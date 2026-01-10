@@ -17,7 +17,10 @@ async function ensureDir(p) {
 async function main() {
   const PROMPT_SRC = path.resolve(process.cwd(), 'src/config/system-prompts');
   const PROMPT_DIST = path.resolve(process.cwd(), 'dist/config/system-prompts');
+  const CAMOUFOX_SRC = path.resolve(process.cwd(), 'scripts/camoufox');
+  const CAMOUFOX_DIST = path.resolve(process.cwd(), 'dist/scripts/camoufox');
   const promptCopied = [];
+  const camoufoxCopied = [];
   try {
     // copy system prompt artifacts only; provider compat assets are owned by llmswitch-core
     try {
@@ -35,7 +38,22 @@ async function main() {
       if (promptErr && promptErr.code !== 'ENOENT') throw promptErr;
     }
     // 不再复制 provider compat 资产；兼容层由 sharedmodule/llmswitch-core 提供
+    try {
+      for await (const file of walk(CAMOUFOX_SRC)) {
+        const stats = await fs.stat(file);
+        if (stats.isFile()) {
+          const rel = path.relative(CAMOUFOX_SRC, file);
+          const dest = path.join(CAMOUFOX_DIST, rel);
+          await ensureDir(path.dirname(dest));
+          await fs.copyFile(file, dest);
+          camoufoxCopied.push(rel);
+        }
+      }
+    } catch (camoufoxErr) {
+      if (camoufoxErr && camoufoxErr.code !== 'ENOENT') throw camoufoxErr;
+    }
     console.log(`[copy-compat-assets] prompts copied: ${promptCopied.length}`);
+    console.log(`[copy-compat-assets] camoufox assets copied: ${camoufoxCopied.length}`);
   } catch (err) {
     console.error('[copy-compat-assets] failed:', err?.message || String(err));
     process.exit(1);

@@ -60,7 +60,8 @@ export function enhanceProviderRequestId(
   if (!currentId || !meta) {
     return currentId;
   }
-  const components = REQUEST_COMPONENTS.get(currentId);
+  const { baseId, suffix } = splitRequestId(currentId);
+  const components = REQUEST_COMPONENTS.get(baseId);
   if (!components) {
     return currentId;
   }
@@ -69,15 +70,19 @@ export function enhanceProviderRequestId(
   if (providerId === components.providerId && model === components.model) {
     return currentId;
   }
-  const nextId = `${components.entry}-${providerId}-${model}-${components.timestamp}-${components.sequence}`;
-  storeRequestComponents(nextId, {
+  const nextBaseId = `${components.entry}-${providerId}-${model}-${components.timestamp}-${components.sequence}`;
+  storeRequestComponents(nextBaseId, {
     entry: components.entry,
     providerId,
     model,
     timestamp: components.timestamp,
     sequence: components.sequence
   });
+  const nextId = suffix ? `${nextBaseId}${suffix}` : nextBaseId;
   registerAlias(currentId, nextId);
+  if (baseId !== nextBaseId) {
+    registerAlias(baseId, nextBaseId);
+  }
   return nextId;
 }
 
@@ -148,4 +153,18 @@ function registerAlias(originalId: string, aliasId: string): void {
       REQUEST_ALIAS.delete(originalId);
     }
   }, COMPONENT_TTL_MS);
+}
+
+function splitRequestId(requestId: string): { baseId: string; suffix: string } {
+  if (typeof requestId !== 'string' || !requestId) {
+    return { baseId: '', suffix: '' };
+  }
+  const delimiterIndex = requestId.indexOf(':');
+  if (delimiterIndex === -1) {
+    return { baseId: requestId, suffix: '' };
+  }
+  return {
+    baseId: requestId.slice(0, delimiterIndex),
+    suffix: requestId.slice(delimiterIndex)
+  };
 }

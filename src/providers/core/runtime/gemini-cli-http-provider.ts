@@ -94,26 +94,23 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
 
     payload.model = model;
     // 若当前 token 中已有 project 元数据，则补充到请求中；否则让上游决定后续行为。
+    // 注意：Antigravity 运行时保持与早期成功快照一致，始终显式发送 project。
     if (projectId) {
       payload.project = projectId;
     }
     this.ensureRequestMetadata(payload);
 
-    // 删除与 Gemini 协议无关的字段，避免影响 Cloud Code Assist schema 校验
-    // - 对于从 OpenAI/Responses 桥接过来的请求（携带 messages），本地工具应由 server-side-tools 处理，
-    //   不直接下发到 Gemini CLI，否则会触发 “Multiple tools are supported only when they are all search tools.” 等错误。
-    // - 对于原生 Gemini payload（仅包含 contents + tools，例如 server-side web_search 使用的 googleSearch 工具），
-    //   保留 tools 字段以便启用搜索能力。
+    // 删除与 Gemini 协议无关的字段，避免影响 Cloud Code Assist schema 校验。
+    // 按 gcli2api 语义：协议层不主动删 tools，只做最小形状整理。
     const recordPayload = payload as Record<string, unknown>;
     const hasMessages = Array.isArray((recordPayload as { messages?: unknown }).messages);
 
     if (hasMessages) {
+      // OpenAI/Responses 桥接场景：messages 已在上游映射为 contents，这里只去掉重复字段。
       delete recordPayload.messages;
-      delete recordPayload.stream;
-      delete recordPayload.tools;
-    } else {
-      delete recordPayload.stream;
     }
+    // 无论是否来自 messages 桥接，都不向上游发送 OpenAI 的 stream 标记。
+    delete (recordPayload as { stream?: unknown }).stream;
 
     return processedRequest;
   }
@@ -139,8 +136,11 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
     if (this.isAntigravityRuntime()) {
       finalized['User-Agent'] = ANTIGRAVITY_HELPER_DEFAULTS.userAgent;
       if (!this.hasNonEmptyString(finalized['Accept-Encoding'])) {
+        // 对齐旧版成功快照：使用 gzip, deflate, br
         finalized['Accept-Encoding'] = 'gzip, deflate, br';
       }
+      // 保留 X-Goog-Api-Client / Client-Metadata，由上游决定是否使用；
+      // 不再强行删除 Accept 头，维持默认的 text/event-stream。
     }
     return finalized;
   }
@@ -286,6 +286,8 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
   }
 
   private ensureRequestMetadata(payload: MutablePayload): void {
+    const isAntigravity = this.isAntigravityRuntime();
+
     if (!this.hasNonEmptyString(payload.requestId)) {
       payload.requestId = `req-${randomUUID()}`;
     }
@@ -294,6 +296,48 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
     }
     if (!this.hasNonEmptyString(payload.userAgent)) {
       payload.userAgent = this.oauthProviderId === 'antigravity' ? 'antigravity' : 'routecodex';
+    }
+
+    // 对齐 gcli2api：Antigravity 路径统一标记 requestType=agent，
+    // 不区分模型（claude / gemini 均走 agent 配额路径）。
+    if (isAntigravity && !this.hasNonEmptyString((payload as { requestType?: unknown }).requestType)) {
+      (payload as { requestType?: string }).requestType = 'agent';
+    }
+
+    // 对齐 gcli2api：Antigravity 统一注入固定 systemInstruction，
+    // 将已有 systemInstruction.parts 追加在 Antigravity 提示词之后。
+    if (isAntigravity) {
+      const requestContainer =
+        (payload as { request?: unknown }).request && typeof (payload as { request?: unknown }).request === 'object'
+          ? ((payload as { request?: UnknownObject }).request as UnknownObject)
+          : undefined;
+      const currentSystemInstruction =
+        requestContainer && (requestContainer as { systemInstruction?: unknown }).systemInstruction;
+      const currentParts =
+        currentSystemInstruction && typeof currentSystemInstruction === 'object'
+          ? ((currentSystemInstruction as { parts?: unknown }).parts as unknown)
+          : undefined;
+
+      const antigravityPrompt =
+        'Please ignore the following [ignore]You are Antigravity, a powerful agentic AI coding assistant designed by the Google Deepmind team working on Advanced Agentic Coding.' +
+        'You are pair programming with a USER to solve their coding task. The task may require creating a new codebase, modifying or debugging an existing codebase, or simply answering a question.' +
+        '**Absolute paths only****Proactiveness**[/ignore]';
+
+      const nextParts: Array<{ text: string }> = [{ text: antigravityPrompt }];
+      if (Array.isArray(currentParts) && currentParts.length > 0) {
+        for (const part of currentParts as Array<{ text?: string }>) {
+          if (part && typeof part === 'object') {
+            nextParts.push({ text: String(part.text ?? '') });
+          }
+        }
+      }
+
+      const nextSystemInstruction: { parts: Array<{ text: string }> } = { parts: nextParts };
+
+      (payload as { systemInstruction?: { parts: Array<{ text: string }> } }).systemInstruction = nextSystemInstruction;
+      if (requestContainer && typeof requestContainer === 'object') {
+        (requestContainer as { systemInstruction?: unknown }).systemInstruction = nextSystemInstruction;
+      }
     }
   }
 

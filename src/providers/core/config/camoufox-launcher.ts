@@ -1,4 +1,4 @@
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -10,6 +10,62 @@ export interface CamoufoxLaunchOptions {
   provider?: string | null;
   alias?: string | null;
   profileId?: string;
+}
+
+type LaunchHandle = {
+  child: ChildProcess;
+};
+
+const activeLaunchers: Set<LaunchHandle> = new Set();
+
+function registerLauncher(child: ChildProcess): void {
+  const handle: LaunchHandle = { child };
+  activeLaunchers.add(handle);
+  child.once('exit', () => {
+    activeLaunchers.delete(handle);
+  });
+}
+
+function terminateLauncher(handle: LaunchHandle): Promise<void> {
+  return new Promise((resolve) => {
+    const { child } = handle;
+    const onExit = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      try {
+        child.kill('SIGKILL');
+      } catch {
+        // ignore escalation failures
+      }
+      resolve();
+    }, 2000);
+    if (typeof timer.unref === 'function') {
+      timer.unref();
+    }
+    child.once('exit', onExit);
+    try {
+      if (child.exitCode !== null || child.killed) {
+        clearTimeout(timer);
+        resolve();
+        return;
+      }
+      child.kill('SIGTERM');
+    } catch {
+      clearTimeout(timer);
+      resolve();
+    }
+  });
+}
+
+export async function shutdownCamoufoxLaunchers(): Promise<void> {
+  if (activeLaunchers.size === 0) {
+    return;
+  }
+  const launchers = Array.from(activeLaunchers);
+  await Promise.allSettled(launchers.map((handle) => terminateLauncher(handle)));
+  activeLaunchers.clear();
 }
 
 function expandHome(p: string): string {
@@ -103,11 +159,17 @@ function resolveCamoufoxScriptPath(): string | null {
     const here = fileURLToPath(import.meta.url);
     const baseDir = path.dirname(here);
     // BaseDir is usually: <pkgRoot>/dist/providers/core/config
-    // We want: <pkgRoot>/scripts/camoufox/launch-auth.mjs
-    const candidate = path.resolve(baseDir, '../../../../scripts/camoufox/launch-auth.mjs');
-    if (fs.existsSync(candidate)) {
-      logOAuthDebug(`[OAuth] Camoufox: using built-in launcher ${candidate}`);
-      return candidate;
+    const candidates = [
+      // When packaged, automation scripts are copied to dist/scripts/camoufox.
+      path.resolve(baseDir, '../../../scripts/camoufox/launch-auth.mjs'),
+      // During local dev we fallback to the source scripts directory.
+      path.resolve(baseDir, '../../../../scripts/camoufox/launch-auth.mjs')
+    ];
+    for (const candidate of candidates) {
+      if (fs.existsSync(candidate)) {
+        logOAuthDebug(`[OAuth] Camoufox: using built-in launcher ${candidate}`);
+        return candidate;
+      }
     }
   } catch {
     // ignore
@@ -120,12 +182,15 @@ function resolveGenFingerprintScriptPath(): string | null {
   try {
     const here = fileURLToPath(import.meta.url);
     const baseDir = path.dirname(here);
-    // BaseDir is usually: <pkgRoot>/dist/providers/core/config
-    // We want: <pkgRoot>/scripts/camoufox/gen-fingerprint-env.py
-    const candidate = path.resolve(baseDir, '../../../../scripts/camoufox/gen-fingerprint-env.py');
-    if (fs.existsSync(candidate)) {
-      logOAuthDebug(`[OAuth] Camoufox: using fingerprint generator ${candidate}`);
-      return candidate;
+    const candidates = [
+      path.resolve(baseDir, '../../../scripts/camoufox/gen-fingerprint-env.py'),
+      path.resolve(baseDir, '../../../../scripts/camoufox/gen-fingerprint-env.py')
+    ];
+    for (const candidate of candidates) {
+      if (fs.existsSync(candidate)) {
+        logOAuthDebug(`[OAuth] Camoufox: using fingerprint generator ${candidate}`);
+        return candidate;
+      }
     }
   } catch {
     // ignore
@@ -273,12 +338,17 @@ export async function openAuthInCamoufox(options: CamoufoxLaunchOptions): Promis
 
   try {
     logOAuthDebug(`[OAuth] Camoufox: spawning launcher script=${scriptPath} profileId=${profileId}`);
+    const autoMode = (process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE || '').trim();
+    const args = [scriptPath, '--profile', profileId, '--url', url];
+    if (autoMode) {
+      args.push('--auto-mode', autoMode);
+    }
     const child = spawn(
       process.execPath,
-      [scriptPath, '--profile', profileId, '--url', url],
+      args,
       {
         detached: true,
-        stdio: 'ignore',
+        stdio: 'inherit',
         env: {
           ...process.env,
           ...fingerprintEnv,
@@ -287,6 +357,7 @@ export async function openAuthInCamoufox(options: CamoufoxLaunchOptions): Promis
         }
       }
     );
+    registerLauncher(child);
     child.unref();
     return true;
   } catch (error) {

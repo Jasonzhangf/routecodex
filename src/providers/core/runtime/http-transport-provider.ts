@@ -10,7 +10,6 @@
  */
 
 import { createHash } from 'node:crypto';
-import fs from 'node:fs/promises';
 import { BaseProvider } from './base-provider.js';
 import { HttpClient } from '../utils/http-client.js';
 import { DynamicProfileLoader, ServiceProfileValidator } from '../config/service-profiles.js';
@@ -20,7 +19,6 @@ import { logOAuthDebug } from '../../auth/oauth-logger.js';
 import { TokenFileAuthProvider } from '../../auth/tokenfile-auth.js';
 import { IflowCookieAuthProvider } from '../../auth/iflow-cookie-auth.js';
 import { ensureValidOAuthToken, handleUpstreamInvalidOAuthToken } from '../../auth/oauth-lifecycle.js';
-import { fetchAntigravityProjectId } from '../../auth/antigravity-userinfo-helper.js';
 import {
   attachProviderSseSnapshotStream,
   writeProviderSnapshot
@@ -116,62 +114,15 @@ export class HttpTransportProvider extends BaseProvider {
       if (this.authProvider) {
         await this.authProvider.initialize();
         const providerConfig = this.config.config;
-        const extensions = this.getConfigExtensions();
         const auth = providerConfig.auth;
-        const usesTokenFile = this.authProvider instanceof TokenFileAuthProvider;
-        if (this.normalizeAuthMode(auth.type) === 'oauth') {
-          const oauthAuth = auth as OAuthAuthExtended;
-          const oauthProviderId = this.oauthProviderId || this.ensureOAuthProviderId(oauthAuth, extensions);
-          const forceReauthorize = false;
-          const tokenFileHint = oauthAuth.tokenFile ?? '(default)';
-          logOAuthDebug(
-            `[OAuth] [init] provider=${oauthProviderId} type=${auth.type} tokenFile=${tokenFileHint} forceReauth=${forceReauthorize}`
-          );
-          this.dependencies.logger?.logModule?.(this.id, 'oauth-init-start', {
-            providerType: oauthProviderId,
-            tokenFile: tokenFileHint,
-            forceReauthorize
-          });
-          try {
-            // 初始化阶段仅允许静默刷新，不主动打开浏览器；
-            // 交互式登录交由真实请求错误或 Token Daemon 处理。
-            await ensureValidOAuthToken(oauthProviderId, oauthAuth, {
-              forceReacquireIfRefreshFails: true,
-              openBrowser: false,
-              forceReauthorize
-            });
-            if (this.oauthProviderId === 'antigravity') {
-              await this.ensureAntigravityProjectMetadata(oauthAuth);
-            }
-            logOAuthDebug('[OAuth] [init] ensureValid OK');
-            try {
-              if (this.authProvider instanceof TokenFileAuthProvider) {
-                // 令牌文件可能在 ensureValidOAuthToken 中被创建/更新，重新加载一次
-                await this.authProvider.initialize();
-              } else {
-                (this.authProvider as OAuthAwareAuthProvider).getOAuthClient?.()?.loadToken?.();
-              }
-            } catch {
-              // ignore
-            }
-            this.dependencies.logger?.logModule?.(this.id, 'oauth-init-success', {
-              providerType: oauthProviderId
-            });
-          } catch (error) {
-            const err = error as { message?: string };
-            const msg = err?.message ? String(err.message) : String(error);
-            console.error(`[OAuth] [init] ensureValid ERROR: ${msg}`);
-            this.dependencies.logger?.logModule?.(this.id, 'oauth-init-error', {
-              providerType: oauthProviderId,
-              error: msg
-            });
-            throw error;
-          }
-        } else {
+        const authMode = this.normalizeAuthMode(auth.type);
+        // Token 管理迁移后，OAuth 初始化交由 TokenManager/TokenDaemon 负责，
+        // 这里不再在服务器启动阶段主动跑 ensureValidOAuthToken，避免多余日志和上游调用。
+        if (authMode !== 'oauth') {
           try {
             await this.authProvider.validateCredentials();
           } catch {
-            // ignore
+            // ignore validation errors on startup
           }
         }
       }
@@ -1403,65 +1354,6 @@ export class HttpTransportProvider extends BaseProvider {
     return Object.keys(normalized).length ? normalized : undefined;
   }
 
-  private async ensureAntigravityProjectMetadata(oauthAuth: OAuthAuthExtended): Promise<void> {
-    const tokenFile = typeof oauthAuth?.tokenFile === 'string' ? oauthAuth.tokenFile.trim() : '';
-    if (!tokenFile) {
-      return;
-    }
-    const tokenPath = tokenFile.startsWith('~/')
-      ? tokenFile.replace(/^~\//, `${process.env.HOME || ''}/`)
-      : tokenFile;
-    let raw: string;
-    try {
-      raw = await fs.readFile(tokenPath, 'utf-8');
-    } catch {
-      return;
-    }
-    let parsed: Record<string, unknown>;
-    try {
-      parsed = JSON.parse(raw) as Record<string, unknown>;
-    } catch {
-      return;
-    }
-    if (this.extractProjectIdFromTokenSnapshot(parsed)) {
-      return;
-    }
-    const accessToken = this.extractAccessTokenFromSnapshot(parsed);
-    if (!accessToken) {
-      return;
-    }
-    const baseOverride = (oauthAuth as { antigravityApiBase?: string }).antigravityApiBase;
-    const apiBaseHint = baseOverride || this.getEffectiveBaseUrl();
-    const projectId = await fetchAntigravityProjectId(accessToken, apiBaseHint);
-    if (!projectId) {
-      logOAuthDebug('[OAuth] Antigravity: unable to resolve project_id for token file');
-      return;
-    }
-    parsed.project_id = projectId;
-    parsed.projectId = projectId;
-    const projectsNode = (parsed as { projects?: { projectId: string }[] }).projects;
-    if (!Array.isArray(projectsNode) || !projectsNode.length) {
-      (parsed as { projects?: { projectId: string }[] }).projects = [{ projectId }];
-    }
-    await fs.writeFile(tokenPath, JSON.stringify(parsed, null, 2));
-    logOAuthDebug(`[OAuth] Antigravity: persisted project_id=${projectId} for ${tokenPath}`);
-  }
-
-  private extractAccessTokenFromSnapshot(snapshot: Record<string, unknown>): string | undefined {
-    const lower = (snapshot as { access_token?: unknown }).access_token;
-    const upper = (snapshot as { AccessToken?: unknown }).AccessToken;
-    const value =
-      typeof lower === 'string'
-        ? lower
-        : typeof upper === 'string'
-          ? upper
-          : undefined;
-    if (value && value.trim()) {
-      return value.trim();
-    }
-    return undefined;
-  }
-
   private applyProviderSpecificBodyAdjustments(body: UnknownObject): void {
     if (!body || typeof body !== 'object') {
       return;
@@ -1507,28 +1399,5 @@ export class HttpTransportProvider extends BaseProvider {
     }
   }
 
-  private extractProjectIdFromTokenSnapshot(snapshot: Record<string, unknown>): string | undefined {
-    const directNode = (snapshot as { project_id?: unknown }).project_id;
-    const direct = typeof directNode === 'string' ? directNode : undefined;
-    if (direct && direct.trim()) {
-      return direct.trim();
-    }
-    const camelNode = (snapshot as { projectId?: unknown }).projectId;
-    const camel = typeof camelNode === 'string' ? camelNode : undefined;
-    if (camel && camel.trim()) {
-      return camel.trim();
-    }
-    if (Array.isArray((snapshot as { projects?: UnknownObject[] }).projects)) {
-      for (const entry of (snapshot as { projects?: UnknownObject[] }).projects ?? []) {
-        if (entry && typeof entry === 'object' && typeof (entry as { projectId?: unknown }).projectId === 'string') {
-          const candidate = String((entry as { projectId?: unknown }).projectId);
-          if (candidate.trim()) {
-            return candidate.trim();
-          }
-        }
-      }
-    }
-    return undefined;
-  }
 }
 const CODEX_IDENTIFIER_MAX_LENGTH = 64;

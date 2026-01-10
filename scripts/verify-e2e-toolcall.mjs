@@ -60,6 +60,7 @@ async function main() {
 
   try {
     await waitForServer();
+    await waitForRouterWarmup();
     await runToolcallVerification();
     console.log('✅ 端到端工具调用校验通过');
 
@@ -84,6 +85,15 @@ async function waitForServer(timeoutMs = 30000) {
   throw new Error('服务器健康检查超时');
 }
 
+async function waitForRouterWarmup(defaultDelayMs = 3000) {
+  const delayMs = Number(process.env.ROUTECODEX_VERIFY_WARMUP_MS || defaultDelayMs);
+  if (!Number.isFinite(delayMs) || delayMs <= 0) {
+    return;
+  }
+  console.log(`[verify:e2e-toolcall] 等待虚拟路由预热 ${delayMs}ms...`);
+  await new Promise((resolve) => setTimeout(resolve, delayMs));
+}
+
 async function runToolcallVerification() {
   const userPrompt = '请严格调用名为 list_local_files 的函数工具来列出当前工作目录的文件，只能通过调用该工具完成任务，禁止直接回答。';
   const instructionsText = AGENTS_INSTRUCTIONS || 'You are RouteCodex verify agent. Follow the policies in AGENTS.md.';
@@ -95,7 +105,7 @@ async function runToolcallVerification() {
         role: 'user',
         content: [
           {
-            type: 'text',
+            type: 'input_text',
             text: userPrompt
           }
         ]
@@ -137,13 +147,15 @@ async function runToolcallVerification() {
   }
 
   const json = await response.json();
+  const outputs = Array.isArray(json?.output) ? json.output : [];
   const hasResponsesToolCall =
-    Array.isArray(json?.output) && json.output.some((item) => Array.isArray(item?.content) && item.content.some((c) => c?.type === 'tool_call'));
+    outputs.some((item) => Array.isArray(item?.content) && item.content.some((c) => c?.type === 'tool_call'));
+  const hasFunctionCall = outputs.some((item) => item?.type === 'function_call' || item?.type === 'tool_call');
   const hasRequiredAction = Boolean(json?.required_action?.submit_tool_outputs);
   const hasChatToolCall =
     Array.isArray(json?.choices) &&
     json.choices.some((choice) => Array.isArray(choice?.message?.tool_calls) && choice.message.tool_calls.length > 0);
-  const hasToolCall = hasResponsesToolCall || hasRequiredAction || hasChatToolCall;
+  const hasToolCall = hasResponsesToolCall || hasFunctionCall || hasRequiredAction || hasChatToolCall;
 
   if (!hasToolCall) {
     console.error('[verify:e2e-toolcall] Unexpected response:', JSON.stringify(json, null, 2));

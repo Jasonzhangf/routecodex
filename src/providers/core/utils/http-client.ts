@@ -137,13 +137,34 @@ export class HttpClient {
     headers?: Record<string, string>
   ): Promise<NodeJS.ReadableStream> {
     const fullUrl = this.buildUrl(url);
-    const finalHeaders = this.buildHeaders({ 'Accept': 'text/event-stream', ...(headers || {}) });
+    const finalHeaders = this.buildHeaders({ Accept: 'text/event-stream', ...(headers || {}) });
 
     const controller = new AbortController();
     const timeout = this.defaultConfig.timeout;
     const timeoutId = setTimeout(() => controller.abort(), timeout);
 
     try {
+      // Debug Antigravity upstream HTTP payload for SSE when enabled
+      if (process.env.ROUTECODEX_DEBUG_ANTIGRAVITY === '1' && /cloudcode-pa/.test(fullUrl)) {
+        try {
+          const fs = await import('node:fs/promises');
+          const path = await import('node:path');
+          const home = process.env.HOME || process.cwd();
+          const dumpPath = path.join(home, 'antigravity-rc-http.json');
+          const payloadSnapshot = {
+            url: fullUrl,
+            method: 'POST',
+            headers: finalHeaders,
+            body: data
+          };
+          await fs.writeFile(dumpPath, JSON.stringify(payloadSnapshot, null, 2), 'utf8');
+          // eslint-disable-next-line no-console
+          console.log('[ANTIGRAVITY-HTTP-DEBUG] upstream SSE payload dumped to', dumpPath);
+        } catch {
+          // best-effort debug logging; ignore failures
+        }
+      }
+
       const fetchOptions: RequestInit = {
         method: 'POST',
         headers: finalHeaders,
@@ -266,6 +287,27 @@ export class HttpClient {
         headers: config.headers,
         signal: controller.signal
       };
+
+      // Debug Antigravity upstream HTTP payload when enabled
+      if (process.env.ROUTECODEX_DEBUG_ANTIGRAVITY === '1' && /cloudcode-pa/.test(url)) {
+        try {
+          const fs = await import('node:fs/promises');
+          const path = await import('node:path');
+          const home = process.env.HOME || process.cwd();
+          const dumpPath = path.join(home, 'antigravity-rc-http.json');
+          const payloadSnapshot = {
+            url,
+            method: config.method,
+            headers: config.headers,
+            body: data
+          };
+          await fs.writeFile(dumpPath, JSON.stringify(payloadSnapshot, null, 2), 'utf8');
+          // eslint-disable-next-line no-console
+          console.log('[ANTIGRAVITY-HTTP-DEBUG] upstream payload dumped to', dumpPath);
+        } catch {
+          // best-effort debug logging; ignore failures
+        }
+      }
 
       // 添加请求体（如果有）
       if (data !== undefined) {

@@ -4,6 +4,7 @@ import os from 'node:os';
 import { resolveRouteCodexConfigPath } from './config-paths.js';
 import { buildProviderProfiles } from '../providers/profile/provider-profile-loader.js';
 import type { ProviderProfileCollection } from '../providers/profile/provider-profile.js';
+import { buildVirtualRouterInputV2 } from './virtual-router-builder.js';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -30,10 +31,23 @@ export async function loadRouteCodexConfig(explicitPath?: string): Promise<Loade
     process.env.ROUTECODEX_OAUTH_BROWSER = oauthBrowserRaw;
   }
 
-  if (!isRecord(userConfig.virtualrouter)) {
-    const providers = isRecord(userConfig.providers) ? userConfig.providers : {};
-    const routing = isRecord(userConfig.routing) ? userConfig.routing : {};
-    userConfig.virtualrouter = { providers, routing };
+  const modeRaw = (userConfig as UnknownRecord).virtualrouterMode;
+  const mode = typeof modeRaw === 'string' && modeRaw.trim().toLowerCase() === 'v2' ? 'v2' : 'v1';
+
+  if (mode === 'v2') {
+    const vrBase = isRecord(userConfig.virtualrouter) ? (userConfig.virtualrouter as UnknownRecord) : {};
+    const v2Input = await buildVirtualRouterInputV2(userConfig);
+    userConfig.virtualrouter = {
+      ...vrBase,
+      providers: v2Input.providers,
+      routing: v2Input.routing
+    };
+  } else {
+    if (!isRecord(userConfig.virtualrouter)) {
+      const providers = isRecord(userConfig.providers) ? userConfig.providers : {};
+      const routing = isRecord(userConfig.routing) ? userConfig.routing : {};
+      userConfig.virtualrouter = { providers, routing };
+    }
   }
 
   const providerProfiles = buildProviderProfiles(userConfig);

@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.89.791",
+  "version": "0.89.871",
   "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support",
   "type": "module",
   "main": "dist/index.js",
@@ -121,6 +121,7 @@
     "test:v2:protocol": "node tests/v2/dist/protocol-conversion-test.js",
     "test:comprehensive": "node scripts/v2-consistency/comprehensive-consistency-test.mjs",
     "test:golden": "node scripts/tests/golden-provider-cycle.mjs",
+    "test:sharedmodule": "npm run jest:run -- tests/sharedmodule/*.spec.ts",
     "sync:ci-goldens": "node scripts/tools/sync-ci-goldens.mjs",
     "mock:extract": "node scripts/mock-provider/extract.mjs",
     "mock:validate": "node scripts/mock-provider/validate.mjs",
@@ -151,6 +152,7 @@
     "open": "^9.1.0",
     "openai": "^5.23.0",
     "ora": "^9.0.0",
+    "playwright-core": "^1.49.0",
     "rcc-basemodule": "^0.2.7",
     "rcc-debugcenter": "^0.1.6",
     "rcc-errorhandling": "^1.0.10",

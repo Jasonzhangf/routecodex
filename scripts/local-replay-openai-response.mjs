@@ -25,7 +25,7 @@ async function main() {
   const payload = obj?.data || obj; // accept wrapped
   const requestId = (obj?.requestId) || `replay_${Date.now()}`;
 
-  const codecUrl = pathToFileURL(path.join(process.cwd(), 'sharedmodule', 'llmswitch-core', 'dist', 'v2', 'conversion', 'codecs', 'openai-openai-codec.js')).href;
+  const codecUrl = pathToFileURL(path.join(process.cwd(), 'sharedmodule', 'llmswitch-core', 'dist', 'conversion', 'codecs', 'openai-openai-codec.js')).href;
   const { OpenAIOpenAIConversionCodec } = await import(codecUrl);
   const codec = new OpenAIOpenAIConversionCodec({});
   const profile = { outgoingProtocol: 'openai-chat' };
@@ -38,4 +38,3 @@ async function main() {
 }
 
 main().catch(err => { console.error(err); process.exit(1); });
-

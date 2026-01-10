@@ -97,4 +97,3 @@ main().catch((error) => {
   console.error('[verify:errorsamples] failed:', error);
   process.exit(99);
 });
-

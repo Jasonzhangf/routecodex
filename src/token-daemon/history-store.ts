@@ -13,6 +13,8 @@ export interface RefreshMetadata {
   mode: RefreshMode;
   error?: string;
   tokenFileMtime?: number | null;
+  countTowardsFailureStreak?: boolean;
+  forceAutoSuspend?: boolean;
 }
 
 const MAX_AUTO_FAILURES = 3;
@@ -137,9 +139,13 @@ export class TokenHistoryStore {
       entry.lastFailureAt = metadata.completedAt;
       entry.lastError = metadata.error;
       if (isAuto) {
-        entry.failureStreak = (entry.failureStreak || 0) + 1;
+        const shouldCount = metadata.countTowardsFailureStreak !== false;
+        if (shouldCount) {
+          entry.failureStreak = (entry.failureStreak || 0) + 1;
+        }
+        const forceSuspend = Boolean(metadata.forceAutoSuspend);
         if (entry.failureStreak >= MAX_AUTO_FAILURES) {
-          const createSuspension = metadata.tokenFileMtime === null;
+          const createSuspension = forceSuspend || metadata.tokenFileMtime === null;
           if (createSuspension) {
             entry.autoSuspended = true;
             entry.suspendedAt = metadata.completedAt;

@@ -1,0 +1,36 @@
+{
+  "endpoint": "/v1/chat/completions",
+  "body": {
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are a coding assistant. Use TOON format for shell commands."
+      },
+      {
+        "role": "user",
+        "content": "List all TypeScript files in the src directory"
+      }
+    ],
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "exec_command",
+          "description": "Execute shell commands using TOON encoding",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "toon": {
+                "type": "string",
+                "description": "TOON-encoded arguments"
+              }
+            },
+            "required": ["toon"]
+          }
+        }
+      }
+    ],
+    "model": "mock-model",
+    "stream": false
+  }
+}

@@ -21,12 +21,26 @@ import {
   TOKEN_HISTORY_FILE,
   type RefreshOutcome
 } from './history-store.js';
-import { ensureLocalTokenPortalEnv } from '../token-portal/local-token-portal.js';
+import { ensureLocalTokenPortalEnv, shutdownLocalTokenPortalEnv } from '../token-portal/local-token-portal.js';
+import { shutdownCamoufoxLaunchers } from '../providers/core/config/camoufox-launcher.js';
 import { loadRouteCodexConfig } from '../config/routecodex-config-loader.js';
 
 export { TokenDaemon };
 
 const historyStore = new TokenHistoryStore();
+
+async function cleanupInteractiveOAuthArtifacts(): Promise<void> {
+  try {
+    await shutdownCamoufoxLaunchers();
+  } catch {
+    // ignore cleanup errors
+  }
+  try {
+    await shutdownLocalTokenPortalEnv();
+  } catch {
+    // ignore cleanup errors
+  }
+}
 
 // --- shared helpers ---
 
@@ -344,10 +358,13 @@ export async function interactiveRefresh(selector: string): Promise<void> {
   console.log(`  显示名称 : ${label}`);
   console.log('');
 
-  const proceed = await askYesNo('继续并打开浏览器进行认证吗？ (y/N) ');
-  if (!proceed) {
-    console.log(chalk.blue('ℹ'), '已取消重新认证');
-    return;
+  const autoConfirm = String(process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM || '0') === '1';
+  if (!autoConfirm) {
+    const proceed = await askYesNo('继续并打开浏览器进行认证吗？ (y/N) ');
+    if (!proceed) {
+      console.log(chalk.blue('ℹ'), '已取消重新认证');
+      return;
+    }
   }
 
   // Ensure user config is loaded so that global OAuth settings (e.g. oauthBrowser=camoufox)
@@ -385,6 +402,8 @@ export async function interactiveRefresh(selector: string): Promise<void> {
   } catch (error) {
     await recordManualHistory(token, 'failure', startedAt, tokenMtimeBefore, error);
     throw error;
+  } finally {
+    await cleanupInteractiveOAuthArtifacts();
   }
 }
 

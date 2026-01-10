@@ -27,6 +27,19 @@ class LocalTokenPortalServer {
     return this.baseUrl;
   }
 
+  async shutdown(): Promise<void> {
+    if (!this.server) {
+      return;
+    }
+    const srv = this.server;
+    await new Promise<void>((resolve) => {
+      srv.close(() => resolve());
+    });
+    this.server = null;
+    this.port = null;
+    this.baseUrl = null;
+  }
+
   private async startServer(): Promise<void> {
     if (this.server) {
       return;
@@ -100,4 +113,11 @@ export async function ensureLocalTokenPortalEnv(): Promise<string> {
     process.env.ROUTECODEX_HTTP_PORT = String(localPortal.currentPort);
   }
   return baseUrl;
+}
+
+export async function shutdownLocalTokenPortalEnv(): Promise<void> {
+  await localPortal.shutdown();
+  delete process.env.ROUTECODEX_TOKEN_PORTAL_BASE;
+  delete process.env.ROUTECODEX_HTTP_HOST;
+  delete process.env.ROUTECODEX_HTTP_PORT;
 }

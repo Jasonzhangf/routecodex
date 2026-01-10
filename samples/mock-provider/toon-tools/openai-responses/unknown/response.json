@@ -1,0 +1,19 @@
+{
+  "id": "resp_mock_002",
+  "output": [
+    {
+      "type": "tool_calls",
+      "tool_calls": [
+        {
+          "id": "tool_2",
+          "type": "function",
++          "function": {
++            "name": "apply_patch",
++            "arguments": "{\"toon\":\"command: bash -lc \\"ls -la\\"\nworkdir: .\n\"}"
++          }
++        }
++      ]
++    }
++  ],
++  "model": "mock-model"
++}

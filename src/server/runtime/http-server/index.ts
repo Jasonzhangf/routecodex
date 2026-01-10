@@ -384,6 +384,17 @@ export class RouteCodexHttpServer {
         daemon.registerModule(new TokenManagerModule());
         daemon.registerModule(new RoutingStateManagerModule());
         daemon.registerModule(new HealthManagerModule());
+        // Quota manager（当前仅用于 antigravity/gemini-cli 等需要配额信息的 Provider）
+        try {
+          const mod = (await import('../../../manager/modules/quota/index.js')) as {
+            QuotaManagerModule?: new () => import('../../../manager/modules/quota/index.js').QuotaManagerModule;
+          };
+          if (typeof mod.QuotaManagerModule === 'function') {
+            daemon.registerModule(new mod.QuotaManagerModule());
+          }
+        } catch {
+          // 可选模块，缺失时忽略
+        }
         await daemon.start();
         this.managerDaemon = daemon;
       }

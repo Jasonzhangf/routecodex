@@ -3,8 +3,31 @@
  *
  * 定义各个OpenAI兼容服务的预设配置档案
  */
+import os from 'node:os';
 import { API_ENDPOINTS, API_PATHS, HTTP_PROTOCOLS, LOCAL_HOSTS, DEFAULT_CONFIG } from "../../../constants/index.js";
 import type { ServiceProfile } from '../api/provider-types.js';
+
+/**
+ * 解析 Gemini UA 并返回合适的 User-Agent。
+ *
+ * 为了与 gcli2api 保持一致，这里直接采用 GeminiCLI 伪装 UA，
+ * 不再通过环境变量进行运行时切换，避免行为复杂化。
+ */
+function resolveGeminiCliUserAgent(): string {
+  // 对齐 gcli2api：GeminiCLI/<version> (<system>; <arch>)
+  // 版本号采用保守的固定值，避免频繁变更 UA 指纹。
+  const version = '0.1.5';
+  const systemRaw = os.type();
+  const arch = os.arch();
+  // 轻量规范化 system 文本，使其更接近 Python platform.system() 的输出。
+  let system = systemRaw;
+  if (systemRaw === 'Darwin') {
+    system = 'Mac OS';
+  } else if (systemRaw === 'Windows_NT') {
+    system = 'Windows';
+  }
+  return `GeminiCLI/${version} (${system}; ${arch})`;
+}
 
 /**
  * 动态服务配置档案构建器
@@ -88,7 +111,7 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
     optionalAuth: [],
     headers: {
       'Content-Type': 'application/json',
-      'User-Agent': 'google-api-nodejs-client/9.15.1',
+      'User-Agent': resolveGeminiCliUserAgent(),
       'X-Goog-Api-Client': 'gl-node/22.17.0',
       'Client-Metadata': 'ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI'
     },

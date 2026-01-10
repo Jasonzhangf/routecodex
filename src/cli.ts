@@ -275,6 +275,12 @@ try {
   program.addCommand(createTokenDaemonCommand());
 } catch { /* optional: command not available in some builds */ }
 
+// Quota status command - inspect daemon-managed quota snapshot
+try {
+  const { createQuotaStatusCommand } = await import('./commands/quota-status.js');
+  program.addCommand(createQuotaStatusCommand());
+} catch { /* optional */ }
+
 // OAuth command - force re-auth for a specific token (Camoufox-aware when enabled)
 try {
   const { createOauthCommand } = await import('./commands/oauth.js');

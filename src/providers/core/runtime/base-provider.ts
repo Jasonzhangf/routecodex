@@ -576,8 +576,14 @@ export abstract class BaseProvider implements IProviderV2 {
       return undefined;
     }
     const runtimeProfile = this.getRuntimeProfile();
-    const providerId = runtimeProfile?.providerId || this.config.config.providerId;
-    if (providerId === 'antigravity' && model) {
+    const providerIdRaw = runtimeProfile?.providerId || this.config.config.providerId;
+    const providerId = typeof providerIdRaw === 'string' ? providerIdRaw.trim().toLowerCase() : '';
+    // 对 Gemini CLI 系列（gemini-cli / antigravity）按「providerKey+model」粒度计数，
+    // 避免同一模型系列下所有 alias 被一次 429 牵连。
+    if ((providerId === 'antigravity' ||
+      providerId === 'gemini-cli' ||
+      providerId.startsWith('antigravity.') ||
+      providerId.startsWith('gemini-cli.')) && model) {
       return `${providerKey}::${model}`;
     }
     return providerKey;
@@ -631,7 +637,11 @@ export abstract class BaseProvider implements IProviderV2 {
       runtimeProfile?.providerId || context.providerId,
       providerKey
     );
-    if (!normalizedProviderId || !SERIES_COOLDOWN_PROVIDER_IDS.has(normalizedProviderId.toLowerCase())) {
+    if (!normalizedProviderId) {
+      return null;
+    }
+    const topLevelId = BaseProvider.extractTopLevelProviderId(normalizedProviderId);
+    if (!topLevelId || !SERIES_COOLDOWN_PROVIDER_IDS.has(topLevelId.toLowerCase())) {
       return null;
     }
     const rawDelay = BaseProvider.extractQuotaResetDelay(error);
@@ -812,9 +822,17 @@ export abstract class BaseProvider implements IProviderV2 {
   }
 
   private static normalizeSeriesProviderId(providerId?: string, providerKey?: string): string | undefined {
-    const fromKey = BaseProvider.extractTopLevelProviderId(providerKey);
-    if (fromKey) {
-      return fromKey;
+    const aliasFromKey = BaseProvider.extractProviderAliasId(providerKey);
+    if (aliasFromKey) {
+      return aliasFromKey;
+    }
+    const aliasFromId = BaseProvider.extractProviderAliasId(providerId);
+    if (aliasFromId) {
+      return aliasFromId;
+    }
+    const topFromKey = BaseProvider.extractTopLevelProviderId(providerKey);
+    if (topFromKey) {
+      return topFromKey;
     }
     return BaseProvider.extractTopLevelProviderId(providerId);
   }
@@ -877,9 +895,13 @@ export abstract class BaseProvider implements IProviderV2 {
       haystack.includes('余额不足') ||
       haystack.includes('无可用资源包')
     ) {
-      // 默认按 1 小时冷却整条系列，具体 TTL 足够避免短时间连续打爆上游，
-      // 同时又不会在配置缺失时长时间「锁死」该系列。
-      return '1h';
+      // 默认按 5 分钟冷却整条系列，具体 TTL 只作为「第一时间」的保护，
+      // 真正的长周期拉黑/恢复由 daemon/QuotaManager 结合 VirtualRouter 健康状态统一管理。
+      // 若存在 ROUTECODEX_RL_DEFAULT_QUOTA_COOLDOWN / RCC_RL_DEFAULT_QUOTA_COOLDOWN，
+      // 则优先采用该环境变量，支持按部署环境调节冷却窗口（例如 1m / 30m / 2h）。
+      const envValue =
+        (process.env.ROUTECODEX_RL_DEFAULT_QUOTA_COOLDOWN || process.env.RCC_RL_DEFAULT_QUOTA_COOLDOWN || '').trim();
+      return envValue.length ? envValue : '5m';
     }
 
     return undefined;
@@ -898,6 +920,21 @@ export abstract class BaseProvider implements IProviderV2 {
       return trimmed;
     }
     return trimmed.slice(0, firstDot);
+  }
+
+  private static extractProviderAliasId(source?: string): string | undefined {
+    if (!source || typeof source !== 'string') {
+      return undefined;
+    }
+    const trimmed = source.trim();
+    if (!trimmed) {
+      return undefined;
+    }
+    const segments = trimmed.split('.');
+    if (segments.length >= 2 && segments[0] && segments[1]) {
+      return `${segments[0]}.${segments[1]}`;
+    }
+    return undefined;
   }
 
   private static resolveContextModel(

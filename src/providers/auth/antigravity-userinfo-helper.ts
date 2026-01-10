@@ -3,6 +3,10 @@
  * Mirrors the logic implemented in gcli2api for resolving project metadata.
  */
 
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import os from 'node:os';
+
 import type { UnknownObject } from '../../modules/pipeline/types/common-types.js';
 import { logOAuthDebug } from './oauth-logger.js';
 
@@ -20,6 +24,30 @@ type LoadResult = {
 };
 
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+const expandHome = (p: string): string => {
+  if (!p || typeof p !== 'string') {
+    return p;
+  }
+  if (p.startsWith('~/')) {
+    const home = process.env.HOME || os.homedir() || '';
+    return path.join(home, p.slice(2));
+  }
+  return p;
+};
+
+async function readJsonFile(filePath: string): Promise<Record<string, unknown> | null> {
+  try {
+    const raw = await fs.readFile(filePath, 'utf-8');
+    const parsed = raw.trim() ? JSON.parse(raw) : null;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return null;
+    }
+    return parsed as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
 
 const extractProjectId = (value: unknown): string | undefined => {
   if (typeof value === 'string' && value.trim()) {
@@ -47,6 +75,38 @@ const normalizedBase = (base?: string): string => {
   const candidate = (base && base.trim()) || envBase || DEFAULT_ANTIGRAVITY_API_BASE;
   return candidate.replace(/\/+$/, '');
 };
+
+function extractAccessTokenFromSnapshot(snapshot: Record<string, unknown>): string | undefined {
+  const lower = (snapshot as { access_token?: unknown }).access_token;
+  const upper = (snapshot as { AccessToken?: unknown }).AccessToken;
+  const value =
+    typeof lower === 'string'
+      ? lower
+      : typeof upper === 'string'
+        ? upper
+        : undefined;
+  if (value && value.trim()) {
+    return value.trim();
+  }
+  return undefined;
+}
+
+function hasProjectMetadata(snapshot: Record<string, unknown>): boolean {
+  if (typeof (snapshot as { project_id?: unknown }).project_id === 'string' && (snapshot as { project_id?: string }).project_id) {
+    return true;
+  }
+  if (typeof (snapshot as { projectId?: unknown }).projectId === 'string' && (snapshot as { projectId?: string }).projectId) {
+    return true;
+  }
+  const projects = (snapshot as { projects?: unknown }).projects;
+  if (Array.isArray(projects) && projects.length > 0) {
+    const hasProject = projects.some((proj) => proj && typeof proj === 'object' && typeof (proj as { projectId?: unknown }).projectId === 'string');
+    if (hasProject) {
+      return true;
+    }
+  }
+  return false;
+}
 
 async function tryLoadCodeAssist(
   apiBase: string,
@@ -167,6 +227,10 @@ export async function fetchAntigravityProjectId(
   }
 }
 
+export function buildAntigravityHeaders(accessToken: string): Record<string, string> {
+  return buildHeaders(accessToken);
+}
+
 export function resolveAntigravityApiBase(explicit?: string): string {
   return normalizedBase(explicit);
 }
@@ -175,3 +239,55 @@ export const ANTIGRAVITY_HELPER_DEFAULTS = {
   apiBase: DEFAULT_ANTIGRAVITY_API_BASE,
   userAgent: DEFAULT_USER_AGENT
 };
+
+export async function ensureAntigravityTokenProjectMetadata(
+  tokenFilePath: string,
+  apiBaseHint?: string
+): Promise<boolean> {
+  const resolved = expandHome(tokenFilePath);
+  if (!resolved) {
+    return false;
+  }
+  const snapshot = await readJsonFile(resolved);
+  if (!snapshot) {
+    return false;
+  }
+  if (hasProjectMetadata(snapshot)) {
+    return true;
+  }
+  const accessToken = extractAccessTokenFromSnapshot(snapshot);
+  if (!accessToken) {
+    return false;
+  }
+  const projectId = await fetchAntigravityProjectId(accessToken, apiBaseHint);
+  if (!projectId) {
+    return false;
+  }
+  (snapshot as { project_id?: string }).project_id = projectId;
+  (snapshot as { projectId?: string }).projectId = projectId;
+  const projectsNode = (snapshot as { projects?: UnknownObject[] }).projects;
+  if (!Array.isArray(projectsNode) || projectsNode.length === 0) {
+    (snapshot as { projects?: { projectId: string }[] }).projects = [{ projectId }];
+  } else {
+    const exists = projectsNode.some(
+      (proj) => proj && typeof proj === 'object' && typeof (proj as { projectId?: unknown }).projectId === 'string'
+        ? (proj as { projectId?: string }).projectId === projectId
+        : false
+    );
+    if (!exists) {
+      projectsNode.push({ projectId });
+    }
+  }
+  try {
+    await fs.writeFile(resolved, `${JSON.stringify(snapshot, null, 2)}\n`, 'utf-8');
+    logOAuthDebug(`[OAuth] Antigravity: ensured project_id=${projectId} for ${resolved}`);
+    return true;
+  } catch (error) {
+    logOAuthDebug(
+      `[OAuth] Antigravity: failed to persist project_id for ${resolved} - ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+    return false;
+  }
+}

@@ -24,6 +24,7 @@ interface GeminiCLIPayload extends UnknownObject {
   action?: string;
   requestId?: string;
   userAgent?: string;
+   requestType?: string;
   session_id?: string;
 }
 
@@ -36,7 +37,7 @@ export class GeminiCLIProtocolClient implements HttpProtocolClient<ProtocolReque
     const payload = this.extractPayload(request);
 
     // 顶层字段：model / project / action / request metadata
-    const { model, project, action, requestId, userAgent, metadata: _metadata, ...rest } = payload;
+    const { model, project, action, requestId, userAgent, requestType, metadata: _metadata, ...rest } = payload;
 
     const body: Record<string, unknown> = {};
     if (typeof model === 'string' && model.length > 0) {
@@ -50,6 +51,9 @@ export class GeminiCLIProtocolClient implements HttpProtocolClient<ProtocolReque
     }
     if (typeof userAgent === 'string' && userAgent.length > 0) {
       body.userAgent = userAgent;
+    }
+    if (typeof requestType === 'string' && requestType.length > 0) {
+      body.requestType = requestType;
     }
 
     // 其余 Gemini Chat 兼容字段（contents/systemInstruction/generationConfig/tools/metadata 等）

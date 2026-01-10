@@ -20,6 +20,7 @@ import {
   ensureCamoufoxFingerprintForToken
 } from '../providers/core/config/camoufox-launcher.js';
 import { loadRouteCodexConfig } from '../config/routecodex-config-loader.js';
+import { ensureAntigravityTokenProjectMetadata } from '../providers/auth/antigravity-userinfo-helper.js';
 
 export interface TokenDaemonOptions {
   intervalMs: number;
@@ -34,7 +35,21 @@ const DEFAULT_INTERVAL_MS = 60_000;
 const DEFAULT_REFRESH_AHEAD_MINUTES = 5;
 const MIN_REFRESH_INTERVAL_MS = 5 * 60_000;
 const GEMINI_PROVIDER_IDS = new Set(['gemini-cli', 'antigravity']);
+const ANTIGRAVITY_METADATA_ENSURE_INTERVAL_MS = 10 * 60_000;
+const USER_TIMEOUT_PATTERNS = [
+  'device authorization timed out',
+  'authorization timed out',
+  'authorization flow expired',
+  'user did not complete',
+  'callback timed out'
+];
 let camoufoxEnabledCache: boolean | null = null;
+
+type CamoufoxOverrideOptions = {
+  useCamoufox: boolean;
+  autoMode?: string | null;
+  devMode?: boolean;
+};
 
 async function isCamoufoxOauthEnabled(): Promise<boolean> {
   if (camoufoxEnabledCache !== null) {
@@ -58,6 +73,7 @@ export class TokenDaemon {
   private readonly historyStore: TokenHistoryStore;
   private timer: NodeJS.Timeout | null = null;
   private lastRefreshAttempt: Map<string, number> = new Map();
+  private antigravityMetadataEnsureTimestamps: Map<string, number> = new Map();
 
   constructor(options?: Partial<TokenDaemonOptions>) {
     this.intervalMs = options?.intervalMs && options.intervalMs > 0 ? options.intervalMs : DEFAULT_INTERVAL_MS;
@@ -105,14 +121,21 @@ export class TokenDaemon {
         this.logDebug(
           `[daemon] evaluate token provider=${token.provider} alias=${token.alias} expires=${token.state.expiresAt ?? 'unknown'} remainingMs=${token.state.msUntilExpiry ?? 'unknown'} refreshToken=${token.state.hasRefreshToken}`
         );
+        if (token.provider === 'antigravity') {
+          await this.ensureAntigravityTokenMetadata(token).catch((error) => {
+            const msg = error instanceof Error ? error.message : String(error);
+            this.logDebug(`[daemon] antigravity metadata ensure failed for ${token.filePath}: ${msg}`);
+          });
+        }
         const key = buildTokenKey(token);
         const { state } = token;
         const expires = state.expiresAt;
         const msLeft = state.msUntilExpiry;
 
         // 预生成 Camoufox profile 目录 + fingerprint：按 provider + alias 派生稳定 profileId。
-        // 仅在全局配置开启 camoufox 模式时生效。
-        if (camoufoxEnabled && token.provider && token.alias) {
+        // iflow 自动认证强制开启 Camoufox，因此即便全局未启用 camoufox 浏览器也要提前准备。
+        const needsCamoufoxProfile = camoufoxEnabled || token.provider === 'iflow';
+        if (needsCamoufoxProfile && token.alias) {
           try {
             ensureCamoufoxProfileDir(token.provider, token.alias);
             ensureCamoufoxFingerprintForToken(token.provider, token.alias);
@@ -169,7 +192,6 @@ export class TokenDaemon {
 
   private async trySilentRefresh(token: TokenDescriptor): Promise<void> {
     const providerType: OAuthProviderId = token.provider;
-    const rawType = `${providerType}-oauth`;
 
     const tokenMtimeBefore = await getTokenFileMtime(token.filePath);
     if (await this.historyStore.isAutoSuspended(token, tokenMtimeBefore)) {
@@ -197,17 +219,13 @@ export class TokenDaemon {
     );
 
     try {
-      await ensureValidOAuthToken(
-        providerType,
-        {
-          type: rawType,
-          tokenFile: token.filePath
-        } as any,
-        {
-          openBrowser: true,
-          forceReacquireIfRefreshFails: true
-        }
-      );
+      if (providerType === 'iflow') {
+        await (this as any).runIflowAutoAuthorization(token);
+      } else if (providerType === 'antigravity') {
+        await (this as any).runAntigravityAutoAuthorization(token);
+      } else {
+        await (this as any).ensureTokenWithOverrides(token);
+      }
 
       console.log(
         chalk.green('✓'),
@@ -218,13 +236,140 @@ export class TokenDaemon {
       await this.recordHistoryEvent(token, 'success', startedAt, {
         tokenFileMtime: tokenMtimeAfter
       });
+      await this.ensureAntigravityTokenMetadata(token, { force: true }).catch((error) => {
+        const msg = error instanceof Error ? error.message : String(error);
+        this.logDebug(`[daemon] antigravity metadata ensure (post-refresh) failed for ${token.filePath}: ${msg}`);
+      });
     } catch (error) {
+      const failureInfo = (this as any).classifyRefreshFailure(error);
+      const isUserTimeout = failureInfo.isUserTimeout;
+      if (isUserTimeout) {
+        console.warn(
+          chalk.yellow('!'),
+          `Auto OAuth timed out waiting for user action (${providerType} ${token.displayName})`
+        );
+      }
       await this.recordHistoryEvent(token, 'failure', startedAt, {
         error,
-        tokenFileMtime: tokenMtimeBefore
+        tokenFileMtime: tokenMtimeBefore,
+        countTowardsFailureStreak: isUserTimeout,
+        forceAutoSuspend: isUserTimeout
       });
       throw error;
     }
+  }
+
+  private async runIflowAutoAuthorization(token: TokenDescriptor): Promise<void> {
+    try {
+      await this.ensureTokenWithOverrides(token, {
+        useCamoufox: true,
+        autoMode: 'iflow',
+        devMode: false
+      });
+      return;
+    } catch (autoError) {
+      const message = autoError instanceof Error ? autoError.message : String(autoError);
+      console.warn(
+        chalk.yellow('!'),
+        `Camoufox auto OAuth failed for iflow (${token.displayName}): ${message}. Falling back to headful mode.`
+      );
+    }
+    await this.ensureTokenWithOverrides(token, {
+      useCamoufox: true,
+      autoMode: null,
+      devMode: true
+    });
+  }
+
+  private async runAntigravityAutoAuthorization(token: TokenDescriptor): Promise<void> {
+    try {
+      await this.ensureTokenWithOverrides(token, {
+        useCamoufox: true,
+        autoMode: 'antigravity',
+        devMode: false
+      });
+      return;
+    } catch (autoError) {
+      const message = autoError instanceof Error ? autoError.message : String(autoError);
+      console.warn(
+        chalk.yellow('!'),
+        `Camoufox auto OAuth failed for antigravity (${token.displayName}): ${message}. Falling back to manual mode.`
+      );
+    }
+    await this.ensureTokenWithOverrides(token, {
+      useCamoufox: true,
+      autoMode: null,
+      devMode: true
+    });
+  }
+
+  private async ensureTokenWithOverrides(
+    token: TokenDescriptor,
+    camoufoxOptions?: CamoufoxOverrideOptions
+  ): Promise<void> {
+    const providerType: OAuthProviderId = token.provider;
+    const rawType = `${providerType}-oauth`;
+    const runner = () =>
+      ensureValidOAuthToken(
+        providerType,
+        {
+          type: rawType,
+          tokenFile: token.filePath
+        } as any,
+        {
+          openBrowser: true,
+          forceReacquireIfRefreshFails: true
+        }
+      );
+    if (!camoufoxOptions?.useCamoufox) {
+      await runner();
+      return;
+    }
+    const restoreEnv = this.applyCamoufoxEnv(camoufoxOptions);
+    try {
+      await runner();
+    } finally {
+      restoreEnv();
+    }
+  }
+
+  private applyCamoufoxEnv(options: CamoufoxOverrideOptions): () => void {
+    const prevBrowser = process.env.ROUTECODEX_OAUTH_BROWSER;
+    const prevAutoMode = process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
+    const prevDevMode = process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
+
+    process.env.ROUTECODEX_OAUTH_BROWSER = 'camoufox';
+    if (options.autoMode) {
+      process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE = options.autoMode;
+    } else {
+      delete process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
+    }
+    if (options.devMode) {
+      process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = '1';
+    } else {
+      delete process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
+    }
+
+    return () => {
+      this.restoreEnvValue('ROUTECODEX_OAUTH_BROWSER', prevBrowser);
+      this.restoreEnvValue('ROUTECODEX_CAMOUFOX_AUTO_MODE', prevAutoMode);
+      this.restoreEnvValue('ROUTECODEX_CAMOUFOX_DEV_MODE', prevDevMode);
+    };
+  }
+
+  private restoreEnvValue(name: string, value: string | undefined): void {
+    if (value === undefined) {
+      delete process.env[name];
+    } else {
+      process.env[name] = value;
+    }
+  }
+
+  private classifyRefreshFailure(error: unknown): { message: string; isUserTimeout: boolean } {
+    const message = error instanceof Error ? error.message : String(error || '');
+    const normalized = message.toLowerCase();
+    const isUserTimeout = USER_TIMEOUT_PATTERNS.some((pattern) => normalized.includes(pattern));
+    return { message, isUserTimeout };
   }
 
   static async getSnapshot(): Promise<TokenDaemonSnapshot> {
@@ -277,6 +422,34 @@ export class TokenDaemon {
     return null;
   }
 
+  private async ensureAntigravityTokenMetadata(
+    token: TokenDescriptor,
+    options?: { force?: boolean }
+  ): Promise<void> {
+    if (token.provider !== 'antigravity') {
+      return;
+    }
+    const filePath = token.filePath;
+    if (!filePath) {
+      return;
+    }
+    const now = Date.now();
+    const force = options?.force === true;
+    if (!force) {
+      const last = this.antigravityMetadataEnsureTimestamps.get(filePath) || 0;
+      if (now - last < ANTIGRAVITY_METADATA_ENSURE_INTERVAL_MS) {
+        return;
+      }
+    }
+    const ensured = await ensureAntigravityTokenProjectMetadata(filePath);
+    if (ensured) {
+      this.antigravityMetadataEnsureTimestamps.set(filePath, now);
+    } else if (!force) {
+      // allow retry soon if ensure failed
+      this.antigravityMetadataEnsureTimestamps.delete(filePath);
+    }
+  }
+
   private logDebug(message: string): void {
     if (!DEBUG_ENABLED) {
       return;
@@ -299,7 +472,12 @@ export class TokenDaemon {
     token: TokenDescriptor,
     outcome: RefreshOutcome,
     startedAt: number,
-    meta?: { error?: unknown; tokenFileMtime?: number | null }
+    meta?: {
+      error?: unknown;
+      tokenFileMtime?: number | null;
+      countTowardsFailureStreak?: boolean;
+      forceAutoSuspend?: boolean;
+    }
   ): Promise<void> {
     try {
       const completedAt = Date.now();
@@ -309,7 +487,9 @@ export class TokenDaemon {
         durationMs: completedAt - startedAt,
         mode: 'auto',
         error: meta?.error ? (meta.error instanceof Error ? meta.error.message : String(meta.error)) : undefined,
-        tokenFileMtime: meta?.tokenFileMtime ?? null
+        tokenFileMtime: meta?.tokenFileMtime ?? null,
+        countTowardsFailureStreak: meta?.countTowardsFailureStreak,
+        forceAutoSuspend: meta?.forceAutoSuspend
       });
     } catch (historyError) {
       this.logDebug(
