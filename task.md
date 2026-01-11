@@ -85,6 +85,61 @@ tests/servertool/
 
 ---
 
+## Chat 语义扩展：跨协议字段命名去重清单
+
+> 阶段 2 开始跨协议迁移时，以下语义需统一命名并写入 `ChatSemantics`，避免重复的 metadata / extraFields / protocolState。
+
+- **系统指令 & 原始块**
+  - 当前来源：`metadata.systemInstructions`（OpenAI/Gemini）、`metadata.systemInstruction`/`originalSystemMessages`（bridge actions）、`protocolState.systemMessages/systemInstruction`、`responsesContext.originalSystemMessages`。
+  - 统一命名：`semantics.system.textBlocks`（文本数组）+ `semantics.system.rawBlocks`（原始 JSON block），Responses 也复用同名字段。
+
+- **空工具列表哨兵**
+  - 当前来源：`metadata.toolsFieldPresent`（OpenAI/Anthropic/Gemini）、`metadata.extraFields.toolsFieldPresent`、Gemini provider metadata `__rcc_tools_field_present`。
+  - 统一命名：`semantics.tools.explicitEmpty=true`；其它写法仅做兼容期双写，迁移完成后删除。
+
+- **Anthropic 专属语义**
+  - `anthropicToolNameMap` 同时写在 metadata / extraFields / AdapterContext。
+  - `metadata.extraFields.anthropicMirror` 记录 message content 形状。
+  - 统一命名：`semantics.anthropic.toolAliasMap`、`semantics.anthropic.messageShapeMirror`，不再复制到 context。
+
+- **Responses resume / include / responseFormat**
+  - 目前藏在 `metadata.responsesContext`、`metadata.responseFormat`、`metadata.responsesResume`。
+  - 统一命名：`semantics.responses.context`（include/store/stream/responseFormat 等）+ `semantics.responses.resume`（previousRequestId、tool outputs）。
+
+- **Provider metadata / passthrough**
+  - Anthropic & Gemini 同一份 provider metadata 同时写入 `metadata.providerMetadata`、`parameters.metadata`、`metadata.extraFields`。
+  - 统一命名：`semantics.providerExtras.<protocol>.providerMetadata` 或协议命名空间下的字段；metadata 仅保留诊断。
+
+- **WebSearch / 其它 providerExtras**
+  - 新语义已写在 `semantics.providerExtras.webSearch`；后续清理 `metadata.webSearch`、`Virtual Router metadata.webSearch` 的旧读取路径。
+
+迁移每个协议时遵循：
+1. 写 semantics（以以上命名为准）→ 兼容期双写 metadata。
+2. Chat-process / 路由仅读 semantics。
+3. 阶段 3 清理 metadata/extraFields 中的同义字段，新增快照测试确保只剩诊断信息。
+
+### 协议出站白名单 + 矩阵覆盖要求
+
+- **语义→wire 映射显式化**  
+  - 每个协议的 outbound mapper（OpenAI / Responses / Anthropic / Gemini）必须维护一张“语义字段映射表”，仅允许从 `chat.semantics.<namespace>` 抽取白名单字段还原到 wire payload；其它 semantics / metadata 内部字段一律忽略。
+  - 构造 `payload` 时，使用 `ALLOWED_KEYS`（或类似常量）限定可进入 wire 的键，禁止把 `metadata.*` / `providerExtras.*` 整块透传给 provider，避免内部诊断字段造成 4xx。
+  - 返回前执行 defensive prune（如 `stripInternalFields(payload)`），确保 `systemInstruction`、`responsesContext`、`anthropicMirror` 等内部字段不会进入 HTTP 请求体。
+
+- **矩阵回归覆盖**  
+  - Matrix CI 最少覆盖：OpenAI Chat / Responses / Anthropic / Gemini 四条链路的 roundtrip，用 codex samples 验证新语义字段的往返；新增字段必须在 matrix 中出现并断言值正确。
+  - 每次扩展白名单或语义映射时，更新 matrix fixtures（或新增针对性样本）确保关键字段（系统指令、resume、tool alias、generationConfig 等）被采集进报告；否则视为测试缺失。
+  - Matrix 报告必须断言“白名单外字段不在 wire payload 出现”，通过 snapshot 或 diff 校验，防止内部字段漏清理。
+
+### Chat 语义扩展阶段 2 进度
+
+- [x] OpenAI Chat：`semantics.system/textBlocks`、`semantics.providerExtras.openaiChat.extraFields`、`semantics.tools.explicitEmpty` 双写完成，outbound 仅读 semantics。
+- [x] Responses：`semantics.responses.context/resume` 接线，Submit Tool Outputs 及 resume 链路只读 semantics。
+- [x] Anthropic：`semantics.anthropic.systemBlocks/toolAliasMap/mirror/providerMetadata` 接线，metadata 仅作兼容。
+- [x] Gemini：`semantics.gemini` 记录 systemInstruction/safetySettings/generationConfig/toolConfig/providerMetadata，`semantics.tools.explicitEmpty` 标记空工具；出站白名单优先消费 semantics（systemInstruction、generationConfig、safetySettings、toolConfig、providerMetadata），metadata 仅作为 fallback。
+- [ ] 阶段 3：删除 metadata/extraFields 中的同义字段，新增快照守护诊断字段清单。
+
+---
+
 ## Antigravity 429 调查任务（gcli2api ⇄ RouteCodex）
 
 > 目标：从 **gcli2api 能 200 的请求形态** 和 **RouteCodex 当前 429 的 upstream 请求** 两端出发，靠 curl 一步步「收敛」，精确锁定导致 429 的最小差异，然后再回写到 RouteCodex。

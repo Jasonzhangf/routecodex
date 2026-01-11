@@ -223,15 +223,18 @@ RouteCodex 支持通过用户消息中的特殊指令 `<**...**>` 来动态控�
 ### 持久化
 
 路由指令状态按 `stickyKey` 隔离存储，`stickyKey` 的解析顺序为：
-1. `metadata.sessionId`（如果存在）；
-2. 否则 `metadata.conversationId`；
-3. 否则 Responses Resume 场景下的 `metadata.responsesResume.previousRequestId`；
-4. 否则回退为当前 `metadata.requestId`。
+1. 对 Responses 协议（`providerProtocol === 'openai-responses'`）：
+   - 若存在 Responses Resume 语义：`metadata.responsesResume.previousRequestId`；
+   - 否则使用当前 `metadata.requestId`（仅在该条请求链路内生效）。
+2. 对其它协议：
+   - 优先使用 `metadata.sessionId`（如果存在）；
+   - 否则 `metadata.conversationId`；
+   - 否则回退为当前 `metadata.requestId`。
 
 因此：
-- 同一 `sessionId` 或同一 `conversationId` 下的请求共享 sticky / allow / disable 状态；
-- 不同会话的状态相互独立；
-- 没有显式会话信息时，会退化为“按 requestId + resume 链”维持的短期状态。
+- Chat/Anthropic/Gemini 等协议下，同一 `sessionId` 或同一 `conversationId` 下的请求共享 sticky / allow / disable 状态；
+- Responses 自动粘滞仅在单个 requestId/resume 链内生效，不会把 provider 选择粘到整个会话；
+- 没有显式会话信息时，会退化为“按 requestId（以及 Resume 的 previousRequestId）维持的短期状态。
 
 ### Daemon 管理
 

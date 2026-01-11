@@ -15,22 +15,73 @@ function createSubmitContext(overrides?: Partial<AdapterContext>): AdapterContex
 }
 
 function createChatEnvelope(ctx: AdapterContext, seed?: Partial<ChatEnvelope>): ChatEnvelope {
+  const baseContext = {
+    metadata: {
+      originalEndpoint: 'openai-responses'
+    }
+  };
+  const responsesContext = (seed?.metadata as Record<string, unknown> | undefined)?.responsesContext ?? baseContext;
+  const responsesSemantics = seed?.semantics?.responses ?? {
+    context: responsesContext,
+    ...(ctx.responsesResume ? { resume: ctx.responsesResume } : {})
+  };
   return {
     messages: seed?.messages ?? [{ role: 'user', content: 'hello' }],
     parameters: seed?.parameters ?? { model: 'gpt-4o-mini', stream: true },
     metadata: {
       context: ctx,
-      responsesContext: {
-        metadata: {
-          originalEndpoint: 'openai-responses'
-        }
-      }
+      responsesContext,
+      ...(seed?.metadata ?? {})
+    },
+    semantics: {
+      ...(seed?.semantics ?? {}),
+      responses: responsesSemantics
     },
     ...seed
   };
 }
 
 describe('ResponsesSemanticMapper submit tool outputs', () => {
+  it('captures responses context into semantics and metadata on inbound', async () => {
+    const mapper = new ResponsesSemanticMapper();
+    const ctx = createSubmitContext();
+    const format = {
+      protocol: 'openai-responses',
+      direction: 'request',
+      payload: {
+        model: 'gpt-4o-mini',
+        input: [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text: 'hello'
+              }
+            ]
+          }
+        ],
+        response_format: {
+          type: 'json_schema',
+          json_schema: {
+            name: 'sample',
+            schema: {
+              type: 'object'
+            }
+          }
+        }
+      }
+    } as const;
+    const chat = await mapper.toChat(format, ctx);
+    const semantics = chat.semantics?.responses as Record<string, unknown> | undefined;
+    expect(semantics).toBeDefined();
+    expect(semantics?.context).toBeDefined();
+    expect(chat.metadata.responsesContext).toBeDefined();
+    if (ctx.responsesResume) {
+      expect(semantics?.resume).toBeDefined();
+    }
+  });
+
   it('builds submit payload from chat toolOutputs', async () => {
     const mapper = new ResponsesSemanticMapper();
     const ctx = createSubmitContext();

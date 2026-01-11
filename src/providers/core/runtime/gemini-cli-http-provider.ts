@@ -61,6 +61,7 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
     const processedRequest = await super.preprocessRequest(request);
     const adapter = this.resolvePayload(processedRequest);
     const payload = adapter.payload as MutablePayload;
+    const isAntigravity = this.isAntigravityRuntime();
 
     // 从 auth provider 获取 project_id（仅做最小的 OAuth token 解析，不在此处触发 OAuth 流程）
     if (!this.authProvider) {
@@ -96,13 +97,14 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
     // 若当前 token 中已有 project 元数据，则补充到请求中；否则让上游决定后续行为。
     // 注意：Antigravity 运行时保持与早期成功快照一致，始终显式发送 project。
     if (projectId) {
-      payload.project = projectId;
+      (payload as Record<string, unknown>).project = projectId;
     }
+
     this.ensureRequestMetadata(payload);
 
     // 删除与 Gemini 协议无关的字段，避免影响 Cloud Code Assist schema 校验。
-    // 按 gcli2api 语义：协议层不主动删 tools，只做最小形状整理。
     const recordPayload = payload as Record<string, unknown>;
+    // 按 gcli2api 语义：协议层不主动删 tools，只做最小形状整理。
     const hasMessages = Array.isArray((recordPayload as { messages?: unknown }).messages);
 
     if (hasMessages) {
@@ -291,7 +293,8 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
     if (!this.hasNonEmptyString(payload.requestId)) {
       payload.requestId = `req-${randomUUID()}`;
     }
-    if (!this.hasNonEmptyString(payload.session_id)) {
+    // 对齐 gcli2api：Antigravity 运行时不发送 session_id，其它运行时保持原有行为。
+    if (!isAntigravity && !this.hasNonEmptyString(payload.session_id)) {
       payload.session_id = `session-${randomUUID()}`;
     }
     if (!this.hasNonEmptyString(payload.userAgent)) {
