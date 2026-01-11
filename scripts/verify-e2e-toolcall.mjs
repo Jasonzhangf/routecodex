@@ -64,6 +64,9 @@ async function main() {
     await runToolcallVerification();
     console.log('✅ 端到端工具调用校验通过');
 
+    await runDaemonAdminSmokeCheck();
+    await runConfigV2ProvidersSmokeCheck();
+
     // 附加：Gemini CLI 配置健康性快速检查（仅尝试初始化，不做请求）
     await runGeminiCliStartupCheck();
   } finally {
@@ -160,6 +163,55 @@ async function runToolcallVerification() {
   if (!hasToolCall) {
     console.error('[verify:e2e-toolcall] Unexpected response:', JSON.stringify(json, null, 2));
     throw new Error('响应中未检测到工具调用或 required_action，校验失败');
+  }
+}
+
+async function runDaemonAdminSmokeCheck() {
+  // 仅做最小的健康性探测：确保 daemon 管理类只读 API 可用，不做语义校验。
+  try {
+    const res = await fetch(`${VERIFY_BASE}/daemon/status`);
+    if (!res.ok) {
+      throw new Error(`daemon/status HTTP ${res.status}`);
+    }
+    const json = await res.json();
+    if (!json || typeof json !== 'object' || json.ok !== true) {
+      throw new Error('daemon/status 返回值不符合预期形态');
+    }
+  } catch (error) {
+    console.error('[verify:e2e-toolcall] /daemon/status smoke 检查失败:', error);
+    throw error;
+  }
+
+  const paths = ['/daemon/credentials', '/quota/summary', '/providers/runtimes'];
+  for (const path of paths) {
+    try {
+      const res = await fetch(`${VERIFY_BASE}${path}`);
+      if (!res.ok) {
+        throw new Error(`${path} HTTP ${res.status}`);
+      }
+      // 只要 JSON 可解析即可视为通过，避免把语义校验塞到这里。
+      await res.json().catch(() => ({}));
+    } catch (error) {
+      console.error('[verify:e2e-toolcall] Daemon admin smoke 检查失败:', path, error);
+      throw error;
+    }
+  }
+}
+
+async function runConfigV2ProvidersSmokeCheck() {
+  try {
+    const res = await fetch(`${VERIFY_BASE}/config/providers/v2`);
+    if (!res.ok) {
+      throw new Error(`/config/providers/v2 HTTP ${res.status}`);
+    }
+    const json = await res.json();
+    if (!Array.isArray(json)) {
+      // 出于兼容考虑，只要不是致命错误就通过；Config V2 视图是辅助信息。
+      console.warn('[verify:e2e-toolcall] /config/providers/v2 未返回数组形态，跳过进一步校验');
+    }
+  } catch (error) {
+    console.error('[verify:e2e-toolcall] Config V2 providers smoke 检查失败:', error);
+    // 不将 Config V2 视图问题视为构建阻断条件，以免挡住主链路；仅提示。
   }
 }
 

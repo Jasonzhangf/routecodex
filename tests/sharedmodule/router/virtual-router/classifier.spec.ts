@@ -56,4 +56,38 @@ describe('RoutingClassifier user overrides', () => {
     expect(result.routeName).toBe('coding');
     expect(result.reasoning).toContain('coding:last-tool-write');
   });
+
+  it('keeps thinking route when web_search tool is declared', () => {
+    const result = classifier.classify(
+      buildFeatures({
+        latestMessageFromUser: true,
+        hasTools: true,
+        hasWebTool: true
+      })
+    );
+    expect(result.routeName).toBe('thinking');
+    expect(result.reasoning).toContain('thinking:user-input');
+  });
+
+  it('routes to search after thinking/coding when last tool was search', () => {
+    const result = classifier.classify(
+      buildFeatures({
+        latestMessageFromUser: false,
+        lastAssistantToolCategory: 'search'
+      })
+    );
+    expect(result.routeName).toBe('search');
+    expect(result.reasoning).toContain('search:last-tool-search');
+  });
+
+  it('routes to thinking when last tool was read and there is no new user message', () => {
+    const result = classifier.classify(
+      buildFeatures({
+        latestMessageFromUser: false,
+        lastAssistantToolCategory: 'read'
+      })
+    );
+    expect(result.routeName).toBe('thinking');
+    expect(result.reasoning).toContain('thinking:last-tool-read');
+  });
 });

@@ -131,6 +131,7 @@ export class RouteCodexHttpServer {
     // This ensures OAuth Portal is available when providers check token validity
     registerDefaultMiddleware(this.app);
     registerOAuthPortalRoute(this.app);
+    this.registerDaemonAdminUiRoute();
     console.log('[RouteCodexHttpServer] OAuth Portal route registered (early initialization)');
 
     console.log('[RouteCodexHttpServer] Initialized (pipeline=hub)');
@@ -152,6 +153,35 @@ export class RouteCodexHttpServer {
       };
     }
     return this.moduleDependencies!;
+  }
+
+  /**
+   * Register Daemon Admin UI route.
+   * Serves docs/daemon-admin-ui.html as a static page; localhost-only.
+   */
+  private registerDaemonAdminUiRoute(): void {
+    this.app.get('/daemon/admin', async (req, res) => {
+      try {
+        const ip = req.socket?.remoteAddress || '';
+        const allowed = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
+        if (!allowed) {
+          res.status(403).json({ error: { message: 'forbidden', code: 'forbidden' } });
+          return;
+        }
+        const filePath = new URL('../../../../docs/daemon-admin-ui.html', import.meta.url);
+        const fs = await import('node:fs/promises');
+        const html = await fs.readFile(filePath, 'utf8');
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        res.send(html);
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        res.status(500).json({
+          error: {
+            message: `Daemon admin UI not available: ${message}`
+          }
+        });
+      }
+    });
   }
 
   private getErrorHandlingShim(): ModuleDependencies['errorHandlingCenter'] {
@@ -419,7 +449,10 @@ export class RouteCodexHttpServer {
           }
           const key = sessionId && sessionId.trim() ? `session:${sessionId.trim()}` : '';
           return key ? store.loadSync(key) : null;
-        }
+        },
+        getManagerDaemon: () => this.managerDaemon,
+        getVirtualRouterArtifacts: () => this.currentRouterArtifacts,
+        getServerId: () => `${this.config.server.host}:${this.config.server.port}`
       });
 
       this._isInitialized = true;

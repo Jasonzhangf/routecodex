@@ -83,7 +83,10 @@ export class ResponsesProvider extends HttpTransportProvider {
     const settings = this.getResponsesSettings();
     const entryEndpoint = this.extractEntryEndpoint(request) ?? this.extractEntryEndpoint(context);
 
-    const submitPayload = this.extractSubmitToolOutputsPayload(context);
+    const submitPayload =
+      typeof entryEndpoint === 'string' && entryEndpoint.trim().toLowerCase() === '/v1/responses.submit_tool_outputs'
+        ? this.extractSubmitToolOutputsPayload(request)
+        : null;
     if (submitPayload) {
       const submitEndpoint = this.buildSubmitToolOutputsEndpoint(endpoint, submitPayload.responseId);
       const submitTargetUrl = this.buildTargetUrl(this.getEffectiveBaseUrl(), submitEndpoint);
@@ -257,31 +260,28 @@ export class ResponsesProvider extends HttpTransportProvider {
     }
   }
 
-  private extractSubmitToolOutputsPayload(context: ProviderContext): SubmitToolOutputsPayload | null {
-    const metadata = context.metadata && typeof context.metadata === 'object'
-      ? (context.metadata as Record<string, unknown>)
-      : null;
-    if (!metadata) {
+  private extractSubmitToolOutputsPayload(request: UnknownObject): SubmitToolOutputsPayload | null {
+    if (!request || typeof request !== 'object') {
       return null;
     }
-    const raw = metadata.__raw_request_body && typeof metadata.__raw_request_body === 'object'
-      ? (metadata.__raw_request_body as Record<string, unknown>)
-      : null;
-    if (!raw) {
+    const record = request as Record<string, unknown>;
+    const rawId =
+      typeof record.response_id === 'string'
+        ? record.response_id
+        : typeof record.responseId === 'string'
+          ? record.responseId
+          : undefined;
+    const responseId = rawId && rawId.trim().length ? rawId.trim() : undefined;
+    if (!responseId) {
       return null;
     }
-    const responseId = typeof raw.response_id === 'string' && raw.response_id.trim()
-      ? raw.response_id.trim()
-      : undefined;
-    const toolOutputs = Array.isArray(raw.tool_outputs) ? raw.tool_outputs : null;
-    if (!responseId || !toolOutputs || toolOutputs.length === 0) {
+    const toolOutputs = Array.isArray(record.tool_outputs) ? record.tool_outputs : null;
+    if (!toolOutputs || !toolOutputs.length) {
       return null;
     }
-    const submitBody = JSON.parse(JSON.stringify(raw)) as Record<string, unknown>;
+    const submitBody = JSON.parse(JSON.stringify(record)) as Record<string, unknown>;
     delete submitBody.response_id;
-    if (!Array.isArray(submitBody.tool_outputs)) {
-      submitBody.tool_outputs = toolOutputs;
-    }
+    delete submitBody.responseId;
     return {
       responseId,
       body: submitBody

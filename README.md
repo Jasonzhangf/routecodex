@@ -228,6 +228,50 @@ RouteCodex 会按以下优先级查找配置：
 
 ---
 
+## TOON 工具协议与 CLI 解码说明
+
+RouteCodex / llmswitch-core 对「模型看到的工具参数」与「CLI/执行器真正消费的参数」做了明确分层：
+
+- **模型视角（统一协议）**
+  - 所有支持 TOON 的工具（例如 `exec_command`、`apply_patch`）都可以通过 `arguments.toon` 传参：
+    - 形如 `command: ...\nworkdir: ...\n` 的多行 `key: value`。
+    - 模型无需关心 CLI 的内部 JSON 结构（`cmd` / `input` 等字段名）。
+- **执行视角（CLI 黑盒）**
+  - Codex CLI 的工具实现不会理解 TOON，只接受传统 JSON 形态：
+    - `exec_command` 只认 `{ cmd: string, workdir?, command? ... }`。
+    - `apply_patch` 只认 `{ input: string, patch?: string }`，且 `input` 必须是标准统一 diff（`*** Begin Patch` 开头）。
+  - CLI 被视为黑盒：不能指望它去解析 TOON 或结构化 `changes`。
+
+为此，llmswitch-core 在 **响应侧** 增加了成对的解码过滤器，用于在把响应发回 CLI 之前“翻译”工具参数：
+
+- `ResponseToolArgumentsToonDecodeFilter`
+  - 作用于所有协议（包括 `/v1/responses`），在响应处理阶段对 `choices[].message.tool_calls[*].function.arguments` 解码：
+    - 对 shell/exec 类工具（`shell` / `shell_command` / `exec_command`）：
+      - 从 `toon` 中解析 `command`/`cmd`、`workdir`/`cwd`、`timeout_ms`、`with_escalated_permissions`、`justification` 等字段。
+      - 统一输出为 JSON 字符串：`{"cmd":"...","command":"...","workdir":"...","timeout_ms":...,"with_escalated_permissions":...,"justification":"..."}`。
+    - 对其它工具（如 `view_image`、MCP 工具等）：
+      - 将所有 TOON `key: value` 对映射为普通 JSON 字段，并做轻量类型推断（`true/false`→布尔，数字→number，可解析的 `{}`/`[]`→JSON 对象/数组）。
+    - 对 `apply_patch`：
+      - 交由专门的 `ResponseApplyPatchToonDecodeFilter` 处理，当前过滤器只负责 shell/exec 与通用工具，避免相互覆盖。
+- `ResponseApplyPatchToonDecodeFilter`
+  - 专门负责 `apply_patch` 的响应参数规范化：
+    - 支持两类输入：
+      - `{"toon":"*** Begin Patch ... *** End Patch"}`；
+      - 结构化 `changes` payload（多种 `kind`：insert_after / insert_before / replace / delete / create_file / delete_file）。
+    - 将其统一转换为 `{ input: "<统一 diff>", patch: "<统一 diff>" }` 的 JSON 字符串挂回 `function.arguments`，以兼容 CLI 旧语义。
+
+整体约束可以概括为：
+
+- **对模型**：可以使用 TOON 或结构化 JSON（例如 `changes`）；RouteCodex 会在 Hub Pipeline 内对齐为统一 JSON 结构。
+- **对 CLI / 客户端**：始终看到历史兼容形态：
+  - `exec_command`：具备 `cmd` 字段的 JSON；
+  - `apply_patch`：具备 `input`（统一 diff）的 JSON。
+- **对维护者**：
+  - 所有 TOON → JSON 的解码逻辑集中在 `sharedmodule/llmswitch-core/src/filters/special/` 及响应工具治理路径中；
+  - CLI 侧不需要理解 TOON，也无需修改其内部工具实现；一切转换在 Hub 层完成。
+
+---
+
 ## 参考文档
 
 - `docs/ARCHITECTURE.md` – 全量架构细节与数据流

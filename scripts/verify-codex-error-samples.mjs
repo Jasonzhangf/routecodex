@@ -24,7 +24,10 @@ const ROOT =
     : path.join(os.homedir(), '.routecodex', 'errorsamples');
 
 const ERROR_PATTERNS = [
-  'failed to parse exec_command arguments',
+  // exec_command / apply_patch 参数解码错误（CLI 侧报错）
+  'failed to parse function arguments: missing field `cmd`',
+  'failed to parse function arguments: missing field `input`',
+  // 历史回滚：统一 diff 校验失败
   'apply_patch verification failed'
 ];
 

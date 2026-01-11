@@ -7,6 +7,7 @@ import type { ServerConfigV2 } from './types.js';
 import { reportRouteError } from '../../../error-handling/route-error-hub.js';
 import { mapErrorToHttp } from '../../utils/http-error-mapper.js';
 import { renderTokenPortalPage } from '../../../token-portal/render.js';
+import { registerDaemonAdminRoutes } from './daemon-admin-routes.js';
 
 interface RouteOptions {
   app: Application;
@@ -16,6 +17,9 @@ interface RouteOptions {
   handleError: (error: Error, context: string) => Promise<void>;
   getHealthSnapshot?: () => unknown | null;
   getRoutingState?: (sessionId: string) => unknown | null;
+  getManagerDaemon?: () => unknown | null;
+  getVirtualRouterArtifacts?: () => unknown | null;
+  getServerId?: () => string;
 }
 
 /**
@@ -103,6 +107,21 @@ export function registerHttpRoutes(options: RouteOptions): void {
       const message = error instanceof Error ? error.message : String(error);
       res.status(500).json({ error: { message } });
     }
+  });
+
+  // Daemon / token / quota / providers 管理类只读 API（仅本地访问）
+  registerDaemonAdminRoutes({
+    app,
+    getManagerDaemon: () =>
+      (typeof options.getManagerDaemon === 'function' ? (options.getManagerDaemon() as any) : null),
+    getVirtualRouterArtifacts: () =>
+      (typeof options.getVirtualRouterArtifacts === 'function'
+        ? options.getVirtualRouterArtifacts()
+        : null),
+    getServerId: () =>
+      (typeof options.getServerId === 'function'
+        ? options.getServerId()
+        : `${config.server.host}:${config.server.port}`)
   });
 
   // OAuth Portal route is registered early in constructor, so we skip it here

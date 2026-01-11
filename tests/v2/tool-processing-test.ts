@@ -1,10 +1,13 @@
 /**
  * V2工具处理链路测试
- * 测试tool-harvester → tool-canonicalizer → tool-governor的完整流程
+ * 测试 llmswitch-core 响应侧工具治理链路：
+ * runChatResponseToolFilters → ToolGovernanceEngine.governResponse
  */
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import { runChatResponseToolFilters } from '../sharedmodule/llmswitch-core/src/conversion/shared/tool-filter-pipeline.js';
+import { ToolGovernanceEngine } from '../sharedmodule/llmswitch-core/src/conversion/hub/tool-governance/index.js';
 
 interface TestSample {
   id: string;
@@ -27,6 +30,7 @@ class V2ToolProcessingTest {
   private samplesDir = path.join(process.env.HOME || '', '.routecodex/codex-samples');
   private results: ToolProcessingResult[] = [];
   private failedTests: Array<{sample: string; error: string}> = [];
+  private toolGovernance = new ToolGovernanceEngine();
 
   private async getToolSamples(limit: number = 5): Promise<TestSample[]> {
     const openaiChatDir = path.join(this.samplesDir, 'openai-chat');
@@ -69,77 +73,30 @@ class V2ToolProcessingTest {
     return toolSamples;
   }
 
-  private harvestTools(content: string): any[] {
-    const tools: any[] = [];
-    
-    // 检测unified diff
-    const beginIdx = content.indexOf('*** Begin Patch');
-    const endIdx = content.indexOf('*** End Patch');
-    if (beginIdx >= 0 && endIdx > beginIdx) {
-      const patchText = content.slice(beginIdx, endIdx + '*** End Patch'.length);
-      tools.push({
-        type: 'function',
-        function: {
-          name: 'apply_patch',
-          arguments: JSON.stringify({ patch: patchText })
-        },
-        id: `call_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
-      });
-    }
-    
-    // 检测<function=execute>
-    const execRe = /<function=execute>[\s\S]*?<parameter=command>([\s\S]*?)<\/parameter>[\s\S]*?<\/function=execute>/i;
-    const execMatch = execRe.exec(content);
-    if (execMatch && execMatch[1]) {
-      const cmdRaw = execMatch[1].trim();
-      tools.push({
-        type: 'function',
-        function: {
-          name: 'shell',
-          arguments: JSON.stringify({ command: [cmdRaw] })
-        },
-        id: `call_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
-      });
-    }
-    
-    return tools;
-  }
-
-  private canonicalizeTools(tools: any[]): any[] {
-    return tools.map((tool, index) => ({
-      index,
-      id: tool.id || `call_${Date.now()}_${index}`,
-      type: 'function',
-      function: {
-        name: tool.function?.name || tool.name || 'unknown',
-        arguments: typeof tool.function?.arguments === 'string' 
-          ? tool.function.arguments 
-          : JSON.stringify(tool.function?.arguments || {})
-      }
-    }));
-  }
-
-  private governTools(tools: any[]): any[] {
-    return tools.map(tool => ({
-      ...tool,
-      function: {
-        ...tool.function,
-        arguments: tool.function.arguments || '{}'
-      }
-    }));
-  }
-
   private async processSample(sample: TestSample): Promise<ToolProcessingResult> {
     const startTime = Date.now();
     const errors: string[] = [];
     
     try {
-      const responseMessage = sample.response.body?.data?.choices?.[0]?.message;
+      const chatPayload = sample.response.body?.data;
+      const responseMessage = chatPayload?.choices?.[0]?.message;
       const content = responseMessage?.content || '';
-      
-      const harvestedTools = this.harvestTools(content);
-      const canonicalizedTools = this.canonicalizeTools(harvestedTools);
-      const governedTools = this.governTools(canonicalizedTools);
+
+      // 使用生产链路的工具治理：runChatResponseToolFilters → ToolGovernanceEngine.governResponse
+      const filtered = await runChatResponseToolFilters(chatPayload, {
+        entryEndpoint: '/v1/chat/completions',
+        requestId: sample.id,
+        profile: 'openai-chat'
+      });
+      const { payload: governed } = this.toolGovernance.governResponse(filtered as any, 'openai-chat');
+
+      const choices = Array.isArray((governed as any)?.choices) ? (governed as any).choices : [];
+      const msg = choices[0] && typeof choices[0] === 'object' ? (choices[0] as any).message || {} : {};
+      const toolCalls = Array.isArray(msg.tool_calls) ? msg.tool_calls : [];
+
+      const harvestedTools = toolCalls;
+      const canonicalizedTools = toolCalls;
+      const governedTools = toolCalls;
       
       return {
         inputContent: content,

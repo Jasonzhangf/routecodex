@@ -8,7 +8,8 @@
  * - 扫描 openai-responses 下所有 *.json；
  * - 抓取以下错误字符串：
  *   - "apply_patch verification failed"
- *   - "failed to parse exec_command arguments"
+ *   - "failed to parse function arguments: missing field `cmd`"
+ *   - "failed to parse function arguments: missing field `input`"
  *   - "Instructions are not valid"
  * - 输出每种模式的命中次数和示例文件列表。
  */
@@ -22,7 +23,8 @@ const RESPONSES_DIR = path.join(HOME, '.routecodex', 'codex-samples', 'openai-re
 
 const PATTERNS = [
   'apply_patch verification failed',
-  'failed to parse exec_command arguments',
+  'failed to parse function arguments: missing field `cmd`',
+  'failed to parse function arguments: missing field `input`',
   'Instructions are not valid'
 ];
 

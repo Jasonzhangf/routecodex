@@ -1,0 +1,79 @@
+import { describe, it, expect } from '@jest/globals';
+import { GeminiSemanticMapper } from '../../sharedmodule/llmswitch-core/src/conversion/hub/semantic-mappers/gemini-mapper.js';
+import type { ChatEnvelope } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.js';
+
+describe('GeminiSemanticMapper functionCall.args shape', () => {
+  it('ensures functionCall.args is always an object (no top-level arrays)', async () => {
+    const mapper = new GeminiSemanticMapper();
+
+    const chat: ChatEnvelope = {
+      messages: [
+        {
+          role: 'assistant',
+          content: null,
+          // 两种 tool_calls：一个 arguments 为对象，一个为数组
+          // 都应被映射为 functionCall.args 为对象，避免上游 Proto 报错。
+          tool_calls: [
+            {
+              id: 'call_object',
+              type: 'function',
+              function: {
+                name: 'exec_command',
+                arguments: JSON.stringify({ cmd: 'echo 1', workdir: '/tmp' })
+              }
+            } as any,
+            {
+              id: 'call_array',
+              type: 'function',
+              function: {
+                name: 'exec_command',
+                // 顶层为数组的 arguments，在映射时应被包装为对象
+                arguments: JSON.stringify([
+                  { cmd: 'echo 2', workdir: '/tmp' },
+                  { cmd: 'echo 3', workdir: '/tmp' }
+                ])
+              }
+            } as any
+          ]
+        }
+      ],
+      toolDefinitions: [],
+      toolOutputs: [],
+      metadata: {
+        context: {
+          providerId: 'antigravity.jasonqueque.claude-sonnet-4-5'
+        }
+      } as any
+    };
+
+    const ctx = { requestId: 'req_test' } as any;
+    const envelope = await mapper.fromChat(chat, ctx);
+    const payload = envelope.payload as any;
+
+    const contents = Array.isArray(payload?.contents) ? payload.contents : [];
+    const functionCalls: any[] = [];
+    for (const entry of contents) {
+      const parts = Array.isArray(entry?.parts) ? entry.parts : [];
+      for (const part of parts) {
+        if (part && typeof part === 'object' && part.functionCall) {
+          functionCalls.push(part.functionCall);
+        }
+      }
+    }
+
+    // 至少包含上面两条 tool_calls 映射出来的 functionCall
+    expect(functionCalls.length).toBeGreaterThanOrEqual(2);
+
+    for (const fc of functionCalls) {
+      const args = fc.args;
+      expect(args).toBeDefined();
+      expect(typeof args).toBe('object');
+      expect(Array.isArray(args)).toBe(false);
+    }
+
+    // 针对数组 arguments 的那条，确认被包装为 { value: [...] }
+    const arrayCall = functionCalls.find((fc) => fc.id === 'call_array');
+    expect(arrayCall).toBeDefined();
+    expect(Array.isArray(arrayCall.args.value)).toBe(true);
+  });
+});

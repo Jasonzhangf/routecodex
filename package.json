@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.89.871",
+  "version": "0.89.904",
   "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support",
   "type": "module",
   "main": "dist/index.js",
@@ -32,7 +32,7 @@
   },
   "scripts": {
     "build": "npm run llmswitch:ensure && node scripts/build-core.mjs && node scripts/vendor-core.mjs && npm run clean && node scripts/gen-build-info.mjs && tsc && node scripts/copy-compat-assets.mjs && node scripts/copy-modules-config.mjs",
-    "build:dev": "BUILD_MODE=dev npm run build && npm run verify:e2e-toolcall && npm run verify:apply-patch && npm run test:routing-instructions && npm run install:global && npm run mock:regressions && npm run verify:errorsamples",
+    "build:dev": "BUILD_MODE=dev npm run build && npm run verify:e2e-toolcall && npm run verify:apply-patch && npm run verify:exec-command && npm run test:routing-instructions && npm run install:global && npm run mock:regressions && npm run verify:errorsamples",
     "build:min": "npm run llmswitch:ensure && node scripts/build-core.mjs && node scripts/vendor-core.mjs && npm run clean && node scripts/gen-build-info.mjs && tsc && node scripts/copy-compat-assets.mjs && node scripts/copy-modules-config.mjs",
     "prepack": "echo skip-prepack",
     "postbuild": "chmod +x dist/cli.js || true",
@@ -58,6 +58,7 @@
     "prepare": "",
     "postinstall": "chmod +x dist/cli.js || true",
     "verify:apply-patch": "node scripts/verify-apply-patch.mjs",
+    "verify:exec-command": "node scripts/tests/exec-command-loop.mjs",
     "verify:errorsamples": "node scripts/verify-codex-error-samples.mjs",
     "install:global": "./scripts/install-global.sh",
     "install:release": "./scripts/install-release.sh",
@@ -133,7 +134,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.65.0",
-    "@jsonstudio/llms": "^0.6.567",
+    "@jsonstudio/llms": "^0.6.568",
     "@jsonstudio/rcc": "^0.89.555",
     "@lmstudio/sdk": "^1.5.0",
     "@radix-ui/react-switch": "^1.2.6",

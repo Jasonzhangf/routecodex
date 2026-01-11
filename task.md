@@ -122,3 +122,79 @@ tests/servertool/
   - D1.3 对 Claude 工具消息，调用/对齐 gcli2api 的 openai→Gemini 转换逻辑，保证 `contents` 结构与 200 样本一致。（受限于“Provider 层不做工具语义转换”的架构约束，暂不在 Provider 层实现）
 - [x] D2 用同一个 token + 同一个模型，在 RouteCodex 上重打请求，确认 provider snapshot 与 `antigravity-debug-request.json` 关键字段一致（model / requestType / userAgent / systemInstruction / contents 结构）。
 - [x] D3 回归：在 RouteCodex 上对 `gemini-3-pro-low/high` 和 `claude-sonnet-4-5(-thinking)` 分别跑一轮，确认不再出现「同一个 token gcli2api=200 / RouteCodex=429」的形态差异（当前仅 `gemini-3-flash` 仍返回 429，已单独标记为后续 case）。
+
+---
+
+## Daemon / Token 管理 UI ＆ Config V2 Provider 视图任务
+
+> 目标：将 token / quota / health / credentials 管理和基于 Config V2 的 Provider 管理统一到一个独立 WebUI 模块中，前端仅通过 API 获取数据。
+
+### 1. Daemon / Token 管理 UI（现状 & 后续）
+
+- [x] 设计整体信息架构（Tabs：Overview / Token & Quota / Credentials / Providers / Settings）。
+- [x] 落盘静态设计页面 `docs/daemon-admin-ui.html`。
+- [x] 设计并落盘 daemon/token 管理模块的文件结构（后端路由 / handler 模块 / 前端静态资源路径），文档：`docs/daemon-admin-module-structure.md`。
+- [x] 设计并记录后台所需 API（daemon status / quota / credentials / providers runtimes），文档：`docs/daemon-admin-api-design.md`。
+- [x] 在 host/daemon 中实现只读 API（本地访问，隐藏敏感数据）。
+- [x] 将静态页面改造为通过 API 拉取数据的动态视图（保持只读）。
+- [x] 对 Daemon 管理 UI 做端到端集成测试（在 `scripts/verify-e2e-toolcall.mjs` 中附加 `/daemon/status`、`/daemon/credentials`、`/quota/summary`、`/providers/runtimes` smoke 校验，随 `npm run build:dev` 自动执行）。
+
+### 2. Providers (Config V2) 管理视图
+
+- [x] 设计基于 Config V2 的 Provider 管理视图（数据来源 / 边界 / 布局 / API 草案）。
+- [x] 将设计落盘为文档：`docs/provider-config-v2-ui-design.md`。
+- [x] 在 daemon-admin UI 中增加 Providers 二级 Tab：`Runtime health` / `Config V2`。
+- [x] 接入 `/config/providers/v2*` 只读 API，完成列表 + 详情视图（基于 `loadProviderConfigsV2` 读取 `~/.routecodex/provider/*/config.v2.json`，仅返回非敏感字段）。
+- [x] 与 Credentials / Runtime health 视图打通跳转（从 Credentials 行点击跳转到 Providers(Config V2) 并按 `credentialsRef` 过滤列表，前端仅做过滤与高亮，不改动路由逻辑）。
+- [x] 对 Providers(Config V2) 视图做端到端集成测试（在 `scripts/verify-e2e-toolcall.mjs` 中附加 `/config/providers/v2` smoke 校验，确保 Config V2 列表 API 正常响应）。
+
+---
+
+## TOON 工具协议统一任务（全工具 TOON 化）
+
+> 目标：对“模型视角”统一所有工具的调用参数为 TOON 格式，在 chat process 中实现唯一的 TOON ⇄ JSON 解码层，先改工具治理，再扩展解码器，并用 codex samples 做回放验证。
+
+### Phase T1：协议与治理设计
+
+- [ ] 梳理当前工具协议与治理位置：
+  - 工具注册与描述：`sharedmodule/llmswitch-core/src/tools/tool-registry.ts`、`sharedmodule/llmswitch-core/src/guidance/index.ts`。
+  - 工具治理与过滤：`sharedmodule/llmswitch-core/src/conversion/shared/tool-filter-pipeline.ts` 及其 hooks。
+  - TOON 解码过滤器：`sharedmodule/llmswitch-core/src/filters/special/response-tool-arguments-toon-decode.ts`、`response-apply-patch-toon-decode.ts`。
+- [ ] 确认“模型统一协议”的设计原则：
+  - 模型侧所有工具一律使用 `arguments.toon`（不再区分 shell TOON / exec_command JSON）。
+  - 工具说明中明确：模型只需写 TOON，不关心最终 JSON 字段名。
+  - 执行器（CLI / daemon / provider）只消费结构化 JSON，由 chat process 负责 TOON ⇄ JSON。
+
+### Phase T2：工具治理调整（先改治理，再改解码）
+
+- [ ] 更新工具治理与系统提示：
+  - 在全局 guidance 中统一变更工具使用说明，声明“所有工具参数均使用 TOON”，避免混合协议。
+  - 针对 exec_command / shell / apply_patch / search / web_search / 文件读取写入等工具，移除“JSON 形态示例”，改为抽象 TOON 说明。
+- [ ] 收紧 / 统一工具注入规则（与现有治理兼容）：
+  - 保持现有 image / web_search / search / coding 等工具的注入时机与路由规则不变，只改变“对模型暴露的参数形态”为 TOON。
+  - 确保 exec_command 在模型视角只暴露 TOON（避免 cmd-only JSON 与 TOON 混用）。
+
+### Phase T3：TOON 解码器扩展与唯一化
+
+- [ ] 在 chat process / filter 管线中明确唯一的 TOON 解码入口：
+  - 保证 TOON ⇄ JSON 转换仅存在于 llmswitch-core 的一处（当前 response 侧已有基础过滤器，需扩展与归一）。
+- [ ] 扩展 TOON 解码逻辑覆盖所有工具：
+  - 将 `ResponseToolArgumentsToonDecodeFilter` 从“只支持部分工具（shell/exec/apply_patch）”扩展为：只要 `arguments.toon` 存在，就尝试通用 TOON 解析。
+  - 基于 tool name / tool family（文件读写 / search / coding / web_search / apply_patch / exec_command 等）映射到对应的 JSON schema，构造统一的结构化参数对象。
+  - 确保 apply_patch 仍生成兼容 Codex `apply_patch` CLI 的 unified diff `{ input, patch }`。
+- [ ] 确保 TOON 编码/解码对称：
+  - 请求侧：JSON → TOON（用于工具描述 / 模型系统提示）。
+  - 响应侧：TOON → JSON（用于真实工具执行）。
+  - 其他层（HTTP server / provider / CLI 执行器）不再各自实现 TOON 逻辑。
+
+### Phase T4：测试与回放验证
+
+- [ ] 更新 / 扩展测试用例：
+  - 在 `tests/sharedmodule` 下新增 / 扩展 TOON 解码测试，覆盖多种工具（exec_command、shell、apply_patch、search、文件工具等）。
+  - 保证 apply_patch 测试仍通过真实 `apply_patch` CLI 执行，验证 unified diff 正确性。
+- [ ] 使用 codex samples 做回放验证：
+  - 选取最新 codex samples 中包含 TOON 工具调用的样本，验证新解码器可正确解析并生成结构化参数。
+  - 对历史上 exec_command 与 TOON 混用产生的错误样本，确认在“全 TOON 协议 + 新解码器”下行为合理（要么被正确解析，要么返回清晰错误）。
+- [ ] 回归检查：
+  - 确保 web_search / search / coding / longcontext / tools 等路由池在“全 TOON 协议”下行为与现有预期一致（不改变路由逻辑，只改变参数编码方式）。
+  - 将关键错误样本加入标准回归路径（错误样本脚本 / 矩阵测试脚本），防止未来回归。

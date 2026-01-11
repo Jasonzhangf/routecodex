@@ -10,6 +10,14 @@ This document replaces the old “architecture novel” with a concise set of ru
 4. **Fail fast** – Any upstream error (HTTP, auth, compat) is bubbled via `providerErrorCenter` + `errorHandlingCenter`. No silent fallbacks.
 5. **Config-driven** – Host consumes `bootstrapVirtualRouterConfig` output only. Do not reassemble “merged configs” or patch runtime data on the fly.
 
+## 1.1 Agent Conduct & Accountability
+
+1. **Verify before reporting** – Every claim, completion report, or status update must be validated against actual files, command outputs, or test results. Never assume or infer completion without concrete evidence.
+2. **Honest disclosure of incomplete work** – If a task cannot be completed, state this clearly with reasons. Unfinished work reported honestly has no severe consequences—concealment or misrepresentation is the real problem.
+3. **Deception is professional misconduct** – Fabricating results, hiding errors, claiming work that wasn't done, or misrepresenting task status constitutes serious professional misconduct and violates the trust foundation of this working agreement.
+
+---
+
 ## 2. Module Responsibilities
 
 | Layer | Source | What it does | What it must **not** do |

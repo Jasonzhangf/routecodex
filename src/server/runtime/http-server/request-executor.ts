@@ -604,6 +604,7 @@ export class HubRequestExecutor implements RequestExecutor {
     result: PipelineExecutionResult,
     metadata?: Record<string, unknown>
   ): UsageMetrics | undefined {
+    const estimatedInput = this.extractEstimatedInputTokens(metadata);
     const candidates: unknown[] = [];
     if (metadata && typeof metadata === 'object') {
       const bag = metadata as Record<string, unknown>;
@@ -626,7 +627,8 @@ export class HubRequestExecutor implements RequestExecutor {
     for (const candidate of candidates) {
       const normalized = this.normalizeUsage(candidate);
       if (normalized) {
-        return normalized;
+        const reconciled = this.reconcileUsageWithEstimate(normalized, estimatedInput, candidate);
+        return reconciled;
       }
     }
     return undefined;
@@ -637,12 +639,24 @@ export class HubRequestExecutor implements RequestExecutor {
       return undefined;
     }
     const record = value as Record<string, unknown>;
-    const prompt =
+    const basePrompt =
       typeof record.prompt_tokens === 'number'
         ? record.prompt_tokens
         : typeof record.input_tokens === 'number'
           ? record.input_tokens
           : undefined;
+    let cacheRead: number | undefined =
+      typeof record.cache_read_input_tokens === 'number' ? record.cache_read_input_tokens : undefined;
+    if (cacheRead === undefined && record.input_tokens_details && typeof record.input_tokens_details === 'object') {
+      const details = record.input_tokens_details as Record<string, unknown>;
+      if (typeof details.cached_tokens === 'number') {
+        cacheRead = details.cached_tokens;
+      }
+    }
+    const prompt =
+      basePrompt !== undefined || cacheRead !== undefined
+        ? (basePrompt ?? 0) + (cacheRead ?? 0)
+        : undefined;
     const completion =
       typeof record.completion_tokens === 'number'
         ? record.completion_tokens
@@ -664,6 +678,76 @@ export class HubRequestExecutor implements RequestExecutor {
       completion_tokens: completion,
       total_tokens: total
     };
+  }
+
+  private extractEstimatedInputTokens(metadata?: Record<string, unknown>): number | undefined {
+    if (!metadata || typeof metadata !== 'object') {
+      return undefined;
+    }
+    const bag = metadata as Record<string, unknown>;
+    const raw =
+      (bag.estimatedInputTokens as unknown) ??
+      (bag.estimated_tokens as unknown) ??
+      (bag.estimatedTokens as unknown);
+    const value = typeof raw === 'number' ? raw : Number(raw);
+    if (!Number.isFinite(value) || value <= 0) {
+      return undefined;
+    }
+    return value;
+  }
+
+  private reconcileUsageWithEstimate(
+    usage: UsageMetrics,
+    estimatedInput?: number,
+    candidate?: unknown
+  ): UsageMetrics {
+    if (!estimatedInput || !Number.isFinite(estimatedInput) || estimatedInput <= 0) {
+      return usage;
+    }
+    const upstreamPrompt = usage.prompt_tokens ?? usage.total_tokens ?? undefined;
+    const completion = usage.completion_tokens ?? 0;
+
+    // 若上游缺失 prompt/total，直接使用我们估算的输入 token。
+    if (upstreamPrompt === undefined || upstreamPrompt <= 0) {
+      const total = estimatedInput + completion;
+      this.patchUsageCandidate(candidate, estimatedInput, completion, total);
+      return {
+        prompt_tokens: estimatedInput,
+        completion_tokens: completion,
+        total_tokens: total
+      };
+    }
+
+    const ratio = upstreamPrompt > 0 ? upstreamPrompt / estimatedInput : 1;
+    // 差异过大（数量级不一致）时，优先采用本地估算值。
+    if (ratio > 5 || ratio < 0.2) {
+      const total = estimatedInput + completion;
+      this.patchUsageCandidate(candidate, estimatedInput, completion, total);
+      return {
+        prompt_tokens: estimatedInput,
+        completion_tokens: completion,
+        total_tokens: total
+      };
+    }
+
+    return usage;
+  }
+
+  private patchUsageCandidate(
+    candidate: unknown,
+    prompt: number,
+    completion: number,
+    total: number
+  ): void {
+    if (!candidate || typeof candidate !== 'object') {
+      return;
+    }
+    const record = candidate as Record<string, unknown>;
+    record.prompt_tokens = prompt;
+    record.input_tokens = prompt;
+    record.completion_tokens = completion;
+    record.output_tokens = completion;
+    record.total_tokens = total;
   }
 
   private mergeUsageMetrics(base?: UsageMetrics, delta?: UsageMetrics): UsageMetrics | undefined {
