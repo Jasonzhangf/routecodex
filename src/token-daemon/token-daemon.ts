@@ -74,6 +74,11 @@ export class TokenDaemon {
   private timer: NodeJS.Timeout | null = null;
   private lastRefreshAttempt: Map<string, number> = new Map();
   private antigravityMetadataEnsureTimestamps: Map<string, number> = new Map();
+  private sessionStatsByProvider: Map<OAuthProviderId, {
+    autoAttempts: number;
+    autoSuccesses: number;
+    autoFailures: number;
+  }> = new Map();
 
   constructor(options?: Partial<TokenDaemonOptions>) {
     this.intervalMs = options?.intervalMs && options.intervalMs > 0 ? options.intervalMs : DEFAULT_INTERVAL_MS;
@@ -102,10 +107,15 @@ export class TokenDaemon {
     }, this.intervalMs);
   }
 
-  stop(): void {
+  async stop(): Promise<void> {
     if (this.timer) {
       clearInterval(this.timer);
       this.timer = null;
+    }
+    try {
+      await this.printSessionAndHistorySummary();
+    } catch {
+      // summary printing must never block shutdown
     }
     console.log(chalk.blue('ℹ'), 'Token Refresh Daemon stopped');
   }
@@ -481,6 +491,25 @@ export class TokenDaemon {
   ): Promise<void> {
     try {
       const completedAt = Date.now();
+      // update in-memory session stats (per provider, auto mode only for this daemon)
+      try {
+        const providerType: OAuthProviderId = token.provider;
+        const current = this.sessionStatsByProvider.get(providerType) ?? {
+          autoAttempts: 0,
+          autoSuccesses: 0,
+          autoFailures: 0
+        };
+        current.autoAttempts += 1;
+        if (outcome === 'success') {
+          current.autoSuccesses += 1;
+        } else {
+          current.autoFailures += 1;
+        }
+        this.sessionStatsByProvider.set(providerType, current);
+      } catch {
+        // best-effort; do not block history persistence
+      }
+
       await this.historyStore.recordRefreshResult(token, outcome, {
         startedAt,
         completedAt,
@@ -496,6 +525,105 @@ export class TokenDaemon {
         `[daemon] history persistence failed: ${
           historyError instanceof Error ? historyError.message : String(historyError)
         }`
+      );
+    }
+  }
+
+  private async printSessionAndHistorySummary(): Promise<void> {
+    const snapshot = await this.historyStore.getSnapshot();
+    const history = snapshot.data;
+    const aggregatedByProvider = new Map<OAuthProviderId, {
+      providersTokens: number;
+      totalAttempts: number;
+      totalSuccesses: number;
+      totalFailures: number;
+      suspendedTokens: number;
+    }>();
+
+    for (const entry of Object.values(history.tokens)) {
+      const provider = entry.provider as OAuthProviderId;
+      const current = aggregatedByProvider.get(provider) ?? {
+        providersTokens: 0,
+        totalAttempts: 0,
+        totalSuccesses: 0,
+        totalFailures: 0,
+        suspendedTokens: 0
+      };
+      current.providersTokens += 1;
+      current.totalAttempts += entry.totalAttempts ?? 0;
+      current.totalSuccesses += entry.refreshSuccesses ?? 0;
+      current.totalFailures += entry.refreshFailures ?? 0;
+      if (entry.autoSuspended) {
+        current.suspendedTokens += 1;
+      }
+      aggregatedByProvider.set(provider, current);
+    }
+
+    const providers = new Set<OAuthProviderId>([
+      ...this.sessionStatsByProvider.keys(),
+      ...aggregatedByProvider.keys()
+    ]);
+
+    if (!providers.size) {
+      // nothing to report
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const activeProviders: OAuthProviderId[] = [];
+    const suspendedProviders: Array<{ provider: OAuthProviderId; suspendedTokens: number }> = [];
+
+    for (const provider of providers) {
+      const session = this.sessionStatsByProvider.get(provider);
+      const historyAgg = aggregatedByProvider.get(provider);
+      if (session && session.autoAttempts > 0) {
+        activeProviders.push(provider);
+      } else if (historyAgg && historyAgg.totalAttempts > 0) {
+        activeProviders.push(provider);
+      }
+      if (historyAgg && historyAgg.suspendedTokens > 0) {
+        suspendedProviders.push({ provider, suspendedTokens: historyAgg.suspendedTokens });
+      }
+    }
+
+    const activeList = activeProviders.length
+      ? Array.from(new Set(activeProviders)).sort().join(',')
+      : '-';
+    const suspendedList = suspendedProviders.length
+      ? suspendedProviders
+          .sort((a, b) => a.provider.localeCompare(b.provider))
+          .map((entry) => `${entry.provider}(${entry.suspendedTokens})`)
+          .join(',')
+      : '-';
+
+    console.log(
+      chalk.blue('ℹ'),
+      `[TokenDaemon] Summary @ ${now}: providers=${activeList}, suspended=${suspendedList}`
+    );
+
+    const providerDetails = Array.from(providers).sort();
+    for (const provider of providerDetails) {
+      const session = this.sessionStatsByProvider.get(provider);
+      const historyAgg = aggregatedByProvider.get(provider);
+      const sessionAttempts = session?.autoAttempts ?? 0;
+      const sessionSuccesses = session?.autoSuccesses ?? 0;
+      const sessionFailures = session?.autoFailures ?? 0;
+      const historyTokens = historyAgg?.providersTokens ?? 0;
+      const historyAttempts = historyAgg?.totalAttempts ?? 0;
+      const historySuccesses = historyAgg?.totalSuccesses ?? 0;
+      const historyFailures = historyAgg?.totalFailures ?? 0;
+      const historySuspended = historyAgg?.suspendedTokens ?? 0;
+      if (
+        sessionAttempts === 0 &&
+        historyAttempts === 0 &&
+        historySuspended === 0
+      ) {
+        continue;
+      }
+      console.log(
+        chalk.blue('ℹ'),
+        `[TokenDaemon] ${provider}: session attempts=${sessionAttempts} success=${sessionSuccesses} failure=${sessionFailures} | ` +
+          `history tokens=${historyTokens} attempts=${historyAttempts} success=${historySuccesses} failure=${historyFailures} suspended=${historySuspended}`
       );
     }
   }

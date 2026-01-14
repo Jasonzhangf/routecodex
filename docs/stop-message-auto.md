@@ -42,6 +42,8 @@
   - `stopMessageUpdatedAt = Date.now()`，`stopMessageLastUsedAt = undefined`
 - 解析到 `stopMessage:clear`：
   - 删除上述所有字段。
+- **会话标识要求**  
+  - sticky state 依赖 `sessionId` / `conversationId`。`/v1/chat` 与 `/v1/responses` 默认通过请求头即可提供；`/v1/messages` 需要确保请求体中的 `metadata.user_id` 含有 `session_<uuid>` 片段（Claude/Antigravity 默认行为）。llmswitch-core 会在缺少 header/metadata.sessionId 时回退解析 `metadata.__raw_request_body.metadata.user_id`，自动恢复 sessionId 并写入 sticky 文件。若缺失上述字段，stopMessage 无法跨请求记忆次数。
 
 ## 2. 路由层解析与指令清理
 
@@ -154,6 +156,7 @@ const handler: ServerToolHandler = async (ctx) => {
   - 当前响应 finish_reason 是否为 `"stop"`；
   - client 是否 still connected；
   三者共同决定。
+- followup 请求默认沿用最初的入口 endpoint（`/v1/chat/completions`、`/v1/responses` 等），从而复用相同的 Virtual Router 路径与工具治理；如需特殊入口可在 handler 的 `followup.entryEndpoint` 中显式指定。
 
 ### 3.3 finish_reason 判断
 

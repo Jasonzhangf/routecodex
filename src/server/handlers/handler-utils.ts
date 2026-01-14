@@ -242,7 +242,8 @@ export async function respondWithPipelineError(
   if (effectiveRequestId && mapped.body?.error && !mapped.body.error.request_id) {
     mapped.body.error.request_id = effectiveRequestId;
   }
-  if (options?.forceSse) {
+  const shouldBypassSse = shouldBypassSseError(error);
+  if (options?.forceSse && !shouldBypassSse) {
     // For streaming clients, return an SSE error event so the client can surface the failure.
     // Use 200 to keep SSE parsers happy; embed the actual status in the event payload.
     const payload = mapped.body?.error
@@ -265,6 +266,31 @@ export async function respondWithPipelineError(
     return;
   }
   res.status(mapped.status).json(mapped.body);
+}
+
+function shouldBypassSseError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+  const record = error as Record<string, unknown>;
+  const code = typeof record.code === 'string' ? record.code : '';
+  const name = typeof record.name === 'string' ? record.name : '';
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof record.message === 'string'
+        ? record.message
+        : '';
+  if (code === 'SSE_DECODE_ERROR' || code === 'SERVERTOOL_FOLLOWUP_FAILED') {
+    return true;
+  }
+  if (name === 'ProviderProtocolError' && /sse/i.test(message)) {
+    return true;
+  }
+  if (/sse\s+terminated/i.test(message) || /upstream\s+sse\s+terminated/i.test(message)) {
+    return true;
+  }
+  return false;
 }
 
 function applyHeaders(res: Response, headers: Record<string, string> | undefined, omitContentType: boolean): void {

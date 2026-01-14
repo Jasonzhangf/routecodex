@@ -13,6 +13,7 @@ import { applySystemPromptOverride } from '../../utils/system-prompt-loader.js';
 import { parseSseJsonRequest } from '../utils/sse-request-parser.js';
 import { detectWarmupRequest } from '../utils/warmup-detector.js';
 import { recordWarmupSkipEvent } from '../utils/warmup-storm-tracker.js';
+import { trackClientConnectionState } from '../utils/client-connection-state.js';
 
 type MessagesPayload = {
   stream?: boolean;
@@ -93,6 +94,7 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
     }
 
     const clientHeaders = captureClientHeaders(req.headers);
+    const clientConnectionState = trackClientConnectionState(req, res);
     const clientRequestedStream = Boolean(isSseRequest || jsonPayload?.stream === true);
     const inboundStream = clientRequestedStream;
     const wantsStream = clientRequestedStream;
@@ -104,6 +106,14 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
       outboundStream,
       model: inferredModel ?? jsonPayload?.model
     });
+    const mockSampleReqId =
+      process.env.ROUTECODEX_USE_MOCK === '1' &&
+      pipelineBody &&
+      typeof pipelineBody === 'object' &&
+      (pipelineBody as { metadata?: Record<string, unknown> }).metadata &&
+      typeof (pipelineBody as { metadata?: Record<string, unknown> }).metadata?.mockSampleReqId === 'string'
+        ? String((pipelineBody as { metadata?: Record<string, unknown> }).metadata?.mockSampleReqId).trim()
+        : undefined;
     const result = await ctx.executePipeline({
       entryEndpoint,
       method: req.method,
@@ -117,7 +127,9 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
         outboundStream,
         providerProtocol: 'anthropic-messages',
         __raw_request_body: rawRequestMetadata,
-        clientHeaders
+        clientHeaders,
+        clientConnectionState,
+        ...(mockSampleReqId ? { mockSampleReqId } : {})
       }
     });
     logRequestComplete(entryEndpoint, requestId, result.status ?? 200);

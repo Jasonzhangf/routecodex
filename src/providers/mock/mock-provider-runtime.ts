@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { Readable } from 'node:stream';
+import { extractProviderRuntimeMetadata } from '../core/runtime/provider-runtime-metadata.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, '../../..');
@@ -57,6 +58,27 @@ function extractRequestBody(payload: unknown): Record<string, unknown> | undefin
     return record.data as Record<string, unknown>;
   }
   return record;
+}
+
+function resolveMockSampleReqId(payload: unknown, body: Record<string, unknown> | undefined): string | undefined {
+  const fromBody =
+    body && typeof body.metadata === 'object' && body.metadata
+      ? (body.metadata as Record<string, unknown>).mockSampleReqId
+      : undefined;
+  if (typeof fromBody === 'string' && fromBody.trim()) {
+    return fromBody.trim();
+  }
+  if (payload && typeof payload === 'object') {
+    const meta = (payload as Record<string, unknown>).metadata;
+    const candidate =
+      meta && typeof meta === 'object'
+        ? (meta as Record<string, unknown>).mockSampleReqId
+        : undefined;
+    if (typeof candidate === 'string' && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+  return undefined;
 }
 
 function collectInvalidNames(body: Record<string, unknown> | undefined): Array<{ location: string; value: string }> {
@@ -254,6 +276,7 @@ function detectEntryHint(
 export class MockProviderRuntime {
   private samples: MockSample[] = [];
   private sampleMap: Map<string, MockSample> = new Map();
+  private sampleStatusCache: Map<string, number | null> = new Map();
   private providerId: string;
   private model: string;
 
@@ -288,7 +311,45 @@ export class MockProviderRuntime {
       : 'unknown';
     const body = extractRequestBody(payload);
     const entryHint = detectEntryHint(payload, body);
-    const sample = this.sampleMap.get(reqId) || this.findFallback(reqId, entryHint);
+    const modelCandidate =
+      body && typeof body === 'object'
+        ? (body as Record<string, unknown>).model
+        : undefined;
+    const runtimeMetadata =
+      extractProviderRuntimeMetadata(payload) ??
+      extractProviderRuntimeMetadata(body);
+    const runtimeMockSampleReqId =
+      typeof runtimeMetadata?.metadata?.mockSampleReqId === 'string'
+        ? runtimeMetadata.metadata.mockSampleReqId
+        : undefined;
+    const mockSampleReqId =
+      runtimeMockSampleReqId && runtimeMockSampleReqId.trim()
+        ? runtimeMockSampleReqId.trim()
+        : resolveMockSampleReqId(payload, body);
+    const requestModel = parseModelFromRequestId(reqId, this.samples, entryHint);
+    const runtimeModel =
+      typeof runtimeMetadata?.target?.modelId === 'string'
+        ? runtimeMetadata.target.modelId
+        : typeof runtimeMetadata?.modelId === 'string'
+          ? runtimeMetadata.modelId
+          : undefined;
+    const configuredModel =
+      typeof this.model === 'string' && this.model.trim()
+        ? this.model.trim()
+        : '';
+    const modelHint = typeof runtimeModel === 'string'
+      ? runtimeModel.trim()
+      : typeof requestModel === 'string' && requestModel.trim()
+        ? requestModel.trim()
+        : configuredModel && configuredModel !== 'unknown'
+          ? configuredModel
+          : typeof modelCandidate === 'string'
+            ? modelCandidate.trim()
+            : undefined;
+    const sample =
+      (mockSampleReqId ? this.sampleMap.get(mockSampleReqId) : undefined) ||
+      this.sampleMap.get(reqId) ||
+      await this.findFallback(reqId, entryHint, modelHint);
     if (!sample) {
       const err: MockRuntimeError = {
         code: 'MOCK_NOT_FOUND',
@@ -344,6 +405,16 @@ export class MockProviderRuntime {
     if (resp.mockExpectations) {
       delete (resp as any).mockExpectations;
     }
+    if (resp.body && typeof resp.body === 'object' && !Array.isArray(resp.body)) {
+      const mode = (resp.body as Record<string, unknown>).mode;
+      const errVal = (resp.body as Record<string, unknown>).error;
+      if (mode === 'sse' && typeof errVal === 'string' && errVal.trim()) {
+        const error = new Error(`Upstream SSE terminated: ${errVal.trim()}`) as MockRuntimeError & { status?: number };
+        error.code = 'HTTP_502';
+        (error as any).status = 502;
+        throw error;
+      }
+    }
     if (resp.error) {
       const err: MockRuntimeError = {
         code: resp.error.body?.code || 'MOCK_ERROR',
@@ -378,9 +449,11 @@ export class MockProviderRuntime {
     };
   }
 
-  private findFallback(reqId: string, entryHint?: string): MockSample | undefined {
+  private async findFallback(reqId: string, entryHint?: string, modelHint?: string): Promise<MockSample | undefined> {
     if (!this.samples.length) return undefined;
-    let entry = entryHint;
+    const parsed = parseRequestIdParts(reqId);
+    const entryFromId = parsed?.entry;
+    let entry = entryHint || entryFromId;
     if (!entry) {
       if (reqId.startsWith('openai-responses.submit_tool_outputs-')) {
         entry = 'openai-responses.submit_tool_outputs';
@@ -396,8 +469,133 @@ export class MockProviderRuntime {
       entry = reqId.split('-')[0];
     }
     const list = this.samples.filter((s) => s.entry === entry);
-    const pool = list.length ? list : this.samples;
+    const modelTrimmed = typeof modelHint === 'string' && modelHint.trim().length ? modelHint.trim() : '';
+    const modelFiltered = modelTrimmed ? list.filter((s) => s.model === modelTrimmed) : [];
+    let pool = modelFiltered.length ? modelFiltered : list.length ? list : this.samples;
+    if (
+      entryHint &&
+      entryFromId &&
+      entryHint !== entryFromId &&
+      modelTrimmed &&
+      pool === list &&
+      !modelFiltered.length
+    ) {
+      const fallbackList = this.samples.filter((s) => s.entry === entryFromId);
+      const fallbackFiltered = fallbackList.filter((s) => s.model === modelTrimmed);
+      if (fallbackFiltered.length) {
+        entry = entryFromId;
+        pool = fallbackFiltered;
+      }
+    }
+    if (parsed?.middle && modelTrimmed && pool.length > 1) {
+      const providerIdFromId = resolveProviderIdFromId(parsed.middle, modelTrimmed);
+      if (providerIdFromId) {
+        const providerFiltered = pool.filter((s) => s.providerId === providerIdFromId);
+        if (providerFiltered.length) {
+          pool = providerFiltered;
+        }
+      }
+    }
+    if (pool.length > 1) {
+      const healthy = await this.filterHealthySamples(pool);
+      if (healthy.length) {
+        pool = healthy;
+      }
+    }
+    if (pool.length > 1) {
+      const regression = pool.filter(
+        (sample) => Array.isArray(sample.tags) && sample.tags.includes('regression')
+      );
+      if (regression.length) {
+        pool = regression;
+      }
+    }
     pool.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
     return pool[0];
   }
+
+  private async filterHealthySamples(pool: MockSample[]): Promise<MockSample[]> {
+    const selected: MockSample[] = [];
+    for (const sample of pool) {
+      const status = await this.resolveSampleStatus(sample);
+      if (typeof status === 'number' && status >= 400) {
+        continue;
+      }
+      selected.push(sample);
+    }
+    return selected;
+  }
+
+  private async resolveSampleStatus(sample: MockSample): Promise<number | null> {
+    if (this.sampleStatusCache.has(sample.reqId)) {
+      return this.sampleStatusCache.get(sample.reqId) ?? null;
+    }
+    const responsePath = path.join(MOCK_SAMPLES_DIR, sample.path, 'response.json');
+    try {
+      const raw = await fs.readFile(responsePath, 'utf-8');
+      const parsed = JSON.parse(raw);
+      const status = typeof parsed?.status === 'number' ? parsed.status : null;
+      this.sampleStatusCache.set(sample.reqId, status);
+      return status;
+    } catch {
+      this.sampleStatusCache.set(sample.reqId, null);
+      return null;
+    }
+  }
+}
+
+function parseModelFromRequestId(
+  requestId: string,
+  samples: MockSample[],
+  entryHint?: string
+): string | undefined {
+  const parsed = parseRequestIdParts(requestId);
+  if (!parsed) {
+    return undefined;
+  }
+  const entry = parsed.entry || entryHint;
+  const middle = parsed.middle;
+  const pool = entry
+    ? samples.filter((sample) => sample.entry === entry)
+    : samples;
+  let best: string | undefined;
+  for (const sample of pool) {
+    const candidate = typeof sample.model === 'string' ? sample.model : '';
+    if (!candidate) {
+      continue;
+    }
+    if (middle === candidate || middle.endsWith(`-${candidate}`)) {
+      if (!best || candidate.length > best.length) {
+        best = candidate;
+      }
+    }
+  }
+  return best;
+}
+
+function parseRequestIdParts(
+  requestId: string
+): { entry: string; middle: string } | null {
+  if (!requestId || typeof requestId !== 'string') {
+    return null;
+  }
+  const match = requestId.match(
+    /^(openai-responses|openai-chat|anthropic-messages|gemini-chat)-(.+)-(\d{8}T\d{9})-(\d{3})(:.*)?$/
+  );
+  if (!match) {
+    return null;
+  }
+  return { entry: match[1], middle: match[2] };
+}
+
+function resolveProviderIdFromId(middle: string, model: string): string | undefined {
+  if (!middle || !model) {
+    return undefined;
+  }
+  const suffix = `-${model}`;
+  if (!middle.endsWith(suffix)) {
+    return undefined;
+  }
+  const providerId = middle.slice(0, -suffix.length).trim();
+  return providerId || undefined;
 }

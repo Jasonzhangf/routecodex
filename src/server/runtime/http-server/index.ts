@@ -65,6 +65,7 @@ import { ManagerDaemon } from '../../../manager/index.js';
 import { HealthManagerModule } from '../../../manager/modules/health/index.js';
 import { RoutingStateManagerModule } from '../../../manager/modules/routing/index.js';
 import { TokenManagerModule } from '../../../manager/modules/token/index.js';
+import { StatsManager, type UsageMetrics } from './stats-manager.js';
 type LegacyAuthFields = ProviderRuntimeProfile['auth'] & {
   token_file?: unknown;
   token_url?: unknown;
@@ -108,6 +109,7 @@ export class RouteCodexHttpServer {
   private routeErrorHub: RouteErrorHub | null = null;
   private readonly coloredLogger = createServerColoredLogger();
   private managerDaemon: ManagerDaemon | null = null;
+  private readonly stats = new StatsManager();
 
   constructor(config: ServerConfigV2) {
     this.config = config;
@@ -510,6 +512,15 @@ export class RouteCodexHttpServer {
           }
           await this.errorHandling.destroy();
 
+          try {
+            const uptimeMs = Math.round(process.uptime() * 1000);
+            const snapshot = this.stats.logSummary(uptimeMs);
+            await this.stats.persistSnapshot(snapshot, { reason: 'server_shutdown' });
+            await this.stats.logHistoricalSummary();
+          } catch {
+            // stats logging must never block shutdown
+          }
+
           console.log('[RouteCodexHttpServer] Server stopped');
           resolve();
         });
@@ -802,6 +813,7 @@ export class RouteCodexHttpServer {
     if (!this.isPipelineReady()) {
       throw new Error('Hub pipeline runtime is not initialized');
     }
+    this.stats.recordRequestStart(input.requestId);
     const initialMetadata = this.buildRequestMetadata(input);
     const providerRequestId = input.requestId;
     const clientRequestId = typeof initialMetadata.clientRequestId === 'string' && initialMetadata.clientRequestId.trim()
@@ -960,6 +972,12 @@ export class RouteCodexHttpServer {
         metadata: mergedMetadata
       });
 
+      this.stats.bindProvider(input.requestId, {
+        providerKey: target.providerKey,
+        providerType: handle.providerType,
+        model: providerModel
+      });
+
       this.logStage('provider.send.start', input.requestId, {
         providerKey: target.providerKey,
         runtimeKey,
@@ -994,6 +1012,9 @@ export class RouteCodexHttpServer {
           pipelineMetadata: mergedMetadata
         });
 
+        const usage = this.extractUsageFromResult(converted, mergedMetadata);
+        this.stats.recordCompletion(input.requestId, { usage, error: false });
+
         return converted;
       } catch (error) {
         this.logStage('provider.send.error', input.requestId, {
@@ -1004,6 +1025,7 @@ export class RouteCodexHttpServer {
           model: providerModel,
           providerLabel
         });
+        this.stats.recordCompletion(input.requestId, { error: true });
         throw error;
       }
     }
@@ -1088,11 +1110,33 @@ export class RouteCodexHttpServer {
       ...(resolvedOriginator ? { clientOriginator: resolvedOriginator } : {})
     };
 
+    // 将原始客户端请求头快照到 metadata.clientHeaders，便于 llmswitch-core
+    // 的 extractSessionIdentifiersFromMetadata 从中解析 session_id / conversation_id。
+    if (!metadata.clientHeaders && headers && Object.keys(headers).length) {
+      const clientHeaders: Record<string, string> = {};
+      for (const [key, value] of Object.entries(headers)) {
+        if (typeof value === 'string') {
+          const trimmed = value.trim();
+          if (trimmed) {
+            clientHeaders[key] = trimmed;
+          }
+        } else if (Array.isArray(value) && value.length) {
+          const first = String(value[0]).trim();
+          if (first) {
+            clientHeaders[key] = first;
+          }
+        }
+      }
+      if (Object.keys(clientHeaders).length) {
+        (metadata as Record<string, unknown>).clientHeaders = clientHeaders;
+      }
+    }
+
     // 在 Host 入口统一解析会话标识，后续 HubPipeline / servertool 等模块仅依赖
     // sessionId / conversationId 字段，不再重复解析 clientHeaders。
     try {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { extractSessionIdentifiersFromMetadata } =
+          const { extractSessionIdentifiersFromMetadata } =
         require('../../../../sharedmodule/llmswitch-core/dist/conversion/hub/pipeline/session-identifiers.js') as {
           extractSessionIdentifiersFromMetadata: (meta: Record<string, unknown> | undefined) => {
             sessionId?: string;
@@ -1178,6 +1222,72 @@ export class RouteCodexHttpServer {
     return Object.keys(normalized).length ? normalized : undefined;
   }
 
+  private extractUsageFromResult(
+    result: PipelineExecutionResult,
+    metadata?: Record<string, unknown>
+  ): UsageMetrics | undefined {
+    const candidates: unknown[] = [];
+    if (metadata && typeof metadata === 'object') {
+      const bag = metadata as Record<string, unknown>;
+      if (bag.usage) {
+        candidates.push(bag.usage);
+      }
+    }
+    if (result.body && typeof result.body === 'object') {
+      const body = result.body as Record<string, unknown>;
+      if (body.usage) {
+        candidates.push(body.usage);
+      }
+      if (body.response && typeof body.response === 'object') {
+        const responseNode = body.response as Record<string, unknown>;
+        if (responseNode.usage) {
+          candidates.push(responseNode.usage);
+        }
+      }
+    }
+    for (const candidate of candidates) {
+      const normalized = this.normalizeUsage(candidate);
+      if (normalized) {
+        return normalized;
+      }
+    }
+    return undefined;
+  }
+
+  private normalizeUsage(value: unknown): UsageMetrics | undefined {
+    if (!value || typeof value !== 'object') {
+      return undefined;
+    }
+    const record = value as Record<string, unknown>;
+    const prompt =
+      typeof record.prompt_tokens === 'number'
+        ? record.prompt_tokens
+        : typeof record.input_tokens === 'number'
+          ? record.input_tokens
+          : undefined;
+    const completion =
+      typeof record.completion_tokens === 'number'
+        ? record.completion_tokens
+        : typeof record.output_tokens === 'number'
+          ? record.output_tokens
+          : undefined;
+    let total =
+      typeof record.total_tokens === 'number'
+        ? record.total_tokens
+        : undefined;
+    if (total === undefined && prompt !== undefined && completion !== undefined) {
+      total = prompt + completion;
+    }
+    if (prompt === undefined && completion === undefined && total === undefined) {
+      return undefined;
+    }
+    return {
+      prompt_tokens: prompt,
+      completion_tokens: completion,
+      total_tokens: total
+    };
+  }
+
   private async convertProviderResponseIfNeeded(options: {
     entryEndpoint?: string;
     providerType?: string;
@@ -1188,6 +1298,15 @@ export class RouteCodexHttpServer {
     response: PipelineExecutionResult;
     pipelineMetadata?: Record<string, unknown>;
   }): Promise<PipelineExecutionResult> {
+    const body = options.response.body;
+    if (body && typeof body === 'object') {
+      const wrapperError = this.extractSseWrapperError(body as Record<string, unknown>);
+      if (wrapperError) {
+        const error = new Error(`[RouteCodexHttpServer] Upstream SSE terminated: ${wrapperError}`) as Error & { code?: string };
+        error.code = 'SSE_DECODE_ERROR';
+        throw error;
+      }
+    }
     if (options.processMode === 'passthrough') {
       return options.response;
     }
@@ -1198,7 +1317,6 @@ export class RouteCodexHttpServer {
     if (!needsAnthropicConversion && !needsResponsesConversion && !needsChatConversion) {
       return options.response;
     }
-    const body = options.response.body;
     if (!body || typeof body !== 'object') {
       return options.response;
     }
@@ -1313,6 +1431,13 @@ export class RouteCodexHttpServer {
         } else if (nestedEntryLower.includes('/v1/messages')) {
           nestedMetadata.providerProtocol = 'anthropic-messages';
         }
+        const followupProtocol =
+          typeof (nestedExtra as Record<string, unknown>).serverToolFollowupProtocol === 'string'
+            ? ((nestedExtra as Record<string, unknown>).serverToolFollowupProtocol as string)
+            : undefined;
+        if (followupProtocol) {
+          nestedMetadata.providerProtocol = followupProtocol;
+        }
 
         const nestedInput: PipelineExecutionInput = {
           entryEndpoint: nestedEntry,
@@ -1352,9 +1477,52 @@ export class RouteCodexHttpServer {
         body: converted.body ?? body
       };
     } catch (error) {
+      const err = error as Error | unknown;
+      const message = err instanceof Error ? err.message : String(err ?? 'Unknown error');
+      const errRecord = err as Record<string, unknown>;
+      const errCode = typeof errRecord.code === 'string' ? errRecord.code : undefined;
+      const errName = typeof errRecord.name === 'string' ? errRecord.name : undefined;
+      const isSseDecodeError =
+        errCode === 'SSE_DECODE_ERROR' ||
+        (errName === 'ProviderProtocolError' && message.toLowerCase().includes('sse'));
+      const isServerToolFollowupError = errCode === 'SERVERTOOL_FOLLOWUP_FAILED';
+      if (isSseDecodeError || isServerToolFollowupError) {
+        console.error('[RouteCodexHttpServer] Fatal conversion error, bubbling as HTTP error', error);
+        throw error;
+      }
       console.error('[RouteCodexHttpServer] Failed to convert provider response via llmswitch-core', error);
       return options.response;
     }
+  }
+
+  private extractSseWrapperError(payload: Record<string, unknown> | undefined): string | undefined {
+    return this.findSseWrapperError(payload, 2);
+  }
+
+  private findSseWrapperError(
+    record: Record<string, unknown> | undefined,
+    depth: number
+  ): string | undefined {
+    if (!record || typeof record !== 'object' || depth < 0) {
+      return undefined;
+    }
+    const mode = record.mode;
+    const errVal = record.error;
+    if (mode === 'sse' && typeof errVal === 'string' && errVal.trim()) {
+      return errVal.trim();
+    }
+    const nestedKeys = ['body', 'data', 'payload', 'response'];
+    for (const key of nestedKeys) {
+      const nested = record[key];
+      if (!nested || typeof nested !== 'object' || Array.isArray(nested)) {
+        continue;
+      }
+      const found = this.findSseWrapperError(nested as Record<string, unknown>, depth - 1);
+      if (found) {
+        return found;
+      }
+    }
+    return undefined;
   }
 
   private extractClientModelId(

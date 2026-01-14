@@ -47,7 +47,7 @@ export class TokenManagerModule implements ManagerModule {
 
   async stop(): Promise<void> {
     if (this.daemon) {
-      this.daemon.stop();
+      await this.daemon.stop();
       this.daemon = null;
     }
     if (this.isLeader && this.ownerId) {

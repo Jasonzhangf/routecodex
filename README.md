@@ -252,13 +252,7 @@ RouteCodex / llmswitch-core 对「模型看到的工具参数」与「CLI/执行
     - 对其它工具（如 `view_image`、MCP 工具等）：
       - 将所有 TOON `key: value` 对映射为普通 JSON 字段，并做轻量类型推断（`true/false`→布尔，数字→number，可解析的 `{}`/`[]`→JSON 对象/数组）。
     - 对 `apply_patch`：
-      - 交由专门的 `ResponseApplyPatchToonDecodeFilter` 处理，当前过滤器只负责 shell/exec 与通用工具，避免相互覆盖。
-- `ResponseApplyPatchToonDecodeFilter`
-  - 专门负责 `apply_patch` 的响应参数规范化：
-    - 支持两类输入：
-      - `{"toon":"*** Begin Patch ... *** End Patch"}`；
-      - 结构化 `changes` payload（多种 `kind`：insert_after / insert_before / replace / delete / create_file / delete_file）。
-    - 将其统一转换为 `{ input: "<统一 diff>", patch: "<统一 diff>" }` 的 JSON 字符串挂回 `function.arguments`，以兼容 CLI 旧语义。
+      - 直接保留 `toon`/结构化字段，由 Chat process 中的工具验证器（`validateToolCall('apply_patch', ...)`）统一转换为 `{ input, patch }` 的标准形态。
 
 整体约束可以概括为：
 
@@ -269,6 +263,24 @@ RouteCodex / llmswitch-core 对「模型看到的工具参数」与「CLI/执行
 - **对维护者**：
   - 所有 TOON → JSON 的解码逻辑集中在 `sharedmodule/llmswitch-core/src/filters/special/` 及响应工具治理路径中；
   - CLI 侧不需要理解 TOON，也无需修改其内部工具实现；一切转换在 Hub 层完成。
+
+### TOON 开关（全局参数）
+
+为方便在不同环境中逐步 rollout 或紧急关闭 TOON 支持，llmswitch-core 提供了统一的开关：
+
+- 环境变量（两者等价，任意其一生效）：
+  - `RCC_TOON_ENABLE`
+  - `ROUTECODEX_TOON_ENABLE`
+- 取值规则（大小写不敏感）：
+  - 未设置 / 空字符串：默认 **开启** TOON 支持。
+  - 设置为 `0` / `false` / `off`：**关闭** TOON 支持。
+  - 其它任何非空值：视为开启。
+- 影响范围：
+  - **请求侧**：`request-tools-normalize` 不再对 exec_command/apply_patch 等工具注入 TOON 形态 schema。
+  - **响应侧**：`ResponseToolArgumentsToonDecodeFilter` 不再解码 `arguments.toon`，模型看到/返回的将是传统 JSON 形态，TOON 完全禁用。
+
+> 建议：开发环境默认开启 TOON，便于调试；遇到兼容性问题或需要验证“纯 JSON 模式”时，可临时设置  
+> `RCC_TOON_ENABLE=0 routecodex ...` 来关闭 TOON 编解码，对客户端与 Provider 完全透明。
 
 ---
 
@@ -444,6 +456,7 @@ RouteCodex 支持在用户消息中通过 `<**...**>` 标签设置**当前会话
     - 当前响应 `finish_reason = "stop"`；  
     - 当前轮没有工具调用（`tool_calls` 为空）；  
     - `stopMessageUsed < stopMessageMaxRepeats` 且客户端仍连接。  
+  - 会话要求：sticky 状态依赖 `sessionId` / `conversationId`。`/v1/messages` 请求请确保 `metadata.user_id` 内包含 `session_<uuid>` 字样，系统会在缺少 header/metadata.sessionId 时从 `metadata.__raw_request_body.metadata.user_id` 自动提取用作会话键。  
   - 行为：在保存的原始请求消息末尾追加一条 `{ role: "user", content: "<配置的文本>" }`，通过内部 `reenterPipeline` 自动发下一轮对话，对客户端透明。
 
 > 完整说明、状态持久化规则及 daemon 管理示例，参见 `docs/routing-instructions.md`。

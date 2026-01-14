@@ -158,6 +158,13 @@ export async function convertProviderResponseIfNeeded(
       } else if (nestedEntryLower.includes('/v1/messages')) {
         nestedMetadata.providerProtocol = 'anthropic-messages';
       }
+      const followupProtocol =
+        typeof (nestedExtra as Record<string, unknown>).serverToolFollowupProtocol === 'string'
+          ? ((nestedExtra as Record<string, unknown>).serverToolFollowupProtocol as string)
+          : undefined;
+      if (followupProtocol) {
+        nestedMetadata.providerProtocol = followupProtocol;
+      }
 
       const nestedInput: PipelineExecutionInput = {
         entryEndpoint: nestedEntry,

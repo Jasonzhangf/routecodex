@@ -34,7 +34,8 @@ function createExecutor(pipelineResult: PipelineExecutionResult, handle: Provide
   const stats = {
     recordRequestStart: jest.fn(),
     recordCompletion: jest.fn(),
-    bindProvider: jest.fn()
+    bindProvider: jest.fn(),
+    recordToolUsage: jest.fn()
   };
 
   const errorHandlingCenter = {
@@ -133,7 +134,8 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     const stats = {
       recordRequestStart: jest.fn(),
       recordCompletion: jest.fn(),
-      bindProvider: jest.fn()
+      bindProvider: jest.fn(),
+      recordToolUsage: jest.fn()
     };
     const deps = {
       runtimeManager,

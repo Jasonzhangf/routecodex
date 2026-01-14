@@ -257,6 +257,15 @@ export class HubRequestExecutor implements RequestExecutor {
           });
           const usage = this.extractUsageFromResult(converted, mergedMetadata);
           aggregatedUsage = this.mergeUsageMetrics(aggregatedUsage, usage);
+          if (converted.body && typeof converted.body === 'object') {
+            const body = converted.body as Record<string, unknown>;
+            if (!('__sse_responses' in body)) {
+              this.deps.stats.recordToolUsage(
+                { providerKey: target.providerKey, model: providerModel },
+                body
+              );
+            }
+          }
 
           finalizeStats({ usage: aggregatedUsage, error: false });
           this.logUsageSummary(input.requestId, {
@@ -344,6 +353,15 @@ export class HubRequestExecutor implements RequestExecutor {
     response: PipelineExecutionResult;
     pipelineMetadata?: Record<string, unknown>;
   }): Promise<PipelineExecutionResult> {
+    const body = options.response.body;
+    if (body && typeof body === 'object') {
+      const wrapperError = this.extractSseWrapperError(body as Record<string, unknown>);
+      if (wrapperError) {
+        const error = new Error(`[RequestExecutor] Upstream SSE terminated: ${wrapperError}`) as Error & { code?: string };
+        error.code = 'SSE_DECODE_ERROR';
+        throw error;
+      }
+    }
     if (options.processMode === 'passthrough') {
       return options.response;
     }
@@ -354,7 +372,6 @@ export class HubRequestExecutor implements RequestExecutor {
     if (!needsAnthropicConversion && !needsResponsesConversion && !needsChatConversion) {
       return options.response;
     }
-    const body = options.response.body;
     if (!body || typeof body !== 'object') {
       return options.response;
     }
@@ -454,6 +471,13 @@ export class HubRequestExecutor implements RequestExecutor {
         } else if (nestedEntryLower.includes('/v1/messages')) {
           nestedMetadata.providerProtocol = 'anthropic-messages';
         }
+        const followupProtocol =
+          typeof (nestedExtra as Record<string, unknown>).serverToolFollowupProtocol === 'string'
+            ? ((nestedExtra as Record<string, unknown>).serverToolFollowupProtocol as string)
+            : undefined;
+        if (followupProtocol) {
+          nestedMetadata.providerProtocol = followupProtocol;
+        }
 
         const nestedInput: PipelineExecutionInput = {
           entryEndpoint: nestedEntry,
@@ -497,18 +521,19 @@ export class HubRequestExecutor implements RequestExecutor {
       const message = err instanceof Error ? err.message : String(err ?? 'Unknown error');
       const providerProtocol = mapProviderProtocol(options.providerType);
 
-      // 对于 Gemini 等基于 SSE 的 provider，如果 llmswitch-core 报告
-      // “Failed to convert SSE payload ...” 之类错误，说明上游流式响应已异常
-      // 终止（如 Cloud Code 终止/上下文超限），继续回退到原始 SSE 只会让
-      // 客户端挂起。因此在此类场景下直接抛出错误，让 HTTP 层返回明确的
-      // 5xx/4xx，而不是静默退回原始 payload。
-      const isSseConvertFailure =
-        typeof message === 'string' &&
-        message.toLowerCase().includes('failed to convert sse payload');
+      // 对于 SSE 解码失败（含上游终止），直接抛出错误并透传到 HTTP 层。
+      // 否则回退到原始 payload 会让客户端挂起，无法感知失败。
+      const errRecord = err as Record<string, unknown>;
+      const errCode = typeof errRecord.code === 'string' ? errRecord.code : undefined;
+      const errName = typeof errRecord.name === 'string' ? errRecord.name : undefined;
+      const isSseDecodeError =
+        errCode === 'SSE_DECODE_ERROR' ||
+        (errName === 'ProviderProtocolError' && message.toLowerCase().includes('sse'));
+      const isServerToolFollowupError = errCode === 'SERVERTOOL_FOLLOWUP_FAILED';
 
-      if (providerProtocol === 'gemini-chat' && isSseConvertFailure) {
+      if (isSseDecodeError || isServerToolFollowupError) {
         console.error(
-          '[RequestExecutor] Fatal SSE decode error for Gemini provider, bubbling as HTTP error',
+          '[RequestExecutor] Fatal conversion error, bubbling as HTTP error',
           error
         );
         throw error;
@@ -517,6 +542,36 @@ export class HubRequestExecutor implements RequestExecutor {
       console.error('[RequestExecutor] Failed to convert provider response via llmswitch-core', error);
       return options.response;
     }
+  }
+
+  private extractSseWrapperError(payload: Record<string, unknown> | undefined): string | undefined {
+    return this.findSseWrapperError(payload, 2);
+  }
+
+  private findSseWrapperError(
+    record: Record<string, unknown> | undefined,
+    depth: number
+  ): string | undefined {
+    if (!record || typeof record !== 'object' || depth < 0) {
+      return undefined;
+    }
+    const mode = record.mode;
+    const errVal = record.error;
+    if (mode === 'sse' && typeof errVal === 'string' && errVal.trim()) {
+      return errVal.trim();
+    }
+    const nestedKeys = ['body', 'data', 'payload', 'response'];
+    for (const key of nestedKeys) {
+      const nested = record[key];
+      if (!nested || typeof nested !== 'object' || Array.isArray(nested)) {
+        continue;
+      }
+      const found = this.findSseWrapperError(nested as Record<string, unknown>, depth - 1);
+      if (found) {
+        return found;
+      }
+    }
+    return undefined;
   }
 
   private extractClientModelId(

@@ -13,6 +13,7 @@ import { resumeResponsesConversation } from '../../modules/llmswitch/bridge.js';
 import { applySystemPromptOverride } from '../../utils/system-prompt-loader.js';
 import { detectWarmupRequest } from '../utils/warmup-detector.js';
 import { recordWarmupSkipEvent } from '../utils/warmup-storm-tracker.js';
+import { trackClientConnectionState } from '../utils/client-connection-state.js';
 
 interface ResponsesHandlerOptions {
   entryEndpoint?: string;
@@ -49,6 +50,7 @@ export async function handleResponses(
       payload.response_id = options.responseIdFromPath;
     }
     const clientHeaders = captureClientHeaders(req.headers);
+    const clientConnectionState = trackClientConnectionState(req, res);
     const acceptsSse = typeof req.headers['accept'] === 'string'
       && (req.headers['accept'] as string).includes('text/event-stream');
     const originalStream = payload?.stream === true;
@@ -114,6 +116,14 @@ export async function handleResponses(
       return;
     }
 
+    const mockSampleReqId =
+      process.env.ROUTECODEX_USE_MOCK === '1' &&
+      payload &&
+      typeof payload === 'object' &&
+      (payload as { metadata?: Record<string, unknown> }).metadata &&
+      typeof (payload as { metadata?: Record<string, unknown> }).metadata?.mockSampleReqId === 'string'
+        ? String((payload as { metadata?: Record<string, unknown> }).metadata?.mockSampleReqId).trim()
+        : undefined;
     const pipelineInput = {
       entryEndpoint,
       method: req.method,
@@ -129,7 +139,9 @@ export async function handleResponses(
         providerProtocol: 'openai-responses',
         __raw_request_body: originalPayload,
         clientHeaders,
-        responsesResume: resumeMeta
+        clientConnectionState,
+        responsesResume: resumeMeta,
+        ...(mockSampleReqId ? { mockSampleReqId } : {})
       }
     };
 

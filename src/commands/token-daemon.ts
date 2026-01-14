@@ -147,7 +147,7 @@ async function startDaemonForeground(options: { interval?: string; refreshAheadM
   await daemon.start();
 
   const cleanupAndExit = async () => {
-    daemon.stop();
+    await daemon.stop();
     await releaseTokenManagerLeader(ownerId);
     try {
       await fs.unlink(TOKEN_DAEMON_PID_FILE);

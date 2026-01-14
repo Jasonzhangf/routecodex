@@ -84,6 +84,36 @@ async function reportCliError(
   }
 }
 
+type ShutdownReason =
+  | { kind: 'signal'; signal: string }
+  | { kind: 'uncaughtException'; message: string }
+  | { kind: 'startupError'; message: string }
+  | { kind: 'stopError'; message: string }
+  | { kind: 'unknown' };
+
+let lastShutdownReason: ShutdownReason = { kind: 'unknown' };
+
+function recordShutdownReason(reason: ShutdownReason): void {
+  if (lastShutdownReason.kind === 'unknown') {
+    lastShutdownReason = reason;
+  }
+}
+
+process.on('exit', (code) => {
+  const reason = lastShutdownReason;
+  const payload: Record<string, unknown> = {
+    kind: reason.kind,
+    exitCode: code
+  };
+  if (reason.kind === 'signal') {
+    payload.signal = reason.signal;
+  } else if (reason.kind === 'uncaughtException' || reason.kind === 'startupError' || reason.kind === 'stopError') {
+    payload.message = reason.message;
+  }
+  // Single-line JSON for easy grep in logs
+  console.log('[routecodex:shutdown]', JSON.stringify(payload));
+});
+
 function readString(value: unknown): string | undefined {
   if (typeof value === 'string' && value.trim()) {
     return value.trim();
@@ -349,6 +379,8 @@ class RouteCodexApp {
       // samples dry-run removed
 
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error ?? '');
+      recordShutdownReason({ kind: 'startupError', message });
       await reportCliError('SERVER_START_FAILED', 'Failed to start RouteCodex server', error, 'critical');
       console.error('❌ Failed to start RouteCodex server:', error);
       process.exit(1);
@@ -360,6 +392,7 @@ class RouteCodexApp {
    */
   async stop(): Promise<void> {
     try {
+      recordShutdownReason({ kind: 'stopError', message: 'stop() invoked' });
       if (this._isRunning) {
         console.log('🛑 Stopping RouteCodex server...');
 
@@ -371,6 +404,8 @@ class RouteCodexApp {
         console.log('✅ RouteCodex server stopped successfully');
       }
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error ?? '');
+      recordShutdownReason({ kind: 'stopError', message });
       await reportCliError('SERVER_STOP_FAILED', 'Failed to stop RouteCodex server', error, 'high');
       console.error('❌ Failed to stop RouteCodex server:', error);
       process.exit(1);
@@ -612,7 +647,18 @@ async function attemptHttpShutdown(port: number): Promise<boolean> {
  * Handle graceful shutdown
  */
 async function gracefulShutdown(app: RouteCodexApp): Promise<void> {
-  console.log('\n🛑 Received shutdown signal, stopping server gracefully...');
+  const reason = lastShutdownReason;
+  const reasonLabel =
+    reason.kind === 'signal'
+      ? `signal=${reason.signal}`
+      : reason.kind === 'uncaughtException'
+        ? 'reason=uncaughtException'
+        : reason.kind === 'startupError'
+          ? 'reason=startupError'
+          : reason.kind === 'stopError'
+            ? 'reason=stopError'
+            : 'reason=unknown';
+  console.log(`\n🛑 Stopping RouteCodex server gracefully... (${reasonLabel})`);
   try {
     await app.stop();
     process.exit(0);
@@ -631,11 +677,19 @@ async function main(): Promise<void> {
   const app = new RouteCodexApp(modulesConfigPath);
 
   // Setup signal handlers for graceful shutdown
-  process.on('SIGTERM', () => gracefulShutdown(app));
-  process.on('SIGINT', () => gracefulShutdown(app));
+  process.on('SIGTERM', () => {
+    recordShutdownReason({ kind: 'signal', signal: 'SIGTERM' });
+    void gracefulShutdown(app);
+  });
+  process.on('SIGINT', () => {
+    recordShutdownReason({ kind: 'signal', signal: 'SIGINT' });
+    void gracefulShutdown(app);
+  });
 
   // Handle uncaught exceptions
   process.on('uncaughtException', (error) => {
+    const message = error instanceof Error ? error.message : String(error ?? '');
+    recordShutdownReason({ kind: 'uncaughtException', message });
     void reportCliError('UNCAUGHT_EXCEPTION', 'Uncaught Exception', error, 'critical');
     console.error('❌ Uncaught Exception:', error);
     gracefulShutdown(app).catch(() => process.exit(1));
@@ -656,6 +710,8 @@ async function main(): Promise<void> {
 // Start the application if this file is run directly
 if (import.meta.url === `file://${process.argv[1]}`) {
   main().catch(async (error) => {
+    const message = error instanceof Error ? error.message : String(error ?? '');
+    recordShutdownReason({ kind: 'startupError', message });
     await reportCliError('MAIN_START_FAILED', 'Failed to start RouteCodex', error, 'critical');
     console.error('❌ Failed to start RouteCodex:', error);
     process.exit(1);

@@ -633,6 +633,7 @@ program
   .command('start')
   .description('Start the RouteCodex server')
   .option('-c, --config <config>', 'Configuration file path')
+  .option('-p, --port <port>', 'RouteCodex server port (dev package only; overrides env/config)')
   .option('--log-level <level>', 'Log level (debug, info, warn, error)', 'info')
   .option('--codex', 'Use Codex system prompt (tools unchanged)')
   .option('--claude', 'Use Claude system prompt (tools unchanged)')
@@ -728,13 +729,19 @@ program
       // - release package (`rcc`): 严格按配置文件端口启动
       let resolvedPort: number;
       if (IS_DEV_PACKAGE) {
-        const envPort = Number(process.env.ROUTECODEX_PORT || process.env.RCC_PORT || NaN);
-        if (!Number.isNaN(envPort) && envPort > 0) {
-          logger.info(`Using port ${envPort} from environment (ROUTECODEX_PORT/RCC_PORT) [dev package: routecodex]`);
-          resolvedPort = envPort;
+        const flagPort = typeof options.port === 'string' ? Number(options.port) : NaN;
+        if (!Number.isNaN(flagPort) && flagPort > 0) {
+          logger.info(`Using port ${flagPort} from --port flag [dev package: routecodex]`);
+          resolvedPort = flagPort;
         } else {
-          resolvedPort = DEFAULT_DEV_PORT;
-          logger.info(`Using dev default port ${resolvedPort} (routecodex dev package)`);
+          const envPort = Number(process.env.ROUTECODEX_PORT || process.env.RCC_PORT || NaN);
+          if (!Number.isNaN(envPort) && envPort > 0) {
+            logger.info(`Using port ${envPort} from environment (ROUTECODEX_PORT/RCC_PORT) [dev package: routecodex]`);
+            resolvedPort = envPort;
+          } else {
+            resolvedPort = DEFAULT_DEV_PORT;
+            logger.info(`Using dev default port ${resolvedPort} (routecodex dev package)`);
+          }
         }
       } else {
         const port = (config?.httpserver?.port ?? config?.server?.port ?? config?.port);

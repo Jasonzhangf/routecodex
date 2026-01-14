@@ -170,6 +170,21 @@ async function extractPair(entryName, entryDir, file, registry, seqMap, filters 
   await fs.writeFile(path.join(targetDir, 'request.json'), JSON.stringify(enrichedRequest, null, 2));
   await fs.writeFile(path.join(targetDir, 'response.json'), JSON.stringify(enrichedResponse, null, 2));
 
+   // 可选：如果存在入口层的 client-request 快照，一并抽取，便于端到端重放。
+   const clientSnapshotPath = path.join(entryDir, `${prefix}_client-request.json`);
+   if (await fileExists(clientSnapshotPath)) {
+     try {
+       const client = JSON.parse(await fs.readFile(clientSnapshotPath, 'utf-8'));
+       const enrichedClient = { ...client, reqId, entryEndpoint: client?.endpoint };
+       await fs.writeFile(
+         path.join(targetDir, 'client-request.json'),
+         JSON.stringify(enrichedClient, null, 2)
+       );
+     } catch {
+       // client-request 仅用于重放，解析失败不阻断样本注册。
+     }
+   }
+
   registry.samples = registry.samples.filter((sample) => sample.reqId !== reqId);
   registry.samples.push({
     reqId,

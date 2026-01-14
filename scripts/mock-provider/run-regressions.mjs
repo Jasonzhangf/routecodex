@@ -300,6 +300,70 @@ function collectInvalidNames(payload) {
   return failures;
 }
 
+function validateToolCallIds(payload, sample, tagSet) {
+  const errors = [];
+  if (!payload || typeof payload !== 'object') {
+    return errors;
+  }
+  const enforceCallIdFormat = tagSet.has('require_fc_call_ids');
+  const isValidCallId = (value) =>
+    /^call_[A-Za-z0-9]+$/.test(value) || /^fc[_-][A-Za-z0-9-]+$/.test(value);
+
+  const allToolCallIds = new Set();
+  if (Array.isArray(payload.output)) {
+    payload.output.forEach((entry, oi) => {
+      if (!entry || typeof entry !== 'object') return;
+      const toolCalls = Array.isArray(entry.tool_calls) ? entry.tool_calls : [];
+      toolCalls.forEach((tc, ti) => {
+        if (!tc || typeof tc !== 'object') return;
+        const rawId = typeof tc.id === 'string' ? tc.id.trim() : '';
+        if (!rawId) {
+          errors.push(`output[${oi}].tool_calls[${ti}].id missing`);
+          return;
+        }
+        allToolCallIds.add(rawId);
+        if (enforceCallIdFormat && !isValidCallId(rawId)) {
+          errors.push(`output[${oi}].tool_calls[${ti}].id has invalid format: ${rawId}`);
+        }
+      });
+    });
+  }
+
+  const requiredAction = payload.required_action;
+  const submit = requiredAction && typeof requiredAction === 'object'
+    ? requiredAction.submit_tool_outputs
+    : undefined;
+  const submitCalls = submit && typeof submit === 'object'
+    ? submit.tool_calls
+    : undefined;
+  if (Array.isArray(submitCalls)) {
+    submitCalls.forEach((tc, i) => {
+      if (!tc || typeof tc !== 'object') return;
+      const rawId = typeof tc.tool_call_id === 'string'
+        ? tc.tool_call_id.trim()
+        : typeof tc.id === 'string'
+          ? tc.id.trim()
+          : '';
+      if (!rawId) {
+        errors.push(`required_action.submit_tool_outputs.tool_calls[${i}].tool_call_id missing`);
+        return;
+      }
+      if (enforceCallIdFormat && !isValidCallId(rawId)) {
+        errors.push(
+          `required_action.submit_tool_outputs.tool_calls[${i}].tool_call_id has invalid format: ${rawId}`
+        );
+      }
+      if (allToolCallIds.size > 0 && !allToolCallIds.has(rawId)) {
+        errors.push(
+          `required_action.submit_tool_outputs.tool_calls[${i}].tool_call_id=${rawId} has no matching output.tool_calls entry`
+        );
+      }
+    });
+  }
+
+  return errors;
+}
+
 function extractRequestBody(doc) {
   const body = doc && typeof doc === 'object' ? doc.body : undefined;
   if (!body || typeof body !== 'object') {
@@ -334,6 +398,10 @@ function resolveRequestUrl(sample, requestDoc, port) {
 async function sendRequest(sample, requestDoc, port) {
   const url = resolveRequestUrl(sample, requestDoc, port);
   const payload = extractRequestBody(requestDoc);
+  if (payload && typeof payload === 'object') {
+    const meta = payload.metadata && typeof payload.metadata === 'object' ? payload.metadata : {};
+    payload.metadata = { ...meta, mockSampleReqId: sample.reqId };
+  }
   const headers = { 'content-type': 'application/json' };
   const wantsStream =
     payload?.stream === true ||
@@ -366,12 +434,35 @@ async function sendRequest(sample, requestDoc, port) {
 async function runSample(sample, index) {
   const clientDoc = await loadSampleDocument(sample, { fileName: 'client-request.json', optional: true });
   const requestDoc = clientDoc || (await loadSampleDocument(sample));
+  const responseDoc = await loadSampleDocument(sample, { fileName: 'response.json', optional: true });
   const port = 5800 + index;
   const { dir, file } = await writeTempConfig(sample, port);
   const server = createServer(file, port);
+  const tags = new Set(Array.isArray(sample.tags) ? sample.tags : []);
+  const expectSseTerminationError = tags.has('responses_sse_terminated');
+  const allowSampleError =
+    responseDoc && typeof responseDoc.status === 'number' && responseDoc.status >= 400;
   try {
     await waitForHealth(port, server.process);
-    const responseText = await sendRequest(sample, requestDoc, port);
+    let responseText;
+    try {
+      responseText = await sendRequest(sample, requestDoc, port);
+      if (expectSseTerminationError) {
+        throw new Error('expected SSE termination to surface as HTTP error, but request succeeded');
+      }
+    } catch (sendError) {
+      if (expectSseTerminationError || allowSampleError) {
+        const msg = sendError instanceof Error ? sendError.message : String(sendError);
+        if (!/HTTP\s+4\d\d|HTTP\s+5\d\d/i.test(msg)) {
+          throw new Error(
+            `expected HTTP 4xx/5xx error, but got: ${msg}`
+          );
+        }
+        // 对于错误类样本，只要成功以 HTTP 错误形式透出即可。
+        return;
+      }
+      throw sendError;
+    }
     const body = (() => {
       try {
         return JSON.parse(responseText);
@@ -385,6 +476,14 @@ async function runSample(sample, index) {
         throw new Error(
           `[${sample.reqId}] provider response still contains invalid names:\n${invalid
             .map((item) => ` - ${item.location}: ${item.value}`)
+            .join('\n')}`
+        );
+      }
+      const idErrors = validateToolCallIds(body, sample, tags);
+      if (idErrors.length) {
+        throw new Error(
+          `[${sample.reqId}] tool_call_id invariants failed:\n${idErrors
+            .map((msg) => ` - ${msg}`)
             .join('\n')}`
         );
       }
@@ -412,6 +511,10 @@ async function main() {
     console.warn('[mock:regressions] No regression-tagged samples matched current filters; skipping mock replay.');
     return;
   }
+
+  const coverageByEntry = Object.create(null);
+  const coverageByProvider = Object.create(null);
+
   const tagCounter = Object.create(null);
   const incrementTag = (tag) => {
     if (!watchedTags.has(tag)) {
@@ -421,6 +524,12 @@ async function main() {
   };
   regressionSamples.forEach((sample) => {
     const matched = new Set();
+    const entry = typeof sample.entry === 'string' && sample.entry.trim().length ? sample.entry.trim() : 'unknown';
+    const providerId =
+      typeof sample.providerId === 'string' && sample.providerId.trim().length ? sample.providerId.trim() : 'unknown';
+    coverageByEntry[entry] = (coverageByEntry[entry] || 0) + 1;
+    coverageByProvider[providerId] = (coverageByProvider[providerId] || 0) + 1;
+
     (sample.tags || []).forEach((tag) => {
       if (watchedTags.has(tag) && !matched.has(tag)) {
         incrementTag(tag);
@@ -436,6 +545,14 @@ async function main() {
     .map((tag) => `${tag}=${tagCounter[tag] || 0}`)
     .join(', ');
   console.log(`✅ mock provider regressions passed (${regressionSamples.length} samples · ${summary})`);
+  const byEntry = Object.entries(coverageByEntry)
+    .map(([entry, count]) => `${entry}=${count}`)
+    .join(', ');
+  const byProvider = Object.entries(coverageByProvider)
+    .map(([pid, count]) => `${pid}=${count}`)
+    .join(', ');
+  console.log(`[mock:regressions] coverage by entry: ${byEntry}`);
+  console.log(`[mock:regressions] coverage by providerId: ${byProvider}`);
 }
 
 main().catch((error) => {
