@@ -338,10 +338,10 @@ tests/servertool/
 
 ### Phase Q3：Quota Daemon & Errorhandler 集成（先独立跑，再接线）
 
-- [ ] 在 daemon 进程中集成 quota center + store：
-  - [ ] 新增错误事件订阅入口（从现有 errorhandler/RouteErrorHub 发来的标准化 `ErrorEvent`）。
+- [x] 在 daemon 进程中集成 quota center + store：
+  - [x] 新增错误事件订阅入口（当前通过 `providerErrorCenter.subscribe` 旁路订阅 `ProviderErrorEvent`）。
   - [ ] 接入成功 / usage 事件（来自 provider 成功响应与 virtual-router 使用记录）。
-  - [ ] 周期性执行窗口翻转 / 冷却与锁定过期检查，并写回 `provider-quota.json`。
+  - [x] 周期性执行窗口翻转 / 冷却与锁定过期检查，并写回 `provider-quota.json`。
 - [ ] 为 quota daemon 增加 `--dry-run` / `--once` 模式：
   - [ ] 从 `provider-errors.ndjson` 或 fixture 读取事件，不连接真实虚拟路由器。
   - [ ] 执行一轮 quota 更新与落盘后退出，用于 CI / 本地验证。
@@ -349,13 +349,13 @@ tests/servertool/
 
 ### Phase Q4：Virtual Router 读取 quota 快照（按 feature flag 渐进接线）
 
-- [ ] 在 virtual-router 构建 provider 池时，增加可选 quota 快照读取逻辑：
-  - [ ] 当 `ROUTECODEX_QUOTA_ENABLED=1` 且 `~/.routecodex/quota/provider-quota.json` 存在时，读取最新快照。
-  - [ ] 过滤 `inPool !== true` 或仍处于 `cooldownUntil / blacklistUntil` 窗口内的 provider。
-  - [ ] 按 `priorityTier` 做 tier 调度（与当前池子轮询逻辑解耦）。
-  - [ ] 为 quota 驱动的路由行为补充单元测试 / 集成测试：
-  - [ ] 针对 429 / 其它错误 / fatal 错误构造快照，验证 virtual-router 在不同阶段的入池 / 出池决策与预期一致。
-  - [ ] 确保在未启用 `ROUTECODEX_QUOTA_ENABLED` 时行为与现有生产逻辑完全一致（向后兼容）。
+- [x] 在 virtual-router 构建 provider 池时，增加可选 quota 快照读取逻辑：
+  - [x] 当 `ROUTECODEX_QUOTA_ENABLED=1` 时由 host 注入 `QuotaView`（daemon 会在启动时读取 `~/.routecodex/quota/provider-quota.json` 并转为只读 view）。
+  - [x] 过滤 `inPool !== true` 或仍处于 `cooldownUntil / blacklistUntil` 窗口内的 provider。
+  - [x] 按 `priorityTier` 做 tier 调度（与当前池子轮询逻辑解耦）。
+  - [x] 为 quota 驱动的路由行为补充单元测试 / 集成测试：
+  - [x] 针对 `inPool`/`cooldownUntil`/`blacklistUntil`/`priorityTier` 构造 view，验证 virtual-router 在不同阶段的入池 / 出池决策与预期一致。
+  - [x] 确保在未启用 `ROUTECODEX_QUOTA_ENABLED` 时行为与现有生产逻辑完全一致（向后兼容）。
 
 ### Phase Q5：错误中心切换到 daemon + quota（分阶段替换健康管理）
 
