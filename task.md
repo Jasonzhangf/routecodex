@@ -1,13 +1,13 @@
-# RouteCodex Mock 测试覆盖计划 (TOON 启用后更新)
+# RouteCodex Mock 测试覆盖计划
 
 ## 背景
 
-项目已启用 TOON（Tool Object Object Notation）格式用于工具调用参数编码，需要更新 mock 测试覆盖计划。
+完善 mock-provider 回归覆盖，确保工具调用与协议兼容在 CI 前可验证。
 
 ## 目标
 
 1. 构建基于 Virtual Router classifier 的 codex 样本分类脚本
-2. 完善 mock provider 测试，特别是 TOON 工具、apply_patch 测试
+2. 完善 mock provider 测试，特别是 apply_patch 与工具调用兼容性
 3. 确保所有新样本在加入 CI 前通过验证
 
 ## 执行计划
@@ -66,9 +66,7 @@
 ### Phase 1: 基础分析
 
 - [x] 分析现有 mock-provider samples
-- [x] 识别 TOON 相关样本（在 `samples/mock-provider` 中发现 TOON 编码样本）
 - [x] 创建 Virtual Router classifier 分类脚本
-- [x] 从最新 codex samples 提取 TOON 工具样本
 
 ### Phase 2: Mock Provider 测试增强
 
@@ -78,14 +76,6 @@
 - [x] 普通工具调用测试
 - [x] apply_patch 工具测试
 - [x] shell command 测试
-- [x] TOON 工具测试（新增）
-
-#### 2.2 TOON 特殊测试
-
-- [ ] TOON 参数编码 mock 响应
-- [ ] TOON 参数解码验证
-- [ ] 复杂 TOON 场景（多行、特殊字符）
-- [ ] TOON 与现有工具格式兼容性
 
 ### Phase 3: 样本分类与筛选
 
@@ -96,7 +86,7 @@
 ```javascript
 // 按 Virtual Router classifier 分类
 - providerKey 分类（glm, gemini, openai, anthropic）
-- 工具类型分类（apply_patch, TOON, shell, 普通工具）
+- 工具类型分类（apply_patch, shell, 普通工具）
 - 识别 tool_calls 结构
 - 标记未覆盖场景
 ```
@@ -105,7 +95,6 @@
 
 - [x] 普通工具调用：已有 mock samples
 - [x] apply_patch：已有 `mock.apply_patch.toolloop`
-- [x] TOON 工具：从最新 samples 筛选
 - [ ] shell command：筛选复杂命令样本
 
 ### Phase 4: 测试文件组织
@@ -114,7 +103,6 @@
 tests/servertool/
 ├── mock-provider-tests.spec.ts
 ├── apply-patch-compat.spec.ts
-├── toon-tool-compat.spec.ts      # 新增
 ├── shell-command-compat.spec.ts
 └── tool-loop-compat.spec.ts
 ```
@@ -122,7 +110,7 @@ tests/servertool/
 ### Phase 5: CI 集成检查清单
 
 - [ ] 所有测试本地通过
-- [ ] TOON 编码/解码测试覆盖完整
+- [ ] 工具参数归一化测试覆盖完整
 - [ ] 测试运行时间 < 30s
 - [ ] 无外部依赖
 - [ ] CI 配置更新
@@ -130,14 +118,14 @@ tests/servertool/
 ## 下一步行动
 
 1. 编写 `scripts/classify-codex-samples.mjs` 分类脚本
-2. 从最新 codex samples 提取 TOON 工具样本
-3. 创建 TOON 工具 mock 测试
+2. 从最新 codex samples 提取工具样本
+3. 创建工具 mock 测试
 4. 验证后集成到 CI
 5. 记录并排期：全局安装的 iFlow CLI 需要在修复 stopMessage 问题后更新模型配置，确保：
    - `config.json` 与 `providers/iflow/*` 中的模型列表同步最新 iflow 模型库
    - GLM-4.7 的模型写法与 provider 要求一致（包括 key、alias、路由映射）
    - 在真实 CLI 环境里重新安装/链接后能够成功调用并完成一次完整对话验证
-6. **统一 apply_patch 结构化转换**：在 chat-process 阶段实现 apply_patch arguments 的结构化 JSON / TOON → unified diff `{input, patch}` 规范化，移除各协议 codec 中的重复过滤器，确保所有入口（OpenAI、Responses、Anthropic、Gemini 等）共享同一逻辑。
+6. **统一 apply_patch 结构化转换**：在 chat-process 阶段实现 apply_patch arguments 的结构化 JSON → unified diff `{input, patch}` 规范化，移除各协议 codec 中的重复过滤器，确保所有入口（OpenAI、Responses、Anthropic、Gemini 等）共享同一逻辑。
 
 ---
 
@@ -258,57 +246,6 @@ tests/servertool/
 - [x] 接入 `/config/providers/v2*` 只读 API，完成列表 + 详情视图（基于 `loadProviderConfigsV2` 读取 `~/.routecodex/provider/*/config.v2.json`，仅返回非敏感字段）。
 - [x] 与 Credentials / Runtime health 视图打通跳转（从 Credentials 行点击跳转到 Providers(Config V2) 并按 `credentialsRef` 过滤列表，前端仅做过滤与高亮，不改动路由逻辑）。
 - [x] 对 Providers(Config V2) 视图做端到端集成测试（在 `scripts/verify-e2e-toolcall.mjs` 中附加 `/config/providers/v2` smoke 校验，确保 Config V2 列表 API 正常响应）。
-
----
-
-## TOON 工具协议统一任务（全工具 TOON 化）
-
-> 目标：对“模型视角”统一所有工具的调用参数为 TOON 格式，在 chat process 中实现唯一的 TOON ⇄ JSON 解码层，先改工具治理，再扩展解码器，并用 codex samples 做回放验证。
-
-### Phase T1：协议与治理设计
-
-- [ ] 梳理当前工具协议与治理位置：
-  - 工具注册与描述：`sharedmodule/llmswitch-core/src/tools/tool-registry.ts`、`sharedmodule/llmswitch-core/src/guidance/index.ts`。
-  - 工具治理与过滤：`sharedmodule/llmswitch-core/src/conversion/shared/tool-filter-pipeline.ts` 及其 hooks。
-  - TOON 解码过滤器：`sharedmodule/llmswitch-core/src/filters/special/response-tool-arguments-toon-decode.ts`。
-- [ ] 确认“模型统一协议”的设计原则：
-  - 模型侧所有工具一律使用 `arguments.toon`（不再区分 shell TOON / exec_command JSON）。
-  - 工具说明中明确：模型只需写 TOON，不关心最终 JSON 字段名。
-  - 执行器（CLI / daemon / provider）只消费结构化 JSON，由 chat process 负责 TOON ⇄ JSON。
-
-### Phase T2：工具治理调整（先改治理，再改解码）
-
-- [ ] 更新工具治理与系统提示：
-  - 在全局 guidance 中统一变更工具使用说明，声明“所有工具参数均使用 TOON”，避免混合协议。
-  - 针对 exec_command / shell / apply_patch / search / web_search / 文件读取写入等工具，移除“JSON 形态示例”，改为抽象 TOON 说明。
-- [ ] 收紧 / 统一工具注入规则（与现有治理兼容）：
-  - 保持现有 image / web_search / search / coding 等工具的注入时机与路由规则不变，只改变“对模型暴露的参数形态”为 TOON。
-  - 确保 exec_command 在模型视角只暴露 TOON（避免 cmd-only JSON 与 TOON 混用）。
-
-### Phase T3：TOON 解码器扩展与唯一化
-
-- [ ] 在 chat process / filter 管线中明确唯一的 TOON 解码入口：
-  - 保证 TOON ⇄ JSON 转换仅存在于 llmswitch-core 的一处（当前 response 侧已有基础过滤器，需扩展与归一）。
-- [ ] 扩展 TOON 解码逻辑覆盖所有工具：
-  - 将 `ResponseToolArgumentsToonDecodeFilter` 从“只支持部分工具（shell/exec/apply_patch）”扩展为：只要 `arguments.toon` 存在，就尝试通用 TOON 解析。
-  - 基于 tool name / tool family（文件读写 / search / coding / web_search / apply_patch / exec_command 等）映射到对应的 JSON schema，构造统一的结构化参数对象。
-  - 确保 apply_patch 仍生成兼容 Codex `apply_patch` CLI 的 unified diff `{ input, patch }`。
-- [ ] 确保 TOON 编码/解码对称：
-  - 请求侧：JSON → TOON（用于工具描述 / 模型系统提示）。
-  - 响应侧：TOON → JSON（用于真实工具执行）。
-  - 其他层（HTTP server / provider / CLI 执行器）不再各自实现 TOON 逻辑。
-
-### Phase T4：测试与回放验证
-
-- [ ] 更新 / 扩展测试用例：
-  - 在 `tests/sharedmodule` 下新增 / 扩展 TOON 解码测试，覆盖多种工具（exec_command、shell、apply_patch、search、文件工具等）。
-  - 保证 apply_patch 测试仍通过真实 `apply_patch` CLI 执行，验证 unified diff 正确性。
-- [ ] 使用 codex samples 做回放验证：
-  - 选取最新 codex samples 中包含 TOON 工具调用的样本，验证新解码器可正确解析并生成结构化参数。
-  - 对历史上 exec_command 与 TOON 混用产生的错误样本，确认在“全 TOON 协议 + 新解码器”下行为合理（要么被正确解析，要么返回清晰错误）。
-- [ ] 回归检查：
-  - 确保 web_search / search / coding / longcontext / tools 等路由池在“全 TOON 协议”下行为与现有预期一致（不改变路由逻辑，只改变参数编码方式）。
-  - 将关键错误样本加入标准回归路径（错误样本脚本 / 矩阵测试脚本），防止未来回归。
 
 ---
 

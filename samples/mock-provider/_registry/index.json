@@ -1007,15 +1007,6 @@
       "tags": []
     },
     {
-      "reqId": "openai-chat-unknown-unknown-20251225T092024-003",
-      "entry": "openai-chat",
-      "providerId": "unknown",
-      "model": "unknown",
-      "timestamp": "2025-12-25T01:20:24.035Z",
-      "path": "openai-chat/unknown/unknown/20251225/092024/003",
-      "tags": []
-    },
-    {
       "reqId": "openai-chat-unknown-unknown-20251225T092024-004",
       "entry": "openai-chat",
       "providerId": "unknown",

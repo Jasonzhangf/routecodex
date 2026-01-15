@@ -27,7 +27,7 @@ async function main() {
 
   // 构造一条模拟的 chat 响应，其中 exec_command 直接使用 JSON 编码参数。
   const chatPayload = {
-    id: 'chatcmpl_exec_toon',
+    id: 'chatcmpl_exec_args',
     object: 'chat.completion',
     created: Math.floor(Date.now() / 1000),
     model: 'gpt-5.2-codex',
@@ -39,7 +39,7 @@ async function main() {
           content: null,
           tool_calls: [
             {
-              id: 'call_exec_toon',
+              id: 'call_exec_args',
               type: 'function',
               function: {
                 name: 'exec_command',
@@ -58,10 +58,10 @@ async function main() {
     ]
   };
 
-  // 通过 response 工具管线运行，触发 TOON → JSON 解码。
+  // 通过 response 工具管线运行，触发统一的工具参数治理/归一化。
   const filtered = await runChatResponseToolFilters(chatPayload, {
     entryEndpoint: '/v1/chat/completions',
-    requestId: 'req_exec_toon',
+    requestId: 'req_exec_args',
     profile: 'openai-chat'
   });
 
@@ -113,7 +113,7 @@ async function main() {
   // 延伸验证：基于 chat 结果构建 Responses payload，确保 /v1/responses 视图中的
   // function_call.arguments 同样保持 exec_command JSON 语义，而不会重新出现 toon。
   const responsesPayload = buildResponsesPayloadFromChat(filtered, {
-    requestId: 'verify_exec_command_toon'
+    requestId: 'verify_exec_command_args'
   });
   const outputItems = Array.isArray(responsesPayload?.output) ? responsesPayload.output : [];
   const fnCall = outputItems.find(
@@ -150,7 +150,7 @@ async function main() {
   console.log(
     `[exec-command-loop] decoded cmd="${args.cmd}" yield_time_ms=${args.yield_time_ms ?? 'n/a'} max_output_tokens=${args.max_output_tokens ?? 'n/a'}`
   );
-  console.log('✅ exec_command TOON decode passed (chat + responses views are JSON-only)');
+  console.log('✅ exec_command arguments normalization passed (chat + responses views are JSON-only)');
 }
 
 main().catch((error) => {

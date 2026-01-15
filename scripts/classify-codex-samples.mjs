@@ -173,7 +173,6 @@ class SampleClassifier {
     
     console.log(`总样本数: ${this.stats.total}`);
     console.log(`包含工具调用: ${this.stats.withToolCalls}`);
-    console.log(`包含 TOON: 0 (TOON 已禁用)`);
     console.log(`错误数: ${this.stats.errors}`);
     
     console.log('\n按 Provider 分布:');
@@ -201,21 +200,10 @@ class SampleClassifier {
     console.log('==================');
     
     const hasApplyPatch = this.stats.byToolType['apply_patch'] > 0;
-    const hasToon = this.stats.byToolType['toon_tool'] > 0;
     const hasShell = this.stats.byToolType['shell_command'] > 0;
     
     if (!hasApplyPatch) console.log('  - 缺少 apply_patch 样本');
-    if (!hasToon) console.log('  - 缺少 TOON 工具样本');
     if (!hasShell) console.log('  - 缺少 shell command 样本');
-    
-    // TOON 样本详情
-    if (this.stats.withToon > 0) {
-      console.log('\n🔧 TOON 工具样本:');
-      const toonSamples = this.samples.filter(s => s.hasToon);
-      for (const sample of toonSamples) {
-        console.log(`  - ${sample.provider}: ${sample.id}`);
-      }
-    }
   }
 }
 
