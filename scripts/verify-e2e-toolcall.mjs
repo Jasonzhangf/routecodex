@@ -81,6 +81,7 @@ async function main() {
   try {
     await waitForServer();
     await waitForRouterWarmup();
+    await runModelsSmokeCheck(authHeaders);
     await runToolcallVerification(authHeaders);
     console.log('✅ 端到端工具调用校验通过');
 
@@ -91,6 +92,23 @@ async function main() {
     await runGeminiCliStartupCheck();
   } finally {
     shutdown();
+  }
+}
+
+async function runModelsSmokeCheck(authHeaders) {
+  try {
+    const res = await fetch(`${VERIFY_BASE}/models`, { headers: { ...(authHeaders || {}) } });
+    if (!res.ok) {
+      throw new Error(`/models HTTP ${res.status}`);
+    }
+    const json = await res.json();
+    const data = Array.isArray(json?.data) ? json.data : [];
+    if (!Array.isArray(data)) {
+      throw new Error('/models response missing data array');
+    }
+  } catch (error) {
+    console.error('[verify:e2e-toolcall] /models smoke 检查失败:', error);
+    throw error;
   }
 }
 
