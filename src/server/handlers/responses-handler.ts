@@ -37,6 +37,20 @@ export async function handleResponses(
   const entryEndpoint = options.entryEndpoint || '/v1/responses';
   const { clientRequestId, providerRequestId } = nextRequestIdentifiers(req.headers['x-request-id'], { entryEndpoint });
   const requestId = providerRequestId;
+  const rawTimeout = String(
+    process.env.ROUTECODEX_HTTP_RESPONSES_TIMEOUT_MS ||
+      process.env.RCC_HTTP_RESPONSES_TIMEOUT_MS ||
+      '500000'
+  ).trim();
+  const requestTimeoutMs = Number(rawTimeout);
+  let timedOut = false;
+  let timeoutHandle: NodeJS.Timeout | undefined;
+  const clearTimeoutHandle = () => {
+    if (timeoutHandle) {
+      clearTimeout(timeoutHandle);
+      timeoutHandle = undefined;
+    }
+  };
   try {
     if (!ctx.executePipeline) {
       res.status(503).json({ error: { message: 'Hub pipeline runtime not initialized' } });
@@ -146,6 +160,43 @@ export async function handleResponses(
       }
     };
 
+    if (Number.isFinite(requestTimeoutMs) && requestTimeoutMs > 0) {
+      timeoutHandle = setTimeout(() => {
+        if (timedOut) return;
+        timedOut = true;
+        const err = Object.assign(new Error(`[http] request timeout after ${requestTimeoutMs}ms`), {
+          code: 'HTTP_REQUEST_TIMEOUT',
+          status: 504
+        });
+        try {
+          logRequestError(entryEndpoint, requestId, err);
+        } catch {
+          /* ignore logging */
+        }
+        // Best-effort: notify pipeline/servertool via shared connection state object.
+        try {
+          const state = clientConnectionState as unknown as { disconnected?: boolean };
+          if (state && typeof state === 'object') {
+            state.disconnected = true;
+          }
+        } catch {
+          /* ignore */
+        }
+        if (res.headersSent) {
+          try {
+            res.end();
+          } catch {
+            /* ignore */
+          }
+          return;
+        }
+        const wantsStreamForError = typeof options.forceStream === 'boolean' ? options.forceStream : inboundStream;
+        void respondWithPipelineError(res, ctx, err, entryEndpoint, requestId, { forceSse: wantsStreamForError });
+      }, requestTimeoutMs);
+      // Let Node exit even if a client hangs; this timer is per-request and should not keep the process alive.
+      timeoutHandle.unref?.();
+    }
+
     logRequestStart(entryEndpoint, requestId, {
       clientRequestId,
       inboundStream: wantsStream,
@@ -155,10 +206,18 @@ export async function handleResponses(
       type: payload?.type
     });
     const result = await ctx.executePipeline(pipelineInput);
+    clearTimeoutHandle();
+    if (timedOut || res.headersSent) {
+      return;
+    }
     const effectiveRequestId = pipelineInput.requestId;
     logRequestComplete(entryEndpoint, effectiveRequestId, result.status ?? 200);
     sendPipelineResponse(res, result, effectiveRequestId, { forceSSE: wantsStream });
   } catch (error: unknown) {
+    clearTimeoutHandle();
+    if (timedOut) {
+      return;
+    }
     logRequestError(entryEndpoint, requestId, error);
     if (res.headersSent) {
       return;

@@ -247,8 +247,7 @@ export async function respondWithPipelineError(
   if (effectiveRequestId && mapped.body?.error && !mapped.body.error.request_id) {
     mapped.body.error.request_id = effectiveRequestId;
   }
-  const shouldBypassSse = shouldBypassSseError(error);
-  if (options?.forceSse && !shouldBypassSse) {
+  if (options?.forceSse) {
     // For streaming clients, return an SSE error event so the client can surface the failure.
     // Use 200 to keep SSE parsers happy; embed the actual status in the event payload.
     const payload = mapped.body?.error
@@ -271,29 +270,6 @@ export async function respondWithPipelineError(
     return;
   }
   res.status(mapped.status).json(mapped.body);
-}
-
-function shouldBypassSseError(error: unknown): boolean {
-  if (!error || typeof error !== 'object') {
-    return false;
-  }
-  const record = error as Record<string, unknown>;
-  const code = typeof record.code === 'string' ? record.code : '';
-  const name = typeof record.name === 'string' ? record.name : '';
-  const message =
-    error instanceof Error
-      ? error.message
-      : typeof record.message === 'string'
-        ? record.message
-        : '';
-  // 仅对 servertool followup 失败保留 JSON 错误响应，其余场景统一通过 SSE error 事件回传，避免客户端长时间挂起。
-  if (code === 'SERVERTOOL_FOLLOWUP_FAILED') {
-    return true;
-  }
-  if (name === 'ServerToolFollowupError') {
-    return true;
-  }
-  return false;
 }
 
 function applyHeaders(res: Response, headers: Record<string, string> | undefined, omitContentType: boolean): void {
