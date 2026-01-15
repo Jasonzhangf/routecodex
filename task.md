@@ -362,23 +362,23 @@ tests/servertool/
 > 目标：保持现有 providerErrorCenter / RouteErrorHub / ErrorHandlerRegistry 作为“观测与聚合层”，将真正的健康/熔断/流控决策迁移到 daemon + quota center 中，virtual-router 只通过 quota 快照决定能否入池与优先级。
 
 - [ ] Q5.1 旁路订阅：为 daemon 增加错误事件 sink（不改现有行为）
-  - [ ] 在 ManagerDaemon 中新增 quota-error-sink 模块：
-    - [ ] 启动时通过 `getProviderErrorCenter()` 订阅 `providerErrorCenter`，监听所有 `ProviderErrorEvent`，抽取 `providerKey` / `status` / `code` / `timestamp` / fatal 标记。
-    - [ ] 将事件映射为 `ErrorEventForQuota` + `ProviderErrorEventRecord`，调用 `appendProviderErrorEvent` 写入 `~/.routecodex/quota/provider-errors.ndjson`，并使用 `applyErrorEvent` / `applySuccessEvent` 驱动内存中的 `QuotaState`。
+  - [x] 在 ManagerDaemon 中新增 quota-error-sink 模块（现为 `ProviderQuotaDaemonModule`）：
+    - [x] 启动时通过 `getProviderErrorCenter()` 订阅 `providerErrorCenter`，监听 `ProviderErrorEvent`，抽取 `providerKey` / `status` / `code` / `timestamp` / fatal 标记。
+    - [x] 将事件映射为 `ErrorEventForQuota` + `ProviderErrorEventRecord`，调用 `appendProviderErrorEvent` 写入 `~/.routecodex/quota/provider-errors.ndjson`，并使用 `applyErrorEvent` 驱动内存中的 `QuotaState`。
   - [ ] （可选）在 RouteErrorHub 或 ErrorHandlerRegistry 中增加只读 sink：
     - [ ] 针对 `rate_limit_error` / `provider_error` / `SSE_DECODE_ERROR` 等错误模板，将 `providerKey` / `status` / `code` 额外投递给 quota-error-sink，补充未通过 providerErrorCenter 进入的错误信号。
 
-- [ ] Q5.2 虚拟路由器读取 quota 快照，弱化 engine-health 的 rate-limit 决策
-  - [ ] 在 virtual-router 初始化/路由决策中新增可选 `QuotaView` 扩展点：
-    - [ ] 当 `ROUTECODEX_QUOTA_ENABLED=1` 且检测到 `~/.routecodex/quota/provider-quota.json` 存在时，通过 host 注入的接口提供 `{ [providerKey]: QuotaStateView }`。
-    - [ ] 构建 provider 池时先按快照过滤：`inPool !== true` 或仍处于 `cooldownUntil/blacklistUntil` 窗口的 provider 一律排除；按 `priorityTier` 做 tier 调度。
+- [x] Q5.2 虚拟路由器读取 quota 快照，弱化 engine-health 的 rate-limit 决策
+  - [x] 在 virtual-router 初始化/路由决策中新增可选 `QuotaView` 扩展点：
+    - [x] 当 `ROUTECODEX_QUOTA_ENABLED=1` 时由 host 注入 `QuotaView`（daemon 读写 `~/.routecodex/quota/provider-quota.json`）。
+    - [x] 构建 provider 池时按快照过滤：`inPool !== true` 或仍处于 `cooldownUntil/blacklistUntil` 窗口的 provider 一律排除；按 `priorityTier` 做 tier 调度（含 forced/sticky 路径）。
   - [x] 在 `engine.ts` 中调整 `handleProviderError` 对 429 / series cooldown 的处理：
     - [x] 当 `QuotaView` 存在时，不再在 engine-health 内部做 429/backoff/series cooldown 等健康决策，避免与 daemon/quota-center 重复维护；长期熔断依赖 quota 快照。
 
-- [ ] Q5.3 将 QUOTA_DEPLETED / QUOTA_RECOVERY 决策从 virtual-router 迁到 daemon
-  - [ ] 调整 `QuotaManagerModule` 与 virtual-router 的关系：
-    - [ ] 保留现有 `QUOTA_DEPLETED` / `QUOTA_RECOVERY` 事件格式，但将“修改健康状态”的责任从 engine-health 移除，改由 daemon/quota center 根据事件更新 `QuotaState`（`inPool` / `cooldownUntil` / `blacklistUntil`）。
-    - [ ] 在 engine-health 中对 `virtualRouterQuota*` 细节降级为 no-op 或只记录 debug 日志，避免重复维护两份健康状态。
+- [x] Q5.3 将 QUOTA_DEPLETED / QUOTA_RECOVERY 决策从 virtual-router 迁到 daemon
+  - [x] 调整 `QuotaManagerModule` 与 virtual-router 的关系（按 feature-flag 渐进）：
+    - [x] 保留现有 `QUOTA_DEPLETED` / `QUOTA_RECOVERY` 事件格式，daemon (`ProviderQuotaDaemonModule`) 会据此更新 `QuotaState`（`inPool` / `cooldownUntil` / `blacklistUntil`）。
+    - [x] 当 `QuotaView` 存在时，virtual-router 不再在 engine-health 中处理 QUOTA 事件（避免重复维护）。
 
 - [ ] Q5.4 关闭 legacy 429 backoff，统一用 quota 管控
   - [ ] 梳理 `ErrorHandlerRegistry` 中默认注册的 429 backoff handler（`RateLimitHandlerContext` / `RateLimitHandlerHooks`）。
