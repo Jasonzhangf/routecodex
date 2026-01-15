@@ -29,6 +29,24 @@ const AGENTS_INSTRUCTIONS = (() => {
   }
 })();
 
+function readServerApiKeyFromConfig(configPath) {
+  try {
+    const raw = fs.readFileSync(configPath, 'utf8');
+    const json = raw && raw.trim() ? JSON.parse(raw) : {};
+    const apikey = json?.httpserver?.apikey;
+    return typeof apikey === 'string' && apikey.trim() ? apikey.trim() : '';
+  } catch {
+    return '';
+  }
+}
+
+function buildAuthHeaders(serverApiKey) {
+  if (!serverApiKey) {
+    return {};
+  }
+  return { 'x-api-key': serverApiKey };
+}
+
 async function main() {
   if (!VERIFY_CONFIG) {
     console.error('❌ ROUTECODEX_VERIFY_CONFIG 未设置，无法运行端到端校验');
@@ -36,6 +54,8 @@ async function main() {
   }
 
   console.log(`[verify:e2e-toolcall] 使用配置: ${VERIFY_CONFIG}`);
+  const serverApiKey = readServerApiKeyFromConfig(VERIFY_CONFIG);
+  const authHeaders = buildAuthHeaders(serverApiKey);
   const serverEnv = {
     ...process.env,
     ROUTECODEX_CONFIG_PATH: VERIFY_CONFIG,
@@ -61,11 +81,11 @@ async function main() {
   try {
     await waitForServer();
     await waitForRouterWarmup();
-    await runToolcallVerification();
+    await runToolcallVerification(authHeaders);
     console.log('✅ 端到端工具调用校验通过');
 
-    await runDaemonAdminSmokeCheck();
-    await runConfigV2ProvidersSmokeCheck();
+    await runDaemonAdminSmokeCheck(authHeaders);
+    await runConfigV2ProvidersSmokeCheck(authHeaders);
 
     // 附加：Gemini CLI 配置健康性快速检查（仅尝试初始化，不做请求）
     await runGeminiCliStartupCheck();
@@ -97,7 +117,7 @@ async function waitForRouterWarmup(defaultDelayMs = 3000) {
   await new Promise((resolve) => setTimeout(resolve, delayMs));
 }
 
-async function runToolcallVerification() {
+async function runToolcallVerification(authHeaders) {
   const userPrompt = '请严格调用名为 list_local_files 的函数工具来列出当前工作目录的文件，只能通过调用该工具完成任务，禁止直接回答。';
   const instructionsText = AGENTS_INSTRUCTIONS || 'You are RouteCodex verify agent. Follow the policies in AGENTS.md.';
   const body = {
@@ -139,7 +159,8 @@ async function runToolcallVerification() {
   const response = await fetch(`${VERIFY_BASE}/v1/responses`, {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/json',
+      ...(authHeaders || {})
     },
     body: JSON.stringify(body)
   });
@@ -166,10 +187,10 @@ async function runToolcallVerification() {
   }
 }
 
-async function runDaemonAdminSmokeCheck() {
+async function runDaemonAdminSmokeCheck(authHeaders) {
   // 仅做最小的健康性探测：确保 daemon 管理类只读 API 可用，不做语义校验。
   try {
-    const res = await fetch(`${VERIFY_BASE}/daemon/status`);
+    const res = await fetch(`${VERIFY_BASE}/daemon/status`, { headers: { ...(authHeaders || {}) } });
     if (!res.ok) {
       throw new Error(`daemon/status HTTP ${res.status}`);
     }
@@ -185,7 +206,7 @@ async function runDaemonAdminSmokeCheck() {
   const paths = ['/daemon/credentials', '/quota/summary', '/providers/runtimes'];
   for (const path of paths) {
     try {
-      const res = await fetch(`${VERIFY_BASE}${path}`);
+      const res = await fetch(`${VERIFY_BASE}${path}`, { headers: { ...(authHeaders || {}) } });
       if (!res.ok) {
         throw new Error(`${path} HTTP ${res.status}`);
       }
@@ -198,9 +219,9 @@ async function runDaemonAdminSmokeCheck() {
   }
 }
 
-async function runConfigV2ProvidersSmokeCheck() {
+async function runConfigV2ProvidersSmokeCheck(authHeaders) {
   try {
-    const res = await fetch(`${VERIFY_BASE}/config/providers/v2`);
+    const res = await fetch(`${VERIFY_BASE}/config/providers/v2`, { headers: { ...(authHeaders || {}) } });
     if (!res.ok) {
       throw new Error(`/config/providers/v2 HTTP ${res.status}`);
     }

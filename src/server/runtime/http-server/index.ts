@@ -29,7 +29,7 @@ import type { ProviderRuntimeProfile } from '../../../providers/core/api/provide
 import type { ProviderProfile, ProviderProfileCollection } from '../../../providers/profile/provider-profile.js';
 import { buildProviderProfiles } from '../../../providers/profile/provider-profile-loader.js';
 import { isStageLoggingEnabled, logPipelineStage } from '../../utils/stage-logger.js';
-import { registerDefaultMiddleware } from './middleware.js';
+import { registerApiKeyAuthMiddleware, registerDefaultMiddleware } from './middleware.js';
 import { registerHttpRoutes, registerOAuthPortalRoute } from './routes.js';
 import { mapProviderProtocol, normalizeProviderType, resolveProviderIdentity, asRecord } from './provider-utils.js';
 import { resolveRepoRoot } from './llmswitch-loader.js';
@@ -132,6 +132,7 @@ export class RouteCodexHttpServer {
 
     // Register critical routes early (before provider initialization)
     // This ensures OAuth Portal is available when providers check token validity
+    registerApiKeyAuthMiddleware(this.app, this.config);
     registerDefaultMiddleware(this.app);
     registerOAuthPortalRoute(this.app);
     this.registerDaemonAdminUiRoute();

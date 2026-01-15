@@ -258,6 +258,8 @@ class RouteCodexApp {
         ?? readRecordString(getNestedRecord(userConfigRecord, ['server']), 'host')
         ?? '0.0.0.0';
       let bindPort = port;
+      let bindApiKey = readRecordString(getNestedRecord(userConfigRecord, ['httpserver']), 'apikey')
+        ?? readRecordString(getNestedRecord(userConfigRecord, ['modules', 'httpserver', 'config']), 'apikey');
       try {
         const envPort = Number(process.env.ROUTECODEX_PORT || process.env.RCC_PORT || NaN);
         const httpConfig =
@@ -265,6 +267,7 @@ class RouteCodexApp {
           getNestedRecord(userConfigRecord, ['modules', 'httpserver', 'config']);
         const serverConfig = getNestedRecord(userConfigRecord, ['server']);
         const portRaw = readRecordNumber(httpConfig, 'port') ?? readRecordNumber(serverConfig, 'port');
+        bindApiKey = readRecordString(httpConfig, 'apikey') ?? bindApiKey;
         if (Number.isFinite(envPort) && envPort > 0) {
           bindPort = envPort;
         } else if (typeof portRaw === 'number') {
@@ -276,6 +279,7 @@ class RouteCodexApp {
       } catch {
         bindHost = '0.0.0.0';
         bindPort = port;
+        bindApiKey = undefined;
       }
       const { RouteCodexHttpServer } = await import('./server/runtime/http-server.js');
       // V2 hooks 开关：默认开启；可通过 ROUTECODEX_V2_HOOKS=0/false/no 关闭
@@ -283,7 +287,7 @@ class RouteCodexApp {
       const hooksOff = hooksEnv === '0' || hooksEnv === 'false' || hooksEnv === 'no';
       const hooksOn = !hooksOff;
       this.httpServer = new RouteCodexHttpServer({
-        server: { host: bindHost, port: bindPort, useV2: true },
+        server: { host: bindHost, port: bindPort, apikey: bindApiKey, useV2: true },
         logging: { level: 'debug', enableConsole: true },
         providers: {},
         v2Config: { enableHooks: hooksOn }

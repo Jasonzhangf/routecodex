@@ -23,6 +23,11 @@ const CLIENT_HEADER_DENYLIST = new Set([
   'accept-encoding',
   'authorization',
   'proxy-authorization',
+  'x-api-key',
+  'x-routecodex-api-key',
+  'x-routecodex-apikey',
+  'api-key',
+  'apikey',
   'upgrade',
   'te'
 ]);

@@ -6,6 +6,7 @@ export interface ServerConfigV2 {
   server: {
     port: number;
     host: string;
+    apikey?: string;
     timeout?: number;
     useV2?: boolean;
   };
