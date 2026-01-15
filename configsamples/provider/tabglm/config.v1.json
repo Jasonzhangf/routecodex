@@ -31,12 +31,19 @@
     },
     "routing": {
       "default": [
-        "tabglm.gpt-5.2-codex"
+        {
+          "id": "default-primary",
+          "mode": "priority",
+          "targets": ["tabglm.gpt-5.2-codex"]
+        }
       ],
       "thinking": [
-        "tabglm.gpt-5.2-codex"
+        {
+          "id": "thinking-primary",
+          "mode": "priority",
+          "targets": ["tabglm.gpt-5.2-codex"]
+        }
       ]
     }
   }
 }
-

@@ -331,25 +331,45 @@
     },
     "routing": {
       "default": [
-        "glm.glm-4.7",
-        "tab.gpt-5.2-codex",
-        "iflow.kimi-k2"
+        {
+          "id": "default-primary",
+          "priority": 200,
+          "mode": "round-robin",
+          "targets": ["glm.glm-4.7", "tab.gpt-5.2-codex"]
+        },
+        {
+          "id": "default-backup",
+          "priority": 100,
+          "backup": true,
+          "mode": "round-robin",
+          "targets": ["iflow.kimi-k2"]
+        }
       ],
       "coding": [
-        "glm.glm-4.7",
-        "iflow.kimi-k2"
+        {
+          "id": "coding-primary",
+          "mode": "priority",
+          "targets": ["iflow.kimi-k2:200", "glm.glm-4.7:100"]
+        }
       ],
       "longcontext": [
-        "tab.gpt-5.1-codex",
-        "crs.gpt-5.1"
+        {
+          "id": "longcontext-primary",
+          "mode": "priority",
+          "targets": ["tab.gpt-5.1-codex:200", "crs.gpt-5.1:100"]
+        }
       ],
       "thinking": [
-        "crs.gpt-5.1-codex",
-        "tab.gpt-5.2-codex"
+        {
+          "id": "thinking-primary",
+          "mode": "priority",
+          "targets": ["crs.gpt-5.1-codex:200", "tab.gpt-5.2-codex:100"]
+        }
       ],
       "vision": [
         {
           "id": "vision-primary",
+          "mode": "priority",
           "targets": [
             "glm.glm-4.6v",
             "iflow.qwen3-vl-plus",
@@ -361,6 +381,7 @@
       "search": [
         {
           "id": "search-primary",
+          "mode": "priority",
           "targets": [
             "iflow.kimi-k2",
             "qwen.qwen3-coder-plus"
@@ -369,13 +390,18 @@
         }
       ],
       "background": [
-        "glm.glm-4.7",
-        "qwen.qwen3-coder-plus"
+        {
+          "id": "background-primary",
+          "mode": "round-robin",
+          "targets": ["glm.glm-4.7", "qwen.qwen3-coder-plus"]
+        }
       ],
       "tools": [
-        "glm.glm-4.7",
-        "qwen.qwen3-coder-plus",
-        "iflow.kimi-k2"
+        {
+          "id": "tools-primary",
+          "mode": "priority",
+          "targets": ["glm.glm-4.7:200", "qwen.qwen3-coder-plus:100", "iflow.kimi-k2:50"]
+        }
       ]
     },
     "webSearch": {

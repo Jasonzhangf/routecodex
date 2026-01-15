@@ -32,10 +32,18 @@
     },
     "routing": {
       "default": [
-        "tab.gpt-5.1"
+        {
+          "id": "default-primary",
+          "mode": "priority",
+          "targets": ["tab.gpt-5.1"]
+        }
       ],
       "thinking": [
-        "tab.gpt-5.2"
+        {
+          "id": "thinking-primary",
+          "mode": "priority",
+          "targets": ["tab.gpt-5.2"]
+        }
       ]
     }
   }

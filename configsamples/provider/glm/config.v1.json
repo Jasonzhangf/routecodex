@@ -41,13 +41,25 @@
     },
     "routing": {
       "default": [
-        "glm.glm-4.7"
+        {
+          "id": "default-primary",
+          "mode": "priority",
+          "targets": ["glm.glm-4.7"]
+        }
       ],
       "vision": [
-        "glm.glm-4.6v"
+        {
+          "id": "vision-primary",
+          "mode": "priority",
+          "targets": ["glm.glm-4.6v"]
+        }
       ],
       "web_search": [
-        "glm.glm-4.7"
+        {
+          "id": "web_search-primary",
+          "mode": "priority",
+          "targets": ["glm.glm-4.7"]
+        }
       ]
     },
     "webSearch": {

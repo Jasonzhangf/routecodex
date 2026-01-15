@@ -54,10 +54,18 @@
     },
     "routing": {
       "default": [
-        "iflow.kimi-k2"
+        {
+          "id": "default-primary",
+          "mode": "priority",
+          "targets": ["iflow.kimi-k2"]
+        }
       ],
       "vision": [
-        "iflow.qwen3-vl-plus"
+        {
+          "id": "vision-primary",
+          "mode": "priority",
+          "targets": ["iflow.qwen3-vl-plus"]
+        }
       ],
       "search": [],
       "background": []

@@ -27,7 +27,11 @@
     },
     "routing": {
       "default": [
-        "qwen.qwen3-coder-plus"
+        {
+          "id": "default-primary",
+          "mode": "priority",
+          "targets": ["qwen.qwen3-coder-plus"]
+        }
       ]
     }
   }

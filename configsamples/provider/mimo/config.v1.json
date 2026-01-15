@@ -24,7 +24,11 @@
     },
     "routing": {
       "default": [
-        "mimo.mimo-v2-flash"
+        {
+          "id": "default-primary",
+          "mode": "priority",
+          "targets": ["mimo.mimo-v2-flash"]
+        }
       ]
     }
   }

@@ -83,7 +83,11 @@
     },
     "routing": {
       "default": [
-        "lmstudio.gpt-oss-20b-mlx"
+        {
+          "id": "default-primary",
+          "mode": "priority",
+          "targets": ["lmstudio.gpt-oss-20b-mlx"]
+        }
       ],
       "coding": [],
       "longcontext": [],

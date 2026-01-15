@@ -35,7 +35,11 @@
     },
     "routing": {
       "default": [
-        "crs.gpt-5.1"
+        {
+          "id": "default-primary",
+          "mode": "priority",
+          "targets": ["crs.gpt-5.1"]
+        }
       ]
     }
   }

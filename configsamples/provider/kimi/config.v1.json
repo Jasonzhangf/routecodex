@@ -26,7 +26,11 @@
     },
     "routing": {
       "default": [
-        "kimi.kimi-for-coding"
+        {
+          "id": "default-primary",
+          "mode": "priority",
+          "targets": ["kimi.kimi-for-coding"]
+        }
       ]
     }
   },
