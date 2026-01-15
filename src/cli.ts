@@ -646,10 +646,17 @@ program
         const envPath = String(process.env.CLAUDE_PATH || '').trim();
         return envPath || 'claude';
       })();
+      // Windows: Node spawn does not resolve .cmd shims unless using a shell. Prefer shell for bare commands.
+      const shouldUseShell =
+        IS_WINDOWS &&
+        !path.extname(claudeBin) &&
+        !claudeBin.includes('/') &&
+        !claudeBin.includes('\\');
       const claudeProcess = spawn(claudeBin, claudeArgs, {
         stdio: 'inherit',
         env: claudeEnv,
-        cwd: currentCwd
+        cwd: currentCwd,
+        shell: shouldUseShell
       });
 
       spinner.succeed('Claude Code launched with RouteCodex proxy');
@@ -667,6 +674,16 @@ program
 
       process.on('SIGINT', () => { void shutdown('SIGINT'); });
       process.on('SIGTERM', () => { void shutdown('SIGTERM'); });
+
+      claudeProcess.on('error', (err) => {
+        try {
+          logger.error(`Failed to launch Claude Code (${claudeBin}): ${err instanceof Error ? err.message : String(err)}`);
+          if (IS_WINDOWS && shouldUseShell) {
+            logger.error('Tip: If Claude is installed via npm, ensure the shim is in PATH (e.g. claude.cmd).');
+          }
+        } catch { /* ignore */ }
+        process.exit(1);
+      });
 
       claudeProcess.on('exit', (code, signal) => {
         if (signal) {
