@@ -45,6 +45,10 @@ export function registerApiKeyAuthMiddleware(app: Application, config: ServerCon
     }
 
     const path = typeof req.path === 'string' ? req.path : '';
+    if (path === '/daemon/admin' || path === '/daemon/admin/') {
+      next();
+      return;
+    }
     if (path === '/health' || path === '/health/') {
       next();
       return;

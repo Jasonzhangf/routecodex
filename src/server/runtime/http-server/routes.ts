@@ -60,7 +60,8 @@ export function registerHttpRoutes(options: RouteOptions): void {
     getPipelineReady,
     handleError,
     getHealthSnapshot,
-    getRoutingState
+    getRoutingState,
+    getVirtualRouterArtifacts
   } = options;
 
   console.log('[RouteCodexHttpServer] Setting up routes...');
@@ -76,6 +77,45 @@ export function registerHttpRoutes(options: RouteOptions): void {
   app.get('/config', (_req: Request, res: Response) => {
     res.status(200).json({ httpserver: { host: config.server.host, port: config.server.port }, merged: false });
   });
+
+  const listModels = (_req: Request, res: Response) => {
+    try {
+      const artifacts = typeof getVirtualRouterArtifacts === 'function' ? getVirtualRouterArtifacts() : null;
+      const vrConfig = (artifacts as any)?.config as any;
+      const providers = vrConfig && typeof vrConfig === 'object' ? (vrConfig as any).providers : null;
+      const items: Array<{ id: string; object: 'model'; owned_by: string }> = [];
+      const seen = new Set<string>();
+      if (providers && typeof providers === 'object') {
+        for (const [providerKey, profile] of Object.entries(providers as Record<string, any>)) {
+          const providerId =
+            typeof profile?.runtimeKey === 'string' && profile.runtimeKey.includes('.')
+              ? String(profile.runtimeKey).split('.')[0]
+              : typeof providerKey === 'string' && providerKey.includes('.')
+              ? providerKey.split('.')[0]
+              : '';
+          const modelId = typeof profile?.modelId === 'string' ? String(profile.modelId) : '';
+          if (!providerId || !modelId) {
+            continue;
+          }
+          const id = `${providerId}.${modelId}`;
+          if (seen.has(id)) {
+            continue;
+          }
+          seen.add(id);
+          items.push({ id, object: 'model', owned_by: providerId });
+        }
+      }
+      items.sort((a, b) => a.id.localeCompare(b.id));
+      res.status(200).json({ object: 'list', data: items });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ error: { message } });
+    }
+  };
+
+  // Standard model discovery: returns provider-prefixed models (provider.model).
+  app.get('/models', listModels);
+  app.get('/v1/models', listModels);
 
   app.get('/manager/state/health', (_req: Request, res: Response) => {
     try {

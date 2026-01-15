@@ -172,9 +172,17 @@ export class RouteCodexHttpServer {
           res.status(403).json({ error: { message: 'forbidden', code: 'forbidden' } });
           return;
         }
-        const filePath = new URL('../../../../docs/daemon-admin-ui.html', import.meta.url);
         const fs = await import('node:fs/promises');
-        const html = await fs.readFile(filePath, 'utf8');
+        let html = '';
+        try {
+          const filePath = new URL('../../../../docs/daemon-admin-ui.html', import.meta.url);
+          html = await fs.readFile(filePath, 'utf8');
+        } catch {
+          // build output reads from dist/docs; fallback to cwd/docs for dev runners
+          const path = await import('node:path');
+          const fallback = path.join(process.cwd(), 'docs', 'daemon-admin-ui.html');
+          html = await fs.readFile(fallback, 'utf8');
+        }
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
         res.send(html);
       } catch (error: unknown) {

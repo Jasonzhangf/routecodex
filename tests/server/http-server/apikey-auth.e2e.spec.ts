@@ -83,6 +83,10 @@ describe('HTTP apikey auth (optional)', () => {
       const health = await getJson(baseUrl, '/health');
       expect(health.status).toBe(200);
 
+      const adminUi = await getJson(baseUrl, '/daemon/admin');
+      expect(adminUi.status).toBe(200);
+      expect(String(adminUi.body)).toContain('<html');
+
       const denied = await getJson(baseUrl, '/config');
       expect(denied.status).toBe(401);
 
@@ -116,4 +120,3 @@ describe('HTTP apikey auth (optional)', () => {
     }
   });
 });
-

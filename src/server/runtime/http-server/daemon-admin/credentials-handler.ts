@@ -1,8 +1,11 @@
 import path from 'node:path';
 import type { Application, Request, Response } from 'express';
+import fs from 'node:fs/promises';
+import os from 'node:os';
 import type { DaemonAdminRouteOptions } from '../daemon-admin-routes.js';
 import { isLocalRequest } from '../daemon-admin-routes.js';
-import { collectTokenSnapshot, readTokenFile, evaluateTokenState } from '../../../../token-daemon/token-utils.js';
+import { collectTokenSnapshot, readTokenFile, evaluateTokenState, DEFAULT_AUTH_DIR } from '../../../../token-daemon/token-utils.js';
+import { ensureValidOAuthToken } from '../../../../providers/auth/oauth-lifecycle.js';
 
 interface CredentialSummary {
   id: string;
@@ -18,6 +21,7 @@ interface CredentialSummary {
   hasAccessToken: boolean;
   hasApiKey: boolean;
   noRefresh: boolean;
+  secretRef?: string;
 }
 
 async function buildCredentialSummaries(): Promise<CredentialSummary[]> {
@@ -49,6 +53,27 @@ async function buildCredentialSummaries(): Promise<CredentialSummary[]> {
         noRefresh: token.state.noRefresh === true
       });
     }
+  }
+
+  const apikeyMatches = await scanApiKeyAuthFiles();
+  for (const match of apikeyMatches) {
+    const hasApiKey = Boolean(match.hasApiKey);
+    results.push({
+      id: match.id,
+      kind: 'apikey',
+      provider: match.providerPrefix,
+      alias: match.alias,
+      tokenFile: match.filePath,
+      displayName: match.alias && match.alias !== 'default' ? match.alias : match.id,
+      expiresAt: null,
+      expiresInSec: null,
+      status: hasApiKey ? 'valid' : 'invalid',
+      hasRefreshToken: false,
+      hasAccessToken: false,
+      hasApiKey,
+      noRefresh: true,
+      secretRef: `authfile-${path.basename(match.filePath)}`
+    });
   }
   return results;
 }
@@ -136,7 +161,7 @@ export function registerCredentialRoutes(app: Application, _options: DaemonAdmin
       res.status(200).json({
         ok: true,
         id: summary.id,
-        status: state.status,
+        status: summary.kind === 'apikey' ? summary.status : state.status,
         checkedAt: Date.now(),
         message: 'Verified locally (token file parsed and evaluated); no upstream call performed.'
       });
@@ -159,4 +184,164 @@ export function registerCredentialRoutes(app: Application, _options: DaemonAdmin
       }
     });
   });
+
+  app.post('/daemon/credentials/apikey', async (req: Request, res: Response) => {
+    if (!isLocalRequest(req)) {
+      res.status(403).json({ error: { message: 'forbidden', code: 'forbidden' } });
+      return;
+    }
+    const body = req.body as Record<string, unknown>;
+    const provider = typeof body?.provider === 'string' ? body.provider.trim() : '';
+    const alias = typeof body?.alias === 'string' && body.alias.trim() ? body.alias.trim() : 'default';
+    const apiKey = typeof body?.apiKey === 'string' ? body.apiKey.trim() : '';
+    if (!provider) {
+      res.status(400).json({ error: { message: 'provider is required', code: 'bad_request' } });
+      return;
+    }
+    if (!apiKey) {
+      res.status(400).json({ error: { message: 'apiKey is required', code: 'bad_request' } });
+      return;
+    }
+    try {
+      const fileName = await allocateApiKeyFileName(provider, alias);
+      const filePath = path.join(DEFAULT_AUTH_DIR, fileName);
+      await fs.mkdir(DEFAULT_AUTH_DIR, { recursive: true });
+      await fs.writeFile(filePath, `${apiKey}\n`, { encoding: 'utf8', mode: 0o600 });
+      res.status(200).json({
+        ok: true,
+        provider,
+        alias,
+        fileName,
+        secretRef: `authfile-${fileName}`
+      });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ error: { message } });
+    }
+  });
+
+  app.post('/daemon/oauth/authorize', async (req: Request, res: Response) => {
+    if (!isLocalRequest(req)) {
+      res.status(403).json({ error: { message: 'forbidden', code: 'forbidden' } });
+      return;
+    }
+    const body = req.body as Record<string, unknown>;
+    const provider = typeof body?.provider === 'string' ? body.provider.trim() : '';
+    const alias = typeof body?.alias === 'string' && body.alias.trim() ? body.alias.trim() : '';
+    const openBrowser = body?.openBrowser !== false;
+    const forceReauthorize = body?.forceReauthorize === true;
+    if (!provider) {
+      res.status(400).json({ error: { message: 'provider is required', code: 'bad_request' } });
+      return;
+    }
+    if (!alias) {
+      res.status(400).json({ error: { message: 'alias is required', code: 'bad_request' } });
+      return;
+    }
+    if (!SUPPORTED_OAUTH_PROVIDERS.has(provider)) {
+      res.status(400).json({ error: { message: `unsupported oauth provider: ${provider}`, code: 'bad_request' } });
+      return;
+    }
+    try {
+      const type = provider === 'gemini-cli' ? 'gemini-cli-oauth' : `${provider}-oauth`;
+      const auth = { type, tokenFile: alias } as any;
+      // Best effort: allow UI-configured browser selection without requiring restart.
+      const browserHint = String(process.env.ROUTECODEX_OAUTH_BROWSER || '').trim();
+      if (!browserHint) {
+        const configPath = path.join(os.homedir(), '.routecodex', 'config.json');
+        try {
+          const raw = await fs.readFile(configPath, 'utf8');
+          const parsed = raw.trim() ? JSON.parse(raw) : {};
+          const oauthBrowser =
+            typeof (parsed as { oauthBrowser?: unknown }).oauthBrowser === 'string'
+              ? ((parsed as { oauthBrowser?: string }).oauthBrowser as string).trim()
+              : '';
+          if (oauthBrowser) {
+            process.env.ROUTECODEX_OAUTH_BROWSER = oauthBrowser;
+          }
+        } catch {
+          // ignore config read errors for browser hint
+        }
+      }
+
+      await ensureValidOAuthToken(provider, auth, {
+        openBrowser,
+        forceReauthorize,
+        forceReacquireIfRefreshFails: true
+      });
+      res.status(200).json({
+        ok: true,
+        provider,
+        alias,
+        tokenFile: typeof auth.tokenFile === 'string' ? auth.tokenFile : null
+      });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ error: { message } });
+    }
+  });
 }
+
+type ApiKeyMatch = {
+  filePath: string;
+  providerPrefix: string;
+  sequence: number;
+  alias: string;
+  id: string;
+  hasApiKey: boolean;
+};
+
+const APIKEY_FILE_PATTERN = /^(.+)-apikey-(\d+)(?:-(.+))?\.key$/i;
+
+async function scanApiKeyAuthFiles(): Promise<ApiKeyMatch[]> {
+  try {
+    const entries = await fs.readdir(DEFAULT_AUTH_DIR);
+    const matches: ApiKeyMatch[] = [];
+    for (const entry of entries) {
+      const m = entry.match(APIKEY_FILE_PATTERN);
+      if (!m) {
+        continue;
+      }
+      const providerPrefix = m[1] || '';
+      const sequence = parseInt(m[2], 10);
+      const alias = (m[3] || 'default').trim() || 'default';
+      if (!providerPrefix || !Number.isFinite(sequence) || sequence <= 0) {
+        continue;
+      }
+      const filePath = path.join(DEFAULT_AUTH_DIR, entry);
+      const content = await fs.readFile(filePath, 'utf8').catch(() => '');
+      const hasApiKey = Boolean(content && content.trim());
+      matches.push({
+        filePath,
+        providerPrefix,
+        sequence,
+        alias,
+        id: path.basename(entry, '.key'),
+        hasApiKey
+      });
+    }
+    matches.sort((a, b) => a.sequence - b.sequence);
+    return matches;
+  } catch {
+    return [];
+  }
+}
+
+async function allocateApiKeyFileName(provider: string, alias: string): Promise<string> {
+  const safeProvider = provider.toLowerCase().replace(/[^a-z0-9_.-]+/g, '-');
+  const safeAlias = alias.toLowerCase().replace(/[^a-z0-9_.-]+/g, '-');
+  const entries = await scanApiKeyAuthFiles();
+  let maxSeq = 0;
+  for (const entry of entries) {
+    if (entry.providerPrefix.toLowerCase() !== safeProvider) {
+      continue;
+    }
+    if (entry.sequence > maxSeq) {
+      maxSeq = entry.sequence;
+    }
+  }
+  const nextSeq = maxSeq + 1;
+  return `${safeProvider}-apikey-${nextSeq}-${safeAlias}.key`;
+}
+
+const SUPPORTED_OAUTH_PROVIDERS = new Set(['iflow', 'qwen', 'gemini-cli', 'antigravity']);
