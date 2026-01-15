@@ -8,6 +8,7 @@ import { Readable } from 'node:stream';
 import http from 'node:http';
 import { setTimeout as delay } from 'node:timers/promises';
 import { spawnSync } from 'node:child_process';
+import chalk from 'chalk';
 import { createTempConfig, startServer, stopServer } from '../lib/routecodex-runner.mjs';
 import { GeminiSemanticMapper } from '../../sharedmodule/llmswitch-core/dist/conversion/hub/semantic-mappers/gemini-mapper.js';
 
@@ -29,6 +30,8 @@ const STAGE_DIR = path.join(HOME, '.routecodex', 'golden_samples', 'openai-respo
 const STAGE_SUFFIX = '_req_outbound_stage2_format_build.json';
 const STAGE1_SUFFIX = '_req_outbound_stage1_semantic_map.json';
 const MOCK_PROVIDER_ID = 'mock.apply_patch.toolloop';
+
+const chalkError = typeof chalk?.redBright === 'function' ? chalk.redBright : (value) => value;
 
 function listProcessesOnPort(port) {
   try {
@@ -702,6 +705,7 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error(`[tool-loop] FAILED: ${error.message}`);
+  const msg = error instanceof Error ? (error.stack || error.message) : String(error ?? '');
+  console.error(chalkError(`[tool-loop] FAILED: ${msg}`));
   process.exit(1);
 });

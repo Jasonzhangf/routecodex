@@ -37,13 +37,14 @@ function parseEntryFilter() {
 
 async function ensureCliAvailable() {
   const cliPath = path.join(PROJECT_ROOT, 'dist', 'cli.js');
-  if (await fileExists(cliPath)) {
+  const serverPath = path.join(PROJECT_ROOT, 'dist', 'index.js');
+  if ((await fileExists(cliPath)) && (await fileExists(serverPath))) {
     return;
   }
-  console.warn('[mock:regressions] dist/cli.js missing, running "npm run build:min" automatically...');
+  console.warn('[mock:regressions] dist artifacts missing (cli.js/index.js), running "npm run build:min" automatically...');
   await runBuildForMockRegressions();
-  if (!(await fileExists(cliPath))) {
-    throw new Error('dist/cli.js missing after automatic build. Please run "npm run build:dev" manually.');
+  if (!(await fileExists(cliPath)) || !(await fileExists(serverPath))) {
+    throw new Error('dist artifacts missing after automatic build. Please run "npm run build:dev" manually.');
   }
 }
 

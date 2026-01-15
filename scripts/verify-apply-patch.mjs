@@ -7,12 +7,15 @@
  */
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import chalk from 'chalk';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
 const coreLoaderPath = path.join(repoRoot, 'dist', 'modules', 'llmswitch', 'core-loader.js');
 const coreLoaderUrl = pathToFileURL(coreLoaderPath).href;
 const { importCoreModule } = await import(coreLoaderUrl);
+
+const chalkError = typeof chalk?.redBright === 'function' ? chalk.redBright : (value) => value;
 
 async function loadCoreModule(subpath) {
   return importCoreModule(subpath);
@@ -99,6 +102,47 @@ async function runApplyPatchTextCase(label, payloadText) {
   }
 }
 
+async function runApplyPatchArgsCase(label, argsString) {
+  const { validateToolCall } = await loadCoreModule('tools/tool-registry');
+  const validation = validateToolCall('apply_patch', argsString);
+  if (!validation?.ok) {
+    throw new Error(
+      `[verify-apply-patch] ${label}: validateToolCall failed with reason=${validation?.reason}`
+    );
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(validation.normalizedArgs || '{}');
+  } catch (error) {
+    throw new Error(
+      `[verify-apply-patch] ${label}: normalized arguments not valid JSON: ${(error && error.message) || String(error)}`
+    );
+  }
+  const normalizedPatchText =
+    typeof parsed?.patch === 'string'
+      ? parsed.patch
+      : typeof parsed?.input === 'string'
+        ? parsed.input
+        : '';
+  if (!normalizedPatchText) {
+    throw new Error(`[verify-apply-patch] ${label}: missing normalized patch text`);
+  }
+  if (!normalizedPatchText.startsWith('*** Begin Patch')) {
+    throw new Error(`[verify-apply-patch] ${label}: patch does not start with *** Begin Patch`);
+  }
+  if (!normalizedPatchText.includes('\n*** End Patch')) {
+    throw new Error(`[verify-apply-patch] ${label}: patch missing *** End Patch`);
+  }
+  if (
+    normalizedPatchText.includes('*** End Patch","input":"*** Begin Patch') ||
+    normalizedPatchText.includes('*** End Patch","patch":"*** Begin Patch') ||
+    normalizedPatchText.includes('*** End Patch\\",\\"input\\":\\"*** Begin Patch') ||
+    normalizedPatchText.includes('*** End Patch\\",\\"patch\\":\\"*** Begin Patch')
+  ) {
+    throw new Error(`[verify-apply-patch] ${label}: patch still contains stitched JSON keys`);
+  }
+}
+
 async function main() {
   if (String(process.env.ROUTECODEX_VERIFY_SKIP || '').trim() === '1') {
     console.log('[verify-apply-patch] 跳过（ROUTECODEX_VERIFY_SKIP=1）');
@@ -107,6 +151,7 @@ async function main() {
 
   try {
     const { validateToolCall } = await loadCoreModule('tools/tool-registry');
+    const escapeNewlines = (value) => String(value || '').replace(/\n/g, '\\n');
 
     // Regression: tolerate newline-escaped patch text (e.g. "*** Begin Patch\\n...") and
     // normalize into a real multi-line unified diff string.
@@ -173,6 +218,110 @@ async function main() {
       }
       if (!normalizedPatchText.includes('*** End Patch')) {
         throw new Error('[verify-apply-patch] already_normalized: patch missing *** End Patch');
+      }
+    }
+
+    // Regression: accept a typical sequence of apply_patch calls (add/update/append/escape/multi-hunk/delete).
+    // Note: we only validate tool governance & patch text normalization, not filesystem application.
+    {
+      const addBasic = [
+        '*** Begin Patch',
+        '*** Add File: .apply_patch_basic_add.txt',
+        '+apply_patch basic add ok',
+        '+line2',
+        '*** End Patch'
+      ].join('\n');
+      const updateBasic = [
+        '*** Begin Patch',
+        '*** Update File: .apply_patch_basic_add.txt',
+        '@@',
+        '-apply_patch basic add ok',
+        '+apply_patch basic add+update ok',
+        ' line2',
+        '*** End Patch'
+      ].join('\n');
+      const appendBasic = [
+        '*** Begin Patch',
+        '*** Update File: .apply_patch_basic_add.txt',
+        '@@',
+        ' apply_patch basic add+update ok',
+        ' line2',
+        '+line3 (append)',
+        '*** End Patch'
+      ].join('\n');
+      const addEscapeChars = [
+        '*** Begin Patch',
+        '*** Add File: .apply_patch_escape_chars.txt',
+        '+quotes: "double" and \'single\'',
+        '+backslash: \\',
+        '+json: {"a":1,"b":"x"}',
+        '+template: ${notInterpolated}',
+        '*** End Patch'
+      ].join('\n');
+      const addMulti = [
+        '*** Begin Patch',
+        '*** Add File: .apply_patch_multi_hunk.txt',
+        '+Header',
+        '+Section A',
+        '+Section B',
+        '+Footer',
+        '*** End Patch'
+      ].join('\n');
+      const updateMulti = [
+        '*** Begin Patch',
+        '*** Update File: .apply_patch_multi_hunk.txt',
+        '@@',
+        ' Header',
+        '-Section A',
+        '+Section A (updated)',
+        ' Section B',
+        ' Footer',
+        '@@',
+        ' Header',
+        ' Section A (updated)',
+        '-Section B',
+        '+Section B (updated)',
+        ' Footer',
+        '*** End Patch'
+      ].join('\n');
+      const deleteBasic = [
+        '*** Begin Patch',
+        '*** Delete File: .apply_patch_basic_add.txt',
+        '*** End Patch'
+      ].join('\n');
+      const deleteEscapeChars = [
+        '*** Begin Patch',
+        '*** Delete File: .apply_patch_escape_chars.txt',
+        '*** End Patch'
+      ].join('\n');
+      const deleteMulti = [
+        '*** Begin Patch',
+        '*** Delete File: .apply_patch_multi_hunk.txt',
+        '*** End Patch'
+      ].join('\n');
+
+      const cases = [
+        ['seq_basic_add_text', addBasic],
+        ['seq_basic_update_text', updateBasic],
+        ['seq_basic_append_text', appendBasic],
+        ['seq_escape_chars_text', addEscapeChars],
+        ['seq_multi_add_text', addMulti],
+        ['seq_multi_update_text', updateMulti],
+        ['seq_basic_delete_text', deleteBasic],
+        ['seq_escape_chars_delete_text', deleteEscapeChars],
+        ['seq_multi_delete_text', deleteMulti]
+      ];
+
+      for (const [label, patchText] of cases) {
+        await runApplyPatchArgsCase(label, patchText);
+        await runApplyPatchArgsCase(
+          `${label}_json`,
+          JSON.stringify({ patch: patchText, input: patchText })
+        );
+        await runApplyPatchArgsCase(
+          `${label}_json_escaped_newlines`,
+          JSON.stringify({ patch: escapeNewlines(patchText), input: escapeNewlines(patchText) })
+        );
       }
     }
 
@@ -277,11 +426,9 @@ async function main() {
 
     console.log('✅ verify-apply-patch: text→tool_calls pipeline passed');
   } catch (error) {
-    console.error(error);
-    console.error(
-      '❌ verify-apply-patch 失败:',
-      error instanceof Error ? error.message : String(error ?? 'Unknown error')
-    );
+    const msg = error instanceof Error ? (error.stack || error.message) : String(error ?? 'Unknown error');
+    console.error(chalkError(msg));
+    console.error(chalkError(`❌ verify-apply-patch 失败: ${error instanceof Error ? error.message : String(error ?? 'Unknown error')}`));
     process.exit(1);
   }
 }
