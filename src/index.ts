@@ -9,10 +9,12 @@ import fsSync from 'fs';
 import path from 'path';
 import { homedir } from 'os';
 import net from 'net';
-import { spawn } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { buildInfo } from './build-info.js';
+import { isDirectExecution } from './utils/is-direct-execution.js';
+import { parseNetstatListeningPids } from './utils/windows-netstat.js';
 import { reportRouteError } from './error-handling/route-error-hub.js';
 import { resolveRouteCodexConfigPath } from './config/config-paths.js';
 import { loadRouteCodexConfig } from './config/routecodex-config-loader.js';
@@ -593,7 +595,7 @@ async function ensurePortAvailable(port: number, opts: { attemptGraceful?: boole
     return;
   }
   for (const pid of pids) {
-    try { process.kill(Number(pid), 'SIGTERM'); } catch { /* ignore */ }
+    killPidBestEffort(Number(pid), { force: false });
   }
   for (let i = 0; i < 10; i++) {
     await new Promise(r => setTimeout(r, 300));
@@ -603,9 +605,32 @@ async function ensurePortAvailable(port: number, opts: { attemptGraceful?: boole
   }
   const remain = await listPidsOnPort(port);
   for (const pid of remain) {
-    try { process.kill(Number(pid), 'SIGKILL'); } catch { /* ignore */ }
+    killPidBestEffort(Number(pid), { force: true });
   }
   await new Promise(r => setTimeout(r, 500));
+}
+
+function killPidBestEffort(pid: number, opts: { force: boolean }): void {
+  if (!Number.isFinite(pid) || pid <= 0) {
+    return;
+  }
+  if (process.platform === 'win32') {
+    const args = ['/PID', String(pid), '/T'];
+    if (opts.force) {
+      args.push('/F');
+    }
+    try {
+      spawnSync('taskkill', args, { stdio: 'ignore', encoding: 'utf8' });
+    } catch {
+      // best-effort
+    }
+    return;
+  }
+  try {
+    process.kill(pid, opts.force ? 'SIGKILL' : 'SIGTERM');
+  } catch {
+    // best-effort
+  }
 }
 
 async function canBind(port: number): Promise<boolean> {
@@ -621,6 +646,17 @@ async function canBind(port: number): Promise<boolean> {
 }
 
 async function listPidsOnPort(port: number): Promise<string[]> {
+  if (process.platform === 'win32') {
+    try {
+      const result = spawnSync('netstat', ['-ano', '-p', 'tcp'], { encoding: 'utf8' });
+      if (result.error) {
+        return [];
+      }
+      return parseNetstatListeningPids(result.stdout || '', port).map(String);
+    } catch {
+      return [];
+    }
+  }
   return await new Promise<string[]>(resolve => {
     try {
       const ps = spawn('lsof', ['-ti', `:${port}`]);
@@ -712,7 +748,7 @@ async function main(): Promise<void> {
 }
 
 // Start the application if this file is run directly
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isDirectExecution(import.meta.url, process.argv[1])) {
   main().catch(async (error) => {
     const message = error instanceof Error ? error.message : String(error ?? '');
     recordShutdownReason({ kind: 'startupError', message });

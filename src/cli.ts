@@ -15,6 +15,7 @@ import { fileURLToPath } from 'url';
 import { LOCAL_HOSTS, HTTP_PROTOCOLS, API_PATHS, DEFAULT_CONFIG, API_ENDPOINTS } from './constants/index.js';
 import { buildInfo } from './build-info.js';
 import { ensureLocalTokenPortalEnv } from './token-portal/local-token-portal.js';
+import { parseNetstatListeningPids } from './utils/windows-netstat.js';
 // Spinner wrapper (lazy-loaded to avoid hard dependency on ora/restore-cursor issues)
 type Spinner = {
   start(text?: string): Spinner;
@@ -189,6 +190,7 @@ const pkgName: string = (() => {
 // - routecodex（dev 包）：默认端口 5555，用于本地开发调试，不读取配置端口，除非显式设置 ROUTECODEX_PORT/RCC_PORT
 // - rcc（release 包）：严格按配置文件端口启动（httpserver.port/server.port/port）
 const IS_DEV_PACKAGE = pkgName === 'routecodex';
+const IS_WINDOWS = process.platform === 'win32';
 const DEFAULT_DEV_PORT = 5555;
 const TOKEN_DAEMON_PID_FILE = path.join(homedir(), '.routecodex', 'token-daemon.pid');
 program
@@ -208,6 +210,29 @@ async function ensureTokenDaemonAutoStart(): Promise<void> {
     logger.info(
       'Token manager is now integrated into the server process; automatic external token-daemon auto-start is disabled.'
     );
+  }
+}
+
+function killPidBestEffort(pid: number, opts: { force: boolean }): void {
+  if (!Number.isFinite(pid) || pid <= 0) {
+    return;
+  }
+  if (IS_WINDOWS) {
+    const args = ['/PID', String(pid), '/T'];
+    if (opts.force) {
+      args.push('/F');
+    }
+    try {
+      spawnSync('taskkill', args, { stdio: 'ignore', encoding: 'utf8' });
+    } catch {
+      // best-effort
+    }
+    return;
+  }
+  try {
+    process.kill(pid, opts.force ? 'SIGKILL' : 'SIGTERM');
+  } catch {
+    // best-effort
   }
 }
 
@@ -234,7 +259,7 @@ async function stopTokenDaemonIfRunning(): Promise<void> {
       return;
     }
     try {
-      process.kill(pid, 'SIGTERM');
+      killPidBestEffort(pid, { force: false });
     } catch {
       // ignore
     }
@@ -930,7 +955,9 @@ program
         } catch (error) { /* ignore */ }
         // 2) Forward signal to child
         try { childProc.kill(sig); } catch (error) { /* ignore */ }
-        try { if (childProc.pid) { process.kill(-childProc.pid, sig); } } catch (error) { /* ignore */ }
+        if (!IS_WINDOWS) {
+          try { if (childProc.pid) { process.kill(-childProc.pid, sig); } } catch (error) { /* ignore */ }
+        }
         // 3) Wait briefly; if still listening, try SIGTERM/SIGKILL by port
         const deadline = Date.now() + 3500;
         while (Date.now() < deadline) {
@@ -940,7 +967,7 @@ program
         const remain = findListeningPids(resolvedPort);
         if (remain.length) {
           for (const pid of remain) {
-            try { process.kill(pid, 'SIGTERM'); } catch { /* ignore */ }
+            killPidBestEffort(pid, { force: false });
           }
           const killDeadline = Date.now() + 1500;
           while (Date.now() < killDeadline) {
@@ -951,7 +978,7 @@ program
         const still = findListeningPids(resolvedPort);
         if (still.length) {
           for (const pid of still) {
-            try { process.kill(pid, 'SIGKILL'); } catch { /* ignore */ }
+            killPidBestEffort(pid, { force: true });
           }
         }
         if (IS_DEV_PACKAGE) {
@@ -1296,7 +1323,7 @@ program
         return;
       }
       for (const pid of pids) {
-        try { process.kill(pid, 'SIGTERM'); } catch { /* ignore */ }
+        killPidBestEffort(pid, { force: false });
       }
       const deadline = Date.now() + 3000;
       while (Date.now() < deadline) {
@@ -1311,7 +1338,7 @@ program
       }
       const remain = findListeningPids(resolvedPort);
       if (remain.length) {
-        for (const pid of remain) { try { process.kill(pid, 'SIGKILL'); } catch { /* ignore */ } }
+        for (const pid of remain) { killPidBestEffort(pid, { force: true }); }
       }
       spinner.succeed(`Force stopped server on ${resolvedPort}.`);
       if (IS_DEV_PACKAGE) {
@@ -1386,14 +1413,14 @@ program
       // Stop current instance (if any)
       const pids = findListeningPids(resolvedPort);
       if (pids.length) {
-        for (const pid of pids) { try { process.kill(pid, 'SIGTERM'); } catch { /* ignore */ } }
+        for (const pid of pids) { killPidBestEffort(pid, { force: false }); }
         const deadline = Date.now() + 3500;
         while (Date.now() < deadline) {
           if (findListeningPids(resolvedPort).length === 0) {break;}
           await sleep(120);
         }
         const remain = findListeningPids(resolvedPort);
-        for (const pid of remain) { try { process.kill(pid, 'SIGKILL'); } catch { /* ignore */ } }
+        for (const pid of remain) { killPidBestEffort(pid, { force: true }); }
       }
 
       spinner.text = 'Starting RouteCodex server...';
@@ -1427,21 +1454,23 @@ program
       const shutdown = async (sig: NodeJS.Signals) => {
         try { await fetch(`${HTTP_PROTOCOLS.HTTP}${LOCAL_HOSTS.IPV4}:${resolvedPort}${API_PATHS.SHUTDOWN}`, { method: 'POST' }).catch(() => {}); } catch (error) { /* ignore */ }
         try { child.kill(sig); } catch (error) { /* ignore */ }
-        try { if (child.pid) { process.kill(-child.pid, sig); } } catch (error) { /* ignore */ }
+        if (!IS_WINDOWS) {
+          try { if (child.pid) { process.kill(-child.pid, sig); } } catch (error) { /* ignore */ }
+        }
         const deadline = Date.now() + 3500;
         while (Date.now() < deadline) {
           if (findListeningPids(resolvedPort).length === 0) {break;}
           await sleep(120);
         }
         const remain = findListeningPids(resolvedPort);
-        for (const pid of remain) { try { process.kill(pid, 'SIGTERM'); } catch (error) { /* ignore */ } }
+        for (const pid of remain) { killPidBestEffort(pid, { force: false }); }
         const killDeadline = Date.now() + 1500;
         while (Date.now() < killDeadline) {
           if (findListeningPids(resolvedPort).length === 0) {break;}
           await sleep(100);
         }
         const still = findListeningPids(resolvedPort);
-        for (const pid of still) { try { process.kill(pid, 'SIGKILL'); } catch (error) { /* ignore */ } }
+        for (const pid of still) { killPidBestEffort(pid, { force: true }); }
         // Ensure parent exits in any case
         try { process.exit(0); } catch (error) { /* ignore */ }
       };
@@ -1751,7 +1780,7 @@ async function ensurePortAvailable(port: number, parentSpinner: Spinner, opts: {
 
   for (const pid of initialPids) {
     try {
-      process.kill(pid, 'SIGTERM');
+      killPidBestEffort(pid, { force: false });
     } catch (error) {
       stopSpinner.warn(`Failed to send SIGTERM to PID ${pid}: ${(error as Error).message}`);
     }
@@ -1774,7 +1803,7 @@ async function ensurePortAvailable(port: number, parentSpinner: Spinner, opts: {
     logger.warning(`Graceful stop timed out. Forcing SIGKILL to PID(s): ${remaining.join(', ')}`);
     for (const pid of remaining) {
       try {
-        process.kill(pid, 'SIGKILL');
+        killPidBestEffort(pid, { force: true });
       } catch (error) {
         const message = (error as Error).message;
         stopSpinner.warn(`Failed to send SIGKILL to PID ${pid}: ${message}`);
@@ -1808,6 +1837,15 @@ async function ensurePortAvailable(port: number, parentSpinner: Spinner, opts: {
 
 function findListeningPids(port: number): number[] {
   try {
+    if (IS_WINDOWS) {
+      const result = spawnSync('netstat', ['-ano', '-p', 'tcp'], { encoding: 'utf8' });
+      if (result.error) {
+        logger.warning(`netstat not available to inspect port usage: ${result.error.message}`);
+        return [];
+      }
+      return parseNetstatListeningPids(result.stdout || '', port);
+    }
+
     // macOS/BSD lsof expects either "-i TCP:port" or "-tiTCP:port" as a single argument.
     // Use the compact form to avoid treating ":port" as a filename.
     const result = spawnSync('lsof', [`-tiTCP:${port}`, '-sTCP:LISTEN'], { encoding: 'utf8' });
@@ -1962,7 +2000,7 @@ program
       if (opts.kill && pids.length) {
         const ksp = await createSpinner(`Killing ${pids.length} listener(s) on ${port}...`);
         for (const pid of pids) {
-          try { process.kill(pid, 'SIGKILL'); } catch (e) { ksp.warn(`Failed to kill ${pid}: ${(e as Error).message}`); }
+          try { killPidBestEffort(pid, { force: true }); } catch (e) { ksp.warn(`Failed to kill ${pid}: ${(e as Error).message}`); }
         }
         // brief wait
         await sleep(300);
