@@ -325,6 +325,48 @@ async function main() {
       }
     }
 
+    // Regression: tolerate <arg_key>/<arg_value> artifacts stitched into patch strings.
+    // Some upstream providers may leak XML-like markup into JSON string fields.
+    {
+      const patchText = [
+        '*** Begin Patch',
+        '*** Delete File: .apply_patch_escape_test.txt',
+        '*** End Patch'
+      ].join('\n');
+      const injected = `${patchText}</arg_key><arg_value>input</arg_key><arg_value>${patchText}`;
+      const argsString = JSON.stringify({ patch: injected });
+      const validation = validateToolCall('apply_patch', argsString);
+      if (!validation?.ok) {
+        throw new Error(
+          `[verify-apply-patch] arg_key_artifacts: validateToolCall failed with reason=${validation?.reason}`
+        );
+      }
+      const parsed = JSON.parse(validation.normalizedArgs);
+      const normalizedPatchText =
+        typeof parsed?.patch === 'string'
+          ? parsed.patch
+          : typeof parsed?.input === 'string'
+            ? parsed.input
+            : '';
+      if (normalizedPatchText.includes('</arg_key><arg_value>')) {
+        throw new Error('[verify-apply-patch] arg_key_artifacts: patch still contains arg_key artifacts');
+      }
+      if (parsed?.patch !== parsed?.input) {
+        throw new Error('[verify-apply-patch] arg_key_artifacts: patch/input mismatch after normalization');
+      }
+    }
+
+    // Regression: invalid JSON containers should be classified as invalid_json (not missing_changes).
+    {
+      const invalidJson = '{"file":"a.ts","changes":[{"kind":"create_file","lines":["x"],"file</arg_key><arg_value>a.ts"}]}';
+      const validation = validateToolCall('apply_patch', invalidJson);
+      if (validation?.ok || validation?.reason !== 'invalid_json') {
+        throw new Error(
+          `[verify-apply-patch] invalid_json: expected invalid_json reason, got ok=${validation?.ok} reason=${validation?.reason}`
+        );
+      }
+    }
+
     // Regression: patches can contain ``` blocks inside file content; do not treat them as outer fences.
     {
       const patchText = [
