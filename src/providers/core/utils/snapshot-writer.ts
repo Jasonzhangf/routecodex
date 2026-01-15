@@ -292,7 +292,16 @@ export function attachProviderSseSnapshotStream(
   capture.on('end', () => flushSnapshot());
   capture.on('close', () => flushSnapshot());
   capture.on('error', handleError);
-  stream.on('error', handleError);
+  stream.on('error', (error) => {
+    flushSnapshot(error);
+    // 关键：pipe 不会自动把 source error 透传给 PassThrough。
+    // 若不显式 destroy，consumer（例如 SSE→JSON converter）会永久挂起等待 chunk。
+    try {
+      tee.destroy(error as Error);
+    } catch {
+      tee.destroy();
+    }
+  });
   tee.on('error', handleError);
 
   return tee;

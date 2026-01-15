@@ -9,6 +9,7 @@ import type {
   ReadableStreamDefaultReader
 } from 'node:stream/web';
 import type { ProviderError } from '../api/provider-types.js';
+import { PassThrough } from 'node:stream';
 
 /**
  * HTTP请求配置
@@ -141,7 +142,24 @@ export class HttpClient {
 
     const controller = new AbortController();
     const timeout = this.defaultConfig.timeout;
-    const timeoutId = setTimeout(() => controller.abort(), timeout);
+    // NOTE: stream 请求如果在拿到 response body 后立刻清除 timeout，会导致“流式卡死不返回”。
+    // 这里维持一个全局 timeout + idle timeout，直到上游流结束或被消费者关闭。
+    const envIdle = Number(
+      process.env.ROUTECODEX_PROVIDER_STREAM_IDLE_TIMEOUT_MS ||
+        process.env.RCC_PROVIDER_STREAM_IDLE_TIMEOUT_MS ||
+        NaN
+    );
+    const idleTimeoutMs = Number.isFinite(envIdle) && envIdle > 0 ? envIdle : Math.min(120_000, timeout);
+    const abortWithReason = (reason: string) => {
+      try {
+        const err = Object.assign(new Error(reason), { code: reason });
+        // Node 18+ 支持 abort(reason)，fetch 侧会以该 reason 失败。
+        (controller as unknown as { abort: (reason?: unknown) => void }).abort(err);
+      } catch {
+        controller.abort();
+      }
+    };
+    const timeoutId = setTimeout(() => abortWithReason('UPSTREAM_STREAM_TIMEOUT'), timeout);
 
     try {
       // Debug Antigravity upstream HTTP payload for SSE when enabled
@@ -174,6 +192,7 @@ export class HttpClient {
 
       const response = await fetch(fullUrl, fetchOptions);
       if (!response.ok) {
+        clearTimeout(timeoutId);
         // 与非流式 request 保持一致：在错误中包含上游返回体，但对 message 进行截断，避免控制台刷屏。
         const errorText = await response.text();
         const message = this.buildHttpErrorMessage(response.status, errorText);
@@ -192,7 +211,7 @@ export class HttpClient {
       const body = response.body as StreamBody;
       if (body) {
         if (isNodeReadable(body)) {
-          return body;
+          return this.wrapStreamWithTimeouts(body, controller, timeoutId, idleTimeoutMs, abortWithReason);
         }
         if (isWebReadableStream(body)) {
           try {
@@ -200,7 +219,7 @@ export class HttpClient {
             if (typeof Readable.fromWeb === 'function') {
               const nodeStream = Readable.fromWeb(body);
               if (isNodeReadable(nodeStream)) {
-                return nodeStream;
+                return this.wrapStreamWithTimeouts(nodeStream, controller, timeoutId, idleTimeoutMs, abortWithReason);
               }
             }
           } catch {
@@ -209,11 +228,137 @@ export class HttpClient {
         }
       }
 
+      clearTimeout(timeoutId);
       // As a last resort, throw to let caller decide (should not fallback silently)
       throw new Error('Upstream response body is not streamable');
-    } finally {
+    } catch (error) {
       clearTimeout(timeoutId);
+      throw this.createProviderError(error);
     }
+  }
+
+  private wrapStreamWithTimeouts(
+    upstream: NodeJS.ReadableStream,
+    controller: AbortController,
+    timeoutId: NodeJS.Timeout,
+    idleTimeoutMs: number,
+    abortWithReason: (reason: string) => void
+  ): NodeJS.ReadableStream {
+    const pass = new PassThrough();
+    let idleTimer: NodeJS.Timeout | null = null;
+    let cleaned = false;
+    const onAbort = () => {
+      cleanup();
+      try {
+        const reason = (controller.signal as { reason?: unknown }).reason;
+        if (reason instanceof Error) {
+          pass.destroy(reason);
+        } else if (reason !== undefined) {
+          pass.destroy(Object.assign(new Error(String(reason)), { code: 'UPSTREAM_STREAM_ABORTED' }));
+        } else {
+          pass.destroy(Object.assign(new Error('UPSTREAM_STREAM_ABORTED'), { code: 'UPSTREAM_STREAM_ABORTED' }));
+        }
+      } catch {
+        pass.destroy();
+      }
+    };
+
+    const clearTimers = () => {
+      if (idleTimer) {
+        clearTimeout(idleTimer);
+        idleTimer = null;
+      }
+      clearTimeout(timeoutId);
+    };
+
+    const cleanup = () => {
+      if (cleaned) {
+        return;
+      }
+      cleaned = true;
+      clearTimers();
+      try {
+        controller.signal.removeEventListener?.('abort', onAbort as unknown as EventListener);
+        upstream.removeListener('data', onData);
+        upstream.removeListener('end', onEnd);
+        upstream.removeListener('error', onError);
+        upstream.removeListener('close', onClose);
+      } catch {
+        // ignore
+      }
+    };
+
+    const resetIdle = () => {
+      if (!Number.isFinite(idleTimeoutMs) || idleTimeoutMs <= 0) {
+        return;
+      }
+      if (idleTimer) {
+        clearTimeout(idleTimer);
+      }
+      idleTimer = setTimeout(() => {
+        abortWithReason('UPSTREAM_STREAM_IDLE_TIMEOUT');
+        try {
+          pass.destroy(Object.assign(new Error('UPSTREAM_STREAM_IDLE_TIMEOUT'), { code: 'UPSTREAM_STREAM_IDLE_TIMEOUT' }));
+        } catch {
+          pass.destroy();
+        }
+      }, idleTimeoutMs);
+    };
+
+    const onData = () => {
+      resetIdle();
+    };
+
+    const onEnd = () => {
+      cleanup();
+    };
+
+    const onError = (error: unknown) => {
+      cleanup();
+      // ensure consumer sees error
+      try {
+        pass.destroy(error as Error);
+      } catch {
+        pass.destroy();
+      }
+    };
+
+    const onClose = () => {
+      cleanup();
+    };
+
+    try {
+      controller.signal.addEventListener?.('abort', onAbort as unknown as EventListener, { once: true } as AddEventListenerOptions);
+    } catch {
+      // ignore addEventListener failures
+    }
+
+    resetIdle();
+    upstream.on('data', onData);
+    upstream.on('end', onEnd);
+    upstream.on('error', onError);
+    upstream.on('close', onClose);
+
+    // If consumer closes early, abort upstream fetch to avoid leaking sockets.
+    pass.on('close', () => {
+      cleanup();
+      try {
+        controller.abort();
+      } catch {
+        // ignore
+      }
+      try {
+        const destroyable = upstream as unknown as { destroy?: () => void };
+        if (typeof destroyable.destroy === 'function') {
+          destroyable.destroy();
+        }
+      } catch {
+        // ignore
+      }
+    });
+
+    upstream.pipe(pass);
+    return pass;
   }
 
   /**
