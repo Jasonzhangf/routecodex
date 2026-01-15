@@ -11,7 +11,16 @@ import {
 } from './token-types.js';
 import { scanProviderTokenFiles } from '../providers/auth/token-scanner/index.js';
 
-export const DEFAULT_AUTH_DIR = path.join(homedir(), '.routecodex', 'auth');
+export function resolveAuthDir(): string {
+  const override = String(process.env.ROUTECODEX_AUTH_DIR || process.env.RCC_AUTH_DIR || '').trim();
+  if (override) {
+    return path.isAbsolute(override) ? override : path.resolve(override);
+  }
+  const home = String(process.env.HOME || '').trim() || homedir();
+  return path.join(home, '.routecodex', 'auth');
+}
+
+export const DEFAULT_AUTH_DIR = resolveAuthDir();
 
 export async function readTokenFile(filePath: string): Promise<RawTokenPayload | null> {
   try {

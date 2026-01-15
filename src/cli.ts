@@ -97,7 +97,9 @@ interface TemplateConfig {
 type CodeCommandOptions = {
   port?: string;
   host: string;
+  url?: string;
   config?: string;
+  apikey?: string;
   claudePath?: string;
   cwd?: string;
   model?: string;
@@ -306,7 +308,9 @@ program
   .option('-p, --port <port>', 'RouteCodex server port (overrides config file)')
   // Default to IPv4 localhost to avoid environments where localhost resolves to ::1
   .option('-h, --host <host>', 'RouteCodex server host', LOCAL_HOSTS.IPV4)
+  .option('--url <url>', 'RouteCodex base URL (overrides host/port), e.g. https://code.codewhisper.cc')
   .option('-c, --config <config>', 'RouteCodex configuration file path')
+  .option('--apikey <apikey>', 'RouteCodex server apikey (defaults to httpserver.apikey in config when present)')
   .option('--claude-path <path>', 'Path to Claude Code executable', 'claude')
   .option('--cwd <dir>', 'Working directory for Claude Code (defaults to current shell cwd)')
   .option('--model <model>', 'Model to use with Claude Code')
@@ -320,14 +324,61 @@ program
     const spinner = await createSpinner('Preparing Claude Code with RouteCodex...');
 
     try {
+      const parseServerUrl = (
+        raw: string
+      ): { protocol: 'http' | 'https'; host: string; port: number | null; basePath: string } => {
+        const trimmed = String(raw || '').trim();
+        if (!trimmed) {
+          throw new Error('--url is empty');
+        }
+        let parsed: URL;
+        try {
+          parsed = new URL(trimmed);
+        } catch {
+          parsed = new URL(`http://${trimmed}`);
+        }
+        const protocol = parsed.protocol === 'https:' ? 'https' : 'http';
+        const host = parsed.hostname;
+        const hasExplicitPort = Boolean(parsed.port && parsed.port.trim());
+        const port = hasExplicitPort ? Number(parsed.port) : null;
+        const rawPath = typeof parsed.pathname === 'string' ? parsed.pathname : '';
+        const basePath = rawPath && rawPath !== '/' ? rawPath.replace(/\/+$/, '') : '';
+        return { protocol, host, port: Number.isFinite(port as number) ? (port as number) : null, basePath };
+      };
+
+      const readConfigApiKey = (configPath: string): string | null => {
+        try {
+          if (!configPath || !fs.existsSync(configPath)) {
+            return null;
+          }
+          const txt = fs.readFileSync(configPath, 'utf8');
+          const cfg = JSON.parse(txt);
+          const direct = cfg?.httpserver?.apikey ?? cfg?.modules?.httpserver?.config?.apikey ?? cfg?.server?.apikey;
+          const value = typeof direct === 'string' ? direct.trim() : '';
+          return value ? value : null;
+        } catch {
+          return null;
+        }
+      };
+
       // Resolve configuration and determine port
       let configPath = options.config;
       if (!configPath) {
         configPath = path.join(homedir(), '.routecodex', 'config.json');
       }
 
+      let actualProtocol: 'http' | 'https' = 'http';
       let actualPort = options.port ? parseInt(options.port, 10) : null;
       let actualHost = options.host;
+      let actualBasePath = '';
+
+      if (options.url && String(options.url).trim()) {
+        const parsed = parseServerUrl(options.url);
+        actualProtocol = parsed.protocol;
+        actualHost = parsed.host || actualHost;
+        actualPort = parsed.port ?? actualPort;
+        actualBasePath = parsed.basePath;
+      }
 
       // Determine effective port for code command:
       // - dev package (routecodex): env override, otherwise固定 5555，不读取配置端口
@@ -340,7 +391,7 @@ program
         }
       } else {
         // 非 dev 包：若未显式指定端口，则从配置文件解析
-        if (!actualPort && fs.existsSync(configPath)) {
+        if (!actualPort && fs.existsSync(configPath) && !(options.url && String(options.url).trim())) {
           try {
             const configContent = fs.readFileSync(configPath, 'utf8');
             const config = JSON.parse(configContent);
@@ -352,12 +403,24 @@ program
         }
       }
 
-      // Require explicit port if not resolved
-      if (!actualPort) {
+      // Require explicit port if not resolved (except when --url is used; default ports are implicit).
+      if (!(options.url && String(options.url).trim()) && !actualPort) {
         spinner.fail('Invalid or missing port configuration for RouteCodex server');
         logger.error('Please set httpserver.port in your configuration (e.g., ~/.routecodex/config.json) or use --port');
         process.exit(1);
       }
+
+      const configuredApiKey =
+        (typeof options.apikey === 'string' && options.apikey.trim()
+          ? options.apikey.trim()
+          : null)
+        ?? (typeof process.env.ROUTECODEX_APIKEY === 'string' && process.env.ROUTECODEX_APIKEY.trim()
+          ? process.env.ROUTECODEX_APIKEY.trim()
+          : null)
+        ?? (typeof process.env.RCC_APIKEY === 'string' && process.env.RCC_APIKEY.trim()
+          ? process.env.RCC_APIKEY.trim()
+          : null)
+        ?? readConfigApiKey(configPath);
 
       // Check if RouteCodex server needs to be started
       if (options.ensureServer) {
@@ -369,17 +432,25 @@ program
           return h || LOCAL_HOSTS.IPV4;
         };
         const connectHost = normalizeConnectHost(actualHost);
-        const serverUrl = `http://${connectHost}:${actualPort}`;
+        const portPart = actualPort ? `:${actualPort}` : '';
+        const serverUrl = `${actualProtocol}://${connectHost}${portPart}${actualBasePath}`;
         try {
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 3000);
-          const response = await fetch(`${serverUrl}/ready`, { signal: controller.signal, method: 'GET' });
+          const headers = configuredApiKey ? { 'x-api-key': configuredApiKey } : undefined;
+          const response = await fetch(`${serverUrl}/ready`, { signal: controller.signal, method: 'GET', headers });
           clearTimeout(timeoutId);
           if (!response.ok) {throw new Error('Server not ready');}
           const j = await response.json().catch(() => ({}));
           if (j?.status !== 'ready') {throw new Error('Server reported not_ready');}
           spinner.succeed('RouteCodex server is ready');
         } catch (error) {
+          if (options.url && String(options.url).trim()) {
+            spinner.fail('RouteCodex server is not reachable (ensure-server with --url cannot auto-start)');
+            logger.error(error instanceof Error ? error.message : String(error));
+            process.exit(1);
+          }
+
           spinner.info('RouteCodex server is not running, starting it...');
 
           // Start RouteCodex server in background
@@ -401,7 +472,8 @@ program
           for (let i = 0; i < 30; i++) {
             await sleep(1000);
             try {
-              const res = await fetch(`${serverUrl}/ready`, { method: 'GET' });
+              const headers = configuredApiKey ? { 'x-api-key': configuredApiKey } : undefined;
+              const res = await fetch(`${serverUrl}/ready`, { method: 'GET', headers });
               if (res.ok) {
                 const jr = await res.json().catch(() => ({}));
                 if (jr?.status === 'ready') { ready = true; break; }
@@ -425,7 +497,8 @@ program
         if (v === '::' || v === '::1' || v === 'localhost') {return LOCAL_HOSTS.IPV4;}
         return actualHost || LOCAL_HOSTS.IPV4;
       })());
-      const anthropicBase = `http://${resolvedBaseHost}:${actualPort}`;
+      const portPart = actualPort ? `:${actualPort}` : '';
+      const anthropicBase = `${actualProtocol}://${resolvedBaseHost}${portPart}${actualBasePath}`;
       const currentCwd = (() => {
         try {
           const d = options.cwd ? String(options.cwd) : process.cwd();
@@ -448,7 +521,7 @@ program
         // Cover both common env var names used by Anthropic SDK / tools
         ANTHROPIC_BASE_URL: anthropicBase,
         ANTHROPIC_API_URL: anthropicBase,
-        ANTHROPIC_API_KEY: 'rcc-proxy-key'
+        ANTHROPIC_API_KEY: configuredApiKey || 'rcc-proxy-key'
       } as NodeJS.ProcessEnv;
       // Avoid auth conflict: prefer API key routed via RouteCodex; remove shell tokens
       try { delete (claudeEnv as Record<string, unknown>)['ANTHROPIC_AUTH_TOKEN']; } catch { /* ignore */ }
@@ -476,8 +549,33 @@ program
         const sepIndex = afterCode.indexOf('--');
         const tail = sepIndex >= 0 ? afterCode.slice(sepIndex + 1) : afterCode;
         // 过滤本命令自身已识别的选项，剩余的作为透传参数
-        const knownOpts = new Set(['-p','--port','-h','--host','-c','--config','--claude-path','--model','--profile','--ensure-server']);
-        const requireValue = new Set(['-p','--port','-h','--host','-c','--config','--claude-path','--model','--profile']);
+        const knownOpts = new Set([
+          '-p',
+          '--port',
+          '-h',
+          '--host',
+          '--url',
+          '-c',
+          '--config',
+          '--apikey',
+          '--claude-path',
+          '--model',
+          '--profile',
+          '--ensure-server'
+        ]);
+        const requireValue = new Set([
+          '-p',
+          '--port',
+          '-h',
+          '--host',
+          '--url',
+          '-c',
+          '--config',
+          '--apikey',
+          '--claude-path',
+          '--model',
+          '--profile'
+        ]);
         const passThrough: string[] = [];
         for (let i = 0; i < tail.length; i++) {
           const tok = tail[i];

@@ -16,7 +16,14 @@ export interface TokenFileMatch {
   alias: string;
 }
 
-const AUTH_DIR = path.join(homedir(), '.routecodex', 'auth');
+function resolveAuthDir(): string {
+  const override = String(process.env.ROUTECODEX_AUTH_DIR || process.env.RCC_AUTH_DIR || '').trim();
+  if (override) {
+    return path.isAbsolute(override) ? override : path.resolve(override);
+  }
+  const home = String(process.env.HOME || '').trim() || homedir();
+  return path.join(home, '.routecodex', 'auth');
+}
 
 /**
  * 匹配token文件名的正则
@@ -30,7 +37,8 @@ const TOKEN_FILE_PATTERN = /^(.+)-oauth-(\d+)(?:-(.+))?\.json$/;
  */
 export async function scanProviderTokenFiles(provider: string): Promise<TokenFileMatch[]> {
   try {
-    const entries = await fs.readdir(AUTH_DIR);
+    const authDir = resolveAuthDir();
+    const entries = await fs.readdir(authDir);
     const matches: TokenFileMatch[] = [];
     const normalizedProvider = provider.toLowerCase();
     const acceptedPrefixes: string[] = [normalizedProvider];
@@ -66,7 +74,7 @@ export async function scanProviderTokenFiles(provider: string): Promise<TokenFil
       }
 
       matches.push({
-        filePath: path.join(AUTH_DIR, entry),
+        filePath: path.join(authDir, entry),
         providerPrefix,
         sequence,
         alias: alias || 'default'

@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import type { DaemonAdminRouteOptions } from '../daemon-admin-routes.js';
 import { isLocalRequest } from '../daemon-admin-routes.js';
-import { collectTokenSnapshot, readTokenFile, evaluateTokenState, DEFAULT_AUTH_DIR } from '../../../../token-daemon/token-utils.js';
+import { collectTokenSnapshot, readTokenFile, evaluateTokenState, resolveAuthDir } from '../../../../token-daemon/token-utils.js';
 import { ensureValidOAuthToken } from '../../../../providers/auth/oauth-lifecycle.js';
 
 interface CredentialSummary {
@@ -204,8 +204,9 @@ export function registerCredentialRoutes(app: Application, _options: DaemonAdmin
     }
     try {
       const fileName = await allocateApiKeyFileName(provider, alias);
-      const filePath = path.join(DEFAULT_AUTH_DIR, fileName);
-      await fs.mkdir(DEFAULT_AUTH_DIR, { recursive: true });
+      const authDir = resolveAuthDir();
+      const filePath = path.join(authDir, fileName);
+      await fs.mkdir(authDir, { recursive: true });
       await fs.writeFile(filePath, `${apiKey}\n`, { encoding: 'utf8', mode: 0o600 });
       res.status(200).json({
         ok: true,
@@ -295,7 +296,8 @@ const APIKEY_FILE_PATTERN = /^(.+)-apikey-(\d+)(?:-(.+))?\.key$/i;
 
 async function scanApiKeyAuthFiles(): Promise<ApiKeyMatch[]> {
   try {
-    const entries = await fs.readdir(DEFAULT_AUTH_DIR);
+    const authDir = resolveAuthDir();
+    const entries = await fs.readdir(authDir);
     const matches: ApiKeyMatch[] = [];
     for (const entry of entries) {
       const m = entry.match(APIKEY_FILE_PATTERN);
@@ -308,7 +310,7 @@ async function scanApiKeyAuthFiles(): Promise<ApiKeyMatch[]> {
       if (!providerPrefix || !Number.isFinite(sequence) || sequence <= 0) {
         continue;
       }
-      const filePath = path.join(DEFAULT_AUTH_DIR, entry);
+      const filePath = path.join(authDir, entry);
       const content = await fs.readFile(filePath, 'utf8').catch(() => '');
       const hasApiKey = Boolean(content && content.trim());
       matches.push({

@@ -13,6 +13,7 @@ async function startServerWithTempConfig(): Promise<Started> {
   await fs.mkdir(home, { recursive: true });
   process.env.HOME = home;
   process.env.ROUTECODEX_SNAPSHOT = '0';
+  process.env.ROUTECODEX_AUTH_DIR = path.join(tmp, 'auth');
 
   const configPath = path.join(tmp, 'config.json');
   process.env.ROUTECODEX_CONFIG_PATH = configPath;
