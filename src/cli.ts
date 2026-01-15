@@ -281,6 +281,12 @@ try {
   program.addCommand(createQuotaStatusCommand());
 } catch { /* optional */ }
 
+// Quota daemon command - offline replay/once maintenance for provider-quota snapshot
+try {
+  const { createQuotaDaemonCommand } = await import('./commands/quota-daemon.js');
+  program.addCommand(createQuotaDaemonCommand());
+} catch { /* optional */ }
+
 // OAuth command - force re-auth for a specific token (Camoufox-aware when enabled)
 try {
   const { createOauthCommand } = await import('./commands/oauth.js');

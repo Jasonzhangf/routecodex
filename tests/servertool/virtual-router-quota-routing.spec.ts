@@ -23,7 +23,13 @@ describe('virtual-router quotaView routing', () => {
         auth: { type: 'apiKey', value: 'test-key' },
         outboundProfile: 'default'
       }),
-      listProviderKeys: () => [providerA, providerB]
+      listProviderKeys: (providerId?: string) => {
+        if (providerId === 'mock.providerA') return [providerA];
+        if (providerId === 'mock.providerB') return [providerB];
+        return [providerA, providerB];
+      },
+      resolveRuntimeKeyByAlias: () => null,
+      resolveRuntimeKeyByIndex: () => null
     };
     const healthManager = {
       isAvailable: () => true
@@ -210,6 +216,52 @@ describe('virtual-router quotaView routing', () => {
     const deps = createDeps(quotaView);
     const features = createBaseFeatures();
     const state = createBaseState();
+    const result = selectProviderImpl(
+      routeName,
+      baseMetadata,
+      baseClassification,
+      features,
+      state,
+      deps as any,
+      { routingState: state }
+    );
+    expect(result.providerKey).toBe(providerB);
+  });
+
+  it('applies quotaView to forcedTarget resolution', () => {
+    const quotaView = (key: string) => {
+      if (key === providerA) {
+        return { providerKey: key, inPool: false, reason: 'quotaDepleted', priorityTier: 0 };
+      }
+      return { providerKey: key, inPool: true, reason: 'ok', priorityTier: 0 };
+    };
+    const deps = createDeps(quotaView);
+    const features = createBaseFeatures();
+    const state = createBaseState();
+    state.forcedTarget = { provider: 'mock.providerA' };
+    const result = selectProviderImpl(
+      routeName,
+      baseMetadata,
+      baseClassification,
+      features,
+      state,
+      deps as any,
+      { routingState: state }
+    );
+    expect(result.providerKey).toBe(providerB);
+  });
+
+  it('applies quotaView to stickyTarget resolution', () => {
+    const quotaView = (key: string) => {
+      if (key === providerA) {
+        return { providerKey: key, inPool: false, reason: 'blacklist', priorityTier: 0 };
+      }
+      return { providerKey: key, inPool: true, reason: 'ok', priorityTier: 0 };
+    };
+    const deps = createDeps(quotaView);
+    const features = createBaseFeatures();
+    const state = createBaseState();
+    state.stickyTarget = { provider: 'mock.providerA' };
     const result = selectProviderImpl(
       routeName,
       baseMetadata,

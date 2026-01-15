@@ -1024,6 +1024,30 @@ export class RouteCodexHttpServer {
         });
 
         const usage = this.extractUsageFromResult(converted, mergedMetadata);
+        const quotaModule = this.managerDaemon?.getModule('provider-quota') as ProviderQuotaDaemonModule | undefined;
+        if (quotaModule) {
+          const totalTokens =
+            typeof usage?.total_tokens === 'number' && Number.isFinite(usage.total_tokens)
+              ? Math.max(0, usage.total_tokens)
+              : Math.max(
+                0,
+                (typeof usage?.prompt_tokens === 'number' && Number.isFinite(usage.prompt_tokens) ? usage.prompt_tokens : 0) +
+                  (typeof usage?.completion_tokens === 'number' && Number.isFinite(usage.completion_tokens)
+                    ? usage.completion_tokens
+                    : 0)
+              );
+          try {
+            quotaModule.recordProviderUsage({ providerKey: target.providerKey, requestedTokens: totalTokens });
+          } catch {
+            // best-effort
+          }
+          try {
+            // 用于“成功清零连续错误计数”；tokens 已由 usage 事件统计，避免重复累计。
+            quotaModule.recordProviderSuccess({ providerKey: target.providerKey, usedTokens: 0 });
+          } catch {
+            // best-effort
+          }
+        }
         this.stats.recordCompletion(input.requestId, { usage, error: false });
 
         return converted;
@@ -1036,6 +1060,14 @@ export class RouteCodexHttpServer {
           model: providerModel,
           providerLabel
         });
+        const quotaModule = this.managerDaemon?.getModule('provider-quota') as ProviderQuotaDaemonModule | undefined;
+        if (quotaModule) {
+          try {
+            quotaModule.recordProviderUsage({ providerKey: target.providerKey, requestedTokens: 0 });
+          } catch {
+            // best-effort
+          }
+        }
         this.stats.recordCompletion(input.requestId, { error: true });
         throw error;
       }

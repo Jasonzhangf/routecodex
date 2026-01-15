@@ -340,11 +340,11 @@ tests/servertool/
 
 - [x] 在 daemon 进程中集成 quota center + store：
   - [x] 新增错误事件订阅入口（当前通过 `providerErrorCenter.subscribe` 旁路订阅 `ProviderErrorEvent`）。
-  - [ ] 接入成功 / usage 事件（来自 provider 成功响应与 virtual-router 使用记录）。
+  - [x] 接入成功 / usage 事件（来自 provider 成功响应与 virtual-router 使用记录）。
   - [x] 周期性执行窗口翻转 / 冷却与锁定过期检查，并写回 `provider-quota.json`。
-- [ ] 为 quota daemon 增加 `--dry-run` / `--once` 模式：
-  - [ ] 从 `provider-errors.ndjson` 或 fixture 读取事件，不连接真实虚拟路由器。
-  - [ ] 执行一轮 quota 更新与落盘后退出，用于 CI / 本地验证。
+- [x] 为 quota daemon 增加 `--dry-run` / `--once` 模式：
+  - [x] 提供 `routecodex quota-daemon --once [--replay-errors] [--dry-run]`（不连接真实虚拟路由器）。
+  - [ ] 执行一轮 quota 更新与落盘后退出，用于 CI / 本地验证（后续可接入 CI）。
 - [ ] 在 host 侧 errorhandler 中仅新增“向 daemon 发 ErrorEvent”的可选 sink（通过环境变量开启），不改变现有 HTTP 映射逻辑。
 
 ### Phase Q4：Virtual Router 读取 quota 快照（按 feature flag 渐进接线）
@@ -372,8 +372,8 @@ tests/servertool/
   - [ ] 在 virtual-router 初始化/路由决策中新增可选 `QuotaView` 扩展点：
     - [ ] 当 `ROUTECODEX_QUOTA_ENABLED=1` 且检测到 `~/.routecodex/quota/provider-quota.json` 存在时，通过 host 注入的接口提供 `{ [providerKey]: QuotaStateView }`。
     - [ ] 构建 provider 池时先按快照过滤：`inPool !== true` 或仍处于 `cooldownUntil/blacklistUntil` 窗口的 provider 一律排除；按 `priorityTier` 做 tier 调度。
-  - [ ] 在 `engine-health.ts` 中调整 `handleProviderError` 对 429 / series cooldown 的处理：
-    - [ ] 当 `QuotaView` 存在且 `ROUTECODEX_QUOTA_ENABLED=1` 时，仅更新统计或短期状态，避免再在 engine-health 内部做长期冷却/拉黑决策；真正的长周期熔断依赖 quota 快照。
+  - [x] 在 `engine.ts` 中调整 `handleProviderError` 对 429 / series cooldown 的处理：
+    - [x] 当 `QuotaView` 存在时，不再在 engine-health 内部做 429/backoff/series cooldown 等健康决策，避免与 daemon/quota-center 重复维护；长期熔断依赖 quota 快照。
 
 - [ ] Q5.3 将 QUOTA_DEPLETED / QUOTA_RECOVERY 决策从 virtual-router 迁到 daemon
   - [ ] 调整 `QuotaManagerModule` 与 virtual-router 的关系：

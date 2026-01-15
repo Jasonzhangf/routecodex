@@ -15,6 +15,8 @@ import { getProviderErrorCenter } from '../../../modules/llmswitch/bridge.js';
 import { readTokenFile, evaluateTokenState } from '../../../token-daemon/token-utils.js';
 import {
   applyErrorEvent as applyQuotaErrorEvent,
+  applySuccessEvent as applyQuotaSuccessEvent,
+  applyUsageEvent as applyQuotaUsageEvent,
   createInitialQuotaState,
   tickQuotaStateTime,
   type ErrorEventForQuota,
@@ -480,6 +482,7 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
   private quotaStates: Map<string, QuotaState> = new Map();
   private unsubscribe: (() => void) | null = null;
   private maintenanceTimer: NodeJS.Timeout | null = null;
+  private persistTimer: NodeJS.Timeout | null = null;
 
   async init(_context: ManagerContext): Promise<void> {
     try {
@@ -535,6 +538,10 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
       clearInterval(this.maintenanceTimer);
       this.maintenanceTimer = null;
     }
+    if (this.persistTimer) {
+      clearTimeout(this.persistTimer);
+      this.persistTimer = null;
+    }
     try {
       await saveProviderQuotaSnapshot(this.toSnapshotObject(), new Date());
     } catch {
@@ -542,16 +549,51 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
     }
   }
 
+  recordProviderUsage(event: { providerKey: string; requestedTokens?: number | null; timestampMs?: number }): void {
+    const providerKey = typeof event?.providerKey === 'string' ? event.providerKey.trim() : '';
+    if (!providerKey) {
+      return;
+    }
+    const nowMs =
+      typeof event.timestampMs === 'number' && Number.isFinite(event.timestampMs) && event.timestampMs > 0
+        ? event.timestampMs
+        : Date.now();
+    const requestedTokens =
+      typeof event.requestedTokens === 'number' && Number.isFinite(event.requestedTokens) && event.requestedTokens > 0
+        ? event.requestedTokens
+        : 0;
+
+    const previous = this.quotaStates.get(providerKey) ?? createInitialQuotaState(providerKey, undefined, nowMs);
+    const nextState = applyQuotaUsageEvent(previous, { providerKey, requestedTokens, timestampMs: nowMs }, nowMs);
+    this.quotaStates.set(providerKey, nextState);
+    this.schedulePersist(nowMs);
+  }
+
+  recordProviderSuccess(event: { providerKey: string; usedTokens?: number | null; timestampMs?: number }): void {
+    const providerKey = typeof event?.providerKey === 'string' ? event.providerKey.trim() : '';
+    if (!providerKey) {
+      return;
+    }
+    const nowMs =
+      typeof event.timestampMs === 'number' && Number.isFinite(event.timestampMs) && event.timestampMs > 0
+        ? event.timestampMs
+        : Date.now();
+    const usedTokens =
+      typeof event.usedTokens === 'number' && Number.isFinite(event.usedTokens) && event.usedTokens > 0
+        ? event.usedTokens
+        : 0;
+
+    const previous = this.quotaStates.get(providerKey) ?? createInitialQuotaState(providerKey, undefined, nowMs);
+    const nextState = applyQuotaSuccessEvent(previous, { providerKey, usedTokens, timestampMs: nowMs }, nowMs);
+    this.quotaStates.set(providerKey, nextState);
+    this.schedulePersist(nowMs);
+  }
+
   private async handleProviderErrorEvent(event: ProviderErrorEvent): Promise<void> {
     if (!event) {
       return;
     }
-    // 跳过来自配额管理自身发出的事件，避免形成反馈回路。
     const code = typeof event.code === 'string' ? event.code : '';
-    const stage = typeof event.stage === 'string' ? event.stage : '';
-    if (stage === 'quota' || code === 'QUOTA_RECOVERY' || code === 'QUOTA_DEPLETED') {
-      return;
-    }
 
     const providerKey = this.extractProviderKey(event);
     if (!providerKey) {
@@ -564,6 +606,46 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
         : Date.now();
 
     const previous = this.quotaStates.get(providerKey) ?? createInitialQuotaState(providerKey, undefined, nowMs);
+
+    // QUOTA_* 属于“确定性配额信号”，不进入错误 series 统计。
+    if (code === 'QUOTA_DEPLETED') {
+      const detailCarrier = (event.details && typeof event.details === 'object') ? (event.details as Record<string, unknown>) : {};
+      const raw = detailCarrier.virtualRouterQuotaDepleted;
+      const cooldownMs =
+        raw && typeof raw === 'object' && typeof (raw as { cooldownMs?: unknown }).cooldownMs === 'number'
+          ? ((raw as { cooldownMs?: number }).cooldownMs as number)
+          : undefined;
+      const ttl =
+        typeof cooldownMs === 'number' && Number.isFinite(cooldownMs) && cooldownMs > 0
+          ? cooldownMs
+          : undefined;
+      const nextState: QuotaState = {
+        ...previous,
+        inPool: false,
+        reason: 'quotaDepleted',
+        cooldownUntil: ttl ? nowMs + ttl : previous.cooldownUntil
+      };
+      this.quotaStates.set(providerKey, nextState);
+      this.schedulePersist(nowMs);
+      return;
+    }
+    if (code === 'QUOTA_RECOVERY') {
+      const withinBlacklist =
+        previous.blacklistUntil !== null && nowMs < previous.blacklistUntil;
+      const withinFatalBlacklist =
+        previous.reason === 'fatal' && previous.blacklistUntil !== null && nowMs < previous.blacklistUntil;
+      if (!withinBlacklist && !withinFatalBlacklist) {
+        const nextState: QuotaState = {
+          ...previous,
+          inPool: true,
+          reason: 'ok',
+          cooldownUntil: null
+        };
+        this.quotaStates.set(providerKey, nextState);
+        this.schedulePersist(nowMs);
+      }
+      return;
+    }
 
     const errorForQuota: ErrorEventForQuota = {
       providerKey,
@@ -617,6 +699,19 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
     } catch {
       // ignore persistence errors
     }
+  }
+
+  private schedulePersist(_nowMs: number): void {
+    if (this.persistTimer) {
+      return;
+    }
+    const debounceMs = readPositiveNumberFromEnv('ROUTECODEX_QUOTA_PERSIST_DEBOUNCE_MS', 5_000);
+    this.persistTimer = setTimeout(() => {
+      this.persistTimer = null;
+      void saveProviderQuotaSnapshot(this.toSnapshotObject(), new Date()).catch(() => {
+        // ignore persistence errors
+      });
+    }, debounceMs);
   }
 
   private toSnapshotObject(): Record<string, QuotaState> {
