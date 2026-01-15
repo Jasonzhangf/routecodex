@@ -90,17 +90,6 @@ describe('apply_patch full coverage', () => {
     expect(result.ok).toBe(false);
   });
 
-  it('accepts toon arguments containing unified diff', () => {
-    const toonPayload = {
-      toon: '```apply_patch\n*** Begin Patch\n*** Update File: src/foo.ts\n@@\n-const value = 1;\n+const value = 2;\n*** End Patch\n```'
-    };
-    const result = validateToolCall('apply_patch', JSON.stringify(toonPayload));
-    expect(result.ok).toBe(true);
-    const parsed = toArgsObject(result);
-    expect(parsed.patch).toContain('*** Begin Patch');
-    expect(parsed.patch).toContain('+const value = 2;');
-  });
-
   it('accepts raw unified diff string without JSON wrapper', () => {
     const rawPatch = [
       '*** Begin Patch',

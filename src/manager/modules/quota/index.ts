@@ -13,6 +13,18 @@ import { resolveAntigravityApiBase } from '../../../providers/auth/antigravity-u
 import type { ProviderErrorEvent } from '@jsonstudio/llms/dist/router/virtual-router/types.js';
 import { getProviderErrorCenter } from '../../../modules/llmswitch/bridge.js';
 import { readTokenFile, evaluateTokenState } from '../../../token-daemon/token-utils.js';
+import {
+  applyErrorEvent as applyQuotaErrorEvent,
+  createInitialQuotaState,
+  tickQuotaStateTime,
+  type ErrorEventForQuota,
+  type QuotaState
+} from '../../quota/provider-quota-center.js';
+import {
+  appendProviderErrorEvent,
+  loadProviderQuotaSnapshot,
+  saveProviderQuotaSnapshot
+} from '../../quota/provider-quota-store.js';
 
 export interface QuotaRecord {
   remainingFraction: number | null;
@@ -460,4 +472,240 @@ export class QuotaManagerModule implements ManagerModule {
       // ignore emit errors
     }
   }
+}
+
+export class ProviderQuotaDaemonModule implements ManagerModule {
+  readonly id = 'provider-quota';
+
+  private quotaStates: Map<string, QuotaState> = new Map();
+  private unsubscribe: (() => void) | null = null;
+  private maintenanceTimer: NodeJS.Timeout | null = null;
+
+  async init(_context: ManagerContext): Promise<void> {
+    try {
+      const snapshot = await loadProviderQuotaSnapshot();
+      if (snapshot && snapshot.providers && typeof snapshot.providers === 'object') {
+        for (const [providerKey, state] of Object.entries(snapshot.providers)) {
+          if (state && typeof state === 'object') {
+            this.quotaStates.set(providerKey, state as QuotaState);
+          }
+        }
+      }
+    } catch {
+      this.quotaStates = new Map();
+    }
+  }
+
+  async start(): Promise<void> {
+    let center:
+      | { subscribe?: (handler: (event: ProviderErrorEvent) => void) => () => void }
+      | null
+      | undefined = null;
+    try {
+      center = await getProviderErrorCenter();
+    } catch {
+      center = null;
+    }
+    if (center && typeof center.subscribe === 'function') {
+      this.unsubscribe = center.subscribe((event: ProviderErrorEvent) => {
+        void this.handleProviderErrorEvent(event);
+      });
+    }
+
+    const intervalMs = readPositiveNumberFromEnv('ROUTECODEX_QUOTA_DAEMON_INTERVAL_MS', 60_000);
+    if (intervalMs > 0) {
+      this.maintenanceTimer = setInterval(() => {
+        void this.runMaintenanceTick().catch(() => {
+          // ignore maintenance failures
+        });
+      }, intervalMs);
+    }
+  }
+
+  async stop(): Promise<void> {
+    if (this.unsubscribe) {
+      try {
+        this.unsubscribe();
+      } catch {
+        // ignore unsubscribe failures
+      }
+      this.unsubscribe = null;
+    }
+    if (this.maintenanceTimer) {
+      clearInterval(this.maintenanceTimer);
+      this.maintenanceTimer = null;
+    }
+    try {
+      await saveProviderQuotaSnapshot(this.toSnapshotObject(), new Date());
+    } catch {
+      // best-effort persistence
+    }
+  }
+
+  private async handleProviderErrorEvent(event: ProviderErrorEvent): Promise<void> {
+    if (!event) {
+      return;
+    }
+    // 跳过来自配额管理自身发出的事件，避免形成反馈回路。
+    const code = typeof event.code === 'string' ? event.code : '';
+    const stage = typeof event.stage === 'string' ? event.stage : '';
+    if (stage === 'quota' || code === 'QUOTA_RECOVERY' || code === 'QUOTA_DEPLETED') {
+      return;
+    }
+
+    const providerKey = this.extractProviderKey(event);
+    if (!providerKey) {
+      return;
+    }
+
+    const nowMs =
+      typeof event.timestamp === 'number' && Number.isFinite(event.timestamp) && event.timestamp > 0
+        ? event.timestamp
+        : Date.now();
+
+    const previous = this.quotaStates.get(providerKey) ?? createInitialQuotaState(providerKey, undefined, nowMs);
+
+    const errorForQuota: ErrorEventForQuota = {
+      providerKey,
+      httpStatus: typeof event.status === 'number' ? event.status : undefined,
+      code: typeof event.code === 'string' ? event.code : undefined,
+      fatal: this.isFatalForQuota(event),
+      timestampMs: nowMs
+    };
+
+    const nextState = applyQuotaErrorEvent(previous, errorForQuota, nowMs);
+    this.quotaStates.set(providerKey, nextState);
+
+    const tsIso = new Date(nowMs).toISOString();
+    try {
+      await appendProviderErrorEvent({
+        ts: tsIso,
+        providerKey,
+        code: typeof errorForQuota.code === 'string' ? errorForQuota.code : undefined,
+        httpStatus: typeof errorForQuota.httpStatus === 'number' ? errorForQuota.httpStatus : undefined,
+        message: event.message,
+        details: {
+          stage: event.stage,
+          routeName: (event.runtime as { routeName?: string }).routeName,
+          entryEndpoint: (event.runtime as { entryEndpoint?: string }).entryEndpoint
+        }
+      });
+    } catch {
+      // logging failure is non-fatal
+    }
+
+    try {
+      await saveProviderQuotaSnapshot(this.toSnapshotObject(), new Date(nowMs));
+    } catch {
+      // best-effort persistence only
+    }
+  }
+
+  private async runMaintenanceTick(): Promise<void> {
+    if (!this.quotaStates.size) {
+      return;
+    }
+    const nowMs = Date.now();
+    const updated = new Map<string, QuotaState>();
+    for (const [providerKey, state] of this.quotaStates.entries()) {
+      const next = tickQuotaStateTime(state, nowMs);
+      updated.set(providerKey, next);
+    }
+    this.quotaStates = updated;
+    try {
+      await saveProviderQuotaSnapshot(this.toSnapshotObject(), new Date(nowMs));
+    } catch {
+      // ignore persistence errors
+    }
+  }
+
+  private toSnapshotObject(): Record<string, QuotaState> {
+    const result: Record<string, QuotaState> = {};
+    for (const [key, state] of this.quotaStates.entries()) {
+      result[key] = state;
+    }
+    return result;
+  }
+
+  private extractProviderKey(event: ProviderErrorEvent): string | null {
+    const runtime = event.runtime as { providerKey?: unknown; target?: unknown } | undefined;
+    const direct =
+      runtime && typeof runtime.providerKey === 'string' && runtime.providerKey.trim()
+        ? runtime.providerKey.trim()
+        : null;
+    if (direct) {
+      return direct;
+    }
+    const target = runtime && runtime.target;
+    if (target && typeof target === 'object') {
+      const targetKey = (target as { providerKey?: unknown }).providerKey;
+      if (typeof targetKey === 'string' && targetKey.trim()) {
+        return targetKey.trim();
+      }
+    }
+    return null;
+  }
+
+  getQuotaView(): (providerKey: string) => {
+    providerKey: string;
+    inPool: boolean;
+    reason?: string;
+    priorityTier?: number;
+    cooldownUntil?: number | null;
+    blacklistUntil?: number | null;
+  } | null {
+    return (providerKey: string) => {
+      const key = typeof providerKey === 'string' ? providerKey.trim() : '';
+      if (!key) {
+        return null;
+      }
+      const state = this.quotaStates.get(key);
+      if (!state) {
+        return null;
+      }
+      return {
+        providerKey: state.providerKey,
+        inPool: state.inPool,
+        reason: state.reason,
+        priorityTier: state.priorityTier,
+        cooldownUntil: state.cooldownUntil ?? null,
+        blacklistUntil: state.blacklistUntil ?? null
+      };
+    };
+  }
+
+  private isFatalForQuota(event: ProviderErrorEvent): boolean {
+    const status = typeof event.status === 'number' ? event.status : undefined;
+    const code = typeof event.code === 'string' ? event.code.toUpperCase() : '';
+    const stage = typeof event.stage === 'string' ? event.stage.toLowerCase() : '';
+
+    if (status === 401 || status === 402 || status === 403) {
+      return true;
+    }
+    if (code.includes('AUTH') || code.includes('UNAUTHORIZED')) {
+      return true;
+    }
+    if (code.includes('CONFIG')) {
+      return true;
+    }
+    if (stage.includes('compat')) {
+      return true;
+    }
+    if (event.recoverable === false && status !== undefined && status >= 500) {
+      return true;
+    }
+    return false;
+  }
+}
+
+function readPositiveNumberFromEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) {
+    return fallback;
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
+  }
+  return parsed;
 }

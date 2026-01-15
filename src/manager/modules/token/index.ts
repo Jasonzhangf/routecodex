@@ -21,15 +21,29 @@ export class TokenManagerModule implements ManagerModule {
       return;
     }
 
+    const disabled =
+      String(process.env.ROUTECODEX_DISABLE_TOKEN_DAEMON || '').trim() === '1' ||
+      String(process.env.RCC_DISABLE_TOKEN_DAEMON || '').trim() === '1';
+    const mockMode =
+      String(process.env.ROUTECODEX_USE_MOCK || '').trim() === '1' ||
+      Boolean(process.env.ROUTECODEX_MOCK_CONFIG_PATH);
+    if (disabled || mockMode) {
+      return;
+    }
+
     const { isLeader, leader } = await tryAcquireTokenManagerLeader(this.ownerId);
     if (!isLeader) {
       const owner = leader?.ownerId ?? 'unknown';
       const pid = leader?.pid ?? 'unknown';
       // 仅日志提示，避免重复刷新同一批 token。
-      // eslint-disable-next-line no-console
-      console.log(
-        `[TokenManagerModule] Token manager leader already active (owner=${owner}, pid=${pid}); skipping TokenDaemon in this process.`
-      );
+      const logFlag = String(process.env.ROUTECODEX_TOKEN_DAEMON_LOG || '').trim().toLowerCase();
+      const logEnabled = logFlag === '1' || logFlag === 'true';
+      if (logEnabled) {
+        // eslint-disable-next-line no-console
+        console.log(
+          `[TokenManagerModule] Token manager leader already active (owner=${owner}, pid=${pid}); skipping TokenDaemon in this process.`
+        );
+      }
       this.isLeader = false;
       return;
     }

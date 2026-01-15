@@ -29,6 +29,8 @@ export interface TokenDaemonOptions {
 
 const DEBUG_FLAG = String(process.env.ROUTECODEX_TOKEN_DAEMON_DEBUG || '').trim().toLowerCase();
 const DEBUG_ENABLED = DEBUG_FLAG === '1' || DEBUG_FLAG === 'true';
+const LOG_FLAG = String(process.env.ROUTECODEX_TOKEN_DAEMON_LOG || '').trim().toLowerCase();
+const LOG_ENABLED = LOG_FLAG === '1' || LOG_FLAG === 'true';
 
 const DEFAULT_INTERVAL_MS = 60_000;
 // 默认行为：在到期前 5 分钟进入自动刷新窗口。
@@ -90,14 +92,19 @@ export class TokenDaemon {
   }
 
   async start(): Promise<void> {
-    console.log(chalk.blue('ℹ'), 'Token Refresh Daemon started');
-    console.log(
-      chalk.blue('ℹ'),
-      `Polling interval=${Math.round(this.intervalMs / 1000)}s, refreshAhead=${this.refreshAheadMinutes}min`
-    );
+    if (LOG_ENABLED) {
+      console.log(chalk.blue('ℹ'), 'Token Refresh Daemon started');
+      console.log(
+        chalk.blue('ℹ'),
+        `Polling interval=${Math.round(this.intervalMs / 1000)}s, refreshAhead=${this.refreshAheadMinutes}min`
+      );
+    }
 
-    // initial tick
-    await this.tick();
+    // initial tick (best-effort, non-blocking): token refresh must never block server init
+    void this.tick().catch((error) => {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error(chalk.red('✗'), `Token daemon tick failed: ${msg}`);
+    });
 
     this.timer = setInterval(() => {
       void this.tick().catch((error) => {
@@ -117,7 +124,9 @@ export class TokenDaemon {
     } catch {
       // summary printing must never block shutdown
     }
-    console.log(chalk.blue('ℹ'), 'Token Refresh Daemon stopped');
+    if (LOG_ENABLED) {
+      console.log(chalk.blue('ℹ'), 'Token Refresh Daemon stopped');
+    }
   }
 
   private async tick(): Promise<void> {
@@ -220,10 +229,12 @@ export class TokenDaemon {
     }
     const startedAt = Date.now();
 
-    console.log(
-      chalk.gray('◉'),
-      `Auto-refresh token for ${providerType} (${token.displayName}), file=${token.filePath}`
-    );
+    if (LOG_ENABLED) {
+      console.log(
+        chalk.gray('◉'),
+        `Auto-refresh token for ${providerType} (${token.displayName}), file=${token.filePath}`
+      );
+    }
     this.logDebug(
       `[daemon] trigger refresh provider=${providerType} alias=${token.alias} file=${token.filePath}`
     );
@@ -237,10 +248,12 @@ export class TokenDaemon {
         await (this as any).ensureTokenWithOverrides(token);
       }
 
-      console.log(
-        chalk.green('✓'),
-        `Token refreshed for ${providerType} (${token.displayName})`
-      );
+      if (LOG_ENABLED) {
+        console.log(
+          chalk.green('✓'),
+          `Token refreshed for ${providerType} (${token.displayName})`
+        );
+      }
       this.logDebug(`[daemon] refresh success provider=${providerType} alias=${token.alias}`);
       const tokenMtimeAfter = await getTokenFileMtime(token.filePath);
       await this.recordHistoryEvent(token, 'success', startedAt, {
@@ -530,6 +543,12 @@ export class TokenDaemon {
   }
 
   private async printSessionAndHistorySummary(): Promise<void> {
+    // 默认情况下不在控制台输出 Token 管理历史摘要，避免重复打印旧记录。
+    // 如需调试，可通过设置 ROUTECODEX_TOKEN_DAEMON_DEBUG=1 启用。
+    if (!DEBUG_ENABLED) {
+      return;
+    }
+
     const snapshot = await this.historyStore.getSnapshot();
     const history = snapshot.data;
     const aggregatedByProvider = new Map<OAuthProviderId, {

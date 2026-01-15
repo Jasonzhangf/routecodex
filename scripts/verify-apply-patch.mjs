@@ -106,6 +106,147 @@ async function main() {
   }
 
   try {
+    const { validateToolCall } = await loadCoreModule('tools/tool-registry');
+
+    // Regression: tolerate newline-escaped patch text (e.g. "*** Begin Patch\\n...") and
+    // normalize into a real multi-line unified diff string.
+    {
+      const escapedPatch = '*** Begin Patch\\n*** End Patch';
+      const validation = validateToolCall('apply_patch', escapedPatch);
+      if (!validation?.ok) {
+        throw new Error(
+          `[verify-apply-patch] escaped_patch: validateToolCall failed with reason=${validation?.reason}`
+        );
+      }
+      let parsed;
+      try {
+        parsed = JSON.parse(validation.normalizedArgs);
+      } catch (error) {
+        throw new Error(
+          `[verify-apply-patch] escaped_patch: normalized arguments not valid JSON: ${(error && error.message) || String(error)}`
+        );
+      }
+      const patchText =
+        typeof parsed?.patch === 'string'
+          ? parsed.patch
+          : typeof parsed?.input === 'string'
+            ? parsed.input
+            : '';
+      if (!patchText || typeof patchText !== 'string') {
+        throw new Error('[verify-apply-patch] escaped_patch: missing patch text in normalized args');
+      }
+      if (patchText.includes('\\n') && !patchText.includes('\n')) {
+        throw new Error('[verify-apply-patch] escaped_patch: patch still contains literal \\\\n without real newlines');
+      }
+      if (patchText.split('\n')[0] !== '*** Begin Patch') {
+        throw new Error('[verify-apply-patch] escaped_patch: patch first line is not *** Begin Patch');
+      }
+    }
+
+    // Regression: validateToolCall should be idempotent for already-normalized JSON arguments.
+    // Previously we could mis-detect the whole JSON as patch text, producing a merged line like:
+    //   "*** End Patch\",\"input\":\"*** Begin Patch"
+    {
+      const patchText = '*** Begin Patch\n*** End Patch';
+      const alreadyNormalized = JSON.stringify({ patch: patchText, input: patchText });
+      const validation = validateToolCall('apply_patch', alreadyNormalized);
+      if (!validation?.ok) {
+        throw new Error(
+          `[verify-apply-patch] already_normalized: validateToolCall failed with reason=${validation?.reason}`
+        );
+      }
+      const parsed = JSON.parse(validation.normalizedArgs);
+      const normalizedPatchText =
+        typeof parsed?.patch === 'string'
+          ? parsed.patch
+          : typeof parsed?.input === 'string'
+            ? parsed.input
+            : '';
+      if (!normalizedPatchText) {
+        throw new Error('[verify-apply-patch] already_normalized: missing patch text in normalized args');
+      }
+      if (normalizedPatchText.includes('","input":"*** Begin Patch') || normalizedPatchText.includes('*** End Patch","input":"')) {
+        throw new Error('[verify-apply-patch] already_normalized: patch text incorrectly contains serialized JSON keys');
+      }
+      if (normalizedPatchText.split('\n')[0] !== '*** Begin Patch') {
+        throw new Error('[verify-apply-patch] already_normalized: patch first line is not *** Begin Patch');
+      }
+      if (!normalizedPatchText.includes('*** End Patch')) {
+        throw new Error('[verify-apply-patch] already_normalized: patch missing *** End Patch');
+      }
+    }
+
+    // Regression: patches can contain ``` blocks inside file content; do not treat them as outer fences.
+    {
+      const patchText = [
+        '*** Begin Patch',
+        '*** Add File: src/demo-codefence.md',
+        '+```json',
+        '+{\"ok\":true}',
+        '+```',
+        '*** End Patch'
+      ].join('\n');
+      const validation = validateToolCall('apply_patch', patchText);
+      if (!validation?.ok) {
+        throw new Error(
+          `[verify-apply-patch] inner_codefence: validateToolCall failed with reason=${validation?.reason}`
+        );
+      }
+      const parsed = JSON.parse(validation.normalizedArgs);
+      const normalizedPatchText =
+        typeof parsed?.patch === 'string'
+          ? parsed.patch
+          : typeof parsed?.input === 'string'
+            ? parsed.input
+            : '';
+      if (!normalizedPatchText.startsWith('*** Begin Patch')) {
+        throw new Error('[verify-apply-patch] inner_codefence: patch lost *** Begin Patch header');
+      }
+      if (!normalizedPatchText.includes('*** Add File: src/demo-codefence.md')) {
+        throw new Error('[verify-apply-patch] inner_codefence: missing Add File header');
+      }
+      if (!normalizedPatchText.includes('+```json') || !normalizedPatchText.includes('+```')) {
+        throw new Error('[verify-apply-patch] inner_codefence: missing fenced lines inside patch');
+      }
+    }
+
+    // Regression: tolerate newline-escaped snippets inside structured payload fields.
+    // Some models/clients double-escape multi-line anchors/targets (e.g. "\\n  ").
+    {
+      const structuredArgs = JSON.stringify({
+        file: 'src/demo-escaped-snippet.ts',
+        changes: [
+          {
+            kind: 'replace',
+            target: 'const alpha = 1;\\n  const beta = 2;',
+            lines: ['const alpha = 1;', '  const beta = 3;']
+          }
+        ]
+      });
+      const validation = validateToolCall('apply_patch', structuredArgs);
+      if (!validation?.ok) {
+        throw new Error(
+          `[verify-apply-patch] escaped_structured_snippet: validateToolCall failed with reason=${validation?.reason}`
+        );
+      }
+      const parsed = JSON.parse(validation.normalizedArgs);
+      const patchText =
+        typeof parsed?.patch === 'string'
+          ? parsed.patch
+          : typeof parsed?.input === 'string'
+            ? parsed.input
+            : '';
+      if (!patchText) {
+        throw new Error('[verify-apply-patch] escaped_structured_snippet: missing patch text in normalized args');
+      }
+      if (patchText.includes('const alpha = 1;\\n') || patchText.includes('\\n  const beta = 2;')) {
+        throw new Error('[verify-apply-patch] escaped_structured_snippet: patch still contains literal \\\\n in target');
+      }
+      if (!patchText.includes('-const alpha = 1;') || !patchText.includes('-  const beta = 2;')) {
+        throw new Error('[verify-apply-patch] escaped_structured_snippet: expected multi-line "-" target not found');
+      }
+    }
+
     const plainJson = JSON.stringify({
       file: 'src/demo.ts',
       changes: [

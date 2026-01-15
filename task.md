@@ -12,12 +12,63 @@
 
 ## 执行计划
 
+### 新增：基于 codex-samples 的统一回归框架
+
+> 目标：用一套样本（来自 `~/.routecodex/codex-samples`）同时驱动 sharedmodule 单元/形状测试 + 主包 mock-provider 端到端回归，覆盖各入口协议与主要 provider。
+
+#### A. 样本与注册表基础设施
+
+- [x] 完成 `scripts/mock-provider/extract.mjs`：
+  - [x] 支持 `--req <requestId>` / `--all` 从 `~/.routecodex/codex-samples/{openai-chat|openai-responses|anthropic-messages}` 抽取 `*_client-request.json` / `*_provider-request.json` / `*_provider-response.json`。
+  - [x] 统一落盘到 `samples/mock-provider/<entry>/<providerKey>/<stamp>/`，并生成 `request.json` / `response.json` / 可选 `client-request.json`。
+  - [x] 维护 `_registry/index.json`，记录 `reqId` / `entry` / `providerId` / `path` / `tags`。
+- [x] 完成 `scripts/mock-provider/validate.mjs`：
+  - [x] 校验样本目录完整性（必需文件、JSON 可解析）。
+  - [x] 校验 `reqId`、`entryEndpoint`、`providerId`、`model` 一致性。
+  - [x] 校验 `providerId` 形如 `provider.alias.model`，并与 Virtual Router 约定一致。
+- [ ] 规划样本覆盖面：
+  - [ ] 为 antigravity（gemini-3-pro-high / claude-sonnet-4-5 / claude-sonnet-4-5-thinking）至少各保留 1–2 条 chat/responses/messages 入口样本，含工具 / 无工具、流式 / 非流式。
+  - [ ] 为 tab/tabglm/iflow/glm 系列至少各保留工具 + 普通对话样本。
+
+#### B. sharedmodule（llmswitch-core）形状 / 单元测试
+
+- [x] 新增 codex-samples 驱动的形状回归测试（仅 JSON，不启动 server）：
+  - [x] 在 `sharedmodule/llmswitch-core/scripts/tests/` 增加统一入口（`codex-matrix-regression.mjs`）。
+  - [x] 读取一小批 codex-samples 的 `_provider-response.json`，分别通过：
+    - [x] openai-chat 路径：provider-response → Chat → Chat 输出 invariants。
+    - [x] openai-responses 路径：provider-response → Chat → Responses → Chat。
+    - [ ] anthropic-messages 路径：provider-response → Chat → Anthropic → Chat。
+  - [x] 对每条样本验证核心 invariants：
+    - [x] `tool_use` / `tool_result` 配对（id 不丢、不孤立）。
+    - [x] `finish_reason` / `stop_reason` 映射正确（通过既有矩阵脚本覆盖）。
+    - [x] `tool_calls[].function.arguments` 始终为字符串。
+    - [x] Gemini / Claude-thinking 特有约束（例如不再生成孤立的 `tool_use_id`）。
+- [x] 在矩阵脚本中注册上述测试文件（`scripts/tests/run-matrix-ci.mjs` 增加 `matrix:codex-samples` 步骤）。
+
+#### C. 主包 mock-provider 端到端回归增强
+
+- [x] 扩展 `scripts/mock-provider/run-regressions.mjs`：
+  - [x] 基于 `_registry/index.json` 的 `tags` 做精细化筛选和统计（例如 `invalid_name` / `missing_tool_call_id` / `tool_pairing` / `anthropic_claude_thinking`）。
+  - [x] 除现有“非法 name 清理”检查外，逐步加入：
+    - [x] tool_call_id 存在性与风格检查（fc / preserve）。
+    - [x] `required_action.submit_tool_outputs[*].tool_call_id` 必须在 `output.tool_calls` 中找到对应项。
+    - [ ] 针对 antigravity Claude-thinking 样本，断言不会再出现“孤立 `tool_use_id`”导致的 400（例如检查 mock provider response 中不存在未配对的 tool_call_id）。
+  - [x] 支持按 providerType / entryEndpoint / route 统计覆盖（输出 summary）。
+- [x] 将 `npm run mock:regressions` 保持在主包 `build:dev` 的流水线中，作为端到端健康门槛。
+
+#### D. 持续演进策略
+
+- [ ] 每次线上 bug 定位后，形成标准流程：
+  - [ ] 先把对应 codex-sample 通过 `extract.mjs` 转成 mock-provider 样本，并在 `_registry/index.json` 打上针对性 `tags`。
+  - [ ] 在 sharedmodule 形状测试中加一个针对该样本的 invariants 检查。
+  - [ ] 在 `run-regressions.mjs` 中为该 `tag` 注册端到端断言，确保回归。
+
 ### Phase 1: 基础分析
 
 - [x] 分析现有 mock-provider samples
 - [x] 识别 TOON 相关样本（在 `samples/mock-provider` 中发现 TOON 编码样本）
-- [ ] 创建 Virtual Router classifier 分类脚本
-- [ ] 从最新 codex samples 提取 TOON 工具样本
+- [x] 创建 Virtual Router classifier 分类脚本
+- [x] 从最新 codex samples 提取 TOON 工具样本
 
 ### Phase 2: Mock Provider 测试增强
 
@@ -27,7 +78,7 @@
 - [x] 普通工具调用测试
 - [x] apply_patch 工具测试
 - [x] shell command 测试
-- [ ] TOON 工具测试（新增）
+- [x] TOON 工具测试（新增）
 
 #### 2.2 TOON 特殊测试
 
@@ -54,7 +105,7 @@
 
 - [x] 普通工具调用：已有 mock samples
 - [x] apply_patch：已有 `mock.apply_patch.toolloop`
-- [ ] TOON 工具：从最新 samples 筛选
+- [x] TOON 工具：从最新 samples 筛选
 - [ ] shell command：筛选复杂命令样本
 
 ### Phase 4: 测试文件组织
@@ -82,6 +133,11 @@ tests/servertool/
 2. 从最新 codex samples 提取 TOON 工具样本
 3. 创建 TOON 工具 mock 测试
 4. 验证后集成到 CI
+5. 记录并排期：全局安装的 iFlow CLI 需要在修复 stopMessage 问题后更新模型配置，确保：
+   - `config.json` 与 `providers/iflow/*` 中的模型列表同步最新 iflow 模型库
+   - GLM-4.7 的模型写法与 provider 要求一致（包括 key、alias、路由映射）
+   - 在真实 CLI 环境里重新安装/链接后能够成功调用并完成一次完整对话验证
+6. **统一 apply_patch 结构化转换**：在 chat-process 阶段实现 apply_patch arguments 的结构化 JSON / TOON → unified diff `{input, patch}` 规范化，移除各协议 codec 中的重复过滤器，确保所有入口（OpenAI、Responses、Anthropic、Gemini 等）共享同一逻辑。
 
 ---
 
@@ -214,7 +270,7 @@ tests/servertool/
 - [ ] 梳理当前工具协议与治理位置：
   - 工具注册与描述：`sharedmodule/llmswitch-core/src/tools/tool-registry.ts`、`sharedmodule/llmswitch-core/src/guidance/index.ts`。
   - 工具治理与过滤：`sharedmodule/llmswitch-core/src/conversion/shared/tool-filter-pipeline.ts` 及其 hooks。
-  - TOON 解码过滤器：`sharedmodule/llmswitch-core/src/filters/special/response-tool-arguments-toon-decode.ts`、`response-apply-patch-toon-decode.ts`。
+  - TOON 解码过滤器：`sharedmodule/llmswitch-core/src/filters/special/response-tool-arguments-toon-decode.ts`。
 - [ ] 确认“模型统一协议”的设计原则：
   - 模型侧所有工具一律使用 `arguments.toon`（不再区分 shell TOON / exec_command JSON）。
   - 工具说明中明确：模型只需写 TOON，不关心最终 JSON 字段名。
@@ -253,3 +309,83 @@ tests/servertool/
 - [ ] 回归检查：
   - 确保 web_search / search / coding / longcontext / tools 等路由池在“全 TOON 协议”下行为与现有预期一致（不改变路由逻辑，只改变参数编码方式）。
   - 将关键错误样本加入标准回归路径（错误样本脚本 / 矩阵测试脚本），防止未来回归。
+
+---
+
+## Provider Quota / Virtual Router 健康管理（文件落盘 & Daemon 路线）
+
+> 目标：将 provider 健康 / 流控 / 熔断统一抽象为 quota，由 daemon 落盘维护 `~/.routecodex/quota/provider-quota.json`，virtual-router 仅通过快照决定进入路由池与优先级，错误处理集中在 daemon 的 errorhandler。
+
+### Phase Q1：Quota 逻辑中心（纯函数，不接线）
+
+- [x] 设计并落盘文档 `docs/provider-quota-design.md`（文件结构、错误规则、分阶段计划）。
+- [x] 在 host/daemon 仓库新增 `provider-quota-center` 模块（无文件 I/O）：
+  - [x] 定义 `QuotaState` / `ErrorEvent` / `SuccessEvent` / `UsageEvent` 类型。
+  - [x] 实现 `applyErrorEvent`：支持 429 与其它可恢复错误的 1/3/5 分钟回退 + 连续三次 6 小时锁定逻辑。
+  - [x] 实现 `applySuccessEvent`：在成功时清零“连续”错误计数，必要时恢复 `inPool`。
+  - [x] 实现 `applyUsageEvent` / `tickWindow`：按分钟窗口维护 `requestsThisWindow` / `tokensThisWindow`，支持静态 rateLimitPerMinute / tokenLimitPerMinute。
+  - [x] 为上述逻辑补充完整的单元测试（错误梯度、成功重置、quota 用尽 / 窗口翻转）。
+
+### Phase Q2：落盘存储层（Provider Quota Store）
+
+- [x] 实现 `provider-quota-store` 模块（仅在 daemon 侧使用）：
+  - [x] `loadSnapshot` / `saveSnapshot`：基于 `~/.routecodex/quota/provider-quota.json`，采用临时文件 + rename 的原子写方案。
+  - [x] `appendErrorEvent`：将标准化 `ErrorEvent` 追加写入 `provider-errors.ndjson`，供调试或冷启动恢复使用。
+  - [x] 为 store 编写读写 / 容错单元测试（包含损坏文件、权限失败、不存在文件等场景）。
+- [x] 提供 `scripts/quota-dryrun.mjs`：
+  - [x] 从本地 fixture（错误 / 成功 / usage 序列）读事件，驱动 quota center。
+  - [x] 输出 `provider-quota.json` 快照，便于人工核对与回归测试使用。
+
+### Phase Q3：Quota Daemon & Errorhandler 集成（先独立跑，再接线）
+
+- [ ] 在 daemon 进程中集成 quota center + store：
+  - [ ] 新增错误事件订阅入口（从现有 errorhandler/RouteErrorHub 发来的标准化 `ErrorEvent`）。
+  - [ ] 接入成功 / usage 事件（来自 provider 成功响应与 virtual-router 使用记录）。
+  - [ ] 周期性执行窗口翻转 / 冷却与锁定过期检查，并写回 `provider-quota.json`。
+- [ ] 为 quota daemon 增加 `--dry-run` / `--once` 模式：
+  - [ ] 从 `provider-errors.ndjson` 或 fixture 读取事件，不连接真实虚拟路由器。
+  - [ ] 执行一轮 quota 更新与落盘后退出，用于 CI / 本地验证。
+- [ ] 在 host 侧 errorhandler 中仅新增“向 daemon 发 ErrorEvent”的可选 sink（通过环境变量开启），不改变现有 HTTP 映射逻辑。
+
+### Phase Q4：Virtual Router 读取 quota 快照（按 feature flag 渐进接线）
+
+- [ ] 在 virtual-router 构建 provider 池时，增加可选 quota 快照读取逻辑：
+  - [ ] 当 `ROUTECODEX_QUOTA_ENABLED=1` 且 `~/.routecodex/quota/provider-quota.json` 存在时，读取最新快照。
+  - [ ] 过滤 `inPool !== true` 或仍处于 `cooldownUntil / blacklistUntil` 窗口内的 provider。
+  - [ ] 按 `priorityTier` 做 tier 调度（与当前池子轮询逻辑解耦）。
+  - [ ] 为 quota 驱动的路由行为补充单元测试 / 集成测试：
+  - [ ] 针对 429 / 其它错误 / fatal 错误构造快照，验证 virtual-router 在不同阶段的入池 / 出池决策与预期一致。
+  - [ ] 确保在未启用 `ROUTECODEX_QUOTA_ENABLED` 时行为与现有生产逻辑完全一致（向后兼容）。
+
+### Phase Q5：错误中心切换到 daemon + quota（分阶段替换健康管理）
+
+> 目标：保持现有 providerErrorCenter / RouteErrorHub / ErrorHandlerRegistry 作为“观测与聚合层”，将真正的健康/熔断/流控决策迁移到 daemon + quota center 中，virtual-router 只通过 quota 快照决定能否入池与优先级。
+
+- [ ] Q5.1 旁路订阅：为 daemon 增加错误事件 sink（不改现有行为）
+  - [ ] 在 ManagerDaemon 中新增 quota-error-sink 模块：
+    - [ ] 启动时通过 `getProviderErrorCenter()` 订阅 `providerErrorCenter`，监听所有 `ProviderErrorEvent`，抽取 `providerKey` / `status` / `code` / `timestamp` / fatal 标记。
+    - [ ] 将事件映射为 `ErrorEventForQuota` + `ProviderErrorEventRecord`，调用 `appendProviderErrorEvent` 写入 `~/.routecodex/quota/provider-errors.ndjson`，并使用 `applyErrorEvent` / `applySuccessEvent` 驱动内存中的 `QuotaState`。
+  - [ ] （可选）在 RouteErrorHub 或 ErrorHandlerRegistry 中增加只读 sink：
+    - [ ] 针对 `rate_limit_error` / `provider_error` / `SSE_DECODE_ERROR` 等错误模板，将 `providerKey` / `status` / `code` 额外投递给 quota-error-sink，补充未通过 providerErrorCenter 进入的错误信号。
+
+- [ ] Q5.2 虚拟路由器读取 quota 快照，弱化 engine-health 的 rate-limit 决策
+  - [ ] 在 virtual-router 初始化/路由决策中新增可选 `QuotaView` 扩展点：
+    - [ ] 当 `ROUTECODEX_QUOTA_ENABLED=1` 且检测到 `~/.routecodex/quota/provider-quota.json` 存在时，通过 host 注入的接口提供 `{ [providerKey]: QuotaStateView }`。
+    - [ ] 构建 provider 池时先按快照过滤：`inPool !== true` 或仍处于 `cooldownUntil/blacklistUntil` 窗口的 provider 一律排除；按 `priorityTier` 做 tier 调度。
+  - [ ] 在 `engine-health.ts` 中调整 `handleProviderError` 对 429 / series cooldown 的处理：
+    - [ ] 当 `QuotaView` 存在且 `ROUTECODEX_QUOTA_ENABLED=1` 时，仅更新统计或短期状态，避免再在 engine-health 内部做长期冷却/拉黑决策；真正的长周期熔断依赖 quota 快照。
+
+- [ ] Q5.3 将 QUOTA_DEPLETED / QUOTA_RECOVERY 决策从 virtual-router 迁到 daemon
+  - [ ] 调整 `QuotaManagerModule` 与 virtual-router 的关系：
+    - [ ] 保留现有 `QUOTA_DEPLETED` / `QUOTA_RECOVERY` 事件格式，但将“修改健康状态”的责任从 engine-health 移除，改由 daemon/quota center 根据事件更新 `QuotaState`（`inPool` / `cooldownUntil` / `blacklistUntil`）。
+    - [ ] 在 engine-health 中对 `virtualRouterQuota*` 细节降级为 no-op 或只记录 debug 日志，避免重复维护两份健康状态。
+
+- [ ] Q5.4 关闭 legacy 429 backoff，统一用 quota 管控
+  - [ ] 梳理 `ErrorHandlerRegistry` 中默认注册的 429 backoff handler（`RateLimitHandlerContext` / `RateLimitHandlerHooks`）。
+  - [ ] 在 quota daemon 完全接管 429 限制后：
+    - [ ] 将 429 handler 改为仅发送 telemetry（调用 hooks.errorCenter.handleError），不再发起 `processWithPipeline` 重放；或
+    - [ ] 通过 feature flag（例如 `ROUTECODEX_RATE_LIMIT_HANDLER=legacy`）控制是否启用老的 HTTP 层 429 backoff 逻辑。
+
+- [ ] Q5.5 集成测试与回退策略
+  - [ ] 新增 quota+错误中心集成测试套件：从固定错误序列驱动 daemon + quota center，生成 `provider-quota.json`，启动 virtual-router 使用 QuotaView，验证入池/出池行为与预期一致（包含 429、其它错误、fatal 错误与 QUOTA_DEPLETED/RECOVERY）。
+  - [ ] 确保所有切换点（QuotaView、生效的 error sink、engine-health rate-limit 逻辑、429 backoff handler）都受环境变量控制，必要时可逐项回退到旧行为。

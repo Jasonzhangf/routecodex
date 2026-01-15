@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.89.1029",
+  "version": "0.89.1066",
   "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support",
   "type": "module",
   "main": "dist/index.js",
@@ -76,7 +76,6 @@
     "build:smoke": "npm run build && node scripts/protocol-smoke.mjs",
     "verify:sse-loop": "node scripts/verify-sse-loop.mjs",
     "snapshot:inspect": "node scripts/snapshot-inspect.mjs",
-    "probe:toon": "node scripts/toon-suite.mjs",
     "debug:responses": "tsx tools/responses-debug-client/src/index.ts",
     "debug:responses:lmstudio:text": "tsx tools/responses-debug-client/src/index.ts --file tools/responses-debug-client/payloads/lmstudio-text.json --baseURL ${LMSTUDIO_BASEURL:-http://127.0.0.1:1234/v1}",
     "debug:responses:lmstudio:tool": "tsx tools/responses-debug-client/src/index.ts --file tools/responses-debug-client/payloads/lmstudio-tool.json --baseURL ${LMSTUDIO_BASEURL:-http://127.0.0.1:1234/v1}",
