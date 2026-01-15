@@ -198,7 +198,26 @@ async function loadSnapshotsForRequest(
 ): Promise<SemanticSnapshotInput[]> {
   const protocolDir = resolveProtocolDir(requestId, protocolHint);
   const dirPath = path.join(samplesRoot, protocolDir);
+  const requestToken = sanitizeToken(requestId, requestId);
+  const requestDir = path.join(dirPath, requestToken);
   let entries: string[] = [];
+  try {
+    const stat = await fs.stat(requestDir);
+    if (stat.isDirectory()) {
+      entries = (await fs.readdir(requestDir)).filter((name) => name.endsWith('.json'));
+      const snapshots: SemanticSnapshotInput[] = [];
+      for (const file of entries) {
+        const snap = await parseSnapshotFile(path.join(requestDir, file), { protocolHint, requestId });
+        if (snap) {
+          snapshots.push(snap);
+        }
+      }
+      return snapshots;
+    }
+  } catch {
+    // fall through to legacy layout
+  }
+
   try {
     entries = await fs.readdir(dirPath);
   } catch (error) {
@@ -222,6 +241,17 @@ async function loadSnapshotsForRequest(
     snapshots.push(...contextSnaps);
   }
   return snapshots;
+}
+
+function sanitizeToken(value: string, fallback: string): string {
+  if (typeof value !== 'string') {
+    return fallback;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return fallback;
+  }
+  return trimmed.replace(/[^A-Za-z0-9_.-]/g, '_') || fallback;
 }
 
 function resolveProtocolDir(requestId: string, protocolHint?: string): string {

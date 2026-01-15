@@ -14,7 +14,13 @@ type Phase =
   | 'provider-body-debug';
 type ClientPhase = 'client-request';
 
-const SNAPSHOT_BASE = path.join(os.homedir(), '.routecodex', 'codex-samples');
+function resolveSnapshotBase(): string {
+  const override = String(process.env.ROUTECODEX_SNAPSHOT_DIR || process.env.RCC_SNAPSHOT_DIR || '').trim();
+  if (override) {
+    return path.isAbsolute(override) ? override : path.resolve(override);
+  }
+  return path.join(os.homedir(), '.routecodex', 'codex-samples');
+}
 
 async function ensureDir(dir: string): Promise<void> {
   try {
@@ -36,6 +42,17 @@ function normalizeRequestId(requestId?: string): string {
   return sanitized || `req_${Date.now()}`;
 }
 
+function normalizeProviderToken(value?: string): string {
+  if (!value || typeof value !== 'string') {
+    return '';
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return '';
+  }
+  return trimmed.replace(/[^A-Za-z0-9_.-]/g, '_');
+}
+
 function resolveEndpoint(url?: string): { endpoint: string; folder: string } {
   const rawUrl = String(url || '').toLowerCase();
   if (rawUrl.includes('/responses')) {
@@ -43,6 +60,9 @@ function resolveEndpoint(url?: string): { endpoint: string; folder: string } {
   }
   if (rawUrl.includes('/messages')) {
     return { endpoint: '/v1/messages', folder: 'anthropic-messages' };
+  }
+  if (rawUrl.includes('/v1/openai')) {
+    return { endpoint: '/v1/chat/completions', folder: 'openai-chat' };
   }
   return { endpoint: '/v1/chat/completions', folder: 'openai-chat' };
 }
@@ -85,10 +105,36 @@ function buildSnapshotPayload(options: {
   };
 }
 
-function fallbackFilePath(folder: string, requestId: string, stage: string): string {
-  const dir = path.join(SNAPSHOT_BASE, folder);
-  const safeStage = stage.replace(/[^\w.-]/g, '_');
-  return path.join(dir, `${requestId}_${safeStage}.json`);
+function toErrorCode(error: unknown): string | undefined {
+  if (!error || typeof error !== 'object') {
+    return undefined;
+  }
+  const code = (error as { code?: unknown }).code;
+  return typeof code === 'string' && code.trim() ? code : undefined;
+}
+
+async function writeUniqueFile(dir: string, baseName: string, contents: string): Promise<void> {
+  const parsed = path.parse(baseName);
+  const ext = parsed.ext || '.json';
+  const stem = parsed.name || 'snapshot';
+  for (let i = 0; i < 64; i += 1) {
+    const name = i === 0 ? `${stem}${ext}` : `${stem}_${i}${ext}`;
+    try {
+      await fsp.writeFile(path.join(dir, name), contents, { encoding: 'utf-8', flag: 'wx' });
+      return;
+    } catch (error) {
+      if (toErrorCode(error) === 'EEXIST') {
+        continue;
+      }
+      throw error;
+    }
+  }
+  const fallback = `${stem}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`;
+  await fsp.writeFile(path.join(dir, fallback), contents, 'utf-8');
+}
+
+function fallbackSnapshotDir(folder: string, requestId: string): string {
+  return path.join(resolveSnapshotBase(), folder, requestId);
 }
 
 export async function writeProviderSnapshot(options: {
@@ -99,6 +145,8 @@ export async function writeProviderSnapshot(options: {
   url?: string;
   entryEndpoint?: string;
   clientRequestId?: string;
+  providerKey?: string;
+  providerId?: string;
 }): Promise<void> {
   if (!runtimeFlags.snapshotsEnabled) {
     return;
@@ -106,6 +154,8 @@ export async function writeProviderSnapshot(options: {
   const { endpoint, folder } = resolveEndpoint(options.entryEndpoint || options.url);
   const stage = options.phase;
   const requestId = normalizeRequestId(options.requestId);
+  const groupRequestId = normalizeRequestId(options.clientRequestId || options.requestId);
+  const providerToken = normalizeProviderToken(options.providerKey || options.providerId || '');
   const payload = buildSnapshotPayload({
     stage,
     data: options.data,
@@ -113,7 +163,9 @@ export async function writeProviderSnapshot(options: {
     url: options.url,
     extraMeta: {
       ...(options.entryEndpoint ? { entryEndpoint: options.entryEndpoint } : {}),
-      ...(options.clientRequestId ? { clientRequestId: options.clientRequestId } : {})
+      ...(options.clientRequestId ? { clientRequestId: options.clientRequestId } : {}),
+      ...(options.providerKey ? { providerKey: options.providerKey } : {}),
+      ...(options.providerId ? { providerId: options.providerId } : {})
     }
   });
 
@@ -122,14 +174,18 @@ export async function writeProviderSnapshot(options: {
       endpoint,
       stage,
       requestId,
+      groupRequestId,
+      providerKey: providerToken || undefined,
       data: payload,
       verbosity: 'verbose'
     });
     return;
   } catch {
     try {
-      await ensureDir(path.join(SNAPSHOT_BASE, folder));
-      await fsp.writeFile(fallbackFilePath(folder, requestId, stage), JSON.stringify(payload, null, 2), 'utf-8');
+      const dir = path.join(resolveSnapshotBase(), folder, providerToken || '__pending__', groupRequestId);
+      await ensureDir(dir);
+      const safeStage = stage.replace(/[^\w.-]/g, '_') || 'snapshot';
+      await writeUniqueFile(dir, `${safeStage}.json`, JSON.stringify(payload, null, 2));
     } catch {
       // non-blocking fallback failure
     }
@@ -142,6 +198,8 @@ type StreamSnapshotOptions = {
   url?: string;
   entryEndpoint?: string;
   clientRequestId?: string;
+  providerKey?: string;
+  providerId?: string;
   extra?: Record<string, unknown>;
 };
 
@@ -219,7 +277,9 @@ export function attachProviderSseSnapshotStream(
       headers: options.headers,
       url: options.url,
       entryEndpoint: options.entryEndpoint,
-      clientRequestId: options.clientRequestId
+      clientRequestId: options.clientRequestId,
+      providerKey: options.providerKey,
+      providerId: options.providerId
     }).catch(() => {
       /* ignore snapshot errors */
     });
@@ -245,10 +305,15 @@ export async function writeProviderRetrySnapshot(options: {
   headers?: Record<string, unknown>;
   url?: string;
   clientRequestId?: string;
+  entryEndpoint?: string;
+  providerKey?: string;
+  providerId?: string;
 }): Promise<void> {
-  const { endpoint, folder } = resolveEndpoint(options.url);
+  const { endpoint, folder } = resolveEndpoint(options.entryEndpoint || options.url);
   const stage = options.type === 'request' ? 'provider-request.retry' : 'provider-response.retry';
   const requestId = normalizeRequestId(options.requestId);
+  const groupRequestId = normalizeRequestId(options.clientRequestId || options.requestId);
+  const providerToken = normalizeProviderToken(options.providerKey || options.providerId || '');
   const payload = buildSnapshotPayload({
     stage,
     data: options.data,
@@ -262,14 +327,18 @@ export async function writeProviderRetrySnapshot(options: {
       endpoint,
       stage,
       requestId,
+      groupRequestId,
+      providerKey: providerToken || undefined,
       data: payload,
       verbosity: 'verbose'
     });
     return;
   } catch {
     try {
-      await ensureDir(path.join(SNAPSHOT_BASE, folder));
-      await fsp.writeFile(fallbackFilePath(folder, requestId, stage), JSON.stringify(payload, null, 2), 'utf-8');
+      const dir = path.join(resolveSnapshotBase(), folder, providerToken || '__pending__', groupRequestId);
+      await ensureDir(dir);
+      const safeStage = stage.replace(/[^\w.-]/g, '_') || 'snapshot';
+      await writeUniqueFile(dir, `${safeStage}.json`, JSON.stringify(payload, null, 2));
     } catch {
       // non-blocking fallback failure
     }
@@ -279,11 +348,18 @@ export async function writeProviderRetrySnapshot(options: {
 export async function writeRepairFeedbackSnapshot(options: {
   requestId: string;
   feedback: unknown;
+  entryEndpoint?: string;
+  providerKey?: string;
+  providerId?: string;
+  groupRequestId?: string;
 }): Promise<void> {
   try {
-    const dir = path.join(SNAPSHOT_BASE, 'openai-chat');
-    await ensureDir(dir);
     const requestId = normalizeRequestId(options.requestId);
+    const { folder } = resolveEndpoint(options.entryEndpoint);
+    const groupRequestId = normalizeRequestId(options.groupRequestId || options.requestId);
+    const providerToken = normalizeProviderToken(options.providerKey || options.providerId || '');
+    const dir = path.join(resolveSnapshotBase(), folder, providerToken || '__pending__', groupRequestId);
+    await ensureDir(dir);
     const payload = {
       meta: {
         stage: 'repair-feedback',
@@ -292,7 +368,7 @@ export async function writeRepairFeedbackSnapshot(options: {
       },
       feedback: options.feedback
     };
-    await fsp.writeFile(path.join(dir, `${requestId}_repair-feedback.json`), JSON.stringify(payload, null, 2), 'utf-8');
+    await writeUniqueFile(dir, 'repair-feedback.json', JSON.stringify(payload, null, 2));
   } catch {
     // non-blocking
   }
@@ -304,11 +380,18 @@ export async function writeClientSnapshot(options: {
   headers?: Record<string, unknown>;
   body: unknown;
   metadata?: Record<string, unknown>;
+  providerKey?: string;
 }): Promise<void> {
   try {
     const stage: ClientPhase = 'client-request';
     const { endpoint, folder } = resolveEndpoint(options.entryEndpoint);
     const requestId = normalizeRequestId(options.requestId);
+    const groupRequestIdCandidate =
+      options.metadata && typeof options.metadata === 'object' && typeof options.metadata.clientRequestId === 'string'
+        ? (options.metadata.clientRequestId as string)
+        : undefined;
+    const groupRequestId = normalizeRequestId(groupRequestIdCandidate || requestId);
+    const providerToken = normalizeProviderToken(options.providerKey || '');
     const metadataSnapshot =
       options.metadata && typeof options.metadata === 'object'
         ? JSON.parse(JSON.stringify(options.metadata))
@@ -334,13 +417,16 @@ export async function writeClientSnapshot(options: {
         endpoint,
         stage,
         requestId,
+        groupRequestId,
+        providerKey: providerToken || undefined,
         data: payload,
         verbosity: 'verbose'
       });
       return;
     } catch {
-      await ensureDir(path.join(SNAPSHOT_BASE, folder));
-      await fsp.writeFile(fallbackFilePath(folder, requestId, stage), JSON.stringify(payload, null, 2), 'utf-8');
+      const dir = path.join(resolveSnapshotBase(), folder, providerToken || '__pending__', groupRequestId);
+      await ensureDir(dir);
+      await writeUniqueFile(dir, `${stage}.json`, JSON.stringify(payload, null, 2));
     }
   } catch {
     // non-blocking

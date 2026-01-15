@@ -132,30 +132,65 @@ class V2ProtocolConversionTest {
     const responsesDir = path.join(this.samplesDir, 'openai-responses');
     
     try {
-      const files = await fs.readdir(responsesDir);
-      const responseFiles = files.filter(f => f.includes('response'));
+      const entries = await fs.readdir(responsesDir, { withFileTypes: true });
       const samples: ConversionTestSample[] = [];
-      
-      for (const responseFile of responseFiles.slice(0, limit)) {
+
+      // New layout: openai-responses/<requestId>/*.json
+      for (const entry of entries) {
+        if (!entry.isDirectory()) {
+          continue;
+        }
+        if (!entry.name.includes('responses') && !entry.name.startsWith('req_')) {
+          continue;
+        }
         try {
-          const responsePath = path.join(responsesDir, responseFile);
+          const requestDir = path.join(responsesDir, entry.name);
+          const files = await fs.readdir(requestDir);
+          const responseFile = files.find((f) => f.endsWith('.json') && f.includes('response'));
+          if (!responseFile) {
+            continue;
+          }
+          const responsePath = path.join(requestDir, responseFile);
           const responseContent = await fs.readFile(responsePath, 'utf-8');
           const response = JSON.parse(responseContent);
-          
-          const baseName = responseFile.replace(/_response.*$/, '');
-          
           samples.push({
-            id: baseName,
+            id: entry.name,
             sourceProtocol: 'openai-responses',
             targetProtocol: 'openai-chat',
             input: response,
             conversionPath: 'responses->openai'
           });
+          if (samples.length >= limit) {
+            break;
+          }
         } catch (error) {
-          console.warn(`Failed to load Responses sample: ${responseFile}`);
+          console.warn(`Failed to load Responses sample directory: ${entry.name}`);
         }
       }
-      
+
+      // Legacy layout: openai-responses/*.json
+      if (samples.length < limit) {
+        const files = entries.filter((e) => e.isFile()).map((e) => e.name);
+        const responseFiles = files.filter(f => f.includes('response'));
+        for (const responseFile of responseFiles.slice(0, limit - samples.length)) {
+          try {
+            const responsePath = path.join(responsesDir, responseFile);
+            const responseContent = await fs.readFile(responsePath, 'utf-8');
+            const response = JSON.parse(responseContent);
+            const baseName = responseFile.replace(/_response.*$/, '');
+            samples.push({
+              id: baseName,
+              sourceProtocol: 'openai-responses',
+              targetProtocol: 'openai-chat',
+              input: response,
+              conversionPath: 'responses->openai'
+            });
+          } catch (error) {
+            console.warn(`Failed to load Responses sample: ${responseFile}`);
+          }
+        }
+      }
+
       return samples;
     } catch (error) {
       console.warn('Responses directory not accessible');

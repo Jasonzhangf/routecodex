@@ -281,13 +281,11 @@ function shouldBypassSseError(error: unknown): boolean {
       : typeof record.message === 'string'
         ? record.message
         : '';
-  if (code === 'SSE_DECODE_ERROR' || code === 'SERVERTOOL_FOLLOWUP_FAILED') {
+  // 仅对 servertool followup 失败保留 JSON 错误响应，其余场景统一通过 SSE error 事件回传，避免客户端长时间挂起。
+  if (code === 'SERVERTOOL_FOLLOWUP_FAILED') {
     return true;
   }
-  if (name === 'ProviderProtocolError' && /sse/i.test(message)) {
-    return true;
-  }
-  if (/sse\s+terminated/i.test(message) || /upstream\s+sse\s+terminated/i.test(message)) {
+  if (name === 'ServerToolFollowupError') {
     return true;
   }
   return false;

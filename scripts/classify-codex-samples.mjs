@@ -30,7 +30,6 @@ const PROVIDER_KEYS = {
 const TOOL_TYPES = {
   'apply_patch': 'apply_patch',
   'shell': 'shell_command',
-  'toon': 'toon_tool',
   'submit_tool_outputs': 'tool_loop',
   'list_files': 'file_operation',
   'write_file': 'file_operation',
@@ -46,7 +45,6 @@ class SampleClassifier {
       byProvider: {},
       byToolType: {},
       withToolCalls: 0,
-      withToon: 0,
       errors: 0
     };
   }
@@ -68,9 +66,6 @@ class SampleClassifier {
   identifyToolType(toolCall) {
     const funcName = toolCall.function?.name || '';
     
-    // 检查 TOON 格式
-    if (this.isToonTool(toolCall)) return 'toon_tool';
-    
     // 检查已知工具名称
     for (const [pattern, type] of Object.entries(TOOL_TYPES)) {
       if (funcName.toLowerCase().includes(pattern)) return type;
@@ -84,19 +79,6 @@ class SampleClassifier {
     return 'unknown_tool';
   }
 
-  // 检查是否为 TOON 工具
-  isToonTool(toolCall) {
-    const args = toolCall.function?.arguments;
-    if (!args) return false;
-    
-    try {
-      const parsed = JSON.parse(args);
-      return parsed && typeof parsed.toon === 'string';
-    } catch {
-      return false;
-    }
-  }
-
   // 分析单个样本
   async analyzeSample(filePath) {
     try {
@@ -107,7 +89,6 @@ class SampleClassifier {
       const sampleId = basename(dirname(filePath)) + '/' + basename(filePath, '.json');
       
       let toolCalls = [];
-      let hasToon = false;
       
       // 提取 tool_calls
       if (data.tool_calls) {
@@ -128,8 +109,6 @@ class SampleClassifier {
         const toolType = this.identifyToolType(toolCall);
         toolTypes.push(toolType);
         
-        if (toolType === 'toon_tool') hasToon = true;
-        
         // 更新统计
         this.stats.byToolType[toolType] = (this.stats.byToolType[toolType] || 0) + 1;
       }
@@ -140,7 +119,6 @@ class SampleClassifier {
         filePath,
         hasToolCalls: toolCalls.length > 0,
         toolTypes,
-        hasToon,
         toolCallCount: toolCalls.length
       };
       
@@ -150,7 +128,6 @@ class SampleClassifier {
       this.stats.total++;
       this.stats.byProvider[providerKey] = (this.stats.byProvider[providerKey] || 0) + 1;
       if (toolCalls.length > 0) this.stats.withToolCalls++;
-      if (hasToon) this.stats.withToon++;
       
     } catch (error) {
       console.error(`Error analyzing ${filePath}:`, error.message);
@@ -196,7 +173,7 @@ class SampleClassifier {
     
     console.log(`总样本数: ${this.stats.total}`);
     console.log(`包含工具调用: ${this.stats.withToolCalls}`);
-    console.log(`包含 TOON: ${this.stats.withToon}`);
+    console.log(`包含 TOON: 0 (TOON 已禁用)`);
     console.log(`错误数: ${this.stats.errors}`);
     
     console.log('\n按 Provider 分布:');

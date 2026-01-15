@@ -77,6 +77,7 @@ export class HubRequestExecutor implements RequestExecutor {
           body: input.body,
           metadata: {
             ...initialMetadata,
+            clientRequestId,
             userAgent: headerUa,
             clientOriginator: headerOriginator
           }

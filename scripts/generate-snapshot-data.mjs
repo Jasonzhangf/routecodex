@@ -148,27 +148,57 @@ class SnapshotDataGenerator {
     
     try {
       await fs.mkdir(outputDir, { recursive: true });
-      const files = await fs.readdir(responsesDir);
-      
-      const groups = this.groupFilesByRequestId(files);
       let count = 0;
-      
-      for (const [requestId, groupFiles] of Object.entries(groups)) {
+
+      const entries = await fs.readdir(responsesDir, { withFileTypes: true });
+
+      // New layout: openai-responses/<requestId>/*.json
+      for (const entry of entries) {
         if (count >= MAX_SAMPLES) break;
-        
+        if (!entry.isDirectory()) continue;
+        const requestId = entry.name;
+        if (!requestId.startsWith('req_') && !requestId.includes('responses')) continue;
+
+        const subdirPath = path.join(responsesDir, requestId);
+        const files = (await fs.readdir(subdirPath)).filter((f) => f.endsWith('.json'));
         const snapshot = await this.buildSnapshotFromFiles(
-          requestId, 
-          'openai-responses', 
-          groupFiles, 
-          responsesDir
+          requestId,
+          'openai-responses',
+          files,
+          subdirPath
         );
-        
+
         if (snapshot) {
           const outputPath = path.join(outputDir, `${requestId}.json`);
           await fs.writeFile(outputPath, JSON.stringify(snapshot, null, 2));
           console.log(`  ✅ 生成快照: ${requestId}`);
           count++;
           this.samplesGenerated++;
+        }
+      }
+
+      // Legacy layout: openai-responses/*.json
+      if (count < MAX_SAMPLES) {
+        const files = entries.filter((e) => e.isFile()).map((e) => e.name);
+        const groups = this.groupFilesByRequestId(files);
+      
+        for (const [requestId, groupFiles] of Object.entries(groups)) {
+          if (count >= MAX_SAMPLES) break;
+
+          const snapshot = await this.buildSnapshotFromFiles(
+            requestId,
+            'openai-responses',
+            groupFiles,
+            responsesDir
+          );
+
+          if (snapshot) {
+            const outputPath = path.join(outputDir, `${requestId}.json`);
+            await fs.writeFile(outputPath, JSON.stringify(snapshot, null, 2));
+            console.log(`  ✅ 生成快照: ${requestId}`);
+            count++;
+            this.samplesGenerated++;
+          }
         }
       }
       

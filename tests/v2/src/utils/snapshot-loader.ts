@@ -42,13 +42,30 @@ export class SnapshotLoader {
     const testCases: ConsistencyTestCase[] = [];
     
     try {
-      const files = await fs.readdir(openaiChatDir);
-      const compatFiles = files.filter(f => f.includes('compat'));
-      const providerFiles = files.filter(f => f.includes('provider'));
-      
-      // 按请求ID分组
+      const entries = await fs.readdir(openaiChatDir, { withFileTypes: true });
+      const flatFiles = entries.filter((e) => e.isFile()).map((e) => e.name);
+
+      // New layout: openai-chat/<requestId>/*.json
+      for (const entry of entries) {
+        if (!entry.isDirectory()) {
+          continue;
+        }
+        const requestId = entry.name;
+        if (!this.isLikelyRequestId(requestId)) {
+          continue;
+        }
+        const dirPath = path.join(openaiChatDir, requestId);
+        const files = (await fs.readdir(dirPath)).filter((f) => f.endsWith('.json'));
+        const testCase = await this.buildTestCaseFromFiles(requestId, 'openai-chat', files, dirPath);
+        if (testCase) {
+          testCases.push(testCase);
+        }
+      }
+
+      // Legacy layout: openai-chat/*.json
+      const compatFiles = flatFiles.filter(f => f.includes('compat'));
+      const providerFiles = flatFiles.filter(f => f.includes('provider'));
       const groups = this.groupFilesByRequestId([...compatFiles, ...providerFiles]);
-      
       for (const [requestId, groupFiles] of Object.entries(groups)) {
         const testCase = await this.buildTestCaseFromFiles(requestId, 'openai-chat', groupFiles, openaiChatDir);
         if (testCase) {
@@ -70,28 +87,25 @@ export class SnapshotLoader {
     const testCases: ConsistencyTestCase[] = [];
     
     try {
-      const subdirs = await fs.readdir(anthropicDir);
+      const subdirs = await fs.readdir(anthropicDir, { withFileTypes: true });
       
-      for (const subdir of subdirs.slice(0, 10)) { // 限制数量
+      const dirs = subdirs.filter((e) => e.isDirectory()).map((e) => e.name);
+      for (const subdir of dirs.slice(0, 10)) { // 限制数量
         const subdirPath = path.join(anthropicDir, subdir);
-        const stat = await fs.stat(subdirPath);
-        
-        if (stat.isDirectory()) {
-          const files = await fs.readdir(subdirPath);
-          const relevantFiles = files.filter(f => 
-            f.includes('request') || f.includes('response')
-          );
-          
-          const testCase = await this.buildTestCaseFromFiles(
-            subdir, 
-            'anthropic-messages', 
-            relevantFiles, 
-            subdirPath
-          );
-          
-          if (testCase) {
-            testCases.push(testCase);
-          }
+        const files = await fs.readdir(subdirPath);
+        const relevantFiles = files.filter(f =>
+          f.endsWith('.json') && (f.includes('request') || f.includes('response') || f.includes('provider'))
+        );
+
+        const testCase = await this.buildTestCaseFromFiles(
+          subdir,
+          'anthropic-messages',
+          relevantFiles,
+          subdirPath
+        );
+
+        if (testCase) {
+          testCases.push(testCase);
         }
       }
     } catch (error) {
@@ -109,21 +123,39 @@ export class SnapshotLoader {
     const testCases: ConsistencyTestCase[] = [];
     
     try {
-      const files = await fs.readdir(responsesDir);
-      const relevantFiles = files.filter(f => 
-        f.includes('request') || f.includes('response')
+      const entries = await fs.readdir(responsesDir, { withFileTypes: true });
+      const flatFiles = entries.filter((e) => e.isFile()).map((e) => e.name);
+
+      // New layout: openai-responses/<requestId>/*.json
+      for (const entry of entries) {
+        if (!entry.isDirectory()) {
+          continue;
+        }
+        const requestId = entry.name;
+        if (!this.isLikelyRequestId(requestId)) {
+          continue;
+        }
+        const dirPath = path.join(responsesDir, requestId);
+        const files = (await fs.readdir(dirPath)).filter((f) => f.endsWith('.json'));
+        const testCase = await this.buildTestCaseFromFiles(requestId, 'openai-responses', files, dirPath);
+        if (testCase) {
+          testCases.push(testCase);
+        }
+      }
+
+      // Legacy layout: openai-responses/*.json
+      const relevantFiles = flatFiles.filter(f =>
+        f.includes('request') || f.includes('response') || f.includes('provider')
       );
-      
       const groups = this.groupFilesByRequestId(relevantFiles);
-      
       for (const [requestId, groupFiles] of Object.entries(groups)) {
         const testCase = await this.buildTestCaseFromFiles(
-          requestId, 
-          'openai-responses', 
-          groupFiles, 
+          requestId,
+          'openai-responses',
+          groupFiles,
           responsesDir
         );
-        
+
         if (testCase) {
           testCases.push(testCase);
         }
@@ -135,6 +167,16 @@ export class SnapshotLoader {
     return testCases;
   }
 
+  private isLikelyRequestId(value: string): boolean {
+    return (
+      value.startsWith('req_') ||
+      value.startsWith('req-') ||
+      value.startsWith('openai-chat') ||
+      value.startsWith('openai-responses') ||
+      value.startsWith('anthropic')
+    );
+  }
+
   /**
    * 按请求ID分组文件
    */
@@ -142,18 +184,29 @@ export class SnapshotLoader {
     const groups: Record<string, string[]> = {};
     
     for (const file of files) {
-      // 提取请求ID模式
-      const match = file.match(/(req_\d+_[a-zA-Z0-9]+)/) || file.match(/(req-\d+-[a-zA-Z0-9]+)/);
-      if (match) {
-        const requestId = match[1];
-        if (!groups[requestId]) {
-          groups[requestId] = [];
-        }
-        groups[requestId].push(file);
+      const requestId = this.extractRequestIdFromName(file);
+      if (!requestId) {
+        continue;
       }
+      if (!groups[requestId]) {
+        groups[requestId] = [];
+      }
+      groups[requestId].push(file);
     }
     
     return groups;
+  }
+
+  private extractRequestIdFromName(fileName: string): string | null {
+    const match = fileName.match(/^(req_\d+(?:_[a-zA-Z0-9]+)?)_/) || fileName.match(/^(req-\d+-[a-zA-Z0-9]+)_/);
+    if (match && match[1]) {
+      return match[1];
+    }
+    const idx = fileName.indexOf('_');
+    if (idx > 0) {
+      return fileName.slice(0, idx);
+    }
+    return null;
   }
 
   /**
@@ -176,21 +229,25 @@ export class SnapshotLoader {
         const filePath = path.join(dirPath, file);
         const content = await fs.readFile(filePath, 'utf-8');
         const data: SnapshotData = JSON.parse(content);
+        const stage =
+          (data as any)?.meta && typeof (data as any).meta === 'object' && typeof (data as any).meta.stage === 'string'
+            ? (data as any).meta.stage
+            : file;
         
         // 提取时间戳
         if (!timestamp) {
-          const timestampMatch = file.match(/(\d{10,13})/);
+          const timestampMatch = file.match(/(\d{10,13})/) || requestId.match(/(\d{10,13})/);
           if (timestampMatch) {
             timestamp = timestampMatch[1];
           }
         }
         
         // 分类数据
-        if (file.includes('compat-pre')) {
+        if (String(stage).includes('compat-pre') || file.includes('compat-pre')) {
           v1Data.compatPre = data.data || data;
-        } else if (file.includes('compat-post')) {
+        } else if (String(stage).includes('compat-post') || file.includes('compat-post')) {
           v1Data.compatPost = data.data || data;
-        } else if (file.includes('provider-request')) {
+        } else if (String(stage).includes('provider-request') || file.includes('provider-request')) {
           v2Data.providerRequest = {
             url: data.url,
             headers: data.headers,
@@ -199,13 +256,13 @@ export class SnapshotLoader {
           if (!inputRequest) {
             inputRequest = data.body;
           }
-        } else if (file.includes('provider-response')) {
+        } else if (String(stage).includes('provider-response') || file.includes('provider-response')) {
           v2Data.providerResponse = data.data || data;
-        } else if (file.includes('request')) {
+        } else if (String(stage).includes('request') || file.includes('request')) {
           if (!inputRequest) {
             inputRequest = data.data || data;
           }
-        } else if (file.includes('response')) {
+        } else if (String(stage).includes('response') || file.includes('response')) {
           v1Data.finalResponse = data.data || data;
         }
       }

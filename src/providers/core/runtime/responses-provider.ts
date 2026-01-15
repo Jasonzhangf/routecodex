@@ -351,7 +351,9 @@ export class ResponsesProvider extends HttpTransportProvider {
         headers,
         url,
         entryEndpoint,
-        clientRequestId
+        clientRequestId,
+        providerKey: context.providerKey,
+        providerId: context.providerId
       });
     } catch {
       // non-blocking
@@ -398,7 +400,9 @@ export class ResponsesProvider extends HttpTransportProvider {
         headers,
         url: targetUrl,
         entryEndpoint,
-        clientRequestId: this.extractClientRequestId(context)
+        clientRequestId: this.extractClientRequestId(context),
+        providerKey: context.providerKey,
+        providerId: context.providerId
       })
       : stream;
 
@@ -456,7 +460,9 @@ export class ResponsesProvider extends HttpTransportProvider {
           headers,
           url: targetUrl,
           entryEndpoint,
-          clientRequestId: this.extractClientRequestId(context)
+          clientRequestId: this.extractClientRequestId(context),
+          providerKey: context.providerKey,
+          providerId: context.providerId
         })
         : stream;
       const converter = await this.loadResponsesSseConverter();

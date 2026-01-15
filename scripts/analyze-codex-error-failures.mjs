@@ -37,11 +37,25 @@ async function fileExists(p) {
   }
 }
 
-async function listJsonFiles(root) {
-  const entries = await fs.readdir(root);
-  return entries
-    .filter((name) => name.toLowerCase().endsWith('.json'))
-    .map((name) => path.join(root, name));
+async function* walkJsonFiles(root) {
+  const stack = [root];
+  while (stack.length) {
+    const current = stack.pop();
+    let entries;
+    try {
+      entries = await fs.readdir(current, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const full = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(full);
+      } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.json')) {
+        yield full;
+      }
+    }
+  }
 }
 
 async function analyzeFile(filePath) {
@@ -61,20 +75,13 @@ async function main() {
     process.exit(0);
   }
 
-  const files = await listJsonFiles(RESPONSES_DIR);
-  if (!files.length) {
-    console.log('[analyze-codex-error-failures] no JSON files under', RESPONSES_DIR);
-    process.exit(0);
-  }
-
-  console.log(`[analyze-codex-error-failures] scanning ${files.length} file(s) under ${RESPONSES_DIR}`);
-
   const summary = new Map();
   for (const p of PATTERNS) {
     summary.set(p, { count: 0, files: [] });
   }
 
-  for (const file of files) {
+  let scanned = 0;
+  for await (const file of walkJsonFiles(RESPONSES_DIR)) {
     let res;
     try {
       res = await analyzeFile(file);
@@ -90,7 +97,10 @@ async function main() {
         entry.files.push(path.basename(file));
       }
     }
+    scanned += 1;
   }
+
+  console.log(`[analyze-codex-error-failures] scanned ${scanned} file(s) under ${RESPONSES_DIR}`);
 
   for (const key of PATTERNS) {
     const { count, files } = summary.get(key);

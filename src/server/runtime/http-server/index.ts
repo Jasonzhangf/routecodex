@@ -65,6 +65,7 @@ import { ManagerDaemon } from '../../../manager/index.js';
 import { HealthManagerModule } from '../../../manager/modules/health/index.js';
 import { RoutingStateManagerModule } from '../../../manager/modules/routing/index.js';
 import { TokenManagerModule } from '../../../manager/modules/token/index.js';
+import type { ProviderQuotaDaemonModule } from '../../../manager/modules/quota/index.js';
 import { StatsManager, type UsageMetrics } from './stats-manager.js';
 type LegacyAuthFields = ProviderRuntimeProfile['auth'] & {
   token_file?: unknown;
@@ -420,9 +421,13 @@ export class RouteCodexHttpServer {
         try {
           const mod = (await import('../../../manager/modules/quota/index.js')) as {
             QuotaManagerModule?: new () => import('../../../manager/modules/quota/index.js').QuotaManagerModule;
+            ProviderQuotaDaemonModule?: new () => import('../../../manager/modules/quota/index.js').ProviderQuotaDaemonModule;
           };
           if (typeof mod.QuotaManagerModule === 'function') {
             daemon.registerModule(new mod.QuotaManagerModule());
+          }
+          if (typeof mod.ProviderQuotaDaemonModule === 'function') {
+            daemon.registerModule(new mod.ProviderQuotaDaemonModule());
           }
         } catch {
           // 可选模块，缺失时忽略
@@ -626,6 +631,12 @@ export class RouteCodexHttpServer {
     const routingStateStore = routingModule?.getRoutingStateStore();
     if (routingStateStore) {
       hubConfig.routingStateStore = routingStateStore;
+    }
+    const quotaModule = this.managerDaemon?.getModule('provider-quota') as ProviderQuotaDaemonModule | undefined;
+    const quotaFlagRaw = String(process.env.ROUTECODEX_QUOTA_ENABLED || '').trim().toLowerCase();
+    const quotaEnabled = quotaFlagRaw === '1' || quotaFlagRaw === 'true';
+    if (quotaEnabled && quotaModule && typeof quotaModule.getQuotaView === 'function') {
+      hubConfig.quotaView = quotaModule.getQuotaView();
     }
     if (!this.hubPipeline) {
       this.hubPipeline = new hubCtor(hubConfig);

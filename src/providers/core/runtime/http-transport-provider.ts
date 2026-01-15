@@ -663,6 +663,8 @@ export class HttpTransportProvider extends BaseProvider {
             url: requestInfo.targetUrl,
             entryEndpoint: requestInfo.entryEndpoint,
             clientRequestId: requestInfo.clientRequestId,
+            providerKey: context.providerKey,
+            providerId: context.providerId,
             extra: { retry: true }
           })
           : upstreamStream;
@@ -676,7 +678,9 @@ export class HttpTransportProvider extends BaseProvider {
               headers: finalRetryHeaders,
               url: requestInfo.targetUrl,
               entryEndpoint: requestInfo.entryEndpoint,
-              clientRequestId: requestInfo.clientRequestId
+              clientRequestId: requestInfo.clientRequestId,
+              providerKey: context.providerKey,
+              providerId: context.providerId
             });
           } catch { /* non-blocking */ }
         }
@@ -691,7 +695,9 @@ export class HttpTransportProvider extends BaseProvider {
           headers: finalRetryHeaders,
           url: requestInfo.targetUrl,
           entryEndpoint: requestInfo.entryEndpoint,
-          clientRequestId: requestInfo.clientRequestId
+          clientRequestId: requestInfo.clientRequestId,
+          providerKey: context.providerKey,
+          providerId: context.providerId
         });
       } catch { /* non-blocking */ }
       return response;
@@ -749,7 +755,9 @@ export class HttpTransportProvider extends BaseProvider {
         headers: requestInfo.headers,
         url: requestInfo.targetUrl,
         entryEndpoint: requestInfo.entryEndpoint ?? this.getEntryEndpointFromPayload(processedRequest),
-        clientRequestId: requestInfo.clientRequestId ?? this.getClientRequestIdFromContext(context)
+        clientRequestId: requestInfo.clientRequestId ?? this.getClientRequestIdFromContext(context),
+        providerKey: context.providerKey,
+        providerId: context.providerId
       });
     } catch { /* non-blocking */ }
 

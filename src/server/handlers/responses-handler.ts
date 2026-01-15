@@ -133,6 +133,7 @@ export async function handleResponses(
       body: payload,
       metadata: {
         stream: wantsStream,
+        clientRequestId,
         clientStream: acceptsSse || undefined,
         inboundStream: wantsStream,
         outboundStream,

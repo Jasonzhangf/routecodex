@@ -123,6 +123,7 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
       body: pipelineBody,
       metadata: {
         stream: wantsStream,
+        clientRequestId,
         inboundStream,
         outboundStream,
         providerProtocol: 'anthropic-messages',

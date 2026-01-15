@@ -83,7 +83,14 @@ export class HttpRequestExecutor {
     finalHeaders = this.deps.applyStreamModeHeaders(finalHeaders, wantsSse);
     const targetUrl = `${this.deps.getEffectiveBaseUrl().replace(/\/$/, '')}/${endpoint.startsWith('/') ? endpoint.slice(1) : endpoint}`;
     const finalBody = this.deps.buildHttpRequestBody(processedRequest);
-    const entryEndpoint = this.deps.getEntryEndpointFromPayload(processedRequest);
+    const meta = (context as { metadata?: unknown }).metadata;
+    const metaEntryEndpoint =
+      meta && typeof meta === 'object' && typeof (meta as Record<string, unknown>).entryEndpoint === 'string'
+        ? ((meta as Record<string, unknown>).entryEndpoint as string)
+        : undefined;
+    const entryEndpoint =
+      this.deps.getEntryEndpointFromPayload(processedRequest) ||
+      metaEntryEndpoint;
     if (wantsSse) {
       this.deps.prepareSseRequestBody(finalBody, context);
     }
@@ -93,7 +100,9 @@ export class HttpRequestExecutor {
       entryEndpoint,
       requestId: context.requestId,
       routeName: context.routeName,
-      clientRequestId
+      clientRequestId,
+      providerKey: context.providerKey,
+      providerId: context.providerId
     });
 
     // Debug: 打印完整的HTTP请求信息（用于对比gcli2api）
@@ -136,7 +145,15 @@ export class HttpRequestExecutor {
   private async captureVisionDebugRequest(
     processedRequest: UnknownObject,
     body: UnknownObject,
-    options: { wantsSse: boolean; entryEndpoint?: string; requestId: string; routeName?: string; clientRequestId?: string }
+    options: {
+      wantsSse: boolean;
+      entryEndpoint?: string;
+      requestId: string;
+      routeName?: string;
+      clientRequestId?: string;
+      providerKey?: string;
+      providerId?: string;
+    }
   ): Promise<void> {
     const debug = shouldCaptureVisionDebug(processedRequest, {
       routeName: options.routeName,
@@ -154,7 +171,9 @@ export class HttpRequestExecutor {
           wantsSse: options.wantsSse
         }),
         entryEndpoint: options.entryEndpoint,
-        clientRequestId: options.clientRequestId ?? options.requestId
+        clientRequestId: options.clientRequestId ?? options.requestId,
+        providerKey: options.providerKey,
+        providerId: options.providerId
       });
     } catch {
       // ignore snapshot failures
@@ -179,7 +198,9 @@ export class HttpRequestExecutor {
         headers: requestInfo.headers,
         url: requestInfo.targetUrl,
         entryEndpoint: requestInfo.entryEndpoint,
-        clientRequestId: requestInfo.clientRequestId
+        clientRequestId: requestInfo.clientRequestId,
+        providerKey: context.providerKey,
+        providerId: context.providerId
       });
     } catch {
       /* ignore snapshot failures */
@@ -235,7 +256,9 @@ export class HttpRequestExecutor {
           headers: requestInfo.headers,
           url: requestInfo.targetUrl,
           entryEndpoint: requestInfo.entryEndpoint,
-          clientRequestId: requestInfo.clientRequestId
+          clientRequestId: requestInfo.clientRequestId,
+          providerKey: context.providerKey,
+          providerId: context.providerId
         })
         : upstreamStream;
       const wrapped = await this.deps.wrapUpstreamSseResponse(streamForHost, context);
@@ -248,7 +271,9 @@ export class HttpRequestExecutor {
             headers: requestInfo.headers,
             url: requestInfo.targetUrl,
             entryEndpoint: requestInfo.entryEndpoint,
-            clientRequestId: requestInfo.clientRequestId
+            clientRequestId: requestInfo.clientRequestId,
+            providerKey: context.providerKey,
+            providerId: context.providerId
           });
         } catch {
           /* ignore snapshot failures */
@@ -266,7 +291,9 @@ export class HttpRequestExecutor {
         headers: requestInfo.headers,
         url: requestInfo.targetUrl,
         entryEndpoint: requestInfo.entryEndpoint,
-        clientRequestId: requestInfo.clientRequestId
+        clientRequestId: requestInfo.clientRequestId,
+        providerKey: context.providerKey,
+        providerId: context.providerId
       });
     } catch {
       /* ignore snapshot failures */

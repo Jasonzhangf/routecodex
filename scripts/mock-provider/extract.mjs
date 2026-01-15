@@ -105,8 +105,8 @@ function findProviderId(node) {
 }
 
 async function detectProviderId(entryDir, prefix, request) {
-  const semanticPath = path.join(entryDir, `${prefix}_semantic_map_from_chat.json`);
-  if (await fileExists(semanticPath)) {
+  const semanticPath = prefix ? path.join(entryDir, `${prefix}_semantic_map_from_chat.json`) : null;
+  if (semanticPath && (await fileExists(semanticPath))) {
     try {
       const semantic = JSON.parse(await fs.readFile(semanticPath, 'utf-8'));
       const detected = findProviderId(semantic);
@@ -119,22 +119,98 @@ async function detectProviderId(entryDir, prefix, request) {
   }
   const fallback =
     request?.providerId ||
-    request?.data?.providerId ||
-    request?.data?.meta?.providerId ||
+    request?.meta?.providerId ||
+    request?.body?.providerId ||
+    request?.body?.meta?.providerId ||
     'unknown';
   return sanitizeComponent(fallback, 'unknown');
 }
 
 function buildTags(response) {
   const tags = [];
-  const body = response?.data?.body;
-  if (body?.__sse_responses) {
+  const body = response?.body || response?.data?.body;
+  if (body?.__sse_responses || body?.mode === 'sse') {
     tags.push('sse');
   }
-  if (Array.isArray(body?.tool_calls) && body.tool_calls.length > 0) {
+  const toolCalls = body?.tool_calls || body?.output?.tool_calls;
+  if (Array.isArray(toolCalls) && toolCalls.length > 0) {
     tags.push('tool-call');
   }
   return tags;
+}
+
+function parseRequestTimestamp(requestId, request) {
+  if (typeof request?.timestamp === 'number' && Number.isFinite(request.timestamp)) {
+    return request.timestamp;
+  }
+  const buildTime = request?.meta?.buildTime;
+  if (typeof buildTime === 'string') {
+    const parsed = Date.parse(buildTime);
+    if (!Number.isNaN(parsed)) {
+      return parsed;
+    }
+  }
+  const match = String(requestId || '').match(/(\d{8})T(\d{6})(\d{3})?/);
+  if (match) {
+    const ymd = match[1];
+    const hms = match[2];
+    const ms = match[3] || '000';
+    const year = Number(ymd.slice(0, 4));
+    const month = Number(ymd.slice(4, 6));
+    const day = Number(ymd.slice(6, 8));
+    const hour = Number(hms.slice(0, 2));
+    const min = Number(hms.slice(2, 4));
+    const sec = Number(hms.slice(4, 6));
+    const msNum = Number(ms);
+    if ([year, month, day, hour, min, sec, msNum].every((v) => Number.isFinite(v))) {
+      return new Date(year, month - 1, day, hour, min, sec, msNum).getTime();
+    }
+  }
+  return Date.now();
+}
+
+function extractModelFromProviderRequest(request) {
+  const body = request?.body || request?.data?.body;
+  const raw =
+    body?.model ||
+    body?.data?.model ||
+    request?.model ||
+    request?.data?.model ||
+    undefined;
+  return typeof raw === 'string' && raw.trim() ? raw.trim() : 'unknown';
+}
+
+async function detectProviderIdFromRequestDir(requestDir, request) {
+  try {
+    const files = await fs.readdir(requestDir);
+    const semanticCandidates = files
+      .filter((name) => name.toLowerCase().endsWith('.json') && name.toLowerCase().includes('semantic_map'))
+      .slice(0, 10);
+    for (const file of semanticCandidates) {
+      try {
+        const semantic = JSON.parse(await fs.readFile(path.join(requestDir, file), 'utf-8'));
+        const detected = findProviderId(semantic);
+        if (detected) {
+          return sanitizeComponent(detected, 'unknown');
+        }
+      } catch {
+        // ignore semantic parse errors
+      }
+    }
+  } catch {
+    // ignore dir read errors
+  }
+  return await detectProviderId(requestDir, null, request);
+}
+
+function pickLatestStageFile(files, prefix) {
+  const candidates = files
+    .filter((name) => name.toLowerCase().endsWith('.json') && name.startsWith(prefix))
+    .sort((a, b) => a.localeCompare(b, 'en'));
+  if (!candidates.length) {
+    return null;
+  }
+  return candidates[candidates.length - 1];
 }
 
 async function extractPair(entryName, entryDir, file, registry, seqMap, filters = {}) {
@@ -152,8 +228,8 @@ async function extractPair(entryName, entryDir, file, registry, seqMap, filters 
   if (filters.provider && providerId !== sanitizeComponent(filters.provider, filters.provider)) {
     return;
   }
-  const model = sanitizeComponent(request?.data?.body?.model, 'unknown');
-  const tsToken = timestampToToken(request?.timestamp);
+  const model = sanitizeComponent(extractModelFromProviderRequest(request), 'unknown');
+  const tsToken = timestampToToken(parseRequestTimestamp(prefix, request));
   const seqKey = `${entryName}|${providerId}|${model}|${tsToken}`;
   const seq = (seqMap.get(seqKey) || 0) + 1;
   seqMap.set(seqKey, seq);
@@ -198,6 +274,66 @@ async function extractPair(entryName, entryDir, file, registry, seqMap, filters 
   console.log(`✅ ${reqId}`);
 }
 
+async function extractPairFromRequestDir(entryName, requestDir, registry, seqMap, filters = {}) {
+  const files = await fs.readdir(requestDir);
+  const providerRequestFile = pickLatestStageFile(files, 'provider-request');
+  const providerResponseFile = pickLatestStageFile(files, 'provider-response');
+  if (!providerRequestFile || !providerResponseFile) {
+    return;
+  }
+
+  const requestPath = path.join(requestDir, providerRequestFile);
+  const responsePath = path.join(requestDir, providerResponseFile);
+  const request = JSON.parse(await fs.readFile(requestPath, 'utf-8'));
+  const response = JSON.parse(await fs.readFile(responsePath, 'utf-8'));
+
+  const requestId = path.basename(requestDir);
+  const providerId = await detectProviderIdFromRequestDir(requestDir, request);
+  if (filters.provider && providerId !== sanitizeComponent(filters.provider, filters.provider)) {
+    return;
+  }
+  const model = sanitizeComponent(extractModelFromProviderRequest(request), 'unknown');
+  const tsToken = timestampToToken(parseRequestTimestamp(requestId, request));
+  const seqKey = `${entryName}|${providerId}|${model}|${tsToken}`;
+  const seq = (seqMap.get(seqKey) || 0) + 1;
+  seqMap.set(seqKey, seq);
+  const seqStr = String(seq).padStart(3, '0');
+  const reqId = `${entryName}-${providerId}-${model}-${tsToken}-${seqStr}`;
+
+  const daySegment = tsToken.slice(0, 8);
+  const timeSegment = tsToken.slice(9);
+  const targetDir = path.join(MOCK_SAMPLES_DIR, entryName, providerId, model, daySegment, timeSegment, seqStr);
+  await ensureDir(targetDir);
+
+  const enrichedRequest = { ...request, reqId, entryEndpoint: request?.endpoint };
+  const enrichedResponse = { ...response, reqId, entryEndpoint: response?.endpoint };
+  await fs.writeFile(path.join(targetDir, 'request.json'), JSON.stringify(enrichedRequest, null, 2));
+  await fs.writeFile(path.join(targetDir, 'response.json'), JSON.stringify(enrichedResponse, null, 2));
+
+  const clientRequestFile = pickLatestStageFile(files, 'client-request');
+  if (clientRequestFile) {
+    try {
+      const client = JSON.parse(await fs.readFile(path.join(requestDir, clientRequestFile), 'utf-8'));
+      const enrichedClient = { ...client, reqId, entryEndpoint: client?.endpoint };
+      await fs.writeFile(path.join(targetDir, 'client-request.json'), JSON.stringify(enrichedClient, null, 2));
+    } catch {
+      // ignore client-request parse errors
+    }
+  }
+
+  registry.samples = registry.samples.filter((sample) => sample.reqId !== reqId);
+  registry.samples.push({
+    reqId,
+    entry: entryName,
+    providerId,
+    model,
+    timestamp: new Date(parseRequestTimestamp(requestId, request)).toISOString(),
+    path: path.relative(MOCK_SAMPLES_DIR, targetDir),
+    tags: buildTags(response)
+  });
+  console.log(`✅ ${reqId}`);
+}
+
 async function extractAll(options = {}) {
   console.log('[mock:extract] Preparing directories...');
   await ensureDir(MOCK_SAMPLES_DIR);
@@ -214,7 +350,41 @@ async function extractAll(options = {}) {
       continue;
     }
     const entryDir = path.join(CODEX_SAMPLES_DIR, dirEntry.name);
-    const files = await fs.readdir(entryDir);
+    const entries = await fs.readdir(entryDir, { withFileTypes: true });
+
+    // Newer layout: entry/<provider>/<requestId>/... (all stages in one directory)
+    // Previous layout: entry/<requestId>/... (single-level request directory)
+    for (const sub of entries) {
+      if (!sub.isDirectory()) continue;
+      const maybeProviderOrRequestDir = path.join(entryDir, sub.name);
+      let nested = [];
+      try {
+        nested = await fs.readdir(maybeProviderOrRequestDir, { withFileTypes: true });
+      } catch {
+        nested = [];
+      }
+      const hasJsonFiles = nested.some((e) => e.isFile() && e.name.toLowerCase().endsWith('.json'));
+      if (hasJsonFiles) {
+        try {
+          await extractPairFromRequestDir(dirEntry.name, maybeProviderOrRequestDir, registry, seqMap, { provider: providerFilter });
+        } catch (error) {
+          console.warn(`⚠️  Skipped ${sub.name}: ${error.message}`);
+        }
+        continue;
+      }
+      const requestDirs = nested.filter((e) => e.isDirectory());
+      for (const reqSub of requestDirs) {
+        const requestDir = path.join(maybeProviderOrRequestDir, reqSub.name);
+        try {
+          await extractPairFromRequestDir(dirEntry.name, requestDir, registry, seqMap, { provider: providerFilter });
+        } catch (error) {
+          console.warn(`⚠️  Skipped ${sub.name}/${reqSub.name}: ${error.message}`);
+        }
+      }
+    }
+
+    // Legacy layout: entry/*_provider-request.json
+    const files = entries.filter((e) => e.isFile()).map((e) => e.name);
     const requests = files.filter((name) => name.endsWith('_provider-request.json'));
     for (const file of requests) {
       try {
@@ -230,23 +400,71 @@ async function extractAll(options = {}) {
 }
 
 async function extractSingle(reqId) {
-  const parts = reqId.split('-');
-  if (parts.length < 5) {
-    throw new Error(`Invalid requestId format: ${reqId}`);
-  }
-  const entry = parts.slice(0, parts.length - 4).join('-') || parts[0];
-  const entryDir = path.join(CODEX_SAMPLES_DIR, entry);
-  const files = await fs.readdir(entryDir);
-  const target = files.find((file) => file.includes(reqId) && file.endsWith('_provider-request.json'));
-  if (!target) {
-    throw new Error(`Request ${reqId} not found under ${entry}`);
-  }
   await ensureDir(MOCK_SAMPLES_DIR);
   await ensureDir(path.join(MOCK_SAMPLES_DIR, '_registry'));
   const registry = await loadRegistry();
   const seqMap = buildSeqMapFromRegistry(registry);
-  await extractPair(entry, entryDir, target, registry, seqMap);
+
+  const inferredEntry = inferEntryFolder(reqId);
+  const entryDir = path.join(CODEX_SAMPLES_DIR, inferredEntry);
+  const requestDir = path.join(entryDir, sanitizeRequestDirName(reqId));
+  try {
+    const stat = await fs.stat(requestDir);
+    if (stat.isDirectory()) {
+      await extractPairFromRequestDir(inferredEntry, requestDir, registry, seqMap);
+      await saveRegistry(registry);
+      return;
+    }
+  } catch {
+    // fall through
+  }
+
+  // Newer layout: entry/<provider>/<requestId>/...
+  try {
+    const providerDirs = await fs.readdir(entryDir, { withFileTypes: true });
+    for (const providerDir of providerDirs) {
+      if (!providerDir.isDirectory()) continue;
+      const candidate = path.join(entryDir, providerDir.name, sanitizeRequestDirName(reqId));
+      try {
+        const stat = await fs.stat(candidate);
+        if (stat.isDirectory()) {
+          await extractPairFromRequestDir(inferredEntry, candidate, registry, seqMap);
+          await saveRegistry(registry);
+          return;
+        }
+      } catch {
+        // continue
+      }
+    }
+  } catch {
+    // ignore entryDir scan errors
+  }
+
+  const files = await fs.readdir(entryDir);
+  const target = files.find((file) => file.includes(reqId) && file.endsWith('_provider-request.json'));
+  if (!target) {
+    throw new Error(`Request ${reqId} not found under ${inferredEntry}`);
+  }
+  await extractPair(inferredEntry, entryDir, target, registry, seqMap);
   await saveRegistry(registry);
+}
+
+function sanitizeRequestDirName(value) {
+  if (typeof value !== 'string' || !value.trim()) {
+    return `req_${Date.now()}`;
+  }
+  return value.trim().replace(/[^A-Za-z0-9_.-]/g, '_');
+}
+
+function inferEntryFolder(reqId) {
+  const lower = String(reqId || '').toLowerCase();
+  if (lower.includes('openai-responses') || lower.includes('responses')) {
+    return 'openai-responses';
+  }
+  if (lower.includes('anthropic')) {
+    return 'anthropic-messages';
+  }
+  return 'openai-chat';
 }
 
 function parseArguments(argv) {

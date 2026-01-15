@@ -187,7 +187,7 @@ async function writeTempConfig(sample, port) {
   return { dir, file };
 }
 
-function createServer(configPath, port) {
+function createServer(configPath, port, snapshotRoot) {
   const env = {
     ...process.env,
     ROUTECODEX_USE_MOCK: '1',
@@ -196,7 +196,14 @@ function createServer(configPath, port) {
     ROUTECODEX_MOCK_VALIDATE_NAMES: '1',
     ROUTECODEX_STAGE_LOG: process.env.ROUTECODEX_STAGE_LOG ?? '0',
     ROUTECODEX_PORT: String(port),
-    ROUTECODEX_CONFIG_PATH: configPath
+    ROUTECODEX_CONFIG_PATH: configPath,
+    // 将快照写入临时目录，避免污染全局 ~/.routecodex/codex-samples 样本
+    ...(snapshotRoot
+      ? {
+          ROUTECODEX_SNAPSHOT_DIR: snapshotRoot,
+          RCC_SNAPSHOT_DIR: snapshotRoot
+        }
+      : {})
   };
   const entry = path.join(PROJECT_ROOT, 'dist', 'index.js');
   const child = spawn(process.execPath, [entry], {
@@ -431,13 +438,33 @@ async function sendRequest(sample, requestDoc, port) {
   }
 }
 
+function looksLikeSseErrorStream(text) {
+  if (typeof text !== 'string') {
+    return false;
+  }
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return false;
+  }
+  // 简单判定：包含 SSE error 事件头和 JSON error 负载。
+  if (trimmed.includes('event: error') && trimmed.includes('data:')) {
+    return true;
+  }
+  if (trimmed.includes('"type":"error"') || trimmed.includes('"status":502')) {
+    return true;
+  }
+  return false;
+}
+
 async function runSample(sample, index) {
   const clientDoc = await loadSampleDocument(sample, { fileName: 'client-request.json', optional: true });
   const requestDoc = clientDoc || (await loadSampleDocument(sample));
   const responseDoc = await loadSampleDocument(sample, { fileName: 'response.json', optional: true });
   const port = 5800 + index;
   const { dir, file } = await writeTempConfig(sample, port);
-  const server = createServer(file, port);
+  // 为当前样本创建独立的临时快照根目录，并在完成后整体删除
+  const snapshotRoot = path.join(dir, 'codex-samples');
+  const server = createServer(file, port, snapshotRoot);
   const tags = new Set(Array.isArray(sample.tags) ? sample.tags : []);
   const expectSseTerminationError = tags.has('responses_sse_terminated');
   const allowSampleError =
@@ -448,7 +475,13 @@ async function runSample(sample, index) {
     try {
       responseText = await sendRequest(sample, requestDoc, port);
       if (expectSseTerminationError) {
-        throw new Error('expected SSE termination to surface as HTTP error, but request succeeded');
+        if (!looksLikeSseErrorStream(responseText)) {
+          throw new Error(
+            'expected SSE termination to surface as HTTP error or SSE error event, but got successful non-error payload'
+          );
+        }
+        // 对于 SSE 终止样本，只要以 SSE error 事件形式返回即可视为通过。
+        return;
       }
     } catch (sendError) {
       if (expectSseTerminationError || allowSampleError) {

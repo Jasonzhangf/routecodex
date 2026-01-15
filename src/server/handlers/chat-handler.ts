@@ -68,6 +68,7 @@ export async function handleChatCompletions(req: Request, res: Response, ctx: Ha
       body: payload,
       metadata: {
         stream: wantsSSE,
+        clientRequestId,
         clientStream: acceptsSse || undefined,
         inboundStream: wantsSSE,
         outboundStream,

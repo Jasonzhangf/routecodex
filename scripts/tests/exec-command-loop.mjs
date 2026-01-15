@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
- * exec_command TOON → JSON 回环验证（模拟 Responses 客户端）。
+ * exec_command JSON 形态回环验证（模拟 Responses 客户端）。
  *
  * 目标：
- * - 构造一条带 exec_command TOON arguments 的 chat 响应；
- * - 通过 llmswitch-core 的 response 工具过滤管线（ResponseToolArgumentsToonDecodeFilter）做解码；
- * - 使用 codex 的工具注册表 validateToolCall 校验最终 JSON 形状（必须包含 cmd，且不再暴露 toon）；
- * - 只从“客户端视角”观察：发送/接收的都是 JSON，TOON 对客户端完全透明。
+ * - 构造一条带 exec_command JSON arguments 的 chat 响应；
+ * - 通过 llmswitch-core 的 response 工具过滤管线做统一治理；
+ * - 校验最终 JSON 形状（必须包含 cmd，且不暴露 toon）；
+ * - 再通过 Responses 映射验证 /v1/responses 视图同样保持 JSON 语义。
  */
 
 import path from 'node:path';
@@ -25,7 +25,7 @@ async function main() {
     'conversion/responses/responses-openai-bridge'
   );
 
-  // 构造一条模拟的 chat 响应，其中 exec_command 使用 TOON 编码参数。
+  // 构造一条模拟的 chat 响应，其中 exec_command 直接使用 JSON 编码参数。
   const chatPayload = {
     id: 'chatcmpl_exec_toon',
     object: 'chat.completion',
@@ -44,13 +44,10 @@ async function main() {
               function: {
                 name: 'exec_command',
                 arguments: JSON.stringify({
-                  toon: [
-                    'cmd: echo 1',
-                    'yield_time_ms: 500',
-                    'max_output_tokens: 128',
-                    'shell: /bin/bash',
-                    'login: false'
-                  ].join('\n')
+                  cmd: 'echo 1',
+                  workdir: '.',
+                  yield_time_ms: 500,
+                  max_output_tokens: 128
                 })
               }
             }
