@@ -14,7 +14,7 @@ function normalizeString(value: unknown): string {
   return value.trim();
 }
 
-function extractApiKey(req: Request): string {
+export function extractApiKeyFromRequest(req: Request): string {
   const direct =
     normalizeString(req.header('x-routecodex-api-key'))
     || normalizeString(req.header('x-api-key'))
@@ -33,13 +33,14 @@ function extractApiKey(req: Request): string {
 }
 
 export function registerApiKeyAuthMiddleware(app: Application, config: ServerConfigV2): void {
-  const expectedKey = normalizeString(config?.server?.apikey);
-  if (!expectedKey) {
-    return;
-  }
-
   app.use((req: Request, res: Response, next) => {
     if (req.method === 'OPTIONS') {
+      next();
+      return;
+    }
+
+    const expectedKey = normalizeString(config?.server?.apikey);
+    if (!expectedKey) {
       next();
       return;
     }
@@ -54,7 +55,7 @@ export function registerApiKeyAuthMiddleware(app: Application, config: ServerCon
       return;
     }
 
-    const provided = extractApiKey(req);
+    const provided = extractApiKeyFromRequest(req);
     if (provided && provided === expectedKey) {
       next();
       return;

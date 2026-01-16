@@ -3,6 +3,8 @@ import { registerStatusRoutes } from './daemon-admin/status-handler.js';
 import { registerCredentialRoutes } from './daemon-admin/credentials-handler.js';
 import { registerQuotaRoutes } from './daemon-admin/quota-handler.js';
 import { registerProviderRoutes } from './daemon-admin/providers-handler.js';
+import { registerRestartRoutes } from './daemon-admin/restart-handler.js';
+import { extractApiKeyFromRequest } from './middleware.js';
 
 export interface DaemonAdminRouteOptions {
   app: Application;
@@ -18,6 +20,19 @@ export interface DaemonAdminRouteOptions {
    * 返回当前虚拟路由构建产物；用于 Providers 运行时视图。
    */
   getVirtualRouterArtifacts: () => unknown | null;
+  /**
+   * 返回 HTTP server 访问 apikey（如果配置了）。
+   * 用于允许远程访问 daemon-admin JSON API（配合 apikey 校验）。
+   */
+  getExpectedApiKey?: () => string | undefined;
+  /**
+   * 触发服务重新读取 config 并重建 runtime（不退出进程）。
+   */
+  restartRuntimeFromDisk?: () => Promise<{
+    reloadedAt: number;
+    configPath: string;
+    warnings?: string[];
+  }>;
 }
 
 export function isLocalRequest(req: Request): boolean {
@@ -25,8 +40,32 @@ export function isLocalRequest(req: Request): boolean {
   return ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
 }
 
+export function isDaemonAdminRequestAllowed(req: Request, expectedApiKey?: string): boolean {
+  if (isLocalRequest(req)) {
+    return true;
+  }
+  const expected = typeof expectedApiKey === 'string' ? expectedApiKey.trim() : '';
+  if (!expected) {
+    return false;
+  }
+  const provided = extractApiKeyFromRequest(req);
+  return Boolean(provided && provided === expected);
+}
+
 export function rejectNonLocal(req: Request, res: Response): boolean {
   if (isLocalRequest(req)) {
+    return false;
+  }
+  res.status(403).json({ error: { message: 'forbidden', code: 'forbidden' } });
+  return true;
+}
+
+export function rejectNonLocalOrUnauthorizedAdmin(
+  req: Request,
+  res: Response,
+  expectedApiKey?: string
+): boolean {
+  if (isDaemonAdminRequestAllowed(req, expectedApiKey)) {
     return false;
   }
   res.status(403).json({ error: { message: 'forbidden', code: 'forbidden' } });
@@ -47,4 +86,7 @@ export function registerDaemonAdminRoutes(options: DaemonAdminRouteOptions): voi
 
   // Providers 运行时 + Config V2 视图
   registerProviderRoutes(app, options);
+
+  // Reload / restart runtime (reload config from disk)
+  registerRestartRoutes(app, options);
 }

@@ -44,7 +44,7 @@
 - 动态状态：
   - `inPool` + `reason`：是否参与路由池以及原因。
   - `cooldownUntil` / `blacklistUntil`：冷却与锁定窗口。
-  - `consecutiveErrorCount` / `lastErrorSeries`：用于“连续三次同类错误”的判定。
+  - `consecutiveErrorCount` / `lastErrorSeries`：用于“连续多次同类错误”的判定（默认第 4 次进入黑名单）。
 
 ### 1.2 `provider-errors.ndjson`
 
@@ -70,7 +70,7 @@
   - 第 1 次：`cooldownUntil = now + 1min`，`inPool=false`。
   - 第 2 次：`cooldownUntil = now + 3min`。
   - 第 3 次：`cooldownUntil = now + 5min`。
-- 同一 series 连续 3 次错误：
+- 同一 series 连续 4 次错误：
   - `blacklistUntil = now + 6h`，`inPool=false`，`reason='blacklist'`。
 - 任意成功事件：
   - 清零该 provider 的所有 `consecutiveErrorCount`；
@@ -127,4 +127,3 @@
     - 过滤 `inPool !== true` 或 `cooldownUntil/blacklistUntil > now` 的 provider。
     - 按 `priorityTier` 做 tier 调度。
 - 初期通过环境变量开启（例如 `ROUTECODEX_QUOTA_ENABLED=1`），待稳定后再作为默认路径。
-

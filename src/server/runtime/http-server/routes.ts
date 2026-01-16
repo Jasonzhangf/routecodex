@@ -20,6 +20,11 @@ interface RouteOptions {
   getManagerDaemon?: () => unknown | null;
   getVirtualRouterArtifacts?: () => unknown | null;
   getServerId?: () => string;
+  restartRuntimeFromDisk?: () => Promise<{
+    reloadedAt: number;
+    configPath: string;
+    warnings?: string[];
+  }>;
 }
 
 /**
@@ -149,7 +154,9 @@ export function registerHttpRoutes(options: RouteOptions): void {
     }
   });
 
-  // Daemon / token / quota / providers 管理类只读 API（仅本地访问）
+  // Daemon / token / quota / providers 管理类只读 API
+  // - 默认仅本地访问
+  // - 配置了 httpserver.apikey 后允许远程访问（需提供 apikey）
   registerDaemonAdminRoutes({
     app,
     getManagerDaemon: () =>
@@ -158,6 +165,8 @@ export function registerHttpRoutes(options: RouteOptions): void {
       (typeof options.getVirtualRouterArtifacts === 'function'
         ? options.getVirtualRouterArtifacts()
         : null),
+    getExpectedApiKey: () => config?.server?.apikey,
+    restartRuntimeFromDisk: options.restartRuntimeFromDisk,
     getServerId: () =>
       (typeof options.getServerId === 'function'
         ? options.getServerId()

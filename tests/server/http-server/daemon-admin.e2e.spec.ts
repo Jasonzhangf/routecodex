@@ -1,13 +1,38 @@
 import { jest } from '@jest/globals';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { RouteCodexHttpServer } from '../../../src/server/runtime/http-server/index.js';
 import type { ServerConfigV2 } from '../../../src/server/runtime/http-server/types.js';
 
 // 基于最小配置启动一个内存内 HTTP server，并调用 daemon-admin 相关只读 API。
 
-function createTestConfig(port: number): ServerConfigV2 {
+async function createTempUserConfig(): Promise<string> {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-daemon-admin-'));
+  const filePath = path.join(dir, 'config.json');
+  const config = {
+    virtualrouterMode: 'v1',
+    virtualrouter: {
+      providers: {
+        mock: {
+          type: 'mock',
+          endpoint: 'mock://',
+          auth: { type: 'apiKey', value: 'dummy_dummy_dummy' },
+          models: { dummy: {} }
+        }
+      },
+      routing: { default: ['mock.dummy'] }
+    }
+  };
+  await fs.writeFile(filePath, JSON.stringify(config, null, 2), 'utf8');
+  return filePath;
+}
+
+function createTestConfig(port: number, configPath: string): ServerConfigV2 {
   return {
+    configPath,
     server: {
       host: '127.0.0.1',
       port
@@ -23,7 +48,8 @@ function createTestConfig(port: number): ServerConfigV2 {
 
 async function startTestServer(): Promise<{ server: RouteCodexHttpServer; baseUrl: string }> {
   // 使用随机端口 0 启动 server，再从实际监听地址读取端口。
-  const tmpConfig = createTestConfig(0);
+  const configPath = await createTempUserConfig();
+  const tmpConfig = createTestConfig(0, configPath);
   const server = new RouteCodexHttpServer(tmpConfig);
   // 使用私有方法启动监听，以便读取实际端口；这里复用 start() 逻辑。
   await server.start();
@@ -55,6 +81,22 @@ async function getJson(baseUrl: string, path: string): Promise<any> {
   return { status: res.status, body };
 }
 
+async function postJson(baseUrl: string, endpoint: string, body?: unknown): Promise<any> {
+  const res = await fetch(`${baseUrl}${endpoint}`, {
+    method: 'POST',
+    headers: body ? { 'content-type': 'application/json' } : undefined,
+    body: body ? JSON.stringify(body) : undefined
+  });
+  const text = await res.text();
+  let parsed: any = null;
+  try {
+    parsed = text ? JSON.parse(text) : null;
+  } catch {
+    parsed = text;
+  }
+  return { status: res.status, body: parsed };
+}
+
 describe('Daemon admin HTTP endpoints (smoke)', () => {
   jest.setTimeout(30000);
 
@@ -80,5 +122,19 @@ describe('Daemon admin HTTP endpoints (smoke)', () => {
       await stopTestServer(server);
     }
   });
-});
 
+  it('supports /daemon/restart for reloading config from disk', async () => {
+    const { server, baseUrl } = await startTestServer();
+    try {
+      const out = await postJson(baseUrl, '/daemon/restart');
+      if (out.status !== 200) {
+        throw new Error(`Expected 200 but got ${out.status}: ${JSON.stringify(out.body)}`);
+      }
+      expect(out.body).toHaveProperty('ok', true);
+      expect(out.body).toHaveProperty('reloadedAt');
+      expect(out.body).toHaveProperty('configPath');
+    } finally {
+      await stopTestServer(server);
+    }
+  });
+});

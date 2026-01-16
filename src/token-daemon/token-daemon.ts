@@ -14,7 +14,7 @@ import {
   type TokenDescriptor
 } from './token-types.js';
 import { TokenHistoryStore, type RefreshOutcome } from './history-store.js';
-import { ensureLocalTokenPortalEnv } from '../token-portal/local-token-portal.js';
+import { ensureLocalTokenPortalEnv, shutdownLocalTokenPortalEnv } from '../token-portal/local-token-portal.js';
 import {
   ensureCamoufoxProfileDir,
   ensureCamoufoxFingerprintForToken
@@ -118,6 +118,11 @@ export class TokenDaemon {
     if (this.timer) {
       clearInterval(this.timer);
       this.timer = null;
+    }
+    try {
+      await shutdownLocalTokenPortalEnv();
+    } catch {
+      // best-effort: portal shutdown must never block daemon stop
     }
     try {
       await this.printSessionAndHistorySummary();

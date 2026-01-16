@@ -255,13 +255,15 @@
           <div class="title">
             <h1>RouteCodex Daemon Admin</h1>
             <p>
-              Local-only UI. Writes to <span class="mono">~/.routecodex/config.json</span>; restart
-              required to apply routing/provider changes.
+              Writes to <span class="mono">~/.routecodex/config.json</span>. If
+              <span class="mono">httpserver.apikey</span> is configured, remote access is allowed
+              with the key; otherwise this page is localhost-only.
             </p>
           </div>
           <div class="statusline">
             <div class="pill"><span id="statusDot" class="dot"></span><span id="statusText">connecting…</span></div>
             <div class="pill"><span class="mono" id="serverId">serverId: —</span></div>
+            <button id="restartRuntimeBtn" class="primary">Restart runtime</button>
           </div>
         </header>
 
@@ -318,7 +320,7 @@
               </p>
 
               <div class="notice" style="margin-bottom: 10px;">
-                If you use <span class="mono">httpserver.apikey</span>, set it above so API calls don’t return 401. The HTML page is always local-only.
+                If you use <span class="mono">httpserver.apikey</span>, set it above so API calls don’t return 401. Without apikey configured, this page is localhost-only.
               </div>
 
               <div class="row" style="margin-bottom: 10px;">
@@ -902,6 +904,22 @@
         $("apiKeyHint").textContent = "";
       });
 
+      $("restartRuntimeBtn").addEventListener("click", async () => {
+        setLog("providerOpLog", "");
+        if (!confirm("Reload config from disk and rebuild runtime now?")) return;
+        try {
+          const out = await apiFetch("/daemon/restart", { method: "POST" });
+          const warnings = Array.isArray(out.warnings) && out.warnings.length ? `\nWarnings:\n- ${out.warnings.join("\n- ")}` : "";
+          setLog("providerOpLog", `Restarted.\nconfigPath: ${out.configPath || "—"}\nreloadedAt: ${out.reloadedAt || "—"}${warnings}`);
+          await refreshStatus();
+          await refreshProviders();
+          await refreshCredentials();
+          await refreshRuntimes();
+        } catch (e) {
+          setLog("providerOpLog", `Restart failed: ${e.message}`);
+        }
+      });
+
       $("refreshProvidersBtn").addEventListener("click", refreshProviders);
       $("newProviderBtn").addEventListener("click", () => {
         $("providerEditorTitle").textContent = "Provider editor (new)";
@@ -955,4 +973,3 @@
     </script>
   </body>
 </html>
-

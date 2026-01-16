@@ -9,9 +9,9 @@ import {
 describe('provider-quota-center error handling', () => {
   const providerKey = 'antigravity.alias1.gemini-3-pro-high';
 
-  it('applies 1/3/5 minute cooldowns for repeated 429s and then 6h blacklist', () => {
+  it('applies 1/3/5 minute cooldowns for repeated 429s and then 3h blacklist for apikey providers', () => {
     const baseNow = 1_000_000;
-    let state = createInitialQuotaState(providerKey, undefined, baseNow);
+    let state = createInitialQuotaState(providerKey, { authType: 'apikey' }, baseNow);
 
     // first 429 -> 1 minute cooldown
     state = applyErrorEvent(
@@ -37,18 +37,81 @@ describe('provider-quota-center error handling', () => {
     expect(state.blacklistUntil).toBeNull();
     expect(state.consecutiveErrorCount).toBe(2);
 
-    // third 429 -> 6h blacklist
+    // third 429 -> 5 minutes cooldown
     const thirdNow = secondNow + 10_000;
     state = applyErrorEvent(
       state,
       { providerKey, httpStatus: 429 },
       thirdNow
     );
+    expect(state.reason).toBe('cooldown');
+    expect(state.inPool).toBe(false);
+    expect(state.blacklistUntil).toBeNull();
+    expect(state.cooldownUntil).toBe(thirdNow + 5 * 60_000);
+    expect(state.consecutiveErrorCount).toBe(3);
+
+    // fourth 429 -> 3h blacklist
+    const fourthNow = thirdNow + 10_000;
+    state = applyErrorEvent(
+      state,
+      { providerKey, httpStatus: 429 },
+      fourthNow
+    );
     expect(state.reason).toBe('blacklist');
     expect(state.inPool).toBe(false);
-    expect(state.blacklistUntil).toBe(thirdNow + 6 * 60 * 60_000);
+    expect(state.blacklistUntil).toBe(fourthNow + 3 * 60 * 60_000);
     expect(state.cooldownUntil).toBeNull();
-    expect(state.consecutiveErrorCount).toBe(3);
+    expect(state.consecutiveErrorCount).toBe(4);
+  });
+
+  it('loops 1/3/5 minute cooldown for network errors (no long blacklist)', () => {
+    const baseNow = 4_000_000;
+    let state = createInitialQuotaState(providerKey, { authType: 'apikey' }, baseNow);
+
+    state = applyErrorEvent(state, { providerKey, code: 'ETIMEDOUT' }, baseNow);
+    expect(state.reason).toBe('cooldown');
+    expect(state.cooldownUntil).toBe(baseNow + 60_000);
+
+    const secondNow = baseNow + 10_000;
+    state = applyErrorEvent(state, { providerKey, code: 'ETIMEDOUT' }, secondNow);
+    expect(state.reason).toBe('cooldown');
+    expect(state.cooldownUntil).toBe(secondNow + 3 * 60_000);
+
+    const thirdNow = secondNow + 10_000;
+    state = applyErrorEvent(state, { providerKey, code: 'ETIMEDOUT' }, thirdNow);
+    expect(state.reason).toBe('cooldown');
+    expect(state.cooldownUntil).toBe(thirdNow + 5 * 60_000);
+
+    const fourthNow = thirdNow + 10_000;
+    state = applyErrorEvent(state, { providerKey, code: 'ETIMEDOUT' }, fourthNow);
+    expect(state.reason).toBe('cooldown');
+    expect(state.blacklistUntil).toBeNull();
+    expect(state.cooldownUntil).toBe(fourthNow + 5 * 60_000);
+  });
+
+  it('blacklists unknown errors for 1h after repeated series', () => {
+    const baseNow = 5_000_000;
+    let state = createInitialQuotaState(providerKey, { authType: 'apikey' }, baseNow);
+
+    state = applyErrorEvent(state, { providerKey, code: 'E_UNKNOWN' }, baseNow);
+    expect(state.reason).toBe('cooldown');
+    expect(state.cooldownUntil).toBe(baseNow + 60_000);
+
+    const secondNow = baseNow + 10_000;
+    state = applyErrorEvent(state, { providerKey, code: 'E_UNKNOWN' }, secondNow);
+    expect(state.reason).toBe('cooldown');
+    expect(state.cooldownUntil).toBe(secondNow + 3 * 60_000);
+
+    const thirdNow = secondNow + 10_000;
+    state = applyErrorEvent(state, { providerKey, code: 'E_UNKNOWN' }, thirdNow);
+    expect(state.reason).toBe('cooldown');
+    expect(state.cooldownUntil).toBe(thirdNow + 5 * 60_000);
+
+    const fourthNow = thirdNow + 10_000;
+    state = applyErrorEvent(state, { providerKey, code: 'E_UNKNOWN' }, fourthNow);
+    expect(state.reason).toBe('blacklist');
+    expect(state.blacklistUntil).toBe(fourthNow + 60 * 60_000);
+    expect(state.cooldownUntil).toBeNull();
   });
 
   it('resets consecutive counter when series changes', () => {

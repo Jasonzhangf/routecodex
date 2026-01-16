@@ -20,7 +20,9 @@ import {
   createInitialQuotaState,
   tickQuotaStateTime,
   type ErrorEventForQuota,
-  type QuotaState
+  type QuotaState,
+  type StaticQuotaConfig,
+  type QuotaAuthType
 } from '../../quota/provider-quota-center.js';
 import {
   appendProviderErrorEvent,
@@ -480,6 +482,7 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
   readonly id = 'provider-quota';
 
   private quotaStates: Map<string, QuotaState> = new Map();
+  private staticConfigs: Map<string, StaticQuotaConfig> = new Map();
   private unsubscribe: (() => void) | null = null;
   private maintenanceTimer: NodeJS.Timeout | null = null;
   private persistTimer: NodeJS.Timeout | null = null;
@@ -490,8 +493,22 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
       if (snapshot && snapshot.providers && typeof snapshot.providers === 'object') {
         for (const [providerKey, state] of Object.entries(snapshot.providers)) {
           if (state && typeof state === 'object') {
-            this.quotaStates.set(providerKey, state as QuotaState);
+            this.quotaStates.set(providerKey, normalizeLoadedQuotaState(providerKey, state as QuotaState));
           }
+        }
+      }
+      if (this.quotaStates.size) {
+        const nowMs = Date.now();
+        let changed = false;
+        for (const [providerKey, state] of this.quotaStates.entries()) {
+          const next = tickQuotaStateTime(state, nowMs);
+          if (next !== state) {
+            this.quotaStates.set(providerKey, next);
+            changed = true;
+          }
+        }
+        if (changed) {
+          this.schedulePersist(nowMs);
         }
       }
     } catch {
@@ -523,6 +540,11 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
         });
       }, intervalMs);
     }
+    // Run a one-off maintenance tick immediately so expired cooldown/blacklist entries
+    // are cleared even before the first request hits quotaView.
+    void this.runMaintenanceTick().catch(() => {
+      // ignore immediate tick failures
+    });
   }
 
   async stop(): Promise<void> {
@@ -563,7 +585,9 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
         ? event.requestedTokens
         : 0;
 
-    const previous = this.quotaStates.get(providerKey) ?? createInitialQuotaState(providerKey, undefined, nowMs);
+    const previous =
+      this.quotaStates.get(providerKey) ??
+      createInitialQuotaState(providerKey, this.staticConfigs.get(providerKey), nowMs);
     const nextState = applyQuotaUsageEvent(previous, { providerKey, requestedTokens, timestampMs: nowMs }, nowMs);
     this.quotaStates.set(providerKey, nextState);
     this.schedulePersist(nowMs);
@@ -583,10 +607,37 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
         ? event.usedTokens
         : 0;
 
-    const previous = this.quotaStates.get(providerKey) ?? createInitialQuotaState(providerKey, undefined, nowMs);
+    const previous =
+      this.quotaStates.get(providerKey) ??
+      createInitialQuotaState(providerKey, this.staticConfigs.get(providerKey), nowMs);
     const nextState = applyQuotaSuccessEvent(previous, { providerKey, usedTokens, timestampMs: nowMs }, nowMs);
     this.quotaStates.set(providerKey, nextState);
     this.schedulePersist(nowMs);
+  }
+
+  registerProviderStaticConfig(providerKey: string, config: { authType?: string | null; priorityTier?: number | null } = {}): void {
+    const key = typeof providerKey === 'string' ? providerKey.trim() : '';
+    if (!key) {
+      return;
+    }
+    const authTypeRaw = typeof config.authType === 'string' ? config.authType.trim().toLowerCase() : '';
+    const authType: QuotaAuthType =
+      authTypeRaw === 'apikey' ? 'apikey' : authTypeRaw === 'oauth' ? 'oauth' : 'unknown';
+    const staticConfig: StaticQuotaConfig = {
+      ...(typeof config.priorityTier === 'number' && Number.isFinite(config.priorityTier)
+        ? { priorityTier: config.priorityTier }
+        : {}),
+      authType
+    };
+    this.staticConfigs.set(key, staticConfig);
+    const existing = this.quotaStates.get(key);
+    if (existing) {
+      this.quotaStates.set(key, {
+        ...existing,
+        authType,
+        ...(typeof staticConfig.priorityTier === 'number' ? { priorityTier: staticConfig.priorityTier } : {})
+      });
+    }
   }
 
   private async handleProviderErrorEvent(event: ProviderErrorEvent): Promise<void> {
@@ -605,7 +656,9 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
         ? event.timestamp
         : Date.now();
 
-    const previous = this.quotaStates.get(providerKey) ?? createInitialQuotaState(providerKey, undefined, nowMs);
+    const previous =
+      this.quotaStates.get(providerKey) ??
+      createInitialQuotaState(providerKey, this.staticConfigs.get(providerKey), nowMs);
 
     // QUOTA_* 属于“确定性配额信号”，不进入错误 series 统计。
     if (code === 'QUOTA_DEPLETED') {
@@ -645,6 +698,31 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
         this.schedulePersist(nowMs);
       }
       return;
+    }
+
+    // Gemini-family quota exhausted errors often carry quota reset delay.
+    // When present, treat as deterministic quota depletion signal rather than generic 429 backoff/blacklist.
+    if (typeof event.status === 'number' && event.status === 429) {
+      const runtime = event.runtime as { providerId?: unknown; providerProtocol?: unknown } | undefined;
+      const providerIdRaw = runtime && typeof runtime.providerId === 'string' ? runtime.providerId.trim().toLowerCase() : '';
+      const isQuotaProvider = providerIdRaw === 'antigravity' || providerIdRaw === 'gemini-cli';
+      if (isQuotaProvider) {
+        const ttl = parseQuotaResetDelayMs(event);
+        if (ttl && ttl > 0) {
+          const nextState: QuotaState = {
+            ...previous,
+            inPool: false,
+            reason: 'quotaDepleted',
+            cooldownUntil: nowMs + ttl,
+            blacklistUntil: null,
+            lastErrorSeries: null,
+            consecutiveErrorCount: 0
+          };
+          this.quotaStates.set(providerKey, nextState);
+          this.schedulePersist(nowMs);
+          return;
+        }
+      }
     }
 
     const errorForQuota: ErrorEventForQuota = {
@@ -758,13 +836,22 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
       if (!state) {
         return null;
       }
+      // 视图层做一次“即时修复”，确保即使 maintenance tick 未运行，
+      // 冷却/黑名单到期也能立刻恢复可用状态，避免路由长期卡死。
+      const nowMs = Date.now();
+      const normalized = tickQuotaStateTime(state, nowMs);
+      if (normalized !== state) {
+        this.quotaStates.set(key, normalized);
+        this.schedulePersist(nowMs);
+      }
+      const effective = normalized;
       return {
-        providerKey: state.providerKey,
-        inPool: state.inPool,
-        reason: state.reason,
-        priorityTier: state.priorityTier,
-        cooldownUntil: state.cooldownUntil ?? null,
-        blacklistUntil: state.blacklistUntil ?? null
+        providerKey: effective.providerKey,
+        inPool: effective.inPool,
+        reason: effective.reason,
+        priorityTier: effective.priorityTier,
+        cooldownUntil: effective.cooldownUntil ?? null,
+        blacklistUntil: effective.blacklistUntil ?? null
       };
     };
   }
@@ -791,6 +878,78 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
     }
     return false;
   }
+}
+
+function parseQuotaResetDelayMs(event: ProviderErrorEvent): number | null {
+  const message = typeof event.message === 'string' ? event.message : '';
+  const raw = message.toLowerCase();
+
+  // Common shape: "reset after 3h22m41s" (Gemini quota exhausted)
+  const afterMatch = raw.match(/reset after\s+([0-9a-z\.\s]+)\.?/i);
+  if (afterMatch && afterMatch[1]) {
+    const parsed = parseDurationToMs(afterMatch[1]);
+    if (parsed && parsed > 0) {
+      return parsed;
+    }
+  }
+
+  // Sometimes the upstream JSON is embedded; try extracting quotaResetDelay.
+  const embeddedDelayMatch = raw.match(/quotaresetdelay\"\s*:\s*\"([^\"]+)\"/i);
+  if (embeddedDelayMatch && embeddedDelayMatch[1]) {
+    const parsed = parseDurationToMs(embeddedDelayMatch[1]);
+    if (parsed && parsed > 0) {
+      return parsed;
+    }
+  }
+
+  return null;
+}
+
+function parseDurationToMs(value?: string): number | null {
+  if (!value || typeof value !== 'string') {
+    return null;
+  }
+  const pattern = /(\d+(?:\.\d+)?)(ms|s|m|h)/gi;
+  let totalMs = 0;
+  let matched = false;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(value)) !== null) {
+    matched = true;
+    const amount = Number.parseFloat(match[1]);
+    if (!Number.isFinite(amount)) {
+      continue;
+    }
+    const unit = match[2].toLowerCase();
+    if (unit === 'ms') {
+      totalMs += amount;
+    } else if (unit === 'h') {
+      totalMs += amount * 3_600_000;
+    } else if (unit === 'm') {
+      totalMs += amount * 60_000;
+    } else if (unit === 's') {
+      totalMs += amount * 1_000;
+    }
+  }
+  if (!matched) {
+    return null;
+  }
+  if (totalMs <= 0) {
+    return null;
+  }
+  return Math.round(totalMs);
+}
+
+function normalizeLoadedQuotaState(providerKey: string, state: QuotaState): QuotaState {
+  const key = typeof providerKey === 'string' && providerKey.trim() ? providerKey.trim() : state.providerKey;
+  const rawAuth = typeof (state as unknown as { authType?: unknown }).authType === 'string'
+    ? String((state as unknown as { authType?: string }).authType).trim().toLowerCase()
+    : '';
+  const authType: QuotaAuthType = rawAuth === 'apikey' ? 'apikey' : rawAuth === 'oauth' ? 'oauth' : 'unknown';
+  return {
+    ...state,
+    providerKey: key,
+    authType
+  };
 }
 
 function readPositiveNumberFromEnv(name: string, fallback: number): number {

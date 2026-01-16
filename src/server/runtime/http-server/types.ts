@@ -3,6 +3,11 @@ import type { PipelineExecutionInput } from '../../handlers/types.js';
 import type { ProviderRuntimeProfile } from '../../../providers/core/api/provider-types.js';
 
 export interface ServerConfigV2 {
+  /**
+   * The config file path used to bootstrap this server instance.
+   * When present, daemon-admin restart should reload from the same file.
+   */
+  configPath?: string;
   server: {
     port: number;
     host: string;

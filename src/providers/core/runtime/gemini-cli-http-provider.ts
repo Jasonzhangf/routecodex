@@ -388,6 +388,7 @@ class GeminiSseNormalizer extends Transform {
   private eventCounter = 0;
   private chunkCounter = 0;
   private processedEventCounter = 0;
+  private capturedEvents: any[] = [];
 
   constructor() {
     super();
@@ -423,6 +424,7 @@ class GeminiSseNormalizer extends Transform {
       processedEvents: this.processedEventCounter,
       emittedEvents: this.eventCounter
     });
+    console.log('[DEBUG-GEMINI-RAW]', JSON.stringify(this.capturedEvents, null, 2));
 
     if (this.lastDonePayload) {
       this.pushEvent('gemini.done', this.lastDonePayload);
@@ -459,6 +461,9 @@ class GeminiSseNormalizer extends Transform {
   }
 
   private processEvent(rawEvent: string): void {
+    if (process.env.ROUTECODEX_DEBUG_GEMINI_RAW === '1') {
+      console.log('[DEBUG-GEMINI-INPUT]', JSON.stringify(rawEvent));
+    }
     this.processedEventCounter++;
     const trimmed = rawEvent.trim();
     if (!trimmed.length) {
@@ -478,6 +483,7 @@ class GeminiSseNormalizer extends Transform {
     }
     try {
       const parsed = JSON.parse(payloadText) as { response?: Record<string, unknown> };
+      this.capturedEvents.push(parsed);
       const response = parsed?.response;
       if (!response || typeof response !== 'object') {
         // Log dropped events for debugging

@@ -1,7 +1,7 @@
 import type { Application, Request, Response } from 'express';
 import type { ManagerModule } from '../../../../manager/types.js';
 import type { DaemonAdminRouteOptions } from '../daemon-admin-routes.js';
-import { isLocalRequest } from '../daemon-admin-routes.js';
+import { rejectNonLocalOrUnauthorizedAdmin } from '../daemon-admin-routes.js';
 
 interface ModuleStatusView {
   id: string;
@@ -11,15 +11,12 @@ interface ModuleStatusView {
 
 export function registerStatusRoutes(app: Application, options: DaemonAdminRouteOptions): void {
   app.get('/daemon/status', (req: Request, res: Response) => {
-    if (!isLocalRequest(req)) {
-      res.status(403).json({ error: { message: 'forbidden', code: 'forbidden' } });
-      return;
-    }
+    if (rejectNonLocalOrUnauthorizedAdmin(req, res, options.getExpectedApiKey?.())) return;
 
     const manager = options.getManagerDaemon() as
       | {
           getModule?: (id: string) => ManagerModule | undefined;
-        }
+      }
       | null;
     const modules: ModuleStatusView[] = [];
 

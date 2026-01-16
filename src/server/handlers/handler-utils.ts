@@ -114,8 +114,92 @@ export function sendPipelineResponse(
     logPipelineStage('response.sse.stream.start', requestLabel, { status });
 
     let eventCount = 0;
+    let ended = false;
+    let idleTimer: NodeJS.Timeout | null = null;
+    let totalTimer: NodeJS.Timeout | null = null;
+
+    const readTimeoutMs = (names: string[], fallback: number): number => {
+      for (const name of names) {
+        const raw = String(process.env[name] || '').trim();
+        if (!raw) {
+          continue;
+        }
+        const parsed = Number(raw);
+        if (Number.isFinite(parsed) && parsed > 0) {
+          return parsed;
+        }
+      }
+      return fallback;
+    };
+
+    const idleTimeoutMs = readTimeoutMs(
+      ['ROUTECODEX_HTTP_SSE_IDLE_TIMEOUT_MS', 'RCC_HTTP_SSE_IDLE_TIMEOUT_MS'],
+      120_000
+    );
+    const totalTimeoutMs = readTimeoutMs(
+      ['ROUTECODEX_HTTP_SSE_TIMEOUT_MS', 'RCC_HTTP_SSE_TIMEOUT_MS'],
+      500_000
+    );
+
+    const clearTimers = () => {
+      if (idleTimer) {
+        clearTimeout(idleTimer);
+        idleTimer = null;
+      }
+      if (totalTimer) {
+        clearTimeout(totalTimer);
+        totalTimer = null;
+      }
+    };
+
+    const endWithSseError = (code: string, message: string) => {
+      if (ended) {
+        return;
+      }
+      ended = true;
+      clearTimers();
+      logPipelineStage('response.sse.stream.timeout', requestLabel, { code, message });
+      try {
+        const payload = { type: 'error', status: 504, error: { message, code } };
+        res.write(`event: error\ndata: ${JSON.stringify(payload)}\n\n`);
+      } catch {
+        /* ignore */
+      }
+      try {
+        res.end();
+      } catch {
+        /* ignore */
+      }
+      try {
+        stream.destroy?.(Object.assign(new Error(message), { code }));
+      } catch {
+        /* ignore */
+      }
+    };
+
+    const resetIdle = () => {
+      if (!Number.isFinite(idleTimeoutMs) || idleTimeoutMs <= 0) {
+        return;
+      }
+      if (idleTimer) {
+        clearTimeout(idleTimer);
+      }
+      idleTimer = setTimeout(() => {
+        endWithSseError('HTTP_SSE_IDLE_TIMEOUT', `SSE idle timeout after ${idleTimeoutMs}ms`);
+      }, idleTimeoutMs);
+      idleTimer.unref?.();
+    };
+
+    if (Number.isFinite(totalTimeoutMs) && totalTimeoutMs > 0) {
+      totalTimer = setTimeout(() => {
+        endWithSseError('HTTP_SSE_TIMEOUT', `SSE timeout after ${totalTimeoutMs}ms`);
+      }, totalTimeoutMs);
+      totalTimer.unref?.();
+    }
+    resetIdle();
 
     const cleanup = () => {
+      clearTimers();
       try {
         stream.destroy?.();
       } catch {
@@ -124,6 +208,8 @@ export function sendPipelineResponse(
       logPipelineStage('response.sse.stream.end', requestLabel, { events: eventCount, status });
     };
     stream.on('error', (error: Error) => {
+      ended = true;
+      clearTimers();
       logPipelineStage('response.sse.stream.error', requestLabel, { message: error.message });
       try {
         res.write(`event: error\ndata: ${JSON.stringify({ message: error.message })}\n\n`);
@@ -138,6 +224,7 @@ export function sendPipelineResponse(
     });
     stream.on('data', () => {
       eventCount++;
+      resetIdle();
     });
     res.on('close', cleanup);
     res.on('finish', cleanup);

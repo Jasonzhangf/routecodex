@@ -239,16 +239,17 @@ describe('virtual-router quotaView routing', () => {
     const features = createBaseFeatures();
     const state = createBaseState();
     state.forcedTarget = { provider: 'mock.providerA' };
-    const result = selectProviderImpl(
-      routeName,
-      baseMetadata,
-      baseClassification,
-      features,
-      state,
-      deps as any,
-      { routingState: state }
-    );
-    expect(result.providerKey).toBe(providerB);
+    expect(() =>
+      selectProviderImpl(
+        routeName,
+        baseMetadata,
+        baseClassification,
+        features,
+        state,
+        deps as any,
+        { routingState: state }
+      )
+    ).toThrow(/All providers unavailable/);
   });
 
   it('applies quotaView to stickyTarget resolution', () => {

@@ -77,5 +77,4 @@ describe('provider-quota-store error event log', () => {
     expect(parsed.httpStatus).toBe(429);
     expect(parsed.message).toBe('Rate limit');
   });
-}
-
+});

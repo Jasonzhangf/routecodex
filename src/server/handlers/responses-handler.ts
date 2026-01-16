@@ -42,7 +42,11 @@ export async function handleResponses(
       process.env.RCC_HTTP_RESPONSES_TIMEOUT_MS ||
       '500000'
   ).trim();
-  const requestTimeoutMs = Number(rawTimeout);
+  const parsedTimeout = Number(rawTimeout);
+  const requestTimeoutMs =
+    rawTimeout === ''
+      ? 500000
+      : (Number.isFinite(parsedTimeout) ? parsedTimeout : 500000);
   let timedOut = false;
   let timeoutHandle: NodeJS.Timeout | undefined;
   const clearTimeoutHandle = () => {
@@ -168,6 +172,7 @@ export async function handleResponses(
           code: 'HTTP_REQUEST_TIMEOUT',
           status: 504
         });
+        const wantsStreamForError = typeof options.forceStream === 'boolean' ? options.forceStream : inboundStream;
         try {
           logRequestError(entryEndpoint, requestId, err);
         } catch {
@@ -183,6 +188,24 @@ export async function handleResponses(
           /* ignore */
         }
         if (res.headersSent) {
+          // If we've already started an SSE response, try to emit an explicit error event
+          // so SSE clients don't hang on a silent TCP close.
+          if (wantsStreamForError) {
+            try {
+              const payload = {
+                type: 'error',
+                status: 504,
+                error: {
+                  message: err.message,
+                  code: 'HTTP_REQUEST_TIMEOUT',
+                  request_id: requestId
+                }
+              };
+              res.write(`event: error\ndata: ${JSON.stringify(payload)}\n\n`);
+            } catch {
+              /* ignore */
+            }
+          }
           try {
             res.end();
           } catch {
@@ -190,7 +213,6 @@ export async function handleResponses(
           }
           return;
         }
-        const wantsStreamForError = typeof options.forceStream === 'boolean' ? options.forceStream : inboundStream;
         void respondWithPipelineError(res, ctx, err, entryEndpoint, requestId, { forceSse: wantsStreamForError });
       }, requestTimeoutMs);
       // Let Node exit even if a client hangs; this timer is per-request and should not keep the process alive.

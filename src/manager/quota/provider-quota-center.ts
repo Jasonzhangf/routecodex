@@ -1,16 +1,20 @@
 export type QuotaReason = 'ok' | 'cooldown' | 'blacklist' | 'quotaDepleted' | 'fatal';
 
+export type QuotaAuthType = 'apikey' | 'oauth' | 'unknown';
+
 export interface StaticQuotaConfig {
   priorityTier?: number | null;
   rateLimitPerMinute?: number | null;
   tokenLimitPerMinute?: number | null;
   totalTokenLimit?: number | null;
+  authType?: QuotaAuthType | null;
 }
 
 export interface QuotaState {
   providerKey: string;
   inPool: boolean;
   reason: QuotaReason;
+  authType: QuotaAuthType;
   priorityTier: number;
   rateLimitPerMinute: number | null;
   tokenLimitPerMinute: number | null;
@@ -50,10 +54,11 @@ export interface UsageEventForQuota {
 }
 
 const WINDOW_DURATION_MS = 60_000;
-const COOLDOWN_1_MS = 1 * 60_000;
-const COOLDOWN_2_MS = 3 * 60_000;
-const COOLDOWN_3_MS = 5 * 60_000;
-const BLACKLIST_MS = 6 * 60 * 60_000;
+const COOLDOWN_SCHEDULE_MS = [1 * 60_000, 3 * 60_000, 5 * 60_000] as const;
+const BLACKLIST_MAX_MS = 6 * 60 * 60_000;
+const BLACKLIST_1H_MS = 60 * 60_000;
+const BLACKLIST_3H_MS = 3 * 60 * 60_000;
+const BLACKLIST_THRESHOLD_DEFAULT = 4;
 
 const NETWORK_ERROR_CODES = ['ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EAI_AGAIN'];
 
@@ -78,11 +83,16 @@ export function createInitialQuotaState(
     staticConfig && typeof staticConfig.totalTokenLimit === 'number'
       ? staticConfig.totalTokenLimit
       : null;
+  const authType: QuotaAuthType =
+    staticConfig && typeof staticConfig.authType === 'string' && staticConfig.authType.trim()
+      ? (staticConfig.authType.trim() as QuotaAuthType)
+      : 'unknown';
 
   return {
     providerKey,
     inPool: true,
     reason: 'ok',
+    authType,
     priorityTier,
     rateLimitPerMinute,
     tokenLimitPerMinute,
@@ -132,16 +142,52 @@ function computeCooldownMs(consecutive: number): number | null {
   if (consecutive <= 0) {
     return null;
   }
-  if (consecutive === 1) {
-    return COOLDOWN_1_MS;
+  const idx = Math.min(consecutive - 1, COOLDOWN_SCHEDULE_MS.length - 1);
+  return COOLDOWN_SCHEDULE_MS[idx] ?? null;
+}
+
+type ErrorPolicy = {
+  cooldownOnly: boolean;
+  blacklistAfterConsecutive?: number;
+  blacklistDurationMs?: number;
+};
+
+function resolveErrorPolicy(state: QuotaState, series: ErrorSeries): ErrorPolicy {
+  // Fatal errors: immediate blacklist (max 6h).
+  if (series === 'EFATAL') {
+    return {
+      cooldownOnly: false,
+      blacklistAfterConsecutive: 1,
+      blacklistDurationMs: BLACKLIST_MAX_MS
+    };
   }
-  if (consecutive === 2) {
-    return COOLDOWN_2_MS;
+
+  // Network / upstream gateway errors: only backoff (1/3/5 minutes), keep repeating 5m.
+  if (series === 'ENET' || series === 'E5XX') {
+    return { cooldownOnly: true };
   }
-  if (consecutive >= 3) {
-    return COOLDOWN_3_MS;
+
+  // 429 for API-key providers: 1/3/5 minute backoff, then 3h blacklist.
+  if (series === 'E429' && state.authType === 'apikey') {
+    return {
+      cooldownOnly: false,
+      blacklistAfterConsecutive: BLACKLIST_THRESHOLD_DEFAULT,
+      blacklistDurationMs: BLACKLIST_3H_MS
+    };
   }
-  return null;
+
+  // 429 for OAuth/unknown providers: only backoff (do not long-blacklist here);
+  // OAuth tokens may recover after refresh; quota-style providers should emit QUOTA_* events.
+  if (series === 'E429') {
+    return { cooldownOnly: true };
+  }
+
+  // Unknown / other errors: 1/3/5 minute backoff; after repeated series continues, blacklist 1h.
+  return {
+    cooldownOnly: false,
+    blacklistAfterConsecutive: BLACKLIST_THRESHOLD_DEFAULT,
+    blacklistDurationMs: BLACKLIST_1H_MS
+  };
 }
 
 export function applyErrorEvent(
@@ -162,7 +208,7 @@ export function applyErrorEvent(
       ...state,
       inPool: false,
       reason: 'fatal',
-      blacklistUntil: nowMs + BLACKLIST_MS,
+      blacklistUntil: nowMs + BLACKLIST_MAX_MS,
       cooldownUntil: null,
       lastErrorSeries: series,
       consecutiveErrorCount: state.consecutiveErrorCount + 1
@@ -172,14 +218,24 @@ export function applyErrorEvent(
   const sameSeries = state.lastErrorSeries === series;
   const nextCount = sameSeries ? state.consecutiveErrorCount + 1 : 1;
 
-  // 连续三次同类错误：锁定 6 小时。
-  if (nextCount >= 3) {
+  const policy = resolveErrorPolicy(state, series);
+  const shouldBlacklist =
+    !policy.cooldownOnly &&
+    typeof policy.blacklistAfterConsecutive === 'number' &&
+    Number.isFinite(policy.blacklistAfterConsecutive) &&
+    policy.blacklistAfterConsecutive > 0 &&
+    nextCount >= policy.blacklistAfterConsecutive &&
+    typeof policy.blacklistDurationMs === 'number' &&
+    Number.isFinite(policy.blacklistDurationMs) &&
+    policy.blacklistDurationMs > 0;
+
+  if (shouldBlacklist) {
     return {
       ...state,
       inPool: false,
       reason: 'blacklist',
       cooldownUntil: null,
-      blacklistUntil: nowMs + BLACKLIST_MS,
+      blacklistUntil: nowMs + (policy.blacklistDurationMs as number),
       lastErrorSeries: series,
       consecutiveErrorCount: nextCount
     };
@@ -324,7 +380,7 @@ export function tickQuotaStateTime(state: QuotaState, nowMs: number): QuotaState
       ...next,
       cooldownUntil: null,
       inPool: true,
-      reason: next.reason === 'cooldown' ? 'ok' : next.reason
+      reason: next.reason === 'cooldown' || next.reason === 'quotaDepleted' ? 'ok' : next.reason
     };
   }
 
@@ -337,16 +393,21 @@ export function tickQuotaStateTime(state: QuotaState, nowMs: number): QuotaState
       tokensThisWindow: 0
     };
 
-    if (resetState.reason === 'quotaDepleted' && !resetState.totalTokenLimit) {
-      return {
-        ...resetState,
-        inPool: true,
-        reason: 'ok'
-      };
+    if (resetState.reason === 'quotaDepleted') {
+      const hasHardTotalLimit =
+        resetState.totalTokenLimit !== null &&
+        resetState.totalTokenLimit >= 0 &&
+        resetState.totalTokensUsed > resetState.totalTokenLimit;
+      if (!hasHardTotalLimit) {
+        return {
+          ...resetState,
+          inPool: true,
+          reason: 'ok'
+        };
+      }
     }
     return resetState;
   }
 
   return next;
 }
-

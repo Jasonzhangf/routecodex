@@ -3,7 +3,7 @@ import type { Application, Request, Response } from 'express';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import type { DaemonAdminRouteOptions } from '../daemon-admin-routes.js';
-import { isLocalRequest } from '../daemon-admin-routes.js';
+import { rejectNonLocalOrUnauthorizedAdmin } from '../daemon-admin-routes.js';
 import { collectTokenSnapshot, readTokenFile, evaluateTokenState, resolveAuthDir } from '../../../../token-daemon/token-utils.js';
 import { ensureValidOAuthToken } from '../../../../providers/auth/oauth-lifecycle.js';
 
@@ -78,12 +78,12 @@ async function buildCredentialSummaries(): Promise<CredentialSummary[]> {
   return results;
 }
 
-export function registerCredentialRoutes(app: Application, _options: DaemonAdminRouteOptions): void {
+export function registerCredentialRoutes(app: Application, options: DaemonAdminRouteOptions): void {
+  const expectedApiKey = options.getExpectedApiKey?.();
+  const reject = (req: Request, res: Response) => rejectNonLocalOrUnauthorizedAdmin(req, res, expectedApiKey);
+
   app.get('/daemon/credentials', async (req: Request, res: Response) => {
-    if (!isLocalRequest(req)) {
-      res.status(403).json({ error: { message: 'forbidden', code: 'forbidden' } });
-      return;
-    }
+    if (reject(req, res)) return;
     try {
       const items = await buildCredentialSummaries();
       res.status(200).json(items);
@@ -94,10 +94,7 @@ export function registerCredentialRoutes(app: Application, _options: DaemonAdmin
   });
 
   app.get('/daemon/credentials/:id', async (req: Request, res: Response) => {
-    if (!isLocalRequest(req)) {
-      res.status(403).json({ error: { message: 'forbidden', code: 'forbidden' } });
-      return;
-    }
+    if (reject(req, res)) return;
     const id = String(req.params.id || '').trim();
     if (!id) {
       res.status(400).json({ error: { message: 'id is required' } });
@@ -140,10 +137,7 @@ export function registerCredentialRoutes(app: Application, _options: DaemonAdmin
   });
 
   app.post('/daemon/credentials/:id/verify', async (req: Request, res: Response) => {
-    if (!isLocalRequest(req)) {
-      res.status(403).json({ error: { message: 'forbidden', code: 'forbidden' } });
-      return;
-    }
+    if (reject(req, res)) return;
     const id = String(req.params.id || '').trim();
     if (!id) {
       res.status(400).json({ error: { message: 'id is required' } });
@@ -172,10 +166,7 @@ export function registerCredentialRoutes(app: Application, _options: DaemonAdmin
   });
 
   app.post('/daemon/credentials/:id/refresh', (req: Request, res: Response) => {
-    if (!isLocalRequest(req)) {
-      res.status(403).json({ error: { message: 'forbidden', code: 'forbidden' } });
-      return;
-    }
+    if (reject(req, res)) return;
     // 为避免在 HTTP 请求路径中触发复杂的交互式 OAuth 流程，当前先返回明确的未实现标记。
     res.status(501).json({
       error: {
@@ -186,10 +177,7 @@ export function registerCredentialRoutes(app: Application, _options: DaemonAdmin
   });
 
   app.post('/daemon/credentials/apikey', async (req: Request, res: Response) => {
-    if (!isLocalRequest(req)) {
-      res.status(403).json({ error: { message: 'forbidden', code: 'forbidden' } });
-      return;
-    }
+    if (reject(req, res)) return;
     const body = req.body as Record<string, unknown>;
     const provider = typeof body?.provider === 'string' ? body.provider.trim() : '';
     const alias = typeof body?.alias === 'string' && body.alias.trim() ? body.alias.trim() : 'default';
@@ -222,10 +210,7 @@ export function registerCredentialRoutes(app: Application, _options: DaemonAdmin
   });
 
   app.post('/daemon/oauth/authorize', async (req: Request, res: Response) => {
-    if (!isLocalRequest(req)) {
-      res.status(403).json({ error: { message: 'forbidden', code: 'forbidden' } });
-      return;
-    }
+    if (reject(req, res)) return;
     const body = req.body as Record<string, unknown>;
     const provider = typeof body?.provider === 'string' ? body.provider.trim() : '';
     const alias = typeof body?.alias === 'string' && body.alias.trim() ? body.alias.trim() : '';

@@ -289,6 +289,7 @@ class RouteCodexApp {
       const hooksOff = hooksEnv === '0' || hooksEnv === 'false' || hooksEnv === 'no';
       const hooksOn = !hooksOff;
       this.httpServer = new RouteCodexHttpServer({
+        configPath: this.configPath,
         server: { host: bindHost, port: bindPort, apikey: bindApiKey, useV2: true },
         logging: { level: 'debug', enableConsole: true },
         providers: {},

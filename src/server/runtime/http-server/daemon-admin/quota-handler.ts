@@ -1,6 +1,6 @@
 import type { Application, Request, Response } from 'express';
 import type { DaemonAdminRouteOptions } from '../daemon-admin-routes.js';
-import { isLocalRequest } from '../daemon-admin-routes.js';
+import { rejectNonLocalOrUnauthorizedAdmin } from '../daemon-admin-routes.js';
 import type { ManagerModule } from '../../../../manager/types.js';
 import type { QuotaManagerModule, QuotaRecord } from '../../../../manager/modules/quota/index.js';
 
@@ -22,10 +22,7 @@ function getQuotaModule(options: DaemonAdminRouteOptions): QuotaManagerModule | 
 
 export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteOptions): void {
   app.get('/quota/summary', (req: Request, res: Response) => {
-    if (!isLocalRequest(req)) {
-      res.status(403).json({ error: { message: 'forbidden', code: 'forbidden' } });
-      return;
-    }
+    if (rejectNonLocalOrUnauthorizedAdmin(req, res, options.getExpectedApiKey?.())) return;
     try {
       const quotaModule = getQuotaModule(options);
       const snapshot: Record<string, QuotaRecord> = quotaModule ? quotaModule.getRawSnapshot() : {};
@@ -46,10 +43,7 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
   });
 
   app.get('/quota/runtime', (req: Request, res: Response) => {
-    if (!isLocalRequest(req)) {
-      res.status(403).json({ error: { message: 'forbidden', code: 'forbidden' } });
-      return;
-    }
+    if (rejectNonLocalOrUnauthorizedAdmin(req, res, options.getExpectedApiKey?.())) return;
     const runtimeKey = typeof req.query.runtimeKey === 'string' ? req.query.runtimeKey : undefined;
     const providerKey = typeof req.query.providerKey === 'string' ? req.query.providerKey : undefined;
     try {
@@ -96,10 +90,7 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
   });
 
   app.get('/quota/cooldowns', (req: Request, res: Response) => {
-    if (!isLocalRequest(req)) {
-      res.status(403).json({ error: { message: 'forbidden', code: 'forbidden' } });
-      return;
-    }
+    if (rejectNonLocalOrUnauthorizedAdmin(req, res, options.getExpectedApiKey?.())) return;
     // 目前 VirtualRouter 的 series cooldown 状态未通过稳定 API 暴露；
     // 为避免与核心路由实现交叉，先返回空列表，占位以便前端视图对接。
     res.status(200).json([]);

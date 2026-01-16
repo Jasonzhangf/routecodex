@@ -1,8 +1,15 @@
 import type { ProviderProtocol } from './types.js';
 
-type CanonicalProviderType = 'openai' | 'responses' | 'anthropic' | 'gemini' | 'gemini-cli';
+type CanonicalProviderType = 'openai' | 'responses' | 'anthropic' | 'gemini' | 'gemini-cli' | 'mock';
 
-const CANONICAL_PROVIDER_TYPES = new Set<CanonicalProviderType>(['openai', 'responses', 'anthropic', 'gemini', 'gemini-cli']);
+const CANONICAL_PROVIDER_TYPES = new Set<CanonicalProviderType>([
+  'openai',
+  'responses',
+  'anthropic',
+  'gemini',
+  'gemini-cli',
+  'mock'
+]);
 const FAMILY_TO_CANONICAL: Record<string, CanonicalProviderType> = {
   openai: 'openai',
   glm: 'openai',
@@ -15,7 +22,8 @@ const FAMILY_TO_CANONICAL: Record<string, CanonicalProviderType> = {
   anthropic: 'anthropic',
   claude: 'anthropic',
   gemini: 'gemini',
-  'gemini-cli': 'gemini-cli'
+  'gemini-cli': 'gemini-cli',
+  mock: 'mock'
 };
 
 export function normalizeProviderType(input?: string): string {
@@ -76,6 +84,9 @@ export function mapProviderModule(providerType: string): string {
   if (normalized === 'openai' || normalized === 'glm' || normalized === 'qwen' || normalized === 'lmstudio') {
     return 'openai-http-provider';
   }
+  if (normalized === 'mock') {
+    return 'mock-provider';
+  }
   throw new Error(`[ProviderType] Unsupported providerType '${providerType}'`);
 }
 
@@ -96,6 +107,9 @@ export function mapProviderProtocol(providerType?: string): ProviderProtocol {
   if (normalized === 'openai' || normalized === 'glm' || normalized === 'qwen' || normalized === 'iflow' || normalized === 'lmstudio') {
     return 'openai-chat';
   }
+  if (normalized === 'mock') {
+    return 'openai-chat';
+  }
   throw new Error(`[ProviderType] Unsupported providerType '${providerType}'`);
 }
 
@@ -114,6 +128,9 @@ export function defaultEndpointForProvider(providerType?: string): string {
     return '/v1internal:generateContent';
   }
   if (normalized === 'openai' || normalized === 'glm' || normalized === 'qwen' || normalized === 'iflow' || normalized === 'lmstudio') {
+    return '/v1/chat/completions';
+  }
+  if (normalized === 'mock') {
     return '/v1/chat/completions';
   }
   throw new Error(`[ProviderType] Unsupported providerType '${providerType}'`);

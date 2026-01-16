@@ -22,7 +22,7 @@ const SAMPLES_DIR = path.join(HOME, '.routecodex', 'codex-samples', 'openai-chat
 
 const ALLOWED_KEYS = {
   shell: new Set(['command','justification','timeout_ms','with_escalated_permissions','workdir']),
-  apply_patch: new Set(['patch']),
+  apply_patch: new Set(['patch','input']),
   update_plan: new Set(['explanation','plan']),
   view_image: new Set(['path']),
   list_mcp_resources: new Set(['server','cursor','filter','root']),
@@ -175,4 +175,3 @@ async function main() {
 }
 
 main().catch(err => { console.error(err); process.exit(2); });
-

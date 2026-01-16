@@ -10,6 +10,7 @@
 
 import express, { type Application } from 'express';
 import type { Server } from 'http';
+import type { Socket } from 'node:net';
 import { ErrorHandlingCenter } from 'rcc-errorhandling';
 import type { UnknownObject } from '../../../types/common-types.js';
 import type { HandlerContext, PipelineExecutionInput, PipelineExecutionResult } from '../../handlers/types.js';
@@ -67,6 +68,7 @@ import { RoutingStateManagerModule } from '../../../manager/modules/routing/inde
 import { TokenManagerModule } from '../../../manager/modules/token/index.js';
 import type { ProviderQuotaDaemonModule } from '../../../manager/modules/quota/index.js';
 import { StatsManager, type UsageMetrics } from './stats-manager.js';
+import { loadRouteCodexConfig } from '../../../config/routecodex-config-loader.js';
 type LegacyAuthFields = ProviderRuntimeProfile['auth'] & {
   token_file?: unknown;
   token_url?: unknown;
@@ -88,6 +90,7 @@ type LegacyAuthFields = ProviderRuntimeProfile['auth'] & {
 export class RouteCodexHttpServer {
   private app: Application;
   private server?: Server;
+  private activeSockets: Set<Socket> = new Set();
   private config: ServerConfigV2;
   private errorHandling: ErrorHandlingCenter;
   private _isInitialized: boolean = false;
@@ -111,6 +114,7 @@ export class RouteCodexHttpServer {
   private readonly coloredLogger = createServerColoredLogger();
   private managerDaemon: ManagerDaemon | null = null;
   private readonly stats = new StatsManager();
+  private restartChain: Promise<void> = Promise.resolve();
 
   constructor(config: ServerConfigV2) {
     this.config = config;
@@ -161,14 +165,18 @@ export class RouteCodexHttpServer {
 
   /**
    * Register Daemon Admin UI route.
-   * Serves docs/daemon-admin-ui.html as a static page; localhost-only.
+   * Serves docs/daemon-admin-ui.html as a static page.
+   * - If `httpserver.apikey` is not configured: localhost-only.
+   * - If `httpserver.apikey` is configured: allow remote UI access (API calls still require apikey).
    */
   private registerDaemonAdminUiRoute(): void {
     this.app.get('/daemon/admin', async (req, res) => {
       try {
         const ip = req.socket?.remoteAddress || '';
-        const allowed = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
-        if (!allowed) {
+        const isLocal = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
+        const expectedKey = typeof this.config?.server?.apikey === 'string' ? this.config.server.apikey.trim() : '';
+        const hasConfiguredKey = Boolean(expectedKey);
+        if (!isLocal && !hasConfiguredKey) {
           res.status(403).json({ error: { message: 'forbidden', code: 'forbidden' } });
           return;
         }
@@ -453,6 +461,7 @@ export class RouteCodexHttpServer {
         buildHandlerContext: () => this.buildHandlerContext(),
         getPipelineReady: () => this.isPipelineReady(),
         handleError: (error, context) => this.handleError(error, context),
+        restartRuntimeFromDisk: async () => await this.restartRuntimeFromDisk(),
         getHealthSnapshot: () => {
           const healthModule = this.managerDaemon?.getModule('health') as HealthManagerModule | undefined;
           return healthModule?.getCurrentSnapshot() ?? null;
@@ -481,6 +490,44 @@ export class RouteCodexHttpServer {
     }
   }
 
+  private async restartRuntimeFromDisk(): Promise<{ reloadedAt: number; configPath: string; warnings?: string[] }> {
+    // Serialize restarts to avoid racing provider disposals / hub updates.
+    const run = async (): Promise<{ reloadedAt: number; configPath: string; warnings?: string[] }> => {
+      const loaded = await loadRouteCodexConfig(this.config?.configPath);
+      const userConfig = asRecord(loaded.userConfig) ?? {};
+      const httpServerNode =
+        asRecord((userConfig as Record<string, unknown>).httpserver) ??
+        asRecord(asRecord((userConfig as Record<string, unknown>).modules)?.httpserver)?.config ??
+        null;
+      const nextApiKey = httpServerNode ? (typeof (httpServerNode as any).apikey === 'string' ? String((httpServerNode as any).apikey).trim() : '') : '';
+      const nextHost = httpServerNode ? (typeof (httpServerNode as any).host === 'string' ? String((httpServerNode as any).host).trim() : '') : '';
+      const nextPort = httpServerNode ? (typeof (httpServerNode as any).port === 'number' ? Number((httpServerNode as any).port) : NaN) : NaN;
+
+      const warnings: string[] = [];
+      // Best-effort: allow rotating apikey at runtime by mutating config object.
+      if (typeof nextApiKey === 'string' && nextApiKey !== String(this.config.server.apikey || '')) {
+        this.config.server.apikey = nextApiKey || undefined;
+      }
+      // host/port changes require rebind; record warnings but do not attempt to re-listen.
+      if (nextHost && nextHost !== this.config.server.host) {
+        warnings.push(`httpserver.host changed to "${nextHost}" but live server keeps "${this.config.server.host}" until process restart`);
+      }
+      if (Number.isFinite(nextPort) && nextPort > 0 && nextPort !== this.config.server.port) {
+        warnings.push(`httpserver.port changed to ${nextPort} but live server keeps ${this.config.server.port} until process restart`);
+      }
+
+      // Keep the server's configPath aligned with what was loaded.
+      this.config.configPath = loaded.configPath;
+
+      await this.reloadRuntime(loaded.userConfig, { providerProfiles: loaded.providerProfiles });
+      return { reloadedAt: Date.now(), configPath: loaded.configPath, ...(warnings.length ? { warnings } : {}) };
+    };
+
+    const slot = this.restartChain.then(run);
+    this.restartChain = slot.then(() => undefined, () => undefined);
+    return await slot;
+  }
+
   /**
    * 启动服务器
    */
@@ -497,6 +544,23 @@ export class RouteCodexHttpServer {
         resolve();
       });
 
+      // In test runners (Jest), prevent the listen handle from keeping the process alive
+      // in case some keep-alive sockets linger.
+      if (process.env.JEST_WORKER_ID || process.env.NODE_ENV === 'test') {
+        try {
+          (this.server as unknown as { unref?: () => void }).unref?.();
+        } catch {
+          // ignore
+        }
+      }
+
+      this.server.on('connection', (socket: Socket) => {
+        this.activeSockets.add(socket);
+        socket.on('close', () => {
+          this.activeSockets.delete(socket);
+        });
+      });
+
       this.server.on('error', async (error: Error) => {
         await this.handleError(error, 'server_start');
         reject(error);
@@ -509,6 +573,25 @@ export class RouteCodexHttpServer {
    */
   public async stop(): Promise<void> {
     if (this.server) {
+      // Best-effort: close any open keep-alive sockets so server.close can finish.
+      for (const socket of this.activeSockets) {
+        try {
+          socket.destroy();
+        } catch {
+          // ignore
+        }
+      }
+      this.activeSockets.clear();
+      try {
+        const srv = this.server as unknown as {
+          closeIdleConnections?: () => void;
+          closeAllConnections?: () => void;
+        };
+        srv.closeIdleConnections?.();
+        srv.closeAllConnections?.();
+      } catch {
+        // ignore
+      }
       return new Promise(resolve => {
         this.server?.close(async () => {
           this._isRunning = false;
@@ -524,6 +607,12 @@ export class RouteCodexHttpServer {
           } catch {
             // ignore manager shutdown failures
           }
+          try {
+            this.server?.removeAllListeners();
+          } catch {
+            // ignore
+          }
+          this.server = undefined;
           await this.errorHandling.destroy();
 
           try {
@@ -643,13 +732,26 @@ export class RouteCodexHttpServer {
     }
     const quotaModule = this.managerDaemon?.getModule('provider-quota') as ProviderQuotaDaemonModule | undefined;
     const quotaFlagRaw = String(process.env.ROUTECODEX_QUOTA_ENABLED || '').trim().toLowerCase();
-    const quotaEnabled = quotaFlagRaw === '1' || quotaFlagRaw === 'true';
-    if (quotaEnabled && quotaModule && typeof quotaModule.getQuotaView === 'function') {
+    const quotaDisabled = quotaFlagRaw === '0' || quotaFlagRaw === 'false' || quotaFlagRaw === 'no';
+    if (!quotaDisabled && quotaModule && typeof quotaModule.getQuotaView === 'function') {
       hubConfig.quotaView = quotaModule.getQuotaView();
     }
     if (!this.hubPipeline) {
       this.hubPipeline = new hubCtor(hubConfig);
     } else {
+      const existing = this.hubPipeline as unknown as {
+        updateRuntimeDeps?: (deps: { healthStore?: unknown; routingStateStore?: unknown; quotaView?: unknown }) => void;
+        updateVirtualRouterConfig?: (config: unknown) => void;
+      };
+      try {
+        existing.updateRuntimeDeps?.({
+          ...(healthStore ? { healthStore } : {}),
+          ...(routingStateStore ? { routingStateStore } : {}),
+          ...('quotaView' in hubConfig ? { quotaView: hubConfig.quotaView } : {})
+        });
+      } catch {
+        // best-effort: runtime deps updates must never block reload
+      }
       this.hubPipeline.updateVirtualRouterConfig(bootstrapArtifacts.config);
     }
     await this.initializeProviderRuntimes(bootstrapArtifacts);
@@ -670,12 +772,25 @@ export class RouteCodexHttpServer {
     await this.disposeProviders();
     this.providerKeyToRuntimeKey.clear();
 
+    const quotaModule = this.managerDaemon?.getModule('provider-quota') as
+      | { registerProviderStaticConfig?: (providerKey: string, config: { authType?: string | null; priorityTier?: number | null }) => void }
+      | undefined;
+
     for (const [providerKey, runtime] of Object.entries(runtimeMap)) {
       if (!runtime) { continue; }
       const runtimeKey = runtime.runtimeKey || providerKey;
       if (!this.providerHandles.has(runtimeKey)) {
         const resolvedRuntime = await this.materializeRuntimeProfile(runtime);
         const patchedRuntime = this.applyProviderProfileOverrides(resolvedRuntime);
+        try {
+          const authType =
+            patchedRuntime && patchedRuntime.auth && typeof (patchedRuntime.auth as { type?: unknown }).type === 'string'
+              ? String((patchedRuntime.auth as { type?: string }).type).trim()
+              : null;
+          quotaModule?.registerProviderStaticConfig?.(providerKey, { authType });
+        } catch {
+          // best-effort: quota static config registration must never block runtime init
+        }
         const handle = await this.createProviderHandle(runtimeKey, patchedRuntime);
         this.providerHandles.set(runtimeKey, handle);
       }
