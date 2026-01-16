@@ -50,6 +50,7 @@
         align-items: center;
         justify-content: space-between;
         gap: 14px;
+        flex-wrap: wrap;
         margin-bottom: 14px;
       }
 
@@ -156,6 +157,7 @@
         display: flex;
         gap: 6px;
         margin: 14px 0 10px;
+        flex-wrap: wrap;
       }
 
       .tab {
@@ -176,6 +178,11 @@
         display: grid;
         grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
         gap: 12px;
+      }
+
+      /* Ensure grid children can shrink without overflowing into the next column */
+      .grid > .card {
+        min-width: 0;
       }
 
       @media (max-width: 980px) {
@@ -199,9 +206,7 @@
       .table {
         width: 100%;
         border-collapse: collapse;
-        border-radius: 12px;
-        overflow: hidden;
-        border: 1px solid var(--border);
+        table-layout: fixed;
       }
 
       .table th,
@@ -210,6 +215,8 @@
         font-size: 12px;
         border-bottom: 1px solid rgba(255, 255, 255, 0.06);
         vertical-align: top;
+        overflow-wrap: anywhere;
+        word-break: break-word;
       }
 
       .table th {
@@ -219,10 +226,42 @@
         background: rgba(255, 255, 255, 0.03);
       }
 
+      .table-wrap {
+        width: 100%;
+        max-width: 100%;
+        overflow: auto;
+        border-radius: 12px;
+        border: 1px solid var(--border);
+      }
+
+      .table-wrap .table {
+        border: 0;
+        min-width: 720px;
+      }
+
+      .table td.actions-cell {
+        width: 160px;
+        overflow: visible;
+      }
+
+      .actions {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+      }
+
+      .truncate {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
       .mono {
         font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
           "Courier New", monospace;
         color: var(--muted);
+        word-break: break-all;
       }
 
       .notice {
@@ -245,6 +284,25 @@
         border: 1px solid rgba(255, 255, 255, 0.08);
         border-radius: 12px;
         padding: 10px 12px;
+      }
+
+      @media (max-width: 640px) {
+        header {
+          flex-direction: column;
+          align-items: flex-start;
+        }
+        .statusline {
+          width: 100%;
+          justify-content: flex-start;
+        }
+        .row {
+          align-items: stretch;
+        }
+        .row > input,
+        .row > select,
+        .row > button {
+          max-width: 100%;
+        }
       }
     </style>
   </head>
@@ -283,6 +341,7 @@
         <div class="tabs">
           <button class="tab active" data-tab="providers">Provider Pool</button>
           <button class="tab" data-tab="credentials">Auth Provider Pool</button>
+          <button class="tab" data-tab="quota">Quota Pool</button>
           <button class="tab" data-tab="routing">Runtime Routing Pool</button>
         </div>
 
@@ -297,20 +356,22 @@
                 <button id="refreshProvidersBtn" class="primary">Refresh</button>
                 <button id="newProviderBtn">New provider…</button>
               </div>
-              <table class="table">
-                <thead>
-                  <tr>
-                    <th>id</th>
-                    <th>type</th>
-                    <th>enabled</th>
-                    <th>baseURL</th>
-                    <th>models</th>
-                    <th>auth</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody id="providersTbody"></tbody>
-              </table>
+              <div class="table-wrap">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>id</th>
+                      <th>type</th>
+                      <th>enabled</th>
+                      <th>baseURL</th>
+                      <th>models</th>
+                      <th>auth</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody id="providersTbody"></tbody>
+                </table>
+              </div>
             </div>
 
             <div class="card" style="box-shadow: none;">
@@ -424,19 +485,21 @@
               <div class="row" style="margin-bottom: 10px;">
                 <button id="refreshCredentialsBtn" class="primary">Refresh</button>
               </div>
-              <table class="table">
-                <thead>
-                  <tr>
-                    <th>kind</th>
-                    <th>provider</th>
-                    <th>alias</th>
-                    <th>status</th>
-                    <th>expires</th>
-                    <th>secretRef</th>
-                  </tr>
-                </thead>
-                <tbody id="credentialsTbody"></tbody>
-              </table>
+              <div class="table-wrap">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>kind</th>
+                      <th>provider</th>
+                      <th>alias</th>
+                      <th>status</th>
+                      <th>expires</th>
+                      <th>secretRef</th>
+                    </tr>
+                  </thead>
+                  <tbody id="credentialsTbody"></tbody>
+                </table>
+              </div>
             </div>
 
             <div class="card" style="box-shadow:none;">
@@ -476,6 +539,51 @@
           </div>
         </section>
 
+        <section id="panelQuota" data-panel="quota" style="display:none;">
+          <div class="grid">
+            <div class="card" style="box-shadow:none;">
+              <p class="section-title">Quota (daemon)</p>
+              <p class="section-sub">
+                VirtualRouter consumes this via <span class="mono">quotaView</span>. When
+                <span class="mono">inPool=false</span>, the provider is treated as removed from the route pool.
+              </p>
+              <div class="row" style="margin-bottom: 10px;">
+                <button id="refreshQuotaBtn" class="primary">Refresh</button>
+                <button id="resetQuotaBtn" class="danger">Reset quota module</button>
+              </div>
+              <div class="table-wrap">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>providerKey</th>
+                      <th>auth</th>
+                      <th>inPool</th>
+                      <th>reason</th>
+                      <th>cooldownUntil</th>
+                      <th>blacklistUntil</th>
+                      <th>errCount</th>
+                    </tr>
+                  </thead>
+                  <tbody id="quotaTbody"></tbody>
+                </table>
+              </div>
+              <div id="quotaOpLog" class="log" style="margin-top: 10px; display:none;"></div>
+            </div>
+
+            <div class="card" style="box-shadow:none;">
+              <p class="section-title">Notes</p>
+              <div class="notice">
+                <div style="margin-bottom: 6px;">
+                  Use this view to confirm 429/backoff/blacklist decisions and whether a provider is currently eligible.
+                </div>
+                <div>
+                  If a provider looks stuck, try <span class="mono">Reset quota module</span>, then <span class="mono">Restart runtime</span>.
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <section id="panelRouting" data-panel="routing" style="display:none;">
           <div class="grid">
             <div class="card" style="box-shadow:none;">
@@ -497,18 +605,20 @@
               <div class="row" style="margin-bottom: 10px;">
                 <button id="refreshRuntimesBtn" class="primary">Refresh</button>
               </div>
-              <table class="table">
-                <thead>
-                  <tr>
-                    <th>providerKey</th>
-                    <th>runtimeKey</th>
-                    <th>family</th>
-                    <th>protocol</th>
-                    <th>series</th>
-                  </tr>
-                </thead>
-                <tbody id="runtimesTbody"></tbody>
-              </table>
+              <div class="table-wrap">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>providerKey</th>
+                      <th>runtimeKey</th>
+                      <th>family</th>
+                      <th>protocol</th>
+                      <th>series</th>
+                    </tr>
+                  </thead>
+                  <tbody id="runtimesTbody"></tbody>
+                </table>
+              </div>
             </div>
           </div>
         </section>
@@ -572,9 +682,67 @@
         const panels = [
           { name: "providers", el: $("panelProviders") },
           { name: "credentials", el: $("panelCredentials") },
+          { name: "quota", el: $("panelQuota") },
           { name: "routing", el: $("panelRouting") }
         ];
         for (const p of panels) p.el.style.display = p.name === name ? "block" : "none";
+
+        // Light auto-refresh on tab switch to avoid showing stale "Unauthorized" after setting apikey.
+        void maybeRefreshTab(name);
+      }
+
+      function getActiveTab() {
+        const active = document.querySelector(".tab.active");
+        const name = active ? active.getAttribute("data-tab") : null;
+        return name || "providers";
+      }
+
+      const tabLastRefreshedAt = {
+        providers: 0,
+        credentials: 0,
+        quota: 0,
+        routing: 0
+      };
+
+      async function maybeRefreshTab(name) {
+        const key = name in tabLastRefreshedAt ? name : "providers";
+        const now = Date.now();
+        if (now - tabLastRefreshedAt[key] < 1500) {
+          return;
+        }
+        tabLastRefreshedAt[key] = now;
+        try {
+          if (key === "providers") await refreshProviders();
+          else if (key === "credentials") await refreshCredentials();
+          else if (key === "quota") await refreshQuota();
+          else if (key === "routing") await refreshRuntimes();
+        } catch {
+          // ignore refresh failures on tab switch
+        }
+      }
+
+      function textOf(value) {
+        if (value === null || value === undefined) return "";
+        return String(value);
+      }
+
+      function createCell(tag, text, className, opts = {}) {
+        const el = document.createElement(tag);
+        if (className) el.className = className;
+        const s = textOf(text);
+        el.textContent = s;
+        if (opts.title && s) el.title = s;
+        return el;
+      }
+
+      function createErrorRow(colSpan, message) {
+        const tr = document.createElement("tr");
+        const td = document.createElement("td");
+        td.colSpan = colSpan;
+        td.className = "mono";
+        td.textContent = `Failed to load: ${textOf(message)}`;
+        tr.appendChild(td);
+        return tr;
       }
 
       function presetFor(type) {
@@ -642,29 +810,38 @@
 
       async function refreshProviders() {
         const body = $("providersTbody");
-        body.innerHTML = "";
+        body.replaceChildren();
         try {
           const data = await apiFetch("/config/providers");
           for (const p of data.providers || []) {
             const tr = document.createElement("tr");
-            tr.innerHTML = `
-              <td class="mono">${p.id || ""}</td>
-              <td>${p.type || ""}</td>
-              <td>${String(p.enabled)}</td>
-              <td class="mono">${p.baseURL || ""}</td>
-              <td>${p.modelCount || 0}</td>
-              <td>${p.authType || ""}</td>
-              <td>
-                <button data-action="edit" data-id="${p.id}">Edit</button>
-                <button data-action="delete" data-id="${p.id}" class="danger">Delete</button>
-              </td>
-            `;
+            tr.appendChild(createCell("td", p.id || "", "mono"));
+            tr.appendChild(createCell("td", p.type || "", ""));
+            tr.appendChild(createCell("td", String(Boolean(p.enabled)), ""));
+            tr.appendChild(createCell("td", p.baseURL || "", "mono truncate", { title: true }));
+            tr.appendChild(createCell("td", p.modelCount || 0, ""));
+            tr.appendChild(createCell("td", p.authType || "", ""));
+            const actionsTd = document.createElement("td");
+            actionsTd.className = "actions-cell";
+            const box = document.createElement("div");
+            box.className = "actions";
+            const edit = document.createElement("button");
+            edit.textContent = "Edit";
+            edit.setAttribute("data-action", "edit");
+            edit.setAttribute("data-id", textOf(p.id));
+            const del = document.createElement("button");
+            del.textContent = "Delete";
+            del.className = "danger";
+            del.setAttribute("data-action", "delete");
+            del.setAttribute("data-id", textOf(p.id));
+            box.appendChild(edit);
+            box.appendChild(del);
+            actionsTd.appendChild(box);
+            tr.appendChild(actionsTd);
             body.appendChild(tr);
           }
         } catch (e) {
-          const tr = document.createElement("tr");
-          tr.innerHTML = `<td colspan="7" class="mono">Failed to load: ${e.message}</td>`;
-          body.appendChild(tr);
+          body.appendChild(createErrorRow(7, e && e.message ? e.message : e));
         }
       }
 
@@ -777,26 +954,22 @@
 
       async function refreshCredentials() {
         const body = $("credentialsTbody");
-        body.innerHTML = "";
+        body.replaceChildren();
         try {
           const items = await apiFetch("/daemon/credentials");
           for (const c of items || []) {
             const tr = document.createElement("tr");
             const exp = c.expiresInSec == null ? "—" : `${c.expiresInSec}s`;
-            tr.innerHTML = `
-              <td>${c.kind}</td>
-              <td class="mono">${c.provider}</td>
-              <td class="mono">${c.alias}</td>
-              <td>${c.status}</td>
-              <td class="mono">${exp}</td>
-              <td class="mono">${c.secretRef || "—"}</td>
-            `;
+            tr.appendChild(createCell("td", c.kind || "", ""));
+            tr.appendChild(createCell("td", c.provider || "", "mono"));
+            tr.appendChild(createCell("td", c.alias || "", "mono"));
+            tr.appendChild(createCell("td", c.status || "", ""));
+            tr.appendChild(createCell("td", exp, "mono"));
+            tr.appendChild(createCell("td", c.secretRef || "—", "mono"));
             body.appendChild(tr);
           }
         } catch (e) {
-          const tr = document.createElement("tr");
-          tr.innerHTML = `<td colspan="6" class="mono">Failed to load: ${e.message}</td>`;
-          body.appendChild(tr);
+          body.appendChild(createErrorRow(6, e && e.message ? e.message : e));
         }
       }
 
@@ -867,24 +1040,64 @@
 
       async function refreshRuntimes() {
         const body = $("runtimesTbody");
-        body.innerHTML = "";
+        body.replaceChildren();
         try {
           const items = await apiFetch("/providers/runtimes");
           for (const r of items || []) {
             const tr = document.createElement("tr");
-            tr.innerHTML = `
-              <td class="mono">${r.providerKey || ""}</td>
-              <td class="mono">${r.runtimeKey || ""}</td>
-              <td>${r.family || ""}</td>
-              <td>${r.protocol || ""}</td>
-              <td>${r.series || ""}</td>
-            `;
+            tr.appendChild(createCell("td", r.providerKey || "", "mono truncate", { title: true }));
+            tr.appendChild(createCell("td", r.runtimeKey || "", "mono truncate", { title: true }));
+            tr.appendChild(createCell("td", r.family || "", ""));
+            tr.appendChild(createCell("td", r.protocol || "", ""));
+            tr.appendChild(createCell("td", r.series || "", ""));
             body.appendChild(tr);
           }
         } catch (e) {
-          const tr = document.createElement("tr");
-          tr.innerHTML = `<td colspan="5" class="mono">Failed to load: ${e.message}</td>`;
-          body.appendChild(tr);
+          body.appendChild(createErrorRow(5, e && e.message ? e.message : e));
+        }
+      }
+
+      function formatEpochMs(ms) {
+        if (typeof ms !== "number" || !Number.isFinite(ms) || ms <= 0) return "—";
+        try {
+          return new Date(ms).toLocaleString();
+        } catch {
+          return String(ms);
+        }
+      }
+
+      async function refreshQuota() {
+        const body = $("quotaTbody");
+        body.replaceChildren();
+        setLog("quotaOpLog", "");
+        try {
+          const out = await apiFetch("/quota/providers");
+          const list = Array.isArray(out.providers) ? out.providers : [];
+          for (const q of list) {
+            const tr = document.createElement("tr");
+            tr.appendChild(createCell("td", q.providerKey || "", "mono truncate", { title: true }));
+            tr.appendChild(createCell("td", q.authType || "", ""));
+            tr.appendChild(createCell("td", String(Boolean(q.inPool)), ""));
+            tr.appendChild(createCell("td", q.reason || "", ""));
+            tr.appendChild(createCell("td", formatEpochMs(q.cooldownUntil), "mono"));
+            tr.appendChild(createCell("td", formatEpochMs(q.blacklistUntil), "mono"));
+            tr.appendChild(createCell("td", q.consecutiveErrorCount ?? 0, "mono"));
+            body.appendChild(tr);
+          }
+        } catch (e) {
+          body.appendChild(createErrorRow(7, e && e.message ? e.message : e));
+        }
+      }
+
+      async function resetQuotaModule() {
+        setLog("quotaOpLog", "");
+        if (!confirm("Reset provider-quota module now? This clears cooldown/blacklist state.")) return;
+        try {
+          const out = await apiFetch("/daemon/modules/provider-quota/reset", { method: "POST" });
+          setLog("quotaOpLog", `OK. resetAt=${out.resetAt || "—"}`);
+          await refreshQuota();
+        } catch (e) {
+          setLog("quotaOpLog", `Reset failed: ${e.message}`);
         }
       }
 
@@ -897,11 +1110,19 @@
         const value = ($("apiKeyInput").value || "").trim();
         setApiKey(value);
         $("apiKeyHint").textContent = value ? "saved (session only)" : "";
+        Promise.resolve()
+          .then(refreshStatus)
+          .then(() => selectTab(getActiveTab()))
+          .catch(() => {});
       });
       $("clearApiKeyBtn").addEventListener("click", () => {
         setApiKey("");
         $("apiKeyInput").value = "";
         $("apiKeyHint").textContent = "";
+        Promise.resolve()
+          .then(refreshStatus)
+          .then(() => selectTab(getActiveTab()))
+          .catch(() => {});
       });
 
       $("restartRuntimeBtn").addEventListener("click", async () => {
@@ -914,6 +1135,7 @@
           await refreshStatus();
           await refreshProviders();
           await refreshCredentials();
+          await refreshQuota();
           await refreshRuntimes();
         } catch (e) {
           setLog("providerOpLog", `Restart failed: ${e.message}`);
@@ -954,6 +1176,9 @@
       $("saveOauthBrowserBtn").addEventListener("click", saveSettings);
       $("oauthAuthorizeBtn").addEventListener("click", authorizeOauth);
 
+      $("refreshQuotaBtn").addEventListener("click", refreshQuota);
+      $("resetQuotaBtn").addEventListener("click", resetQuotaModule);
+
       $("loadRoutingBtn").addEventListener("click", loadRouting);
       $("saveRoutingBtn").addEventListener("click", saveRouting);
       $("refreshRuntimesBtn").addEventListener("click", refreshRuntimes);
@@ -968,6 +1193,8 @@
         await refreshStatus();
         await refreshProviders();
         await refreshCredentials();
+        await refreshQuota();
+        await refreshRuntimes();
         await loadSettings();
       })();
     </script>

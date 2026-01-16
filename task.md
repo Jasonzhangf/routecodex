@@ -22,6 +22,7 @@
   - [x] 支持 `--req <requestId>` / `--all` 从 `~/.routecodex/codex-samples/{openai-chat|openai-responses|anthropic-messages}` 抽取 `*_client-request.json` / `*_provider-request.json` / `*_provider-response.json`。
   - [x] 统一落盘到 `samples/mock-provider/<entry>/<providerKey>/<stamp>/`，并生成 `request.json` / `response.json` / 可选 `client-request.json`。
   - [x] 维护 `_registry/index.json`，记录 `reqId` / `entry` / `providerId` / `path` / `tags`。
+- [x] 修复 codex-samples 快照落盘分目录：第一层按入口 `entryEndpoint`（openai-chat/openai-responses/anthropic-messages）分类，第二层按 `providerKey`，避免因 provider 上游 endpoint（如 `/messages`）导致写入错误入口目录。
 - [x] 完成 `scripts/mock-provider/validate.mjs`：
   - [x] 校验样本目录完整性（必需文件、JSON 可解析）。
   - [x] 校验 `reqId`、`entryEndpoint`、`providerId`、`model` 一致性。
