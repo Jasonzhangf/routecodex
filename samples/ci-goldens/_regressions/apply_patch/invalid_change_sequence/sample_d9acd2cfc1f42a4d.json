@@ -1,0 +1,9 @@
+{
+  "id": "sample_d9acd2cfc1f42a4d",
+  "timestamp": "2026-01-16T02:04:11.258Z",
+  "errorType": "invalid_change_sequence",
+  "originalArgs": "{\"file\":\".apply_patch_final_test.txt\",\"instructions\":\"测试 apply_patch 工具的完整功能\",\"changes\":[{\"kind\":\"create_file\",\"lines\":\"# Apply Patch Final Test\\n\\n## Test 1: Create File\\nThis file was created to test apply_patch.\\n\\n## Test 2: Simple Append\\nWill append content below.\\n\",\"target\":\"\"},{\"kind\":\"replace\",\"anchor\":\"## Test 2: Simple Append\",\"lines\":\"## Test 2: Simple Append\\nContent appended successfully.\\n\\n## Test 3: Multi-line Change\\n- Item 1\\n- Item 2\\n- Item 3\\n\",\"target\":\"## Test 2: Simple Append\\nWill append content below.\\n\"},{\"kind\":\"replace\",\"anchor\":\"- Item 1\\n- Item 2\\n- Item 3\",\"lines\":\"- Modified Item 1\\n- Modified Item 2\\n- Modified Item 3\\n- New Item 4\\n\",\"target\":\"- Item 1\\n- Item 2\\n- Item 3\\n\"}]}",
+  "normalizedArgs": "{\"file\":\".apply_patch_final_test.txt\",\"instructions\":\"测试 apply_patch 工具的完整功能\",\"changes\":[{\"kind\":\"create_file\",\"lines\":\"# Apply Patch Final Test\\n\\n## Test 1: Create File\\nThis file was created to test apply_patch.\\n\\n## Test 2: Simple Append\\nWill append content below.\\n\",\"target\":\"\"},{\"kind\":\"replace\",\"anchor\":\"## Test 2: Simple Append\",\"lines\":\"## Test 2: Simple Append\\nContent appended successfully.\\n\\n## Test 3: Multi-line Change\\n- Item 1\\n- Item 2\\n- Item 3\\n\",\"target\":\"## Test 2: Simple Append\\nWill append content below.\\n\"},{\"kind\":\"replace\",\"anchor\":\"- Item 1\\n- Item 2\\n- Item 3\",\"lines\":\"- Modified Item 1\\n- Modified Item 2\\n- Modified Item 3\\n- New Item 4\\n\",\"target\":\"- Item 1\\n- Item 2\\n- Item 3\\n\"}]}",
+  "validationError": "invalid_change_sequence",
+  "source": "tool-registry.validateToolCall"
+}

@@ -1,0 +1,9 @@
+{
+  "id": "sample_6d652f89d5520c07",
+  "timestamp": "2026-01-16T02:04:01.200Z",
+  "errorType": "missing_field",
+  "originalArgs": "{\"changes\":[{\"target\":\"export {\\n  RelationshipCardSchema,\\n} from './cards/schemas/relationship-card.js';\",\"lines\":\"export type { SummaryCard } from './cards/schemas/summary-card.js';\",\"kind\":\"insert_after\"}],\"file\":\"packages/domain-models/src/index.ts\"}",
+  "normalizedArgs": "{\"changes\":[{\"target\":\"export {\\n  RelationshipCardSchema,\\n} from './cards/schemas/relationship-card.js';\",\"lines\":\"export type { SummaryCard } from './cards/schemas/summary-card.js';\",\"kind\":\"insert_after\"}],\"file\":\"packages/domain-models/src/index.ts\"}",
+  "validationError": "missing_field",
+  "source": "tool-registry.validateToolCall"
+}

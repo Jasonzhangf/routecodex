@@ -1,0 +1,9 @@
+{
+  "id": "sample_42b7d4f93ec79fed",
+  "timestamp": "2026-01-16T02:04:14.569Z",
+  "errorType": "invalid_lines",
+  "originalArgs": "{\"file\":\"TASK.md\",\"instructions\":\"更新当前进度：完成阶段4任务4.3；同步更新时间\",\"changes\":[{\"kind\":\"replace\",\"anchor\":\"- [ ] 阶段4: 关联检索系统 (2/3)\\n  - [x] 任务4.1: 设计统一关联字段\\n  - [x] 任务4.2: 建立卡片关联索引表\",\"target\":\"- [x] 阶段4: 关联检索系统 (3/3) ✅ **已完成**\\n  - [x] 任务4.1: 设计统一关联字段\\n  - [x] 任务4.2: 建立卡片关联索引表\\n  - [x] 任务4.3: 实现按人物提取相关卡片\"},{\"kind\":\"replace\",\"anchor\":\"更新时间: 2026-01-14\",\"target\":\"更新时间: 2026-01-15\"}]}",
+  "normalizedArgs": "{\"file\":\"TASK.md\",\"instructions\":\"更新当前进度：完成阶段4任务4.3；同步更新时间\",\"changes\":[{\"kind\":\"replace\",\"anchor\":\"- [ ] 阶段4: 关联检索系统 (2/3)\\n  - [x] 任务4.1: 设计统一关联字段\\n  - [x] 任务4.2: 建立卡片关联索引表\",\"target\":\"- [x] 阶段4: 关联检索系统 (3/3) ✅ **已完成**\\n  - [x] 任务4.1: 设计统一关联字段\\n  - [x] 任务4.2: 建立卡片关联索引表\\n  - [x] 任务4.3: 实现按人物提取相关卡片\"},{\"kind\":\"replace\",\"anchor\":\"更新时间: 2026-01-14\",\"target\":\"更新时间: 2026-01-15\"}]}",
+  "validationError": "invalid_lines",
+  "source": "tool-registry.validateToolCall"
+}

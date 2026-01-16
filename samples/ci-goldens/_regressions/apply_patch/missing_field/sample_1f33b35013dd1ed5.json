@@ -1,0 +1,9 @@
+{
+  "id": "sample_1f33b35013dd1ed5",
+  "timestamp": "2026-01-16T02:04:05.885Z",
+  "errorType": "missing_field",
+  "originalArgs": "{\"file\":\"/Users/fanzhang/Documents/github/novelmobile/.gitignore\",\"instructions\":\"Ignore turbo cache and Playwright reports; keep the file minimal and aligned with repo needs.\",\"changes\":[{\"kind\":\"insert_before\",\"target\":\"# Backup files\",\"lines\":[\"# Tooling caches\",\".turbo/\",\"apps/web-admin/playwright-report/\",\"\"]}]}",
+  "normalizedArgs": "{\"file\":\"/Users/fanzhang/Documents/github/novelmobile/.gitignore\",\"instructions\":\"Ignore turbo cache and Playwright reports; keep the file minimal and aligned with repo needs.\",\"changes\":[{\"kind\":\"insert_before\",\"target\":\"# Backup files\",\"lines\":[\"# Tooling caches\",\".turbo/\",\"apps/web-admin/playwright-report/\",\"\"]}]}",
+  "validationError": "missing_field",
+  "source": "tool-registry.validateToolCall"
+}

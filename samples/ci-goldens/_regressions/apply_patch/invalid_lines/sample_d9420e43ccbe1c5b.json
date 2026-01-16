@@ -1,0 +1,9 @@
+{
+  "id": "sample_d9420e43ccbe1c5b",
+  "timestamp": "2026-01-16T02:04:14.569Z",
+  "errorType": "invalid_lines",
+  "originalArgs": "{\"file\":\"packages/card-engine/src/query/association/__tests__/association-query.test.ts\",\"instructions\":\"更新时间字段断言，适配 UnifiedTimeSpec 联合类型\",\"changes\":[{\"kind\":\"replace\",\"anchor\":\"      expect(result.memories[0].data.time.datetime).toBe('2026-01-14T10:00:00Z');\\n      expect(result.events[0].data.time.datetime).toBe('2026-01-14T12:00:00Z');\",\"target\":\"      expect(result.memories[0].data.time.type).toBe('exact');\\n      expect(result.memories[0].data.time.datetime).toBe('2026-01-14T10:00:00Z');\\n      expect(result.events[0].data.time.type).toBe('exact');\\n      expect(result.events[0].data.time.datetime).toBe('2026-01-14T12:00:00Z');\"}]}",
+  "normalizedArgs": "{\"file\":\"packages/card-engine/src/query/association/__tests__/association-query.test.ts\",\"instructions\":\"更新时间字段断言，适配 UnifiedTimeSpec 联合类型\",\"changes\":[{\"kind\":\"replace\",\"anchor\":\"      expect(result.memories[0].data.time.datetime).toBe('2026-01-14T10:00:00Z');\\n      expect(result.events[0].data.time.datetime).toBe('2026-01-14T12:00:00Z');\",\"target\":\"      expect(result.memories[0].data.time.type).toBe('exact');\\n      expect(result.memories[0].data.time.datetime).toBe('2026-01-14T10:00:00Z');\\n      expect(result.events[0].data.time.type).toBe('exact');\\n      expect(result.events[0].data.time.datetime).toBe('2026-01-14T12:00:00Z');\"}]}",
+  "validationError": "invalid_lines",
+  "source": "tool-registry.validateToolCall"
+}

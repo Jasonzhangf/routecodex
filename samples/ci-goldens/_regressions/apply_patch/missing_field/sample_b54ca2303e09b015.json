@@ -1,0 +1,9 @@
+{
+  "id": "sample_b54ca2303e09b015",
+  "timestamp": "2026-01-16T02:04:01.201Z",
+  "errorType": "missing_field",
+  "originalArgs": "{\"changes\":[{\"lines\":\"export {\\n  CardCodingSystem,\\n  CardTypeCode,\\n} from './cards/coding-system.js';\\n\\nexport {\\n  UnifiedTimeSpec,\\n} from './cards/time-specification.js';\",\"target\":\"export type {\\n  SummaryCard,\\n} from './cards/schemas/summary-card.js';\",\"kind\":\"insert_after\"}],\"file\":\"packages/domain-models/src/index.ts\"}",
+  "normalizedArgs": "{\"changes\":[{\"lines\":\"export {\\n  CardCodingSystem,\\n  CardTypeCode,\\n} from './cards/coding-system.js';\\n\\nexport {\\n  UnifiedTimeSpec,\\n} from './cards/time-specification.js';\",\"target\":\"export type {\\n  SummaryCard,\\n} from './cards/schemas/summary-card.js';\",\"kind\":\"insert_after\"}],\"file\":\"packages/domain-models/src/index.ts\"}",
+  "validationError": "missing_field",
+  "source": "tool-registry.validateToolCall"
+}

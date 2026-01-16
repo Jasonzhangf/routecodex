@@ -1,0 +1,9 @@
+{
+  "id": "sample_e2f540fa4f7ccdd9",
+  "timestamp": "2026-01-16T02:06:00.826Z",
+  "errorType": "invalid_lines",
+  "originalArgs": "{\"file\":\"src/providers/core/runtime/gemini-cli-http-provider.ts\",\"instructions\":\"Move debug logging to the very beginning of processEvent, before any early returns\",\"changes\":[{\"kind\":\"replace\",\"anchor\":\"  private processEvent(rawEvent: string): void {\\n    this.processedEventCounter++;\",\"target\":\"  private processEvent(rawEvent: string): void {\\n    if (process.env.ROUTECODEX_DEBUG_GEMINI_RAW === '1') {\\n      console.log('[DEBUG-GEMINI-INPUT]', JSON.stringify(rawEvent));\\n    }\\n    this.processedEventCounter++;\",\"use_anchor_indent\":true}]}",
+  "normalizedArgs": "{\"file\":\"src/providers/core/runtime/gemini-cli-http-provider.ts\",\"instructions\":\"Move debug logging to the very beginning of processEvent, before any early returns\",\"changes\":[{\"kind\":\"replace\",\"anchor\":\"  private processEvent(rawEvent: string): void {\\n    this.processedEventCounter++;\",\"target\":\"  private processEvent(rawEvent: string): void {\\n    if (process.env.ROUTECODEX_DEBUG_GEMINI_RAW === '1') {\\n      console.log('[DEBUG-GEMINI-INPUT]', JSON.stringify(rawEvent));\\n    }\\n    this.processedEventCounter++;\",\"use_anchor_indent\":true}]}",
+  "validationError": "invalid_lines",
+  "source": "tool-registry.validateToolCall"
+}

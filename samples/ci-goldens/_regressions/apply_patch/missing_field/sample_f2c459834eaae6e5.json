@@ -1,0 +1,9 @@
+{
+  "id": "sample_f2c459834eaae6e5",
+  "timestamp": "2026-01-16T02:04:01.200Z",
+  "errorType": "missing_field",
+  "originalArgs": "{\"file\":\"packages/card-engine/package.json\",\"changes\":[{\"lines\":\"    \\\"@novelmobile/llm-client\\\": \\\"workspace:*\\\",\",\"target\":\"    \\\"@novelmobile/domain-models\\\": \\\"workspace:*\\\",\",\"kind\":\"insert_after\"}]}",
+  "normalizedArgs": "{\"file\":\"packages/card-engine/package.json\",\"changes\":[{\"lines\":\"    \\\"@novelmobile/llm-client\\\": \\\"workspace:*\\\",\",\"target\":\"    \\\"@novelmobile/domain-models\\\": \\\"workspace:*\\\",\",\"kind\":\"insert_after\"}]}",
+  "validationError": "missing_field",
+  "source": "tool-registry.validateToolCall"
+}

@@ -1,0 +1,9 @@
+{
+  "id": "sample_83091a1ec0f53ee6",
+  "timestamp": "2026-01-16T02:03:42.139Z",
+  "errorType": "invalid_json",
+  "originalArgs": "{}",
+  "normalizedArgs": "{}",
+  "validationError": "invalid_json",
+  "source": "tool-registry.validateToolCall"
+}

@@ -1,0 +1,9 @@
+{
+  "id": "sample_768d8f0dfef1978d",
+  "timestamp": "2026-01-16T02:04:10.435Z",
+  "errorType": "invalid_lines",
+  "originalArgs": "{\"file\":\"/Users/fanzhang/Documents/github/novelmobile/AGENTS.md\",\"instructions\":\"更新编码规范章节，加入单文件行数限制的详细规则\",\"changes\":[{\"kind\":\"replace\",\"anchor\":\"## 🔧 常用命令\\n## 📏 代码规范\\n\\n### 文件大小限制\\n\\n**强制规则（必须遵守）：**\\n- 单个文件代码行数不超过 **500行**\\n- 超过500行的模块必须拆分为多个子模块\\n- 保持单一职责原则\",\"target\":\"## 🔧 常用命令\\n## 📏 代码规范\\n\\n### 文件大小限制\\n\\n**强制规则（必须遵守）：**\\n- 单个文件代码行数不超过 **500行**\\n- 超过500行的模块必须拆分为多个子模块\\n- 保持单一职责原则\"}]}",
+  "normalizedArgs": "{\"file\":\"/Users/fanzhang/Documents/github/novelmobile/AGENTS.md\",\"instructions\":\"更新编码规范章节，加入单文件行数限制的详细规则\",\"changes\":[{\"kind\":\"replace\",\"anchor\":\"## 🔧 常用命令\\n## 📏 代码规范\\n\\n### 文件大小限制\\n\\n**强制规则（必须遵守）：**\\n- 单个文件代码行数不超过 **500行**\\n- 超过500行的模块必须拆分为多个子模块\\n- 保持单一职责原则\",\"target\":\"## 🔧 常用命令\\n## 📏 代码规范\\n\\n### 文件大小限制\\n\\n**强制规则（必须遵守）：**\\n- 单个文件代码行数不超过 **500行**\\n- 超过500行的模块必须拆分为多个子模块\\n- 保持单一职责原则\"}]}",
+  "validationError": "invalid_lines",
+  "source": "tool-registry.validateToolCall"
+}
