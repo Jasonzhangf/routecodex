@@ -725,6 +725,11 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
       this.quotaStates.get(providerKey) ??
       createInitialQuotaState(providerKey, this.staticConfigs.get(providerKey), nowMs);
 
+    // fatal 黑名单在锁定期内，不应被其它事件（包括 429/配额信号）改变。
+    if (previous.reason === 'fatal' && previous.blacklistUntil && nowMs < previous.blacklistUntil) {
+      return;
+    }
+
     // QUOTA_* 属于“确定性配额信号”，不进入错误 series 统计。
     if (code === 'QUOTA_DEPLETED') {
       const detailCarrier = (event.details && typeof event.details === 'object') ? (event.details as Record<string, unknown>) : {};
@@ -768,6 +773,21 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
     // Gemini-family quota exhausted errors often carry quota reset delay.
     // When present, treat as deterministic quota depletion signal rather than generic 429 backoff/blacklist.
     if (typeof event.status === 'number' && event.status === 429) {
+      const seriesCooldownUntil = extractVirtualRouterSeriesCooldownUntil(event, nowMs);
+      if (seriesCooldownUntil) {
+        const nextState: QuotaState = {
+          ...previous,
+          inPool: false,
+          reason: 'quotaDepleted',
+          cooldownUntil: seriesCooldownUntil,
+          blacklistUntil: null,
+          lastErrorSeries: null,
+          consecutiveErrorCount: 0
+        };
+        this.quotaStates.set(providerKey, nextState);
+        this.schedulePersist(nowMs);
+        return;
+      }
       const runtime = event.runtime as { providerId?: unknown; providerProtocol?: unknown } | undefined;
       const providerIdRaw = runtime && typeof runtime.providerId === 'string' ? runtime.providerId.trim().toLowerCase() : '';
       const isQuotaProvider = providerIdRaw === 'antigravity' || providerIdRaw === 'gemini-cli';
@@ -943,6 +963,36 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
     }
     return false;
   }
+}
+
+function extractVirtualRouterSeriesCooldownUntil(event: ProviderErrorEvent, nowMs: number): number | null {
+  if (!event || !event.details || typeof event.details !== 'object') {
+    return null;
+  }
+  const raw = (event.details as Record<string, unknown>).virtualRouterSeriesCooldown;
+  if (!raw || typeof raw !== 'object') {
+    return null;
+  }
+  const record = raw as Record<string, unknown>;
+  const cooldownMsRaw = record.cooldownMs;
+  const expiresAtRaw = record.expiresAt;
+  const expiresAt =
+    typeof expiresAtRaw === 'number' && Number.isFinite(expiresAtRaw) && expiresAtRaw > nowMs
+      ? expiresAtRaw
+      : null;
+  if (expiresAt) {
+    return expiresAt;
+  }
+  const cooldownMs =
+    typeof cooldownMsRaw === 'number'
+      ? cooldownMsRaw
+      : typeof cooldownMsRaw === 'string'
+        ? Number.parseFloat(cooldownMsRaw)
+        : Number.NaN;
+  if (!Number.isFinite(cooldownMs) || cooldownMs <= 0) {
+    return null;
+  }
+  return nowMs + cooldownMs;
 }
 
 function parseQuotaResetDelayMs(event: ProviderErrorEvent): number | null {

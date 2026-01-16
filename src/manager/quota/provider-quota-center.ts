@@ -60,7 +60,16 @@ const BLACKLIST_1H_MS = 60 * 60_000;
 const BLACKLIST_3H_MS = 3 * 60 * 60_000;
 const BLACKLIST_THRESHOLD_DEFAULT = 3;
 
-const NETWORK_ERROR_CODES = ['ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EAI_AGAIN'];
+const NETWORK_ERROR_CODES = [
+  'ECONNRESET',
+  'ECONNREFUSED',
+  'ETIMEDOUT',
+  'EAI_AGAIN',
+  'UPSTREAM_HEADERS_TIMEOUT',
+  'UPSTREAM_STREAM_TIMEOUT',
+  'UPSTREAM_STREAM_IDLE_TIMEOUT',
+  'UPSTREAM_STREAM_ABORTED'
+] as const;
 
 export function createInitialQuotaState(
   providerKey: string,
@@ -122,7 +131,7 @@ export function normalizeErrorSeries(event: ErrorEventForQuota): ErrorSeries {
     return 'E5XX';
   }
 
-  if (NETWORK_ERROR_CODES.some((code) => rawCode.includes(code))) {
+  if (rawCode.includes('TIMEOUT') || NETWORK_ERROR_CODES.some((code) => rawCode.includes(code))) {
     return 'ENET';
   }
 
@@ -167,19 +176,13 @@ function resolveErrorPolicy(state: QuotaState, series: ErrorSeries): ErrorPolicy
     return { cooldownOnly: true };
   }
 
-  // 429 for API-key providers: 1/3/5 minute backoff, then 3h blacklist.
-  if (series === 'E429' && state.authType === 'apikey') {
+  // 429: 1/3/5 minute backoff, then 3h blacklist.
+  if (series === 'E429') {
     return {
       cooldownOnly: false,
       blacklistAfterConsecutive: BLACKLIST_THRESHOLD_DEFAULT,
       blacklistDurationMs: BLACKLIST_3H_MS
     };
-  }
-
-  // 429 for OAuth/unknown providers: only backoff (do not long-blacklist here);
-  // OAuth tokens may recover after refresh; quota-style providers should emit QUOTA_* events.
-  if (series === 'E429') {
-    return { cooldownOnly: true };
   }
 
   // Unknown / other errors: 1/3/5 minute backoff; after repeated series continues, blacklist 1h.
