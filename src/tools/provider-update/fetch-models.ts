@@ -43,13 +43,16 @@ async function buildOAuthHeaders(provider: ProviderInputConfig, providerKind: st
     if (Object.keys(client).length > 0) {overrides.client = client;}
 
     // 统一 tokenFile 路径，避免与运行时 OAuth 流程使用不同文件导致重复授权：
-    // - qwen: ~/.routecodex/auth/qwen-oauth.json （对齐 oauth-lifecycle 默认）
-    // - iflow: 保持默认（~/.iflow/oauth_creds.json）
+    // - 若显式提供 auth.tokenFile，则优先使用；
+    // - qwen: 默认 ~/.routecodex/auth/qwen-oauth.json（对齐 oauth-lifecycle 默认）；
+    // - iflow: 默认保持 upstream/strategy 内置（通常为 ~/.iflow/oauth_creds.json）。
     const home = process.env.HOME || '';
     const tokenFile =
-      kind === 'qwen'
-        ? path.join(home, '.routecodex', 'auth', 'qwen-oauth.json')
-        : undefined;
+      (typeof auth.tokenFile === 'string' && auth.tokenFile.trim())
+        ? auth.tokenFile.trim()
+        : kind === 'qwen'
+          ? path.join(home, '.routecodex', 'auth', 'qwen-oauth.json')
+          : undefined;
 
     const strategy = createProviderOAuthStrategy(kind, overrides, tokenFile);
 

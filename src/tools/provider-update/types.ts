@@ -5,6 +5,7 @@ export type AuthConfig = {
   prefix?: string;
 
   // OAuth-related fields (optional, used when type === 'oauth')
+  tokenFile?: string;
   clientId?: string;
   clientSecret?: string;
   tokenUrl?: string;

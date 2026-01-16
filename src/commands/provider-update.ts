@@ -5,6 +5,9 @@ import os from 'node:os';
 import readline from 'node:readline';
 
 import { updateProviderModels } from '../tools/provider-update/index.js';
+import { fetchModelsFromUpstream } from '../tools/provider-update/fetch-models.js';
+import { readBlacklist, writeBlacklist } from '../tools/provider-update/blacklist.js';
+import type { ProviderInputConfig } from '../tools/provider-update/types.js';
 import { API_ENDPOINTS } from '../constants/index.js';
 import { loadProviderConfigsV2, type ProviderConfigV2 } from '../config/provider-v2-loader.js';
 import type { UnknownRecord } from '../config/virtual-router-types.js';
@@ -58,6 +61,122 @@ function askYesNo(question: string, defaultYes = true): Promise<boolean> {
       resolve(raw === 'y' || raw === 'yes');
     });
   });
+}
+
+function splitCsv(raw?: unknown): string[] {
+  return typeof raw === 'string' && raw.trim()
+    ? raw.split(',').map((item) => item.trim()).filter(Boolean)
+    : [];
+}
+
+type ProviderUpdateAuth = {
+  type: 'apikey' | 'oauth';
+  apiKey?: string;
+  headerName?: string;
+  prefix?: string;
+  tokenFile?: string;
+  clientId?: string;
+  clientSecret?: string;
+  tokenUrl?: string;
+  deviceCodeUrl?: string;
+  scopes?: string[];
+};
+
+type ProviderUpdateInput = {
+  providerId: string;
+  type: string;
+  baseUrl?: string;
+  baseURL?: string;
+  auth?: ProviderUpdateAuth;
+};
+
+function readString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function readStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const out: string[] = [];
+  for (const entry of value) {
+    const item = readString(entry);
+    if (item) {
+      out.push(item);
+    }
+  }
+  return out.length ? out : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function extractApiKeyFromAuthNode(authNode: Record<string, unknown>): string | undefined {
+  const direct = readString(authNode.apiKey);
+  if (direct) {
+    return direct;
+  }
+  const keys = authNode.keys;
+  if (!isRecord(keys)) {
+    return undefined;
+  }
+  for (const entry of Object.values(keys)) {
+    if (!isRecord(entry)) {
+      continue;
+    }
+    const value = readString(entry.value);
+    if (value) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function normalizeAuthForProviderUpdate(authNodeValue: unknown): ProviderUpdateAuth | undefined {
+  if (!isRecord(authNodeValue)) {
+    return undefined;
+  }
+  const authTypeRaw = readString(authNodeValue.type) ?? '';
+  const authType = authTypeRaw.toLowerCase();
+
+  if (authType.includes('oauth')) {
+    return {
+      type: 'oauth',
+      tokenFile: readString(authNodeValue.tokenFile),
+      clientId: readString(authNodeValue.clientId),
+      clientSecret: readString(authNodeValue.clientSecret),
+      tokenUrl: readString(authNodeValue.tokenUrl),
+      deviceCodeUrl: readString(authNodeValue.deviceCodeUrl),
+      scopes: readStringArray(authNodeValue.scopes)
+    };
+  }
+
+  if (authType.includes('apikey') || authType === 'api_key' || authType === 'apikey') {
+    return {
+      type: 'apikey',
+      apiKey: extractApiKeyFromAuthNode(authNodeValue),
+      headerName: readString(authNodeValue.headerName),
+      prefix: readString(authNodeValue.prefix)
+    };
+  }
+
+  return undefined;
+}
+
+function buildProviderUpdateInputFromV2(providerId: string, provider: UnknownRecord): ProviderUpdateInput {
+  const type = readString((provider as { type?: unknown }).type) ?? providerId;
+  const baseURL = readString((provider as { baseURL?: unknown }).baseURL) ?? readString((provider as { baseUrl?: unknown }).baseUrl);
+  const baseUrl = readString((provider as { baseUrl?: unknown }).baseUrl) ?? readString((provider as { baseURL?: unknown }).baseURL);
+  const auth = normalizeAuthForProviderUpdate((provider as { auth?: unknown }).auth);
+  return { providerId, type, baseURL, baseUrl, auth };
+}
+
+function normalizeModelsNode(node: unknown): Record<string, UnknownRecord> {
+  if (!node || typeof node !== 'object' || Array.isArray(node)) {
+    return {};
+  }
+  return node as Record<string, UnknownRecord>;
 }
 
 type ProviderTemplateId =
@@ -260,18 +379,13 @@ export function createProviderUpdateCommand(): Command {
     .option('--probe-keys', 'Probe apiKey list and set auth.apiKey to first working key', false)
     .option('--verbose', 'Verbose logs', false)
     .action(async (opts) => {
-      const splitCsv = (s?: string): string[] =>
-        (typeof s === 'string' && s.trim())
-          ? s.split(',').map((x) => x.trim()).filter(Boolean)
-          : [];
-
       const args = {
         providerId: opts.provider as string | undefined,
         configPath: path.resolve(opts.config as string),
         write: !!opts.write,
         outputDir: opts.outputDir as string | undefined,
-        blacklistAdd: splitCsv(opts.blacklistAdd as string | undefined),
-        blacklistRemove: splitCsv(opts.blacklistRemove as string | undefined),
+        blacklistAdd: splitCsv(opts.blacklistAdd),
+        blacklistRemove: splitCsv(opts.blacklistRemove),
         blacklistFile: opts.blacklistFile as string | undefined,
         listOnly: !!opts.listOnly,
         useCache: !!opts.useCache,
@@ -292,6 +406,141 @@ export function createProviderUpdateCommand(): Command {
         console.error('provider update failed:', e?.message || String(e));
         process.exit(1);
       }
+    });
+
+  const syncModels = new Command('sync-models')
+    .description('Sync upstream model list into an existing provider config.v2.json')
+    .argument('<id>', 'Provider id to update (directory name under ~/.routecodex/provider)')
+    .option('--root <dir>', 'Override provider root directory')
+    .option('--write', 'Write updated config.v2.json (default: dry-run)', false)
+    .option('--use-cache', 'Use cached models-latest.json on upstream failure', false)
+    .option('--blacklist-add <items>', 'Add comma-separated model ids to blacklist')
+    .option('--blacklist-remove <items>', 'Remove comma-separated model ids from blacklist')
+    .option('--verbose', 'Verbose logs', false)
+    .action(async (
+      id: string,
+      opts: {
+        root?: string;
+        write?: boolean;
+        useCache?: boolean;
+        blacklistAdd?: string;
+        blacklistRemove?: string;
+        verbose?: boolean;
+      }
+    ) => {
+      const providerId = (id || '').trim();
+      if (!providerId) {
+        console.error('Provider id is required');
+        process.exit(1);
+      }
+
+      const root = resolveProviderRoot(opts.root);
+      const dir = path.join(root, providerId);
+      const v2Path = path.join(dir, 'config.v2.json');
+      const blacklistPath = path.join(dir, 'blacklist.json');
+      const cachePath = path.join(dir, 'models-latest.json');
+
+      if (!(await fileExists(v2Path))) {
+        console.error(`No config.v2.json found for provider "${providerId}" under ${dir}`);
+        process.exit(1);
+      }
+
+      const raw = await fs.readFile(v2Path, 'utf8');
+      let parsed: ProviderConfigV2;
+      try {
+        parsed = JSON.parse(raw) as ProviderConfigV2;
+      } catch (e) {
+        console.error('Failed to parse existing config.v2.json:', (e as Error)?.message ?? String(e));
+        process.exit(1);
+        return;
+      }
+
+      const providerNode = (parsed.provider ?? {}) as UnknownRecord;
+      const input = buildProviderUpdateInputFromV2(providerId, providerNode);
+
+      // Load/update blacklist
+      const blacklist = readBlacklist(blacklistPath);
+      const add = splitCsv(opts.blacklistAdd);
+      const rem = splitCsv(opts.blacklistRemove);
+      if (add.length || rem.length) {
+        const set = new Set(blacklist.models);
+        for (const item of add) { set.add(item); }
+        for (const item of rem) { set.delete(item); }
+        blacklist.models = Array.from(set);
+        writeBlacklist(blacklistPath, blacklist);
+      }
+
+      // Fetch upstream models (with optional cache fallback)
+      let modelsRemote: string[] = [];
+      let modelsRaw: unknown = null;
+      try {
+        const res = await fetchModelsFromUpstream(input as unknown as ProviderInputConfig, !!opts.verbose);
+        modelsRemote = res.models || [];
+        modelsRaw = res.raw ?? null;
+        await fs.writeFile(cachePath, `${JSON.stringify({ models: modelsRemote, raw: modelsRaw, updatedAt: Date.now() }, null, 2)}\n`, 'utf8');
+      } catch (e) {
+        if (!opts.useCache) {
+          throw e;
+        }
+        try {
+          const cachedRaw = await fs.readFile(cachePath, 'utf8');
+          const cached = JSON.parse(cachedRaw) as { models?: unknown };
+          if (!Array.isArray(cached.models)) {
+            throw e;
+          }
+          modelsRemote = cached.models.map((value) => String(value));
+        } catch {
+          throw e;
+        }
+      }
+
+      const blacklistSet = new Set(blacklist.models || []);
+      const modelsFiltered = modelsRemote.filter((m) => !blacklistSet.has(m));
+      if (!modelsFiltered.length) {
+        throw new Error(`Upstream returned 0 models after blacklist filter for provider "${providerId}"`);
+      }
+
+      const existingModels = normalizeModelsNode((providerNode as { models?: unknown }).models);
+      const existingIds = new Set(Object.keys(existingModels));
+      const nextIds = Array.from(new Set(modelsFiltered)).sort();
+      const nextSet = new Set(nextIds);
+
+      const added: string[] = [];
+      const removed: string[] = [];
+      const kept: string[] = [];
+
+      for (const modelId of nextIds) {
+        if (existingIds.has(modelId)) {
+          kept.push(modelId);
+        } else {
+          added.push(modelId);
+        }
+      }
+      for (const modelId of existingIds) {
+        if (!nextSet.has(modelId)) {
+          removed.push(modelId);
+        }
+      }
+
+      const nextModels: Record<string, UnknownRecord> = {};
+      for (const modelId of nextIds) {
+        const current = existingModels[modelId];
+        if (current && typeof current === 'object' && !Array.isArray(current)) {
+          nextModels[modelId] = current as UnknownRecord;
+        } else {
+          nextModels[modelId] = { supportsStreaming: true };
+        }
+      }
+      providerNode.models = nextModels;
+      parsed.provider = providerNode;
+
+      if (opts.write) {
+        await fs.writeFile(v2Path, `${JSON.stringify(parsed, null, 2)}\n`, 'utf8');
+        console.log(`Provider "${providerId}" updated: ${v2Path}`);
+      } else {
+        console.log(`[DRY RUN] Provider "${providerId}" would be updated: ${v2Path}`);
+      }
+      console.log(`models: upstream=${modelsRemote.length} filtered=${modelsFiltered.length} kept=${kept.length} added=${added.length} removed=${removed.length}`);
     });
 
   // provider list
@@ -556,6 +805,7 @@ export function createProviderUpdateCommand(): Command {
     });
 
   cmd.addCommand(update);
+  cmd.addCommand(syncModels);
   cmd.addCommand(list);
   cmd.addCommand(add);
   cmd.addCommand(change);
