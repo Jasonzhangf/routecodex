@@ -15,6 +15,25 @@
   - `npm run lint:strict` / `npm run format:check`：静态检查
   -（重型）`npm run build:dev`：包含大量 verify + `install:global`，不适合作为 CI 默认门禁（会改全局环境）
 
+## 会话标识回传（session_id / conversation_id）
+
+> 需要确认：是否要求 **HTTP 响应回传**入口 `session_id` / `conversation_id`（便于客户端复用会话/对话标识、实现 sticky/stop-message 等能力）？
+
+### 当前代码行为（已在仓库内代码中核对）
+
+- 入口解析已做：Host 会把入站 headers 快照到 `metadata.clientHeaders`，并调用 llmswitch-core 的 `extractSessionIdentifiersFromMetadata()` 写入 `metadata.sessionId` / `metadata.conversationId`（`src/server/runtime/http-server/index.ts`）。
+- 上游转发已做：Provider 会透传入站 `session_id` / `conversation_id` 到上游；Codex UA 模式下还会在缺失时生成并注入到上游请求头（`src/providers/core/runtime/http-transport-provider.ts`，并由 `scripts/verify-client-headers.mjs` 覆盖）。
+- 回传客户端 **目前不保证**：Host 只透传“上游响应头”（上游返回了相关 header 才会出现在客户端响应里），不会基于入口 metadata 主动注入 `session_id` / `conversation_id`。
+
+### 待决策 & 任务（建议纳入 CI 回归门禁）
+
+- [ ] 明确回传 header 名称（建议：至少回 `session_id`/`conversation_id`；必要时镜像 `anthropic-session-id`/`anthropic-conversation-id`）。
+- [ ] 明确策略：仅“有则回传”还是“缺失也生成并回传”。
+- [ ] 若需要回传：
+  - [ ] 在 `RouteCodexHttpServer.executePipeline()` 返回前，向 `PipelineExecutionResult.headers` 注入 `session_id` / `conversation_id`（不覆盖上游同名 header）。
+  - [ ] 覆盖 JSON + SSE + error 三条路径（尤其是 `respondWithPipelineError()`）。
+  - [ ] 新增 e2e regression：请求带 `session_id` / `conversation_id`，断言响应必携带。
+
 ## 设计原则（与 Working Agreement 对齐）
 
 - CI 只做“验证”，不做“修复/回退/热补丁”；失败必须 fail fast。
@@ -23,6 +42,36 @@
 - 分层验证：PR 门禁用 deterministic + offline 回归；nightly 才跑长耗时/联网 smoke（可选）。
 
 ## 任务拆解（用此文件跟踪）
+
+### Coverage 90% 标准（每个模块）
+
+> 目标：CI 对每个“模块（module）”强制覆盖率 ≥ 90%（branches/functions/lines/statements），并且覆盖率报告可追溯、可复现。
+
+#### 模块边界（建议先这样定义，后续可调整）
+
+- **host/server**：`src/server/**`
+- **providers**：`src/providers/**`
+- **config**：`src/config/**`
+- **tools & cli**：`src/tools/**` + `src/commands/**`
+- **sharedmodule/llmswitch-core**：`sharedmodule/llmswitch-core/src/**`（单独 job/单独 jest config）
+
+#### 覆盖率采集策略（落地方式）
+
+- [ ] 为主包新增 CI 专用 coverage 配置（例如 `jest.ci.config.js`）：
+  - [ ] `collectCoverageFrom` 仅包含已纳入门禁的模块路径（避免“一刀切 src/** 导致现阶段无法达标”）。
+  - [ ] `coverageThreshold` 设置为：
+    - [ ] `global` 作为兜底（90%）
+    - [ ] 每个模块路径单独设阈值（90%），确保“模块级标准”真正生效。
+- [ ] 为 sharedmodule 单独新增 coverage job：
+  - [ ] 在 `sharedmodule/llmswitch-core` 目录运行其自己的 test/coverage（或在根仓库用独立 jest config 覆盖 `sharedmodule/llmswitch-core/src/**`）。
+
+#### 覆盖率门禁上线策略（避免一次性打爆主分支）
+
+> 标准是 90%，但需要分阶段把模块逐个纳入门禁，否则 CI 会因历史未覆盖代码大面积失败。
+
+- [ ] Phase A（立即）：只对“已有回归测试覆盖的模块”启用 90% 门禁（例如 server/runtime + tools/bridge 相关）。
+- [ ] Phase B：逐模块补齐测试，把 providers/config 等逐步纳入门禁，直到覆盖上述全部模块。
+- [ ] Phase C：清理或迁移当前 `jest --coverage` 下无法通过的历史测试（只做与覆盖率门禁相关的最小修复）。
 
 ### Phase 0：明确 CI 门禁范围
 
