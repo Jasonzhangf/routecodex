@@ -32,7 +32,7 @@
       }
 
       .container {
-        max-width: 1120px;
+        max-width: 1680px;
         margin: 22px auto 40px;
         padding: 0 16px;
       }
@@ -180,6 +180,10 @@
         gap: 12px;
       }
 
+      .grid.grid-wide-left {
+        grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+      }
+
       /* Ensure grid children can shrink without overflowing into the next column */
       .grid > .card {
         min-width: 0;
@@ -226,6 +230,16 @@
         background: rgba(255, 255, 255, 0.03);
       }
 
+      .table tr.group-row td {
+        background: rgba(255, 255, 255, 0.02);
+        color: rgba(255, 255, 255, 0.86);
+        font-weight: 650;
+      }
+
+      .indent {
+        padding-left: 22px !important;
+      }
+
       .table-wrap {
         width: 100%;
         max-width: 100%;
@@ -236,11 +250,11 @@
 
       .table-wrap .table {
         border: 0;
-        min-width: 720px;
+        min-width: 860px;
       }
 
       .table td.actions-cell {
-        width: 160px;
+        width: 220px;
         overflow: visible;
       }
 
@@ -346,7 +360,7 @@
         </div>
 
         <section id="panelProviders" data-panel="providers">
-          <div class="grid">
+          <div class="grid grid-wide-left">
             <div class="card" style="box-shadow: none;">
               <p class="section-title">Providers in <span class="mono">virtualrouter.providers</span></p>
               <p class="section-sub">
@@ -365,6 +379,7 @@
                       <th>enabled</th>
                       <th>baseURL</th>
                       <th>models</th>
+                      <th>compat</th>
                       <th>auth</th>
                       <th></th>
                     </tr>
@@ -562,6 +577,7 @@
                       <th>cooldownUntil</th>
                       <th>blacklistUntil</th>
                       <th>errCount</th>
+                      <th></th>
                     </tr>
                   </thead>
                   <tbody id="quotaTbody"></tbody>
@@ -632,7 +648,10 @@
         const el = $(id);
         if (!el) return;
         el.style.display = value ? "block" : "none";
-        el.textContent = value || "";
+        const raw = value || "";
+        const max = 12000;
+        const out = raw.length > max ? raw.slice(0, max) + "\n…(truncated)" : raw;
+        el.textContent = out;
       }
 
       function getApiKey() {
@@ -813,35 +832,64 @@
         body.replaceChildren();
         try {
           const data = await apiFetch("/config/providers");
-          for (const p of data.providers || []) {
-            const tr = document.createElement("tr");
-            tr.appendChild(createCell("td", p.id || "", "mono"));
-            tr.appendChild(createCell("td", p.type || "", ""));
-            tr.appendChild(createCell("td", String(Boolean(p.enabled)), ""));
-            tr.appendChild(createCell("td", p.baseURL || "", "mono truncate", { title: true }));
-            tr.appendChild(createCell("td", p.modelCount || 0, ""));
-            tr.appendChild(createCell("td", p.authType || "", ""));
-            const actionsTd = document.createElement("td");
-            actionsTd.className = "actions-cell";
-            const box = document.createElement("div");
-            box.className = "actions";
-            const edit = document.createElement("button");
-            edit.textContent = "Edit";
-            edit.setAttribute("data-action", "edit");
-            edit.setAttribute("data-id", textOf(p.id));
-            const del = document.createElement("button");
-            del.textContent = "Delete";
-            del.className = "danger";
-            del.setAttribute("data-action", "delete");
-            del.setAttribute("data-id", textOf(p.id));
-            box.appendChild(edit);
-            box.appendChild(del);
-            actionsTd.appendChild(box);
-            tr.appendChild(actionsTd);
-            body.appendChild(tr);
+          const list = Array.isArray(data.providers) ? data.providers : [];
+          const grouped = new Map();
+          for (const p of list) {
+            const t = textOf(p.type || "unknown") || "unknown";
+            if (!grouped.has(t)) grouped.set(t, []);
+            grouped.get(t).push(p);
+          }
+          const types = Array.from(grouped.keys()).sort((a, b) => a.localeCompare(b));
+          for (const type of types) {
+            const groupRow = document.createElement("tr");
+            groupRow.className = "group-row";
+            const groupCell = document.createElement("td");
+            groupCell.colSpan = 8;
+            groupCell.textContent = `${type} (${grouped.get(type).length})`;
+            groupRow.appendChild(groupCell);
+            body.appendChild(groupRow);
+
+            const items = grouped.get(type);
+            items.sort((a, b) => textOf(a.id).localeCompare(textOf(b.id)));
+            for (const p of items) {
+              const tr = document.createElement("tr");
+              tr.appendChild(createCell("td", p.id || "", "mono indent"));
+              tr.appendChild(createCell("td", p.type || "", ""));
+              tr.appendChild(createCell("td", String(Boolean(p.enabled)), ""));
+              tr.appendChild(createCell("td", p.baseURL || "", "mono truncate", { title: true }));
+              const preview = Array.isArray(p.modelsPreview) ? p.modelsPreview.map((x) => textOf(x)).filter(Boolean) : [];
+              const modelSummary = preview.length ? `${p.modelCount || 0}: ${preview.join(", ")}${(p.modelCount || 0) > preview.length ? ", …" : ""}` : String(p.modelCount || 0);
+              tr.appendChild(createCell("td", modelSummary, "mono truncate", { title: true }));
+              tr.appendChild(createCell("td", p.compatibilityProfile || "", "mono truncate", { title: true }));
+              tr.appendChild(createCell("td", p.authType || "", ""));
+              const actionsTd = document.createElement("td");
+              actionsTd.className = "actions-cell";
+              const box = document.createElement("div");
+              box.className = "actions";
+              const edit = document.createElement("button");
+              edit.textContent = "Edit";
+              edit.setAttribute("data-action", "edit");
+              edit.setAttribute("data-id", textOf(p.id));
+              const test = document.createElement("button");
+              test.textContent = "Test";
+              test.setAttribute("data-action", "test");
+              test.setAttribute("data-id", textOf(p.id));
+              test.disabled = !(p && p.enabled !== false && Number(p.modelCount || 0) > 0);
+              const del = document.createElement("button");
+              del.textContent = "Delete";
+              del.className = "danger";
+              del.setAttribute("data-action", "delete");
+              del.setAttribute("data-id", textOf(p.id));
+              box.appendChild(edit);
+              box.appendChild(test);
+              box.appendChild(del);
+              actionsTd.appendChild(box);
+              tr.appendChild(actionsTd);
+              body.appendChild(tr);
+            }
           }
         } catch (e) {
-          body.appendChild(createErrorRow(7, e && e.message ? e.message : e));
+          body.appendChild(createErrorRow(8, e && e.message ? e.message : e));
         }
       }
 
@@ -1082,10 +1130,103 @@
             tr.appendChild(createCell("td", formatEpochMs(q.cooldownUntil), "mono"));
             tr.appendChild(createCell("td", formatEpochMs(q.blacklistUntil), "mono"));
             tr.appendChild(createCell("td", q.consecutiveErrorCount ?? 0, "mono"));
+            const actionsTd = document.createElement("td");
+            actionsTd.className = "actions-cell";
+            const box = document.createElement("div");
+            box.className = "actions";
+            const recover = document.createElement("button");
+            recover.textContent = "Recover";
+            recover.setAttribute("data-action", "quota-recover");
+            recover.setAttribute("data-key", textOf(q.providerKey));
+            const reset = document.createElement("button");
+            reset.textContent = "Reset";
+            reset.setAttribute("data-action", "quota-reset");
+            reset.setAttribute("data-key", textOf(q.providerKey));
+            const disable = document.createElement("button");
+            disable.textContent = "Disable…";
+            disable.className = "danger";
+            disable.setAttribute("data-action", "quota-disable");
+            disable.setAttribute("data-key", textOf(q.providerKey));
+            box.appendChild(recover);
+            box.appendChild(reset);
+            box.appendChild(disable);
+            actionsTd.appendChild(box);
+            tr.appendChild(actionsTd);
             body.appendChild(tr);
           }
         } catch (e) {
-          body.appendChild(createErrorRow(7, e && e.message ? e.message : e));
+          body.appendChild(createErrorRow(8, e && e.message ? e.message : e));
+        }
+      }
+
+      async function testProviderFromPool(providerId) {
+        setLog("providerOpLog", "");
+        try {
+          const detail = await apiFetch(`/config/providers/${encodeURIComponent(providerId)}`);
+          const provider = detail && detail.provider ? detail.provider : null;
+          const models = provider && provider.models && typeof provider.models === "object" ? Object.keys(provider.models) : [];
+          if (!models.length) {
+            throw new Error("No models configured for this provider");
+          }
+          const modelId = models[0];
+          const directModel = `${providerId}.${modelId}`;
+          const payload = { model: directModel, input: "ping", stream: false };
+          const headers = new Headers({ "content-type": "application/json" });
+          const apiKey = getApiKey();
+          if (apiKey) headers.set("x-api-key", apiKey);
+          const started = Date.now();
+          const resp = await fetch("/v1/responses", { method: "POST", headers, body: JSON.stringify(payload) });
+          const text = await resp.text();
+          const ms = Date.now() - started;
+          if (!resp.ok) {
+            throw new Error(`HTTP ${resp.status} (${ms}ms): ${text}`);
+          }
+          let json = null;
+          try { json = text ? JSON.parse(text) : null; } catch { json = null; }
+          const summary =
+            json && typeof json.output_text === "string"
+              ? json.output_text.slice(0, 200)
+              : json && Array.isArray(json.output)
+                ? "(output items=" + json.output.length + ")"
+                : "(ok)";
+          setLog("providerOpLog", `Test OK (${ms}ms) model=${directModel}\n${summary}`);
+        } catch (e) {
+          setLog("providerOpLog", `Test failed: ${e && e.message ? e.message : e}`);
+        }
+      }
+
+      async function quotaAction(kind, providerKey) {
+        setLog("quotaOpLog", "");
+        if (!providerKey) return;
+        try {
+          if (kind === "recover") {
+            await apiFetch(`/quota/providers/${encodeURIComponent(providerKey)}/recover`, { method: "POST" });
+            await refreshQuota();
+            return;
+          }
+          if (kind === "reset") {
+            await apiFetch(`/quota/providers/${encodeURIComponent(providerKey)}/reset`, { method: "POST" });
+            await refreshQuota();
+            return;
+          }
+          if (kind === "disable") {
+            const minutesRaw = prompt("Disable duration (minutes)", "60");
+            if (!minutesRaw) return;
+            const minutes = Number.parseFloat(minutesRaw);
+            if (!Number.isFinite(minutes) || minutes <= 0) {
+              throw new Error("Invalid minutes");
+            }
+            const modeRaw = prompt("Mode: cooldown or blacklist", "cooldown");
+            const mode = (modeRaw || "cooldown").trim().toLowerCase() === "blacklist" ? "blacklist" : "cooldown";
+            await apiFetch(`/quota/providers/${encodeURIComponent(providerKey)}/disable`, {
+              method: "POST",
+              body: JSON.stringify({ mode, durationMinutes: minutes })
+            });
+            await refreshQuota();
+            return;
+          }
+        } catch (e) {
+          setLog("quotaOpLog", `Action failed: ${e && e.message ? e.message : e}`);
         }
       }
 
@@ -1154,6 +1295,10 @@
         if (!btn) return;
         const id = btn.getAttribute("data-id");
         const action = btn.getAttribute("data-action");
+        if (action === "test" && id) {
+          await testProviderFromPool(id);
+          return;
+        }
         if (action === "edit") await loadProvider(id);
         if (action === "delete") await deleteProvider(id);
       });
@@ -1177,6 +1322,15 @@
       $("oauthAuthorizeBtn").addEventListener("click", authorizeOauth);
 
       $("refreshQuotaBtn").addEventListener("click", refreshQuota);
+      $("quotaTbody").addEventListener("click", (ev) => {
+        const el = ev.target;
+        if (!el || el.tagName !== "BUTTON") return;
+        const action = el.getAttribute("data-action");
+        const key = el.getAttribute("data-key");
+        if (action === "quota-recover") void quotaAction("recover", key);
+        else if (action === "quota-reset") void quotaAction("reset", key);
+        else if (action === "quota-disable") void quotaAction("disable", key);
+      });
       $("resetQuotaBtn").addEventListener("click", resetQuotaModule);
 
       $("loadRoutingBtn").addEventListener("click", loadRouting);

@@ -526,7 +526,7 @@ function applyProviderDeleteV1(config: unknown, id: string): Record<string, unkn
 
 function summarizeProviderV1(provider: unknown): Record<string, unknown> {
   if (!provider || typeof provider !== 'object' || Array.isArray(provider)) {
-    return { type: null, enabled: null, baseURL: null, modelCount: 0, authType: null };
+    return { type: null, enabled: null, baseURL: null, modelCount: 0, modelsPreview: [], authType: null };
   }
   const rec = provider as Record<string, unknown>;
   const type = typeof rec.type === 'string' ? rec.type : null;
@@ -534,6 +534,10 @@ function summarizeProviderV1(provider: unknown): Record<string, unknown> {
   const baseURL = typeof rec.baseURL === 'string' ? rec.baseURL : null;
   const compatibilityProfile = typeof rec.compatibilityProfile === 'string' ? rec.compatibilityProfile : null;
   const models = rec.models;
+  const modelsPreview =
+    models && typeof models === 'object' && !Array.isArray(models)
+      ? Object.keys(models as Record<string, unknown>).sort((a, b) => a.localeCompare(b)).slice(0, 6)
+      : [];
   const modelCount =
     models && typeof models === 'object' && !Array.isArray(models)
       ? Object.keys(models as Record<string, unknown>).length
@@ -543,7 +547,7 @@ function summarizeProviderV1(provider: unknown): Record<string, unknown> {
     auth && typeof auth === 'object' && !Array.isArray(auth) && typeof (auth as Record<string, unknown>).type === 'string'
       ? ((auth as Record<string, unknown>).type as string)
       : null;
-  return { type, enabled, baseURL, compatibilityProfile, modelCount, authType };
+  return { type, enabled, baseURL, compatibilityProfile, modelCount, modelsPreview, authType };
 }
 
 function scrubProviderConfigV1(provider: unknown): Record<string, unknown> {

@@ -140,4 +140,38 @@ describe('ProviderQuotaDaemonModule', () => {
 
     await mod.stop();
   });
+
+  it('supports manual quota operations (disable/recover/reset)', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-01-16T00:00:00.000Z'));
+
+    const mod = new ProviderQuotaDaemonModule();
+    await mod.init({ serverId: 'test' });
+    mod.registerProviderStaticConfig('tab.default.gpt-5.1', { authType: 'apikey' });
+    await mod.start();
+
+    const disabled = await mod.disableProvider({
+      providerKey: 'tab.default.gpt-5.1',
+      mode: 'cooldown',
+      durationMs: 60_000
+    });
+    expect(disabled).not.toBeNull();
+    expect(disabled!.state.inPool).toBe(false);
+    expect(disabled!.state.reason).toBe('cooldown');
+    expect(disabled!.state.cooldownUntil).toBe(Date.now() + 60_000);
+
+    const recovered = await mod.recoverProvider('tab.default.gpt-5.1');
+    expect(recovered).not.toBeNull();
+    expect(recovered!.state.inPool).toBe(true);
+    expect(recovered!.state.reason).toBe('ok');
+    expect(recovered!.state.cooldownUntil).toBeNull();
+    expect(recovered!.state.blacklistUntil).toBeNull();
+
+    const reset = await mod.resetProvider('tab.default.gpt-5.1');
+    expect(reset).not.toBeNull();
+    expect(reset!.state.inPool).toBe(true);
+    expect(reset!.state.reason).toBe('ok');
+
+    await mod.stop();
+  });
 });

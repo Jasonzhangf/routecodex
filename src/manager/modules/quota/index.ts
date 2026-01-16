@@ -567,6 +567,94 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
     return { resetAt: nowMs, persisted };
   }
 
+  async resetProvider(providerKey: string): Promise<{ providerKey: string; state: QuotaState } | null> {
+    const key = typeof providerKey === 'string' ? providerKey.trim() : '';
+    if (!key) {
+      return null;
+    }
+    const nowMs = Date.now();
+    const next = createInitialQuotaState(key, this.staticConfigs.get(key), nowMs);
+    this.quotaStates.set(key, next);
+    try {
+      await saveProviderQuotaSnapshot(this.toSnapshotObject(), new Date(nowMs));
+    } catch {
+      // ignore persistence failure
+    }
+    return { providerKey: key, state: next };
+  }
+
+  async recoverProvider(providerKey: string): Promise<{ providerKey: string; state: QuotaState } | null> {
+    const key = typeof providerKey === 'string' ? providerKey.trim() : '';
+    if (!key) {
+      return null;
+    }
+    const nowMs = Date.now();
+    const previous =
+      this.quotaStates.get(key) ??
+      createInitialQuotaState(key, this.staticConfigs.get(key), nowMs);
+    const next: QuotaState = {
+      ...previous,
+      inPool: true,
+      reason: 'ok',
+      cooldownUntil: null,
+      blacklistUntil: null,
+      lastErrorSeries: null,
+      consecutiveErrorCount: 0
+    };
+    this.quotaStates.set(key, next);
+    try {
+      await saveProviderQuotaSnapshot(this.toSnapshotObject(), new Date(nowMs));
+    } catch {
+      // ignore persistence failure
+    }
+    return { providerKey: key, state: next };
+  }
+
+  async disableProvider(options: {
+    providerKey: string;
+    mode: 'cooldown' | 'blacklist';
+    durationMs: number;
+  }): Promise<{ providerKey: string; state: QuotaState } | null> {
+    const key = typeof options?.providerKey === 'string' ? options.providerKey.trim() : '';
+    if (!key) {
+      return null;
+    }
+    const durationMs =
+      typeof options.durationMs === 'number' && Number.isFinite(options.durationMs) && options.durationMs > 0
+        ? Math.floor(options.durationMs)
+        : 0;
+    if (!durationMs) {
+      return null;
+    }
+    const mode = options.mode === 'blacklist' ? 'blacklist' : 'cooldown';
+    const nowMs = Date.now();
+    const previous =
+      this.quotaStates.get(key) ??
+      createInitialQuotaState(key, this.staticConfigs.get(key), nowMs);
+    const next: QuotaState =
+      mode === 'blacklist'
+        ? {
+          ...previous,
+          inPool: false,
+          reason: 'blacklist',
+          blacklistUntil: nowMs + durationMs,
+          cooldownUntil: null
+        }
+        : {
+          ...previous,
+          inPool: false,
+          reason: 'cooldown',
+          cooldownUntil: nowMs + durationMs
+        };
+    this.quotaStates.set(key, next);
+    try {
+      await saveProviderQuotaSnapshot(this.toSnapshotObject(), new Date(nowMs));
+    } catch {
+      // ignore persistence failure
+    }
+    return { providerKey: key, state: next };
+  }
+
   getAdminSnapshot(): Record<string, QuotaState> {
     return this.toSnapshotObject();
   }

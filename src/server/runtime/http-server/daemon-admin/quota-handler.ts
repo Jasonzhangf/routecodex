@@ -85,6 +85,90 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
     }
   });
 
+  app.post('/quota/providers/:providerKey/reset', async (req: Request, res: Response) => {
+    if (rejectNonLocalOrUnauthorizedAdmin(req, res, options.getExpectedApiKey?.())) return;
+    const providerKey = String(req.params.providerKey || '').trim();
+    if (!providerKey) {
+      res.status(400).json({ error: { message: 'providerKey is required', code: 'bad_request' } });
+      return;
+    }
+    const mod = getProviderQuotaModule(options) as
+      | (ProviderQuotaDaemonModule & { resetProvider?: (providerKey: string) => Promise<unknown> })
+      | null;
+    if (!mod || typeof (mod as any).resetProvider !== 'function') {
+      res.status(503).json({ error: { message: 'provider-quota module not available', code: 'not_ready' } });
+      return;
+    }
+    try {
+      const result = await (mod as any).resetProvider(providerKey);
+      res.status(200).json({ ok: true, providerKey, action: 'reset', result });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ error: { message, code: 'quota_provider_reset_failed' } });
+    }
+  });
+
+  app.post('/quota/providers/:providerKey/recover', async (req: Request, res: Response) => {
+    if (rejectNonLocalOrUnauthorizedAdmin(req, res, options.getExpectedApiKey?.())) return;
+    const providerKey = String(req.params.providerKey || '').trim();
+    if (!providerKey) {
+      res.status(400).json({ error: { message: 'providerKey is required', code: 'bad_request' } });
+      return;
+    }
+    const mod = getProviderQuotaModule(options) as
+      | (ProviderQuotaDaemonModule & { recoverProvider?: (providerKey: string) => Promise<unknown> })
+      | null;
+    if (!mod || typeof (mod as any).recoverProvider !== 'function') {
+      res.status(503).json({ error: { message: 'provider-quota module not available', code: 'not_ready' } });
+      return;
+    }
+    try {
+      const result = await (mod as any).recoverProvider(providerKey);
+      res.status(200).json({ ok: true, providerKey, action: 'recover', result });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ error: { message, code: 'quota_provider_recover_failed' } });
+    }
+  });
+
+  app.post('/quota/providers/:providerKey/disable', async (req: Request, res: Response) => {
+    if (rejectNonLocalOrUnauthorizedAdmin(req, res, options.getExpectedApiKey?.())) return;
+    const providerKey = String(req.params.providerKey || '').trim();
+    if (!providerKey) {
+      res.status(400).json({ error: { message: 'providerKey is required', code: 'bad_request' } });
+      return;
+    }
+    const body = req.body as Record<string, unknown>;
+    const modeRaw = typeof body?.mode === 'string' ? String(body.mode).trim().toLowerCase() : 'cooldown';
+    const mode = modeRaw === 'blacklist' ? 'blacklist' : 'cooldown';
+    const durationMinutesRaw = typeof body?.durationMinutes === 'number' ? body.durationMinutes : Number.NaN;
+    const durationMsRaw = typeof body?.durationMs === 'number' ? body.durationMs : Number.NaN;
+    const durationMs =
+      Number.isFinite(durationMsRaw) && durationMsRaw > 0
+        ? Math.floor(durationMsRaw)
+        : Number.isFinite(durationMinutesRaw) && durationMinutesRaw > 0
+          ? Math.floor(durationMinutesRaw * 60_000)
+          : 0;
+    if (!durationMs) {
+      res.status(400).json({ error: { message: 'durationMs or durationMinutes is required', code: 'bad_request' } });
+      return;
+    }
+    const mod = getProviderQuotaModule(options) as
+      | (ProviderQuotaDaemonModule & { disableProvider?: (options: any) => Promise<unknown> })
+      | null;
+    if (!mod || typeof (mod as any).disableProvider !== 'function') {
+      res.status(503).json({ error: { message: 'provider-quota module not available', code: 'not_ready' } });
+      return;
+    }
+    try {
+      const result = await (mod as any).disableProvider({ providerKey, mode, durationMs });
+      res.status(200).json({ ok: true, providerKey, action: 'disable', mode, durationMs, result });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ error: { message, code: 'quota_provider_disable_failed' } });
+    }
+  });
+
   app.get('/quota/runtime', (req: Request, res: Response) => {
     if (rejectNonLocalOrUnauthorizedAdmin(req, res, options.getExpectedApiKey?.())) return;
     const runtimeKey = typeof req.query.runtimeKey === 'string' ? req.query.runtimeKey : undefined;
