@@ -1,5 +1,81 @@
 # RouteCodex Mock 测试覆盖计划
 
+---
+
+# CI/CD 从零构建计划（基于现有模块 + regression）
+
+> 目的：把“本地可验证”的 build/test/regression 变成可重复、可审计的 CI 门禁，并为 release（`@jsonstudio/rcc`）提供可控的 CD 流水线。
+
+## 现状盘点（已验证）
+
+- 现有 CI：`.github/workflows/test.yml` 仅跑 sharedmodule 部分测试（4 个 spec），未覆盖主包 `npm test`（含 `mock:regressions`）。
+- 本仓库可复用的验证脚本（来自 `package.json`）：
+  - `npm run build:min`：构建 `dist/`（不包含 dev 全验证栈）
+  - `npm run test`：`test:routing-instructions` + `mock:regressions`
+  - `npm run lint:strict` / `npm run format:check`：静态检查
+  -（重型）`npm run build:dev`：包含大量 verify + `install:global`，不适合作为 CI 默认门禁（会改全局环境）
+
+## 设计原则（与 Working Agreement 对齐）
+
+- CI 只做“验证”，不做“修复/回退/热补丁”；失败必须 fail fast。
+- 不在 CI 中做全局安装（`install:global` / `install:release`），避免污染 runner。
+- 不提交/不缓存进 git：`dist/`、tarball、token、OAuth 凭据、`~/.routecodex` 运行态数据。
+- 分层验证：PR 门禁用 deterministic + offline 回归；nightly 才跑长耗时/联网 smoke（可选）。
+
+## 任务拆解（用此文件跟踪）
+
+### Phase 0：明确 CI 门禁范围
+
+- [ ] 列出 PR 必跑项（建议：`npm ci` + `npm run build:min` + `npm run test` + `npm run lint:strict` + `npm run format:check`）。
+- [ ] 决定 Node 版本策略（建议：Node 20 为主；是否加 Node 18 matrix）。
+- [ ] 明确哪些脚本允许联网（默认：`mock:regressions`/单元测试必须离线；联网 smoke 放 nightly）。
+
+### Phase 1：搭建 CI（PR/push）
+
+- [ ] 新增/重构 GitHub Actions：`.github/workflows/ci.yml`
+  - [ ] job: `ci`（最小门禁）：
+    - [ ] `actions/checkout@v4`
+    - [ ] `actions/setup-node@v4`（cache npm）
+    - [ ] `npm ci`
+    - [ ] `npm run build:min`
+    - [ ] `npm run test`（含 regression）
+  - [ ] job: `lint`（可并行）：
+    - [ ] `npm ci`
+    - [ ] `npm run lint:strict`
+    - [ ] `npm run format:check`
+  - [ ] 加 `concurrency` 防止同分支并发浪费 runner
+  - [ ] 失败时上传必要的 debug artifact（仅测试输出，不含密钥）
+- [ ] 替换/合并现有 `.github/workflows/test.yml`（避免重复跑、避免漏跑）。
+- [ ] 在 README 加 CI badge（可选）。
+
+### Phase 2：增强一致性/可维护性
+
+- [ ] 增加 `npm run ci`（聚合上面 CI 步骤，便于本地复现）。
+- [ ] 让 sharedmodule 测试并入同一套 CI（保留原来的 spec，但纳入统一 job）。
+- [ ] 对“是否需要构建 sharedmodule dist”给出明确策略：
+  - [ ] 若 PR 触及 `sharedmodule/llmswitch-core/src/**`，则在 CI 中先在该目录 `npm ci && npm run build && npm test`（或现有矩阵脚本）。
+  - [ ] 未触及 sharedmodule，则只跑主包测试。
+
+### Phase 3：CD（release 仅针对 `@jsonstudio/rcc`，routecodex 不发布）
+
+- [ ] 新增 `.github/workflows/release-rcc.yml`
+  - [ ] 触发：tag（如 `rcc-v*`）或手动 workflow_dispatch
+  - [ ] `BUILD_MODE=release npm run build:min`（或 `npm run build`，视 pack 脚本需要）
+  - [ ] `node scripts/pack-mode.mjs --name @jsonstudio/rcc --bin rcc`
+  - [ ] 上传产物 `jsonstudio-rcc-*.tgz` 到 GitHub Actions artifact / GitHub Release assets
+  - [ ]（可选）有 `NPM_TOKEN` 才执行 `npm publish`，否则只产出 tarball
+- [ ] 明确版本策略（tag 驱动 vs package.json 驱动，避免构建自动 bump 影响可追溯性）。
+
+### Phase 4：Nightly（可选）
+
+- [ ] nightly 跑长耗时检查：`npm run test:comprehensive` / `npm audit` / `depcheck`（挑选对你们最有价值的 1-2 项起步）。
+- [ ] nightly 可跑“联网 smoke”（例如 provider 兼容探测），但必须：
+  - [ ] 使用 GitHub Secrets 注入 token
+  - [ ] 严格遮蔽日志中的 Authorization
+  - [ ] 不写入 repo、不写入 artifact
+
+---
+
 ## 背景
 
 完善 mock-provider 回归覆盖，确保工具调用与协议兼容在 CI 前可验证。
