@@ -553,41 +553,12 @@ export class HttpTransportProvider extends BaseProvider {
     const normalized = { ...headers };
     const acceptKey = Object.keys(normalized).find((key) => key.toLowerCase() === 'accept');
 
-    // GLM: 强制使用 JSON 响应，不透传客户端的 SSE Accept，避免出现
-    // “Accept: text/event-stream 但 body 无 stream 标记”的组合。
-    // 说明：
-    // - providerFamily 通过 runtime profile / providerId 表达（例如 'glm'、'qwen' 等）；
-    // - 这里只特殊处理 GLM，其它家族保持现有逻辑不变。
-    try {
-      const runtime = this.getRuntimeProfile();
-      const providerFamilyRaw =
-        (runtime && typeof runtime.providerFamily === 'string' && runtime.providerFamily) ||
-        (runtime && typeof runtime.providerId === 'string' && runtime.providerId) ||
-        (typeof (this.config.config as { providerId?: unknown }).providerId === 'string'
-          ? (this.config.config as { providerId?: string }).providerId
-          : '');
-      const providerFamily = providerFamilyRaw ? providerFamilyRaw.toLowerCase() : '';
-      if (providerFamily === 'glm') {
-        if (acceptKey) {
-          delete normalized[acceptKey];
-        }
-        normalized['Accept'] = wantsSse ? 'text/event-stream' : 'application/json';
-        return normalized;
-      }
-    } catch {
-      // provider family detection is best-effort; fall through to default behavior on failure
+    // 上游 Accept 必须由我们“上游是否走 SSE”来决定；不能透传客户端的 SSE Accept。
+    // 否则会出现 “Accept: text/event-stream 但 body 无 stream 标记” 的组合（部分上游会返回 406）。
+    if (acceptKey) {
+      delete normalized[acceptKey];
     }
-
-    if (wantsSse) {
-      if (acceptKey) {
-        delete normalized[acceptKey];
-      }
-      normalized['Accept'] = 'text/event-stream';
-      return normalized;
-    }
-    if (!acceptKey) {
-      normalized['Accept'] = 'application/json';
-    }
+    normalized['Accept'] = wantsSse ? 'text/event-stream' : 'application/json';
     return normalized;
   }
 
