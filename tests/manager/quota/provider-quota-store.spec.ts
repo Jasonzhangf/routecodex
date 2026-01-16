@@ -9,20 +9,34 @@ import {
 import { createInitialQuotaState } from '../../../src/manager/quota/provider-quota-center.js';
 
 function quotaDir(): string {
-  const home = os.homedir();
-  return path.join(home, '.routecodex', 'quota');
+  const configured = String(process.env.ROUTECODEX_QUOTA_DIR || '').trim();
+  if (!configured) {
+    throw new Error('ROUTECODEX_QUOTA_DIR must be set for tests');
+  }
+  return configured;
 }
 
 describe('provider-quota-store snapshot', () => {
   const providerKey = 'test.provider.key';
+  const originalQuotaDir = process.env.ROUTECODEX_QUOTA_DIR;
+  let tempDir: string | null = null;
+
+  beforeEach(async () => {
+    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-quota-test-'));
+    process.env.ROUTECODEX_QUOTA_DIR = tempDir;
+  });
 
   afterEach(async () => {
-    const dir = quotaDir();
     try {
-      await fs.rm(dir, { recursive: true, force: true });
+      if (tempDir) {
+        await fs.rm(tempDir, { recursive: true, force: true });
+      }
     } catch {
       // ignore cleanup errors
     }
+    tempDir = null;
+    if (originalQuotaDir === undefined) delete process.env.ROUTECODEX_QUOTA_DIR;
+    else process.env.ROUTECODEX_QUOTA_DIR = originalQuotaDir;
   });
 
   it('saves and loads provider quota snapshot roundtrip', async () => {
@@ -42,13 +56,25 @@ describe('provider-quota-store snapshot', () => {
 });
 
 describe('provider-quota-store error event log', () => {
+  const originalQuotaDir = process.env.ROUTECODEX_QUOTA_DIR;
+  let tempDir: string | null = null;
+
+  beforeEach(async () => {
+    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-quota-test-'));
+    process.env.ROUTECODEX_QUOTA_DIR = tempDir;
+  });
+
   afterEach(async () => {
-    const dir = quotaDir();
     try {
-      await fs.rm(dir, { recursive: true, force: true });
+      if (tempDir) {
+        await fs.rm(tempDir, { recursive: true, force: true });
+      }
     } catch {
       // ignore cleanup errors
     }
+    tempDir = null;
+    if (originalQuotaDir === undefined) delete process.env.ROUTECODEX_QUOTA_DIR;
+    else process.env.ROUTECODEX_QUOTA_DIR = originalQuotaDir;
   });
 
   it('appends error events as ndjson', async () => {

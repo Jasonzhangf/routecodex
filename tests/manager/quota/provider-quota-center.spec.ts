@@ -37,31 +37,18 @@ describe('provider-quota-center error handling', () => {
     expect(state.blacklistUntil).toBeNull();
     expect(state.consecutiveErrorCount).toBe(2);
 
-    // third 429 -> 5 minutes cooldown
+    // third 429 -> 3h blacklist
     const thirdNow = secondNow + 10_000;
     state = applyErrorEvent(
       state,
       { providerKey, httpStatus: 429 },
       thirdNow
     );
-    expect(state.reason).toBe('cooldown');
-    expect(state.inPool).toBe(false);
-    expect(state.blacklistUntil).toBeNull();
-    expect(state.cooldownUntil).toBe(thirdNow + 5 * 60_000);
-    expect(state.consecutiveErrorCount).toBe(3);
-
-    // fourth 429 -> 3h blacklist
-    const fourthNow = thirdNow + 10_000;
-    state = applyErrorEvent(
-      state,
-      { providerKey, httpStatus: 429 },
-      fourthNow
-    );
     expect(state.reason).toBe('blacklist');
     expect(state.inPool).toBe(false);
-    expect(state.blacklistUntil).toBe(fourthNow + 3 * 60 * 60_000);
+    expect(state.blacklistUntil).toBe(thirdNow + 3 * 60 * 60_000);
     expect(state.cooldownUntil).toBeNull();
-    expect(state.consecutiveErrorCount).toBe(4);
+    expect(state.consecutiveErrorCount).toBe(3);
   });
 
   it('loops 1/3/5 minute cooldown for network errors (no long blacklist)', () => {
@@ -104,13 +91,8 @@ describe('provider-quota-center error handling', () => {
 
     const thirdNow = secondNow + 10_000;
     state = applyErrorEvent(state, { providerKey, code: 'E_UNKNOWN' }, thirdNow);
-    expect(state.reason).toBe('cooldown');
-    expect(state.cooldownUntil).toBe(thirdNow + 5 * 60_000);
-
-    const fourthNow = thirdNow + 10_000;
-    state = applyErrorEvent(state, { providerKey, code: 'E_UNKNOWN' }, fourthNow);
     expect(state.reason).toBe('blacklist');
-    expect(state.blacklistUntil).toBe(fourthNow + 60 * 60_000);
+    expect(state.blacklistUntil).toBe(thirdNow + 60 * 60_000);
     expect(state.cooldownUntil).toBeNull();
   });
 
@@ -229,5 +211,45 @@ describe('provider-quota-center usage and window handling', () => {
     );
     expect(state.reason).toBe('quotaDepleted');
     expect(state.totalTokensUsed).toBeGreaterThan(150);
+  });
+
+  it('does not recover quotaDepleted while cooldown is active (even after window reset)', () => {
+    const baseNow = 30_000;
+    let state = createInitialQuotaState(providerKey, { rateLimitPerMinute: 1 }, baseNow);
+
+    state = applyUsageEvent(state, { providerKey }, baseNow + 1_000);
+    expect(state.reason).toBe('ok');
+
+    state = applyUsageEvent(state, { providerKey }, baseNow + 2_000);
+    expect(state.reason).toBe('quotaDepleted');
+    expect(state.inPool).toBe(false);
+
+    // Simulate an upstream deterministic cooldown window (e.g. quota exhausted until reset).
+    state = {
+      ...state,
+      cooldownUntil: baseNow + 5 * 60_000
+    };
+
+    // Advance beyond window but still within cooldown.
+    const nextWindowNow = baseNow + 70_000;
+    state = tickQuotaStateTime(state, nextWindowNow);
+    expect(state.inPool).toBe(false);
+    expect(state.reason).toBe('quotaDepleted');
+    expect(state.cooldownUntil).toBe(baseNow + 5 * 60_000);
+  });
+
+  it('repairs inconsistent snapshots where inPool=true but cooldown is still active', () => {
+    const baseNow = 40_000;
+    const cooldownUntil = baseNow + 10 * 60_000;
+    const state: any = {
+      ...createInitialQuotaState(providerKey, {}, baseNow),
+      inPool: true,
+      reason: 'ok',
+      cooldownUntil
+    };
+    const ticked = tickQuotaStateTime(state, baseNow + 60_000);
+    expect(ticked.inPool).toBe(false);
+    expect(ticked.reason).toBe('cooldown');
+    expect(ticked.cooldownUntil).toBe(cooldownUntil);
   });
 });

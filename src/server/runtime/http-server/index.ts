@@ -776,24 +776,51 @@ export class RouteCodexHttpServer {
       | { registerProviderStaticConfig?: (providerKey: string, config: { authType?: string | null; priorityTier?: number | null }) => void }
       | undefined;
 
+    // Multiple providerKeys may share the same runtimeKey (single provider handle with multiple models).
+    // Quota is tracked by providerKey, so we need a stable way to derive authType for every key,
+    // even when the handle has already been created for this runtimeKey.
+    const runtimeKeyAuthType = new Map<string, string | null>();
+
     for (const [providerKey, runtime] of Object.entries(runtimeMap)) {
       if (!runtime) { continue; }
       const runtimeKey = runtime.runtimeKey || providerKey;
+
+      const authTypeFromRuntime =
+        runtime && (runtime as any).auth && typeof (runtime as any).auth.type === 'string'
+          ? String((runtime as any).auth.type).trim()
+          : null;
+
       if (!this.providerHandles.has(runtimeKey)) {
         const resolvedRuntime = await this.materializeRuntimeProfile(runtime);
         const patchedRuntime = this.applyProviderProfileOverrides(resolvedRuntime);
         try {
-          const authType =
+          const authTypeFromPatched =
             patchedRuntime && patchedRuntime.auth && typeof (patchedRuntime.auth as { type?: unknown }).type === 'string'
               ? String((patchedRuntime.auth as { type?: string }).type).trim()
               : null;
-          quotaModule?.registerProviderStaticConfig?.(providerKey, { authType });
+          if (authTypeFromPatched) {
+            runtimeKeyAuthType.set(runtimeKey, authTypeFromPatched);
+          } else if (authTypeFromRuntime) {
+            runtimeKeyAuthType.set(runtimeKey, authTypeFromRuntime);
+          } else if (!runtimeKeyAuthType.has(runtimeKey)) {
+            runtimeKeyAuthType.set(runtimeKey, null);
+          }
         } catch {
-          // best-effort: quota static config registration must never block runtime init
+          // ignore authType derivation failures
         }
         const handle = await this.createProviderHandle(runtimeKey, patchedRuntime);
         this.providerHandles.set(runtimeKey, handle);
       }
+
+      // Register static quota metadata for every providerKey (not just per runtimeKey).
+      // Use the runtimeKey authType when available so shared runtimeKey models inherit correct policy.
+      try {
+        const authType = runtimeKeyAuthType.get(runtimeKey) ?? authTypeFromRuntime;
+        quotaModule?.registerProviderStaticConfig?.(providerKey, { authType: authType ?? null });
+      } catch {
+        // best-effort: quota static config registration must never block runtime init
+      }
+
       this.providerKeyToRuntimeKey.set(providerKey, runtimeKey);
     }
   }

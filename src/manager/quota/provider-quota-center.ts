@@ -58,7 +58,7 @@ const COOLDOWN_SCHEDULE_MS = [1 * 60_000, 3 * 60_000, 5 * 60_000] as const;
 const BLACKLIST_MAX_MS = 6 * 60 * 60_000;
 const BLACKLIST_1H_MS = 60 * 60_000;
 const BLACKLIST_3H_MS = 3 * 60 * 60_000;
-const BLACKLIST_THRESHOLD_DEFAULT = 4;
+const BLACKLIST_THRESHOLD_DEFAULT = 3;
 
 const NETWORK_ERROR_CODES = ['ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EAI_AGAIN'];
 
@@ -364,6 +364,23 @@ export function applyUsageEvent(
 export function tickQuotaStateTime(state: QuotaState, nowMs: number): QuotaState {
   let next = state;
 
+  // Guard: persisted snapshots may carry inconsistent flags (e.g. `inPool: true` while cooldown is still active)
+  // due to legacy window reset behavior. Ensure active cooldown/blacklist always removes the provider from pool.
+  const withinBlacklist = next.blacklistUntil !== null && nowMs < next.blacklistUntil;
+  const withinCooldown = next.cooldownUntil !== null && nowMs < next.cooldownUntil;
+  if ((withinBlacklist || withinCooldown) && next.inPool) {
+    next = {
+      ...next,
+      inPool: false,
+      reason:
+        withinBlacklist
+          ? 'blacklist'
+          : withinCooldown && next.reason === 'ok'
+          ? 'cooldown'
+          : next.reason
+    };
+  }
+
   // 冷却与黑名单窗口到期处理。
   if (next.blacklistUntil !== null && nowMs >= next.blacklistUntil) {
     next = {
@@ -398,7 +415,9 @@ export function tickQuotaStateTime(state: QuotaState, nowMs: number): QuotaState
         resetState.totalTokenLimit !== null &&
         resetState.totalTokenLimit >= 0 &&
         resetState.totalTokensUsed > resetState.totalTokenLimit;
-      if (!hasHardTotalLimit) {
+      const stillCoolingDown = resetState.cooldownUntil !== null && nowMs < resetState.cooldownUntil;
+      const stillBlacklisted = resetState.blacklistUntil !== null && nowMs < resetState.blacklistUntil;
+      if (!hasHardTotalLimit && !stillCoolingDown && !stillBlacklisted) {
         return {
           ...resetState,
           inPool: true,

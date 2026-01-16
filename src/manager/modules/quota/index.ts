@@ -487,33 +487,88 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
   private maintenanceTimer: NodeJS.Timeout | null = null;
   private persistTimer: NodeJS.Timeout | null = null;
 
+  private async loadSnapshotIntoMemory(): Promise<void> {
+    // Always clear in-memory state first so operator actions like deleting provider-quota.json
+    // take effect immediately after a reload.
+    this.quotaStates = new Map();
+
+    const snapshot = await loadProviderQuotaSnapshot();
+    if (snapshot && snapshot.providers && typeof snapshot.providers === 'object') {
+      for (const [providerKey, state] of Object.entries(snapshot.providers)) {
+        if (state && typeof state === 'object') {
+          this.quotaStates.set(providerKey, normalizeLoadedQuotaState(providerKey, state as QuotaState));
+        }
+      }
+    }
+
+    if (this.quotaStates.size) {
+      const nowMs = Date.now();
+      let changed = false;
+      for (const [providerKey, state] of this.quotaStates.entries()) {
+        const next = tickQuotaStateTime(state, nowMs);
+        if (next !== state) {
+          this.quotaStates.set(providerKey, next);
+          changed = true;
+        }
+      }
+      if (changed) {
+        this.schedulePersist(nowMs);
+      }
+    }
+
+    // Ensure we always have default entries for known providers (seeded via static configs),
+    // so deleting the snapshot file doesn't permanently "hide" providers from admin views.
+    if (this.staticConfigs.size) {
+      const nowMs = Date.now();
+      let seeded = false;
+      for (const [providerKey, cfg] of this.staticConfigs.entries()) {
+        if (this.quotaStates.has(providerKey)) {
+          continue;
+        }
+        this.quotaStates.set(providerKey, createInitialQuotaState(providerKey, cfg, nowMs));
+        seeded = true;
+      }
+      if (seeded) {
+        this.schedulePersist(nowMs);
+      }
+    }
+  }
+
   async init(_context: ManagerContext): Promise<void> {
     try {
-      const snapshot = await loadProviderQuotaSnapshot();
-      if (snapshot && snapshot.providers && typeof snapshot.providers === 'object') {
-        for (const [providerKey, state] of Object.entries(snapshot.providers)) {
-          if (state && typeof state === 'object') {
-            this.quotaStates.set(providerKey, normalizeLoadedQuotaState(providerKey, state as QuotaState));
-          }
-        }
-      }
-      if (this.quotaStates.size) {
-        const nowMs = Date.now();
-        let changed = false;
-        for (const [providerKey, state] of this.quotaStates.entries()) {
-          const next = tickQuotaStateTime(state, nowMs);
-          if (next !== state) {
-            this.quotaStates.set(providerKey, next);
-            changed = true;
-          }
-        }
-        if (changed) {
-          this.schedulePersist(nowMs);
-        }
-      }
+      await this.loadSnapshotIntoMemory();
     } catch {
       this.quotaStates = new Map();
     }
+  }
+
+  async reloadFromDisk(): Promise<{ loadedAt: number; providerCount: number }> {
+    await this.loadSnapshotIntoMemory();
+    return { loadedAt: Date.now(), providerCount: this.quotaStates.size };
+  }
+
+  async reset(options: { persist?: boolean } = {}): Promise<{ resetAt: number; persisted: boolean }> {
+    const nowMs = Date.now();
+    this.quotaStates = new Map();
+    // Rebuild default quota entries for known providers so routing can recover immediately.
+    if (this.staticConfigs.size) {
+      for (const [providerKey, cfg] of this.staticConfigs.entries()) {
+        this.quotaStates.set(providerKey, createInitialQuotaState(providerKey, cfg, nowMs));
+      }
+    }
+    const persisted = options.persist !== false;
+    if (persisted) {
+      try {
+        await saveProviderQuotaSnapshot(this.toSnapshotObject(), new Date(nowMs));
+      } catch {
+        // ignore persistence failure
+      }
+    }
+    return { resetAt: nowMs, persisted };
+  }
+
+  getAdminSnapshot(): Record<string, QuotaState> {
+    return this.toSnapshotObject();
   }
 
   async start(): Promise<void> {
@@ -528,7 +583,9 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
     }
     if (center && typeof center.subscribe === 'function') {
       this.unsubscribe = center.subscribe((event: ProviderErrorEvent) => {
-        void this.handleProviderErrorEvent(event);
+        void this.handleProviderErrorEvent(event).catch(() => {
+          // swallow handler errors to avoid unhandled rejection noise; quota updates are best-effort
+        });
       });
     }
 
@@ -630,6 +687,7 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
       authType
     };
     this.staticConfigs.set(key, staticConfig);
+    const nowMs = Date.now();
     const existing = this.quotaStates.get(key);
     if (existing) {
       this.quotaStates.set(key, {
@@ -637,7 +695,14 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
         authType,
         ...(typeof staticConfig.priorityTier === 'number' ? { priorityTier: staticConfig.priorityTier } : {})
       });
+      return;
     }
+
+    // If snapshot is missing (or operator cleared it), we still want a predictable default:
+    // API-key providers start "inPool: true" with unlimited quota until errors are observed.
+    // We persist (debounced) so admin tools can inspect the pool quickly after startup.
+    this.quotaStates.set(key, createInitialQuotaState(key, staticConfig, nowMs));
+    this.schedulePersist(nowMs);
   }
 
   private async handleProviderErrorEvent(event: ProviderErrorEvent): Promise<void> {

@@ -19,9 +19,12 @@ export interface ProviderErrorEventRecord {
 }
 
 function resolveQuotaDir(): string {
+  const override = String(process.env.ROUTECODEX_QUOTA_DIR || process.env.RCC_QUOTA_DIR || '').trim();
+  if (override) {
+    return path.isAbsolute(override) ? override : path.resolve(process.cwd(), override);
+  }
   const home = os.homedir();
-  const base = path.join(home, '.routecodex', 'quota');
-  return base;
+  return path.join(home, '.routecodex', 'quota');
 }
 
 function resolveQuotaSnapshotPath(): string {
@@ -106,4 +109,3 @@ export async function appendProviderErrorEvent(event: ProviderErrorEventRecord):
     // 追加失败不影响主流程
   }
 }
-

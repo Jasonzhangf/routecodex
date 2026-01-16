@@ -3,6 +3,7 @@ import type { DaemonAdminRouteOptions } from '../daemon-admin-routes.js';
 import { rejectNonLocalOrUnauthorizedAdmin } from '../daemon-admin-routes.js';
 import type { ManagerModule } from '../../../../manager/types.js';
 import type { QuotaManagerModule, QuotaRecord } from '../../../../manager/modules/quota/index.js';
+import type { ProviderQuotaDaemonModule } from '../../../../manager/modules/quota/index.js';
 
 function getQuotaModule(options: DaemonAdminRouteOptions): QuotaManagerModule | null {
   const daemon = options.getManagerDaemon() as
@@ -18,6 +19,24 @@ function getQuotaModule(options: DaemonAdminRouteOptions): QuotaManagerModule | 
     return null;
   }
   return mod as unknown as QuotaManagerModule;
+}
+
+function getProviderQuotaModule(options: DaemonAdminRouteOptions): ProviderQuotaDaemonModule | null {
+  const daemon = options.getManagerDaemon() as
+    | {
+        getModule?: (id: string) => ManagerModule | undefined;
+      }
+    | null;
+  if (!daemon) {
+    return null;
+  }
+  const mod = typeof daemon.getModule === 'function'
+    ? (daemon.getModule('provider-quota') as ManagerModule | undefined)
+    : undefined;
+  if (!mod) {
+    return null;
+  }
+  return mod as unknown as ProviderQuotaDaemonModule;
 }
 
 export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteOptions): void {
@@ -36,6 +55,30 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
         updatedAt: Date.now(),
         records
       });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ error: { message } });
+    }
+  });
+
+  app.get('/quota/providers', (req: Request, res: Response) => {
+    if (rejectNonLocalOrUnauthorizedAdmin(req, res, options.getExpectedApiKey?.())) return;
+    try {
+      const mod = getProviderQuotaModule(options);
+      const snapshot = mod && typeof (mod as any).getAdminSnapshot === 'function'
+        ? (mod as any).getAdminSnapshot()
+        : {};
+      const providers = Object.values(snapshot).map((state: any) => ({
+        providerKey: state.providerKey,
+        inPool: Boolean(state.inPool),
+        reason: state.reason ?? null,
+        authType: state.authType ?? null,
+        priorityTier: typeof state.priorityTier === 'number' ? state.priorityTier : null,
+        cooldownUntil: state.cooldownUntil ?? null,
+        blacklistUntil: state.blacklistUntil ?? null,
+        consecutiveErrorCount: typeof state.consecutiveErrorCount === 'number' ? state.consecutiveErrorCount : 0
+      }));
+      res.status(200).json({ updatedAt: Date.now(), providers });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       res.status(500).json({ error: { message } });

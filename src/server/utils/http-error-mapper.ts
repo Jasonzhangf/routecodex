@@ -65,6 +65,26 @@ export function mapErrorToHttp(err: unknown): HttpErrorPayload {
   const upstreamMessage = upstream.message;
   const effectiveCode = upstream.code || extractString(error.code) || 'upstream_error';
 
+  const timeoutHint = `${baseMessage} ${extractString(error.code) || ''} ${extractString(upstreamCode) || ''}`.toLowerCase();
+  if (
+    timeoutHint.includes('timeout') ||
+    timeoutHint.includes('upstream_stream_timeout') ||
+    timeoutHint.includes('upstream_stream_idle_timeout') ||
+    timeoutHint.includes('upstream_headers_timeout')
+  ) {
+    return formatPayload(504, {
+      message: upstreamMessage || baseMessage || 'Upstream request timed out',
+      code: upstreamCode || effectiveCode || 'gateway_timeout',
+      request_id: requestId,
+      provider_key: providerKey,
+      route_name: routeName,
+      provider_type: providerType,
+      upstream_status: upstream.status,
+      upstream_code: upstreamCode,
+      upstream_message: upstreamMessage
+    });
+  }
+
   if (status === 429) {
     return formatPayload(429, {
       message: 'Rate limited by upstream provider',
