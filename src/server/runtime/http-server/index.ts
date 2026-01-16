@@ -192,6 +192,10 @@ export class RouteCodexHttpServer {
           html = await fs.readFile(fallback, 'utf8');
         }
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        // Avoid stale admin UI in browsers / proxies after upgrades.
+        res.setHeader('Cache-Control', 'no-store, max-age=0');
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('X-RouteCodex-Version', String(process.env.ROUTECODEX_VERSION || 'dev'));
         res.send(html);
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error);
