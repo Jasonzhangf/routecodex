@@ -146,6 +146,7 @@ async function captureFailure({
   captureState,
 }) {
   if (isContextMismatchReason(reason)) return;
+  if (captureState?.reasonAllowList && !captureState.reasonAllowList.has(reason)) return;
   if (!destRoot) return;
 
   const totalLimit = captureState.totalLimit ?? DEFAULT_CAPTURE_TOTAL_LIMIT;
@@ -289,11 +290,26 @@ async function main() {
   const captureRoot = process.env.ROUTECODEX_ERRORSAMPLES_DIR || ERROR_SAMPLES_ROOT;
   const totalLimit = Number.parseInt(process.env.ROUTECODEX_CAPTURE_TOTAL_LIMIT || '', 10);
   const perReasonLimit = Number.parseInt(process.env.ROUTECODEX_CAPTURE_PER_REASON_LIMIT || '', 10);
+  const reasonsArg = process.argv
+    .slice(2)
+    .find((arg) => arg.startsWith('--capture-reasons='))
+    ?.split('=')[1];
+  const reasonsEnv = process.env.ROUTECODEX_CAPTURE_REASONS;
+  const reasonAllowListRaw = (reasonsArg || reasonsEnv || '').trim();
+  const reasonAllowList = reasonAllowListRaw
+    ? new Set(
+        reasonAllowListRaw
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean)
+      )
+    : null;
   const captureState = {
     totalCaptured: 0,
     totalLimit: Number.isFinite(totalLimit) ? totalLimit : DEFAULT_CAPTURE_TOTAL_LIMIT,
     perReasonLimit: Number.isFinite(perReasonLimit) ? perReasonLimit : DEFAULT_CAPTURE_PER_REASON_LIMIT,
     byReason: new Map(),
+    reasonAllowList,
   };
 
   const repo = await scanRoot('repo samples/ci-goldens', REPO_GOLDENS_ROOT, validateToolCall, {
