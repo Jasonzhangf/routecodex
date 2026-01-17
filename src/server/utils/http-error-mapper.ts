@@ -65,6 +65,23 @@ export function mapErrorToHttp(err: unknown): HttpErrorPayload {
   const upstreamMessage = upstream.message;
   const effectiveCode = upstream.code || extractString(error.code) || 'upstream_error';
 
+  // Protocol/shape errors produced by our bridge/pipeline should be treated as client errors.
+  // (e.g. /v1/responses with invalid payload shape)
+  const normalizedCode = String(effectiveCode || '').trim().toUpperCase();
+  if (normalizedCode === 'MALFORMED_REQUEST') {
+    return formatPayload(400, {
+      message: upstreamMessage || baseMessage || 'Malformed request',
+      code: 'MALFORMED_REQUEST',
+      request_id: requestId,
+      provider_key: providerKey,
+      route_name: routeName,
+      provider_type: providerType,
+      upstream_status: upstream.status,
+      upstream_code: upstreamCode,
+      upstream_message: upstreamMessage
+    });
+  }
+
   const timeoutHint = `${baseMessage} ${extractString(error.code) || ''} ${extractString(upstreamCode) || ''}`.toLowerCase();
   if (
     timeoutHint.includes('timeout') ||

@@ -4,7 +4,9 @@ import { registerCredentialRoutes } from './daemon-admin/credentials-handler.js'
 import { registerQuotaRoutes } from './daemon-admin/quota-handler.js';
 import { registerProviderRoutes } from './daemon-admin/providers-handler.js';
 import { registerRestartRoutes } from './daemon-admin/restart-handler.js';
+import { registerStatsRoutes } from './daemon-admin/stats-handler.js';
 import { extractApiKeyFromRequest } from './middleware.js';
+import type { HistoricalStatsSnapshot, StatsSnapshot } from './stats-manager.js';
 
 export interface DaemonAdminRouteOptions {
   app: Application;
@@ -33,6 +35,11 @@ export interface DaemonAdminRouteOptions {
     configPath: string;
     warnings?: string[];
   }>;
+  /**
+   * 返回当前进程的 token/usage 统计（session + historical）。
+   * 由 HTTP server 负责组装；daemon-admin 仅展示。
+   */
+  getStatsSnapshot?: () => { session: StatsSnapshot; historical: HistoricalStatsSnapshot };
 }
 
 export function isLocalRequest(req: Request): boolean {
@@ -77,6 +84,9 @@ export function registerDaemonAdminRoutes(options: DaemonAdminRouteOptions): voi
 
   // Daemon / manager 状态
   registerStatusRoutes(app, options);
+
+  // Token usage / provider stats
+  registerStatsRoutes(app, options);
 
   // Credentials / token 视图
   registerCredentialRoutes(app, options);

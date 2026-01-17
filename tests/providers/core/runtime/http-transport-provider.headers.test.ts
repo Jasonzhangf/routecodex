@@ -108,7 +108,8 @@ const deps: ModuleDependencies = {
 
 async function executeProviderRequest(
   provider: TestHttpTransportProvider,
-  inboundHeaders: Record<string, string>
+  inboundHeaders: Record<string, string>,
+  runtimeMetadataExtras?: Record<string, unknown>
 ): Promise<Record<string, string>> {
   const providerRequest = {
     metadata: {
@@ -130,7 +131,8 @@ async function executeProviderRequest(
     routeName: 'test',
     metadata: {
       entryEndpoint: '/v1/responses',
-      clientHeaders: inboundHeaders
+      clientHeaders: inboundHeaders,
+      ...(runtimeMetadataExtras ?? {})
     },
     target: {
       providerKey: 'crs.key1.gpt-5.1-codex',
@@ -176,5 +178,31 @@ describe('HttpTransportProvider header propagation', () => {
     const headers = await executeProviderRequest(provider, inboundHeaders);
     expect(headers['conversation_id']).toBe('conv-789');
     expect(headers['session_id']).toBe('sess-999');
+  });
+
+  test('injects session headers from inbound metadata when client headers are missing', async () => {
+    const provider = new TestHttpTransportProvider(config, deps);
+    await provider.initialize();
+
+    const headers = await executeProviderRequest(
+      provider,
+      { accept: 'application/json' },
+      { sessionId: 'sess-meta', conversationId: 'conv-meta' }
+    );
+    expect(headers['session_id']).toBe('sess-meta');
+    expect(headers['conversation_id']).toBe('conv-meta');
+  });
+
+  test('does not override explicit client session headers with metadata session identifiers', async () => {
+    const provider = new TestHttpTransportProvider(config, deps);
+    await provider.initialize();
+
+    const headers = await executeProviderRequest(
+      provider,
+      { accept: 'application/json', session_id: 'sess-header', conversation_id: 'conv-header' },
+      { sessionId: 'sess-meta', conversationId: 'conv-meta' }
+    );
+    expect(headers['session_id']).toBe('sess-header');
+    expect(headers['conversation_id']).toBe('conv-header');
   });
 });

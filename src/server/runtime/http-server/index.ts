@@ -481,6 +481,10 @@ export class RouteCodexHttpServer {
         },
         getManagerDaemon: () => this.managerDaemon,
         getVirtualRouterArtifacts: () => this.currentRouterArtifacts,
+        getStatsSnapshot: () => ({
+          session: this.stats.snapshot(Math.round(process.uptime() * 1000)),
+          historical: this.stats.snapshotHistorical()
+        }),
         getServerId: () => `${this.config.server.host}:${this.config.server.port}`
       });
 
@@ -1012,8 +1016,8 @@ export class RouteCodexHttpServer {
       // snapshot failure should not block request path
     }
     const pipelineLabel = 'hub';
-    let iterationMetadata = initialMetadata;
-    let followupTriggered = false;
+    const iterationMetadata = initialMetadata;
+    const followupTriggered = false;
     // Provider 级别不再在单个 HTTP 请求内执行重复尝试，
     // 429/配额/熔断逻辑统一交由 llmswitch-core VirtualRouter 处理。
     const maxAttempts = 1;
@@ -1204,6 +1208,26 @@ export class RouteCodexHttpServer {
           }
         }
         this.stats.recordCompletion(input.requestId, { usage, error: false });
+
+        // 回传 session_id 和 conversation_id 到响应头（如果存在）
+        const sessionId = typeof mergedMetadata.sessionId === "string" && mergedMetadata.sessionId.trim()
+          ? mergedMetadata.sessionId.trim()
+          : undefined;
+        const conversationId = typeof mergedMetadata.conversationId === "string" && mergedMetadata.conversationId.trim()
+          ? mergedMetadata.conversationId.trim()
+          : undefined;
+
+        if (sessionId || conversationId) {
+          if (!converted.headers) {
+            converted.headers = {};
+          }
+          if (sessionId && !converted.headers["session_id"]) {
+            converted.headers["session_id"] = sessionId;
+          }
+          if (conversationId && !converted.headers["conversation_id"]) {
+            converted.headers["conversation_id"] = conversationId;
+          }
+        }
 
         return converted;
       } catch (error) {

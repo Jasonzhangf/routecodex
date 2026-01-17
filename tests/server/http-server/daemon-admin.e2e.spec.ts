@@ -166,6 +166,13 @@ describe('Daemon admin HTTP endpoints (smoke)', () => {
       expect(status.status).toBe(200);
       expect(status.body).toHaveProperty('ok', true);
 
+      const stats = await getJson(baseUrl, '/daemon/stats');
+      expect(stats.status).toBe(200);
+      expect(stats.body).toHaveProperty('ok', true);
+      expect(stats.body).toHaveProperty('session');
+      expect(stats.body).toHaveProperty('historical');
+      expect(stats.body).toHaveProperty('totals');
+
       const creds = await getJson(baseUrl, '/daemon/credentials');
       expect(creds.status).toBe(200);
       expect(Array.isArray(creds.body)).toBe(true);

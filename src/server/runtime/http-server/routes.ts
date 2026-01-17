@@ -8,6 +8,7 @@ import { reportRouteError } from '../../../error-handling/route-error-hub.js';
 import { mapErrorToHttp } from '../../utils/http-error-mapper.js';
 import { renderTokenPortalPage } from '../../../token-portal/render.js';
 import { registerDaemonAdminRoutes } from './daemon-admin-routes.js';
+import type { HistoricalStatsSnapshot, StatsSnapshot } from './stats-manager.js';
 
 interface RouteOptions {
   app: Application;
@@ -20,6 +21,7 @@ interface RouteOptions {
   getManagerDaemon?: () => unknown | null;
   getVirtualRouterArtifacts?: () => unknown | null;
   getServerId?: () => string;
+  getStatsSnapshot?: () => { session: StatsSnapshot; historical: HistoricalStatsSnapshot };
   restartRuntimeFromDisk?: () => Promise<{
     reloadedAt: number;
     configPath: string;
@@ -166,6 +168,15 @@ export function registerHttpRoutes(options: RouteOptions): void {
         ? options.getVirtualRouterArtifacts()
         : null),
     getExpectedApiKey: () => config?.server?.apikey,
+    getStatsSnapshot: () => {
+      const now = Date.now();
+      return typeof options.getStatsSnapshot === 'function'
+        ? options.getStatsSnapshot()
+        : {
+          session: { generatedAt: now, uptimeMs: 0, totals: [] },
+          historical: { generatedAt: now, snapshotCount: 0, sampleCount: 0, totals: [] }
+        };
+    },
     restartRuntimeFromDisk: options.restartRuntimeFromDisk,
     getServerId: () =>
       (typeof options.getServerId === 'function'

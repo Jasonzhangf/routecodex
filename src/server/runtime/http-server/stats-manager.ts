@@ -65,6 +65,13 @@ export interface StatsSnapshot {
   tools?: ToolStatsSnapshot;
 }
 
+export interface HistoricalStatsSnapshot {
+  generatedAt: number;
+  snapshotCount: number;
+  sampleCount: number;
+  totals: ProviderStatsView[];
+}
+
 export type StatsPersistOptions = {
   logPath?: string;
   reason?: string;
@@ -117,9 +124,9 @@ export class StatsManager {
     }
     const sample = this.inflight.get(requestId);
     if (sample) {
-      if (meta.providerKey) sample.providerKey = meta.providerKey;
-      if (meta.providerType) sample.providerType = meta.providerType;
-      if (meta.model) sample.model = meta.model;
+      if (meta.providerKey) {sample.providerKey = meta.providerKey;}
+      if (meta.providerType) {sample.providerType = meta.providerType;}
+      if (meta.model) {sample.model = meta.model;}
       return;
     }
     this.inflight.set(requestId, {
@@ -331,6 +338,23 @@ export class StatsManager {
       this.ensureHistoricalLoaded();
     }
     this.logHistoricalFromMemory();
+  }
+
+  snapshotHistorical(): HistoricalStatsSnapshot {
+    this.ensureHistoricalLoaded();
+    const totals: ProviderStatsView[] = Array.from(this.historicalBuckets.values()).map(bucket => ({
+      ...bucket,
+      averageLatencyMs: bucket.requestCount ? bucket.totalLatencyMs / bucket.requestCount : 0,
+      averagePromptTokens: bucket.requestCount ? bucket.totalPromptTokens / bucket.requestCount : 0,
+      averageCompletionTokens: bucket.requestCount ? bucket.totalCompletionTokens / bucket.requestCount : 0,
+      averageOutputTokens: bucket.requestCount ? bucket.totalOutputTokens / bucket.requestCount : 0
+    }));
+    return {
+      generatedAt: Date.now(),
+      snapshotCount: this.historicalSnapshotCount,
+      sampleCount: this.historicalSampleCount,
+      totals
+    };
   }
 
   private composeBucketKey(providerKey: string, model?: string): string {

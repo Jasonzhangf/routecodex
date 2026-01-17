@@ -354,6 +354,7 @@
 
         <div class="tabs">
           <button class="tab active" data-tab="providers">Provider Pool</button>
+          <button class="tab" data-tab="tokens">Token Stats</button>
           <button class="tab" data-tab="credentials">Auth Provider Pool</button>
           <button class="tab" data-tab="quota">Quota Pool</button>
           <button class="tab" data-tab="routing">Runtime Routing Pool</button>
@@ -486,6 +487,37 @@
               </div>
 
               <div id="providerOpLog" class="log" style="margin-top: 10px; display:none;"></div>
+            </div>
+          </div>
+        </section>
+
+        <section id="panelTokens" data-panel="tokens" style="display:none;">
+          <div class="grid">
+            <div class="card" style="box-shadow:none;">
+              <p class="section-title">Token usage (session + historical)</p>
+              <p class="section-sub">
+                Session stats reset on server restart. Historical totals are aggregated from
+                <span class="mono">~/.routecodex/logs/provider-stats.jsonl</span> (best-effort).
+              </p>
+              <div class="row" style="margin-bottom: 10px;">
+                <button id="refreshTokensBtn" class="primary">Refresh</button>
+              </div>
+              <div class="notice mono" id="tokenTotalsBox" style="white-space: pre-wrap;"></div>
+              <div class="table-wrap" style="margin-top: 10px;">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>providerKey</th>
+                      <th>model</th>
+                      <th>session req/err</th>
+                      <th>session tokens in/out/total</th>
+                      <th>historical req/err</th>
+                      <th>historical tokens in/out/total</th>
+                    </tr>
+                  </thead>
+                  <tbody id="tokensTbody"></tbody>
+                </table>
+              </div>
             </div>
           </div>
         </section>
@@ -700,6 +732,7 @@
         });
         const panels = [
           { name: "providers", el: $("panelProviders") },
+          { name: "tokens", el: $("panelTokens") },
           { name: "credentials", el: $("panelCredentials") },
           { name: "quota", el: $("panelQuota") },
           { name: "routing", el: $("panelRouting") }
@@ -718,6 +751,7 @@
 
       const tabLastRefreshedAt = {
         providers: 0,
+        tokens: 0,
         credentials: 0,
         quota: 0,
         routing: 0
@@ -732,6 +766,7 @@
         tabLastRefreshedAt[key] = now;
         try {
           if (key === "providers") await refreshProviders();
+          else if (key === "tokens") await refreshTokens();
           else if (key === "credentials") await refreshCredentials();
           else if (key === "quota") await refreshQuota();
           else if (key === "routing") await refreshRuntimes();
@@ -1159,6 +1194,85 @@
         }
       }
 
+      function formatInt(n) {
+        const v = typeof n === "number" && Number.isFinite(n) ? n : 0;
+        try { return v.toLocaleString(); } catch { return String(v); }
+      }
+
+      function formatTokensRow(label, totals) {
+        const inTok = formatInt(totals.totalPromptTokens);
+        const outTok = formatInt(totals.totalCompletionTokens);
+        const totTok = formatInt(totals.totalOutputTokens);
+        const req = formatInt(totals.requestCount);
+        const err = formatInt(totals.errorCount);
+        return `${label}: requests=${req} (err=${err}) tokens in/out/total=${inTok}/${outTok}/${totTok}`;
+      }
+
+      async function refreshTokens() {
+        const body = $("tokensTbody");
+        body.replaceChildren();
+        $("tokenTotalsBox").textContent = "";
+        try {
+          const out = await apiFetch("/daemon/stats");
+          const session = out && out.session ? out.session : null;
+          const historical = out && out.historical ? out.historical : null;
+          const totals = out && out.totals ? out.totals : null;
+
+          const sessionTotals = totals && totals.session ? totals.session : { requestCount: 0, errorCount: 0, totalPromptTokens: 0, totalCompletionTokens: 0, totalOutputTokens: 0 };
+          const historicalTotals = totals && totals.historical ? totals.historical : { requestCount: 0, errorCount: 0, totalPromptTokens: 0, totalCompletionTokens: 0, totalOutputTokens: 0 };
+
+          const lines = [];
+          lines.push(formatTokensRow("ALL (session)", sessionTotals));
+          lines.push(formatTokensRow("ALL (historical)", historicalTotals));
+          $("tokenTotalsBox").textContent = lines.join("\n");
+
+          const sessionRows = session && Array.isArray(session.totals) ? session.totals : [];
+          const histRows = historical && Array.isArray(historical.totals) ? historical.totals : [];
+
+          const byKey = new Map();
+          const keyOf = (r) => `${textOf(r.providerKey)}|${textOf(r.model || "")}`;
+          for (const r of sessionRows) {
+            if (!r || !r.providerKey) continue;
+            byKey.set(keyOf(r), { providerKey: textOf(r.providerKey), model: textOf(r.model || ""), session: r, historical: null });
+          }
+          for (const r of histRows) {
+            if (!r || !r.providerKey) continue;
+            const k = keyOf(r);
+            const existing = byKey.get(k) || { providerKey: textOf(r.providerKey), model: textOf(r.model || ""), session: null, historical: null };
+            existing.historical = r;
+            byKey.set(k, existing);
+          }
+
+          const rows = Array.from(byKey.values()).sort((a, b) => {
+            const ak = `${a.providerKey}.${a.model}`;
+            const bk = `${b.providerKey}.${b.model}`;
+            return ak.localeCompare(bk);
+          });
+
+          for (const row of rows) {
+            const tr = document.createElement("tr");
+            tr.appendChild(createCell("td", row.providerKey, "mono truncate", { title: true }));
+            tr.appendChild(createCell("td", row.model || "—", "mono truncate", { title: true }));
+
+            const s = row.session;
+            const sReqErr = s ? `${formatInt(s.requestCount)} / ${formatInt(s.errorCount)}` : "—";
+            const sTok = s ? `${formatInt(s.totalPromptTokens)}/${formatInt(s.totalCompletionTokens)}/${formatInt(s.totalOutputTokens)}` : "—";
+            tr.appendChild(createCell("td", sReqErr, "mono"));
+            tr.appendChild(createCell("td", sTok, "mono"));
+
+            const h = row.historical;
+            const hReqErr = h ? `${formatInt(h.requestCount)} / ${formatInt(h.errorCount)}` : "—";
+            const hTok = h ? `${formatInt(h.totalPromptTokens)}/${formatInt(h.totalCompletionTokens)}/${formatInt(h.totalOutputTokens)}` : "—";
+            tr.appendChild(createCell("td", hReqErr, "mono"));
+            tr.appendChild(createCell("td", hTok, "mono"));
+
+            body.appendChild(tr);
+          }
+        } catch (e) {
+          body.appendChild(createErrorRow(6, e && e.message ? e.message : e));
+        }
+      }
+
       async function testProviderFromPool(providerId) {
         setLog("providerOpLog", "");
         try {
@@ -1170,7 +1284,7 @@
           }
           const modelId = models[0];
           const directModel = `${providerId}.${modelId}`;
-          const payload = { model: directModel, input: "ping", stream: false };
+          const payload = { model: directModel, input: [{ role: "user", content: "ping" }], stream: false };
           const headers = new Headers({ "content-type": "application/json" });
           const apiKey = getApiKey();
           if (apiKey) headers.set("x-api-key", apiKey);
@@ -1284,6 +1398,7 @@
       });
 
       $("refreshProvidersBtn").addEventListener("click", refreshProviders);
+      $("refreshTokensBtn").addEventListener("click", refreshTokens);
       $("newProviderBtn").addEventListener("click", () => {
         $("providerEditorTitle").textContent = "Provider editor (new)";
         $("providerIdInput").value = "";

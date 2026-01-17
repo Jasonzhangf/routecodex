@@ -443,8 +443,8 @@ export class HttpTransportProvider extends BaseProvider {
     };
 
     // 初始请求预处理
-    const runtime = this.getRuntimeProfile();
-    let processedRequest: UnknownObject = { ...request };
+    const __runtime = this.getRuntimeProfile();
+    const processedRequest: UnknownObject = { ...request };
     ensureRuntimeMetadata(processedRequest);
     // 记录入站原始模型，便于响应阶段还原（不影响上游请求体）
     try {
@@ -476,10 +476,10 @@ export class HttpTransportProvider extends BaseProvider {
   }
 
   protected async postprocessResponse(response: unknown, context: ProviderContext): Promise<UnknownObject> {
-    const runtime = this.getRuntimeProfile();
+    const __runtime = this.getRuntimeProfile();
     const processingTime = Date.now() - context.startTime;
 
-    let processedResponse = response;
+    const processedResponse = response;
     const originalRecord = this.asResponseRecord(response);
     const processedRecord = this.asResponseRecord(processedResponse);
 
@@ -887,7 +887,7 @@ export class HttpTransportProvider extends BaseProvider {
       throw error;
     }
 
-    let finalHeaders: Record<string, string> = {
+    const finalHeaders: Record<string, string> = {
       ...baseHeaders,
       ...serviceHeaders,
       ...overrideHeaders,
@@ -920,20 +920,39 @@ export class HttpTransportProvider extends BaseProvider {
       this.assignHeader(finalHeaders, 'originator', resolvedOriginator);
     }
 
-    if (normalizedClientHeaders) {
-      const conversationId = this.findHeaderValue(normalizedClientHeaders, 'conversation_id');
-      if (conversationId) {
-        this.assignHeader(finalHeaders, 'conversation_id', conversationId);
+      if (normalizedClientHeaders) {
+        const conversationId = this.findHeaderValue(normalizedClientHeaders, 'conversation_id');
+        if (conversationId) {
+          this.assignHeader(finalHeaders, 'conversation_id', conversationId);
+        }
+        const sessionId = this.findHeaderValue(normalizedClientHeaders, 'session_id');
+        if (sessionId) {
+          this.assignHeader(finalHeaders, 'session_id', sessionId);
+        }
       }
-      const sessionId = this.findHeaderValue(normalizedClientHeaders, 'session_id');
-      if (sessionId) {
-        this.assignHeader(finalHeaders, 'session_id', sessionId);
-      }
-    }
 
-    if (this.isCodexUaMode()) {
-      this.ensureCodexSessionHeaders(finalHeaders, runtimeMetadata);
-    }
+      // Inbound metadata may already carry parsed session identifiers (e.g. when client sends
+      // metadata.sessionId / metadata.conversationId instead of headers). Inject them only
+      // if not already provided by config/runtime headers or inbound client headers.
+      if (inboundMetadata && typeof inboundMetadata === 'object') {
+        const meta = inboundMetadata as Record<string, unknown>;
+        const metaSessionId =
+          typeof meta.sessionId === 'string' && meta.sessionId.trim() ? meta.sessionId.trim() : '';
+        const metaConversationId =
+          typeof meta.conversationId === 'string' && meta.conversationId.trim() ? meta.conversationId.trim() : '';
+        const resolvedSessionId = metaSessionId || metaConversationId;
+        const resolvedConversationId = metaConversationId || metaSessionId;
+        if (resolvedSessionId && !this.findHeaderValue(finalHeaders, 'session_id')) {
+          this.assignHeader(finalHeaders, 'session_id', resolvedSessionId);
+        }
+        if (resolvedConversationId && !this.findHeaderValue(finalHeaders, 'conversation_id')) {
+          this.assignHeader(finalHeaders, 'conversation_id', resolvedConversationId);
+        }
+      }
+
+      if (this.isCodexUaMode()) {
+        this.ensureCodexSessionHeaders(finalHeaders, runtimeMetadata);
+      }
 
     return finalHeaders;
   }

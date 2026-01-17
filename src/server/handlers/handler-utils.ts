@@ -295,7 +295,7 @@ function extractRawErrorMeta(error: unknown): { rawError?: string; rawErrorSnipp
 
 export async function respondWithPipelineError(
   res: Response,
-  _ctx: HandlerContext,
+  ctx: HandlerContext,
   error: unknown,
   entryEndpoint: string,
   requestId: string,
