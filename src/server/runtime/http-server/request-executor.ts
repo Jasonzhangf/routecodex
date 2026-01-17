@@ -2,7 +2,7 @@ import type { ModuleDependencies } from '../../../modules/pipeline/interfaces/pi
 import type { PipelineExecutionInput, PipelineExecutionResult } from '../../handlers/types.js';
 import type { HubPipeline, ProviderProtocol } from './types.js';
 import { writeClientSnapshot } from '../../../providers/core/utils/snapshot-writer.js';
-import { mapProviderProtocol, asRecord } from './provider-utils.js';
+import { asRecord } from './provider-utils.js';
 import { attachProviderRuntimeMetadata } from '../../../providers/core/runtime/provider-runtime-metadata.js';
 import { extractAnthropicToolAliasMap } from './anthropic-tool-alias.js';
 import { enhanceProviderRequestId } from '../../utils/request-id-manager.js';
@@ -15,13 +15,12 @@ import {
   ensureClientHeadersOnPayload,
   resolveClientRequestId
 } from './executor-metadata.js';
-import { ensureHubPipeline, runHubPipeline, type HubPipelineResult } from './executor-pipeline.js';
 import { describeRetryReason, shouldRetryProviderError } from './executor-provider.js';
 import {
   convertProviderResponse as bridgeConvertProviderResponse,
   createSnapshotRecorder as bridgeCreateSnapshotRecorder
 } from '../../../modules/llmswitch/bridge.js';
-import type { ProviderError } from '../../../providers/core/api/provider-types.js';
+import { ensureHubPipeline, runHubPipeline } from './executor-pipeline.js';
 
 export type RequestExecutorDeps = {
   runtimeManager: ProviderRuntimeManager;
@@ -248,6 +247,7 @@ export class HubRequestExecutor implements RequestExecutor {
           const normalized = this.normalizeProviderResponse(providerResponse);
           const converted = await this.convertProviderResponseIfNeeded({
             entryEndpoint: input.entryEndpoint,
+            providerProtocol,
             providerType: handle.providerType,
             requestId: input.requestId,
             wantsStream: wantsStreamBase,
@@ -346,6 +346,7 @@ export class HubRequestExecutor implements RequestExecutor {
 
   private async convertProviderResponseIfNeeded(options: {
     entryEndpoint?: string;
+    providerProtocol: string;
     providerType?: string;
     requestId: string;
     wantsStream: boolean;
@@ -377,7 +378,6 @@ export class HubRequestExecutor implements RequestExecutor {
       return options.response;
     }
     try {
-      const _providerProtocol = mapProviderProtocol(options.providerType);
       const metadataBag = asRecord(options.pipelineMetadata);
       const aliasMap = extractAnthropicToolAliasMap(metadataBag);
       const originalModelId = this.extractClientModelId(metadataBag, options.originalRequest);
@@ -389,7 +389,7 @@ export class HubRequestExecutor implements RequestExecutor {
       }
       baseContext.requestId = options.requestId;
       baseContext.entryEndpoint = options.entryEndpoint || entry;
-      baseContext._providerProtocol = _providerProtocol;
+      baseContext._providerProtocol = options.providerProtocol;
       baseContext.originalModelId = originalModelId;
       const adapterContext = baseContext;
       if (aliasMap) {
@@ -498,7 +498,7 @@ export class HubRequestExecutor implements RequestExecutor {
       };
 
       const converted = await bridgeConvertProviderResponse({
-        providerProtocol: _providerProtocol,
+        providerProtocol: options.providerProtocol,
         providerResponse: body as Record<string, unknown>,
         context: adapterContext,
         entryEndpoint: options.entryEndpoint || entry,
@@ -520,7 +520,6 @@ export class HubRequestExecutor implements RequestExecutor {
     } catch (error) {
       const err = error as Error | unknown;
       const message = err instanceof Error ? err.message : String(err ?? 'Unknown error');
-      const _providerProtocol = mapProviderProtocol(options.providerType);
 
       // 对于 SSE 解码失败（含上游终止），直接抛出错误并透传到 HTTP 层。
       // 否则回退到原始 payload 会让客户端挂起，无法感知失败。

@@ -65,8 +65,9 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
     if (rejectNonLocalOrUnauthorizedAdmin(req, res, options.getExpectedApiKey?.())) {return;}
     try {
       const mod = getProviderQuotaModule(options);
-      const snapshot = mod && typeof (mod as any).getAdminSnapshot === 'function'
-        ? (mod as any).getAdminSnapshot()
+      interface AdminSnapshotModule { getAdminSnapshot?: () => Record<string, unknown> }
+      const snapshot = mod && typeof (mod as AdminSnapshotModule).getAdminSnapshot === 'function'
+        ? (mod as AdminSnapshotModule).getAdminSnapshot?.() ?? {}
         : {};
       const providers = Object.values(snapshot).map((state: unknown) => {
         const record = state && typeof state === 'object' ? (state as Record<string, unknown>) : {};
@@ -98,12 +99,13 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
     const mod = getProviderQuotaModule(options) as
       | (ProviderQuotaDaemonModule & { resetProvider?: (providerKey: string) => Promise<unknown> })
       | null;
-    if (!mod || typeof (mod as any).resetProvider !== 'function') {
+    const resetMod = mod as { resetProvider?: (key: string) => Promise<unknown> };
+    if (!mod || typeof resetMod.resetProvider !== 'function') {
       res.status(503).json({ error: { message: 'provider-quota module not available', code: 'not_ready' } });
       return;
     }
     try {
-      const result = await (mod as any).resetProvider(providerKey);
+      const result = await resetMod.resetProvider(providerKey);
       res.status(200).json({ ok: true, providerKey, action: 'reset', result });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
@@ -121,12 +123,13 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
     const mod = getProviderQuotaModule(options) as
       | (ProviderQuotaDaemonModule & { recoverProvider?: (providerKey: string) => Promise<unknown> })
       | null;
-    if (!mod || typeof (mod as any).recoverProvider !== 'function') {
+    const recoverMod = mod as { recoverProvider?: (key: string) => Promise<unknown> };
+    if (!mod || typeof recoverMod.recoverProvider !== 'function') {
       res.status(503).json({ error: { message: 'provider-quota module not available', code: 'not_ready' } });
       return;
     }
     try {
-      const result = await (mod as any).recoverProvider(providerKey);
+      const result = await recoverMod.recoverProvider(providerKey);
       res.status(200).json({ ok: true, providerKey, action: 'recover', result });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
@@ -159,12 +162,13 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
     const mod = getProviderQuotaModule(options) as
       | (ProviderQuotaDaemonModule & { disableProvider?: (options: unknown) => Promise<unknown> })
       | null;
-    if (!mod || typeof (mod as any).disableProvider !== 'function') {
+    const disableMod = mod as { disableProvider?: (options: unknown) => Promise<unknown> };
+    if (!mod || typeof disableMod.disableProvider !== 'function') {
       res.status(503).json({ error: { message: 'provider-quota module not available', code: 'not_ready' } });
       return;
     }
     try {
-      const result = await (mod as any).disableProvider({ providerKey, mode, durationMs });
+      const result = await disableMod.disableProvider({ providerKey, mode, durationMs });
       res.status(200).json({ ok: true, providerKey, action: 'disable', mode, durationMs, result });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);

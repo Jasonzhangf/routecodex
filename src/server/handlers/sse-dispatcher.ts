@@ -1,9 +1,8 @@
-import { Readable, Transform } from 'node:stream';
+import { Readable } from 'node:stream';
 import type { ReadableStream as NodeReadableStream } from 'node:stream/web';
 import type { Response } from 'express';
 import { logPipelineStage } from '../utils/stage-logger.js';
 import { applyResponseHeaders } from './response-headers.js';
-import { Utf8ChunkBuffer } from '../utils/utf8-chunk-buffer.js';
 
 const TRUTHY_VALUES = new Set(['1', 'true', 'yes', 'on']);
 const FALSY_VALUES = new Set(['0', 'false', 'no', 'off']);
@@ -57,9 +56,6 @@ export function dispatchSseStream(options: DispatchSseOptions): boolean {
   logPipelineStage('response.sse.stream.start', requestLabel, { status });
 
   let eventCount = 0;
-
-  // Create UTF-8 aware chunk buffer to prevent splitting multibyte characters
-  const _utf8Buffer = new Utf8ChunkBuffer(128); // Use larger chunks for better performance
 
   const cleanup = () => {
     try {

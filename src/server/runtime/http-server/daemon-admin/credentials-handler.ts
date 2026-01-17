@@ -6,6 +6,7 @@ import type { DaemonAdminRouteOptions } from '../daemon-admin-routes.js';
 import { rejectNonLocalOrUnauthorizedAdmin } from '../daemon-admin-routes.js';
 import { collectTokenSnapshot, readTokenFile, evaluateTokenState, resolveAuthDir } from '../../../../token-daemon/token-utils.js';
 import { ensureValidOAuthToken } from '../../../../providers/auth/oauth-lifecycle.js';
+import type { OAuthAuth, OAuthAuthType } from '../../../../providers/core/api/provider-config.js';
 
 interface CredentialSummary {
   id: string;
@@ -229,8 +230,9 @@ export function registerCredentialRoutes(app: Application, options: DaemonAdminR
       return;
     }
     try {
-      const type = provider === 'gemini-cli' ? 'gemini-cli-oauth' : `${provider}-oauth`;
-      const auth = { type, tokenFile: alias } as any;
+      const type: OAuthAuthType =
+        provider === 'gemini-cli' ? 'gemini-cli-oauth' : (`${provider}-oauth` as OAuthAuthType);
+      const auth: OAuthAuth = { type, tokenFile: alias };
       // Best effort: allow UI-configured browser selection without requiring restart.
       const browserHint = String(process.env.ROUTECODEX_OAUTH_BROWSER || '').trim();
       if (!browserHint) {

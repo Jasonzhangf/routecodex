@@ -188,7 +188,7 @@ describe('virtual-router quotaView routing', () => {
     expect(result.providerKey).toBe(providerB);
   });
 
-  it.skip('does not allow quotaView to empty the default route (quota bypass)', () => {
+  it('does not allow quotaView to empty the default route (quota bypass)', () => {
     const quotaView = (key: string) => ({
       providerKey: key,
       inPool: false,

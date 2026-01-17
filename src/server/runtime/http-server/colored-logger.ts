@@ -25,10 +25,11 @@ export function createServerColoredLogger(): unknown {
 
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const mod = localRequire('../../../modules/pipeline/utils/colored-logger.js');
-    const ColoredLogger = (mod as any).ColoredLogger || (mod as any).default || null;
+    const modRecord = mod as Record<string, unknown>;
+    const ColoredLogger = modRecord.ColoredLogger || modRecord.default || null;
 
-    if (ColoredLogger) {
-      return new ColoredLogger({ isDev });
+    if (typeof ColoredLogger === 'function') {
+      return new (ColoredLogger as new (options: { isDev: boolean }) => unknown)({ isDev });
     }
 
     // If the module loaded but ColoredLogger is missing, emit a warning and fall back to a no-op logger.
