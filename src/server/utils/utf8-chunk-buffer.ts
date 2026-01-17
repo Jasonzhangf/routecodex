@@ -1,151 +1,128 @@
+import { Transform } from 'stream';
+
 /**
- * UTF-8 Chunk Buffer
- * 
- * Handles proper buffering of UTF-8 text chunks to prevent splitting multibyte characters.
- * This ensures that Chinese and other multibyte characters are not split mid-character
- * during SSE streaming.
+ * A buffer helper that handles splitting UTF-8 characters across chunks.
+ *
+ * It accumulates incoming chunks (Buffer or string) and pushes complete
+ * UTF-8 strings downstream. If a chunk ends in the middle of a multi-byte
+ * sequence, the bytes are buffered until the next chunk completes it.
+ *
+ * This uses the utf8-chunk-buffer package implementation logic but wrapped
+ * in a stream.Transform for easy piping.
  */
-
 export class Utf8ChunkBuffer {
-    private buffer: Buffer = Buffer.alloc(0);
-    private readonly minChunkSize: number;
+  private buffer: Buffer | null = null;
 
-    constructor(minChunkSize: number = 64) {
-        this.minChunkSize = minChunkSize;
+  /**
+   * Pushes a new chunk into the buffer.
+   * Returns an array of complete UTF-8 strings found so far.
+   */
+  public push(chunk: Buffer | string): string[] {
+    const data = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    if (!data.length) {
+      return [];
     }
 
-    /**
-     * Add data to the buffer and return complete UTF-8 sequences
-     * @param chunk - Incoming data chunk (Buffer or string)
-     * @returns Array of complete UTF-8 strings ready to be sent
-     */
-    push(chunk: Buffer | string): string[] {
-        // Convert input to Buffer if it's a string
-        const inputBuffer = typeof chunk === 'string'
-            ? Buffer.from(chunk, 'utf8')
-            : chunk;
+    // Combine with pending buffer if any
+    const buffer = this.buffer ? Buffer.concat([this.buffer, data]) : data;
+    this.buffer = null;
 
-        // Append new data to existing buffer
-        this.buffer = Buffer.concat([this.buffer, inputBuffer]);
+    // Check for incomplete UTF-8 sequence at the end
+    // UTF-8 logic:
+    // 1-byte: 0xxxxxxx
+    // 2-byte: 110xxxxx 10xxxxxx
+    // 3-byte: 1110xxxx 10xxxxxx 10xxxxxx
+    // 4-byte: 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx
 
-        const output: string[] = [];
+    // We scan from the end to find the start byte of the last sequence
+    let i = buffer.length - 1;
+    let lookback = 0;
+    // Look back at most 3 bytes (since max utf8 char is 4 bytes)
+    while (i >= 0 && lookback < 4) {
+      const byte = buffer[i];
+      if ((byte & 0xc0) === 0x80) {
+        // Continuation byte (10xxxxxx), keep looking back
+        i--;
+        lookback++;
+        continue;
+      }
 
-        // Process buffer in chunks, ensuring we don't split multibyte characters
-        while (this.buffer.length >= this.minChunkSize) {
-            // Find safe chunk boundary (don't split multibyte chars)
-            const chunkSize = this.findSafeChunkSize(this.minChunkSize);
+      // Found a start byte or ASCII
+      if ((byte & 0x80) === 0x00) {
+        // ASCII (0xxxxxxx), complete char. No split at this byte.
+        // If we looked back some bytes, those were continuation bytes without a start,
+        // which is invalid UTF-8 but we treat it as complete to avoid stuck buffer.
+        break;
+      }
 
-            if (chunkSize === 0) {
-                // No safe boundary found, wait for more data
-                break;
-            }
+      // Multi-byte start
+      let charLength = 0;
+      if ((byte & 0xe0) === 0xc0) charLength = 2;
+      else if ((byte & 0xf0) === 0xe0) charLength = 3;
+      else if ((byte & 0xf8) === 0xf0) charLength = 4;
 
-            // Extract the safe chunk
-            const safeChunk = this.buffer.slice(0, chunkSize);
-            this.buffer = this.buffer.slice(chunkSize);
-
-            // Convert to string and add to output
-            const text = safeChunk.toString('utf8');
-            if (text) {
-                output.push(text);
-            }
+      if (charLength > 0) {
+        // We found a start byte. Check if we have enough bytes.
+        const available = buffer.length - i;
+        if (available < charLength) {
+          // Incomplete sequence
+          this.buffer = buffer.subarray(i);
+          return [buffer.subarray(0, i).toString('utf8')];
         }
-
-        return output;
+      }
+      break;
     }
 
-    /**
-     * Flush any remaining buffered data
-     * @returns Remaining buffered text
-     */
-    flush(): string {
-        if (this.buffer.length === 0) {
-            return '';
-        }
+    return [buffer.toString('utf8')];
+  }
 
-        const text = this.buffer.toString('utf8');
-        this.buffer = Buffer.alloc(0);
-        return text;
+  /**
+   * Flushes any remaining bytes in the buffer as a string.
+   */
+  public flush(): string[] {
+    if (this.buffer && this.buffer.length > 0) {
+      const str = this.buffer.toString('utf8');
+      this.buffer = null;
+      return [str];
     }
-
-    /**
-     * Find a safe chunk size that doesn't split multibyte UTF-8 characters
-     * @param targetSize - Desired chunk size
-     * @returns Safe chunk size
-     */
-    private findSafeChunkSize(targetSize: number): number {
-        if (this.buffer.length < targetSize) {
-            return 0;
-        }
-
-        let size = targetSize;
-
-        // Walk backward from target size to find a safe boundary
-        // A safe boundary is where we're not in the middle of a multibyte sequence
-        while (size > 0) {
-            if (this.isCharBoundary(size)) {
-                return size;
-            }
-            size--;
-        }
-
-        return 0;
-    }
-
-    /**
-     * Check if a position is a character boundary (not in the middle of a multibyte sequence)
-     * @param pos - Position to check
-     * @returns true if position is a character boundary
-     */
-    private isCharBoundary(pos: number): boolean {
-        if (pos >= this.buffer.length) {
-            return true;
-        }
-
-        const byte = this.buffer[pos];
-
-        // If the byte is not a continuation byte (0x80-0xBF), it's a boundary
-        // UTF-8 continuation bytes have the pattern 10xxxxxx (0x80-0xBF)
-        return (byte & 0xC0) !== 0x80;
-    }
-
-    /**
-     * Get current buffer size
-     */
-    get bufferSize(): number {
-        return this.buffer.length;
-    }
+    return [];
+  }
 }
 
 /**
- * Create a transform stream that properly chunks UTF-8 text
+ * Creates a Node.js Transform stream that ensures chunks emitted are complete UTF-8 strings.
+ * This is useful for processing SSE streams where a chunk might split a multi-byte character.
  */
-export function createUtf8ChunkStream(minChunkSize: number = 64) {
-    const buffer = new Utf8ChunkBuffer(minChunkSize);
-    import { Transform } from 'stream';
+export function createUtf8TransformStream(): Transform {
+  const buffer = new Utf8ChunkBuffer();
 
-    return new Transform({
-        transform(chunk: Buffer | string, encoding: BufferEncoding, callback: (error?: Error | null, data?: unknown) => void) {
-            try {
-                const chunks = buffer.push(chunk);
-                for (const text of chunks) {
-                    this.push(text);
-                }
-                callback();
-            } catch (error) {
-                callback(error instanceof Error ? error : new Error(String(error)));
-            }
-        },
-        flush(callback: (error?: Error | null, data?: unknown) => void) {
-            try {
-                const remaining = buffer.flush();
-                if (remaining) {
-                    this.push(remaining);
-                }
-                callback();
-            } catch (error) {
-                callback(error instanceof Error ? error : new Error(String(error)));
-            }
+  return new Transform({
+    objectMode: true, // We emit strings, not buffers
+    transform(chunk: Buffer | string, encoding: BufferEncoding, callback: (error?: Error | null, data?: unknown) => void) {
+      try {
+        const chunks = buffer.push(chunk);
+        for (const text of chunks) {
+          if (text) {
+            this.push(text);
+          }
         }
-    });
+        callback();
+      } catch (error) {
+        callback(error instanceof Error ? error : new Error(String(error)));
+      }
+    },
+    flush(callback: (error?: Error | null, data?: unknown) => void) {
+      try {
+        const chunks = buffer.flush();
+        for (const text of chunks) {
+          if (text) {
+            this.push(text);
+          }
+        }
+        callback();
+      } catch (error) {
+        callback(error instanceof Error ? error : new Error(String(error)));
+      }
+    }
+  });
 }
