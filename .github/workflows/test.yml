@@ -17,4 +17,7 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - run: npm run test
+      - name: Ensure release llms module
+        run: BUILD_MODE=release npm run llmswitch:ensure
+      - name: Run host tests
+        run: npm run test
