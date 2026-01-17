@@ -6,7 +6,6 @@
  */
 
 import { Command } from 'commander';
-import chalk from 'chalk';
 import fs from 'fs';
 import path from 'path';
 import { homedir, tmpdir } from 'os';
@@ -27,59 +26,8 @@ import { createStopCommand } from './cli/commands/stop.js';
 import { createRestartCommand } from './cli/commands/restart.js';
 import { createStartCommand } from './cli/commands/start.js';
 import { createCodeCommand } from './cli/commands/code.js';
-// Spinner wrapper (lazy-loaded to avoid hard dependency on ora/restore-cursor issues)
-type Spinner = {
-  start(text?: string): Spinner;
-  succeed(text?: string): void;
-  fail(text?: string): void;
-  warn(text?: string): void;
-  info(text?: string): void;
-  stop(): void;
-  text: string;
-};
-type OraModule = {
-  default?: (text?: string) => Spinner;
-};
-
-async function createSpinner(text: string): Promise<Spinner> {
-  const mod = await dynamicImport<OraModule>('ora');
-  const oraFactory = typeof mod?.default === 'function' ? mod.default : undefined;
-  if (oraFactory) {
-    const instance = oraFactory(text);
-    if (typeof instance.start === 'function') {
-      instance.start(text);
-      return instance;
-    }
-  }
-
-  let currentText = text;
-  const log = (prefix: string, msg?: string) => {
-    const message = msg ?? currentText;
-    if (!message) {
-      return;
-    }
-    console.log(`${prefix} ${message}`);
-  };
-
-  const stub: Spinner = {
-    start(msg?: string) {
-      if (msg) {
-        currentText = msg;
-      }
-      log('...', msg);
-      return stub;
-    },
-    succeed(msg?: string) { log('✓', msg); },
-    fail(msg?: string) { log('✗', msg); },
-    warn(msg?: string) { log('⚠', msg); },
-    info(msg?: string) { log('ℹ', msg); },
-    stop() { /* no-op */ },
-    get text() { return currentText; },
-    set text(value: string) { currentText = value; }
-  };
-
-  return stub;
-}
+import { createSpinner, type Spinner } from './cli/spinner.js';
+import { logger } from './cli/logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -103,26 +51,8 @@ interface HealthCheckResult {
   error?: string;
 }
 
-// Simple logger
-const logger = {
-  info: (msg: string) => console.log(`${chalk.blue('ℹ')  } ${  msg}`),
-  success: (msg: string) => console.log(`${chalk.green('✓')  } ${  msg}`),
-  warning: (msg: string) => console.log(`${chalk.yellow('⚠')  } ${  msg}`),
-  error: (msg: string) => console.log(`${chalk.red('✗')  } ${  msg}`),
-  debug: (msg: string) => console.log(`${chalk.gray('◉')  } ${  msg}`)
-};
-
 const sleep = (ms: number): Promise<void> =>
   new Promise(resolve => setTimeout(resolve, ms));
-
-// Ensure llmswitch-core is resolvable（dev/worktree 场景下由 pipeline 加载 vendor）
-async function dynamicImport<T>(specifier: string): Promise<T | undefined> {
-  try {
-    return (await import(specifier)) as T;
-  } catch {
-    return undefined;
-  }
-}
 
 async function ensureCoreOrFail(): Promise<void> {
 // 在当前 worktree/dev 场景下：
