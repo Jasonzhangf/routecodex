@@ -56,23 +56,25 @@
 - [ ] 明确每个命令的“输入/输出契约”（stdout/stderr、exit code、必选参数、默认值）
 
 ### Phase 1（可测试骨架）
-- [ ] 新增 `src/cli/runtime.ts`：`CliRuntime` 抽象（fs/spawn/fetch/env/stdout/exit 等）+ `createNodeRuntime()`
-- [ ] 新增 `src/cli/main.ts`：`runCli(argv, runtime): Promise<number>`（**不直接 `process.exit()`**）
-- [ ] 新增 `src/cli/program.ts`：`createCliProgram(ctx): Command`（只负责 commander wiring）
-- [ ] 新增 `tests/cli/smoke.spec.ts`：覆盖 `--help`、未知命令、返回码路径
+- [x] 新增 `src/cli/runtime.ts`：`CliRuntime` 抽象（最小 writeOut/writeErr）+ `createNodeRuntime()`
+- [x] 新增 `src/cli/main.ts`：`runCli(argv, runtime): Promise<number>`（不直接 `process.exit()`）
+- [x] 新增 `src/cli/program.ts`：`createCliProgram(ctx): Command`（目前只做基础 wiring；尚未接管 `src/cli.ts`）
+- [x] 新增 `tests/cli/smoke.spec.ts`：覆盖 `--help`、未知命令、返回码路径（当前仅覆盖 program 框架）
 
 ### Phase 2（抽公共工具，仍由旧命令逻辑驱动）
-- [ ] 迁移 `createSpinner/logger/safeReadJson/normalizePort/host 归一化/version+pkgName 解析` 到 `src/cli/*` 下独立模块
+- [x] 迁移 `safeReadJson/normalizePort/host 归一化` 到 `src/cli/utils/*`
+- [ ] 迁移 `createSpinner/logger/version+pkgName 解析` 到 `src/cli/*`
 - [ ] `src/cli.ts` 改为调用新模块（行为不变）
 
 ### Phase 3（低风险命令迁移 + 单测）
-- [ ] 迁移 `env` → `src/cli/commands/env.ts` + `tests/cli/env.spec.ts`
-- [ ] 迁移 `port` → `src/cli/commands/port.ts` + `tests/cli/port.spec.ts`
-- [ ] 迁移 `examples/clean`（如存在复杂副作用，先用 runtime stub 覆盖）
+- [x] 迁移 `env` → `src/cli/commands/env.ts`（已替换 `src/cli.ts` 的 env 命令注册；保留行为一致）
+- [x] 迁移 `port` → `src/cli/commands/port.ts` + `tests/cli/port-command.spec.ts`
+- [x] 迁移 `examples` → `src/cli/commands/examples.ts` + `tests/cli/examples-command.spec.ts`
+- [x] 迁移 `clean` → `src/cli/commands/clean.ts` + `tests/cli/clean-command.spec.ts`
 
 ### Phase 4（中风险命令迁移 + 单测）
-- [ ] 迁移 `config`（包含子命令则拆成子模块）+ `tests/cli/config.spec.ts`
-- [ ] 迁移 `status`（端口探测/health check）+ `tests/cli/status.spec.ts`（stub fetch）
+- [x] 迁移 `config` → `src/cli/commands/config.ts` + `tests/cli/config-command.spec.ts`
+- [x] 迁移 `status`（端口探测/health check）→ `src/cli/commands/status.ts` + `tests/cli/status-command.spec.ts`（stub fetch+config）
 
 ### Phase 5（高风险：server 生命周期命令迁移 + 集成测）
 - [ ] 抽 `src/cli/server/*`：pidfile / port-probe / kill / start-server 等

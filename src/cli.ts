@@ -16,6 +16,13 @@ import { LOCAL_HOSTS, HTTP_PROTOCOLS, API_PATHS, DEFAULT_CONFIG, API_ENDPOINTS }
 import { buildInfo } from './build-info.js';
 import { ensureLocalTokenPortalEnv } from './token-portal/local-token-portal.js';
 import { parseNetstatListeningPids } from './utils/windows-netstat.js';
+import { createEnvCommand } from './cli/commands/env.js';
+import { createPortCommand } from './cli/commands/port.js';
+import { createCleanCommand } from './cli/commands/clean.js';
+import { createExamplesCommand } from './cli/commands/examples.js';
+import { createStatusCommand } from './cli/commands/status.js';
+import { loadRouteCodexConfig } from './config/routecodex-config-loader.js';
+import { createConfigCommand } from './cli/commands/config.js';
 // Spinner wrapper (lazy-loaded to avoid hard dependency on ora/restore-cursor issues)
 type Spinner = {
   start(text?: string): Spinner;
@@ -82,19 +89,6 @@ interface LoggingConfig {
   level: string;
 }
 
-interface EnvCommandConfig {
-  httpserver?: { port?: number; host?: string };
-  server?: { port?: number; host?: string };
-  port?: number;
-  host?: string;
-}
-
-interface TemplateConfig {
-  server?: Partial<ServerConfig>;
-  logging?: Partial<LoggingConfig>;
-  [key: string]: unknown;
-}
-
 type CodeCommandOptions = {
   port?: string;
   host: string;
@@ -106,13 +100,6 @@ type CodeCommandOptions = {
   model?: string;
   profile?: string;
   ensureServer?: boolean;
-};
-
-type EnvCommandOptions = {
-  port?: string;
-  host?: string;
-  config?: string;
-  json?: boolean;
 };
 
 // simple-log config type removed
@@ -707,72 +694,13 @@ program
   });
 
 // Env command - Print env exports for Anthropic proxy
-program
-  .command('env')
-  .description('Print environment exports for Anthropic tools to use RouteCodex proxy')
-  .option('-p, --port <port>', 'RouteCodex server port (overrides config file)')
-  .option('-h, --host <host>', 'RouteCodex server host')
-  .option('-c, --config <config>', 'RouteCodex configuration file path')
-  .option('--json', 'Output JSON instead of shell exports')
-  .action(async (options: EnvCommandOptions) => {
-    try {
-      const configPath = options.config
-        ? options.config
-        : path.join(homedir(), '.routecodex', 'config.json');
-
-      let host = options.host;
-      let port = normalizePort(options.port);
-
-      if (IS_DEV_PACKAGE) {
-        if (!Number.isFinite(port)) {
-          const envPort = Number(process.env.ROUTECODEX_PORT || process.env.RCC_PORT || NaN);
-          port = Number.isFinite(envPort) && envPort > 0 ? envPort : DEFAULT_DEV_PORT;
-        }
-      } else {
-        if (!Number.isFinite(port) && fs.existsSync(configPath)) {
-          const cfg = safeReadJson<EnvCommandConfig>(configPath);
-          port = normalizePort(cfg?.httpserver?.port ?? cfg?.server?.port ?? cfg?.port);
-          host = typeof cfg?.httpserver?.host === 'string'
-            ? cfg.httpserver.host
-            : typeof cfg?.server?.host === 'string'
-              ? cfg.server.host
-              : cfg?.host ?? host;
-        }
-      }
-
-      if (!Number.isFinite(port) || !port || port <= 0) {
-        throw new Error('Missing port. Set via --port, env or config file');
-      }
-
-      const norm = (h: string | undefined): string => {
-        const v = String(h || '').toLowerCase();
-        if (v === '0.0.0.0' || v === '::' || v === '::1' || v === 'localhost') {return LOCAL_HOSTS.IPV4;}
-        return h || LOCAL_HOSTS.IPV4;
-      };
-      const resolvedHost = norm(host);
-      const base = `http://${resolvedHost}:${port}`;
-
-      if (options.json) {
-        const out = {
-          ANTHROPIC_BASE_URL: base,
-          ANTHROPIC_API_URL: base,
-          ANTHROPIC_API_KEY: 'rcc-proxy-key',
-          UNSET: ['ANTHROPIC_TOKEN', 'ANTHROPIC_AUTH_TOKEN']
-        };
-        console.log(JSON.stringify(out, null, 2));
-      } else {
-        console.log(`export ANTHROPIC_BASE_URL=${base}`);
-        console.log(`export ANTHROPIC_API_URL=${base}`);
-        console.log(`export ANTHROPIC_API_KEY=rcc-proxy-key`);
-        // Ensure conflicting tokens are not picked up by client tools
-        console.log('unset ANTHROPIC_TOKEN');
-        console.log('unset ANTHROPIC_AUTH_TOKEN');
-      }
-    } catch (error) {
-      logger.error(error instanceof Error ? error.message : String(error));
-      process.exit(1);
-    }
-  });
+createEnvCommand(program, {
+  isDevPackage: IS_DEV_PACKAGE,
+  defaultDevPort: DEFAULT_DEV_PORT,
+  log: (line) => console.log(line),
+  error: (line) => logger.error(line),
+  exit: (code) => process.exit(code)
+});
 
 // Start command
 program
@@ -1076,249 +1004,7 @@ program
   });
 
 // Config command
-program
-  .command('config')
-  .description('Configuration management')
-  .argument('<action>', 'Action to perform (show, edit, validate, init)')
-  .option('-c, --config <config>', 'Configuration file path')
-  .option('-t, --template <template>', 'Configuration template (default, lmstudio, oauth)')
-  .option('-f, --force', 'Force overwrite existing configuration')
-  .action(async (action, options) => {
-    try {
-      const configPath = options.config || path.join(homedir(), '.routecodex', 'config.json');
-
-      switch (action) {
-        case 'init':
-          await initializeConfig(configPath, options.template, options.force);
-          break;
-
-        case 'show':
-          if (fs.existsSync(configPath)) {
-            const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-            console.log(JSON.stringify(config, null, 2));
-          } else {
-            logger.error('Configuration file not found');
-          }
-          break;
-
-        case 'edit': {
-          const editor = process.env.EDITOR || 'nano';
-          const { spawn } = await import('child_process');
-          spawn(editor, [configPath], { stdio: 'inherit' });
-          break;
-        }
-
-        case 'validate': {
-          if (fs.existsSync(configPath)) {
-            try {
-              JSON.parse(fs.readFileSync(configPath, 'utf8'));
-              logger.success('Configuration is valid');
-            } catch (error) {
-              logger.error(`Configuration is invalid: ${  error instanceof Error ? error.message : String(error)}`);
-            }
-          } else {
-            logger.error('Configuration file not found');
-          }
-          break;
-        }
-
-        default:
-          logger.error('Unknown action. Use: show, edit, validate, init');
-      }
-    } catch (error) {
-      logger.error(`Config command failed: ${  error instanceof Error ? error.message : String(error)}`);
-    }
-  });
-
-// Initialize configuration helper function
-async function initializeConfig(configPath: string, template?: string, force: boolean = false) {
-  const spinner = await createSpinner('Initializing configuration...');
-
-  try {
-    // Create config directory if it doesn't exist
-    const configDir = path.dirname(configPath);
-    if (!fs.existsSync(configDir)) {
-      fs.mkdirSync(configDir, { recursive: true });
-    }
-
-    // Check if config already exists
-    if (fs.existsSync(configPath) && !force) {
-      spinner.warn('Configuration file already exists');
-      spinner.info('Use --force flag to overwrite or choose a different path');
-      return;
-    }
-
-    // Load template
-    let templateConfig: TemplateConfig | undefined;
-
-    switch (template) {
-      case 'lmstudio':
-        templateConfig = {
-          server: {
-            port: DEFAULT_CONFIG.PORT,
-            host: LOCAL_HOSTS.LOCALHOST
-          },
-          logging: {
-            level: "info"
-          },
-          providers: {
-            lmstudio: {
-              type: "lmstudio",
-              baseUrl: `${HTTP_PROTOCOLS.HTTP}${LOCAL_HOSTS.LOCALHOST}:${DEFAULT_CONFIG.LM_STUDIO_PORT}`,
-              apiKey: "${LM_STUDIO_API_KEY:-}",
-              models: {
-                "gpt-oss-20b-mlx": {
-                  maxTokens: 8192,
-                  temperature: 0.7,
-                  supportsStreaming: true,
-                  supportsTools: true
-                },
-                "qwen2.5-7b-instruct": {
-                  maxTokens: 32768,
-                  temperature: 0.7,
-                  supportsStreaming: true,
-                  supportsTools: true
-                }
-              },
-              timeout: 60000,
-              retryAttempts: 3
-            }
-          },
-          routing: {
-            default: "lmstudio",
-            models: {
-              "gpt-4": "gpt-oss-20b-mlx",
-              "gpt-4-turbo": "gpt-oss-20b-mlx",
-              "gpt-3.5-turbo": "gpt-oss-20b-mlx",
-              "claude-3-haiku": "qwen2.5-7b-instruct",
-              "claude-3-sonnet": "gpt-oss-20b-mlx"
-            }
-          },
-          features: {
-            tools: {
-              enabled: true,
-              maxTools: 10
-            },
-            streaming: {
-              enabled: true,
-              chunkSize: 1024
-            },
-            oauth: {
-              enabled: true,
-              providers: ["qwen", "iflow"]
-            }
-          }
-        };
-        break;
-
-      case 'oauth':
-        templateConfig = {
-          server: {
-            port: DEFAULT_CONFIG.PORT,
-            host: LOCAL_HOSTS.LOCALHOST
-          },
-          logging: {
-            level: "info"
-          },
-          providers: {
-            qwen: {
-              type: "qwen-provider",
-              baseUrl: "https://chat.qwen.ai",
-              oauth: {
-                clientId: "f0304373b74a44d2b584a3fb70ca9e56",
-                deviceCodeUrl: "https://chat.qwen.ai/api/v1/oauth2/device/code",
-                tokenUrl: "https://chat.qwen.ai/api/v1/oauth2/token",
-                scopes: ["openid", "profile", "email", "model.completion"]
-              },
-              models: {
-                "qwen3-coder-plus": {
-                  maxTokens: 32768,
-                  temperature: 0.7,
-                  supportsStreaming: true,
-                  supportsTools: true
-                }
-              }
-            }
-          },
-          routing: {
-            default: "qwen",
-            models: {
-              "gpt-4": "qwen3-coder-plus",
-              "gpt-3.5-turbo": "qwen3-coder-plus"
-            }
-          },
-          features: {
-            tools: {
-              enabled: true,
-              maxTools: 10
-            },
-            streaming: {
-              enabled: true,
-              chunkSize: 1024
-            },
-            oauth: {
-              enabled: true,
-              autoRefresh: true,
-              sharedCredentials: true
-            }
-          }
-        };
-        break;
-
-      default:
-        templateConfig = {
-          server: {
-            port: DEFAULT_CONFIG.PORT,
-            host: LOCAL_HOSTS.LOCALHOST
-          },
-          logging: {
-            level: "info"
-          },
-          providers: {
-            openai: {
-              type: "openai",
-              apiKey: "${OPENAI_API_KEY}",
-              baseUrl: API_ENDPOINTS.OPENAI,
-              models: {
-                "gpt-4": {
-                  maxTokens: 8192,
-                  temperature: 0.7
-                },
-                "gpt-3.5-turbo": {
-                  maxTokens: 4096,
-                  temperature: 0.7
-                }
-              }
-            }
-          },
-          routing: {
-            default: "openai"
-          },
-          features: {
-            tools: {
-              enabled: true,
-              maxTools: 10
-            },
-            streaming: {
-              enabled: true,
-              chunkSize: 1024
-            }
-          }
-        };
-    }
-
-    // Write configuration file
-    fs.writeFileSync(configPath, JSON.stringify(templateConfig, null, 2));
-
-    spinner.succeed(`Configuration initialized: ${configPath}`);
-    logger.info(`Template used: ${template || 'default'}`);
-    logger.info('You can now start the server with: rcc start');
-
-  } catch (error) {
-    spinner.fail('Failed to initialize configuration');
-    logger.error(`Initialization failed: ${  error instanceof Error ? error.message : String(error)}`);
-  }
-}
+createConfigCommand(program, { logger, createSpinner });
 
 // Stop command
 program
@@ -1556,168 +1242,15 @@ program
   });
 
 // Status command
-program
-  .command('status')
-  .description('Show server status')
-  .option('-j, --json', 'Output in JSON format')
-  .action(async (options) => {
-    try {
-      // Resolve config path and get configuration
-      const configPath = path.join(homedir(), '.routecodex', 'config.json');
-
-      // Check if config exists
-      if (!fs.existsSync(configPath)) {
-        logger.error('Configuration file not found');
-        logger.info('Please create a configuration file first:');
-        logger.info('  rcc config init');
-        if (options.json) {
-          console.log(JSON.stringify({ error: 'Configuration file not found' }, null, 2));
-        }
-        return;
-      }
-
-      let port: number;
-      let host: string;
-
-      // Load configuration to get port and host
-      try {
-        const configContent = fs.readFileSync(configPath, 'utf8');
-        const config = JSON.parse(configContent);
-
-        port = config?.port || config?.server?.port;
-        host = config?.server?.host || config?.host || LOCAL_HOSTS.LOCALHOST;
-
-        if (!port || typeof port !== 'number' || port <= 0) {
-          const errorMsg = 'Invalid or missing port configuration in configuration file';
-          logger.error(errorMsg);
-          if (options.json) {
-            console.log(JSON.stringify({ error: errorMsg }, null, 2));
-          }
-          return;
-        }
-      } catch (error) {
-        const errorMsg = `Failed to parse configuration file: ${configPath}`;
-        logger.error(errorMsg);
-        if (options.json) {
-          console.log(JSON.stringify({ error: errorMsg }, null, 2));
-        }
-        return;
-      }
-
-      // Check if server is running by trying to connect (HTTP)
-      const { get } = await import('http');
-
-      const checkServer = (port: number, host: string): Promise<HealthCheckResult> => {
-        return new Promise((resolve) => {
-          const req = get({
-            hostname: host,
-            port: port,
-            path: '/health',
-            method: 'GET',
-            timeout: 5000
-          }, (res) => {
-            let data = '';
-            res.on('data', chunk => data += chunk);
-            res.on('end', () => {
-              try {
-                const health = JSON.parse(data);
-                // Ensure required fields in case health payload differs
-                resolve({
-                  status: health?.status || 'unknown',
-                  port,
-                  host
-                });
-              } catch {
-                resolve({ status: 'unknown', port, host });
-              }
-            });
-          });
-
-          req.on('error', () => {
-            resolve({ status: 'stopped', port, host });
-          });
-
-          req.on('timeout', () => {
-            req.destroy();
-            resolve({ status: 'timeout', port, host });
-          });
-
-          req.end();
-        });
-      };
-
-      const status = await checkServer(port, host);
-
-      if (options.json) {
-        console.log(JSON.stringify(status, null, 2));
-      } else {
-        switch (status.status) {
-          case 'running':
-            logger.success(`Server is running on ${host}:${port}`);
-            break;
-          case 'stopped':
-            logger.error('Server is not running');
-            break;
-          case 'error':
-            logger.error('Server is in error state');
-            break;
-          default:
-            logger.warning('Server status unknown');
-        }
-      }
-    } catch (error) {
-      logger.error(`Status check failed: ${  error instanceof Error ? error.message : String(error)}`);
-    }
-  });
+createStatusCommand(program, {
+  logger,
+  log: (line) => console.log(line),
+  loadConfig: () => loadRouteCodexConfig(),
+  fetch
+});
 
 // Clean command: purge local capture and debug data for fresh runs
-program
-  .command('clean')
-  .description('Clean captured data and debug logs')
-  .option('-y, --yes', 'Confirm deletion without prompt')
-  .option('--what <targets>', 'Targets to clean: captures,logs,all', 'all')
-  .action(async (options) => {
-    const confirm = Boolean(options.yes);
-    const what = String(options.what || 'all');
-    if (!confirm) {
-      logger.warning("Add --yes to confirm deletion.");
-      logger.info("Example: rcc clean --yes --what all");
-      return;
-    }
-    const home = homedir();
-    const targets: Array<{ path: string; label: string }>= [];
-    if (what === 'captures' || what === 'all') {
-      targets.push({ path: path.join(home, '.routecodex', 'codex-samples'), label: 'captures' });
-    }
-    if (what === 'logs' || what === 'all') {
-      targets.push({ path: path.join(process.cwd(), 'debug-logs'), label: 'debug-logs' });
-      targets.push({ path: path.join(home, '.routecodex', 'logs'), label: 'user-logs' });
-    }
-    let removedAny = false;
-    for (const t of targets) {
-      try {
-        if (fs.existsSync(t.path)) {
-          const entries = fs.readdirSync(t.path);
-          for (const name of entries) {
-            const p = path.join(t.path, name);
-            try {
-              // Recursively remove files/folders
-              fs.rmSync(p, { recursive: true, force: true });
-              removedAny = true;
-            } catch (e) {
-              logger.warning(`Failed to remove ${p}: ${(e as Error).message}`);
-            }
-          }
-          logger.success(`Cleared ${t.label} at ${t.path}`);
-        }
-      } catch (e) {
-        logger.warning(`Unable to access ${t.label} at ${t.path}: ${(e as Error).message}`);
-      }
-    }
-    if (!removedAny) {
-      logger.info('Nothing to clean.');
-    }
-  });
+createCleanCommand(program, { logger });
 
 // Import commands at top level
 // offline-log CLI temporarily disabled to simplify build
@@ -1730,76 +1263,7 @@ program
 // simple-log command removed
 
 // Examples command
-program
-  .command('examples')
-  .description('Show usage examples')
-  .action(() => {
-    console.log(chalk.cyan('RouteCodex Usage Examples'));
-    console.log('='.repeat(40));
-    console.log('');
-
-    console.log(chalk.yellow('1. Initialize Configuration:'));
-    console.log('  # Create default configuration');
-    console.log('  rcc config init');
-    console.log('');
-    console.log('  # Create LMStudio configuration');
-    console.log('  rcc config init --template lmstudio');
-    console.log('');
-    console.log('  # Create OAuth configuration');
-    console.log('  rcc config init --template oauth');
-    console.log('');
-
-    console.log(chalk.yellow('2. Start Server:'));
-    console.log('  # Start with default config');
-    console.log('  rcc start');
-    console.log('');
-    console.log('  # Start with custom config');
-    console.log('  rcc start --config ./config/lmstudio-config.json');
-    console.log('');
-    console.log('  # Note: Port must be specified in configuration file');
-    console.log('  # Server will not start without valid port configuration');
-    console.log('');
-
-    console.log(chalk.yellow('3. Launch Claude Code:'));
-    console.log('  # Launch Claude Code with automatic server start');
-    console.log('  rcc code --ensure-server');
-    console.log('');
-    console.log('  # Launch Claude Code with specific model');
-    console.log('  rcc code --model claude-3-haiku');
-    console.log('');
-    console.log('  # Launch Claude Code with custom profile');
-    console.log('  rcc code --profile my-profile');
-    console.log('');
-
-    console.log(chalk.yellow('4. Configuration Management:'));
-    console.log('  # Show current configuration');
-    console.log('  rcc config show');
-    console.log('');
-    console.log('  # Edit configuration');
-    console.log('  rcc config edit');
-    console.log('');
-    console.log('  # Validate configuration');
-    console.log('  rcc config validate');
-    console.log('');
-
-    // Dry-Run examples removed
-
-    console.log(chalk.yellow('6. Environment Variables:'));
-    console.log('  # Set LM Studio API Key');
-    console.log('  export LM_STUDIO_API_KEY="your-api-key"');
-    console.log('');
-    console.log('  # Set OpenAI API Key');
-    console.log('  export OPENAI_API_KEY="your-api-key"');
-    console.log('');
-
-    console.log(chalk.yellow('7. Testing:'));
-    console.log('  # Test with curl');
-    console.log('  curl -X POST http://localhost:5506/v1/chat/completions \\');
-    console.log('    -H "Content-Type: application/json" \\');
-    console.log('    -H "Authorization: Bearer test-key" \\');
-    console.log('    -d \'{"model": "gpt-4", "messages": [{"role": "user", "content": "Hello!"}]}\'');
-    console.log('');
-  });
+createExamplesCommand(program, { log: (line) => console.log(line) });
 
 async function ensurePortAvailable(port: number, parentSpinner: Spinner, opts: { restart?: boolean } = {}): Promise<void> {
   if (!port || Number.isNaN(port)) { return; }
@@ -1929,28 +1393,6 @@ function findListeningPids(port: number): number[] {
 const sleep = (ms: number): Promise<void> =>
   new Promise(resolve => setTimeout(resolve, ms));
 
-function normalizePort(value: unknown): number {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return value;
-  }
-  if (typeof value === 'string' && value.trim()) {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed)) {
-      return parsed;
-    }
-  }
-  return NaN;
-}
-
-function safeReadJson<T = Record<string, unknown>>(filePath: string): T | null {
-  try {
-    const content = fs.readFileSync(filePath, 'utf8');
-    return JSON.parse(content) as T;
-  } catch {
-    return null;
-  }
-}
-
 // Fallback keypress setup: capture Ctrl+C and 'q' to trigger shutdown when SIGINT is not delivered
 function setupKeypress(onInterrupt: () => void): () => void {
   try {
@@ -2008,74 +1450,16 @@ function getModulesConfigPath(): string {
 
 
 // Port utilities: doctor
-program
-  .command('port')
-  .description('Port utilities (doctor)')
-  .argument('<sub>', 'Subcommand: doctor')
-  .argument('[port]', 'Port number (e.g., ${DEFAULT_CONFIG.PORT})')
-  .option('--kill', 'Kill all listeners on the port')
-  .action(async (sub: string, portArg: string | undefined, opts: { kill?: boolean }) => {
-    if ((sub || '').toLowerCase() !== 'doctor') {
-      console.error(chalk.red("Unknown subcommand. Use: rcc port doctor [port] [--kill]"));
-      process.exit(2);
-    }
-    const spinner = await createSpinner('Inspecting port...');
-    try {
-      let port = Number(portArg || 0);
-      if (!Number.isFinite(port) || port <= 0) {
-        // fallback to user config
-        const cfgPath = path.join(homedir(), '.routecodex', 'config.json');
-        if (fs.existsSync(cfgPath)) {
-          try {
-            const raw = fs.readFileSync(cfgPath, 'utf8');
-            const cfg = JSON.parse(raw);
-            port = (cfg?.httpserver?.port ?? cfg?.server?.port ?? cfg?.port) || port;
-          } catch { /* ignore */ }
-        }
-      }
-      if (!Number.isFinite(port) || port <= 0) {
-        spinner.fail('Missing port. Provide an explicit port or set it in ~/.routecodex/config.json');
-        process.exit(1);
-      }
-
-      const pids = findListeningPids(port);
-      spinner.stop();
-      console.log(chalk.cyan(`Port ${port} listeners:`));
-      if (!pids.length) {
-        console.log('  (none)');
-      } else {
-        for (const pid of pids) {
-          let cmd = '';
-          try {
-            cmd = spawnSync('ps', ['-o', 'command=', '-p', String(pid)], { encoding: 'utf8' }).stdout.trim();
-          } catch {
-            cmd = '';
-          }
-          const origin = /node\s+.*routecodex-worktree/.test(cmd) ? 'local-dev' : (/node\s+.*lib\/node_modules\/routecodex/.test(cmd) ? 'global' : 'unknown');
-          console.log(`  PID ${pid} [${origin}] ${cmd}`);
-        }
-      }
-
-      if (opts.kill && pids.length) {
-        const ksp = await createSpinner(`Killing ${pids.length} listener(s) on ${port}...`);
-        for (const pid of pids) {
-          try { killPidBestEffort(pid, { force: true }); } catch (e) { ksp.warn(`Failed to kill ${pid}: ${(e as Error).message}`); }
-        }
-        // brief wait
-        await sleep(300);
-        const remain = findListeningPids(port);
-        if (remain.length) {
-          ksp.fail(`Some listeners remain: ${remain.join(', ')}`);
-          process.exit(1);
-        }
-        ksp.succeed(`Port ${port} is now free.`);
-      }
-    } catch (e) {
-      spinner.fail('Port inspection failed');
-      console.error(e instanceof Error ? e.message : String(e));
-      process.exit(1);
-    }
-  });
+createPortCommand(program, {
+  defaultPort: DEFAULT_CONFIG.PORT,
+  createSpinner,
+  findListeningPids,
+  killPidBestEffort,
+  sleep,
+  log: (line) => console.log(line),
+  error: (line) => console.error(line),
+  exit: (code) => process.exit(code)
+});
 
 // Parse command line arguments (must be last)
 program.parse();
