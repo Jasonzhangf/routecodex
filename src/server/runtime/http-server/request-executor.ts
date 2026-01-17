@@ -464,6 +464,13 @@ export class HubRequestExecutor implements RequestExecutor {
           stage: 'inbound'
         };
 
+        // servertool followup 是内部二跳请求：不应继承客户端 headers 偏好（尤其是 Accept），
+        // 否则会导致上游返回非 SSE 响应而被当作 SSE 解析，出现“空回复”。
+        if (nestedMetadata.serverToolFollowup === true) {
+          delete nestedMetadata.clientHeaders;
+          delete nestedMetadata.clientRequestId;
+        }
+
         // 针对 reenterPipeline 的入口端点，纠正 providerProtocol，避免沿用外层协议。
         if (nestedEntryLower.includes('/v1/chat/completions')) {
           nestedMetadata._providerProtocol = 'openai-chat';
