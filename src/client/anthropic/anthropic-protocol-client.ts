@@ -15,7 +15,8 @@ export class AnthropicProtocolClient implements HttpProtocolClient<ProtocolReque
     const body = this.chatClient.buildRequestBody(request);
 
     try {
-      const raw = (body as any).tool_choice;
+      const bodyRecord = body as Record<string, unknown>;
+      const raw = bodyRecord.tool_choice;
       if (raw !== undefined && raw !== null) {
         let normalized: Record<string, unknown> | undefined;
         if (typeof raw === 'string') {
@@ -38,10 +39,10 @@ export class AnthropicProtocolClient implements HttpProtocolClient<ProtocolReque
           normalized = { ...(raw as Record<string, unknown>) };
         }
         if (normalized) {
-          (body as any).tool_choice = normalized;
+          bodyRecord.tool_choice = normalized;
         } else {
           // If we couldn't normalize, drop invalid value to avoid upstream 422.
-          delete (body as any).tool_choice;
+          delete bodyRecord.tool_choice;
         }
       }
     } catch {

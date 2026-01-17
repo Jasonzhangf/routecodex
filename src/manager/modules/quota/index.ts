@@ -1116,7 +1116,7 @@ function parseQuotaResetDelayMs(event: ProviderErrorEvent): number | null {
   const raw = message.toLowerCase();
 
   // Common shape: "reset after 3h22m41s" (Gemini quota exhausted)
-  const afterMatch = raw.match(/reset after\s+([0-9a-z\.\s]+)\.?/i);
+  const afterMatch = raw.match(/reset after\s+([0-9a-z.\s]+)\.?/i);
   if (afterMatch && afterMatch[1]) {
     const parsed = parseDurationToMs(afterMatch[1]);
     if (parsed && parsed > 0) {
@@ -1125,7 +1125,7 @@ function parseQuotaResetDelayMs(event: ProviderErrorEvent): number | null {
   }
 
   // Sometimes the upstream JSON is embedded; try extracting quotaResetDelay.
-  const embeddedDelayMatch = raw.match(/quotaresetdelay\"\s*:\s*\"([^\"]+)\"/i);
+  const embeddedDelayMatch = raw.match(/quotaresetdelay"\s*:\s*"([^"]+)"/i);
   if (embeddedDelayMatch && embeddedDelayMatch[1]) {
     const parsed = parseDurationToMs(embeddedDelayMatch[1]);
     if (parsed && parsed > 0) {
