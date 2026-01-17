@@ -10,6 +10,19 @@ export function createServerColoredLogger(): unknown {
   const isDev = String(process.env.BUILD_MODE || process.env.RCC_BUILD_MODE || 'release').toLowerCase() === 'dev';
 
   try {
+    // In test environment (jest), we cannot use localRequire to load ESM modules
+    // Fallback to static import if possible or return dummy logger for tests
+    if (process.env.NODE_ENV === 'test') {
+      return {
+        log: () => {},
+        logModule: () => {},
+        logStage: () => {},
+        logProviderRequest: () => {},
+        warn: () => {},
+        error: () => {}
+      };
+    }
+
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const mod = localRequire('../../../modules/pipeline/utils/colored-logger.js');
     const ColoredLogger = (mod as any).ColoredLogger || (mod as any).default || null;
@@ -25,14 +38,13 @@ export function createServerColoredLogger(): unknown {
     console.warn('[routecodex] Failed to load ColoredLogger from dist index; colored logs (provider/virtual-router) are disabled.', err);
   }
 
-  // Fallback: keep interface shape but perform no logging. This avoids
-  // breaking server startup while still surfacing the configuration issue
-  // via the warnings above.
+  // Fallback: keep interface shape but perform no logging.
   return {
-    logModule() {},
-    logProviderRequest() {},
-    logVirtualRouterHit() {},
-    logDebug() {},
-    logError() {}
+    log: () => {},
+    logModule: () => {},
+    logStage: () => {},
+    logProviderRequest: () => {},
+    warn: () => {},
+    error: () => {}
   };
 }

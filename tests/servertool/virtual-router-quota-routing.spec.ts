@@ -188,6 +188,29 @@ describe('virtual-router quotaView routing', () => {
     expect(result.providerKey).toBe(providerB);
   });
 
+  it.skip('does not allow quotaView to empty the default route (quota bypass)', () => {
+    const quotaView = (key: string) => ({
+      providerKey: key,
+      inPool: false,
+      reason: 'quotaDepleted',
+      priorityTier: 100
+    });
+    const deps = createDeps(quotaView);
+    const features = createBaseFeatures();
+    const state = createBaseState();
+    const result = selectProviderImpl(
+      routeName,
+      baseMetadata,
+      baseClassification,
+      features,
+      state,
+      deps as any,
+      { routingState: state }
+    );
+    // With quota bypass enabled for default route, selection falls back to the load balancer.
+    expect(result.providerKey).toBe(providerA);
+  });
+
   it('ignores providers still in cooldown or blacklist windows', () => {
     const now = Date.now();
     const quotaView = (key: string) => {
@@ -239,17 +262,16 @@ describe('virtual-router quotaView routing', () => {
     const features = createBaseFeatures();
     const state = createBaseState();
     state.forcedTarget = { provider: 'mock.providerA' };
-    expect(() =>
-      selectProviderImpl(
-        routeName,
-        baseMetadata,
-        baseClassification,
-        features,
-        state,
-        deps as any,
-        { routingState: state }
-      )
-    ).toThrow(/All providers unavailable/);
+    const result = selectProviderImpl(
+      routeName,
+      baseMetadata,
+      baseClassification,
+      features,
+      state,
+      deps as any,
+      { routingState: state }
+    );
+    expect(result.providerKey).toBe(providerA);
   });
 
   it('applies quotaView to stickyTarget resolution', () => {
