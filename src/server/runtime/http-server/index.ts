@@ -1725,7 +1725,10 @@ export class RouteCodexHttpServer {
       const isSseDecodeError =
         errCode === 'SSE_DECODE_ERROR' ||
         (errName === 'ProviderProtocolError' && message.toLowerCase().includes('sse'));
-      const isServerToolFollowupError = errCode === 'SERVERTOOL_FOLLOWUP_FAILED';
+      const isServerToolFollowupError =
+        errCode === 'SERVERTOOL_FOLLOWUP_FAILED' ||
+        errCode === 'SERVERTOOL_EMPTY_FOLLOWUP' ||
+        (typeof errCode === 'string' && errCode.startsWith('SERVERTOOL_'));
       if (isSseDecodeError || isServerToolFollowupError) {
         console.error('[RouteCodexHttpServer] Fatal conversion error, bubbling as HTTP error', error);
         throw error;
