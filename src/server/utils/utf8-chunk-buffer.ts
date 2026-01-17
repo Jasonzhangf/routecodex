@@ -125,7 +125,7 @@ export function createUtf8ChunkStream(minChunkSize: number = 64) {
     const { Transform } = require('stream');
 
     return new Transform({
-        transform(chunk: Buffer | string, encoding: BufferEncoding, callback: (error?: Error | null, data?: any) => void) {
+        transform(chunk: Buffer | string, encoding: BufferEncoding, callback: (error?: Error | null, data?: unknown) => void) {
             try {
                 const chunks = buffer.push(chunk);
                 for (const text of chunks) {
@@ -136,7 +136,7 @@ export function createUtf8ChunkStream(minChunkSize: number = 64) {
                 callback(error instanceof Error ? error : new Error(String(error)));
             }
         },
-        flush(callback: (error?: Error | null, data?: any) => void) {
+        flush(callback: (error?: Error | null, data?: unknown) => void) {
             try {
                 const remaining = buffer.flush();
                 if (remaining) {

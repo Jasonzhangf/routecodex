@@ -155,7 +155,7 @@ export class HubRequestExecutor implements RequestExecutor {
           });
         }
 
-        const providerProtocol = (target.outboundProfile as ProviderProtocol) || handle.providerProtocol;
+        const _providerProtocol = (target.outboundProfile as ProviderProtocol) || handle.providerProtocol;
         const metadataModel =
           mergedMetadata?.target && typeof mergedMetadata.target === 'object'
             ? (mergedMetadata.target as Record<string, unknown>).clientModelId
@@ -377,7 +377,7 @@ export class HubRequestExecutor implements RequestExecutor {
       return options.response;
     }
     try {
-      const providerProtocol = mapProviderProtocol(options.providerType);
+      const _providerProtocol = mapProviderProtocol(options.providerType);
       const metadataBag = asRecord(options.pipelineMetadata);
       const aliasMap = extractAnthropicToolAliasMap(metadataBag);
       const originalModelId = this.extractClientModelId(metadataBag, options.originalRequest);
@@ -389,7 +389,7 @@ export class HubRequestExecutor implements RequestExecutor {
       }
       baseContext.requestId = options.requestId;
       baseContext.entryEndpoint = options.entryEndpoint || entry;
-      baseContext.providerProtocol = providerProtocol;
+      baseContext._providerProtocol = providerProtocol;
       baseContext.originalModelId = originalModelId;
       const adapterContext = baseContext;
       if (aliasMap) {
@@ -466,18 +466,18 @@ export class HubRequestExecutor implements RequestExecutor {
 
         // 针对 reenterPipeline 的入口端点，纠正 providerProtocol，避免沿用外层协议。
         if (nestedEntryLower.includes('/v1/chat/completions')) {
-          nestedMetadata.providerProtocol = 'openai-chat';
+          nestedMetadata._providerProtocol = 'openai-chat';
         } else if (nestedEntryLower.includes('/v1/responses')) {
-          nestedMetadata.providerProtocol = 'openai-responses';
+          nestedMetadata._providerProtocol = 'openai-responses';
         } else if (nestedEntryLower.includes('/v1/messages')) {
-          nestedMetadata.providerProtocol = 'anthropic-messages';
+          nestedMetadata._providerProtocol = 'anthropic-messages';
         }
         const followupProtocol =
           typeof (nestedExtra as Record<string, unknown>).serverToolFollowupProtocol === 'string'
             ? ((nestedExtra as Record<string, unknown>).serverToolFollowupProtocol as string)
             : undefined;
         if (followupProtocol) {
-          nestedMetadata.providerProtocol = followupProtocol;
+          nestedMetadata._providerProtocol = followupProtocol;
         }
 
         const nestedInput: PipelineExecutionInput = {
@@ -520,7 +520,7 @@ export class HubRequestExecutor implements RequestExecutor {
     } catch (error) {
       const err = error as Error | unknown;
       const message = err instanceof Error ? err.message : String(err ?? 'Unknown error');
-      const providerProtocol = mapProviderProtocol(options.providerType);
+      const _providerProtocol = mapProviderProtocol(options.providerType);
 
       // 对于 SSE 解码失败（含上游终止），直接抛出错误并透传到 HTTP 层。
       // 否则回退到原始 payload 会让客户端挂起，无法感知失败。

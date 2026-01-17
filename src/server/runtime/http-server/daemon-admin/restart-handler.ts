@@ -4,7 +4,7 @@ import { rejectNonLocalOrUnauthorizedAdmin } from '../daemon-admin-routes.js';
 
 export function registerRestartRoutes(app: Application, options: DaemonAdminRouteOptions): void {
   app.post('/daemon/restart', async (req: Request, res: Response) => {
-    if (rejectNonLocalOrUnauthorizedAdmin(req, res, options.getExpectedApiKey?.())) return;
+    if (rejectNonLocalOrUnauthorizedAdmin(req, res, options.getExpectedApiKey?.())) {return;}
 
     const restart = options.restartRuntimeFromDisk;
     if (typeof restart !== 'function') {

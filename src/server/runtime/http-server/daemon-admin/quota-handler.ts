@@ -41,7 +41,7 @@ function getProviderQuotaModule(options: DaemonAdminRouteOptions): ProviderQuota
 
 export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteOptions): void {
   app.get('/quota/summary', (req: Request, res: Response) => {
-    if (rejectNonLocalOrUnauthorizedAdmin(req, res, options.getExpectedApiKey?.())) return;
+    if (rejectNonLocalOrUnauthorizedAdmin(req, res, options.getExpectedApiKey?.())) {return;}
     try {
       const quotaModule = getQuotaModule(options);
       const snapshot: Record<string, QuotaRecord> = quotaModule ? quotaModule.getRawSnapshot() : {};
@@ -62,13 +62,13 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
   });
 
   app.get('/quota/providers', (req: Request, res: Response) => {
-    if (rejectNonLocalOrUnauthorizedAdmin(req, res, options.getExpectedApiKey?.())) return;
+    if (rejectNonLocalOrUnauthorizedAdmin(req, res, options.getExpectedApiKey?.())) {return;}
     try {
       const mod = getProviderQuotaModule(options);
       const snapshot = mod && typeof (mod as any).getAdminSnapshot === 'function'
         ? (mod as any).getAdminSnapshot()
         : {};
-      const providers = Object.values(snapshot).map((state: any) => ({
+      const providers = Object.values(snapshot).map((state: unknown) => ({
         providerKey: state.providerKey,
         inPool: Boolean(state.inPool),
         reason: state.reason ?? null,
@@ -86,7 +86,7 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
   });
 
   app.post('/quota/providers/:providerKey/reset', async (req: Request, res: Response) => {
-    if (rejectNonLocalOrUnauthorizedAdmin(req, res, options.getExpectedApiKey?.())) return;
+    if (rejectNonLocalOrUnauthorizedAdmin(req, res, options.getExpectedApiKey?.())) {return;}
     const providerKey = String(req.params.providerKey || '').trim();
     if (!providerKey) {
       res.status(400).json({ error: { message: 'providerKey is required', code: 'bad_request' } });
@@ -109,7 +109,7 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
   });
 
   app.post('/quota/providers/:providerKey/recover', async (req: Request, res: Response) => {
-    if (rejectNonLocalOrUnauthorizedAdmin(req, res, options.getExpectedApiKey?.())) return;
+    if (rejectNonLocalOrUnauthorizedAdmin(req, res, options.getExpectedApiKey?.())) {return;}
     const providerKey = String(req.params.providerKey || '').trim();
     if (!providerKey) {
       res.status(400).json({ error: { message: 'providerKey is required', code: 'bad_request' } });
@@ -132,7 +132,7 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
   });
 
   app.post('/quota/providers/:providerKey/disable', async (req: Request, res: Response) => {
-    if (rejectNonLocalOrUnauthorizedAdmin(req, res, options.getExpectedApiKey?.())) return;
+    if (rejectNonLocalOrUnauthorizedAdmin(req, res, options.getExpectedApiKey?.())) {return;}
     const providerKey = String(req.params.providerKey || '').trim();
     if (!providerKey) {
       res.status(400).json({ error: { message: 'providerKey is required', code: 'bad_request' } });
@@ -154,7 +154,7 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
       return;
     }
     const mod = getProviderQuotaModule(options) as
-      | (ProviderQuotaDaemonModule & { disableProvider?: (options: any) => Promise<unknown> })
+      | (ProviderQuotaDaemonModule & { disableProvider?: (options: unknown) => Promise<unknown> })
       | null;
     if (!mod || typeof (mod as any).disableProvider !== 'function') {
       res.status(503).json({ error: { message: 'provider-quota module not available', code: 'not_ready' } });
@@ -170,7 +170,7 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
   });
 
   app.get('/quota/runtime', (req: Request, res: Response) => {
-    if (rejectNonLocalOrUnauthorizedAdmin(req, res, options.getExpectedApiKey?.())) return;
+    if (rejectNonLocalOrUnauthorizedAdmin(req, res, options.getExpectedApiKey?.())) {return;}
     const runtimeKey = typeof req.query.runtimeKey === 'string' ? req.query.runtimeKey : undefined;
     const providerKey = typeof req.query.providerKey === 'string' ? req.query.providerKey : undefined;
     try {
@@ -217,7 +217,7 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
   });
 
   app.get('/quota/cooldowns', (req: Request, res: Response) => {
-    if (rejectNonLocalOrUnauthorizedAdmin(req, res, options.getExpectedApiKey?.())) return;
+    if (rejectNonLocalOrUnauthorizedAdmin(req, res, options.getExpectedApiKey?.())) {return;}
     // 目前 VirtualRouter 的 series cooldown 状态未通过稳定 API 暴露；
     // 为避免与核心路由实现交叉，先返回空列表，占位以便前端视图对接。
     res.status(200).json([]);

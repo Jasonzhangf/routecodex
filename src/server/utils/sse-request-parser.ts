@@ -88,7 +88,7 @@ export async function parseSseJsonRequest(req: IncomingMessage): Promise<ParsedS
   let lastPayload: Record<string, unknown> | undefined;
   for (const event of events) {
     const data = event.data?.trim();
-    if (!data) continue;
+    if (!data) {continue;}
     try {
       const payload = JSON.parse(data);
       if (payload && typeof payload === 'object') {

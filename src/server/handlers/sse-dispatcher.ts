@@ -59,7 +59,7 @@ export function dispatchSseStream(options: DispatchSseOptions): boolean {
   let eventCount = 0;
 
   // Create UTF-8 aware chunk buffer to prevent splitting multibyte characters
-  const utf8Buffer = new Utf8ChunkBuffer(128); // Use larger chunks for better performance
+  const _utf8Buffer = new Utf8ChunkBuffer(128); // Use larger chunks for better performance
 
   const cleanup = () => {
     try {

@@ -11,7 +11,7 @@ interface ModuleStatusView {
 
 export function registerStatusRoutes(app: Application, options: DaemonAdminRouteOptions): void {
   app.get('/daemon/status', (req: Request, res: Response) => {
-    if (rejectNonLocalOrUnauthorizedAdmin(req, res, options.getExpectedApiKey?.())) return;
+    if (rejectNonLocalOrUnauthorizedAdmin(req, res, options.getExpectedApiKey?.())) {return;}
 
     const manager = options.getManagerDaemon() as
       | {
@@ -58,7 +58,7 @@ export function registerStatusRoutes(app: Application, options: DaemonAdminRoute
   // Admin-only module control helpers (stop/restart).
   // Intended for operational debugging (e.g. reload provider-quota snapshot after file deletion).
   app.post('/daemon/modules/:id/stop', async (req: Request, res: Response) => {
-    if (rejectNonLocalOrUnauthorizedAdmin(req, res, options.getExpectedApiKey?.())) return;
+    if (rejectNonLocalOrUnauthorizedAdmin(req, res, options.getExpectedApiKey?.())) {return;}
     const id = typeof req.params.id === 'string' ? req.params.id.trim() : '';
     if (!id) {
       res.status(400).json({ error: { message: 'id is required', code: 'bad_request' } });
@@ -84,7 +84,7 @@ export function registerStatusRoutes(app: Application, options: DaemonAdminRoute
   });
 
   app.post('/daemon/modules/:id/restart', async (req: Request, res: Response) => {
-    if (rejectNonLocalOrUnauthorizedAdmin(req, res, options.getExpectedApiKey?.())) return;
+    if (rejectNonLocalOrUnauthorizedAdmin(req, res, options.getExpectedApiKey?.())) {return;}
     const id = typeof req.params.id === 'string' ? req.params.id.trim() : '';
     if (!id) {
       res.status(400).json({ error: { message: 'id is required', code: 'bad_request' } });
@@ -113,7 +113,7 @@ export function registerStatusRoutes(app: Application, options: DaemonAdminRoute
   });
 
   app.post('/daemon/modules/:id/reset', async (req: Request, res: Response) => {
-    if (rejectNonLocalOrUnauthorizedAdmin(req, res, options.getExpectedApiKey?.())) return;
+    if (rejectNonLocalOrUnauthorizedAdmin(req, res, options.getExpectedApiKey?.())) {return;}
     const id = typeof req.params.id === 'string' ? req.params.id.trim() : '';
     if (!id) {
       res.status(400).json({ error: { message: 'id is required', code: 'bad_request' } });
@@ -124,7 +124,7 @@ export function registerStatusRoutes(app: Application, options: DaemonAdminRoute
       res.status(503).json({ error: { message: 'manager daemon not available', code: 'not_ready' } });
       return;
     }
-    const mod = daemon.getModule(id) as (ManagerModule & { reset?: (opts?: any) => Promise<unknown> }) | undefined;
+    const mod = daemon.getModule(id) as (ManagerModule & { reset?: (opts?: unknown) => Promise<unknown> }) | undefined;
     if (!mod) {
       res.status(404).json({ error: { message: 'module not found', code: 'not_found' } });
       return;

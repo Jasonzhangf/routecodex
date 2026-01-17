@@ -34,7 +34,7 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
   const reject = (req: Request, res: Response) => rejectNonLocalOrUnauthorizedAdmin(req, res, expectedApiKey);
 
   app.get('/providers/runtimes', (req: Request, res: Response) => {
-    if (reject(req, res)) return;
+    if (reject(req, res)) {return;}
     try {
       const artifacts = options.getVirtualRouterArtifacts() as VirtualRouterArtifacts | null;
       const targetRuntime = artifacts?.targetRuntime ?? {};
@@ -75,7 +75,7 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
   // Config V1 Provider Pool：基于 user config (virtualrouter.providers) 的声明性配置。
   // 注意：该接口只落盘，不做热更新；调用方需重启 routecodex 以应用更改。
   app.get('/config/providers', async (req: Request, res: Response) => {
-    if (reject(req, res)) return;
+    if (reject(req, res)) {return;}
     try {
       const configPath = pickUserConfigPath();
       const raw = await fs.readFile(configPath, 'utf8');
@@ -95,7 +95,7 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
 
   // Config V2 Provider 视图：基于 ~/.routecodex/provider/*/config.v2.json 的声明性配置。
   app.get('/config/providers/v2', async (req: Request, res: Response) => {
-    if (reject(req, res)) return;
+    if (reject(req, res)) {return;}
     try {
       const configs = await loadProviderConfigsV2();
       const items: ProviderConfigV2Summary[] = Object.values(configs).map((cfg: ProviderConfigV2) => {
@@ -132,7 +132,7 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
   });
 
   app.get('/config/providers/v2/:id', async (req: Request, res: Response) => {
-    if (reject(req, res)) return;
+    if (reject(req, res)) {return;}
     const id = String(req.params.id || '').trim();
     if (!id) {
       res.status(400).json({ error: { message: 'id is required' } });
@@ -158,7 +158,7 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
   });
 
   app.get('/config/providers/v2/:id/preview-route', (req: Request, res: Response) => {
-    if (reject(req, res)) return;
+    if (reject(req, res)) {return;}
     const id = String(req.params.id || '').trim();
     if (!id) {
       res.status(400).json({ error: { message: 'id is required' } });
@@ -175,7 +175,7 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
   });
 
   app.post('/config/providers/v2', async (req: Request, res: Response) => {
-    if (reject(req, res)) return;
+    if (reject(req, res)) {return;}
     const body = req.body as Record<string, unknown>;
     const providerId = typeof body?.providerId === 'string' ? body.providerId.trim() : '';
     const version = typeof body?.version === 'string' && body.version.trim() ? body.version.trim() : '2.0.0';
@@ -214,7 +214,7 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
   });
 
   app.delete('/config/providers/v2/:id', async (req: Request, res: Response) => {
-    if (reject(req, res)) return;
+    if (reject(req, res)) {return;}
     const id = String(req.params.id || '').trim();
     if (!id) {
       res.status(400).json({ error: { message: 'id is required', code: 'bad_request' } });
@@ -239,7 +239,7 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
   // Config V1 Provider Pool (by provider id).
   // NOTE: put this after `/config/providers/v2/*` so `/config/providers/v2` is not shadowed.
   app.get('/config/providers/:id', async (req: Request, res: Response) => {
-    if (reject(req, res)) return;
+    if (reject(req, res)) {return;}
     const id = String(req.params.id || '').trim();
     if (!id) {
       res.status(400).json({ error: { message: 'id is required', code: 'bad_request' } });
@@ -267,7 +267,7 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
   });
 
   app.put('/config/providers/:id', async (req: Request, res: Response) => {
-    if (reject(req, res)) return;
+    if (reject(req, res)) {return;}
     const id = String(req.params.id || '').trim();
     if (!id) {
       res.status(400).json({ error: { message: 'id is required', code: 'bad_request' } });
@@ -299,7 +299,7 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
   });
 
   app.delete('/config/providers/:id', async (req: Request, res: Response) => {
-    if (reject(req, res)) return;
+    if (reject(req, res)) {return;}
     const id = String(req.params.id || '').trim();
     if (!id) {
       res.status(400).json({ error: { message: 'id is required', code: 'bad_request' } });
@@ -320,7 +320,7 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
   });
 
   app.get('/config/routing', async (req: Request, res: Response) => {
-    if (reject(req, res)) return;
+    if (reject(req, res)) {return;}
     try {
       const configPath = pickUserConfigPath();
       const raw = await fs.readFile(configPath, 'utf8');
@@ -334,7 +334,7 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
   });
 
   app.put('/config/routing', async (req: Request, res: Response) => {
-    if (reject(req, res)) return;
+    if (reject(req, res)) {return;}
     const body = req.body as Record<string, unknown>;
     const routingNode = body?.routing;
     if (!routingNode || typeof routingNode !== 'object' || Array.isArray(routingNode)) {
@@ -356,7 +356,7 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
   });
 
   app.get('/config/settings', async (req: Request, res: Response) => {
-    if (reject(req, res)) return;
+    if (reject(req, res)) {return;}
     try {
       const configPath = pickUserConfigPath();
       const raw = await fs.readFile(configPath, 'utf8');
@@ -379,7 +379,7 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
   });
 
   app.put('/config/settings', async (req: Request, res: Response) => {
-    if (reject(req, res)) return;
+    if (reject(req, res)) {return;}
     const body = req.body as Record<string, unknown>;
     const oauthBrowser = typeof body?.oauthBrowser === 'string' ? body.oauthBrowser.trim() : '';
     if (!oauthBrowser) {

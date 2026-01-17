@@ -166,7 +166,7 @@ export async function handleResponses(
 
     if (Number.isFinite(requestTimeoutMs) && requestTimeoutMs > 0) {
       timeoutHandle = setTimeout(() => {
-        if (timedOut) return;
+        if (timedOut) {return;}
         timedOut = true;
         const err = Object.assign(new Error(`[http] request timeout after ${requestTimeoutMs}ms`), {
           code: 'HTTP_REQUEST_TIMEOUT',

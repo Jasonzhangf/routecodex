@@ -19,7 +19,7 @@ type RequestIdComponents = {
   sequence: string;
 };
 
-const CLIENT_SEQ_MAP = new Map<string, number>();
+// const CLIENT_SEQ_MAP = new Map<string, number>();
 const PROVIDER_SEQ_MAP = new Map<string, number>();
 const REQUEST_COMPONENTS = new Map<string, RequestIdComponents>();
 const REQUEST_ALIAS = new Map<string, string>();
@@ -102,15 +102,15 @@ export function resolveEffectiveRequestId(requestId?: string): string {
 
 function sanitizeEntry(endpoint?: string): string {
   const raw = typeof endpoint === 'string' ? endpoint.toLowerCase() : '';
-  if (raw.includes('/v1/responses')) return 'openai-responses';
-  if (raw.includes('/v1/messages') || raw.includes('/anthropic')) return 'anthropic-messages';
+  if (raw.includes('/v1/responses')) {return 'openai-responses';}
+  if (raw.includes('/v1/messages') || raw.includes('/anthropic')) {return 'anthropic-messages';}
   return 'openai-chat';
 }
 
 function sanitizeToken(value?: string): string {
-  if (!value || typeof value !== 'string') return 'unknown';
+  if (!value || typeof value !== 'string') {return 'unknown';}
   const trimmed = value.trim();
-  if (!trimmed) return 'unknown';
+  if (!trimmed) {return 'unknown';}
   const sanitized = trimmed.replace(/[^a-zA-Z0-9_.-]/g, '').replace(/^[^a-zA-Z]/, '');
   return sanitized || 'unknown';
 }

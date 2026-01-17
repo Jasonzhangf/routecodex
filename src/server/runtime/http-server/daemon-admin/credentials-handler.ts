@@ -83,7 +83,7 @@ export function registerCredentialRoutes(app: Application, options: DaemonAdminR
   const reject = (req: Request, res: Response) => rejectNonLocalOrUnauthorizedAdmin(req, res, expectedApiKey);
 
   app.get('/daemon/credentials', async (req: Request, res: Response) => {
-    if (reject(req, res)) return;
+    if (reject(req, res)) {return;}
     try {
       const items = await buildCredentialSummaries();
       res.status(200).json(items);
@@ -94,7 +94,7 @@ export function registerCredentialRoutes(app: Application, options: DaemonAdminR
   });
 
   app.get('/daemon/credentials/:id', async (req: Request, res: Response) => {
-    if (reject(req, res)) return;
+    if (reject(req, res)) {return;}
     const id = String(req.params.id || '').trim();
     if (!id) {
       res.status(400).json({ error: { message: 'id is required' } });
@@ -137,7 +137,7 @@ export function registerCredentialRoutes(app: Application, options: DaemonAdminR
   });
 
   app.post('/daemon/credentials/:id/verify', async (req: Request, res: Response) => {
-    if (reject(req, res)) return;
+    if (reject(req, res)) {return;}
     const id = String(req.params.id || '').trim();
     if (!id) {
       res.status(400).json({ error: { message: 'id is required' } });
@@ -166,7 +166,7 @@ export function registerCredentialRoutes(app: Application, options: DaemonAdminR
   });
 
   app.post('/daemon/credentials/:id/refresh', (req: Request, res: Response) => {
-    if (reject(req, res)) return;
+    if (reject(req, res)) {return;}
     // 为避免在 HTTP 请求路径中触发复杂的交互式 OAuth 流程，当前先返回明确的未实现标记。
     res.status(501).json({
       error: {
@@ -177,7 +177,7 @@ export function registerCredentialRoutes(app: Application, options: DaemonAdminR
   });
 
   app.post('/daemon/credentials/apikey', async (req: Request, res: Response) => {
-    if (reject(req, res)) return;
+    if (reject(req, res)) {return;}
     const body = req.body as Record<string, unknown>;
     const provider = typeof body?.provider === 'string' ? body.provider.trim() : '';
     const alias = typeof body?.alias === 'string' && body.alias.trim() ? body.alias.trim() : 'default';
@@ -210,7 +210,7 @@ export function registerCredentialRoutes(app: Application, options: DaemonAdminR
   });
 
   app.post('/daemon/oauth/authorize', async (req: Request, res: Response) => {
-    if (reject(req, res)) return;
+    if (reject(req, res)) {return;}
     const body = req.body as Record<string, unknown>;
     const provider = typeof body?.provider === 'string' ? body.provider.trim() : '';
     const alias = typeof body?.alias === 'string' && body.alias.trim() ? body.alias.trim() : '';

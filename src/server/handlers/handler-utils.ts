@@ -9,7 +9,7 @@ import { logPipelineStage } from '../utils/stage-logger.js';
 import { buildInfo } from '../../build-info.js';
 import type { RouteErrorPayload } from '../../error-handling/route-error-hub.js';
 import { reportRouteError } from '../../error-handling/route-error-hub.js';
-import { runtimeFlags } from '../../runtime/runtime-flags.js';
+// import { runtimeFlags } from '../../runtime/runtime-flags.js';
 import { formatErrorForConsole } from '../../utils/log-helpers.js';
 import {
   generateRequestIdentifiers,
@@ -331,6 +331,15 @@ export async function respondWithPipelineError(
   } catch {
     /* ignore hub failures */
   }
+  // 回传 session_id 和 conversation_id（如果存在）
+  const metadata = ctx.metadata || {};
+  const sessionId = typeof metadata.sessionId === "string" && metadata.sessionId.trim()
+    ? metadata.sessionId.trim()
+    : undefined;
+  const conversationId = typeof metadata.conversationId === "string" && metadata.conversationId.trim()
+    ? metadata.conversationId.trim()
+    : undefined;
+
   if (effectiveRequestId && mapped.body?.error && !mapped.body.error.request_id) {
     mapped.body.error.request_id = effectiveRequestId;
   }

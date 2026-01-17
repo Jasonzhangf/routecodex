@@ -1017,16 +1017,16 @@ export class RouteCodexHttpServer {
     }
     const pipelineLabel = 'hub';
     const iterationMetadata = initialMetadata;
-    const followupTriggered = false;
+    const _followupTriggered = false;
     // Provider 级别不再在单个 HTTP 请求内执行重复尝试，
     // 429/配额/熔断逻辑统一交由 llmswitch-core VirtualRouter 处理。
-    const maxAttempts = 1;
-    let attempt = 0;
+    const _maxAttempts = 1;
+    let _attempt = 0;
     const originalBodySnapshot = this.cloneRequestPayload(input.body);
     const excludedProviderKeys = new Set<string>();
 
     while (true) {
-      attempt += 1;
+      _attempt += 1;
       // 每次尝试前重置请求 body，避免上一轮 HubPipeline 的就地改写导致
       // 第二轮出现 ChatEnvelopeValidationError(messages_missing) 之类的问题。
       if (originalBodySnapshot && typeof originalBodySnapshot === 'object') {
