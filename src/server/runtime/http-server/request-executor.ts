@@ -155,7 +155,7 @@ export class HubRequestExecutor implements RequestExecutor {
           });
         }
 
-        const _providerProtocol = (target.outboundProfile as ProviderProtocol) || handle.providerProtocol;
+        const providerProtocol = (target.outboundProfile as ProviderProtocol) || handle.providerProtocol;
         const metadataModel =
           mergedMetadata?.target && typeof mergedMetadata.target === 'object'
             ? (mergedMetadata.target as Record<string, unknown>).clientModelId
@@ -389,7 +389,7 @@ export class HubRequestExecutor implements RequestExecutor {
       }
       baseContext.requestId = options.requestId;
       baseContext.entryEndpoint = options.entryEndpoint || entry;
-      baseContext._providerProtocol = providerProtocol;
+      baseContext._providerProtocol = _providerProtocol;
       baseContext.originalModelId = originalModelId;
       const adapterContext = baseContext;
       if (aliasMap) {
@@ -498,7 +498,7 @@ export class HubRequestExecutor implements RequestExecutor {
       };
 
       const converted = await bridgeConvertProviderResponse({
-        providerProtocol,
+        providerProtocol: _providerProtocol,
         providerResponse: body as Record<string, unknown>,
         context: adapterContext,
         entryEndpoint: options.entryEndpoint || entry,

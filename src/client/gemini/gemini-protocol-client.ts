@@ -24,6 +24,12 @@ export class GeminiProtocolClient implements HttpProtocolClient<ProtocolRequestP
       throw new Error('provider-runtime-error: missing model from virtual router');
     }
 
+    // Internal routing/debug metadata must never be forwarded to upstream providers.
+    // (It can be huge, e.g. __raw_request_body / clientHeaders, and may trigger 400s.)
+    if ('metadata' in body) {
+      delete (body as unknown as { metadata?: unknown }).metadata;
+    }
+
     const generationConfig = this.extractGenerationConfig(body);
     delete body.model;
     if ('max_tokens' in body) {

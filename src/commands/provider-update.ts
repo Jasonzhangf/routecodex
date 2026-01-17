@@ -7,6 +7,7 @@ import readline from 'node:readline';
 import { updateProviderModels } from '../tools/provider-update/index.js';
 import { fetchModelsFromUpstream } from '../tools/provider-update/fetch-models.js';
 import { readBlacklist, writeBlacklist } from '../tools/provider-update/blacklist.js';
+import { probeContextForModel } from '../tools/provider-update/probe-context.js';
 import type { ProviderInputConfig } from '../tools/provider-update/types.js';
 import { API_ENDPOINTS } from '../constants/index.js';
 import { loadProviderConfigsV2, type ProviderConfigV2 } from '../config/provider-v2-loader.js';
@@ -67,6 +68,18 @@ function splitCsv(raw?: unknown): string[] {
   return typeof raw === 'string' && raw.trim()
     ? raw.split(',').map((item) => item.trim()).filter(Boolean)
     : [];
+}
+
+function splitTokenThresholds(raw?: unknown): number[] {
+  const parts = splitCsv(raw);
+  const out: number[] = [];
+  for (const part of parts) {
+    const n = Math.floor(Number(part));
+    if (Number.isFinite(n) && n > 0) {
+      out.push(n);
+    }
+  }
+  return out;
 }
 
 type ProviderUpdateAuth = {
@@ -543,6 +556,172 @@ export function createProviderUpdateCommand(): Command {
       console.log(`models: upstream=${modelsRemote.length} filtered=${modelsFiltered.length} kept=${kept.length} added=${added.length} removed=${removed.length}`);
     });
 
+  const probeContext = new Command('probe-context')
+    .description('Probe context limits for each model (via /v1/responses) and optionally write maxContextTokens into config.v2.json')
+    .argument('<id>', 'Provider id to probe (directory name under ~/.routecodex/provider)')
+    .option('--root <dir>', 'Override provider root directory')
+    .option('--endpoint <url>', 'RouteCodex /v1/responses endpoint (default: $ROUTECODEX_BASE/v1/responses)')
+    .option('--key <token>', 'RouteCodex inbound API key (default: $ROUTECODEX_API_KEY or routecodex-test)')
+    .option('--encoder <model>', 'tiktoken encoder model for token sizing (default: gpt-4o)', 'gpt-4o')
+    .option('--models <items>', 'Only probe these comma-separated model ids')
+    .option('--thresholds <items>', 'Comma-separated token thresholds', '128000,150000,180000,200000,256000,512000,1000000')
+    .option('--timeout-ms <ms>', 'Per-request timeout (ms)', '60000')
+    .option('--write', 'Write maxContextTokens/maxContext back into config.v2.json (default: dry-run)', false)
+    .option('--verbose', 'Verbose logs', false)
+    .action(async (
+      id: string,
+      opts: {
+        root?: string;
+        endpoint?: string;
+        key?: string;
+        encoder?: string;
+        models?: string;
+        thresholds?: string;
+        timeoutMs?: string;
+        write?: boolean;
+        verbose?: boolean;
+      }
+    ) => {
+      const providerId = (id || '').trim();
+      if (!providerId) {
+        console.error('Provider id is required');
+        process.exit(1);
+      }
+
+      const base =
+        (() => {
+          const raw =
+            typeof opts.endpoint === 'string' && opts.endpoint.trim()
+              ? opts.endpoint.trim()
+              : typeof process.env.ROUTECODEX_BASE === 'string' && process.env.ROUTECODEX_BASE.trim()
+                ? process.env.ROUTECODEX_BASE.trim()
+                : 'http://127.0.0.1:5555';
+          const normalized = raw.replace(/\/$/, '');
+          if (normalized.endsWith('/v1/responses')) {
+            return normalized;
+          }
+          if (normalized.endsWith('/v1')) {
+            return `${normalized}/responses`;
+          }
+          return `${normalized}/v1/responses`;
+        })();
+
+      const apiKey =
+        typeof opts.key === 'string' && opts.key.trim()
+          ? opts.key.trim()
+          : typeof process.env.ROUTECODEX_API_KEY === 'string' && process.env.ROUTECODEX_API_KEY.trim()
+            ? process.env.ROUTECODEX_API_KEY.trim()
+            : typeof process.env.ROUTECODEX_APIKEY === 'string' && process.env.ROUTECODEX_APIKEY.trim()
+              ? process.env.ROUTECODEX_APIKEY.trim()
+              : 'routecodex-test';
+
+      const encoderModel = typeof opts.encoder === 'string' && opts.encoder.trim() ? opts.encoder.trim() : 'gpt-4o';
+      const thresholds = splitTokenThresholds(opts.thresholds);
+      if (!thresholds.length) {
+        console.error('No valid thresholds provided');
+        process.exit(1);
+      }
+
+      const timeoutMs = (() => {
+        const parsed = Math.floor(Number(opts.timeoutMs));
+        return Number.isFinite(parsed) && parsed > 0 ? parsed : 60_000;
+      })();
+
+      const onlyModels = splitCsv(opts.models);
+
+      const root = resolveProviderRoot(opts.root);
+      const dir = path.join(root, providerId);
+      const v2Path = path.join(dir, 'config.v2.json');
+
+      if (!(await fileExists(v2Path))) {
+        console.error(`No config.v2.json found for provider "${providerId}" under ${dir}`);
+        process.exit(1);
+      }
+
+      const raw = await fs.readFile(v2Path, 'utf8');
+      let parsed: ProviderConfigV2;
+      try {
+        parsed = JSON.parse(raw) as ProviderConfigV2;
+      } catch (e) {
+        console.error('Failed to parse existing config.v2.json:', (e as Error)?.message ?? String(e));
+        process.exit(1);
+        return;
+      }
+
+      const providerNode = (parsed.provider ?? {}) as UnknownRecord;
+      const modelsNode = normalizeModelsNode((providerNode as { models?: unknown }).models);
+      const modelIds = Object.keys(modelsNode).sort();
+      const selectedModelIds = onlyModels.length
+        ? modelIds.filter((id) => onlyModels.includes(id))
+        : modelIds;
+
+      if (!selectedModelIds.length) {
+        console.error('No models found to probe');
+        process.exit(1);
+      }
+
+      console.log(`Probing provider="${providerId}" models=${selectedModelIds.length} endpoint=${base}`);
+      console.log(`thresholds=${thresholds.join(', ')} encoder=${encoderModel} timeoutMs=${timeoutMs}`);
+
+      const results: Array<{
+        modelId: string;
+        maxPassedTokens: number | null;
+        firstFailure?: { threshold: number; status: number; message?: string };
+      }> = [];
+
+      let changed = 0;
+      for (const modelId of selectedModelIds) {
+        console.log(`\n[probe-context] model=${modelId}`);
+        // eslint-disable-next-line no-await-in-loop
+        const res = await probeContextForModel(modelId, thresholds, {
+          endpoint: base,
+          apiKey,
+          timeoutMs,
+          encoderModel
+        });
+        const max = res.maxPassedTokens;
+        if (typeof max === 'number' && Number.isFinite(max) && max > 0) {
+          const currentRaw = modelsNode[modelId];
+          const record = isRecord(currentRaw) ? { ...currentRaw } : {};
+          const prev = typeof (record as { maxContextTokens?: unknown }).maxContextTokens === 'number'
+            ? (record as { maxContextTokens?: number }).maxContextTokens
+            : undefined;
+          (record as { maxContextTokens?: number }).maxContextTokens = max;
+          (record as { maxContext?: number }).maxContext = max;
+          modelsNode[modelId] = record as UnknownRecord;
+          if (prev !== max) {
+            changed += 1;
+          }
+          console.log(`  ✅ maxPassedTokens=${max}${prev !== undefined ? ` (prev=${prev})` : ''}`);
+        } else {
+          const failure = res.firstFailure;
+          console.log(`  ❌ failed at threshold=${failure?.threshold ?? 'unknown'} status=${failure?.status ?? 'unknown'}`);
+        }
+
+        results.push({
+          modelId,
+          maxPassedTokens: res.maxPassedTokens,
+          ...(res.firstFailure ? { firstFailure: { threshold: res.firstFailure.threshold, status: res.firstFailure.status, message: res.firstFailure.message } } : {})
+        });
+
+        if (opts.verbose && res.firstFailure?.responseSnippet) {
+          console.log('  failure snippet:');
+          console.log(String(res.firstFailure.responseSnippet).slice(0, 800));
+        }
+      }
+
+      providerNode.models = modelsNode;
+      parsed.provider = providerNode;
+
+      if (opts.write) {
+        await fs.writeFile(v2Path, `${JSON.stringify(parsed, null, 2)}\n`, 'utf8');
+        console.log(`\nProvider "${providerId}" updated: ${v2Path} (models changed=${changed})`);
+      } else {
+        console.log(`\n[DRY RUN] Provider "${providerId}" would be updated: ${v2Path} (models changed=${changed})`);
+      }
+      console.log(`Probe results: ${JSON.stringify(results, null, 2)}`);
+    });
+
   // provider list
   const list = new Command('list')
     .description('List provider v2 configs under ~/.routecodex/provider')
@@ -806,6 +985,7 @@ export function createProviderUpdateCommand(): Command {
 
   cmd.addCommand(update);
   cmd.addCommand(syncModels);
+  cmd.addCommand(probeContext);
   cmd.addCommand(list);
   cmd.addCommand(add);
   cmd.addCommand(change);

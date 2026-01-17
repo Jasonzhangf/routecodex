@@ -15,6 +15,15 @@
   - `npm run lint:strict` / `npm run format:check`：静态检查
   -（重型）`npm run build:dev`：包含大量 verify + `install:global`，不适合作为 CI 默认门禁（会改全局环境）
 
+## Antigravity 模型上下文上限探测（tiktoken + 线上探测）
+
+> 目的：对 antigravity（及同类 Gemini family）每个模型做“逐档阈值探测”，把可用的最大上下文 token 数写回 `~/.routecodex/provider/<id>/config.v2.json`，避免出现 “Prompt is too long” 的误用/误配。
+
+- [x] 提供 CLI：`routecodex provider probe-context <providerId> [--write]`
+- [x] 阈值序列：`128k, 150k, 180k, 200k, 256k, 512k, 1000k`（首次失败即停止更大阈值）
+- [x] 写回：`provider.models[modelId].maxContextTokens` + `maxContext`
+- [x] 单测覆盖：token 生成精确性 + “首次失败停止”行为
+
 ## 会话标识回传（session_id / conversation_id）
 
 > 需要确认：是否要求 **HTTP 响应回传**入口 `session_id` / `conversation_id`（便于客户端复用会话/对话标识、实现 sticky/stop-message 等能力）？

@@ -68,16 +68,19 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
       const snapshot = mod && typeof (mod as any).getAdminSnapshot === 'function'
         ? (mod as any).getAdminSnapshot()
         : {};
-      const providers = Object.values(snapshot).map((state: unknown) => ({
-        providerKey: state.providerKey,
-        inPool: Boolean(state.inPool),
-        reason: state.reason ?? null,
-        authType: state.authType ?? null,
-        priorityTier: typeof state.priorityTier === 'number' ? state.priorityTier : null,
-        cooldownUntil: state.cooldownUntil ?? null,
-        blacklistUntil: state.blacklistUntil ?? null,
-        consecutiveErrorCount: typeof state.consecutiveErrorCount === 'number' ? state.consecutiveErrorCount : 0
-      }));
+      const providers = Object.values(snapshot).map((state: unknown) => {
+        const record = state && typeof state === 'object' ? (state as Record<string, unknown>) : {};
+        return {
+          providerKey: typeof record.providerKey === 'string' ? record.providerKey : '',
+          inPool: Boolean(record.inPool),
+          reason: record.reason ?? null,
+          authType: record.authType ?? null,
+          priorityTier: typeof record.priorityTier === 'number' ? record.priorityTier : null,
+          cooldownUntil: record.cooldownUntil ?? null,
+          blacklistUntil: record.blacklistUntil ?? null,
+          consecutiveErrorCount: typeof record.consecutiveErrorCount === 'number' ? record.consecutiveErrorCount : 0
+        };
+      });
       res.status(200).json({ updatedAt: Date.now(), providers });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
