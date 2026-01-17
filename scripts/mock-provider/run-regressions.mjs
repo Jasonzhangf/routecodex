@@ -188,7 +188,7 @@ async function writeTempConfig(sample, port) {
   return { dir, file };
 }
 
-function createServer(configPath, port, snapshotRoot) {
+async function createServer(configPath, port, snapshotRoot) {
   const env = {
     ...process.env,
     ROUTECODEX_USE_MOCK: '1',
@@ -207,6 +207,16 @@ function createServer(configPath, port, snapshotRoot) {
       : {})
   };
   const entry = path.join(PROJECT_ROOT, 'dist', 'index.js');
+  // Defensive: build scripts or other verification steps may clean dist between checks.
+  // Ensure the server entry exists right before spawning.
+  // (Avoids confusing "Cannot find module dist/index.js" regressions.)
+  if (!(await fileExists(entry))) {
+    console.warn('[mock:regressions] dist/index.js missing at spawn time, rebuilding via "npm run build:min"...');
+    await runBuildForMockRegressions();
+    if (!(await fileExists(entry))) {
+      throw new Error(`dist/index.js still missing after rebuild: ${entry}`);
+    }
+  }
   const child = spawn(process.execPath, [entry], {
     cwd: PROJECT_ROOT,
     env,
@@ -465,7 +475,7 @@ async function runSample(sample, index) {
   const { dir, file } = await writeTempConfig(sample, port);
   // 为当前样本创建独立的临时快照根目录，并在完成后整体删除
   const snapshotRoot = path.join(dir, 'codex-samples');
-  const server = createServer(file, port, snapshotRoot);
+  const server = await createServer(file, port, snapshotRoot);
   const tags = new Set(Array.isArray(sample.tags) ? sample.tags : []);
   const expectSseTerminationError = tags.has('responses_sse_terminated');
   const allowSampleError =

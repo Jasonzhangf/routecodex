@@ -429,6 +429,17 @@ export class RouteCodexHttpServer {
     return true;
   }
 
+  private shouldStartManagerDaemon(): boolean {
+    const mockFlag = String(process.env.ROUTECODEX_USE_MOCK || '').trim();
+    if (mockFlag === '1' || mockFlag.toLowerCase() === 'true') {
+      return false;
+    }
+    if (process.env.ROUTECODEX_MOCK_CONFIG_PATH || process.env.ROUTECODEX_MOCK_SAMPLES_DIR) {
+      return false;
+    }
+    return true;
+  }
+
   /**
    * 初始化服务器
    */
@@ -440,7 +451,8 @@ export class RouteCodexHttpServer {
       await this.errorHandling.initialize();
       await this.initializeRouteErrorHub();
       // 初始化 ManagerDaemon 骨架（当前模块为占位实现，不改变行为）
-      if (!this.managerDaemon) {
+      // Mock regressions run many short-lived servers; skip daemon to avoid flakiness from lingering background tasks.
+      if (this.shouldStartManagerDaemon() && !this.managerDaemon) {
         const serverId = `${this.config.server.host}:${this.config.server.port}`;
         const daemon = new ManagerDaemon({ serverId, quotaRoutingEnabled: this.isQuotaRoutingEnabled() });
         daemon.registerModule(new TokenManagerModule());

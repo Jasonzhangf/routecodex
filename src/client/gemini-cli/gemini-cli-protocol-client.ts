@@ -64,6 +64,10 @@ export class GeminiCLIProtocolClient implements HttpProtocolClient<ProtocolReque
     // 显式移除 OpenAI 兼容字段
     const payloadRecord = requestPayload as Record<string, unknown>;
     delete payloadRecord.stream;
+    // Cloud Code Assist: request 不接受 metadata/action/web_search 等非标准字段
+    delete payloadRecord.metadata;
+    delete payloadRecord.action;
+    delete payloadRecord.web_search;
 
     if (Object.keys(requestPayload).length > 0) {
       body.request = requestPayload;
