@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "allowedProjectRoots": [
+    "~/Documents/github"
+  ],
+  "defaults": {
+    "denyOutsideProjectDestructive": true,
+    "gitSingleFileOnly": true,
+    "denyMassKill": true
+  },
+  "rules": [
+    {
+      "id": "deny-git-reset",
+      "type": "regex",
+      "pattern": "\\bgit\\s+reset\\b",
+      "flags": "i",
+      "reason": "git reset is not allowed"
+    },
+    {
+      "id": "deny-rm-rf-anywhere",
+      "type": "regex",
+      "pattern": "\\brm\\b[^\\n]*\\s(-rf|-fr)\\b",
+      "flags": "i",
+      "reason": "rm -rf is not allowed"
+    },
+    {
+      "id": "deny-find-delete-anywhere",
+      "type": "regex",
+      "pattern": "\\bfind\\b[^\\n]*\\s-delete(\\s|$)",
+      "flags": "i",
+      "reason": "find -delete is not allowed"
+    },
+    {
+      "id": "deny-loop-or-batch-delete",
+      "type": "regex",
+      "pattern": "\\b(xargs\\s+rm\\b|for\\s+[^;\\n]+;\\s*do\\s+rm\\b|while\\s+[^;\\n]+;\\s*do\\s+rm\\b)",
+      "flags": "i",
+      "reason": "Loop/batch deletion is not allowed"
+    }
+  ]
+}
+

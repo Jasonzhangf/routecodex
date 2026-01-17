@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { runServerSideToolEngine } from '../../sharedmodule/llmswitch-core/src/servertool/server-side-tools.js';
+import { runServerToolOrchestration } from '../../sharedmodule/llmswitch-core/src/servertool/engine.js';
 import type { AdapterContext } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/json.js';
 import {
@@ -19,6 +20,23 @@ function writeRoutingStateForSession(sessionId: string, state: RoutingInstructio
     state: serializeRoutingInstructionState(state)
   };
   fs.writeFileSync(filepath, JSON.stringify(payload), { encoding: 'utf8' });
+}
+
+async function readJsonFileWithRetry<T>(filepath: string, attempts = 20, delayMs = 10): Promise<T> {
+  let lastError: unknown;
+  for (let i = 0; i < attempts; i += 1) {
+    try {
+      const raw = fs.readFileSync(filepath, 'utf8');
+      if (!raw || !raw.trim()) {
+        throw new Error('empty file');
+      }
+      return JSON.parse(raw) as T;
+    } catch (err) {
+      lastError = err;
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError ?? 'failed to read json'));
 }
 
 describe('stop_message_auto servertool', () => {
@@ -96,9 +114,9 @@ describe('stop_message_auto servertool', () => {
     expect(followup.metadata?.disableStickyRoutes).toBe(true);
     expect(followup.metadata?.preserveRouteHint).toBe(false);
 
-    const persisted = JSON.parse(
-      fs.readFileSync(path.join(SESSION_DIR, `session-${sessionId}.json`), 'utf8')
-    ) as { state?: { stopMessageUsed?: number; stopMessageLastUsedAt?: number } };
+    const persisted = await readJsonFileWithRetry<{ state?: { stopMessageUsed?: number; stopMessageLastUsedAt?: number } }>(
+      path.join(SESSION_DIR, `session-${sessionId}.json`)
+    );
     expect(persisted?.state?.stopMessageUsed).toBe(1);
     expect(typeof persisted?.state?.stopMessageLastUsedAt).toBe('number');
   });
@@ -162,5 +180,237 @@ describe('stop_message_auto servertool', () => {
     });
 
     expect(result.mode).toBe('passthrough');
+  });
+
+  test('forces followup stream=false even when captured parameters.stream=true', async () => {
+    const sessionId = 'stopmessage-spec-session-stream-override';
+    const state: RoutingInstructionState = {
+      forcedTarget: undefined,
+      stickyTarget: undefined,
+      allowedProviders: new Set(),
+      disabledProviders: new Set(),
+      disabledKeys: new Map(),
+      disabledModels: new Map(),
+      stopMessageText: '继续',
+      stopMessageMaxRepeats: 1,
+      stopMessageUsed: 0
+    };
+    writeRoutingStateForSession(sessionId, state);
+
+    const capturedChatRequest: JsonObject = {
+      model: 'gpt-test',
+      messages: [
+        {
+          role: 'user',
+          content: 'hi'
+        }
+      ],
+      parameters: {
+        stream: true
+      }
+    };
+
+    const chatResponse: JsonObject = {
+      id: 'chatcmpl-stop-stream-1',
+      object: 'chat.completion',
+      model: 'gpt-test',
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: 'assistant',
+            content: 'ok'
+          },
+          finish_reason: 'stop'
+        }
+      ]
+    };
+
+    const adapterContext: AdapterContext = {
+      requestId: 'req-stopmessage-stream-1',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      sessionId,
+      capturedChatRequest
+    } as any;
+
+    let sawFollowupStreamFalse = false;
+    const orchestration = await runServerToolOrchestration({
+      chat: chatResponse,
+      adapterContext,
+      requestId: 'req-stopmessage-stream-1',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      reenterPipeline: async (opts: any) => {
+        sawFollowupStreamFalse = opts?.body?.stream === false;
+        return {
+          body: {
+            id: 'chatcmpl-stop-stream-1-followup',
+            object: 'chat.completion',
+            model: 'gpt-test',
+            choices: [{ index: 0, message: { role: 'assistant', content: 'done' }, finish_reason: 'stop' }]
+          } as JsonObject
+        };
+      }
+    });
+
+    expect(orchestration.executed).toBe(true);
+    expect(orchestration.flowId).toBe('stop_message_flow');
+    expect(sawFollowupStreamFalse).toBe(true);
+  });
+
+  test('retries once on empty stop_followup and then succeeds', async () => {
+    const sessionId = 'stopmessage-spec-session-empty-retry';
+    const state: RoutingInstructionState = {
+      forcedTarget: undefined,
+      stickyTarget: undefined,
+      allowedProviders: new Set(),
+      disabledProviders: new Set(),
+      disabledKeys: new Map(),
+      disabledModels: new Map(),
+      stopMessageText: '继续',
+      stopMessageMaxRepeats: 1,
+      stopMessageUsed: 0
+    };
+    writeRoutingStateForSession(sessionId, state);
+
+    const capturedChatRequest: JsonObject = {
+      model: 'gpt-test',
+      messages: [
+        {
+          role: 'user',
+          content: 'hi'
+        }
+      ]
+    };
+
+    const chatResponse: JsonObject = {
+      id: 'chatcmpl-stop-empty-1',
+      object: 'chat.completion',
+      model: 'gpt-test',
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: 'assistant',
+            content: 'ok'
+          },
+          finish_reason: 'stop'
+        }
+      ]
+    };
+
+    const adapterContext: AdapterContext = {
+      requestId: 'req-stopmessage-empty-1',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      sessionId,
+      capturedChatRequest
+    } as any;
+
+    let callCount = 0;
+    const orchestration = await runServerToolOrchestration({
+      chat: chatResponse,
+      adapterContext,
+      requestId: 'req-stopmessage-empty-1',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      reenterPipeline: async () => {
+        callCount += 1;
+        if (callCount === 1) {
+          return {
+            body: {
+              id: 'chatcmpl-followup-empty',
+              object: 'chat.completion',
+              model: 'gpt-test',
+              choices: [{ index: 0, message: { role: 'assistant', content: '' }, finish_reason: 'stop' }]
+            } as JsonObject
+          };
+        }
+        return {
+          body: {
+            id: 'chatcmpl-followup-nonempty',
+            object: 'chat.completion',
+            model: 'gpt-test',
+            choices: [{ index: 0, message: { role: 'assistant', content: 'done' }, finish_reason: 'stop' }]
+          } as JsonObject
+        };
+      }
+    });
+
+    expect(orchestration.executed).toBe(true);
+    expect(orchestration.flowId).toBe('stop_message_flow');
+    expect(callCount).toBe(2);
+    expect((orchestration.chat as any)?.id).toBe('chatcmpl-followup-nonempty');
+  });
+
+  test('errors when stop_followup stays empty after retry', async () => {
+    const sessionId = 'stopmessage-spec-session-empty-error';
+    const state: RoutingInstructionState = {
+      forcedTarget: undefined,
+      stickyTarget: undefined,
+      allowedProviders: new Set(),
+      disabledProviders: new Set(),
+      disabledKeys: new Map(),
+      disabledModels: new Map(),
+      stopMessageText: '继续',
+      stopMessageMaxRepeats: 1,
+      stopMessageUsed: 0
+    };
+    writeRoutingStateForSession(sessionId, state);
+
+    const capturedChatRequest: JsonObject = {
+      model: 'gpt-test',
+      messages: [
+        {
+          role: 'user',
+          content: 'hi'
+        }
+      ]
+    };
+
+    const chatResponse: JsonObject = {
+      id: 'chatcmpl-stop-empty-2',
+      object: 'chat.completion',
+      model: 'gpt-test',
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: 'assistant',
+            content: 'ok'
+          },
+          finish_reason: 'stop'
+        }
+      ]
+    };
+
+    const adapterContext: AdapterContext = {
+      requestId: 'req-stopmessage-empty-2',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      sessionId,
+      capturedChatRequest
+    } as any;
+
+    await expect(
+      runServerToolOrchestration({
+        chat: chatResponse,
+        adapterContext,
+        requestId: 'req-stopmessage-empty-2',
+        entryEndpoint: '/v1/chat/completions',
+        providerProtocol: 'openai-chat',
+        reenterPipeline: async () => ({
+          body: {
+            id: 'chatcmpl-followup-empty',
+            object: 'chat.completion',
+            model: 'gpt-test',
+            choices: [{ index: 0, message: { role: 'assistant', content: '' }, finish_reason: 'stop' }]
+          } as JsonObject
+        })
+      })
+    ).rejects.toMatchObject({
+      code: 'SERVERTOOL_EMPTY_FOLLOWUP'
+    });
   });
 });

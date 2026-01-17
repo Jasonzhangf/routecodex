@@ -65,7 +65,6 @@ export function registerHttpRoutes(options: RouteOptions): void {
     config,
     buildHandlerContext,
     getPipelineReady,
-    handleError,
     getHealthSnapshot,
     getRoutingState,
     getVirtualRouterArtifacts
@@ -88,15 +87,20 @@ export function registerHttpRoutes(options: RouteOptions): void {
   const listModels = (_req: Request, res: Response) => {
     try {
       const artifacts = typeof getVirtualRouterArtifacts === 'function' ? getVirtualRouterArtifacts() : null;
-      const vrConfig = (artifacts as any)?.config as any;
-      const providers = vrConfig && typeof vrConfig === 'object' ? (vrConfig as any).providers : null;
+      const vrConfig = (artifacts as Record<string, unknown> | null)?.config as Record<string, unknown> | null;
+      const providers = vrConfig && typeof vrConfig === 'object' ? (vrConfig as Record<string, unknown>).providers : null;
       const items: Array<{ id: string; object: 'model'; owned_by: string }> = [];
       const seen = new Set<string>();
       if (providers && typeof providers === 'object') {
-        for (const [providerKey, profile] of Object.entries(providers as Record<string, any>)) {
+        for (const [providerKey, profileRaw] of Object.entries(providers as Record<string, unknown>)) {
+          const profile =
+            profileRaw && typeof profileRaw === 'object' && !Array.isArray(profileRaw)
+              ? (profileRaw as Record<string, unknown>)
+              : null;
+          const runtimeKey = typeof profile?.runtimeKey === 'string' ? String(profile.runtimeKey) : '';
           const providerId =
-            typeof profile?.runtimeKey === 'string' && profile.runtimeKey.includes('.')
-              ? String(profile.runtimeKey).split('.')[0]
+            runtimeKey && runtimeKey.includes('.')
+              ? runtimeKey.split('.')[0]
               : typeof providerKey === 'string' && providerKey.includes('.')
               ? providerKey.split('.')[0]
               : '';
@@ -162,7 +166,7 @@ export function registerHttpRoutes(options: RouteOptions): void {
   registerDaemonAdminRoutes({
     app,
     getManagerDaemon: () =>
-      (typeof options.getManagerDaemon === 'function' ? (options.getManagerDaemon() as any) : null),
+      (typeof options.getManagerDaemon === 'function' ? (options.getManagerDaemon() as unknown) : null),
     getVirtualRouterArtifacts: () =>
       (typeof options.getVirtualRouterArtifacts === 'function'
         ? options.getVirtualRouterArtifacts()

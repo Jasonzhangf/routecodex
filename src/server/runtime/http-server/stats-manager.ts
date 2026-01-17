@@ -577,7 +577,9 @@ export class StatsManager {
       calls.push({ name, ...(id ? { id } : {}) });
     };
 
-    const toolCalls = (record.tool_calls ?? (record.required_action as any)?.submit_tool_outputs?.tool_calls) as
+    const toolCalls = (record.tool_calls ??
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (record.required_action as any)?.submit_tool_outputs?.tool_calls) as
       | unknown
       | undefined;
     if (Array.isArray(toolCalls)) {
@@ -600,7 +602,12 @@ export class StatsManager {
         const node = entry as Record<string, unknown>;
         const type = typeof node.type === 'string' ? node.type.trim().toLowerCase() : '';
         if (type === 'function_call' || type === 'tool_call' || type === 'function') {
-          addCall(node.name ?? node.tool_name ?? (node.function as any)?.name, node.call_id ?? node.id);
+          addCall(
+            node.name ?? node.tool_name ??
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              (node.function as any)?.name,
+            node.call_id ?? node.id
+          );
         }
         if (Array.isArray(node.content)) {
           for (const contentItem of node.content as unknown[]) {
@@ -612,7 +619,9 @@ export class StatsManager {
               typeof contentNode.type === 'string' ? contentNode.type.trim().toLowerCase() : '';
             if (contentType === 'tool_call' || contentType === 'function_call') {
               addCall(
-                contentNode.name ?? contentNode.tool_name ?? (contentNode.function as any)?.name,
+                contentNode.name ?? contentNode.tool_name ??
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  (contentNode.function as any)?.name,
                 contentNode.call_id ?? contentNode.id
               );
             }
