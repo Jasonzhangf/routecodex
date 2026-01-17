@@ -14,6 +14,11 @@ export interface ServerConfigV2 {
     apikey?: string;
     timeout?: number;
     useV2?: boolean;
+    /**
+     * Whether quota management participates in virtual-router routing decisions.
+     * When false, quota daemon signals won't remove providers from the pool.
+     */
+    quotaRoutingEnabled?: boolean;
   };
   pipeline?: {
     useHubPipeline?: boolean; // legacy flag (hub is always enabled)

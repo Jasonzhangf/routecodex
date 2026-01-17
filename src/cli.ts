@@ -9,7 +9,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import fs from 'fs';
 import path from 'path';
-import { homedir } from 'os';
+import { homedir, tmpdir } from 'os';
 import { spawnSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { LOCAL_HOSTS, HTTP_PROTOCOLS, API_PATHS, DEFAULT_CONFIG, API_ENDPOINTS } from './constants/index.js';
@@ -780,6 +780,7 @@ program
   .description('Start the RouteCodex server')
   .option('-c, --config <config>', 'Configuration file path')
   .option('-p, --port <port>', 'RouteCodex server port (dev package only; overrides env/config)')
+  .option('--quota-routing <mode>', 'Quota routing admission control (on|off). off => do not remove providers from pool based on quota')
   .option('--log-level <level>', 'Log level (debug, info, warn, error)', 'info')
   .option('--codex', 'Use Codex system prompt (tools unchanged)')
   .option('--claude', 'Use Claude system prompt (tools unchanged)')
@@ -868,6 +869,47 @@ program
         spinner.fail('Failed to parse configuration file');
         logger.error(`Invalid JSON in configuration file: ${configPath}`);
         process.exit(1);
+      }
+
+      const parseBoolish = (value: unknown): boolean | undefined => {
+        if (typeof value !== 'string') {
+          return undefined;
+        }
+        const normalized = value.trim().toLowerCase();
+        if (!normalized) {
+          return undefined;
+        }
+        if (normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on' || normalized === 'enable' || normalized === 'enabled') {
+          return true;
+        }
+        if (normalized === '0' || normalized === 'false' || normalized === 'no' || normalized === 'off' || normalized === 'disable' || normalized === 'disabled') {
+          return false;
+        }
+        return undefined;
+      };
+
+      const quotaRoutingOverride = parseBoolish((options as { quotaRouting?: unknown }).quotaRouting);
+      if ((options as { quotaRouting?: unknown }).quotaRouting !== undefined && quotaRoutingOverride === undefined) {
+        spinner.fail('Invalid --quota-routing value. Use on|off');
+        process.exit(1);
+      }
+      if (typeof quotaRoutingOverride === 'boolean') {
+        const carrier = config && typeof config === 'object' ? (config as Record<string, unknown>) : {};
+        const httpserver =
+          carrier.httpserver && typeof carrier.httpserver === 'object' && carrier.httpserver !== null
+            ? (carrier.httpserver as Record<string, unknown>)
+            : {};
+        carrier.httpserver = {
+          ...httpserver,
+          quotaRoutingEnabled: quotaRoutingOverride
+        };
+        config = carrier;
+
+        const dir = fs.mkdtempSync(path.join(tmpdir(), 'routecodex-config-'));
+        const patchedPath = path.join(dir, 'config.json');
+        fs.writeFileSync(patchedPath, JSON.stringify(config, null, 2), 'utf8');
+        configPath = patchedPath;
+        spinner.info(`quota routing override: ${quotaRoutingOverride ? 'on' : 'off'} (temp config)`);
       }
 
       // Determine effective port:

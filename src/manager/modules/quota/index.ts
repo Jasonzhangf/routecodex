@@ -48,6 +48,7 @@ export class QuotaManagerModule implements ManagerModule {
   private snapshot: Record<string, QuotaRecord> = {};
   private antigravityTokens: Map<string, AntigravityTokenRegistration> = new Map();
   private refreshTimer: NodeJS.Timeout | null = null;
+  private quotaRoutingEnabled = true;
   private providerErrorCenter:
     | {
         emit(event: ProviderErrorEvent): void;
@@ -56,6 +57,7 @@ export class QuotaManagerModule implements ManagerModule {
 
   async init(context: ManagerContext): Promise<void> {
     this.snapshot = this.loadSnapshotFromDisk();
+    this.quotaRoutingEnabled = context.quotaRoutingEnabled !== false;
   }
 
   async start(): Promise<void> {
@@ -404,6 +406,9 @@ export class QuotaManagerModule implements ManagerModule {
     if (!providerKey || !modelId) {
       return;
     }
+    if (!this.quotaRoutingEnabled) {
+      return;
+    }
     const center = await this.getProviderErrorCenterInstance();
     if (!center) {
       return;
@@ -442,6 +447,9 @@ export class QuotaManagerModule implements ManagerModule {
     cooldownMs?: number
   ): Promise<void> {
     if (!providerKey || !modelId) {
+      return;
+    }
+    if (!this.quotaRoutingEnabled) {
       return;
     }
     const center = await this.getProviderErrorCenterInstance();
@@ -486,12 +494,7 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
   private unsubscribe: (() => void) | null = null;
   private maintenanceTimer: NodeJS.Timeout | null = null;
   private persistTimer: NodeJS.Timeout | null = null;
-  private disabled = false;
-
-  private isQuotaDisabled(): boolean {
-    const raw = String(process.env.ROUTECODEX_QUOTA_ENABLED || process.env.RCC_QUOTA_ENABLED || '').trim().toLowerCase();
-    return raw === '0' || raw === 'false' || raw === 'no';
-  }
+  private quotaRoutingEnabled = true;
 
   private async loadSnapshotIntoMemory(): Promise<void> {
     // Always clear in-memory state first so operator actions like deleting provider-quota.json
@@ -540,8 +543,8 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
     }
   }
 
-  async init(_context: ManagerContext): Promise<void> {
-    this.disabled = this.isQuotaDisabled();
+  async init(context: ManagerContext): Promise<void> {
+    this.quotaRoutingEnabled = context.quotaRoutingEnabled !== false;
     try {
       await this.loadSnapshotIntoMemory();
     } catch {
@@ -667,8 +670,7 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
   }
 
   async start(): Promise<void> {
-    this.disabled = this.isQuotaDisabled();
-    if (this.disabled) {
+    if (!this.quotaRoutingEnabled) {
       return;
     }
     let center:
@@ -704,7 +706,6 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
   }
 
   async stop(): Promise<void> {
-    this.disabled = this.isQuotaDisabled();
     if (this.unsubscribe) {
       try {
         this.unsubscribe();
@@ -721,7 +722,7 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
       clearTimeout(this.persistTimer);
       this.persistTimer = null;
     }
-    if (this.disabled) {
+    if (!this.quotaRoutingEnabled) {
       return;
     }
     try {
@@ -732,6 +733,9 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
   }
 
   recordProviderUsage(event: { providerKey: string; requestedTokens?: number | null; timestampMs?: number }): void {
+    if (!this.quotaRoutingEnabled) {
+      return;
+    }
     const providerKey = typeof event?.providerKey === 'string' ? event.providerKey.trim() : '';
     if (!providerKey) {
       return;
@@ -754,6 +758,9 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
   }
 
   recordProviderSuccess(event: { providerKey: string; usedTokens?: number | null; timestampMs?: number }): void {
+    if (!this.quotaRoutingEnabled) {
+      return;
+    }
     const providerKey = typeof event?.providerKey === 'string' ? event.providerKey.trim() : '';
     if (!providerKey) {
       return;
@@ -776,6 +783,9 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
   }
 
   registerProviderStaticConfig(providerKey: string, config: { authType?: string | null; priorityTier?: number | null } = {}): void {
+    if (!this.quotaRoutingEnabled) {
+      return;
+    }
     const key = typeof providerKey === 'string' ? providerKey.trim() : '';
     if (!key) {
       return;
@@ -1015,6 +1025,9 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
     cooldownUntil?: number | null;
     blacklistUntil?: number | null;
   } | null {
+    if (!this.quotaRoutingEnabled) {
+      return () => null;
+    }
     return (providerKey: string) => {
       const key = typeof providerKey === 'string' ? providerKey.trim() : '';
       if (!key) {

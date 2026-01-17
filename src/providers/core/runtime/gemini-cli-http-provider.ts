@@ -424,10 +424,6 @@ class GeminiSseNormalizer extends Transform {
       processedEvents: this.processedEventCounter,
       emittedEvents: this.eventCounter
     });
-    if (process.env.ROUTECODEX_DEBUG_GEMINI_RAW === '1') {
-      console.log('[DEBUG-GEMINI-RAW]', JSON.stringify(this.capturedEvents, null, 2));
-    }
-
     if (this.lastDonePayload) {
       this.pushEvent('gemini.done', this.lastDonePayload);
       this.lastDonePayload = null;

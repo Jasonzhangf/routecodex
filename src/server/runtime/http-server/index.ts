@@ -421,6 +421,14 @@ export class RouteCodexHttpServer {
     return Boolean(this.hubPipeline);
   }
 
+  private isQuotaRoutingEnabled(): boolean {
+    const flag = (this.config.server as { quotaRoutingEnabled?: unknown }).quotaRoutingEnabled;
+    if (typeof flag === 'boolean') {
+      return flag;
+    }
+    return true;
+  }
+
   /**
    * 初始化服务器
    */
@@ -434,7 +442,7 @@ export class RouteCodexHttpServer {
       // 初始化 ManagerDaemon 骨架（当前模块为占位实现，不改变行为）
       if (!this.managerDaemon) {
         const serverId = `${this.config.server.host}:${this.config.server.port}`;
-        const daemon = new ManagerDaemon({ serverId });
+        const daemon = new ManagerDaemon({ serverId, quotaRoutingEnabled: this.isQuotaRoutingEnabled() });
         daemon.registerModule(new TokenManagerModule());
         daemon.registerModule(new RoutingStateManagerModule());
         daemon.registerModule(new HealthManagerModule());
@@ -739,9 +747,7 @@ export class RouteCodexHttpServer {
       hubConfig.routingStateStore = routingStateStore;
     }
     const quotaModule = this.managerDaemon?.getModule('provider-quota') as ProviderQuotaDaemonModule | undefined;
-    const quotaFlagRaw = String(process.env.ROUTECODEX_QUOTA_ENABLED || '').trim().toLowerCase();
-    const quotaDisabled = quotaFlagRaw === '0' || quotaFlagRaw === 'false' || quotaFlagRaw === 'no';
-    if (!quotaDisabled && quotaModule && typeof quotaModule.getQuotaView === 'function') {
+    if (this.isQuotaRoutingEnabled() && quotaModule && typeof quotaModule.getQuotaView === 'function') {
       hubConfig.quotaView = quotaModule.getQuotaView();
     }
     if (!this.hubPipeline) {
@@ -1184,7 +1190,7 @@ export class RouteCodexHttpServer {
 
         const usage = this.extractUsageFromResult(converted, mergedMetadata);
         const quotaModule = this.managerDaemon?.getModule('provider-quota') as ProviderQuotaDaemonModule | undefined;
-        if (quotaModule) {
+        if (this.isQuotaRoutingEnabled() && quotaModule) {
           const totalTokens =
             typeof usage?.total_tokens === 'number' && Number.isFinite(usage.total_tokens)
               ? Math.max(0, usage.total_tokens)
@@ -1240,7 +1246,7 @@ export class RouteCodexHttpServer {
           providerLabel
         });
         const quotaModule = this.managerDaemon?.getModule('provider-quota') as ProviderQuotaDaemonModule | undefined;
-        if (quotaModule) {
+        if (this.isQuotaRoutingEnabled() && quotaModule) {
           try {
             quotaModule.recordProviderUsage({ providerKey: target.providerKey, requestedTokens: 0 });
           } catch {

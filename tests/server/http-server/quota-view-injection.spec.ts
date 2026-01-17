@@ -6,15 +6,9 @@ import fs from 'node:fs/promises';
 const BRIDGE_MODULE_PATH = path.resolve(process.cwd(), 'src/modules/llmswitch/bridge.ts');
 
 describe('RouteCodexHttpServer quotaView injection', () => {
-  const originalQuotaFlag = process.env.ROUTECODEX_QUOTA_ENABLED;
   let tempConfigPath = '';
 
   afterEach(async () => {
-    if (originalQuotaFlag === undefined) {
-      delete process.env.ROUTECODEX_QUOTA_ENABLED;
-    } else {
-      process.env.ROUTECODEX_QUOTA_ENABLED = originalQuotaFlag;
-    }
     if (tempConfigPath) {
       try {
         await fs.rm(path.dirname(tempConfigPath), { recursive: true, force: true });
@@ -47,7 +41,6 @@ describe('RouteCodexHttpServer quotaView injection', () => {
   }
 
   it('injects quotaView into HubPipeline config by default', async () => {
-    delete process.env.ROUTECODEX_QUOTA_ENABLED;
     tempConfigPath = await createTempUserConfig();
 
     const captured: { quotaView?: unknown } = {};
@@ -104,8 +97,7 @@ describe('RouteCodexHttpServer quotaView injection', () => {
     expect(captured.quotaView).toBe(quotaView);
   });
 
-  it('does not inject quotaView when ROUTECODEX_QUOTA_ENABLED disables it', async () => {
-    process.env.ROUTECODEX_QUOTA_ENABLED = '0';
+  it('does not inject quotaView when server quotaRoutingEnabled is false', async () => {
     tempConfigPath = await createTempUserConfig();
 
     const captured: { quotaView?: unknown } = {};
@@ -141,9 +133,10 @@ describe('RouteCodexHttpServer quotaView injection', () => {
     }));
 
     const { RouteCodexHttpServer } = await import('../../../src/server/runtime/http-server/index.js');
+
     const config: any = {
       configPath: tempConfigPath,
-      server: { host: '127.0.0.1', port: 0 },
+      server: { host: '127.0.0.1', port: 0, quotaRoutingEnabled: false },
       pipeline: {},
       logging: { level: 'error', enableConsole: false },
       providers: {}
@@ -153,6 +146,7 @@ describe('RouteCodexHttpServer quotaView injection', () => {
     (server as any).managerDaemon = {
       getModule: (id: string) => (id === 'provider-quota' ? { getQuotaView: () => quotaView } : undefined)
     };
+
     const userConfigRaw = JSON.parse(await fs.readFile(tempConfigPath, 'utf8'));
     await server.initializeWithUserConfig(userConfigRaw);
 

@@ -265,7 +265,7 @@ const PROVIDER_TEMPLATES: ProviderTemplate[] = [
     label: 'Gemini CLI (Cloud Code Assist)',
     providerTypeHint: 'gemini-cli',
     defaultBaseUrl: 'https://cloudcode-pa.googleapis.com',
-    defaultModel: 'gemini-2.5-pro',
+    defaultModel: 'gemini-2.5-flash-lite',
     defaultAuthType: 'gemini-cli-oauth'
   },
   {
@@ -273,7 +273,7 @@ const PROVIDER_TEMPLATES: ProviderTemplate[] = [
     label: 'Antigravity (Gemini CLI dev)',
     providerTypeHint: 'antigravity',
     defaultBaseUrl: 'https://cloudcode-pa.googleapis.com',
-    defaultModel: 'gemini-2.5-pro',
+    defaultModel: 'gemini-2.5-flash-lite',
     defaultAuthType: 'gemini-cli-oauth'
   },
   {

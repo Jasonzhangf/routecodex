@@ -30,6 +30,13 @@ export function shouldRetryProviderError(error: unknown): boolean {
   if (!error || typeof error !== 'object') {
     return false;
   }
+  // Deterministic context overflow: retrying the *same* model will keep failing,
+  // but a different model/provider in the same route pool might accept it.
+  // This matches the virtual-router strategy: if a target is over its context window,
+  // switch to the next candidate before giving up.
+  if (isPromptTooLongError(error)) {
+    return true;
+  }
   // virtualRouterSeriesCooldown 表示 provider 已经把 alias 从池子里拉黑，需要切换到下一位。
   // 这类错误仍然属于「可恢复」，因为虚拟路由会根据 cooldown 信息选择新的目标。
   if (hasVirtualRouterSeriesCooldown(error)) {
@@ -47,6 +54,56 @@ export function shouldRetryProviderError(error: unknown): boolean {
     return true;
   }
   return false;
+}
+
+function isPromptTooLongError(error: unknown): boolean {
+  const status = extractErrorStatusCode(error);
+  // Most upstreams return 400 for context overflow; keep this narrow to avoid retries on generic 400s.
+  if (status !== 400) {
+    return false;
+  }
+  const messages: string[] = [];
+  const rawMessage = (error as { message?: unknown }).message;
+  if (typeof rawMessage === 'string' && rawMessage.trim()) {
+    messages.push(rawMessage);
+  }
+  const upstreamMessage = (error as { upstreamMessage?: unknown }).upstreamMessage;
+  if (typeof upstreamMessage === 'string' && upstreamMessage.trim()) {
+    messages.push(upstreamMessage);
+  }
+  const details = (error as { details?: unknown }).details;
+  if (details && typeof details === 'object') {
+    const msg = (details as { upstreamMessage?: unknown }).upstreamMessage;
+    if (typeof msg === 'string' && msg.trim()) {
+      messages.push(msg);
+    }
+  }
+  const response = (error as { response?: unknown }).response;
+  if (response && typeof response === 'object') {
+    const data = (response as { data?: unknown }).data;
+    if (data && typeof data === 'object') {
+      const err = (data as { error?: unknown }).error;
+      if (err && typeof err === 'object') {
+        const msg = (err as { message?: unknown }).message;
+        if (typeof msg === 'string' && msg.trim()) {
+          messages.push(msg);
+        }
+      }
+    }
+  }
+  const combined = messages.join(' | ').toLowerCase();
+  if (!combined) {
+    return false;
+  }
+  return (
+    combined.includes('prompt is too long') ||
+    combined.includes('maximum context') ||
+    combined.includes('max context') ||
+    combined.includes('context length') ||
+    combined.includes('context_window_exceeded') ||
+    combined.includes('token limit') ||
+    combined.includes('too many tokens')
+  );
 }
 
 export function extractErrorStatusCode(error: unknown): number | undefined {

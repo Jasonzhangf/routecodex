@@ -137,6 +137,29 @@ function readRecordString(record: UnknownRecord | undefined, key: string): strin
   return readString(record[key]);
 }
 
+function readBoolean(value: unknown): boolean | undefined {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on') {
+      return true;
+    }
+    if (normalized === '0' || normalized === 'false' || normalized === 'no' || normalized === 'off') {
+      return false;
+    }
+  }
+  return undefined;
+}
+
+function readRecordBoolean(record: UnknownRecord | undefined, key: string): boolean | undefined {
+  if (!record) {
+    return undefined;
+  }
+  return readBoolean(record[key]);
+}
+
 if (!process.env.ROUTECODEX_VERSION) {
   let resolvedVersion = 'dev';
   try {
@@ -262,6 +285,7 @@ class RouteCodexApp {
       let bindPort = port;
       let bindApiKey = readRecordString(getNestedRecord(userConfigRecord, ['httpserver']), 'apikey')
         ?? readRecordString(getNestedRecord(userConfigRecord, ['modules', 'httpserver', 'config']), 'apikey');
+      let quotaRoutingEnabled: boolean | undefined;
       try {
         const envPort = Number(process.env.ROUTECODEX_PORT || process.env.RCC_PORT || NaN);
         const httpConfig =
@@ -269,6 +293,9 @@ class RouteCodexApp {
           getNestedRecord(userConfigRecord, ['modules', 'httpserver', 'config']);
         const serverConfig = getNestedRecord(userConfigRecord, ['server']);
         const portRaw = readRecordNumber(httpConfig, 'port') ?? readRecordNumber(serverConfig, 'port');
+        quotaRoutingEnabled =
+          readRecordBoolean(httpConfig, 'quotaRoutingEnabled') ??
+          readRecordBoolean(httpConfig, 'quotaRouting');
         bindApiKey = readRecordString(httpConfig, 'apikey') ?? bindApiKey;
         if (Number.isFinite(envPort) && envPort > 0) {
           bindPort = envPort;
@@ -290,7 +317,13 @@ class RouteCodexApp {
       const hooksOn = !hooksOff;
       this.httpServer = new RouteCodexHttpServer({
         configPath: this.configPath,
-        server: { host: bindHost, port: bindPort, apikey: bindApiKey, useV2: true },
+        server: {
+          host: bindHost,
+          port: bindPort,
+          apikey: bindApiKey,
+          useV2: true,
+          ...(typeof quotaRoutingEnabled === 'boolean' ? { quotaRoutingEnabled } : {})
+        },
         logging: { level: 'debug', enableConsole: true },
         providers: {},
         v2Config: { enableHooks: hooksOn }
