@@ -486,6 +486,12 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
   private unsubscribe: (() => void) | null = null;
   private maintenanceTimer: NodeJS.Timeout | null = null;
   private persistTimer: NodeJS.Timeout | null = null;
+  private disabled = false;
+
+  private isQuotaDisabled(): boolean {
+    const raw = String(process.env.ROUTECODEX_QUOTA_ENABLED || process.env.RCC_QUOTA_ENABLED || '').trim().toLowerCase();
+    return raw === '0' || raw === 'false' || raw === 'no';
+  }
 
   private async loadSnapshotIntoMemory(): Promise<void> {
     // Always clear in-memory state first so operator actions like deleting provider-quota.json
@@ -535,6 +541,7 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
   }
 
   async init(_context: ManagerContext): Promise<void> {
+    this.disabled = this.isQuotaDisabled();
     try {
       await this.loadSnapshotIntoMemory();
     } catch {
@@ -660,6 +667,10 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
   }
 
   async start(): Promise<void> {
+    this.disabled = this.isQuotaDisabled();
+    if (this.disabled) {
+      return;
+    }
     let center:
       | { subscribe?: (handler: (event: ProviderErrorEvent) => void) => () => void }
       | null
@@ -693,6 +704,7 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
   }
 
   async stop(): Promise<void> {
+    this.disabled = this.isQuotaDisabled();
     if (this.unsubscribe) {
       try {
         this.unsubscribe();
@@ -708,6 +720,9 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
     if (this.persistTimer) {
       clearTimeout(this.persistTimer);
       this.persistTimer = null;
+    }
+    if (this.disabled) {
+      return;
     }
     try {
       await saveProviderQuotaSnapshot(this.toSnapshotObject(), new Date());
