@@ -17,4 +17,8 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+      - name: Ensure sharedmodule symlink
+        run: |
+          ln -sfn "$GITHUB_WORKSPACE/sharedmodule/llmswitch-core" "$GITHUB_WORKSPACE/sharedmodule/llmswitch-core"
+          ls -la "$GITHUB_WORKSPACE/sharedmodule/llmswitch-core/src/tools/tool-registry.js"
       - run: npm run jest:run -- tests/sharedmodule/apply-patch-full.spec.ts tests/sharedmodule/provider-compat-tests.spec.ts tests/sharedmodule/provider-compat-gemini.spec.ts tests/sharedmodule/provider-compat-anthropic.spec.ts
