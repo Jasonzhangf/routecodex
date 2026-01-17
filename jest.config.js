@@ -32,18 +32,14 @@ const config = {
       statements: 70,
     },
   },
-  setupFilesAfterEnv: ['<rootDir>/tests/setup.ts'],
-  moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json', 'node'],
-  maxWorkers: '50%',
-  verbose: false,
-  testTimeout: 30000,
   moduleNameMapper: {
+    // Keep existing .js stripping for ESM
     '^(\\.{1,2}/.*)\\.js$': '$1',
-    '^rcc-debugcenter$': '<rootDir>/tests/mocks/rcc-debugcenter.ts',
-    '^rcc-basemodule$': '<rootDir>/tests/mocks/rcc-basemodule.ts',
-    '^rcc-errorhandling$': '<rootDir>/tests/mocks/rcc-errorhandling.ts',
-    '.*modules/llmswitch/core-loader\\.js$': '<rootDir>/tests/mocks/core-loader.ts',
-    '^yaml$': '<rootDir>/tests/mocks/yaml.js',
+
+    // IMPORTANT: host CI must not depend on local sharedmodule worktree.
+    // Map sharedmodule imports used by tests to npm-installed @jsonstudio/llms.
+    '^\\.\\./\\.\\./sharedmodule/llmswitch-core/src/(.*)$': '@jsonstudio/llms/dist/$1',
+    '^\\.\\./\\.\\./\\.\\./sharedmodule/llmswitch-core/dist/(.*)$': '@jsonstudio/llms/dist/$1',
   },
 };
 
