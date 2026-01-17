@@ -25,6 +25,7 @@ import { loadRouteCodexConfig } from './config/routecodex-config-loader.js';
 import { createConfigCommand } from './cli/commands/config.js';
 import { createStopCommand } from './cli/commands/stop.js';
 import { createRestartCommand } from './cli/commands/restart.js';
+import { createStartCommand } from './cli/commands/start.js';
 // Spinner wrapper (lazy-loaded to avoid hard dependency on ora/restore-cursor issues)
 type Spinner = {
   start(text?: string): Spinner;
@@ -708,305 +709,37 @@ createEnvCommand(program, {
 });
 
 // Start command
-program
-  .command('start')
-  .description('Start the RouteCodex server')
-  .option('-c, --config <config>', 'Configuration file path')
-  .option('-p, --port <port>', 'RouteCodex server port (dev package only; overrides env/config)')
-  .option('--quota-routing <mode>', 'Quota routing admission control (on|off). off => do not remove providers from pool based on quota')
-  .option('--log-level <level>', 'Log level (debug, info, warn, error)', 'info')
-  .option('--codex', 'Use Codex system prompt (tools unchanged)')
-  .option('--claude', 'Use Claude system prompt (tools unchanged)')
-  .option('--ua <mode>', 'Upstream User-Agent override mode (e.g., codex)')
-  .option('--snap', 'Force-enable snapshot capture')
-  .option('--snap-off', 'Disable snapshot capture')
-  .option('--verbose-errors', 'Print verbose error stacks in console output')
-  .option('--quiet-errors', 'Silence detailed error stacks')
-  .option('--restart', 'Restart if an instance is already running')
-  .option('--exclusive', 'Always take over the port (kill existing listeners)')
-  .action(async (options) => {
-    const spinner = await createSpinner('Starting RouteCodex server...');
-
-    try {
-      // Validate system prompt replacement flags
-      try {
-        if (options.codex && options.claude) {
-          spinner.fail('Flags --codex and --claude are mutually exclusive');
-          process.exit(1);
-        }
-        const promptFlag = options.codex ? 'codex' : (options.claude ? 'claude' : null);
-        if (promptFlag) {
-          process.env.ROUTECODEX_SYSTEM_PROMPT_SOURCE = promptFlag;
-          process.env.ROUTECODEX_SYSTEM_PROMPT_ENABLE = '1';
-        }
-        const uaFromFlag =
-          typeof options.ua === 'string' && options.ua.trim()
-            ? options.ua.trim()
-            : null;
-        const uaMode = uaFromFlag || (options.codex ? 'codex' : null);
-        if (uaMode) {
-          process.env.ROUTECODEX_UA_MODE = uaMode;
-        }
-        if (options.snap && options.snapOff) {
-          spinner.fail('Flags --snap and --snap-off are mutually exclusive');
-          process.exit(1);
-        }
-        if (options.snap) {
-          process.env.ROUTECODEX_SNAPSHOT = '1';
-        } else if (options.snapOff) {
-          process.env.ROUTECODEX_SNAPSHOT = '0';
-        }
-        if (options.verboseErrors && options.quietErrors) {
-          spinner.fail('Flags --verbose-errors and --quiet-errors are mutually exclusive');
-          process.exit(1);
-        }
-        if (options.verboseErrors) {
-          process.env.ROUTECODEX_VERBOSE_ERRORS = '1';
-        } else if (options.quietErrors) {
-          process.env.ROUTECODEX_VERBOSE_ERRORS = '0';
-        }
-      } catch { /* ignore */ }
-
-      // Resolve config path
-      let configPath = options.config;
-      if (!configPath) {
-        configPath = path.join(homedir(), '.routecodex', 'config.json');
-      }
-
-      // Ensure provided config path is a file (not a directory)
-      if (fs.existsSync(configPath)) {
-        const stats = fs.statSync(configPath);
-        if (stats.isDirectory()) {
-          spinner.fail(`Configuration path must be a file, received directory: ${configPath}`);
-          process.exit(1);
-        }
-      }
-
-      // Check if config exists; do NOT create defaults
-      if (!fs.existsSync(configPath)) {
-        spinner.fail(`Configuration file not found: ${configPath}`);
-        logger.error('Please create a RouteCodex user config first (e.g., ~/.routecodex/config.json).');
-        logger.error('Or initialize via CLI:');
-        logger.error('  rcc config init');
-        logger.error('Or specify a custom configuration file:');
-        logger.error('  rcc start --config ./my-config.json');
-        process.exit(1);
-      }
-
-      // Load and validate configuration (non-dev packages rely on config port)
-      let config;
-  try {
-    const configContent = fs.readFileSync(configPath, 'utf8');
-    config = JSON.parse(configContent);
-  } catch (error) {
-        spinner.fail('Failed to parse configuration file');
-        logger.error(`Invalid JSON in configuration file: ${configPath}`);
-        process.exit(1);
-      }
-
-      const parseBoolish = (value: unknown): boolean | undefined => {
-        if (typeof value !== 'string') {
-          return undefined;
-        }
-        const normalized = value.trim().toLowerCase();
-        if (!normalized) {
-          return undefined;
-        }
-        if (normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on' || normalized === 'enable' || normalized === 'enabled') {
-          return true;
-        }
-        if (normalized === '0' || normalized === 'false' || normalized === 'no' || normalized === 'off' || normalized === 'disable' || normalized === 'disabled') {
-          return false;
-        }
-        return undefined;
-      };
-
-      const quotaRoutingOverride = parseBoolish((options as { quotaRouting?: unknown }).quotaRouting);
-      if ((options as { quotaRouting?: unknown }).quotaRouting !== undefined && quotaRoutingOverride === undefined) {
-        spinner.fail('Invalid --quota-routing value. Use on|off');
-        process.exit(1);
-      }
-      if (typeof quotaRoutingOverride === 'boolean') {
-        const carrier = config && typeof config === 'object' ? (config as Record<string, unknown>) : {};
-        const httpserver =
-          carrier.httpserver && typeof carrier.httpserver === 'object' && carrier.httpserver !== null
-            ? (carrier.httpserver as Record<string, unknown>)
-            : {};
-        carrier.httpserver = {
-          ...httpserver,
-          quotaRoutingEnabled: quotaRoutingOverride
-        };
-        config = carrier;
-
-        const dir = fs.mkdtempSync(path.join(tmpdir(), 'routecodex-config-'));
-        const patchedPath = path.join(dir, 'config.json');
-        fs.writeFileSync(patchedPath, JSON.stringify(config, null, 2), 'utf8');
-        configPath = patchedPath;
-        spinner.info(`quota routing override: ${quotaRoutingOverride ? 'on' : 'off'} (temp config)`);
-      }
-
-      // Determine effective port:
-      // - dev package (`routecodex`): env override, otherwise固定端口 5555（完全忽略配置中的端口）
-      // - release package (`rcc`): 严格按配置文件端口启动
-      let resolvedPort: number;
-      if (IS_DEV_PACKAGE) {
-        const flagPort = typeof options.port === 'string' ? Number(options.port) : NaN;
-        if (!Number.isNaN(flagPort) && flagPort > 0) {
-          logger.info(`Using port ${flagPort} from --port flag [dev package: routecodex]`);
-          resolvedPort = flagPort;
-        } else {
-          const envPort = Number(process.env.ROUTECODEX_PORT || process.env.RCC_PORT || NaN);
-          if (!Number.isNaN(envPort) && envPort > 0) {
-            logger.info(`Using port ${envPort} from environment (ROUTECODEX_PORT/RCC_PORT) [dev package: routecodex]`);
-            resolvedPort = envPort;
-          } else {
-            resolvedPort = DEFAULT_DEV_PORT;
-            logger.info(`Using dev default port ${resolvedPort} (routecodex dev package)`);
-          }
-        }
-      } else {
-        const port = (config?.httpserver?.port ?? config?.server?.port ?? config?.port);
-        if (!port || typeof port !== 'number' || port <= 0) {
-          spinner.fail('Invalid or missing port configuration');
-          logger.error('Please set a valid port (httpserver.port or top-level port) in your configuration');
-          process.exit(1);
-        }
-        resolvedPort = port;
-      }
-
-      // Ensure port state aligns with requested behavior (always take over to avoid duplicates)
-      await ensurePortAvailable(resolvedPort, spinner, { restart: true });
-
-      const resolveServerHost = (): string => {
-        if (typeof config?.httpserver?.host === 'string' && config.httpserver.host.trim()) {
-          return config.httpserver.host;
-        }
-        if (typeof config?.server?.host === 'string' && config.server.host.trim()) {
-          return config.server.host;
-        }
-        if (typeof config?.host === 'string' && config.host.trim()) {
-          return config.host;
-        }
-        return LOCAL_HOSTS.LOCALHOST;
-      };
-      const serverHost = resolveServerHost();
-      process.env.ROUTECODEX_PORT = String(resolvedPort);
-      process.env.RCC_PORT = String(resolvedPort);
-      process.env.ROUTECODEX_HTTP_HOST = serverHost;
-      process.env.ROUTECODEX_HTTP_PORT = String(resolvedPort);
-      await ensureLocalTokenPortalEnv();
-
-      // Best-effort auto-start of token daemon (can be disabled via env)
-      await ensureTokenDaemonAutoStart();
-
-      // simple-log application removed
-
-      // Resolve modules config path
-      const modulesConfigPath = getModulesConfigPath();
-      if (!fs.existsSync(modulesConfigPath)) {
-        spinner.fail(`Modules configuration file not found: ${modulesConfigPath}`);
-        process.exit(1);
-      }
-
-      // resolvedPort already determined above
-
-      // Spawn child Node process to run the server entry; forward signals
-      const nodeBin = process.execPath; // current Node
-      const serverEntry = path.resolve(__dirname, 'index.js');
-      // Use spawn (not spawnSync); import child_process at top already
-      const { spawn } = await import('child_process');
-
-      const env = { ...process.env } as NodeJS.ProcessEnv;
-      // Ensure server process picks the intended user config path
-      env.ROUTECODEX_CONFIG = configPath;
-      env.ROUTECODEX_CONFIG_PATH = configPath;
-      // 对 dev 包（routecodex），强制通过环境变量传递端口，确保服务器与 CLI 使用同一个 5555/自定义端口
-      if (IS_DEV_PACKAGE) {
-        env.ROUTECODEX_PORT = String(resolvedPort);
-      }
-      const args: string[] = [serverEntry, modulesConfigPath];
-
-      const childProc = spawn(nodeBin, args, { stdio: 'inherit', env });
-      // Persist child pid for out-of-band stop diagnostics
-      try {
-        const pidFile = path.join(homedir(), '.routecodex', 'server.cli.pid');
-        fs.writeFileSync(pidFile, String(childProc.pid ?? ''), 'utf8');
-      } catch (error) { /* ignore */ }
-
-      const host = serverHost;
-      spinner.succeed(`RouteCodex server starting on ${host}:${resolvedPort}`);
-      logger.info(`Configuration loaded from: ${configPath}`);
-      logger.info(`Server will run on port: ${resolvedPort}`);
-      logger.info('Press Ctrl+C to stop the server');
-
-      // Forward signals to child
-      const shutdown = async (sig: NodeJS.Signals) => {
-        // 1) Ask server to shutdown over HTTP
-        try {
-          await fetch(`${HTTP_PROTOCOLS.HTTP}${LOCAL_HOSTS.IPV4}:${resolvedPort}${API_PATHS.SHUTDOWN}`, { method: 'POST' }).catch(() => {});
-        } catch (error) { /* ignore */ }
-        // 2) Forward signal to child
-        try { childProc.kill(sig); } catch (error) { /* ignore */ }
-        if (!IS_WINDOWS) {
-          try { if (childProc.pid) { process.kill(-childProc.pid, sig); } } catch (error) { /* ignore */ }
-        }
-        // 3) Wait briefly; if still listening, try SIGTERM/SIGKILL by port
-        const deadline = Date.now() + 3500;
-        while (Date.now() < deadline) {
-          if (findListeningPids(resolvedPort).length === 0) {break;}
-          await sleep(120);
-        }
-        const remain = findListeningPids(resolvedPort);
-        if (remain.length) {
-          for (const pid of remain) {
-            killPidBestEffort(pid, { force: false });
-          }
-          const killDeadline = Date.now() + 1500;
-          while (Date.now() < killDeadline) {
-            if (findListeningPids(resolvedPort).length === 0) {break;}
-            await sleep(100);
-          }
-        }
-        const still = findListeningPids(resolvedPort);
-        if (still.length) {
-          for (const pid of still) {
-            killPidBestEffort(pid, { force: true });
-          }
-        }
-        if (IS_DEV_PACKAGE) {
-          await stopTokenDaemonIfRunning();
-        }
-        // Ensure parent exits even if child fails to exit
-        try { process.exit(0); } catch { /* ignore */ }
-      };
-      process.on('SIGINT', () => { void shutdown('SIGINT'); });
-      process.on('SIGTERM', () => { void shutdown('SIGTERM'); });
-
-      // Fallback keypress handler: capture Ctrl+C / q when some environments swallow SIGINT
-      const cleanupKeypress = setupKeypress(() => { void shutdown('SIGINT'); });
-
-      childProc.on('exit', (code, signal) => {
-        // Propagate exit code
-        try { cleanupKeypress(); } catch { /* ignore */ }
-        if (signal) {
-          process.exit(0);
-        } else {
-          process.exit(code ?? 0);
-        }
-      });
-
-      // Do not exit parent; keep process alive to relay signals
-      await new Promise<void>(() => {
-        // Keep supervisor alive until shutdown completes
-        return;
-      });
-
-    } catch (error) {
-      spinner.fail('Failed to start server');
-      logger.error(error instanceof Error ? error.message : String(error));
-      process.exit(1);
-    }
-  });
+createStartCommand(program, {
+  isDevPackage: IS_DEV_PACKAGE,
+  isWindows: IS_WINDOWS,
+  defaultDevPort: DEFAULT_DEV_PORT,
+  nodeBin: process.execPath,
+  createSpinner,
+  logger,
+  env: process.env,
+  fsImpl: fs,
+  pathImpl: path,
+  homedir,
+  tmpdir,
+  sleep,
+  ensureLocalTokenPortalEnv,
+  ensureTokenDaemonAutoStart,
+  stopTokenDaemonIfRunning,
+  ensurePortAvailable,
+  findListeningPids,
+  killPidBestEffort,
+  getModulesConfigPath,
+  resolveServerEntryPath: () => path.resolve(__dirname, 'index.js'),
+  spawn: (cmd, args, opts) => spawn(cmd, args, opts),
+  fetch,
+  setupKeypress,
+  waitForever: () =>
+    new Promise<void>(() => {
+      return;
+    }),
+  onSignal: (sig, cb) => process.on(sig, cb),
+  exit: (code) => process.exit(code)
+});
 
 // Config command
 createConfigCommand(program, { logger, createSpinner });
