@@ -336,11 +336,11 @@ export async function respondWithPipelineError(
   }
   if (options?.forceSse) {
     // For streaming clients, return an SSE error event so the client can surface the failure.
-    // Use 200 to keep SSE parsers happy; embed the actual status in the event payload.
+    // Use the mapped HTTP status so clients can fail fast; embed the status in the event payload as well.
     const payload = mapped.body?.error
       ? { type: 'error', status: mapped.status, error: mapped.body.error }
       : { type: 'error', status: mapped.status, error: mapped.body };
-    res.status(200);
+    res.status(mapped.status);
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
