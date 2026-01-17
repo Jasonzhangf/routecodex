@@ -65,7 +65,7 @@ export function emitProviderError(options: EmitOptions): void {
   const err = normalizeError(options.error);
   const code = normalizeCode(err, options.stage);
   const status = determineStatusCode(err, options.statusCode);
-  let recoverable = options.recoverable ?? (err.retryable === true);
+  const recoverable = options.recoverable ?? (err.retryable === true);
 
   // 组装细粒度 details：优先使用错误自身的 details，再叠加调用方附加信息。
   let mergedDetails: Record<string, unknown> | undefined = extractRecord(err.details);
@@ -156,14 +156,10 @@ export function emitProviderError(options: EmitOptions): void {
       options.runtime.target && typeof options.runtime.target === 'object'
         ? (options.runtime.target as { clientModelId?: string }).clientModelId
         : undefined;
-    const extras = {
-      requestId: options.runtime.requestId,
-      providerKey: options.runtime.providerKey,
-      model: targetModel
-    };
     const sanitizedContext = formatErrorForErrorCenter({
       requestId: options.runtime.requestId,
       providerKey: options.runtime.providerKey,
+      model: targetModel,
       providerType: options.runtime.providerType,
       providerFamily: options.runtime.providerFamily,
       routeName: options.runtime.routeName,
