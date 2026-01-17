@@ -15,6 +15,12 @@ import { LOCAL_HOSTS, HTTP_PROTOCOLS, API_PATHS, DEFAULT_CONFIG, API_ENDPOINTS }
 import { buildInfo } from './build-info.js';
 import { ensureLocalTokenPortalEnv } from './token-portal/local-token-portal.js';
 import { parseNetstatListeningPids } from './utils/windows-netstat.js';
+import {
+  ensurePortAvailableImpl,
+  findListeningPidsImpl,
+  isServerHealthyQuickImpl,
+  killPidBestEffortImpl
+} from './cli/server/port-utils.js';
 import { createEnvCommand } from './cli/commands/env.js';
 import { createPortCommand } from './cli/commands/port.js';
 import { createCleanCommand } from './cli/commands/clean.js';
@@ -125,26 +131,12 @@ async function ensureTokenDaemonAutoStart(): Promise<void> {
 }
 
 function killPidBestEffort(pid: number, opts: { force: boolean }): void {
-  if (!Number.isFinite(pid) || pid <= 0) {
-    return;
-  }
-  if (IS_WINDOWS) {
-    const args = ['/PID', String(pid), '/T'];
-    if (opts.force) {
-      args.push('/F');
-    }
-    try {
-      spawnSync('taskkill', args, { stdio: 'ignore', encoding: 'utf8' });
-    } catch {
-      // best-effort
-    }
-    return;
-  }
-  try {
-    process.kill(pid, opts.force ? 'SIGKILL' : 'SIGTERM');
-  } catch {
-    // best-effort
-  }
+  return killPidBestEffortImpl({
+    pid,
+    force: Boolean(opts?.force),
+    isWindows: IS_WINDOWS,
+    spawnSyncImpl: spawnSync
+  });
 }
 
 async function stopTokenDaemonIfRunning(): Promise<void> {
@@ -373,128 +365,30 @@ createCleanCommand(program, { logger });
 createExamplesCommand(program, { log: (line) => console.log(line) });
 
 async function ensurePortAvailable(port: number, parentSpinner: Spinner, opts: { restart?: boolean } = {}): Promise<void> {
-  if (!port || Number.isNaN(port)) { return; }
-
-  // Best-effort HTTP shutdown on common loopback hosts to cover IPv4/IPv6
-  try {
-    const candidates = [LOCAL_HOSTS.IPV4, LOCAL_HOSTS.LOCALHOST];
-    for (const h of candidates) {
-      try {
-        const controller = new AbortController();
-        const t = setTimeout(() => { try { controller.abort(); } catch (error) { /* ignore */ } }, 700);
-        await fetch(`http://${h}:${port}/shutdown`, { method: 'POST', signal: controller.signal }).catch(() => {});
-        clearTimeout(t);
-      } catch (error) { /* ignore */ }
-    }
-    await sleep(300);
-  } catch { /* ignore */ }
-
-  const initialPids = findListeningPids(port);
-  if (initialPids.length === 0) { return; }
-
-  // If a healthy server is already running and no restart requested, report and exit gracefully
-  const healthy = await isServerHealthyQuick(port);
-  if (healthy && !opts.restart) {
-    parentSpinner.stop();
-    logger.success(`RouteCodex is already running on port ${port}.`);
-    logger.info(`Use 'rcc stop' or 'rcc start --restart' to restart.`);
-    process.exit(0);
-  }
-
-  parentSpinner.stop();
-  logger.warning(`Port ${port} is in use by PID(s): ${initialPids.join(', ')}`);
-  const stopSpinner = await createSpinner(`Port ${port} is in use on 0.0.0.0. Attempting graceful stop...`);
-  const gracefulTimeout = Number(process.env.ROUTECODEX_STOP_TIMEOUT_MS ?? 5000);
-  const killTimeout = Number(process.env.ROUTECODEX_KILL_TIMEOUT_MS ?? 3000);
-  const pollInterval = 150;
-
-  for (const pid of initialPids) {
-    try {
-      killPidBestEffort(pid, { force: false });
-    } catch (error) {
-      stopSpinner.warn(`Failed to send SIGTERM to PID ${pid}: ${(error as Error).message}`);
-    }
-  }
-
-  const gracefulDeadline = Date.now() + gracefulTimeout;
-  while (Date.now() < gracefulDeadline) {
-    if (findListeningPids(port).length === 0) {
-      stopSpinner.succeed(`Port ${port} freed after graceful stop.`);
-      logger.success(`Port ${port} freed after graceful stop.`);
-      parentSpinner.start('Starting RouteCodex server...');
-      return;
-    }
-    await sleep(pollInterval);
-  }
-
-  let remaining = findListeningPids(port);
-  if (remaining.length) {
-    stopSpinner.warn(`Graceful stop timed out, sending SIGKILL to PID(s): ${remaining.join(', ')}`);
-    logger.warning(`Graceful stop timed out. Forcing SIGKILL to PID(s): ${remaining.join(', ')}`);
-    for (const pid of remaining) {
-      try {
-        killPidBestEffort(pid, { force: true });
-      } catch (error) {
-        const message = (error as Error).message;
-        stopSpinner.warn(`Failed to send SIGKILL to PID ${pid}: ${message}`);
-        logger.error(`Failed to SIGKILL PID ${pid}: ${message}`);
-      }
-    }
-
-    const killDeadline = Date.now() + killTimeout;
-    while (Date.now() < killDeadline) {
-      if (findListeningPids(port).length === 0) {
-        stopSpinner.succeed(`Port ${port} freed after SIGKILL.`);
-        logger.success(`Port ${port} freed after SIGKILL.`);
-        parentSpinner.start('Starting RouteCodex server...');
-        return;
-      }
-      await sleep(pollInterval);
-    }
-  }
-
-  remaining = findListeningPids(port);
-  if (remaining.length) {
-    stopSpinner.fail(`Failed to free port ${port}. Still held by PID(s): ${remaining.join(', ')}`);
-    logger.error(`Failed to free port ${port}. Still held by PID(s): ${remaining.join(', ')}`);
-    throw new Error(`Failed to free port ${port}`);
-  }
-
-  stopSpinner.succeed(`Port ${port} freed.`);
-  logger.success(`Port ${port} freed.`);
-  parentSpinner.start('Starting RouteCodex server...');
+  return ensurePortAvailableImpl({
+    port,
+    parentSpinner,
+    opts,
+    fetchImpl: fetch,
+    sleep,
+    env: process.env,
+    logger,
+    createSpinner,
+    findListeningPids,
+    killPidBestEffort,
+    isServerHealthyQuick,
+    exit: (code) => process.exit(code)
+  });
 }
 
 function findListeningPids(port: number): number[] {
-  try {
-    if (IS_WINDOWS) {
-      const result = spawnSync('netstat', ['-ano', '-p', 'tcp'], { encoding: 'utf8' });
-      if (result.error) {
-        logger.warning(`netstat not available to inspect port usage: ${result.error.message}`);
-        return [];
-      }
-      return parseNetstatListeningPids(result.stdout || '', port);
-    }
-
-    // macOS/BSD lsof expects either "-i TCP:port" or "-tiTCP:port" as a single argument.
-    // Use the compact form to avoid treating ":port" as a filename.
-    const result = spawnSync('lsof', [`-tiTCP:${port}`, '-sTCP:LISTEN'], { encoding: 'utf8' });
-    if (result.error) {
-      logger.warning(`lsof not available to inspect port usage: ${result.error.message}`);
-      return [];
-    }
-    const stdout = (result.stdout || '').trim();
-    if (!stdout) {
-      return [];
-    }
-    return stdout
-      .split(/\s+/)
-      .map((value) => parseInt(value, 10))
-      .filter((pid) => !Number.isNaN(pid));
-  } catch (error) {
-    logger.warning(`Failed to inspect port ${port}: ${(error as Error).message}`);
-    return [];
-  }
+  return findListeningPidsImpl({
+    port,
+    isWindows: IS_WINDOWS,
+    spawnSyncImpl: spawnSync,
+    logger,
+    parseNetstatListeningPids
+  });
 }
 
 // Fallback keypress setup: capture Ctrl+C and 'q' to trigger shutdown when SIGINT is not delivered
@@ -535,17 +429,7 @@ function setupKeypress(onInterrupt: () => void): () => void {
 }
 
 async function isServerHealthyQuick(port: number): Promise<boolean> {
-  try {
-    const controller = new AbortController();
-    const t = setTimeout(() => { try { controller.abort(); } catch { /* ignore */ } }, 800);
-    const res = await fetch(`${HTTP_PROTOCOLS.HTTP}${LOCAL_HOSTS.IPV4}:${port}${API_PATHS.HEALTH}`, { method: 'GET', signal: controller.signal });
-    clearTimeout(t);
-    if (!res.ok) { return false; }
-    const data = await res.json().catch(() => null);
-    return !!data && (data.status === 'healthy' || data.status === 'ready');
-  } catch (error) {
-    return false;
-  }
+  return isServerHealthyQuickImpl({ port, fetchImpl: fetch });
 }
 
 function getModulesConfigPath(): string {
