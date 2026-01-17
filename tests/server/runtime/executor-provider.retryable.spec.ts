@@ -10,10 +10,15 @@ describe('shouldRetryProviderError', () => {
     expect(shouldRetryProviderError(err)).toBe(true);
   });
 
+  it('retries when status is nested but message is a strong match', () => {
+    const err: any = new Error('Prompt is too long');
+    err.response = { data: { error: { status: 400, message: 'Prompt is too long' } } };
+    expect(shouldRetryProviderError(err)).toBe(true);
+  });
+
   it('does not retry on generic 400 errors', () => {
     const err: any = new Error('HTTP 400: {"error":{"message":"bad request"}}');
     err.statusCode = 400;
     expect(shouldRetryProviderError(err)).toBe(false);
   });
 });
-

@@ -59,7 +59,9 @@ export function shouldRetryProviderError(error: unknown): boolean {
 function isPromptTooLongError(error: unknown): boolean {
   const status = extractErrorStatusCode(error);
   // Most upstreams return 400 for context overflow; keep this narrow to avoid retries on generic 400s.
-  if (status !== 400) {
+  // Some error shims only expose the message (or nest status inside response.data.error.status),
+  // so allow missing status when the message is a strong match.
+  if (status !== undefined && status !== 400) {
     return false;
   }
   const messages: string[] = [];
@@ -125,6 +127,14 @@ export function extractErrorStatusCode(error: unknown): number | undefined {
     if (typeof nestedStatus === 'number') {
       statusCandidates.push(nestedStatus);
     }
+    const upstreamStatus = (detailStatus as { upstreamStatus?: unknown }).upstreamStatus;
+    if (typeof upstreamStatus === 'number') {
+      statusCandidates.push(upstreamStatus);
+    }
+    const upstreamStatusSnake = (detailStatus as { upstream_status?: unknown }).upstream_status;
+    if (typeof upstreamStatusSnake === 'number') {
+      statusCandidates.push(upstreamStatusSnake);
+    }
   }
   const response = (error as { response?: unknown }).response;
   if (response && typeof response === 'object') {
@@ -135,6 +145,16 @@ export function extractErrorStatusCode(error: unknown): number | undefined {
     const respStatusCode = (response as { statusCode?: unknown }).statusCode;
     if (typeof respStatusCode === 'number') {
       statusCandidates.push(respStatusCode);
+    }
+    const data = (response as { data?: unknown }).data;
+    if (data && typeof data === 'object') {
+      const errNode = (data as { error?: unknown }).error;
+      if (errNode && typeof errNode === 'object') {
+        const nested = (errNode as { status?: unknown }).status;
+        if (typeof nested === 'number') {
+          statusCandidates.push(nested);
+        }
+      }
     }
   }
   const explicit = statusCandidates.find((candidate): candidate is number => typeof candidate === 'number');
