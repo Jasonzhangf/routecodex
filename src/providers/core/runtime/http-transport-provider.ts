@@ -382,10 +382,22 @@ export class HttpTransportProvider extends BaseProvider {
       this.config.config.overrides?.headers ||
       (this.config.config as { headers?: Record<string, string> }).headers ||
       undefined;
+    const normalizedStreamIdleTimeoutMs =
+      typeof this.config.config.overrides?.streamIdleTimeoutMs === 'number' &&
+      Number.isFinite(this.config.config.overrides.streamIdleTimeoutMs)
+        ? this.config.config.overrides.streamIdleTimeoutMs
+        : undefined;
+    const normalizedStreamHeadersTimeoutMs =
+      typeof this.config.config.overrides?.streamHeadersTimeoutMs === 'number' &&
+      Number.isFinite(this.config.config.overrides.streamHeadersTimeoutMs)
+        ? this.config.config.overrides.streamHeadersTimeoutMs
+        : undefined;
     this.httpClient = new HttpClient({
       baseUrl: effectiveBase,
       timeout: effectiveTimeout,
       maxRetries: effectiveRetries,
+      streamIdleTimeoutMs: normalizedStreamIdleTimeoutMs ?? profile.streamIdleTimeoutMs,
+      streamHeadersTimeoutMs: normalizedStreamHeadersTimeoutMs ?? profile.streamHeadersTimeoutMs,
       defaultHeaders: {
         'Content-Type': 'application/json',
         ...(profile.headers || {}),

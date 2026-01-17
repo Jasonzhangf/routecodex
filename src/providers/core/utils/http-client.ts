@@ -42,6 +42,15 @@ export interface HttpClientConfig {
   maxRetries?: number;
   retryDelay?: number;
   defaultHeaders?: Record<string, string>;
+  /**
+   * Stream idle timeout (ms) after response headers are received.
+   * When upstream stream produces no bytes for this long, abort.
+   */
+  streamIdleTimeoutMs?: number;
+  /**
+   * Stream headers timeout (ms) before the initial response headers are received.
+   */
+  streamHeadersTimeoutMs?: number;
 }
 
 /**
@@ -107,7 +116,9 @@ export class HttpClient {
       retryDelay: 0,
       defaultHeaders: {
         'Content-Type': 'application/json'
-      }
+      },
+      streamIdleTimeoutMs: config.streamIdleTimeoutMs ?? NaN,
+      streamHeadersTimeoutMs: config.streamHeadersTimeoutMs ?? NaN
     };
   }
 
@@ -144,20 +155,11 @@ export class HttpClient {
     const timeout = this.defaultConfig.timeout;
     // NOTE: stream 请求如果在拿到 response body 后立刻清除 timeout，会导致“流式卡死不返回”。
     // 这里维持一个全局 timeout + idle timeout，直到上游流结束或被消费者关闭。
-    const envIdle = Number(
-      process.env.ROUTECODEX_PROVIDER_STREAM_IDLE_TIMEOUT_MS ||
-        process.env.RCC_PROVIDER_STREAM_IDLE_TIMEOUT_MS ||
-        NaN
-    );
-    const idleTimeoutMs = Number.isFinite(envIdle) && envIdle > 0 ? envIdle : Math.min(120_000, timeout);
-    const envHeadersTimeout = Number(
-      process.env.ROUTECODEX_PROVIDER_STREAM_HEADERS_TIMEOUT_MS ||
-        process.env.RCC_PROVIDER_STREAM_HEADERS_TIMEOUT_MS ||
-        NaN
-    );
-    const headersTimeoutMs = Number.isFinite(envHeadersTimeout) && envHeadersTimeout > 0
-      ? envHeadersTimeout
-      : Math.min(30_000, timeout);
+    const cfgIdle = this.defaultConfig.streamIdleTimeoutMs;
+    const idleTimeoutMs = Number.isFinite(cfgIdle) && cfgIdle > 0 ? cfgIdle : Math.min(120_000, timeout);
+    const cfgHeaders = this.defaultConfig.streamHeadersTimeoutMs;
+    // NOTE: default headers timeout used to be fixed at 30s, which is too short for some upstreams.
+    const headersTimeoutMs = Number.isFinite(cfgHeaders) && cfgHeaders > 0 ? cfgHeaders : Math.min(60_000, timeout);
     const abortWithReason = (reason: string) => {
       try {
         const err = Object.assign(new Error(reason), { code: reason, name: 'AbortError' });

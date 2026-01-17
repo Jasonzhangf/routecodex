@@ -87,6 +87,8 @@ export interface ServiceOverrides {
   endpoint?: string;
   timeout?: number;
   maxRetries?: number;
+  streamIdleTimeoutMs?: number;
+  streamHeadersTimeoutMs?: number;
 }
 
 /**

@@ -178,6 +178,8 @@ export interface ServiceProfile {
   headers?: Record<string, string>;
   timeout?: number;
   maxRetries?: number;
+  streamIdleTimeoutMs?: number;
+  streamHeadersTimeoutMs?: number;
 
   // Hook系统支持
   hooks?: ProviderHooks;
