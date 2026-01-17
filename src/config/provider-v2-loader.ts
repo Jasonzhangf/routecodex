@@ -40,8 +40,12 @@ async function listProviderDirs(rootDir: string): Promise<ProviderDirEntry[]> {
   const entries = await fs.readdir(rootDir, { withFileTypes: true });
   const dirs: ProviderDirEntry[] = [];
   for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    if (entry.name === '.DS_Store') continue;
+    if (!entry.isDirectory()) {
+      continue;
+    }
+    if (entry.name === '.DS_Store') {
+      continue;
+    }
     const id = entry.name;
     const dirPath = path.join(rootDir, id);
     dirs.push({ id, dirPath });

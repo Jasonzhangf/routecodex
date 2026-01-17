@@ -104,12 +104,9 @@ export function createQuotaDaemonCommand(): Command {
 
       const total = Object.keys(providers).length;
       const inPool = Object.values(providers).filter((p) => p && p.inPool).length;
-      console.log(
-        `[quota-daemon] ${opts.dryRun ? 'dry-run ' : ''}completed: providers=${total} inPool=${inPool}` +
-          (replayPath ? ` replay=${replayPath}` : '')
-      );
+      const replaySuffix = replayPath ? ` replay=${replayPath}` : '';
+      console.log(`[quota-daemon] ${opts.dryRun ? 'dry-run ' : ''}completed: providers=${total} inPool=${inPool}${replaySuffix}`);
     });
 
   return cmd;
 }
-
