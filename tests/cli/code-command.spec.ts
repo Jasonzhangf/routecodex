@@ -71,7 +71,7 @@ describe('cli code command', () => {
     expect(spawnCalls).toHaveLength(1);
     expect(spawnCalls[0]!.command).toBe('claude');
     expect(spawnCalls[0]!.args).toEqual(['--model', 'sonnet', '--foo', 'bar']);
-    expect(spawnCalls[0]!.options?.env?.ANTHROPIC_BASE_URL).toBe('http://127.0.0.1:1234/proxy');
+    expect(spawnCalls[0]!.options?.env?.ANTHROPIC_BASE_URL).toBe('http://0.0.0.0:1234/proxy');
   });
 
   it('errors when port cannot be resolved (release mode, no --url)', async () => {
@@ -132,7 +132,6 @@ describe('cli code command', () => {
 
     await program.parseAsync(['node', 'routecodex', 'code', '--', '--x'], { from: 'node' });
     expect(spawnCalls).toHaveLength(1);
-    expect(spawnCalls[0]!.options?.env?.ANTHROPIC_BASE_URL).toBe('http://127.0.0.1:5555');
+    expect(spawnCalls[0]!.options?.env?.ANTHROPIC_BASE_URL).toBe('http://0.0.0.0:5555');
   });
 });
-

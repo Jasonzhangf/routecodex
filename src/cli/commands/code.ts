@@ -97,9 +97,11 @@ function readConfigApiKey(fsImpl: typeof fs, configPath: string): string | null 
 
 function normalizeConnectHost(host: string): string {
   const v = String(host || '').toLowerCase();
-  if (v === '0.0.0.0') return LOCAL_HOSTS.IPV4;
-  if (v === '::' || v === '::1' || v === 'localhost') return LOCAL_HOSTS.IPV4;
-  return host || LOCAL_HOSTS.IPV4;
+  // NOTE: routecodex expects local base URLs to use 0.0.0.0 (not 127.0.0.1) for compatibility
+  // with environments where loopback is not reachable from the launched tool process.
+  if (v === '0.0.0.0') return '0.0.0.0';
+  if (v === '::' || v === '::1' || v === 'localhost') return '0.0.0.0';
+  return host || '0.0.0.0';
 }
 
 export function createCodeCommand(program: Command, ctx: CodeCommandContext): void {
@@ -113,7 +115,7 @@ export function createCodeCommand(program: Command, ctx: CodeCommandContext): vo
       'Launch Claude Code interface with RouteCodex as proxy (args after this command are passed to Claude by default)'
     )
     .option('-p, --port <port>', 'RouteCodex server port (overrides config file)')
-    .option('-h, --host <host>', 'RouteCodex server host', LOCAL_HOSTS.IPV4)
+    .option('-h, --host <host>', 'RouteCodex server host', LOCAL_HOSTS.ANY)
     .option('--url <url>', 'RouteCodex base URL (overrides host/port), e.g. https://code.codewhisper.cc')
     .option('-c, --config <config>', 'RouteCodex configuration file path')
     .option('--apikey <apikey>', 'RouteCodex server apikey (defaults to httpserver.apikey in config when present)')
