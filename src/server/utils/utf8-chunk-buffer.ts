@@ -122,7 +122,7 @@ export class Utf8ChunkBuffer {
  */
 export function createUtf8ChunkStream(minChunkSize: number = 64) {
     const buffer = new Utf8ChunkBuffer(minChunkSize);
-    const { Transform } = require('stream');
+    import { Transform } from 'stream';
 
     return new Transform({
         transform(chunk: Buffer | string, encoding: BufferEncoding, callback: (error?: Error | null, data?: unknown) => void) {

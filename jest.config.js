@@ -13,7 +13,8 @@ const config = {
     ],
   },
   transformIgnorePatterns: [
-    'node_modules/(?!(rcc-debugcenter|rcc-basemodule|rcc-errorhandling)/)',
+    // Allow transforming specific modules that might be ESM
+    'node_modules/(?!(rcc-debugcenter|rcc-basemodule|rcc-errorhandling|@jsonstudio/llms)/)',
   ],
   roots: ['<rootDir>/src', '<rootDir>/tests'],
   testMatch: ['**/__tests__/**/*.ts', '**/?(*.)+(spec|test).ts'],
