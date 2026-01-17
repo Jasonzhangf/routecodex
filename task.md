@@ -47,6 +47,48 @@
 
 ---
 
+## CLI 拆分计划：`src/cli.ts`（分阶段、可回滚）
+
+> 目标：把 `src/cli.ts`（当前 >2000 行）拆成可测试的模块化结构；**先新增新实现并通过测试/验证**，再逐步移除旧代码。
+
+### Phase 0（盘点，不改行为）
+- [ ] 盘点 `src/cli.ts` 的命令清单与副作用（读写文件/网络/kill/spawn/`process.exit`），形成表格
+- [ ] 明确每个命令的“输入/输出契约”（stdout/stderr、exit code、必选参数、默认值）
+
+### Phase 1（可测试骨架）
+- [ ] 新增 `src/cli/runtime.ts`：`CliRuntime` 抽象（fs/spawn/fetch/env/stdout/exit 等）+ `createNodeRuntime()`
+- [ ] 新增 `src/cli/main.ts`：`runCli(argv, runtime): Promise<number>`（**不直接 `process.exit()`**）
+- [ ] 新增 `src/cli/program.ts`：`createCliProgram(ctx): Command`（只负责 commander wiring）
+- [ ] 新增 `tests/cli/smoke.spec.ts`：覆盖 `--help`、未知命令、返回码路径
+
+### Phase 2（抽公共工具，仍由旧命令逻辑驱动）
+- [ ] 迁移 `createSpinner/logger/safeReadJson/normalizePort/host 归一化/version+pkgName 解析` 到 `src/cli/*` 下独立模块
+- [ ] `src/cli.ts` 改为调用新模块（行为不变）
+
+### Phase 3（低风险命令迁移 + 单测）
+- [ ] 迁移 `env` → `src/cli/commands/env.ts` + `tests/cli/env.spec.ts`
+- [ ] 迁移 `port` → `src/cli/commands/port.ts` + `tests/cli/port.spec.ts`
+- [ ] 迁移 `examples/clean`（如存在复杂副作用，先用 runtime stub 覆盖）
+
+### Phase 4（中风险命令迁移 + 单测）
+- [ ] 迁移 `config`（包含子命令则拆成子模块）+ `tests/cli/config.spec.ts`
+- [ ] 迁移 `status`（端口探测/health check）+ `tests/cli/status.spec.ts`（stub fetch）
+
+### Phase 5（高风险：server 生命周期命令迁移 + 集成测）
+- [ ] 抽 `src/cli/server/*`：pidfile / port-probe / kill / start-server 等
+- [ ] 迁移 `start/stop/restart` 到 `src/cli/commands/*`
+- [ ] 增加最小集成测试：临时 config + 随机端口启动 server，等待 `/health`，再 stop（不得静默失败）
+
+### Phase 6（迁移 `code` 命令 + 单测）
+- [ ] 迁移 `code` → `src/cli/commands/code.ts`
+- [ ] 测试只校验参数拼装与解析（stub spawn），不真的启动 `claude`
+
+### Phase 7（删除 legacy 代码，逐段验收）
+- [ ] 每迁移并通过测试后，删除 `src/cli.ts` 对应旧实现块（保持 `src/cli.ts` 最终只做入口转发）
+- [ ] 每次删除都跑：`npm run build:dev`（包含现有 verify 链路）
+
+---
+
 ## 说明
 - Host CI 必须使用 release 模式的 @jsonstudio/llms（不依赖 sharedmodule 源码）
 - Sharedmodule CI 由 llmswitch-core 仓库独立运行

@@ -875,8 +875,8 @@ export async function ensureValidOAuthToken(
     let token = await readTokenFromFile(tokenFilePath);
     const hadExistingTokenFile = token !== null;
 
-	    // Gemini CLI 家族：如果现有 token 缺少 project 元数据，尝试在不触发完整 OAuth 授权的前提下
-	    // 使用当前 access_token 补全 UserInfo + Projects（对齐 gcli2api 的行为），并立即写回。
+    // Gemini CLI family: if existing token lacks project metadata, try to enrich it without
+    // forcing a full OAuth flow. Use current access_token to fetch userinfo/projects and write back.
     if (isGeminiCliFamily(providerType) && token) {
       try {
         const hasProjectMetadata = Boolean(getDefaultProjectId(token as UnknownObject));

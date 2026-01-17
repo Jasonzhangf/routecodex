@@ -147,39 +147,33 @@ export abstract class BaseProvider implements IProviderV2 {
     const context = this.createContext(request);
     const runtimeMetadata = context.runtimeMetadata;
 
-    try {
-      this.requestCount++;
-      this.lastActivity = Date.now();
+    this.requestCount++;
+    this.lastActivity = Date.now();
 
-      this.dependencies.logger?.logProviderRequest(this.id, 'request-start', {
-        providerType: this.providerType,
-        requestId: context.requestId,
-        model: context.model
-      });
+    this.dependencies.logger?.logProviderRequest(this.id, 'request-start', {
+      providerType: this.providerType,
+      requestId: context.requestId,
+      model: context.model
+    });
 
-      // 预处理请求
-      const processedRequest = await this.preprocessRequest(request);
-      this.reattachRuntimeMetadata(processedRequest, runtimeMetadata);
+    // 预处理请求
+    const processedRequest = await this.preprocessRequest(request);
+    this.reattachRuntimeMetadata(processedRequest, runtimeMetadata);
 
-      // 发送请求 (子类实现)
-      const response = await this.sendRequest(processedRequest);
+    // 发送请求 (子类实现)
+    const response = await this.sendRequest(processedRequest);
 
-      // 后处理响应
-      const finalResponse = await this.postprocessResponse(response, context);
+    // 后处理响应
+    const finalResponse = await this.postprocessResponse(response, context);
 
-      const endTime = Date.now();
-      this.dependencies.logger?.logProviderRequest(this.id, 'request-success', {
-        requestId: context.requestId,
-        responseTime: endTime - context.startTime
-      });
-      this.resetRateLimitCounter(context.providerKey);
+    const endTime = Date.now();
+    this.dependencies.logger?.logProviderRequest(this.id, 'request-success', {
+      requestId: context.requestId,
+      responseTime: endTime - context.startTime
+    });
+    this.resetRateLimitCounter(context.providerKey);
 
-      return finalResponse;
-
-    } catch (error) {
-      // 统一在 sendRequest 路径中处理错误与限流计数，避免重复调用 handleRequestError。
-      throw error;
-    }
+    return finalResponse;
   }
 
   async processOutgoing(response: UnknownObject): Promise<UnknownObject> {
