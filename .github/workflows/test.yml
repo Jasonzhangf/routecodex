@@ -12,20 +12,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: true
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
       - run: npm ci
-      - name: Build sharedmodule
-        run: |
-          if [ -d "sharedmodule/llmswitch-core" ]; then
-            cd sharedmodule/llmswitch-core
-            npm ci
-            npm run build
-          else
-            echo "sharedmodule/llmswitch-core not found, using npm package"
-          fi
-      - run: npm run jest:run -- tests/sharedmodule/apply-patch-full.spec.ts tests/sharedmodule/provider-compat-tests.spec.ts tests/sharedmodule/provider-compat-gemini.spec.ts tests/sharedmodule/provider-compat-anthropic.spec.ts
+      - run: npm run test
