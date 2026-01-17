@@ -24,7 +24,7 @@ interface GeminiCLIPayload extends UnknownObject {
   action?: string;
   requestId?: string;
   userAgent?: string;
-   requestType?: string;
+  requestType?: string;
   session_id?: string;
 }
 
@@ -37,7 +37,9 @@ export class GeminiCLIProtocolClient implements HttpProtocolClient<ProtocolReque
     const payload = this.extractPayload(request);
 
     // 顶层字段：model / project / action / request metadata
-    const { model, project, requestId, userAgent, requestType, ...rest } = payload;
+    // 注意：Cloud Code Assist 的 request schema 不接受 request.metadata / request.action。
+    // action 仅用于 resolveEndpoint；metadata 不下发到上游。
+    const { model, project, requestId, userAgent, requestType, action: _action, metadata: _metadata, ...rest } = payload;
 
     const body: Record<string, unknown> = {};
     if (typeof model === 'string' && model.length > 0) {
