@@ -23,6 +23,7 @@ import { createExamplesCommand } from './cli/commands/examples.js';
 import { createStatusCommand } from './cli/commands/status.js';
 import { loadRouteCodexConfig } from './config/routecodex-config-loader.js';
 import { createConfigCommand } from './cli/commands/config.js';
+import { createStopCommand } from './cli/commands/stop.js';
 // Spinner wrapper (lazy-loaded to avoid hard dependency on ora/restore-cursor issues)
 type Spinner = {
   start(text?: string): Spinner;
@@ -120,6 +121,9 @@ const logger = {
   error: (msg: string) => console.log(`${chalk.red('✗')  } ${  msg}`),
   debug: (msg: string) => console.log(`${chalk.gray('◉')  } ${  msg}`)
 };
+
+const sleep = (ms: number): Promise<void> =>
+  new Promise(resolve => setTimeout(resolve, ms));
 
 // Ensure llmswitch-core is resolvable（dev/worktree 场景下由 pipeline 加载 vendor）
 async function dynamicImport<T>(specifier: string): Promise<T | undefined> {
@@ -1007,93 +1011,18 @@ program
 createConfigCommand(program, { logger, createSpinner });
 
 // Stop command
-program
-  .command('stop')
-  .description('Stop the RouteCodex server')
-  .action(async () => {
-    const spinner = await createSpinner('Stopping RouteCodex server...');
-    try {
-      let resolvedPort: number;
-      if (IS_DEV_PACKAGE) {
-        const envPort = Number(process.env.ROUTECODEX_PORT || process.env.RCC_PORT || NaN);
-        if (!Number.isNaN(envPort) && envPort > 0) {
-          logger.info(
-            `Using port ${envPort} from environment (ROUTECODEX_PORT/RCC_PORT) [dev package: routecodex]`
-          );
-          resolvedPort = envPort;
-        } else {
-          resolvedPort = DEFAULT_DEV_PORT;
-          logger.info(`Using dev default port ${resolvedPort} (routecodex dev package)`);
-        }
-      } else {
-        // Resolve config path and port
-        const configPath = path.join(homedir(), '.routecodex', 'config.json');
-
-        // Check if config exists
-        if (!fs.existsSync(configPath)) {
-          spinner.fail(`Configuration file not found: ${configPath}`);
-          logger.error('Cannot determine server port without configuration file');
-          logger.info('Please create a configuration file first:');
-          logger.info('  rcc config init');
-          process.exit(1);
-        }
-
-        // Load configuration to get port
-        let config;
-        try {
-          const configContent = fs.readFileSync(configPath, 'utf8');
-          config = JSON.parse(configContent);
-        } catch (error) {
-          spinner.fail('Failed to parse configuration file');
-          logger.error(`Invalid JSON in configuration file: ${configPath}`);
-          process.exit(1);
-        }
-
-        const port = (config?.httpserver?.port ?? config?.server?.port ?? config?.port);
-        if (!port || typeof port !== 'number' || port <= 0) {
-          spinner.fail('Invalid or missing port configuration');
-          logger.error('Configuration file must specify a valid port number');
-          process.exit(1);
-        }
-
-        resolvedPort = port;
-      }
-
-      const pids = findListeningPids(resolvedPort);
-      if (!pids.length) {
-        spinner.succeed(`No server listening on ${resolvedPort}.`);
-        if (IS_DEV_PACKAGE) {
-          await stopTokenDaemonIfRunning();
-        }
-        return;
-      }
-      for (const pid of pids) {
-        killPidBestEffort(pid, { force: false });
-      }
-      const deadline = Date.now() + 3000;
-      while (Date.now() < deadline) {
-        if (findListeningPids(resolvedPort).length === 0) {
-          spinner.succeed(`Stopped server on ${resolvedPort}.`);
-          if (IS_DEV_PACKAGE) {
-            await stopTokenDaemonIfRunning();
-          }
-          return;
-        }
-        await sleep(100);
-      }
-      const remain = findListeningPids(resolvedPort);
-      if (remain.length) {
-        for (const pid of remain) { killPidBestEffort(pid, { force: true }); }
-      }
-      spinner.succeed(`Force stopped server on ${resolvedPort}.`);
-      if (IS_DEV_PACKAGE) {
-        await stopTokenDaemonIfRunning();
-      }
-    } catch (e) {
-      spinner.fail(`Failed to stop: ${(e as Error).message}`);
-      process.exit(1);
-    }
-  });
+createStopCommand(program, {
+  isDevPackage: IS_DEV_PACKAGE,
+  defaultDevPort: DEFAULT_DEV_PORT,
+  createSpinner,
+  logger,
+  findListeningPids,
+  killPidBestEffort,
+  sleep,
+  stopTokenDaemonIfRunning,
+  env: process.env,
+  exit: (code) => process.exit(code)
+});
 
 // Restart command (stop + start with same environment)
 program
@@ -1389,9 +1318,6 @@ function findListeningPids(port: number): number[] {
     return [];
   }
 }
-
-const sleep = (ms: number): Promise<void> =>
-  new Promise(resolve => setTimeout(resolve, ms));
 
 // Fallback keypress setup: capture Ctrl+C and 'q' to trigger shutdown when SIGINT is not delivered
 function setupKeypress(onInterrupt: () => void): () => void {

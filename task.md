@@ -78,7 +78,8 @@
 
 ### Phase 5（高风险：server 生命周期命令迁移 + 集成测）
 - [ ] 抽 `src/cli/server/*`：pidfile / port-probe / kill / start-server 等
-- [ ] 迁移 `start/stop/restart` 到 `src/cli/commands/*`
+- [ ] 迁移 `start/restart` 到 `src/cli/commands/*`
+- [x] 迁移 `stop` → `src/cli/commands/stop.ts` + `tests/cli/stop-command.spec.ts`
 - [ ] 增加最小集成测试：临时 config + 随机端口启动 server，等待 `/health`，再 stop（不得静默失败）
 
 ### Phase 6（迁移 `code` 命令 + 单测）
