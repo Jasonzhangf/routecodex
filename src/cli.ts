@@ -26,6 +26,7 @@ import { createConfigCommand } from './cli/commands/config.js';
 import { createStopCommand } from './cli/commands/stop.js';
 import { createRestartCommand } from './cli/commands/restart.js';
 import { createStartCommand } from './cli/commands/start.js';
+import { createCodeCommand } from './cli/commands/code.js';
 // Spinner wrapper (lazy-loaded to avoid hard dependency on ora/restore-cursor issues)
 type Spinner = {
   start(text?: string): Spinner;
@@ -91,19 +92,6 @@ interface ServerConfig {
 interface LoggingConfig {
   level: string;
 }
-
-type CodeCommandOptions = {
-  port?: string;
-  host: string;
-  url?: string;
-  config?: string;
-  apikey?: string;
-  claudePath?: string;
-  cwd?: string;
-  model?: string;
-  profile?: string;
-  ensureServer?: boolean;
-};
 
 // simple-log config type removed
 
@@ -320,384 +308,29 @@ try {
 } catch { /* optional */ }
 
 // Code command - Launch Claude Code interface
-program
-  .command('code')
-  .description('Launch Claude Code interface with RouteCodex as proxy (args after this command are passed to Claude by default)')
-  .option('-p, --port <port>', 'RouteCodex server port (overrides config file)')
-  // Default to IPv4 localhost to avoid environments where localhost resolves to ::1
-  .option('-h, --host <host>', 'RouteCodex server host', LOCAL_HOSTS.IPV4)
-  .option('--url <url>', 'RouteCodex base URL (overrides host/port), e.g. https://code.codewhisper.cc')
-  .option('-c, --config <config>', 'RouteCodex configuration file path')
-  .option('--apikey <apikey>', 'RouteCodex server apikey (defaults to httpserver.apikey in config when present)')
-  .option('--claude-path <path>', 'Path to Claude Code executable', 'claude')
-  .option('--cwd <dir>', 'Working directory for Claude Code (defaults to current shell cwd)')
-  .option('--model <model>', 'Model to use with Claude Code')
-  .option('--profile <profile>', 'Claude Code profile to use')
-  .option('--ensure-server', 'Ensure RouteCodex server is running before launching Claude')
-  .argument('[extraArgs...]', 'Additional args to pass through to Claude')
-  .allowUnknownOption(true)
-  .allowExcessArguments(true)
-  .action(async (extraArgs: string[] = [], options: CodeCommandOptions) => {
-    const extraArgsFromCommander = Array.isArray(extraArgs) ? extraArgs : [];
-    const spinner = await createSpinner('Preparing Claude Code with RouteCodex...');
-
-    try {
-      const parseServerUrl = (
-        raw: string
-      ): { protocol: 'http' | 'https'; host: string; port: number | null; basePath: string } => {
-        const trimmed = String(raw || '').trim();
-        if (!trimmed) {
-          throw new Error('--url is empty');
-        }
-        let parsed: URL;
-        try {
-          parsed = new URL(trimmed);
-        } catch {
-          parsed = new URL(`http://${trimmed}`);
-        }
-        const protocol = parsed.protocol === 'https:' ? 'https' : 'http';
-        const host = parsed.hostname;
-        const hasExplicitPort = Boolean(parsed.port && parsed.port.trim());
-        const port = hasExplicitPort ? Number(parsed.port) : null;
-        const rawPath = typeof parsed.pathname === 'string' ? parsed.pathname : '';
-        const basePath = rawPath && rawPath !== '/' ? rawPath.replace(/\/+$/, '') : '';
-        return { protocol, host, port: Number.isFinite(port as number) ? (port as number) : null, basePath };
-      };
-
-      const readConfigApiKey = (configPath: string): string | null => {
-        try {
-          if (!configPath || !fs.existsSync(configPath)) {
-            return null;
-          }
-          const txt = fs.readFileSync(configPath, 'utf8');
-          const cfg = JSON.parse(txt);
-          const direct = cfg?.httpserver?.apikey ?? cfg?.modules?.httpserver?.config?.apikey ?? cfg?.server?.apikey;
-          const value = typeof direct === 'string' ? direct.trim() : '';
-          return value ? value : null;
-        } catch {
-          return null;
-        }
-      };
-
-      // Resolve configuration and determine port
-      let configPath = options.config;
-      if (!configPath) {
-        configPath = path.join(homedir(), '.routecodex', 'config.json');
-      }
-
-      let actualProtocol: 'http' | 'https' = 'http';
-      let actualPort = options.port ? parseInt(options.port, 10) : null;
-      let actualHost = options.host;
-      let actualBasePath = '';
-
-      if (options.url && String(options.url).trim()) {
-        const parsed = parseServerUrl(options.url);
-        actualProtocol = parsed.protocol;
-        actualHost = parsed.host || actualHost;
-        actualPort = parsed.port ?? actualPort;
-        actualBasePath = parsed.basePath;
-      }
-
-      // Determine effective port for code command:
-      // - dev package (routecodex): env override, otherwise固定 5555，不读取配置端口
-      // - release package (rcc): 按配置/参数解析端口
-      if (IS_DEV_PACKAGE) {
-        if (!actualPort) {
-          const envPort = Number(process.env.ROUTECODEX_PORT || process.env.RCC_PORT || NaN);
-          actualPort = Number.isFinite(envPort) && envPort > 0 ? envPort : DEFAULT_DEV_PORT;
-          logger.info(`Using dev default port ${actualPort} for routecodex code (config ports ignored)`);
-        }
-      } else {
-        // 非 dev 包：若未显式指定端口，则从配置文件解析
-        if (!actualPort && fs.existsSync(configPath) && !(options.url && String(options.url).trim())) {
-          try {
-            const configContent = fs.readFileSync(configPath, 'utf8');
-            const config = JSON.parse(configContent);
-            actualPort = (config?.httpserver?.port ?? config?.server?.port ?? config?.port) || null;
-            actualHost = (config?.httpserver?.host || config?.server?.host || config?.host || actualHost);
-          } catch (error) {
-            spinner.warn('Failed to read configuration file, using defaults');
-          }
-        }
-      }
-
-      // Require explicit port if not resolved (except when --url is used; default ports are implicit).
-      if (!(options.url && String(options.url).trim()) && !actualPort) {
-        spinner.fail('Invalid or missing port configuration for RouteCodex server');
-        logger.error('Please set httpserver.port in your configuration (e.g., ~/.routecodex/config.json) or use --port');
-        process.exit(1);
-      }
-
-      const configuredApiKey =
-        (typeof options.apikey === 'string' && options.apikey.trim()
-          ? options.apikey.trim()
-          : null)
-        ?? (typeof process.env.ROUTECODEX_APIKEY === 'string' && process.env.ROUTECODEX_APIKEY.trim()
-          ? process.env.ROUTECODEX_APIKEY.trim()
-          : null)
-        ?? (typeof process.env.RCC_APIKEY === 'string' && process.env.RCC_APIKEY.trim()
-          ? process.env.RCC_APIKEY.trim()
-          : null)
-        ?? readConfigApiKey(configPath);
-
-      // Check if RouteCodex server needs to be started
-      if (options.ensureServer) {
-        spinner.text = 'Checking RouteCodex server status...';
-        const normalizeConnectHost = (h: string): string => {
-          const v = String(h || '').toLowerCase();
-          if (v === '0.0.0.0') {return LOCAL_HOSTS.IPV4;}
-          if (v === '::' || v === '::1' || v === 'localhost') {return LOCAL_HOSTS.IPV4;}
-          return h || LOCAL_HOSTS.IPV4;
-        };
-        const connectHost = normalizeConnectHost(actualHost);
-        const portPart = actualPort ? `:${actualPort}` : '';
-        const serverUrl = `${actualProtocol}://${connectHost}${portPart}${actualBasePath}`;
-        try {
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 3000);
-          const headers = configuredApiKey ? { 'x-api-key': configuredApiKey } : undefined;
-          const response = await fetch(`${serverUrl}/ready`, { signal: controller.signal, method: 'GET', headers });
-          clearTimeout(timeoutId);
-          if (!response.ok) {throw new Error('Server not ready');}
-          const j = await response.json().catch(() => ({}));
-          if (j?.status !== 'ready') {throw new Error('Server reported not_ready');}
-          spinner.succeed('RouteCodex server is ready');
-        } catch (error) {
-          if (options.url && String(options.url).trim()) {
-            spinner.fail('RouteCodex server is not reachable (ensure-server with --url cannot auto-start)');
-            logger.error(error instanceof Error ? error.message : String(error));
-            process.exit(1);
-          }
-
-          spinner.info('RouteCodex server is not running, starting it...');
-
-          // Start RouteCodex server in background
-          const { spawn } = await import('child_process');
-          const modulesConfigPath = path.resolve(__dirname, '../config/modules.json');
-          const serverEntry = path.resolve(__dirname, 'index.js');
-
-          const serverProcess = spawn(process.execPath, [serverEntry, modulesConfigPath], {
-            stdio: 'pipe',
-            env: { ...process.env },
-            detached: true
-          });
-
-          serverProcess.unref();
-
-          // Wait for server to become ready (up to ~30s)
-          spinner.text = 'Waiting for RouteCodex server to become ready...';
-          let ready = false;
-          for (let i = 0; i < 30; i++) {
-            await sleep(1000);
-            try {
-              const headers = configuredApiKey ? { 'x-api-key': configuredApiKey } : undefined;
-              const res = await fetch(`${serverUrl}/ready`, { method: 'GET', headers });
-              if (res.ok) {
-                const jr = await res.json().catch(() => ({}));
-                if (jr?.status === 'ready') { ready = true; break; }
-              }
-            } catch { /* ignore */ }
-          }
-        if (ready) {
-          spinner.succeed('RouteCodex server is ready');
-        } else {
-          spinner.warn('RouteCodex server may not be fully ready, continuing...');
-        }
-        }
-      }
-
-      spinner.text = 'Launching Claude Code...';
-
-      // Prepare environment variables for Claude Code
-      const resolvedBaseHost = String((() => {
-        const v = String(actualHost || '').toLowerCase();
-        if (v === '0.0.0.0') {return LOCAL_HOSTS.IPV4;}
-        if (v === '::' || v === '::1' || v === 'localhost') {return LOCAL_HOSTS.IPV4;}
-        return actualHost || LOCAL_HOSTS.IPV4;
-      })());
-      const portPart = actualPort ? `:${actualPort}` : '';
-      const anthropicBase = `${actualProtocol}://${resolvedBaseHost}${portPart}${actualBasePath}`;
-      const currentCwd = (() => {
-        try {
-          const d = options.cwd ? String(options.cwd) : process.cwd();
-          const resolved = path.resolve(d);
-        if (fs.existsSync(resolved)) {
-          return resolved;
-        }
-        } catch {
-          return process.cwd();
-        }
-        return process.cwd();
-      })();
-      const claudeEnv = {
-        ...process.env,
-        // Normalize working directory context for downstream tools
-        PWD: currentCwd,
-        RCC_WORKDIR: currentCwd,
-        ROUTECODEX_WORKDIR: currentCwd,
-        CLAUDE_WORKDIR: currentCwd,
-        // Cover both common env var names used by Anthropic SDK / tools
-        ANTHROPIC_BASE_URL: anthropicBase,
-        ANTHROPIC_API_URL: anthropicBase,
-        ANTHROPIC_API_KEY: configuredApiKey || 'rcc-proxy-key'
-      } as NodeJS.ProcessEnv;
-      // Avoid auth conflict: prefer API key routed via RouteCodex; remove shell tokens
-      try { delete (claudeEnv as Record<string, unknown>)['ANTHROPIC_AUTH_TOKEN']; } catch { /* ignore */ }
-      try { delete (claudeEnv as Record<string, unknown>)['ANTHROPIC_TOKEN']; } catch { /* ignore */ }
-      logger.info('Unset ANTHROPIC_AUTH_TOKEN/ANTHROPIC_TOKEN for Claude process to avoid conflicts');
-      logger.info(`Setting Anthropic base URL to: ${anthropicBase}`);
-
-      // Prepare Claude Code command arguments（将 rcc code 后面的原始参数默认透传给 Claude）
-      const claudeArgs: string[] = [];
-
-      if (options.model) {
-        claudeArgs.push('--model', options.model);
-      }
-
-      if (options.profile) {
-        claudeArgs.push('--profile', options.profile);
-      }
-
-      // 透传用户紧随 `rcc code` 之后的参数（默认行为）
-      try {
-        const rawArgv = process.argv.slice(2); // drop node/bin and script
-        const idxCode = rawArgv.findIndex(a => a === 'code');
-        const afterCode = idxCode >= 0 ? rawArgv.slice(idxCode + 1) : [];
-        // 支持显式分隔符 -- ：其后的所有参数原样传给 Claude
-        const sepIndex = afterCode.indexOf('--');
-        const tail = sepIndex >= 0 ? afterCode.slice(sepIndex + 1) : afterCode;
-        // 过滤本命令自身已识别的选项，剩余的作为透传参数
-        const knownOpts = new Set([
-          '-p',
-          '--port',
-          '-h',
-          '--host',
-          '--url',
-          '-c',
-          '--config',
-          '--apikey',
-          '--claude-path',
-          '--model',
-          '--profile',
-          '--ensure-server'
-        ]);
-        const requireValue = new Set([
-          '-p',
-          '--port',
-          '-h',
-          '--host',
-          '--url',
-          '-c',
-          '--config',
-          '--apikey',
-          '--claude-path',
-          '--model',
-          '--profile'
-        ]);
-        const passThrough: string[] = [];
-        for (let i = 0; i < tail.length; i++) {
-          const tok = tail[i];
-          if (knownOpts.has(tok)) {
-            if (requireValue.has(tok)) {
-              i++;
-            }
-            continue;
-          }
-          // 若是组合形式 --opt=value 且 opt 为已识别的，跳过
-          if (tok.startsWith('--')) {
-            const eq = tok.indexOf('=');
-            if (eq > 2) {
-              const optName = tok.slice(0, eq);
-              if (knownOpts.has(optName)) { continue; }
-            }
-          }
-          passThrough.push(tok);
-        }
-        // 合并 Commander 捕获到的额外参数（多数为位置参数），与我们手动解析的尾参数，去重保序
-        const merged: string[] = [];
-        const seen = new Set<string>();
-        const pushUnique = (arr: string[]) => { for (const t of arr) { if (!seen.has(t)) { seen.add(t); merged.push(t); } } };
-        pushUnique(extraArgsFromCommander);
-        pushUnique(passThrough);
-        if (merged.length) { claudeArgs.push(...merged); }
-      } catch {
-        // ignore passthrough errors
-        void 0;
-      }
-
-      // Launch Claude Code
-      const { spawn } = await import('child_process');
-      const claudeBin = ((): string => {
-        try {
-          const v = String(options?.claudePath || '').trim();
-          if (v) {
-            return v;
-          }
-        } catch {
-          // ignore
-        }
-        const envPath = String(process.env.CLAUDE_PATH || '').trim();
-        return envPath || 'claude';
-      })();
-      // Windows: Node spawn does not resolve .cmd shims unless using a shell. Prefer shell for bare commands.
-      const shouldUseShell =
-        IS_WINDOWS &&
-        !path.extname(claudeBin) &&
-        !claudeBin.includes('/') &&
-        !claudeBin.includes('\\');
-      const claudeProcess = spawn(claudeBin, claudeArgs, {
-        stdio: 'inherit',
-        env: claudeEnv,
-        cwd: currentCwd,
-        shell: shouldUseShell
-      });
-
-      spinner.succeed('Claude Code launched with RouteCodex proxy');
-      // Log normalized IPv4 host to avoid confusion (do not print ::/localhost)
-      logger.info(`Using RouteCodex server at: http://${resolvedBaseHost}:${actualPort}`);
-      logger.info(`Claude binary: ${claudeBin}`);
-      logger.info(`Working directory for Claude: ${currentCwd}`);
-      logger.info('Press Ctrl+C to exit Claude Code');
-
-      // Handle graceful shutdown
-      const shutdown = async (sig: NodeJS.Signals) => {
-        try { claudeProcess.kill(sig); } catch { /* ignore */ }
-        try { process.exit(0); } catch { /* ignore */ }
-      };
-
-      process.on('SIGINT', () => { void shutdown('SIGINT'); });
-      process.on('SIGTERM', () => { void shutdown('SIGTERM'); });
-
-      claudeProcess.on('error', (err) => {
-        try {
-          logger.error(`Failed to launch Claude Code (${claudeBin}): ${err instanceof Error ? err.message : String(err)}`);
-          if (IS_WINDOWS && shouldUseShell) {
-            logger.error('Tip: If Claude is installed via npm, ensure the shim is in PATH (e.g. claude.cmd).');
-          }
-        } catch { /* ignore */ }
-        process.exit(1);
-      });
-
-      claudeProcess.on('exit', (code, signal) => {
-        if (signal) {
-          process.exit(0);
-        } else {
-          process.exit(code ?? 0);
-        }
-      });
-
-      // Keep process alive
-      await new Promise<void>(() => {
-        // Keep process alive until interrupted
-        return;
-      });
-
-    } catch (error) {
-      spinner.fail('Failed to launch Claude Code');
-      logger.error(error instanceof Error ? error.message : String(error));
-      process.exit(1);
-    }
-  });
+createCodeCommand(program, {
+  isDevPackage: IS_DEV_PACKAGE,
+  isWindows: IS_WINDOWS,
+  defaultDevPort: DEFAULT_DEV_PORT,
+  nodeBin: process.execPath,
+  createSpinner,
+  logger,
+  env: process.env,
+  rawArgv: process.argv.slice(2),
+  homedir,
+  cwd: () => process.cwd(),
+  sleep,
+  fetch,
+  spawn: (cmd, args, opts) => spawn(cmd, args, opts),
+  getModulesConfigPath,
+  resolveServerEntryPath: () => path.resolve(__dirname, 'index.js'),
+  waitForever: () =>
+    new Promise<void>(() => {
+      return;
+    }),
+  onSignal: (sig, cb) => process.on(sig, cb),
+  exit: (code) => process.exit(code)
+});
 
 // Env command - Print env exports for Anthropic proxy
 createEnvCommand(program, {

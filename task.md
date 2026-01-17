@@ -84,7 +84,7 @@
 - [ ] 增加最小集成测试：临时 config + 随机端口启动 server，等待 `/health`，再 stop（不得静默失败）
 
 ### Phase 6（迁移 `code` 命令 + 单测）
-- [ ] 迁移 `code` → `src/cli/commands/code.ts`
+- [x] 迁移 `code` → `src/cli/commands/code.ts`
 - [ ] 测试只校验参数拼装与解析（stub spawn），不真的启动 `claude`
 
 ### Phase 7（删除 legacy 代码，逐段验收）
