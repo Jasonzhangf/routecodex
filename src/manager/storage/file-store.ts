@@ -126,7 +126,7 @@ export class JsonlFileStore<TSnapshot, TEvent = unknown>
 
       const dir = path.dirname(this.filePath);
       await fs.mkdir(dir, { recursive: true });
-      const payload = next.map((entry) => JSON.stringify(entry)).join('\n') + '\n';
+      const payload = `${next.map((entry) => JSON.stringify(entry)).join('\n')  }\n`;
       await fs.writeFile(this.filePath, payload, 'utf8');
     } catch {
       // 压缩失败不影响主流程

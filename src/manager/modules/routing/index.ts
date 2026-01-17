@@ -57,7 +57,7 @@ export class RoutingStateManagerModule implements ManagerModule {
       this.stateStore = {
         loadSync: (key: string) => loadFn(key),
         saveAsync: (key: string, state: RoutingInstructionState | null) => {
-          saveFn(key, state as any);
+          saveFn(key, state as RoutingInstructionState | null);
         }
       };
     } catch {

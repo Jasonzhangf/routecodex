@@ -103,7 +103,9 @@ export class QuotaManagerModule implements ManagerModule {
    */
   updateAntigravityQuota(alias: string, quota: AntigravityQuotaSnapshot): void {
     const aliasId = alias.trim();
-    if (!aliasId) return;
+    if (!aliasId) {
+      return;
+    }
     const now = Date.now();
     const next: Record<string, QuotaRecord> = { ...this.snapshot };
     for (const [modelId, info] of Object.entries(quota.models)) {
