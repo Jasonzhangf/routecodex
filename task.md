@@ -35,6 +35,8 @@
 
 - Policy 违规/改写归档：`~/.routecodex/errorsamples/policy/**`（同时仍会写入 `~/.routecodex/codex-samples/__policy_violations__/`）
 - 黑盒对比 diff 归档：`~/.routecodex/errorsamples/unified-hub-shadow/*.json`
+- 运行时自动黑盒 shadow compare（只要检测到 diff 才落盘）：`~/.routecodex/errorsamples/unified-hub-shadow-runtime/*.json`
+  - 说明：diff 文件内包含 `runtime.routecodex/llmswitchCore/node` 版本信息，并默认忽略内部 requestId 等非语义字段（可用 `ROUTECODEX_UNIFIED_HUB_SHADOW_COMPARE_IGNORE_INTERNAL_IDS=0` 关闭）。
 - 其它对比工具 diff 归档：
   - `scripts/compare-responses-request.mjs` → `~/.routecodex/errorsamples/compare-responses-request/*.json`
   - `scripts/anthropic-compare-modes.mjs` → `~/.routecodex/errorsamples/anthropic-compare-modes/*.json`
@@ -48,6 +50,12 @@
 - 显式启用 observe-only：`ROUTECODEX_HUB_POLICY_MODE=observe`
 - 显式启用 enforce：`ROUTECODEX_HUB_POLICY_MODE=enforce`
 - 可选采样率：`ROUTECODEX_HUB_POLICY_SAMPLE_RATE=0.25`（范围 [0,1]，未设置则全量记录）
+
+#### 运行时自动黑盒 compare（默认开启）
+
+- 启用/关闭：`ROUTECODEX_UNIFIED_HUB_SHADOW_COMPARE=1|0`
+- 基线 policy mode（与当前 policy 对比）：`ROUTECODEX_UNIFIED_HUB_SHADOW_BASELINE_MODE=off|observe|enforce`（默认 off）
+- 采样率：`ROUTECODEX_UNIFIED_HUB_SHADOW_COMPARE_SAMPLE_RATE=0.1`（范围 [0,1]，默认 1）
 
 #### 每个 Phase 的“必须有”的黑盒用例（建议最小集）
 
@@ -295,3 +303,40 @@
 - Sharedmodule CI 由 llmswitch-core 仓库独立运行
 - 每个模块 lint 清理完成后再推进下一个模块
 - **lint 总计：171 warnings, 0 errors** (最新数据：2026-01-18)
+
+---
+
+## 🧪 CI / Coverage 追踪块
+
+### CI 当前状态（2026-01-18）
+- ❌ GitHub CI 失败：Jest 无法解析 `sharedmodule/llmswitch-core` 的相对路径
+  - 失败示例：
+    - `../../sharedmodule/llmswitch-core/src/servertool/server-side-tools.js`
+    - `../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection.js`
+  - 根因：`moduleNameMapper` 规则顺序/匹配方式无法覆盖所有相对路径深度
+
+### ✅ 目标（CI）
+1. **稳定运行 Release 模式测试**：Host CI 全部依赖 npm 包 `@jsonstudio/llms`
+2. **保证 Jest 路径映射命中**：所有 `../../sharedmodule/llmswitch-core/*` 导入映射到 `@jsonstudio/llms/dist/*`
+3. **避免使用 sharedmodule 源码**：CI 中不需要 sharedmodule 工作区
+
+### ✅ 目标（覆盖率）
+1. **提高 Host 模块覆盖率**：优先 `src/server/**` + `src/providers/**`
+2. **模块覆盖率路径（顺序）**：
+   - `src/server/**`: HTTP / pipeline / servertool 路径
+   - `src/providers/**`: 认证、重试、compat、quota
+   - `src/cli/**`: 命令入口与错误分支
+   - `src/modules/**`: pipeline/debug/compat 关键路径
+3. **测试优先级**：
+   - servertool: apply-patch / exec-command / web-search
+   - virtual-router: routing / cooldown / quota / engine-update
+   - provider: gemini-cli / iflow / antigravity
+
+### 📌 待执行路径（CI 修复 + Coverage 提升）
+1. **修复 Jest moduleNameMapper**（最高优先级）
+   - 统一匹配所有 `../../..` 深度路径 → `@jsonstudio/llms/dist/*`
+   - 确保 `.js` strip 规则在后
+2. **CI 通过后再推进覆盖率**
+   - 每个模块逐个补测试，记录增量
+
+---
