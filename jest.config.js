@@ -39,8 +39,13 @@ const config = {
 
     // IMPORTANT: host CI must not depend on local sharedmodule worktree.
     // Map sharedmodule imports used by tests to npm-installed @jsonstudio/llms.
-    '^\\.\\./\\.\\./sharedmodule/llmswitch-core/src/(.*)$': '@jsonstudio/llms/dist/$1',
-    '^\\.\\./\\.\\./\\.\\./sharedmodule/llmswitch-core/dist/(.*)$': '@jsonstudio/llms/dist/$1',
+    // Map all sharedmodule/llmswitch-core imports (both src & dist) to npm package
+    '../../sharedmodule/llmswitch-core/src/(.*)': '@jsonstudio/llms/dist/$1',
+    '../../sharedmodule/llmswitch-core/dist/(.*)': '@jsonstudio/llms/dist/$1',
+    '../../../sharedmodule/llmswitch-core/src/(.*)': '@jsonstudio/llms/dist/$1',
+    '../../../sharedmodule/llmswitch-core/dist/(.*)': '@jsonstudio/llms/dist/$1',
+    '../../../../sharedmodule/llmswitch-core/src/(.*)': '@jsonstudio/llms/dist/$1',
+    '../../../../sharedmodule/llmswitch-core/dist/(.*)': '@jsonstudio/llms/dist/$1',
   },
 };
 
