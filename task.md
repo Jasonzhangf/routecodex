@@ -161,7 +161,7 @@
 #### 任务拆分
 1) **开关与 A/B 入口**
    - [x] 增加 env A/B 开关（全局）：`RCC_APPLY_PATCH_TOOL_MODE=freeform`（或 `RCC_APPLY_PATCH_FREEFORM=1`）
-   - [ ] 在 Hub Pipeline capture 的 metadata 中记录本次请求使用的模式（用于 response stage 判定，后续做按请求 A/B）
+   - [x] 在 Hub Pipeline capture 的 metadata 中记录本次请求使用的模式（用于 response stage 判定，后续做按请求 A/B）（sharedmodules: c7f3d8d）
 
 2) **请求侧透传（Client tools Raw）**
    - [x] 允许客户端 tools 声明 `format:"freeform"` 且不提供 `parameters`（或 `parameters:{}`），不强制注入 apply_patch structured schema
