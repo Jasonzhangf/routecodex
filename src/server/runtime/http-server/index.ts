@@ -805,6 +805,15 @@ export class RouteCodexHttpServer {
       };
     }
 
+    // Unified Hub Framework V1: followup (servertool) shadow compare toggle.
+    // Implemented in llmswitch-core servertool engine; controlled by env for progressive rollout.
+    // Default: shadow in dev builds; off in release builds.
+    if (!process.env.ROUTECODEX_HUB_FOLLOWUP_MODE) {
+      if (buildInfo.mode === 'dev') {
+        process.env.ROUTECODEX_HUB_FOLLOWUP_MODE = 'shadow';
+      }
+    }
+
     const healthModule = this.managerDaemon?.getModule('health') as HealthManagerModule | undefined;
     const healthStore = healthModule?.getHealthStore();
     if (healthStore) {

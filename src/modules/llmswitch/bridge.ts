@@ -307,6 +307,35 @@ export async function createSnapshotRecorder(
           }).catch(() => {});
           return;
         }
+
+        if (stage.startsWith('hub_followup.')) {
+          const diffCount = typeof p.diffCount === 'number' ? p.diffCount : 0;
+          if (!(diffCount > 0)) return;
+          void writeErrorsampleJson({
+            group: 'followup',
+            kind: stage,
+            payload: {
+              kind: 'hub_followup_diff',
+              timestamp: new Date().toISOString(),
+              endpoint,
+              stage,
+              versions: {
+                routecodex: buildInfo.version,
+                llms: resolveLlmswitchCoreVersion(),
+                node: process.version
+              },
+              ...(context && typeof context === 'object'
+                ? {
+                    requestId: (context as any).requestId,
+                    providerProtocol: (context as any).providerProtocol,
+                    runtime: (context as any).runtime
+                  }
+                : {}),
+              observation: payload
+            }
+          }).catch(() => {});
+          return;
+        }
       } catch {
         // best-effort only; must never break request path
       }
