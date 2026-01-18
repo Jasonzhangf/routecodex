@@ -96,6 +96,50 @@ describe('ProviderQuotaDaemonModule', () => {
     await mod.stop();
   });
 
+  it('keeps antigravity oauth providers out of pool until quota recovery signal arrives', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-01-16T00:00:00.000Z'));
+    const now = Date.now();
+
+    const mod = new ProviderQuotaDaemonModule();
+    await mod.init({ serverId: 'test' });
+    mod.registerProviderStaticConfig('antigravity.alias1.claude-sonnet-4-5-thinking', { authType: 'oauth' });
+    await mod.start();
+
+    const view1 = mod.getQuotaView();
+    expect(view1).not.toBeNull();
+    expect(view1!('antigravity.alias1.claude-sonnet-4-5-thinking')?.inPool).toBe(false);
+
+    const center = await getProviderErrorCenter();
+    center.emit({
+      code: 'QUOTA_RECOVERY',
+      message: 'Quota manager: provider quota refreshed',
+      stage: 'quota',
+      status: 200,
+      recoverable: true,
+      timestamp: now,
+      runtime: {
+        requestId: `quota_${now}`,
+        providerKey: 'antigravity.alias1.claude-sonnet-4-5-thinking',
+        providerId: 'antigravity'
+      },
+      details: {
+        virtualRouterQuotaRecovery: {
+          providerKey: 'antigravity.alias1.claude-sonnet-4-5-thinking',
+          reason: 'quota>0 for model claude-sonnet-4-5-thinking',
+          source: 'quota-manager'
+        }
+      }
+    } as any);
+
+    await jest.advanceTimersByTimeAsync(5);
+
+    const view2 = mod.getQuotaView();
+    expect(view2!('antigravity.alias1.claude-sonnet-4-5-thinking')?.inPool).toBe(true);
+
+    await mod.stop();
+  });
+
   it('tracks 429 backoff for apikey providers and blacklists after 3 consecutive', async () => {
     jest.useFakeTimers();
     jest.setSystemTime(new Date('2026-01-16T00:00:00.000Z'));

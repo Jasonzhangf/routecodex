@@ -21,19 +21,15 @@ import {
   isServerHealthyQuickImpl,
   killPidBestEffortImpl
 } from './cli/server/port-utils.js';
-import { createEnvCommand } from './cli/commands/env.js';
-import { createPortCommand } from './cli/commands/port.js';
-import { createCleanCommand } from './cli/commands/clean.js';
-import { createExamplesCommand } from './cli/commands/examples.js';
-import { createStatusCommand } from './cli/commands/status.js';
+import { registerBasicCommands } from './cli/register/basic-commands.js';
 import { loadRouteCodexConfig } from './config/routecodex-config-loader.js';
-import { createConfigCommand } from './cli/commands/config.js';
-import { createStopCommand } from './cli/commands/stop.js';
-import { createRestartCommand } from './cli/commands/restart.js';
-import { createStartCommand } from './cli/commands/start.js';
-import { createCodeCommand } from './cli/commands/code.js';
 import { createSpinner, type Spinner } from './cli/spinner.js';
 import { logger } from './cli/logger.js';
+import { registerStatusConfigCommands } from './cli/register/status-config-commands.js';
+import { registerRestartCommand } from './cli/register/restart-command.js';
+import { registerStopCommand } from './cli/register/stop-command.js';
+import { registerStartCommand } from './cli/register/start-command.js';
+import { registerCodeCommand } from './cli/register/code-command.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -230,7 +226,7 @@ try {
 } catch { /* optional */ }
 
 // Code command - Launch Claude Code interface
-createCodeCommand(program, {
+	registerCodeCommand(program, {
   isDevPackage: IS_DEV_PACKAGE,
   isWindows: IS_WINDOWS,
   defaultDevPort: DEFAULT_DEV_PORT,
@@ -254,17 +250,30 @@ createCodeCommand(program, {
   exit: (code) => process.exit(code)
 });
 
-// Env command - Print env exports for Anthropic proxy
-createEnvCommand(program, {
-  isDevPackage: IS_DEV_PACKAGE,
-  defaultDevPort: DEFAULT_DEV_PORT,
-  log: (line) => console.log(line),
-  error: (line) => logger.error(line),
-  exit: (code) => process.exit(code)
+registerBasicCommands(program, {
+  env: {
+    isDevPackage: IS_DEV_PACKAGE,
+    defaultDevPort: DEFAULT_DEV_PORT,
+    log: (line) => console.log(line),
+    error: (line) => logger.error(line),
+    exit: (code) => process.exit(code)
+  },
+  clean: { logger },
+  examples: { log: (line) => console.log(line) },
+  port: {
+    defaultPort: DEFAULT_CONFIG.PORT,
+    createSpinner,
+    findListeningPids,
+    killPidBestEffort,
+    sleep,
+    log: (line) => console.log(line),
+    error: (line) => console.error(line),
+    exit: (code) => process.exit(code)
+  }
 });
 
 // Start command
-createStartCommand(program, {
+registerStartCommand(program, {
   isDevPackage: IS_DEV_PACKAGE,
   isWindows: IS_WINDOWS,
   defaultDevPort: DEFAULT_DEV_PORT,
@@ -297,10 +306,18 @@ createStartCommand(program, {
 });
 
 // Config command
-createConfigCommand(program, { logger, createSpinner });
+registerStatusConfigCommands(program, {
+  config: { logger, createSpinner },
+  status: {
+    logger,
+    log: (line) => console.log(line),
+    loadConfig: () => loadRouteCodexConfig(),
+    fetch
+  }
+});
 
 // Stop command
-createStopCommand(program, {
+registerStopCommand(program, {
   isDevPackage: IS_DEV_PACKAGE,
   defaultDevPort: DEFAULT_DEV_PORT,
   createSpinner,
@@ -314,7 +331,7 @@ createStopCommand(program, {
 });
 
 // Restart command (stop + start with same environment)
-createRestartCommand(program, {
+registerRestartCommand(program, {
   isDevPackage: IS_DEV_PACKAGE,
   isWindows: IS_WINDOWS,
   defaultDevPort: DEFAULT_DEV_PORT,
@@ -340,17 +357,6 @@ createRestartCommand(program, {
   }
 });
 
-// Status command
-createStatusCommand(program, {
-  logger,
-  log: (line) => console.log(line),
-  loadConfig: () => loadRouteCodexConfig(),
-  fetch
-});
-
-// Clean command: purge local capture and debug data for fresh runs
-createCleanCommand(program, { logger });
-
 // Import commands at top level
 // offline-log CLI temporarily disabled to simplify build
 
@@ -360,9 +366,6 @@ createCleanCommand(program, { logger });
 // dry-run commands removed
 // offline-log command disabled
 // simple-log command removed
-
-// Examples command
-createExamplesCommand(program, { log: (line) => console.log(line) });
 
 async function ensurePortAvailable(port: number, parentSpinner: Spinner, opts: { restart?: boolean } = {}): Promise<void> {
   return ensurePortAvailableImpl({
@@ -435,19 +438,6 @@ async function isServerHealthyQuick(port: number): Promise<boolean> {
 function getModulesConfigPath(): string {
   return path.resolve(__dirname, '../config/modules.json');
 }
-
-
-// Port utilities: doctor
-createPortCommand(program, {
-  defaultPort: DEFAULT_CONFIG.PORT,
-  createSpinner,
-  findListeningPids,
-  killPidBestEffort,
-  sleep,
-  log: (line) => console.log(line),
-  error: (line) => console.error(line),
-  exit: (code) => process.exit(code)
-});
 
 // Parse command line arguments (must be last)
 program.parse();

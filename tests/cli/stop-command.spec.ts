@@ -2,6 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 import { Command } from 'commander';
 
 import { createStopCommand } from '../../src/cli/commands/stop.js';
+import { registerStopCommand } from '../../src/cli/register/stop-command.js';
 
 function createStubSpinner() {
   return {
@@ -16,6 +17,25 @@ function createStubSpinner() {
 }
 
 describe('cli stop command', () => {
+  it('registers stop command', () => {
+    const program = new Command();
+    registerStopCommand(program, {
+      isDevPackage: true,
+      defaultDevPort: 5520,
+      createSpinner: async () => createStubSpinner(),
+      logger: { info: () => {}, error: () => {} },
+      findListeningPids: () => [],
+      killPidBestEffort: () => {},
+      sleep: async () => {},
+      env: {},
+      exit: (code) => {
+        throw new Error(`exit:${code}`);
+      }
+    });
+
+    expect(program.commands.some((c) => c.name() === 'stop')).toBe(true);
+  });
+
   it('exits with 1 in release mode when config is missing', async () => {
     const errors: string[] = [];
     const info: string[] = [];
@@ -73,4 +93,3 @@ describe('cli stop command', () => {
     expect(succeeded.join('\n')).toContain('No server listening on 5520');
   });
 });
-

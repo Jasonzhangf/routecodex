@@ -2,6 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 import { Command } from 'commander';
 
 import { createCodeCommand } from '../../src/cli/commands/code.js';
+import { registerCodeCommand } from '../../src/cli/register/code-command.js';
 
 function createStubSpinner() {
   return {
@@ -25,6 +26,33 @@ function createStubFs() {
 }
 
 describe('cli code command', () => {
+  it('registers code command', () => {
+    const program = new Command();
+    registerCodeCommand(program, {
+      isDevPackage: true,
+      isWindows: false,
+      defaultDevPort: 5555,
+      nodeBin: 'node',
+      createSpinner: async () => createStubSpinner(),
+      logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
+      env: {},
+      rawArgv: ['code'],
+      fsImpl: createStubFs(),
+      homedir: () => '/home/test',
+      sleep: async () => {},
+      fetch: (async () => ({ ok: true })) as any,
+      spawn: () => ({ on: () => {}, kill: () => true } as any),
+      getModulesConfigPath: () => '/tmp/modules.json',
+      resolveServerEntryPath: () => '/tmp/index.js',
+      waitForever: async () => {},
+      exit: (code) => {
+        throw new Error(`exit:${code}`);
+      }
+    });
+
+    expect(program.commands.some((c) => c.name() === 'code')).toBe(true);
+  });
+
   it('spawns Claude with passthrough args and sets ANTHROPIC_BASE_URL from --url', async () => {
     const program = new Command();
     const spawnCalls: Array<{ command: string; args: string[]; options: any }> = [];

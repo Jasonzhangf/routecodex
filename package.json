@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.89.1162",
+  "version": "0.89.1173",
   "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support",
   "type": "module",
   "main": "dist/index.js",
@@ -32,7 +32,7 @@
   },
   "scripts": {
     "build": "npm run llmswitch:ensure && node scripts/build-core.mjs && node scripts/vendor-core.mjs && npm run clean && node scripts/gen-build-info.mjs && tsc && node scripts/copy-compat-assets.mjs && node scripts/copy-modules-config.mjs",
-    "build:dev": "BUILD_MODE=dev npm run build && npm run verify:e2e-toolcall && npm run verify:apply-patch && npm run verify:apply-patch-regressions && npm run verify:exec-command && npm run test:routing-instructions && npm run install:global && npm run mock:regressions && npm run verify:errorsamples && npm run verify:e2e-gemini-followup-sample",
+    "build:dev": "BUILD_MODE=dev npm run build && npm run verify:e2e-toolcall && npm run verify:apply-patch && npm run verify:apply-patch-regressions && npm run verify:exec-command && npm run test:routing-instructions && npm run test:cli && npm run install:global && npm run mock:regressions && npm run verify:errorsamples && npm run verify:e2e-gemini-followup-sample",
     "build:min": "npm run llmswitch:ensure && node scripts/build-core.mjs && node scripts/vendor-core.mjs && npm run clean && node scripts/gen-build-info.mjs && tsc && node scripts/copy-compat-assets.mjs && node scripts/copy-modules-config.mjs",
     "prepack": "echo skip-prepack",
     "postbuild": "chmod +x dist/cli.js || true",
@@ -42,6 +42,7 @@
     "jest:run": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js",
     "test": "npm run test:routing-instructions && npm run mock:regressions",
     "test:routing-instructions": "npm run jest:run -- --runTestsByPath tests/server/runtime/request-executor.single-attempt.spec.ts tests/server/runtime/executor-provider.retryable.spec.ts tests/providers/core/runtime/gemini-cli-http-provider.unit.test.ts tests/sharedmodule/gemini-mapper-functioncall-args.spec.ts tests/servertool/stop-message-auto.spec.ts tests/servertool/gemini-empty-reply-continue.spec.ts tests/servertool/apply-patch-guard.spec.ts tests/servertool/exec-command-guard.spec.ts tests/servertool/server-side-web-search.spec.ts tests/servertool/vision-flow.spec.ts tests/servertool/iflow-model-error-retry.spec.ts tests/servertool/virtual-router-routing-instructions.spec.ts tests/servertool/virtual-router-series-cooldown.spec.ts tests/servertool/virtual-router-quota-routing.spec.ts tests/servertool/virtual-router-engine-update-deps.spec.ts tests/manager/quota/provider-quota-center.spec.ts tests/manager/quota/provider-quota-store.spec.ts tests/server/http-server/daemon-admin.e2e.spec.ts tests/server/http-server/quota-view-injection.spec.ts tests/server/handlers/sse-timeout.spec.ts tests/utils/is-direct-execution.test.ts tests/utils/windows-netstat.test.ts",
+    "test:cli": "npm run jest:run -- --runTestsByPath tests/cli/clean-command.spec.ts tests/cli/code-command.spec.ts tests/cli/config-command.spec.ts tests/cli/env-command.spec.ts tests/cli/env-output.spec.ts tests/cli/examples-command.spec.ts tests/cli/port-command.spec.ts tests/cli/port-utils.spec.ts tests/cli/restart-command.spec.ts tests/cli/smoke.spec.ts tests/cli/start-command.spec.ts tests/cli/status-command.spec.ts tests/cli/stop-command.spec.ts",
     "test:watch": "npm run jest:run -- --watch",
     "test:coverage": "npm run jest:run -- --coverage",
     "test:integration": "npm run jest:run -- --testPathPattern=integration",

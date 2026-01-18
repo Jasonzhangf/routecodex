@@ -2,6 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 import { Command } from 'commander';
 
 import { createRestartCommand } from '../../src/cli/commands/restart.js';
+import { registerRestartCommand } from '../../src/cli/register/restart-command.js';
 
 function createStubSpinner() {
   return {
@@ -16,6 +17,33 @@ function createStubSpinner() {
 }
 
 describe('cli restart command', () => {
+  it('registers restart command', () => {
+    const program = new Command();
+    registerRestartCommand(program, {
+      isDevPackage: true,
+      isWindows: false,
+      defaultDevPort: 5520,
+      createSpinner: async () => createStubSpinner(),
+      logger: { info: () => {}, error: () => {} },
+      findListeningPids: () => [],
+      killPidBestEffort: () => {},
+      sleep: async () => {},
+      getModulesConfigPath: () => '/tmp/modules.json',
+      resolveServerEntryPath: () => '/tmp/index.js',
+      nodeBin: 'node',
+      spawn: () => ({ pid: 123, on: () => {}, kill: () => true } as any),
+      fetch: (async () => ({ ok: true })) as any,
+      setupKeypress: () => () => {},
+      waitForever: async () => {},
+      env: {},
+      exit: (code) => {
+        throw new Error(`exit:${code}`);
+      }
+    });
+
+    expect(program.commands.some((c) => c.name() === 'restart')).toBe(true);
+  });
+
   it('rejects using --codex and --claude together', async () => {
     const program = new Command();
     createRestartCommand(program, {
@@ -45,4 +73,3 @@ describe('cli restart command', () => {
     ).rejects.toThrow('exit:1');
   });
 });
-

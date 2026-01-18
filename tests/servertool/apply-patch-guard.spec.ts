@@ -122,4 +122,38 @@ describe('apply_patch guard servertool (reenter)', () => {
     expect(payload.stream).toBe(false);
     expect(payload.parameters?.stream).toBeUndefined();
   });
+
+  test('does not attempt recovery for exec_command-shaped args (missing_changes)', async () => {
+    const adapterContext: AdapterContext = {
+      requestId: 'req-apply-patch-guard-hardstop',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      routeId: 'coding',
+      capturedChatRequest: makeCapturedChatRequest()
+    } as any;
+
+    const invalidArgs = JSON.stringify({
+      command: "cat > /tmp/fix.patch << 'EOF'\nEOF"
+    });
+    const chatResponse = makeInvalidApplyPatchToolCallResponse(invalidArgs);
+
+    const result = await runServerSideToolEngine({
+      chatResponse,
+      adapterContext,
+      entryEndpoint: '/v1/chat/completions',
+      requestId: 'req-apply-patch-guard-hardstop',
+      providerProtocol: 'openai-chat',
+      reenterPipeline: async () => ({ body: {} as JsonObject })
+    });
+
+    expect(result.mode).toBe('tool_flow');
+    expect(result.execution?.flowId).toBe('apply_patch_guard');
+    expect(result.execution?.followup).toBeUndefined();
+
+    const final = result.finalChatResponse as any;
+    const msg = final?.choices?.[0]?.message;
+    expect(msg?.tool_calls).toBeUndefined();
+    expect(String(msg?.content || '')).toContain('exec_command');
+    expect(final.tool_outputs).toBeUndefined();
+  });
 });
