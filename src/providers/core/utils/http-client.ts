@@ -158,8 +158,9 @@ export class HttpClient {
     const cfgIdle = this.defaultConfig.streamIdleTimeoutMs;
     const idleTimeoutMs = Number.isFinite(cfgIdle) && cfgIdle > 0 ? cfgIdle : Math.min(120_000, timeout);
     const cfgHeaders = this.defaultConfig.streamHeadersTimeoutMs;
-    // NOTE: default headers timeout used to be fixed at 30s, which is too short for some upstreams.
-    const headersTimeoutMs = Number.isFinite(cfgHeaders) && cfgHeaders > 0 ? cfgHeaders : Math.min(60_000, timeout);
+    // NOTE: headers timeout controls how long we wait for the *first response headers* from upstream.
+    // Some upstreams are slow to flush headers for SSE; keep this fairly generous by default.
+    const headersTimeoutMs = Number.isFinite(cfgHeaders) && cfgHeaders > 0 ? cfgHeaders : Math.min(300_000, timeout);
     const abortWithReason = (reason: string) => {
       try {
         const err = Object.assign(new Error(reason), { code: reason, name: 'AbortError' });
