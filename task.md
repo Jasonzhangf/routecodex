@@ -92,7 +92,7 @@
 3) **响应侧 Tool Governance（apply_patch）兼容**
    - [x] 识别 client tool format 为 freeform 时：治理内部仍可做 `apply_patch` 解析/修补，但**回传给客户端的 arguments 保持 freeform 文本**
    - [x] client tool 存在 JSON schema 时：维持 schema-aware 的 key 对齐/裁剪（修不了则回退原 arguments）
-   - [ ] 将“修补/回退”过程写入可检索日志/采样（避免链路上看起来像停住，后续补齐可观测性）
+   - [x] freeform 模式错误快照写入 meta：`applyPatchToolMode`（用于区分按哪种风格修复）
 
 4) **回归测试（必须纳入回归集）**
    - [x] 新增：freeform 模式下 `apply_patch` 的出站 arguments 保持为纯文本（Responses output + required_action 两条路径）

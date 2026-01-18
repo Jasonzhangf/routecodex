@@ -297,7 +297,7 @@ describe('virtual-router quotaView routing', () => {
     expect(result.providerKey).toBe(providerB);
   });
 
-  it('falls back to default route when non-default route has only one target and quota blocks it', () => {
+  it('does not block a non-default route when it has only one target (even if quotaView marks it out of pool)', () => {
     const routing = {
       coding: [
         {
@@ -376,7 +376,7 @@ describe('virtual-router quotaView routing', () => {
       } as any,
       { routingState: state }
     );
-    expect(result.providerKey).toBe(providerB);
-    expect(result.routeUsed).toBe('default');
+    expect(result.providerKey).toBe(providerA);
+    expect(result.routeUsed).toBe('coding');
   });
 });
