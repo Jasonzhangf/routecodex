@@ -441,7 +441,9 @@ class GeminiSseNormalizer extends Transform {
         // or assume separate handling. Safe approach: treat as bytes.
         text = this.decoder.write(Buffer.from(String(chunk), 'utf8'));
       }
-      this.buffer += text.replace(/\r\n/g, '\n');
+      // Upstream can use CRLF (\r\n), and chunk boundaries may split \r and \n.
+      // Normalize by removing all \r so the event separator is always \n\n.
+      this.buffer += text.replace(/\r/g, '');
       this.processBuffered();
     }
     callback();
@@ -450,7 +452,7 @@ class GeminiSseNormalizer extends Transform {
   override _flush(callback: TransformCallback): void {
     const remaining = this.decoder.end();
     if (remaining) {
-      this.buffer += remaining.replace(/\r\n/g, '\n');
+      this.buffer += remaining.replace(/\r/g, '');
     }
     this.processBuffered(true);
 
