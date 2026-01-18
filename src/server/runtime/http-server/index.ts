@@ -748,6 +748,19 @@ export class RouteCodexHttpServer {
     const hubConfig: { virtualRouter: unknown; [key: string]: unknown } = {
       virtualRouter: bootstrapArtifacts.config
     };
+
+    // Unified Hub Framework V1: policy (observe-only) rollout toggle.
+    // Default: off. Enable via env for progressive adoption without changing user configs.
+    const hubPolicyMode = String(process.env.ROUTECODEX_HUB_POLICY_MODE || '').trim().toLowerCase();
+    if (hubPolicyMode === 'observe' || hubPolicyMode === 'enforce') {
+      const sampleRateRaw = String(process.env.ROUTECODEX_HUB_POLICY_SAMPLE_RATE || '').trim();
+      const sampleRate = sampleRateRaw ? Number(sampleRateRaw) : undefined;
+      hubConfig.policy = {
+        mode: hubPolicyMode,
+        ...(Number.isFinite(sampleRate) ? { sampleRate } : {})
+      };
+    }
+
     const healthModule = this.managerDaemon?.getModule('health') as HealthManagerModule | undefined;
     const healthStore = healthModule?.getHealthStore();
     if (healthStore) {

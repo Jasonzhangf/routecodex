@@ -2,6 +2,63 @@
 
 ## 当前任务状态 (2026-01-18)
 
+## Unified Hub Framework V1（逐步收口骨架）（更新：2026-01-18）
+
+- 计划文档：`docs/plans/unified-hub-framework-v1.md`
+- 目标：把参数白名单/字段布局/工具形态/ServerTool followup 等“政策”从分散实现，收敛到 llmswitch-core 的统一骨架（single execution path + 强制 policy + ProtocolSpec 注册表）。
+- 当前基线（已具备）：HubPipeline 已捕获 `capturedChatRequest`，ServerTool followup 已实现 entry-aware payload 与统一 followup metadata（详见下方 “ServerTool followup 统一规范” 章节）。
+
+### 里程碑（可回滚、按协议逐步收紧）
+
+- [ ] Phase 0：PolicyEngine observe-only（不改写，只统计/快照）
+- [ ] Phase 1：parameterPolicy 收口（provider outbound：sanitize/normalize/layout）
+- [ ] Phase 2：toolSurface 收口（definition/call/result 形态统一 + 可配置 A/B）
+- [ ] Phase 3：followup 收口完善（由 core 明确 followup protocol/metadata；Host 移除兜底修补）
+- [ ] Phase 4：语义迁移到 Operation Table（协议只保留 wire ↔ ops 映射）
+- [ ] Phase 5：删除旧路径 + CI/Lint 禁绕过（仅保留 ProtocolSpec + PolicyEngine + ops 执行器）
+
+### 交付与门禁（每段必须满足：黑盒对比 + 回归通过 + 可渐进切换）
+
+- **渐进式改造**：每个 Phase 都必须提供 `off → shadow(observe) → enforce → widen` 的切换路径，默认保持 `off` 或 `shadow`，并支持按协议/按 route 逐步开启。
+- **黑盒对比（必须）**：在同一条输入上同时产生 baseline 与 candidate 的输出，并做稳定化 diff（忽略 requestId/timestamp 等非确定性字段），`diff=0` 才允许切换到 enforce。
+- **完整回归（必须）**：每个 Phase 都要新增或更新对应的回归集（Jest + scripts），并在 CI 中可重复运行。
+
+#### 黑盒对比基线工具（现有）
+
+- 端到端重放 + 产物落盘：`scripts/replay-codex-sample.mjs`
+- 黑盒对比（RouteCodex vs rccx）：`scripts/compare-codex-rccx.mjs`（包含稳定字段子集比较）
+- 入站/出站 payload 对比（按 requestId）：`scripts/compare-responses-request.mjs`
+- Anthropic 直通 vs 编解码对比：`scripts/anthropic-compare-modes.mjs`
+- 多 provider 回归（基于 codex-samples）：`scripts/outbound-regression-codex-samples.mjs`
+
+#### Phase 0 开关（Host 注入，默认关闭）
+
+- 启用 observe-only：`ROUTECODEX_HUB_POLICY_MODE=observe`
+- 可选采样率：`ROUTECODEX_HUB_POLICY_SAMPLE_RATE=0.25`（范围 [0,1]，未设置则全量记录）
+
+#### 每个 Phase 的“必须有”的黑盒用例（建议最小集）
+
+- Phase 0（observe-only）：输出不变 + 仅新增快照/统计（diff=0）
+- Phase 1（parameterPolicy/layout）：provider outbound payload（JSON）必须一致；违规字段仅记录到 policy diff，不允许出站变更
+- Phase 2（toolSurface）：工具循环（definition/call/result）在三条入口 `/v1/chat|responses|messages` 下必须结构一致（diff=0）
+- Phase 3（followup）：servertool followup 的二/三跳请求必须 entry-aware 且 non-stream，且 Host 不再做协议修补（diff=0）
+- Phase 4（Operation Table）：语义等价（semantic diff=0），允许实现路径变化但输出一致
+
+### Phase 1 回归用例清单（parameters/layout 收口）
+
+- `/v1/chat/completions` → outbound(OpenAI/Responses/Anthropic/Gemini) 方向：`providerPayload` 必须 diff=0（shadow 模式）
+- `/v1/responses`：确保 provider outbound **不出现** `parameters` wrapper（已经有 sharedmodule 回归：`responses request must not include parameters wrapper regression passed`）
+- 三类入口分别覆盖：
+  - “仅 messages + parameters”
+  - “含 tools（function tools）+ tool_choice”
+  - “含 response_format / stop / seed / parallel_tool_calls”
+- 非确定性字段处理：`requestId` 必须固定，diff 忽略 timestamp/随机字段（现有 compare harness 已固定 requestId）
+
+#### Responses（首个落地点）
+
+- 黑盒对比（compliant payload，允许切换前提）：`npm run test:unified-hub-responses-enforce`
+- 渐进开关（Host）：`ROUTECODEX_HUB_POLICY_MODE=enforce`（先对 `/v1/responses` 入口 + responses provider 小流量灰度）
+
 ## 路由指令 / stopMessage / ServerTool（更新：2026-01-18）
 
 ### ✅ ServerTool followup 统一规范（不裁剪历史 + 入口一致 + entry-aware payload）

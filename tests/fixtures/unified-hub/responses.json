@@ -1,0 +1,9 @@
+{
+  "model": "gpt-test",
+  "instructions": "You are a helpful assistant.",
+  "input": [
+    { "role": "user", "content": "Say hello" }
+  ],
+  "max_output_tokens": 16,
+  "_private": "should_be_observed_only"
+}

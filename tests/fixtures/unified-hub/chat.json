@@ -1,0 +1,10 @@
+{
+  "model": "gpt-test",
+  "messages": [
+    { "role": "system", "content": "You are a helpful assistant." },
+    { "role": "user", "content": "Say hello" }
+  ],
+  "temperature": 0.2,
+  "max_tokens": 16,
+  "_private": "should_be_observed_only"
+}
