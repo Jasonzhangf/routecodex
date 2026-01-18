@@ -61,7 +61,7 @@ import { writeClientSnapshot } from '../../../providers/core/utils/snapshot-writ
 import { createServerColoredLogger } from './colored-logger.js';
 import { formatValueForConsole } from '../../../utils/logger.js';
 import { QuietErrorHandlingCenter } from '../../../error-handling/quiet-error-handling-center.js';
-import { hasVirtualRouterSeriesCooldown } from './executor-provider.js';
+import { describeRetryReason, shouldRetryProviderError } from './executor-provider.js';
 import { ManagerDaemon } from '../../../manager/index.js';
 import { HealthManagerModule } from '../../../manager/modules/health/index.js';
 import { RoutingStateManagerModule } from '../../../manager/modules/routing/index.js';
@@ -1036,15 +1036,17 @@ export class RouteCodexHttpServer {
     const pipelineLabel = 'hub';
     const iterationMetadata = initialMetadata;
     const _followupTriggered = false;
-    // Provider 级别不再在单个 HTTP 请求内执行重复尝试，
-    // 429/配额/熔断逻辑统一交由 llmswitch-core VirtualRouter 处理。
-    const _maxAttempts = 1;
-    let _attempt = 0;
+    // 单次 HTTP 请求内最多做一次 failover（不在 Provider 层做重试）：
+    // - 让 VirtualRouter 根据 excludedProviderKeys 跳过失败目标
+    // - 避免客户端“一次就断”导致对话破裂（尤其是 429 / prompt too long 等可恢复错误）
+    const maxAttempts = 2;
+    let attempt = 0;
+    let firstError: unknown | null = null;
     const originalBodySnapshot = this.cloneRequestPayload(input.body);
     const excludedProviderKeys = new Set<string>();
 
-    while (true) {
-      _attempt += 1;
+    while (attempt < maxAttempts) {
+      attempt += 1;
       // 每次尝试前重置请求 body，避免上一轮 HubPipeline 的就地改写导致
       // 第二轮出现 ChatEnvelopeValidationError(messages_missing) 之类的问题。
       if (originalBodySnapshot && typeof originalBodySnapshot === 'object') {
@@ -1265,10 +1267,32 @@ export class RouteCodexHttpServer {
             // best-effort
           }
         }
-        this.stats.recordCompletion(input.requestId, { error: true });
-        throw error;
+        if (!firstError) {
+          firstError = error;
+        }
+        const shouldRetry = attempt < maxAttempts && shouldRetryProviderError(error);
+        if (!shouldRetry) {
+          this.stats.recordCompletion(input.requestId, { error: true });
+          throw error;
+        }
+        if (target.providerKey) {
+          excludedProviderKeys.add(target.providerKey);
+        }
+        this.logStage('provider.retry', input.requestId, {
+          providerKey: target.providerKey,
+          attempt,
+          nextAttempt: attempt + 1,
+          excluded: Array.from(excludedProviderKeys),
+          reason: describeRetryReason(error)
+        });
+        continue;
       }
     }
+
+    // best-effort: if failover attempt could not produce a successful response,
+    // return the original error (avoid masking 429 with PROVIDER_NOT_AVAILABLE etc.).
+    this.stats.recordCompletion(input.requestId, { error: true });
+    throw firstError ?? new Error('Provider execution failed without response');
   }
 
   private async runHubPipeline(

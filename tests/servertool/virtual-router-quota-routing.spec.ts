@@ -296,4 +296,87 @@ describe('virtual-router quotaView routing', () => {
     );
     expect(result.providerKey).toBe(providerB);
   });
+
+  it('falls back to default route when non-default route has only one target and quota blocks it', () => {
+    const routing = {
+      coding: [
+        {
+          id: 'primary',
+          targets: [providerA],
+          priority: 100
+        }
+      ],
+      default: [
+        {
+          id: 'primary',
+          targets: [providerB],
+          priority: 100
+        }
+      ]
+    };
+    const providerRegistry = {
+      get: (key: string) => ({
+        providerKey: key,
+        providerType: 'responses',
+        endpoint: 'https://example.invalid',
+        auth: { type: 'apiKey', value: 'test-key' },
+        outboundProfile: 'default'
+      }),
+      listProviderKeys: () => [providerA, providerB],
+      resolveRuntimeKeyByAlias: () => null,
+      resolveRuntimeKeyByIndex: () => null
+    };
+    const healthManager = { isAvailable: () => true };
+    const contextAdvisor = {
+      classify: (targets: string[]) => ({
+        safe: targets,
+        risky: [] as string[],
+        overflow: [] as string[]
+      })
+    };
+    const loadBalancer = {
+      select: (options: { candidates: string[] }) => (options.candidates.length ? options.candidates[0] : null)
+    };
+    const quotaView = (key: string) => {
+      if (key === providerA) {
+        return { providerKey: key, inPool: false, reason: 'quotaDepleted', priorityTier: 0 };
+      }
+      if (key === providerB) {
+        return { providerKey: key, inPool: true, reason: 'ok', priorityTier: 0 };
+      }
+      return null;
+    };
+
+    const features = createBaseFeatures();
+    const state = createBaseState();
+    const classification: any = {
+      routeName: 'coding',
+      confidence: 1,
+      reasoning: 'test',
+      fallback: false,
+      candidates: ['coding', 'default']
+    };
+    const metadata: any = { ...baseMetadata };
+
+    const result = selectProviderImpl(
+      'coding',
+      metadata,
+      classification,
+      features,
+      state,
+      {
+        routing,
+        providerRegistry,
+        healthManager,
+        contextAdvisor,
+        loadBalancer,
+        isProviderCoolingDown: () => false,
+        resolveStickyKey: () => undefined,
+        quotaView
+      } as any,
+      { routingState: state }
+    );
+    expect(result.providerKey).toBe(providerB);
+    expect(result.routeUsed).toBe('default');
+  });
 });

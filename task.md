@@ -71,6 +71,39 @@
   - 当客户端 raw tool 声明 `format:"freeform"` 时（例如 Codex 的 `apply_patch`），回包中的 `function_call.arguments` 输出为原始 patch 文本（非 JSON wrapper），避免客户端侧解析/执行失败。
 - sharedmodule 回归脚本：`sharedmodule/llmswitch-core/scripts/tests/responses-freeform-tool-args.mjs`
 
+### 🚧 apply_patch：Freeform（非 JSON Schema）透传 + 响应侧 Tool Governance 兼容（A/B）
+
+目标：为 `apply_patch` 增加一个 **freeform（非 JSON schema）模式**，允许客户端在请求里以“透传/无 schema”的方式声明工具，并在**响应侧工具治理**里做兼容（后续用于 A/B 测试）。
+
+#### 约束（必须遵守）
+- 不返回 `status:"failed"` 形态的 Responses 回包（失败由客户端自行暴露/处理）
+- 不静默失败：治理/桥接出错至少要有可追踪日志/采样；回包结构必须保持协议正确
+- “能修就修”：允许做形态归一/别名修补；“修不了就退回原样”并让客户端报错
+
+#### 任务拆分
+1) **开关与 A/B 入口**
+   - [x] 增加 env A/B 开关（全局）：`RCC_APPLY_PATCH_TOOL_MODE=freeform`（或 `RCC_APPLY_PATCH_FREEFORM=1`）
+   - [ ] 在 Hub Pipeline capture 的 metadata 中记录本次请求使用的模式（用于 response stage 判定，后续做按请求 A/B）
+
+2) **请求侧透传（Client tools Raw）**
+   - [x] 允许客户端 tools 声明 `format:"freeform"` 且不提供 `parameters`（或 `parameters:{}`），不强制注入 apply_patch structured schema
+   - [x] 确保 capture 的 `toolsRaw` 完整保留（顺序/字段不丢失），用于后续响应侧对齐（已在 Hub Pipeline 做 jsonClone）
+
+3) **响应侧 Tool Governance（apply_patch）兼容**
+   - [x] 识别 client tool format 为 freeform 时：治理内部仍可做 `apply_patch` 解析/修补，但**回传给客户端的 arguments 保持 freeform 文本**
+   - [x] client tool 存在 JSON schema 时：维持 schema-aware 的 key 对齐/裁剪（修不了则回退原 arguments）
+   - [ ] 将“修补/回退”过程写入可检索日志/采样（避免链路上看起来像停住，后续补齐可观测性）
+
+4) **回归测试（必须纳入回归集）**
+   - [x] 新增：freeform 模式下 `apply_patch` 的出站 arguments 保持为纯文本（Responses output + required_action 两条路径）
+   - [x] 新增：schema 模式下 `apply_patch` key 对齐（cmd/command、patch/instructions 等）保持兼容
+   - [x] 新增：freeform A/B 模式下不强制 apply_patch structured schema（tool mapping passthrough）
+   - [x] 新增：治理失败时回包仍为协议正确工具调用（不引入 failed payload）
+
+5) **端到端验证（可选，但建议）**
+   - [ ] 启动 Antigravity upstream，走 Provider 直连（不通过 mock），用 errorsamples 中的负载跑 `apply_patch` tool call 循环
+   - [ ] 对比 A/B 两种模式的 client 行为（是否能继续发 tool_result、是否会卡住）
+
 ### 📝 改进项：UPSTREAM_HEADERS_TIMEOUT / SSE headers timeout
 - 现象：部分 upstream 在建立 SSE 时超过 ~30s 才返回 headers，触发 `UPSTREAM_HEADERS_TIMEOUT`。
 - `src/providers/core/runtime/http-transport-provider.ts`
