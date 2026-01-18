@@ -96,5 +96,68 @@ describe('Unified Hub runtime shadow compare → errorsamples', () => {
     const files = await listFiles(dir);
     expect(files.some((f) => f.includes('diff-') && f.endsWith('.json'))).toBe(true);
   });
-});
 
+  it('writes a routing drift errorsample when only target differs (and ignoreTargetSelection=true)', async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-shadow-runtime-routing-'));
+    const errorsRoot = path.join(tmp, 'errorsamples');
+    process.env.ROUTECODEX_ERRORSAMPLES_DIR = errorsRoot;
+
+    process.env.ROUTECODEX_UNIFIED_HUB_SHADOW_COMPARE = '1';
+    process.env.ROUTECODEX_UNIFIED_HUB_SHADOW_BASELINE_MODE = 'off';
+    process.env.ROUTECODEX_UNIFIED_HUB_SHADOW_COMPARE_SAMPLE_RATE = '1';
+    process.env.ROUTECODEX_UNIFIED_HUB_SHADOW_COMPARE_IGNORE_TARGET_SELECTION = '1';
+
+    const { RouteCodexHttpServer } = await import('../../src/server/runtime/http-server/index.js');
+
+    const server: any = new RouteCodexHttpServer({
+      server: { host: '127.0.0.1', port: 0 },
+      pipeline: {},
+      logging: { level: 'error', enableConsole: false },
+      providers: {}
+    });
+
+    class HubPipelineMock {
+      async execute(input: any): Promise<any> {
+        const override = input?.metadata?.__hubPolicyOverride;
+        const isBaseline = Boolean(override) && override.mode === 'off';
+        return {
+          providerPayload: { model: 'x', input: [{ role: 'user', content: 'hi' }] },
+          target: isBaseline
+            ? { providerKey: 'mock.key1.mock-model', runtimeKey: 'mock.key1', providerType: 'mock-provider', outboundProfile: 'openai-responses' }
+            : { providerKey: 'mock.key2.mock-model', runtimeKey: 'mock.key2', providerType: 'mock-provider', outboundProfile: 'openai-responses' },
+          routingDecision: { routeName: 'default' },
+          metadata: {
+            entryEndpoint: input?.endpoint || '/v1/responses',
+            providerProtocol: 'openai-responses',
+            processMode: 'chat',
+            stream: false,
+            routeHint: 'default'
+          }
+        };
+      }
+      updateVirtualRouterConfig(): void {}
+    }
+
+    server.hubPipeline = new HubPipelineMock();
+    server.hubShadowComparePipeline = new HubPipelineMock();
+
+    await server.runHubPipeline(
+      {
+        entryEndpoint: '/v1/responses',
+        method: 'POST',
+        requestId: 'req_shadow_runtime_route_drift_test',
+        headers: {},
+        query: {},
+        body: { model: 'x', input: [{ role: 'user', content: 'hi' }] },
+        metadata: {}
+      },
+      { routeHint: 'default' }
+    );
+
+    const dir = path.join(errorsRoot, 'unified-hub-shadow-runtime-routing');
+    await waitFor(async () => (await listFiles(dir)).length > 0, 3000);
+
+    const files = await listFiles(dir);
+    expect(files.some((f) => f.includes('route-drift-') && f.endsWith('.json'))).toBe(true);
+  });
+});

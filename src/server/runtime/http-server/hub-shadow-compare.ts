@@ -104,15 +104,17 @@ export async function recordHubShadowCompareDiff(options: {
     process.env.ROUTECODEX_UNIFIED_HUB_SHADOW_COMPARE_IGNORE_TARGET_SELECTION,
     true
   );
-  const excludedComparePaths = ignoreInternalIds
-    ? [
-      'providerPayload.requestId',
-      'providerPayload.metadata.context.requestId',
-      'providerPayload.metadata.responsesContext.requestId',
-      'providerPayload.metadata.context.__disableHubSnapshots',
-      ...(ignoreTargetSelection ? ['target.providerKey', 'target.runtimeKey'] : [])
-    ]
-    : [];
+  const excludedComparePaths = [
+    ...(ignoreInternalIds
+      ? [
+        'providerPayload.requestId',
+        'providerPayload.metadata.context.requestId',
+        'providerPayload.metadata.responsesContext.requestId',
+        'providerPayload.metadata.context.__disableHubSnapshots'
+      ]
+      : []),
+    ...(ignoreTargetSelection ? ['target.providerKey', 'target.runtimeKey'] : [])
+  ];
 
   const cloneJsonSafe = <T>(value: T): T => {
     try {
@@ -139,7 +141,7 @@ export async function recordHubShadowCompareDiff(options: {
   };
 
   const prepareForDiff = (value: unknown): unknown => {
-    if (!ignoreInternalIds) return value;
+    if (!excludedComparePaths.length) return value;
     const cloned = cloneJsonSafe(value);
     for (const p of excludedComparePaths) {
       deletePath(cloned, p);
@@ -147,7 +149,49 @@ export async function recordHubShadowCompareDiff(options: {
     return cloned;
   };
 
+  const baselineTarget = (options.baselineOut as any)?.target;
+  const candidateTarget = (options.candidateOut as any)?.target;
+  const baselineProviderKey = typeof baselineTarget?.providerKey === 'string' ? String(baselineTarget.providerKey) : undefined;
+  const candidateProviderKey = typeof candidateTarget?.providerKey === 'string' ? String(candidateTarget.providerKey) : undefined;
+  const baselineRuntimeKey = typeof baselineTarget?.runtimeKey === 'string' ? String(baselineTarget.runtimeKey) : undefined;
+  const candidateRuntimeKey = typeof candidateTarget?.runtimeKey === 'string' ? String(candidateTarget.runtimeKey) : undefined;
+  const routingDrift =
+    Boolean(baselineProviderKey && candidateProviderKey && baselineProviderKey !== candidateProviderKey) ||
+    Boolean(baselineRuntimeKey && candidateRuntimeKey && baselineRuntimeKey !== candidateRuntimeKey);
+
   const diffs = diffPayloads(prepareForDiff(options.baselineOut), prepareForDiff(options.candidateOut));
+  if (!diffs.length && routingDrift && ignoreTargetSelection) {
+    const llmsVersion = resolveLlmswitchCoreVersion();
+    const record = {
+      kind: 'unified-hub-shadow-runtime-routing-drift',
+      timestamp: new Date().toISOString(),
+      requestId: options.requestId,
+      entryEndpoint: options.entryEndpoint,
+      routeHint: options.routeHint,
+      attempt: options.attempt,
+      excludedProviderKeys: options.excludedProviderKeys || [],
+      runtime: {
+        routecodex: {
+          version: buildInfo.version,
+          mode: buildInfo.mode
+        },
+        llmswitchCore: llmsVersion ? { version: llmsVersion } : undefined,
+        node: { version: process.version }
+      },
+      baselineMode: options.baselineMode,
+      candidateMode: options.candidateMode,
+      baselineTarget: baselineTarget ?? null,
+      candidateTarget: candidateTarget ?? null
+    };
+    const file = await writeErrorsampleJson({
+      group: 'unified-hub-shadow-runtime-routing',
+      kind: 'route-drift',
+      payload: record
+    });
+    // eslint-disable-next-line no-console
+    console.error(`[unified-hub-shadow-runtime] wrote routing drift errorsample: ${file}`);
+    return;
+  }
   if (!diffs.length) return;
 
   const llmsVersion = resolveLlmswitchCoreVersion();
