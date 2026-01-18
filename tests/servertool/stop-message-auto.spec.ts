@@ -188,9 +188,9 @@ describe('stop_message_auto servertool', () => {
     expect(payload.messages).toBeUndefined();
     expect(Array.isArray(payload.input)).toBe(true);
     expect(payload.stream).toBe(false);
-    expect(payload.parameters?.max_output_tokens).toBe(99);
-    expect(payload.parameters?.temperature).toBe(0.1);
-    expect(payload.parameters?.stream).toBeUndefined();
+    expect(payload.parameters).toBeUndefined();
+    expect(payload.max_output_tokens).toBe(99);
+    expect(payload.temperature).toBe(0.1);
 
     const inputText = JSON.stringify(payload.input);
     expect(inputText).toContain('hi');
@@ -263,9 +263,9 @@ describe('stop_message_auto servertool', () => {
     expect(payload.messages).toBeUndefined();
     expect(Array.isArray(payload.input)).toBe(true);
     expect(payload.stream).toBe(false);
-    expect(payload.parameters?.max_output_tokens).toBe(77);
-    expect(payload.parameters?.temperature).toBe(0.2);
-    expect(payload.parameters?.stream).toBeUndefined();
+    expect(payload.parameters).toBeUndefined();
+    expect(payload.max_output_tokens).toBe(77);
+    expect(payload.temperature).toBe(0.2);
 
     const inputText = JSON.stringify(payload.input);
     expect(inputText).toContain('hi');
