@@ -51,6 +51,10 @@
 - 显式启用 enforce：`ROUTECODEX_HUB_POLICY_MODE=enforce`
 - 可选采样率：`ROUTECODEX_HUB_POLICY_SAMPLE_RATE=0.25`（范围 [0,1]，未设置则全量记录）
 
+#### Phase 2（toolSurface）进度（shadow-only）
+
+- [x] provider_outbound 工具定义跨协议形态对比：OpenAI ↔ Gemini、OpenAI ↔ Anthropic（sharedmodules: 1c3a9e8）
+
 #### 运行时自动黑盒 compare（默认开启）
 
 - 启用/关闭：`ROUTECODEX_UNIFIED_HUB_SHADOW_COMPARE=1|0`
