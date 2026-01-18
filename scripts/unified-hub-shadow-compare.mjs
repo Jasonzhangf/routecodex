@@ -13,6 +13,25 @@ import fs from 'node:fs';
 import path from 'node:path';
 import url from 'node:url';
 
+function resolveErrorSamplesRoot() {
+  const envOverride =
+    process.env.ROUTECODEX_ERRORSAMPLES_DIR ||
+    process.env.ROUTECODEX_ERROR_SAMPLES_DIR;
+  if (envOverride && String(envOverride).trim()) {
+    return path.resolve(String(envOverride).trim());
+  }
+  const home = process.env.HOME || process.env.USERPROFILE || '';
+  return path.join(home, '.routecodex', 'errorsamples');
+}
+
+function ensureDirSync(dir) {
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+  } catch {
+    // ignore
+  }
+}
+
 function usage() {
   console.log(`Usage:
   node scripts/unified-hub-shadow-compare.mjs --request <file.json> [options]
@@ -256,6 +275,21 @@ async function runOnce({ requestId, mode, entryEndpoint, routeHint, payload }) {
   return result;
 }
 
+function writeCompareErrorSample(opts) {
+  const root = resolveErrorSamplesRoot();
+  if (!root || !String(root).trim()) return;
+  const dir = path.join(root, 'unified-hub-shadow');
+  ensureDirSync(dir);
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const file = path.join(dir, `unified-hub-shadow-diff-${stamp}.json`);
+  try {
+    fs.writeFileSync(file, JSON.stringify(opts, null, 2), 'utf8');
+    console.error(`[unified-hub-shadow-compare] wrote errorsample: ${file}`);
+  } catch {
+    // ignore
+  }
+}
+
 async function main() {
   const opts = parseArgs();
   const loaded = readRequestPayloadAndHints(opts.request);
@@ -300,6 +334,19 @@ async function main() {
   console.error(`[unified-hub-shadow-compare] DIFF count=${diffs.length} (showing first 80)`);
   diffs.slice(0, 80).forEach((d) => {
     console.error(`- ${d.path}`);
+  });
+  writeCompareErrorSample({
+    kind: 'unified-hub-shadow-diff',
+    timestamp: new Date().toISOString(),
+    requestFile: path.resolve(opts.request),
+    entryEndpoint,
+    routeHint,
+    baselineMode,
+    candidateMode,
+    diffCount: diffs.length,
+    diffPaths: diffs.slice(0, 200).map((d) => d.path),
+    baseline: baselineOut,
+    candidate: candidateOut
   });
   console.error('\n--- baseline (stable) ---\n' + stableStringify(baselineOut));
   console.error('\n--- candidate (stable) ---\n' + stableStringify(candidateOut));

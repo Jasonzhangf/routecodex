@@ -25,7 +25,7 @@ Options:
 
 function parseArgs(argv) {
   const out = {
-    root: path.join(os.homedir(), '.routecodex', 'codex-samples', '__policy_violations__'),
+    root: path.join(os.homedir(), '.routecodex', 'errorsamples', 'policy'),
     sinceHours: undefined,
     limit: 30,
     fail: false
@@ -124,10 +124,15 @@ async function main() {
     usage();
     process.exit(0);
   }
-  const root = path.resolve(args.root);
+  let root = path.resolve(args.root);
   if (!(await fileExists(root))) {
-    console.log(`[policy-report] no folder: ${root}`);
-    process.exit(0);
+    const fallback = path.join(os.homedir(), '.routecodex', 'codex-samples', '__policy_violations__');
+    if (await fileExists(fallback)) {
+      root = fallback;
+    } else {
+      console.log(`[policy-report] no folder: ${root}`);
+      process.exit(0);
+    }
   }
 
   const sinceMs =

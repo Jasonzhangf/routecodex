@@ -33,6 +33,7 @@ Fast snapshots are stored in `~/.routecodex/codex-samples/`.
 When Unified Hub Framework policy snapshots (`hub_policy.*`) detect violations, they are additionally copied to:
 
 - `~/.routecodex/codex-samples/__policy_violations__/`
+- `~/.routecodex/errorsamples/policy/`
 
 This keeps normal snapshot traffic intact while making these cases easy to monitor:
 

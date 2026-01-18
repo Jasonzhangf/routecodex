@@ -31,6 +31,11 @@
 - Anthropic 直通 vs 编解码对比：`scripts/anthropic-compare-modes.mjs`
 - 多 provider 回归（基于 codex-samples）：`scripts/outbound-regression-codex-samples.mjs`
 
+#### 统一错误归档（默认开启）
+
+- Policy 违规/改写归档：`~/.routecodex/errorsamples/policy/**`（同时仍会写入 `~/.routecodex/codex-samples/__policy_violations__/`）
+- 黑盒对比 diff 归档：`~/.routecodex/errorsamples/unified-hub-shadow/*.json`
+
 #### Phase 0/1 开关（Host 注入，默认 enforce）
 
 - 默认开启 enforce（Phase 1：Responses-first outbound policy；目前仅对 `openai-responses` 的 provider outbound 生效）：无需设置 env
