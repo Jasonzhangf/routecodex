@@ -8,6 +8,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, '..');
 const PACK_SCRIPT = path.join(PROJECT_ROOT, 'scripts', 'pack-mode.mjs');
 const pkgPath = path.join(PROJECT_ROOT, 'package.json');
+const llmsPath = path.join(PROJECT_ROOT, 'node_modules', '@jsonstudio', 'llms');
 
 function run(command, args, options = {}) {
   const res = spawnSync(command, args, { stdio: 'inherit', ...options });
@@ -17,6 +18,14 @@ function run(command, args, options = {}) {
 }
 
 try {
+  const hadDevLink = (() => {
+    try {
+      return fs.lstatSync(llmsPath).isSymbolicLink();
+    } catch {
+      return false;
+    }
+  })();
+
   // 1) 使用 release 模式构建 dist（依赖 npm 上的 @jsonstudio/llms）
   run('npm', ['run', 'build:min'], {
     cwd: PROJECT_ROOT,
@@ -39,8 +48,13 @@ try {
   // 3) 发布 npm 包
   run('npm', ['publish', tarballName], { cwd: PROJECT_ROOT });
 
-  // 4) pack-mode 会在内部检测 dev 链接并调用 ensure-llmswitch-mode 恢复 dev 模式，
-  //    因此此处不再额外修改 BUILD_MODE 或重新 link。后续本地如需 dev build，可单独运行 `npm run build:dev`。
+  // 4) 发布结束后恢复 dev 模式（routecodex 约定始终为 dev CLI；rcc 发布时才切 release）。
+  if (hadDevLink) {
+    run('npm', ['run', 'llmswitch:ensure'], {
+      cwd: PROJECT_ROOT,
+      env: { ...process.env, BUILD_MODE: 'dev' }
+    });
+  }
 } catch (err) {
   console.error('[publish-rcc] failed:', err.message);
   process.exit(1);

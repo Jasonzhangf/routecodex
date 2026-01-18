@@ -10,6 +10,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { writeErrorSampleJson } from './lib/errorsamples.mjs';
 
 const protocolFolders = {
   'openai-responses': 'openai-responses',
@@ -118,9 +119,15 @@ function listCounts(label, payload) {
   console.log(
     `${label} counts → input:${inputCount} messages:${messageCount} tools:${toolCount} instructions:${typeof payload?.instructions === 'string'}`
   );
+  return {
+    input: inputCount,
+    messages: messageCount,
+    tools: toolCount,
+    hasInstructions: typeof payload?.instructions === 'string'
+  };
 }
 
-function main() {
+async function main() {
   const opts = parseArgs();
   const clientProtocol = opts.clientProtocol || opts.protocol;
   const providerProtocol = opts.providerProtocol || opts.protocol;
@@ -146,8 +153,8 @@ function main() {
   const clientPayload = extractPayload(clientSnapshot);
   const providerPayload = extractPayload(providerSnapshot);
 
-  listCounts('Client', clientPayload);
-  listCounts('Provider', providerPayload);
+  const clientCounts = listCounts('Client', clientPayload);
+  const providerCounts = listCounts('Provider', providerPayload);
 
   const diffs = diffPayloads(pruneUndefined(clientPayload), pruneUndefined(providerPayload));
   if (!diffs.length) {
@@ -159,6 +166,30 @@ function main() {
     });
     if (diffs.length > 50) {
       console.log(`  ... ${diffs.length - 50} more differences`);
+    }
+
+    const record = {
+      kind: 'compare-responses-request-diff',
+      requestId: normalizedId,
+      clientProtocol,
+      providerProtocol,
+      clientPath,
+      providerPath,
+      clientCounts,
+      providerCounts,
+      diffsCount: diffs.length,
+      diffsHead: diffs.slice(0, 200),
+      diffsTruncated: diffs.length > 200
+    };
+    try {
+      const file = await writeErrorSampleJson({
+        group: 'compare-responses-request',
+        kind: 'diff',
+        payload: record
+      });
+      console.error(`[compare-responses-request] wrote errorsample: ${file}`);
+    } catch (err) {
+      console.error('[compare-responses-request] failed to write errorsample:', err);
     }
   }
 }
@@ -217,4 +248,19 @@ function diffPayloads(expected, actual, path = '<root>') {
   return [{ path, expected, actual }];
 }
 
-main();
+main().catch((err) => {
+  console.error('[compare-responses-request] fatal error:', err);
+  void writeErrorSampleJson({
+    group: 'compare-responses-request',
+    kind: 'fatal',
+    payload: {
+      kind: 'compare-responses-request-fatal',
+      stamp: new Date().toISOString(),
+      argv: process.argv.slice(2),
+      error: String(err?.stack || err)
+    }
+  }).then((file) => {
+    console.error(`[compare-responses-request] wrote errorsample: ${file}`);
+  }).catch(() => {});
+  process.exitCode = 1;
+});

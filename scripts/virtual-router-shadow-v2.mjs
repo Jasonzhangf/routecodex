@@ -15,6 +15,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { writeErrorSampleJson } from './lib/errorsamples.mjs';
 
 async function main() {
   const __filename = fileURLToPath(import.meta.url);
@@ -38,6 +39,19 @@ async function main() {
       '[virtual-router-shadow-v2] Failed to load dist modules. Please run `npm run build` first.',
       error instanceof Error ? error.message : String(error)
     );
+    try {
+      const file = await writeErrorSampleJson({
+        group: 'virtual-router-shadow-v2',
+        kind: 'fatal',
+        payload: {
+          kind: 'virtual-router-shadow-v2-fatal',
+          stamp: new Date().toISOString(),
+          error: String(error instanceof Error ? error.stack || error.message : String(error))
+        }
+      });
+      // eslint-disable-next-line no-console
+      console.error(`[virtual-router-shadow-v2] wrote errorsample: ${file}`);
+    } catch {}
     process.exitCode = 1;
     return;
   }
@@ -111,6 +125,24 @@ async function main() {
   console.log('[virtual-router-shadow-v2] routing equal:', routingEqual);
 
   if (!providersEqual || !routingEqual) {
+    try {
+      const file = await writeErrorSampleJson({
+        group: 'virtual-router-shadow-v2',
+        kind: 'diff',
+        payload: {
+          kind: 'virtual-router-shadow-v2-diff',
+          stamp: new Date().toISOString(),
+          v1Providers,
+          v2Providers,
+          providersEqual,
+          routingEqual,
+          v1Routing: v1Input.routing,
+          v2Routing: v2Input.routing
+        }
+      });
+      // eslint-disable-next-line no-console
+      console.error(`[virtual-router-shadow-v2] wrote errorsample: ${file}`);
+    } catch {}
     process.exitCode = 1;
   }
 }
@@ -118,5 +150,14 @@ async function main() {
 main().catch((error) => {
   // eslint-disable-next-line no-console
   console.error('[virtual-router-shadow-v2] failed:', error);
+  void writeErrorSampleJson({
+    group: 'virtual-router-shadow-v2',
+    kind: 'fatal',
+    payload: {
+      kind: 'virtual-router-shadow-v2-fatal',
+      stamp: new Date().toISOString(),
+      error: String(error instanceof Error ? error.stack || error.message : String(error))
+    }
+  }).catch(() => {});
   process.exit(1);
 });

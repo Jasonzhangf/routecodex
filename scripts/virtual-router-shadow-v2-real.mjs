@@ -15,6 +15,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { writeErrorSampleJson } from './lib/errorsamples.mjs';
 
 async function resolveConfigPath() {
   const explicit = process.env.ROUTECODEX_CONFIG || process.env.RCC_CONFIG;
@@ -47,6 +48,18 @@ function diffKeys(a, b) {
   return { onlyA, onlyB };
 }
 
+function redactSecrets(value) {
+  const secretKeyRe = /key|token|secret|password|authorization/i;
+  if (Array.isArray(value)) return value.map(redactSecrets);
+  if (!value || typeof value !== 'object') return value;
+  const out = {};
+  for (const [k, v] of Object.entries(value)) {
+    if (secretKeyRe.test(k)) out[k] = '[REDACTED]';
+    else out[k] = redactSecrets(v);
+  }
+  return out;
+}
+
 async function main() {
   const __filename = fileURLToPath(import.meta.url);
   const __dirname = path.dirname(__filename);
@@ -66,6 +79,19 @@ async function main() {
       '[virtual-router-shadow-v2-real] Failed to load dist modules. Please run `npm run build` or tsc first.',
       error instanceof Error ? error.message : String(error)
     );
+    try {
+      const file = await writeErrorSampleJson({
+        group: 'virtual-router-shadow-v2-real',
+        kind: 'fatal',
+        payload: {
+          kind: 'virtual-router-shadow-v2-real-fatal',
+          stamp: new Date().toISOString(),
+          error: String(error instanceof Error ? error.stack || error.message : String(error))
+        }
+      });
+      // eslint-disable-next-line no-console
+      console.error(`[virtual-router-shadow-v2-real] wrote errorsample: ${file}`);
+    } catch {}
     process.exitCode = 1;
     return;
   }
@@ -79,6 +105,19 @@ async function main() {
       '[virtual-router-shadow-v2-real] Failed to load user config:',
       error instanceof Error ? error.message : String(error)
     );
+    try {
+      const file = await writeErrorSampleJson({
+        group: 'virtual-router-shadow-v2-real',
+        kind: 'fatal',
+        payload: {
+          kind: 'virtual-router-shadow-v2-real-fatal',
+          stamp: new Date().toISOString(),
+          error: String(error instanceof Error ? error.stack || error.message : String(error))
+        }
+      });
+      // eslint-disable-next-line no-console
+      console.error(`[virtual-router-shadow-v2-real] wrote errorsample: ${file}`);
+    } catch {}
     process.exitCode = 1;
     return;
   }
@@ -131,6 +170,29 @@ async function main() {
   console.log('[virtual-router-shadow-v2-real] routing equal:', routingEqual);
 
   if (!providersEqual || !providerPayloadEqual || !routingEqual) {
+    try {
+      const file = await writeErrorSampleJson({
+        group: 'virtual-router-shadow-v2-real',
+        kind: 'diff',
+        payload: {
+          kind: 'virtual-router-shadow-v2-real-diff',
+          stamp: new Date().toISOString(),
+          configPath: await resolveConfigPath(),
+          providerKeyDiff,
+          providersEqual,
+          providerPayloadEqual,
+          routingEqual,
+          v1ProvidersKeys: Object.keys(v1Providers),
+          v2ProvidersKeys: Object.keys(v2Providers),
+          v1Routing: redactSecrets(v1Input.routing || {}),
+          v2Routing: redactSecrets(v2Input.routing || {}),
+          v1Providers: redactSecrets(v1Providers),
+          v2Providers: redactSecrets(v2Providers)
+        }
+      });
+      // eslint-disable-next-line no-console
+      console.error(`[virtual-router-shadow-v2-real] wrote errorsample: ${file}`);
+    } catch {}
     process.exitCode = 1;
   }
 }
@@ -138,6 +200,14 @@ async function main() {
 main().catch((error) => {
   // eslint-disable-next-line no-console
   console.error('[virtual-router-shadow-v2-real] failed:', error);
+  void writeErrorSampleJson({
+    group: 'virtual-router-shadow-v2-real',
+    kind: 'fatal',
+    payload: {
+      kind: 'virtual-router-shadow-v2-real-fatal',
+      stamp: new Date().toISOString(),
+      error: String(error instanceof Error ? error.stack || error.message : String(error))
+    }
+  }).catch(() => {});
   process.exit(1);
 });
-

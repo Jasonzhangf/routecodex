@@ -23,8 +23,10 @@
  */
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { writeErrorSampleJson } from './lib/errorsamples.mjs';
 
 const DEFAULT_ROUTE_BASE = process.env.ROUTECODEX_BASE || 'http://127.0.0.1:5555';
 const DEFAULT_RCCX_BASE = process.env.RCCX_BASE || 'http://127.0.0.1:5556';
@@ -230,6 +232,29 @@ async function main() {
       rccxRunDir,
       rccxError: rccxResult.error || null
     });
+    try {
+      const file = await writeErrorSampleJson({
+        group: 'compare-codex-rccx',
+        kind: 'missing-artifacts',
+        payload: {
+          kind: 'compare-codex-rccx-missing-artifacts',
+          stamp: new Date().toISOString(),
+          samplePath,
+          requestId,
+          routeBase: opts.routeBase,
+          rccxBase: opts.rccxBase,
+          routeLabel: opts.routeLabel,
+          rccxLabel: opts.rccxLabel,
+          routeRunDir,
+          rccxRunDir,
+          routeError: routeResult.error || null,
+          rccxError: rccxResult.error || null
+        }
+      });
+      console.error(`[compare-codex-rccx] wrote errorsample: ${file}`);
+    } catch (err) {
+      console.error('[compare-codex-rccx] failed to write errorsample:', err);
+    }
     process.exitCode = 1;
     return;
   }
@@ -252,6 +277,33 @@ async function main() {
     // 为了调试 429 / 系列冷却问题，额外打印一小段 body 样本。
     console.log('[compare-codex-rccx] routecodex.bodySample =', routeResult.bodySample);
     console.log('[compare-codex-rccx] rccx.bodySample      =', rccxResult.bodySample);
+    try {
+      const file = await writeErrorSampleJson({
+        group: 'compare-codex-rccx',
+        kind: 'mismatch',
+        payload: {
+          kind: 'compare-codex-rccx-mismatch',
+          stamp: new Date().toISOString(),
+          samplePath,
+          requestId,
+          routeBase: opts.routeBase,
+          rccxBase: opts.rccxBase,
+          routeLabel: opts.routeLabel,
+          rccxLabel: opts.rccxLabel,
+          routeRunDir,
+          rccxRunDir,
+          routeMeta,
+          rccxMeta,
+          routeBodyKind: routeResult.bodyKind,
+          rccxBodyKind: rccxResult.bodyKind,
+          routeBodySample: routeResult.bodySample,
+          rccxBodySample: rccxResult.bodySample
+        }
+      });
+      console.error(`[compare-codex-rccx] wrote errorsample: ${file}`);
+    } catch (err) {
+      console.error('[compare-codex-rccx] failed to write errorsample:', err);
+    }
     process.exitCode = 1;
     return;
   }
@@ -263,6 +315,12 @@ async function main() {
 
 main().catch((err) => {
   console.error('[compare-codex-rccx] fatal error:', err);
+  try {
+    const root = path.join(os.homedir(), '.routecodex', 'errorsamples', 'compare-codex-rccx');
+    const file = path.join(root, `fatal-${Date.now()}.txt`);
+    fs.mkdirSync(root, { recursive: true });
+    fs.writeFileSync(file, String(err?.stack || err), 'utf8');
+    console.error(`[compare-codex-rccx] wrote errorsample: ${file}`);
+  } catch {}
   process.exitCode = 1;
 });
-

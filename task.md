@@ -35,6 +35,11 @@
 
 - Policy 违规/改写归档：`~/.routecodex/errorsamples/policy/**`（同时仍会写入 `~/.routecodex/codex-samples/__policy_violations__/`）
 - 黑盒对比 diff 归档：`~/.routecodex/errorsamples/unified-hub-shadow/*.json`
+- 其它对比工具 diff 归档：
+  - `scripts/compare-responses-request.mjs` → `~/.routecodex/errorsamples/compare-responses-request/*.json`
+  - `scripts/anthropic-compare-modes.mjs` → `~/.routecodex/errorsamples/anthropic-compare-modes/*.json`
+  - `scripts/compare-codex-rccx.mjs` → `~/.routecodex/errorsamples/compare-codex-rccx/*.json`
+  - `scripts/virtual-router-shadow-v2*.mjs` → `~/.routecodex/errorsamples/virtual-router-shadow-v2*/`
 
 #### Phase 0/1 开关（Host 注入，默认 enforce）
 

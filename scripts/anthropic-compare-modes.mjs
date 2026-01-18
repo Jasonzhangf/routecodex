@@ -19,6 +19,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import url from 'url';
+import { writeErrorSampleJson } from './lib/errorsamples.mjs';
 
 const __filename = url.fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -92,6 +93,7 @@ function diffViews(label, a, b) {
   } else {
     console.log('[DIFF]', diffs);
   }
+  return diffs;
 }
 
 async function main() {
@@ -140,7 +142,7 @@ async function main() {
 
   const viewReqA = viewRequestAnth(anthReq);
   const viewReqB = viewRequestAnth(anthReqChat);
-  diffViews('REQUEST COMPARISON', viewReqA, viewReqB);
+  const reqDiffs = diffViews('REQUEST COMPARISON', viewReqA, viewReqB);
 
   // 响应：A 直通 vs B 编解码
   // 使用与 anthropic-snapshot-closed-loop 相同路径：
@@ -199,12 +201,47 @@ async function main() {
 
   const viewRespA = viewResponseAnth(anthResp);
   const viewRespB = viewResponseAnth(anthRespChat);
-  diffViews('RESPONSE COMPARISON', viewRespA, viewRespB);
+  const respDiffs = diffViews('RESPONSE COMPARISON', viewRespA, viewRespB);
+
+  if (reqDiffs.length || respDiffs.length) {
+    const record = {
+      kind: 'anthropic-compare-modes-diff',
+      requestFile: reqFile,
+      responseFile: respFile,
+      requestDiffs: reqDiffs,
+      responseDiffs: respDiffs,
+      requestView: { passthrough: viewReqA, chatBridge: viewReqB },
+      responseView: { passthrough: viewRespA, chatBridge: viewRespB }
+    };
+    try {
+      const file = await writeErrorSampleJson({
+        group: 'anthropic-compare-modes',
+        kind: 'diff',
+        payload: record
+      });
+      console.error(`[anthropic-compare-modes] wrote errorsample: ${file}`);
+    } catch (err) {
+      console.error('[anthropic-compare-modes] failed to write errorsample:', err);
+    }
+  }
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  main().catch(err => {
+  main().catch(async (err) => {
     console.error('anthropic-compare-modes failed:', err);
+    try {
+      const file = await writeErrorSampleJson({
+        group: 'anthropic-compare-modes',
+        kind: 'fatal',
+        payload: {
+          kind: 'anthropic-compare-modes-fatal',
+          stamp: new Date().toISOString(),
+          argv: process.argv.slice(2),
+          error: String(err?.stack || err)
+        }
+      });
+      console.error(`[anthropic-compare-modes] wrote errorsample: ${file}`);
+    } catch {}
     process.exit(1);
   });
 }
