@@ -114,6 +114,11 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
     // 无论是否来自 messages 桥接，都不向上游发送 OpenAI 的 stream 标记。
     delete (recordPayload as { stream?: unknown }).stream;
 
+    // 对齐 gcli2api：最终上游 schema 里 `request` 仅在最外层包裹一次（由 GeminiCLIProtocolClient 负责）。
+    // 如果上游/compat 层错误地产生了 payload.request（例如旧版本样本/回放），这里做一次扁平化，
+    // 避免出现 body.request.request.contents 这种非法形状，导致上游生成空响应或被静默忽略。
+    this.flattenRequestContainer(payload);
+
     return processedRequest;
   }
 
@@ -320,11 +325,14 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
           ? ((payload as { request?: UnknownObject }).request as UnknownObject)
           : undefined;
       const currentSystemInstruction =
-        requestContainer && (requestContainer as { systemInstruction?: unknown }).systemInstruction;
+        (payload as { systemInstruction?: unknown }).systemInstruction ??
+        (requestContainer && (requestContainer as { systemInstruction?: unknown }).systemInstruction);
       const currentParts =
-        currentSystemInstruction && typeof currentSystemInstruction === 'object'
+        currentSystemInstruction && typeof currentSystemInstruction === 'object' && !Array.isArray(currentSystemInstruction)
           ? ((currentSystemInstruction as { parts?: unknown }).parts as unknown)
-          : undefined;
+          : Array.isArray(currentSystemInstruction)
+            ? currentSystemInstruction
+            : undefined;
 
       const antigravityPrompt =
         'Please ignore the following [ignore]You are Antigravity, a powerful agentic AI coding assistant designed by the Google Deepmind team working on Advanced Agentic Coding.' +
@@ -335,18 +343,45 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
       if (Array.isArray(currentParts) && currentParts.length > 0) {
         for (const part of currentParts as Array<{ text?: string }>) {
           if (part && typeof part === 'object') {
-            nextParts.push({ text: String(part.text ?? '') });
+            const text = String(part.text ?? '').trim();
+            if (text.length) {
+              nextParts.push({ text });
+            }
           }
         }
       }
 
-      const nextSystemInstruction: { parts: Array<{ text: string }> } = { parts: nextParts };
+      const nextSystemInstruction: { parts: Array<{ text: string }>; role?: string } = {
+        parts: nextParts,
+        ...(currentSystemInstruction &&
+        typeof currentSystemInstruction === 'object' &&
+        !Array.isArray(currentSystemInstruction) &&
+        typeof (currentSystemInstruction as { role?: unknown }).role === 'string'
+          ? { role: (currentSystemInstruction as { role: string }).role }
+          : {})
+      };
 
       (payload as { systemInstruction?: { parts: Array<{ text: string }> } }).systemInstruction = nextSystemInstruction;
       if (requestContainer && typeof requestContainer === 'object') {
         (requestContainer as { systemInstruction?: unknown }).systemInstruction = nextSystemInstruction;
       }
     }
+  }
+
+  private flattenRequestContainer(payload: MutablePayload): void {
+    const requestContainer =
+      (payload as { request?: unknown }).request && typeof (payload as { request?: unknown }).request === 'object'
+        ? ((payload as { request?: Record<string, unknown> }).request as Record<string, unknown>)
+        : undefined;
+    if (!requestContainer || Array.isArray(requestContainer)) {
+      return;
+    }
+    for (const [key, value] of Object.entries(requestContainer)) {
+      if ((payload as Record<string, unknown>)[key] === undefined) {
+        (payload as Record<string, unknown>)[key] = value;
+      }
+    }
+    delete (payload as { request?: unknown }).request;
   }
 
   private hasNonEmptyString(value: unknown): value is string {

@@ -20,6 +20,7 @@ function createState(overrides?: Partial<RoutingInstructionState>): RoutingInstr
   return {
     forcedTarget: undefined,
     stickyTarget: undefined,
+    preferTarget: undefined,
     allowedProviders: new Set(),
     disabledProviders: new Set(),
     disabledKeys: new Map(),
@@ -48,11 +49,11 @@ describe('Routing instruction parsing and application', () => {
     expect(Array.from(nextState.allowedProviders).sort()).toEqual(['glm', 'openai']);
   });
 
-  test('sticky provider.model instructions keep model target without alias binding', () => {
+  test('prefer provider.model instructions keep model target without alias binding', () => {
     const instructions = parseRoutingInstructions(buildMessages('<**!antigravity.claude-sonnet-4-5**>'));
     expect(instructions).toHaveLength(1);
     const instruction = instructions[0];
-    expect(instruction.type).toBe('sticky');
+    expect(instruction.type).toBe('prefer');
     expect(instruction.provider).toBe('antigravity');
     expect(instruction.model).toBe('claude-sonnet-4-5');
     expect(instruction.keyAlias).toBeUndefined();

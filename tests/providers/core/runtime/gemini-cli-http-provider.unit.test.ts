@@ -31,4 +31,45 @@ describe('GeminiCLIHttpProvider basic behaviour', () => {
     expect(profile.defaultEndpoint).toContain('v1internal:generateContent');
     expect(profile.requiredAuth).toContain('oauth');
   });
+
+  test('flattens accidental nested request container (avoid body.request.request.*)', async () => {
+    const provider = new GeminiCLIHttpProvider(baseConfig, emptyDeps);
+    const processed = await (provider as any).preprocessRequest({
+      model: 'gemini-3-pro-high',
+      request: {
+        contents: [{ role: 'user', parts: [{ text: 'hi' }] }]
+      },
+      stream: true
+    });
+
+    expect(processed).toBeTruthy();
+    expect((processed as any).request).toBeUndefined();
+    expect(Array.isArray((processed as any).contents)).toBe(true);
+    expect((processed as any).stream).toBeUndefined();
+  });
+
+  test('antigravity systemInstruction injection preserves existing parts', async () => {
+    const cfg: OpenAIStandardConfig = {
+      ...baseConfig,
+      config: {
+        ...(baseConfig.config as any),
+        providerId: 'antigravity'
+      }
+    } as unknown as OpenAIStandardConfig;
+
+    const provider = new GeminiCLIHttpProvider(cfg, emptyDeps);
+    const processed = await (provider as any).preprocessRequest({
+      model: 'gemini-3-pro-high',
+      contents: [{ role: 'user', parts: [{ text: 'hi' }] }],
+      systemInstruction: { role: 'system', parts: [{ text: 'custom-system' }] },
+      stream: true
+    });
+
+    const sys = (processed as any).systemInstruction;
+    expect(sys).toBeTruthy();
+    expect(Array.isArray(sys.parts)).toBe(true);
+    expect(String(sys.parts[0]?.text || '')).toContain('Antigravity');
+    expect(JSON.stringify(sys.parts)).toContain('custom-system');
+    expect((processed as any).stream).toBeUndefined();
+  });
 });

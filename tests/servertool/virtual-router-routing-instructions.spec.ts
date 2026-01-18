@@ -45,6 +45,88 @@ function buildEngine(): VirtualRouterEngine {
   return engine;
 }
 
+function buildEnginePreferFallback(): VirtualRouterEngine {
+  const input: VirtualRouterBootstrapInput = {
+    virtualrouter: {
+      providers: {
+        antigravity: {
+          id: 'antigravity',
+          type: 'openai',
+          endpoint: 'https://example.invalid',
+          auth: {
+            type: 'apikey',
+            keys: {
+              sonnetkey: { value: 'SONNET' },
+              sonnetbackup: { value: 'SONNET-BACKUP' },
+              geminikey: { value: 'GEMINI' }
+            }
+          },
+          models: {
+            'claude-sonnet-4-5': {},
+            'gemini-3-pro-high': {}
+          }
+        }
+      },
+      routing: {
+        // Only Claude is present in the normal route pool; prefer-mode must still be able to select Gemini.
+        default: ['antigravity.claude-sonnet-4-5']
+      }
+    }
+  };
+  const { config } = bootstrapVirtualRouterConfig(input);
+  const engine = new VirtualRouterEngine();
+  engine.initialize(config);
+  return engine;
+}
+
+function buildEngineAllowlistGlobalFallback(): VirtualRouterEngine {
+  const input: VirtualRouterBootstrapInput = {
+    virtualrouter: {
+      providers: {
+        antigravity: {
+          id: 'antigravity',
+          type: 'openai',
+          endpoint: 'https://example.invalid',
+          auth: {
+            type: 'apikey',
+            keys: {
+              sonnetkey: { value: 'SONNET' }
+            }
+          },
+          models: {
+            'claude-sonnet-4-5': {}
+          }
+        },
+        glm: {
+          id: 'glm',
+          type: 'openai',
+          endpoint: 'https://example.invalid',
+          auth: {
+            type: 'apikey',
+            keys: {
+              key1: { value: 'GLM' }
+            }
+          },
+          models: {
+            'glm-4.7': {}
+          }
+        }
+      },
+      routing: {
+        longcontext: ['antigravity.claude-sonnet-4-5'],
+        default: ['antigravity.claude-sonnet-4-5'],
+        // Provider allowlists like "<**!glm**>" must remain routable even if the preferred provider
+        // only appears in a backup/default route outside classifier candidates.
+        'default-backup': ['glm.glm-4.7']
+      }
+    }
+  };
+  const { config } = bootstrapVirtualRouterConfig(input);
+  const engine = new VirtualRouterEngine();
+  engine.initialize(config);
+  return engine;
+}
+
 function buildRequest(userContent: string): StandardizedRequest {
   const messages: StandardizedMessage[] = [
     {
@@ -81,11 +163,83 @@ function buildMetadata(
 }
 
 describe('VirtualRouterEngine routing instructions', () => {
-  test('sticky instructions honor provider.model syntax', () => {
+  test('prefer instructions honor provider.model syntax', () => {
     const engine = buildEngine();
     const request = buildRequest('<**!antigravity.gemini-3-pro-high**>');
-    const { target } = engine.route(request, buildMetadata({ sessionId: 'session-sticky-model' }));
+    const { target, decision } = engine.route(request, buildMetadata({ sessionId: 'session-prefer-model' }));
+    expect(decision.routeName).toBe('prefer');
     expect(target.providerKey.includes('gemini-3-pro-high')).toBe(true);
+  });
+
+  test('prefer instructions honor provider[alias].model syntax', () => {
+    const engine = buildEngine();
+    const request = buildRequest('<**!antigravity[geminikey].gemini-3-pro-high**>');
+    const { target, decision } = engine.route(request, buildMetadata({ sessionId: 'session-prefer-bracket' }));
+    expect(decision.routeName).toBe('prefer');
+    expect(target.providerKey.includes('gemini-3-pro-high')).toBe(true);
+    expect(target.providerKey.includes('geminikey')).toBe(true);
+  });
+
+  test('prefer instructions honor provider[].model syntax (all aliases)', () => {
+    const engine = buildEngine();
+    const request = buildRequest('<**!antigravity[].claude-sonnet-4-5**>');
+    const { target, decision } = engine.route(request, buildMetadata({ sessionId: 'session-prefer-bracket-empty-alias' }));
+    expect(decision.routeName).toBe('prefer');
+    expect(target.providerKey.includes('claude-sonnet-4-5')).toBe(true);
+    expect(target.providerKey.includes('sonnetkey') || target.providerKey.includes('sonnetbackup')).toBe(true);
+  });
+
+  test('prefer auto-clears when target becomes unavailable and falls back to routing', () => {
+    const engine = buildEnginePreferFallback();
+    const sessionId = 'session-prefer-autoclear';
+
+    const first = engine.route(
+      buildRequest('<**!antigravity.gemini-3-pro-high**>'),
+      buildMetadata({ sessionId })
+    );
+    expect(first.decision.routeName).toBe('prefer');
+    expect(first.target.providerKey.includes('gemini-3-pro-high')).toBe(true);
+
+    // Disable the preferred model for this session.
+    engine.route(buildRequest('<**#antigravity.gemini-3-pro-high**>'), buildMetadata({ sessionId }));
+    const fallback = engine.route(buildRequest('继续'), buildMetadata({ sessionId }));
+    expect(fallback.target.providerKey.includes('claude-sonnet-4-5')).toBe(true);
+    expect(fallback.decision.routeName).not.toBe('prefer');
+
+    // Re-enable the model; preferTarget should have been cleared already, so routing remains on Claude.
+    engine.route(buildRequest('<**@antigravity.gemini-3-pro-high**>'), buildMetadata({ sessionId }));
+    const third = engine.route(buildRequest('再次'), buildMetadata({ sessionId }));
+    expect(third.target.providerKey.includes('claude-sonnet-4-5')).toBe(true);
+    expect(third.decision.routeName).not.toBe('prefer');
+  });
+
+  test('prefer does not auto-clear on cooldown (e.g. HTTP 429) and resumes after cooldown', () => {
+    const engine = buildEnginePreferFallback();
+    const sessionId = 'session-prefer-cooldown';
+
+    const first = engine.route(buildRequest('<**!antigravity.gemini-3-pro-high**>'), buildMetadata({ sessionId }));
+    expect(first.decision.routeName).toBe('prefer');
+    expect(first.target.providerKey.includes('gemini-3-pro-high')).toBe(true);
+
+    const allKeys: string[] = (engine as any).providerRegistry.listProviderKeys('antigravity');
+    const preferredKeys = allKeys.filter((key) => key.includes('gemini-3-pro-high'));
+    expect(preferredKeys.length).toBeGreaterThan(0);
+
+    for (const key of preferredKeys) {
+      (engine as any).markProviderCooldown(key, 60_000);
+    }
+
+    const duringCooldown = engine.route(buildRequest('继续'), buildMetadata({ sessionId }));
+    expect(duringCooldown.decision.routeName).not.toBe('prefer');
+    expect(duringCooldown.target.providerKey.includes('claude-sonnet-4-5')).toBe(true);
+
+    for (const key of preferredKeys) {
+      (engine as any).clearProviderCooldown(key);
+    }
+
+    const afterCooldown = engine.route(buildRequest('再次'), buildMetadata({ sessionId }));
+    expect(afterCooldown.decision.routeName).toBe('prefer');
+    expect(afterCooldown.target.providerKey.includes('gemini-3-pro-high')).toBe(true);
   });
 
   test('disabling provider model only removes that model for the session', () => {
@@ -98,39 +252,51 @@ describe('VirtualRouterEngine routing instructions', () => {
     expect(followUp.target.providerKey.includes('claude-sonnet-4-5')).toBe(false);
   });
 
-  test('disabling provider key alias respects provider.key syntax', () => {
+  test('disabling provider key alias respects provider[alias] syntax', () => {
     const engine = buildEngine();
     const sessionId = 'session-disable-key';
-    engine.route(buildRequest('<**#antigravity.geminikey**>'), buildMetadata({ sessionId }));
+    engine.route(buildRequest('<**#antigravity[geminikey]**>'), buildMetadata({ sessionId }));
 
     const followUp = engine.route(buildRequest('继续'), buildMetadata({ sessionId }));
     expect(followUp.target.providerKey.includes('claude-sonnet-4-5')).toBe(true);
     expect(followUp.target.providerKey.includes('gemini-3-pro-high')).toBe(false);
   });
 
-  test('sticky provider.model instructions retain all aliases for retries', () => {
+  test('prefer provider.model instructions retain all aliases for retries', () => {
     const engine = buildEngine();
     const sessionId = 'session-sticky-multi-key';
     const first = engine.route(
       buildRequest('<**!antigravity.claude-sonnet-4-5**>'),
       buildMetadata({ sessionId })
     );
-    expect(first.target.providerKey.includes('sonnetkey')).toBe(true);
+    const firstKey = first.target.providerKey;
+    const firstAlias = firstKey.includes('sonnetkey')
+      ? 'sonnetkey'
+      : firstKey.includes('sonnetbackup')
+        ? 'sonnetbackup'
+        : '';
+    expect(firstAlias).toBeTruthy();
 
-    engine.route(buildRequest('<**#antigravity.sonnetkey**>'), buildMetadata({ sessionId }));
+    engine.route(buildRequest(`<**#antigravity[${firstAlias}]**>`), buildMetadata({ sessionId }));
     const followUp = engine.route(buildRequest('继续'), buildMetadata({ sessionId }));
     expect(followUp.target.providerKey.includes('claude-sonnet-4-5')).toBe(true);
-    expect(followUp.target.providerKey.includes('sonnetbackup')).toBe(true);
+    if (firstAlias === 'sonnetkey') {
+      expect(followUp.target.providerKey.includes('sonnetbackup')).toBe(true);
+    } else {
+      expect(followUp.target.providerKey.includes('sonnetkey')).toBe(true);
+    }
   });
 
-  test('sticky provider.model rotates between aliases without additional instructions', () => {
+  test('prefer provider.model rotates between aliases without additional instructions', () => {
     const engine = buildEngine();
     const sessionId = 'session-round-robin-multi-key';
     const first = engine.route(
       buildRequest('<**!antigravity.claude-sonnet-4-5**>'),
       buildMetadata({ sessionId })
     );
-    expect(first.target.providerKey.includes('sonnetkey')).toBe(true);
+    expect(
+      first.target.providerKey.includes('sonnetkey') || first.target.providerKey.includes('sonnetbackup')
+    ).toBe(true);
 
     const second = engine.route(buildRequest('继续'), buildMetadata({ sessionId }));
     expect(second.target.providerKey.includes('claude-sonnet-4-5')).toBe(true);
@@ -138,10 +304,10 @@ describe('VirtualRouterEngine routing instructions', () => {
   });
 
   test('disableStickyRoutes metadata bypasses sticky decisions for that request only', () => {
-    const engine = buildEngine();
+    const engine = buildEnginePreferFallback();
     const sessionId = 'session-disable-sticky';
     engine.route(
-      buildRequest('<**!antigravity.geminikey.gemini-3-pro-high**>'),
+      buildRequest('<**!antigravity[geminikey].gemini-3-pro-high**>'),
       buildMetadata({ sessionId })
     );
 
@@ -152,6 +318,28 @@ describe('VirtualRouterEngine routing instructions', () => {
       buildRequest('再次选择'),
       buildMetadata({ sessionId, disableStickyRoutes: true })
     );
-    expect(bypass.target.providerKey.includes('gemini-3-pro-high')).toBe(false);
+    expect(bypass.target.providerKey.includes('claude-sonnet-4-5')).toBe(true);
+  });
+
+  test('provider allowlist can route to providers outside classifier candidate routes', () => {
+    const engine = buildEngineAllowlistGlobalFallback();
+    const request = buildRequest('<**!glm**>');
+    const { target, decision } = engine.route(
+      request,
+      buildMetadata({ sessionId: 'session-allowlist-global', routeHint: 'longcontext' })
+    );
+    expect(decision.routeName).toBe('default-backup');
+    expect(target.providerKey.startsWith('glm.')).toBe(true);
+  });
+
+  test('prefer supports dotful model ids via provider[].model syntax', () => {
+    const engine = buildEngineAllowlistGlobalFallback();
+    const request = buildRequest('<**!glm[].glm-4.7**>');
+    const { target, decision } = engine.route(
+      request,
+      buildMetadata({ sessionId: 'session-prefer-dot-model', routeHint: 'longcontext' })
+    );
+    expect(decision.routeName).toBe('prefer');
+    expect(target.providerKey.includes('glm-4.7')).toBe(true);
   });
 });

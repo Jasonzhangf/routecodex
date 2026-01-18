@@ -382,16 +382,33 @@ export class HttpTransportProvider extends BaseProvider {
       this.config.config.overrides?.headers ||
       (this.config.config as { headers?: Record<string, string> }).headers ||
       undefined;
-    const normalizedStreamIdleTimeoutMs =
-      typeof this.config.config.overrides?.streamIdleTimeoutMs === 'number' &&
-      Number.isFinite(this.config.config.overrides.streamIdleTimeoutMs)
-        ? this.config.config.overrides.streamIdleTimeoutMs
-        : undefined;
-    const normalizedStreamHeadersTimeoutMs =
-      typeof this.config.config.overrides?.streamHeadersTimeoutMs === 'number' &&
-      Number.isFinite(this.config.config.overrides.streamHeadersTimeoutMs)
-        ? this.config.config.overrides.streamHeadersTimeoutMs
-        : undefined;
+    const envStreamIdleTimeoutMs = Number(
+      process.env.ROUTECODEX_PROVIDER_STREAM_IDLE_TIMEOUT_MS ||
+        process.env.RCC_PROVIDER_STREAM_IDLE_TIMEOUT_MS ||
+        NaN
+    );
+    const normalizedStreamIdleTimeoutMs = Number.isFinite(envStreamIdleTimeoutMs) && envStreamIdleTimeoutMs > 0
+      ? envStreamIdleTimeoutMs
+      : (
+          typeof this.config.config.overrides?.streamIdleTimeoutMs === 'number' &&
+          Number.isFinite(this.config.config.overrides.streamIdleTimeoutMs)
+            ? this.config.config.overrides.streamIdleTimeoutMs
+            : undefined
+        );
+
+    const envStreamHeadersTimeoutMs = Number(
+      process.env.ROUTECODEX_PROVIDER_STREAM_HEADERS_TIMEOUT_MS ||
+        process.env.RCC_PROVIDER_STREAM_HEADERS_TIMEOUT_MS ||
+        NaN
+    );
+    const normalizedStreamHeadersTimeoutMs = Number.isFinite(envStreamHeadersTimeoutMs) && envStreamHeadersTimeoutMs > 0
+      ? envStreamHeadersTimeoutMs
+      : (
+          typeof this.config.config.overrides?.streamHeadersTimeoutMs === 'number' &&
+          Number.isFinite(this.config.config.overrides.streamHeadersTimeoutMs)
+            ? this.config.config.overrides.streamHeadersTimeoutMs
+            : undefined
+        );
     this.httpClient = new HttpClient({
       baseUrl: effectiveBase,
       timeout: effectiveTimeout,

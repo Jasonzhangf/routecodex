@@ -14,6 +14,24 @@ describe('ServerTool web_search engine (generic)', () => {
     providerProtocol: 'openai-chat'
   } as any;
 
+  function makeCapturedChatRequest(): JsonObject {
+    return {
+      model: 'gpt-4o-mini',
+      messages: [{ role: 'user', content: 'hi' }],
+      tools: [
+        {
+          type: 'function',
+          function: {
+            name: 'web_search',
+            description: 'search',
+            parameters: { type: 'object' }
+          }
+        }
+      ],
+      parameters: { temperature: 0.2 }
+    } as any;
+  }
+
   function buildChatWithToolCall(query: string): JsonObject {
     return {
       id: 'chatcmpl-web',
@@ -100,6 +118,7 @@ describe('ServerTool web_search engine (generic)', () => {
     const ctx: AdapterContext = {
       ...baseCtx,
       requestId: 'req-web-stub',
+      capturedChatRequest: makeCapturedChatRequest(),
       webSearch: {
         engines: [
           {
@@ -148,6 +167,7 @@ describe('ServerTool web_search engine (generic)', () => {
 
     expect(result.mode).toBe('tool_flow');
     expect(result.execution?.flowId).toBe('web_search_flow');
+    expect((result.execution as any)?.followup?.payload).toBeTruthy();
     expect(invocations.length).toBe(1);
 
     const patched = result.finalChatResponse as any;
@@ -159,6 +179,69 @@ describe('ServerTool web_search engine (generic)', () => {
     const contentObj = JSON.parse(outputs[0].content);
     expect(contentObj.summary).toBe('stub search result');
     expect(contentObj.engine).toBe('stub');
+  });
+
+  test('builds entry-aware followup payload for /v1/responses', async () => {
+    const chatResponse = buildChatWithToolCall('today news');
+    const ctx: AdapterContext = {
+      ...baseCtx,
+      requestId: 'req-web-responses',
+      entryEndpoint: '/v1/responses',
+      capturedChatRequest: makeCapturedChatRequest(),
+      webSearch: {
+        engines: [
+          {
+            id: 'stub',
+            providerKey: 'stub-backend',
+            description: 'stub backend',
+            default: true
+          }
+        ],
+        injectPolicy: 'always',
+        force: true
+      } as any
+    };
+
+    const providerInvoker: ProviderInvoker = async () => {
+      return {
+        providerResponse: {
+          id: 'search-resp',
+          model: 'stub-backend-model',
+          choices: [
+            {
+              index: 0,
+              message: {
+                role: 'assistant',
+                content: 'stub search result'
+              },
+              finish_reason: 'stop'
+            }
+          ]
+        } as any
+      };
+    };
+
+    process.env.ROUTECODEX_SERVER_SIDE_TOOLS = 'web_search';
+
+    const result = await runServerSideToolEngine({
+      chatResponse,
+      adapterContext: ctx,
+      entryEndpoint: '/v1/responses',
+      requestId: 'req-web-responses',
+      providerProtocol: 'openai-chat',
+      providerInvoker,
+      reenterPipeline: async () => ({ body: {} as JsonObject })
+    });
+
+    expect(result.mode).toBe('tool_flow');
+    expect(result.execution?.flowId).toBe('web_search_flow');
+    const followup = (result.execution as any)?.followup;
+    expect(followup).toBeTruthy();
+    const payload = followup.payload as any;
+    expect(Array.isArray(payload.input)).toBe(true);
+    expect(payload.messages).toBeUndefined();
+    expect(payload.stream).toBe(false);
+    expect(payload.parameters?.stream).toBeUndefined();
   });
 
   test('falls back to next engine on backend failure', async () => {

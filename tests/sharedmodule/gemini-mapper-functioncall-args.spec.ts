@@ -37,7 +37,21 @@ describe('GeminiSemanticMapper functionCall.args shape', () => {
           ]
         }
       ],
-      toolDefinitions: [],
+      tools: [
+        {
+          type: 'function',
+          function: {
+            name: 'exec_command',
+            parameters: {
+              type: 'object',
+              properties: {
+                command: { type: 'string' },
+                workdir: { type: 'string' }
+              }
+            }
+          }
+        } as any
+      ],
       toolOutputs: [],
       metadata: {
         context: {
@@ -75,5 +89,139 @@ describe('GeminiSemanticMapper functionCall.args shape', () => {
     const arrayCall = functionCalls.find((fc) => fc.id === 'call_array');
     expect(arrayCall).toBeDefined();
     expect(Array.isArray(arrayCall.args.value)).toBe(true);
+  });
+
+  it('aligns historical tool_call arguments to declared tool schema keys (exec_command cmd→command, apply_patch patch→instructions, write_stdin text→chars)', async () => {
+    const mapper = new GeminiSemanticMapper();
+
+    const chat: ChatEnvelope = {
+      messages: [
+        // History: first tool call uses internal/canonical keys (cmd/patch/text)
+        {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            {
+              id: 'call_exec_hist',
+              type: 'function',
+              function: {
+                name: 'exec_command',
+                arguments: JSON.stringify({
+                  cmd: 'echo 1',
+                  workdir: '/tmp',
+                  yield_time_ms: 123
+                })
+              }
+            } as any,
+            {
+              id: 'call_patch_hist',
+              type: 'function',
+              function: {
+                name: 'apply_patch',
+                arguments: JSON.stringify({
+                  patch: '*** Begin Patch\n*** End Patch',
+                  input: '*** Begin Patch\n*** End Patch'
+                })
+              }
+            } as any,
+            {
+              id: 'call_stdin_hist',
+              type: 'function',
+              function: {
+                name: 'write_stdin',
+                arguments: JSON.stringify({
+                  session_id: 1,
+                  text: 'hello',
+                  yield_time_ms: 50
+                })
+              }
+            } as any
+          ]
+        },
+        // A later user turn, to ensure the mapping applies across history.
+        {
+          role: 'user',
+          content: 'continue'
+        } as any
+      ],
+      tools: [
+        // The declared schema uses command/workdir, not cmd.
+        {
+          type: 'function',
+          function: {
+            name: 'exec_command',
+            parameters: {
+              type: 'object',
+              properties: {
+                command: { type: 'string' },
+                workdir: { type: 'string' }
+              }
+            }
+          }
+        } as any,
+        // The declared schema uses instructions (patch text accepted as a string).
+        {
+          type: 'function',
+          function: {
+            name: 'apply_patch',
+            parameters: {
+              type: 'object',
+              properties: {
+                instructions: { type: 'string' }
+              }
+            }
+          }
+        } as any,
+        // The declared schema uses chars, not text.
+        {
+          type: 'function',
+          function: {
+            name: 'write_stdin',
+            parameters: {
+              type: 'object',
+              properties: {
+                chars: { type: 'string' },
+                session_id: { type: 'number' },
+                yield_time_ms: { type: 'number' }
+              }
+            }
+          }
+        } as any
+      ],
+      toolOutputs: [],
+      metadata: {
+        context: {
+          providerId: 'antigravity.geetasamodgeetasamoda.gemini-3-pro-high',
+          entryEndpoint: '/v1/responses',
+          providerProtocol: 'gemini-chat',
+          requestId: 'req_test'
+        }
+      } as any
+    };
+
+    const ctx = { requestId: 'req_test' } as any;
+    const envelope = await mapper.fromChat(chat, ctx);
+    const payload = envelope.payload as any;
+
+    const contents = Array.isArray(payload?.contents) ? payload.contents : [];
+    const calls: Record<string, any> = {};
+    for (const entry of contents) {
+      const parts = Array.isArray(entry?.parts) ? entry.parts : [];
+      for (const part of parts) {
+        const fc = part?.functionCall;
+        if (fc && typeof fc === 'object' && typeof fc.id === 'string') {
+          calls[fc.id] = fc;
+        }
+      }
+    }
+
+    expect(calls.call_exec_hist).toBeDefined();
+    expect(calls.call_exec_hist.args).toEqual({ command: 'echo 1', workdir: '/tmp' });
+
+    expect(calls.call_patch_hist).toBeDefined();
+    expect(calls.call_patch_hist.args).toEqual({ instructions: '*** Begin Patch\n*** End Patch' });
+
+    expect(calls.call_stdin_hist).toBeDefined();
+    expect(calls.call_stdin_hist.args).toEqual({ chars: 'hello', session_id: 1, yield_time_ms: 50 });
   });
 });

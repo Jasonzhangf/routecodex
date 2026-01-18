@@ -98,6 +98,37 @@ describe('exec_command guard servertool (reenter)', () => {
     expect(toolNames).toContain('apply_patch');
   });
 
+  test('baseline deny builds entry-aware followup payload for /v1/responses', async () => {
+    const adapterContext: AdapterContext = {
+      requestId: 'req-exec-guard-resp-1',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-chat',
+      routeId: 'coding',
+      capturedChatRequest: makeCapturedChatRequest(),
+      execCommandGuard: { enabled: true, policyFile: path.join(TMP_DIR, 'missing.json') }
+    } as any;
+
+    const chatResponse = makeToolCallResponse({ cmd: 'rm -rf /', workdir: '/Users/fanzhang/Documents/github/routecodex' });
+    const result = await runServerSideToolEngine({
+      chatResponse,
+      adapterContext,
+      entryEndpoint: '/v1/responses',
+      requestId: 'req-exec-guard-resp-1',
+      providerProtocol: 'openai-chat',
+      reenterPipeline: async () => ({ body: {} as JsonObject })
+    });
+
+    expect(result.mode).toBe('tool_flow');
+    expect(result.execution?.flowId).toBe('exec_command_guard');
+    const followup = result.execution?.followup as any;
+    expect(followup).toBeDefined();
+    const payload = followup.payload as any;
+    expect(Array.isArray(payload.input)).toBe(true);
+    expect(payload.messages).toBeUndefined();
+    expect(payload.stream).toBe(false);
+    expect(payload.parameters?.stream).toBeUndefined();
+  });
+
   test('allowed command passthrough when no rules match', async () => {
     const adapterContext: AdapterContext = {
       requestId: 'req-exec-guard-2',

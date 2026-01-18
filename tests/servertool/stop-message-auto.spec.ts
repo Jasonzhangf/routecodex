@@ -8,6 +8,7 @@ import {
   serializeRoutingInstructionState,
   type RoutingInstructionState
 } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-instructions.js';
+import { buildResponsesRequestFromChat } from '../../sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.js';
 
 const SESSION_DIR = path.join(process.cwd(), 'tmp', 'jest-stopmessage-sessions');
 
@@ -117,8 +118,159 @@ describe('stop_message_auto servertool', () => {
     const persisted = await readJsonFileWithRetry<{ state?: { stopMessageUsed?: number; stopMessageLastUsedAt?: number } }>(
       path.join(SESSION_DIR, `session-${sessionId}.json`)
     );
-    expect(persisted?.state?.stopMessageUsed).toBe(1);
-    expect(typeof persisted?.state?.stopMessageLastUsedAt).toBe('number');
+    // stopMessage usage counter is reserved only when followup is executed (servertool orchestration),
+    // not when the handler merely schedules the followup.
+    expect(persisted?.state?.stopMessageUsed).toBe(0);
+  });
+
+  test('builds /v1/responses followup and preserves parameters (non-streaming)', async () => {
+    const sessionId = 'stopmessage-spec-session-responses';
+    const state: RoutingInstructionState = {
+      forcedTarget: undefined,
+      stickyTarget: undefined,
+      allowedProviders: new Set(),
+      disabledProviders: new Set(),
+      disabledKeys: new Map(),
+      disabledModels: new Map(),
+      stopMessageText: '继续执行',
+      stopMessageMaxRepeats: 1,
+      stopMessageUsed: 0
+    };
+    writeRoutingStateForSession(sessionId, state);
+
+    const capturedChatRequest: JsonObject = {
+      model: 'gemini-test',
+      messages: [{ role: 'user', content: 'hi' }],
+      parameters: {
+        max_output_tokens: 99,
+        temperature: 0.1,
+        stream: true
+      }
+    };
+
+    const responsesPayload: JsonObject = {
+      id: 'resp-stopmessage-1',
+      object: 'response',
+      model: 'gemini-test',
+      status: 'completed',
+      output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'ok' }] }]
+    };
+
+    const adapterContext: AdapterContext = {
+      requestId: 'req-stopmessage-resp-1',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'gemini-chat',
+      sessionId,
+      capturedChatRequest
+    } as any;
+
+    const result = await runServerSideToolEngine({
+      chatResponse: responsesPayload,
+      adapterContext,
+      entryEndpoint: '/v1/responses',
+      requestId: 'req-stopmessage-resp-1',
+      providerProtocol: 'gemini-chat',
+      reenterPipeline: async () => {
+        throw new Error('unexpected followup execution in this test');
+      }
+    });
+
+    expect(result.mode).toBe('tool_flow');
+    expect(result.execution?.flowId).toBe('stop_message_flow');
+    const followup = result.execution?.followup as any;
+    expect(followup).toBeDefined();
+    expect(followup.metadata?.disableStickyRoutes).toBe(true);
+    expect(followup.metadata?.preserveRouteHint).toBe(false);
+    expect(followup.metadata?.stream).toBe(false);
+    expect(followup.metadata?.serverToolOriginalEntryEndpoint).toBe('/v1/responses');
+
+    const payload = followup.payload as any;
+    expect(payload.messages).toBeUndefined();
+    expect(Array.isArray(payload.input)).toBe(true);
+    expect(payload.stream).toBe(false);
+    expect(payload.parameters?.max_output_tokens).toBe(99);
+    expect(payload.parameters?.temperature).toBe(0.1);
+    expect(payload.parameters?.stream).toBeUndefined();
+
+    const inputText = JSON.stringify(payload.input);
+    expect(inputText).toContain('hi');
+    expect(inputText).toContain('ok');
+    expect(inputText).toContain('继续执行');
+  });
+
+  test('builds /v1/responses followup when captured request is a Responses payload', async () => {
+    const sessionId = 'stopmessage-spec-session-responses-captured';
+    const state: RoutingInstructionState = {
+      forcedTarget: undefined,
+      stickyTarget: undefined,
+      allowedProviders: new Set(),
+      disabledProviders: new Set(),
+      disabledKeys: new Map(),
+      disabledModels: new Map(),
+      stopMessageText: '继续执行',
+      stopMessageMaxRepeats: 1,
+      stopMessageUsed: 0
+    };
+    writeRoutingStateForSession(sessionId, state);
+
+    const capturedChatSeed: JsonObject = {
+      model: 'gemini-test',
+      messages: [{ role: 'user', content: 'hi' }],
+      parameters: {
+        max_output_tokens: 77,
+        temperature: 0.2,
+        stream: true
+      }
+    };
+    const capturedChatRequest = buildResponsesRequestFromChat(capturedChatSeed as any, {
+      stream: true
+    }).request as unknown as JsonObject;
+
+    const responsesPayload: JsonObject = {
+      id: 'resp-stopmessage-2',
+      object: 'response',
+      model: 'gemini-test',
+      status: 'completed',
+      output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'ok' }] }]
+    };
+
+    const adapterContext: AdapterContext = {
+      requestId: 'req-stopmessage-resp-2',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'gemini-chat',
+      sessionId,
+      capturedChatRequest
+    } as any;
+
+    const result = await runServerSideToolEngine({
+      chatResponse: responsesPayload,
+      adapterContext,
+      entryEndpoint: '/v1/responses',
+      requestId: 'req-stopmessage-resp-2',
+      providerProtocol: 'gemini-chat',
+      reenterPipeline: async () => {
+        throw new Error('unexpected followup execution in this test');
+      }
+    });
+
+    expect(result.mode).toBe('tool_flow');
+    expect(result.execution?.flowId).toBe('stop_message_flow');
+    const followup = result.execution?.followup as any;
+    expect(followup).toBeDefined();
+    expect(followup.metadata?.stream).toBe(false);
+
+    const payload = followup.payload as any;
+    expect(payload.messages).toBeUndefined();
+    expect(Array.isArray(payload.input)).toBe(true);
+    expect(payload.stream).toBe(false);
+    expect(payload.parameters?.max_output_tokens).toBe(77);
+    expect(payload.parameters?.temperature).toBe(0.2);
+    expect(payload.parameters?.stream).toBeUndefined();
+
+    const inputText = JSON.stringify(payload.input);
+    expect(inputText).toContain('hi');
+    expect(inputText).toContain('ok');
+    expect(inputText).toContain('继续执行');
   });
 
   test('skips followup when client disconnects mid-stream', async () => {
@@ -393,24 +545,31 @@ describe('stop_message_auto servertool', () => {
       capturedChatRequest
     } as any;
 
-    await expect(
-      runServerToolOrchestration({
-        chat: chatResponse,
-        adapterContext,
-        requestId: 'req-stopmessage-empty-2',
-        entryEndpoint: '/v1/chat/completions',
-        providerProtocol: 'openai-chat',
-        reenterPipeline: async () => ({
-          body: {
-            id: 'chatcmpl-followup-empty',
-            object: 'chat.completion',
-            model: 'gpt-test',
-            choices: [{ index: 0, message: { role: 'assistant', content: '' }, finish_reason: 'stop' }]
-          } as JsonObject
-        })
+    const orchestration = await runServerToolOrchestration({
+      chat: chatResponse,
+      adapterContext,
+      requestId: 'req-stopmessage-empty-2',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      reenterPipeline: async () => ({
+        body: {
+          id: 'chatcmpl-followup-empty',
+          object: 'chat.completion',
+          model: 'gpt-test',
+          choices: [{ index: 0, message: { role: 'assistant', content: '' }, finish_reason: 'stop' }]
+        } as JsonObject
       })
-    ).rejects.toMatchObject({
-      code: 'SERVERTOOL_EMPTY_FOLLOWUP'
     });
+
+    // stopMessage followup empty: should not bubble 502; return original response and disable stopMessage to avoid loops.
+    expect(orchestration.executed).toBe(true);
+    expect(orchestration.flowId).toBe('stop_message_flow');
+    expect((orchestration.chat as any)?.id).toBe('chatcmpl-stop-empty-2');
+
+    const persisted = await readJsonFileWithRetry<{ state?: { stopMessageText?: unknown; stopMessageMaxRepeats?: unknown } }>(
+      path.join(SESSION_DIR, `session-${sessionId}.json`)
+    );
+    expect(persisted?.state?.stopMessageText).toBeUndefined();
+    expect(persisted?.state?.stopMessageMaxRepeats).toBeUndefined();
   });
 });
