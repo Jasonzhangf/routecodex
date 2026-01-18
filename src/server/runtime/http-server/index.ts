@@ -781,6 +781,30 @@ export class RouteCodexHttpServer {
       };
     }
 
+    // Unified Hub Framework V1: tool surface rollout toggle (shadow by default in dev).
+    // - Disable via env: ROUTECODEX_HUB_TOOL_SURFACE_MODE=off
+    // - Observe via env: ROUTECODEX_HUB_TOOL_SURFACE_MODE=observe
+    // - Shadow (diff-only, no rewrites) via env: ROUTECODEX_HUB_TOOL_SURFACE_MODE=shadow
+    // - Enforce (rewrite outbound payload) via env: ROUTECODEX_HUB_TOOL_SURFACE_MODE=enforce
+    const toolSurfaceModeRaw = String(process.env.ROUTECODEX_HUB_TOOL_SURFACE_MODE || '').trim().toLowerCase();
+    const toolSurfaceMode =
+      toolSurfaceModeRaw === 'off' || toolSurfaceModeRaw === '0' || toolSurfaceModeRaw === 'false'
+        ? null
+        : toolSurfaceModeRaw === 'observe' || toolSurfaceModeRaw === 'shadow' || toolSurfaceModeRaw === 'enforce'
+          ? toolSurfaceModeRaw
+          : buildInfo.mode === 'dev'
+            ? 'shadow'
+            : null;
+
+    if (toolSurfaceMode) {
+      const sampleRateRaw = String(process.env.ROUTECODEX_HUB_TOOL_SURFACE_SAMPLE_RATE || '').trim();
+      const sampleRate = sampleRateRaw ? Number(sampleRateRaw) : undefined;
+      hubConfig.toolSurface = {
+        mode: toolSurfaceMode,
+        ...(Number.isFinite(sampleRate) ? { sampleRate } : {})
+      };
+    }
+
     const healthModule = this.managerDaemon?.getModule('health') as HealthManagerModule | undefined;
     const healthStore = healthModule?.getHealthStore();
     if (healthStore) {

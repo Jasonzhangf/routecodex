@@ -3,6 +3,8 @@ import { fileURLToPath } from 'url';
 import { importCoreModule } from './core-loader.js';
 import type { ProviderErrorEvent } from '@jsonstudio/llms/dist/router/virtual-router/types.js';
 import { writeErrorsampleJson } from '../../utils/errorsamples.js';
+import { buildInfo } from '../../build-info.js';
+import { resolveLlmswitchCoreVersion } from '../../utils/runtime-versions.js';
 
 type AnyRecord = Record<string, unknown>;
 type WithBaseDir = BridgeProcessOptions & { baseDir: string };
@@ -245,29 +247,66 @@ export async function createSnapshotRecorder(
       baseRecord(stage, payload);
       try {
         if (!stage || typeof stage !== 'string') return;
-        if (!stage.startsWith('hub_policy.')) return;
         const p = payload as any;
         if (!p || typeof p !== 'object') return;
-        const violations = p.violations;
-        if (!Array.isArray(violations) || violations.length <= 0) return;
-        void writeErrorsampleJson({
-          group: 'policy',
-          kind: stage,
-          payload: {
-            kind: 'hub_policy_violation',
-            timestamp: new Date().toISOString(),
-            endpoint,
-            stage,
-            ...(context && typeof context === 'object'
-              ? {
-                  requestId: (context as any).requestId,
-                  providerProtocol: (context as any).providerProtocol,
-                  runtime: (context as any).runtime
-                }
-              : {}),
-            observation: payload
-          }
-        }).catch(() => {});
+
+        if (stage.startsWith('hub_policy.')) {
+          const violations = p.violations;
+          if (!Array.isArray(violations) || violations.length <= 0) return;
+          void writeErrorsampleJson({
+            group: 'policy',
+            kind: stage,
+            payload: {
+              kind: 'hub_policy_violation',
+              timestamp: new Date().toISOString(),
+              endpoint,
+              stage,
+              versions: {
+                routecodex: buildInfo.version,
+                llms: resolveLlmswitchCoreVersion(),
+                node: process.version
+              },
+              ...(context && typeof context === 'object'
+                ? {
+                    requestId: (context as any).requestId,
+                    providerProtocol: (context as any).providerProtocol,
+                    runtime: (context as any).runtime
+                  }
+                : {}),
+              observation: payload
+            }
+          }).catch(() => {});
+          return;
+        }
+
+        if (stage.startsWith('hub_toolsurface.')) {
+          const diffCount = typeof p.diffCount === 'number' ? p.diffCount : 0;
+          if (!(diffCount > 0)) return;
+          void writeErrorsampleJson({
+            group: 'tool-surface',
+            kind: stage,
+            payload: {
+              kind: 'hub_toolsurface_diff',
+              timestamp: new Date().toISOString(),
+              endpoint,
+              stage,
+              versions: {
+                routecodex: buildInfo.version,
+                llms: resolveLlmswitchCoreVersion(),
+                node: process.version
+              },
+              ...(context && typeof context === 'object'
+                ? {
+                    requestId: (context as any).requestId,
+                    providerProtocol: (context as any).providerProtocol,
+                    runtime: (context as any).runtime
+                  }
+                : {}),
+              observation: payload
+            }
+          }).catch(() => {});
+          return;
+        }
       } catch {
         // best-effort only; must never break request path
       }
