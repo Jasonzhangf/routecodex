@@ -69,6 +69,13 @@ import { TokenManagerModule } from '../../../manager/modules/token/index.js';
 import type { ProviderQuotaDaemonModule } from '../../../manager/modules/quota/index.js';
 import { StatsManager, type UsageMetrics } from './stats-manager.js';
 import { loadRouteCodexConfig } from '../../../config/routecodex-config-loader.js';
+import { buildInfo } from '../../../build-info.js';
+import {
+  recordHubShadowCompareDiff,
+  resolveHubShadowCompareConfig,
+  shouldRunHubShadowCompare
+} from './hub-shadow-compare.js';
+import { resolveLlmswitchCoreVersion } from '../../../utils/runtime-versions.js';
 type LegacyAuthFields = ProviderRuntimeProfile['auth'] & {
   token_file?: unknown;
   token_url?: unknown;
@@ -98,6 +105,7 @@ export class RouteCodexHttpServer {
 
   // Runtime state
   private hubPipeline: HubPipeline | null = null;
+  private hubShadowComparePipeline: HubPipeline | null = null;
   private providerHandles: Map<string, ProviderHandle> = new Map();
   private providerKeyToRuntimeKey: Map<string, string> = new Map();
   private pipelineLogger: PipelineDebugLogger = createNoopPipelineLogger();
@@ -115,6 +123,8 @@ export class RouteCodexHttpServer {
   private managerDaemon: ManagerDaemon | null = null;
   private readonly stats = new StatsManager();
   private restartChain: Promise<void> = Promise.resolve();
+  private readonly hubShadowCompareConfig = resolveHubShadowCompareConfig();
+  private hubPolicyMode: string | null = null;
 
   constructor(config: ServerConfigV2) {
     this.config = config;
@@ -760,6 +770,8 @@ export class RouteCodexHttpServer {
         ? null
         : (hubPolicyModeRaw === 'observe' || hubPolicyModeRaw === 'enforce' ? hubPolicyModeRaw : 'enforce');
 
+    this.hubPolicyMode = hubPolicyMode ?? 'off';
+
     if (hubPolicyMode) {
       const sampleRateRaw = String(process.env.ROUTECODEX_HUB_POLICY_SAMPLE_RATE || '').trim();
       const sampleRate = sampleRateRaw ? Number(sampleRateRaw) : undefined;
@@ -800,6 +812,37 @@ export class RouteCodexHttpServer {
         // best-effort: runtime deps updates must never block reload
       }
       this.hubPipeline.updateVirtualRouterConfig(bootstrapArtifacts.config);
+    }
+
+    // Unified Hub Framework V1: optional shadow compare pipeline (same runtime deps, same config).
+    // Used to execute baseline runs without contending with the main pipeline instance.
+    if (this.hubShadowCompareConfig.enabled) {
+      if (!this.hubShadowComparePipeline) {
+        this.hubShadowComparePipeline = new hubCtor(hubConfig);
+      } else {
+        const existingShadow = this.hubShadowComparePipeline as unknown as {
+          updateRuntimeDeps?: (deps: { healthStore?: unknown; routingStateStore?: unknown; quotaView?: unknown }) => void;
+          updateVirtualRouterConfig?: (config: unknown) => void;
+        };
+        try {
+          existingShadow.updateRuntimeDeps?.({
+            ...(healthStore ? { healthStore } : {}),
+            ...(routingStateStore ? { routingStateStore } : {}),
+            ...('quotaView' in hubConfig ? { quotaView: hubConfig.quotaView } : {})
+          });
+        } catch {
+          // best-effort: runtime deps updates must never block reload
+        }
+        this.hubShadowComparePipeline.updateVirtualRouterConfig(bootstrapArtifacts.config);
+      }
+    } else if (this.hubShadowComparePipeline) {
+      try {
+        const shadow = this.hubShadowComparePipeline as unknown as { dispose?: () => void };
+        shadow.dispose?.();
+      } catch {
+        // ignore dispose failures
+      }
+      this.hubShadowComparePipeline = null;
     }
     await this.initializeProviderRuntimes(bootstrapArtifacts);
   }
@@ -1358,6 +1401,93 @@ export class RouteCodexHttpServer {
       typeof resultRecord.requestId === 'string'
         ? (resultRecord.requestId as string)
         : input.requestId;
+
+    // Unified Hub Framework V1: runtime black-box shadow compare (baseline policy vs current policy).
+    // - baseline run uses the same input but overrides policy mode
+    // - only writes errorsample when diff exists
+    // - baseline run disables hub snapshots to avoid polluting codex-samples
+    try {
+      const isInternalFollowup = metadata.serverToolFollowup === true;
+      if (!isInternalFollowup && shouldRunHubShadowCompare(this.hubShadowCompareConfig)) {
+        const entryEndpoint = String(input.entryEndpoint || '/v1/chat/completions');
+        const routeHint =
+          typeof (metadata as Record<string, unknown>).routeHint === 'string'
+            ? String((metadata as Record<string, unknown>).routeHint)
+            : undefined;
+        const excludedProviderKeys =
+          Array.isArray((metadata as Record<string, unknown>).excludedProviderKeys)
+            ? ((metadata as Record<string, unknown>).excludedProviderKeys as string[])
+            : [];
+
+        const cloneJsonSafe = <T>(value: T): T => {
+          try {
+            return JSON.parse(JSON.stringify(value)) as T;
+          } catch {
+            return value;
+          }
+        };
+
+        const candidateOut = {
+          providerPayload: cloneJsonSafe(result.providerPayload),
+          target: cloneJsonSafe(result.target),
+          metadata: {
+            entryEndpoint: result.metadata?.entryEndpoint,
+            providerProtocol: result.metadata?.providerProtocol,
+            processMode: result.metadata?.processMode,
+            stream: result.metadata?.stream,
+            routeHint: result.metadata?.routeHint
+          }
+        };
+
+        void (async () => {
+          try {
+            const baselineMeta: Record<string, unknown> = {
+              ...(pipelineInput.metadata ?? {}),
+              __hubPolicyOverride: { mode: this.hubShadowCompareConfig.baselineMode },
+              __disableHubSnapshots: true
+            };
+            const baselineInput: PipelineExecutionInput & { payload: Record<string, unknown> } & { id?: string; endpoint?: string } = {
+              ...pipelineInput,
+              // Ensure baseline run uses the exact same HubPipeline requestId as the candidate run.
+              // Otherwise internal requestId fields (e.g. responsesContext.requestId) will differ and
+              // produce noisy diffs even when providerPayload is otherwise identical.
+              id: derivedRequestId,
+              endpoint: entryEndpoint,
+              metadata: baselineMeta
+            };
+            const baselinePipeline = this.hubShadowComparePipeline || this.hubPipeline!;
+            const baseline = await baselinePipeline.execute(baselineInput);
+            const baselineOut = {
+              providerPayload: cloneJsonSafe(baseline.providerPayload),
+              target: cloneJsonSafe(baseline.target),
+              metadata: {
+                entryEndpoint: baseline.metadata?.entryEndpoint,
+                providerProtocol: baseline.metadata?.providerProtocol,
+                processMode: baseline.metadata?.processMode,
+                stream: baseline.metadata?.stream,
+                routeHint: baseline.metadata?.routeHint
+              }
+            };
+
+            await recordHubShadowCompareDiff({
+              requestId: derivedRequestId,
+              entryEndpoint,
+              routeHint,
+              excludedProviderKeys,
+              baselineMode: this.hubShadowCompareConfig.baselineMode,
+              candidateMode: this.hubPolicyMode ?? undefined,
+              baselineOut,
+              candidateOut
+            });
+          } catch (error) {
+            // eslint-disable-next-line no-console
+            console.error('[unified-hub-shadow-runtime] baseline compare failed:', error);
+          }
+        })();
+      }
+    } catch {
+      // best-effort only
+    }
     return {
       requestId: derivedRequestId,
       providerPayload: result.providerPayload,
@@ -1383,6 +1513,8 @@ export class RouteCodexHttpServer {
         : inboundOriginator;
     const routeHint = this.extractRouteHint(input) ?? userMeta.routeHint;
     const processMode = (userMeta.processMode as string) || 'chat';
+    const runtimeFromUser = asRecord(userMeta.runtime);
+    const llmsVersion = resolveLlmswitchCoreVersion();
     const metadata: Record<string, unknown> = {
       ...userMeta,
       entryEndpoint: input.entryEndpoint,
@@ -1391,6 +1523,15 @@ export class RouteCodexHttpServer {
       stage: 'inbound',
       routeHint,
       stream: userMeta.stream === true,
+      runtime: {
+        ...(runtimeFromUser ?? {}),
+        routecodex: {
+          version: buildInfo.version,
+          mode: buildInfo.mode
+        },
+        llmswitchCore: llmsVersion ? { version: llmsVersion } : undefined,
+        node: { version: process.version }
+      },
       ...(resolvedUserAgent ? { userAgent: resolvedUserAgent } : {}),
       ...(resolvedOriginator ? { clientOriginator: resolvedOriginator } : {})
     };

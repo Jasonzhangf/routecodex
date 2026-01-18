@@ -34,18 +34,19 @@ const config = {
     },
   },
   moduleNameMapper: {
-    // Keep existing .js stripping for ESM
-    '^(\\.{1,2}/.*)\\.js$': '$1',
-
     // IMPORTANT: host CI must not depend on local sharedmodule worktree.
     // Map sharedmodule imports used by tests to npm-installed @jsonstudio/llms.
-    // Map all sharedmodule/llmswitch-core imports (both src & dist) to npm package
-    '../../sharedmodule/llmswitch-core/src/(.*)': '@jsonstudio/llms/dist/$1',
-    '../../sharedmodule/llmswitch-core/dist/(.*)': '@jsonstudio/llms/dist/$1',
-    '../../../sharedmodule/llmswitch-core/src/(.*)': '@jsonstudio/llms/dist/$1',
-    '../../../sharedmodule/llmswitch-core/dist/(.*)': '@jsonstudio/llms/dist/$1',
-    '../../../../sharedmodule/llmswitch-core/src/(.*)': '@jsonstudio/llms/dist/$1',
-    '../../../../sharedmodule/llmswitch-core/dist/(.*)': '@jsonstudio/llms/dist/$1',
+    '../../sharedmodule/llmswitch-core/src/(.*)': '<rootDir>/node_modules/@jsonstudio/llms/dist/$1',
+    '../../sharedmodule/llmswitch-core/dist/(.*)': '<rootDir>/node_modules/@jsonstudio/llms/dist/$1',
+    '../../../sharedmodule/llmswitch-core/src/(.*)': '<rootDir>/node_modules/@jsonstudio/llms/dist/$1',
+    '../../../sharedmodule/llmswitch-core/dist/(.*)': '<rootDir>/node_modules/@jsonstudio/llms/dist/$1',
+    '../../../../sharedmodule/llmswitch-core/src/(.*)': '<rootDir>/node_modules/@jsonstudio/llms/dist/$1',
+    '../../../../sharedmodule/llmswitch-core/dist/(.*)': '<rootDir>/node_modules/@jsonstudio/llms/dist/$1',
+    '../../../../../sharedmodule/llmswitch-core/src/(.*)': '<rootDir>/node_modules/@jsonstudio/llms/dist/$1',
+    '../../../../../sharedmodule/llmswitch-core/dist/(.*)': '<rootDir>/node_modules/@jsonstudio/llms/dist/$1',
+
+    // Keep existing .js stripping for ESM (must come after sharedmodule rules)
+    '^(\\.{1,2}/.*)\\.js$': '$1',
   },
 };
 

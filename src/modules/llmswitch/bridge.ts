@@ -2,6 +2,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { importCoreModule } from './core-loader.js';
 import type { ProviderErrorEvent } from '@jsonstudio/llms/dist/router/virtual-router/types.js';
+import { writeErrorsampleJson } from '../../utils/errorsamples.js';
 
 type AnyRecord = Record<string, unknown>;
 type WithBaseDir = BridgeProcessOptions & { baseDir: string };
@@ -232,7 +233,46 @@ export async function createSnapshotRecorder(
     }
     cachedSnapshotRecorderFactory = factory;
   }
-  return cachedSnapshotRecorderFactory(context, endpoint);
+  const recorder = cachedSnapshotRecorderFactory(context, endpoint) as any;
+  const baseRecord = typeof recorder?.record === 'function' ? recorder.record.bind(recorder) : null;
+  if (!baseRecord) {
+    return recorder;
+  }
+
+  return {
+    ...recorder,
+    record(stage: string, payload: object) {
+      baseRecord(stage, payload);
+      try {
+        if (!stage || typeof stage !== 'string') return;
+        if (!stage.startsWith('hub_policy.')) return;
+        const p = payload as any;
+        if (!p || typeof p !== 'object') return;
+        const violations = p.violations;
+        if (!Array.isArray(violations) || violations.length <= 0) return;
+        void writeErrorsampleJson({
+          group: 'policy',
+          kind: stage,
+          payload: {
+            kind: 'hub_policy_violation',
+            timestamp: new Date().toISOString(),
+            endpoint,
+            stage,
+            ...(context && typeof context === 'object'
+              ? {
+                  requestId: (context as any).requestId,
+                  providerProtocol: (context as any).providerProtocol,
+                  runtime: (context as any).runtime
+                }
+              : {}),
+            observation: payload
+          }
+        }).catch(() => {});
+      } catch {
+        // best-effort only; must never break request path
+      }
+    }
+  } as SnapshotRecorder;
 }
 
 type ResponsesSseModule = {

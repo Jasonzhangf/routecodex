@@ -159,7 +159,8 @@ describe('GeminiSemanticMapper functionCall.args shape', () => {
             }
           }
         } as any,
-        // The declared schema uses instructions (patch text accepted as a string).
+        // The declared schema uses instructions, but governance will also augment apply_patch
+        // with patch/input aliases for compatibility.
         {
           type: 'function',
           function: {
@@ -219,7 +220,11 @@ describe('GeminiSemanticMapper functionCall.args shape', () => {
     expect(calls.call_exec_hist.args).toEqual({ command: 'echo 1', workdir: '/tmp' });
 
     expect(calls.call_patch_hist).toBeDefined();
-    expect(calls.call_patch_hist.args).toEqual({ instructions: '*** Begin Patch\n*** End Patch' });
+    expect(calls.call_patch_hist.args).toEqual({
+      instructions: '*** Begin Patch\n*** End Patch',
+      patch: '*** Begin Patch\n*** End Patch',
+      input: '*** Begin Patch\n*** End Patch'
+    });
 
     expect(calls.call_stdin_hist).toBeDefined();
     expect(calls.call_stdin_hist.args).toEqual({ chars: 'hello', session_id: 1, yield_time_ms: 50 });

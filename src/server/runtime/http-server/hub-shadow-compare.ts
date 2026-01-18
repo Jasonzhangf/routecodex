@@ -1,5 +1,6 @@
 import { buildInfo } from '../../../build-info.js';
 import { writeErrorsampleJson } from '../../../utils/errorsamples.js';
+import { resolveLlmswitchCoreVersion } from '../../../utils/runtime-versions.js';
 
 export type HubShadowCompareConfig = {
   enabled: boolean;
@@ -95,9 +96,61 @@ export async function recordHubShadowCompareDiff(options: {
   excludedProviderKeys?: string[];
   attempt?: number;
 }): Promise<void> {
-  const diffs = diffPayloads(options.baselineOut, options.candidateOut);
+  const ignoreInternalIds = resolveBoolFromEnv(
+    process.env.ROUTECODEX_UNIFIED_HUB_SHADOW_COMPARE_IGNORE_INTERNAL_IDS,
+    true
+  );
+  const ignoreTargetSelection = resolveBoolFromEnv(
+    process.env.ROUTECODEX_UNIFIED_HUB_SHADOW_COMPARE_IGNORE_TARGET_SELECTION,
+    true
+  );
+  const excludedComparePaths = ignoreInternalIds
+    ? [
+      'providerPayload.requestId',
+      'providerPayload.metadata.context.requestId',
+      'providerPayload.metadata.responsesContext.requestId',
+      'providerPayload.metadata.context.__disableHubSnapshots',
+      ...(ignoreTargetSelection ? ['target.providerKey', 'target.runtimeKey'] : [])
+    ]
+    : [];
+
+  const cloneJsonSafe = <T>(value: T): T => {
+    try {
+      return JSON.parse(JSON.stringify(value)) as T;
+    } catch {
+      return value;
+    }
+  };
+
+  const deletePath = (root: unknown, pathExpr: string): void => {
+    if (!root || typeof root !== 'object') return;
+    const parts = pathExpr.split('.').filter(Boolean);
+    let cursor: any = root;
+    for (let i = 0; i < parts.length - 1; i += 1) {
+      const key = parts[i]!;
+      if (!cursor || typeof cursor !== 'object') return;
+      cursor = cursor[key];
+    }
+    const last = parts[parts.length - 1];
+    if (!last) return;
+    if (cursor && typeof cursor === 'object' && Object.prototype.hasOwnProperty.call(cursor, last)) {
+      delete cursor[last];
+    }
+  };
+
+  const prepareForDiff = (value: unknown): unknown => {
+    if (!ignoreInternalIds) return value;
+    const cloned = cloneJsonSafe(value);
+    for (const p of excludedComparePaths) {
+      deletePath(cloned, p);
+    }
+    return cloned;
+  };
+
+  const diffs = diffPayloads(prepareForDiff(options.baselineOut), prepareForDiff(options.candidateOut));
   if (!diffs.length) return;
 
+  const llmsVersion = resolveLlmswitchCoreVersion();
   const record = {
     kind: 'unified-hub-shadow-runtime-diff',
     timestamp: new Date().toISOString(),
@@ -106,6 +159,15 @@ export async function recordHubShadowCompareDiff(options: {
     routeHint: options.routeHint,
     attempt: options.attempt,
     excludedProviderKeys: options.excludedProviderKeys || [],
+    excludedComparePaths,
+    runtime: {
+      routecodex: {
+        version: buildInfo.version,
+        mode: buildInfo.mode
+      },
+      llmswitchCore: llmsVersion ? { version: llmsVersion } : undefined,
+      node: { version: process.version }
+    },
     baselineMode: options.baselineMode,
     candidateMode: options.candidateMode,
     diffCount: diffs.length,
@@ -127,4 +189,3 @@ export async function recordHubShadowCompareDiff(options: {
   // eslint-disable-next-line no-console
   console.error(`[unified-hub-shadow-runtime] wrote errorsample: ${file}`);
 }
-
