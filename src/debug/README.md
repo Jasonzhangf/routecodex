@@ -28,6 +28,22 @@ npm run snapshot:inspect -- --rid <RID>
 ```
 Fast snapshots are stored in `~/.routecodex/codex-samples/`.
 
+## Policy Violations Folder
+
+When Unified Hub Framework policy snapshots (`hub_policy.*`) detect violations, they are additionally copied to:
+
+- `~/.routecodex/codex-samples/__policy_violations__/`
+
+This keeps normal snapshot traffic intact while making these cases easy to monitor:
+
+- observe-mode violations (`violations[]` / `summary.totalViolations > 0`)
+- enforce-mode outbound rewrites (`removedTopLevelKeys[]` / `flattenedWrappers[]`)
+
+Quick report:
+```bash
+npm run policy:report
+```
+
 ## Do / Don't
 **Do**
 - Use for inspection, replay, and offline testing

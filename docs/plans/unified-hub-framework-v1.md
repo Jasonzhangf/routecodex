@@ -14,6 +14,11 @@
 
 本文档的方案会把这些约束“制度化”为框架级别的强制机制，而不是依赖开发习惯。
 
+## 0.1 当前落地状态（截至 2026-01-18）
+
+- Host 已默认注入 `hubConfig.policy.mode="enforce"`（Phase 1：Responses-first provider outbound policy），可通过 `ROUTECODEX_HUB_POLICY_MODE=off` 显式关闭。
+- llmswitch-core PolicyEngine 已支持 Responses 的 provider outbound wrapper 清理（例如扁平化 `request`/`parameters` wrapper）。
+
 ## 1. 问题陈述（为什么会反复回归）
 
 现状并不是“没有骨架”，而是：
@@ -238,4 +243,3 @@ PolicyEngine 的关键要求：
 - ProtocolSpec 的最小字段集合（V1 先覆盖 parametersPolicy + wireShape 的关键布局规则）。
 - PolicyEngine 的运行模式（CI hard assert / prod 采样）。
 - followup 的统一 builder 是否在 Phase 1 还是 Phase 3 再收口（取决于当前回归压力）。
-

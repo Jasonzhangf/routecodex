@@ -749,10 +749,18 @@ export class RouteCodexHttpServer {
       virtualRouter: bootstrapArtifacts.config
     };
 
-    // Unified Hub Framework V1: policy (observe-only) rollout toggle.
-    // Default: off. Enable via env for progressive adoption without changing user configs.
-    const hubPolicyMode = String(process.env.ROUTECODEX_HUB_POLICY_MODE || '').trim().toLowerCase();
-    if (hubPolicyMode === 'observe' || hubPolicyMode === 'enforce') {
+    // Unified Hub Framework V1: policy rollout toggle.
+    // Default: enforce (Phase 1: Responses-first outbound policy; currently only
+    // affects openai-responses provider outbound payload).
+    // - Disable via env: ROUTECODEX_HUB_POLICY_MODE=off
+    // - Enforce via env: ROUTECODEX_HUB_POLICY_MODE=enforce
+    const hubPolicyModeRaw = String(process.env.ROUTECODEX_HUB_POLICY_MODE || '').trim().toLowerCase();
+    const hubPolicyMode =
+      hubPolicyModeRaw === 'off' || hubPolicyModeRaw === '0' || hubPolicyModeRaw === 'false'
+        ? null
+        : (hubPolicyModeRaw === 'observe' || hubPolicyModeRaw === 'enforce' ? hubPolicyModeRaw : 'enforce');
+
+    if (hubPolicyMode) {
       const sampleRateRaw = String(process.env.ROUTECODEX_HUB_POLICY_SAMPLE_RATE || '').trim();
       const sampleRate = sampleRateRaw ? Number(sampleRateRaw) : undefined;
       hubConfig.policy = {

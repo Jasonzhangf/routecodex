@@ -26,18 +26,8 @@ const OUT_ROOT = path.join(ERR_BASE, 'apply_patch_exec');
 
 const MAX_PER_TYPE = 250;
 
-function isTruthyEnv(value) {
-  const v = typeof value === 'string' ? value.trim().toLowerCase() : '';
-  return v === '1' || v === 'true' || v === 'yes' || v === 'on';
-}
-
 function detectApplyPatchToolMode() {
-  const mode = String(process.env.RCC_APPLY_PATCH_TOOL_MODE || process.env.ROUTECODEX_APPLY_PATCH_TOOL_MODE || '')
-    .trim()
-    .toLowerCase();
-  if (mode === 'freeform') return 'freeform';
-  if (mode === 'schema') return 'schema';
-  return isTruthyEnv(process.env.RCC_APPLY_PATCH_FREEFORM || process.env.ROUTECODEX_APPLY_PATCH_FREEFORM) ? 'freeform' : 'schema';
+  return 'freeform';
 }
 
 function classifyExecutionFailure(content) {
@@ -233,4 +223,3 @@ main().catch((err) => {
   console.error('[backfill:apply_patch_exec] failed:', err?.stack || err?.message || String(err));
   process.exit(2);
 });
-

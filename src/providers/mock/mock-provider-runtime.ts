@@ -205,6 +205,7 @@ function validateApplyPatchToolSchema(sample: MockSample, body: Record<string, u
   if (!body || typeof body !== 'object') {
     return;
   }
+
   const tools = Array.isArray((body as any).tools) ? ((body as any).tools as any[]) : [];
   const applyPatch = tools.find((t) => {
     if (!t || typeof t !== 'object') return false;
@@ -222,11 +223,25 @@ function validateApplyPatchToolSchema(sample: MockSample, body: Record<string, u
       : (applyPatch as any).parameters)
     : undefined;
   const props = params && typeof params === 'object' ? (params as any).properties : undefined;
-  const required = params && typeof params === 'object' ? (params as any).required : undefined;
-  const hasRequiredChanges = Array.isArray(required) && required.includes('changes');
-  const hasChangesProp =
-    props && typeof props === 'object' && props.changes && typeof props.changes === 'object';
-  if (!applyPatch || !hasRequiredChanges || !hasChangesProp) {
+
+  const hasFreeformInputSchema = (): boolean => {
+    const additionalProps = params && typeof params === 'object' ? (params as any).additionalProperties : undefined;
+    const additionalOk = additionalProps === undefined || additionalProps === true;
+    if (additionalOk && (!props || typeof props !== 'object')) {
+      return true;
+    }
+    if (!props || typeof props !== 'object') return false;
+    if (additionalOk && Object.keys(props as Record<string, unknown>).length === 0) {
+      return true;
+    }
+    const hasInput = (props as any).input && typeof (props as any).input === 'object';
+    const hasPatch = (props as any).patch && typeof (props as any).patch === 'object';
+    // Be tolerant: some clients omit `required`, but still provide input/patch schema.
+    return Boolean(hasInput || hasPatch);
+  };
+
+  const ok = hasFreeformInputSchema();
+  if (!ok) {
     const summary = (() => {
       try {
         const name = applyPatch
@@ -239,7 +254,7 @@ function validateApplyPatchToolSchema(sample: MockSample, body: Record<string, u
       }
     })();
     const error = new Error(
-      `apply_patch schema 校验失败：必须提供 JSON schema 且 required 包含 changes（sample=${sample.reqId}，当前：${summary}）`
+      `apply_patch schema 校验失败：freeform 模式要求 input/patch schema（sample=${sample.reqId}，当前：${summary}）`
     ) as MockRuntimeError & { status?: number };
     error.code = 'HTTP_400';
     (error as any).status = 400;

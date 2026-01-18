@@ -100,7 +100,63 @@ describe('RouteCodexHttpServer hub policy injection', () => {
     expect(captured.policy).toEqual({ mode: 'observe', sampleRate: 0.25 });
   });
 
-  it('does not inject hubConfig.policy by default', async () => {
+  it('injects hubConfig.policy by default (enforce)', async () => {
+    tempConfigPath = await createTempUserConfig();
+
+    const captured: { policy?: unknown } = {};
+
+    jest.resetModules();
+    jest.unstable_mockModule(BRIDGE_MODULE_PATH, () => ({
+      getProviderErrorCenter: async () => ({
+        emit: () => {},
+        subscribe: () => () => {}
+      }),
+      bootstrapVirtualRouterConfig: async (input: any) => ({ config: input, targetRuntime: {} }),
+      convertProviderResponse: async (value: any) => value,
+      createSnapshotRecorder: () => ({}) as any,
+      rebindResponsesConversationRequestId: async () => {},
+      resumeResponsesConversation: async () => ({ payload: {}, meta: {} }),
+      writeSnapshotViaHooks: async () => {},
+      buildResponsesRequestFromChat: async () => ({}),
+      ensureResponsesInstructions: async () => {},
+      createResponsesSseToJsonConverter: async () => ({
+        convertSseToJson: async () => ({})
+      }),
+      getHubPipelineCtor: async () =>
+        class HubPipelineMock {
+          constructor(config: any) {
+            captured.policy = config?.policy;
+          }
+          updateVirtualRouterConfig(): void {}
+          async execute(): Promise<any> {
+            return { metadata: {} };
+          }
+        }
+    }));
+
+    const { RouteCodexHttpServer } = await import('../../../src/server/runtime/http-server/index.js');
+
+    const config: any = {
+      configPath: tempConfigPath,
+      server: { host: '127.0.0.1', port: 0 },
+      pipeline: {},
+      logging: { level: 'error', enableConsole: false },
+      providers: {}
+    };
+
+    const server = new RouteCodexHttpServer(config);
+    (server as any).managerDaemon = {
+      getModule: () => undefined
+    };
+
+    const userConfigRaw = JSON.parse(await fs.readFile(tempConfigPath, 'utf8'));
+    await server.initializeWithUserConfig(userConfigRaw);
+
+    expect(captured.policy).toEqual({ mode: 'enforce' });
+  });
+
+  it('does not inject hubConfig.policy when ROUTECODEX_HUB_POLICY_MODE=off', async () => {
+    process.env.ROUTECODEX_HUB_POLICY_MODE = 'off';
     tempConfigPath = await createTempUserConfig();
 
     const captured: { policy?: unknown } = {};
@@ -155,4 +211,3 @@ describe('RouteCodexHttpServer hub policy injection', () => {
     expect(captured.policy).toBeUndefined();
   });
 });
-

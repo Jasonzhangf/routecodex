@@ -31,9 +31,12 @@
 - Anthropic 直通 vs 编解码对比：`scripts/anthropic-compare-modes.mjs`
 - 多 provider 回归（基于 codex-samples）：`scripts/outbound-regression-codex-samples.mjs`
 
-#### Phase 0 开关（Host 注入，默认关闭）
+#### Phase 0/1 开关（Host 注入，默认 enforce）
 
-- 启用 observe-only：`ROUTECODEX_HUB_POLICY_MODE=observe`
+- 默认开启 enforce（Phase 1：Responses-first outbound policy；目前仅对 `openai-responses` 的 provider outbound 生效）：无需设置 env
+- 显式关闭：`ROUTECODEX_HUB_POLICY_MODE=off`
+- 显式启用 observe-only：`ROUTECODEX_HUB_POLICY_MODE=observe`
+- 显式启用 enforce：`ROUTECODEX_HUB_POLICY_MODE=enforce`
 - 可选采样率：`ROUTECODEX_HUB_POLICY_SAMPLE_RATE=0.25`（范围 [0,1]，未设置则全量记录）
 
 #### 每个 Phase 的“必须有”的黑盒用例（建议最小集）
