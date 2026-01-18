@@ -54,6 +54,7 @@
 #### Phase 2（toolSurface）进度（shadow-only）
 
 - [x] provider_outbound 工具定义跨协议形态对比：OpenAI ↔ Gemini、OpenAI ↔ Anthropic（sharedmodules: 1c3a9e8）
+- [x] provider_outbound 工具调用/结果历史载体对比：Chat `messages[]` ↔ Responses `input[]`（sharedmodules: f13b211）
 
 #### 运行时自动黑盒 compare（默认开启）
 
