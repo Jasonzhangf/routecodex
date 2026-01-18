@@ -1441,10 +1441,15 @@ export class RouteCodexHttpServer {
 
         void (async () => {
           try {
+            const forcedProviderKey =
+              result.target && typeof (result.target as any).providerKey === 'string'
+                ? String((result.target as any).providerKey)
+                : '';
             const baselineMeta: Record<string, unknown> = {
               ...(pipelineInput.metadata ?? {}),
               __hubPolicyOverride: { mode: this.hubShadowCompareConfig.baselineMode },
-              __disableHubSnapshots: true
+              __disableHubSnapshots: true,
+              ...(forcedProviderKey ? { __shadowCompareForcedProviderKey: forcedProviderKey } : {})
             };
             const baselineInput: PipelineExecutionInput & { payload: Record<string, unknown> } & { id?: string; endpoint?: string } = {
               ...pipelineInput,
