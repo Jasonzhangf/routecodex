@@ -1335,9 +1335,14 @@ export class RouteCodexHttpServer {
         const sessionId = typeof mergedMetadata.sessionId === "string" && mergedMetadata.sessionId.trim()
           ? mergedMetadata.sessionId.trim()
           : undefined;
-        const conversationId = typeof mergedMetadata.conversationId === "string" && mergedMetadata.conversationId.trim()
+        let conversationId = typeof mergedMetadata.conversationId === "string" && mergedMetadata.conversationId.trim()
           ? mergedMetadata.conversationId.trim()
           : undefined;
+
+        // 对称补齐：如果只有 session_id，则回传 conversation_id=session_id
+        if (!conversationId && sessionId) {
+          conversationId = sessionId;
+        }
 
         if (sessionId || conversationId) {
           if (!converted.headers) {
