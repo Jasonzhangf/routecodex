@@ -148,7 +148,9 @@ function collectNonFcCallIds(body: Record<string, unknown> | undefined): string[
   if (!body || typeof body !== 'object') {
     return [];
   }
-  const input = Array.isArray((body as unknown).input) ? ((body as unknown).input as Array<Record<string, unknown>>) : [];
+  const input = Array.isArray((body as Record<string, unknown>).input)
+    ? ((body as Record<string, unknown>).input as Array<Record<string, unknown>>)
+    : [];
   const issues: string[] = [];
   const isFc = (value: unknown): boolean => typeof value === 'string' && /^fc[_-]/i.test(value.trim());
   input.forEach((entry, index) => {
@@ -168,7 +170,9 @@ function collectNonFcCallIds(body: Record<string, unknown> | undefined): string[
 function collectCallIdsFromInput(body: Record<string, unknown> | undefined): Set<string> {
   const collected = new Set<string>();
   if (!body || typeof body !== 'object') {return collected;}
-  const input = Array.isArray((body as unknown).input) ? ((body as unknown).input as Array<Record<string, unknown>>) : [];
+  const input = Array.isArray((body as Record<string, unknown>).input)
+    ? ((body as Record<string, unknown>).input as Array<Record<string, unknown>>)
+    : [];
   input.forEach((entry) => {
     if (!entry || typeof entry !== 'object') {return;}
     const t = typeof entry.type === 'string' ? entry.type.toLowerCase() : '';
@@ -206,22 +210,30 @@ function validateApplyPatchToolSchema(sample: MockSample, body: Record<string, u
     return;
   }
 
-  const tools = Array.isArray((body as unknown).tools) ? ((body as unknown).tools as any[]) : [];
-  const applyPatch = tools.find((t) => {
-    if (!t || typeof t !== 'object') {return false;}
+  const tools = Array.isArray((body as Record<string, unknown>).tools)
+    ? ((body as Record<string, unknown>).tools as unknown[])
+    : [];
+  const applyPatch = tools.find((tool) => {
+    if (!tool || typeof tool !== 'object') {return false;}
+    const record = tool as Record<string, unknown>;
+    const fn = record.function;
     const fnName =
-      (t.function && typeof t.function === 'object' && typeof t.function.name === 'string' ? t.function.name : undefined) ??
-      (typeof t.name === 'string' ? t.name : undefined);
+      fn && typeof fn === 'object' && !Array.isArray(fn) && typeof (fn as Record<string, unknown>).name === 'string'
+        ? String((fn as Record<string, unknown>).name)
+        : typeof record.name === 'string'
+          ? record.name
+          : undefined;
     return typeof fnName === 'string' && fnName.trim() === 'apply_patch';
   });
   if (!applyPatch) {
     return;
   }
-  const params = applyPatch && typeof applyPatch === 'object'
-    ? ((applyPatch as Record<string, unknown>).function && typeof (applyPatch as Record<string, unknown>).function === 'object'
-      ? (applyPatch as Record<string, unknown>).function.parameters
-      : (applyPatch as Record<string, unknown>).parameters)
-    : undefined;
+  const applyPatchRecord = applyPatch as Record<string, unknown>;
+  const applyPatchFn = applyPatchRecord.function;
+  const params =
+    applyPatchFn && typeof applyPatchFn === 'object' && !Array.isArray(applyPatchFn)
+      ? (applyPatchFn as Record<string, unknown>).parameters
+      : applyPatchRecord.parameters;
   const props = params && typeof params === 'object' ? (params as Record<string, unknown>).properties : undefined;
 
   const hasFreeformInputSchema = (): boolean => {
@@ -244,11 +256,18 @@ function validateApplyPatchToolSchema(sample: MockSample, body: Record<string, u
   if (!ok) {
     const summary = (() => {
       try {
-        const name = applyPatch
-          ? ((applyPatch as Record<string, unknown>).function?.name ?? (applyPatch as Record<string, unknown>).name ?? 'apply_patch')
-          : 'missing';
+        const fn =
+          applyPatchRecord.function && typeof applyPatchRecord.function === 'object' && !Array.isArray(applyPatchRecord.function)
+            ? (applyPatchRecord.function as Record<string, unknown>)
+            : null;
+        const nameCandidate =
+          fn && typeof fn.name === 'string'
+            ? fn.name
+            : typeof applyPatchRecord.name === 'string'
+              ? applyPatchRecord.name
+              : 'apply_patch';
         const p = params && typeof params === 'object' ? params : null;
-        return JSON.stringify({ name, parameters: p }, null, 2);
+        return JSON.stringify({ name: nameCandidate, parameters: p }, null, 2);
       } catch {
         return '<unserializable>';
       }
@@ -275,8 +294,12 @@ function detectEntryHint(
     return 'openai-responses.submit_tool_outputs';
   }
   if (body && typeof body === 'object') {
-    const submitOutputs = Array.isArray((body as unknown).tool_outputs) && (body as unknown).tool_outputs.length > 0;
-    const inputList = Array.isArray((body as unknown).input) ? ((body as unknown).input as Array<Record<string, unknown>>) : [];
+    const submitOutputs = Array.isArray((body as Record<string, unknown>).tool_outputs)
+      ? ((body as Record<string, unknown>).tool_outputs as unknown[]).length > 0
+      : false;
+    const inputList = Array.isArray((body as Record<string, unknown>).input)
+      ? ((body as Record<string, unknown>).input as Array<Record<string, unknown>>)
+      : [];
     const hasOutputEntries = inputList.some((entry) => {
       const type = typeof entry?.type === 'string' ? entry.type.toLowerCase() : '';
       return type === 'function_call_output' || type === 'tool_result' || type === 'tool_message';
@@ -418,7 +441,7 @@ export class MockProviderRuntime {
     }
     validateApplyPatchToolSchema(sample, body);
     if (resp.mockExpectations) {
-      delete (resp as Record<string, unknown>).mockExpectations;
+      delete resp.mockExpectations;
     }
     if (resp.body && typeof resp.body === 'object' && !Array.isArray(resp.body)) {
       const mode = (resp.body as Record<string, unknown>).mode;

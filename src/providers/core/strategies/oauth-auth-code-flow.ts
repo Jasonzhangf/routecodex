@@ -347,8 +347,6 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
         }
       });
 
-      serverInstance = server;
-
       // 添加服务器错误处理
       server.on('error', (error: Error) => {
         logOAuthDebug(`[OAuth] Callback server error: ${error.message}`);

@@ -445,7 +445,7 @@ export abstract class BaseProvider implements IProviderV2 {
     const runtimeProfile = this.getRuntimeProfile();
     const classification = classifyProviderError({
       error,
-      context,
+      context: _context,
       detectDailyLimit: (messageLower, upstreamLower) => this.isDailyLimitRateLimit(messageLower, upstreamLower),
       registerRateLimitFailure: this.registerRateLimitFailure.bind(this),
       forceRateLimitFailure: this.forceRateLimitFailure.bind(this),
@@ -456,10 +456,10 @@ export abstract class BaseProvider implements IProviderV2 {
     const statusCode = classification.statusCode;
     const upstreamCode = classification.upstreamCode;
     const upstreamMessage = classification.upstreamMessage;
-    const providerKey = context.providerKey || runtimeProfile?.providerKey;
+    const providerKey = _context.providerKey || runtimeProfile?.providerKey;
 
     if (!classification.isRateLimit && providerKey) {
-      this.resetRateLimitCounter(providerKey, context.model);
+      this.resetRateLimitCounter(providerKey, _context.model);
     }
 
     let seriesCooldownDetail: SeriesCooldownDetail | null = null;
@@ -469,7 +469,7 @@ export abstract class BaseProvider implements IProviderV2 {
       // 逻辑完全由 VirtualRouterEngine 处理，Provider 层不再维护独立的 backoff 状态。
       seriesCooldownDetail = BaseProvider.buildSeriesCooldownDetail(
         augmentedError,
-        context,
+        _context,
         runtimeProfile,
         providerKey
       );
@@ -483,56 +483,56 @@ export abstract class BaseProvider implements IProviderV2 {
       typeof upstreamMessage === 'string' ? this.truncateLogMessage(upstreamMessage) : upstreamMessage;
 
     this.dependencies.logger?.logModule(this.id, 'request-error', {
-      requestId: context.requestId,
+      requestId: _context.requestId,
       error: logErrorMessage,
       statusCode,
       upstreamCode,
       upstreamMessage: logUpstreamMessage,
-      providerType: context.providerType,
-      providerFamily: context.providerFamily,
-      providerId: context.providerId,
-      providerProtocol: context.providerProtocol,
+      providerType: _context.providerType,
+      providerFamily: _context.providerFamily,
+      providerId: _context.providerId,
+      providerProtocol: _context.providerProtocol,
       providerKey: providerKey,
       runtimeKey: runtimeProfile?.runtimeKey,
-      processingTime: now - context.startTime
+      processingTime: now - _context.startTime
     });
 
     const enrichedDetails = {
       providerId: this.id,
       providerKey,
-      providerType: context.providerType,
-      providerFamily: context.providerFamily,
-      routeName: context.routeName,
+      providerType: _context.providerType,
+      providerFamily: _context.providerFamily,
+      routeName: _context.routeName,
       runtimeKey: runtimeProfile?.runtimeKey,
       upstreamCode,
       upstreamMessage,
-      requestContext: context.runtimeMetadata,
+      requestContext: _context.runtimeMetadata,
       meta: augmentedError.details,
       ...(seriesCooldownDetail ? { [SERIES_COOLDOWN_DETAIL_KEY]: seriesCooldownDetail } : {})
     };
     if (!augmentedError.requestId) {
-      augmentedError.requestId = context.requestId;
+      augmentedError.requestId = _context.requestId;
     }
-    augmentedError.providerKey = context.providerKey;
-    augmentedError.providerId = context.providerId;
-    augmentedError.providerType = context.providerType;
-    augmentedError.providerFamily = context.providerFamily;
-    augmentedError.routeName = context.routeName;
+    augmentedError.providerKey = _context.providerKey;
+    augmentedError.providerId = _context.providerId;
+    augmentedError.providerType = _context.providerType;
+    augmentedError.providerFamily = _context.providerFamily;
+    augmentedError.routeName = _context.routeName;
     augmentedError.details = {
       ...(augmentedError.details || {}),
       ...enrichedDetails,
       providerKey: enrichedDetails.providerKey,
-      providerType: context.providerType,
-      providerFamily: context.providerFamily,
-      routeName: context.routeName,
+      providerType: _context.providerType,
+      providerFamily: _context.providerFamily,
+      routeName: _context.routeName,
       status: statusCode,
-      requestId: context.requestId
+      requestId: _context.requestId
     };
 
     emitProviderError({
       error: augmentedError,
       stage: 'provider.http',
-      runtime: buildRuntimeFromProviderContext(context),
+      runtime: buildRuntimeFromProviderContext(_context),
       dependencies: this.dependencies,
       statusCode,
       recoverable,
@@ -628,7 +628,7 @@ export abstract class BaseProvider implements IProviderV2 {
     providerKey?: string
   ): SeriesCooldownDetail | null {
     const normalizedProviderId = BaseProvider.normalizeSeriesProviderId(
-      runtimeProfile?.providerId || context.providerId,
+      runtimeProfile?.providerId || _context.providerId,
       providerKey
     );
     if (!normalizedProviderId) {
@@ -646,7 +646,7 @@ export abstract class BaseProvider implements IProviderV2 {
     if (!cooldownMs || cooldownMs <= 0) {
       return null;
     }
-    const modelId = BaseProvider.resolveContextModel(context, runtimeProfile, providerKey);
+    const modelId = BaseProvider.resolveContextModel(_context, runtimeProfile, providerKey);
     const series = BaseProvider.resolveModelSeries(modelId);
     if (!modelId || series === 'default') {
       return null;
@@ -936,10 +936,10 @@ export abstract class BaseProvider implements IProviderV2 {
     runtimeProfile?: ProviderRuntimeProfile,
     providerKey?: string
   ): string | undefined {
-    if (typeof context.model === 'string' && context.model.trim().length) {
-      return context.model.trim();
+    if (typeof _context.model === 'string' && _context.model.trim().length) {
+      return _context.model.trim();
     }
-    const target = context.target;
+    const target = _context.target;
     if (target && typeof target === 'object') {
       const candidate =
         (target as { clientModelId?: string }).clientModelId ||

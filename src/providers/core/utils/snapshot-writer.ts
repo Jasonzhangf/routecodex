@@ -149,7 +149,7 @@ export async function writeProviderSnapshot(options: {
   }
   const { endpoint, folder } = resolveEndpoint(options.entryEndpoint || options.url);
   const stage = options.phase;
-  // const requestId = normalizeRequestId(options.requestId);
+  const requestId = normalizeRequestId(options.requestId);
   const groupRequestId = normalizeRequestId(options.clientRequestId || options.requestId);
   const providerToken = normalizeProviderToken(options.providerKey || options.providerId || '');
   const payload = buildSnapshotPayload({
@@ -316,7 +316,7 @@ export async function writeProviderRetrySnapshot(options: {
 }): Promise<void> {
   const { endpoint, folder } = resolveEndpoint(options.entryEndpoint || options.url);
   const stage = options.type === 'request' ? 'provider-request.retry' : 'provider-response.retry';
-  // const requestId = normalizeRequestId(options.requestId);
+  const requestId = normalizeRequestId(options.requestId);
   const groupRequestId = normalizeRequestId(options.clientRequestId || options.requestId);
   const providerToken = normalizeProviderToken(options.providerKey || options.providerId || '');
   const payload = buildSnapshotPayload({
@@ -390,7 +390,7 @@ export async function writeClientSnapshot(options: {
   try {
     const stage: ClientPhase = 'client-request';
     const { endpoint, folder } = resolveEndpoint(options.entryEndpoint);
-    // const requestId = normalizeRequestId(options.requestId);
+    const requestId = normalizeRequestId(options.requestId);
     const groupRequestIdCandidate =
       options.metadata && typeof options.metadata === 'object' && typeof options.metadata.clientRequestId === 'string'
         ? (options.metadata.clientRequestId as string)

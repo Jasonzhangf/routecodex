@@ -124,6 +124,7 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
   protected override wantsUpstreamSse(request: UnknownObject, context: ProviderContext): boolean {
     const fromRequest = this.extractStreamFlag(request);
     const fromContext = this.extractStreamFlag(context.metadata as UnknownObject);
+    const isAntigravity = this.isAntigravityRuntime();
     const wantsStream =
       // 对 Antigravity 运行时强制走 SSE，以对齐 /v1/responses 上稳定的 streamGenerateContent 行为，
       // 避免非流式 generateContent 触发上游配额/限流策略差异。
@@ -296,6 +297,7 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
   }
 
   private ensureRequestMetadata(payload: MutablePayload): void {
+    const isAntigravity = this.isAntigravityRuntime();
 
     if (!this.hasNonEmptyString(payload.requestId)) {
       payload.requestId = `req-${randomUUID()}`;
