@@ -1488,11 +1488,17 @@ export class RouteCodexHttpServer {
               result.target && typeof (result.target as any).providerKey === 'string'
                 ? String((result.target as any).providerKey)
                 : '';
+            const baselineExcludedProviderKeys =
+              forcedProviderKey && this.providerKeyToRuntimeKey.size > 0
+                ? Array.from(this.providerKeyToRuntimeKey.keys()).filter((key) => key !== forcedProviderKey)
+                : undefined;
             const baselineMeta: Record<string, unknown> = {
               ...(pipelineInput.metadata ?? {}),
               __hubPolicyOverride: { mode: this.hubShadowCompareConfig.baselineMode },
               __disableHubSnapshots: true,
-              ...(forcedProviderKey ? { __shadowCompareForcedProviderKey: forcedProviderKey } : {})
+              ...(baselineExcludedProviderKeys && baselineExcludedProviderKeys.length > 0
+                ? { excludedProviderKeys: baselineExcludedProviderKeys }
+                : {})
             };
             const baselineInput: PipelineExecutionInput & { payload: Record<string, unknown> } & { id?: string; endpoint?: string } = {
               ...pipelineInput,
