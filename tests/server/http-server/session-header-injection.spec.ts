@@ -17,7 +17,7 @@ function createTestConfig(): ServerConfigV2 {
 describe('RouteCodexHttpServer response session headers', () => {
   jest.setTimeout(30000);
 
-  it('echoes session_id and mirrors conversation_id when missing', async () => {
+  it('echoes conversation_id=session_id when missing', async () => {
     const server = new RouteCodexHttpServer(createTestConfig());
 
     const providerKey = 'mock.default.toolloop';
@@ -71,5 +71,59 @@ describe('RouteCodexHttpServer response session headers', () => {
     expect(result.headers?.session_id).toBe('sess-123');
     expect(result.headers?.conversation_id).toBe('sess-123');
   });
-});
 
+  it('echoes conversation_id when provided', async () => {
+    const server = new RouteCodexHttpServer(createTestConfig());
+
+    const providerKey = 'mock.default.toolloop';
+    const runtimeKey = 'runtime:mock';
+
+    (server as any).hubPipeline = {};
+    (server as any).runHubPipeline = jest.fn().mockResolvedValueOnce({
+      requestId: 'req_test',
+      providerPayload: { model: 'toolloop' },
+      target: {
+        providerKey,
+        providerType: 'responses',
+        outboundProfile: 'openai-responses',
+        runtimeKey,
+        processMode: 'chat'
+      },
+      routingDecision: { routeName: 'default' },
+      processMode: 'chat',
+      metadata: {}
+    });
+
+    const providerHandles = new Map<string, any>();
+    providerHandles.set(runtimeKey, {
+      providerType: 'responses',
+      providerFamily: 'responses',
+      providerId: 'mock',
+      providerProtocol: 'openai-responses',
+      instance: {
+        processIncoming: jest.fn(async () => ({ status: 200, data: { ok: true } })),
+        initialize: jest.fn(),
+        cleanup: jest.fn()
+      }
+    });
+    (server as any).providerHandles = providerHandles;
+
+    const providerKeyToRuntimeKey = new Map<string, string>();
+    providerKeyToRuntimeKey.set(providerKey, runtimeKey);
+    (server as any).providerKeyToRuntimeKey = providerKeyToRuntimeKey;
+
+    (server as any).convertProviderResponseIfNeeded = jest.fn(async ({ response }: any) => response);
+
+    const result = await (server as any).executePipeline({
+      requestId: 'req_test',
+      entryEndpoint: '/v1/responses',
+      headers: {},
+      body: { input: [] },
+      metadata: { stream: false, inboundStream: false, sessionId: 'sess-123', conversationId: 'conv-456' }
+    });
+
+    expect(result.status).toBe(200);
+    expect(result.headers?.session_id).toBe('sess-123');
+    expect(result.headers?.conversation_id).toBe('conv-456');
+  });
+});

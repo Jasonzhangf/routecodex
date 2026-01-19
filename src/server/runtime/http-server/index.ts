@@ -105,7 +105,6 @@ export class RouteCodexHttpServer {
 
   // Runtime state
   private hubPipeline: HubPipeline | null = null;
-  private hubShadowComparePipeline: HubPipeline | null = null;
   private providerHandles: Map<string, ProviderHandle> = new Map();
   private providerKeyToRuntimeKey: Map<string, string> = new Map();
   private pipelineLogger: PipelineDebugLogger = createNoopPipelineLogger();
@@ -852,36 +851,6 @@ export class RouteCodexHttpServer {
       this.hubPipeline.updateVirtualRouterConfig(bootstrapArtifacts.config);
     }
 
-    // Unified Hub Framework V1: optional shadow compare pipeline (same runtime deps, same config).
-    // Used to execute baseline runs without contending with the main pipeline instance.
-    if (this.hubShadowCompareConfig.enabled) {
-      if (!this.hubShadowComparePipeline) {
-        this.hubShadowComparePipeline = new hubCtor(hubConfig);
-      } else {
-        const existingShadow = this.hubShadowComparePipeline as unknown as {
-          updateRuntimeDeps?: (deps: { healthStore?: unknown; routingStateStore?: unknown; quotaView?: unknown }) => void;
-          updateVirtualRouterConfig?: (config: unknown) => void;
-        };
-        try {
-          existingShadow.updateRuntimeDeps?.({
-            ...(healthStore ? { healthStore } : {}),
-            ...(routingStateStore ? { routingStateStore } : {}),
-            ...('quotaView' in hubConfig ? { quotaView: hubConfig.quotaView } : {})
-          });
-        } catch {
-          // best-effort: runtime deps updates must never block reload
-        }
-        this.hubShadowComparePipeline.updateVirtualRouterConfig(bootstrapArtifacts.config);
-      }
-    } else if (this.hubShadowComparePipeline) {
-      try {
-        const shadow = this.hubShadowComparePipeline as unknown as { dispose?: () => void };
-        shadow.dispose?.();
-      } catch {
-        // ignore dispose failures
-      }
-      this.hubShadowComparePipeline = null;
-    }
     await this.initializeProviderRuntimes(bootstrapArtifacts);
   }
 
@@ -1423,11 +1392,18 @@ export class RouteCodexHttpServer {
       throw new Error('Hub pipeline runtime is not initialized');
     }
     const payload = asRecord(input.body);
-    const pipelineInput: PipelineExecutionInput & { payload: Record<string, unknown> } = {
+    const isInternalFollowup = metadata.serverToolFollowup === true;
+    const wantsShadowCompare = !isInternalFollowup && shouldRunHubShadowCompare(this.hubShadowCompareConfig);
+    const pipelineInput: PipelineExecutionInput & { payload: Record<string, unknown> } & { id?: string; endpoint?: string } = {
       ...input,
+      id: input.requestId,
+      endpoint: input.entryEndpoint,
       metadata: {
         ...metadata,
-        logger: this.coloredLogger
+        logger: this.coloredLogger,
+        ...(wantsShadowCompare
+          ? { __hubShadowCompare: { baselineMode: this.hubShadowCompareConfig.baselineMode } }
+          : {})
       },
       payload
     };
@@ -1446,12 +1422,15 @@ export class RouteCodexHttpServer {
         : input.requestId;
 
     // Unified Hub Framework V1: runtime black-box shadow compare (baseline policy vs current policy).
-    // - baseline run uses the same input but overrides policy mode
+    // - baseline payload is computed in the SAME hub pipeline execution (single-pass)
     // - only writes errorsample when diff exists
-    // - baseline run disables hub snapshots to avoid polluting codex-samples
     try {
-      const isInternalFollowup = metadata.serverToolFollowup === true;
-      if (!isInternalFollowup && shouldRunHubShadowCompare(this.hubShadowCompareConfig)) {
+      const shadow = (result.metadata as any)?.hubShadowCompare;
+      const baselineProviderPayload =
+        shadow && typeof shadow === 'object' && !Array.isArray(shadow)
+          ? (shadow as any).baselineProviderPayload
+          : undefined;
+      if (wantsShadowCompare && baselineProviderPayload && typeof baselineProviderPayload === 'object') {
         const entryEndpoint = String(input.entryEndpoint || '/v1/chat/completions');
         const routeHint =
           typeof (metadata as Record<string, unknown>).routeHint === 'string'
@@ -1484,42 +1463,15 @@ export class RouteCodexHttpServer {
 
         void (async () => {
           try {
-            const forcedProviderKey =
-              result.target && typeof (result.target as any).providerKey === 'string'
-                ? String((result.target as any).providerKey)
-                : '';
-            const baselineExcludedProviderKeys =
-              forcedProviderKey && this.providerKeyToRuntimeKey.size > 0
-                ? Array.from(this.providerKeyToRuntimeKey.keys()).filter((key) => key !== forcedProviderKey)
-                : undefined;
-            const baselineMeta: Record<string, unknown> = {
-              ...(pipelineInput.metadata ?? {}),
-              __hubPolicyOverride: { mode: this.hubShadowCompareConfig.baselineMode },
-              __disableHubSnapshots: true,
-              ...(baselineExcludedProviderKeys && baselineExcludedProviderKeys.length > 0
-                ? { excludedProviderKeys: baselineExcludedProviderKeys }
-                : {})
-            };
-            const baselineInput: PipelineExecutionInput & { payload: Record<string, unknown> } & { id?: string; endpoint?: string } = {
-              ...pipelineInput,
-              // Ensure baseline run uses the exact same HubPipeline requestId as the candidate run.
-              // Otherwise internal requestId fields (e.g. responsesContext.requestId) will differ and
-              // produce noisy diffs even when providerPayload is otherwise identical.
-              id: derivedRequestId,
-              endpoint: entryEndpoint,
-              metadata: baselineMeta
-            };
-            const baselinePipeline = this.hubShadowComparePipeline || this.hubPipeline!;
-            const baseline = await baselinePipeline.execute(baselineInput);
             const baselineOut = {
-              providerPayload: cloneJsonSafe(baseline.providerPayload),
-              target: cloneJsonSafe(baseline.target),
+              providerPayload: cloneJsonSafe(baselineProviderPayload),
+              target: cloneJsonSafe(result.target),
               metadata: {
-                entryEndpoint: baseline.metadata?.entryEndpoint,
-                providerProtocol: baseline.metadata?.providerProtocol,
-                processMode: baseline.metadata?.processMode,
-                stream: baseline.metadata?.stream,
-                routeHint: baseline.metadata?.routeHint
+                entryEndpoint: result.metadata?.entryEndpoint,
+                providerProtocol: result.metadata?.providerProtocol,
+                processMode: result.metadata?.processMode,
+                stream: result.metadata?.stream,
+                routeHint: result.metadata?.routeHint
               }
             };
 
@@ -1529,7 +1481,7 @@ export class RouteCodexHttpServer {
               routeHint,
               excludedProviderKeys,
               baselineMode: this.hubShadowCompareConfig.baselineMode,
-              candidateMode: this.hubPolicyMode ?? undefined,
+              candidateMode: typeof shadow?.candidateMode === 'string' ? shadow.candidateMode : (this.hubPolicyMode ?? undefined),
               baselineOut,
               candidateOut
             });

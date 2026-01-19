@@ -141,6 +141,14 @@ function stableStringify(value) {
   );
 }
 
+function cloneJsonSafe(value) {
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch {
+    return value;
+  }
+}
+
 function diffPayloads(expected, actual, p = '<root>') {
   if (Object.is(expected, actual)) return [];
   if (typeof expected !== typeof actual) {
@@ -254,12 +262,12 @@ async function bootstrapVirtualRouterConfig(rawConfig) {
   return mod.bootstrapVirtualRouterConfig(rawConfig);
 }
 
-async function runOnce({ requestId, mode, entryEndpoint, routeHint, payload }) {
+async function runOnce({ requestId, candidateMode, baselineMode, entryEndpoint, routeHint, payload }) {
   const HubPipeline = await importHubPipelineCtor();
   const artifacts = await bootstrapVirtualRouterConfig(buildVirtualRouterConfig());
   const pipeline = new HubPipeline({
     virtualRouter: artifacts.config,
-    policy: { mode }
+    policy: { mode: candidateMode }
   });
   const providerProtocol = normalizeEntryProviderProtocol(entryEndpoint);
   const result = await pipeline.execute({
@@ -269,7 +277,10 @@ async function runOnce({ requestId, mode, entryEndpoint, routeHint, payload }) {
     metadata: {
       entryEndpoint,
       providerProtocol,
-      routeHint
+      routeHint,
+      __hubShadowCompare: {
+        baselineMode
+      }
     }
   });
   return result;
@@ -300,18 +311,24 @@ async function main() {
   const candidateMode = String(opts.candidateMode);
   const requestId = `shadow_unified_hub_${Date.now()}`;
 
-  const baseline = await runOnce({ requestId, mode: baselineMode, entryEndpoint, routeHint, payload });
-  const candidate = await runOnce({ requestId, mode: candidateMode, entryEndpoint, routeHint, payload });
+  const candidate = await runOnce({ requestId, candidateMode, baselineMode, entryEndpoint, routeHint, payload });
+  const shadow = candidate && candidate.metadata && typeof candidate.metadata === 'object'
+    ? candidate.metadata.hubShadowCompare
+    : undefined;
+  const baselineProviderPayload =
+    shadow && typeof shadow === 'object' && shadow && !Array.isArray(shadow)
+      ? shadow.baselineProviderPayload
+      : undefined;
 
   const baselineOut = {
-    providerPayload: baseline.providerPayload,
-    target: baseline.target,
+    providerPayload: baselineProviderPayload,
+    target: candidate.target,
     metadata: {
-      entryEndpoint: baseline.metadata?.entryEndpoint,
-      providerProtocol: baseline.metadata?.providerProtocol,
-      processMode: baseline.metadata?.processMode,
-      stream: baseline.metadata?.stream,
-      routeHint: baseline.metadata?.routeHint
+      entryEndpoint: candidate.metadata?.entryEndpoint,
+      providerProtocol: candidate.metadata?.providerProtocol,
+      processMode: candidate.metadata?.processMode,
+      stream: candidate.metadata?.stream,
+      routeHint: candidate.metadata?.routeHint
     }
   };
   const candidateOut = {
@@ -326,7 +343,10 @@ async function main() {
     }
   };
 
-  const diffs = diffPayloads(baselineOut, candidateOut);
+  if (!baselineProviderPayload || typeof baselineProviderPayload !== 'object') {
+    throw new Error('[unified-hub-shadow-compare] hubShadowCompare.baselineProviderPayload missing; ensure llmswitch-core is rebuilt.');
+  }
+  const diffs = diffPayloads(cloneJsonSafe(baselineOut), cloneJsonSafe(candidateOut));
   if (!diffs.length) {
     console.log('[unified-hub-shadow-compare] OK diff=0');
     return;
