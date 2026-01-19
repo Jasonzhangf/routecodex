@@ -78,6 +78,14 @@ function resolveCamoufoxBinary(cacheRoot) {
   }
 
   const isMac = process.platform === 'darwin';
+  if (!cacheRoot && isMac) {
+    // Best-effort fallback when python3 is unavailable/broken:
+    // Camoufox's packaged app is commonly placed under ~/Library/Caches/camoufox/Camoufox.app.
+    const guessed = path.join(os.homedir(), 'Library', 'Caches', 'camoufox');
+    if (fs.existsSync(path.join(guessed, 'Camoufox.app'))) {
+      cacheRoot = guessed;
+    }
+  }
   if (cacheRoot && isMac) {
     const appPath = path.join(cacheRoot, 'Camoufox.app');
     const macBinary = path.join(appPath, 'Contents', 'MacOS', 'camoufox');
