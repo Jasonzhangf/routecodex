@@ -7,6 +7,12 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+function isTruthy(value) {
+  if (!value) return false;
+  const v = String(value).trim().toLowerCase();
+  return v === '1' || v === 'true' || v === 'yes' || v === 'on';
+}
+
 function parseArgs(argv) {
   const args = { profile: 'default', url: '', autoMode: '', devMode: false };
   const list = argv.slice(2);
@@ -65,6 +71,36 @@ async function getCamoufoxCacheRoot() {
   });
 }
 
+function resolveCamoufoxBinary(cacheRoot) {
+  const override = (process.env.ROUTECODEX_CAMOUFOX_BINARY || '').trim();
+  if (override) {
+    return override;
+  }
+
+  const isMac = process.platform === 'darwin';
+  if (cacheRoot && isMac) {
+    const appPath = path.join(cacheRoot, 'Camoufox.app');
+    const macBinary = path.join(appPath, 'Contents', 'MacOS', 'camoufox');
+    if (fs.existsSync(macBinary)) {
+      return macBinary;
+    }
+  }
+
+  try {
+    const located = spawnSync('which', ['camoufox'], { encoding: 'utf-8' });
+    if (located.status === 0) {
+      const resolved = String(located.stdout || '').trim();
+      if (resolved) {
+        return resolved;
+      }
+    }
+  } catch {
+    // ignore lookup failure
+  }
+
+  return 'camoufox';
+}
+
 async function ensureProfileDir(profileId) {
   const root = path.join(os.homedir(), '.routecodex', 'camoufox-profiles');
   const dir = path.join(root, profileId);
@@ -108,17 +144,16 @@ async function main() {
 
   const cacheRoot = await getCamoufoxCacheRoot();
   if (!cacheRoot) {
-    console.error(
-      '[camoufox-launch-auth] Failed to resolve Camoufox cache root via "python3 -m camoufox path"'
+    console.warn(
+      '[camoufox-launch-auth] Failed to resolve Camoufox cache root via "python3 -m camoufox path"; falling back to PATH/override.'
     );
-    process.exit(1);
   }
 
   const camoufoxBinary = resolveCamoufoxBinary(cacheRoot);
 
   if (autoMode && autoMode.trim().toLowerCase() === 'iflow') {
     try {
-      await runIflowAutoFlow({ url, profileDir, profileId, camoufoxBinary, devMode });
+      await runAutoFlowWithFallback('iflow', { url, profileDir, profileId, camoufoxBinary, devMode });
       process.exit(0);
     } catch (error) {
       console.error(
@@ -132,7 +167,7 @@ async function main() {
 
   if (autoMode && autoMode.trim().toLowerCase() === 'gemini') {
     try {
-      await runGeminiAutoFlow({ url, profileDir, camoufoxBinary, devMode });
+      await runAutoFlowWithFallback('gemini', { url, profileDir, profileId, camoufoxBinary, devMode });
       process.exit(0);
     } catch (error) {
       console.error(
@@ -146,7 +181,7 @@ async function main() {
 
   if (autoMode && autoMode.trim().toLowerCase() === 'antigravity') {
     try {
-      await runAntigravityAutoFlow({ url, profileDir, camoufoxBinary, devMode });
+      await runAutoFlowWithFallback('antigravity', { url, profileDir, profileId, camoufoxBinary, devMode });
       process.exit(0);
     } catch (error) {
       console.error(
@@ -166,57 +201,27 @@ main().catch((err) => {
   process.exit(1);
 });
 
-function resolveCamoufoxBinary(cacheRoot) {
-  const isMac = process.platform === 'darwin';
-  if (isMac) {
-    const appPath = path.join(cacheRoot, 'Camoufox.app');
-    const macBinary = path.join(appPath, 'Contents', 'MacOS', 'camoufox');
-    if (fs.existsSync(macBinary)) {
-      return macBinary;
-    }
-  }
-  try {
-    const located = spawnSync('which', ['camoufox'], { encoding: 'utf-8' });
-    if (located.status === 0) {
-      const resolved = located.stdout.trim();
-      if (resolved) {
-        return resolved;
-      }
-    }
-  } catch {
-    // ignore lookup failure
-  }
-  return 'camoufox';
-}
-
 async function launchManualCamoufox({ camoufoxBinary, profileDir, url }) {
   let browserExitCode = 0;
-  try {
-    const browser = spawn(camoufoxBinary, ['-profile', profileDir, url], {
-      detached: true,
-      stdio: 'ignore'
-    });
-
-    const shutdownBrowser = (signal = 'SIGTERM') => {
-      try {
-        if (browser.pid) {
-          try {
-            process.kill(-browser.pid, signal);
-            return;
-          } catch {
-            // process group kill may fail on non-unix systems; fall back to direct kill
-          }
-        }
-        browser.kill(signal);
-      } catch {
-        // ignore
+  let browser = null;
+  const shutdownBrowser = (signal = 'SIGTERM') => {
+    try {
+      if (!browser) {
+        return;
       }
-    };
+      browser.kill(signal);
+    } catch {
+      // ignore
+    }
+  };
+  ['SIGTERM', 'SIGINT', 'SIGHUP'].forEach((signal) => {
+    process.on(signal, () => shutdownBrowser(signal));
+  });
 
-    ['SIGTERM', 'SIGINT'].forEach((signal) => {
-      process.on(signal, () => {
-        shutdownBrowser(signal);
-      });
+  try {
+    browser = spawn(camoufoxBinary, ['-profile', profileDir, url], {
+      detached: false,
+      stdio: 'ignore'
     });
 
     browserExitCode = await new Promise((resolve) => {
@@ -232,6 +237,95 @@ async function launchManualCamoufox({ camoufoxBinary, profileDir, url }) {
   }
 
   process.exit(browserExitCode);
+}
+
+function isSelectorOrTimeoutError(error) {
+  const message = error instanceof Error ? error.message : String(error || '');
+  return (
+    /timeout/i.test(message) ||
+    /waiting for selector/i.test(message) ||
+    /strict mode violation/i.test(message) ||
+    message.includes('未能定位') ||
+    message.includes('无法定位')
+  );
+}
+
+async function runHeadedManualAssistFlow({ url, profileDir, camoufoxBinary, timeoutMs, label }) {
+  let firefox;
+  try {
+    ({ firefox } = await import('playwright-core'));
+  } catch (error) {
+    throw new Error(
+      `playwright-core is required for headed manual assist (${error instanceof Error ? error.message : String(error)})`
+    );
+  }
+
+  console.warn(
+    `[camoufox-launch-auth] ${label}: falling back to headed mode for manual completion (no selector match).`
+  );
+  cleanupExistingCamoufox(profileDir);
+  const context = await firefox.launchPersistentContext(profileDir, {
+    executablePath: camoufoxBinary,
+    headless: false,
+    acceptDownloads: false
+  });
+
+  let closed = false;
+  const shutdown = async () => {
+    if (closed) return;
+    closed = true;
+    await context.close().catch(() => {});
+  };
+  ['SIGTERM', 'SIGINT', 'SIGHUP'].forEach((signal) => {
+    process.on(signal, () => {
+      void shutdown().finally(() => process.exit(0));
+    });
+  });
+
+  try {
+    const page = context.pages()[0] || (await context.newPage());
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+    console.log('[camoufox-launch-auth] Headed browser opened. Please complete OAuth manually...');
+    const callbackPage = await waitForCallback(context, page, timeoutMs);
+    await callbackPage.waitForLoadState('load', { timeout: 120000 }).catch(() => {});
+    console.log('[camoufox-launch-auth] OAuth callback detected, manual completion finished.');
+  } finally {
+    await shutdown();
+  }
+}
+
+async function runAutoFlowWithFallback(kind, options) {
+  const mode = String(kind || '').trim().toLowerCase();
+  const label = mode || 'auto';
+  const timeoutMs = Number(process.env.ROUTECODEX_CAMOUFOX_GEMINI_TIMEOUT_MS || 120_000);
+
+  try {
+    if (mode === 'iflow') {
+      await runIflowAutoFlow(options);
+      return;
+    }
+    if (mode === 'gemini') {
+      await runGeminiAutoFlow(options);
+      return;
+    }
+    if (mode === 'antigravity') {
+      await runAntigravityAutoFlow(options);
+      return;
+    }
+    throw new Error(`Unknown auto mode: ${mode}`);
+  } catch (error) {
+    if (!options.devMode && isSelectorOrTimeoutError(error)) {
+      await runHeadedManualAssistFlow({
+        url: options.url,
+        profileDir: options.profileDir,
+        camoufoxBinary: options.camoufoxBinary,
+        timeoutMs: Number(process.env.ROUTECODEX_OAUTH_TIMEOUT_MS || 10 * 60_000),
+        label
+      });
+      return;
+    }
+    throw error;
+  }
 }
 
 async function runIflowAutoFlow({ url, profileDir, profileId, camoufoxBinary, devMode }) {
@@ -251,6 +345,17 @@ async function runIflowAutoFlow({ url, profileDir, profileId, camoufoxBinary, de
     executablePath: camoufoxBinary,
     headless,
     acceptDownloads: false
+  });
+  let closing = false;
+  const shutdown = async () => {
+    if (closing) return;
+    closing = true;
+    await context.close().catch(() => {});
+  };
+  ['SIGTERM', 'SIGINT', 'SIGHUP'].forEach((signal) => {
+    process.on(signal, () => {
+      void shutdown().finally(() => process.exit(0));
+    });
   });
 
   let callbackObserved = false;
@@ -352,7 +457,7 @@ async function runIflowAutoFlow({ url, profileDir, profileId, camoufoxBinary, de
     }
     throw error;
   } finally {
-    await context.close().catch(() => {});
+    await shutdown();
   }
 }
 
@@ -373,6 +478,17 @@ async function runGeminiAutoFlow({ url, profileDir, camoufoxBinary, devMode }) {
     executablePath: camoufoxBinary,
     headless: !devMode,
     acceptDownloads: false
+  });
+  let closing = false;
+  const shutdown = async () => {
+    if (closing) return;
+    closing = true;
+    await context.close().catch(() => {});
+  };
+  ['SIGTERM', 'SIGINT', 'SIGHUP'].forEach((signal) => {
+    process.on(signal, () => {
+      void shutdown().finally(() => process.exit(0));
+    });
   });
 
   let callbackObserved = false;
@@ -440,7 +556,7 @@ async function runGeminiAutoFlow({ url, profileDir, camoufoxBinary, devMode }) {
     await callbackPage.waitForLoadState('load', { timeout: timeoutMs }).catch(() => {});
     console.log('[camoufox-launch-auth] OAuth callback detected, automation complete.');
   } finally {
-    await context.close().catch(() => {});
+    await shutdown();
   }
 }
 
@@ -461,6 +577,17 @@ async function runAntigravityAutoFlow({ url, profileDir, camoufoxBinary, devMode
     executablePath: camoufoxBinary,
     headless: !devMode,
     acceptDownloads: false
+  });
+  let closing = false;
+  const shutdown = async () => {
+    if (closing) return;
+    closing = true;
+    await context.close().catch(() => {});
+  };
+  ['SIGTERM', 'SIGINT', 'SIGHUP'].forEach((signal) => {
+    process.on(signal, () => {
+      void shutdown().finally(() => process.exit(0));
+    });
   });
 
   let callbackObserved = false;
@@ -544,7 +671,7 @@ async function runAntigravityAutoFlow({ url, profileDir, camoufoxBinary, devMode
     }
     throw error;
   } finally {
-    await context.close().catch(() => {});
+    await shutdown();
   }
 }
 
@@ -584,7 +711,7 @@ async function waitForElementInPages(context, selector, timeoutMs) {
   return null;
 }
 
-async function waitForCallback(context, fallbackPage) {
+async function waitForCallback(context, fallbackPage, timeoutMs = 120000) {
   const isCallbackUrl = (current) => {
     if (typeof current !== 'string') {
       return false;
@@ -605,13 +732,13 @@ async function waitForCallback(context, fallbackPage) {
   }
 
   try {
-    await fallbackPage.waitForURL((current) => isCallbackUrl(current), { timeout: 120000 });
+    await fallbackPage.waitForURL((current) => isCallbackUrl(current), { timeout: timeoutMs });
     return fallbackPage;
   } catch {
     // ignore and wait for popup
   }
 
-  const callback = await context.waitForEvent('page', { timeout: 120000 });
+  const callback = await context.waitForEvent('page', { timeout: timeoutMs });
   await callback.waitForLoadState('domcontentloaded', { timeout: 60000 }).catch(() => {});
   return callback;
 }

@@ -343,23 +343,49 @@ export async function openAuthInCamoufox(options: CamoufoxLaunchOptions): Promis
     if (autoMode) {
       args.push('--auto-mode', autoMode);
     }
-    const child = spawn(
-      process.execPath,
-      args,
-      {
-        detached: true,
-        stdio: 'inherit',
-        env: {
-          ...process.env,
-          ...fingerprintEnv,
-          BROWSER_PROFILE_ID: profileId,
-          BROWSER_INITIAL_URL: url
-        }
+    const child = spawn(process.execPath, args, {
+      detached: false,
+      stdio: 'inherit',
+      env: {
+        ...process.env,
+        ...fingerprintEnv,
+        BROWSER_PROFILE_ID: profileId,
+        BROWSER_INITIAL_URL: url
       }
-    );
+    });
     registerLauncher(child);
+
+    // If the launcher exits immediately with a non-zero code (missing python/camoufox/etc),
+    // report failure so the caller can fall back to the system browser.
+    const quickCheckMs = 800;
+    const ok = await new Promise<boolean>((resolve) => {
+      let settled = false;
+      const settle = (value: boolean) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timer);
+        resolve(value);
+      };
+      const timer = setTimeout(() => settle(true), quickCheckMs);
+      if (typeof timer.unref === 'function') {
+        timer.unref();
+      }
+      child.once('error', () => settle(false));
+      child.once('exit', (code) => {
+        if (typeof code === 'number' && code !== 0) {
+          settle(false);
+        } else {
+          settle(true);
+        }
+      });
+    });
+
+    // Do not keep the parent process alive solely for the launcher; interactive flows
+    // will keep running due to the callback server anyway. Cleanup will terminate it.
     child.unref();
-    return true;
+    return ok;
   } catch (error) {
     logOAuthDebug(
       `[OAuth] Camoufox: failed to spawn launcher - ${error instanceof Error ? error.message : String(error)}`
