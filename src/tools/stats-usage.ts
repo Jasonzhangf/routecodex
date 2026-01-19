@@ -222,9 +222,9 @@ export function summarizeUsage(
     period === 'day' ? timeSeries.days : period === 'week' ? timeSeries.weeks : timeSeries.days;
 
   const pickGroup = (daily: DailyUsage): Record<string, UsageBucket> => {
-    if (group === 'provider') return daily.byProviderKey;
-    if (group === 'route') return daily.byRoute;
-    if (group === 'pool') return daily.byPool;
+    if (group === 'provider') {return daily.byProviderKey;}
+    if (group === 'route') {return daily.byRoute;}
+    if (group === 'pool') {return daily.byPool;}
     return daily.byEndpoint;
   };
 

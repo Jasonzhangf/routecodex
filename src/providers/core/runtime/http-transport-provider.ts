@@ -25,7 +25,7 @@ import {
 } from '../utils/snapshot-writer.js';
 import type { IAuthProvider } from '../../auth/auth-interface.js';
 import type { ApiKeyAuth, OAuthAuth, OpenAIStandardConfig } from '../api/provider-config.js';
-import type { ProviderContext, ProviderError, ProviderRuntimeProfile, ServiceProfile, ProviderType } from '../api/provider-types.js';
+import type { ProviderContext, ProviderRuntimeProfile, ServiceProfile, ProviderType } from '../api/provider-types.js';
 import type { UnknownObject } from '../../../types/common-types.js';
 import type { ModuleDependencies } from '../../../modules/pipeline/interfaces/pipeline-interfaces.js';
 import { attachProviderRuntimeMetadata, extractProviderRuntimeMetadata } from './provider-runtime-metadata.js';
@@ -472,7 +472,7 @@ export class HttpTransportProvider extends BaseProvider {
     };
 
     // 初始请求预处理
-    const __runtime = this.getRuntimeProfile();
+    this.getRuntimeProfile();
     const processedRequest: UnknownObject = { ...request };
     ensureRuntimeMetadata(processedRequest);
     // 记录入站原始模型，便于响应阶段还原（不影响上游请求体）
@@ -505,7 +505,7 @@ export class HttpTransportProvider extends BaseProvider {
   }
 
   protected async postprocessResponse(response: unknown, context: ProviderContext): Promise<UnknownObject> {
-    const __runtime = this.getRuntimeProfile();
+    this.getRuntimeProfile();
     const processingTime = Date.now() - context.startTime;
 
     const processedResponse = response;

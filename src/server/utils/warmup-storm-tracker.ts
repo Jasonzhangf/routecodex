@@ -57,7 +57,7 @@ export function flushWarmupStormSummary(): void {
   const durationMs = Math.max(0, stats.lastTimestamp - stats.firstTimestamp);
   const endpointList = Array.from(stats.endpoints);
   const userAgentList = Array.from(stats.userAgents);
-  const _reasonList = Array.from(stats.reasons);
+  // const _reasonList = Array.from(stats.reasons);
   const firstId = stats.firstRequestId ?? 'n/a';
   const lastId = stats.lastRequestId ?? 'n/a';
 

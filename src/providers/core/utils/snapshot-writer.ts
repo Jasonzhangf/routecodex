@@ -133,10 +133,6 @@ async function writeUniqueFile(dir: string, baseName: string, contents: string):
   await fsp.writeFile(path.join(dir, fallback), contents, 'utf-8');
 }
 
-function fallbackSnapshotDir(folder: string, requestId: string): string {
-  return path.join(resolveSnapshotBase(), folder, requestId);
-}
-
 export async function writeProviderSnapshot(options: {
   phase: Phase;
   requestId: string;
@@ -153,7 +149,7 @@ export async function writeProviderSnapshot(options: {
   }
   const { endpoint, folder } = resolveEndpoint(options.entryEndpoint || options.url);
   const stage = options.phase;
-  const requestId = normalizeRequestId(options.requestId);
+  // const requestId = normalizeRequestId(options.requestId);
   const groupRequestId = normalizeRequestId(options.clientRequestId || options.requestId);
   const providerToken = normalizeProviderToken(options.providerKey || options.providerId || '');
   const payload = buildSnapshotPayload({
@@ -320,7 +316,7 @@ export async function writeProviderRetrySnapshot(options: {
 }): Promise<void> {
   const { endpoint, folder } = resolveEndpoint(options.entryEndpoint || options.url);
   const stage = options.type === 'request' ? 'provider-request.retry' : 'provider-response.retry';
-  const requestId = normalizeRequestId(options.requestId);
+  // const requestId = normalizeRequestId(options.requestId);
   const groupRequestId = normalizeRequestId(options.clientRequestId || options.requestId);
   const providerToken = normalizeProviderToken(options.providerKey || options.providerId || '');
   const payload = buildSnapshotPayload({
@@ -363,7 +359,7 @@ export async function writeRepairFeedbackSnapshot(options: {
   groupRequestId?: string;
 }): Promise<void> {
   try {
-    const requestId = normalizeRequestId(options.requestId);
+    // const requestId = normalizeRequestId(options.requestId);
     const { folder } = resolveEndpoint(options.entryEndpoint);
     const groupRequestId = normalizeRequestId(options.groupRequestId || options.requestId);
     const providerToken = normalizeProviderToken(options.providerKey || options.providerId || '');
@@ -394,7 +390,7 @@ export async function writeClientSnapshot(options: {
   try {
     const stage: ClientPhase = 'client-request';
     const { endpoint, folder } = resolveEndpoint(options.entryEndpoint);
-    const requestId = normalizeRequestId(options.requestId);
+    // const requestId = normalizeRequestId(options.requestId);
     const groupRequestIdCandidate =
       options.metadata && typeof options.metadata === 'object' && typeof options.metadata.clientRequestId === 'string'
         ? (options.metadata.clientRequestId as string)

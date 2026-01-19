@@ -5,9 +5,7 @@
  * 请求阶段始终以 `Authorization: Bearer <apiKey>` 调用 https://apis.iflow.cn/v1/chat/completions。
  */
 
-import fs from 'fs';
 import fsPromises from 'fs/promises';
-import path from 'path';
 import type { IAuthProvider, AuthStatus } from './auth-interface.js';
 import type { UnknownObject } from '../../modules/pipeline/types/common-types.js';
 

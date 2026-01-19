@@ -9,23 +9,23 @@ export type HubShadowCompareConfig = {
 };
 
 function resolveBoolFromEnv(value: string | undefined, fallback: boolean): boolean {
-  if (!value) return fallback;
+  if (!value) {return fallback;}
   const normalized = value.trim().toLowerCase();
-  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
-  if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) {return true;}
+  if (['0', 'false', 'no', 'off'].includes(normalized)) {return false;}
   return fallback;
 }
 
 function resolveNumberFromEnv(value: string | undefined, fallback: number): number {
-  if (!value || !value.trim()) return fallback;
+  if (!value || !value.trim()) {return fallback;}
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
 }
 
 function clamp01(n: number): number {
-  if (!Number.isFinite(n)) return 1;
-  if (n <= 0) return 0;
-  if (n >= 1) return 1;
+  if (!Number.isFinite(n)) {return 1;}
+  if (n <= 0) {return 0;}
+  if (n >= 1) {return 1;}
   return n;
 }
 
@@ -40,27 +40,27 @@ export function resolveHubShadowCompareConfig(): HubShadowCompareConfig {
 }
 
 export function shouldRunHubShadowCompare(config: HubShadowCompareConfig): boolean {
-  if (!config.enabled) return false;
-  if (config.sampleRate <= 0) return false;
-  if (config.sampleRate >= 1) return true;
+  if (!config.enabled) {return false;}
+  if (config.sampleRate <= 0) {return false;}
+  if (config.sampleRate >= 1) {return true;}
   return Math.random() < config.sampleRate;
 }
 
 function summarizeValue(value: unknown): unknown {
-  if (value === undefined) return 'undefined';
-  if (value === null) return null;
+  if (value === undefined) {return 'undefined';}
+  if (value === null) {return null;}
   if (typeof value === 'string') {
     return value.length > 240 ? `${value.slice(0, 200)}...(len=${value.length})` : value;
   }
-  if (typeof value === 'number' || typeof value === 'boolean') return value;
-  if (Array.isArray(value)) return `[array length=${value.length}]`;
-  if (value && typeof value === 'object') return `[object keys=${Object.keys(value as object).length}]`;
+  if (typeof value === 'number' || typeof value === 'boolean') {return value;}
+  if (Array.isArray(value)) {return `[array length=${value.length}]`;}
+  if (value && typeof value === 'object') {return `[object keys=${Object.keys(value as object).length}]`;}
   return String(value);
 }
 
 function diffPayloads(expected: unknown, actual: unknown, p = '<root>'): Array<{ path: string; expected: unknown; actual: unknown }> {
-  if (Object.is(expected, actual)) return [];
-  if (typeof expected !== typeof actual) return [{ path: p, expected, actual }];
+  if (Object.is(expected, actual)) {return [];}
+  if (typeof expected !== typeof actual) {return [{ path: p, expected, actual }];}
   if (Array.isArray(expected) && Array.isArray(actual)) {
     const max = Math.max(expected.length, actual.length);
     const diffs: Array<{ path: string; expected: unknown; actual: unknown }> = [];
@@ -76,9 +76,9 @@ function diffPayloads(expected: unknown, actual: unknown, p = '<root>'): Array<{
     const diffs: Array<{ path: string; expected: unknown; actual: unknown }> = [];
     for (const key of keys) {
       const next = p === '<root>' ? key : `${p}.${key}`;
-      if (!(key in actualObj)) diffs.push({ path: next, expected: expectedObj[key], actual: undefined });
-      else if (!(key in expectedObj)) diffs.push({ path: next, expected: undefined, actual: actualObj[key] });
-      else diffs.push(...diffPayloads(expectedObj[key], actualObj[key], next));
+      if (!(key in actualObj)) {diffs.push({ path: next, expected: expectedObj[key], actual: undefined });}
+      else if (!(key in expectedObj)) {diffs.push({ path: next, expected: undefined, actual: actualObj[key] });}
+      else {diffs.push(...diffPayloads(expectedObj[key], actualObj[key], next));}
     }
     return diffs;
   }
@@ -113,7 +113,12 @@ export async function recordHubShadowCompareDiff(options: {
         'providerPayload.metadata.context.__disableHubSnapshots'
       ]
       : []),
-    ...(ignoreTargetSelection ? ['target.providerKey', 'target.runtimeKey'] : [])
+    ...(ignoreTargetSelection ? ['target.providerKey', 'target.runtimeKey'] : []),
+    // Auxiliary / debug-only fields (not part of provider outbound contract).
+    'providerPayload.stageExpectations',
+    'providerPayload.stages',
+    'providerPayload.anthropicMirror',
+    'providerPayload.toolsFieldPresent'
   ];
 
   const cloneJsonSafe = <T>(value: T): T => {
@@ -125,23 +130,23 @@ export async function recordHubShadowCompareDiff(options: {
   };
 
   const deletePath = (root: unknown, pathExpr: string): void => {
-    if (!root || typeof root !== 'object') return;
+    if (!root || typeof root !== 'object') {return;}
     const parts = pathExpr.split('.').filter(Boolean);
     let cursor: any = root;
     for (let i = 0; i < parts.length - 1; i += 1) {
       const key = parts[i]!;
-      if (!cursor || typeof cursor !== 'object') return;
+      if (!cursor || typeof cursor !== 'object') {return;}
       cursor = cursor[key];
     }
     const last = parts[parts.length - 1];
-    if (!last) return;
+    if (!last) {return;}
     if (cursor && typeof cursor === 'object' && Object.prototype.hasOwnProperty.call(cursor, last)) {
       delete cursor[last];
     }
   };
 
   const prepareForDiff = (value: unknown): unknown => {
-    if (!excludedComparePaths.length) return value;
+    if (!excludedComparePaths.length) {return value;}
     const cloned = cloneJsonSafe(value);
     for (const p of excludedComparePaths) {
       deletePath(cloned, p);
@@ -192,7 +197,7 @@ export async function recordHubShadowCompareDiff(options: {
     console.error(`[unified-hub-shadow-runtime] wrote routing drift errorsample: ${file}`);
     return;
   }
-  if (!diffs.length) return;
+  if (!diffs.length) {return;}
 
   const llmsVersion = resolveLlmswitchCoreVersion();
   const record = {

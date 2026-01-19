@@ -99,8 +99,8 @@ function normalizeConnectHost(host: string): string {
   const v = String(host || '').toLowerCase();
   // NOTE: routecodex expects local base URLs to use 0.0.0.0 (not 127.0.0.1) for compatibility
   // with environments where loopback is not reachable from the launched tool process.
-  if (v === '0.0.0.0') return '0.0.0.0';
-  if (v === '::' || v === '::1' || v === 'localhost') return '0.0.0.0';
+  if (v === '0.0.0.0') {return '0.0.0.0';}
+  if (v === '::' || v === '::1' || v === 'localhost') {return '0.0.0.0';}
   return host || '0.0.0.0';
 }
 
@@ -200,9 +200,9 @@ export function createCodeCommand(program: Command, ctx: CodeCommandContext): vo
             const headers = configuredApiKey ? { 'x-api-key': configuredApiKey } : undefined;
             const response = await ctx.fetch(`${serverUrl}/ready`, { signal: controller.signal, method: 'GET', headers });
             clearTimeout(timeoutId);
-            if (!response.ok) throw new Error('Server not ready');
+            if (!response.ok) {throw new Error('Server not ready');}
             const j = await response.json().catch(() => ({}));
-            if (j?.status !== 'ready') throw new Error('Server reported not_ready');
+            if (j?.status !== 'ready') {throw new Error('Server reported not_ready');}
             spinner.succeed('RouteCodex server is ready');
           } catch (error) {
             if (options.url && String(options.url).trim()) {
@@ -350,7 +350,7 @@ export function createCodeCommand(program: Command, ctx: CodeCommandContext): vo
               const eq = tok.indexOf('=');
               if (eq > 2) {
                 const optName = tok.slice(0, eq);
-                if (knownOpts.has(optName)) continue;
+                if (knownOpts.has(optName)) {continue;}
               }
             }
             passThrough.push(tok);
@@ -378,7 +378,7 @@ export function createCodeCommand(program: Command, ctx: CodeCommandContext): vo
         const claudeBin = (() => {
           try {
             const v = String(options?.claudePath || '').trim();
-            if (v) return v;
+            if (v) {return v;}
           } catch {
             // ignore
           }

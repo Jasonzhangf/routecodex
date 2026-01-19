@@ -68,21 +68,12 @@ export type StartCommandContext = {
   exit: (code: number) => never;
 };
 
-function normalizePort(value: unknown): number {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value === 'string' && value.trim()) {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed)) return parsed;
-  }
-  return NaN;
-}
-
 function parseBoolish(value: unknown): boolean | undefined {
-  if (typeof value !== 'string') return undefined;
+  if (typeof value !== 'string') {return undefined;}
   const normalized = value.trim().toLowerCase();
-  if (!normalized) return undefined;
-  if (['1', 'true', 'yes', 'on', 'enable', 'enabled'].includes(normalized)) return true;
-  if (['0', 'false', 'no', 'off', 'disable', 'disabled'].includes(normalized)) return false;
+  if (!normalized) {return undefined;}
+  if (['1', 'true', 'yes', 'on', 'enable', 'enabled'].includes(normalized)) {return true;}
+  if (['0', 'false', 'no', 'off', 'disable', 'disabled'].includes(normalized)) {return false;}
   return undefined;
 }
 
@@ -241,9 +232,9 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
         await ctx.ensurePortAvailable(resolvedPort, spinner, { restart: true });
 
         const resolveServerHost = (): string => {
-          if (typeof config?.httpserver?.host === 'string' && config.httpserver.host.trim()) return config.httpserver.host;
-          if (typeof config?.server?.host === 'string' && config.server.host.trim()) return config.server.host;
-          if (typeof config?.host === 'string' && config.host.trim()) return config.host;
+          if (typeof config?.httpserver?.host === 'string' && config.httpserver.host.trim()) {return config.httpserver.host;}
+          if (typeof config?.server?.host === 'string' && config.server.host.trim()) {return config.server.host;}
+          if (typeof config?.host === 'string' && config.host.trim()) {return config.host;}
           return LOCAL_HOSTS.LOCALHOST;
         };
         const serverHost = resolveServerHost();
@@ -310,21 +301,21 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
           }
           const deadline = Date.now() + 3500;
           while (Date.now() < deadline) {
-            if (ctx.findListeningPids(resolvedPort).length === 0) break;
+            if (ctx.findListeningPids(resolvedPort).length === 0) {break;}
             await ctx.sleep(120);
           }
           const remain = ctx.findListeningPids(resolvedPort);
           if (remain.length) {
-            for (const pid of remain) ctx.killPidBestEffort(pid, { force: false });
+            for (const pid of remain) {ctx.killPidBestEffort(pid, { force: false });}
             const killDeadline = Date.now() + 1500;
             while (Date.now() < killDeadline) {
-              if (ctx.findListeningPids(resolvedPort).length === 0) break;
+              if (ctx.findListeningPids(resolvedPort).length === 0) {break;}
               await ctx.sleep(100);
             }
           }
           const still = ctx.findListeningPids(resolvedPort);
           if (still.length) {
-            for (const pid of still) ctx.killPidBestEffort(pid, { force: true });
+            for (const pid of still) {ctx.killPidBestEffort(pid, { force: true });}
           }
           if (ctx.isDevPackage) {
             await ctx.stopTokenDaemonIfRunning?.();
@@ -343,7 +334,7 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
         const cleanupKeypress = ctx.setupKeypress(() => { void shutdown('SIGINT'); });
         childProc.on('exit', (code, signal) => {
           try { cleanupKeypress(); } catch { /* ignore */ }
-          if (signal) ctx.exit(0);
+          if (signal) {ctx.exit(0);}
           ctx.exit(code ?? 0);
         });
 

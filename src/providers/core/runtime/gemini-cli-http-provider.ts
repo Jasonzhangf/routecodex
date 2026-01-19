@@ -61,7 +61,6 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
     const processedRequest = await super.preprocessRequest(request);
     const adapter = this.resolvePayload(processedRequest);
     const payload = adapter.payload as MutablePayload;
-    const isAntigravity = this.isAntigravityRuntime();
 
     // 从 auth provider 获取 project_id（仅做最小的 OAuth token 解析，不在此处触发 OAuth 流程）
     if (!this.authProvider) {
@@ -125,7 +124,6 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
   protected override wantsUpstreamSse(request: UnknownObject, context: ProviderContext): boolean {
     const fromRequest = this.extractStreamFlag(request);
     const fromContext = this.extractStreamFlag(context.metadata as UnknownObject);
-    const isAntigravity = this.isAntigravityRuntime();
     const wantsStream =
       // 对 Antigravity 运行时强制走 SSE，以对齐 /v1/responses 上稳定的 streamGenerateContent 行为，
       // 避免非流式 generateContent 触发上游配额/限流策略差异。
@@ -298,7 +296,6 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
   }
 
   private ensureRequestMetadata(payload: MutablePayload): void {
-    const isAntigravity = this.isAntigravityRuntime();
 
     if (!this.hasNonEmptyString(payload.requestId)) {
       payload.requestId = `req-${randomUUID()}`;
@@ -553,7 +550,7 @@ class GeminiSseNormalizer extends Transform {
       const parts = Array.isArray(partsRaw) ? (partsRaw as Record<string, unknown>[]) : [];
 
       for (const part of parts) {
-        if (!part || typeof part !== 'object') continue;
+        if (!part || typeof part !== 'object') {continue;}
 
         // Send raw Gemini part - let llmswitch-core handle the conversion to target protocol
         this.pushEvent('gemini.data', {

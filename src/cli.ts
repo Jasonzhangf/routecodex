@@ -11,7 +11,7 @@ import path from 'path';
 import { homedir, tmpdir } from 'os';
 import { spawn, spawnSync } from 'child_process';
 import { fileURLToPath } from 'url';
-import { LOCAL_HOSTS, HTTP_PROTOCOLS, API_PATHS, DEFAULT_CONFIG, API_ENDPOINTS } from './constants/index.js';
+import { DEFAULT_CONFIG } from './constants/index.js';
 import { buildInfo } from './build-info.js';
 import { ensureLocalTokenPortalEnv } from './token-portal/local-token-portal.js';
 import { parseNetstatListeningPids } from './utils/windows-netstat.js';
@@ -33,25 +33,6 @@ import { registerCodeCommand } from './cli/register/code-command.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-interface ServerConfig {
-  port: number;
-  host: string;
-}
-
-interface LoggingConfig {
-  level: string;
-}
-
-// simple-log config type removed
-
-interface HealthCheckResult {
-  status: string;
-  port: number;
-  host: string;
-  responseTime?: number;
-  error?: string;
-}
 
 const sleep = (ms: number): Promise<void> =>
   new Promise(resolve => setTimeout(resolve, ms));

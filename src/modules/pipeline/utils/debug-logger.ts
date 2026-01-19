@@ -1,5 +1,5 @@
 import type { LogData } from '../../../types/common-types.js';
-import { ColoredLogger, type ColoredLoggerOptions } from './colored-logger.js';
+import { ColoredLogger } from './colored-logger.js';
 
 export type DebugLogEntry = {
   timestamp: number;
@@ -104,7 +104,7 @@ export class PipelineDebugLogger {
       timestamp: Date.now(),
       level: 'info',
       category: 'virtual-router-hit',
-      message: `${routeName} -> ${providerKey}${model ? '.' + model : ''}`
+      message: `${routeName} -> ${providerKey}${model ? `.${  model}` : ''}`
     });
   }
 

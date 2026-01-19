@@ -98,7 +98,7 @@ export function evaluateTokenState(token: RawTokenPayload | null, now: number): 
   const expiresAt = getExpiresAtMillis(token);
   const msUntilExpiry = expiresAt !== null ? expiresAt - now : null;
   const noRefresh =
-    token != null && (token.norefresh === true || (typeof (token as any).noRefresh === 'boolean' && (token as any).noRefresh));
+    token !== null && (token.norefresh === true || (typeof token.noRefresh === 'boolean' && token.noRefresh));
 
   let status: TokenState['status'] = 'invalid';
   if (!access && !apiKey) {

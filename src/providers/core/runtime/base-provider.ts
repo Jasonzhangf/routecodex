@@ -117,7 +117,7 @@ export abstract class BaseProvider implements IProviderV2 {
   protected abstract getServiceProfile(): ServiceProfile;
   protected abstract createAuthProvider(): IAuthProvider;
   protected abstract preprocessRequest(request: UnknownObject): UnknownObject | Promise<UnknownObject>;
-  protected abstract postprocessResponse(response: unknown, context: ProviderContext): UnknownObject | Promise<UnknownObject>;
+  protected abstract postprocessResponse(response: unknown, _context: ProviderContext): UnknownObject | Promise<UnknownObject>;
 
   // 通用实现方法
   async initialize(): Promise<void> {
@@ -440,7 +440,7 @@ export abstract class BaseProvider implements IProviderV2 {
     attachProviderRuntimeMetadata(target as Record<string, unknown>, metadata);
   }
 
-  private handleRequestError(error: unknown, context: ProviderContext): void {
+  private handleRequestError(error: unknown, _context: ProviderContext): void {
     const now = Date.now();
     const runtimeProfile = this.getRuntimeProfile();
     const classification = classifyProviderError({
@@ -560,7 +560,7 @@ export abstract class BaseProvider implements IProviderV2 {
     return Boolean(tools);
   }
 
-  private enforceRateLimitWindow(context: ProviderContext): void {
+  private enforceRateLimitWindow(_context: ProviderContext): void {
     // 冷却窗口治理收敛到 llmswitch-core VirtualRouter。
     // Provider 层不在此处主动拦截请求，避免与 VirtualRouter 的健康状态重复。
   }
@@ -623,7 +623,7 @@ export abstract class BaseProvider implements IProviderV2 {
 
   private static buildSeriesCooldownDetail(
     error: ProviderErrorAugmented,
-    context: ProviderContext,
+    _context: ProviderContext,
     runtimeProfile?: ProviderRuntimeProfile,
     providerKey?: string
   ): SeriesCooldownDetail | null {
@@ -932,7 +932,7 @@ export abstract class BaseProvider implements IProviderV2 {
   }
 
   private static resolveContextModel(
-    context: ProviderContext,
+    _context: ProviderContext,
     runtimeProfile?: ProviderRuntimeProfile,
     providerKey?: string
   ): string | undefined {

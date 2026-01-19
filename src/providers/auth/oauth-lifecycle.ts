@@ -1,8 +1,7 @@
 import type { OAuthAuth } from '../core/api/provider-config.js';
 import {
   createProviderOAuthStrategy,
-  getProviderOAuthConfig,
-  resolveOAuthBrowserPreference
+  getProviderOAuthConfig
 } from '../core/config/provider-oauth-configs.js';
 import { OAuthFlowType, type OAuthFlowConfig, type OAuthClientConfig, type OAuthEndpoints } from '../core/config/oauth-flows.js';
 import fs from 'fs/promises';
@@ -11,7 +10,7 @@ import path from 'path';
 import os from 'os';
 import type { UnknownObject } from '../../modules/pipeline/types/common-types.js';
 import { fetchIFlowUserInfo, mergeIFlowTokenData } from './iflow-userinfo-helper.js';
-import { fetchQwenUserInfo, mergeQwenTokenData, hasQwenApiKey } from './qwen-userinfo-helper.js';
+import {} from './qwen-userinfo-helper.js';
 import {
   fetchGeminiCLIUserInfo,
   fetchGeminiCLIProjects,
@@ -287,27 +286,6 @@ function getExpiresAt(token: StoredOAuthToken | null): number | null {
     return Number.isFinite(ts) ? ts : null;
   }
   return null;
-}
-
-function hasGeminiProjectMetadata(token: StoredOAuthToken | null): boolean {
-  if (!token || typeof token !== 'object') {
-    return false;
-  }
-  const obj = token as UnknownObject;
-  const directProjectId = (obj as any).project_id;
-  if (typeof directProjectId === 'string' && directProjectId.trim().length > 0) {
-    return true;
-  }
-  const projects = (obj as any).projects;
-  if (Array.isArray(projects) && projects.length > 0) {
-    return true;
-  }
-  try {
-    const inferred = getDefaultProjectId(obj);
-    return typeof inferred === 'string' && inferred.trim().length > 0;
-  } catch {
-    return false;
-  }
 }
 
 function hasNoRefreshFlag(token: StoredOAuthToken | null): boolean {

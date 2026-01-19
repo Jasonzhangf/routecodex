@@ -298,7 +298,7 @@ async function parseSnapshotFile(filePath: string, options: SnapshotParseOptions
     console.warn('[semantic-replay] Failed to read snapshot file', filePath, error);
     return null;
   }
-  let record: Record<string, unknown> | null = tryParseJson(raw);
+  const record: Record<string, unknown> | null = tryParseJson(raw);
   if (!record) {
     console.warn('[semantic-replay] Failed to parse snapshot', filePath);
     return null;
@@ -398,7 +398,7 @@ function tryParseJson(raw: string): Record<string, unknown> | null {
 }
 
 function extractTopLevelJson(raw: string): string | null {
-  const startMatch = raw.match(/[\[{]/);
+  const startMatch = raw.match(/[[{]/);
   if (!startMatch || startMatch.index === undefined) {
     return null;
   }

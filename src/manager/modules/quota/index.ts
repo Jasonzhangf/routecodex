@@ -784,11 +784,14 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
     this.schedulePersist(nowMs);
   }
 
-	  registerProviderStaticConfig(providerKey: string, config: { authType?: string | null; priorityTier?: number | null } = {}): void {
-	    if (!this.quotaRoutingEnabled) {
-	      return;
-	    }
-	    const key = typeof providerKey === 'string' ? providerKey.trim() : '';
+  registerProviderStaticConfig(
+    providerKey: string,
+    config: { authType?: string | null; priorityTier?: number | null } = {}
+  ): void {
+    if (!this.quotaRoutingEnabled) {
+      return;
+    }
+    const key = typeof providerKey === 'string' ? providerKey.trim() : '';
     if (!key) {
       return;
     }
@@ -813,27 +816,27 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
       return;
     }
 
-	    // If snapshot is missing (or operator cleared it), we still want a predictable default:
-	    // API-key providers start "inPool: true" with unlimited quota until errors are observed.
-	    // We persist (debounced) so admin tools can inspect the pool quickly after startup.
-	    const initial = createInitialQuotaState(key, staticConfig, nowMs);
-	    // Antigravity OAuth providers require an explicit quota snapshot before being routed:
-	    // - If we haven't observed quota for a model yet, treat it as "no quota" and keep it out of pool.
-	    // - QuotaManagerModule will emit QUOTA_RECOVERY / QUOTA_DEPLETED to flip this state.
-	    // This prevents sticky/prefer targets from repeatedly hitting an untracked model and returning 429s.
-	    const isAntigravity = key.toLowerCase().startsWith('antigravity.');
-	    if (isAntigravity && authType === 'oauth') {
-	      this.quotaStates.set(key, {
-	        ...initial,
-	        inPool: false,
-	        reason: 'cooldown',
-	        cooldownUntil: null
-	      });
-	    } else {
-	      this.quotaStates.set(key, initial);
-	    }
-	    this.schedulePersist(nowMs);
-	  }
+    // If snapshot is missing (or operator cleared it), we still want a predictable default:
+    // API-key providers start "inPool: true" with unlimited quota until errors are observed.
+    // We persist (debounced) so admin tools can inspect the pool quickly after startup.
+    const initial = createInitialQuotaState(key, staticConfig, nowMs);
+    // Antigravity OAuth providers require an explicit quota snapshot before being routed:
+    // - If we haven't observed quota for a model yet, treat it as "no quota" and keep it out of pool.
+    // - QuotaManagerModule will emit QUOTA_RECOVERY / QUOTA_DEPLETED to flip this state.
+    // This prevents sticky/prefer targets from repeatedly hitting an untracked model and returning 429s.
+    const isAntigravity = key.toLowerCase().startsWith('antigravity.');
+    if (isAntigravity && authType === 'oauth') {
+      this.quotaStates.set(key, {
+        ...initial,
+        inPool: false,
+        reason: 'cooldown',
+        cooldownUntil: null
+      });
+    } else {
+      this.quotaStates.set(key, initial);
+    }
+    this.schedulePersist(nowMs);
+  }
 
   private async handleProviderErrorEvent(event: ProviderErrorEvent): Promise<void> {
     if (!event) {

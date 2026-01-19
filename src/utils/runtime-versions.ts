@@ -20,7 +20,7 @@ export function resolveLlmswitchCoreVersion(): string | undefined {
 
     for (const pkgPath of candidates) {
       try {
-        if (!fs.existsSync(pkgPath)) continue;
+        if (!fs.existsSync(pkgPath)) {continue;}
         const text = fs.readFileSync(pkgPath, 'utf-8');
         const parsed = JSON.parse(text) as { version?: unknown };
         if (parsed && typeof parsed.version === 'string' && parsed.version.trim()) {

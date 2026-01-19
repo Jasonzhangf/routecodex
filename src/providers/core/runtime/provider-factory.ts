@@ -337,12 +337,14 @@ export class ProviderFactory {
       case 'anthropic':
         return new AnthropicHttpProvider(config, dependencies);
       case 'gemini':
-        // Check if OAuth type is gemini-cli-oauth to decide between providers
-        const oauthType = config?.config?.auth?.type;
-        if (oauthType === 'gemini-cli-oauth') {
-          return new GeminiCLIHttpProvider(config, dependencies);
+        {
+          // Check if OAuth type is gemini-cli-oauth to decide between providers
+          const oauthType = config?.config?.auth?.type;
+          if (oauthType === 'gemini-cli-oauth') {
+            return new GeminiCLIHttpProvider(config, dependencies);
+          }
+          return new GeminiHttpProvider(config, dependencies);
         }
-        return new GeminiHttpProvider(config, dependencies);
       default:
         break;
     }

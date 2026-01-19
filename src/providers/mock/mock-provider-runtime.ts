@@ -98,9 +98,9 @@ function collectInvalidNames(body: Record<string, unknown> | undefined): Array<{
     };
 
   const visitList = (list: unknown, base: string) => {
-    if (!Array.isArray(list)) return;
+    if (!Array.isArray(list)) {return;}
     list.forEach((item, index) => {
-      if (!item || typeof item !== 'object') return;
+      if (!item || typeof item !== 'object') {return;}
       const entry = item as Record<string, unknown>;
       check(entry.name, `${base}[${index}].name`);
       if (entry.function && typeof entry.function === 'object') {
@@ -132,7 +132,7 @@ function collectMissingToolOutputs(body: Record<string, unknown> | undefined): s
     : [];
   const missing: string[] = [];
   input.forEach((entry, index) => {
-    if (!entry || typeof entry !== 'object') return;
+    if (!entry || typeof entry !== 'object') {return;}
     const type = typeof entry.type === 'string' ? entry.type.toLowerCase() : '';
     if (type !== 'function_call_output' && type !== 'tool_result' && type !== 'tool_message') {
       return;
@@ -148,11 +148,11 @@ function collectNonFcCallIds(body: Record<string, unknown> | undefined): string[
   if (!body || typeof body !== 'object') {
     return [];
   }
-  const input = Array.isArray((body as any).input) ? ((body as any).input as Array<Record<string, unknown>>) : [];
+  const input = Array.isArray((body as unknown).input) ? ((body as unknown).input as Array<Record<string, unknown>>) : [];
   const issues: string[] = [];
   const isFc = (value: unknown): boolean => typeof value === 'string' && /^fc[_-]/i.test(value.trim());
   input.forEach((entry, index) => {
-    if (!entry || typeof entry !== 'object') return;
+    if (!entry || typeof entry !== 'object') {return;}
     const type = typeof entry.type === 'string' ? entry.type.toLowerCase() : '';
     if (type !== 'function_call' && type !== 'function_call_output' && type !== 'tool_result' && type !== 'tool_message') {
       return;
@@ -167,18 +167,18 @@ function collectNonFcCallIds(body: Record<string, unknown> | undefined): string[
 
 function collectCallIdsFromInput(body: Record<string, unknown> | undefined): Set<string> {
   const collected = new Set<string>();
-  if (!body || typeof body !== 'object') return collected;
-  const input = Array.isArray((body as any).input) ? ((body as any).input as Array<Record<string, unknown>>) : [];
+  if (!body || typeof body !== 'object') {return collected;}
+  const input = Array.isArray((body as unknown).input) ? ((body as unknown).input as Array<Record<string, unknown>>) : [];
   input.forEach((entry) => {
-    if (!entry || typeof entry !== 'object') return;
+    if (!entry || typeof entry !== 'object') {return;}
     const t = typeof entry.type === 'string' ? entry.type.toLowerCase() : '';
     if (t !== 'function_call' && t !== 'function_call_output' && t !== 'tool_result' && t !== 'tool_message') {
       return;
     }
     const callId =
-      (entry as any).call_id ||
-      (entry as any).tool_call_id ||
-      (entry as any).id;
+      (entry as Record<string, unknown>).call_id ||
+      (entry as Record<string, unknown>).tool_call_id ||
+      (entry as Record<string, unknown>).id;
     if (typeof callId === 'string' && callId.trim().length) {
       collected.add(callId.trim());
     }
@@ -187,7 +187,7 @@ function collectCallIdsFromInput(body: Record<string, unknown> | undefined): Set
 }
 
 function validateCallIdExpectations(sample: MockSample, body: Record<string, unknown> | undefined, expected: string[] | undefined) {
-  if (!expected || !expected.length) return;
+  if (!expected || !expected.length) {return;}
   const actual = collectCallIdsFromInput(body);
   for (const target of expected) {
     if (!actual.has(target)) {
@@ -195,7 +195,7 @@ function validateCallIdExpectations(sample: MockSample, body: Record<string, unk
         `Mock sample ${sample.reqId} 缺少期望的 call_id '${target}'`
       ) as MockRuntimeError & { status?: number };
       error.code = 'HTTP_400';
-      (error as any).status = 400;
+      (error as Record<string, unknown>).status = 400;
       throw error;
     }
   }
@@ -206,9 +206,9 @@ function validateApplyPatchToolSchema(sample: MockSample, body: Record<string, u
     return;
   }
 
-  const tools = Array.isArray((body as any).tools) ? ((body as any).tools as any[]) : [];
+  const tools = Array.isArray((body as unknown).tools) ? ((body as unknown).tools as any[]) : [];
   const applyPatch = tools.find((t) => {
-    if (!t || typeof t !== 'object') return false;
+    if (!t || typeof t !== 'object') {return false;}
     const fnName =
       (t.function && typeof t.function === 'object' && typeof t.function.name === 'string' ? t.function.name : undefined) ??
       (typeof t.name === 'string' ? t.name : undefined);
@@ -218,24 +218,24 @@ function validateApplyPatchToolSchema(sample: MockSample, body: Record<string, u
     return;
   }
   const params = applyPatch && typeof applyPatch === 'object'
-    ? ((applyPatch as any).function && typeof (applyPatch as any).function === 'object'
-      ? (applyPatch as any).function.parameters
-      : (applyPatch as any).parameters)
+    ? ((applyPatch as Record<string, unknown>).function && typeof (applyPatch as Record<string, unknown>).function === 'object'
+      ? (applyPatch as Record<string, unknown>).function.parameters
+      : (applyPatch as Record<string, unknown>).parameters)
     : undefined;
-  const props = params && typeof params === 'object' ? (params as any).properties : undefined;
+  const props = params && typeof params === 'object' ? (params as Record<string, unknown>).properties : undefined;
 
   const hasFreeformInputSchema = (): boolean => {
-    const additionalProps = params && typeof params === 'object' ? (params as any).additionalProperties : undefined;
+    const additionalProps = params && typeof params === 'object' ? (params as Record<string, unknown>).additionalProperties : undefined;
     const additionalOk = additionalProps === undefined || additionalProps === true;
     if (additionalOk && (!props || typeof props !== 'object')) {
       return true;
     }
-    if (!props || typeof props !== 'object') return false;
+    if (!props || typeof props !== 'object') {return false;}
     if (additionalOk && Object.keys(props as Record<string, unknown>).length === 0) {
       return true;
     }
-    const hasInput = (props as any).input && typeof (props as any).input === 'object';
-    const hasPatch = (props as any).patch && typeof (props as any).patch === 'object';
+    const hasInput = (props as Record<string, unknown>).input && typeof (props as Record<string, unknown>).input === 'object';
+    const hasPatch = (props as Record<string, unknown>).patch && typeof (props as Record<string, unknown>).patch === 'object';
     // Be tolerant: some clients omit `required`, but still provide input/patch schema.
     return Boolean(hasInput || hasPatch);
   };
@@ -245,7 +245,7 @@ function validateApplyPatchToolSchema(sample: MockSample, body: Record<string, u
     const summary = (() => {
       try {
         const name = applyPatch
-          ? ((applyPatch as any).function?.name ?? (applyPatch as any).name ?? 'apply_patch')
+          ? ((applyPatch as Record<string, unknown>).function?.name ?? (applyPatch as Record<string, unknown>).name ?? 'apply_patch')
           : 'missing';
         const p = params && typeof params === 'object' ? params : null;
         return JSON.stringify({ name, parameters: p }, null, 2);
@@ -257,7 +257,7 @@ function validateApplyPatchToolSchema(sample: MockSample, body: Record<string, u
       `apply_patch schema 校验失败：freeform 模式要求 input/patch schema（sample=${sample.reqId}，当前：${summary}）`
     ) as MockRuntimeError & { status?: number };
     error.code = 'HTTP_400';
-    (error as any).status = 400;
+    (error as Record<string, unknown>).status = 400;
     throw error;
   }
 }
@@ -275,8 +275,8 @@ function detectEntryHint(
     return 'openai-responses.submit_tool_outputs';
   }
   if (body && typeof body === 'object') {
-    const submitOutputs = Array.isArray((body as any).tool_outputs) && (body as any).tool_outputs.length > 0;
-    const inputList = Array.isArray((body as any).input) ? ((body as any).input as Array<Record<string, unknown>>) : [];
+    const submitOutputs = Array.isArray((body as unknown).tool_outputs) && (body as unknown).tool_outputs.length > 0;
+    const inputList = Array.isArray((body as unknown).input) ? ((body as unknown).input as Array<Record<string, unknown>>) : [];
     const hasOutputEntries = inputList.some((entry) => {
       const type = typeof entry?.type === 'string' ? entry.type.toLowerCase() : '';
       return type === 'function_call_output' || type === 'tool_result' || type === 'tool_message';
@@ -383,7 +383,7 @@ export class MockProviderRuntime {
           `Invalid '${first.location}': string does not match pattern. Expected a string that matches the pattern '^[A-Za-z0-9_-]+$'.`
         ) as MockRuntimeError & { status?: number };
         error.code = 'HTTP_400';
-        (error as any).status = 400;
+        (error as Record<string, unknown>).status = 400;
         throw error;
       }
       const shouldCheckOutputs = sample.entry === 'openai-responses' || (Array.isArray(sample.tags) && sample.tags.includes('missing_output'));
@@ -394,7 +394,7 @@ export class MockProviderRuntime {
             `Missing required parameter(s): ${missingOutputs.join(', ')}`
           ) as MockRuntimeError & { status?: number };
           error.code = 'HTTP_400';
-          (error as any).status = 400;
+          (error as Record<string, unknown>).status = 400;
           throw error;
         }
       }
@@ -406,7 +406,7 @@ export class MockProviderRuntime {
             `Invalid 'input[*].id': requires fc_* prefix (${invalidIds.join(', ')})`
           ) as MockRuntimeError & { status?: number };
           error.code = 'HTTP_400';
-          (error as any).status = 400;
+          (error as Record<string, unknown>).status = 400;
           throw error;
         }
       }
@@ -418,7 +418,7 @@ export class MockProviderRuntime {
     }
     validateApplyPatchToolSchema(sample, body);
     if (resp.mockExpectations) {
-      delete (resp as any).mockExpectations;
+      delete (resp as Record<string, unknown>).mockExpectations;
     }
     if (resp.body && typeof resp.body === 'object' && !Array.isArray(resp.body)) {
       const mode = (resp.body as Record<string, unknown>).mode;
@@ -426,7 +426,7 @@ export class MockProviderRuntime {
       if (mode === 'sse' && typeof errVal === 'string' && errVal.trim()) {
         const error = new Error(`Upstream SSE terminated: ${errVal.trim()}`) as MockRuntimeError & { status?: number };
         error.code = 'HTTP_502';
-        (error as any).status = 502;
+        (error as Record<string, unknown>).status = 502;
         throw error;
       }
     }
@@ -465,7 +465,7 @@ export class MockProviderRuntime {
   }
 
   private async findFallback(reqId: string, entryHint?: string, modelHint?: string): Promise<MockSample | undefined> {
-    if (!this.samples.length) return undefined;
+    if (!this.samples.length) {return undefined;}
     const parsed = parseRequestIdParts(reqId);
     const entryFromId = parsed?.entry;
     let entry = entryHint || entryFromId;

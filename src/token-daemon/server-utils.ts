@@ -1,11 +1,9 @@
-import fs from 'fs/promises';
 import path from 'path';
 import { homedir } from 'os';
 import fetch from 'node-fetch';
 import { loadRouteCodexConfig } from '../config/routecodex-config-loader.js';
 import type {
   ProviderProfileCollection,
-  ProviderProfile
 } from '../providers/profile/provider-profile.js';
 
 type UnknownRecord = Record<string, unknown>;
@@ -44,15 +42,15 @@ export interface ServerAuthSnapshot {
   providers: ProviderAuthView[];
 }
 
-const SERVER_PID_FILE = path.join(homedir(), '.routecodex', 'server.cli.pid');
+// const SERVER_PID_FILE = path.join(homedir(), '.routecodex', 'server.cli.pid');
 
-function tryReadNumber(value: string | null | undefined): number | null {
-  if (!value) {
-    return null;
-  }
-  const parsed = Number(String(value).trim());
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
-}
+// function tryReadNumber(value: string | null | undefined): number | null {
+//   if (!value) {
+//     return null;
+//   }
+//   const parsed = Number(String(value).trim());
+//   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+// }
 
 export async function detectLocalServerInstance(): Promise<ServerInstanceInfo | null> {
   try {

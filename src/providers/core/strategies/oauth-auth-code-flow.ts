@@ -259,7 +259,6 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
       }
     } catch { /* ignore parsing errors */ }
 
-    let serverInstance: ReturnType<typeof http.createServer> | null = null;
     let timeoutHandle: NodeJS.Timeout | null = null;
 
     const callbackPromise = new Promise<{ code: string; verifier: string }>((resolve, reject) => {
@@ -288,7 +287,7 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
             res.setHeader('Content-Type', 'text/html');
             res.end('<html><body><h1>OAuth Error</h1><p>Authorization failed. You can close this window.</p></body></html>');
 
-            if (timeoutHandle) clearTimeout(timeoutHandle);
+            if (timeoutHandle) {clearTimeout(timeoutHandle);}
             server.close();
             reject(new Error(`Authorization error: ${error}`));
             return;
@@ -302,7 +301,7 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
             res.setHeader('Content-Type', 'text/html');
             res.end('<html><body><h1>OAuth Error</h1><p>State mismatch. Possible CSRF attack. You can close this window.</p></body></html>');
 
-            if (timeoutHandle) clearTimeout(timeoutHandle);
+            if (timeoutHandle) {clearTimeout(timeoutHandle);}
             server.close();
             reject(new Error('State mismatch. Possible CSRF attack'));
             return;
@@ -316,7 +315,7 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
             res.setHeader('Content-Type', 'text/html');
             res.end('<html><body><h1>OAuth Error</h1><p>No authorization code found. You can close this window.</p></body></html>');
 
-            if (timeoutHandle) clearTimeout(timeoutHandle);
+            if (timeoutHandle) {clearTimeout(timeoutHandle);}
             server.close();
             reject(new Error('No authorization code found'));
             return;
@@ -328,7 +327,7 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
           res.setHeader('Content-Type', 'text/html');
           res.end('<html><body><h1>OAuth Success!</h1><p>Authentication successful. You can close this window now.</p><script>setTimeout(function(){window.close()},3000);</script></body></html>');
 
-          if (timeoutHandle) clearTimeout(timeoutHandle);
+          if (timeoutHandle) {clearTimeout(timeoutHandle);}
           server.close();
           resolve({ code, verifier: codeVerifier });
 
@@ -342,7 +341,7 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
             // Response might already be closed
           }
 
-          if (timeoutHandle) clearTimeout(timeoutHandle);
+          if (timeoutHandle) {clearTimeout(timeoutHandle);}
           server.close();
           reject(error instanceof Error ? error : new Error(String(error)));
         }
@@ -357,7 +356,7 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
           '[OAuth] Callback server failed to start or encountered an error:',
           error.message
         );
-        if (timeoutHandle) clearTimeout(timeoutHandle);
+        if (timeoutHandle) {clearTimeout(timeoutHandle);}
         reject(new Error(`Failed to start callback server: ${error.message}`));
       });
 

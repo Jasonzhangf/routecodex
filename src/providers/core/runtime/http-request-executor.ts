@@ -119,7 +119,7 @@ export class HttpRequestExecutor {
         }
       }
 
-      console.log('\n' + '='.repeat(80));
+      console.log(`\n${  '='.repeat(80)}`);
       console.log('[ANTIGRAVITY-DEBUG] HTTP Request');
       console.log('='.repeat(80));
       console.log('URL:', targetUrl);
@@ -128,7 +128,7 @@ export class HttpRequestExecutor {
       console.log(JSON.stringify(safeHeaders, null, 2));
       console.log('\nBody:');
       console.log(JSON.stringify(finalBody, null, 2));
-      console.log('='.repeat(80) + '\n');
+      console.log(`${'='.repeat(80)  }\n`);
     }
 
     return {

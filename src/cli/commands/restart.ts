@@ -106,7 +106,7 @@ function resolvePortHost(ctx: RestartCommandContext, options: RestartCommandOpti
 
 async function stopExisting(ctx: RestartCommandContext, port: number): Promise<void> {
   const pids = ctx.findListeningPids(port);
-  if (!pids.length) return;
+  if (!pids.length) {return;}
 
   for (const pid of pids) {
     ctx.killPidBestEffort(pid, { force: false });
@@ -221,7 +221,7 @@ export function createRestartCommand(program: Command, ctx: RestartCommandContex
 
         child.on('exit', (code, signal) => {
           try { cleanupKeypress2(); } catch { /* ignore */ }
-          if (signal) ctx.exit(0);
+          if (signal) {ctx.exit(0);}
           ctx.exit(code ?? 0);
         });
 

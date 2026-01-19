@@ -216,8 +216,8 @@ function computeOsPolicy(provider?: string | null, alias?: string | null): strin
     hash = (hash * 31 + ch) >>> 0;
   }
   const idx = hash % 3;
-  if (idx === 0) return 'windows';
-  if (idx === 1) return 'macos';
+  if (idx === 0) {return 'windows';}
+  if (idx === 1) {return 'macos';}
   return 'linux';
 }
 

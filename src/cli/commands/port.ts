@@ -26,7 +26,7 @@ export type PortCommandContext = {
 };
 
 function parseConfigPort(userConfig: unknown): number {
-  const cfg = userConfig as Record<string, any> | null;
+  const cfg = userConfig as Record<string, unknown> | null;
   const port = cfg?.httpserver?.port ?? cfg?.server?.port ?? cfg?.port;
   return typeof port === 'number' && Number.isFinite(port) ? port : NaN;
 }

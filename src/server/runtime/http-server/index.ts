@@ -1137,7 +1137,7 @@ export class RouteCodexHttpServer {
     }
     const pipelineLabel = 'hub';
     const iterationMetadata = initialMetadata;
-    const _followupTriggered = false;
+    // _followupTriggered = false;
     // 单次 HTTP 请求内最多做一次 failover（不在 Provider 层做重试）：
     // - 让 VirtualRouter 根据 excludedProviderKeys 跳过失败目标
     // - 避免客户端“一次就断”导致对话破裂（尤其是 429 / prompt too long 等可恢复错误）
@@ -1604,7 +1604,6 @@ export class RouteCodexHttpServer {
     // 在 Host 入口统一解析会话标识，后续 HubPipeline / servertool 等模块仅依赖
     // sessionId / conversationId 字段，不再重复解析 clientHeaders。
     try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
           const { extractSessionIdentifiersFromMetadata } =
         require('../../../../sharedmodule/llmswitch-core/dist/conversion/hub/pipeline/session-identifiers.js') as {
           extractSessionIdentifiersFromMetadata: (meta: Record<string, unknown> | undefined) => {

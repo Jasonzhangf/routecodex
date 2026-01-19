@@ -34,7 +34,7 @@ export class ColoredLogger {
   }
 
   private format(data?: LogData): string {
-    if (!data) return '';
+    if (!data) {return '';}
     return JSON.stringify(data, null, this.isDev ? 2 : 0);
   }
 
@@ -51,7 +51,7 @@ export class ColoredLogger {
 
   logVirtualRouterHit(routeName: string, providerKey: string, model?: string): void {
     const colorizer = this.resolveRouteColor(routeName);
-    const line = `[virtual-router] ${routeName} -> ${providerKey}${model ? '.' + model : ''}`;
+    const line = `[virtual-router] ${routeName} -> ${providerKey}${model ? `.${  model}` : ''}`;
     console.log(colorizer(line));
   }
 

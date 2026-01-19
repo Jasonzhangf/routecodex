@@ -57,9 +57,9 @@ export class Utf8ChunkBuffer {
 
       // Multi-byte start
       let charLength = 0;
-      if ((byte & 0xe0) === 0xc0) charLength = 2;
-      else if ((byte & 0xf0) === 0xe0) charLength = 3;
-      else if ((byte & 0xf8) === 0xf0) charLength = 4;
+      if ((byte & 0xe0) === 0xc0) {charLength = 2;}
+      else if ((byte & 0xf0) === 0xe0) {charLength = 3;}
+      else if ((byte & 0xf8) === 0xf0) {charLength = 4;}
 
       if (charLength > 0) {
         // We found a start byte. Check if we have enough bytes.

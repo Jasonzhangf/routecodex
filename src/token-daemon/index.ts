@@ -163,7 +163,7 @@ export async function printStatus(json = false): Promise<void> {
       let details = '';
       if (authKind === 'apikey') {
         const src = p.auth.apiKeySource ?? '-';
-        details = `source=${src}` + (p.auth.apiKeyPreview ? ` value=${p.auth.apiKeyPreview}` : '');
+        details = `source=${src}${  p.auth.apiKeyPreview ? ` value=${p.auth.apiKeyPreview}` : ''}`;
       } else if (authKind === 'oauth') {
         details = `tokenFile=${p.auth.tokenFile ?? '-'}`;
       } else {
@@ -261,7 +261,7 @@ export async function printProviders(json = false): Promise<void> {
     let details = '';
     if (authKind === 'apikey') {
       const src = p.auth.apiKeySource ?? '-';
-      details = `source=${src}` + (p.auth.apiKeyPreview ? ` value=${p.auth.apiKeyPreview}` : '');
+      details = `source=${src}${  p.auth.apiKeyPreview ? ` value=${p.auth.apiKeyPreview}` : ''}`;
     } else if (authKind === 'oauth') {
       details = `tokenFile=${p.auth.tokenFile ?? '-'}`;
     } else {
