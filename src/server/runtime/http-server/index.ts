@@ -803,6 +803,11 @@ export class RouteCodexHttpServer {
         mode: toolSurfaceMode,
         ...(Number.isFinite(sampleRate) ? { sampleRate } : {})
       };
+      // Also export the resolved mode to env so llmswitch-core response conversion
+      // (convertProviderResponse) can observe tool surface mismatches consistently.
+      if (!process.env.ROUTECODEX_HUB_TOOL_SURFACE_MODE) {
+        process.env.ROUTECODEX_HUB_TOOL_SURFACE_MODE = toolSurfaceMode;
+      }
     }
 
     // Unified Hub Framework V1: followup (servertool) shadow compare toggle.
