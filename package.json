@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.89.1257",
+  "version": "0.89.1258",
   "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support",
   "type": "module",
   "main": "dist/index.js",
@@ -166,6 +166,9 @@
     "rcc-errorhandling": "^1.0.10",
     "socket.io": "^4.8.1",
     "zod": "^3.23.8"
+  },
+  "optionalDependencies": {
+    "@jsonstudio/llms-engine": "^0.3.0"
   },
   "peerDependencies": {
     "@jest/globals": "^30.1.2"

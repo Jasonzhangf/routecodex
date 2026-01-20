@@ -1,7 +1,7 @@
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
-import { importCoreModule } from './core-loader.js';
+import { importCoreModule, resolveCoreModulePath, type LlmsImpl } from './core-loader.js';
 import type { ProviderErrorEvent } from '@jsonstudio/llms/dist/router/virtual-router/types.js';
 import { writeErrorsampleJson } from '../../utils/errorsamples.js';
 import { buildInfo } from '../../build-info.js';
@@ -19,15 +19,67 @@ export type { ProviderUsageEvent } from '@jsonstudio/llms';
 
 const require = createRequire(import.meta.url);
 
-async function importCoreDist<TModule extends object = AnyRecord>(subpath: string): Promise<TModule> {
+function parsePrefixList(raw: string | undefined): string[] {
+  return String(raw || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((s) => s.replace(/^\/*/, '').replace(/\/+$/, ''));
+}
+
+function matchesPrefix(subpath: string, prefixes: string[]): boolean {
+  if (!prefixes.length) {
+    return false;
+  }
+  const normalized = subpath.replace(/^\/*/, '').replace(/\.js$/i, '');
+  return prefixes.some((prefix) => normalized === prefix || normalized.startsWith(`${prefix}/`));
+}
+
+function isEngineEnabled(): boolean {
+  const raw = String(process.env.ROUTECODEX_LLMS_ENGINE_ENABLE || '').trim().toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'yes';
+}
+
+function getEnginePrefixes(): string[] {
+  return parsePrefixList(process.env.ROUTECODEX_LLMS_ENGINE_PREFIXES);
+}
+
+function resolveImplForSubpath(subpath: string): LlmsImpl {
+  if (!isEngineEnabled()) {
+    return 'ts';
+  }
+  const enginePrefixes = getEnginePrefixes();
+  if (matchesPrefix(subpath, enginePrefixes)) {
+    return 'engine';
+  }
+  return 'ts';
+}
+
+async function importCoreDist<TModule extends object = AnyRecord>(
+  subpath: string,
+  impl: LlmsImpl = resolveImplForSubpath(subpath)
+): Promise<TModule> {
   try {
-    return await importCoreModule<TModule>(subpath);
+    return await importCoreModule<TModule>(subpath, impl);
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
+    const pkg = impl === 'engine' ? '@jsonstudio/llms-engine' : '@jsonstudio/llms';
     throw new Error(
-      `[llmswitch-bridge] Unable to load core module "${subpath}". 请确认 @jsonstudio/llms 依赖已安装（npm install）。${detail ? ` (${detail})` : ''}`
+      `[llmswitch-bridge] Unable to load core module "${subpath}" (${impl}). 请确认 ${pkg} 依赖已安装（npm install）。${detail ? ` (${detail})` : ''}`
     );
   }
+}
+
+function requireCoreDist<TModule extends object = AnyRecord>(
+  subpath: string,
+  impl: LlmsImpl = resolveImplForSubpath(subpath)
+): TModule {
+  if (impl === 'engine' && !isEngineEnabled()) {
+    throw new Error('[llmswitch-bridge] ROUTECODEX_LLMS_ENGINE_ENABLE must be enabled to load engine core');
+  }
+  const modulePath = resolveCoreModulePath(subpath, impl);
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  return require(modulePath) as TModule;
 }
 
 type SnapshotHooksModule = {
@@ -102,27 +154,29 @@ type ProviderResponseConversionModule = {
   convertProviderResponse?: (options: AnyRecord) => Promise<AnyRecord> | AnyRecord;
 };
 
-let cachedConvertProviderResponse:
-  | ((options: AnyRecord) => Promise<AnyRecord>)
-  | null = null;
+const cachedConvertProviderResponseByImpl: Record<LlmsImpl, ((options: AnyRecord) => Promise<AnyRecord>) | null> = {
+  ts: null,
+  engine: null
+};
 
 /**
  * Host/HTTP 侧统一使用的 provider 响应转换入口。
  * 封装 llmswitch-core 的 convertProviderResponse，避免在 Host 内部直接 import core 模块。
  */
 export async function convertProviderResponse(options: AnyRecord): Promise<AnyRecord> {
-  if (!cachedConvertProviderResponse) {
-    const mod = await importCoreDist<ProviderResponseConversionModule>('conversion/hub/response/provider-response');
+  const impl = resolveImplForSubpath('conversion/hub/response/provider-response');
+  if (!cachedConvertProviderResponseByImpl[impl]) {
+    const mod = await importCoreDist<ProviderResponseConversionModule>('conversion/hub/response/provider-response', impl);
     const fn = mod.convertProviderResponse;
     if (typeof fn !== 'function') {
       throw new Error('[llmswitch-bridge] convertProviderResponse not available');
     }
-    cachedConvertProviderResponse = async (opts: AnyRecord) => {
+    cachedConvertProviderResponseByImpl[impl] = async (opts: AnyRecord) => {
       const result = fn(opts);
       return result instanceof Promise ? await result : result;
     };
   }
-  return await cachedConvertProviderResponse(options);
+  return await cachedConvertProviderResponseByImpl[impl]!(options);
 }
 
 type SnapshotRecorderModule = {
@@ -325,7 +379,7 @@ function getStickySessionStoreExports(): StickySessionStoreExports | null {
   try {
     // NOTE: must be sync because VirtualRouter routingStateStore expects loadSync.
     // Centralized here to keep a single core import surface.
-    cachedStickySessionStore = require('@jsonstudio/llms/dist/router/virtual-router/sticky-session-store.js') as StickySessionStoreExports;
+    cachedStickySessionStore = requireCoreDist<StickySessionStoreExports>('router/virtual-router/sticky-session-store');
   } catch {
     cachedStickySessionStore = null;
   }
@@ -363,9 +417,7 @@ function getSessionIdentifiersModule(): SessionIdentifiersModule | null {
     return cachedSessionIdentifiersModule;
   }
   try {
-    cachedSessionIdentifiersModule = require(
-      '@jsonstudio/llms/dist/conversion/hub/pipeline/session-identifiers.js'
-    ) as SessionIdentifiersModule;
+    cachedSessionIdentifiersModule = requireCoreDist<SessionIdentifiersModule>('conversion/hub/pipeline/session-identifiers');
   } catch {
     cachedSessionIdentifiersModule = null;
   }
@@ -405,7 +457,7 @@ export function getStatsCenterSafe(): StatsCenterLike {
     return { recordProviderUsage: () => {} };
   }
   try {
-    const mod = require('@jsonstudio/llms/dist/telemetry/stats-center.js') as StatsCenterModule;
+    const mod = requireCoreDist<StatsCenterModule>('telemetry/stats-center');
     const fn = mod?.getStatsCenter;
     const center = typeof fn === 'function' ? fn() : null;
     if (center && typeof center.recordProviderUsage === 'function') {
@@ -441,21 +493,25 @@ type HubPipelineModule = {
 
 type HubPipelineCtorAny = new (config: AnyRecord) => AnyRecord;
 
-let cachedHubPipelineCtor: HubPipelineCtorAny | null = null;
+const cachedHubPipelineCtorByImpl: Record<LlmsImpl, HubPipelineCtorAny | null> = {
+  ts: null,
+  engine: null
+};
 
 /**
  * 获取 HubPipeline 构造函数，供 Host 创建 HubPipeline 实例。
  */
 export async function getHubPipelineCtor(): Promise<HubPipelineCtorAny> {
-  if (!cachedHubPipelineCtor) {
-    const mod = await importCoreDist<HubPipelineModule>('conversion/hub/pipeline/hub-pipeline');
+  const impl = resolveImplForSubpath('conversion/hub/pipeline/hub-pipeline');
+  if (!cachedHubPipelineCtorByImpl[impl]) {
+    const mod = await importCoreDist<HubPipelineModule>('conversion/hub/pipeline/hub-pipeline', impl);
     const Ctor = mod.HubPipeline;
     if (typeof Ctor !== 'function') {
       throw new Error('[llmswitch-bridge] HubPipeline constructor not available');
     }
-    cachedHubPipelineCtor = Ctor;
+    cachedHubPipelineCtorByImpl[impl] = Ctor;
   }
-  return cachedHubPipelineCtor;
+  return cachedHubPipelineCtorByImpl[impl]!;
 }
 
 function resolveBaseDir(): string {
