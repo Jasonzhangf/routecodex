@@ -134,7 +134,7 @@ export function sendPipelineResponse(
 
     const idleTimeoutMs = readTimeoutMs(
       ['ROUTECODEX_HTTP_SSE_IDLE_TIMEOUT_MS', 'RCC_HTTP_SSE_IDLE_TIMEOUT_MS'],
-      120_000
+      300_000
     );
     const totalTimeoutMs = readTimeoutMs(
       ['ROUTECODEX_HTTP_SSE_TIMEOUT_MS', 'RCC_HTTP_SSE_TIMEOUT_MS'],

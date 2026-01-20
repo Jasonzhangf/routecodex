@@ -156,7 +156,7 @@ export class HttpClient {
     // NOTE: stream 请求如果在拿到 response body 后立刻清除 timeout，会导致“流式卡死不返回”。
     // 这里维持一个全局 timeout + idle timeout，直到上游流结束或被消费者关闭。
     const cfgIdle = this.defaultConfig.streamIdleTimeoutMs;
-    const idleTimeoutMs = Number.isFinite(cfgIdle) && cfgIdle > 0 ? cfgIdle : Math.min(120_000, timeout);
+    const idleTimeoutMs = Number.isFinite(cfgIdle) && cfgIdle > 0 ? cfgIdle : Math.min(300_000, timeout);
     const cfgHeaders = this.defaultConfig.streamHeadersTimeoutMs;
     // NOTE: headers timeout controls how long we wait for the *first response headers* from upstream.
     // Some upstreams are slow to flush headers for SSE; keep this fairly generous by default.
