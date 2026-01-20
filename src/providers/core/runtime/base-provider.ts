@@ -41,6 +41,7 @@ type StatsCenterLike = {
 
 const SERIES_COOLDOWN_DETAIL_KEY = 'virtualRouterSeriesCooldown' as const;
 const SERIES_COOLDOWN_PROVIDER_IDS = new Set(['antigravity', 'gemini-cli']);
+const SERIES_COOLDOWN_MAX_MS = 3 * 60 * 60_000;
 type ModelSeriesName = 'claude' | 'gemini-pro' | 'gemini-flash' | 'default';
 type SeriesCooldownDetail = {
   scope: 'model-series';
@@ -52,6 +53,10 @@ type SeriesCooldownDetail = {
   quotaResetDelay?: string;
   source?: string;
   expiresAt?: number;
+};
+type QuotaDelayExtraction = {
+  delay: string;
+  source: 'quota_reset_delay' | 'quota_exhausted_fallback' | 'capacity_exhausted_fallback';
 };
 
 /**
@@ -617,14 +622,16 @@ export abstract class BaseProvider implements IProviderV2 {
     if (!topLevelId || !SERIES_COOLDOWN_PROVIDER_IDS.has(topLevelId.toLowerCase())) {
       return null;
     }
-    const rawDelay = BaseProvider.extractQuotaResetDelay(error);
-    if (!rawDelay) {
+    const extracted = BaseProvider.extractQuotaResetDelayWithSource(error);
+    if (!extracted) {
       return null;
     }
+    const rawDelay = extracted.delay;
     const cooldownMs = BaseProvider.parseDurationToMs(rawDelay);
     if (!cooldownMs || cooldownMs <= 0) {
       return null;
     }
+    const cappedCooldownMs = Math.min(cooldownMs, SERIES_COOLDOWN_MAX_MS);
     const modelId = BaseProvider.resolveContextModel(_context, runtimeProfile, providerKey);
     const series = BaseProvider.resolveModelSeries(modelId);
     if (!modelId || series === 'default') {
@@ -636,16 +643,16 @@ export abstract class BaseProvider implements IProviderV2 {
       providerKey,
       model: modelId,
       series,
-      cooldownMs,
+      cooldownMs: cappedCooldownMs,
       quotaResetDelay: rawDelay,
-      source: 'quota_reset_delay',
-      expiresAt: Date.now() + cooldownMs
+      source: extracted.source,
+      expiresAt: Date.now() + cappedCooldownMs
     };
   }
 
-  private static extractQuotaResetDelay(error: ProviderErrorAugmented): string | undefined {
+  private static extractQuotaResetDelayWithSource(error: ProviderErrorAugmented): QuotaDelayExtraction | null {
     if (!error) {
-      return undefined;
+      return null;
     }
     const response = error.response as { data?: unknown } | undefined;
     const textSources: string[] = [];
@@ -687,13 +694,13 @@ export abstract class BaseProvider implements IProviderV2 {
     for (const source of objectSources) {
       const candidate = BaseProvider.extractQuotaDelayFromObject(source);
       if (candidate) {
-        return candidate;
+        return { delay: candidate, source: 'quota_reset_delay' };
       }
     }
     for (const text of textSources) {
       const candidate = BaseProvider.extractQuotaDelayFromString(text);
       if (candidate) {
-        return candidate;
+        return { delay: candidate, source: 'quota_reset_delay' };
       }
     }
     // 若未在结构化字段中发现 quotaResetDelay / quotaResetTimeStamp，
@@ -704,7 +711,7 @@ export abstract class BaseProvider implements IProviderV2 {
     if (fallback) {
       return fallback;
     }
-    return undefined;
+    return null;
   }
 
   private static extractQuotaDelayFromObject(source: unknown): string | undefined {
@@ -846,13 +853,13 @@ export abstract class BaseProvider implements IProviderV2 {
     return undefined;
   }
 
-  private static extractFallbackQuotaDelayFromTexts(texts: string[]): string | undefined {
+  private static extractFallbackQuotaDelayFromTexts(texts: string[]): QuotaDelayExtraction | null {
     if (!Array.isArray(texts) || texts.length === 0) {
-      return undefined;
+      return null;
     }
     const haystack = texts.join(' ').toLowerCase();
     if (!haystack) {
-      return undefined;
+      return null;
     }
 
     // Antigravity / Gemini CLI: capacity exhausted (not quota depleted).
@@ -865,7 +872,10 @@ export abstract class BaseProvider implements IProviderV2 {
     ) {
       const envValue =
         (process.env.ROUTECODEX_RL_CAPACITY_COOLDOWN || process.env.RCC_RL_CAPACITY_COOLDOWN || '').trim();
-      return envValue.length ? envValue : '30s';
+      return {
+        delay: envValue.length ? envValue : '30s',
+        source: 'capacity_exhausted_fallback'
+      };
     }
 
     // 针对常见的「额度/余额耗尽」类 429 文案给出保守的冷却时间，
@@ -887,10 +897,13 @@ export abstract class BaseProvider implements IProviderV2 {
       // 则优先采用该环境变量，支持按部署环境调节冷却窗口（例如 1m / 30m / 2h）。
       const envValue =
         (process.env.ROUTECODEX_RL_DEFAULT_QUOTA_COOLDOWN || process.env.RCC_RL_DEFAULT_QUOTA_COOLDOWN || '').trim();
-      return envValue.length ? envValue : '5m';
+      return {
+        delay: envValue.length ? envValue : '5m',
+        source: 'quota_exhausted_fallback'
+      };
     }
 
-    return undefined;
+    return null;
   }
 
   private static extractTopLevelProviderId(source?: string): string | undefined {

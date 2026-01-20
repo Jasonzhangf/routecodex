@@ -54,11 +54,30 @@ export interface UsageEventForQuota {
 }
 
 const WINDOW_DURATION_MS = 60_000;
-const COOLDOWN_SCHEDULE_MS = [1 * 60_000, 3 * 60_000, 5 * 60_000] as const;
-const BLACKLIST_MAX_MS = 6 * 60 * 60_000;
-const BLACKLIST_1H_MS = 60 * 60_000;
-const BLACKLIST_3H_MS = 3 * 60 * 60_000;
-const BLACKLIST_THRESHOLD_DEFAULT = 3;
+const COOLDOWN_SCHEDULE_429_MS = [
+  1 * 60_000,
+  3 * 60_000,
+  5 * 60_000,
+  15 * 60_000,
+  30 * 60_000,
+  60 * 60_000,
+  3 * 60 * 60_000
+] as const;
+const COOLDOWN_SCHEDULE_FATAL_MS = [
+  5 * 60_000,
+  15 * 60_000,
+  30 * 60_000,
+  60 * 60_000,
+  3 * 60 * 60_000
+] as const;
+const COOLDOWN_SCHEDULE_DEFAULT_MS = [
+  1 * 60_000,
+  3 * 60_000,
+  5 * 60_000,
+  15 * 60_000,
+  30 * 60_000,
+  60 * 60_000
+] as const;
 
 const NETWORK_ERROR_CODES = [
   'ECONNRESET',
@@ -148,49 +167,21 @@ export function normalizeErrorSeries(event: ErrorEventForQuota): ErrorSeries {
 }
 
 function computeCooldownMs(consecutive: number): number | null {
+  return computeCooldownMsBySeries('EOTHER', consecutive);
+}
+
+function computeCooldownMsBySeries(series: ErrorSeries, consecutive: number): number | null {
   if (consecutive <= 0) {
     return null;
   }
-  const idx = Math.min(consecutive - 1, COOLDOWN_SCHEDULE_MS.length - 1);
-  return COOLDOWN_SCHEDULE_MS[idx] ?? null;
-}
-
-type ErrorPolicy = {
-  cooldownOnly: boolean;
-  blacklistAfterConsecutive?: number;
-  blacklistDurationMs?: number;
-};
-
-function resolveErrorPolicy(state: QuotaState, series: ErrorSeries): ErrorPolicy {
-  // Fatal errors: immediate blacklist (max 6h).
-  if (series === 'EFATAL') {
-    return {
-      cooldownOnly: false,
-      blacklistAfterConsecutive: 1,
-      blacklistDurationMs: BLACKLIST_MAX_MS
-    };
-  }
-
-  // Network / upstream gateway errors: only backoff (1/3/5 minutes), keep repeating 5m.
-  if (series === 'ENET' || series === 'E5XX') {
-    return { cooldownOnly: true };
-  }
-
-  // 429: 1/3/5 minute backoff, then 3h blacklist.
-  if (series === 'E429') {
-    return {
-      cooldownOnly: false,
-      blacklistAfterConsecutive: BLACKLIST_THRESHOLD_DEFAULT,
-      blacklistDurationMs: BLACKLIST_3H_MS
-    };
-  }
-
-  // Unknown / other errors: 1/3/5 minute backoff; after repeated series continues, blacklist 1h.
-  return {
-    cooldownOnly: false,
-    blacklistAfterConsecutive: BLACKLIST_THRESHOLD_DEFAULT,
-    blacklistDurationMs: BLACKLIST_1H_MS
-  };
+  const schedule =
+    series === 'E429'
+      ? COOLDOWN_SCHEDULE_429_MS
+      : series === 'EFATAL'
+        ? COOLDOWN_SCHEDULE_FATAL_MS
+        : COOLDOWN_SCHEDULE_DEFAULT_MS;
+  const idx = Math.min(consecutive - 1, schedule.length - 1);
+  return schedule[idx] ?? null;
 }
 
 export function applyErrorEvent(
@@ -198,54 +189,24 @@ export function applyErrorEvent(
   event: ErrorEventForQuota,
   nowMs: number = event.timestampMs ?? Date.now()
 ): QuotaState {
-  // 如果已经处于 fatal 黑名单且还在锁定窗口内，错误事件不再改变状态。
-  if (state.reason === 'fatal' && state.blacklistUntil && nowMs < state.blacklistUntil) {
+  // Manual/operator blacklist is rigid: automated error events must not override it.
+  if (state.blacklistUntil !== null && nowMs < state.blacklistUntil) {
     return state;
   }
 
   const series = normalizeErrorSeries(event);
 
-  // 不可恢复错误：直接 6 小时锁定。
-  if (series === 'EFATAL') {
-    return {
-      ...state,
-      inPool: false,
-      reason: 'fatal',
-      blacklistUntil: nowMs + BLACKLIST_MAX_MS,
-      cooldownUntil: null,
-      lastErrorSeries: series,
-      consecutiveErrorCount: state.consecutiveErrorCount + 1
-    };
-  }
-
   const sameSeries = state.lastErrorSeries === series;
   const nextCount = sameSeries ? state.consecutiveErrorCount + 1 : 1;
-
-  const policy = resolveErrorPolicy(state, series);
-  const shouldBlacklist =
-    !policy.cooldownOnly &&
-    typeof policy.blacklistAfterConsecutive === 'number' &&
-    Number.isFinite(policy.blacklistAfterConsecutive) &&
-    policy.blacklistAfterConsecutive > 0 &&
-    nextCount >= policy.blacklistAfterConsecutive &&
-    typeof policy.blacklistDurationMs === 'number' &&
-    Number.isFinite(policy.blacklistDurationMs) &&
-    policy.blacklistDurationMs > 0;
-
-  if (shouldBlacklist) {
-    return {
-      ...state,
-      inPool: false,
-      reason: 'blacklist',
-      cooldownUntil: null,
-      blacklistUntil: nowMs + (policy.blacklistDurationMs as number),
-      lastErrorSeries: series,
-      consecutiveErrorCount: nextCount
-    };
-  }
-
-  const cooldownMs = computeCooldownMs(nextCount);
-  const cooldownUntil = cooldownMs ? nowMs + cooldownMs : null;
+  const cooldownMs = computeCooldownMsBySeries(series, nextCount);
+  const nextUntil = cooldownMs ? nowMs + cooldownMs : null;
+  const existingUntil = typeof state.cooldownUntil === 'number' ? state.cooldownUntil : null;
+  const cooldownUntil =
+    typeof nextUntil === 'number' && Number.isFinite(nextUntil)
+      ? typeof existingUntil === 'number' && existingUntil > nextUntil
+        ? existingUntil
+        : nextUntil
+      : existingUntil;
 
   return {
     ...state,
@@ -264,16 +225,6 @@ export function applySuccessEvent(
 ): QuotaState {
   const usedTokens = typeof event.usedTokens === 'number' && event.usedTokens > 0 ? event.usedTokens : 0;
   const totalTokensUsed = state.totalTokensUsed + usedTokens;
-
-  // fatal 黑名单在锁定期内不自动恢复，成功事件只更新统计信息。
-  if (state.reason === 'fatal' && state.blacklistUntil && nowMs < state.blacklistUntil) {
-    return {
-      ...state,
-      totalTokensUsed,
-      lastErrorSeries: null,
-      consecutiveErrorCount: 0
-    };
-  }
 
   const withinBlacklist =
     state.blacklistUntil !== null && nowMs < state.blacklistUntil;
@@ -400,7 +351,9 @@ export function tickQuotaStateTime(state: QuotaState, nowMs: number): QuotaState
       ...next,
       cooldownUntil: null,
       inPool: true,
-      reason: next.reason === 'cooldown' || next.reason === 'quotaDepleted' ? 'ok' : next.reason
+      reason: next.reason === 'cooldown' || next.reason === 'quotaDepleted' ? 'ok' : next.reason,
+      lastErrorSeries: null,
+      consecutiveErrorCount: 0
     };
   }
 

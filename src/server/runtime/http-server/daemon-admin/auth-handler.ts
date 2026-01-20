@@ -68,9 +68,42 @@ export function registerDaemonAuthRoutes(app: Application): void {
     res.status(200).json({ ok: true });
   });
 
+  app.post('/daemon/auth/change', async (req: Request, res: Response) => {
+    if (!isLocalRequest(req)) {
+      res.status(403).json({ error: { message: 'forbidden', code: 'forbidden' } });
+      return;
+    }
+    if (!isDaemonSessionAuthenticated(req)) {
+      res.status(401).json({ error: { message: 'unauthorized', code: 'unauthorized' } });
+      return;
+    }
+    const loaded = await readDaemonLoginRecord();
+    if (!loaded.ok) {
+      res.status(500).json({ error: { message: loaded.error.message, code: 'login_file_error' } });
+      return;
+    }
+    if (!loaded.record) {
+      res.status(409).json({ error: { message: 'password not configured', code: 'not_configured' } });
+      return;
+    }
+    const oldPassword = normalizePassword((req.body as any)?.oldPassword);
+    const newPassword = normalizePassword((req.body as any)?.newPassword);
+    if (newPassword.length < 8 || newPassword.length > 1024) {
+      res.status(400).json({ error: { message: 'newPassword must be 8..1024 characters', code: 'bad_request' } });
+      return;
+    }
+    const ok = await verifyDaemonPassword(oldPassword, loaded.record);
+    if (!ok) {
+      res.status(401).json({ error: { message: 'unauthorized', code: 'unauthorized' } });
+      return;
+    }
+    await writeDaemonLoginRecord(newPassword);
+    establishDaemonSession(res);
+    res.status(200).json({ ok: true });
+  });
+
   app.post('/daemon/auth/logout', async (_req: Request, res: Response) => {
     clearDaemonSession(res);
     res.status(200).json({ ok: true });
   });
 }
-

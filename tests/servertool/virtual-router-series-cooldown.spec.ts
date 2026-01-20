@@ -79,6 +79,7 @@ describe('VirtualRouterEngine series cooldown handling', () => {
         virtualRouterSeriesCooldown: {
           providerId: 'antigravity.alias1',
           providerKey: providerA,
+          model: 'gemini-3-pro-high',
           series: 'gemini-pro',
           cooldownMs: 60_000
         }

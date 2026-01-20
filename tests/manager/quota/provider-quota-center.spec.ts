@@ -9,7 +9,7 @@ import {
 describe('provider-quota-center error handling', () => {
   const providerKey = 'antigravity.alias1.gemini-3-pro-high';
 
-  it('applies 1/3/5 minute cooldowns for repeated 429s and then 3h blacklist for apikey providers', () => {
+  it('applies escalating cooldowns for repeated 429s (no direct blacklist)', () => {
     const baseNow = 1_000_000;
     let state = createInitialQuotaState(providerKey, { authType: 'apikey' }, baseNow);
 
@@ -37,21 +37,31 @@ describe('provider-quota-center error handling', () => {
     expect(state.blacklistUntil).toBeNull();
     expect(state.consecutiveErrorCount).toBe(2);
 
-    // third 429 -> 3h blacklist
+    // third 429 -> 5 minutes cooldown
     const thirdNow = secondNow + 10_000;
     state = applyErrorEvent(
       state,
       { providerKey, httpStatus: 429 },
       thirdNow
     );
-    expect(state.reason).toBe('blacklist');
+    expect(state.reason).toBe('cooldown');
     expect(state.inPool).toBe(false);
-    expect(state.blacklistUntil).toBe(thirdNow + 3 * 60 * 60_000);
-    expect(state.cooldownUntil).toBeNull();
+    expect(state.blacklistUntil).toBeNull();
+    expect(state.cooldownUntil).toBe(thirdNow + 5 * 60_000);
     expect(state.consecutiveErrorCount).toBe(3);
+
+    // After enough consecutive 429s, it caps at 3h cooldown (still not a blacklist).
+    let now = thirdNow;
+    for (let i = 0; i < 4; i += 1) {
+      now += 10_000;
+      state = applyErrorEvent(state, { providerKey, httpStatus: 429 }, now);
+    }
+    expect(state.reason).toBe('cooldown');
+    expect(state.blacklistUntil).toBeNull();
+    expect(state.cooldownUntil).toBe(now + 3 * 60 * 60_000);
   });
 
-  it('loops 1/3/5 minute cooldown for network errors (no long blacklist)', () => {
+  it('applies escalating cooldowns for network errors (no blacklist)', () => {
     const baseNow = 4_000_000;
     let state = createInitialQuotaState(providerKey, { authType: 'apikey' }, baseNow);
 
@@ -73,10 +83,10 @@ describe('provider-quota-center error handling', () => {
     state = applyErrorEvent(state, { providerKey, code: 'ETIMEDOUT' }, fourthNow);
     expect(state.reason).toBe('cooldown');
     expect(state.blacklistUntil).toBeNull();
-    expect(state.cooldownUntil).toBe(fourthNow + 5 * 60_000);
+    expect(state.cooldownUntil).toBe(fourthNow + 15 * 60_000);
   });
 
-  it('blacklists unknown errors for 1h after repeated series', () => {
+  it('does not blacklist unknown errors; keeps escalating cooldown', () => {
     const baseNow = 5_000_000;
     let state = createInitialQuotaState(providerKey, { authType: 'apikey' }, baseNow);
 
@@ -91,9 +101,9 @@ describe('provider-quota-center error handling', () => {
 
     const thirdNow = secondNow + 10_000;
     state = applyErrorEvent(state, { providerKey, code: 'E_UNKNOWN' }, thirdNow);
-    expect(state.reason).toBe('blacklist');
-    expect(state.blacklistUntil).toBe(thirdNow + 60 * 60_000);
-    expect(state.cooldownUntil).toBeNull();
+    expect(state.reason).toBe('cooldown');
+    expect(state.blacklistUntil).toBeNull();
+    expect(state.cooldownUntil).toBe(thirdNow + 5 * 60_000);
   });
 
   it('resets consecutive counter when series changes', () => {
@@ -117,7 +127,7 @@ describe('provider-quota-center error handling', () => {
     expect(state.consecutiveErrorCount).toBe(1);
   });
 
-  it('treats fatal errors as 6h blacklist that does not auto-clear on success inside window', () => {
+  it('treats fatal errors as escalating cooldown (no direct blacklist)', () => {
     const baseNow = 3_000_000;
     let state = createInitialQuotaState(providerKey, undefined, baseNow);
 
@@ -126,9 +136,10 @@ describe('provider-quota-center error handling', () => {
       { providerKey, httpStatus: 401, fatal: true },
       baseNow
     );
-    expect(state.reason).toBe('fatal');
+    expect(state.reason).toBe('cooldown');
     expect(state.inPool).toBe(false);
-    expect(state.blacklistUntil).toBe(baseNow + 6 * 60 * 60_000);
+    expect(state.blacklistUntil).toBeNull();
+    expect(state.cooldownUntil).toBe(baseNow + 5 * 60_000);
 
     const successNow = baseNow + 60_000;
     const afterSuccess = applySuccessEvent(
@@ -136,9 +147,8 @@ describe('provider-quota-center error handling', () => {
       { providerKey, usedTokens: 10 },
       successNow
     );
-    expect(afterSuccess.reason).toBe('fatal');
-    expect(afterSuccess.inPool).toBe(false);
-    expect(afterSuccess.blacklistUntil).toBe(state.blacklistUntil);
+    expect(afterSuccess.reason).toBe('ok');
+    expect(afterSuccess.inPool).toBe(true);
   });
 });
 
@@ -251,5 +261,31 @@ describe('provider-quota-center usage and window handling', () => {
     expect(ticked.inPool).toBe(false);
     expect(ticked.reason).toBe('cooldown');
     expect(ticked.cooldownUntil).toBe(cooldownUntil);
+  });
+
+  it('resets error streak when cooldown expires (cyclic backoff)', () => {
+    const baseNow = 50_000;
+    let state = createInitialQuotaState(providerKey, { authType: 'apikey' }, baseNow);
+
+    // Build up a long cooldown (simulate repeated 429s).
+    let now = baseNow;
+    for (let i = 0; i < 7; i += 1) {
+      state = applyErrorEvent(state, { providerKey, httpStatus: 429 }, now);
+      now += 10_000;
+    }
+    expect(state.reason).toBe('cooldown');
+    const cooldownUntil = state.cooldownUntil as number;
+    expect(typeof cooldownUntil).toBe('number');
+
+    // Once cooldown expires, tick should restore pool and clear the streak.
+    state = tickQuotaStateTime(state, cooldownUntil + 1);
+    expect(state.inPool).toBe(true);
+    expect(state.reason).toBe('ok');
+    expect(state.consecutiveErrorCount).toBe(0);
+
+    // Next error should restart from the first step.
+    state = applyErrorEvent(state, { providerKey, httpStatus: 429 }, cooldownUntil + 2);
+    expect(state.consecutiveErrorCount).toBe(1);
+    expect(state.cooldownUntil).toBe((cooldownUntil + 2) + 60_000);
   });
 });

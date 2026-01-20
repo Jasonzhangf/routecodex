@@ -116,8 +116,8 @@
         font-size: 12px;
         line-height: 1.45;
         color: rgba(255, 255, 255, 0.86);
-        overflow: auto;
-        max-height: 520px;
+        overflow: visible;
+        max-height: none;
       }
 
       .kv details {
@@ -381,14 +381,14 @@
       .table-wrap {
         width: 100%;
         max-width: 100%;
-        overflow: auto;
+        overflow: visible;
         border-radius: 12px;
         border: 1px solid var(--border);
       }
 
       .table-wrap .table {
         border: 0;
-        min-width: 860px;
+        min-width: 0;
       }
 
       .table td.actions-cell {
@@ -522,6 +522,30 @@
           <button id="logoutPasswordBtn">Logout</button>
           <span class="mono" id="adminAuthHint"></span>
         </div>
+
+        <details id="changePasswordDetails" style="margin: 0 0 10px; display:none;">
+          <summary class="muted" style="font-size:12px; cursor:pointer; user-select:none;">Change admin password</summary>
+          <div class="row" style="margin-top: 10px;">
+            <label for="oldAdminPasswordInput">old</label>
+            <input
+              id="oldAdminPasswordInput"
+              type="password"
+              placeholder="old password"
+              style="flex: 1; min-width: 240px;"
+            />
+            <label for="newAdminPasswordInput">new</label>
+            <input
+              id="newAdminPasswordInput"
+              type="password"
+              placeholder="new password (8+ chars)"
+              style="flex: 1; min-width: 240px;"
+            />
+            <button id="changePasswordBtn" class="primary">Change</button>
+          </div>
+          <div class="muted" style="font-size:12px; margin-top: 6px;">
+            Localhost-only. Requires current authenticated session.
+          </div>
+        </details>
 
         <div class="row" style="margin-bottom: 10px;">
           <label for="apiKeyInput">Server API key (optional, for /v1/* tests)</label>
@@ -785,6 +809,7 @@
 	                <label for="quotaFilterInput">filter</label>
 	                <input id="quotaFilterInput" type="text" placeholder="providerKey contains…" style="width: 320px;" />
 	                <label><input id="quotaHideOkToggle" type="checkbox" /> hide ok</label>
+	                <label><input id="quotaOnlyRoutedTargetsToggle" type="checkbox" checked /> only routed targets</label>
 	                <span class="muted" style="font-size:12px;">Tip: click a row to fill the edit box.</span>
 	              </div>
 	              <div class="row" style="margin-bottom: 10px;">
@@ -807,16 +832,15 @@
 	                <button id="resetQuotaBtn" class="danger">Reset provider-quota module</button>
               </div>
               <div class="table-wrap">
-                <table class="table" style="min-width: 1080px;">
+                <table class="table">
                   <thead>
                     <tr>
-                      <th>providerKey</th>
-                      <th>auth</th>
-                      <th>tier</th>
+                      <th>provider</th>
+                      <th>key</th>
+                      <th>model</th>
                       <th>inPool</th>
                       <th>reason</th>
-                      <th>cooldownUntil</th>
-                      <th>blacklistUntil</th>
+                      <th>until</th>
                       <th>errCount</th>
                       <th></th>
                     </tr>
@@ -832,11 +856,16 @@
 	              <p class="section-sub">
 	                Snapshot fetched by <span class="mono">QuotaManagerModule</span> (antigravity quota API). Used to gate antigravity providers entering the route pool.
 	              </p>
+	              <div class="row" style="margin-bottom: 10px;">
+	                <label><input id="quotaSnapshotOnlyRoutedToggle" type="checkbox" checked /> only routed models</label>
+	                <span class="muted" style="font-size:12px;">(filters by current provider pool keys)</span>
+	              </div>
 	              <div class="table-wrap">
 	                <table class="table">
 	                  <thead>
 	                    <tr>
-	                      <th>key</th>
+	                      <th>alias</th>
+	                      <th>model</th>
 	                      <th>remaining</th>
 	                      <th>resetAt</th>
 	                      <th>fetchedAt</th>
@@ -927,8 +956,11 @@
       const UI = {
         selectedProviderId: "",
         lastUnauthorizedToastAt: 0,
+        adminAuth: null,
         quotaProviders: [],
-        quotaProvidersUpdatedAt: 0
+        quotaProvidersUpdatedAt: 0,
+        routingTargets: null,
+        routingTargetsUpdatedAt: 0
       };
       let toastTimer = null;
 
@@ -1979,11 +2011,75 @@
         return span;
       }
 
+      function extractRoutingTargets(routing) {
+        const out = new Set();
+        if (!routing || typeof routing !== "object") return out;
+        for (const routeName of Object.keys(routing)) {
+          const pools = routing[routeName];
+          if (!Array.isArray(pools)) continue;
+          for (const pool of pools) {
+            if (!pool || typeof pool !== "object") continue;
+            const targets = pool.targets;
+            if (!Array.isArray(targets)) continue;
+            for (const t of targets) {
+              if (typeof t === "string" && t.trim()) out.add(t.trim());
+            }
+          }
+        }
+        return out;
+      }
+
+      function resolveRoutedProviderKeys(routingTargets, providers) {
+        const targets = routingTargets instanceof Set ? Array.from(routingTargets) : [];
+        const list = Array.isArray(providers) ? providers : [];
+        const keys = [];
+        for (const p of list) {
+          const k = textOf(p && p.providerKey ? p.providerKey : "");
+          if (k) keys.push(k);
+        }
+        const known = new Set(keys);
+        const resolved = new Set();
+        if (!targets.length || !known.size) return resolved;
+
+        for (const t of targets) {
+          const target = textOf(t);
+          if (!target) continue;
+          if (known.has(target)) {
+            resolved.add(target);
+            continue;
+          }
+          const dot = target.indexOf(".");
+          if (dot <= 0) continue;
+          const providerId = target.slice(0, dot);
+          const modelId = target.slice(dot + 1);
+          if (!providerId || !modelId) continue;
+          const prefix = `${providerId}.`;
+          const suffix = `.${modelId}`;
+          for (const k of known) {
+            if (k.startsWith(prefix) && k.endsWith(suffix)) resolved.add(k);
+          }
+        }
+        return resolved;
+      }
+
+      async function refreshRoutingTargets() {
+        try {
+          const routingOut = await apiFetch("/config/routing");
+          UI.routingTargets = extractRoutingTargets(routingOut && routingOut.routing ? routingOut.routing : {});
+          UI.routingTargetsUpdatedAt = Date.now();
+        } catch {
+          UI.routingTargets = null;
+          UI.routingTargetsUpdatedAt = Date.now();
+        }
+      }
+
       async function refreshQuota() {
         const body = $("quotaTbody");
         body.replaceChildren();
         setLog("quotaOpLog", "");
         try {
+          // Load routing targets so we can filter out providers not referenced by routing pools.
+          await refreshRoutingTargets();
           // Force refresh quota first so UI doesn't show stale pool state.
           try {
             await apiFetch("/daemon/modules/quota/refresh", { method: "POST" });
@@ -2006,7 +2102,7 @@
         } catch (e) {
           if (e && e.status === 401) notifyUnauthorizedOnce("quota");
           else toast(e && e.message ? e.message : String(e || "quota refresh failed"));
-          body.appendChild(createErrorRow(9, e && e.message ? e.message : e));
+          body.appendChild(createErrorRow(8, e && e.message ? e.message : e));
         }
       }
 
@@ -2016,6 +2112,8 @@
 
         const filter = textOf($("quotaFilterInput").value || "").trim().toLowerCase();
         const hideOk = Boolean($("quotaHideOkToggle").checked);
+        const onlyRoutedTargets = Boolean($("quotaOnlyRoutedTargetsToggle").checked);
+        const routedProviderKeys = onlyRoutedTargets ? resolveRoutedProviderKeys(UI.routingTargets, UI.quotaProviders) : null;
 
         const list = Array.isArray(UI.quotaProviders) ? UI.quotaProviders : [];
         const next = list
@@ -2023,6 +2121,7 @@
             const key = textOf(q && q.providerKey ? q.providerKey : "").toLowerCase();
             if (filter && !key.includes(filter)) return false;
             if (hideOk && q && q.inPool === true) return false;
+            if (routedProviderKeys && !routedProviderKeys.has(textOf(q && q.providerKey ? q.providerKey : ""))) return false;
             return true;
           })
           .slice();
@@ -2038,61 +2137,114 @@
         });
 
         if (!next.length) {
-          body.appendChild(createErrorRow(9, "No providers matched filter."));
+          body.appendChild(createErrorRow(8, "No providers matched filter."));
           return;
         }
 
+        function splitProviderKey(providerKey) {
+          const raw = textOf(providerKey || "");
+          const parts = raw.split(".");
+          if (parts.length >= 3) {
+            return { providerId: parts[0], authAlias: parts[1], model: parts.slice(2).join(".") };
+          }
+          if (parts.length === 2) {
+            return { providerId: parts[0], authAlias: "", model: parts[1] };
+          }
+          return { providerId: raw, authAlias: "", model: "" };
+        }
+
+        const byProvider = new Map();
         for (const q of next) {
+          const pk = textOf(q && q.providerKey ? q.providerKey : "");
+          const { providerId, authAlias, model } = splitProviderKey(pk);
+          if (!byProvider.has(providerId)) byProvider.set(providerId, new Map());
+          const byAlias = byProvider.get(providerId);
+          if (!byAlias.has(authAlias)) byAlias.set(authAlias, []);
+          byAlias.get(authAlias).push({ q, pk, providerId, authAlias, model });
+        }
+
+        const providerIds = Array.from(byProvider.keys()).sort((a, b) => a.localeCompare(b));
+        const groupCols = 8;
+
+        const appendGroupRow = (label, indent = false) => {
           const tr = document.createElement("tr");
-          tr.className = "provider-row";
-          tr.setAttribute("data-provider-key", textOf(q.providerKey));
-
-          tr.appendChild(createCell("td", q.providerKey || "", "mono truncate", { title: true }));
-          tr.appendChild(createCell("td", q.authType || "", ""));
-          tr.appendChild(createCell("td", typeof q.priorityTier === "number" ? q.priorityTier : "", "mono"));
-
-          const inPool = Boolean(q.inPool);
-          const inTd = document.createElement("td");
-          inTd.appendChild(pill(inPool ? "true" : "false", inPool ? "ok" : "bad"));
-          tr.appendChild(inTd);
-
-          const reason = textOf(q.reason || "");
-          const reasonKind =
-            reason === "ok" ? "ok" :
-            reason === "cooldown" ? "warn" :
-            reason === "blacklist" || reason === "fatal" || reason === "quotaDepleted" ? "bad" : "warn";
-          const reasonTd = document.createElement("td");
-          reasonTd.appendChild(pill(reason || "—", reasonKind));
-          tr.appendChild(reasonTd);
-
-          tr.appendChild(createCell("td", formatEpochWithDelta(q.cooldownUntil), "mono", { title: true }));
-          tr.appendChild(createCell("td", formatEpochWithDelta(q.blacklistUntil), "mono", { title: true }));
-          tr.appendChild(createCell("td", q.consecutiveErrorCount ?? 0, "mono"));
-
-          const actionsTd = document.createElement("td");
-          actionsTd.className = "actions-cell";
-          const box = document.createElement("div");
-          box.className = "actions";
-          const recover = document.createElement("button");
-          recover.textContent = "Recover";
-          recover.setAttribute("data-action", "quota-recover");
-          recover.setAttribute("data-key", textOf(q.providerKey));
-          const reset = document.createElement("button");
-          reset.textContent = "Reset";
-          reset.setAttribute("data-action", "quota-reset");
-          reset.setAttribute("data-key", textOf(q.providerKey));
-          const disable = document.createElement("button");
-          disable.textContent = "Edit…";
-          disable.className = "danger";
-          disable.setAttribute("data-action", "quota-disable");
-          disable.setAttribute("data-key", textOf(q.providerKey));
-          box.appendChild(recover);
-          box.appendChild(reset);
-          box.appendChild(disable);
-          actionsTd.appendChild(box);
-          tr.appendChild(actionsTd);
-
+          tr.className = "group-row";
+          const td = document.createElement("td");
+          td.colSpan = groupCols;
+          td.textContent = label;
+          if (indent) td.className = "indent";
+          tr.appendChild(td);
           body.appendChild(tr);
+        };
+
+        for (const providerId of providerIds) {
+          const byAlias = byProvider.get(providerId);
+          let modelsCount = 0;
+          for (const v of byAlias.values()) modelsCount += v.length;
+          appendGroupRow(`${providerId} (${modelsCount})`);
+
+          const aliases = Array.from(byAlias.keys()).sort((a, b) => a.localeCompare(b));
+          for (const alias of aliases) {
+            const items = byAlias.get(alias);
+            appendGroupRow(`${alias || "(no-key)"} (${items.length})`, true);
+
+            for (const item of items) {
+              const q = item.q;
+              const tr = document.createElement("tr");
+              tr.className = "provider-row";
+              tr.setAttribute("data-provider-key", item.pk);
+
+              tr.appendChild(createCell("td", "", "mono"));
+              tr.appendChild(createCell("td", "", "mono"));
+              tr.appendChild(createCell("td", item.model || item.pk, "mono indent", { title: true }));
+
+              const inPool = Boolean(q.inPool);
+              const inTd = document.createElement("td");
+              inTd.appendChild(pill(inPool ? "true" : "false", inPool ? "ok" : "bad"));
+              tr.appendChild(inTd);
+
+              const reason = textOf(q.reason || "");
+              const reasonKind =
+                reason === "ok" ? "ok" :
+                reason === "cooldown" ? "warn" :
+                reason === "blacklist" || reason === "fatal" || reason === "quotaDepleted" ? "bad" : "warn";
+              const reasonTd = document.createElement("td");
+              reasonTd.appendChild(pill(reason || "—", reasonKind));
+              tr.appendChild(reasonTd);
+
+              const cooldown = formatEpochWithDelta(q.cooldownUntil);
+              const blacklist = formatEpochWithDelta(q.blacklistUntil);
+              const until = `cooldown=${cooldown || "—"} blacklist=${blacklist || "—"}`;
+              tr.appendChild(createCell("td", until, "mono", { title: true }));
+
+              tr.appendChild(createCell("td", q.consecutiveErrorCount ?? 0, "mono"));
+
+              const actionsTd = document.createElement("td");
+              actionsTd.className = "actions-cell";
+              const box = document.createElement("div");
+              box.className = "actions";
+              const recover = document.createElement("button");
+              recover.textContent = "Recover";
+              recover.setAttribute("data-action", "quota-recover");
+              recover.setAttribute("data-key", item.pk);
+              const reset = document.createElement("button");
+              reset.textContent = "Reset";
+              reset.setAttribute("data-action", "quota-reset");
+              reset.setAttribute("data-key", item.pk);
+              const disable = document.createElement("button");
+              disable.textContent = "Edit…";
+              disable.className = "danger";
+              disable.setAttribute("data-action", "quota-disable");
+              disable.setAttribute("data-key", item.pk);
+              box.appendChild(recover);
+              box.appendChild(reset);
+              box.appendChild(disable);
+              actionsTd.appendChild(box);
+              tr.appendChild(actionsTd);
+
+              body.appendChild(tr);
+            }
+          }
         }
       }
 
@@ -2107,23 +2259,58 @@
         body.replaceChildren();
         setLog("quotaSnapshotLog", "");
         try {
+          // Ensure routing + provider pool snapshots exist so we can filter routed models.
+          await refreshRoutingTargets();
+          if (!Array.isArray(UI.quotaProviders) || UI.quotaProviders.length === 0) {
+            try {
+              const outProviders = await apiFetch("/quota/providers");
+              UI.quotaProviders = Array.isArray(outProviders.providers) ? outProviders.providers : [];
+              UI.quotaProvidersUpdatedAt = Date.now();
+            } catch {
+              // ignore: snapshot view can still render unfiltered
+            }
+          }
           const out = await apiFetch("/quota/summary");
-          const list = Array.isArray(out.records) ? out.records : [];
+          let list = Array.isArray(out.records) ? out.records : [];
+
+          const onlyRouted = Boolean($("quotaSnapshotOnlyRoutedToggle").checked);
+          if (onlyRouted) {
+            const routedProviderKeys = resolveRoutedProviderKeys(UI.routingTargets, UI.quotaProviders);
+            const allowedSnapshotKeys = new Set();
+            for (const providerKey of routedProviderKeys) {
+              if (!providerKey.toLowerCase().startsWith("antigravity.")) continue;
+              const parts = providerKey.split(".");
+              if (parts.length < 3) continue;
+              const alias = parts[1];
+              const modelId = parts.slice(2).join(".");
+              if (!alias || !modelId) continue;
+              allowedSnapshotKeys.add(`antigravity://${alias}/${modelId}`);
+            }
+            list = list.filter((r) => allowedSnapshotKeys.has(textOf(r && r.key ? r.key : "")));
+          }
+
           list.sort((a, b) => String(a.key || "").localeCompare(String(b.key || "")));
           for (const r of list) {
+            const raw = textOf(r && r.key ? r.key : "");
+            const prefix = "antigravity://";
+            const rest = raw.startsWith(prefix) ? raw.slice(prefix.length) : raw;
+            const parts = rest.split("/");
+            const alias = parts.length >= 2 ? parts[0] : "";
+            const model = parts.length >= 2 ? parts.slice(1).join("/") : rest;
             const tr = document.createElement("tr");
-            tr.appendChild(createCell("td", r.key || "", "mono truncate", { title: true }));
+            tr.appendChild(createCell("td", alias || "—", "mono", { title: true }));
+            tr.appendChild(createCell("td", model || "—", "mono", { title: true }));
             tr.appendChild(createCell("td", formatRemainingFraction(r.remainingFraction), "mono"));
-            tr.appendChild(createCell("td", formatEpochWithDelta(r.resetAt), "mono"));
-            tr.appendChild(createCell("td", formatEpochMs(r.fetchedAt), "mono"));
+            tr.appendChild(createCell("td", formatEpochWithDelta(r.resetAt), "mono", { title: true }));
+            tr.appendChild(createCell("td", formatEpochMs(r.fetchedAt), "mono", { title: true }));
             body.appendChild(tr);
           }
           if (!list.length) {
-            body.appendChild(createErrorRow(4, "No quota records yet. Click Refresh antigravity snapshot to fetch."));
+            body.appendChild(createErrorRow(5, "No quota records to show (check filter or click Refresh antigravity snapshot)."));
           }
         } catch (e) {
           if (e && e.status === 401) notifyUnauthorizedOnce("quota snapshot");
-          body.appendChild(createErrorRow(4, e && e.message ? e.message : e));
+          body.appendChild(createErrorRow(5, e && e.message ? e.message : e));
         }
       }
 
@@ -2328,9 +2515,11 @@
           if (status && status.ok) {
             const hasPassword = Boolean(status.hasPassword);
             const authed = Boolean(status.authenticated);
+            UI.adminAuth = { hasPassword, authenticated: authed };
             $("adminAuthHint").textContent = authed ? "authenticated" : hasPassword ? "login required" : "setup required (localhost only)";
             $("setupPasswordBtn").style.display = hasPassword ? "none" : "inline-block";
             $("loginPasswordBtn").style.display = hasPassword ? "inline-block" : "none";
+            $("changePasswordDetails").style.display = hasPassword && authed ? "block" : "none";
             return { hasPassword, authenticated: authed };
           }
         } catch (e) {
@@ -2338,8 +2527,18 @@
           $("adminAuthHint").textContent = msg;
           toast(`Admin auth status failed: ${msg}`);
         }
+        UI.adminAuth = { hasPassword: false, authenticated: false };
+        $("changePasswordDetails").style.display = "none";
         return { hasPassword: false, authenticated: false };
       }
+
+      $("adminPasswordInput").addEventListener("keydown", async (ev) => {
+        if (ev.key !== "Enter") return;
+        ev.preventDefault();
+        const status = UI.adminAuth ? UI.adminAuth : await refreshAdminAuthStatus();
+        if (status.hasPassword) $("loginPasswordBtn").click();
+        else $("setupPasswordBtn").click();
+      });
 
       $("setupPasswordBtn").addEventListener("click", async () => {
         const pw = ($("adminPasswordInput").value || "");
@@ -2347,6 +2546,8 @@
           $("adminAuthHint").textContent = "setting password…";
           await apiFetch("/daemon/auth/setup", { method: "POST", body: JSON.stringify({ password: pw }) });
           $("adminPasswordInput").value = "";
+          $("oldAdminPasswordInput").value = "";
+          $("newAdminPasswordInput").value = "";
           toast("Password set. You're now logged in.", "ok");
           await refreshAdminAuthStatus();
           await refreshStatus();
@@ -2368,6 +2569,8 @@
           $("adminAuthHint").textContent = "logging in…";
           await apiFetch("/daemon/auth/login", { method: "POST", body: JSON.stringify({ password: pw }) });
           $("adminPasswordInput").value = "";
+          $("oldAdminPasswordInput").value = "";
+          $("newAdminPasswordInput").value = "";
           toast("Logged in.", "ok");
           await refreshAdminAuthStatus();
           await refreshStatus();
@@ -2392,6 +2595,26 @@
           const msg = e && e.message ? e.message : String(e);
           $("adminAuthHint").textContent = msg;
           toast(`Logout failed: ${msg}`);
+        }
+      });
+
+      $("changePasswordBtn").addEventListener("click", async () => {
+        const oldPassword = ($("oldAdminPasswordInput").value || "");
+        const newPassword = ($("newAdminPasswordInput").value || "");
+        try {
+          $("adminAuthHint").textContent = "changing password…";
+          await apiFetch("/daemon/auth/change", {
+            method: "POST",
+            body: JSON.stringify({ oldPassword, newPassword })
+          });
+          $("oldAdminPasswordInput").value = "";
+          $("newAdminPasswordInput").value = "";
+          toast("Password changed.", "ok");
+          await refreshAdminAuthStatus();
+        } catch (e) {
+          const msg = e && e.message ? e.message : String(e);
+          $("adminAuthHint").textContent = msg;
+          toast(`Change password failed: ${msg}`);
         }
       });
 
@@ -2500,6 +2723,7 @@
       $("refreshQuotaSnapshotBtn").addEventListener("click", refreshQuotaSnapshotNow);
       $("quotaFilterInput").addEventListener("input", renderQuotaProviders);
       $("quotaHideOkToggle").addEventListener("change", renderQuotaProviders);
+      $("quotaOnlyRoutedTargetsToggle").addEventListener("change", renderQuotaProviders);
       $("quotaApplyDisableBtn").addEventListener("click", () => void quotaAction("disable", $("quotaKeyInput").value));
       $("quotaApplyRecoverBtn").addEventListener("click", () => void quotaAction("recover", $("quotaKeyInput").value));
       $("quotaApplyResetBtn").addEventListener("click", () => void quotaAction("reset", $("quotaKeyInput").value));

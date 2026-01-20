@@ -96,6 +96,83 @@ describe('ProviderQuotaDaemonModule', () => {
     await mod.stop();
   });
 
+  it('does not let QUOTA_RECOVERY override capacity cooldown windows', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-01-16T00:00:00.000Z'));
+    const now = Date.now();
+
+    const mod = new ProviderQuotaDaemonModule();
+    await mod.init({ serverId: 'test' });
+    await mod.start();
+
+    const center = await getProviderErrorCenter();
+    center.emit({
+      code: 'HTTP_429',
+      message: 'HTTP 429: {"error":{"message":"No capacity available for model claude-sonnet-4-5-thinking on the server"}}',
+      stage: 'provider.provider.http',
+      status: 429,
+      recoverable: false,
+      timestamp: now,
+      runtime: {
+        requestId: 'req_test_capacity',
+        providerKey: 'antigravity.alias1.claude-sonnet-4-5-thinking',
+        providerId: 'antigravity'
+      },
+      details: {
+        virtualRouterSeriesCooldown: {
+          providerId: 'antigravity.alias1',
+          providerKey: 'antigravity.alias1.claude-sonnet-4-5-thinking',
+          series: 'claude',
+          cooldownMs: 1000,
+          expiresAt: now + 1000,
+          source: 'capacity_exhausted_fallback'
+        }
+      }
+    } as any);
+
+    await jest.advanceTimersByTimeAsync(5);
+
+    const snapshot1 = mod.getAdminSnapshot();
+    expect(snapshot1['antigravity.alias1.claude-sonnet-4-5-thinking']).toBeDefined();
+    expect(snapshot1['antigravity.alias1.claude-sonnet-4-5-thinking'].inPool).toBe(false);
+    expect(snapshot1['antigravity.alias1.claude-sonnet-4-5-thinking'].reason).toBe('cooldown');
+    expect(snapshot1['antigravity.alias1.claude-sonnet-4-5-thinking'].cooldownUntil).toBe(now + 1000);
+
+    center.emit({
+      code: 'QUOTA_RECOVERY',
+      message: 'Quota manager: provider quota refreshed',
+      stage: 'quota',
+      status: 200,
+      recoverable: true,
+      timestamp: now + 10,
+      runtime: {
+        requestId: `quota_${now + 10}`,
+        providerKey: 'antigravity.alias1.claude-sonnet-4-5-thinking',
+        providerId: 'antigravity'
+      },
+      details: {
+        virtualRouterQuotaRecovery: {
+          providerKey: 'antigravity.alias1.claude-sonnet-4-5-thinking',
+          reason: 'quota>0 for model claude-sonnet-4-5-thinking',
+          source: 'quota-manager'
+        }
+      }
+    } as any);
+
+    await jest.advanceTimersByTimeAsync(5);
+
+    const snapshot2 = mod.getAdminSnapshot();
+    expect(snapshot2['antigravity.alias1.claude-sonnet-4-5-thinking'].inPool).toBe(false);
+    expect(snapshot2['antigravity.alias1.claude-sonnet-4-5-thinking'].reason).toBe('cooldown');
+
+    await jest.advanceTimersByTimeAsync(1_100);
+    const view = mod.getQuotaView();
+    const entry = view?.('antigravity.alias1.claude-sonnet-4-5-thinking');
+    expect(entry?.inPool).toBe(true);
+
+    await mod.stop();
+  });
+
   it('keeps antigravity oauth providers out of pool until quota recovery signal arrives', async () => {
     jest.useFakeTimers();
     jest.setSystemTime(new Date('2026-01-16T00:00:00.000Z'));
@@ -140,7 +217,7 @@ describe('ProviderQuotaDaemonModule', () => {
     await mod.stop();
   });
 
-  it('tracks 429 backoff for apikey providers and blacklists after 3 consecutive', async () => {
+  it('tracks 429 backoff for apikey providers (no automatic blacklist)', async () => {
     jest.useFakeTimers();
     jest.setSystemTime(new Date('2026-01-16T00:00:00.000Z'));
 
@@ -174,13 +251,82 @@ describe('ProviderQuotaDaemonModule', () => {
     const state = snapshot['tab.default.gpt-5.1'];
     expect(state).toBeDefined();
     expect(state.inPool).toBe(false);
-    expect(state.reason).toBe('blacklist');
-    expect(state.blacklistUntil).toBe(baseNow + 2_000 + 3 * 60 * 60_000);
+    expect(state.reason).toBe('cooldown');
+    expect(state.blacklistUntil).toBeNull();
+    expect(state.cooldownUntil).toBe(baseNow + 2_000 + 5 * 60_000);
 
-    await jest.advanceTimersByTimeAsync(3 * 60 * 60_000 + 2_000 + 5);
+    await jest.advanceTimersByTimeAsync(5 * 60_000 + 5);
     const view = mod.getQuotaView();
     const entry = view?.('tab.default.gpt-5.1');
     expect(entry?.inPool).toBe(true);
+
+    await mod.stop();
+  });
+
+  it('caps repeated 429 backoff at 3h and then retries cyclically', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-01-16T00:00:00.000Z'));
+
+    const mod = new ProviderQuotaDaemonModule();
+    await mod.init({ serverId: 'test' });
+    mod.registerProviderStaticConfig('tab.default.gpt-5.1', { authType: 'apikey' });
+    await mod.start();
+
+    const center = await getProviderErrorCenter();
+    const baseNow = Date.now();
+    const eventCount = 7; // reaches 3h step in the schedule
+    for (let i = 0; i < eventCount; i++) {
+      center.emit({
+        code: 'HTTP_429',
+        message: 'HTTP 429: rate limited',
+        stage: 'provider.provider.http',
+        status: 429,
+        recoverable: false,
+        timestamp: baseNow + i * 1000,
+        runtime: {
+          requestId: `req_${i}`,
+          providerKey: 'tab.default.gpt-5.1',
+          providerId: 'tab'
+        },
+        details: {}
+      } as any);
+    }
+
+    await jest.advanceTimersByTimeAsync(10);
+    const snapshot = mod.getAdminSnapshot();
+    const state = snapshot['tab.default.gpt-5.1'];
+    expect(state).toBeDefined();
+    expect(state.inPool).toBe(false);
+    expect(state.reason).toBe('cooldown');
+    expect(state.blacklistUntil).toBeNull();
+    expect(state.cooldownUntil).toBe(baseNow + (eventCount - 1) * 1000 + 3 * 60 * 60_000);
+
+    // After cooldown expiry, it should re-enter the pool and reset its streak.
+    await jest.advanceTimersByTimeAsync(3 * 60 * 60_000 + 5);
+    const view = mod.getQuotaView();
+    const entry = view?.('tab.default.gpt-5.1');
+    expect(entry?.inPool).toBe(true);
+
+    // Next 429 should start the schedule from the first step again (1m).
+    const afterCooldownNow = Date.now();
+    center.emit({
+      code: 'HTTP_429',
+      message: 'HTTP 429: rate limited',
+      stage: 'provider.provider.http',
+      status: 429,
+      recoverable: false,
+      timestamp: afterCooldownNow,
+      runtime: {
+        requestId: 'req_after_cooldown',
+        providerKey: 'tab.default.gpt-5.1',
+        providerId: 'tab'
+      },
+      details: {}
+    } as any);
+    await jest.advanceTimersByTimeAsync(5);
+    const snap2 = mod.getAdminSnapshot();
+    expect(snap2['tab.default.gpt-5.1'].reason).toBe('cooldown');
+    expect(snap2['tab.default.gpt-5.1'].cooldownUntil).toBe(afterCooldownNow + 60_000);
 
     await mod.stop();
   });

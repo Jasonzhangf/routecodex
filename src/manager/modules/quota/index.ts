@@ -12,7 +12,6 @@ import { scanProviderTokenFiles } from '../../../providers/auth/token-scanner/in
 import { resolveAntigravityApiBase } from '../../../providers/auth/antigravity-userinfo-helper.js';
 import { getProviderErrorCenter } from '../../../modules/llmswitch/bridge.js';
 import type { ProviderErrorEvent } from '../../../modules/llmswitch/bridge.js';
-import { readTokenFile, evaluateTokenState } from '../../../token-daemon/token-utils.js';
 import {
   applyErrorEvent as applyQuotaErrorEvent,
   applySuccessEvent as applyQuotaSuccessEvent,
@@ -142,7 +141,9 @@ export class QuotaManagerModule implements ManagerModule {
         fetchedAt: quota.fetchedAt
       };
       const resetAt = this.computeResetAt(info.resetTimeRaw);
-      if (resetAt && resetAt > now) {
+      // Keep resetAt even if it's already in the past so admin UI can inspect drift/staleness.
+      // Routing gate still treats `resetAt <= now` as unknown quota and will block entry.
+      if (resetAt) {
         record.resetAt = resetAt;
       }
       next[key] = record;
@@ -246,9 +247,8 @@ export class QuotaManagerModule implements ManagerModule {
   }
 
   /**
-   * 根据当前 token 池的过期时间和固定 5 分钟基准，动态安排下一次 quota 刷新：
-   * - 如有 token 会在 5 分钟内到期，则在该 token 到期时间附近刷新；
-   * - 否则按固定 5 分钟间隔刷新。
+   * 每 5 分钟刷新一次 quota（固定间隔）。
+   * 启动时会立即刷新一次，随后由该定时器维持周期刷新。
    */
   private async scheduleNextRefresh(): Promise<void> {
     if (this.refreshTimer) {
@@ -256,16 +256,7 @@ export class QuotaManagerModule implements ManagerModule {
       this.refreshTimer = null;
     }
     const baseIntervalMs = 5 * 60 * 1000;
-    let delayMs = baseIntervalMs;
-    try {
-      const nextExpiryDelay = await this.computeNextTokenExpiryDelayMs();
-      if (nextExpiryDelay !== null && nextExpiryDelay > 0 && nextExpiryDelay < baseIntervalMs) {
-        delayMs = nextExpiryDelay;
-      }
-    } catch {
-      // 如果计算失败，退回到固定 5 分钟间隔
-      delayMs = baseIntervalMs;
-    }
+    const delayMs = baseIntervalMs;
     this.refreshTimer = setTimeout(() => {
       void this.refreshAllAntigravityQuotas()
         .catch(() => {
@@ -278,41 +269,6 @@ export class QuotaManagerModule implements ManagerModule {
         });
     }, delayMs);
     this.refreshTimer.unref?.();
-  }
-
-  /**
-   * 扫描 antigravity token 文件，计算距离最近一次 token 过期还剩多少毫秒。
-   * 若所有 token 都无过期时间或已过期，则返回 null。
-   */
-  private async computeNextTokenExpiryDelayMs(): Promise<number | null> {
-    let matches: Array<{ filePath: string }> = [];
-    try {
-      const raw = await scanProviderTokenFiles('antigravity');
-      matches = raw.map((m) => ({ filePath: m.filePath }));
-    } catch {
-      matches = [];
-    }
-    if (!matches.length) {
-      return null;
-    }
-    const now = Date.now();
-    let minDelay: number | null = null;
-    for (const match of matches) {
-      try {
-        const token = await readTokenFile(match.filePath);
-        const state = evaluateTokenState(token, now);
-        const msLeft = state.msUntilExpiry;
-        if (msLeft === null || msLeft <= 0) {
-          continue;
-        }
-        if (minDelay === null || msLeft < minDelay) {
-          minDelay = msLeft;
-        }
-      } catch {
-        // ignore single token file errors
-      }
-    }
-    return minDelay;
   }
 
   /**
@@ -912,8 +868,8 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
       this.quotaStates.get(providerKey) ??
       createInitialQuotaState(providerKey, this.staticConfigs.get(providerKey), nowMs);
 
-    // fatal 黑名单在锁定期内，不应被其它事件（包括 429/配额信号）改变。
-    if (previous.reason === 'fatal' && previous.blacklistUntil && nowMs < previous.blacklistUntil) {
+    // Manual/operator blacklist is rigid: do not override it with automated error/quota signals.
+    if (previous.reason === 'blacklist' && previous.blacklistUntil && nowMs < previous.blacklistUntil) {
       return;
     }
 
@@ -929,11 +885,18 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
         typeof cooldownMs === 'number' && Number.isFinite(cooldownMs) && cooldownMs > 0
           ? cooldownMs
           : undefined;
+      const cappedTtl = capAutoCooldownMs(ttl);
+      const nextCooldownUntil = cappedTtl ? nowMs + cappedTtl : previous.cooldownUntil;
+      const existingCooldownUntil = previous.cooldownUntil;
+      const cooldownUntil =
+        typeof existingCooldownUntil === 'number' && typeof nextCooldownUntil === 'number' && existingCooldownUntil > nextCooldownUntil
+          ? existingCooldownUntil
+          : nextCooldownUntil;
       const nextState: QuotaState = {
         ...previous,
         inPool: false,
         reason: 'quotaDepleted',
-        cooldownUntil: ttl ? nowMs + ttl : previous.cooldownUntil
+        cooldownUntil
       };
       this.quotaStates.set(providerKey, nextState);
       this.schedulePersist(nowMs);
@@ -942,9 +905,20 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
     if (code === 'QUOTA_RECOVERY') {
       const withinBlacklist =
         previous.blacklistUntil !== null && nowMs < previous.blacklistUntil;
-      const withinFatalBlacklist =
-        previous.reason === 'fatal' && previous.blacklistUntil !== null && nowMs < previous.blacklistUntil;
-      if (!withinBlacklist && !withinFatalBlacklist) {
+      // QUOTA_RECOVERY should only flip providers that are waiting on an explicit quota snapshot:
+      // - previously quota-depleted, or
+      // - antigravity oauth "untracked" initial state (cooldown with no timers / no error series).
+      //
+      // It must NOT override active cooldown windows caused by real upstream failures
+      // (e.g. MODEL_CAPACITY_EXHAUSTED short backoff), otherwise the pool will keep hammering 429s.
+      const isUntrackedAntigravityOauthGate =
+        previous.reason === 'cooldown' &&
+        previous.cooldownUntil === null &&
+        previous.blacklistUntil === null &&
+        previous.lastErrorSeries === null &&
+        previous.consecutiveErrorCount === 0;
+      const canRecover = previous.reason === 'quotaDepleted' || isUntrackedAntigravityOauthGate;
+      if (canRecover && !withinBlacklist) {
         const nextState: QuotaState = {
           ...previous,
           inPool: true,
@@ -960,16 +934,36 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
     // Gemini-family quota exhausted errors often carry quota reset delay.
     // When present, treat as deterministic quota depletion signal rather than generic 429 backoff/blacklist.
     if (typeof event.status === 'number' && event.status === 429) {
-      const seriesCooldownUntil = extractVirtualRouterSeriesCooldownUntil(event, nowMs);
-      if (seriesCooldownUntil) {
+      const seriesCooldown = extractVirtualRouterSeriesCooldown(event, nowMs);
+      if (seriesCooldown) {
+        const withinBlacklist =
+          previous.blacklistUntil !== null && nowMs < previous.blacklistUntil;
+        // Do not override an active blacklist window (manual ops or policy).
+        if (withinBlacklist) {
+          return;
+        }
+        const isCapacityCooldown =
+          typeof seriesCooldown.source === 'string' && seriesCooldown.source.toLowerCase().includes('capacity');
+        const until = capAutoCooldownUntil(seriesCooldown.until, nowMs);
+        const existingCooldownUntil = previous.cooldownUntil;
+        const cooldownUntil =
+          typeof existingCooldownUntil === 'number' && existingCooldownUntil > until
+            ? existingCooldownUntil
+            : until;
         const nextState: QuotaState = {
           ...previous,
           inPool: false,
-          reason: 'quotaDepleted',
-          cooldownUntil: seriesCooldownUntil,
-          blacklistUntil: null,
+          reason: isCapacityCooldown ? 'cooldown' : 'quotaDepleted',
+          cooldownUntil,
           lastErrorSeries: null,
-          consecutiveErrorCount: 0
+          consecutiveErrorCount: 0,
+          ...(isCapacityCooldown
+            ? {}
+            : {
+                blacklistUntil: null,
+                // deterministic quota signals should clear blacklist to avoid sticky long locks
+                // when upstream provides explicit reset delay.
+              })
         };
         this.quotaStates.set(providerKey, nextState);
         this.schedulePersist(nowMs);
@@ -981,11 +975,12 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
       if (isQuotaProvider) {
         const ttl = parseQuotaResetDelayMs(event);
         if (ttl && ttl > 0) {
+          const capped = capAutoCooldownMs(ttl);
           const nextState: QuotaState = {
             ...previous,
             inPool: false,
             reason: 'quotaDepleted',
-            cooldownUntil: nowMs + ttl,
+            cooldownUntil: nowMs + (capped ?? ttl),
             blacklistUntil: null,
             lastErrorSeries: null,
             consecutiveErrorCount: 0
@@ -1192,6 +1187,23 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
   }
 }
 
+const AUTO_COOLDOWN_MAX_MS = 3 * 60 * 60_000;
+
+function capAutoCooldownMs(value?: number | null): number | null {
+  if (!value || !Number.isFinite(value) || value <= 0) {
+    return null;
+  }
+  return Math.min(Math.floor(value), AUTO_COOLDOWN_MAX_MS);
+}
+
+function capAutoCooldownUntil(until: number, nowMs: number): number {
+  const maxUntil = nowMs + AUTO_COOLDOWN_MAX_MS;
+  if (!Number.isFinite(until) || until <= nowMs) {
+    return maxUntil;
+  }
+  return Math.min(until, maxUntil);
+}
+
 function extractVirtualRouterSeriesCooldownUntil(event: ProviderErrorEvent, nowMs: number): number | null {
   if (!event || !event.details || typeof event.details !== 'object') {
     return null;
@@ -1220,6 +1232,27 @@ function extractVirtualRouterSeriesCooldownUntil(event: ProviderErrorEvent, nowM
     return null;
   }
   return nowMs + cooldownMs;
+}
+
+function extractVirtualRouterSeriesCooldown(
+  event: ProviderErrorEvent,
+  nowMs: number
+): { until: number; source?: string } | null {
+  if (!event || !event.details || typeof event.details !== 'object') {
+    return null;
+  }
+  const raw = (event.details as Record<string, unknown>).virtualRouterSeriesCooldown;
+  if (!raw || typeof raw !== 'object') {
+    return null;
+  }
+  const record = raw as Record<string, unknown>;
+  const until = extractVirtualRouterSeriesCooldownUntil(event, nowMs);
+  if (!until) {
+    return null;
+  }
+  const source =
+    typeof record.source === 'string' && record.source.trim().length ? record.source.trim() : undefined;
+  return { until, source };
 }
 
 function parseQuotaResetDelayMs(event: ProviderErrorEvent): number | null {
@@ -1287,10 +1320,24 @@ function normalizeLoadedQuotaState(providerKey: string, state: QuotaState): Quot
     ? String((state as unknown as { authType?: string }).authType).trim().toLowerCase()
     : '';
   const authType: QuotaAuthType = rawAuth === 'apikey' ? 'apikey' : rawAuth === 'oauth' ? 'oauth' : 'unknown';
+  // Migration: legacy snapshots may contain `reason: "fatal"` which used to represent an automatic long blacklist.
+  // New policy forbids direct blacklists from errors; downgrade to cooldown semantics and keep the existing TTL.
+  const reason = state.reason === 'fatal' ? 'cooldown' : state.reason;
+  const cooldownUntil =
+    state.reason === 'fatal'
+      ? Math.max(
+          typeof state.cooldownUntil === 'number' ? state.cooldownUntil : 0,
+          typeof state.blacklistUntil === 'number' ? state.blacklistUntil : 0
+        ) || null
+      : state.cooldownUntil;
+  const blacklistUntil = state.reason === 'fatal' ? null : state.blacklistUntil;
   return {
     ...state,
     providerKey: key,
-    authType
+    authType,
+    reason,
+    cooldownUntil,
+    blacklistUntil
   };
 }
 
