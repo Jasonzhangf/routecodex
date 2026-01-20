@@ -855,6 +855,19 @@ export abstract class BaseProvider implements IProviderV2 {
       return undefined;
     }
 
+    // Antigravity / Gemini CLI: capacity exhausted (not quota depleted).
+    // Example: "No capacity available for model ..." with reason "MODEL_CAPACITY_EXHAUSTED".
+    // This is typically short-lived; apply a short series cooldown to avoid hammering every alias.
+    if (
+      haystack.includes('no capacity available') ||
+      haystack.includes('model_capacity_exhausted') ||
+      haystack.includes('model capacity exhausted')
+    ) {
+      const envValue =
+        (process.env.ROUTECODEX_RL_CAPACITY_COOLDOWN || process.env.RCC_RL_CAPACITY_COOLDOWN || '').trim();
+      return envValue.length ? envValue : '30s';
+    }
+
     // 针对常见的「额度/余额耗尽」类 429 文案给出保守的冷却时间，
     // 用于 series 级别的降温，避免在明显 quota 用尽时持续命中上游：
     // - Gemini: "Resource has been exhausted (e.g. check quota)."
@@ -973,6 +986,14 @@ export abstract class BaseProvider implements IProviderV2 {
 
   private isDailyLimitRateLimit(messageLower: string, upstreamLower?: string): boolean {
     const haystack = `${messageLower} ${upstreamLower ?? ''}`;
+    // Capacity exhausted != daily quota exhausted. Avoid marking it as a hard daily limit.
+    if (
+      haystack.includes('no capacity available') ||
+      haystack.includes('model_capacity_exhausted') ||
+      haystack.includes('model capacity exhausted')
+    ) {
+      return false;
+    }
     return (
       haystack.includes('daily cost limit') ||
       haystack.includes('daily quota') ||

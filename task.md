@@ -15,53 +15,10 @@
 
 ---
 
-## Phase 1：双库加载（不改行为）
+## 已完成（已归档到 task.archive.md）
 
-- [ ] `package.json` 增加 `@jsonstudio/llms-engine`（建议 optionalDependencies；未安装时可运行 baseline）
-- [ ] 扩展 `src/modules/llmswitch/core-loader.ts`：
-  - [ ] 支持 `impl=ts|engine` 两套 package root（`@jsonstudio/llms` vs `@jsonstudio/llms-engine`）
-  - [ ] 同一 subpath 解析为 `<pkg>/dist/<subpath>.js`
-- [ ] 改造 `src/modules/llmswitch/bridge.ts`：
-  - [ ] 所有 core import/require 都走统一 loader（避免硬编码 `@jsonstudio/llms/dist/...`）
-  - [ ] 仍保持 “单一桥接面” 规则（Host/Provider 不直接触碰 core）
-
-验收：
-- [ ] `npm test` 通过（默认仍只用 TS）
-- [ ] `npm run build:dev` 通过
-
----
-
-## Phase 2：Hub inbound/outbound shadow 黑盒对齐（同进程）
-
-### 2.1 Shadow 配置开关（仅 bridge/host 生效）
-
-- [ ] `ROUTECODEX_LLMS_ENGINE_ENABLE=1`：允许加载 `@jsonstudio/llms-engine`
-- [ ] `ROUTECODEX_LLMS_ENGINE_PREFIXES=conversion/hub/pipeline,conversion/hub/response`：这些前缀“真实走 engine”
-- [ ] `ROUTECODEX_LLMS_SHADOW_PREFIXES=conversion/hub/pipeline,conversion/hub/response`：这些前缀双跑对比（baseline 输出仍取 TS）
-- [ ] `ROUTECODEX_LLMS_SHADOW_SAMPLE_RATE=0.1`：采样（避免全量双跑）
-- [ ] `ROUTECODEX_LLMS_SHADOW_DIR=~/.routecodex/llms-shadow`：diff 落盘目录（默认该值）
-
-### 2.2 inbound：HubPipeline.execute() shadow
-
-- [ ] baseline：TS HubPipeline（真实输出）
-- [ ] shadow：engine HubPipeline（仅对比，不影响真实输出）
-- [ ] diff 口径（稳定字段）：
-  - [ ] `providerPayload`
-  - [ ] `target.providerKey/providerType/outboundProfile/runtimeKey/processMode`
-  - [ ] `metadata.entryEndpoint/providerProtocol/processMode/stream/routeHint`（其它字段按需扩展）
-- [ ] side-effect 隔离：
-  - [ ] shadow 路径不得写入 healthStore / routingStateStore / quotaView（必要时实现只读/吞写代理）
-  - [ ] shadow 输入必须 deep clone，避免引用共享导致“假 diff”
-
-### 2.3 outbound：convertProviderResponse() shadow
-
-- [ ] baseline：TS convert（真实输出）
-- [ ] shadow：engine convert（仅对比）
-- [ ] diff 口径：对比转换后的响应结构（忽略 requestId/timestamps 等非确定字段）
-
-验收：
-- [ ] `~/.routecodex/llms-shadow` 产出结构化 diff 文件（包含 prefix、requestId、diff paths、baseline/candidate 摘要）
-- [ ] `npm run build:dev` 通过（含 e2e / shadow regression / global install）
+- [x] Phase 1：双库加载（不改行为）
+- [x] Phase 2：Hub inbound/outbound shadow 黑盒对齐（同进程）
 
 ---
 
@@ -87,4 +44,3 @@
 - [ ] 支持 `ROUTECODEX_LLMS_DEFAULT_IMPL=engine|ts`（默认 engine，ts 作为紧急回退）
 - [ ] 文档补充：如何安装 `@jsonstudio/llms-engine`、如何开启 shadow、如何读取 `~/.routecodex/llms-shadow`
 - [ ]（后续）评估 `rcc` release 路径切到 engine（保留版本 pin 与回滚策略）
-

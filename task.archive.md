@@ -2,6 +2,17 @@
 
 ## 当前任务状态 (2026-01-19)
 
+## llms-engine 逐步替换（Hub inbound/outbound 优先）（更新：2026-01-20）
+
+- [x] Phase 1：双库加载（不改行为）
+  - `package.json` 增加 `optionalDependencies.@jsonstudio/llms-engine`
+  - `src/modules/llmswitch/core-loader.ts` 支持 `impl=ts|engine`，统一解析 `<pkg>/dist/<subpath>.js`
+  - `src/modules/llmswitch/bridge.ts` 所有 core import/require 走 loader（保持 single bridge surface）
+- [x] Phase 2：Hub inbound/outbound shadow 黑盒对齐（同进程）
+  - shadow 配置与落盘：`src/utils/llms-engine-shadow.ts`，默认 `~/.routecodex/llms-shadow`
+  - outbound shadow：`src/modules/llmswitch/bridge.ts#convertProviderResponse`
+  - inbound shadow：`src/server/runtime/http-server/index.ts#ensureHubPipelineEngineShadow`（read-only runtime deps，避免双跑副作用）
+
 ## Unified Hub Framework V1（逐步收口骨架）（更新：2026-01-19）
 
 - 计划文档：`docs/plans/unified-hub-framework-v1.md`

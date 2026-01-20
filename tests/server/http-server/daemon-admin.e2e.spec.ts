@@ -210,6 +210,10 @@ describe('Daemon admin HTTP endpoints (smoke)', () => {
       expect(quota.status).toBe(200);
       expect(quota.body).toHaveProperty('records');
 
+      const quotaRefresh = await postJson(baseUrl, '/quota/refresh', undefined, cookie);
+      expect(quotaRefresh.status).toBe(200);
+      expect(quotaRefresh.body).toHaveProperty('ok', true);
+
       const providers = await getJson(baseUrl, '/providers/runtimes', cookie);
       expect(providers.status).toBe(200);
       expect(Array.isArray(providers.body)).toBe(true);

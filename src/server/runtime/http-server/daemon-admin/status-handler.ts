@@ -112,6 +112,51 @@ export function registerStatusRoutes(app: Application, options: DaemonAdminRoute
     }
   });
 
+  // Best-effort "refresh" semantics for modules that expose refreshNow()/reset().
+  // This is primarily used by quota modules so the admin UI can force refresh without restart.
+  app.post('/daemon/modules/:id/refresh', async (req: Request, res: Response) => {
+    if (rejectNonLocalOrUnauthorizedAdmin(req, res)) {return;}
+    const id = typeof req.params.id === 'string' ? req.params.id.trim() : '';
+    if (!id) {
+      res.status(400).json({ error: { message: 'id is required', code: 'bad_request' } });
+      return;
+    }
+    const daemon = options.getManagerDaemon() as { getModule?: (id: string) => ManagerModule | undefined } | null;
+    if (!daemon || typeof daemon.getModule !== 'function') {
+      res.status(503).json({ error: { message: 'manager daemon not available', code: 'not_ready' } });
+      return;
+    }
+    const mod = daemon.getModule(id) as
+      | (ManagerModule & {
+          refreshNow?: (opts?: unknown) => Promise<unknown>;
+          reset?: (opts?: unknown) => Promise<unknown>;
+        })
+      | undefined;
+    if (!mod) {
+      res.status(404).json({ error: { message: 'module not found', code: 'not_found' } });
+      return;
+    }
+    try {
+      if (typeof mod.refreshNow === 'function') {
+        const result = await mod.refreshNow();
+        res.status(200).json({ ok: true, id, action: 'refresh', refreshedAt: Date.now(), result });
+        return;
+      }
+      if (typeof mod.reset === 'function') {
+        const result = await mod.reset({ persist: true });
+        res.status(200).json({ ok: true, id, action: 'refresh', refreshedAt: Date.now(), result, fallback: 'reset' });
+        return;
+      }
+      await mod.stop();
+      await mod.init({ serverId: options.getServerId() });
+      await mod.start();
+      res.status(200).json({ ok: true, id, action: 'refresh', refreshedAt: Date.now(), fallback: 'restart' });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ error: { message, code: 'module_refresh_failed' } });
+    }
+  });
+
   app.post('/daemon/modules/:id/reset', async (req: Request, res: Response) => {
     if (rejectNonLocalOrUnauthorizedAdmin(req, res)) {return;}
     const id = typeof req.params.id === 'string' ? req.params.id.trim() : '';
@@ -132,6 +177,27 @@ export function registerStatusRoutes(app: Application, options: DaemonAdminRoute
     try {
       if (typeof mod.reset === 'function') {
         const result = await mod.reset({ persist: true });
+        // Special-case: resetting provider-quota should immediately trigger a quota refresh
+        // so quota-aware providers (e.g. antigravity) are re-fetched instead of staying stale.
+        if (id === 'provider-quota') {
+          try {
+            const quotaMod = daemon.getModule('quota') as unknown as { refreshNow?: () => Promise<unknown> } | undefined;
+            if (quotaMod && typeof quotaMod.refreshNow === 'function') {
+              const quotaRefresh = await quotaMod.refreshNow();
+              res.status(200).json({
+                ok: true,
+                id,
+                action: 'reset',
+                resetAt: Date.now(),
+                result,
+                meta: { quotaRefresh }
+              });
+              return;
+            }
+          } catch {
+            // ignore quota refresh failures on provider-quota reset
+          }
+        }
         res.status(200).json({ ok: true, id, action: 'reset', resetAt: Date.now(), result });
         return;
       }

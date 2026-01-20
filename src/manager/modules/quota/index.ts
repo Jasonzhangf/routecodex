@@ -61,7 +61,7 @@ export class QuotaManagerModule implements ManagerModule {
   }
 
   async start(): Promise<void> {
-    // 启动时立即做一次最佳努力刷新，然后根据 token 过期时间和 15 分钟基准动态调度后续刷新。
+    // 启动时立即做一次最佳努力刷新，然后根据 token 过期时间和 5 分钟基准动态调度后续刷新。
     try {
       await this.refreshAllAntigravityQuotas();
     } catch {
@@ -78,6 +78,33 @@ export class QuotaManagerModule implements ManagerModule {
       this.refreshTimer = null;
     }
     this.saveSnapshotToDisk();
+  }
+
+  /**
+   * Admin operation: force-refresh quota snapshots immediately (best-effort).
+   * Exposed via daemon-admin endpoint `/quota/refresh`.
+   */
+  async refreshNow(): Promise<{ refreshedAt: number; tokenCount: number; recordCount: number }> {
+    const refreshedAt = Date.now();
+    try {
+      await this.refreshAllAntigravityQuotas();
+    } catch {
+      // ignore refresh failures
+    }
+    try {
+      void this.scheduleNextRefresh();
+    } catch {
+      // ignore scheduling failures
+    }
+    return { refreshedAt, tokenCount: this.antigravityTokens.size, recordCount: Object.keys(this.snapshot).length };
+  }
+
+  /**
+   * daemon-admin "reset" semantics for quota module = refresh now.
+   * Keeps module UX consistent across admin actions.
+   */
+  async reset(): Promise<{ refreshedAt: number; tokenCount: number; recordCount: number }> {
+    return await this.refreshNow();
   }
 
   /**
@@ -219,16 +246,16 @@ export class QuotaManagerModule implements ManagerModule {
   }
 
   /**
-   * 根据当前 token 池的过期时间和固定 15 分钟基准，动态安排下一次 quota 刷新：
-   * - 如有 token 会在 15 分钟内到期，则在该 token 到期时间附近刷新；
-   * - 否则按固定 15 分钟间隔刷新。
+   * 根据当前 token 池的过期时间和固定 5 分钟基准，动态安排下一次 quota 刷新：
+   * - 如有 token 会在 5 分钟内到期，则在该 token 到期时间附近刷新；
+   * - 否则按固定 5 分钟间隔刷新。
    */
   private async scheduleNextRefresh(): Promise<void> {
     if (this.refreshTimer) {
       clearTimeout(this.refreshTimer);
       this.refreshTimer = null;
     }
-    const baseIntervalMs = 15 * 60 * 1000;
+    const baseIntervalMs = 5 * 60 * 1000;
     let delayMs = baseIntervalMs;
     try {
       const nextExpiryDelay = await this.computeNextTokenExpiryDelayMs();
@@ -236,7 +263,7 @@ export class QuotaManagerModule implements ManagerModule {
         delayMs = nextExpiryDelay;
       }
     } catch {
-      // 如果计算失败，退回到固定 15 分钟间隔
+      // 如果计算失败，退回到固定 5 分钟间隔
       delayMs = baseIntervalMs;
     }
     this.refreshTimer = setTimeout(() => {
@@ -250,6 +277,7 @@ export class QuotaManagerModule implements ManagerModule {
           });
         });
     }, delayMs);
+    this.refreshTimer.unref?.();
   }
 
   /**
@@ -305,14 +333,19 @@ export class QuotaManagerModule implements ManagerModule {
 
     const base = resolveAntigravityApiBase();
     const next = new Map<string, AntigravityTokenRegistration>();
+    const legacyAliases: string[] = [];
     for (const match of matches) {
-      const label =
-        match.alias && match.alias !== 'default'
-          ? `${match.sequence}-${match.alias}`
-          : String(match.sequence);
-      const alias = label.trim();
+      // IMPORTANT: alias must match providerKey alias used by VirtualRouter/provider registry:
+      // providerKey is `antigravity.<alias>.<modelId>`, where `<alias>` comes from user config entries.
+      // Do not prefix with sequence number here, otherwise QUOTA_* events will target keys that routing never uses.
+      const alias = (match.alias && match.alias !== 'default' ? match.alias : String(match.sequence)).trim();
       if (!alias) {
         continue;
+      }
+      const legacyAlias =
+        match.alias && match.alias !== 'default' ? `${match.sequence}-${match.alias}`.trim() : null;
+      if (legacyAlias) {
+        legacyAliases.push(legacyAlias);
       }
       next.set(alias, {
         alias,
@@ -329,6 +362,27 @@ export class QuotaManagerModule implements ManagerModule {
     }
 
     this.antigravityTokens = next;
+
+    // Cleanup legacy snapshot keys created by older builds (sequence-prefixed alias like "1-foo").
+    // Those keys never match VirtualRouter providerKey aliases and only cause duplicate/stale rows in admin views.
+    if (legacyAliases.length && this.snapshot && typeof this.snapshot === 'object') {
+      const legacyPrefixes = legacyAliases.map((a) => `antigravity://${a}/`);
+      const rawEntries = Object.entries(this.snapshot);
+      let changed = false;
+      const cleaned: Record<string, QuotaRecord> = {};
+      for (const [key, value] of rawEntries) {
+        const drop = legacyPrefixes.some((prefix) => key.startsWith(prefix));
+        if (drop) {
+          changed = true;
+          continue;
+        }
+        cleaned[key] = value;
+      }
+      if (changed) {
+        this.snapshot = cleaned;
+        this.saveSnapshotToDisk();
+      }
+    }
   }
 
   private resolveStatePath(): string {

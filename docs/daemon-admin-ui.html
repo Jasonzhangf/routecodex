@@ -747,11 +747,12 @@
               <p class="section-sub">
                 VirtualRouter consumes this via <span class="mono">quotaView</span>. When
                 <span class="mono">inPool=false</span>, the provider is treated as removed from the route pool.
-              </p>
-              <div class="row" style="margin-bottom: 10px;">
-                <button id="refreshQuotaBtn" class="primary">Refresh</button>
-                <button id="resetQuotaBtn" class="danger">Reset quota module</button>
-              </div>
+	              </p>
+	              <div class="row" style="margin-bottom: 10px;">
+	                <button id="refreshQuotaBtn" class="primary">Refresh provider pool</button>
+	                <button id="refreshQuotaSnapshotBtn" class="primary">Refresh antigravity snapshot</button>
+	                <button id="resetQuotaBtn" class="danger">Reset provider-quota module</button>
+	              </div>
               <div class="table-wrap">
                 <table class="table">
                   <thead>
@@ -769,20 +770,41 @@
                   <tbody id="quotaTbody"></tbody>
                 </table>
               </div>
-              <div id="quotaOpLog" class="log" style="margin-top: 10px; display:none;"></div>
-            </div>
+	              <div id="quotaOpLog" class="log" style="margin-top: 10px; display:none;"></div>
+	            </div>
 
-            <div class="card" style="box-shadow:none;">
-              <p class="section-title">Notes</p>
-              <div class="notice">
+	            <div class="card" style="box-shadow:none;">
+	              <p class="section-title">Antigravity quota snapshot</p>
+	              <p class="section-sub">
+	                Snapshot fetched by <span class="mono">QuotaManagerModule</span> (antigravity quota API). Used to gate antigravity providers entering the route pool.
+	              </p>
+	              <div class="table-wrap">
+	                <table class="table">
+	                  <thead>
+	                    <tr>
+	                      <th>key</th>
+	                      <th>remaining</th>
+	                      <th>resetAt</th>
+	                      <th>fetchedAt</th>
+	                    </tr>
+	                  </thead>
+	                  <tbody id="quotaSnapshotTbody"></tbody>
+	                </table>
+	              </div>
+	              <div id="quotaSnapshotLog" class="log" style="margin-top: 10px; display:none;"></div>
+	            </div>
+	
+	            <div class="card" style="box-shadow:none;">
+	              <p class="section-title">Notes</p>
+	              <div class="notice">
                 <div style="margin-bottom: 6px;">
                   Use this view to confirm 429/backoff/blacklist decisions and whether a provider is currently eligible.
-                </div>
-                <div>
-                  If a provider looks stuck, try <span class="mono">Reset quota module</span>, then <span class="mono">Restart runtime</span>.
-                </div>
-              </div>
-            </div>
+	                </div>
+	                <div>
+	                  If a provider looks stuck, try <span class="mono">Reset provider-quota module</span>, then <span class="mono">Restart runtime</span>.
+	                </div>
+	              </div>
+	            </div>
           </div>
         </section>
 
@@ -977,7 +999,10 @@
           if (key === "providers") await refreshProviders();
           else if (key === "tokens") await refreshTokens();
           else if (key === "credentials") await refreshCredentials();
-          else if (key === "quota") await refreshQuota();
+	          else if (key === "quota") {
+	            await refreshQuota();
+	            await refreshQuotaSnapshot();
+	          }
           else if (key === "routing") await refreshRuntimes();
         } catch {
           // ignore refresh failures on tab switch
@@ -1875,6 +1900,21 @@
         body.replaceChildren();
         setLog("quotaOpLog", "");
         try {
+          // Force refresh quota first so UI doesn't show stale pool state.
+          try {
+            await apiFetch("/daemon/modules/quota/refresh", { method: "POST" });
+          } catch (e) {
+            // Backwards compatibility: older servers may only support reset.
+            if (e && e.status === 404) {
+              try {
+                await apiFetch("/daemon/modules/quota/reset", { method: "POST" });
+              } catch (e2) {
+                throw e2;
+              }
+            } else {
+              throw e;
+            }
+          }
           const out = await apiFetch("/quota/providers");
           const list = Array.isArray(out.providers) ? out.providers : [];
           for (const q of list) {
@@ -1912,7 +1952,57 @@
           }
         } catch (e) {
           if (e && e.status === 401) notifyUnauthorizedOnce("quota");
+          else toast(e && e.message ? e.message : String(e || "quota refresh failed"));
           body.appendChild(createErrorRow(8, e && e.message ? e.message : e));
+        }
+      }
+
+      function formatRemainingFraction(v) {
+        if (typeof v !== "number" || !Number.isFinite(v)) return "—";
+        const pct = Math.max(0, Math.min(1, v)) * 100;
+        return `${pct.toFixed(1)}%`;
+      }
+
+      async function refreshQuotaSnapshot() {
+        const body = $("quotaSnapshotTbody");
+        body.replaceChildren();
+        setLog("quotaSnapshotLog", "");
+        try {
+          const out = await apiFetch("/quota/summary");
+          const list = Array.isArray(out.records) ? out.records : [];
+          list.sort((a, b) => String(a.key || "").localeCompare(String(b.key || "")));
+          for (const r of list) {
+            const tr = document.createElement("tr");
+            tr.appendChild(createCell("td", r.key || "", "mono truncate", { title: true }));
+            tr.appendChild(createCell("td", formatRemainingFraction(r.remainingFraction), "mono"));
+            tr.appendChild(createCell("td", formatEpochMs(r.resetAt), "mono"));
+            tr.appendChild(createCell("td", formatEpochMs(r.fetchedAt), "mono"));
+            body.appendChild(tr);
+          }
+          if (!list.length) {
+            body.appendChild(createErrorRow(4, "No quota records yet. Click Refresh antigravity snapshot to fetch."));
+          }
+        } catch (e) {
+          if (e && e.status === 401) notifyUnauthorizedOnce("quota snapshot");
+          body.appendChild(createErrorRow(4, e && e.message ? e.message : e));
+        }
+      }
+
+      async function refreshQuotaSnapshotNow() {
+        setLog("quotaSnapshotLog", "");
+        try {
+          const out = await apiFetch("/quota/refresh", { method: "POST" });
+          const result = out && out.result ? out.result : null;
+          setLog(
+            "quotaSnapshotLog",
+            `OK. refreshedAt=${result && result.refreshedAt ? formatEpochMs(result.refreshedAt) : "—"} tokenCount=${result && typeof result.tokenCount === "number" ? result.tokenCount : "—"} records=${result && typeof result.recordCount === "number" ? result.recordCount : "—"}`
+          );
+          await refreshQuotaSnapshot();
+          toast("Quota snapshot refreshed.", "ok");
+        } catch (e) {
+          if (e && e.status === 401) notifyUnauthorizedOnce("quota refresh");
+          setLog("quotaSnapshotLog", `Refresh failed: ${e && e.message ? e.message : e}`);
+          toast(`Refresh failed: ${e && e.message ? e.message : String(e)}`);
         }
       }
 
@@ -2193,14 +2283,15 @@
           const out = await apiFetch("/daemon/restart", { method: "POST" });
           const warnings = Array.isArray(out.warnings) && out.warnings.length ? `\nWarnings:\n- ${out.warnings.join("\n- ")}` : "";
           setLog("providerOpLog", `Restarted.\nconfigPath: ${out.configPath || "—"}\nreloadedAt: ${out.reloadedAt || "—"}${warnings}`);
-          await refreshStatus();
-          await refreshProviders();
-          await refreshCredentials();
-          await refreshQuota();
-          await refreshRuntimes();
-        } catch (e) {
-          setLog("providerOpLog", `Restart failed: ${e.message}`);
-        }
+	          await refreshStatus();
+	          await refreshProviders();
+	          await refreshCredentials();
+	          await refreshQuota();
+	          await refreshQuotaSnapshot();
+	          await refreshRuntimes();
+	        } catch (e) {
+	          setLog("providerOpLog", `Restart failed: ${e.message}`);
+	        }
       });
 
       $("refreshProvidersBtn").addEventListener("click", refreshProviders);
@@ -2268,6 +2359,7 @@
       $("oauthAuthorizeBtn").addEventListener("click", authorizeOauth);
 
       $("refreshQuotaBtn").addEventListener("click", refreshQuota);
+      $("refreshQuotaSnapshotBtn").addEventListener("click", refreshQuotaSnapshotNow);
       $("quotaTbody").addEventListener("click", (ev) => {
         const el = ev.target.closest("button");
         if (!el) return;

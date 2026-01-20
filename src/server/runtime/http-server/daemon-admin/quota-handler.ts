@@ -40,6 +40,25 @@ function getProviderQuotaModule(options: DaemonAdminRouteOptions): ProviderQuota
 }
 
 export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteOptions): void {
+  app.post('/quota/refresh', async (req: Request, res: Response) => {
+    if (rejectNonLocalOrUnauthorizedAdmin(req, res)) {return;}
+    try {
+      const quotaModule = getQuotaModule(options) as
+        | (QuotaManagerModule & { refreshNow?: () => Promise<unknown> })
+        | null;
+      const refreshMod = quotaModule as { refreshNow?: () => Promise<unknown> };
+      if (!quotaModule || typeof refreshMod.refreshNow !== 'function') {
+        res.status(503).json({ error: { message: 'quota module not available', code: 'not_ready' } });
+        return;
+      }
+      const result = await refreshMod.refreshNow();
+      res.status(200).json({ ok: true, action: 'refresh', result });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ error: { message, code: 'quota_refresh_failed' } });
+    }
+  });
+
   app.get('/quota/summary', (req: Request, res: Response) => {
     if (rejectNonLocalOrUnauthorizedAdmin(req, res)) {return;}
     try {
@@ -106,7 +125,26 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
     }
     try {
       const result = await resetMod.resetProvider(providerKey);
-      res.status(200).json({ ok: true, providerKey, action: 'reset', result });
+      // If this provider supports external quota refresh (e.g. antigravity), force-refresh immediately
+      // so the virtual-router pool state can converge without waiting for the periodic timer.
+      let quotaRefresh: unknown = null;
+      if (providerKey.toLowerCase().startsWith('antigravity.')) {
+        try {
+          const quotaModule = getQuotaModule(options) as unknown as { refreshNow?: () => Promise<unknown> } | null;
+          if (quotaModule && typeof quotaModule.refreshNow === 'function') {
+            quotaRefresh = await quotaModule.refreshNow();
+          }
+        } catch {
+          quotaRefresh = null;
+        }
+      }
+      res.status(200).json({
+        ok: true,
+        providerKey,
+        action: 'reset',
+        result,
+        ...(quotaRefresh ? { meta: { quotaRefresh } } : {})
+      });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       res.status(500).json({ error: { message, code: 'quota_provider_reset_failed' } });
