@@ -820,8 +820,17 @@
 	                  <option value="cooldown">cooldown</option>
 	                  <option value="blacklist">blacklist</option>
 	                </select>
-	                <label for="quotaMinutesInput">offline minutes</label>
-	                <input id="quotaMinutesInput" type="number" min="1" step="1" value="60" style="width: 120px;" />
+	                <label for="quotaDurationSelect">offline time</label>
+	                <select id="quotaDurationSelect" style="width: 160px;">
+	                  <option value="5">5m</option>
+	                  <option value="15">15m</option>
+	                  <option value="30">30m</option>
+	                  <option value="60" selected>1h</option>
+	                  <option value="180">3h</option>
+	                  <option value="360">6h</option>
+	                  <option value="720">12h</option>
+	                  <option value="1440">24h</option>
+	                </select>
 	                <button id="quotaApplyDisableBtn" class="danger">Offline</button>
 	                <button id="quotaApplyRecoverBtn">Recover</button>
 	                <button id="quotaApplyResetBtn">Reset</button>
@@ -2471,7 +2480,7 @@
             return;
           }
           if (kind === "disable") {
-            const minutes = Number.parseFloat(textOf($("quotaMinutesInput").value || "60"));
+            const minutes = Number.parseFloat(textOf($("quotaDurationSelect").value || "60"));
             if (!Number.isFinite(minutes) || minutes <= 0) {
               throw new Error("Invalid minutes");
             }
