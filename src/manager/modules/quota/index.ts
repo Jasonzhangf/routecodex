@@ -1077,6 +1077,43 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
     };
   }
 
+  /**
+   * Read-only quota view for shadow runs (must not mutate quotaStates or schedule persistence).
+   * Used by llms-engine shadow HubPipeline to avoid double side effects.
+   */
+  getQuotaViewReadOnly(): (providerKey: string) => {
+    providerKey: string;
+    inPool: boolean;
+    reason?: string;
+    priorityTier?: number;
+    cooldownUntil?: number | null;
+    blacklistUntil?: number | null;
+  } | null {
+    if (!this.quotaRoutingEnabled) {
+      return () => null;
+    }
+    return (providerKey: string) => {
+      const key = typeof providerKey === 'string' ? providerKey.trim() : '';
+      if (!key) {
+        return null;
+      }
+      const state = this.quotaStates.get(key);
+      if (!state) {
+        return null;
+      }
+      const nowMs = Date.now();
+      const effective = tickQuotaStateTime(state, nowMs);
+      return {
+        providerKey: effective.providerKey,
+        inPool: effective.inPool,
+        reason: effective.reason,
+        priorityTier: effective.priorityTier,
+        cooldownUntil: effective.cooldownUntil ?? null,
+        blacklistUntil: effective.blacklistUntil ?? null
+      };
+    };
+  }
+
   private isFatalForQuota(event: ProviderErrorEvent): boolean {
     const status = typeof event.status === 'number' ? event.status : undefined;
     const code = typeof event.code === 'string' ? event.code.toUpperCase() : '';

@@ -175,6 +175,46 @@
         flex-wrap: wrap;
         margin: 0 0 8px;
       }
+
+      .kv-editor .kv-leaf,
+      .kv-editor summary {
+        align-items: center;
+      }
+
+      .kv-editor .kv-type {
+        color: rgba(255, 255, 255, 0.55);
+        min-width: 92px;
+        max-width: 140px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .kv-editor .kv-actions {
+        display: inline-flex;
+        gap: 6px;
+        margin-left: auto;
+        flex: 0 0 auto;
+      }
+
+      .kv-editor .kv-actions button {
+        padding: 4px 8px;
+        border-radius: 8px;
+        font-size: 12px;
+      }
+
+      .kv-editor input[type="text"],
+      .kv-editor input[type="number"],
+      .kv-editor select {
+        padding: 4px 6px;
+        border-radius: 8px;
+        font-size: 12px;
+      }
+
+      .kv-editor .kv-path {
+        color: rgba(255, 255, 255, 0.42);
+        margin-left: 6px;
+      }
       .dot {
         width: 8px;
         height: 8px;
@@ -499,20 +539,12 @@
                   <tbody id="providersTbody"></tbody>
                 </table>
               </div>
-
-              <p class="section-title" style="margin-top: 12px;">Providers registry</p>
-              <p class="section-sub">Key/value view of <span class="mono">virtualrouter.providers</span>.</p>
-              <div class="kv-tools">
-                <button id="providersRegExpandBtn">Expand all</button>
-                <button id="providersRegCollapseBtn">Collapse all</button>
-              </div>
-              <div id="providersRegistry" class="kv"></div>
             </div>
 
             <div class="card" style="box-shadow: none;">
               <p class="section-title" id="providerEditorTitle">Provider editor</p>
               <p class="section-sub">
-                Edit provider JSON (secrets are not allowed inline). Save writes to disk and creates a backup.
+                Edit providers as key/value entries to avoid JSON syntax errors. Save writes to disk and creates a backup.
               </p>
 
               <div class="notice" style="margin-bottom: 10px;">
@@ -592,11 +624,14 @@
                 </div>
               </div>
 
-              <textarea
-                id="providerJsonEditor"
-                spellcheck="false"
-                placeholder="{\n  \"enabled\": true,\n  \"type\": \"responses\",\n  \"baseURL\": \"https://...\",\n  \"auth\": { \"type\": \"apikey\", \"apiKey\": \"authfile-...\" }\n}"
-              ></textarea>
+              <p class="section-title" style="margin-top: 10px;">Provider config</p>
+              <p class="section-sub">Tree editor. Use “Apply preset” to populate common templates.</p>
+              <div class="kv-tools">
+                <button id="providerEditorExpandBtn">Expand all</button>
+                <button id="providerEditorCollapseBtn">Collapse all</button>
+                <span class="mono" id="providerEditorDirtyHint"></span>
+              </div>
+              <div id="providerKvEditor" class="kv kv-editor"></div>
 
               <div class="row" style="margin-top: 10px;">
                 <button id="loadProviderBtn">Load</button>
@@ -1005,6 +1040,348 @@
         return t;
       }
 
+      const providerEditorState = {
+        value: {},
+        dirty: false
+      };
+
+      function providerEditorClone(value) {
+        try {
+          return value == null ? value : JSON.parse(JSON.stringify(value));
+        } catch {
+          return value;
+        }
+      }
+
+      function providerEditorSetDirty(dirty) {
+        providerEditorState.dirty = Boolean(dirty);
+        const hint = $("providerEditorDirtyHint");
+        if (hint) hint.textContent = providerEditorState.dirty ? "unsaved changes" : "";
+      }
+
+      function providerEditorSetValue(value) {
+        providerEditorState.value = providerEditorClone(value) || {};
+        providerEditorSetDirty(false);
+        providerEditorRender();
+      }
+
+      function providerEditorGetValue() {
+        return providerEditorClone(providerEditorState.value) || {};
+      }
+
+      function providerEditorPathToString(path) {
+        if (!path || !path.length) return "";
+        return path.map((p) => String(p)).join(".");
+      }
+
+      function providerEditorGetByPath(root, path) {
+        let cur = root;
+        for (const part of path || []) {
+          if (cur == null) return undefined;
+          cur = cur[part];
+        }
+        return cur;
+      }
+
+      function providerEditorSetByPath(root, path, nextValue) {
+        if (!root || typeof root !== "object") return;
+        if (!path || !path.length) return;
+        const last = path[path.length - 1];
+        let cur = root;
+        for (let i = 0; i < path.length - 1; i += 1) {
+          const part = path[i];
+          const existing = cur[part];
+          if (existing == null || typeof existing !== "object") cur[part] = {};
+          cur = cur[part];
+        }
+        cur[last] = nextValue;
+      }
+
+      function providerEditorDeleteByPath(root, path) {
+        if (!root || typeof root !== "object") return;
+        if (!path || !path.length) return;
+        const last = path[path.length - 1];
+        let cur = root;
+        for (let i = 0; i < path.length - 1; i += 1) {
+          const part = path[i];
+          if (cur == null) return;
+          cur = cur[part];
+        }
+        if (Array.isArray(cur)) {
+          const idx = Number(last);
+          if (Number.isFinite(idx) && idx >= 0 && idx < cur.length) cur.splice(idx, 1);
+          return;
+        }
+        try { delete cur[last]; } catch {}
+      }
+
+      function providerEditorKind(value) {
+        if (value === null) return "null";
+        if (Array.isArray(value)) return "array";
+        const t = typeof value;
+        if (t === "string") return "string";
+        if (t === "number") return "number";
+        if (t === "boolean") return "boolean";
+        if (t === "object") return "object";
+        return "string";
+      }
+
+      function providerEditorCoerce(kind, raw) {
+        if (kind === "null") return null;
+        if (kind === "boolean") return raw === true || raw === "true";
+        if (kind === "number") {
+          const n = typeof raw === "number" ? raw : Number.parseFloat(String(raw));
+          return Number.isFinite(n) ? n : 0;
+        }
+        if (kind === "array") return [];
+        if (kind === "object") return {};
+        return String(raw ?? "");
+      }
+
+      function providerEditorRender() {
+        const container = $("providerKvEditor");
+        if (!container) return;
+        try {
+          container.replaceChildren();
+        } catch {
+          try { container.innerHTML = ""; } catch {}
+        }
+        try {
+          container.appendChild(providerEditorRenderNode("provider", providerEditorState.value || {}, [], 0, true));
+        } catch (e) {
+          const msg = e && e.message ? e.message : String(e);
+          try { container.textContent = `Render failed: ${msg}`; } catch {}
+        }
+      }
+
+      function providerEditorRenderNode(label, value, path, depth, isRoot = false) {
+        const isObj = value !== null && typeof value === "object";
+        const isArr = Array.isArray(value);
+        const kind = providerEditorKind(value);
+
+        if (!isObj) {
+          const row = document.createElement("div");
+          row.className = "kv-leaf";
+
+          const keyEl = document.createElement("div");
+          keyEl.className = "kv-key";
+          keyEl.textContent = label;
+
+          const typeSel = document.createElement("select");
+          typeSel.className = "kv-type";
+          typeSel.innerHTML = [
+            "<option value=\"string\">string</option>",
+            "<option value=\"number\">number</option>",
+            "<option value=\"boolean\">boolean</option>",
+            "<option value=\"null\">null</option>",
+            "<option value=\"object\">object</option>",
+            "<option value=\"array\">array</option>"
+          ].join("");
+          typeSel.value = kind;
+          typeSel.addEventListener("click", (e) => e.stopPropagation());
+          typeSel.addEventListener("change", () => {
+            const root = providerEditorState.value || {};
+            providerEditorSetByPath(root, path, providerEditorCoerce(typeSel.value, ""));
+            providerEditorSetDirty(true);
+            providerEditorRender();
+          });
+
+          const valWrap = document.createElement("div");
+          valWrap.className = "kv-val";
+
+          if (kind === "boolean") {
+            const sel = document.createElement("select");
+            sel.innerHTML = `<option value="true">true</option><option value="false">false</option>`;
+            sel.value = value ? "true" : "false";
+            sel.addEventListener("click", (e) => e.stopPropagation());
+            sel.addEventListener("change", () => {
+              const root = providerEditorState.value || {};
+              providerEditorSetByPath(root, path, sel.value === "true");
+              providerEditorSetDirty(true);
+              providerEditorRender();
+            });
+            valWrap.appendChild(sel);
+          } else if (kind === "number") {
+            const inp = document.createElement("input");
+            inp.type = "number";
+            inp.value = String(value);
+            inp.addEventListener("click", (e) => e.stopPropagation());
+            inp.addEventListener("change", () => {
+              const root = providerEditorState.value || {};
+              const n = Number.parseFloat(inp.value);
+              providerEditorSetByPath(root, path, Number.isFinite(n) ? n : 0);
+              providerEditorSetDirty(true);
+              providerEditorRender();
+            });
+            valWrap.appendChild(inp);
+          } else if (kind === "null") {
+            const span = document.createElement("span");
+            span.className = "mono";
+            span.textContent = "null";
+            valWrap.appendChild(span);
+          } else {
+            const inp = document.createElement("input");
+            inp.type = "text";
+            inp.value = value == null ? "" : String(value);
+            inp.addEventListener("click", (e) => e.stopPropagation());
+            inp.addEventListener("change", () => {
+              const root = providerEditorState.value || {};
+              providerEditorSetByPath(root, path, String(inp.value));
+              providerEditorSetDirty(true);
+              providerEditorRender();
+            });
+            valWrap.appendChild(inp);
+          }
+
+          const actions = document.createElement("div");
+          actions.className = "kv-actions";
+          if (!isRoot) {
+            const del = document.createElement("button");
+            del.textContent = "Del";
+            del.className = "danger";
+            del.addEventListener("click", (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              const root = providerEditorState.value || {};
+              providerEditorDeleteByPath(root, path);
+              providerEditorSetDirty(true);
+              providerEditorRender();
+            });
+            actions.appendChild(del);
+          }
+          const pathEl = document.createElement("span");
+          pathEl.className = "kv-path mono";
+          pathEl.textContent = providerEditorPathToString(path);
+          actions.appendChild(pathEl);
+
+          row.appendChild(keyEl);
+          row.appendChild(typeSel);
+          row.appendChild(valWrap);
+          row.appendChild(actions);
+          return row;
+        }
+
+        const details = document.createElement("details");
+        details.open = isRoot || depth < 1;
+
+        const summary = document.createElement("summary");
+
+        const keyEl = document.createElement("div");
+        keyEl.className = "kv-key";
+        keyEl.textContent = label;
+
+        const metaEl = document.createElement("div");
+        metaEl.className = "kv-meta";
+        metaEl.textContent = kvTypeMeta(value);
+
+        const actions = document.createElement("div");
+        actions.className = "kv-actions";
+
+        if (isArr) {
+          const add = document.createElement("button");
+          add.textContent = "+Item";
+          add.addEventListener("click", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const t = (prompt("Item type: string/number/boolean/null/object/array", "string") || "string").trim().toLowerCase();
+            const k = ["string","number","boolean","null","object","array"].includes(t) ? t : "string";
+            let init = "";
+            if (k === "boolean") init = prompt("Value: true/false", "false") || "false";
+            else if (k === "number") init = prompt("Value (number)", "0") || "0";
+            else if (k === "string") init = prompt("Value (string)", "") || "";
+            const v = providerEditorCoerce(k, k === "boolean" ? init === "true" : init);
+            const root = providerEditorState.value || {};
+            const arr = providerEditorGetByPath(root, path);
+            if (Array.isArray(arr)) {
+              arr.push(v);
+              providerEditorSetDirty(true);
+              providerEditorRender();
+            }
+          });
+          actions.appendChild(add);
+        } else {
+          const add = document.createElement("button");
+          add.textContent = "+Key";
+          add.addEventListener("click", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const name = (prompt("Key name", "") || "").trim();
+            if (!name) return;
+            const t = (prompt("Value type: string/number/boolean/null/object/array", "string") || "string").trim().toLowerCase();
+            const k = ["string","number","boolean","null","object","array"].includes(t) ? t : "string";
+            let init = "";
+            if (k === "boolean") init = prompt("Value: true/false", "false") || "false";
+            else if (k === "number") init = prompt("Value (number)", "0") || "0";
+            else if (k === "string") init = prompt("Value (string)", "") || "";
+            const v = providerEditorCoerce(k, k === "boolean" ? init === "true" : init);
+            const root = providerEditorState.value || {};
+            const obj = providerEditorGetByPath(root, path);
+            if (obj && typeof obj === "object" && !Array.isArray(obj)) {
+              obj[name] = v;
+              providerEditorSetDirty(true);
+              providerEditorRender();
+            }
+          });
+          actions.appendChild(add);
+        }
+
+        if (!isRoot) {
+          const del = document.createElement("button");
+          del.textContent = "Del";
+          del.className = "danger";
+          del.addEventListener("click", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const root = providerEditorState.value || {};
+            providerEditorDeleteByPath(root, path);
+            providerEditorSetDirty(true);
+            providerEditorRender();
+          });
+          actions.appendChild(del);
+        }
+
+        const pathEl = document.createElement("span");
+        pathEl.className = "kv-path mono";
+        pathEl.textContent = providerEditorPathToString(path);
+        actions.appendChild(pathEl);
+
+        summary.appendChild(keyEl);
+        summary.appendChild(metaEl);
+        summary.appendChild(actions);
+        details.appendChild(summary);
+
+        if (isArr) {
+          for (let i = 0; i < value.length; i += 1) {
+            details.appendChild(providerEditorRenderNode(String(i), value[i], path.concat([i]), depth + 1));
+          }
+          return details;
+        }
+
+        let keys = [];
+        try {
+          keys = Object.keys(value);
+          keys.sort((a, b) => a.localeCompare(b));
+        } catch {
+          keys = [];
+        }
+        for (const childKey of keys) {
+          details.appendChild(providerEditorRenderNode(childKey, value[childKey], path.concat([childKey]), depth + 1));
+        }
+
+        return details;
+      }
+
+      function providerEditorSetAuthApiKey(secretRef) {
+        const ref = textOf(secretRef).trim();
+        if (!ref) return;
+        const root = providerEditorState.value || {};
+        if (!root.auth || typeof root.auth !== "object" || Array.isArray(root.auth)) root.auth = {};
+        root.auth.type = "apikey";
+        root.auth.apiKey = ref;
+        providerEditorSetDirty(true);
+        providerEditorRender();
+      }
+
       function kvPreview(value) {
         if (value === null || value === undefined) return String(value);
         const t = typeof value;
@@ -1167,18 +1544,9 @@
       async function refreshProviders() {
         const body = $("providersTbody");
         body.replaceChildren();
-        const reg = $("providersRegistry");
-        if (reg) reg.replaceChildren();
         try {
           const data = await apiFetch("/config/providers");
           const list = Array.isArray(data.providers) ? data.providers : [];
-          const providersById = {};
-          for (let i = 0; i < list.length; i += 1) {
-            const p = list[i];
-            const id = textOf(p && p.id ? p.id : "") || `__${i}`;
-            providersById[id] = p;
-          }
-          renderRegistry(reg, providersById, { rootLabel: "virtualrouter.providers" });
           const grouped = new Map();
           for (const p of list) {
             const t = textOf(p.type || "unknown") || "unknown";
@@ -1240,7 +1608,6 @@
           }
         } catch (e) {
           if (e && e.status === 401) notifyUnauthorizedOnce("providers");
-          renderRegistry(reg, { error: e && e.message ? e.message : String(e) }, { rootLabel: "virtualrouter.providers" });
           body.appendChild(createErrorRow(8, e && e.message ? e.message : e));
         }
       }
@@ -1251,7 +1618,7 @@
         try {
           const data = await apiFetch(`/config/providers/${encodeURIComponent(id)}`);
           $("providerIdInput").value = id;
-          $("providerJsonEditor").value = JSON.stringify(data.provider || {}, null, 2);
+          providerEditorSetValue(data.provider || {});
           $("providerEditorTitle").textContent = `Provider editor: ${id}`;
         } catch (e) {
           if (e && e.status === 401) notifyUnauthorizedOnce("provider load");
@@ -1269,13 +1636,15 @@
           return;
         }
         try {
-          const provider = JSON.parse($("providerJsonEditor").value || "{}");
+          const provider = providerEditorGetValue() || {};
+          if (provider && typeof provider === "object") provider.id = id;
           const result = await apiFetch(`/config/providers/${encodeURIComponent(id)}`, {
             method: "PUT",
             body: JSON.stringify({ provider })
           });
           setLog("providerOpLog", `Saved. Path: ${result.path || "—"}\nRestart required to apply.`);
           toast("Provider saved.", "ok");
+          providerEditorSetDirty(false);
           await refreshProviders();
         } catch (e) {
           if (e && e.status === 401) notifyUnauthorizedOnce("provider save");
@@ -1326,7 +1695,9 @@
           $("apikeySecretRefOut").textContent = `secretRef: ${out.secretRef}`;
           return out.secretRef;
         } catch (e) {
+          if (e && e.status === 401) notifyUnauthorizedOnce("authfile create");
           setLog("providerOpLog", `Create authfile failed: ${e.message}`);
+          toast(`Create authfile failed: ${e.message}`);
           return null;
         }
       }
@@ -1353,7 +1724,8 @@
           const secretRef = ($("apikeySecretRefOut").textContent || "").replace(/^secretRef:\\s*/i, "").trim();
           base.auth = { type: "apikey", apiKey: secretRef || "authfile-REPLACE_ME" };
         }
-        $("providerJsonEditor").value = JSON.stringify(base, null, 2);
+        providerEditorSetValue(base);
+        providerEditorSetDirty(true);
       }
 
       function updateAuthModeUi() {
@@ -1833,12 +2205,11 @@
 
       $("refreshProvidersBtn").addEventListener("click", refreshProviders);
       $("refreshTokensBtn").addEventListener("click", refreshTokens);
-      $("providersRegExpandBtn").addEventListener("click", () => setAllDetailsOpen($("providersRegistry"), true));
-      $("providersRegCollapseBtn").addEventListener("click", () => setAllDetailsOpen($("providersRegistry"), false));
       $("newProviderBtn").addEventListener("click", () => {
         $("providerEditorTitle").textContent = "Provider editor (new)";
         $("providerIdInput").value = "";
-        $("providerJsonEditor").value = JSON.stringify(presetFor($("providerPreset").value), null, 2);
+        setSelectedProviderId("");
+        providerEditorSetValue(presetFor($("providerPreset").value));
         setLog("providerOpLog", "");
       });
       $("providersTbody").addEventListener("click", async (ev) => {
@@ -1878,7 +2249,16 @@
         const id = ($("providerIdInput").value || "").trim();
         await deleteProvider(id);
       });
-      $("createApiKeyCredentialBtn").addEventListener("click", createApiKeyCredential);
+      $("createApiKeyCredentialBtn").addEventListener("click", async () => {
+        const secretRef = await createApiKeyCredential();
+        if (secretRef) {
+          providerEditorSetAuthApiKey(secretRef);
+          toast("Authfile created and applied to provider editor.", "ok");
+        }
+      });
+
+      $("providerEditorExpandBtn").addEventListener("click", () => setAllDetailsOpen($("providerKvEditor"), true, true));
+      $("providerEditorCollapseBtn").addEventListener("click", () => setAllDetailsOpen($("providerKvEditor"), false, true));
 
       $("authMode").addEventListener("change", updateAuthModeUi);
       updateAuthModeUi();

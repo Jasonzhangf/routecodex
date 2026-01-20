@@ -4,6 +4,12 @@ import { createRequire } from 'module';
 import { importCoreModule, resolveCoreModulePath, type LlmsImpl } from './core-loader.js';
 import type { ProviderErrorEvent } from '@jsonstudio/llms/dist/router/virtual-router/types.js';
 import { writeErrorsampleJson } from '../../utils/errorsamples.js';
+import {
+  isLlmsEngineShadowEnabledForSubpath,
+  recordLlmsEngineShadowDiff,
+  resolveLlmsEngineShadowConfig,
+  shouldRunLlmsEngineShadowForSubpath
+} from '../../utils/llms-engine-shadow.js';
 import { buildInfo } from '../../build-info.js';
 import { resolveLlmswitchCoreVersion } from '../../utils/runtime-versions.js';
 
@@ -159,24 +165,65 @@ const cachedConvertProviderResponseByImpl: Record<LlmsImpl, ((options: AnyRecord
   engine: null
 };
 
+const llmsEngineShadowConfig = resolveLlmsEngineShadowConfig();
+
 /**
  * Host/HTTP 侧统一使用的 provider 响应转换入口。
  * 封装 llmswitch-core 的 convertProviderResponse，避免在 Host 内部直接 import core 模块。
  */
 export async function convertProviderResponse(options: AnyRecord): Promise<AnyRecord> {
-  const impl = resolveImplForSubpath('conversion/hub/response/provider-response');
-  if (!cachedConvertProviderResponseByImpl[impl]) {
-    const mod = await importCoreDist<ProviderResponseConversionModule>('conversion/hub/response/provider-response', impl);
-    const fn = mod.convertProviderResponse;
-    if (typeof fn !== 'function') {
-      throw new Error('[llmswitch-bridge] convertProviderResponse not available');
+  const subpath = 'conversion/hub/response/provider-response';
+
+  const ensureFn = async (impl: LlmsImpl) => {
+    if (!cachedConvertProviderResponseByImpl[impl]) {
+      const mod = await importCoreDist<ProviderResponseConversionModule>(subpath, impl);
+      const fn = mod.convertProviderResponse;
+      if (typeof fn !== 'function') {
+        throw new Error('[llmswitch-bridge] convertProviderResponse not available');
+      }
+      cachedConvertProviderResponseByImpl[impl] = async (opts: AnyRecord) => {
+        const result = fn(opts);
+        return result instanceof Promise ? await result : result;
+      };
     }
-    cachedConvertProviderResponseByImpl[impl] = async (opts: AnyRecord) => {
-      const result = fn(opts);
-      return result instanceof Promise ? await result : result;
-    };
+    return cachedConvertProviderResponseByImpl[impl]!;
+  };
+
+  const shadowEnabled = isLlmsEngineShadowEnabledForSubpath(llmsEngineShadowConfig, 'conversion/hub/response');
+  if (shadowEnabled) {
+    // Fail fast: if shadow is enabled for this module, engine core must be available.
+    await ensureFn('engine');
   }
-  return await cachedConvertProviderResponseByImpl[impl]!(options);
+  const wantsShadow = shadowEnabled && shouldRunLlmsEngineShadowForSubpath(llmsEngineShadowConfig, 'conversion/hub/response');
+  if (wantsShadow) {
+    const baseline = await (await ensureFn('ts'))(options);
+    const requestId =
+      typeof (options as AnyRecord).requestId === 'string'
+        ? String((options as AnyRecord).requestId)
+        : (typeof (options as AnyRecord).id === 'string' ? String((options as AnyRecord).id) : `shadow_${Date.now()}`);
+    void (async () => {
+      try {
+        const candidate = await (await ensureFn('engine'))(options);
+        await recordLlmsEngineShadowDiff({
+          group: 'provider-response',
+          requestId,
+          subpath: 'conversion/hub/response',
+          baselineImpl: 'ts',
+          candidateImpl: 'engine',
+          baselineOut: baseline,
+          candidateOut: candidate,
+          excludedComparePaths: []
+        });
+      } catch (error) {
+        // eslint-disable-next-line no-console
+        console.error('[llms-engine-shadow] provider response shadow failed:', error);
+      }
+    })();
+    return baseline;
+  }
+
+  const impl = resolveImplForSubpath(subpath);
+  return await (await ensureFn(impl))(options);
 }
 
 type SnapshotRecorderModule = {
@@ -503,6 +550,18 @@ const cachedHubPipelineCtorByImpl: Record<LlmsImpl, HubPipelineCtorAny | null> =
  */
 export async function getHubPipelineCtor(): Promise<HubPipelineCtorAny> {
   const impl = resolveImplForSubpath('conversion/hub/pipeline/hub-pipeline');
+  if (!cachedHubPipelineCtorByImpl[impl]) {
+    const mod = await importCoreDist<HubPipelineModule>('conversion/hub/pipeline/hub-pipeline', impl);
+    const Ctor = mod.HubPipeline;
+    if (typeof Ctor !== 'function') {
+      throw new Error('[llmswitch-bridge] HubPipeline constructor not available');
+    }
+    cachedHubPipelineCtorByImpl[impl] = Ctor;
+  }
+  return cachedHubPipelineCtorByImpl[impl]!;
+}
+
+export async function getHubPipelineCtorForImpl(impl: LlmsImpl): Promise<HubPipelineCtorAny> {
   if (!cachedHubPipelineCtorByImpl[impl]) {
     const mod = await importCoreDist<HubPipelineModule>('conversion/hub/pipeline/hub-pipeline', impl);
     const Ctor = mod.HubPipeline;

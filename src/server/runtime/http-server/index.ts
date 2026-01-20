@@ -76,6 +76,12 @@ import {
   resolveHubShadowCompareConfig,
   shouldRunHubShadowCompare
 } from './hub-shadow-compare.js';
+import {
+  recordLlmsEngineShadowDiff,
+  isLlmsEngineShadowEnabledForSubpath,
+  resolveLlmsEngineShadowConfig,
+  shouldRunLlmsEngineShadowForSubpath
+} from '../../../utils/llms-engine-shadow.js';
 import { resolveLlmswitchCoreVersion } from '../../../utils/runtime-versions.js';
 type LegacyAuthFields = ProviderRuntimeProfile['auth'] & {
   token_file?: unknown;
@@ -124,7 +130,10 @@ export class RouteCodexHttpServer {
   private readonly stats = new StatsManager();
   private restartChain: Promise<void> = Promise.resolve();
   private readonly hubShadowCompareConfig = resolveHubShadowCompareConfig();
+  private readonly llmsEngineShadowConfig = resolveLlmsEngineShadowConfig();
   private hubPolicyMode: string | null = null;
+  private hubPipelineEngineShadow: HubPipeline | null = null;
+  private hubPipelineConfigForShadow: Record<string, unknown> | null = null;
 
   constructor(config: ServerConfigV2) {
     this.config = config;
@@ -412,6 +421,60 @@ export class RouteCodexHttpServer {
     const ctorFactory = await getHubPipelineCtor();
     this.hubPipelineCtor = ctorFactory as unknown as HubPipelineCtor;
     return this.hubPipelineCtor;
+  }
+
+  private async ensureHubPipelineEngineShadow(): Promise<HubPipeline> {
+    if (this.hubPipelineEngineShadow) {
+      return this.hubPipelineEngineShadow;
+    }
+    if (!this.hubPipelineConfigForShadow) {
+      throw new Error('Hub pipeline shadow config is not initialized');
+    }
+
+    const baseConfig = this.hubPipelineConfigForShadow as unknown as Record<string, unknown>;
+    const shadowConfig: Record<string, unknown> = { ...baseConfig };
+
+    // Avoid double side effects when shadow-running the pipeline: keep reads, drop writes.
+    const routingStateStore = baseConfig.routingStateStore as unknown as
+      | { loadSync?: (key: string) => unknown | null; saveAsync?: (key: string, state: unknown | null) => void }
+      | undefined;
+    if (routingStateStore && typeof routingStateStore.loadSync === 'function') {
+      shadowConfig.routingStateStore = {
+        loadSync: routingStateStore.loadSync.bind(routingStateStore),
+        saveAsync: () => {}
+      };
+    }
+
+    const healthStore = baseConfig.healthStore as unknown as
+      | { loadInitialSnapshot?: () => unknown | null; persistSnapshot?: (snapshot: unknown) => void; recordProviderError?: (event: unknown) => void }
+      | undefined;
+    if (healthStore && typeof healthStore.loadInitialSnapshot === 'function') {
+      shadowConfig.healthStore = {
+        loadInitialSnapshot: healthStore.loadInitialSnapshot.bind(healthStore)
+      };
+    }
+
+    const quotaViewReadOnly = baseConfig.quotaViewReadOnly as unknown as ((providerKey: string) => unknown) | undefined;
+    if (typeof quotaViewReadOnly === 'function') {
+      shadowConfig.quotaView = quotaViewReadOnly;
+    }
+
+    const bridge = (await import('../../../modules/llmswitch/bridge.js')) as unknown as {
+      getHubPipelineCtorForImpl?: (impl: 'engine') => Promise<unknown>;
+    };
+    const getCtor = bridge.getHubPipelineCtorForImpl;
+    if (typeof getCtor !== 'function') {
+      throw new Error('llmswitch bridge does not expose getHubPipelineCtorForImpl');
+    }
+    const ctorFactory = await getCtor('engine');
+    const hubCtor = ctorFactory as unknown as HubPipelineCtor;
+    if (!('virtualRouter' in shadowConfig)) {
+      throw new Error('HubPipeline shadow config missing virtualRouter');
+    }
+    this.hubPipelineEngineShadow = new hubCtor(
+      shadowConfig as unknown as { virtualRouter: unknown; [key: string]: unknown }
+    ) as unknown as HubPipeline;
+    return this.hubPipelineEngineShadow;
   }
 
   private isPipelineReady(): boolean {
@@ -819,6 +882,9 @@ export class RouteCodexHttpServer {
     const quotaModule = this.managerDaemon?.getModule('provider-quota') as ProviderQuotaDaemonModule | undefined;
     if (this.isQuotaRoutingEnabled() && quotaModule && typeof quotaModule.getQuotaView === 'function') {
       hubConfig.quotaView = quotaModule.getQuotaView();
+      if (typeof quotaModule.getQuotaViewReadOnly === 'function') {
+        (hubConfig as Record<string, unknown>).quotaViewReadOnly = quotaModule.getQuotaViewReadOnly();
+      }
     }
     if (!this.hubPipeline) {
       this.hubPipeline = new hubCtor(hubConfig);
@@ -838,6 +904,10 @@ export class RouteCodexHttpServer {
       }
       this.hubPipeline.updateVirtualRouterConfig(bootstrapArtifacts.config);
     }
+
+    // llms-engine shadow: capture the latest hub config and reset shadow pipeline to avoid stale deps.
+    this.hubPipelineConfigForShadow = hubConfig as unknown as Record<string, unknown>;
+    this.hubPipelineEngineShadow = null;
 
     await this.initializeProviderRuntimes(bootstrapArtifacts);
   }
@@ -1402,14 +1472,25 @@ export class RouteCodexHttpServer {
         requestId: input.requestId
       });
     }
-    const processMode = (result.metadata?.processMode as string | undefined) ?? 'chat';
-    const resultRecord = result as unknown as Record<string, unknown>;
-    const derivedRequestId =
-      typeof resultRecord.requestId === 'string'
-        ? (resultRecord.requestId as string)
-        : input.requestId;
+	    const processMode = (result.metadata?.processMode as string | undefined) ?? 'chat';
+	    const resultRecord = result as unknown as Record<string, unknown>;
+	    const derivedRequestId =
+	      typeof resultRecord.requestId === 'string'
+	        ? (resultRecord.requestId as string)
+	        : input.requestId;
 
-    // Unified Hub Framework V1: runtime black-box shadow compare (baseline policy vs current policy).
+	    const llmsEngineShadowEnabled =
+	      !isInternalFollowup &&
+	      isLlmsEngineShadowEnabledForSubpath(this.llmsEngineShadowConfig, 'conversion/hub/pipeline');
+	    if (llmsEngineShadowEnabled) {
+	      // Fail fast: if shadow is enabled for this module, engine core must be available.
+	      await this.ensureHubPipelineEngineShadow();
+	    }
+	    const wantsLlmsEngineShadow =
+	      llmsEngineShadowEnabled &&
+	      shouldRunLlmsEngineShadowForSubpath(this.llmsEngineShadowConfig, 'conversion/hub/pipeline');
+
+	    // Unified Hub Framework V1: runtime black-box shadow compare (baseline policy vs current policy).
     // - baseline payload is computed in the SAME hub pipeline execution (single-pass)
     // - only writes errorsample when diff exists
     try {
@@ -1482,13 +1563,85 @@ export class RouteCodexHttpServer {
           }
         })();
       }
-    } catch {
-      // best-effort only
-    }
-    return {
-      requestId: derivedRequestId,
-      providerPayload: result.providerPayload,
-      target: result.target,
+	    } catch {
+	      // best-effort only
+	    }
+
+	    // llms-engine: runtime black-box shadow compare (TS vs engine) for hub pipeline.
+	    if (wantsLlmsEngineShadow) {
+	      const cloneJsonSafe = <T>(value: T): T => {
+	        try {
+	          return JSON.parse(JSON.stringify(value)) as T;
+	        } catch {
+	          return value;
+	        }
+	      };
+	      const entryEndpoint = String(input.entryEndpoint || '/v1/chat/completions');
+	      const routeHint =
+	        typeof (metadata as Record<string, unknown>).routeHint === 'string'
+	          ? String((metadata as Record<string, unknown>).routeHint)
+	          : undefined;
+	      const baselineOut = {
+	        providerPayload: cloneJsonSafe(result.providerPayload),
+	        target: cloneJsonSafe(result.target),
+	        metadata: {
+	          entryEndpoint: result.metadata?.entryEndpoint,
+	          providerProtocol: result.metadata?.providerProtocol,
+	          processMode: result.metadata?.processMode,
+	          stream: result.metadata?.stream,
+	          routeHint: result.metadata?.routeHint
+	        }
+	      };
+
+		      void (async () => {
+		        try {
+		          const shadowPipeline = await this.ensureHubPipelineEngineShadow();
+		          const shadowRequestId = `${input.requestId}__llms_engine_shadow`;
+		          const baseMeta = (pipelineInput as unknown as { metadata?: unknown }).metadata;
+		          const shadowInput = {
+		            ...(pipelineInput as unknown as Record<string, unknown>),
+		            id: shadowRequestId,
+		            endpoint: input.entryEndpoint,
+		            metadata: {
+		              ...(baseMeta && typeof baseMeta === 'object' ? (baseMeta as Record<string, unknown>) : {}),
+		              __llmsEngineShadow: { baselineRequestId: derivedRequestId, entryEndpoint, routeHint }
+		            },
+		            payload: cloneJsonSafe(payload)
+		          } as unknown as PipelineExecutionInput & { payload: Record<string, unknown> };
+		          const shadowResult = await shadowPipeline.execute(shadowInput);
+		          if (!shadowResult?.providerPayload || !shadowResult?.target) {
+		            return;
+		          }
+	          const candidateOut = {
+	            providerPayload: cloneJsonSafe(shadowResult.providerPayload),
+	            target: cloneJsonSafe(shadowResult.target),
+	            metadata: {
+	              entryEndpoint: shadowResult.metadata?.entryEndpoint,
+	              providerProtocol: shadowResult.metadata?.providerProtocol,
+	              processMode: shadowResult.metadata?.processMode,
+	              stream: shadowResult.metadata?.stream,
+	              routeHint: shadowResult.metadata?.routeHint
+	            }
+	          };
+	          await recordLlmsEngineShadowDiff({
+	            group: 'hub-pipeline',
+	            requestId: derivedRequestId,
+	            subpath: 'conversion/hub/pipeline',
+	            baselineImpl: 'ts',
+	            candidateImpl: 'engine',
+	            baselineOut,
+	            candidateOut
+	          });
+	        } catch (error) {
+	          // eslint-disable-next-line no-console
+	          console.error('[llms-engine-shadow] hub pipeline shadow failed:', error);
+	        }
+	      })();
+	    }
+	    return {
+	      requestId: derivedRequestId,
+	      providerPayload: result.providerPayload,
+	      target: result.target,
       routingDecision: result.routingDecision ?? undefined,
       processMode,
       metadata: result.metadata ?? {}

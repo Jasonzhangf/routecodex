@@ -80,6 +80,16 @@ describe('RouteCodexHttpServer hub policy injection', () => {
           async execute(): Promise<any> {
             return { metadata: {} };
           }
+        },
+      getHubPipelineCtorForImpl: async () =>
+        class HubPipelineMock {
+          constructor(config: any) {
+            captured.policy = config?.policy;
+          }
+          updateVirtualRouterConfig(): void {}
+          async execute(): Promise<any> {
+            return { metadata: {} };
+          }
         }
     }));
 
@@ -131,6 +141,16 @@ describe('RouteCodexHttpServer hub policy injection', () => {
         convertSseToJson: async () => ({})
       }),
       getHubPipelineCtor: async () =>
+        class HubPipelineMock {
+          constructor(config: any) {
+            captured.policy = config?.policy;
+          }
+          updateVirtualRouterConfig(): void {}
+          async execute(): Promise<any> {
+            return { metadata: {} };
+          }
+        },
+      getHubPipelineCtorForImpl: async () =>
         class HubPipelineMock {
           constructor(config: any) {
             captured.policy = config?.policy;
@@ -191,6 +211,16 @@ describe('RouteCodexHttpServer hub policy injection', () => {
         convertSseToJson: async () => ({})
       }),
       getHubPipelineCtor: async () =>
+        class HubPipelineMock {
+          constructor(config: any) {
+            captured.policy = config?.policy;
+          }
+          updateVirtualRouterConfig(): void {}
+          async execute(): Promise<any> {
+            return { metadata: {} };
+          }
+        },
+      getHubPipelineCtorForImpl: async () =>
         class HubPipelineMock {
           constructor(config: any) {
             captured.policy = config?.policy;
