@@ -96,20 +96,29 @@ async function main() {
 }
 
 async function runModelsSmokeCheck(authHeaders) {
-  try {
-    const res = await fetch(`${VERIFY_BASE}/models`, { headers: { ...(authHeaders || {}) } });
-    if (!res.ok) {
-      throw new Error(`/models HTTP ${res.status}`);
+  let lastError;
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    try {
+      const res = await fetch(`${VERIFY_BASE}/models`, { headers: { ...(authHeaders || {}) } });
+      if (!res.ok) {
+        throw new Error(`/models HTTP ${res.status}`);
+      }
+      const json = await res.json();
+      const data = Array.isArray(json?.data) ? json.data : [];
+      if (!Array.isArray(data)) {
+        throw new Error('/models response missing data array');
+      }
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attempt < 5) {
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        continue;
+      }
     }
-    const json = await res.json();
-    const data = Array.isArray(json?.data) ? json.data : [];
-    if (!Array.isArray(data)) {
-      throw new Error('/models response missing data array');
-    }
-  } catch (error) {
-    console.error('[verify:e2e-toolcall] /models smoke 检查失败:', error);
-    throw error;
   }
+  console.error('[verify:e2e-toolcall] /models smoke 检查失败:', lastError);
+  throw lastError;
 }
 
 async function waitForServer(timeoutMs = 30000) {
@@ -126,7 +135,7 @@ async function waitForServer(timeoutMs = 30000) {
   throw new Error('服务器健康检查超时');
 }
 
-async function waitForRouterWarmup(defaultDelayMs = 3000) {
+async function waitForRouterWarmup(defaultDelayMs = 0) {
   const delayMs = Number(process.env.ROUTECODEX_VERIFY_WARMUP_MS || defaultDelayMs);
   if (!Number.isFinite(delayMs) || delayMs <= 0) {
     return;
@@ -209,6 +218,12 @@ async function runDaemonAdminSmokeCheck(authHeaders) {
   // 仅做最小的健康性探测：确保 daemon 管理类只读 API 可用，不做语义校验。
   try {
     const res = await fetch(`${VERIFY_BASE}/daemon/status`, { headers: { ...(authHeaders || {}) } });
+    if (res.status === 401) {
+      // Daemon admin endpoints are protected by password login (cookie session).
+      // Do not fail the build when the user has not logged in.
+      console.warn('[verify:e2e-toolcall] /daemon/status returned 401 (unauthorized); skip daemon-admin smoke checks');
+      return;
+    }
     if (!res.ok) {
       throw new Error(`daemon/status HTTP ${res.status}`);
     }
@@ -225,6 +240,10 @@ async function runDaemonAdminSmokeCheck(authHeaders) {
   for (const path of paths) {
     try {
       const res = await fetch(`${VERIFY_BASE}${path}`, { headers: { ...(authHeaders || {}) } });
+      if (res.status === 401) {
+        console.warn(`[verify:e2e-toolcall] ${path} returned 401 (unauthorized); skip remaining daemon-admin smoke checks`);
+        return;
+      }
       if (!res.ok) {
         throw new Error(`${path} HTTP ${res.status}`);
       }

@@ -34,7 +34,18 @@ export interface RequestExecutor {
   execute(input: PipelineExecutionInput): Promise<PipelineExecutionResult>;
 }
 
-const MAX_PROVIDER_ATTEMPTS = 3;
+const DEFAULT_MAX_PROVIDER_ATTEMPTS = 6;
+
+function resolveMaxProviderAttempts(): number {
+  const raw = String(
+    process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS || process.env.RCC_MAX_PROVIDER_ATTEMPTS || ''
+  )
+    .trim()
+    .toLowerCase();
+  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
+  const candidate = Number.isFinite(parsed) ? parsed : DEFAULT_MAX_PROVIDER_ATTEMPTS;
+  return Math.max(1, Math.min(20, candidate));
+}
 
 export class HubRequestExecutor implements RequestExecutor {
   constructor(private readonly deps: RequestExecutorDeps) { }
@@ -88,7 +99,7 @@ export class HubRequestExecutor implements RequestExecutor {
       const pipelineLabel = 'hub';
       let aggregatedUsage: UsageMetrics | undefined;
       const excludedProviderKeys = new Set<string>();
-      const maxAttempts = MAX_PROVIDER_ATTEMPTS;
+      const maxAttempts = resolveMaxProviderAttempts();
       const originalRequestSnapshot = this.cloneRequestPayload(input.body);
       let attempt = 0;
       let lastError: unknown;
@@ -452,7 +463,6 @@ export class HubRequestExecutor implements RequestExecutor {
       }): Promise<{ body?: Record<string, unknown>; __sse_responses?: unknown; format?: string }> => {
         const nestedEntry = reenterOpts.entryEndpoint || options.entryEndpoint || entry;
         const nestedExtra = asRecord(reenterOpts.metadata) ?? {};
-        const nestedEntryLower = nestedEntry.toLowerCase();
 
         // 基于首次 HubPipeline metadata + 调用方注入的 metadata 构建新的请求 metadata。
         // 不在 Host 层编码 servertool/web_search 等语义，由 llmswitch-core 负责。
@@ -469,22 +479,6 @@ export class HubRequestExecutor implements RequestExecutor {
         if (nestedMetadata.serverToolFollowup === true) {
           delete nestedMetadata.clientHeaders;
           delete nestedMetadata.clientRequestId;
-        }
-
-        // 针对 reenterPipeline 的入口端点，纠正 providerProtocol，避免沿用外层协议。
-        if (nestedEntryLower.includes('/v1/chat/completions')) {
-          nestedMetadata._providerProtocol = 'openai-chat';
-        } else if (nestedEntryLower.includes('/v1/responses')) {
-          nestedMetadata._providerProtocol = 'openai-responses';
-        } else if (nestedEntryLower.includes('/v1/messages')) {
-          nestedMetadata._providerProtocol = 'anthropic-messages';
-        }
-        const followupProtocol =
-          typeof (nestedExtra as Record<string, unknown>).serverToolFollowupProtocol === 'string'
-            ? ((nestedExtra as Record<string, unknown>).serverToolFollowupProtocol as string)
-            : undefined;
-        if (followupProtocol) {
-          nestedMetadata._providerProtocol = followupProtocol;
         }
 
         const nestedInput: PipelineExecutionInput = {

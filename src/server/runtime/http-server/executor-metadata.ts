@@ -1,6 +1,6 @@
 import type { PipelineExecutionInput } from '../../handlers/types.js';
 import { asRecord } from './provider-utils.js';
-import { extractSessionIdentifiersFromMetadata } from '../../../../sharedmodule/llmswitch-core/dist/conversion/hub/pipeline/session-identifiers.js';
+import { extractSessionIdentifiersFromMetadata } from '../../../modules/llmswitch/bridge.js';
 
 export function cloneClientHeaders(source: unknown): Record<string, string> | undefined {
   if (!source || typeof source !== 'object') {
@@ -149,4 +149,3 @@ function cloneMetadata(source: Record<string, unknown>): Record<string, unknown>
     return { ...source };
   }
 }
-

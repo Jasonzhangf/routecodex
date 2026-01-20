@@ -39,8 +39,8 @@ const sleep = (ms: number): Promise<void> =>
 
 async function ensureCoreOrFail(): Promise<void> {
 // 在当前 worktree/dev 场景下：
-// - llmswitch-core 直接通过 sharedmodule/llmswitch-core/dist 引用；
-// - 实际加载在 pipeline/server 模块内部完成；
+// - llmswitch-core 通过 node_modules 中的 llms 包引用（dev 下可能 symlink 到 sharedmodule/llmswitch-core）；
+// - 实际加载与访问统一由 src/modules/llmswitch/bridge 负责；
 // 这里不再做额外的模块解析探测，避免因为本地 node_modules 结构差异导致 CLI 直接失败。
   return;
 }

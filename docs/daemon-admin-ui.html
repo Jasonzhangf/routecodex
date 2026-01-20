@@ -85,6 +85,96 @@
         color: var(--muted);
       }
 
+      .toast {
+        position: fixed;
+        right: 14px;
+        bottom: 14px;
+        max-width: 520px;
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: rgba(20, 20, 20, 0.92);
+        color: var(--fg);
+        box-shadow: 0 12px 34px rgba(0,0,0,0.45);
+        z-index: 99999;
+        font-size: 13px;
+        line-height: 1.35;
+        display: none;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .toast.show { display: block; }
+      .toast.ok { border-color: rgba(38, 200, 120, 0.45); }
+      .toast.err { border-color: rgba(255, 90, 90, 0.55); }
+
+      .kv {
+        border: 1px solid rgba(255, 255, 255, 0.10);
+        border-radius: 12px;
+        padding: 8px 10px;
+        background: rgba(0, 0, 0, 0.18);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        font-size: 12px;
+        line-height: 1.45;
+        color: rgba(255, 255, 255, 0.86);
+        overflow: auto;
+        max-height: 520px;
+      }
+
+      .kv details {
+        border-left: 1px solid rgba(255, 255, 255, 0.10);
+        margin-left: 10px;
+        padding-left: 10px;
+      }
+
+      .kv summary {
+        cursor: pointer;
+        list-style: none;
+        user-select: none;
+        display: flex;
+        gap: 10px;
+        align-items: baseline;
+        padding: 2px 0;
+      }
+
+      .kv summary::-webkit-details-marker { display: none; }
+
+      .kv .kv-key {
+        color: rgba(255, 255, 255, 0.92);
+        min-width: 180px;
+        max-width: 520px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .kv .kv-meta {
+        color: rgba(255, 255, 255, 0.55);
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .kv .kv-leaf {
+        display: flex;
+        gap: 10px;
+        padding: 2px 0;
+      }
+
+      .kv .kv-val {
+        color: rgba(255, 255, 255, 0.78);
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .kv-tools {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin: 0 0 8px;
+      }
       .dot {
         width: 8px;
         height: 8px;
@@ -236,6 +326,14 @@
         font-weight: 650;
       }
 
+      .table tr.provider-row:hover td {
+        background: rgba(78, 161, 255, 0.06);
+      }
+
+      .table tr.provider-row.selected td {
+        background: rgba(78, 161, 255, 0.12);
+      }
+
       .indent {
         padding-left: 22px !important;
       }
@@ -327,9 +425,8 @@
           <div class="title">
             <h1>RouteCodex Daemon Admin</h1>
             <p>
-              Writes to <span class="mono">~/.routecodex/config.json</span>. If
-              <span class="mono">httpserver.apikey</span> is configured, remote access is allowed
-              with the key; otherwise this page is localhost-only.
+              Writes to <span class="mono">~/.routecodex/config.json</span>. This UI requires an admin password:
+              first visit will ask you to set one (stored at <span class="mono">~/.routecodex/login</span>), then you login with it.
             </p>
           </div>
           <div class="statusline">
@@ -340,7 +437,21 @@
         </header>
 
         <div class="row" style="margin-bottom: 10px;">
-          <label for="apiKeyInput">Server API Key (optional)</label>
+          <label for="adminPasswordInput">Admin password</label>
+          <input
+            id="adminPasswordInput"
+            type="password"
+            placeholder="set (first time) / login"
+            style="flex: 1; min-width: 260px;"
+          />
+          <button id="setupPasswordBtn" class="primary">Set</button>
+          <button id="loginPasswordBtn" class="primary">Login</button>
+          <button id="logoutPasswordBtn">Logout</button>
+          <span class="mono" id="adminAuthHint"></span>
+        </div>
+
+        <div class="row" style="margin-bottom: 10px;">
+          <label for="apiKeyInput">Server API key (optional, for /v1/* tests)</label>
           <input
             id="apiKeyInput"
             type="password"
@@ -388,6 +499,14 @@
                   <tbody id="providersTbody"></tbody>
                 </table>
               </div>
+
+              <p class="section-title" style="margin-top: 12px;">Providers registry</p>
+              <p class="section-sub">Key/value view of <span class="mono">virtualrouter.providers</span>.</p>
+              <div class="kv-tools">
+                <button id="providersRegExpandBtn">Expand all</button>
+                <button id="providersRegCollapseBtn">Collapse all</button>
+              </div>
+              <div id="providersRegistry" class="kv"></div>
             </div>
 
             <div class="card" style="box-shadow: none;">
@@ -397,7 +516,7 @@
               </p>
 
               <div class="notice" style="margin-bottom: 10px;">
-                If you use <span class="mono">httpserver.apikey</span>, set it above so API calls don’t return 401. Without apikey configured, this page is localhost-only.
+                Admin API calls use the password login above (cookie session). The optional server API key is only needed for testing proxy endpoints like <span class="mono">/v1/responses</span>.
               </div>
 
               <div class="row" style="margin-bottom: 10px;">
@@ -643,6 +762,15 @@
               </div>
               <textarea id="routingEditor" spellcheck="false" placeholder="{\n  \"default\": [...]\n}"></textarea>
               <div id="routingOpLog" class="log" style="margin-top: 10px; display:none;"></div>
+
+              <p class="section-title" style="margin-top: 12px;">Routing registry</p>
+              <p class="section-sub">Key/value view of <span class="mono">virtualrouter.routing</span>.</p>
+              <div class="kv-tools">
+                <button id="routingRegPreviewBtn">Preview from editor</button>
+                <button id="routingRegExpandBtn">Expand all</button>
+                <button id="routingRegCollapseBtn">Collapse all</button>
+              </div>
+              <div id="routingRegistry" class="kv"></div>
             </div>
 
             <div class="card" style="box-shadow:none;">
@@ -667,14 +795,61 @@
                   <tbody id="runtimesTbody"></tbody>
                 </table>
               </div>
+
+              <p class="section-title" style="margin-top: 12px;">Runtime providers registry</p>
+              <p class="section-sub">Key/value view of loaded runtime providers.</p>
+              <div class="kv-tools">
+                <button id="runtimesRegExpandBtn">Expand all</button>
+                <button id="runtimesRegCollapseBtn">Collapse all</button>
+              </div>
+              <div id="runtimesRegistry" class="kv"></div>
             </div>
           </div>
         </section>
       </div>
     </div>
 
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
     <script>
       const $ = (id) => document.getElementById(id);
+      const UI = {
+        selectedProviderId: "",
+        lastUnauthorizedToastAt: 0
+      };
+      let toastTimer = null;
+
+      function toast(msg, kind = "err") {
+        const el = $("toast");
+        if (!el) return;
+        el.classList.remove("ok", "err", "show");
+        el.classList.add(kind === "ok" ? "ok" : "err");
+        el.textContent = String(msg || "");
+        el.classList.add("show");
+        if (toastTimer) clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => {
+          try { el.classList.remove("show"); } catch {}
+        }, 4200);
+      }
+
+      function onClick(id, handler) {
+        const el = $(id);
+        if (!el) {
+          console.warn(`[daemon-admin-ui] missing #${id}`);
+          return false;
+        }
+        el.addEventListener("click", handler);
+        return true;
+      }
+
+      function notifyUnauthorizedOnce(context) {
+        const now = Date.now();
+        if (now - UI.lastUnauthorizedToastAt < 1800) return;
+        UI.lastUnauthorizedToastAt = now;
+        const label = context ? ` (${context})` : "";
+        toast(`Unauthorized${label}. Login required.`);
+        try { void refreshAdminAuthStatus(); } catch {}
+      }
 
       function setLog(id, value) {
         const el = $(id);
@@ -703,10 +878,8 @@
 
       async function apiFetch(path, opts = {}) {
         const headers = new Headers(opts.headers || {});
-        const apiKey = getApiKey();
-        if (apiKey) headers.set("x-api-key", apiKey);
         if (!headers.has("content-type") && opts.body) headers.set("content-type", "application/json");
-        const res = await fetch(path, { ...opts, headers });
+        const res = await fetch(path, { ...opts, headers, credentials: "same-origin" });
         const text = await res.text();
         let json = null;
         try {
@@ -720,6 +893,7 @@
             `HTTP ${res.status} ${res.statusText}`;
           const err = new Error(msg);
           err.status = res.status;
+          err.path = path;
           err.payload = json;
           throw err;
         }
@@ -739,7 +913,7 @@
         ];
         for (const p of panels) p.el.style.display = p.name === name ? "block" : "none";
 
-        // Light auto-refresh on tab switch to avoid showing stale "Unauthorized" after setting apikey.
+        // Light auto-refresh on tab switch to avoid showing stale "Unauthorized" after login.
         void maybeRefreshTab(name);
       }
 
@@ -797,6 +971,134 @@
         td.textContent = `Failed to load: ${textOf(message)}`;
         tr.appendChild(td);
         return tr;
+      }
+
+      function setSelectedProviderId(id) {
+        UI.selectedProviderId = textOf(id || "");
+        const tbody = $("providersTbody");
+        if (!tbody) return;
+        tbody.querySelectorAll("tr.provider-row").forEach((tr) => {
+          const pid = tr.getAttribute("data-provider-id") || "";
+          tr.classList.toggle("selected", pid && pid === UI.selectedProviderId);
+        });
+      }
+
+      function kvTypeMeta(value) {
+        if (value === null) return "null";
+        if (value === undefined) return "undefined";
+        if (Array.isArray(value)) return `array(${value.length})`;
+        const t = typeof value;
+        if (t === "string") return `string(${value.length})`;
+        if (t === "number") return "number";
+        if (t === "boolean") return "boolean";
+        if (t === "bigint") return "bigint";
+        if (t === "function") return "function";
+        if (t === "symbol") return "symbol";
+        if (t === "object") {
+          try {
+            const keys = Object.keys(value);
+            return `object(${keys.length})`;
+          } catch {
+            return "object";
+          }
+        }
+        return t;
+      }
+
+      function kvPreview(value) {
+        if (value === null || value === undefined) return String(value);
+        const t = typeof value;
+        if (t === "string") {
+          const max = 140;
+          const s = value.length > max ? value.slice(0, max) + "…" : value;
+          return JSON.stringify(s);
+        }
+        if (t === "number" || t === "boolean" || t === "bigint") return String(value);
+        if (Array.isArray(value)) return "";
+        if (t === "object") return "";
+        return String(value);
+      }
+
+      function renderRegistry(container, value, opts = {}) {
+        if (!container) return;
+        container.replaceChildren();
+        const rootLabel = (opts.rootLabel || "root").trim() || "root";
+        try {
+          container.appendChild(renderRegistryNode(rootLabel, value, 0, true));
+        } catch (e) {
+          const box = document.createElement("div");
+          box.className = "mono";
+          box.textContent = `Render failed: ${e && e.message ? e.message : String(e)}`;
+          container.appendChild(box);
+        }
+      }
+
+      function renderRegistryNode(key, value, depth, isRoot = false) {
+        const isObj = value !== null && typeof value === "object";
+        const isArr = Array.isArray(value);
+
+        if (!isObj) {
+          const row = document.createElement("div");
+          row.className = "kv-leaf";
+          const k = document.createElement("div");
+          k.className = "kv-key";
+          k.textContent = key;
+          const v = document.createElement("div");
+          v.className = "kv-val";
+          v.textContent = kvPreview(value);
+          row.appendChild(k);
+          row.appendChild(v);
+          return row;
+        }
+
+        const details = document.createElement("details");
+        details.open = isRoot || depth < 1;
+
+        const summary = document.createElement("summary");
+        const k = document.createElement("div");
+        k.className = "kv-key";
+        k.textContent = key;
+        const m = document.createElement("div");
+        m.className = "kv-meta";
+        const meta = kvTypeMeta(value);
+        const preview = kvPreview(value);
+        m.textContent = preview ? `${meta}  ${preview}` : meta;
+        summary.appendChild(k);
+        summary.appendChild(m);
+        details.appendChild(summary);
+
+        if (isArr) {
+          for (let i = 0; i < value.length; i += 1) {
+            details.appendChild(renderRegistryNode(String(i), value[i], depth + 1));
+          }
+          return details;
+        }
+
+        let keys = [];
+        try {
+          keys = Object.keys(value);
+          keys.sort((a, b) => a.localeCompare(b));
+        } catch {
+          keys = [];
+        }
+        for (const childKey of keys) {
+          let childValue;
+          try {
+            childValue = value[childKey];
+          } catch (e) {
+            childValue = `[[unreadable: ${e && e.message ? e.message : String(e)}]]`;
+          }
+          details.appendChild(renderRegistryNode(childKey, childValue, depth + 1));
+        }
+        return details;
+      }
+
+      function setAllDetailsOpen(container, open, keepRootOpen = true) {
+        if (!container) return;
+        const nodes = Array.from(container.querySelectorAll("details"));
+        nodes.forEach((d, idx) => {
+          d.open = open || (keepRootOpen && idx === 0);
+        });
       }
 
       function presetFor(type) {
@@ -865,9 +1167,18 @@
       async function refreshProviders() {
         const body = $("providersTbody");
         body.replaceChildren();
+        const reg = $("providersRegistry");
+        if (reg) reg.replaceChildren();
         try {
           const data = await apiFetch("/config/providers");
           const list = Array.isArray(data.providers) ? data.providers : [];
+          const providersById = {};
+          for (let i = 0; i < list.length; i += 1) {
+            const p = list[i];
+            const id = textOf(p && p.id ? p.id : "") || `__${i}`;
+            providersById[id] = p;
+          }
+          renderRegistry(reg, providersById, { rootLabel: "virtualrouter.providers" });
           const grouped = new Map();
           for (const p of list) {
             const t = textOf(p.type || "unknown") || "unknown";
@@ -887,8 +1198,12 @@
             const items = grouped.get(type);
             items.sort((a, b) => textOf(a.id).localeCompare(textOf(b.id)));
             for (const p of items) {
+              const pid = textOf(p.id);
               const tr = document.createElement("tr");
-              tr.appendChild(createCell("td", p.id || "", "mono indent"));
+              tr.className = "provider-row";
+              tr.setAttribute("data-provider-id", pid);
+              if (pid && pid === UI.selectedProviderId) tr.classList.add("selected");
+              tr.appendChild(createCell("td", pid || "", "mono indent"));
               tr.appendChild(createCell("td", p.type || "", ""));
               tr.appendChild(createCell("td", String(Boolean(p.enabled)), ""));
               tr.appendChild(createCell("td", p.baseURL || "", "mono truncate", { title: true }));
@@ -924,19 +1239,24 @@
             }
           }
         } catch (e) {
+          if (e && e.status === 401) notifyUnauthorizedOnce("providers");
+          renderRegistry(reg, { error: e && e.message ? e.message : String(e) }, { rootLabel: "virtualrouter.providers" });
           body.appendChild(createErrorRow(8, e && e.message ? e.message : e));
         }
       }
 
       async function loadProvider(id) {
         setLog("providerOpLog", "");
+        setSelectedProviderId(id);
         try {
           const data = await apiFetch(`/config/providers/${encodeURIComponent(id)}`);
           $("providerIdInput").value = id;
           $("providerJsonEditor").value = JSON.stringify(data.provider || {}, null, 2);
           $("providerEditorTitle").textContent = `Provider editor: ${id}`;
         } catch (e) {
+          if (e && e.status === 401) notifyUnauthorizedOnce("provider load");
           setLog("providerOpLog", `Load failed: ${e.message}`);
+          toast(`Load failed: ${e.message}`);
         }
       }
 
@@ -945,6 +1265,7 @@
         const id = ($("providerIdInput").value || "").trim();
         if (!id) {
           setLog("providerOpLog", "provider id is required");
+          toast("provider id is required");
           return;
         }
         try {
@@ -954,9 +1275,12 @@
             body: JSON.stringify({ provider })
           });
           setLog("providerOpLog", `Saved. Path: ${result.path || "—"}\nRestart required to apply.`);
+          toast("Provider saved.", "ok");
           await refreshProviders();
         } catch (e) {
+          if (e && e.status === 401) notifyUnauthorizedOnce("provider save");
           setLog("providerOpLog", `Save failed: ${e.message}`);
+          toast(`Save failed: ${e.message}`);
         }
       }
 
@@ -964,15 +1288,19 @@
         setLog("providerOpLog", "");
         if (!id) {
           setLog("providerOpLog", "provider id is required");
+          toast("provider id is required");
           return;
         }
         if (!confirm(`Delete provider "${id}" from user config?`)) return;
         try {
           const result = await apiFetch(`/config/providers/${encodeURIComponent(id)}`, { method: "DELETE" });
           setLog("providerOpLog", `Deleted. Path: ${result.path || "—"}\nRestart required to apply.`);
+          toast("Provider deleted.", "ok");
           await refreshProviders();
         } catch (e) {
+          if (e && e.status === 401) notifyUnauthorizedOnce("provider delete");
           setLog("providerOpLog", `Delete failed: ${e.message}`);
+          toast(`Delete failed: ${e.message}`);
         }
       }
 
@@ -1098,12 +1426,18 @@
 
       async function loadRouting() {
         setLog("routingOpLog", "");
+        const reg = $("routingRegistry");
         try {
           const out = await apiFetch("/config/routing");
+          renderRegistry(reg, out.routing || {}, { rootLabel: "virtualrouter.routing" });
           $("routingEditor").value = JSON.stringify(out.routing || {}, null, 2);
           setLog("routingOpLog", `Loaded. Path: ${out.path || "—"}`);
+          toast("Routing loaded.", "ok");
         } catch (e) {
+          if (e && e.status === 401) notifyUnauthorizedOnce("routing");
+          renderRegistry(reg, { error: e && e.message ? e.message : String(e) }, { rootLabel: "virtualrouter.routing" });
           setLog("routingOpLog", `Load failed: ${e.message}`);
+          toast(`Load failed: ${e.message}`);
         }
       }
 
@@ -1115,17 +1449,30 @@
             method: "PUT",
             body: JSON.stringify({ routing })
           });
+          renderRegistry($("routingRegistry"), routing || {}, { rootLabel: "virtualrouter.routing" });
           setLog("routingOpLog", `Saved. Path: ${out.path || "—"}\nRestart required to apply.`);
+          toast("Routing saved.", "ok");
         } catch (e) {
+          if (e && e.status === 401) notifyUnauthorizedOnce("routing save");
           setLog("routingOpLog", `Save failed: ${e.message}`);
+          toast(`Save failed: ${e.message}`);
         }
       }
 
       async function refreshRuntimes() {
         const body = $("runtimesTbody");
         body.replaceChildren();
+        const reg = $("runtimesRegistry");
+        if (reg) reg.replaceChildren();
         try {
           const items = await apiFetch("/providers/runtimes");
+          const grouped = {};
+          for (const r of items || []) {
+            const k = textOf(r && r.providerKey ? r.providerKey : "") || "unknown";
+            if (!grouped[k]) grouped[k] = [];
+            grouped[k].push(r);
+          }
+          renderRegistry(reg, grouped, { rootLabel: "runtime.providers" });
           for (const r of items || []) {
             const tr = document.createElement("tr");
             tr.appendChild(createCell("td", r.providerKey || "", "mono truncate", { title: true }));
@@ -1136,6 +1483,8 @@
             body.appendChild(tr);
           }
         } catch (e) {
+          if (e && e.status === 401) notifyUnauthorizedOnce("runtimes");
+          renderRegistry(reg, { error: e && e.message ? e.message : String(e) }, { rootLabel: "runtime.providers" });
           body.appendChild(createErrorRow(5, e && e.message ? e.message : e));
         }
       }
@@ -1190,6 +1539,7 @@
             body.appendChild(tr);
           }
         } catch (e) {
+          if (e && e.status === 401) notifyUnauthorizedOnce("quota");
           body.appendChild(createErrorRow(8, e && e.message ? e.message : e));
         }
       }
@@ -1311,16 +1661,22 @@
 
       async function quotaAction(kind, providerKey) {
         setLog("quotaOpLog", "");
-        if (!providerKey) return;
+        if (!providerKey) {
+          setLog("quotaOpLog", "providerKey required");
+          toast("providerKey required");
+          return;
+        }
         try {
           if (kind === "recover") {
             await apiFetch(`/quota/providers/${encodeURIComponent(providerKey)}/recover`, { method: "POST" });
             await refreshQuota();
+            toast("Recovered.", "ok");
             return;
           }
           if (kind === "reset") {
             await apiFetch(`/quota/providers/${encodeURIComponent(providerKey)}/reset`, { method: "POST" });
             await refreshQuota();
+            toast("Reset.", "ok");
             return;
           }
           if (kind === "disable") {
@@ -1337,10 +1693,13 @@
               body: JSON.stringify({ mode, durationMinutes: minutes })
             });
             await refreshQuota();
+            toast("Disabled.", "ok");
             return;
           }
         } catch (e) {
+          if (e && e.status === 401) notifyUnauthorizedOnce("quota action");
           setLog("quotaOpLog", `Action failed: ${e && e.message ? e.message : e}`);
+          toast(`Action failed: ${e && e.message ? e.message : String(e)}`);
         }
       }
 
@@ -1351,14 +1710,89 @@
           const out = await apiFetch("/daemon/modules/provider-quota/reset", { method: "POST" });
           setLog("quotaOpLog", `OK. resetAt=${out.resetAt || "—"}`);
           await refreshQuota();
+          toast("Quota module reset.", "ok");
         } catch (e) {
+          if (e && e.status === 401) notifyUnauthorizedOnce("quota reset");
           setLog("quotaOpLog", `Reset failed: ${e.message}`);
+          toast(`Reset failed: ${e.message}`);
         }
       }
 
       // Bind events
       document.querySelectorAll(".tab").forEach((btn) => {
         btn.addEventListener("click", () => selectTab(btn.getAttribute("data-tab")));
+      });
+
+      async function refreshAdminAuthStatus() {
+        try {
+          const status = await apiFetch("/daemon/auth/status", { method: "GET" });
+          if (status && status.ok) {
+            const hasPassword = Boolean(status.hasPassword);
+            const authed = Boolean(status.authenticated);
+            $("adminAuthHint").textContent = authed ? "authenticated" : hasPassword ? "login required" : "setup required (localhost only)";
+            $("setupPasswordBtn").style.display = hasPassword ? "none" : "inline-block";
+            $("loginPasswordBtn").style.display = hasPassword ? "inline-block" : "none";
+            return { hasPassword, authenticated: authed };
+          }
+        } catch (e) {
+          const msg = e && e.message ? e.message : String(e);
+          $("adminAuthHint").textContent = msg;
+          toast(`Admin auth status failed: ${msg}`);
+        }
+        return { hasPassword: false, authenticated: false };
+      }
+
+      $("setupPasswordBtn").addEventListener("click", async () => {
+        const pw = ($("adminPasswordInput").value || "");
+        try {
+          $("adminAuthHint").textContent = "setting password…";
+          await apiFetch("/daemon/auth/setup", { method: "POST", body: JSON.stringify({ password: pw }) });
+          $("adminPasswordInput").value = "";
+          toast("Password set. You're now logged in.", "ok");
+          await refreshAdminAuthStatus();
+          await refreshStatus();
+          await refreshProviders();
+          await refreshCredentials();
+          await refreshQuota();
+          await refreshRuntimes();
+        } catch (e) {
+          const msg = e && e.message ? e.message : String(e);
+          $("adminAuthHint").textContent = msg;
+          toast(`Set password failed: ${msg}`);
+        }
+      });
+
+      $("loginPasswordBtn").addEventListener("click", async () => {
+        const pw = ($("adminPasswordInput").value || "");
+        try {
+          $("adminAuthHint").textContent = "logging in…";
+          await apiFetch("/daemon/auth/login", { method: "POST", body: JSON.stringify({ password: pw }) });
+          $("adminPasswordInput").value = "";
+          toast("Logged in.", "ok");
+          await refreshAdminAuthStatus();
+          await refreshStatus();
+          await refreshProviders();
+          await refreshCredentials();
+          await refreshQuota();
+          await refreshRuntimes();
+        } catch (e) {
+          const msg = e && e.message ? e.message : String(e);
+          $("adminAuthHint").textContent = msg;
+          toast(`Login failed: ${msg}`);
+        }
+      });
+
+      $("logoutPasswordBtn").addEventListener("click", async () => {
+        try {
+          $("adminAuthHint").textContent = "logging out…";
+          await apiFetch("/daemon/auth/logout", { method: "POST" });
+          toast("Logged out.", "ok");
+          await refreshAdminAuthStatus();
+        } catch (e) {
+          const msg = e && e.message ? e.message : String(e);
+          $("adminAuthHint").textContent = msg;
+          toast(`Logout failed: ${msg}`);
+        }
       });
 
       $("saveApiKeyBtn").addEventListener("click", () => {
@@ -1399,6 +1833,8 @@
 
       $("refreshProvidersBtn").addEventListener("click", refreshProviders);
       $("refreshTokensBtn").addEventListener("click", refreshTokens);
+      $("providersRegExpandBtn").addEventListener("click", () => setAllDetailsOpen($("providersRegistry"), true));
+      $("providersRegCollapseBtn").addEventListener("click", () => setAllDetailsOpen($("providersRegistry"), false));
       $("newProviderBtn").addEventListener("click", () => {
         $("providerEditorTitle").textContent = "Provider editor (new)";
         $("providerIdInput").value = "";
@@ -1407,15 +1843,30 @@
       });
       $("providersTbody").addEventListener("click", async (ev) => {
         const btn = ev.target.closest("button");
-        if (!btn) return;
-        const id = btn.getAttribute("data-id");
-        const action = btn.getAttribute("data-action");
-        if (action === "test" && id) {
-          await testProviderFromPool(id);
+        if (btn) {
+          const id = btn.getAttribute("data-id");
+          const action = btn.getAttribute("data-action");
+          if (action === "test" && id) {
+            setSelectedProviderId(id);
+            await testProviderFromPool(id);
+            return;
+          }
+          if (action === "edit" && id) {
+            await loadProvider(id);
+            return;
+          }
+          if (action === "delete" && id) {
+            await deleteProvider(id);
+            return;
+          }
           return;
         }
-        if (action === "edit") await loadProvider(id);
-        if (action === "delete") await deleteProvider(id);
+
+        const row = ev.target.closest("tr.provider-row");
+        if (!row) return;
+        const id = row.getAttribute("data-provider-id");
+        if (!id) return;
+        await loadProvider(id);
       });
       $("loadProviderBtn").addEventListener("click", async () => {
         const id = ($("providerIdInput").value || "").trim();
@@ -1438,8 +1889,8 @@
 
       $("refreshQuotaBtn").addEventListener("click", refreshQuota);
       $("quotaTbody").addEventListener("click", (ev) => {
-        const el = ev.target;
-        if (!el || el.tagName !== "BUTTON") return;
+        const el = ev.target.closest("button");
+        if (!el) return;
         const action = el.getAttribute("data-action");
         const key = el.getAttribute("data-key");
         if (action === "quota-recover") void quotaAction("recover", key);
@@ -1450,10 +1901,24 @@
 
       $("loadRoutingBtn").addEventListener("click", loadRouting);
       $("saveRoutingBtn").addEventListener("click", saveRouting);
+      $("routingRegPreviewBtn").addEventListener("click", () => {
+        try {
+          const routing = JSON.parse($("routingEditor").value || "{}");
+          renderRegistry($("routingRegistry"), routing || {}, { rootLabel: "virtualrouter.routing" });
+          toast("Routing preview updated.", "ok");
+        } catch (e) {
+          toast(`Preview failed: ${e && e.message ? e.message : String(e)}`);
+        }
+      });
+      $("routingRegExpandBtn").addEventListener("click", () => setAllDetailsOpen($("routingRegistry"), true));
+      $("routingRegCollapseBtn").addEventListener("click", () => setAllDetailsOpen($("routingRegistry"), false));
       $("refreshRuntimesBtn").addEventListener("click", refreshRuntimes);
+      $("runtimesRegExpandBtn").addEventListener("click", () => setAllDetailsOpen($("runtimesRegistry"), true));
+      $("runtimesRegCollapseBtn").addEventListener("click", () => setAllDetailsOpen($("runtimesRegistry"), false));
 
       // Init
       (async () => {
+        await refreshAdminAuthStatus();
         const savedKey = getApiKey();
         if (savedKey) {
           $("apiKeyHint").textContent = "saved (session only)";

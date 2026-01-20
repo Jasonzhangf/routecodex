@@ -30,8 +30,7 @@ interface ProviderConfigV2Summary {
 }
 
 export function registerProviderRoutes(app: Application, options: DaemonAdminRouteOptions): void {
-  const expectedApiKey = options.getExpectedApiKey?.();
-  const reject = (req: Request, res: Response) => rejectNonLocalOrUnauthorizedAdmin(req, res, expectedApiKey);
+  const reject = (req: Request, res: Response) => rejectNonLocalOrUnauthorizedAdmin(req, res);
 
   app.get('/providers/runtimes', (req: Request, res: Response) => {
     if (reject(req, res)) {return;}

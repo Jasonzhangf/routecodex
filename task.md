@@ -1,8 +1,8 @@
 # CI/CD 任务进度与模块修复记录
 
-## 当前任务状态 (2026-01-18)
+## 当前任务状态 (2026-01-19)
 
-## Unified Hub Framework V1（逐步收口骨架）（更新：2026-01-18）
+## Unified Hub Framework V1（逐步收口骨架）（更新：2026-01-19）
 
 - 计划文档：`docs/plans/unified-hub-framework-v1.md`
 - 目标：把参数白名单/字段布局/工具形态/ServerTool followup 等“政策”从分散实现，收敛到 llmswitch-core 的统一骨架（single execution path + 强制 policy + ProtocolSpec 注册表）。
@@ -10,12 +10,71 @@
 
 ### 里程碑（可回滚、按协议逐步收紧）
 
-- [ ] Phase 0：PolicyEngine observe-only（不改写，只统计/快照）
-- [ ] Phase 1：parameterPolicy 收口（provider outbound：sanitize/normalize/layout）
-- [ ] Phase 2：toolSurface 收口（definition/call/result 形态统一 + 可配置 A/B）
-- [ ] Phase 3：followup 收口完善（由 core 明确 followup protocol/metadata；Host 移除兜底修补）
-- [ ] Phase 4：语义迁移到 Operation Table（协议只保留 wire ↔ ops 映射）
-- [ ] Phase 5：删除旧路径 + CI/Lint 禁绕过（仅保留 ProtocolSpec + PolicyEngine + ops 执行器）
+- [x] Phase 0：PolicyEngine observe-only（不改写，只统计/快照）
+- [x] Phase 1：parameterPolicy 收口（provider outbound：sanitize/normalize/layout）
+- [x] Phase 2：toolSurface 收口（definition/call/result 形态统一 + 可配置 A/B）
+- [x] Phase 3：followup 收口完善（目标：handler 只负责 injection，不再自行拼 followup payload）
+  - 已完成：
+    - [x] servertool followup 走 chat-process 入口（HubPipeline 内重跑 VirtualRouter 选路由）
+    - [x] followup contract 强制（不继承 routeHint、禁用 sticky、标记 original entry）
+    - [x] Host 移除兜底修补（reenterPipeline 不再按 entryEndpoint 重写 providerProtocol）
+  - 待完成：
+    - [x] handlers 迁移为 injection-only（不再各自组 followup payload）
+    - [x] 单一 canonical builder API（engine 统一组包，handler 只产出 ops）
+  - 收口范围：
+    - `sharedmodule/llmswitch-core/src/servertool/engine.ts`：成为唯一 followup payload 组装入口（canonical builder），并统一注入 followup metadata（含 **chat-process 入口标记**）。
+    - `sharedmodule/llmswitch-core/src/servertool/handlers/*`：只返回 injection plan + 最小 metadata overrides（例如计数/连接状态），禁止自行 entry-aware 组包。
+    - Host：移除 `reenterPipeline` 对 followup 的协议/路由兜底修补（由 core 通过 HubPipeline + VirtualRouter 统一决定）。
+  - 交付拆分（可回滚）：
+    1) **新增 canonical builder API（core）**
+       - 新增 `FollowupInjectionPlan`（ops 列表）与 `buildServerToolFollowupChatPayloadFromInjection(...)`：
+         - 输入：`capturedChatRequest`（或 adapterContext）、`chatResponse`、`injectionPlan`
+         - 输出：**protocol-agnostic chat-like payload**（`{ model, messages, tools?, parameters? }`），并复用既有 `applyHubFollowupPolicyShadow` 做 shadow/enforce（保持现有开关与落盘）
+       - 将共用逻辑统一：seed 提取（messages/input）、parameters 规整（去 stream + max_tokens→max_output_tokens）、assistant/tool message 提取、drop tool、vision summary 注入等。
+    2) **engine 支持 injection（保持 legacy payload 兼容）**
+       - 扩展 `ServerToolFollowupPlan`：允许 `{ payload }`（legacy）或 `{ injection }`（新），engine 优先走 injection→canonical builder。
+       - engine 统一写入 followup metadata：
+         - `serverToolFollowup=true`、`stream=false`、`preserveRouteHint=false`、`disableStickyRoutes=true`
+         - `serverToolOriginalEntryEndpoint=<原始入口>`
+         - **新增**：`metadata.__hubEntry='chat_process'`，用于让 followup 直接从 chat-process 入口开始执行（避免重复跑每种 client protocol 的 inbound parse/semantic map），同时仍会在 HubPipeline 内重新执行 VirtualRouter 选路由。
+    3) **迁移 handlers（按风险分批）**
+       - 低风险先迁：`iflow_model_error_retry`、`apply_patch_guard`、`exec_command_guard`、`web_search`、`vision`
+       - 中/高风险后迁：`stop_message_flow`、`gemini_empty_reply_continue`
+       - 迁移标准：handler 不再构造 followup payload；仅返回 injection ops（例如 append assistant、append tool outputs、append user text、drop tool、inject vision summary）。
+    4) **Host 移除兜底修补（diff=0 门禁）**
+       - 删除 Host `reenterPipeline` 内“按 entryEndpoint 重写 providerProtocol/_providerProtocol + followupProtocol override”逻辑：
+         - `src/server/runtime/http-server/index.ts`
+         - `src/server/runtime/http-server/executor-response.ts`
+         - `src/server/runtime/http-server/request-executor.ts`
+       - 保留：followup 不继承 client headers（Accept 等）以避免 SSE wrapper 误判。
+  - 验收/门禁（必须）：
+    - 黑盒对比：followup payload shadow/enforce diff=0（`~/.routecodex/errorsamples/unified-hub-shadow-runtime/*.json` 观察）
+    - 回归：`tests/servertool/*`（Jest）通过；必要时新增表驱动单测覆盖 injection→payload 的三入口形态一致性
+    - 构建：`sharedmodule/llmswitch-core npm run build` + Host `npm run build:dev`
+- [x] Phase 4：语义迁移到 Operation Table（协议只保留 wire ↔ ops 映射）
+  - ✅ ops 执行器：`web_search` 注入、`streaming`、`tool_choice`、`stopMessageState` 以 ops 形式建模（语义不变）
+  - ✅ 迁出 mapper 语义 hooks：BridgePolicy + tool-session-compat 统一由 Operation Table runner 执行，semantic-mapper 仅保留 wire ↔ chat 映射
+    - runner：`sharedmodule/llmswitch-core/src/conversion/hub/operation-table/operation-table-runner.ts`
+    - inbound hook：`sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/req_inbound/req_inbound_stage2_semantic_map/index.ts`
+    - outbound hook：`sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/req_outbound/req_outbound_stage1_semantic_map/index.ts`
+- [x] Phase 5：删除旧路径 + CI/Lint 禁绕过（仅保留 ProtocolSpec + PolicyEngine + ops 执行器）
+  - 已落地（2026-01-20）：
+    - ✅ Host 侧移除 `sharedmodule/llmswitch-core/dist/...` 直连：统一改走 `src/modules/llmswitch/bridge.ts`（`extractSessionIdentifiersFromMetadata`）
+      - `src/server/runtime/http-server/index.ts`
+      - `src/server/runtime/http-server/executor-metadata.ts`
+    - ✅ 新增“单一 core import surface”断言并纳入回归集：
+      - `tests/unified-hub/hub-v1-single-path-imports.spec.ts`
+      - `package.json#test:routing-instructions`（已加入该用例）
+    - ✅ 清理 legacy HubPipeline 开关：移除 `ROUTECODEX_USE_HUB_PIPELINE` / `config.pipeline.useHubPipeline`（HubPipeline 为唯一执行路径）
+      - `src/server/runtime/http-server/index.ts`
+      - `src/server/runtime/http-server/types.ts`
+      - `src/server-factory.ts`
+    - ✅ 移除未引用的旧 pipeline-config registry（避免出现旧路径侧路）
+      - `src/modules/llmswitch/pipeline-registry.ts`
+    - ✅ Provider 层收口为 transport-only：ResponsesProvider 不再做 chat→responses / instructions/prompt 注入（错误直接 fail-fast）
+      - `src/providers/core/runtime/responses-provider.ts`
+    - ✅ llmswitch bridge 收口：移除旧 routecodex-adapter bridge 与 responses helper（避免绕过骨架的入口）
+      - `src/modules/llmswitch/bridge.ts`
 
 ### 交付与门禁（每段必须满足：黑盒对比 + 回归通过 + 可渐进切换）
 
@@ -51,11 +110,13 @@
 - 显式启用 enforce：`ROUTECODEX_HUB_POLICY_MODE=enforce`
 - 可选采样率：`ROUTECODEX_HUB_POLICY_SAMPLE_RATE=0.25`（范围 [0,1]，未设置则全量记录）
 
-#### Phase 2（toolSurface）进度（shadow-only）
+#### Phase 2（toolSurface）进度（spec 驱动 + enforce-ready）
 
-- [x] provider_outbound 工具定义跨协议形态对比：OpenAI ↔ Gemini、OpenAI ↔ Anthropic（sharedmodules: 1c3a9e8）
-- [x] provider_outbound 工具调用/结果历史载体对比：Chat `messages[]` ↔ Responses `input[]`（sharedmodules: f13b211）
-- [x] response 阶段形态误投检测（只落盘不改写）：provider_inbound / client_outbound（sharedmodules: c15865c）
+- [x] `ProtocolSpec.toolSurface` 注册表落地：tool 格式与历史载体期望值由 spec 驱动（`sharedmodule/llmswitch-core/src/conversion/hub/policy/protocol-spec.ts`）
+- [x] provider_outbound 工具定义跨协议形态归一（enforce）：OpenAI ↔ Gemini、OpenAI ↔ Anthropic（`sharedmodule/llmswitch-core/src/conversion/hub/tool-surface/tool-surface-engine.ts`）
+- [x] provider_outbound 工具调用/结果历史载体归一（enforce）：Chat `messages[]` ↔ Responses `input[]`（OpenAI 协议族）
+- [x] response 阶段形态误投检测（shadow-only，不改写）：provider_inbound / client_outbound（`sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts`）
+- [x] 回归：以 llmswitch-core matrix + RouteCodex `mock:regressions` 覆盖 toolSurface enforce 关键路径
 
 #### 运行时自动黑盒 compare（默认开启）
 
@@ -155,6 +216,12 @@
   - 当客户端 raw tool 声明 `format:"freeform"` 时（例如 Codex 的 `apply_patch`），回包中的 `function_call.arguments` 输出为原始 patch 文本（非 JSON wrapper），避免客户端侧解析/执行失败。
 - sharedmodule 回归脚本：`sharedmodule/llmswitch-core/scripts/tests/responses-freeform-tool-args.mjs`
 
+### ✅ recursive_detection_guard（循环工具调用检测）
+- 触发条件：同一工具同一参数 **连续 10 次**（中断/触发后均重置计数）
+- 行为：不直接向客户端吐提示，而是通过 followup 给 provider 注入 system 提醒（并对该 tool_call 注入 blocked tool_result）
+- 代码：`sharedmodule/llmswitch-core/src/servertool/handlers/recursive-detection-guard.ts`
+- 回归：`tests/servertool/recursive-detection-guard.spec.ts`（已加入 `package.json#test:routing-instructions`）
+
 ### 🚧 apply_patch：Freeform（非 JSON Schema）透传 + 响应侧 Tool Governance 兼容（A/B）
 
 目标：为 `apply_patch` 增加一个 **freeform（非 JSON schema）模式**，允许客户端在请求里以“透传/无 schema”的方式声明工具，并在**响应侧工具治理**里做兼容（后续用于 A/B 测试）。
@@ -199,6 +266,12 @@
 ### 🔍 现场问题：All providers unavailable for route longcontext（需要进一步可观测性）
 - 现象：路由命中 `longcontext` 时出现 `PROVIDER_NOT_AVAILABLE`，日志只看到 message，缺少 “attempted” 细节（health/context/empty pool）。
 - 待改进：在 debug 模式下输出 VirtualRouter 的 attempted 诊断（例如 `:max_context_window` / `:health`），便于快速定位。
+
+### ✅ Daemon Admin UI 密码登录（更新：2026-01-20）
+- [x] `/daemon/admin` WebUI 改为密码登录：首次 setup 写入 `~/.routecodex/login`（scrypt hash），后续用密码登录建立 cookie session
+- [x] daemon-admin JSON API 不再依赖 `httpserver.apikey`（apikey 仅用于主 API，如 `/v1/*`）
+- [x] 新增 `/daemon/auth/*`：`status` / `setup` / `login` / `logout`
+- [x] 回归：`tests/server/http-server/daemon-admin.e2e.spec.ts`
 
 ### ✅ 已完成：Session ID 回传
 - HTTP 成功响应路径：`src/server/runtime/http-server/index.ts`

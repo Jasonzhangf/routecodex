@@ -1,7 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
-import type { ProviderUsageEvent } from '@jsonstudio/llms';
+import type { ProviderUsageEvent } from '../modules/llmswitch/bridge.js';
 
 const STATS_DIR = path.join(os.homedir(), '.routecodex', 'stats');
 const REQUEST_EVENTS_FILE = path.join(STATS_DIR, 'request-events.log');

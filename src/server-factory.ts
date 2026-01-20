@@ -175,7 +175,6 @@ export class ServerFactory {
         timeout: config.server?.timeout,
         useV2: config.server?.useV2 ?? true
       },
-      pipeline: config.pipeline ?? {},
       logging: {
         level: resolveLevel(config.logging?.level),
         enableConsole: config.logging?.enableConsole ?? true,

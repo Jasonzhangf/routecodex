@@ -63,14 +63,14 @@ describe('gemini_empty_reply_continue servertool', () => {
 
     const body = sawFollowupPayload?.body as any;
     expect(body).toBeDefined();
-    expect(body.messages).toBeUndefined();
-    expect(Array.isArray(body.input)).toBe(true);
+    expect(Array.isArray(body.messages)).toBe(true);
     expect(body.stream).toBe(false);
-    expect(body.parameters).toBeUndefined();
-    expect(body.max_output_tokens).toBe(321);
-    expect(body.temperature).toBe(0.2);
+    expect(body.parameters).toBeDefined();
+    expect(body.parameters.stream).toBeUndefined();
+    expect(body.parameters.max_output_tokens).toBe(321);
+    expect(body.parameters.temperature).toBe(0.2);
 
-    const inputText = JSON.stringify(body.input);
+    const inputText = JSON.stringify(body.messages);
     for (let i = 0; i < 20; i += 1) {
       expect(inputText).toContain(`m${i}`);
     }
@@ -130,13 +130,13 @@ describe('gemini_empty_reply_continue servertool', () => {
     });
 
     expect(sawFollowupBody).toBeDefined();
-    expect(sawFollowupBody.messages).toBeUndefined();
-    expect(Array.isArray(sawFollowupBody.input)).toBe(true);
+    expect(Array.isArray(sawFollowupBody.messages)).toBe(true);
     expect(sawFollowupBody.stream).toBe(false);
-    expect(sawFollowupBody.parameters).toBeUndefined();
-    expect(sawFollowupBody.max_output_tokens).toBe(222);
-    expect(sawFollowupBody.temperature).toBe(0.3);
-    const inputText = JSON.stringify(sawFollowupBody.input);
+    expect(sawFollowupBody.parameters).toBeDefined();
+    expect(sawFollowupBody.parameters.stream).toBeUndefined();
+    expect(sawFollowupBody.parameters.max_output_tokens).toBe(222);
+    expect(sawFollowupBody.parameters.temperature).toBe(0.3);
+    const inputText = JSON.stringify(sawFollowupBody.messages);
     for (let i = 0; i < 12; i += 1) {
       expect(inputText).toContain(`m${i}`);
     }
@@ -191,12 +191,13 @@ describe('gemini_empty_reply_continue servertool', () => {
       }
     });
 
-    const inputText = JSON.stringify(sawFollowupBody?.input ?? []);
+    const inputText = JSON.stringify(sawFollowupBody?.messages ?? []);
     expect(inputText).toContain('hi');
     expect(inputText).toContain('partial');
     expect(inputText).toContain('继续执行');
     expect(sawFollowupBody?.stream).toBe(false);
-    expect(sawFollowupBody?.parameters).toBeUndefined();
-    expect(sawFollowupBody?.max_output_tokens).toBe(123);
+    expect(sawFollowupBody?.parameters).toBeDefined();
+    expect(sawFollowupBody?.parameters?.stream).toBeUndefined();
+    expect(sawFollowupBody?.parameters?.max_output_tokens).toBe(123);
   });
 });

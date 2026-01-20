@@ -11,10 +11,18 @@ jest.mock('../../src/providers/core/utils/snapshot-writer.ts', () => ({
   writeProviderSnapshot: async () => {}
 }), { virtual: true });
 jest.mock('../../src/modules/llmswitch/bridge.ts', () => ({
+  getStatsCenterSafe: () => ({ recordProviderUsage: () => {} }),
+  extractSessionIdentifiersFromMetadata: () => ({}),
+  loadRoutingInstructionStateSync: () => null,
+  saveRoutingInstructionStateAsync: () => {},
   buildResponsesRequestFromChat: () => ({ request: {} }),
   buildChatResponseFromResponses: () => ({ choices: [] })
 }), { virtual: true });
 jest.mock('../../src/modules/llmswitch/bridge.js', () => ({
+  getStatsCenterSafe: () => ({ recordProviderUsage: () => {} }),
+  extractSessionIdentifiersFromMetadata: () => ({}),
+  loadRoutingInstructionStateSync: () => null,
+  saveRoutingInstructionStateAsync: () => {},
   buildResponsesRequestFromChat: () => ({ request: {} }),
   buildChatResponseFromResponses: () => ({ choices: [] })
 }), { virtual: true });

@@ -1,4 +1,5 @@
 import type { ManagerContext, ManagerModule } from '../../types.js';
+import { loadRoutingInstructionStateSync, saveRoutingInstructionStateAsync } from '../../../modules/llmswitch/bridge.js';
 
 type RoutingInstructionState = unknown;
 
@@ -36,33 +37,13 @@ export class RoutingStateManagerModule implements ManagerModule {
       this.stateStore = null;
       return;
     }
-    // 初始版本：通过 require 动态加载 llmswitch-core 的 sticky-session 存取函数，
-    // 并包装为 VirtualRouterEngine 所需的 routingStateStore 接口。
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires,global-require
-      const mod = require('@jsonstudio/llms/dist/router/virtual-router/sticky-session-store.js') as {
-        loadRoutingInstructionStateSync?: (key: string) => RoutingInstructionState | null;
-        saveRoutingInstructionStateAsync?: (key: string, state: RoutingInstructionState | null) => void;
-      };
-      const loadFn = typeof mod?.loadRoutingInstructionStateSync === 'function'
-        ? mod.loadRoutingInstructionStateSync
-        : undefined;
-      const saveFn = typeof mod?.saveRoutingInstructionStateAsync === 'function'
-        ? mod.saveRoutingInstructionStateAsync
-        : undefined;
-      if (!loadFn || !saveFn) {
-        this.stateStore = null;
-        return;
+    // Single import surface: llmswitch-core sticky session store is accessed via llmswitch bridge only.
+    this.stateStore = {
+      loadSync: (key: string) => loadRoutingInstructionStateSync(key) as RoutingInstructionState | null,
+      saveAsync: (key: string, state: RoutingInstructionState | null) => {
+        saveRoutingInstructionStateAsync(key, state as RoutingInstructionState | null);
       }
-      this.stateStore = {
-        loadSync: (key: string) => loadFn(key),
-        saveAsync: (key: string, state: RoutingInstructionState | null) => {
-          saveFn(key, state as RoutingInstructionState | null);
-        }
-      };
-    } catch {
-      this.stateStore = null;
-    }
+    };
   }
 
   async start(): Promise<void> {

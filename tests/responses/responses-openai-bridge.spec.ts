@@ -1,7 +1,7 @@
 import { buildResponsesRequestFromChat } from '../../sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.js';
 
 describe('buildResponsesRequestFromChat (responses bridge)', () => {
-  it('mirrors apply_patch arguments into both patch and input fields', () => {
+  it('preserves apply_patch arguments when converting tool_calls to Responses input', () => {
     const patchText = [
       '*** Begin Patch',
       '*** Update File: demo.txt',
@@ -49,10 +49,10 @@ describe('buildResponsesRequestFromChat (responses bridge)', () => {
     expect(fnCall).toBeTruthy();
     const parsedArgs = JSON.parse(fnCall.arguments);
     expect(parsedArgs.patch).toBe(patchText);
-    expect(parsedArgs.input).toBe(patchText);
+    expect(parsedArgs.input).toBeUndefined();
   });
 
-  it('throws when apply_patch arguments are missing patch/input', () => {
+  it('does not fail-close when apply_patch arguments are missing patch/input', () => {
     const payload = {
       model: 'gpt-test',
       messages: [
@@ -83,6 +83,13 @@ describe('buildResponsesRequestFromChat (responses bridge)', () => {
       ]
     };
 
-    expect(() => buildResponsesRequestFromChat(payload, {})).toThrow(/apply_patch arguments missing/i);
+    expect(() => buildResponsesRequestFromChat(payload, {})).not.toThrow();
+    const result = buildResponsesRequestFromChat(payload, {});
+    const inputEntries = Array.isArray((result.request as any).input) ? (result.request as any).input : [];
+    const fnCall = inputEntries.find(
+      (entry: any) => entry?.type === 'function_call' && entry?.name === 'apply_patch'
+    );
+    expect(fnCall).toBeTruthy();
+    expect(fnCall.arguments).toBe('{}');
   });
 });

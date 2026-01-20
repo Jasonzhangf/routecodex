@@ -1,21 +1,39 @@
 import { describe, expect, test, jest } from '@jest/globals';
-import { ProviderComposite } from '../../src/providers/core/composite/provider-composite.js';
-import { attachProviderRuntimeMetadata } from '../../src/providers/core/runtime/provider-runtime-metadata.ts';
 
-jest.mock('@jsonstudio/llms/dist/router/virtual-router/error-center.js', () => ({
-  providerErrorCenter: { emit: jest.fn() }
-}), { virtual: true });
+describe('Provider error reporting', () => {
+  test('emitProviderError emits ProviderErrorEvent and calls errorHandlingCenter', async () => {
+    jest.resetModules();
 
-jest.mock('@jsonstudio/llms/dist/router/virtual-router/types.js', () => ({}), { virtual: true });
+    const providerErrorEmit = jest.fn();
+    await jest.unstable_mockModule('../../src/modules/llmswitch/bridge.ts', () => ({
+      getProviderErrorCenter: async () => ({ emit: providerErrorEmit })
+    }));
+    await jest.unstable_mockModule('../../src/error-handling/route-error-hub.ts', () => ({
+      getRouteErrorHub: () => null,
+      reportRouteError: jest.fn(async () => ({}))
+    }));
 
-const mockDeps = () => ({ errorHandlingCenter: { handleError: jest.fn(async () => {}) } } as any);
+    const { emitProviderError } = await import('../../src/providers/core/utils/provider-error-reporter.ts');
 
-describe('ProviderComposite guards → Error Center', () => {
-  test('protocol mismatch triggers handleError and throws', async () => {
-    const deps = mockDeps();
-    const body: any = { data: { model: 'gpt', messages: [] } };
-    attachProviderRuntimeMetadata(body, { requestId: 'req_x', providerType: 'anthropic', providerProtocol: 'openai-chat', providerKey: 'k1' });
-    await expect(ProviderComposite.applyRequest(body, { providerType: 'anthropic', dependencies: deps })).rejects.toThrow();
+    const deps = {
+      errorHandlingCenter: { handleError: jest.fn(async () => {}) }
+    } as any;
+
+    emitProviderError({
+      error: new Error('boom'),
+      stage: 'provider-test',
+      runtime: {
+        requestId: 'req_x',
+        providerType: 'openai',
+        providerProtocol: 'openai-chat',
+        providerId: 'test-provider',
+        providerKey: 'openai.test',
+        routeName: 'test-route'
+      },
+      dependencies: deps
+    });
+
+    expect(providerErrorEmit).toHaveBeenCalled();
     expect(deps.errorHandlingCenter.handleError).toHaveBeenCalled();
   });
 });

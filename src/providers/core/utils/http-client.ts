@@ -696,8 +696,17 @@ export class HttpClient {
     providerError.retryable = this.shouldRetry(err);
 
     // 设置错误详情
+    const originalError =
+      error instanceof Error
+        ? {
+            name: error.name,
+            message: error.message,
+            ...(typeof (error as any)?.code === 'string' ? { code: (error as any).code } : {}),
+            ...(typeof (error as any)?.statusCode === 'number' ? { statusCode: (error as any).statusCode } : {})
+          }
+        : error;
     providerError.details = {
-      originalError: error,
+      originalError,
       response: err?.response
     };
 

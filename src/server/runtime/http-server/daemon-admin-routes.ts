@@ -1,12 +1,13 @@
 import type { Application, Request, Response } from 'express';
+import { registerDaemonAuthRoutes } from './daemon-admin/auth-handler.js';
 import { registerStatusRoutes } from './daemon-admin/status-handler.js';
 import { registerCredentialRoutes } from './daemon-admin/credentials-handler.js';
 import { registerQuotaRoutes } from './daemon-admin/quota-handler.js';
 import { registerProviderRoutes } from './daemon-admin/providers-handler.js';
 import { registerRestartRoutes } from './daemon-admin/restart-handler.js';
 import { registerStatsRoutes } from './daemon-admin/stats-handler.js';
-import { extractApiKeyFromRequest } from './middleware.js';
 import type { HistoricalStatsSnapshot, StatsSnapshot } from './stats-manager.js';
+import { isDaemonSessionAuthenticated } from './daemon-admin/auth-session.js';
 
 export interface DaemonAdminRouteOptions {
   app: Application;
@@ -23,8 +24,7 @@ export interface DaemonAdminRouteOptions {
    */
   getVirtualRouterArtifacts: () => unknown | null;
   /**
-   * 返回 HTTP server 访问 apikey（如果配置了）。
-   * 用于允许远程访问 daemon-admin JSON API（配合 apikey 校验）。
+   * Deprecated: daemon-admin 不再使用 apikey 鉴权（改为密码登录）。
    */
   getExpectedApiKey?: () => string | undefined;
   /**
@@ -47,16 +47,8 @@ export function isLocalRequest(req: Request): boolean {
   return ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
 }
 
-export function isDaemonAdminRequestAllowed(req: Request, expectedApiKey?: string): boolean {
-  if (isLocalRequest(req)) {
-    return true;
-  }
-  const expected = typeof expectedApiKey === 'string' ? expectedApiKey.trim() : '';
-  if (!expected) {
-    return false;
-  }
-  const provided = extractApiKeyFromRequest(req);
-  return Boolean(provided && provided === expected);
+export function isDaemonAdminAuthenticated(req: Request): boolean {
+  return isDaemonSessionAuthenticated(req);
 }
 
 export function rejectNonLocal(req: Request, res: Response): boolean {
@@ -69,18 +61,20 @@ export function rejectNonLocal(req: Request, res: Response): boolean {
 
 export function rejectNonLocalOrUnauthorizedAdmin(
   req: Request,
-  res: Response,
-  expectedApiKey?: string
+  res: Response
 ): boolean {
-  if (isDaemonAdminRequestAllowed(req, expectedApiKey)) {
+  if (isDaemonAdminAuthenticated(req)) {
     return false;
   }
-  res.status(403).json({ error: { message: 'forbidden', code: 'forbidden' } });
+  res.status(401).json({ error: { message: 'unauthorized', code: 'unauthorized' } });
   return true;
 }
 
 export function registerDaemonAdminRoutes(options: DaemonAdminRouteOptions): void {
   const { app } = options;
+
+  // Daemon admin password auth (setup/login/logout/status)
+  registerDaemonAuthRoutes(app);
 
   // Daemon / manager 状态
   registerStatusRoutes(app, options);

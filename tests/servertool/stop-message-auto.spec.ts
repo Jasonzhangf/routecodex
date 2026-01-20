@@ -106,14 +106,10 @@ describe('stop_message_auto servertool', () => {
     expect(result.execution?.flowId).toBe('stop_message_flow');
     const followup = result.execution?.followup as any;
     expect(followup).toBeDefined();
-    const payload = followup.payload as JsonObject;
-    const messages = Array.isArray((payload as any).messages) ? (payload as any).messages : [];
-    expect(messages.length).toBeGreaterThan(1);
-    const last = messages[messages.length - 1] as any;
-    expect(last.role).toBe('user');
-    expect(last.content).toBe('继续');
-    expect(followup.metadata?.disableStickyRoutes).toBe(true);
-    expect(followup.metadata?.preserveRouteHint).toBe(false);
+    expect(followup.entryEndpoint).toBe('/v1/chat/completions');
+    expect(Array.isArray(followup.injection?.ops)).toBe(true);
+    const ops = followup.injection.ops as any[];
+    expect(ops.some((op) => op?.op === 'append_user_text' && op?.text === '继续')).toBe(true);
 
     const persisted = await readJsonFileWithRetry<{ state?: { stopMessageUsed?: number; stopMessageLastUsedAt?: number } }>(
       path.join(SESSION_DIR, `session-${sessionId}.json`)
@@ -164,37 +160,46 @@ describe('stop_message_auto servertool', () => {
       capturedChatRequest
     } as any;
 
-    const result = await runServerSideToolEngine({
-      chatResponse: responsesPayload,
+    let capturedFollowup: { entryEndpoint?: string; body?: any; metadata?: any } | null = null;
+    const orchestration = await runServerToolOrchestration({
+      chat: responsesPayload,
       adapterContext,
-      entryEndpoint: '/v1/responses',
       requestId: 'req-stopmessage-resp-1',
+      entryEndpoint: '/v1/responses',
       providerProtocol: 'gemini-chat',
-      reenterPipeline: async () => {
-        throw new Error('unexpected followup execution in this test');
+      reenterPipeline: async (opts: any) => {
+        capturedFollowup = { entryEndpoint: opts?.entryEndpoint, body: opts?.body, metadata: opts?.metadata };
+        return {
+          body: {
+            id: 'resp-stopmessage-followup-1',
+            object: 'response',
+            model: 'gemini-test',
+            status: 'completed',
+            output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'done' }] }]
+          } as JsonObject
+        };
       }
     });
 
-    expect(result.mode).toBe('tool_flow');
-    expect(result.execution?.flowId).toBe('stop_message_flow');
-    const followup = result.execution?.followup as any;
-    expect(followup).toBeDefined();
-    expect(followup.metadata?.disableStickyRoutes).toBe(true);
-    expect(followup.metadata?.preserveRouteHint).toBe(false);
-    expect(followup.metadata?.stream).toBe(false);
-    expect(followup.metadata?.serverToolOriginalEntryEndpoint).toBe('/v1/responses');
+    expect(orchestration.executed).toBe(true);
+    expect(orchestration.flowId).toBe('stop_message_flow');
+    expect(capturedFollowup).toBeTruthy();
+    expect(capturedFollowup?.entryEndpoint).toBe('/v1/responses');
+    expect(capturedFollowup?.metadata?.disableStickyRoutes).toBe(true);
+    expect(capturedFollowup?.metadata?.preserveRouteHint).toBe(false);
+    expect(capturedFollowup?.metadata?.stream).toBe(false);
+    expect(capturedFollowup?.metadata?.serverToolOriginalEntryEndpoint).toBe('/v1/responses');
 
-    const payload = followup.payload as any;
-    expect(payload.messages).toBeUndefined();
-    expect(Array.isArray(payload.input)).toBe(true);
+    const payload = capturedFollowup?.body as any;
+    expect(Array.isArray(payload.messages)).toBe(true);
     expect(payload.stream).toBe(false);
-    expect(payload.parameters).toBeUndefined();
-    expect(payload.max_output_tokens).toBe(99);
-    expect(payload.temperature).toBe(0.1);
+    expect(payload.parameters).toBeDefined();
+    expect(payload.parameters.stream).toBeUndefined();
+    expect(payload.parameters.max_output_tokens).toBe(99);
+    expect(payload.parameters.temperature).toBe(0.1);
 
-    const inputText = JSON.stringify(payload.input);
+    const inputText = JSON.stringify(payload.messages);
     expect(inputText).toContain('hi');
-    expect(inputText).toContain('ok');
     expect(inputText).toContain('继续执行');
   });
 
@@ -242,34 +247,43 @@ describe('stop_message_auto servertool', () => {
       capturedChatRequest
     } as any;
 
-    const result = await runServerSideToolEngine({
-      chatResponse: responsesPayload,
+    let capturedFollowup: { entryEndpoint?: string; body?: any; metadata?: any } | null = null;
+    const orchestration = await runServerToolOrchestration({
+      chat: responsesPayload,
       adapterContext,
-      entryEndpoint: '/v1/responses',
       requestId: 'req-stopmessage-resp-2',
+      entryEndpoint: '/v1/responses',
       providerProtocol: 'gemini-chat',
-      reenterPipeline: async () => {
-        throw new Error('unexpected followup execution in this test');
+      reenterPipeline: async (opts: any) => {
+        capturedFollowup = { entryEndpoint: opts?.entryEndpoint, body: opts?.body, metadata: opts?.metadata };
+        return {
+          body: {
+            id: 'resp-stopmessage-followup-2',
+            object: 'response',
+            model: 'gemini-test',
+            status: 'completed',
+            output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'done' }] }]
+          } as JsonObject
+        };
       }
     });
 
-    expect(result.mode).toBe('tool_flow');
-    expect(result.execution?.flowId).toBe('stop_message_flow');
-    const followup = result.execution?.followup as any;
-    expect(followup).toBeDefined();
-    expect(followup.metadata?.stream).toBe(false);
+    expect(orchestration.executed).toBe(true);
+    expect(orchestration.flowId).toBe('stop_message_flow');
+    expect(capturedFollowup).toBeTruthy();
+    expect(capturedFollowup?.entryEndpoint).toBe('/v1/responses');
+    expect(capturedFollowup?.metadata?.stream).toBe(false);
 
-    const payload = followup.payload as any;
-    expect(payload.messages).toBeUndefined();
-    expect(Array.isArray(payload.input)).toBe(true);
+    const payload = capturedFollowup?.body as any;
+    expect(Array.isArray(payload.messages)).toBe(true);
     expect(payload.stream).toBe(false);
-    expect(payload.parameters).toBeUndefined();
-    expect(payload.max_output_tokens).toBe(77);
-    expect(payload.temperature).toBe(0.2);
+    expect(payload.parameters).toBeDefined();
+    expect(payload.parameters.stream).toBeUndefined();
+    expect(payload.parameters.max_output_tokens).toBe(77);
+    expect(payload.parameters.temperature).toBe(0.2);
 
-    const inputText = JSON.stringify(payload.input);
+    const inputText = JSON.stringify(payload.messages);
     expect(inputText).toContain('hi');
-    expect(inputText).toContain('ok');
     expect(inputText).toContain('继续执行');
   });
 

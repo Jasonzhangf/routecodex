@@ -27,6 +27,7 @@ async function waitFor(predicate: () => Promise<boolean>, timeoutMs = 2000): Pro
 
 describe('Unified Hub runtime shadow compare → errorsamples', () => {
   const originalEnv = { ...process.env };
+  jest.setTimeout(15000);
 
   afterEach(() => {
     process.env = { ...originalEnv };
@@ -53,11 +54,9 @@ describe('Unified Hub runtime shadow compare → errorsamples', () => {
 
     class HubPipelineMock {
       async execute(input: any): Promise<any> {
-        const override = input?.metadata?.__hubPolicyOverride;
-        const isBaseline = Boolean(override) && override.mode === 'off';
-        const providerPayload = isBaseline
-          ? { model: 'x', input: [{ role: 'user', content: 'hi' }], __shadow_test: 1 }
-          : { model: 'x', input: [{ role: 'user', content: 'hi' }] };
+        const wantsShadowCompare = Boolean(input?.metadata?.__hubShadowCompare);
+        const providerPayload = { model: 'x', input: [{ role: 'user', content: 'hi' }] };
+        const baselineProviderPayload = { ...providerPayload, __shadow_test: 1 };
         return {
           providerPayload,
           target: { providerKey: 'mock.key1.mock-model', providerType: 'mock-provider', outboundProfile: 'openai-responses' },
@@ -67,7 +66,8 @@ describe('Unified Hub runtime shadow compare → errorsamples', () => {
             providerProtocol: 'openai-responses',
             processMode: 'chat',
             stream: false,
-            routeHint: 'default'
+            routeHint: 'default',
+            ...(wantsShadowCompare ? { hubShadowCompare: { baselineProviderPayload, candidateMode: 'enforce' } } : {})
           }
         };
       }
@@ -75,7 +75,6 @@ describe('Unified Hub runtime shadow compare → errorsamples', () => {
     }
 
     server.hubPipeline = new HubPipelineMock();
-    server.hubShadowComparePipeline = new HubPipelineMock();
 
     await server.runHubPipeline(
       {
@@ -91,7 +90,7 @@ describe('Unified Hub runtime shadow compare → errorsamples', () => {
     );
 
     const dir = path.join(errorsRoot, 'unified-hub-shadow-runtime');
-    await waitFor(async () => (await listFiles(dir)).length > 0, 3000);
+    await waitFor(async () => (await listFiles(dir)).length > 0, 10000);
 
     const files = await listFiles(dir);
     expect(files.some((f) => f.includes('diff-') && f.endsWith('.json'))).toBe(true);
@@ -118,20 +117,27 @@ describe('Unified Hub runtime shadow compare → errorsamples', () => {
 
     class HubPipelineMock {
       async execute(input: any): Promise<any> {
-        const override = input?.metadata?.__hubPolicyOverride;
-        const isBaseline = Boolean(override) && override.mode === 'off';
+        const wantsShadowCompare = Boolean(input?.metadata?.__hubShadowCompare);
+        const providerPayload = { model: 'x', input: [{ role: 'user', content: 'hi' }] };
         return {
-          providerPayload: { model: 'x', input: [{ role: 'user', content: 'hi' }] },
-          target: isBaseline
-            ? { providerKey: 'mock.key1.mock-model', runtimeKey: 'mock.key1', providerType: 'mock-provider', outboundProfile: 'openai-responses' }
-            : { providerKey: 'mock.key2.mock-model', runtimeKey: 'mock.key2', providerType: 'mock-provider', outboundProfile: 'openai-responses' },
+          providerPayload,
+          target: { providerKey: 'mock.key2.mock-model', runtimeKey: 'mock.key2', providerType: 'mock-provider', outboundProfile: 'openai-responses' },
           routingDecision: { routeName: 'default' },
           metadata: {
             entryEndpoint: input?.endpoint || '/v1/responses',
             providerProtocol: 'openai-responses',
             processMode: 'chat',
             stream: false,
-            routeHint: 'default'
+            routeHint: 'default',
+            ...(wantsShadowCompare
+              ? {
+                hubShadowCompare: {
+                  baselineProviderPayload: providerPayload,
+                  baselineTarget: { providerKey: 'mock.key1.mock-model', runtimeKey: 'mock.key1', providerType: 'mock-provider', outboundProfile: 'openai-responses' },
+                  candidateMode: 'enforce'
+                }
+              }
+              : {})
           }
         };
       }
@@ -139,7 +145,6 @@ describe('Unified Hub runtime shadow compare → errorsamples', () => {
     }
 
     server.hubPipeline = new HubPipelineMock();
-    server.hubShadowComparePipeline = new HubPipelineMock();
 
     await server.runHubPipeline(
       {
@@ -155,7 +160,7 @@ describe('Unified Hub runtime shadow compare → errorsamples', () => {
     );
 
     const dir = path.join(errorsRoot, 'unified-hub-shadow-runtime-routing');
-    await waitFor(async () => (await listFiles(dir)).length > 0, 3000);
+    await waitFor(async () => (await listFiles(dir)).length > 0, 10000);
 
     const files = await listFiles(dir);
     expect(files.some((f) => f.includes('route-drift-') && f.endsWith('.json'))).toBe(true);

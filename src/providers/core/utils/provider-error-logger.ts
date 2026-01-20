@@ -1,5 +1,5 @@
 import chalk from 'chalk';
-import type { ProviderErrorEvent } from '@jsonstudio/llms/dist/router/virtual-router/types.js';
+import type { ProviderErrorEvent } from '../../../modules/llmswitch/bridge.js';
 
 export type ProviderErrorLogPayload = {
   stage: string;

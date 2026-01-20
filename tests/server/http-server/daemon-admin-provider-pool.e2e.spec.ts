@@ -14,6 +14,8 @@ async function startServerWithTempConfig(): Promise<Started> {
   process.env.HOME = home;
   process.env.ROUTECODEX_SNAPSHOT = '0';
   process.env.ROUTECODEX_AUTH_DIR = path.join(tmp, 'auth');
+  // Ensure daemon admin auth is isolated from any pre-existing login file in the test runner env.
+  process.env.ROUTECODEX_LOGIN_FILE = path.join(tmp, 'login');
 
   const configPath = path.join(tmp, 'config.json');
   process.env.ROUTECODEX_CONFIG_PATH = configPath;
@@ -69,13 +71,55 @@ async function readJson(res: Response): Promise<any> {
   }
 }
 
+function extractCookie(res: Response): string {
+  const raw = res.headers.get('set-cookie') || '';
+  const cookie = raw.split(';')[0]?.trim() || '';
+  return cookie;
+}
+
+async function ensureDaemonSession(baseUrl: string): Promise<string> {
+  const password = 'test-password-1234';
+  const setup = await fetch(`${baseUrl}/daemon/auth/setup`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ password })
+  });
+  if (setup.status === 200) {
+    const cookie = extractCookie(setup);
+    if (!cookie) {
+      throw new Error('daemon auth setup succeeded but no cookie returned');
+    }
+    return cookie;
+  }
+  // Already configured: login instead.
+  if (setup.status === 409) {
+    const login = await fetch(`${baseUrl}/daemon/auth/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ password })
+    });
+    if (login.status !== 200) {
+      throw new Error(`daemon auth login failed: ${login.status}`);
+    }
+    const cookie = extractCookie(login);
+    if (!cookie) {
+      throw new Error('daemon auth login succeeded but no cookie returned');
+    }
+    return cookie;
+  }
+  const body = await readJson(setup);
+  throw new Error(`daemon auth setup failed: ${setup.status} ${JSON.stringify(body)}`);
+}
+
 describe('Daemon admin provider pool (v1 config) - e2e', () => {
   jest.setTimeout(30000);
 
   it('creates an authfile credential and persists provider config via /config/providers', async () => {
     const { baseUrl, stop } = await startServerWithTempConfig();
     try {
-      const empty = await fetch(`${baseUrl}/config/providers`);
+      const cookie = await ensureDaemonSession(baseUrl);
+
+      const empty = await fetch(`${baseUrl}/config/providers`, { headers: { cookie } });
       expect(empty.status).toBe(200);
       const emptyBody = await readJson(empty);
       expect(emptyBody).toHaveProperty('ok', true);
@@ -83,7 +127,7 @@ describe('Daemon admin provider pool (v1 config) - e2e', () => {
 
       const deniedInline = await fetch(`${baseUrl}/config/providers/test`, {
         method: 'PUT',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', cookie },
         body: JSON.stringify({
           provider: {
             enabled: true,
@@ -99,7 +143,7 @@ describe('Daemon admin provider pool (v1 config) - e2e', () => {
 
       const cred = await fetch(`${baseUrl}/daemon/credentials/apikey`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', cookie },
         body: JSON.stringify({ provider: 'test', alias: 'default', apiKey: 'dummy-key' })
       });
       expect(cred.status).toBe(200);
@@ -109,7 +153,7 @@ describe('Daemon admin provider pool (v1 config) - e2e', () => {
 
       const upsert = await fetch(`${baseUrl}/config/providers/test`, {
         method: 'PUT',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', cookie },
         body: JSON.stringify({
           provider: {
             enabled: true,
@@ -123,21 +167,21 @@ describe('Daemon admin provider pool (v1 config) - e2e', () => {
       const upsertBody = await readJson(upsert);
       expect(upsertBody).toHaveProperty('ok', true);
 
-      const getProvider = await fetch(`${baseUrl}/config/providers/test`);
+      const getProvider = await fetch(`${baseUrl}/config/providers/test`, { headers: { cookie } });
       expect(getProvider.status).toBe(200);
       const providerBody = await readJson(getProvider);
       expect(providerBody).toHaveProperty('ok', true);
       expect(providerBody).toHaveProperty('id', 'test');
       expect(providerBody).toHaveProperty('provider.auth.apiKey', credBody.secretRef);
 
-      const creds = await fetch(`${baseUrl}/daemon/credentials`);
+      const creds = await fetch(`${baseUrl}/daemon/credentials`, { headers: { cookie } });
       expect(creds.status).toBe(200);
       const credsBody = await readJson(creds);
       const apikeyEntry = (credsBody as any[]).find((c) => c.kind === 'apikey' && c.provider === 'test');
       expect(apikeyEntry).toBeTruthy();
       expect(apikeyEntry).toHaveProperty('secretRef', credBody.secretRef);
 
-      const removed = await fetch(`${baseUrl}/config/providers/test`, { method: 'DELETE' });
+      const removed = await fetch(`${baseUrl}/config/providers/test`, { method: 'DELETE', headers: { cookie } });
       expect(removed.status).toBe(200);
       const removedBody = await readJson(removed);
       expect(removedBody).toHaveProperty('ok', true);
@@ -149,7 +193,8 @@ describe('Daemon admin provider pool (v1 config) - e2e', () => {
   it('serves /daemon/admin UI HTML', async () => {
     const { baseUrl, stop } = await startServerWithTempConfig();
     try {
-      const res = await fetch(`${baseUrl}/daemon/admin`, { method: 'GET' });
+      const cookie = await ensureDaemonSession(baseUrl);
+      const res = await fetch(`${baseUrl}/daemon/admin`, { method: 'GET', headers: { cookie } });
       expect(res.status).toBe(200);
       const text = await res.text();
       expect(text).toContain('<html');

@@ -7,7 +7,7 @@ import type { ServerConfigV2 } from './types.js';
 import { reportRouteError } from '../../../error-handling/route-error-hub.js';
 import { mapErrorToHttp } from '../../utils/http-error-mapper.js';
 import { renderTokenPortalPage } from '../../../token-portal/render.js';
-import { registerDaemonAdminRoutes } from './daemon-admin-routes.js';
+import { registerDaemonAdminRoutes, rejectNonLocalOrUnauthorizedAdmin } from './daemon-admin-routes.js';
 import type { HistoricalStatsSnapshot, StatsSnapshot } from './stats-manager.js';
 
 interface RouteOptions {
@@ -128,8 +128,9 @@ export function registerHttpRoutes(options: RouteOptions): void {
   app.get('/models', listModels);
   app.get('/v1/models', listModels);
 
-  app.get('/manager/state/health', (_req: Request, res: Response) => {
+  app.get('/manager/state/health', (req: Request, res: Response) => {
     try {
+      if (rejectNonLocalOrUnauthorizedAdmin(req, res)) {return;}
       const snapshot = typeof getHealthSnapshot === 'function' ? getHealthSnapshot() : null;
       res.status(200).json({
         ok: true,
@@ -142,6 +143,7 @@ export function registerHttpRoutes(options: RouteOptions): void {
   });
 
   app.get('/manager/state/routing/:sessionId', (req: Request, res: Response) => {
+    if (rejectNonLocalOrUnauthorizedAdmin(req, res)) {return;}
     const sessionId = typeof req.params.sessionId === 'string' ? req.params.sessionId.trim() : '';
     if (!sessionId) {
       res.status(400).json({ error: { message: 'sessionId is required' } });

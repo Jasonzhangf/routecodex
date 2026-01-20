@@ -9,12 +9,10 @@ jest.mock('../../src/providers/core/utils/snapshot-writer.ts', () => ({
 
 // bridge mock for responses encoding (avoid ESM import.meta and control shape)
 jest.mock('../../src/modules/llmswitch/bridge.ts', () => ({
-  buildResponsesRequestFromChat: (body: any) => {
-    const input = Array.isArray(body?.messages)
-      ? body.messages.map((m: any) => ({ role: m.role || 'user', content: [{ type: 'input_text', text: (m.content || '') + '' }] }))
-      : [];
-    return { request: { model: body?.model || 'gpt-4o-mini', input } };
-  }
+  getStatsCenterSafe: () => ({ recordProviderUsage: () => {} }),
+  extractSessionIdentifiersFromMetadata: () => ({}),
+  loadRoutingInstructionStateSync: () => null,
+  saveRoutingInstructionStateAsync: () => {},
 }), { virtual: true });
 
 import { ChatHttpProvider } from '../../src/providers/core/runtime/chat-http-provider.ts';
@@ -106,7 +104,17 @@ describe('Param: chat → all providers (openai/responses/anthropic)', () => {
           }
         }, deps);
         (provider as any).httpClient = new FakeHttpClientResponses({}); await provider.initialize();
-        const request: any = { data: { messages, stream: false } };
+        const first = Array.isArray(messages) ? messages[0] : null;
+        const text = first && typeof first === 'object' && typeof (first as any).content === 'string'
+          ? (first as any).content
+          : 'hi';
+        const request: any = {
+          data: {
+            model: 'gpt-4o-mini',
+            input: [{ role: 'user', content: [{ type: 'input_text', text }] }],
+            stream: true
+          }
+        };
         attachProviderRuntimeMetadata(request, { requestId: 'req_param_responses', providerType: 'responses', providerProtocol: 'openai-responses', providerId: 'openai' });
         let processed: any; try { processed = await (provider as any).preprocessRequest(request); } catch {}
         try { await (provider as any).sendRequestInternal(processed); } catch {}

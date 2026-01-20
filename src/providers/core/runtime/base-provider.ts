@@ -30,8 +30,8 @@ import {
 } from '../utils/provider-type-utils.js';
 import { classifyProviderError } from './provider-error-classifier.js';
 import type { ProviderErrorAugmented } from './provider-error-types.js';
-import type { ProviderUsageEvent } from '@jsonstudio/llms';
-import * as LlmsCore from '@jsonstudio/llms';
+import { getStatsCenterSafe as getStatsCenterSafeFromBridge } from '../../../modules/llmswitch/bridge.js';
+import type { ProviderUsageEvent } from '../../../modules/llmswitch/bridge.js';
 import { RateLimitCooldownError } from './rate-limit-manager.js';
 
 type RequestEnvelope = UnknownObject & { data?: UnknownObject };
@@ -53,27 +53,6 @@ type SeriesCooldownDetail = {
   source?: string;
   expiresAt?: number;
 };
-
-function getStatsCenterSafe(): StatsCenterLike {
-  const anyLlms = LlmsCore as unknown as {
-    getStatsCenter?: () => StatsCenterLike | unknown;
-  };
-  try {
-    if (anyLlms && typeof anyLlms.getStatsCenter === 'function') {
-      const center = anyLlms.getStatsCenter();
-      if (center && typeof (center as StatsCenterLike).recordProviderUsage === 'function') {
-        return center as StatsCenterLike;
-      }
-    }
-  } catch {
-    // fall through to no-op
-  }
-  return {
-    recordProviderUsage: () => {
-      // stats center not available in this @jsonstudio/llms build
-    }
-  };
-}
 
 /**
  * 基础Provider抽象类
@@ -188,7 +167,7 @@ export abstract class BaseProvider implements IProviderV2 {
 
     const context = this.createContext(request as UnknownObject);
     const runtimeMetadata = context.runtimeMetadata;
-    const stats = getStatsCenterSafe();
+    const stats = getStatsCenterSafeFromBridge() as StatsCenterLike;
 
     try {
       this.requestCount++;

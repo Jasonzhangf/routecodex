@@ -2,14 +2,13 @@ import type { ErrorContext } from 'rcc-errorhandling';
 import type { ModuleDependencies } from '../../../modules/pipeline/interfaces/pipeline-interfaces.js';
 import type { ProviderContext } from '../api/provider-types.js';
 import type { TargetMetadata } from '../../../modules/pipeline/orchestrator/pipeline-context.js';
-import type {
-  ProviderErrorEvent,
-  ProviderErrorRuntimeMetadata
-} from '@jsonstudio/llms/dist/router/virtual-router/types.js';
 import { formatErrorForErrorCenter } from '../../../utils/error-center-payload.js';
 import { getRouteErrorHub, reportRouteError } from '../../../error-handling/route-error-hub.js';
 import { buildInfo } from '../../../build-info.js';
 import { getProviderErrorCenter } from '../../../modules/llmswitch/bridge.js';
+import type { ProviderErrorEvent } from '../../../modules/llmswitch/bridge.js';
+
+type ProviderErrorRuntimeMetadata = ProviderErrorEvent['runtime'];
 
 const providerErrorCenter = (await getProviderErrorCenter())!;
 

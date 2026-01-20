@@ -9,6 +9,7 @@ jest.mock('../../src/providers/core/utils/snapshot-writer.ts', () => ({
 }), { virtual: true });
 
 import { ChatHttpProvider } from '../../src/providers/core/runtime/chat-http-provider.ts';
+import { HttpRequestExecutor } from '../../src/providers/core/runtime/http-request-executor.ts';
 import { attachProviderRuntimeMetadata } from '../../src/providers/core/runtime/provider-runtime-metadata.ts';
 
 // Minimal dependencies stub
@@ -23,7 +24,7 @@ class FakeHttpClient {
   constructor(_cfg?: any) {}
   async post(url: string, body: any, headers?: Record<string, string>) {
     this.last = { url, body, headers: headers || {} };
-    return { data: { id: 'cmpl_x', model: (body?.model || 'unknown'), choices: [] }, status: 200, headers: {}, url };
+    return { data: { id: 'cmpl_x', model: (body?.model || 'unknown'), choices: [] }, status: 200, statusText: 'OK', headers: {}, url };
   }
 }
 
@@ -56,12 +57,17 @@ describe('Provider outbound → upstream (openai-chat)', () => {
         overrides: { maxRetries: 0 }
       }
     } as any, deps);
-    // Patch http client
+    // Patch http client + executor (constructor wires executor to the original HttpClient)
     (provider as any).httpClient = new FakeHttpClient({});
+    (provider as any).requestExecutor = new HttpRequestExecutor(
+      (provider as any).httpClient,
+      (provider as any).createRequestExecutorDeps()
+    );
     await provider.initialize();
 
     // Build request and attach runtime routing metadata
-    const request: any = { data: { ...golden, stream: true, metadata: { foo: 'bar' } } };
+    const requestModel = (golden as any)?.model ?? 'glm-4.6';
+    const request: any = { data: { ...golden, model: requestModel, stream: true, metadata: { foo: 'bar' } } };
     attachProviderRuntimeMetadata(request, {
       requestId: 'req_test_glm', providerType: 'openai', providerProtocol: 'openai-chat', providerId: 'glm'
     });
@@ -71,8 +77,8 @@ describe('Provider outbound → upstream (openai-chat)', () => {
     expect(res?.status ?? 200).toBe(200);
     // Assert endpoint
     expect(String(call.url)).toMatch(/\/chat\/completions$/);
-    // Assert model enforced
-    expect(call.body.model).toBe('glm-4.6');
+    // Model comes from virtual router (request payload); provider should not drop it.
+    expect(call.body.model).toBe(requestModel);
     // stream removed
     expect(call.body.stream).toBeUndefined();
     // metadata removed
@@ -95,9 +101,14 @@ describe('Provider outbound → upstream (openai-chat)', () => {
       }
     } as any, deps);
     (provider as any).httpClient = new FakeHttpClient({});
+    (provider as any).requestExecutor = new HttpRequestExecutor(
+      (provider as any).httpClient,
+      (provider as any).createRequestExecutorDeps()
+    );
     await provider.initialize();
 
-    const request: any = { data: { ...golden, stream: true, metadata: { foo: 'bar' } } };
+    const requestModel = (golden as any)?.model ?? 'qwen3-coder-plus';
+    const request: any = { data: { ...golden, model: requestModel, stream: true, metadata: { foo: 'bar' } } };
     attachProviderRuntimeMetadata(request, {
       requestId: 'req_test_qwen', providerType: 'openai', providerProtocol: 'openai-chat', providerId: 'qwen'
     });
@@ -106,7 +117,7 @@ describe('Provider outbound → upstream (openai-chat)', () => {
     const call = (provider as any).httpClient.last as any;
     expect(res?.status ?? 200).toBe(200);
     expect(String(call.url)).toMatch(/\/chat\/completions$/);
-    expect(call.body.model).toBe('qwen3-coder-plus');
+    expect(call.body.model).toBe(requestModel);
     expect(call.body.stream).toBeUndefined();
     expect(call.body.metadata).toBeUndefined();
     expect((call.headers || {})['Accept']).toBe('application/json');
@@ -125,13 +136,19 @@ describe('Provider outbound → upstream (iflow/lmstudio)', () => {
         providerType: 'openai', baseUrl: 'https://api.openai.com/v1', model: 'iflow-gpt4-1106', auth: { type: 'apikey', apiKey: 'testapikey12345' }, overrides: { maxRetries: 0 }
       }
     } as any, deps);
-    (provider as any).httpClient = new FakeHttpClient({}); await provider.initialize();
-    const request: any = { data: { ...golden, stream: true, metadata: { foo: 'bar' } } };
+    (provider as any).httpClient = new FakeHttpClient({});
+    (provider as any).requestExecutor = new HttpRequestExecutor(
+      (provider as any).httpClient,
+      (provider as any).createRequestExecutorDeps()
+    );
+    await provider.initialize();
+    const requestModel = (golden as any)?.model ?? 'iflow-gpt4-1106';
+    const request: any = { data: { ...golden, model: requestModel, stream: true, metadata: { foo: 'bar' } } };
     attachProviderRuntimeMetadata(request, { requestId: 'req_iflow', providerType: 'openai', providerProtocol: 'openai-chat', providerId: 'iflow' });
     const res = await provider.sendRequest(request); const call = (provider as any).httpClient.last as any;
     expect(res?.status ?? 200).toBe(200);
     expect(String(call.url)).toMatch(/\/chat\/completions$/);
-    expect(call.body.model).toBe('iflow-gpt4-1106');
+    expect(call.body.model).toBe(requestModel);
     expect(call.body.stream).toBeUndefined(); expect(call.body.metadata).toBeUndefined();
     expect((call.headers || {})['Accept']).toBe('application/json');
   });
@@ -145,31 +162,25 @@ describe('Provider outbound → upstream (iflow/lmstudio)', () => {
         providerType: 'openai', baseUrl: 'http://localhost:1234/v1', model: 'lmstudio-phi3', auth: { type: 'apikey', apiKey: 'testapikey12345' }, overrides: { maxRetries: 0 }
       }
     } as any, deps);
-    (provider as any).httpClient = new FakeHttpClient({}); await provider.initialize();
-    const request: any = { data: { ...golden, stream: true, metadata: { foo: 'bar' } } };
+    (provider as any).httpClient = new FakeHttpClient({});
+    (provider as any).requestExecutor = new HttpRequestExecutor(
+      (provider as any).httpClient,
+      (provider as any).createRequestExecutorDeps()
+    );
+    await provider.initialize();
+    const requestModel = (golden as any)?.model ?? 'lmstudio-phi3';
+    const request: any = { data: { ...golden, model: requestModel, stream: true, metadata: { foo: 'bar' } } };
     attachProviderRuntimeMetadata(request, { requestId: 'req_lms', providerType: 'openai', providerProtocol: 'openai-chat', providerId: 'lmstudio' });
     const res = await provider.sendRequest(request); const call = (provider as any).httpClient.last as any;
     expect(res?.status ?? 200).toBe(200);
     expect(String(call.url)).toMatch(/\/chat\/completions$/);
-    expect(call.body.model).toBe('lmstudio-phi3');
+    expect(call.body.model).toBe(requestModel);
     expect(call.body.stream).toBeUndefined(); expect(call.body.metadata).toBeUndefined();
     expect((call.headers || {})['Accept']).toBe('application/json');
   });
 });
 
 describe('Provider outbound → upstream (responses wire)', () => {
-  // Mock llmswitch bridge (avoid ESM import.meta issues and control chat→responses encoding)
-  jest.mock('../../src/modules/llmswitch/bridge.ts', () => ({
-    buildResponsesRequestFromChat: (body: any) => {
-      const msg = Array.isArray(body?.messages) ? body.messages[0] : { role: 'user', content: '' };
-      const instructions = typeof body?.instructions === 'string' ? body.instructions : undefined;
-      const input = Array.isArray(body?.messages)
-        ? body.messages.map((m: any) => ({ role: m.role || 'user', content: [{ type: 'input_text', text: (m.content || '') + '' }] }))
-        : [];
-      const req = instructions ? { model: body?.model, instructions } : { model: body?.model, input };
-      return { request: req };
-    }
-  }), { virtual: true });
   class FakeHttpClientResponses extends FakeHttpClient {
     async postStream(url: string, body: any, headers?: Record<string, string>) {
       this.last = { url, body, headers: headers || {} };
@@ -178,9 +189,8 @@ describe('Provider outbound → upstream (responses wire)', () => {
     }
   }
 
-  test('responses: chat→responses encoding before postStream', async () => {
-    const golden = loadGolden('fc', 'openai-responses') || null; // for shape hints; not required
-    const chatReq = loadGolden('glm', 'openai-chat') || { messages: [{ role: 'user', content: 'hi' }] };
+  test('responses: provider expects responses wire payload (no chat→responses conversion)', async () => {
+    const golden = loadGolden('fc', 'openai-responses') || null; // optional shape hints
     const { ResponsesHttpProvider } = await import('../../src/providers/core/runtime/responses-http-provider.ts');
     const provider = new (ResponsesHttpProvider as any)({
       type: 'responses-http-provider',
@@ -189,7 +199,15 @@ describe('Provider outbound → upstream (responses wire)', () => {
       }
     }, deps);
     (provider as any).httpClient = new FakeHttpClientResponses({}); await provider.initialize();
-    const request: any = { data: { ...chatReq, stream: false } };
+    const requestPayload: any =
+      golden && typeof golden === 'object' && !Array.isArray(golden)
+        ? { ...golden, model: golden.model ?? 'gpt-4o-mini', stream: true }
+        : {
+            model: 'gpt-4o-mini',
+            input: [{ role: 'user', content: [{ type: 'input_text', text: 'hi' }] }],
+            stream: true
+          };
+    const request: any = { data: requestPayload };
     attachProviderRuntimeMetadata(request, { requestId: 'req_resp', providerType: 'responses', providerProtocol: 'openai-responses', providerId: 'openai' });
     let processed: any;
     try {

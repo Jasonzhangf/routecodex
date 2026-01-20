@@ -49,11 +49,14 @@ describe('resp_outbound stages snapshot payloads', () => {
     expect(recorder.entries).toHaveLength(1);
     const recorded = recorder.entries[0];
     expect(recorded.stage).toBe('resp_outbound_stage1_client_remap');
-    const recordedPayload = recorded.payload as typeof chatResponse;
-    expect(recordedPayload).toEqual(chatResponse);
-    const toolCalls = recordedPayload.choices?.[0]?.message?.tool_calls ?? [];
-    expect(Array.isArray(toolCalls)).toBe(true);
-    expect(toolCalls.length).toBeGreaterThan(0);
+    const recordedPayload = recorded.payload as any;
+    expect(recordedPayload.type).toBe('message');
+    expect(recordedPayload.role).toBe('assistant');
+    expect(Array.isArray(recordedPayload.content)).toBe(true);
+    const toolUse = (recordedPayload.content as any[]).find((b) => b && b.type === 'tool_use');
+    expect(toolUse).toBeDefined();
+    expect(toolUse.id).toBe('call_shell');
+    expect(toolUse.name).toBe('shell_command');
   });
 
   it('records final payload when streaming is disabled in SSE stage', async () => {

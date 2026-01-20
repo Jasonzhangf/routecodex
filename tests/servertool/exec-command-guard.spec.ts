@@ -57,7 +57,7 @@ describe('exec_command guard servertool (reenter)', () => {
     fs.mkdirSync(TMP_DIR, { recursive: true });
   });
 
-  test('baseline deny triggers followup and removes exec_command tool', async () => {
+  test('does not fabricate tool_outputs or followups for exec_command (client executes tool)', async () => {
     const adapterContext: AdapterContext = {
       requestId: 'req-exec-guard-1',
       entryEndpoint: '/v1/chat/completions',
@@ -78,27 +78,15 @@ describe('exec_command guard servertool (reenter)', () => {
       reenterPipeline: async () => ({ body: {} as JsonObject })
     });
 
-    expect(result.mode).toBe('tool_flow');
-    expect(result.execution?.flowId).toBe('exec_command_guard');
-    expect(result.execution?.followup).toBeDefined();
-    const followup = result.execution?.followup as any;
-    const payload = followup.payload as JsonObject;
-    const messages = Array.isArray((payload as any).messages) ? (payload as any).messages : [];
-    expect(messages.length).toBeGreaterThanOrEqual(3);
-    const last = messages[messages.length - 1] as any;
-    expect(last.role).toBe('tool');
-    expect(last.tool_call_id).toBe('call_exec_1');
-    expect(last.name).toBe('exec_command');
-
-    const tools = Array.isArray((payload as any).tools) ? (payload as any).tools : [];
-    const toolNames = tools
-      .map((t: any) => t?.function?.name)
-      .filter((v: any) => typeof v === 'string');
-    expect(toolNames).not.toContain('exec_command');
-    expect(toolNames).toContain('apply_patch');
+    expect(result.mode).toBe('passthrough');
+    expect(result.execution).toBeUndefined();
+    const final = result.finalChatResponse as any;
+    expect(final.tool_outputs).toBeUndefined();
+    const tc = final?.choices?.[0]?.message?.tool_calls?.[0]?.function;
+    expect(tc?.name).toBe('exec_command');
   });
 
-  test('baseline deny builds entry-aware followup payload for /v1/responses', async () => {
+  test('passthrough even when entry is /v1/responses', async () => {
     const adapterContext: AdapterContext = {
       requestId: 'req-exec-guard-resp-1',
       entryEndpoint: '/v1/responses',
@@ -118,15 +106,8 @@ describe('exec_command guard servertool (reenter)', () => {
       reenterPipeline: async () => ({ body: {} as JsonObject })
     });
 
-    expect(result.mode).toBe('tool_flow');
-    expect(result.execution?.flowId).toBe('exec_command_guard');
-    const followup = result.execution?.followup as any;
-    expect(followup).toBeDefined();
-    const payload = followup.payload as any;
-    expect(Array.isArray(payload.input)).toBe(true);
-    expect(payload.messages).toBeUndefined();
-    expect(payload.stream).toBe(false);
-    expect(payload.parameters?.stream).toBeUndefined();
+    expect(result.mode).toBe('passthrough');
+    expect(result.execution).toBeUndefined();
   });
 
   test('allowed command passthrough when no rules match', async () => {
@@ -150,7 +131,7 @@ describe('exec_command guard servertool (reenter)', () => {
     expect(result.mode).toBe('passthrough');
   });
 
-  test('policy regex deny triggers followup with ruleId', async () => {
+  test('passthrough even when policy would have denied', async () => {
     const policyPath = path.join(TMP_DIR, 'policy.v1.json');
     fs.writeFileSync(
       policyPath,
@@ -182,17 +163,11 @@ describe('exec_command guard servertool (reenter)', () => {
       reenterPipeline: async () => ({ body: {} as JsonObject })
     });
 
-    expect(result.mode).toBe('tool_flow');
-    expect(result.execution?.flowId).toBe('exec_command_guard');
-    const followup = result.execution?.followup as any;
-    expect(followup).toBeDefined();
-
-    const toolMessage = ((followup.payload as any).messages as any[]).slice(-1)[0];
-    const content = typeof toolMessage?.content === 'string' ? toolMessage.content : '';
-    expect(content).toContain('deny-git-reset');
+    expect(result.mode).toBe('passthrough');
+    expect(result.execution).toBeUndefined();
   });
 
-  test('orchestration calls reenterPipeline on denial', async () => {
+  test('orchestration does not call reenterPipeline (no server-side followup)', async () => {
     const adapterContext: AdapterContext = {
       requestId: 'req-exec-guard-4',
       entryEndpoint: '/v1/chat/completions',
@@ -213,8 +188,6 @@ describe('exec_command guard servertool (reenter)', () => {
       providerProtocol: 'openai-chat',
       reenterPipeline: async (opts: any) => {
         reenterCalled = true;
-        const messages = Array.isArray(opts?.body?.messages) ? opts.body.messages : [];
-        expect(messages[messages.length - 1]?.role).toBe('tool');
         return {
           body: {
             id: 'chatcmpl-followup-1',
@@ -226,8 +199,8 @@ describe('exec_command guard servertool (reenter)', () => {
       }
     });
 
-    expect(reenterCalled).toBe(true);
-    expect(orchestration.executed).toBe(true);
-    expect((orchestration.chat as any)?.id).toBe('chatcmpl-followup-1');
+    expect(reenterCalled).toBe(false);
+    expect(orchestration.executed).toBe(false);
+    expect((orchestration.chat as any)?.id).toBe('chatcmpl-tool-1');
   });
 });

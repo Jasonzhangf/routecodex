@@ -39,6 +39,7 @@ import {
   convertProviderResponse as bridgeConvertProviderResponse,
   createSnapshotRecorder as bridgeCreateSnapshotRecorder,
   rebindResponsesConversationRequestId,
+  extractSessionIdentifiersFromMetadata,
   bootstrapVirtualRouterConfig,
   getHubPipelineCtor
 } from '../../../modules/llmswitch/bridge.js';
@@ -131,10 +132,6 @@ export class RouteCodexHttpServer {
     this.errorHandling = new QuietErrorHandlingCenter();
     this.stageLoggingEnabled = isStageLoggingEnabled();
     this.repoRoot = resolveRepoRoot(import.meta.url);
-    const envFlag = (process.env.ROUTECODEX_USE_HUB_PIPELINE || '').trim().toLowerCase();
-    if (config.pipeline?.useHubPipeline === false || envFlag === '0' || envFlag === 'false') {
-      console.warn('[RouteCodexHttpServer] Super pipeline has been removed; falling back to Hub pipeline.');
-    }
 
     try {
       this.pipelineLogger = new PipelineDebugLoggerImpl({ colored: this.coloredLogger }, { enableConsoleLogging: true });
@@ -175,20 +172,11 @@ export class RouteCodexHttpServer {
   /**
    * Register Daemon Admin UI route.
    * Serves docs/daemon-admin-ui.html as a static page.
-   * - If `httpserver.apikey` is not configured: localhost-only.
-   * - If `httpserver.apikey` is configured: allow remote UI access (API calls still require apikey).
+   * Note: daemon-admin UI/API now uses password login (stored at ~/.routecodex/login) instead of httpserver.apikey.
    */
   private registerDaemonAdminUiRoute(): void {
     this.app.get('/daemon/admin', async (req, res) => {
       try {
-        const ip = req.socket?.remoteAddress || '';
-        const isLocal = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
-        const expectedKey = typeof this.config?.server?.apikey === 'string' ? this.config.server.apikey.trim() : '';
-        const hasConfiguredKey = Boolean(expectedKey);
-        if (!isLocal && !hasConfiguredKey) {
-          res.status(403).json({ error: { message: 'forbidden', code: 'forbidden' } });
-          return;
-        }
         const fs = await import('node:fs/promises');
         let html = '';
         try {
@@ -780,7 +768,7 @@ export class RouteCodexHttpServer {
       };
     }
 
-    // Unified Hub Framework V1: tool surface rollout toggle (shadow by default in dev).
+    // Unified Hub Framework V1: tool surface rollout toggle (enforce by default in dev).
     // - Disable via env: ROUTECODEX_HUB_TOOL_SURFACE_MODE=off
     // - Observe via env: ROUTECODEX_HUB_TOOL_SURFACE_MODE=observe
     // - Shadow (diff-only, no rewrites) via env: ROUTECODEX_HUB_TOOL_SURFACE_MODE=shadow
@@ -792,7 +780,7 @@ export class RouteCodexHttpServer {
         : toolSurfaceModeRaw === 'observe' || toolSurfaceModeRaw === 'shadow' || toolSurfaceModeRaw === 'enforce'
           ? toolSurfaceModeRaw
           : buildInfo.mode === 'dev'
-            ? 'shadow'
+            ? 'enforce'
             : null;
 
     if (toolSurfaceMode) {
@@ -1465,7 +1453,10 @@ export class RouteCodexHttpServer {
           try {
             const baselineOut = {
               providerPayload: cloneJsonSafe(baselineProviderPayload),
-              target: cloneJsonSafe(result.target),
+              target:
+                shadow && typeof shadow === 'object' && !Array.isArray(shadow) && (shadow as any).baselineTarget
+                  ? cloneJsonSafe((shadow as any).baselineTarget)
+                  : cloneJsonSafe(result.target),
               metadata: {
                 entryEndpoint: result.metadata?.entryEndpoint,
                 providerProtocol: result.metadata?.providerProtocol,
@@ -1566,23 +1557,12 @@ export class RouteCodexHttpServer {
 
     // 在 Host 入口统一解析会话标识，后续 HubPipeline / servertool 等模块仅依赖
     // sessionId / conversationId 字段，不再重复解析 clientHeaders。
-    try {
-          const { extractSessionIdentifiersFromMetadata } =
-        require('../../../../sharedmodule/llmswitch-core/dist/conversion/hub/pipeline/session-identifiers.js') as {
-          extractSessionIdentifiersFromMetadata: (meta: Record<string, unknown> | undefined) => {
-            sessionId?: string;
-            conversationId?: string;
-          };
-        };
-      const identifiers = extractSessionIdentifiersFromMetadata(metadata);
-      if (identifiers.sessionId) {
-        metadata.sessionId = identifiers.sessionId;
-      }
-      if (identifiers.conversationId) {
-        metadata.conversationId = identifiers.conversationId;
-      }
-    } catch {
-      // best-effort：解析失败时不影响主流程
+    const identifiers = extractSessionIdentifiersFromMetadata(metadata);
+    if (identifiers.sessionId) {
+      metadata.sessionId = identifiers.sessionId;
+    }
+    if (identifiers.conversationId) {
+      metadata.conversationId = identifiers.conversationId;
     }
 
     return metadata;
@@ -1842,7 +1822,6 @@ export class RouteCodexHttpServer {
       }): Promise<{ body?: Record<string, unknown>; __sse_responses?: unknown; format?: string }> => {
         const nestedEntry = reenterOpts.entryEndpoint || options.entryEndpoint || entry;
         const nestedExtra = asRecord(reenterOpts.metadata) ?? {};
-        const nestedEntryLower = nestedEntry.toLowerCase();
 
         // 基于首次 HubPipeline metadata + 调用方注入的 metadata 构建新的请求 metadata。
         // 不在 Host 层编码 servertool/web_search 等语义，由 llmswitch-core 负责。
@@ -1859,22 +1838,6 @@ export class RouteCodexHttpServer {
         if (nestedMetadata.serverToolFollowup === true) {
           delete nestedMetadata.clientHeaders;
           delete nestedMetadata.clientRequestId;
-        }
-
-        // 针对 reenterPipeline 的入口端点，纠正 providerProtocol，避免沿用外层协议。
-        if (nestedEntryLower.includes('/v1/chat/completions')) {
-          nestedMetadata.providerProtocol = 'openai-chat';
-        } else if (nestedEntryLower.includes('/v1/responses')) {
-          nestedMetadata.providerProtocol = 'openai-responses';
-        } else if (nestedEntryLower.includes('/v1/messages')) {
-          nestedMetadata.providerProtocol = 'anthropic-messages';
-        }
-        const followupProtocol =
-          typeof (nestedExtra as Record<string, unknown>).serverToolFollowupProtocol === 'string'
-            ? ((nestedExtra as Record<string, unknown>).serverToolFollowupProtocol as string)
-            : undefined;
-        if (followupProtocol) {
-          nestedMetadata.providerProtocol = followupProtocol;
         }
 
         const nestedInput: PipelineExecutionInput = {

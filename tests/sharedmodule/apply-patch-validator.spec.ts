@@ -52,4 +52,52 @@ describe('apply_patch validator', () => {
     expect(result.ok).toBe(false);
     expect(result.reason).toBe('missing_changes');
   });
+
+  it('accepts classic context diff by converting to apply_patch format', () => {
+    const contextDiff = [
+      '*** src/foo.ts',
+      '--- src/foo.ts',
+      '***************',
+      '*** 1,2 ****',
+      '! const a = 1;',
+      '--- 1,2 ----',
+      '! const a = 2;'
+    ].join('\n');
+    const args = JSON.stringify({ patch: contextDiff });
+    const result = validateToolCall('apply_patch', args);
+    expect(result.ok).toBe(true);
+    const parsed = toArgsObject(result);
+    expect(String(parsed.patch)).toContain('*** Begin Patch');
+    expect(String(parsed.patch)).toContain('*** Update File: src/foo.ts');
+    expect(String(parsed.patch)).toContain('-const a = 1;');
+    expect(String(parsed.patch)).toContain('+const a = 2;');
+  });
+
+  it('rejects invalid json args (even when containing <arg_key>/<arg_value> artifacts)', () => {
+    const brokenArgs =
+      '{"file":"a.ts","changes":[{"kind":"create_file","lines":["x"],"file</arg_key><arg_value>a.ts"}]}';
+    const result = validateToolCall('apply_patch', brokenArgs);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('invalid_json');
+  });
+
+  it('converts unified diff wrapped in "*** Begin Patch ***" markers into apply_patch format', () => {
+    const wrappedUnifiedDiff = [
+      '*** Begin Patch ***',
+      '--- a/src/foo.ts',
+      '+++ b/src/foo.ts',
+      '@@ -1,1 +1,1 @@',
+      '-const a = 1;',
+      '+const a = 2;',
+      '*** End Patch ***'
+    ].join('\n');
+    const args = JSON.stringify({ patch: wrappedUnifiedDiff });
+    const result = validateToolCall('apply_patch', args);
+    expect(result.ok).toBe(true);
+    const parsed = toArgsObject(result);
+    expect(String(parsed.patch)).toContain('*** Begin Patch');
+    expect(String(parsed.patch)).toContain('*** Update File: src/foo.ts');
+    expect(String(parsed.patch)).toContain('-const a = 1;');
+    expect(String(parsed.patch)).toContain('+const a = 2;');
+  });
 });

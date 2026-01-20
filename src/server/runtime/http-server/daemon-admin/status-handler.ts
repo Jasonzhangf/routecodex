@@ -11,7 +11,7 @@ interface ModuleStatusView {
 
 export function registerStatusRoutes(app: Application, options: DaemonAdminRouteOptions): void {
   app.get('/daemon/status', (req: Request, res: Response) => {
-    if (rejectNonLocalOrUnauthorizedAdmin(req, res, options.getExpectedApiKey?.())) {return;}
+    if (rejectNonLocalOrUnauthorizedAdmin(req, res)) {return;}
 
     const manager = options.getManagerDaemon() as
       | {
@@ -58,7 +58,7 @@ export function registerStatusRoutes(app: Application, options: DaemonAdminRoute
   // Admin-only module control helpers (stop/restart).
   // Intended for operational debugging (e.g. reload provider-quota snapshot after file deletion).
   app.post('/daemon/modules/:id/stop', async (req: Request, res: Response) => {
-    if (rejectNonLocalOrUnauthorizedAdmin(req, res, options.getExpectedApiKey?.())) {return;}
+    if (rejectNonLocalOrUnauthorizedAdmin(req, res)) {return;}
     const id = typeof req.params.id === 'string' ? req.params.id.trim() : '';
     if (!id) {
       res.status(400).json({ error: { message: 'id is required', code: 'bad_request' } });
@@ -84,7 +84,7 @@ export function registerStatusRoutes(app: Application, options: DaemonAdminRoute
   });
 
   app.post('/daemon/modules/:id/restart', async (req: Request, res: Response) => {
-    if (rejectNonLocalOrUnauthorizedAdmin(req, res, options.getExpectedApiKey?.())) {return;}
+    if (rejectNonLocalOrUnauthorizedAdmin(req, res)) {return;}
     const id = typeof req.params.id === 'string' ? req.params.id.trim() : '';
     if (!id) {
       res.status(400).json({ error: { message: 'id is required', code: 'bad_request' } });
@@ -113,7 +113,7 @@ export function registerStatusRoutes(app: Application, options: DaemonAdminRoute
   });
 
   app.post('/daemon/modules/:id/reset', async (req: Request, res: Response) => {
-    if (rejectNonLocalOrUnauthorizedAdmin(req, res, options.getExpectedApiKey?.())) {return;}
+    if (rejectNonLocalOrUnauthorizedAdmin(req, res)) {return;}
     const id = typeof req.params.id === 'string' ? req.params.id.trim() : '';
     if (!id) {
       res.status(400).json({ error: { message: 'id is required', code: 'bad_request' } });

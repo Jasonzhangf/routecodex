@@ -46,7 +46,27 @@ export function registerApiKeyAuthMiddleware(app: Application, config: ServerCon
     }
 
     const path = typeof req.path === 'string' ? req.path : '';
-    if (path === '/daemon/admin' || path === '/daemon/admin/') {
+    // Daemon admin UI/API has its own password auth (not apikey).
+    if (path === '/daemon/admin' || path === '/daemon/admin/' || path.startsWith('/daemon/')) {
+      next();
+      return;
+    }
+    // Manager state endpoints are also daemon-admin scoped (password auth).
+    if (path.startsWith('/manager/state/')) {
+      next();
+      return;
+    }
+    // Daemon admin JSON APIs are intentionally not under /daemon/* (legacy); they are still admin-only and
+    // must be protected by the daemon password session, not by apikey.
+    if (
+      path.startsWith('/providers/')
+      || path.startsWith('/quota/')
+      || path === '/quota/summary'
+      || path === '/quota/providers'
+      || path.startsWith('/config/providers')
+      || path.startsWith('/config/routing')
+      || path.startsWith('/config/settings')
+    ) {
       next();
       return;
     }

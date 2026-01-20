@@ -36,7 +36,7 @@ function sumTotals(rows: ProviderStatsView[] | undefined): TokenTotals {
 
 export function registerStatsRoutes(app: Application, options: DaemonAdminRouteOptions): void {
   app.get('/daemon/stats', (req: Request, res: Response) => {
-    if (rejectNonLocalOrUnauthorizedAdmin(req, res, options.getExpectedApiKey?.())) {return;}
+    if (rejectNonLocalOrUnauthorizedAdmin(req, res)) {return;}
 
     if (typeof options.getStatsSnapshot !== 'function') {
       res.status(503).json({ error: { message: 'stats module not available', code: 'not_ready' } });
@@ -69,4 +69,3 @@ export function registerStatsRoutes(app: Application, options: DaemonAdminRouteO
     }
   });
 }
-

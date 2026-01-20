@@ -20,9 +20,6 @@ export interface ServerConfigV2 {
      */
     quotaRoutingEnabled?: boolean;
   };
-  pipeline?: {
-    useHubPipeline?: boolean; // legacy flag (hub is always enabled)
-  };
   logging: {
     level: 'debug' | 'info' | 'warn' | 'error';
     enableConsole?: boolean;

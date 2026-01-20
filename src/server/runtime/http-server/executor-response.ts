@@ -141,7 +141,6 @@ export async function convertProviderResponseIfNeeded(
     }): Promise<{ body?: Record<string, unknown>; __sse_responses?: unknown; format?: string }> => {
       const nestedEntry = reenterOpts.entryEndpoint || options.entryEndpoint || entry;
       const nestedExtra = asRecord(reenterOpts.metadata) ?? {};
-      const nestedEntryLower = nestedEntry.toLowerCase();
 
       const nestedMetadata: Record<string, unknown> = {
         ...(metadataBag ?? {}),
@@ -150,21 +149,6 @@ export async function convertProviderResponseIfNeeded(
         direction: 'request',
         stage: 'inbound'
       };
-
-      if (nestedEntryLower.includes('/v1/chat/completions')) {
-        nestedMetadata.providerProtocol = 'openai-chat';
-      } else if (nestedEntryLower.includes('/v1/responses')) {
-        nestedMetadata.providerProtocol = 'openai-responses';
-      } else if (nestedEntryLower.includes('/v1/messages')) {
-        nestedMetadata.providerProtocol = 'anthropic-messages';
-      }
-      const followupProtocol =
-        typeof (nestedExtra as Record<string, unknown>).serverToolFollowupProtocol === 'string'
-          ? ((nestedExtra as Record<string, unknown>).serverToolFollowupProtocol as string)
-          : undefined;
-      if (followupProtocol) {
-        nestedMetadata.providerProtocol = followupProtocol;
-      }
 
       const nestedInput: PipelineExecutionInput = {
         entryEndpoint: nestedEntry,

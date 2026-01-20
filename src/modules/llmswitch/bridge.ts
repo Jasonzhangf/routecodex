@@ -1,5 +1,6 @@
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { createRequire } from 'module';
 import { importCoreModule } from './core-loader.js';
 import type { ProviderErrorEvent } from '@jsonstudio/llms/dist/router/virtual-router/types.js';
 import { writeErrorsampleJson } from '../../utils/errorsamples.js';
@@ -7,14 +8,16 @@ import { buildInfo } from '../../build-info.js';
 import { resolveLlmswitchCoreVersion } from '../../utils/runtime-versions.js';
 
 type AnyRecord = Record<string, unknown>;
-type WithBaseDir = BridgeProcessOptions & { baseDir: string };
-type BridgeHandler = (payload: AnyRecord, options: WithBaseDir) => Promise<AnyRecord>;
-type RouteCodexBridgeModule = Partial<Record<CoreBridgeMethod, BridgeHandler>>;
 type SnapshotRecorder = unknown;
 
 // 单一桥接模块：这是全项目中唯一允许直接 import llmswitch-core 的地方。
 // 其它代码（pipeline/provider/server/virtual-router/snapshot）都只能通过这里暴露的统一接口访问 llmswitch-core。
 // 默认引用 @jsonstudio/llms（来自 npm 发布版本）。仓库开发场景可通过 scripts/link-llmswitch.mjs 将该依赖 link 到本地 sharedmodule。
+
+export type { ProviderErrorEvent } from '@jsonstudio/llms/dist/router/virtual-router/types.js';
+export type { ProviderUsageEvent } from '@jsonstudio/llms';
+
+const require = createRequire(import.meta.url);
 
 async function importCoreDist<TModule extends object = AnyRecord>(subpath: string): Promise<TModule> {
   try {
@@ -24,95 +27,6 @@ async function importCoreDist<TModule extends object = AnyRecord>(subpath: strin
     throw new Error(
       `[llmswitch-bridge] Unable to load core module "${subpath}". 请确认 @jsonstudio/llms 依赖已安装（npm install）。${detail ? ` (${detail})` : ''}`
     );
-  }
-}
-
-export type BridgeProcessOptions = {
-  processMode: 'chat' | 'passthrough';
-  providerProtocol?: string;
-  providerType?: string;
-  entryEndpoint?: string;
-};
-
-type CoreBridgeMethod =
-  | 'processIncoming'
-  | 'processOutgoing'
-  | 'processInboundRequest'
-  | 'processInboundResponse'
-  | 'processOutboundRequest'
-  | 'processOutboundResponse';
-
-async function invokeCoreBridge(
-  method: CoreBridgeMethod,
-  payload: AnyRecord,
-  opts: BridgeProcessOptions
-): Promise<AnyRecord> {
-  const mod = await importCoreDist<RouteCodexBridgeModule>('bridge/routecodex-adapter');
-  const fn = mod[method];
-  if (typeof fn !== 'function') {
-    throw new Error(`[llmswitch-bridge] ${method} not available on core adapter`);
-  }
-  const baseDir = resolveBaseDir();
-  const { processMode, providerProtocol, entryEndpoint, providerType } = opts;
-  return await fn(payload, {
-    baseDir,
-    processMode,
-    providerProtocol,
-    providerType,
-    entryEndpoint
-  });
-}
-
-export async function bridgeProcessIncoming(request: AnyRecord, opts: BridgeProcessOptions): Promise<AnyRecord> {
-  return await invokeCoreBridge('processInboundRequest', request, opts);
-}
-
-export async function bridgeProcessOutgoing(response: AnyRecord, opts: BridgeProcessOptions): Promise<AnyRecord> {
-  return await invokeCoreBridge('processOutboundResponse', response, opts);
-}
-
-export async function bridgeProcessInboundResponse(response: AnyRecord, opts: BridgeProcessOptions): Promise<AnyRecord> {
-  return await invokeCoreBridge('processInboundResponse', response, opts);
-}
-
-export async function bridgeProcessOutboundRequest(request: AnyRecord, opts: BridgeProcessOptions): Promise<AnyRecord> {
-  return await invokeCoreBridge('processOutboundRequest', request, opts);
-}
-
-export async function bridgeProcessOutboundResponse(response: AnyRecord, opts: BridgeProcessOptions): Promise<AnyRecord> {
-  return await invokeCoreBridge('processOutboundResponse', response, opts);
-}
-
-type ResponsesBridgeModule = {
-  buildResponsesRequestFromChat?: (request: AnyRecord, ctx?: AnyRecord) => Promise<AnyRecord> | AnyRecord;
-};
-
-export async function buildResponsesRequestFromChat(
-  chatRequest: AnyRecord,
-  ctx?: AnyRecord
-): Promise<AnyRecord> {
-  const mod = await importCoreDist<ResponsesBridgeModule>('conversion/responses/responses-openai-bridge');
-  const builder = mod.buildResponsesRequestFromChat;
-  if (typeof builder !== 'function') {
-    throw new Error('[llmswitch-bridge] buildResponsesRequestFromChat not available');
-  }
-  const result = builder(chatRequest, ctx);
-  return result instanceof Promise ? await result : result;
-}
-
-type ResponsesInstructionsModule = {
-  ensureResponsesInstructions?: (body: AnyRecord) => void;
-};
-
-/**
- * 确保 Responses 请求体包含规范化的 instructions 字段。
- * Provider 层通过该桥接函数调用 llmswitch-core 的 ensureResponsesInstructions。
- */
-export async function ensureResponsesInstructions(body: AnyRecord): Promise<void> {
-  const mod = await importCoreDist<ResponsesInstructionsModule>('conversion/shared/responses-instructions');
-  const fn = mod.ensureResponsesInstructions;
-  if (typeof fn === 'function') {
-    fn(body);
   }
 }
 
@@ -395,6 +309,114 @@ export async function getProviderErrorCenter(): Promise<ProviderErrorCenterExpor
     cachedProviderErrorCenter = center;
   }
   return cachedProviderErrorCenter;
+}
+
+type StickySessionStoreExports = {
+  loadRoutingInstructionStateSync?: (key: string) => unknown | null;
+  saveRoutingInstructionStateAsync?: (key: string, state: unknown | null) => void;
+};
+
+let cachedStickySessionStore: StickySessionStoreExports | null | undefined = undefined;
+
+function getStickySessionStoreExports(): StickySessionStoreExports | null {
+  if (cachedStickySessionStore !== undefined) {
+    return cachedStickySessionStore;
+  }
+  try {
+    // NOTE: must be sync because VirtualRouter routingStateStore expects loadSync.
+    // Centralized here to keep a single core import surface.
+    cachedStickySessionStore = require('@jsonstudio/llms/dist/router/virtual-router/sticky-session-store.js') as StickySessionStoreExports;
+  } catch {
+    cachedStickySessionStore = null;
+  }
+  return cachedStickySessionStore;
+}
+
+export function loadRoutingInstructionStateSync(key: string): unknown | null {
+  const mod = getStickySessionStoreExports();
+  const fn = mod?.loadRoutingInstructionStateSync;
+  if (typeof fn !== 'function') {
+    return null;
+  }
+  return fn(key);
+}
+
+export function saveRoutingInstructionStateAsync(key: string, state: unknown | null): void {
+  const mod = getStickySessionStoreExports();
+  const fn = mod?.saveRoutingInstructionStateAsync;
+  if (typeof fn !== 'function') {
+    return;
+  }
+  fn(key, state);
+}
+
+type SessionIdentifiers = { sessionId?: string; conversationId?: string };
+
+type SessionIdentifiersModule = {
+  extractSessionIdentifiersFromMetadata?: (meta: Record<string, unknown> | undefined) => SessionIdentifiers;
+};
+
+let cachedSessionIdentifiersModule: SessionIdentifiersModule | null | undefined = undefined;
+
+function getSessionIdentifiersModule(): SessionIdentifiersModule | null {
+  if (cachedSessionIdentifiersModule !== undefined) {
+    return cachedSessionIdentifiersModule;
+  }
+  try {
+    cachedSessionIdentifiersModule = require(
+      '@jsonstudio/llms/dist/conversion/hub/pipeline/session-identifiers.js'
+    ) as SessionIdentifiersModule;
+  } catch {
+    cachedSessionIdentifiersModule = null;
+  }
+  return cachedSessionIdentifiersModule;
+}
+
+export function extractSessionIdentifiersFromMetadata(
+  meta: Record<string, unknown> | undefined
+): SessionIdentifiers {
+  const mod = getSessionIdentifiersModule();
+  const fn = mod?.extractSessionIdentifiersFromMetadata;
+  if (typeof fn !== 'function') {
+    return {};
+  }
+  try {
+    return fn(meta);
+  } catch {
+    return {};
+  }
+}
+
+type StatsCenterLike = {
+  recordProviderUsage(ev: unknown): void;
+};
+
+type StatsCenterModule = {
+  getStatsCenter?: () => StatsCenterLike;
+};
+
+let cachedStatsCenter: StatsCenterLike | null | undefined = undefined;
+
+export function getStatsCenterSafe(): StatsCenterLike {
+  if (cachedStatsCenter) {
+    return cachedStatsCenter;
+  }
+  if (cachedStatsCenter === null) {
+    return { recordProviderUsage: () => {} };
+  }
+  try {
+    const mod = require('@jsonstudio/llms/dist/telemetry/stats-center.js') as StatsCenterModule;
+    const fn = mod?.getStatsCenter;
+    const center = typeof fn === 'function' ? fn() : null;
+    if (center && typeof center.recordProviderUsage === 'function') {
+      cachedStatsCenter = center;
+      return center;
+    }
+  } catch {
+    // fall through
+  }
+  cachedStatsCenter = null;
+  return { recordProviderUsage: () => {} };
 }
 
 type VirtualRouterBootstrapModule = {

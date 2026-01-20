@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { homedir } from 'node:os';
 import type { ManagerContext, ManagerModule } from '../../types.js';
-import type { ProviderErrorEvent } from '@jsonstudio/llms/dist/router/virtual-router/types.js';
+import type { ProviderErrorEvent } from '../../../modules/llmswitch/bridge.js';
 import { JsonlFileStore } from '../../storage/file-store.js';
 
 type VirtualRouterHealthSnapshot = unknown;

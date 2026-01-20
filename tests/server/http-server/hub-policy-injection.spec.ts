@@ -52,6 +52,10 @@ describe('RouteCodexHttpServer hub policy injection', () => {
 
     jest.resetModules();
     jest.unstable_mockModule(BRIDGE_MODULE_PATH, () => ({
+      getStatsCenterSafe: () => ({ recordProviderUsage: () => {} }),
+      extractSessionIdentifiersFromMetadata: () => ({}),
+      loadRoutingInstructionStateSync: () => null,
+      saveRoutingInstructionStateAsync: () => {},
       getProviderErrorCenter: async () => ({
         emit: () => {},
         subscribe: () => () => {}
@@ -107,6 +111,10 @@ describe('RouteCodexHttpServer hub policy injection', () => {
 
     jest.resetModules();
     jest.unstable_mockModule(BRIDGE_MODULE_PATH, () => ({
+      getStatsCenterSafe: () => ({ recordProviderUsage: () => {} }),
+      extractSessionIdentifiersFromMetadata: () => ({}),
+      loadRoutingInstructionStateSync: () => null,
+      saveRoutingInstructionStateAsync: () => {},
       getProviderErrorCenter: async () => ({
         emit: () => {},
         subscribe: () => () => {}
@@ -163,6 +171,10 @@ describe('RouteCodexHttpServer hub policy injection', () => {
 
     jest.resetModules();
     jest.unstable_mockModule(BRIDGE_MODULE_PATH, () => ({
+      getStatsCenterSafe: () => ({ recordProviderUsage: () => {} }),
+      extractSessionIdentifiersFromMetadata: () => ({}),
+      loadRoutingInstructionStateSync: () => null,
+      saveRoutingInstructionStateAsync: () => {},
       getProviderErrorCenter: async () => ({
         emit: () => {},
         subscribe: () => () => {}

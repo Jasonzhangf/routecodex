@@ -10,8 +10,8 @@ import {
 } from '../../../providers/core/runtime/antigravity-quota-client.js';
 import { scanProviderTokenFiles } from '../../../providers/auth/token-scanner/index.js';
 import { resolveAntigravityApiBase } from '../../../providers/auth/antigravity-userinfo-helper.js';
-import type { ProviderErrorEvent } from '@jsonstudio/llms/dist/router/virtual-router/types.js';
 import { getProviderErrorCenter } from '../../../modules/llmswitch/bridge.js';
+import type { ProviderErrorEvent } from '../../../modules/llmswitch/bridge.js';
 import { readTokenFile, evaluateTokenState } from '../../../token-daemon/token-utils.js';
 import {
   applyErrorEvent as applyQuotaErrorEvent,

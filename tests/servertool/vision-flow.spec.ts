@@ -1,4 +1,4 @@
-import { runServerSideToolEngine } from '../../sharedmodule/llmswitch-core/src/servertool/server-side-tools.js';
+import { runServerToolOrchestration } from '../../sharedmodule/llmswitch-core/src/servertool/engine.js';
 import type { AdapterContext } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/json.js';
 
@@ -19,7 +19,7 @@ function makeCapturedChatRequestWithImage(): JsonObject {
 }
 
 describe('vision_auto servertool followup (entry-aware)', () => {
-  test('builds followup payload compatible with /v1/responses', async () => {
+  test('re-enters hub with a canonical chat-like followup body (messages, non-stream)', async () => {
     const adapterContext: AdapterContext = {
       requestId: 'req-vision-1',
       entryEndpoint: '/v1/responses',
@@ -42,37 +42,59 @@ describe('vision_auto servertool followup (entry-aware)', () => {
       ]
     } as any;
 
-    const result = await runServerSideToolEngine({
-      chatResponse,
+    let sawFollowup: any;
+    const orchestration = await runServerToolOrchestration({
+      chat: chatResponse,
       adapterContext,
       entryEndpoint: '/v1/responses',
       requestId: 'req-vision-1',
       providerProtocol: 'openai-chat',
-      reenterPipeline: async () => ({
-        body: {
-          id: 'chatcmpl-vision-analysis',
-          object: 'chat.completion',
-          model: 'gpt-test',
-          choices: [
-            {
-              index: 0,
-              message: { role: 'assistant', content: 'vision summary' },
-              finish_reason: 'stop'
-            }
-          ]
-        } as JsonObject
-      })
+      reenterPipeline: async (opts: any) => {
+        if (String(opts.requestId).includes(':vision_followup')) {
+          sawFollowup = opts;
+          return {
+            body: {
+              id: 'chatcmpl-vision-followup-1',
+              object: 'chat.completion',
+              model: 'gpt-test',
+              choices: [
+                {
+                  index: 0,
+                  message: { role: 'assistant', content: 'ok' },
+                  finish_reason: 'stop'
+                }
+              ]
+            } as JsonObject
+          };
+        }
+        // backend :vision analysis hop
+        return {
+          body: {
+            id: 'chatcmpl-vision-analysis',
+            object: 'chat.completion',
+            model: 'gpt-test',
+            choices: [
+              {
+                index: 0,
+                message: { role: 'assistant', content: 'vision summary' },
+                finish_reason: 'stop'
+              }
+            ]
+          } as JsonObject
+        };
+      }
     });
 
-    expect(result.mode).toBe('tool_flow');
-    expect(result.execution?.flowId).toBe('vision_flow');
-    const followup = (result.execution as any)?.followup;
-    expect(followup).toBeTruthy();
-    const payload = followup.payload as any;
-    expect(Array.isArray(payload.input)).toBe(true);
-    expect(payload.messages).toBeUndefined();
-    expect(payload.stream).toBe(false);
-    expect(payload.parameters?.stream).toBeUndefined();
+    expect(orchestration.executed).toBe(true);
+    expect(orchestration.flowId).toBe('vision_flow');
+    expect(sawFollowup?.metadata?.serverToolFollowup).toBe(true);
+    expect(sawFollowup?.metadata?.stream).toBe(false);
+
+    const body = sawFollowup?.body as any;
+    expect(body).toBeDefined();
+    expect(Array.isArray(body.messages)).toBe(true);
+    expect(body.stream).toBe(false);
+    expect(body.parameters?.stream).toBeUndefined();
+    expect(JSON.stringify(body.messages)).toContain('[Vision] vision summary');
   });
 });
-

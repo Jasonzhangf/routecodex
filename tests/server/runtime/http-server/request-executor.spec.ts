@@ -55,11 +55,11 @@ describe('HubRequestExecutor failover', () => {
     const pipeline = {
       execute: jest.fn(async (input: any) => {
         const disabled = new Set<string>(
-          Array.isArray(input.metadata?.disabledProviderKeyAliases)
-            ? input.metadata.disabledProviderKeyAliases
+          Array.isArray(input.metadata?.excludedProviderKeys)
+            ? input.metadata.excludedProviderKeys
             : []
         );
-        const providerKey = disabled.has('antigravity.1-geetasamodgeetasamoda')
+        const providerKey = disabled.has(firstProviderKey)
           ? secondProviderKey
           : firstProviderKey;
         return {

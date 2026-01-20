@@ -1,4 +1,5 @@
 import { runServerSideToolEngine } from '../../sharedmodule/llmswitch-core/src/servertool/server-side-tools.js';
+import { runServerToolOrchestration } from '../../sharedmodule/llmswitch-core/src/servertool/engine.js';
 import type {
   ProviderInvoker,
   ServerSideToolEngineOptions
@@ -167,7 +168,7 @@ describe('ServerTool web_search engine (generic)', () => {
 
     expect(result.mode).toBe('tool_flow');
     expect(result.execution?.flowId).toBe('web_search_flow');
-    expect((result.execution as any)?.followup?.payload).toBeTruthy();
+    expect(Array.isArray((result.execution as any)?.followup?.injection?.ops)).toBe(true);
     expect(invocations.length).toBe(1);
 
     const patched = result.finalChatResponse as any;
@@ -223,25 +224,32 @@ describe('ServerTool web_search engine (generic)', () => {
 
     process.env.ROUTECODEX_SERVER_SIDE_TOOLS = 'web_search';
 
-    const result = await runServerSideToolEngine({
-      chatResponse,
+    let sawFollowup: any;
+    const orchestration = await runServerToolOrchestration({
+      chat: chatResponse,
       adapterContext: ctx,
       entryEndpoint: '/v1/responses',
       requestId: 'req-web-responses',
       providerProtocol: 'openai-chat',
       providerInvoker,
-      reenterPipeline: async () => ({ body: {} as JsonObject })
+      reenterPipeline: async (opts: any) => {
+        sawFollowup = opts;
+        return { body: {} as JsonObject };
+      }
     });
 
-    expect(result.mode).toBe('tool_flow');
-    expect(result.execution?.flowId).toBe('web_search_flow');
-    const followup = (result.execution as any)?.followup;
-    expect(followup).toBeTruthy();
-    const payload = followup.payload as any;
-    expect(Array.isArray(payload.input)).toBe(true);
-    expect(payload.messages).toBeUndefined();
-    expect(payload.stream).toBe(false);
-    expect(payload.parameters?.stream).toBeUndefined();
+    expect(orchestration.executed).toBe(true);
+    expect(orchestration.flowId).toBe('web_search_flow');
+    expect(sawFollowup?.metadata?.serverToolFollowup).toBe(true);
+    expect(sawFollowup?.metadata?.stream).toBe(false);
+    const body = sawFollowup?.body as any;
+    expect(body).toBeDefined();
+    expect(Array.isArray(body.messages)).toBe(true);
+    expect(body.stream).toBe(false);
+    expect(body.parameters?.stream).toBeUndefined();
+    const payloadText = JSON.stringify(body.messages);
+    expect(payloadText).toContain('web_search');
+    expect(payloadText).toContain('call_web_1');
   });
 
   test('falls back to next engine on backend failure', async () => {

@@ -16,11 +16,8 @@ import {
   writeProviderSnapshot
 } from '../utils/snapshot-writer.js';
 import {
-  buildResponsesRequestFromChat,
-  ensureResponsesInstructions as bridgeEnsureResponsesInstructions,
   createResponsesSseToJsonConverter
 } from '../../../modules/llmswitch/bridge.js';
-import { getCodexSystemPrompt } from '../../../utils/system-prompt-loader.js';
 import type { HttpClient } from '../utils/http-client.js';
 import { ResponsesProtocolClient } from '../../../client/responses/responses-protocol-client.js';
 import { emitProviderError, buildRuntimeFromProviderContext } from '../utils/provider-error-reporter.js';
@@ -29,6 +26,9 @@ type ResponsesHttpClient = Pick<HttpClient, 'post' | 'postStream'>;
 type ResponsesStreamingMode = 'auto' | 'always' | 'never';
 type ResponsesSseConverter = {
   convertSseToJson(stream: unknown, options: { requestId: string; model: string }): Promise<unknown>;
+};
+type ResponsesProviderConfig = {
+  streaming?: ResponsesStreamingMode;
 };
 
 type SubmitToolOutputsPayload = {
@@ -80,7 +80,6 @@ export class ResponsesProvider extends HttpTransportProvider {
     const headers = await this.finalizeRequestHeaders(baseHeaders, request);
 
     const context = this.createProviderContext();
-    const settings = this.getResponsesSettings();
     const entryEndpoint = this.extractEntryEndpoint(request) ?? this.extractEntryEndpoint(context);
 
     const submitPayload =
@@ -104,11 +103,7 @@ export class ResponsesProvider extends HttpTransportProvider {
 
     const targetUrl = this.buildTargetUrl(this.getEffectiveBaseUrl(), endpoint);
     const finalBody = this.responsesClient.buildRequestBody(request);
-
-    await this.maybeConvertChatPayload(finalBody, context);
-    await this.ensureResponsesInstructions(finalBody);
-    this.applyInstructionsMode(finalBody, settings.instructionsMode);
-    this.applyCodexSystemPromptIfNeeded(finalBody);
+    this.assertResponsesWireShape(finalBody);
 
     const explicitStream = this.extractStreamFlagFromBody(finalBody);
     const streamingPreference = this.responsesClient.getStreamingPreference();
@@ -171,43 +166,26 @@ export class ResponsesProvider extends HttpTransportProvider {
     }
   }
 
-  private getResponsesSettings(): ResponsesSettings {
-    const cfg = extractResponsesConfig(this.config as unknown as UnknownObject);
-    return {
-      instructionsMode: cfg.instructionsMode ?? 'default'
-    };
-  }
-
   private shouldOverrideCodexUa(): boolean {
     return this.isCodexUaMode();
   }
 
-  private isLmstudioProvider(): boolean {
-    try {
-      const runtime = this.getRuntimeProfile();
-      const providerId = runtime?.providerId || runtime?.providerKey;
-      if (typeof providerId !== 'string') {
-        return false;
-      }
-      const lowered = providerId.toLowerCase();
-      return lowered === 'lmstudio' || lowered.startsWith('lmstudio.');
-    } catch {
-      return false;
-    }
-  }
-
-  private applyCodexSystemPromptIfNeeded(body: Record<string, unknown>): void {
+  private assertResponsesWireShape(body: Record<string, unknown>): void {
     if (!body || typeof body !== 'object') {
-      return;
+      throw new Error('provider-runtime-error: responses payload must be an object');
     }
-    if (this.isLmstudioProvider()) {
-      return;
+    if ('messages' in body && Array.isArray((body as any).messages)) {
+      throw new Error(
+        'provider-runtime-error: responses provider received chat-style "messages". ' +
+        'This indicates a HubPipeline bypass; provider must receive Responses wire payload (input/instructions).'
+      );
     }
-    const prompt = getCodexSystemPrompt();
-    if (!prompt) {
-      return;
+    const hasInput = Array.isArray((body as any).input);
+    const hasInstructions =
+      typeof (body as any).instructions === 'string' && String((body as any).instructions).trim().length > 0;
+    if (!hasInput && !hasInstructions) {
+      throw new Error('provider-runtime-error: responses payload missing "input" or "instructions"');
     }
-    (body as Record<string, unknown>).instructions = prompt;
   }
 
   private buildTargetUrl(baseUrl: string, endpoint: string): string {
@@ -246,20 +224,6 @@ export class ResponsesProvider extends HttpTransportProvider {
     return undefined;
   }
 
-  private async ensureResponsesInstructions(body: Record<string, unknown>): Promise<void> {
-    try {
-      await bridgeEnsureResponsesInstructions(body as UnknownObject);
-    } catch {
-      // non-blocking
-    }
-  }
-
-  private applyInstructionsMode(body: Record<string, unknown>, mode: InstructionsMode): void {
-    if (mode === 'inline') {
-      (body as Record<string, unknown>).__rcc_inline_system_instructions = true;
-    }
-  }
-
   private extractSubmitToolOutputsPayload(request: UnknownObject): SubmitToolOutputsPayload | null {
     if (!request || typeof request !== 'object') {
       return null;
@@ -292,46 +256,6 @@ export class ResponsesProvider extends HttpTransportProvider {
     const normalizedBase = baseEndpoint.replace(/\/+$/, '');
     const encodedId = encodeURIComponent(responseId);
     return `${normalizedBase}/${encodedId}/submit_tool_outputs`;
-  }
-
-  private async maybeConvertChatPayload(body: Record<string, unknown>, context: ProviderContext): Promise<void> {
-    const looksResponses = Array.isArray(body.input as unknown[]) || typeof body.instructions === 'string';
-    const looksChat = Array.isArray(body.messages as unknown[]);
-    if (looksResponses) {
-      return;
-    }
-    if (!looksChat) {
-      return;
-    }
-
-    const ctx = {
-      metadata: (context.metadata && typeof context.metadata === 'object'
-        ? (context.metadata as Record<string, unknown>)
-        : {}) as Record<string, unknown>
-    };
-    const conversion = await buildResponsesRequestFromChat(body, ctx);
-    const requestObject = this.extractConvertedRequest(conversion);
-    if (!requestObject) {
-      throw new Error('buildResponsesRequestFromChat did not return a valid request object');
-    }
-    const currentModel = typeof body.model === 'string' ? body.model : undefined;
-    for (const key of Object.keys(body)) {
-      delete body[key];
-    }
-    Object.assign(body, requestObject);
-    if (currentModel) {
-      body.model = currentModel;
-    }
-  }
-
-  private extractConvertedRequest(conversion: unknown): Record<string, unknown> | null {
-    if (isRecord(conversion) && 'request' in conversion && isRecord((conversion as Record<string, unknown>).request)) {
-      return { ...(conversion as Record<string, unknown>).request as Record<string, unknown> };
-    }
-    if (isRecord(conversion)) {
-      return { ...conversion };
-    }
-    return null;
   }
 
   private async snapshotPhase(
@@ -678,22 +602,6 @@ export class ResponsesProvider extends HttpTransportProvider {
   }
 }
 
-export default ResponsesProvider;
-
-type InstructionsMode = 'default' | 'inline';
-
-interface ResponsesSettings {
-  instructionsMode: InstructionsMode;
-  streaming?: ResponsesStreamingMode;
-}
-
-function parseInstructionsMode(value: unknown): InstructionsMode {
-  if (value === 'inline') {
-    return 'inline';
-  }
-  return 'default';
-}
-
 function parseStreamingMode(value: unknown): ResponsesStreamingMode {
   if (typeof value === 'string') {
     const lowered = value.trim().toLowerCase();
@@ -707,7 +615,7 @@ function parseStreamingMode(value: unknown): ResponsesStreamingMode {
   return 'auto';
 }
 
-function extractResponsesConfig(config: UnknownObject): Partial<ResponsesSettings> {
+function extractResponsesConfig(config: UnknownObject): ResponsesProviderConfig {
   const container = isRecord(config) ? (config as Record<string, unknown>) : {};
   const providerConfig = isRecord(container.config)
     ? (container.config as Record<string, unknown>)
@@ -721,10 +629,11 @@ function extractResponsesConfig(config: UnknownObject): Partial<ResponsesSetting
     return {};
   }
   return {
-    instructionsMode: parseInstructionsMode(responsesCfg.instructionsMode),
     streaming: 'streaming' in responsesCfg ? parseStreamingMode(responsesCfg.streaming) : undefined
   };
 }
+
+export default ResponsesProvider;
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
