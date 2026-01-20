@@ -321,7 +321,6 @@ class RouteCodexApp {
           host: bindHost,
           port: bindPort,
           apikey: bindApiKey,
-          useV2: true,
           ...(typeof quotaRoutingEnabled === 'boolean' ? { quotaRoutingEnabled } : {})
         },
         logging: { level: 'debug', enableConsole: true },
