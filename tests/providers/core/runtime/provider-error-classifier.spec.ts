@@ -92,3 +92,30 @@ describe('Provider error classifier - 429 handling', () => {
     expect(classification.affectsHealth).toBe(false);
   });
 });
+
+describe('Provider error classifier - internal conversion errors', () => {
+  const baseContext = {
+    requestId: 'req_test',
+    providerKey: 'tab.key1.gpt-5.2-codex',
+    providerType: 'openai',
+    providerFamily: 'openai',
+    providerProtocol: 'openai-responses',
+    model: 'gpt-5.2-codex'
+  } as any;
+
+  it('treats SSE_TO_JSON_ERROR as recoverable and does not affect health', () => {
+    const error = Object.assign(new Error('SSE_TO_JSON_ERROR: terminated'), { code: 'SSE_TO_JSON_ERROR' });
+    const classification = classifyProviderError({
+      error,
+      context: baseContext,
+      detectDailyLimit: () => false,
+      registerRateLimitFailure: () => false,
+      forceRateLimitFailure: () => {},
+      authMode: 'apikey'
+    });
+
+    expect(classification.recoverable).toBe(true);
+    expect(classification.affectsHealth).toBe(false);
+    expect(classification.isRateLimit).toBe(false);
+  });
+});

@@ -39,6 +39,7 @@ export function classifyProviderError(options: ProviderErrorClassifierOptions): 
   const err: ProviderErrorAugmented =
     (options.error instanceof Error ? options.error : new Error(String(options.error))) as ProviderErrorAugmented;
   const message = typeof err.message === 'string' ? err.message : String(options.error ?? 'unknown error');
+  const codeUpper = typeof err.code === 'string' ? err.code.trim().toUpperCase() : '';
   let statusCode = extractStatusCodeFromError(err);
   if (!statusCode) {
     const match = message.match(/HTTP\s+(\d{3})/i);
@@ -63,6 +64,7 @@ export function classifyProviderError(options: ProviderErrorClassifierOptions): 
   const isRateLimit = statusText.includes('429') || msgLower.includes('429');
   const isDailyLimit429 = isRateLimit && options.detectDailyLimit(msgLower, upstreamMessageLower);
   const isSyntheticCooldown = err instanceof RateLimitCooldownError;
+  const isSseToJsonError = codeUpper === 'SSE_TO_JSON_ERROR' || msgLower.includes('sse_to_json_error');
 
   const statusCodeValue = typeof statusCode === 'number' ? statusCode : undefined;
   const isClient4xx =
@@ -119,6 +121,14 @@ export function classifyProviderError(options: ProviderErrorClassifierOptions): 
   if (isAbortError) {
     recoverable = true;
     affectsHealth = false;
+  }
+  // Internal conversion errors (client-side) must not poison provider health.
+  // Example: SSE_TO_JSON_ERROR can be triggered by downstream stream termination or
+  // converter state, and does not imply the upstream/provider is unhealthy.
+  if (isSseToJsonError) {
+    recoverable = true;
+    affectsHealth = false;
+    forceFatalRateLimit = false;
   }
 
   return {
