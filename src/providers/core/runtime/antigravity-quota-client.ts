@@ -83,15 +83,19 @@ export async function fetchAntigravityQuotaSnapshot(
           continue;
         }
         const q = quota as { remainingFraction?: unknown; resetTime?: unknown };
+        const resetTimeRaw =
+          typeof q.resetTime === 'string' && q.resetTime.trim().length ? q.resetTime.trim() : undefined;
         const remainingRaw = q.remainingFraction;
         const remaining =
           typeof remainingRaw === 'number'
             ? remainingRaw
             : typeof remainingRaw === 'string'
               ? Number.parseFloat(remainingRaw)
-              : NaN;
-        const resetTimeRaw =
-          typeof q.resetTime === 'string' && q.resetTime.trim().length ? q.resetTime.trim() : undefined;
+              : // Some Antigravity credentials omit remainingFraction when exhausted but still provide resetTime.
+                // Treat it as 0 so quota manager can gate routing correctly.
+                resetTimeRaw
+                ? 0
+                : NaN;
         if (Number.isNaN(remaining)) {
           continue;
         }

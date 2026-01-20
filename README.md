@@ -396,6 +396,7 @@ RouteCodex 支持在用户消息中通过 `<**...**>` 标签设置**当前会话
   - 启用 / 更新：  
     - `<**stopMessage:"继续"**>` → 默认最多自动续写 1 次  
     - `<**stopMessage:"继续",3**>` → 最多自动续写 3 次
+    - `<**stopMessage:<file://stopMessage/message1.md>**>` → 读取 `~/.routecodex/stopMessage/message1.md` 作为 stopMessage 文案（设置时读取并缓存到内存）
   - 清理：  
     - `<**stopMessage:clear**>`
   - 触发条件（由内置 `stop_message_auto` servertool 在服务端判断）：  

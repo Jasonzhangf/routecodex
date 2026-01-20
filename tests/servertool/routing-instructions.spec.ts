@@ -1,4 +1,7 @@
 import type { StandardizedMessage } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.js';
+import * as fs from 'node:fs';
+import os from 'node:os';
+import * as path from 'node:path';
 import {
   parseRoutingInstructions,
   applyRoutingInstructions,
@@ -135,5 +138,32 @@ describe('Routing instruction parsing and application', () => {
     expect(restored.stopMessageText).toBe('继续');
     expect(restored.stopMessageMaxRepeats).toBe(2);
     expect(restored.stopMessageUsed).toBe(0);
+  });
+
+  test('parses stopMessage from file:// ref (relative to ~/.routecodex)', () => {
+    const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-stopMessage-'));
+    const prev = process.env.ROUTECODEX_USER_DIR;
+    try {
+      process.env.ROUTECODEX_USER_DIR = temp;
+      fs.mkdirSync(path.join(temp, 'stopMessage'), { recursive: true });
+      fs.writeFileSync(path.join(temp, 'stopMessage', 'message1.md'), '第一行\n第二行\n', 'utf8');
+
+      const instructions = parseRoutingInstructions(
+        buildMessages('<**stopMessage:<file://stopMessage/message1.md>**>')
+      );
+      expect(instructions).toHaveLength(1);
+      const inst = instructions[0] as any;
+      expect(inst.type).toBe('stopMessageSet');
+      expect(inst.stopMessageText).toContain('第一行');
+      expect(inst.stopMessageText).toContain('第二行');
+      expect(inst.stopMessageMaxRepeats).toBe(1);
+    } finally {
+      if (prev === undefined) {
+        delete process.env.ROUTECODEX_USER_DIR;
+      } else {
+        process.env.ROUTECODEX_USER_DIR = prev;
+      }
+      fs.rmSync(temp, { recursive: true, force: true });
+    }
   });
 });
