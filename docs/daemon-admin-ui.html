@@ -416,6 +416,39 @@
         word-break: break-all;
       }
 
+      .pill {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 999px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        background: rgba(255, 255, 255, 0.04);
+        font-size: 11px;
+        line-height: 1.4;
+        white-space: nowrap;
+      }
+
+      .pill.ok {
+        border-color: rgba(52, 211, 153, 0.35);
+        background: rgba(52, 211, 153, 0.10);
+        color: rgba(210, 255, 236, 0.92);
+      }
+
+      .pill.warn {
+        border-color: rgba(255, 181, 71, 0.35);
+        background: rgba(255, 181, 71, 0.10);
+        color: rgba(255, 236, 210, 0.92);
+      }
+
+      .pill.bad {
+        border-color: rgba(239, 68, 68, 0.35);
+        background: rgba(239, 68, 68, 0.10);
+        color: rgba(255, 220, 220, 0.92);
+      }
+
+      .muted {
+        color: var(--muted);
+      }
+
       .notice {
         border: 1px solid rgba(255, 181, 71, 0.35);
         background: rgba(255, 181, 71, 0.08);
@@ -749,16 +782,37 @@
                 <span class="mono">inPool=false</span>, the provider is treated as removed from the route pool.
 	              </p>
 	              <div class="row" style="margin-bottom: 10px;">
+	                <label for="quotaFilterInput">filter</label>
+	                <input id="quotaFilterInput" type="text" placeholder="providerKey contains…" style="width: 320px;" />
+	                <label><input id="quotaHideOkToggle" type="checkbox" /> hide ok</label>
+	                <span class="muted" style="font-size:12px;">Tip: click a row to fill the edit box.</span>
+	              </div>
+	              <div class="row" style="margin-bottom: 10px;">
+	                <label for="quotaKeyInput">providerKey</label>
+	                <input id="quotaKeyInput" type="text" placeholder="tab.key1.gpt-5.2-codex" style="width: 420px;" />
+	                <label for="quotaModeSelect">mode</label>
+	                <select id="quotaModeSelect" style="width: 140px;">
+	                  <option value="cooldown">cooldown</option>
+	                  <option value="blacklist">blacklist</option>
+	                </select>
+	                <label for="quotaMinutesInput">minutes</label>
+	                <input id="quotaMinutesInput" type="number" min="1" step="1" value="60" style="width: 120px;" />
+	                <button id="quotaApplyDisableBtn" class="danger">Apply</button>
+	                <button id="quotaApplyRecoverBtn">Recover</button>
+	                <button id="quotaApplyResetBtn">Reset</button>
+	              </div>
+	              <div class="row" style="margin-bottom: 10px;">
 	                <button id="refreshQuotaBtn" class="primary">Refresh provider pool</button>
 	                <button id="refreshQuotaSnapshotBtn" class="primary">Refresh antigravity snapshot</button>
 	                <button id="resetQuotaBtn" class="danger">Reset provider-quota module</button>
-	              </div>
+              </div>
               <div class="table-wrap">
-                <table class="table">
+                <table class="table" style="min-width: 1080px;">
                   <thead>
                     <tr>
                       <th>providerKey</th>
                       <th>auth</th>
+                      <th>tier</th>
                       <th>inPool</th>
                       <th>reason</th>
                       <th>cooldownUntil</th>
@@ -872,7 +926,9 @@
       const $ = (id) => document.getElementById(id);
       const UI = {
         selectedProviderId: "",
-        lastUnauthorizedToastAt: 0
+        lastUnauthorizedToastAt: 0,
+        quotaProviders: [],
+        quotaProvidersUpdatedAt: 0
       };
       let toastTimer = null;
 
@@ -1895,6 +1951,34 @@
         }
       }
 
+      function formatDurationMs(ms) {
+        if (typeof ms !== "number" || !Number.isFinite(ms)) return "—";
+        const abs = Math.abs(ms);
+        const sign = ms < 0 ? "-" : "";
+        const s = Math.round(abs / 1000);
+        if (s < 60) return `${sign}${s}s`;
+        const m = Math.round(s / 60);
+        if (m < 60) return `${sign}${m}m`;
+        const h = Math.round(m / 60);
+        if (h < 48) return `${sign}${h}h`;
+        const d = Math.round(h / 24);
+        return `${sign}${d}d`;
+      }
+
+      function formatEpochWithDelta(ms) {
+        if (typeof ms !== "number" || !Number.isFinite(ms) || ms <= 0) return "—";
+        const delta = ms - Date.now();
+        const tail = delta >= 0 ? `in ${formatDurationMs(delta)}` : `${formatDurationMs(delta)} ago`;
+        return `${formatEpochMs(ms)} (${tail})`;
+      }
+
+      function pill(text, kind) {
+        const span = document.createElement("span");
+        span.className = `pill ${kind || ""}`.trim();
+        span.textContent = textOf(text);
+        return span;
+      }
+
       async function refreshQuota() {
         const body = $("quotaTbody");
         body.replaceChildren();
@@ -1916,44 +2000,99 @@
             }
           }
           const out = await apiFetch("/quota/providers");
-          const list = Array.isArray(out.providers) ? out.providers : [];
-          for (const q of list) {
-            const tr = document.createElement("tr");
-            tr.appendChild(createCell("td", q.providerKey || "", "mono truncate", { title: true }));
-            tr.appendChild(createCell("td", q.authType || "", ""));
-            tr.appendChild(createCell("td", String(Boolean(q.inPool)), ""));
-            tr.appendChild(createCell("td", q.reason || "", ""));
-            tr.appendChild(createCell("td", formatEpochMs(q.cooldownUntil), "mono"));
-            tr.appendChild(createCell("td", formatEpochMs(q.blacklistUntil), "mono"));
-            tr.appendChild(createCell("td", q.consecutiveErrorCount ?? 0, "mono"));
-            const actionsTd = document.createElement("td");
-            actionsTd.className = "actions-cell";
-            const box = document.createElement("div");
-            box.className = "actions";
-            const recover = document.createElement("button");
-            recover.textContent = "Recover";
-            recover.setAttribute("data-action", "quota-recover");
-            recover.setAttribute("data-key", textOf(q.providerKey));
-            const reset = document.createElement("button");
-            reset.textContent = "Reset";
-            reset.setAttribute("data-action", "quota-reset");
-            reset.setAttribute("data-key", textOf(q.providerKey));
-            const disable = document.createElement("button");
-            disable.textContent = "Disable…";
-            disable.className = "danger";
-            disable.setAttribute("data-action", "quota-disable");
-            disable.setAttribute("data-key", textOf(q.providerKey));
-            box.appendChild(recover);
-            box.appendChild(reset);
-            box.appendChild(disable);
-            actionsTd.appendChild(box);
-            tr.appendChild(actionsTd);
-            body.appendChild(tr);
-          }
+          UI.quotaProviders = Array.isArray(out.providers) ? out.providers : [];
+          UI.quotaProvidersUpdatedAt = Date.now();
+          renderQuotaProviders();
         } catch (e) {
           if (e && e.status === 401) notifyUnauthorizedOnce("quota");
           else toast(e && e.message ? e.message : String(e || "quota refresh failed"));
-          body.appendChild(createErrorRow(8, e && e.message ? e.message : e));
+          body.appendChild(createErrorRow(9, e && e.message ? e.message : e));
+        }
+      }
+
+      function renderQuotaProviders() {
+        const body = $("quotaTbody");
+        body.replaceChildren();
+
+        const filter = textOf($("quotaFilterInput").value || "").trim().toLowerCase();
+        const hideOk = Boolean($("quotaHideOkToggle").checked);
+
+        const list = Array.isArray(UI.quotaProviders) ? UI.quotaProviders : [];
+        const next = list
+          .filter((q) => {
+            const key = textOf(q && q.providerKey ? q.providerKey : "").toLowerCase();
+            if (filter && !key.includes(filter)) return false;
+            if (hideOk && q && q.inPool === true) return false;
+            return true;
+          })
+          .slice();
+
+        next.sort((a, b) => {
+          const aIn = a && a.inPool === true ? 1 : 0;
+          const bIn = b && b.inPool === true ? 1 : 0;
+          if (aIn !== bIn) return aIn - bIn; // inPool=false first
+          const aUntil = Math.max(Number(a?.blacklistUntil || 0), Number(a?.cooldownUntil || 0));
+          const bUntil = Math.max(Number(b?.blacklistUntil || 0), Number(b?.cooldownUntil || 0));
+          if (aUntil !== bUntil) return bUntil - aUntil;
+          return textOf(a?.providerKey).localeCompare(textOf(b?.providerKey));
+        });
+
+        if (!next.length) {
+          body.appendChild(createErrorRow(9, "No providers matched filter."));
+          return;
+        }
+
+        for (const q of next) {
+          const tr = document.createElement("tr");
+          tr.className = "provider-row";
+          tr.setAttribute("data-provider-key", textOf(q.providerKey));
+
+          tr.appendChild(createCell("td", q.providerKey || "", "mono truncate", { title: true }));
+          tr.appendChild(createCell("td", q.authType || "", ""));
+          tr.appendChild(createCell("td", typeof q.priorityTier === "number" ? q.priorityTier : "", "mono"));
+
+          const inPool = Boolean(q.inPool);
+          const inTd = document.createElement("td");
+          inTd.appendChild(pill(inPool ? "true" : "false", inPool ? "ok" : "bad"));
+          tr.appendChild(inTd);
+
+          const reason = textOf(q.reason || "");
+          const reasonKind =
+            reason === "ok" ? "ok" :
+            reason === "cooldown" ? "warn" :
+            reason === "blacklist" || reason === "fatal" || reason === "quotaDepleted" ? "bad" : "warn";
+          const reasonTd = document.createElement("td");
+          reasonTd.appendChild(pill(reason || "—", reasonKind));
+          tr.appendChild(reasonTd);
+
+          tr.appendChild(createCell("td", formatEpochWithDelta(q.cooldownUntil), "mono", { title: true }));
+          tr.appendChild(createCell("td", formatEpochWithDelta(q.blacklistUntil), "mono", { title: true }));
+          tr.appendChild(createCell("td", q.consecutiveErrorCount ?? 0, "mono"));
+
+          const actionsTd = document.createElement("td");
+          actionsTd.className = "actions-cell";
+          const box = document.createElement("div");
+          box.className = "actions";
+          const recover = document.createElement("button");
+          recover.textContent = "Recover";
+          recover.setAttribute("data-action", "quota-recover");
+          recover.setAttribute("data-key", textOf(q.providerKey));
+          const reset = document.createElement("button");
+          reset.textContent = "Reset";
+          reset.setAttribute("data-action", "quota-reset");
+          reset.setAttribute("data-key", textOf(q.providerKey));
+          const disable = document.createElement("button");
+          disable.textContent = "Edit…";
+          disable.className = "danger";
+          disable.setAttribute("data-action", "quota-disable");
+          disable.setAttribute("data-key", textOf(q.providerKey));
+          box.appendChild(recover);
+          box.appendChild(reset);
+          box.appendChild(disable);
+          actionsTd.appendChild(box);
+          tr.appendChild(actionsTd);
+
+          body.appendChild(tr);
         }
       }
 
@@ -1975,7 +2114,7 @@
             const tr = document.createElement("tr");
             tr.appendChild(createCell("td", r.key || "", "mono truncate", { title: true }));
             tr.appendChild(createCell("td", formatRemainingFraction(r.remainingFraction), "mono"));
-            tr.appendChild(createCell("td", formatEpochMs(r.resetAt), "mono"));
+            tr.appendChild(createCell("td", formatEpochWithDelta(r.resetAt), "mono"));
             tr.appendChild(createCell("td", formatEpochMs(r.fetchedAt), "mono"));
             body.appendChild(tr);
           }
@@ -2142,20 +2281,18 @@
             return;
           }
           if (kind === "disable") {
-            const minutesRaw = prompt("Disable duration (minutes)", "60");
-            if (!minutesRaw) return;
-            const minutes = Number.parseFloat(minutesRaw);
+            const minutes = Number.parseFloat(textOf($("quotaMinutesInput").value || "60"));
             if (!Number.isFinite(minutes) || minutes <= 0) {
               throw new Error("Invalid minutes");
             }
-            const modeRaw = prompt("Mode: cooldown or blacklist", "cooldown");
-            const mode = (modeRaw || "cooldown").trim().toLowerCase() === "blacklist" ? "blacklist" : "cooldown";
+            const modeRaw = (textOf($("quotaModeSelect").value) || "cooldown").trim().toLowerCase();
+            const mode = modeRaw === "blacklist" ? "blacklist" : "cooldown";
             await apiFetch(`/quota/providers/${encodeURIComponent(providerKey)}/disable`, {
               method: "POST",
               body: JSON.stringify({ mode, durationMinutes: minutes })
             });
             await refreshQuota();
-            toast("Disabled.", "ok");
+            toast("Applied.", "ok");
             return;
           }
         } catch (e) {
@@ -2216,6 +2353,7 @@
           await refreshProviders();
           await refreshCredentials();
           await refreshQuota();
+          await refreshQuotaSnapshot();
           await refreshRuntimes();
         } catch (e) {
           const msg = e && e.message ? e.message : String(e);
@@ -2360,11 +2498,22 @@
 
       $("refreshQuotaBtn").addEventListener("click", refreshQuota);
       $("refreshQuotaSnapshotBtn").addEventListener("click", refreshQuotaSnapshotNow);
+      $("quotaFilterInput").addEventListener("input", renderQuotaProviders);
+      $("quotaHideOkToggle").addEventListener("change", renderQuotaProviders);
+      $("quotaApplyDisableBtn").addEventListener("click", () => void quotaAction("disable", $("quotaKeyInput").value));
+      $("quotaApplyRecoverBtn").addEventListener("click", () => void quotaAction("recover", $("quotaKeyInput").value));
+      $("quotaApplyResetBtn").addEventListener("click", () => void quotaAction("reset", $("quotaKeyInput").value));
       $("quotaTbody").addEventListener("click", (ev) => {
+        const tr = ev.target.closest("tr");
+        if (tr && tr.getAttribute) {
+          const pk = tr.getAttribute("data-provider-key");
+          if (pk) $("quotaKeyInput").value = pk;
+        }
         const el = ev.target.closest("button");
         if (!el) return;
         const action = el.getAttribute("data-action");
         const key = el.getAttribute("data-key");
+        if (key) $("quotaKeyInput").value = key;
         if (action === "quota-recover") void quotaAction("recover", key);
         else if (action === "quota-reset") void quotaAction("reset", key);
         else if (action === "quota-disable") void quotaAction("disable", key);
