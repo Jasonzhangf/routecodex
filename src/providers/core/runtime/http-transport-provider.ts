@@ -865,6 +865,7 @@ export class HttpTransportProvider extends BaseProvider {
         : undefined;
     const inboundClientHeaders = this.extractClientHeaders(runtimeMetadata);
     const normalizedClientHeaders = this.normalizeCodexClientHeaders(inboundClientHeaders);
+    const isAntigravity = this.isAntigravityTransportRuntime(runtimeMetadata);
 
     // 服务特定头部
     const serviceHeaders = this.serviceProfile.headers || {};
@@ -949,39 +950,44 @@ export class HttpTransportProvider extends BaseProvider {
       this.assignHeader(finalHeaders, 'originator', resolvedOriginator);
     }
 
-      if (normalizedClientHeaders) {
-        const conversationId = this.findHeaderValue(normalizedClientHeaders, 'conversation_id');
-        if (conversationId) {
-          this.assignHeader(finalHeaders, 'conversation_id', conversationId);
-        }
-        const sessionId = this.findHeaderValue(normalizedClientHeaders, 'session_id');
-        if (sessionId) {
-          this.assignHeader(finalHeaders, 'session_id', sessionId);
-        }
+    if (!isAntigravity && normalizedClientHeaders) {
+      const conversationId = this.findHeaderValue(normalizedClientHeaders, 'conversation_id');
+      if (conversationId) {
+        this.assignHeader(finalHeaders, 'conversation_id', conversationId);
       }
+      const sessionId = this.findHeaderValue(normalizedClientHeaders, 'session_id');
+      if (sessionId) {
+        this.assignHeader(finalHeaders, 'session_id', sessionId);
+      }
+    }
 
-      // Inbound metadata may already carry parsed session identifiers (e.g. when client sends
-      // metadata.sessionId / metadata.conversationId instead of headers). Inject them only
-      // if not already provided by config/runtime headers or inbound client headers.
-      if (inboundMetadata && typeof inboundMetadata === 'object') {
-        const meta = inboundMetadata as Record<string, unknown>;
-        const metaSessionId =
-          typeof meta.sessionId === 'string' && meta.sessionId.trim() ? meta.sessionId.trim() : '';
-        const metaConversationId =
-          typeof meta.conversationId === 'string' && meta.conversationId.trim() ? meta.conversationId.trim() : '';
-        const resolvedSessionId = metaSessionId || metaConversationId;
-        const resolvedConversationId = metaConversationId || metaSessionId;
-        if (resolvedSessionId && !this.findHeaderValue(finalHeaders, 'session_id')) {
-          this.assignHeader(finalHeaders, 'session_id', resolvedSessionId);
-        }
-        if (resolvedConversationId && !this.findHeaderValue(finalHeaders, 'conversation_id')) {
-          this.assignHeader(finalHeaders, 'conversation_id', resolvedConversationId);
-        }
+    // Inbound metadata may already carry parsed session identifiers (e.g. when client sends
+    // metadata.sessionId / metadata.conversationId instead of headers). Inject them only
+    // if not already provided by config/runtime headers or inbound client headers.
+    if (!isAntigravity && inboundMetadata && typeof inboundMetadata === 'object') {
+      const meta = inboundMetadata as Record<string, unknown>;
+      const metaSessionId =
+        typeof meta.sessionId === 'string' && meta.sessionId.trim() ? meta.sessionId.trim() : '';
+      const metaConversationId =
+        typeof meta.conversationId === 'string' && meta.conversationId.trim() ? meta.conversationId.trim() : '';
+      const resolvedSessionId = metaSessionId || metaConversationId;
+      const resolvedConversationId = metaConversationId || metaSessionId;
+      if (resolvedSessionId && !this.findHeaderValue(finalHeaders, 'session_id')) {
+        this.assignHeader(finalHeaders, 'session_id', resolvedSessionId);
       }
+      if (resolvedConversationId && !this.findHeaderValue(finalHeaders, 'conversation_id')) {
+        this.assignHeader(finalHeaders, 'conversation_id', resolvedConversationId);
+      }
+    }
 
-      if (this.isCodexUaMode()) {
-        this.ensureCodexSessionHeaders(finalHeaders, runtimeMetadata);
-      }
+    if (!isAntigravity && this.isCodexUaMode()) {
+      this.ensureCodexSessionHeaders(finalHeaders, runtimeMetadata);
+    }
+
+    if (isAntigravity) {
+      this.deleteHeader(finalHeaders, 'session_id');
+      this.deleteHeader(finalHeaders, 'conversation_id');
+    }
 
     return finalHeaders;
   }
@@ -1093,6 +1099,24 @@ export class HttpTransportProvider extends BaseProvider {
     headers[target] = value;
   }
 
+  private deleteHeader(headers: Record<string, string>, target: string): void {
+    const lowered = typeof target === 'string' ? target.toLowerCase() : '';
+    if (!lowered) {
+      return;
+    }
+    const normalizedTarget = this.normalizeHeaderKey(lowered);
+    for (const key of Object.keys(headers)) {
+      const loweredKey = key.toLowerCase();
+      if (loweredKey === lowered) {
+        delete headers[key];
+        continue;
+      }
+      if (this.normalizeHeaderKey(loweredKey) === normalizedTarget) {
+        delete headers[key];
+      }
+    }
+  }
+
   private ensureCodexSessionHeaders(
     headers: Record<string, string>,
     runtimeMetadata?: ProviderRuntimeMetadata
@@ -1133,6 +1157,30 @@ export class HttpTransportProvider extends BaseProvider {
       parts.push(routeName.replace(/[^A-Za-z0-9_-]/g, '_'));
     }
     return this.enforceCodexIdentifierLength(parts.join('_'));
+  }
+
+  private isAntigravityTransportRuntime(runtimeMetadata?: ProviderRuntimeMetadata): boolean {
+    const fromConfig =
+      typeof this.config?.config?.providerId === 'string' && this.config.config.providerId.trim()
+        ? this.config.config.providerId.trim().toLowerCase()
+        : '';
+    const fromRuntime =
+      typeof runtimeMetadata?.providerId === 'string' && runtimeMetadata.providerId.trim()
+        ? runtimeMetadata.providerId.trim().toLowerCase()
+        : '';
+    const fromProviderKey =
+      typeof runtimeMetadata?.providerKey === 'string' && runtimeMetadata.providerKey.trim()
+        ? runtimeMetadata.providerKey.trim().toLowerCase()
+        : '';
+    const fromOAuth = typeof this.oauthProviderId === 'string' ? this.oauthProviderId.trim().toLowerCase() : '';
+
+    if (fromConfig === 'antigravity' || fromRuntime === 'antigravity' || fromOAuth === 'antigravity') {
+      return true;
+    }
+    if (fromProviderKey.startsWith('antigravity.')) {
+      return true;
+    }
+    return false;
   }
 
   private enforceCodexIdentifierLength(value: string): string {
