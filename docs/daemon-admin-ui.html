@@ -810,22 +810,25 @@
 	                <input id="quotaFilterInput" type="text" placeholder="providerKey contains…" style="width: 320px;" />
 	                <label><input id="quotaHideOkToggle" type="checkbox" /> hide ok</label>
 	                <label><input id="quotaOnlyRoutedTargetsToggle" type="checkbox" checked /> only routed targets</label>
-	                <span class="muted" style="font-size:12px;">Tip: click a row to fill the edit box.</span>
+	                <span class="muted" style="font-size:12px;">Tip: click a row to fill the offline box.</span>
 	              </div>
 	              <div class="row" style="margin-bottom: 10px;">
 	                <label for="quotaKeyInput">providerKey</label>
 	                <input id="quotaKeyInput" type="text" placeholder="tab.key1.gpt-5.2-codex" style="width: 420px;" />
-	                <label for="quotaModeSelect">mode</label>
+	                <label for="quotaModeSelect">offline mode</label>
 	                <select id="quotaModeSelect" style="width: 140px;">
 	                  <option value="cooldown">cooldown</option>
 	                  <option value="blacklist">blacklist</option>
 	                </select>
-	                <label for="quotaMinutesInput">minutes</label>
+	                <label for="quotaMinutesInput">offline minutes</label>
 	                <input id="quotaMinutesInput" type="number" min="1" step="1" value="60" style="width: 120px;" />
-	                <button id="quotaApplyDisableBtn" class="danger">Apply</button>
+	                <button id="quotaApplyDisableBtn" class="danger">Offline</button>
 	                <button id="quotaApplyRecoverBtn">Recover</button>
 	                <button id="quotaApplyResetBtn">Reset</button>
 	              </div>
+                <div class="muted" style="font-size:12px; margin: -6px 0 10px;">
+                  Offline removes the provider from the route pool for the selected minutes. Recover brings it back online immediately.
+                </div>
 	              <div class="row" style="margin-bottom: 10px;">
 	                <button id="refreshQuotaBtn" class="primary">Refresh provider pool</button>
 	                <button id="refreshQuotaSnapshotBtn" class="primary">Refresh antigravity snapshot</button>
@@ -2232,7 +2235,7 @@
               reset.setAttribute("data-action", "quota-reset");
               reset.setAttribute("data-key", item.pk);
               const disable = document.createElement("button");
-              disable.textContent = "Edit…";
+              disable.textContent = "Offline…";
               disable.className = "danger";
               disable.setAttribute("data-action", "quota-disable");
               disable.setAttribute("data-key", item.pk);
