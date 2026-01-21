@@ -29,6 +29,22 @@ interface ProviderConfigV2Summary {
   version: string;
 }
 
+type RoutingLocation = 'virtualrouter.routing' | 'routing';
+interface RoutingSnapshot {
+  routing: Record<string, unknown>;
+  location: RoutingLocation;
+  version: string | null;
+}
+
+interface RoutingSourceSummary {
+  id: string;
+  kind: 'active' | 'routecodex' | 'import' | 'provider';
+  label: string;
+  path: string;
+  location: RoutingLocation;
+  version: string | null;
+}
+
 export function registerProviderRoutes(app: Application, options: DaemonAdminRouteOptions): void {
   const reject = (req: Request, res: Response) => rejectNonLocalOrUnauthorizedAdmin(req, res);
 
@@ -65,6 +81,21 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
         });
       }
       res.status(200).json(items);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ error: { message } });
+    }
+  });
+
+  app.get('/config/routing/sources', async (req: Request, res: Response) => {
+    if (reject(req, res)) {return;}
+    try {
+      const sources = await listRoutingSources();
+      res.status(200).json({
+        ok: true,
+        activePath: pickUserConfigPath(),
+        sources
+      });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       res.status(500).json({ error: { message } });
@@ -321,12 +352,17 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
   app.get('/config/routing', async (req: Request, res: Response) => {
     if (reject(req, res)) {return;}
     try {
-      const configPath = pickUserConfigPath();
+      const configPath = resolveAllowedAdminFilePath(readQueryString(req, 'path'));
       const raw = await fs.readFile(configPath, 'utf8');
       const parsed = raw.trim() ? JSON.parse(raw) : {};
-      const routing = extractRouting(parsed);
-      res.status(200).json({ ok: true, path: configPath, routing });
+      const snapshot = extractRoutingSnapshot(parsed);
+      res.status(200).json({ ok: true, path: configPath, ...snapshot });
     } catch (error: unknown) {
+      const code = (error as { code?: string } | null)?.code;
+      if (code === 'forbidden_path') {
+        res.status(403).json({ error: { message: 'path is not allowed', code: 'forbidden' } });
+        return;
+      }
       const message = error instanceof Error ? error.message : String(error);
       res.status(500).json({ error: { message } });
     }
@@ -336,19 +372,33 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
     if (reject(req, res)) {return;}
     const body = req.body as Record<string, unknown>;
     const routingNode = body?.routing;
+    const locationNode = body?.location;
     if (!routingNode || typeof routingNode !== 'object' || Array.isArray(routingNode)) {
       res.status(400).json({ error: { message: 'routing must be an object', code: 'bad_request' } });
       return;
     }
+    if (locationNode !== undefined && locationNode !== 'virtualrouter.routing' && locationNode !== 'routing') {
+      res.status(400).json({ error: { message: 'location must be "virtualrouter.routing" or "routing"', code: 'bad_request' } });
+      return;
+    }
     try {
-      const configPath = pickUserConfigPath();
+      const configPath = resolveAllowedAdminFilePath(
+        readQueryString(req, 'path') || (typeof body?.path === 'string' ? body.path : undefined)
+      );
       const raw = await fs.readFile(configPath, 'utf8');
       const parsed = raw.trim() ? JSON.parse(raw) : {};
-      const next = applyRouting(parsed, routingNode as Record<string, unknown>);
+      const detected = extractRoutingSnapshot(parsed);
+      const location = (locationNode as RoutingLocation | undefined) ?? detected.location;
+      const next = applyRoutingAtLocation(parsed, routingNode as Record<string, unknown>, location);
       await backupFile(configPath);
       await fs.writeFile(configPath, JSON.stringify(next, null, 2), 'utf8');
-      res.status(200).json({ ok: true, path: configPath });
+      res.status(200).json({ ok: true, path: configPath, location });
     } catch (error: unknown) {
+      const code = (error as { code?: string } | null)?.code;
+      if (code === 'forbidden_path') {
+        res.status(403).json({ error: { message: 'path is not allowed', code: 'forbidden' } });
+        return;
+      }
       const message = error instanceof Error ? error.message : String(error);
       res.status(500).json({ error: { message } });
     }
@@ -609,7 +659,15 @@ function pickProviderRootDir(): string {
   if (envPath && envPath.trim()) {
     return path.resolve(envPath.trim());
   }
-  return path.join(os.homedir(), '.routecodex', 'provider');
+  return path.join(pickHomeDir(), '.routecodex', 'provider');
+}
+
+function pickHomeDir(): string {
+  const home = process.env.HOME;
+  if (home && home.trim()) {
+    return path.resolve(home.trim());
+  }
+  return os.homedir();
 }
 
 function pickUserConfigPath(): string {
@@ -631,37 +689,204 @@ function pickUserConfigPath(): string {
   return resolveRouteCodexConfigPath();
 }
 
-function extractRouting(config: unknown): Record<string, unknown> {
+function extractRoutingSnapshot(config: unknown): RoutingSnapshot {
   if (!config || typeof config !== 'object' || Array.isArray(config)) {
-    return {};
+    return { routing: {}, location: 'virtualrouter.routing', version: null };
   }
   const root = config as Record<string, unknown>;
+  const version = typeof root.version === 'string' ? root.version : null;
+
   const vr = root.virtualrouter;
-  if (!vr || typeof vr !== 'object' || Array.isArray(vr)) {
-    return {};
+  if (vr && typeof vr === 'object' && !Array.isArray(vr)) {
+    const routingNode = (vr as Record<string, unknown>).routing;
+    if (routingNode && typeof routingNode === 'object' && !Array.isArray(routingNode)) {
+      return { routing: routingNode as Record<string, unknown>, location: 'virtualrouter.routing', version };
+    }
+    return { routing: {}, location: 'virtualrouter.routing', version };
   }
-  const routing = (vr as Record<string, unknown>).routing;
-  if (routing && typeof routing === 'object' && !Array.isArray(routing)) {
-    return routing as Record<string, unknown>;
+
+  const routingNode = root.routing;
+  if (routingNode && typeof routingNode === 'object' && !Array.isArray(routingNode)) {
+    return { routing: routingNode as Record<string, unknown>, location: 'routing', version };
   }
-  return {};
+  return { routing: {}, location: 'routing', version };
 }
 
-function applyRouting(config: unknown, routing: Record<string, unknown>): Record<string, unknown> {
+function applyRoutingAtLocation(
+  config: unknown,
+  routing: Record<string, unknown>,
+  location: RoutingLocation
+): Record<string, unknown> {
   const root = (config && typeof config === 'object' && !Array.isArray(config))
     ? (config as Record<string, unknown>)
     : {};
+  if (location === 'routing') {
+    return { ...root, routing };
+  }
   const vrNode = root.virtualrouter;
   const vr = (vrNode && typeof vrNode === 'object' && !Array.isArray(vrNode))
     ? (vrNode as Record<string, unknown>)
     : {};
-  return {
-    ...root,
-    virtualrouter: {
-      ...vr,
-      routing
+  return { ...root, virtualrouter: { ...vr, routing } };
+}
+
+function readQueryString(req: Request, key: string): string | undefined {
+  const value = (req.query as Record<string, unknown>)[key];
+  if (typeof value === 'string' && value.trim()) {
+    return value.trim();
+  }
+  return undefined;
+}
+
+function expandTilde(inputPath: string): string {
+  if (!inputPath.startsWith('~')) {
+    return inputPath;
+  }
+  if (inputPath === '~') {
+    return pickHomeDir();
+  }
+  if (inputPath.startsWith('~/')) {
+    return path.join(pickHomeDir(), inputPath.slice(2));
+  }
+  return inputPath;
+}
+
+function isPathWithinDir(filePath: string, dirPath: string): boolean {
+  const base = path.resolve(dirPath);
+  const abs = path.resolve(filePath);
+  const rel = path.relative(base, abs);
+  return rel === '' || (!rel.startsWith('..' + path.sep) && rel !== '..');
+}
+
+function resolveAllowedAdminFilePath(inputPath: string | undefined): string {
+  const active = pickUserConfigPath();
+  if (!inputPath) {
+    return active;
+  }
+  const expanded = expandTilde(inputPath);
+  const resolved = path.resolve(expanded);
+  if (resolved === active) {
+    return resolved;
+  }
+  const routecodexHome = path.join(pickHomeDir(), '.routecodex');
+  const providerRoot = pickProviderRootDir();
+  if (isPathWithinDir(resolved, routecodexHome) || isPathWithinDir(resolved, providerRoot)) {
+    return resolved;
+  }
+  const error = new Error('path is not allowed') as Error & { code?: string };
+  error.code = 'forbidden_path';
+  throw error;
+}
+
+async function listRoutingSources(): Promise<RoutingSourceSummary[]> {
+  const activePath = pickUserConfigPath();
+  const routecodexHome = path.join(pickHomeDir(), '.routecodex');
+  const providerRoot = pickProviderRootDir();
+
+  const candidates: Array<{ kind: RoutingSourceSummary['kind']; label: string; path: string }> = [];
+  candidates.push({ kind: 'active', label: 'Active config', path: activePath });
+
+  const defaultConfig = path.join(routecodexHome, 'config.json');
+  if (defaultConfig !== activePath) {
+    candidates.push({ kind: 'routecodex', label: 'Default config.json', path: defaultConfig });
+  }
+
+  // Root-level config backups or variants (config_*.json)
+  try {
+    const entries = await fs.readdir(routecodexHome, { withFileTypes: true });
+    for (const ent of entries) {
+      if (!ent.isFile()) continue;
+      const name = ent.name;
+      const lower = name.toLowerCase();
+      if (!lower.endsWith('.json')) continue;
+      if (!lower.startsWith('config_')) continue;
+      candidates.push({ kind: 'routecodex', label: name, path: path.join(routecodexHome, name) });
     }
-  };
+  } catch {
+    // ignore
+  }
+
+  // Imported configs under ~/.routecodex/config and ~/.routecodex/config/multi
+  for (const dir of [path.join(routecodexHome, 'config'), path.join(routecodexHome, 'config', 'multi')]) {
+    try {
+      const entries = await fs.readdir(dir, { withFileTypes: true });
+      for (const ent of entries) {
+        if (!ent.isFile()) continue;
+        const name = ent.name;
+        const lower = name.toLowerCase();
+        if (!lower.endsWith('.json')) continue;
+        if (lower.endsWith('.ds_store')) continue;
+        const label = dir.endsWith(path.join('config', 'multi')) ? `config/multi/${name}` : `config/${name}`;
+        candidates.push({ kind: 'import', label, path: path.join(dir, name) });
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  // Provider directory v1 configs often carry their own virtualrouter.routing for standalone operation.
+  try {
+    const dirs = await fs.readdir(providerRoot, { withFileTypes: true });
+    for (const ent of dirs) {
+      if (!ent.isDirectory()) continue;
+      const providerId = ent.name;
+      const providerDir = path.join(providerRoot, providerId);
+      let files: string[] = [];
+      try {
+        files = (await fs.readdir(providerDir, { withFileTypes: true }))
+          .filter((f) => f.isFile())
+          .map((f) => f.name);
+      } catch {
+        files = [];
+      }
+      for (const name of files) {
+        const lower = name.toLowerCase();
+        if (!lower.endsWith('.json')) continue;
+        if (!lower.includes('.v1.json') && lower !== 'config.codex.json') continue;
+        candidates.push({ kind: 'provider', label: `provider/${providerId}/${name}`, path: path.join(providerDir, name) });
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  const out: RoutingSourceSummary[] = [];
+  const seen = new Set<string>();
+
+  for (const candidate of candidates) {
+    const abs = path.resolve(candidate.path);
+    if (seen.has(abs)) continue;
+    seen.add(abs);
+    try {
+      const allowed = resolveAllowedAdminFilePath(abs);
+      const raw = await fs.readFile(allowed, 'utf8');
+      const parsed = raw.trim() ? JSON.parse(raw) : {};
+      const snapshot = extractRoutingSnapshot(parsed);
+
+      const hasRoutingContainer =
+        snapshot.location === 'virtualrouter.routing'
+          ? Boolean(parsed && typeof parsed === 'object' && !Array.isArray(parsed) && (parsed as Record<string, unknown>).virtualrouter)
+          : Boolean(parsed && typeof parsed === 'object' && !Array.isArray(parsed));
+      if (!hasRoutingContainer) continue;
+
+      out.push({
+        id: abs,
+        kind: candidate.kind,
+        label: candidate.label,
+        path: abs,
+        location: snapshot.location,
+        version: snapshot.version
+      });
+    } catch {
+      // ignore parse/read errors
+    }
+  }
+
+  out.sort((a, b) => {
+    if (a.kind !== b.kind) return a.kind.localeCompare(b.kind);
+    return a.label.localeCompare(b.label);
+  });
+  return out;
 }
 
 async function backupFile(filePath: string): Promise<void> {

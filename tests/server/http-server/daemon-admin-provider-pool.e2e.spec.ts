@@ -114,6 +114,92 @@ async function ensureDaemonSession(baseUrl: string): Promise<string> {
 describe('Daemon admin provider pool (v1 config) - e2e', () => {
   jest.setTimeout(30000);
 
+  it('lists and edits routing sources across active/import/provider configs', async () => {
+    const { baseUrl, stop } = await startServerWithTempConfig();
+    try {
+      const cookie = await ensureDaemonSession(baseUrl);
+
+      const home = process.env.HOME || '';
+      if (!home) {
+        throw new Error('Missing HOME env in test');
+      }
+
+      const routecodexHome = path.join(home, '.routecodex');
+      const importedDir = path.join(routecodexHome, 'config', 'multi');
+      const providerDir = path.join(routecodexHome, 'provider', 'demo');
+      await fs.mkdir(importedDir, { recursive: true });
+      await fs.mkdir(providerDir, { recursive: true });
+
+      const defaultConfigPath = path.join(routecodexHome, 'config.json');
+      const importedConfigPath = path.join(importedDir, 'imported.json');
+      const providerConfigPath = path.join(providerDir, 'config.v1.json');
+
+      await fs.writeFile(
+        defaultConfigPath,
+        JSON.stringify({ version: '1.0.0', virtualrouter: { providers: {}, routing: { default: ['mock.dummy'] } } }, null, 2),
+        'utf8'
+      );
+      await fs.writeFile(
+        importedConfigPath,
+        JSON.stringify({ version: '1.0.0', virtualrouter: { providers: {}, routing: { default: ['mock.dummy'], tools: [] } } }, null, 2),
+        'utf8'
+      );
+      await fs.writeFile(
+        providerConfigPath,
+        JSON.stringify({ version: '1.0.0', virtualrouter: { providers: {}, routing: { default: ['demo.model'] } } }, null, 2),
+        'utf8'
+      );
+
+      const sourcesRes = await fetch(`${baseUrl}/config/routing/sources`, { headers: { cookie } });
+      expect(sourcesRes.status).toBe(200);
+      const sourcesBody = await readJson(sourcesRes);
+      expect(sourcesBody).toHaveProperty('ok', true);
+      expect(Array.isArray(sourcesBody.sources)).toBe(true);
+      const paths = (sourcesBody.sources as any[]).map((s) => String(s.path || ''));
+      expect(paths).toContain(defaultConfigPath);
+      expect(paths).toContain(importedConfigPath);
+      expect(paths).toContain(providerConfigPath);
+
+      const importedGet = await fetch(
+        `${baseUrl}/config/routing?path=${encodeURIComponent(importedConfigPath)}`,
+        { headers: { cookie } }
+      );
+      expect(importedGet.status).toBe(200);
+      const importedBody = await readJson(importedGet);
+      expect(importedBody).toHaveProperty('ok', true);
+      expect(importedBody).toHaveProperty('location', 'virtualrouter.routing');
+      expect(importedBody).toHaveProperty('routing.default');
+
+      const nextRouting = { ...(importedBody.routing || {}), tools: ['mock.dummy'] };
+      const importedPut = await fetch(
+        `${baseUrl}/config/routing?path=${encodeURIComponent(importedConfigPath)}`,
+        {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json', cookie },
+          body: JSON.stringify({ routing: nextRouting, location: importedBody.location })
+        }
+      );
+      expect(importedPut.status).toBe(200);
+      const putBody = await readJson(importedPut);
+      expect(putBody).toHaveProperty('ok', true);
+      expect(putBody).toHaveProperty('location', 'virtualrouter.routing');
+
+      const afterText = await fs.readFile(importedConfigPath, 'utf8');
+      const after = JSON.parse(afterText);
+      expect(after).toHaveProperty('virtualrouter.routing.tools');
+      expect(Array.isArray(after.virtualrouter.routing.tools)).toBe(true);
+      expect(after.virtualrouter.routing.tools).toEqual(['mock.dummy']);
+
+      const forbidden = await fetch(
+        `${baseUrl}/config/routing?path=${encodeURIComponent('/etc/passwd')}`,
+        { headers: { cookie } }
+      );
+      expect(forbidden.status).toBe(403);
+    } finally {
+      await stop();
+    }
+  });
+
   it('creates an authfile credential and persists provider config via /config/providers', async () => {
     const { baseUrl, stop } = await startServerWithTempConfig();
     try {
