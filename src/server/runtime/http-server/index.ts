@@ -97,6 +97,19 @@ type LegacyAuthFields = ProviderRuntimeProfile['auth'] & {
   scope?: unknown;
 };
 
+const DEFAULT_MAX_PROVIDER_ATTEMPTS = 6;
+
+function resolveMaxProviderAttempts(): number {
+  const raw = String(
+    process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS || process.env.RCC_MAX_PROVIDER_ATTEMPTS || ''
+  )
+    .trim()
+    .toLowerCase();
+  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
+  const candidate = Number.isFinite(parsed) ? parsed : DEFAULT_MAX_PROVIDER_ATTEMPTS;
+  return Math.max(1, Math.min(20, candidate));
+}
+
 /**
  * RouteCodex Server V2
  *
@@ -1168,10 +1181,11 @@ export class RouteCodexHttpServer {
     const pipelineLabel = 'hub';
     const iterationMetadata = initialMetadata;
     // _followupTriggered = false;
-    // 单次 HTTP 请求内最多做一次 failover（不在 Provider 层做重试）：
+    // 单次 HTTP 请求内允许多次 failover（不在 Provider 层做重试）：
     // - 让 VirtualRouter 根据 excludedProviderKeys 跳过失败目标
     // - 避免客户端“一次就断”导致对话破裂（尤其是 429 / prompt too long 等可恢复错误）
-    const maxAttempts = 2;
+    // - 通过 env 允许按部署/客户端调整：ROUTECODEX_MAX_PROVIDER_ATTEMPTS / RCC_MAX_PROVIDER_ATTEMPTS
+    const maxAttempts = resolveMaxProviderAttempts();
     let attempt = 0;
     let firstError: unknown | null = null;
     const originalBodySnapshot = this.cloneRequestPayload(input.body);
