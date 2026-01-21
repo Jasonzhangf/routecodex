@@ -2,6 +2,43 @@
 
 > 历史已完成任务已归档到 `task.archive.md`（含 Unified Hub Framework V1 Phase0–5、CLI 拆分等）。
 
+## Hotfix / Workstream：stopMessage / servertool / clock / quota（进行中）
+
+### stopMessage（新语法 + 作用域 + 持久化一致性）
+
+- [x] 支持 `<**stopMessage:<file://stopMessage/message1.md>**>`：设置时解析并读入内存（相对 `~/.routecodex/`），触发时仅发送已缓存内容
+- [x] 去掉旧兼容逻辑，只保留新逻辑（仅从 session 持久化状态读取，不使用 stopMessageState/implicit 回退）
+- [x] 仅对“设置时的 server 实例”生效：serverId 作用域隔离，避免跨 server 串读
+- [x] 仅对“设置时的 sessionId”生效：触发必须 sessionId 匹配（不匹配不触发）
+- [x] 触发后必须计数（repeatCount++），并同步刷新持久化（不允许内存更新但盘未刷）
+- [x] 增加可观测日志：触发时会在 servertool 黄色进度里打印 `stopMessage reserved ... (cleared)`（含 stickyKey）
+- [x] 单元测试 + 回归测试（覆盖 session/server 作用域、触发计数与持久化）
+
+### clock（servertool + daemon 定时提醒，仅设计已落盘）
+
+- [x] 详细设计（含 retention=20min、断开后下次请求注入、`stopMessage` 优先级、`<**clock:clear**>`）：`docs/SERVERTOOL_CLOCK_DESIGN.md`
+- [ ] 实验：验证“hold（stop 时无限等待）+ 断开后下次请求注入”在客户端侧的可观测表现（确认 UI/CLI 行为与超时边界）
+- [ ] 实现（待确认）：clock tool schema 注入、daemon 任务持久化、reservation/commit、启动清理（过期 >20min 删除）
+
+### servertool 可观测性（执行进度日志）
+
+- [x] servertool 执行进度亮黄色日志（已在 sharedmodule 侧实现并验证）✅
+- [ ] 进一步：每条工具/handler 的“第 N 步”细粒度进度（仅当有必要再做）
+
+### MCP 工具调用“变成文字”问题（Playwright 等）
+
+- [ ] 复现：收集一次原始请求 payload + tool schema + tool_choice + providerProtocol（含 glm-4.7 / anthropic-messages 路径）
+- [ ] 定位：确认是“模型未按 tool_call 输出”还是“Hub/compat 把 tool_call 降级成文本”
+- [ ] 修复：只在 llmswitch-core（HubPipeline/工具治理）里做（Host/Provider 不修 payload 语义）
+- [ ] 回归：e2e tool-loop（/v1/responses + tool_outputs）覆盖该场景
+
+### quota alias 重复 + quota 不一致
+
+- [ ] 复现：QuotaView 中 `1-geetasamodgeetasamoda` vs `geetasamodgeetasamoda`、`2-jasonqueque` vs `jasonqueque` 的重复与 quota 差异
+- [ ] 定位：alias 解析/标准化链路（含序号前缀是否应参与 key）
+- [ ] 修复：统一 alias 规范（确保同一 tokenFile 不会产生两套不同 quota 视图）
+- [ ] 回归：单测覆盖 “同一凭据 → 同一 quota key”
+
 ## 目标（llms-engine 逐步替换，Hub inbound/outbound 优先）
 
 - 在同一个 `routecodex` 进程内同时支持两套 llms 核心：

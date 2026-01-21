@@ -28,6 +28,8 @@ export interface QuotaState {
   cooldownUntil: number | null;
   blacklistUntil: number | null;
   lastErrorSeries: ErrorSeries | null;
+  lastErrorCode: string | null;
+  lastErrorAtMs: number | null;
   consecutiveErrorCount: number;
 }
 
@@ -55,13 +57,13 @@ export interface UsageEventForQuota {
 
 const WINDOW_DURATION_MS = 60_000;
 const COOLDOWN_SCHEDULE_429_MS = [
-  1 * 60_000,
-  3 * 60_000,
-  5 * 60_000,
-  15 * 60_000,
-  30 * 60_000,
-  60 * 60_000,
-  3 * 60 * 60_000
+  5_000,
+  30_000,
+  60_000,
+  300_000,
+  1_800_000,
+  3_600_000,
+  10_000_000
 ] as const;
 const COOLDOWN_SCHEDULE_FATAL_MS = [
   5 * 60_000,
@@ -71,13 +73,15 @@ const COOLDOWN_SCHEDULE_FATAL_MS = [
   3 * 60 * 60_000
 ] as const;
 const COOLDOWN_SCHEDULE_DEFAULT_MS = [
-  1 * 60_000,
-  3 * 60_000,
-  5 * 60_000,
-  15 * 60_000,
-  30 * 60_000,
-  60 * 60_000
+  5_000,
+  30_000,
+  60_000,
+  300_000,
+  1_800_000,
+  3_600_000,
+  10_000_000
 ] as const;
+const ERROR_CHAIN_WINDOW_MS = 10 * 60_000;
 
 const NETWORK_ERROR_CODES = [
   'ECONNRESET',
@@ -132,6 +136,8 @@ export function createInitialQuotaState(
     cooldownUntil: null,
     blacklistUntil: null,
     lastErrorSeries: null,
+    lastErrorCode: null,
+    lastErrorAtMs: null,
     consecutiveErrorCount: 0
   };
 }
@@ -166,6 +172,18 @@ export function normalizeErrorSeries(event: ErrorEventForQuota): ErrorSeries {
   return 'EOTHER';
 }
 
+function normalizeErrorKey(event: ErrorEventForQuota): string {
+  const rawCode = String(event.code || '').trim().toUpperCase();
+  if (rawCode) {
+    return rawCode;
+  }
+  const status = typeof event.httpStatus === 'number' ? event.httpStatus : null;
+  if (status && Number.isFinite(status)) {
+    return `HTTP_${Math.floor(status)}`;
+  }
+  return 'ERR_UNKNOWN';
+}
+
 function computeCooldownMs(consecutive: number): number | null {
   return computeCooldownMsBySeries('EOTHER', consecutive);
 }
@@ -195,9 +213,25 @@ export function applyErrorEvent(
   }
 
   const series = normalizeErrorSeries(event);
+  const errorKey = normalizeErrorKey(event);
 
-  const sameSeries = state.lastErrorSeries === series;
-  const nextCount = sameSeries ? state.consecutiveErrorCount + 1 : 1;
+  const lastAt =
+    typeof state.lastErrorAtMs === 'number' && Number.isFinite(state.lastErrorAtMs)
+      ? state.lastErrorAtMs
+      : null;
+  const withinChainWindow =
+    typeof lastAt === 'number' &&
+    nowMs - lastAt >= 0 &&
+    nowMs - lastAt <= ERROR_CHAIN_WINDOW_MS;
+  const sameErrorKey = withinChainWindow && state.lastErrorCode === errorKey;
+  const rawNextCount = sameErrorKey ? state.consecutiveErrorCount + 1 : 1;
+  const schedule =
+    series === 'E429'
+      ? COOLDOWN_SCHEDULE_429_MS
+      : series === 'EFATAL'
+        ? COOLDOWN_SCHEDULE_FATAL_MS
+        : COOLDOWN_SCHEDULE_DEFAULT_MS;
+  const nextCount = rawNextCount > schedule.length ? 1 : rawNextCount;
   const cooldownMs = computeCooldownMsBySeries(series, nextCount);
   const nextUntil = cooldownMs ? nowMs + cooldownMs : null;
   const existingUntil = typeof state.cooldownUntil === 'number' ? state.cooldownUntil : null;
@@ -214,6 +248,8 @@ export function applyErrorEvent(
     reason: 'cooldown',
     cooldownUntil,
     lastErrorSeries: series,
+    lastErrorCode: errorKey,
+    lastErrorAtMs: nowMs,
     consecutiveErrorCount: nextCount
   };
 }
@@ -257,6 +293,8 @@ export function applySuccessEvent(
     inPool: nextInPool,
     cooldownUntil: nextCooldownUntil,
     lastErrorSeries: null,
+    lastErrorCode: null,
+    lastErrorAtMs: null,
     consecutiveErrorCount: 0
   };
 }
@@ -344,6 +382,8 @@ export function tickQuotaStateTime(state: QuotaState, nowMs: number): QuotaState
       inPool: true,
       reason: 'ok',
       lastErrorSeries: null,
+      lastErrorCode: null,
+      lastErrorAtMs: null,
       consecutiveErrorCount: 0
     };
   } else if (next.cooldownUntil !== null && nowMs >= next.cooldownUntil) {
@@ -351,9 +391,7 @@ export function tickQuotaStateTime(state: QuotaState, nowMs: number): QuotaState
       ...next,
       cooldownUntil: null,
       inPool: true,
-      reason: next.reason === 'cooldown' || next.reason === 'quotaDepleted' ? 'ok' : next.reason,
-      lastErrorSeries: null,
-      consecutiveErrorCount: 0
+      reason: next.reason === 'cooldown' || next.reason === 'quotaDepleted' ? 'ok' : next.reason
     };
   }
 

@@ -14,11 +14,13 @@ import {
   extractVirtualRouterSeriesCooldown,
   parseQuotaResetDelayMs
 } from './provider-quota-daemon.cooldown.js';
+import { isModelCapacityExhausted429, type ProviderModelBackoffTracker } from './provider-quota-daemon.model-backoff.js';
 
 export type ProviderQuotaDaemonEventContext = {
   quotaStates: Map<string, QuotaState>;
   staticConfigs: Map<string, StaticQuotaConfig>;
   quotaRoutingEnabled: boolean;
+  modelBackoff?: ProviderModelBackoffTracker;
   schedulePersist(nowMs: number): void;
   toSnapshotObject(): Record<string, QuotaState>;
 };
@@ -93,12 +95,14 @@ export async function handleProviderQuotaErrorEvent(
     //
     // It must NOT override active cooldown windows caused by real upstream failures
     // (e.g. MODEL_CAPACITY_EXHAUSTED short backoff), otherwise the pool will keep hammering 429s.
-    const isUntrackedAntigravityOauthGate =
-      previous.reason === 'cooldown' &&
-      previous.cooldownUntil === null &&
-      previous.blacklistUntil === null &&
-      previous.lastErrorSeries === null &&
-      previous.consecutiveErrorCount === 0;
+	    const isUntrackedAntigravityOauthGate =
+	      previous.reason === 'cooldown' &&
+	      previous.cooldownUntil === null &&
+	      previous.blacklistUntil === null &&
+	      previous.lastErrorSeries === null &&
+	      previous.lastErrorCode === null &&
+	      previous.lastErrorAtMs === null &&
+	      previous.consecutiveErrorCount === 0;
     const canRecover = previous.reason === 'quotaDepleted' || isUntrackedAntigravityOauthGate;
     if (canRecover && !withinBlacklist) {
       const nextState: QuotaState = {
@@ -117,6 +121,13 @@ export async function handleProviderQuotaErrorEvent(
   // When present, treat as deterministic quota depletion signal rather than generic 429 backoff/blacklist.
   if (typeof event.status === 'number' && event.status === 429) {
     const seriesCooldown = extractVirtualRouterSeriesCooldown(event, nowMs);
+    if (ctx.modelBackoff && isModelCapacityExhausted429(event)) {
+      try {
+        ctx.modelBackoff.recordCapacity429(providerKey, event, nowMs, seriesCooldown?.until ?? null);
+      } catch {
+        // ignore model backoff failures; quota routing must stay best-effort
+      }
+    }
     if (seriesCooldown) {
       const withinBlacklist =
         previous.blacklistUntil !== null && nowMs < previous.blacklistUntil;
@@ -132,16 +143,18 @@ export async function handleProviderQuotaErrorEvent(
         typeof existingCooldownUntil === 'number' && existingCooldownUntil > until
           ? existingCooldownUntil
           : until;
-      const nextState: QuotaState = {
-        ...previous,
-        inPool: false,
-        reason: isCapacityCooldown ? 'cooldown' : 'quotaDepleted',
-        cooldownUntil,
-        lastErrorSeries: null,
-        consecutiveErrorCount: 0,
-        ...(isCapacityCooldown
-          ? {}
-          : {
+	      const nextState: QuotaState = {
+	        ...previous,
+	        inPool: false,
+	        reason: isCapacityCooldown ? 'cooldown' : 'quotaDepleted',
+	        cooldownUntil,
+	        lastErrorSeries: null,
+	        lastErrorCode: null,
+	        lastErrorAtMs: null,
+	        consecutiveErrorCount: 0,
+	        ...(isCapacityCooldown
+	          ? {}
+	          : {
               blacklistUntil: null,
               // deterministic quota signals should clear blacklist to avoid sticky long locks
               // when upstream provides explicit reset delay.
@@ -158,15 +171,17 @@ export async function handleProviderQuotaErrorEvent(
       const ttl = parseQuotaResetDelayMs(event);
       if (ttl && ttl > 0) {
         const capped = capAutoCooldownMs(ttl);
-        const nextState: QuotaState = {
-          ...previous,
-          inPool: false,
-          reason: 'quotaDepleted',
-          cooldownUntil: nowMs + (capped ?? ttl),
-          blacklistUntil: null,
-          lastErrorSeries: null,
-          consecutiveErrorCount: 0
-        };
+	        const nextState: QuotaState = {
+	          ...previous,
+	          inPool: false,
+	          reason: 'quotaDepleted',
+	          cooldownUntil: nowMs + (capped ?? ttl),
+	          blacklistUntil: null,
+	          lastErrorSeries: null,
+	          lastErrorCode: null,
+	          lastErrorAtMs: null,
+	          consecutiveErrorCount: 0
+	        };
         ctx.quotaStates.set(providerKey, nextState);
         ctx.schedulePersist(nowMs);
         return;
@@ -251,4 +266,3 @@ function isFatalForQuota(event: ProviderErrorEvent): boolean {
   }
   return false;
 }
-

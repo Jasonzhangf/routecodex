@@ -1,5 +1,13 @@
 import { createInitialQuotaState, type QuotaAuthType, type QuotaState } from '../../quota/provider-quota-center.js';
 
+function normalizeErrorCode(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
 export function canonicalizeProviderKey(providerKey: string): string {
   const key = typeof providerKey === 'string' ? providerKey.trim() : '';
   if (!key) {
@@ -45,7 +53,15 @@ export function mergeQuotaStates(providerKey: string, states: QuotaState[]): Quo
   let priorityTier = typeof base.priorityTier === 'number' ? base.priorityTier : 100;
   let totalTokensUsed = typeof base.totalTokensUsed === 'number' ? base.totalTokensUsed : 0;
   let lastErrorSeries = base.lastErrorSeries ?? null;
+  let lastErrorCode = normalizeErrorCode((base as unknown as { lastErrorCode?: unknown }).lastErrorCode);
+  let lastErrorAtMs =
+    typeof (base as unknown as { lastErrorAtMs?: unknown }).lastErrorAtMs === 'number'
+      ? ((base as unknown as { lastErrorAtMs?: number }).lastErrorAtMs as number)
+      : null;
   let consecutiveErrorCount = typeof base.consecutiveErrorCount === 'number' ? base.consecutiveErrorCount : 0;
+  let maxConsecutive = consecutiveErrorCount;
+  let maxConsecutiveSeries = lastErrorSeries;
+  let maxConsecutiveCode = lastErrorCode;
 
   for (const s of usable) {
     const r0 = typeof worstReason === 'string' ? worstReason : 'ok';
@@ -74,11 +90,50 @@ export function mergeQuotaStates(providerKey: string, states: QuotaState[]): Quo
     }
 
     if (typeof s.consecutiveErrorCount === 'number' && Number.isFinite(s.consecutiveErrorCount)) {
-      if (s.consecutiveErrorCount > consecutiveErrorCount) {
-        consecutiveErrorCount = s.consecutiveErrorCount;
-        lastErrorSeries = s.lastErrorSeries ?? lastErrorSeries;
+      if (s.consecutiveErrorCount > maxConsecutive) {
+        maxConsecutive = s.consecutiveErrorCount;
+        maxConsecutiveSeries = s.lastErrorSeries ?? maxConsecutiveSeries;
+        maxConsecutiveCode =
+          normalizeErrorCode((s as unknown as { lastErrorCode?: unknown }).lastErrorCode) ?? maxConsecutiveCode;
       }
     }
+
+    const candidateAt =
+      typeof (s as unknown as { lastErrorAtMs?: unknown }).lastErrorAtMs === 'number' &&
+      Number.isFinite((s as unknown as { lastErrorAtMs?: number }).lastErrorAtMs as number)
+        ? ((s as unknown as { lastErrorAtMs?: number }).lastErrorAtMs as number)
+        : null;
+    if (candidateAt !== null && (lastErrorAtMs === null || candidateAt > lastErrorAtMs)) {
+      lastErrorAtMs = candidateAt;
+      lastErrorSeries = s.lastErrorSeries ?? lastErrorSeries;
+      lastErrorCode = normalizeErrorCode((s as unknown as { lastErrorCode?: unknown }).lastErrorCode) ?? lastErrorCode;
+      if (typeof s.consecutiveErrorCount === 'number' && Number.isFinite(s.consecutiveErrorCount)) {
+        consecutiveErrorCount = s.consecutiveErrorCount;
+      }
+    } else if (candidateAt !== null && lastErrorAtMs !== null && candidateAt === lastErrorAtMs) {
+      if (typeof s.consecutiveErrorCount === 'number' && Number.isFinite(s.consecutiveErrorCount)) {
+        if (s.consecutiveErrorCount > consecutiveErrorCount) {
+          consecutiveErrorCount = s.consecutiveErrorCount;
+          lastErrorSeries = s.lastErrorSeries ?? lastErrorSeries;
+          lastErrorCode = normalizeErrorCode((s as unknown as { lastErrorCode?: unknown }).lastErrorCode) ?? lastErrorCode;
+        }
+      }
+    } else if (candidateAt === null && lastErrorAtMs === null) {
+      // Defensive merge: some legacy quota snapshots omit lastErrorAtMs entirely.
+      // In that case we still want to preserve the strongest error-chain signal.
+      if (typeof s.consecutiveErrorCount === 'number' && Number.isFinite(s.consecutiveErrorCount)) {
+        if (s.consecutiveErrorCount > consecutiveErrorCount) {
+          consecutiveErrorCount = s.consecutiveErrorCount;
+          lastErrorSeries = s.lastErrorSeries ?? lastErrorSeries;
+          lastErrorCode = normalizeErrorCode((s as unknown as { lastErrorCode?: unknown }).lastErrorCode) ?? lastErrorCode;
+        }
+      }
+    }
+  }
+  if (lastErrorAtMs === null && maxConsecutive > consecutiveErrorCount) {
+    consecutiveErrorCount = maxConsecutive;
+    lastErrorSeries = maxConsecutiveSeries;
+    lastErrorCode = maxConsecutiveCode;
   }
 
   const merged: QuotaState = {
@@ -90,6 +145,8 @@ export function mergeQuotaStates(providerKey: string, states: QuotaState[]): Quo
     cooldownUntil,
     blacklistUntil,
     lastErrorSeries,
+    ...(lastErrorCode !== null ? { lastErrorCode } : { lastErrorCode: null }),
+    ...(lastErrorAtMs !== null ? { lastErrorAtMs } : { lastErrorAtMs: null }),
     consecutiveErrorCount,
     inPool: worstReason === 'ok',
     reason: (worstReason || 'ok') as any

@@ -27,13 +27,38 @@ export function resolveServerScopedSessionDir(serverId: string): string | null {
 
 export function ensureServerScopedSessionDir(serverId: string): string | null {
   const existing = String(process.env.ROUTECODEX_SESSION_DIR || '').trim();
-  if (existing) {
-    return existing;
-  }
   const resolved = resolveServerScopedSessionDir(serverId);
-  if (resolved) {
-    process.env.ROUTECODEX_SESSION_DIR = resolved;
+  if (!resolved) {
+    return existing || null;
   }
+
+  // Do not override explicit external configs (e.g. user points to /tmp/custom-sessions).
+  // But if the existing value looks like an auto-generated ~/.routecodex/sessions/<serverId> path
+  // and does not match the current serverId, override it to prevent cross-server leakage
+  // when servers are restarted/rebound within the same process.
+  if (existing) {
+    try {
+      const home = os.homedir();
+      const base = home ? path.join(home, '.routecodex', 'sessions') : '';
+      const normalizedExisting = path.resolve(existing);
+      const normalizedResolved = path.resolve(resolved);
+      const normalizedBase = base ? path.resolve(base) : '';
+
+      const isUnderBase =
+        Boolean(normalizedBase) &&
+        (normalizedExisting === normalizedBase || normalizedExisting.startsWith(`${normalizedBase}${path.sep}`));
+
+      if (!isUnderBase) {
+        return existing;
+      }
+
+      if (normalizedExisting === normalizedResolved) {
+        return existing;
+      }
+    } catch {
+      return existing;
+    }
+  }
+  process.env.ROUTECODEX_SESSION_DIR = resolved;
   return resolved;
 }
-

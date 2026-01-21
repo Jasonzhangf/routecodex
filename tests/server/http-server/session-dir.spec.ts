@@ -28,6 +28,13 @@ describe('server-scoped session dir', () => {
     expect(process.env.ROUTECODEX_SESSION_DIR).toBe('/tmp/custom-sessions');
   });
 
+  test('overrides auto-scoped ~/.routecodex/sessions/<serverId> when serverId changes', () => {
+    process.env.ROUTECODEX_SESSION_DIR = path.join(os.homedir(), '.routecodex', 'sessions', '127.0.0.1_3001');
+    const ensured = ensureServerScopedSessionDir('0.0.0.0:5520');
+    expect(ensured).toBe(path.join(os.homedir(), '.routecodex', 'sessions', '0.0.0.0_5520'));
+    expect(process.env.ROUTECODEX_SESSION_DIR).toBe(ensured);
+  });
+
   test('sets ROUTECODEX_SESSION_DIR when missing', () => {
     delete process.env.ROUTECODEX_SESSION_DIR;
     const ensured = ensureServerScopedSessionDir('127.0.0.1:3001');
@@ -50,4 +57,3 @@ describe('server-scoped session dir', () => {
     }
   });
 });
-

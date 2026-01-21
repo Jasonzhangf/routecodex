@@ -14,12 +14,18 @@ import { saveProviderQuotaSnapshot } from '../../quota/provider-quota-store.js';
 import { canonicalizeProviderKey } from './provider-key-normalization.js';
 import { handleProviderQuotaErrorEvent } from './provider-quota-daemon.events.js';
 import { loadProviderQuotaStates } from './provider-quota-daemon.snapshot.js';
+import { ProviderModelBackoffTracker } from './provider-quota-daemon.model-backoff.js';
+import { buildQuotaViewEntry } from './provider-quota-daemon.view.js';
+
+const ERROR_PRIORITY_WINDOW_MS = readPositiveNumberFromEnv('ROUTECODEX_QUOTA_ERROR_PRIORITY_WINDOW_MS', 10 * 60_000);
+const ERROR_PRIORITY_BASE = readPositiveNumberFromEnv('ROUTECODEX_QUOTA_ERROR_PRIORITY_BASE', 1_000);
 
 export class ProviderQuotaDaemonModule implements ManagerModule {
   readonly id = 'provider-quota';
 
   private quotaStates: Map<string, QuotaState> = new Map();
   private staticConfigs: Map<string, StaticQuotaConfig> = new Map();
+  private modelBackoff: ProviderModelBackoffTracker = new ProviderModelBackoffTracker();
   private unsubscribe: (() => void) | null = null;
   private maintenanceTimer: NodeJS.Timeout | null = null;
   private persistTimer: NodeJS.Timeout | null = null;
@@ -98,15 +104,17 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
     const nowMs = Date.now();
     const previous =
       this.quotaStates.get(key) ?? createInitialQuotaState(key, this.staticConfigs.get(key), nowMs);
-    const next: QuotaState = {
-      ...previous,
-      inPool: true,
-      reason: 'ok',
-      cooldownUntil: null,
-      blacklistUntil: null,
-      lastErrorSeries: null,
-      consecutiveErrorCount: 0
-    };
+	    const next: QuotaState = {
+	      ...previous,
+	      inPool: true,
+	      reason: 'ok',
+	      cooldownUntil: null,
+	      blacklistUntil: null,
+	      lastErrorSeries: null,
+	      lastErrorCode: null,
+	      lastErrorAtMs: null,
+	      consecutiveErrorCount: 0
+	    };
     this.quotaStates.set(key, next);
     try {
       await saveProviderQuotaSnapshot(this.toSnapshotObject(), new Date(nowMs));
@@ -280,6 +288,7 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
       createInitialQuotaState(providerKey, this.staticConfigs.get(providerKey), nowMs);
     const nextState = applyQuotaSuccessEvent(previous, { providerKey, usedTokens, timestampMs: nowMs }, nowMs);
     this.quotaStates.set(providerKey, nextState);
+    this.modelBackoff.recordSuccess(providerKey);
     this.schedulePersist(nowMs);
   }
 
@@ -344,6 +353,7 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
         quotaStates: this.quotaStates,
         staticConfigs: this.staticConfigs,
         quotaRoutingEnabled: this.quotaRoutingEnabled,
+        modelBackoff: this.modelBackoff,
         schedulePersist: (nowMs: number) => this.schedulePersist(nowMs),
         toSnapshotObject: () => this.toSnapshotObject()
       },
@@ -419,15 +429,13 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
         this.quotaStates.set(key, normalized);
         this.schedulePersist(nowMs);
       }
-      const effective = normalized;
-      return {
-        providerKey: effective.providerKey,
-        inPool: effective.inPool,
-        reason: effective.reason,
-        priorityTier: effective.priorityTier,
-        cooldownUntil: effective.cooldownUntil ?? null,
-        blacklistUntil: effective.blacklistUntil ?? null
-      };
+      return buildQuotaViewEntry({
+        state: normalized,
+        nowMs,
+        modelBackoff: this.modelBackoff,
+        errorPriorityWindowMs: ERROR_PRIORITY_WINDOW_MS,
+        errorPriorityBase: ERROR_PRIORITY_BASE
+      });
     };
   }
 
@@ -455,14 +463,13 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
       }
       const nowMs = Date.now();
       const effective = tickQuotaStateTime(state, nowMs);
-      return {
-        providerKey: effective.providerKey,
-        inPool: effective.inPool,
-        reason: effective.reason,
-        priorityTier: effective.priorityTier,
-        cooldownUntil: effective.cooldownUntil ?? null,
-        blacklistUntil: effective.blacklistUntil ?? null
-      };
+      return buildQuotaViewEntry({
+        state: effective,
+        nowMs,
+        modelBackoff: this.modelBackoff,
+        errorPriorityWindowMs: ERROR_PRIORITY_WINDOW_MS,
+        errorPriorityBase: ERROR_PRIORITY_BASE
+      });
     };
   }
 }

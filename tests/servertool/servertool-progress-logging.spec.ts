@@ -1,17 +1,40 @@
 import { jest } from '@jest/globals';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { runServerToolOrchestration } from '../../sharedmodule/llmswitch-core/src/servertool/engine.js';
 import type { AdapterContext } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/json.js';
+import { serializeRoutingInstructionState, type RoutingInstructionState } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-instructions.js';
 
 describe('servertool progress logging', () => {
   test('prints yellow progress steps when a servertool followup executes', async () => {
+    const SESSION_DIR = path.join(process.cwd(), 'tmp', 'jest-progress-sessions');
+    const ORIGINAL = process.env.ROUTECODEX_SESSION_DIR;
+    process.env.ROUTECODEX_SESSION_DIR = SESSION_DIR;
+    const sessionId = 'sess-progress-1';
+    fs.mkdirSync(SESSION_DIR, { recursive: true });
+    const filepath = path.join(SESSION_DIR, `session-${sessionId}.json`);
+    const state: RoutingInstructionState = {
+      forcedTarget: undefined,
+      stickyTarget: undefined,
+      allowedProviders: new Set(),
+      disabledProviders: new Set(),
+      disabledKeys: new Map(),
+      disabledModels: new Map(),
+      stopMessageText: '继续',
+      stopMessageMaxRepeats: 1,
+      stopMessageUsed: 0,
+      stopMessageUpdatedAt: Date.now()
+    };
+    fs.writeFileSync(filepath, JSON.stringify({ version: 1, state: serializeRoutingInstructionState(state) }), { encoding: 'utf8' });
+
     const spy = jest.spyOn(console, 'log').mockImplementation(() => {});
     try {
       const adapterContext: AdapterContext = {
         requestId: 'req-progress-1',
         entryEndpoint: '/v1/responses',
         providerProtocol: 'openai-responses',
-        sessionId: 'sess-progress-1',
+        sessionId,
         capturedChatRequest: {
           model: 'gpt-test',
           messages: [{ role: 'user', content: 'hi' }]
@@ -24,14 +47,6 @@ describe('servertool progress logging', () => {
         model: 'gpt-test',
         status: 'completed',
         output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'ok' }] }]
-      };
-
-      // stop_message_flow triggers followup whenever stopMessage is active and finish_reason maps to stop;
-      // easiest path is to supply a stopMessageState snapshot directly on adapterContext.
-      (adapterContext as any).stopMessageState = {
-        stopMessageText: '继续',
-        stopMessageMaxRepeats: 1,
-        stopMessageUsed: 0
       };
 
       await runServerToolOrchestration({
@@ -59,7 +74,14 @@ describe('servertool progress logging', () => {
       expect(lines.some((l) => l.includes('[servertool][progress 5/5]'))).toBe(true);
     } finally {
       spy.mockRestore();
+      if (ORIGINAL === undefined) {
+        delete process.env.ROUTECODEX_SESSION_DIR;
+      } else {
+        process.env.ROUTECODEX_SESSION_DIR = ORIGINAL;
+      }
+      try {
+        fs.unlinkSync(filepath);
+      } catch {}
     }
   });
 });
-
