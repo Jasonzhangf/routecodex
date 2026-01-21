@@ -215,6 +215,47 @@
         color: rgba(255, 255, 255, 0.42);
         margin-left: 6px;
       }
+
+      #routingKvEditor.kv-editor .kv-val {
+        white-space: normal;
+        overflow: visible;
+        text-overflow: unset;
+      }
+
+      #routingKvEditor .routing-target-actions {
+        margin-top: 6px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      #routingKvEditor .routing-target-row {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        align-items: center;
+      }
+
+      #routingKvEditor .routing-target-key {
+        padding: 2px 6px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.04);
+        max-width: 520px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      #routingKvEditor .routing-target-meta {
+        color: rgba(255, 255, 255, 0.55);
+      }
+
+      #routingKvEditor .routing-target-row button {
+        padding: 4px 8px;
+        border-radius: 8px;
+        font-size: 12px;
+      }
       .dot {
         width: 8px;
         height: 8px;
@@ -941,7 +982,7 @@
         </section>
 
 	        <section id="panelRouting" data-panel="routing" style="display:none;">
-	          <div class="grid grid-wide-right">
+	          <div class="grid grid-wide-left">
 	            <div class="card" style="box-shadow:none;">
 	              <p class="section-title">Routing editor</p>
 	              <p class="section-sub">
@@ -952,28 +993,6 @@
 	                <select id="routingSourceSelect" style="width: 420px;"></select>
 	                <button id="refreshRoutingSourcesBtn">Refresh sources</button>
 	              </div>
-	              <div class="row" style="margin-bottom: 10px;">
-	                <button id="loadRoutingBtn" class="primary">Load</button>
-	                <button id="saveRoutingBtn" class="primary">Save</button>
-	              </div>
-              <textarea id="routingEditor" spellcheck="false" placeholder="{\n  \"default\": [...]\n}"></textarea>
-              <div id="routingOpLog" class="log" style="margin-top: 10px; display:none;"></div>
-
-	              <p class="section-title" style="margin-top: 12px;">Routing registry</p>
-	              <p class="section-sub">Key/value view of loaded routing.</p>
-              <div class="kv-tools">
-                <button id="routingRegPreviewBtn">Preview from editor</button>
-                <button id="routingRegExpandBtn">Expand all</button>
-                <button id="routingRegCollapseBtn">Collapse all</button>
-              </div>
-              <div id="routingRegistry" class="kv"></div>
-            </div>
-
-	            <div class="card" style="box-shadow:none;">
-	              <p class="section-title">Runtime providers</p>
-	              <p class="section-sub">
-	                What the running process currently has loaded (restart required after edits).
-	              </p>
 	              <div class="row" style="margin-bottom: 10px;">
 	                <label for="routingQuotaModeSelect">mode</label>
 	                <select id="routingQuotaModeSelect" style="width: 160px;">
@@ -992,6 +1011,24 @@
 	                  <option value="1440">24h</option>
 	                </select>
 	              </div>
+	              <div class="row" style="margin-bottom: 10px;">
+	                <button id="loadRoutingBtn" class="primary">Load</button>
+	                <button id="saveRoutingBtn" class="primary">Save</button>
+	                <button id="routingRegExpandBtn">Expand all</button>
+	                <button id="routingRegCollapseBtn">Collapse all</button>
+	              </div>
+	              <div id="routingOpLog" class="log" style="margin-top: 10px; display:none;"></div>
+	              <div class="muted" style="font-size:12px; margin: -4px 0 10px;">
+	                Tip: edit routing here (CRUD). For tool targets, use the inline <span class="mono">Offline/Recover</span> controls to manage runtime provider keys.
+	              </div>
+	              <div id="routingKvEditor" class="kv kv-editor"></div>
+	            </div>
+
+	            <div class="card" style="box-shadow:none;">
+	              <p class="section-title">Runtime providers</p>
+	              <p class="section-sub">
+	                What the running process currently has loaded (restart required after edits).
+	              </p>
 	              <div class="row" style="margin-bottom: 10px;">
 	                <button id="refreshRuntimesBtn" class="primary">Refresh</button>
 	              </div>
@@ -1030,18 +1067,19 @@
 
     <script>
       const $ = (id) => document.getElementById(id);
-	      const UI = {
-	        selectedProviderId: "",
-	        lastUnauthorizedToastAt: 0,
-	        adminAuth: null,
-	        quotaProviders: [],
-	        quotaProvidersUpdatedAt: 0,
-	        routingTargets: null,
-	        routingTargetsUpdatedAt: 0,
-	        routingSources: [],
-	        routingSourcesUpdatedAt: 0,
-	        routingLocation: "virtualrouter.routing"
-	      };
+		      const UI = {
+		        selectedProviderId: "",
+		        lastUnauthorizedToastAt: 0,
+		        adminAuth: null,
+		        quotaProviders: [],
+		        quotaProvidersUpdatedAt: 0,
+		        quotaProviderMap: null,
+		        routingTargets: null,
+		        routingTargetsUpdatedAt: 0,
+		        routingSources: [],
+		        routingSourcesUpdatedAt: 0,
+		        routingLocation: "virtualrouter.routing"
+		      };
       let toastTimer = null;
 
       function toast(msg, kind = "err") {
@@ -1171,7 +1209,10 @@
 	            await refreshQuota();
 	            await refreshQuotaSnapshot();
 	          }
-          else if (key === "routing") await refreshRuntimes();
+          else if (key === "routing") {
+            await refreshRuntimes();
+            await refreshRoutingSources();
+          }
         } catch {
           // ignore refresh failures on tab switch
         }
@@ -1971,39 +2012,504 @@
         }
       }
 
-      async function authorizeOauth() {
-        setLog("credentialOpLog", "");
-        const provider = $("oauthProviderSelect").value;
-        const alias = ($("oauthAuthAliasInput").value || "default").trim() || "default";
-        const openBrowser = $("oauthOpenBrowser").checked;
-        const forceReauthorize = $("oauthForceReauth").checked;
-        try {
-          const out = await apiFetch("/daemon/oauth/authorize", {
-            method: "POST",
-            body: JSON.stringify({ provider, alias, openBrowser, forceReauthorize })
-          });
-          setLog("credentialOpLog", `OK. tokenFile: ${out.tokenFile || "—"}`);
-          await refreshCredentials();
-        } catch (e) {
-          setLog("credentialOpLog", `Authorize failed: ${e.message}`);
-        }
-      }
+	      async function authorizeOauth() {
+	        setLog("credentialOpLog", "");
+	        const provider = $("oauthProviderSelect").value;
+	        const alias = ($("oauthAuthAliasInput").value || "default").trim() || "default";
+	        const openBrowser = $("oauthOpenBrowser").checked;
+	        const forceReauthorize = $("oauthForceReauth").checked;
+	        try {
+	          const out = await apiFetch("/daemon/oauth/authorize", {
+	            method: "POST",
+	            body: JSON.stringify({ provider, alias, openBrowser, forceReauthorize })
+	          });
+	          setLog("credentialOpLog", `OK. tokenFile: ${out.tokenFile || "—"}`);
+	          await refreshCredentials();
+	        } catch (e) {
+	          setLog("credentialOpLog", `Authorize failed: ${e.message}`);
+	        }
+	      }
+
+	      const routingEditorState = {
+	        value: {},
+	        dirty: false
+	      };
+
+	      function routingEditorClone(value) {
+	        try {
+	          return value == null ? value : JSON.parse(JSON.stringify(value));
+	        } catch {
+	          return value;
+	        }
+	      }
+
+	      function routingEditorSetDirty(dirty) {
+	        routingEditorState.dirty = Boolean(dirty);
+	      }
+
+	      function routingEditorSetValue(value) {
+	        routingEditorState.value = routingEditorClone(value) || {};
+	        routingEditorSetDirty(false);
+	        routingEditorRender();
+	      }
+
+	      function routingEditorGetValue() {
+	        return routingEditorClone(routingEditorState.value) || {};
+	      }
+
+	      function routingEditorPathToString(path) {
+	        if (!path || !path.length) return "";
+	        return path.map((p) => String(p)).join(".");
+	      }
+
+	      function routingEditorGetByPath(root, path) {
+	        let cur = root;
+	        for (const part of path || []) {
+	          if (cur == null) return undefined;
+	          cur = cur[part];
+	        }
+	        return cur;
+	      }
+
+	      function routingEditorSetByPath(root, path, nextValue) {
+	        if (!root || typeof root !== "object") return;
+	        if (!path || !path.length) return;
+	        const last = path[path.length - 1];
+	        let cur = root;
+	        for (let i = 0; i < path.length - 1; i += 1) {
+	          const part = path[i];
+	          const existing = cur[part];
+	          if (existing == null || typeof existing !== "object") cur[part] = {};
+	          cur = cur[part];
+	        }
+	        cur[last] = nextValue;
+	      }
+
+	      function routingEditorDeleteByPath(root, path) {
+	        if (!root || typeof root !== "object") return;
+	        if (!path || !path.length) return;
+	        const last = path[path.length - 1];
+	        let cur = root;
+	        for (let i = 0; i < path.length - 1; i += 1) {
+	          const part = path[i];
+	          if (cur == null) return;
+	          cur = cur[part];
+	        }
+	        if (Array.isArray(cur)) {
+	          const idx = Number(last);
+	          if (Number.isFinite(idx) && idx >= 0 && idx < cur.length) cur.splice(idx, 1);
+	          return;
+	        }
+	        try { delete cur[last]; } catch {}
+	      }
+
+	      function routingEditorKind(value) {
+	        if (value === null) return "null";
+	        if (Array.isArray(value)) return "array";
+	        const t = typeof value;
+	        if (t === "string") return "string";
+	        if (t === "number") return "number";
+	        if (t === "boolean") return "boolean";
+	        if (t === "object") return "object";
+	        return "string";
+	      }
+
+	      function routingEditorCoerce(kind, raw) {
+	        if (kind === "null") return null;
+	        if (kind === "boolean") return raw === true || raw === "true";
+	        if (kind === "number") {
+	          const n = typeof raw === "number" ? raw : Number.parseFloat(String(raw));
+	          return Number.isFinite(n) ? n : 0;
+	        }
+	        if (kind === "array") return [];
+	        if (kind === "object") return {};
+	        return String(raw ?? "");
+	      }
+
+	      function looksLikeRoutingTargetString(path, value) {
+	        const s = textOf(value).trim();
+	        if (!s) return false;
+	        if (s.length > 320) return false;
+	        if (s.includes(" ")) return false;
+	        if (!s.includes(".")) return false;
+	        const root = routingEditorState.value || {};
+	        const parentPath = path.slice(0, -1);
+	        const parent = routingEditorGetByPath(root, parentPath);
+	        const parentKey = path.length >= 2 ? path[path.length - 2] : null;
+	        if (parentKey === "targets") return true;
+	        if (Array.isArray(parent) && path.length === 2 && typeof path[0] === "string") return true;
+	        return false;
+	      }
+
+	      function resolveTargetToProviderKeys(target) {
+	        const raw = textOf(target).trim();
+	        if (!raw) return [];
+	        const list = Array.isArray(UI.quotaProviders) ? UI.quotaProviders : [];
+	        const keys = list.map((p) => textOf(p && p.providerKey ? p.providerKey : "")).filter(Boolean);
+	        const known = new Set(keys);
+	        if (known.has(raw)) return [raw];
+	        const dot = raw.indexOf(".");
+	        if (dot <= 0) return [];
+	        const providerId = raw.slice(0, dot);
+	        const modelId = raw.slice(dot + 1);
+	        if (!providerId || !modelId) return [];
+	        const prefix = `${providerId}.`;
+	        const suffix = `.${modelId}`;
+	        const out = [];
+	        for (const k of keys) {
+	          if (k.startsWith(prefix) && k.endsWith(suffix)) out.push(k);
+	        }
+	        out.sort((a, b) => a.localeCompare(b));
+	        return out;
+	      }
+
+	      function getQuotaStateByProviderKey(providerKey) {
+	        const map = UI.quotaProviderMap instanceof Map ? UI.quotaProviderMap : null;
+	        if (map && map.has(providerKey)) return map.get(providerKey);
+	        const list = Array.isArray(UI.quotaProviders) ? UI.quotaProviders : [];
+	        return list.find((p) => textOf(p && p.providerKey ? p.providerKey : "") === providerKey) || null;
+	      }
+
+	      async function routingQuotaAction(kind, providerKey) {
+	        if (!providerKey) return;
+	        if (!UI.adminAuth || !UI.adminAuth.authenticated) {
+	          notifyUnauthorizedOnce("routing quota action");
+	          return;
+	        }
+	        try {
+	          if (kind === "recover") {
+	            await apiFetch(`/quota/providers/${encodeURIComponent(providerKey)}/recover`, { method: "POST" });
+	          } else if (kind === "disable") {
+	            const minutes = Number.parseFloat(textOf($("routingQuotaDurationSelect").value || "60"));
+	            if (!Number.isFinite(minutes) || minutes <= 0) throw new Error("Invalid minutes");
+	            const modeRaw = (textOf($("routingQuotaModeSelect").value) || "cooldown").trim().toLowerCase();
+	            const mode = modeRaw === "blacklist" ? "blacklist" : "cooldown";
+	            await apiFetch(`/quota/providers/${encodeURIComponent(providerKey)}/disable`, {
+	              method: "POST",
+	              body: JSON.stringify({ mode, durationMinutes: minutes })
+	            });
+	          } else {
+	            return;
+	          }
+	          await refreshRuntimes();
+	          routingEditorRender();
+	        } catch (e) {
+	          if (e && e.status === 401) notifyUnauthorizedOnce("routing quota action");
+	          toast(`Action failed: ${e && e.message ? e.message : String(e)}`);
+	        }
+	      }
+
+	      function routingEditorRenderTargetActions(target) {
+	        const providerKeys = resolveTargetToProviderKeys(target);
+	        if (!providerKeys.length) return null;
+
+	        const box = document.createElement("div");
+	        box.className = "routing-target-actions";
+
+	        for (const providerKey of providerKeys) {
+	          const row = document.createElement("div");
+	          row.className = "routing-target-row";
+
+	          const key = document.createElement("span");
+	          key.className = "routing-target-key mono";
+	          key.textContent = providerKey;
+
+	          const state = getQuotaStateByProviderKey(providerKey);
+	          const inPool = state ? Boolean(state.inPool) : null;
+	          const untilMs = state ? Math.max(Number(state.blacklistUntil || 0), Number(state.cooldownUntil || 0)) : 0;
+	          const meta = document.createElement("span");
+	          meta.className = "routing-target-meta";
+	          meta.textContent =
+	            inPool === null
+	              ? "unknown"
+	              : inPool
+	                ? "online"
+	                : untilMs
+	                  ? `offline ${formatEpochWithDelta(untilMs)}`
+	                  : "offline";
+
+	          const offBtn = document.createElement("button");
+	          offBtn.textContent = "Offline";
+	          offBtn.className = "danger";
+	          offBtn.addEventListener("click", (e) => {
+	            e.preventDefault();
+	            e.stopPropagation();
+	            void routingQuotaAction("disable", providerKey);
+	          });
+
+	          const recBtn = document.createElement("button");
+	          recBtn.textContent = "Recover";
+	          recBtn.addEventListener("click", (e) => {
+	            e.preventDefault();
+	            e.stopPropagation();
+	            void routingQuotaAction("recover", providerKey);
+	          });
+
+	          row.appendChild(key);
+	          row.appendChild(meta);
+	          row.appendChild(offBtn);
+	          row.appendChild(recBtn);
+	          box.appendChild(row);
+	        }
+
+	        return box;
+	      }
+
+	      function routingEditorRender() {
+	        const container = $("routingKvEditor");
+	        if (!container) return;
+	        try {
+	          container.replaceChildren();
+	        } catch {
+	          try { container.innerHTML = ""; } catch {}
+	        }
+	        try {
+	          container.appendChild(routingEditorRenderNode("routing", routingEditorState.value || {}, [], 0, true));
+	        } catch (e) {
+	          const msg = e && e.message ? e.message : String(e);
+	          try { container.textContent = `Render failed: ${msg}`; } catch {}
+	        }
+	      }
+
+	      function routingEditorRenderNode(label, value, path, depth, isRoot = false) {
+	        const isObj = value !== null && typeof value === "object";
+	        const isArr = Array.isArray(value);
+	        const kind = routingEditorKind(value);
+
+	        if (!isObj) {
+	          const row = document.createElement("div");
+	          row.className = "kv-leaf";
+
+	          const keyEl = document.createElement("div");
+	          keyEl.className = "kv-key";
+	          keyEl.textContent = label;
+
+	          const typeSel = document.createElement("select");
+	          typeSel.className = "kv-type";
+	          typeSel.innerHTML = [
+	            "<option value=\"string\">string</option>",
+	            "<option value=\"number\">number</option>",
+	            "<option value=\"boolean\">boolean</option>",
+	            "<option value=\"null\">null</option>",
+	            "<option value=\"object\">object</option>",
+	            "<option value=\"array\">array</option>"
+	          ].join("");
+	          typeSel.value = kind;
+	          typeSel.addEventListener("click", (e) => e.stopPropagation());
+	          typeSel.addEventListener("change", () => {
+	            const root = routingEditorState.value || {};
+	            routingEditorSetByPath(root, path, routingEditorCoerce(typeSel.value, ""));
+	            routingEditorSetDirty(true);
+	            routingEditorRender();
+	          });
+
+	          const valWrap = document.createElement("div");
+	          valWrap.className = "kv-val";
+
+	          if (kind === "boolean") {
+	            const sel = document.createElement("select");
+	            sel.innerHTML = `<option value="true">true</option><option value="false">false</option>`;
+	            sel.value = value ? "true" : "false";
+	            sel.addEventListener("click", (e) => e.stopPropagation());
+	            sel.addEventListener("change", () => {
+	              const root = routingEditorState.value || {};
+	              routingEditorSetByPath(root, path, sel.value === "true");
+	              routingEditorSetDirty(true);
+	              routingEditorRender();
+	            });
+	            valWrap.appendChild(sel);
+	          } else if (kind === "number") {
+	            const inp = document.createElement("input");
+	            inp.type = "number";
+	            inp.value = String(value);
+	            inp.addEventListener("click", (e) => e.stopPropagation());
+	            inp.addEventListener("change", () => {
+	              const root = routingEditorState.value || {};
+	              const n = Number.parseFloat(inp.value);
+	              routingEditorSetByPath(root, path, Number.isFinite(n) ? n : 0);
+	              routingEditorSetDirty(true);
+	              routingEditorRender();
+	            });
+	            valWrap.appendChild(inp);
+	          } else if (kind === "null") {
+	            const span = document.createElement("span");
+	            span.className = "mono";
+	            span.textContent = "null";
+	            valWrap.appendChild(span);
+	          } else {
+	            const inp = document.createElement("input");
+	            inp.type = "text";
+	            inp.value = value == null ? "" : String(value);
+	            inp.addEventListener("click", (e) => e.stopPropagation());
+	            inp.addEventListener("change", () => {
+	              const root = routingEditorState.value || {};
+	              routingEditorSetByPath(root, path, String(inp.value));
+	              routingEditorSetDirty(true);
+	              routingEditorRender();
+	            });
+	            valWrap.appendChild(inp);
+
+	            if (looksLikeRoutingTargetString(path, value)) {
+	              const widget = routingEditorRenderTargetActions(inp.value);
+	              if (widget) valWrap.appendChild(widget);
+	            }
+	          }
+
+	          const actions = document.createElement("div");
+	          actions.className = "kv-actions";
+	          if (!isRoot) {
+	            const del = document.createElement("button");
+	            del.textContent = "Del";
+	            del.className = "danger";
+	            del.addEventListener("click", (e) => {
+	              e.preventDefault();
+	              e.stopPropagation();
+	              const root = routingEditorState.value || {};
+	              routingEditorDeleteByPath(root, path);
+	              routingEditorSetDirty(true);
+	              routingEditorRender();
+	            });
+	            actions.appendChild(del);
+	          }
+	          const pathEl = document.createElement("span");
+	          pathEl.className = "kv-path mono";
+	          pathEl.textContent = routingEditorPathToString(path);
+	          actions.appendChild(pathEl);
+
+	          row.appendChild(keyEl);
+	          row.appendChild(typeSel);
+	          row.appendChild(valWrap);
+	          row.appendChild(actions);
+	          return row;
+	        }
+
+	        const details = document.createElement("details");
+	        details.open = isRoot || depth < 1;
+
+	        const summary = document.createElement("summary");
+
+	        const keyEl = document.createElement("div");
+	        keyEl.className = "kv-key";
+	        keyEl.textContent = label;
+
+	        const metaEl = document.createElement("div");
+	        metaEl.className = "kv-meta";
+	        metaEl.textContent = kvTypeMeta(value);
+
+	        const actions = document.createElement("div");
+	        actions.className = "kv-actions";
+
+	        if (isArr) {
+	          const add = document.createElement("button");
+	          add.textContent = "+Item";
+	          add.addEventListener("click", (e) => {
+	            e.preventDefault();
+	            e.stopPropagation();
+	            const t = (prompt("Item type: string/number/boolean/null/object/array", "string") || "string").trim().toLowerCase();
+	            const k = ["string","number","boolean","null","object","array"].includes(t) ? t : "string";
+	            let init = "";
+	            if (k === "boolean") init = prompt("Value: true/false", "false") || "false";
+	            else if (k === "number") init = prompt("Value (number)", "0") || "0";
+	            else if (k === "string") init = prompt("Value (string)", "") || "";
+	            const v = routingEditorCoerce(k, k === "boolean" ? init === "true" : init);
+	            const root = routingEditorState.value || {};
+	            const arr = routingEditorGetByPath(root, path);
+	            if (Array.isArray(arr)) {
+	              arr.push(v);
+	              routingEditorSetDirty(true);
+	              routingEditorRender();
+	            }
+	          });
+	          actions.appendChild(add);
+	        } else {
+	          const add = document.createElement("button");
+	          add.textContent = "+Key";
+	          add.addEventListener("click", (e) => {
+	            e.preventDefault();
+	            e.stopPropagation();
+	            const name = (prompt("Key name", "") || "").trim();
+	            if (!name) return;
+	            const t = (prompt("Value type: string/number/boolean/null/object/array", "string") || "string").trim().toLowerCase();
+	            const k = ["string","number","boolean","null","object","array"].includes(t) ? t : "string";
+	            let init = "";
+	            if (k === "boolean") init = prompt("Value: true/false", "false") || "false";
+	            else if (k === "number") init = prompt("Value (number)", "0") || "0";
+	            else if (k === "string") init = prompt("Value (string)", "") || "";
+	            const v = routingEditorCoerce(k, k === "boolean" ? init === "true" : init);
+	            const root = routingEditorState.value || {};
+	            const obj = routingEditorGetByPath(root, path);
+	            if (obj && typeof obj === "object" && !Array.isArray(obj)) {
+	              obj[name] = v;
+	              routingEditorSetDirty(true);
+	              routingEditorRender();
+	            }
+	          });
+	          actions.appendChild(add);
+	        }
+
+	        if (!isRoot) {
+	          const del = document.createElement("button");
+	          del.textContent = "Del";
+	          del.className = "danger";
+	          del.addEventListener("click", (e) => {
+	            e.preventDefault();
+	            e.stopPropagation();
+	            const root = routingEditorState.value || {};
+	            routingEditorDeleteByPath(root, path);
+	            routingEditorSetDirty(true);
+	            routingEditorRender();
+	          });
+	          actions.appendChild(del);
+	        }
+
+	        const pathEl = document.createElement("span");
+	        pathEl.className = "kv-path mono";
+	        pathEl.textContent = routingEditorPathToString(path);
+	        actions.appendChild(pathEl);
+
+	        summary.appendChild(keyEl);
+	        summary.appendChild(metaEl);
+	        summary.appendChild(actions);
+	        details.appendChild(summary);
+
+	        if (isArr) {
+	          for (let i = 0; i < value.length; i += 1) {
+	            details.appendChild(routingEditorRenderNode(String(i), value[i], path.concat([i]), depth + 1));
+	          }
+	          return details;
+	        }
+
+	        let keys = [];
+	        try {
+	          keys = Object.keys(value);
+	          keys.sort((a, b) => a.localeCompare(b));
+	        } catch {
+	          keys = [];
+	        }
+	        for (const childKey of keys) {
+	          details.appendChild(routingEditorRenderNode(childKey, value[childKey], path.concat([childKey]), depth + 1));
+	        }
+
+	        return details;
+	      }
 
 	      async function loadRouting() {
 	        setLog("routingOpLog", "");
-	        const reg = $("routingRegistry");
+	        const auth = UI.adminAuth ? UI.adminAuth : await refreshAdminAuthStatus();
+	        if (!auth || !auth.authenticated) {
+	          notifyUnauthorizedOnce("routing");
+	          return;
+	        }
 	        try {
 	          const selectedPath = textOf($("routingSourceSelect").value || "").trim();
 	          const query = selectedPath ? `?path=${encodeURIComponent(selectedPath)}` : "";
 	          const out = await apiFetch(`/config/routing${query}`);
 	          UI.routingLocation = out.location || "virtualrouter.routing";
-	          renderRegistry(reg, out.routing || {}, { rootLabel: UI.routingLocation });
-	          $("routingEditor").value = JSON.stringify(out.routing || {}, null, 2);
+	          routingEditorSetValue(out.routing || {});
 	          setLog("routingOpLog", `Loaded. Path: ${out.path || "—"}\nLocation: ${UI.routingLocation}`);
 	          toast("Routing loaded.", "ok");
 	        } catch (e) {
 	          if (e && e.status === 401) notifyUnauthorizedOnce("routing");
-	          renderRegistry(reg, { error: e && e.message ? e.message : String(e) }, { rootLabel: "routing" });
 	          setLog("routingOpLog", `Load failed: ${e.message}`);
 	          toast(`Load failed: ${e.message}`);
 	        }
@@ -2011,18 +2517,23 @@
 
 	      async function saveRouting() {
 	        setLog("routingOpLog", "");
+	        const auth = UI.adminAuth ? UI.adminAuth : await refreshAdminAuthStatus();
+	        if (!auth || !auth.authenticated) {
+	          notifyUnauthorizedOnce("routing save");
+	          return;
+	        }
 	        try {
 	          const selectedPath = textOf($("routingSourceSelect").value || "").trim();
 	          const query = selectedPath ? `?path=${encodeURIComponent(selectedPath)}` : "";
-	          const routing = JSON.parse($("routingEditor").value || "{}");
+	          const routing = routingEditorGetValue() || {};
 	          const out = await apiFetch(`/config/routing${query}`, {
 	            method: "PUT",
 	            body: JSON.stringify({ routing, location: UI.routingLocation, path: selectedPath || undefined })
 	          });
 	          UI.routingLocation = out.location || UI.routingLocation;
-	          renderRegistry($("routingRegistry"), routing || {}, { rootLabel: UI.routingLocation });
 	          setLog("routingOpLog", `Saved. Path: ${out.path || "—"}\nLocation: ${UI.routingLocation}\nRestart required to apply.`);
 	          toast("Routing saved.", "ok");
+	          routingEditorSetDirty(false);
 	        } catch (e) {
 	          if (e && e.status === 401) notifyUnauthorizedOnce("routing save");
 	          setLog("routingOpLog", `Save failed: ${e.message}`);
@@ -2072,7 +2583,10 @@
 	        try {
 	          const [items, quota] = await Promise.all([apiFetch("/providers/runtimes"), apiFetch("/quota/providers")]);
 	          const quotaProviders = quota && Array.isArray(quota.providers) ? quota.providers : [];
+	          UI.quotaProviders = quotaProviders;
+	          UI.quotaProvidersUpdatedAt = Date.now();
 	          const quotaMap = new Map(quotaProviders.map((q) => [textOf(q.providerKey), q]));
+	          UI.quotaProviderMap = quotaMap;
 	          const grouped = {};
 	          for (const r of items || []) {
 	            const k = textOf(r && r.providerKey ? r.providerKey : "") || "unknown";
@@ -2177,12 +2691,12 @@
         return `${formatEpochMs(ms)} (${tail})`;
       }
 
-      function pill(text, kind) {
-        const span = document.createElement("span");
-        span.className = `pill ${kind || ""}`.trim();
-        span.textContent = textOf(text);
-        return span;
-      }
+	      function pill(text, kind) {
+	        const span = document.createElement("span");
+	        span.className = `pill ${kind || ""}`.trim();
+	        span.textContent = textOf(text);
+	        return span;
+	      }
 
       function extractRoutingTargets(routing) {
         const out = new Set();
@@ -2925,17 +3439,8 @@
       $("saveRoutingBtn").addEventListener("click", saveRouting);
       $("refreshRoutingSourcesBtn").addEventListener("click", refreshRoutingSources);
       $("routingSourceSelect").addEventListener("change", loadRouting);
-      $("routingRegPreviewBtn").addEventListener("click", () => {
-        try {
-          const routing = JSON.parse($("routingEditor").value || "{}");
-          renderRegistry($("routingRegistry"), routing || {}, { rootLabel: UI.routingLocation || "routing" });
-          toast("Routing preview updated.", "ok");
-        } catch (e) {
-          toast(`Preview failed: ${e && e.message ? e.message : String(e)}`);
-        }
-      });
-      $("routingRegExpandBtn").addEventListener("click", () => setAllDetailsOpen($("routingRegistry"), true));
-      $("routingRegCollapseBtn").addEventListener("click", () => setAllDetailsOpen($("routingRegistry"), false));
+      $("routingRegExpandBtn").addEventListener("click", () => setAllDetailsOpen($("routingKvEditor"), true));
+      $("routingRegCollapseBtn").addEventListener("click", () => setAllDetailsOpen($("routingKvEditor"), false));
       $("refreshRuntimesBtn").addEventListener("click", refreshRuntimes);
       $("runtimesRegExpandBtn").addEventListener("click", () => setAllDetailsOpen($("runtimesRegistry"), true));
       $("runtimesRegCollapseBtn").addEventListener("click", () => setAllDetailsOpen($("runtimesRegistry"), false));
