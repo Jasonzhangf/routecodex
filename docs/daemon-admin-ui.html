@@ -222,6 +222,23 @@
         text-overflow: unset;
       }
 
+      #routingKvEditor.kv-editor .kv-actions .kv-path {
+        display: none;
+      }
+
+      body.show-routing-paths #routingKvEditor.kv-editor .kv-actions .kv-path {
+        display: inline-flex;
+      }
+
+      #routingKvEditor.kv-editor .kv-actions button.danger {
+        display: none;
+      }
+
+      #routingKvEditor.kv-editor .kv-leaf:hover .kv-actions button.danger,
+      #routingKvEditor.kv-editor summary:hover .kv-actions button.danger {
+        display: inline-flex;
+      }
+
       #routingKvEditor .routing-target-actions {
         margin-top: 6px;
         display: flex;
@@ -357,6 +374,10 @@
 
       .grid.grid-wide-right {
         grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr);
+      }
+
+      .grid.grid-one {
+        grid-template-columns: minmax(0, 1fr);
       }
 
       /* Ensure grid children can shrink without overflowing into the next column */
@@ -982,7 +1003,7 @@
         </section>
 
 	        <section id="panelRouting" data-panel="routing" style="display:none;">
-	          <div class="grid grid-wide-left">
+	          <div class="grid grid-one">
 	            <div class="card" style="box-shadow:none;">
 	              <p class="section-title">Routing editor</p>
 	              <p class="section-sub">
@@ -1014,8 +1035,10 @@
 	              <div class="row" style="margin-bottom: 10px;">
 	                <button id="loadRoutingBtn" class="primary">Load</button>
 	                <button id="saveRoutingBtn" class="primary">Save</button>
+                  <button id="refreshRoutingPoolBtn">Refresh pool status</button>
 	                <button id="routingRegExpandBtn">Expand all</button>
 	                <button id="routingRegCollapseBtn">Collapse all</button>
+                  <label style="margin-left:auto;"><input id="routingShowPathsToggle" type="checkbox" /> show debug paths</label>
 	              </div>
 	              <div id="routingOpLog" class="log" style="margin-top: 10px; display:none;"></div>
 	              <div class="muted" style="font-size:12px; margin: -4px 0 10px;">
@@ -1023,41 +1046,6 @@
 	              </div>
 	              <div id="routingKvEditor" class="kv kv-editor"></div>
 	            </div>
-
-	            <div class="card" style="box-shadow:none;">
-	              <p class="section-title">Runtime providers</p>
-	              <p class="section-sub">
-	                What the running process currently has loaded (restart required after edits).
-	              </p>
-	              <div class="row" style="margin-bottom: 10px;">
-	                <button id="refreshRuntimesBtn" class="primary">Refresh</button>
-	              </div>
-	              <div class="table-wrap">
-	                <table class="table table-runtime">
-	                  <thead>
-	                    <tr>
-                      <th>providerKey</th>
-                      <th>runtimeKey</th>
-	                      <th>family</th>
-	                      <th>protocol</th>
-	                      <th>series</th>
-	                      <th>inPool</th>
-	                      <th>until</th>
-	                      <th></th>
-	                    </tr>
-	                  </thead>
-	                  <tbody id="runtimesTbody"></tbody>
-	                </table>
-	              </div>
-
-              <p class="section-title" style="margin-top: 12px;">Runtime providers registry</p>
-              <p class="section-sub">Key/value view of loaded runtime providers.</p>
-              <div class="kv-tools">
-                <button id="runtimesRegExpandBtn">Expand all</button>
-                <button id="runtimesRegCollapseBtn">Collapse all</button>
-              </div>
-              <div id="runtimesRegistry" class="kv"></div>
-            </div>
           </div>
         </section>
       </div>
@@ -2576,88 +2564,15 @@
 	      }
 
 	      async function refreshRuntimes() {
-	        const body = $("runtimesTbody");
-	        body.replaceChildren();
-	        const reg = $("runtimesRegistry");
-	        if (reg) reg.replaceChildren();
 	        try {
-	          const [items, quota] = await Promise.all([apiFetch("/providers/runtimes"), apiFetch("/quota/providers")]);
+	          const quota = await apiFetch("/quota/providers");
 	          const quotaProviders = quota && Array.isArray(quota.providers) ? quota.providers : [];
 	          UI.quotaProviders = quotaProviders;
 	          UI.quotaProvidersUpdatedAt = Date.now();
-	          const quotaMap = new Map(quotaProviders.map((q) => [textOf(q.providerKey), q]));
-	          UI.quotaProviderMap = quotaMap;
-	          const grouped = {};
-	          for (const r of items || []) {
-	            const k = textOf(r && r.providerKey ? r.providerKey : "") || "unknown";
-	            if (!grouped[k]) grouped[k] = [];
-	            grouped[k].push(r);
-	          }
-	          renderRegistry(reg, grouped, { rootLabel: "runtime.providers" });
-	          for (const r of items || []) {
-	            const tr = document.createElement("tr");
-	            const providerKey = textOf(r.providerKey || "");
-	            const quotaState = quotaMap.get(providerKey) || null;
-	            const inPool = quotaState ? Boolean(quotaState.inPool) : null;
-	            const untilMs = quotaState
-	              ? Math.max(Number(quotaState.blacklistUntil || 0), Number(quotaState.cooldownUntil || 0))
-	              : 0;
-	            tr.appendChild(createCell("td", r.providerKey || "", "mono truncate", { title: true }));
-	            tr.appendChild(createCell("td", r.runtimeKey || "", "mono truncate", { title: true }));
-	            tr.appendChild(createCell("td", r.family || "", ""));
-	            tr.appendChild(createCell("td", r.protocol || "", ""));
-	            tr.appendChild(createCell("td", r.series || "", ""));
-	            tr.appendChild(createCell("td", inPool === null ? "—" : inPool ? "yes" : "no", inPool ? "ok" : "err"));
-	            tr.appendChild(createCell("td", untilMs ? formatEpochMs(untilMs) : "—", "mono"));
-	            const actions = document.createElement("td");
-	            actions.style.whiteSpace = "nowrap";
-	            const offBtn = document.createElement("button");
-	            offBtn.textContent = "Offline";
-	            offBtn.className = "danger";
-	            offBtn.addEventListener("click", async () => {
-	              const minutes = Number.parseFloat(textOf($("routingQuotaDurationSelect").value || "60"));
-	              if (!Number.isFinite(minutes) || minutes <= 0) {
-	                toast("Invalid offline time");
-	                return;
-	              }
-	              const modeRaw = (textOf($("routingQuotaModeSelect").value) || "cooldown").trim().toLowerCase();
-	              const mode = modeRaw === "blacklist" ? "blacklist" : "cooldown";
-	              try {
-	                await apiFetch(`/quota/providers/${encodeURIComponent(providerKey)}/disable`, {
-	                  method: "POST",
-	                  body: JSON.stringify({ mode, durationMinutes: minutes })
-	                });
-	                await refreshRuntimes();
-	                await refreshQuota();
-	                toast("Offline applied.", "ok");
-	              } catch (e) {
-	                if (e && e.status === 401) notifyUnauthorizedOnce("runtime offline");
-	                toast(`Offline failed: ${e && e.message ? e.message : String(e)}`);
-	              }
-	            });
-	            const recBtn = document.createElement("button");
-	            recBtn.textContent = "Recover";
-	            recBtn.addEventListener("click", async () => {
-	              try {
-	                await apiFetch(`/quota/providers/${encodeURIComponent(providerKey)}/recover`, { method: "POST" });
-	                await refreshRuntimes();
-	                await refreshQuota();
-	                toast("Recovered.", "ok");
-	              } catch (e) {
-	                if (e && e.status === 401) notifyUnauthorizedOnce("runtime recover");
-	                toast(`Recover failed: ${e && e.message ? e.message : String(e)}`);
-	              }
-	            });
-	            actions.appendChild(offBtn);
-	            actions.appendChild(document.createTextNode(" "));
-	            actions.appendChild(recBtn);
-	            tr.appendChild(actions);
-	            body.appendChild(tr);
-	          }
+	          UI.quotaProviderMap = new Map(quotaProviders.map((q) => [textOf(q.providerKey), q]));
 	        } catch (e) {
-	          if (e && e.status === 401) notifyUnauthorizedOnce("runtimes");
-	          renderRegistry(reg, { error: e && e.message ? e.message : String(e) }, { rootLabel: "runtime.providers" });
-	          body.appendChild(createErrorRow(8, e && e.message ? e.message : e));
+	          if (e && e.status === 401) notifyUnauthorizedOnce("pool status");
+	          throw e;
 	        }
 	      }
 
@@ -3441,9 +3356,19 @@
       $("routingSourceSelect").addEventListener("change", loadRouting);
       $("routingRegExpandBtn").addEventListener("click", () => setAllDetailsOpen($("routingKvEditor"), true));
       $("routingRegCollapseBtn").addEventListener("click", () => setAllDetailsOpen($("routingKvEditor"), false));
-      $("refreshRuntimesBtn").addEventListener("click", refreshRuntimes);
-      $("runtimesRegExpandBtn").addEventListener("click", () => setAllDetailsOpen($("runtimesRegistry"), true));
-      $("runtimesRegCollapseBtn").addEventListener("click", () => setAllDetailsOpen($("runtimesRegistry"), false));
+      $("refreshRoutingPoolBtn").addEventListener("click", async () => {
+        try {
+          await refreshRuntimes();
+          toast("Pool status refreshed.", "ok");
+        } catch (e) {
+          toast(`Refresh failed: ${e && e.message ? e.message : String(e)}`);
+        }
+      });
+      $("routingShowPathsToggle").addEventListener("change", () => {
+        try {
+          document.body.classList.toggle("show-routing-paths", Boolean($("routingShowPathsToggle").checked));
+        } catch {}
+      });
 
       // Init
       (async () => {
