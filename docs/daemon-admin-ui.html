@@ -314,6 +314,10 @@
         grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
       }
 
+      .grid.grid-wide-right {
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr);
+      }
+
       /* Ensure grid children can shrink without overflowing into the next column */
       .grid > .card {
         min-width: 0;
@@ -358,6 +362,39 @@
         color: var(--muted);
         font-weight: 600;
         background: rgba(255, 255, 255, 0.03);
+      }
+
+      .table.table-runtime th:nth-child(1),
+      .table.table-runtime td:nth-child(1) {
+        width: 22%;
+      }
+      .table.table-runtime th:nth-child(2),
+      .table.table-runtime td:nth-child(2) {
+        width: 19%;
+      }
+      .table.table-runtime th:nth-child(3),
+      .table.table-runtime td:nth-child(3) {
+        width: 9%;
+      }
+      .table.table-runtime th:nth-child(4),
+      .table.table-runtime td:nth-child(4) {
+        width: 12%;
+      }
+      .table.table-runtime th:nth-child(5),
+      .table.table-runtime td:nth-child(5) {
+        width: 12%;
+      }
+      .table.table-runtime th:nth-child(6),
+      .table.table-runtime td:nth-child(6) {
+        width: 7%;
+      }
+      .table.table-runtime th:nth-child(7),
+      .table.table-runtime td:nth-child(7) {
+        width: 11%;
+      }
+      .table.table-runtime th:nth-child(8),
+      .table.table-runtime td:nth-child(8) {
+        width: 8%;
       }
 
       .table tr.group-row td {
@@ -904,7 +941,7 @@
         </section>
 
 	        <section id="panelRouting" data-panel="routing" style="display:none;">
-	          <div class="grid">
+	          <div class="grid grid-wide-right">
 	            <div class="card" style="box-shadow:none;">
 	              <p class="section-title">Routing editor</p>
 	              <p class="section-sub">
@@ -958,10 +995,10 @@
 	              <div class="row" style="margin-bottom: 10px;">
 	                <button id="refreshRuntimesBtn" class="primary">Refresh</button>
 	              </div>
-              <div class="table-wrap">
-                <table class="table">
-                  <thead>
-                    <tr>
+	              <div class="table-wrap">
+	                <table class="table table-runtime">
+	                  <thead>
+	                    <tr>
                       <th>providerKey</th>
                       <th>runtimeKey</th>
 	                      <th>family</th>
@@ -2692,6 +2729,8 @@
           await refreshQuota();
           await refreshQuotaSnapshot();
           await refreshRuntimes();
+          await refreshRoutingSources();
+          await loadRouting();
         } catch (e) {
           const msg = e && e.message ? e.message : String(e);
           $("adminAuthHint").textContent = msg;
@@ -2714,6 +2753,8 @@
           await refreshCredentials();
           await refreshQuota();
           await refreshRuntimes();
+          await refreshRoutingSources();
+          await loadRouting();
         } catch (e) {
           const msg = e && e.message ? e.message : String(e);
           $("adminAuthHint").textContent = msg;
@@ -2901,7 +2942,7 @@
 
       // Init
       (async () => {
-        await refreshAdminAuthStatus();
+        const auth = await refreshAdminAuthStatus();
         const savedKey = getApiKey();
         if (savedKey) {
           $("apiKeyHint").textContent = "saved (session only)";
@@ -2912,8 +2953,10 @@
         await refreshCredentials();
         await refreshQuota();
         await refreshRuntimes();
-        await refreshRoutingSources();
-        await loadRouting();
+        if (auth && auth.authenticated) {
+          await refreshRoutingSources();
+          await loadRouting();
+        }
         await loadSettings();
       })();
     </script>
