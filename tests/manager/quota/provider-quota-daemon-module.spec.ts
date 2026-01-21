@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { ProviderQuotaDaemonModule } from '../../../src/manager/modules/quota/index.js';
+import { createInitialQuotaState } from '../../../src/manager/quota/provider-quota-center.js';
 import { getProviderErrorCenter } from '../../../src/modules/llmswitch/bridge.js';
 
 function setEnv(name: string, value: string | undefined): () => void {
@@ -94,6 +95,58 @@ describe('ProviderQuotaDaemonModule', () => {
     expect(entry?.inPool).toBe(true);
 
     await mod.stop();
+  });
+
+  it('canonicalizes legacy sequence-prefixed antigravity alias keys (1-foo -> foo)', async () => {
+    const now = Date.now();
+    const legacyKey = 'antigravity.1-geetasamodgeetasamoda.claude-sonnet-4-5-thinking';
+    const canonicalKey = 'antigravity.geetasamodgeetasamoda.claude-sonnet-4-5-thinking';
+
+    const legacyState = {
+      ...createInitialQuotaState(legacyKey, { authType: 'oauth' }, now),
+      inPool: false,
+      reason: 'cooldown',
+      cooldownUntil: now + 60_000,
+      consecutiveErrorCount: 3,
+      lastErrorSeries: 'E429'
+    } as any;
+
+    const canonicalState = {
+      ...createInitialQuotaState(canonicalKey, { authType: 'oauth' }, now),
+      inPool: true,
+      reason: 'ok',
+      cooldownUntil: null,
+      consecutiveErrorCount: 0,
+      lastErrorSeries: null
+    } as any;
+
+    const filePath = path.join(tempQuotaDir!, 'provider-quota.json');
+    await fs.writeFile(
+      filePath,
+      `${JSON.stringify({ version: 1, updatedAt: new Date(now).toISOString(), providers: { [legacyKey]: legacyState, [canonicalKey]: canonicalState } }, null, 2)}\n`,
+      'utf8'
+    );
+
+    const mod = new ProviderQuotaDaemonModule();
+    await mod.init({ serverId: 'test' });
+
+    const admin = mod.getAdminSnapshot();
+    expect(admin[legacyKey]).toBeUndefined();
+    expect(admin[canonicalKey]).toBeDefined();
+    expect(admin[canonicalKey].inPool).toBe(false);
+    expect(admin[canonicalKey].reason).toBe('cooldown');
+    expect(admin[canonicalKey].cooldownUntil).toBe(now + 60_000);
+
+    const view = mod.getQuotaView();
+    expect(view).not.toBeNull();
+    const viaLegacy = view!(legacyKey);
+    const viaCanonical = view!(canonicalKey);
+    expect(viaLegacy?.providerKey).toBe(canonicalKey);
+    expect(viaCanonical?.providerKey).toBe(canonicalKey);
+
+    const persisted = JSON.parse(await fs.readFile(filePath, 'utf8'));
+    expect(persisted.providers[legacyKey]).toBeUndefined();
+    expect(persisted.providers[canonicalKey]).toBeDefined();
   });
 
   it('does not let QUOTA_RECOVERY override capacity cooldown windows', async () => {
@@ -255,7 +308,7 @@ describe('ProviderQuotaDaemonModule', () => {
     expect(state.blacklistUntil).toBeNull();
     expect(state.cooldownUntil).toBe(baseNow + 2_000 + 5 * 60_000);
 
-    await jest.advanceTimersByTimeAsync(5 * 60_000 + 5);
+    await jest.advanceTimersByTimeAsync(5 * 60_000 + 2_000 + 5);
     const view = mod.getQuotaView();
     const entry = view?.('tab.default.gpt-5.1');
     expect(entry?.inPool).toBe(true);
@@ -302,7 +355,7 @@ describe('ProviderQuotaDaemonModule', () => {
     expect(state.cooldownUntil).toBe(baseNow + (eventCount - 1) * 1000 + 3 * 60 * 60_000);
 
     // After cooldown expiry, it should re-enter the pool and reset its streak.
-    await jest.advanceTimersByTimeAsync(3 * 60 * 60_000 + 5);
+    await jest.advanceTimersByTimeAsync(3 * 60 * 60_000 + (eventCount - 1) * 1000 + 5);
     const view = mod.getQuotaView();
     const entry = view?.('tab.default.gpt-5.1');
     expect(entry?.inPool).toBe(true);

@@ -68,6 +68,7 @@ describe('RouteCodexHttpServer quotaView injection', () => {
       extractSessionIdentifiersFromMetadata: () => ({}),
       loadRoutingInstructionStateSync: () => null,
       saveRoutingInstructionStateAsync: () => {},
+      saveRoutingInstructionStateSync: () => {},
       getProviderErrorCenter: async () => ({
         emit: () => {},
         subscribe: () => () => {}
@@ -150,6 +151,7 @@ describe('RouteCodexHttpServer quotaView injection', () => {
       extractSessionIdentifiersFromMetadata: () => ({}),
       loadRoutingInstructionStateSync: () => null,
       saveRoutingInstructionStateAsync: () => {},
+      saveRoutingInstructionStateSync: () => {},
       getProviderErrorCenter: async () => ({
         emit: () => {},
         subscribe: () => () => {}
@@ -237,6 +239,7 @@ describe('RouteCodexHttpServer quotaView injection', () => {
       extractSessionIdentifiersFromMetadata: () => ({}),
       loadRoutingInstructionStateSync: () => null,
       saveRoutingInstructionStateAsync: () => {},
+      saveRoutingInstructionStateSync: () => {},
       getProviderErrorCenter: async () => ({
         emit: () => {},
         subscribe: () => () => {}

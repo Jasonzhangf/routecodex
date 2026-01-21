@@ -1,11 +1,16 @@
 import type { ManagerContext, ManagerModule } from '../../types.js';
-import { loadRoutingInstructionStateSync, saveRoutingInstructionStateAsync } from '../../../modules/llmswitch/bridge.js';
+import {
+  loadRoutingInstructionStateSync,
+  saveRoutingInstructionStateAsync,
+  saveRoutingInstructionStateSync
+} from '../../../modules/llmswitch/bridge.js';
 
 type RoutingInstructionState = unknown;
 
 export interface RoutingInstructionStateStore {
   loadSync(key: string): RoutingInstructionState | null;
   saveAsync(key: string, state: RoutingInstructionState | null): void;
+  saveSync?(key: string, state: RoutingInstructionState | null): void;
 }
 
 export class RoutingStateManagerModule implements ManagerModule {
@@ -42,7 +47,10 @@ export class RoutingStateManagerModule implements ManagerModule {
       loadSync: (key: string) => loadRoutingInstructionStateSync(key) as RoutingInstructionState | null,
       saveAsync: (key: string, state: RoutingInstructionState | null) => {
         saveRoutingInstructionStateAsync(key, state as RoutingInstructionState | null);
-      }
+      },
+      saveSync: (key: string, state: RoutingInstructionState | null) => {
+        saveRoutingInstructionStateSync(key, state as RoutingInstructionState | null);
+      },
     };
   }
 

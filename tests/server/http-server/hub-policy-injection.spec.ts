@@ -56,6 +56,7 @@ describe('RouteCodexHttpServer hub policy injection', () => {
       extractSessionIdentifiersFromMetadata: () => ({}),
       loadRoutingInstructionStateSync: () => null,
       saveRoutingInstructionStateAsync: () => {},
+      saveRoutingInstructionStateSync: () => {},
       getProviderErrorCenter: async () => ({
         emit: () => {},
         subscribe: () => () => {}
@@ -125,6 +126,7 @@ describe('RouteCodexHttpServer hub policy injection', () => {
       extractSessionIdentifiersFromMetadata: () => ({}),
       loadRoutingInstructionStateSync: () => null,
       saveRoutingInstructionStateAsync: () => {},
+      saveRoutingInstructionStateSync: () => {},
       getProviderErrorCenter: async () => ({
         emit: () => {},
         subscribe: () => () => {}
@@ -195,6 +197,7 @@ describe('RouteCodexHttpServer hub policy injection', () => {
       extractSessionIdentifiersFromMetadata: () => ({}),
       loadRoutingInstructionStateSync: () => null,
       saveRoutingInstructionStateAsync: () => {},
+      saveRoutingInstructionStateSync: () => {},
       getProviderErrorCenter: async () => ({
         emit: () => {},
         subscribe: () => () => {}

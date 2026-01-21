@@ -415,6 +415,7 @@ export async function getProviderErrorCenter(): Promise<ProviderErrorCenterExpor
 type StickySessionStoreExports = {
   loadRoutingInstructionStateSync?: (key: string) => unknown | null;
   saveRoutingInstructionStateAsync?: (key: string, state: unknown | null) => void;
+  saveRoutingInstructionStateSync?: (key: string, state: unknown | null) => void;
 };
 
 let cachedStickySessionStore: StickySessionStoreExports | null | undefined = undefined;
@@ -445,6 +446,15 @@ export function loadRoutingInstructionStateSync(key: string): unknown | null {
 export function saveRoutingInstructionStateAsync(key: string, state: unknown | null): void {
   const mod = getStickySessionStoreExports();
   const fn = mod?.saveRoutingInstructionStateAsync;
+  if (typeof fn !== 'function') {
+    return;
+  }
+  fn(key, state);
+}
+
+export function saveRoutingInstructionStateSync(key: string, state: unknown | null): void {
+  const mod = getStickySessionStoreExports();
+  const fn = mod?.saveRoutingInstructionStateSync;
   if (typeof fn !== 'function') {
     return;
   }

@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import process from 'node:process';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 if (String(process.env.ROUTECODEX_VERIFY_SKIP || '').trim() === '1') {
@@ -12,11 +13,14 @@ if (String(process.env.ROUTECODEX_VERIFY_SKIP || '').trim() === '1') {
 
 const VERIFY_PORT = process.env.ROUTECODEX_VERIFY_PORT || '5580';
 const VERIFY_BASE = process.env.ROUTECODEX_VERIFY_BASE_URL || `http://127.0.0.1:${VERIFY_PORT}`;
-const VERIFY_CONFIG =
-  process.env.ROUTECODEX_VERIFY_CONFIG ||
-  process.env.ROUTECODEX_CONFIG_PATH ||
-  `${process.env.HOME || ''}/.routecodex/config.json`;
-const GEMINI_CLI_CONFIG = process.env.ROUTECODEX_VERIFY_GEMINI_CLI_CONFIG || '/Users/fanzhang/.routecodex/provider/gemini-cli/config.v1.json';
+const EXPLICIT_VERIFY_CONFIG = String(
+  process.env.ROUTECODEX_VERIFY_CONFIG || process.env.ROUTECODEX_CONFIG_PATH || ''
+).trim();
+const DEFAULT_USER_CONFIG = `${process.env.HOME || ''}/.routecodex/config.json`;
+const USE_USER_CONFIG = String(process.env.ROUTECODEX_VERIFY_USE_USER_CONFIG || '').trim() === '1';
+const GEMINI_CLI_CONFIG =
+  process.env.ROUTECODEX_VERIFY_GEMINI_CLI_CONFIG ||
+  `${process.env.HOME || ''}/.routecodex/provider/gemini-cli/config.v1.json`;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_AGENTS_PATH = path.resolve(__dirname, '..', 'AGENTS.md');
@@ -48,21 +52,27 @@ function buildAuthHeaders(serverApiKey) {
 }
 
 async function main() {
-  if (!VERIFY_CONFIG) {
-    console.error('❌ ROUTECODEX_VERIFY_CONFIG 未设置，无法运行端到端校验');
+  const resolved = resolveVerifyConfig();
+  if (!resolved?.configPath) {
+    console.error('❌ verify config 未设置，无法运行端到端校验');
     process.exit(1);
   }
 
-  console.log(`[verify:e2e-toolcall] 使用配置: ${VERIFY_CONFIG}`);
-  const serverApiKey = readServerApiKeyFromConfig(VERIFY_CONFIG);
+  console.log(`[verify:e2e-toolcall] 使用配置: ${resolved.configPath}`);
+  const serverApiKey = readServerApiKeyFromConfig(resolved.configPath);
   const authHeaders = buildAuthHeaders(serverApiKey);
   const serverEnv = {
     ...process.env,
-    ROUTECODEX_CONFIG_PATH: VERIFY_CONFIG,
+    ROUTECODEX_CONFIG_PATH: resolved.configPath,
     ROUTECODEX_PORT: VERIFY_PORT,
     ROUTECODEX_V2_HOOKS: '0',
     RCC_V2_HOOKS: '0'
   };
+  if (resolved.mode === 'mock') {
+    serverEnv.ROUTECODEX_USE_MOCK = '1';
+    serverEnv.ROUTECODEX_MOCK_CONFIG_PATH = resolved.configPath;
+    serverEnv.ROUTECODEX_MOCK_VALIDATE_NAMES = '1';
+  }
 
   const server = spawn('node', ['dist/index.js'], {
     env: serverEnv,
@@ -82,7 +92,7 @@ async function main() {
     await waitForServer();
     await waitForRouterWarmup();
     await runModelsSmokeCheck(authHeaders);
-    await runToolcallVerification(authHeaders);
+    await runToolcallVerification(authHeaders, resolved.defaultModel, resolved.mode);
     console.log('✅ 端到端工具调用校验通过');
 
     await runDaemonAdminSmokeCheck(authHeaders);
@@ -92,7 +102,59 @@ async function main() {
     await runGeminiCliStartupCheck();
   } finally {
     shutdown();
+    if (resolved.tempDir) {
+      try {
+        fs.rmSync(resolved.tempDir, { recursive: true, force: true });
+      } catch {
+        // ignore cleanup failure
+      }
+    }
   }
+}
+
+function resolveVerifyConfig() {
+  if (EXPLICIT_VERIFY_CONFIG) {
+    return { configPath: EXPLICIT_VERIFY_CONFIG, defaultModel: 'glm-4.6', mode: 'user', tempDir: null };
+  }
+  if (USE_USER_CONFIG) {
+    return { configPath: DEFAULT_USER_CONFIG, defaultModel: 'glm-4.6', mode: 'user', tempDir: null };
+  }
+  return writeTempMockVerifyConfig();
+}
+
+function writeTempMockVerifyConfig() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-verify-mock-'));
+  const file = path.join(dir, 'config.json');
+  const port = Number.parseInt(String(VERIFY_PORT), 10) || 5580;
+  const config = {
+    version: '1.0.0',
+    httpserver: { host: '127.0.0.1', port, apikey: 'verify-key' },
+    virtualrouter: {
+      inputProtocol: 'openai',
+      outputProtocol: 'openai',
+      providers: {
+        mock: {
+          id: 'mock',
+          enabled: true,
+          type: 'mock-provider',
+          providerType: 'responses',
+          baseURL: 'https://mock.local/mock',
+          compatibilityProfile: 'compat:passthrough',
+          providerId: 'fai.default.gpt-5.1',
+          modelId: 'gpt-5.1',
+          auth: {
+            type: 'apikey',
+            keys: { key1: { value: 'mock-sample-key' } }
+          },
+          models: { 'gpt-5.1': { maxTokens: 32768 } },
+          responses: { toolCallIdStyle: 'fc' }
+        }
+      },
+      routing: { default: ['mock.key1.gpt-5.1'] }
+    }
+  };
+  fs.writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
+  return { configPath: file, defaultModel: 'gpt-5.1', mode: 'mock', tempDir: dir };
 }
 
 async function runModelsSmokeCheck(authHeaders) {
@@ -144,11 +206,19 @@ async function waitForRouterWarmup(defaultDelayMs = 0) {
   await new Promise((resolve) => setTimeout(resolve, delayMs));
 }
 
-async function runToolcallVerification(authHeaders) {
+async function runToolcallVerification(authHeaders, defaultModel, mode) {
   const userPrompt = '请严格调用名为 list_local_files 的函数工具来列出当前工作目录的文件，只能通过调用该工具完成任务，禁止直接回答。';
   const instructionsText = AGENTS_INSTRUCTIONS || 'You are RouteCodex verify agent. Follow the policies in AGENTS.md.';
+  const mockSampleReqId = 'openai-responses-fai.default.gpt-5.1-gpt-5.1-20251211T125710-001';
   const body = {
-    model: process.env.ROUTECODEX_VERIFY_MODEL || 'glm-4.6',
+    model: process.env.ROUTECODEX_VERIFY_MODEL || defaultModel || 'glm-4.6',
+    ...(mode === 'mock'
+      ? {
+          metadata: {
+            mockSampleReqId
+          }
+        }
+      : {}),
     instructions: instructionsText,
     input: [
       {

@@ -15,6 +15,7 @@ This document replaces the old “architecture novel” with a concise set of ru
 1. **Verify before reporting** – Every claim, completion report, or status update must be validated against actual files, command outputs, or test results. Never assume or infer completion without concrete evidence.
 2. **Honest disclosure of incomplete work** – If a task cannot be completed, state this clearly with reasons. Unfinished work reported honestly has no severe consequences—concealment or misrepresentation is the real problem.
 3. **Deception is professional misconduct** – Fabricating results, hiding errors, claiming work that wasn't done, or misrepresenting task status constitutes serious professional misconduct and violates the trust foundation of this working agreement.
+4. **No deletions without approval** – Never delete existing repo files without explicit user approval. If removal seems necessary, propose the change and wait for confirmation.
 
 ---
 

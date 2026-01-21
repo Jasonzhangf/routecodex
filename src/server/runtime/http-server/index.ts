@@ -68,6 +68,7 @@ import { HealthManagerModule } from '../../../manager/modules/health/index.js';
 import { RoutingStateManagerModule } from '../../../manager/modules/routing/index.js';
 import { TokenManagerModule } from '../../../manager/modules/token/index.js';
 import type { ProviderQuotaDaemonModule } from '../../../manager/modules/quota/index.js';
+import { ensureServerScopedSessionDir } from './session-dir.js';
 import { StatsManager, type UsageMetrics } from './stats-manager.js';
 import { loadRouteCodexConfig } from '../../../config/routecodex-config-loader.js';
 import { buildInfo } from '../../../build-info.js';
@@ -141,6 +142,8 @@ export class RouteCodexHttpServer {
     this.errorHandling = new QuietErrorHandlingCenter();
     this.stageLoggingEnabled = isStageLoggingEnabled();
     this.repoRoot = resolveRepoRoot(import.meta.url);
+    // Ensure session-scoped routing state does not leak across server instances.
+    ensureServerScopedSessionDir(`${this.config.server.host}:${this.config.server.port}`);
 
     try {
       this.pipelineLogger = new PipelineDebugLoggerImpl({ colored: this.coloredLogger }, { enableConsoleLogging: true });
