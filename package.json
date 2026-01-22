@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.89.1357",
+  "version": "0.89.1359",
   "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support",
   "type": "module",
   "main": "dist/index.js",
@@ -67,6 +67,7 @@
     "verify:e2e-gemini-followup-sample": "node scripts/verify-e2e-gemini-followup-sample.mjs",
     "install:global": "./scripts/install-global.sh",
     "install:release": "./scripts/install-release.sh",
+    "release:rcc": "npm run pack:rcc",
     "audit:tool-text": "node scripts/audit-tool-text.mjs",
     "start:bg": "bash scripts/run-bg.sh -- 'node dist/index.js'",
     "start:fg": "bash scripts/run-fg-gtimeout.sh 12 -- 'node dist/index.js'",
