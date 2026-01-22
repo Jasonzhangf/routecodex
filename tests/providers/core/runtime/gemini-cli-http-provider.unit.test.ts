@@ -48,7 +48,7 @@ describe('GeminiCLIHttpProvider basic behaviour', () => {
     expect((processed as any).stream).toBeUndefined();
   });
 
-  test('antigravity systemInstruction injection preserves existing parts', async () => {
+  test('antigravity aligns to gcli2api: no provider-layer systemInstruction, ensures session_id + generationConfig', async () => {
     const cfg: OpenAIStandardConfig = {
       ...baseConfig,
       config: {
@@ -66,10 +66,17 @@ describe('GeminiCLIHttpProvider basic behaviour', () => {
     });
 
     const sys = (processed as any).systemInstruction;
-    expect(sys).toBeTruthy();
-    expect(Array.isArray(sys.parts)).toBe(true);
-    expect(String(sys.parts[0]?.text || '')).toContain('Antigravity');
-    expect(JSON.stringify(sys.parts)).toContain('custom-system');
+    expect(sys).toBeUndefined();
+    expect((processed as any).requestType).toBe('agent');
+    expect(typeof (processed as any).session_id).toBe('string');
+    expect(String((processed as any).session_id)).toContain('session-');
+    expect((processed as any).generationConfig).toEqual(
+      expect.objectContaining({
+        candidateCount: 1,
+        topK: 50,
+        temperature: 1.0
+      })
+    );
     expect((processed as any).stream).toBeUndefined();
   });
 });

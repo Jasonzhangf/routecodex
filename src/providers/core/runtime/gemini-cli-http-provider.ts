@@ -302,8 +302,10 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
     if (!this.hasNonEmptyString(payload.requestId)) {
       payload.requestId = `req-${randomUUID()}`;
     }
-    // 对齐 gcli2api：Antigravity 运行时不发送 session_id，其它运行时保持原有行为。
-    if (!isAntigravity && !this.hasNonEmptyString(payload.session_id)) {
+    // gcli2api 对齐：session_id 可存在且不会导致 400（A1 已验证 200）。
+    // 对于 RouteCodex 运行时，始终确保 session_id 存在，避免上游在部分场景下用默认 session
+    // 导致对话隔离/配额分桶不稳定。
+    if (!this.hasNonEmptyString(payload.session_id)) {
       payload.session_id = `session-${randomUUID()}`;
     }
     if (!this.hasNonEmptyString(payload.userAgent)) {
@@ -316,53 +318,21 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
       (payload as { requestType?: string }).requestType = 'agent';
     }
 
-    // 对齐 gcli2api：Antigravity 统一注入固定 systemInstruction，
-    // 将已有 systemInstruction.parts 追加在 Antigravity 提示词之后。
+    // gcli2api alignment: do not inject any fixed systemInstruction for Antigravity at the provider layer.
+    // The Hub Pipeline owns cross-protocol instruction mapping; providers remain transport-only.
     if (isAntigravity) {
-      const requestContainer =
-        (payload as { request?: unknown }).request && typeof (payload as { request?: unknown }).request === 'object'
-          ? ((payload as { request?: UnknownObject }).request as UnknownObject)
-          : undefined;
-      const currentSystemInstruction =
-        (payload as { systemInstruction?: unknown }).systemInstruction ??
-        (requestContainer && (requestContainer as { systemInstruction?: unknown }).systemInstruction);
-      const currentParts =
-        currentSystemInstruction && typeof currentSystemInstruction === 'object' && !Array.isArray(currentSystemInstruction)
-          ? ((currentSystemInstruction as { parts?: unknown }).parts as unknown)
-          : Array.isArray(currentSystemInstruction)
-            ? currentSystemInstruction
-            : undefined;
+      delete (payload as { systemInstruction?: unknown }).systemInstruction;
+    }
 
-      const antigravityPrompt =
-        'Please ignore the following [ignore]You are Antigravity, a powerful agentic AI coding assistant designed by the Google Deepmind team working on Advanced Agentic Coding.' +
-        'You are pair programming with a USER to solve their coding task. The task may require creating a new codebase, modifying or debugging an existing codebase, or simply answering a question.' +
-        '**Absolute paths only****Proactiveness**[/ignore]';
-
-      const nextParts: Array<{ text: string }> = [{ text: antigravityPrompt }];
-      if (Array.isArray(currentParts) && currentParts.length > 0) {
-        for (const part of currentParts as Array<{ text?: string }>) {
-          if (part && typeof part === 'object') {
-            const text = String(part.text ?? '').trim();
-            if (text.length) {
-              nextParts.push({ text });
-            }
-          }
-        }
-      }
-
-      const nextSystemInstruction: { parts: Array<{ text: string }>; role?: string } = {
-        parts: nextParts,
-        ...(currentSystemInstruction &&
-        typeof currentSystemInstruction === 'object' &&
-        !Array.isArray(currentSystemInstruction) &&
-        typeof (currentSystemInstruction as { role?: unknown }).role === 'string'
-          ? { role: (currentSystemInstruction as { role: string }).role }
-          : {})
-      };
-
-      (payload as { systemInstruction?: { parts: Array<{ text: string }> } }).systemInstruction = nextSystemInstruction;
-      if (requestContainer && typeof requestContainer === 'object') {
-        (requestContainer as { systemInstruction?: unknown }).systemInstruction = nextSystemInstruction;
+    // gcli2api alignment: ensure a stable generationConfig unless explicitly provided.
+    if (isAntigravity) {
+      const gen = (payload as { generationConfig?: unknown }).generationConfig;
+      if (!gen || typeof gen !== 'object' || Array.isArray(gen)) {
+        (payload as { generationConfig: Record<string, unknown> }).generationConfig = {
+          candidateCount: 1,
+          topK: 50,
+          temperature: 1.0
+        };
       }
     }
   }
