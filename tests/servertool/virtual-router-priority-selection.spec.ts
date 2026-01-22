@@ -145,4 +145,59 @@ describe('virtual-router priority pool selection', () => {
       logSpy.mockRestore();
     }
   });
+
+  test('priority pools rotate within the selected provider+model group (aliases)', () => {
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const a = 'mock.key1.gpt-5.2';
+      const b = 'mock.key2.gpt-5.2';
+
+      const engine = new VirtualRouterEngine();
+      engine.initialize({
+        routing: {
+          default: [{ id: 'primary', targets: [a, b], priority: 100, mode: 'priority' }]
+        },
+        providers: {
+          [a]: {
+            providerKey: a,
+            providerType: 'responses',
+            endpoint: 'https://example.invalid',
+            auth: { type: 'apiKey', value: 'test' },
+            outboundProfile: 'openai-responses',
+            modelId: 'gpt-5.2'
+          },
+          [b]: {
+            providerKey: b,
+            providerType: 'responses',
+            endpoint: 'https://example.invalid',
+            auth: { type: 'apiKey', value: 'test' },
+            outboundProfile: 'openai-responses',
+            modelId: 'gpt-5.2'
+          }
+        },
+        classifier: { longContextThresholdTokens: 180000, thinkingKeywords: [], backgroundKeywords: [] },
+        loadBalancing: { strategy: 'round-robin' },
+        contextRouting: { warnRatio: 0.9, hardLimit: false },
+        health: { failureThreshold: 3, cooldownMs: 5_000, fatalCooldownMs: 10_000 }
+      } as any);
+
+      const request: any = { model: 'gpt-5.2', messages: [{ role: 'user', content: 'hi' }], tools: [], parameters: {} };
+      const metadata: any = {
+        requestId: 'req_priority_alias_rr',
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-responses',
+        routeHint: 'default'
+      };
+
+      const first = engine.route(request, metadata).target.providerKey;
+      const second = engine.route(request, metadata).target.providerKey;
+      const third = engine.route(request, metadata).target.providerKey;
+
+      expect(first).toBe(a);
+      expect(second).toBe(b);
+      expect(third).toBe(a);
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
 });

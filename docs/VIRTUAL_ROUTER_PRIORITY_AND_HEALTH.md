@@ -96,3 +96,30 @@ Implementation:
 
 - `src/manager/modules/quota/provider-quota-daemon.model-backoff.ts`
 
+## Context-weighted selection (preserve large windows)
+
+Some clients have a fixed maximum usable context (e.g. `200k`). When multiple candidates are all "safe" for the current
+request, we want to bias traffic toward smaller effective safe windows early, so that larger windows remain available
+later when context grows.
+
+This is implemented as an additional multiplier on top of existing weights (health-weighted / legacy), and is only
+applied inside the same pool bucket and only for candidates in `ContextAdvisor.safe`.
+
+Config (under `virtualrouter.loadBalancing.contextWeighted`):
+
+- `enabled` (default `false`)
+- `clientCapTokens` (default `200000`)
+- `gamma` (default `1`, proportional compensation)
+- `maxMultiplier` (default `2`)
+
+Effective safe window (`T_safeEff`) used for compensation:
+
+- `T_eff = min(modelMaxTokens, clientCapTokens)`
+- `reserve = ceil(T_eff * (1 - warnRatio))` (warnRatio comes from `virtualrouter.contextRouting.warnRatio`, default `0.9`)
+- `slack = max(0, modelMaxTokens - clientCapTokens)`
+- `reserveEff = max(0, reserve - slack)` (models with slack can "absorb" the reserve)
+- `T_safeEff = T_eff - reserveEff`
+
+Then, within the bucket:
+
+- `multiplier = min(maxMultiplier, (max(T_safeEff) / T_safeEff) ^ gamma)`
