@@ -14,13 +14,11 @@ import {
   extractVirtualRouterSeriesCooldown,
   parseQuotaResetDelayMs
 } from './provider-quota-daemon.cooldown.js';
-import { isModelCapacityExhausted429, type ProviderModelBackoffTracker } from './provider-quota-daemon.model-backoff.js';
 
 export type ProviderQuotaDaemonEventContext = {
   quotaStates: Map<string, QuotaState>;
   staticConfigs: Map<string, StaticQuotaConfig>;
   quotaRoutingEnabled: boolean;
-  modelBackoff?: ProviderModelBackoffTracker;
   schedulePersist(nowMs: number): void;
   toSnapshotObject(): Record<string, QuotaState>;
 };
@@ -121,13 +119,6 @@ export async function handleProviderQuotaErrorEvent(
   // When present, treat as deterministic quota depletion signal rather than generic 429 backoff/blacklist.
   if (typeof event.status === 'number' && event.status === 429) {
     const seriesCooldown = extractVirtualRouterSeriesCooldown(event, nowMs);
-    if (ctx.modelBackoff && isModelCapacityExhausted429(event)) {
-      try {
-        ctx.modelBackoff.recordCapacity429(providerKey, event, nowMs, seriesCooldown?.until ?? null);
-      } catch {
-        // ignore model backoff failures; quota routing must stay best-effort
-      }
-    }
     if (seriesCooldown) {
       const withinBlacklist =
         previous.blacklistUntil !== null && nowMs < previous.blacklistUntil;

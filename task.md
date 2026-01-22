@@ -25,6 +25,13 @@
 - [x] servertool 执行进度亮黄色日志（已在 sharedmodule 侧实现并验证）✅
 - [ ] 进一步：每条工具/handler 的“第 N 步”细粒度进度（仅当有必要再做）
 
+### apply_patch errorsamples（形状巡检）
+
+- [x] 扫描 `~/.routecodex/errorsamples/apply_patch_exec/invalid_patch` 并用当前 llmswitch-core `validateToolCall('apply_patch')` 复跑：`total=250 fails=0`
+- [x] 扫描 `~/.routecodex/errorsamples/apply_patch/**`：`total=17 fails=13`（其余为真实无效输入：missing_changes/invalid_json/invalid_lines 等；`unsupported_patch_format` 均已被 normalize 覆盖）
+- [x] 新增 shape-fix：结构化补丁 payload 顶层 `target` 作为 file（当 `file` 缺失且 changes[] 不含 file 时），修复一条 `invalid_file` 样本
+- [x] 回归：`tool-governance-check` 增补 Begin/End Patch marker variant（`*** Begin Patch ***`）、classic context diff、structured payload `target` file 三类形状
+
 ### MCP 工具调用“变成文字”问题（Playwright 等）
 
 - [ ] 复现：收集一次原始请求 payload + tool schema + tool_choice + providerProtocol（含 glm-4.7 / anthropic-messages 路径）
