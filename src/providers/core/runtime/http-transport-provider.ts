@@ -891,18 +891,6 @@ export class HttpTransportProvider extends BaseProvider {
       // Accept 类型（用于流式响应）
       const isStreaming = runtimeMetadata?.streaming === true;
       this.assignHeader(baseHeaders, 'Accept', isStreaming ? 'text/event-stream' : 'application/json');
-      
-      // Request ID（用于调试和追踪）
-      const requestId = runtimeMetadata?.requestId;
-      if (requestId && typeof requestId === 'string') {
-        this.assignHeader(baseHeaders, 'requestId', requestId);
-      }
-      
-      // Request Type（用于区分不同类型的请求）
-      const requestType = this.buildRequestType(runtimeMetadata);
-      if (requestType) {
-        this.assignHeader(baseHeaders, 'requestType', requestType);
-      }
     }
 
     // OAuth：请求前确保令牌有效（提前刷新）
@@ -973,12 +961,15 @@ export class HttpTransportProvider extends BaseProvider {
     const resolvedUa = uaFromConfig ?? inboundUserAgent ?? uaFromService ?? DEFAULT_USER_AGENT;
     this.assignHeader(finalHeaders, 'User-Agent', resolvedUa);
 
-    // originator: do not invent one; only forward from config or inbound client
-    const originatorFromConfig = this.findHeaderValue({ ...overrideHeaders, ...runtimeHeaders }, 'originator');
-    const originatorFromService = this.findHeaderValue(serviceHeaders, 'originator');
-    const resolvedOriginator = originatorFromConfig ?? inboundOriginator ?? originatorFromService;
-    if (resolvedOriginator) {
-      this.assignHeader(finalHeaders, 'originator', resolvedOriginator);
+    // originator: do not invent one; only forward from config or inbound client.
+    // gcli2api alignment: Gemini-family upstreams do not expect/need originator; avoid leaking client identifiers.
+    if (!this.isGeminiFamilyTransport()) {
+      const originatorFromConfig = this.findHeaderValue({ ...overrideHeaders, ...runtimeHeaders }, 'originator');
+      const originatorFromService = this.findHeaderValue(serviceHeaders, 'originator');
+      const resolvedOriginator = originatorFromConfig ?? inboundOriginator ?? originatorFromService;
+      if (resolvedOriginator) {
+        this.assignHeader(finalHeaders, 'originator', resolvedOriginator);
+      }
     }
 
     if (!isAntigravity && normalizedClientHeaders) {
@@ -1451,24 +1442,9 @@ export class HttpTransportProvider extends BaseProvider {
    * 构建客户端元数据（用于风控和调试）
    */
   private buildClientMetadata(runtimeMetadata?: Record<string, unknown> | undefined): string {
-    const parts: string[] = [];
-    
-    // IDE 类型
-    parts.push('ideType=IDE_UNSPECIFIED');
-    
-    // 平台
-    parts.push('platform=PLATFORM_UNSPECIFIED');
-    
-    // 插件类型
-    parts.push('pluginType=GEMINI');
-    
-    // 客户端发起者（如果有）
-    const originator = runtimeMetadata?.clientOriginator;
-    if (originator && typeof originator === 'string') {
-      parts.push(`clientOriginator=${originator}`);
-    }
-    
-    return parts.join(', ');
+    // Keep this string stable and minimal to match gcli2api snapshots.
+    // Avoid embedding client identifiers (originator/session) into upstream headers.
+    return 'ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI';
   }
 
   /**

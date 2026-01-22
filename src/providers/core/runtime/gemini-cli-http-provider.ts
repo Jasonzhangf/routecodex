@@ -454,12 +454,6 @@ class GeminiSseNormalizer extends Transform {
       this.buffer += remaining.replace(/\r/g, '');
     }
     this.processBuffered(true);
-
-    console.log('[GeminiSseNormalizer] Stream complete:', {
-      totalChunks: this.chunkCounter,
-      processedEvents: this.processedEventCounter,
-      emittedEvents: this.eventCounter
-    });
     if (this.lastDonePayload) {
       this.pushEvent('gemini.done', this.lastDonePayload);
       this.lastDonePayload = null;
@@ -480,24 +474,12 @@ class GeminiSseNormalizer extends Transform {
       this.processEvent(rawEvent);
     }
     if (flush && this.buffer.trim().length) {
-      console.log('[GeminiSseNormalizer] Final buffer flush:', {
-        bufferLength: this.buffer.length,
-        bufferPreview: this.buffer.slice(0, 300),
-        eventsFoundInLoop: eventsFound
-      });
       this.processEvent(this.buffer);
       this.buffer = '';
-    } else if (flush) {
-      console.log('[GeminiSseNormalizer] Flush called but buffer empty:', {
-        eventsFoundInLoop: eventsFound
-      });
     }
   }
 
   private processEvent(rawEvent: string): void {
-    if (process.env.ROUTECODEX_DEBUG_GEMINI_RAW === '1') {
-      console.log('[DEBUG-GEMINI-INPUT]', JSON.stringify(rawEvent));
-    }
     this.processedEventCounter++;
     const trimmed = rawEvent.trim();
     if (!trimmed.length) {
@@ -520,21 +502,11 @@ class GeminiSseNormalizer extends Transform {
       this.capturedEvents.push(parsed);
       const response = parsed?.response;
       if (!response || typeof response !== 'object') {
-        // Log dropped events for debugging
-        console.warn('[GeminiSseNormalizer] Dropped event without valid response field:', {
-          hasResponse: !!parsed?.response,
-          parsedKeys: Object.keys(parsed || {}),
-          payloadPreview: payloadText.slice(0, 150)
-        });
         return;
       }
       this.emitCandidateParts(response as Record<string, unknown>);
     } catch (err) {
-      // Log parse failures for debugging
-      console.error('[GeminiSseNormalizer] Failed to parse SSE payload:', {
-        error: err instanceof Error ? err.message : String(err),
-        payloadPreview: payloadText.slice(0, 200)
-      });
+      // ignore parse errors; upstream stream snapshots (if enabled) are used for debugging
     }
   }
 

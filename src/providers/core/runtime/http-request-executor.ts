@@ -105,30 +105,30 @@ export class HttpRequestExecutor {
       providerId: context.providerId
     });
 
-    // Debug: 打印完整的HTTP请求信息（用于对比gcli2api）
-    const debugAntigravity = process.env.ROUTECODEX_DEBUG_ANTIGRAVITY === '1' ||
-      process.env.RCC_DEBUG_ANTIGRAVITY === '1';
+    const debugAntigravity = process.env.ROUTECODEX_DEBUG_ANTIGRAVITY === '1' || process.env.RCC_DEBUG_ANTIGRAVITY === '1';
     if (debugAntigravity) {
-      const safeHeaders = { ...finalHeaders };
-      // 脱敏Authorization header
-      if (safeHeaders.Authorization) {
-        const authParts = safeHeaders.Authorization.split(' ');
-        if (authParts.length === 2) {
-          const token = authParts[1];
-          safeHeaders.Authorization = `${authParts[0]} ${token.substring(0, 10)}...${token.substring(token.length - 10)}`;
-        }
+      try {
+        await writeProviderSnapshot({
+          phase: 'provider-preprocess-debug',
+          requestId: context.requestId,
+          data: {
+            method: 'POST',
+            endpoint,
+            wantsSse,
+            targetUrl,
+            headers: finalHeaders,
+            body: finalBody
+          },
+          headers: finalHeaders,
+          url: targetUrl,
+          entryEndpoint,
+          clientRequestId,
+          providerKey: context.providerKey,
+          providerId: context.providerId
+        });
+      } catch {
+        // ignore snapshot failures
       }
-
-      console.log(`\n${  '='.repeat(80)}`);
-      console.log('[ANTIGRAVITY-DEBUG] HTTP Request');
-      console.log('='.repeat(80));
-      console.log('URL:', targetUrl);
-      console.log('Method: POST');
-      console.log('\nHeaders:');
-      console.log(JSON.stringify(safeHeaders, null, 2));
-      console.log('\nBody:');
-      console.log(JSON.stringify(finalBody, null, 2));
-      console.log(`${'='.repeat(80)  }\n`);
     }
 
     return {
