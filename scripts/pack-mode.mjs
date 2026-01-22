@@ -70,8 +70,15 @@ try {
     mutated.bundledDependencies = [];
     mutated.bundleDependencies = [];
     const llmsVersion = original.dependencies?.['@jsonstudio/llms'] || '^0.6.230';
+    const deps = {
+      ...(original.dependencies || {})
+    };
+    // Avoid recursive self-dependency when packing @jsonstudio/rcc.
+    if (isRcc && deps['@jsonstudio/rcc']) {
+      delete deps['@jsonstudio/rcc'];
+    }
     mutated.dependencies = {
-      ...(original.dependencies || {}),
+      ...deps,
       ajv: original.dependencies?.ajv || '^8.17.1',
       zod: original.dependencies?.zod || '^3.23.8',
       '@jsonstudio/llms': llmsVersion
