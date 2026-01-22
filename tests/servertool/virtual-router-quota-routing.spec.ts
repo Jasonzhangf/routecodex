@@ -1,5 +1,6 @@
 import { selectProviderImpl } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection.js';
 import { RouteLoadBalancer } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/load-balancer.js';
+import { VirtualRouterErrorCode } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/types.js';
 
 describe('virtual-router quotaView routing', () => {
   const routeName = 'default';
@@ -186,7 +187,7 @@ describe('virtual-router quotaView routing', () => {
     expect(result.providerKey).toBe(providerB);
   });
 
-  it('does not allow quotaView to empty the default route (quota bypass)', () => {
+  it('fails fast when quotaView empties the default route', () => {
     const quotaView = (key: string) => ({
       providerKey: key,
       inPool: false,
@@ -196,17 +197,22 @@ describe('virtual-router quotaView routing', () => {
     const deps = createDeps(quotaView);
     const features = createBaseFeatures();
     const state = createBaseState();
-    const result = selectProviderImpl(
-      routeName,
-      baseMetadata,
-      baseClassification,
-      features,
-      state,
-      deps as any,
-      { routingState: state }
-    );
-    // With quota bypass enabled for default route, selection falls back to the load balancer.
-    expect(result.providerKey).toBe(providerA);
+    let threw = false;
+    try {
+      selectProviderImpl(
+        routeName,
+        baseMetadata,
+        baseClassification,
+        features,
+        state,
+        deps as any,
+        { routingState: state }
+      );
+    } catch (err: any) {
+      threw = true;
+      expect(err?.code).toBe(VirtualRouterErrorCode.PROVIDER_NOT_AVAILABLE);
+    }
+    expect(threw).toBe(true);
   });
 
   it('ignores providers still in cooldown or blacklist windows', () => {
@@ -249,7 +255,7 @@ describe('virtual-router quotaView routing', () => {
     expect(result.providerKey).toBe(providerB);
   });
 
-  it('applies quotaView to forcedTarget resolution', () => {
+  it('fails fast when forcedTarget is blocked by quotaView', () => {
     const quotaView = (key: string) => {
       if (key === providerA) {
         return { providerKey: key, inPool: false, reason: 'quotaDepleted', priorityTier: 0 };
@@ -260,16 +266,22 @@ describe('virtual-router quotaView routing', () => {
     const features = createBaseFeatures();
     const state = createBaseState();
     state.forcedTarget = { provider: 'mock.providerA' };
-    const result = selectProviderImpl(
-      routeName,
-      baseMetadata,
-      baseClassification,
-      features,
-      state,
-      deps as any,
-      { routingState: state }
-    );
-    expect(result.providerKey).toBe(providerA);
+    let threw = false;
+    try {
+      selectProviderImpl(
+        routeName,
+        baseMetadata,
+        baseClassification,
+        features,
+        state,
+        deps as any,
+        { routingState: state }
+      );
+    } catch (err: any) {
+      threw = true;
+      expect(err?.code).toBe(VirtualRouterErrorCode.PROVIDER_NOT_AVAILABLE);
+    }
+    expect(threw).toBe(true);
   });
 
   it('applies quotaView to stickyTarget resolution', () => {
@@ -295,7 +307,7 @@ describe('virtual-router quotaView routing', () => {
     expect(result.providerKey).toBe(providerB);
   });
 
-  it('does not block a non-default route when it has only one target (even if quotaView marks it out of pool)', () => {
+  it('falls back to default route when quotaView blocks a single-target non-default route', () => {
     const routing = {
       coding: [
         {
@@ -372,7 +384,7 @@ describe('virtual-router quotaView routing', () => {
       } as any,
       { routingState: state }
     );
-    expect(result.providerKey).toBe(providerA);
-    expect(result.routeUsed).toBe('coding');
+    expect(result.providerKey).toBe(providerB);
+    expect(result.routeUsed).toBe('default');
   });
 });
