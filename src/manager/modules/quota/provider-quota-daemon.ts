@@ -15,6 +15,7 @@ import { canonicalizeProviderKey } from './provider-key-normalization.js';
 import { handleProviderQuotaErrorEvent } from './provider-quota-daemon.events.js';
 import { loadProviderQuotaStates } from './provider-quota-daemon.snapshot.js';
 import { buildQuotaViewEntry } from './provider-quota-daemon.view.js';
+import { ProviderModelBackoffTracker } from './provider-quota-daemon.model-backoff.js';
 
 const ERROR_PRIORITY_WINDOW_MS = readPositiveNumberFromEnv('ROUTECODEX_QUOTA_ERROR_PRIORITY_WINDOW_MS', 10 * 60_000);
 
@@ -23,6 +24,7 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
 
   private quotaStates: Map<string, QuotaState> = new Map();
   private staticConfigs: Map<string, StaticQuotaConfig> = new Map();
+  private readonly modelBackoff: ProviderModelBackoffTracker = new ProviderModelBackoffTracker();
   private unsubscribe: (() => void) | null = null;
   private maintenanceTimer: NodeJS.Timeout | null = null;
   private persistTimer: NodeJS.Timeout | null = null;
@@ -285,6 +287,7 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
       createInitialQuotaState(providerKey, this.staticConfigs.get(providerKey), nowMs);
     const nextState = applyQuotaSuccessEvent(previous, { providerKey, usedTokens, timestampMs: nowMs }, nowMs);
     this.quotaStates.set(providerKey, nextState);
+    this.modelBackoff.recordSuccess(providerKey);
     this.schedulePersist(nowMs);
   }
 
@@ -349,6 +352,7 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
         quotaStates: this.quotaStates,
         staticConfigs: this.staticConfigs,
         quotaRoutingEnabled: this.quotaRoutingEnabled,
+        modelBackoff: this.modelBackoff,
         schedulePersist: (nowMs: number) => this.schedulePersist(nowMs),
         toSnapshotObject: () => this.toSnapshotObject()
       },
@@ -427,7 +431,7 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
       return buildQuotaViewEntry({
         state: normalized,
         nowMs,
-        modelBackoff: null,
+        modelBackoff: this.modelBackoff,
         errorPriorityWindowMs: ERROR_PRIORITY_WINDOW_MS
       });
     };
@@ -460,7 +464,7 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
       return buildQuotaViewEntry({
         state: effective,
         nowMs,
-        modelBackoff: null,
+        modelBackoff: this.modelBackoff,
         errorPriorityWindowMs: ERROR_PRIORITY_WINDOW_MS
       });
     };

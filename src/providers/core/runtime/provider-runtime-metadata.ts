@@ -14,6 +14,12 @@ export interface ProviderRuntimeMetadata {
   metadata?: Record<string, unknown>;
   target?: TargetMetadata;
   compatibilityProfile?: string;
+  /**
+   * Runtime metadata is a dynamic carrier for provider/request hints.
+   * Keep an index signature so transport/provider code can attach extra fields
+   * (e.g. streaming flags, client originator, counters) without fighting TS.
+   */
+  [key: string]: unknown;
 }
 
 const PROVIDER_RUNTIME_SYMBOL = Symbol.for('routecodex.providerRuntime');

@@ -1,4 +1,5 @@
 import { selectProviderImpl } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection.js';
+import { RouteLoadBalancer } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/load-balancer.js';
 
 describe('virtual-router quotaView routing', () => {
   const routeName = 'default';
@@ -41,10 +42,7 @@ describe('virtual-router quotaView routing', () => {
         overflow: [] as string[]
       })
     };
-    const loadBalancer = {
-      select: (options: { candidates: string[] }) =>
-        options.candidates.length ? options.candidates[0] : null
-    };
+    const loadBalancer = new RouteLoadBalancer({ strategy: 'round-robin' });
     return {
       routing,
       providerRegistry,
@@ -334,9 +332,7 @@ describe('virtual-router quotaView routing', () => {
         overflow: [] as string[]
       })
     };
-    const loadBalancer = {
-      select: (options: { candidates: string[] }) => (options.candidates.length ? options.candidates[0] : null)
-    };
+    const loadBalancer = new RouteLoadBalancer({ strategy: 'round-robin' });
     const quotaView = (key: string) => {
       if (key === providerA) {
         return { providerKey: key, inPool: false, reason: 'quotaDepleted', priorityTier: 0 };

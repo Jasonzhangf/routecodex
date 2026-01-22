@@ -8,6 +8,14 @@ type BackoffState = {
   cooldownUntil: number | null;
 };
 
+/**
+ * When upstream explicitly reports "model capacity exhausted" (429),
+ * treat it as a *capacity* signal rather than a quota signal:
+ * - quota may still be available locally, but the upstream cannot serve the model right now.
+ * - we cool down the *entire model series* immediately to avoid hammering 429s.
+ */
+const MODEL_CAPACITY_EXHAUSTED_COOLDOWN_MS = 60_000;
+
 const DEFAULT_CAPACITY_COOLDOWN_SCHEDULE_MS = [
   5_000,
   30_000,
@@ -43,6 +51,9 @@ function resolveModelKey(providerKey: string): string | null {
     return null;
   }
   const providerId = parts[0]!;
+  // NOTE: model-series cooldown is intentionally cross-key for the same model:
+  // `providerId.<keyAlias>.<modelId>` → `${providerId}.${modelId}`.
+  // This is required for upstream "MODEL_CAPACITY_EXHAUSTED", where switching keys won't help.
   const modelId = parts.slice(2).join('.');
   if (!providerId || !modelId) {
     return null;
@@ -157,12 +168,17 @@ export class ProviderModelBackoffTracker {
     const sameError = withinWindow && previous?.lastErrorKey === errorKey;
     const nextCount = sameError ? (previous?.consecutiveCount ?? 0) + 1 : 1;
     const wrappedCount = nextCount > this.schedule.length ? 1 : nextCount;
-    const ttl = this.schedule[Math.min(wrappedCount - 1, this.schedule.length - 1)] ?? this.schedule[0]!;
+    // Capacity exhausted should cool down immediately, regardless of quota manager state.
+    // Use a fixed TTL by default, but keep the schedule/env overrides for debugging/tuning.
+    const ttl =
+      this.schedule[Math.min(wrappedCount - 1, this.schedule.length - 1)] ??
+      this.schedule[0] ??
+      MODEL_CAPACITY_EXHAUSTED_COOLDOWN_MS;
     const explicitUntil =
       typeof untilOverrideMs === 'number' && Number.isFinite(untilOverrideMs) && untilOverrideMs > nowMs
         ? untilOverrideMs
         : null;
-    const until = explicitUntil ?? (nowMs + ttl);
+    const until = explicitUntil ?? (nowMs + MODEL_CAPACITY_EXHAUSTED_COOLDOWN_MS);
     const existingUntil =
       typeof previous?.cooldownUntil === 'number' && Number.isFinite(previous.cooldownUntil)
         ? previous.cooldownUntil

@@ -15,6 +15,7 @@ const providerErrorCenter = (await getProviderErrorCenter())!;
 type ExtendedRuntimeMetadata = ProviderErrorRuntimeMetadata & {
   providerFamily?: string;
   runtimeKey?: string;
+  consecutiveErrors?: number;
 };
 
 type ProviderErrorEventExtended = ProviderErrorEvent & {
@@ -84,6 +85,10 @@ export function emitProviderError(options: EmitOptions): void {
       ...(mergedDetails ?? {}),
       protocolErrorCode: err.code.toUpperCase()
     };
+  }
+  
+  if (status !== undefined) {
+    mergedDetails = { ...(mergedDetails ?? {}), statusCode: status };
   }
 
   const event: ProviderErrorEventExtended = {

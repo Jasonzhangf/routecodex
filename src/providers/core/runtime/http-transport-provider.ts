@@ -874,6 +874,37 @@ export class HttpTransportProvider extends BaseProvider {
     const overrideHeaders = this.config.config.overrides?.headers || {};
     const runtimeHeaders = this.getRuntimeProfile()?.headers || {};
 
+    // ========== 风控增强：添加 Google 客户端标识和元数据 ==========
+    if (this.isGeminiFamilyTransport()) {
+      // Google 客户端标识
+      this.assignHeader(baseHeaders, 'X-Goog-Api-Client', 'gl-node/22.17.0');
+      
+      // 客户端元数据
+      const clientMetadata = this.buildClientMetadata(runtimeMetadata);
+      if (clientMetadata) {
+        this.assignHeader(baseHeaders, 'Client-Metadata', clientMetadata);
+      }
+      
+      // Accept 编码
+      this.assignHeader(baseHeaders, 'Accept-Encoding', 'gzip, deflate, br');
+      
+      // Accept 类型（用于流式响应）
+      const isStreaming = runtimeMetadata?.streaming === true;
+      this.assignHeader(baseHeaders, 'Accept', isStreaming ? 'text/event-stream' : 'application/json');
+      
+      // Request ID（用于调试和追踪）
+      const requestId = runtimeMetadata?.requestId;
+      if (requestId && typeof requestId === 'string') {
+        this.assignHeader(baseHeaders, 'requestId', requestId);
+      }
+      
+      // Request Type（用于区分不同类型的请求）
+      const requestType = this.buildRequestType(runtimeMetadata);
+      if (requestType) {
+        this.assignHeader(baseHeaders, 'requestType', requestType);
+      }
+    }
+
     // OAuth：请求前确保令牌有效（提前刷新）
     try {
       const auth = this.config.config.auth;
@@ -1414,6 +1445,56 @@ export class HttpTransportProvider extends BaseProvider {
       }
     }
     return undefined;
+  }
+
+  /**
+   * 构建客户端元数据（用于风控和调试）
+   */
+  private buildClientMetadata(runtimeMetadata?: Record<string, unknown> | undefined): string {
+    const parts: string[] = [];
+    
+    // IDE 类型
+    parts.push('ideType=IDE_UNSPECIFIED');
+    
+    // 平台
+    parts.push('platform=PLATFORM_UNSPECIFIED');
+    
+    // 插件类型
+    parts.push('pluginType=GEMINI');
+    
+    // 客户端发起者（如果有）
+    const originator = runtimeMetadata?.clientOriginator;
+    if (originator && typeof originator === 'string') {
+      parts.push(`clientOriginator=${originator}`);
+    }
+    
+    return parts.join(', ');
+  }
+
+  /**
+   * 构建请求类型（用于区分不同类型的请求）
+   */
+  private buildRequestType(runtimeMetadata?: Record<string, unknown> | undefined): string | undefined {
+    const model = runtimeMetadata?.target as { clientModelId?: string } | undefined;
+    const modelId = model?.clientModelId || '';
+    
+    // 根据模型名称判断请求类型
+    if (modelId.includes('image') || modelId.includes('imagen')) {
+      return 'image_gen';
+    }
+    
+    // 默认为 agent 类型
+    return 'agent';
+  }
+
+  /**
+   * 检查是否为 Gemini 系列传输
+   */
+  private isGeminiFamilyTransport(): boolean {
+    const providerType = this.providerType.toLowerCase();
+    return providerType === 'gemini' || 
+           providerType === 'gemini-cli' ||
+           providerType === 'antigravity';
   }
 
   private normalizeClientHeaders(value: unknown): Record<string, string> | undefined {

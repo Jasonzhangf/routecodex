@@ -11,6 +11,7 @@ import type { RouteErrorPayload } from '../../error-handling/route-error-hub.js'
 import { reportRouteError } from '../../error-handling/route-error-hub.js';
 // import { runtimeFlags } from '../../runtime/runtime-flags.js';
 import { formatErrorForConsole } from '../../utils/log-helpers.js';
+import { DEFAULT_TIMEOUTS } from '../../constants/index.js';
 import {
   generateRequestIdentifiers,
   resolveEffectiveRequestId
@@ -134,11 +135,11 @@ export function sendPipelineResponse(
 
     const idleTimeoutMs = readTimeoutMs(
       ['ROUTECODEX_HTTP_SSE_IDLE_TIMEOUT_MS', 'RCC_HTTP_SSE_IDLE_TIMEOUT_MS'],
-      300_000
+      DEFAULT_TIMEOUTS.HTTP_SSE_IDLE_MS
     );
     const totalTimeoutMs = readTimeoutMs(
       ['ROUTECODEX_HTTP_SSE_TIMEOUT_MS', 'RCC_HTTP_SSE_TIMEOUT_MS'],
-      500_000
+      DEFAULT_TIMEOUTS.HTTP_SSE_TOTAL_MS
     );
 
     const clearTimers = () => {

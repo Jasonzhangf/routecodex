@@ -10,6 +10,7 @@ import type {
 } from 'node:stream/web';
 import type { ProviderError } from '../api/provider-types.js';
 import { PassThrough } from 'node:stream';
+import { DEFAULT_TIMEOUTS } from '../../../constants/index.js';
 
 /**
  * HTTP请求配置
@@ -156,11 +157,15 @@ export class HttpClient {
     // NOTE: stream 请求如果在拿到 response body 后立刻清除 timeout，会导致“流式卡死不返回”。
     // 这里维持一个全局 timeout + idle timeout，直到上游流结束或被消费者关闭。
     const cfgIdle = this.defaultConfig.streamIdleTimeoutMs;
-    const idleTimeoutMs = Number.isFinite(cfgIdle) && cfgIdle > 0 ? cfgIdle : Math.min(300_000, timeout);
+    const idleTimeoutMs = Number.isFinite(cfgIdle) && cfgIdle > 0
+      ? cfgIdle
+      : Math.min(DEFAULT_TIMEOUTS.PROVIDER_STREAM_IDLE_CAP_MS, timeout);
     const cfgHeaders = this.defaultConfig.streamHeadersTimeoutMs;
     // NOTE: headers timeout controls how long we wait for the *first response headers* from upstream.
     // Some upstreams are slow to flush headers for SSE; keep this fairly generous by default.
-    const headersTimeoutMs = Number.isFinite(cfgHeaders) && cfgHeaders > 0 ? cfgHeaders : Math.min(300_000, timeout);
+    const headersTimeoutMs = Number.isFinite(cfgHeaders) && cfgHeaders > 0
+      ? cfgHeaders
+      : Math.min(DEFAULT_TIMEOUTS.PROVIDER_STREAM_HEADERS_CAP_MS, timeout);
     const abortWithReason = (reason: string) => {
       try {
         const err = Object.assign(new Error(reason), { code: reason, name: 'AbortError' });

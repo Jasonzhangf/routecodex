@@ -14,11 +14,13 @@ import {
   extractVirtualRouterSeriesCooldown,
   parseQuotaResetDelayMs
 } from './provider-quota-daemon.cooldown.js';
+import { isModelCapacityExhausted429, ProviderModelBackoffTracker } from './provider-quota-daemon.model-backoff.js';
 
 export type ProviderQuotaDaemonEventContext = {
   quotaStates: Map<string, QuotaState>;
   staticConfigs: Map<string, StaticQuotaConfig>;
   quotaRoutingEnabled: boolean;
+  modelBackoff: ProviderModelBackoffTracker;
   schedulePersist(nowMs: number): void;
   toSnapshotObject(): Record<string, QuotaState>;
 };
@@ -52,6 +54,29 @@ export async function handleProviderQuotaErrorEvent(
 
   // Manual/operator blacklist is rigid: do not override it with automated error/quota signals.
   if (previous.reason === 'blacklist' && previous.blacklistUntil && nowMs < previous.blacklistUntil) {
+    return;
+  }
+
+  // Upstream capacity exhaustion is not quota depletion. Cool down the entire model series immediately
+  // so the router can try other models/providers instead of hammering 429s.
+  if (isModelCapacityExhausted429(event)) {
+    ctx.modelBackoff.recordCapacity429(providerKey, event, nowMs, nowMs + 60_000);
+    const errorForQuota: ErrorEventForQuota = {
+      providerKey,
+      httpStatus: typeof event.status === 'number' ? event.status : undefined,
+      code: typeof event.code === 'string' ? event.code : undefined,
+      fatal: false,
+      timestampMs: nowMs
+    };
+    const applied = applyQuotaErrorEvent(previous, errorForQuota, nowMs);
+    const nextState: QuotaState = {
+      ...applied,
+      inPool: false,
+      reason: 'cooldown',
+      cooldownUntil: nowMs + 60_000
+    };
+    ctx.quotaStates.set(providerKey, nextState);
+    ctx.schedulePersist(nowMs);
     return;
   }
 

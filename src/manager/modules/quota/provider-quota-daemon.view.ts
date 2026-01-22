@@ -1,4 +1,5 @@
 import type { QuotaState } from '../../quota/provider-quota-center.js';
+import type { ProviderModelBackoffTracker } from './provider-quota-daemon.model-backoff.js';
 
 export type QuotaViewEntry = {
   providerKey: string;
@@ -15,7 +16,7 @@ export type QuotaViewEntry = {
 export function buildQuotaViewEntry(options: {
   state: QuotaState;
   nowMs: number;
-  modelBackoff: null;
+  modelBackoff?: ProviderModelBackoffTracker | null;
   errorPriorityWindowMs: number;
 }): QuotaViewEntry {
   const { state, nowMs, errorPriorityWindowMs } = options;
@@ -37,12 +38,24 @@ export function buildQuotaViewEntry(options: {
       ? Math.max(0, Math.floor(state.consecutiveErrorCount))
       : 0;
 
-  const cooldownUntil = state.cooldownUntil ?? null;
+  const modelCooldownUntil =
+    options.modelBackoff ? options.modelBackoff.getActiveCooldownUntil(state.providerKey, nowMs) : null;
+  const cooldownUntilRaw = state.cooldownUntil ?? null;
+  const cooldownUntil =
+    typeof modelCooldownUntil === 'number' && Number.isFinite(modelCooldownUntil)
+      ? (typeof cooldownUntilRaw === 'number' && Number.isFinite(cooldownUntilRaw) && cooldownUntilRaw > modelCooldownUntil
+          ? cooldownUntilRaw
+          : modelCooldownUntil)
+      : cooldownUntilRaw;
+  const reason =
+    typeof modelCooldownUntil === 'number' && Number.isFinite(modelCooldownUntil) && modelCooldownUntil > nowMs
+      ? 'cooldown:model-capacity'
+      : state.reason;
 
   return {
     providerKey: state.providerKey,
     inPool: state.inPool,
-    reason: state.reason,
+    reason,
     priorityTier: state.priorityTier,
     selectionPenalty,
     lastErrorAtMs,

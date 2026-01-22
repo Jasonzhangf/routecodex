@@ -22,13 +22,13 @@ Provider V2 may use upstream SSE; timeouts are **config-driven** via env (or pro
 
 ### Provider → Upstream (SSE)
 - `ROUTECODEX_PROVIDER_TIMEOUT_MS` / `RCC_PROVIDER_TIMEOUT_MS`: global provider request timeout (default `500000`).
-- `ROUTECODEX_PROVIDER_STREAM_HEADERS_TIMEOUT_MS` / `RCC_PROVIDER_STREAM_HEADERS_TIMEOUT_MS`: wait for first response headers (default `min(300000, providerTimeout)`).
-- `ROUTECODEX_PROVIDER_STREAM_IDLE_TIMEOUT_MS` / `RCC_PROVIDER_STREAM_IDLE_TIMEOUT_MS`: abort if upstream stream produces no bytes (default `min(300000, providerTimeout)`).
+- `ROUTECODEX_PROVIDER_STREAM_HEADERS_TIMEOUT_MS` / `RCC_PROVIDER_STREAM_HEADERS_TIMEOUT_MS`: wait for first response headers (default `min(900000, providerTimeout)`).
+- `ROUTECODEX_PROVIDER_STREAM_IDLE_TIMEOUT_MS` / `RCC_PROVIDER_STREAM_IDLE_TIMEOUT_MS`: abort if upstream stream produces no bytes (default `min(900000, providerTimeout)`).
 
 ### Host → Client (SSE bridge)
 These are enforced in the HTTP server SSE bridge (not in provider runtime), but often tuned together with upstream streaming:
-- `ROUTECODEX_HTTP_SSE_IDLE_TIMEOUT_MS` / `RCC_HTTP_SSE_IDLE_TIMEOUT_MS`: client SSE idle timeout (default `300000`).
-- `ROUTECODEX_HTTP_SSE_TIMEOUT_MS` / `RCC_HTTP_SSE_TIMEOUT_MS`: client SSE total timeout (default `500000`).
+- `ROUTECODEX_HTTP_SSE_IDLE_TIMEOUT_MS` / `RCC_HTTP_SSE_IDLE_TIMEOUT_MS`: client SSE idle timeout (default `900000`).
+- `ROUTECODEX_HTTP_SSE_TIMEOUT_MS` / `RCC_HTTP_SSE_TIMEOUT_MS`: client SSE total timeout (default `1000000`).
 
 ## Rate-limit cooldown knobs
 These envs influence how the provider layer annotates retry/cooldown hints for VirtualRouter.

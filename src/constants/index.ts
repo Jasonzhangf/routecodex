@@ -44,6 +44,21 @@ export const DEFAULT_CONFIG = {
   LM_STUDIO_PORT: 1234,
 } as const;
 
+// 默认超时（毫秒）
+// 说明：
+// - ProviderTimeout：provider 层整体请求超时（由 service profile / provider overrides 决定）
+// - Stream*Cap：provider 层 SSE 的 headers/idle 默认上限；实际默认取 min(cap, providerTimeout)
+// - HTTP_SSE_*：server 层向客户端桥接 SSE 的 idle/total 默认值
+export const DEFAULT_TIMEOUTS = {
+  // Provider → upstream (SSE headers/idle)
+  PROVIDER_STREAM_HEADERS_CAP_MS: 900_000, // 15 min cap（避免长 prompt 初始化被 5min 默认截断）
+  PROVIDER_STREAM_IDLE_CAP_MS: 900_000,    // 15 min cap（避免长时间无字节输出导致中途断流）
+
+  // Host → client (SSE bridge)
+  HTTP_SSE_IDLE_MS: 900_000,               // 15 min（与 provider idle cap 对齐）
+  HTTP_SSE_TOTAL_MS: 1_000_000,            // 16.6 min（覆盖 LM Studio 默认 1000s provider timeout）
+} as const;
+
 // HTTP 协议前缀
 export const HTTP_PROTOCOLS = {
   HTTP: 'http://',
