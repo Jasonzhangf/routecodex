@@ -48,7 +48,7 @@ describe('GeminiCLIHttpProvider basic behaviour', () => {
     expect((processed as any).stream).toBeUndefined();
   });
 
-  test('antigravity aligns to gcli2api: no provider-layer systemInstruction, ensures session_id + generationConfig', async () => {
+  test('antigravity aligns to gcli2api: minimal body fields + requestId/requestType as headers', async () => {
     const cfg: OpenAIStandardConfig = {
       ...baseConfig,
       config: {
@@ -65,18 +65,27 @@ describe('GeminiCLIHttpProvider basic behaviour', () => {
       stream: true
     });
 
-    const sys = (processed as any).systemInstruction;
-    expect(sys).toBeUndefined();
-    expect((processed as any).requestType).toBe('agent');
-    expect(typeof (processed as any).session_id).toBe('string');
-    expect(String((processed as any).session_id)).toContain('session-');
-    expect((processed as any).generationConfig).toEqual(
-      expect.objectContaining({
-        candidateCount: 1,
-        topK: 50,
-        temperature: 1.0
-      })
+    expect((processed as any).systemInstruction).toEqual(
+      expect.objectContaining({ role: 'system' })
     );
+    expect(typeof (processed as any).requestId).toBe('string');
+    expect(String((processed as any).requestId)).toContain('req-');
+    expect((processed as any).requestType).toBeUndefined();
+    expect((processed as any).userAgent).toBeUndefined();
+    expect((processed as any).session_id).toBeUndefined();
+    expect((processed as any).generationConfig).toBeUndefined();
     expect((processed as any).stream).toBeUndefined();
+
+    const headers = await (provider as any).finalizeRequestHeaders({}, processed);
+    expect(headers).toBeTruthy();
+    expect(headers.requestId).toBe((processed as any).requestId);
+    expect(headers.requestType).toBe('agent');
+
+    const body = (provider as any).buildHttpRequestBody(processed);
+    expect(body).toBeTruthy();
+    expect(Object.keys(body).sort()).toEqual(expect.arrayContaining(['model', 'request']));
+    expect((body as any).requestId).toBeUndefined();
+    expect((body as any).requestType).toBeUndefined();
+    expect((body as any).userAgent).toBeUndefined();
   });
 });

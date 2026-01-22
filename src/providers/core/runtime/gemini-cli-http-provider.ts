@@ -145,15 +145,54 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
   ): Promise<Record<string, string>> {
     const finalized = await super.finalizeRequestHeaders(headers, request);
     if (this.isAntigravityRuntime()) {
+      const deleteHeaderInsensitive = (key: string): void => {
+        const target = key.toLowerCase();
+        for (const k of Object.keys(finalized)) {
+          if (k.toLowerCase() === target) {
+            delete finalized[k];
+          }
+        }
+      };
+
       finalized['User-Agent'] = ANTIGRAVITY_HELPER_DEFAULTS.userAgent;
-      if (!this.hasNonEmptyString(finalized['Accept-Encoding'])) {
-        // 对齐旧版成功快照：使用 gzip, deflate, br
-        finalized['Accept-Encoding'] = 'gzip, deflate, br';
+      // gcli2api alignment: keep headers minimal for Antigravity.
+      finalized['Accept-Encoding'] = 'gzip';
+      deleteHeaderInsensitive('X-Goog-Api-Client');
+      deleteHeaderInsensitive('Client-Metadata');
+      deleteHeaderInsensitive('originator');
+
+      // gcli2api alignment: requestId/requestType are headers, not JSON body fields.
+      try {
+        const adapter = this.resolvePayload(request);
+        const payload = adapter.payload as MutablePayload;
+        if (this.hasNonEmptyString(payload.requestId)) {
+          finalized.requestId = payload.requestId;
+        }
+        const modelRaw = payload.model;
+        const model = typeof modelRaw === 'string' ? modelRaw : '';
+        finalized.requestType = model.toLowerCase().includes('image') ? 'image_gen' : 'agent';
+      } catch {
+        // best effort
       }
-      // 保留 X-Goog-Api-Client / Client-Metadata，由上游决定是否使用；
-      // 不再强行删除 Accept 头，维持默认的 text/event-stream。
     }
     return finalized;
+  }
+
+  protected override buildHttpRequestBody(request: UnknownObject): UnknownObject {
+    const built = super.buildHttpRequestBody(request);
+    if (!this.isAntigravityRuntime() || !built || typeof built !== 'object') {
+      return built;
+    }
+    const body = built as Record<string, unknown>;
+    const model = body.model;
+    const project = body.project;
+    const requestNode = body.request;
+
+    const sanitized: Record<string, unknown> = {};
+    if (model !== undefined) sanitized.model = model;
+    if (project !== undefined) sanitized.project = project;
+    if (requestNode !== undefined) sanitized.request = requestNode;
+    return sanitized as UnknownObject;
   }
 
   protected override async postprocessResponse(response: unknown, context: ProviderContext): Promise<UnknownObject> {
@@ -302,38 +341,12 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
     if (!this.hasNonEmptyString(payload.requestId)) {
       payload.requestId = `req-${randomUUID()}`;
     }
-    // gcli2api 对齐：session_id 可存在且不会导致 400（A1 已验证 200）。
-    // 对于 RouteCodex 运行时，始终确保 session_id 存在，避免上游在部分场景下用默认 session
-    // 导致对话隔离/配额分桶不稳定。
-    if (!this.hasNonEmptyString(payload.session_id)) {
-      payload.session_id = `session-${randomUUID()}`;
-    }
-    if (!this.hasNonEmptyString(payload.userAgent)) {
-      payload.userAgent = this.oauthProviderId === 'antigravity' ? 'antigravity' : 'routecodex';
-    }
-
-    // 对齐 gcli2api：Antigravity 路径统一标记 requestType=agent，
-    // 不区分模型（claude / gemini 均走 agent 配额路径）。
-    if (isAntigravity && !this.hasNonEmptyString((payload as { requestType?: unknown }).requestType)) {
-      (payload as { requestType?: string }).requestType = 'agent';
-    }
-
-    // gcli2api alignment: do not inject any fixed systemInstruction for Antigravity at the provider layer.
-    // The Hub Pipeline owns cross-protocol instruction mapping; providers remain transport-only.
+    // gcli2api alignment: Antigravity request bodies are minimal; do not inject session_id/userAgent/requestType
+    // or generationConfig defaults at the provider layer.
     if (isAntigravity) {
-      delete (payload as { systemInstruction?: unknown }).systemInstruction;
-    }
-
-    // gcli2api alignment: ensure a stable generationConfig unless explicitly provided.
-    if (isAntigravity) {
-      const gen = (payload as { generationConfig?: unknown }).generationConfig;
-      if (!gen || typeof gen !== 'object' || Array.isArray(gen)) {
-        (payload as { generationConfig: Record<string, unknown> }).generationConfig = {
-          candidateCount: 1,
-          topK: 50,
-          temperature: 1.0
-        };
-      }
+      delete (payload as { session_id?: unknown }).session_id;
+      delete (payload as { userAgent?: unknown }).userAgent;
+      delete (payload as { requestType?: unknown }).requestType;
     }
   }
 
