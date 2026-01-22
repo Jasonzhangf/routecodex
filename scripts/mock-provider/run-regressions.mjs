@@ -251,7 +251,17 @@ async function waitForHealth(port, serverProc, timeoutMs = 20000) {
     try {
       const res = await fetch(`http://127.0.0.1:${port}/health`, { method: 'GET' });
       if (res.ok) {
-        return;
+        // /health becomes reachable before runtime is fully initialized (server starts listening first
+        // to support token portal). Mock regressions must wait until hub pipeline is ready.
+        try {
+          const data = await res.json();
+          const ready = data && (data.ready === true || data.pipelineReady === true || data.status === 'ok');
+          if (ready) {
+            return;
+          }
+        } catch {
+          // ignore JSON errors, retry
+        }
       }
     } catch {
       // retry

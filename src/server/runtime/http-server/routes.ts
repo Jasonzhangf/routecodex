@@ -73,8 +73,11 @@ export function registerHttpRoutes(options: RouteOptions): void {
   console.log('[RouteCodexHttpServer] Setting up routes...');
 
   app.get('/health', (_req: Request, res: Response) => {
+    const ready = typeof getPipelineReady === 'function' ? Boolean(getPipelineReady()) : false;
     res.status(200).json({
-      status: 'ok',
+      status: ready ? 'ok' : 'starting',
+      ready,
+      pipelineReady: ready,
       server: 'routecodex',
       version: String(process.env.ROUTECODEX_VERSION || 'dev')
     });
