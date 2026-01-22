@@ -20,4 +20,6 @@ jobs:
       - name: Ensure release llms module
         run: BUILD_MODE=release npm run llmswitch:ensure
       - name: Run host tests
+        env:
+          ROUTECODEX_JEST_USE_NPM_LLMS: "1"
         run: npm run test
