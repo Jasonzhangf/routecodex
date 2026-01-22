@@ -26,6 +26,7 @@ import { loadRouteCodexConfig } from './config/routecodex-config-loader.js';
 import { createSpinner, type Spinner } from './cli/spinner.js';
 import { logger } from './cli/logger.js';
 import { registerStatusConfigCommands } from './cli/register/status-config-commands.js';
+import { registerInitCommand } from './cli/register/init-command.js';
 import { registerRestartCommand } from './cli/register/restart-command.js';
 import { registerStopCommand } from './cli/register/stop-command.js';
 import { registerStartCommand } from './cli/register/start-command.js';
@@ -91,6 +92,26 @@ program
   .name(pkgName === 'rcc' ? 'rcc' : 'routecodex')
   .description('RouteCodex CLI - Multi-provider OpenAI proxy server and Claude Code interface')
   .version(cliVersion);
+
+program.addHelpText(
+  'after',
+  `
+Quickstart:
+  ${pkgName === 'rcc' ? 'rcc' : 'routecodex'} init
+  ${pkgName === 'rcc' ? 'rcc' : 'routecodex'} start
+
+Docs (in this repo):
+  docs/INSTALLATION_AND_QUICKSTART.md
+  docs/PROVIDERS_BUILTIN.md
+  docs/PROVIDER_TYPES.md
+  docs/INSTRUCTION_MARKUP.md
+  docs/PORTS.md
+  docs/CODEX_AND_CLAUDE_CODE.md
+
+Note:
+  "${pkgName === 'rcc' ? 'rcc' : 'routecodex'} init" also copies these docs into ~/.routecodex/docs
+`
+);
 
 async function ensureTokenDaemonAutoStart(): Promise<void> {
   // Token 刷新逻辑已经在服务器进程内通过 ManagerDaemon/TokenManagerModule 执行。
@@ -207,7 +228,7 @@ try {
 } catch { /* optional */ }
 
 // Code command - Launch Claude Code interface
-	registerCodeCommand(program, {
+registerCodeCommand(program, {
   isDevPackage: IS_DEV_PACKAGE,
   isWindows: IS_WINDOWS,
   defaultDevPort: DEFAULT_DEV_PORT,
@@ -229,6 +250,15 @@ try {
     }),
   onSignal: (sig, cb) => process.on(sig, cb),
   exit: (code) => process.exit(code)
+});
+
+// Init command - guided config generation
+registerInitCommand(program, {
+  logger,
+  createSpinner,
+  fsImpl: fs,
+  pathImpl: path,
+  getHomeDir: homedir
 });
 
 registerBasicCommands(program, {

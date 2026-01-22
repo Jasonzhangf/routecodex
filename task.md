@@ -16,6 +16,20 @@
 
 ## 任务清单
 
+### 12. 安装说明 + 参考配置 + rcc init（本轮）
+- **位置**: `src/cli/commands/config.ts` + `src/cli/commands/*` + `docs/*` + `configsamples/*`
+- **优先级**: 高
+- **状态**: ✅ 已完成
+- **子任务**:
+  - [x] 新增脱敏参考配置：`configsamples/config.reference.json`
+  - [x] `rcc init`（或 `rcc config init`）交互式选择 provider 并生成 `~/.routecodex/config.json`
+  - [x] 文档：安装/启动（npm）、端口说明、provider 类型说明、内置 provider 配置说明
+  - [x] 文档：`<****>` 指令语法说明（含 stopMessage / clock）
+  - [x] 文档：Codex（`~/.codex/config.toml` 的 tc/tcm 示例）与 Claude Code（`rcc code`）使用说明
+  - [x] 单测：覆盖 init 生成逻辑与 CLI 行为（coverage（selected files）≥ 90%）
+  - [x] 回归：`npm run build:dev`（含 install:global）通过
+  - [x] `rcc init` 复制内置文档到 `~/.routecodex/docs`
+
 ### 1. Claude thoughtSignature 验证增强
 - **位置**: `sharedmodule/llmswitch-core/src/conversion/shared/reasoning-normalizer.ts`
 - **优先级**: 高

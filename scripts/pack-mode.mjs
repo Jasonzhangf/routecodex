@@ -83,6 +83,17 @@ try {
       zod: original.dependencies?.zod || '^3.23.8',
       '@jsonstudio/llms': llmsVersion
     };
+    // Ensure rcc ships bundled docs (copied to ~/.routecodex/docs by `rcc init`).
+    if (isRcc) {
+      const baseFiles = Array.isArray(original.files) ? [...original.files] : [];
+      if (!baseFiles.includes('docs/')) {
+        baseFiles.push('docs/');
+      }
+      if (!baseFiles.includes('configsamples/')) {
+        baseFiles.push('configsamples/');
+      }
+      mutated.files = baseFiles;
+    }
   } else if (isRccx) {
     // rccx: wasm-backed llms 核心，通过 npm alias 将 @jsonstudio/llms 指向 wasm 引擎包。
     mutated.bundledDependencies = [];

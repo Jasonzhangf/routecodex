@@ -2,9 +2,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { homedir } from 'node:os';
 import { spawn } from 'node:child_process';
+import readline from 'node:readline/promises';
+import { stdin as input, stdout as output } from 'node:process';
 import type { Command } from 'commander';
 
-import { API_ENDPOINTS, DEFAULT_CONFIG, HTTP_PROTOCOLS, LOCAL_HOSTS } from '../../constants/index.js';
+import { initializeConfigV1, parseProvidersArg } from '../config/init-config.js';
+import { getInitProviderCatalog } from '../config/init-provider-catalog.js';
+import { installBundledDocsBestEffort } from '../config/bundled-docs.js';
 
 type Spinner = {
   start(text?: string): Spinner;
@@ -23,130 +27,32 @@ type LoggerLike = {
   error: (msg: string) => void;
 };
 
-type TemplateConfig = {
-  server?: { port?: number; host?: string };
-  logging?: { level?: string };
-  [key: string]: unknown;
-};
-
 export type ConfigCommandContext = {
   logger: LoggerLike;
   createSpinner: (text: string) => Promise<Spinner>;
   getHomeDir?: () => string;
   fsImpl?: Pick<typeof fs, 'existsSync' | 'readFileSync' | 'writeFileSync' | 'mkdirSync'>;
-  pathImpl?: Pick<typeof path, 'join' | 'dirname'>;
+  pathImpl?: Pick<typeof path, 'join' | 'dirname' | 'resolve'>;
   spawnImpl?: typeof spawn;
   env?: Record<string, string | undefined>;
   log?: (line: string) => void;
+  prompt?: (question: string) => Promise<string>;
 };
 
-function buildTemplate(template: string | undefined): TemplateConfig {
-  switch (template) {
-    case 'lmstudio':
-      return {
-        server: { port: DEFAULT_CONFIG.PORT, host: LOCAL_HOSTS.LOCALHOST },
-        logging: { level: 'info' },
-        providers: {
-          lmstudio: {
-            type: 'lmstudio',
-            baseUrl: `${HTTP_PROTOCOLS.HTTP}${LOCAL_HOSTS.LOCALHOST}:${DEFAULT_CONFIG.LM_STUDIO_PORT}`,
-            apiKey: '${LM_STUDIO_API_KEY:-}',
-            models: {
-              'gpt-oss-20b-mlx': { maxTokens: 8192, temperature: 0.7, supportsStreaming: true, supportsTools: true },
-              'qwen2.5-7b-instruct': { maxTokens: 32768, temperature: 0.7, supportsStreaming: true, supportsTools: true }
-            },
-            timeout: 60000,
-            retryAttempts: 3
-          }
-        },
-        routing: {
-          default: 'lmstudio',
-          models: {
-            'gpt-4': 'gpt-oss-20b-mlx',
-            'gpt-4-turbo': 'gpt-oss-20b-mlx',
-            'gpt-3.5-turbo': 'gpt-oss-20b-mlx',
-            'claude-3-haiku': 'qwen2.5-7b-instruct',
-            'claude-3-sonnet': 'gpt-oss-20b-mlx'
-          }
-        },
-        features: {
-          tools: { enabled: true, maxTools: 10 },
-          streaming: { enabled: true, chunkSize: 1024 },
-          oauth: { enabled: true, providers: ['qwen', 'iflow'] }
-        }
-      };
-    case 'oauth':
-      return {
-        server: { port: DEFAULT_CONFIG.PORT, host: LOCAL_HOSTS.LOCALHOST },
-        logging: { level: 'info' },
-        providers: {
-          qwen: {
-            type: 'qwen-provider',
-            baseUrl: 'https://chat.qwen.ai',
-            oauth: {
-              clientId: 'f0304373b74a44d2b584a3fb70ca9e56',
-              deviceCodeUrl: 'https://chat.qwen.ai/api/v1/oauth2/device/code',
-              tokenUrl: 'https://chat.qwen.ai/api/v1/oauth2/token',
-              scopes: ['openid', 'profile', 'email', 'model.completion']
-            },
-            models: {
-              'qwen3-coder-plus': { maxTokens: 32768, temperature: 0.7, supportsStreaming: true, supportsTools: true }
-            }
-          }
-        },
-        routing: { default: 'qwen', models: { 'gpt-4': 'qwen3-coder-plus', 'gpt-3.5-turbo': 'qwen3-coder-plus' } },
-        features: {
-          tools: { enabled: true, maxTools: 10 },
-          streaming: { enabled: true, chunkSize: 1024 },
-          oauth: { enabled: true, autoRefresh: true, sharedCredentials: true }
-        }
-      };
-    default:
-      return {
-        server: { port: DEFAULT_CONFIG.PORT, host: LOCAL_HOSTS.LOCALHOST },
-        logging: { level: 'info' },
-        providers: {
-          openai: {
-            type: 'openai',
-            apiKey: '${OPENAI_API_KEY}',
-            baseUrl: API_ENDPOINTS.OPENAI,
-            models: { 'gpt-4': { maxTokens: 8192, temperature: 0.7 }, 'gpt-3.5-turbo': { maxTokens: 4096, temperature: 0.7 } }
-          }
-        },
-        routing: { default: 'openai' },
-        features: { tools: { enabled: true, maxTools: 10 }, streaming: { enabled: true, chunkSize: 1024 } }
-      };
+function buildInteractivePrompt(
+  ctx: ConfigCommandContext
+): { prompt: (question: string) => Promise<string>; close: () => void } | null {
+  if (typeof ctx.prompt === 'function') {
+    return { prompt: ctx.prompt, close: () => {} };
   }
-}
-
-async function initializeConfig(ctx: ConfigCommandContext, configPath: string, template?: string, force: boolean = false) {
-  const spinner = await ctx.createSpinner('Initializing configuration...');
-
-  const fsImpl = ctx.fsImpl ?? fs;
-  const pathImpl = ctx.pathImpl ?? path;
-
-  try {
-    const configDir = pathImpl.dirname(configPath);
-    if (!fsImpl.existsSync(configDir)) {
-      fsImpl.mkdirSync(configDir, { recursive: true });
-    }
-
-    if (fsImpl.existsSync(configPath) && !force) {
-      spinner.warn('Configuration file already exists');
-      spinner.info('Use --force flag to overwrite or choose a different path');
-      return;
-    }
-
-    const templateConfig = buildTemplate(template);
-    fsImpl.writeFileSync(configPath, JSON.stringify(templateConfig, null, 2));
-
-    spinner.succeed(`Configuration initialized: ${configPath}`);
-    ctx.logger.info(`Template used: ${template || 'default'}`);
-    ctx.logger.info('You can now start the server with: rcc start');
-  } catch (error) {
-    spinner.fail('Failed to initialize configuration');
-    ctx.logger.error(`Initialization failed: ${error instanceof Error ? error.message : String(error)}`);
+  if (!input.isTTY || !output.isTTY) {
+    return null;
   }
+  const rl = readline.createInterface({ input, output });
+  return {
+    prompt: async (question: string) => rl.question(question),
+    close: () => rl.close()
+  };
 }
 
 export function createConfigCommand(program: Command, ctx: ConfigCommandContext): void {
@@ -156,21 +62,87 @@ export function createConfigCommand(program: Command, ctx: ConfigCommandContext)
   const env = ctx.env ?? process.env;
   const log = ctx.log ?? ((line: string) => console.log(line));
   const spawnImpl = ctx.spawnImpl ?? spawn;
+  const bin = typeof (program as unknown as { name?: () => string }).name === 'function' ? program.name() : 'rcc';
 
   program
     .command('config')
     .description('Configuration management')
+    .addHelpText(
+      'after',
+      `
+Tips:
+  - Prefer "${bin} init" for guided config generation.
+
+Examples:
+  ${bin} init
+  ${bin} config show
+  ${bin} config validate
+  ${bin} config init --providers openai,tab --default-provider tab
+`
+    )
     .argument('<action>', 'Action to perform (show, edit, validate, init)')
     .option('-c, --config <config>', 'Configuration file path')
-    .option('-t, --template <template>', 'Configuration template (default, lmstudio, oauth)')
+    .option('-t, --template <template>', 'Init template provider id (e.g., openai, tab, glm, qwen)')
+    .option('--providers <ids>', 'Init providers (comma-separated), e.g. openai,tab,glm')
+    .option('--default-provider <id>', 'Init default provider id for routing.default')
+    .option('--host <host>', 'Init server host (httpserver.host)')
+    .option('--port <port>', 'Init server port (httpserver.port)')
     .option('-f, --force', 'Force overwrite existing configuration')
-    .action(async (action: string, options: { config?: string; template?: string; force?: boolean }) => {
+    .action(async (action: string, options: { config?: string; template?: string; providers?: string; defaultProvider?: string; host?: string; port?: string; force?: boolean }) => {
       try {
         const configPath = options.config || pathImpl.join(home(), '.routecodex', 'config.json');
 
         switch (action) {
           case 'init':
-            await initializeConfig(ctx, configPath, options.template, Boolean(options.force));
+            {
+              const spinner = await ctx.createSpinner('Initializing configuration...');
+              const catalog = getInitProviderCatalog();
+              const supported = catalog.map((p) => p.id).join(', ');
+              const providersFromArg =
+                parseProvidersArg(options.providers) ??
+                (typeof options.template === 'string' && options.template.trim() ? [options.template.trim()] : undefined);
+
+              const promptBundle = providersFromArg ? null : buildInteractivePrompt(ctx);
+              const result = await initializeConfigV1(
+                {
+                  fsImpl,
+                  pathImpl
+                },
+                {
+                  configPath,
+                  force: Boolean(options.force),
+                  host: options.host,
+                  port:
+                    typeof options.port === 'string' && Number.isFinite(Number(options.port)) && Number(options.port) > 0
+                      ? Math.floor(Number(options.port))
+                      : undefined,
+                  providers: providersFromArg,
+                  defaultProvider: options.defaultProvider
+                },
+                promptBundle ? { prompt: promptBundle.prompt } : undefined
+              );
+              try { promptBundle?.close(); } catch { /* ignore */ }
+
+              if (!result.ok) {
+                spinner.fail('Failed to initialize configuration');
+                ctx.logger.error(result.message);
+                if (!providersFromArg && !promptBundle) {
+                  ctx.logger.error(`Non-interactive init requires --providers or --template. Supported: ${supported}`);
+                }
+                return;
+              }
+
+              spinner.succeed(`Configuration initialized: ${result.configPath}`);
+              ctx.logger.info(`Providers: ${result.selectedProviders.join(', ')}`);
+              ctx.logger.info(`Default provider: ${result.defaultProvider}`);
+              {
+                const installed = installBundledDocsBestEffort({ fsImpl, pathImpl });
+                if (installed.ok) {
+                  ctx.logger.info(`Docs installed: ${installed.targetDir}`);
+                }
+              }
+              ctx.logger.info('Next: edit apiKey/tokenFile/cookieFile as needed, then run: rcc start');
+            }
             break;
           case 'show':
             if (fsImpl.existsSync(configPath)) {
@@ -206,4 +178,3 @@ export function createConfigCommand(program: Command, ctx: ConfigCommandContext)
       }
     });
 }
-

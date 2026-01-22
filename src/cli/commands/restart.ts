@@ -81,6 +81,7 @@ function resolvePortHost(ctx: RestartCommandContext, options: RestartCommandOpti
     spinner.fail(`Configuration file not found: ${configPath}`);
     ctx.logger.error('Cannot determine server port without configuration file');
     ctx.logger.info('Please create a configuration file first:');
+    ctx.logger.info('  rcc init');
     ctx.logger.info('  rcc config init');
     ctx.exit(1);
   }

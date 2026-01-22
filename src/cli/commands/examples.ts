@@ -15,14 +15,14 @@ export function createExamplesCommand(program: Command, ctx: ExamplesCommandCont
       ctx.log('');
 
       ctx.log(chalk.yellow('1. Initialize Configuration:'));
-      ctx.log('  # Create default configuration');
-      ctx.log('  rcc config init');
+      ctx.log('  # Guided init (interactive)');
+      ctx.log('  rcc init');
       ctx.log('');
-      ctx.log('  # Create LMStudio configuration');
-      ctx.log('  rcc config init --template lmstudio');
+      ctx.log('  # Non-interactive init (pick providers)');
+      ctx.log('  rcc init --providers openai,tab --default-provider tab');
       ctx.log('');
-      ctx.log('  # Create OAuth configuration');
-      ctx.log('  rcc config init --template oauth');
+      ctx.log('  # List built-in provider ids');
+      ctx.log('  rcc init --list-providers');
       ctx.log('');
 
       ctx.log(chalk.yellow('2. Start Server:'));
@@ -75,4 +75,3 @@ export function createExamplesCommand(program: Command, ctx: ExamplesCommandCont
       ctx.log('');
     });
 }
-

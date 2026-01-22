@@ -65,6 +65,21 @@ rcc --version
 
 安装成功后，`rcc --version` 会显示形如 `0.89.xxx (release)` 的版本信息；可通过 `npm update -g @jsonstudio/rcc` 升级，`npm uninstall -g @jsonstudio/rcc` 卸载。
 
+### 快速上手（推荐）
+
+```bash
+rcc init
+rcc start
+```
+
+更多细节见：
+- `docs/INSTALLATION_AND_QUICKSTART.md`
+- `docs/PROVIDERS_BUILTIN.md`
+- `docs/INSTRUCTION_MARKUP.md`
+- `docs/PORTS.md`
+- `docs/PROVIDER_TYPES.md`
+- `docs/CODEX_AND_CLAUDE_CODE.md`
+
 ### Dev CLI（本仓库）
 开发者使用以下命令安装 dev CLI（必须先构建 sharedmodule）：
 
@@ -96,6 +111,7 @@ RouteCodex 会按以下优先级查找配置：
 ## 无密钥配置样本
 
 仓库附带了一份不含真实密钥的示例：`samples/configs/openai-chat-sample.json`。复制到本地后，只需提供环境变量即可启动。
+也可以直接参考：`configsamples/config.reference.json`，或使用 `rcc init` 自动生成。
 
 ```json
 {
