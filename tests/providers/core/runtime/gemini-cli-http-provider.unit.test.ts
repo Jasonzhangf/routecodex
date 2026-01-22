@@ -80,6 +80,8 @@ describe('GeminiCLIHttpProvider basic behaviour', () => {
     expect(headers).toBeTruthy();
     expect(headers.requestId).toBe((processed as any).requestId);
     expect(headers.requestType).toBe('agent');
+    const streamHeaders = (provider as any).applyStreamModeHeaders(headers, true);
+    expect(streamHeaders.Accept).toBe('*/*');
 
     const body = (provider as any).buildHttpRequestBody(processed);
     expect(body).toBeTruthy();

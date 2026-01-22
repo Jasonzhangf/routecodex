@@ -57,6 +57,21 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
     super(cfg, dependencies, 'gemini-cli-http-provider', new GeminiCLIProtocolClient());
   }
 
+  protected override applyStreamModeHeaders(headers: Record<string, string>, wantsSse: boolean): Record<string, string> {
+    if (!this.isAntigravityRuntime()) {
+      return super.applyStreamModeHeaders(headers, wantsSse);
+    }
+    // gcli2api alignment: httpx default Accept is "*/*" (gcli2api does not override it).
+    // For Antigravity, keep this header minimal and avoid forcing text/event-stream.
+    const normalized = { ...headers };
+    const acceptKey = Object.keys(normalized).find((key) => key.toLowerCase() === 'accept');
+    if (acceptKey) {
+      delete normalized[acceptKey];
+    }
+    normalized.Accept = '*/*';
+    return normalized;
+  }
+
   protected override async preprocessRequest(request: UnknownObject): Promise<UnknownObject> {
     const processedRequest = await super.preprocessRequest(request);
     const adapter = this.resolvePayload(processedRequest);
