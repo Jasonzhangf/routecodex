@@ -1,0 +1,97 @@
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (default: v<package.json version>)"
+        required: false
+        type: string
+      npm_publish:
+        description: "Also publish @jsonstudio/rcc to npm (requires NPM_TOKEN secret)"
+        required: false
+        type: boolean
+        default: false
+      npm_tag:
+        description: "npm dist-tag when publishing (default: latest)"
+        required: false
+        type: string
+        default: "latest"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Ensure release llms module
+        run: BUILD_MODE=release npm run llmswitch:ensure
+
+      - name: Test (release deps)
+        env:
+          ROUTECODEX_JEST_USE_NPM_LLMS: "1"
+          ROUTECODEX_SKIP_AUTO_BUMP: "1"
+        run: npm run test
+
+      - name: Pack rcc tarball
+        env:
+          BUILD_MODE: release
+          ROUTECODEX_SKIP_AUTO_BUMP: "1"
+        run: npm run pack:rcc
+
+      - name: Resolve tag + asset name
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./package.json').version")"
+          if [[ -n "${{ inputs.tag }}" ]]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="v${VERSION}"
+          fi
+          TARBALL="jsonstudio-rcc-${VERSION}.tgz"
+          if [[ ! -f "${TARBALL}" ]]; then
+            echo "missing tarball: ${TARBALL}" >&2
+            ls -la jsonstudio-rcc-*.tgz || true
+            exit 2
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tarball=${TARBALL}" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release (and tag if missing)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: ${{ steps.meta.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          files: ${{ steps.meta.outputs.tarball }}
+          body: |
+            - CI: build/test using npm-installed `@jsonstudio/llms` (no local sharedmodule required)
+            - Asset: `${{ steps.meta.outputs.tarball }}`
+
+      - name: Publish to npm (optional)
+        if: ${{ inputs.npm_publish }}
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${NPM_TOKEN}" ]]; then
+            echo "Missing NPM_TOKEN secret" >&2
+            exit 2
+          fi
+          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
+          npm publish "${{ steps.meta.outputs.tarball }}" --access public --tag "${{ inputs.npm_tag }}"

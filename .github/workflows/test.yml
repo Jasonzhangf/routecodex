@@ -22,4 +22,6 @@ jobs:
       - name: Run host tests
         env:
           ROUTECODEX_JEST_USE_NPM_LLMS: "1"
+          # Prevent test-triggered builds (mock regressions) from auto-bumping version files in CI.
+          ROUTECODEX_SKIP_AUTO_BUMP: "1"
         run: npm run test
