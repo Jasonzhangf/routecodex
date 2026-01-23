@@ -1270,9 +1270,14 @@ export class RouteCodexHttpServer {
         providerId: providerIdToken,
         model: rawModel
       });
-      if (providerProtocol === 'openai-responses') {
+      // /v1/responses tool loop depends on a stable requestId mapping between:
+      // - inbound conversion capture (uses the initial requestId), and
+      // - outbound response record (may run after requestId enhancement).
+      // Enhancement happens for all providers, so rebind must be keyed off the client endpoint,
+      // not the providerProtocol (which can be gemini-chat/anthropic-messages/etc.).
+      if (String(input.entryEndpoint || '').startsWith('/v1/responses')) {
         try {
-          await rebindResponsesConversationRequestId(pipelineResult.requestId, enhancedRequestId);
+          await rebindResponsesConversationRequestId(providerRequestId, enhancedRequestId);
         } catch {
           /* ignore rebind failures */
         }
