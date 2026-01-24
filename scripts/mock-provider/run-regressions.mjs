@@ -6,6 +6,7 @@ import os from 'os';
 import { fileURLToPath } from 'url';
 import { spawn } from 'child_process';
 import { setTimeout as delay } from 'node:timers/promises';
+import http from 'node:http';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, '../..');
@@ -286,6 +287,150 @@ async function stopServer(child, forceTimeout = 5000) {
   child.kill('SIGKILL');
 }
 
+async function createLocalUpstreamServer(handler) {
+  return await new Promise((resolve, reject) => {
+    const server = http.createServer(handler);
+    server.on('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      if (!address || typeof address !== 'object') {
+        reject(new Error('Failed to obtain listen address for upstream server'));
+        return;
+      }
+      resolve({
+        server,
+        port: address.port
+      });
+    });
+  });
+}
+
+function buildIflowUaProbeConfig(port, upstreamPort) {
+  return {
+    version: '1.0.0',
+    virtualrouter: {
+      inputProtocol: 'openai',
+      outputProtocol: 'openai',
+      providers: {
+        iflow: {
+          id: 'iflow',
+          enabled: true,
+          type: 'iflow',
+          baseURL: `http://127.0.0.1:${upstreamPort}/v1`,
+          compatibilityProfile: 'chat:iflow',
+          auth: {
+            type: 'apikey',
+            apiKey: 'test-upstream-token'
+          },
+          models: {
+            'glm-4.7': { supportsStreaming: false }
+          }
+        }
+      },
+      routing: {
+        default: ['iflow.glm-4.7']
+      }
+    },
+    httpserver: {
+      host: '127.0.0.1',
+      port
+    }
+  };
+}
+
+async function runIflowUserAgentRegression() {
+  const seen = {
+    path: '',
+    headers: {},
+    body: ''
+  };
+
+  const { server: upstream, port: upstreamPort } = await createLocalUpstreamServer(async (req, res) => {
+    try {
+      seen.path = String(req.url || '');
+      seen.headers = req.headers || {};
+      let raw = '';
+      req.setEncoding('utf8');
+      req.on('data', (chunk) => {
+        raw += chunk;
+      });
+      await new Promise((resolve) => req.on('end', resolve));
+      seen.body = raw;
+    } catch {
+      // ignore
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(
+      JSON.stringify({
+        id: 'chatcmpl_mock_iflow_ua',
+        object: 'chat.completion',
+        created: Math.floor(Date.now() / 1000),
+        model: 'glm-4.7',
+        choices: [
+          {
+            index: 0,
+            message: { role: 'assistant', content: 'ok' },
+            finish_reason: 'stop'
+          }
+        ],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }
+      })
+    );
+  });
+
+  const port = 5750;
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-iflow-ua-'));
+  const configPath = path.join(dir, 'config.json');
+  await fs.writeFile(configPath, JSON.stringify(buildIflowUaProbeConfig(port, upstreamPort), null, 2), 'utf-8');
+
+  const entry = path.join(PROJECT_ROOT, 'dist', 'index.js');
+  const child = spawn(process.execPath, [entry], {
+    cwd: PROJECT_ROOT,
+    env: {
+      ...process.env,
+      ROUTECODEX_PORT: String(port),
+      ROUTECODEX_CONFIG_PATH: configPath,
+      RCC_PORT: String(port),
+      RCC_CONFIG_PATH: configPath
+    },
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+
+  try {
+    await waitForHealth(port, child);
+    const res = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        // If UA precedence is wrong, this inbound UA will leak to upstream and break iFlow glm-4.7.
+        'User-Agent': 'curl/8.7.1'
+      },
+      body: JSON.stringify({
+        model: 'iflow.glm-4.7',
+        messages: [{ role: 'user', content: 'hi' }],
+        max_tokens: 16,
+        stream: false
+      })
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      throw new Error(`ua probe request failed: HTTP ${res.status}: ${text}`);
+    }
+
+    const upstreamUa = typeof seen.headers['user-agent'] === 'string' ? seen.headers['user-agent'] : '';
+    if (upstreamUa !== 'iFlow-Cli') {
+      throw new Error(
+        `iflow UA regression: expected upstream user-agent="iFlow-Cli", got ${JSON.stringify(upstreamUa)} (path=${seen.path})`
+      );
+    }
+  } finally {
+    await stopServer(child);
+    await fs.rm(dir, { recursive: true, force: true });
+    await new Promise((resolve) => upstream.close(() => resolve()));
+  }
+}
+
 function collectInvalidNames(payload) {
   const failures = [];
   const check = (value, location) => {
@@ -556,6 +701,7 @@ async function runSample(sample, index) {
 
 async function main() {
   await ensureCliAvailable();
+  await runIflowUserAgentRegression();
   const samples = await loadRegistry();
   const watchedTags = new Set(['invalid_name', 'missing_output', 'missing_tool_call_id', 'require_fc_call_ids', 'regression']);
   const regressionSamples = samples.filter(
