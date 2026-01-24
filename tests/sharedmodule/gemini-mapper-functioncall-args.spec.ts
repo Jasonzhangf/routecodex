@@ -3,6 +3,74 @@ import { GeminiSemanticMapper } from '../../sharedmodule/llmswitch-core/src/conv
 import type { ChatEnvelope } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.js';
 
 describe('GeminiSemanticMapper functionCall.args shape', () => {
+  it('includes tools + structured functionCall for gemini-cli providers (no text-only tool transcripts)', async () => {
+    const mapper = new GeminiSemanticMapper();
+
+    const chat: ChatEnvelope = {
+      messages: [
+        {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            {
+              id: 'call_exec',
+              type: 'function',
+              function: {
+                name: 'exec_command',
+                arguments: JSON.stringify({ cmd: 'echo 1', workdir: '/tmp' })
+              }
+            } as any
+          ]
+        } as any
+      ],
+      tools: [
+        {
+          type: 'function',
+          function: {
+            name: 'exec_command',
+            parameters: {
+              type: 'object',
+              properties: {
+                command: { type: 'string' },
+                workdir: { type: 'string' }
+              }
+            }
+          }
+        } as any
+      ],
+      toolOutputs: [],
+      metadata: {
+        context: {
+          providerId: 'gemini-cli.geetasamodgeetasamoda.gemini-2.5-pro',
+          entryEndpoint: '/v1/responses',
+          providerProtocol: 'gemini-chat',
+          requestId: 'req_test'
+        }
+      } as any
+    };
+
+    const ctx = { requestId: 'req_test' } as any;
+    const envelope = await mapper.fromChat(chat, ctx);
+    const payload = envelope.payload as any;
+
+    expect(Array.isArray(payload?.tools)).toBe(true);
+    expect(Array.isArray(payload.tools?.[0]?.functionDeclarations)).toBe(true);
+    const names = payload.tools[0].functionDeclarations.map((d: any) => d?.name).filter(Boolean);
+    expect(names).toContain('exec_command');
+
+    const contents = Array.isArray(payload?.contents) ? payload.contents : [];
+    const functionCalls: any[] = [];
+    for (const entry of contents) {
+      const parts = Array.isArray(entry?.parts) ? entry.parts : [];
+      for (const part of parts) {
+        if (part && typeof part === 'object' && part.functionCall) {
+          functionCalls.push(part.functionCall);
+        }
+      }
+    }
+    expect(functionCalls.length).toBeGreaterThanOrEqual(1);
+  });
+
   it('ensures functionCall.args is always an object (no top-level arrays)', async () => {
     const mapper = new GeminiSemanticMapper();
 
