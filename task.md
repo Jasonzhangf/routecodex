@@ -38,6 +38,7 @@
 - **待落地/进行中**:
   - [x] RouteCodex CI 新增 `test:ci` + `test:ci:coverage`（先覆盖 CI 测试集）：`package.json` + `scripts/tests/ci-jest.mjs`
   - [x] 在 `.github/workflows/test.yml` 增加 coverage job（PR 必跑）：`.github/workflows/test.yml`
+  - [ ]（PR）sharedmodule：修复 `llms-wasm CI` 在 Node 20 下 `.wasm` ESM 导入失败 + 无 config 时的 bootstrap 失败（避免 CI 噪音/漏检）：`sharedmodule/.github/workflows/llms-wasm-ci.yml` + `sharedmodule/llms-wasm/scripts/compare-virtual-router.mjs`
   - [ ] CI 测试集 re-enable：`@jsonstudio/llms` 仍停留在 npm `0.6.1172`，因此 release CI 暂不包含依赖新 llmswitch-core 行为的 servertool/sharedmodule 测试（待 llms 发布后再纳入）
   - [ ] 修复当前阻塞“全量 coverage”的单测（`tests/servertool/virtual-router-quota-routing.spec.ts`）或拆分为 nightly
 
