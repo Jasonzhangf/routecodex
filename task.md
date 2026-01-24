@@ -69,10 +69,11 @@
   - [x] Coverage runner：`build:coverage`（sourcemap）+ `c8` 产出 `coverage/coverage-summary.json`：`sharedmodule/llmswitch-core/scripts/run-ci-coverage.mjs` + `sharedmodule/llmswitch-core/tsconfig.coverage.json`
   - [x] Coverage gate 脚本 + glue allowlist 初版：`sharedmodule/llmswitch-core/scripts/verify-coverage.mjs` + `sharedmodule/llmswitch-core/config/coverage-exclude-glue.json`
   - [x] 增加覆盖回归用例（先覆盖核心路径）：HubPipeline 全链路 smoke + web_search backend smoke：`sharedmodule/llmswitch-core/scripts/tests/hub-pipeline-smoke.mjs` + `sharedmodule/llmswitch-core/scripts/tests/web-search-backend-smoke.mjs`
+  - [x] 增加 coverage boost 用例（纯单测、无外网、deterministic）并入 matrix：`sharedmodule/llmswitch-core/scripts/tests/coverage-openai-message-normalize.mjs` + `sharedmodule/llmswitch-core/scripts/tests/coverage-request-tool-list-filter.mjs` + `sharedmodule/llmswitch-core/scripts/tests/coverage-context-diff.mjs` + `sharedmodule/llmswitch-core/scripts/tests/coverage-sticky-pool-via-router.mjs` + `sharedmodule/llmswitch-core/scripts/tests/coverage-parse-loose-json.mjs` + `sharedmodule/llmswitch-core/scripts/tests/coverage-instruction-target.mjs`
   - [ ] 90% 目标：逐步补齐 `src/**` 单测/回归并把 CI gate 从当前临时阈值提升到 90%（lines/branches/functions/statements）
   - [ ] “模块必须有测试” gate：落地 `tests/unit|integration|regression|golden` 分层，并启用 `scripts/verify-test-coverage-map.mjs`
   - [ ] Golden 扩容策略：如果 fixtures 体积膨胀，迁 GitHub Release asset + sha256 lock（仍保证 CI 可获取）
-  - **当前覆盖率基线（本地，2026-01-24）**：`src/**` ≈ lines **55.39%** / branches **44.37%** / functions **54.47%** / statements **55.39%**（未达 90%，CI 暂时用较低阈值跑通并持续抬升）
+  - **当前覆盖率基线（本地，2026-01-24）**：`src/**` ≈ lines **57.3%** / branches **45.11%** / functions **55.94%** / statements **57.3%**（未达 90%，CI 暂时用较低阈值跑通并持续抬升）
 
 ### 13. Chat Process 协议与流水线契约（processMode=chat）
 - **位置**: `docs/CHAT_PROCESS_PROTOCOL_AND_PIPELINE.md` + `docs/chat-semantic-expansion-plan.md` + `sharedmodule/llmswitch-core/src/conversion/hub/**` + `src/client/**` + `src/server/handlers/**`
