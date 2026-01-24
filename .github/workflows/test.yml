@@ -52,16 +52,7 @@ jobs:
         run: |
           set -euo pipefail
           if [[ -f coverage/coverage-summary.json ]]; then
-            node - <<'NODE'
-          const fs = require('fs');
-          const s = JSON.parse(fs.readFileSync('coverage/coverage-summary.json', 'utf8'));
-          const t = s.total || {};
-          const pct = (x) => (x && typeof x.pct === 'number' ? x.pct : 0);
-          console.log(`lines: ${pct(t.lines)}%`);
-          console.log(`branches: ${pct(t.branches)}%`);
-          console.log(`functions: ${pct(t.functions)}%`);
-          console.log(`statements: ${pct(t.statements)}%`);
-NODE
+            node -e 'const fs=require("fs");const s=JSON.parse(fs.readFileSync("coverage/coverage-summary.json","utf8"));const t=s.total||{};const pct=(x)=>((x&&typeof x.pct==="number")?x.pct:0);console.log(`lines: ${pct(t.lines)}%`);console.log(`branches: ${pct(t.branches)}%`);console.log(`functions: ${pct(t.functions)}%`);console.log(`statements: ${pct(t.statements)}%`);'
           else
             echo "missing coverage/coverage-summary.json"
             ls -la coverage || true
