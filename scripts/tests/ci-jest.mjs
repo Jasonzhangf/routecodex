@@ -2,23 +2,42 @@ import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import process from 'node:process';
 
+// Keep CI Jest fast and deterministic:
+// - Prefer pure unit tests / mock-provider tests (no external network).
+// - Expand coverage by adding more suites here (don’t run `jest --all` in CI).
 const routingInstructionTests = [
   'tests/server/runtime/request-executor.single-attempt.spec.ts',
   'tests/server/runtime/executor-provider.retryable.spec.ts',
   'tests/providers/auth/tokenfile-auth.iflow.spec.ts',
+  'tests/providers/core/runtime/gemini-http-provider.unit.test.ts',
   'tests/providers/core/runtime/gemini-cli-http-provider.unit.test.ts',
+  'tests/providers/core/runtime/base-provider.spec.ts',
+  'tests/providers/core/runtime/http-transport-provider.headers.test.ts',
+  'tests/providers/core/runtime/protocol-http-providers.unit.test.ts',
+  'tests/providers/core/runtime/provider-error-classifier.spec.ts',
   'tests/providers/core/runtime/antigravity-quota-client.unit.test.ts',
+  'tests/providers/core/utils/http-client.postStream.idle-timeout.spec.ts',
+  'tests/providers/core/utils/snapshot-writer.sse-error-propagation.spec.ts',
   'tests/manager/quota/provider-quota-center.spec.ts',
   'tests/manager/quota/provider-quota-store.spec.ts',
   'tests/manager/quota/quota-manager-refresh.spec.ts',
   'tests/manager/quota/provider-quota-daemon-module.spec.ts',
   'tests/manager/quota/provider-key-normalization.spec.ts',
+  'tests/responses/responses-openai-bridge.spec.ts',
   'tests/server/http-server/daemon-admin.e2e.spec.ts',
+  'tests/server/http-server/daemon-admin-provider-pool.e2e.spec.ts',
+  'tests/server/http-server/apikey-auth.e2e.spec.ts',
   'tests/server/http-server/quota-view-injection.spec.ts',
   'tests/server/http-server/quota-refresh-triggers.e2e.spec.ts',
   'tests/server/http-server/hub-policy-injection.spec.ts',
   'tests/server/http-server/session-header-injection.spec.ts',
   'tests/server/http-server/session-dir.spec.ts',
+  'tests/server/http-server/execute-pipeline-failover.spec.ts',
+  'tests/server/runtime/http-server/executor-provider.spec.ts',
+  'tests/server/runtime/http-server/request-executor.spec.ts',
+  'tests/server/utils/http-error-mapper-timeout.spec.ts',
+  'tests/server/utils/http-error-mapper-malformed-request.spec.ts',
+  'tests/server/handlers/handler-utils.apikey-denylist.spec.ts',
   'tests/server/handlers/sse-timeout.spec.ts',
   'tests/utils/is-direct-execution.test.ts',
   'tests/utils/windows-netstat.test.ts',
@@ -55,6 +74,7 @@ const jestBin = path.join(process.cwd(), 'node_modules', 'jest', 'bin', 'jest.js
 const args = [
   '--runTestsByPath',
   ...allTests,
+  ...(wantsCoverage ? ['--testTimeout=20000'] : []),
   ...(wantsCoverage
     ? [
         '--coverage',
