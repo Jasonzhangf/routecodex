@@ -27,9 +27,9 @@ function resolveUserDir(): string {
 function resolvePackageRootFromHere(): string {
   const here = fileURLToPath(import.meta.url);
   const dir = path.dirname(here);
-  // dist/cli/config/bundled-docs.js -> ../../.. = dist
+  // dist/cli/config/bundled-docs.js -> ../.. = dist
   // dist -> .. = package root
-  const distDir = path.resolve(dir, '..', '..', '..');
+  const distDir = path.resolve(dir, '..', '..');
   const rootDir = path.resolve(distDir, '..');
   return rootDir;
 }
@@ -105,4 +105,3 @@ export function installBundledDocsBestEffort(opts?: {
 
   return { ok: true, sourceDir, targetDir, copied, skipped };
 }
-

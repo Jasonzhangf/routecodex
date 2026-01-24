@@ -122,6 +122,9 @@ Examples:
       }
 
       spinner.succeed(`Configuration initialized: ${result.configPath}`);
+      if (result.backupPath) {
+        ctx.logger.info(`Backed up existing config: ${result.backupPath}`);
+      }
       ctx.logger.info(`Providers: ${result.selectedProviders.join(', ')}`);
       ctx.logger.info(`Default provider: ${result.defaultProvider}`);
       {

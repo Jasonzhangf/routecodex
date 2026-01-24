@@ -504,6 +504,7 @@ describe('init-config', () => {
         fsImpl: {
           existsSync: () => true,
           mkdirSync: () => {},
+          readFileSync: () => '',
           writeFileSync: () => {}
         },
         pathImpl: path as any
@@ -522,6 +523,7 @@ describe('init-config', () => {
         fsImpl: {
           existsSync: () => false,
           mkdirSync: () => {},
+          readFileSync: () => '',
           writeFileSync: () => {}
         },
         pathImpl: path as any
@@ -540,6 +542,7 @@ describe('init-config', () => {
         fsImpl: {
           existsSync: () => false,
           mkdirSync: () => {},
+          readFileSync: () => '',
           writeFileSync: () => {}
         },
         pathImpl: path as any
@@ -558,6 +561,7 @@ describe('init-config', () => {
         fsImpl: {
           existsSync: () => false,
           mkdirSync: () => {},
+          readFileSync: () => '',
           writeFileSync: () => {}
         },
         pathImpl: path as any
@@ -578,6 +582,7 @@ describe('init-config', () => {
         fsImpl: {
           existsSync: () => false,
           mkdirSync: () => {},
+          readFileSync: () => '',
           writeFileSync: (p: any, content: any) => writes.set(String(p), String(content))
         },
         pathImpl: path as any
@@ -613,6 +618,7 @@ describe('init-config', () => {
         fsImpl: {
           existsSync: () => false,
           mkdirSync: () => {},
+          readFileSync: () => '',
           writeFileSync: (p: any, content: any) => writes.set(String(p), String(content))
         },
         pathImpl: path as any
@@ -635,6 +641,7 @@ describe('init-config', () => {
         fsImpl: {
           existsSync: () => false,
           mkdirSync: () => {},
+          readFileSync: () => '',
           writeFileSync: () => {
             throw new Error('disk full');
           }
@@ -653,6 +660,34 @@ describe('init-config', () => {
   it('parseProvidersArg parses comma-separated list', () => {
     expect(parseProvidersArg(' openai, tab ,glm ')).toEqual(['openai', 'tab', 'glm']);
     expect(parseProvidersArg('')).toBeUndefined();
+  });
+
+  it('backs up existing config when forced', async () => {
+    const writes = new Map<string, string>();
+    const exists = new Set<string>(['/tmp/config.json']);
+
+    const result = await initializeConfigV1(
+      {
+        fsImpl: {
+          existsSync: (p: any) => exists.has(String(p)),
+          mkdirSync: () => {},
+          readFileSync: () => '{"old":true}',
+          writeFileSync: (p: any, content: any) => {
+            writes.set(String(p), String(content));
+            exists.add(String(p));
+          }
+        },
+        pathImpl: path as any
+      },
+      { configPath: '/tmp/config.json', force: true, providers: ['openai'] }
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.backupPath).toBe('/tmp/config.json.bak');
+      expect(writes.get('/tmp/config.json.bak')).toContain('"old"');
+      expect(writes.get('/tmp/config.json')).toContain('"version"');
+    }
   });
 });
 

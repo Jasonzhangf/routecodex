@@ -4,7 +4,7 @@ import type * as fs from 'node:fs';
 import { getInitProviderCatalog, type InitProviderTemplate } from './init-provider-catalog.js';
 
 export type InitConfigIo = {
-  fsImpl: Pick<typeof fs, 'existsSync' | 'mkdirSync' | 'writeFileSync'>;
+  fsImpl: Pick<typeof fs, 'existsSync' | 'mkdirSync' | 'readFileSync' | 'writeFileSync'>;
   pathImpl?: Pick<typeof path, 'join' | 'dirname' | 'resolve'>;
 };
 
@@ -22,7 +22,7 @@ export type InitConfigOptions = {
 };
 
 export type InitConfigResult =
-  | { ok: true; configPath: string; selectedProviders: string[]; defaultProvider: string }
+  | { ok: true; configPath: string; selectedProviders: string[]; defaultProvider: string; backupPath?: string }
   | { ok: false; reason: 'exists' | 'invalid_selection' | 'no_providers' | 'write_failed'; message: string };
 
 function parseCsvList(value: string): string[] {
@@ -144,6 +144,21 @@ async function interactiveHostPort(
   };
 }
 
+function computeBackupPath(fsImpl: InitConfigIo['fsImpl'], configPath: string): string {
+  const base = `${configPath}.bak`;
+  if (!fsImpl.existsSync(base)) {
+    return base;
+  }
+  for (let i = 1; i < 10_000; i++) {
+    const candidate = `${base}.${i}`;
+    if (!fsImpl.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  // Extremely unlikely; avoid an infinite loop in pathological environments.
+  return `${base}.${Date.now()}`;
+}
+
 export async function initializeConfigV1(
   io: InitConfigIo,
   opts: InitConfigOptions,
@@ -155,12 +170,24 @@ export async function initializeConfigV1(
   const configPath = pathImpl.resolve(opts.configPath);
   const configDir = pathImpl.dirname(configPath);
 
+  let backupPath: string | undefined;
   if (fsImpl.existsSync(configPath) && !opts.force) {
     return { ok: false, reason: 'exists', message: `Configuration file already exists: ${configPath}` };
   }
 
   if (!fsImpl.existsSync(configDir)) {
     fsImpl.mkdirSync(configDir, { recursive: true });
+  }
+
+  if (opts.force && fsImpl.existsSync(configPath)) {
+    try {
+      const previous = fsImpl.readFileSync(configPath, 'utf8');
+      backupPath = computeBackupPath(fsImpl, configPath);
+      fsImpl.writeFileSync(backupPath, previous, 'utf8');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { ok: false, reason: 'write_failed', message: `Failed to backup existing config: ${message}` };
+    }
   }
 
   const catalog = getInitProviderCatalog();
@@ -223,7 +250,13 @@ export async function initializeConfigV1(
 
   try {
     fsImpl.writeFileSync(configPath, JSON.stringify(configObject, null, 2), 'utf8');
-    return { ok: true, configPath, selectedProviders: selectedTemplates.map((p) => p.id), defaultProvider: defaultProviderId };
+    return {
+      ok: true,
+      configPath,
+      selectedProviders: selectedTemplates.map((p) => p.id),
+      defaultProvider: defaultProviderId,
+      backupPath
+    };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return { ok: false, reason: 'write_failed', message: `Failed to write config: ${message}` };
