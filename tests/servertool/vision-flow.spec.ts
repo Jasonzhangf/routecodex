@@ -87,7 +87,10 @@ describe('vision_auto servertool followup (entry-aware)', () => {
 
     expect(orchestration.executed).toBe(true);
     expect(orchestration.flowId).toBe('vision_flow');
-    expect(sawFollowup?.metadata?.serverToolFollowup).toBe(true);
+    const followupMeta = sawFollowup?.metadata as any;
+    const followupFlag =
+      followupMeta?.serverToolFollowup ?? followupMeta?.__rt?.serverToolFollowup;
+    expect(followupFlag).toBe(true);
     expect(sawFollowup?.metadata?.stream).toBe(false);
 
     const body = sawFollowup?.body as any;

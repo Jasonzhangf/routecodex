@@ -116,23 +116,28 @@ describe('ServerTool web_search engine (generic)', () => {
   test('performs search via providerInvoker and injects tool_outputs', async () => {
     const chatResponse = buildChatWithToolCall('today news');
 
+    const webSearch = {
+      engines: [
+        {
+          id: 'stub',
+          providerKey: 'stub-backend',
+          description: 'stub backend',
+          default: true
+        }
+      ],
+      injectPolicy: 'always',
+      force: true
+    } as any;
+
     const ctx: AdapterContext = {
       ...baseCtx,
       requestId: 'req-web-stub',
       capturedChatRequest: makeCapturedChatRequest(),
-      webSearch: {
-        engines: [
-          {
-            id: 'stub',
-            providerKey: 'stub-backend',
-            description: 'stub backend',
-            default: true
-          }
-        ],
-        injectPolicy: 'always',
-        force: true
-      } as any
-    };
+      webSearch,
+      __rt: {
+        webSearch
+      }
+    } as any;
 
     const invocations: any[] = [];
     const providerInvoker: ProviderInvoker = async (options) => {
@@ -184,24 +189,30 @@ describe('ServerTool web_search engine (generic)', () => {
 
   test('builds entry-aware followup payload for /v1/responses', async () => {
     const chatResponse = buildChatWithToolCall('today news');
+
+    const webSearch = {
+      engines: [
+        {
+          id: 'stub',
+          providerKey: 'stub-backend',
+          description: 'stub backend',
+          default: true
+        }
+      ],
+      injectPolicy: 'always',
+      force: true
+    } as any;
+
     const ctx: AdapterContext = {
       ...baseCtx,
       requestId: 'req-web-responses',
       entryEndpoint: '/v1/responses',
       capturedChatRequest: makeCapturedChatRequest(),
-      webSearch: {
-        engines: [
-          {
-            id: 'stub',
-            providerKey: 'stub-backend',
-            description: 'stub backend',
-            default: true
-          }
-        ],
-        injectPolicy: 'always',
-        force: true
-      } as any
-    };
+      webSearch,
+      __rt: {
+        webSearch
+      }
+    } as any;
 
     const providerInvoker: ProviderInvoker = async () => {
       return {
@@ -240,7 +251,10 @@ describe('ServerTool web_search engine (generic)', () => {
 
     expect(orchestration.executed).toBe(true);
     expect(orchestration.flowId).toBe('web_search_flow');
-    expect(sawFollowup?.metadata?.serverToolFollowup).toBe(true);
+    const followupMeta = sawFollowup?.metadata as any;
+    const followupFlag =
+      followupMeta?.serverToolFollowup ?? followupMeta?.__rt?.serverToolFollowup;
+    expect(followupFlag).toBe(true);
     expect(sawFollowup?.metadata?.stream).toBe(false);
     const body = sawFollowup?.body as any;
     expect(body).toBeDefined();
@@ -255,27 +269,32 @@ describe('ServerTool web_search engine (generic)', () => {
   test('falls back to next engine on backend failure', async () => {
     const chatResponse = buildChatWithToolCall('fallback search');
 
+    const webSearch = {
+      engines: [
+        {
+          id: 'bad',
+          providerKey: 'backend.bad',
+          description: 'bad backend',
+          default: true
+        },
+        {
+          id: 'good',
+          providerKey: 'backend.good',
+          description: 'good backend'
+        }
+      ],
+      injectPolicy: 'always',
+      force: true
+    } as any;
+
     const ctx: AdapterContext = {
       ...baseCtx,
       requestId: 'req-web-fallback',
-      webSearch: {
-        engines: [
-          {
-            id: 'bad',
-            providerKey: 'backend.bad',
-            description: 'bad backend',
-            default: true
-          },
-          {
-            id: 'good',
-            providerKey: 'backend.good',
-            description: 'good backend'
-          }
-        ],
-        injectPolicy: 'always',
-        force: true
-      } as any
-    };
+      webSearch,
+      __rt: {
+        webSearch
+      }
+    } as any;
 
     const invocations: any[] = [];
     const providerInvoker: ProviderInvoker = async (options) => {
@@ -329,28 +348,33 @@ describe('ServerTool web_search engine (generic)', () => {
   test('skips engines with serverToolsDisabled', async () => {
     const chatResponse = buildChatWithToolCall('skip disabled engine');
 
+    const webSearch = {
+      engines: [
+        {
+          id: 'disabled',
+          providerKey: 'backend.disabled',
+          description: 'disabled backend',
+          default: true,
+          serverToolsDisabled: true
+        },
+        {
+          id: 'enabled',
+          providerKey: 'backend.enabled',
+          description: 'enabled backend'
+        }
+      ],
+      injectPolicy: 'always',
+      force: true
+    } as any;
+
     const ctx: AdapterContext = {
       ...baseCtx,
       requestId: 'req-web-disabled',
-      webSearch: {
-        engines: [
-          {
-            id: 'disabled',
-            providerKey: 'backend.disabled',
-            description: 'disabled backend',
-            default: true,
-            serverToolsDisabled: true
-          },
-          {
-            id: 'enabled',
-            providerKey: 'backend.enabled',
-            description: 'enabled backend'
-          }
-        ],
-        injectPolicy: 'always',
-        force: true
-      } as any
-    };
+      webSearch,
+      __rt: {
+        webSearch
+      }
+    } as any;
 
     const invocations: any[] = [];
     const providerInvoker: ProviderInvoker = async (options) => {
@@ -440,8 +464,21 @@ describe('ServerTool web_search engine (Gemini backend)', () => {
           }
         ],
         injectPolicy: 'always'
-      } as any
-    };
+      } as any,
+      __rt: {
+        webSearch: {
+        engines: [
+          {
+            id: 'gemini-2.5-flash-lite',
+            providerKey: 'gemini-cli.gemini-2.5-flash-lite',
+            description: 'Gemini 2.5 Flash Lite web search backend',
+            default: true
+          }
+        ],
+        injectPolicy: 'always'
+        } as any
+      }
+    } as any;
 
     const invocations: any[] = [];
     const providerInvoker: ProviderInvoker = async (options) => {

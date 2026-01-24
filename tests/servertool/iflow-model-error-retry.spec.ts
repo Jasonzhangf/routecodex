@@ -40,7 +40,10 @@ describe('iflow_model_error_retry servertool followup (entry-aware)', () => {
 
     expect(orchestration.executed).toBe(true);
     expect(orchestration.flowId).toBe('iflow_model_error_retry');
-    expect(sawFollowup?.metadata?.serverToolFollowup).toBe(true);
+    const followupMeta = sawFollowup?.metadata as any;
+    const followupFlag =
+      followupMeta?.serverToolFollowup ?? followupMeta?.__rt?.serverToolFollowup;
+    expect(followupFlag).toBe(true);
     expect(sawFollowup?.metadata?.stream).toBe(false);
 
     const body = sawFollowup?.body as any;

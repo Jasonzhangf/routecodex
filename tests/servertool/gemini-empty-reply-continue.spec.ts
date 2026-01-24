@@ -55,11 +55,13 @@ describe('gemini_empty_reply_continue servertool', () => {
 
     expect(orchestration.executed).toBe(true);
     expect(orchestration.flowId).toBe('gemini_empty_reply_continue');
-    expect(sawFollowupPayload?.metadata?.serverToolFollowup).toBe(true);
+    const followupMeta = sawFollowupPayload?.metadata as any;
+    const followupRt = followupMeta?.__rt ?? followupMeta;
+    expect(followupRt?.serverToolFollowup).toBe(true);
     expect(sawFollowupPayload?.metadata?.stream).toBe(false);
-    expect(sawFollowupPayload?.metadata?.preserveRouteHint).toBe(false);
-    expect(sawFollowupPayload?.metadata?.disableStickyRoutes).toBe(true);
-    expect(sawFollowupPayload?.metadata?.serverToolOriginalEntryEndpoint).toBe('/v1/responses');
+    expect(followupRt?.preserveRouteHint).toBe(false);
+    expect(followupRt?.disableStickyRoutes).toBe(true);
+    expect(followupRt?.serverToolOriginalEntryEndpoint).toBe('/v1/responses');
 
     const body = sawFollowupPayload?.body as any;
     expect(body).toBeDefined();

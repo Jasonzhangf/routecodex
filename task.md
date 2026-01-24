@@ -32,6 +32,7 @@
   - [x] 扩大 CI jest 测试集（仍保持 deterministic / 无外网）：`scripts/tests/ci-jest.mjs`
   - [x] CI 增加 release build 校验（防止“测试过了但 build 挂”）：`.github/workflows/test.yml`（`npm run build:min`）
   - [x] CI 稳定性：workflow 增加 concurrency + job timeout；coverage job 固定 maxWorkers（通过 `ROUTECODEX_CI_MAX_WORKERS`）防止小 runner OOM：`.github/workflows/test.yml` + `scripts/tests/ci-jest.mjs`
+  - [x] servertool 回归测试兼容两套契约：旧版 `metadata.* / adapterContext.webSearch` 与新版 `metadata.__rt.* / adapterContext.__rt.*`（避免 sharedmodule 演进时 CI 断裂）；PR CI 仍以 release npm `@jsonstudio/llms@0.6.1172` 为基准，dev-only servertool suites（clock/mixed/stop-message session 等）暂不纳入 CI coverage：`tests/servertool/*.spec.ts` + `scripts/tests/ci-jest.mjs`
 - **仍需你拍板**（GitHub 设置侧，代码无法强制）:
   - [ ] 分支保护规则：将 `llmswitch-core-ci` 标记为 Required status checks（PR 必过）
 - **待落地/进行中**:
