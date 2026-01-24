@@ -93,6 +93,9 @@ const args = [
   ...(wantsCoverage
     ? [
         '--coverage',
+        ...(process.env.ROUTECODEX_CI_MAX_WORKERS
+          ? [`--maxWorkers=${process.env.ROUTECODEX_CI_MAX_WORKERS}`]
+          : []),
         '--coverageReporters=json-summary',
         '--coverageReporters=text',
         '--coverageDirectory=coverage'
