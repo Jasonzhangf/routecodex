@@ -46,7 +46,7 @@ describe('servertool:clock', () => {
     resetSessionDir();
   });
 
-  test('is disabled by default (no tool injection when virtualrouter.clock is absent)', async () => {
+  test('does not inject clock tool when sessionId is absent', async () => {
     const request = buildRequest([{ role: 'user', content: 'hi' }]);
     const result = await runReqProcessStage1ToolGovernance({
       request,
@@ -60,6 +60,26 @@ describe('servertool:clock', () => {
     const processed = result.processedRequest as StandardizedRequest;
     const toolNames = (Array.isArray(processed.tools) ? processed.tools : []).map((t) => t.function?.name);
     expect(toolNames).not.toContain('clock');
+  });
+
+  test('injects clock tool schema by default when sessionId exists', async () => {
+    const request = buildRequest([{ role: 'user', content: 'hi' }]);
+    const result = await runReqProcessStage1ToolGovernance({
+      request,
+      rawPayload: {},
+      metadata: {
+        originalEndpoint: '/v1/chat/completions',
+        sessionId: 's-clock-default-1'
+      },
+      entryEndpoint: '/v1/chat/completions',
+      requestId: 'req-clock-default-inject'
+    });
+
+    const processed = result.processedRequest as any;
+    const toolNames = (Array.isArray(processed.tools) ? processed.tools : []).map((t: any) => t?.function?.name);
+    expect(toolNames).toContain('clock');
+    expect(processed.metadata?.clockEnabled).toBe(true);
+    expect(processed.metadata?.serverToolRequired).toBe(true);
   });
 
   test('injects clock tool schema when enabled', async () => {
