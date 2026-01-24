@@ -502,6 +502,11 @@ export QWEN_CLIENT_SECRET="your-qwen-client-secret"
 # 其他提供商密钥
 export OPENAI_API_KEY="your-openai-api-key"
 export ANTHROPIC_API_KEY="your-anthropic-api-key"
+
+# Antigravity（Gemini CLI runtime）兼容开关
+# 默认行为无需设置；只有在需要对齐 legacy gcli2api 的“最小 header/body”时才设置为 minimal。
+# 可用值：minimal（或 gcli2api）
+export ROUTECODEX_ANTIGRAVITY_HEADER_MODE="minimal"
 ```
 
 ### 启动服务

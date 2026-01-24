@@ -57,7 +57,7 @@ function makeCtx(options: {
       model: 'gpt-test',
       messages: [{ role: 'user', content: 'hi' }]
     },
-    ...(options.serverToolFollowup ? { serverToolFollowup: true } : {})
+    ...(options.serverToolFollowup ? { __rt: { serverToolFollowup: true } } : {})
   };
 
   return {
@@ -238,4 +238,3 @@ describe('recursive_detection_guard servertool', () => {
     );
   });
 });
-

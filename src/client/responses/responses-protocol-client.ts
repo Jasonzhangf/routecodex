@@ -1,5 +1,6 @@
 import type { HttpProtocolClient, ProtocolRequestPayload } from '../http-protocol-client.js';
 import type { UnknownObject } from '../../types/common-types.js';
+import { stripInternalKeysDeep } from '../../utils/strip-internal-keys.js';
 
 interface ResponsesRequest extends Record<string, unknown> {
   model?: string;
@@ -44,7 +45,7 @@ export class ResponsesProtocolClient implements HttpProtocolClient<ProtocolReque
     if ('metadata' in body) {
       delete body.metadata;
     }
-    return body;
+    return stripInternalKeysDeep(body);
   }
 
   resolveEndpoint(_request: ProtocolRequestPayload, defaultEndpoint: string): string {

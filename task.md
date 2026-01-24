@@ -16,6 +16,88 @@
 
 ## 任务清单
 
+### 14. CI 基线（PR 必跑）+ 覆盖率增强（从最小集合开始）
+- **位置**: `sharedmodule/.github/workflows/llmswitch-core-ci.yml` + `routecodex/.github/workflows/test.yml` + `jest.config.js`
+- **优先级**: 高
+- **状态**: 🟡 进行中
+- **目标**:
+  - PR 必跑：llmswitch-core `npm run verif`（matrix）必须作为 PR 检查项
+  - RouteCodex CI 走 release 路径：npm 安装的 `@jsonstudio/llms`（不走本地 symlink）
+  - 覆盖率从“CI 测试集”起步，逐步扩大到全量测试
+  - 任何 CI/测试产物不入 git（`dist/`、`coverage/`、`test-results/`、`*.tgz` 等）
+- **已完成**:
+  - [x] 新增 sharedmodule PR workflow：llmswitch-core `npm ci` + `npm run verif`：`sharedmodule/.github/workflows/llmswitch-core-ci.yml`
+  - [x] RouteCodex 基线 coverage 盘点（按 `test:ci:coverage` 的 jest 集合）：当前 lines/branches/functions/statements 约 22%/18%/24%/22%
+  - [x] 仓库卫生：根目录禁止 ad-hoc 文件（md/test/debug/pid/cache），CI 增加 `verify:repo-sanity`（PR 必跑）：`.github/workflows/test.yml` + `scripts/ci/repo-sanity.mjs`
+- **仍需你拍板**（GitHub 设置侧，代码无法强制）:
+  - [ ] 分支保护规则：将 `llmswitch-core-ci` 标记为 Required status checks（PR 必过）
+- **待落地/进行中**:
+  - [x] RouteCodex CI 新增 `test:ci` + `test:ci:coverage`（先覆盖 CI 测试集）：`package.json` + `scripts/tests/ci-jest.mjs`
+  - [x] 在 `.github/workflows/test.yml` 增加 coverage job（PR 必跑）：`.github/workflows/test.yml`
+  - [ ] CI 测试集 re-enable：`@jsonstudio/llms` 仍停留在 npm `0.6.1172`，因此 release CI 暂不包含依赖新 llmswitch-core 行为的 servertool/sharedmodule 测试（待 llms 发布后再纳入）
+  - [ ] 修复当前阻塞“全量 coverage”的单测（`tests/servertool/virtual-router-quota-routing.spec.ts`）或拆分为 nightly
+
+### 13. Chat Process 协议与流水线契约（processMode=chat）
+- **位置**: `docs/CHAT_PROCESS_PROTOCOL_AND_PIPELINE.md` + `docs/chat-semantic-expansion-plan.md` + `sharedmodule/llmswitch-core/src/conversion/hub/**` + `src/client/**` + `src/server/handlers/**`
+- **优先级**: 高
+- **状态**: ✅ 已完成（待你审阅）
+- **目标不变量**（processMode=chat）:
+  - 请求/响应都严格走 `inbound → (chat extension shape) → chat_process → outbound`
+  - 进入 chat_process 前必须完成**强制语义映射**；可映射语义不得滞留在 `metadata`
+  - 响应侧进入 chat_process 前必须是 canonical chat completion（`choices[0].message` 存在）
+  - 内部环境注入字段统一 `__*` 前缀，并在 provider/client 边界统一剥离 `__*`
+- **已完成**:
+  - [x] 文档：统一术语/不变量/阶段命名提案与修改点：`docs/CHAT_PROCESS_PROTOCOL_AND_PIPELINE.md`
+  - [x] 文档：语义扩展计划与口径收敛：`docs/chat-semantic-expansion-plan.md`
+  - [x] E1：在 provider/client 边界剥离所有 `__*`（host side）：`src/utils/strip-internal-keys.ts` + `src/client/**` + `src/server/handlers/handler-utils.ts`
+  - [x] 修复 `/v1/responses` 常规请求不携带 `responsesResume`（避免触发 semantic gate）：`src/server/handlers/responses-handler.ts`
+  - [x] A1（第一版）：协议扫描并列出“可映射语义键”清单（以具体键枚举为策略）：`docs/CHAT_PROCESS_PROTOCOL_AND_PIPELINE.md` 3.2
+  - [x] A1（第一版）：请求侧 chat_process entry 的 fail-fast gate（禁入键枚举）：`sharedmodule/llmswitch-core/src/conversion/hub/pipeline/hub-pipeline.ts`
+  - [x] C：响应侧在 servertool orchestration 后强制 canonicalize（hard gate）+ resp_process 兜底归一（best-effort）：`sharedmodule/llmswitch-core/src/conversion/hub/response/provider-response.ts` + `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/resp_process/resp_process_stage1_tool_governance/index.ts`
+  - [x] D：chat_process 范围 stageId 改为点分风格（仅 stageRecorder/snapshot key）：`sharedmodule/llmswitch-core/src/conversion/hub/**`
+  - [x] 修复 request outbound format_build 调错函数（buildResponse → buildRequest），避免 tools 等字段在请求侧丢失：`sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/req_outbound/req_outbound_stage2_format_build/index.ts`
+  - [x] 请求侧：将 `requestSemantics` 作为响应转换的唯一语义载体（不塞 metadata）：`src/server/runtime/http-server/request-executor.ts`
+  - [x] E1（落地到实现）：内部 runtime/env 注入统一迁移到 `metadata.__rt`，并在 provider/client 边界剥离 `__*`（含 `__rt`）
+  - [x] Host：补齐所有响应转换入口都传递 `requestSemantics`（与 request-executor 口径一致）：`src/server/runtime/http-server/index.ts` + `src/server/runtime/http-server/request-executor.ts`
+  - [x] 文档：修正 llmswitch-core stage README 对 `responsesContext` 的 legacy 叫法，统一以 `ChatEnvelope.semantics.responses.*` 为语义载体
+  - [x] 移除响应侧“文本工具标记 → tool_calls”兜底提升（不掩盖上游问题；仅对结构化 tool_calls 做 canonicalize）：`sharedmodule/llmswitch-core/src/filters/special/response-tool-text-canonicalize.ts`
+  - [x] Matrix：停用 text-markup uplift 相关用例（保留文件但不作为默认验证路径）：`sharedmodule/llmswitch-core/scripts/tests/run-matrix-ci.mjs`
+  - [x] 验证链：`sharedmodule/llmswitch-core` build（matrix）+ host `npm run build:dev`（含 `install:global`）通过
+- **待落地/验证**:（无）
+
+### 15. Antigravity 端点级联（transport）+ 上游错误信号收集
+- **位置**: `src/providers/core/runtime/http-request-executor.ts` + `src/providers/core/runtime/http-transport-provider.ts` + `src/providers/core/runtime/gemini-cli-http-provider.ts` + `src/providers/core/utils/http-client.ts` + `src/providers/auth/antigravity-userinfo-helper.ts`
+- **优先级**: 高
+- **状态**: 🟡 进行中
+- **目标**:
+  - Transport 层支持 baseUrl 级联尝试（默认顺序：daily → autopush → prod），并在 Antigravity 下优先“切 baseUrl 再切 alias”
+  - baseUrl 级联触发条件（Antigravity）：网络/timeout/5xx/403/404 + 429/400
+  - 捕获并保留上游响应头（用于诊断/策略），尤其是 `x-antigravity-context-error`（仅用于内部决策；不透传到 client）
+- **已完成**:
+  - [x] Provider 请求执行器支持多 baseUrl 目标（不改 payload 语义）：`src/providers/core/runtime/http-request-executor.ts`
+  - [x] Provider Runtime 允许下发 baseUrl candidates（默认无；仅 antigravity 运行时覆写）：`src/providers/core/runtime/http-transport-provider.ts` + `src/providers/core/runtime/gemini-cli-http-provider.ts`
+  - [x] HttpClient 错误路径补齐响应头捕获，并放入 ProviderError.details.response.headers：`src/providers/core/utils/http-client.ts`
+  - [x] Antigravity baseUrl candidates helper（含 env 覆写）：`src/providers/auth/antigravity-userinfo-helper.ts`
+  - [x] 决策已确认：Antigravity 下遇到 429/400 时，优先尝试切 baseUrl（用尽 candidates 后再交由路由层处理 alias/retry）：`src/providers/core/runtime/http-request-executor.ts`
+
+### 16. 工具 schema 清洗（Gemini functionDeclarations）
+- **位置**: `sharedmodule/llmswitch-core/src/conversion/shared/gemini-tool-utils.ts`
+- **优先级**: 高
+- **状态**: 🟡 进行中
+- **目标**:
+  - 更贴近上游 functionDeclarations.parameters 的可接受子集（const→enum、丢弃不支持关键字、组合器收敛）
+- **已完成**:
+  - [x] cloneParameters 增强（const→enum + 额外 unsupported key 丢弃）：`sharedmodule/llmswitch-core/src/conversion/shared/gemini-tool-utils.ts`
+
+### 17. Reasoning/Thinking 块策略（Claude via Antigravity）
+- **位置**: `sharedmodule/llmswitch-core/src/conversion/hub/operation-table/semantic-mappers/gemini-mapper.ts`
+- **优先级**: 中
+- **状态**: 🟡 进行中
+- **目标**:
+  - 默认对 antigravity.* + claude-* 的 outbound 文本去除 `<think>/<reflection>`（除非用户显式 opt-in）
+- **已完成**:
+  - [x] 在 gemini mapper 侧对特定路径启用 reasoning tag strip（`keep_thinking`/`keep_reasoning` 可 opt-in）：`sharedmodule/llmswitch-core/src/conversion/hub/operation-table/semantic-mappers/gemini-mapper.ts`
+
 ### 12. 安装说明 + 参考配置 + rcc init（本轮）
 - **位置**: `src/cli/commands/config.ts` + `src/cli/commands/*` + `docs/*` + `configsamples/*`
 - **优先级**: 高
@@ -293,10 +375,12 @@ Provider V2 通过 `emitProviderError` 上报配额和错误事件：
 
 ## 更新日志
 
-- 2026-01-22: 初始任务文档创建
-- 2026-01-22: 所有任务已完成 ✅
+- 2026-01-22: 初始任务文档创建（风控增强阶段一/二）
+- 2026-01-24: 新增任务 13（Chat Process 协议与流水线契约），已完成（待审阅）
 
-## 任务完成总结
+## 阶段性完成总结（2026-01-22）
+
+> 本节仅覆盖最初的“风控增强”相关任务（任务 1–11）的阶段性总结；后续新增的任务（如任务 12/13）以任务清单的状态为准。
 
 ### 已完成的文件
 

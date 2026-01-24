@@ -193,4 +193,69 @@ describe('stopMessage is session-scoped', () => {
     expect(persisted?.state?.stopMessageText).toBeUndefined();
     expect(persisted?.state?.stopMessageMaxRepeats).toBeUndefined();
   });
+
+  test('re-arms stopMessage when set again with the same text/max after being exhausted', () => {
+    const engine = buildEngine();
+    const sessionId = 'sess-rearm-same-1';
+
+    const setRequest: StandardizedRequest = {
+      model: 'gpt-test',
+      messages: [{ role: 'user', content: '<**stopMessage:\"继续\",1**>\\nhello' }],
+      tools: [],
+      parameters: {}
+    } as any;
+    engine.route(setRequest, {
+      requestId: 'req_stopmessage_rearm_set_1',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      sessionId,
+      routeHint: 'default'
+    } as any);
+
+    const before = readSessionState(sessionId);
+    expect(before?.state?.stopMessageText).toBe('继续');
+    expect(before?.state?.stopMessageMaxRepeats).toBe(1);
+    expect(before?.state?.stopMessageUsed).toBe(0);
+    const beforeUpdatedAt = before?.state?.stopMessageUpdatedAt;
+    expect(typeof beforeUpdatedAt === 'number').toBe(true);
+
+    // Simulate servertool exhausting stopMessage (used === maxRepeats).
+    const exhaustedAt = Date.now();
+    saveRoutingInstructionStateSync(`session:${sessionId}`, {
+      forcedTarget: undefined,
+      stickyTarget: undefined,
+      allowedProviders: new Set(),
+      disabledProviders: new Set(),
+      disabledKeys: new Map(),
+      disabledModels: new Map(),
+      stopMessageText: '继续',
+      stopMessageMaxRepeats: 1,
+      stopMessageUsed: 1,
+      stopMessageUpdatedAt: beforeUpdatedAt,
+      stopMessageLastUsedAt: exhaustedAt,
+      stopMessageSource: 'explicit'
+    } as any);
+
+    const setAgainRequest: StandardizedRequest = {
+      model: 'gpt-test',
+      messages: [{ role: 'user', content: '<**stopMessage:\"继续\",1**>\\nhello again' }],
+      tools: [],
+      parameters: {}
+    } as any;
+    engine.route(setAgainRequest, {
+      requestId: 'req_stopmessage_rearm_set_2',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      sessionId,
+      routeHint: 'default'
+    } as any);
+
+    const after = readSessionState(sessionId);
+    expect(after?.state?.stopMessageText).toBe('继续');
+    expect(after?.state?.stopMessageMaxRepeats).toBe(1);
+    expect(after?.state?.stopMessageUsed).toBe(0);
+    expect(typeof after?.state?.stopMessageUpdatedAt).toBe('number');
+    expect(after?.state?.stopMessageUpdatedAt).toBeGreaterThanOrEqual(beforeUpdatedAt);
+    expect(after?.state?.stopMessageLastUsedAt).toBeUndefined();
+  });
 });

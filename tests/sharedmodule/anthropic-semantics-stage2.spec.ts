@@ -62,11 +62,7 @@ function buildFormatPayload() {
           ]
         }
       ],
-      metadata: {
-        anthropicToolNameMap: {
-          CallHTTP: 'CallHTTP'
-        }
-      }
+      metadata: {}
     }
   } as const;
 }
@@ -74,19 +70,21 @@ function buildFormatPayload() {
 function scrubMetadata(chat: ChatEnvelope) {
   delete (chat.metadata as Record<string, unknown>).extraFields;
   delete (chat.metadata as Record<string, unknown>).protocolState;
-  delete (chat.metadata as Record<string, unknown>).anthropicToolNameMap;
   delete (chat.metadata as Record<string, unknown>).toolsFieldPresent;
 }
 
 describe('Anthropic semantics stage 2', () => {
   it('captures system blocks / alias map / mirror semantics on inbound', async () => {
     const chat = await mapper.toChat(buildFormatPayload(), adapterContext);
-    const semantics = chat.semantics?.anthropic as Record<string, unknown> | undefined;
-    expect(semantics?.systemBlocks).toBeDefined();
-    const aliasMap = semantics?.toolAliasMap as Record<string, string> | undefined;
+    const semantics = chat.semantics as Record<string, unknown> | undefined;
+    const system = (semantics?.system as Record<string, unknown> | undefined) ?? undefined;
+    expect(system?.blocks).toBeDefined();
+    const tools = (semantics?.tools as Record<string, unknown> | undefined) ?? undefined;
+    const aliasMap = tools?.toolNameAliasMap as Record<string, string> | undefined;
     expect(aliasMap).toBeDefined();
     expect(Object.values(aliasMap ?? {})).toContain('CallHTTP');
-    expect(semantics?.mirror).toBeDefined();
+    const providerExtras = (semantics?.providerExtras as Record<string, unknown> | undefined) ?? undefined;
+    expect(providerExtras?.anthropicMirror).toBeDefined();
   });
 
   it('replays semantics when metadata/protocolState snapshots are missing', async () => {

@@ -35,6 +35,7 @@ export interface RequestExecutor {
 }
 
 const DEFAULT_MAX_PROVIDER_ATTEMPTS = 6;
+const DEFAULT_ANTIGRAVITY_MAX_PROVIDER_ATTEMPTS = 20;
 
 function resolveMaxProviderAttempts(): number {
   const raw = String(
@@ -45,6 +46,30 @@ function resolveMaxProviderAttempts(): number {
   const parsed = raw ? Number.parseInt(raw, 10) : NaN;
   const candidate = Number.isFinite(parsed) ? parsed : DEFAULT_MAX_PROVIDER_ATTEMPTS;
   return Math.max(1, Math.min(20, candidate));
+}
+
+function resolveAntigravityMaxProviderAttempts(): number {
+  const raw = String(
+    process.env.ROUTECODEX_ANTIGRAVITY_MAX_PROVIDER_ATTEMPTS || process.env.RCC_ANTIGRAVITY_MAX_PROVIDER_ATTEMPTS || ''
+  )
+    .trim()
+    .toLowerCase();
+  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
+  const candidate = Number.isFinite(parsed) ? parsed : DEFAULT_ANTIGRAVITY_MAX_PROVIDER_ATTEMPTS;
+  return Math.max(1, Math.min(60, candidate));
+}
+
+function isAntigravityProviderKey(providerKey: string | undefined): boolean {
+  return typeof providerKey === 'string' && providerKey.startsWith('antigravity.');
+}
+
+function extractStatusCodeFromError(err: unknown): number | undefined {
+  if (!err || typeof err !== 'object') return undefined;
+  const direct = (err as any).statusCode;
+  if (typeof direct === 'number') return direct;
+  const nested = (err as any).status;
+  if (typeof nested === 'number') return nested;
+  return undefined;
 }
 
 export class HubRequestExecutor implements RequestExecutor {
@@ -99,7 +124,7 @@ export class HubRequestExecutor implements RequestExecutor {
       const pipelineLabel = 'hub';
       let aggregatedUsage: UsageMetrics | undefined;
       const excludedProviderKeys = new Set<string>();
-      const maxAttempts = resolveMaxProviderAttempts();
+      let maxAttempts = resolveMaxProviderAttempts();
       const originalRequestSnapshot = this.cloneRequestPayload(input.body);
       let attempt = 0;
       let lastError: unknown;
@@ -256,6 +281,7 @@ export class HubRequestExecutor implements RequestExecutor {
           });
           const wantsStreamBase = Boolean(input.metadata?.inboundStream ?? input.metadata?.stream);
           const normalized = this.normalizeProviderResponse(providerResponse);
+          const pipelineResultAny = pipelineResult as any;
           const converted = await this.convertProviderResponseIfNeeded({
             entryEndpoint: input.entryEndpoint,
             providerProtocol,
@@ -263,6 +289,12 @@ export class HubRequestExecutor implements RequestExecutor {
             requestId: input.requestId,
             wantsStream: wantsStreamBase,
             originalRequest: originalRequestSnapshot,
+            requestSemantics:
+              (pipelineResultAny?.processedRequest && pipelineResultAny.processedRequest.semantics && typeof pipelineResultAny.processedRequest.semantics === 'object')
+                ? (pipelineResultAny.processedRequest.semantics as Record<string, unknown>)
+                : (pipelineResultAny?.standardizedRequest && pipelineResultAny.standardizedRequest.semantics && typeof pipelineResultAny.standardizedRequest.semantics === 'object')
+                  ? (pipelineResultAny.standardizedRequest.semantics as Record<string, unknown>)
+                  : undefined,
             processMode: pipelineResult.processMode,
             response: normalized,
             pipelineMetadata: mergedMetadata
@@ -298,6 +330,11 @@ export class HubRequestExecutor implements RequestExecutor {
             attempt
           });
           lastError = error;
+          // Antigravity pool behavior: on 429 MODEL_CAPACITY_EXHAUSTED, keep rotating aliases within Antigravity
+          // (sticky-queue) before falling back to other pool targets. This may require more than the global default attempts.
+          if (isAntigravityProviderKey(target.providerKey) && extractStatusCodeFromError(error) === 429) {
+            maxAttempts = Math.max(maxAttempts, resolveAntigravityMaxProviderAttempts());
+          }
           const shouldRetry = attempt < maxAttempts && shouldRetryProviderError(error);
           if (!shouldRetry) {
             throw error;
@@ -362,6 +399,7 @@ export class HubRequestExecutor implements RequestExecutor {
     requestId: string;
     wantsStream: boolean;
     originalRequest?: Record<string, unknown> | undefined;
+    requestSemantics?: Record<string, unknown> | undefined;
     processMode?: string;
     response: PipelineExecutionResult;
     pipelineMetadata?: Record<string, unknown>;
@@ -390,7 +428,6 @@ export class HubRequestExecutor implements RequestExecutor {
     }
     try {
       const metadataBag = asRecord(options.pipelineMetadata);
-      const aliasMap = extractAnthropicToolAliasMap(metadataBag);
       const originalModelId = this.extractClientModelId(metadataBag, options.originalRequest);
       const baseContext: Record<string, unknown> = {
         ...(metadataBag ?? {})
@@ -403,9 +440,6 @@ export class HubRequestExecutor implements RequestExecutor {
       baseContext._providerProtocol = options.providerProtocol;
       baseContext.originalModelId = originalModelId;
       const adapterContext = baseContext;
-      if (aliasMap) {
-        (adapterContext as Record<string, unknown>).anthropicToolNameMap = aliasMap;
-      }
       const stageRecorder = await bridgeCreateSnapshotRecorder(
         adapterContext,
         typeof (adapterContext as Record<string, unknown>).entryEndpoint === 'string'
@@ -473,10 +507,22 @@ export class HubRequestExecutor implements RequestExecutor {
           direction: 'request',
           stage: 'inbound'
         };
+        // E1: merge internal runtime metadata carrier (`__rt`) instead of clobbering it.
+        // ServerTool followup metadata always adds fields under __rt, while the base pipeline
+        // metadata may already contain runtime configs (webSearch/clock/etc).
+        try {
+          const baseRt = asRecord((metadataBag as any)?.__rt) ?? {};
+          const extraRt = asRecord((nestedExtra as any)?.__rt) ?? {};
+          if (Object.keys(baseRt).length || Object.keys(extraRt).length) {
+            (nestedMetadata as any).__rt = { ...baseRt, ...extraRt };
+          }
+        } catch {
+          // best-effort
+        }
 
         // servertool followup 是内部二跳请求：不应继承客户端 headers 偏好（尤其是 Accept），
         // 否则会导致上游返回非 SSE 响应而被当作 SSE 解析，出现“空回复”。
-        if (nestedMetadata.serverToolFollowup === true) {
+        if (asRecord((nestedMetadata as any).__rt)?.serverToolFollowup === true) {
           delete nestedMetadata.clientHeaders;
           delete nestedMetadata.clientRequestId;
         }
@@ -504,6 +550,7 @@ export class HubRequestExecutor implements RequestExecutor {
         context: adapterContext,
         entryEndpoint: options.entryEndpoint || entry,
         wantsStream: options.wantsStream,
+        requestSemantics: options.requestSemantics,
         providerInvoker,
         stageRecorder,
         reenterPipeline

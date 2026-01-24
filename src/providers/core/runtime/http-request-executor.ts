@@ -17,6 +17,7 @@ export type PreparedHttpRequest = {
   endpoint: string;
   headers: Record<string, string>;
   targetUrl: string;
+  targetUrls?: string[];
   body: UnknownObject;
   entryEndpoint?: string;
   clientRequestId?: string;
@@ -31,6 +32,7 @@ export type HttpRequestExecutorDeps = {
   finalizeRequestHeaders(headers: Record<string, string>, request: UnknownObject): Promise<Record<string, string>>;
   applyStreamModeHeaders(headers: Record<string, string>, wantsSse: boolean): Record<string, string>;
   getEffectiveBaseUrl(): string;
+  getBaseUrlCandidates?(context: ProviderContext): string[] | undefined;
   buildHttpRequestBody(request: UnknownObject): UnknownObject;
   prepareSseRequestBody(body: UnknownObject, context: ProviderContext): void;
   getEntryEndpointFromPayload(request: UnknownObject): string | undefined;
@@ -81,7 +83,21 @@ export class HttpRequestExecutor {
     const headers = await this.deps.buildRequestHeaders();
     let finalHeaders = await this.deps.finalizeRequestHeaders(headers, processedRequest);
     finalHeaders = this.deps.applyStreamModeHeaders(finalHeaders, wantsSse);
-    const targetUrl = `${this.deps.getEffectiveBaseUrl().replace(/\/$/, '')}/${endpoint.startsWith('/') ? endpoint.slice(1) : endpoint}`;
+    const baseUrlPrimary = this.deps.getEffectiveBaseUrl().replace(/\/$/, '');
+    const endpointSuffix = endpoint.startsWith('/') ? endpoint.slice(1) : endpoint;
+    const targetUrl = `${baseUrlPrimary}/${endpointSuffix}`;
+    const candidateBases = this.deps.getBaseUrlCandidates?.(context);
+    const targetUrls = candidateBases && candidateBases.length
+      ? Array.from(
+          new Set(
+            [baseUrlPrimary, ...candidateBases]
+              .map((base) => String(base || '').trim())
+              .filter((base) => base.length)
+              .map((base) => base.replace(/\/$/, ''))
+              .map((base) => `${base}/${endpointSuffix}`)
+          )
+        )
+      : undefined;
     const finalBody = this.deps.buildHttpRequestBody(processedRequest);
     const meta = (context as { metadata?: unknown }).metadata;
     const metaEntryEndpoint =
@@ -135,6 +151,7 @@ export class HttpRequestExecutor {
       endpoint,
       headers: finalHeaders,
       targetUrl,
+      targetUrls: targetUrls && targetUrls.length > 1 ? targetUrls : undefined,
       body: finalBody,
       entryEndpoint,
       clientRequestId,
@@ -215,32 +232,107 @@ export class HttpRequestExecutor {
     const captureSse = shouldCaptureProviderStreamSnapshots();
     const maxAttempts = this.deps.getHttpRetryLimit();
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      try {
-        return await this.executeHttpRequestOnce(requestInfo, context, captureSse);
-      } catch (error) {
-        if (this.deps.tryRecoverOAuthAndReplay) {
-          const oauthReplay = await this.deps.tryRecoverOAuthAndReplay(
-            error,
-            requestInfo,
-            processedRequest,
-            captureSse,
-            context
-          );
-          if (oauthReplay) {
-            return oauthReplay;
+      const targets =
+        requestInfo.targetUrls && requestInfo.targetUrls.length ? requestInfo.targetUrls : [requestInfo.targetUrl];
+      for (let idx = 0; idx < targets.length; idx += 1) {
+        const candidate = idx === 0 ? requestInfo : { ...requestInfo, targetUrl: targets[idx] };
+        try {
+          return await this.executeHttpRequestOnce(candidate, context, captureSse);
+        } catch (error) {
+          if (this.deps.tryRecoverOAuthAndReplay) {
+            const oauthReplay = await this.deps.tryRecoverOAuthAndReplay(
+              error,
+              candidate,
+              processedRequest,
+              captureSse,
+              context
+            );
+            if (oauthReplay) {
+              return oauthReplay;
+            }
           }
-        }
 
-        const shouldRetry = this.deps.shouldRetryHttpError(error, attempt, maxAttempts);
-        if (shouldRetry) {
-          await this.deps.delayBeforeHttpRetry(attempt);
-          continue;
-        }
+          const canTryNext = idx + 1 < targets.length && this.shouldTryNextTarget(error, context);
+          if (canTryNext) {
+            continue;
+          }
 
-        throw error;
+          const shouldRetry = this.deps.shouldRetryHttpError(error, attempt, maxAttempts);
+          if (shouldRetry) {
+            await this.deps.delayBeforeHttpRetry(attempt);
+            break;
+          }
+
+          throw error;
+        }
       }
     }
     throw new Error('provider-runtime-error: http retries exhausted');
+  }
+
+  private shouldTryNextTarget(error: unknown, context: ProviderContext): boolean {
+    const err = error as {
+      statusCode?: unknown;
+      status?: unknown;
+      code?: unknown;
+      type?: unknown;
+      headers?: unknown;
+      details?: unknown;
+    };
+    const statusCode =
+      typeof err?.statusCode === 'number'
+        ? err.statusCode
+        : typeof err?.status === 'number'
+          ? err.status
+          : undefined;
+
+    const ctx = context as unknown as {
+      providerKey?: unknown;
+      providerId?: unknown;
+      providerFamily?: unknown;
+      providerType?: unknown;
+    };
+    const providerHint = String(
+      ctx.providerKey || ctx.providerId || ctx.providerFamily || ctx.providerType || ''
+    ).toLowerCase();
+    const isAntigravity = providerHint.includes('antigravity');
+
+    // If upstream explicitly reports a context error, do NOT fallback to a different base.
+    try {
+      const headersFromTop =
+        err && typeof err.headers === 'object' && err.headers !== null ? (err.headers as Record<string, unknown>) : undefined;
+      const headersFromDetails = (() => {
+        const details = err && typeof err.details === 'object' && err.details !== null ? (err.details as any) : undefined;
+        const resp = details && typeof details.response === 'object' && details.response !== null ? details.response : undefined;
+        const headers = resp && typeof resp.headers === 'object' && resp.headers !== null ? resp.headers : undefined;
+        return headers as Record<string, unknown> | undefined;
+      })();
+      const headers = headersFromTop || headersFromDetails;
+      const key = headers ? Object.keys(headers).find((k) => k.toLowerCase() === 'x-antigravity-context-error') : undefined;
+      const value = key ? String(headers?.[key] ?? '').trim() : '';
+      if (value) {
+        return false;
+      }
+    } catch {
+      // ignore
+    }
+
+    if (typeof err?.type === 'string' && err.type === 'network') {
+      return true;
+    }
+    const code = typeof err?.code === 'string' ? err.code : '';
+    if (code === 'UPSTREAM_HEADERS_TIMEOUT' || code === 'UPSTREAM_STREAM_TIMEOUT') {
+      return true;
+    }
+    if (typeof statusCode === 'number') {
+      // Antigravity: prefer switching baseUrl before switching alias on rate-limit or client-side errors.
+      if (isAntigravity && statusCode === 429) return true;
+      if (isAntigravity && statusCode === 400) return true;
+      if (statusCode === 403) return true;
+      if (statusCode === 404) return true;
+      if (statusCode >= 500) return true;
+    }
+    return false;
   }
 
   private async executeHttpRequestOnce(
@@ -249,7 +341,7 @@ export class HttpRequestExecutor {
     captureSse: boolean
   ): Promise<unknown> {
     if (requestInfo.wantsSse) {
-      const upstreamStream = await this.httpClient.postStream(requestInfo.endpoint, requestInfo.body, requestInfo.headers);
+      const upstreamStream = await this.httpClient.postStream(requestInfo.targetUrl, requestInfo.body, requestInfo.headers);
       const streamForHost = captureSse
         ? attachProviderSseSnapshotStream(upstreamStream, {
           requestId: context.requestId,
@@ -282,7 +374,7 @@ export class HttpRequestExecutor {
       return wrapped;
     }
 
-    const response = await this.httpClient.post(requestInfo.endpoint, requestInfo.body, requestInfo.headers);
+    const response = await this.httpClient.post(requestInfo.targetUrl, requestInfo.body, requestInfo.headers);
     try {
       await writeProviderSnapshot({
         phase: 'provider-response',

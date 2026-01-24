@@ -35,6 +35,9 @@ jobs:
       - name: Install
         run: npm ci
 
+      - name: Repo sanity (no root junk)
+        run: npm run verify:repo-sanity
+
       - name: Ensure release llms module
         run: BUILD_MODE=release npm run llmswitch:ensure
 
@@ -42,7 +45,7 @@ jobs:
         env:
           ROUTECODEX_JEST_USE_NPM_LLMS: "1"
           ROUTECODEX_SKIP_AUTO_BUMP: "1"
-        run: npm run test
+        run: npm run test:ci
 
       - name: Pack rcc tarball
         env:

@@ -1,6 +1,6 @@
 /**
  * Antigravity OAuth helper utilities.
- * Mirrors the logic implemented in gcli2api for resolving project metadata.
+ * Resolves Antigravity project metadata via the Cloud Code Assist internal endpoints.
  */
 
 import fs from 'node:fs/promises';
@@ -10,7 +10,10 @@ import os from 'node:os';
 import type { UnknownObject } from '../../modules/pipeline/types/common-types.js';
 import { logOAuthDebug } from './oauth-logger.js';
 
-const DEFAULT_ANTIGRAVITY_API_BASE = 'https://daily-cloudcode-pa.sandbox.googleapis.com';
+const DEFAULT_ANTIGRAVITY_API_BASE_DAILY = 'https://daily-cloudcode-pa.sandbox.googleapis.com';
+const DEFAULT_ANTIGRAVITY_API_BASE_AUTOPUSH = 'https://autopush-cloudcode-pa.sandbox.googleapis.com';
+const DEFAULT_ANTIGRAVITY_API_BASE_PROD = 'https://cloudcode-pa.googleapis.com';
+const DEFAULT_ANTIGRAVITY_API_BASE = DEFAULT_ANTIGRAVITY_API_BASE_DAILY;
 const DEFAULT_USER_AGENT = 'antigravity/1.11.3 windows/amd64';
 const METADATA_PAYLOAD = {
   ideType: 'ANTIGRAVITY',
@@ -70,11 +73,32 @@ const buildHeaders = (accessToken: string): Record<string, string> => ({
   'Accept-Encoding': 'gzip, deflate, br'
 });
 
+function normalizeApiBase(value: string): string {
+  const trimmed = String(value || '').trim();
+  if (!trimmed) {
+    return '';
+  }
+  const noSlash = trimmed.replace(/\/+$/, '');
+  return noSlash.replace(/\/v1internal$/i, '');
+}
+
 const normalizedBase = (base?: string): string => {
-  const envBase = process.env.ROUTECODEX_ANTIGRAVITY_API_BASE?.trim();
+  const envBase =
+    (process.env.ROUTECODEX_ANTIGRAVITY_API_BASE || process.env.RCC_ANTIGRAVITY_API_BASE || '').trim();
   const candidate = (base && base.trim()) || envBase || DEFAULT_ANTIGRAVITY_API_BASE;
-  return candidate.replace(/\/+$/, '');
+  return normalizeApiBase(candidate);
 };
+
+export function resolveAntigravityApiBaseCandidates(explicit?: string): string[] {
+  const primary = normalizedBase(explicit);
+  const ordered = [
+    primary,
+    DEFAULT_ANTIGRAVITY_API_BASE_DAILY,
+    DEFAULT_ANTIGRAVITY_API_BASE_AUTOPUSH,
+    DEFAULT_ANTIGRAVITY_API_BASE_PROD
+  ].map((base) => normalizeApiBase(base)).filter((base) => base.length);
+  return Array.from(new Set(ordered));
+}
 
 function extractAccessTokenFromSnapshot(snapshot: Record<string, unknown>): string | undefined {
   const lower = (snapshot as { access_token?: unknown }).access_token;

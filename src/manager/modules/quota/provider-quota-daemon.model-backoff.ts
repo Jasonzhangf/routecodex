@@ -14,10 +14,10 @@ type BackoffState = {
  * - quota may still be available locally, but the upstream cannot serve the model right now.
  * - we cool down the *entire model series* immediately to avoid hammering 429s.
  */
-const MODEL_CAPACITY_EXHAUSTED_COOLDOWN_MS = 60_000;
+const MODEL_CAPACITY_EXHAUSTED_COOLDOWN_MS = 15_000;
 
 const DEFAULT_CAPACITY_COOLDOWN_SCHEDULE_MS = [
-  5_000,
+  15_000,
   30_000,
   60_000,
   300_000,
@@ -51,9 +51,12 @@ function resolveModelKey(providerKey: string): string | null {
     return null;
   }
   const providerId = parts[0]!;
-  // NOTE: model-series cooldown is intentionally cross-key for the same model:
-  // `providerId.<keyAlias>.<modelId>` → `${providerId}.${modelId}`.
-  // This is required for upstream "MODEL_CAPACITY_EXHAUSTED", where switching keys won't help.
+  // NOTE: Upstream "MODEL_CAPACITY_EXHAUSTED" can be account/quota-style scoped for some providers
+  // (e.g. antigravity), where switching aliases can help. For those providers, model backoff should
+  // remain per-providerKey (which already includes the alias).
+  if (providerId === 'antigravity' || providerId === 'gemini-cli') {
+    return canonical;
+  }
   const modelId = parts.slice(2).join('.');
   if (!providerId || !modelId) {
     return null;
@@ -178,7 +181,7 @@ export class ProviderModelBackoffTracker {
       typeof untilOverrideMs === 'number' && Number.isFinite(untilOverrideMs) && untilOverrideMs > nowMs
         ? untilOverrideMs
         : null;
-    const until = explicitUntil ?? (nowMs + MODEL_CAPACITY_EXHAUSTED_COOLDOWN_MS);
+    const until = explicitUntil ?? (nowMs + ttl);
     const existingUntil =
       typeof previous?.cooldownUntil === 'number' && Number.isFinite(previous.cooldownUntil)
         ? previous.cooldownUntil

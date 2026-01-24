@@ -189,7 +189,7 @@ describe('ProviderQuotaDaemonModule', () => {
     expect(snapshot1['antigravity.alias1.claude-sonnet-4-5-thinking']).toBeDefined();
     expect(snapshot1['antigravity.alias1.claude-sonnet-4-5-thinking'].inPool).toBe(false);
     expect(snapshot1['antigravity.alias1.claude-sonnet-4-5-thinking'].reason).toBe('cooldown');
-    expect(snapshot1['antigravity.alias1.claude-sonnet-4-5-thinking'].cooldownUntil).toBe(now + 60_000);
+    expect(snapshot1['antigravity.alias1.claude-sonnet-4-5-thinking'].cooldownUntil).toBe(now + 15_000);
 
     center.emit({
       code: 'QUOTA_RECOVERY',
@@ -218,7 +218,7 @@ describe('ProviderQuotaDaemonModule', () => {
     expect(snapshot2['antigravity.alias1.claude-sonnet-4-5-thinking'].inPool).toBe(false);
     expect(snapshot2['antigravity.alias1.claude-sonnet-4-5-thinking'].reason).toBe('cooldown');
 
-    await jest.advanceTimersByTimeAsync(60_100);
+    await jest.advanceTimersByTimeAsync(15_100);
     const view = mod.getQuotaView();
     const entry = view?.('antigravity.alias1.claude-sonnet-4-5-thinking');
     expect(entry?.inPool).toBe(true);

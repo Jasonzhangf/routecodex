@@ -1,4 +1,5 @@
 import type { HttpProtocolClient, ProtocolRequestPayload } from '../http-protocol-client.js';
+import { stripInternalKeysDeep } from '../../utils/strip-internal-keys.js';
 
 interface DataEnvelope {
   data?: Record<string, unknown>;
@@ -38,7 +39,7 @@ export class GeminiProtocolClient implements HttpProtocolClient<ProtocolRequestP
     if (generationConfig) {
       body.generationConfig = generationConfig;
     }
-    return body;
+    return stripInternalKeysDeep(body);
   }
 
   resolveEndpoint(request: ProtocolRequestPayload, defaultEndpoint: string): string {

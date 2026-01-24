@@ -455,17 +455,15 @@ provider → compatibility → llmswitch (final) → response
 #### llmswitch-core Exclusive Responsibilities
 Only `llmswitch-core` modules may perform:
 
-1. **Tool Text Harvesting**: Extract tool calls from message content
+1. **Tool Calls Canonicalization**: Normalize tool_calls structure
    - Implementation: `sharedmodule/llmswitch-core/src/conversion/shared/tool-canonicalizer.ts`
-2. **Tool Calls Canonicalization**: Normalize tool_calls structure
+2. **Argument Stringification**: Convert tool arguments to proper string format
    - Implementation: `sharedmodule/llmswitch-core/src/conversion/shared/tool-canonicalizer.ts`
-3. **Argument Stringification**: Convert tool arguments to proper string format
-   - Implementation: `sharedmodule/llmswitch-core/src/conversion/shared/tool-canonicalizer.ts`
-4. **Result Envelope Stripping**: Remove tool result wrapper envelopes
+3. **Result Envelope Stripping**: Remove tool result wrapper envelopes
    - Implementation: `sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.ts`
-5. **Schema Augmentation**: Add missing tool schemas when needed
-   - Implementation: `sharedmodule/llmswitch-core/src/conversion/shared/text-markup-normalizer.ts`
-6. **finish_reason=tool_calls Patching**: Set correct finish reason for tool calls
+4. **Schema Augmentation**: Normalize/augment tool schemas (and inject tool guidance when enabled)
+   - Implementation: `sharedmodule/llmswitch-core/src/conversion/shared/tool-governor.ts` + `sharedmodule/llmswitch-core/src/guidance/index.ts`
+5. **finish_reason=tool_calls Patching**: Set correct finish reason for tool calls
    - Implementation: `sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.ts`
 
 #### V2 Guardrails

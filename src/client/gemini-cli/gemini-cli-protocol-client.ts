@@ -9,6 +9,7 @@
 
 import type { HttpProtocolClient, ProtocolRequestPayload } from '../http-protocol-client.js';
 import type { UnknownObject } from '../../types/common-types.js';
+import { stripInternalKeysDeep } from '../../utils/strip-internal-keys.js';
 
 interface DataEnvelope {
   data?: UnknownObject;
@@ -73,7 +74,7 @@ export class GeminiCLIProtocolClient implements HttpProtocolClient<ProtocolReque
       body.request = requestPayload;
     }
 
-    return body;
+    return stripInternalKeysDeep(body);
   }
 
   resolveEndpoint(request: ProtocolRequestPayload, _defaultEndpoint: string): string {

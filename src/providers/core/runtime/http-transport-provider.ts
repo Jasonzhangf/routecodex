@@ -357,7 +357,9 @@ export class HttpTransportProvider extends BaseProvider {
         !oauthAuth.tokenUrl &&
         !oauthAuth.deviceCodeUrl;
       if (useTokenFile) {
-        return new TokenFileAuthProvider(oauthAuth);
+        // Keep TokenFileAuthProvider pure: do not infer providerId from type/rawType.
+        // The creator already knows oauthProviderId and must pass it explicitly.
+        return new TokenFileAuthProvider({ ...oauthAuth, oauthProviderId } as OAuthAuthExtended);
       }
       return new OAuthAuthProvider(oauthAuth, oauthProviderId);
     } else {
@@ -432,6 +434,7 @@ export class HttpTransportProvider extends BaseProvider {
       finalizeRequestHeaders: this.finalizeRequestHeaders.bind(this),
       applyStreamModeHeaders: this.applyStreamModeHeaders.bind(this),
       getEffectiveBaseUrl: () => this.getEffectiveBaseUrl(),
+      getBaseUrlCandidates: this.getBaseUrlCandidates.bind(this),
       buildHttpRequestBody: this.buildHttpRequestBody.bind(this),
       prepareSseRequestBody: this.prepareSseRequestBody.bind(this),
       getEntryEndpointFromPayload: this.getEntryEndpointFromPayload.bind(this),
@@ -655,7 +658,7 @@ export class HttpTransportProvider extends BaseProvider {
       let finalRetryHeaders = await this.finalizeRequestHeaders(retryHeaders, processedRequest);
       finalRetryHeaders = this.applyStreamModeHeaders(finalRetryHeaders, requestInfo.wantsSse);
       if (requestInfo.wantsSse) {
-        const upstreamStream = await this.httpClient.postStream(requestInfo.endpoint, requestInfo.body, finalRetryHeaders);
+        const upstreamStream = await this.httpClient.postStream(requestInfo.targetUrl, requestInfo.body, finalRetryHeaders);
         const streamForHost = captureSse
           ? attachProviderSseSnapshotStream(upstreamStream, {
             requestId: context.requestId,
@@ -686,7 +689,7 @@ export class HttpTransportProvider extends BaseProvider {
         }
         return wrapped;
       }
-      const response = await this.httpClient.post(requestInfo.endpoint, requestInfo.body, finalRetryHeaders);
+      const response = await this.httpClient.post(requestInfo.targetUrl, requestInfo.body, finalRetryHeaders);
       try {
         await writeProviderSnapshot({
           phase: 'provider-response',
@@ -1224,6 +1227,10 @@ export class HttpTransportProvider extends BaseProvider {
       this.config.config.baseUrl ||
       this.serviceProfile.defaultBaseUrl
     );
+  }
+
+  protected getBaseUrlCandidates(_context: ProviderContext): string[] | undefined {
+    return undefined;
   }
 
   protected getEffectiveEndpoint(): string {

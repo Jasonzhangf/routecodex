@@ -142,27 +142,27 @@ export async function handleResponses(
       typeof (payload as { metadata?: Record<string, unknown> }).metadata?.mockSampleReqId === 'string'
         ? String((payload as { metadata?: Record<string, unknown> }).metadata?.mockSampleReqId).trim()
         : undefined;
-    const pipelineInput = {
-      entryEndpoint,
-      method: req.method,
-      requestId,
-      headers: req.headers as Record<string, unknown>,
-      query: req.query as Record<string, unknown>,
-      body: payload,
-      metadata: {
-        stream: wantsStream,
-        clientRequestId,
-        clientStream: acceptsSse || undefined,
-        inboundStream: wantsStream,
-        outboundStream,
-        providerProtocol: 'openai-responses',
-        __raw_request_body: originalPayload,
-        clientHeaders,
-        clientConnectionState,
-        responsesResume: resumeMeta,
-        ...(mockSampleReqId ? { mockSampleReqId } : {})
-      }
-    };
+	    const pipelineInput = {
+	      entryEndpoint,
+	      method: req.method,
+	      requestId,
+	      headers: req.headers as Record<string, unknown>,
+	      query: req.query as Record<string, unknown>,
+	      body: payload,
+	      metadata: {
+	        stream: wantsStream,
+	        clientRequestId,
+	        clientStream: acceptsSse || undefined,
+	        inboundStream: wantsStream,
+	        outboundStream,
+	        providerProtocol: 'openai-responses',
+	        __raw_request_body: originalPayload,
+	        clientHeaders,
+	        clientConnectionState,
+	        ...(resumeMeta ? { responsesResume: resumeMeta } : {}),
+	        ...(mockSampleReqId ? { mockSampleReqId } : {})
+	      }
+	    };
 
     if (Number.isFinite(requestTimeoutMs) && requestTimeoutMs > 0) {
       timeoutHandle = setTimeout(() => {

@@ -2,6 +2,8 @@
 
 > 目标：让 llmswitch-core 中的 Chat Process / Standardized 桥承接四种协议的语义，不再依赖 metadata 透传 “raw payload”，并按顺序分阶段完成。
 
+> 术语约定：本文中的 “chat process” 指代码层面的 `chat_process` 阶段（工具治理/路由/协议重建的必经处理段）。
+
 ### 阶段 0：现状确认
 
 1. **协议扫描**  
@@ -9,7 +11,7 @@
    - `responses-mapper.ts`：resume/include/store 等通过 `metadata.responsesContext/responseFormat` 储存。  
    - `anthropic-mapper.ts`：system blocks、tool alias、内容 shape 等塞进 `metadata.extraFields`。  
    - `gemini-mapper.ts`：systemInstruction、safetySettings、generationConfig、toolConfig 均在 metadata/parameters。
-2. **chat-process / standardized 桥**  
+2. **chat process / standardized 桥**  
    - 只理解 `messages/tools/toolOutputs/parameters`，其余通通进 `metadata.capturedContext`。
 
 ### 阶段 1：扩展 Chat Process + Standardized 桥
@@ -20,13 +22,13 @@
      - **协议专属命名空间**：`semantics.responses` / `semantics.anthropic` / `semantics.gemini`。每个命名空间内定义稳定 contract，禁止随意往里塞 provider extras。  
      - **providerExtras** 仅用于临时透传，默认禁止业务逻辑读取，后续接线完成后应趋近于空。
    - `chatEnvelopeToStandardized` / `standardizedToChatEnvelope` 深拷贝 `semantics`。
-2. **chat-process 适配**  
+2. **chat process 适配**  
    - `runHubChatProcess`、工具治理、路由决策只读 `request.semantics`；除 mapper/bridge 外，任何模块不得写入 `semantics`。  
    - Metadata 退回诊断角色：仅保留 `missingFields/providerMetadata` 等调试字段，`capturedContext` 禁止再夹带业务语义。
 3. **模块测试**  
-   - 新增 spec：构造 `ChatEnvelope` (含 system/responses/anthropic/gemini)，执行标准化→还原→chat-process，断言 `semantics` 原样保留。
+   - 新增 spec：构造 `ChatEnvelope` (含 system/responses/anthropic/gemini)，执行标准化→还原→chat process，断言 `semantics` 原样保留。
 
-> 完成该阶段后，chat-process 成为“语义承接层”，为后续接线提供可靠落点。
+> 完成该阶段后，chat process 成为“语义承接层”，为后续接线提供可靠落点。
 
 ### 阶段 2：协议语义接线（分批）
 
@@ -69,10 +71,10 @@
 ### 注意事项
 
 - **严格顺序**：阶段 1 完成并通过黑盒测试后，才能启动阶段 2 的任何接线工作。  
-- **只读语义**：除 Semantic Mapper / Bridge 外，任何模块不得写 `semantics`； chat-process 之后的所有节点禁止从 metadata/raw 读取业务语义。  
+- **只读语义**：除 Semantic Mapper / Bridge 外，任何模块不得写 `semantics`； chat process 之后的所有节点禁止从 metadata/raw 读取业务语义。  
 - **最小增量**：每个协议接线尽量独立 PR/commit，便于回滚。  
 - **兼容期双写**：阶段 2 中需维护 semantics & metadata 双写（写 semantics → 同步旧字段）；读路径优先 semantics，metadata 仅保底兼容，直到阶段 3 清理完成。  
-- **验证方式**：所有语义字段必须能在 `StandardizedRequest.semantics` 中观测到，且 chat-process/路由/工具治理仅依赖该结构。
+- **验证方式**：所有语义字段必须能在 `StandardizedRequest.semantics` 中观测到，且 chat process/路由/工具治理仅依赖该结构。
 
 ### 审查建议
 

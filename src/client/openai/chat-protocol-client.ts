@@ -1,4 +1,5 @@
 import type { HttpProtocolClient, ProtocolRequestPayload } from '../http-protocol-client.js';
+import { stripInternalKeysDeep } from '../../utils/strip-internal-keys.js';
 
 interface DataEnvelope {
   data?: Record<string, unknown>;
@@ -41,7 +42,7 @@ export class OpenAIChatProtocolClient implements HttpProtocolClient<ProtocolRequ
     if (body.stream === true) {
       delete body.stream;
     }
-    return body;
+    return stripInternalKeysDeep(body);
   }
 
   resolveEndpoint(_request: ProtocolRequestPayload, defaultEndpoint: string): string {

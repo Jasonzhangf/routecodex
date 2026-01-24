@@ -60,7 +60,10 @@ export async function handleProviderQuotaErrorEvent(
   // Upstream capacity exhaustion is not quota depletion. Cool down the entire model series immediately
   // so the router can try other models/providers instead of hammering 429s.
   if (isModelCapacityExhausted429(event)) {
-    ctx.modelBackoff.recordCapacity429(providerKey, event, nowMs, nowMs + 60_000);
+    ctx.modelBackoff.recordCapacity429(providerKey, event, nowMs);
+    const cooldownUntil =
+      ctx.modelBackoff.getActiveCooldownUntil(providerKey, nowMs) ??
+      (nowMs + 15_000);
     const errorForQuota: ErrorEventForQuota = {
       providerKey,
       httpStatus: typeof event.status === 'number' ? event.status : undefined,
@@ -73,7 +76,7 @@ export async function handleProviderQuotaErrorEvent(
       ...applied,
       inPool: false,
       reason: 'cooldown',
-      cooldownUntil: nowMs + 60_000
+      cooldownUntil
     };
     ctx.quotaStates.set(providerKey, nextState);
     ctx.schedulePersist(nowMs);

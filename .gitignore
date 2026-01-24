@@ -6,7 +6,10 @@ config/llmswitch/
 
 # Local caches and packs
 .npm-cache/
+.npm-cache-local/
 *.tgz
+*.pid
+.secrets.baseline
 
 # Local debug payloads
 payloads/
@@ -39,3 +42,7 @@ scripts/demo-*.mjs
 
 # System files
 .DS_Store
+
+# Local agent/tooling state (never commit)
+.claude/
+.iflow/

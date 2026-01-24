@@ -12,6 +12,7 @@ import { reportRouteError } from '../../error-handling/route-error-hub.js';
 // import { runtimeFlags } from '../../runtime/runtime-flags.js';
 import { formatErrorForConsole } from '../../utils/log-helpers.js';
 import { DEFAULT_TIMEOUTS } from '../../constants/index.js';
+import { stripInternalKeysDeep } from '../../utils/strip-internal-keys.js';
 import {
   generateRequestIdentifiers,
   resolveEffectiveRequestId
@@ -241,7 +242,10 @@ export function sendPipelineResponse(
     return;
   }
   logPipelineStage('response.json.write', requestLabel, { status });
-  res.status(status).json(body);
+  // E1 boundary rule: internal env variables use "__*" and must never reach client payloads.
+  // Preserve the SSE carrier key (it is handled above and never JSON-encoded).
+  const sanitized = stripInternalKeysDeep(body, { preserveKeys: new Set(['__sse_responses']) });
+  res.status(status).json(sanitized);
   logPipelineStage('response.json.completed', requestLabel, { status });
 }
 

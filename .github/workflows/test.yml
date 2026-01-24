@@ -17,6 +17,8 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+      - name: Repo sanity (no root junk)
+        run: npm run verify:repo-sanity
       - name: Ensure release llms module
         run: BUILD_MODE=release npm run llmswitch:ensure
       - name: Run host tests
@@ -24,4 +26,43 @@ jobs:
           ROUTECODEX_JEST_USE_NPM_LLMS: "1"
           # Prevent test-triggered builds (mock regressions) from auto-bumping version files in CI.
           ROUTECODEX_SKIP_AUTO_BUMP: "1"
-        run: npm run test
+        run: npm run test:ci
+
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Repo sanity (no root junk)
+        run: npm run verify:repo-sanity
+      - name: Ensure release llms module
+        run: BUILD_MODE=release npm run llmswitch:ensure
+      - name: Run CI coverage (jest-only)
+        env:
+          ROUTECODEX_JEST_USE_NPM_LLMS: "1"
+          ROUTECODEX_SKIP_AUTO_BUMP: "1"
+        run: npm run test:ci:coverage
+      - name: Coverage summary
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f coverage/coverage-summary.json ]]; then
+            node - <<'NODE'
+          const fs = require('fs');
+          const s = JSON.parse(fs.readFileSync('coverage/coverage-summary.json', 'utf8'));
+          const t = s.total || {};
+          const pct = (x) => (x && typeof x.pct === 'number' ? x.pct : 0);
+          console.log(`lines: ${pct(t.lines)}%`);
+          console.log(`branches: ${pct(t.branches)}%`);
+          console.log(`functions: ${pct(t.functions)}%`);
+          console.log(`statements: ${pct(t.statements)}%`);
+NODE
+          else
+            echo "missing coverage/coverage-summary.json"
+            ls -la coverage || true
+          fi

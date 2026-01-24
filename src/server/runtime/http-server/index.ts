@@ -24,7 +24,6 @@ import type {
   ProviderRequestLogEntry
 } from '../../../modules/pipeline/utils/debug-logger.js';
 import { attachProviderRuntimeMetadata } from '../../../providers/core/runtime/provider-runtime-metadata.js';
-import { extractAnthropicToolAliasMap } from './anthropic-tool-alias.js';
 import { AuthFileResolver } from '../../../config/auth-file-resolver.js';
 import type { ProviderRuntimeProfile } from '../../../providers/core/api/provider-types.js';
 import type { ProviderProfile, ProviderProfileCollection } from '../../../providers/profile/provider-profile.js';
@@ -98,6 +97,7 @@ type LegacyAuthFields = ProviderRuntimeProfile['auth'] & {
 };
 
 const DEFAULT_MAX_PROVIDER_ATTEMPTS = 6;
+const DEFAULT_ANTIGRAVITY_MAX_PROVIDER_ATTEMPTS = 20;
 
 function resolveMaxProviderAttempts(): number {
   const raw = String(
@@ -108,6 +108,30 @@ function resolveMaxProviderAttempts(): number {
   const parsed = raw ? Number.parseInt(raw, 10) : NaN;
   const candidate = Number.isFinite(parsed) ? parsed : DEFAULT_MAX_PROVIDER_ATTEMPTS;
   return Math.max(1, Math.min(20, candidate));
+}
+
+function resolveAntigravityMaxProviderAttempts(): number {
+  const raw = String(
+    process.env.ROUTECODEX_ANTIGRAVITY_MAX_PROVIDER_ATTEMPTS || process.env.RCC_ANTIGRAVITY_MAX_PROVIDER_ATTEMPTS || ''
+  )
+    .trim()
+    .toLowerCase();
+  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
+  const candidate = Number.isFinite(parsed) ? parsed : DEFAULT_ANTIGRAVITY_MAX_PROVIDER_ATTEMPTS;
+  return Math.max(1, Math.min(60, candidate));
+}
+
+function isAntigravityProviderKey(providerKey: string | undefined): boolean {
+  return typeof providerKey === 'string' && providerKey.startsWith('antigravity.');
+}
+
+function extractStatusCodeFromError(err: unknown): number | undefined {
+  if (!err || typeof err !== 'object') return undefined;
+  const direct = (err as any).statusCode;
+  if (typeof direct === 'number') return direct;
+  const nested = (err as any).status;
+  if (typeof nested === 'number') return nested;
+  return undefined;
 }
 
 /**
@@ -1185,7 +1209,7 @@ export class RouteCodexHttpServer {
     // - 让 VirtualRouter 根据 excludedProviderKeys 跳过失败目标
     // - 避免客户端“一次就断”导致对话破裂（尤其是 429 / prompt too long 等可恢复错误）
     // - 通过 env 允许按部署/客户端调整：ROUTECODEX_MAX_PROVIDER_ATTEMPTS / RCC_MAX_PROVIDER_ATTEMPTS
-    const maxAttempts = resolveMaxProviderAttempts();
+    let maxAttempts = resolveMaxProviderAttempts();
     let attempt = 0;
     let firstError: unknown | null = null;
     const originalBodySnapshot = this.cloneRequestPayload(input.body);
@@ -1342,12 +1366,23 @@ export class RouteCodexHttpServer {
         });
         const wantsStreamBase = Boolean(input.metadata?.inboundStream ?? input.metadata?.stream);
         const normalized = this.normalizeProviderResponse(providerResponse);
+        const pipelineResultAny = pipelineResult as any;
         const converted = await this.convertProviderResponseIfNeeded({
           entryEndpoint: input.entryEndpoint,
           providerType: handle.providerType,
           requestId: input.requestId,
           wantsStream: wantsStreamBase,
           originalRequest: originalRequestSnapshot,
+          requestSemantics:
+            (pipelineResultAny?.processedRequest &&
+              pipelineResultAny.processedRequest.semantics &&
+              typeof pipelineResultAny.processedRequest.semantics === 'object')
+              ? (pipelineResultAny.processedRequest.semantics as Record<string, unknown>)
+              : (pipelineResultAny?.standardizedRequest &&
+                  pipelineResultAny.standardizedRequest.semantics &&
+                  typeof pipelineResultAny.standardizedRequest.semantics === 'object')
+                ? (pipelineResultAny.standardizedRequest.semantics as Record<string, unknown>)
+                : undefined,
           processMode: pipelineResult.processMode,
           response: normalized,
           pipelineMetadata: mergedMetadata
@@ -1415,6 +1450,9 @@ export class RouteCodexHttpServer {
           model: providerModel,
           providerLabel
         });
+        if (isAntigravityProviderKey(target.providerKey) && extractStatusCodeFromError(error) === 429) {
+          maxAttempts = Math.max(maxAttempts, resolveAntigravityMaxProviderAttempts());
+        }
         const quotaModule = this.managerDaemon?.getModule('provider-quota') as ProviderQuotaDaemonModule | undefined;
         if (this.isQuotaRoutingEnabled() && quotaModule) {
           try {
@@ -1472,7 +1510,7 @@ export class RouteCodexHttpServer {
       throw new Error('Hub pipeline runtime is not initialized');
     }
     const payload = asRecord(input.body);
-    const isInternalFollowup = metadata.serverToolFollowup === true;
+    const isInternalFollowup = asRecord((metadata as any).__rt)?.serverToolFollowup === true;
     const wantsShadowCompare = !isInternalFollowup && shouldRunHubShadowCompare(this.hubShadowCompareConfig);
     const pipelineInput: PipelineExecutionInput & { payload: Record<string, unknown> } & { id?: string; endpoint?: string } = {
       ...input,
@@ -1880,6 +1918,7 @@ export class RouteCodexHttpServer {
     requestId: string;
     wantsStream: boolean;
     originalRequest?: Record<string, unknown> | undefined;
+    requestSemantics?: Record<string, unknown>;
     processMode?: string;
     response: PipelineExecutionResult;
     pipelineMetadata?: Record<string, unknown>;
@@ -1909,7 +1948,6 @@ export class RouteCodexHttpServer {
     try {
       const providerProtocol = mapProviderProtocol(options.providerType);
       const metadataBag = asRecord(options.pipelineMetadata);
-      const aliasMap = extractAnthropicToolAliasMap(metadataBag);
       const originalModelId = this.extractClientModelId(metadataBag, options.originalRequest);
 
       // 以 HubPipeline metadata 为基础构建 AdapterContext，确保诸如
@@ -1928,12 +1966,6 @@ export class RouteCodexHttpServer {
       baseContext.providerProtocol = providerProtocol;
       baseContext.originalModelId = originalModelId;
       const adapterContext = baseContext;
-      // 将 serverToolFollowup 等标记从 pipelineMetadata 透传到 AdapterContext，
-      // 便于 convertProviderResponse 正确识别内部二跳请求并跳过 servertool。
-      if (metadataBag && Object.prototype.hasOwnProperty.call(metadataBag, 'serverToolFollowup')) {
-        (adapterContext as Record<string, unknown>).serverToolFollowup = (metadataBag as Record<string, unknown>)
-          .serverToolFollowup as unknown;
-      }
       const compatProfile =
         metadataBag &&
           typeof metadataBag === 'object' &&
@@ -1944,21 +1976,6 @@ export class RouteCodexHttpServer {
           : undefined;
       if (compatProfile && compatProfile.trim()) {
         adapterContext.compatibilityProfile = compatProfile.trim();
-      }
-      if (aliasMap) {
-        adapterContext.anthropicToolNameMap = aliasMap;
-      }
-      if (metadataBag && typeof metadataBag === 'object') {
-        const webSearchConfig = (metadataBag as Record<string, unknown>).webSearch;
-        if (webSearchConfig && typeof webSearchConfig === 'object') {
-          adapterContext.webSearch = webSearchConfig;
-        }
-        if ((metadataBag as Record<string, unknown>).forceWebSearch === true) {
-          adapterContext.forceWebSearch = true;
-        }
-        if ((metadataBag as Record<string, unknown>).forceVision === true) {
-          adapterContext.forceVision = true;
-        }
       }
       const stageRecorder = await bridgeCreateSnapshotRecorder(
         adapterContext,
@@ -2010,7 +2027,18 @@ export class RouteCodexHttpServer {
 
         // servertool followup 是内部二跳请求：不应继承客户端 headers 偏好（尤其是 Accept），
         // 否则会导致上游返回非 SSE 响应而被当作 SSE 解析，出现“空回复”。
-        if (nestedMetadata.serverToolFollowup === true) {
+        // E1: merge internal runtime metadata carrier (`__rt`) instead of clobbering it.
+        try {
+          const baseRt = asRecord((metadataBag as any)?.__rt) ?? {};
+          const extraRt = asRecord((nestedExtra as any)?.__rt) ?? {};
+          if (Object.keys(baseRt).length || Object.keys(extraRt).length) {
+            (nestedMetadata as any).__rt = { ...baseRt, ...extraRt };
+          }
+        } catch {
+          // best-effort
+        }
+
+        if (asRecord((nestedMetadata as any).__rt)?.serverToolFollowup === true) {
           delete nestedMetadata.clientHeaders;
           delete nestedMetadata.clientRequestId;
         }
@@ -2038,6 +2066,7 @@ export class RouteCodexHttpServer {
         context: adapterContext,
         entryEndpoint: options.entryEndpoint || entry,
         wantsStream: options.wantsStream,
+        requestSemantics: options.requestSemantics,
         providerInvoker,
         stageRecorder,
         reenterPipeline
@@ -2058,6 +2087,12 @@ export class RouteCodexHttpServer {
       const errRecord = err as Record<string, unknown>;
       const errCode = typeof errRecord.code === 'string' ? errRecord.code : undefined;
       const errName = typeof errRecord.name === 'string' ? errRecord.name : undefined;
+      const statusCandidate =
+        typeof (errRecord as { status?: unknown }).status === 'number'
+          ? (errRecord as { status: number }).status
+          : typeof (errRecord as { statusCode?: unknown }).statusCode === 'number'
+            ? (errRecord as { statusCode: number }).statusCode
+            : undefined;
       const isSseDecodeError =
         errCode === 'SSE_DECODE_ERROR' ||
         (errName === 'ProviderProtocolError' && message.toLowerCase().includes('sse'));
@@ -2065,7 +2100,12 @@ export class RouteCodexHttpServer {
         errCode === 'SERVERTOOL_FOLLOWUP_FAILED' ||
         errCode === 'SERVERTOOL_EMPTY_FOLLOWUP' ||
         (typeof errCode === 'string' && errCode.startsWith('SERVERTOOL_'));
-      if (isSseDecodeError || isServerToolFollowupError) {
+      const isProviderProtocolError = errName === 'ProviderProtocolError';
+      // If we need to stream a client response, conversion failures are fatal: there is no safe fallback
+      // that preserves protocol correctness.
+      const isStreamingConversion = Boolean(options.wantsStream && (needsAnthropicConversion || needsResponsesConversion || needsChatConversion));
+
+      if (isSseDecodeError || isServerToolFollowupError || isStreamingConversion || (isProviderProtocolError && typeof statusCandidate === 'number')) {
         console.error('[RouteCodexHttpServer] Fatal conversion error, bubbling as HTTP error', error);
         throw error;
       }

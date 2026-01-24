@@ -20,6 +20,7 @@ type TokenPayload = UnknownObject & {
   token?: string;
   api_key?: string;
   APIKey?: string;
+  apiKey?: string;
   expires_at?: number | string;
   ExpiresAt?: number | string;
 };
@@ -128,12 +129,45 @@ export class TokenFileAuthProvider implements IAuthProvider {
   }
 
   // ---- helpers ----
+  private pickTokenFileIfItContainsApiKey(candidatePath: string): string | null {
+    try {
+      if (!candidatePath) return null;
+      if (!fs.existsSync(candidatePath)) return null;
+      const parsed = this.readJson(candidatePath);
+      const apiKey = this.extractApiKey(parsed);
+      return apiKey ? candidatePath : null;
+    } catch {
+      return null;
+    }
+  }
+
   private resolveTokenFile(): string | null {
     // Prefer explicit tokenFile from config
     const tf = typeof this.config.tokenFile === 'string' ? this.config.tokenFile.trim() : '';
     if (tf) {
       return this.expandHome(tf);
     }
+
+    const providerIdRaw =
+      typeof (this.config as unknown as { oauthProviderId?: unknown }).oauthProviderId === 'string'
+        ? String((this.config as unknown as { oauthProviderId: string }).oauthProviderId).trim()
+        : '';
+    const providerId = providerIdRaw ? providerIdRaw.toLowerCase() : '';
+    if (providerId === 'iflow') {
+      // iFlow CLI stores an already-usable API key in ~/.iflow/settings.json (field: apiKey).
+      // Prefer it and DO NOT fall back to access_token-only files (iFlow business calls require apiKey).
+      const home = process.env.HOME || '';
+      const settings = this.pickTokenFileIfItContainsApiKey(path.join(home, '.iflow', 'settings.json'));
+      if (settings) {
+        return settings;
+      }
+      const creds = this.pickTokenFileIfItContainsApiKey(path.join(home, '.iflow', 'oauth_creds.json'));
+      if (creds) {
+        return creds;
+      }
+      return null;
+    }
+
     // Fallback order:
     // 1) RouteCodex default token path
     const rc = path.join(process.env.HOME || '', '.routecodex', 'tokens', 'qwen-default.json');
@@ -190,7 +224,7 @@ export class TokenFileAuthProvider implements IAuthProvider {
     if (!tok) {
       return null;
     }
-    const cand = tok.api_key || tok.APIKey;
+    const cand = tok.api_key || tok.APIKey || tok.apiKey;
     if (typeof cand === 'string' && cand.trim()) {
       return cand.trim();
     }

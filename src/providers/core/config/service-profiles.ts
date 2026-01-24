@@ -168,7 +168,10 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
     requiredAuth: [],
     optionalAuth: ['oauth', 'apikey'],
     headers: {
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/json',
+      // iFlow 对部分模型（例如 glm-4.7）会基于 UA 做强约束：
+      // 必须伪装成 iFlow CLI 才能获得可用配额/能力，否则会返回 HTTP 200 + status=435 "Model not support"。
+      'User-Agent': 'iFlow-Cli'
     },
     // 默认 Provider 请求超时时间：500s
     timeout: 500000,

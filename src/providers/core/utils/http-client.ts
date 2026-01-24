@@ -192,6 +192,12 @@ export class HttpClient {
         clearTimeout(timeoutId);
         // 与非流式 request 保持一致：在错误中包含上游返回体，但对 message 进行截断，避免控制台刷屏。
         const errorText = await response.text();
+        const headersObj: Record<string, string> = {};
+        try {
+          response.headers.forEach((value, key) => { headersObj[key] = value; });
+        } catch {
+          // ignore header parsing failures
+        }
         const message = this.buildHttpErrorMessage(response.status, errorText);
         const err: UpstreamError = new Error(message) as UpstreamError;
         err.status = response.status;
@@ -200,6 +206,7 @@ export class HttpClient {
           data: undefined,
           raw: errorText
         };
+        err.headers = headersObj;
         err.retryable = false;
         throw err;
       }
@@ -441,6 +448,12 @@ export class HttpClient {
 
       if (!response.ok) {
         const errorText = await response.text();
+        const headersObj: Record<string, string> = {};
+        try {
+          response.headers.forEach((value, key) => { headersObj[key] = value; });
+        } catch {
+          // ignore header parsing failures
+        }
         let parsed: unknown;
         try {
           parsed = errorText ? JSON.parse(errorText) : undefined;
@@ -461,6 +474,7 @@ export class HttpClient {
           data: parsed,
           raw: errorText
         };
+        err.headers = headersObj;
         err.retryable = false;
         throw err;
       }
@@ -670,7 +684,10 @@ export class HttpClient {
         : error;
     providerError.details = {
       originalError,
-      response: err?.response
+      response: {
+        ...(err?.response || {}),
+        ...(err?.headers ? { headers: err.headers } : {})
+      }
     };
 
     return providerError;

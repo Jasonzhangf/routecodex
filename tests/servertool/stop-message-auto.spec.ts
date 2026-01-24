@@ -183,12 +183,28 @@ describe('stop_message_auto servertool', () => {
 
     expect(orchestration.executed).toBe(true);
     expect(orchestration.flowId).toBe('stop_message_flow');
+
+    const persisted = await readJsonFileWithRetry<{
+      state?: {
+        stopMessageText?: unknown;
+        stopMessageMaxRepeats?: unknown;
+        stopMessageUsed?: unknown;
+        stopMessageUpdatedAt?: unknown;
+        stopMessageLastUsedAt?: unknown;
+      };
+    }>(path.join(SESSION_DIR, `session-${sessionId}.json`));
+    expect(persisted?.state?.stopMessageText).toBeUndefined();
+    expect(persisted?.state?.stopMessageMaxRepeats).toBeUndefined();
+    expect(persisted?.state?.stopMessageUsed).toBeUndefined();
+    expect(typeof persisted?.state?.stopMessageUpdatedAt).toBe('number');
+    expect(typeof persisted?.state?.stopMessageLastUsedAt).toBe('number');
+
     expect(capturedFollowup).toBeTruthy();
     expect(capturedFollowup?.entryEndpoint).toBe('/v1/responses');
-    expect(capturedFollowup?.metadata?.disableStickyRoutes).toBe(true);
-    expect(capturedFollowup?.metadata?.preserveRouteHint).toBe(false);
+    expect(capturedFollowup?.metadata?.__rt?.disableStickyRoutes).toBe(true);
+    expect(capturedFollowup?.metadata?.__rt?.preserveRouteHint).toBe(false);
     expect(capturedFollowup?.metadata?.stream).toBe(false);
-    expect(capturedFollowup?.metadata?.serverToolOriginalEntryEndpoint).toBe('/v1/responses');
+    expect(capturedFollowup?.metadata?.__rt?.serverToolOriginalEntryEndpoint).toBe('/v1/responses');
 
     const payload = capturedFollowup?.body as any;
     expect(Array.isArray(payload.messages)).toBe(true);
