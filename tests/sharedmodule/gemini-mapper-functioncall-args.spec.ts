@@ -3,6 +3,72 @@ import { GeminiSemanticMapper } from '../../sharedmodule/llmswitch-core/src/conv
 import type { ChatEnvelope } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.js';
 
 describe('GeminiSemanticMapper functionCall.args shape', () => {
+  it('normalizes historical tool alias execute_command -> exec_command for Gemini payload', async () => {
+    const mapper = new GeminiSemanticMapper();
+
+    const chat: ChatEnvelope = {
+      messages: [
+        {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            {
+              id: 'call_exec_alias',
+              type: 'function',
+              function: {
+                name: 'execute_command',
+                arguments: JSON.stringify({ command: 'echo 1', workdir: '/tmp' })
+              }
+            } as any
+          ]
+        } as any
+      ],
+      tools: [
+        {
+          type: 'function',
+          function: {
+            name: 'exec_command',
+            parameters: {
+              type: 'object',
+              properties: {
+                cmd: { type: 'string' },
+                command: { type: 'string' },
+                workdir: { type: 'string' }
+              }
+            }
+          }
+        } as any
+      ],
+      toolOutputs: [],
+      metadata: {
+        context: {
+          providerId: 'antigravity.geetasamodgeetasamoda.gemini-3-pro-high',
+          entryEndpoint: '/v1/responses',
+          providerProtocol: 'gemini-chat',
+          requestId: 'req_test'
+        }
+      } as any,
+      parameters: { model: 'gemini-3-pro-high' } as any
+    };
+
+    const ctx = { requestId: 'req_test' } as any;
+    const envelope = await mapper.fromChat(chat, ctx);
+    const payload = envelope.payload as any;
+
+    const contents = Array.isArray(payload?.contents) ? payload.contents : [];
+    const functionCalls: any[] = [];
+    for (const entry of contents) {
+      const parts = Array.isArray(entry?.parts) ? entry.parts : [];
+      for (const part of parts) {
+        if (part && typeof part === 'object' && part.functionCall) {
+          functionCalls.push(part.functionCall);
+        }
+      }
+    }
+    expect(functionCalls.find((fc) => fc?.name === 'execute_command')).toBeUndefined();
+    expect(functionCalls.find((fc) => fc?.name === 'exec_command')).toBeDefined();
+  });
+
   it('includes tools + structured functionCall for gemini-cli providers (no text-only tool transcripts)', async () => {
     const mapper = new GeminiSemanticMapper();
 
@@ -46,7 +112,8 @@ describe('GeminiSemanticMapper functionCall.args shape', () => {
           providerProtocol: 'gemini-chat',
           requestId: 'req_test'
         }
-      } as any
+      } as any,
+      parameters: { model: 'gemini-2.5-pro' } as any
     };
 
     const ctx = { requestId: 'req_test' } as any;
@@ -125,7 +192,8 @@ describe('GeminiSemanticMapper functionCall.args shape', () => {
         context: {
           providerId: 'antigravity.jasonqueque.claude-sonnet-4-5'
         }
-      } as any
+      } as any,
+      parameters: { model: 'claude-sonnet-4-5' } as any
     };
 
     const ctx = { requestId: 'req_test' } as any;
@@ -265,7 +333,8 @@ describe('GeminiSemanticMapper functionCall.args shape', () => {
           providerProtocol: 'gemini-chat',
           requestId: 'req_test'
         }
-      } as any
+      } as any,
+      parameters: { model: 'gemini-3-pro-high' } as any
     };
 
     const ctx = { requestId: 'req_test' } as any;
