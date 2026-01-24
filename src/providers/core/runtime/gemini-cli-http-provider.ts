@@ -64,19 +64,10 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
     if (!this.isAntigravityRuntime()) {
       return super.applyStreamModeHeaders(headers, wantsSse);
     }
-    if (!this.isAntigravityMinimalCompatibilityEnabled()) {
-      // Standard contract: keep standard SSE Accept header behavior.
-      return super.applyStreamModeHeaders(headers, wantsSse);
-    }
-    // gcli2api alignment: httpx default Accept is "*/*" (gcli2api does not override it).
-    // For Antigravity, keep this header minimal and avoid forcing text/event-stream.
-    const normalized = { ...headers };
-    const acceptKey = Object.keys(normalized).find((key) => key.toLowerCase() === 'accept');
-    if (acceptKey) {
-      delete normalized[acceptKey];
-    }
-    normalized.Accept = '*/*';
-    return normalized;
+    // Antigravity: keep SSE Accept header behavior stable.
+    // We intentionally do not force "*/*" here because the upstream is sensitive to header triplets
+    // and we have observed successful runs with the default "text/event-stream" Accept.
+    return super.applyStreamModeHeaders(headers, wantsSse);
   }
 
   protected override getBaseUrlCandidates(_context: ProviderContext): string[] | undefined {
@@ -233,13 +224,8 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
       const defaultUa =
         minimalCompatibility ? ANTIGRAVITY_HELPER_DEFAULTS.userAgent : 'antigravity/1.11.5 windows/amd64';
       finalized['User-Agent'] = envUa || defaultUa;
-      // gcli2api alignment: keep headers minimal for Antigravity.
-      finalized['Accept-Encoding'] = 'gzip';
-      deleteHeaderInsensitive('originator');
 
       if (minimalCompatibility) {
-        deleteHeaderInsensitive('X-Goog-Api-Client');
-        deleteHeaderInsensitive('Client-Metadata');
         // gcli2api alignment: requestId/requestType are headers, not JSON body fields.
         try {
           const adapter = this.resolvePayload(request);
@@ -256,6 +242,23 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
         } catch {
           // best effort
         }
+        // Keep the header triplet stable (X-Goog-Api-Client / Client-Metadata / originator) to align with
+        // previously successful antigravity snapshots and avoid quota pool surprises.
+        if (!finalized['X-Goog-Api-Client']) {
+          finalized['X-Goog-Api-Client'] =
+            (process.env.ROUTECODEX_ANTIGRAVITY_X_GOOG_API_CLIENT ||
+              process.env.RCC_ANTIGRAVITY_X_GOOG_API_CLIENT ||
+              'gl-node/22.17.0').trim();
+        }
+        if (!finalized['Client-Metadata']) {
+          finalized['Client-Metadata'] =
+            (process.env.ROUTECODEX_ANTIGRAVITY_CLIENT_METADATA ||
+              process.env.RCC_ANTIGRAVITY_CLIENT_METADATA ||
+              'ideType=IDE_UNSPECIFIED, platform=PLATFORM_UNSPECIFIED, pluginType=GEMINI').trim();
+        }
+        if (!finalized.originator) {
+          finalized.originator = 'codex_cli_rs';
+        }
       } else {
         // Standard contract: header triplet differentiates identity/quota pool.
         const xGoog =
@@ -268,6 +271,9 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
             '{"ideType":"IDE_UNSPECIFIED","platform":"PLATFORM_UNSPECIFIED","pluginType":"GEMINI"}').trim();
         if (xGoog) finalized['X-Goog-Api-Client'] = xGoog;
         if (clientMeta) finalized['Client-Metadata'] = clientMeta;
+        if (!finalized.originator) {
+          finalized.originator = 'codex_cli_rs';
+        }
         // Standard contract: requestId/requestType are NOT headers.
         deleteHeaderInsensitive('requestId');
         deleteHeaderInsensitive('requestType');
@@ -464,6 +470,13 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
     const raw = (process.env.ROUTECODEX_ANTIGRAVITY_HEADER_MODE || process.env.RCC_ANTIGRAVITY_HEADER_MODE || '')
       .trim()
       .toLowerCase();
+    // Default to minimal for Antigravity to match historically successful snapshots.
+    if (!raw) {
+      return true;
+    }
+    if (raw === 'standard' || raw === 'full' || raw === 'headers') {
+      return false;
+    }
     return raw === 'minimal' || raw === 'gcli2api';
   }
 

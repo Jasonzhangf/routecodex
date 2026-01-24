@@ -86,7 +86,7 @@ describe('GeminiCLIHttpProvider basic behaviour', () => {
       expect(headers.requestId).toBe((processed as any).requestId);
       expect(headers.requestType).toBe('agent');
       const streamHeaders = (provider as any).applyStreamModeHeaders(headers, true);
-      expect(streamHeaders.Accept).toBe('*/*');
+      expect(streamHeaders.Accept).toBe('text/event-stream');
 
       const body = (provider as any).buildHttpRequestBody(processed);
       expect(body).toBeTruthy();
@@ -108,11 +108,59 @@ describe('GeminiCLIHttpProvider basic behaviour', () => {
     }
   });
 
-  test('antigravity default contract: requestId/userAgent/requestType in JSON + header triplet', async () => {
+  test('antigravity default behaviour: minimal-by-default (no env)', async () => {
     const prevHeaderMode = process.env.ROUTECODEX_ANTIGRAVITY_HEADER_MODE;
     const prevRccHeaderMode = process.env.RCC_ANTIGRAVITY_HEADER_MODE;
     delete process.env.ROUTECODEX_ANTIGRAVITY_HEADER_MODE;
     delete process.env.RCC_ANTIGRAVITY_HEADER_MODE;
+    try {
+      const cfg: OpenAIStandardConfig = {
+        ...baseConfig,
+        config: {
+          ...(baseConfig.config as any),
+          providerId: 'antigravity'
+        }
+      } as unknown as OpenAIStandardConfig;
+
+      const provider = new GeminiCLIHttpProvider(cfg, emptyDeps);
+      const processed = await (provider as any).preprocessRequest({
+        model: 'gemini-3-pro-high',
+        contents: [{ role: 'user', parts: [{ text: 'hi' }] }],
+        stream: true
+      });
+
+      expect(typeof (processed as any).requestId).toBe('string');
+      expect(String((processed as any).requestId)).toContain('req-');
+      expect((processed as any).requestType).toBeUndefined();
+      expect((processed as any).userAgent).toBeUndefined();
+
+      const headers = await (provider as any).finalizeRequestHeaders({}, processed);
+      expect(headers.requestId).toBe((processed as any).requestId);
+      expect(headers.requestType).toBe('agent');
+
+      const body = (provider as any).buildHttpRequestBody(processed);
+      expect((body as any).requestId).toBeUndefined();
+      expect((body as any).requestType).toBeUndefined();
+      expect((body as any).userAgent).toBeUndefined();
+    } finally {
+      if (prevHeaderMode === undefined) {
+        delete process.env.ROUTECODEX_ANTIGRAVITY_HEADER_MODE;
+      } else {
+        process.env.ROUTECODEX_ANTIGRAVITY_HEADER_MODE = prevHeaderMode;
+      }
+      if (prevRccHeaderMode === undefined) {
+        delete process.env.RCC_ANTIGRAVITY_HEADER_MODE;
+      } else {
+        process.env.RCC_ANTIGRAVITY_HEADER_MODE = prevRccHeaderMode;
+      }
+    }
+  });
+
+  test('antigravity standard contract: requestId/userAgent/requestType in JSON + header triplet', async () => {
+    const prevHeaderMode = process.env.ROUTECODEX_ANTIGRAVITY_HEADER_MODE;
+    const prevRccHeaderMode = process.env.RCC_ANTIGRAVITY_HEADER_MODE;
+    process.env.ROUTECODEX_ANTIGRAVITY_HEADER_MODE = 'standard';
+    process.env.RCC_ANTIGRAVITY_HEADER_MODE = 'standard';
     try {
       const cfg: OpenAIStandardConfig = {
         ...baseConfig,
@@ -149,6 +197,7 @@ describe('GeminiCLIHttpProvider basic behaviour', () => {
       expect(headers['User-Agent']).toContain('antigravity/');
       expect(headers['X-Goog-Api-Client']).toBeTruthy();
       expect(headers['Client-Metadata']).toBeTruthy();
+      expect(headers.originator).toBeTruthy();
       const streamHeaders = (provider as any).applyStreamModeHeaders(headers, true);
       expect(streamHeaders.Accept).toBe('text/event-stream');
 
