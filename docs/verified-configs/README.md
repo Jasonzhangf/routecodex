@@ -32,7 +32,7 @@ npx ts-node src/cli.ts start --config ~/.routecodex/config/qwen-5522-qwen3-coder
 
 ## 目录结构
 ```
-verified-configs/
+docs/verified-configs/
 ├── README.md                 # 本文件
 └── v0.45.0/                 # 版本化配置目录
     ├── lmstudio-5521-gpt-oss-20b-mlx.json

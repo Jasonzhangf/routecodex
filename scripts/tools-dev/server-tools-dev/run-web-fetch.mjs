@@ -22,7 +22,7 @@ function parseArgs(argv) {
 }
 
 function usage() {
-  console.log('Usage: node tools/server-tools-dev/run-web-fetch.mjs --url <URL> [--timeout 12000] [--max-bytes 524288] [--no-follow] [--header "Key: Value"]');
+  console.log('Usage: node scripts/tools-dev/server-tools-dev/run-web-fetch.mjs --url <URL> [--timeout 12000] [--max-bytes 524288] [--no-follow] [--header "Key: Value"]');
 }
 
 async function importCoreFetcher() {

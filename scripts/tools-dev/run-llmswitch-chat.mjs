@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 // Quick llmswitch-core Chat filter runner: runStandardChatRequestFilters without starting server.
 // Usage:
-//   node tools/run-llmswitch-chat.mjs path/to/chat-request.json [/v1/chat|/v1/messages|/v1/responses]
+//   node scripts/tools-dev/run-llmswitch-chat.mjs path/to/chat-request.json [/v1/chat|/v1/messages|/v1/responses]
 
 import fs from 'fs';
 import path from 'path';
 import url from 'url';
-import { runStandardChatRequestFilters } from '../sharedmodule/llmswitch-core/dist/conversion/index.js';
+import { runStandardChatRequestFilters } from '../../sharedmodule/llmswitch-core/dist/conversion/index.js';
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 
@@ -15,7 +15,7 @@ async function main() {
   const endpoint = process.argv[3] || '/v1/chat/completions';
 
   if (!file) {
-    console.error('Usage: node tools/run-llmswitch-chat.mjs <payload.json> [endpoint]');
+    console.error('Usage: node scripts/tools-dev/run-llmswitch-chat.mjs <payload.json> [endpoint]');
     process.exit(1);
   }
 

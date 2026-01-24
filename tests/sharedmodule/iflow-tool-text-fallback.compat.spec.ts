@@ -5,7 +5,7 @@ const { applyRequestCompat } = await import(
 );
 
 describe('chat:iflow compat (tool text fallback)', () => {
-  it('removes tools/tool_choice for glm-4.7 and injects tool markup instruction into system message', () => {
+  it('does not force text tool fallback for glm-4.7 (tools/tool_choice preserved)', () => {
     const payload = {
       model: 'glm-4.7',
       messages: [{ role: 'user', content: 'run ls' }],
@@ -27,15 +27,13 @@ describe('chat:iflow compat (tool text fallback)', () => {
       adapterContext: { requestId: 't', entryEndpoint: '/v1/chat/completions', providerProtocol: 'openai-chat' } as any
     }).payload as any;
 
-    expect(out.tools).toBeUndefined();
-    expect(out.tool_choice).toBeUndefined();
+    expect(Array.isArray(out.tools)).toBe(true);
+    expect(out.tool_choice).toBeTruthy();
     expect(Array.isArray(out.messages)).toBe(true);
-    expect(out.messages[0].role).toBe('system');
-    expect(String(out.messages[0].content || '')).toContain('Tool Calls (Text Markup Mode)');
-    expect(String(out.messages[0].content || '')).toContain('<tool:exec_command>');
+    expect(out.messages[0].role).toBe('user');
   });
 
-  it('rewrites tool_calls/tool-role followups into plain text for glm-4.7 (even when tools/tool_choice are absent)', () => {
+  it('preserves tool_calls/tool-role followups for glm-4.7 (no rewrite)', () => {
     const payload = {
       model: 'glm-4.7',
       messages: [
@@ -61,20 +59,18 @@ describe('chat:iflow compat (tool text fallback)', () => {
     }).payload as any;
 
     expect(Array.isArray(out.messages)).toBe(true);
-    expect(out.messages[0].role).toBe('system');
+    expect(out.messages[0].role).toBe('user');
 
     const assistant = out.messages.find((m: any) => m && m.role === 'assistant');
     expect(assistant).toBeTruthy();
-    expect(assistant.tool_calls).toBeUndefined();
-    expect(String(assistant.content || '')).toContain('<tool:exec_command>');
-    expect(String(assistant.content || '')).toContain('<command>ls -la</command>');
-    expect(String(assistant.content || '')).toContain('<timeout_ms>12345</timeout_ms>');
+    expect(Array.isArray(assistant.tool_calls)).toBe(true);
+    expect(assistant.tool_calls[0]?.function?.name).toBe('exec_command');
+    expect(String(assistant.tool_calls[0]?.function?.arguments || '')).toContain('ls -la');
 
-    const toolAsUser = out.messages.find((m: any) => m && m.role === 'user' && String(m.content || '').includes('Tool result:'));
-    expect(toolAsUser).toBeTruthy();
-    expect(toolAsUser.name).toBeUndefined();
-    expect(toolAsUser.tool_call_id).toBeUndefined();
-    expect(String(toolAsUser.content || '')).toContain('name: exec_command');
-    expect(String(toolAsUser.content || '')).toContain('output:');
+    const toolMsg = out.messages.find((m: any) => m && m.role === 'tool');
+    expect(toolMsg).toBeTruthy();
+    expect(toolMsg.name).toBe('exec_command');
+    expect(toolMsg.tool_call_id).toBe('tc_1');
+    expect(String(toolMsg.content || '')).toBe('ok');
   });
 });

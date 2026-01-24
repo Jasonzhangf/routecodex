@@ -5,8 +5,8 @@ Purpose
 - Starts with SSE event consumption, then completes a basic tool-calls loop.
 
 Run
-- npm run debug:responses -- --file tools/responses-debug-client/payloads/text.json
-- npm run debug:responses -- --file tools/responses-debug-client/payloads/tool.json
+- npm run debug:responses -- --file scripts/tools-dev/responses-debug-client/payloads/text.json
+- npm run debug:responses -- --file scripts/tools-dev/responses-debug-client/payloads/tool.json
 
 Options
 - --file <path>       Required. JSON request payload (Responses shape)
@@ -21,4 +21,3 @@ Notes
 - Only Responses payloads are supported (no Chat conversion).
 - Listens to named SSE events (response.output_text.delta, etc.).
 - Implements minimal local tools: echo, sum, time.
-

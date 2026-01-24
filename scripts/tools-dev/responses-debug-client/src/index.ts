@@ -73,7 +73,7 @@ async function main() {
   const args = parseArgs(process.argv);
   const file = String(args.file || args.f || '');
   if (!file) {
-    console.error('Usage: tsx tools/responses-debug-client/src/index.ts --file <payload.json> [--baseURL URL] [--apiKey KEY] [--timeout 120] [--raw] [--save] [--maxRounds 3]');
+    console.error('Usage: tsx scripts/tools-dev/responses-debug-client/src/index.ts --file <payload.json> [--baseURL URL] [--apiKey KEY] [--timeout 120] [--raw] [--save] [--maxRounds 3]');
     process.exit(1);
   }
   const baseURL = String(args.baseURL || 'http://127.0.0.1:5520/v1');

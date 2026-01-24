@@ -44,18 +44,18 @@
 
 ## 模块划分
 
-- `servertool/registry`（计划）
+- `llmswitch-core/src/servertool/registry`（计划）
   - 负责 ServerTool handler 的注册与查找。
   - 提供按 tool name（如 `web_search`）查找 handler 的接口。
 
-- `servertool/engine`（计划）
+- `llmswitch-core/src/servertool/engine`（计划）
   - 替换/封装现有 `runServerSideToolEngine()` 的实现：
     - 统一抽取工具调用；
     - 调用 handler；
     - 注入虚拟 tool 消息；
     - 触发第二跳或返回更新后的 ChatEnvelope。
 
-- `servertool/handlers/web_search`（计划）
+- `llmswitch-core/src/servertool/handlers/web_search`（计划）
   - web_search 的具体 handler：
     - 解析 `query/engine/recency/count`；
     - 根据 `virtualrouter.webSearch.engines` 选择后端引擎（Gemini CLI / GLM 等）；
@@ -63,4 +63,3 @@
     - 返回绑定原始 tool_call_id 的虚拟 tool 消息。
 
 后续 vision followup 等也会迁移为独立 handler，挂到同一框架上，尽量做到「ServerTool 框架 + 多个 handler」的统一模式。
-

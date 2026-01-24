@@ -205,4 +205,63 @@ describe('HttpTransportProvider header propagation', () => {
     expect(headers['session_id']).toBe('sess-header');
     expect(headers['conversation_id']).toBe('conv-header');
   });
+
+  test('iflow forces UA simulation (service UA overrides inbound userAgent)', async () => {
+    const iflowConfig = {
+      id: 'test-http-provider-iflow',
+      type: 'openai-http-provider',
+      config: {
+        providerType: 'openai',
+        providerId: 'iflow',
+        auth: { type: 'apikey', apiKey: 'test-key-1234567890' },
+        overrides: {
+          baseUrl: 'https://example.invalid/iflow',
+          endpoint: '/chat/completions',
+          defaultModel: 'glm-4.7'
+        }
+      }
+    } as unknown as typeof config;
+
+    const provider = new TestHttpTransportProvider(iflowConfig, deps);
+    await provider.initialize();
+
+    const providerRequest = {
+      metadata: {
+        stream: false,
+        clientHeaders: { accept: 'application/json' }
+      },
+      data: {
+        model: 'glm-4.7',
+        messages: [{ role: 'user', content: 'hi' }]
+      }
+    };
+
+    attachProviderRuntimeMetadata(providerRequest as Record<string, unknown>, {
+      requestId: 'req-test-iflow-ua',
+      providerId: 'iflow',
+      providerKey: 'iflow.key1.glm-4.7',
+      providerType: 'openai',
+      providerProtocol: 'openai-chat',
+      routeName: 'test',
+      metadata: {
+        entryEndpoint: '/v1/chat/completions',
+        userAgent: 'curl/8.7.1',
+        clientHeaders: { accept: 'application/json' }
+      },
+      target: {
+        providerKey: 'iflow.key1.glm-4.7',
+        providerType: 'openai',
+        compatibilityProfile: undefined,
+        runtimeKey: 'iflow.key1',
+        modelId: 'glm-4.7'
+      }
+    });
+
+    const response = await provider.processIncoming(providerRequest as any);
+    expect(response).toBeTruthy();
+
+    const client = (provider as unknown as { httpClient: RecordingHttpClient }).httpClient;
+    const headers = client.lastHeaders || {};
+    expect(headers['User-Agent']).toBe('iFlow-Cli');
+  });
 });

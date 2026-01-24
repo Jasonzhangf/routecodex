@@ -961,7 +961,13 @@ export class HttpTransportProvider extends BaseProvider {
     // - otherwise fall back to defaults
     const uaFromConfig = this.findHeaderValue({ ...overrideHeaders, ...runtimeHeaders }, 'User-Agent');
     const uaFromService = this.findHeaderValue(serviceHeaders, 'User-Agent');
-    const resolvedUa = uaFromConfig ?? inboundUserAgent ?? uaFromService ?? DEFAULT_USER_AGENT;
+    // iFlow 特例：部分模型（例如 glm-4.7）对 UA 有强约束，必须模拟 iFlow CLI。
+    // 因此对 iflow：service/profile 的 UA 优先级应高于 inbound client userAgent，
+    // 否则客户端 UA 会把模拟头部冲掉，触发 HTTP 200 + status=435 "Model not support"。
+    const isIflow = this.isIflowTransportRuntime(runtimeMetadata);
+    const resolvedUa = isIflow
+      ? (uaFromConfig ?? uaFromService ?? inboundUserAgent ?? DEFAULT_USER_AGENT)
+      : (uaFromConfig ?? inboundUserAgent ?? uaFromService ?? DEFAULT_USER_AGENT);
     this.assignHeader(finalHeaders, 'User-Agent', resolvedUa);
 
     // originator: do not invent one; only forward from config or inbound client.
@@ -1203,6 +1209,30 @@ export class HttpTransportProvider extends BaseProvider {
       return true;
     }
     if (fromProviderKey.startsWith('antigravity.')) {
+      return true;
+    }
+    return false;
+  }
+
+  private isIflowTransportRuntime(runtimeMetadata?: ProviderRuntimeMetadata): boolean {
+    const fromConfig =
+      typeof this.config?.config?.providerId === 'string' && this.config.config.providerId.trim()
+        ? this.config.config.providerId.trim().toLowerCase()
+        : '';
+    const fromRuntime =
+      typeof runtimeMetadata?.providerId === 'string' && runtimeMetadata.providerId.trim()
+        ? runtimeMetadata.providerId.trim().toLowerCase()
+        : '';
+    const fromProviderKey =
+      typeof runtimeMetadata?.providerKey === 'string' && runtimeMetadata.providerKey.trim()
+        ? runtimeMetadata.providerKey.trim().toLowerCase()
+        : '';
+    const fromOAuth = typeof this.oauthProviderId === 'string' ? this.oauthProviderId.trim().toLowerCase() : '';
+
+    if (fromConfig === 'iflow' || fromRuntime === 'iflow' || fromOAuth === 'iflow') {
+      return true;
+    }
+    if (fromProviderKey.startsWith('iflow.')) {
       return true;
     }
     return false;

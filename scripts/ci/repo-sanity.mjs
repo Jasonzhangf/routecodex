@@ -10,11 +10,17 @@ function runGit(args) {
   return String(out.stdout || '');
 }
 
+function isIgnoredByGit(p) {
+  const out = spawnSync('git', ['check-ignore', '-q', p], { encoding: 'utf8' });
+  return out.status === 0;
+}
+
 function listRootEntries() {
   const cwd = process.cwd();
   return fs
     .readdirSync(cwd, { withFileTypes: true })
     .filter((d) => d.name !== '.git')
+    .filter((d) => !isIgnoredByGit(d.name))
     .map((d) => d.name)
     .sort();
 }
@@ -43,6 +49,13 @@ function isForbiddenTrackedPath(p) {
   if (p.startsWith('docs/archive/')) return true;
   if (p.startsWith('scripts/dev/')) return true;
   if (p.startsWith('scripts/test-') && p.endsWith('.mjs')) return true;
+  if (p.startsWith('tools/')) return true;
+  if (p.startsWith('replay/')) return true;
+  if (p.startsWith('servertool/')) return true;
+  if (p.startsWith('verified-configs/')) return true;
+  if (p.startsWith('interpreter/')) return true;
+  if (p.startsWith('exporters/')) return true;
+  if (p.startsWith('bin/')) return true;
   if (p.startsWith('.npm-cache-local/')) return true;
   if (p.startsWith('.claude/')) return true;
   if (p.startsWith('.iflow/')) return true;
@@ -64,32 +77,25 @@ function checkRootLayout() {
     '.prettierrc.json',
     'AGENTS.md',
     'README.md',
-    'bin',
     'config',
     'configsamples',
     'dist',
     'docs',
-    'exporters',
-    'interpreter',
     'jest.config.js',
     'node_modules',
     'package',
     'package-lock.json',
     'package.json',
     'rcc',
-    'replay',
     'samples',
     'scripts',
-    'servertool',
     'sharedmodule',
     'src',
     'task.md',
     'tests',
     'tmp',
-    'tools',
     'tsconfig.json',
     'vendor',
-    'verified-configs',
   ]);
 
   const rootEntries = listRootEntries();

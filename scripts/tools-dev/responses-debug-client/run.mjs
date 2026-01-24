@@ -12,7 +12,7 @@ async function readJson(file){ const abs=path.isAbsolute(file)?file:path.resolve
 async function main(){
   const args=parseArgs(process.argv);
   const file=String(args.file||args.f||'');
-  if(!file){ console.error('Usage: node tools/responses-debug-client/run.mjs --file <payload.json> [--baseURL URL] [--apiKey KEY] [--timeout 120] [--raw]'); process.exit(1); }
+  if(!file){ console.error('Usage: node scripts/tools-dev/responses-debug-client/run.mjs --file <payload.json> [--baseURL URL] [--apiKey KEY] [--timeout 120] [--raw]'); process.exit(1); }
   const baseURL=String(args.baseURL||'http://127.0.0.1:5520/v1');
   const apiKey=String(args.apiKey||'dummy');
   const timeoutSec=Number(args.timeout||120);
