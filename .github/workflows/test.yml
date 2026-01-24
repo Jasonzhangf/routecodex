@@ -21,6 +21,12 @@ jobs:
         run: npm run verify:repo-sanity
       - name: Ensure release llms module
         run: BUILD_MODE=release npm run llmswitch:ensure
+      - name: Build (release)
+        env:
+          BUILD_MODE: release
+          # Prevent build scripts from mutating version files in CI.
+          ROUTECODEX_SKIP_AUTO_BUMP: "1"
+        run: npm run build:min
       - name: Run host tests
         env:
           ROUTECODEX_JEST_USE_NPM_LLMS: "1"
@@ -41,6 +47,11 @@ jobs:
         run: npm run verify:repo-sanity
       - name: Ensure release llms module
         run: BUILD_MODE=release npm run llmswitch:ensure
+      - name: Build (release)
+        env:
+          BUILD_MODE: release
+          ROUTECODEX_SKIP_AUTO_BUMP: "1"
+        run: npm run build:min
       - name: Run CI coverage (jest-only)
         env:
           ROUTECODEX_JEST_USE_NPM_LLMS: "1"

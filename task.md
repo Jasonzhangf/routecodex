@@ -30,6 +30,7 @@
   - [x] RouteCodex 基线 coverage 盘点（按 `test:ci:coverage` 的 jest 集合）：当前 lines/branches/functions/statements 约 27.8%/23.3%/29.5%/27.4%
   - [x] 仓库卫生：根目录禁止 ad-hoc 文件（md/test/debug/pid/cache），CI 增加 `verify:repo-sanity`（PR 必跑）：`.github/workflows/test.yml` + `scripts/ci/repo-sanity.mjs`
   - [x] 扩大 CI jest 测试集（仍保持 deterministic / 无外网）：`scripts/tests/ci-jest.mjs`
+  - [x] CI 增加 release build 校验（防止“测试过了但 build 挂”）：`.github/workflows/test.yml`（`npm run build:min`）
 - **仍需你拍板**（GitHub 设置侧，代码无法强制）:
   - [ ] 分支保护规则：将 `llmswitch-core-ci` 标记为 Required status checks（PR 必过）
 - **待落地/进行中**:
