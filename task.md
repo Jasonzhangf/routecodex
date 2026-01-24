@@ -79,10 +79,11 @@
   - [x]（PR）新增 coverage boost（覆盖 `context-weighted/session-identifiers/tool-registry/reasoning-tool-parser`）：`sharedmodule/llmswitch-core/scripts/tests/coverage-context-weighted.mjs` + `sharedmodule/llmswitch-core/scripts/tests/coverage-session-identifiers.mjs` + `sharedmodule/llmswitch-core/scripts/tests/coverage-tool-registry.mjs` + `sharedmodule/llmswitch-core/scripts/tests/coverage-reasoning-tool-parser.mjs`
   - [x]（PR）新增 coverage boost（覆盖 `servertool` auto handlers）：`sharedmodule/llmswitch-core/scripts/tests/coverage-servertool-handlers.mjs`
   - [x]（PR）新增 coverage boost（覆盖 SSE sequencers）：`sharedmodule/llmswitch-core/scripts/tests/coverage-sse-sequencers.mjs`
+  - [x]（PR）新增 coverage boost（覆盖 stopMessage auto handler）：`sharedmodule/llmswitch-core/scripts/tests/coverage-servertool-stop-message-auto.mjs`
   - [ ] 90% 目标：逐步补齐 `src/**` 单测/回归并把 CI gate 从当前临时阈值提升到 90%（lines/branches/functions/statements）
   - [ ] “模块必须有测试” gate：落地 `tests/unit|integration|regression|golden` 分层，并启用 `scripts/verify-test-coverage-map.mjs`
   - [ ] Golden 扩容策略：如果 fixtures 体积膨胀，迁 GitHub Release asset + sha256 lock（仍保证 CI 可获取）
-  - **当前覆盖率基线（本地，2026-01-24）**：`src/**` ≈ lines **62.81%** / branches **47.05%** / functions **63.07%** / statements **62.81%**；CI 临时 gate（min）= **47**（未达 90%，持续抬升）
+  - **当前覆盖率基线（本地，2026-01-24）**：`src/**` ≈ lines **62.91%** / branches **47.54%** / functions **63.11%** / statements **62.91%**；CI 临时 gate（min）= **47**（未达 90%，持续抬升）
 
 ### 13. Chat Process 协议与流水线契约（processMode=chat）
 - **位置**: `docs/CHAT_PROCESS_PROTOCOL_AND_PIPELINE.md` + `docs/chat-semantic-expansion-plan.md` + `sharedmodule/llmswitch-core/src/conversion/hub/**` + `src/client/**` + `src/server/handlers/**`
