@@ -76,10 +76,11 @@
   - [ ]（PR）新增 “模块必须有覆盖” gate（每个 `src/*` 模块至少 1 个文件被覆盖；`src/test` 允许排除）：`sharedmodule/llmswitch-core/scripts/verify-test-coverage-map.mjs` + `sharedmodule/llmswitch-core/config/test-coverage-map.json`
   - [ ]（PR）新增 coverage boost（覆盖 `src/http` 与 `src/bridge`）：`sharedmodule/llmswitch-core/scripts/tests/coverage-http-sse-response.mjs` + `sharedmodule/llmswitch-core/scripts/tests/coverage-bridge-routecodex-adapter.mjs`
   - [ ]（PR）新增 coverage boost（覆盖 `payload-budget/jsonish/target-utils`）：`sharedmodule/llmswitch-core/scripts/tests/coverage-payload-budget.mjs` + `sharedmodule/llmswitch-core/scripts/tests/coverage-jsonish.mjs` + `sharedmodule/llmswitch-core/scripts/tests/coverage-target-utils.mjs`
+  - [ ]（PR）新增 coverage boost（覆盖 `context-weighted/session-identifiers/tool-registry/reasoning-tool-parser`）：`sharedmodule/llmswitch-core/scripts/tests/coverage-context-weighted.mjs` + `sharedmodule/llmswitch-core/scripts/tests/coverage-session-identifiers.mjs` + `sharedmodule/llmswitch-core/scripts/tests/coverage-tool-registry.mjs` + `sharedmodule/llmswitch-core/scripts/tests/coverage-reasoning-tool-parser.mjs`
   - [ ] 90% 目标：逐步补齐 `src/**` 单测/回归并把 CI gate 从当前临时阈值提升到 90%（lines/branches/functions/statements）
   - [ ] “模块必须有测试” gate：落地 `tests/unit|integration|regression|golden` 分层，并启用 `scripts/verify-test-coverage-map.mjs`
   - [ ] Golden 扩容策略：如果 fixtures 体积膨胀，迁 GitHub Release asset + sha256 lock（仍保证 CI 可获取）
-  - **当前覆盖率基线（本地，2026-01-24）**：`src/**` ≈ lines **61.31%** / branches **45.57%** / functions **61.08%** / statements **61.31%**（未达 90%，CI 暂时用较低阈值跑通并持续抬升）
+  - **当前覆盖率基线（本地，2026-01-24）**：`src/**` ≈ lines **61.78%** / branches **46.49%** / functions **61.83%** / statements **61.78%**（未达 90%，CI 暂时用较低阈值跑通并持续抬升）
 
 ### 13. Chat Process 协议与流水线契约（processMode=chat）
 - **位置**: `docs/CHAT_PROCESS_PROTOCOL_AND_PIPELINE.md` + `docs/chat-semantic-expansion-plan.md` + `sharedmodule/llmswitch-core/src/conversion/hub/**` + `src/client/**` + `src/server/handlers/**`
