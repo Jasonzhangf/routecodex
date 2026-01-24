@@ -67,14 +67,9 @@ function isForbiddenTrackedPath(p) {
 function checkRootLayout() {
   // Fixed top-level layout. Adding new root entries requires an explicit policy change.
   const allowed = new Set([
-    '.eslintrc.cjs',
-    '.eslintrc.json',
+    'eslint.config.js',
     '.github',
     '.gitignore',
-    '.npmignore',
-    '.nvmrc',
-    '.prettierignore',
-    '.prettierrc.json',
     'AGENTS.md',
     'README.md',
     'config',
