@@ -72,10 +72,12 @@
   - [x] 修复 llmswitch-core CI lint job（.d.ts ignore + no-useless-escape/no-empty/no-mixed-spaces-and-tabs）：`sharedmodule/llmswitch-core/.eslintrc.json` + `sharedmodule/llmswitch-core/src/**`
   - [x] 增加 coverage boost 用例（纯单测、无外网、deterministic）并入 matrix：`sharedmodule/llmswitch-core/scripts/tests/coverage-openai-message-normalize.mjs` + `sharedmodule/llmswitch-core/scripts/tests/coverage-request-tool-list-filter.mjs` + `sharedmodule/llmswitch-core/scripts/tests/coverage-context-diff.mjs` + `sharedmodule/llmswitch-core/scripts/tests/coverage-sticky-pool-via-router.mjs` + `sharedmodule/llmswitch-core/scripts/tests/coverage-parse-loose-json.mjs` + `sharedmodule/llmswitch-core/scripts/tests/coverage-instruction-target.mjs` + `sharedmodule/llmswitch-core/scripts/tests/coverage-guidance-augment.mjs` + `sharedmodule/llmswitch-core/scripts/tests/coverage-tool-harvester.mjs` + `sharedmodule/llmswitch-core/scripts/tests/coverage-text-markup-normalizer.mjs` + `sharedmodule/llmswitch-core/scripts/tests/coverage-recursive-detection-guard.mjs`
   - [x] 增加 coverage boost 用例（路由/工具 surface/patch 结构化）并入 matrix：`sharedmodule/llmswitch-core/scripts/tests/coverage-tool-surface-engine.mjs` + `sharedmodule/llmswitch-core/scripts/tests/coverage-structured-apply-patch.mjs` + `sharedmodule/llmswitch-core/scripts/tests/coverage-engine-health.mjs`
+  - [ ]（PR）新增 “模块必须有覆盖” gate（每个 `src/*` 模块至少 1 个文件被覆盖；`src/test` 允许排除）：`sharedmodule/llmswitch-core/scripts/verify-test-coverage-map.mjs` + `sharedmodule/llmswitch-core/config/test-coverage-map.json`
+  - [ ]（PR）新增 coverage boost（覆盖 `src/http` 与 `src/bridge`）：`sharedmodule/llmswitch-core/scripts/tests/coverage-http-sse-response.mjs` + `sharedmodule/llmswitch-core/scripts/tests/coverage-bridge-routecodex-adapter.mjs`
   - [ ] 90% 目标：逐步补齐 `src/**` 单测/回归并把 CI gate 从当前临时阈值提升到 90%（lines/branches/functions/statements）
   - [ ] “模块必须有测试” gate：落地 `tests/unit|integration|regression|golden` 分层，并启用 `scripts/verify-test-coverage-map.mjs`
   - [ ] Golden 扩容策略：如果 fixtures 体积膨胀，迁 GitHub Release asset + sha256 lock（仍保证 CI 可获取）
-  - **当前覆盖率基线（本地，2026-01-24）**：`src/**` ≈ lines **60.79%** / branches **44.93%** / functions **60.38%** / statements **60.79%**（未达 90%，CI 暂时用较低阈值跑通并持续抬升）
+  - **当前覆盖率基线（本地，2026-01-24）**：`src/**` ≈ lines **60.99%** / branches **44.97%** / functions **60.68%** / statements **60.99%**（未达 90%，CI 暂时用较低阈值跑通并持续抬升）
 
 ### 13. Chat Process 协议与流水线契约（processMode=chat）
 - **位置**: `docs/CHAT_PROCESS_PROTOCOL_AND_PIPELINE.md` + `docs/chat-semantic-expansion-plan.md` + `sharedmodule/llmswitch-core/src/conversion/hub/**` + `src/client/**` + `src/server/handlers/**`
