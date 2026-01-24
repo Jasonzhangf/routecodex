@@ -44,10 +44,25 @@ const routingInstructionTests = [
   'tests/servertool/virtual-router-context-fallback.spec.ts',
   'tests/servertool/virtual-router-longcontext-fallback.spec.ts',
   'tests/servertool/virtual-router-series-cooldown.spec.ts',
+  'tests/servertool/virtual-router-context-weighted.spec.ts',
+  'tests/servertool/virtual-router-engine-update-deps.spec.ts',
+  'tests/servertool/virtual-router-health-weighted-rr.spec.ts',
+  'tests/servertool/virtual-router-priority-selection.spec.ts',
+  'tests/servertool/virtual-router-routing-instructions.spec.ts',
+  'tests/servertool/virtual-router-servertool-routing.spec.ts',
   'tests/servertool/routing-instructions.spec.ts',
+  'tests/servertool/server-side-web-search.spec.ts',
+  'tests/servertool/vision-flow.spec.ts',
+  'tests/servertool/gemini-empty-reply-continue.spec.ts',
+  'tests/servertool/iflow-model-error-retry.spec.ts',
+  'tests/servertool/apply-patch-guard.spec.ts',
+  'tests/servertool/exec-command-guard.spec.ts',
   'tests/servertool/stopmessage-anthropic-stop-sequence.spec.ts',
   'tests/servertool/servertool-progress-logging.spec.ts',
-  'tests/unified-hub/hub-v1-single-path-imports.spec.ts'
+  'tests/unified-hub/hub-v1-single-path-imports.spec.ts',
+  'tests/unified-hub/policy-errorsample-write.spec.ts',
+  'tests/unified-hub/policy-observe-shadow.spec.ts',
+  'tests/unified-hub/shadow-runtime-compare.errorsamples.spec.ts'
 ];
 
 const cliTests = [
