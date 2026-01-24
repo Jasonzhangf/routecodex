@@ -41,6 +41,39 @@
   - [ ] CI 测试集 re-enable：`@jsonstudio/llms` 仍停留在 npm `0.6.1172`，因此 release CI 暂不包含依赖新 llmswitch-core 行为的 servertool/sharedmodule 测试（待 llms 发布后再纳入）
   - [ ] 修复当前阻塞“全量 coverage”的单测（`tests/servertool/virtual-router-quota-routing.spec.ts`）或拆分为 nightly
 
+### 18. llmswitch-core：单测全覆盖 + Golden 回归 + 覆盖率 90%（PR 必跑）
+- **位置**: `sharedmodule/llmswitch-core/tests/**` + `sharedmodule/llmswitch-core/scripts/**` + `sharedmodule/.github/workflows/llmswitch-core-ci.yml`
+- **优先级**: 最高
+- **状态**: 🟡 进行中（开始落地）
+- **目标**:
+  - 每个模块（按 `src/**` 目录边界）必须至少有 1 个单元测试用例（可通过脚本自动检查缺失）
+  - 每个功能契约必须有 regression/golden 测试：chat_process 不变量、servertool followup H1/H2/H3、SSE decode/encode、compat profiles、virtual-router quota/cooldown/sticky、tool schema 清洗等
+  - `src/**` 覆盖率（lines/branches/functions/statements）>= **90%**，作为 PR Required check（fail-fast）
+  - 允许少量“不可测 glue”通过显式 allowlist 排除（必须可审计、可收敛）
+  - Golden 样本必须在 CI 可获取（优先放 repo；如体积过大再迁 GitHub Release asset + sha256 lock）
+- **落地策略**:
+  - 测试分层固定：`tests/unit/**` + `tests/integration/**` + `tests/regression/**` + `tests/golden/**` + `tests/fixtures/**` + `tests/harness/**`
+  - 测试 runner（先落地最小可用）：沿用现有 matrix 脚本（`scripts/tests/run-matrix-ci.mjs`），用 `c8` 做 v8 coverage，并通过 sourcemap 映射回 `src/**`
+  - 新增脚本：
+    - `scripts/verify-test-coverage-map.mjs`：检查“模块必须有测试”的最低覆盖（缺失即 fail）
+    - `scripts/verify-coverage.mjs`：读取 `coverage-summary.json` 并执行 90% gate + glue allowlist
+    - `scripts/fetch-golden.mjs`（可选）：当 golden 不在 repo 时，下载并校验 Release asset
+- **CI/CD 计划**:
+  - PR 必跑（workflow jobs 并行 + timeout + concurrency）：
+    - `lint+typecheck`、`unit`、`integration`、`regression`、`coverage`（90% gate）、`golden-verify`
+  - Nightly（schedule）：
+    - 跑更重的 matrix（Node 20/22）+ 全量 regression + golden verify（可选 golden update 走 PR）
+- **待落地/进行中**:
+  - [x] CI 结构：workflow 拆为 `lint` / `verif` / `coverage` 三个 job：`sharedmodule/.github/workflows/llmswitch-core-ci.yml`
+  - [x] Golden in CI：chat/anthropic golden 改为读 repo fixtures（可用 `CODEX_SAMPLES_DIR` 覆写）：`sharedmodule/llmswitch-core/tests/fixtures/codex-samples/**` + `sharedmodule/llmswitch-core/scripts/tests/*golden-roundtrip.mjs`
+  - [x] Coverage runner：`build:coverage`（sourcemap）+ `c8` 产出 `coverage/coverage-summary.json`：`sharedmodule/llmswitch-core/scripts/run-ci-coverage.mjs` + `sharedmodule/llmswitch-core/tsconfig.coverage.json`
+  - [x] Coverage gate 脚本 + glue allowlist 初版：`sharedmodule/llmswitch-core/scripts/verify-coverage.mjs` + `sharedmodule/llmswitch-core/config/coverage-exclude-glue.json`
+  - [x] 增加覆盖回归用例（先覆盖核心路径）：HubPipeline 全链路 smoke + web_search backend smoke：`sharedmodule/llmswitch-core/scripts/tests/hub-pipeline-smoke.mjs` + `sharedmodule/llmswitch-core/scripts/tests/web-search-backend-smoke.mjs`
+  - [ ] 90% 目标：逐步补齐 `src/**` 单测/回归并把 CI gate 从当前临时阈值提升到 90%（lines/branches/functions/statements）
+  - [ ] “模块必须有测试” gate：落地 `tests/unit|integration|regression|golden` 分层，并启用 `scripts/verify-test-coverage-map.mjs`
+  - [ ] Golden 扩容策略：如果 fixtures 体积膨胀，迁 GitHub Release asset + sha256 lock（仍保证 CI 可获取）
+  - **当前覆盖率基线（本地，2026-01-24）**：`src/**` ≈ lines **55.39%** / branches **44.37%** / functions **54.47%** / statements **55.39%**（未达 90%，CI 暂时用较低阈值跑通并持续抬升）
+
 ### 13. Chat Process 协议与流水线契约（processMode=chat）
 - **位置**: `docs/CHAT_PROCESS_PROTOCOL_AND_PIPELINE.md` + `docs/chat-semantic-expansion-plan.md` + `sharedmodule/llmswitch-core/src/conversion/hub/**` + `src/client/**` + `src/server/handlers/**`
 - **优先级**: 高

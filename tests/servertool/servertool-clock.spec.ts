@@ -46,7 +46,7 @@ describe('servertool:clock', () => {
     resetSessionDir();
   });
 
-  test('does not inject clock tool when sessionId is absent', async () => {
+  test('injects clock tool schema even when sessionId is absent', async () => {
     const request = buildRequest([{ role: 'user', content: 'hi' }]);
     const result = await runReqProcessStage1ToolGovernance({
       request,
@@ -59,7 +59,10 @@ describe('servertool:clock', () => {
     expect(result.processedRequest).toBeDefined();
     const processed = result.processedRequest as StandardizedRequest;
     const toolNames = (Array.isArray(processed.tools) ? processed.tools : []).map((t) => t.function?.name);
-    expect(toolNames).not.toContain('clock');
+    expect(toolNames).toContain('clock');
+    expect((processed.metadata as any)?.clockEnabled).toBe(true);
+    // Execution still requires session; do not force serverToolRequired when sessionId is missing.
+    expect((processed.metadata as any)?.serverToolRequired).toBeUndefined();
   });
 
   test('injects clock tool schema by default when sessionId exists', async () => {
