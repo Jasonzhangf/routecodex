@@ -41,7 +41,8 @@ describe('virtual-router quotaView routing', () => {
         safe: targets,
         risky: [] as string[],
         overflow: [] as string[]
-      })
+      }),
+      getConfig: () => ({ warnRatio: 0.6 })
     };
     const loadBalancer = new RouteLoadBalancer({ strategy: 'round-robin' });
     return {
@@ -342,7 +343,8 @@ describe('virtual-router quotaView routing', () => {
         safe: targets,
         risky: [] as string[],
         overflow: [] as string[]
-      })
+      }),
+      getConfig: () => ({ warnRatio: 0.6 })
     };
     const loadBalancer = new RouteLoadBalancer({ strategy: 'round-robin' });
     const quotaView = (key: string) => {
