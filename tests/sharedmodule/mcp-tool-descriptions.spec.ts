@@ -59,7 +59,16 @@ describe('MCP tool descriptions (avoid server-name guessing)', () => {
     const req = {
       model: 'gpt-test',
       messages: [{ role: 'user', content: 'hello' }],
-      tools: []
+      tools: [
+        {
+          type: 'function',
+          function: {
+            name: 'list_mcp_resources',
+            description: '',
+            parameters: { type: 'object', properties: {}, additionalProperties: true }
+          }
+        }
+      ]
     };
 
     const filtered = await runChatRequestToolFilters(req as any, {
@@ -99,7 +108,16 @@ describe('MCP tool descriptions (avoid server-name guessing)', () => {
           ]
         }
       ],
-      tools: []
+      tools: [
+        {
+          type: 'function',
+          function: {
+            name: 'list_mcp_resources',
+            description: '',
+            parameters: { type: 'object', properties: {}, additionalProperties: true }
+          }
+        }
+      ]
     };
 
     const filtered = await runChatRequestToolFilters(req as any, {
@@ -131,7 +149,16 @@ describe('MCP tool descriptions (avoid server-name guessing)', () => {
           })
         }
       ],
-      tools: []
+      tools: [
+        {
+          type: 'function',
+          function: {
+            name: 'list_mcp_resources',
+            description: '',
+            parameters: { type: 'object', properties: {}, additionalProperties: true }
+          }
+        }
+      ]
     };
 
     const filtered = await runChatRequestToolFilters(req as any, {
@@ -150,7 +177,24 @@ describe('MCP tool descriptions (avoid server-name guessing)', () => {
     expect(desc).toContain('Known MCP servers: context7, playwright.');
   });
 
-  it('disables MCP resource tools after empty list_mcp_resources (non-wrapped tool output)', async () => {
+  it('does not inject MCP tools when absent', async () => {
+    process.env.RCC_MCP_EXPOSE = 'phase';
+    process.env.RCC_MCP_SERVERS = 'context7,playwright';
+
+    const req = {
+      model: 'gpt-test',
+      messages: [{ role: 'user', content: 'hello' }]
+    };
+
+    const filtered = await runChatRequestToolFilters(req as any, {
+      entryEndpoint: '/v1/chat/completions',
+      profile: 'openai-chat'
+    } as any);
+
+    expect((filtered as any).tools).toBeUndefined();
+  });
+
+  it('keeps MCP tool lists stable after empty list_mcp_resources output (non-wrapped tool output)', async () => {
     process.env.RCC_MCP_EXPOSE = 'phase';
     process.env.RCC_MCP_SERVERS = '';
 
@@ -188,8 +232,8 @@ describe('MCP tool descriptions (avoid server-name guessing)', () => {
     } as any);
 
     const tools = Array.isArray((filtered as any).tools) ? ((filtered as any).tools as any[]) : [];
-    expect(findTool(tools, 'list_mcp_resources')).toBeNull();
-    expect(findTool(tools, 'list_mcp_resource_templates')).toBeNull();
-    expect(findTool(tools, 'read_mcp_resource')).toBeNull();
+    expect(findTool(tools, 'list_mcp_resources')).toBeTruthy();
+    expect(findTool(tools, 'list_mcp_resource_templates')).toBeTruthy();
+    expect(findTool(tools, 'read_mcp_resource')).toBeTruthy();
   });
 });

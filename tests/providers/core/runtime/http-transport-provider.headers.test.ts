@@ -2,6 +2,9 @@ import { HttpTransportProvider } from '../../../../src/providers/core/runtime/ht
 import type { OpenAIStandardConfig } from '../../../../src/providers/core/api/provider-config.js';
 import type { ModuleDependencies, PipelineDebugLogger } from '../../../../src/modules/pipeline/interfaces/pipeline-interfaces.js';
 import { attachProviderRuntimeMetadata } from '../../../../src/providers/core/runtime/provider-runtime-metadata.js';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 class RecordingHttpClient {
   public lastHeaders: Record<string, string> | undefined;
@@ -34,7 +37,7 @@ class RecordingHttpClient {
 
 class TestHttpTransportProvider extends HttpTransportProvider {
   constructor(config: OpenAIStandardConfig, deps: ModuleDependencies) {
-    super(config, deps, 'test-http-provider');
+    super(config, deps, config.type);
   }
 
   protected override createHttpClient(): void {
@@ -263,5 +266,47 @@ describe('HttpTransportProvider header propagation', () => {
     const client = (provider as unknown as { httpClient: RecordingHttpClient }).httpClient;
     const headers = client.lastHeaders || {};
     expect(headers['User-Agent']).toBe('iFlow-Cli');
+  });
+
+  test('gemini-cli forces stable UA and does not forward session headers', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rc-gemini-cli-token-'));
+    const tokenFile = path.join(tmpDir, 'token.json');
+    fs.writeFileSync(
+      tokenFile,
+      JSON.stringify({
+        access_token: 'test-access-token',
+        expires_at: Date.now() + 7 * 24 * 60 * 60 * 1000,
+        project_id: 'test-project'
+      }),
+      'utf8'
+    );
+
+    const geminiCliConfig = {
+      id: 'test-http-provider-gemini-cli',
+      type: 'gemini-cli-http-provider',
+      config: {
+        providerType: 'gemini',
+        providerId: 'gemini-cli',
+        auth: { type: 'gemini-cli-oauth', tokenFile },
+        overrides: {
+          baseUrl: 'https://example.invalid/gemini-cli',
+          endpoint: '/v1internal:generateContent',
+          defaultModel: 'gemini-2.5-pro'
+        }
+      }
+    } as unknown as typeof config;
+
+    const provider = new TestHttpTransportProvider(geminiCliConfig, deps);
+    await provider.initialize();
+
+    const headers = await executeProviderRequest(
+      provider,
+      { accept: 'application/json', session_id: 'sess-should-not-leak', conversation_id: 'conv-should-not-leak' },
+      { userAgent: 'codex_cli_rs/0.89.0 (Mac OS 15.7.3; arm64) iTerm.app/3.6.5' }
+    );
+
+    expect(headers['User-Agent']).toBe('google-api-nodejs-client/9.15.1');
+    expect(headers['session_id']).toBeUndefined();
+    expect(headers['conversation_id']).toBeUndefined();
   });
 });

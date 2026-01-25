@@ -9,6 +9,7 @@ import {
   type RoutingInstructionState
 } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-instructions.js';
 import { buildResponsesRequestFromChat } from '../../sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.js';
+import { ensureRuntimeMetadata } from '../../sharedmodule/llmswitch-core/src/conversion/shared/runtime-metadata.js';
 
 const SESSION_DIR = path.join(process.cwd(), 'tmp', 'jest-stopmessage-sessions');
 
@@ -137,6 +138,21 @@ describe('stop_message_auto servertool', () => {
     const capturedChatRequest: JsonObject = {
       model: 'gemini-test',
       messages: [{ role: 'user', content: 'hi' }],
+      tools: [
+        {
+          type: 'function',
+          function: {
+            name: 'exec_command',
+            description: 'Run a shell command',
+            parameters: {
+              type: 'object',
+              properties: { cmd: { type: 'string' } },
+              required: ['cmd'],
+              additionalProperties: false
+            }
+          }
+        }
+      ],
       parameters: {
         max_output_tokens: 99,
         temperature: 0.1,
@@ -209,6 +225,9 @@ describe('stop_message_auto servertool', () => {
     const payload = capturedFollowup?.body as any;
     expect(Array.isArray(payload.messages)).toBe(true);
     expect(payload.stream).toBe(false);
+    expect(Array.isArray(payload.tools)).toBe(true);
+    expect(payload.tools.length).toBeGreaterThanOrEqual(1);
+    expect(JSON.stringify(payload.tools)).toContain('exec_command');
     expect(payload.parameters).toBeDefined();
     expect(payload.parameters.stream).toBeUndefined();
     expect(payload.parameters.max_output_tokens).toBe(99);
@@ -301,6 +320,90 @@ describe('stop_message_auto servertool', () => {
     const inputText = JSON.stringify(payload.messages);
     expect(inputText).toContain('hi');
     expect(inputText).toContain('继续执行');
+  });
+
+  test('followup hop still triggers servertools but does not nest followups', async () => {
+    const sessionId = 'stopmessage-spec-session-followup-hop';
+    // No routing state required: we are testing serverToolFollowup behavior, not stopMessage scheduling.
+    writeRoutingStateForSession(sessionId, {
+      forcedTarget: undefined,
+      stickyTarget: undefined,
+      allowedProviders: new Set(),
+      disabledProviders: new Set(),
+      disabledKeys: new Map(),
+      disabledModels: new Map()
+    } as any);
+
+    const capturedChatRequest: JsonObject = {
+      model: 'gpt-test',
+      messages: [{ role: 'user', content: 'hi' }],
+      tools: [
+        {
+          type: 'function',
+          function: {
+            name: 'clock',
+            description: 'get time',
+            parameters: { type: 'object', properties: { action: { type: 'string' } } }
+          }
+        }
+      ]
+    };
+
+    const adapterContext: AdapterContext = {
+      requestId: 'req-followup-hop-1',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-chat',
+      sessionId,
+      capturedChatRequest
+    } as any;
+    const rt = ensureRuntimeMetadata(adapterContext as any);
+    (rt as any).serverToolFollowup = true;
+    // Pretend we are inside a stopMessage followup hop; other flows must not start new followups.
+    (rt as any).serverToolLoopState = { flowId: 'stop_message_flow', repeatCount: 1 };
+    // Avoid starting the clock daemon; we only need tool output injection for this test.
+    (rt as any).clock = { enabled: false };
+
+    const chatResponse: JsonObject = {
+      id: 'chatcmpl-tool-1',
+      object: 'chat.completion',
+      model: 'gpt-test',
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: 'assistant',
+            content: null,
+            tool_calls: [
+              {
+                id: 'call_clock_1',
+                type: 'function',
+                function: { name: 'clock', arguments: JSON.stringify({ action: 'list' }) }
+              }
+            ]
+          },
+          finish_reason: 'tool_calls'
+        }
+      ]
+    };
+
+    let reentered = 0;
+    const orchestration = await runServerToolOrchestration({
+      chat: chatResponse,
+      adapterContext,
+      requestId: 'req-followup-hop-1',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-chat',
+      reenterPipeline: async () => {
+        reentered += 1;
+        return { body: { ok: true } as any };
+      }
+    });
+
+    expect(orchestration.executed).toBe(true);
+    // A followup hop should not reenter again (no nested followups).
+    expect(reentered).toBe(0);
+    expect(JSON.stringify(orchestration.chat)).toContain('tool_outputs');
+    expect(JSON.stringify(orchestration.chat)).toContain('call_clock_1');
   });
 
   test('skips followup when client disconnects mid-stream', async () => {

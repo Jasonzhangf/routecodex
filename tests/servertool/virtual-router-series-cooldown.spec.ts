@@ -28,6 +28,7 @@ describe('Virtual router series cooldown', () => {
 
 describe('VirtualRouterEngine series cooldown handling', () => {
   const providerA = 'antigravity.alias1.gemini-3-pro-high';
+  const providerA2 = 'antigravity.alias1.gemini-3-pro-low';
   const providerB = 'antigravity.alias2.gemini-3-pro-high';
 
   const baseConfig: VirtualRouterConfig = {
@@ -35,7 +36,7 @@ describe('VirtualRouterEngine series cooldown handling', () => {
       default: [
         {
           id: 'primary',
-          targets: [providerA, providerB],
+          targets: [providerA, providerA2, providerB],
           priority: 1
         }
       ]
@@ -50,6 +51,15 @@ describe('VirtualRouterEngine series cooldown handling', () => {
         runtimeKey: 'runtime:a',
         modelId: 'gemini-3-pro-high'
       },
+      [providerA2]: {
+        providerKey: providerA2,
+        providerType: 'gemini',
+        endpoint: 'https://example.invalid',
+        auth: { type: 'apiKey', value: 'test' },
+        outboundProfile: 'gemini-chat',
+        runtimeKey: 'runtime:a2',
+        modelId: 'gemini-3-pro-low'
+      },
       [providerB]: {
         providerKey: providerB,
         providerType: 'gemini',
@@ -63,7 +73,7 @@ describe('VirtualRouterEngine series cooldown handling', () => {
     classifier: {}
   };
 
-  it('blacklists only the alias that triggered 429', () => {
+  it('blacklists all keys in the same series under one alias', () => {
     const engine = new VirtualRouterEngine();
     engine.initialize(baseConfig);
     const event: ProviderErrorEvent = {
@@ -90,6 +100,39 @@ describe('VirtualRouterEngine series cooldown handling', () => {
 
     const status = engine.getStatus().health;
     expect(status.find((entry) => entry.providerKey === providerA)?.state).toBe('tripped');
+    expect(status.find((entry) => entry.providerKey === providerA2)?.state).toBe('tripped');
+    expect(status.find((entry) => entry.providerKey === providerB)?.state).not.toBe('tripped');
+  });
+
+  it('applies series cooldown even when quotaView is injected', () => {
+    const quotaView = (providerKey: string) => ({ providerKey, inPool: true });
+    const engine = new VirtualRouterEngine({ quotaView });
+    engine.initialize(baseConfig);
+    const event: ProviderErrorEvent = {
+      code: 'HTTP_429',
+      message: 'Rate limit',
+      stage: 'provider.http',
+      runtime: {
+        requestId: 'req_test',
+        providerKey: providerA
+      },
+      timestamp: Date.now(),
+      details: {
+        virtualRouterSeriesCooldown: {
+          providerId: 'antigravity.alias1',
+          providerKey: providerA,
+          model: 'gemini-3-pro-high',
+          series: 'gemini-pro',
+          cooldownMs: 60_000
+        }
+      }
+    };
+
+    engine.handleProviderError(event);
+
+    const status = engine.getStatus().health;
+    expect(status.find((entry) => entry.providerKey === providerA)?.state).toBe('tripped');
+    expect(status.find((entry) => entry.providerKey === providerA2)?.state).toBe('tripped');
     expect(status.find((entry) => entry.providerKey === providerB)?.state).not.toBe('tripped');
   });
 });

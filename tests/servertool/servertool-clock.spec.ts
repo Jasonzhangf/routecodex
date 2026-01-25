@@ -46,6 +46,31 @@ describe('servertool:clock', () => {
     resetSessionDir();
   });
 
+  afterEach(() => {
+    delete process.env.ROUTECODEX_DISABLE_CLOCK;
+    delete process.env.LLMSWITCH_DISABLE_CLOCK;
+  });
+
+  test('does not inject clock tool schema when disabled by env', async () => {
+    process.env.ROUTECODEX_DISABLE_CLOCK = '1';
+
+    const request = buildRequest([{ role: 'user', content: 'hi' }]);
+    const result = await runReqProcessStage1ToolGovernance({
+      request,
+      rawPayload: {},
+      metadata: { originalEndpoint: '/v1/chat/completions' },
+      entryEndpoint: '/v1/chat/completions',
+      requestId: 'req-clock-env-disabled'
+    });
+
+    expect(result.processedRequest).toBeDefined();
+    const processed = result.processedRequest as StandardizedRequest;
+    const toolNames = (Array.isArray(processed.tools) ? processed.tools : []).map((t) => t.function?.name);
+    expect(toolNames).not.toContain('clock');
+    expect((processed.metadata as any)?.clockEnabled).toBeUndefined();
+    expect((processed.metadata as any)?.serverToolRequired).toBeUndefined();
+  });
+
   test('injects clock tool schema even when sessionId is absent', async () => {
     const request = buildRequest([{ role: 'user', content: 'hi' }]);
     const result = await runReqProcessStage1ToolGovernance({
@@ -59,9 +84,9 @@ describe('servertool:clock', () => {
     expect(result.processedRequest).toBeDefined();
     const processed = result.processedRequest as StandardizedRequest;
     const toolNames = (Array.isArray(processed.tools) ? processed.tools : []).map((t) => t.function?.name);
-    expect(toolNames).toContain('clock');
-    expect((processed.metadata as any)?.clockEnabled).toBe(true);
-    // Execution still requires session; do not force serverToolRequired when sessionId is missing.
+    // Clock tool injection is opt-in (requires explicit config).
+    expect(toolNames).not.toContain('clock');
+    expect((processed.metadata as any)?.clockEnabled).toBeUndefined();
     expect((processed.metadata as any)?.serverToolRequired).toBeUndefined();
   });
 
@@ -80,9 +105,10 @@ describe('servertool:clock', () => {
 
     const processed = result.processedRequest as any;
     const toolNames = (Array.isArray(processed.tools) ? processed.tools : []).map((t: any) => t?.function?.name);
-    expect(toolNames).toContain('clock');
-    expect(processed.metadata?.clockEnabled).toBe(true);
-    expect(processed.metadata?.serverToolRequired).toBe(true);
+    // Clock tool injection is opt-in (requires explicit config).
+    expect(toolNames).not.toContain('clock');
+    expect(processed.metadata?.clockEnabled).toBeUndefined();
+    expect(processed.metadata?.serverToolRequired).toBeUndefined();
   });
 
   test('injects clock tool schema when enabled', async () => {

@@ -56,7 +56,7 @@ type SeriesCooldownDetail = {
 };
 type QuotaDelayExtraction = {
   delay: string;
-  source: 'quota_reset_delay' | 'quota_exhausted_fallback' | 'capacity_exhausted_fallback';
+  source: 'quota_reset_delay' | 'quota_exhausted_fallback' | 'capacity_exhausted_fallback' | 'rate_limit_reset_fallback';
 };
 
 /**
@@ -860,6 +860,33 @@ export abstract class BaseProvider implements IProviderV2 {
     const haystack = texts.join(' ').toLowerCase();
     if (!haystack) {
       return null;
+    }
+
+    // Gemini CLI (cloudcode-pa) sometimes returns a short-window capacity/rate-limit 429 with a reset hint in text:
+    // - "Your quota will reset after 30s."
+    // - "quota will reset after 30 seconds"
+    // Prefer extracting the explicit reset window to avoid hammering all aliases within the same series.
+    {
+      const match =
+        haystack.match(/reset\s+(?:after|in)\s+(\d+(?:\.\d+)?)(ms|s|m|h)\b/i) ??
+        haystack.match(/reset\s+(?:after|in)\s+(\d+(?:\.\d+)?)\s*(seconds?|secs?|minutes?|mins?|hours?|hrs?)\b/i);
+      if (match && match[1]) {
+        const amount = match[1];
+        const unitRaw = (match[2] || '').toLowerCase();
+        const unit =
+          unitRaw === 'ms' || unitRaw === 's' || unitRaw === 'm' || unitRaw === 'h'
+            ? unitRaw
+            : unitRaw.startsWith('sec')
+              ? 's'
+              : unitRaw.startsWith('min')
+                ? 'm'
+                : unitRaw.startsWith('hour') || unitRaw.startsWith('hr')
+                  ? 'h'
+                  : '';
+        if (unit) {
+          return { delay: `${amount}${unit}`, source: 'rate_limit_reset_fallback' };
+        }
+      }
     }
 
     // Antigravity / Gemini CLI: capacity exhausted (not quota depleted).

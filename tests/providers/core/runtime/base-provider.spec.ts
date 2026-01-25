@@ -15,4 +15,17 @@ describe('BaseProvider quota reset parsing', () => {
     expect(mixedUnits).not.toBeNull();
     expect(mixedUnits).toBeCloseTo(1250, 0);
   });
+
+  it('extracts reset-after hints from Gemini CLI 429 messages', () => {
+    const extractFallbackQuotaDelayFromTexts = (BaseProvider as unknown as {
+      extractFallbackQuotaDelayFromTexts: (texts: string[]) => { delay: string; source: string } | null;
+    }).extractFallbackQuotaDelayFromTexts;
+
+    const extracted = extractFallbackQuotaDelayFromTexts([
+      'HTTP 429: {"error":{"code":429,"message":"You have exhausted your capacity on this model. Your quota will reset after 30s.","status":"RESOURCE_EXHAUSTED"}}'
+    ]);
+    expect(extracted).not.toBeNull();
+    expect(extracted!.delay).toBe('30s');
+    expect(extracted!.source).toBe('rate_limit_reset_fallback');
+  });
 });

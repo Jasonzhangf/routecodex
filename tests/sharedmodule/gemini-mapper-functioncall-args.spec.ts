@@ -138,6 +138,116 @@ describe('GeminiSemanticMapper functionCall.args shape', () => {
     expect(functionCalls.length).toBeGreaterThanOrEqual(1);
   });
 
+  it('does not shrink Antigravity tool surface for large tool lists (tools must remain stable)', async () => {
+    const mapper = new GeminiSemanticMapper();
+
+    const manyTools: any[] = [];
+    manyTools.push({
+      type: 'function',
+      function: {
+        name: 'exec_command',
+        parameters: { type: 'object', properties: { command: { type: 'string' } } }
+      }
+    });
+    manyTools.push({
+      type: 'function',
+      function: {
+        name: 'mcp__playwright__browser_close',
+        parameters: { type: 'object', properties: {} }
+      }
+    });
+    // Pad with dummy tools so we exceed the shrink threshold.
+    for (let i = 0; i < 24; i += 1) {
+      manyTools.push({
+        type: 'function',
+        function: {
+          name: `dummy_tool_${i}`,
+          parameters: { type: 'object', properties: { ok: { type: 'boolean' } } }
+        }
+      });
+    }
+
+    const chat: ChatEnvelope = {
+      messages: [
+        {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            {
+              id: 'call_exec',
+              type: 'function',
+              function: { name: 'exec_command', arguments: JSON.stringify({ command: 'echo 1' }) }
+            } as any
+          ]
+        } as any
+      ],
+      tools: manyTools as any,
+      toolOutputs: [],
+      metadata: {
+        context: {
+          providerId: 'antigravity.geetasamodgeetasamoda.gemini-3-pro-high',
+          entryEndpoint: '/v1/responses',
+          providerProtocol: 'gemini-chat',
+          requestId: 'req_test'
+        }
+      } as any,
+      parameters: { model: 'gemini-3-pro-high' } as any
+    };
+
+    const ctx = { requestId: 'req_test' } as any;
+    const envelope = await mapper.fromChat(chat, ctx);
+    const payload = envelope.payload as any;
+
+    const decls = payload?.tools?.[0]?.functionDeclarations ?? [];
+    const names = Array.isArray(decls) ? decls.map((d: any) => d?.name).filter(Boolean) : [];
+    expect(names).toContain('exec_command');
+    expect(names).toContain('mcp__playwright__browser_close');
+    expect(names.find((n: string) => typeof n === 'string' && n.startsWith('dummy_tool_'))).toBeTruthy();
+  });
+
+  it('keeps JSON Schema constraints (minLength, etc.) for Antigravity/Gemini tools (gcli2api style)', async () => {
+    const mapper = new GeminiSemanticMapper();
+
+    const chat: ChatEnvelope = {
+      messages: [{ role: 'user', content: 'ping' } as any],
+      tools: [
+        {
+          type: 'function',
+          function: {
+            name: 'list_mcp_resources',
+            parameters: {
+              type: 'object',
+              properties: {
+                server: { type: 'string', minLength: 1 },
+                filter: { type: 'string' }
+              }
+            }
+          }
+        } as any
+      ],
+      toolOutputs: [],
+      metadata: {
+        context: {
+          providerId: 'antigravity.geetasamodgeetasamoda.gemini-3-pro-high',
+          entryEndpoint: '/v1/responses',
+          providerProtocol: 'gemini-chat',
+          requestId: 'req_test'
+        }
+      } as any,
+      parameters: { model: 'gemini-3-pro-high' } as any
+    };
+
+    const ctx = { requestId: 'req_test' } as any;
+    const envelope = await mapper.fromChat(chat, ctx);
+    const payload = envelope.payload as any;
+
+    const decls = payload?.tools?.[0]?.functionDeclarations ?? [];
+    const decl = Array.isArray(decls) ? decls.find((d: any) => d?.name === 'list_mcp_resources') : undefined;
+    expect(decl).toBeTruthy();
+    expect(decl.parameters?.properties?.server?.type).toBe('STRING');
+    expect(decl.parameters?.properties?.server?.minLength).toBe(1);
+  });
+
   it('ensures functionCall.args is always an object (no top-level arrays)', async () => {
     const mapper = new GeminiSemanticMapper();
 

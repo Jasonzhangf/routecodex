@@ -41,6 +41,7 @@ export class GeminiCLIProtocolClient implements HttpProtocolClient<ProtocolReque
     // 注意：Cloud Code Assist 的 request schema 不接受 request.metadata / request.action。
     // action 仅用于 resolveEndpoint；metadata 不下发到上游。
     const { model, project, requestId, userAgent, requestType, ...rest } = payload;
+    const isAntigravity = typeof userAgent === 'string' && userAgent.trim() === 'antigravity';
 
     const body: Record<string, unknown> = {};
     if (typeof model === 'string' && model.length > 0) {
@@ -49,14 +50,19 @@ export class GeminiCLIProtocolClient implements HttpProtocolClient<ProtocolReque
     if (typeof project === 'string' && project.length > 0) {
       body.project = project;
     }
-    if (typeof requestId === 'string' && requestId.length > 0) {
-      body.requestId = requestId;
-    }
-    if (typeof userAgent === 'string' && userAgent.length > 0) {
-      body.userAgent = userAgent;
-    }
-    if (typeof requestType === 'string' && requestType.length > 0) {
-      body.requestType = requestType;
+    // gcli2api antigravity alignment:
+    // - requestId/requestType are HTTP headers, not JSON fields
+    // - userAgent is not sent in the JSON wrapper
+    if (!isAntigravity) {
+      if (typeof requestId === 'string' && requestId.length > 0) {
+        body.requestId = requestId;
+      }
+      if (typeof userAgent === 'string' && userAgent.length > 0) {
+        body.userAgent = userAgent;
+      }
+      if (typeof requestType === 'string' && requestType.length > 0) {
+        body.requestType = requestType;
+      }
     }
 
     // 其余 Gemini Chat 兼容字段（contents/systemInstruction/generationConfig/tools/metadata 等）
@@ -96,14 +102,31 @@ export class GeminiCLIProtocolClient implements HttpProtocolClient<ProtocolReque
   ): Record<string, string> {
     const normalized: Record<string, string> = { ...headers };
 
-    // 确保包含必需的 headers
-    if (!normalized['User-Agent']) {
+    const deleteHeaderInsensitive = (target: string): void => {
+      const lowered = target.toLowerCase();
+      for (const key of Object.keys(normalized)) {
+        if (key.toLowerCase() === lowered) {
+          delete normalized[key];
+        }
+      }
+    };
+
+    // gcli2api / opencode alignment: do not forward client identifiers.
+    deleteHeaderInsensitive('session_id');
+    deleteHeaderInsensitive('conversation_id');
+
+    const payload = this.extractPayload(_request);
+    const isAntigravity = typeof payload.userAgent === 'string' && payload.userAgent.trim() === 'antigravity';
+
+    if (isAntigravity) {
+      // gcli2api antigravity alignment: do not send the Gemini CLI header triplet.
+      deleteHeaderInsensitive('x-goog-api-client');
+      deleteHeaderInsensitive('client-metadata');
+    } else {
+      // gcli2api / opencode alignment: keep a stable header triplet for Gemini CLI.
+      // Always override inbound UA to avoid leaking host/client fingerprints into upstream.
       normalized['User-Agent'] = 'google-api-nodejs-client/9.15.1';
-    }
-    if (!normalized['X-Goog-Api-Client']) {
       normalized['X-Goog-Api-Client'] = 'gl-node/22.17.0';
-    }
-    if (!normalized['Client-Metadata']) {
       normalized['Client-Metadata'] = 'ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI';
     }
     if (!normalized['Accept']) {

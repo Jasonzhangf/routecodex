@@ -34,7 +34,8 @@ type MutablePayload = Record<string, unknown> & {
   // generationConfig?: Record<string, unknown>;
 };
 
-// Antigravity transport contract: a stable per-process session seed (plugin-style session semantics).
+// Legacy helper seed for Antigravity signature session key generation.
+// Kept for backwards compatibility (even when we avoid auto-injecting sessionId).
 const ANTIGRAVITY_PLUGIN_SESSION_ID = `-${randomUUID()}`;
 
 export class GeminiCLIHttpProvider extends HttpTransportProvider {
@@ -106,6 +107,16 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
 
     const tokenData = readTokenPayload();
     const projectId = getDefaultProjectId(tokenData || {});
+    const projectOverride = (() => {
+      const ext = this.config?.config?.extensions as Record<string, unknown> | undefined;
+      const candidates = [ext?.projectId, ext?.project_id, ext?.project];
+      for (const candidate of candidates) {
+        if (typeof candidate === 'string' && candidate.trim().length) {
+          return candidate.trim();
+        }
+      }
+      return undefined;
+    })();
 
     // 构建 Gemini CLI 格式的请求（仅做传输层整理，不做 OpenAI→Gemini 语义转换）
     const model =
@@ -117,36 +128,22 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
     }
 
     payload.model = model;
-    // 若当前 token 中已有 project 元数据，则补充到请求中；否则让上游决定后续行为。
-    // 注意：Antigravity 运行时保持与早期成功快照一致，始终显式发送 project。
-    if (projectId) {
-      (payload as Record<string, unknown>).project = projectId;
+    // Project selection:
+    // - honor explicit payload.project (client/config),
+    // - otherwise honor provider config extensions project override,
+    // - otherwise fall back to token-derived default project_id if present.
+    const existingProject =
+      typeof (payload as any).project === 'string' && String((payload as any).project).trim().length
+        ? String((payload as any).project).trim()
+        : '';
+    if (!existingProject) {
+      const nextProject = projectOverride || projectId;
+      if (nextProject && nextProject.trim().length) {
+        (payload as Record<string, unknown>).project = nextProject.trim();
+      }
     }
 
     this.ensureRequestMetadata(payload);
-
-    // Standard contract: attach stable sessionId in request payload (NOT headers) for Antigravity.
-    // This is a compatibility hook for upstream signature caching; it must not affect llmswitch pipeline routing.
-    if (this.isAntigravityRuntime() && !this.isAntigravityMinimalCompatibilityEnabled()) {
-      const project =
-        typeof (payload as any).project === 'string' && String((payload as any).project).trim().length
-          ? String((payload as any).project).trim()
-          : projectId || 'default';
-      const sessionIdFromMeta =
-        metadata && typeof metadata.sessionId === 'string' && metadata.sessionId.trim().length
-          ? metadata.sessionId.trim()
-          : '';
-      const conversationIdFromMeta =
-        metadata && typeof metadata.conversationId === 'string' && metadata.conversationId.trim().length
-          ? metadata.conversationId.trim()
-          : '';
-      const signatureSessionKey = this.buildAntigravitySignatureSessionKey({
-        model,
-        project,
-        conversationKey: conversationIdFromMeta || sessionIdFromMeta || 'default'
-      });
-      (payload as any).sessionId = signatureSessionKey;
-    }
 
     // 删除与 Gemini 协议无关的字段，避免影响 Cloud Code Assist schema 校验。
     const recordPayload = payload as Record<string, unknown>;
@@ -166,8 +163,11 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
     this.flattenRequestContainer(payload);
 
     // Standard contract: Antigravity identity fields are carried in the JSON wrapper (not headers).
+    // gcli2api antigravity alignment:
+    // - requestId/requestType are sent as HTTP headers (provider finalizeRequestHeaders)
+    // - JSON wrapper should not force-inject extra identity/session fields
     // Provider must not infer request semantics from user payload; modality hints must come from llmswitch-core metadata.
-    if (this.isAntigravityRuntime() && !this.isAntigravityMinimalCompatibilityEnabled()) {
+    if (this.isAntigravityRuntime()) {
       const record = payload as Record<string, unknown>;
       if (!this.hasNonEmptyString(record.userAgent)) {
         record.userAgent = 'antigravity';
@@ -175,11 +175,12 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
       if (!this.hasNonEmptyString(record.requestType)) {
         const hasImageAttachment =
           metadata && (metadata.hasImageAttachment === true || metadata.hasImageAttachment === 'true');
-        record.requestType = hasImageAttachment ? 'image_gen' : 'agent';
+        const fallbackImageByModel = typeof model === 'string' && model.toLowerCase().includes('image');
+        record.requestType = hasImageAttachment || fallbackImageByModel ? 'image_gen' : 'agent';
       }
       const existingReqId = record.requestId;
-      if (typeof existingReqId !== 'string' || !existingReqId.trim().startsWith('agent-')) {
-        record.requestId = `agent-${randomUUID()}`;
+      if (typeof existingReqId !== 'string' || !existingReqId.trim().startsWith('req-')) {
+        record.requestId = `req-${randomUUID()}`;
       }
     }
 
@@ -219,65 +220,23 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
         }
       };
 
-      const minimalCompatibility = this.isAntigravityMinimalCompatibilityEnabled();
+      // gcli2api antigravity alignment: keep headers minimal.
+      // - User-Agent follows ANTIGRAVITY_USER_AGENT style
+      // - requestId/requestType are headers (not JSON fields)
+      // - no X-Goog-Api-Client / Client-Metadata triplet
       const envUa = (process.env.ROUTECODEX_ANTIGRAVITY_USER_AGENT || process.env.RCC_ANTIGRAVITY_USER_AGENT || '').trim();
-      const defaultUa =
-        minimalCompatibility ? ANTIGRAVITY_HELPER_DEFAULTS.userAgent : 'antigravity/1.11.5 windows/amd64';
-      finalized['User-Agent'] = envUa || defaultUa;
-
-      if (minimalCompatibility) {
-        // gcli2api alignment: requestId/requestType are headers, not JSON body fields.
-        try {
-          const adapter = this.resolvePayload(request);
-          const payload = adapter.payload as MutablePayload;
-          if (this.hasNonEmptyString(payload.requestId)) {
-            finalized.requestId = payload.requestId;
-          }
-          const meta =
-            request && typeof request === 'object' && typeof (request as any).metadata === 'object'
-              ? ((request as any).metadata as Record<string, unknown>)
-              : undefined;
-          const hasImageAttachment = meta && (meta.hasImageAttachment === true || meta.hasImageAttachment === 'true');
-          finalized.requestType = hasImageAttachment ? 'image_gen' : 'agent';
-        } catch {
-          // best effort
-        }
-        // Keep the header triplet stable (X-Goog-Api-Client / Client-Metadata / originator) to align with
-        // previously successful antigravity snapshots and avoid quota pool surprises.
-        if (!finalized['X-Goog-Api-Client']) {
-          finalized['X-Goog-Api-Client'] =
-            (process.env.ROUTECODEX_ANTIGRAVITY_X_GOOG_API_CLIENT ||
-              process.env.RCC_ANTIGRAVITY_X_GOOG_API_CLIENT ||
-              'gl-node/22.17.0').trim();
-        }
-        if (!finalized['Client-Metadata']) {
-          finalized['Client-Metadata'] =
-            (process.env.ROUTECODEX_ANTIGRAVITY_CLIENT_METADATA ||
-              process.env.RCC_ANTIGRAVITY_CLIENT_METADATA ||
-              'ideType=IDE_UNSPECIFIED, platform=PLATFORM_UNSPECIFIED, pluginType=GEMINI').trim();
-        }
-        if (!finalized.originator) {
-          finalized.originator = 'codex_cli_rs';
-        }
-      } else {
-        // Standard contract: header triplet differentiates identity/quota pool.
-        const xGoog =
-          (process.env.ROUTECODEX_ANTIGRAVITY_X_GOOG_API_CLIENT ||
-            process.env.RCC_ANTIGRAVITY_X_GOOG_API_CLIENT ||
-            'google-cloud-sdk vscode_cloudshelleditor/0.1').trim();
-        const clientMeta =
-          (process.env.ROUTECODEX_ANTIGRAVITY_CLIENT_METADATA ||
-            process.env.RCC_ANTIGRAVITY_CLIENT_METADATA ||
-            '{"ideType":"IDE_UNSPECIFIED","platform":"PLATFORM_UNSPECIFIED","pluginType":"GEMINI"}').trim();
-        if (xGoog) finalized['X-Goog-Api-Client'] = xGoog;
-        if (clientMeta) finalized['Client-Metadata'] = clientMeta;
-        if (!finalized.originator) {
-          finalized.originator = 'codex_cli_rs';
-        }
-        // Standard contract: requestId/requestType are NOT headers.
-        deleteHeaderInsensitive('requestId');
-        deleteHeaderInsensitive('requestType');
+      finalized['User-Agent'] = envUa || 'antigravity/1.11.3 windows/amd64';
+      deleteHeaderInsensitive('X-Goog-Api-Client');
+      deleteHeaderInsensitive('Client-Metadata');
+      if (!finalized['Accept-Encoding']) {
+        finalized['Accept-Encoding'] = 'gzip';
       }
+
+      const payload = this.resolvePayload(request).payload as Record<string, unknown>;
+      const requestId = typeof payload.requestId === 'string' && payload.requestId.trim().length ? payload.requestId.trim() : '';
+      const requestType = typeof payload.requestType === 'string' && payload.requestType.trim().length ? payload.requestType.trim() : '';
+      if (requestId) finalized['requestId'] = requestId;
+      if (requestType) finalized['requestType'] = requestType;
     }
     return finalized;
   }
@@ -287,20 +246,8 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
     if (!this.isAntigravityRuntime() || !built || typeof built !== 'object') {
       return built;
     }
-    if (!this.isAntigravityMinimalCompatibilityEnabled()) {
-      // Standard contract: keep requestId/requestType/userAgent fields in JSON body.
-      return built;
-    }
-    const body = built as Record<string, unknown>;
-    const model = body.model;
-    const project = body.project;
-    const requestNode = body.request;
-
-    const sanitized: Record<string, unknown> = {};
-    if (model !== undefined) sanitized.model = model;
-    if (project !== undefined) sanitized.project = project;
-    if (requestNode !== undefined) sanitized.request = requestNode;
-    return sanitized as UnknownObject;
+    // gcli2api antigravity alignment: requestId/requestType are headers; JSON wrapper stays minimal.
+    return built;
   }
 
   protected override async postprocessResponse(response: unknown, context: ProviderContext): Promise<UnknownObject> {
@@ -450,19 +397,14 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
 
   private ensureRequestMetadata(payload: MutablePayload): void {
     const isAntigravity = this.isAntigravityRuntime();
-    const minimalCompatibility = isAntigravity ? this.isAntigravityMinimalCompatibilityEnabled() : false;
 
     if (!this.hasNonEmptyString(payload.requestId)) {
-      payload.requestId = isAntigravity && !minimalCompatibility ? `agent-${randomUUID()}` : `req-${randomUUID()}`;
+      // gcli2api antigravity alignment: requestId uses req- prefix (carried as HTTP header).
+      payload.requestId = `req-${randomUUID()}`;
     }
-    // gcli2api alignment: Antigravity request bodies are minimal; do not inject session_id/userAgent/requestType
-    // or generationConfig defaults at the provider layer.
+    // Never inject legacy snake_case session_id.
     if (isAntigravity) {
       delete (payload as { session_id?: unknown }).session_id;
-      if (minimalCompatibility) {
-        delete (payload as { userAgent?: unknown }).userAgent;
-        delete (payload as { requestType?: unknown }).requestType;
-      }
     }
   }
 
@@ -470,9 +412,10 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
     const raw = (process.env.ROUTECODEX_ANTIGRAVITY_HEADER_MODE || process.env.RCC_ANTIGRAVITY_HEADER_MODE || '')
       .trim()
       .toLowerCase();
-    // Default to minimal for Antigravity to match historically successful snapshots.
+    // Legacy switch kept for older deployments; RouteCodex now follows gcli2api antigravity header style by default.
+    // This method is currently unused (we avoid forcing sessionId injection and keep requestId/requestType in headers).
     if (!raw) {
-      return true;
+      return false;
     }
     if (raw === 'standard' || raw === 'full' || raw === 'headers') {
       return false;

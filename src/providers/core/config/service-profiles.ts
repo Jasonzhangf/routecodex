@@ -3,30 +3,17 @@
  *
  * 定义各个OpenAI兼容服务的预设配置档案
  */
-import os from 'node:os';
 import { API_ENDPOINTS, API_PATHS, HTTP_PROTOCOLS, LOCAL_HOSTS, DEFAULT_CONFIG } from "../../../constants/index.js";
 import type { ServiceProfile } from '../api/provider-types.js';
 
 /**
  * 解析 Gemini UA 并返回合适的 User-Agent。
  *
- * 为了与 gcli2api 保持一致，这里直接采用 GeminiCLI 伪装 UA，
- * 不再通过环境变量进行运行时切换，避免行为复杂化。
+ * 对齐 opencode / gcli2api：Gemini CLI 风格请求使用固定的 Google API Node client UA，
+ * 避免 UA 指纹在不同运行环境下变化导致上游风控/配额策略差异。
  */
 function resolveGeminiCliUserAgent(): string {
-  // 对齐 gcli2api：GeminiCLI/<version> (<system>; <arch>)
-  // 版本号采用保守的固定值，避免频繁变更 UA 指纹。
-  const version = '0.1.5';
-  const systemRaw = os.type();
-  const arch = os.arch();
-  // 轻量规范化 system 文本，使其更接近 Python platform.system() 的输出。
-  let system = systemRaw;
-  if (systemRaw === 'Darwin') {
-    system = 'Mac OS';
-  } else if (systemRaw === 'Windows_NT') {
-    system = 'Windows';
-  }
-  return `GeminiCLI/${version} (${system}; ${arch})`;
+  return 'google-api-nodejs-client/9.15.1';
 }
 
 /**

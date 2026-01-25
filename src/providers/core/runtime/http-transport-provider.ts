@@ -869,6 +869,7 @@ export class HttpTransportProvider extends BaseProvider {
     const inboundClientHeaders = this.extractClientHeaders(runtimeMetadata);
     const normalizedClientHeaders = this.normalizeCodexClientHeaders(inboundClientHeaders);
     const isAntigravity = this.isAntigravityTransportRuntime(runtimeMetadata);
+    const isGeminiCli = this.isGeminiCliTransportRuntime(runtimeMetadata);
 
     // 服务特定头部
     const serviceHeaders = this.serviceProfile.headers || {};
@@ -965,9 +966,18 @@ export class HttpTransportProvider extends BaseProvider {
     // 因此对 iflow：service/profile 的 UA 优先级应高于 inbound client userAgent，
     // 否则客户端 UA 会把模拟头部冲掉，触发 HTTP 200 + status=435 "Model not support"。
     const isIflow = this.isIflowTransportRuntime(runtimeMetadata);
+    const isGeminiFamily = this.isGeminiFamilyTransport();
+    const defaultGeminiUa = isAntigravity
+      ? 'antigravity/1.11.3 windows/amd64'
+      : isGeminiCli
+        ? 'google-api-nodejs-client/9.15.1'
+        : 'google-api-nodejs-client/9.15.1';
     const resolvedUa = isIflow
       ? (uaFromConfig ?? uaFromService ?? inboundUserAgent ?? DEFAULT_USER_AGENT)
-      : (uaFromConfig ?? inboundUserAgent ?? uaFromService ?? DEFAULT_USER_AGENT);
+      // Gemini family: align with opencode/gcli2api and do not leak inbound UA fingerprints.
+      : isGeminiFamily
+        ? (uaFromConfig ?? uaFromService ?? defaultGeminiUa)
+        : (uaFromConfig ?? inboundUserAgent ?? uaFromService ?? DEFAULT_USER_AGENT);
     this.assignHeader(finalHeaders, 'User-Agent', resolvedUa);
 
     // originator: do not invent one; only forward from config or inbound client.
@@ -981,7 +991,7 @@ export class HttpTransportProvider extends BaseProvider {
       }
     }
 
-    if (!isAntigravity && normalizedClientHeaders) {
+    if (!isAntigravity && !this.isGeminiFamilyTransport() && normalizedClientHeaders) {
       const conversationId = this.findHeaderValue(normalizedClientHeaders, 'conversation_id');
       if (conversationId) {
         this.assignHeader(finalHeaders, 'conversation_id', conversationId);
@@ -995,7 +1005,7 @@ export class HttpTransportProvider extends BaseProvider {
     // Inbound metadata may already carry parsed session identifiers (e.g. when client sends
     // metadata.sessionId / metadata.conversationId instead of headers). Inject them only
     // if not already provided by config/runtime headers or inbound client headers.
-    if (!isAntigravity && inboundMetadata && typeof inboundMetadata === 'object') {
+    if (!isAntigravity && !this.isGeminiFamilyTransport() && inboundMetadata && typeof inboundMetadata === 'object') {
       const meta = inboundMetadata as Record<string, unknown>;
       const metaSessionId =
         typeof meta.sessionId === 'string' && meta.sessionId.trim() ? meta.sessionId.trim() : '';
@@ -1011,7 +1021,7 @@ export class HttpTransportProvider extends BaseProvider {
       }
     }
 
-    if (!isAntigravity && this.isCodexUaMode()) {
+    if (!isAntigravity && !this.isGeminiFamilyTransport() && this.isCodexUaMode()) {
       this.ensureCodexSessionHeaders(finalHeaders, runtimeMetadata);
     }
 
@@ -1508,6 +1518,28 @@ export class HttpTransportProvider extends BaseProvider {
     return providerType === 'gemini' || 
            providerType === 'gemini-cli' ||
            providerType === 'antigravity';
+  }
+
+  private isGeminiCliTransportRuntime(runtimeMetadata?: ProviderRuntimeMetadata): boolean {
+    const fromConfig =
+      typeof this.config?.config?.providerId === 'string' && this.config.config.providerId.trim()
+        ? this.config.config.providerId.trim().toLowerCase()
+        : '';
+    const fromRuntime =
+      typeof runtimeMetadata?.providerId === 'string' && runtimeMetadata.providerId.trim()
+        ? runtimeMetadata.providerId.trim().toLowerCase()
+        : '';
+    const fromProviderKey =
+      typeof runtimeMetadata?.providerKey === 'string' && runtimeMetadata.providerKey.trim()
+        ? runtimeMetadata.providerKey.trim().toLowerCase()
+        : '';
+    if (fromConfig === 'gemini-cli' || fromRuntime === 'gemini-cli') {
+      return true;
+    }
+    if (fromProviderKey.startsWith('gemini-cli.')) {
+      return true;
+    }
+    return false;
   }
 
   private normalizeClientHeaders(value: unknown): Record<string, string> | undefined {
