@@ -967,8 +967,9 @@ export class HttpTransportProvider extends BaseProvider {
     // 否则客户端 UA 会把模拟头部冲掉，触发 HTTP 200 + status=435 "Model not support"。
     const isIflow = this.isIflowTransportRuntime(runtimeMetadata);
     const isGeminiFamily = this.isGeminiFamilyTransport();
+    const envAntigravityUa = (process.env.ROUTECODEX_ANTIGRAVITY_USER_AGENT || process.env.RCC_ANTIGRAVITY_USER_AGENT || '').trim();
     const defaultGeminiUa = isAntigravity
-      ? 'antigravity/1.11.3 windows/amd64'
+      ? (envAntigravityUa || 'antigravity/1.11.3 windows/amd64')
       : isGeminiCli
         ? 'google-api-nodejs-client/9.15.1'
         : 'google-api-nodejs-client/9.15.1';

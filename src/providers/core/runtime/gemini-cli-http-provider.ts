@@ -184,6 +184,24 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
       }
     }
 
+    // gcli2api antigravity alignment: keep JSON wrapper minimal.
+    // Preserve requestId/requestType in metadata for headers, then remove them from payload.
+    if (this.isAntigravityRuntime()) {
+      const meta = (processedRequest as { metadata?: Record<string, unknown> }).metadata ?? {};
+      (processedRequest as { metadata?: Record<string, unknown> }).metadata = meta;
+      if (typeof (payload as any).requestId === 'string' && (payload as any).requestId.trim().length) {
+        meta.__antigravityRequestId = String((payload as any).requestId).trim();
+        delete (payload as any).requestId;
+      }
+      if (typeof (payload as any).requestType === 'string' && (payload as any).requestType.trim().length) {
+        meta.__antigravityRequestType = String((payload as any).requestType).trim();
+        delete (payload as any).requestType;
+      }
+      if (typeof (payload as any).userAgent === 'string' && (payload as any).userAgent.trim().length) {
+        delete (payload as any).userAgent;
+      }
+    }
+
     return processedRequest;
   }
 
@@ -224,8 +242,7 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
       // - User-Agent follows ANTIGRAVITY_USER_AGENT style
       // - requestId/requestType are headers (not JSON fields)
       // - no X-Goog-Api-Client / Client-Metadata triplet
-      const envUa = (process.env.ROUTECODEX_ANTIGRAVITY_USER_AGENT || process.env.RCC_ANTIGRAVITY_USER_AGENT || '').trim();
-      finalized['User-Agent'] = envUa || 'antigravity/1.11.3 windows/amd64';
+      // User-Agent handled in HttpTransportProvider; keep headers minimal here.
       deleteHeaderInsensitive('X-Goog-Api-Client');
       deleteHeaderInsensitive('Client-Metadata');
       if (!finalized['Accept-Encoding']) {
@@ -233,8 +250,17 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
       }
 
       const payload = this.resolvePayload(request).payload as Record<string, unknown>;
-      const requestId = typeof payload.requestId === 'string' && payload.requestId.trim().length ? payload.requestId.trim() : '';
-      const requestType = typeof payload.requestType === 'string' && payload.requestType.trim().length ? payload.requestType.trim() : '';
+      const meta = (request as { metadata?: Record<string, unknown> }).metadata ?? {};
+      const requestId =
+        (typeof payload.requestId === 'string' && payload.requestId.trim().length ? payload.requestId.trim() : '') ||
+        (typeof meta.__antigravityRequestId === 'string' && meta.__antigravityRequestId.trim().length
+          ? String(meta.__antigravityRequestId).trim()
+          : '');
+      const requestType =
+        (typeof payload.requestType === 'string' && payload.requestType.trim().length ? payload.requestType.trim() : '') ||
+        (typeof meta.__antigravityRequestType === 'string' && meta.__antigravityRequestType.trim().length
+          ? String(meta.__antigravityRequestType).trim()
+          : '');
       if (requestId) finalized['requestId'] = requestId;
       if (requestType) finalized['requestType'] = requestType;
     }
