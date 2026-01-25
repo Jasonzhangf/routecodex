@@ -73,19 +73,20 @@ describe('GeminiCLIHttpProvider basic behaviour', () => {
       expect((processed as any).systemInstruction).toEqual(
         expect.objectContaining({ role: 'system' })
       );
-      expect(typeof (processed as any).requestId).toBe('string');
-      expect(String((processed as any).requestId)).toContain('req-');
-      expect((processed as any).requestType).toBe('agent');
-      expect((processed as any).userAgent).toBe('antigravity');
+      expect(typeof (processed as any).requestId).toBe('undefined');
+      expect((processed as any).requestType).toBeUndefined();
+      expect((processed as any).userAgent).toBeUndefined();
+      expect(typeof (processed as any).metadata?.__antigravityRequestId).toBe('string');
+      expect(String((processed as any).metadata?.__antigravityRequestId)).toContain('req-');
+      expect((processed as any).metadata?.__antigravityRequestType).toBe('agent');
       expect((processed as any).session_id).toBeUndefined();
       expect((processed as any).generationConfig).toBeUndefined();
       expect((processed as any).stream).toBeUndefined();
 
       const headers = await (provider as any).finalizeRequestHeaders({}, processed);
       expect(headers).toBeTruthy();
-      expect(headers.requestId).toBe((processed as any).requestId);
+      expect(headers.requestId).toBe((processed as any).metadata?.__antigravityRequestId);
       expect(headers.requestType).toBe('agent');
-      expect(headers['User-Agent']).toContain('antigravity/');
       expect(headers['X-Goog-Api-Client']).toBeUndefined();
       expect(headers['Client-Metadata']).toBeUndefined();
       expect(headers['Accept-Encoding']).toBe('gzip');
@@ -133,16 +134,17 @@ describe('GeminiCLIHttpProvider basic behaviour', () => {
         stream: true
       });
 
-      expect(typeof (processed as any).requestId).toBe('string');
-      expect(String((processed as any).requestId)).toContain('req-');
-      expect((processed as any).requestType).toBe('agent');
-      expect((processed as any).userAgent).toBe('antigravity');
+      expect(typeof (processed as any).requestId).toBe('undefined');
+      expect((processed as any).requestType).toBeUndefined();
+      expect((processed as any).userAgent).toBeUndefined();
+      expect(typeof (processed as any).metadata?.__antigravityRequestId).toBe('string');
+      expect(String((processed as any).metadata?.__antigravityRequestId)).toContain('req-');
+      expect((processed as any).metadata?.__antigravityRequestType).toBe('agent');
       expect((processed as any).sessionId).toBeUndefined();
 
       const headers = await (provider as any).finalizeRequestHeaders({}, processed);
-      expect(headers.requestId).toBe((processed as any).requestId);
+      expect(headers.requestId).toBe((processed as any).metadata?.__antigravityRequestId);
       expect(headers.requestType).toBe('agent');
-      expect(headers['User-Agent']).toContain('antigravity/');
       expect(headers['X-Goog-Api-Client']).toBeUndefined();
       expect(headers['Client-Metadata']).toBeUndefined();
 
@@ -190,19 +192,20 @@ describe('GeminiCLIHttpProvider basic behaviour', () => {
       expect((processed as any).systemInstruction).toEqual(
         expect.objectContaining({ role: 'system' })
       );
-      expect(typeof (processed as any).requestId).toBe('string');
-      expect(String((processed as any).requestId)).toContain('req-');
-      expect((processed as any).requestType).toBe('agent');
-      expect((processed as any).userAgent).toBe('antigravity');
+      expect(typeof (processed as any).requestId).toBe('undefined');
+      expect((processed as any).requestType).toBeUndefined();
+      expect((processed as any).userAgent).toBeUndefined();
+      expect(typeof (processed as any).metadata?.__antigravityRequestId).toBe('string');
+      expect(String((processed as any).metadata?.__antigravityRequestId)).toContain('req-');
+      expect((processed as any).metadata?.__antigravityRequestType).toBe('agent');
       expect((processed as any).session_id).toBeUndefined();
       expect((processed as any).sessionId).toBeUndefined();
       expect((processed as any).stream).toBeUndefined();
 
       const headers = await (provider as any).finalizeRequestHeaders({}, processed);
       expect(headers).toBeTruthy();
-      expect(headers.requestId).toBe((processed as any).requestId);
+      expect(headers.requestId).toBe((processed as any).metadata?.__antigravityRequestId);
       expect(headers.requestType).toBe('agent');
-      expect(headers['User-Agent']).toContain('antigravity/');
       expect(headers['X-Goog-Api-Client']).toBeUndefined();
       expect(headers['Client-Metadata']).toBeUndefined();
       expect(headers.originator).toBeUndefined();

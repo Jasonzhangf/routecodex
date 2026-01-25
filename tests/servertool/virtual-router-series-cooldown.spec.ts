@@ -15,10 +15,10 @@ describe('Virtual router series cooldown', () => {
     const model = 'gemini-3-pro-high';
 
     const first = manager.record429(bucket, model);
-    expect(first.seriesBlacklisted).toBe(false);
+    expect(first.consecutive).toBe(1);
 
     const second = manager.record429(bucket, model);
-    expect(second.seriesBlacklisted).toBe(true);
+    expect(second.consecutive).toBe(2);
 
     const error = manager.buildThrottleError({ providerKey: bucket, model });
     expect(error).toBeInstanceOf(RateLimitCooldownError);
