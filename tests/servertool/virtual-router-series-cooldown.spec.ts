@@ -22,7 +22,7 @@ describe('Virtual router series cooldown', () => {
 
     const error = manager.buildThrottleError({ providerKey: bucket, model });
     expect(error).toBeInstanceOf(RateLimitCooldownError);
-    expect(error?.message).toContain('cooling down');
+    expect(error?.message).toContain('series');
   });
 });
 
