@@ -26,9 +26,12 @@
 - **A1 System Instruction `<priority>`** ✅（已对齐）
   - 参考：`sharedmodule/llmswitch-core/src/conversion/compat/*`、`sharedmodule/llmswitch-core/src/conversion/hub/operation-table/semantic-mappers/gemini-mapper.ts`
   - 要求：仅 `<priority>` 版，去除旧格式分支
-- **A2 request wrapper `requestType: "agent"`（body wrapper）** ✅（已对齐）
-  - 参考：`sharedmodule/llmswitch-core/src/conversion/compat/*`、`src/providers/core/runtime/gemini-cli-http-provider.ts`
-  - 要求：仅 body wrapper，禁用 header-only
+- **A2 request wrapper（body wrapper）** ✅（已对齐）
+  - 参考：`sharedmodule/llmswitch-core/src/conversion/hub/operation-table/semantic-mappers/gemini-mapper.ts`、
+    `/Users/fanzhang/Documents/github/Antigravity-Manager/src-tauri/src/proxy/mappers/gemini/wrapper.rs`、
+    `sharedmodule/llmswitch-core/src/conversion/compat/profiles/chat-gemini.json`、
+    `src/client/gemini-cli/gemini-cli-protocol-client.ts`、`src/providers/core/runtime/gemini-cli-http-provider.ts`
+  - 要求：JSON wrapper 必含 `requestType/userAgent/requestId/project/request`；不走 header-only
 - **A3 Thought Signature（缓存/预热/恢复）** ✅（已对齐）
   - 参考：`sharedmodule/llmswitch-core/src/conversion/hub/pipeline/**`、`sharedmodule/llmswitch-core/src/conversion/compat/*`
   - 要求：仅 Antigravity 分支；缓存 12h / session 50 / 全局 200；不扩展 deepFilter 策略
@@ -36,8 +39,17 @@
   - 参考：`sharedmodule/llmswitch-core/src/conversion/hub/pipeline/**`、`sharedmodule/llmswitch-core/src/conversion/compat/*`
   - 要求：仅 Antigravity 分支；对齐 deepFilterThinkingBlocks
 - **A5 Endpoint/路径构造** 🟡（代码对齐，待验证）
-  - 参考：`src/client/gemini-cli/gemini-cli-protocol-client.ts`、`src/providers/core/runtime/gemini-cli-http-provider.ts`
-  - 要求：对齐 Antigravity Tools 最新路径构造
+  - 参考：`src/client/gemini-cli/gemini-cli-protocol-client.ts`、
+    `/Users/fanzhang/Documents/github/Antigravity-Manager/src-tauri/src/proxy/upstream/client.rs`
+  - 要求：对齐 Antigravity Tools 最新路径构造（/v1internal:generateContent | :streamGenerateContent）
+- **A6 requestType 解析（agent/web_search/image_gen）** 🟡（对齐中）
+  - 参考：`sharedmodule/llmswitch-core/src/conversion/hub/operation-table/semantic-mappers/gemini-mapper.ts`、
+    `/Users/fanzhang/Documents/github/Antigravity-Manager/src-tauri/src/proxy/mappers/common_utils.rs`
+  - 要求：对齐 Antigravity Tools 的 request_type 判定（-online 后缀 / networking tools / image 模型）
+- **A7 googleSearch 注入 & tools 清理（Antigravity 分支）** 🟡（对齐中）
+  - 参考：`sharedmodule/llmswitch-core/src/conversion/compat/actions/gemini-web-search.ts`、
+    `/Users/fanzhang/Documents/github/Antigravity-Manager/src-tauri/src/proxy/mappers/common_utils.rs`
+  - 要求：仅 Antigravity 分支；与 Antigravity Tools 的 googleSearch 注入行为一致
 
 ### B. 风控与配额保护（Antigravity only）
 - **B1 账号禁用（disabled/proxy_disabled）持久化** ✅（已对齐）
@@ -58,11 +70,24 @@
   - 参考：`src/providers/core/runtime/gemini-cli-http-provider.ts`
   - 要求：Provider 不做模型降级/回退；仅允许后缀规范化（-low/-high/-medium/-minimal）；
     具体业务映射在虚拟路由器层完成
+- **C3 最佳账号推荐（按 quota 池）** ✅（已对齐）
+  - 参考：`sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/alias-selection.ts`、
+    `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/tier-selection-select.ts`、
+    `/Users/fanzhang/Documents/github/Antigravity-Manager/src-tauri/src/proxy/token_manager.rs`、
+    `src/manager/modules/quota/antigravity-quota-manager.ts`、
+    `src/server/runtime/http-server/index.ts`
+  - 对齐目标：
+    - “最佳账号推荐”来自 quota 池剩余额度（按 model 维度）
+    - 默认不做轮询；只有当该 alias 的该 model 空时才切换
+    - “model 空”判定：quota=0 或 429 冷却移出账号池 ≥30s
+    - 策略按模型族分开（每个 model 单独挑最佳 alias）
 
 ### D. 请求头一致性（Antigravity only）
-- **D1 UA / X-Goog-Api-Client / Client-Metadata** ✅（已对齐）
-  - 参考：`src/providers/auth/antigravity-userinfo-helper.ts`、`src/providers/core/runtime/http-transport-provider.ts`
-  - 要求：对齐 Antigravity Tools 最新版本
+- **D1 UA / X-Goog-Api-Client / Client-Metadata** 🟡（对齐中）
+  - 参考：`src/client/gemini-cli/gemini-cli-protocol-client.ts`、
+    `src/providers/core/runtime/gemini-cli-http-provider.ts`、
+    `/Users/fanzhang/Documents/github/Antigravity-Manager/src-tauri/src/proxy/project_resolver.rs`
+  - 要求：对齐 Antigravity Tools 最新版本（Antigravity 分支仅使用 UA，不加 Gemini CLI header triplet）
 
 ### E. project_id 来源（Antigravity only）
 - **E1 token 缺失 project_id → OAuth 生命周期补全** ✅（已对齐）
@@ -120,8 +145,11 @@
     - [x] virtual-router engine-health：先验证 → 再允许 shadow（已通过 llms-wasm native compare：vr_map_provider_error/vr_handle_provider_failure/vr_apply_series_cooldown）
     - [x] virtual-router routing-policy：先验证 → 再允许 shadow（已补齐 fixtures：multi-provider round_robin / priority-fallback）
     - [x] provider-response conversion：先验证 → 再允许 shadow（已补齐 fixtures：openai-chat/openai-responses provider response conversion）
-    - [ ] inbound/outbound request shaping：先验证 → 再允许 shadow（下一步：补齐 openai-chat/openai-responses request fixtures，打通 standardized_bridge/response_io）
+    - [x] inbound/outbound request shaping：先验证 → 再允许 shadow（已补齐 FFI + native：vr_convert_inbound/vr_convert_inbound_responses + request fixtures）
     - [x] standardized bridge：先验证 → 再允许 shadow（已补齐 FFI + native roundtrip：ChatEnvelope <-> StandardizedRequest）
+    - [x] outbound response conversion：先验证 → 再允许 shadow（已补齐 FFI + native：vr_convert_outbound）
+    - [x] response finalize：先验证 → 再允许 shadow（已补齐 FFI + native：vr_finalize_chat_response）
+    - [x] response IO：先验证 → 再允许 shadow（已补齐 FFI + native：vr_convert_provider_response / vr_provider_response_to_chat）
   - [ ] 新建 `src/runtime/wasm-runtime/` 模块结构与入口
   - [ ] 实现 `WasmRuntime` 类（加载、初始化、生命周期管理）
   - [ ] 扩展 `src/modules/llmswitch/bridge` 新增 `getHubPipelineCtorForImpl('wasm')`
