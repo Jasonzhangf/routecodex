@@ -161,6 +161,17 @@
   - [ ] 验证双加载互不影响（隔离测试）
   - [x] 在 llmswitch-core CI 新增 wasm-compare job（模块顺序 gating）: `/Users/fanzhang/Documents/github/sharedmodule/.github/workflows/llmswitch-core-ci.yml`
 
+#### W2 验证记录（2026-01-26）
+- llms-wasm native：`cargo test --test ts_fixtures_compare` 全部 42 用例通过（新增 20 个 compat_pipeline 相关的）。
+- llms-wasm native：`cargo llvm-cov report` 覆盖率（本地）= lines 52.70% / functions 51.82% / regions 51.31%。
+- 目标阈值 90% 尚未达到，继续按模块补齐覆盖与 fixtures。
+
+### W2 验证记录（2026-01-26 - compat_pipeline 阶段性完成）
+- **完成项**: 新增 `remove/rename/set/stringify/parse_json/set_default/normalize_tool_choice/inject_instruction/convert_responses_output_to_choices/resp_blacklist/field_map/tool_schema_sanitize/apply_rules/response_normalize/response_validate/qwen_request_transform/qwen_response_transform/auto_thinking/glm_web_search_request` 等 20 个 `compat_pipeline` 相关的 fixtures 和测试。
+- **测试结果**: 所有 `ts_fixtures_compare` 测试通过。
+- **覆盖率**: `compat_pipeline.rs` 模块的行覆盖率为 36.58% (之前为 37.38%)，整体行覆盖率略降至 52.70%。
+- **下一步**: 继续关注 `response_io.rs` 等低覆盖模块。
+
 ### 14. CI 基线（PR 必跑）+ 覆盖率增强（从最小集合开始）
 - **位置**: `sharedmodule/.github/workflows/llmswitch-core-ci.yml` + `routecodex/.github/workflows/test.yml` + `jest.config.js`
 - **优先级**: 高
