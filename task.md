@@ -162,9 +162,16 @@
   - [x] 在 llmswitch-core CI 新增 wasm-compare job（模块顺序 gating）: `/Users/fanzhang/Documents/github/sharedmodule/.github/workflows/llmswitch-core-ci.yml`
 
 #### W2 验证记录（2026-01-26）
-- llms-wasm native：`cargo test --test ts_fixtures_compare` 全部 42 用例通过（新增 20 个 compat_pipeline 相关的）。
-- llms-wasm native：`cargo llvm-cov report` 覆盖率（本地）= lines 52.70% / functions 51.82% / regions 51.31%。
+- llms-wasm native：`cargo test --test ts_fixtures_compare` 全部 24 用例通过（新增 tokenizer/standardized-bridge 的错误路径用例）。
+- llms-wasm native：`cargo llvm-cov report` 覆盖率（本地，clean 后）= lines 59.28% / functions 59.27% / regions 58.76%。
 - 目标阈值 90% 尚未达到，继续按模块补齐覆盖与 fixtures。
+- **本轮进展**：
+  - 新增 14 个 compat_pipeline fixtures：normalize_tool_choice / inject_instruction / parse_json / convert_responses_output_to_choices / extract_glm_tool_markup / apply_rules(when_tools) / qwen_transform / glm_web_search / response_normalize / auto_thinking
+  - 实现 `convert_responses_output_to_choices` 函数（之前是 TODO 空实现）
+  - 新增 `token_estimator` / `standardized_bridge` 的错误路径测试（invalid JSON / missing required fields）
+  - token_estimator.rs 覆盖率提升到 ~70.21%（lines）
+  - standardized_bridge.rs 覆盖率提升到 ~53.89%（lines）
+  - TOTAL 覆盖率从 53.91% 提升到 59.28%
 
 ### W2 验证记录（2026-01-26 - compat_pipeline 阶段性完成）
 - **完成项**: 新增 `remove/rename/set/stringify/parse_json/set_default/normalize_tool_choice/inject_instruction/convert_responses_output_to_choices/resp_blacklist/field_map/tool_schema_sanitize/apply_rules/response_normalize/response_validate/qwen_request_transform/qwen_response_transform/auto_thinking/glm_web_search_request` 等 20 个 `compat_pipeline` 相关的 fixtures 和测试。
