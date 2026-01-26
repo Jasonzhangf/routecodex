@@ -25,6 +25,65 @@ export type ProviderQuotaDaemonEventContext = {
   toSnapshotObject(): Record<string, QuotaState>;
 };
 
+function extractAntigravityAlias(providerKey: string): string | null {
+  const raw = typeof providerKey === 'string' ? providerKey.trim() : '';
+  if (!raw) {
+    return null;
+  }
+  const parts = raw.split('.').filter(Boolean);
+  if (parts.length < 3) {
+    return null;
+  }
+  if (parts[0]?.toLowerCase() !== 'antigravity') {
+    return null;
+  }
+  return parts[1] ? parts[1].trim() : null;
+}
+
+function applyAntigravityAccountCooldown(
+  ctx: ProviderQuotaDaemonEventContext,
+  alias: string,
+  cooldownUntil: number,
+  nowMs: number,
+  sourceKey?: string
+): void {
+  if (!alias) {
+    return;
+  }
+  let touched = false;
+  for (const [key, state] of ctx.quotaStates.entries()) {
+    if (!key.startsWith('antigravity.')) {
+      continue;
+    }
+    const keyAlias = extractAntigravityAlias(key);
+    if (!keyAlias || keyAlias !== alias) {
+      continue;
+    }
+    if (sourceKey && key === sourceKey) {
+      continue;
+    }
+    if (state.reason === 'blacklist' && state.blacklistUntil && nowMs < state.blacklistUntil) {
+      continue;
+    }
+    const existing = state.cooldownUntil;
+    const nextCooldownUntil =
+      typeof existing === 'number' && Number.isFinite(existing) && existing > cooldownUntil
+        ? existing
+        : cooldownUntil;
+    const nextState: QuotaState = {
+      ...state,
+      inPool: false,
+      reason: 'cooldown',
+      cooldownUntil: nextCooldownUntil
+    };
+    ctx.quotaStates.set(key, nextState);
+    touched = true;
+  }
+  if (touched) {
+    ctx.schedulePersist(nowMs);
+  }
+}
+
 export async function handleProviderQuotaErrorEvent(
   ctx: ProviderQuotaDaemonEventContext,
   event: ProviderErrorEvent
@@ -47,6 +106,9 @@ export async function handleProviderQuotaErrorEvent(
     typeof event.timestamp === 'number' && Number.isFinite(event.timestamp) && event.timestamp > 0
       ? event.timestamp
       : Date.now();
+  const runtime = event.runtime as { providerId?: unknown } | undefined;
+  const providerIdRaw =
+    runtime && typeof runtime.providerId === 'string' ? runtime.providerId.trim().toLowerCase() : '';
 
   const previous =
     ctx.quotaStates.get(providerKey) ??
@@ -183,8 +245,6 @@ export async function handleProviderQuotaErrorEvent(
       ctx.schedulePersist(nowMs);
       return;
     }
-    const runtime = event.runtime as { providerId?: unknown; providerProtocol?: unknown } | undefined;
-    const providerIdRaw = runtime && typeof runtime.providerId === 'string' ? runtime.providerId.trim().toLowerCase() : '';
     const isQuotaProvider = providerIdRaw === 'antigravity' || providerIdRaw === 'gemini-cli';
     if (isQuotaProvider) {
       const ttl = parseQuotaResetDelayMs(event);
@@ -217,7 +277,20 @@ export async function handleProviderQuotaErrorEvent(
   };
 
   const nextState = applyQuotaErrorEvent(previous, errorForQuota, nowMs);
+  if (
+    typeof event.status === 'number' &&
+    event.status === 429 &&
+    providerIdRaw === 'antigravity' &&
+    typeof nextState.cooldownUntil === 'number' &&
+    nextState.cooldownUntil > nowMs
+  ) {
+    const alias = extractAntigravityAlias(providerKey);
+    if (alias) {
+      applyAntigravityAccountCooldown(ctx, alias, nextState.cooldownUntil, nowMs, providerKey);
+    }
+  }
   ctx.quotaStates.set(providerKey, nextState);
+  ctx.schedulePersist(nowMs);
 
   const tsIso = new Date(nowMs).toISOString();
   try {

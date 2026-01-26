@@ -3,6 +3,11 @@ import { GeminiSemanticMapper } from '../../sharedmodule/llmswitch-core/src/conv
 import type { ChatEnvelope } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.js';
 
 describe('GeminiSemanticMapper functionCall.args shape', () => {
+  const resolveRequestPayload = (payload: any): any =>
+    payload && typeof payload === 'object' && payload.request && typeof payload.request === 'object'
+      ? payload.request
+      : payload;
+
   it('normalizes historical tool alias execute_command -> exec_command for Gemini payload', async () => {
     const mapper = new GeminiSemanticMapper();
 
@@ -53,7 +58,7 @@ describe('GeminiSemanticMapper functionCall.args shape', () => {
 
     const ctx = { requestId: 'req_test' } as any;
     const envelope = await mapper.fromChat(chat, ctx);
-    const payload = envelope.payload as any;
+    const payload = resolveRequestPayload(envelope.payload as any);
 
     const contents = Array.isArray(payload?.contents) ? payload.contents : [];
     const functionCalls: any[] = [];
@@ -118,7 +123,7 @@ describe('GeminiSemanticMapper functionCall.args shape', () => {
 
     const ctx = { requestId: 'req_test' } as any;
     const envelope = await mapper.fromChat(chat, ctx);
-    const payload = envelope.payload as any;
+    const payload = resolveRequestPayload(envelope.payload as any);
 
     expect(Array.isArray(payload?.tools)).toBe(true);
     expect(Array.isArray(payload.tools?.[0]?.functionDeclarations)).toBe(true);
@@ -196,7 +201,7 @@ describe('GeminiSemanticMapper functionCall.args shape', () => {
 
     const ctx = { requestId: 'req_test' } as any;
     const envelope = await mapper.fromChat(chat, ctx);
-    const payload = envelope.payload as any;
+    const payload = resolveRequestPayload(envelope.payload as any);
 
     const decls = payload?.tools?.[0]?.functionDeclarations ?? [];
     const names = Array.isArray(decls) ? decls.map((d: any) => d?.name).filter(Boolean) : [];
@@ -239,7 +244,7 @@ describe('GeminiSemanticMapper functionCall.args shape', () => {
 
     const ctx = { requestId: 'req_test' } as any;
     const envelope = await mapper.fromChat(chat, ctx);
-    const payload = envelope.payload as any;
+    const payload = resolveRequestPayload(envelope.payload as any);
 
     const decls = payload?.tools?.[0]?.functionDeclarations ?? [];
     const decl = Array.isArray(decls) ? decls.find((d: any) => d?.name === 'list_mcp_resources') : undefined;
@@ -308,7 +313,7 @@ describe('GeminiSemanticMapper functionCall.args shape', () => {
 
     const ctx = { requestId: 'req_test' } as any;
     const envelope = await mapper.fromChat(chat, ctx);
-    const payload = envelope.payload as any;
+    const payload = resolveRequestPayload(envelope.payload as any);
 
     const contents = Array.isArray(payload?.contents) ? payload.contents : [];
     const functionCalls: any[] = [];
@@ -449,7 +454,7 @@ describe('GeminiSemanticMapper functionCall.args shape', () => {
 
     const ctx = { requestId: 'req_test' } as any;
     const envelope = await mapper.fromChat(chat, ctx);
-    const payload = envelope.payload as any;
+    const payload = resolveRequestPayload(envelope.payload as any);
 
     const contents = Array.isArray(payload?.contents) ? payload.contents : [];
     const calls: Record<string, any> = {};

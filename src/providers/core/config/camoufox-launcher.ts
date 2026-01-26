@@ -16,6 +16,11 @@ type LaunchHandle = {
   child: ChildProcess;
 };
 
+export type CamoufoxFingerprintProfile = {
+  profileId: string;
+  env: Record<string, string>;
+};
+
 const activeLaunchers: Set<LaunchHandle> = new Set();
 
 function registerLauncher(child: ChildProcess): void {
@@ -239,6 +244,15 @@ function loadFingerprintEnv(profileId: string): Record<string, string> | null {
     // Missing or invalid file – caller will re-generate.
   }
   return null;
+}
+
+export function getCamoufoxFingerprintProfile(
+  provider?: string | null,
+  alias?: string | null
+): CamoufoxFingerprintProfile | null {
+  const profileId = buildProfileId(provider, alias);
+  const env = loadFingerprintEnv(profileId);
+  return env ? { profileId, env } : null;
 }
 
 function ensureFingerprintEnv(profileId: string, provider?: string | null, alias?: string | null): Record<string, string> {

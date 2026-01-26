@@ -13,8 +13,8 @@ import { logOAuthDebug } from './oauth-logger.js';
 const DEFAULT_ANTIGRAVITY_API_BASE_DAILY = 'https://daily-cloudcode-pa.sandbox.googleapis.com';
 const DEFAULT_ANTIGRAVITY_API_BASE_AUTOPUSH = 'https://autopush-cloudcode-pa.sandbox.googleapis.com';
 const DEFAULT_ANTIGRAVITY_API_BASE_PROD = 'https://cloudcode-pa.googleapis.com';
-const DEFAULT_ANTIGRAVITY_API_BASE = DEFAULT_ANTIGRAVITY_API_BASE_DAILY;
-const DEFAULT_USER_AGENT = 'antigravity/1.11.3 windows/amd64';
+const DEFAULT_ANTIGRAVITY_API_BASE = DEFAULT_ANTIGRAVITY_API_BASE_PROD;
+const DEFAULT_USER_AGENT = 'antigravity/1.11.9 windows/amd64';
 const METADATA_PAYLOAD = {
   ideType: 'ANTIGRAVITY',
   platform: 'PLATFORM_UNSPECIFIED',
@@ -93,9 +93,9 @@ export function resolveAntigravityApiBaseCandidates(explicit?: string): string[]
   const primary = normalizedBase(explicit);
   const ordered = [
     primary,
+    DEFAULT_ANTIGRAVITY_API_BASE_PROD,
     DEFAULT_ANTIGRAVITY_API_BASE_DAILY,
-    DEFAULT_ANTIGRAVITY_API_BASE_AUTOPUSH,
-    DEFAULT_ANTIGRAVITY_API_BASE_PROD
+    DEFAULT_ANTIGRAVITY_API_BASE_AUTOPUSH
   ].map((base) => normalizeApiBase(base)).filter((base) => base.length);
   return Array.from(new Set(ordered));
 }
@@ -103,11 +103,16 @@ export function resolveAntigravityApiBaseCandidates(explicit?: string): string[]
 function extractAccessTokenFromSnapshot(snapshot: Record<string, unknown>): string | undefined {
   const lower = (snapshot as { access_token?: unknown }).access_token;
   const upper = (snapshot as { AccessToken?: unknown }).AccessToken;
+  const nested = (snapshot as { token?: unknown }).token;
+  const nestedAccess =
+    nested && typeof nested === 'object' ? (nested as { access_token?: unknown }).access_token : undefined;
   const value =
     typeof lower === 'string'
       ? lower
       : typeof upper === 'string'
         ? upper
+        : typeof nestedAccess === 'string'
+          ? nestedAccess
         : undefined;
   if (value && value.trim()) {
     return value.trim();
@@ -127,6 +132,22 @@ function hasProjectMetadata(snapshot: Record<string, unknown>): boolean {
     const hasProject = projects.some((proj) => proj && typeof proj === 'object' && typeof (proj as { projectId?: unknown }).projectId === 'string');
     if (hasProject) {
       return true;
+    }
+  }
+  const nested = (snapshot as { token?: unknown }).token;
+  if (nested && typeof nested === 'object') {
+    const nestedProjectId = (nested as { project_id?: unknown }).project_id;
+    if (typeof nestedProjectId === 'string' && nestedProjectId) {
+      return true;
+    }
+    const nestedProjects = (nested as { projects?: unknown }).projects;
+    if (Array.isArray(nestedProjects) && nestedProjects.length > 0) {
+      const hasNested = nestedProjects.some(
+        (proj) => proj && typeof proj === 'object' && typeof (proj as { projectId?: unknown }).projectId === 'string'
+      );
+      if (hasNested) {
+        return true;
+      }
     }
   }
   return false;
@@ -266,7 +287,8 @@ export const ANTIGRAVITY_HELPER_DEFAULTS = {
 
 export async function ensureAntigravityTokenProjectMetadata(
   tokenFilePath: string,
-  apiBaseHint?: string
+  apiBaseHint?: string,
+  options?: { force?: boolean }
 ): Promise<boolean> {
   const resolved = expandHome(tokenFilePath);
   if (!resolved) {
@@ -276,7 +298,7 @@ export async function ensureAntigravityTokenProjectMetadata(
   if (!snapshot) {
     return false;
   }
-  if (hasProjectMetadata(snapshot)) {
+  if (!options?.force && hasProjectMetadata(snapshot)) {
     return true;
   }
   const accessToken = extractAccessTokenFromSnapshot(snapshot);
@@ -300,6 +322,23 @@ export async function ensureAntigravityTokenProjectMetadata(
     );
     if (!exists) {
       projectsNode.push({ projectId });
+    }
+  }
+  const nested = (snapshot as { token?: UnknownObject }).token;
+  if (nested && typeof nested === 'object') {
+    (nested as { project_id?: string }).project_id = projectId;
+    const nestedProjects = (nested as { projects?: UnknownObject[] }).projects;
+    if (!Array.isArray(nestedProjects) || nestedProjects.length === 0) {
+      (nested as { projects?: { projectId: string }[] }).projects = [{ projectId }];
+    } else {
+      const exists = nestedProjects.some(
+        (proj) => proj && typeof proj === 'object' && typeof (proj as { projectId?: unknown }).projectId === 'string'
+          ? (proj as { projectId?: string }).projectId === projectId
+          : false
+      );
+      if (!exists) {
+        nestedProjects.push({ projectId });
+      }
     }
   }
   try {

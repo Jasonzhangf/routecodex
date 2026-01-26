@@ -879,7 +879,7 @@ export class HttpTransportProvider extends BaseProvider {
     const runtimeHeaders = this.getRuntimeProfile()?.headers || {};
 
     // ========== 风控增强：添加 Google 客户端标识和元数据 ==========
-    if (this.isGeminiFamilyTransport()) {
+    if (this.isGeminiFamilyTransport() && !isAntigravity) {
       // Google 客户端标识
       this.assignHeader(baseHeaders, 'X-Goog-Api-Client', 'gl-node/22.17.0');
       
@@ -969,7 +969,7 @@ export class HttpTransportProvider extends BaseProvider {
     const isGeminiFamily = this.isGeminiFamilyTransport();
     const envAntigravityUa = (process.env.ROUTECODEX_ANTIGRAVITY_USER_AGENT || process.env.RCC_ANTIGRAVITY_USER_AGENT || '').trim();
     const defaultGeminiUa = isAntigravity
-      ? (envAntigravityUa || 'antigravity/1.11.3 windows/amd64')
+      ? (envAntigravityUa || 'antigravity/1.11.9 windows/amd64')
       : isGeminiCli
         ? 'google-api-nodejs-client/9.15.1'
         : 'google-api-nodejs-client/9.15.1';
@@ -1405,6 +1405,9 @@ export class HttpTransportProvider extends BaseProvider {
     const direct = typeof config?.providerId === 'string' && config.providerId.trim()
       ? config.providerId.trim().toLowerCase()
       : '';
+    if (direct === 'antigravity' && this.type === 'gemini-cli-http-provider') {
+      return 'gemini-cli';
+    }
     return direct || this.providerType;
   }
 

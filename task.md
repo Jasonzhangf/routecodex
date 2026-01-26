@@ -16,6 +16,123 @@
 
 ## 任务清单
 
+---
+
+## Antigravity 对齐（阶段一：协议/风控/alias）
+
+> 仅对齐 **Antigravity Tools 最新版本**，不考虑旧格式；只启用 **Antigravity 分支**。
+
+### A. 协议层（request/response）
+- **A1 System Instruction `<priority>`** ✅（已对齐）
+  - 参考：`sharedmodule/llmswitch-core/src/conversion/compat/*`、`sharedmodule/llmswitch-core/src/conversion/hub/operation-table/semantic-mappers/gemini-mapper.ts`
+  - 要求：仅 `<priority>` 版，去除旧格式分支
+- **A2 request wrapper `requestType: "agent"`（body wrapper）** ✅（已对齐）
+  - 参考：`sharedmodule/llmswitch-core/src/conversion/compat/*`、`src/providers/core/runtime/gemini-cli-http-provider.ts`
+  - 要求：仅 body wrapper，禁用 header-only
+- **A3 Thought Signature（缓存/预热/恢复）** ✅（已对齐）
+  - 参考：`sharedmodule/llmswitch-core/src/conversion/hub/pipeline/**`、`sharedmodule/llmswitch-core/src/conversion/compat/*`
+  - 要求：仅 Antigravity 分支；缓存 12h / session 50 / 全局 200；不扩展 deepFilter 策略
+- **A4 工具调用清理（history/tool_call）** ✅（已对齐）
+  - 参考：`sharedmodule/llmswitch-core/src/conversion/hub/pipeline/**`、`sharedmodule/llmswitch-core/src/conversion/compat/*`
+  - 要求：仅 Antigravity 分支；对齐 deepFilterThinkingBlocks
+- **A5 Endpoint/路径构造** 🟡（代码对齐，待验证）
+  - 参考：`src/client/gemini-cli/gemini-cli-protocol-client.ts`、`src/providers/core/runtime/gemini-cli-http-provider.ts`
+  - 要求：对齐 Antigravity Tools 最新路径构造
+
+### B. 风控与配额保护（Antigravity only）
+- **B1 账号禁用（disabled/proxy_disabled）持久化** ✅（已对齐）
+  - 参考：`src/providers/core/runtime/http-transport-provider.ts`、`src/providers/auth/oauth-lifecycle.ts`
+  - 要求：仅 Antigravity 分支；invalid_grant/401 触发禁用；quota 已持久化
+- **B2 protected_models 持久化 + 路由影响** 🟡（实现完成，待验证）
+  - 参考：`src/manager/quota/**`、`sharedmodule/llmswitch-core/src/router/virtual-router/**`
+  - 要求：模型级保护与恢复机制
+- **B3 账号级限流** 🟡（实现完成，待验证）
+  - 参考：`src/providers/core/runtime/rate-limit-manager.ts`、`sharedmodule/llmswitch-core/src/router/virtual-router/**`
+  - 要求：引入账号级限流；与 session stickiness 一致
+
+### C. Alias 与模型映射
+- **C1 Alias → model 顺序（走 Hub pipeline）** ✅（已符合）
+  - 参考：`sharedmodule/llmswitch-core/src/router/virtual-router/**`
+  - 要求：不做特殊 provider 映射
+- **C2 模型名规范化（provider 侧配置）** 🟡（进行中）
+  - 参考：`src/providers/core/runtime/gemini-cli-http-provider.ts`
+  - 要求：Provider 不做模型降级/回退；仅允许后缀规范化（-low/-high/-medium/-minimal）；
+    具体业务映射在虚拟路由器层完成
+
+### D. 请求头一致性（Antigravity only）
+- **D1 UA / X-Goog-Api-Client / Client-Metadata** ✅（已对齐）
+  - 参考：`src/providers/auth/antigravity-userinfo-helper.ts`、`src/providers/core/runtime/http-transport-provider.ts`
+  - 要求：对齐 Antigravity Tools 最新版本
+
+### E. project_id 来源（Antigravity only）
+- **E1 token 缺失 project_id → OAuth 生命周期补全** ✅（已对齐）
+  - 参考：`src/providers/auth/oauth-lifecycle.ts`、`src/providers/auth/antigravity-userinfo-helper.ts`
+  - 要求：对齐 Antigravity Tools 最新版本（不随机）
+
+---
+
+## llms-wasm 逐步替换（TS → WASM）迁移任务
+
+> [!important]
+> 本任务基于 `docs/llms-wasm-migration.md`（计划概要）与 `docs/plans/llms-wasm-migration-plan.md`（可执行清单）。
+>
+> 责任边界：Host 只做开关读取/影子分发/指标上报；canonicalization、routing、tools、compat、diff 协议全部在 llmswitch-core。
+
+### W1. 阶段 0：边界与基线（先做）
+- **参考**: `docs/plans/llms-wasm-migration-plan.md#阶段-0边界与基线`
+- **优先级**: 最高
+- **状态**: ✅ 已完成（文档与基线定义完成，下一步进入双加载与开关矩阵）
+- **目标**:
+  - 产出“模块边界清单”（Contract + 归属 + 依赖顺序）
+  - 建立“基线回放集”（可重复、可脱敏、可回放）
+- **任务**:
+  - [x] 产出模块边界清单文档：`docs/llms-wasm-module-boundaries.md`
+  - [x] 定义每个模块的输入/输出 Contract（TypeScript interface 草案）：`docs/llms-wasm-module-boundaries.md`
+  - [x] 明确依赖顺序与替换优先级：`docs/llms-wasm-module-boundaries.md`
+  - [x] 确认 Owner/修复路径（wasm core vs compat adapter）：`docs/llms-wasm-module-boundaries.md`
+  - [x] 设计回放集采样策略（覆盖模型/工具/路由/SSE 典型场景）：`docs/llms-wasm-replay-baseline.md`
+  - [x] 定义回放集存储格式（JSON + 脱敏规则）：`docs/llms-wasm-replay-baseline.md`
+  - [x] 定义 baseline 版本快照字段（TS/WASM/ruleset/compat/sse 版本号）：`docs/llms-wasm-replay-baseline.md`
+
+---
+
+### W2. 阶段 1：双加载与开关矩阵（进行中）
+- **参考**: `docs/plans/llms-wasm-migration-plan.md#阶段-1双加载--开关矩阵`
+- **优先级**: 最高
+- **状态**: 🟡 进行中（已确认方案，开始实现）
+- **目标**:
+  - 在 Host 中实现 WASM & TS 双加载初始化
+  - 实现运行模式开关（`shadow` / `wasm_primary` / `ts_primary` / `split`）
+  - 实现开关优先级矩阵（全局 > 租户 > 路由 > 请求）
+  - 实现影子请求分发（异步、非阻塞）
+- **方案确认**:
+  - WASM 侧已提供 `HubPipeline` 实现（`sharedmodule/llms-wasm/js/hub-pipeline.mjs`）
+  - Host 侧已有 `hubPipelineEngineShadow` 预留字段，需实现影子加载逻辑
+  - 新增 `src/runtime/wasm-runtime/` 模块负责 WASM 运行时加载
+  - 扩展 `src/modules/llmswitch/bridge` 新增 `getHubPipelineCtorForImpl('wasm')` 接口
+- **任务清单**:
+  - [ ] 强制规则：模块必须先验证通过，才能进入“上线对比（shadow）”阶段（按模块顺序执行）
+    - [x] tokenizer：先验证 → 再允许 shadow（已通过 llms-wasm compare：hub-chat-process/tool-filters）
+    - [x] tool canonicalization：先验证 → 再允许 shadow（已通过 llms-wasm compare：tool-filters/tool-governance 样本）
+    - [x] compat profile：先验证 → 再允许 shadow（已通过 llms-wasm compare：compat-request/compat-response）
+    - [x] streaming (SSE)：先验证 → 再允许 shadow（已通过 llms-wasm compare：hub-response/provider-response）
+    - [x] routing：先验证 → 再允许 shadow（已通过 llms-wasm compare：virtual-router）
+    - [x] virtual-router engine-health：先验证 → 再允许 shadow（已通过 llms-wasm native compare：vr_map_provider_error/vr_handle_provider_failure/vr_apply_series_cooldown）
+    - [x] virtual-router routing-policy：先验证 → 再允许 shadow（已补齐 fixtures：multi-provider round_robin / priority-fallback）
+    - [x] provider-response conversion：先验证 → 再允许 shadow（已补齐 fixtures：openai-chat/openai-responses provider response conversion）
+    - [ ] inbound/outbound request shaping：先验证 → 再允许 shadow（下一步：补齐 openai-chat/openai-responses request fixtures，打通 standardized_bridge/response_io）
+    - [x] standardized bridge：先验证 → 再允许 shadow（已补齐 FFI + native roundtrip：ChatEnvelope <-> StandardizedRequest）
+  - [ ] 新建 `src/runtime/wasm-runtime/` 模块结构与入口
+  - [ ] 实现 `WasmRuntime` 类（加载、初始化、生命周期管理）
+  - [ ] 扩展 `src/modules/llmswitch/bridge` 新增 `getHubPipelineCtorForImpl('wasm')`
+  - [ ] 实现 `ensureHubPipelineEngineShadow()` 加载 WASM HubPipeline
+  - [ ] 实现运行模式开关解析（环境变量 `ROUTECODEX_HUB_PIPELINE_IMPL`）
+  - [ ] 实现开关优先级矩阵（全局 > 租户 > 路由 > 请求）
+  - [ ] 实现影子请求分发逻辑（主路 + 影子异步）
+  - [ ] WASM 初始化失败上报（通过 `providerErrorCenter`）
+  - [ ] 验证双加载互不影响（隔离测试）
+  - [x] 在 llmswitch-core CI 新增 wasm-compare job（模块顺序 gating）: `/Users/fanzhang/Documents/github/sharedmodule/.github/workflows/llmswitch-core-ci.yml`
+
 ### 14. CI 基线（PR 必跑）+ 覆盖率增强（从最小集合开始）
 - **位置**: `sharedmodule/.github/workflows/llmswitch-core-ci.yml` + `routecodex/.github/workflows/test.yml` + `jest.config.js`
 - **优先级**: 高
@@ -41,6 +158,28 @@
   - [x]（PR）sharedmodule：修复 `llms-wasm CI` 在 Node 20 下 `.wasm` ESM 导入失败 + 无 config 时的 bootstrap 失败（compare steps 暂时为非阻塞信号，避免 CI 噪音/漏检）：`sharedmodule/.github/workflows/llms-wasm-ci.yml` + `sharedmodule/llms-wasm/scripts/compare-virtual-router.mjs`
   - [ ] CI 测试集 re-enable：`@jsonstudio/llms` 仍停留在 npm `0.6.1172`，因此 release CI 暂不包含依赖新 llmswitch-core 行为的 servertool/sharedmodule 测试（待 llms 发布后再纳入）
   - [ ] 修复当前阻塞“全量 coverage”的单测（`tests/servertool/virtual-router-quota-routing.spec.ts`）或拆分为 nightly
+
+---
+
+### 19. Antigravity 429 冷却与 alias 策略重置（架构一致性修正）
+- **位置**: `src/providers/core/runtime/rate-limit-manager.ts` + `src/providers/core/runtime/base-provider.ts` + `sharedmodule/llmswitch-core/src/router/virtual-router/**`
+- **优先级**: 高
+- **状态**: 🟡 进行中
+- **原因**:
+  - 现有实现存在“模型系列整体移出路由池”的行为（series cooldown/series blacklist），会扩大影响面。
+  - Antigravity alias 设计是默认 sticky，仅在 429/错误时轮转；因此应以 alias 级别冷却与切换为准。
+  - 冷却策略需与路由池一致：**冷却 = 移出路由池**，但不应扩展到整个模型系列。
+  - 429 语义应先触发 quota 更新判断：无 quota → 冷却移出；有 quota → alias 置尾并切换 sticky。
+- **目标**:
+  - 移除 series-level 冷却/黑名单（不再对模型系列整体移出路由池）。
+  - 429 流程改为“先 quota 更新后决策”，只影响当前 alias。
+  - Antigravity alias 维持默认 sticky，出错时轮转到下一 alias。
+- **待落地/进行中**:
+  - [x] Provider 侧移除 series blacklist（`rate-limit-manager.ts`）
+  - [x] 禁用 `virtualRouterSeriesCooldown` 生成与处理（`base-provider.ts` + `engine-health.ts`）
+  - [ ] 429 流程调整为“先 quota 更新后决策”
+  - [ ] 429 后 alias 轮转与 sticky 切换（`engine-selection/alias-selection.ts`）
+  - [ ] 更新/补齐相关测试（`tests/servertool/virtual-router-series-cooldown.spec.ts` 等）
 
 ### 18. llmswitch-core：单测全覆盖 + Golden 回归 + 覆盖率 90%（PR 必跑）
 - **位置**: `sharedmodule/llmswitch-core/tests/**` + `sharedmodule/llmswitch-core/scripts/**` + `sharedmodule/.github/workflows/llmswitch-core-ci.yml`

@@ -23,7 +23,14 @@ interface AntigravityTokenRegistration {
   alias: string;
   tokenFile: string;
   apiBase: string;
+  protectedModels: Set<string>;
 }
+
+type QuotaProtectionConfig = {
+  enabled: boolean;
+  thresholdPercent: number;
+  monitoredModels: Set<string>;
+};
 
 export class QuotaManagerModule implements ManagerModule {
   readonly id = 'quota';
@@ -104,7 +111,8 @@ export class QuotaManagerModule implements ManagerModule {
     this.antigravityTokens.set(cleanAlias, {
       alias: cleanAlias,
       tokenFile: cleanToken,
-      apiBase: cleanBase
+      apiBase: cleanBase,
+      protectedModels: this.antigravityTokens.get(cleanAlias)?.protectedModels ?? new Set<string>()
     });
   }
 
@@ -116,6 +124,22 @@ export class QuotaManagerModule implements ManagerModule {
     if (!aliasId) {
       return;
     }
+    const tokenRegistration = this.antigravityTokens.get(aliasId);
+    const protectedModels =
+      tokenRegistration?.protectedModels ?? new Set<string>();
+    const protectionConfig = this.resolveQuotaProtectionConfig();
+    const nextProtectedModels = this.computeProtectedModels({
+      current: protectedModels,
+      quota,
+      config: protectionConfig
+    });
+    if (tokenRegistration && protectionConfig.enabled) {
+      const updated = this.persistProtectedModels(tokenRegistration.tokenFile, nextProtectedModels);
+      if (updated) {
+        tokenRegistration.protectedModels = nextProtectedModels;
+        this.antigravityTokens.set(aliasId, tokenRegistration);
+      }
+    }
     const now = Date.now();
     const next: Record<string, QuotaRecord> = { ...this.snapshot };
     for (const [modelId, info] of Object.entries(quota.models)) {
@@ -124,6 +148,9 @@ export class QuotaManagerModule implements ManagerModule {
         remainingFraction: Number.isFinite(info.remainingFraction) ? info.remainingFraction : null,
         fetchedAt: quota.fetchedAt
       };
+      if (nextProtectedModels.has(modelId)) {
+        record.remainingFraction = 0;
+      }
       const resetAt = this.computeResetAt(info.resetTimeRaw);
       // Keep resetAt even if it's already in the past so admin UI can inspect drift/staleness.
       // Routing gate still treats `resetAt <= now` as unknown quota and will block entry.
@@ -208,6 +235,123 @@ export class QuotaManagerModule implements ManagerModule {
     }
   }
 
+  private readAntigravityTokenMeta(filePath: string): {
+    disabled: boolean;
+    proxyDisabled: boolean;
+    protectedModels: Set<string>;
+  } {
+    try {
+      const raw = fs.readFileSync(filePath, 'utf8');
+      const parsed = raw.trim() ? JSON.parse(raw) : {};
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return { disabled: false, proxyDisabled: false, protectedModels: new Set() };
+      }
+      const token = parsed as Record<string, unknown>;
+      const disabled = token.disabled === true;
+      const proxyDisabled = token.proxy_disabled === true || token.proxyDisabled === true;
+      const list = token.protected_models ?? token.protectedModels;
+      const models = Array.isArray(list)
+        ? list
+            .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
+            .filter((entry) => entry.length > 0)
+        : [];
+      return { disabled, proxyDisabled, protectedModels: new Set(models) };
+    } catch {
+      return { disabled: false, proxyDisabled: false, protectedModels: new Set() };
+    }
+  }
+
+  private resolveQuotaProtectionConfig(): QuotaProtectionConfig {
+    const enabledRaw =
+      String(process.env.ROUTECODEX_ANTIGRAVITY_QUOTA_PROTECTION || process.env.RCC_ANTIGRAVITY_QUOTA_PROTECTION || '')
+        .trim()
+        .toLowerCase();
+    const enabled = enabledRaw === '1' || enabledRaw === 'true' || enabledRaw === 'yes';
+    const thresholdRaw = String(
+      process.env.ROUTECODEX_ANTIGRAVITY_QUOTA_PROTECT_THRESHOLD ||
+      process.env.RCC_ANTIGRAVITY_QUOTA_PROTECT_THRESHOLD ||
+      ''
+    ).trim();
+    const thresholdPercent = Number.isFinite(Number(thresholdRaw)) ? Number(thresholdRaw) : 10;
+    const defaultModels = [
+      'claude-sonnet-4-5',
+      'gemini-3-pro-high',
+      'gemini-3-flash',
+      'gemini-3-pro-image'
+    ];
+    const modelsRaw =
+      String(process.env.ROUTECODEX_ANTIGRAVITY_QUOTA_PROTECT_MODELS || process.env.RCC_ANTIGRAVITY_QUOTA_PROTECT_MODELS || '')
+        .trim();
+    const list = modelsRaw
+      ? modelsRaw.split(',').map((m) => m.trim()).filter(Boolean)
+      : defaultModels;
+    return {
+      enabled,
+      thresholdPercent: Number.isFinite(thresholdPercent) && thresholdPercent > 0 ? thresholdPercent : 10,
+      monitoredModels: new Set(list)
+    };
+  }
+
+  private computeProtectedModels(options: {
+    current: Set<string>;
+    quota: AntigravityQuotaSnapshot;
+    config: QuotaProtectionConfig;
+  }): Set<string> {
+    const { current, quota, config } = options;
+    if (!config.enabled) {
+      return new Set(current);
+    }
+    const next = new Set<string>();
+    const monitored = config.monitoredModels;
+    for (const entry of current) {
+      if (!monitored.has(entry)) {
+        next.add(entry);
+      }
+    }
+    for (const modelId of monitored) {
+      const info = quota.models[modelId];
+      if (!info) {
+        continue;
+      }
+      const fraction = Number.isFinite(info.remainingFraction) ? info.remainingFraction : NaN;
+      if (!Number.isFinite(fraction)) {
+        continue;
+      }
+      const percentage = fraction > 1 ? fraction : fraction * 100;
+      if (percentage <= config.thresholdPercent) {
+        next.add(modelId);
+      } else {
+        next.delete(modelId);
+      }
+    }
+    return next;
+  }
+
+  private persistProtectedModels(tokenFile: string, models: Set<string>): boolean {
+    try {
+      const raw = fs.readFileSync(tokenFile, 'utf8');
+      const parsed = raw.trim() ? JSON.parse(raw) : {};
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return false;
+      }
+      const root = parsed as Record<string, unknown>;
+      const next = Array.from(models);
+      next.sort();
+      const existing = Array.isArray(root.protected_models)
+        ? (root.protected_models as unknown[]).map((m) => String(m)).sort()
+        : [];
+      const changed = next.length !== existing.length || next.some((value, idx) => value !== existing[idx]);
+      if (!changed) {
+        return false;
+      }
+      root.protected_models = next;
+      fs.writeFileSync(tokenFile, `${JSON.stringify(root, null, 2)}\n`, 'utf8');
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   private async refreshAllAntigravityQuotas(): Promise<void> {
     await this.syncAntigravityTokensFromDisk();
     if (this.antigravityTokens.size === 0) {
@@ -287,10 +431,15 @@ export class QuotaManagerModule implements ManagerModule {
       if (legacyAlias) {
         legacyAliases.push(legacyAlias);
       }
+      const tokenMeta = this.readAntigravityTokenMeta(match.filePath);
+      if (tokenMeta.disabled || tokenMeta.proxyDisabled) {
+        continue;
+      }
       next.set(alias, {
         alias,
         tokenFile: match.filePath,
-        apiBase: base
+        apiBase: base,
+        protectedModels: tokenMeta.protectedModels
       });
     }
 
@@ -481,4 +630,3 @@ export class QuotaManagerModule implements ManagerModule {
     }
   }
 }
-

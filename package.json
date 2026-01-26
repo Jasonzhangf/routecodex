@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.89.1439",
+  "version": "0.89.1473",
   "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support",
   "type": "module",
   "main": "dist/index.js",
@@ -148,7 +148,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.65.0",
-    "@jsonstudio/llms": "^0.6.1172",
+    "@jsonstudio/llms": "^0.6.1354",
     "@jsonstudio/rcc": "^0.89.555",
     "@lmstudio/sdk": "^1.5.0",
     "@radix-ui/react-switch": "^1.2.6",

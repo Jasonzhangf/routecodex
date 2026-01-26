@@ -9,7 +9,7 @@ import type {
 import type { StandardizedRequest } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.js';
 
 describe('Virtual router series cooldown', () => {
-  it('blacklists an entire model series after repeated 429s', () => {
+  it('applies provider cooldown after repeated 429s', () => {
     const manager = new RateLimitBackoffManager([10, 20], 50);
     const bucket = 'antigravity.2-jasonqueque.gemini-3-pro-high';
     const model = 'gemini-3-pro-high';
@@ -22,7 +22,7 @@ describe('Virtual router series cooldown', () => {
 
     const error = manager.buildThrottleError({ providerKey: bucket, model });
     expect(error).toBeInstanceOf(RateLimitCooldownError);
-    expect(error?.message).toContain('series');
+    expect(error?.message).toContain('cooling down');
   });
 });
 
@@ -73,7 +73,7 @@ describe('VirtualRouterEngine series cooldown handling', () => {
     classifier: {}
   };
 
-  it('blacklists all keys in the same series under one alias', () => {
+  it('does not propagate cooldown to sibling aliases when details are absent', () => {
     const engine = new VirtualRouterEngine();
     engine.initialize(baseConfig);
     const event: ProviderErrorEvent = {
@@ -85,26 +85,18 @@ describe('VirtualRouterEngine series cooldown handling', () => {
         providerKey: providerA
       },
       timestamp: Date.now(),
-      details: {
-        virtualRouterSeriesCooldown: {
-          providerId: 'antigravity.alias1',
-          providerKey: providerA,
-          model: 'gemini-3-pro-high',
-          series: 'gemini-pro',
-          cooldownMs: 60_000
-        }
-      }
+      details: {}
     };
 
     engine.handleProviderError(event);
 
     const status = engine.getStatus().health;
     expect(status.find((entry) => entry.providerKey === providerA)?.state).toBe('tripped');
-    expect(status.find((entry) => entry.providerKey === providerA2)?.state).toBe('tripped');
+    expect(status.find((entry) => entry.providerKey === providerA2)?.state).toBe('healthy');
     expect(status.find((entry) => entry.providerKey === providerB)?.state).not.toBe('tripped');
   });
 
-  it('applies series cooldown even when quotaView is injected', () => {
+  it('keeps all aliases healthy with quotaView when details are absent', () => {
     const quotaView = (providerKey: string) => ({ providerKey, inPool: true });
     const engine = new VirtualRouterEngine({ quotaView });
     engine.initialize(baseConfig);
@@ -117,22 +109,14 @@ describe('VirtualRouterEngine series cooldown handling', () => {
         providerKey: providerA
       },
       timestamp: Date.now(),
-      details: {
-        virtualRouterSeriesCooldown: {
-          providerId: 'antigravity.alias1',
-          providerKey: providerA,
-          model: 'gemini-3-pro-high',
-          series: 'gemini-pro',
-          cooldownMs: 60_000
-        }
-      }
+      details: {}
     };
 
     engine.handleProviderError(event);
 
     const status = engine.getStatus().health;
-    expect(status.find((entry) => entry.providerKey === providerA)?.state).toBe('tripped');
-    expect(status.find((entry) => entry.providerKey === providerA2)?.state).toBe('tripped');
+    expect(status.find((entry) => entry.providerKey === providerA)?.state).toBe('healthy');
+    expect(status.find((entry) => entry.providerKey === providerA2)?.state).toBe('healthy');
     expect(status.find((entry) => entry.providerKey === providerB)?.state).not.toBe('tripped');
   });
 });

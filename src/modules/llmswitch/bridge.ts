@@ -46,11 +46,20 @@ function isEngineEnabled(): boolean {
   return raw === '1' || raw === 'true' || raw === 'yes';
 }
 
+function isWasmEnabled(): boolean {
+  // WASM is backed by @jsonstudio/llms-engine optional dependency.
+  // We allow enabling without requiring ROUTECODEX_LLMS_ENGINE_ENABLE.
+  const raw = String(process.env.ROUTECODEX_LLMS_WASM_ENABLE || '').trim().toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'yes';
+}
+
 function getEnginePrefixes(): string[] {
   return parsePrefixList(process.env.ROUTECODEX_LLMS_ENGINE_PREFIXES);
 }
 
 function resolveImplForSubpath(subpath: string): LlmsImpl {
+  // Explicit override for HubPipeline via ROUTECODEX_HUB_PIPELINE_IMPL is handled in http-server.
+
   if (!isEngineEnabled()) {
     return 'ts';
   }
@@ -162,7 +171,8 @@ type ProviderResponseConversionModule = {
 
 const cachedConvertProviderResponseByImpl: Record<LlmsImpl, ((options: AnyRecord) => Promise<AnyRecord>) | null> = {
   ts: null,
-  engine: null
+  engine: null,
+  wasm: null
 };
 
 const llmsEngineShadowConfig = resolveLlmsEngineShadowConfig();
@@ -552,7 +562,8 @@ type HubPipelineCtorAny = new (config: AnyRecord) => AnyRecord;
 
 const cachedHubPipelineCtorByImpl: Record<LlmsImpl, HubPipelineCtorAny | null> = {
   ts: null,
-  engine: null
+  engine: null,
+  wasm: null
 };
 
 /**
@@ -573,10 +584,14 @@ export async function getHubPipelineCtor(): Promise<HubPipelineCtorAny> {
 
 export async function getHubPipelineCtorForImpl(impl: LlmsImpl): Promise<HubPipelineCtorAny> {
   if (!cachedHubPipelineCtorByImpl[impl]) {
-    const mod = await importCoreDist<HubPipelineModule>('conversion/hub/pipeline/hub-pipeline', impl);
+    // NOTE:
+    // - TS/engine: load from llmswitch-core dist modules.
+    // - WASM: load from @jsonstudio/llms-engine's ESM entrypoints.
+    const subpath = impl === 'wasm' ? 'hub-pipeline' : 'conversion/hub/pipeline/hub-pipeline';
+    const mod = await importCoreDist<HubPipelineModule>(subpath, impl);
     const Ctor = mod.HubPipeline;
     if (typeof Ctor !== 'function') {
-      throw new Error('[llmswitch-bridge] HubPipeline constructor not available');
+      throw new Error(`[llmswitch-bridge] HubPipeline constructor not available (impl=${impl}, subpath=${subpath})`);
     }
     cachedHubPipelineCtorByImpl[impl] = Ctor;
   }

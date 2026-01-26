@@ -50,19 +50,17 @@ export class GeminiCLIProtocolClient implements HttpProtocolClient<ProtocolReque
     if (typeof project === 'string' && project.length > 0) {
       body.project = project;
     }
-    // gcli2api antigravity alignment:
-    // - requestId/requestType are HTTP headers, not JSON fields
-    // - userAgent is not sent in the JSON wrapper
-    if (!isAntigravity) {
-      if (typeof requestId === 'string' && requestId.length > 0) {
-        body.requestId = requestId;
-      }
-      if (typeof userAgent === 'string' && userAgent.length > 0) {
-        body.userAgent = userAgent;
-      }
-      if (typeof requestType === 'string' && requestType.length > 0) {
-        body.requestType = requestType;
-      }
+    // opencode-antigravity-auth alignment:
+    // - antigravity keeps requestId/userAgent/requestType in JSON wrapper
+    // - headers may still carry the same values
+    if (typeof requestId === 'string' && requestId.length > 0) {
+      body.requestId = requestId;
+    }
+    if (typeof userAgent === 'string' && userAgent.length > 0) {
+      body.userAgent = userAgent;
+    }
+    if (typeof requestType === 'string' && requestType.length > 0) {
+      body.requestType = requestType;
     }
 
     // 其余 Gemini Chat 兼容字段（contents/systemInstruction/generationConfig/tools/metadata 等）
@@ -86,7 +84,12 @@ export class GeminiCLIProtocolClient implements HttpProtocolClient<ProtocolReque
   resolveEndpoint(request: ProtocolRequestPayload, _defaultEndpoint: string): string {
     const payload = this.extractPayload(request);
     const action = (payload.action as string) || 'generateContent';
-    const endpoint = `/v1internal:${action}`;
+    const defaultEndpoint = typeof _defaultEndpoint === 'string' ? _defaultEndpoint.trim() : '';
+    const base =
+      defaultEndpoint && defaultEndpoint.includes(':')
+        ? defaultEndpoint.replace(/:[^/?]+/, '')
+        : '/v1internal';
+    const endpoint = `${base}:${action}`;
 
     // 根据 action 返回对应的 endpoint
     // generateContent, streamGenerateContent, countTokens
@@ -117,12 +120,11 @@ export class GeminiCLIProtocolClient implements HttpProtocolClient<ProtocolReque
 
     const payload = this.extractPayload(_request);
     const isAntigravity = typeof payload.userAgent === 'string' && payload.userAgent.trim() === 'antigravity';
-
     if (isAntigravity) {
-      // gcli2api antigravity alignment: do not send the Gemini CLI header triplet.
+      // Antigravity Tools alignment: do not send Gemini CLI header triplet.
       deleteHeaderInsensitive('x-goog-api-client');
       deleteHeaderInsensitive('client-metadata');
-    } else {
+    } else if (!isAntigravity) {
       // gcli2api / opencode alignment: keep a stable header triplet for Gemini CLI.
       // Always override inbound UA to avoid leaking host/client fingerprints into upstream.
       normalized['User-Agent'] = 'google-api-nodejs-client/9.15.1';

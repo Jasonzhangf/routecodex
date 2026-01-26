@@ -19,7 +19,7 @@ import {
 } from './gemini-cli-userinfo-helper.js';
 import { parseTokenSequenceFromPath } from './token-scanner/index.js';
 import { logOAuthDebug } from './oauth-logger.js';
-import { fetchAntigravityProjectId } from './antigravity-userinfo-helper.js';
+import { fetchAntigravityProjectId, ensureAntigravityTokenProjectMetadata } from './antigravity-userinfo-helper.js';
 import { HTTP_PROTOCOLS, LOCAL_HOSTS } from '../../constants/index.js';
 
 type EnsureOpts = {
@@ -167,9 +167,72 @@ function hasNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
+function normalizeAntigravityAccountToken(raw: UnknownObject): StoredOAuthToken | null {
+  const token = (raw as { token?: unknown }).token;
+  if (!token || typeof token !== 'object') {
+    return null;
+  }
+  const tokenObj = token as Record<string, unknown>;
+  const access = tokenObj.access_token;
+  if (typeof access !== 'string' || !access.trim()) {
+    return null;
+  }
+  const out: StoredOAuthToken = { ...tokenObj };
+  const root = raw as Record<string, unknown>;
+  if (typeof root.disabled === 'boolean') {
+    (out as Record<string, unknown>).disabled = root.disabled;
+  }
+  if (typeof root.disabled_reason === 'string') {
+    (out as Record<string, unknown>).disabled_reason = root.disabled_reason;
+  }
+  if (typeof root.disabled_at === 'number' || typeof root.disabled_at === 'string') {
+    (out as Record<string, unknown>).disabled_at = root.disabled_at;
+  }
+  if (typeof root.proxy_disabled === 'boolean') {
+    (out as Record<string, unknown>).proxy_disabled = root.proxy_disabled;
+  }
+  if (typeof root.proxyDisabled === 'boolean') {
+    (out as Record<string, unknown>).proxyDisabled = root.proxyDisabled;
+  }
+  if (typeof root.proxy_disabled_reason === 'string') {
+    (out as Record<string, unknown>).proxy_disabled_reason = root.proxy_disabled_reason;
+  }
+  if (typeof root.proxy_disabled_at === 'number' || typeof root.proxy_disabled_at === 'string') {
+    (out as Record<string, unknown>).proxy_disabled_at = root.proxy_disabled_at;
+  }
+  if (Array.isArray(root.protected_models)) {
+    (out as Record<string, unknown>).protected_models = root.protected_models;
+  }
+  if (Array.isArray(root.protectedModels)) {
+    (out as Record<string, unknown>).protectedModels = root.protectedModels;
+  }
+  if (!hasNonEmptyString((out as Record<string, unknown>).project_id as unknown) && hasNonEmptyString(root.project_id as unknown)) {
+    (out as Record<string, unknown>).project_id = String(root.project_id);
+  }
+  if (!hasNonEmptyString((out as Record<string, unknown>).projectId as unknown) && hasNonEmptyString(root.projectId as unknown)) {
+    (out as Record<string, unknown>).projectId = String(root.projectId);
+  }
+  if (!Array.isArray((out as { projects?: unknown }).projects) && Array.isArray((root as { projects?: unknown }).projects)) {
+    (out as { projects?: unknown }).projects = (root as { projects?: unknown }).projects;
+  }
+  if (!hasNonEmptyString((out as Record<string, unknown>).email as unknown) && hasNonEmptyString(root.email as unknown)) {
+    (out as Record<string, unknown>).email = String(root.email);
+  }
+  const expiryTimestamp = tokenObj.expiry_timestamp;
+  if (!hasNonEmptyString(out.expires_at as unknown) && typeof expiryTimestamp === 'number') {
+    (out as { expires_at?: number }).expires_at =
+      expiryTimestamp > 10_000_000_000 ? expiryTimestamp : expiryTimestamp * 1000;
+  }
+  return out;
+}
+
 function sanitizeToken(token: UnknownObject | null): StoredOAuthToken | null {
   if (!token || typeof token !== 'object') {
     return null;
+  }
+  const normalized = normalizeAntigravityAccountToken(token);
+  if (normalized) {
+    return normalized;
   }
   const copy = { ...token } as StoredOAuthToken;
   if (!hasNonEmptyString(copy.apiKey) && hasNonEmptyString(copy.api_key)) {
@@ -184,6 +247,30 @@ async function readTokenFromFile(file: string): Promise<StoredOAuthToken | null>
     return sanitizeToken(JSON.parse(txt) as UnknownObject);
   } catch {
     return null;
+  }
+}
+
+async function markAntigravityTokenDisabled(tokenFilePath: string, reason?: string): Promise<void> {
+  if (!tokenFilePath) {
+    return;
+  }
+  try {
+    const txt = await fs.readFile(tokenFilePath, 'utf-8');
+    const parsed = txt.trim() ? JSON.parse(txt) : null;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return;
+    }
+    const obj = parsed as Record<string, unknown>;
+    obj.disabled = true;
+    obj.disabled_reason = typeof reason === 'string' && reason.trim() ? reason.trim() : obj.disabled_reason ?? 'invalid_grant';
+    obj.disabled_at = Math.floor(Date.now() / 1000);
+    await fs.writeFile(tokenFilePath, `${JSON.stringify(obj, null, 2)}\n`, 'utf-8');
+  } catch (error) {
+    logOAuthDebug(
+      `[OAuth] Antigravity: failed to mark token disabled for ${tokenFilePath} - ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
   }
 }
 
@@ -308,6 +395,12 @@ function evaluateTokenState(token: StoredOAuthToken | null, providerType: string
   const hasAccess = hasAccessToken(token);
   const expiresAt = getExpiresAt(token);
   const isExpiredOrNear = expiresAt !== null && Date.now() >= (expiresAt - TOKEN_REFRESH_SKEW_MS);
+  const isDisabled =
+    token &&
+    typeof token === 'object' &&
+    ((token as { disabled?: unknown }).disabled === true ||
+      (token as { proxy_disabled?: unknown }).proxy_disabled === true ||
+      (token as { proxyDisabled?: unknown }).proxyDisabled === true);
   let validAccess: boolean;
   const pt = providerType.toLowerCase();
   if (pt === 'iflow') {
@@ -316,6 +409,9 @@ function evaluateTokenState(token: StoredOAuthToken | null, providerType: string
     validAccess = (hasApiKey || hasAccess) && !isExpiredOrNear;
   } else {
     validAccess = (hasApiKey || hasAccess) && !isExpiredOrNear;
+  }
+  if (pt === 'antigravity' && isDisabled) {
+    validAccess = false;
   }
 
   return { hasApiKey, hasAccess, expiresAt, isExpiredOrNear, validAccess };
@@ -601,6 +697,10 @@ async function maybeEnrichToken(providerType: string, tokenData: UnknownObject):
       if (projectId) {
         merged.project_id = projectId;
       }
+      // Clear disabled flag on successful OAuth refresh to re-enable account.
+      (merged as Record<string, unknown>).disabled = false;
+      (merged as Record<string, unknown>).disabled_reason = null;
+      (merged as Record<string, unknown>).disabled_at = null;
       return merged;
     } catch (error) {
       console.error(`[OAuth] Antigravity: failed to fetch metadata - ${error instanceof Error ? error.message : String(error)}`);
@@ -853,6 +953,19 @@ export async function ensureValidOAuthToken(
     let token = await readTokenFromFile(tokenFilePath);
     const hadExistingTokenFile = token !== null;
 
+    // Antigravity: always attempt to refresh project_id from token file (no synthetic fallback).
+    if (providerType === 'antigravity' && token) {
+      try {
+        const ensured = await ensureAntigravityTokenProjectMetadata(tokenFilePath, undefined, { force: true });
+        if (ensured) {
+          token = await readTokenFromFile(tokenFilePath);
+        }
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error(`[OAuth] Antigravity: failed to ensure project_id metadata - ${msg}`);
+      }
+    }
+
     // Gemini CLI family: if existing token lacks project metadata, try to enrich it without
     // forcing a full OAuth flow. Use current access_token to fetch userinfo/projects and write back.
     if (isGeminiCliFamily(providerType) && token) {
@@ -1010,6 +1123,10 @@ export async function handleUpstreamInvalidOAuthToken(
 
     if (!looksInvalid) {
       return false;
+    }
+    if (pt === 'antigravity') {
+      const tokenFilePath = resolveTokenFilePath(auth, providerType);
+      await markAntigravityTokenDisabled(tokenFilePath, msg);
     }
     const opts: EnsureOpts = {
       forceReacquireIfRefreshFails: true,

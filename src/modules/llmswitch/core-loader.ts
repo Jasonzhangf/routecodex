@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 
-export type LlmsImpl = 'ts' | 'engine';
+export type LlmsImpl = 'ts' | 'engine' | 'wasm';
 
 const PACKAGE_CANDIDATES_BY_IMPL: Record<LlmsImpl, string[]> = {
   ts: [
@@ -11,12 +11,19 @@ const PACKAGE_CANDIDATES_BY_IMPL: Record<LlmsImpl, string[]> = {
   ],
   engine: [
     path.join('node_modules', '@jsonstudio', 'llms-engine')
+  ],
+  wasm: [
+    // NOTE: llms-wasm is published under @jsonstudio/llms-engine.
+    // This alias keeps host-side code readable.
+    path.join('node_modules', '@jsonstudio', 'llms-engine')
   ]
 };
 
 const corePackageDirByImpl: Record<LlmsImpl, string | null> = {
   ts: null,
   engine: null
+  ,
+  wasm: null
 };
 
 function resolveCorePackageDir(impl: LlmsImpl): string {
@@ -47,8 +54,17 @@ function resolveCorePackageDir(impl: LlmsImpl): string {
 
 function resolveCoreDistPath(subpath: string, impl: LlmsImpl): string {
   const clean = subpath.replace(/^\/*/, '').replace(/\.js$/i, '');
-  const distDir = path.join(resolveCorePackageDir(impl), 'dist');
-  const candidate = path.join(distDir, `${clean}.js`);
+  const baseDir = resolveCorePackageDir(impl);
+  const distDir = path.join(baseDir, 'dist');
+
+  // NOTE:
+  // - TS / engine use dist/*.js modules.
+  // - WASM package (@jsonstudio/llms-engine) exposes entrypoints under js/*.js.
+  const candidate =
+    impl === 'wasm'
+      ? path.join(baseDir, 'js', `${clean}.mjs`)
+      : path.join(distDir, `${clean}.js`);
+
   if (!fs.existsSync(candidate)) {
     throw new Error(`[llmswitch-core-loader] 未找到 ${candidate}，请确认对应核心库包含该模块。`);
   }
