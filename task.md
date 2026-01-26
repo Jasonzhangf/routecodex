@@ -172,6 +172,12 @@
 - **覆盖率**: `compat_pipeline.rs` 模块的行覆盖率为 36.58% (之前为 37.38%)，整体行覆盖率略降至 52.70%。
 - **下一步**: 继续关注 `response_io.rs` 等低覆盖模块。
 
+### W2 验证记录（2026-01-26 - response_io 阶段性完成）
+- **完成项**: 新增 `responses-explicit-output-text`、`responses-status-in-progress`、`responses-status-cancelled`、`responses-status-failed`、`responses-finish-reason-metadata`、`responses-tool-call-output`、`responses-reasoning-output`、`anthropic-messages-tool-use`、`gemini-chat-basic` 等 9 个 `response_io` 相关的 fixtures 和测试。
+- **测试结果**: 所有 `ts_fixtures_compare` 测试通过。
+- **覆盖率**: `response_io.rs` 模块的行覆盖率为 68.50%（之前为 39.88%），整体行覆盖率提升到 54.72%。
+- **下一步**: 继续关注 `standardized_bridge.rs`（51.06%）和 `token_estimator.rs`（46.81%）等低覆盖模块。
+
 ### 14. CI 基线（PR 必跑）+ 覆盖率增强（从最小集合开始）
 - **位置**: `sharedmodule/.github/workflows/llmswitch-core-ci.yml` + `routecodex/.github/workflows/test.yml` + `jest.config.js`
 - **优先级**: 高
