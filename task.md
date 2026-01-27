@@ -183,6 +183,17 @@
   - lib.rs：lines 42.23%
   - compat_pipeline.rs：lines 59.96%
 
+#### W2 验证记录（2026-01-27 - vr_apply_series_cooldown 覆盖增强）
+- **目的**：增强系列冷却逻辑覆盖率（`vr_apply_series_cooldown` / `extract_series_cooldown_detail` / `resolve_series_cooldown_targets`）。
+- **变更**：
+  - 新增 `ts_fixtures_series_cooldown_gemini_flash` 测试用例，验证 gemini-flash 系列冷却
+  - 扩充 `virtual-router-fixtures.json` 的 `series_cooldown` 部分，添加 gemini-flash 测试用例
+  - 新增 `series-cooldown-test-fixture.json` fixture 文件，提供正确的 `details.virtualRouterSeriesCooldown` 结构
+- **测试**：`cargo test --test ts_fixtures_compare` 通过（27 passed）。
+- **覆盖率（clean 后）**：
+  - TOTAL：lines **62.81%** / functions **61.50%** / regions **62.30%**
+  - lib.rs：lines **55.00%**（从 50.38% 提升）
+
 #### W2 验证记录（2026-01-27 - vr_bootstrap_config 错误路径覆盖）
 - **目的**：提高 `vr_bootstrap_config` 的错误分支覆盖（invalid JSON / missing providers / missing routing）。
 - **测试**：`cargo test --test ts_fixtures_compare` 通过（25 passed）。
