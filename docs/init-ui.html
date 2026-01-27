@@ -1,0 +1,763 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>RouteCodex Init</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      :root {
+        --bg: #0a0e1c;
+        --panel: rgba(255, 255, 255, 0.06);
+        --panel-2: rgba(255, 255, 255, 0.03);
+        --border: rgba(255, 255, 255, 0.08);
+        --text: rgba(255, 255, 255, 0.92);
+        --muted: rgba(255, 255, 255, 0.6);
+        --accent: #67d1ff;
+        --accent-2: #49f1a6;
+        --warn: #ffb347;
+        --err: #ff6b6b;
+        --ok: #4cd964;
+        --radius: 14px;
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        font-family: "Space Grotesk", "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+        background: radial-gradient(circle at 20% 0%, #18213e 0%, var(--bg) 45%, #06070f 100%);
+        color: var(--text);
+      }
+
+      .container {
+        max-width: 1200px;
+        margin: 24px auto 60px;
+        padding: 0 18px;
+      }
+
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+        margin-bottom: 18px;
+      }
+
+      .title h1 { margin: 0; font-size: 18px; letter-spacing: 0.3px; }
+      .title p { margin: 4px 0 0; font-size: 12px; color: var(--muted); }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        padding: 4px 10px;
+        font-size: 12px;
+        color: var(--muted);
+        background: rgba(255,255,255,0.02);
+      }
+
+      .steps {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 18px;
+      }
+
+      .step {
+        border: 1px solid var(--border);
+        padding: 10px 14px;
+        border-radius: 999px;
+        font-size: 12px;
+        color: var(--muted);
+        background: rgba(255,255,255,0.03);
+      }
+
+      .step.active {
+        color: #06101a;
+        background: linear-gradient(120deg, var(--accent), var(--accent-2));
+        border-color: transparent;
+        font-weight: 600;
+      }
+
+      .card {
+        border: 1px solid var(--border);
+        background: linear-gradient(180deg, var(--panel), var(--panel-2));
+        border-radius: var(--radius);
+        padding: 16px;
+        box-shadow: 0 14px 30px rgba(0,0,0,0.35);
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        gap: 14px;
+      }
+
+      .provider-card {
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 12px;
+        background: rgba(9,12,24,0.7);
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      .provider-card h3 { margin: 0; font-size: 14px; }
+      .provider-card p { margin: 0; font-size: 12px; color: var(--muted); }
+      .provider-meta { font-size: 11px; color: var(--muted); }
+
+      .button {
+        border: 1px solid var(--border);
+        background: rgba(255,255,255,0.05);
+        color: var(--text);
+        padding: 8px 12px;
+        border-radius: 10px;
+        font-size: 12px;
+        cursor: pointer;
+      }
+
+      .button.primary {
+        border: none;
+        background: linear-gradient(120deg, var(--accent), var(--accent-2));
+        color: #07111a;
+        font-weight: 600;
+      }
+
+      .button.ghost { background: transparent; }
+      .button.warn { border-color: rgba(255,179,71,0.5); color: var(--warn); }
+
+      .row {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 10px;
+      }
+
+      label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 6px; }
+      input, select, textarea {
+        width: 100%;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: rgba(0,0,0,0.28);
+        color: var(--text);
+        padding: 8px 10px;
+        font-size: 12px;
+      }
+
+      textarea { min-height: 72px; }
+
+      .section-title {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 12px;
+      }
+
+      .muted { color: var(--muted); font-size: 12px; }
+      .status { font-size: 12px; color: var(--muted); }
+      .status.ok { color: var(--ok); }
+      .status.warn { color: var(--warn); }
+      .status.err { color: var(--err); }
+
+      .hidden { display: none; }
+
+      .targets { display: grid; gap: 10px; }
+      .target-row {
+        display: grid;
+        grid-template-columns: 1.4fr 1fr 0.6fr auto;
+        gap: 8px;
+        align-items: center;
+      }
+      .target-row button { height: 34px; }
+
+      .footer {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        margin-top: 18px;
+      }
+
+      .toast {
+        position: fixed;
+        right: 14px;
+        bottom: 14px;
+        max-width: 520px;
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: rgba(20,20,20,0.9);
+        color: var(--text);
+        font-size: 12px;
+        display: none;
+        z-index: 9999;
+        white-space: pre-wrap;
+      }
+      .toast.show { display: block; }
+      .toast.ok { border-color: rgba(38,200,120,0.5); }
+      .toast.err { border-color: rgba(255,90,90,0.55); }
+
+      @media (max-width: 720px) {
+        .target-row { grid-template-columns: 1fr; }
+        .footer { flex-direction: column; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <div class="title">
+          <h1>RouteCodex Init</h1>
+          <p>Guided provider setup + routing configuration</p>
+        </div>
+        <div class="pill" id="configPathPill">Loading...</div>
+      </header>
+
+      <div class="steps">
+        <div class="step active" id="stepIndicatorProviders">1 · Providers</div>
+        <div class="step" id="stepIndicatorRouting">2 · Routing</div>
+      </div>
+
+      <section id="stepProviders" class="card">
+        <div class="section-title">
+          <div>
+            <strong>Providers</strong>
+            <div class="muted">Select providers, add OAuth aliases or API keys.</div>
+          </div>
+          <div class="status" id="camoufoxStatus"></div>
+        </div>
+        <div class="grid" id="providerCatalog"></div>
+        <div id="configuredProviders" style="margin-top:16px;"></div>
+      </section>
+
+      <section id="stepRouting" class="card hidden" style="margin-top:18px;">
+        <div class="section-title">
+          <div>
+            <strong>Routing Pools</strong>
+            <div class="muted">Each pool defaults to one empty target. Default route is required.</div>
+          </div>
+        </div>
+        <div class="row" style="margin-bottom:12px;">
+          <div>
+            <label>Server Host</label>
+            <input id="serverHostInput" placeholder="127.0.0.1" />
+          </div>
+          <div>
+            <label>Server Port</label>
+            <input id="serverPortInput" placeholder="5506" />
+          </div>
+        </div>
+        <div id="routingPools"></div>
+      </section>
+
+      <div class="footer">
+        <button class="button" id="backBtn">Back</button>
+        <div style="display:flex; gap:10px;">
+          <button class="button" id="nextBtn">Next</button>
+          <button class="button primary hidden" id="saveBtn">Save Config</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script>
+      const state = {
+        status: null,
+        providersCatalog: [],
+        configuredProviders: [],
+        routing: {},
+        step: 0
+      };
+
+      const qs = (id) => document.getElementById(id);
+
+      function toast(msg, ok = true) {
+        const el = qs('toast');
+        el.textContent = msg;
+        el.className = `toast show ${ok ? 'ok' : 'err'}`;
+        setTimeout(() => { el.className = 'toast'; }, 4200);
+      }
+
+      async function fetchJson(url, options) {
+        const res = await fetch(url, options);
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const message = body?.error?.message || `HTTP ${res.status}`;
+          throw new Error(message);
+        }
+        return body;
+      }
+
+      function isOauthProvider(providerId) {
+        return ['iflow', 'qwen', 'antigravity', 'gemini-cli'].includes(providerId);
+      }
+
+      function isAntigravityFamily(providerId) {
+        return providerId === 'antigravity' || providerId === 'gemini-cli';
+      }
+
+      function buildProviderEntryId(providerId, alias, index) {
+        if (isAntigravityFamily(providerId)) {
+          return `${providerId}.${alias}`;
+        }
+        if (!alias) {
+          return `${providerId}-${index + 1}`;
+        }
+        return `${providerId}-${alias}`;
+      }
+
+      function defaultAliasFromEmail(email) {
+        if (!email) return '';
+        const prefix = email.split('@')[0] || '';
+        return prefix.replace(/\./g, '').replace(/[^A-Za-z0-9]/g, '');
+      }
+
+      function renderCatalog() {
+        const host = qs('providerCatalog');
+        host.innerHTML = '';
+        state.providersCatalog.forEach((p) => {
+          const added = state.configuredProviders.some((c) => c.id === p.id);
+          const card = document.createElement('div');
+          card.className = 'provider-card';
+          card.innerHTML = `
+            <div>
+              <h3>${p.label || p.id}</h3>
+              <p>${p.description || ''}</p>
+            </div>
+            <div class="provider-meta">Auth: ${p.authType || 'unknown'} · Models: ${p.models?.length || 0}</div>
+            <button class="button ${added ? 'ghost' : 'primary'}" ${added ? 'disabled' : ''}>${added ? 'Added' : 'Add provider'}</button>
+          `;
+          card.querySelector('button').addEventListener('click', () => {
+            if (added) return;
+            state.configuredProviders.push({
+              id: p.id,
+              label: p.label || p.id,
+              authType: p.authType,
+              models: p.models || [],
+              template: p.template || null,
+              entries: []
+            });
+            renderCatalog();
+            renderConfiguredProviders();
+          });
+          host.appendChild(card);
+        });
+      }
+
+      function renderConfiguredProviders() {
+        const host = qs('configuredProviders');
+        host.innerHTML = '';
+        if (!state.configuredProviders.length) {
+          host.innerHTML = '<div class="muted">No providers selected yet.</div>';
+          return;
+        }
+        state.configuredProviders.forEach((provider) => {
+          const wrapper = document.createElement('div');
+          wrapper.className = 'card';
+          wrapper.style.marginBottom = '12px';
+          const isOauth = isOauthProvider(provider.id);
+          wrapper.innerHTML = `
+            <div class="section-title">
+              <div>
+                <strong>${provider.label}</strong>
+                <div class="muted">${isOauth ? 'OAuth aliases' : 'API keys'} · ${provider.models.length} models</div>
+              </div>
+              <button class="button ghost" data-remove="true">Remove</button>
+            </div>
+            <div class="${isOauth ? 'oauth-block' : 'apikey-block'}"></div>
+          `;
+          wrapper.querySelector('[data-remove]').addEventListener('click', () => {
+            state.configuredProviders = state.configuredProviders.filter((p) => p !== provider);
+            renderCatalog();
+            renderConfiguredProviders();
+          });
+          const block = wrapper.querySelector(isOauth ? '.oauth-block' : '.apikey-block');
+          if (isOauth) {
+            renderOauthBlock(block, provider);
+          } else {
+            renderApikeyBlock(block, provider);
+          }
+          host.appendChild(wrapper);
+        });
+      }
+
+      function renderOauthBlock(host, provider) {
+        host.innerHTML = '';
+        const warning = document.createElement('div');
+        warning.className = 'muted';
+        if (state.status && !state.status.camoufoxReady) {
+          warning.innerHTML = `Camoufox not detected. Install it before OAuth: <span class="pill">pip install camoufox</span>`;
+          warning.classList.add('status', 'warn');
+        }
+        host.appendChild(warning);
+
+        const entries = provider.entries;
+        const list = document.createElement('div');
+        list.className = 'targets';
+        entries.forEach((entry, idx) => {
+          const row = document.createElement('div');
+          row.className = 'target-row';
+          row.innerHTML = `
+            <input placeholder="Alias (letters/numbers)" value="${entry.alias || ''}" />
+            <input placeholder="Token file" value="${entry.tokenFile || ''}" ${entry.tokenFile ? 'readonly' : ''} />
+            <div class="status ${entry.status || ''}">${entry.statusText || ''}</div>
+            <button class="button">Authorize</button>
+          `;
+          const aliasInput = row.querySelector('input');
+          const tokenInput = row.querySelectorAll('input')[1];
+          const statusEl = row.querySelector('.status');
+          const btn = row.querySelector('button');
+          aliasInput.addEventListener('input', (e) => {
+            entry.alias = e.target.value.trim();
+          });
+          btn.addEventListener('click', async () => {
+            statusEl.textContent = 'Authorizing...';
+            statusEl.className = 'status';
+            try {
+              const resp = await fetchJson('/init/oauth/authorize', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ provider: provider.id, alias: entry.alias || undefined })
+              });
+              entry.alias = resp.alias || entry.alias;
+              entry.tokenFile = resp.tokenFile;
+              entry.email = resp.email;
+              entry.status = 'ok';
+              entry.statusText = resp.email ? `OK · ${resp.email}` : 'OK';
+              if (!entry.alias && resp.suggestedAlias) {
+                entry.alias = resp.suggestedAlias;
+              }
+              if (!entry.alias && resp.email) {
+                entry.alias = defaultAliasFromEmail(resp.email);
+              }
+              aliasInput.value = entry.alias || '';
+              tokenInput.value = entry.tokenFile || '';
+              statusEl.className = 'status ok';
+              statusEl.textContent = entry.statusText;
+              toast('OAuth success');
+            } catch (err) {
+              statusEl.className = 'status err';
+              statusEl.textContent = err.message || 'OAuth failed';
+              toast(err.message || 'OAuth failed', false);
+            }
+          });
+          list.appendChild(row);
+        });
+        host.appendChild(list);
+
+        const actions = document.createElement('div');
+        actions.style.display = 'flex';
+        actions.style.gap = '8px';
+        actions.style.marginTop = '8px';
+        const addBtn = document.createElement('button');
+        addBtn.className = 'button';
+        addBtn.textContent = 'Add alias';
+        addBtn.addEventListener('click', () => {
+          provider.entries.push({ alias: '' });
+          renderConfiguredProviders();
+        });
+        const importBtn = document.createElement('button');
+        importBtn.className = 'button ghost';
+        importBtn.textContent = 'Import local aliases';
+        importBtn.addEventListener('click', async () => {
+          try {
+            const resp = await fetchJson(`/init/oauth/tokens?provider=${provider.id}`);
+            const existing = new Set(provider.entries.map((e) => e.alias));
+            (resp.tokens || []).forEach((t) => {
+              if (existing.has(t.alias)) return;
+              provider.entries.push({
+                alias: t.alias,
+                tokenFile: t.tokenFile,
+                email: t.email,
+                status: 'ok',
+                statusText: t.email ? `Imported · ${t.email}` : 'Imported'
+              });
+            });
+            renderConfiguredProviders();
+          } catch (err) {
+            toast(err.message || 'Import failed', false);
+          }
+        });
+        actions.appendChild(addBtn);
+        actions.appendChild(importBtn);
+        host.appendChild(actions);
+      }
+
+      function renderApikeyBlock(host, provider) {
+        host.innerHTML = '';
+        const list = document.createElement('div');
+        list.className = 'targets';
+        provider.entries.forEach((entry) => {
+          const row = document.createElement('div');
+          row.className = 'target-row';
+          row.innerHTML = `
+            <input placeholder="Alias (optional)" value="${entry.alias || ''}" />
+            <input placeholder="API key" value="${entry.apiKey || ''}" ${entry.secretRef ? 'readonly' : ''} />
+            <div class="status ${entry.secretRef ? 'ok' : ''}">${entry.secretRef ? 'Saved' : ''}</div>
+            <button class="button">Remove</button>
+          `;
+          const aliasInput = row.querySelector('input');
+          const keyInput = row.querySelectorAll('input')[1];
+          const removeBtn = row.querySelector('button');
+          aliasInput.addEventListener('input', (e) => {
+            entry.alias = e.target.value.trim();
+          });
+          keyInput.addEventListener('input', (e) => {
+            entry.apiKey = e.target.value;
+          });
+          removeBtn.addEventListener('click', () => {
+            provider.entries = provider.entries.filter((e) => e !== entry);
+            renderConfiguredProviders();
+          });
+          list.appendChild(row);
+        });
+        host.appendChild(list);
+
+        const actions = document.createElement('div');
+        actions.style.display = 'flex';
+        actions.style.gap = '8px';
+        actions.style.marginTop = '8px';
+        const addBtn = document.createElement('button');
+        addBtn.className = 'button';
+        addBtn.textContent = 'Add key';
+        addBtn.addEventListener('click', () => {
+          provider.entries.push({ alias: '', apiKey: '' });
+          renderConfiguredProviders();
+        });
+        const saveBtn = document.createElement('button');
+        saveBtn.className = 'button primary';
+        saveBtn.textContent = 'Save keys';
+        saveBtn.addEventListener('click', async () => {
+          const items = provider.entries.filter((e) => e.apiKey && !e.secretRef)
+            .map((e) => ({ alias: e.alias || 'default', apiKey: e.apiKey }));
+          if (!items.length) {
+            toast('No new API keys to save', false);
+            return;
+          }
+          try {
+            const resp = await fetchJson('/init/credentials/apikey', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ provider: provider.id, items })
+            });
+            (resp.items || []).forEach((saved) => {
+              const entry = provider.entries.find((e) => (e.alias || 'default') === saved.alias);
+              if (entry) {
+                entry.secretRef = saved.secretRef;
+                entry.apiKey = '';
+              }
+            });
+            renderConfiguredProviders();
+            toast('API keys saved');
+          } catch (err) {
+            toast(err.message || 'Save failed', false);
+          }
+        });
+        actions.appendChild(addBtn);
+        actions.appendChild(saveBtn);
+        host.appendChild(actions);
+      }
+
+      function renderRoutingPools() {
+        const host = qs('routingPools');
+        host.innerHTML = '';
+        const providerOptions = collectProviderTargets();
+        (state.status?.routePools || []).forEach((routeName) => {
+          if (!state.routing[routeName]) {
+            state.routing[routeName] = [{ providerId: '', modelId: '', weight: '' }];
+          }
+          const card = document.createElement('div');
+          card.className = 'card';
+          card.style.marginBottom = '12px';
+          card.innerHTML = `
+            <div class="section-title">
+              <div>
+                <strong>${routeName}</strong>
+                <div class="muted">Route pool targets</div>
+              </div>
+              <button class="button" data-add="true">+ Target</button>
+            </div>
+            <div class="targets"></div>
+          `;
+          const list = card.querySelector('.targets');
+          state.routing[routeName].forEach((row) => {
+            const rowEl = document.createElement('div');
+            rowEl.className = 'target-row';
+            rowEl.innerHTML = `
+              <select></select>
+              <select></select>
+              <input placeholder="Priority (optional)" value="${row.weight || ''}" />
+              <button class="button">Remove</button>
+            `;
+            const providerSelect = rowEl.querySelectorAll('select')[0];
+            const modelSelect = rowEl.querySelectorAll('select')[1];
+            const weightInput = rowEl.querySelector('input');
+            const removeBtn = rowEl.querySelector('button');
+
+            providerSelect.innerHTML = '<option value="">Select provider</option>' +
+              providerOptions.map((p) => `<option value="${p.id}">${p.id}</option>`).join('');
+            providerSelect.value = row.providerId || '';
+
+            const fillModels = (providerId) => {
+              const entry = providerOptions.find((p) => p.id === providerId);
+              const models = entry ? entry.models : [];
+              modelSelect.innerHTML = '<option value="">Select model</option>' +
+                models.map((m) => `<option value="${m}">${m}</option>`).join('');
+              if (!models.includes(row.modelId)) {
+                row.modelId = '';
+              }
+              modelSelect.value = row.modelId || '';
+            };
+            fillModels(row.providerId || '');
+
+            providerSelect.addEventListener('change', (e) => {
+              row.providerId = e.target.value;
+              fillModels(row.providerId);
+            });
+            modelSelect.addEventListener('change', (e) => {
+              row.modelId = e.target.value;
+            });
+            weightInput.addEventListener('input', (e) => {
+              row.weight = e.target.value.trim();
+            });
+            removeBtn.addEventListener('click', () => {
+              state.routing[routeName] = state.routing[routeName].filter((r) => r !== row);
+              renderRoutingPools();
+            });
+            list.appendChild(rowEl);
+          });
+          card.querySelector('[data-add]').addEventListener('click', () => {
+            state.routing[routeName].push({ providerId: '', modelId: '', weight: '' });
+            renderRoutingPools();
+          });
+          host.appendChild(card);
+        });
+      }
+
+      function collectProviderTargets() {
+        const targets = [];
+        state.configuredProviders.forEach((provider) => {
+          const entries = provider.entries || [];
+          if (!entries.length) {
+            return;
+          }
+          entries.forEach((entry, idx) => {
+            const alias = entry.alias || `key${idx + 1}`;
+            const hasCredential = isOauthProvider(provider.id)
+              ? Boolean(entry.tokenFile)
+              : Boolean(entry.secretRef || entry.apiKey);
+            if (!hasCredential) {
+              return;
+            }
+            const id = buildProviderEntryId(provider.id, alias, idx);
+            targets.push({ id, models: provider.models || [] });
+          });
+        });
+        return targets;
+      }
+
+      function buildProvidersPayload() {
+        const result = {};
+        state.configuredProviders.forEach((provider) => {
+          const template = provider.template || { id: provider.id, enabled: true, models: {} };
+          provider.entries.forEach((entry, idx) => {
+            const alias = entry.alias || `key${idx + 1}`;
+            const hasCredential = isOauthProvider(provider.id)
+              ? Boolean(entry.tokenFile)
+              : Boolean(entry.secretRef || entry.apiKey);
+            if (!hasCredential) {
+              return;
+            }
+            const id = buildProviderEntryId(provider.id, alias, idx);
+            const cloned = JSON.parse(JSON.stringify(template));
+            cloned.id = id;
+            cloned.enabled = true;
+            const auth = cloned.auth || { type: provider.authType || 'apikey' };
+            if (isOauthProvider(provider.id)) {
+              auth.type = provider.id === 'gemini-cli' ? 'gemini-cli-oauth' : `${provider.id}-oauth`;
+              auth.tokenFile = entry.tokenFile || entry.alias;
+            } else {
+              auth.type = auth.type || 'apikey';
+              auth.apiKey = entry.secretRef || entry.apiKey || auth.apiKey;
+            }
+            cloned.auth = auth;
+            result[id] = cloned;
+          });
+        });
+        return result;
+      }
+
+      function buildRoutingPayload() {
+        const routing = {};
+        Object.entries(state.routing).forEach(([routeName, rows]) => {
+          const targets = rows
+            .map((row) => {
+              if (!row.providerId || !row.modelId) return '';
+              const weight = row.weight && /^\d+$/.test(row.weight) ? `:${row.weight}` : '';
+              return `${row.providerId}.${row.modelId}${weight}`;
+            })
+            .filter(Boolean);
+          routing[routeName] = targets.length ? [{ id: `${routeName}-primary`, mode: 'priority', targets }] : [];
+        });
+        return routing;
+      }
+
+      function setStep(index) {
+        state.step = index;
+        qs('stepProviders').classList.toggle('hidden', index !== 0);
+        qs('stepRouting').classList.toggle('hidden', index !== 1);
+        qs('stepIndicatorProviders').classList.toggle('active', index === 0);
+        qs('stepIndicatorRouting').classList.toggle('active', index === 1);
+        qs('backBtn').disabled = index === 0;
+        qs('nextBtn').classList.toggle('hidden', index !== 0);
+        qs('saveBtn').classList.toggle('hidden', index !== 1);
+        if (index === 1) {
+          renderRoutingPools();
+        }
+      }
+
+      async function saveConfig() {
+        try {
+          const providersPayload = buildProvidersPayload();
+          const routingPayload = buildRoutingPayload();
+          const host = qs('serverHostInput').value.trim() || '127.0.0.1';
+          const port = Number(qs('serverPortInput').value.trim() || '5506');
+          await fetchJson('/init/config/save', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ providers: providersPayload, routing: routingPayload, host, port })
+          });
+          toast('Config saved. Restart server when ready.');
+        } catch (err) {
+          toast(err.message || 'Save failed', false);
+        }
+      }
+
+      async function boot() {
+        try {
+          state.status = await fetchJson('/init/status');
+          const providerPayload = await fetchJson('/init/providers');
+          state.providersCatalog = providerPayload.providers || [];
+          qs('configPathPill').textContent = `Config: ${state.status.configPath}`;
+          qs('camoufoxStatus').textContent = state.status.camoufoxReady ? 'Camoufox ready' : 'Camoufox required';
+          qs('camoufoxStatus').className = `status ${state.status.camoufoxReady ? 'ok' : 'warn'}`;
+          qs('serverHostInput').value = '127.0.0.1';
+          qs('serverPortInput').value = state.status?.port || '';
+          renderCatalog();
+          renderConfiguredProviders();
+          setStep(0);
+        } catch (err) {
+          toast(err.message || 'Init failed', false);
+        }
+      }
+
+      qs('backBtn').addEventListener('click', () => setStep(Math.max(0, state.step - 1)));
+      qs('nextBtn').addEventListener('click', () => setStep(1));
+      qs('saveBtn').addEventListener('click', saveConfig);
+
+      boot();
+    </script>
+  </body>
+</html>

@@ -96,6 +96,25 @@
 
 ---
 
+## Init-only Web UI（rcc init / rcc start）
+
+> 目标：`rcc init` 以 Web 引导完成 provider + routing 配置；`rcc start` 无 config 时进入 init UI。
+
+- **I1 init-only server + UI** 🟡（实现中）
+  - 参考：`src/server/runtime/init-server.ts`、`docs/init-ui.html`
+  - 要求：本地访问、支持 OAuth/ApiKey、默认 route 池、可回退到 admin
+- **I2 CLI 入口行为对齐** 🟡（实现中）
+  - 参考：`src/cli/commands/init.ts`、`src/cli/commands/start.ts`、`src/index.ts`
+  - 要求：`rcc init` 启动 init-only；`rcc start` 无 config 自动进入 init UI
+- **I3 OAuth alias 默认规则** 🟡（实现中）
+  - 规则：alias 默认取 email `@` 前缀且去掉 `.` 与标点，仅字母/数字
+  - 参考：`src/server/runtime/init-server.ts`
+- **I4 路由池配置 + 默认路由** 🟡（实现中）
+  - 规则：默认 `default` 路由必须至少一个 target
+  - 参考：`docs/init-ui.html`、`src/server/runtime/init-server.ts`
+
+---
+
 ## llms-wasm 逐步替换（TS → WASM）迁移任务
 
 > [!important]
