@@ -194,6 +194,18 @@
   - TOTAL：lines **62.81%** / functions **61.50%** / regions **62.30%**
   - lib.rs：lines **55.00%**（从 50.38% 提升）
 
+#### W2 验证记录（2026-01-27 - vr_bootstrap_config 详细错误分支覆盖）
+- **目的**：补齐 `build_provider_runtime_entries` / `extract_provider_auth_entries` / routing 相关错误分支。
+- **变更**：新增 `ts_fixtures_virtual_router_detailed_errors` 测试用例，覆盖：
+  - 空 auth 对象
+  - OAuth 缺失字段（当前行为）
+  - routing 引用未知 provider
+  - 非法 auth 类型 fallback 行为（当前行为）
+- **测试**：`cargo test --test ts_fixtures_compare` 通过（28 passed）。
+- **覆盖率（clean 后）**：
+  - TOTAL：lines **64.07%** / functions **64.03%** / regions **63.36%**
+  - lib.rs：lines **59.36%**（从 55.00% 提升）
+
 #### W2 验证记录（2026-01-27 - vr_bootstrap_config 错误路径覆盖）
 - **目的**：提高 `vr_bootstrap_config` 的错误分支覆盖（invalid JSON / missing providers / missing routing）。
 - **测试**：`cargo test --test ts_fixtures_compare` 通过（25 passed）。
