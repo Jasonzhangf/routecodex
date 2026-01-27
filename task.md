@@ -162,8 +162,9 @@
   - [x] 在 llmswitch-core CI 新增 wasm-compare job（模块顺序 gating）: `/Users/fanzhang/Documents/github/sharedmodule/.github/workflows/llmswitch-core-ci.yml`
 
 #### W2 验证记录（2026-01-26）
-- llms-wasm native：`cargo test --test ts_fixtures_compare` 全部 24 用例通过（新增 tokenizer/standardized-bridge 的错误路径用例）。
-- llms-wasm native：`cargo llvm-cov report` 覆盖率（本地，clean 后）= lines 59.28% / functions 59.27% / regions 58.76%。
+- llms-wasm native：`cargo test --test ts_fixtures_compare` 全部 26 用例通过。
+- llms-wasm native：`cargo llvm-cov clean && cargo llvm-cov --no-report --test ts_fixtures_compare && cargo llvm-cov report`（本地，clean 后）覆盖率 = lines **61.48%** / functions **60.11%** / regions **61.08%**。
+- 关键文件：`native/src/lib.rs` lines **50.38%** / functions **48.23%** / regions **49.06%**（仍是主要短板）。
 - 目标阈值 90% 尚未达到，继续按模块补齐覆盖与 fixtures。
 - **本轮进展**：
   - 新增 14 个 compat_pipeline fixtures：normalize_tool_choice / inject_instruction / parse_json / convert_responses_output_to_choices / extract_glm_tool_markup / apply_rules(when_tools) / qwen_transform / glm_web_search / response_normalize / auto_thinking
