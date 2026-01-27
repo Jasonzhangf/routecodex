@@ -352,7 +352,7 @@
   - [ ] 90% 目标：逐步补齐 `src/**` 单测/回归并把 CI gate 从当前临时阈值提升到 90%（lines/branches/functions/statements）
   - [ ] “模块必须有测试” gate：落地 `tests/unit|integration|regression|golden` 分层，并启用 `scripts/verify-test-coverage-map.mjs`
   - [ ] Golden 扩容策略：如果 fixtures 体积膨胀，迁 GitHub Release asset + sha256 lock（仍保证 CI 可获取）
-  - **当前覆盖率基线（本地，2026-01-24）**：`src/**` ≈ lines **63.13%** / branches **48.04%** / functions **63.19%** / statements **63.13%**；CI 临时 gate（min）= **48**（未达 90%，持续抬升）
+- **当前覆盖率基线（本地，2026-01-27）**：`src/**` ≈ lines **67.90%** / branches **53.09%** / functions **70.85%** / statements **67.90%**；CI 临时 gate（min）= **48**（未达 90%，持续抬升）
 
 #### 覆盖范围调整（2026-01-27）
 - antigravity：你已确认“已经稳定”，因此 **不再排除 antigravity**，纳入 llmswitch-core coverage 与对比矩阵。
