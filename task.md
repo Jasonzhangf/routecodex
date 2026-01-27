@@ -343,6 +343,10 @@
   - [ ] Golden 扩容策略：如果 fixtures 体积膨胀，迁 GitHub Release asset + sha256 lock（仍保证 CI 可获取）
   - **当前覆盖率基线（本地，2026-01-24）**：`src/**` ≈ lines **63.13%** / branches **48.04%** / functions **63.19%** / statements **63.13%**；CI 临时 gate（min）= **48**（未达 90%，持续抬升）
 
+#### 覆盖范围调整（2026-01-27）
+- antigravity：你已确认“已经稳定”，因此 **不再排除 antigravity**，纳入 llmswitch-core coverage 与对比矩阵。
+- gemini：仍保持纳入（如你后续要再次排除，请给出排除范围与恢复条件）。
+
 ### 13. Chat Process 协议与流水线契约（processMode=chat）
 - **位置**: `docs/CHAT_PROCESS_PROTOCOL_AND_PIPELINE.md` + `docs/chat-semantic-expansion-plan.md` + `sharedmodule/llmswitch-core/src/conversion/hub/**` + `src/client/**` + `src/server/handlers/**`
 - **优先级**: 高
