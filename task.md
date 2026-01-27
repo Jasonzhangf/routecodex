@@ -182,6 +182,13 @@
   - lib.rs：lines 42.23%
   - compat_pipeline.rs：lines 59.96%
 
+#### W2 验证记录（2026-01-27 - vr_bootstrap_config 错误路径覆盖）
+- **目的**：提高 `vr_bootstrap_config` 的错误分支覆盖（invalid JSON / missing providers / missing routing）。
+- **测试**：`cargo test --test ts_fixtures_compare` 通过（25 passed）。
+- **覆盖率（clean 后）**：
+  - TOTAL：lines 59.45% / functions 59.35% / regions 58.87%
+  - lib.rs：lines 42.83%
+
 ### W2 验证记录（2026-01-26 - compat_pipeline 阶段性完成）
 - **完成项**: 新增 `remove/rename/set/stringify/parse_json/set_default/normalize_tool_choice/inject_instruction/convert_responses_output_to_choices/resp_blacklist/field_map/tool_schema_sanitize/apply_rules/response_normalize/response_validate/qwen_request_transform/qwen_response_transform/auto_thinking/glm_web_search_request` 等 20 个 `compat_pipeline` 相关的 fixtures 和测试。
 - **测试结果**: 所有 `ts_fixtures_compare` 测试通过。
