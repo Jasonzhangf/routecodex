@@ -173,6 +173,15 @@
   - standardized_bridge.rs 覆盖率提升到 ~53.89%（lines）
   - TOTAL 覆盖率从 53.91% 提升到 59.28%
 
+#### W2 验证记录（2026-01-27 - virtual-router fixtures 扩充）
+- **目的**：提高 `llms-wasm/native/src/lib.rs` 的分支覆盖（engine lifecycle + provider availability）。
+- **变更**：扩充 `llms-wasm/testdata/virtual-router-fixtures.json`，并在 `ts_fixtures_compare` 中对 `multi-provider-round-robin` 增强 `vr_set_provider_availability` 探测（同时覆盖 providerKey 有/无 `.key1` 后缀两种形式）。
+- **测试**：`cargo test --test ts_fixtures_compare` 通过（24 passed）。
+- **覆盖率（clean 后）**：
+  - TOTAL：lines 59.28% / functions 59.27% / regions 58.76%
+  - lib.rs：lines 42.23%
+  - compat_pipeline.rs：lines 59.96%
+
 ### W2 验证记录（2026-01-26 - compat_pipeline 阶段性完成）
 - **完成项**: 新增 `remove/rename/set/stringify/parse_json/set_default/normalize_tool_choice/inject_instruction/convert_responses_output_to_choices/resp_blacklist/field_map/tool_schema_sanitize/apply_rules/response_normalize/response_validate/qwen_request_transform/qwen_response_transform/auto_thinking/glm_web_search_request` 等 20 个 `compat_pipeline` 相关的 fixtures 和测试。
 - **测试结果**: 所有 `ts_fixtures_compare` 测试通过。
