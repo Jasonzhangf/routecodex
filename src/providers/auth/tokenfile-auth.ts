@@ -23,22 +23,95 @@ type TokenPayload = UnknownObject & {
   apiKey?: string;
   expires_at?: number | string;
   ExpiresAt?: number | string;
+  disabled?: boolean;
+  disabled_reason?: string;
+  disabled_at?: number | string;
+  proxy_disabled?: boolean;
+  proxyDisabled?: boolean;
+  proxy_disabled_reason?: string;
+  proxy_disabled_at?: number | string;
+  protected_models?: string[];
+  protectedModels?: string[];
 };
 
 function isTokenPayload(value: unknown): value is TokenPayload {
   return typeof value === 'object' && value !== null;
 }
 
+function normalizeAntigravityAccountToken(raw: UnknownObject): TokenPayload | null {
+  const nested = (raw as { token?: unknown }).token;
+  if (!nested || typeof nested !== 'object') {
+    return null;
+  }
+  const tokenObj = nested as Record<string, unknown>;
+  const access = tokenObj.access_token;
+  if (typeof access !== 'string' || !access.trim()) {
+    return null;
+  }
+  const out: TokenPayload = { ...tokenObj };
+  const root = raw as Record<string, unknown>;
+  if (typeof root.disabled === 'boolean') {
+    out.disabled = root.disabled;
+  }
+  if (typeof root.disabled_reason === 'string') {
+    out.disabled_reason = root.disabled_reason;
+  }
+  if (typeof root.disabled_at === 'number' || typeof root.disabled_at === 'string') {
+    out.disabled_at = root.disabled_at as number | string;
+  }
+  if (typeof root.proxy_disabled === 'boolean') {
+    out.proxy_disabled = root.proxy_disabled;
+  }
+  if (typeof root.proxyDisabled === 'boolean') {
+    out.proxyDisabled = root.proxyDisabled;
+  }
+  if (typeof root.proxy_disabled_reason === 'string') {
+    out.proxy_disabled_reason = root.proxy_disabled_reason;
+  }
+  if (typeof root.proxy_disabled_at === 'number' || typeof root.proxy_disabled_at === 'string') {
+    out.proxy_disabled_at = root.proxy_disabled_at as number | string;
+  }
+  if (Array.isArray(root.protected_models)) {
+    out.protected_models = root.protected_models as string[];
+  }
+  if (Array.isArray(root.protectedModels)) {
+    out.protectedModels = root.protectedModels as string[];
+  }
+  if (!(out as Record<string, unknown>).project_id && typeof root.project_id === 'string') {
+    (out as Record<string, unknown>).project_id = root.project_id;
+  }
+  if (!(out as Record<string, unknown>).projectId && typeof root.projectId === 'string') {
+    (out as Record<string, unknown>).projectId = root.projectId;
+  }
+  if (!(out as { projects?: unknown }).projects && Array.isArray(root.projects)) {
+    (out as { projects?: unknown }).projects = root.projects;
+  }
+  if (!(out as Record<string, unknown>).email && typeof root.email === 'string') {
+    (out as Record<string, unknown>).email = root.email;
+  }
+  if (!out.expires_at && typeof tokenObj.expiry_timestamp === 'number') {
+    (out as { expires_at?: number }).expires_at =
+      tokenObj.expiry_timestamp > 10_000_000_000 ? tokenObj.expiry_timestamp : tokenObj.expiry_timestamp * 1000;
+  }
+  return out;
+}
+
 export class TokenFileAuthProvider implements IAuthProvider {
   readonly type = 'oauth' as const;
 
   private readonly config: OAuthAuth;
+  private readonly oauthProviderId: string;
   private status: AuthStatus;
   private isInitialized = false;
   private token: TokenPayload | null = null;
 
   constructor(config: OAuthAuth) {
     this.config = config;
+    const providerRaw =
+      typeof (config as unknown as { oauthProviderId?: unknown }).oauthProviderId === 'string'
+        ? String((config as unknown as { oauthProviderId: string }).oauthProviderId)
+        : '';
+    this.oauthProviderId = providerRaw.trim().toLowerCase();
     this.status = { isAuthenticated: false, isValid: false, lastValidated: 0 };
   }
 
@@ -52,6 +125,12 @@ export class TokenFileAuthProvider implements IAuthProvider {
       return;
     }
     this.token = this.readJson(file);
+    if (this.isAntigravityProvider() && this.isTokenDisabled(this.token)) {
+      this.token = null;
+      this.isInitialized = true;
+      this.updateStatus(false, false, 'token_disabled');
+      return;
+    }
     if (!this.token) {
       this.isInitialized = true;
       this.updateStatus(false, false, 'token_file_unreadable');
@@ -76,6 +155,10 @@ export class TokenFileAuthProvider implements IAuthProvider {
 
     if (!this.isInitialized || !this.token) {
       throw new Error('TokenFileAuthProvider not initialized');
+    }
+    if (this.isAntigravityProvider() && this.isTokenDisabled(this.token)) {
+      this.updateStatus(false, false, 'token_disabled');
+      throw new Error('TokenFileAuthProvider: token disabled');
     }
 
     // iFlow专用：优先使用API Key，回退到access_token
@@ -195,7 +278,11 @@ export class TokenFileAuthProvider implements IAuthProvider {
   private readJson(p: string): TokenPayload | null {
     try {
       const parsed = JSON.parse(fs.readFileSync(p, 'utf-8')) as unknown;
-      return isTokenPayload(parsed) ? parsed : null;
+      if (!isTokenPayload(parsed)) {
+        return null;
+      }
+      const normalized = normalizeAntigravityAccountToken(parsed);
+      return normalized || parsed;
     } catch {
       return null;
     }
@@ -248,6 +335,23 @@ export class TokenFileAuthProvider implements IAuthProvider {
       return Number.isFinite(ts) ? ts : null;
     }
     return null;
+  }
+
+  private isAntigravityProvider(): boolean {
+    return this.oauthProviderId === 'antigravity';
+  }
+
+  private isTokenDisabled(tok: TokenPayload | null): boolean {
+    if (!tok) {
+      return false;
+    }
+    if (tok.disabled === true) {
+      return true;
+    }
+    if (tok.proxy_disabled === true || tok.proxyDisabled === true) {
+      return true;
+    }
+    return false;
   }
 
   private updateStatus(isAuthenticated: boolean, isValid: boolean, message?: string): void {

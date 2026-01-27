@@ -46,6 +46,51 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return undefined;
 }
 
+function extractErrorMessage(error: ErrorContext['error']): string {
+  if (typeof error === 'string') {
+    return error;
+  }
+  if (error instanceof Error) {
+    return error.message;
+  }
+  const record = asRecord(error as Record<string, unknown>);
+  if (typeof record?.message === 'string') {
+    return record.message;
+  }
+  return 'Unknown error';
+}
+
+function extractErrorCode(error: ErrorContext['error']): string | undefined {
+  if (error && typeof error === 'object' && 'code' in error) {
+    const code = (error as { code?: unknown }).code;
+    if (typeof code === 'string' && code.trim()) {
+      return code.trim();
+    }
+  }
+  return undefined;
+}
+
+function isQuotaSignal(context: ErrorContext): boolean {
+  if (context.source === 'quota') {
+    return true;
+  }
+  const payload = asRecord(context.context);
+  const details = asRecord(payload?.details);
+  if (details?.virtualRouterQuotaDepleted || details?.virtualRouterQuotaRecovery) {
+    return true;
+  }
+  const requestId = extractRequestId(payload);
+  if (requestId && requestId.startsWith('quota_')) {
+    return true;
+  }
+  const code = typeof details?.code === 'string' ? details.code : extractErrorCode(context.error);
+  if (code && code.startsWith('QUOTA_')) {
+    return true;
+  }
+  const message = extractErrorMessage(context.error);
+  return message.startsWith('Quota manager:');
+}
+
 function extractDetails(context: ErrorContext): {
   requestId?: string;
   endpoint?: string;
@@ -108,14 +153,7 @@ export class QuietErrorHandlingCenter extends ErrorHandlingCenter {
     state.errorCount += 1;
     const errorId = `error_${state.errorCount}_${Date.now()}`;
     const details = extractDetails(errorContext);
-    const message =
-      typeof errorContext.error === 'string'
-        ? errorContext.error
-        : errorContext.error instanceof Error
-          ? errorContext.error.message
-          : typeof (errorContext.error as Record<string, unknown>)?.message === 'string'
-            ? String((errorContext.error as Record<string, unknown>).message)
-            : 'Unknown error';
+    const message = extractErrorMessage(errorContext.error);
     const snippet = truncateForConsole(message, 500);
     const payload = {
       errorId,
@@ -128,7 +166,9 @@ export class QuietErrorHandlingCenter extends ErrorHandlingCenter {
       source: errorContext.source,
       severity: errorContext.severity
     };
-    console.error('[route-error]', JSON.stringify(payload));
+    if (!isQuotaSignal(errorContext)) {
+      console.error('[route-error]', JSON.stringify(payload));
+    }
     const response: ErrorResponse = {
       success: true,
       message: `Error processed: ${message}`,

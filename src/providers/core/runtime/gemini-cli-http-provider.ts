@@ -8,7 +8,8 @@
  * - 特性：多 project 支持、token 共享、模型回退
  */
 
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID, randomBytes } from 'node:crypto';
+import { platform as osPlatform, arch as osArch, release as osRelease } from 'node:os';
 import { Transform } from 'node:stream';
 import type { TransformCallback } from 'node:stream';
 import { StringDecoder } from 'node:string_decoder';
@@ -20,7 +21,9 @@ import type { UnknownObject } from '../../../types/common-types.js';
 import type { ModuleDependencies } from '../../../modules/pipeline/interfaces/pipeline-interfaces.js';
 import { GeminiCLIProtocolClient } from '../../../client/gemini-cli/gemini-cli-protocol-client.js';
 import { getDefaultProjectId } from '../../auth/gemini-cli-userinfo-helper.js';
-import { ANTIGRAVITY_HELPER_DEFAULTS, resolveAntigravityApiBaseCandidates } from '../../auth/antigravity-userinfo-helper.js';
+import { resolveAntigravityApiBaseCandidates } from '../../auth/antigravity-userinfo-helper.js';
+import { getCamoufoxFingerprintProfile } from '../config/camoufox-launcher.js';
+import type { ProviderRuntimeMetadata } from './provider-runtime-metadata.js';
 
 type DataEnvelope = UnknownObject & { data?: UnknownObject };
 
@@ -34,7 +37,209 @@ type MutablePayload = Record<string, unknown> & {
   // generationConfig?: Record<string, unknown>;
 };
 
-// Antigravity transport contract: a stable per-process session seed (plugin-style session semantics).
+type AntigravityFingerprint = {
+  deviceId: string;
+  sessionToken: string;
+  userAgent: string;
+  apiClient: string;
+  acceptEncoding?: string;
+  clientMetadata: {
+    ideType: string;
+    platform: string;
+    pluginType: string;
+    osVersion: string;
+    arch: string;
+    sqmId?: string;
+  };
+  quotaUser: string;
+  createdAt: number;
+};
+
+const ANTIGRAVITY_OS_VERSIONS: Record<string, string[]> = {
+  darwin: ['10.15.7', '11.6.8', '12.6.3', '13.5.2', '14.2.1', '14.5'],
+  win32: ['10.0.19041', '10.0.19042', '10.0.19043', '10.0.22000', '10.0.22621', '10.0.22631'],
+  linux: ['5.15.0', '5.19.0', '6.1.0', '6.2.0', '6.5.0', '6.6.0']
+};
+const ANTIGRAVITY_ARCHS = ['x64', 'arm64'];
+const ANTIGRAVITY_VERSIONS = ['1.10.0', '1.10.5', '1.11.0', '1.11.2', '1.11.5', '1.12.0', '1.12.1'];
+const ANTIGRAVITY_IDE_TYPES = ['IDE_UNSPECIFIED', 'VSCODE', 'INTELLIJ', 'ANDROID_STUDIO', 'CLOUD_SHELL_EDITOR'];
+const ANTIGRAVITY_PLATFORMS = ['PLATFORM_UNSPECIFIED', 'WINDOWS', 'MACOS', 'LINUX'];
+const ANTIGRAVITY_SDK_CLIENTS = [
+  'google-cloud-sdk vscode_cloudshelleditor/0.1',
+  'google-cloud-sdk vscode/1.86.0',
+  'google-cloud-sdk vscode/1.87.0',
+  'google-cloud-sdk intellij/2024.1',
+  'google-cloud-sdk android-studio/2024.1',
+  'gcloud-python/1.2.0 grpc-google-iam-v1/0.12.6'
+];
+let antigravitySessionFingerprint: AntigravityFingerprint | null = null;
+
+const randomFrom = <T,>(items: T[]): T => items[Math.floor(Math.random() * items.length)]!;
+
+const generateAntigravityFingerprint = (): AntigravityFingerprint => {
+  const platform = randomFrom(['darwin', 'win32', 'linux']);
+  const arch = randomFrom(ANTIGRAVITY_ARCHS);
+  const osVersion = randomFrom(ANTIGRAVITY_OS_VERSIONS[platform] ?? ANTIGRAVITY_OS_VERSIONS.linux!);
+  const antigravityVersion = randomFrom(ANTIGRAVITY_VERSIONS);
+  const matchingPlatform =
+    platform === 'darwin'
+      ? 'MACOS'
+      : platform === 'win32'
+        ? 'WINDOWS'
+        : platform === 'linux'
+          ? 'LINUX'
+          : randomFrom(ANTIGRAVITY_PLATFORMS);
+  return {
+    deviceId: randomUUID(),
+    sessionToken: randomBytes(16).toString('hex'),
+    userAgent: `antigravity/${antigravityVersion} ${platform}/${arch}`,
+    apiClient: randomFrom(ANTIGRAVITY_SDK_CLIENTS),
+    clientMetadata: {
+      ideType: randomFrom(ANTIGRAVITY_IDE_TYPES),
+      platform: matchingPlatform,
+      pluginType: 'GEMINI',
+      osVersion,
+      arch,
+      sqmId: `{${randomUUID().toUpperCase()}}`
+    },
+    quotaUser: `device-${randomBytes(8).toString('hex')}`,
+    createdAt: Date.now()
+  };
+};
+
+const getAntigravitySessionFingerprint = (): AntigravityFingerprint => {
+  if (!antigravitySessionFingerprint) {
+    antigravitySessionFingerprint = generateAntigravityFingerprint();
+  }
+  return antigravitySessionFingerprint;
+};
+
+const collectCurrentAntigravityFingerprint = (): AntigravityFingerprint => {
+  const platform = osPlatform();
+  const arch = osArch();
+  const osVersion = osRelease();
+  const matchingPlatform =
+    platform === 'darwin'
+      ? 'MACOS'
+      : platform === 'win32'
+        ? 'WINDOWS'
+        : platform === 'linux'
+          ? 'LINUX'
+          : 'PLATFORM_UNSPECIFIED';
+  return {
+    deviceId: randomUUID(),
+    sessionToken: randomBytes(16).toString('hex'),
+    userAgent: `antigravity/1.11.9 ${platform}/${arch}`,
+    apiClient: 'google-cloud-sdk vscode_cloudshelleditor/0.1',
+    clientMetadata: {
+      ideType: 'VSCODE',
+      platform: matchingPlatform,
+      pluginType: 'GEMINI',
+      osVersion,
+      arch,
+      sqmId: `{${randomUUID().toUpperCase()}}`
+    },
+    quotaUser: `device-${randomBytes(16).toString('hex').slice(0, 16)}`,
+    createdAt: Date.now()
+  };
+};
+
+const extractAntigravityAlias = (providerKey?: string): string | undefined => {
+  if (!providerKey) {
+    return undefined;
+  }
+  const parts = providerKey.split('.').filter(Boolean);
+  if (!parts.length) {
+    return undefined;
+  }
+  if (parts[0] !== 'antigravity') {
+    return undefined;
+  }
+  return parts.length >= 2 ? parts[1] : undefined;
+};
+
+const stableIdFromProfile = (profileId: string): { deviceId: string; quotaUser: string; sqmId: string } => {
+  const hash = createHash('sha256').update(profileId).digest('hex');
+  const deviceId = `${hash.slice(0, 8)}-${hash.slice(8, 12)}-${hash.slice(12, 16)}-${hash.slice(16, 20)}-${hash.slice(20, 32)}`;
+  return {
+    deviceId,
+    quotaUser: `device-${hash.slice(0, 16)}`,
+    sqmId: `{${hash.slice(0, 8).toUpperCase()}-${hash.slice(8, 12).toUpperCase()}-${hash.slice(12, 16).toUpperCase()}-${hash.slice(16, 20).toUpperCase()}-${hash.slice(20, 32).toUpperCase()}}`
+  };
+};
+
+const buildFingerprintFromCamoufox = (
+  profileId: string,
+  env: Record<string, string>
+): AntigravityFingerprint | null => {
+  const camouKeys = Object.keys(env).filter((key) => key.startsWith('CAMOU_CONFIG_')).sort();
+  if (camouKeys.length === 0) {
+    return null;
+  }
+  const blob = camouKeys.map((key) => env[key]).join('');
+  let parsed: Record<string, unknown> | null = null;
+  try {
+    parsed = JSON.parse(blob) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+
+  const ua = typeof parsed['navigator.userAgent'] === 'string' ? (parsed['navigator.userAgent'] as string) : '';
+  const oscpu = typeof parsed['navigator.oscpu'] === 'string' ? (parsed['navigator.oscpu'] as string) : '';
+  const platformRaw = typeof parsed['navigator.platform'] === 'string' ? (parsed['navigator.platform'] as string) : oscpu;
+  const acceptEncoding =
+    typeof parsed['headers.Accept-Encoding'] === 'string' ? (parsed['headers.Accept-Encoding'] as string) : undefined;
+
+  const platformLower = platformRaw.toLowerCase();
+  const platform =
+    platformLower.includes('win') ? 'WINDOWS' : platformLower.includes('mac') ? 'MACOS' : 'LINUX';
+  const arch =
+    platformLower.includes('arm64') || platformLower.includes('aarch64') ? 'arm64' : 'x64';
+
+  const stableIds = stableIdFromProfile(profileId);
+
+  return {
+    deviceId: stableIds.deviceId,
+    sessionToken: randomBytes(16).toString('hex'),
+    userAgent: ua || `antigravity/1.11.9 ${osPlatform()}/${osArch()}`,
+    apiClient: 'google-cloud-sdk vscode_cloudshelleditor/0.1',
+    acceptEncoding,
+    clientMetadata: {
+      ideType: 'IDE_UNSPECIFIED',
+      platform,
+      pluginType: 'GEMINI',
+      osVersion: oscpu || osRelease(),
+      arch,
+      sqmId: stableIds.sqmId
+    },
+    quotaUser: stableIds.quotaUser,
+    createdAt: Date.now()
+  };
+};
+
+const resolveAntigravityFingerprint = (runtime?: ProviderRuntimeMetadata): AntigravityFingerprint => {
+  const alias =
+    (runtime?.metadata && typeof runtime.metadata === 'object' && typeof (runtime.metadata as any).alias === 'string'
+      ? String((runtime.metadata as any).alias)
+      : undefined) || extractAntigravityAlias(runtime?.providerKey);
+  const camoufox = getCamoufoxFingerprintProfile('antigravity', alias);
+  if (camoufox) {
+    const parsed = buildFingerprintFromCamoufox(camoufox.profileId, camoufox.env);
+    if (parsed) {
+      return parsed;
+    }
+  }
+  const env = (process.env.ROUTECODEX_ANTIGRAVITY_FINGERPRINT_MODE || process.env.RCC_ANTIGRAVITY_FINGERPRINT_MODE || '')
+    .trim()
+    .toLowerCase();
+  if (env === 'current' || env === 'host') {
+    return collectCurrentAntigravityFingerprint();
+  }
+  return getAntigravitySessionFingerprint();
+};
+
+// Legacy helper seed for Antigravity signature session key generation.
+// Kept for backwards compatibility (even when we avoid auto-injecting sessionId).
 const ANTIGRAVITY_PLUGIN_SESSION_ID = `-${randomUUID()}`;
 
 export class GeminiCLIHttpProvider extends HttpTransportProvider {
@@ -64,19 +269,10 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
     if (!this.isAntigravityRuntime()) {
       return super.applyStreamModeHeaders(headers, wantsSse);
     }
-    if (!this.isAntigravityMinimalCompatibilityEnabled()) {
-      // Standard contract: keep standard SSE Accept header behavior.
-      return super.applyStreamModeHeaders(headers, wantsSse);
-    }
-    // gcli2api alignment: httpx default Accept is "*/*" (gcli2api does not override it).
-    // For Antigravity, keep this header minimal and avoid forcing text/event-stream.
-    const normalized = { ...headers };
-    const acceptKey = Object.keys(normalized).find((key) => key.toLowerCase() === 'accept');
-    if (acceptKey) {
-      delete normalized[acceptKey];
-    }
-    normalized.Accept = '*/*';
-    return normalized;
+    // Antigravity: keep SSE Accept header behavior stable.
+    // We intentionally do not force "*/*" here because the upstream is sensitive to header triplets
+    // and we have observed successful runs with the default "text/event-stream" Accept.
+    return super.applyStreamModeHeaders(headers, wantsSse);
   }
 
   protected override getBaseUrlCandidates(_context: ProviderContext): string[] | undefined {
@@ -115,6 +311,16 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
 
     const tokenData = readTokenPayload();
     const projectId = getDefaultProjectId(tokenData || {});
+    const projectOverride = (() => {
+      const ext = this.config?.config?.extensions as Record<string, unknown> | undefined;
+      const candidates = [ext?.projectId, ext?.project_id, ext?.project];
+      for (const candidate of candidates) {
+        if (typeof candidate === 'string' && candidate.trim().length) {
+          return candidate.trim();
+        }
+      }
+      return undefined;
+    })();
 
     // 构建 Gemini CLI 格式的请求（仅做传输层整理，不做 OpenAI→Gemini 语义转换）
     const model =
@@ -126,36 +332,25 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
     }
 
     payload.model = model;
-    // 若当前 token 中已有 project 元数据，则补充到请求中；否则让上游决定后续行为。
-    // 注意：Antigravity 运行时保持与早期成功快照一致，始终显式发送 project。
-    if (projectId) {
-      (payload as Record<string, unknown>).project = projectId;
+    const isClaudeModel = this.isClaudeModelName(model);
+    // Project selection:
+    // - honor explicit payload.project (client/config),
+    // - otherwise honor provider config extensions project override,
+    // - otherwise fall back to token-derived default project_id if present.
+    const existingProject =
+      typeof (payload as any).project === 'string' && String((payload as any).project).trim().length
+        ? String((payload as any).project).trim()
+        : '';
+    if (!existingProject) {
+      const nextProject = projectOverride || projectId;
+      if (nextProject && nextProject.trim().length) {
+        (payload as Record<string, unknown>).project = nextProject.trim();
+      } else {
+        throw new Error('Gemini CLI: project_id missing in token; re-auth or configure projectId');
+      }
     }
 
     this.ensureRequestMetadata(payload);
-
-    // Standard contract: attach stable sessionId in request payload (NOT headers) for Antigravity.
-    // This is a compatibility hook for upstream signature caching; it must not affect llmswitch pipeline routing.
-    if (this.isAntigravityRuntime() && !this.isAntigravityMinimalCompatibilityEnabled()) {
-      const project =
-        typeof (payload as any).project === 'string' && String((payload as any).project).trim().length
-          ? String((payload as any).project).trim()
-          : projectId || 'default';
-      const sessionIdFromMeta =
-        metadata && typeof metadata.sessionId === 'string' && metadata.sessionId.trim().length
-          ? metadata.sessionId.trim()
-          : '';
-      const conversationIdFromMeta =
-        metadata && typeof metadata.conversationId === 'string' && metadata.conversationId.trim().length
-          ? metadata.conversationId.trim()
-          : '';
-      const signatureSessionKey = this.buildAntigravitySignatureSessionKey({
-        model,
-        project,
-        conversationKey: conversationIdFromMeta || sessionIdFromMeta || 'default'
-      });
-      (payload as any).sessionId = signatureSessionKey;
-    }
 
     // 删除与 Gemini 协议无关的字段，避免影响 Cloud Code Assist schema 校验。
     const recordPayload = payload as Record<string, unknown>;
@@ -175,8 +370,11 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
     this.flattenRequestContainer(payload);
 
     // Standard contract: Antigravity identity fields are carried in the JSON wrapper (not headers).
+    // gcli2api antigravity alignment:
+    // - requestId/requestType are sent as HTTP headers (provider finalizeRequestHeaders)
+    // - JSON wrapper should not force-inject extra identity/session fields
     // Provider must not infer request semantics from user payload; modality hints must come from llmswitch-core metadata.
-    if (this.isAntigravityRuntime() && !this.isAntigravityMinimalCompatibilityEnabled()) {
+    if (this.isAntigravityRuntime()) {
       const record = payload as Record<string, unknown>;
       if (!this.hasNonEmptyString(record.userAgent)) {
         record.userAgent = 'antigravity';
@@ -184,11 +382,26 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
       if (!this.hasNonEmptyString(record.requestType)) {
         const hasImageAttachment =
           metadata && (metadata.hasImageAttachment === true || metadata.hasImageAttachment === 'true');
-        record.requestType = hasImageAttachment ? 'image_gen' : 'agent';
+        const fallbackImageByModel = typeof model === 'string' && model.toLowerCase().includes('image');
+        record.requestType = hasImageAttachment || fallbackImageByModel ? 'image_gen' : 'agent';
       }
       const existingReqId = record.requestId;
-      if (typeof existingReqId !== 'string' || !existingReqId.trim().startsWith('agent-')) {
+      const normalizedReqId = typeof existingReqId === 'string' ? existingReqId.trim() : '';
+      if (!normalizedReqId || !(normalizedReqId.startsWith('agent-') || normalizedReqId.startsWith('req-'))) {
         record.requestId = `agent-${randomUUID()}`;
+      }
+    }
+
+    // opencode-antigravity-auth alignment: keep requestId/requestType/userAgent in JSON wrapper,
+    // but also mirror requestId/requestType into metadata for header propagation.
+    if (this.isAntigravityRuntime()) {
+      const meta = (processedRequest as { metadata?: Record<string, unknown> }).metadata ?? {};
+      (processedRequest as { metadata?: Record<string, unknown> }).metadata = meta;
+      if (typeof (payload as any).requestId === 'string' && (payload as any).requestId.trim().length) {
+        meta.__antigravityRequestId = String((payload as any).requestId).trim();
+      }
+      if (typeof (payload as any).requestType === 'string' && (payload as any).requestType.trim().length) {
+        meta.__antigravityRequestType = String((payload as any).requestType).trim();
       }
     }
 
@@ -219,59 +432,31 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
   ): Promise<Record<string, string>> {
     const finalized = await super.finalizeRequestHeaders(headers, request);
     if (this.isAntigravityRuntime()) {
-      const deleteHeaderInsensitive = (key: string): void => {
-        const target = key.toLowerCase();
-        for (const k of Object.keys(finalized)) {
-          if (k.toLowerCase() === target) {
-            delete finalized[k];
-          }
-        }
-      };
+      const payload = this.resolvePayload(request).payload as Record<string, unknown>;
+      const meta = (request as { metadata?: Record<string, unknown> }).metadata ?? {};
+      const runtime = this.getCurrentRuntimeMetadata();
+      const isClaudeModel = this.isClaudeModelName(payload?.model);
+      const isClaudeThinking = typeof payload?.model === 'string' && payload.model.toLowerCase().includes('thinking');
+      const requestNode =
+        payload && typeof payload.request === 'object' && payload.request !== null
+          ? (payload.request as Record<string, unknown>)
+          : payload;
+      const hasTools =
+        Array.isArray((requestNode as { tools?: unknown }).tools) &&
+        ((requestNode as { tools?: unknown[] }).tools?.length ?? 0) > 0;
 
-      const minimalCompatibility = this.isAntigravityMinimalCompatibilityEnabled();
-      const envUa = (process.env.ROUTECODEX_ANTIGRAVITY_USER_AGENT || process.env.RCC_ANTIGRAVITY_USER_AGENT || '').trim();
-      const defaultUa =
-        minimalCompatibility ? ANTIGRAVITY_HELPER_DEFAULTS.userAgent : 'antigravity/1.11.5 windows/amd64';
-      finalized['User-Agent'] = envUa || defaultUa;
-      // gcli2api alignment: keep headers minimal for Antigravity.
-      finalized['Accept-Encoding'] = 'gzip';
-      deleteHeaderInsensitive('originator');
-
-      if (minimalCompatibility) {
-        deleteHeaderInsensitive('X-Goog-Api-Client');
-        deleteHeaderInsensitive('Client-Metadata');
-        // gcli2api alignment: requestId/requestType are headers, not JSON body fields.
-        try {
-          const adapter = this.resolvePayload(request);
-          const payload = adapter.payload as MutablePayload;
-          if (this.hasNonEmptyString(payload.requestId)) {
-            finalized.requestId = payload.requestId;
-          }
-          const meta =
-            request && typeof request === 'object' && typeof (request as any).metadata === 'object'
-              ? ((request as any).metadata as Record<string, unknown>)
-              : undefined;
-          const hasImageAttachment = meta && (meta.hasImageAttachment === true || meta.hasImageAttachment === 'true');
-          finalized.requestType = hasImageAttachment ? 'image_gen' : 'agent';
-        } catch {
-          // best effort
+      const fingerprint = resolveAntigravityFingerprint(runtime);
+      finalized['User-Agent'] = fingerprint.userAgent;
+      if (isClaudeModel) {
+        if (isClaudeThinking && hasTools) {
+          const existing = finalized['anthropic-beta'];
+          const interleaved = 'interleaved-thinking-2025-05-14';
+          finalized['anthropic-beta'] = existing && existing.length
+            ? (existing.includes(interleaved) ? existing : `${existing},${interleaved}`)
+            : interleaved;
         }
-      } else {
-        // Standard contract: header triplet differentiates identity/quota pool.
-        const xGoog =
-          (process.env.ROUTECODEX_ANTIGRAVITY_X_GOOG_API_CLIENT ||
-            process.env.RCC_ANTIGRAVITY_X_GOOG_API_CLIENT ||
-            'google-cloud-sdk vscode_cloudshelleditor/0.1').trim();
-        const clientMeta =
-          (process.env.ROUTECODEX_ANTIGRAVITY_CLIENT_METADATA ||
-            process.env.RCC_ANTIGRAVITY_CLIENT_METADATA ||
-            '{"ideType":"IDE_UNSPECIFIED","platform":"PLATFORM_UNSPECIFIED","pluginType":"GEMINI"}').trim();
-        if (xGoog) finalized['X-Goog-Api-Client'] = xGoog;
-        if (clientMeta) finalized['Client-Metadata'] = clientMeta;
-        // Standard contract: requestId/requestType are NOT headers.
-        deleteHeaderInsensitive('requestId');
-        deleteHeaderInsensitive('requestType');
       }
+
     }
     return finalized;
   }
@@ -281,20 +466,12 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
     if (!this.isAntigravityRuntime() || !built || typeof built !== 'object') {
       return built;
     }
-    if (!this.isAntigravityMinimalCompatibilityEnabled()) {
-      // Standard contract: keep requestId/requestType/userAgent fields in JSON body.
-      return built;
-    }
-    const body = built as Record<string, unknown>;
-    const model = body.model;
-    const project = body.project;
-    const requestNode = body.request;
+    // gcli2api antigravity alignment: requestId/requestType are headers; JSON wrapper stays minimal.
+    return built;
+  }
 
-    const sanitized: Record<string, unknown> = {};
-    if (model !== undefined) sanitized.model = model;
-    if (project !== undefined) sanitized.project = project;
-    if (requestNode !== undefined) sanitized.request = requestNode;
-    return sanitized as UnknownObject;
+  private isClaudeModelName(model: unknown): boolean {
+    return typeof model === 'string' && model.toLowerCase().includes('claude');
   }
 
   protected override async postprocessResponse(response: unknown, context: ProviderContext): Promise<UnknownObject> {
@@ -422,12 +599,9 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
    * 参考 CLIProxyAPI 的 cliPreviewFallbackOrder
    */
   protected getFallbackModels(model: string): string[] {
-    const fallbackMap: Record<string, string[]> = {
-      'gemini-2.5-pro': ['gemini-2.5-pro-preview-06-05'],
-      'gemini-2.5-flash': [],
-      'gemini-2.5-flash-lite': []
-    };
-    return fallbackMap[model] || [];
+    // 禁用模型回退：路由层负责标准映射，Provider 不做降级/回退。
+    void model;
+    return [];
   }
 
   private applyStreamAction(target: UnknownObject, wantsStream: boolean): void {
@@ -444,19 +618,15 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
 
   private ensureRequestMetadata(payload: MutablePayload): void {
     const isAntigravity = this.isAntigravityRuntime();
-    const minimalCompatibility = isAntigravity ? this.isAntigravityMinimalCompatibilityEnabled() : false;
 
     if (!this.hasNonEmptyString(payload.requestId)) {
-      payload.requestId = isAntigravity && !minimalCompatibility ? `agent-${randomUUID()}` : `req-${randomUUID()}`;
+      // opencode-antigravity-auth alignment: antigravity uses agent- prefix.
+      const prefix = isAntigravity ? 'agent' : 'req';
+      payload.requestId = `${prefix}-${randomUUID()}`;
     }
-    // gcli2api alignment: Antigravity request bodies are minimal; do not inject session_id/userAgent/requestType
-    // or generationConfig defaults at the provider layer.
+    // Never inject legacy snake_case session_id.
     if (isAntigravity) {
       delete (payload as { session_id?: unknown }).session_id;
-      if (minimalCompatibility) {
-        delete (payload as { userAgent?: unknown }).userAgent;
-        delete (payload as { requestType?: unknown }).requestType;
-      }
     }
   }
 
@@ -464,6 +634,14 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
     const raw = (process.env.ROUTECODEX_ANTIGRAVITY_HEADER_MODE || process.env.RCC_ANTIGRAVITY_HEADER_MODE || '')
       .trim()
       .toLowerCase();
+    // Legacy switch kept for older deployments; RouteCodex now follows gcli2api antigravity header style by default.
+    // This method is currently unused (we avoid forcing sessionId injection and keep requestId/requestType in headers).
+    if (!raw) {
+      return false;
+    }
+    if (raw === 'standard' || raw === 'full' || raw === 'headers') {
+      return false;
+    }
     return raw === 'minimal' || raw === 'gcli2api';
   }
 

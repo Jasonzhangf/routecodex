@@ -6,6 +6,7 @@ import process from 'node:process';
 // - Prefer pure unit tests / mock-provider tests (no external network).
 // - Expand coverage by adding more suites here (don’t run `jest --all` in CI).
 const routingInstructionTests = [
+  'tests/client/gemini/gemini-cli-protocol-client.test.ts',
   'tests/server/runtime/request-executor.single-attempt.spec.ts',
   'tests/server/runtime/executor-provider.retryable.spec.ts',
   'tests/providers/auth/tokenfile-auth.iflow.spec.ts',
@@ -60,7 +61,11 @@ const routingInstructionTests = [
   'tests/servertool/exec-command-guard.spec.ts',
   'tests/servertool/hub-pipeline-session-headers.spec.ts',
   'tests/servertool/stopmessage-anthropic-stop-sequence.spec.ts',
+  'tests/servertool/stop-message-auto.spec.ts',
+  'tests/servertool/servertool-clock.spec.ts',
   'tests/servertool/servertool-progress-logging.spec.ts',
+  'tests/sharedmodule/gemini-mapper-functioncall-args.spec.ts',
+  'tests/sharedmodule/mcp-tool-descriptions.spec.ts',
   'tests/unified-hub/hub-v1-single-path-imports.spec.ts',
   'tests/unified-hub/policy-errorsample-write.spec.ts',
   'tests/unified-hub/policy-observe-shadow.spec.ts',

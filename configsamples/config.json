@@ -116,10 +116,18 @@
           "apiKey": "YOUR_API_KEY_HERE"
         },
         "models": {
-          "gpt-5.1": {},
-          "gpt-5.1-codex": {},
-          "gpt-5.2-codex": {},
-          "gpt-5.2": {}
+          "gpt-5.1": {
+            "maxContext": 256000
+          },
+          "gpt-5.1-codex": {
+            "maxContext": 256000
+          },
+          "gpt-5.2-codex": {
+            "maxContext": 256000
+          },
+          "gpt-5.2": {
+            "maxContext": 256000
+          }
         },
         "responses": {
           "process": "chat",

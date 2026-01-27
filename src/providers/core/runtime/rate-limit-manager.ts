@@ -1,9 +1,6 @@
 import type { ProviderContext } from '../api/provider-types.js';
 
 const DEFAULT_BACKOFF_SCHEDULE = [10_000, 30_000, 60_000];
-const DEFAULT_SERIES_BLACKLIST_MS = 5 * 60_000;
-
-type SeriesName = 'claude' | 'gemini-pro' | 'gemini-flash' | 'default';
 
 interface BucketState {
   consecutive429: number;
@@ -27,56 +24,16 @@ export class RateLimitCooldownError extends Error {
 
 export class RateLimitBackoffManager {
   private readonly buckets = new Map<string, BucketState>();
-  private readonly seriesBlacklist = new Map<string, number>();
 
   constructor(
-    private readonly schedule: number[] = DEFAULT_BACKOFF_SCHEDULE,
-    private readonly seriesBlacklistDurationMs: number = DEFAULT_SERIES_BLACKLIST_MS
+    private readonly schedule: number[] = DEFAULT_BACKOFF_SCHEDULE
   ) {}
-
-  /**
-   * 根据外部传入的冷却时间（例如上游返回的 quotaResetDelay）直接对整个系列做一次性降温。
-   * 这用于 Gemini / Gemini CLI / antigravity 这类按模型系列限流的场景，
-   * 避免在明确知道冷却窗口后仍然多次命中真实 429。
-   */
-  applySeriesCooldown(providerKey?: string, model?: string, cooldownMs?: number): void {
-    if (!providerKey) {
-      return;
-    }
-    if (!cooldownMs || !Number.isFinite(cooldownMs) || cooldownMs <= 0) {
-      return;
-    }
-    const seriesKey = this.buildSeriesKey(providerKey, model);
-    if (!seriesKey) {
-      return;
-    }
-    const now = Date.now();
-    const nextExpiry = now + cooldownMs;
-    const existing = this.seriesBlacklist.get(seriesKey);
-    if (!existing || nextExpiry > existing) {
-      this.seriesBlacklist.set(seriesKey, nextExpiry);
-    }
-  }
 
   shouldThrottle(providerKey?: string, model?: string): { blocked: boolean; reason?: string; waitMs?: number } {
     if (!providerKey) {
       return { blocked: false };
     }
     const now = Date.now();
-    const seriesKey = this.buildSeriesKey(providerKey, model);
-    if (seriesKey) {
-      const blacklistUntil = this.seriesBlacklist.get(seriesKey);
-      if (blacklistUntil && blacklistUntil > now) {
-        return {
-          blocked: true,
-          reason: 'series-blacklist',
-          waitMs: blacklistUntil - now
-        };
-      }
-      if (blacklistUntil && blacklistUntil <= now) {
-        this.seriesBlacklist.delete(seriesKey);
-      }
-    }
 
     const bucketKey = this.buildBucketKey(providerKey, model);
     if (!bucketKey) {
@@ -97,10 +54,10 @@ export class RateLimitBackoffManager {
     return { blocked: false };
   }
 
-  record429(providerKey?: string, model?: string): { cooldownMs: number; consecutive: number; seriesBlacklisted: boolean } {
+  record429(providerKey?: string, model?: string): { cooldownMs: number; consecutive: number } {
     const bucketKey = this.buildBucketKey(providerKey, model);
     if (!bucketKey) {
-      return { cooldownMs: this.schedule[0] ?? 10_000, consecutive: 1, seriesBlacklisted: false };
+      return { cooldownMs: this.schedule[0] ?? 10_000, consecutive: 1 };
     }
     const now = Date.now();
     const prev = this.buckets.get(bucketKey);
@@ -114,19 +71,9 @@ export class RateLimitBackoffManager {
     };
     this.buckets.set(bucketKey, nextState);
 
-    let seriesBlacklisted = false;
-    if (nextCount >= this.schedule.length) {
-      const seriesKey = this.buildSeriesKey(providerKey, model);
-      if (seriesKey) {
-        this.seriesBlacklist.set(seriesKey, now + this.seriesBlacklistDurationMs);
-        seriesBlacklisted = true;
-      }
-    }
-
     return {
       cooldownMs,
-      consecutive: nextCount,
-      seriesBlacklisted
+      consecutive: nextCount
     };
   }
 
@@ -142,7 +89,7 @@ export class RateLimitBackoffManager {
     if (!result.blocked) {
       return null;
     }
-    const reason = result.reason === 'series-blacklist' ? 'series temporarily blocked due to repeated 429' : 'provider cooling down after 429';
+    const reason = 'provider cooling down after 429';
     return new RateLimitCooldownError(reason, result.waitMs);
   }
 
@@ -154,28 +101,4 @@ export class RateLimitBackoffManager {
     return `${providerKey}::${normalizedModel}`;
   }
 
-  private buildSeriesKey(providerKey?: string, model?: string): string | undefined {
-    if (!providerKey) {
-      return undefined;
-    }
-    const series = this.resolveSeries(model);
-    return `${providerKey}::series::${series}`;
-  }
-
-  private resolveSeries(model?: string): SeriesName {
-    if (!model) {
-      return 'default';
-    }
-    const lower = model.toLowerCase();
-    if (lower.includes('claude') || lower.includes('opus')) {
-      return 'claude';
-    }
-    if (lower.includes('flash')) {
-      return 'gemini-flash';
-    }
-    if (lower.includes('gemini') || lower.includes('pro')) {
-      return 'gemini-pro';
-    }
-    return 'default';
-  }
 }

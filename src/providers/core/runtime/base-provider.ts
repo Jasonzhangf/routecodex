@@ -39,24 +39,9 @@ type StatsCenterLike = {
   recordProviderUsage(ev: ProviderUsageEvent): void;
 };
 
-const SERIES_COOLDOWN_DETAIL_KEY = 'virtualRouterSeriesCooldown' as const;
-const SERIES_COOLDOWN_PROVIDER_IDS = new Set(['antigravity', 'gemini-cli']);
-const SERIES_COOLDOWN_MAX_MS = 3 * 60 * 60_000;
-type ModelSeriesName = 'claude' | 'gemini-pro' | 'gemini-flash' | 'default';
-type SeriesCooldownDetail = {
-  scope: 'model-series';
-  providerId: string;
-  providerKey?: string;
-  model?: string;
-  series: Exclude<ModelSeriesName, 'default'>;
-  cooldownMs: number;
-  quotaResetDelay?: string;
-  source?: string;
-  expiresAt?: number;
-};
 type QuotaDelayExtraction = {
   delay: string;
-  source: 'quota_reset_delay' | 'quota_exhausted_fallback' | 'capacity_exhausted_fallback';
+  source: 'quota_reset_delay' | 'quota_exhausted_fallback' | 'capacity_exhausted_fallback' | 'rate_limit_reset_fallback';
 };
 
 /**
@@ -446,18 +431,7 @@ export abstract class BaseProvider implements IProviderV2 {
       this.resetRateLimitCounter(providerKey, _context.model);
     }
 
-    let seriesCooldownDetail: SeriesCooldownDetail | null = null;
-    if (classification.isRateLimit && providerKey) {
-      // 仅负责从上游错误中提取配额冷却信息，并通过 virtualRouterSeriesCooldown
-      // 提供给 llmswitch-core 的 VirtualRouter。具体的 alias / series 冷却与重路由
-      // 逻辑完全由 VirtualRouterEngine 处理，Provider 层不再维护独立的 backoff 状态。
-      seriesCooldownDetail = BaseProvider.buildSeriesCooldownDetail(
-        augmentedError,
-        _context,
-        runtimeProfile,
-        providerKey
-      );
-    }
+    // Rate-limit/429: provider 层不再生成 series-level 冷却事件；alias 轮转与路由池决策在 llmswitch-core 执行。
 
     const affectsHealth = classification.affectsHealth;
     const recoverable = classification.forceFatalRateLimit ? false : classification.recoverable;
@@ -492,7 +466,7 @@ export abstract class BaseProvider implements IProviderV2 {
       upstreamMessage,
       requestContext: _context.runtimeMetadata,
       meta: augmentedError.details,
-      ...(seriesCooldownDetail ? { [SERIES_COOLDOWN_DETAIL_KEY]: seriesCooldownDetail } : {})
+      // 不再携带 series-level 冷却信息
     };
     if (!augmentedError.requestId) {
       augmentedError.requestId = _context.requestId;
@@ -605,50 +579,6 @@ export abstract class BaseProvider implements IProviderV2 {
     BaseProvider.rateLimitFailures.set(bucketKey, BaseProvider.RATE_LIMIT_THRESHOLD);
   }
 
-  private static buildSeriesCooldownDetail(
-    error: ProviderErrorAugmented,
-    _context: ProviderContext,
-    runtimeProfile?: ProviderRuntimeProfile,
-    providerKey?: string
-  ): SeriesCooldownDetail | null {
-    const normalizedProviderId = BaseProvider.normalizeSeriesProviderId(
-      runtimeProfile?.providerId || _context.providerId,
-      providerKey
-    );
-    if (!normalizedProviderId) {
-      return null;
-    }
-    const topLevelId = BaseProvider.extractTopLevelProviderId(normalizedProviderId);
-    if (!topLevelId || !SERIES_COOLDOWN_PROVIDER_IDS.has(topLevelId.toLowerCase())) {
-      return null;
-    }
-    const extracted = BaseProvider.extractQuotaResetDelayWithSource(error);
-    if (!extracted) {
-      return null;
-    }
-    const rawDelay = extracted.delay;
-    const cooldownMs = BaseProvider.parseDurationToMs(rawDelay);
-    if (!cooldownMs || cooldownMs <= 0) {
-      return null;
-    }
-    const cappedCooldownMs = Math.min(cooldownMs, SERIES_COOLDOWN_MAX_MS);
-    const modelId = BaseProvider.resolveContextModel(_context, runtimeProfile, providerKey);
-    const series = BaseProvider.resolveModelSeries(modelId);
-    if (!modelId || series === 'default') {
-      return null;
-    }
-    return {
-      scope: 'model-series',
-      providerId: normalizedProviderId,
-      providerKey,
-      model: modelId,
-      series,
-      cooldownMs: cappedCooldownMs,
-      quotaResetDelay: rawDelay,
-      source: extracted.source,
-      expiresAt: Date.now() + cappedCooldownMs
-    };
-  }
 
   private static extractQuotaResetDelayWithSource(error: ProviderErrorAugmented): QuotaDelayExtraction | null {
     if (!error) {
@@ -801,21 +731,6 @@ export abstract class BaseProvider implements IProviderV2 {
     return Math.round(totalMs);
   }
 
-  private static normalizeSeriesProviderId(providerId?: string, providerKey?: string): string | undefined {
-    const aliasFromKey = BaseProvider.extractProviderAliasId(providerKey);
-    if (aliasFromKey) {
-      return aliasFromKey;
-    }
-    const aliasFromId = BaseProvider.extractProviderAliasId(providerId);
-    if (aliasFromId) {
-      return aliasFromId;
-    }
-    const topFromKey = BaseProvider.extractTopLevelProviderId(providerKey);
-    if (topFromKey) {
-      return topFromKey;
-    }
-    return BaseProvider.extractTopLevelProviderId(providerId);
-  }
 
   private static normalizeObjectCandidate(value: unknown): Record<string, unknown> | null {
     if (!value) {
@@ -862,6 +777,33 @@ export abstract class BaseProvider implements IProviderV2 {
       return null;
     }
 
+    // Gemini CLI (cloudcode-pa) sometimes returns a short-window capacity/rate-limit 429 with a reset hint in text:
+    // - "Your quota will reset after 30s."
+    // - "quota will reset after 30 seconds"
+    // Prefer extracting the explicit reset window to avoid hammering all aliases within the same series.
+    {
+      const match =
+        haystack.match(/reset\s+(?:after|in)\s+(\d+(?:\.\d+)?)(ms|s|m|h)\b/i) ??
+        haystack.match(/reset\s+(?:after|in)\s+(\d+(?:\.\d+)?)\s*(seconds?|secs?|minutes?|mins?|hours?|hrs?)\b/i);
+      if (match && match[1]) {
+        const amount = match[1];
+        const unitRaw = (match[2] || '').toLowerCase();
+        const unit =
+          unitRaw === 'ms' || unitRaw === 's' || unitRaw === 'm' || unitRaw === 'h'
+            ? unitRaw
+            : unitRaw.startsWith('sec')
+              ? 's'
+              : unitRaw.startsWith('min')
+                ? 'm'
+                : unitRaw.startsWith('hour') || unitRaw.startsWith('hr')
+                  ? 'h'
+                  : '';
+        if (unit) {
+          return { delay: `${amount}${unit}`, source: 'rate_limit_reset_fallback' };
+        }
+      }
+    }
+
     // Antigravity / Gemini CLI: capacity exhausted (not quota depleted).
     // Example: "No capacity available for model ..." with reason "MODEL_CAPACITY_EXHAUSTED".
     // This is typically short-lived; apply a short series cooldown to avoid hammering every alias.
@@ -906,20 +848,6 @@ export abstract class BaseProvider implements IProviderV2 {
     return null;
   }
 
-  private static extractTopLevelProviderId(source?: string): string | undefined {
-    if (!source || typeof source !== 'string') {
-      return undefined;
-    }
-    const trimmed = source.trim();
-    if (!trimmed) {
-      return undefined;
-    }
-    const firstDot = trimmed.indexOf('.');
-    if (firstDot <= 0) {
-      return trimmed;
-    }
-    return trimmed.slice(0, firstDot);
-  }
 
   private static extractProviderAliasId(source?: string): string | undefined {
     if (!source || typeof source !== 'string') {
@@ -936,31 +864,6 @@ export abstract class BaseProvider implements IProviderV2 {
     return undefined;
   }
 
-  private static resolveContextModel(
-    _context: ProviderContext,
-    runtimeProfile?: ProviderRuntimeProfile,
-    providerKey?: string
-  ): string | undefined {
-    if (typeof _context.model === 'string' && _context.model.trim().length) {
-      return _context.model.trim();
-    }
-    const target = _context.target;
-    if (target && typeof target === 'object') {
-      const candidate =
-        (target as { clientModelId?: string }).clientModelId ||
-        (target as { modelId?: string }).modelId;
-      if (typeof candidate === 'string' && candidate.trim().length) {
-        return candidate.trim();
-      }
-    }
-    if (runtimeProfile?.defaultModel && runtimeProfile.defaultModel.trim().length) {
-      return runtimeProfile.defaultModel.trim();
-    }
-    if (providerKey) {
-      return BaseProvider.deriveModelIdFromProviderKey(providerKey);
-    }
-    return undefined;
-  }
 
   private static deriveModelIdFromProviderKey(providerKey?: string): string | undefined {
     if (!providerKey) {
@@ -980,22 +883,6 @@ export abstract class BaseProvider implements IProviderV2 {
     return finalPart || undefined;
   }
 
-  private static resolveModelSeries(model?: string): ModelSeriesName {
-    if (!model) {
-      return 'default';
-    }
-    const lower = model.toLowerCase();
-    if (lower.includes('claude') || lower.includes('opus')) {
-      return 'claude';
-    }
-    if (lower.includes('flash')) {
-      return 'gemini-flash';
-    }
-    if (lower.includes('gemini') || lower.includes('pro')) {
-      return 'gemini-pro';
-    }
-    return 'default';
-  }
 
   private isDailyLimitRateLimit(messageLower: string, upstreamLower?: string): boolean {
     const haystack = `${messageLower} ${upstreamLower ?? ''}`;

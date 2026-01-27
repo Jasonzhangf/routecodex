@@ -500,12 +500,14 @@ export class RouteCodexHttpServer {
     }
 
     const bridge = (await import('../../../modules/llmswitch/bridge.js')) as unknown as {
-      getHubPipelineCtorForImpl?: (impl: 'engine') => Promise<unknown>;
+      getHubPipelineCtorForImpl?: (impl: 'engine' | 'wasm') => Promise<unknown>;
     };
     const getCtor = bridge.getHubPipelineCtorForImpl;
     if (typeof getCtor !== 'function') {
       throw new Error('llmswitch bridge does not expose getHubPipelineCtorForImpl');
     }
+    // Keep existing behavior: this shadow pipeline is for llms-engine shadow compare.
+    // WASM shadow pipeline will use a separate loader in W2.
     const ctorFactory = await getCtor('engine');
     const hubCtor = ctorFactory as unknown as HubPipelineCtor;
     if (!('virtualRouter' in shadowConfig)) {
