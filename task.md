@@ -183,13 +183,14 @@
 #### llmswitch-core 覆盖率对比（目标 90%）
 
 - **最新验证（2026-01-27）**：`node scripts/run-ci-coverage.mjs`
-  - lines **66.75%** / branches **52.21%** / functions **68.08%** / statements **66.75%**
+  - lines **68.63%** / branches **53.16%** / functions **72.09%** / statements **68.63%**
   - 证据：`/Users/fanzhang/Documents/github/sharedmodule/llmswitch-core/coverage/coverage-summary.json`
   - 仍未达标（目标 90%），需继续补覆盖
 - **新增覆盖脚本（已接入 CI）**：
   - `sharedmodule/llmswitch-core/scripts/tests/coverage-compat-pipeline-executor.mjs`
   - `sharedmodule/llmswitch-core/scripts/tests/coverage-responses-mapper.mjs`
   - `sharedmodule/llmswitch-core/scripts/tests/coverage-tool-governor.mjs`
+  - `sharedmodule/llmswitch-core/scripts/tests/coverage-followup-shadow.mjs`
 
 #### W2 验证记录（2026-01-26）
 - llms-wasm native：`cargo test --test ts_fixtures_compare` 全部 26 用例通过。
