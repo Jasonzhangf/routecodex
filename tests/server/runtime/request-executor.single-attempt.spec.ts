@@ -179,4 +179,92 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     expect(handle.instance.processIncoming).toHaveBeenCalledTimes(1);
     expect(runtimeManager.getHandleByRuntimeKey).toHaveBeenCalledTimes(1);
   });
+
+  it('signals repeated identical antigravity errors to VirtualRouter via metadata.__rt', async () => {
+    const agA = 'antigravity.aliasA';
+    const agB = 'antigravity.aliasB';
+    const other = 'tab.key1';
+
+    const retryable403 = Object.assign(new Error('HTTP 403'), {
+      statusCode: 403,
+      upstreamCode: 'HTTP_403',
+      retryable: true
+    });
+
+    const failingHandle = createRuntimeHandle(async () => {
+      throw retryable403;
+    });
+    const successHandle = createRuntimeHandle(async () => ({ data: { ok: true } }));
+
+    const pipelineResultA = {
+      providerPayload: { messages: [{ role: 'user', content: 'retry me' }] },
+      target: { providerKey: agA, runtimeKey: 'runtime:agA', outboundProfile: 'openai-chat' },
+      processMode: 'chat'
+    } as any;
+    const pipelineResultB = {
+      providerPayload: { messages: [{ role: 'user', content: 'retry me' }] },
+      target: { providerKey: agB, runtimeKey: 'runtime:agB', outboundProfile: 'openai-chat' },
+      processMode: 'chat'
+    } as any;
+    const pipelineResultOk = {
+      providerPayload: { messages: [{ role: 'user', content: 'retry me' }] },
+      target: { providerKey: other, runtimeKey: 'runtime:other', outboundProfile: 'openai-chat' },
+      processMode: 'chat'
+    } as any;
+
+    const fakePipeline: HubPipeline = {
+      execute: jest
+        .fn()
+        .mockResolvedValueOnce(pipelineResultA)
+        .mockResolvedValueOnce(pipelineResultB)
+        .mockResolvedValueOnce(pipelineResultOk)
+    };
+    const runtimeManager: ProviderRuntimeManager = {
+      resolveRuntimeKey: jest.fn(),
+      getHandleByRuntimeKey: jest.fn((runtimeKey: string) => {
+        if (runtimeKey === 'runtime:other') {
+          return successHandle;
+        }
+        return failingHandle;
+      }),
+      getHandleByProviderKey: jest.fn(),
+      disposeAll: jest.fn(),
+      initialize: jest.fn()
+    } as unknown as ProviderRuntimeManager;
+
+    const stats = {
+      recordRequestStart: jest.fn(),
+      recordCompletion: jest.fn(),
+      bindProvider: jest.fn(),
+      recordToolUsage: jest.fn()
+    };
+    const deps = {
+      runtimeManager,
+      getHubPipeline: () => fakePipeline,
+      getModuleDependencies: (): ModuleDependencies => ({
+        errorHandlingCenter: {
+          handleError: jest.fn().mockResolvedValue({ success: true })
+        }
+      } as ModuleDependencies),
+      logStage: jest.fn(),
+      stats
+    };
+    const executor = new HubRequestExecutor(deps);
+    const request: PipelineExecutionInput = {
+      requestId: 'req_retry_sig',
+      entryEndpoint: '/v1/responses',
+      headers: {},
+      body: { messages: [{ role: 'user', content: 'retry me' }] },
+      metadata: { stream: false, inboundStream: false }
+    };
+
+    const response = await executor.execute(request);
+    expect(response).toBeDefined();
+    expect(fakePipeline.execute).toHaveBeenCalledTimes(3);
+
+    const thirdCallMetadata = fakePipeline.execute.mock.calls[2][0]
+      .metadata as Record<string, unknown>;
+    expect((thirdCallMetadata as any)?.__rt?.antigravityRetryErrorSignature).toBe('403:HTTP_403');
+    expect((thirdCallMetadata as any)?.__rt?.antigravityRetryErrorConsecutive).toBe(2);
+  });
 });

@@ -72,6 +72,40 @@ function extractStatusCodeFromError(err: unknown): number | undefined {
   return undefined;
 }
 
+function extractRetryErrorSignature(err: unknown): string {
+  if (!err || typeof err !== 'object') {
+    return 'unknown';
+  }
+  const status = extractStatusCodeFromError(err);
+  const codeRaw = (err as { code?: unknown }).code;
+  const upstreamCodeRaw = (err as { upstreamCode?: unknown }).upstreamCode;
+  const upstreamCode =
+    typeof upstreamCodeRaw === 'string' && upstreamCodeRaw.trim() ? upstreamCodeRaw.trim() : undefined;
+  const code = typeof codeRaw === 'string' && codeRaw.trim() ? codeRaw.trim() : undefined;
+  const parts = [
+    typeof status === 'number' && Number.isFinite(status) ? String(status) : '',
+    upstreamCode || '',
+    code || ''
+  ].filter((p) => p.length > 0);
+  return parts.length ? parts.join(':') : 'unknown';
+}
+
+function injectAntigravityRetrySignal(
+  metadata: Record<string, unknown>,
+  signal: { signature: string; consecutive: number } | null
+): void {
+  if (!signal || !signal.signature || signal.consecutive <= 0) {
+    return;
+  }
+  const carrier = metadata as { __rt?: unknown };
+  const existing = carrier.__rt && typeof carrier.__rt === 'object' && !Array.isArray(carrier.__rt) ? carrier.__rt : {};
+  carrier.__rt = {
+    ...(existing as Record<string, unknown>),
+    antigravityRetryErrorSignature: signal.signature,
+    antigravityRetryErrorConsecutive: signal.consecutive
+  };
+}
+
 export class HubRequestExecutor implements RequestExecutor {
   constructor(private readonly deps: RequestExecutorDeps) { }
 
@@ -129,6 +163,7 @@ export class HubRequestExecutor implements RequestExecutor {
       let attempt = 0;
       let lastError: unknown;
       let initialRoutePool: string[] | null = null;
+      let antigravityRetrySignal: { signature: string; consecutive: number } | null = null;
 
       while (attempt < maxAttempts) {
         attempt += 1;
@@ -145,6 +180,7 @@ export class HubRequestExecutor implements RequestExecutor {
           metadataForAttempt.clientHeaders = clientHeadersForAttempt;
         }
         metadataForAttempt.clientRequestId = clientRequestId;
+        injectAntigravityRetrySignal(metadataForAttempt, antigravityRetrySignal);
         this.logStage(`${pipelineLabel}.start`, providerRequestId, {
           endpoint: input.entryEndpoint,
           stream: metadataForAttempt.stream,
@@ -334,6 +370,16 @@ export class HubRequestExecutor implements RequestExecutor {
             attempt
           });
           lastError = error;
+          if (isAntigravityProviderKey(target.providerKey)) {
+            const signature = extractRetryErrorSignature(error);
+            const consecutive: number =
+              antigravityRetrySignal && antigravityRetrySignal.signature === signature
+                ? antigravityRetrySignal.consecutive + 1
+                : 1;
+            antigravityRetrySignal = { signature, consecutive };
+          } else {
+            antigravityRetrySignal = null;
+          }
           // Antigravity pool behavior: on 429 MODEL_CAPACITY_EXHAUSTED, keep rotating aliases within Antigravity
           // (sticky-queue) before falling back to other pool targets. This may require more than the global default attempts.
           if (isAntigravityProviderKey(target.providerKey) && extractStatusCodeFromError(error) === 429) {

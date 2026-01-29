@@ -168,3 +168,88 @@ describe('Virtual router sticky fallback with excluded keys', () => {
     expect(second.target.providerKey).toBe(providerB);
   });
 });
+
+describe('Virtual router antigravity safer fallback on repeated errors', () => {
+  const ag1 = 'antigravity.alias1.gemini-3-pro-high';
+  const ag2 = 'antigravity.alias2.gemini-3-pro-high';
+  const ag3 = 'antigravity.alias3.gemini-3-pro-high';
+  const other = 'tabglm.key1.glm-4.7';
+
+  const config: VirtualRouterConfig = {
+    routing: {
+      default: [
+        {
+          id: 'primary',
+          targets: [ag1, ag2, ag3, other],
+          priority: 1
+        }
+      ]
+    },
+    providers: {
+      [ag1]: {
+        providerKey: ag1,
+        providerType: 'gemini',
+        endpoint: 'https://example.invalid',
+        auth: { type: 'apiKey', value: 'test' },
+        outboundProfile: 'gemini-chat',
+        runtimeKey: 'runtime:ag1',
+        modelId: 'gemini-3-pro-high'
+      },
+      [ag2]: {
+        providerKey: ag2,
+        providerType: 'gemini',
+        endpoint: 'https://example.invalid',
+        auth: { type: 'apiKey', value: 'test' },
+        outboundProfile: 'gemini-chat',
+        runtimeKey: 'runtime:ag2',
+        modelId: 'gemini-3-pro-high'
+      },
+      [ag3]: {
+        providerKey: ag3,
+        providerType: 'gemini',
+        endpoint: 'https://example.invalid',
+        auth: { type: 'apiKey', value: 'test' },
+        outboundProfile: 'gemini-chat',
+        runtimeKey: 'runtime:ag3',
+        modelId: 'gemini-3-pro-high'
+      },
+      [other]: {
+        providerKey: other,
+        providerType: 'anthropic',
+        endpoint: 'https://example.invalid',
+        auth: { type: 'apiKey', value: 'test' },
+        outboundProfile: 'anthropic-messages',
+        runtimeKey: 'runtime:other',
+        modelId: 'glm-4.7'
+      }
+    },
+    classifier: {}
+  };
+
+  const baseRequest: StandardizedRequest = {
+    model: 'client-model',
+    messages: [{ role: 'user', content: 'hello' }],
+    parameters: {},
+    metadata: { originalEndpoint: '/v1/responses', processMode: 'chat' }
+  };
+
+  it('prefers non-antigravity targets after two consecutive identical antigravity errors (unless none)', () => {
+    const engine = new VirtualRouterEngine();
+    engine.initialize(config);
+
+    const routed = engine.route(baseRequest, {
+      requestId: 'req_ag_safe',
+      entryEndpoint: '/v1/responses',
+      processMode: 'chat',
+      stream: true,
+      direction: 'request',
+      excludedProviderKeys: [ag1, ag2],
+      __rt: {
+        antigravityRetryErrorSignature: '403:HTTP_403',
+        antigravityRetryErrorConsecutive: 2
+      }
+    } as any);
+
+    expect(routed.target.providerKey).toBe(other);
+  });
+});
