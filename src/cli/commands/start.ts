@@ -140,7 +140,11 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
         // Resolve config path
         let configPath = options.config;
         if (!configPath) {
-          configPath = pathImpl.join(home(), '.routecodex', 'config.json');
+          // Respect env overrides used by install/global verification scripts.
+          // CLI flags still take precedence when provided.
+          configPath =
+            (ctx.env.ROUTECODEX_CONFIG_PATH || ctx.env.ROUTECODEX_CONFIG || '').trim() ||
+            pathImpl.join(home(), '.routecodex', 'config.json');
         }
 
         // Ensure provided config path is a file (not a directory)

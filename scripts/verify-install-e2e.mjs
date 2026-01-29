@@ -127,7 +127,10 @@ async function main() {
     RCC_HOST: HOST,
     ROUTECODEX_CONFIG: verifyConfigPath,
     ROUTECODEX_CONFIG_PATH: verifyConfigPath,
-    RCC4_CONFIG_PATH: verifyConfigPath
+    RCC4_CONFIG_PATH: verifyConfigPath,
+    // Install verification uses a mock upstream; skip ManagerDaemon modules (token/quota) so startup
+    // does not depend on external network availability.
+    ROUTECODEX_USE_MOCK: '1'
   };
   const server = spawn(routecodexBin, ['start'], {
     env,
