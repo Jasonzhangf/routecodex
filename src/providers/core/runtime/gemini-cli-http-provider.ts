@@ -18,6 +18,7 @@ import type { OpenAIStandardConfig } from '../api/provider-config.js';
 import type { ProviderContext, ProviderType } from '../api/provider-types.js';
 import type { UnknownObject } from '../../../types/common-types.js';
 import type { ModuleDependencies } from '../../../modules/pipeline/interfaces/pipeline-interfaces.js';
+import { cacheAntigravitySessionSignature, extractAntigravityGeminiSessionId } from '../../../modules/llmswitch/bridge.js';
 import { GeminiCLIProtocolClient } from '../../../client/gemini-cli/gemini-cli-protocol-client.js';
 import { getDefaultProjectId } from '../../auth/gemini-cli-userinfo-helper.js';
 import { ANTIGRAVITY_HELPER_DEFAULTS, resolveAntigravityApiBaseCandidates } from '../../auth/antigravity-userinfo-helper.js';
@@ -160,6 +161,18 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
       const prefix = headerMode === 'minimal' ? 'req-' : 'agent-';
       if (typeof existingReqId !== 'string' || !existingReqId.trim().startsWith(prefix)) {
         record.requestId = `${prefix}${randomUUID()}`;
+      }
+    }
+
+    if (this.isAntigravityRuntime()) {
+      const derivedSessionId = extractAntigravityGeminiSessionId(processedRequest);
+      if (typeof derivedSessionId === 'string' && derivedSessionId.trim().length) {
+        const metaCarrier = processedRequest as { metadata?: Record<string, unknown> };
+        metaCarrier.metadata = { ...(metaCarrier.metadata || {}), antigravitySessionId: derivedSessionId.trim() };
+        const runtimeMeta = this.getCurrentRuntimeMetadata();
+        if (runtimeMeta) {
+          runtimeMeta.metadata = { ...(runtimeMeta.metadata || {}), antigravitySessionId: derivedSessionId.trim() };
+        }
       }
     }
 
@@ -314,7 +327,11 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
     stream: NodeJS.ReadableStream,
     context: ProviderContext
   ): Promise<UnknownObject> {
-    const normalizer = new GeminiSseNormalizer();
+    const sessionId =
+      context && context.metadata && typeof context.metadata.antigravitySessionId === 'string'
+        ? String(context.metadata.antigravitySessionId)
+        : undefined;
+    const normalizer = new GeminiSseNormalizer({ sessionId, enableAntigravitySignatureCache: this.isAntigravityRuntime() });
     stream.pipe(normalizer);
     return super.wrapUpstreamSseResponse(normalizer, context);
   }
@@ -463,10 +480,16 @@ class GeminiSseNormalizer extends Transform {
   private chunkCounter = 0;
   private processedEventCounter = 0;
   private capturedEvents: any[] = [];
+  private antigravitySessionId: string | null = null;
+  private enableAntigravitySignatureCache = false;
 
-  constructor() {
+  constructor(options?: { sessionId?: string; enableAntigravitySignatureCache?: boolean }) {
     super();
     this.decoder = new StringDecoder('utf8');
+    this.antigravitySessionId = typeof options?.sessionId === 'string' && options.sessionId.trim().length
+      ? options.sessionId.trim()
+      : null;
+    this.enableAntigravitySignatureCache = !!options?.enableAntigravitySignatureCache;
   }
 
   override _transform(chunk: unknown, _encoding: BufferEncoding, callback: TransformCallback): void {
@@ -565,6 +588,14 @@ class GeminiSseNormalizer extends Transform {
 
       for (const part of parts) {
         if (!part || typeof part !== 'object') {continue;}
+        if (this.enableAntigravitySignatureCache && this.antigravitySessionId) {
+          const sig = typeof (part as { thoughtSignature?: unknown }).thoughtSignature === 'string'
+            ? String((part as { thoughtSignature?: unknown }).thoughtSignature)
+            : '';
+          if (sig) {
+            cacheAntigravitySessionSignature(this.antigravitySessionId, sig, 1);
+          }
+        }
 
         // Send raw Gemini part - let llmswitch-core handle the conversion to target protocol
         this.pushEvent('gemini.data', {

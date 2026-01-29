@@ -88,6 +88,53 @@ function requireCoreDist<TModule extends object = AnyRecord>(
   return require(modulePath) as TModule;
 }
 
+type AntigravitySessionSignatureModule = {
+  extractAntigravityGeminiSessionId?: (payload: unknown) => string;
+  cacheAntigravitySessionSignature?: (sessionId: string, signature: string, messageCount?: number) => void;
+};
+
+let cachedAntigravitySignatureModule: AntigravitySessionSignatureModule | null = null;
+
+function loadAntigravitySignatureModule(): AntigravitySessionSignatureModule | null {
+  if (cachedAntigravitySignatureModule) {
+    return cachedAntigravitySignatureModule;
+  }
+  try {
+    cachedAntigravitySignatureModule = requireCoreDist<AntigravitySessionSignatureModule>(
+      'conversion/compat/antigravity-session-signature'
+    );
+  } catch {
+    cachedAntigravitySignatureModule = null;
+  }
+  return cachedAntigravitySignatureModule;
+}
+
+export function extractAntigravityGeminiSessionId(payload: unknown): string | undefined {
+  const mod = loadAntigravitySignatureModule();
+  const fn = mod?.extractAntigravityGeminiSessionId;
+  if (typeof fn !== 'function') {
+    return undefined;
+  }
+  try {
+    return fn(payload);
+  } catch {
+    return undefined;
+  }
+}
+
+export function cacheAntigravitySessionSignature(sessionId: string, signature: string, messageCount = 1): void {
+  const mod = loadAntigravitySignatureModule();
+  const fn = mod?.cacheAntigravitySessionSignature;
+  if (typeof fn !== 'function') {
+    return;
+  }
+  try {
+    fn(sessionId, signature, messageCount);
+  } catch {
+    // best-effort only
+  }
+}
+
 type SnapshotHooksModule = {
   writeSnapshotViaHooks?: (options: AnyRecord) => Promise<void> | void;
 };
