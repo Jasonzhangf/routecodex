@@ -190,7 +190,69 @@ export function getInitProviderCatalog(): InitProviderTemplate[] {
         }
       },
       defaultModel: 'mimo-v2-flash'
+    },
+    {
+      id: 'gemini-cli',
+      label: 'Gemini CLI (Cloud Code Assist)',
+      description: 'Google Cloud Code Assist v1internal endpoints (Sandbox-first)',
+      provider: {
+        id: 'gemini-cli',
+        enabled: true,
+        type: 'gemini-cli-http-provider',
+        providerType: 'gemini',
+        compatibilityProfile: 'chat:gemini',
+        baseURL: 'https://daily-cloudcode-pa.sandbox.googleapis.com',
+        auth: {
+          type: 'gemini-cli-oauth',
+          entries: [
+            {
+              alias: 'YOUR_ALIAS_HERE',
+              type: 'gemini-cli-oauth',
+              tokenFile: '~/.routecodex/auth/gemini-oauth-1-YOUR_ALIAS_HERE.json'
+            }
+          ]
+        },
+        models: {
+          'gemini-2.5-pro': { supportsStreaming: true },
+          'gemini-2.5-flash': { supportsStreaming: true },
+          'gemini-2.5-flash-lite': { supportsStreaming: true }
+        }
+      },
+      defaultModel: 'gemini-2.5-flash'
+    },
+    {
+      id: 'antigravity',
+      label: 'Antigravity (Cloud Code Assist)',
+      description: 'Antigravity/Code Assist routing via v1internal endpoints (Sandbox-first)',
+      provider: {
+        id: 'antigravity',
+        enabled: true,
+        type: 'gemini-cli-http-provider',
+        providerType: 'gemini',
+        compatibilityProfile: 'chat:gemini',
+        baseURL: 'https://daily-cloudcode-pa.sandbox.googleapis.com',
+        auth: {
+          type: 'antigravity-oauth',
+          entries: [
+            {
+              alias: 'YOUR_ALIAS_HERE',
+              type: 'antigravity-oauth',
+              tokenFile: '~/.routecodex/auth/antigravity-oauth-1-YOUR_ALIAS_HERE.json'
+            }
+          ]
+        },
+        models: {
+          'gemini-2.5-pro': { supportsStreaming: true },
+          'gemini-2.5-flash': { supportsStreaming: true },
+          'gemini-2.5-flash-lite': { supportsStreaming: true },
+          'gemini-3-pro-high': { supportsStreaming: true },
+          'gemini-3-pro-low': { supportsStreaming: true },
+          'gemini-3-flash-preview': { supportsStreaming: true },
+          'claude-sonnet-4-5': { supportsStreaming: true },
+          'claude-sonnet-4-5-thinking': { supportsStreaming: true }
+        }
+      },
+      defaultModel: 'claude-sonnet-4-5'
     }
   ];
 }
-

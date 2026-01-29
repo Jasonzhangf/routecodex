@@ -40,6 +40,36 @@ async function readJsonFileWithRetry<T>(filepath: string, attempts = 20, delayMs
   throw lastError instanceof Error ? lastError : new Error(String(lastError ?? 'failed to read json'));
 }
 
+async function readJsonFileUntil<T>(
+  filepath: string,
+  predicate: (data: T) => boolean,
+  attempts = 50,
+  delayMs = 10
+): Promise<T> {
+  let lastError: unknown;
+  let lastValue: T | undefined;
+  for (let i = 0; i < attempts; i += 1) {
+    try {
+      const raw = fs.readFileSync(filepath, 'utf8');
+      if (!raw || !raw.trim()) {
+        throw new Error('empty file');
+      }
+      const parsed = JSON.parse(raw) as T;
+      lastValue = parsed;
+      if (predicate(parsed)) {
+        return parsed;
+      }
+    } catch (err) {
+      lastError = err;
+    }
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+  if (lastValue !== undefined) {
+    throw new Error(`condition not met for ${filepath}: ${JSON.stringify(lastValue)}`);
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError ?? 'failed to read json'));
+}
+
 describe('stop_message_auto servertool', () => {
   beforeAll(() => {
     process.env.ROUTECODEX_SESSION_DIR = SESSION_DIR;
@@ -111,12 +141,13 @@ describe('stop_message_auto servertool', () => {
     const ops = followup.injection.ops as any[];
     expect(ops.some((op) => op?.op === 'append_user_text' && op?.text === '继续')).toBe(true);
 
-    const persisted = await readJsonFileWithRetry<{ state?: { stopMessageUsed?: number; stopMessageLastUsedAt?: number } }>(
-      path.join(SESSION_DIR, `session-${sessionId}.json`)
+    const persisted = await readJsonFileUntil<{ state?: { stopMessageUsed?: number; stopMessageLastUsedAt?: number } }>(
+      path.join(SESSION_DIR, `session-${sessionId}.json`),
+      (data) => data?.state?.stopMessageUsed === 1 && typeof data?.state?.stopMessageLastUsedAt === 'number'
     );
-    // stopMessage usage counter is reserved only when followup is executed (servertool orchestration),
-    // not when the handler merely schedules the followup.
-    expect(persisted?.state?.stopMessageUsed).toBe(0);
+    // llmswitch-core main: stopMessage usage counter increments as soon as we decide to trigger followup.
+    expect(persisted?.state?.stopMessageUsed).toBe(1);
+    expect(typeof persisted?.state?.stopMessageLastUsedAt).toBe('number');
   });
 
   test('builds /v1/responses followup and preserves parameters (non-streaming)', async () => {
@@ -184,7 +215,7 @@ describe('stop_message_auto servertool', () => {
     expect(orchestration.executed).toBe(true);
     expect(orchestration.flowId).toBe('stop_message_flow');
 
-    const persisted = await readJsonFileWithRetry<{
+    const persisted = await readJsonFileUntil<{
       state?: {
         stopMessageText?: unknown;
         stopMessageMaxRepeats?: unknown;
@@ -192,11 +223,17 @@ describe('stop_message_auto servertool', () => {
         stopMessageUpdatedAt?: unknown;
         stopMessageLastUsedAt?: unknown;
       };
-    }>(path.join(SESSION_DIR, `session-${sessionId}.json`));
-    expect(persisted?.state?.stopMessageText).toBeUndefined();
-    expect(persisted?.state?.stopMessageMaxRepeats).toBeUndefined();
-    expect(persisted?.state?.stopMessageUsed).toBeUndefined();
-    expect(typeof persisted?.state?.stopMessageUpdatedAt).toBe('number');
+    }>(
+      path.join(SESSION_DIR, `session-${sessionId}.json`),
+      (data) => (data as any)?.state?.stopMessageUsed === 1 && typeof (data as any)?.state?.stopMessageLastUsedAt === 'number'
+    );
+    // The followup itself is re-entered via a stubbed reenterPipeline in this test, so we do not
+    // process the followup response here. Cleanup happens when the handler observes used>=maxRepeats
+    // in a subsequent stop_message_flow invocation.
+    expect(persisted?.state?.stopMessageText).toBe('继续执行');
+    expect(persisted?.state?.stopMessageMaxRepeats).toBe(1);
+    expect(persisted?.state?.stopMessageUsed).toBe(1);
+    expect(persisted?.state?.stopMessageUpdatedAt).toBeUndefined();
     expect(typeof persisted?.state?.stopMessageLastUsedAt).toBe('number');
 
     expect(capturedFollowup).toBeTruthy();

@@ -10,10 +10,12 @@ import os from 'node:os';
 import type { UnknownObject } from '../../modules/pipeline/types/common-types.js';
 import { logOAuthDebug } from './oauth-logger.js';
 
-const DEFAULT_ANTIGRAVITY_API_BASE_DAILY = 'https://daily-cloudcode-pa.sandbox.googleapis.com';
+// Antigravity-Manager alignment: prefer Sandbox → Daily → Prod for Cloud Code Assist v1internal APIs.
+const DEFAULT_ANTIGRAVITY_API_BASE_SANDBOX = 'https://daily-cloudcode-pa.sandbox.googleapis.com';
+const DEFAULT_ANTIGRAVITY_API_BASE_DAILY = 'https://daily-cloudcode-pa.googleapis.com';
 const DEFAULT_ANTIGRAVITY_API_BASE_AUTOPUSH = 'https://autopush-cloudcode-pa.sandbox.googleapis.com';
 const DEFAULT_ANTIGRAVITY_API_BASE_PROD = 'https://cloudcode-pa.googleapis.com';
-const DEFAULT_ANTIGRAVITY_API_BASE = DEFAULT_ANTIGRAVITY_API_BASE_DAILY;
+const DEFAULT_ANTIGRAVITY_API_BASE = DEFAULT_ANTIGRAVITY_API_BASE_SANDBOX;
 const DEFAULT_USER_AGENT = 'antigravity/1.11.3 windows/amd64';
 const METADATA_PAYLOAD = {
   ideType: 'ANTIGRAVITY',
@@ -90,13 +92,25 @@ const normalizedBase = (base?: string): string => {
 };
 
 export function resolveAntigravityApiBaseCandidates(explicit?: string): string[] {
-  const primary = normalizedBase(explicit);
+  const envBase = normalizeApiBase(
+    (process.env.ROUTECODEX_ANTIGRAVITY_API_BASE || process.env.RCC_ANTIGRAVITY_API_BASE || '').trim()
+  );
+  const explicitBase = normalizeApiBase(explicit || '');
+
+  // Default order mirrors Antigravity-Manager: Sandbox → Daily → (Autopush) → Prod.
+  // - We do NOT promote the caller's explicit base to the front because our config.v1/v2
+  //   often pins `baseURL` to prod; promoting it would defeat the intent of this function.
+  // - Env override is treated as an explicit operator choice and is placed first.
   const ordered = [
-    primary,
+    ...(envBase ? [envBase] : []),
+    DEFAULT_ANTIGRAVITY_API_BASE_SANDBOX,
     DEFAULT_ANTIGRAVITY_API_BASE_DAILY,
     DEFAULT_ANTIGRAVITY_API_BASE_AUTOPUSH,
-    DEFAULT_ANTIGRAVITY_API_BASE_PROD
-  ].map((base) => normalizeApiBase(base)).filter((base) => base.length);
+    DEFAULT_ANTIGRAVITY_API_BASE_PROD,
+    ...(explicitBase ? [explicitBase] : [])
+  ]
+    .map((base) => normalizeApiBase(base))
+    .filter((base) => base.length);
   return Array.from(new Set(ordered));
 }
 

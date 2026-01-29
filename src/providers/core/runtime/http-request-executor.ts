@@ -77,6 +77,15 @@ export class HttpRequestExecutor {
     processedRequest: UnknownObject,
     context: ProviderContext
   ): Promise<PreparedHttpRequest> {
+    const providerHint = String(
+      (context as unknown as { providerKey?: unknown; providerId?: unknown; providerFamily?: unknown; providerType?: unknown })
+        .providerKey ||
+        (context as unknown as { providerId?: unknown }).providerId ||
+        (context as unknown as { providerFamily?: unknown }).providerFamily ||
+        (context as unknown as { providerType?: unknown }).providerType ||
+        ''
+    ).toLowerCase();
+    const isAntigravity = providerHint.includes('antigravity');
     const wantsSse = this.deps.wantsUpstreamSse(processedRequest, context);
     const defaultEndpoint = this.deps.getEffectiveEndpoint();
     const endpoint = this.deps.resolveRequestEndpoint(processedRequest, defaultEndpoint);
@@ -85,19 +94,28 @@ export class HttpRequestExecutor {
     finalHeaders = this.deps.applyStreamModeHeaders(finalHeaders, wantsSse);
     const baseUrlPrimary = this.deps.getEffectiveBaseUrl().replace(/\/$/, '');
     const endpointSuffix = endpoint.startsWith('/') ? endpoint.slice(1) : endpoint;
-    const targetUrl = `${baseUrlPrimary}/${endpointSuffix}`;
     const candidateBases = this.deps.getBaseUrlCandidates?.(context);
-    const targetUrls = candidateBases && candidateBases.length
-      ? Array.from(
-          new Set(
-            [baseUrlPrimary, ...candidateBases]
-              .map((base) => String(base || '').trim())
-              .filter((base) => base.length)
-              .map((base) => base.replace(/\/$/, ''))
-              .map((base) => `${base}/${endpointSuffix}`)
-          )
-        )
-      : undefined;
+    const baseList =
+      candidateBases && candidateBases.length
+        ? (isAntigravity
+            ? [
+                ...candidateBases,
+                // Keep configured primary as the last fallback for antigravity (Sandbox/Daily-first).
+                ...(candidateBases.includes(baseUrlPrimary) ? [] : [baseUrlPrimary])
+              ]
+            : [baseUrlPrimary, ...candidateBases])
+        : [baseUrlPrimary];
+    const targets = Array.from(
+      new Set(
+        baseList
+          .map((base) => String(base || '').trim())
+          .filter((base) => base.length)
+          .map((base) => base.replace(/\/$/, ''))
+          .map((base) => `${base}/${endpointSuffix}`)
+      )
+    );
+    const targetUrl = targets[0] || `${baseUrlPrimary}/${endpointSuffix}`;
+    const targetUrls = targets.length > 1 ? targets : undefined;
     const finalBody = this.deps.buildHttpRequestBody(processedRequest);
     const meta = (context as { metadata?: unknown }).metadata;
     const metaEntryEndpoint =
