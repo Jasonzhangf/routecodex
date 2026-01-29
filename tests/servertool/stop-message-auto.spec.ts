@@ -225,16 +225,21 @@ describe('stop_message_auto servertool', () => {
       };
     }>(
       path.join(SESSION_DIR, `session-${sessionId}.json`),
-      (data) => (data as any)?.state?.stopMessageUsed === 1 && typeof (data as any)?.state?.stopMessageLastUsedAt === 'number'
+      (data) =>
+        (data as any)?.state?.stopMessageText === undefined &&
+        (data as any)?.state?.stopMessageMaxRepeats === undefined &&
+        (data as any)?.state?.stopMessageUsed === undefined &&
+        typeof (data as any)?.state?.stopMessageUpdatedAt === 'number' &&
+        typeof (data as any)?.state?.stopMessageLastUsedAt === 'number'
     );
-    // The followup itself is re-entered via a stubbed reenterPipeline in this test, so we do not
-    // process the followup response here. Cleanup happens when the handler observes used>=maxRepeats
-    // in a subsequent stop_message_flow invocation.
-    expect(persisted?.state?.stopMessageText).toBe('继续执行');
-    expect(persisted?.state?.stopMessageMaxRepeats).toBe(1);
-    expect(persisted?.state?.stopMessageUsed).toBe(1);
-    expect(persisted?.state?.stopMessageUpdatedAt).toBeUndefined();
+    // With stop_message_flow followups allowed to re-trigger servertool orchestration, the followup
+    // response runs stop_message_auto again. Since maxRepeats=1, it auto-clears state and leaves
+    // a tombstone timestamp pair to prevent accidental re-application.
+    expect(persisted?.state?.stopMessageText).toBeUndefined();
+    expect(persisted?.state?.stopMessageMaxRepeats).toBeUndefined();
+    expect(persisted?.state?.stopMessageUsed).toBeUndefined();
     expect(typeof persisted?.state?.stopMessageLastUsedAt).toBe('number');
+    expect(typeof persisted?.state?.stopMessageUpdatedAt).toBe('number');
 
     expect(capturedFollowup).toBeTruthy();
     expect(capturedFollowup?.entryEndpoint).toBe('/v1/responses');
