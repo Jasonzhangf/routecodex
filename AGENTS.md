@@ -31,6 +31,7 @@ This document replaces the old “architecture novel” with a concise set of ru
 ## 3. Build & Release Workflow
 
 1. **Update shared modules first** – Modify `sharedmodule/llmswitch-core` (or other sharedmodule repos) in their source worktrees, run their `npm run build`, and ensure dist artifacts exist.
+2. **Tag both repos for npm releases** – Every npm publish requires matching git tags on BOTH repos: `routecodex` and `sharedmodule/llmswitch-core`. If tags are missing, do **not** build/publish the npm package.
 2. **Host build** – Run `npm run build:dev` 并确保验证通过；禁止在常规流程中使用 `ROUTECODEX_VERIFY_SKIP=1` 跳过验证。这会重新生成 `dist/` 和 `src/build-info.ts`。
 3. **Global install/test** – `npm run install:global` to validate the CLI, followed by any targeted smoke tests (providers, responses SSE, etc.).
 4. **Never commit build artifacts** – `dist/` is emitted during CI, sharedmodule dist files track the upstream repo, and tarballs stay out of git.
