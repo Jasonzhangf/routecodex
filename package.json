@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.89.1517",
+  "version": "0.89.1520",
   "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support",
   "type": "module",
   "main": "dist/index.js",
@@ -32,7 +32,7 @@
   },
   "scripts": {
     "build": "npm run llmswitch:ensure && node scripts/build-core.mjs && node scripts/vendor-core.mjs && npm run clean && node scripts/gen-build-info.mjs && tsc && node scripts/copy-compat-assets.mjs && node scripts/copy-modules-config.mjs",
-    "build:dev": "bash -lc 'export BUILD_MODE=dev; npm run build && npm run test:unified-hub-shadow && npm run verify:e2e-toolcall && npm run verify:apply-patch && npm run verify:apply-patch-regressions && npm run verify:exec-command && npm run test:routing-instructions && npm run test:cli && npm run install:global && npm run mock:regressions && npm run verify:errorsamples && npm run verify:e2e-gemini-followup-sample'",
+    "build:dev": "bash -lc 'export BUILD_MODE=dev; npm run build && npm run test:unified-hub-shadow && npm run verify:e2e-toolcall && npm run verify:apply-patch && npm run verify:apply-patch-regressions && npm run verify:exec-command && npm run test:routing-instructions && npm run test:cli && npm run install:global && npm run mock:regressions && npm run test:blackbox-antigravity-parity && npm run verify:errorsamples && npm run verify:e2e-gemini-followup-sample'",
     "build:min": "npm run llmswitch:ensure && node scripts/build-core.mjs && node scripts/vendor-core.mjs && npm run clean && node scripts/gen-build-info.mjs && tsc && node scripts/copy-compat-assets.mjs && node scripts/copy-modules-config.mjs",
     "prepack": "echo skip-prepack",
     "postbuild": "chmod +x dist/cli.js || true",
@@ -41,9 +41,10 @@
     "dev": "tsx watch src/index.ts",
     "jest:run": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js",
     "test": "npm run test:routing-instructions && npm run mock:regressions",
+    "test:blackbox-antigravity-parity": "node scripts/tests/blackbox-rcc-vs-routecodex-antigravity.mjs",
     "test:ci:jest": "node scripts/tests/ci-jest.mjs",
     "test:ci:jest:coverage": "node scripts/tests/ci-jest.mjs --coverage",
-    "test:ci": "npm run test:ci:jest && npm run mock:regressions",
+    "test:ci": "npm run test:ci:jest && npm run mock:regressions && npm run test:blackbox-antigravity-parity",
     "test:ci:coverage": "npm run test:ci:jest:coverage",
     "verify:repo-sanity": "node scripts/ci/repo-sanity.mjs",
     "test:routing-instructions": "npm run jest:run -- --runTestsByPath tests/server/runtime/request-executor.single-attempt.spec.ts tests/server/runtime/executor-provider.retryable.spec.ts tests/providers/auth/tokenfile-auth.iflow.spec.ts tests/providers/core/runtime/gemini-cli-http-provider.unit.test.ts tests/providers/core/runtime/antigravity-quota-client.unit.test.ts tests/manager/quota/provider-quota-center.spec.ts tests/manager/quota/provider-quota-store.spec.ts tests/manager/quota/quota-manager-refresh.spec.ts tests/manager/quota/provider-quota-daemon-module.spec.ts tests/manager/quota/provider-key-normalization.spec.ts tests/server/http-server/daemon-admin.e2e.spec.ts tests/server/http-server/quota-view-injection.spec.ts tests/server/http-server/quota-refresh-triggers.e2e.spec.ts tests/server/http-server/hub-policy-injection.spec.ts tests/server/http-server/session-header-injection.spec.ts tests/server/http-server/session-dir.spec.ts tests/server/handlers/sse-timeout.spec.ts tests/utils/is-direct-execution.test.ts tests/utils/windows-netstat.test.ts tests/servertool/virtual-router-context-fallback.spec.ts tests/servertool/virtual-router-longcontext-fallback.spec.ts tests/servertool/virtual-router-series-cooldown.spec.ts tests/servertool/recursive-detection-guard.spec.ts tests/servertool/routing-instructions.spec.ts tests/servertool/stop-message-auto.spec.ts tests/servertool/stopmessage-session-scope.spec.ts tests/servertool/stopmessage-anthropic-stop-sequence.spec.ts tests/servertool/servertool-progress-logging.spec.ts tests/servertool/servertool-clock.spec.ts tests/sharedmodule/mcp-tool-descriptions.spec.ts tests/unified-hub/hub-v1-single-path-imports.spec.ts",

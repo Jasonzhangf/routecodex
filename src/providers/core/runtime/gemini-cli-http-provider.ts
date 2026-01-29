@@ -61,6 +61,31 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
     super(cfg, dependencies, 'gemini-cli-http-provider', new GeminiCLIProtocolClient());
   }
 
+  protected override buildHttpRequestBody(request: UnknownObject): UnknownObject {
+    const built = super.buildHttpRequestBody(request);
+    // Antigravity-Manager alignment: `action` is an internal transport selector (generate vs stream)
+    // and must never be forwarded to Cloud Code Assist v1internal JSON bodies.
+    const stripAction = (node: unknown): void => {
+      if (!node || typeof node !== 'object') return;
+      if (Array.isArray(node)) {
+        node.forEach(stripAction);
+        return;
+      }
+      const record = node as Record<string, unknown>;
+      if ('action' in record) {
+        delete record.action;
+      }
+      if (record.request && typeof record.request === 'object') {
+        stripAction(record.request);
+      }
+      if (record.data && typeof record.data === 'object') {
+        stripAction(record.data);
+      }
+    };
+    stripAction(built);
+    return built;
+  }
+
   protected override applyStreamModeHeaders(headers: Record<string, string>, wantsSse: boolean): Record<string, string> {
     if (!this.isAntigravityRuntime()) {
       return super.applyStreamModeHeaders(headers, wantsSse);
@@ -235,10 +260,6 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
       }
     }
     return finalized;
-  }
-
-  protected override buildHttpRequestBody(request: UnknownObject): UnknownObject {
-    return super.buildHttpRequestBody(request);
   }
 
   private getAntigravityHeaderMode(): 'minimal' | 'standard' | 'default' {
