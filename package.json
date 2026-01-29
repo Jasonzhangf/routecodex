@@ -148,7 +148,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.65.0",
-    "@jsonstudio/llms": "^0.6.1172",
+    "@jsonstudio/llms": "^0.6.1402",
     "@jsonstudio/rcc": "^0.89.555",
     "@lmstudio/sdk": "^1.5.0",
     "@radix-ui/react-switch": "^1.2.6",
