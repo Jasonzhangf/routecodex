@@ -498,7 +498,7 @@ async function main() {
           canonUpB,
           `Upstream request mismatch (routecodex vs rcc). Captures: ${upRoutecodexPath} ${upRccPath}`
         );
-      } else if (JSON.stringify(canonUpA) !== JSON.stringify(canonUpB)) {
+      } else if (String(process.env.ROUTECODEX_BLACKBOX_KEEP || '').trim() === '1' && JSON.stringify(canonUpA) !== JSON.stringify(canonUpB)) {
         const upRoutecodexPath = path.join(tempDir, 'upstream.routecodex.json');
         const upRccPath = path.join(tempDir, 'upstream.rcc.json');
         fs.writeFileSync(upRoutecodexPath, `${JSON.stringify(reqA, null, 2)}\n`, 'utf8');
@@ -506,6 +506,8 @@ async function main() {
         console.warn(
           `⚠️ upstream request differs (routecodex vs rcc); captures written: ${upRoutecodexPath} ${upRccPath}`
         );
+      } else if (JSON.stringify(canonUpA) !== JSON.stringify(canonUpB)) {
+        console.warn('⚠️ upstream request differs (routecodex vs rcc); set ROUTECODEX_BLACKBOX_KEEP=1 to write captures');
       }
 
       console.log('✅ blackbox ok: routecodex == rcc (client response parity; upstream cleanliness OK)');
@@ -514,7 +516,12 @@ async function main() {
     }
   } finally {
     try {
-      fs.rmSync(tempDir, { recursive: true, force: true });
+      const keep = String(process.env.ROUTECODEX_BLACKBOX_KEEP || '').trim() === '1';
+      if (keep) {
+        console.log(`🧾 blackbox artifacts kept: ${tempDir}`);
+      } else {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
     } catch {
       // ignore cleanup failure
     }
