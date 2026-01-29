@@ -41,6 +41,9 @@ function buildInteractivePrompt(
   if (typeof ctx.prompt === 'function') {
     return { prompt: ctx.prompt, close: () => {} };
   }
+  if (process.env.CI === '1' || process.env.JEST_WORKER_ID || process.env.NODE_ENV === 'test') {
+    return null;
+  }
   if (!input.isTTY || !output.isTTY) {
     return null;
   }

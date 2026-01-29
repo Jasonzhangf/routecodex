@@ -36,19 +36,23 @@ function hasDataEnvelope(payload: ProtocolRequestPayload): payload is ProtocolRe
 export class GeminiCLIProtocolClient implements HttpProtocolClient<ProtocolRequestPayload> {
   buildRequestBody(request: ProtocolRequestPayload): Record<string, unknown> {
     const payload = this.extractPayload(request);
-
     // 顶层字段：model / project / action / request metadata
     // 注意：Cloud Code Assist 的 request schema 不接受 request.metadata / request.action。
     // action 仅用于 resolveEndpoint；metadata 不下发到上游。
     const { model, project, requestId, userAgent, requestType, ...rest } = payload;
-
+    const payloadRequest = payload && typeof payload.request === 'object' ? payload.request : undefined;
     const body: Record<string, unknown> = {};
+
     if (typeof model === 'string' && model.length > 0) {
       body.model = model;
     }
     if (typeof project === 'string' && project.length > 0) {
       body.project = project;
     }
+
+    // opencode-antigravity-auth alignment:
+    // - antigravity keeps requestId/userAgent/requestType in JSON wrapper
+    // - headers may still carry the same values
     if (typeof requestId === 'string' && requestId.length > 0) {
       body.requestId = requestId;
     }
@@ -61,17 +65,29 @@ export class GeminiCLIProtocolClient implements HttpProtocolClient<ProtocolReque
 
     // 其余 Gemini Chat 兼容字段（contents/systemInstruction/generationConfig/tools/metadata 等）
     // 统一放到 request 下，对齐 Cloud Code Assist v1internal:generateContent 的预期形状
-    const requestPayload: Record<string, unknown> = { ...rest };
-    // 显式移除 OpenAI 兼容字段
-    const payloadRecord = requestPayload as Record<string, unknown>;
-    delete payloadRecord.stream;
-    // Cloud Code Assist: request 不接受 metadata/action/web_search 等非标准字段
-    delete payloadRecord.metadata;
-    delete payloadRecord.action;
-    delete payloadRecord.web_search;
+    const requestPayload: Record<string, unknown> = { ...(rest as Record<string, unknown>) };
+    const sanitizeRequestPayload = (node: Record<string, unknown>): void => {
+      delete node.stream;
+      delete node.metadata;
+      delete node.action;
+      delete node.web_search;
+    };
 
+    // 显式移除 OpenAI 兼容字段
+    sanitizeRequestPayload(requestPayload);
     if (Object.keys(requestPayload).length > 0) {
-      body.request = requestPayload;
+      const onlyRequest =
+        Object.keys(requestPayload).length === 1 &&
+        requestPayload.request &&
+        typeof requestPayload.request === 'object' &&
+        !Array.isArray(requestPayload.request);
+      const finalRequest = onlyRequest ? (requestPayload.request as Record<string, unknown>) : requestPayload;
+      sanitizeRequestPayload(finalRequest);
+      body.request = finalRequest;
+    } else if (payloadRequest && typeof payloadRequest === 'object') {
+      const finalRequest = { ...(payloadRequest as Record<string, unknown>) };
+      sanitizeRequestPayload(finalRequest);
+      body.request = finalRequest;
     }
 
     return stripInternalKeysDeep(body);
@@ -80,7 +96,12 @@ export class GeminiCLIProtocolClient implements HttpProtocolClient<ProtocolReque
   resolveEndpoint(request: ProtocolRequestPayload, _defaultEndpoint: string): string {
     const payload = this.extractPayload(request);
     const action = (payload.action as string) || 'generateContent';
-    const endpoint = `/v1internal:${action}`;
+    const defaultEndpoint = typeof _defaultEndpoint === 'string' ? _defaultEndpoint.trim() : '';
+    const base =
+      defaultEndpoint && defaultEndpoint.includes(':')
+        ? defaultEndpoint.replace(/:[^/?]+/, '')
+        : '/v1internal';
+    const endpoint = `${base}:${action}`;
 
     // 根据 action 返回对应的 endpoint
     // generateContent, streamGenerateContent, countTokens
@@ -96,8 +117,24 @@ export class GeminiCLIProtocolClient implements HttpProtocolClient<ProtocolReque
   ): Record<string, string> {
     const normalized: Record<string, string> = { ...headers };
 
-    // 确保包含必需的 headers
-    if (!normalized['User-Agent']) {
+    const deleteHeaderInsensitive = (target: string): void => {
+      const lowered = target.toLowerCase();
+      for (const key of Object.keys(normalized)) {
+        if (key.toLowerCase() === lowered) {
+          delete normalized[key];
+        }
+      }
+    };
+
+    // gcli2api / opencode alignment: do not forward client identifiers.
+    deleteHeaderInsensitive('session_id');
+    deleteHeaderInsensitive('conversation_id');
+
+    const payload = this.extractPayload(_request);
+    const isAntigravity = typeof payload.userAgent === 'string' && payload.userAgent.trim() === 'antigravity';
+    // gcli2api / opencode alignment: keep a stable header triplet.
+    // For antigravity, do not override UA (handled by provider), but still send the triplet.
+    if (!isAntigravity) {
       normalized['User-Agent'] = 'google-api-nodejs-client/9.15.1';
     }
     if (!normalized['X-Goog-Api-Client']) {
@@ -117,7 +154,19 @@ export class GeminiCLIProtocolClient implements HttpProtocolClient<ProtocolReque
     if (hasDataEnvelope(request)) {
       const envelopeData = request.data;
       if (envelopeData && typeof envelopeData === 'object') {
-        return envelopeData as GeminiCLIPayload;
+        // Merge top-level fields into data when missing to preserve hub pipeline outputs
+        // (e.g. model/request may live on the root in some paths).
+        const merged: Record<string, unknown> = { ...(envelopeData as Record<string, unknown>) };
+        const root = request as Record<string, unknown>;
+        for (const [key, value] of Object.entries(root)) {
+          if (key === 'data' || key === 'metadata') {
+            continue;
+          }
+          if (merged[key] === undefined) {
+            merged[key] = value;
+          }
+        }
+        return merged as GeminiCLIPayload;
       }
     }
     return { ...(request as Record<string, unknown>) } as GeminiCLIPayload;

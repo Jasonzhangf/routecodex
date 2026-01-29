@@ -878,7 +878,7 @@ export class HttpTransportProvider extends BaseProvider {
     const runtimeHeaders = this.getRuntimeProfile()?.headers || {};
 
     // ========== 风控增强：添加 Google 客户端标识和元数据 ==========
-    if (this.isGeminiFamilyTransport()) {
+    if (this.isGeminiFamilyTransport() && !isAntigravity) {
       // Google 客户端标识
       this.assignHeader(baseHeaders, 'X-Goog-Api-Client', 'gl-node/22.17.0');
       
@@ -1391,6 +1391,9 @@ export class HttpTransportProvider extends BaseProvider {
   }
 
   private resolveProfileKey(config: Record<string, unknown>): string {
+    if (this.type === 'gemini-cli-http-provider') {
+      return 'gemini-cli';
+    }
     const direct = typeof config?.providerId === 'string' && config.providerId.trim()
       ? config.providerId.trim().toLowerCase()
       : '';

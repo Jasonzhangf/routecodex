@@ -80,14 +80,15 @@ export function classifyProviderError(options: ProviderErrorClassifierOptions): 
   const isGenericClientError = isClient4xx && !is401 && !is402 && !isRateLimit;
 
   let recoverable = isRateLimit || isClient400 || isGenericClientError;
+  let affectsHealth = !recoverable;
   if (isNetworkError) {
     recoverable = true;
+    affectsHealth = false;
   }
   if (is401 || is402 || is500 || is524) {
     recoverable = false;
+    affectsHealth = !recoverable;
   }
-
-  let affectsHealth = !recoverable;
   let forceFatalRateLimit = false;
 
   if (isRateLimit) {

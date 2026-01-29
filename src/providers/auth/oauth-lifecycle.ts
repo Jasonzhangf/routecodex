@@ -167,9 +167,63 @@ function hasNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
+function normalizeGeminiCliAccountToken(token: UnknownObject): StoredOAuthToken | null {
+  const raw = token as { token?: UnknownObject };
+  const tokenNode = raw.token;
+  if (!tokenNode || typeof tokenNode !== 'object') {
+    return null;
+  }
+  const tokenObj = tokenNode as UnknownObject;
+  const access = tokenObj.access_token;
+  if (!hasNonEmptyString(access)) {
+    return null;
+  }
+
+  const out = { ...(tokenObj as StoredOAuthToken) };
+  const root = token as UnknownObject;
+
+  if (typeof root.disabled === 'boolean') out.disabled = root.disabled;
+  if (typeof root.disabled_reason === 'string') out.disabled_reason = root.disabled_reason;
+  if (typeof root.disabled_at === 'number' || typeof root.disabled_at === 'string') out.disabled_at = root.disabled_at;
+
+  if (typeof root.proxy_disabled === 'boolean') out.proxy_disabled = root.proxy_disabled;
+  if (typeof root.proxyDisabled === 'boolean') out.proxyDisabled = root.proxyDisabled;
+  if (typeof root.proxy_disabled_reason === 'string') out.proxy_disabled_reason = root.proxy_disabled_reason;
+  if (typeof root.proxy_disabled_at === 'number' || typeof root.proxy_disabled_at === 'string') {
+    out.proxy_disabled_at = root.proxy_disabled_at;
+  }
+
+  if (Array.isArray(root.protected_models)) out.protected_models = root.protected_models;
+  if (Array.isArray(root.protectedModels)) out.protectedModels = root.protectedModels;
+
+  if (!hasNonEmptyString(out.project_id) && hasNonEmptyString(root.project_id)) {
+    out.project_id = String(root.project_id);
+  }
+  if (!hasNonEmptyString(out.projectId) && hasNonEmptyString(root.projectId)) {
+    out.projectId = String(root.projectId);
+  }
+  if (!Array.isArray(out.projects) && Array.isArray(root.projects)) {
+    out.projects = root.projects;
+  }
+  if (!hasNonEmptyString(out.email) && hasNonEmptyString(root.email)) {
+    out.email = String(root.email);
+  }
+
+  const expiryTimestamp = (tokenObj as { expiry_timestamp?: unknown }).expiry_timestamp;
+  if (!hasNonEmptyString(out.expires_at) && typeof expiryTimestamp === 'number') {
+    out.expires_at = expiryTimestamp > 10_000_000_000 ? expiryTimestamp : expiryTimestamp * 1000;
+  }
+
+  return out;
+}
+
 function sanitizeToken(token: UnknownObject | null): StoredOAuthToken | null {
   if (!token || typeof token !== 'object') {
     return null;
+  }
+  const normalized = normalizeGeminiCliAccountToken(token);
+  if (normalized) {
+    return normalized;
   }
   const copy = { ...token } as StoredOAuthToken;
   if (!hasNonEmptyString(copy.apiKey) && hasNonEmptyString(copy.api_key)) {
@@ -286,6 +340,170 @@ function getExpiresAt(token: StoredOAuthToken | null): number | null {
     return Number.isFinite(ts) ? ts : null;
   }
   return null;
+}
+
+function resolveProjectId(token: UnknownObject | null): string | undefined {
+  if (!token || typeof token !== 'object') {
+    return undefined;
+  }
+  const record = token as Record<string, unknown>;
+  if (hasNonEmptyString(record.project_id)) {
+    return record.project_id;
+  }
+  if (hasNonEmptyString(record.projectId)) {
+    return record.projectId;
+  }
+  return undefined;
+}
+
+async function readRawTokenFile(file: string): Promise<UnknownObject | null> {
+  if (!file) {
+    return null;
+  }
+  try {
+    const txt = await fs.readFile(file, 'utf-8');
+    const parsed = JSON.parse(txt) as UnknownObject;
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function coerceExpiryTimestampSeconds(token: StoredOAuthToken | null): number | undefined {
+  if (!token) {
+    return undefined;
+  }
+  const rawExpiry = (token as UnknownObject).expiry_timestamp;
+  if (typeof rawExpiry === 'number' && Number.isFinite(rawExpiry)) {
+    return rawExpiry > 10_000_000_000 ? Math.floor(rawExpiry / 1000) : rawExpiry;
+  }
+  const expiresAt = getExpiresAt(token);
+  if (!expiresAt) {
+    return undefined;
+  }
+  return expiresAt > 10_000_000_000 ? Math.floor(expiresAt / 1000) : Math.floor(expiresAt);
+}
+
+async function wrapGeminiCliTokenForStorage(
+  tokenData: UnknownObject,
+  tokenFilePath: string
+): Promise<UnknownObject> {
+  const rawExisting = await readRawTokenFile(tokenFilePath);
+  const existing = rawExisting && typeof rawExisting === 'object' ? rawExisting : null;
+  const existingToken = existing && typeof (existing as UnknownObject).token === 'object'
+    ? ((existing as UnknownObject).token as UnknownObject)
+    : null;
+
+  const sanitized = sanitizeToken(tokenData) ?? (tokenData as StoredOAuthToken);
+  const accessToken = extractAccessToken(sanitized);
+  if (!accessToken) {
+    return tokenData;
+  }
+
+  const nextToken: UnknownObject = {
+    ...(existingToken || {}),
+    access_token: accessToken,
+    token_type: hasNonEmptyString((sanitized as UnknownObject).token_type)
+      ? String((sanitized as UnknownObject).token_type)
+      : ((existingToken as UnknownObject | null)?.token_type as string | undefined) ?? 'Bearer'
+  };
+
+  const refreshToken = (sanitized as UnknownObject).refresh_token;
+  if (hasNonEmptyString(refreshToken)) {
+    nextToken.refresh_token = refreshToken;
+  } else if (existingToken && hasNonEmptyString(existingToken.refresh_token)) {
+    nextToken.refresh_token = existingToken.refresh_token;
+  }
+
+  const expiresIn = (sanitized as UnknownObject).expires_in;
+  if (typeof expiresIn === 'number' && Number.isFinite(expiresIn)) {
+    nextToken.expires_in = expiresIn;
+  } else if (existingToken && typeof existingToken.expires_in === 'number') {
+    nextToken.expires_in = existingToken.expires_in;
+  }
+
+  const expiryTimestamp = coerceExpiryTimestampSeconds(sanitized);
+  if (typeof expiryTimestamp === 'number') {
+    nextToken.expiry_timestamp = expiryTimestamp;
+  } else if (existingToken && typeof existingToken.expiry_timestamp === 'number') {
+    nextToken.expiry_timestamp = existingToken.expiry_timestamp;
+  }
+
+  const email = (sanitized as UnknownObject).email;
+  if (hasNonEmptyString(email)) {
+    nextToken.email = String(email);
+  } else if (existingToken && hasNonEmptyString(existingToken.email)) {
+    nextToken.email = String(existingToken.email);
+  }
+
+  const projectId = resolveProjectId(sanitized as UnknownObject);
+  if (projectId) {
+    nextToken.project_id = projectId;
+  } else if (existingToken && hasNonEmptyString(existingToken.project_id)) {
+    nextToken.project_id = String(existingToken.project_id);
+  }
+
+  const sessionId = (sanitized as UnknownObject).session_id ?? (sanitized as UnknownObject).sessionId;
+  if (hasNonEmptyString(sessionId)) {
+    nextToken.session_id = String(sessionId);
+  } else if (existingToken && hasNonEmptyString(existingToken.session_id)) {
+    nextToken.session_id = String(existingToken.session_id);
+  }
+
+  const result: UnknownObject = {
+    ...(existing || {}),
+    token: nextToken
+  };
+
+  // Keep top-level fields in sync for backward compatibility.
+  result.access_token = nextToken.access_token;
+  if (hasNonEmptyString(nextToken.refresh_token)) {
+    result.refresh_token = nextToken.refresh_token;
+  }
+  if (typeof nextToken.expires_in === 'number') {
+    result.expires_in = nextToken.expires_in;
+  }
+  if (hasNonEmptyString(nextToken.token_type)) {
+    result.token_type = nextToken.token_type;
+  }
+  if (typeof nextToken.expiry_timestamp === 'number') {
+    const expiresAtMs = nextToken.expiry_timestamp * 1000;
+    result.expires_at = expiresAtMs;
+    result.expiry_date = expiresAtMs;
+    result.expired = new Date(expiresAtMs).toISOString();
+  }
+
+  const scope = (sanitized as UnknownObject).scope;
+  if (hasNonEmptyString(scope)) {
+    result.scope = String(scope);
+  }
+  const idToken = (sanitized as UnknownObject).id_token;
+  if (hasNonEmptyString(idToken)) {
+    result.id_token = String(idToken);
+  }
+
+  if (hasNonEmptyString(email)) {
+    result.email = String(email);
+  }
+  if (projectId) {
+    result.project_id = projectId;
+  }
+  if (Array.isArray((sanitized as UnknownObject).projects)) {
+    result.projects = (sanitized as UnknownObject).projects as unknown[];
+  }
+
+  return result;
+}
+
+async function prepareTokenForStorage(
+  providerType: string,
+  tokenFilePath: string,
+  tokenData: UnknownObject
+): Promise<UnknownObject> {
+  if (isGeminiCliFamily(providerType)) {
+    return await wrapGeminiCliTokenForStorage(tokenData, tokenFilePath);
+  }
+  return tokenData;
 }
 
 function hasNoRefreshFlag(token: StoredOAuthToken | null): boolean {
@@ -539,6 +757,9 @@ async function buildOverrides(
   openBrowser: boolean,
   tokenFilePath: string
 ) {
+  if (providerType === 'antigravity' && !process.env.ROUTECODEX_OAUTH_BROWSER) {
+    process.env.ROUTECODEX_OAUTH_BROWSER = 'camoufox';
+  }
   const endpoints = buildEndpointOverrides(defaults, auth);
   const client = await buildClientOverrides(defaults, auth, providerType);
   const headers = buildHeaderOverrides(defaults, providerType);
@@ -567,7 +788,8 @@ async function finalizeTokenWrite(
     return;
   }
   const enriched = await maybeEnrichToken(providerType, tokenData);
-  await strategy.saveToken(enriched);
+  const prepared = await prepareTokenForStorage(providerType, tokenFilePath, enriched);
+  await strategy.saveToken(prepared);
   logOAuthDebug(`[OAuth] Token ${reason} saved: ${tokenFilePath}`);
 }
 
@@ -857,12 +1079,15 @@ export async function ensureValidOAuthToken(
     // forcing a full OAuth flow. Use current access_token to fetch userinfo/projects and write back.
     if (isGeminiCliFamily(providerType) && token) {
       try {
-        const hasProjectMetadata = Boolean(getDefaultProjectId(token as UnknownObject));
+        const hasProjectMetadata = providerType === 'antigravity'
+          ? hasNonEmptyString(resolveProjectId(token as UnknownObject))
+          : Boolean(getDefaultProjectId(token as UnknownObject));
         if (!hasProjectMetadata) {
           const enriched = await maybeEnrichToken(providerType, token as UnknownObject);
           if (enriched && typeof strategy.saveToken === 'function') {
-            await strategy.saveToken(enriched);
-            token = enriched as StoredOAuthToken;
+            const prepared = await prepareTokenForStorage(providerType, tokenFilePath, enriched);
+            await strategy.saveToken(prepared);
+            token = sanitizeToken(enriched) ?? (enriched as StoredOAuthToken);
           }
         }
       } catch (error) {

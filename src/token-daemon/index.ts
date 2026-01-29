@@ -5,7 +5,12 @@ import { homedir } from 'os';
 import chalk from 'chalk';
 import { ensureValidOAuthToken } from '../providers/auth/oauth-lifecycle.js';
 import { TokenDaemon } from './token-daemon.js';
-import { collectTokenSnapshot } from './token-utils.js';
+import {
+  collectTokenSnapshot,
+  readTokenFile,
+  evaluateTokenState,
+  hasRefreshToken
+} from './token-utils.js';
 import {
   formatTokenLabel,
   type TokenDescriptor,
@@ -405,6 +410,113 @@ export async function interactiveRefresh(selector: string): Promise<void> {
   } finally {
     await cleanupInteractiveOAuthArtifacts();
   }
+}
+
+type OAuthValidateResult = {
+  provider: string;
+  alias: string;
+  filePath: string;
+  status: 'ok' | 'needs_reauth' | 'refresh_failed' | 'skipped';
+  message?: string;
+};
+
+function oauthAuthType(provider: string): string {
+  return provider === 'gemini-cli' ? 'gemini-cli-oauth' : `${provider}-oauth`;
+}
+
+async function validateSingleToken(token: TokenDescriptor): Promise<OAuthValidateResult> {
+  const base = {
+    provider: token.provider,
+    alias: token.alias || 'default',
+    filePath: token.filePath
+  };
+
+  if (token.alias === 'static') {
+    return { ...base, status: 'skipped', message: 'static alias (read-only)' };
+  }
+
+  const raw = await readTokenFile(token.filePath);
+  const state = evaluateTokenState(raw, Date.now());
+
+  if (state.noRefresh) {
+    return { ...base, status: 'skipped', message: 'norefresh flag set' };
+  }
+
+  if (state.status === 'valid') {
+    return { ...base, status: 'ok' };
+  }
+
+  if (!hasRefreshToken(raw)) {
+    return { ...base, status: 'needs_reauth', message: 'missing refresh token' };
+  }
+
+  try {
+    await ensureValidOAuthToken(
+      token.provider,
+      {
+        type: oauthAuthType(token.provider),
+        tokenFile: token.filePath
+      } as any,
+      {
+        openBrowser: false,
+        forceReauthorize: false,
+        forceReacquireIfRefreshFails: false
+      }
+    );
+    const refreshed = await readTokenFile(token.filePath);
+    const nextState = evaluateTokenState(refreshed, Date.now());
+    if (nextState.status === 'valid' || nextState.status === 'expiring') {
+      return { ...base, status: 'ok' };
+    }
+    return { ...base, status: 'refresh_failed', message: `status=${nextState.status}` };
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error || '');
+    return { ...base, status: 'refresh_failed', message: msg };
+  }
+}
+
+export async function validateOAuthTokens(selector?: string, json = false): Promise<boolean> {
+  const targets: TokenDescriptor[] = [];
+  if (selector && selector.trim() && selector.trim() !== 'all') {
+    const token = await TokenDaemon.findTokenBySelector(selector.trim());
+    if (!token) {
+      console.error(chalk.red('✗'), `No token found for selector: ${selector}`);
+      return false;
+    }
+    targets.push(token);
+  } else {
+    const snapshot = await collectTokenSnapshot();
+    for (const providerSnapshot of snapshot.providers) {
+      for (const token of providerSnapshot.tokens) {
+        targets.push(token);
+      }
+    }
+  }
+
+  const results: OAuthValidateResult[] = [];
+  for (const token of targets) {
+    results.push(await validateSingleToken(token));
+  }
+
+  if (json) {
+    console.log(JSON.stringify({ results }, null, 2));
+    return results.every((r) => r.status === 'ok' || r.status === 'skipped');
+  }
+
+  const rows: string[] = [];
+  rows.push('== OAuth Token Validation ==');
+  rows.push('| Provider       | Alias     | Status         | File                               | Message |');
+  rows.push('|----------------|-----------|----------------|------------------------------------|---------|');
+  for (const r of results) {
+    rows.push(
+      `| ${r.provider.padEnd(14)} | ${r.alias.padEnd(9)} | ${r.status.padEnd(14)} | ${r.filePath.padEnd(
+        34
+      )} | ${String(r.message || '-').slice(0, 60).padEnd(7)} |`
+    );
+  }
+  console.log(rows.join('\n'));
+
+  return results.every((r) => r.status === 'ok' || r.status === 'skipped');
 }
 
 async function recordManualHistory(

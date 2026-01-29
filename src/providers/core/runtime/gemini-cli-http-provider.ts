@@ -64,19 +64,11 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
     if (!this.isAntigravityRuntime()) {
       return super.applyStreamModeHeaders(headers, wantsSse);
     }
-    if (!this.isAntigravityMinimalCompatibilityEnabled()) {
-      // Standard contract: keep standard SSE Accept header behavior.
-      return super.applyStreamModeHeaders(headers, wantsSse);
+    if (this.getAntigravityHeaderMode() === 'minimal') {
+      return { ...headers, Accept: '*/*' };
     }
-    // gcli2api alignment: httpx default Accept is "*/*" (gcli2api does not override it).
-    // For Antigravity, keep this header minimal and avoid forcing text/event-stream.
-    const normalized = { ...headers };
-    const acceptKey = Object.keys(normalized).find((key) => key.toLowerCase() === 'accept');
-    if (acceptKey) {
-      delete normalized[acceptKey];
-    }
-    normalized.Accept = '*/*';
-    return normalized;
+    // Antigravity manager alignment: keep standard SSE Accept header behavior.
+    return super.applyStreamModeHeaders(headers, wantsSse);
   }
 
   protected override getBaseUrlCandidates(_context: ProviderContext): string[] | undefined {
@@ -134,29 +126,6 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
 
     this.ensureRequestMetadata(payload);
 
-    // Standard contract: attach stable sessionId in request payload (NOT headers) for Antigravity.
-    // This is a compatibility hook for upstream signature caching; it must not affect llmswitch pipeline routing.
-    if (this.isAntigravityRuntime() && !this.isAntigravityMinimalCompatibilityEnabled()) {
-      const project =
-        typeof (payload as any).project === 'string' && String((payload as any).project).trim().length
-          ? String((payload as any).project).trim()
-          : projectId || 'default';
-      const sessionIdFromMeta =
-        metadata && typeof metadata.sessionId === 'string' && metadata.sessionId.trim().length
-          ? metadata.sessionId.trim()
-          : '';
-      const conversationIdFromMeta =
-        metadata && typeof metadata.conversationId === 'string' && metadata.conversationId.trim().length
-          ? metadata.conversationId.trim()
-          : '';
-      const signatureSessionKey = this.buildAntigravitySignatureSessionKey({
-        model,
-        project,
-        conversationKey: conversationIdFromMeta || sessionIdFromMeta || 'default'
-      });
-      (payload as any).sessionId = signatureSessionKey;
-    }
-
     // 删除与 Gemini 协议无关的字段，避免影响 Cloud Code Assist schema 校验。
     const recordPayload = payload as Record<string, unknown>;
     // 按 gcli2api 语义：协议层不主动删 tools，只做最小形状整理。
@@ -169,26 +138,28 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
     // 无论是否来自 messages 桥接，都不向上游发送 OpenAI 的 stream 标记。
     delete (recordPayload as { stream?: unknown }).stream;
 
-    // 对齐 gcli2api：最终上游 schema 里 `request` 仅在最外层包裹一次（由 GeminiCLIProtocolClient 负责）。
-    // 如果上游/compat 层错误地产生了 payload.request（例如旧版本样本/回放），这里做一次扁平化，
-    // 避免出现 body.request.request.contents 这种非法形状，导致上游生成空响应或被静默忽略。
-    this.flattenRequestContainer(payload);
-
     // Standard contract: Antigravity identity fields are carried in the JSON wrapper (not headers).
     // Provider must not infer request semantics from user payload; modality hints must come from llmswitch-core metadata.
-    if (this.isAntigravityRuntime() && !this.isAntigravityMinimalCompatibilityEnabled()) {
+    if (this.isAntigravityRuntime()) {
+      const headerMode = this.getAntigravityHeaderMode();
       const record = payload as Record<string, unknown>;
-      if (!this.hasNonEmptyString(record.userAgent)) {
-        record.userAgent = 'antigravity';
-      }
-      if (!this.hasNonEmptyString(record.requestType)) {
-        const hasImageAttachment =
-          metadata && (metadata.hasImageAttachment === true || metadata.hasImageAttachment === 'true');
-        record.requestType = hasImageAttachment ? 'image_gen' : 'agent';
+      if (headerMode !== 'minimal') {
+        if (!this.hasNonEmptyString(record.userAgent)) {
+          record.userAgent = 'antigravity';
+        }
+        if (!this.hasNonEmptyString(record.requestType)) {
+          const hasImageAttachment =
+            metadata && (metadata.hasImageAttachment === true || metadata.hasImageAttachment === 'true');
+          record.requestType = hasImageAttachment ? 'image_gen' : 'agent';
+        }
+      } else {
+        delete record.userAgent;
+        delete record.requestType;
       }
       const existingReqId = record.requestId;
-      if (typeof existingReqId !== 'string' || !existingReqId.trim().startsWith('agent-')) {
-        record.requestId = `agent-${randomUUID()}`;
+      const prefix = headerMode === 'minimal' ? 'req-' : 'agent-';
+      if (typeof existingReqId !== 'string' || !existingReqId.trim().startsWith(prefix)) {
+        record.requestId = `${prefix}${randomUUID()}`;
       }
     }
 
@@ -219,6 +190,7 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
   ): Promise<Record<string, string>> {
     const finalized = await super.finalizeRequestHeaders(headers, request);
     if (this.isAntigravityRuntime()) {
+      const headerMode = this.getAntigravityHeaderMode();
       const deleteHeaderInsensitive = (key: string): void => {
         const target = key.toLowerCase();
         for (const k of Object.keys(finalized)) {
@@ -228,47 +200,23 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
         }
       };
 
-      const minimalCompatibility = this.isAntigravityMinimalCompatibilityEnabled();
       const envUa = (process.env.ROUTECODEX_ANTIGRAVITY_USER_AGENT || process.env.RCC_ANTIGRAVITY_USER_AGENT || '').trim();
-      const defaultUa =
-        minimalCompatibility ? ANTIGRAVITY_HELPER_DEFAULTS.userAgent : 'antigravity/1.11.5 windows/amd64';
+      const defaultUa = ANTIGRAVITY_HELPER_DEFAULTS.userAgent;
       finalized['User-Agent'] = envUa || defaultUa;
       // gcli2api alignment: keep headers minimal for Antigravity.
       finalized['Accept-Encoding'] = 'gzip';
       deleteHeaderInsensitive('originator');
-
-      if (minimalCompatibility) {
-        deleteHeaderInsensitive('X-Goog-Api-Client');
-        deleteHeaderInsensitive('Client-Metadata');
-        // gcli2api alignment: requestId/requestType are headers, not JSON body fields.
-        try {
-          const adapter = this.resolvePayload(request);
-          const payload = adapter.payload as MutablePayload;
-          if (this.hasNonEmptyString(payload.requestId)) {
-            finalized.requestId = payload.requestId;
-          }
-          const meta =
-            request && typeof request === 'object' && typeof (request as any).metadata === 'object'
-              ? ((request as any).metadata as Record<string, unknown>)
-              : undefined;
-          const hasImageAttachment = meta && (meta.hasImageAttachment === true || meta.hasImageAttachment === 'true');
-          finalized.requestType = hasImageAttachment ? 'image_gen' : 'agent';
-        } catch {
-          // best effort
+      if (headerMode === 'minimal') {
+        const record = request as Record<string, unknown>;
+        const reqId = typeof record.requestId === 'string' ? record.requestId : undefined;
+        if (reqId && reqId.trim()) {
+          finalized.requestId = reqId;
         }
+        const hasImageAttachment =
+          (request as any)?.metadata && (((request as any).metadata as Record<string, unknown>).hasImageAttachment === true ||
+            ((request as any).metadata as Record<string, unknown>).hasImageAttachment === 'true');
+        finalized.requestType = hasImageAttachment ? 'image_gen' : 'agent';
       } else {
-        // Standard contract: header triplet differentiates identity/quota pool.
-        const xGoog =
-          (process.env.ROUTECODEX_ANTIGRAVITY_X_GOOG_API_CLIENT ||
-            process.env.RCC_ANTIGRAVITY_X_GOOG_API_CLIENT ||
-            'google-cloud-sdk vscode_cloudshelleditor/0.1').trim();
-        const clientMeta =
-          (process.env.ROUTECODEX_ANTIGRAVITY_CLIENT_METADATA ||
-            process.env.RCC_ANTIGRAVITY_CLIENT_METADATA ||
-            '{"ideType":"IDE_UNSPECIFIED","platform":"PLATFORM_UNSPECIFIED","pluginType":"GEMINI"}').trim();
-        if (xGoog) finalized['X-Goog-Api-Client'] = xGoog;
-        if (clientMeta) finalized['Client-Metadata'] = clientMeta;
-        // Standard contract: requestId/requestType are NOT headers.
         deleteHeaderInsensitive('requestId');
         deleteHeaderInsensitive('requestType');
       }
@@ -277,24 +225,17 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
   }
 
   protected override buildHttpRequestBody(request: UnknownObject): UnknownObject {
-    const built = super.buildHttpRequestBody(request);
-    if (!this.isAntigravityRuntime() || !built || typeof built !== 'object') {
-      return built;
-    }
-    if (!this.isAntigravityMinimalCompatibilityEnabled()) {
-      // Standard contract: keep requestId/requestType/userAgent fields in JSON body.
-      return built;
-    }
-    const body = built as Record<string, unknown>;
-    const model = body.model;
-    const project = body.project;
-    const requestNode = body.request;
+    return super.buildHttpRequestBody(request);
+  }
 
-    const sanitized: Record<string, unknown> = {};
-    if (model !== undefined) sanitized.model = model;
-    if (project !== undefined) sanitized.project = project;
-    if (requestNode !== undefined) sanitized.request = requestNode;
-    return sanitized as UnknownObject;
+  private getAntigravityHeaderMode(): 'minimal' | 'standard' | 'default' {
+    const raw = (process.env.ROUTECODEX_ANTIGRAVITY_HEADER_MODE || process.env.RCC_ANTIGRAVITY_HEADER_MODE || '')
+      .trim()
+      .toLowerCase();
+    if (raw === 'minimal' || raw === 'standard') {
+      return raw as 'minimal' | 'standard';
+    }
+    return 'default';
   }
 
   protected override async postprocessResponse(response: unknown, context: ProviderContext): Promise<UnknownObject> {
@@ -399,6 +340,17 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
       if (!envelope.data || typeof envelope.data !== 'object') {
         envelope.data = dataRecord;
       }
+      if (source && typeof source === 'object') {
+        const sourceRecord = source as Record<string, unknown>;
+        for (const [key, value] of Object.entries(sourceRecord)) {
+          if (key === 'data' || key === 'metadata') {
+            continue;
+          }
+          if ((dataRecord as Record<string, unknown>)[key] === undefined) {
+            (dataRecord as Record<string, unknown>)[key] = value;
+          }
+        }
+      }
       return {
         payload: dataRecord,
         assign: (updated) => {
@@ -444,27 +396,15 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
 
   private ensureRequestMetadata(payload: MutablePayload): void {
     const isAntigravity = this.isAntigravityRuntime();
-    const minimalCompatibility = isAntigravity ? this.isAntigravityMinimalCompatibilityEnabled() : false;
 
     if (!this.hasNonEmptyString(payload.requestId)) {
-      payload.requestId = isAntigravity && !minimalCompatibility ? `agent-${randomUUID()}` : `req-${randomUUID()}`;
+      payload.requestId = isAntigravity ? `agent-${randomUUID()}` : `req-${randomUUID()}`;
     }
     // gcli2api alignment: Antigravity request bodies are minimal; do not inject session_id/userAgent/requestType
     // or generationConfig defaults at the provider layer.
     if (isAntigravity) {
       delete (payload as { session_id?: unknown }).session_id;
-      if (minimalCompatibility) {
-        delete (payload as { userAgent?: unknown }).userAgent;
-        delete (payload as { requestType?: unknown }).requestType;
-      }
     }
-  }
-
-  private isAntigravityMinimalCompatibilityEnabled(): boolean {
-    const raw = (process.env.ROUTECODEX_ANTIGRAVITY_HEADER_MODE || process.env.RCC_ANTIGRAVITY_HEADER_MODE || '')
-      .trim()
-      .toLowerCase();
-    return raw === 'minimal' || raw === 'gcli2api';
   }
 
   private buildAntigravitySignatureSessionKey(options: {
@@ -481,22 +421,6 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
         ? options.conversationKey.trim()
         : 'default';
     return `${ANTIGRAVITY_PLUGIN_SESSION_ID}:${modelKey}:${projectPart}:${conversationPart}`;
-  }
-
-  private flattenRequestContainer(payload: MutablePayload): void {
-    const requestContainer =
-      (payload as { request?: unknown }).request && typeof (payload as { request?: unknown }).request === 'object'
-        ? ((payload as { request?: Record<string, unknown> }).request as Record<string, unknown>)
-        : undefined;
-    if (!requestContainer || Array.isArray(requestContainer)) {
-      return;
-    }
-    for (const [key, value] of Object.entries(requestContainer)) {
-      if ((payload as Record<string, unknown>)[key] === undefined) {
-        (payload as Record<string, unknown>)[key] = value;
-      }
-    }
-    delete (payload as { request?: unknown }).request;
   }
 
   private hasNonEmptyString(value: unknown): value is string {

@@ -195,15 +195,78 @@ export function mergeGeminiCLITokenData(
  * 获取默认 project_id
  */
 export function getDefaultProjectId(token: UnknownObject): string | undefined {
+  if (Array.isArray(token.projects) && token.projects.length > 0) {
+    const projects = token.projects as UnknownObject[];
+    const tierScore = (value: unknown): number => {
+      if (typeof value !== 'string') {
+        return 0;
+      }
+      const upper = value.trim().toUpperCase();
+      if (upper === 'ULTRA' || upper === 'ENTERPRISE') {
+        return 3;
+      }
+      if (upper === 'PRO' || upper === 'PAID') {
+        return 2;
+      }
+      if (upper === 'FREE') {
+        return 1;
+      }
+      return 0;
+    };
+    const boolScore = (value: unknown): number => (value === true ? 2 : 0);
+    const numberScore = (value: unknown): number => (typeof value === 'number' && Number.isFinite(value) ? value : 0);
+    const getStringField = (project: UnknownObject, keys: string[]): string | undefined => {
+      for (const key of keys) {
+        const value = project[key];
+        if (typeof value === 'string' && value.trim()) {
+          return value.trim();
+        }
+      }
+      return undefined;
+    };
+    let bestProjectId: string | undefined;
+    let bestScore = 0;
+    for (const project of projects) {
+      if (!project || typeof project !== 'object') {
+        continue;
+      }
+      const projectId = getStringField(project, ['projectId', 'project_id', 'id']);
+      if (!projectId) {
+        continue;
+      }
+      const score =
+        tierScore(getStringField(project, ['subscription_tier', 'subscriptionTier', 'tier', 'paid_tier', 'paidTier'])) +
+        boolScore(project.licensed) +
+        boolScore(project.hasLicense) +
+        boolScore(project.has_code_assist) +
+        boolScore(project.hasCodeAssist) +
+        boolScore(project.codeAssistEligible) +
+        numberScore(project.priority) +
+        numberScore(project.weight);
+      if (score > bestScore) {
+        bestScore = score;
+        bestProjectId = projectId;
+      }
+    }
+    if (bestProjectId && bestScore > 0) {
+      return bestProjectId;
+    }
+    if (typeof token.project_id === 'string' && token.project_id) {
+      return token.project_id;
+    }
+    if (typeof token.projectId === 'string' && token.projectId) {
+      return token.projectId;
+    }
+    const firstProject = projects[0];
+    return typeof firstProject.projectId === 'string'
+      ? String(firstProject.projectId)
+      : undefined;
+  }
   if (typeof token.project_id === 'string' && token.project_id) {
     return token.project_id;
   }
   if (typeof token.projectId === 'string' && token.projectId) {
     return token.projectId;
-  }
-  if (Array.isArray(token.projects) && token.projects.length > 0) {
-    const firstProject = token.projects[0] as UnknownObject;
-    return typeof firstProject.projectId === 'string' ? firstProject.projectId : undefined;
   }
   return undefined;
 }

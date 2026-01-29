@@ -355,12 +355,16 @@ async function runGeminiCliStartupCheck() {
       ...process.env,
       ROUTECODEX_CONFIG_PATH: GEMINI_CLI_CONFIG,
       ROUTECODEX_PORT: '0',
-      ROUTECODEX_STAGE_LOG: '0'
+      ROUTECODEX_STAGE_LOG: '0',
+      // Avoid opening OAuth browser during build-time health checks.
+      ROUTECODEX_OAUTH_AUTO_OPEN: '0'
     };
     const child = spawn('node', ['dist/index.js'], {
       env,
       stdio: ['ignore', 'ignore', 'pipe']
     });
+    // Prevent a stuck child process from keeping the verify task alive.
+    child.unref();
 
     let stderr = '';
     child.stderr.on('data', (chunk) => {
@@ -373,6 +377,14 @@ async function runGeminiCliStartupCheck() {
       } catch {
         // ignore
       }
+      const hardKill = setTimeout(() => {
+        try {
+          child.kill('SIGKILL');
+        } catch {
+          // ignore
+        }
+      }, 1500);
+      hardKill.unref?.();
       if (stderr) {
         console.warn('[verify:e2e-toolcall] gemini-cli 启动日志(截断):', stderr.slice(0, 1000));
       }
@@ -391,8 +403,12 @@ async function runGeminiCliStartupCheck() {
   });
 }
 
-main().catch((error) => {
-  console.error(error);
-  console.error('❌ verify:e2e-toolcall 失败:', error?.message || error);
-  process.exit(1);
-});
+main()
+  .then(() => {
+    process.exit(0);
+  })
+  .catch((error) => {
+    console.error(error);
+    console.error('❌ verify:e2e-toolcall 失败:', error?.message || error);
+    process.exit(1);
+  });

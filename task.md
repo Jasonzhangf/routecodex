@@ -16,6 +16,284 @@
 
 ## 任务清单
 
+
+---
+
+## Antigravity 对齐（阶段一：协议/风控/alias）
+
+> 仅对齐 **Antigravity Tools 最新版本**，不考虑旧格式；只启用 **Antigravity 分支**。
+
+### A. 协议层（request/response）
+- **A1 System Instruction `<priority>`** ✅（已对齐）
+  - 参考：`sharedmodule/llmswitch-core/src/conversion/compat/*`、`sharedmodule/llmswitch-core/src/conversion/hub/operation-table/semantic-mappers/gemini-mapper.ts`
+  - 要求：仅 `<priority>` 版，去除旧格式分支
+- **A2 request wrapper（body wrapper）** ✅（已对齐）
+  - 参考：`sharedmodule/llmswitch-core/src/conversion/hub/operation-table/semantic-mappers/gemini-mapper.ts`、
+    `/Users/fanzhang/Documents/github/Antigravity-Manager/src-tauri/src/proxy/mappers/gemini/wrapper.rs`、
+    `sharedmodule/llmswitch-core/src/conversion/compat/profiles/chat-gemini.json`、
+    `src/client/gemini-cli/gemini-cli-protocol-client.ts`、`src/providers/core/runtime/gemini-cli-http-provider.ts`
+  - 要求：JSON wrapper 必含 `requestType/userAgent/requestId/project/request`；不走 header-only
+- **A3 Thought Signature（缓存/预热/恢复）** ✅（已对齐）
+  - 参考：`sharedmodule/llmswitch-core/src/conversion/hub/pipeline/**`、`sharedmodule/llmswitch-core/src/conversion/compat/*`
+  - 要求：仅 Antigravity 分支；缓存 12h / session 50 / 全局 200；不扩展 deepFilter 策略
+- **A4 工具调用清理（history/tool_call）** ✅（已对齐）
+  - 参考：`sharedmodule/llmswitch-core/src/conversion/hub/pipeline/**`、`sharedmodule/llmswitch-core/src/conversion/compat/*`
+  - 要求：仅 Antigravity 分支；对齐 deepFilterThinkingBlocks
+- **A5 Endpoint/路径构造** 🟡（代码对齐，待验证）
+  - 参考：`src/client/gemini-cli/gemini-cli-protocol-client.ts`、
+    `/Users/fanzhang/Documents/github/Antigravity-Manager/src-tauri/src/proxy/upstream/client.rs`
+  - 要求：对齐 Antigravity Tools 最新路径构造（/v1internal:generateContent | :streamGenerateContent）
+- **A6 requestType 解析（agent/web_search/image_gen）** 🟡（对齐中）
+  - 参考：`sharedmodule/llmswitch-core/src/conversion/hub/operation-table/semantic-mappers/gemini-mapper.ts`、
+    `/Users/fanzhang/Documents/github/Antigravity-Manager/src-tauri/src/proxy/mappers/common_utils.rs`
+  - 要求：对齐 Antigravity Tools 的 request_type 判定（-online 后缀 / networking tools / image 模型）
+- **A7 googleSearch 注入 & tools 清理（Antigravity 分支）** 🟡（对齐中）
+  - 参考：`sharedmodule/llmswitch-core/src/conversion/compat/actions/gemini-web-search.ts`、
+    `/Users/fanzhang/Documents/github/Antigravity-Manager/src-tauri/src/proxy/mappers/common_utils.rs`
+  - 要求：仅 Antigravity 分支；与 Antigravity Tools 的 googleSearch 注入行为一致
+
+### B. 风控与配额保护（Antigravity only）
+- **B1 账号禁用（disabled/proxy_disabled）持久化** ✅（已对齐）
+  - 参考：`src/providers/core/runtime/http-transport-provider.ts`、`src/providers/auth/oauth-lifecycle.ts`
+  - 要求：仅 Antigravity 分支；invalid_grant/401 触发禁用；quota 已持久化
+- **B2 protected_models 持久化 + 路由影响** 🟡（实现完成，待验证）
+  - 参考：`src/manager/quota/**`、`sharedmodule/llmswitch-core/src/router/virtual-router/**`
+  - 要求：模型级保护与恢复机制
+- **B3 账号级限流** 🟡（实现完成，待验证）
+  - 参考：`src/providers/core/runtime/rate-limit-manager.ts`、`sharedmodule/llmswitch-core/src/router/virtual-router/**`
+  - 要求：引入账号级限流；与 session stickiness 一致
+
+### C. Alias 与模型映射
+- **C1 Alias → model 顺序（走 Hub pipeline）** ✅（已符合）
+  - 参考：`sharedmodule/llmswitch-core/src/router/virtual-router/**`
+  - 要求：不做特殊 provider 映射
+- **C2 模型名规范化（provider 侧配置）** 🟡（进行中）
+  - 参考：`src/providers/core/runtime/gemini-cli-http-provider.ts`
+  - 要求：Provider 不做模型降级/回退；仅允许后缀规范化（-low/-high/-medium/-minimal）；
+    具体业务映射在虚拟路由器层完成
+- **C3 最佳账号推荐（按 quota 池）** ✅（已对齐）
+  - 参考：`sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/alias-selection.ts`、
+    `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/tier-selection-select.ts`、
+    `/Users/fanzhang/Documents/github/Antigravity-Manager/src-tauri/src/proxy/token_manager.rs`、
+    `src/manager/modules/quota/antigravity-quota-manager.ts`、
+    `src/server/runtime/http-server/index.ts`
+  - 对齐目标：
+    - “最佳账号推荐”来自 quota 池剩余额度（按 model 维度）
+    - 默认不做轮询；只有当该 alias 的该 model 空时才切换
+    - “model 空”判定：quota=0 或 429 冷却移出账号池 ≥30s
+    - 策略按模型族分开（每个 model 单独挑最佳 alias）
+
+### D. 请求头一致性（Antigravity only）
+- **D1 UA / X-Goog-Api-Client / Client-Metadata** 🟡（对齐中）
+  - 参考：`src/client/gemini-cli/gemini-cli-protocol-client.ts`、
+    `src/providers/core/runtime/gemini-cli-http-provider.ts`、
+    `/Users/fanzhang/Documents/github/Antigravity-Manager/src-tauri/src/proxy/project_resolver.rs`
+  - 要求：对齐 Antigravity Tools 最新版本（Antigravity 分支仅使用 UA，不加 Gemini CLI header triplet）
+
+### E. project_id 来源（Antigravity only）
+- **E1 token 缺失 project_id → OAuth 生命周期补全** ✅（已对齐）
+  - 参考：`src/providers/auth/oauth-lifecycle.ts`、`src/providers/auth/antigravity-userinfo-helper.ts`
+  - 要求：对齐 Antigravity Tools 最新版本（不随机）
+
+---
+
+## Antigravity Gemini 格式清理（阶段二：迁出与回归）
+
+> 目标：Provider 只做传输；outbound 负责标准 Gemini schema；compat 负责 Gemini CLI 私有包裹。
+
+### T1 迁出 payload merge（provider → outbound/compat）
+- **状态**: ✅ 已完成（迁出 + 对齐）
+- **内容**:
+  - 从 `GeminiCLIHttpProvider` 移除 `payload.request` 回填/合并与 data envelope 扁平逻辑
+  - outbound 输出完整 Gemini schema（`request.contents/tools/generationConfig` 等）
+  - compat（antigravity 自动加载）仅负责 Gemini CLI `request` 包裹与私有字段
+
+### T2 回放验证（rcc 样本）
+- **状态**: ✅ 已完成（dry-run 对比）
+- **内容**:
+  - 使用 rcc 样本 dry-run（`/v1/responses`）
+  - 对比 `provider-request.json` 的 URL / headers / body 是否一致
+  - 产出：`scripts/tests/antigravity-gemini-dryrun-compare.mjs`
+
+### T3 回到 git HEAD 并同步改动
+- **状态**: ✅ 已完成（同步到 origin/main）
+- **内容**:
+  - 回到主包与 llmswitch-core 的最新 HEAD
+  - 将已验证改动同步到最新 HEAD
+  - 重新构建与回归测试
+
+---
+
+## Init-only Web UI（rcc init / rcc start）
+
+> 目标：`rcc init` 以 Web 引导完成 provider + routing 配置；`rcc start` 无 config 时进入 init UI。
+
+- **I1 init-only server + UI** 🟡（实现中）
+  - 参考：`src/server/runtime/init-server.ts`、`docs/init-ui.html`
+  - 要求：本地访问、支持 OAuth/ApiKey、默认 route 池、可回退到 admin
+- **I2 CLI 入口行为对齐** 🟡（实现中）
+  - 参考：`src/cli/commands/init.ts`、`src/cli/commands/start.ts`、`src/index.ts`
+  - 要求：`rcc init` 启动 init-only；`rcc start` 无 config 自动进入 init UI
+- **I3 OAuth alias 默认规则** 🟡（实现中）
+  - 规则：alias 默认取 email `@` 前缀且去掉 `.` 与标点，仅字母/数字
+  - 参考：`src/server/runtime/init-server.ts`
+- **I4 路由池配置 + 默认路由** 🟡（实现中）
+  - 规则：默认 `default` 路由必须至少一个 target
+  - 参考：`docs/init-ui.html`、`src/server/runtime/init-server.ts`
+
+---
+
+## llms-wasm 逐步替换（TS → WASM）迁移任务
+
+> [!important]
+> 本任务基于 `docs/llms-wasm-migration.md`（计划概要）与 `docs/plans/llms-wasm-migration-plan.md`（可执行清单）。
+>
+> 责任边界：Host 只做开关读取/影子分发/指标上报；canonicalization、routing、tools、compat、diff 协议全部在 llmswitch-core。
+
+### W1. 阶段 0：边界与基线（先做）
+- **参考**: `docs/plans/llms-wasm-migration-plan.md#阶段-0边界与基线`
+- **优先级**: 最高
+- **状态**: ✅ 已完成（文档与基线定义完成，下一步进入双加载与开关矩阵）
+- **目标**:
+  - 产出“模块边界清单”（Contract + 归属 + 依赖顺序）
+  - 建立“基线回放集”（可重复、可脱敏、可回放）
+- **任务**:
+  - [x] 产出模块边界清单文档：`docs/llms-wasm-module-boundaries.md`
+  - [x] 定义每个模块的输入/输出 Contract（TypeScript interface 草案）：`docs/llms-wasm-module-boundaries.md`
+  - [x] 明确依赖顺序与替换优先级：`docs/llms-wasm-module-boundaries.md`
+  - [x] 确认 Owner/修复路径（wasm core vs compat adapter）：`docs/llms-wasm-module-boundaries.md`
+  - [x] 设计回放集采样策略（覆盖模型/工具/路由/SSE 典型场景）：`docs/llms-wasm-replay-baseline.md`
+  - [x] 定义回放集存储格式（JSON + 脱敏规则）：`docs/llms-wasm-replay-baseline.md`
+  - [x] 定义 baseline 版本快照字段（TS/WASM/ruleset/compat/sse 版本号）：`docs/llms-wasm-replay-baseline.md`
+
+---
+
+### W2. 阶段 1：双加载与开关矩阵（进行中）
+- **参考**: `docs/plans/llms-wasm-migration-plan.md#阶段-1双加载--开关矩阵`
+- **优先级**: 最高
+- **状态**: 🟡 进行中（已确认方案，开始实现）
+- **目标**:
+  - 在 Host 中实现 WASM & TS 双加载初始化
+  - 实现运行模式开关（`shadow` / `wasm_primary` / `ts_primary` / `split`）
+  - 实现开关优先级矩阵（全局 > 租户 > 路由 > 请求）
+  - 实现影子请求分发（异步、非阻塞）
+- **方案确认**:
+  - WASM 侧已提供 `HubPipeline` 实现（`sharedmodule/llms-wasm/js/hub-pipeline.mjs`）
+  - Host 侧已有 `hubPipelineEngineShadow` 预留字段，需实现影子加载逻辑
+  - 新增 `src/runtime/wasm-runtime/` 模块负责 WASM 运行时加载
+  - 扩展 `src/modules/llmswitch/bridge` 新增 `getHubPipelineCtorForImpl('wasm')` 接口
+- **任务清单**:
+  - [ ] 强制规则：模块必须先验证通过，才能进入“上线对比（shadow）”阶段（按模块顺序执行）
+    - [x] tokenizer：先验证 → 再允许 shadow（已通过 llms-wasm compare：hub-chat-process/tool-filters）
+    - [x] tool canonicalization：先验证 → 再允许 shadow（已通过 llms-wasm compare：tool-filters/tool-governance 样本）
+    - [x] compat profile：先验证 → 再允许 shadow（已通过 llms-wasm compare：compat-request/compat-response）
+    - [x] streaming (SSE)：先验证 → 再允许 shadow（已通过 llms-wasm compare：hub-response/provider-response）
+    - [x] routing：先验证 → 再允许 shadow（已通过 llms-wasm compare：virtual-router）
+    - [x] virtual-router engine-health：先验证 → 再允许 shadow（已通过 llms-wasm native compare：vr_map_provider_error/vr_handle_provider_failure/vr_apply_series_cooldown）
+    - [x] virtual-router routing-policy：先验证 → 再允许 shadow（已补齐 fixtures：multi-provider round_robin / priority-fallback）
+    - [x] provider-response conversion：先验证 → 再允许 shadow（已补齐 fixtures：openai-chat/openai-responses provider response conversion）
+    - [x] inbound/outbound request shaping：先验证 → 再允许 shadow（已补齐 FFI + native：vr_convert_inbound/vr_convert_inbound_responses + request fixtures）
+    - [x] standardized bridge：先验证 → 再允许 shadow（已补齐 FFI + native roundtrip：ChatEnvelope <-> StandardizedRequest）
+    - [x] outbound response conversion：先验证 → 再允许 shadow（已补齐 FFI + native：vr_convert_outbound）
+    - [x] response finalize：先验证 → 再允许 shadow（已补齐 FFI + native：vr_finalize_chat_response）
+    - [x] response IO：先验证 → 再允许 shadow（已补齐 FFI + native：vr_convert_provider_response / vr_provider_response_to_chat）
+  - [ ] 新建 `src/runtime/wasm-runtime/` 模块结构与入口
+  - [ ] 实现 `WasmRuntime` 类（加载、初始化、生命周期管理）
+  - [ ] 扩展 `src/modules/llmswitch/bridge` 新增 `getHubPipelineCtorForImpl('wasm')`
+  - [ ] 实现 `ensureHubPipelineEngineShadow()` 加载 WASM HubPipeline
+  - [ ] 实现运行模式开关解析（环境变量 `ROUTECODEX_HUB_PIPELINE_IMPL`）
+  - [ ] 实现开关优先级矩阵（全局 > 租户 > 路由 > 请求）
+  - [ ] 实现影子请求分发逻辑（主路 + 影子异步）
+  - [ ] WASM 初始化失败上报（通过 `providerErrorCenter`）
+  - [ ] 验证双加载互不影响（隔离测试）
+- [x] 在 llmswitch-core CI 新增 wasm-compare job（模块顺序 gating）: `/Users/fanzhang/Documents/github/sharedmodule/.github/workflows/llmswitch-core-ci.yml`
+
+#### llmswitch-core 覆盖率对比（目标 90%）
+
+- **最新验证（2026-01-27）**：`node scripts/run-ci-coverage.mjs`
+  - lines **69.04%** / branches **53.42%** / functions **72.45%** / statements **69.04%**
+  - 证据：`/Users/fanzhang/Documents/github/sharedmodule/llmswitch-core/coverage/coverage-summary.json`
+  - 仍未达标（目标 90%），需继续补覆盖
+- **新增覆盖脚本（已接入 CI）**：
+  - `sharedmodule/llmswitch-core/scripts/tests/coverage-compat-pipeline-executor.mjs`
+  - `sharedmodule/llmswitch-core/scripts/tests/coverage-responses-mapper.mjs`
+  - `sharedmodule/llmswitch-core/scripts/tests/coverage-tool-governor.mjs`
+  - `sharedmodule/llmswitch-core/scripts/tests/coverage-followup-shadow.mjs`
+  - `sharedmodule/llmswitch-core/scripts/tests/coverage-tool-session-compat.mjs`
+  - `sharedmodule/llmswitch-core/scripts/tests/coverage-stop-message-file-resolver.mjs`
+  - `sharedmodule/llmswitch-core/scripts/tests/coverage-bridge-instructions.mjs`
+
+#### W2 验证记录（2026-01-26）
+- llms-wasm native：`cargo test --test ts_fixtures_compare` 全部 26 用例通过。
+- llms-wasm native：`cargo llvm-cov clean && cargo llvm-cov --no-report --test ts_fixtures_compare && cargo llvm-cov report`（本地，clean 后）覆盖率 = lines **61.48%** / functions **60.11%** / regions **61.08%**。
+- 关键文件：`native/src/lib.rs` lines **50.38%** / functions **48.23%** / regions **49.06%**（仍是主要短板）。
+- 目标阈值 90% 尚未达到，继续按模块补齐覆盖与 fixtures。
+- **本轮进展**：
+  - 新增 14 个 compat_pipeline fixtures：normalize_tool_choice / inject_instruction / parse_json / convert_responses_output_to_choices / extract_glm_tool_markup / apply_rules(when_tools) / qwen_transform / glm_web_search / response_normalize / auto_thinking
+  - 实现 `convert_responses_output_to_choices` 函数（之前是 TODO 空实现）
+  - 新增 `token_estimator` / `standardized_bridge` 的错误路径测试（invalid JSON / missing required fields）
+  - token_estimator.rs 覆盖率提升到 ~70.21%（lines）
+  - standardized_bridge.rs 覆盖率提升到 ~53.89%（lines）
+  - TOTAL 覆盖率从 53.91% 提升到 59.28%
+
+#### W2 验证记录（2026-01-27 - virtual-router fixtures 扩充）
+- **目的**：提高 `llms-wasm/native/src/lib.rs` 的分支覆盖（engine lifecycle + provider availability）。
+- **变更**：扩充 `llms-wasm/testdata/virtual-router-fixtures.json`，并在 `ts_fixtures_compare` 中对 `multi-provider-round-robin` 增强 `vr_set_provider_availability` 探测（同时覆盖 providerKey 有/无 `.key1` 后缀两种形式）。
+- **测试**：`cargo test --test ts_fixtures_compare` 通过（24 passed）。
+- **覆盖率（clean 后）**：
+  - TOTAL：lines 59.28% / functions 59.27% / regions 58.76%
+  - lib.rs：lines 42.23%
+  - compat_pipeline.rs：lines 59.96%
+
+#### W2 验证记录（2026-01-27 - vr_apply_series_cooldown 覆盖增强）
+- **目的**：增强系列冷却逻辑覆盖率（`vr_apply_series_cooldown` / `extract_series_cooldown_detail` / `resolve_series_cooldown_targets`）。
+- **变更**：
+  - 新增 `ts_fixtures_series_cooldown_gemini_flash` 测试用例，验证 gemini-flash 系列冷却
+  - 扩充 `virtual-router-fixtures.json` 的 `series_cooldown` 部分，添加 gemini-flash 测试用例
+  - 新增 `series-cooldown-test-fixture.json` fixture 文件，提供正确的 `details.virtualRouterSeriesCooldown` 结构
+- **测试**：`cargo test --test ts_fixtures_compare` 通过（27 passed）。
+- **覆盖率（clean 后）**：
+  - TOTAL：lines **62.81%** / functions **61.50%** / regions **62.30%**
+  - lib.rs：lines **55.00%**（从 50.38% 提升）
+
+#### W2 验证记录（2026-01-27 - vr_bootstrap_config 详细错误分支覆盖）
+- **目的**：补齐 `build_provider_runtime_entries` / `extract_provider_auth_entries` / routing 相关错误分支。
+- **变更**：新增 `ts_fixtures_virtual_router_detailed_errors` 测试用例，覆盖：
+  - 空 auth 对象
+  - OAuth 缺失字段（当前行为）
+  - routing 引用未知 provider
+  - 非法 auth 类型 fallback 行为（当前行为）
+- **测试**：`cargo test --test ts_fixtures_compare` 通过（28 passed）。
+- **覆盖率（clean 后）**：
+  - TOTAL：lines **64.07%** / functions **64.03%** / regions **63.36%**
+  - lib.rs：lines **59.36%**（从 55.00% 提升）
+
+#### W2 验证记录（2026-01-27 - vr_bootstrap_config 错误路径覆盖）
+- **目的**：提高 `vr_bootstrap_config` 的错误分支覆盖（invalid JSON / missing providers / missing routing）。
+- **测试**：`cargo test --test ts_fixtures_compare` 通过（25 passed）。
+- **覆盖率（clean 后）**：
+  - TOTAL：lines 59.45% / functions 59.35% / regions 58.87%
+  - lib.rs：lines 42.83%
+
+#### W2 验证记录（2026-01-27 - vr_create_engine / invalid handle 错误覆盖）
+- **目的**：提高引擎生命周期与错误路径覆盖（create_engine 解析失败、空配置、invalid handle route）。
+- **测试**：`cargo test --test ts_fixtures_compare` 通过（26 passed）。
+- **覆盖率（clean 后）**：
+  - TOTAL：lines 59.51% / functions 59.35% / regions 58.91%
+  - lib.rs：lines 43.05%
+
+### W2 验证记录（2026-01-26 - compat_pipeline 阶段性完成）
+- **完成项**: 新增 `remove/rename/set/stringify/parse_json/set_default/normalize_tool_choice/inject_instruction/convert_responses_output_to_choices/resp_blacklist/field_map/tool_schema_sanitize/apply_rules/response_normalize/response_validate/qwen_request_transform/qwen_response_transform/auto_thinking/glm_web_search_request` 等 20 个 `compat_pipeline` 相关的 fixtures 和测试。
+- **测试结果**: 所有 `ts_fixtures_compare` 测试通过。
+- **覆盖率**: `compat_pipeline.rs` 模块的行覆盖率为 36.58% (之前为 37.38%)，整体行覆盖率略降至 52.70%。
+- **下一步**: 继续关注 `response_io.rs` 等低覆盖模块。
+
+### W2 验证记录（2026-01-26 - response_io 阶段性完成）
+- **完成项**: 新增 `responses-explicit-output-text`、`responses-status-in-progress`、`responses-status-cancelled`、`responses-status-failed`、`responses-finish-reason-metadata`、`responses-tool-call-output`、`responses-reasoning-output`、`anthropic-messages-tool-use`、`gemini-chat-basic` 等 9 个 `response_io` 相关的 fixtures 和测试。
+- **测试结果**: 所有 `ts_fixtures_compare` 测试通过。
+- **覆盖率**: `response_io.rs` 模块的行覆盖率为 68.50%（之前为 39.88%），整体行覆盖率提升到 54.72%。
+- **下一步**: 继续关注 `standardized_bridge.rs`（51.06%）和 `token_estimator.rs`（46.81%）等低覆盖模块。
+
 ### 14. CI 基线（PR 必跑）+ 覆盖率增强（从最小集合开始）
 - **位置**: `sharedmodule/.github/workflows/llmswitch-core-ci.yml` + `routecodex/.github/workflows/test.yml` + `jest.config.js`
 - **优先级**: 高

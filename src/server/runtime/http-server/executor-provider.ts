@@ -1,5 +1,16 @@
 import type { ProviderError } from '../../../providers/core/api/provider-types.js';
 
+const NETWORK_ERROR_CODE_SET = new Set([
+  'ECONNRESET',
+  'ECONNREFUSED',
+  'EHOSTUNREACH',
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'EPIPE',
+  'ETIMEDOUT',
+  'ECONNABORTED'
+]);
+
 export function hasVirtualRouterSeriesCooldown(error: unknown): boolean {
   if (!error || typeof error !== 'object') {
     return false;
@@ -26,6 +37,33 @@ export function hasVirtualRouterSeriesCooldown(error: unknown): boolean {
   return hasQuotaHint;
 }
 
+export function isNetworkTransportError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+  const err = error as { code?: unknown; message?: unknown; name?: unknown };
+  const code = typeof err.code === 'string' ? err.code.trim().toUpperCase() : '';
+  if (code && NETWORK_ERROR_CODE_SET.has(code)) {
+    return true;
+  }
+  const message = typeof err.message === 'string' ? err.message.toLowerCase() : '';
+  const name = typeof err.name === 'string' ? err.name : '';
+  if (name === 'AbortError' || message.includes('operation was aborted')) {
+    return true;
+  }
+  const hints = [
+    'fetch failed',
+    'network timeout',
+    'socket hang up',
+    'client network socket disconnected',
+    'tls handshake timeout',
+    'unable to verify the first certificate',
+    'network error',
+    'temporarily unreachable'
+  ];
+  return hints.some((hint) => message.includes(hint));
+}
+
 export function shouldRetryProviderError(error: unknown): boolean {
   if (!error || typeof error !== 'object') {
     return false;
@@ -46,6 +84,9 @@ export function shouldRetryProviderError(error: unknown): boolean {
   if (providerError.retryable === true) {
     return true;
   }
+  if (isNetworkTransportError(error)) {
+    return true;
+  }
   const status = extractErrorStatusCode(error);
   if (status === 429 || status === 408 || status === 425) {
     return true;
@@ -54,6 +95,14 @@ export function shouldRetryProviderError(error: unknown): boolean {
     return true;
   }
   return false;
+}
+
+export async function waitBeforeRetry(error: unknown): Promise<void> {
+  if (!isNetworkTransportError(error)) {
+    return;
+  }
+  const delayMs = 500;
+  await new Promise((resolve) => setTimeout(resolve, delayMs));
 }
 
 function isPromptTooLongError(error: unknown): boolean {

@@ -61,7 +61,7 @@ import { writeClientSnapshot } from '../../../providers/core/utils/snapshot-writ
 import { createServerColoredLogger } from './colored-logger.js';
 import { formatValueForConsole } from '../../../utils/logger.js';
 import { QuietErrorHandlingCenter } from '../../../error-handling/quiet-error-handling-center.js';
-import { describeRetryReason, shouldRetryProviderError } from './executor-provider.js';
+import { describeRetryReason, isNetworkTransportError, shouldRetryProviderError, waitBeforeRetry } from './executor-provider.js';
 import { ManagerDaemon } from '../../../manager/index.js';
 import { HealthManagerModule } from '../../../manager/modules/health/index.js';
 import { RoutingStateManagerModule } from '../../../manager/modules/routing/index.js';
@@ -1214,6 +1214,7 @@ export class RouteCodexHttpServer {
     let firstError: unknown | null = null;
     const originalBodySnapshot = this.cloneRequestPayload(input.body);
     const excludedProviderKeys = new Set<string>();
+    let initialRoutePool: string[] | null = null;
 
     while (attempt < maxAttempts) {
       attempt += 1;
@@ -1245,6 +1246,9 @@ export class RouteCodexHttpServer {
         route: pipelineResult.routingDecision?.routeName,
         target: pipelineResult.target?.providerKey
       });
+      if (!initialRoutePool && Array.isArray(pipelineResult.routingDecision?.pool)) {
+        initialRoutePool = [...pipelineResult.routingDecision!.pool];
+      }
 
       const providerPayload = pipelineResult.providerPayload;
       const target = pipelineResult.target;
@@ -1469,7 +1473,13 @@ export class RouteCodexHttpServer {
           this.stats.recordCompletion(input.requestId, { error: true });
           throw error;
         }
-        if (target.providerKey) {
+        const singleProviderPool =
+          Boolean(initialRoutePool && initialRoutePool.length === 1 && initialRoutePool[0] === target.providerKey);
+        if (singleProviderPool) {
+          if (isNetworkTransportError(error)) {
+            await waitBeforeRetry(error);
+          }
+        } else if (target.providerKey) {
           excludedProviderKeys.add(target.providerKey);
         }
         this.logStage('provider.retry', input.requestId, {
@@ -1502,7 +1512,7 @@ export class RouteCodexHttpServer {
       runtimeKey?: string;
       processMode?: string;
     };
-    routingDecision?: { routeName?: string };
+    routingDecision?: { routeName?: string; pool?: string[] };
     processMode: string;
     metadata: Record<string, unknown>;
   }> {

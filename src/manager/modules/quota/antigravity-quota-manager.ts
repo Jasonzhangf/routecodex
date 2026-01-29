@@ -32,6 +32,8 @@ export class QuotaManagerModule implements ManagerModule {
   private antigravityTokens: Map<string, AntigravityTokenRegistration> = new Map();
   private refreshTimer: NodeJS.Timeout | null = null;
   private quotaRoutingEnabled = true;
+  private refreshFailures = 0;
+  private refreshDisabled = false;
   private providerErrorCenter:
     | {
         emit(event: ProviderErrorEvent): void;
@@ -46,7 +48,12 @@ export class QuotaManagerModule implements ManagerModule {
   async start(): Promise<void> {
     // 启动时立即做一次最佳努力刷新，然后根据 token 过期时间和 5 分钟基准动态调度后续刷新。
     try {
-      await this.refreshAllAntigravityQuotas();
+      const result = await this.refreshAllAntigravityQuotas();
+      if (result.attempted > 0 && result.successCount === 0) {
+        this.refreshFailures = 1;
+      } else if (result.successCount > 0) {
+        this.refreshFailures = 0;
+      }
     } catch {
       // ignore startup refresh failures
     }
@@ -70,7 +77,11 @@ export class QuotaManagerModule implements ManagerModule {
   async refreshNow(): Promise<{ refreshedAt: number; tokenCount: number; recordCount: number }> {
     const refreshedAt = Date.now();
     try {
-      await this.refreshAllAntigravityQuotas();
+      const result = await this.refreshAllAntigravityQuotas();
+      if (result.successCount > 0) {
+        this.refreshFailures = 0;
+        this.refreshDisabled = false;
+      }
     } catch {
       // ignore refresh failures
     }
@@ -208,26 +219,34 @@ export class QuotaManagerModule implements ManagerModule {
     }
   }
 
-  private async refreshAllAntigravityQuotas(): Promise<void> {
+  private async refreshAllAntigravityQuotas(): Promise<{ attempted: number; successCount: number; failureCount: number }> {
     await this.syncAntigravityTokensFromDisk();
     if (this.antigravityTokens.size === 0) {
-      return;
+      return { attempted: 0, successCount: 0, failureCount: 0 };
     }
+    let attempted = 0;
+    let successCount = 0;
+    let failureCount = 0;
     for (const { alias, tokenFile, apiBase } of this.antigravityTokens.values()) {
       try {
         const accessToken = await loadAntigravityAccessToken(tokenFile);
         if (!accessToken) {
           continue;
         }
+        attempted += 1;
         const snapshot = await fetchAntigravityQuotaSnapshot(apiBase, accessToken);
         if (!snapshot) {
+          failureCount += 1;
           continue;
         }
         this.updateAntigravityQuota(alias, snapshot);
+        successCount += 1;
       } catch {
+        failureCount += 1;
         // 单个 alias 失败不影响其他 alias 的刷新
       }
     }
+    return { attempted, successCount, failureCount };
   }
 
   /**
@@ -239,17 +258,35 @@ export class QuotaManagerModule implements ManagerModule {
       clearTimeout(this.refreshTimer);
       this.refreshTimer = null;
     }
+    if (this.refreshDisabled) {
+      return;
+    }
     const baseIntervalMs = 5 * 60 * 1000;
     const delayMs = baseIntervalMs;
     this.refreshTimer = setTimeout(() => {
       void this.refreshAllAntigravityQuotas()
+        .then((result) => {
+          if (result.attempted > 0 && result.successCount === 0) {
+            this.refreshFailures += 1;
+            if (this.refreshFailures >= 3) {
+              this.refreshDisabled = true;
+            }
+          } else if (result.successCount > 0) {
+            this.refreshFailures = 0;
+          }
+        })
         .catch(() => {
-          // ignore refresh failure
+          this.refreshFailures += 1;
+          if (this.refreshFailures >= 3) {
+            this.refreshDisabled = true;
+          }
         })
         .finally(() => {
-          void this.scheduleNextRefresh().catch(() => {
-            // ignore reschedule failure
-          });
+          if (!this.refreshDisabled) {
+            void this.scheduleNextRefresh().catch(() => {
+              // ignore reschedule failure
+            });
+          }
         });
     }, delayMs);
     this.refreshTimer.unref?.();
@@ -481,4 +518,3 @@ export class QuotaManagerModule implements ManagerModule {
     }
   }
 }
-

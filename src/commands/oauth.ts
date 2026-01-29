@@ -1,19 +1,35 @@
 import { Command } from 'commander';
 import {
-  interactiveRefresh
+  interactiveRefresh,
+  validateOAuthTokens
 } from '../token-daemon/index.js';
 
 export function createOauthCommand(): Command {
   const cmd = new Command('oauth');
 
   cmd
-    .description('Force OAuth re-authentication for a specific token (opens browser / Camoufox when enabled)')
+    .description('OAuth tools: refresh token or validate tokens without opening a browser')
     .argument(
-      '<selector>',
-      'Token selector: file basename, full path, or provider id (e.g. "iflow-oauth-1-186.json" or "iflow")'
+      '[args...]',
+      'Usage: "oauth <selector>" or "oauth validate <selector|all> [--json]"'
     )
-    .action(async (selector: string) => {
-      await interactiveRefresh(selector);
+    .option('--json', 'Output JSON result (only for validate)', false)
+    .action(async (args: string[], options: { json?: boolean }) => {
+      const list = Array.isArray(args) ? args : [];
+      const first = list[0];
+      if (!first) {
+        cmd.help();
+        return;
+      }
+      if (first === 'validate') {
+        const selector = list[1] || 'all';
+        const ok = await validateOAuthTokens(selector, Boolean(options?.json));
+        if (!ok) {
+          process.exit(1);
+        }
+        return;
+      }
+      await interactiveRefresh(first);
     });
 
   cmd

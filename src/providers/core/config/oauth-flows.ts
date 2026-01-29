@@ -217,7 +217,7 @@ export abstract class BaseOAuthFlowStrategy {
 
       let opened = false;
       const envPref = (process.env.ROUTECODEX_OAUTH_BROWSER || '').toLowerCase();
-      const preferCamoufox = envPref === 'camoufox';
+      const preferCamoufox = envPref ? envPref === 'camoufox' : true;
 
       if (preferCamoufox) {
         const meta = this.extractTokenPortalMetadata(portalUrl);

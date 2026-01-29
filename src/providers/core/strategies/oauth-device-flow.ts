@@ -456,11 +456,14 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
    * 保存令牌
    */
   async saveToken(token: UnknownObject): Promise<void> {
-    const stored = this.ensureStoredToken(token);
+    const wrapper = token && typeof token === 'object' && typeof (token as Record<string, unknown>).token === 'object'
+      ? (token as UnknownObject)
+      : null;
+    const stored = this.ensureStoredToken(wrapper ? (wrapper as Record<string, unknown>).token as UnknownObject : token);
     try {
       const dir = path.dirname(this.tokenFile);
       await fs.mkdir(dir, { recursive: true });
-      await fs.writeFile(this.tokenFile, JSON.stringify(stored, null, 2));
+      await fs.writeFile(this.tokenFile, JSON.stringify(wrapper ?? stored, null, 2));
       this.tokenStorage = stored;
       logOAuthDebug(`[OAuth] [device_code] Token saved to: ${this.tokenFile}`);
     } catch (error) {
@@ -491,10 +494,13 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
       return null;
     }
     const record = token as Record<string, unknown>;
-    if (typeof record.access_token !== 'string' || typeof record.expires_in !== 'number') {
+    const candidate = record.token && typeof record.token === 'object'
+      ? (record.token as Record<string, unknown>)
+      : record;
+    if (typeof candidate.access_token !== 'string' || typeof candidate.expires_in !== 'number') {
       return null;
     }
-    return record as StoredToken;
+    return candidate as StoredToken;
   }
 
   private ensureStoredToken(token: UnknownObject): StoredToken {

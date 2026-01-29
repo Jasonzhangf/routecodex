@@ -12,7 +12,7 @@ export type HubPipelineResult = {
     processMode?: string;
     compatibilityProfile?: string;
   };
-  routingDecision?: { routeName?: string };
+  routingDecision?: { routeName?: string; pool?: string[] };
   processMode: string;
   metadata: Record<string, unknown>;
 };
@@ -58,4 +58,3 @@ export async function runHubPipeline(
     metadata: result.metadata ?? {}
   };
 }
-

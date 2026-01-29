@@ -15,7 +15,7 @@ import {
   ensureClientHeadersOnPayload,
   resolveClientRequestId
 } from './executor-metadata.js';
-import { describeRetryReason, shouldRetryProviderError } from './executor-provider.js';
+import { describeRetryReason, isNetworkTransportError, shouldRetryProviderError, waitBeforeRetry } from './executor-provider.js';
 import {
   convertProviderResponse as bridgeConvertProviderResponse,
   createSnapshotRecorder as bridgeCreateSnapshotRecorder
@@ -128,6 +128,7 @@ export class HubRequestExecutor implements RequestExecutor {
       const originalRequestSnapshot = this.cloneRequestPayload(input.body);
       let attempt = 0;
       let lastError: unknown;
+      let initialRoutePool: string[] | null = null;
 
       while (attempt < maxAttempts) {
         attempt += 1;
@@ -150,7 +151,7 @@ export class HubRequestExecutor implements RequestExecutor {
           attempt
         });
 
-        const pipelineResult = await runHubPipeline(hubPipeline, input, metadataForAttempt);
+    const pipelineResult = await runHubPipeline(hubPipeline, input, metadataForAttempt);
         const pipelineMetadata = pipelineResult.metadata ?? {};
         const mergedMetadata = { ...metadataForAttempt, ...pipelineMetadata };
         const mergedClientHeaders =
@@ -164,6 +165,9 @@ export class HubRequestExecutor implements RequestExecutor {
           target: pipelineResult.target?.providerKey,
           attempt
         });
+        if (!initialRoutePool && Array.isArray(pipelineResult.routingDecision?.pool)) {
+          initialRoutePool = [...pipelineResult.routingDecision!.pool];
+        }
 
         const providerPayload = pipelineResult.providerPayload;
         const target = pipelineResult.target;
@@ -339,7 +343,13 @@ export class HubRequestExecutor implements RequestExecutor {
           if (!shouldRetry) {
             throw error;
           }
-          if (target.providerKey) {
+          const singleProviderPool =
+            Boolean(initialRoutePool && initialRoutePool.length === 1 && initialRoutePool[0] === target.providerKey);
+          if (singleProviderPool) {
+            if (isNetworkTransportError(error)) {
+              await waitBeforeRetry(error);
+            }
+          } else if (target.providerKey) {
             excludedProviderKeys.add(target.providerKey);
           }
           this.logStage('provider.retry', input.requestId, {

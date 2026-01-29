@@ -32,7 +32,7 @@ describe('GeminiCLIHttpProvider basic behaviour', () => {
     expect(profile.requiredAuth).toContain('oauth');
   });
 
-  test('flattens accidental nested request container (avoid body.request.request.*)', async () => {
+  test('preserves nested request container (provider does not flatten)', async () => {
     const provider = new GeminiCLIHttpProvider(baseConfig, emptyDeps);
     const processed = await (provider as any).preprocessRequest({
       model: 'gemini-3-pro-high',
@@ -43,12 +43,13 @@ describe('GeminiCLIHttpProvider basic behaviour', () => {
     });
 
     expect(processed).toBeTruthy();
-    expect((processed as any).request).toBeUndefined();
-    expect(Array.isArray((processed as any).contents)).toBe(true);
+    expect((processed as any).request).toBeTruthy();
+    expect(Array.isArray((processed as any).request?.contents)).toBe(true);
+    expect((processed as any).contents).toBeUndefined();
     expect((processed as any).stream).toBeUndefined();
   });
 
-  test('antigravity minimal compatibility: minimal body fields + requestId/requestType as headers', async () => {
+  test('antigravity minimal compatibility: requestId in body + requestId/requestType as headers', async () => {
     const prevHeaderMode = process.env.ROUTECODEX_ANTIGRAVITY_HEADER_MODE;
     const prevRccHeaderMode = process.env.RCC_ANTIGRAVITY_HEADER_MODE;
     process.env.ROUTECODEX_ANTIGRAVITY_HEADER_MODE = 'minimal';
@@ -91,9 +92,11 @@ describe('GeminiCLIHttpProvider basic behaviour', () => {
       const body = (provider as any).buildHttpRequestBody(processed);
       expect(body).toBeTruthy();
       expect(Object.keys(body).sort()).toEqual(expect.arrayContaining(['model', 'request']));
-      expect((body as any).requestId).toBeUndefined();
+      expect(typeof (body as any).requestId).toBe('string');
       expect((body as any).requestType).toBeUndefined();
       expect((body as any).userAgent).toBeUndefined();
+      expect((body as any).request).toBeTruthy();
+      expect((body as any).contents).toBeUndefined();
     } finally {
       if (prevHeaderMode === undefined) {
         delete process.env.ROUTECODEX_ANTIGRAVITY_HEADER_MODE;
@@ -126,6 +129,62 @@ describe('GeminiCLIHttpProvider basic behaviour', () => {
       const processed = await (provider as any).preprocessRequest({
         model: 'gemini-3-pro-high',
         contents: [{ role: 'user', parts: [{ text: 'hi' }] }],
+        stream: true
+      });
+
+      expect(typeof (processed as any).requestId).toBe('string');
+      expect(String((processed as any).requestId)).toContain('agent-');
+      expect((processed as any).requestType).toBe('agent');
+      expect((processed as any).userAgent).toBe('antigravity');
+      expect((processed as any).sessionId).toBeUndefined();
+
+      const headers = await (provider as any).finalizeRequestHeaders({}, processed);
+      expect(headers.requestId).toBeUndefined();
+      expect(headers.requestType).toBeUndefined();
+      expect(typeof headers['User-Agent']).toBe('string');
+      expect(headers['X-Goog-Api-Client']).toBeTruthy();
+      expect(headers['Client-Metadata']).toBeTruthy();
+      expect(headers['X-Goog-QuotaUser']).toBeUndefined();
+      expect(headers['X-Client-Device-Id']).toBeUndefined();
+
+      const body = (provider as any).buildHttpRequestBody(processed);
+      expect(typeof (body as any).requestId).toBe('string');
+      expect((body as any).requestType).toBe('agent');
+      expect((body as any).userAgent).toBe('antigravity');
+      expect((body as any).request).toBeTruthy();
+      expect((body as any).contents).toBeUndefined();
+    } finally {
+      if (prevHeaderMode === undefined) {
+        delete process.env.ROUTECODEX_ANTIGRAVITY_HEADER_MODE;
+      } else {
+        process.env.ROUTECODEX_ANTIGRAVITY_HEADER_MODE = prevHeaderMode;
+      }
+      if (prevRccHeaderMode === undefined) {
+        delete process.env.RCC_ANTIGRAVITY_HEADER_MODE;
+      } else {
+        process.env.RCC_ANTIGRAVITY_HEADER_MODE = prevRccHeaderMode;
+      }
+    }
+  });
+
+  test('antigravity standard contract: headers minimal + JSON body keeps requestId/requestType', async () => {
+    const prevHeaderMode = process.env.ROUTECODEX_ANTIGRAVITY_HEADER_MODE;
+    const prevRccHeaderMode = process.env.RCC_ANTIGRAVITY_HEADER_MODE;
+    process.env.ROUTECODEX_ANTIGRAVITY_HEADER_MODE = 'standard';
+    process.env.RCC_ANTIGRAVITY_HEADER_MODE = 'standard';
+    try {
+      const cfg: OpenAIStandardConfig = {
+        ...baseConfig,
+        config: {
+          ...(baseConfig.config as any),
+          providerId: 'antigravity'
+        }
+      } as unknown as OpenAIStandardConfig;
+
+      const provider = new GeminiCLIHttpProvider(cfg, emptyDeps);
+      const processed = await (provider as any).preprocessRequest({
+        model: 'gemini-3-pro-high',
+        contents: [{ role: 'user', parts: [{ text: 'hi' }] }],
         systemInstruction: { role: 'system', parts: [{ text: 'custom-system' }] },
         stream: true
       });
@@ -138,8 +197,7 @@ describe('GeminiCLIHttpProvider basic behaviour', () => {
       expect((processed as any).requestType).toBe('agent');
       expect((processed as any).userAgent).toBe('antigravity');
       expect((processed as any).session_id).toBeUndefined();
-      expect(typeof (processed as any).sessionId).toBe('string');
-      expect(String((processed as any).sessionId)).toContain(':');
+      expect((processed as any).sessionId).toBeUndefined();
       expect((processed as any).stream).toBeUndefined();
 
       const headers = await (provider as any).finalizeRequestHeaders({}, processed);
@@ -155,10 +213,11 @@ describe('GeminiCLIHttpProvider basic behaviour', () => {
       const body = (provider as any).buildHttpRequestBody(processed);
       expect(body).toBeTruthy();
       expect(Object.keys(body).sort()).toEqual(expect.arrayContaining(['model', 'request']));
-      expect((body as any).requestId).toBeTruthy();
+      expect(typeof (body as any).requestId).toBe('string');
       expect((body as any).requestType).toBe('agent');
       expect((body as any).userAgent).toBe('antigravity');
-      expect((body as any).request?.sessionId).toBe((processed as any).sessionId);
+      expect((body as any).request).toBeTruthy();
+      expect((body as any).contents).toBeUndefined();
     } finally {
       if (prevHeaderMode === undefined) {
         delete process.env.ROUTECODEX_ANTIGRAVITY_HEADER_MODE;

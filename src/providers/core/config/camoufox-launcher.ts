@@ -178,6 +178,46 @@ function resolveCamoufoxScriptPath(): string | null {
   return null;
 }
 
+function runCamoufoxPathCheck(): boolean {
+  try {
+    const result = spawnSync('python3', ['-m', 'camoufox', 'path'], {
+      stdio: 'ignore'
+    });
+    return result.status === 0;
+  } catch {
+    return false;
+  }
+}
+
+function installCamoufox(): boolean {
+  console.warn('[OAuth] Camoufox not detected. Installing via python3 -m pip ...');
+  try {
+    const result = spawnSync('python3', ['-m', 'pip', 'install', '--user', '-U', 'camoufox'], {
+      stdio: 'inherit'
+    });
+    return result.status === 0;
+  } catch {
+    return false;
+  }
+}
+
+function ensureCamoufoxInstalled(): boolean {
+  if (runCamoufoxPathCheck()) {
+    return true;
+  }
+  logOAuthDebug('[OAuth] Camoufox: python module not available, attempting install...');
+  const installed = installCamoufox();
+  if (!installed) {
+    logOAuthDebug('[OAuth] Camoufox: auto-install failed or python3 unavailable');
+    return false;
+  }
+  const ready = runCamoufoxPathCheck();
+  if (!ready) {
+    logOAuthDebug('[OAuth] Camoufox: install completed but camoufox path still unresolved');
+  }
+  return ready;
+}
+
 function resolveGenFingerprintScriptPath(): string | null {
   try {
     const here = fileURLToPath(import.meta.url);
@@ -315,6 +355,10 @@ export async function openAuthInCamoufox(options: CamoufoxLaunchOptions): Promis
     `[OAuth] Camoufox: launch requested url=${options.url} provider=${options.provider ?? ''} alias=${options.alias ?? ''
     }`
   );
+  if (!ensureCamoufoxInstalled()) {
+    logOAuthDebug('[OAuth] Camoufox: installation missing; falling back to default browser');
+    return false;
+  }
   const scriptPath = resolveCamoufoxScriptPath();
   if (!scriptPath) {
     logOAuthDebug('[OAuth] Camoufox: launcher script not resolved; falling back to default browser');
