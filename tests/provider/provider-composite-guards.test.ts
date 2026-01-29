@@ -6,7 +6,9 @@ describe('Provider error reporting', () => {
 
     const providerErrorEmit = jest.fn();
     await jest.unstable_mockModule('../../src/modules/llmswitch/bridge.ts', () => ({
-      getProviderErrorCenter: async () => ({ emit: providerErrorEmit })
+      getProviderErrorCenter: async () => ({ emit: providerErrorEmit }),
+      extractAntigravityGeminiSessionId: () => undefined,
+      cacheAntigravitySessionSignature: () => {}
     }));
     await jest.unstable_mockModule('../../src/error-handling/route-error-hub.ts', () => ({
       getRouteErrorHub: () => null,

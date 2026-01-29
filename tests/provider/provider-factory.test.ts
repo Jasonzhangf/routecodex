@@ -13,6 +13,8 @@ jest.mock('../../src/providers/core/utils/snapshot-writer.ts', () => ({
 jest.mock('../../src/modules/llmswitch/bridge.ts', () => ({
   getStatsCenterSafe: () => ({ recordProviderUsage: () => {} }),
   extractSessionIdentifiersFromMetadata: () => ({}),
+  extractAntigravityGeminiSessionId: () => undefined,
+  cacheAntigravitySessionSignature: () => {},
   loadRoutingInstructionStateSync: () => null,
   saveRoutingInstructionStateAsync: () => {},
   buildResponsesRequestFromChat: () => ({ request: {} }),
@@ -21,6 +23,8 @@ jest.mock('../../src/modules/llmswitch/bridge.ts', () => ({
 jest.mock('../../src/modules/llmswitch/bridge.js', () => ({
   getStatsCenterSafe: () => ({ recordProviderUsage: () => {} }),
   extractSessionIdentifiersFromMetadata: () => ({}),
+  extractAntigravityGeminiSessionId: () => undefined,
+  cacheAntigravitySessionSignature: () => {},
   loadRoutingInstructionStateSync: () => null,
   saveRoutingInstructionStateAsync: () => {},
   buildResponsesRequestFromChat: () => ({ request: {} }),

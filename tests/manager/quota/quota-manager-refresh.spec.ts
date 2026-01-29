@@ -25,7 +25,9 @@ jest.unstable_mockModule('../../../src/providers/auth/antigravity-userinfo-helpe
 }));
 
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
-  getProviderErrorCenter: async () => ({ emit: () => {} })
+  getProviderErrorCenter: async () => ({ emit: () => {} }),
+  extractAntigravityGeminiSessionId: () => undefined,
+  cacheAntigravitySessionSignature: () => {}
 }));
 
 describe('QuotaManagerModule refresh behavior', () => {

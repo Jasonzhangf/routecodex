@@ -231,4 +231,5 @@ describe('GeminiCLIHttpProvider basic behaviour', () => {
       }
     }
   });
+
 });

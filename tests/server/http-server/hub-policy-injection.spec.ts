@@ -54,6 +54,8 @@ describe('RouteCodexHttpServer hub policy injection', () => {
     jest.unstable_mockModule(BRIDGE_MODULE_PATH, () => ({
       getStatsCenterSafe: () => ({ recordProviderUsage: () => {} }),
       extractSessionIdentifiersFromMetadata: () => ({}),
+      extractAntigravityGeminiSessionId: () => undefined,
+      cacheAntigravitySessionSignature: () => {},
       loadRoutingInstructionStateSync: () => null,
       saveRoutingInstructionStateAsync: () => {},
       saveRoutingInstructionStateSync: () => {},
@@ -124,6 +126,8 @@ describe('RouteCodexHttpServer hub policy injection', () => {
     jest.unstable_mockModule(BRIDGE_MODULE_PATH, () => ({
       getStatsCenterSafe: () => ({ recordProviderUsage: () => {} }),
       extractSessionIdentifiersFromMetadata: () => ({}),
+      extractAntigravityGeminiSessionId: () => undefined,
+      cacheAntigravitySessionSignature: () => {},
       loadRoutingInstructionStateSync: () => null,
       saveRoutingInstructionStateAsync: () => {},
       saveRoutingInstructionStateSync: () => {},
@@ -195,6 +199,8 @@ describe('RouteCodexHttpServer hub policy injection', () => {
     jest.unstable_mockModule(BRIDGE_MODULE_PATH, () => ({
       getStatsCenterSafe: () => ({ recordProviderUsage: () => {} }),
       extractSessionIdentifiersFromMetadata: () => ({}),
+      extractAntigravityGeminiSessionId: () => undefined,
+      cacheAntigravitySessionSignature: () => {},
       loadRoutingInstructionStateSync: () => null,
       saveRoutingInstructionStateAsync: () => {},
       saveRoutingInstructionStateSync: () => {},
