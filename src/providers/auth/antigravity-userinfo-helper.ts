@@ -9,6 +9,7 @@ import os from 'node:os';
 
 import type { UnknownObject } from '../../modules/pipeline/types/common-types.js';
 import { logOAuthDebug } from './oauth-logger.js';
+import { getAntigravityUserAgentFallback, resolveAntigravityUserAgent } from './antigravity-user-agent.js';
 
 // Antigravity-Manager alignment: prefer Sandbox → Daily → Prod for Cloud Code Assist v1internal APIs.
 const DEFAULT_ANTIGRAVITY_API_BASE_SANDBOX = 'https://daily-cloudcode-pa.sandbox.googleapis.com';
@@ -16,8 +17,6 @@ const DEFAULT_ANTIGRAVITY_API_BASE_DAILY = 'https://daily-cloudcode-pa.googleapi
 const DEFAULT_ANTIGRAVITY_API_BASE_AUTOPUSH = 'https://autopush-cloudcode-pa.sandbox.googleapis.com';
 const DEFAULT_ANTIGRAVITY_API_BASE_PROD = 'https://cloudcode-pa.googleapis.com';
 const DEFAULT_ANTIGRAVITY_API_BASE = DEFAULT_ANTIGRAVITY_API_BASE_SANDBOX;
-// Antigravity-Manager alignment (cloudcode-pa now rejects older UA strings).
-const DEFAULT_USER_AGENT = 'antigravity/1.11.9 windows/amd64';
 const METADATA_PAYLOAD = {
   ideType: 'ANTIGRAVITY',
   platform: 'PLATFORM_UNSPECIFIED',
@@ -68,8 +67,8 @@ const extractProjectId = (value: unknown): string | undefined => {
   return undefined;
 };
 
-const buildHeaders = (accessToken: string): Record<string, string> => ({
-  'User-Agent': process.env.ROUTECODEX_ANTIGRAVITY_USER_AGENT?.trim() || DEFAULT_USER_AGENT,
+const buildHeaders = async (accessToken: string): Promise<Record<string, string>> => ({
+  'User-Agent': await resolveAntigravityUserAgent(),
   'Authorization': `Bearer ${accessToken}`,
   'Content-Type': 'application/json',
   'Accept': 'application/json',
@@ -266,7 +265,7 @@ export async function fetchAntigravityProjectId(
   }
 
   const base = normalizedBase(apiBase);
-  const headers = buildHeaders(accessToken);
+  const headers = await buildHeaders(accessToken);
   logOAuthDebug(`[Antigravity] Resolving project_id via ${base}`);
 
   try {
@@ -289,8 +288,8 @@ export async function fetchAntigravityProjectId(
   }
 }
 
-export function buildAntigravityHeaders(accessToken: string): Record<string, string> {
-  return buildHeaders(accessToken);
+export async function buildAntigravityHeaders(accessToken: string): Promise<Record<string, string>> {
+  return await buildHeaders(accessToken);
 }
 
 export function resolveAntigravityApiBase(explicit?: string): string {
@@ -299,7 +298,7 @@ export function resolveAntigravityApiBase(explicit?: string): string {
 
 export const ANTIGRAVITY_HELPER_DEFAULTS = {
   apiBase: DEFAULT_ANTIGRAVITY_API_BASE,
-  userAgent: DEFAULT_USER_AGENT
+  userAgent: getAntigravityUserAgentFallback()
 };
 
 export async function ensureAntigravityTokenProjectMetadata(

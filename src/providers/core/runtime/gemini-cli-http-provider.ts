@@ -21,7 +21,8 @@ import type { ModuleDependencies } from '../../../modules/pipeline/interfaces/pi
 import { cacheAntigravitySessionSignature, extractAntigravityGeminiSessionId } from '../../../modules/llmswitch/bridge.js';
 import { GeminiCLIProtocolClient } from '../../../client/gemini-cli/gemini-cli-protocol-client.js';
 import { getDefaultProjectId } from '../../auth/gemini-cli-userinfo-helper.js';
-import { ANTIGRAVITY_HELPER_DEFAULTS, resolveAntigravityApiBaseCandidates } from '../../auth/antigravity-userinfo-helper.js';
+import { resolveAntigravityUserAgent } from '../../auth/antigravity-user-agent.js';
+import { resolveAntigravityApiBaseCandidates } from '../../auth/antigravity-userinfo-helper.js';
 
 type DataEnvelope = UnknownObject & { data?: UnknownObject };
 
@@ -241,9 +242,7 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
         }
       };
 
-      const envUa = (process.env.ROUTECODEX_ANTIGRAVITY_USER_AGENT || process.env.RCC_ANTIGRAVITY_USER_AGENT || '').trim();
-      const defaultUa = ANTIGRAVITY_HELPER_DEFAULTS.userAgent;
-      finalized['User-Agent'] = envUa || defaultUa;
+      finalized['User-Agent'] = await resolveAntigravityUserAgent();
       // gcli2api alignment: keep headers minimal for Antigravity.
       finalized['Accept-Encoding'] = 'gzip';
       deleteHeaderInsensitive('originator');

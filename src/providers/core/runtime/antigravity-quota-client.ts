@@ -61,7 +61,7 @@ export async function fetchAntigravityQuotaSnapshot(
   const base = apiBase.replace(/\/+$/, '');
   const url = `${base}/v1internal:fetchAvailableModels`;
   try {
-    const headers = buildAntigravityHeaders(accessToken);
+    const headers = await buildAntigravityHeaders(accessToken);
     const resp = await axios.post(
       url,
       {},
