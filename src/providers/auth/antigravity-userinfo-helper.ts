@@ -16,7 +16,8 @@ const DEFAULT_ANTIGRAVITY_API_BASE_DAILY = 'https://daily-cloudcode-pa.googleapi
 const DEFAULT_ANTIGRAVITY_API_BASE_AUTOPUSH = 'https://autopush-cloudcode-pa.sandbox.googleapis.com';
 const DEFAULT_ANTIGRAVITY_API_BASE_PROD = 'https://cloudcode-pa.googleapis.com';
 const DEFAULT_ANTIGRAVITY_API_BASE = DEFAULT_ANTIGRAVITY_API_BASE_SANDBOX;
-const DEFAULT_USER_AGENT = 'antigravity/1.11.3 windows/amd64';
+// Antigravity-Manager alignment (cloudcode-pa now rejects older UA strings).
+const DEFAULT_USER_AGENT = 'antigravity/1.11.9 windows/amd64';
 const METADATA_PAYLOAD = {
   ideType: 'ANTIGRAVITY',
   platform: 'PLATFORM_UNSPECIFIED',

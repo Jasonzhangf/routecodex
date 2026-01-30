@@ -208,6 +208,16 @@ function extractTextFromResponses(body) {
   return texts.join('');
 }
 
+function assertAntigravityUaFresh(label, requests) {
+  // Only enforce this for routecodex dev. rcc release is pinned to a published stack and may lag.
+  if (label !== 'routecodex') return;
+  const req = Array.isArray(requests) ? requests.find((r) => String(r?.url || '').includes(':generateContent') || String(r?.url || '').includes(':streamGenerateContent')) : null;
+  const ua = req?.headers?.['user-agent'];
+  const uaString = typeof ua === 'string' ? ua : Array.isArray(ua) ? ua.join(' ') : '';
+  assert.ok(uaString.toLowerCase().startsWith('antigravity/'), `${label}: upstream User-Agent must start with antigravity/ (got ${JSON.stringify(uaString)})`);
+  assert.ok(!uaString.toLowerCase().includes('codex_cli_rs/'), `${label}: upstream User-Agent must not be codex_cli_rs (got ${JSON.stringify(uaString)})`);
+}
+
 async function startMockUpstream() {
   const requests = [];
   let lastIssuedSignature = null;
@@ -703,6 +713,7 @@ async function main() {
       });
       const afterA = upstream.requests.length;
       const sliceA = upstream.requests.slice(beforeA, afterA);
+      assertAntigravityUaFresh('routecodex', sliceA);
       const genA = sliceA.filter((r) => {
         const u = String(r.url || '');
         return u.includes(':streamGenerateContent') || u.includes(':generateContent');
