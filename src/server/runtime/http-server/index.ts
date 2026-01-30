@@ -1008,7 +1008,7 @@ export class RouteCodexHttpServer {
       | undefined;
 
     // Antigravity warmup (strict): if UA fingerprint suffix doesn't match local OAuth fingerprint, blacklist the alias.
-    if (isAntigravityWarmupEnabled() && quotaModule && typeof quotaModule.disableProvider === 'function') {
+    if (isAntigravityWarmupEnabled()) {
       try {
         const providerKeysByAlias = new Map<string, string[]>();
         for (const providerKey of Object.keys(runtimeMap)) {
@@ -1030,23 +1030,34 @@ export class RouteCodexHttpServer {
         }
 
         if (providerKeysByAlias.size > 0) {
+          const canBlacklist = Boolean(quotaModule && typeof quotaModule.disableProvider === 'function');
           const durationMs = getAntigravityWarmupBlacklistDurationMs();
+          let okCount = 0;
+          let failCount = 0;
           for (const [alias, providerKeys] of providerKeysByAlias.entries()) {
             const result = await warmupCheckAntigravityAlias(alias);
             if (result.ok) {
+              okCount += 1;
+              console.log(
+                `[antigravity:warmup] ok alias=${alias} suffix=${result.actualSuffix} ua=${result.actualUserAgent}`
+              );
               continue;
             }
+            failCount += 1;
             const expected = result.expectedSuffix ? ` expected=${result.expectedSuffix}` : '';
             const actual = result.actualSuffix ? ` actual=${result.actualSuffix}` : '';
             console.error(
-              `[antigravity:warmup] blacklist alias=${alias} reason=${result.reason}${expected}${actual} providerKeys=${providerKeys.length}`
+              `[antigravity:warmup] FAIL alias=${alias} reason=${result.reason}${expected}${actual} providerKeys=${providerKeys.length}${canBlacklist ? '' : ' (quota module unavailable; cannot blacklist)'}`
             );
-            await Promise.allSettled(
-              providerKeys.map((providerKey) =>
-                quotaModule.disableProvider!({ providerKey, mode: 'blacklist', durationMs })
-              )
-            );
+            if (canBlacklist) {
+              await Promise.allSettled(
+                providerKeys.map((providerKey) =>
+                  quotaModule!.disableProvider!({ providerKey, mode: 'blacklist', durationMs })
+                )
+              );
+            }
           }
+          console.log(`[antigravity:warmup] summary ok=${okCount} fail=${failCount} total=${providerKeysByAlias.size}`);
         }
       } catch {
         // warmup is best-effort; never block server startup

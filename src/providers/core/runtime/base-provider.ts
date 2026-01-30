@@ -83,6 +83,7 @@ export abstract class BaseProvider implements IProviderV2 {
   private static readonly RATE_LIMIT_THRESHOLD = 4;
 
   constructor(config: OpenAIStandardConfig, dependencies: ModuleDependencies) {
+    // Internal unique id; do not use it as a log prefix (it's not human-readable).
     this.id = `provider-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     this.config = config;
     this.providerType = config.config.providerType;
@@ -97,6 +98,27 @@ export abstract class BaseProvider implements IProviderV2 {
     return this.runtimeProfile;
   }
 
+  protected getLogId(): string {
+    const runtime = this.getRuntimeProfile();
+    const runtimeKey =
+      runtime && typeof runtime.runtimeKey === 'string' && runtime.runtimeKey.trim()
+        ? runtime.runtimeKey.trim()
+        : '';
+    const providerId =
+      runtime && typeof runtime.providerId === 'string' && runtime.providerId.trim()
+        ? runtime.providerId.trim()
+        : typeof this.config?.config?.providerId === 'string' && this.config.config.providerId.trim()
+          ? this.config.config.providerId.trim()
+          : '';
+    if (runtimeKey) {
+      return `provider:${runtimeKey}`;
+    }
+    if (providerId) {
+      return `provider:${providerId}`;
+    }
+    return `provider:${this.providerType || 'unknown'}`;
+  }
+
   // 抽象方法 - 子类必须实现
   protected abstract getServiceProfile(): ServiceProfile;
   protected abstract createAuthProvider(): IAuthProvider;
@@ -106,7 +128,8 @@ export abstract class BaseProvider implements IProviderV2 {
   // 通用实现方法
   async initialize(): Promise<void> {
     try {
-      this.dependencies.logger?.logModule(this.id, 'initialization-start');
+      const logId = this.getLogId();
+      this.dependencies.logger?.logModule(logId, 'initialization-start');
 
       // 子类可以重写此方法进行初始化
       await this.onInitialize();
@@ -114,11 +137,11 @@ export abstract class BaseProvider implements IProviderV2 {
       this.isInitialized = true;
       this.lastActivity = Date.now();
 
-      this.dependencies.logger?.logModule(this.id, 'initialization-complete', {
+      this.dependencies.logger?.logModule(logId, 'initialization-complete', {
         providerType: this.providerType
       });
     } catch (error) {
-      this.dependencies.logger?.logModule(this.id, 'initialization-error', { error });
+      this.dependencies.logger?.logModule(this.getLogId(), 'initialization-error', { error });
       throw error;
     }
   }
@@ -134,7 +157,7 @@ export abstract class BaseProvider implements IProviderV2 {
     this.requestCount++;
     this.lastActivity = Date.now();
 
-    this.dependencies.logger?.logProviderRequest(this.id, 'request-start', {
+    this.dependencies.logger?.logProviderRequest(this.getLogId(), 'request-start', {
       providerType: this.providerType,
       requestId: context.requestId,
       model: context.model
@@ -151,7 +174,7 @@ export abstract class BaseProvider implements IProviderV2 {
     const finalResponse = await this.postprocessResponse(response, context);
 
     const endTime = Date.now();
-    this.dependencies.logger?.logProviderRequest(this.id, 'request-success', {
+    this.dependencies.logger?.logProviderRequest(this.getLogId(), 'request-success', {
       requestId: context.requestId,
       responseTime: endTime - context.startTime
     });
@@ -216,7 +239,7 @@ export abstract class BaseProvider implements IProviderV2 {
     } catch (error) {
       this.errorCount++;
       if (error instanceof RateLimitCooldownError) {
-        this.dependencies.logger?.logModule(this.id, 'rate-limit-skip', {
+        this.dependencies.logger?.logModule(this.getLogId(), 'rate-limit-skip', {
           providerKey: context.providerKey,
           model: context.model,
           message: error.message
@@ -253,7 +276,7 @@ export abstract class BaseProvider implements IProviderV2 {
       // 子类可以重写健康检查逻辑
       return await this.performHealthCheck(url);
     } catch (error) {
-      this.dependencies.logger?.logModule(this.id, 'health-check-error', { error });
+      this.dependencies.logger?.logModule(this.getLogId(), 'health-check-error', { error });
       return false;
     }
   }
@@ -265,9 +288,9 @@ export abstract class BaseProvider implements IProviderV2 {
       // 子类可以重写清理逻辑
       await this.onCleanup();
 
-      this.dependencies.logger?.logModule(this.id, 'cleanup-complete');
+      this.dependencies.logger?.logModule(this.getLogId(), 'cleanup-complete');
     } catch (error) {
-      this.dependencies.logger?.logModule(this.id, 'cleanup-error', { error });
+      this.dependencies.logger?.logModule(this.getLogId(), 'cleanup-error', { error });
       throw error;
     }
   }
@@ -466,7 +489,7 @@ export abstract class BaseProvider implements IProviderV2 {
     const logUpstreamMessage =
       typeof upstreamMessage === 'string' ? this.truncateLogMessage(upstreamMessage) : upstreamMessage;
 
-    this.dependencies.logger?.logModule(this.id, 'request-error', {
+    this.dependencies.logger?.logModule(this.getLogId(), 'request-error', {
       requestId: _context.requestId,
       error: logErrorMessage,
       statusCode,
@@ -577,7 +600,7 @@ export abstract class BaseProvider implements IProviderV2 {
     BaseProvider.rateLimitFailures.set(bucketKey, next);
     // 调试：记录当前 key 的第几次 429 命中，方便观察是否触发熔断
     if (this.dependencies.logger) {
-      this.dependencies.logger.logModule(this.id, 'rate-limit-429', {
+      this.dependencies.logger.logModule(this.getLogId(), 'rate-limit-429', {
         providerKey: bucketKey,
         hitCount: next
       });
