@@ -101,6 +101,56 @@ describe('cli start command', () => {
     ).rejects.toThrow('exit:1');
   });
 
+  it('auto-enables --claude when tabglm provider exists in config', async () => {
+    const program = new Command();
+    const captured: { env?: Record<string, string> } = {};
+    createStartCommand(program, {
+      isDevPackage: true,
+      isWindows: false,
+      defaultDevPort: 5520,
+      nodeBin: 'node',
+      createSpinner: async () => createStubSpinner(),
+      logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
+      env: {},
+      fsImpl: {
+        existsSync: () => true,
+        statSync: () => ({ isDirectory: () => false } as any),
+        readFileSync: () => JSON.stringify({
+          httpserver: { port: 5520, host: '127.0.0.1' },
+          virtualrouter: { providers: { tabglm: { id: 'tabglm', enabled: true } } }
+        }),
+        writeFileSync: () => {},
+        mkdtempSync: () => '/tmp/rc',
+        mkdirSync: () => {}
+      } as any,
+      pathImpl: { join: (...parts: string[]) => parts.join('/'), resolve: (...parts: string[]) => parts.join('/') } as any,
+      homedir: () => '/home/test',
+      tmpdir: () => '/tmp',
+      sleep: async () => {},
+      ensureLocalTokenPortalEnv: async () => {},
+      ensureTokenDaemonAutoStart: async () => {},
+      ensurePortAvailable: async () => {},
+      findListeningPids: () => [],
+      killPidBestEffort: () => {},
+      getModulesConfigPath: () => '/tmp/modules.json',
+      resolveServerEntryPath: () => '/tmp/index.js',
+      spawn: (_cmd, _args, options) => {
+        captured.env = options.env as any;
+        return ({ pid: 1, on: () => {}, kill: () => true } as any);
+      },
+      fetch: (async () => ({ ok: true })) as any,
+      setupKeypress: () => () => {},
+      waitForever: async () => {},
+      exit: (code) => {
+        throw new Error(`exit:${code}`);
+      }
+    });
+
+    await program.parseAsync(['node', 'routecodex', 'start'], { from: 'node' });
+    expect(captured.env?.ROUTECODEX_SYSTEM_PROMPT_ENABLE).toBe('1');
+    expect(captured.env?.ROUTECODEX_SYSTEM_PROMPT_SOURCE).toBe('claude');
+  });
+
   it('exits when config is missing', async () => {
     const errors: string[] = [];
     const program = new Command();

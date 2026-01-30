@@ -23,6 +23,44 @@ type LoggerLike = {
   error: (msg: string) => void;
 };
 
+function shouldAutoEnableClaudeSystemPrompt(config: unknown): boolean {
+  if (!config || typeof config !== 'object') {
+    return false;
+  }
+  const carrier = config as Record<string, unknown>;
+  const vr = carrier.virtualrouter;
+  if (!vr || typeof vr !== 'object') {
+    return false;
+  }
+  const providers = (vr as Record<string, unknown>).providers;
+  if (!providers || typeof providers !== 'object') {
+    return false;
+  }
+
+  const byKey = (providers as Record<string, unknown>).tabglm;
+  if (byKey && typeof byKey === 'object') {
+    const enabled = (byKey as Record<string, unknown>).enabled;
+    if (enabled === false) {
+      return false;
+    }
+    return true;
+  }
+
+  for (const value of Object.values(providers as Record<string, unknown>)) {
+    if (!value || typeof value !== 'object') {
+      continue;
+    }
+    const record = value as Record<string, unknown>;
+    const id = typeof record.id === 'string' ? record.id.trim().toLowerCase() : '';
+    const enabled = record.enabled;
+    if (id === 'tabglm' && enabled !== false) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 export type StartCommandOptions = {
   config?: string;
   port?: string;
@@ -108,11 +146,7 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
           spinner.fail('Flags --codex and --claude are mutually exclusive');
           ctx.exit(1);
         }
-        const promptFlag = options.codex ? 'codex' : (options.claude ? 'claude' : null);
-        if (promptFlag) {
-          ctx.env.ROUTECODEX_SYSTEM_PROMPT_SOURCE = promptFlag;
-          ctx.env.ROUTECODEX_SYSTEM_PROMPT_ENABLE = '1';
-        }
+        const explicitPromptFlag = options.codex ? 'codex' : (options.claude ? 'claude' : null);
         const uaFromFlag = typeof options.ua === 'string' && options.ua.trim() ? options.ua.trim() : null;
         const uaMode = uaFromFlag || (options.codex ? 'codex' : null);
         if (uaMode) {
@@ -177,6 +211,16 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
           spinner.fail('Failed to parse configuration file');
           ctx.logger.error(`Invalid JSON in configuration file: ${configPath}`);
           ctx.exit(1);
+        }
+
+        const autoClaude = !explicitPromptFlag && shouldAutoEnableClaudeSystemPrompt(config);
+        const promptFlag = explicitPromptFlag ?? (autoClaude ? 'claude' : null);
+        if (promptFlag) {
+          ctx.env.ROUTECODEX_SYSTEM_PROMPT_SOURCE = promptFlag;
+          ctx.env.ROUTECODEX_SYSTEM_PROMPT_ENABLE = '1';
+          if (autoClaude) {
+            spinner.info('Auto-enabled Claude system prompt (--claude) due to tabglm provider');
+          }
         }
 
         const quotaRoutingOverride = parseBoolish((options as { quotaRouting?: unknown }).quotaRouting);
