@@ -2,6 +2,7 @@ import http from 'http';
 import { URL } from 'url';
 import { HTTP_PROTOCOLS, LOCAL_HOSTS } from '../constants/index.js';
 import { renderTokenPortalPage } from './render.js';
+import { loadTokenPortalFingerprintSummary } from './fingerprint-summary.js';
 
 interface AddressInfo {
   port: number;
@@ -90,13 +91,16 @@ class LocalTokenPortalServer {
     const sessionId = url.searchParams.get('sessionId') || 'local-session';
     const displayName = url.searchParams.get('displayName') || undefined;
 
+    const fingerprint = await loadTokenPortalFingerprintSummary(provider, alias).catch(() => null);
+
     const html = renderTokenPortalPage({
       provider,
       alias,
       tokenFile,
       oauthUrl,
       sessionId,
-      displayName
+      displayName,
+      fingerprint: fingerprint || undefined
     });
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.end(html);

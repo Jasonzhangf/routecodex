@@ -14,7 +14,6 @@ import { getAntigravityUserAgentFallback, resolveAntigravityUserAgent } from './
 // Antigravity-Manager alignment: prefer Sandbox → Daily → Prod for Cloud Code Assist v1internal APIs.
 const DEFAULT_ANTIGRAVITY_API_BASE_SANDBOX = 'https://daily-cloudcode-pa.sandbox.googleapis.com';
 const DEFAULT_ANTIGRAVITY_API_BASE_DAILY = 'https://daily-cloudcode-pa.googleapis.com';
-const DEFAULT_ANTIGRAVITY_API_BASE_AUTOPUSH = 'https://autopush-cloudcode-pa.sandbox.googleapis.com';
 const DEFAULT_ANTIGRAVITY_API_BASE_PROD = 'https://cloudcode-pa.googleapis.com';
 const DEFAULT_ANTIGRAVITY_API_BASE = DEFAULT_ANTIGRAVITY_API_BASE_SANDBOX;
 const METADATA_PAYLOAD = {
@@ -136,20 +135,18 @@ export function resolveAntigravityApiBaseCandidates(explicit?: string): string[]
     return Array.from(new Set(orderedLocal));
   }
 
-  // Default order mirrors Antigravity-Manager: Sandbox → Daily → (Autopush) → Prod.
-  // - We do NOT promote the caller's explicit base to the front because our config.v1/v2
-  //   often pins `baseURL` to prod; promoting it would defeat the intent of this function.
-  // - Env override is treated as an explicit operator choice and is placed first.
+  // Default order mirrors Antigravity-Manager: Sandbox → Daily → Prod.
+  // Operator override (env) is treated as authoritative and disables the fallback chain.
+  if (envBase) {
+    return [envBase];
+  }
+  // Keep explicit base as a last resort only when it's outside the default chain.
   const ordered = [
-    ...(envBase ? [envBase] : []),
     DEFAULT_ANTIGRAVITY_API_BASE_SANDBOX,
     DEFAULT_ANTIGRAVITY_API_BASE_DAILY,
-    DEFAULT_ANTIGRAVITY_API_BASE_AUTOPUSH,
     DEFAULT_ANTIGRAVITY_API_BASE_PROD,
     ...(explicitBase ? [explicitBase] : [])
-  ]
-    .map((base) => normalizeApiBase(base))
-    .filter((base) => base.length);
+  ].map((base) => normalizeApiBase(base)).filter((base) => base.length);
   return Array.from(new Set(ordered));
 }
 

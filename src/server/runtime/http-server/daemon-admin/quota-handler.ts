@@ -4,6 +4,7 @@ import { rejectNonLocalOrUnauthorizedAdmin } from '../daemon-admin-routes.js';
 import type { ManagerModule } from '../../../../manager/types.js';
 import type { QuotaManagerModule, QuotaRecord } from '../../../../manager/modules/quota/index.js';
 import type { ProviderQuotaDaemonModule } from '../../../../manager/modules/quota/index.js';
+import { loadTokenPortalFingerprintSummary } from '../../../../token-portal/fingerprint-summary.js';
 
 function getQuotaModule(options: DaemonAdminRouteOptions): QuotaManagerModule | null {
   const daemon = options.getManagerDaemon() as
@@ -80,7 +81,7 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
     }
   });
 
-  app.get('/quota/providers', (req: Request, res: Response) => {
+  app.get('/quota/providers', async (req: Request, res: Response) => {
     if (rejectNonLocalOrUnauthorizedAdmin(req, res)) {return;}
     try {
       const mod = getProviderQuotaModule(options);
@@ -88,10 +89,12 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
       const snapshot = mod && typeof (mod as AdminSnapshotModule).getAdminSnapshot === 'function'
         ? (mod as AdminSnapshotModule).getAdminSnapshot?.() ?? {}
         : {};
-      const providers = Object.values(snapshot).map((state: unknown) => {
+
+      const entries = Object.values(snapshot).map((state: unknown) => {
         const record = state && typeof state === 'object' ? (state as Record<string, unknown>) : {};
+        const providerKey = typeof record.providerKey === 'string' ? record.providerKey : '';
         return {
-          providerKey: typeof record.providerKey === 'string' ? record.providerKey : '',
+          providerKey,
           inPool: Boolean(record.inPool),
           reason: record.reason ?? null,
           authType: record.authType ?? null,
@@ -99,6 +102,50 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
           cooldownUntil: record.cooldownUntil ?? null,
           blacklistUntil: record.blacklistUntil ?? null,
           consecutiveErrorCount: typeof record.consecutiveErrorCount === 'number' ? record.consecutiveErrorCount : 0
+        };
+      });
+
+      // Enrich Antigravity providers with camoufox fingerprint info (per alias).
+      const aliases = new Set<string>();
+      for (const p of entries) {
+        const key = typeof p.providerKey === 'string' ? p.providerKey : '';
+        if (!key.toLowerCase().startsWith('antigravity.')) {
+          continue;
+        }
+        const parts = key.split('.');
+        const alias = parts.length >= 2 ? String(parts[1] || '').trim().toLowerCase() : '';
+        if (alias) {
+          aliases.add(alias);
+        }
+      }
+
+      const fpByAlias = new Map<string, Awaited<ReturnType<typeof loadTokenPortalFingerprintSummary>> | null>();
+      if (aliases.size) {
+        await Promise.allSettled(
+          Array.from(aliases).map(async (alias) => {
+            const fp = await loadTokenPortalFingerprintSummary('antigravity', alias).catch(() => null);
+            fpByAlias.set(alias, fp);
+          })
+        );
+      }
+
+      const providers = entries.map((p) => {
+        const key = typeof p.providerKey === 'string' ? p.providerKey : '';
+        if (!key.toLowerCase().startsWith('antigravity.')) {
+          return p;
+        }
+        const parts = key.split('.');
+        const alias = parts.length >= 2 ? String(parts[1] || '').trim().toLowerCase() : '';
+        const fp = alias ? fpByAlias.get(alias) : null;
+        return {
+          ...p,
+          fpAlias: alias || null,
+          fpProfileId: fp?.profileId || null,
+          fpSuffix: fp?.suffix || null,
+          fpOs: fp?.os || null,
+          fpArch: fp?.arch || null,
+          fpPlatform: fp?.navigatorPlatform || null,
+          fpOscpu: fp?.navigatorOscpu || null
         };
       });
       res.status(200).json({ updatedAt: Date.now(), providers });

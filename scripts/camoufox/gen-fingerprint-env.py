@@ -110,8 +110,12 @@ def generate_env_delta(os_name: str | None) -> Dict[str, str]:
   try:
     opts: Dict[str, Any] = launch_options(
       os=os_name,
-      geoip=True,
-      headless=False,
+      # NOTE:
+      # - We no longer rely on geoip for region/timezone (we force a US region below).
+      # - geoip can introduce slow/hanging network calls during CLI startup.
+      geoip=False,
+      # Keep this hermetic: we are only computing launch options, not launching a browser.
+      headless=True,
       window=(1440, 900),
     )
   except Exception as exc:

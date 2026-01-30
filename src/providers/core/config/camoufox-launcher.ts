@@ -248,17 +248,31 @@ function computeOsPolicy(provider?: string | null, alias?: string | null): strin
 
   // 根据 (family, alias) 生成稳定的 OS 选择：
   //   - 同一个 alias 始终映射到同一个 OS
-  //   - 不同 alias 在 windows/macos/linux 之间分布
+  //   - 不同 alias 在 windows/macos 之间分布
+  //
+  // IMPORTANT: Linux 指纹会导致部分上游 OAuth/风控触发 re-verify（尤其是 Antigravity/Gemini Cloud Code Assist）。
+  // 因此这里严格禁止生成 linux 指纹。
   const seed = `${family}:${effectiveAlias}`;
   let hash = 0;
   for (let i = 0; i < seed.length; i += 1) {
     const ch = seed.charCodeAt(i);
     hash = (hash * 31 + ch) >>> 0;
   }
-  const idx = hash % 3;
+  const idx = hash % 2;
   if (idx === 0) {return 'windows';}
-  if (idx === 1) {return 'macos';}
-  return 'linux';
+  return 'macos';
+}
+
+/**
+ * Exposed for CLI/tests: report which OS policy will be used for a given (provider, alias).
+ * NOTE: This is the policy passed to the fingerprint generator, not necessarily the runtime OS.
+ */
+export function getCamoufoxOsPolicy(provider?: string | null, alias?: string | null): 'windows' | 'macos' | undefined {
+  const osPolicy = computeOsPolicy(provider, alias);
+  if (osPolicy === 'windows' || osPolicy === 'macos') {
+    return osPolicy;
+  }
+  return undefined;
 }
 
 function loadFingerprintEnv(profileId: string): Record<string, string> | null {
@@ -279,6 +293,42 @@ function loadFingerprintEnv(profileId: string): Record<string, string> | null {
     // Missing or invalid file – caller will re-generate.
   }
   return null;
+}
+
+function writeMinimalFingerprintEnv(profileId: string, osPolicy?: string | undefined): Record<string, string> {
+  const fpPath = getFingerprintPath(profileId);
+  const windows = {
+    'navigator.platform': 'Win32',
+    'navigator.oscpu': 'Windows NT 10.0; Win64; x64',
+    'navigator.appVersion': '5.0 (Windows)',
+    'navigator.userAgent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:135.0) Gecko/20100101 Firefox/135.0',
+    'timezone': 'America/Los_Angeles',
+    'locale:language': 'en',
+    'locale:region': 'US',
+    'geolocation:latitude': 37.7749,
+    'geolocation:longitude': -122.4194
+  };
+  const macos = {
+    'navigator.platform': 'MacIntel',
+    'navigator.oscpu': 'Intel Mac OS X 10.15',
+    'navigator.appVersion': '5.0 (Macintosh)',
+    'navigator.userAgent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:135.0) Gecko/20100101 Firefox/135.0',
+    'timezone': 'America/Los_Angeles',
+    'locale:language': 'en',
+    'locale:region': 'US',
+    'geolocation:latitude': 37.7749,
+    'geolocation:longitude': -122.4194
+  };
+  const cfg = osPolicy === 'macos' ? macos : windows;
+  const env = { CAMOU_CONFIG_1: JSON.stringify(cfg) };
+  try {
+    fs.mkdirSync(path.dirname(fpPath), { recursive: true });
+    const payload = { env };
+    fs.writeFileSync(fpPath, JSON.stringify(payload), { encoding: 'utf-8' });
+  } catch {
+    // best-effort
+  }
+  return env;
 }
 
 function ensureFingerprintEnv(profileId: string, provider?: string | null, alias?: string | null): Record<string, string> {
@@ -311,8 +361,12 @@ function ensureFingerprintEnv(profileId: string, provider?: string | null, alias
     `[OAuth] Camoufox: generating fingerprint env profileId=${profileId} os=${osPolicy || 'default'} script=${scriptPath}`
   );
 
+  const timeoutMsRaw = String(process.env.ROUTECODEX_CAMOUFOX_FINGERPRINT_TIMEOUT_MS || '').trim();
+  const timeoutMs = timeoutMsRaw ? Number(timeoutMsRaw) : NaN;
+  const effectiveTimeoutMs = Number.isFinite(timeoutMs) && timeoutMs > 0 ? Math.floor(timeoutMs) : 30_000;
   const result = spawnSync('python3', args, {
-    stdio: 'ignore'
+    stdio: 'ignore',
+    timeout: effectiveTimeoutMs
   });
 
   if (result.error) {
@@ -321,13 +375,17 @@ function ensureFingerprintEnv(profileId: string, provider?: string | null, alias
         result.error
       )}`
     );
-    return {};
+    return writeMinimalFingerprintEnv(profileId, osPolicy);
+  }
+  if (result.status !== 0) {
+    logOAuthDebug(`[OAuth] Camoufox: fingerprint generator exited with status=${result.status}`);
+    return writeMinimalFingerprintEnv(profileId, osPolicy);
   }
 
   const env = loadFingerprintEnv(profileId);
   if (!env) {
     logOAuthDebug('[OAuth] Camoufox: fingerprint env file not created; falling back to default fingerprint');
-    return {};
+    return writeMinimalFingerprintEnv(profileId, osPolicy);
   }
 
   return env;

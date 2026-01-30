@@ -13,6 +13,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { inferAntigravityUaSuffixFromFingerprint, loadAntigravityCamoufoxFingerprint } from './antigravity-fingerprint.js';
+import { getAntigravityReauthRequiredRecord } from './antigravity-reauth-state.js';
 
 const VERSION_URL = 'https://antigravity-auto-updater-974169037036.us-central1.run.app';
 const VERSION_REGEX = /\d+\.\d+\.\d+/;
@@ -27,10 +28,30 @@ const LEGACY_PINNED_VERSION = '1.11.9';
 const DEFAULT_FINGERPRINT_SUFFIX = 'windows/amd64';
 const VERSION_CACHE_FILE = path.join(os.homedir(), '.routecodex', 'state', 'antigravity-ua-version.json');
 
-let cachedVersion: { version: string; fetchedAt: number } | null = null;
+type AntigravityUaVersionSource = 'env' | 'remote' | 'disk' | 'legacy';
+
+let cachedVersion: { version: string; fetchedAt: number; source: AntigravityUaVersionSource } | null = null;
 let inflightVersion: Promise<string> | null = null;
 const aliasSuffixCache = new Map<string, string>();
 const aliasSuffixInflight = new Map<string, Promise<string | undefined>>();
+let reauthCache: { fetchedAt: number; records: Record<string, { updatedAt: number }> } | null = null;
+
+async function isAliasReauthRequired(alias: string): Promise<boolean> {
+  const key = alias.trim().toLowerCase();
+  if (!key) {
+    return false;
+  }
+  const now = Date.now();
+  if (reauthCache && now - reauthCache.fetchedAt < 2_000) {
+    return Boolean(reauthCache.records[key]);
+  }
+  const record = await getAntigravityReauthRequiredRecord(key);
+  reauthCache = {
+    fetchedAt: now,
+    records: record ? { [key]: { updatedAt: record.updatedAt } } : {}
+  };
+  return Boolean(record);
+}
 
 export function parseAntigravityVersionFromUpdater(text: string): string | undefined {
   const hit = String(text || '').match(VERSION_REGEX)?.[0];
@@ -78,7 +99,7 @@ async function writeCachedVersionToDisk(version: string): Promise<void> {
     await fs.mkdir(path.dirname(VERSION_CACHE_FILE), { recursive: true });
     await fs.writeFile(
       VERSION_CACHE_FILE,
-      `${JSON.stringify({ version: v, fetchedAt: Date.now() }, null, 2)}\n`,
+      `${JSON.stringify({ version: v, fetchedAt: Date.now(), source: 'remote' }, null, 2)}\n`,
       'utf8'
     );
   } catch {
@@ -141,7 +162,7 @@ async function resolveAntigravityVersion(opts?: {
     // Yield once to let concurrent callers coalesce.
     await delay(0);
     if (envVersion) {
-      cachedVersion = { version: envVersion, fetchedAt: Date.now() };
+      cachedVersion = { version: envVersion, fetchedAt: Date.now(), source: 'env' };
       return envVersion;
     }
 
@@ -152,7 +173,11 @@ async function resolveAntigravityVersion(opts?: {
       await writeCachedVersionToDisk(remoteVersion);
     }
 
-    cachedVersion = { version: resolvedVersion, fetchedAt: Date.now() };
+    cachedVersion = {
+      version: resolvedVersion,
+      fetchedAt: Date.now(),
+      source: remoteVersion ? 'remote' : diskVersion ? 'disk' : 'legacy'
+    };
     return resolvedVersion;
   })();
 
@@ -168,8 +193,20 @@ async function resolveAntigravityUaSuffixForAlias(alias: string): Promise<string
   if (!key) {
     return undefined;
   }
+  if (await isAliasReauthRequired(key)) {
+    throw new Error(
+      `Antigravity alias "${key}" requires OAuth re-auth (fingerprint updated). Run: routecodex oauth antigravity-auto antigravity-oauth-*-` +
+        `${key}.json`
+    );
+  }
   if (aliasSuffixCache.has(key)) {
-    return aliasSuffixCache.get(key);
+    const cached = aliasSuffixCache.get(key);
+    if (cached && cached.startsWith('linux/')) {
+      // Never reuse a cached linux suffix; fingerprint may have been repaired on disk.
+      aliasSuffixCache.delete(key);
+    } else {
+      return cached;
+    }
   }
   const inflight = aliasSuffixInflight.get(key);
   if (inflight) {
@@ -181,6 +218,12 @@ async function resolveAntigravityUaSuffixForAlias(alias: string): Promise<string
       return undefined;
     }
     const suffix = inferAntigravityUaSuffixFromFingerprint(fp);
+    if (suffix && suffix.startsWith('linux/')) {
+      throw new Error(
+        `Linux fingerprint is not allowed for Antigravity/Gemini (alias="${key}" suffix="${suffix}"). ` +
+          `Fix it by regenerating fingerprint + reauth: routecodex camoufox-fp repair --provider antigravity --alias ${key}`
+      );
+    }
     if (suffix) {
       aliasSuffixCache.set(key, suffix);
     }
@@ -209,7 +252,13 @@ export async function preloadAntigravityAliasUserAgents(aliases: string[]): Prom
 }
 
 export async function primeAntigravityUserAgentVersion(): Promise<void> {
-  await resolveAntigravityVersion({ forceRefresh: true }).catch(() => undefined);
+  try {
+    const version = await resolveAntigravityVersion({ forceRefresh: true });
+    const source = cachedVersion?.source || 'legacy';
+    console.log(`[antigravity:ua] version=${version} source=${source}`);
+  } catch {
+    // best-effort
+  }
 }
 
 export async function resolveAntigravityUserAgent(opts?: {

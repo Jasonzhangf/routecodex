@@ -111,7 +111,7 @@ describe('GeminiCLIHttpProvider basic behaviour', () => {
     }
   });
 
-  test('antigravity default contract: requestId/userAgent/requestType in JSON + header triplet', async () => {
+  test('antigravity default contract: requestId/userAgent/requestType in JSON + minimal headers', async () => {
     const prevHeaderMode = process.env.ROUTECODEX_ANTIGRAVITY_HEADER_MODE;
     const prevRccHeaderMode = process.env.RCC_ANTIGRAVITY_HEADER_MODE;
     delete process.env.ROUTECODEX_ANTIGRAVITY_HEADER_MODE;
@@ -142,8 +142,9 @@ describe('GeminiCLIHttpProvider basic behaviour', () => {
       expect(headers.requestId).toBeUndefined();
       expect(headers.requestType).toBeUndefined();
       expect(typeof headers['User-Agent']).toBe('string');
-      expect(headers['X-Goog-Api-Client']).toBeTruthy();
-      expect(headers['Client-Metadata']).toBeTruthy();
+      expect(headers['X-Goog-Api-Client']).toBeUndefined();
+      expect(headers['Client-Metadata']).toBeUndefined();
+      expect(headers['Accept-Encoding']).toBeUndefined();
       expect(headers['X-Goog-QuotaUser']).toBeUndefined();
       expect(headers['X-Client-Device-Id']).toBeUndefined();
 
@@ -205,8 +206,9 @@ describe('GeminiCLIHttpProvider basic behaviour', () => {
       expect(headers.requestId).toBeUndefined();
       expect(headers.requestType).toBeUndefined();
       expect(headers['User-Agent']).toContain('antigravity/');
-      expect(headers['X-Goog-Api-Client']).toBeTruthy();
-      expect(headers['Client-Metadata']).toBeTruthy();
+      expect(headers['X-Goog-Api-Client']).toBeUndefined();
+      expect(headers['Client-Metadata']).toBeUndefined();
+      expect(headers['Accept-Encoding']).toBeUndefined();
       const streamHeaders = (provider as any).applyStreamModeHeaders(headers, true);
       expect(streamHeaders.Accept).toBe('text/event-stream');
 

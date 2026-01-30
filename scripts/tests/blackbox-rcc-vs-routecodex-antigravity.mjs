@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 /**
  * Black-box parity test:
- * - Run the same /v1/responses request payload against TWO servers:
- *   1) routecodex dev (repo dist/index.js, linked llmswitch-core main)
- *   2) rcc npm (node_modules/@jsonstudio/rcc/dist/index.js, pinned @jsonstudio/llms)
+ * - Always validate RouteCodex behavior against Antigravity-Manager invariants.
+ * - Optionally compare against rcc release (off by default) because rcc bundles a published @jsonstudio/llms
+ *   which may intentionally lag behind dev during incident response.
  * - Both point to a local mock Cloud Code Assist (v1internal) upstream.
  * - Assert:
- *   - client-visible responses are equivalent (canonicalized)
- *   - upstream requests are equivalent (canonicalized; strip nondeterministic ids)
+ *   - RouteCodex upstream requests are "clean" and match Antigravity-Manager signature semantics
+ *   - (optional) client-visible responses are equivalent across RouteCodex and rcc
  *
  * This catches "dirty request" regressions and CLI divergence early.
  */
@@ -137,6 +137,30 @@ function extractThoughtSignaturesFromGeminiRequest(raw) {
   return hits;
 }
 
+function extractThoughtSignaturePresenceFromGeminiRequest(raw) {
+  const hits = [];
+  const top = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  const carrier =
+    top.request && typeof top.request === 'object' && !Array.isArray(top.request)
+      ? top
+      : top.data && typeof top.data === 'object' && !Array.isArray(top.data) && top.data.request && typeof top.data.request === 'object'
+        ? top.data
+        : top;
+  const requestNode =
+    carrier.request && typeof carrier.request === 'object' && !Array.isArray(carrier.request) ? carrier.request : {};
+  const contents = Array.isArray(requestNode.contents) ? requestNode.contents : [];
+  for (const content of contents) {
+    if (!content || typeof content !== 'object') continue;
+    const parts = Array.isArray(content.parts) ? content.parts : [];
+    for (const part of parts) {
+      if (!part || typeof part !== 'object') continue;
+      if (!part.functionCall || typeof part.functionCall !== 'object') continue;
+      hits.push(Object.prototype.hasOwnProperty.call(part, 'thoughtSignature'));
+    }
+  }
+  return hits;
+}
+
 function safeWriteJson(filePath, value) {
   try {
     fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
@@ -219,8 +243,8 @@ function assertAntigravityUaFresh(label, requests) {
   // RouteCodex must keep a stable per-alias fingerprint suffix derived from camoufox OAuth fingerprint.
   // (This blackbox provides a fake camoufox fingerprint for alias "test" and asserts it is honored.)
   assert.ok(
-    /^antigravity\/\d+\.\d+\.\d+ linux\/amd64$/i.test(uaString.trim()),
-    `${label}: UA must honor per-alias suffix linux/amd64 (got ${JSON.stringify(uaString)})`
+    /^antigravity\/\d+\.\d+\.\d+ windows\/amd64$/i.test(uaString.trim()),
+    `${label}: UA must honor per-alias suffix windows/amd64 (got ${JSON.stringify(uaString)})`
   );
 }
 
@@ -423,8 +447,9 @@ async function startMockUpstream() {
   };
 }
 
-function writeTempConfig({ dir, serverPort, upstreamBaseUrl, tokenFile }) {
+function writeTempConfig({ dir, serverPort, upstreamBaseUrl, tokenFile, targetModel }) {
   const cfgPath = path.join(dir, `config-${serverPort}.json`);
+  const modelName = String(targetModel || 'gemini-3-pro-high').trim() || 'gemini-3-pro-high';
   const cfg = {
     version: '1.0.0',
     server: { quotaRoutingEnabled: false },
@@ -445,7 +470,7 @@ function writeTempConfig({ dir, serverPort, upstreamBaseUrl, tokenFile }) {
             ]
           },
           models: {
-            'gemini-3-pro-high': { supportsStreaming: true }
+            [modelName]: { supportsStreaming: true }
           }
         }
       },
@@ -455,7 +480,7 @@ function writeTempConfig({ dir, serverPort, upstreamBaseUrl, tokenFile }) {
             id: 'default-primary',
             priority: 200,
             mode: 'priority',
-            targets: ['antigravity.gemini-3-pro-high']
+            targets: [`antigravity.${modelName}`]
           }
         ],
         thinking: [
@@ -463,7 +488,7 @@ function writeTempConfig({ dir, serverPort, upstreamBaseUrl, tokenFile }) {
             id: 'thinking-primary',
             priority: 200,
             mode: 'priority',
-            targets: ['antigravity.gemini-3-pro-high']
+            targets: [`antigravity.${modelName}`]
           }
         ]
       }
@@ -592,7 +617,67 @@ async function runOnceBlackbox(opts) {
     }
     const json = text.trim() ? JSON.parse(text) : {};
 
-    // 2) Prime Antigravity thoughtSignature cache (mock returns a functionCall part with thoughtSignature)
+    // 2) Cold followup: include assistant tool call history WITHOUT priming a signature first.
+    // Antigravity-Manager does not invent dummy thoughtSignature fields for functionCall parts.
+    const coldRes = await withTimeout(
+      fetch(`${baseUrl}/v1/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'x-api-key': 'verify-key',
+          'x-route-hint': 'thinking',
+          'x-session-id': 'bb-antigravity-session'
+        },
+        body: JSON.stringify({
+          model: 'gpt-5.2-codex',
+          stream: false,
+          tools: [
+            {
+              type: 'function',
+              function: {
+                name: 'exec_command',
+                description: 'Run a shell command',
+                parameters: {
+                  type: 'object',
+                  properties: {
+                    cmd: { type: 'string' }
+                  },
+                  required: ['cmd']
+                }
+              }
+            }
+          ],
+          messages: [
+            { role: 'user', content: 'bb-cold-followup: please call exec_command' },
+            {
+              role: 'assistant',
+              content: null,
+              tool_calls: [
+                {
+                  id: 'call_bb_cold_1',
+                  type: 'function',
+                  function: {
+                    name: 'exec_command',
+                    arguments: JSON.stringify({ cmd: 'echo cold' })
+                  }
+                }
+              ]
+            },
+            { role: 'tool', tool_call_id: 'call_bb_cold_1', content: 'ok' },
+            { role: 'user', content: 'bb-cold-followup: continue' }
+          ]
+        })
+      }),
+      25000,
+      `${label}:/v1/chat/completions:cold`
+    );
+    const coldText = await coldRes.text();
+    if (!coldRes.ok) {
+      throw new Error(`${label} cold /v1/chat/completions HTTP ${coldRes.status}: ${coldText.slice(0, 300)}`);
+    }
+
+    // 3) Prime Antigravity thoughtSignature cache (mock returns a functionCall part with thoughtSignature)
     const primeRes = await withTimeout(
       fetch(`${baseUrl}/v1/chat/completions`, {
         method: 'POST',
@@ -635,7 +720,7 @@ async function runOnceBlackbox(opts) {
       throw new Error(`${label} prime /v1/chat/completions HTTP ${primeRes.status}: ${primeText.slice(0, 300)}`);
     }
 
-    // 3) Followup: include assistant tool call history (no thoughtSignature in OpenAI format).
+    // 4) Followup: include assistant tool call history (no thoughtSignature in OpenAI format).
     // llmswitch-core compat must inject the cached signature into Gemini functionCall parts.
     const followRes = await withTimeout(
       fetch(`${baseUrl}/v1/chat/completions`, {
@@ -709,6 +794,8 @@ async function runOnceBlackbox(opts) {
 async function main() {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rc-blackbox-antigravity-'));
   try {
+    const runRcc = String(process.env.ROUTECODEX_BLACKBOX_RUN_RCC || '').trim() === '1';
+
     const rccLlmsHasAntigravitySignatureCache = (() => {
       try {
         const candidate = path.join(
@@ -732,15 +819,21 @@ async function main() {
       dir: tempDir,
       provider: 'antigravity',
       alias: 'test',
-      platform: 'Linux x86_64',
-      oscpu: 'Linux x86_64',
-      userAgent: 'Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:135.0) Gecko/20100101 Firefox/135.0'
+      platform: 'Win32',
+      oscpu: 'Windows NT 10.0; Win64; x64',
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:135.0) Gecko/20100101 Firefox/135.0'
     });
 
     const upstream = await startMockUpstream();
     try {
-      // Run routecodex (dev) then rcc (npm) sequentially against the SAME upstream.
-      const cfg1 = writeTempConfig({ dir: tempDir, serverPort: 5591, upstreamBaseUrl: upstream.baseUrl, tokenFile });
+      // Run routecodex (dev) against the SAME upstream.
+      const cfg1 = writeTempConfig({
+        dir: tempDir,
+        serverPort: 5591,
+        upstreamBaseUrl: upstream.baseUrl,
+        tokenFile,
+        targetModel: 'gemini-3-pro-high'
+      });
       const beforeA = upstream.requests.length;
       const routecodex = await runOnceBlackbox({
         label: 'routecodex',
@@ -753,58 +846,39 @@ async function main() {
       const afterA = upstream.requests.length;
       const sliceA = upstream.requests.slice(beforeA, afterA);
       assertAntigravityUaFresh('routecodex', sliceA);
+      assert.equal(extractTextFromResponses(routecodex.response), 'ok-from-mock');
       const genA = sliceA.filter((r) => {
         const u = String(r.url || '');
         return u.includes(':streamGenerateContent') || u.includes(':generateContent');
       });
-      assert.ok(genA.length >= 3, `routecodex: expected >=3 content-generation calls, got ${genA.length}`);
+      assert.ok(genA.length >= 4, `routecodex: expected >=4 content-generation calls, got ${genA.length}`);
+      const coldReqA = genA[1]?.body;
       const followUpReqA = genA[genA.length - 1]?.body;
+      assert.ok(coldReqA, 'routecodex: missing cold upstream request body');
       assert.ok(followUpReqA, 'routecodex: missing followup upstream request body');
+
+      // Cold followup should not include dummy or any thoughtSignature keys.
+      const coldSigsA = extractThoughtSignaturesFromGeminiRequest(coldReqA).filter((s) => s);
+      assert.ok(
+        coldSigsA.every((s) => s !== 'skip_thought_signature_validator'),
+        `routecodex: cold followup must not send dummy thoughtSignature (got ${JSON.stringify(coldSigsA.slice(0, 10))})`
+      );
+      const coldPresenceA = extractThoughtSignaturePresenceFromGeminiRequest(coldReqA);
+      if (coldPresenceA.some(Boolean)) {
+        safeWriteJson(path.join(tempDir, 'upstream.routecodex.cold.json'), coldReqA);
+        throw new Error(`routecodex: cold followup unexpectedly contains thoughtSignature keys (captures in ${tempDir})`);
+      }
+
       const sigsA = extractThoughtSignaturesFromGeminiRequest(followUpReqA).filter((s) => s);
       const routecodexInjected = sigsA.includes(MOCK_THOUGHT_SIGNATURE);
       if (!routecodexInjected) {
         safeWriteJson(path.join(tempDir, 'upstream.routecodex.followup.json'), followUpReqA);
-        safeWriteJson(path.join(tempDir, 'upstream.routecodex.prime.json'), genA[1]?.body || null);
+        safeWriteJson(path.join(tempDir, 'upstream.routecodex.prime.json'), genA[2]?.body || null);
         safeWriteJson(path.join(tempDir, 'debug.routecodex.signature.json'), {
           expected: MOCK_THOUGHT_SIGNATURE,
           got: sigsA,
           firstUserTextFollowup: getFirstUserTextFromGeminiRequest(followUpReqA),
-          firstUserTextPrime: getFirstUserTextFromGeminiRequest(genA[1]?.body || null)
-        });
-      }
-
-      // Reset upstream capture for the next run (keep the same server instance).
-      upstream.requests.splice(0, upstream.requests.length);
-
-      const cfg2 = writeTempConfig({ dir: tempDir, serverPort: 5592, upstreamBaseUrl: upstream.baseUrl, tokenFile });
-      const beforeB = upstream.requests.length;
-      const rcc = await runOnceBlackbox({
-        label: 'rcc',
-        entryScript: 'node_modules/@jsonstudio/rcc/dist/index.js',
-        port: 5592,
-        configPath: cfg2,
-        homeDir: tempDir,
-        antigravityApiBase: upstream.baseUrl
-      });
-      const afterB = upstream.requests.length;
-      const sliceB = upstream.requests.slice(beforeB, afterB);
-      const genB = sliceB.filter((r) => {
-        const u = String(r.url || '');
-        return u.includes(':streamGenerateContent') || u.includes(':generateContent');
-      });
-      assert.ok(genB.length >= 3, `rcc: expected >=3 content-generation calls, got ${genB.length}`);
-      const followUpReqB = genB[genB.length - 1]?.body;
-      assert.ok(followUpReqB, 'rcc: missing followup upstream request body');
-      const sigsB = extractThoughtSignaturesFromGeminiRequest(followUpReqB).filter((s) => s);
-      const rccInjected = sigsB.includes(MOCK_THOUGHT_SIGNATURE);
-      if (!rccInjected) {
-        safeWriteJson(path.join(tempDir, 'upstream.rcc.followup.json'), followUpReqB);
-        safeWriteJson(path.join(tempDir, 'upstream.rcc.prime.json'), genB[1]?.body || null);
-        safeWriteJson(path.join(tempDir, 'debug.rcc.signature.json'), {
-          expected: MOCK_THOUGHT_SIGNATURE,
-          got: sigsB,
-          firstUserTextFollowup: getFirstUserTextFromGeminiRequest(followUpReqB),
-          firstUserTextPrime: getFirstUserTextFromGeminiRequest(genB[1]?.body || null)
+          firstUserTextPrime: getFirstUserTextFromGeminiRequest(genA[2]?.body || null)
         });
       }
 
@@ -812,35 +886,16 @@ async function main() {
         routecodexInjected,
         `routecodex: thoughtSignature injection missing (captures in ${tempDir})`
       );
-      if (rccLlmsHasAntigravitySignatureCache) {
-        assert.ok(
-          rccInjected,
-          `rcc: thoughtSignature injection missing (captures in ${tempDir})`
-        );
-      } else if (!rccInjected) {
-        console.warn(
-          '⚠️ rcc bundled @jsonstudio/llms does not include antigravity signature cache; skipping rcc injection assertion'
-        );
-      }
-
-      // Capture the two upstream requests (one per run).
-      // NOTE: we reset upstream.requests between runs, so re-run the /v1/responses request captures from
-      // each run using the first generation call in the respective slices.
-      const reqA = genA[0]?.body;
-      const reqB = genB[0]?.body;
-      assert.ok(reqA && reqB, 'expected upstream requests for /v1/responses baseline');
-
-      const canonUpA = canonicalizeUpstream(reqA);
-      const canonUpB = canonicalizeUpstream(reqB);
 
       // Cleanliness invariants (Antigravity-Manager alignment signals):
-      // - no "[undefined]" strings
-      // - no obviously-forbidden keys that commonly trigger 4xx schema enforcement
-      // - must preserve v1internal wrapper fields
-      for (const [label, raw] of [
-        ['routecodex.upstream', reqA],
-        ['rcc.upstream', reqB]
-      ]) {
+      const reqA = genA[0]?.body;
+      assert.ok(reqA, 'routecodex: expected upstream request for /v1/responses baseline');
+
+      const canonUpA = canonicalizeUpstream(reqA);
+
+      {
+        const label = 'routecodex.upstream';
+        const raw = reqA;
         assertNoUndefinedStrings(label, raw);
         assertNoForbiddenWrapperFields(label, raw);
         assert.equal(typeof raw?.project, 'string', `${label}: missing project`);
@@ -849,43 +904,171 @@ async function main() {
         assert.equal(typeof raw?.request, 'object', `${label}: missing request`);
       }
 
-      const canonRespA = canonicalizeResponses(routecodex.response);
-      const canonRespB = canonicalizeResponses(rcc.response);
-      assert.deepEqual(
-        canonRespA,
-        canonRespB,
-        `Client response mismatch (routecodex vs rcc).\nroutecodex=${JSON.stringify(canonRespA).slice(0, 2000)}\nrcc=${JSON.stringify(canonRespB).slice(0, 2000)}`
+      // Second pass: Claude model routed via Antigravity (same v1internal transport; different model family).
+      upstream.requests.splice(0, upstream.requests.length);
+      const cfgClaude = writeTempConfig({
+        dir: tempDir,
+        serverPort: 5593,
+        upstreamBaseUrl: upstream.baseUrl,
+        tokenFile,
+        targetModel: 'claude-sonnet-4-5-thinking'
+      });
+      const beforeC = upstream.requests.length;
+      const routecodexClaude = await runOnceBlackbox({
+        label: 'routecodex',
+        entryScript: 'dist/index.js',
+        port: 5593,
+        configPath: cfgClaude,
+        homeDir: tempDir,
+        antigravityApiBase: upstream.baseUrl
+      });
+      const afterC = upstream.requests.length;
+      const sliceC = upstream.requests.slice(beforeC, afterC);
+      assertAntigravityUaFresh('routecodex', sliceC);
+      assert.equal(extractTextFromResponses(routecodexClaude.response), 'ok-from-mock');
+      const genC = sliceC.filter((r) => {
+        const u = String(r.url || '');
+        return u.includes(':streamGenerateContent') || u.includes(':generateContent');
+      });
+      assert.ok(genC.length >= 4, `routecodex (claude): expected >=4 content-generation calls, got ${genC.length}`);
+      const coldReqC = genC[1]?.body;
+      const followUpReqC = genC[genC.length - 1]?.body;
+      assert.ok(coldReqC, 'routecodex (claude): missing cold upstream request body');
+      assert.ok(followUpReqC, 'routecodex (claude): missing followup upstream request body');
+
+      const coldSigsC = extractThoughtSignaturesFromGeminiRequest(coldReqC).filter((s) => s);
+      assert.ok(
+        coldSigsC.every((s) => s !== 'skip_thought_signature_validator'),
+        `routecodex (claude): cold followup must not send dummy thoughtSignature (got ${JSON.stringify(coldSigsC.slice(0, 10))})`
       );
-
-      // Stronger semantic check: extracted text must match expected sentinel.
-      assert.equal(extractTextFromResponses(routecodex.response), 'ok-from-mock');
-      assert.equal(extractTextFromResponses(rcc.response), 'ok-from-mock');
-
-      // Optional strict parity: upstream request must be equal after canonicalization.
-      // Default off because tool registries can legitimately diverge between routecodex dev and rcc release.
-      if (String(process.env.ROUTECODEX_BLACKBOX_STRICT || '').trim() === '1') {
-        const upRoutecodexPath = path.join(tempDir, 'upstream.routecodex.json');
-        const upRccPath = path.join(tempDir, 'upstream.rcc.json');
-        fs.writeFileSync(upRoutecodexPath, `${JSON.stringify(reqA, null, 2)}\n`, 'utf8');
-        fs.writeFileSync(upRccPath, `${JSON.stringify(reqB, null, 2)}\n`, 'utf8');
-        assert.deepEqual(
-          canonUpA,
-          canonUpB,
-          `Upstream request mismatch (routecodex vs rcc). Captures: ${upRoutecodexPath} ${upRccPath}`
-        );
-      } else if (String(process.env.ROUTECODEX_BLACKBOX_KEEP || '').trim() === '1' && JSON.stringify(canonUpA) !== JSON.stringify(canonUpB)) {
-        const upRoutecodexPath = path.join(tempDir, 'upstream.routecodex.json');
-        const upRccPath = path.join(tempDir, 'upstream.rcc.json');
-        fs.writeFileSync(upRoutecodexPath, `${JSON.stringify(reqA, null, 2)}\n`, 'utf8');
-        fs.writeFileSync(upRccPath, `${JSON.stringify(reqB, null, 2)}\n`, 'utf8');
-        console.warn(
-          `⚠️ upstream request differs (routecodex vs rcc); captures written: ${upRoutecodexPath} ${upRccPath}`
-        );
-      } else if (JSON.stringify(canonUpA) !== JSON.stringify(canonUpB)) {
-        console.warn('⚠️ upstream request differs (routecodex vs rcc); set ROUTECODEX_BLACKBOX_KEEP=1 to write captures');
+      const coldPresenceC = extractThoughtSignaturePresenceFromGeminiRequest(coldReqC);
+      if (coldPresenceC.some(Boolean)) {
+        safeWriteJson(path.join(tempDir, 'upstream.routecodex.claude.cold.json'), coldReqC);
+        throw new Error(`routecodex (claude): cold followup unexpectedly contains thoughtSignature keys (captures in ${tempDir})`);
       }
 
-      console.log('✅ blackbox ok: routecodex == rcc (client response parity; upstream cleanliness OK)');
+      const sigsC = extractThoughtSignaturesFromGeminiRequest(followUpReqC).filter((s) => s);
+      const routecodexClaudeInjected = sigsC.includes(MOCK_THOUGHT_SIGNATURE);
+      if (!routecodexClaudeInjected) {
+        safeWriteJson(path.join(tempDir, 'upstream.routecodex.claude.followup.json'), followUpReqC);
+        safeWriteJson(path.join(tempDir, 'upstream.routecodex.claude.prime.json'), genC[2]?.body || null);
+        safeWriteJson(path.join(tempDir, 'debug.routecodex.claude.signature.json'), {
+          expected: MOCK_THOUGHT_SIGNATURE,
+          got: sigsC,
+          firstUserTextFollowup: getFirstUserTextFromGeminiRequest(followUpReqC),
+          firstUserTextPrime: getFirstUserTextFromGeminiRequest(genC[2]?.body || null)
+        });
+      }
+      assert.ok(
+        routecodexClaudeInjected,
+        `routecodex (claude): thoughtSignature injection missing (captures in ${tempDir})`
+      );
+
+      const reqC = genC[0]?.body;
+      assert.ok(reqC, 'routecodex (claude): expected upstream request for /v1/responses baseline');
+      assertNoUndefinedStrings('routecodex.upstream', reqC);
+      assertNoForbiddenWrapperFields('routecodex.upstream', reqC);
+      assert.equal(typeof reqC?.project, 'string', 'routecodex.upstream: missing project');
+      assert.equal(typeof reqC?.model, 'string', 'routecodex.upstream: missing model');
+      assert.equal(typeof reqC?.requestId, 'string', 'routecodex.upstream: missing requestId');
+      assert.equal(typeof reqC?.request, 'object', 'routecodex.upstream: missing request');
+
+      if (runRcc) {
+        // Reset upstream capture for the next run (keep the same server instance).
+        upstream.requests.splice(0, upstream.requests.length);
+
+        const cfg2 = writeTempConfig({
+          dir: tempDir,
+          serverPort: 5592,
+          upstreamBaseUrl: upstream.baseUrl,
+          tokenFile,
+          targetModel: 'gemini-3-pro-high'
+        });
+        const beforeB = upstream.requests.length;
+        const rcc = await runOnceBlackbox({
+          label: 'rcc',
+          entryScript: 'node_modules/@jsonstudio/rcc/dist/index.js',
+          port: 5592,
+          configPath: cfg2,
+          homeDir: tempDir,
+          antigravityApiBase: upstream.baseUrl
+        });
+        const afterB = upstream.requests.length;
+        const sliceB = upstream.requests.slice(beforeB, afterB);
+        const genB = sliceB.filter((r) => {
+          const u = String(r.url || '');
+          return u.includes(':streamGenerateContent') || u.includes(':generateContent');
+        });
+        assert.ok(genB.length >= 4, `rcc: expected >=4 content-generation calls, got ${genB.length}`);
+        const coldReqB = genB[1]?.body;
+        const followUpReqB = genB[genB.length - 1]?.body;
+        assert.ok(coldReqB, 'rcc: missing cold upstream request body');
+        assert.ok(followUpReqB, 'rcc: missing followup upstream request body');
+
+        // rcc cold followup signature semantics may lag; only assert if it has the cache implementation.
+        if (rccLlmsHasAntigravitySignatureCache) {
+          const coldSigsB = extractThoughtSignaturesFromGeminiRequest(coldReqB).filter((s) => s);
+          assert.ok(
+            coldSigsB.every((s) => s !== 'skip_thought_signature_validator'),
+            `rcc: cold followup must not send dummy thoughtSignature (got ${JSON.stringify(coldSigsB.slice(0, 10))})`
+          );
+          const coldPresenceB = extractThoughtSignaturePresenceFromGeminiRequest(coldReqB);
+          if (coldPresenceB.some(Boolean)) {
+            safeWriteJson(path.join(tempDir, 'upstream.rcc.cold.json'), coldReqB);
+            throw new Error(`rcc: cold followup unexpectedly contains thoughtSignature keys (captures in ${tempDir})`);
+          }
+        }
+
+        const sigsB = extractThoughtSignaturesFromGeminiRequest(followUpReqB).filter((s) => s);
+        const rccInjected = sigsB.includes(MOCK_THOUGHT_SIGNATURE);
+        if (rccLlmsHasAntigravitySignatureCache) {
+          assert.ok(rccInjected, `rcc: thoughtSignature injection missing (captures in ${tempDir})`);
+        }
+
+        const canonRespA = canonicalizeResponses(routecodex.response);
+        const canonRespB = canonicalizeResponses(rcc.response);
+        assert.deepEqual(
+          canonRespA,
+          canonRespB,
+          `Client response mismatch (routecodex vs rcc).\nroutecodex=${JSON.stringify(canonRespA).slice(0, 2000)}\nrcc=${JSON.stringify(canonRespB).slice(0, 2000)}`
+        );
+
+        const reqB = genB[0]?.body;
+        assert.ok(reqB, 'rcc: expected upstream request for /v1/responses baseline');
+        const canonUpB = canonicalizeUpstream(reqB);
+
+        // Optional strict parity: upstream request must be equal after canonicalization.
+        // Default off because tool registries can legitimately diverge between routecodex dev and rcc release.
+        if (String(process.env.ROUTECODEX_BLACKBOX_STRICT || '').trim() === '1') {
+          const upRoutecodexPath = path.join(tempDir, 'upstream.routecodex.json');
+          const upRccPath = path.join(tempDir, 'upstream.rcc.json');
+          fs.writeFileSync(upRoutecodexPath, `${JSON.stringify(reqA, null, 2)}\n`, 'utf8');
+          fs.writeFileSync(upRccPath, `${JSON.stringify(reqB, null, 2)}\n`, 'utf8');
+          assert.deepEqual(
+            canonUpA,
+            canonUpB,
+            `Upstream request mismatch (routecodex vs rcc). Captures: ${upRoutecodexPath} ${upRccPath}`
+          );
+        } else if (
+          String(process.env.ROUTECODEX_BLACKBOX_KEEP || '').trim() === '1' &&
+          JSON.stringify(canonUpA) !== JSON.stringify(canonUpB)
+        ) {
+          const upRoutecodexPath = path.join(tempDir, 'upstream.routecodex.json');
+          const upRccPath = path.join(tempDir, 'upstream.rcc.json');
+          fs.writeFileSync(upRoutecodexPath, `${JSON.stringify(reqA, null, 2)}\n`, 'utf8');
+          fs.writeFileSync(upRccPath, `${JSON.stringify(reqB, null, 2)}\n`, 'utf8');
+          console.warn(
+            `⚠️ upstream request differs (routecodex vs rcc); captures written: ${upRoutecodexPath} ${upRccPath}`
+          );
+        } else if (JSON.stringify(canonUpA) !== JSON.stringify(canonUpB)) {
+          console.warn('⚠️ upstream request differs (routecodex vs rcc); set ROUTECODEX_BLACKBOX_KEEP=1 to write captures');
+        }
+
+        console.log('✅ blackbox ok: routecodex (Antigravity invariants) + rcc response parity');
+      } else {
+        void canonUpA;
+        console.log('✅ blackbox ok: routecodex (Antigravity-Manager invariants)');
+      }
     } finally {
       await upstream.close();
     }

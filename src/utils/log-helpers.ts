@@ -62,6 +62,36 @@ export function formatErrorForConsole(
   error: unknown,
   limit = DEFAULT_ERROR_LOG_LIMIT
 ): { text: string } {
+  // Improve VirtualRouterError diagnostics for "no providers" cases.
+  // This is intentionally console-only: client error mapping remains unchanged.
+  if (error && typeof error === 'object') {
+    try {
+      const bag = error as Record<string, unknown>;
+      const code = typeof bag.code === 'string' ? bag.code.trim() : '';
+      const details = bag.details && typeof bag.details === 'object' && !Array.isArray(bag.details)
+        ? (bag.details as Record<string, unknown>)
+        : null;
+      const attemptedRaw =
+        (details && Array.isArray(details.attempted) ? details.attempted : null) ??
+        (Array.isArray(bag.attempted) ? bag.attempted : null);
+      const attempted = Array.isArray(attemptedRaw)
+        ? attemptedRaw.filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+        : [];
+      if (code === 'PROVIDER_NOT_AVAILABLE' && attempted.length > 0) {
+        const routeName =
+          (details && typeof details.routeName === 'string' ? details.routeName.trim() : '') ||
+          (typeof bag.routeName === 'string' ? bag.routeName.trim() : '');
+        const head = attempted.slice(0, 12);
+        const suffix = attempted.length > head.length ? ` …(+${attempted.length - head.length})` : '';
+        const text = `${routeName ? `All providers unavailable for route ${routeName}` : 'All providers unavailable'} (attempted: ${head.join(', ')}${suffix})`;
+        annotateErrorWithRaw(error, text);
+        return { text: truncateForConsole(text, limit) };
+      }
+    } catch {
+      // ignore: fall back to default formatting
+    }
+  }
+
   const raw = extractRawErrorPayload(error);
   if (raw) {
     annotateErrorWithRaw(error, raw);

@@ -68,7 +68,11 @@ export class HttpRequestExecutor {
     try {
       return await this.executeHttpRequestWithRetries(prepared, processedRequest, context);
     } catch (error) {
-      const normalized = await this.deps.normalizeHttpError(error, processedRequest, prepared, context);
+      const requestInfoOverride =
+        error && typeof error === 'object' && '__routecodexRequestInfo' in error
+          ? ((error as { __routecodexRequestInfo?: PreparedHttpRequest }).__routecodexRequestInfo ?? prepared)
+          : prepared;
+      const normalized = await this.deps.normalizeHttpError(error, processedRequest, requestInfoOverride, context);
       throw normalized;
     }
   }
@@ -249,11 +253,13 @@ export class HttpRequestExecutor {
   ): Promise<unknown> {
     const captureSse = shouldCaptureProviderStreamSnapshots();
     const maxAttempts = this.deps.getHttpRetryLimit();
+    let lastRequestInfo: PreparedHttpRequest = requestInfo;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       const targets =
         requestInfo.targetUrls && requestInfo.targetUrls.length ? requestInfo.targetUrls : [requestInfo.targetUrl];
       for (let idx = 0; idx < targets.length; idx += 1) {
         const candidate = idx === 0 ? requestInfo : { ...requestInfo, targetUrl: targets[idx] };
+        lastRequestInfo = candidate;
         try {
           return await this.executeHttpRequestOnce(candidate, context, captureSse);
         } catch (error) {
@@ -281,11 +287,18 @@ export class HttpRequestExecutor {
             break;
           }
 
+          if (error && typeof error === 'object') {
+            (error as { __routecodexRequestInfo?: PreparedHttpRequest }).__routecodexRequestInfo = candidate;
+          }
           throw error;
         }
       }
     }
-    throw new Error('provider-runtime-error: http retries exhausted');
+    const finalError: Error & { __routecodexRequestInfo?: PreparedHttpRequest } = Object.assign(
+      new Error('provider-runtime-error: http retries exhausted'),
+      { __routecodexRequestInfo: lastRequestInfo }
+    );
+    throw finalError;
   }
 
   private shouldTryNextTarget(error: unknown, context: ProviderContext): boolean {

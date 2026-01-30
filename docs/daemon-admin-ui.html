@@ -2788,7 +2788,15 @@
           const aliases = Array.from(byAlias.keys()).sort((a, b) => a.localeCompare(b));
           for (const alias of aliases) {
             const items = byAlias.get(alias);
-            appendGroupRow(`${alias || "(no-key)"} (${items.length})`, true);
+            const fpSuffix = (() => {
+              if (providerId !== "antigravity") return "";
+              if (!items || !items.length) return "";
+              const q0 = items[0] && items[0].q ? items[0].q : null;
+              const suffix = textOf(q0 && (q0.fpSuffix || q0.fingerprintSuffix) ? (q0.fpSuffix || q0.fingerprintSuffix) : "");
+              return suffix;
+            })();
+            const fpTag = fpSuffix ? ` · fp=${fpSuffix}` : "";
+            appendGroupRow(`${alias || "(no-key)"} (${items.length})${fpTag}`, true);
 
             for (const item of items) {
               const q = item.q;

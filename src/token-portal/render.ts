@@ -5,6 +5,14 @@ interface TokenPortalPageProps {
   sessionId: string;
   oauthUrl: string;
   displayName?: string;
+  fingerprint?: {
+    profileId: string;
+    os?: string;
+    arch?: string;
+    suffix?: string;
+    navigatorPlatform?: string;
+    navigatorOscpu?: string;
+  };
 }
 
 function escapeHtml(value: string): string {
@@ -17,8 +25,29 @@ function escapeHtml(value: string): string {
 }
 
 export function renderTokenPortalPage(props: TokenPortalPageProps): string {
-  const { provider, alias, tokenFile, sessionId, oauthUrl, displayName } = props;
+  const { provider, alias, tokenFile, sessionId, oauthUrl, displayName, fingerprint } = props;
   const providerLabel = displayName ? `${displayName} (${provider})` : provider;
+
+  const fingerprintHtml = (() => {
+    if (!fingerprint || !fingerprint.profileId) {
+      return '';
+    }
+    const suffix = fingerprint.suffix || (fingerprint.os && fingerprint.arch ? `${fingerprint.os}/${fingerprint.arch}` : '');
+    const parts: string[] = [];
+    parts.push(`<div><span>Camoufox profile:</span> ${escapeHtml(fingerprint.profileId)}</div>`);
+    if (suffix) {
+      parts.push(`<div><span>Fingerprint OS/Arch:</span> ${escapeHtml(suffix)}</div>`);
+    }
+    if (fingerprint.navigatorPlatform) {
+      parts.push(`<div><span>navigator.platform:</span> ${escapeHtml(fingerprint.navigatorPlatform)}</div>`);
+    }
+    if (fingerprint.navigatorOscpu) {
+      parts.push(`<div><span>navigator.oscpu:</span> ${escapeHtml(fingerprint.navigatorOscpu)}</div>`);
+    }
+    return parts.length
+      ? `<div class="meta" style="margin-top:10px">${parts.join('')}</div>`
+      : '';
+  })();
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -47,6 +76,7 @@ export function renderTokenPortalPage(props: TokenPortalPageProps): string {
         <div><span>Token file:</span> ${escapeHtml(tokenFile)}</div>
         <div><span>Session ID:</span> ${escapeHtml(sessionId)}</div>
       </div>
+      ${fingerprintHtml}
       <button id="continue-btn">Continue to OAuth</button>
       <div class="hint">
         RouteCodex shows this page before contacting the upstream OAuth portal so you know exactly which credential is being refreshed.

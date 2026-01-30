@@ -1,8 +1,10 @@
 import { Command } from 'commander';
 import {
   interactiveRefresh,
+  TokenDaemon,
   validateOAuthTokens
 } from '../token-daemon/index.js';
+import { clearAntigravityReauthRequired, readAntigravityReauthRequiredState } from '../providers/auth/antigravity-reauth-state.js';
 
 export function createOauthCommand(): Command {
   const cmd = new Command('oauth');
@@ -30,6 +32,70 @@ export function createOauthCommand(): Command {
         return;
       }
       await interactiveRefresh(first);
+    });
+
+  cmd
+    .command('reauth-required')
+    .description('Re-auth all Antigravity aliases marked as reauth-required (Camoufox automation)')
+    .option('--dev', 'Run Camoufox automation in headed debug mode (default headless)')
+    .option('--account-text <text>', 'Preferred Antigravity account display text/email to auto-select')
+    .action(async (options: { dev?: boolean; accountText?: string }) => {
+      const state = await readAntigravityReauthRequiredState();
+      const aliases = Object.keys(state).sort();
+      if (!aliases.length) {
+        console.log('No antigravity reauth-required aliases.');
+        return;
+      }
+
+      const prevBrowser = process.env.ROUTECODEX_OAUTH_BROWSER;
+      const prevAutoMode = process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
+      const prevDevMode = process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
+      const prevAccountText = process.env.ROUTECODEX_CAMOUFOX_ACCOUNT_TEXT;
+      process.env.ROUTECODEX_OAUTH_BROWSER = 'camoufox';
+      process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE = 'antigravity';
+      process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM = '1';
+      if (options?.dev) {
+        process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = '1';
+      } else {
+        delete process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
+      }
+      if (options?.accountText) {
+        process.env.ROUTECODEX_CAMOUFOX_ACCOUNT_TEXT = options.accountText;
+      } else {
+        delete process.env.ROUTECODEX_CAMOUFOX_ACCOUNT_TEXT;
+      }
+
+      try {
+        for (const alias of aliases) {
+          const rec = state[alias];
+          const selector = rec?.tokenFile || `antigravity-oauth-*-` + alias + `.json`;
+          console.log(`Re-auth required: alias=${alias}${rec?.fromSuffix ? ` from=${rec.fromSuffix}` : ''}${rec?.toSuffix ? ` to=${rec.toSuffix}` : ''}`);
+          await interactiveRefresh(selector);
+          await clearAntigravityReauthRequired(alias);
+        }
+      } finally {
+        if (prevBrowser === undefined) {
+          delete process.env.ROUTECODEX_OAUTH_BROWSER;
+        } else {
+          process.env.ROUTECODEX_OAUTH_BROWSER = prevBrowser;
+        }
+        if (prevAutoMode === undefined) {
+          delete process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
+        } else {
+          process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE = prevAutoMode;
+        }
+        if (prevDevMode === undefined) {
+          delete process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
+        } else {
+          process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = prevDevMode;
+        }
+        if (prevAccountText === undefined) {
+          delete process.env.ROUTECODEX_CAMOUFOX_ACCOUNT_TEXT;
+        } else {
+          process.env.ROUTECODEX_CAMOUFOX_ACCOUNT_TEXT = prevAccountText;
+        }
+        delete process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM;
+      }
     });
 
   cmd
@@ -84,6 +150,7 @@ export function createOauthCommand(): Command {
     .option('--dev', 'Run Camoufox automation in headed debug mode (default headless)')
     .option('--account-text <text>', 'Preferred Gemini account display text to auto-select')
     .action(async (selector: string, options: { dev?: boolean; accountText?: string }) => {
+      const token = await TokenDaemon.findTokenBySelector(selector).catch(() => null);
       const prevBrowser = process.env.ROUTECODEX_OAUTH_BROWSER;
       const prevAutoMode = process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
       const prevDevMode = process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
@@ -103,6 +170,9 @@ export function createOauthCommand(): Command {
       }
       try {
         await interactiveRefresh(selector);
+        if (token && token.provider === 'gemini-cli' && token.alias && token.alias !== 'static') {
+          await clearAntigravityReauthRequired(token.alias);
+        }
       } finally {
         if (prevBrowser === undefined) {
           delete process.env.ROUTECODEX_OAUTH_BROWSER;
@@ -138,6 +208,7 @@ export function createOauthCommand(): Command {
     .option('--dev', 'Run Camoufox automation in headed debug mode (default headless)')
     .option('--account-text <text>', 'Preferred Antigravity account display text/email to auto-select')
     .action(async (selector: string, options: { dev?: boolean; accountText?: string }) => {
+      const token = await TokenDaemon.findTokenBySelector(selector).catch(() => null);
       const prevBrowser = process.env.ROUTECODEX_OAUTH_BROWSER;
       const prevAutoMode = process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
       const prevDevMode = process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
@@ -157,6 +228,9 @@ export function createOauthCommand(): Command {
       }
       try {
         await interactiveRefresh(selector);
+        if (token && token.provider === 'antigravity' && token.alias && token.alias !== 'static') {
+          await clearAntigravityReauthRequired(token.alias);
+        }
       } finally {
         if (prevBrowser === undefined) {
           delete process.env.ROUTECODEX_OAUTH_BROWSER;

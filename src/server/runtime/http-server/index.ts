@@ -1039,15 +1039,22 @@ export class RouteCodexHttpServer {
             if (result.ok) {
               okCount += 1;
               console.log(
-                `[antigravity:warmup] ok alias=${alias} suffix=${result.actualSuffix} ua=${result.actualUserAgent}`
+                `[antigravity:warmup] ok alias=${alias} profile=${result.profileId} fp_os=${result.fingerprintOs} fp_arch=${result.fingerprintArch} ua_suffix=${result.actualSuffix} ua=${result.actualUserAgent}`
               );
               continue;
             }
             failCount += 1;
             const expected = result.expectedSuffix ? ` expected=${result.expectedSuffix}` : '';
             const actual = result.actualSuffix ? ` actual=${result.actualSuffix}` : '';
+            const hint =
+              result.reason === 'linux_not_allowed'
+                ? ` hint="run: routecodex camoufox-fp repair --provider antigravity --alias ${alias}"`
+                : result.reason === 'reauth_required'
+                  ? ` hint="run: routecodex oauth antigravity-auto ${result.tokenFile || `antigravity-oauth-*-` + alias + `.json`}"` +
+                    `${result.fromSuffix ? ` from=${result.fromSuffix}` : ''}${result.toSuffix ? ` to=${result.toSuffix}` : ''}`
+                  : '';
             console.error(
-              `[antigravity:warmup] FAIL alias=${alias} reason=${result.reason}${expected}${actual} providerKeys=${providerKeys.length}${canBlacklist ? '' : ' (quota module unavailable; cannot blacklist)'}`
+              `[antigravity:warmup] FAIL alias=${alias} profile=${result.profileId}${result.fingerprintOs ? ` fp_os=${result.fingerprintOs}` : ''}${result.fingerprintArch ? ` fp_arch=${result.fingerprintArch}` : ''} reason=${result.reason}${expected}${actual}${hint} providerKeys=${providerKeys.length}${canBlacklist ? '' : ' (quota module unavailable; cannot blacklist)'}`
             );
             if (canBlacklist) {
               await Promise.allSettled(

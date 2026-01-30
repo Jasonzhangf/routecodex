@@ -244,8 +244,10 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
 
       const alias = this.extractAntigravityAliasFromRuntime();
       finalized['User-Agent'] = await resolveAntigravityUserAgent({ alias });
-      // gcli2api alignment: keep headers minimal for Antigravity.
-      finalized['Accept-Encoding'] = 'gzip';
+      // Antigravity-Manager alignment: keep headers minimal (no Google client identifiers).
+      deleteHeaderInsensitive('x-goog-api-client');
+      deleteHeaderInsensitive('client-metadata');
+      deleteHeaderInsensitive('accept-encoding');
       deleteHeaderInsensitive('originator');
       if (headerMode === 'minimal') {
         const record = request as Record<string, unknown>;

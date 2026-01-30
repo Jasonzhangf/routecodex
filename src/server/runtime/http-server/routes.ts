@@ -7,6 +7,7 @@ import type { ServerConfigV2 } from './types.js';
 import { reportRouteError } from '../../../error-handling/route-error-hub.js';
 import { mapErrorToHttp } from '../../utils/http-error-mapper.js';
 import { renderTokenPortalPage } from '../../../token-portal/render.js';
+import { loadTokenPortalFingerprintSummary } from '../../../token-portal/fingerprint-summary.js';
 import { registerDaemonAdminRoutes, rejectNonLocalOrUnauthorizedAdmin } from './daemon-admin-routes.js';
 import type { HistoricalStatsSnapshot, StatsSnapshot } from './stats-manager.js';
 
@@ -34,7 +35,7 @@ interface RouteOptions {
  * This route must be available before provider initialization
  */
 export function registerOAuthPortalRoute(app: Application): void {
-  app.get('/token-auth/demo', (req: Request, res: Response) => {
+  app.get('/token-auth/demo', async (req: Request, res: Response) => {
     const provider = typeof req.query.provider === 'string' ? req.query.provider : 'unknown-provider';
     const alias = typeof req.query.alias === 'string' ? req.query.alias : 'default';
     const tokenFile =
@@ -46,13 +47,15 @@ export function registerOAuthPortalRoute(app: Application): void {
     const sessionId = typeof req.query.sessionId === 'string' ? req.query.sessionId : 'demo-session';
     const displayName =
       typeof req.query.displayName === 'string' && req.query.displayName.trim() ? req.query.displayName : undefined;
+    const fingerprint = await loadTokenPortalFingerprintSummary(provider, alias).catch(() => null);
     const html = renderTokenPortalPage({
       provider,
       alias,
       tokenFile,
       oauthUrl,
       sessionId,
-      displayName
+      displayName,
+      fingerprint: fingerprint || undefined
     });
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(html);
