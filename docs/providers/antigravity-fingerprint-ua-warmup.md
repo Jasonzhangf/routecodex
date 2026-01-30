@@ -6,6 +6,26 @@
 
 ---
 
+## 0) 你需要知道的文件/目录/入口
+
+### 关键目录（默认都在 `~/.routecodex/`）
+
+- OAuth token：`auth/antigravity-oauth-*.json`
+- Camoufox profile：`camoufox-profiles/rc-gemini.<alias>/...`
+- Camoufox 指纹 env：`camoufox-fp/rc-gemini.<alias>.json`
+- reauth-required 标记：`state/antigravity-reauth-required.json`
+- UA 版本缓存：`state/antigravity-ua-version.json`
+
+> 为什么 profileId 是 `rc-gemini.<alias>`：`gemini-cli` 与 `antigravity` 共享同一“指纹家族（gemini）”，同 alias 共用同一套 profile/指纹，避免一个账号跑出两套平台指纹。
+
+### 关键日志/接口
+
+- 启动 warmup：`[antigravity:warmup] ...`
+- Quota / pool UI 数据：`GET /quota/providers`（包含 `fpOs/fpArch/fpSuffix/...`）
+- OAuth 本地 portal：OAuth 前会展示 token + 指纹摘要（Camoufox profile + OS/Arch）
+
+---
+
 ## 1) 403：`verify your account`（UA/指纹不匹配导致的重新验证）
 
 ### 现象
@@ -18,6 +38,24 @@
 ### RouteCodex 的约束（安全策略）
 - Antigravity/Gemini **禁止使用 Linux 指纹**（`linux/*`），发现即要求修复并重新 OAuth。
 - 每个 alias 使用自己对应的 Camoufox profile 指纹（避免“多个账号互相污染”）。
+
+### UA 的原则：版本可更新，OS/arch 不可漂移
+
+`User-Agent` header 形态：
+
+```
+antigravity/<version> <os>/<arch>
+```
+
+- `<os>/<arch>` 来自 alias 的 OAuth 指纹（Camoufox）；**不能随意改**。
+- `<version>` 允许更新（避免 “This version of Antigravity is no longer supported.”）。
+
+RouteCodex 的版本号来源（从高到低）：
+1. `ROUTECODEX_ANTIGRAVITY_USER_AGENT` / `RCC_ANTIGRAVITY_USER_AGENT`（完全覆盖）
+2. `ROUTECODEX_ANTIGRAVITY_UA_VERSION` / `RCC_ANTIGRAVITY_UA_VERSION`
+3. 远程拉取（可通过 `ROUTECODEX_ANTIGRAVITY_UA_DISABLE_REMOTE=1` 禁用）
+4. `~/.routecodex/state/antigravity-ua-version.json`
+5. 兜底版本（仅保证“有值”，不保证不过期）
 
 ### 修复步骤
 1. 修复指纹（把 linux 修回 windows/macos）：
@@ -47,7 +85,14 @@
   - tool 声明字段对齐（例如 Gemini 最新规范要求 `parameters`）
   - Antigravity wrapper 语义要求：不把内部调试字段带到上游（版本/buildTime 等只留在本地快照）
 
-> 上述行为有黑盒回归：同一 payload 跑“mock upstream”验证 signature 缓存与注入是否生效。
+### 如何确认签名注入真的生效（不是“占位”）
+
+建议用 codex-samples 快照做证据链（不看日志猜测）：
+
+1. 找到一次成功返回且包含 `thoughtSignature` 的响应快照（`provider-response.json` / SSE 片段中 `candidate.content.parts[].thoughtSignature`）。
+2. 紧接着找下一次“带工具历史”的请求快照，检查 request body 的 `contents[].parts[].functionCall` 是否带同一个 `thoughtSignature`。
+
+> 这个验证不依赖“你是否真的有 quota”；只要 upstream 在某次响应里下发过 signature，后续注入就应当可见。
 
 ---
 
@@ -58,6 +103,23 @@
   - 指纹可读且平台识别正确（禁止 linux）
   - UA 的 `<os>/<arch>` 与指纹期望一致
   - 若修过指纹，需要完成 OAuth reauth
+
+### Warmup 实际做了什么
+
+实现位置：
+- 检查逻辑：`src/providers/auth/antigravity-warmup.ts:warmupCheckAntigravityAlias()`
+- 启动触发：`src/server/runtime/http-server/index.ts`（初始化阶段遍历 `antigravity.<alias>.*` providerKey）
+
+行为（高层）：
+1. 读取 alias 的 Camoufox 指纹 → 推断期望 suffix（`windows|macos` + `amd64|aarch64`）。
+2. 解析/生成 `User-Agent`（会强制刷新版本号，避免过旧）。
+3. 校验 `ua_suffix === expected_suffix`。
+4. 若检测到 alias 处于 `reauth_required` 状态，则提示 OAuth，并在满足条件时自动清理“陈旧标记”（通过 token 文件 mtime 判断）。
+5. 如果 warmup 失败且 quota 模块可用，会把该 alias 下的所有 providerKey **blacklist** 一段时间（默认很长，避免运行时误用被 ban）。
+
+可控开关：
+- 禁用 warmup：`ROUTECODEX_ANTIGRAVITY_WARMUP=0` / `RCC_ANTIGRAVITY_WARMUP=0`
+- blacklist 时长：`ROUTECODEX_ANTIGRAVITY_WARMUP_BLACKLIST_MS=<ms>`
 
 ### 日志格式
 - 启动后会看到：
@@ -72,4 +134,3 @@
 ## 4) 变更范围约束（架构要求）
 - Hub Pipeline 仍是唯一执行路径；Provider 层只做传输（auth/http/retry/compat hook）。
 - Antigravity 的 session/signature 逻辑 **不扩散**：最多位于 compat 与 gemini-cli provider 路径。
-
