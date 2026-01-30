@@ -65,3 +65,4 @@ GEMINI_API_KEY=**** node scripts/gemini-smoke.mjs
 
 如果你走的是 **Antigravity → Gemini（Cloud Code Assist）** 路径（而不是直连 Generative Language API），请看：
 - `docs/providers/antigravity-fingerprint-ua-warmup.md`
+- `docs/providers/antigravity-gemini-provider-compat.md`
