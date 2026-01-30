@@ -69,7 +69,11 @@ try {
   if (isDevPkg || isRcc) {
     mutated.bundledDependencies = [];
     mutated.bundleDependencies = [];
-    const llmsVersion = original.dependencies?.['@jsonstudio/llms'] || '^0.6.230';
+    const llmsOverride = String(process.env.RCC_LLMS_VERSION || process.env.ROUTECODEX_PACK_LLMS_VERSION || '').trim();
+    const llmsVersion = (isRcc && llmsOverride) ? llmsOverride : (original.dependencies?.['@jsonstudio/llms'] || '^0.6.230');
+    if (isRcc && llmsOverride) {
+      console.log(`[pack-mode] using RCC_LLMS_VERSION override: @jsonstudio/llms=${llmsVersion}`);
+    }
     const deps = {
       ...(original.dependencies || {})
     };
