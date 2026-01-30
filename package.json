@@ -150,7 +150,6 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.65.0",
     "@jsonstudio/llms": "0.6.1435",
-    "@jsonstudio/rcc": "^0.89.555",
     "@lmstudio/sdk": "^1.5.0",
     "@radix-ui/react-switch": "^1.2.6",
     "@types/socket.io": "^3.0.1",
