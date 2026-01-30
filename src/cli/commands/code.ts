@@ -22,6 +22,45 @@ type LoggerLike = {
   error: (msg: string) => void;
 };
 
+function resolveClaudeBinary(options: {
+  fsImpl: typeof fs;
+  pathImpl: typeof path;
+  homedir: () => string;
+  command: string;
+}): string {
+  const raw = String(options.command || '').trim();
+  if (!raw) {
+    return 'claude';
+  }
+  // Already a path: keep as-is.
+  if (raw.includes('/') || raw.includes('\\\\')) {
+    return raw;
+  }
+
+  const candidates: string[] = [];
+  try {
+    candidates.push(options.pathImpl.join('/opt/homebrew/bin', raw));
+  } catch { /* ignore */ }
+  try {
+    candidates.push(options.pathImpl.join('/usr/local/bin', raw));
+  } catch { /* ignore */ }
+  try {
+    candidates.push(options.pathImpl.join(options.homedir(), '.local', 'bin', raw));
+  } catch { /* ignore */ }
+
+  for (const candidate of candidates) {
+    try {
+      if (candidate && options.fsImpl.existsSync(candidate)) {
+        return candidate;
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  return raw;
+}
+
 export type CodeCommandOptions = {
   port?: string;
   host: string;
@@ -386,13 +425,20 @@ export function createCodeCommand(program: Command, ctx: CodeCommandContext): vo
           return envPath || 'claude';
         })();
 
+        const resolvedClaudeBin = resolveClaudeBinary({
+          fsImpl,
+          pathImpl,
+          homedir: ctx.homedir,
+          command: claudeBin
+        });
+
         const shouldUseShell =
           ctx.isWindows &&
-          !pathImpl.extname(claudeBin) &&
-          !claudeBin.includes('/') &&
-          !claudeBin.includes('\\\\');
+          !pathImpl.extname(resolvedClaudeBin) &&
+          !resolvedClaudeBin.includes('/') &&
+          !resolvedClaudeBin.includes('\\\\');
 
-        const claudeProcess = ctx.spawn(claudeBin, claudeArgs, {
+        const claudeProcess = ctx.spawn(resolvedClaudeBin, claudeArgs, {
           stdio: 'inherit',
           env: claudeEnv,
           cwd: currentCwd,
@@ -401,7 +447,7 @@ export function createCodeCommand(program: Command, ctx: CodeCommandContext): vo
 
         spinner.succeed('Claude Code launched with RouteCodex proxy');
         ctx.logger.info(`Using RouteCodex server at: http://${resolvedBaseHost}:${actualPort}`);
-        ctx.logger.info(`Claude binary: ${claudeBin}`);
+        ctx.logger.info(`Claude binary: ${resolvedClaudeBin}`);
         ctx.logger.info(`Working directory for Claude: ${currentCwd}`);
         ctx.logger.info('Press Ctrl+C to exit Claude Code');
 
@@ -425,7 +471,7 @@ export function createCodeCommand(program: Command, ctx: CodeCommandContext): vo
         claudeProcess.on('error', (err) => {
           try {
             ctx.logger.error(
-              `Failed to launch Claude Code (${claudeBin}): ${err instanceof Error ? err.message : String(err)}`
+              `Failed to launch Claude Code (${resolvedClaudeBin}): ${err instanceof Error ? err.message : String(err)}`
             );
             if (ctx.isWindows && shouldUseShell) {
               ctx.logger.error('Tip: If Claude is installed via npm, ensure the shim is in PATH (e.g. claude.cmd).');

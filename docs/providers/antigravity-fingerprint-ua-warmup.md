@@ -71,6 +71,29 @@ RouteCodex 的版本号来源（从高到低）：
 ### 现象
 - 上游返回 `HTTP 429`，错误体含 `RESOURCE_EXHAUSTED`。
 
+### 关键结论（本次事故的“真因”）
+我们遇到过一种非常典型的形态：
+- **第一次请求 OK**（upstream 在响应里下发了 `thoughtSignature`）
+- **第二次（带工具历史）开始 429**（本地在历史 `functionCall` part 里丢了/没注入 `thoughtSignature`）
+
+而“丢签名”的根因不是 quota，而是 **Antigravity provider 配错了 compat profile**：
+- `chat:gemini` 不会跑 `gemini_cli_request_wrap`（因此不会做历史 `thoughtSignature` 注入）
+- Antigravity 必须用 `chat:gemini-cli`（Cloud Code Assist wrapper 对齐 + signature 注入）
+
+修复点：确保你的用户配置中（`~/.routecodex/config.json`）：
+
+```jsonc
+{
+  "virtualrouter": {
+    "providers": {
+      "antigravity": {
+        "compatibilityProfile": "chat:gemini-cli"
+      }
+    }
+  }
+}
+```
+
 ### 说明
 - 这类 429 可能是“真实配额/容量”或上游策略性拒绝，**不能假设一定是本地形状问题**。
 - 但在 Antigravity/Gemini 路径上，如果请求形状/历史/工具 schema/签名注入不对齐，也会显著放大 429 的出现概率（尤其是长上下文 + 多工具历史）。
@@ -93,6 +116,11 @@ RouteCodex 的版本号来源（从高到低）：
 2. 紧接着找下一次“带工具历史”的请求快照，检查 request body 的 `contents[].parts[].functionCall` 是否带同一个 `thoughtSignature`。
 
 > 这个验证不依赖“你是否真的有 quota”；只要 upstream 在某次响应里下发过 signature，后续注入就应当可见。
+
+### 如何确认 compat profile 真的生效
+用 `--snap` 或 dev 默认快照（`~/.routecodex/codex-samples/...`）检查 pipeline stage8：
+- `chat_process.req.stage8.outbound.compat.json` 里必须出现 `chat:gemini-cli`
+- 如果你看到的是 `chat:gemini`，说明 profile 仍然配错（很容易复发“第一次 OK，第二次 429”）
 
 ---
 

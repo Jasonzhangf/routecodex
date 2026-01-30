@@ -18,6 +18,7 @@
 2. **“UA 版本可变，但指纹不可漂移”**：对 Cloud Code Assist，OAuth 账号与“浏览器平台指纹”强绑定。UA 的 `<os>/<arch>` 必须稳定绑定到该 alias 的 OAuth 指纹。
 3. **禁用 Linux 指纹（Antigravity/Gemini 路径）**：我们遇到过 `linux/*` 指纹触发 re-verify/风控；因此在这条路径上明确禁止。
 4. **signature 不扩散**：`thoughtSignature` 缓存/注入只在 `antigravity + gemini-chat` 的 compat 生效，不影响其它 provider。
+5. **profile 必须选对**：Antigravity 走 Cloud Code Assist wrapper 时必须用 `compatibilityProfile: "chat:gemini-cli"`；用错 profile（例如 `chat:gemini`）会导致 request wrap / 历史 `thoughtSignature` 注入缺失，从而出现“第一次 OK、第二次 429”的假象。
 
 ## 1) 端到端执行路径（单一路径）
 
@@ -233,6 +234,29 @@ compat 会做“最小必要”的规范化（不修复路由、不改语义）�
   - `sharedmodule/llmswitch-core/src/conversion/compat/antigravity-session-signature.ts`
 
 > 重要：signature 只在 antigravity + gemini-chat 的 compat 中注入，不向其它 provider 扩散。
+
+### 5.4 为什么一定要用 `chat:gemini-cli`（而不是 `chat:gemini`）
+本次排障中我们确认过一个“高频误配”：
+- **`chat:gemini`**：面向 Generative Language API 的常规 Gemini 形状（不会跑 Cloud Code Assist wrapper），因此不会执行 `gemini_cli_request_wrap`，也不会把缓存的 `thoughtSignature` 回填进历史 `functionCall`。
+- **`chat:gemini-cli`**：面向 Cloud Code Assist / Antigravity 的 wrapper 形状（会把 root 字段收敛到 `request` 节点，并对工具 schema 与历史签名做对齐）。
+
+当 profile 配错时，典型症状是：
+- 第一跳（无工具历史）可能 OK
+- 第二跳（带 `functionCall` 历史但缺 `thoughtSignature`）开始出现 429 / 被策略性拒绝放大
+
+所以，Antigravity provider 的 `compatibilityProfile` 必须显式设置为：
+
+```jsonc
+{
+  "virtualrouter": {
+    "providers": {
+      "antigravity": {
+        "compatibilityProfile": "chat:gemini-cli"
+      }
+    }
+  }
+}
+```
 
 ---
 
