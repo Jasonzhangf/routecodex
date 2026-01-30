@@ -216,11 +216,30 @@ function assertAntigravityUaFresh(label, requests) {
   const uaString = typeof ua === 'string' ? ua : Array.isArray(ua) ? ua.join(' ') : '';
   assert.ok(uaString.toLowerCase().startsWith('antigravity/'), `${label}: upstream User-Agent must start with antigravity/ (got ${JSON.stringify(uaString)})`);
   assert.ok(!uaString.toLowerCase().includes('codex_cli_rs/'), `${label}: upstream User-Agent must not be codex_cli_rs (got ${JSON.stringify(uaString)})`);
-  // RouteCodex must keep a stable fingerprint suffix to avoid forcing re-verification.
+  // RouteCodex must keep a stable per-alias fingerprint suffix derived from camoufox OAuth fingerprint.
+  // (This blackbox provides a fake camoufox fingerprint for alias "test" and asserts it is honored.)
   assert.ok(
-    /^antigravity\/\d+\.\d+\.\d+ windows\/amd64$/i.test(uaString.trim()),
-    `${label}: UA must keep stable suffix windows/amd64 (got ${JSON.stringify(uaString)})`
+    /^antigravity\/\d+\.\d+\.\d+ linux\/amd64$/i.test(uaString.trim()),
+    `${label}: UA must honor per-alias suffix linux/amd64 (got ${JSON.stringify(uaString)})`
   );
+}
+
+function writeCamoufoxFingerprintForAlias({ dir, provider, alias, platform, userAgent, oscpu }) {
+  const providerFamily =
+    String(provider || '').toLowerCase() === 'antigravity' || String(provider || '').toLowerCase() === 'gemini-cli'
+      ? 'gemini'
+      : String(provider || '').toLowerCase();
+  const profileId = `rc-${providerFamily}.${String(alias || '').toLowerCase()}`;
+  const fpDir = path.join(dir, '.routecodex', 'camoufox-fp');
+  fs.mkdirSync(fpDir, { recursive: true });
+  const fpPath = path.join(fpDir, `${profileId}.json`);
+  const camouConfig = {
+    'navigator.platform': platform,
+    'navigator.userAgent': userAgent,
+    'navigator.oscpu': oscpu
+  };
+  fs.writeFileSync(fpPath, JSON.stringify({ env: { CAMOU_CONFIG_1: JSON.stringify(camouConfig) } }, null, 2));
+  return fpPath;
 }
 
 async function startMockUpstream() {
@@ -708,6 +727,15 @@ async function main() {
       tokenFile,
       JSON.stringify({ access_token: 'test_access_token', token_type: 'Bearer', project_id: 'test-project' }, null, 2)
     );
+    // Provide a deterministic camoufox fingerprint so UA suffix is selected per-alias (no machine drift).
+    writeCamoufoxFingerprintForAlias({
+      dir: tempDir,
+      provider: 'antigravity',
+      alias: 'test',
+      platform: 'Linux x86_64',
+      oscpu: 'Linux x86_64',
+      userAgent: 'Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:135.0) Gecko/20100101 Firefox/135.0'
+    });
 
     const upstream = await startMockUpstream();
     try {

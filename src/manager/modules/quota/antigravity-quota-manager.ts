@@ -234,7 +234,7 @@ export class QuotaManagerModule implements ManagerModule {
           continue;
         }
         attempted += 1;
-        const snapshot = await fetchAntigravityQuotaSnapshot(apiBase, accessToken);
+        const snapshot = await fetchAntigravityQuotaSnapshot(apiBase, accessToken, { alias });
         if (!snapshot) {
           failureCount += 1;
           continue;

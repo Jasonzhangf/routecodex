@@ -24,6 +24,7 @@ import type {
   ProviderRequestLogEntry
 } from '../../../modules/pipeline/utils/debug-logger.js';
 import { attachProviderRuntimeMetadata } from '../../../providers/core/runtime/provider-runtime-metadata.js';
+import { preloadAntigravityAliasUserAgents, primeAntigravityUserAgentVersion } from '../../../providers/auth/antigravity-user-agent.js';
 import { AuthFileResolver } from '../../../config/auth-file-resolver.js';
 import type { ProviderRuntimeProfile } from '../../../providers/core/api/provider-types.js';
 import type { ProviderProfile, ProviderProfileCollection } from '../../../providers/profile/provider-profile.js';
@@ -966,6 +967,37 @@ export class RouteCodexHttpServer {
     }
     await this.disposeProviders();
     this.providerKeyToRuntimeKey.clear();
+
+    // Antigravity UA preload (best-effort):
+    // - fetch latest UA version once (cached)
+    // - load per-alias camoufox fingerprints so UA suffix stays stable per OAuth session
+    try {
+      const aliases: string[] = [];
+      for (const [providerKey, runtime] of Object.entries(runtimeMap)) {
+        const key = typeof providerKey === 'string' ? providerKey.trim() : '';
+        const rk =
+          runtime && typeof (runtime as any).runtimeKey === 'string'
+            ? String((runtime as any).runtimeKey).trim()
+            : '';
+        for (const candidate of [rk, key]) {
+          if (!candidate.toLowerCase().startsWith('antigravity.')) {
+            continue;
+          }
+          const parts = candidate.split('.');
+          if (parts.length >= 2 && parts[1] && parts[1].trim()) {
+            aliases.push(parts[1].trim());
+          }
+        }
+      }
+      if (aliases.length) {
+        await Promise.allSettled([
+          primeAntigravityUserAgentVersion(),
+          preloadAntigravityAliasUserAgents(aliases)
+        ]);
+      }
+    } catch {
+      // UA preload must never block runtime init/reload
+    }
 
     const quotaModule = this.managerDaemon?.getModule('provider-quota') as
       | { registerProviderStaticConfig?: (providerKey: string, config: { authType?: string | null; priorityTier?: number | null }) => void }

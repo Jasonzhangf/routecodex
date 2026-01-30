@@ -67,8 +67,24 @@ const extractProjectId = (value: unknown): string | undefined => {
   return undefined;
 };
 
-const buildHeaders = async (accessToken: string): Promise<Record<string, string>> => ({
-  'User-Agent': await resolveAntigravityUserAgent(),
+function inferAliasFromTokenFilePath(tokenFilePath: string): string | undefined {
+  const base = path.basename(tokenFilePath || '').trim();
+  if (!base) {
+    return undefined;
+  }
+  const match = base.match(/-(?<alias>[a-z0-9._-]+)\.json$/i);
+  const alias = match?.groups?.alias ? String(match.groups.alias).trim() : '';
+  if (!alias || alias.toLowerCase() === 'default') {
+    return undefined;
+  }
+  return alias;
+}
+
+const buildHeaders = async (
+  accessToken: string,
+  opts?: { alias?: string }
+): Promise<Record<string, string>> => ({
+  'User-Agent': await resolveAntigravityUserAgent({ alias: opts?.alias }),
   'Authorization': `Bearer ${accessToken}`,
   'Content-Type': 'application/json',
   'Accept': 'application/json',
@@ -258,14 +274,21 @@ async function tryOnboardUser(
 
 export async function fetchAntigravityProjectId(
   accessToken: string,
-  apiBase?: string
+  apiBase?: string,
+  opts?: { tokenFilePath?: string; alias?: string }
 ): Promise<string | undefined> {
   if (!accessToken?.trim()) {
     throw new Error('fetchAntigravityProjectId: access token is empty');
   }
 
   const base = normalizedBase(apiBase);
-  const headers = await buildHeaders(accessToken);
+  const aliasFromFile =
+    typeof opts?.tokenFilePath === 'string' && opts.tokenFilePath.trim()
+      ? inferAliasFromTokenFilePath(opts.tokenFilePath)
+      : undefined;
+  const alias =
+    (typeof opts?.alias === 'string' && opts.alias.trim() ? opts.alias.trim() : aliasFromFile) || undefined;
+  const headers = await buildHeaders(accessToken, { alias });
   logOAuthDebug(`[Antigravity] Resolving project_id via ${base}`);
 
   try {
@@ -288,8 +311,11 @@ export async function fetchAntigravityProjectId(
   }
 }
 
-export async function buildAntigravityHeaders(accessToken: string): Promise<Record<string, string>> {
-  return await buildHeaders(accessToken);
+export async function buildAntigravityHeaders(
+  accessToken: string,
+  opts?: { alias?: string }
+): Promise<Record<string, string>> {
+  return await buildHeaders(accessToken, { alias: opts?.alias });
 }
 
 export function resolveAntigravityApiBase(explicit?: string): string {
@@ -320,7 +346,7 @@ export async function ensureAntigravityTokenProjectMetadata(
   if (!accessToken) {
     return false;
   }
-  const projectId = await fetchAntigravityProjectId(accessToken, apiBaseHint);
+  const projectId = await fetchAntigravityProjectId(accessToken, apiBaseHint, { tokenFilePath: resolved });
   if (!projectId) {
     return false;
   }

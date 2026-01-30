@@ -787,13 +787,17 @@ async function finalizeTokenWrite(
   if (!tokenData || typeof strategy.saveToken !== 'function') {
     return;
   }
-  const enriched = await maybeEnrichToken(providerType, tokenData);
+  const enriched = await maybeEnrichToken(providerType, tokenData, tokenFilePath);
   const prepared = await prepareTokenForStorage(providerType, tokenFilePath, enriched);
   await strategy.saveToken(prepared);
   logOAuthDebug(`[OAuth] Token ${reason} saved: ${tokenFilePath}`);
 }
 
-async function maybeEnrichToken(providerType: string, tokenData: UnknownObject): Promise<UnknownObject> {
+async function maybeEnrichToken(
+  providerType: string,
+  tokenData: UnknownObject,
+  tokenFilePath?: string
+): Promise<UnknownObject> {
   if (providerType === 'iflow') {
     const accessToken = extractAccessToken(sanitizeToken(tokenData) ?? null);
     if (!accessToken) {
@@ -817,7 +821,7 @@ async function maybeEnrichToken(providerType: string, tokenData: UnknownObject):
     }
     try {
       const userInfo = await fetchGeminiCLIUserInfo(accessToken);
-      const projectId = await fetchAntigravityProjectId(accessToken);
+      const projectId = await fetchAntigravityProjectId(accessToken, undefined, { tokenFilePath });
       const projects = projectId ? [{ projectId }] : [];
       const merged = mergeGeminiCLITokenData(tokenData, userInfo, projects) as unknown as UnknownObject;
       if (projectId) {

@@ -242,7 +242,8 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
         }
       };
 
-      finalized['User-Agent'] = await resolveAntigravityUserAgent();
+      const alias = this.extractAntigravityAliasFromRuntime();
+      finalized['User-Agent'] = await resolveAntigravityUserAgent({ alias });
       // gcli2api alignment: keep headers minimal for Antigravity.
       finalized['Accept-Encoding'] = 'gzip';
       deleteHeaderInsensitive('originator');
@@ -262,6 +263,28 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
       }
     }
     return finalized;
+  }
+
+  private extractAntigravityAliasFromRuntime(): string | undefined {
+    const runtime = this.getCurrentRuntimeMetadata();
+    const candidates: string[] = [];
+    if (runtime && typeof (runtime as any).runtimeKey === 'string') {
+      candidates.push(String((runtime as any).runtimeKey));
+    }
+    if (runtime && typeof (runtime as any).providerKey === 'string') {
+      candidates.push(String((runtime as any).providerKey));
+    }
+    for (const value of candidates) {
+      const trimmed = value.trim();
+      if (!trimmed.toLowerCase().startsWith('antigravity.')) {
+        continue;
+      }
+      const parts = trimmed.split('.');
+      if (parts.length >= 2 && parts[1] && parts[1].trim()) {
+        return parts[1].trim();
+      }
+    }
+    return undefined;
   }
 
   private getAntigravityHeaderMode(): 'minimal' | 'standard' | 'default' {

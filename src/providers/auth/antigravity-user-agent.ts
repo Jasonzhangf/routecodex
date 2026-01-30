@@ -2,15 +2,17 @@
  * Antigravity Cloud Code Assist User-Agent helpers.
  *
  * IMPORTANT (RouteCodex constraint):
- * - Do NOT vary the OS/arch fingerprint per machine. Antigravity cloudcode oauth sessions
- *   are sensitive to UA drift; changing OS/arch can trigger re-verification.
- * - We keep the historical UA suffix ("windows/amd64") stable, while allowing the version
- *   to refresh to avoid "version no longer supported" rejections.
+ * - Do NOT vary the OS/arch fingerprint per machine.
+ * - Use the per-alias OAuth fingerprint (Camoufox) to select the OS/arch suffix, so each alias
+ *   stays consistent with its own browser/OAuth session.
+ * - Allow the version to refresh to avoid "version no longer supported" rejections.
  */
 import { setTimeout as delay } from 'node:timers/promises';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+
+import { inferAntigravityUaSuffixFromFingerprint, loadAntigravityCamoufoxFingerprint } from './antigravity-fingerprint.js';
 
 const VERSION_URL = 'https://antigravity-auto-updater-974169037036.us-central1.run.app';
 const VERSION_REGEX = /\d+\.\d+\.\d+/;
@@ -25,8 +27,10 @@ const LEGACY_PINNED_VERSION = '1.11.9';
 const DEFAULT_FINGERPRINT_SUFFIX = 'windows/amd64';
 const VERSION_CACHE_FILE = path.join(os.homedir(), '.routecodex', 'state', 'antigravity-ua-version.json');
 
-let cached: { ua: string; fetchedAt: number } | null = null;
-let inflight: Promise<string> | null = null;
+let cachedVersion: { version: string; fetchedAt: number } | null = null;
+let inflightVersion: Promise<string> | null = null;
+const aliasSuffixCache = new Map<string, string>();
+const aliasSuffixInflight = new Map<string, Promise<string | undefined>>();
 
 export function parseAntigravityVersionFromUpdater(text: string): string | undefined {
   const hit = String(text || '').match(VERSION_REGEX)?.[0];
@@ -37,7 +41,7 @@ export function formatAntigravityManagerUserAgent(opts: {
   version: string;
   /**
    * Optional stable fingerprint suffix, e.g. "windows/amd64".
-   * If omitted, we keep the historical RouteCodex default.
+   * If omitted, we use RouteCodex default (only when alias fingerprint is unavailable).
    */
   suffix?: string;
 }): string {
@@ -105,7 +109,7 @@ async function fetchRemoteVersion(): Promise<string | undefined> {
   }
 }
 
-export async function resolveAntigravityUserAgent(opts?: {
+async function resolveAntigravityVersion(opts?: {
   /**
    * Refresh cache regardless of TTL.
    */
@@ -115,16 +119,6 @@ export async function resolveAntigravityUserAgent(opts?: {
    */
   ttlMs?: number;
 }): Promise<string> {
-  const envUa = (process.env.ROUTECODEX_ANTIGRAVITY_USER_AGENT || process.env.RCC_ANTIGRAVITY_USER_AGENT || '').trim();
-  if (envUa) {
-    return envUa;
-  }
-
-  // Optional: allow operators to pin the UA fingerprint suffix without changing the full UA.
-  const suffix =
-    (process.env.ROUTECODEX_ANTIGRAVITY_UA_SUFFIX || process.env.RCC_ANTIGRAVITY_UA_SUFFIX || '').trim() ||
-    DEFAULT_FINGERPRINT_SUFFIX;
-
   // Optional: allow operators/tests to pin the UA version without specifying a full UA.
   const envVersionRaw = (
     process.env.ROUTECODEX_ANTIGRAVITY_UA_VERSION ||
@@ -135,21 +129,20 @@ export async function resolveAntigravityUserAgent(opts?: {
 
   const ttlMs = typeof opts?.ttlMs === 'number' && opts.ttlMs > 0 ? opts.ttlMs : 30 * 60_000;
   const now = Date.now();
-  if (!opts?.forceRefresh && cached && now - cached.fetchedAt < ttlMs) {
-    return cached.ua;
+  if (!opts?.forceRefresh && cachedVersion && now - cachedVersion.fetchedAt < ttlMs) {
+    return cachedVersion.version;
   }
 
-  if (inflight) {
-    return inflight;
+  if (inflightVersion) {
+    return inflightVersion;
   }
 
-  inflight = (async () => {
+  inflightVersion = (async () => {
     // Yield once to let concurrent callers coalesce.
     await delay(0);
     if (envVersion) {
-      const ua = formatAntigravityManagerUserAgent({ version: envVersion, suffix });
-      cached = { ua, fetchedAt: Date.now() };
-      return ua;
+      cachedVersion = { version: envVersion, fetchedAt: Date.now() };
+      return envVersion;
     }
 
     const remoteVersion = await fetchRemoteVersion();
@@ -159,16 +152,97 @@ export async function resolveAntigravityUserAgent(opts?: {
       await writeCachedVersionToDisk(remoteVersion);
     }
 
-    const ua = formatAntigravityManagerUserAgent({ version: resolvedVersion, suffix });
-    cached = { ua, fetchedAt: Date.now() };
-    return ua;
+    cachedVersion = { version: resolvedVersion, fetchedAt: Date.now() };
+    return resolvedVersion;
   })();
 
   try {
-    return await inflight;
+    return await inflightVersion;
   } finally {
-    inflight = null;
+    inflightVersion = null;
   }
+}
+
+async function resolveAntigravityUaSuffixForAlias(alias: string): Promise<string | undefined> {
+  const key = alias.trim().toLowerCase();
+  if (!key) {
+    return undefined;
+  }
+  if (aliasSuffixCache.has(key)) {
+    return aliasSuffixCache.get(key);
+  }
+  const inflight = aliasSuffixInflight.get(key);
+  if (inflight) {
+    return inflight;
+  }
+  const task = (async () => {
+    const fp = await loadAntigravityCamoufoxFingerprint(key);
+    if (!fp) {
+      return undefined;
+    }
+    const suffix = inferAntigravityUaSuffixFromFingerprint(fp);
+    if (suffix) {
+      aliasSuffixCache.set(key, suffix);
+    }
+    return suffix;
+  })();
+  aliasSuffixInflight.set(key, task);
+  try {
+    return await task;
+  } finally {
+    aliasSuffixInflight.delete(key);
+  }
+}
+
+export async function preloadAntigravityAliasUserAgents(aliases: string[]): Promise<void> {
+  const unique = Array.from(
+    new Set(
+      (Array.isArray(aliases) ? aliases : [])
+        .map((a) => (typeof a === 'string' ? a.trim().toLowerCase() : ''))
+        .filter(Boolean)
+    )
+  );
+  if (!unique.length) {
+    return;
+  }
+  await Promise.allSettled(unique.map((alias) => resolveAntigravityUaSuffixForAlias(alias)));
+}
+
+export async function primeAntigravityUserAgentVersion(): Promise<void> {
+  await resolveAntigravityVersion({ forceRefresh: true }).catch(() => undefined);
+}
+
+export async function resolveAntigravityUserAgent(opts?: {
+  /**
+   * Optional alias. When present, UA fingerprint suffix is derived from this alias's
+   * Camoufox OAuth fingerprint, keeping UA stable per-account.
+   */
+  alias?: string;
+  /**
+   * Refresh version cache regardless of TTL.
+   */
+  forceRefresh?: boolean;
+  /**
+   * Version cache TTL in milliseconds (default: 30 minutes).
+   */
+  ttlMs?: number;
+}): Promise<string> {
+  const envUa = (process.env.ROUTECODEX_ANTIGRAVITY_USER_AGENT || process.env.RCC_ANTIGRAVITY_USER_AGENT || '').trim();
+  if (envUa) {
+    return envUa;
+  }
+
+  // Optional: allow operators to force a UA fingerprint suffix without changing the full UA.
+  // NOTE: This overrides per-alias fingerprint inference.
+  const envSuffix = (process.env.ROUTECODEX_ANTIGRAVITY_UA_SUFFIX || process.env.RCC_ANTIGRAVITY_UA_SUFFIX || '').trim();
+  const aliasSuffix =
+    !envSuffix && typeof opts?.alias === 'string' && opts.alias.trim()
+      ? await resolveAntigravityUaSuffixForAlias(opts.alias)
+      : undefined;
+  const suffix = envSuffix || aliasSuffix || DEFAULT_FINGERPRINT_SUFFIX;
+
+  const version = await resolveAntigravityVersion({ forceRefresh: opts?.forceRefresh, ttlMs: opts?.ttlMs });
+  return formatAntigravityManagerUserAgent({ version, suffix });
 }
 
 export function getAntigravityUserAgentFallback(): string {

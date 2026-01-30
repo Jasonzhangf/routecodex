@@ -56,12 +56,13 @@ export async function loadAntigravityAccessToken(tokenFile: string): Promise<str
 
 export async function fetchAntigravityQuotaSnapshot(
   apiBase: string,
-  accessToken: string
+  accessToken: string,
+  opts?: { alias?: string }
 ): Promise<AntigravityQuotaSnapshot | null> {
   const base = apiBase.replace(/\/+$/, '');
   const url = `${base}/v1internal:fetchAvailableModels`;
   try {
-    const headers = await buildAntigravityHeaders(accessToken);
+    const headers = await buildAntigravityHeaders(accessToken, { alias: opts?.alias });
     const resp = await axios.post(
       url,
       {},
