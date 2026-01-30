@@ -19,6 +19,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+const MOCK_THOUGHT_SIGNATURE = `tsig-${'x'.repeat(80)}`; // >= 50 chars (Antigravity cache requires min length)
+
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
@@ -66,12 +68,80 @@ function assertNoUndefinedStrings(label, value) {
 
 function assertNoForbiddenWrapperFields(label, raw) {
   const top = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  const carrier =
+    top.request && typeof top.request === 'object' && !Array.isArray(top.request)
+      ? top
+      : top.data && typeof top.data === 'object' && !Array.isArray(top.data) && top.data.request && typeof top.data.request === 'object'
+        ? top.data
+        : top;
   const inner =
-    top.request && typeof top.request === 'object' && !Array.isArray(top.request) ? top.request : {};
+    carrier.request && typeof carrier.request === 'object' && !Array.isArray(carrier.request) ? carrier.request : {};
 
   for (const key of ['metadata', 'web_search', 'messages', 'stream', 'sessionId', 'action']) {
     assert.equal(Object.prototype.hasOwnProperty.call(top, key), false, `${label}: forbidden top-level ${key}`);
     assert.equal(Object.prototype.hasOwnProperty.call(inner, key), false, `${label}: forbidden request.${key}`);
+  }
+}
+
+function getFirstUserTextFromGeminiRequest(raw) {
+  const top = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  const carrier =
+    top.request && typeof top.request === 'object' && !Array.isArray(top.request)
+      ? top
+      : top.data && typeof top.data === 'object' && !Array.isArray(top.data) && top.data.request && typeof top.data.request === 'object'
+        ? top.data
+        : top;
+  const requestNode =
+    carrier.request && typeof carrier.request === 'object' && !Array.isArray(carrier.request) ? carrier.request : {};
+  const contents = Array.isArray(requestNode.contents) ? requestNode.contents : [];
+  for (const content of contents) {
+    if (!content || typeof content !== 'object') continue;
+    if (content.role !== 'user') continue;
+    const parts = Array.isArray(content.parts) ? content.parts : [];
+    const texts = [];
+    for (const part of parts) {
+      if (!part || typeof part !== 'object') continue;
+      if (typeof part.text === 'string' && part.text.trim()) texts.push(part.text.trim());
+    }
+    const combined = texts.join(' ').trim();
+    if (combined) return combined;
+  }
+  return '';
+}
+
+function extractThoughtSignaturesFromGeminiRequest(raw) {
+  const hits = [];
+  const top = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  const carrier =
+    top.request && typeof top.request === 'object' && !Array.isArray(top.request)
+      ? top
+      : top.data && typeof top.data === 'object' && !Array.isArray(top.data) && top.data.request && typeof top.data.request === 'object'
+        ? top.data
+        : top;
+  const requestNode =
+    carrier.request && typeof carrier.request === 'object' && !Array.isArray(carrier.request) ? carrier.request : {};
+  const contents = Array.isArray(requestNode.contents) ? requestNode.contents : [];
+  for (const content of contents) {
+    if (!content || typeof content !== 'object') continue;
+    const parts = Array.isArray(content.parts) ? content.parts : [];
+    for (const part of parts) {
+      if (!part || typeof part !== 'object') continue;
+      if (!part.functionCall || typeof part.functionCall !== 'object') continue;
+      if (typeof part.thoughtSignature === 'string' && part.thoughtSignature.trim()) {
+        hits.push(part.thoughtSignature.trim());
+      } else {
+        hits.push('');
+      }
+    }
+  }
+  return hits;
+}
+
+function safeWriteJson(filePath, value) {
+  try {
+    fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+  } catch {
+    // ignore
   }
 }
 
@@ -140,6 +210,7 @@ function extractTextFromResponses(body) {
 
 async function startMockUpstream() {
   const requests = [];
+  let lastIssuedSignature = null;
   const server = http.createServer(async (req, res) => {
     try {
       if (req.method !== 'POST') {
@@ -204,11 +275,45 @@ async function startMockUpstream() {
       // Cloud Code Assist stream endpoint
       const isSse = url.pathname.endsWith(':streamGenerateContent') || url.searchParams.get('alt') === 'sse';
       if (isSse) {
-        res.writeHead(200, {
-          'Content-Type': 'text/event-stream',
-          'Cache-Control': 'no-cache',
-          'Connection': 'keep-alive'
-        });
+      const firstUserText = getFirstUserTextFromGeminiRequest(parsed);
+      const wantsSignaturePriming = firstUserText.includes('bb-prime-thought-signature');
+
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive'
+      });
+
+        if (wantsSignaturePriming) {
+          lastIssuedSignature = MOCK_THOUGHT_SIGNATURE;
+          const response = {
+            response: {
+              candidates: [
+                {
+                  index: 0,
+                  finishReason: 'TOOL_CALLS',
+                  content: {
+                    role: 'model',
+                    parts: [
+                      {
+                        thoughtSignature: MOCK_THOUGHT_SIGNATURE,
+                        functionCall: {
+                          name: 'exec_command',
+                          args: { command: 'echo prime' }
+                        }
+                      }
+                    ]
+                  }
+                }
+              ],
+              modelVersion: 'mock'
+            }
+          };
+          res.write(`data: ${JSON.stringify(response)}\n\n`);
+          res.end();
+          return;
+        }
+
         const response = {
           response: {
             candidates: [
@@ -217,9 +322,7 @@ async function startMockUpstream() {
                 finishReason: 'STOP',
                 content: {
                   role: 'model',
-                  parts: [
-                    { text: 'ok-from-mock' }
-                  ]
+                  parts: [{ text: 'ok-from-mock' }]
                 }
               }
             ],
@@ -233,10 +336,43 @@ async function startMockUpstream() {
 
       // Non-stream fallback
       res.writeHead(200, { 'Content-Type': 'application/json' });
+      const firstUserText = getFirstUserTextFromGeminiRequest(parsed);
+      if (firstUserText.includes('bb-prime-thought-signature')) {
+        lastIssuedSignature = MOCK_THOUGHT_SIGNATURE;
+        res.end(
+          JSON.stringify({
+            candidates: [
+              {
+                content: {
+                  role: 'model',
+                  parts: [
+                    {
+                      thoughtSignature: MOCK_THOUGHT_SIGNATURE,
+                      functionCall: {
+                        name: 'exec_command',
+                        args: { command: 'echo prime' }
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          })
+        );
+        return;
+      }
       res.end(JSON.stringify({ candidates: [{ content: { role: 'model', parts: [{ text: 'ok-from-mock' }] } }] }));
     } catch (e) {
-      res.writeHead(500, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: { message: e instanceof Error ? e.message : String(e) } }));
+      if (!res.headersSent) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: { message: e instanceof Error ? e.message : String(e) } }));
+        return;
+      }
+      try {
+        res.end();
+      } catch {
+        // ignore
+      }
     }
   });
 
@@ -248,6 +384,7 @@ async function startMockUpstream() {
   return {
     baseUrl,
     requests,
+    getLastIssuedSignature: () => lastIssuedSignature,
     close: async () => new Promise((resolve) => server.close(() => resolve()))
   };
 }
@@ -265,7 +402,7 @@ function writeTempConfig({ dir, serverPort, upstreamBaseUrl, tokenFile }) {
           enabled: true,
           type: 'gemini-cli-http-provider',
           providerType: 'gemini',
-          compatibilityProfile: 'chat:gemini',
+          compatibilityProfile: 'chat:gemini-cli',
           baseURL: upstreamBaseUrl,
           auth: {
             type: 'antigravity-oauth',
@@ -337,6 +474,10 @@ async function runOnceBlackbox(opts) {
     // Disable ManagerDaemon (quota/health background tasks) so the parity run is isolated and deterministic.
     ROUTECODEX_USE_MOCK: '1',
     RCC_USE_MOCK: '1',
+    // Disable token daemon + OAuth auto-open to keep the blackbox test non-interactive.
+    ROUTECODEX_DISABLE_TOKEN_DAEMON: '1',
+    RCC_DISABLE_TOKEN_DAEMON: '1',
+    ROUTECODEX_OAUTH_AUTO_OPEN: '0',
     ...(antigravityApiBase
       ? {
           ROUTECODEX_ANTIGRAVITY_API_BASE: antigravityApiBase,
@@ -360,6 +501,8 @@ async function runOnceBlackbox(opts) {
 
   try {
     await withTimeout(waitForHealth(baseUrl), 25000, `${label}:waitForHealth`);
+
+    // 1) /v1/responses smoke (existing parity baseline)
     const res = await withTimeout(
       fetch(`${baseUrl}/v1/responses`, {
         method: 'POST',
@@ -408,6 +551,110 @@ async function runOnceBlackbox(opts) {
       throw new Error(`${label} /v1/responses HTTP ${res.status}: ${text.slice(0, 300)}`);
     }
     const json = text.trim() ? JSON.parse(text) : {};
+
+    // 2) Prime Antigravity thoughtSignature cache (mock returns a functionCall part with thoughtSignature)
+    const primeRes = await withTimeout(
+      fetch(`${baseUrl}/v1/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'x-api-key': 'verify-key',
+          'x-route-hint': 'thinking',
+          'x-session-id': 'bb-antigravity-session'
+        },
+        body: JSON.stringify({
+          model: 'gpt-5.2-codex',
+          stream: false,
+          tools: [
+            {
+              type: 'function',
+              function: {
+                name: 'exec_command',
+                description: 'Run a shell command',
+                parameters: {
+                  type: 'object',
+                  properties: {
+                    cmd: { type: 'string' }
+                  },
+                  required: ['cmd']
+                }
+              }
+            }
+          ],
+          messages: [
+            { role: 'user', content: 'bb-prime-thought-signature: please call exec_command' }
+          ]
+        })
+      }),
+      25000,
+      `${label}:/v1/chat/completions:prime`
+    );
+    const primeText = await primeRes.text();
+    if (!primeRes.ok) {
+      throw new Error(`${label} prime /v1/chat/completions HTTP ${primeRes.status}: ${primeText.slice(0, 300)}`);
+    }
+
+    // 3) Followup: include assistant tool call history (no thoughtSignature in OpenAI format).
+    // llmswitch-core compat must inject the cached signature into Gemini functionCall parts.
+    const followRes = await withTimeout(
+      fetch(`${baseUrl}/v1/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'x-api-key': 'verify-key',
+          'x-route-hint': 'thinking',
+          'x-session-id': 'bb-antigravity-session'
+        },
+        body: JSON.stringify({
+          model: 'gpt-5.2-codex',
+          stream: false,
+          tools: [
+            {
+              type: 'function',
+              function: {
+                name: 'exec_command',
+                description: 'Run a shell command',
+                parameters: {
+                  type: 'object',
+                  properties: {
+                    cmd: { type: 'string' }
+                  },
+                  required: ['cmd']
+                }
+              }
+            }
+          ],
+          messages: [
+            { role: 'user', content: 'bb-prime-thought-signature: please call exec_command' },
+            {
+              role: 'assistant',
+              content: null,
+              tool_calls: [
+                {
+                  id: 'call_bb_1',
+                  type: 'function',
+                  function: {
+                    name: 'exec_command',
+                    arguments: JSON.stringify({ cmd: 'echo followup' })
+                  }
+                }
+              ]
+            },
+            { role: 'tool', tool_call_id: 'call_bb_1', content: 'ok' },
+            { role: 'user', content: 'bb-verify-injection: continue' }
+          ]
+        })
+      }),
+      25000,
+      `${label}:/v1/chat/completions:followup`
+    );
+    const followText = await followRes.text();
+    if (!followRes.ok) {
+      throw new Error(`${label} followup /v1/chat/completions HTTP ${followRes.status}: ${followText.slice(0, 300)}`);
+    }
+
     return { label, response: json };
   } finally {
     shutdown();
@@ -422,7 +669,20 @@ async function runOnceBlackbox(opts) {
 async function main() {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rc-blackbox-antigravity-'));
   try {
-    const tokenFile = path.join(tempDir, 'antigravity-token.json');
+    const rccLlmsHasAntigravitySignatureCache = (() => {
+      try {
+        const candidate = path.join(
+          process.cwd(),
+          'node_modules/@jsonstudio/rcc/node_modules/@jsonstudio/llms/dist/conversion/compat/antigravity-session-signature.js'
+        );
+        return fs.existsSync(candidate);
+      } catch {
+        return false;
+      }
+    })();
+
+    // Name includes "-static" so OAuth lifecycle (if invoked) will never try refresh/reauth in this blackbox test.
+    const tokenFile = path.join(tempDir, 'antigravity-oauth-1-static.json');
     fs.writeFileSync(
       tokenFile,
       JSON.stringify({ access_token: 'test_access_token', token_type: 'Bearer', project_id: 'test-project' }, null, 2)
@@ -432,6 +692,7 @@ async function main() {
     try {
       // Run routecodex (dev) then rcc (npm) sequentially against the SAME upstream.
       const cfg1 = writeTempConfig({ dir: tempDir, serverPort: 5591, upstreamBaseUrl: upstream.baseUrl, tokenFile });
+      const beforeA = upstream.requests.length;
       const routecodex = await runOnceBlackbox({
         label: 'routecodex',
         entryScript: 'dist/index.js',
@@ -440,8 +701,33 @@ async function main() {
         homeDir: tempDir,
         antigravityApiBase: upstream.baseUrl
       });
+      const afterA = upstream.requests.length;
+      const sliceA = upstream.requests.slice(beforeA, afterA);
+      const genA = sliceA.filter((r) => {
+        const u = String(r.url || '');
+        return u.includes(':streamGenerateContent') || u.includes(':generateContent');
+      });
+      assert.ok(genA.length >= 3, `routecodex: expected >=3 content-generation calls, got ${genA.length}`);
+      const followUpReqA = genA[genA.length - 1]?.body;
+      assert.ok(followUpReqA, 'routecodex: missing followup upstream request body');
+      const sigsA = extractThoughtSignaturesFromGeminiRequest(followUpReqA).filter((s) => s);
+      const routecodexInjected = sigsA.includes(MOCK_THOUGHT_SIGNATURE);
+      if (!routecodexInjected) {
+        safeWriteJson(path.join(tempDir, 'upstream.routecodex.followup.json'), followUpReqA);
+        safeWriteJson(path.join(tempDir, 'upstream.routecodex.prime.json'), genA[1]?.body || null);
+        safeWriteJson(path.join(tempDir, 'debug.routecodex.signature.json'), {
+          expected: MOCK_THOUGHT_SIGNATURE,
+          got: sigsA,
+          firstUserTextFollowup: getFirstUserTextFromGeminiRequest(followUpReqA),
+          firstUserTextPrime: getFirstUserTextFromGeminiRequest(genA[1]?.body || null)
+        });
+      }
+
+      // Reset upstream capture for the next run (keep the same server instance).
+      upstream.requests.splice(0, upstream.requests.length);
 
       const cfg2 = writeTempConfig({ dir: tempDir, serverPort: 5592, upstreamBaseUrl: upstream.baseUrl, tokenFile });
+      const beforeB = upstream.requests.length;
       const rcc = await runOnceBlackbox({
         label: 'rcc',
         entryScript: 'node_modules/@jsonstudio/rcc/dist/index.js',
@@ -450,10 +736,49 @@ async function main() {
         homeDir: tempDir,
         antigravityApiBase: upstream.baseUrl
       });
+      const afterB = upstream.requests.length;
+      const sliceB = upstream.requests.slice(beforeB, afterB);
+      const genB = sliceB.filter((r) => {
+        const u = String(r.url || '');
+        return u.includes(':streamGenerateContent') || u.includes(':generateContent');
+      });
+      assert.ok(genB.length >= 3, `rcc: expected >=3 content-generation calls, got ${genB.length}`);
+      const followUpReqB = genB[genB.length - 1]?.body;
+      assert.ok(followUpReqB, 'rcc: missing followup upstream request body');
+      const sigsB = extractThoughtSignaturesFromGeminiRequest(followUpReqB).filter((s) => s);
+      const rccInjected = sigsB.includes(MOCK_THOUGHT_SIGNATURE);
+      if (!rccInjected) {
+        safeWriteJson(path.join(tempDir, 'upstream.rcc.followup.json'), followUpReqB);
+        safeWriteJson(path.join(tempDir, 'upstream.rcc.prime.json'), genB[1]?.body || null);
+        safeWriteJson(path.join(tempDir, 'debug.rcc.signature.json'), {
+          expected: MOCK_THOUGHT_SIGNATURE,
+          got: sigsB,
+          firstUserTextFollowup: getFirstUserTextFromGeminiRequest(followUpReqB),
+          firstUserTextPrime: getFirstUserTextFromGeminiRequest(genB[1]?.body || null)
+        });
+      }
+
+      assert.ok(
+        routecodexInjected,
+        `routecodex: thoughtSignature injection missing (captures in ${tempDir})`
+      );
+      if (rccLlmsHasAntigravitySignatureCache) {
+        assert.ok(
+          rccInjected,
+          `rcc: thoughtSignature injection missing (captures in ${tempDir})`
+        );
+      } else if (!rccInjected) {
+        console.warn(
+          '⚠️ rcc bundled @jsonstudio/llms does not include antigravity signature cache; skipping rcc injection assertion'
+        );
+      }
 
       // Capture the two upstream requests (one per run).
-      assert.equal(upstream.requests.length, 2, `expected 2 upstream requests, got ${upstream.requests.length}`);
-      const [reqA, reqB] = upstream.requests.map((r) => r.body);
+      // NOTE: we reset upstream.requests between runs, so re-run the /v1/responses request captures from
+      // each run using the first generation call in the respective slices.
+      const reqA = genA[0]?.body;
+      const reqB = genB[0]?.body;
+      assert.ok(reqA && reqB, 'expected upstream requests for /v1/responses baseline');
 
       const canonUpA = canonicalizeUpstream(reqA);
       const canonUpB = canonicalizeUpstream(reqB);

@@ -196,7 +196,10 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
         metaCarrier.metadata = { ...(metaCarrier.metadata || {}), antigravitySessionId: derivedSessionId.trim() };
         const runtimeMeta = this.getCurrentRuntimeMetadata();
         if (runtimeMeta) {
-          runtimeMeta.metadata = { ...(runtimeMeta.metadata || {}), antigravitySessionId: derivedSessionId.trim() };
+          if (!runtimeMeta.metadata || typeof runtimeMeta.metadata !== 'object') {
+            runtimeMeta.metadata = {};
+          }
+          (runtimeMeta.metadata as Record<string, unknown>).antigravitySessionId = derivedSessionId.trim();
         }
       }
     }
@@ -318,6 +321,33 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
           ? ((payloadObject as { usageMetadata?: UnknownObject }).usageMetadata as UnknownObject)
           : undefined;
 
+      if (this.isAntigravityRuntime()) {
+        const sessionId =
+          context && typeof (context as any)?.runtimeMetadata?.metadata?.antigravitySessionId === 'string'
+            ? String((context as any).runtimeMetadata.metadata.antigravitySessionId)
+            : context && context.metadata && typeof (context.metadata as any)?.antigravitySessionId === 'string'
+              ? String((context.metadata as any).antigravitySessionId)
+              : undefined;
+        if (sessionId && payloadObject) {
+          const candidatesRaw = (payloadObject as { candidates?: unknown }).candidates;
+          const candidates = Array.isArray(candidatesRaw) ? (candidatesRaw as Record<string, unknown>[]) : [];
+          for (const cand of candidates) {
+            const content =
+              cand && typeof cand.content === 'object' && cand.content !== null
+                ? (cand.content as Record<string, unknown>)
+                : undefined;
+            const partsRaw = content?.parts;
+            const parts = Array.isArray(partsRaw) ? (partsRaw as Record<string, unknown>[]) : [];
+            for (const part of parts) {
+              const sig = typeof (part as any)?.thoughtSignature === 'string' ? String((part as any).thoughtSignature) : '';
+              if (sig) {
+                cacheAntigravitySessionSignature(sessionId, sig, 1);
+              }
+            }
+          }
+        }
+      }
+
       return {
         data: normalizedPayload,
         status: typeof record.status === 'number' ? record.status : undefined,
@@ -349,9 +379,11 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
     context: ProviderContext
   ): Promise<UnknownObject> {
     const sessionId =
-      context && context.metadata && typeof context.metadata.antigravitySessionId === 'string'
-        ? String(context.metadata.antigravitySessionId)
-        : undefined;
+      context && typeof (context as any)?.runtimeMetadata?.metadata?.antigravitySessionId === 'string'
+        ? String((context as any).runtimeMetadata.metadata.antigravitySessionId)
+        : context && context.metadata && typeof context.metadata.antigravitySessionId === 'string'
+          ? String(context.metadata.antigravitySessionId)
+          : undefined;
     const normalizer = new GeminiSseNormalizer({ sessionId, enableAntigravitySignatureCache: this.isAntigravityRuntime() });
     stream.pipe(normalizer);
     return super.wrapUpstreamSseResponse(normalizer, context);

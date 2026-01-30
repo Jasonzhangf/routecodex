@@ -39,11 +39,10 @@ describe('OpenAI Chat semantics stage 2', () => {
     });
     expect(semantics.tools?.explicitEmpty).toBe(true);
 
-    expect(chat.metadata.systemInstructions).toEqual(['You are tester']);
-    expect(chat.metadata.extraFields).toEqual({
-      custom_field: { foo: 'bar' }
-    });
-    expect(chat.metadata.toolsFieldPresent).toBe(true);
+    // Metadata mirrors were removed; rely on semantics instead.
+    expect((chat.metadata as Record<string, unknown> | undefined)?.systemInstructions).toBeUndefined();
+    expect((chat.metadata as Record<string, unknown> | undefined)?.extraFields).toBeUndefined();
+    expect((chat.metadata as Record<string, unknown> | undefined)?.toolsFieldPresent).toBeUndefined();
   });
 
   it('replays semantics when metadata mirror is absent', async () => {

@@ -76,10 +76,8 @@ describe('ResponsesSemanticMapper submit tool outputs', () => {
     const semantics = chat.semantics?.responses as Record<string, unknown> | undefined;
     expect(semantics).toBeDefined();
     expect(semantics?.context).toBeDefined();
-    expect(chat.metadata.responsesContext).toBeDefined();
-    if (ctx.responsesResume) {
-      expect(semantics?.resume).toBeDefined();
-    }
+    expect((chat.metadata as Record<string, unknown> | undefined)?.responsesContext).toBeUndefined();
+    expect(semantics?.resume).toBeUndefined();
   });
 
   it('builds submit payload from chat toolOutputs', async () => {

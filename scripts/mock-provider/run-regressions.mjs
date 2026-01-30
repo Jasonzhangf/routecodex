@@ -190,8 +190,13 @@ async function writeTempConfig(sample, port) {
 }
 
 async function createServer(configPath, port, snapshotRoot) {
+  const isolatedHome = path.dirname(configPath);
   const env = {
     ...process.env,
+    // Important: isolate ~/.routecodex reads (oauth token refresh, provider v2 autoload, etc.)
+    // These regression replays must be hermetic and never depend on the developer's real HOME.
+    HOME: isolatedHome,
+    USERPROFILE: isolatedHome,
     ROUTECODEX_USE_MOCK: '1',
     ROUTECODEX_MOCK_CONFIG_PATH: configPath,
     ROUTECODEX_MOCK_SAMPLES_DIR: MOCK_SAMPLES_DIR,
@@ -389,6 +394,9 @@ async function runIflowUserAgentRegression() {
     cwd: PROJECT_ROOT,
     env: {
       ...process.env,
+      // Isolate ~/.routecodex; otherwise local oauth tokens can trigger refresh attempts and stall startup.
+      HOME: dir,
+      USERPROFILE: dir,
       ROUTECODEX_PORT: String(port),
       ROUTECODEX_CONFIG_PATH: configPath,
       RCC_PORT: String(port),

@@ -97,6 +97,29 @@ export function resolveAntigravityApiBaseCandidates(explicit?: string): string[]
   );
   const explicitBase = normalizeApiBase(explicit || '');
 
+  const isLocalHttp = (base: string): boolean => {
+    const normalized = String(base || '').trim().toLowerCase();
+    if (!normalized) return false;
+    if (!normalized.startsWith('http://')) return false;
+    return (
+      normalized.includes('127.0.0.1') ||
+      normalized.includes('localhost') ||
+      normalized.includes('0.0.0.0')
+    );
+  };
+
+  // Test/dev safety: when operator pins Antigravity base to a local HTTP endpoint,
+  // never fall back to public Cloud Code Assist hosts (avoids accidental real calls).
+  if (isLocalHttp(envBase) || isLocalHttp(explicitBase)) {
+    const orderedLocal = [
+      ...(envBase ? [envBase] : []),
+      ...(explicitBase ? [explicitBase] : [])
+    ]
+      .map((base) => normalizeApiBase(base))
+      .filter((base) => base.length);
+    return Array.from(new Set(orderedLocal));
+  }
+
   // Default order mirrors Antigravity-Manager: Sandbox → Daily → (Autopush) → Prod.
   // - We do NOT promote the caller's explicit base to the front because our config.v1/v2
   //   often pins `baseURL` to prod; promoting it would defeat the intent of this function.

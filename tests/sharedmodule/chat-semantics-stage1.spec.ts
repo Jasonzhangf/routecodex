@@ -148,14 +148,16 @@ describe('Chat semantics stage 1 bridge', () => {
       }
     };
     const result = await runProcessWithRequest(standardized, {
-      webSearch: {
-        injectPolicy: 'selective',
-        engines: [
-          {
-            id: 'engine-1',
-            providerKey: 'tabglm.glm-4.7'
-          }
-        ]
+      __rt: {
+        webSearch: {
+          injectPolicy: 'selective',
+          engines: [
+            {
+              id: 'engine-1',
+              providerKey: 'tabglm.glm-4.7'
+            }
+          ]
+        }
       }
     });
     const hasWebSearchTool = (result.processedRequest?.tools ?? []).some(
@@ -179,14 +181,16 @@ describe('Chat semantics stage 1 bridge', () => {
       }
     };
     const result = await runProcessWithRequest(standardized, {
-      webSearch: {
-        injectPolicy: 'always',
-        engines: [
-          {
-            id: 'engine-1',
-            providerKey: 'tabglm.glm-4.7'
-          }
-        ]
+      __rt: {
+        webSearch: {
+          injectPolicy: 'always',
+          engines: [
+            {
+              id: 'engine-1',
+              providerKey: 'tabglm.glm-4.7'
+            }
+          ]
+        }
       }
     });
     const hasWebSearchTool = (result.processedRequest?.tools ?? []).some(
