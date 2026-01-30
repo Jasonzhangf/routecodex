@@ -25,6 +25,7 @@ import type {
 } from '../../../modules/pipeline/utils/debug-logger.js';
 import { attachProviderRuntimeMetadata } from '../../../providers/core/runtime/provider-runtime-metadata.js';
 import { preloadAntigravityAliasUserAgents, primeAntigravityUserAgentVersion } from '../../../providers/auth/antigravity-user-agent.js';
+import { getAntigravityWarmupBlacklistDurationMs, isAntigravityWarmupEnabled, warmupCheckAntigravityAlias } from '../../../providers/auth/antigravity-warmup.js';
 import { AuthFileResolver } from '../../../config/auth-file-resolver.js';
 import type { ProviderRuntimeProfile } from '../../../providers/core/api/provider-types.js';
 import type { ProviderProfile, ProviderProfileCollection } from '../../../providers/profile/provider-profile.js';
@@ -1000,8 +1001,57 @@ export class RouteCodexHttpServer {
     }
 
     const quotaModule = this.managerDaemon?.getModule('provider-quota') as
-      | { registerProviderStaticConfig?: (providerKey: string, config: { authType?: string | null; priorityTier?: number | null }) => void }
+      | {
+          registerProviderStaticConfig?: (providerKey: string, config: { authType?: string | null; priorityTier?: number | null }) => void;
+          disableProvider?: (options: { providerKey: string; mode: 'cooldown' | 'blacklist'; durationMs: number }) => Promise<unknown>;
+        }
       | undefined;
+
+    // Antigravity warmup (strict): if UA fingerprint suffix doesn't match local OAuth fingerprint, blacklist the alias.
+    if (isAntigravityWarmupEnabled() && quotaModule && typeof quotaModule.disableProvider === 'function') {
+      try {
+        const providerKeysByAlias = new Map<string, string[]>();
+        for (const providerKey of Object.keys(runtimeMap)) {
+          const key = typeof providerKey === 'string' ? providerKey.trim() : '';
+          if (!key.toLowerCase().startsWith('antigravity.')) {
+            continue;
+          }
+          const parts = key.split('.');
+          if (parts.length < 3) {
+            continue;
+          }
+          const alias = parts[1]?.trim();
+          if (!alias) {
+            continue;
+          }
+          const list = providerKeysByAlias.get(alias) || [];
+          list.push(key);
+          providerKeysByAlias.set(alias, list);
+        }
+
+        if (providerKeysByAlias.size > 0) {
+          const durationMs = getAntigravityWarmupBlacklistDurationMs();
+          for (const [alias, providerKeys] of providerKeysByAlias.entries()) {
+            const result = await warmupCheckAntigravityAlias(alias);
+            if (result.ok) {
+              continue;
+            }
+            const expected = result.expectedSuffix ? ` expected=${result.expectedSuffix}` : '';
+            const actual = result.actualSuffix ? ` actual=${result.actualSuffix}` : '';
+            console.error(
+              `[antigravity:warmup] blacklist alias=${alias} reason=${result.reason}${expected}${actual} providerKeys=${providerKeys.length}`
+            );
+            await Promise.allSettled(
+              providerKeys.map((providerKey) =>
+                quotaModule.disableProvider!({ providerKey, mode: 'blacklist', durationMs })
+              )
+            );
+          }
+        }
+      } catch {
+        // warmup is best-effort; never block server startup
+      }
+    }
 
     // Multiple providerKeys may share the same runtimeKey (single provider handle with multiple models).
     // Quota is tracked by providerKey, so we need a stable way to derive authType for every key,
