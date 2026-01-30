@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import fs from 'fs';
 import path from 'path';
 import { homedir } from 'os';
-import fetch from 'node-fetch';
+const fetch = globalThis.fetch;
 
 async function sleep(ms: number): Promise<void> { return new Promise(r => setTimeout(r, ms)); }
 

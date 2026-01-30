@@ -101,7 +101,7 @@ describe('cli start command', () => {
     ).rejects.toThrow('exit:1');
   });
 
-  it('auto-enables --claude when tabglm provider exists in config', async () => {
+  it('does not auto-enable --claude based on providers in config', async () => {
     const program = new Command();
     const captured: { env?: Record<string, string> } = {};
     createStartCommand(program, {
@@ -147,8 +147,8 @@ describe('cli start command', () => {
     });
 
     await program.parseAsync(['node', 'routecodex', 'start'], { from: 'node' });
-    expect(captured.env?.ROUTECODEX_SYSTEM_PROMPT_ENABLE).toBe('1');
-    expect(captured.env?.ROUTECODEX_SYSTEM_PROMPT_SOURCE).toBe('claude');
+    expect(captured.env?.ROUTECODEX_SYSTEM_PROMPT_ENABLE).toBeUndefined();
+    expect(captured.env?.ROUTECODEX_SYSTEM_PROMPT_SOURCE).toBeUndefined();
   });
 
   it('exits when config is missing', async () => {

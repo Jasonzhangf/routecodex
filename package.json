@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.89.1553",
+  "version": "0.89.1554",
   "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support",
   "type": "module",
   "main": "dist/index.js",
@@ -164,7 +164,6 @@
     "express": "^4.18.2",
     "helmet": "^7.0.0",
     "lmstudio": "^0.0.32",
-    "node-fetch": "^3.3.2",
     "open": "^9.1.0",
     "openai": "^5.23.0",
     "ora": "^9.0.0",

@@ -73,7 +73,7 @@ describe('cli restart command', () => {
     ).rejects.toThrow('exit:1');
   });
 
-  it('auto-enables --claude when tabglm provider exists in config', async () => {
+  it('does not auto-enable --claude based on providers in config', async () => {
     const program = new Command();
     let capturedEnv: Record<string, string> | undefined;
     createRestartCommand(program, {
@@ -112,7 +112,7 @@ describe('cli restart command', () => {
     });
 
     await program.parseAsync(['node', 'routecodex', 'restart'], { from: 'node' });
-    expect(capturedEnv?.ROUTECODEX_SYSTEM_PROMPT_ENABLE).toBe('1');
-    expect(capturedEnv?.ROUTECODEX_SYSTEM_PROMPT_SOURCE).toBe('claude');
+    expect(capturedEnv?.ROUTECODEX_SYSTEM_PROMPT_ENABLE).toBeUndefined();
+    expect(capturedEnv?.ROUTECODEX_SYSTEM_PROMPT_SOURCE).toBeUndefined();
   });
 });

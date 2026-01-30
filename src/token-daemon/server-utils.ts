@@ -1,6 +1,6 @@
 import path from 'path';
 import { homedir } from 'os';
-import fetch from 'node-fetch';
+const fetch = globalThis.fetch;
 import { loadRouteCodexConfig } from '../config/routecodex-config-loader.js';
 import type {
   ProviderProfileCollection,

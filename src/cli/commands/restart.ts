@@ -21,44 +21,6 @@ type LoggerLike = {
   error: (msg: string) => void;
 };
 
-function shouldAutoEnableClaudeSystemPrompt(config: unknown): boolean {
-  if (!config || typeof config !== 'object') {
-    return false;
-  }
-  const carrier = config as Record<string, unknown>;
-  const vr = carrier.virtualrouter;
-  if (!vr || typeof vr !== 'object') {
-    return false;
-  }
-  const providers = (vr as Record<string, unknown>).providers;
-  if (!providers || typeof providers !== 'object') {
-    return false;
-  }
-
-  const byKey = (providers as Record<string, unknown>).tabglm;
-  if (byKey && typeof byKey === 'object') {
-    const enabled = (byKey as Record<string, unknown>).enabled;
-    if (enabled === false) {
-      return false;
-    }
-    return true;
-  }
-
-  for (const value of Object.values(providers as Record<string, unknown>)) {
-    if (!value || typeof value !== 'object') {
-      continue;
-    }
-    const record = value as Record<string, unknown>;
-    const id = typeof record.id === 'string' ? record.id.trim().toLowerCase() : '';
-    const enabled = record.enabled;
-    if (id === 'tabglm' && enabled !== false) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
 export type RestartCommandOptions = {
   config?: string;
   logLevel?: string;
@@ -185,31 +147,11 @@ export function createRestartCommand(program: Command, ctx: RestartCommandContex
           spinner.fail('Flags --codex and --claude are mutually exclusive');
           ctx.exit(1);
         }
-        const explicitPromptFlag = options.codex ? 'codex' : (options.claude ? 'claude' : null);
-        let restartPrompt = explicitPromptFlag;
-        if (!restartPrompt) {
-          // Auto-enable Claude prompt when tabglm is present in config (tabglm validates Claude Code prompt format).
-          const fsImpl = ctx.fsImpl ?? fs;
-          const pathImpl = ctx.pathImpl ?? path;
-          const home = ctx.getHomeDir ?? (() => homedir());
-          const configPath = options.config || pathImpl.join(home(), '.routecodex', 'config.json');
-          if (fsImpl.existsSync(configPath)) {
-            try {
-              const configContent = fsImpl.readFileSync(configPath, 'utf8');
-              const config = JSON.parse(configContent);
-              if (shouldAutoEnableClaudeSystemPrompt(config)) {
-                restartPrompt = 'claude';
-                spinner.info('Auto-enabled Claude system prompt (--claude) due to tabglm provider');
-              }
-            } catch {
-              // ignore
-            }
-          }
-        }
-        if (restartPrompt) {
+        const promptFlag = options.codex ? 'codex' : (options.claude ? 'claude' : null);
+        if (promptFlag) {
           // Preserve existing behavior: mutate env for child.
           ctx.env = ctx.env || process.env;
-          ctx.env.ROUTECODEX_SYSTEM_PROMPT_SOURCE = restartPrompt;
+          ctx.env.ROUTECODEX_SYSTEM_PROMPT_SOURCE = promptFlag;
           ctx.env.ROUTECODEX_SYSTEM_PROMPT_ENABLE = '1';
         }
 

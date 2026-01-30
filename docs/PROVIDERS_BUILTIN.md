@@ -54,11 +54,12 @@
 - 关键点：同 TAB；模型列表通常更全
 - 你需要：填写 `auth.apiKey`
 
-### TABGLM（Responses）
+### TABGLM（Anthropic Messages wire）
 
 - 样本：`configsamples/provider/tabglm/config.v1.json`
-- 关键点：本质仍是 Responses；只是 providerId 不同（用于区分路由池/配额/快照）
+- 关键点：`type: "anthropic"`（走 `/v1/messages` 协议）；`compatibilityProfile: "chat:claude-code"`（对齐 Claude Code 官方 system prompt 校验）
 - 你需要：填写 `auth.apiKey`
+- 说明：详见 `docs/providers/tabglm-claude-code-compat.md`
 
 ### GLM（OpenAI-compatible）
 

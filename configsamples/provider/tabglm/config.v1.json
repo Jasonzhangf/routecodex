@@ -9,24 +9,19 @@
       "tabglm": {
         "id": "tabglm",
         "enabled": true,
-        "type": "responses",
-        "baseURL": "https://api.tabcode.cc/openai",
+        "type": "anthropic",
+        "baseURL": "https://api.tabcode.cc/claude/glm",
+        "process": "chat",
         "auth": {
           "type": "apikey",
           "apiKey": "YOUR_API_KEY_HERE"
         },
         "models": {
-          "gpt-5.2-codex": {}
-        },
-        "responses": {
-          "process": "chat",
-          "streaming": "always"
-        },
-        "config": {
-          "responses": {
-            "streaming": "always"
+          "glm-4.7": {
+            "supportsStreaming": true
           }
-        }
+        },
+        "compatibilityProfile": "chat:claude-code"
       }
     },
     "routing": {
@@ -34,14 +29,14 @@
         {
           "id": "default-primary",
           "mode": "priority",
-          "targets": ["tabglm.gpt-5.2-codex"]
+          "targets": ["tabglm.glm-4.7"]
         }
       ],
       "thinking": [
         {
           "id": "thinking-primary",
           "mode": "priority",
-          "targets": ["tabglm.gpt-5.2-codex"]
+          "targets": ["tabglm.glm-4.7"]
         }
       ]
     }

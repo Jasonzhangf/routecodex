@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import express from 'express';
 import cors from 'cors';
-import fetch from 'node-fetch';
+const fetch = globalThis.fetch;
 import { randomUUID } from 'crypto';
 
 const PORT = Number(process.env.COMPARE_PORT || process.argv[2]) || 5555;

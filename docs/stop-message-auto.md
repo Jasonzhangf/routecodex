@@ -44,6 +44,7 @@
   - 删除上述所有字段。
 - **会话标识要求**  
   - sticky state 依赖 `sessionId` / `conversationId`。`/v1/chat` 与 `/v1/responses` 默认通过请求头即可提供；`/v1/messages` 需要确保请求体中的 `metadata.user_id` 含有 `session_<uuid>` 片段（Claude/Antigravity 默认行为）。llmswitch-core 会在缺少 header/metadata.sessionId 时回退解析 `metadata.__raw_request_body.metadata.user_id`，自动恢复 sessionId 并写入 sticky 文件。若缺失上述字段，stopMessage 无法跨请求记忆次数。
+  - compaction 保护：当捕获到的上一跳请求被判定为“compaction 请求”时，stopMessage 不会触发（避免 compaction 流程被 stopMessage 反复续写干扰）。判定逻辑只对 **payload 起始处**的 sentinel 生效；在对话历史中粘贴包含 “Handoff Summary …” 等字样的文本，不应再误伤 stopMessage。
 
 ## 2. 路由层解析与指令清理
 
