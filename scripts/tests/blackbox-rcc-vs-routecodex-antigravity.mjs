@@ -216,10 +216,10 @@ function assertAntigravityUaFresh(label, requests) {
   const uaString = typeof ua === 'string' ? ua : Array.isArray(ua) ? ua.join(' ') : '';
   assert.ok(uaString.toLowerCase().startsWith('antigravity/'), `${label}: upstream User-Agent must start with antigravity/ (got ${JSON.stringify(uaString)})`);
   assert.ok(!uaString.toLowerCase().includes('codex_cli_rs/'), `${label}: upstream User-Agent must not be codex_cli_rs (got ${JSON.stringify(uaString)})`);
-  assert.ok(!uaString.toLowerCase().includes('/amd64'), `${label}: UA arch must not be amd64 (Antigravity-Manager uses x86_64/aarch64). got ${JSON.stringify(uaString)}`);
+  // RouteCodex must keep a stable fingerprint suffix to avoid forcing re-verification.
   assert.ok(
-    /^antigravity\/\d+\.\d+\.\d+ (windows|linux|macos)\/(x86_64|aarch64)$/i.test(uaString.trim()),
-    `${label}: UA must match Antigravity-Manager shape (got ${JSON.stringify(uaString)})`
+    /^antigravity\/\d+\.\d+\.\d+ windows\/amd64$/i.test(uaString.trim()),
+    `${label}: UA must keep stable suffix windows/amd64 (got ${JSON.stringify(uaString)})`
   );
 }
 
@@ -496,6 +496,9 @@ async function runOnceBlackbox(opts) {
     // Keep blackbox deterministic/hermetic: do not hit Antigravity auto-updater from CI.
     ROUTECODEX_ANTIGRAVITY_UA_DISABLE_REMOTE: '1',
     RCC_ANTIGRAVITY_UA_DISABLE_REMOTE: '1',
+    // Also pin UA version so we don't rely on hardcoded fallbacks in tests.
+    ROUTECODEX_ANTIGRAVITY_UA_VERSION: '1.11.9',
+    RCC_ANTIGRAVITY_UA_VERSION: '1.11.9',
     ...(antigravityApiBase
       ? {
           ROUTECODEX_ANTIGRAVITY_API_BASE: antigravityApiBase,
