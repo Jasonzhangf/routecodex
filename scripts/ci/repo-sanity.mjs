@@ -117,6 +117,55 @@ function checkUntrackedNotIgnored() {
   }
 }
 
+function checkTrackedSecrets() {
+  // Lightweight secret scanner: prevent accidental commits of raw tokens/keys.
+  // Keep patterns tight to avoid false positives.
+  const patterns = [
+    // OpenAI-style API keys.
+    { label: 'openai_sk', mode: 'E', pattern: String.raw`sk-[A-Za-z0-9]{20,}` },
+    // Google API keys.
+    { label: 'google_api_key', mode: 'E', pattern: String.raw`AIza[0-9A-Za-z\-_]{20,}` },
+    // GitHub classic personal access tokens.
+    { label: 'github_pat', mode: 'E', pattern: String.raw`ghp_[A-Za-z0-9]{30,}` },
+    // PEM private keys (fixed strings to avoid regex engine differences).
+    { label: 'private_key', mode: 'F', pattern: '-----BEGIN PRIVATE KEY-----' },
+    { label: 'rsa_private_key', mode: 'F', pattern: '-----BEGIN RSA PRIVATE KEY-----' },
+    { label: 'ec_private_key', mode: 'F', pattern: '-----BEGIN EC PRIVATE KEY-----' }
+  ];
+
+  const hits = [];
+  for (const entry of patterns) {
+    const out = spawnSync(
+      'git',
+      entry.mode === 'F'
+        ? ['grep', '-nF', '-e', entry.pattern, '--', '.', ':(exclude)scripts/ci/repo-sanity.mjs']
+        : ['grep', '-nE', '-e', entry.pattern, '--', '.', ':(exclude)scripts/ci/repo-sanity.mjs'],
+      { encoding: 'utf8' }
+    );
+    // git grep exits with 1 when no matches; 0 when matches; >1 for errors.
+    if (out.status === 0) {
+      const lines = String(out.stdout || '')
+        .split('\n')
+        .map((s) => s.trim())
+        .filter(Boolean);
+      for (const line of lines) {
+        hits.push(`[${entry.label}] ${line}`);
+      }
+    } else if ((out.status ?? 0) > 1) {
+      throw new Error(`git grep failed for ${entry.label}: ${out.stderr || out.stdout}`);
+    }
+  }
+
+  if (hits.length) {
+    console.error('[repo-sanity] potential secrets detected in tracked files:');
+    for (const line of hits.slice(0, 200)) {
+      console.error(`- ${line}`);
+    }
+    if (hits.length > 200) console.error(`- ... (${hits.length - 200} more)`);
+    process.exit(2);
+  }
+}
+
 const files = runGit(['ls-files']).split('\n').map((s) => s.trim()).filter(Boolean);
 const forbidden = [];
 for (const p of files) {
@@ -134,5 +183,6 @@ if (forbidden.length) {
 
 checkRootLayout();
 checkUntrackedNotIgnored();
+checkTrackedSecrets();
 
 console.log('[repo-sanity] ok');
