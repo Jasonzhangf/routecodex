@@ -4,12 +4,47 @@ import { pathToFileURL, fileURLToPath } from 'node:url';
 
 export type LlmsImpl = 'ts' | 'engine';
 
+// WASM 100% CI 覆盖的模块列表（基于 llms-wasm compare-all-modules.mjs 40/40 验证通过）
+// 这些模块默认使用 WASM 版本，TS 版本作为 shadow 对比
+// 
+// 策略：
+// - 只有在 CI 中验证 100% 对齐的模块才列入此表
+// - 未列入的模块继续使用 TS 实现，保证稳定性
+// 注：当前 llms-wasm-sync 中已完成黑盒对齐的模块（100% passed）：
+// - conversion/shared/anthropic-utils
+// - conversion/codecs/anthropic-openai-codec
+// - conversion/sse/responses-json-to-sse-converter
+// - conversion/sse/chat-json-to-sse-converter
+// - conversion/sse/responses-sse-to-json-converter
+// - conversion/sse/chat-sse-to-json-converter
+// - conversion/hub/operation-table/semantic-mappers/anthropic-mapper
+// 
+// 这些模块对应 llmswitch-core 的路径（简化为前缀匹配）：
+const WASM_COVERED_PREFIXES = [
+  'conversion/shared/anthropic-utils',
+  'conversion/codecs/anthropic-openai-codec',
+  'conversion/sse/responses-json-to-sse-converter',
+  'conversion/sse/responses-sse-to-json-converter',
+  'conversion/sse/chat-json-to-sse-converter',
+  'conversion/sse/chat-sse-to-json-converter',
+  'conversion/hub/operation-table/semantic-mappers/anthropic-mapper',
+];
+
+export function isWasmCoveredModule(subpath: string): boolean {
+  const normalized = subpath.replace(/^\/+/, '').replace(/\.js$/i, '');
+  return WASM_COVERED_PREFIXES.some(
+    (prefix) => normalized === prefix || normalized.startsWith(`${prefix}/`)
+  );
+}
+
 const PACKAGE_CANDIDATES_BY_IMPL: Record<LlmsImpl, string[]> = {
   ts: [
     path.join('node_modules', '@jsonstudio', 'llms'),
     path.join('node_modules', 'rcc-llmswitch-core')
   ],
   engine: [
+    // WASM 版本优先查找 @jsonstudio/llms 自带的 WASM 构建
+    path.join('node_modules', '@jsonstudio', 'llms'),
     path.join('node_modules', '@jsonstudio', 'llms-engine')
   ]
 };
@@ -46,7 +81,7 @@ function resolveCorePackageDir(impl: LlmsImpl): string {
 }
 
 function resolveCoreDistPath(subpath: string, impl: LlmsImpl): string {
-  const clean = subpath.replace(/^\/*/, '').replace(/\.js$/i, '');
+  const clean = subpath.replace(/^\/*/,'').replace(/\.js$/i, '');
   const distDir = path.join(resolveCorePackageDir(impl), 'dist');
   const candidate = path.join(distDir, `${clean}.js`);
   if (!fs.existsSync(candidate)) {

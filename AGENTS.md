@@ -38,6 +38,10 @@ This document replaces the old “architecture novel” with a concise set of ru
 5. **Release vs. Dev 依赖** – Release 构建一律依赖 npm 上的 `@jsonstudio/llms`（通过 `npm install` 获取）；开发流程使用 `npm run llmswitch:link` 将 `sharedmodule/llmswitch-core` 符号链接到 `node_modules/@jsonstudio/llms`，两种路径互不覆盖。
 6. **CLI 包隔离** – Release 版只能用 `@jsonstudio/rcc`，并通过 `node scripts/pack-mode.mjs --name @jsonstudio/rcc --bin rcc` 生成 tarball 后 `npm publish jsonstudio-rcc-*.tgz`；`routecodex` 仅限本地/调试 CLI，严禁发布到 npm。
 7. **CLI 运行模式固定** – `routecodex` 始终对应 dev 模式（`npm run build:dev` + `npm run install:global`，使用本地 `sharedmodule/llmswitch-core` symlink）；`rcc` 始终对应 release 模式（`npm run install:release`，使用 npm 安装的 `@jsonstudio/llms`）。禁止用 release 构建启动 `routecodex`，两条 CLI 路径的构建与运行互不混用。
+8. **rccx 双加载（WASM 主 / TS 影子）** – 仅在 rccx 分支中启用：
+   - 默认使用 WASM 覆盖模块（通过 `isWasmCoveredModule()` 判定），TS 版本作为影子对比。
+   - 不允许在 rcc/routcodex 主线启用该策略。
+   - 提交时不得包含构建产物、临时文件、测试脚本。
 
 ## 4. Error Reporting
 
