@@ -73,6 +73,12 @@
       "wasmExport": "sse_serialize_responses_event",
       "coverage": "100%",
       "note": "3/3 blackbox tests passed"
+    },
+    {
+      "tsPath": "sse/sse-to-json/responses-sse-to-json-converter",
+      "wasmExport": "convert_responses_sse_to_json",
+      "coverage": "100%",
+      "note": "1/1 blackbox tests passed"
     }
   ]
 }
