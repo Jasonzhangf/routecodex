@@ -1,6 +1,14 @@
-export type QuotaReason = 'ok' | 'cooldown' | 'blacklist' | 'quotaDepleted' | 'fatal';
+export type QuotaReason = 'ok' | 'cooldown' | 'blacklist' | 'quotaDepleted' | 'fatal' | 'authVerify';
 
 export type QuotaAuthType = 'apikey' | 'oauth' | 'unknown';
+
+export type QuotaAuthIssue =
+  | {
+      kind: 'google_account_verification';
+      url?: string | null;
+      message?: string | null;
+    }
+  | null;
 
 export interface StaticQuotaConfig {
   priorityTier?: number | null;
@@ -15,6 +23,7 @@ export interface QuotaState {
   inPool: boolean;
   reason: QuotaReason;
   authType: QuotaAuthType;
+  authIssue?: QuotaAuthIssue;
   priorityTier: number;
   rateLimitPerMinute: number | null;
   tokenLimitPerMinute: number | null;
@@ -125,6 +134,7 @@ export function createInitialQuotaState(
     inPool: true,
     reason: 'ok',
     authType,
+    authIssue: null,
     priorityTier,
     rateLimitPerMinute,
     tokenLimitPerMinute,
@@ -292,6 +302,7 @@ export function applySuccessEvent(
     reason: nextReason,
     inPool: nextInPool,
     cooldownUntil: nextCooldownUntil,
+    ...(nextReason === 'ok' ? { authIssue: null } : {}),
     lastErrorSeries: null,
     lastErrorCode: null,
     lastErrorAtMs: null,
@@ -381,6 +392,7 @@ export function tickQuotaStateTime(state: QuotaState, nowMs: number): QuotaState
       cooldownUntil: null,
       inPool: true,
       reason: 'ok',
+      authIssue: null,
       lastErrorSeries: null,
       lastErrorCode: null,
       lastErrorAtMs: null,
@@ -391,7 +403,8 @@ export function tickQuotaStateTime(state: QuotaState, nowMs: number): QuotaState
       ...next,
       cooldownUntil: null,
       inPool: true,
-      reason: next.reason === 'cooldown' || next.reason === 'quotaDepleted' ? 'ok' : next.reason
+      reason: next.reason === 'cooldown' || next.reason === 'quotaDepleted' ? 'ok' : next.reason,
+      ...(next.reason === 'cooldown' || next.reason === 'quotaDepleted' ? { authIssue: null } : {})
     };
   }
 

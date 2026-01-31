@@ -63,6 +63,31 @@ RouteCodex 的版本号来源（从高到低）：
 2. 对被标记需要 reauth 的 alias 重新 OAuth：
    - `routecodex oauth antigravity-auto <token-selector-or-path>`
    - 或批量：`routecodex oauth reauth-required`
+3. 如果 Google 提示需要二次验证（账户风控页），用对应 alias 的 profile 打开浏览器完成验证（“养号/解封”）：
+   - `rcc camoufox ~/.routecodex/auth/antigravity-oauth-<alias>.json --url '<verify_url>'`
+
+> 关键点：必须用 **同一个 alias 的 Camoufox profile** 打开验证页，否则容易造成“验证通过但指纹漂移 → 继续 403”。
+
+---
+
+## 1.1) 多账号并发：为什么会“一个号 403 牵连别的号”
+
+### 现象
+- 多个 Antigravity alias 同时跑（或者同一会话内快速切换 alias）时，某个 alias 触发 `verify your account` 之后，其他 alias 也开始陆续 403。
+
+### 我们确认过的根因（与 Antigravity-Manager 行为对齐）
+- Antigravity/Cloud Code Assist **对同一会话指纹（sessionId）跨账号切换极敏感**：同一个会话如果在短时间内换 OAuth cookie / device profile，极容易触发 Google 风控。
+- Antigravity-Manager 的策略是 **session_id → account 绑定**：同一 session 不随便换账号；账号需要验证就让它失败并提示用户完成验证。
+
+### RouteCodex 的修复策略（现在的默认行为）
+- 当某个 Antigravity alias 命中 **403 verify** 时：
+  - Virtual Router 会将该 alias（同 runtimeKey 下的所有模型 key）立即标记为 `auth_verify` 冷却（默认 24h，可通过 OAuth 重新恢复）。
+  - 同一次请求的重试阶段，会 **避免命中任何 Antigravity alias**，只尝试非 Antigravity 的兜底池（例如 `gemini-cli`）。
+- 当某个 Antigravity alias 命中 **429** 时：
+  - 重试阶段同样 **不在 Antigravity 内换号**，只走非 Antigravity 兜底（避免“429→换号→全家 403”）。
+  - 具体“换号”交给后续请求 + Virtual Router 健康/冷却机制（而不是在单次请求里瞬间轮询所有账号）。
+
+> 经验：这条策略会让“单次请求”的 fallback 更克制，但能显著降低“多账号一起用 → 全部触发二次验证”的概率。
 
 ---
 

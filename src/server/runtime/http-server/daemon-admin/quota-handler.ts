@@ -97,6 +97,7 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
           providerKey,
           inPool: Boolean(record.inPool),
           reason: record.reason ?? null,
+          authIssue: record.authIssue ?? null,
           authType: record.authType ?? null,
           priorityTier: typeof record.priorityTier === 'number' ? record.priorityTier : null,
           cooldownUntil: record.cooldownUntil ?? null,

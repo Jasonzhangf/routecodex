@@ -63,6 +63,29 @@ function isAntigravityProviderKey(providerKey: string | undefined): boolean {
   return typeof providerKey === 'string' && providerKey.startsWith('antigravity.');
 }
 
+function isGoogleAccountVerificationRequiredError(err: unknown): boolean {
+  if (!err || typeof err !== 'object') {
+    return false;
+  }
+  const messageRaw = (err as { message?: unknown }).message;
+  const message = typeof messageRaw === 'string' ? messageRaw : '';
+  if (!message) {
+    return false;
+  }
+  const lowered = message.toLowerCase();
+  return (
+    lowered.includes('verify your account') ||
+    lowered.includes('accounts.google.com/signin/continue') ||
+    lowered.includes('support.google.com/accounts?p=al_alert')
+  );
+}
+
+function shouldRotateAntigravityAliasOnRetry(error: unknown): boolean {
+  // Antigravity safety: do not rotate between Antigravity aliases within a single request.
+  // Multi-account switching (especially during 4xx/429 states) can cascade into cross-account reauth (403 verify) events.
+  return false;
+}
+
 function extractStatusCodeFromError(err: unknown): number | undefined {
   if (!err || typeof err !== 'object') return undefined;
   const direct = (err as any).statusCode;
@@ -77,6 +100,9 @@ function extractRetryErrorSignature(err: unknown): string {
     return 'unknown';
   }
   const status = extractStatusCodeFromError(err);
+  if (status === 403 && isGoogleAccountVerificationRequiredError(err)) {
+    return '403:GOOGLE_VERIFY';
+  }
   const codeRaw = (err as { code?: unknown }).code;
   const upstreamCodeRaw = (err as { upstreamCode?: unknown }).upstreamCode;
   const upstreamCode =
@@ -92,7 +118,7 @@ function extractRetryErrorSignature(err: unknown): string {
 
 function injectAntigravityRetrySignal(
   metadata: Record<string, unknown>,
-  signal: { signature: string; consecutive: number } | null
+  signal: { signature: string; consecutive: number; avoidAllOnRetry?: boolean } | null
 ): void {
   if (!signal || !signal.signature || signal.consecutive <= 0) {
     return;
@@ -102,7 +128,8 @@ function injectAntigravityRetrySignal(
   carrier.__rt = {
     ...(existing as Record<string, unknown>),
     antigravityRetryErrorSignature: signal.signature,
-    antigravityRetryErrorConsecutive: signal.consecutive
+    antigravityRetryErrorConsecutive: signal.consecutive,
+    ...(signal.avoidAllOnRetry === true ? { antigravityAvoidAllOnRetry: true } : {})
   };
 }
 
@@ -163,7 +190,7 @@ export class HubRequestExecutor implements RequestExecutor {
       let attempt = 0;
       let lastError: unknown;
       let initialRoutePool: string[] | null = null;
-      let antigravityRetrySignal: { signature: string; consecutive: number } | null = null;
+      let antigravityRetrySignal: { signature: string; consecutive: number; avoidAllOnRetry?: boolean } | null = null;
 
       while (attempt < maxAttempts) {
         attempt += 1;
@@ -380,11 +407,6 @@ export class HubRequestExecutor implements RequestExecutor {
           } else {
             antigravityRetrySignal = null;
           }
-          // Antigravity pool behavior: on 429 MODEL_CAPACITY_EXHAUSTED, keep rotating aliases within Antigravity
-          // (sticky-queue) before falling back to other pool targets. This may require more than the global default attempts.
-          if (isAntigravityProviderKey(target.providerKey) && extractStatusCodeFromError(error) === 429) {
-            maxAttempts = Math.max(maxAttempts, resolveAntigravityMaxProviderAttempts());
-          }
           const shouldRetry = attempt < maxAttempts && shouldRetryProviderError(error);
           if (!shouldRetry) {
             throw error;
@@ -396,7 +418,22 @@ export class HubRequestExecutor implements RequestExecutor {
               await waitBeforeRetry(error);
             }
           } else if (target.providerKey) {
-            excludedProviderKeys.add(target.providerKey);
+            const status = extractStatusCodeFromError(error);
+            const isVerify = status === 403 && isGoogleAccountVerificationRequiredError(error);
+            const is429 = status === 429;
+            if (isAntigravityProviderKey(target.providerKey) && (isVerify || is429)) {
+              // For Antigravity 403 verify / 429 states:
+              // - exclude the current providerKey so we don't immediately retry the same account
+              // - avoid ALL other Antigravity aliases on retry (prefer non-Antigravity fallbacks)
+              excludedProviderKeys.add(target.providerKey);
+              if (antigravityRetrySignal) {
+                antigravityRetrySignal.avoidAllOnRetry = true;
+              } else {
+                antigravityRetrySignal = { signature: extractRetryErrorSignature(error), consecutive: 1, avoidAllOnRetry: true };
+              }
+            } else if (!isAntigravityProviderKey(target.providerKey) || shouldRotateAntigravityAliasOnRetry(error)) {
+              excludedProviderKeys.add(target.providerKey);
+            }
           }
           this.logStage('provider.retry', input.requestId, {
             providerKey: target.providerKey,

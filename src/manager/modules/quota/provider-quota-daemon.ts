@@ -107,6 +107,7 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
 	      ...previous,
 	      inPool: true,
 	      reason: 'ok',
+	      authIssue: null,
 	      cooldownUntil: null,
 	      blacklistUntil: null,
 	      lastErrorSeries: null,

@@ -885,6 +885,7 @@
                 <label for="oauthAuthAliasInput">alias</label>
                 <input id="oauthAuthAliasInput" type="text" placeholder="default" style="width: 240px;" />
               </div>
+              <div id="oauthAuthIssueHint" class="notice" style="display:none; margin-bottom: 10px; white-space: pre-wrap;"></div>
               <div class="row" style="margin-bottom: 10px;">
                 <label><input id="oauthOpenBrowser" type="checkbox" checked /> open browser</label>
                 <label><input id="oauthForceReauth" type="checkbox" /> force reauthorize</label>
@@ -1957,18 +1958,129 @@
         $("authCookieBox").style.display = mode === "cookie" ? "block" : "none";
       }
 
+      function findAuthIssueForProviderAlias(providerRaw, aliasRaw) {
+        const provider = textOf(providerRaw || "").trim().toLowerCase();
+        const alias = textOf(aliasRaw || "").trim().toLowerCase();
+        if (!provider || !alias) return null;
+        const list = Array.isArray(UI.quotaProviders) ? UI.quotaProviders : [];
+        if (provider !== "antigravity") return null;
+        const prefix = `antigravity.${alias}.`;
+        for (const q of list) {
+          const pk = textOf(q && q.providerKey ? q.providerKey : "").trim().toLowerCase();
+          if (!pk.startsWith(prefix)) continue;
+          const issue = q && q.authIssue && typeof q.authIssue === "object" ? q.authIssue : null;
+          if (issue && issue.kind === "google_account_verification") {
+            return { kind: issue.kind, url: textOf(issue.url || ""), message: textOf(issue.message || "") };
+          }
+        }
+        return null;
+      }
+
+      function updateOauthAuthIssueHint() {
+        const el = $("oauthAuthIssueHint");
+        if (!el) return;
+        const provider = textOf($("oauthProviderSelect").value || "").trim().toLowerCase();
+        const alias = textOf($("oauthAuthAliasInput").value || "default").trim().toLowerCase();
+        const issue = findAuthIssueForProviderAlias(provider, alias);
+        if (!issue) {
+          el.style.display = "none";
+          el.textContent = "";
+          return;
+        }
+        if (issue.kind === "google_account_verification") {
+          const url = issue.url ? `\n\nOpen: ${issue.url}` : "";
+          el.textContent =
+            `⚠ Google requires account verification for alias \"${alias}\".\n` +
+            `Complete the browser verification flow, then click Authorize again.${url}`;
+          el.style.display = "block";
+          return;
+        }
+        el.style.display = "none";
+        el.textContent = "";
+      }
+
+      function listAntigravityProviderKeysByAlias(aliasRaw) {
+        const alias = textOf(aliasRaw || "").trim().toLowerCase();
+        if (!alias) return [];
+        const list = Array.isArray(UI.quotaProviders) ? UI.quotaProviders : [];
+        const prefix = `antigravity.${alias}.`;
+        const out = [];
+        for (const q of list) {
+          const pk = textOf(q && q.providerKey ? q.providerKey : "").trim();
+          if (!pk) continue;
+          if (pk.toLowerCase().startsWith(prefix)) out.push(pk);
+        }
+        out.sort((a, b) => a.localeCompare(b));
+        return out;
+      }
+
+      async function recoverAntigravityAliasIfAuthVerify(aliasRaw) {
+        if (!UI.adminAuth || !UI.adminAuth.authenticated) {
+          return;
+        }
+        const keys = listAntigravityProviderKeysByAlias(aliasRaw);
+        if (!keys.length) return;
+        const toRecover = [];
+        for (const key of keys) {
+          const q = getQuotaStateByProviderKey(key);
+          if (!q) continue;
+          if (textOf(q.reason || "").trim() === "authVerify") {
+            toRecover.push(key);
+          }
+        }
+        if (!toRecover.length) {
+          return;
+        }
+        for (const key of toRecover) {
+          try {
+            await apiFetch(`/quota/providers/${encodeURIComponent(key)}/recover`, { method: "POST" });
+          } catch {
+            // best-effort
+          }
+        }
+      }
+
       async function refreshCredentials() {
         const body = $("credentialsTbody");
         body.replaceChildren();
         try {
           const items = await apiFetch("/daemon/credentials");
+          // Best-effort: load quota provider state so we can surface upstream auth issues (e.g. Google verify required).
+          try {
+            const quota = await apiFetch("/quota/providers");
+            const quotaProviders = quota && Array.isArray(quota.providers) ? quota.providers : [];
+            UI.quotaProviders = quotaProviders;
+            UI.quotaProvidersUpdatedAt = Date.now();
+            UI.quotaProviderMap = new Map(quotaProviders.map((q) => [textOf(q.providerKey), q]));
+          } catch {
+            // ignore
+          }
+
+          updateOauthAuthIssueHint();
           for (const c of items || []) {
             const tr = document.createElement("tr");
             const exp = c.expiresInSec == null ? "—" : `${c.expiresInSec}s`;
             tr.appendChild(createCell("td", c.kind || "", ""));
             tr.appendChild(createCell("td", c.provider || "", "mono"));
             tr.appendChild(createCell("td", c.alias || "", "mono"));
-            tr.appendChild(createCell("td", c.status || "", ""));
+            const statusTd = document.createElement("td");
+            statusTd.appendChild(pill(c.status || "—", (c.status || "") === "valid" ? "ok" : "warn"));
+            const issue = findAuthIssueForProviderAlias(c.provider, c.alias);
+            if (issue) {
+              statusTd.appendChild(document.createTextNode(" "));
+              statusTd.appendChild(pill("verify required", "bad"));
+              if (issue.url) {
+                statusTd.appendChild(document.createTextNode(" "));
+                const a = document.createElement("a");
+                a.href = issue.url;
+                a.target = "_blank";
+                a.rel = "noreferrer";
+                a.textContent = "open";
+                a.className = "mono";
+                statusTd.appendChild(a);
+              }
+            }
+            tr.appendChild(statusTd);
             tr.appendChild(createCell("td", exp, "mono"));
             tr.appendChild(createCell("td", c.secretRef || "—", "mono"));
             body.appendChild(tr);
@@ -2004,6 +2116,7 @@
 	        setLog("credentialOpLog", "");
 	        const provider = $("oauthProviderSelect").value;
 	        const alias = ($("oauthAuthAliasInput").value || "default").trim() || "default";
+	        updateOauthAuthIssueHint();
 	        const openBrowser = $("oauthOpenBrowser").checked;
 	        const forceReauthorize = $("oauthForceReauth").checked;
 	        try {
@@ -2013,6 +2126,17 @@
 	          });
 	          setLog("credentialOpLog", `OK. tokenFile: ${out.tokenFile || "—"}`);
 	          await refreshCredentials();
+	          // If OAuth was blocked by Google account verification and the user just completed it,
+	          // attempt to recover the alias back into the pool.
+	          if (textOf(provider).trim().toLowerCase() === "antigravity") {
+	            try {
+	              await recoverAntigravityAliasIfAuthVerify(alias);
+	            } catch {}
+	            try {
+	              await refreshQuota();
+	              await refreshCredentials();
+	            } catch {}
+	          }
 	        } catch (e) {
 	          setLog("credentialOpLog", `Authorize failed: ${e.message}`);
 	        }
@@ -2700,6 +2824,8 @@
           const out = await apiFetch("/quota/providers");
           UI.quotaProviders = Array.isArray(out.providers) ? out.providers : [];
           UI.quotaProvidersUpdatedAt = Date.now();
+          UI.quotaProviderMap = new Map(UI.quotaProviders.map((q) => [textOf(q.providerKey), q]));
+          updateOauthAuthIssueHint();
           renderQuotaProviders();
         } catch (e) {
           if (e && e.status === 401) notifyUnauthorizedOnce("quota");
@@ -2816,10 +2942,25 @@
               const reason = textOf(q.reason || "");
               const reasonKind =
                 reason === "ok" ? "ok" :
+                reason === "authVerify" ? "bad" :
                 reason === "cooldown" ? "warn" :
                 reason === "blacklist" || reason === "fatal" || reason === "quotaDepleted" ? "bad" : "warn";
               const reasonTd = document.createElement("td");
               reasonTd.appendChild(pill(reason || "—", reasonKind));
+              const issue = q && q.authIssue && typeof q.authIssue === "object" ? q.authIssue : null;
+              if (issue && issue.kind === "google_account_verification") {
+                const url = textOf(issue.url || "");
+                if (url) {
+                  reasonTd.appendChild(document.createTextNode(" "));
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.target = "_blank";
+                  a.rel = "noreferrer";
+                  a.textContent = "verify";
+                  a.className = "mono";
+                  reasonTd.appendChild(a);
+                }
+              }
               tr.appendChild(reasonTd);
 
               const cooldown = formatEpochWithDelta(q.cooldownUntil);
@@ -3332,6 +3473,8 @@
       $("refreshCredentialsBtn").addEventListener("click", refreshCredentials);
       $("saveOauthBrowserBtn").addEventListener("click", saveSettings);
       $("oauthAuthorizeBtn").addEventListener("click", authorizeOauth);
+      $("oauthProviderSelect").addEventListener("change", updateOauthAuthIssueHint);
+      $("oauthAuthAliasInput").addEventListener("input", updateOauthAuthIssueHint);
 
       $("refreshQuotaBtn").addEventListener("click", refreshQuota);
       $("refreshQuotaSnapshotBtn").addEventListener("click", refreshQuotaSnapshotNow);

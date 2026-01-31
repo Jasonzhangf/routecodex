@@ -31,6 +31,7 @@ import { registerRestartCommand } from './cli/register/restart-command.js';
 import { registerStopCommand } from './cli/register/stop-command.js';
 import { registerStartCommand } from './cli/register/start-command.js';
 import { registerCodeCommand } from './cli/register/code-command.js';
+import { registerCamoufoxCommand } from './cli/register/camoufox-command.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -281,6 +282,17 @@ registerBasicCommands(program, {
     error: (line) => console.error(line),
     exit: (code) => process.exit(code)
   }
+});
+
+// Camoufox command - open a profile by token file (养号/verify)
+registerCamoufoxCommand(program, {
+  env: process.env,
+  fsImpl: fs,
+  pathImpl: path,
+  homedir,
+  log: (line) => console.log(line),
+  error: (line) => console.error(line),
+  exit: (code) => process.exit(code)
 });
 
 // Start command

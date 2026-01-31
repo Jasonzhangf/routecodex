@@ -57,6 +57,62 @@ export async function handleProviderQuotaErrorEvent(
     return;
   }
 
+  // Antigravity: Google account risk verification required ("signin/continue").
+  // This is NOT "token expired" (reauth) and not quota. It requires human interaction in browser,
+  // so we remove all models under the same runtime alias from pool and surface a UI hint.
+  if (providerKey.toLowerCase().startsWith('antigravity.')) {
+    const verification = parseAntigravityGoogleAccountVerification(event);
+    if (verification) {
+      const alias = extractAntigravityAlias(providerKey);
+      const keys = alias ? listAntigravityProviderKeysByAlias(ctx, alias) : [providerKey];
+      for (const key of keys) {
+        const prevState =
+          ctx.quotaStates.get(key) ?? createInitialQuotaState(key, ctx.staticConfigs.get(key), nowMs);
+        const nextState: QuotaState = {
+          ...prevState,
+          inPool: false,
+          reason: 'authVerify',
+          authIssue: {
+            kind: 'google_account_verification',
+            url: verification.url,
+            message: verification.message
+          },
+          cooldownUntil: null,
+          blacklistUntil: null,
+          lastErrorSeries: 'EFATAL',
+          lastErrorCode: typeof event.code === 'string' && event.code.trim() ? event.code.trim() : 'HTTP_403',
+          lastErrorAtMs: nowMs,
+          consecutiveErrorCount:
+            typeof prevState.consecutiveErrorCount === 'number' && prevState.consecutiveErrorCount > 0
+              ? prevState.consecutiveErrorCount + 1
+              : 1
+        };
+        ctx.quotaStates.set(key, nextState);
+      }
+      ctx.schedulePersist(nowMs);
+
+      const tsIso = new Date(nowMs).toISOString();
+      try {
+        await appendProviderErrorEvent({
+          ts: tsIso,
+          providerKey,
+          code: typeof event.code === 'string' ? event.code : undefined,
+          httpStatus: typeof event.status === 'number' ? event.status : undefined,
+          message: event.message,
+          details: {
+            stage: event.stage,
+            routeName: (event.runtime as { routeName?: string }).routeName,
+            entryEndpoint: (event.runtime as { entryEndpoint?: string }).entryEndpoint,
+            authIssue: { kind: 'google_account_verification', url: verification.url }
+          }
+        });
+      } catch {
+        // logging failure is non-fatal
+      }
+      return;
+    }
+  }
+
   // Upstream capacity exhaustion is not quota depletion. Cool down the entire model series immediately
   // so the router can try other models/providers instead of hammering 429s.
   if (isModelCapacityExhausted429(event)) {
@@ -261,6 +317,72 @@ function extractProviderKey(event: ProviderErrorEvent): string | null {
     }
   }
   return null;
+}
+
+function extractAntigravityAlias(providerKey: string): string | null {
+  const parts = String(providerKey || '').trim().split('.').filter(Boolean);
+  if (parts.length < 3) {
+    return null;
+  }
+  if (parts[0].toLowerCase() !== 'antigravity') {
+    return null;
+  }
+  const alias = String(parts[1] || '').trim().toLowerCase();
+  return alias ? alias : null;
+}
+
+function listAntigravityProviderKeysByAlias(ctx: ProviderQuotaDaemonEventContext, alias: string): string[] {
+  const prefix = `antigravity.${alias}.`;
+  const keys = new Set<string>();
+  for (const key of ctx.quotaStates.keys()) {
+    if (key.toLowerCase().startsWith(prefix)) {
+      keys.add(key);
+    }
+  }
+  for (const key of ctx.staticConfigs.keys()) {
+    if (key.toLowerCase().startsWith(prefix)) {
+      keys.add(key);
+    }
+  }
+  return Array.from(keys.values());
+}
+
+function parseAntigravityGoogleAccountVerification(event: ProviderErrorEvent): { url: string | null; message: string } | null {
+  const status = typeof event.status === 'number' ? event.status : undefined;
+  if (status !== 403) {
+    return null;
+  }
+  const raw = typeof event.message === 'string' ? event.message : '';
+  if (!raw) {
+    return null;
+  }
+  const lowered = raw.toLowerCase();
+  const isMatch =
+    lowered.includes('verify your account') ||
+    lowered.includes('accounts.google.com/signin/continue') ||
+    lowered.includes('support.google.com/accounts?p=al_alert');
+  if (!isMatch) {
+    return null;
+  }
+  const url =
+    extractFirstUrl(raw, /https?:\/\/accounts\.google\.com\/signin\/continue[^\s"'<>)]*/i) ||
+    extractFirstUrl(raw, /https?:\/\/support\.google\.com\/accounts\?p=al_alert[^\s"'<>)]*/i) ||
+    null;
+  return {
+    url,
+    message: 'Google account verification required (open the link and complete the flow, then re-authorize OAuth).'
+  };
+}
+
+function extractFirstUrl(input: string, pattern: RegExp): string | null {
+  try {
+    const match = pattern.exec(input);
+    if (!match) return null;
+    const url = String(match[0] || '').trim();
+    return url ? url : null;
+  } catch {
+    return null;
+  }
 }
 
 function isFatalForQuota(event: ProviderErrorEvent): boolean {
