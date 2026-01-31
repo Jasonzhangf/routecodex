@@ -1,7 +1,7 @@
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
-import { importCoreModule, resolveCoreModulePath, isWasmCoveredModule, type LlmsImpl } from './core-loader.js';
+import { importCoreModule, resolveCoreModulePath, type LlmsImpl } from './core-loader.js';
 import type { ProviderErrorEvent } from '@jsonstudio/llms/dist/router/virtual-router/types.js';
 import { writeErrorsampleJson } from '../../utils/errorsamples.js';
 import {
@@ -50,18 +50,12 @@ function getEnginePrefixes(): string[] {
   return parsePrefixList(process.env.ROUTECODEX_LLMS_ENGINE_PREFIXES);
 }
 
-/**
- * 决定给定模块使用哪种实现（TS 或 WASM）。
- * 
- * 策略：
- * 1. 环境变量 ROUTECODEX_LLMS_ENGINE_ENABLE=0 → 全局禁用，返回 'ts'
- * 2. 环境变量 ROUTECODEX_LLMS_ENGINE_PREFIXES 指定 → 优先匹配，返回 'engine'
- * 3. 默认：WASM 100% 覆盖模块 → 'engine'，其他 → 'ts'
- */
 function resolveImplForSubpath(subpath: string): LlmsImpl {
-  // rccx: 默认只允许“100% 黑盒对齐”的模块走 WASM。
-  // 其它模块一律走 TS，避免引入未覆盖差异。
-  if (isWasmCoveredModule(subpath)) {
+  if (!isEngineEnabled()) {
+    return 'ts';
+  }
+  const enginePrefixes = getEnginePrefixes();
+  if (matchesPrefix(subpath, enginePrefixes)) {
     return 'engine';
   }
   return 'ts';
@@ -86,6 +80,9 @@ function requireCoreDist<TModule extends object = AnyRecord>(
   subpath: string,
   impl: LlmsImpl = resolveImplForSubpath(subpath)
 ): TModule {
+  if (impl === 'engine' && !isEngineEnabled()) {
+    throw new Error('[llmswitch-bridge] ROUTECODEX_LLMS_ENGINE_ENABLE must be enabled to load engine core');
+  }
   const modulePath = resolveCoreModulePath(subpath, impl);
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   return require(modulePath) as TModule;

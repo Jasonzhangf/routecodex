@@ -49,6 +49,3 @@ scripts/demo-*.mjs
 # Local agent/tooling state (never commit)
 .claude/
 .iflow/
-*.orig
-*.rej
-scripts/pack-mode.mjs.rej
