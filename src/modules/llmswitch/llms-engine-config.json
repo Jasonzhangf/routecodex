@@ -43,6 +43,30 @@
       "wasmExport": "map_anthropic_tools_to_chat_internal",
       "coverage": "100%",
       "note": "verified via semantic mapper"
+    },
+    {
+      "tsPath": "sse/shared/serializers/base-serializer",
+      "wasmExport": "sse_serialize_base_event",
+      "coverage": "100%",
+      "note": "5/5 blackbox tests passed"
+    },
+    {
+      "tsPath": "sse/shared/serializers/anthropic-event-serializer",
+      "wasmExport": "sse_serialize_anthropic_event",
+      "coverage": "100%",
+      "note": "2/2 blackbox tests passed"
+    },
+    {
+      "tsPath": "sse/shared/serializers/gemini-event-serializer",
+      "wasmExport": "sse_serialize_gemini_event",
+      "coverage": "100%",
+      "note": "2/2 blackbox tests passed"
+    },
+    {
+      "tsPath": "sse/shared/serializers/chat-event-serializer",
+      "wasmExport": "sse_serialize_chat_event",
+      "coverage": "100%",
+      "note": "4/4 blackbox tests passed"
     }
   ]
 }
