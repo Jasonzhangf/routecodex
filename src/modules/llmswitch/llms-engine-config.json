@@ -67,6 +67,12 @@
       "wasmExport": "sse_serialize_chat_event",
       "coverage": "100%",
       "note": "4/4 blackbox tests passed"
+    },
+    {
+      "tsPath": "sse/shared/serializers/responses-event-serializer",
+      "wasmExport": "sse_serialize_responses_event",
+      "coverage": "100%",
+      "note": "3/3 blackbox tests passed"
     }
   ]
 }
