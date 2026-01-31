@@ -1,7 +1,7 @@
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
-import { importCoreModule, resolveCoreModulePath, type LlmsImpl } from './core-loader.js';
+import { importCoreModule, resolveCoreModulePath, type LlmsImpl, hasWasmImplementation } from './core-loader.js';
 import type { ProviderErrorEvent } from '@jsonstudio/llms/dist/router/virtual-router/types.js';
 import { writeErrorsampleJson } from '../../utils/errorsamples.js';
 import {
@@ -51,13 +51,22 @@ function getEnginePrefixes(): string[] {
 }
 
 function resolveImplForSubpath(subpath: string): LlmsImpl {
+  // Engine 总开关
   if (!isEngineEnabled()) {
     return 'ts';
   }
+
+  // 只对黑盒 100% 对齐模块启用 WASM
+  if (hasWasmImplementation(subpath)) {
+    return 'engine';
+  }
+
+  // 兼容旧的前缀配置：可额外指定某些模块走 engine（用于实验/灰度）
   const enginePrefixes = getEnginePrefixes();
   if (matchesPrefix(subpath, enginePrefixes)) {
     return 'engine';
   }
+
   return 'ts';
 }
 

@@ -2,6 +2,36 @@
 
 This document replaces the old “architecture novel” with a concise set of rules that reflect how the system actually works today. Everything else lives in source.
 
+## rccx WASM 双加载规则（wt-merge 分支）
+
+**目标**：逐步用 WASM 替换 TS 模块，确保黑盒 100% 对齐。
+
+### 挂载规则
+1. **只挂载 100% 对齐模块**：必须有 compare 脚本 + 黑盒比对记录
+2. **TS 作为影子**：WASM 主实现，TS 用于 shadow diff/回归检测
+3. **环境变量控制**：`ROUTECODEX_LLMS_ENGINE_ENABLE=1` + `ROUTECODEX_LLMS_ENGINE_PREFIXES` 配置模块前缀
+4. **本地开发**：通过 `npm run llmswitch:link` 将 llms-wasm-sync 链接到 `node_modules/@jsonstudio/llms-engine`
+
+### 已对齐模块（52 个，15.2% 覆盖）
+**SSE 序列化器（8）**：base-serializer, chat-event-serializer, anthropic-event-serializer, gemini-event-serializer, responses-event-serializer, chat-serializer, responses-output-normalizer, serializers/types
+
+**SSE 转换器（4）**：responses-json-to-sse-converter（100% match）, responses-sse-to-json-converter, chat-json-to-sse-converter（100%）, chat-sse-to-json-converter
+
+**Router 核心（7）**：bootstrap, engine-health, classifier, token-estimator, routing-instructions, context-routing, tool-signals
+
+**Filters 工具治理（5）**：tool-governance/engine, request-tool-list-filter, response-tool-arguments-*, tool-session-compat
+
+**Conversion/Hub 核心（12）**：standardized-bridge, hub-pipeline, session-identifiers, chat-process, provider-response, inbound/outbound (6), response-runtime
+
+**SSE 基础设施与 Utils（12）**：reasoning-dispatcher, sse-constants, sse-utils, reasoning-utils, output-content-normalizer, chat-output-normalizer, bridge-metadata, bridge-id-utils, jsonish, tool-argument-repairer, tool-call-utils, bridge-message-utils
+
+**Bridge/Config（1）**：routecodex-adapter
+
+**Anthropic 链路（4）**：anthropic_utils（18/18 passed）, codec: anthropic↔openai（10/10 passed）, semantic_mapper_anthropic（7/7 passed）
+
+### 未挂载模块
+继续使用 TS 实现，直到完成黑盒对齐。
+
 ## 1. Core Principles
 
 1. **Single execution path** – All traffic flows `HTTP server → llmswitch-core Hub Pipeline → Provider V2 → upstream AI`. No side channels, no bypasses.

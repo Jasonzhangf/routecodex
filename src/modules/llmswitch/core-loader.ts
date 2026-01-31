@@ -10,7 +10,8 @@ const PACKAGE_CANDIDATES_BY_IMPL: Record<LlmsImpl, string[]> = {
     path.join('node_modules', 'rcc-llmswitch-core')
   ],
   engine: [
-    path.join('node_modules', '@jsonstudio', 'llms-engine')
+    path.join('node_modules', '@jsonstudio', 'llms-engine'),
+    path.join('node_modules', 'rcc-llmswitch-engine')
   ]
 };
 
@@ -18,6 +19,53 @@ const corePackageDirByImpl: Record<LlmsImpl, string | null> = {
   ts: null,
   engine: null
 };
+
+// WASM 模块配置（100% 黑盒对齐的模块）
+type WasmModuleConfig = {
+  tsPath: string;
+  wasmExport: string;
+  coverage: string;
+  note: string;
+};
+
+let wasmModulesConfig: { enabled: boolean; shadowMode: boolean; wasmModules: WasmModuleConfig[] } | null = null;
+
+function loadWasmModulesConfig(): void {
+  if (wasmModulesConfig !== null) {
+    return;
+  }
+  try {
+    const configPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'llms-engine-config.json');
+    const configContent = fs.readFileSync(configPath, 'utf-8');
+    wasmModulesConfig = JSON.parse(configContent);
+  } catch {
+    // 配置文件不存在或读取失败，默认禁用 WASM
+    wasmModulesConfig = { enabled: false, shadowMode: false, wasmModules: [] };
+  }
+}
+
+/**
+ * 检查指定 subpath 是否有 100% 对齐的 WASM 实现
+ */
+export function hasWasmImplementation(subpath: string): boolean {
+  loadWasmModulesConfig();
+  if (!wasmModulesConfig!.enabled) {
+    return false;
+  }
+  return wasmModulesConfig!.wasmModules.some((mod) => {
+    const normalizedTsPath = mod.tsPath.replace(/^\/*/, '').replace(/\.js$/i, '');
+    const normalizedSubpath = subpath.replace(/^\/*/, '').replace(/\.js$/i, '');
+    return (
+      normalizedSubpath === normalizedTsPath ||
+      normalizedSubpath.startsWith(`${normalizedTsPath}/`)
+    );
+  });
+}
+
+export function getWasmConfig(): typeof wasmModulesConfig {
+  loadWasmModulesConfig();
+  return wasmModulesConfig;
+}
 
 function resolveCorePackageDir(impl: LlmsImpl): string {
   const cached = corePackageDirByImpl[impl];

@@ -1,5 +1,8 @@
 # Build artifacts
 dist/
+*.orig
+*.rej
+jsonstudio-rccx-*.tgz
 coverage/
 config/pipeline-config.generated.json
 config/llmswitch/
@@ -49,3 +52,8 @@ scripts/demo-*.mjs
 # Local agent/tooling state (never commit)
 .claude/
 .iflow/
+*.orig
+*.rej
+scripts/pack-mode.mjs.orig
+scripts/pack-mode.mjs.rej
+src/modules/llmswitch/bridge.ts.orig

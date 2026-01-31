@@ -1,0 +1,42 @@
+{
+  "enabled": true,
+  "shadowMode": true,
+  "wasmModules": [
+    {
+      "tsPath": "conversion/shared/anthropic-message-utils",
+      "wasmExport": "anthropic_utils",
+      "coverage": "100%",
+      "note": "18/18 blackbox tests passed"
+    },
+    {
+      "tsPath": "conversion/shared/anthropic-message-utils",
+      "wasmExport": "codec_anthropic_to_openai",
+      "coverage": "100%",
+      "note": "6/6 blackbox tests passed"
+    },
+    {
+      "tsPath": "conversion/shared/anthropic-message-utils",
+      "wasmExport": "codec_openai_to_anthropic",
+      "coverage": "100%",
+      "note": "4/4 blackbox tests passed"
+    },
+    {
+      "tsPath": "conversion/sse/responses-json-to-sse-converter",
+      "wasmExport": "responses_json_to_sse_converter",
+      "coverage": "100%",
+      "note": "100% blackbox match"
+    },
+    {
+      "tsPath": "conversion/sse/chat-json-to-sse-converter",
+      "wasmExport": "chat_json_to_sse_converter",
+      "coverage": "100%",
+      "note": "4/4 unit tests passed"
+    },
+    {
+      "tsPath": "conversion/hub/operation-table/semantic-mappers/anthropic-mapper",
+      "wasmExport": "semantic_mapper_anthropic",
+      "coverage": "100%",
+      "note": "7/7 blackbox tests passed"
+    }
+  ]
+}
