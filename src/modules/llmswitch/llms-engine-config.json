@@ -37,6 +37,12 @@
       "wasmExport": "semantic_mapper_anthropic",
       "coverage": "100%",
       "note": "7/7 blackbox tests passed"
+    },
+    {
+      "tsPath": "conversion/hub/operation-table/semantic-mappers/tools/map-anthropic-tools-to-chat",
+      "wasmExport": "map_anthropic_tools_to_chat_internal",
+      "coverage": "100%",
+      "note": "verified via semantic mapper"
     }
   ]
 }
