@@ -13,6 +13,10 @@ jest.mock('../../src/modules/llmswitch/bridge.ts', () => ({
   extractSessionIdentifiersFromMetadata: () => ({}),
   extractAntigravityGeminiSessionId: () => undefined,
   cacheAntigravitySessionSignature: () => {},
+  lookupAntigravitySessionSignatureEntry: () => undefined,
+  getAntigravityLatestSignatureSessionIdForAlias: () => undefined,
+  resetAntigravitySessionSignatureCachesForTests: () => {},
+  warmupAntigravitySessionSignatureModule: async () => {},
   loadRoutingInstructionStateSync: () => null,
   saveRoutingInstructionStateAsync: () => {},
 }), { virtual: true });

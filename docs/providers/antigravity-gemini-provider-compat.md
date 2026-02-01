@@ -226,6 +226,7 @@ compat 会做“最小必要”的规范化（不修复路由、不改语义）�
 
 当满足 “antigravity + gemini-chat” 条件时，compat 会从 signature cache 取出 signature，并在请求中对所有 `part.functionCall` 补齐：
 - `part.thoughtSignature` 缺失/空/占位时 → 写入缓存 signature
+- 如果本次请求属于“新会话”，但 alias 已有可用签名：会将本次请求的 session fingerprint 临时绑定到**签名所属 sessionId**，确保响应侧继续落在同一签名会话里（不向上游透传 sessionId）。
 
 对应代码：
 - `sharedmodule/llmswitch-core/src/conversion/compat/actions/gemini-cli-request.ts`

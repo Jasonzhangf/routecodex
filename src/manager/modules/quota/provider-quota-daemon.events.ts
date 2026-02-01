@@ -359,6 +359,11 @@ function parseAntigravityGoogleAccountVerification(event: ProviderErrorEvent): {
   const lowered = raw.toLowerCase();
   const isMatch =
     lowered.includes('verify your account') ||
+    // Antigravity-Manager alignment: 403 validation gating keywords.
+    lowered.includes('validation_required') ||
+    lowered.includes('validation required') ||
+    lowered.includes('validation_url') ||
+    lowered.includes('validation url') ||
     lowered.includes('accounts.google.com/signin/continue') ||
     lowered.includes('support.google.com/accounts?p=al_alert');
   if (!isMatch) {

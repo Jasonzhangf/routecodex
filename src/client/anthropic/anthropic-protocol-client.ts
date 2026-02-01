@@ -1,7 +1,16 @@
 import type { HttpProtocolClient, ProtocolRequestPayload } from '../http-protocol-client.js';
 import { OpenAIChatProtocolClient } from '../openai/chat-protocol-client.js';
+import { stripInternalKeysDeep } from '../../utils/strip-internal-keys.js';
 
 const DEFAULT_VERSION = '2023-06-01';
+
+interface DataEnvelope {
+  data?: Record<string, unknown>;
+}
+
+function hasDataEnvelope(payload: ProtocolRequestPayload): payload is ProtocolRequestPayload & DataEnvelope {
+  return typeof payload === 'object' && payload !== null && 'data' in payload;
+}
 
 export class AnthropicProtocolClient implements HttpProtocolClient<ProtocolRequestPayload> {
   private readonly chatClient = new OpenAIChatProtocolClient();
@@ -12,6 +21,7 @@ export class AnthropicProtocolClient implements HttpProtocolClient<ProtocolReque
   }
 
   buildRequestBody(request: ProtocolRequestPayload): Record<string, unknown> {
+    const rawPayload = this.extractPayload(request);
     const body = this.chatClient.buildRequestBody(request);
 
     try {
@@ -47,6 +57,17 @@ export class AnthropicProtocolClient implements HttpProtocolClient<ProtocolReque
       }
     } catch {
       // best-effort; fall back to original body on failure
+    }
+
+    // Anthropic Messages supports top-level `metadata`. Some Claude-Code-gated proxies require it to exist.
+    // The OpenAI chat client deletes `metadata`, so restore it (after stripping internal "__*" keys).
+    try {
+      const raw = (rawPayload as Record<string, unknown>).metadata;
+      if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+        (body as Record<string, unknown>).metadata = stripInternalKeysDeep(raw as Record<string, unknown>);
+      }
+    } catch {
+      // best-effort
     }
 
     return body;
@@ -86,5 +107,15 @@ export class AnthropicProtocolClient implements HttpProtocolClient<ProtocolReque
     }
 
     return normalized;
+  }
+
+  private extractPayload(request: ProtocolRequestPayload): Record<string, unknown> {
+    if (hasDataEnvelope(request)) {
+      const envelope = request as ProtocolRequestPayload & DataEnvelope;
+      if (envelope.data && typeof envelope.data === 'object') {
+        return envelope.data;
+      }
+    }
+    return { ...(request as Record<string, unknown>) };
   }
 }

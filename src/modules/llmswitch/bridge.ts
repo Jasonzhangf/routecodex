@@ -91,6 +91,9 @@ function requireCoreDist<TModule extends object = AnyRecord>(
 type AntigravitySessionSignatureModule = {
   extractAntigravityGeminiSessionId?: (payload: unknown) => string;
   cacheAntigravitySessionSignature?: (...args: unknown[]) => void;
+  getAntigravityLatestSignatureSessionIdForAlias?: (aliasKey: string, options?: { hydrate?: boolean }) => string | undefined;
+  lookupAntigravitySessionSignatureEntry?: (aliasKey: string, sessionId: string, options?: { hydrate?: boolean }) => unknown;
+  resetAntigravitySessionSignatureCachesForTests?: () => void;
   configureAntigravitySessionSignaturePersistence?: (input: { stateDir: string; fileName?: string } | null) => void;
   flushAntigravitySessionSignaturePersistenceSync?: () => void;
 };
@@ -167,6 +170,54 @@ export function cacheAntigravitySessionSignature(a: string, b: string, c?: strin
     } else {
       fn(sessionId, signature, messageCount);
     }
+  } catch {
+    // best-effort only
+  }
+}
+
+export function getAntigravityLatestSignatureSessionIdForAlias(
+  aliasKey: string,
+  options?: { hydrate?: boolean }
+): string | undefined {
+  const mod = loadAntigravitySignatureModule();
+  const fn = mod?.getAntigravityLatestSignatureSessionIdForAlias;
+  if (typeof fn !== 'function') {
+    return undefined;
+  }
+  try {
+    const out = fn(aliasKey, options);
+    return typeof out === 'string' && out.trim().length ? out.trim() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function lookupAntigravitySessionSignatureEntry(
+  aliasKey: string,
+  sessionId: string,
+  options?: { hydrate?: boolean }
+): Record<string, unknown> | undefined {
+  const mod = loadAntigravitySignatureModule();
+  const fn = mod?.lookupAntigravitySessionSignatureEntry;
+  if (typeof fn !== 'function') {
+    return undefined;
+  }
+  try {
+    const out = fn(aliasKey, sessionId, options);
+    return out && typeof out === 'object' ? (out as Record<string, unknown>) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function resetAntigravitySessionSignatureCachesForTests(): void {
+  const mod = loadAntigravitySignatureModule();
+  const fn = mod?.resetAntigravitySessionSignatureCachesForTests;
+  if (typeof fn !== 'function') {
+    return;
+  }
+  try {
+    fn();
   } catch {
     // best-effort only
   }

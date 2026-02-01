@@ -7,12 +7,46 @@ import {
   clearAntigravitySessionSignature,
   configureAntigravitySessionSignaturePersistence,
   flushAntigravitySessionSignaturePersistenceSync,
+  getAntigravityLatestSignatureSessionIdForAlias,
   getAntigravitySessionSignature,
+  lookupAntigravitySessionSignatureEntry,
   markAntigravitySessionSignatureRewind,
   resetAntigravitySessionSignatureCachesForTests
 } from '../../sharedmodule/llmswitch-core/src/conversion/compat/antigravity-session-signature.js';
 
 describe('antigravity thoughtSignature persistence & rewind guard', () => {
+  it('retains alias->signature session binding across restarts (latestByAlias.sessionId)', () => {
+    resetAntigravitySessionSignatureCachesForTests();
+
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rc-antigravity-sig-'));
+    const fileName = 'antigravity-session-signatures.json';
+    const filePath = path.join(tmpDir, fileName);
+
+    configureAntigravitySessionSignaturePersistence({ stateDir: tmpDir, fileName });
+
+    const aliasKey = 'antigravity.key1';
+    const signatureSessionId = 'sid-signature';
+    const newSessionId = 'sid-new';
+    const sig = 's'.repeat(80);
+
+    cacheAntigravitySessionSignature(aliasKey, signatureSessionId, sig, 1);
+    flushAntigravitySessionSignaturePersistenceSync();
+
+    const persisted = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    expect(persisted.latestByAlias[aliasKey].sessionId).toBe(signatureSessionId);
+
+    // Simulate a server restart: clear in-memory caches, then reconfigure persistence and hydrate on demand.
+    resetAntigravitySessionSignatureCachesForTests();
+    configureAntigravitySessionSignaturePersistence({ stateDir: tmpDir, fileName });
+
+    expect(getAntigravitySessionSignature(aliasKey, signatureSessionId)).toBe(sig);
+    expect(getAntigravityLatestSignatureSessionIdForAlias(aliasKey)).toBe(signatureSessionId);
+
+    const lookup = lookupAntigravitySessionSignatureEntry(aliasKey, newSessionId);
+    expect(lookup.source).toBe('miss');
+    expect(lookup.sourceSessionId).toBeUndefined();
+  });
+
   it('hydrates persisted signatures (per alias)', () => {
     resetAntigravitySessionSignatureCachesForTests();
 

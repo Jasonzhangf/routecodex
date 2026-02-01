@@ -8,7 +8,11 @@ describe('Provider error reporting', () => {
     await jest.unstable_mockModule('../../src/modules/llmswitch/bridge.ts', () => ({
       getProviderErrorCenter: async () => ({ emit: providerErrorEmit }),
       extractAntigravityGeminiSessionId: () => undefined,
-      cacheAntigravitySessionSignature: () => {}
+      cacheAntigravitySessionSignature: () => {},
+      lookupAntigravitySessionSignatureEntry: () => undefined,
+      getAntigravityLatestSignatureSessionIdForAlias: () => undefined,
+      resetAntigravitySessionSignatureCachesForTests: () => {},
+      warmupAntigravitySessionSignatureModule: async () => {}
     }));
     await jest.unstable_mockModule('../../src/error-handling/route-error-hub.ts', () => ({
       getRouteErrorHub: () => null,

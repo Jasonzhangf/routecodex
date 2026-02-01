@@ -75,6 +75,11 @@ function isGoogleAccountVerificationRequiredError(err: unknown): boolean {
   const lowered = message.toLowerCase();
   return (
     lowered.includes('verify your account') ||
+    // Antigravity-Manager alignment: 403 validation gating keywords.
+    lowered.includes('validation_required') ||
+    lowered.includes('validation required') ||
+    lowered.includes('validation_url') ||
+    lowered.includes('validation url') ||
     lowered.includes('accounts.google.com/signin/continue') ||
     lowered.includes('support.google.com/accounts?p=al_alert')
   );
@@ -348,7 +353,14 @@ export class HubRequestExecutor implements RequestExecutor {
           });
           const wantsStreamBase = Boolean(input.metadata?.inboundStream ?? input.metadata?.stream);
           const normalized = this.normalizeProviderResponse(providerResponse);
-          const pipelineResultAny = pipelineResult as any;
+          const pipelineProcessed = pipelineResult.processedRequest;
+          const pipelineStandardized = pipelineResult.standardizedRequest;
+          const requestSemantics =
+            pipelineProcessed && typeof pipelineProcessed === 'object' && typeof (pipelineProcessed as any).semantics === 'object'
+              ? ((pipelineProcessed as any).semantics as Record<string, unknown>)
+              : pipelineStandardized && typeof pipelineStandardized === 'object' && typeof (pipelineStandardized as any).semantics === 'object'
+                ? ((pipelineStandardized as any).semantics as Record<string, unknown>)
+                : undefined;
           const converted = await this.convertProviderResponseIfNeeded({
             entryEndpoint: input.entryEndpoint,
             providerProtocol,
@@ -356,12 +368,7 @@ export class HubRequestExecutor implements RequestExecutor {
             requestId: input.requestId,
             wantsStream: wantsStreamBase,
             originalRequest: originalRequestSnapshot,
-            requestSemantics:
-              (pipelineResultAny?.processedRequest && pipelineResultAny.processedRequest.semantics && typeof pipelineResultAny.processedRequest.semantics === 'object')
-                ? (pipelineResultAny.processedRequest.semantics as Record<string, unknown>)
-                : (pipelineResultAny?.standardizedRequest && pipelineResultAny.standardizedRequest.semantics && typeof pipelineResultAny.standardizedRequest.semantics === 'object')
-                  ? (pipelineResultAny.standardizedRequest.semantics as Record<string, unknown>)
-                  : undefined,
+            requestSemantics,
             processMode: pipelineResult.processMode,
             response: normalized,
             pipelineMetadata: mergedMetadata

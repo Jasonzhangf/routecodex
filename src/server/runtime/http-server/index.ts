@@ -1470,7 +1470,14 @@ export class RouteCodexHttpServer {
         });
         const wantsStreamBase = Boolean(input.metadata?.inboundStream ?? input.metadata?.stream);
         const normalized = this.normalizeProviderResponse(providerResponse);
-        const pipelineResultAny = pipelineResult as any;
+        const pipelineProcessed = pipelineResult.processedRequest;
+        const pipelineStandardized = pipelineResult.standardizedRequest;
+        const requestSemantics =
+          pipelineProcessed && typeof pipelineProcessed === 'object' && typeof (pipelineProcessed as any).semantics === 'object'
+            ? ((pipelineProcessed as any).semantics as Record<string, unknown>)
+            : pipelineStandardized && typeof pipelineStandardized === 'object' && typeof (pipelineStandardized as any).semantics === 'object'
+              ? ((pipelineStandardized as any).semantics as Record<string, unknown>)
+              : undefined;
         const converted = await this.convertProviderResponseIfNeeded({
           entryEndpoint: input.entryEndpoint,
           providerType: handle.providerType,
@@ -1478,15 +1485,7 @@ export class RouteCodexHttpServer {
           wantsStream: wantsStreamBase,
           originalRequest: originalRequestSnapshot,
           requestSemantics:
-            (pipelineResultAny?.processedRequest &&
-              pipelineResultAny.processedRequest.semantics &&
-              typeof pipelineResultAny.processedRequest.semantics === 'object')
-              ? (pipelineResultAny.processedRequest.semantics as Record<string, unknown>)
-              : (pipelineResultAny?.standardizedRequest &&
-                  pipelineResultAny.standardizedRequest.semantics &&
-                  typeof pipelineResultAny.standardizedRequest.semantics === 'object')
-                ? (pipelineResultAny.standardizedRequest.semantics as Record<string, unknown>)
-                : undefined,
+            requestSemantics,
           processMode: pipelineResult.processMode,
           response: normalized,
           pipelineMetadata: mergedMetadata
@@ -1605,6 +1604,8 @@ export class RouteCodexHttpServer {
   ): Promise<{
     requestId: string;
     providerPayload: Record<string, unknown>;
+    standardizedRequest?: Record<string, unknown>;
+    processedRequest?: Record<string, unknown>;
     target: {
       providerKey: string;
       providerType: string;
@@ -1808,15 +1809,23 @@ export class RouteCodexHttpServer {
 	        }
 	      })();
 	    }
-	    return {
-	      requestId: derivedRequestId,
-	      providerPayload: result.providerPayload,
-	      target: result.target,
-      routingDecision: result.routingDecision ?? undefined,
-      processMode,
-      metadata: result.metadata ?? {}
-    };
-  }
+		    return {
+		      requestId: derivedRequestId,
+		      providerPayload: result.providerPayload,
+          standardizedRequest:
+            result.standardizedRequest && typeof result.standardizedRequest === 'object'
+              ? (result.standardizedRequest as Record<string, unknown>)
+              : undefined,
+          processedRequest:
+            result.processedRequest && typeof result.processedRequest === 'object'
+              ? (result.processedRequest as Record<string, unknown>)
+              : undefined,
+		      target: result.target,
+	      routingDecision: result.routingDecision ?? undefined,
+	      processMode,
+	      metadata: result.metadata ?? {}
+	    };
+	  }
 
   private buildRequestMetadata(input: PipelineExecutionInput): Record<string, unknown> {
     const userMeta = asRecord(input.metadata);

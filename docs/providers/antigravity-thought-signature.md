@@ -74,6 +74,16 @@ Gemini 原生请求 `thoughtSignature` 的对齐策略、缓存键选择、以�
 - `tests/compat/antigravity-thought-signature.spec.ts`
   - `uses stable sessionId from metadata ...`
 
+## 4.1 变更：跨会话复用签名时，临时“切换到签名所属 sessionId”
+
+当同一个 antigravity alias 已经缓存过有效签名后，如果出现**新的 sessionId**（例如客户端重启或新会话 ID）
+继续请求同一 alias，llmswitch-core 会做一个“签名会话绑定”：
+
+- 仍然按 alias 维度复用已缓存的 `thoughtSignature`（和之前一致）
+- 但会将本次请求的 `requestId → session fingerprint` 绑定到**签名来源的 sessionId**（而不是新 sessionId）
+  - 目的：让后续响应缓存与 SSE 侧的签名捕获始终落到“签名所属 sessionId”，避免跨会话漂移导致的拒绝/放大
+- 该切换仅影响本地缓存键，不会把 sessionId 下发到上游
+
 ## 5. 安全性：rewind（回滚历史）时避免注入“未来签名”
 
 如果用户回滚历史（例如删除若干轮对话后重发），会出现 “当前 messageCount < 缓存 messageCount” 的情况。

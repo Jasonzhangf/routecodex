@@ -950,8 +950,23 @@ async function main() {
       );
       const coldPresenceC = extractThoughtSignaturePresenceFromGeminiRequest(coldReqC);
       if (coldPresenceC.some(Boolean)) {
-        safeWriteJson(path.join(tempDir, 'upstream.routecodex.claude.cold.json'), coldReqC);
-        throw new Error(`routecodex (claude): cold followup unexpectedly contains thoughtSignature keys (captures in ${tempDir})`);
+        // New behavior (alias-scoped cache): if the previous run already primed a signature for this alias,
+        // the cold followup may immediately reuse it (with sessionId rewind handled in provider/runtime).
+        //
+        // Keep this deterministic: when present, it must be the mock signature (never the dummy sentinel).
+        const coldInjected = coldSigsC.includes(MOCK_THOUGHT_SIGNATURE);
+        if (!coldInjected) {
+          safeWriteJson(path.join(tempDir, 'upstream.routecodex.claude.cold.json'), coldReqC);
+          safeWriteJson(path.join(tempDir, 'debug.routecodex.claude.cold-signature.json'), {
+            expected: MOCK_THOUGHT_SIGNATURE,
+            got: coldSigsC,
+            firstUserText: getFirstUserTextFromGeminiRequest(coldReqC)
+          });
+        }
+        assert.ok(
+          coldInjected,
+          `routecodex (claude): cold followup signature mismatch (captures in ${tempDir})`
+        );
       }
 
       const sigsC = extractThoughtSignaturesFromGeminiRequest(followUpReqC).filter((s) => s);
@@ -1021,8 +1036,21 @@ async function main() {
           );
           const coldPresenceB = extractThoughtSignaturePresenceFromGeminiRequest(coldReqB);
           if (coldPresenceB.some(Boolean)) {
-            safeWriteJson(path.join(tempDir, 'upstream.rcc.cold.json'), coldReqB);
-            throw new Error(`rcc: cold followup unexpectedly contains thoughtSignature keys (captures in ${tempDir})`);
+            // When the alias-scoped cache is already populated (e.g. by the routecodex run above),
+            // the cold followup may immediately reuse the cached signature.
+            const coldInjected = coldSigsB.includes(MOCK_THOUGHT_SIGNATURE);
+            if (!coldInjected) {
+              safeWriteJson(path.join(tempDir, 'upstream.rcc.cold.json'), coldReqB);
+              safeWriteJson(path.join(tempDir, 'debug.rcc.cold-signature.json'), {
+                expected: MOCK_THOUGHT_SIGNATURE,
+                got: coldSigsB,
+                firstUserText: getFirstUserTextFromGeminiRequest(coldReqB)
+              });
+            }
+            assert.ok(
+              coldInjected,
+              `rcc: cold followup signature mismatch (captures in ${tempDir})`
+            );
           }
         }
 

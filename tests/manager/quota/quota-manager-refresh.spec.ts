@@ -27,7 +27,11 @@ jest.unstable_mockModule('../../../src/providers/auth/antigravity-userinfo-helpe
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
   getProviderErrorCenter: async () => ({ emit: () => {} }),
   extractAntigravityGeminiSessionId: () => undefined,
-  cacheAntigravitySessionSignature: () => {}
+  cacheAntigravitySessionSignature: () => {},
+  lookupAntigravitySessionSignatureEntry: () => undefined,
+  getAntigravityLatestSignatureSessionIdForAlias: () => undefined,
+  resetAntigravitySessionSignatureCachesForTests: () => {},
+  warmupAntigravitySessionSignatureModule: async () => {}
 }));
 
 describe('QuotaManagerModule refresh behavior', () => {

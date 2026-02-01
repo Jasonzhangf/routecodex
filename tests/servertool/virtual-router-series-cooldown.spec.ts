@@ -1,6 +1,10 @@
 import { RateLimitBackoffManager, RateLimitCooldownError } from '../../src/providers/core/runtime/rate-limit-manager.js';
 import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine.js';
 import { deserializeRoutingInstructionState } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-instructions.js';
+import {
+  cacheAntigravitySessionSignature,
+  extractAntigravityGeminiSessionId
+} from '../../sharedmodule/llmswitch-core/src/conversion/compat/antigravity-session-signature.js';
 import type {
   VirtualRouterConfig,
   ProviderErrorEvent,
@@ -166,6 +170,11 @@ describe('Virtual router antigravity strict session alias binding', () => {
 
     const first = engine.route(request, metadata);
     expect(first.target.providerKey).toBe(ag1);
+
+    // Simulate a successful upstream response that returned thoughtSignature.
+    // Strict binding should only activate after the session has a pinned signature.
+    const sessionId = extractAntigravityGeminiSessionId({ contents: [{ role: 'user', parts: [{ text: 'hello' }] }] });
+    cacheAntigravitySessionSignature('antigravity.alias1', sessionId, 'x'.repeat(60), 1);
 
     // Mark alias1 as unavailable; strict binding must not switch to alias2 for the same session.
     engine.handleProviderFailure({ providerKey: ag1, reason: 'auth', fatal: true, statusCode: 403 });

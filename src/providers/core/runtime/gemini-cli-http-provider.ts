@@ -18,7 +18,11 @@ import type { OpenAIStandardConfig } from '../api/provider-config.js';
 import type { ProviderContext, ProviderType } from '../api/provider-types.js';
 import type { UnknownObject } from '../../../types/common-types.js';
 import type { ModuleDependencies } from '../../../modules/pipeline/interfaces/pipeline-interfaces.js';
-import { cacheAntigravitySessionSignature, extractAntigravityGeminiSessionId } from '../../../modules/llmswitch/bridge.js';
+import {
+  cacheAntigravitySessionSignature,
+  extractAntigravityGeminiSessionId,
+  lookupAntigravitySessionSignatureEntry
+} from '../../../modules/llmswitch/bridge.js';
 import { GeminiCLIProtocolClient } from '../../../client/gemini-cli/gemini-cli-protocol-client.js';
 import { getDefaultProjectId } from '../../auth/gemini-cli-userinfo-helper.js';
 import { resolveAntigravityUserAgent } from '../../auth/antigravity-user-agent.js';
@@ -191,16 +195,31 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
     }
 
     if (this.isAntigravityRuntime()) {
+      const alias = this.extractAntigravityAliasFromRuntime();
+      const aliasKey = alias && alias.trim().length ? `antigravity.${alias.trim()}` : 'antigravity.unknown';
+      const stableSessionId = this.resolveAntigravityStableSessionId(metadata);
       const derivedSessionId = extractAntigravityGeminiSessionId(processedRequest);
-      if (typeof derivedSessionId === 'string' && derivedSessionId.trim().length) {
+      const candidateSessionId = stableSessionId || (typeof derivedSessionId === 'string' ? derivedSessionId.trim() : '');
+      if (candidateSessionId) {
+        const lookup = lookupAntigravitySessionSignatureEntry(aliasKey, candidateSessionId, { hydrate: true });
+        const hasSignature = typeof (lookup as any)?.signature === 'string' && String((lookup as any).signature).trim().length > 0;
+        const sourceSessionId =
+          hasSignature && typeof (lookup as any)?.sourceSessionId === 'string'
+            ? String((lookup as any).sourceSessionId).trim()
+            : '';
+        const effectiveSessionId = sourceSessionId || candidateSessionId;
         const metaCarrier = processedRequest as { metadata?: Record<string, unknown> };
-        metaCarrier.metadata = { ...(metaCarrier.metadata || {}), antigravitySessionId: derivedSessionId.trim() };
-        const runtimeMeta = this.getCurrentRuntimeMetadata();
-        if (runtimeMeta) {
-          if (!runtimeMeta.metadata || typeof runtimeMeta.metadata !== 'object') {
-            runtimeMeta.metadata = {};
+        metaCarrier.metadata = {
+          ...(metaCarrier.metadata || {}),
+          antigravitySessionId: effectiveSessionId,
+          ...(effectiveSessionId !== candidateSessionId ? { antigravitySessionIdOriginal: candidateSessionId } : {})
+        };
+        // Also attach to provider context metadata so SSE normalizers / downstream stages see a stable id.
+        if (metadata && typeof metadata === 'object') {
+          (metadata as any).antigravitySessionId = effectiveSessionId;
+          if (effectiveSessionId !== candidateSessionId) {
+            (metadata as any).antigravitySessionIdOriginal = candidateSessionId;
           }
-          (runtimeMeta.metadata as Record<string, unknown>).antigravitySessionId = derivedSessionId.trim();
         }
       }
     }
@@ -365,7 +384,12 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
             const partsRaw = content?.parts;
             const parts = Array.isArray(partsRaw) ? (partsRaw as Record<string, unknown>[]) : [];
             for (const part of parts) {
-              const sig = typeof (part as any)?.thoughtSignature === 'string' ? String((part as any).thoughtSignature) : '';
+              const sig =
+                typeof (part as any)?.thoughtSignature === 'string'
+                  ? String((part as any).thoughtSignature)
+                  : typeof (part as any)?.thought_signature === 'string'
+                    ? String((part as any).thought_signature)
+                    : '';
               if (sig) {
                 cacheAntigravitySessionSignature(aliasKey, sessionId, sig, 1);
               }
@@ -525,6 +549,29 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
     return typeof value === 'string' && value.trim().length > 0;
   }
 
+  private resolveAntigravityStableSessionId(metadata: Record<string, unknown> | undefined): string | undefined {
+    // Antigravity-Manager alignment: session_id is derived from the first user text (or JSON fallback),
+    // unless the client explicitly provides a user_id. Do NOT derive from generic session/conversation ids.
+    if (!metadata || typeof metadata !== 'object') {
+      return undefined;
+    }
+    const userIdCandidateRaw =
+      typeof (metadata as any)?.user_id === 'string'
+        ? String((metadata as any).user_id)
+        : typeof (metadata as any)?.metadata?.user_id === 'string'
+          ? String((metadata as any).metadata.user_id)
+          : '';
+    const userIdCandidate = userIdCandidateRaw.trim();
+    if (!userIdCandidate) {
+      return undefined;
+    }
+    // Match Antigravity-Manager behavior: ignore "session-" style placeholders.
+    if (userIdCandidate.toLowerCase().includes('session-')) {
+      return undefined;
+    }
+    return userIdCandidate;
+  }
+
   private extractStreamFlag(source: UnknownObject | undefined): boolean | undefined {
     if (!source || typeof source !== 'object') {
       return undefined;
@@ -674,9 +721,12 @@ class GeminiSseNormalizer extends Transform {
       for (const part of parts) {
         if (!part || typeof part !== 'object') {continue;}
         if (this.enableAntigravitySignatureCache && this.antigravitySessionId) {
-          const sig = typeof (part as { thoughtSignature?: unknown }).thoughtSignature === 'string'
-            ? String((part as { thoughtSignature?: unknown }).thoughtSignature)
-            : '';
+          const sig =
+            typeof (part as { thoughtSignature?: unknown }).thoughtSignature === 'string'
+              ? String((part as { thoughtSignature?: unknown }).thoughtSignature)
+              : typeof (part as { thought_signature?: unknown }).thought_signature === 'string'
+                ? String((part as { thought_signature?: unknown }).thought_signature)
+                : '';
           if (sig) {
             const aliasKey =
               this.antigravityAliasKey && this.antigravityAliasKey.trim().length ? this.antigravityAliasKey.trim() : 'antigravity.unknown';

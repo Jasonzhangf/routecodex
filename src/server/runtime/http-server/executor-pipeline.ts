@@ -4,6 +4,16 @@ import { asRecord } from './provider-utils.js';
 
 export type HubPipelineResult = {
   providerPayload: Record<string, unknown>;
+  /**
+   * Full standardized request produced by llmswitch-core. Carries canonical
+   * semantics (e.g. tool alias maps) required for correct client remap.
+   */
+  standardizedRequest?: Record<string, unknown>;
+  /**
+   * Request after chat_process/tool governance. Carries canonical semantics
+   * (e.g. tool alias maps) required for correct client remap.
+   */
+  processedRequest?: Record<string, unknown>;
   target: {
     providerKey: string;
     providerType: string;
@@ -52,6 +62,14 @@ export async function runHubPipeline(
   const processMode = (result.metadata?.processMode as string | undefined) ?? 'chat';
   return {
     providerPayload: result.providerPayload,
+    standardizedRequest:
+      result.standardizedRequest && typeof result.standardizedRequest === 'object'
+        ? (result.standardizedRequest as Record<string, unknown>)
+        : undefined,
+    processedRequest:
+      result.processedRequest && typeof result.processedRequest === 'object'
+        ? (result.processedRequest as Record<string, unknown>)
+        : undefined,
     target: result.target,
     routingDecision: result.routingDecision ?? undefined,
     processMode,

@@ -1,6 +1,13 @@
 import { GeminiCLIHttpProvider } from '../../../../src/providers/core/runtime/gemini-cli-http-provider.js';
 import type { OpenAIStandardConfig } from '../../../../src/providers/core/api/provider-config.js';
 import type { ModuleDependencies } from '../../../../src/providers/modules/pipeline/interfaces/pipeline-interfaces.js';
+import { createHash } from 'node:crypto';
+import {
+  cacheAntigravitySessionSignature,
+  lookupAntigravitySessionSignatureEntry,
+  resetAntigravitySessionSignatureCachesForTests,
+  warmupAntigravitySessionSignatureModule
+} from '../../../../src/modules/llmswitch/bridge.js';
 
 const baseConfig: OpenAIStandardConfig = {
   id: 'test-gemini-cli',
@@ -16,6 +23,10 @@ const baseConfig: OpenAIStandardConfig = {
 } as unknown as OpenAIStandardConfig;
 
 const emptyDeps: ModuleDependencies = {} as ModuleDependencies;
+
+function stableSid(raw: string): string {
+  return `sid-${createHash('sha256').update(raw).digest('hex').slice(0, 16)}`;
+}
 
 describe('GeminiCLIHttpProvider basic behaviour', () => {
   test('constructs and exposes service profile from config-core', () => {
@@ -232,6 +243,76 @@ describe('GeminiCLIHttpProvider basic behaviour', () => {
         process.env.RCC_ANTIGRAVITY_HEADER_MODE = prevRccHeaderMode;
       }
     }
+  });
+
+  test('antigravity thoughtSignature session swap: does not reuse signature across sessions', async () => {
+    await warmupAntigravitySessionSignatureModule();
+    resetAntigravitySessionSignatureCachesForTests();
+
+    const cfg: OpenAIStandardConfig = {
+      ...baseConfig,
+      config: {
+        ...(baseConfig.config as any),
+        providerId: 'antigravity'
+      }
+    } as unknown as OpenAIStandardConfig;
+
+    const aliasKey = 'antigravity.sessionSwap';
+    const signatureSessionId = stableSid('session-1');
+    cacheAntigravitySessionSignature(aliasKey, signatureSessionId, `EiYK${'a'.repeat(80)}`, 1);
+    const probe = lookupAntigravitySessionSignatureEntry(aliasKey, stableSid('session-2'), { hydrate: false });
+    expect(probe.source).toBe('miss');
+    expect(probe.sourceSessionId).toBeUndefined();
+
+    const provider = new GeminiCLIHttpProvider(cfg, emptyDeps);
+    (provider as any).lastRuntimeMetadata = {
+      runtimeKey: aliasKey,
+      providerKey: `${aliasKey}.gemini-3-pro-high`,
+      providerId: 'antigravity'
+    };
+
+    const processed = await (provider as any).preprocessRequest({
+      model: 'gemini-3-pro-high',
+      contents: [{ role: 'user', parts: [{ text: 'hi' }] }],
+      metadata: { user_id: 'user-2' },
+      stream: true
+    });
+
+    expect((processed as any)?.metadata?.antigravitySessionId).toBe('user-2');
+    expect((processed as any)?.metadata?.antigravitySessionIdOriginal).toBeUndefined();
+  });
+
+  test('antigravity sessionId derivation: ignores metadata.sessionId and uses derived fingerprint', async () => {
+    await warmupAntigravitySessionSignatureModule();
+    resetAntigravitySessionSignatureCachesForTests();
+
+    const cfg: OpenAIStandardConfig = {
+      ...baseConfig,
+      config: {
+        ...(baseConfig.config as any),
+        providerId: 'antigravity'
+      }
+    } as unknown as OpenAIStandardConfig;
+
+    const provider = new GeminiCLIHttpProvider(cfg, emptyDeps);
+    (provider as any).lastRuntimeMetadata = {
+      runtimeKey: 'antigravity.sessionDerive',
+      providerKey: 'antigravity.sessionDerive.gemini-3-pro-high',
+      providerId: 'antigravity'
+    };
+
+    const seedText = 'session seed: provider should derive session id from user text parts';
+    const expectedDerived = stableSid(seedText);
+
+    const processed = await (provider as any).preprocessRequest({
+      model: 'gemini-3-pro-high',
+      contents: [{ role: 'user', parts: [{ text: seedText }] }],
+      metadata: { sessionId: 'external-session-id' },
+      stream: true
+    });
+
+    expect((processed as any)?.metadata?.antigravitySessionId).toBe(expectedDerived);
+    expect((processed as any)?.metadata?.antigravitySessionIdOriginal).toBeUndefined();
   });
 
 });
