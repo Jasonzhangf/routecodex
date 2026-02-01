@@ -94,6 +94,87 @@ describe('VirtualRouterEngine series cooldown handling', () => {
   });
 });
 
+describe('Virtual router antigravity strict session alias binding', () => {
+  it('does not rotate to another alias for the same session', () => {
+    const ag1 = 'antigravity.alias1.gemini-3-pro-high';
+    const ag2 = 'antigravity.alias2.gemini-3-pro-high';
+    const fallback = 'tab.key1.gpt-5.2';
+
+    const engine = new VirtualRouterEngine();
+    engine.initialize({
+      routing: {
+        default: [
+          {
+            id: 'primary',
+            mode: 'priority',
+            targets: [ag1, ag2, fallback],
+            priority: 1
+          }
+        ]
+      },
+      providers: {
+        [ag1]: {
+          providerKey: ag1,
+          providerType: 'gemini',
+          endpoint: 'https://example.invalid',
+          auth: { type: 'apiKey', value: 'test' },
+          outboundProfile: 'gemini-chat',
+          runtimeKey: 'runtime:ag1',
+          modelId: 'gemini-3-pro-high'
+        },
+        [ag2]: {
+          providerKey: ag2,
+          providerType: 'gemini',
+          endpoint: 'https://example.invalid',
+          auth: { type: 'apiKey', value: 'test' },
+          outboundProfile: 'gemini-chat',
+          runtimeKey: 'runtime:ag2',
+          modelId: 'gemini-3-pro-high'
+        },
+        [fallback]: {
+          providerKey: fallback,
+          providerType: 'responses',
+          endpoint: 'https://example.invalid',
+          auth: { type: 'apiKey', value: 'test' },
+          outboundProfile: 'openai-responses',
+          runtimeKey: 'runtime:tab',
+          modelId: 'gpt-5.2'
+        }
+      },
+      loadBalancing: {
+        strategy: 'round-robin',
+        aliasSelection: { antigravitySessionBinding: 'strict' }
+      },
+      classifier: {},
+      health: { failureThreshold: 3, cooldownMs: 5_000, fatalCooldownMs: 60_000 }
+    } as any);
+
+    const request: StandardizedRequest = {
+      model: 'client-model',
+      messages: [{ role: 'user', content: 'hello' }],
+      parameters: {},
+      metadata: { originalEndpoint: '/v1/responses', processMode: 'chat' }
+    };
+    const metadata: RouterMetadataInput = {
+      requestId: 'req_ag_strict_1',
+      entryEndpoint: '/v1/responses',
+      processMode: 'chat',
+      stream: true,
+      direction: 'request',
+      sessionId: 'session-strict'
+    };
+
+    const first = engine.route(request, metadata);
+    expect(first.target.providerKey).toBe(ag1);
+
+    // Mark alias1 as unavailable; strict binding must not switch to alias2 for the same session.
+    engine.handleProviderFailure({ providerKey: ag1, reason: 'auth', fatal: true, statusCode: 403 });
+
+    const second = engine.route(request, { ...metadata, requestId: 'req_ag_strict_2' });
+    expect(second.target.providerKey).toBe(fallback);
+  });
+});
+
 describe('Virtual router sticky fallback with excluded keys', () => {
   const providerA = 'antigravity.alias1.gemini-3-pro-high';
   const providerB = 'antigravity.alias2.gemini-3-pro-high';

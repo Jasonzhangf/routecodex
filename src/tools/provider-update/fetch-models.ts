@@ -1,4 +1,3 @@
-import fetch from 'node-fetch';
 import path from 'path';
 import { createProviderOAuthStrategy } from '../../providers/core/config/provider-oauth-configs.js';
 import { buildAuthHeaders } from './auth-headers.js';

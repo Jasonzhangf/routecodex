@@ -1,4 +1,3 @@
-import fetch from 'node-fetch';
 import type { ProviderInputConfig } from './types.js';
 import { buildAuthHeaders } from './auth-headers.js';
 import { normalizeBaseUrlForModels } from './url-normalize.js';

@@ -48,7 +48,7 @@ describe('resp_outbound stages snapshot payloads', () => {
 
     expect(recorder.entries).toHaveLength(1);
     const recorded = recorder.entries[0];
-    expect(recorded.stage).toBe('resp_outbound_stage1_client_remap');
+    expect(recorded.stage).toBe('chat_process.resp.stage9.client_remap');
     const recordedPayload = recorded.payload as any;
     expect(recordedPayload.type).toBe('message');
     expect(recordedPayload.role).toBe('assistant');
@@ -75,7 +75,7 @@ describe('resp_outbound stages snapshot payloads', () => {
     expect(result.body).toEqual(clientPayload);
     expect(recorder.entries).toHaveLength(1);
     const recorded = recorder.entries[0];
-    expect(recorded.stage).toBe('resp_outbound_stage2_sse_stream');
+    expect(recorded.stage).toBe('chat_process.resp.stage10.sse_stream');
     expect(recorded.payload).toEqual({
       passthrough: false,
       protocol: 'anthropic-messages',

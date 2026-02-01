@@ -518,7 +518,8 @@ async function runOnceBlackbox(opts) {
     port,
     configPath,
     homeDir,
-    antigravityApiBase
+    antigravityApiBase,
+    sessionId: sessionIdOverride
   } = opts;
 
   const env = {
@@ -567,6 +568,10 @@ async function runOnceBlackbox(opts) {
   try {
     await withTimeout(waitForHealth(baseUrl), 25000, `${label}:waitForHealth`);
 
+    const sessionId = typeof sessionIdOverride === 'string' && sessionIdOverride.trim().length
+      ? sessionIdOverride.trim()
+      : `bb-antigravity-session-${Date.now()}`;
+
     // 1) /v1/responses smoke (existing parity baseline)
     const res = await withTimeout(
       fetch(`${baseUrl}/v1/responses`, {
@@ -576,7 +581,7 @@ async function runOnceBlackbox(opts) {
           'Accept': 'application/json',
           'x-api-key': 'verify-key',
           'x-route-hint': 'thinking',
-          'x-session-id': 'bb-antigravity-session'
+          'x-session-id': sessionId
         },
         body: JSON.stringify({
           model: 'gpt-5.2-codex',
@@ -627,7 +632,7 @@ async function runOnceBlackbox(opts) {
           'Accept': 'application/json',
           'x-api-key': 'verify-key',
           'x-route-hint': 'thinking',
-          'x-session-id': 'bb-antigravity-session'
+          'x-session-id': sessionId
         },
         body: JSON.stringify({
           model: 'gpt-5.2-codex',
@@ -686,7 +691,7 @@ async function runOnceBlackbox(opts) {
           'Accept': 'application/json',
           'x-api-key': 'verify-key',
           'x-route-hint': 'thinking',
-          'x-session-id': 'bb-antigravity-session'
+          'x-session-id': sessionId
         },
         body: JSON.stringify({
           model: 'gpt-5.2-codex',
@@ -730,7 +735,7 @@ async function runOnceBlackbox(opts) {
           'Accept': 'application/json',
           'x-api-key': 'verify-key',
           'x-route-hint': 'thinking',
-          'x-session-id': 'bb-antigravity-session'
+          'x-session-id': sessionId
         },
         body: JSON.stringify({
           model: 'gpt-5.2-codex',
@@ -841,6 +846,7 @@ async function main() {
         port: 5591,
         configPath: cfg1,
         homeDir: tempDir,
+        sessionId: 'bb-antigravity-session-gemini',
         antigravityApiBase: upstream.baseUrl
       });
       const afterA = upstream.requests.length;
@@ -920,6 +926,7 @@ async function main() {
         port: 5593,
         configPath: cfgClaude,
         homeDir: tempDir,
+        sessionId: 'bb-antigravity-session-claude',
         antigravityApiBase: upstream.baseUrl
       });
       const afterC = upstream.requests.length;

@@ -346,6 +346,8 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
           : undefined;
 
       if (this.isAntigravityRuntime()) {
+        const alias = this.extractAntigravityAliasFromRuntime();
+        const aliasKey = alias && alias.trim().length ? `antigravity.${alias.trim()}` : 'antigravity.unknown';
         const sessionId =
           context && typeof (context as any)?.runtimeMetadata?.metadata?.antigravitySessionId === 'string'
             ? String((context as any).runtimeMetadata.metadata.antigravitySessionId)
@@ -365,7 +367,7 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
             for (const part of parts) {
               const sig = typeof (part as any)?.thoughtSignature === 'string' ? String((part as any).thoughtSignature) : '';
               if (sig) {
-                cacheAntigravitySessionSignature(sessionId, sig, 1);
+                cacheAntigravitySessionSignature(aliasKey, sessionId, sig, 1);
               }
             }
           }
@@ -408,7 +410,9 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
         : context && context.metadata && typeof context.metadata.antigravitySessionId === 'string'
           ? String(context.metadata.antigravitySessionId)
           : undefined;
-    const normalizer = new GeminiSseNormalizer({ sessionId, enableAntigravitySignatureCache: this.isAntigravityRuntime() });
+    const alias = this.isAntigravityRuntime() ? this.extractAntigravityAliasFromRuntime() : undefined;
+    const aliasKey = alias && alias.trim().length ? `antigravity.${alias.trim()}` : undefined;
+    const normalizer = new GeminiSseNormalizer({ sessionId, aliasKey, enableAntigravitySignatureCache: this.isAntigravityRuntime() });
     stream.pipe(normalizer);
     return super.wrapUpstreamSseResponse(normalizer, context);
   }
@@ -558,13 +562,17 @@ class GeminiSseNormalizer extends Transform {
   private processedEventCounter = 0;
   private capturedEvents: any[] = [];
   private antigravitySessionId: string | null = null;
+  private antigravityAliasKey: string | null = null;
   private enableAntigravitySignatureCache = false;
 
-  constructor(options?: { sessionId?: string; enableAntigravitySignatureCache?: boolean }) {
+  constructor(options?: { sessionId?: string; aliasKey?: string; enableAntigravitySignatureCache?: boolean }) {
     super();
     this.decoder = new StringDecoder('utf8');
     this.antigravitySessionId = typeof options?.sessionId === 'string' && options.sessionId.trim().length
       ? options.sessionId.trim()
+      : null;
+    this.antigravityAliasKey = typeof options?.aliasKey === 'string' && options.aliasKey.trim().length
+      ? options.aliasKey.trim()
       : null;
     this.enableAntigravitySignatureCache = !!options?.enableAntigravitySignatureCache;
   }
@@ -670,7 +678,9 @@ class GeminiSseNormalizer extends Transform {
             ? String((part as { thoughtSignature?: unknown }).thoughtSignature)
             : '';
           if (sig) {
-            cacheAntigravitySessionSignature(this.antigravitySessionId, sig, 1);
+            const aliasKey =
+              this.antigravityAliasKey && this.antigravityAliasKey.trim().length ? this.antigravityAliasKey.trim() : 'antigravity.unknown';
+            cacheAntigravitySessionSignature(aliasKey, this.antigravitySessionId, sig, 1);
           }
         }
 

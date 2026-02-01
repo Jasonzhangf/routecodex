@@ -9,13 +9,20 @@ describe('compat profile chat:claude-code', () => {
     } as any;
 
     const result = applyRequestCompat('chat:claude-code', input, {
-      adapterContext: { requestId: 'req-test', entryEndpoint: '/v1/messages' } as any
+      adapterContext: {
+        requestId: 'req-test',
+        entryEndpoint: '/v1/messages',
+        providerProtocol: 'anthropic-messages'
+      } as any
     });
 
     expect(result.appliedProfile).toBe('chat:claude-code');
-    expect((result.payload as any).system).toBe("You are Claude Code, Anthropic's official CLI for Claude.");
+    expect(typeof (result.payload as any).metadata).toBe('object');
+    const system = (result.payload as any).system;
+    expect(Array.isArray(system)).toBe(true);
+    expect(system?.[0]?.type).toBe('text');
+    expect(system?.[0]?.text).toBe("You are Claude Code, Anthropic's official CLI for Claude.");
     expect((result.payload as any).messages?.[0]?.role).toBe('user');
     expect(String((result.payload as any).messages?.[0]?.content || '')).toContain('You are Codex, based on GPT-5.');
   });
 });
-

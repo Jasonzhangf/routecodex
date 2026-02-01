@@ -32,13 +32,10 @@ tool:exec_command (tool:exec_command)
     const msg = governed.choices[0]?.message;
     expect(msg).toBeDefined();
 
-    const toolCalls = Array.isArray(msg?.tool_calls) ? msg.tool_calls : [];
-    expect(toolCalls.length).toBeGreaterThanOrEqual(1);
-    expect(toolCalls[0]?.function?.name).toBe('exec_command');
-
-    const args = JSON.parse(toolCalls[0].function.arguments);
-    expect(args.cmd).toBe('which flutter');
-    expect(args.timeout_ms).toBe(10000);
+    // NOTE: response tool filters are strict and do not "repair" text markup into tool_calls.
+    // Text tool markup should remain visible for debugging instead of being silently upgraded.
+    expect(typeof msg.content).toBe('string');
+    expect(String(msg.content)).toContain('tool:exec_command');
+    expect(Array.isArray(msg?.tool_calls) ? msg.tool_calls.length : 0).toBe(0);
   });
 });
-

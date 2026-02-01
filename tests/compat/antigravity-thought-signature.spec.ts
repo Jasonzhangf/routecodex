@@ -79,6 +79,84 @@ describe('antigravity thoughtSignature (gemini-chat)', () => {
     expect((tailParts[0]?.thoughtSignature || '').length).toBeGreaterThan(10);
   });
 
+  it('does not reuse thoughtSignature across different antigravity aliases (same session)', () => {
+    const baseAdapterContextA = {
+      providerProtocol: 'gemini-chat',
+      runtimeKey: 'antigravity.aliasA',
+      entryEndpoint: '/v1/responses',
+      routeId: 'longcontext'
+    } as any;
+    const baseAdapterContextB = {
+      providerProtocol: 'gemini-chat',
+      runtimeKey: 'antigravity.aliasB',
+      entryEndpoint: '/v1/responses',
+      routeId: 'longcontext'
+    } as any;
+
+    const firstRequestId = 'openai-responses-antigravity.aliasA.gemini-3-pro-high-gemini-3-pro-high-20260130T000000000-201';
+    const followupRequestId = 'openai-responses-antigravity.aliasB.gemini-3-pro-high-gemini-3-pro-high-20260130T000000000-202';
+
+    const baseRequest = {
+      model: 'gemini-3-pro-high',
+      project: 'test-project',
+      requestId: firstRequestId,
+      requestType: 'agent',
+      userAgent: 'antigravity',
+      request: {
+        contents: [
+          { role: 'user', parts: [{ text: 'session seed: alias isolation test' }] },
+          { role: 'model', parts: [{ text: 'ok' }] }
+        ],
+        tools: [{ functionDeclarations: [{ name: 'exec_command', parameters: { type: 'object' } }] }]
+      }
+    } as any;
+
+    applyRequestCompat('chat:gemini', baseRequest, {
+      adapterContext: { ...baseAdapterContextA, requestId: firstRequestId }
+    });
+
+    const responsePayload = {
+      candidates: [
+        {
+          content: {
+            role: 'model',
+            parts: [
+              {
+                thoughtSignature: 'EiYKJGFsaWFzQS1zaWduYXR1cmU=',
+                functionCall: { name: 'exec_command', args: { command: 'echo hi' } }
+              }
+            ]
+          }
+        }
+      ],
+      request_id: firstRequestId
+    } as any;
+
+    applyResponseCompat('chat:gemini', responsePayload, {
+      adapterContext: { ...baseAdapterContextA, requestId: firstRequestId }
+    });
+
+    const followupRequest = {
+      ...baseRequest,
+      requestId: followupRequestId,
+      request: {
+        ...baseRequest.request,
+        contents: [
+          ...baseRequest.request.contents,
+          { role: 'model', parts: [{ functionCall: { id: 'fc_1', name: 'exec_command', args: { command: 'pwd' } } }] }
+        ]
+      }
+    } as any;
+
+    const second = applyRequestCompat('chat:gemini', followupRequest, {
+      adapterContext: { ...baseAdapterContextB, requestId: followupRequestId }
+    });
+
+    const tailParts = (second.payload as any)?.request?.contents?.slice(-1)?.[0]?.parts ?? [];
+    expect(tailParts[0]?.functionCall?.name).toBe('exec_command');
+    expect(typeof tailParts[0]?.thoughtSignature).not.toBe('string');
+  });
+
   it('injects into servertool-like web_search functionCall parts (web_search route)', () => {
     const baseAdapterContext = {
       providerProtocol: 'gemini-chat',

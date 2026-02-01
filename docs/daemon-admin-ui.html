@@ -905,16 +905,20 @@
                 VirtualRouter consumes this via <span class="mono">quotaView</span>. When
                 <span class="mono">inPool=false</span>, the provider is treated as removed from the route pool.
 	              </p>
-	              <div class="row" style="margin-bottom: 10px;">
-	                <label for="quotaFilterInput">filter</label>
-	                <input id="quotaFilterInput" type="text" placeholder="providerKey contains…" style="width: 320px;" />
-	                <label><input id="quotaHideOkToggle" type="checkbox" /> hide ok</label>
-	                <label><input id="quotaOnlyRoutedTargetsToggle" type="checkbox" checked /> only routed targets</label>
-	                <span class="muted" style="font-size:12px;">Tip: click a row to fill the offline box.</span>
-	              </div>
-	              <div class="row" style="margin-bottom: 10px;">
-	                <label for="quotaKeyInput">providerKey</label>
-	                <input id="quotaKeyInput" type="text" placeholder="tab.key1.gpt-5.2-codex" style="width: 420px;" />
+		              <div class="row" style="margin-bottom: 10px;">
+		                <label for="quotaFilterInput">filter</label>
+		                <input id="quotaFilterInput" type="text" placeholder="providerKey contains…" style="width: 320px;" />
+		                <label><input id="quotaHideOkToggle" type="checkbox" /> hide ok</label>
+		                <label><input id="quotaOnlyRoutedTargetsToggle" type="checkbox" checked /> only routed targets</label>
+                    <button id="quotaSelectVisibleBtn">Select visible</button>
+                    <button id="quotaClearSelectionBtn">Clear selection</button>
+                    <label><input id="quotaAutoRefreshToggle" type="checkbox" checked /> auto refresh</label>
+                    <span id="quotaSelectionHint" class="muted" style="font-size:12px;">selected 0</span>
+		                <span class="muted" style="font-size:12px;">Tip: click a row to fill the offline box.</span>
+		              </div>
+		              <div class="row" style="margin-bottom: 10px;">
+		                <label for="quotaKeyInput">providerKey</label>
+		                <input id="quotaKeyInput" type="text" placeholder="tab.key1.gpt-5.2-codex" style="width: 420px;" />
 	                <label for="quotaModeSelect">offline mode</label>
 	                <select id="quotaModeSelect" style="width: 140px;">
 	                  <option value="cooldown">cooldown</option>
@@ -934,25 +938,28 @@
 	                <button id="quotaApplyDisableBtn" class="danger">Offline</button>
 	                <button id="quotaApplyRecoverBtn">Recover</button>
 	                <button id="quotaApplyResetBtn">Reset</button>
-	              </div>
+		              </div>
                 <div class="muted" style="font-size:12px; margin: -6px 0 10px;">
                   Offline removes the provider from the route pool for the selected minutes. Recover brings it back online immediately.
+                  If selection is non-empty, actions apply to selected providerKeys.
                 </div>
-	              <div class="row" style="margin-bottom: 10px;">
-	                <button id="refreshQuotaBtn" class="primary">Refresh provider pool</button>
-	                <button id="refreshQuotaSnapshotBtn" class="primary">Refresh antigravity snapshot</button>
-	                <button id="resetQuotaBtn" class="danger">Reset provider-quota module</button>
+		              <div class="row" style="margin-bottom: 10px;">
+		                <button id="refreshQuotaBtn" class="primary">Refresh provider pool</button>
+		                <button id="refreshQuotaSnapshotBtn" class="primary">Refresh antigravity snapshot</button>
+		                <button id="resetQuotaBtn" class="danger">Reset provider-quota module</button>
               </div>
               <div class="table-wrap">
-                <table class="table">
-                  <thead>
-                    <tr>
-                      <th>provider</th>
-                      <th>key</th>
-                      <th>model</th>
-                      <th>inPool</th>
-                      <th>reason</th>
-                      <th>until</th>
+	                <table class="table">
+	                  <thead>
+	                    <tr>
+	                      <th style="width: 34px;">
+                        <input id="quotaSelectAllVisibleToggle" type="checkbox" title="Select all visible" />
+                      </th>
+	                      <th>key</th>
+	                      <th>model</th>
+	                      <th>inPool</th>
+	                      <th>reason</th>
+	                      <th>until</th>
                       <th>errCount</th>
                       <th></th>
                     </tr>
@@ -1056,18 +1063,21 @@
 
     <script>
       const $ = (id) => document.getElementById(id);
-		      const UI = {
-		        selectedProviderId: "",
-		        lastUnauthorizedToastAt: 0,
-		        adminAuth: null,
-		        quotaProviders: [],
-		        quotaProvidersUpdatedAt: 0,
-		        quotaProviderMap: null,
-		        routingTargets: null,
-		        routingTargetsUpdatedAt: 0,
-		        routingSources: [],
-		        routingSourcesUpdatedAt: 0,
-		        routingLocation: "virtualrouter.routing"
+			      const UI = {
+			        selectedProviderId: "",
+			        lastUnauthorizedToastAt: 0,
+			        adminAuth: null,
+			        quotaProviders: [],
+			        quotaProvidersUpdatedAt: 0,
+			        quotaProviderMap: null,
+              quotaSelection: new Set(),
+              quotaRenderedVisibleKeys: [],
+              quotaRenderedGroups: new Map(),
+			        routingTargets: null,
+			        routingTargetsUpdatedAt: 0,
+			        routingSources: [],
+			        routingSourcesUpdatedAt: 0,
+			        routingLocation: "virtualrouter.routing"
 		      };
       let toastTimer = null;
 
@@ -2799,13 +2809,14 @@
         }
       }
 
-      async function refreshQuota() {
-        const body = $("quotaTbody");
-        body.replaceChildren();
-        setLog("quotaOpLog", "");
-        try {
-          // Load routing targets so we can filter out providers not referenced by routing pools.
-          await refreshRoutingTargets();
+	      async function refreshQuota() {
+	        const body = $("quotaTbody");
+	        body.replaceChildren();
+	        setLog("quotaOpLog", "");
+          clearQuotaRenderedGroups();
+	        try {
+	          // Load routing targets so we can filter out providers not referenced by routing pools.
+	          await refreshRoutingTargets();
           // Force refresh quota first so UI doesn't show stale pool state.
           try {
             await apiFetch("/daemon/modules/quota/refresh", { method: "POST" });
@@ -2824,23 +2835,119 @@
           const out = await apiFetch("/quota/providers");
           UI.quotaProviders = Array.isArray(out.providers) ? out.providers : [];
           UI.quotaProvidersUpdatedAt = Date.now();
-          UI.quotaProviderMap = new Map(UI.quotaProviders.map((q) => [textOf(q.providerKey), q]));
-          updateOauthAuthIssueHint();
-          renderQuotaProviders();
-        } catch (e) {
-          if (e && e.status === 401) notifyUnauthorizedOnce("quota");
-          else toast(e && e.message ? e.message : String(e || "quota refresh failed"));
-          body.appendChild(createErrorRow(8, e && e.message ? e.message : e));
+	          UI.quotaProviderMap = new Map(UI.quotaProviders.map((q) => [textOf(q.providerKey), q]));
+	          updateOauthAuthIssueHint();
+	          renderQuotaProviders();
+            updateQuotaSelectionSummary();
+	        } catch (e) {
+	          if (e && e.status === 401) notifyUnauthorizedOnce("quota");
+	          else toast(e && e.message ? e.message : String(e || "quota refresh failed"));
+	          body.appendChild(createErrorRow(8, e && e.message ? e.message : e));
+	        }
+	      }
+
+        function normalizeProviderKeyList(value) {
+          if (Array.isArray(value)) {
+            return value.map((k) => textOf(k)).map((k) => k.trim()).filter(Boolean);
+          }
+          const single = textOf(value || "").trim();
+          return single ? [single] : [];
         }
-      }
 
-      function renderQuotaProviders() {
-        const body = $("quotaTbody");
-        body.replaceChildren();
+        function clearQuotaRenderedGroups() {
+          UI.quotaRenderedVisibleKeys = [];
+          UI.quotaRenderedGroups = new Map();
+        }
 
-        const filter = textOf($("quotaFilterInput").value || "").trim().toLowerCase();
-        const hideOk = Boolean($("quotaHideOkToggle").checked);
-        const onlyRoutedTargets = Boolean($("quotaOnlyRoutedTargetsToggle").checked);
+        function computeSelectionState(keys) {
+          const sel = UI.quotaSelection instanceof Set ? UI.quotaSelection : new Set();
+          let any = false;
+          let all = true;
+          for (const k of keys) {
+            const hit = sel.has(k);
+            if (hit) any = true;
+            else all = false;
+          }
+          return { any, all };
+        }
+
+        function setGroupCheckboxState(checkbox, keys) {
+          if (!checkbox) return;
+          const { any, all } = computeSelectionState(keys);
+          checkbox.indeterminate = Boolean(any && !all);
+          checkbox.checked = Boolean(all && keys.length > 0);
+        }
+
+        function syncQuotaRowCheckboxes() {
+          const sel = UI.quotaSelection instanceof Set ? UI.quotaSelection : new Set();
+          const body = $("quotaTbody");
+          if (!body) return;
+          body.querySelectorAll("input[data-select-key]").forEach((el) => {
+            const key = el.getAttribute("data-select-key");
+            if (!key) return;
+            el.checked = sel.has(key);
+          });
+        }
+
+        function updateQuotaSelectionSummary() {
+          syncQuotaRowCheckboxes();
+          const hint = $("quotaSelectionHint");
+          if (hint) {
+            const n = UI.quotaSelection instanceof Set ? UI.quotaSelection.size : 0;
+            hint.textContent = `selected ${n}`;
+          }
+          const master = $("quotaSelectAllVisibleToggle");
+          if (master) {
+            setGroupCheckboxState(master, Array.isArray(UI.quotaRenderedVisibleKeys) ? UI.quotaRenderedVisibleKeys : []);
+          }
+          if (UI.quotaRenderedGroups instanceof Map) {
+            for (const entry of UI.quotaRenderedGroups.values()) {
+              if (!entry || !entry.checkbox || !Array.isArray(entry.keys)) continue;
+              setGroupCheckboxState(entry.checkbox, entry.keys);
+            }
+          }
+        }
+
+        function setQuotaSelection(keys, selected) {
+          if (!(UI.quotaSelection instanceof Set)) UI.quotaSelection = new Set();
+          for (const k of keys) {
+            if (!k) continue;
+            if (selected) UI.quotaSelection.add(k);
+            else UI.quotaSelection.delete(k);
+          }
+          updateQuotaSelectionSummary();
+        }
+
+        function clearQuotaSelection() {
+          if (UI.quotaSelection instanceof Set) UI.quotaSelection.clear();
+          updateQuotaSelectionSummary();
+        }
+
+        function resolveQuotaActionTargets() {
+          const selected = UI.quotaSelection instanceof Set ? Array.from(UI.quotaSelection) : [];
+          if (selected.length) return selected;
+          return normalizeProviderKeyList($("quotaKeyInput")?.value);
+        }
+
+        let quotaRefreshTimer = null;
+        function scheduleQuotaRefresh() {
+          const auto = $("quotaAutoRefreshToggle");
+          if (auto && auto.checked === false) return;
+          if (quotaRefreshTimer) clearTimeout(quotaRefreshTimer);
+          quotaRefreshTimer = setTimeout(() => {
+            quotaRefreshTimer = null;
+            void refreshQuota();
+          }, 550);
+        }
+
+	      function renderQuotaProviders() {
+	        const body = $("quotaTbody");
+	        body.replaceChildren();
+          clearQuotaRenderedGroups();
+
+	        const filter = textOf($("quotaFilterInput").value || "").trim().toLowerCase();
+	        const hideOk = Boolean($("quotaHideOkToggle").checked);
+	        const onlyRoutedTargets = Boolean($("quotaOnlyRoutedTargetsToggle").checked);
         const routedProviderKeys = onlyRoutedTargets ? resolveRoutedProviderKeys(UI.routingTargets, UI.quotaProviders) : null;
 
         const list = Array.isArray(UI.quotaProviders) ? UI.quotaProviders : [];
@@ -2864,10 +2971,10 @@
           return textOf(a?.providerKey).localeCompare(textOf(b?.providerKey));
         });
 
-        if (!next.length) {
-          body.appendChild(createErrorRow(8, "No providers matched filter."));
-          return;
-        }
+	        if (!next.length) {
+	          body.appendChild(createErrorRow(8, "No providers matched filter."));
+	          return;
+	        }
 
         function splitProviderKey(providerKey) {
           const raw = textOf(providerKey || "");
@@ -2891,52 +2998,86 @@
           byAlias.get(authAlias).push({ q, pk, providerId, authAlias, model });
         }
 
-        const providerIds = Array.from(byProvider.keys()).sort((a, b) => a.localeCompare(b));
-        const groupCols = 8;
+	        const providerIds = Array.from(byProvider.keys()).sort((a, b) => a.localeCompare(b));
+	        const groupCols = 8;
 
-        const appendGroupRow = (label, indent = false) => {
-          const tr = document.createElement("tr");
-          tr.className = "group-row";
-          const td = document.createElement("td");
-          td.colSpan = groupCols;
-          td.textContent = label;
-          if (indent) td.className = "indent";
-          tr.appendChild(td);
-          body.appendChild(tr);
-        };
+	        const appendGroupRow = (label, opts = {}) => {
+	          const tr = document.createElement("tr");
+	          tr.className = "group-row";
+            const keys = Array.isArray(opts.keys) ? opts.keys : [];
+            const canSelect = Boolean(keys.length);
+            const td0 = document.createElement("td");
+            td0.className = "check-cell";
+            if (canSelect) {
+              const cb = document.createElement("input");
+              cb.type = "checkbox";
+              cb.title = "Select group";
+              cb.addEventListener("change", () => setQuotaSelection(keys, cb.checked));
+              td0.appendChild(cb);
+              if (UI.quotaRenderedGroups instanceof Map && typeof opts.groupId === "string" && opts.groupId) {
+                UI.quotaRenderedGroups.set(opts.groupId, { checkbox: cb, keys });
+              }
+              setGroupCheckboxState(cb, keys);
+            }
+            tr.appendChild(td0);
 
-        for (const providerId of providerIds) {
-          const byAlias = byProvider.get(providerId);
-          let modelsCount = 0;
-          for (const v of byAlias.values()) modelsCount += v.length;
-          appendGroupRow(`${providerId} (${modelsCount})`);
+	          const td = document.createElement("td");
+	          td.colSpan = groupCols - 1;
+	          td.textContent = label;
+	          if (opts.indent) td.className = "indent";
+	          tr.appendChild(td);
+	          body.appendChild(tr);
+	        };
 
-          const aliases = Array.from(byAlias.keys()).sort((a, b) => a.localeCompare(b));
-          for (const alias of aliases) {
-            const items = byAlias.get(alias);
+	        for (const providerId of providerIds) {
+	          const byAlias = byProvider.get(providerId);
+	          let modelsCount = 0;
+	          for (const v of byAlias.values()) modelsCount += v.length;
+            const providerKeys = Array.from(byAlias.values()).flatMap((items) => items.map((it) => it.pk));
+	          appendGroupRow(`${providerId} (${modelsCount})`, { keys: providerKeys, groupId: `provider:${providerId}` });
+
+	          const aliases = Array.from(byAlias.keys()).sort((a, b) => a.localeCompare(b));
+	          for (const alias of aliases) {
+	            const items = byAlias.get(alias);
             const fpSuffix = (() => {
               if (providerId !== "antigravity") return "";
               if (!items || !items.length) return "";
               const q0 = items[0] && items[0].q ? items[0].q : null;
               const suffix = textOf(q0 && (q0.fpSuffix || q0.fingerprintSuffix) ? (q0.fpSuffix || q0.fingerprintSuffix) : "");
               return suffix;
-            })();
-            const fpTag = fpSuffix ? ` · fp=${fpSuffix}` : "";
-            appendGroupRow(`${alias || "(no-key)"} (${items.length})${fpTag}`, true);
+	            })();
+	            const fpTag = fpSuffix ? ` · fp=${fpSuffix}` : "";
+              const aliasKeys = Array.isArray(items) ? items.map((it) => it.pk) : [];
+	            appendGroupRow(`${alias || "(no-key)"} (${items.length})${fpTag}`, {
+                indent: true,
+                keys: aliasKeys,
+                groupId: `alias:${providerId}.${alias || "(no-key)"}`
+              });
 
-            for (const item of items) {
-              const q = item.q;
-              const tr = document.createElement("tr");
-              tr.className = "provider-row";
-              tr.setAttribute("data-provider-key", item.pk);
+	            for (const item of items) {
+	              const q = item.q;
+	              const tr = document.createElement("tr");
+	              tr.className = "provider-row";
+	              tr.setAttribute("data-provider-key", item.pk);
 
-              tr.appendChild(createCell("td", "", "mono"));
-              tr.appendChild(createCell("td", "", "mono"));
-              tr.appendChild(createCell("td", item.model || item.pk, "mono indent", { title: true }));
+                const selTd = document.createElement("td");
+                selTd.className = "check-cell";
+                const cb = document.createElement("input");
+                cb.type = "checkbox";
+                cb.setAttribute("data-select-key", item.pk);
+                cb.checked = UI.quotaSelection instanceof Set ? UI.quotaSelection.has(item.pk) : false;
+                cb.addEventListener("change", () => {
+                  setQuotaSelection([item.pk], cb.checked);
+                });
+                selTd.appendChild(cb);
+                tr.appendChild(selTd);
+	              tr.appendChild(createCell("td", "", "mono"));
+	              tr.appendChild(createCell("td", item.model || item.pk, "mono indent", { title: true }));
+                UI.quotaRenderedVisibleKeys.push(item.pk);
 
-              const inPool = Boolean(q.inPool);
-              const inTd = document.createElement("td");
-              inTd.appendChild(pill(inPool ? "true" : "false", inPool ? "ok" : "bad"));
+	              const inPool = Boolean(q.inPool);
+	              const inTd = document.createElement("td");
+	              inTd.appendChild(pill(inPool ? "true" : "false", inPool ? "ok" : "bad"));
               tr.appendChild(inTd);
 
               const reason = textOf(q.reason || "");
@@ -2993,11 +3134,12 @@
               actionsTd.appendChild(box);
               tr.appendChild(actionsTd);
 
-              body.appendChild(tr);
-            }
-          }
-        }
-      }
+	              body.appendChild(tr);
+	            }
+	          }
+	        }
+          updateQuotaSelectionSummary();
+	      }
 
       function formatRemainingFraction(v) {
         if (typeof v !== "number" || !Number.isFinite(v)) return "—";
@@ -3198,47 +3340,59 @@
         }
       }
 
-      async function quotaAction(kind, providerKey) {
-        setLog("quotaOpLog", "");
-        if (!providerKey) {
-          setLog("quotaOpLog", "providerKey required");
-          toast("providerKey required");
-          return;
-        }
-        try {
-          if (kind === "recover") {
-            await apiFetch(`/quota/providers/${encodeURIComponent(providerKey)}/recover`, { method: "POST" });
-            await refreshQuota();
-            toast("Recovered.", "ok");
-            return;
-          }
-          if (kind === "reset") {
-            await apiFetch(`/quota/providers/${encodeURIComponent(providerKey)}/reset`, { method: "POST" });
-            await refreshQuota();
-            toast("Reset.", "ok");
-            return;
-          }
-          if (kind === "disable") {
-            const minutes = Number.parseFloat(textOf($("quotaDurationSelect").value || "60"));
-            if (!Number.isFinite(minutes) || minutes <= 0) {
-              throw new Error("Invalid minutes");
+	      async function quotaAction(kind, providerKeys) {
+	        setLog("quotaOpLog", "");
+          const keys = normalizeProviderKeyList(providerKeys);
+	        if (!keys.length) {
+	          setLog("quotaOpLog", "providerKey required (or select rows)");
+	          toast("providerKey required (or select rows)");
+	          return;
+	        }
+	        try {
+            const many = keys.length > 1;
+            if (many) {
+              const ok = confirm(`${kind} on ${keys.length} providerKeys?`);
+              if (!ok) return;
             }
-            const modeRaw = (textOf($("quotaModeSelect").value) || "cooldown").trim().toLowerCase();
-            const mode = modeRaw === "blacklist" ? "blacklist" : "cooldown";
-            await apiFetch(`/quota/providers/${encodeURIComponent(providerKey)}/disable`, {
-              method: "POST",
-              body: JSON.stringify({ mode, durationMinutes: minutes })
-            });
-            await refreshQuota();
-            toast("Applied.", "ok");
-            return;
-          }
-        } catch (e) {
-          if (e && e.status === 401) notifyUnauthorizedOnce("quota action");
-          setLog("quotaOpLog", `Action failed: ${e && e.message ? e.message : e}`);
-          toast(`Action failed: ${e && e.message ? e.message : String(e)}`);
-        }
-      }
+	          if (kind === "recover") {
+              for (const key of keys) {
+	              await apiFetch(`/quota/providers/${encodeURIComponent(key)}/recover`, { method: "POST" });
+              }
+	            scheduleQuotaRefresh();
+	            toast(many ? `Recovered (${keys.length}).` : "Recovered.", "ok");
+	            return;
+	          }
+	          if (kind === "reset") {
+              for (const key of keys) {
+	              await apiFetch(`/quota/providers/${encodeURIComponent(key)}/reset`, { method: "POST" });
+              }
+	            scheduleQuotaRefresh();
+	            toast(many ? `Reset (${keys.length}).` : "Reset.", "ok");
+	            return;
+	          }
+	          if (kind === "disable") {
+	            const minutes = Number.parseFloat(textOf($("quotaDurationSelect").value || "60"));
+	            if (!Number.isFinite(minutes) || minutes <= 0) {
+	              throw new Error("Invalid minutes");
+	            }
+	            const modeRaw = (textOf($("quotaModeSelect").value) || "cooldown").trim().toLowerCase();
+	            const mode = modeRaw === "blacklist" ? "blacklist" : "cooldown";
+              for (const key of keys) {
+	              await apiFetch(`/quota/providers/${encodeURIComponent(key)}/disable`, {
+	                method: "POST",
+	                body: JSON.stringify({ mode, durationMinutes: minutes })
+	              });
+              }
+	            scheduleQuotaRefresh();
+	            toast(many ? `Applied (${keys.length}).` : "Applied.", "ok");
+	            return;
+	          }
+	        } catch (e) {
+	          if (e && e.status === 401) notifyUnauthorizedOnce("quota action");
+	          setLog("quotaOpLog", `Action failed: ${e && e.message ? e.message : e}`);
+	          toast(`Action failed: ${e && e.message ? e.message : String(e)}`);
+	        }
+	      }
 
       async function resetQuotaModule() {
         setLog("quotaOpLog", "");
@@ -3476,29 +3630,39 @@
       $("oauthProviderSelect").addEventListener("change", updateOauthAuthIssueHint);
       $("oauthAuthAliasInput").addEventListener("input", updateOauthAuthIssueHint);
 
-      $("refreshQuotaBtn").addEventListener("click", refreshQuota);
-      $("refreshQuotaSnapshotBtn").addEventListener("click", refreshQuotaSnapshotNow);
-      $("quotaFilterInput").addEventListener("input", renderQuotaProviders);
-      $("quotaHideOkToggle").addEventListener("change", renderQuotaProviders);
-      $("quotaOnlyRoutedTargetsToggle").addEventListener("change", renderQuotaProviders);
-      $("quotaApplyDisableBtn").addEventListener("click", () => void quotaAction("disable", $("quotaKeyInput").value));
-      $("quotaApplyRecoverBtn").addEventListener("click", () => void quotaAction("recover", $("quotaKeyInput").value));
-      $("quotaApplyResetBtn").addEventListener("click", () => void quotaAction("reset", $("quotaKeyInput").value));
-      $("quotaTbody").addEventListener("click", (ev) => {
-        const tr = ev.target.closest("tr");
-        if (tr && tr.getAttribute) {
-          const pk = tr.getAttribute("data-provider-key");
+	      $("refreshQuotaBtn").addEventListener("click", refreshQuota);
+	      $("refreshQuotaSnapshotBtn").addEventListener("click", refreshQuotaSnapshotNow);
+	      $("quotaFilterInput").addEventListener("input", renderQuotaProviders);
+	      $("quotaHideOkToggle").addEventListener("change", renderQuotaProviders);
+	      $("quotaOnlyRoutedTargetsToggle").addEventListener("change", renderQuotaProviders);
+        $("quotaSelectVisibleBtn").addEventListener("click", () => {
+          const keys = Array.isArray(UI.quotaRenderedVisibleKeys) ? UI.quotaRenderedVisibleKeys : [];
+          setQuotaSelection(keys, true);
+        });
+        $("quotaClearSelectionBtn").addEventListener("click", clearQuotaSelection);
+        $("quotaSelectAllVisibleToggle").addEventListener("change", () => {
+          const master = $("quotaSelectAllVisibleToggle");
+          const keys = Array.isArray(UI.quotaRenderedVisibleKeys) ? UI.quotaRenderedVisibleKeys : [];
+          setQuotaSelection(keys, Boolean(master && master.checked));
+        });
+	      $("quotaApplyDisableBtn").addEventListener("click", () => void quotaAction("disable", resolveQuotaActionTargets()));
+	      $("quotaApplyRecoverBtn").addEventListener("click", () => void quotaAction("recover", resolveQuotaActionTargets()));
+	      $("quotaApplyResetBtn").addEventListener("click", () => void quotaAction("reset", resolveQuotaActionTargets()));
+	      $("quotaTbody").addEventListener("click", (ev) => {
+	        const tr = ev.target.closest("tr");
+	        if (tr && tr.getAttribute) {
+	          const pk = tr.getAttribute("data-provider-key");
           if (pk) $("quotaKeyInput").value = pk;
         }
         const el = ev.target.closest("button");
         if (!el) return;
-        const action = el.getAttribute("data-action");
-        const key = el.getAttribute("data-key");
-        if (key) $("quotaKeyInput").value = key;
-        if (action === "quota-recover") void quotaAction("recover", key);
-        else if (action === "quota-reset") void quotaAction("reset", key);
-        else if (action === "quota-disable") void quotaAction("disable", key);
-      });
+	        const action = el.getAttribute("data-action");
+	        const key = el.getAttribute("data-key");
+	        if (key) $("quotaKeyInput").value = key;
+	        if (action === "quota-recover") void quotaAction("recover", [key]);
+	        else if (action === "quota-reset") void quotaAction("reset", [key]);
+	        else if (action === "quota-disable") void quotaAction("disable", [key]);
+	      });
       $("resetQuotaBtn").addEventListener("click", resetQuotaModule);
 
       $("loadRoutingBtn").addEventListener("click", loadRouting);

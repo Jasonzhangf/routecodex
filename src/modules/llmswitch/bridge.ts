@@ -90,10 +90,13 @@ function requireCoreDist<TModule extends object = AnyRecord>(
 
 type AntigravitySessionSignatureModule = {
   extractAntigravityGeminiSessionId?: (payload: unknown) => string;
-  cacheAntigravitySessionSignature?: (sessionId: string, signature: string, messageCount?: number) => void;
+  cacheAntigravitySessionSignature?: (...args: unknown[]) => void;
+  configureAntigravitySessionSignaturePersistence?: (input: { stateDir: string; fileName?: string } | null) => void;
+  flushAntigravitySessionSignaturePersistenceSync?: () => void;
 };
 
 let cachedAntigravitySignatureModule: AntigravitySessionSignatureModule | null = null;
+let antigravitySignatureModuleWarmupPromise: Promise<AntigravitySessionSignatureModule | null> | null = null;
 
 function loadAntigravitySignatureModule(): AntigravitySessionSignatureModule | null {
   if (cachedAntigravitySignatureModule) {
@@ -109,6 +112,26 @@ function loadAntigravitySignatureModule(): AntigravitySessionSignatureModule | n
   return cachedAntigravitySignatureModule;
 }
 
+export async function warmupAntigravitySessionSignatureModule(): Promise<void> {
+  if (cachedAntigravitySignatureModule) {
+    return;
+  }
+  if (!antigravitySignatureModuleWarmupPromise) {
+    antigravitySignatureModuleWarmupPromise = (async () => {
+      try {
+        return await importCoreDist<AntigravitySessionSignatureModule>('conversion/compat/antigravity-session-signature');
+      } catch {
+        return null;
+      }
+    })();
+  }
+  try {
+    cachedAntigravitySignatureModule = await antigravitySignatureModuleWarmupPromise;
+  } finally {
+    antigravitySignatureModuleWarmupPromise = null;
+  }
+}
+
 export function extractAntigravityGeminiSessionId(payload: unknown): string | undefined {
   const mod = loadAntigravitySignatureModule();
   const fn = mod?.extractAntigravityGeminiSessionId;
@@ -122,14 +145,54 @@ export function extractAntigravityGeminiSessionId(payload: unknown): string | un
   }
 }
 
-export function cacheAntigravitySessionSignature(sessionId: string, signature: string, messageCount = 1): void {
+export function cacheAntigravitySessionSignature(aliasKey: string, sessionId: string, signature: string, messageCount?: number): void;
+export function cacheAntigravitySessionSignature(sessionId: string, signature: string, messageCount?: number): void;
+export function cacheAntigravitySessionSignature(a: string, b: string, c?: string | number, d = 1): void {
   const mod = loadAntigravitySignatureModule();
   const fn = mod?.cacheAntigravitySessionSignature;
   if (typeof fn !== 'function') {
     return;
   }
+  const supportsAliasKey =
+    typeof (mod as any)?.getAntigravitySessionSignature === 'function' &&
+    ((mod as any).getAntigravitySessionSignature as (...args: unknown[]) => unknown).length >= 2;
+  const isNewSignature = typeof c === 'string';
+  const aliasKey = isNewSignature ? a : 'antigravity.unknown';
+  const sessionId = isNewSignature ? b : a;
+  const signature = isNewSignature ? (c as string) : b;
+  const messageCount = typeof c === 'number' ? c : typeof d === 'number' ? d : 1;
   try {
-    fn(sessionId, signature, messageCount);
+    if (isNewSignature && supportsAliasKey) {
+      fn(aliasKey, sessionId, signature, messageCount);
+    } else {
+      fn(sessionId, signature, messageCount);
+    }
+  } catch {
+    // best-effort only
+  }
+}
+
+export function configureAntigravitySessionSignaturePersistence(input: { stateDir: string; fileName?: string } | null): void {
+  const mod = loadAntigravitySignatureModule();
+  const fn = mod?.configureAntigravitySessionSignaturePersistence;
+  if (typeof fn !== 'function') {
+    return;
+  }
+  try {
+    fn(input);
+  } catch {
+    // best-effort only
+  }
+}
+
+export function flushAntigravitySessionSignaturePersistenceSync(): void {
+  const mod = loadAntigravitySignatureModule();
+  const fn = mod?.flushAntigravitySessionSignaturePersistenceSync;
+  if (typeof fn !== 'function') {
+    return;
+  }
+  try {
+    fn();
   } catch {
     // best-effort only
   }
