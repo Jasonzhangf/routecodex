@@ -29,6 +29,7 @@ Provider V2 may use upstream SSE; timeouts are **config-driven** via env (or pro
 These are enforced in the HTTP server SSE bridge (not in provider runtime), but often tuned together with upstream streaming:
 - `ROUTECODEX_HTTP_SSE_IDLE_TIMEOUT_MS` / `RCC_HTTP_SSE_IDLE_TIMEOUT_MS`: client SSE idle timeout (default `900000`).
 - `ROUTECODEX_HTTP_SSE_TIMEOUT_MS` / `RCC_HTTP_SSE_TIMEOUT_MS`: client SSE total timeout (default `1000000`).
+- `ROUTECODEX_HTTP_SSE_KEEPALIVE_MS` / `RCC_HTTP_SSE_KEEPALIVE_MS`: server-side SSE keepalive comment interval (default `15000`).
 
 ## Rate-limit cooldown knobs
 These envs influence how the provider layer annotates retry/cooldown hints for VirtualRouter.

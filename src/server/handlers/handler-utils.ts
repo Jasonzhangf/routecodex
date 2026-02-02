@@ -119,6 +119,7 @@ export function sendPipelineResponse(
     let ended = false;
     let idleTimer: NodeJS.Timeout | null = null;
     let totalTimer: NodeJS.Timeout | null = null;
+    let keepaliveTimer: NodeJS.Timeout | null = null;
 
     const readTimeoutMs = (names: string[], fallback: number): number => {
       for (const name of names) {
@@ -143,6 +144,11 @@ export function sendPipelineResponse(
       DEFAULT_TIMEOUTS.HTTP_SSE_TOTAL_MS
     );
 
+    const keepaliveMs = readTimeoutMs(
+      ['ROUTECODEX_HTTP_SSE_KEEPALIVE_MS', 'RCC_HTTP_SSE_KEEPALIVE_MS'],
+      15_000
+    );
+
     const clearTimers = () => {
       if (idleTimer) {
         clearTimeout(idleTimer);
@@ -151,6 +157,10 @@ export function sendPipelineResponse(
       if (totalTimer) {
         clearTimeout(totalTimer);
         totalTimer = null;
+      }
+      if (keepaliveTimer) {
+        clearInterval(keepaliveTimer);
+        keepaliveTimer = null;
       }
     };
 
@@ -199,6 +209,23 @@ export function sendPipelineResponse(
       totalTimer.unref?.();
     }
     resetIdle();
+
+    // Keep-alive: send SSE comments periodically so clients don't treat long servertool holds as a dead connection.
+    // Comment frames (": ...") are ignored by SSE parsers and safe across OpenAI/Anthropic streams.
+    if (Number.isFinite(keepaliveMs) && keepaliveMs > 0) {
+      keepaliveTimer = setInterval(() => {
+        if (ended) {
+          return;
+        }
+        try {
+          res.write(`: keepalive\n\n`);
+          resetIdle();
+        } catch {
+          // ignore write failures; close handler will clean up
+        }
+      }, keepaliveMs);
+      keepaliveTimer.unref?.();
+    }
 
     const cleanup = () => {
       clearTimers();
