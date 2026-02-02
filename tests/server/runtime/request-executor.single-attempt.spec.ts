@@ -268,7 +268,7 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     expect((thirdCallMetadata as any)?.__rt?.antigravityRetryErrorConsecutive).toBe(2);
   });
 
-  it('retries once with antigravity thoughtSignature recovery hint on HTTP 400 signature-invalid errors', async () => {
+  it('does not host-retry on HTTP 400 signature-invalid errors (handled by llmswitch-core servertool)', async () => {
     const invalidSig = Object.assign(new Error('HTTP 400: thinking.signature invalid'), {
       statusCode: 400,
       retryable: false,
@@ -331,10 +331,7 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     };
 
     await expect(executor.execute(request)).rejects.toThrow('thinking.signature');
-    expect(fakePipeline.execute).toHaveBeenCalledTimes(2);
-    expect(handle.instance.processIncoming).toHaveBeenCalledTimes(2);
-
-    const secondCallMetadata = fakePipeline.execute.mock.calls[1][0].metadata as Record<string, unknown>;
-    expect((secondCallMetadata as any)?.__rt?.antigravityThoughtSignatureRecovery).toBe(true);
+    expect(fakePipeline.execute).toHaveBeenCalledTimes(1);
+    expect(handle.instance.processIncoming).toHaveBeenCalledTimes(1);
   });
 });

@@ -1075,6 +1075,23 @@ export class RouteCodexHttpServer {
     // Quota is tracked by providerKey, so we need a stable way to derive authType for every key,
     // even when the handle has already been created for this runtimeKey.
     const runtimeKeyAuthType = new Map<string, string | null>();
+    const apikeyDailyResetTime = (() => {
+      const vr = this.userConfig && typeof this.userConfig === 'object' ? (this.userConfig as any).virtualrouter : null;
+      const quota = vr && typeof vr === 'object' && !Array.isArray(vr) ? (vr as any).quota : null;
+      if (!quota || typeof quota !== 'object' || Array.isArray(quota)) {
+        return null;
+      }
+      const raw =
+        typeof (quota as any).apikeyDailyResetTime === 'string'
+          ? (quota as any).apikeyDailyResetTime
+          : typeof (quota as any).apikeyResetTime === 'string'
+            ? (quota as any).apikeyResetTime
+            : typeof (quota as any).apikeyReset === 'string'
+              ? (quota as any).apikeyReset
+              : null;
+      const trimmed = typeof raw === 'string' ? raw.trim() : '';
+      return trimmed ? trimmed : null;
+    })();
 
     for (const [providerKey, runtime] of Object.entries(runtimeMap)) {
       if (!runtime) { continue; }
@@ -1111,7 +1128,7 @@ export class RouteCodexHttpServer {
       // Use the runtimeKey authType when available so shared runtimeKey models inherit correct policy.
       try {
         const authType = runtimeKeyAuthType.get(runtimeKey) ?? authTypeFromRuntime;
-        quotaModule?.registerProviderStaticConfig?.(providerKey, { authType: authType ?? null });
+        quotaModule?.registerProviderStaticConfig?.(providerKey, { authType: authType ?? null, apikeyDailyResetTime });
       } catch {
         // best-effort: quota static config registration must never block runtime init
       }

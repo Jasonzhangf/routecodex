@@ -16,6 +16,28 @@
 
 ## 任务清单
 
+## Clock：Time + Alarm + Tools（按 llmswitch-core 单路径实现）
+
+- [x] 文档：更新 `docs/SERVERTOOL_CLOCK_DESIGN.md`（Time tag 注入、action=get、NTP、到期补齐 tools、防死循环规则）
+- [x] llmswitch-core：`clock` tool schema 增加 `action=get`
+- [x] llmswitch-core：NTP（SNTP/UDP）best-effort 校时 + `ntp-state.json` 持久化 + `correctedNowMs`
+- [x] llmswitch-core：每次请求注入 Time tag
+  - [x] 末尾为 `role:user` → 追加一条 user 时间 tag
+  - [x] 末尾为 `role:tool` → 合成 `assistant clock.get tool_call` + 配对 `tool result`
+- [x] llmswitch-core：到期闹钟注入（role:user）+ “可调用 tools”文案
+- [x] llmswitch-core：到期时检查并补齐标准工具列表（按工具 allowlist/phase gating 对齐）
+- [x] llmswitch-core：修复窗口内设置导致的逻辑死循环（notBeforeRequestId guard：本 request 不激发，下次才激发）
+- [x] Tests：更新/新增 `tests/servertool/servertool-clock.spec.ts` 覆盖 time 注入、到期注入、tools 补齐与 bug 回归
+- [x] 验证：`npm run test:routing-instructions`（包含 `tests/servertool/servertool-clock.spec.ts`）
+
+---
+
+## CLI：restart 广播 + 端口指定
+
+- [x] `routecodex restart` 默认广播重启所有本机运行中的 server（按 `/health` 识别）
+- [x] `routecodex restart --port <port>` 支持指定端口重启
+- [x] Tests：更新 `tests/cli/restart-command.spec.ts`
+- [x] 验证：`npm run build:dev`（包含全局安装）
 
 ---
 
@@ -36,6 +58,9 @@
 - **A3 Thought Signature（缓存/预热/恢复）** ✅（已对齐）
   - 参考：`sharedmodule/llmswitch-core/src/conversion/hub/pipeline/**`、`sharedmodule/llmswitch-core/src/conversion/compat/*`
   - 要求：仅 Antigravity 分支；缓存 12h / session 50 / 全局 200；不扩展 deepFilter 策略
+- **A3b ThoughtSignature 429 Bootstrap（ServerTool preflight + replay）** ✅（实现完成，已验证）
+  - 设计：`docs/ANTIGRAVITY_THOUGHT_SIGNATURE_BOOTSTRAP_429.md`
+  - 要求：仅 user 层注入；强制 `clock.get`；失败后不循环、交给正常重试/回退
 - **A4 工具调用清理（history/tool_call）** ✅（已对齐）
   - 参考：`sharedmodule/llmswitch-core/src/conversion/hub/pipeline/**`、`sharedmodule/llmswitch-core/src/conversion/compat/*`
   - 要求：仅 Antigravity 分支；对齐 deepFilterThinkingBlocks

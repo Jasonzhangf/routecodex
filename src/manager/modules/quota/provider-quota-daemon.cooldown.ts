@@ -93,6 +93,79 @@ export function parseQuotaResetDelayMs(event: ProviderErrorEvent): number | null
   return null;
 }
 
+export function parseApikeyDailyResetAtMs(event: ProviderErrorEvent): number | null {
+  const message = typeof event.message === 'string' ? event.message : '';
+  if (!message) {
+    return null;
+  }
+  const match = message.match(/"resetAt"\s*:\s*"([^"]+)"/i);
+  if (!match || !match[1]) {
+    return null;
+  }
+  const iso = match[1].trim();
+  if (!iso) {
+    return null;
+  }
+  const parsed = Date.parse(iso);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return null;
+  }
+  return Math.floor(parsed);
+}
+
+export function computeDailyResetUntilMs(args: {
+  nowMs: number;
+  resetTime: string | null;
+  defaultLocalHour: number;
+  defaultLocalMinute: number;
+}): number | null {
+  const nowMs = args.nowMs;
+  if (!Number.isFinite(nowMs) || nowMs <= 0) {
+    return null;
+  }
+  const resetTime = typeof args.resetTime === 'string' ? args.resetTime.trim() : '';
+  const parsed = parseDailyResetTime(resetTime);
+  const hour = parsed ? parsed.hour : args.defaultLocalHour;
+  const minute = parsed ? parsed.minute : args.defaultLocalMinute;
+  const mode = parsed ? parsed.mode : 'local';
+
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+    return null;
+  }
+
+  const d = new Date(nowMs);
+  const candidate =
+    mode === 'utc'
+      ? Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), hour, minute, 0, 0)
+      : new Date(d.getFullYear(), d.getMonth(), d.getDate(), hour, minute, 0, 0).getTime();
+
+  if (!Number.isFinite(candidate)) {
+    return null;
+  }
+  const dayMs = 24 * 60 * 60_000;
+  const until = candidate > nowMs ? candidate : candidate + dayMs;
+  return until > nowMs ? until : nowMs + dayMs;
+}
+
+function parseDailyResetTime(value: string): { hour: number; minute: number; mode: 'local' | 'utc' } | null {
+  const raw = typeof value === 'string' ? value.trim() : '';
+  if (!raw) {
+    return null;
+  }
+  const utc = raw.toUpperCase().endsWith('Z');
+  const core = utc ? raw.slice(0, -1).trim() : raw;
+  const match = core.match(/^(\d{1,2})(?::(\d{1,2}))?$/);
+  if (!match) {
+    return null;
+  }
+  const hour = Number(match[1]);
+  const minute = match[2] !== undefined ? Number(match[2]) : 0;
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) {
+    return null;
+  }
+  return { hour: Math.floor(hour), minute: Math.floor(minute), mode: utc ? 'utc' : 'local' };
+}
+
 function parseDurationToMs(value?: string): number | null {
   if (!value || typeof value !== 'string') {
     return null;
@@ -126,4 +199,3 @@ function parseDurationToMs(value?: string): number | null {
   }
   return Math.round(totalMs);
 }
-

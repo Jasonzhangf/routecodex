@@ -83,6 +83,17 @@
   - `inPool=false, reason='fatal'`。
 - 恢复依赖时间到期或管理操作，成功事件不会自动解除。
 
+#### 402（apikey 日额度/费用上限）
+
+- 仅对 `authType=apikey` 生效：
+  - 当上游返回 `HTTP 402`（例如 `daily_cost_limit_exceeded`）时，视为“当日额度耗尽”。
+  - daemon 将该 `providerKey` 设为 `reason='blacklist'`，并设置 `blacklistUntil` 到“下一次 reset 时间”。
+    - 优先使用上游错误 payload 中的 `"resetAt":"<ISO8601>"`（如果存在）。
+    - 若上游未提供 `resetAt`，则使用配置的每日 reset 时间：
+      - `virtualrouter.quota.apikeyDailyResetTime`（也兼容 `apikeyResetTime` / `apikeyReset`）
+      - 格式：`"HH:mm"`（本地时区）或 `"HH:mmZ"`（UTC）
+      - 未配置时默认 `"12:00"`（本地时区）
+
 ### 2.2 静态 quota（apikey provider）
 
 - 优先级：

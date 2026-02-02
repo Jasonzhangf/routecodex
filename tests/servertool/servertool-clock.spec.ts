@@ -40,6 +40,8 @@ function readClockStateFile(sessionId: string): any {
 describe('servertool:clock', () => {
   beforeAll(() => {
     process.env.ROUTECODEX_SESSION_DIR = SESSION_DIR;
+    // Keep tests deterministic and offline.
+    process.env.ROUTECODEX_CLOCK_NTP = '0';
   });
 
   beforeEach(() => {
@@ -144,8 +146,10 @@ describe('servertool:clock', () => {
       requestId: 'req-clock-clear-2'
     });
     const processed2 = result2.processedRequest as any;
-    const lastUser = processed2.messages?.[processed2.messages.length - 1];
-    expect(typeof lastUser?.content === 'string' ? lastUser.content : '').not.toContain('clock:clear');
+    const lastUserWithDirective = (processed2.messages as any[]).findLast((m) =>
+      m?.role === 'user' && typeof m?.content === 'string' && m.content.includes('please clear')
+    );
+    expect(typeof lastUserWithDirective?.content === 'string' ? lastUserWithDirective.content : '').not.toContain('clock:clear');
     expect(fs.existsSync(stateFile)).toBe(false);
   });
 
@@ -224,9 +228,14 @@ describe('servertool:clock', () => {
     });
 
     const processedRequest = processed.processedRequest as any;
-    const last = processedRequest.messages?.[processedRequest.messages.length - 1];
-    expect(last?.role).toBe('system');
-    expect(typeof last?.content === 'string' ? last.content : '').toContain('[scheduled task:"do the thing"');
+    const messages = Array.isArray(processedRequest.messages) ? processedRequest.messages : [];
+    // Due reminder is injected as a user message (time tag is appended after).
+    const dueMsg = messages.findLast((m: any) => m?.role === 'user' && typeof m?.content === 'string' && m.content.includes('[Clock Reminder]'));
+    expect(dueMsg).toBeDefined();
+    expect(typeof dueMsg?.content === 'string' ? dueMsg.content : '').toContain('[scheduled task:"do the thing"');
+    const last = messages[messages.length - 1];
+    expect(last?.role).toBe('user');
+    expect(typeof last?.content === 'string' ? last.content : '').toContain('[Time/Date]:');
 
     const reservation = processedRequest.metadata?.__clockReservation;
     expect(reservation?.reservationId).toBe(`${reqId}:clock`);
@@ -243,6 +252,95 @@ describe('servertool:clock', () => {
     expect(stateAfter.tasks).toHaveLength(1);
     expect(typeof stateAfter.tasks[0].deliveredAtMs).toBe('number');
     expect(stateAfter.tasks[0].deliveryCount).toBe(1);
+  });
+
+  test('injects time tag as user message when last role is user', async () => {
+    const request = buildRequest([{ role: 'user', content: 'hi' }]);
+    const result = await runReqProcessStage1ToolGovernance({
+      request,
+      rawPayload: {},
+      metadata: { originalEndpoint: '/v1/chat/completions', __rt: { clock: { enabled: true, tickMs: 0 } } },
+      entryEndpoint: '/v1/chat/completions',
+      requestId: 'req-clock-time-tag-user'
+    });
+
+    const processed = result.processedRequest as any;
+    const last = processed.messages?.[processed.messages.length - 1];
+    expect(last?.role).toBe('user');
+    expect(typeof last?.content === 'string' ? last.content : '').toContain('[Time/Date]:');
+  });
+
+  test('injects paired clock.get tool_call+tool_result when last role is tool', async () => {
+    const request = buildRequest([
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          {
+            id: 'call_any_1',
+            type: 'function',
+            function: { name: 'shell', arguments: JSON.stringify({ command: 'echo ok' }) }
+          }
+        ]
+      },
+      {
+        role: 'tool',
+        tool_call_id: 'call_any_1',
+        content: 'ok'
+      }
+    ] as any);
+
+    const result = await runReqProcessStage1ToolGovernance({
+      request,
+      rawPayload: {},
+      metadata: { originalEndpoint: '/v1/chat/completions', __rt: { clock: { enabled: true, tickMs: 0 } } },
+      entryEndpoint: '/v1/chat/completions',
+      requestId: 'req-clock-time-tag-tool'
+    });
+
+    const processed = result.processedRequest as any;
+    const messages = processed.messages as any[];
+    const tail = messages.slice(-2);
+    expect(tail[0]?.role).toBe('assistant');
+    expect(Array.isArray(tail[0]?.tool_calls)).toBe(true);
+    expect(tail[0]?.tool_calls?.[0]?.function?.name).toBe('clock');
+    expect(tail[1]?.role).toBe('tool');
+    expect(typeof tail[1]?.tool_call_id).toBe('string');
+    expect(tail[1].tool_call_id).toBe(tail[0].tool_calls[0].id);
+    const payload = JSON.parse(String(tail[1]?.content || '{}'));
+    expect(payload.action).toBe('get');
+  });
+
+  test('injects standard tool list when due reminders are injected', async () => {
+    const sessionId = 's-clock-tools-complete';
+    const clockConfig = normalizeClockConfig({ enabled: true, tickMs: 0 });
+    if (!clockConfig) throw new Error('clockConfig should not be null');
+    await scheduleClockTasks(sessionId, [{ dueAtMs: Date.now() - 1, task: 'due' }], clockConfig);
+
+    const request = buildRequest([{ role: 'user', content: 'next' }]);
+    const result = await runReqProcessStage1ToolGovernance({
+      request,
+      rawPayload: {},
+      metadata: { originalEndpoint: '/v1/chat/completions', __rt: { clock: { enabled: true, tickMs: 0 } }, sessionId },
+      entryEndpoint: '/v1/chat/completions',
+      requestId: 'req-clock-tools-complete'
+    });
+
+    const processed = result.processedRequest as any;
+    const toolNames = (Array.isArray(processed.tools) ? processed.tools : []).map((t: any) => t?.function?.name);
+    for (const name of [
+      'clock',
+      'shell',
+      'exec_command',
+      'apply_patch',
+      'update_plan',
+      'view_image',
+      'list_mcp_resources',
+      'list_mcp_resource_templates',
+      'read_mcp_resource'
+    ]) {
+      expect(toolNames).toContain(name);
+    }
   });
 
   test('unit: schedule/list/cancel/clear via clock handler outputs', async () => {
@@ -386,6 +484,49 @@ describe('servertool:clock', () => {
 
     // Session file should be gone after clear.
     expect(fs.existsSync(path.join(SESSION_DIR, 'clock', `${sessionId}.json`))).toBe(false);
+  });
+
+  test('unit: clock.get returns time snapshot', async () => {
+    const adapterContext: AdapterContext = {
+      requestId: 'req-clock-get-1',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      __rt: { clock: { enabled: true, tickMs: 0 } }
+    } as any;
+
+    const result = await runServerSideToolEngine({
+      chatResponse: {
+        choices: [
+          {
+            message: {
+              role: 'assistant',
+              content: null,
+              tool_calls: [
+                {
+                  id: 'call_clock_get',
+                  type: 'function',
+                  function: { name: 'clock', arguments: JSON.stringify({ action: 'get', items: [], taskId: '' }) }
+                }
+              ]
+            },
+            finish_reason: 'tool_calls'
+          }
+        ]
+      } as any,
+      adapterContext,
+      entryEndpoint: '/v1/chat/completions',
+      requestId: 'req-clock-get-1',
+      providerProtocol: 'openai-chat'
+    });
+
+    const payload = JSON.parse((result.finalChatResponse as any).tool_outputs.slice(-1)[0].content);
+    expect(payload.ok).toBe(true);
+    expect(payload.action).toBe('get');
+    expect(typeof payload.utc).toBe('string');
+    expect(typeof payload.local).toBe('string');
+    expect(typeof payload.timezone).toBe('string');
+    expect(typeof payload.nowMs).toBe('number');
+    expect(payload.ntp).toBeDefined();
   });
 
   test('unit: clock handler returns ok=false when clock is not enabled', async () => {

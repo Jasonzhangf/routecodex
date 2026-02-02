@@ -1,15 +1,16 @@
-# ServerTool: `clock`（定时提醒）详细设计（Draft）
+# ServerTool: `clock`（Time + Alarm）详细设计（Draft）
 
-> 目标：在不引入“旁路”执行路径的前提下，为每个 session 提供可持久化的定时提醒能力，并在后续请求中把提醒注入到模型上下文里。
-> 本文是**详细设计**，不包含实现。
+> 目标：在不引入“旁路”执行路径的前提下，为每个 session 提供可持久化的 **定时提醒（Alarm）**，并提供可机器读取的 **当前时间（Time）** 能力给 MCP/模型使用。
+> 本文是**详细设计**，用于约束行为与契约（实现细节以源码为准）。
 
 ## 0. 背景与约束
 
 - 单执行路径：所有模型调用仍必须走 `HTTP server → llmswitch-core Hub Pipeline → Provider V2 → upstream`。
 - llmswitch-core 拥有工具语义与路由：Host/Provider 不得自行修复 tool calls、重写参数或决定路由，只能注入依赖与 IO。
 - Provider 层只做 transport（auth/http/retry/compat），不得理解 payload 语义。
-- 时钟任务必须 **serverId + sessionId** 作用域隔离，避免跨 server 串读（stopMessage 的坑不能再踩）。
-- “过期删除”与“过期也算触发”必须统一：保留期（retention）设为 **20 分钟**（`retentionMs = 20 * 60 * 1000`）。
+- `clock` 的存储根目录由运行时环境变量 `ROUTECODEX_SESSION_DIR` 提供；所有持久化均落在该目录下。
+- “过期删除”与“过期也算触发”必须统一：保留期（retention）默认 **20 分钟**（`retentionMs = 20 * 60 * 1000`）。
+- 所有 “注入（messages/tools）/工具 schema/工具配对” 必须在 llmswitch-core 内完成；Host/Provider 不得做补丁式修复。
 
 ## 1. 需求澄清（本设计采纳的语义）
 
@@ -20,7 +21,7 @@
 
 ### 1.2 调度与触发窗口
 
-- 模型通过调用 `clock` 工具创建任务，形成 `{dueAt, task}` 列表，写入 daemon（持久化）。
+- 模型通过调用 `clock` 工具创建任务，形成 `{dueAt, task, tool?, arguments?}` 列表，写入持久化（按 session 作用域）。
 - 每次请求到来时（对该请求的 session）检查任务是否“到达触发阈值”：
   - 触发窗口定义为：`now >= dueAt - 60s` 即视为到达（“差一分钟到也算，过期也算”）。
   - 过期任务并不立即删除；仅当 `now > dueAt + retentionMs` 才删除。
@@ -30,10 +31,7 @@
 **重要现实约束：没有客户端请求就无法把提醒推送给客户端**（系统当前没有反向推送通道）。
 
 - 本设计的默认投递语义：提醒以 `"[scheduled task:\"...\"]"` 的形式**注入到下一次该 session 的请求**中。
-- “finish_reason=stop 且时间没到就 hold 等待”会把 HTTP 变成长连接并引发代理/超时/资源占用等风险；但在当前需求中**明确要求 hold 且不限制时间**：
-  - 当响应 `finish_reason=stop` 且存在未到达触发窗口的最近任务 `nextDueAtMs`，server 可以保持连接，直到 `now >= nextDueAtMs - 60s` 再继续执行注入/续轮。
-  - 若客户端在 hold 期间断开：server 无法把“同一条响应”推送回客户端；此时任务保持在 daemon 持久化中，**在下一次同 session 的请求到来时**（只要未超过 20 分钟 retention）依然会被判定为 due 并注入提醒。
-  - 若需要“用户完全离线仍能收到提醒”，必须补齐客户端侧机制（例如：客户端定期发起心跳/拉取请求，或新增事件订阅/长轮询 endpoint）。单纯 server 侧 fake 请求给模型不会自动出现在既有客户端 UI 上。
+- 本设计不要求“server hold 直到时间到”（长连接/代理超时风险过高）；只保证“下一次请求注入”语义。
 
 ### 1.4 与 `stopMessage` 的优先级与交互（必须）
 
@@ -53,6 +51,7 @@
 
 - 工具名：`clock`
 - action：
+  - `get`：获取当前时间（UTC + local）与 NTP 校时状态（机器可解析；同时作为“clock 激活”信号）
   - `schedule`：创建/覆盖任务
   - `list`：列出本 session 未过期任务
   - `cancel`：取消指定任务
@@ -68,7 +67,7 @@
 {
   "type": "object",
   "properties": {
-    "action": { "type": "string", "enum": ["schedule", "list", "cancel", "clear"] },
+    "action": { "type": "string", "enum": ["get", "schedule", "list", "cancel", "clear"] },
     "items": {
       "type": "array",
       "items": {
@@ -87,24 +86,28 @@
             "description": "可选：建议要调用的工具名（仅用于提示，不做强制执行）。"
           },
           "arguments": {
-            "type": "object",
-            "description": "可选：建议工具参数（仅用于提示）。",
-            "additionalProperties": true
+            "type": "string",
+            "description": "可选：建议工具参数（仅用于提示）。JSON string（例如 \"{}\"），避免 strict schema 下的任意 object 结构。",
+            "default": "{}"
           }
         },
-        "required": ["dueAt", "task"]
+        "required": ["dueAt", "task", "tool", "arguments"]
       }
     },
     "taskId": { "type": "string", "description": "cancel 时使用" }
   },
-  "required": ["action"]
+  "required": ["action", "items", "taskId"]
 }
 ```
+
+> 说明：当前实现采用 `strict: true` 的函数工具 schema（对齐 OpenAI Responses 的严格校验），因此 `required` 需要覆盖 `properties` 的全部字段；
+> 对不适用的 action，可使用空数组/空字符串占位（例如 `get` 使用 `items=[]`、`taskId=""`）。
 
 ### 2.3 工具返回（建议）
 
 `clock` 工具返回必须可机器解析，便于模型后续自查：
 
+- `get`：返回 `{ ok, action:"get", active:true, nowMs, utc, local, timezone, ntp:{...} }`
 - `schedule`：返回 `{ ok, scheduled: [{ taskId, dueAt, task }] }`
 - `list`：返回 `{ ok, items: [{ taskId, dueAt, task, deliveredAt? }] }`
 - `cancel`：返回 `{ ok, removed: taskId }`
@@ -117,7 +120,6 @@
 ```ts
 type ClockTask = {
   taskId: string;          // uuid
-  serverId: string;        // 当前 server 实例稳定标识（用于路径隔离）
   sessionId: string;
   dueAtMs: number;         // 毫秒时间戳
   createdAtMs: number;
@@ -127,6 +129,7 @@ type ClockTask = {
   arguments?: Record<string, unknown>;
   deliveredAtMs?: number;  // 成功“注入到某次请求并 commit”后写入
   deliveryCount: number;   // 注入/投递计数（至少 1 次）
+  notBeforeRequestId?: string; // 防死循环：窗口内设置的任务，本 requestId 不允许触发注入
 };
 ```
 
@@ -135,7 +138,6 @@ type ClockTask = {
 ```ts
 type ClockSessionState = {
   version: 1;
-  serverId: string;
   sessionId: string;
   tasks: ClockTask[];
   updatedAtMs: number;
@@ -146,10 +148,9 @@ type ClockSessionState = {
 
 ### 4.1 存储位置
 
-- 统一放在 server-scoped session dir 下，避免跨 server 串读：
-  - 根目录：`~/.routecodex/sessions/<serverId>/`
-- Clock 子目录建议：
-  - `~/.routecodex/sessions/<serverId>/clock/<sessionId>.json`
+- 统一放在 `ROUTECODEX_SESSION_DIR` 下：
+  - 闹钟任务：`$ROUTECODEX_SESSION_DIR/clock/<sessionId>.json`
+  - NTP 校时状态（server-wide）：`$ROUTECODEX_SESSION_DIR/clock/ntp-state.json`
 
 ### 4.2 加载/写入策略
 
@@ -164,10 +165,18 @@ type ClockSessionState = {
 
 在 Hub Pipeline 的 canonicalization 完成后、路由/上游调用前执行注入（属于 llmswitch-core 的职责）。
 
-注入格式（最小实现）：
+注入包括两部分：
 
-- 在请求末尾追加一段系统文本（或 user 文本，二选一，建议 system）：
-  - `"[scheduled task:\"<task>\" tool=<tool?> args=<json?> dueAt=<iso>]"`（字符串格式固定，方便可观测）
+1) Time tag（每次请求）：
+   - 若当前请求末尾是 `role:user`：在 messages 末尾追加一条新的 `role:user`，内容为：
+     - `[Time/Date]: utc=<...> local=<...> tz=<...> nowMs=<...> ntpOffsetMs=<...>`
+   - 若当前请求末尾是 `role:tool`（常见于“工具结果阶段”）：在 messages 末尾追加一对 **配对** 消息：
+     - `role:assistant` + `tool_calls:[{name:"clock", arguments:{action:"get"}}]`
+     - `role:tool` + `tool_call_id` 配对 + `content` 为 `clock.get` 的 JSON 输出
+
+2) Alarm due reminders（仅当本次有到期任务）：
+   - 在请求末尾追加一条 `role:user` 提醒文本，包含到期任务列表，并明确提示：
+     - “你可以调用 tools 完成这些任务；如果 tools 不全，系统会补齐标准工具列表。”
 
 ### 5.2 触发判定
 
@@ -225,6 +234,21 @@ daemon 启动时扫描 `~/.routecodex/sessions/<serverId>/clock/`：
 - `dueAt` 解析失败：工具错误（fail fast）
 - 写盘失败：工具错误（fail fast）
 - 同一 session 大量任务：上限策略可后续再加；本设计先不设硬上限（但要有 O(n) 扫描的性能告警/日志）
+
+## 10. NTP 校时（Time 校验与偏移）
+
+- `clock` 在启用后会进行 best-effort NTP 校时（SNTP/UDP 123）：
+  - 维护 `ntpOffsetMs`，用于计算 `correctedNowMs = Date.now() + ntpOffsetMs`。
+  - 失败不阻断请求/不影响闹钟功能；仅更新 `ntp.status=error` 与 `lastError`。
+- 校时状态持久化到 `$ROUTECODEX_SESSION_DIR/clock/ntp-state.json`，用于进程重启恢复。
+
+## 11. 防死循环规则（窗口内设置不在当前请求激发）
+
+当 `schedule` 设置的 `dueAt` 已经落入触发窗口（例如 `dueAt <= now + dueWindowMs`）时：
+
+- 本次请求不注入/不激发提醒（防止同 requestId / followup 路径产生逻辑死循环）。
+- 任务仍会被持久化保存，但写入 `notBeforeRequestId=<currentRequestId>` 作为 guard。
+- 下一次请求（requestId 不同）到来时，会立即满足注入条件并注入一次，然后正常 commit 为 delivered。
 
 ## 9. 与“fake 请求/hold”相关的实验结论（必须先对齐现实）
 

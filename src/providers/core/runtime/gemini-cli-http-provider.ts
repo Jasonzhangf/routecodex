@@ -70,6 +70,14 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
   protected override async sendRequestInternal(request: UnknownObject): Promise<unknown> {
     try {
       return await super.sendRequestInternal(request);
+    } catch (error) {
+      if (this.isAntigravityRuntime()) {
+        const wrapped = this.wrapAntigravityHttpErrorAsResponse(error);
+        if (wrapped) {
+          return wrapped;
+        }
+      }
+      throw error;
     } finally {
       this.restoreAntigravityRuntimeSessionId();
     }
@@ -98,6 +106,57 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
     };
     stripAction(built);
     return built;
+  }
+
+  private wrapAntigravityHttpErrorAsResponse(error: unknown): UnknownObject | null {
+    const err = error as {
+      statusCode?: unknown;
+      status?: unknown;
+      response?: { data?: unknown; raw?: unknown; status?: unknown };
+      headers?: unknown;
+      message?: unknown;
+    };
+    const status =
+      typeof err?.statusCode === 'number'
+        ? err.statusCode
+        : typeof err?.status === 'number'
+          ? err.status
+          : typeof err?.response?.status === 'number'
+            ? err.response.status
+            : undefined;
+    if (typeof status !== 'number' || !Number.isFinite(status)) {
+      return null;
+    }
+    const message = typeof err?.message === 'string' ? err.message : String(err?.message ?? '');
+    const looksLikeSignatureError =
+      status === 429 ||
+      (status === 400 && /signature/i.test(message));
+    if (!looksLikeSignatureError) {
+      return null;
+    }
+    const data =
+      err?.response && typeof err.response === 'object' && 'data' in err.response
+        ? (err.response as { data?: unknown }).data
+        : undefined;
+    const errorBody =
+      data && typeof data === 'object' && !Array.isArray(data)
+        ? (data as Record<string, unknown>)
+        : {
+            error: {
+              code: status,
+              message: message || `HTTP ${status}`,
+              status
+            }
+          };
+    const headers =
+      err?.headers && typeof err.headers === 'object' && !Array.isArray(err.headers)
+        ? (err.headers as Record<string, unknown>)
+        : undefined;
+    return {
+      status,
+      ...(headers ? { headers } : {}),
+      data: errorBody
+    } as UnknownObject;
   }
 
   protected override applyStreamModeHeaders(headers: Record<string, string>, wantsSse: boolean): Record<string, string> {

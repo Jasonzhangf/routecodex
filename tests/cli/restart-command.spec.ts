@@ -28,7 +28,7 @@ describe('cli restart command', () => {
       findListeningPids: () => [],
       sleep: async () => {},
       sendSignal: () => {},
-      fetch: (async () => ({ ok: true })) as any,
+      fetch: (async () => ({ ok: true, json: async () => ({ server: 'routecodex', status: 'ok' }) })) as any,
       env: {},
       exit: (code) => {
         throw new Error(`exit:${code}`);
@@ -49,7 +49,7 @@ describe('cli restart command', () => {
       findListeningPids: () => [],
       sleep: async () => {},
       sendSignal: () => {},
-      fetch: (async () => ({ ok: true })) as any,
+      fetch: (async () => ({ ok: true, json: async () => ({ server: 'routecodex', status: 'ok' }) })) as any,
       env: {},
       exit: (code) => {
         throw new Error(`exit:${code}`);
@@ -80,7 +80,7 @@ describe('cli restart command', () => {
       sendSignal: (pid, signal) => {
         signals.push({ pid, signal });
       },
-      fetch: (async () => ({ ok: true })) as any,
+      fetch: (async () => ({ ok: true, json: async () => ({ server: 'routecodex', status: 'ok' }) })) as any,
       env: {},
       fsImpl: {
         existsSync: () => true,
@@ -99,5 +99,37 @@ describe('cli restart command', () => {
 
     await program.parseAsync(['node', 'routecodex', 'restart'], { from: 'node' });
     expect(signals).toEqual([{ pid: 111, signal: 'SIGUSR2' }]);
+  });
+
+  it('supports --port to target a specific server', async () => {
+    const program = new Command();
+    const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
+    let call = 0;
+    createRestartCommand(program, {
+      isDevPackage: true,
+      isWindows: false,
+      defaultDevPort: 5555,
+      createSpinner: async () => createStubSpinner(),
+      logger: { info: () => {}, error: () => {} },
+      findListeningPids: (port) => {
+        call += 1;
+        if (port !== 5520) {
+          return [];
+        }
+        return call <= 1 ? [333] : [444];
+      },
+      sleep: async () => {},
+      sendSignal: (pid, signal) => {
+        signals.push({ pid, signal });
+      },
+      fetch: (async () => ({ ok: true, json: async () => ({ server: 'routecodex', status: 'ok' }) })) as any,
+      env: {},
+      exit: (code) => {
+        throw new Error(`exit:${code}`);
+      }
+    });
+
+    await program.parseAsync(['node', 'routecodex', 'restart', '--port', '5520'], { from: 'node' });
+    expect(signals).toEqual([{ pid: 333, signal: 'SIGUSR2' }]);
   });
 });

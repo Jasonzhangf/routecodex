@@ -16,6 +16,14 @@ export interface StaticQuotaConfig {
   tokenLimitPerMinute?: number | null;
   totalTokenLimit?: number | null;
   authType?: QuotaAuthType | null;
+  /**
+   * Daily reset time for apikey quota exhaustion (HTTP 402).
+   * Format:
+   * - "HH:mm" => local time
+   * - "HH:mmZ" => UTC time
+   * If not set, defaults to 12:00 local.
+   */
+  apikeyDailyResetTime?: string | null;
 }
 
 export interface QuotaState {

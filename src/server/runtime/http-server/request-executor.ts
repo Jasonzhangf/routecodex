@@ -19,7 +19,6 @@ import { describeRetryReason, isNetworkTransportError, shouldRetryProviderError,
 import {
   convertProviderResponse as bridgeConvertProviderResponse,
   createSnapshotRecorder as bridgeCreateSnapshotRecorder,
-  invalidateAntigravitySessionSignature
 } from '../../../modules/llmswitch/bridge.js';
 import { ensureHubPipeline, runHubPipeline } from './executor-pipeline.js';
 
@@ -139,71 +138,6 @@ function injectAntigravityRetrySignal(
   };
 }
 
-function isAntigravityThoughtSignatureInvalidError(err: unknown): boolean {
-  const status = extractStatusCodeFromError(err);
-  if (status !== 400) {
-    return false;
-  }
-  const sources: string[] = [];
-  const msg = err && typeof err === 'object' && typeof (err as any).message === 'string' ? String((err as any).message) : '';
-  const upstream = err && typeof err === 'object' && typeof (err as any).upstreamMessage === 'string' ? String((err as any).upstreamMessage) : '';
-  if (msg) sources.push(msg);
-  if (upstream) sources.push(upstream);
-  const details = err && typeof err === 'object' ? (err as any).details : undefined;
-  if (details && typeof details === 'object') {
-    const dUp = typeof details.upstreamMessage === 'string' ? String(details.upstreamMessage) : '';
-    if (dUp) sources.push(dUp);
-    const meta = details.meta && typeof details.meta === 'object' ? details.meta : undefined;
-    if (meta) {
-      const mUp = typeof meta.upstreamMessage === 'string' ? String(meta.upstreamMessage) : '';
-      const mMsg = typeof meta.message === 'string' ? String(meta.message) : '';
-      if (mUp) sources.push(mUp);
-      if (mMsg) sources.push(mMsg);
-    }
-  }
-  const combined = sources.join(' | ').toLowerCase();
-  if (!combined) {
-    return false;
-  }
-  return (
-    combined.includes('thinking.signature') ||
-    combined.includes('corrupted thought signature') ||
-    combined.includes('invalid `signature`') ||
-    (combined.includes('invalid signature') && combined.includes('signature'))
-  );
-}
-
-function extractAntigravitySessionIdFromProviderPayload(payload: unknown): string | undefined {
-  if (!payload || typeof payload !== 'object') {
-    return undefined;
-  }
-  const root = payload as Record<string, unknown>;
-  const candidates: unknown[] = [];
-  candidates.push((root.metadata && typeof root.metadata === 'object' ? (root.metadata as Record<string, unknown>).antigravitySessionId : undefined));
-  const data = root.data && typeof root.data === 'object' ? (root.data as Record<string, unknown>) : undefined;
-  if (data) {
-    candidates.push((data.metadata && typeof data.metadata === 'object' ? (data.metadata as Record<string, unknown>).antigravitySessionId : undefined));
-  }
-  for (const v of candidates) {
-    if (typeof v === 'string' && v.trim().length) {
-      return v.trim();
-    }
-  }
-  return undefined;
-}
-
-function injectAntigravitySignatureRecoveryHint(metadata: Record<string, unknown>, enabled: boolean): void {
-  if (!enabled) {
-    return;
-  }
-  const carrier = metadata as { __rt?: unknown };
-  const existing = carrier.__rt && typeof carrier.__rt === 'object' && !Array.isArray(carrier.__rt) ? carrier.__rt : {};
-  carrier.__rt = {
-    ...(existing as Record<string, unknown>),
-    antigravityThoughtSignatureRecovery: true
-  };
-}
-
 export class HubRequestExecutor implements RequestExecutor {
   constructor(private readonly deps: RequestExecutorDeps) { }
 
@@ -262,8 +196,6 @@ export class HubRequestExecutor implements RequestExecutor {
       let lastError: unknown;
       let initialRoutePool: string[] | null = null;
       let antigravityRetrySignal: { signature: string; consecutive: number; avoidAllOnRetry?: boolean } | null = null;
-      let antigravitySignatureRecovery = false;
-      let antigravitySignatureRecoveryPending = false;
 
       while (attempt < maxAttempts) {
         attempt += 1;
@@ -281,7 +213,6 @@ export class HubRequestExecutor implements RequestExecutor {
         }
         metadataForAttempt.clientRequestId = clientRequestId;
         injectAntigravityRetrySignal(metadataForAttempt, antigravityRetrySignal);
-        injectAntigravitySignatureRecoveryHint(metadataForAttempt, antigravitySignatureRecovery);
         this.logStage(`${pipelineLabel}.start`, providerRequestId, {
           endpoint: input.entryEndpoint,
           stream: metadataForAttempt.stream,
@@ -442,6 +373,27 @@ export class HubRequestExecutor implements RequestExecutor {
             response: normalized,
             pipelineMetadata: mergedMetadata
           });
+          // For Antigravity/Gemini, we may receive an error-shaped response (status=429/400) instead of a thrown error,
+          // so llmswitch-core servertool can attempt thoughtSignature bootstrap + replay.
+          // If it is still an error after conversion, treat it as a provider failure and continue the retry loop.
+          if (
+            typeof converted.status === 'number' &&
+            converted.status >= 400 &&
+            (isAntigravityProviderKey(target.providerKey) ||
+              (typeof target.providerKey === 'string' && target.providerKey.startsWith('gemini-cli.'))) &&
+            providerProtocol === 'gemini-chat'
+          ) {
+            const bodyForError = converted.body && typeof converted.body === 'object' ? (converted.body as Record<string, unknown>) : undefined;
+            const errMsg =
+              bodyForError && bodyForError.error && typeof bodyForError.error === 'object'
+                ? String((bodyForError.error as any).message || bodyForError.error || '')
+                : '';
+            const errorToThrow: any = new Error(errMsg && errMsg.trim().length ? errMsg : `HTTP ${converted.status}`);
+            errorToThrow.statusCode = converted.status;
+            errorToThrow.status = converted.status;
+            errorToThrow.response = { data: bodyForError };
+            throw errorToThrow;
+          }
           const usage = this.extractUsageFromResult(converted, mergedMetadata);
           aggregatedUsage = this.mergeUsageMetrics(aggregatedUsage, usage);
           if (converted.body && typeof converted.body === 'object') {
@@ -483,35 +435,9 @@ export class HubRequestExecutor implements RequestExecutor {
           } else {
             antigravityRetrySignal = null;
           }
-
-          const signatureInvalid =
-            isAntigravityProviderKey(target.providerKey) && isAntigravityThoughtSignatureInvalidError(error);
-          if (signatureInvalid) {
-            // Antigravity-Manager parity: if upstream reports an invalid/corrupted signature,
-            // drop persisted thoughtSignature + alias pin so the next attempt can regenerate cleanly.
-            const sessionId = extractAntigravitySessionIdFromProviderPayload(providerPayload);
-            if (sessionId && providerAlias && providerAlias.startsWith('antigravity.')) {
-              try {
-                invalidateAntigravitySessionSignature(providerAlias, sessionId);
-              } catch {
-                // best-effort only
-              }
-            }
-            // Retry exactly once with a "recovery" hint so compat disables signature leasing/injection.
-            if (!antigravitySignatureRecovery) {
-              antigravitySignatureRecovery = true;
-              antigravitySignatureRecoveryPending = true;
-            }
-          }
-
-          const shouldRetry =
-            attempt < maxAttempts &&
-            (shouldRetryProviderError(error) || antigravitySignatureRecoveryPending);
+          const shouldRetry = attempt < maxAttempts && shouldRetryProviderError(error);
           if (!shouldRetry) {
             throw error;
-          }
-          if (antigravitySignatureRecoveryPending) {
-            antigravitySignatureRecoveryPending = false;
           }
           const singleProviderPool =
             Boolean(initialRoutePool && initialRoutePool.length === 1 && initialRoutePool[0] === target.providerKey);
@@ -756,10 +682,23 @@ export class HubRequestExecutor implements RequestExecutor {
           body: { __sse_responses: converted.__sse_responses }
         };
       }
-      return {
+      const merged: PipelineExecutionResult = {
         ...options.response,
         body: converted.body ?? body
       };
+      // Special case: some Antigravity/Gemini upstream failures are intentionally passed through as
+      // an error-shaped response (status=429/400) so llmswitch-core servertool can recover via followup.
+      // If recovery succeeded, the final client payload will NOT contain an error envelope.
+      if (typeof options.response.status === 'number' && options.response.status >= 400) {
+        const out = merged.body;
+        if (out && typeof out === 'object' && !Array.isArray(out)) {
+          const hasError = Object.prototype.hasOwnProperty.call(out as Record<string, unknown>, 'error');
+          if (!hasError) {
+            merged.status = 200;
+          }
+        }
+      }
+      return merged;
     } catch (error) {
       const err = error as Error | unknown;
       const message = err instanceof Error ? err.message : String(err ?? 'Unknown error');

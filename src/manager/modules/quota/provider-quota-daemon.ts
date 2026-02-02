@@ -294,7 +294,7 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
 
   registerProviderStaticConfig(
     providerKey: string,
-    config: { authType?: string | null; priorityTier?: number | null } = {}
+    config: { authType?: string | null; priorityTier?: number | null; apikeyDailyResetTime?: string | null } = {}
   ): void {
     if (!this.quotaRoutingEnabled) {
       return;
@@ -308,11 +308,16 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
 
     const authTypeRaw = typeof config.authType === 'string' ? config.authType.trim().toLowerCase() : '';
     const authType: QuotaAuthType = authTypeRaw === 'apikey' ? 'apikey' : authTypeRaw === 'oauth' ? 'oauth' : 'unknown';
+    const apikeyDailyResetTime =
+      typeof config.apikeyDailyResetTime === 'string' && config.apikeyDailyResetTime.trim().length
+        ? config.apikeyDailyResetTime.trim()
+        : null;
     const staticConfig: StaticQuotaConfig = {
       ...(typeof config.priorityTier === 'number' && Number.isFinite(config.priorityTier)
         ? { priorityTier: config.priorityTier }
         : {}),
-      authType
+      authType,
+      ...(apikeyDailyResetTime ? { apikeyDailyResetTime } : {})
     };
 
     this.staticConfigs.set(key, staticConfig);

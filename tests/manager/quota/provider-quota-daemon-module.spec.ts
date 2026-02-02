@@ -417,4 +417,79 @@ describe('ProviderQuotaDaemonModule', () => {
 
     await mod.stop();
   });
+
+  it('blacklists apikey providers on HTTP 402 until upstream resetAt', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-02-02T08:00:00.000Z'));
+    const now = Date.now();
+
+    const mod = new ProviderQuotaDaemonModule();
+    await mod.init({ serverId: 'test' });
+    mod.registerProviderStaticConfig('crs.key1.gpt-5.2', { authType: 'apikey' });
+    await mod.start();
+
+    const center = await getProviderErrorCenter();
+    center.emit({
+      code: 'HTTP_402',
+      message:
+        'HTTP 402: {"error":{"type":"insufficient_quota","message":"daily limit","code":"daily_cost_limit_exceeded"},"resetAt":"2026-02-02T16:00:00.000Z"}',
+      stage: 'provider.provider.http',
+      status: 402,
+      recoverable: false,
+      timestamp: now,
+      runtime: {
+        requestId: 'req_test_402',
+        providerKey: 'crs.key1.gpt-5.2',
+        providerId: 'crs'
+      },
+      details: {}
+    } as any);
+
+    await jest.advanceTimersByTimeAsync(5);
+
+    const snapshot = mod.getAdminSnapshot();
+    expect(snapshot['crs.key1.gpt-5.2']).toBeDefined();
+    expect(snapshot['crs.key1.gpt-5.2'].inPool).toBe(false);
+    expect(snapshot['crs.key1.gpt-5.2'].reason).toBe('blacklist');
+    expect(snapshot['crs.key1.gpt-5.2'].blacklistUntil).toBe(Date.parse('2026-02-02T16:00:00.000Z'));
+
+    await mod.stop();
+  });
+
+  it('blacklists apikey providers on HTTP 402 until configured daily reset time when resetAt missing', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-02-02T10:00:00.000Z'));
+    const now = Date.now();
+
+    const mod = new ProviderQuotaDaemonModule();
+    await mod.init({ serverId: 'test' });
+    mod.registerProviderStaticConfig('crs.key1.gpt-5.2', { authType: 'apikey', apikeyDailyResetTime: '12:00Z' });
+    await mod.start();
+
+    const center = await getProviderErrorCenter();
+    center.emit({
+      code: 'HTTP_402',
+      message: 'HTTP 402: {"error":{"type":"insufficient_quota","message":"daily limit","code":"daily_cost_limit_exceeded"}}',
+      stage: 'provider.provider.http',
+      status: 402,
+      recoverable: false,
+      timestamp: now,
+      runtime: {
+        requestId: 'req_test_402_nors',
+        providerKey: 'crs.key1.gpt-5.2',
+        providerId: 'crs'
+      },
+      details: {}
+    } as any);
+
+    await jest.advanceTimersByTimeAsync(5);
+
+    const snapshot = mod.getAdminSnapshot();
+    expect(snapshot['crs.key1.gpt-5.2']).toBeDefined();
+    expect(snapshot['crs.key1.gpt-5.2'].inPool).toBe(false);
+    expect(snapshot['crs.key1.gpt-5.2'].reason).toBe('blacklist');
+    expect(snapshot['crs.key1.gpt-5.2'].blacklistUntil).toBe(Date.parse('2026-02-02T12:00:00.000Z'));
+
+    await mod.stop();
+  });
 });

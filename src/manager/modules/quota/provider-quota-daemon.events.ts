@@ -12,7 +12,9 @@ import {
   capAutoCooldownMs,
   capAutoCooldownUntil,
   extractVirtualRouterSeriesCooldown,
-  parseQuotaResetDelayMs
+  parseQuotaResetDelayMs,
+  parseApikeyDailyResetAtMs,
+  computeDailyResetUntilMs
 } from './provider-quota-daemon.cooldown.js';
 import { isModelCapacityExhausted429, ProviderModelBackoffTracker } from './provider-quota-daemon.model-backoff.js';
 
@@ -55,6 +57,42 @@ export async function handleProviderQuotaErrorEvent(
   // Manual/operator blacklist is rigid: do not override it with automated error/quota signals.
   if (previous.reason === 'blacklist' && previous.blacklistUntil && nowMs < previous.blacklistUntil) {
     return;
+  }
+
+  // Apikey providers: HTTP 402 means daily spending quota exhausted.
+  // Default policy: blacklist until the next daily reset time:
+  // - Prefer upstream `resetAt` when present in error payload.
+  // - Otherwise use configured `apikeyDailyResetTime` (or default 12:00 local).
+  if (typeof event.status === 'number' && event.status === 402 && previous.authType === 'apikey') {
+    const resetAtMs = parseApikeyDailyResetAtMs(event);
+    const staticCfg = ctx.staticConfigs.get(providerKey) as unknown as { apikeyDailyResetTime?: unknown } | undefined;
+    const apikeyDailyResetTime =
+      staticCfg && typeof staticCfg.apikeyDailyResetTime === 'string' ? staticCfg.apikeyDailyResetTime.trim() : '';
+    const until =
+      resetAtMs && resetAtMs > nowMs
+        ? resetAtMs
+        : computeDailyResetUntilMs({
+            nowMs,
+            resetTime: apikeyDailyResetTime || null,
+            defaultLocalHour: 12,
+            defaultLocalMinute: 0
+          });
+    if (until && until > nowMs) {
+      const nextState: QuotaState = {
+        ...previous,
+        inPool: false,
+        reason: 'blacklist',
+        blacklistUntil: until,
+        cooldownUntil: null,
+        lastErrorSeries: null,
+        lastErrorCode: null,
+        lastErrorAtMs: null,
+        consecutiveErrorCount: 0
+      };
+      ctx.quotaStates.set(providerKey, nextState);
+      ctx.schedulePersist(nowMs);
+      return;
+    }
   }
 
   // Antigravity: Google account risk verification required ("signin/continue").
