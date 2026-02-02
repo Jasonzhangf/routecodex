@@ -26,15 +26,9 @@ describe('cli restart command', () => {
       createSpinner: async () => createStubSpinner(),
       logger: { info: () => {}, error: () => {} },
       findListeningPids: () => [],
-      killPidBestEffort: () => {},
       sleep: async () => {},
-      getModulesConfigPath: () => '/tmp/modules.json',
-      resolveServerEntryPath: () => '/tmp/index.js',
-      nodeBin: 'node',
-      spawn: () => ({ pid: 123, on: () => {}, kill: () => true } as any),
+      sendSignal: () => {},
       fetch: (async () => ({ ok: true })) as any,
-      setupKeypress: () => () => {},
-      waitForever: async () => {},
       env: {},
       exit: (code) => {
         throw new Error(`exit:${code}`);
@@ -53,15 +47,9 @@ describe('cli restart command', () => {
       createSpinner: async () => createStubSpinner(),
       logger: { info: () => {}, error: () => {} },
       findListeningPids: () => [],
-      killPidBestEffort: () => {},
       sleep: async () => {},
-      getModulesConfigPath: () => '/tmp/modules.json',
-      resolveServerEntryPath: () => '/tmp/index.js',
-      nodeBin: 'node',
-      spawn: () => ({ pid: 123, on: () => {}, kill: () => true } as any),
+      sendSignal: () => {},
       fetch: (async () => ({ ok: true })) as any,
-      setupKeypress: () => () => {},
-      waitForever: async () => {},
       env: {},
       exit: (code) => {
         throw new Error(`exit:${code}`);
@@ -73,28 +61,26 @@ describe('cli restart command', () => {
     ).rejects.toThrow('exit:1');
   });
 
-  it('does not auto-enable --claude based on providers in config', async () => {
+  it('broadcasts a restart signal to the running server', async () => {
     const program = new Command();
-    let capturedEnv: Record<string, string> | undefined;
+    const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
+    let call = 0;
     createRestartCommand(program, {
       isDevPackage: true,
       isWindows: false,
       defaultDevPort: 5520,
       createSpinner: async () => createStubSpinner(),
       logger: { info: () => {}, error: () => {} },
-      findListeningPids: () => [],
-      killPidBestEffort: () => {},
+      findListeningPids: () => {
+        call += 1;
+        // first read => existing server pid; subsequent => restarted pid
+        return call <= 1 ? [111] : [222];
+      },
       sleep: async () => {},
-      getModulesConfigPath: () => '/tmp/modules.json',
-      resolveServerEntryPath: () => '/tmp/index.js',
-      nodeBin: 'node',
-      spawn: (_cmd, _args, options) => {
-        capturedEnv = options.env as any;
-        return ({ pid: 123, on: () => {}, kill: () => true } as any);
+      sendSignal: (pid, signal) => {
+        signals.push({ pid, signal });
       },
       fetch: (async () => ({ ok: true })) as any,
-      setupKeypress: () => () => {},
-      waitForever: async () => {},
       env: {},
       fsImpl: {
         existsSync: () => true,
@@ -112,7 +98,6 @@ describe('cli restart command', () => {
     });
 
     await program.parseAsync(['node', 'routecodex', 'restart'], { from: 'node' });
-    expect(capturedEnv?.ROUTECODEX_SYSTEM_PROMPT_ENABLE).toBeUndefined();
-    expect(capturedEnv?.ROUTECODEX_SYSTEM_PROMPT_SOURCE).toBeUndefined();
+    expect(signals).toEqual([{ pid: 111, signal: 'SIGUSR2' }]);
   });
 });

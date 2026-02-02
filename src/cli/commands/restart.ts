@@ -1,7 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { homedir } from 'node:os';
-import type { ChildProcess, SpawnOptions } from 'node:child_process';
 import type { Command } from 'commander';
 
 import { API_PATHS, HTTP_PROTOCOLS, LOCAL_HOSTS } from '../../constants/index.js';
@@ -35,20 +34,13 @@ export type RestartCommandContext = {
   createSpinner: (text: string) => Promise<Spinner>;
   logger: LoggerLike;
   findListeningPids: (port: number) => number[];
-  killPidBestEffort: (pid: number, opts: { force: boolean }) => void;
   sleep: (ms: number) => Promise<void>;
-  getModulesConfigPath: () => string;
-  resolveServerEntryPath: () => string;
-  nodeBin: string;
-  spawn: (command: string, args: string[], options: SpawnOptions) => ChildProcess;
+  sendSignal: (pid: number, signal: NodeJS.Signals) => void;
   fetch: typeof fetch;
-  setupKeypress: (onInterrupt: () => void) => () => void;
-  waitForever: () => Promise<void>;
   env?: NodeJS.ProcessEnv;
-  fsImpl?: Pick<typeof fs, 'existsSync' | 'readFileSync' | 'writeFileSync'>;
+  fsImpl?: Pick<typeof fs, 'existsSync' | 'readFileSync'>;
   pathImpl?: Pick<typeof path, 'join'>;
   getHomeDir?: () => string;
-  onSignal?: (signal: NodeJS.Signals, cb: () => void) => void;
   exit: (code: number) => never;
 };
 
@@ -105,24 +97,31 @@ function resolvePortHost(ctx: RestartCommandContext, options: RestartCommandOpti
   return { port, host: String(host || LOCAL_HOSTS.LOCALHOST) };
 }
 
-async function stopExisting(ctx: RestartCommandContext, port: number): Promise<void> {
-  const pids = ctx.findListeningPids(port);
-  if (!pids.length) {return;}
-
-  for (const pid of pids) {
-    ctx.killPidBestEffort(pid, { force: false });
-  }
-  const deadline = Date.now() + 3500;
+async function waitForRestart(ctx: RestartCommandContext, host: string, port: number, oldPids: number[]): Promise<void> {
+  const deadline = Date.now() + 15000;
+  const old = new Set(oldPids);
+  let sawNewPid = false;
   while (Date.now() < deadline) {
-    if (ctx.findListeningPids(port).length === 0) {
-      break;
+    const current = ctx.findListeningPids(port);
+    if (current.some((pid) => !old.has(pid))) {
+      sawNewPid = true;
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => {
+          try { controller.abort(); } catch { /* ignore */ }
+        }, 750);
+        const res = await ctx.fetch(`${HTTP_PROTOCOLS.HTTP}${host}:${port}${API_PATHS.HEALTH}`, { signal: controller.signal }).catch(() => null);
+        clearTimeout(timeout);
+        if (res && res.ok) {
+          return;
+        }
+      } catch {
+        // ignore health failures during restart window
+      }
     }
-    await ctx.sleep(120);
+    await ctx.sleep(sawNewPid ? 250 : 150);
   }
-  const remain = ctx.findListeningPids(port);
-  for (const pid of remain) {
-    ctx.killPidBestEffort(pid, { force: true });
-  }
+  throw new Error('Timeout waiting for server to restart');
 }
 
 export function createRestartCommand(program: Command, ctx: RestartCommandContext): void {
@@ -138,95 +137,36 @@ export function createRestartCommand(program: Command, ctx: RestartCommandContex
       try {
         const { port: resolvedPort, host: resolvedHost } = resolvePortHost(ctx, options, spinner);
 
-        await stopExisting(ctx, resolvedPort);
-
-        spinner.text = 'Starting RouteCodex server...';
-
-        // Prompt source flags
-        if (options.codex && options.claude) {
-          spinner.fail('Flags --codex and --claude are mutually exclusive');
+        // Prompt flags cannot be applied via a signal-based restart (server reloads from its own config/env).
+        if (options.codex || options.claude) {
+          spinner.fail('Flags --codex/--claude are not supported for restart; edit config/env and restart again.');
           ctx.exit(1);
         }
-        const promptFlag = options.codex ? 'codex' : (options.claude ? 'claude' : null);
-        if (promptFlag) {
-          // Preserve existing behavior: mutate env for child.
-          ctx.env = ctx.env || process.env;
-          ctx.env.ROUTECODEX_SYSTEM_PROMPT_SOURCE = promptFlag;
-          ctx.env.ROUTECODEX_SYSTEM_PROMPT_ENABLE = '1';
+
+        const pids = ctx.findListeningPids(resolvedPort);
+        if (!pids.length) {
+          spinner.fail(`No RouteCodex server found on ${resolvedHost}:${resolvedPort}`);
+          ctx.exit(1);
         }
 
-        const modulesConfigPath = ctx.getModulesConfigPath();
-        const serverEntry = ctx.resolveServerEntryPath();
-        const env = { ...(ctx.env || process.env) } as NodeJS.ProcessEnv;
-        const args: string[] = [serverEntry, modulesConfigPath];
-        const child = ctx.spawn(ctx.nodeBin, args, { stdio: 'inherit', env });
-
-        const fsImpl = ctx.fsImpl ?? fs;
-        const pathImpl = ctx.pathImpl ?? path;
-        const home = ctx.getHomeDir ?? (() => homedir());
-        try {
-          fsImpl.writeFileSync(pathImpl.join(home(), '.routecodex', 'server.cli.pid'), String(child.pid ?? ''), 'utf8');
-        } catch {
-          /* ignore */
+        if (ctx.isWindows) {
+          spinner.fail('Signal-based restart is not supported on Windows');
+          ctx.exit(1);
         }
 
-        spinner.succeed(`RouteCodex server restarting on ${resolvedHost}:${resolvedPort}`);
-        ctx.logger.info(`Server will run on port: ${resolvedPort}`);
-        ctx.logger.info('Press Ctrl+C to stop the server');
-
-        const shutdown = async (sig: NodeJS.Signals) => {
+        spinner.text = `Sending restart signal to ${pids.length} process(es)...`;
+        for (const pid of pids) {
           try {
-            await ctx.fetch(`${HTTP_PROTOCOLS.HTTP}${LOCAL_HOSTS.IPV4}:${resolvedPort}${API_PATHS.SHUTDOWN}`, { method: 'POST' }).catch(() => {});
+            ctx.sendSignal(pid, 'SIGUSR2');
           } catch {
-            /* ignore */
+            // best-effort: continue broadcasting
           }
-          try {
-            child.kill(sig);
-          } catch {
-            /* ignore */
-          }
-          if (!ctx.isWindows) {
-            try {
-              if (child.pid) {
-                process.kill(-child.pid, sig);
-              }
-            } catch {
-              /* ignore */
-            }
-          }
-          const deadline = Date.now() + 3500;
-          while (Date.now() < deadline) {
-            if (ctx.findListeningPids(resolvedPort).length === 0) {
-              break;
-            }
-            await ctx.sleep(100);
-          }
-          const still = ctx.findListeningPids(resolvedPort);
-          for (const pid of still) {
-            ctx.killPidBestEffort(pid, { force: true });
-          }
-          try {
-            ctx.exit(0);
-          } catch {
-            /* ignore */
-          }
-        };
+        }
 
-        const onSignal = ctx.onSignal ?? ((sig: NodeJS.Signals, cb: () => void) => {
-          process.on(sig, cb);
-        });
-        onSignal('SIGINT', () => { void shutdown('SIGINT'); });
-        onSignal('SIGTERM', () => { void shutdown('SIGTERM'); });
+        spinner.text = 'Waiting for server to restart...';
+        await waitForRestart(ctx, resolvedHost || LOCAL_HOSTS.LOCALHOST, resolvedPort, pids);
 
-        const cleanupKeypress2 = ctx.setupKeypress(() => { void shutdown('SIGINT'); });
-
-        child.on('exit', (code, signal) => {
-          try { cleanupKeypress2(); } catch { /* ignore */ }
-          if (signal) {ctx.exit(0);}
-          ctx.exit(code ?? 0);
-        });
-
-        await ctx.waitForever();
+        spinner.succeed(`RouteCodex server restarted on ${resolvedHost}:${resolvedPort}`);
       } catch (e) {
         spinner.fail(`Failed to restart: ${(e as Error).message}`);
         ctx.exit(1);

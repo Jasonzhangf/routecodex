@@ -361,23 +361,11 @@ registerRestartCommand(program, {
   createSpinner,
   logger,
   findListeningPids,
-  killPidBestEffort,
   sleep,
-  getModulesConfigPath,
-  resolveServerEntryPath: () => path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'index.js'),
-  nodeBin: process.execPath,
-  spawn: (cmd, args, opts) => spawn(cmd, args, opts),
+  sendSignal: (pid, signal) => process.kill(pid, signal),
   fetch,
-  setupKeypress,
-  waitForever: () =>
-    new Promise<void>(() => {
-      return;
-    }),
   env: process.env,
-  exit: (code) => process.exit(code),
-  onSignal: (sig, cb) => {
-    process.on(sig, cb);
-  }
+  exit: (code) => process.exit(code)
 });
 
 // Import commands at top level

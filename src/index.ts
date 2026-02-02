@@ -94,6 +94,7 @@ type ShutdownReason =
   | { kind: 'unknown' };
 
 let lastShutdownReason: ShutdownReason = { kind: 'unknown' };
+let restartInProgress = false;
 
 function recordShutdownReason(reason: ShutdownReason): void {
   if (lastShutdownReason.kind === 'unknown') {
@@ -766,6 +767,37 @@ async function gracefulShutdown(app: RouteCodexApp): Promise<void> {
   }
 }
 
+async function restartSelf(app: RouteCodexApp, signal: NodeJS.Signals): Promise<void> {
+  if (restartInProgress) {
+    return;
+  }
+  restartInProgress = true;
+  recordShutdownReason({ kind: 'signal', signal });
+  console.log(`\n🔄 Restart signal received (${signal}). Restarting RouteCodex server process...`);
+
+  const argv = process.argv.slice(1);
+  const env = { ...process.env } as NodeJS.ProcessEnv;
+  env.ROUTECODEX_RESTARTED_AT = String(Date.now());
+
+  try {
+    await app.stop();
+  } catch (error) {
+    // Best-effort: even if stop fails, attempt to spawn a replacement to recover.
+    await reportCliError('SERVER_RESTART_STOP_FAILED', 'Failed to stop before restart', error, 'high').catch(() => {});
+  }
+
+  try {
+    const child = spawn(process.execPath, argv, { stdio: 'inherit', env });
+    console.log(`[routecodex:restart] spawned pid=${child.pid ?? 'unknown'}`);
+  } catch (error) {
+    await reportCliError('SERVER_RESTART_SPAWN_FAILED', 'Failed to spawn restarted server', error, 'critical').catch(() => {});
+    console.error('❌ Failed to spawn restarted server:', error);
+    process.exit(1);
+  }
+
+  process.exit(0);
+}
+
 /**
  * Main entry point
  */
@@ -782,6 +814,18 @@ async function main(): Promise<void> {
     recordShutdownReason({ kind: 'signal', signal: 'SIGINT' });
     void gracefulShutdown(app);
   });
+
+  // Restart signal:
+  // - CLI sends SIGUSR2 to ask the server to restart with new code/config from disk.
+  // - The server respawns itself (same argv), then exits.
+  if (process.platform !== 'win32') {
+    process.on('SIGUSR2', () => {
+      void restartSelf(app, 'SIGUSR2');
+    });
+    process.on('SIGHUP', () => {
+      void restartSelf(app, 'SIGHUP');
+    });
+  }
 
   // Handle uncaught exceptions
   process.on('uncaughtException', (error) => {
