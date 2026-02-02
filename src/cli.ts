@@ -353,7 +353,7 @@ registerStopCommand(program, {
   exit: (code) => process.exit(code)
 });
 
-// Restart command (stop + start with same environment)
+// Restart command (signal-based; server self-respawns)
 registerRestartCommand(program, {
   isDevPackage: IS_DEV_PACKAGE,
   isWindows: IS_WINDOWS,
