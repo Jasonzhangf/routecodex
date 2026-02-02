@@ -7,6 +7,8 @@ Gemini 原生请求 `thoughtSignature` 的对齐策略、缓存键选择、以�
 > 说明：`thoughtSignature` **不是我们生成的**。它来自上游在响应里返回的签名（通常出现在 `functionCall`
 > 的 part 上），我们只做“捕获→缓存→回填注入”。
 
+> Status: stable as of 2026-02-02.
+
 ## 1. 什么时候必须注入 `thoughtSignature`
 
 在 Gemini Cloud Code Assist 的 tool-loop 里，后续请求会把上一次的 `functionCall` 和本次的
@@ -96,7 +98,23 @@ Gemini 原生请求 `thoughtSignature` 的对齐策略、缓存键选择、以�
 - `tests/compat/antigravity-thought-signature.spec.ts`
   - `skips injection on rewind ...`
 
-## 6. 与 429 的关系（澄清）
+## 6. 400 invalid signature 的恢复路径（一次性重试）
+
+当上游明确返回“签名无效/损坏”的错误（通常是 **HTTP 400**，message 含 `thinking.signature` /
+`invalid signature` 等关键词）时，Host 会走一个 **一次性恢复重试**：
+
+1) 清除当前会话在该 alias 下的本地 signature 缓存（避免继续注入坏签名）
+2) 将 metadata 标记为 `__rt.antigravityThoughtSignatureRecovery=true`
+3) 立即重试一次：llmswitch-core 会在请求侧 **剥离所有 `thoughtSignature`** 并注入一个 system recovery 提示，
+   让上游重新生成不包含损坏签名的输出
+
+实现位置：
+- Host（触发恢复 + 只重试一次）：
+  - `src/server/runtime/http-server/request-executor.ts`
+- llmswitch-core（恢复模式：strip + recovery prompt）：
+  - `sharedmodule/llmswitch-core/src/conversion/compat/actions/antigravity-thought-signature-prepare.ts`
+
+## 7. 与 429 的关系（澄清）
 
 `HTTP 429 RESOURCE_EXHAUSTED` 是上游明确的资源/配额耗尽信号，不是签名机制本身的错误。
 在一些 429 的样本里确实会出现 `functionCall` 缺签名，但这并不构成因果关系：
@@ -105,3 +123,5 @@ Gemini 原生请求 `thoughtSignature` 的对齐策略、缓存键选择、以�
 - 429 的根因是上游对该账号/资源返回 `RESOURCE_EXHAUSTED`
 
 因此稳定性策略需要在虚拟路由/重试层单独处理（例如将 Antigravity 429 视作账号级耗尽，不在同一账号下 high/low 互切）。
+
+另见（429/重试的标准行为）：`docs/antigravity-routing-contract.md`
