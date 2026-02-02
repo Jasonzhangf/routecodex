@@ -306,6 +306,113 @@ describe('antigravity thoughtSignature (gemini-chat)', () => {
     expect((tailParts[0]?.thoughtSignature || '').length).toBeGreaterThan(10);
   });
 
+  it('leases alias latest signature sessionId for new sessions (prevents cold-start tool-call failures)', () => {
+    resetAntigravitySessionSignatureCachesForTests();
+
+    const baseAdapterContext = {
+      providerProtocol: 'gemini-chat',
+      runtimeKey: 'antigravity.aliasLease',
+      entryEndpoint: '/v1/responses',
+      routeId: 'tools'
+    } as any;
+
+    const sig = `EiYK${'s'.repeat(80)}`;
+
+    const baseRequestId = 'openai-responses-antigravity.aliasLease.gemini-3-pro-high-gemini-3-pro-high-20260130T000000000-301';
+    const baseRequest = {
+      model: 'gemini-3-pro-high',
+      project: 'test-project',
+      requestId: baseRequestId,
+      requestType: 'agent',
+      userAgent: 'antigravity',
+      request: {
+        contents: [{ role: 'user', parts: [{ text: 'seed: alias lease base session' }] }]
+      }
+    } as any;
+    const sidBase = extractAntigravityGeminiSessionId(baseRequest);
+    cacheAntigravitySessionSignature('antigravity.aliasLease', sidBase, sig, 1);
+
+    const followupRequestId = 'openai-responses-antigravity.aliasLease.gemini-3-pro-high-gemini-3-pro-high-20260130T000000000-302';
+    const followupRequest = {
+      ...baseRequest,
+      requestId: followupRequestId,
+      request: {
+        contents: [
+          { role: 'user', parts: [{ text: 'seed: alias lease NEW session' }] },
+          { role: 'model', parts: [{ functionCall: { id: 'fc_0', name: 'exec_command', args: { command: 'pwd' } } }] }
+        ]
+      }
+    } as any;
+    const sidNew = extractAntigravityGeminiSessionId(followupRequest);
+    expect(sidNew).not.toBe(sidBase);
+
+    const second = applyRequestCompat('chat:gemini', followupRequest, {
+      adapterContext: { ...baseAdapterContext, requestId: followupRequestId }
+    });
+    const tailParts = (second.payload as any)?.request?.contents?.slice(-1)?.[0]?.parts ?? [];
+    expect(tailParts[0]?.functionCall?.name).toBe('exec_command');
+    expect(tailParts[0]?.thoughtSignature).toBe(sig);
+    expect(getAntigravityRequestSessionMeta(followupRequestId)?.sessionId).toBe(sidBase);
+  });
+
+  it('recovery hint strips stale thoughtSignature and disables leasing/injection', () => {
+    resetAntigravitySessionSignatureCachesForTests();
+
+    const baseAdapterContext = {
+      providerProtocol: 'gemini-chat',
+      runtimeKey: 'antigravity.aliasRecover',
+      entryEndpoint: '/v1/responses',
+      routeId: 'tools',
+      __rt: { antigravityThoughtSignatureRecovery: true }
+    } as any;
+
+    const sig = `EiYK${'t'.repeat(80)}`;
+
+    const baseSeedRequest = {
+      model: 'gemini-3-pro-high',
+      project: 'test-project',
+      requestId: 'openai-responses-antigravity.aliasRecover.gemini-3-pro-high-gemini-3-pro-high-20260130T000000000-401',
+      requestType: 'agent',
+      userAgent: 'antigravity',
+      request: { contents: [{ role: 'user', parts: [{ text: 'seed: recovery base session' }] }] }
+    } as any;
+    const sidBase = extractAntigravityGeminiSessionId(baseSeedRequest);
+    cacheAntigravitySessionSignature('antigravity.aliasRecover', sidBase, sig, 1);
+
+    const requestId = 'openai-responses-antigravity.aliasRecover.gemini-3-pro-high-gemini-3-pro-high-20260130T000000000-402';
+    const req = {
+      model: 'gemini-3-pro-high',
+      project: 'test-project',
+      requestId,
+      requestType: 'agent',
+      userAgent: 'antigravity',
+      request: {
+        contents: [
+          { role: 'user', parts: [{ text: 'seed: recovery NEW session' }] },
+          {
+            role: 'model',
+            parts: [
+              {
+                thoughtSignature: 'stale_signature_should_be_removed',
+                functionCall: { id: 'fc_0', name: 'exec_command', args: { command: 'pwd' } }
+              }
+            ]
+          }
+        ]
+      }
+    } as any;
+    const sidOriginal = extractAntigravityGeminiSessionId(req);
+    expect(sidOriginal).not.toBe(sidBase);
+
+    const out = applyRequestCompat('chat:gemini', req, {
+      adapterContext: { ...baseAdapterContext, requestId }
+    });
+    const tailParts = (out.payload as any)?.request?.contents?.slice(-1)?.[0]?.parts ?? [];
+    expect(tailParts[0]?.functionCall?.name).toBe('exec_command');
+    expect(tailParts[0]?.thoughtSignature).toBeUndefined();
+    expect(getAntigravityRequestSessionMeta(requestId)?.sessionId).toBe(sidOriginal);
+  });
+
   it('injects into servertool-like web_search functionCall parts (web_search route)', () => {
     const baseAdapterContext = {
       providerProtocol: 'gemini-chat',

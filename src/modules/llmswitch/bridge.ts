@@ -93,6 +93,7 @@ type AntigravitySessionSignatureModule = {
   cacheAntigravitySessionSignature?: (...args: unknown[]) => void;
   getAntigravityLatestSignatureSessionIdForAlias?: (aliasKey: string, options?: { hydrate?: boolean }) => string | undefined;
   lookupAntigravitySessionSignatureEntry?: (aliasKey: string, sessionId: string, options?: { hydrate?: boolean }) => unknown;
+  invalidateAntigravitySessionSignature?: (aliasKey: string, sessionId: string) => void;
   resetAntigravitySessionSignatureCachesForTests?: () => void;
   configureAntigravitySessionSignaturePersistence?: (input: { stateDir: string; fileName?: string } | null) => void;
   flushAntigravitySessionSignaturePersistenceSync?: () => void;
@@ -207,6 +208,19 @@ export function lookupAntigravitySessionSignatureEntry(
     return out && typeof out === 'object' ? (out as Record<string, unknown>) : undefined;
   } catch {
     return undefined;
+  }
+}
+
+export function invalidateAntigravitySessionSignature(aliasKey: string, sessionId: string): void {
+  const mod = loadAntigravitySignatureModule();
+  const fn = mod?.invalidateAntigravitySessionSignature;
+  if (typeof fn !== 'function') {
+    return;
+  }
+  try {
+    fn(aliasKey, sessionId);
+  } catch {
+    // best-effort only
   }
 }
 

@@ -267,4 +267,74 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     expect((thirdCallMetadata as any)?.__rt?.antigravityRetryErrorSignature).toBe('403:HTTP_403');
     expect((thirdCallMetadata as any)?.__rt?.antigravityRetryErrorConsecutive).toBe(2);
   });
+
+  it('retries once with antigravity thoughtSignature recovery hint on HTTP 400 signature-invalid errors', async () => {
+    const invalidSig = Object.assign(new Error('HTTP 400: thinking.signature invalid'), {
+      statusCode: 400,
+      retryable: false,
+      upstreamMessage: 'Bad Request: thinking.signature'
+    });
+
+    const handle = createRuntimeHandle(async () => {
+      throw invalidSig;
+    });
+
+    const pipelineResultA: PipelineExecutionResult = {
+      providerPayload: { metadata: { antigravitySessionId: 'sid-aaaaaaaaaaaaaaaa' }, data: { messages: [] } },
+      target: {
+        providerKey: 'antigravity.aliasRecover',
+        providerType: 'gemini',
+        outboundProfile: 'gemini-chat',
+        runtimeKey: 'runtime:ag',
+        processMode: 'standard'
+      },
+      processMode: 'standard',
+      metadata: {}
+    };
+
+    const fakePipeline: HubPipeline = {
+      execute: jest.fn().mockResolvedValueOnce(pipelineResultA).mockResolvedValueOnce(pipelineResultA)
+    };
+
+    const runtimeManager: ProviderRuntimeManager = {
+      resolveRuntimeKey: jest.fn(),
+      getHandleByRuntimeKey: jest.fn().mockReturnValue(handle),
+      getHandleByProviderKey: jest.fn(),
+      disposeAll: jest.fn(),
+      initialize: jest.fn()
+    } as unknown as ProviderRuntimeManager;
+
+    const stats = {
+      recordRequestStart: jest.fn(),
+      recordCompletion: jest.fn(),
+      bindProvider: jest.fn(),
+      recordToolUsage: jest.fn()
+    };
+    const deps = {
+      runtimeManager,
+      getHubPipeline: () => fakePipeline,
+      getModuleDependencies: (): ModuleDependencies => ({
+        errorHandlingCenter: {
+          handleError: jest.fn().mockResolvedValue({ success: true })
+        }
+      } as ModuleDependencies),
+      logStage: jest.fn(),
+      stats
+    };
+    const executor = new HubRequestExecutor(deps);
+    const request: PipelineExecutionInput = {
+      requestId: 'req_invalid_sig',
+      entryEndpoint: '/v1/responses',
+      headers: {},
+      body: { messages: [{ role: 'user', content: 'retry me' }] },
+      metadata: { stream: false, inboundStream: false }
+    };
+
+    await expect(executor.execute(request)).rejects.toThrow('thinking.signature');
+    expect(fakePipeline.execute).toHaveBeenCalledTimes(2);
+    expect(handle.instance.processIncoming).toHaveBeenCalledTimes(2);
+
+    const secondCallMetadata = fakePipeline.execute.mock.calls[1][0].metadata as Record<string, unknown>;
+    expect((secondCallMetadata as any)?.__rt?.antigravityThoughtSignatureRecovery).toBe(true);
+  });
 });
