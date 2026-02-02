@@ -245,7 +245,7 @@ describe('GeminiCLIHttpProvider basic behaviour', () => {
     }
   });
 
-  test('antigravity thoughtSignature session swap: does not reuse signature across sessions', async () => {
+  test('antigravity thoughtSignature session swap: reuse alias signature sessionId when available', async () => {
     await warmupAntigravitySessionSignatureModule();
     resetAntigravitySessionSignatureCachesForTests();
 
@@ -278,8 +278,10 @@ describe('GeminiCLIHttpProvider basic behaviour', () => {
       stream: true
     });
 
-    expect((processed as any)?.metadata?.antigravitySessionId).toBe('user-2');
-    expect((processed as any)?.metadata?.antigravitySessionIdOriginal).toBeUndefined();
+    // Provider swaps the sessionId to the one that has a cached thoughtSignature for this alias,
+    // then restores it after the request (runtime metadata).
+    expect((processed as any)?.metadata?.antigravitySessionId).toBe(signatureSessionId);
+    expect((processed as any)?.metadata?.antigravitySessionIdOriginal).toBe('user-2');
   });
 
   test('antigravity sessionId derivation: ignores metadata.sessionId and uses derived fingerprint', async () => {

@@ -99,7 +99,7 @@ describe('antigravity thoughtSignature persistence & rewind guard', () => {
     expect(getAntigravitySessionSignature(aliasKey, sessionId)).toBeUndefined();
   });
 
-  it('refreshes signature TTL on access (active sessions do not silently expire)', () => {
+  it('does not silently expire persisted signatures over time (session continuity)', () => {
     resetAntigravitySessionSignatureCachesForTests();
     jest.useFakeTimers();
     try {
@@ -112,8 +112,7 @@ describe('antigravity thoughtSignature persistence & rewind guard', () => {
       const aliasKey = 'antigravity.key1';
       const sessionId = 'sid-touch';
       const sig = 's'.repeat(80);
-      const ttlMs = 2 * 60 * 60 * 1000;
-      const initialTs = Date.now() - (ttlMs - 60_000);
+      const initialTs = Date.now() - 60_000;
 
       fs.writeFileSync(
         filePath,
@@ -139,8 +138,8 @@ describe('antigravity thoughtSignature persistence & rewind guard', () => {
       const persisted = JSON.parse(fs.readFileSync(filePath, 'utf8'));
       expect(persisted.sessions[`${aliasKey}|${sessionId}`].timestamp).toBeGreaterThan(initialTs);
 
-      // Move near the original expiry window; it should still be present after touch.
-      jest.setSystemTime(new Date(Date.now() + ttlMs - 30_000));
+      // Advance time significantly; the signature should still be present.
+      jest.setSystemTime(new Date(Date.now() + 8 * 60 * 60 * 1000));
       expect(getAntigravitySessionSignature(aliasKey, sessionId)).toBe(sig);
     } finally {
       jest.useRealTimers();

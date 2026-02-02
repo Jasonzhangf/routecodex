@@ -16,6 +16,7 @@ import type { UnknownObject } from '../../../types/common-types.js';
 import type { ModuleDependencies } from '../../../modules/pipeline/interfaces/pipeline-interfaces.js';
 import {
   extractAntigravityGeminiSessionId,
+  getAntigravityLatestSignatureSessionIdForAlias,
   lookupAntigravitySessionSignatureEntry
 } from '../../../modules/llmswitch/bridge.js';
 import { GeminiProtocolClient } from '../../../client/gemini/gemini-protocol-client.js';
@@ -45,6 +46,14 @@ export class GeminiHttpProvider extends HttpTransportProvider {
       }
     };
     super(cfg, dependencies, 'gemini-http-provider', new GeminiProtocolClient());
+  }
+
+  protected override async sendRequestInternal(request: UnknownObject): Promise<unknown> {
+    try {
+      return await super.sendRequestInternal(request);
+    } finally {
+      this.restoreAntigravityRuntimeSessionId();
+    }
   }
 
   protected override async preprocessRequest(request: UnknownObject): Promise<UnknownObject> {
@@ -253,20 +262,79 @@ export class GeminiHttpProvider extends HttpTransportProvider {
     const derivedSessionId = extractAntigravityGeminiSessionId(target);
     const candidateSessionId = stableSessionId || (typeof derivedSessionId === 'string' ? derivedSessionId.trim() : '');
     if (candidateSessionId) {
-      const lookup = lookupAntigravitySessionSignatureEntry(aliasKey, candidateSessionId, { hydrate: true });
-      const hasSignature =
-        typeof (lookup as any)?.signature === 'string' && String((lookup as any).signature).trim().length > 0;
-      const sourceSessionId =
-        hasSignature && typeof (lookup as any)?.sourceSessionId === 'string'
-          ? String((lookup as any).sourceSessionId).trim()
-          : '';
-      const effectiveSessionId = sourceSessionId || candidateSessionId;
+      const lookupCandidate = lookupAntigravitySessionSignatureEntry(aliasKey, candidateSessionId, { hydrate: true });
+      const candidateHasSignature =
+        typeof (lookupCandidate as any)?.signature === 'string' && String((lookupCandidate as any).signature).trim().length > 0;
+
+      let effectiveSessionId = candidateSessionId;
+      if (!candidateHasSignature) {
+        const latestSid = getAntigravityLatestSignatureSessionIdForAlias(aliasKey, { hydrate: true });
+        if (latestSid && latestSid !== candidateSessionId) {
+          const lookupLatest = lookupAntigravitySessionSignatureEntry(aliasKey, latestSid, { hydrate: true });
+          const latestHasSignature =
+            typeof (lookupLatest as any)?.signature === 'string' && String((lookupLatest as any).signature).trim().length > 0;
+          if (latestHasSignature) {
+            effectiveSessionId = latestSid;
+          }
+        }
+      }
       const metaCarrier = target as { metadata?: Record<string, unknown> };
       metaCarrier.metadata = {
         ...(metaCarrier.metadata || {}),
         antigravitySessionId: effectiveSessionId,
         ...(effectiveSessionId !== candidateSessionId ? { antigravitySessionIdOriginal: candidateSessionId } : {})
       };
+      if (effectiveSessionId !== candidateSessionId) {
+        this.swapAntigravityRuntimeSessionId(effectiveSessionId, candidateSessionId);
+      }
+    }
+  }
+
+  private swapAntigravityRuntimeSessionId(effectiveSessionId: string, originalSessionId: string): void {
+    if (!this.isAntigravityRuntime()) {
+      return;
+    }
+    const runtime = this.getCurrentRuntimeMetadata();
+    const meta = runtime?.metadata;
+    if (!meta || typeof meta !== 'object') {
+      return;
+    }
+    const record = meta as Record<string, unknown>;
+    if (!('__antigravitySessionIdRestore' in record)) {
+      record.__antigravitySessionIdRestore = typeof record.antigravitySessionId === 'string' ? record.antigravitySessionId : null;
+      record.__antigravitySessionIdOriginalRestore =
+        typeof record.antigravitySessionIdOriginal === 'string' ? record.antigravitySessionIdOriginal : null;
+    }
+    record.antigravitySessionId = effectiveSessionId;
+    record.antigravitySessionIdOriginal = originalSessionId;
+  }
+
+  private restoreAntigravityRuntimeSessionId(): void {
+    if (!this.isAntigravityRuntime()) {
+      return;
+    }
+    const runtime = this.getCurrentRuntimeMetadata();
+    const meta = runtime?.metadata;
+    if (!meta || typeof meta !== 'object') {
+      return;
+    }
+    const record = meta as Record<string, unknown>;
+    if (!('__antigravitySessionIdRestore' in record)) {
+      return;
+    }
+    const restore = record.__antigravitySessionIdRestore;
+    const restoreOriginal = record.__antigravitySessionIdOriginalRestore;
+    delete record.__antigravitySessionIdRestore;
+    delete record.__antigravitySessionIdOriginalRestore;
+    if (typeof restore === 'string' && restore.trim().length) {
+      record.antigravitySessionId = restore;
+    } else {
+      delete record.antigravitySessionId;
+    }
+    if (typeof restoreOriginal === 'string' && restoreOriginal.trim().length) {
+      record.antigravitySessionIdOriginal = restoreOriginal;
+    } else {
+      delete record.antigravitySessionIdOriginal;
     }
   }
 

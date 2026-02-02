@@ -222,4 +222,84 @@ describe('VirtualRouterEngine antigravity alias session lease', () => {
       logSpy.mockRestore();
     }
   });
+
+  test('Gemini alias leases do not affect Claude scheduling (separate scopes)', () => {
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const nowSpy = jest.spyOn(Date, 'now');
+
+    const gemini = 'antigravity.aliasA.gemini-3-pro-high';
+    const claude = 'antigravity.aliasA.claude-sonnet-4-5-thinking';
+    const fallback = 'tab.key1.gpt-5.2';
+    const cooldown = 5 * 60_000;
+
+    try {
+      const engine = new VirtualRouterEngine();
+      engine.initialize({
+        routing: {
+          gemini: [{ id: 'primary', targets: [gemini], priority: 1, mode: 'round-robin' }],
+          claude: [{ id: 'primary', targets: [claude, fallback], priority: 1, mode: 'round-robin' }]
+        },
+        providers: {
+          [gemini]: {
+            providerKey: gemini,
+            providerType: 'gemini',
+            endpoint: 'https://example.invalid',
+            auth: { type: 'apiKey', value: 'test' },
+            outboundProfile: 'gemini-chat',
+            modelId: 'gemini-3-pro-high'
+          },
+          [claude]: {
+            providerKey: claude,
+            providerType: 'gemini',
+            endpoint: 'https://example.invalid',
+            auth: { type: 'apiKey', value: 'test' },
+            outboundProfile: 'gemini-chat',
+            modelId: 'claude-sonnet-4-5-thinking'
+          },
+          [fallback]: {
+            providerKey: fallback,
+            providerType: 'gemini',
+            endpoint: 'https://example.invalid',
+            auth: { type: 'apiKey', value: 'test' },
+            outboundProfile: 'gemini-chat',
+            modelId: 'gpt-5.2'
+          }
+        },
+        classifier: { longContextThresholdTokens: 180000, thinkingKeywords: [], backgroundKeywords: [] },
+        loadBalancing: { strategy: 'round-robin', aliasSelection: { sessionLeaseCooldownMs: cooldown } },
+        contextRouting: { warnRatio: 0.9, hardLimit: false },
+        health: { failureThreshold: 3, cooldownMs: 5_000, fatalCooldownMs: 10_000 }
+      } as any);
+
+      nowSpy.mockReturnValue(4_000_000);
+      const pickedGemini = engine.route(
+        { model: 'gemini-3-pro-high', messages: [{ role: 'user', content: 'hi' }], tools: [] } as any,
+        {
+          requestId: 'req_gemini_a_1',
+          entryEndpoint: '/v1/chat/completions',
+          providerProtocol: 'openai-chat',
+          routeHint: 'gemini',
+          sessionId: 'sessionA'
+        } as any
+      ).target.providerKey;
+      expect(pickedGemini).toBe(gemini);
+
+      // Even though it shares the same alias (antigravity.aliasA), Claude scheduling must not be blocked by Gemini lease.
+      nowSpy.mockReturnValue(4_000_010);
+      const pickedClaude = engine.route(
+        { model: 'claude-sonnet-4-5-thinking', messages: [{ role: 'user', content: 'hi' }], tools: [] } as any,
+        {
+          requestId: 'req_claude_b_1',
+          entryEndpoint: '/v1/chat/completions',
+          providerProtocol: 'openai-chat',
+          routeHint: 'claude',
+          sessionId: 'sessionB'
+        } as any
+      ).target.providerKey;
+      expect(pickedClaude).toBe(claude);
+    } finally {
+      nowSpy.mockRestore();
+      logSpy.mockRestore();
+    }
+  });
 });
