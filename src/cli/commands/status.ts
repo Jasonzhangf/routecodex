@@ -15,6 +15,8 @@ type HealthCheckResult = {
   port: number;
   host: string;
   responseTime?: number;
+  version?: string;
+  ready?: boolean;
   error?: string;
 };
 
@@ -57,7 +59,9 @@ async function checkServer(ctx: StatusCommandContext, port: number, host: string
     }
     const data = await res.json().catch(() => null);
     const status = data?.status ? String(data.status) : 'unknown';
-    return { status, port, host, responseTime };
+    const version = data?.version ? String(data.version) : undefined;
+    const ready = typeof data?.ready === 'boolean' ? Boolean(data.ready) : undefined;
+    return { status, port, host, responseTime, ...(version ? { version } : {}), ...(ready !== undefined ? { ready } : {}) };
   } catch (error) {
     const responseTime = Date.now() - startedAt;
     const message = error instanceof Error ? error.message : String(error);
@@ -72,7 +76,9 @@ function printHuman(ctx: StatusCommandContext, status: HealthCheckResult): void 
   const normalized = status.status === 'healthy' || status.status === 'ready' ? 'running' : status.status;
   switch (normalized) {
     case 'running':
-      ctx.logger.success(`Server is running on ${status.host}:${status.port}`);
+      ctx.logger.success(
+        `Server is running on ${status.host}:${status.port}` + (status.version ? ` (version=${status.version})` : '')
+      );
       break;
     case 'stopped':
       ctx.logger.error('Server is not running');
@@ -89,8 +95,10 @@ export function createStatusCommand(program: Command, ctx: StatusCommandContext)
   program
     .command('status')
     .description('Show server status')
+    .option('-p, --port <port>', 'RouteCodex server port (overrides config)')
+    .option('--host <host>', 'RouteCodex server host (overrides config)')
     .option('-j, --json', 'Output in JSON format')
-    .action(async (options: { json?: boolean }) => {
+    .action(async (options: { json?: boolean; port?: string; host?: string }) => {
       try {
         let loaded: LoadedRouteCodexConfig | null = null;
         try {
@@ -110,13 +118,14 @@ export function createStatusCommand(program: Command, ctx: StatusCommandContext)
           return;
         }
 
-        const { port, host } = pickPortHost(loaded.userConfig as any);
+        const fallback = pickPortHost(loaded.userConfig as any);
+        const explicitPort = typeof options.port === 'string' && options.port.trim() ? Number(options.port.trim()) : null;
+        const port = explicitPort && Number.isFinite(explicitPort) && explicitPort > 0 ? explicitPort : fallback.port;
+        const host = typeof options.host === 'string' && options.host.trim() ? options.host.trim() : fallback.host;
         if (!port || port <= 0) {
-          const errorMsg = 'Invalid or missing port configuration in configuration file';
+          const errorMsg = 'Missing port. Set via --port or config file.';
           ctx.logger.error(errorMsg);
-          if (options.json) {
-            ctx.log(JSON.stringify({ error: errorMsg }, null, 2));
-          }
+          if (options.json) ctx.log(JSON.stringify({ error: errorMsg }, null, 2));
           return;
         }
 

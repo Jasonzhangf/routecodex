@@ -604,6 +604,7 @@
           <div class="statusline">
             <div class="pill"><span id="statusDot" class="dot"></span><span id="statusText">connecting…</span></div>
             <div class="pill"><span class="mono" id="serverId">serverId: —</span></div>
+            <div class="pill"><span class="mono" id="serverVersion">version: —</span></div>
             <button id="restartRuntimeBtn" class="primary">Restart runtime</button>
           </div>
         </header>
@@ -660,12 +661,104 @@
         </div>
 
         <div class="tabs">
+          <button class="tab" data-tab="control">Control</button>
           <button class="tab active" data-tab="providers">Provider Pool</button>
+          <button class="tab" data-tab="stats">Stats</button>
           <button class="tab" data-tab="tokens">Token Stats</button>
           <button class="tab" data-tab="credentials">Auth Provider Pool</button>
           <button class="tab" data-tab="quota">Quota Pool</button>
           <button class="tab" data-tab="routing">Runtime Routing Pool</button>
         </div>
+
+        <section id="panelControl" data-panel="control" style="display:none;">
+          <div class="grid grid-wide-left">
+            <div class="card" style="box-shadow: none;">
+              <p class="section-title">Control plane (single entry)</p>
+              <p class="section-sub">
+                This panel uses <span class="mono">/daemon/control/snapshot</span> and <span class="mono">/daemon/control/mutate</span>
+                to manage all local servers (broadcast restart) and quota operations from one port.
+              </p>
+              <div class="row" style="margin-bottom: 10px;">
+                <button id="controlRefreshBtn" class="primary">Refresh</button>
+                <button id="controlRestartAllBtn" class="danger">Restart all servers</button>
+                <button id="controlQuotaRefreshBtn">Refresh quota</button>
+                <span id="controlHint" class="muted" style="margin-left:auto; font-size:12px;"></span>
+              </div>
+              <div class="table-wrap">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>port</th>
+                      <th>version</th>
+                      <th>ready</th>
+                      <th>pids</th>
+                    </tr>
+                  </thead>
+                  <tbody id="controlServersTbody"></tbody>
+                </table>
+              </div>
+              <p class="section-title" style="margin-top: 12px;">Routing hits (llmswitch-core)</p>
+              <div class="table-wrap">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>route</th>
+                      <th>hits</th>
+                    </tr>
+                  </thead>
+                  <tbody id="controlHitsTbody"></tbody>
+                </table>
+              </div>
+              <div id="controlOpLog" class="log" style="margin-top: 10px; display:none;"></div>
+            </div>
+
+            <div class="card" style="box-shadow: none;">
+              <p class="section-title">Quota actions</p>
+              <p class="section-sub">
+                Offline/Recover/Reset are executed by control plane (no direct writes from UI).
+              </p>
+              <div class="row" style="margin-bottom: 10px;">
+                <label for="controlQuotaKeyInput">providerKey</label>
+                <input id="controlQuotaKeyInput" type="text" placeholder="tab.key1.gpt-5.2-codex" style="flex: 1; min-width: 320px;" />
+              </div>
+              <div class="row" style="margin-bottom: 10px;">
+                <label for="controlQuotaModeSelect">mode</label>
+                <select id="controlQuotaModeSelect" style="width: 140px;">
+                  <option value="cooldown" selected>cooldown</option>
+                  <option value="blacklist">blacklist</option>
+                </select>
+                <label for="controlQuotaDurationSelect">time</label>
+                <select id="controlQuotaDurationSelect" style="width: 160px;">
+                  <option value="5">5m</option>
+                  <option value="15">15m</option>
+                  <option value="30">30m</option>
+                  <option value="60" selected>1h</option>
+                  <option value="180">3h</option>
+                  <option value="360">6h</option>
+                  <option value="720">12h</option>
+                  <option value="1440">24h</option>
+                </select>
+                <button id="controlQuotaOfflineBtn" class="danger">Offline</button>
+                <button id="controlQuotaRecoverBtn">Recover</button>
+                <button id="controlQuotaResetBtn">Reset</button>
+              </div>
+              <div class="table-wrap">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>providerKey</th>
+                      <th>inPool</th>
+                      <th>reason</th>
+                      <th>cooldownUntil</th>
+                      <th>blacklistUntil</th>
+                    </tr>
+                  </thead>
+                  <tbody id="controlQuotaProvidersTbody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
 
         <section id="panelProviders" data-panel="providers">
           <div class="grid grid-wide-left">
@@ -797,6 +890,132 @@
               </div>
 
               <div id="providerOpLog" class="log" style="margin-top: 10px; display:none;"></div>
+            </div>
+          </div>
+        </section>
+
+        <section id="panelStats" data-panel="stats" style="display:none;">
+          <div class="grid">
+            <div class="card" style="box-shadow:none;">
+              <p class="section-title">Stats (session)</p>
+              <p class="section-sub">
+                Real-time request/error counters aggregated from in-memory buckets (counts provider attempts, including failover retries). Resets on server restart.
+              </p>
+              <div class="row" style="margin-bottom: 10px;">
+                <button id="refreshStatsBtn" class="primary">Refresh</button>
+                <label class="muted" style="display:inline-flex; align-items:center; gap:8px;">
+                  <input id="statsAutoRefresh" type="checkbox" checked />
+                  auto refresh (2s)
+                </label>
+                <span class="mono muted" id="statsLastUpdated"></span>
+              </div>
+              <div class="notice mono" id="statsSessionTotalsBox" style="white-space: pre-wrap;"></div>
+              <div class="table-wrap" style="margin-top: 10px;">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>providerId</th>
+                      <th>req</th>
+                      <th>err</th>
+                    </tr>
+                  </thead>
+                  <tbody id="statsSessionProvidersTbody"></tbody>
+                </table>
+              </div>
+              <div class="table-wrap" style="margin-top: 10px;">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>providerRuntime</th>
+                      <th>req</th>
+                      <th>err</th>
+                    </tr>
+                  </thead>
+                  <tbody id="statsSessionRuntimesTbody"></tbody>
+                </table>
+              </div>
+              <div class="table-wrap" style="margin-top: 10px;">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>model</th>
+                      <th>req</th>
+                      <th>err</th>
+                    </tr>
+                  </thead>
+                  <tbody id="statsSessionModelsTbody"></tbody>
+                </table>
+              </div>
+              <div class="table-wrap" style="margin-top: 10px;">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>providerKey</th>
+                      <th>model</th>
+                      <th>req</th>
+                      <th>err</th>
+                    </tr>
+                  </thead>
+                  <tbody id="statsSessionErrorsTbody"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="card" style="box-shadow:none;">
+              <p class="section-title">Stats (historical)</p>
+              <p class="section-sub">
+                Aggregated from <span class="mono">~/.routecodex/logs/provider-stats.jsonl</span> (best-effort).
+              </p>
+              <div class="notice mono" id="statsHistoricalTotalsBox" style="white-space: pre-wrap;"></div>
+              <div class="table-wrap" style="margin-top: 10px;">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>providerId</th>
+                      <th>req</th>
+                      <th>err</th>
+                    </tr>
+                  </thead>
+                  <tbody id="statsHistoricalProvidersTbody"></tbody>
+                </table>
+              </div>
+              <div class="table-wrap" style="margin-top: 10px;">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>providerRuntime</th>
+                      <th>req</th>
+                      <th>err</th>
+                    </tr>
+                  </thead>
+                  <tbody id="statsHistoricalRuntimesTbody"></tbody>
+                </table>
+              </div>
+              <div class="table-wrap" style="margin-top: 10px;">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>model</th>
+                      <th>req</th>
+                      <th>err</th>
+                    </tr>
+                  </thead>
+                  <tbody id="statsHistoricalModelsTbody"></tbody>
+                </table>
+              </div>
+              <div class="table-wrap" style="margin-top: 10px;">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>providerKey</th>
+                      <th>model</th>
+                      <th>req</th>
+                      <th>err</th>
+                    </tr>
+                  </thead>
+                  <tbody id="statsHistoricalErrorsTbody"></tbody>
+                </table>
+              </div>
             </div>
           </div>
         </section>
@@ -1067,6 +1286,8 @@
 			        selectedProviderId: "",
 			        lastUnauthorizedToastAt: 0,
 			        adminAuth: null,
+              controlSnapshot: null,
+              controlSnapshotUpdatedAt: 0,
 			        quotaProviders: [],
 			        quotaProvidersUpdatedAt: 0,
 			        quotaProviderMap: null,
@@ -1167,7 +1388,9 @@
           btn.classList.toggle("active", btn.getAttribute("data-tab") === name);
         });
         const panels = [
+          { name: "control", el: $("panelControl") },
           { name: "providers", el: $("panelProviders") },
+          { name: "stats", el: $("panelStats") },
           { name: "tokens", el: $("panelTokens") },
           { name: "credentials", el: $("panelCredentials") },
           { name: "quota", el: $("panelQuota") },
@@ -1177,6 +1400,7 @@
 
         // Light auto-refresh on tab switch to avoid showing stale "Unauthorized" after login.
         void maybeRefreshTab(name);
+        syncStatsAutoRefresh();
       }
 
       function getActiveTab() {
@@ -1186,7 +1410,9 @@
       }
 
       const tabLastRefreshedAt = {
+        control: 0,
         providers: 0,
+        stats: 0,
         tokens: 0,
         credentials: 0,
         quota: 0,
@@ -1202,6 +1428,8 @@
         tabLastRefreshedAt[key] = now;
         try {
           if (key === "providers") await refreshProviders();
+          else if (key === "control") await refreshControl();
+          else if (key === "stats") await refreshStats();
           else if (key === "tokens") await refreshTokens();
           else if (key === "credentials") await refreshCredentials();
 	          else if (key === "quota") {
@@ -1215,6 +1443,32 @@
         } catch {
           // ignore refresh failures on tab switch
         }
+      }
+
+      let statsAutoRefreshTimer = null;
+      function syncStatsAutoRefresh() {
+        if (statsAutoRefreshTimer) {
+          try { clearInterval(statsAutoRefreshTimer); } catch {}
+          statsAutoRefreshTimer = null;
+        }
+        const active = getActiveTab();
+        if (active !== "stats") {
+          return;
+        }
+        const checkbox = $("statsAutoRefresh");
+        const enabled = checkbox && checkbox.checked;
+        if (!enabled) {
+          return;
+        }
+        if (UI && UI.adminAuth && UI.adminAuth.authenticated === false) {
+          return;
+        }
+        statsAutoRefreshTimer = setInterval(() => {
+          if (getActiveTab() !== "stats") return;
+          const checkboxNow = $("statsAutoRefresh");
+          if (!checkboxNow || !checkboxNow.checked) return;
+          void refreshStats();
+        }, 2000);
       }
 
       function textOf(value) {
@@ -1237,6 +1491,16 @@
         td.colSpan = colSpan;
         td.className = "mono";
         td.textContent = `Failed to load: ${textOf(message)}`;
+        tr.appendChild(td);
+        return tr;
+      }
+
+      function createInfoRow(colSpan, message) {
+        const tr = document.createElement("tr");
+        const td = document.createElement("td");
+        td.colSpan = colSpan;
+        td.className = "mono muted";
+        td.textContent = textOf(message);
         tr.appendChild(td);
         return tr;
       }
@@ -1761,6 +2025,14 @@
       }
 
       async function refreshStatus() {
+        // /health is public; use it to always show version even before admin login.
+        try {
+          const res = await fetch("/health");
+          const data = res && res.ok ? await res.json().catch(() => null) : null;
+          $("serverVersion").textContent = `version: ${data && data.version ? data.version : "—"}`;
+        } catch {
+          $("serverVersion").textContent = "version: —";
+        }
         try {
           const data = await apiFetch("/daemon/status");
           $("serverId").textContent = `serverId: ${data.serverId || "—"}`;
@@ -1771,7 +2043,134 @@
           $("statusText").textContent = e && e.status === 401 ? "401 (set API key above)" : "disconnected";
           $("statusDot").classList.remove("ok");
           $("statusDot").classList.add("err");
+          $("serverId").textContent = "serverId: —";
         }
+      }
+
+      function formatTs(ms) {
+        if (ms === null || ms === undefined) return "—";
+        const n = Number(ms);
+        if (!Number.isFinite(n) || n <= 0) return "—";
+        try {
+          return new Date(n).toLocaleString();
+        } catch {
+          return String(n);
+        }
+      }
+
+      function renderControlSnapshot() {
+        const snap = UI.controlSnapshot;
+        const serversBody = $("controlServersTbody");
+        const hitsBody = $("controlHitsTbody");
+        const quotaBody = $("controlQuotaProvidersTbody");
+        if (serversBody) serversBody.replaceChildren();
+        if (hitsBody) hitsBody.replaceChildren();
+        if (quotaBody) quotaBody.replaceChildren();
+        if (!snap || typeof snap !== "object") {
+          if (serversBody) serversBody.appendChild(createErrorRow(4, "No snapshot"));
+          if (hitsBody) hitsBody.appendChild(createErrorRow(2, "No snapshot"));
+          if (quotaBody) quotaBody.appendChild(createErrorRow(5, "No snapshot"));
+          return;
+        }
+        const servers = Array.isArray(snap.servers) ? snap.servers : [];
+        if (!servers.length) {
+          if (serversBody) serversBody.appendChild(createErrorRow(4, "No local servers discovered"));
+        } else if (serversBody) {
+          for (const s of servers) {
+            const tr = document.createElement("tr");
+            tr.appendChild(createCell("td", String(s.port ?? "—"), "mono"));
+            tr.appendChild(createCell("td", textOf(s.version || "—"), "mono"));
+            tr.appendChild(createCell("td", s.ready === true ? "true" : s.ready === false ? "false" : "—", ""));
+            tr.appendChild(createCell("td", Array.isArray(s.pids) ? s.pids.join(" ") : "", "mono"));
+            serversBody.appendChild(tr);
+          }
+        }
+
+        try {
+          const llms = snap.llmsStats && typeof snap.llmsStats === "object" ? snap.llmsStats : null;
+          const routeHits =
+            llms && llms.router && llms.router.global && llms.router.global.routeHitCount
+              ? llms.router.global.routeHitCount
+              : null;
+          const entries = routeHits && typeof routeHits === "object" ? Object.entries(routeHits) : [];
+          entries.sort((a, b) => Number(b[1] || 0) - Number(a[1] || 0));
+          const top = entries.slice(0, 20);
+          if (!top.length) {
+            if (hitsBody) hitsBody.appendChild(createErrorRow(2, "No routing hits recorded yet"));
+          } else if (hitsBody) {
+            for (const [route, count] of top) {
+              const tr = document.createElement("tr");
+              tr.appendChild(createCell("td", String(route || "—"), "mono"));
+              tr.appendChild(createCell("td", String(count ?? 0), "mono"));
+              hitsBody.appendChild(tr);
+            }
+          }
+        } catch {
+          if (hitsBody) hitsBody.appendChild(createErrorRow(2, "Failed to read routing hits"));
+        }
+
+        const quota = snap.quota && typeof snap.quota === "object" ? snap.quota : null;
+        const providers = quota && Array.isArray(quota.providers) ? quota.providers : [];
+        const list = providers
+          .map((p) => ({
+            providerKey: textOf(p.providerKey),
+            inPool: Boolean(p.inPool),
+            reason: textOf(p.reason),
+            cooldownUntil: p.cooldownUntil ?? null,
+            blacklistUntil: p.blacklistUntil ?? null
+          }))
+          .filter((p) => p.providerKey);
+        list.sort((a, b) => a.providerKey.localeCompare(b.providerKey));
+        const max = 60;
+        const visible = list.slice(0, max);
+        if (!visible.length) {
+          if (quotaBody) quotaBody.appendChild(createErrorRow(5, "No quota providers"));
+        } else if (quotaBody) {
+          for (const p of visible) {
+            const tr = document.createElement("tr");
+            tr.appendChild(createCell("td", p.providerKey, "mono truncate", { title: true }));
+            tr.appendChild(createCell("td", p.inPool ? "true" : "false", p.inPool ? "" : "danger"));
+            tr.appendChild(createCell("td", p.reason || "—", "mono truncate", { title: true }));
+            tr.appendChild(createCell("td", formatTs(p.cooldownUntil), "mono"));
+            tr.appendChild(createCell("td", formatTs(p.blacklistUntil), "mono"));
+            quotaBody.appendChild(tr);
+          }
+          if (list.length > max) {
+            const tr = document.createElement("tr");
+            const td = document.createElement("td");
+            td.colSpan = 5;
+            td.className = "muted";
+            td.textContent = `… ${list.length - max} more hidden`;
+            tr.appendChild(td);
+            quotaBody.appendChild(tr);
+          }
+        }
+
+        const hint = $("controlHint");
+        if (hint) {
+          hint.textContent = `servers: ${servers.length} · quota keys: ${list.length} · updated: ${formatTs(snap.nowMs)}`;
+        }
+      }
+
+      async function refreshControl() {
+        setLog("controlOpLog", "");
+        try {
+          const snap = await apiFetch("/daemon/control/snapshot");
+          UI.controlSnapshot = snap;
+          UI.controlSnapshotUpdatedAt = Date.now();
+          renderControlSnapshot();
+        } catch (e) {
+          if (e && e.status === 401) notifyUnauthorizedOnce("control");
+          setLog("controlOpLog", `Control snapshot failed: ${e.message || e}`);
+        }
+      }
+
+      async function controlMutate(action, payload = {}) {
+        const out = await apiFetch("/daemon/control/mutate", {
+          method: "POST",
+          body: JSON.stringify({ action, ...payload })
+        });
+        return out;
       }
 
       async function refreshProviders() {
@@ -3239,6 +3638,166 @@
         return `${label}: requests=${req} (err=${err}) tokens in/out/total=${inTok}/${outTok}/${totTok}`;
       }
 
+      function summarizeStatsRows(rows) {
+        const byProvider = new Map();
+        const byRuntime = new Map();
+        const byModel = new Map();
+        let totalReq = 0;
+        let totalErr = 0;
+        for (const r of rows) {
+          if (!r || !r.providerKey) continue;
+          const providerKey = textOf(r.providerKey);
+          const providerId = (providerKey.split(".")[0] || providerKey).trim() || providerKey;
+          const runtime = (() => {
+            const parts = providerKey.split(".").filter(Boolean);
+            if (parts.length >= 2) return `${parts[0]}.${parts[1]}`;
+            return providerKey;
+          })();
+          const model = textOf(r.model || "");
+          const req = typeof r.requestCount === "number" ? r.requestCount : 0;
+          const err = typeof r.errorCount === "number" ? r.errorCount : 0;
+          totalReq += req;
+          totalErr += err;
+          const p = byProvider.get(providerId) || { providerId, requestCount: 0, errorCount: 0 };
+          p.requestCount += req;
+          p.errorCount += err;
+          byProvider.set(providerId, p);
+          const rt = byRuntime.get(runtime) || { runtime, requestCount: 0, errorCount: 0 };
+          rt.requestCount += req;
+          rt.errorCount += err;
+          byRuntime.set(runtime, rt);
+          const mKey = model || "—";
+          const m = byModel.get(mKey) || { model: mKey, requestCount: 0, errorCount: 0 };
+          m.requestCount += req;
+          m.errorCount += err;
+          byModel.set(mKey, m);
+        }
+        return {
+          totalReq,
+          totalErr,
+          byProvider: Array.from(byProvider.values()).sort((a, b) => b.requestCount - a.requestCount),
+          byRuntime: Array.from(byRuntime.values()).sort((a, b) => b.requestCount - a.requestCount),
+          byModel: Array.from(byModel.values()).sort((a, b) => b.requestCount - a.requestCount)
+        };
+      }
+
+      function renderStatsTable(bodyEl, rows, colCount, emptyMsg) {
+        bodyEl.replaceChildren();
+        if (!rows.length) {
+          bodyEl.appendChild(createInfoRow(colCount, emptyMsg));
+          return;
+        }
+        for (const r of rows) {
+          const tr = document.createElement("tr");
+          for (const cell of r) {
+            tr.appendChild(createCell("td", cell, "mono truncate", { title: true }));
+          }
+          bodyEl.appendChild(tr);
+        }
+      }
+
+      async function refreshStats() {
+        $("statsSessionTotalsBox").textContent = "";
+        $("statsHistoricalTotalsBox").textContent = "";
+        const sessionProvidersBody = $("statsSessionProvidersTbody");
+        const sessionRuntimesBody = $("statsSessionRuntimesTbody");
+        const sessionModelsBody = $("statsSessionModelsTbody");
+        const sessionErrorsBody = $("statsSessionErrorsTbody");
+        const histProvidersBody = $("statsHistoricalProvidersTbody");
+        const histRuntimesBody = $("statsHistoricalRuntimesTbody");
+        const histModelsBody = $("statsHistoricalModelsTbody");
+        const histErrorsBody = $("statsHistoricalErrorsTbody");
+        sessionProvidersBody.replaceChildren();
+        sessionRuntimesBody.replaceChildren();
+        sessionModelsBody.replaceChildren();
+        sessionErrorsBody.replaceChildren();
+        histProvidersBody.replaceChildren();
+        histRuntimesBody.replaceChildren();
+        histModelsBody.replaceChildren();
+        histErrorsBody.replaceChildren();
+
+        try {
+          const out = await apiFetch("/daemon/stats");
+          const session = out && out.session ? out.session : null;
+          const historical = out && out.historical ? out.historical : null;
+          const sessionRows = session && Array.isArray(session.totals) ? session.totals : [];
+          const histRows = historical && Array.isArray(historical.totals) ? historical.totals : [];
+
+          const s = summarizeStatsRows(sessionRows);
+          const h = summarizeStatsRows(histRows);
+
+          $("statsSessionTotalsBox").textContent = `ALL (session): requests=${formatInt(s.totalReq)} (err=${formatInt(s.totalErr)})`;
+          $("statsHistoricalTotalsBox").textContent = `ALL (historical): requests=${formatInt(h.totalReq)} (err=${formatInt(h.totalErr)})`;
+
+          renderStatsTable(
+            sessionProvidersBody,
+            s.byProvider.map((p) => [p.providerId, formatInt(p.requestCount), formatInt(p.errorCount)]),
+            3,
+            "No provider stats recorded in this session."
+          );
+          renderStatsTable(
+            sessionRuntimesBody,
+            s.byRuntime.map((r) => [r.runtime, formatInt(r.requestCount), formatInt(r.errorCount)]),
+            3,
+            "No runtime stats recorded in this session."
+          );
+          renderStatsTable(
+            sessionModelsBody,
+            s.byModel.map((m) => [m.model, formatInt(m.requestCount), formatInt(m.errorCount)]),
+            3,
+            "No model stats recorded in this session."
+          );
+
+          renderStatsTable(
+            histProvidersBody,
+            h.byProvider.map((p) => [p.providerId, formatInt(p.requestCount), formatInt(p.errorCount)]),
+            3,
+            "No historical stats recorded."
+          );
+          renderStatsTable(
+            histRuntimesBody,
+            h.byRuntime.map((r) => [r.runtime, formatInt(r.requestCount), formatInt(r.errorCount)]),
+            3,
+            "No historical stats recorded."
+          );
+          renderStatsTable(
+            histModelsBody,
+            h.byModel.map((m) => [m.model, formatInt(m.requestCount), formatInt(m.errorCount)]),
+            3,
+            "No historical stats recorded."
+          );
+
+          const toProviderKeys = (rows) =>
+            rows
+              .filter((r) => r && r.providerKey)
+              .map((r) => ({
+                providerKey: textOf(r.providerKey),
+                model: textOf(r.model || "—") || "—",
+                req: typeof r.requestCount === "number" ? r.requestCount : 0,
+                err: typeof r.errorCount === "number" ? r.errorCount : 0
+              }))
+              .sort((a, b) => b.req - a.req || b.err - a.err || a.providerKey.localeCompare(b.providerKey))
+              .slice(0, 50)
+              .map((x) => [x.providerKey, x.model, formatInt(x.req), formatInt(x.err)]);
+
+          renderStatsTable(sessionErrorsBody, toProviderKeys(sessionRows), 4, "No provider stats recorded in this session.");
+          renderStatsTable(histErrorsBody, toProviderKeys(histRows), 4, "No historical provider stats recorded.");
+
+          $("statsLastUpdated").textContent = `updated ${formatEpochMs(Date.now())}`;
+        } catch (e) {
+          if (e && e.status === 401) notifyUnauthorizedOnce("stats");
+          const msg = e && e.message ? e.message : e;
+          renderStatsTable(sessionProvidersBody, [], 3, textOf(msg));
+          renderStatsTable(sessionRuntimesBody, [], 3, textOf(msg));
+          renderStatsTable(sessionModelsBody, [], 3, textOf(msg));
+          renderStatsTable(sessionErrorsBody, [], 4, textOf(msg));
+          renderStatsTable(histProvidersBody, [], 3, textOf(msg));
+          renderStatsTable(histRuntimesBody, [], 3, textOf(msg));
+          renderStatsTable(histModelsBody, [], 3, textOf(msg));
+          renderStatsTable(histErrorsBody, [], 4, textOf(msg));
+        }
+      }
+
       async function refreshTokens() {
         const body = $("tokensTbody");
         body.replaceChildren();
@@ -3564,7 +4123,73 @@
 	        }
       });
 
+      $("controlRefreshBtn").addEventListener("click", refreshControl);
+      $("controlRestartAllBtn").addEventListener("click", async () => {
+        setLog("controlOpLog", "");
+        if (!confirm("Broadcast restart all local RouteCodex servers now?")) return;
+        try {
+          const out = await controlMutate("servers.restart", {});
+          setLog("controlOpLog", `Restart requested.\n${JSON.stringify(out, null, 2)}`);
+          await refreshControl();
+          await refreshStatus();
+        } catch (e) {
+          setLog("controlOpLog", `Restart failed: ${e.message || e}`);
+        }
+      });
+      $("controlQuotaRefreshBtn").addEventListener("click", async () => {
+        setLog("controlOpLog", "");
+        try {
+          const out = await controlMutate("quota.refresh", {});
+          setLog("controlOpLog", `Quota refresh requested.\n${JSON.stringify(out, null, 2)}`);
+          await refreshControl();
+        } catch (e) {
+          setLog("controlOpLog", `Quota refresh failed: ${e.message || e}`);
+        }
+      });
+      $("controlQuotaOfflineBtn").addEventListener("click", async () => {
+        setLog("controlOpLog", "");
+        const providerKey = ($("controlQuotaKeyInput").value || "").trim();
+        if (!providerKey) return toast("providerKey required");
+        const mode = $("controlQuotaModeSelect").value === "blacklist" ? "blacklist" : "cooldown";
+        const minutes = Number($("controlQuotaDurationSelect").value || 0);
+        const durationMs = Number.isFinite(minutes) && minutes > 0 ? minutes * 60 * 1000 : 0;
+        if (!durationMs) return toast("duration required");
+        try {
+          const out = await controlMutate("quota.disable", { providerKey, mode, durationMs });
+          setLog("controlOpLog", `Offline requested.\n${JSON.stringify(out, null, 2)}`);
+          await refreshControl();
+        } catch (e) {
+          setLog("controlOpLog", `Offline failed: ${e.message || e}`);
+        }
+      });
+      $("controlQuotaRecoverBtn").addEventListener("click", async () => {
+        setLog("controlOpLog", "");
+        const providerKey = ($("controlQuotaKeyInput").value || "").trim();
+        if (!providerKey) return toast("providerKey required");
+        try {
+          const out = await controlMutate("quota.recover", { providerKey });
+          setLog("controlOpLog", `Recover requested.\n${JSON.stringify(out, null, 2)}`);
+          await refreshControl();
+        } catch (e) {
+          setLog("controlOpLog", `Recover failed: ${e.message || e}`);
+        }
+      });
+      $("controlQuotaResetBtn").addEventListener("click", async () => {
+        setLog("controlOpLog", "");
+        const providerKey = ($("controlQuotaKeyInput").value || "").trim();
+        if (!providerKey) return toast("providerKey required");
+        try {
+          const out = await controlMutate("quota.reset", { providerKey });
+          setLog("controlOpLog", `Reset requested.\n${JSON.stringify(out, null, 2)}`);
+          await refreshControl();
+        } catch (e) {
+          setLog("controlOpLog", `Reset failed: ${e.message || e}`);
+        }
+      });
+
       $("refreshProvidersBtn").addEventListener("click", refreshProviders);
+      $("refreshStatsBtn").addEventListener("click", refreshStats);
+      $("statsAutoRefresh").addEventListener("change", syncStatsAutoRefresh);
       $("refreshTokensBtn").addEventListener("click", refreshTokens);
       $("newProviderBtn").addEventListener("click", () => {
         $("providerEditorTitle").textContent = "Provider editor (new)";

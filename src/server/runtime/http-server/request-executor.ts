@@ -142,15 +142,14 @@ export class HubRequestExecutor implements RequestExecutor {
   constructor(private readonly deps: RequestExecutorDeps) { }
 
   async execute(input: PipelineExecutionInput): Promise<PipelineExecutionResult> {
-    this.deps.stats.recordRequestStart(input.requestId);
+    // Stats must remain stable across provider retries and requestId enhancements.
+    const statsRequestId = input.requestId;
+    this.deps.stats.recordRequestStart(statsRequestId);
     const requestStartedAt = Date.now();
-    let statsRecorded = false;
-    const finalizeStats = (options?: { usage?: UsageMetrics; error?: boolean }) => {
-      if (statsRecorded) {
-        return;
-      }
-      this.deps.stats.recordCompletion(input.requestId, options);
-      statsRecorded = true;
+    let recordedAnyAttempt = false;
+    const recordAttempt = (options?: { usage?: UsageMetrics; error?: boolean }) => {
+      this.deps.stats.recordCompletion(statsRequestId, options);
+      recordedAnyAttempt = true;
     };
     try {
       const hubPipeline = ensureHubPipeline(this.deps.getHubPipeline);
@@ -296,7 +295,7 @@ export class HubRequestExecutor implements RequestExecutor {
         if (clientHeadersForAttempt) {
           ensureClientHeadersOnPayload(providerPayload, clientHeadersForAttempt);
         }
-        this.deps.stats.bindProvider(input.requestId, {
+        this.deps.stats.bindProvider(statsRequestId, {
           providerKey: target.providerKey,
           providerType: handle.providerType,
           model: providerModel
@@ -406,7 +405,7 @@ export class HubRequestExecutor implements RequestExecutor {
             }
           }
 
-          finalizeStats({ usage: aggregatedUsage, error: false });
+          recordAttempt({ usage: aggregatedUsage, error: false });
           this.logUsageSummary(input.requestId, {
             providerKey: target.providerKey,
             model: providerModel,
@@ -437,8 +436,11 @@ export class HubRequestExecutor implements RequestExecutor {
           }
           const shouldRetry = attempt < maxAttempts && shouldRetryProviderError(error);
           if (!shouldRetry) {
+            recordAttempt({ error: true });
             throw error;
           }
+          // Record this failed provider attempt even if the overall request succeeds later via failover.
+          recordAttempt({ error: true });
           const singleProviderPool =
             Boolean(initialRoutePool && initialRoutePool.length === 1 && initialRoutePool[0] === target.providerKey);
           if (singleProviderPool) {
@@ -476,7 +478,11 @@ export class HubRequestExecutor implements RequestExecutor {
 
       throw lastError ?? new Error('Provider execution failed without response');
     } catch (error: unknown) {
-      finalizeStats({ error: true });
+      // If we failed before selecting a provider (no bindProvider/recordAttempt),
+      // at least record one error sample for this request.
+      if (!recordedAnyAttempt) {
+        recordAttempt({ error: true });
+      }
       throw error;
     }
 

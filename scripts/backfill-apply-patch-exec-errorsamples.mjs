@@ -25,6 +25,7 @@ const ERR_BASE =
 const OUT_ROOT = path.join(ERR_BASE, 'apply_patch_exec');
 
 const MAX_PER_TYPE = 250;
+const EXEC_ERRORSAMPLES_ENABLED = String(process.env.ROUTECODEX_ERRORSAMPLES_APPLY_PATCH_EXEC || '').trim() === '1';
 
 function detectApplyPatchToolMode() {
   return 'freeform';
@@ -45,6 +46,16 @@ function classifyExecutionFailure(content) {
   if (lower.includes('failed to parse')) return { errorType: 'parse_failed', message: msg };
 
   return { errorType: 'unknown', message: msg };
+}
+
+function isContextExecutionFailureType(errorType) {
+  const t = String(errorType || '').trim().toLowerCase();
+  return (
+    t === 'read_file_failed' ||
+    t === 'file_not_found' ||
+    t === 'context_not_found' ||
+    t === 'expected_lines_not_found'
+  );
 }
 
 function stableId({ errorType, errorMessage, toolCallId, toolCallArgs, requestId, mode }) {
@@ -111,6 +122,11 @@ function buildToolCallArgsIndex(messages) {
 }
 
 async function main() {
+  if (!EXEC_ERRORSAMPLES_ENABLED) {
+    console.log('[backfill:apply_patch_exec] skip (disabled; set ROUTECODEX_ERRORSAMPLES_APPLY_PATCH_EXEC=1 to enable)');
+    return;
+  }
+
   const roots = [];
   if (await fileExists(CODEX_ROOT_PRIMARY)) roots.push(CODEX_ROOT_PRIMARY);
   if (await fileExists(CODEX_ROOT_ALT)) roots.push(CODEX_ROOT_ALT);
@@ -167,6 +183,9 @@ async function main() {
 
       for (const m of toolMsgs) {
         const { errorType, message } = classifyExecutionFailure(m.content);
+        // RouteCodex policy: keep shape-ish errors only (parse/format). Skip context/execution mismatches.
+        if (isContextExecutionFailureType(errorType)) continue;
+        if (String(errorType || '').trim().toLowerCase() === 'unknown') continue;
         const safeType = String(errorType || 'unknown').replace(/[^a-z0-9-]/gi, '_');
         const typeDir = path.join(OUT_ROOT, safeType);
         await ensureDir(typeDir);

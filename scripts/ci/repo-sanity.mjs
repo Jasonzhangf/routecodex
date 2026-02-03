@@ -68,7 +68,9 @@ function checkRootLayout() {
   // Fixed top-level layout. Adding new root entries requires an explicit policy change.
   const allowed = new Set([
     'eslint.config.js',
+    '.beads',
     '.github',
+    '.gitattributes',
     '.gitignore',
     'AGENTS.md',
     'README.md',

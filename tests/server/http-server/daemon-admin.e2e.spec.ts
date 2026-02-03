@@ -66,6 +66,7 @@ function createTestConfig(port: number, configPath: string, apikey?: string): Se
 async function startTestServer(): Promise<{
   server: RouteCodexHttpServer;
   baseUrl: string;
+  configPath: string;
   configDir: string;
   restoreEnv: () => void;
   apikey: string;
@@ -99,7 +100,7 @@ async function startTestServer(): Promise<{
     throw new Error('Failed to resolve server port');
   }
   const baseUrl = `http://127.0.0.1:${addr.port}`;
-  return { server, baseUrl, configDir, restoreEnv, apikey };
+  return { server, baseUrl, configPath, configDir, restoreEnv, apikey };
 }
 
 async function stopTestServer(server: RouteCodexHttpServer, configDir: string, restoreEnv: () => void): Promise<void> {
@@ -195,6 +196,30 @@ describe('Daemon admin HTTP endpoints (smoke)', () => {
       expect(status.status).toBe(200);
       expect(status.body).toHaveProperty('ok', true);
 
+      // Control snapshot should expose antigravity alias lease state when the persisted file is present.
+      const leasePath = path.join(configDir, 'home', '.routecodex', 'state', 'antigravity-alias-leases.json');
+      await fs.mkdir(path.dirname(leasePath), { recursive: true });
+      await fs.writeFile(
+        leasePath,
+        JSON.stringify(
+          {
+            version: 1,
+            updatedAt: Date.now(),
+            leases: {
+              'antigravity.aliasA::gemini': { sessionKey: 'session:abc::gemini', lastSeenAt: Date.now() }
+            }
+          },
+          null,
+          2
+        ),
+        'utf8'
+      );
+      const controlSnap = await getJson(baseUrl, '/daemon/control/snapshot', cookie);
+      expect(controlSnap.status).toBe(200);
+      expect(controlSnap.body).toHaveProperty('routing');
+      expect(controlSnap.body.routing).toHaveProperty('antigravityAliasLeases');
+      expect(controlSnap.body.routing.antigravityAliasLeases).toHaveProperty('leases');
+
       const stats = await getJson(baseUrl, '/daemon/stats', cookie);
       expect(stats.status).toBe(200);
       expect(stats.body).toHaveProperty('ok', true);
@@ -247,7 +272,7 @@ describe('Daemon admin HTTP endpoints (smoke)', () => {
   it('supports manual quota provider operations via HTTP', async () => {
     const { server, baseUrl, configDir, restoreEnv } = await startTestServer();
     const cookie = await setupDaemonAdminAuth(baseUrl);
-    const providerKey = encodeURIComponent('tab.default.gpt-5.1');
+    const providerKey = encodeURIComponent('mock.dummy');
     try {
       const reset = await postJson(baseUrl, `/quota/providers/${providerKey}/reset`, undefined, cookie);
       expect(reset.status).toBe(200);
@@ -267,9 +292,49 @@ describe('Daemon admin HTTP endpoints (smoke)', () => {
       const list = await getJson(baseUrl, '/quota/providers', cookie);
       expect(list.status).toBe(200);
       expect(Array.isArray(list.body?.providers)).toBe(true);
-      const found = (list.body.providers as any[]).find((p) => p && p.providerKey === 'tab.default.gpt-5.1');
+      const found = (list.body.providers as any[]).find((p) => p && p.providerKey === 'mock.dummy');
       expect(found).toBeDefined();
       expect(found.inPool).toBe(true);
+    } finally {
+      await stopTestServer(server, configDir, restoreEnv);
+    }
+  });
+
+  it('exposes routing policy + supports routing.policy.set', async () => {
+    const { server, baseUrl, configDir, configPath, restoreEnv } = await startTestServer();
+    try {
+      const cookie = await setupDaemonAdminAuth(baseUrl);
+      const snap1 = await getJson(baseUrl, '/daemon/control/snapshot', cookie);
+      expect(snap1.status).toBe(200);
+      expect(snap1.body).toHaveProperty('routing');
+      expect(snap1.body.routing).toHaveProperty('policy');
+      expect(snap1.body.routing.policy).toHaveProperty('schemaVersion', 1);
+      expect(snap1.body.routing.policy).toHaveProperty('virtualrouter');
+      expect(snap1.body.routing.policy.virtualrouter).toHaveProperty('routing');
+      expect(typeof snap1.body.routing.policyHash).toBe('string');
+
+      const newPolicy = {
+        virtualrouter: {
+          routing: { default: ['mock.dummy'] },
+          loadBalancing: { strategy: 'round-robin' }
+        }
+      };
+      const mutate = await postJson(baseUrl, '/daemon/control/mutate', { action: 'routing.policy.set', policy: newPolicy }, cookie);
+      expect(mutate.status).toBe(200);
+      expect(mutate.body).toHaveProperty('ok', true);
+      expect(mutate.body).toHaveProperty('policyHash');
+      expect(typeof mutate.body.policyHash).toBe('string');
+
+      const snap2 = await getJson(baseUrl, '/daemon/control/snapshot', cookie);
+      expect(snap2.status).toBe(200);
+      expect(snap2.body.routing.policyHash).toBe(mutate.body.policyHash);
+      expect(snap2.body.routing.policy?.virtualrouter).toHaveProperty('loadBalancing');
+
+      const cfgRaw = await fs.readFile(configPath, 'utf8');
+      const cfg = cfgRaw.trim() ? JSON.parse(cfgRaw) : {};
+      expect(cfg).toHaveProperty('virtualrouter');
+      expect(cfg.virtualrouter).toHaveProperty('loadBalancing');
+      expect(cfg.virtualrouter.loadBalancing).toHaveProperty('strategy', 'round-robin');
     } finally {
       await stopTestServer(server, configDir, restoreEnv);
     }

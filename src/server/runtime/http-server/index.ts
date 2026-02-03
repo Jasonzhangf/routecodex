@@ -42,6 +42,7 @@ import {
   rebindResponsesConversationRequestId,
   extractSessionIdentifiersFromMetadata,
   bootstrapVirtualRouterConfig,
+  getProviderSuccessCenter,
   getHubPipelineCtor
 } from '../../../modules/llmswitch/bridge.js';
 import {
@@ -70,6 +71,7 @@ import { RoutingStateManagerModule } from '../../../manager/modules/routing/inde
 import { TokenManagerModule } from '../../../manager/modules/token/index.js';
 import type { ProviderQuotaDaemonModule } from '../../../manager/modules/quota/index.js';
 import { ensureServerScopedSessionDir } from './session-dir.js';
+import { canonicalizeServerId } from './server-id.js';
 import { StatsManager, type UsageMetrics } from './stats-manager.js';
 import { loadRouteCodexConfig } from '../../../config/routecodex-config-loader.js';
 import { buildInfo } from '../../../build-info.js';
@@ -182,7 +184,7 @@ export class RouteCodexHttpServer {
     this.stageLoggingEnabled = isStageLoggingEnabled();
     this.repoRoot = resolveRepoRoot(import.meta.url);
     // Ensure session-scoped routing state does not leak across server instances.
-    ensureServerScopedSessionDir(`${this.config.server.host}:${this.config.server.port}`);
+    ensureServerScopedSessionDir(canonicalizeServerId(this.config.server.host, this.config.server.port));
 
     try {
       this.pipelineLogger = new PipelineDebugLoggerImpl({ colored: this.coloredLogger }, { enableConsoleLogging: true });
@@ -243,7 +245,7 @@ export class RouteCodexHttpServer {
         // Avoid stale admin UI in browsers / proxies after upgrades.
         res.setHeader('Cache-Control', 'no-store, max-age=0');
         res.setHeader('Pragma', 'no-cache');
-        res.setHeader('X-RouteCodex-Version', String(process.env.ROUTECODEX_VERSION || 'dev'));
+        res.setHeader('X-RouteCodex-Version', buildInfo?.version ? String(buildInfo.version) : String(process.env.ROUTECODEX_VERSION || 'dev'));
         res.send(html);
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error);
@@ -555,7 +557,7 @@ export class RouteCodexHttpServer {
       // 初始化 ManagerDaemon 骨架（当前模块为占位实现，不改变行为）
       // Mock regressions run many short-lived servers; skip daemon to avoid flakiness from lingering background tasks.
       if (this.shouldStartManagerDaemon() && !this.managerDaemon) {
-        const serverId = `${this.config.server.host}:${this.config.server.port}`;
+        const serverId = canonicalizeServerId(this.config.server.host, this.config.server.port);
         const daemon = new ManagerDaemon({ serverId, quotaRoutingEnabled: this.isQuotaRoutingEnabled() });
         daemon.registerModule(new TokenManagerModule());
         daemon.registerModule(new RoutingStateManagerModule());
@@ -564,13 +566,9 @@ export class RouteCodexHttpServer {
         try {
           const mod = (await import('../../../manager/modules/quota/index.js')) as {
             QuotaManagerModule?: new () => import('../../../manager/modules/quota/index.js').QuotaManagerModule;
-            ProviderQuotaDaemonModule?: new () => import('../../../manager/modules/quota/index.js').ProviderQuotaDaemonModule;
           };
           if (typeof mod.QuotaManagerModule === 'function') {
             daemon.registerModule(new mod.QuotaManagerModule());
-          }
-          if (typeof mod.ProviderQuotaDaemonModule === 'function') {
-            daemon.registerModule(new mod.ProviderQuotaDaemonModule());
           }
         } catch {
           // 可选模块，缺失时忽略
@@ -607,7 +605,7 @@ export class RouteCodexHttpServer {
           session: this.stats.snapshot(Math.round(process.uptime() * 1000)),
           historical: this.stats.snapshotHistorical()
         }),
-        getServerId: () => `${this.config.server.host}:${this.config.server.port}`
+        getServerId: () => canonicalizeServerId(this.config.server.host, this.config.server.port)
       });
 
       this._isInitialized = true;
@@ -921,9 +919,11 @@ export class RouteCodexHttpServer {
     if (routingStateStore) {
       hubConfig.routingStateStore = routingStateStore;
     }
-    const quotaModule = this.managerDaemon?.getModule('provider-quota') as ProviderQuotaDaemonModule | undefined;
+    const quotaModule = this.managerDaemon?.getModule('quota') as unknown as
+      | { getQuotaView?: () => unknown; getQuotaViewReadOnly?: () => unknown }
+      | undefined;
     if (this.isQuotaRoutingEnabled() && quotaModule && typeof quotaModule.getQuotaView === 'function') {
-      hubConfig.quotaView = quotaModule.getQuotaView();
+      hubConfig.quotaView = quotaModule.getQuotaView() as any;
       if (typeof quotaModule.getQuotaViewReadOnly === 'function') {
         (hubConfig as Record<string, unknown>).quotaViewReadOnly = quotaModule.getQuotaViewReadOnly();
       }
@@ -1000,9 +1000,12 @@ export class RouteCodexHttpServer {
       // UA preload must never block runtime init/reload
     }
 
-    const quotaModule = this.managerDaemon?.getModule('provider-quota') as
+    const quotaModule = this.managerDaemon?.getModule('quota') as
       | {
-          registerProviderStaticConfig?: (providerKey: string, config: { authType?: string | null; priorityTier?: number | null }) => void;
+          registerProviderStaticConfig?: (
+            providerKey: string,
+            config: { authType?: string | null; priorityTier?: number | null; apikeyDailyResetTime?: string | null }
+          ) => void;
           disableProvider?: (options: { providerKey: string; mode: 'cooldown' | 'blacklist'; durationMs: number }) => Promise<unknown>;
         }
       | undefined;
@@ -1128,7 +1131,11 @@ export class RouteCodexHttpServer {
       // Use the runtimeKey authType when available so shared runtimeKey models inherit correct policy.
       try {
         const authType = runtimeKeyAuthType.get(runtimeKey) ?? authTypeFromRuntime;
-        quotaModule?.registerProviderStaticConfig?.(providerKey, { authType: authType ?? null, apikeyDailyResetTime });
+        const apikeyResetForKey = authType === 'apikey' ? apikeyDailyResetTime : null;
+        quotaModule?.registerProviderStaticConfig?.(providerKey, {
+          authType: authType ?? null,
+          apikeyDailyResetTime: apikeyResetForKey
+        });
       } catch {
         // best-effort: quota static config registration must never block runtime init
       }
@@ -1287,7 +1294,9 @@ export class RouteCodexHttpServer {
     if (!this.isPipelineReady()) {
       throw new Error('Hub pipeline runtime is not initialized');
     }
-    this.stats.recordRequestStart(input.requestId);
+    // Stats must remain stable across provider retries and requestId enhancements.
+    const statsRequestId = input.requestId;
+    this.stats.recordRequestStart(statsRequestId);
     const initialMetadata = this.buildRequestMetadata(input);
     const providerRequestId = input.requestId;
     const clientRequestId = typeof initialMetadata.clientRequestId === 'string' && initialMetadata.clientRequestId.trim()
@@ -1458,7 +1467,7 @@ export class RouteCodexHttpServer {
         metadata: mergedMetadata
       });
 
-      this.stats.bindProvider(input.requestId, {
+      this.stats.bindProvider(statsRequestId, {
         providerKey: target.providerKey,
         providerType: handle.providerType,
         model: providerModel
@@ -1509,31 +1518,41 @@ export class RouteCodexHttpServer {
         });
 
         const usage = this.extractUsageFromResult(converted, mergedMetadata);
-        const quotaModule = this.managerDaemon?.getModule('provider-quota') as ProviderQuotaDaemonModule | undefined;
-        if (this.isQuotaRoutingEnabled() && quotaModule) {
-          const totalTokens =
-            typeof usage?.total_tokens === 'number' && Number.isFinite(usage.total_tokens)
-              ? Math.max(0, usage.total_tokens)
-              : Math.max(
-                0,
-                (typeof usage?.prompt_tokens === 'number' && Number.isFinite(usage.prompt_tokens) ? usage.prompt_tokens : 0) +
-                  (typeof usage?.completion_tokens === 'number' && Number.isFinite(usage.completion_tokens)
-                    ? usage.completion_tokens
-                    : 0)
-              );
-          try {
-            quotaModule.recordProviderUsage({ providerKey: target.providerKey, requestedTokens: totalTokens });
-          } catch {
-            // best-effort
-          }
-          try {
-            // 用于“成功清零连续错误计数”；tokens 已由 usage 事件统计，避免重复累计。
-            quotaModule.recordProviderSuccess({ providerKey: target.providerKey, usedTokens: 0 });
-          } catch {
-            // best-effort
-          }
+        // QuotaManager listens to provider error/success events; avoid duplicating accounting here.
+        this.stats.recordCompletion(statsRequestId, { usage, error: false });
+
+        // Notify llmswitch-core about successful completion so session-scoped routing state
+        // (e.g. Antigravity alias bindings) can be committed only after the first success.
+        try {
+          const center = await getProviderSuccessCenter().catch(() => null);
+          const sessionId =
+            typeof mergedMetadata.sessionId === 'string' && mergedMetadata.sessionId.trim()
+              ? mergedMetadata.sessionId.trim()
+              : undefined;
+          const conversationId =
+            typeof mergedMetadata.conversationId === 'string' && mergedMetadata.conversationId.trim()
+              ? mergedMetadata.conversationId.trim()
+              : undefined;
+          center?.emit({
+            runtime: {
+              requestId: input.requestId,
+              routeName: pipelineResult.routingDecision?.routeName,
+              providerKey: target.providerKey,
+              providerId: handle.providerId,
+              providerType: handle.providerType,
+              providerProtocol,
+              pipelineId: target.providerKey,
+              target
+            },
+            timestamp: Date.now(),
+            metadata: {
+              ...(sessionId ? { sessionId } : {}),
+              ...(conversationId ? { conversationId } : {})
+            }
+          });
+        } catch {
+          // best-effort: must never affect request path
         }
-        this.stats.recordCompletion(input.requestId, { usage, error: false });
 
         // 回传 session_id 和 conversation_id 到响应头（如果存在）
         const sessionId = typeof mergedMetadata.sessionId === "string" && mergedMetadata.sessionId.trim()
@@ -1573,22 +1592,17 @@ export class RouteCodexHttpServer {
         if (isAntigravityProviderKey(target.providerKey) && extractStatusCodeFromError(error) === 429) {
           maxAttempts = Math.max(maxAttempts, resolveAntigravityMaxProviderAttempts());
         }
-        const quotaModule = this.managerDaemon?.getModule('provider-quota') as ProviderQuotaDaemonModule | undefined;
-        if (this.isQuotaRoutingEnabled() && quotaModule) {
-          try {
-            quotaModule.recordProviderUsage({ providerKey: target.providerKey, requestedTokens: 0 });
-          } catch {
-            // best-effort
-          }
-        }
+        // QuotaManager listens to provider error events emitted by providers.
         if (!firstError) {
           firstError = error;
         }
         const shouldRetry = attempt < maxAttempts && shouldRetryProviderError(error);
         if (!shouldRetry) {
-          this.stats.recordCompletion(input.requestId, { error: true });
+          this.stats.recordCompletion(statsRequestId, { error: true });
           throw error;
         }
+        // Record this failed provider attempt even if the overall request succeeds later via failover.
+        this.stats.recordCompletion(statsRequestId, { error: true });
         const singleProviderPool =
           Boolean(initialRoutePool && initialRoutePool.length === 1 && initialRoutePool[0] === target.providerKey);
         if (singleProviderPool) {
@@ -1611,7 +1625,7 @@ export class RouteCodexHttpServer {
 
     // best-effort: if failover attempt could not produce a successful response,
     // return the original error (avoid masking 429 with PROVIDER_NOT_AVAILABLE etc.).
-    this.stats.recordCompletion(input.requestId, { error: true });
+    this.stats.recordCompletion(statsRequestId, { error: true });
     throw firstError ?? new Error('Provider execution failed without response');
   }
 

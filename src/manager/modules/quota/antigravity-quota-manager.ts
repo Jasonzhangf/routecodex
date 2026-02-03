@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { homedir } from 'node:os';
+import fsAsync from 'node:fs/promises';
 
 import type { ManagerContext, ManagerModule } from '../../types.js';
 import {
@@ -10,8 +11,9 @@ import {
 } from '../../../providers/core/runtime/antigravity-quota-client.js';
 import { scanProviderTokenFiles } from '../../../providers/auth/token-scanner/index.js';
 import { resolveAntigravityApiBase } from '../../../providers/auth/antigravity-userinfo-helper.js';
-import { getProviderErrorCenter } from '../../../modules/llmswitch/bridge.js';
-import type { ProviderErrorEvent } from '../../../modules/llmswitch/bridge.js';
+import * as llmsBridge from '../../../modules/llmswitch/bridge.js';
+import type { ProviderErrorEvent, ProviderSuccessEvent, StaticQuotaConfig, QuotaStoreSnapshot } from '../../../modules/llmswitch/bridge.js';
+import { loadProviderQuotaSnapshot } from '../../quota/provider-quota-store.js';
 
 export interface QuotaRecord {
   remainingFraction: number | null;
@@ -34,38 +36,143 @@ export class QuotaManagerModule implements ManagerModule {
   private quotaRoutingEnabled = true;
   private refreshFailures = 0;
   private refreshDisabled = false;
-  private providerErrorCenter:
+  private providerErrorUnsub: (() => void) | null = null;
+  private providerSuccessUnsub: (() => void) | null = null;
+
+  private coreQuotaManager:
     | {
-        emit(event: ProviderErrorEvent): void;
+        hydrateFromStore?: () => Promise<void>;
+        registerProviderStaticConfig?: (providerKey: string, cfg: StaticQuotaConfig) => void;
+        onProviderError?: (ev: ProviderErrorEvent) => void;
+        onProviderSuccess?: (ev: ProviderSuccessEvent) => void;
+        updateProviderPoolState?: (options: {
+          providerKey: string;
+          inPool: boolean;
+          reason?: string | null;
+          cooldownUntil?: number | null;
+          blacklistUntil?: number | null;
+        }) => void;
+        disableProvider?: (options: { providerKey: string; mode: 'cooldown' | 'blacklist'; durationMs: number; reason?: string }) => void;
+        recoverProvider?: (providerKey: string) => void;
+        resetProvider?: (providerKey: string) => void;
+        getQuotaView?: () => (providerKey: string) => unknown;
+        getSnapshot?: () => unknown;
+        persistNow?: () => Promise<void>;
       }
     | null = null;
+
+  private quotaStorePath: string | null = null;
 
   async init(context: ManagerContext): Promise<void> {
     this.snapshot = this.loadSnapshotFromDisk();
     this.quotaRoutingEnabled = context.quotaRoutingEnabled !== false;
-  }
 
-  async start(): Promise<void> {
-    // 启动时立即做一次最佳努力刷新，然后根据 token 过期时间和 5 分钟基准动态调度后续刷新。
+    // Core-owned quota manager: host provides only persistence I/O.
+    // When quota routing is enabled, this must be available; otherwise Virtual Router quotaView becomes non-deterministic.
+    if (!this.quotaRoutingEnabled) {
+      this.coreQuotaManager = null;
+      return;
+    }
+    const store = this.createQuotaStore();
+    this.coreQuotaManager = (await llmsBridge.createCoreQuotaManager({ store })) as any;
+    const mgrAny = this.coreQuotaManager as any;
+    const missingApis =
+      !mgrAny ||
+      typeof mgrAny.getQuotaView !== 'function' ||
+      typeof mgrAny.getSnapshot !== 'function' ||
+      typeof mgrAny.updateProviderPoolState !== 'function' ||
+      typeof mgrAny.resetProvider !== 'function' ||
+      typeof mgrAny.recoverProvider !== 'function' ||
+      typeof mgrAny.disableProvider !== 'function';
+    if (missingApis) {
+      const detail = {
+        hasMgr: Boolean(mgrAny),
+        getQuotaView: typeof mgrAny?.getQuotaView,
+        getSnapshot: typeof mgrAny?.getSnapshot,
+        updateProviderPoolState: typeof mgrAny?.updateProviderPoolState,
+        resetProvider: typeof mgrAny?.resetProvider,
+        recoverProvider: typeof mgrAny?.recoverProvider,
+        disableProvider: typeof mgrAny?.disableProvider
+      };
+      throw new Error(`core quota manager missing expected APIs: ${JSON.stringify(detail)}`);
+    }
+    if (this.coreQuotaManager && typeof this.coreQuotaManager.hydrateFromStore === 'function') {
+      await this.coreQuotaManager.hydrateFromStore().catch(() => {});
+    }
+
+    // Apply persisted Antigravity snapshot into the unified quota view (best-effort),
+    // so restarts don't temporarily “forget” known depleted keys.
     try {
-      const result = await this.refreshAllAntigravityQuotas();
-      if (result.attempted > 0 && result.successCount === 0) {
-        this.refreshFailures = 1;
-      } else if (result.successCount > 0) {
-        this.refreshFailures = 0;
+      const nowMs = Date.now();
+      for (const [key, record] of Object.entries(this.snapshot)) {
+        const parsed = this.parseAntigravitySnapshotKey(key);
+        if (!parsed) {
+          continue;
+        }
+        this.applyAntigravityQuotaToCore(`antigravity.${parsed.alias}.${parsed.modelId}`, record, nowMs);
       }
     } catch {
-      // ignore startup refresh failures
+      // ignore snapshot apply failures
     }
+  }
+
+  start(): Promise<void> | void {
+    if (!this.quotaRoutingEnabled) {
+      return;
+    }
+
+    // Subscribe provider error/success streams -> core quota manager.
+    try {
+      void this.subscribeToProviderCenters();
+    } catch {
+      // ignore subscription failures
+    }
+
+    // IMPORTANT: startup must never block server initialization.
+    // Run the initial refresh best-effort in the background; axios timeouts apply per request.
+    const refreshPromise = this.refreshAllAntigravityQuotas()
+      .then((result) => {
+        if (result.attempted > 0 && result.successCount === 0) {
+          this.refreshFailures = 1;
+        } else if (result.successCount > 0) {
+          this.refreshFailures = 0;
+        }
+      })
+      .catch(() => {
+        // ignore startup refresh failures
+      });
+
     void this.scheduleNextRefresh().catch(() => {
       // ignore scheduling failures
     });
+
+    // In Jest, await the refresh to keep unit tests deterministic.
+    if (process.env.JEST_WORKER_ID || process.env.NODE_ENV === 'test') {
+      return refreshPromise;
+    }
+
+    return;
   }
 
   async stop(): Promise<void> {
     if (this.refreshTimer) {
       clearTimeout(this.refreshTimer);
       this.refreshTimer = null;
+    }
+    if (this.providerErrorUnsub) {
+      try { this.providerErrorUnsub(); } catch { /* ignore */ }
+      this.providerErrorUnsub = null;
+    }
+    if (this.providerSuccessUnsub) {
+      try { this.providerSuccessUnsub(); } catch { /* ignore */ }
+      this.providerSuccessUnsub = null;
+    }
+    try {
+      if (this.coreQuotaManager && typeof this.coreQuotaManager.persistNow === 'function') {
+        await this.coreQuotaManager.persistNow();
+      }
+    } catch {
+      // ignore persistence failures
     }
     this.saveSnapshotToDisk();
   }
@@ -143,12 +250,8 @@ export class QuotaManagerModule implements ManagerModule {
       }
       next[key] = record;
       const providerKey = `antigravity.${aliasId}.${modelId}`;
-      if (record.remainingFraction !== null && record.remainingFraction > 0) {
-        void this.emitQuotaRecoveryEvent(providerKey, modelId);
-      } else {
-        const cooldownHint = record.resetAt ? Math.max(0, record.resetAt - now) : undefined;
-        void this.emitQuotaDepletedEvent(providerKey, modelId, cooldownHint);
-      }
+      // Unified quota routing: update pool state directly (quotaView becomes the single source of truth).
+      this.applyAntigravityQuotaToCore(providerKey, record, now);
     }
     this.snapshot = next;
     this.saveSnapshotToDisk();
@@ -183,8 +286,113 @@ export class QuotaManagerModule implements ManagerModule {
     return { ...this.snapshot };
   }
 
+  /**
+   * VirtualRouter consumes this via HubPipeline `quotaView` injection.
+   */
+  getQuotaView(): (providerKey: string) => unknown {
+    const mgr = this.coreQuotaManager;
+    if (!mgr || typeof mgr.getQuotaView !== 'function') {
+      return () => null;
+    }
+    try {
+      // IMPORTANT: call as a bound method; core quota manager uses `this.states`.
+      return mgr.getQuotaView();
+    } catch {
+      return () => null;
+    }
+  }
+
+  getQuotaViewReadOnly(): (providerKey: string) => unknown {
+    // Current core quota view is already side-effect free for routing semantics;
+    // keep the same view function to avoid duplicate logic.
+    return this.getQuotaView();
+  }
+
+  getAdminSnapshot(): Record<string, unknown> {
+    const mgr = this.coreQuotaManager;
+    const snap = mgr && typeof mgr.getSnapshot === 'function' ? (mgr.getSnapshot() as any) : null;
+    const providers = snap && typeof snap === 'object' && snap.providers && typeof snap.providers === 'object'
+      ? (snap.providers as Record<string, unknown>)
+      : {};
+    return providers;
+  }
+
+  registerProviderStaticConfig(
+    providerKey: string,
+    config: { authType?: string | null; priorityTier?: number | null; apikeyDailyResetTime?: string | null } = {}
+  ): void {
+    const key = typeof providerKey === 'string' ? providerKey.trim() : '';
+    if (!key) return;
+    const authType = typeof config.authType === 'string' ? config.authType.trim().toLowerCase() : '';
+    const priorityTier = typeof config.priorityTier === 'number' && Number.isFinite(config.priorityTier)
+      ? Math.floor(config.priorityTier)
+      : undefined;
+    const apikeyDailyResetTime =
+      typeof config.apikeyDailyResetTime === 'string' && config.apikeyDailyResetTime.trim().length
+        ? config.apikeyDailyResetTime.trim()
+        : undefined;
+    const cfg: StaticQuotaConfig = {
+      ...(priorityTier !== undefined ? { priorityTier } : {}),
+      ...(authType === 'apikey' || authType === 'oauth' ? { authType: authType as any } : {}),
+      ...(apikeyDailyResetTime ? { apikeyDailyResetTime } : {})
+    };
+    try {
+      this.coreQuotaManager?.registerProviderStaticConfig?.(key, cfg);
+    } catch {
+      // ignore
+    }
+  }
+
+  async disableProvider(options: { providerKey: string; mode: 'cooldown' | 'blacklist'; durationMs: number }): Promise<unknown> {
+    const mgr = this.coreQuotaManager;
+    if (!mgr) {
+      throw new Error('core quota manager not available');
+    }
+    (mgr as any).disableProvider({ ...options });
+    await mgr.persistNow?.().catch(() => {});
+    return { ok: true };
+  }
+
+  async recoverProvider(providerKey: string): Promise<unknown> {
+    const mgr = this.coreQuotaManager;
+    if (!mgr) {
+      throw new Error('core quota manager not available');
+    }
+    (mgr as any).recoverProvider(providerKey);
+    await mgr.persistNow?.().catch(() => {});
+    return { ok: true };
+  }
+
+  async resetProvider(providerKey: string): Promise<unknown> {
+    const mgr = this.coreQuotaManager;
+    if (!mgr) {
+      throw new Error('core quota manager not available');
+    }
+    (mgr as any).resetProvider(providerKey);
+    await mgr.persistNow?.().catch(() => {});
+    return { ok: true };
+  }
+
   private buildAntigravityKey(alias: string, modelId: string): string {
     return `antigravity://${alias}/${modelId}`;
+  }
+
+  private parseAntigravitySnapshotKey(key: string): { alias: string; modelId: string } | null {
+    const raw = typeof key === 'string' ? key.trim() : '';
+    if (!raw.toLowerCase().startsWith('antigravity://')) {
+      return null;
+    }
+    const rest = raw.slice('antigravity://'.length);
+    const idx = rest.indexOf('/');
+    if (idx <= 0) {
+      return null;
+    }
+    const alias = rest.slice(0, idx).trim();
+    const modelId = rest.slice(idx + 1).trim();
+    if (!alias || !modelId) {
+      return null;
+    }
+    return { alias, modelId };
   }
 
   private extractAntigravityAlias(providerKey?: string): string | null {
@@ -247,6 +455,125 @@ export class QuotaManagerModule implements ManagerModule {
       }
     }
     return { attempted, successCount, failureCount };
+  }
+
+  private applyAntigravityQuotaToCore(providerKey: string, record: QuotaRecord, nowMs: number): void {
+    const mgr = this.coreQuotaManager;
+    if (!mgr || typeof (mgr as any).updateProviderPoolState !== 'function') {
+      return;
+    }
+    const remaining = record.remainingFraction;
+    const resetAt = typeof record.resetAt === 'number' && Number.isFinite(record.resetAt) ? record.resetAt : null;
+    const withinResetWindow = typeof resetAt === 'number' && resetAt > nowMs;
+    const hasQuota = typeof remaining === 'number' && Number.isFinite(remaining) && remaining > 0 && (resetAt === null || withinResetWindow);
+    if (hasQuota) {
+      (mgr as any).updateProviderPoolState({ providerKey, inPool: true, reason: 'ok', cooldownUntil: null, blacklistUntil: null });
+      return;
+    }
+    (mgr as any).updateProviderPoolState({
+      providerKey,
+      inPool: false,
+      reason: 'quotaDepleted',
+      cooldownUntil: null,
+      blacklistUntil: null
+    });
+  }
+
+  private createQuotaStore(): { load: () => Promise<QuotaStoreSnapshot | null>; save: (snapshot: QuotaStoreSnapshot) => Promise<void> } {
+    const dir = this.resolveQuotaManagerDir();
+    const filePath = path.join(dir, 'quota-manager.json');
+    this.quotaStorePath = filePath;
+    return {
+      load: async () => {
+        // Preferred: new snapshot.
+        try {
+          const raw = await fsAsync.readFile(filePath, 'utf8');
+          const parsed = JSON.parse(String(raw || '').trim() || 'null') as QuotaStoreSnapshot | null;
+          if (parsed && typeof parsed === 'object' && parsed.providers && typeof parsed.providers === 'object') {
+            return parsed;
+          }
+        } catch {
+          // ignore
+        }
+        // Fallback: migrate from legacy provider-quota snapshot if present.
+        try {
+          const legacy = await loadProviderQuotaSnapshot();
+          if (legacy && legacy.providers && typeof legacy.providers === 'object') {
+            const nowMs = Date.now();
+            return {
+              savedAtMs: Number.isFinite(Date.parse(legacy.updatedAt)) ? Date.parse(legacy.updatedAt) : nowMs,
+              providers: legacy.providers as any
+            };
+          }
+        } catch {
+          // ignore
+        }
+        return null;
+      },
+      save: async (snapshot: QuotaStoreSnapshot) => {
+        try {
+          await fsAsync.mkdir(dir, { recursive: true });
+        } catch {
+          // ignore
+        }
+        const tmp = `${filePath}.tmp`;
+        const text = `${JSON.stringify(snapshot, null, 2)}\n`;
+        try {
+          await fsAsync.writeFile(tmp, text, 'utf8');
+          await fsAsync.rename(tmp, filePath);
+        } catch {
+          try { await fsAsync.unlink(tmp); } catch { /* ignore */ }
+        }
+      }
+    };
+  }
+
+  private resolveQuotaManagerDir(): string {
+    const base = path.join(homedir(), '.routecodex', 'quota');
+    try {
+      fs.mkdirSync(base, { recursive: true });
+    } catch {
+      // ignore
+    }
+    return base;
+  }
+
+  private async subscribeToProviderCenters(): Promise<void> {
+    const mgr = this.coreQuotaManager;
+    if (!mgr) {
+      return;
+    }
+    let errorCenter: { subscribe?: (handler: (ev: ProviderErrorEvent) => void) => () => void } | null = null;
+    try {
+      errorCenter = (await llmsBridge.getProviderErrorCenter()) as any;
+    } catch {
+      errorCenter = null;
+    }
+    if (errorCenter && typeof errorCenter.subscribe === 'function' && typeof mgr.onProviderError === 'function') {
+      try {
+        this.providerErrorUnsub = errorCenter.subscribe((ev: ProviderErrorEvent) => {
+          try { mgr.onProviderError?.(ev); } catch { /* ignore */ }
+        });
+      } catch {
+        this.providerErrorUnsub = null;
+      }
+    }
+
+    let successCenter: { subscribe?: (handler: (ev: ProviderSuccessEvent) => void) => () => void } | null = null;
+    try {
+      successCenter = (await llmsBridge.getProviderSuccessCenter()) as any;
+    } catch {
+      successCenter = null;
+    }
+    if (successCenter && typeof successCenter.subscribe === 'function' && typeof mgr.onProviderSuccess === 'function') {
+      try {
+        this.providerSuccessUnsub = successCenter.subscribe((ev: ProviderSuccessEvent) => {
+          try { mgr.onProviderSuccess?.(ev); } catch { /* ignore */ }
+        });
+      } catch {
+        this.providerSuccessUnsub = null;
+      }
+    }
   }
 
   /**
@@ -415,106 +742,6 @@ export class QuotaManagerModule implements ManagerModule {
       fs.writeFileSync(filePath, `${JSON.stringify(this.snapshot, null, 2)}\n`, 'utf8');
     } catch {
       // best effort
-    }
-  }
-
-  private async getProviderErrorCenterInstance(): Promise<QuotaManagerModule['providerErrorCenter']> {
-    if (this.providerErrorCenter) {
-      return this.providerErrorCenter;
-    }
-    try {
-      const center = await getProviderErrorCenter();
-      if (center && typeof center.emit === 'function') {
-        this.providerErrorCenter = center as { emit(event: ProviderErrorEvent): void };
-      } else {
-        this.providerErrorCenter = null;
-      }
-    } catch {
-      this.providerErrorCenter = null;
-    }
-    return this.providerErrorCenter;
-  }
-
-  private async emitQuotaRecoveryEvent(providerKey: string, modelId: string): Promise<void> {
-    if (!providerKey || !modelId) {
-      return;
-    }
-    if (!this.quotaRoutingEnabled) {
-      return;
-    }
-    const center = await this.getProviderErrorCenterInstance();
-    if (!center) {
-      return;
-    }
-    const now = Date.now();
-    const event: ProviderErrorEvent = {
-      code: 'QUOTA_RECOVERY',
-      message: 'Quota manager: provider quota refreshed',
-      stage: 'quota',
-      status: 200,
-      recoverable: true,
-      runtime: {
-        requestId: `quota_${now}`,
-        providerKey,
-        providerId: 'antigravity'
-      },
-      timestamp: now,
-      details: {
-        virtualRouterQuotaRecovery: {
-          providerKey,
-          reason: `quota>0 for model ${modelId}`,
-          source: 'quota-manager'
-        }
-      }
-    };
-    try {
-      center.emit(event);
-    } catch {
-      // 忽略 error center 失败，避免影响配额刷新流程
-    }
-  }
-
-  private async emitQuotaDepletedEvent(
-    providerKey: string,
-    modelId: string,
-    cooldownMs?: number
-  ): Promise<void> {
-    if (!providerKey || !modelId) {
-      return;
-    }
-    if (!this.quotaRoutingEnabled) {
-      return;
-    }
-    const center = await this.getProviderErrorCenterInstance();
-    if (!center) {
-      return;
-    }
-    const now = Date.now();
-    const detail: Record<string, unknown> = {
-      virtualRouterQuotaDepleted: {
-        providerKey,
-        reason: `quota<=0 for model ${modelId}`,
-        ...(typeof cooldownMs === 'number' && cooldownMs > 0 ? { cooldownMs } : {})
-      }
-    };
-    const event: ProviderErrorEvent = {
-      code: 'QUOTA_DEPLETED',
-      message: 'Quota manager: provider quota exhausted',
-      stage: 'quota',
-      status: 429,
-      recoverable: false,
-      runtime: {
-        requestId: `quota_${now}`,
-        providerKey,
-        providerId: 'antigravity'
-      },
-      timestamp: now,
-      details: detail
-    };
-    try {
-      center.emit(event);
-    } catch {
-      // ignore emit errors
     }
   }
 }

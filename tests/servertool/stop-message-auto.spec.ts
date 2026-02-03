@@ -255,6 +255,8 @@ describe('stop_message_auto servertool', () => {
     expect(payload.parameters.stream).toBeUndefined();
     expect(payload.parameters.max_output_tokens).toBe(99);
     expect(payload.parameters.temperature).toBe(0.1);
+    expect(Array.isArray(payload.tools)).toBe(true);
+    expect(JSON.stringify(payload.tools)).toContain("\"name\":\"apply_patch\"");
 
     const inputText = JSON.stringify(payload.messages);
     expect(inputText).toContain('hi');

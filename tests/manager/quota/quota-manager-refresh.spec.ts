@@ -24,7 +24,37 @@ jest.unstable_mockModule('../../../src/providers/auth/antigravity-userinfo-helpe
   resolveAntigravityApiBase: () => 'https://example.invalid'
 }));
 
-jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
+const mockLlmsBridgeModule = () => ({
+  createCoreQuotaManager: async () => {
+    const poolState = new Map<string, unknown>();
+    const staticCfg = new Map<string, unknown>();
+    return {
+      hydrateFromStore: async () => {},
+      registerProviderStaticConfig: (providerKey: string, cfg: unknown) => {
+        staticCfg.set(providerKey, cfg);
+      },
+      onProviderError: () => {},
+      onProviderSuccess: () => {},
+      updateProviderPoolState: (options: { providerKey: string }) => {
+        poolState.set(options.providerKey, options);
+      },
+      disableProvider: (options: { providerKey: string }) => {
+        poolState.set(options.providerKey, options);
+      },
+      recoverProvider: (providerKey: string) => {
+        poolState.delete(providerKey);
+      },
+      resetProvider: (providerKey: string) => {
+        poolState.delete(providerKey);
+      },
+      getQuotaView: () => (providerKey: string) => poolState.get(providerKey),
+      getSnapshot: () => ({
+        poolState: Object.fromEntries(poolState.entries()),
+        staticCfg: Object.fromEntries(staticCfg.entries())
+      }),
+      persistNow: async () => {}
+    };
+  },
   getProviderErrorCenter: async () => ({ emit: () => {} }),
   extractAntigravityGeminiSessionId: () => undefined,
   cacheAntigravitySessionSignature: () => {},
@@ -32,7 +62,11 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
   getAntigravityLatestSignatureSessionIdForAlias: () => undefined,
   resetAntigravitySessionSignatureCachesForTests: () => {},
   warmupAntigravitySessionSignatureModule: async () => {}
-}));
+});
+// Jest ESM resolver sometimes maps `.js` imports to the `.ts` source file.
+// Mock both to ensure the QuotaManagerModule sees this stubbed bridge.
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', mockLlmsBridgeModule);
+jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.ts', mockLlmsBridgeModule);
 
 describe('QuotaManagerModule refresh behavior', () => {
   const originalHome = process.env.HOME;

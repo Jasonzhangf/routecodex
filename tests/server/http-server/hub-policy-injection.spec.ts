@@ -67,6 +67,10 @@ describe('RouteCodexHttpServer hub policy injection', () => {
         emit: () => {},
         subscribe: () => () => {}
       }),
+      getProviderSuccessCenter: async () => ({
+        emit: () => {},
+        subscribe: () => () => {}
+      }),
       bootstrapVirtualRouterConfig: async (input: any) => ({ config: input, targetRuntime: {} }),
       convertProviderResponse: async (value: any) => value,
       createSnapshotRecorder: () => ({}) as any,
@@ -140,6 +144,10 @@ describe('RouteCodexHttpServer hub policy injection', () => {
       saveRoutingInstructionStateAsync: () => {},
       saveRoutingInstructionStateSync: () => {},
       getProviderErrorCenter: async () => ({
+        emit: () => {},
+        subscribe: () => () => {}
+      }),
+      getProviderSuccessCenter: async () => ({
         emit: () => {},
         subscribe: () => () => {}
       }),
@@ -217,6 +225,10 @@ describe('RouteCodexHttpServer hub policy injection', () => {
       saveRoutingInstructionStateAsync: () => {},
       saveRoutingInstructionStateSync: () => {},
       getProviderErrorCenter: async () => ({
+        emit: () => {},
+        subscribe: () => () => {}
+      }),
+      getProviderSuccessCenter: async () => ({
         emit: () => {},
         subscribe: () => () => {}
       }),

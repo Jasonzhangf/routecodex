@@ -59,25 +59,144 @@ This document replaces the old “architecture novel” with a concise set of ru
 
 Keep this file short. If a rule needs more nuance, add a doc in `docs/` and link it here instead of expanding this page.
 
-## Skills
-A skill is a set of local instructions to follow that is stored in a `SKILL.md` file. Below is the list of skills that can be used. Each entry includes a name, description, and file path so you can open the source for full instructions when using a specific skill.
-### Available skills
-- skill-creator: Guide for creating effective skills. This skill should be used when users want to create a new skill (or update an existing skill) that extends Codex's capabilities with specialized knowledge, workflows, or tool integrations. (file: /Users/fanzhang/.codex/skills/.system/skill-creator/SKILL.md)
-- skill-installer: Install Codex skills into $CODEX_HOME/skills from a curated list or a GitHub repo path. Use when a user asks to list installable skills, install a curated skill, or install a skill from another repo (including private repos). (file: /Users/fanzhang/.codex/skills/.system/skill-installer/SKILL.md)
-### How to use skills
-- Discovery: The list above is the skills available in this session (name + description + file path). Skill bodies live on disk at the listed paths.
-- Trigger rules: If the user names a skill (with `$SkillName` or plain text) OR the task clearly matches a skill's description shown above, you must use that skill for that turn. Multiple mentions mean use them all. Do not carry skills across turns unless re-mentioned.
-- Missing/blocked: If a named skill isn't in the list or the path can't be read, say so briefly and continue with the best fallback.
-- How to use a skill (progressive disclosure):
-  1) After deciding to use a skill, open its `SKILL.md`. Read only enough to follow the workflow.
-  2) If `SKILL.md` points to extra folders such as `references/`, load only the specific files needed for the request; don't bulk-load everything.
-  3) If `scripts/` exist, prefer running or patching them instead of retyping large code blocks.
-  4) If `assets/` or templates exist, reuse them instead of recreating from scratch.
-- Coordination and sequencing:
-  - If multiple skills apply, choose the minimal set that covers the request and state the order you'll use them.
-  - Announce which skill(s) you're using and why (one short line). If you skip an obvious skill, say why.
-- Context hygiene:
-  - Keep context small: summarize long sections instead of pasting them; only load extra files when needed.
-  - Avoid deep reference-chasing: prefer opening only files directly linked from `SKILL.md` unless you're blocked.
-  - When variants exist (frameworks, providers, domains), pick only the relevant reference file(s) and note that choice.
-- Safety and fallback: If a skill can't be applied cleanly (missing files, unclear instructions), state the issue, pick the next-best approach, and continue.
+## 7. Task Tracking（Beads / `bd`）
+
+本仓库的**具体任务/计划/依赖**不再写在 `AGENTS.md`（避免过时）；统一用 Beads（`bd` CLI）管理，并以 **`bd --no-db` + `.beads/issues.jsonl`** 作为可版本化的单一任务来源。
+
+### 7.1 Setup（推荐）
+
+- 初始化：`bd init --no-db`
+- 日常使用：所有命令都带 `--no-db`（避免误用 sqlite db）
+- 检查位置：`bd --no-db where`
+
+### 7.2 日常工作流（最小命令集）
+
+- 找可做：`bd --no-db ready`（无 blocker 的 open/in_progress）
+- 看详情：`bd --no-db show <id>`
+- 新建任务：`bd --no-db create "Title" -p 0 --parent <epic>`
+- 更新状态：`bd --no-db update <id> --status in_progress|blocked|closed`
+- 依赖（避免循环）：`bd --no-db dep add <blocked> <blocker>`
+  - 注意：parent-child 关系不要再额外用 `dep add` 连接（会形成 cycle）
+- Epic 进度：`bd --no-db epic status` / `bd --no-db epic close-eligible`
+
+### 7.3 约定
+
+- 新增需求：必须先创建/更新 `bd` issue（含验收标准），再开始实现；不要把 TODO 写回 `AGENTS.md`。
+- Issue 模板要求：`task/bug` 必须包含 `Acceptance Criteria`，`epic` 必须包含 `Success Criteria`；新增 issue 以 `bd --no-db lint` 无告警为目标。
+- `.beads/issues.jsonl` 是唯一需要版本化的 beads 文件；其它 `.beads/*` 视为本地运行态，不纳入协作。
+- `task.md` 仅作为历史说明文件；任务/进展/记忆一律以 `bd --no-db` 为准。
+
+### 7.4 多人并行协作约束（推荐规则）
+
+> 目标：多人同时推进多个任务时，保证“谁在做什么”可见、可合并、可回溯，并尽量减少 `.beads/issues.jsonl` 冲突。
+
+- 任务粒度：一个可独立合并的改动 = 一个 `bd` issue（必要时拆分子任务 `epic.1.1`）
+- 领取/占用：开工前必须“claim”任务，避免多人同时改同一件事：
+  - 推荐：`bd --no-db update <id> --claim`（原子操作：设置 assignee + `in_progress`；若已被占用会失败）
+  - 兼容：`bd --no-db update <id> --status in_progress --assignee <name>`
+- 分支命名：建议 `/<issueId>-short-title`，PR 标题/描述必须包含 `<issueId>` 便于追踪
+- 同步节奏：每个 PR 必须包含对应 issue 的状态更新（至少 `in_progress`/`closed`）并提交 `.beads/issues.jsonl`
+- 串行合入（高冲突区域）：需要严格串行的工作流（例如 policy/quota/persistence）用 `bd merge-slot` 做“排队合入”，避免互相覆盖
+- 冲突规避：不要手写编辑 `.beads/issues.jsonl`；只用 `bd --no-db update/create` 写入
+- 冲突处理：若 `.beads/issues.jsonl` 出现 git 冲突，优先用 `bd resolve-conflicts` 修复后再继续
+- 依赖表达：跨人/跨任务阻塞用 `bd --no-db dep add <blocked> <blocker>`；不要把 parent-child 再用 dep 连接
+- 关闭任务：必须在 notes 里附带“可复现的证据”（测试/命令输出/文件路径），再 `bd --no-db close <id> --reason "<what>" --suggest-next`
+
+### 7.5 常用搜索（bd search / bd list）
+
+下面是 `bd` 的“详细搜索用法”整理，覆盖 `bd search`（全文检索）和 `bd list`（字段过滤），按实际使用场景编排。
+
+#### 1) bd search：全文检索（标题/描述/ID）
+
+基础用法
+
+```bash
+bd --no-db search "关键词"
+bd --no-db search "authentication bug"
+bd --no-db search "bd-a3f8"           # 支持部分 ID
+bd --no-db search --query "performance"
+```
+
+常用过滤
+
+```bash
+bd --no-db search "bug" --status open
+bd --no-db search "database" --label backend --limit 10
+bd --no-db search "refactor" --assignee alice
+bd --no-db search "security" --priority-min 0 --priority-max 2
+```
+
+时间范围
+
+```bash
+bd --no-db search "bug" --created-after 2025-01-01
+bd --no-db search "refactor" --updated-after 2025-01-01
+bd --no-db search "cleanup" --closed-before 2025-12-31
+```
+
+排序与展示
+
+```bash
+bd --no-db search "bug" --sort priority
+bd --no-db search "task" --sort created --reverse
+bd --no-db search "design" --long       # 多行显示细节
+```
+
+支持的 `--sort` 字段
+
+- `priority`, `created`, `updated`, `closed`, `status`, `id`, `title`, `type`, `assignee`
+
+---
+
+#### 2) bd list：字段级精确过滤（适合缩小范围）
+
+按状态/优先级/类型
+
+```bash
+bd --no-db list --status open --priority 1
+bd --no-db list --type bug
+```
+
+按标签
+
+```bash
+bd --no-db list --label bug,critical           # AND：必须同时拥有
+bd --no-db list --label-any frontend,backend   # OR：任意一个即可
+```
+
+按字段包含（子串匹配）
+
+```bash
+bd --no-db list --title-contains "auth"
+bd --no-db list --desc-contains "implement"
+bd --no-db list --notes-contains "TODO"
+```
+
+按日期范围
+
+```bash
+bd --no-db list --created-after 2024-01-01
+bd --no-db list --updated-before 2024-12-31
+bd --no-db list --closed-after 2024-01-01
+```
+
+空字段筛选
+
+```bash
+bd --no-db list --empty-description
+bd --no-db list --no-assignee
+bd --no-db list --no-labels
+```
+
+优先级范围
+
+```bash
+bd --no-db list --priority-min 0 --priority-max 1
+bd --no-db list --priority-min 2
+```
+
+组合过滤
+
+```bash
+bd --no-db list --status open --priority 1 --label-any urgent,critical --no-assignee
+```

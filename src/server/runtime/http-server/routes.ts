@@ -10,6 +10,7 @@ import { renderTokenPortalPage } from '../../../token-portal/render.js';
 import { loadTokenPortalFingerprintSummary } from '../../../token-portal/fingerprint-summary.js';
 import { registerDaemonAdminRoutes, rejectNonLocalOrUnauthorizedAdmin } from './daemon-admin-routes.js';
 import type { HistoricalStatsSnapshot, StatsSnapshot } from './stats-manager.js';
+import { buildInfo } from '../../../build-info.js';
 
 interface RouteOptions {
   app: Application;
@@ -82,7 +83,7 @@ export function registerHttpRoutes(options: RouteOptions): void {
       ready,
       pipelineReady: ready,
       server: 'routecodex',
-      version: String(process.env.ROUTECODEX_VERSION || 'dev')
+      version: buildInfo?.version ? String(buildInfo.version) : String(process.env.ROUTECODEX_VERSION || 'dev')
     });
   });
 
@@ -179,6 +180,7 @@ export function registerHttpRoutes(options: RouteOptions): void {
       (typeof options.getVirtualRouterArtifacts === 'function'
         ? options.getVirtualRouterArtifacts()
         : null),
+    getConfigPath: () => (typeof config?.configPath === 'string' && config.configPath.trim() ? config.configPath : null),
     getExpectedApiKey: () => config?.server?.apikey,
     getStatsSnapshot: () => {
       const now = Date.now();

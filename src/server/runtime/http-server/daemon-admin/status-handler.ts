@@ -2,6 +2,7 @@ import type { Application, Request, Response } from 'express';
 import type { ManagerModule } from '../../../../manager/types.js';
 import type { DaemonAdminRouteOptions } from '../daemon-admin-routes.js';
 import { rejectNonLocalOrUnauthorizedAdmin } from '../daemon-admin-routes.js';
+import { buildInfo } from '../../../../build-info.js';
 
 interface ModuleStatusView {
   id: string;
@@ -41,7 +42,7 @@ export function registerStatusRoutes(app: Application, options: DaemonAdminRoute
     }
 
     const uptimeSec = process.uptime();
-    const version = String(process.env.ROUTECODEX_VERSION || 'dev');
+    const version = buildInfo?.version ? String(buildInfo.version) : String(process.env.ROUTECODEX_VERSION || 'dev');
 
     res.status(200).json({
       ok: true,

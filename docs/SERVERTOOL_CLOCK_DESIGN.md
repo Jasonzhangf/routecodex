@@ -31,7 +31,16 @@
 **重要现实约束：没有客户端请求就无法把提醒推送给客户端**（系统当前没有反向推送通道）。
 
 - 本设计的默认投递语义：提醒以 `"[scheduled task:\"...\"]"` 的形式**注入到下一次该 session 的请求**中。
-- 本设计不要求“server hold 直到时间到”（长连接/代理超时风险过高）；只保证“下一次请求注入”语义。
+- 本设计的 best-effort：在 stop/length 场景下允许“短暂 hold + followup”，以便在触发窗口到达时立刻续轮注入提醒（减少“必须等下一次请求”的延迟）。
+  - 默认 **stream/SSE** 与 **非流式（JSON）** 都允许 hold（长轮询/阻塞返回），但必须满足 `holdMaxMs` 上限（默认 60000ms），客户端可随时断开连接取消等待。
+  - 如需关闭非流式 hold（改回“仅下一次请求注入”语义），可在 `virtualrouter.clock` 中设置：
+    - `holdNonStreaming=false`
+    - `holdMaxMs=<ms>`（仍用于限制单次 hold 最长等待）
+
+另外，为避免“同一 HTTP 请求内的二跳/三跳 followup”导致的死循环：
+
+- 当 `schedule` 的目标时间已经落入触发窗口（`dueAt <= now + dueWindowMs`）时，会给任务写入 `notBeforeRequestId=<当前请求 requestId>`。
+- 注入提醒时会把 `notBeforeRequestId` 视为“请求链前缀屏蔽”，即 `requestId === notBeforeRequestId` 或 `requestId` 以 `notBeforeRequestId + ":"` 开头（例如 `:clock_followup`）时，都不会在该请求链内投递提醒。
 
 ### 1.4 与 `stopMessage` 的优先级与交互（必须）
 
@@ -168,11 +177,9 @@ type ClockSessionState = {
 注入包括两部分：
 
 1) Time tag（每次请求）：
-   - 若当前请求末尾是 `role:user`：在 messages 末尾追加一条新的 `role:user`，内容为：
-     - `[Time/Date]: utc=<...> local=<...> tz=<...> nowMs=<...> ntpOffsetMs=<...>`
-   - 若当前请求末尾是 `role:tool`（常见于“工具结果阶段”）：在 messages 末尾追加一对 **配对** 消息：
-     - `role:assistant` + `tool_calls:[{name:"clock", arguments:{action:"get"}}]`
-     - `role:tool` + `tool_call_id` 配对 + `content` 为 `clock.get` 的 JSON 输出
+   - 在 messages 末尾追加一条新的 `role:user`，内容为 markdown time tag（inline code）：
+     - `[Time/Date]: utc=\`...\` local=\`...\` tz=\`...\` nowMs=\`...\` ntpOffsetMs=\`...\``
+   - 设计意图：避免引入额外 tool-call 语义，减少模型把“时间注入”当作必须响应/执行的工具回合，从而分散注意力或打断会话结构。
 
 2) Alarm due reminders（仅当本次有到期任务）：
    - 在请求末尾追加一条 `role:user` 提醒文本，包含到期任务列表，并明确提示：

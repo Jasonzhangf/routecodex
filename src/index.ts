@@ -778,6 +778,9 @@ async function restartSelf(app: RouteCodexApp, signal: NodeJS.Signals): Promise<
   const argv = process.argv.slice(1);
   const env = { ...process.env } as NodeJS.ProcessEnv;
   env.ROUTECODEX_RESTARTED_AT = String(Date.now());
+  // IMPORTANT: avoid inheriting a stale ROUTECODEX_VERSION across restarts.
+  // The child process should re-resolve version from the current code/package on disk.
+  delete env.ROUTECODEX_VERSION;
 
   try {
     await app.stop();

@@ -1,5 +1,9 @@
 # RouteCodex + llmswitch-core 风控增强任务
 
+> [!IMPORTANT]
+> 本仓库已全量切换为 Beads（`bd --no-db`）管理任务与进展：`.beads/issues.jsonl` 是唯一任务来源。
+> 本文件仅保留为历史说明；带 `bd:<id>` 的条目表示对应的 Beads issue。
+
 ## 任务概述
 
 基于 gcli2api 的实践经验，对 RouteCodex 和 llmswitch-core 进行风控增强，降低被上游 API 识别和封禁的风险。
@@ -41,6 +45,18 @@
 
 ---
 
+## Quota Manager V3 + Control Plane（唯一产出 + WebUI 可见）
+
+- [x] llmswitch-core：新增 `QuotaManager`（`sharedmodule/llmswitch-core/src/quota/*`）
+- [x] llmswitch-core：402 → blacklistUntil(resetAt/config)；Antigravity auth-verify/签名缺失策略迁入 QuotaManager
+- [x] routecodex：`quota` 模块升级为统一入口（订阅 provider error/success → 喂入 core QuotaManager；antigravity quota snapshot → updateProviderPoolState）
+- [x] routecodex：HubPipeline 注入 `quotaView` 改为从 `quota` 模块读取（不再依赖 `provider-quota`）
+- [x] daemon-admin：新增 `GET /daemon/control/snapshot` + `POST /daemon/control/mutate`
+- [x] daemon-admin UI：新增 “Control” 面板，展示 servers/route hits/quota，并支持 broadcast restart + quota 操作
+- (bd:routecodex-x7e.3.1) 路由策略 Form UI（routing/loadBalancing 编辑 + 写 config + restart）
+
+---
+
 ## Antigravity 对齐（阶段一：协议/风控/alias）
 
 > 仅对齐 **Antigravity Tools 最新版本**，不考虑旧格式；只启用 **Antigravity 分支**。
@@ -64,15 +80,15 @@
 - **A4 工具调用清理（history/tool_call）** ✅（已对齐）
   - 参考：`sharedmodule/llmswitch-core/src/conversion/hub/pipeline/**`、`sharedmodule/llmswitch-core/src/conversion/compat/*`
   - 要求：仅 Antigravity 分支；对齐 deepFilterThinkingBlocks
-- **A5 Endpoint/路径构造** 🟡（代码对齐，待验证）
+- **A5 Endpoint/路径构造** 🟡（bd:routecodex-1.1）
   - 参考：`src/client/gemini-cli/gemini-cli-protocol-client.ts`、
     `/Users/fanzhang/Documents/github/Antigravity-Manager/src-tauri/src/proxy/upstream/client.rs`
   - 要求：对齐 Antigravity Tools 最新路径构造（/v1internal:generateContent | :streamGenerateContent）
-- **A6 requestType 解析（agent/web_search/image_gen）** 🟡（对齐中）
+- **A6 requestType 解析（agent/web_search/image_gen）** 🟡（bd:routecodex-1.2）
   - 参考：`sharedmodule/llmswitch-core/src/conversion/hub/operation-table/semantic-mappers/gemini-mapper.ts`、
     `/Users/fanzhang/Documents/github/Antigravity-Manager/src-tauri/src/proxy/mappers/common_utils.rs`
   - 要求：对齐 Antigravity Tools 的 request_type 判定（-online 后缀 / networking tools / image 模型）
-- **A7 googleSearch 注入 & tools 清理（Antigravity 分支）** 🟡（对齐中）
+- **A7 googleSearch 注入 & tools 清理（Antigravity 分支）** 🟡（bd:routecodex-1.3）
   - 参考：`sharedmodule/llmswitch-core/src/conversion/compat/actions/gemini-web-search.ts`、
     `/Users/fanzhang/Documents/github/Antigravity-Manager/src-tauri/src/proxy/mappers/common_utils.rs`
   - 要求：仅 Antigravity 分支；与 Antigravity Tools 的 googleSearch 注入行为一致
@@ -81,10 +97,10 @@
 - **B1 账号禁用（disabled/proxy_disabled）持久化** ✅（已对齐）
   - 参考：`src/providers/core/runtime/http-transport-provider.ts`、`src/providers/auth/oauth-lifecycle.ts`
   - 要求：仅 Antigravity 分支；invalid_grant/401 触发禁用；quota 已持久化
-- **B2 protected_models 持久化 + 路由影响** 🟡（实现完成，待验证）
+- **B2 protected_models 持久化 + 路由影响** 🟡（bd:routecodex-1.4）
   - 参考：`src/manager/quota/**`、`sharedmodule/llmswitch-core/src/router/virtual-router/**`
   - 要求：模型级保护与恢复机制
-- **B3 账号级限流** 🟡（实现完成，待验证）
+- **B3 账号级限流** 🟡（bd:routecodex-1.5）
   - 参考：`src/providers/core/runtime/rate-limit-manager.ts`、`sharedmodule/llmswitch-core/src/router/virtual-router/**`
   - 要求：引入账号级限流；与 session stickiness 一致
 
@@ -92,7 +108,7 @@
 - **C1 Alias → model 顺序（走 Hub pipeline）** ✅（已符合）
   - 参考：`sharedmodule/llmswitch-core/src/router/virtual-router/**`
   - 要求：不做特殊 provider 映射
-- **C2 模型名规范化（provider 侧配置）** 🟡（进行中）
+- **C2 模型名规范化（provider 侧配置）** 🟡（bd:routecodex-1.6）
   - 参考：`src/providers/core/runtime/gemini-cli-http-provider.ts`
   - 要求：Provider 不做模型降级/回退；仅允许后缀规范化（-low/-high/-medium/-minimal）；
     具体业务映射在虚拟路由器层完成
@@ -109,7 +125,7 @@
     - 策略按模型族分开（每个 model 单独挑最佳 alias）
 
 ### D. 请求头一致性（Antigravity only）
-- **D1 UA / X-Goog-Api-Client / Client-Metadata** 🟡（对齐中）
+- **D1 UA / X-Goog-Api-Client / Client-Metadata** 🟡（bd:routecodex-1.7）
   - 参考：`src/client/gemini-cli/gemini-cli-protocol-client.ts`、
     `src/providers/core/runtime/gemini-cli-http-provider.ts`、
     `/Users/fanzhang/Documents/github/Antigravity-Manager/src-tauri/src/proxy/project_resolver.rs`
@@ -153,16 +169,16 @@
 
 > 目标：`rcc init` 以 Web 引导完成 provider + routing 配置；`rcc start` 无 config 时进入 init UI。
 
-- **I1 init-only server + UI** 🟡（实现中）
+- **I1 init-only server + UI** 🟡（bd:routecodex-2.1）
   - 参考：`src/server/runtime/init-server.ts`、`docs/init-ui.html`
   - 要求：本地访问、支持 OAuth/ApiKey、默认 route 池、可回退到 admin
-- **I2 CLI 入口行为对齐** 🟡（实现中）
+- **I2 CLI 入口行为对齐** 🟡（bd:routecodex-2.2）
   - 参考：`src/cli/commands/init.ts`、`src/cli/commands/start.ts`、`src/index.ts`
   - 要求：`rcc init` 启动 init-only；`rcc start` 无 config 自动进入 init UI
-- **I3 OAuth alias 默认规则** 🟡（实现中）
+- **I3 OAuth alias 默认规则** 🟡（bd:routecodex-2.3）
   - 规则：alias 默认取 email `@` 前缀且去掉 `.` 与标点，仅字母/数字
   - 参考：`src/server/runtime/init-server.ts`
-- **I4 路由池配置 + 默认路由** 🟡（实现中）
+- **I4 路由池配置 + 默认路由** 🟡（bd:routecodex-2.4）
   - 规则：默认 `default` 路由必须至少一个 target
   - 参考：`docs/init-ui.html`、`src/server/runtime/init-server.ts`
 
@@ -196,7 +212,7 @@
 ### W2. 阶段 1：双加载与开关矩阵（进行中）
 - **参考**: `docs/plans/llms-wasm-migration-plan.md#阶段-1双加载--开关矩阵`
 - **优先级**: 最高
-- **状态**: 🟡 进行中（已确认方案，开始实现）
+- **状态**: 🟡 进行中（bd:routecodex-3）
 - **目标**:
   - 在 Host 中实现 WASM & TS 双加载初始化
   - 实现运行模式开关（`shadow` / `wasm_primary` / `ts_primary` / `split`）
@@ -208,7 +224,7 @@
   - 新增 `src/runtime/wasm-runtime/` 模块负责 WASM 运行时加载
   - 扩展 `src/modules/llmswitch/bridge` 新增 `getHubPipelineCtorForImpl('wasm')` 接口
 - **任务清单**:
-  - [ ] 强制规则：模块必须先验证通过，才能进入“上线对比（shadow）”阶段（按模块顺序执行）
+  - (bd:routecodex-3) 强制规则：模块必须先验证通过，才能进入“上线对比（shadow）”阶段（按模块顺序执行）
     - [x] tokenizer：先验证 → 再允许 shadow（已通过 llms-wasm compare：hub-chat-process/tool-filters）
     - [x] tool canonicalization：先验证 → 再允许 shadow（已通过 llms-wasm compare：tool-filters/tool-governance 样本）
     - [x] compat profile：先验证 → 再允许 shadow（已通过 llms-wasm compare：compat-request/compat-response）
@@ -222,15 +238,15 @@
     - [x] outbound response conversion：先验证 → 再允许 shadow（已补齐 FFI + native：vr_convert_outbound）
     - [x] response finalize：先验证 → 再允许 shadow（已补齐 FFI + native：vr_finalize_chat_response）
     - [x] response IO：先验证 → 再允许 shadow（已补齐 FFI + native：vr_convert_provider_response / vr_provider_response_to_chat）
-  - [ ] 新建 `src/runtime/wasm-runtime/` 模块结构与入口
-  - [ ] 实现 `WasmRuntime` 类（加载、初始化、生命周期管理）
-  - [ ] 扩展 `src/modules/llmswitch/bridge` 新增 `getHubPipelineCtorForImpl('wasm')`
-  - [ ] 实现 `ensureHubPipelineEngineShadow()` 加载 WASM HubPipeline
-  - [ ] 实现运行模式开关解析（环境变量 `ROUTECODEX_HUB_PIPELINE_IMPL`）
-  - [ ] 实现开关优先级矩阵（全局 > 租户 > 路由 > 请求）
-  - [ ] 实现影子请求分发逻辑（主路 + 影子异步）
-  - [ ] WASM 初始化失败上报（通过 `providerErrorCenter`）
-  - [ ] 验证双加载互不影响（隔离测试）
+  - (bd:routecodex-3.1) 新建 `src/runtime/wasm-runtime/` 模块结构与入口
+  - (bd:routecodex-3.2) 实现 `WasmRuntime` 类（加载、初始化、生命周期管理）
+  - (bd:routecodex-3.3) 扩展 `src/modules/llmswitch/bridge` 新增 `getHubPipelineCtorForImpl('wasm')`
+  - (bd:routecodex-3.4) 实现 `ensureHubPipelineEngineShadow()` 加载 WASM HubPipeline
+  - (bd:routecodex-3.5) 实现运行模式开关解析（环境变量 `ROUTECODEX_HUB_PIPELINE_IMPL`）
+  - (bd:routecodex-3.6) 实现开关优先级矩阵（全局 > 租户 > 路由 > 请求）
+  - (bd:routecodex-3.7) 实现影子请求分发逻辑（主路 + 影子异步）
+  - (bd:routecodex-3.8) WASM 初始化失败上报（通过 `providerErrorCenter`）
+  - (bd:routecodex-3.9) 验证双加载互不影响（隔离测试）
 - [x] 在 llmswitch-core CI 新增 wasm-compare job（模块顺序 gating）: `/Users/fanzhang/Documents/github/sharedmodule/.github/workflows/llmswitch-core-ci.yml`
 
 #### llmswitch-core 覆盖率对比（目标 90%）
@@ -322,7 +338,7 @@
 ### 14. CI 基线（PR 必跑）+ 覆盖率增强（从最小集合开始）
 - **位置**: `sharedmodule/.github/workflows/llmswitch-core-ci.yml` + `routecodex/.github/workflows/test.yml` + `jest.config.js`
 - **优先级**: 高
-- **状态**: 🟡 进行中
+- **状态**: 🟡 进行中（bd:routecodex-4）
 - **目标**:
   - PR 必跑：llmswitch-core `npm run verif`（matrix）必须作为 PR 检查项
   - RouteCodex CI 走 release 路径：npm 安装的 `@jsonstudio/llms`（不走本地 symlink）
@@ -337,17 +353,17 @@
   - [x] CI 稳定性：workflow 增加 concurrency + job timeout；coverage job 固定 maxWorkers（通过 `ROUTECODEX_CI_MAX_WORKERS`）防止小 runner OOM：`.github/workflows/test.yml` + `scripts/tests/ci-jest.mjs`
   - [x] servertool 回归测试兼容两套契约：旧版 `metadata.* / adapterContext.webSearch` 与新版 `metadata.__rt.* / adapterContext.__rt.*`（避免 sharedmodule 演进时 CI 断裂）；PR CI 仍以 release npm `@jsonstudio/llms@0.6.1172` 为基准，dev-only servertool suites（clock/mixed/stop-message session 等）暂不纳入 CI coverage：`tests/servertool/*.spec.ts` + `scripts/tests/ci-jest.mjs`
 - **仍需你拍板**（GitHub 设置侧，代码无法强制）:
-  - [ ] 分支保护规则：将 `llmswitch-core-ci` 标记为 Required status checks（PR 必过）
+  - (bd:routecodex-4.1) 分支保护规则：将 `llmswitch-core-ci` 标记为 Required status checks（PR 必过）
 - **待落地/进行中**:
   - [x] RouteCodex CI 新增 `test:ci` + `test:ci:coverage`（先覆盖 CI 测试集）：`package.json` + `scripts/tests/ci-jest.mjs`
   - [x] 在 `.github/workflows/test.yml` 增加 coverage job（PR 必跑）：`.github/workflows/test.yml`
-  - [ ] CI 测试集 re-enable：`@jsonstudio/llms` 仍停留在 npm `0.6.1172`，因此 release CI 暂不包含依赖新 llmswitch-core 行为的 servertool/sharedmodule 测试（待 llms 发布后再纳入）
-  - [ ] 修复当前阻塞“全量 coverage”的单测（`tests/servertool/virtual-router-quota-routing.spec.ts`）或拆分为 nightly
+  - (bd:routecodex-4.2) CI 测试集 re-enable：`@jsonstudio/llms` 仍停留在 npm `0.6.1172`，因此 release CI 暂不包含依赖新 llmswitch-core 行为的 servertool/sharedmodule 测试（待 llms 发布后再纳入）
+  - (bd:routecodex-4.3) 修复当前阻塞“全量 coverage”的单测（`tests/servertool/virtual-router-quota-routing.spec.ts`）或拆分为 nightly
 
 ### 18. llmswitch-core：单测全覆盖 + Golden 回归 + 覆盖率 90%（PR 必跑）
 - **位置**: `sharedmodule/llmswitch-core/tests/**` + `sharedmodule/llmswitch-core/scripts/**` + `sharedmodule/.github/workflows/llmswitch-core-ci.yml`
 - **优先级**: 最高
-- **状态**: 🟡 进行中（开始落地）
+- **状态**: 🟡 进行中（bd:routecodex-4）
 - **目标**:
   - 每个模块（按 `src/**` 目录边界）必须至少有 1 个单元测试用例（可通过脚本自动检查缺失）
   - 每个功能契约必须有 regression/golden 测试：chat_process 不变量、servertool followup H1/H2/H3、SSE decode/encode、compat profiles、virtual-router quota/cooldown/sticky、tool schema 清洗等
@@ -375,9 +391,9 @@
   - [x] 修复 llmswitch-core CI lint job（.d.ts ignore + no-useless-escape/no-empty/no-mixed-spaces-and-tabs）：`sharedmodule/llmswitch-core/.eslintrc.json` + `sharedmodule/llmswitch-core/src/**`
   - [x] 增加 coverage boost 用例（纯单测、无外网、deterministic）并入 matrix：`sharedmodule/llmswitch-core/scripts/tests/coverage-openai-message-normalize.mjs` + `sharedmodule/llmswitch-core/scripts/tests/coverage-request-tool-list-filter.mjs` + `sharedmodule/llmswitch-core/scripts/tests/coverage-context-diff.mjs` + `sharedmodule/llmswitch-core/scripts/tests/coverage-sticky-pool-via-router.mjs` + `sharedmodule/llmswitch-core/scripts/tests/coverage-parse-loose-json.mjs` + `sharedmodule/llmswitch-core/scripts/tests/coverage-instruction-target.mjs` + `sharedmodule/llmswitch-core/scripts/tests/coverage-guidance-augment.mjs` + `sharedmodule/llmswitch-core/scripts/tests/coverage-tool-harvester.mjs` + `sharedmodule/llmswitch-core/scripts/tests/coverage-text-markup-normalizer.mjs` + `sharedmodule/llmswitch-core/scripts/tests/coverage-recursive-detection-guard.mjs`
   - [x] 增加 coverage boost 用例（路由/工具 surface/patch 结构化）并入 matrix：`sharedmodule/llmswitch-core/scripts/tests/coverage-tool-surface-engine.mjs` + `sharedmodule/llmswitch-core/scripts/tests/coverage-structured-apply-patch.mjs` + `sharedmodule/llmswitch-core/scripts/tests/coverage-engine-health.mjs`
-  - [ ] 90% 目标：逐步补齐 `src/**` 单测/回归并把 CI gate 从当前临时阈值提升到 90%（lines/branches/functions/statements）
-  - [ ] “模块必须有测试” gate：落地 `tests/unit|integration|regression|golden` 分层，并启用 `scripts/verify-test-coverage-map.mjs`
-  - [ ] Golden 扩容策略：如果 fixtures 体积膨胀，迁 GitHub Release asset + sha256 lock（仍保证 CI 可获取）
+  - (bd:routecodex-4.4) 90% 目标：逐步补齐 `src/**` 单测/回归并把 CI gate 从当前临时阈值提升到 90%（lines/branches/functions/statements）
+  - (bd:routecodex-4.5) “模块必须有测试” gate：落地 `tests/unit|integration|regression|golden` 分层，并启用 `scripts/verify-test-coverage-map.mjs`
+  - (bd:routecodex-4.6) Golden 扩容策略：如果 fixtures 体积膨胀，迁 GitHub Release asset + sha256 lock（仍保证 CI 可获取）
   - **当前覆盖率基线（本地，2026-01-24）**：`src/**` ≈ lines **60.79%** / branches **44.93%** / functions **60.38%** / statements **60.79%**（未达 90%，CI 暂时用较低阈值跑通并持续抬升）
 
 ### 13. Chat Process 协议与流水线契约（processMode=chat）
@@ -411,7 +427,7 @@
 ### 15. Antigravity 端点级联（transport）+ 上游错误信号收集
 - **位置**: `src/providers/core/runtime/http-request-executor.ts` + `src/providers/core/runtime/http-transport-provider.ts` + `src/providers/core/runtime/gemini-cli-http-provider.ts` + `src/providers/core/utils/http-client.ts` + `src/providers/auth/antigravity-userinfo-helper.ts`
 - **优先级**: 高
-- **状态**: 🟡 进行中
+- **状态**: 🟡 进行中（bd:routecodex-1.8）
 - **目标**:
   - Transport 层支持 baseUrl 级联尝试（默认顺序：daily → autopush → prod），并在 Antigravity 下优先“切 baseUrl 再切 alias”
   - baseUrl 级联触发条件（Antigravity）：网络/timeout/5xx/403/404 + 429/400
@@ -426,7 +442,7 @@
 ### 16. 工具 schema 清洗（Gemini functionDeclarations）
 - **位置**: `sharedmodule/llmswitch-core/src/conversion/shared/gemini-tool-utils.ts`
 - **优先级**: 高
-- **状态**: 🟡 进行中
+- **状态**: 🟡 进行中（bd:routecodex-1.9）
 - **目标**:
   - 更贴近上游 functionDeclarations.parameters 的可接受子集（const→enum、丢弃不支持关键字、组合器收敛）
 - **已完成**:
@@ -435,7 +451,7 @@
 ### 17. Reasoning/Thinking 块策略（Claude via Antigravity）
 - **位置**: `sharedmodule/llmswitch-core/src/conversion/hub/operation-table/semantic-mappers/gemini-mapper.ts`
 - **优先级**: 中
-- **状态**: 🟡 进行中
+- **状态**: 🟡 进行中（bd:routecodex-1.10）
 - **目标**:
   - 默认对 antigravity.* + claude-* 的 outbound 文本去除 `<think>/<reflection>`（除非用户显式 opt-in）
 - **已完成**:

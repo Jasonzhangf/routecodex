@@ -4,6 +4,7 @@ import path from 'node:path';
 import fs from 'node:fs/promises';
 
 const BRIDGE_MODULE_PATH = path.resolve(process.cwd(), 'src/modules/llmswitch/bridge.ts');
+const PROVIDER_FACTORY_MODULE_PATH = path.resolve(process.cwd(), 'src/providers/core/runtime/provider-factory.ts');
 
 describe('RouteCodexHttpServer quotaView injection', () => {
   let tempConfigPath = '';
@@ -41,6 +42,9 @@ describe('RouteCodexHttpServer quotaView injection', () => {
     const config = {
       virtualrouterMode: 'v1',
       virtualrouter: {
+        quota: {
+          apikeyDailyResetTime: '16:00Z'
+        },
         providers: {
           mock: {
             type: 'mock',
@@ -55,6 +59,125 @@ describe('RouteCodexHttpServer quotaView injection', () => {
     await fs.writeFile(filePath, JSON.stringify(config, null, 2), 'utf8');
     return filePath;
   }
+
+  it('seeds virtualrouter.quota.apikeyDailyResetTime into quota module static config (apikey only)', async () => {
+    tempConfigPath = await createTempUserConfig();
+
+    const captured: { calls: Array<{ providerKey: string; cfg: any }> } = { calls: [] };
+
+    jest.resetModules();
+    jest.unstable_mockModule(PROVIDER_FACTORY_MODULE_PATH, () => ({
+      ProviderFactory: {
+        createProviderFromRuntime: () => ({
+          initialize: async () => {},
+          cleanup: async () => {},
+          processIncoming: async (payload: Record<string, unknown>) => payload
+        })
+      }
+    }));
+    jest.unstable_mockModule(BRIDGE_MODULE_PATH, () => ({
+      getStatsCenterSafe: () => ({ recordProviderUsage: () => {} }),
+      extractSessionIdentifiersFromMetadata: () => ({}),
+      extractAntigravityGeminiSessionId: () => undefined,
+      cacheAntigravitySessionSignature: () => {},
+      lookupAntigravitySessionSignatureEntry: () => undefined,
+      getAntigravityLatestSignatureSessionIdForAlias: () => undefined,
+      resetAntigravitySessionSignatureCachesForTests: () => {},
+      warmupAntigravitySessionSignatureModule: async () => {},
+      loadRoutingInstructionStateSync: () => null,
+      saveRoutingInstructionStateAsync: () => {},
+      saveRoutingInstructionStateSync: () => {},
+      getProviderErrorCenter: async () => ({
+        emit: () => {},
+        subscribe: () => () => {}
+      }),
+      getProviderSuccessCenter: async () => ({
+        emit: () => {},
+        subscribe: () => () => {}
+      }),
+      bootstrapVirtualRouterConfig: async (input: any) => ({
+        config: input,
+        targetRuntime: {
+          'mock.apikey': {
+            runtimeKey: 'mock',
+            providerId: 'mock',
+            providerKey: 'mock.apikey',
+            providerType: 'mock',
+            endpoint: 'mock://',
+            auth: { type: 'apikey', value: 'dummy_dummy_dummy' }
+          },
+          'mock.oauth': {
+            runtimeKey: 'mock.oauth',
+            providerId: 'mock',
+            providerKey: 'mock.oauth',
+            providerType: 'mock',
+            endpoint: 'mock://',
+            auth: { type: 'oauth', tokenFile: '/tmp/dummy.json' }
+          }
+        }
+      }),
+      convertProviderResponse: async (value: any) => value,
+      createSnapshotRecorder: () => ({}) as any,
+      rebindResponsesConversationRequestId: async () => {},
+      resumeResponsesConversation: async () => ({ payload: {}, meta: {} }),
+      writeSnapshotViaHooks: async () => {},
+      buildResponsesRequestFromChat: async () => ({}),
+      ensureResponsesInstructions: async () => {},
+      createResponsesSseToJsonConverter: async () => ({
+        convertSseToJson: async () => ({})
+      }),
+      getHubPipelineCtor: async () =>
+        class HubPipelineMock {
+          constructor() {}
+          updateVirtualRouterConfig(): void {}
+          async execute(): Promise<any> {
+            return { providerPayload: { ok: true }, target: { providerKey: 'mock.apikey' }, metadata: {} };
+          }
+        },
+      getHubPipelineCtorForImpl: async () =>
+        class HubPipelineMock {
+          constructor() {}
+          updateVirtualRouterConfig(): void {}
+          async execute(): Promise<any> {
+            return { providerPayload: { ok: true }, target: { providerKey: 'mock.apikey' }, metadata: {} };
+          }
+        }
+    }));
+
+    const { RouteCodexHttpServer } = await import('../../../src/server/runtime/http-server/index.js');
+    const config: any = {
+      configPath: tempConfigPath,
+      server: { host: '127.0.0.1', port: 0 },
+      pipeline: {},
+      logging: { level: 'error', enableConsole: false },
+      providers: {}
+    };
+
+    const server = new RouteCodexHttpServer(config);
+    (server as any).managerDaemon = {
+      getModule: (id: string) =>
+        id === 'quota'
+          ? {
+              registerProviderStaticConfig: (providerKey: string, cfg: any) => {
+                captured.calls.push({ providerKey, cfg });
+              },
+              getQuotaView: () => () => null
+            }
+          : undefined
+    };
+
+    const userConfigRaw = JSON.parse(await fs.readFile(tempConfigPath, 'utf8'));
+    await server.initializeWithUserConfig(userConfigRaw);
+
+    const apikeyCall = captured.calls.find((c) => c.providerKey === 'mock.apikey');
+    expect(apikeyCall).toBeTruthy();
+    expect(apikeyCall!.cfg).toMatchObject({ authType: 'apikey', apikeyDailyResetTime: '16:00Z' });
+
+    const oauthCall = captured.calls.find((c) => c.providerKey === 'mock.oauth');
+    expect(oauthCall).toBeTruthy();
+    expect(oauthCall!.cfg).toMatchObject({ authType: 'oauth' });
+    expect(oauthCall!.cfg.apikeyDailyResetTime).toBeNull();
+  });
 
   it('injects quotaView into HubPipeline config by default', async () => {
     tempConfigPath = await createTempUserConfig();
@@ -76,6 +199,10 @@ describe('RouteCodexHttpServer quotaView injection', () => {
       saveRoutingInstructionStateAsync: () => {},
       saveRoutingInstructionStateSync: () => {},
       getProviderErrorCenter: async () => ({
+        emit: () => {},
+        subscribe: () => () => {}
+      }),
+      getProviderSuccessCenter: async () => ({
         emit: () => {},
         subscribe: () => () => {}
       }),
@@ -134,7 +261,7 @@ describe('RouteCodexHttpServer quotaView injection', () => {
 
     const server = new RouteCodexHttpServer(config);
     (server as any).managerDaemon = {
-      getModule: (id: string) => (id === 'provider-quota' ? { getQuotaView: () => quotaView } : undefined)
+      getModule: (id: string) => (id === 'quota' ? { getQuotaView: () => quotaView } : undefined)
     };
 
     const userConfigRaw = JSON.parse(await fs.readFile(tempConfigPath, 'utf8'));
@@ -165,6 +292,10 @@ describe('RouteCodexHttpServer quotaView injection', () => {
       saveRoutingInstructionStateAsync: () => {},
       saveRoutingInstructionStateSync: () => {},
       getProviderErrorCenter: async () => ({
+        emit: () => {},
+        subscribe: () => () => {}
+      }),
+      getProviderSuccessCenter: async () => ({
         emit: () => {},
         subscribe: () => () => {}
       }),
@@ -223,7 +354,7 @@ describe('RouteCodexHttpServer quotaView injection', () => {
 
     const server = new RouteCodexHttpServer(config);
     (server as any).managerDaemon = {
-      getModule: (id: string) => (id === 'provider-quota' ? { getQuotaView: () => quotaView } : undefined)
+      getModule: (id: string) => (id === 'quota' ? { getQuotaView: () => quotaView } : undefined)
     };
 
     const userConfigRaw = JSON.parse(await fs.readFile(tempConfigPath, 'utf8'));
@@ -259,6 +390,10 @@ describe('RouteCodexHttpServer quotaView injection', () => {
       saveRoutingInstructionStateAsync: () => {},
       saveRoutingInstructionStateSync: () => {},
       getProviderErrorCenter: async () => ({
+        emit: () => {},
+        subscribe: () => () => {}
+      }),
+      getProviderSuccessCenter: async () => ({
         emit: () => {},
         subscribe: () => () => {}
       }),
@@ -315,7 +450,7 @@ describe('RouteCodexHttpServer quotaView injection', () => {
     const server = new RouteCodexHttpServer(config);
     (server as any).managerDaemon = {
       getModule: (id: string) =>
-        id === 'provider-quota'
+        id === 'quota'
           ? {
               getQuotaView: () => quotaView,
               getQuotaViewReadOnly: () => quotaViewReadOnly

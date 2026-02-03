@@ -96,6 +96,45 @@ describe('VirtualRouterEngine series cooldown handling', () => {
     expect(status.find((entry) => entry.providerKey === providerA)?.state).toBe('tripped');
     expect(status.find((entry) => entry.providerKey === providerB)?.state).not.toBe('tripped');
   });
+
+  it('does not produce router-local cooldowns when quotaView is enabled', () => {
+    const quotaView = (key: string) => ({
+      providerKey: key,
+      inPool: true,
+      reason: 'ok',
+      priorityTier: 100,
+      cooldownUntil: null,
+      blacklistUntil: null
+    });
+    const engine = new VirtualRouterEngine({ quotaView } as any);
+    engine.initialize(baseConfig);
+
+    const event: ProviderErrorEvent = {
+      code: 'HTTP_429',
+      message: 'Rate limit',
+      stage: 'provider.http',
+      runtime: {
+        requestId: 'req_test_quota',
+        providerKey: providerA
+      },
+      timestamp: Date.now(),
+      details: {
+        virtualRouterSeriesCooldown: {
+          providerId: 'antigravity.alias1',
+          providerKey: providerA,
+          model: 'gemini-3-pro-high',
+          series: 'gemini-pro',
+          cooldownMs: 60_000
+        }
+      }
+    };
+
+    engine.handleProviderError(event);
+
+    const status = engine.getStatus().health;
+    expect(status.find((entry) => entry.providerKey === providerA)?.state).not.toBe('tripped');
+    expect(status.find((entry) => entry.providerKey === providerB)?.state).not.toBe('tripped');
+  });
 });
 
 describe('Virtual router antigravity strict session alias binding', () => {

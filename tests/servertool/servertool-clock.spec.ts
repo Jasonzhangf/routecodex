@@ -270,7 +270,7 @@ describe('servertool:clock', () => {
     expect(typeof last?.content === 'string' ? last.content : '').toContain('[Time/Date]:');
   });
 
-  test('injects paired clock.get tool_call+tool_result when last role is tool', async () => {
+  test('injects time tag as user message when last role is tool', async () => {
     const request = buildRequest([
       {
         role: 'assistant',
@@ -299,16 +299,9 @@ describe('servertool:clock', () => {
     });
 
     const processed = result.processedRequest as any;
-    const messages = processed.messages as any[];
-    const tail = messages.slice(-2);
-    expect(tail[0]?.role).toBe('assistant');
-    expect(Array.isArray(tail[0]?.tool_calls)).toBe(true);
-    expect(tail[0]?.tool_calls?.[0]?.function?.name).toBe('clock');
-    expect(tail[1]?.role).toBe('tool');
-    expect(typeof tail[1]?.tool_call_id).toBe('string');
-    expect(tail[1].tool_call_id).toBe(tail[0].tool_calls[0].id);
-    const payload = JSON.parse(String(tail[1]?.content || '{}'));
-    expect(payload.action).toBe('get');
+    const last = processed.messages?.[processed.messages.length - 1];
+    expect(last?.role).toBe('user');
+    expect(typeof last?.content === 'string' ? last.content : '').toContain('[Time/Date]:');
   });
 
   test('injects standard tool list when due reminders are injected', async () => {

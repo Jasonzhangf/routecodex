@@ -31,13 +31,16 @@ function getProviderQuotaModule(options: DaemonAdminRouteOptions): ProviderQuota
   if (!daemon) {
     return null;
   }
-  const mod = typeof daemon.getModule === 'function'
+  const modQuota = typeof daemon.getModule === 'function'
+    ? (daemon.getModule('quota') as ManagerModule | undefined)
+    : undefined;
+  if (modQuota) {
+    return modQuota as unknown as ProviderQuotaDaemonModule;
+  }
+  const legacy = typeof daemon.getModule === 'function'
     ? (daemon.getModule('provider-quota') as ManagerModule | undefined)
     : undefined;
-  if (!mod) {
-    return null;
-  }
-  return mod as unknown as ProviderQuotaDaemonModule;
+  return legacy ? (legacy as unknown as ProviderQuotaDaemonModule) : null;
 }
 
 export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteOptions): void {

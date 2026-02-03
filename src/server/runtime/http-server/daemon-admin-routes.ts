@@ -6,6 +6,7 @@ import { registerQuotaRoutes } from './daemon-admin/quota-handler.js';
 import { registerProviderRoutes } from './daemon-admin/providers-handler.js';
 import { registerRestartRoutes } from './daemon-admin/restart-handler.js';
 import { registerStatsRoutes } from './daemon-admin/stats-handler.js';
+import { registerControlRoutes } from './daemon-admin/control-handler.js';
 import type { HistoricalStatsSnapshot, StatsSnapshot } from './stats-manager.js';
 import { isDaemonSessionAuthenticated } from './daemon-admin/auth-session.js';
 
@@ -23,6 +24,11 @@ export interface DaemonAdminRouteOptions {
    * 返回当前虚拟路由构建产物；用于 Providers 运行时视图。
    */
   getVirtualRouterArtifacts: () => unknown | null;
+  /**
+   * Return the config path used to bootstrap this server instance (best-effort).
+   * Control-plane mutate uses this path as the single write target.
+   */
+  getConfigPath?: () => string | null;
   /**
    * Deprecated: daemon-admin 不再使用 apikey 鉴权（改为密码登录）。
    */
@@ -93,4 +99,7 @@ export function registerDaemonAdminRoutes(options: DaemonAdminRouteOptions): voi
 
   // Reload / restart runtime (reload config from disk)
   registerRestartRoutes(app, options);
+
+  // Unified control-plane endpoints (single entry for WebUI)
+  registerControlRoutes(app, options);
 }

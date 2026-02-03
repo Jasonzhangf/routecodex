@@ -2,7 +2,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
 import { importCoreModule, resolveCoreModulePath, type LlmsImpl } from './core-loader.js';
-import type { ProviderErrorEvent } from '@jsonstudio/llms/dist/router/virtual-router/types.js';
+import type { ProviderErrorEvent, ProviderSuccessEvent } from '@jsonstudio/llms/dist/router/virtual-router/types.js';
 import { writeErrorsampleJson } from '../../utils/errorsamples.js';
 import {
   isLlmsEngineShadowEnabledForSubpath,
@@ -21,7 +21,14 @@ type SnapshotRecorder = unknown;
 // 默认引用 @jsonstudio/llms（来自 npm 发布版本）。仓库开发场景可通过 scripts/link-llmswitch.mjs 将该依赖 link 到本地 sharedmodule。
 
 export type { ProviderErrorEvent } from '@jsonstudio/llms/dist/router/virtual-router/types.js';
+export type { ProviderSuccessEvent } from '@jsonstudio/llms/dist/router/virtual-router/types.js';
 export type { ProviderUsageEvent } from '@jsonstudio/llms';
+export type {
+  StaticQuotaConfig,
+  QuotaState,
+  QuotaStore,
+  QuotaStoreSnapshot
+} from '@jsonstudio/llms/dist/quota/index.js';
 
 const require = createRequire(import.meta.url);
 
@@ -97,6 +104,22 @@ type AntigravitySessionSignatureModule = {
   resetAntigravitySessionSignatureCachesForTests?: () => void;
   configureAntigravitySessionSignaturePersistence?: (input: { stateDir: string; fileName?: string } | null) => void;
   flushAntigravitySessionSignaturePersistenceSync?: () => void;
+};
+
+type QuotaModule = {
+  QuotaManager?: new (options?: { store?: unknown }) => {
+    hydrateFromStore?: () => Promise<void>;
+    registerProviderStaticConfig?: (providerKey: string, cfg: unknown) => void;
+    onProviderError?: (ev: ProviderErrorEvent) => void;
+    onProviderSuccess?: (ev: ProviderSuccessEvent) => void;
+    updateProviderPoolState?: (options: unknown) => void;
+    disableProvider?: (options: unknown) => void;
+    recoverProvider?: (providerKey: string) => void;
+    resetProvider?: (providerKey: string) => void;
+    getQuotaView?: () => unknown;
+    getSnapshot?: () => unknown;
+    persistNow?: () => Promise<void>;
+  };
 };
 
 let cachedAntigravitySignatureModule: AntigravitySessionSignatureModule | null = null;
@@ -235,6 +258,36 @@ export function resetAntigravitySessionSignatureCachesForTests(): void {
   } catch {
     // best-effort only
   }
+}
+
+let quotaModulePromise: Promise<QuotaModule | null> | null = null;
+let cachedQuotaModuleError: string | null = null;
+
+async function importQuotaModule(): Promise<QuotaModule | null> {
+  if (!quotaModulePromise) {
+    quotaModulePromise = (async () => {
+      try {
+        const mod = await importCoreDist<QuotaModule>('quota/index');
+        cachedQuotaModuleError = null;
+        return mod;
+      } catch {
+        cachedQuotaModuleError = 'failed to import core module quota/index (resolveCoreModulePath or import failed)';
+        return null;
+      }
+    })();
+  }
+  return await quotaModulePromise;
+}
+
+export async function createCoreQuotaManager(options?: { store?: unknown }): Promise<unknown> {
+  const mod = await importQuotaModule();
+  const Ctor = mod?.QuotaManager;
+  if (typeof Ctor !== 'function') {
+    throw new Error(
+      `[llmswitch-bridge] core QuotaManager not available; please update @jsonstudio/llms${cachedQuotaModuleError ? ` (${cachedQuotaModuleError})` : ''}`
+    );
+  }
+  return new Ctor({ ...(options ?? {}) });
 }
 
 export function configureAntigravitySessionSignaturePersistence(input: { stateDir: string; fileName?: string } | null): void {
@@ -587,6 +640,33 @@ export async function getProviderErrorCenter(): Promise<ProviderErrorCenterExpor
   return cachedProviderErrorCenter;
 }
 
+type ProviderSuccessCenterExports = {
+  providerSuccessCenter?: {
+    emit(event: ProviderSuccessEvent): void;
+    subscribe?(handler: (event: ProviderSuccessEvent) => void): () => void;
+  };
+};
+
+let cachedProviderSuccessCenter:
+  | ProviderSuccessCenterExports['providerSuccessCenter']
+  | null = null;
+
+/**
+ * ProviderSuccessCenter 统一桥接入口。
+ * Host 通过本函数获取 success center，避免直接 import core 模块。
+ */
+export async function getProviderSuccessCenter(): Promise<ProviderSuccessCenterExports['providerSuccessCenter']> {
+  if (!cachedProviderSuccessCenter) {
+    const mod = await importCoreDist<ProviderSuccessCenterExports>('router/virtual-router/success-center');
+    const center = mod.providerSuccessCenter;
+    if (!center) {
+      throw new Error('[llmswitch-bridge] providerSuccessCenter not available');
+    }
+    cachedProviderSuccessCenter = center;
+  }
+  return cachedProviderSuccessCenter;
+}
+
 type StickySessionStoreExports = {
   loadRoutingInstructionStateSync?: (key: string) => unknown | null;
   saveRoutingInstructionStateAsync?: (key: string, state: unknown | null) => void;
@@ -701,6 +781,18 @@ export function getStatsCenterSafe(): StatsCenterLike {
   }
   cachedStatsCenter = null;
   return { recordProviderUsage: () => {} };
+}
+
+export function getLlmsStatsSnapshot(): unknown | null {
+  try {
+    const mod = requireCoreDist<{ getStatsCenter?: () => { getSnapshot?: () => unknown } }>('telemetry/stats-center');
+    const get = mod?.getStatsCenter;
+    const center = typeof get === 'function' ? get() : null;
+    const snap = center && typeof center === 'object' ? (center as any).getSnapshot : null;
+    return typeof snap === 'function' ? snap.call(center) : null;
+  } catch {
+    return null;
+  }
 }
 
 type VirtualRouterBootstrapModule = {
