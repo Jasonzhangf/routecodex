@@ -10,7 +10,7 @@ import path from 'path';
 import os from 'os';
 import type { UnknownObject } from '../../modules/pipeline/types/common-types.js';
 import { fetchIFlowUserInfo, mergeIFlowTokenData } from './iflow-userinfo-helper.js';
-import {} from './qwen-userinfo-helper.js';
+import { fetchQwenUserInfo, mergeQwenTokenData } from './qwen-userinfo-helper.js';
 import {
   fetchGeminiCLIUserInfo,
   fetchGeminiCLIProjects,
@@ -798,6 +798,29 @@ async function maybeEnrichToken(
   tokenData: UnknownObject,
   tokenFilePath?: string
 ): Promise<UnknownObject> {
+  if (providerType === 'qwen') {
+    const sanitized = sanitizeToken(tokenData) ?? (tokenData as StoredOAuthToken);
+    if (hasApiKeyField(sanitized)) {
+      return tokenData;
+    }
+    const accessToken = extractAccessToken(sanitized);
+    if (!accessToken) {
+      logOAuthDebug('[OAuth] Qwen: no access_token found in auth result, skipping API Key fetch');
+      return tokenData;
+    }
+    try {
+      const userInfo = await fetchQwenUserInfo(accessToken);
+      if (userInfo.apiKey) {
+        logOAuthDebug(`[OAuth] Qwen: successfully fetched API Key${userInfo.email ? ` for ${userInfo.email}` : ''}`);
+      } else {
+        logOAuthDebug('[OAuth] Qwen: user info fetched but apiKey missing; continuing with access_token only');
+      }
+      return mergeQwenTokenData(tokenData, userInfo) as unknown as UnknownObject;
+    } catch (error) {
+      console.error(`[OAuth] Qwen: failed to fetch user info - ${error instanceof Error ? error.message : String(error)}`);
+      return tokenData;
+    }
+  }
   if (providerType === 'iflow') {
     const accessToken = extractAccessToken(sanitizeToken(tokenData) ?? null);
     if (!accessToken) {
@@ -1078,6 +1101,22 @@ export async function ensureValidOAuthToken(
     const strategy = createStrategy(providerType, overrides, tokenFilePath);
     let token = await readTokenFromFile(tokenFilePath);
     const hadExistingTokenFile = token !== null;
+
+    // Qwen: ensure api_key is present even when access_token is still valid.
+    // Qwen OpenAI-compatible endpoints may require api_key (not access_token) for business requests.
+    if (providerType === 'qwen' && token && !hasApiKeyField(token)) {
+      try {
+        const enriched = await maybeEnrichToken(providerType, token as UnknownObject);
+        if (enriched && typeof strategy.saveToken === 'function') {
+          const prepared = await prepareTokenForStorage(providerType, tokenFilePath, enriched);
+          await strategy.saveToken(prepared);
+          token = sanitizeToken(enriched) ?? (enriched as StoredOAuthToken);
+        }
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error(`[OAuth] Qwen: failed to enrich existing token with api_key - ${msg}`);
+      }
+    }
 
     // Gemini CLI family: if existing token lacks project metadata, try to enrich it without
     // forcing a full OAuth flow. Use current access_token to fetch userinfo/projects and write back.
