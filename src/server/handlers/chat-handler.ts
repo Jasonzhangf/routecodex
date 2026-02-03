@@ -80,7 +80,7 @@ export async function handleChatCompletions(req: Request, res: Response, ctx: Ha
       }
     });
     logRequestComplete(entryEndpoint, requestId, result.status ?? 200);
-    sendPipelineResponse(res, result, requestId, { forceSSE: wantsSSE });
+    sendPipelineResponse(res, result, requestId, { forceSSE: wantsSSE, entryEndpoint });
   } catch (error: unknown) {
     logRequestError(entryEndpoint, requestId, error);
     if (res.headersSent) {

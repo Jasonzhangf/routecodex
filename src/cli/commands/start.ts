@@ -26,6 +26,7 @@ type LoggerLike = {
 export type StartCommandOptions = {
   config?: string;
   port?: string;
+  mode?: string;
   quotaRouting?: unknown;
   logLevel?: string;
   codex?: boolean;
@@ -77,12 +78,29 @@ function parseBoolish(value: unknown): boolean | undefined {
   return undefined;
 }
 
+type RccRunMode = 'router' | 'analysis' | 'server';
+
+function normalizeRunMode(value: unknown): RccRunMode | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+  if (normalized === 'router' || normalized === 'analysis' || normalized === 'server') {
+    return normalized;
+  }
+  return null;
+}
+
 export function createStartCommand(program: Command, ctx: StartCommandContext): void {
   program
     .command('start')
     .description('Start the RouteCodex server')
     .option('-c, --config <config>', 'Configuration file path')
     .option('-p, --port <port>', 'RouteCodex server port (dev package only; overrides env/config)')
+    .option('--mode <mode>', 'Run mode (router|analysis|server). analysis => router + force snapshots', 'router')
     .option('--quota-routing <mode>', 'Quota routing admission control (on|off). off => do not remove providers from pool based on quota')
     .option('--log-level <level>', 'Log level (debug, info, warn, error)', 'info')
     .option('--codex', 'Use Codex system prompt (tools unchanged)')
@@ -103,6 +121,15 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
       const tmp = ctx.tmpdir ?? (() => tmpdir());
 
       try {
+        const runMode = normalizeRunMode(options.mode) ?? 'router';
+        ctx.env.RCC_MODE = runMode;
+        ctx.env.ROUTECODEX_MODE = runMode;
+
+        if (options.snapOff && runMode === 'analysis') {
+          spinner.fail('Flags --snap-off and --mode analysis are mutually exclusive');
+          ctx.exit(1);
+        }
+
         // Validate system prompt replacement flags
         if (options.codex && options.claude) {
           spinner.fail('Flags --codex and --claude are mutually exclusive');
@@ -118,10 +145,16 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
           spinner.fail('Flags --snap and --snap-off are mutually exclusive');
           ctx.exit(1);
         }
-        if (options.snap) {
+        const forceSnapshots = runMode === 'analysis' || options.snap === true;
+        if (forceSnapshots) {
           ctx.env.ROUTECODEX_SNAPSHOT = '1';
+          ctx.env.ROUTECODEX_HUB_SNAPSHOTS = ctx.env.ROUTECODEX_HUB_SNAPSHOTS || '1';
+          // Analysis mode should be able to capture streaming payloads even in release builds.
+          // Keep this opt-in via --mode analysis (or explicit env override).
+          ctx.env.ROUTECODEX_CAPTURE_STREAM_SNAPSHOTS = ctx.env.ROUTECODEX_CAPTURE_STREAM_SNAPSHOTS || '1';
         } else if (options.snapOff) {
           ctx.env.ROUTECODEX_SNAPSHOT = '0';
+          ctx.env.ROUTECODEX_HUB_SNAPSHOTS = ctx.env.ROUTECODEX_HUB_SNAPSHOTS || '0';
         }
         if (options.verboseErrors && options.quietErrors) {
           spinner.fail('Flags --verbose-errors and --quiet-errors are mutually exclusive');

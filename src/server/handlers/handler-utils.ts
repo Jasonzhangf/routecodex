@@ -1,4 +1,4 @@
-import { Readable } from 'node:stream';
+import { Readable, PassThrough } from 'node:stream';
 import type { ReadableStream as NodeReadableStream } from 'node:stream/web';
 import type { Response } from 'express';
 import type { IncomingHttpHeaders } from 'http';
@@ -13,6 +13,7 @@ import { reportRouteError } from '../../error-handling/route-error-hub.js';
 import { formatErrorForConsole } from '../../utils/log-helpers.js';
 import { DEFAULT_TIMEOUTS } from '../../constants/index.js';
 import { stripInternalKeysDeep } from '../../utils/strip-internal-keys.js';
+import { writeServerSnapshot } from '../../utils/snapshot-writer.js';
 import {
   generateRequestIdentifiers,
   resolveEffectiveRequestId
@@ -36,6 +37,7 @@ const CLIENT_HEADER_DENYLIST = new Set([
 
 interface DispatchOptions {
   forceSSE?: boolean;
+  entryEndpoint?: string;
 }
 
 type RequestLogMeta = Record<string, unknown> | undefined;
@@ -58,6 +60,18 @@ const SHOULD_LOG_HTTP_EVENTS = buildInfo.mode !== 'release'
 
 function formatRequestId(value?: string): string {
   return resolveEffectiveRequestId(value);
+}
+
+function isAnalysisModeEnabled(): boolean {
+  const mode = String(process.env.ROUTECODEX_MODE || process.env.RCC_MODE || '').trim().toLowerCase();
+  if (mode === 'analysis') {
+    return true;
+  }
+  const flag = String(process.env.ROUTECODEX_ANALYSIS || process.env.RCC_ANALYSIS || '').trim().toLowerCase();
+  if (flag === '1' || flag === 'true') {
+    return true;
+  }
+  return false;
 }
 
 export function nextRequestIdentifiers(
@@ -85,9 +99,21 @@ export function sendPipelineResponse(
   const requestLabel = formatRequestId(requestId);
   const forceSSE = options?.forceSSE === true;
   const expectsStream = hasSsePayload(body);
+  const entryEndpoint = typeof options?.entryEndpoint === 'string' && options.entryEndpoint.trim()
+    ? options.entryEndpoint.trim()
+    : undefined;
+  const captureClientResponse = isAnalysisModeEnabled();
 
   if (forceSSE && !expectsStream) {
     logPipelineStage('response.sse.missing', requestLabel, { status });
+    if (captureClientResponse) {
+      void writeServerSnapshot({
+        phase: 'client-response.error',
+        requestId: requestLabel,
+        entryEndpoint,
+        data: { status: 502, error: { message: 'SSE stream missing from pipeline result', code: 'sse_bridge_error' } }
+      }).catch(() => {});
+    }
     res.status(502).json({ error: { message: 'SSE stream missing from pipeline result', code: 'sse_bridge_error' } });
     return;
   }
@@ -99,9 +125,25 @@ export function sendPipelineResponse(
     const stream = toNodeReadable(streamSource);
     if (!stream) {
       logPipelineStage('response.sse.missing', requestLabel, {});
+      if (captureClientResponse) {
+        void writeServerSnapshot({
+          phase: 'client-response.error',
+          requestId: requestLabel,
+          entryEndpoint,
+          data: { status: 502, error: { message: 'SSE stream missing from pipeline result', code: 'sse_bridge_error' } }
+        }).catch(() => {});
+      }
       res.status(502).json({ error: { message: 'SSE stream missing from pipeline result', code: 'sse_bridge_error' } });
       return;
     }
+    const outboundStream = captureClientResponse
+      ? maybeAttachClientSseSnapshotStream(stream, {
+        requestId: requestLabel,
+        entryEndpoint,
+        status,
+        headers: result.headers
+      })
+      : stream;
     applyHeaders(res, result.headers, true);
     res.status(status);
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
@@ -257,13 +299,21 @@ export function sendPipelineResponse(
     });
     res.on('close', cleanup);
     res.on('finish', cleanup);
-    stream.pipe(res);
+    outboundStream.pipe(res);
     return;
   }
 
   applyHeaders(res, result.headers, false);
   if (body === undefined || body === null) {
     logPipelineStage('response.json.empty', requestLabel, { status });
+    if (captureClientResponse) {
+      void writeServerSnapshot({
+        phase: 'client-response',
+        requestId: requestLabel,
+        entryEndpoint,
+        data: { status, headers: result.headers, body: null }
+      }).catch(() => {});
+    }
     res.status(status).end();
     logPipelineStage('response.json.completed', requestLabel, { status });
     return;
@@ -272,6 +322,14 @@ export function sendPipelineResponse(
   // E1 boundary rule: internal env variables use "__*" and must never reach client payloads.
   // Preserve the SSE carrier key (it is handled above and never JSON-encoded).
   const sanitized = stripInternalKeysDeep(body, { preserveKeys: new Set(['__sse_responses']) });
+  if (captureClientResponse) {
+    void writeServerSnapshot({
+      phase: 'client-response',
+      requestId: requestLabel,
+      entryEndpoint,
+      data: { status, headers: result.headers, body: sanitized }
+    }).catch(() => {});
+  }
   res.status(status).json(sanitized);
   logPipelineStage('response.json.completed', requestLabel, { status });
 }
@@ -386,7 +444,23 @@ export async function respondWithPipelineError(
     } catch {
       // ignore end errors
     }
+    if (isAnalysisModeEnabled()) {
+      void writeServerSnapshot({
+        phase: 'client-response.error',
+        requestId: effectiveRequestId,
+        entryEndpoint,
+        data: { mode: 'sse', status: mapped.status, payload }
+      }).catch(() => {});
+    }
     return;
+  }
+  if (isAnalysisModeEnabled()) {
+    void writeServerSnapshot({
+      phase: 'client-response.error',
+      requestId: effectiveRequestId,
+      entryEndpoint,
+      data: { mode: 'json', status: mapped.status, body: mapped.body }
+    }).catch(() => {});
   }
   res.status(mapped.status).json(mapped.body);
 }
@@ -438,6 +512,149 @@ function toNodeReadable(streamLike: unknown): Readable | null {
     return Readable.from(streamLike as AsyncIterable<unknown>);
   }
   return null;
+}
+
+function shouldCaptureClientStreamSnapshots(): boolean {
+  if (!isAnalysisModeEnabled()) {
+    return false;
+  }
+  const flag = String(process.env.ROUTECODEX_CAPTURE_STREAM_SNAPSHOTS || '').trim().toLowerCase();
+  if (flag === '1' || flag === 'true') {
+    return true;
+  }
+  if (flag === '0' || flag === 'false') {
+    return false;
+  }
+  return false;
+}
+
+function resolveClientStreamSnapshotMaxBytes(): number {
+  const raw = String(
+    process.env.ROUTECODEX_CLIENT_STREAM_SNAPSHOT_MAX_BYTES ||
+      process.env.RCC_CLIENT_STREAM_SNAPSHOT_MAX_BYTES ||
+      '2000000'
+  ).trim();
+  const parsed = Number(raw);
+  if (!raw) {
+    return 2_000_000;
+  }
+  if (Number.isFinite(parsed) && parsed >= 0) {
+    return Math.floor(parsed);
+  }
+  return 2_000_000;
+}
+
+function maybeAttachClientSseSnapshotStream(
+  stream: NodeJS.ReadableStream,
+  options: {
+    requestId: string;
+    entryEndpoint?: string;
+    status: number;
+    headers?: Record<string, string>;
+  }
+): NodeJS.ReadableStream {
+  if (!shouldCaptureClientStreamSnapshots()) {
+    return stream;
+  }
+  const maxBytes = resolveClientStreamSnapshotMaxBytes();
+  if (maxBytes <= 0) {
+    return stream;
+  }
+
+  const tee = new PassThrough();
+  const capture = new PassThrough();
+
+  stream.pipe(tee);
+  stream.pipe(capture);
+
+  const chunks: Buffer[] = [];
+  let size = 0;
+  let truncated = false;
+  let flushed = false;
+
+  const toBuffer = (chunk: unknown): Buffer => {
+    if (Buffer.isBuffer(chunk)) {
+      return chunk;
+    }
+    if (chunk instanceof Uint8Array) {
+      return Buffer.from(chunk);
+    }
+    if (typeof chunk === 'string') {
+      return Buffer.from(chunk, 'utf8');
+    }
+    if (chunk === undefined || chunk === null) {
+      return Buffer.alloc(0);
+    }
+    return Buffer.from(String(chunk), 'utf8');
+  };
+
+  const flushSnapshot = (error?: unknown) => {
+    if (flushed) {
+      return;
+    }
+    flushed = true;
+    try {
+      stream.unpipe(capture);
+    } catch {
+      /* ignore */
+    }
+    capture.removeAllListeners();
+    const raw = chunks.length ? Buffer.concat(chunks).toString('utf8') : '';
+    const payload: Record<string, unknown> = {
+      mode: 'sse',
+      status: options.status,
+      headers: options.headers,
+      raw: raw || undefined,
+      truncated: truncated || undefined,
+      maxBytes
+    };
+    if (error) {
+      payload.error = error instanceof Error ? error.message : String(error);
+    }
+    void writeServerSnapshot({
+      phase: 'client-response',
+      requestId: options.requestId,
+      entryEndpoint: options.entryEndpoint,
+      data: payload
+    }).catch(() => {});
+  };
+
+  capture.on('data', (chunk: unknown) => {
+    const buf = toBuffer(chunk);
+    if (buf.length === 0) {
+      return;
+    }
+    if (truncated || size >= maxBytes) {
+      truncated = true;
+      return;
+    }
+    const remaining = maxBytes - size;
+    if (buf.length <= remaining) {
+      chunks.push(buf);
+      size += buf.length;
+      return;
+    }
+    if (remaining > 0) {
+      chunks.push(buf.slice(0, remaining));
+      size += remaining;
+    }
+    truncated = true;
+  });
+
+  capture.on('end', () => flushSnapshot());
+  capture.on('close', () => flushSnapshot());
+  capture.on('error', (error) => flushSnapshot(error));
+  stream.on('error', (error) => {
+    flushSnapshot(error);
+    try {
+      tee.destroy(error as Error);
+    } catch {
+      tee.destroy();
+    }
+  });
+  tee.on('error', (error) => flushSnapshot(error));
+
+  return tee;
 }
 
 export function captureClientHeaders(headers: IncomingHttpHeaders | undefined): Record<string, string> {

@@ -134,7 +134,7 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
       }
     });
     logRequestComplete(entryEndpoint, requestId, result.status ?? 200);
-    sendPipelineResponse(res, result, requestId, { forceSSE: wantsStream });
+    sendPipelineResponse(res, result, requestId, { forceSSE: wantsStream, entryEndpoint });
   } catch (error: unknown) {
     logRequestError(entryEndpoint, requestId, error);
     if (res.headersSent) {
