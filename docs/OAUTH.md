@@ -30,7 +30,10 @@
 "auth": { "type": "qwen-oauth", "tokenFile": "default" }
 ```
 
-当前推荐 Qwen 用 alias：`default`。它会自动匹配 `~/.routecodex/auth/qwen-oauth-*-default.json` 中 seq 最新的那份。
+当前推荐 Qwen 用 alias：`default`。
+
+- 如果存在 `~/.routecodex/auth/qwen-oauth-1-default.json`，会优先使用它（固定文件名，避免“我刚 reauth 但 server 读的是另一个 seq”的坑）
+- 否则会回退到 `~/.routecodex/auth/qwen-oauth-*-default.json` 中 seq 最新的那份
 
 ## 2) 认证（授权登录）
 

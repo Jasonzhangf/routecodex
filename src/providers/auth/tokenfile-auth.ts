@@ -227,6 +227,17 @@ export class TokenFileAuthProvider implements IAuthProvider {
             : '';
         const providerId = providerIdRaw ? providerIdRaw.toLowerCase() : '';
         if (providerId) {
+          // Qwen: pin tokenFile="default" to a stable file name when present, to avoid "I reauthed but server reads another seq".
+          if (providerId === 'qwen' && tf === 'default') {
+            const pinned = path.join(resolveAuthDir(), 'qwen-oauth-1-default.json');
+            try {
+              if (fs.existsSync(pinned)) {
+                return pinned;
+              }
+            } catch {
+              // ignore
+            }
+          }
           const match = pickLatestTokenFile({ providerPrefix: providerId, alias: tf });
           if (match) {
             return match;

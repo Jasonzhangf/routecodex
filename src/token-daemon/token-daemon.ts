@@ -690,7 +690,7 @@ function defaultTokenFilePath(provider: OAuthProviderId): string {
     return path.join(home, '.iflow', 'oauth_creds.json');
   }
   if (provider === 'qwen') {
-    return path.join(home, '.routecodex', 'auth', 'qwen-oauth.json');
+    return path.join(home, '.routecodex', 'auth', 'qwen-oauth-1-default.json');
   }
   if (GEMINI_PROVIDER_IDS.has(provider)) {
     const file = provider === 'antigravity' ? 'antigravity-oauth.json' : 'gemini-oauth.json';

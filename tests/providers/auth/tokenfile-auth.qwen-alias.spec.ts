@@ -10,6 +10,36 @@ function writeJson(filePath: string, value: unknown): void {
 }
 
 describe('TokenFileAuthProvider (qwen) resolves tokenFile alias and auth dir fallbacks', () => {
+  test('tokenFile="default" prefers pinned qwen-oauth-1-default.json when multiple exist', async () => {
+    const prevHome = process.env.HOME;
+    const prevAuthDir = process.env.ROUTECODEX_AUTH_DIR;
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-tokenfile-qwen-'));
+    process.env.HOME = tmpHome;
+    delete process.env.ROUTECODEX_AUTH_DIR;
+
+    // both exist, but "default" should prefer the pinned seq=1 file
+    const token1 = path.join(tmpHome, '.routecodex', 'auth', 'qwen-oauth-1-default.json');
+    const token2 = path.join(tmpHome, '.routecodex', 'auth', 'qwen-oauth-2-default.json');
+    writeJson(token1, { access_token: 'access-1', expires_at: Date.now() + 60 * 60 * 1000 });
+    writeJson(token2, { access_token: 'access-2', expires_at: Date.now() + 60 * 60 * 1000 });
+
+    const provider = new TokenFileAuthProvider({ type: 'qwen-oauth', tokenFile: 'default', oauthProviderId: 'qwen' } as any);
+    await provider.initialize();
+    expect(provider.buildHeaders()).toHaveProperty('Authorization', 'Bearer access-1');
+
+    process.env.HOME = prevHome;
+    if (prevAuthDir === undefined) {
+      delete process.env.ROUTECODEX_AUTH_DIR;
+    } else {
+      process.env.ROUTECODEX_AUTH_DIR = prevAuthDir;
+    }
+    try {
+      fs.rmSync(tmpHome, { recursive: true, force: true });
+    } catch {
+      // ignore
+    }
+  });
+
   test('tokenFile="default" resolves ~/.routecodex/auth/qwen-oauth-<seq>-default.json', async () => {
     const prevHome = process.env.HOME;
     const prevAuthDir = process.env.ROUTECODEX_AUTH_DIR;
