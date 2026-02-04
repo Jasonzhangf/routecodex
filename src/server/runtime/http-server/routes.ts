@@ -17,6 +17,7 @@ interface RouteOptions {
   config: ServerConfigV2;
   buildHandlerContext: () => HandlerContext;
   getPipelineReady: () => boolean;
+  waitForPipelineReady?: () => Promise<void>;
   handleError: (error: Error, context: string) => Promise<void>;
   getHealthSnapshot?: () => unknown | null;
   getRoutingState?: (sessionId: string) => unknown | null;
@@ -69,6 +70,7 @@ export function registerHttpRoutes(options: RouteOptions): void {
     config,
     buildHandlerContext,
     getPipelineReady,
+    waitForPipelineReady,
     getHealthSnapshot,
     getRoutingState,
     getVirtualRouterArtifacts
@@ -242,16 +244,40 @@ export function registerHttpRoutes(options: RouteOptions): void {
     }
   });
 
+  const holdUntilReady = async (res: Response): Promise<boolean> => {
+    if (typeof waitForPipelineReady !== 'function') {
+      return true;
+    }
+    try {
+      await waitForPipelineReady();
+      return true;
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(503).json({
+        error: {
+          message: `Server is still starting: ${message}`,
+          type: 'server_starting',
+          code: 'server_starting'
+        }
+      });
+      return false;
+    }
+  };
+
   app.post('/v1/chat/completions', async (req, res) => {
+    if (!(await holdUntilReady(res))) {return;}
     await handleChatCompletions(req, res, buildHandlerContext());
   });
   app.post('/v1/messages', async (req, res) => {
+    if (!(await holdUntilReady(res))) {return;}
     await handleMessages(req, res, buildHandlerContext());
   });
   app.post('/v1/responses', async (req, res) => {
+    if (!(await holdUntilReady(res))) {return;}
     await handleResponses(req, res, buildHandlerContext());
   });
   app.post('/v1/responses/:id/submit_tool_outputs', async (req, res) => {
+    if (!(await holdUntilReady(res))) {return;}
     await handleResponses(req, res, buildHandlerContext(), {
       entryEndpoint: '/v1/responses.submit_tool_outputs',
       forceStream: true,

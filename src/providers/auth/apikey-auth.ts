@@ -34,9 +34,14 @@ export class ApiKeyAuthProvider implements IAuthProvider {
    */
   async initialize(): Promise<void> {
     try {
-      // 验证API Key格式
-      if (!this.config.apiKey || typeof this.config.apiKey !== 'string') {
-        throw new Error('Invalid API key: must be a non-empty string');
+      // Local no-auth: allow empty API key (e.g., LM Studio / localhost endpoints).
+      if (typeof this.config.apiKey !== 'string') {
+        throw new Error('Invalid API key: must be a string');
+      }
+      if (!this.config.apiKey.trim()) {
+        this.isInitialized = true;
+        this.updateStatus(true, true, 'API key is empty (no-auth mode)');
+        return;
       }
 
       // 验证API Key基本格式
@@ -59,6 +64,9 @@ export class ApiKeyAuthProvider implements IAuthProvider {
   buildHeaders(): Record<string, string> {
     if (!this.isInitialized) {
       throw new Error('ApiKeyAuthProvider is not initialized');
+    }
+    if (!this.config.apiKey.trim()) {
+      return {};
     }
 
     const headers: Record<string, string> = {};
@@ -87,6 +95,10 @@ export class ApiKeyAuthProvider implements IAuthProvider {
     }
 
     try {
+      if (!this.config.apiKey.trim()) {
+        this.updateStatus(true, true, 'No-auth credentials validated');
+        return true;
+      }
       // 基本验证：检查API key是否仍然有效
       const isValid = this.config.apiKey.length >= 10;
 

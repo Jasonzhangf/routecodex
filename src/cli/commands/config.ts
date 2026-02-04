@@ -102,7 +102,13 @@ Examples:
                 parseProvidersArg(options.providers) ??
                 (typeof options.template === 'string' && options.template.trim() ? [options.template.trim()] : undefined);
 
-              const promptBundle = providersFromArg ? null : buildInteractivePrompt(ctx);
+              // `config init` is intentionally non-interactive (use `${bin} init` for guided generation).
+              // This keeps CLI behavior deterministic in CI/tests and avoids hanging on readline prompts.
+              if (!providersFromArg || providersFromArg.length === 0) {
+                spinner.fail('Failed to initialize configuration');
+                ctx.logger.error(`Non-interactive init requires --providers or --template. Supported: ${supported}`);
+                return;
+              }
               const result = await initializeConfigV1(
                 {
                   fsImpl,
@@ -119,16 +125,12 @@ Examples:
                   providers: providersFromArg,
                   defaultProvider: options.defaultProvider
                 },
-                promptBundle ? { prompt: promptBundle.prompt } : undefined
+                undefined
               );
-              try { promptBundle?.close(); } catch { /* ignore */ }
 
               if (!result.ok) {
                 spinner.fail('Failed to initialize configuration');
                 ctx.logger.error(result.message);
-                if (!providersFromArg && !promptBundle) {
-                  ctx.logger.error(`Non-interactive init requires --providers or --template. Supported: ${supported}`);
-                }
                 return;
               }
 

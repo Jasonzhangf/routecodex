@@ -24,7 +24,10 @@
   "id": "openai",
   "type": "openai",
   "baseURL": "https://api.openai.com/v1",
-  "auth": { "type": "apikey", "apiKey": "YOUR_API_KEY_HERE" }
+  // 推荐：用环境变量引用，config 可共享/可进 repo
+  "auth": { "type": "apikey", "apiKey": "${OPENAI_API_KEY}" }
+  // 兼容：也支持直接明文写入（不推荐）
+  // "auth": { "type": "apikey", "apiKey": "sk-..." }
 }
 ```
 
@@ -38,7 +41,7 @@
   "type": "openai",
   "baseURL": "https://portal.qwen.ai/v1",
   "compatibilityProfile": "chat:qwen",
-  "auth": { "type": "qwen-oauth", "tokenFile": "~/.routecodex/auth/qwen-oauth.json" }
+  "auth": { "type": "qwen-oauth", "tokenFile": "default" }
 }
 ```
 
@@ -49,7 +52,6 @@
   "id": "tab",
   "type": "responses",
   "baseURL": "https://api.tabcode.cc/openai",
-  "auth": { "type": "apikey", "apiKey": "YOUR_API_KEY_HERE" }
+  "auth": { "type": "apikey", "apiKey": "${TAB_API_KEY}" }
 }
 ```
-

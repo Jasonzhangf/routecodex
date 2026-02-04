@@ -311,12 +311,32 @@ function extractAccessToken(token: StoredOAuthToken | null): string | undefined 
   return undefined;
 }
 
+function extractApiKey(token: StoredOAuthToken | null): string | undefined {
+  if (!token) {
+    return undefined;
+  }
+  const candidate = token.apiKey ?? token.api_key;
+  return hasNonEmptyString(candidate) ? String(candidate) : undefined;
+}
+
 function hasApiKeyField(token: StoredOAuthToken | null): boolean {
   if (!token) {
     return false;
   }
-  const candidate = token.apiKey ?? token.api_key;
-  return hasNonEmptyString(candidate);
+  return hasNonEmptyString(token.apiKey ?? token.api_key);
+}
+
+/**
+ * Qwen: api_key 可能被降级为 access_token（userInfo 404 时的兼容写法），这种情况不应被视为“稳定 API Key”。
+ * 只有当 api_key 存在且与 access_token 不同（或缺失 access_token）时，才认为可以长期复用并跳过刷新。
+ */
+function hasStableQwenApiKey(token: StoredOAuthToken | null): boolean {
+  const apiKey = extractApiKey(token);
+  if (!apiKey) {
+    return false;
+  }
+  const access = extractAccessToken(token);
+  return !access || apiKey !== access;
 }
 
 function hasAccessToken(token: StoredOAuthToken | null): boolean {
@@ -531,7 +551,8 @@ function evaluateTokenState(token: StoredOAuthToken | null, providerType: string
   if (pt === 'iflow') {
     validAccess = hasApiKey || (!isExpiredOrNear && hasAccess);
   } else if (pt === 'qwen') {
-    validAccess = (hasApiKey || hasAccess) && !isExpiredOrNear;
+    // Qwen: 当获取到稳定 api_key 后，可跳过 refresh/reauth；否则仍依赖 access_token 的有效期。
+    validAccess = hasStableQwenApiKey(token) || (!isExpiredOrNear && (hasAccess || hasApiKey));
   } else {
     validAccess = (hasApiKey || hasAccess) && !isExpiredOrNear;
   }
@@ -800,7 +821,7 @@ async function maybeEnrichToken(
 ): Promise<UnknownObject> {
   if (providerType === 'qwen') {
     const sanitized = sanitizeToken(tokenData) ?? (tokenData as StoredOAuthToken);
-    if (hasApiKeyField(sanitized)) {
+    if (hasStableQwenApiKey(sanitized)) {
       return tokenData;
     }
     const accessToken = extractAccessToken(sanitized);
@@ -817,7 +838,13 @@ async function maybeEnrichToken(
       }
       return mergeQwenTokenData(tokenData, userInfo) as unknown as UnknownObject;
     } catch (error) {
-      console.error(`[OAuth] Qwen: failed to fetch user info - ${error instanceof Error ? error.message : String(error)}`);
+      const msg = error instanceof Error ? error.message : String(error);
+      // If userInfo endpoint is unavailable (404), treat access_token as api_key to avoid repeated lookups.
+      if (/\bHTTP\s+404\b/i.test(msg) || /\bnot\s+found\b/i.test(msg)) {
+        logOAuthDebug('[OAuth] Qwen: userInfo endpoint unavailable (404); using access_token as api_key fallback');
+        return mergeQwenTokenData(tokenData, { apiKey: accessToken }) as unknown as UnknownObject;
+      }
+      logOAuthDebug(`[OAuth] Qwen: failed to fetch user info - ${msg}`);
       return tokenData;
     }
   }
@@ -1104,7 +1131,7 @@ export async function ensureValidOAuthToken(
 
     // Qwen: ensure api_key is present even when access_token is still valid.
     // Qwen OpenAI-compatible endpoints may require api_key (not access_token) for business requests.
-    if (providerType === 'qwen' && token && !hasApiKeyField(token)) {
+    if (providerType === 'qwen' && token && !hasStableQwenApiKey(token)) {
       try {
         const enriched = await maybeEnrichToken(providerType, token as UnknownObject);
         if (enriched && typeof strategy.saveToken === 'function') {
@@ -1228,55 +1255,7 @@ export async function handleUpstreamInvalidOAuthToken(
 ): Promise<boolean> {
   const pt = providerType.toLowerCase();
   try {
-    const msg = upstreamError instanceof Error ? upstreamError.message : String(upstreamError || '');
-    const lower = msg.toLowerCase();
-
-    let statusCode: number | undefined;
-    try {
-      const anyErr = upstreamError as { statusCode?: unknown; status?: unknown } | null | undefined;
-      if (anyErr) {
-        if (typeof anyErr.statusCode === 'number') {
-          statusCode = anyErr.statusCode;
-        } else if (typeof anyErr.status === 'number') {
-          statusCode = anyErr.status;
-        }
-      }
-    } catch {
-      // best-effort statusCode extraction
-    }
-
-    // 基本令牌失效判定：只看典型 OAuth 文案
-    let looksInvalid =
-      /invalid[_-]?token|invalid[_-]?grant|unauthenticated|unauthorized|token has expired|access token expired/.test(
-        lower
-      );
-
-    // 对于 iflow / qwen，保留基于 401/403 的宽松判定，避免破坏既有行为。
-    if (!looksInvalid && (pt === 'iflow' || pt === 'qwen')) {
-      if (
-        statusCode === 401 ||
-        statusCode === 403 ||
-        /\b401\b|\b403\b|40308/.test(msg)
-      ) {
-        looksInvalid = true;
-      }
-    }
-
-    // 对于 gemini / gemini-cli / antigravity，排除纯服务开关类错误，
-    // 但如果明确提示缺少 project_id 或需要重新 OAuth，则视为令牌失效。
-    if (pt === 'gemini' || pt === 'gemini-cli' || pt === 'antigravity') {
-      if (/service_disabled/.test(lower) || lower.includes('has not been used in project')) {
-        looksInvalid = false;
-      }
-      if (
-        lower.includes('project_id not found in token') ||
-        lower.includes('please authenticate with google oauth first')
-      ) {
-        looksInvalid = true;
-      }
-    }
-
-    if (!looksInvalid) {
+    if (!shouldTriggerInteractiveOAuthRepair(providerType, upstreamError)) {
       return false;
     }
     const opts: EnsureOpts = {
@@ -1291,6 +1270,76 @@ export async function handleUpstreamInvalidOAuthToken(
   } catch {
     return false;
   }
+}
+
+export function shouldTriggerInteractiveOAuthRepair(providerType: string, upstreamError: unknown): boolean {
+  const pt = providerType.toLowerCase();
+  const msg =
+    upstreamError instanceof Error
+      ? upstreamError.message
+      : upstreamError && typeof upstreamError === 'object' && typeof (upstreamError as any).message === 'string'
+        ? String((upstreamError as any).message)
+        : String(upstreamError || '');
+  const lower = msg.toLowerCase();
+
+  let statusCode: number | undefined;
+  try {
+    const anyErr = upstreamError as { statusCode?: unknown; status?: unknown } | null | undefined;
+    if (anyErr) {
+      if (typeof anyErr.statusCode === 'number') {
+        statusCode = anyErr.statusCode;
+      } else if (typeof anyErr.status === 'number') {
+        statusCode = anyErr.status;
+      }
+    }
+  } catch {
+    // best-effort statusCode extraction
+  }
+
+  // 基本令牌失效判定：只看典型 OAuth 文案
+  let looksInvalid =
+    /invalid[_-]?token|invalid[_-]?grant|unauthenticated|unauthorized|token has expired|access token expired/.test(
+      lower
+    );
+
+  // 对于 iflow / qwen，保留基于 401/403 的宽松判定，避免破坏既有行为。
+  if (!looksInvalid && (pt === 'iflow' || pt === 'qwen')) {
+    if (
+      statusCode === 401 ||
+      statusCode === 403 ||
+      /\b401\b|\b403\b|40308/.test(msg)
+    ) {
+      looksInvalid = true;
+    }
+  }
+
+  // 对于 gemini / gemini-cli / antigravity，排除纯服务开关类错误，
+  // 但如果明确提示缺少 project_id 或需要重新 OAuth，则视为令牌失效。
+  if (pt === 'gemini' || pt === 'gemini-cli' || pt === 'antigravity') {
+    if (/service_disabled/.test(lower) || lower.includes('has not been used in project')) {
+      looksInvalid = false;
+    }
+    if (
+      lower.includes('project_id not found in token') ||
+      lower.includes('please authenticate with google oauth first')
+    ) {
+      looksInvalid = true;
+    }
+    // Antigravity/Gemini may return 403 "verify your account" / validation_required.
+    // This is not a token-expired case, but it still requires an interactive OAuth/browser flow
+    // to unblock the account. Treat it as "needs interactive reauth".
+    if (
+      statusCode === 403 &&
+      (lower.includes('verify your account') ||
+        lower.includes('validation_required') ||
+        lower.includes('accounts.google.com/signin/continue') ||
+        lower.includes('support.google.com/accounts?p=al_alert'))
+    ) {
+      looksInvalid = true;
+    }
+  }
+
+  return looksInvalid;
 }
 
 async function inferIflowClientCredsFromLog(): Promise<{ clientId?: string; clientSecret?: string } | null> {

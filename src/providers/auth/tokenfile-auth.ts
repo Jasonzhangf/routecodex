@@ -29,6 +29,60 @@ function isTokenPayload(value: unknown): value is TokenPayload {
   return typeof value === 'object' && value !== null;
 }
 
+function resolveAuthDir(): string {
+  const override = String(process.env.ROUTECODEX_AUTH_DIR || process.env.RCC_AUTH_DIR || '').trim();
+  if (override) {
+    return path.isAbsolute(override) ? override : path.resolve(override);
+  }
+  const home = String(process.env.HOME || '').trim();
+  return path.join(home, '.routecodex', 'auth');
+}
+
+const TOKEN_FILE_PATTERN = /^(.+)-oauth-(\d+)(?:-(.+))?\.json$/i;
+
+function pickLatestTokenFile(opts: { providerPrefix: string; alias?: string }): string | null {
+  const provider = opts.providerPrefix.trim().toLowerCase();
+  const alias = (opts.alias || '').trim() || undefined;
+  if (!provider) {
+    return null;
+  }
+  const authDir = resolveAuthDir();
+  try {
+    const entries = fs.readdirSync(authDir);
+    let best: { seq: number; file: string } | null = null;
+    for (const entry of entries) {
+      if (!entry.endsWith('.json')) {
+        continue;
+      }
+      if (entry.includes('.bak')) {
+        continue;
+      }
+      const match = entry.match(TOKEN_FILE_PATTERN);
+      if (!match) {
+        continue;
+      }
+      const [, prefix, seqRaw, entryAliasRaw] = match;
+      if (String(prefix || '').trim().toLowerCase() !== provider) {
+        continue;
+      }
+      const seq = parseInt(String(seqRaw || ''), 10);
+      if (!Number.isFinite(seq) || seq <= 0) {
+        continue;
+      }
+      const entryAlias = (String(entryAliasRaw || '').trim() || 'default');
+      if (alias && entryAlias !== alias) {
+        continue;
+      }
+      if (!best || seq > best.seq) {
+        best = { seq, file: path.join(authDir, entry) };
+      }
+    }
+    return best?.file ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export class TokenFileAuthProvider implements IAuthProvider {
   readonly type = 'oauth' as const;
 
@@ -45,7 +99,6 @@ export class TokenFileAuthProvider implements IAuthProvider {
   async initialize(): Promise<void> {
     const file = this.resolveTokenFile();
     if (!file) {
-      // Lenient: allow initialize without token; ensureValidOAuthToken may create one later
       this.token = null;
       this.isInitialized = true;
       this.updateStatus(false, false, 'token_file_missing');
@@ -70,29 +123,53 @@ export class TokenFileAuthProvider implements IAuthProvider {
       if (latest) {
         this.token = latest;
       }
-    } else if (!this.token) {
+    } else {
       this.token = null;
     }
 
-    if (!this.isInitialized || !this.token) {
+    if (!this.isInitialized) {
+      throw new Error('TokenFileAuthProvider not initialized');
+    }
+    if (!this.token) {
+      this.updateStatus(false, false, 'token_file_missing');
+      throw new Error('TokenFileAuthProvider not initialized');
+    }
+    const ok = this.hasAccessToken(this.token) || this.hasApiKey(this.token);
+    if (!ok) {
+      this.updateStatus(false, false, 'missing_access_token_or_api_key');
       throw new Error('TokenFileAuthProvider not initialized');
     }
 
     // iFlow专用：优先使用API Key，回退到access_token
     const apiKey = this.extractApiKey(this.token);
     if (apiKey) {
+      this.updateStatus(true, true);
       return { Authorization: `Bearer ${apiKey}` };
     }
 
     const access = this.extractAccessToken(this.token);
     if (!access) {
-      throw new Error('TokenFileAuthProvider: no access_token or api_key in token file');
+      this.updateStatus(false, false, 'missing_access_token_or_api_key');
+      throw new Error('TokenFileAuthProvider not initialized');
     }
+    this.updateStatus(true, true);
     return { Authorization: `Bearer ${access}` };
   }
 
   async validateCredentials(): Promise<boolean> {
-    if (!this.isInitialized || !this.token) {
+    if (!this.isInitialized) {
+      return false;
+    }
+    // Best-effort: refresh token snapshot before validating.
+    const file = this.resolveTokenFile();
+    if (file) {
+      const latest = this.readJson(file);
+      if (latest) {
+        this.token = latest;
+      }
+    }
+    if (!this.token) {
+      this.updateStatus(false, false, 'token_file_missing');
       return false;
     }
     const exp = this.extractExpiresAt(this.token);
@@ -122,9 +199,6 @@ export class TokenFileAuthProvider implements IAuthProvider {
         this.token = latest;
       }
     }
-    if (!this.isInitialized && !this.token) {
-      return null;
-    }
     return this.token ? { ...this.token } : null;
   }
 
@@ -145,7 +219,42 @@ export class TokenFileAuthProvider implements IAuthProvider {
     // Prefer explicit tokenFile from config
     const tf = typeof this.config.tokenFile === 'string' ? this.config.tokenFile.trim() : '';
     if (tf) {
-      return this.expandHome(tf);
+      // Alias (no path separators / no .json suffix): resolve to ~/.routecodex/auth/<provider>-oauth-<seq>-<alias>.json
+      if (!tf.includes('/') && !tf.includes('\\') && !tf.endsWith('.json')) {
+        const providerIdRaw =
+          typeof (this.config as unknown as { oauthProviderId?: unknown }).oauthProviderId === 'string'
+            ? String((this.config as unknown as { oauthProviderId: string }).oauthProviderId).trim()
+            : '';
+        const providerId = providerIdRaw ? providerIdRaw.toLowerCase() : '';
+        if (providerId) {
+          const match = pickLatestTokenFile({ providerPrefix: providerId, alias: tf });
+          if (match) {
+            return match;
+          }
+        }
+        return null;
+      }
+
+      const resolved = this.expandHome(tf);
+      // Qwen: allow legacy single-file token path, but fall back to auth dir token set when missing.
+      const providerIdRaw =
+        typeof (this.config as unknown as { oauthProviderId?: unknown }).oauthProviderId === 'string'
+          ? String((this.config as unknown as { oauthProviderId: string }).oauthProviderId).trim()
+          : '';
+      const providerId = providerIdRaw ? providerIdRaw.toLowerCase() : '';
+      if (providerId === 'qwen') {
+        try {
+          if (!fs.existsSync(resolved)) {
+            const fallback = pickLatestTokenFile({ providerPrefix: 'qwen' });
+            if (fallback) {
+              return fallback;
+            }
+          }
+        } catch {
+          // ignore
+        }
+      }
+      return resolved;
     }
 
     const providerIdRaw =
@@ -168,15 +277,29 @@ export class TokenFileAuthProvider implements IAuthProvider {
       return null;
     }
 
-    // Fallback order:
-    // 1) RouteCodex default token path
-    const rc = path.join(process.env.HOME || '', '.routecodex', 'tokens', 'qwen-default.json');
-    try {
-      if (fs.existsSync(rc)) {
-        return rc;
+    // Qwen: default to RouteCodex auth dir tokens (daemon-admin / oauth-lifecycle output)
+    if (providerId === 'qwen') {
+      const home = process.env.HOME || '';
+      const legacySingle = path.join(home, '.routecodex', 'auth', 'qwen-oauth.json');
+      try {
+        if (fs.existsSync(legacySingle)) {
+          return legacySingle;
+        }
+      } catch { /* ignore */ }
+      const latest = pickLatestTokenFile({ providerPrefix: 'qwen' });
+      if (latest) {
+        return latest;
       }
-    } catch { /* ignore */ }
-    // 2) CLIProxyAPI directory
+      // Old fallback: RouteCodex tokens dir (legacy external tooling)
+      const rc = path.join(home, '.routecodex', 'tokens', 'qwen-default.json');
+      try {
+        if (fs.existsSync(rc)) {
+          return rc;
+        }
+      } catch { /* ignore */ }
+    }
+
+    // CLIProxyAPI directory (legacy external tooling)
     const home = process.env.HOME || '';
     const dir = path.join(home, '.cli-proxy-api');
     try {

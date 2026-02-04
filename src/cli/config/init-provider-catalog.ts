@@ -147,7 +147,7 @@ export function getInitProviderCatalog(): InitProviderTemplate[] {
         compatibilityProfile: 'chat:qwen',
         auth: {
           type: 'qwen-oauth',
-          tokenFile: '~/.routecodex/auth/qwen-oauth-1-default.json'
+          tokenFile: 'default'
         },
         models: {
           'qwen3-coder-plus': { supportsStreaming: true }

@@ -41,5 +41,29 @@ describe('apikey secret resolution', () => {
     const auth = { type: 'apikey', value: '${MISSING_API_KEY}' };
     await expect((server as any).resolveApiKeyValue(runtime, auth)).rejects.toThrow('MISSING_API_KEY');
   });
-});
 
+  it('allows empty apikey for local baseURL and ignores unsafe secretRef', async () => {
+    const server = await createServer();
+    const runtime = {
+      runtimeKey: 'lmstudio.key1',
+      providerId: 'lmstudio',
+      baseURL: 'http://127.0.0.1:1234/v1',
+      auth: { type: 'apikey' }
+    };
+    const auth = { type: 'apikey', value: '', secretRef: 'lmstudio.key1' };
+    const resolved = await (server as any).resolveApiKeyValue(runtime, auth);
+    expect(resolved).toBe('');
+  });
+
+  it('does not treat unsafe secretRef as a secret for remote providers', async () => {
+    const server = await createServer();
+    const runtime = {
+      runtimeKey: 'openai.key1',
+      providerId: 'openai',
+      baseURL: 'https://api.example.invalid/v1',
+      auth: { type: 'apikey' }
+    };
+    const auth = { type: 'apikey', value: '', secretRef: 'openai.key1' };
+    await expect((server as any).resolveApiKeyValue(runtime, auth)).rejects.toThrow(/missing api key/i);
+  });
+});

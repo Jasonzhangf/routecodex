@@ -31,7 +31,7 @@ function registerProviderOAuthConfigs(): void {
     endpoints: {
       deviceCodeUrl: 'https://chat.qwen.ai/api/v1/oauth2/device/code',
       tokenUrl: 'https://chat.qwen.ai/api/v1/oauth2/token',
-      userInfoUrl: 'https://portal.qwen.ai/api/v1/user/info'
+      userInfoUrl: 'https://chat.qwen.ai/api/v1/user/info'
     },
     client: {
       clientId: 'f0304373b74a44d2b584a3fb70ca9e56',

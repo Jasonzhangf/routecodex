@@ -902,12 +902,12 @@ export class HttpTransportProvider extends BaseProvider {
       if (this.normalizeAuthMode(auth.type) === 'oauth') {
         const oauthAuth = auth as OAuthAuthExtended;
         const oauthProviderId = this.oauthProviderId || this.ensureOAuthProviderId(oauthAuth);
-        logOAuthDebug('[OAuth] [headers] ensureValid start (openBrowser=true, forceReauth=false)');
+        logOAuthDebug('[OAuth] [headers] ensureValid start (silent refresh only)');
         try {
           // 请求前仅尝试静默刷新，不主动打开浏览器；
           // 真正令牌失效由 handleUpstreamInvalidOAuthToken 触发交互式修复。
           await ensureValidOAuthToken(oauthProviderId, oauthAuth, {
-            forceReacquireIfRefreshFails: true,
+            forceReacquireIfRefreshFails: false,
             openBrowser: false,
             forceReauthorize: false
           });
@@ -915,8 +915,9 @@ export class HttpTransportProvider extends BaseProvider {
         } catch (error) {
           const err = error as { message?: string };
           const msg = err?.message ? String(err.message) : String(error);
-          console.error(`[OAuth] [headers] ensureValid ERROR: ${msg}`);
-          throw error;
+          // Non-blocking: do not start device-code polling or crash requests here.
+          // We'll let the upstream 401/403 path trigger interactive repair when appropriate.
+          logOAuthDebug(`[OAuth] [headers] ensureValid skipped: ${msg}`);
         }
         try {
           (this.authProvider as OAuthAwareAuthProvider).getOAuthClient?.()?.loadToken?.();
@@ -930,14 +931,7 @@ export class HttpTransportProvider extends BaseProvider {
 
     // 认证头部（如为 OAuth，若当前无有效 token 则尝试拉取/刷新一次再取 headers）
     let authHeaders: Record<string, string> = {};
-    try {
-      authHeaders = this.authProvider?.buildHeaders() || {};
-    } catch (error) {
-      const err = error as { message?: string };
-      const msg = err?.message ? String(err.message) : String(error);
-      console.error(`[OAuth] [headers] buildHeaders() failed after single ensureValid: ${msg}`);
-      throw error;
-    }
+    authHeaders = this.authProvider?.buildHeaders() || {};
 
     const finalHeaders: Record<string, string> = {
       ...baseHeaders,

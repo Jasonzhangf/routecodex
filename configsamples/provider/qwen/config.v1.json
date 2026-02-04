@@ -14,7 +14,7 @@
         "compatibilityProfile": "chat:qwen",
         "auth": {
           "type": "qwen-oauth",
-          "tokenFile": "~/.routecodex/auth/qwen-oauth.json"
+          "tokenFile": "default"
         },
         "models": {
           "qwen3-coder-plus": {

@@ -159,6 +159,11 @@ export class RouteCodexHttpServer {
   private pipelineLogger: PipelineDebugLogger = createNoopPipelineLogger();
   private authResolver = new AuthFileResolver();
   private userConfig: UnknownObject = {};
+  private runtimeReadyPromise: Promise<void>;
+  private runtimeReadyResolve: (() => void) | null = null;
+  private runtimeReadyReject: ((error: Error) => void) | null = null;
+  private runtimeReadyResolved = false;
+  private runtimeReadyError: Error | null = null;
   private moduleDependencies: ModuleDependencies | null = null;
   private hubPipelineCtor: HubPipelineCtor | null = null;
   private readonly stageLoggingEnabled: boolean;
@@ -192,6 +197,11 @@ export class RouteCodexHttpServer {
       console.warn('[RouteCodexHttpServer] Failed to initialize PipelineDebugLogger; falling back to noop logger.', error);
       this.pipelineLogger = createNoopPipelineLogger();
     }
+
+    this.runtimeReadyPromise = new Promise<void>((resolve, reject) => {
+      this.runtimeReadyResolve = resolve;
+      this.runtimeReadyReject = reject;
+    });
 
     // Register critical routes early (before provider initialization)
     // This ensures OAuth Portal is available when providers check token validity
@@ -542,6 +552,27 @@ export class RouteCodexHttpServer {
     return Boolean(this.hubPipeline);
   }
 
+  private async waitForRuntimeReady(): Promise<void> {
+    if (this.runtimeReadyResolved) {
+      return;
+    }
+    if (this.runtimeReadyError) {
+      throw this.runtimeReadyError;
+    }
+    const raw = String(process.env.ROUTECODEX_STARTUP_HOLD_MS || process.env.RCC_STARTUP_HOLD_MS || '').trim();
+    const parsed = raw ? Number.parseInt(raw, 10) : NaN;
+    const timeoutMs = Number.isFinite(parsed) && parsed > 0 ? parsed : 120_000;
+    const timeoutPromise = new Promise<void>((_resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`startup timeout after ${timeoutMs}ms`)), timeoutMs);
+      try {
+        (timer as unknown as { unref?: () => void }).unref?.();
+      } catch {
+        // ignore
+      }
+    });
+    await Promise.race([this.runtimeReadyPromise, timeoutPromise]);
+  }
+
   private isQuotaRoutingEnabled(): boolean {
     const flag = (this.config.server as { quotaRoutingEnabled?: unknown }).quotaRoutingEnabled;
     if (typeof flag === 'boolean') {
@@ -601,6 +632,7 @@ export class RouteCodexHttpServer {
         config: this.config,
         buildHandlerContext: () => this.buildHandlerContext(),
         getPipelineReady: () => this.isPipelineReady(),
+        waitForPipelineReady: async () => await this.waitForRuntimeReady(),
         handleError: (error, context) => this.handleError(error, context),
         restartRuntimeFromDisk: async () => await this.restartRuntimeFromDisk(),
         getHealthSnapshot: () => {
@@ -843,8 +875,21 @@ export class RouteCodexHttpServer {
     userConfig: UnknownObject,
     context?: { providerProfiles?: ProviderProfileCollection }
   ): Promise<void> {
-    this.updateProviderProfiles(context?.providerProfiles, userConfig);
-    await this.setupRuntime(userConfig);
+    try {
+      this.updateProviderProfiles(context?.providerProfiles, userConfig);
+      await this.setupRuntime(userConfig);
+      if (!this.runtimeReadyResolved) {
+        this.runtimeReadyResolved = true;
+        this.runtimeReadyResolve?.();
+      }
+    } catch (error) {
+      const normalized = error instanceof Error ? error : new Error(String(error));
+      this.runtimeReadyError = normalized;
+      if (!this.runtimeReadyResolved) {
+        this.runtimeReadyReject?.(normalized);
+      }
+      throw error;
+    }
   }
 
   public async reloadRuntime(
@@ -853,6 +898,10 @@ export class RouteCodexHttpServer {
   ): Promise<void> {
     this.updateProviderProfiles(context?.providerProfiles, userConfig);
     await this.setupRuntime(userConfig);
+    if (!this.runtimeReadyResolved) {
+      this.runtimeReadyResolved = true;
+      this.runtimeReadyResolve?.();
+    }
   }
 
   private async setupRuntime(userConfig: UnknownObject): Promise<void> {
@@ -1113,6 +1162,8 @@ export class RouteCodexHttpServer {
       return trimmed ? trimmed : null;
     })();
 
+    const failedRuntimeKeys = new Set<string>();
+
     for (const [providerKey, runtime] of Object.entries(runtimeMap)) {
       if (!runtime) { continue; }
       const runtimeKey = runtime.runtimeKey || providerKey;
@@ -1122,26 +1173,67 @@ export class RouteCodexHttpServer {
           ? String((runtime as any).auth.type).trim()
           : null;
 
+      if (failedRuntimeKeys.has(runtimeKey)) {
+        continue;
+      }
+
       if (!this.providerHandles.has(runtimeKey)) {
-        const resolvedRuntime = await this.materializeRuntimeProfile(runtime);
-        const patchedRuntime = this.applyProviderProfileOverrides(resolvedRuntime);
+        let patchedRuntime: ProviderRuntimeProfile | null = null;
         try {
-          const authTypeFromPatched =
-            patchedRuntime && patchedRuntime.auth && typeof (patchedRuntime.auth as { type?: unknown }).type === 'string'
-              ? String((patchedRuntime.auth as { type?: string }).type).trim()
-              : null;
-          if (authTypeFromPatched) {
-            runtimeKeyAuthType.set(runtimeKey, authTypeFromPatched);
-          } else if (authTypeFromRuntime) {
-            runtimeKeyAuthType.set(runtimeKey, authTypeFromRuntime);
-          } else if (!runtimeKeyAuthType.has(runtimeKey)) {
-            runtimeKeyAuthType.set(runtimeKey, null);
+          const resolvedRuntime = await this.materializeRuntimeProfile(runtime);
+          patchedRuntime = this.applyProviderProfileOverrides(resolvedRuntime);
+          try {
+            const authTypeFromPatched =
+              patchedRuntime && patchedRuntime.auth && typeof (patchedRuntime.auth as { type?: unknown }).type === 'string'
+                ? String((patchedRuntime.auth as { type?: string }).type).trim()
+                : null;
+            if (authTypeFromPatched) {
+              runtimeKeyAuthType.set(runtimeKey, authTypeFromPatched);
+            } else if (authTypeFromRuntime) {
+              runtimeKeyAuthType.set(runtimeKey, authTypeFromRuntime);
+            } else if (!runtimeKeyAuthType.has(runtimeKey)) {
+              runtimeKeyAuthType.set(runtimeKey, null);
+            }
+          } catch {
+            // ignore authType derivation failures
           }
-        } catch {
-          // ignore authType derivation failures
+
+          const handle = await this.createProviderHandle(runtimeKey, patchedRuntime);
+          this.providerHandles.set(runtimeKey, handle);
+        } catch (error) {
+          // Non-blocking: do not crash server startup when a provider is misconfigured (e.g. missing env var).
+          // Emit a provider error so health/quota modules can mark it unhealthy and routing can fail over.
+          failedRuntimeKeys.add(runtimeKey);
+          try {
+            const { emitProviderError } = await import('../../../providers/core/utils/provider-error-reporter.js');
+            emitProviderError({
+              error,
+              stage: 'provider.runtime.init',
+              runtime: {
+                requestId: `startup_${Date.now()}`,
+                providerKey,
+                providerId: runtime.providerId || runtimeKey.split('.')[0],
+                providerType: String((runtime as any).providerType || runtime.providerType || 'unknown'),
+                providerProtocol: String((runtime as any).outboundProfile || ''),
+                routeName: 'startup',
+                pipelineId: 'startup',
+                runtimeKey
+              },
+              dependencies: this.getModuleDependencies(),
+              recoverable: false,
+              affectsHealth: true,
+              details: {
+                reason: 'provider_init_failed',
+                runtimeKey,
+                providerKey
+              }
+            });
+          } catch {
+            // ignore emit failures
+          }
+          // Skip this providerKey mapping; requests will fail over if routing selects it.
+          continue;
         }
-        const handle = await this.createProviderHandle(runtimeKey, patchedRuntime);
-        this.providerHandles.set(runtimeKey, handle);
       }
 
       // Register static quota metadata for every providerKey (not just per runtimeKey).
@@ -1157,7 +1249,10 @@ export class RouteCodexHttpServer {
         // best-effort: quota static config registration must never block runtime init
       }
 
-      this.providerKeyToRuntimeKey.set(providerKey, runtimeKey);
+      // Only map providerKey when runtimeKey has an initialized handle.
+      if (this.providerHandles.has(runtimeKey)) {
+        this.providerKeyToRuntimeKey.set(providerKey, runtimeKey);
+      }
     }
   }
 
@@ -1285,15 +1380,57 @@ export class RouteCodexHttpServer {
       return inline;
     }
 
-    const resolved =
-      typeof auth?.secretRef === 'string' && auth.secretRef.trim()
-        ? await this.resolveSecretValue(auth.secretRef.trim())
-        : undefined;
-    if (resolved) {
-      return resolved;
+    const rawSecretRef = typeof auth?.secretRef === 'string' ? auth.secretRef.trim() : '';
+    // llmswitch-core may populate secretRef as a stable signature (e.g. "provider.alias").
+    // Only treat it as a resolvable secret reference when it matches our safe reference grammar.
+    if (rawSecretRef && this.isSafeSecretReference(rawSecretRef)) {
+      const resolved = await this.resolveSecretValue(rawSecretRef);
+      if (resolved) {
+        return resolved;
+      }
+    }
+
+    // Local OpenAI-compatible endpoints (e.g., LM Studio) may not require auth.
+    // Keep fail-fast for remote providers by only allowing empty apiKey when baseURL is local.
+    const baseURL =
+      typeof (runtime as any)?.baseURL === 'string'
+        ? String((runtime as any).baseURL).trim()
+        : typeof (runtime as any)?.baseUrl === 'string'
+          ? String((runtime as any).baseUrl).trim()
+          : typeof (runtime as any)?.endpoint === 'string'
+            ? String((runtime as any).endpoint).trim()
+            : '';
+    if (this.isLocalBaseUrl(baseURL)) {
+      return '';
     }
 
     throw new Error(`Provider runtime "${runtime.runtimeKey || runtime.providerId}" missing API key`);
+  }
+
+  private isLocalBaseUrl(value: string): boolean {
+    const raw = typeof value === 'string' ? value.trim() : '';
+    if (!raw) {
+      return false;
+    }
+    try {
+      const url = new URL(raw);
+      const host = String(url.hostname || '').trim().toLowerCase();
+      return (
+        host === 'localhost' ||
+        host === '127.0.0.1' ||
+        host === '0.0.0.0' ||
+        host === '::1' ||
+        host === '::ffff:127.0.0.1'
+      );
+    } catch {
+      const lower = raw.toLowerCase();
+      return (
+        lower.includes('localhost') ||
+        lower.includes('127.0.0.1') ||
+        lower.includes('0.0.0.0') ||
+        lower.includes('[::1]')
+      );
+    }
   }
 
   private async disposeProviders(): Promise<void> {
@@ -1407,18 +1544,44 @@ export class RouteCodexHttpServer {
 
       const runtimeKey = target.runtimeKey || this.providerKeyToRuntimeKey.get(target.providerKey);
       if (!runtimeKey) {
-        throw Object.assign(new Error(`Runtime for provider ${target.providerKey} not initialized`), {
+        const error = Object.assign(new Error(`Runtime for provider ${target.providerKey} not initialized`), {
           code: 'ERR_RUNTIME_NOT_FOUND',
-          requestId: input.requestId
+          requestId: input.requestId,
+          retryable: true
         });
+        if (!firstError) {
+          firstError = error;
+        }
+        excludedProviderKeys.add(target.providerKey);
+        this.logStage('provider.retry', input.requestId, {
+          providerKey: target.providerKey,
+          attempt,
+          nextAttempt: attempt + 1,
+          excluded: Array.from(excludedProviderKeys),
+          reason: 'runtime_not_initialized'
+        });
+        continue;
       }
 
       const handle = this.providerHandles.get(runtimeKey);
       if (!handle) {
-        throw Object.assign(new Error(`Provider runtime ${runtimeKey} not found`), {
+        const error = Object.assign(new Error(`Provider runtime ${runtimeKey} not found`), {
           code: 'ERR_PROVIDER_NOT_FOUND',
-          requestId: input.requestId
+          requestId: input.requestId,
+          retryable: true
         });
+        if (!firstError) {
+          firstError = error;
+        }
+        excludedProviderKeys.add(target.providerKey);
+        this.logStage('provider.retry', input.requestId, {
+          providerKey: target.providerKey,
+          attempt,
+          nextAttempt: attempt + 1,
+          excluded: Array.from(excludedProviderKeys),
+          reason: 'provider_runtime_missing'
+        });
+        continue;
       }
 
       const providerProtocol =

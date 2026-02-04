@@ -175,7 +175,7 @@ export class ProviderFactory {
       runtime.providerKey,
       providerType
     );
-    const authConfig = this.mapRuntimeAuthToConfig(runtime.auth, runtime.runtimeKey);
+    const authConfig = this.mapRuntimeAuthToConfig(runtime.auth, runtime.runtimeKey, runtime);
     const endpointOverride =
       runtime.endpoint && !/^https?:\/\//i.test(runtime.endpoint.trim())
         ? runtime.endpoint.trim()
@@ -239,9 +239,44 @@ export class ProviderFactory {
     return Object.keys(responses).length ? responses : undefined;
   }
 
-  private static mapRuntimeAuthToConfig(auth: ProviderRuntimeAuth, runtimeKey: string) {
+  private static isLocalBaseUrl(value?: string): boolean {
+    const raw = typeof value === 'string' ? value.trim() : '';
+    if (!raw) {
+      return false;
+    }
+    try {
+      const url = new URL(raw);
+      const host = String(url.hostname || '').trim().toLowerCase();
+      return (
+        host === 'localhost' ||
+        host === '127.0.0.1' ||
+        host === '0.0.0.0' ||
+        host === '::1' ||
+        host === '::ffff:127.0.0.1'
+      );
+    } catch {
+      const lower = raw.toLowerCase();
+      return (
+        lower.includes('localhost') ||
+        lower.includes('127.0.0.1') ||
+        lower.includes('0.0.0.0') ||
+        lower.includes('[::1]')
+      );
+    }
+  }
+
+  private static mapRuntimeAuthToConfig(auth: ProviderRuntimeAuth, runtimeKey: string, runtime?: ProviderRuntimeProfile) {
     if (auth.type === 'apikey') {
       if (!isNonEmptyString(auth.value)) {
+        const baseUrl =
+          runtime && typeof (runtime as any).baseUrl === 'string'
+            ? String((runtime as any).baseUrl).trim()
+            : runtime && typeof (runtime as any).endpoint === 'string'
+              ? String((runtime as any).endpoint).trim()
+              : '';
+        if (this.isLocalBaseUrl(baseUrl)) {
+          return { type: 'apikey', apiKey: '' } as ApiKeyAuth;
+        }
         throw new Error(`[ProviderFactory] runtime ${runtimeKey} missing inline apiKey value`);
       }
       const apiKeyAuth: ApiKeyAuth = {
