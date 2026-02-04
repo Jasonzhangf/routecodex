@@ -2385,6 +2385,19 @@
         return null;
       }
 
+      async function openAuthIssueInCamoufox(provider, alias, url) {
+        setLog("credentialOpLog", "");
+        try {
+          await apiFetch("/daemon/oauth/open", {
+            method: "POST",
+            body: JSON.stringify({ provider, alias, url })
+          });
+          setLog("credentialOpLog", `Opened verification URL in Camoufox for ${provider}.${alias}.`);
+        } catch (e) {
+          setLog("credentialOpLog", `Open failed: ${e.message}`);
+        }
+      }
+
       function updateOauthAuthIssueHint() {
         const el = $("oauthAuthIssueHint");
         if (!el) return;
@@ -2397,10 +2410,9 @@
           return;
         }
         if (issue.kind === "google_account_verification") {
-          const url = issue.url ? `\n\nOpen: ${issue.url}` : "";
           el.textContent =
             `⚠ Google requires account verification for alias \"${alias}\".\n` +
-            `Complete the browser verification flow, then click Authorize again.${url}`;
+            `Complete the Camoufox verification flow (click “open”), then click Authorize again.`;
           el.style.display = "block";
           return;
         }
@@ -2481,11 +2493,13 @@
               if (issue.url) {
                 statusTd.appendChild(document.createTextNode(" "));
                 const a = document.createElement("a");
-                a.href = issue.url;
-                a.target = "_blank";
-                a.rel = "noreferrer";
+                a.href = "#";
                 a.textContent = "open";
                 a.className = "mono";
+                a.addEventListener("click", (ev) => {
+                  ev.preventDefault();
+                  void openAuthIssueInCamoufox(c.provider, c.alias, issue.url);
+                });
                 statusTd.appendChild(a);
               }
             }

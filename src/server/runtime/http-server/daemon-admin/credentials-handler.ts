@@ -8,7 +8,7 @@ import { collectTokenSnapshot, readTokenFile, evaluateTokenState, resolveAuthDir
 import { ensureValidOAuthToken } from '../../../../providers/auth/oauth-lifecycle.js';
 import { withOAuthRepairEnv } from '../../../../providers/auth/oauth-repair-env.js';
 import type { OAuthAuth, OAuthAuthType } from '../../../../providers/core/api/provider-config.js';
-import { isCamoufoxAvailable } from '../../../../providers/core/config/camoufox-launcher.js';
+import { isCamoufoxAvailable, openAuthInCamoufox } from '../../../../providers/core/config/camoufox-launcher.js';
 
 interface CredentialSummary {
   id: string;
@@ -309,6 +309,95 @@ export function registerCredentialRoutes(app: Application, options: DaemonAdminR
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       res.status(500).json({ error: { message } });
+    }
+  });
+
+  /**
+   * Open an auth verification URL in Camoufox using the stable (provider+alias) profile.
+   * This is used by daemon-admin UI to handle Google "verify your account" flows without
+   * falling back to the system browser.
+   */
+  app.post('/daemon/oauth/open', async (req: Request, res: Response) => {
+    if (reject(req, res)) {return;}
+    const body = req.body as Record<string, unknown>;
+    const provider = typeof body?.provider === 'string' ? body.provider.trim() : '';
+    const alias = typeof body?.alias === 'string' && body.alias.trim() ? body.alias.trim() : '';
+    const url = typeof body?.url === 'string' ? body.url.trim() : '';
+    if (!provider) {
+      res.status(400).json({ error: { message: 'provider is required', code: 'bad_request' } });
+      return;
+    }
+    if (!alias) {
+      res.status(400).json({ error: { message: 'alias is required', code: 'bad_request' } });
+      return;
+    }
+    if (!url) {
+      res.status(400).json({ error: { message: 'url is required', code: 'bad_request' } });
+      return;
+    }
+    if (!SUPPORTED_OAUTH_PROVIDERS.has(provider)) {
+      res.status(400).json({ error: { message: `unsupported oauth provider: ${provider}`, code: 'bad_request' } });
+      return;
+    }
+
+    // WebUI-triggered open should not attempt to auto-install Camoufox.
+    const prevAutoInstall = process.env.ROUTECODEX_CAMOUFOX_AUTO_INSTALL;
+    process.env.ROUTECODEX_CAMOUFOX_AUTO_INSTALL = '0';
+    try {
+      if (!isCamoufoxAvailable()) {
+        res.status(412).json({
+          error: {
+            code: 'camoufox_missing',
+            message:
+              'Camoufox is required to open the verification URL. Install it first: python3 -m pip install --user -U camoufox'
+          }
+        });
+        return;
+      }
+
+      const prevBrowser = process.env.ROUTECODEX_OAUTH_BROWSER;
+      const prevAutoMode = process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
+      const prevDevMode = process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
+
+      process.env.ROUTECODEX_OAUTH_BROWSER = 'camoufox';
+      // Verification URLs are usually not the OAuth portal; disable auto-mode and force headed mode.
+      delete process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
+      process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = '1';
+
+      try {
+        const ok = await openAuthInCamoufox({ url, provider, alias });
+        if (!ok) {
+          res.status(500).json({ error: { code: 'camoufox_launch_failed', message: 'Failed to open URL in Camoufox' } });
+          return;
+        }
+      } finally {
+        if (prevBrowser === undefined) {
+          delete process.env.ROUTECODEX_OAUTH_BROWSER;
+        } else {
+          process.env.ROUTECODEX_OAUTH_BROWSER = prevBrowser;
+        }
+        if (prevAutoMode === undefined) {
+          delete process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
+        } else {
+          process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE = prevAutoMode;
+        }
+        if (prevDevMode === undefined) {
+          delete process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
+        } else {
+          process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = prevDevMode;
+        }
+      }
+
+      res.status(200).json({ ok: true, provider, alias });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ error: { message } });
+    } finally {
+      if (prevAutoInstall === undefined) {
+        delete process.env.ROUTECODEX_CAMOUFOX_AUTO_INSTALL;
+      } else {
+        process.env.ROUTECODEX_CAMOUFOX_AUTO_INSTALL = prevAutoInstall;
+      }
     }
   });
 }

@@ -458,8 +458,15 @@ export async function interactiveRefresh(selector: string, options: InteractiveR
   const tokenMtimeBefore = await getTokenFileMtime(token.filePath);
   const startedAt = Date.now();
   const prevCamoufoxAutoMode = process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
+  const prevDevMode = process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
   try {
     await ensureLocalTokenPortalEnv();
+    // CLI-driven interactive refresh should be visible to users by default.
+    // This avoids the confusing "waiting for callback" hang when Camoufox automation runs headless
+    // but the user expects to complete login/2FA/verification.
+    if (!process.env.ROUTECODEX_CAMOUFOX_DEV_MODE) {
+      process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = '1';
+    }
     // Qwen: default to Camoufox auto mode so the authorize page Confirm button can be clicked automatically.
     // This avoids users getting stuck at the post-portal confirm screen when using `routecodex oauth <qwen-token>`.
     if (providerType === 'qwen') {
@@ -488,6 +495,11 @@ export async function interactiveRefresh(selector: string, options: InteractiveR
       delete process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
     } else {
       process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE = prevCamoufoxAutoMode;
+    }
+    if (prevDevMode === undefined) {
+      delete process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
+    } else {
+      process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = prevDevMode;
     }
     await cleanupInteractiveOAuthArtifacts();
   }

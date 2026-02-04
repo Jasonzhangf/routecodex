@@ -67,6 +67,8 @@ Qwen 的自动化会在授权页自动点击：
 
 WebUI（daemon-admin）里点 “Authorize OAuth” 时也会强制走 Camoufox；若未安装，会返回错误 `camoufox_missing` 并提示安装命令。
 
+当 token 被标记为 `verify required`（Google 风控校验）时，daemon-admin 会提供 `open` 链接，点击后会用 Camoufox 打开验证 URL（固定 profile + 指纹），不要再用系统浏览器。
+
 Portal 健康检查（`/health`）默认会等待 **300s**（网络慢时避免过早 timeout），可用环境变量调整：
 
 - `ROUTECODEX_OAUTH_PORTAL_READY_TIMEOUT_MS`（总等待）
