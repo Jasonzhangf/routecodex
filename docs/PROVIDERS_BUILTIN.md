@@ -29,8 +29,10 @@
 ### 2) OAuth（tokenFile）
 
 ```jsonc
-"auth": { "type": "qwen-oauth", "tokenFile": "~/.routecodex/auth/qwen-oauth.json" }
+"auth": { "type": "qwen-oauth", "tokenFile": "default" }
 ```
+
+> OAuth 详细说明（认证 / 刷新 / auto）：`docs/OAUTH.md`
 
 ### 3) Cookie（cookieFile）
 
@@ -76,8 +78,8 @@
 ### Qwen（OAuth）
 
 - 样本：`configsamples/provider/qwen/config.v1.json`
-- 关键点：`auth.type: "qwen-oauth"` + `auth.tokenFile` 指向你的 token 文件；`compatibilityProfile: "chat:qwen"`
-- 你需要：先完成一次 OAuth 登录生成 tokenFile（或按你自己的路径修改 tokenFile）
+- 关键点：`auth.type: "qwen-oauth"` + `auth.tokenFile: "default"`（或写全路径）；`compatibilityProfile: "chat:qwen"`
+- 你需要：先完成一次 OAuth 登录生成 tokenFile（详见 `docs/OAUTH.md`）
 
 ### iFlow（OAuth）
 

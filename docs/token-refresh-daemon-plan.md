@@ -9,17 +9,17 @@
 1. **监控 Token 文件** - 监控 `~/.routecodex/auth/*.json` 变化
 2. **检测过期** - 读取 `expires_at` 判断是否即将过期/已过期
 3. **自动刷新** - OAuth Token 提前30分钟自动刷新
-4. **触发认证** - 失效时打开外部浏览器让用户重新认证
+4. **触发认证（显式）** - 后台默认不弹窗；需要交互式修复时由用户运行 `rcc oauth --force <selector>` 或 `rcc oauth <provider>-auto <selector>`
 
 ## 目录结构
 
 ```
 ~/.routecodex/auth/
-├── iflow-oauth.json           # 账号: work@example.com
-├── iflow-personal.json        # 账号: my@gmail.com
-├── qwen-oauth.json            # 账号: dev@company.com
-├── gemini-oauth.json
-└── antigravity-oauth.json
+├── iflow-oauth-1-work.json           # 账号: work@example.com
+├── iflow-oauth-2-personal.json       # 账号: my@gmail.com
+├── qwen-oauth-1-default.json         # 账号: dev@company.com
+├── gemini-cli-oauth-1-default.json
+└── antigravity-oauth-1-default.json
 ```
 
 ## Token 文件格式

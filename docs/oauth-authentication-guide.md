@@ -1,3 +1,7 @@
+# ⚠️ 旧文档提示
+
+本文为历史/实现细节文档，**OAuth 最新统一说明请以 `docs/OAUTH.md` 为准**（包含认证、刷新、Camoufox auto、常见踩坑）。
+
 # Unified OAuth Authentication System Guide
 
 ## Overview

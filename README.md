@@ -91,6 +91,7 @@ curl http://127.0.0.1:5555/v1/messages \
 ## 文档
 
 - 安装与快速上手：`docs/INSTALLATION_AND_QUICKSTART.md`
+- OAuth（认证与刷新）：`docs/OAUTH.md`
 - 内置 Provider：`docs/PROVIDERS_BUILTIN.md`
 - Provider 类型与协议：`docs/PROVIDER_TYPES.md`
 - 路由指令/语法：`docs/routing-instructions.md`
