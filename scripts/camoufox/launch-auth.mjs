@@ -201,6 +201,20 @@ async function main() {
     return;
   }
 
+  if (autoMode && autoMode.trim().toLowerCase() === 'qwen') {
+    try {
+      await runAutoFlowWithFallback('qwen', { url, profileDir, profileId, camoufoxBinary, devMode });
+      process.exit(0);
+    } catch (error) {
+      console.error(
+        '[camoufox-launch-auth] Auto qwen auth failed:',
+        error instanceof Error ? error.message : String(error)
+      );
+      process.exit(1);
+    }
+    return;
+  }
+
   await launchManualCamoufox({ camoufoxBinary, profileDir, url });
 }
 
@@ -318,6 +332,10 @@ async function runAutoFlowWithFallback(kind, options) {
     }
     if (mode === 'antigravity') {
       await runAntigravityAutoFlow(options);
+      return;
+    }
+    if (mode === 'qwen') {
+      await runQwenAutoFlow(options);
       return;
     }
     throw new Error(`Unknown auto mode: ${mode}`);
@@ -678,6 +696,77 @@ async function runAntigravityAutoFlow({ url, profileDir, camoufoxBinary, devMode
       return;
     }
     throw error;
+  } finally {
+    await shutdown();
+  }
+}
+
+async function runQwenAutoFlow({ url, profileDir, camoufoxBinary, devMode }) {
+  let firefox;
+  try {
+    ({ firefox } = await import('playwright-core'));
+  } catch (error) {
+    throw new Error(
+      `playwright-core is required for auto qwen auth (${error instanceof Error ? error.message : String(error)})`
+    );
+  }
+
+  const timeoutMs = Number(process.env.ROUTECODEX_CAMOUFOX_QWEN_TIMEOUT_MS || 120_000);
+  cleanupExistingCamoufox(profileDir);
+  const context = await firefox.launchPersistentContext(profileDir, {
+    executablePath: camoufoxBinary,
+    headless: !devMode,
+    acceptDownloads: false
+  });
+  let closing = false;
+  const shutdown = async () => {
+    if (closing) return;
+    closing = true;
+    await context.close().catch(() => {});
+  };
+  ['SIGTERM', 'SIGINT', 'SIGHUP'].forEach((signal) => {
+    process.on(signal, () => {
+      void shutdown().finally(() => process.exit(0));
+    });
+  });
+
+  try {
+    const page = context.pages()[0] || (await context.newPage());
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
+
+    let authPage = page;
+    if (page.url().includes('token-auth')) {
+      console.log('[camoufox-launch-auth] Portal detected, auto-clicking continue button...');
+      const button = page.locator('#continue-btn');
+      await button.waitFor({ timeout: 20000 });
+      const popupPromise = context.waitForEvent('page', { timeout: 10000 }).catch(() => null);
+      await button.click();
+      const popup = await popupPromise;
+      authPage = popup ?? page;
+      await authPage.waitForLoadState('domcontentloaded', { timeout: 30000 }).catch(() => {});
+    }
+
+    console.log('[camoufox-launch-auth] Qwen authorize page loaded, waiting for confirm button...');
+    const confirmSelector = 'button.qwen-confirm-btn';
+    const confirmResult = await waitForElementInPages(context, confirmSelector, timeoutMs);
+    if (!confirmResult) {
+      throw new Error('未能定位 Qwen Confirm 按钮');
+    }
+    console.log('[camoufox-launch-auth] Qwen confirm button detected, clicking...');
+    try {
+      await confirmResult.locator.first().click({ timeout: timeoutMs });
+    } catch {
+      await confirmResult.page.evaluate((sel) => {
+        const el = document.querySelector(sel);
+        if (!el) return;
+        const events = ['mouseenter', 'mouseover', 'mousemove', 'mousedown', 'mouseup', 'click'];
+        for (const type of events) {
+          el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+        }
+      }, confirmSelector);
+    }
+    console.log('[camoufox-launch-auth] Qwen confirm clicked. Waiting briefly for authorization to settle...');
+    await new Promise((resolve) => setTimeout(resolve, 2000));
   } finally {
     await shutdown();
   }
