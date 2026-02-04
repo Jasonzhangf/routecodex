@@ -149,6 +149,48 @@ describe('ProviderQuotaDaemonModule', () => {
     expect(persisted.providers[canonicalKey]).toBeDefined();
   });
 
+  it('cools down an antigravity alias for 30m on OAuth reauth-required 403 (rotate away from broken token)', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-02-04T00:00:00.000Z'));
+    const now = Date.now();
+
+    const mod = new ProviderQuotaDaemonModule();
+    await mod.init({ serverId: 'test' });
+    mod.registerProviderStaticConfig('antigravity.alias1.gemini-3-pro-high', { authType: 'oauth' });
+    mod.registerProviderStaticConfig('antigravity.alias1.claude-sonnet-4-5-thinking', { authType: 'oauth' });
+    await mod.start();
+
+    const center = await getProviderErrorCenter();
+    center.emit({
+      code: 'HTTP_403',
+      message: 'HTTP 403: Please authenticate with Google OAuth first',
+      stage: 'provider.provider.http',
+      status: 403,
+      recoverable: false,
+      timestamp: now,
+      runtime: {
+        requestId: 'req_test_403_reauth',
+        providerKey: 'antigravity.alias1.gemini-3-pro-high',
+        providerId: 'antigravity'
+      },
+      details: {}
+    } as any);
+
+    await jest.advanceTimersByTimeAsync(5);
+
+    const snapshot = mod.getAdminSnapshot();
+    expect(snapshot['antigravity.alias1.gemini-3-pro-high']).toBeDefined();
+    expect(snapshot['antigravity.alias1.claude-sonnet-4-5-thinking']).toBeDefined();
+    expect(snapshot['antigravity.alias1.gemini-3-pro-high'].inPool).toBe(false);
+    expect(snapshot['antigravity.alias1.claude-sonnet-4-5-thinking'].inPool).toBe(false);
+    expect(snapshot['antigravity.alias1.gemini-3-pro-high'].reason).toBe('cooldown');
+    expect(snapshot['antigravity.alias1.claude-sonnet-4-5-thinking'].reason).toBe('cooldown');
+    expect(snapshot['antigravity.alias1.gemini-3-pro-high'].cooldownUntil).toBe(now + 30 * 60_000);
+    expect(snapshot['antigravity.alias1.claude-sonnet-4-5-thinking'].cooldownUntil).toBe(now + 30 * 60_000);
+
+    await mod.stop();
+  });
+
   it('does not let QUOTA_RECOVERY override capacity cooldown windows', async () => {
     jest.useFakeTimers();
     jest.setSystemTime(new Date('2026-01-16T00:00:00.000Z'));
@@ -314,6 +356,54 @@ describe('ProviderQuotaDaemonModule', () => {
     expect(entry?.inPool).toBe(true);
 
     await mod.stop();
+  });
+
+  it('does not wrap model capacity cooldown schedules (no 9s/15s/27s loop)', async () => {
+    const prev = process.env.ROUTECODEX_MODEL_CAPACITY_SCHEDULE;
+    process.env.ROUTECODEX_MODEL_CAPACITY_SCHEDULE = '9s,15s,27s';
+    try {
+      jest.useFakeTimers();
+      jest.setSystemTime(new Date('2026-01-16T00:00:00.000Z'));
+
+      const mod = new ProviderQuotaDaemonModule();
+      await mod.init({ serverId: 'test' });
+      mod.registerProviderStaticConfig('tab.default.gpt-5.1', { authType: 'apikey' });
+      await mod.start();
+
+      const center = await getProviderErrorCenter();
+      const baseNow = Date.now();
+      for (let i = 0; i < 4; i += 1) {
+        center.emit({
+          code: 'HTTP_429',
+          message: 'HTTP 429: MODEL_CAPACITY_EXHAUSTED',
+          stage: 'provider.provider.http',
+          status: 429,
+          recoverable: true,
+          timestamp: baseNow + i * 1000,
+          runtime: {
+            requestId: `req_capacity_${i}`,
+            providerKey: 'tab.default.gpt-5.1',
+            providerId: 'tab'
+          },
+          details: {}
+        } as any);
+      }
+
+      await jest.advanceTimersByTimeAsync(10);
+      const snapshot = mod.getAdminSnapshot();
+      const state = snapshot['tab.default.gpt-5.1'];
+      expect(state).toBeDefined();
+      // 4th event must clamp to the last schedule step (27s), not wrap back to 9s.
+      expect(state.cooldownUntil).toBe(baseNow + 3 * 1000 + 27_000);
+
+      await mod.stop();
+    } finally {
+      if (prev === undefined) {
+        delete process.env.ROUTECODEX_MODEL_CAPACITY_SCHEDULE;
+      } else {
+        process.env.ROUTECODEX_MODEL_CAPACITY_SCHEDULE = prev;
+      }
+    }
   });
 
   it('caps repeated 429 backoff at 3h and then retries cyclically', async () => {

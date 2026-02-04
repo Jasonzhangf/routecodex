@@ -149,6 +149,57 @@ export async function handleProviderQuotaErrorEvent(
       }
       return;
     }
+
+    // Antigravity: OAuth missing/expired (reauth required).
+    // Policy: cool down the entire alias for 30 minutes so routing can immediately switch to another alias,
+    // while preventing repeated 403 hammering on the same broken token.
+    if (typeof event.status === 'number' && event.status === 403 && isAntigravityReauthRequired403(event)) {
+      const alias = extractAntigravityAlias(providerKey);
+      const keys = alias ? listAntigravityProviderKeysByAlias(ctx, alias) : [providerKey];
+      const cooldownUntil = nowMs + 30 * 60_000;
+
+      for (const key of keys) {
+        const prevState =
+          ctx.quotaStates.get(key) ?? createInitialQuotaState(key, ctx.staticConfigs.get(key), nowMs);
+        const nextState: QuotaState = {
+          ...prevState,
+          inPool: false,
+          reason: 'cooldown',
+          authIssue: null,
+          cooldownUntil,
+          blacklistUntil: null,
+          lastErrorSeries: 'EFATAL',
+          lastErrorCode: typeof event.code === 'string' && event.code.trim() ? event.code.trim() : 'HTTP_403',
+          lastErrorAtMs: nowMs,
+          consecutiveErrorCount:
+            typeof prevState.consecutiveErrorCount === 'number' && prevState.consecutiveErrorCount > 0
+              ? prevState.consecutiveErrorCount + 1
+              : 1
+        };
+        ctx.quotaStates.set(key, nextState);
+      }
+      ctx.schedulePersist(nowMs);
+
+      const tsIso = new Date(nowMs).toISOString();
+      try {
+        await appendProviderErrorEvent({
+          ts: tsIso,
+          providerKey,
+          code: typeof event.code === 'string' ? event.code : undefined,
+          httpStatus: typeof event.status === 'number' ? event.status : undefined,
+          message: event.message,
+          details: {
+            stage: event.stage,
+            routeName: (event.runtime as { routeName?: string }).routeName,
+            entryEndpoint: (event.runtime as { entryEndpoint?: string }).entryEndpoint,
+            authIssue: { kind: 'oauth_reauth_required', cooldownUntil }
+          }
+        });
+      } catch {
+        // logging failure is non-fatal
+      }
+      return;
+    }
   }
 
   // Upstream capacity exhaustion is not quota depletion. Cool down the entire model series immediately
@@ -306,6 +357,7 @@ export async function handleProviderQuotaErrorEvent(
     providerKey,
     httpStatus: typeof event.status === 'number' ? event.status : undefined,
     code: typeof event.code === 'string' ? event.code : undefined,
+    message: typeof event.message === 'string' ? event.message : undefined,
     fatal: isFatalForQuota(event),
     timestampMs: nowMs
   };
@@ -415,6 +467,38 @@ function parseAntigravityGoogleAccountVerification(event: ProviderErrorEvent): {
     url,
     message: 'Google account verification required (open the link and complete the flow, then re-authorize OAuth).'
   };
+}
+
+function isAntigravityReauthRequired403(event: ProviderErrorEvent): boolean {
+  try {
+    const status = typeof event.status === 'number' ? event.status : undefined;
+    if (status !== 403) {
+      return false;
+    }
+    // Exclude Google verification gating: handled separately.
+    if (parseAntigravityGoogleAccountVerification(event)) {
+      return false;
+    }
+    const raw = typeof event.message === 'string' ? event.message : '';
+    if (!raw) {
+      return false;
+    }
+    const lowered = raw.toLowerCase();
+    return (
+      lowered.includes('please authenticate with google oauth first') ||
+      lowered.includes('authenticate with google oauth') ||
+      lowered.includes('missing required authentication credential') ||
+      lowered.includes('request is missing required authentication') ||
+      lowered.includes('unauthenticated') ||
+      lowered.includes('invalid token') ||
+      lowered.includes('invalid_grant') ||
+      lowered.includes('unauthorized') ||
+      lowered.includes('token expired') ||
+      lowered.includes('expired token')
+    );
+  } catch {
+    return false;
+  }
 }
 
 function extractFirstUrl(input: string, pattern: RegExp): string | null {

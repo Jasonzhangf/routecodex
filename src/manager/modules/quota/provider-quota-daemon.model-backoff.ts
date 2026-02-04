@@ -170,11 +170,13 @@ export class ProviderModelBackoffTracker {
       nowMs - previous.lastErrorAtMs <= this.chainWindowMs;
     const sameError = withinWindow && previous?.lastErrorKey === errorKey;
     const nextCount = sameError ? (previous?.consecutiveCount ?? 0) + 1 : 1;
-    const wrappedCount = nextCount > this.schedule.length ? 1 : nextCount;
+    // Never wrap back to the first schedule step inside the chain window; it causes
+    // short cooldown loops (e.g. 9s/15s/27s repeating) and keeps hammering the same model.
+    const boundedCount = Math.min(nextCount, Math.max(1, this.schedule.length));
     // Capacity exhausted should cool down immediately, regardless of quota manager state.
     // Use a fixed TTL by default, but keep the schedule/env overrides for debugging/tuning.
     const ttl =
-      this.schedule[Math.min(wrappedCount - 1, this.schedule.length - 1)] ??
+      this.schedule[Math.min(boundedCount - 1, this.schedule.length - 1)] ??
       this.schedule[0] ??
       MODEL_CAPACITY_EXHAUSTED_COOLDOWN_MS;
     const explicitUntil =
@@ -189,7 +191,7 @@ export class ProviderModelBackoffTracker {
     this.states.set(modelKey, {
       lastErrorKey: errorKey,
       lastErrorAtMs: nowMs,
-      consecutiveCount: wrappedCount,
+      consecutiveCount: boundedCount,
       cooldownUntil: existingUntil && existingUntil > until ? existingUntil : until
     });
   }

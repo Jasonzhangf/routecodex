@@ -55,6 +55,7 @@ export type ErrorSeries = 'E429' | 'E5XX' | 'ENET' | 'EFATAL' | 'EOTHER';
 export interface ErrorEventForQuota {
   providerKey: string;
   code?: string | null;
+  message?: string | null;
   httpStatus?: number | null;
   fatal?: boolean | null;
   timestampMs?: number;
@@ -166,6 +167,8 @@ export function normalizeErrorSeries(event: ErrorEventForQuota): ErrorSeries {
   }
   const status = typeof event.httpStatus === 'number' ? event.httpStatus : null;
   const rawCode = String(event.code || '').toUpperCase();
+  const message = typeof event.message === 'string' ? event.message : '';
+  const msgUpper = message.toUpperCase();
 
   if (status === 429 || rawCode.includes('429') || rawCode.includes('RATE') || rawCode.includes('QUOTA')) {
     return 'E429';
@@ -174,7 +177,23 @@ export function normalizeErrorSeries(event: ErrorEventForQuota): ErrorSeries {
     return 'E5XX';
   }
 
-  if (rawCode.includes('TIMEOUT') || NETWORK_ERROR_CODES.some((code) => rawCode.includes(code))) {
+  const networkMessageHints = [
+    'FETCH FAILED',
+    'NETWORK TIMEOUT',
+    'SOCKET HANG UP',
+    'CLIENT NETWORK SOCKET DISCONNECTED',
+    'TLS HANDSHAKE TIMEOUT',
+    'UNABLE TO VERIFY THE FIRST CERTIFICATE',
+    'NETWORK ERROR',
+    'TEMPORARILY UNREACHABLE'
+  ] as const;
+
+  if (
+    rawCode.includes('TIMEOUT') ||
+    NETWORK_ERROR_CODES.some((code) => rawCode.includes(code)) ||
+    msgUpper.includes('TIMEOUT') ||
+    networkMessageHints.some((hint) => msgUpper.includes(hint))
+  ) {
     return 'ENET';
   }
 
@@ -249,7 +268,9 @@ export function applyErrorEvent(
       : series === 'EFATAL'
         ? COOLDOWN_SCHEDULE_FATAL_MS
         : COOLDOWN_SCHEDULE_DEFAULT_MS;
-  const nextCount = rawNextCount > schedule.length ? 1 : rawNextCount;
+  // Never wrap cooldown back to the first step within the same error-chain window.
+  // Wrapping causes repeated short retries (hammering) and makes cooldowns appear to "loop".
+  const nextCount = Math.min(rawNextCount, schedule.length);
   const cooldownMs = computeCooldownMsBySeries(series, nextCount);
   const nextUntil = cooldownMs ? nowMs + cooldownMs : null;
   const existingUntil = typeof state.cooldownUntil === 'number' ? state.cooldownUntil : null;

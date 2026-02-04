@@ -68,22 +68,36 @@ describe('provider-quota-center error handling', () => {
     state = applyErrorEvent(state, { providerKey, code: 'ETIMEDOUT' }, baseNow);
     expect(state.reason).toBe('cooldown');
     expect(state.cooldownUntil).toBe(baseNow + 5_000);
+    expect(state.lastErrorSeries).toBe('ENET');
 
     const secondNow = baseNow + 10_000;
     state = applyErrorEvent(state, { providerKey, code: 'ETIMEDOUT' }, secondNow);
     expect(state.reason).toBe('cooldown');
     expect(state.cooldownUntil).toBe(secondNow + 30_000);
+    expect(state.lastErrorSeries).toBe('ENET');
 
     const thirdNow = secondNow + 10_000;
     state = applyErrorEvent(state, { providerKey, code: 'ETIMEDOUT' }, thirdNow);
     expect(state.reason).toBe('cooldown');
     expect(state.cooldownUntil).toBe(thirdNow + 60_000);
+    expect(state.lastErrorSeries).toBe('ENET');
 
     const fourthNow = thirdNow + 10_000;
     state = applyErrorEvent(state, { providerKey, code: 'ETIMEDOUT' }, fourthNow);
     expect(state.reason).toBe('cooldown');
     expect(state.blacklistUntil).toBeNull();
     expect(state.cooldownUntil).toBe(fourthNow + 300_000);
+    expect(state.lastErrorSeries).toBe('ENET');
+  });
+
+  it('treats message-only fetch errors as network series', () => {
+    const baseNow = 4_500_000;
+    let state = createInitialQuotaState(providerKey, { authType: 'apikey' }, baseNow);
+
+    state = applyErrorEvent(state, { providerKey, message: 'TypeError: fetch failed' }, baseNow);
+    expect(state.reason).toBe('cooldown');
+    expect(state.cooldownUntil).toBe(baseNow + 5_000);
+    expect(state.lastErrorSeries).toBe('ENET');
   });
 
   it('does not blacklist unknown errors; keeps escalating cooldown', () => {

@@ -85,6 +85,37 @@ function isGoogleAccountVerificationRequiredError(err: unknown): boolean {
   );
 }
 
+function isAntigravityReauthRequired403(err: unknown): boolean {
+  if (!err || typeof err !== 'object') {
+    return false;
+  }
+  const status = extractStatusCodeFromError(err);
+  if (status !== 403) {
+    return false;
+  }
+  if (isGoogleAccountVerificationRequiredError(err)) {
+    return false;
+  }
+  const messageRaw = (err as { message?: unknown }).message;
+  const message = typeof messageRaw === 'string' ? messageRaw : '';
+  if (!message) {
+    return false;
+  }
+  const lowered = message.toLowerCase();
+  return (
+    lowered.includes('please authenticate with google oauth first') ||
+    lowered.includes('authenticate with google oauth') ||
+    lowered.includes('missing required authentication credential') ||
+    lowered.includes('request is missing required authentication') ||
+    lowered.includes('unauthenticated') ||
+    lowered.includes('invalid token') ||
+    lowered.includes('invalid_grant') ||
+    lowered.includes('unauthorized') ||
+    lowered.includes('token expired') ||
+    lowered.includes('expired token')
+  );
+}
+
 function shouldRotateAntigravityAliasOnRetry(error: unknown): boolean {
   // Antigravity safety: do not rotate between Antigravity aliases within a single request.
   // Multi-account switching (especially during 4xx/429 states) can cascade into cross-account reauth (403 verify) events.
@@ -107,6 +138,9 @@ function extractRetryErrorSignature(err: unknown): string {
   const status = extractStatusCodeFromError(err);
   if (status === 403 && isGoogleAccountVerificationRequiredError(err)) {
     return '403:GOOGLE_VERIFY';
+  }
+  if (status === 403 && isAntigravityReauthRequired403(err)) {
+    return '403:OAUTH_REAUTH';
   }
   const codeRaw = (err as { code?: unknown }).code;
   const upstreamCodeRaw = (err as { upstreamCode?: unknown }).upstreamCode;
@@ -434,7 +468,13 @@ export class HubRequestExecutor implements RequestExecutor {
           } else {
             antigravityRetrySignal = null;
           }
-          const shouldRetry = attempt < maxAttempts && shouldRetryProviderError(error);
+          const status = extractStatusCodeFromError(error);
+          const isVerify = status === 403 && isGoogleAccountVerificationRequiredError(error);
+          const isReauth = status === 403 && isAntigravityReauthRequired403(error);
+          const shouldRetry =
+            attempt < maxAttempts &&
+            (shouldRetryProviderError(error) ||
+              (isAntigravityProviderKey(target.providerKey) && (isVerify || isReauth)));
           if (!shouldRetry) {
             recordAttempt({ error: true });
             throw error;
@@ -448,8 +488,6 @@ export class HubRequestExecutor implements RequestExecutor {
               await waitBeforeRetry(error);
             }
           } else if (target.providerKey) {
-            const status = extractStatusCodeFromError(error);
-            const isVerify = status === 403 && isGoogleAccountVerificationRequiredError(error);
             const is429 = status === 429;
             if (isAntigravityProviderKey(target.providerKey) && (isVerify || is429)) {
               // For Antigravity 403 verify / 429 states:
@@ -461,6 +499,11 @@ export class HubRequestExecutor implements RequestExecutor {
               } else {
                 antigravityRetrySignal = { signature: extractRetryErrorSignature(error), consecutive: 1, avoidAllOnRetry: true };
               }
+            } else if (isAntigravityProviderKey(target.providerKey) && isReauth) {
+              // Antigravity OAuth reauth-required 403:
+              // - exclude the current providerKey so router can pick another alias
+              // - DO NOT avoid all Antigravity on retry; switching aliases is the intended recovery path.
+              excludedProviderKeys.add(target.providerKey);
             } else if (!isAntigravityProviderKey(target.providerKey) || shouldRotateAntigravityAliasOnRetry(error)) {
               excludedProviderKeys.add(target.providerKey);
             }
