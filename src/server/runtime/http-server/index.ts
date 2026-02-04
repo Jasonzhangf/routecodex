@@ -451,6 +451,23 @@ export class RouteCodexHttpServer {
     return trimmed;
   }
 
+  private isSafeSecretReference(value: string): boolean {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return false;
+    }
+    if (trimmed.startsWith('authfile-')) {
+      return true;
+    }
+    if (/^\$\{[A-Z0-9_]+\}$/i.test(trimmed)) {
+      return true;
+    }
+    if (/^[A-Z][A-Z0-9_]+$/.test(trimmed)) {
+      return true;
+    }
+    return false;
+  }
+
   private async bootstrapVirtualRouter(input: UnknownObject): Promise<VirtualRouterArtifacts> {
     const artifacts = (await bootstrapVirtualRouterConfig(
       input as Record<string, unknown>
@@ -1262,6 +1279,9 @@ export class RouteCodexHttpServer {
   private async resolveApiKeyValue(runtime: ProviderRuntimeProfile, auth: ProviderRuntimeProfile['auth']): Promise<string> {
     const inline = typeof auth?.value === 'string' ? auth.value.trim() : '';
     if (inline) {
+      if (this.isSafeSecretReference(inline)) {
+        return await this.resolveSecretValue(inline);
+      }
       return inline;
     }
 

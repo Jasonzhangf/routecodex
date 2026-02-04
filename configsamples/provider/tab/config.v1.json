@@ -14,7 +14,7 @@
         "maxContextTokens": 256000,
         "auth": {
           "type": "apikey",
-          "apiKey": "YOUR_API_KEY_HERE"
+          "apiKey": "${TAB_API_KEY}"
         },
         "models": {
           "gpt-5.1": {},

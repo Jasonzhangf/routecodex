@@ -14,6 +14,22 @@ function normalizeString(value: unknown): string {
   return value.trim();
 }
 
+function resolveEnvSecretReference(value: string): { ok: true; value: string } | { ok: false; missing: string } {
+  const trimmed = normalizeString(value);
+  if (!trimmed) {
+    return { ok: true, value: '' };
+  }
+  const envMatch = trimmed.match(/^\$\{([A-Z0-9_]+)\}$/i);
+  if (!envMatch) {
+    return { ok: true, value: trimmed };
+  }
+  const envValue = normalizeString(process.env[envMatch[1]]);
+  if (!envValue) {
+    return { ok: false, missing: envMatch[1] };
+  }
+  return { ok: true, value: envValue };
+}
+
 export function extractApiKeyFromRequest(req: Request): string {
   const direct =
     normalizeString(req.header('x-routecodex-api-key'))
@@ -39,7 +55,18 @@ export function registerApiKeyAuthMiddleware(app: Application, config: ServerCon
       return;
     }
 
-    const expectedKey = normalizeString(config?.server?.apikey);
+    const expectedResolved = resolveEnvSecretReference(normalizeString(config?.server?.apikey));
+    if (!expectedResolved.ok) {
+      res.status(500).json({
+        error: {
+          message: `Server misconfigured: environment variable ${expectedResolved.missing} is not defined`,
+          type: 'config_error',
+          code: 'missing_env'
+        }
+      });
+      return;
+    }
+    const expectedKey = expectedResolved.value;
     if (!expectedKey) {
       next();
       return;

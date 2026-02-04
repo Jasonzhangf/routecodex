@@ -6,10 +6,10 @@ export type InitProviderTemplate = {
   defaultModel: string;
 };
 
-function apikeyAuthPlaceholder() {
+function apikeyAuthEnv(envVar: string) {
   return {
     type: 'apikey',
-    apiKey: 'YOUR_API_KEY_HERE'
+    apiKey: `\${${envVar}}`
   };
 }
 
@@ -24,7 +24,7 @@ export function getInitProviderCatalog(): InitProviderTemplate[] {
         enabled: true,
         type: 'openai',
         baseURL: 'https://api.openai.com/v1',
-        auth: apikeyAuthPlaceholder(),
+        auth: apikeyAuthEnv('OPENAI_API_KEY'),
         models: {
           'gpt-5.2': { supportsStreaming: true },
           'gpt-5.2-codex': { supportsStreaming: true }
@@ -41,7 +41,7 @@ export function getInitProviderCatalog(): InitProviderTemplate[] {
         enabled: true,
         type: 'responses',
         baseURL: 'https://api.tabcode.cc/openai',
-        auth: apikeyAuthPlaceholder(),
+        auth: apikeyAuthEnv('TAB_API_KEY'),
         models: {
           'gpt-5.2': { supportsStreaming: true },
           'gpt-5.2-codex': { supportsStreaming: true }
@@ -61,7 +61,7 @@ export function getInitProviderCatalog(): InitProviderTemplate[] {
         type: 'openai',
         baseURL: 'https://open.bigmodel.cn/api/paas/v4',
         compatibilityProfile: 'chat:glm',
-        auth: apikeyAuthPlaceholder(),
+        auth: apikeyAuthEnv('GLM_API_KEY'),
         models: {
           'glm-4.7': { supportsStreaming: true },
           'glm-4.6': { supportsStreaming: true }
@@ -79,7 +79,7 @@ export function getInitProviderCatalog(): InitProviderTemplate[] {
         type: 'anthropic',
         baseURL: 'https://open.bigmodel.cn/api/anthropic',
         process: 'chat',
-        auth: apikeyAuthPlaceholder(),
+        auth: apikeyAuthEnv('GLM_API_KEY'),
         models: {
           'glm-4.6': { supportsStreaming: true }
         }
@@ -95,7 +95,7 @@ export function getInitProviderCatalog(): InitProviderTemplate[] {
         enabled: true,
         type: 'openai',
         baseURL: 'https://api.kimi.com/coding/v1',
-        auth: apikeyAuthPlaceholder(),
+        auth: apikeyAuthEnv('KIMI_API_KEY'),
         headers: { 'User-Agent': 'KimiCLI/1.0' },
         models: {
           'kimi-for-coding': { supportsStreaming: true }
@@ -112,7 +112,7 @@ export function getInitProviderCatalog(): InitProviderTemplate[] {
         enabled: true,
         type: 'openai',
         baseURL: 'https://api-inference.modelscope.cn/v1',
-        auth: apikeyAuthPlaceholder(),
+        auth: apikeyAuthEnv('MODELSCOPE_API_KEY'),
         models: {
           'deepseek-ai/DeepSeek-R1-0528': { supportsStreaming: true }
         }
@@ -184,7 +184,7 @@ export function getInitProviderCatalog(): InitProviderTemplate[] {
         enabled: true,
         type: 'openai',
         baseURL: 'https://api.xiaomimimo.com/v1',
-        auth: apikeyAuthPlaceholder(),
+        auth: apikeyAuthEnv('MIMO_API_KEY'),
         models: {
           'mimo-v2-flash': { supportsStreaming: true }
         }

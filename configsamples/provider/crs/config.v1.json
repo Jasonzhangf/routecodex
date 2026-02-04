@@ -13,7 +13,7 @@
         "baseURL": "https://dapi.micosoft.icu/openai",
         "auth": {
           "type": "apikey",
-          "apiKey": "YOUR_API_KEY_HERE"
+          "apiKey": "${CRS_API_KEY}"
         },
         "models": {
           "gpt-5.1": {},

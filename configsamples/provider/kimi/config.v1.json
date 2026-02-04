@@ -9,7 +9,7 @@
         "baseURL": "https://api.kimi.com/coding/v1",
         "auth": {
           "type": "apikey",
-          "apiKey": "YOUR_API_KEY_HERE"
+          "apiKey": "${KIMI_API_KEY}"
         },
         "models": {
           "kimi-for-coding": {

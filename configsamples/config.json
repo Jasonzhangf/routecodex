@@ -31,7 +31,7 @@
         },
         "auth": {
           "type": "apikey",
-          "apiKey": "YOUR_API_KEY_HERE"
+          "apiKey": "${GLM_API_KEY}"
         }
       },
       "qwen": {
@@ -59,7 +59,7 @@
         "baseURL": "https://api.kimi.com/coding/v1",
         "auth": {
           "type": "apikey",
-          "apiKey": "YOUR_API_KEY_HERE"
+          "apiKey": "${KIMI_API_KEY}"
         },
         "models": {
           "kimi-for-coding": {
@@ -113,7 +113,7 @@
         "baseURL": "https://api.tabcode.cc/openai",
         "auth": {
           "type": "apikey",
-          "apiKey": "YOUR_API_KEY_HERE"
+          "apiKey": "${TAB_API_KEY}"
         },
         "models": {
           "gpt-5.1": {},
@@ -139,7 +139,7 @@
         "baseURL": "https://dapi.micosoft.icu/openai",
         "auth": {
           "type": "apikey",
-          "apiKey": "YOUR_API_KEY_HERE"
+          "apiKey": "${CRS_API_KEY}"
         },
         "models": {
           "gpt-5.1": {},
@@ -165,7 +165,7 @@
         "baseURL": "https://api-inference.modelscope.cn/v1",
         "auth": {
           "type": "apikey",
-          "apiKey": "YOUR_API_KEY_HERE"
+          "apiKey": "${MODELSCOPE_API_KEY}"
         },
         "models": {
           "deepseek-ai/DeepSeek-R1-0528": {
@@ -305,7 +305,7 @@
         },
         "auth": {
           "type": "apikey",
-          "apiKey": "YOUR_API_KEY_HERE"
+          "apiKey": ""
         },
         "config": {
           "responses": {
@@ -320,7 +320,7 @@
         "baseURL": "https://api.xiaomimimo.com/v1",
         "auth": {
           "type": "apikey",
-          "apiKey": "YOUR_API_KEY_HERE"
+          "apiKey": "${MIMO_API_KEY}"
         },
         "models": {
           "mimo-v2-flash": {
