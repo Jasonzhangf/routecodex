@@ -7,6 +7,8 @@ import process from 'node:process';
 // - Expand coverage by adding more suites here (don’t run `jest --all` in CI).
 const routingInstructionTests = [
   'tests/token-daemon/interactive-refresh.spec.ts',
+  'tests/token-daemon/token-daemon.auto-refresh-noninteractive.spec.ts',
+  'tests/commands/oauth-command.qwen-auto.spec.ts',
   'tests/server/runtime/request-executor.single-attempt.spec.ts',
   'tests/server/runtime/executor-provider.retryable.spec.ts',
   'tests/providers/auth/tokenfile-auth.iflow.spec.ts',

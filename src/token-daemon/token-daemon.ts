@@ -337,6 +337,9 @@ export class TokenDaemon {
   ): Promise<void> {
     const providerType: OAuthProviderId = token.provider;
     const rawType = `${providerType}-oauth`;
+    const wantsInteractive = Boolean(camoufoxOptions?.useCamoufox);
+    // IMPORTANT: Token daemon must not pop interactive OAuth during background refresh.
+    // Only explicit auto-authorization flows (iflow/antigravity) opt into interactive mode via Camoufox.
     const runner = () =>
       ensureValidOAuthToken(
         providerType,
@@ -345,8 +348,9 @@ export class TokenDaemon {
           tokenFile: token.filePath
         } as any,
         {
-          openBrowser: true,
-          forceReacquireIfRefreshFails: true
+          openBrowser: wantsInteractive,
+          forceReacquireIfRefreshFails: wantsInteractive,
+          forceReauthorize: false
         }
       );
     if (!camoufoxOptions?.useCamoufox) {

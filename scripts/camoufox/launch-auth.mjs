@@ -341,6 +341,15 @@ async function runAutoFlowWithFallback(kind, options) {
     throw new Error(`Unknown auto mode: ${mode}`);
   } catch (error) {
     if (!options.devMode && isSelectorOrTimeoutError(error)) {
+      if (mode === 'qwen') {
+        await runHeadedQwenManualAssistFlow({
+          url: options.url,
+          profileDir: options.profileDir,
+          camoufoxBinary: options.camoufoxBinary,
+          timeoutMs: Number(process.env.ROUTECODEX_CAMOUFOX_QWEN_TIMEOUT_MS || 10 * 60_000)
+        });
+        return;
+      }
       await runHeadedManualAssistFlow({
         url: options.url,
         profileDir: options.profileDir,
@@ -351,6 +360,58 @@ async function runAutoFlowWithFallback(kind, options) {
       return;
     }
     throw error;
+  }
+}
+
+async function runHeadedQwenManualAssistFlow({ url, profileDir, camoufoxBinary, timeoutMs }) {
+  let firefox;
+  try {
+    ({ firefox } = await import('playwright-core'));
+  } catch (error) {
+    throw new Error(
+      `playwright-core is required for headed qwen manual assist (${error instanceof Error ? error.message : String(error)})`
+    );
+  }
+
+  console.warn(
+    '[camoufox-launch-auth] qwen: falling back to headed mode for manual completion (no selector match).'
+  );
+  cleanupExistingCamoufox(profileDir);
+  const context = await firefox.launchPersistentContext(profileDir, {
+    executablePath: camoufoxBinary,
+    headless: false,
+    acceptDownloads: false
+  });
+
+  let closed = false;
+  const shutdown = async () => {
+    if (closed) return;
+    closed = true;
+    await context.close().catch(() => {});
+  };
+  ['SIGTERM', 'SIGINT', 'SIGHUP'].forEach((signal) => {
+    process.on(signal, () => {
+      void shutdown().finally(() => process.exit(0));
+    });
+  });
+
+  try {
+    const page = context.pages()[0] || (await context.newPage());
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+    console.log('[camoufox-launch-auth] Headed Qwen browser opened. Please complete Qwen authorization manually...');
+
+    const started = Date.now();
+    while (Date.now() - started < timeoutMs) {
+      const pages = context.pages();
+      if (pages.length === 0) {
+        console.log('[camoufox-launch-auth] Browser closed by user, exiting.');
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+    console.warn('[camoufox-launch-auth] Qwen manual assist timed out; exiting.');
+  } finally {
+    await shutdown();
   }
 }
 
@@ -765,8 +826,24 @@ async function runQwenAutoFlow({ url, profileDir, camoufoxBinary, devMode }) {
         }
       }, confirmSelector);
     }
-    console.log('[camoufox-launch-auth] Qwen confirm clicked. Waiting briefly for authorization to settle...');
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    console.log('[camoufox-launch-auth] Qwen confirm clicked. Waiting for authorization to settle...');
+    // Heuristics (device-code flow): we don't get a localhost callback, so wait for either:
+    // - confirm button disappears, or
+    // - URL leaves /authorize, or
+    // - a short settle window elapses.
+    await Promise.race([
+      confirmResult.page
+        .locator(confirmSelector)
+        .first()
+        .waitFor({ state: 'detached', timeout: 30_000 })
+        .catch(() => {}),
+      confirmResult.page
+        .waitForURL((current) => typeof current === 'string' && !String(current).includes('/authorize'), {
+          timeout: 30_000
+        })
+        .catch(() => {}),
+      new Promise((resolve) => setTimeout(resolve, 5000))
+    ]);
   } finally {
     await shutdown();
   }
