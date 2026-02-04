@@ -152,6 +152,59 @@ export function createOauthCommand(): Command {
     .option('--account-text <text>', 'Preferred Gemini account display text to auto-select')
     .action(async (selector: string, options: { dev?: boolean; accountText?: string }) => {
       const token = await TokenDaemon.findTokenBySelector(selector).catch(() => null);
+      if (token?.provider === 'antigravity') {
+        // User often calls gemini-auto with an antigravity token file; route to the correct mode.
+        console.warn(
+          `⚠ gemini-auto received an antigravity token (${token.displayName}); switching to antigravity auto mode. ` +
+            `Use: "oauth antigravity-auto ${selector}" for clarity.`
+        );
+        const prevBrowser = process.env.ROUTECODEX_OAUTH_BROWSER;
+        const prevAutoMode = process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
+        const prevDevMode = process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
+        const prevAccountText = process.env.ROUTECODEX_CAMOUFOX_ACCOUNT_TEXT;
+        process.env.ROUTECODEX_OAUTH_BROWSER = 'camoufox';
+        process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE = 'antigravity';
+        process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM = '1';
+        if (options?.dev) {
+          process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = '1';
+        } else {
+          delete process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
+        }
+        if (options?.accountText) {
+          process.env.ROUTECODEX_CAMOUFOX_ACCOUNT_TEXT = options.accountText;
+        } else {
+          delete process.env.ROUTECODEX_CAMOUFOX_ACCOUNT_TEXT;
+        }
+        try {
+          await interactiveRefresh(selector, { force: true });
+          if (token.alias && token.alias !== 'static') {
+            await clearAntigravityReauthRequired(token.alias);
+          }
+        } finally {
+          if (prevBrowser === undefined) {
+            delete process.env.ROUTECODEX_OAUTH_BROWSER;
+          } else {
+            process.env.ROUTECODEX_OAUTH_BROWSER = prevBrowser;
+          }
+          if (prevAutoMode === undefined) {
+            delete process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
+          } else {
+            process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE = prevAutoMode;
+          }
+          if (prevDevMode === undefined) {
+            delete process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
+          } else {
+            process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = prevDevMode;
+          }
+          if (prevAccountText === undefined) {
+            delete process.env.ROUTECODEX_CAMOUFOX_ACCOUNT_TEXT;
+          } else {
+            process.env.ROUTECODEX_CAMOUFOX_ACCOUNT_TEXT = prevAccountText;
+          }
+          delete process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM;
+        }
+        return;
+      }
       const prevBrowser = process.env.ROUTECODEX_OAUTH_BROWSER;
       const prevAutoMode = process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
       const prevDevMode = process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;

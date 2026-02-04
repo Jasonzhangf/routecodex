@@ -65,6 +65,8 @@ Qwen 的自动化会在授权页自动点击：
 
 > 如果 auto 失败，会自动退到 headed 模式让你手动完成（Qwen 不走 localhost callback，因此不会再“等不到回调一直卡住”）。
 
+WebUI（daemon-admin）里点 “Authorize OAuth” 时也会强制走 Camoufox；若未安装，会返回错误 `camoufox_missing` 并提示安装命令。
+
 Portal 健康检查（`/health`）默认会等待 **300s**（网络慢时避免过早 timeout），可用环境变量调整：
 
 - `ROUTECODEX_OAUTH_PORTAL_READY_TIMEOUT_MS`（总等待）
@@ -75,7 +77,17 @@ Portal 健康检查（`/health`）默认会等待 **300s**（网络慢时避免�
 
 ### 3.1 后台刷新（默认：静默，不弹窗）
 
-默认后台只做 **静默 refresh**（`openBrowser=false`），失败会记录并进入退避，不会突然弹出 Qwen/Gemini 登录页。
+RouteCodex 运行时会启动 token-daemon 做 **后台刷新**（默认提前刷新窗口：到期前 **30 分钟**；可用 `ROUTECODEX_TOKEN_REFRESH_AHEAD_MIN` 覆盖）。
+
+默认情况下后台会先尝试 **静默 refresh**（`openBrowser=false`）。对以下 provider：
+
+- `antigravity`
+- `qwen`
+- `iflow`
+
+当静默 refresh 失败且需要交互式修复时，会尝试用 Camoufox 做 **auto OAuth**（headless），并在 auto 失败时退到 headed 让你手动完成。
+
+为避免“无限认证 / 无限弹窗”，如果连续 **3 次**都等不到用户完成（例如 device-code 超时 / callback 超时），token-daemon 会对该 token **自动暂停**后续后台认证，直到 token 文件被你手动更新（例如执行一次 `${bin} oauth --force ...` 成功写回文件）。
 
 > 需要交互式修复时，使用上面的 `${bin} oauth ...` 显式触发。
 

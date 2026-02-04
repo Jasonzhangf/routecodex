@@ -6,7 +6,9 @@ import type { DaemonAdminRouteOptions } from '../daemon-admin-routes.js';
 import { rejectNonLocalOrUnauthorizedAdmin } from '../daemon-admin-routes.js';
 import { collectTokenSnapshot, readTokenFile, evaluateTokenState, resolveAuthDir } from '../../../../token-daemon/token-utils.js';
 import { ensureValidOAuthToken } from '../../../../providers/auth/oauth-lifecycle.js';
+import { withOAuthRepairEnv } from '../../../../providers/auth/oauth-repair-env.js';
 import type { OAuthAuth, OAuthAuthType } from '../../../../providers/core/api/provider-config.js';
+import { isCamoufoxAvailable } from '../../../../providers/core/config/camoufox-launcher.js';
 
 interface CredentialSummary {
   id: string;
@@ -251,11 +253,53 @@ export function registerCredentialRoutes(app: Application, options: DaemonAdminR
         }
       }
 
-      await ensureValidOAuthToken(provider, auth, {
-        openBrowser,
-        forceReauthorize,
-        forceReacquireIfRefreshFails: true
-      });
+      // WebUI-triggered authorization should not attempt to auto-install Camoufox.
+      // If Camoufox is missing, return an actionable error so user can install it explicitly.
+      const prevAutoInstall = process.env.ROUTECODEX_CAMOUFOX_AUTO_INSTALL;
+      process.env.ROUTECODEX_CAMOUFOX_AUTO_INSTALL = '0';
+      try {
+        if (openBrowser && !isCamoufoxAvailable()) {
+          res.status(412).json({
+            error: {
+              code: 'camoufox_missing',
+              message:
+                'Camoufox is required for OAuth authorization. Install it first: python3 -m pip install --user -U camoufox'
+            }
+          });
+          return;
+        }
+      } finally {
+        if (prevAutoInstall === undefined) {
+          delete process.env.ROUTECODEX_CAMOUFOX_AUTO_INSTALL;
+        } else {
+          process.env.ROUTECODEX_CAMOUFOX_AUTO_INSTALL = prevAutoInstall;
+        }
+      }
+
+      const prevDevMode = process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
+      const restoreDevMode = () => {
+        if (prevDevMode === undefined) {
+          delete process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
+        } else {
+          process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = prevDevMode;
+        }
+      };
+      // For explicit user-triggered authorization, prefer a headed Camoufox window so the user
+      // can complete login/2FA if needed. Auto flow still runs; failures fall back to manual assist.
+      if (openBrowser && !process.env.ROUTECODEX_CAMOUFOX_DEV_MODE) {
+        process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = '1';
+      }
+      try {
+        await withOAuthRepairEnv(provider, async () => {
+          await ensureValidOAuthToken(provider, auth, {
+            openBrowser,
+            forceReauthorize,
+            forceReacquireIfRefreshFails: true
+          });
+        });
+      } finally {
+        restoreDevMode();
+      }
       res.status(200).json({
         ok: true,
         provider,

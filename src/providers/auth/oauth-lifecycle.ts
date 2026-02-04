@@ -1163,9 +1163,14 @@ export async function ensureValidOAuthToken(
     await inFlight.get(cacheKey)!;
     return;
   }
+  // Only treat "open browser" as explicit user intent when caller passed it explicitly.
+  // This prevents background flows (daemon/provider init) from bypassing noRefresh due to env defaults.
+  const openBrowserRequested = opts.openBrowser === true;
   // 当 opts.forceReauthorize 显式为 true 时，跳过节流检查，
   // 确保来自上游 401/406 等认证错误的修复请求不会被初始化阶段的调用吞掉。
-  if (!opts.forceReauthorize && shouldThrottle(cacheKey)) {
+  // Explicit user-triggered OAuth (openBrowser=true) must also bypass throttle,
+  // otherwise repeated "Authorize" clicks in WebUI can become a silent no-op.
+  if (!opts.forceReauthorize && !openBrowserRequested && shouldThrottle(cacheKey)) {
     return;
   }
 
@@ -1249,7 +1254,7 @@ export async function ensureValidOAuthToken(
     const tokenState = evaluateTokenState(token, providerType);
     const noRefresh = hasNoRefreshFlag(token);
 
-    if (noRefresh) {
+    if (noRefresh && !forceReauth && !openBrowserRequested) {
       logOAuthDebug(
         `[OAuth] norefresh flag set for provider=${providerType} tokenFile=${tokenFilePath} - skip auto-refresh and re-authorization.`
       );

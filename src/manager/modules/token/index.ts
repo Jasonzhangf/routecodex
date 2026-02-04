@@ -49,8 +49,8 @@ export class TokenManagerModule implements ManagerModule {
     }
 
     const intervalSec = readPositiveNumberFromEnv('ROUTECODEX_TOKEN_INTERVAL_SEC', 60);
-    // 默认不提前刷新；仅在 token 已过期时刷新。
-    const aheadMinutes = readPositiveNumberFromEnv('ROUTECODEX_TOKEN_REFRESH_AHEAD_MIN', 0);
+    // 默认提前 30 分钟刷新：避免临近到期时触发“真实请求阻塞 / 403/401 连锁失败”。
+    const aheadMinutes = readPositiveNumberFromEnv('ROUTECODEX_TOKEN_REFRESH_AHEAD_MIN', 30);
     this.daemon = new TokenDaemon({
       intervalMs: intervalSec * 1000,
       refreshAheadMinutes: aheadMinutes

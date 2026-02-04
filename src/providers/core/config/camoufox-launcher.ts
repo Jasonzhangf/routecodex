@@ -189,6 +189,10 @@ function runCamoufoxPathCheck(): boolean {
   }
 }
 
+export function isCamoufoxAvailable(): boolean {
+  return runCamoufoxPathCheck();
+}
+
 function installCamoufox(): boolean {
   console.warn('[OAuth] Camoufox not detected. Installing via python3 -m pip ...');
   try {
@@ -204,6 +208,18 @@ function installCamoufox(): boolean {
 function ensureCamoufoxInstalled(): boolean {
   if (runCamoufoxPathCheck()) {
     return true;
+  }
+  const autoInstallRaw = String(
+    process.env.ROUTECODEX_CAMOUFOX_AUTO_INSTALL ||
+      process.env.RCC_CAMOUFOX_AUTO_INSTALL ||
+      '1'
+  )
+    .trim()
+    .toLowerCase();
+  const autoInstallEnabled = autoInstallRaw !== '0' && autoInstallRaw !== 'false' && autoInstallRaw !== 'no';
+  if (!autoInstallEnabled) {
+    logOAuthDebug('[OAuth] Camoufox: auto-install disabled; camoufox not available');
+    return false;
   }
   logOAuthDebug('[OAuth] Camoufox: python module not available, attempting install...');
   const installed = installCamoufox();

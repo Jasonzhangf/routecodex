@@ -43,7 +43,8 @@ const USER_TIMEOUT_PATTERNS = [
   'authorization timed out',
   'authorization flow expired',
   'user did not complete',
-  'callback timed out'
+  'callback timed out',
+  'oauth callback timeout'
 ];
 let camoufoxEnabledCache: boolean | null = null;
 
@@ -300,6 +301,8 @@ export class TokenDaemon {
         await (this as any).runIflowAutoAuthorization(token);
       } else if (providerType === 'antigravity') {
         await (this as any).runAntigravityAutoAuthorization(token);
+      } else if (providerType === 'qwen') {
+        await (this as any).runQwenAutoAuthorization(token);
       } else {
         await (this as any).ensureTokenWithOverrides(token);
       }
@@ -400,6 +403,28 @@ export class TokenDaemon {
       console.warn(
         chalk.yellow('!'),
         `Camoufox auto OAuth failed for antigravity (${token.displayName}): ${message}. Falling back to manual mode.`
+      );
+    }
+    await this.ensureTokenWithOverrides(token, {
+      useCamoufox: true,
+      autoMode: null,
+      devMode: true
+    });
+  }
+
+  private async runQwenAutoAuthorization(token: TokenDescriptor): Promise<void> {
+    try {
+      await this.ensureTokenWithOverrides(token, {
+        useCamoufox: true,
+        autoMode: 'qwen',
+        devMode: false
+      });
+      return;
+    } catch (autoError) {
+      const message = autoError instanceof Error ? autoError.message : String(autoError);
+      console.warn(
+        chalk.yellow('!'),
+        `Camoufox auto OAuth failed for qwen (${token.displayName}): ${message}. Falling back to manual mode.`
       );
     }
     await this.ensureTokenWithOverrides(token, {

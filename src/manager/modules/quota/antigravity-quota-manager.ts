@@ -63,9 +63,26 @@ export class QuotaManagerModule implements ManagerModule {
 
   private quotaStorePath: string | null = null;
 
+  private resolveHomeDir(): string {
+    const envHome = typeof process.env.HOME === 'string' ? process.env.HOME.trim() : '';
+    if (envHome) {
+      return envHome;
+    }
+    return homedir();
+  }
+
   async init(context: ManagerContext): Promise<void> {
     this.snapshot = this.loadSnapshotFromDisk();
     this.quotaRoutingEnabled = context.quotaRoutingEnabled !== false;
+
+    // IMPORTANT: prune persisted quota aliases using current token files on disk.
+    // We must not “invent” aliases; admin UI should only show aliases that have a token file.
+    // This is cheap (local fs read) and prevents stale entries like antigravity://a1/... lingering forever.
+    try {
+      await this.syncAntigravityTokensFromDisk();
+    } catch {
+      // best-effort; never block server init
+    }
 
     // Core-owned quota manager: host provides only persistence I/O.
     // When quota routing is enabled, this must be available; otherwise Virtual Router quotaView becomes non-deterministic.
@@ -529,7 +546,7 @@ export class QuotaManagerModule implements ManagerModule {
   }
 
   private resolveQuotaManagerDir(): string {
-    const base = path.join(homedir(), '.routecodex', 'quota');
+    const base = path.join(this.resolveHomeDir(), '.routecodex', 'quota');
     try {
       fs.mkdirSync(base, { recursive: true });
     } catch {
@@ -632,6 +649,11 @@ export class QuotaManagerModule implements ManagerModule {
     }
     if (!matches.length) {
       this.antigravityTokens.clear();
+      // No token files -> no valid aliases -> drop any persisted snapshot rows.
+      if (this.snapshot && Object.keys(this.snapshot).length) {
+        this.snapshot = {};
+        this.saveSnapshotToDisk();
+      }
       return;
     }
 
@@ -687,10 +709,31 @@ export class QuotaManagerModule implements ManagerModule {
         this.saveSnapshotToDisk();
       }
     }
+
+    // Cleanup stale snapshot keys for aliases that no longer exist on disk.
+    // This prevents “phantom aliases” (e.g. a1) from showing up in admin UI when the token file is gone.
+    if (this.snapshot && typeof this.snapshot === 'object') {
+      const allowedAliases = new Set<string>(Array.from(this.antigravityTokens.keys()));
+      const rawEntries = Object.entries(this.snapshot);
+      let changed = false;
+      const cleaned: Record<string, QuotaRecord> = {};
+      for (const [key, value] of rawEntries) {
+        const parsed = this.parseAntigravitySnapshotKey(key);
+        if (parsed && !allowedAliases.has(parsed.alias)) {
+          changed = true;
+          continue;
+        }
+        cleaned[key] = value;
+      }
+      if (changed) {
+        this.snapshot = cleaned;
+        this.saveSnapshotToDisk();
+      }
+    }
   }
 
   private resolveStatePath(): string {
-    const baseDir = path.join(homedir(), '.routecodex', 'state', 'quota');
+    const baseDir = path.join(this.resolveHomeDir(), '.routecodex', 'state', 'quota');
     try {
       fs.mkdirSync(baseDir, { recursive: true });
     } catch {

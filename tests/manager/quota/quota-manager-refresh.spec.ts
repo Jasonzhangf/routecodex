@@ -151,4 +151,40 @@ describe('QuotaManagerModule refresh behavior', () => {
       await mod.stop();
     }
   });
+
+  it('prunes persisted aliases that have no token file (no phantom alias)', async () => {
+    // Simulate: legacy state has alias a1, but current token scan only has alias b2.
+    scanProviderTokenFiles.mockResolvedValueOnce([{ filePath: '/tmp/token2.json', sequence: 2, alias: 'b2' }]);
+
+    const { QuotaManagerModule } = await import('../../../src/manager/modules/quota/index.js');
+    const mod = new QuotaManagerModule();
+
+    const snapPath = path.join(tempHome as string, '.routecodex', 'state', 'quota', 'antigravity.json');
+    await fs.mkdir(path.dirname(snapPath), { recursive: true });
+    await fs.writeFile(
+      snapPath,
+      JSON.stringify(
+        {
+          'antigravity://a1/claude-sonnet-4-5': { remainingFraction: 1, fetchedAt: Date.now() }
+        },
+        null,
+        2
+      ),
+      'utf8'
+    );
+
+    await mod.init({ serverId: 'test' } as any);
+
+    try {
+      const snapRaw = mod.getRawSnapshot() as Record<string, unknown>;
+      const keys = Object.keys(snapRaw);
+      expect(keys.some((k) => k.startsWith('antigravity://a1/'))).toBe(false);
+
+      // Persisted file should also be cleaned.
+      const onDisk = JSON.parse(await fs.readFile(snapPath, 'utf8')) as Record<string, unknown>;
+      expect(Object.keys(onDisk).some((k) => k.startsWith('antigravity://a1/'))).toBe(false);
+    } finally {
+      await mod.stop();
+    }
+  });
 });

@@ -199,25 +199,29 @@ export abstract class BaseOAuthFlowStrategy {
     const portalUrl = this.buildTokenPortalUrl(targetUrl);
     const resolvedUrl = portalUrl || targetUrl;
 
-    console.log('Opening browser for authentication...');
-    if (portalUrl) {
-      console.log(`Portal URL: ${resolvedUrl}`);
-      console.log(`OAuth URL: ${targetUrl}`);
-    } else {
-      console.log(`URL: ${targetUrl}`);
-    }
-    if (userCode) {
-      console.log(`User Code: ${userCode}`);
+    const shouldOpen = options.openBrowser !== false;
+    if (shouldOpen) {
+      console.log('Opening browser for authentication...');
+      if (portalUrl) {
+        console.log(`Portal URL: ${resolvedUrl}`);
+        console.log(`OAuth URL: ${targetUrl}`);
+      } else {
+        console.log(`URL: ${targetUrl}`);
+      }
+      if (userCode) {
+        console.log(`User Code: ${userCode}`);
+      }
     }
 
-    if (options.openBrowser !== false) {
+    if (shouldOpen) {
       if (portalUrl) {
         await this.waitForPortalReady(portalUrl);
       }
 
       let opened = false;
       const envPref = (process.env.ROUTECODEX_OAUTH_BROWSER || '').toLowerCase();
-      const preferCamoufox = envPref ? envPref === 'camoufox' : true;
+      const camoufoxExplicit = envPref === 'camoufox';
+      const preferCamoufox = envPref ? camoufoxExplicit : true;
 
       if (preferCamoufox) {
         const meta = this.extractTokenPortalMetadata(portalUrl);
@@ -230,6 +234,12 @@ export abstract class BaseOAuthFlowStrategy {
         } catch {
           opened = false;
         }
+      }
+
+      if (!opened && camoufoxExplicit) {
+        throw new Error(
+          'Camoufox OAuth is required but Camoufox is not available. Please install Camoufox first (python3 -m pip install --user -U camoufox) and retry.'
+        );
       }
 
       if (!opened) {
