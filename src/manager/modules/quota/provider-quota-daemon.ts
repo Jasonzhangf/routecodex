@@ -59,6 +59,7 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
   async reset(options: { persist?: boolean } = {}): Promise<{ resetAt: number; persisted: boolean }> {
     const nowMs = Date.now();
     this.quotaStates = new Map();
+    this.modelBackoff.clearAll();
 
     if (this.staticConfigs.size) {
       for (const [providerKey, cfg] of this.staticConfigs.entries()) {
@@ -85,6 +86,7 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
     }
     const nowMs = Date.now();
     const next = createInitialQuotaState(key, this.staticConfigs.get(key), nowMs);
+    this.modelBackoff.recordSuccess(key);
     this.quotaStates.set(key, next);
     try {
       await saveProviderQuotaSnapshot(this.toSnapshotObject(), new Date(nowMs));
@@ -115,6 +117,7 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
 	      lastErrorAtMs: null,
 	      consecutiveErrorCount: 0
 	    };
+    this.modelBackoff.recordSuccess(key);
     this.quotaStates.set(key, next);
     try {
       await saveProviderQuotaSnapshot(this.toSnapshotObject(), new Date(nowMs));

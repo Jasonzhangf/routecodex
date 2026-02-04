@@ -418,6 +418,51 @@ describe('ProviderQuotaDaemonModule', () => {
     await mod.stop();
   });
 
+  it('resetProvider clears capacity backoff (modelBackoff) so quotaView no longer blocks selection', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-01-16T00:00:00.000Z'));
+    const now = Date.now();
+
+    const mod = new ProviderQuotaDaemonModule();
+    await mod.init({ serverId: 'test' });
+    await mod.start();
+
+    const center = await getProviderErrorCenter();
+    center.emit({
+      code: 'HTTP_429',
+      message: 'HTTP 429: {"error":{"message":"No capacity available for model gpt-5.1"}}',
+      stage: 'provider.provider.http',
+      status: 429,
+      recoverable: false,
+      timestamp: now,
+      runtime: {
+        requestId: 'req_capacity',
+        providerKey: 'tab.default.gpt-5.1',
+        providerId: 'tab'
+      },
+      details: {}
+    } as any);
+
+    await jest.advanceTimersByTimeAsync(5);
+
+    const view1 = mod.getQuotaView();
+    expect(view1).not.toBeNull();
+    const entry1 = view1!('tab.default.gpt-5.1');
+    expect(entry1?.reason).toBe('cooldown:model-capacity');
+    expect(typeof entry1?.cooldownUntil).toBe('number');
+    expect((entry1?.cooldownUntil as number) > now).toBe(true);
+
+    const reset = await mod.resetProvider('tab.default.gpt-5.1');
+    expect(reset).not.toBeNull();
+
+    const view2 = mod.getQuotaView();
+    const entry2 = view2!('tab.default.gpt-5.1');
+    expect(entry2?.reason).toBe('ok');
+    expect(entry2?.cooldownUntil ?? null).toBeNull();
+
+    await mod.stop();
+  });
+
   it('blacklists apikey providers on HTTP 402 until upstream resetAt', async () => {
     jest.useFakeTimers();
     jest.setSystemTime(new Date('2026-02-02T08:00:00.000Z'));

@@ -202,6 +202,10 @@ export class ProviderModelBackoffTracker {
     this.states.delete(modelKey);
   }
 
+  clearAll(): void {
+    this.states.clear();
+  }
+
   getActiveCooldownUntil(providerKey: string, nowMs: number): number | null {
     const modelKey = resolveModelKey(providerKey);
     if (!modelKey) {
