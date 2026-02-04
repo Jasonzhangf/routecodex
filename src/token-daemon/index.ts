@@ -339,7 +339,32 @@ export async function printTokens(json = false): Promise<void> {
   console.log(rows.join('\n'));
 }
 
-export async function interactiveRefresh(selector: string): Promise<void> {
+type InteractiveRefreshOptions = {
+  force?: boolean;
+};
+
+function configHasProviderId(userConfig: unknown, providerId: string): boolean {
+  const id = providerId.trim().toLowerCase();
+  if (!id) {
+    return false;
+  }
+  const cfg = (userConfig ?? {}) as any;
+  const vr = (cfg.virtualrouter ?? cfg.virtualRouter ?? cfg.router ?? cfg) as any;
+  const providers = vr?.providers;
+  if (Array.isArray(providers)) {
+    return providers.some((p: any) => String(p?.id || '').trim().toLowerCase() === id);
+  }
+  if (providers && typeof providers === 'object') {
+    return Object.entries(providers).some(([key, value]) => {
+      const v = value as any;
+      const pid = String(v?.id ?? key ?? '').trim().toLowerCase();
+      return pid === id;
+    });
+  }
+  return false;
+}
+
+export async function interactiveRefresh(selector: string, options: InteractiveRefreshOptions = {}): Promise<void> {
   const token = await TokenDaemon.findTokenBySelector(selector);
   if (!token) {
     console.error(chalk.red('✗'), `No token found for selector: ${selector}`);
@@ -354,18 +379,49 @@ export async function interactiveRefresh(selector: string): Promise<void> {
   }
 
   const label = formatTokenLabel(token);
+  const force = Boolean(options?.force);
+  if (!force) {
+    // If the token is still valid and not close to expiry, avoid repeatedly forcing the user
+    // into interactive OAuth flow (this looks like "infinite reauth" to users).
+    const msLeft = token.state.msUntilExpiry;
+    const status = token.state.status;
+    const safeWindowMs = 10 * 60_000;
+    if (status === 'valid' && (msLeft === null || msLeft > safeWindowMs)) {
+      console.log(chalk.green('✓'), `Token is still valid; skip interactive OAuth (${label})`);
+      // Still provide a hint when qwen token exists but user config has no qwen provider.
+      if (token.provider === 'qwen') {
+        try {
+          const { userConfig } = await loadRouteCodexConfig();
+          if (!configHasProviderId(userConfig, 'qwen')) {
+            console.warn(
+              chalk.yellow('⚠'),
+              'Your user config has no "qwen" provider entry. This token will not be used until you add a qwen provider.'
+            );
+          }
+        } catch {
+          // ignore config load failures
+        }
+      }
+      return;
+    }
+  }
+
   console.log('');
-  console.log(chalk.yellow('⚠'), '即将为以下 Token 打开浏览器进行 OAuth 登录:');
+  console.log(
+    chalk.yellow('⚠'),
+    force ? '即将为以下 Token 打开浏览器进行 OAuth 重新授权:' : '即将为以下 Token 执行 OAuth 刷新（必要时打开浏览器）:'
+  );
   console.log(`  Provider : ${token.provider}`);
   console.log(`  Sequence : ${token.sequence}`);
   console.log(`  Alias    : ${token.alias || 'default'}`);
   console.log(`  File     : ${token.filePath}`);
   console.log(`  显示名称 : ${label}`);
+  console.log(`  Status   : ${token.state.status}`);
   console.log('');
 
   const autoConfirm = String(process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM || '0') === '1';
   if (!autoConfirm) {
-    const proceed = await askYesNo('继续并打开浏览器进行认证吗？ (y/N) ');
+    const proceed = await askYesNo(force ? '继续并打开浏览器进行重新授权吗？ (y/N) ' : '继续（必要时打开浏览器）进行刷新吗？ (y/N) ');
     if (!proceed) {
       console.log(chalk.blue('ℹ'), '已取消重新认证');
       return;
@@ -380,11 +436,25 @@ export async function interactiveRefresh(selector: string): Promise<void> {
     // best-effort: failure to load config should not block interactive re-auth;
     // in that case, OAuth will fall back to default browser behavior.
   }
+  // If token exists but config doesn't reference the provider, users will keep reauthing without effect.
+  if (token.provider === 'qwen') {
+    try {
+      const { userConfig } = await loadRouteCodexConfig();
+      if (!configHasProviderId(userConfig, 'qwen')) {
+        console.warn(
+          chalk.yellow('⚠'),
+          'Your user config has no "qwen" provider entry. This token will not be used until you add a qwen provider.'
+        );
+      }
+    } catch {
+      // ignore
+    }
+  }
 
   const providerType = token.provider;
   const rawType = `${providerType}-oauth`;
 
-  console.log(chalk.blue('ℹ'), '正在启动 OAuth 流程，请在浏览器中完成登录...');
+  console.log(chalk.blue('ℹ'), force ? '正在启动 OAuth 重新授权流程，请在浏览器中完成登录...' : '正在尝试刷新 Token（必要时会打开浏览器）...');
   const tokenMtimeBefore = await getTokenFileMtime(token.filePath);
   const startedAt = Date.now();
   try {
@@ -397,7 +467,7 @@ export async function interactiveRefresh(selector: string): Promise<void> {
       } as any,
       {
         openBrowser: true,
-        forceReauthorize: true,
+        forceReauthorize: force,
         forceReacquireIfRefreshFails: true
       }
     );

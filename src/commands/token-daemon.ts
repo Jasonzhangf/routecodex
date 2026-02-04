@@ -36,7 +36,7 @@ export function createTokenDaemonCommand(): Command {
         cmd.outputHelp();
         return;
       }
-      await interactiveRefresh(selector);
+      await interactiveRefresh(selector, { force: true });
     });
 
   cmd
@@ -113,7 +113,7 @@ export function createTokenDaemonCommand(): Command {
       'Token selector: file basename, full path, or provider id (e.g. "iflow-oauth-1-work.json")'
     )
     .action(async (selector: string) => {
-      await interactiveRefresh(selector);
+      await interactiveRefresh(selector, { force: true });
     });
 
   return cmd;

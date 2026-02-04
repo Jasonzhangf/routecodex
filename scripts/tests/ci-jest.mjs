@@ -6,6 +6,7 @@ import process from 'node:process';
 // - Prefer pure unit tests / mock-provider tests (no external network).
 // - Expand coverage by adding more suites here (don’t run `jest --all` in CI).
 const routingInstructionTests = [
+  'tests/token-daemon/interactive-refresh.spec.ts',
   'tests/server/runtime/request-executor.single-attempt.spec.ts',
   'tests/server/runtime/executor-provider.retryable.spec.ts',
   'tests/providers/auth/tokenfile-auth.iflow.spec.ts',
