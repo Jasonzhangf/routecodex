@@ -172,6 +172,51 @@ export function registerStatusRoutes(app: Application, options: DaemonAdminRoute
     }
     const mod = daemon.getModule(id) as (ManagerModule & { reset?: (opts?: unknown) => Promise<unknown> }) | undefined;
     if (!mod) {
+      // Back-compat for daemon-admin UI:
+      // - UI uses module id "provider-quota", but current runtime registers quota manager under id "quota".
+      // - When "provider-quota" module is absent, provide an explicit fallback that clears quotaView cooldown/blacklist
+      //   by calling quota.resetProvider(...) on all known providerKeys.
+      if (id === 'provider-quota') {
+        const quotaMod = daemon.getModule('quota') as
+          | (ManagerModule & {
+              getAdminSnapshot?: () => Record<string, unknown>;
+              resetProvider?: (providerKey: string) => unknown;
+              persistNow?: () => Promise<unknown>;
+              refreshNow?: () => Promise<unknown>;
+            })
+          | undefined;
+        const canResetAll =
+          quotaMod &&
+          typeof quotaMod.getAdminSnapshot === 'function' &&
+          typeof quotaMod.resetProvider === 'function';
+        if (canResetAll) {
+          try {
+            const snapshot = (quotaMod as any).getAdminSnapshot?.() ?? {};
+            const providerKeys = Object.keys(snapshot);
+            for (const providerKey of providerKeys) {
+              await Promise.resolve((quotaMod as any).resetProvider(providerKey));
+            }
+            await (quotaMod as any).persistNow?.().catch(() => {});
+            const quotaRefresh = await (quotaMod as any).refreshNow?.().catch(() => null);
+            res.status(200).json({
+              ok: true,
+              id,
+              action: 'reset',
+              resetAt: Date.now(),
+              fallback: {
+                kind: 'quota.reset-all',
+                providerCount: providerKeys.length,
+                ...(quotaRefresh ? { quotaRefresh } : {})
+              }
+            });
+            return;
+          } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : String(error);
+            res.status(500).json({ error: { message, code: 'module_reset_failed' } });
+            return;
+          }
+        }
+      }
       res.status(404).json({ error: { message: 'module not found', code: 'not_found' } });
       return;
     }
