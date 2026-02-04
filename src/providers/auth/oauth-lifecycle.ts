@@ -1299,9 +1299,23 @@ export async function ensureValidOAuthToken(
 export async function handleUpstreamInvalidOAuthToken(
   providerType: string,
   auth: OAuthAuth,
-  upstreamError: unknown
+  upstreamError: unknown,
+  options?: {
+    /**
+     * When false, interactive OAuth repair must not block the current request.
+     * The repair flow will be started in the background (subject to cooldown),
+     * and this function will return `false` so the router can failover.
+     */
+    allowBlocking?: boolean;
+    /**
+     * Test-only injection: override ensureValidOAuthToken implementation.
+     */
+    ensureValidOAuthToken?: typeof ensureValidOAuthToken;
+  }
 ): Promise<boolean> {
   const pt = providerType.toLowerCase();
+  const allowBlocking = options?.allowBlocking !== false;
+  const ensureValid = options?.ensureValidOAuthToken ?? ensureValidOAuthToken;
   try {
     if (!shouldTriggerInteractiveOAuthRepair(providerType, upstreamError)) {
       return false;
@@ -1314,29 +1328,62 @@ export async function handleUpstreamInvalidOAuthToken(
           : String(upstreamError || '');
     const lower = msg.toLowerCase();
     const statusCode = extractStatusCode(upstreamError);
-    const cooldownReason: OAuthRepairCooldownReason | null =
-      statusCode === 403 && isGoogleAccountVerificationRequiredMessage(lower) ? 'google_verify' : null;
     const tokenFilePath = resolveTokenFilePath(auth as ExtendedOAuthAuth, providerType);
-    if (cooldownReason) {
-      const gate = await shouldSkipInteractiveOAuthRepair({
-        providerType,
-        tokenFile: tokenFilePath,
-        reason: cooldownReason
-      });
-      if (gate.skip) {
-        const msLeft = typeof gate.msLeft === 'number' ? gate.msLeft : 0;
-        console.warn(
-          `[OAuth] interactive repair skipped due to cooldown (provider=${providerType} status=403 reason=${cooldownReason} msLeft=${msLeft} tokenFile=${tokenFilePath})`
-        );
-        return false;
-      }
-      // Mark immediately so repeated 403s don't cause infinite auth loops within a short window.
-      await markInteractiveOAuthRepairAttempt({
-        providerType,
-        tokenFile: tokenFilePath,
-        reason: cooldownReason
-      });
+    const cooldownReason: OAuthRepairCooldownReason =
+      statusCode === 403 && isGoogleAccountVerificationRequiredMessage(lower) ? 'google_verify' : 'generic';
+    const gate = await shouldSkipInteractiveOAuthRepair({
+      providerType,
+      tokenFile: tokenFilePath,
+      reason: cooldownReason
+    });
+    if (gate.skip) {
+      const msLeft = typeof gate.msLeft === 'number' ? gate.msLeft : 0;
+      console.warn(
+        `[OAuth] interactive repair skipped due to cooldown (provider=${providerType} status=${statusCode ?? 'unknown'} reason=${cooldownReason} msLeft=${msLeft} tokenFile=${tokenFilePath})`
+      );
+      return false;
     }
+    // Mark immediately so repeated auth failures don't cause infinite auth loops within a short window.
+    await markInteractiveOAuthRepairAttempt({
+      providerType,
+      tokenFile: tokenFilePath,
+      reason: cooldownReason
+    });
+
+    // Non-blocking server semantics:
+    // - Try silent refresh first (fast path).
+    // - If refresh fails or interactive is required (e.g. 403 verify), kick off interactive flow in background.
+    // - Return false so Virtual Router can failover immediately.
+    if (!allowBlocking) {
+      if (!(statusCode === 403 && cooldownReason === 'google_verify')) {
+        try {
+          await withOAuthRepairEnv(providerType, async () => {
+            await ensureValid(providerType, auth, {
+              forceReacquireIfRefreshFails: false,
+              openBrowser: false,
+              forceReauthorize: false
+            });
+          });
+          return true;
+        } catch {
+          // ignore silent refresh errors; fall through to background interactive flow
+        }
+      }
+      const interactiveOpts: EnsureOpts = {
+        forceReacquireIfRefreshFails: true,
+        openBrowser: true,
+        // 上游已经明确返回“认证失效”（包括 iflow 的 406/439），
+        // 此时强制跳过节流并允许走完整 OAuth 流程。
+        forceReauthorize: pt === 'gemini' || pt === 'gemini-cli' || pt === 'antigravity' || pt === 'iflow' || pt === 'qwen'
+      };
+      void withOAuthRepairEnv(providerType, async () => {
+        await ensureValid(providerType, auth, interactiveOpts);
+      }).catch(() => {
+        // background repair failure must never block requests
+      });
+      return false;
+    }
+
     const opts: EnsureOpts = {
       forceReacquireIfRefreshFails: true,
       openBrowser: true,
@@ -1345,7 +1392,7 @@ export async function handleUpstreamInvalidOAuthToken(
       forceReauthorize: pt === 'gemini' || pt === 'gemini-cli' || pt === 'antigravity' || pt === 'iflow' || pt === 'qwen'
     };
     await withOAuthRepairEnv(providerType, async () => {
-      await ensureValidOAuthToken(providerType, auth, opts);
+      await ensureValid(providerType, auth, opts);
     });
     return true;
   } catch {

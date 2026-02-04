@@ -649,7 +649,10 @@ export class HttpTransportProvider extends BaseProvider {
       const shouldRetry = await handleUpstreamInvalidOAuthToken(
         this.oauthProviderId || this.providerType,
         providerAuth as OAuthAuthExtended,
-        error
+        error,
+        // Never block server requests waiting for interactive OAuth.
+        // The repair flow (if needed) will run in background and Virtual Router should failover immediately.
+        { allowBlocking: false }
       );
       if (!shouldRetry) {
         return undefined;
