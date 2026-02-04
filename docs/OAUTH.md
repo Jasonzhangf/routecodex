@@ -93,6 +93,10 @@ Portal 健康检查（`/health`）默认会等待 **300s**（网络慢时避免�
 
 - `ROUTECODEX_OAUTH_GOOGLE_VERIFY_COOLDOWN_MS`（默认 `1800000`）
 
+另外，所有 **交互式 OAuth repair**（例如持续 401/403 导致的自动 reauth）也有统一冷却，避免在网络抖动或上游风控期内“疯狂弹窗/疯狂认证”：
+
+- `ROUTECODEX_OAUTH_INTERACTIVE_COOLDOWN_MS`（默认 `1800000`）
+
 ### 3.2 显式刷新/重登（你主动触发）
 
 - 刷新（有效就跳过）：`${bin} oauth <selector>`

@@ -323,17 +323,24 @@ export class TokenDaemon {
       const failureInfo = (this as any).classifyRefreshFailure(error);
       const isUserTimeout = failureInfo.isUserTimeout;
       const isPermanentAuthFailure = failureInfo.isPermanentAuthFailure;
-      if (isUserTimeout) {
-        console.warn(
-          chalk.yellow('!'),
-          `Auto OAuth timed out waiting for user action (${providerType} ${token.displayName})`
-        );
-      }
+      // Permanent refresh failures should not spam logs nor block traffic.
+      // Best-effort: persist a per-token "noRefresh" flag so future daemon runs won't keep retrying.
       if (isPermanentAuthFailure) {
-        console.warn(
-          chalk.yellow('!'),
-          `Auto-refresh disabled for ${providerType} (${token.displayName}) due to permanent refresh failure. Re-auth required.`
-        );
+        await maybeMarkTokenFileNoRefresh(token.filePath);
+      }
+      if (LOG_ENABLED || DEBUG_ENABLED) {
+        if (isUserTimeout) {
+          console.warn(
+            chalk.yellow('!'),
+            `Auto OAuth timed out waiting for user action (${providerType} ${token.displayName})`
+          );
+        }
+        if (isPermanentAuthFailure) {
+          console.warn(
+            chalk.yellow('!'),
+            `Auto-refresh disabled for ${providerType} (${token.displayName}) due to permanent refresh failure. Re-auth required.`
+          );
+        }
       }
       await this.recordHistoryEvent(token, 'failure', startedAt, {
         error,
@@ -479,7 +486,8 @@ export class TokenDaemon {
       (normalized.includes('oauth error: invalid_request') &&
         (normalized.includes('refresh token') ||
           normalized.includes('refresh_token') ||
-          normalized.includes('client_id')));
+          normalized.includes('client_id') ||
+          normalized.includes('invalid refresh token')));
     return { message, isUserTimeout, isPermanentAuthFailure };
   }
 
@@ -744,6 +752,35 @@ async function getTokenFileMtime(filePath: string): Promise<number | null> {
     return stats.mtimeMs;
   } catch {
     return null;
+  }
+}
+
+async function maybeMarkTokenFileNoRefresh(filePath: string): Promise<void> {
+  try {
+    if (!filePath) {
+      return;
+    }
+    const raw = await fs.readFile(filePath, 'utf8').catch(() => '');
+    if (!raw.trim()) {
+      return;
+    }
+    const parsed = JSON.parse(raw) as any;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return;
+    }
+    const already =
+      parsed.norefresh === true ||
+      parsed.noRefresh === true ||
+      (typeof parsed.norefresh === 'string' && parsed.norefresh.trim().toLowerCase() === 'true') ||
+      (typeof parsed.noRefresh === 'string' && parsed.noRefresh.trim().toLowerCase() === 'true');
+    if (already) {
+      return;
+    }
+    parsed.norefresh = true;
+    parsed.noRefresh = true;
+    await fs.writeFile(filePath, `${JSON.stringify(parsed, null, 2)}\n`, 'utf8');
+  } catch {
+    // best-effort: never block token refresh flow
   }
 }
 

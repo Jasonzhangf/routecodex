@@ -77,10 +77,13 @@ function resolveCooldownMs(reason: OAuthRepairCooldownReason): number {
     return Number.isFinite(parsed) && parsed > 0 ? parsed : 30 * 60_000;
   }
   const raw = String(
-    process.env.ROUTECODEX_OAUTH_INTERACTIVE_COOLDOWN_MS || process.env.RCC_OAUTH_INTERACTIVE_COOLDOWN_MS || '60000'
+    process.env.ROUTECODEX_OAUTH_INTERACTIVE_COOLDOWN_MS ||
+      process.env.RCC_OAUTH_INTERACTIVE_COOLDOWN_MS ||
+      // 默认 30 分钟：避免“持续 401/403 导致无限弹窗/无限认证”。
+      '1800000'
   ).trim();
   const parsed = Number.parseInt(raw, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 60_000;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 30 * 60_000;
 }
 
 export async function shouldSkipInteractiveOAuthRepair(args: {
@@ -128,4 +131,3 @@ export async function markInteractiveOAuthRepairAttempt(args: {
   state.updatedAt = Date.now();
   await writeState(state);
 }
-

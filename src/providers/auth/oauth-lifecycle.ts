@@ -85,7 +85,9 @@ function defaultTokenFile(providerType: string): string {
     return path.join(home, '.iflow', 'oauth_creds.json');
   }
   if (providerType === 'qwen') {
-    return path.join(home, '.routecodex', 'auth', 'qwen-oauth.json');
+    // Align with TokenFileAuthProvider + token-daemon defaults:
+    // keep a stable, well-known Qwen token file for alias="default".
+    return path.join(home, '.routecodex', 'auth', 'qwen-oauth-1-default.json');
   }
   if (isGeminiCliFamily(providerType)) {
     const file = providerType.toLowerCase() === 'antigravity'
@@ -119,7 +121,22 @@ function resolveTokenFilePath(auth: ExtendedOAuthAuth, providerType: string): st
   const authDir = path.join(homeDir, '.routecodex', 'auth');
   const pattern = new RegExp(`^${providerType}-oauth-(\\d+)(?:-(.+))?\\.json$`, 'i');
 
+  const pt = providerType.toLowerCase();
+  // Qwen: keep a stable "default" file name whenever possible.
+  if (pt === 'qwen' && alias === 'default') {
+    const pinned = path.join(authDir, 'qwen-oauth-1-default.json');
+    try {
+      if (fsSync.existsSync(pinned)) {
+        auth.tokenFile = pinned;
+        return pinned;
+      }
+    } catch {
+      // ignore and fall back to scanning
+    }
+  }
+
   let existingPath: string | null = null;
+  let bestSeqForAlias = 0;
   let maxSeq = 0;
   try {
     const entries = fsSync.readdirSync(authDir);
@@ -133,7 +150,8 @@ function resolveTokenFilePath(auth: ExtendedOAuthAuth, providerType: string): st
         continue;
       }
       const entryAlias = (match[2] || 'default');
-      if (entryAlias === alias && !existingPath) {
+      if (entryAlias === alias && seq >= bestSeqForAlias) {
+        bestSeqForAlias = seq;
         existingPath = path.join(authDir, entry);
       }
       if (seq > maxSeq) {
@@ -149,7 +167,10 @@ function resolveTokenFilePath(auth: ExtendedOAuthAuth, providerType: string): st
     return existingPath;
   }
 
-  const nextSeq = maxSeq + 1;
+  // When we don't have any existing token for this alias:
+  // - Qwen default alias should always map to seq=1 for stability.
+  // - Otherwise, allocate next seq to avoid collisions.
+  const nextSeq = (pt === 'qwen' && alias === 'default') ? 1 : (maxSeq + 1);
   const fileName = `${providerType}-oauth-${nextSeq}-${alias}.json`;
   const fullPath = path.join(authDir, fileName);
   auth.tokenFile = fullPath;
