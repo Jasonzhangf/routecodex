@@ -406,7 +406,7 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
       } catch (error) {
         lastError = error;
         const msg = error instanceof Error ? error.message : String(error);
-        console.warn(`Token refresh attempt ${attempt + 1} failed:`, msg);
+        logOAuthDebug(`[OAuth] Token refresh attempt ${attempt + 1} failed: ${msg}`);
         if (isPermanentOAuthRefreshErrorMessage(msg)) {
           abortedEarly = true;
           break;

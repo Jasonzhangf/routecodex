@@ -46,6 +46,7 @@ ${bin} oauth --force qwen-oauth-1-default.json
 - `selector` 支持：token 文件 basename、全路径、或 provider id（例如 `qwen` / `iflow` / `antigravity`）
 - `--force`：强制重新授权（一定会走浏览器/portal）
 - 不带 `--force`：如果 token 仍然有效，会直接跳过（避免“每次都让我重新认证”）
+- 若你的 `oauthBrowser=camoufox`，Qwen 在 `authorize` 页面需要点一次 Confirm；`oauth` 默认会启用 `qwen` auto（等价于 `oauth qwen-auto ...`）
 
 ### 2.2 Camoufox 自动化（推荐：Qwen / Gemini / Antigravity / iFlow）
 
@@ -64,6 +65,12 @@ Qwen 的自动化会在授权页自动点击：
 
 > 如果 auto 失败，会自动退到 headed 模式让你手动完成（Qwen 不走 localhost callback，因此不会再“等不到回调一直卡住”）。
 
+Portal 健康检查（`/health`）默认会等待 **300s**（网络慢时避免过早 timeout），可用环境变量调整：
+
+- `ROUTECODEX_OAUTH_PORTAL_READY_TIMEOUT_MS`（总等待）
+- `ROUTECODEX_OAUTH_PORTAL_READY_REQUEST_TIMEOUT_MS`（单次请求）
+- `ROUTECODEX_OAUTH_PORTAL_READY_POLL_MS`（轮询间隔）
+
 ## 3) 刷新（refresh）是怎么工作的？
 
 ### 3.1 后台刷新（默认：静默，不弹窗）
@@ -71,6 +78,20 @@ Qwen 的自动化会在授权页自动点击：
 默认后台只做 **静默 refresh**（`openBrowser=false`），失败会记录并进入退避，不会突然弹出 Qwen/Gemini 登录页。
 
 > 需要交互式修复时，使用上面的 `${bin} oauth ...` 显式触发。
+
+### 3.3 403 账户验证（Antigravity / Gemini）
+
+如果上游返回 `HTTP 403` 且包含以下关键字之一：
+
+- `verify your account`
+- `validation_required`
+- `accounts.google.com/signin/continue`
+
+说明账号需要在浏览器里完成验证/风控解除（不是简单的 token 过期）。此时 RouteCodex 会尝试自动拉起 Camoufox 交互式 OAuth/验证流程。
+
+为避免“无限弹窗/无限认证”，同一个 token（provider + tokenFile）在该类 403 下会有 **30 分钟冷却**（可用环境变量覆盖）：
+
+- `ROUTECODEX_OAUTH_GOOGLE_VERIFY_COOLDOWN_MS`（默认 `1800000`）
 
 ### 3.2 显式刷新/重登（你主动触发）
 

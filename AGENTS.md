@@ -200,3 +200,15 @@ bd --no-db list --priority-min 2
 ```bash
 bd --no-db list --status open --priority 1 --label-any urgent,critical --no-assignee
 ```
+
+### 7.6 Git Portable 同步流程（推荐）
+
+最合理的“基于 git 的 bd 同步”做法，本质目标是：让团队只通过 git 同步 `.beads/issues.jsonl`，而不是同步本地数据库文件，并且把“忘了导出/导入”的风险降到最低。
+
+- 统一模式：`bd sync mode set git-portable`
+- 一次性初始化：`bd init`（若 main 受保护：用 `bd init --branch beads-sync` 建一个元数据分支）
+- 把同步做成“自动护栏”（强烈推荐）：`bd hooks install`（会装 pre-commit / post-merge / pre-push / post-checkout 等，保证提交前 flush、拉取/切分支后 import、推送前不允许 stale）
+- 日常流程（最省心）：`git pull --rebase` → 正常 `bd create/update/close` → 正常 `git commit/push`（hooks 自动处理大部分同步）
+- 关键时刻强制落盘：结束会话/交接前跑一次 `bd sync`（把 debounce 窗口里的改动立刻刷到 JSONL）
+- 约定：git 只追踪 `.beads/issues.jsonl`/`.gitattributes`/`.beads/.gitignore`，不要提交 `.beads/beads.db` 之类本地文件
+- 如果用 git worktree：别开 daemon（`export BEADS_NO_DAEMON=1` 或每次加 `--no-daemon`），主要依赖 hooks + 需要时手动 `bd sync`

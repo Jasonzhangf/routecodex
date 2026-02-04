@@ -284,13 +284,36 @@ export abstract class BaseOAuthFlowStrategy {
       const baseUrl = `${url.protocol}//${url.host}`;
       const healthUrl = `${baseUrl}/health`;
 
-      const maxAttempts = 15; // 最多尝试 15 次
-      const delayMs = 200;    // 每次等待 200ms，总计最多 3 秒
+      const timeoutTotalMsRaw = String(
+        process.env.ROUTECODEX_OAUTH_PORTAL_READY_TIMEOUT_MS ||
+          process.env.RCC_OAUTH_PORTAL_READY_TIMEOUT_MS ||
+          '300000'
+      ).trim();
+      const timeoutTotalMs = Number.parseInt(timeoutTotalMsRaw, 10);
+      const totalMs = Number.isFinite(timeoutTotalMs) && timeoutTotalMs > 0 ? timeoutTotalMs : 300000;
 
-      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const requestTimeoutMsRaw = String(
+        process.env.ROUTECODEX_OAUTH_PORTAL_READY_REQUEST_TIMEOUT_MS ||
+          process.env.RCC_OAUTH_PORTAL_READY_REQUEST_TIMEOUT_MS ||
+          '1500'
+      ).trim();
+      const requestTimeoutMs = Number.parseInt(requestTimeoutMsRaw, 10);
+      const perRequestMs = Number.isFinite(requestTimeoutMs) && requestTimeoutMs > 0 ? requestTimeoutMs : 1500;
+
+      const delayMsRaw = String(
+        process.env.ROUTECODEX_OAUTH_PORTAL_READY_POLL_MS ||
+          process.env.RCC_OAUTH_PORTAL_READY_POLL_MS ||
+          '1000'
+      ).trim();
+      const delayMsParsed = Number.parseInt(delayMsRaw, 10);
+      const delayMs = Number.isFinite(delayMsParsed) && delayMsParsed >= 0 ? delayMsParsed : 1000;
+
+      const deadline = Date.now() + totalMs;
+
+      while (Date.now() < deadline) {
         try {
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 500);
+          const timeoutId = setTimeout(() => controller.abort(), perRequestMs);
 
           const response = await fetch(healthUrl, {
             method: 'GET',
@@ -305,9 +328,9 @@ export abstract class BaseOAuthFlowStrategy {
           }
         } catch (error) {
           // Server not ready yet, continue waiting
-          if (attempt < maxAttempts) {
-            await new Promise(resolve => setTimeout(resolve, delayMs));
-          }
+        }
+        if (delayMs > 0) {
+          await new Promise(resolve => setTimeout(resolve, delayMs));
         }
       }
 

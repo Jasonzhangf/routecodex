@@ -53,6 +53,40 @@ type CamoufoxOverrideOptions = {
   devMode?: boolean;
 };
 
+function resolveConfiguredProviders(userConfig: unknown): Set<OAuthProviderId> {
+  const configured = new Set<OAuthProviderId>();
+  const cfg = (userConfig ?? {}) as any;
+  const vr = (cfg.virtualrouter ?? cfg.virtualRouter ?? cfg.router ?? cfg) as any;
+  const providers = vr?.providers;
+  const addIfSupported = (idRaw: unknown, enabledRaw: unknown): void => {
+    const id = typeof idRaw === 'string' ? idRaw.trim().toLowerCase() : '';
+    if (!id) {
+      return;
+    }
+    const enabled = enabledRaw === undefined ? true : Boolean(enabledRaw);
+    if (!enabled) {
+      return;
+    }
+    const match = SUPPORTED_OAUTH_PROVIDERS.find((p) => p === id);
+    if (match) {
+      configured.add(match);
+    }
+  };
+  if (Array.isArray(providers)) {
+    for (const p of providers) {
+      addIfSupported(p?.id, p?.enabled);
+    }
+    return configured;
+  }
+  if (providers && typeof providers === 'object') {
+    for (const [key, value] of Object.entries(providers)) {
+      const v = value as any;
+      addIfSupported(v?.id ?? key, v?.enabled);
+    }
+  }
+  return configured;
+}
+
 async function isCamoufoxOauthEnabled(): Promise<boolean> {
   if (camoufoxEnabledCache !== null) {
     return camoufoxEnabledCache;
@@ -139,9 +173,26 @@ export class TokenDaemon {
     const now = snapshot.timestamp;
     const refreshAheadMs = this.refreshAheadMinutes * 60_000;
     const camoufoxEnabled = await isCamoufoxOauthEnabled();
+    const refreshUnconfigured =
+      String(process.env.ROUTECODEX_TOKEN_DAEMON_REFRESH_UNCONFIGURED || '').trim() === '1';
+    let configuredProviders: Set<OAuthProviderId> | null = null;
+    if (!refreshUnconfigured) {
+      try {
+        const { userConfig } = await loadRouteCodexConfig();
+        configuredProviders = resolveConfiguredProviders(userConfig);
+      } catch {
+        configuredProviders = new Set();
+      }
+    }
 
     for (const providerSnapshot of snapshot.providers) {
       for (const token of providerSnapshot.tokens) {
+        if (configuredProviders && !configuredProviders.has(token.provider)) {
+          this.logDebug(
+            `[daemon] skip token provider not configured provider=${token.provider} alias=${token.alias} file=${token.filePath}`
+          );
+          continue;
+        }
         this.logDebug(
           `[daemon] evaluate token provider=${token.provider} alias=${token.alias} expires=${token.state.expiresAt ?? 'unknown'} remainingMs=${token.state.msUntilExpiry ?? 'unknown'} refreshToken=${token.state.hasRefreshToken}`
         );

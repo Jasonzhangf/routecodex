@@ -457,8 +457,14 @@ export async function interactiveRefresh(selector: string, options: InteractiveR
   console.log(chalk.blue('ℹ'), force ? '正在启动 OAuth 重新授权流程，请在浏览器中完成登录...' : '正在尝试刷新 Token（必要时会打开浏览器）...');
   const tokenMtimeBefore = await getTokenFileMtime(token.filePath);
   const startedAt = Date.now();
+  const prevCamoufoxAutoMode = process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
   try {
     await ensureLocalTokenPortalEnv();
+    // Qwen: default to Camoufox auto mode so the authorize page Confirm button can be clicked automatically.
+    // This avoids users getting stuck at the post-portal confirm screen when using `routecodex oauth <qwen-token>`.
+    if (providerType === 'qwen') {
+      process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE = 'qwen';
+    }
     await ensureValidOAuthToken(
       providerType,
       {
@@ -478,6 +484,11 @@ export async function interactiveRefresh(selector: string, options: InteractiveR
     await recordManualHistory(token, 'failure', startedAt, tokenMtimeBefore, error);
     throw error;
   } finally {
+    if (prevCamoufoxAutoMode === undefined) {
+      delete process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
+    } else {
+      process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE = prevCamoufoxAutoMode;
+    }
     await cleanupInteractiveOAuthArtifacts();
   }
 }

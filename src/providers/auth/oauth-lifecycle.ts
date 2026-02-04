@@ -21,6 +21,12 @@ import { parseTokenSequenceFromPath } from './token-scanner/index.js';
 import { logOAuthDebug } from './oauth-logger.js';
 import { fetchAntigravityProjectId } from './antigravity-userinfo-helper.js';
 import { HTTP_PROTOCOLS, LOCAL_HOSTS } from '../../constants/index.js';
+import { withOAuthRepairEnv } from './oauth-repair-env.js';
+import {
+  markInteractiveOAuthRepairAttempt,
+  shouldSkipInteractiveOAuthRepair,
+  type OAuthRepairCooldownReason
+} from './oauth-repair-cooldown.js';
 
 type EnsureOpts = {
   forceReacquireIfRefreshFails?: boolean;
@@ -157,6 +163,48 @@ function shouldThrottle(k: string, ms = 60_000): boolean {
 
 function updateThrottle(k: string): void {
   lastRunAt.set(k, Date.now());
+}
+
+function extractStatusCode(upstreamError: unknown): number | undefined {
+  if (!upstreamError || typeof upstreamError !== 'object') {
+    return undefined;
+  }
+  const anyErr = upstreamError as any;
+  const direct = anyErr.statusCode;
+  if (typeof direct === 'number' && Number.isFinite(direct)) {
+    return direct;
+  }
+  const status = anyErr.status;
+  if (typeof status === 'number' && Number.isFinite(status)) {
+    return status;
+  }
+  const response = anyErr.response;
+  if (response && typeof response === 'object') {
+    const respStatus = (response as any).status;
+    if (typeof respStatus === 'number' && Number.isFinite(respStatus)) {
+      return respStatus;
+    }
+    const respStatusCode = (response as any).statusCode;
+    if (typeof respStatusCode === 'number' && Number.isFinite(respStatusCode)) {
+      return respStatusCode;
+    }
+  }
+  return undefined;
+}
+
+function isGoogleAccountVerificationRequiredMessage(lower: string): boolean {
+  if (!lower) {
+    return false;
+  }
+  return (
+    lower.includes('verify your account') ||
+    lower.includes('validation_required') ||
+    lower.includes('validation required') ||
+    lower.includes('validation_url') ||
+    lower.includes('validation url') ||
+    lower.includes('accounts.google.com/signin/continue') ||
+    lower.includes('support.google.com/accounts?p=al_alert')
+  );
 }
 
 function isOAuthConfig(auth: OAuthAuth): auth is ExtendedOAuthAuth {
@@ -1258,6 +1306,37 @@ export async function handleUpstreamInvalidOAuthToken(
     if (!shouldTriggerInteractiveOAuthRepair(providerType, upstreamError)) {
       return false;
     }
+    const msg =
+      upstreamError instanceof Error
+        ? upstreamError.message
+        : upstreamError && typeof upstreamError === 'object' && typeof (upstreamError as any).message === 'string'
+          ? String((upstreamError as any).message)
+          : String(upstreamError || '');
+    const lower = msg.toLowerCase();
+    const statusCode = extractStatusCode(upstreamError);
+    const cooldownReason: OAuthRepairCooldownReason | null =
+      statusCode === 403 && isGoogleAccountVerificationRequiredMessage(lower) ? 'google_verify' : null;
+    const tokenFilePath = resolveTokenFilePath(auth as ExtendedOAuthAuth, providerType);
+    if (cooldownReason) {
+      const gate = await shouldSkipInteractiveOAuthRepair({
+        providerType,
+        tokenFile: tokenFilePath,
+        reason: cooldownReason
+      });
+      if (gate.skip) {
+        const msLeft = typeof gate.msLeft === 'number' ? gate.msLeft : 0;
+        console.warn(
+          `[OAuth] interactive repair skipped due to cooldown (provider=${providerType} status=403 reason=${cooldownReason} msLeft=${msLeft} tokenFile=${tokenFilePath})`
+        );
+        return false;
+      }
+      // Mark immediately so repeated 403s don't cause infinite auth loops within a short window.
+      await markInteractiveOAuthRepairAttempt({
+        providerType,
+        tokenFile: tokenFilePath,
+        reason: cooldownReason
+      });
+    }
     const opts: EnsureOpts = {
       forceReacquireIfRefreshFails: true,
       openBrowser: true,
@@ -1265,7 +1344,9 @@ export async function handleUpstreamInvalidOAuthToken(
       // 此时强制跳过节流并允许走完整 OAuth 流程。
       forceReauthorize: pt === 'gemini' || pt === 'gemini-cli' || pt === 'antigravity' || pt === 'iflow' || pt === 'qwen'
     };
-    await ensureValidOAuthToken(providerType, auth, opts);
+    await withOAuthRepairEnv(providerType, async () => {
+      await ensureValidOAuthToken(providerType, auth, opts);
+    });
     return true;
   } catch {
     return false;
@@ -1281,20 +1362,7 @@ export function shouldTriggerInteractiveOAuthRepair(providerType: string, upstre
         ? String((upstreamError as any).message)
         : String(upstreamError || '');
   const lower = msg.toLowerCase();
-
-  let statusCode: number | undefined;
-  try {
-    const anyErr = upstreamError as { statusCode?: unknown; status?: unknown } | null | undefined;
-    if (anyErr) {
-      if (typeof anyErr.statusCode === 'number') {
-        statusCode = anyErr.statusCode;
-      } else if (typeof anyErr.status === 'number') {
-        statusCode = anyErr.status;
-      }
-    }
-  } catch {
-    // best-effort statusCode extraction
-  }
+  const statusCode = extractStatusCode(upstreamError);
 
   // 基本令牌失效判定：只看典型 OAuth 文案
   let looksInvalid =
@@ -1330,10 +1398,7 @@ export function shouldTriggerInteractiveOAuthRepair(providerType: string, upstre
     // to unblock the account. Treat it as "needs interactive reauth".
     if (
       statusCode === 403 &&
-      (lower.includes('verify your account') ||
-        lower.includes('validation_required') ||
-        lower.includes('accounts.google.com/signin/continue') ||
-        lower.includes('support.google.com/accounts?p=al_alert'))
+      isGoogleAccountVerificationRequiredMessage(lower)
     ) {
       looksInvalid = true;
     }
