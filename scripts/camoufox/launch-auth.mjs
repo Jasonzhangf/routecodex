@@ -215,6 +215,26 @@ async function main() {
     return;
   }
 
+  // Interactive CLI flows set devMode=true by default. In that case, prefer Playwright headed
+  // "manual assist" mode so users always see a window and clear progress logs.
+  if (devMode) {
+    try {
+      await runHeadedManualAssistFlow({
+        url,
+        profileDir,
+        camoufoxBinary,
+        timeoutMs: Number(process.env.ROUTECODEX_OAUTH_TIMEOUT_MS || 10 * 60_000),
+        label: 'manual'
+      });
+      process.exit(0);
+    } catch (error) {
+      console.warn(
+        '[camoufox-launch-auth] manual: headed assist failed, falling back to direct Camoufox launch:',
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+  }
+
   await launchManualCamoufox({ camoufoxBinary, profileDir, url });
 }
 
@@ -224,6 +244,10 @@ main().catch((err) => {
 });
 
 async function launchManualCamoufox({ camoufoxBinary, profileDir, url }) {
+  console.log('[camoufox-launch-auth] Launching Camoufox (direct binary) for manual completion...');
+  console.log(`[camoufox-launch-auth] binary=${camoufoxBinary}`);
+  console.log(`[camoufox-launch-auth] profileDir=${profileDir}`);
+  console.log(`[camoufox-launch-auth] url=${url}`);
   let browserExitCode = 0;
   let browser = null;
   const shutdownBrowser = (signal = 'SIGTERM') => {

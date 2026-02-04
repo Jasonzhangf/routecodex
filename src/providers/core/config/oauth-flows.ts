@@ -226,6 +226,7 @@ export abstract class BaseOAuthFlowStrategy {
       if (preferCamoufox) {
         const meta = this.extractTokenPortalMetadata(portalUrl);
         try {
+          console.log('[OAuth] Launching Camoufox for authentication...');
           opened = await openAuthInCamoufox({
             url: resolvedUrl,
             provider: meta.provider,
