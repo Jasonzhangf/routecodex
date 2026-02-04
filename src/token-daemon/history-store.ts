@@ -15,6 +15,7 @@ export interface RefreshMetadata {
   tokenFileMtime?: number | null;
   countTowardsFailureStreak?: boolean;
   forceAutoSuspend?: boolean;
+  autoSuspendImmediately?: boolean;
 }
 
 const MAX_AUTO_FAILURES = 3;
@@ -143,12 +144,17 @@ export class TokenHistoryStore {
         if (shouldCount) {
           entry.failureStreak = (entry.failureStreak || 0) + 1;
         }
-        const forceSuspend = Boolean(metadata.forceAutoSuspend);
-        if (entry.failureStreak >= MAX_AUTO_FAILURES) {
-          const createSuspension = forceSuspend || metadata.tokenFileMtime === null;
-          if (createSuspension) {
-            entry.autoSuspended = true;
-            entry.suspendedAt = metadata.completedAt;
+        if (metadata.autoSuspendImmediately) {
+          entry.autoSuspended = true;
+          entry.suspendedAt = metadata.completedAt;
+        } else {
+          const forceSuspend = Boolean(metadata.forceAutoSuspend);
+          if (entry.failureStreak >= MAX_AUTO_FAILURES) {
+            const createSuspension = forceSuspend || metadata.tokenFileMtime === null;
+            if (createSuspension) {
+              entry.autoSuspended = true;
+              entry.suspendedAt = metadata.completedAt;
+            }
           }
         }
       } else {

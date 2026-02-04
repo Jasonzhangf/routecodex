@@ -10,6 +10,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { logOAuthDebug } from '../../auth/oauth-logger.js';
 import crypto from 'crypto';
+import { isPermanentOAuthRefreshErrorMessage } from './oauth-refresh-errors.js';
 
 /**
  * 授权码令牌响应
@@ -537,6 +538,7 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
   async refreshToken(refreshToken: string): Promise<UnknownObject> {
     const maxAttempts = this.config.retry?.maxAttempts || 3;
     let lastError: unknown;
+    let abortedEarly = false;
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       if (attempt > 0) {
@@ -579,11 +581,20 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
 
       } catch (error) {
         lastError = error;
-        console.warn(`Token refresh attempt ${attempt + 1} failed:`, error instanceof Error ? error.message : String(error));
+        const msg = error instanceof Error ? error.message : String(error);
+        console.warn(`Token refresh attempt ${attempt + 1} failed:`, msg);
+        if (isPermanentOAuthRefreshErrorMessage(msg)) {
+          abortedEarly = true;
+          break;
+        }
       }
     }
 
-    throw new Error(`Token refresh failed after ${maxAttempts} attempts: ${lastError instanceof Error ? lastError.message : String(lastError)}`);
+    const lastMsg = lastError instanceof Error ? lastError.message : String(lastError);
+    if (abortedEarly) {
+      throw new Error(`Token refresh failed (permanent): ${lastMsg}`);
+    }
+    throw new Error(`Token refresh failed after ${maxAttempts} attempts: ${lastMsg}`);
   }
 
   /**

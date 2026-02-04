@@ -271,17 +271,25 @@ export class TokenDaemon {
     } catch (error) {
       const failureInfo = (this as any).classifyRefreshFailure(error);
       const isUserTimeout = failureInfo.isUserTimeout;
+      const isPermanentAuthFailure = failureInfo.isPermanentAuthFailure;
       if (isUserTimeout) {
         console.warn(
           chalk.yellow('!'),
           `Auto OAuth timed out waiting for user action (${providerType} ${token.displayName})`
         );
       }
+      if (isPermanentAuthFailure) {
+        console.warn(
+          chalk.yellow('!'),
+          `Auto-refresh disabled for ${providerType} (${token.displayName}) due to permanent refresh failure. Re-auth required.`
+        );
+      }
       await this.recordHistoryEvent(token, 'failure', startedAt, {
         error,
         tokenFileMtime: tokenMtimeBefore,
-        countTowardsFailureStreak: isUserTimeout,
-        forceAutoSuspend: isUserTimeout
+        countTowardsFailureStreak: isUserTimeout || isPermanentAuthFailure,
+        forceAutoSuspend: isUserTimeout,
+        autoSuspendImmediately: isPermanentAuthFailure
       });
       throw error;
     }
@@ -397,11 +405,19 @@ export class TokenDaemon {
     }
   }
 
-  private classifyRefreshFailure(error: unknown): { message: string; isUserTimeout: boolean } {
+  private classifyRefreshFailure(error: unknown): { message: string; isUserTimeout: boolean; isPermanentAuthFailure: boolean } {
     const message = error instanceof Error ? error.message : String(error || '');
     const normalized = message.toLowerCase();
     const isUserTimeout = USER_TIMEOUT_PATTERNS.some((pattern) => normalized.includes(pattern));
-    return { message, isUserTimeout };
+    const isPermanentAuthFailure =
+      normalized.includes('oauth error: invalid_grant') ||
+      normalized.includes('oauth error: invalid_client') ||
+      normalized.includes('oauth error: unauthorized_client') ||
+      (normalized.includes('oauth error: invalid_request') &&
+        (normalized.includes('refresh token') ||
+          normalized.includes('refresh_token') ||
+          normalized.includes('client_id')));
+    return { message, isUserTimeout, isPermanentAuthFailure };
   }
 
   static async getSnapshot(): Promise<TokenDaemonSnapshot> {
@@ -509,6 +525,7 @@ export class TokenDaemon {
       tokenFileMtime?: number | null;
       countTowardsFailureStreak?: boolean;
       forceAutoSuspend?: boolean;
+      autoSuspendImmediately?: boolean;
     }
   ): Promise<void> {
     try {
@@ -540,7 +557,8 @@ export class TokenDaemon {
         error: meta?.error ? (meta.error instanceof Error ? meta.error.message : String(meta.error)) : undefined,
         tokenFileMtime: meta?.tokenFileMtime ?? null,
         countTowardsFailureStreak: meta?.countTowardsFailureStreak,
-        forceAutoSuspend: meta?.forceAutoSuspend
+        forceAutoSuspend: meta?.forceAutoSuspend,
+        autoSuspendImmediately: meta?.autoSuspendImmediately
       });
     } catch (historyError) {
       this.logDebug(
