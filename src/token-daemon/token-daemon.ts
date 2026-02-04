@@ -342,6 +342,18 @@ export class TokenDaemon {
         forceAutoSuspend: isUserTimeout,
         autoSuspendImmediately: isPermanentAuthFailure
       });
+      // Token daemon must never block or break server traffic:
+      // - For "permanent auth failures" we auto-suspend this token and let real requests trigger reauth.
+      // - For user timeouts we avoid spamming error logs and retry later (after suspension).
+      //
+      // NOTE: We intentionally do NOT throw here, otherwise the caller logs a loud
+      // "Auto-refresh failed ..." line which is interpreted as a fatal error.
+      if (isUserTimeout || isPermanentAuthFailure) {
+        this.logDebug(
+          `[daemon] refresh suppressed provider=${providerType} alias=${token.alias} permanent=${isPermanentAuthFailure} timeout=${isUserTimeout}`
+        );
+        return;
+      }
       throw error;
     }
   }
