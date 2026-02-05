@@ -29,7 +29,8 @@ export function createOauthCommand(): Command {
     )
     .option('--json', 'Output JSON result (only for validate)', false)
     .option('--force', 'Force re-authorize in browser even if token is still valid', false)
-    .action(async (args: string[], options: { json?: boolean; force?: boolean }) => {
+    .option('--headful', 'Open Camoufox in headed mode (OAuth refresh only)', false)
+    .action(async (args: string[], options: { json?: boolean; force?: boolean; headful?: boolean }) => {
       const list = Array.isArray(args) ? args : [];
       const first = list[0];
       if (!first) {
@@ -44,15 +45,28 @@ export function createOauthCommand(): Command {
         }
         return;
       }
-      await safeInteractiveRefresh(first, { force: Boolean(options?.force) });
+      const prevDevMode = process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
+      if (options?.headful) {
+        process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = '1';
+      }
+      try {
+        await safeInteractiveRefresh(first, { force: Boolean(options?.force) });
+      } finally {
+        if (prevDevMode === undefined) {
+          delete process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
+        } else {
+          process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = prevDevMode;
+        }
+      }
     });
 
   cmd
     .command('reauth-required')
     .description('Re-auth all Antigravity aliases marked as reauth-required (Camoufox automation)')
     .option('--dev', 'Run Camoufox automation in headed debug mode (default headless)')
+    .option('--headful', 'Open Camoufox in headed mode (alias of --dev)')
     .option('--account-text <text>', 'Preferred Antigravity account display text/email to auto-select')
-    .action(async (options: { dev?: boolean; accountText?: string }) => {
+    .action(async (options: { dev?: boolean; headful?: boolean; accountText?: string }) => {
       const state = await readAntigravityReauthRequiredState();
       const aliases = Object.keys(state).sort();
       if (!aliases.length) {
@@ -67,7 +81,7 @@ export function createOauthCommand(): Command {
       process.env.ROUTECODEX_OAUTH_BROWSER = 'camoufox';
       process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE = 'antigravity';
       process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM = '1';
-      if (options?.dev) {
+      if (options?.dev || options?.headful) {
         process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = '1';
       } else {
         delete process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
@@ -122,14 +136,15 @@ export function createOauthCommand(): Command {
       'Token selector: file basename, full path, or provider id (e.g. "iflow-oauth-1-186.json" or "iflow")'
     )
     .option('--dev', 'Run Camoufox automation in headed debug mode (default headless)')
-    .action(async (selector: string, options: { dev?: boolean }) => {
+    .option('--headful', 'Open Camoufox in headed mode (alias of --dev)')
+    .action(async (selector: string, options: { dev?: boolean; headful?: boolean }) => {
       const prevBrowser = process.env.ROUTECODEX_OAUTH_BROWSER;
       const prevAutoMode = process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
       const prevDevMode = process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
       process.env.ROUTECODEX_OAUTH_BROWSER = 'camoufox';
       process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE = 'iflow';
       process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM = '1';
-      if (options?.dev) {
+      if (options?.dev || options?.headful) {
         process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = '1';
       } else {
         delete process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
@@ -164,8 +179,9 @@ export function createOauthCommand(): Command {
       'Token selector: file basename, full path, or provider id (e.g. "gemini-oauth-1-foo.json" or "gemini-cli")'
     )
     .option('--dev', 'Run Camoufox automation in headed debug mode (default headless)')
+    .option('--headful', 'Open Camoufox in headed mode (alias of --dev)')
     .option('--account-text <text>', 'Preferred Gemini account display text to auto-select')
-    .action(async (selector: string, options: { dev?: boolean; accountText?: string }) => {
+    .action(async (selector: string, options: { dev?: boolean; headful?: boolean; accountText?: string }) => {
       const token = await TokenDaemon.findTokenBySelector(selector).catch(() => null);
       if (token?.provider === 'antigravity') {
         // User often calls gemini-auto with an antigravity token file; route to the correct mode.
@@ -180,7 +196,7 @@ export function createOauthCommand(): Command {
         process.env.ROUTECODEX_OAUTH_BROWSER = 'camoufox';
         process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE = 'antigravity';
         process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM = '1';
-        if (options?.dev) {
+        if (options?.dev || options?.headful) {
           process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = '1';
         } else {
           delete process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
@@ -230,7 +246,7 @@ export function createOauthCommand(): Command {
       process.env.ROUTECODEX_OAUTH_BROWSER = 'camoufox';
       process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE = 'gemini';
       process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM = '1';
-      if (options?.dev) {
+      if (options?.dev || options?.headful) {
         process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = '1';
       } else {
         delete process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
@@ -278,14 +294,15 @@ export function createOauthCommand(): Command {
       'Token selector: file basename, full path, or provider id (e.g. "qwen-oauth-1-default.json" or "qwen")'
     )
     .option('--dev', 'Run Camoufox automation in headed debug mode (default headless)')
-    .action(async (selector: string, options: { dev?: boolean }) => {
+    .option('--headful', 'Open Camoufox in headed mode (alias of --dev)')
+    .action(async (selector: string, options: { dev?: boolean; headful?: boolean }) => {
       const prevBrowser = process.env.ROUTECODEX_OAUTH_BROWSER;
       const prevAutoMode = process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
       const prevDevMode = process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
       process.env.ROUTECODEX_OAUTH_BROWSER = 'camoufox';
       process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE = 'qwen';
       process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM = '1';
-      if (options?.dev) {
+      if (options?.dev || options?.headful) {
         process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = '1';
       } else {
         delete process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
@@ -320,8 +337,9 @@ export function createOauthCommand(): Command {
       'Token selector: file basename, full path, or provider id (e.g. "antigravity-oauth-1-foo.json" or "antigravity")'
     )
     .option('--dev', 'Run Camoufox automation in headed debug mode (default headless)')
+    .option('--headful', 'Open Camoufox in headed mode (alias of --dev)')
     .option('--account-text <text>', 'Preferred Antigravity account display text/email to auto-select')
-    .action(async (selector: string, options: { dev?: boolean; accountText?: string }) => {
+    .action(async (selector: string, options: { dev?: boolean; headful?: boolean; accountText?: string }) => {
       const token = await TokenDaemon.findTokenBySelector(selector).catch(() => null);
       const prevBrowser = process.env.ROUTECODEX_OAUTH_BROWSER;
       const prevAutoMode = process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
@@ -330,7 +348,7 @@ export function createOauthCommand(): Command {
       process.env.ROUTECODEX_OAUTH_BROWSER = 'camoufox';
       process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE = 'antigravity';
       process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM = '1';
-      if (options?.dev) {
+      if (options?.dev || options?.headful) {
         process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = '1';
       } else {
         delete process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;

@@ -358,11 +358,13 @@ export function registerCredentialRoutes(app: Application, options: DaemonAdminR
       const prevBrowser = process.env.ROUTECODEX_OAUTH_BROWSER;
       const prevAutoMode = process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
       const prevDevMode = process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
+      const prevOpenOnly = process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY;
 
       process.env.ROUTECODEX_OAUTH_BROWSER = 'camoufox';
       // Verification URLs are usually not the OAuth portal; disable auto-mode and force headed mode.
       delete process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
       process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = '1';
+      process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY = '1';
 
       try {
         const ok = await openAuthInCamoufox({ url, provider, alias });
@@ -385,6 +387,11 @@ export function registerCredentialRoutes(app: Application, options: DaemonAdminR
           delete process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
         } else {
           process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = prevDevMode;
+        }
+        if (prevOpenOnly === undefined) {
+          delete process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY;
+        } else {
+          process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY = prevOpenOnly;
         }
       }
 

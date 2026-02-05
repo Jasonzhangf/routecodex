@@ -29,6 +29,7 @@ import {
 import { ensureLocalTokenPortalEnv, shutdownLocalTokenPortalEnv } from '../token-portal/local-token-portal.js';
 import { shutdownCamoufoxLaunchers } from '../providers/core/config/camoufox-launcher.js';
 import { loadRouteCodexConfig } from '../config/routecodex-config-loader.js';
+import { findGoogleAccountVerificationIssue } from './quota-auth-issue.js';
 
 export { TokenDaemon };
 
@@ -380,6 +381,29 @@ export async function interactiveRefresh(selector: string, options: InteractiveR
 
   const label = formatTokenLabel(token);
   const force = Boolean(options?.force);
+
+  const warnIfQuotaVerifyRequired = async (): Promise<void> => {
+    try {
+      const issue = await findGoogleAccountVerificationIssue(token.provider, token.alias || 'default');
+      if (!issue) {
+        return;
+      }
+      console.warn(
+        chalk.yellow('⚠'),
+        `Quota manager marks ${token.provider}.${token.alias || 'default'} as "verify required" (google_account_verification). ` +
+          `Token file may still be valid, but this alias is currently out of pool (inPool=${issue.inPool ?? 'unknown'} reason=${issue.reason ?? 'unknown'}).`
+      );
+      if (issue.url) {
+        console.warn(
+          chalk.yellow('⚠'),
+          `Verification URL (use daemon-admin "open" to launch Camoufox): ${issue.url}`
+        );
+      }
+    } catch {
+      // best-effort: never block interactive oauth
+    }
+  };
+
   if (!force) {
     // If the token is still valid and not close to expiry, avoid repeatedly forcing the user
     // into interactive OAuth flow (this looks like "infinite reauth" to users).
@@ -388,6 +412,7 @@ export async function interactiveRefresh(selector: string, options: InteractiveR
     const safeWindowMs = 10 * 60_000;
     if (status === 'valid' && (msLeft === null || msLeft > safeWindowMs)) {
       console.log(chalk.green('✓'), `Token is still valid; skip interactive OAuth (${label})`);
+      await warnIfQuotaVerifyRequired();
       // Still provide a hint when qwen token exists but user config has no qwen provider.
       if (token.provider === 'qwen') {
         try {
@@ -458,15 +483,8 @@ export async function interactiveRefresh(selector: string, options: InteractiveR
   const tokenMtimeBefore = await getTokenFileMtime(token.filePath);
   const startedAt = Date.now();
   const prevCamoufoxAutoMode = process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
-  const prevDevMode = process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
   try {
     await ensureLocalTokenPortalEnv();
-    // CLI-driven interactive refresh should be visible to users by default.
-    // This avoids the confusing "waiting for callback" hang when Camoufox automation runs headless
-    // but the user expects to complete login/2FA/verification.
-    if (!process.env.ROUTECODEX_CAMOUFOX_DEV_MODE) {
-      process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = '1';
-    }
     // Qwen: default to Camoufox auto mode so the authorize page Confirm button can be clicked automatically.
     // This avoids users getting stuck at the post-portal confirm screen when using `routecodex oauth <qwen-token>`.
     if (providerType === 'qwen') {
@@ -507,6 +525,7 @@ export async function interactiveRefresh(selector: string, options: InteractiveR
     const tokenMtimeAfter = await getTokenFileMtime(token.filePath);
     await recordManualHistory(token, 'success', startedAt, tokenMtimeAfter);
     console.log(chalk.green('✓'), '认证完成，Token 文件已更新');
+    await warnIfQuotaVerifyRequired();
   } catch (error) {
     await recordManualHistory(token, 'failure', startedAt, tokenMtimeBefore, error);
     throw error;
@@ -515,11 +534,6 @@ export async function interactiveRefresh(selector: string, options: InteractiveR
       delete process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
     } else {
       process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE = prevCamoufoxAutoMode;
-    }
-    if (prevDevMode === undefined) {
-      delete process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
-    } else {
-      process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = prevDevMode;
     }
     await cleanupInteractiveOAuthArtifacts();
   }

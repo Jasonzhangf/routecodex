@@ -193,6 +193,16 @@ async function main() {
   console.log(`[camoufox-launch-auth] binary=${camoufoxBinary}`);
   console.log(`[camoufox-launch-auth] profileDir=${profileDir}`);
 
+  const openOnly = isTruthy(
+    process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY || process.env.RCC_CAMOUFOX_OPEN_ONLY
+  );
+  if (openOnly) {
+    console.log('[camoufox-launch-auth] open-only mode enabled; launching Camoufox and exiting (no automation/wait).');
+    await launchCamoufoxDetached({ camoufoxBinary, profileDir, url });
+    process.exit(0);
+    return;
+  }
+
   if (autoMode && autoMode.trim().toLowerCase() === 'iflow') {
     try {
       await runAutoFlowWithFallback('iflow', { url, profileDir, profileId, camoufoxBinary, devMode });
@@ -317,6 +327,23 @@ async function launchManualCamoufox({ camoufoxBinary, profileDir, url }) {
   }
 
   process.exit(browserExitCode);
+}
+
+async function launchCamoufoxDetached({ camoufoxBinary, profileDir, url }) {
+  console.log('[camoufox-launch-auth] Launching Camoufox (detached) ...');
+  try {
+    const child = spawn(camoufoxBinary, ['-profile', profileDir, url], {
+      detached: true,
+      stdio: 'ignore'
+    });
+    child.unref();
+  } catch (error) {
+    console.error(
+      '[camoufox-launch-auth] Detached launch failed:',
+      error instanceof Error ? error.message : String(error)
+    );
+    process.exit(1);
+  }
 }
 
 function isSelectorOrTimeoutError(error) {

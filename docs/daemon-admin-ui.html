@@ -3374,15 +3374,8 @@
           })
           .slice();
 
-        next.sort((a, b) => {
-          const aIn = a && a.inPool === true ? 1 : 0;
-          const bIn = b && b.inPool === true ? 1 : 0;
-          if (aIn !== bIn) return aIn - bIn; // inPool=false first
-          const aUntil = Math.max(Number(a?.blacklistUntil || 0), Number(a?.cooldownUntil || 0));
-          const bUntil = Math.max(Number(b?.blacklistUntil || 0), Number(b?.cooldownUntil || 0));
-          if (aUntil !== bUntil) return bUntil - aUntil;
-          return textOf(a?.providerKey).localeCompare(textOf(b?.providerKey));
-        });
+        // Keep order stable across polling refreshes: avoid health-based sorting which makes the table jump.
+        next.sort((a, b) => textOf(a?.providerKey).localeCompare(textOf(b?.providerKey)));
 
 	        if (!next.length) {
 	          body.appendChild(createErrorRow(8, "No providers matched filter."));

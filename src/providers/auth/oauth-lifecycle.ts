@@ -27,6 +27,7 @@ import {
   shouldSkipInteractiveOAuthRepair,
   type OAuthRepairCooldownReason
 } from './oauth-repair-cooldown.js';
+import { openAuthInCamoufox } from '../core/config/camoufox-launcher.js';
 
 type EnsureOpts = {
   forceReacquireIfRefreshFails?: boolean;
@@ -226,6 +227,95 @@ function isGoogleAccountVerificationRequiredMessage(lower: string): boolean {
     lower.includes('accounts.google.com/signin/continue') ||
     lower.includes('support.google.com/accounts?p=al_alert')
   );
+}
+
+function extractGoogleAccountVerificationUrl(message: string): string | null {
+  const msg = typeof message === 'string' ? message : '';
+  if (!msg) {
+    return null;
+  }
+  const patterns: RegExp[] = [
+    /https:\/\/accounts\.google\.com\/signin\/continue[^\s"'\\)]+/i,
+    /https:\/\/accounts\.google\.com\/[^\s"'\\)]+/i,
+    /https:\/\/support\.google\.com\/accounts\?p=al_alert[^\s"'\\)]+/i
+  ];
+  for (const re of patterns) {
+    const m = msg.match(re);
+    if (m && m[0]) {
+      return m[0];
+    }
+  }
+  return null;
+}
+
+function resolveCamoufoxAliasForAuth(providerType: string, auth: ExtendedOAuthAuth): string {
+  const raw = typeof auth.tokenFile === 'string' ? auth.tokenFile.trim() : '';
+  if (raw && !raw.includes('/') && !raw.includes('\\') && !raw.endsWith('.json')) {
+    return raw;
+  }
+  const base = raw ? path.basename(raw) : '';
+  const pt = String(providerType || '').trim().toLowerCase();
+  if (base && pt) {
+    const re = new RegExp(`^${pt}-oauth-\\d+(?:-(.+))?\\.json$`, 'i');
+    const m = base.match(re);
+    const alias = m && m[1] ? String(m[1]).trim() : '';
+    if (alias) {
+      return alias;
+    }
+  }
+  return 'default';
+}
+
+async function openGoogleAccountVerificationInCamoufox(args: {
+  providerType: string;
+  auth: ExtendedOAuthAuth;
+  url: string;
+}): Promise<void> {
+  const providerType = args.providerType;
+  const url = args.url;
+  if (!url) {
+    return;
+  }
+  const alias = resolveCamoufoxAliasForAuth(providerType, args.auth);
+
+  const prevBrowser = process.env.ROUTECODEX_OAUTH_BROWSER;
+  const prevAutoMode = process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
+  const prevDevMode = process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
+  const prevOpenOnly = process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY;
+
+  process.env.ROUTECODEX_OAUTH_BROWSER = 'camoufox';
+  delete process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
+  process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = '1';
+  process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY = '1';
+  try {
+    const ok = await openAuthInCamoufox({ url, provider: providerType, alias });
+    if (ok) {
+      console.warn(`[OAuth] Google account verification opened in Camoufox (provider=${providerType} alias=${alias}).`);
+    }
+  } catch {
+    // best-effort; never block requests
+  } finally {
+    if (prevBrowser === undefined) {
+      delete process.env.ROUTECODEX_OAUTH_BROWSER;
+    } else {
+      process.env.ROUTECODEX_OAUTH_BROWSER = prevBrowser;
+    }
+    if (prevAutoMode === undefined) {
+      delete process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
+    } else {
+      process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE = prevAutoMode;
+    }
+    if (prevDevMode === undefined) {
+      delete process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
+    } else {
+      process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = prevDevMode;
+    }
+    if (prevOpenOnly === undefined) {
+      delete process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY;
+    } else {
+      process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY = prevOpenOnly;
+    }
+  }
 }
 
 function isOAuthConfig(auth: OAuthAuth): auth is ExtendedOAuthAuth {
@@ -1381,19 +1471,28 @@ export async function handleUpstreamInvalidOAuthToken(
     // - If refresh fails or interactive is required (e.g. 403 verify), kick off interactive flow in background.
     // - Return false so Virtual Router can failover immediately.
     if (!allowBlocking) {
-      if (!(statusCode === 403 && cooldownReason === 'google_verify')) {
-        try {
-          await withOAuthRepairEnv(providerType, async () => {
-            await ensureValid(providerType, auth, {
-              forceReacquireIfRefreshFails: false,
-              openBrowser: false,
-              forceReauthorize: false
-            });
-          });
-          return true;
-        } catch {
-          // ignore silent refresh errors; fall through to background interactive flow
+      if (statusCode === 403 && cooldownReason === 'google_verify') {
+        const url = extractGoogleAccountVerificationUrl(msg);
+        if (url) {
+          void openGoogleAccountVerificationInCamoufox({
+            providerType,
+            auth: auth as ExtendedOAuthAuth,
+            url
+          }).catch(() => {});
         }
+        return false;
+      }
+      try {
+        await withOAuthRepairEnv(providerType, async () => {
+          await ensureValid(providerType, auth, {
+            forceReacquireIfRefreshFails: false,
+            openBrowser: false,
+            forceReauthorize: false
+          });
+        });
+        return true;
+      } catch {
+        // ignore silent refresh errors; fall through to background interactive flow
       }
       const interactiveOpts: EnsureOpts = {
         forceReacquireIfRefreshFails: true,

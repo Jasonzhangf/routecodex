@@ -175,7 +175,27 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
       return;
     }
     try {
-      const result = await resetMod.resetProvider(providerKey);
+      let keys: string[] = [providerKey];
+      // Antigravity verification/reauth states are per-alias across many models.
+      // Operator "reset" should reset the whole alias so the pool can re-converge quickly.
+      if (providerKey.toLowerCase().startsWith('antigravity.')) {
+        const parts = providerKey.split('.');
+        const alias = parts.length >= 2 ? String(parts[1] || '').trim().toLowerCase() : '';
+        const getter = mod as unknown as { getAdminSnapshot?: () => Record<string, unknown> };
+        const snapshot = typeof getter.getAdminSnapshot === 'function' ? getter.getAdminSnapshot() : null;
+        if (alias && snapshot && typeof snapshot === 'object') {
+          const prefix = `antigravity.${alias}.`;
+          const expanded = Object.keys(snapshot).filter((k) => String(k || '').trim().toLowerCase().startsWith(prefix));
+          if (expanded.length > 0) {
+            keys = expanded;
+          }
+        }
+      }
+
+      let result: unknown = null;
+      for (const key of keys) {
+        result = await resetMod.resetProvider(key);
+      }
       // If this provider supports external quota refresh (e.g. antigravity), force-refresh immediately
       // so the virtual-router pool state can converge without waiting for the periodic timer.
       let quotaRefresh: unknown = null;
@@ -194,7 +214,14 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
         providerKey,
         action: 'reset',
         result,
-        ...(quotaRefresh ? { meta: { quotaRefresh } } : {})
+        ...(keys.length > 1 || quotaRefresh
+          ? {
+              meta: {
+                ...(keys.length > 1 ? { resetKeys: keys.length } : {}),
+                ...(quotaRefresh ? { quotaRefresh } : {})
+              }
+            }
+          : {})
       });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
@@ -218,7 +245,25 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
       return;
     }
     try {
-      const result = await recoverMod.recoverProvider(providerKey);
+      let keys: string[] = [providerKey];
+      if (providerKey.toLowerCase().startsWith('antigravity.')) {
+        const parts = providerKey.split('.');
+        const alias = parts.length >= 2 ? String(parts[1] || '').trim().toLowerCase() : '';
+        const getter = mod as unknown as { getAdminSnapshot?: () => Record<string, unknown> };
+        const snapshot = typeof getter.getAdminSnapshot === 'function' ? getter.getAdminSnapshot() : null;
+        if (alias && snapshot && typeof snapshot === 'object') {
+          const prefix = `antigravity.${alias}.`;
+          const expanded = Object.keys(snapshot).filter((k) => String(k || '').trim().toLowerCase().startsWith(prefix));
+          if (expanded.length > 0) {
+            keys = expanded;
+          }
+        }
+      }
+
+      let result: unknown = null;
+      for (const key of keys) {
+        result = await recoverMod.recoverProvider(key);
+      }
       res.status(200).json({ ok: true, providerKey, action: 'recover', result });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);

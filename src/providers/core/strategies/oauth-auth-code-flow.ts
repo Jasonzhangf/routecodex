@@ -369,6 +369,23 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
           `[OAuth] Waiting for OAuth callback at http://${redirectHost}:${port}${pathName}`
         );
         console.log(`[OAuth] You have 10 minutes to complete the authentication in your browser`);
+        try {
+          const envBrowser = String(process.env.ROUTECODEX_OAUTH_BROWSER || '').trim().toLowerCase();
+          const camoufoxDefault = !envBrowser || envBrowser === 'camoufox';
+          const devMode = String(process.env.ROUTECODEX_CAMOUFOX_DEV_MODE || '').trim();
+          const headless = !devMode;
+          if (camoufoxDefault && headless) {
+            console.log(
+              `[OAuth] Tip: no browser window? You may be running Camoufox headless. Re-run with "--headful" (or set ROUTECODEX_CAMOUFOX_DEV_MODE=1).`
+            );
+          } else {
+            console.log(
+              `[OAuth] Tip: if no browser window opened, manually visit the Portal URL printed above to continue.`
+            );
+          }
+        } catch {
+          // ignore
+        }
 
         // 设置 10 分钟超时
         timeoutHandle = setTimeout(() => {

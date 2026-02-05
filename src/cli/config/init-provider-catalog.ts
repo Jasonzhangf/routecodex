@@ -246,7 +246,8 @@ export function getInitProviderCatalog(): InitProviderTemplate[] {
           'gemini-2.5-flash': { supportsStreaming: true },
           'gemini-2.5-flash-lite': { supportsStreaming: true },
           'gemini-3-pro-high': { supportsStreaming: true },
-          'gemini-3-pro-low': { supportsStreaming: true },
+          // gemini-3-pro-low has a smaller context window than the high tier.
+          'gemini-3-pro-low': { supportsStreaming: true, maxContext: 256000 },
           'gemini-3-flash-preview': { supportsStreaming: true },
           'claude-sonnet-4-5': { supportsStreaming: true },
           'claude-sonnet-4-5-thinking': { supportsStreaming: true }

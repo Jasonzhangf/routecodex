@@ -46,6 +46,7 @@ ${bin} oauth --force qwen-oauth-1-default.json
 - `selector` 支持：token 文件 basename、全路径、或 provider id（例如 `qwen` / `iflow` / `antigravity`）
 - `--force`：强制重新授权（一定会走浏览器/portal）
 - 不带 `--force`：如果 token 仍然有效，会直接跳过（避免“每次都让我重新认证”）
+- 如果你希望看到可见窗口（避免 headless 误以为“没弹出来”），加 `--headful`（等价于 `ROUTECODEX_CAMOUFOX_DEV_MODE=1`）
 - 若你的 `oauthBrowser=camoufox`，Qwen 在 `authorize` 页面需要点一次 Confirm；`oauth` 默认会启用 `qwen` auto（等价于 `oauth qwen-auto ...`）
 
 ### 2.2 Camoufox 自动化（推荐：Qwen / Gemini / Antigravity / iFlow）
@@ -68,6 +69,8 @@ Qwen 的自动化会在授权页自动点击：
 WebUI（daemon-admin）里点 “Authorize OAuth” 时也会强制走 Camoufox；若未安装，会返回错误 `camoufox_missing` 并提示安装命令。
 
 当 token 被标记为 `verify required`（Google 风控校验）时，daemon-admin 会提供 `open` 链接，点击后会用 Camoufox 打开验证 URL（固定 profile + 指纹），不要再用系统浏览器。
+
+CLI `oauth <selector>` 若发现 quota-manager 已将该 alias 标记为 `verify required`，也会打印明确警告与验证 URL（即使 token 文件仍显示 valid）。
 
 Portal 健康检查（`/health`）默认会等待 **300s**（网络慢时避免过早 timeout），可用环境变量调整：
 
@@ -111,6 +114,8 @@ RouteCodex 运行时会启动 token-daemon 做 **后台刷新**（默认提前�
 - `accounts.google.com/signin/continue`
 
 说明账号需要在浏览器里完成验证/风控解除（不是简单的 token 过期）。此时 RouteCodex 会尝试自动拉起 Camoufox 交互式 OAuth/验证流程。
+
+- 对于这类 “Google verify” 403，后台非阻塞 repair 会优先 **直接打开验证 URL**（Camoufox open-only，不等 localhost callback），让路由立即 failover，同时用户可以在 Camoufox 里完成验证。
 
 为避免“无限弹窗/无限认证”，同一个 token（provider + tokenFile）在该类 403 下会有 **30 分钟冷却**（可用环境变量覆盖）：
 
