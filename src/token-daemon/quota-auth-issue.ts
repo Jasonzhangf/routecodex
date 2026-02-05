@@ -20,7 +20,9 @@ export type GoogleAccountVerificationIssue = {
 };
 
 function resolveQuotaManagerPath(): string {
-  return path.join(os.homedir(), '.routecodex', 'quota', 'quota-manager.json');
+  const envHome = String(process.env.ROUTECODEX_HOME || process.env.HOME || '').trim();
+  const home = envHome || os.homedir();
+  return path.join(home, '.routecodex', 'quota', 'quota-manager.json');
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

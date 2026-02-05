@@ -78,6 +78,8 @@ CLI `oauth <selector>` 若发现 quota-manager 已将该 alias 标记为 `verify
 - 若你希望不提示直接打开：设置 `ROUTECODEX_OAUTH_AUTO_OPEN_VERIFY=1`（或 `RCC_OAUTH_AUTO_OPEN_VERIFY=1`），或在命令上加 `--headful`
 - 若你只想打印 URL：回答 `n`
 
+> 注：quota-manager 状态文件默认读取 `${ROUTECODEX_HOME:-$HOME}/.routecodex/quota/quota-manager.json`（便于测试/沙盒环境重定向）。
+
 Portal 健康检查（`/health`）默认会等待 **300s**（网络慢时避免过早 timeout），可用环境变量调整：
 
 - `ROUTECODEX_OAUTH_PORTAL_READY_TIMEOUT_MS`（总等待）
