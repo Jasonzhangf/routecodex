@@ -36,6 +36,20 @@ function normalizeAlias(alias: string): string {
   return trimmed ? trimmed.toLowerCase() : 'default';
 }
 
+function sanitizeUrl(raw: string): string | null {
+  const trimmed = String(raw || '').trim();
+  if (!trimmed) {
+    return null;
+  }
+  // Some upstream error payloads may accidentally include trailing text/newlines after the URL.
+  // Keep the first HTTPS URL-looking segment only.
+  const m = trimmed.match(/https:\/\/[^\s"'\\)]+/i);
+  if (m && m[0]) {
+    return m[0];
+  }
+  return trimmed;
+}
+
 export async function findGoogleAccountVerificationIssue(
   providerRaw: string,
   aliasRaw: string
@@ -86,7 +100,7 @@ export async function findGoogleAccountVerificationIssue(
     providerKeys.push(key);
     const candidateUrl = typeof authIssue?.url === 'string' ? String(authIssue.url).trim() : '';
     if (!url && candidateUrl) {
-      url = candidateUrl;
+      url = sanitizeUrl(candidateUrl);
     }
     if (reason === null && typeof state.reason === 'string') {
       const r = String(state.reason).trim();
@@ -104,4 +118,3 @@ export async function findGoogleAccountVerificationIssue(
   providerKeys.sort((a, b) => a.localeCompare(b));
   return { providerKeys, url, inPool, reason };
 }
-

@@ -27,8 +27,9 @@ import {
   type RefreshOutcome
 } from './history-store.js';
 import { ensureLocalTokenPortalEnv, shutdownLocalTokenPortalEnv } from '../token-portal/local-token-portal.js';
-import { shutdownCamoufoxLaunchers } from '../providers/core/config/camoufox-launcher.js';
+import { shutdownCamoufoxLaunchers, isCamoufoxAvailable, openAuthInCamoufox } from '../providers/core/config/camoufox-launcher.js';
 import { loadRouteCodexConfig } from '../config/routecodex-config-loader.js';
+import { withOAuthRepairEnv } from '../providers/auth/oauth-repair-env.js';
 import { findGoogleAccountVerificationIssue } from './quota-auth-issue.js';
 
 export { TokenDaemon };
@@ -382,6 +383,59 @@ export async function interactiveRefresh(selector: string, options: InteractiveR
   const label = formatTokenLabel(token);
   const force = Boolean(options?.force);
 
+  const maybeOpenQuotaVerifyUrl = async (url: string): Promise<void> => {
+    const shouldAutoOpen =
+      String(process.env.ROUTECODEX_OAUTH_AUTO_OPEN_VERIFY || '').trim() === '1' ||
+      String(process.env.RCC_OAUTH_AUTO_OPEN_VERIFY || '').trim() === '1' ||
+      // If user asked for --headful, the command wrapper sets this env var.
+      String(process.env.ROUTECODEX_CAMOUFOX_DEV_MODE || '').trim() === '1';
+
+    if (!process.stdin.isTTY && !shouldAutoOpen) {
+      return;
+    }
+
+    if (!isCamoufoxAvailable()) {
+      console.warn(
+        chalk.yellow('⚠'),
+        'Camoufox is required to open the verification URL. Install it first: python3 -m pip install --user -U camoufox'
+      );
+      return;
+    }
+
+    let proceed = shouldAutoOpen;
+    if (!proceed) {
+      proceed = await askYesNo('Open verification URL in Camoufox now? (Y/n) ', true);
+    }
+    if (!proceed) {
+      return;
+    }
+
+    try {
+      const prevOpenOnly = process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY;
+      process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY = '1';
+      try {
+        await withOAuthRepairEnv(token.provider, async () => {
+          const ok = await openAuthInCamoufox({
+            url,
+            provider: token.provider,
+            alias: token.alias || 'default'
+          });
+          if (ok) {
+            console.log(chalk.blue('ℹ'), 'Opened verification URL in Camoufox.');
+          }
+        });
+      } finally {
+        if (prevOpenOnly === undefined) {
+          delete process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY;
+        } else {
+          process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY = prevOpenOnly;
+        }
+      }
+    } catch {
+      // best-effort
+    }
+  };
+
   const warnIfQuotaVerifyRequired = async (): Promise<void> => {
     try {
       const issue = await findGoogleAccountVerificationIssue(token.provider, token.alias || 'default');
@@ -398,6 +452,7 @@ export async function interactiveRefresh(selector: string, options: InteractiveR
           chalk.yellow('⚠'),
           `Verification URL (use daemon-admin "open" to launch Camoufox): ${issue.url}`
         );
+        await maybeOpenQuotaVerifyUrl(issue.url);
       }
     } catch {
       // best-effort: never block interactive oauth
@@ -677,7 +732,7 @@ async function getTokenFileMtime(filePath: string): Promise<number | null> {
   }
 }
 
-function askYesNo(prompt: string): Promise<boolean> {
+function askYesNo(prompt: string, defaultYes: boolean = false): Promise<boolean> {
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout
@@ -687,6 +742,10 @@ function askYesNo(prompt: string): Promise<boolean> {
     rl.question(prompt, (answer) => {
       rl.close();
       const normalized = String(answer || '').trim().toLowerCase();
+      if (!normalized) {
+        resolve(defaultYes);
+        return;
+      }
       resolve(normalized === 'y' || normalized === 'yes');
     });
   });
