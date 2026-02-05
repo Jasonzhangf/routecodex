@@ -283,7 +283,16 @@ export function sendPipelineResponse(
       clearTimers();
       logPipelineStage('response.sse.stream.error', requestLabel, { message: error.message });
       try {
-        res.write(`event: error\ndata: ${JSON.stringify({ message: error.message })}\n\n`);
+        const payload = {
+          type: 'error',
+          status: 500,
+          error: {
+            message: error.message,
+            code: 'sse_stream_error',
+            request_id: requestLabel
+          }
+        };
+        res.write(`event: error\ndata: ${JSON.stringify(payload)}\n\n`);
       } catch {
         /* ignore write errors */
       }
