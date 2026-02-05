@@ -129,6 +129,16 @@ export interface ProviderRuntimeProfile {
   endpoint: string;
   baseUrl?: string;
   headers?: Record<string, string>;
+  /**
+   * Per-request timeout for upstream HTTP calls (ms).
+   * This is a host-side transport concern; may be injected from provider profiles.
+   */
+  timeoutMs?: number;
+  /**
+   * Max retry attempts for upstream HTTP calls.
+   * This is a host-side transport concern; may be injected from provider profiles.
+   */
+  maxRetries?: number;
   auth: ProviderRuntimeAuth;
   compatibilityProfile?: string;
   outboundProfile?: string;

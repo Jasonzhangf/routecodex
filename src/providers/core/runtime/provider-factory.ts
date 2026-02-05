@@ -191,10 +191,22 @@ export class ProviderFactory {
     }
     extensions.providerProtocol = runtime.providerProtocol || providerTypeToProtocol(providerType);
     const moduleOverride = this.resolveProviderModule(runtime.providerModule);
+
+    const timeoutMs =
+      typeof runtime.timeoutMs === 'number' && Number.isFinite(runtime.timeoutMs) && runtime.timeoutMs > 0
+        ? Math.floor(runtime.timeoutMs)
+        : undefined;
+    const maxRetries =
+      typeof runtime.maxRetries === 'number' && Number.isFinite(runtime.maxRetries) && runtime.maxRetries >= 0
+        ? Math.floor(runtime.maxRetries)
+        : undefined;
+
     const configNode: ProviderConfigInternal = {
       providerType,
       providerId: providerFamily,
       baseUrl,
+      ...(timeoutMs !== undefined ? { timeout: timeoutMs } : {}),
+      ...(maxRetries !== undefined ? { maxRetries } : {}),
       auth: authConfig,
       overrides,
       ...(Object.keys(extensions).length ? { extensions } : {})

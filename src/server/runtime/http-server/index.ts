@@ -156,6 +156,7 @@ export class RouteCodexHttpServer {
   private hubPipeline: HubPipeline | null = null;
   private providerHandles: Map<string, ProviderHandle> = new Map();
   private providerKeyToRuntimeKey: Map<string, string> = new Map();
+  private providerRuntimeInitErrors: Map<string, Error> = new Map();
   private pipelineLogger: PipelineDebugLogger = createNoopPipelineLogger();
   private authResolver = new AuthFileResolver();
   private userConfig: UnknownObject = {};
@@ -373,6 +374,12 @@ export class RouteCodexHttpServer {
     }
     if (!patched.headers && profile.transport.headers) {
       patched.headers = profile.transport.headers;
+    }
+    if (patched.timeoutMs === undefined && typeof profile.transport.timeoutMs === 'number') {
+      patched.timeoutMs = profile.transport.timeoutMs;
+    }
+    if (patched.maxRetries === undefined && typeof profile.transport.maxRetries === 'number') {
+      patched.maxRetries = profile.transport.maxRetries;
     }
     if (!patched.compatibilityProfile && profile.compatibilityProfile) {
       patched.compatibilityProfile = profile.compatibilityProfile;
@@ -1034,6 +1041,7 @@ export class RouteCodexHttpServer {
     }
     await this.disposeProviders();
     this.providerKeyToRuntimeKey.clear();
+    this.providerRuntimeInitErrors.clear();
 
     // Antigravity UA preload (best-effort):
     // - fetch latest UA version once (cached)
@@ -1200,10 +1208,16 @@ export class RouteCodexHttpServer {
 
           const handle = await this.createProviderHandle(runtimeKey, patchedRuntime);
           this.providerHandles.set(runtimeKey, handle);
+          this.providerRuntimeInitErrors.delete(runtimeKey);
         } catch (error) {
           // Non-blocking: do not crash server startup when a provider is misconfigured (e.g. missing env var).
           // Emit a provider error so health/quota modules can mark it unhealthy and routing can fail over.
           failedRuntimeKeys.add(runtimeKey);
+          if (error instanceof Error) {
+            this.providerRuntimeInitErrors.set(runtimeKey, error);
+          } else {
+            this.providerRuntimeInitErrors.set(runtimeKey, new Error(String(error)));
+          }
           try {
             const { emitProviderError } = await import('../../../providers/core/utils/provider-error-reporter.js');
             emitProviderError({
@@ -1565,11 +1579,19 @@ export class RouteCodexHttpServer {
 
       const handle = this.providerHandles.get(runtimeKey);
       if (!handle) {
-        const error = Object.assign(new Error(`Provider runtime ${runtimeKey} not found`), {
+        const initError = this.providerRuntimeInitErrors.get(runtimeKey);
+        const error = Object.assign(
+          new Error(
+            initError
+              ? `Provider runtime ${runtimeKey} failed to initialize: ${initError.message}`
+              : `Provider runtime ${runtimeKey} not found`
+          ),
+          {
           code: 'ERR_PROVIDER_NOT_FOUND',
           requestId: input.requestId,
           retryable: true
-        });
+          }
+        );
         if (!firstError) {
           firstError = error;
         }
