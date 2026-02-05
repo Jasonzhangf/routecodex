@@ -430,11 +430,21 @@ export async function openAuthInCamoufox(options: CamoufoxLaunchOptions): Promis
     }`
   );
   if (!ensureCamoufoxInstalled()) {
+    try {
+      console.warn('[OAuth] Camoufox not available (python3 -m camoufox path failed). Falling back to system browser.');
+    } catch {
+      // ignore
+    }
     logOAuthDebug('[OAuth] Camoufox: installation missing; falling back to default browser');
     return false;
   }
   const scriptPath = resolveCamoufoxScriptPath();
   if (!scriptPath) {
+    try {
+      console.warn('[OAuth] Camoufox launcher script not found. Falling back to system browser.');
+    } catch {
+      // ignore
+    }
     logOAuthDebug('[OAuth] Camoufox: launcher script not resolved; falling back to default browser');
     return false;
   }
@@ -455,8 +465,12 @@ export async function openAuthInCamoufox(options: CamoufoxLaunchOptions): Promis
   const fingerprintEnv = ensureFingerprintEnv(profileId, options.provider, options.alias);
 
   try {
-    logOAuthDebug(`[OAuth] Camoufox: spawning launcher script=${scriptPath} profileId=${profileId}`);
     const autoMode = (process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE || '').trim();
+    const devMode = (process.env.ROUTECODEX_CAMOUFOX_DEV_MODE || '').trim();
+    console.log(
+      `[OAuth] Camoufox launcher spawn: profileId=${profileId} autoMode=${autoMode || '-'} devMode=${devMode || '0'}`
+    );
+    logOAuthDebug(`[OAuth] Camoufox: spawning launcher script=${scriptPath} profileId=${profileId}`);
     const args = [scriptPath, '--profile', profileId, '--url', url];
     if (autoMode) {
       args.push('--auto-mode', autoMode);
@@ -500,6 +514,13 @@ export async function openAuthInCamoufox(options: CamoufoxLaunchOptions): Promis
       });
     });
 
+    if (!ok) {
+      try {
+        console.warn('[OAuth] Camoufox launcher exited early; falling back to system browser.');
+      } catch {
+        // ignore
+      }
+    }
     // Do not keep the parent process alive solely for the launcher; interactive flows
     // will keep running due to the callback server anyway. Cleanup will terminate it.
     child.unref();

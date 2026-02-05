@@ -226,7 +226,11 @@ export abstract class BaseOAuthFlowStrategy {
       if (preferCamoufox) {
         const meta = this.extractTokenPortalMetadata(portalUrl);
         try {
-          console.log('[OAuth] Launching Camoufox for authentication...');
+          const autoMode = (process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE || '').trim();
+          const devMode = (process.env.ROUTECODEX_CAMOUFOX_DEV_MODE || '').trim();
+          console.log(
+            `[OAuth] Launching Camoufox for authentication... (autoMode=${autoMode || '-'} devMode=${devMode || '0'})`
+          );
           opened = await openAuthInCamoufox({
             url: resolvedUrl,
             provider: meta.provider,
@@ -244,6 +248,7 @@ export abstract class BaseOAuthFlowStrategy {
       }
 
       if (!opened) {
+        console.warn('[OAuth] Camoufox launch not available; falling back to system browser.');
         try {
           const openImport = (await import('open')) as unknown;
           let opener: BrowserOpener | undefined;

@@ -54,6 +54,7 @@ function stripAnsi(input) {
 }
 
 async function getCamoufoxCacheRoot() {
+  const timeoutMs = Number(process.env.ROUTECODEX_CAMOUFOX_PATH_TIMEOUT_MS || 8000);
   return new Promise((resolve) => {
     const child = spawn('python3', ['-m', 'camoufox', 'path'], {
       stdio: ['ignore', 'pipe', 'pipe']
@@ -62,8 +63,26 @@ async function getCamoufoxCacheRoot() {
     child.stdout.on('data', (chunk) => {
       out += String(chunk);
     });
-    child.on('error', () => resolve(null));
+    const timer = setTimeout(() => {
+      try {
+        child.kill('SIGKILL');
+      } catch {
+        // ignore
+      }
+      console.warn(
+        `[camoufox-launch-auth] camoufox path resolution timed out after ${timeoutMs}ms; falling back to PATH/override.`
+      );
+      resolve(null);
+    }, timeoutMs);
+    if (typeof timer.unref === 'function') {
+      timer.unref();
+    }
+    child.on('error', () => {
+      clearTimeout(timer);
+      resolve(null);
+    });
     child.on('close', () => {
+      clearTimeout(timer);
       const cleaned = stripAnsi(out).trim();
       const line = cleaned.split(/\r?\n/).filter((l) => l.trim()).pop() || '';
       resolve(line || null);
@@ -150,7 +169,20 @@ async function main() {
   const profileId = profile || 'default';
   const profileDir = await ensureProfileDir(profileId);
 
-  const cacheRoot = await getCamoufoxCacheRoot();
+  const urlPreview = String(url).length > 160 ? `${String(url).slice(0, 160)}…` : String(url);
+  console.log(
+    `[camoufox-launch-auth] start profileId=${profileId} devMode=${devMode ? '1' : '0'} autoMode=${autoMode || '-'}`
+  );
+  console.log(`[camoufox-launch-auth] url=${urlPreview}`);
+
+  const binaryOverride = (process.env.ROUTECODEX_CAMOUFOX_BINARY || '').trim();
+  if (binaryOverride) {
+    console.log('[camoufox-launch-auth] ROUTECODEX_CAMOUFOX_BINARY is set; skipping python3 camoufox path lookup.');
+  } else {
+    console.log('[camoufox-launch-auth] Resolving Camoufox path via python3 -m camoufox path ...');
+  }
+
+  const cacheRoot = binaryOverride ? null : await getCamoufoxCacheRoot();
   if (!cacheRoot) {
     console.warn(
       '[camoufox-launch-auth] Failed to resolve Camoufox cache root via "python3 -m camoufox path"; falling back to PATH/override.'
@@ -158,6 +190,8 @@ async function main() {
   }
 
   const camoufoxBinary = resolveCamoufoxBinary(cacheRoot);
+  console.log(`[camoufox-launch-auth] binary=${camoufoxBinary}`);
+  console.log(`[camoufox-launch-auth] profileDir=${profileDir}`);
 
   if (autoMode && autoMode.trim().toLowerCase() === 'iflow') {
     try {
