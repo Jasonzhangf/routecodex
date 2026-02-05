@@ -75,6 +75,15 @@ Portal 健康检查（`/health`）默认会等待 **300s**（网络慢时避免�
 - `ROUTECODEX_OAUTH_PORTAL_READY_REQUEST_TIMEOUT_MS`（单次请求）
 - `ROUTECODEX_OAUTH_PORTAL_READY_POLL_MS`（轮询间隔）
 
+Camoufox 自动化（Google / Antigravity / Qwen）相关等待也有独立超时（默认 **300s**，避免网络慢/跳转慢导致误判）：
+
+- `ROUTECODEX_CAMOUFOX_GEMINI_TIMEOUT_MS`（Gemini / Antigravity account/confirm/callback 总等待）
+- `ROUTECODEX_CAMOUFOX_PORTAL_BUTTON_TIMEOUT_MS`（token portal `Continue` 按钮等待）
+- `ROUTECODEX_CAMOUFOX_PORTAL_POPUP_TIMEOUT_MS`（portal 点击后 popup 或同页跳转等待）
+- `ROUTECODEX_CAMOUFOX_PAGE_LOAD_TIMEOUT_MS`（portal 后 OAuth 页 `domcontentloaded` 等待）
+
+> Antigravity/Gemini 的确认按钮点击不依赖文案（locale/font 变化），按容器 selector 点击 primary action。
+
 ## 3) 刷新（refresh）是怎么工作的？
 
 ### 3.1 后台刷新（默认：静默，不弹窗）

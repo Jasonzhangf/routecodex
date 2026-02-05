@@ -557,9 +557,9 @@ async function runIflowAutoFlow({ url, profileDir, profileId, camoufoxBinary, de
     }
     console.log('[camoufox-launch-auth] Account clicked, waiting for callback...');
 
-    const callbackPage = await waitForCallback(context, iflowPage);
+    const callbackPage = await waitForCallback(context, iflowPage, timeoutMs);
     callbackObserved = true;
-    await callbackPage.waitForLoadState('load', { timeout: 120000 }).catch(() => {});
+    await callbackPage.waitForLoadState('load', { timeout: timeoutMs }).catch(() => {});
     console.log('[camoufox-launch-auth] OAuth callback detected, automation complete.');
   } catch (error) {
     if (callbackObserved && isBrowserClosedError(error)) {
@@ -582,7 +582,7 @@ async function runGeminiAutoFlow({ url, profileDir, camoufoxBinary, devMode }) {
     );
   }
 
-  const timeoutMs = Number(process.env.ROUTECODEX_CAMOUFOX_GEMINI_TIMEOUT_MS || 120_000);
+  const timeoutMs = Number(process.env.ROUTECODEX_CAMOUFOX_GEMINI_TIMEOUT_MS || 300_000);
   const accountPreference = (process.env.ROUTECODEX_CAMOUFOX_ACCOUNT_TEXT || '').trim();
   cleanupExistingCamoufox(profileDir);
   const context = await firefox.launchPersistentContext(profileDir, {
@@ -662,8 +662,8 @@ async function runGeminiAutoFlow({ url, profileDir, camoufoxBinary, devMode }) {
       console.log('[camoufox-launch-auth] No confirmation button detected within 120s, continuing...');
     }
 
-    const activePage = confirmResult?.page || authPage;
-    const callbackPage = await waitForCallback(context, activePage);
+    const activePage = confirmResult?.page || page;
+    const callbackPage = await waitForCallback(context, activePage, timeoutMs);
     await callbackPage.waitForLoadState('load', { timeout: timeoutMs }).catch(() => {});
     console.log('[camoufox-launch-auth] OAuth callback detected, automation complete.');
   } finally {
@@ -681,7 +681,10 @@ async function runAntigravityAutoFlow({ url, profileDir, camoufoxBinary, devMode
     );
   }
 
-  const timeoutMs = Number(process.env.ROUTECODEX_CAMOUFOX_GEMINI_TIMEOUT_MS || 120_000);
+  const timeoutMs = Number(process.env.ROUTECODEX_CAMOUFOX_GEMINI_TIMEOUT_MS || 300_000);
+  const portalButtonTimeoutMs = Number(process.env.ROUTECODEX_CAMOUFOX_PORTAL_BUTTON_TIMEOUT_MS || 300_000);
+  const portalPopupTimeoutMs = Number(process.env.ROUTECODEX_CAMOUFOX_PORTAL_POPUP_TIMEOUT_MS || 300_000);
+  const pageLoadTimeoutMs = Number(process.env.ROUTECODEX_CAMOUFOX_PAGE_LOAD_TIMEOUT_MS || 300_000);
   const accountPreference = (process.env.ROUTECODEX_CAMOUFOX_ACCOUNT_TEXT || '').trim();
   cleanupExistingCamoufox(profileDir);
   const context = await firefox.launchPersistentContext(profileDir, {
@@ -710,12 +713,33 @@ async function runAntigravityAutoFlow({ url, profileDir, camoufoxBinary, devMode
     if (page.url().includes('token-auth')) {
       console.log('[camoufox-launch-auth] Portal detected, auto-clicking continue button...');
       const button = page.locator('#continue-btn');
-      await button.waitFor({ timeout: 20000 });
-      const popupPromise = context.waitForEvent('page', { timeout: 10000 }).catch(() => null);
-      await button.click();
+      await button.waitFor({ timeout: portalButtonTimeoutMs });
+      const popupPromise = context.waitForEvent('page', { timeout: portalPopupTimeoutMs }).catch(() => null);
+      const navPromise = page
+        .waitForURL((current) => typeof current === 'string' && !String(current).includes('token-auth'), {
+          timeout: portalPopupTimeoutMs
+        })
+        .catch(() => null);
+      try {
+        await button.click({ timeout: portalButtonTimeoutMs });
+      } catch {
+        await page.evaluate(() => {
+          const el = document.querySelector('#continue-btn');
+          if (!el) return;
+          const events = ['mouseenter', 'mouseover', 'mousemove', 'mousedown', 'mouseup', 'click'];
+          for (const type of events) {
+            el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+          }
+        });
+      }
       const popup = await popupPromise;
-      authPage = popup ?? page;
-      await authPage.waitForLoadState('domcontentloaded', { timeout: 30000 }).catch(() => {});
+      if (popup) {
+        authPage = popup;
+      } else {
+        await navPromise;
+        authPage = page;
+      }
+      await authPage.waitForLoadState('domcontentloaded', { timeout: pageLoadTimeoutMs }).catch(() => {});
     }
 
     console.log('[camoufox-launch-auth] Antigravity OAuth page loaded, waiting for account selector (<=120s)...');
@@ -755,23 +779,37 @@ async function runAntigravityAutoFlow({ url, profileDir, camoufoxBinary, devMode
       }
     }, handle);
 
-    const confirmSelector = 'span.VfPpkd-vQzf8d[jsname="V67aGc"]';
-    const confirmResult = await waitForElementInPages(context, confirmSelector, timeoutMs);
+    // Google confirmation screens vary by locale/font/text; click by container/role instead of innerText.
+    const confirmSelectors = [
+      // Common primary action container on Google OAuth screens.
+      'div.VfPpkd-RLmnJb',
+      // Common button class.
+      'button.VfPpkd-LgbsSe',
+      // Alternate shape (sometimes rendered as div role=button).
+      'div[role="button"].VfPpkd-LgbsSe'
+    ];
+    const confirmResult = await waitForAnyElementInPages(context, confirmSelectors, timeoutMs);
     if (confirmResult) {
-      const signIn = confirmResult.locator.filter({ hasText: 'Sign in' });
-      if ((await signIn.count().catch(() => 0)) > 0) {
-        console.log('[camoufox-launch-auth] Sign-in confirmation span located (jsname=V67aGc), clicking...');
-        await signIn.first().click({ timeout: timeoutMs }).catch(() => {});
-        console.log('[camoufox-launch-auth] Antigravity confirmation acknowledged, waiting for callback...');
-      } else {
-        console.warn('[camoufox-launch-auth] Confirmation element present but text mismatch; skipping auto-click.');
+      console.log(`[camoufox-launch-auth] Confirmation element detected (${confirmResult.selector}), clicking...`);
+      try {
+        await confirmResult.locator.first().click({ timeout: timeoutMs });
+      } catch {
+        await confirmResult.page.evaluate((sel) => {
+          const el = document.querySelector(sel);
+          if (!el) return;
+          const events = ['mouseenter', 'mouseover', 'mousemove', 'mousedown', 'mouseup', 'click'];
+          for (const type of events) {
+            el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+          }
+        }, confirmResult.selector);
       }
+      console.log('[camoufox-launch-auth] Antigravity confirmation acknowledged, waiting for callback...');
     } else {
       console.log('[camoufox-launch-auth] No Antigravity confirmation button detected within 120s, continuing...');
     }
 
     const activePage = confirmResult?.page || authPage;
-    const callbackPage = await waitForCallback(context, activePage);
+    const callbackPage = await waitForCallback(context, activePage, timeoutMs);
     callbackObserved = true;
     await callbackPage.waitForLoadState('load', { timeout: timeoutMs }).catch(() => {});
     console.log('[camoufox-launch-auth] OAuth callback detected, automation complete.');
@@ -823,12 +861,36 @@ async function runQwenAutoFlow({ url, profileDir, camoufoxBinary, devMode }) {
     if (page.url().includes('token-auth')) {
       console.log('[camoufox-launch-auth] Portal detected, auto-clicking continue button...');
       const button = page.locator('#continue-btn');
-      await button.waitFor({ timeout: 20000 });
-      const popupPromise = context.waitForEvent('page', { timeout: 10000 }).catch(() => null);
-      await button.click();
+      const portalButtonTimeoutMs = Number(process.env.ROUTECODEX_CAMOUFOX_PORTAL_BUTTON_TIMEOUT_MS || 300_000);
+      const portalPopupTimeoutMs = Number(process.env.ROUTECODEX_CAMOUFOX_PORTAL_POPUP_TIMEOUT_MS || 300_000);
+      const pageLoadTimeoutMs = Number(process.env.ROUTECODEX_CAMOUFOX_PAGE_LOAD_TIMEOUT_MS || 300_000);
+      await button.waitFor({ timeout: portalButtonTimeoutMs });
+      const popupPromise = context.waitForEvent('page', { timeout: portalPopupTimeoutMs }).catch(() => null);
+      const navPromise = page
+        .waitForURL((current) => typeof current === 'string' && !String(current).includes('token-auth'), {
+          timeout: portalPopupTimeoutMs
+        })
+        .catch(() => null);
+      try {
+        await button.click({ timeout: portalButtonTimeoutMs });
+      } catch {
+        await page.evaluate(() => {
+          const el = document.querySelector('#continue-btn');
+          if (!el) return;
+          const events = ['mouseenter', 'mouseover', 'mousemove', 'mousedown', 'mouseup', 'click'];
+          for (const type of events) {
+            el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+          }
+        });
+      }
       const popup = await popupPromise;
-      authPage = popup ?? page;
-      await authPage.waitForLoadState('domcontentloaded', { timeout: 30000 }).catch(() => {});
+      if (popup) {
+        authPage = popup;
+      } else {
+        await navPromise;
+        authPage = page;
+      }
+      await authPage.waitForLoadState('domcontentloaded', { timeout: pageLoadTimeoutMs }).catch(() => {});
     }
 
     console.log('[camoufox-launch-auth] Qwen authorize page loaded, waiting for confirm button...');
@@ -892,6 +954,40 @@ async function waitForElementInPages(context, selector, timeoutMs) {
         }
       } catch {
         // ignore closed pages
+      }
+    }
+    const elapsed = Date.now() - start;
+    const remaining = timeoutMs - elapsed;
+    const waitSlice = Math.min(1000, remaining);
+    if (waitSlice <= 0) {
+      break;
+    }
+    try {
+      await context.waitForEvent('page', { timeout: waitSlice });
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, waitSlice));
+    }
+  }
+  return null;
+}
+
+async function waitForAnyElementInPages(context, selectors, timeoutMs) {
+  const list = Array.isArray(selectors) ? selectors.filter(Boolean) : [];
+  if (list.length === 0) {
+    return null;
+  }
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    for (const candidate of context.pages()) {
+      for (const selector of list) {
+        try {
+          const locator = candidate.locator(selector);
+          if ((await locator.count()) > 0) {
+            return { page: candidate, locator, selector };
+          }
+        } catch {
+          // ignore closed pages
+        }
       }
     }
     const elapsed = Date.now() - start;

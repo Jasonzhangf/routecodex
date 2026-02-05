@@ -472,18 +472,38 @@ export async function interactiveRefresh(selector: string, options: InteractiveR
     if (providerType === 'qwen') {
       process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE = 'qwen';
     }
-    await ensureValidOAuthToken(
-      providerType,
-      {
-        type: rawType,
-        tokenFile: token.filePath
-      } as any,
-      {
-        openBrowser: true,
-        forceReauthorize: force,
-        forceReacquireIfRefreshFails: true
+    const runEnsure = async () =>
+      ensureValidOAuthToken(
+        providerType,
+        {
+          type: rawType,
+          tokenFile: token.filePath
+        } as any,
+        {
+          openBrowser: true,
+          forceReauthorize: force,
+          forceReacquireIfRefreshFails: true
+        }
+      );
+
+    const autoModeAtStart = String(process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE || '').trim();
+    try {
+      await runEnsure();
+    } catch (error) {
+      // When Camoufox auto mode fails (selector mismatch / locale / popup differences),
+      // immediately fall back to a visible manual flow in the same command invocation.
+      if (autoModeAtStart) {
+        const msg = error instanceof Error ? error.message : String(error);
+        console.warn(
+          chalk.yellow('!'),
+          `Camoufox auto OAuth failed (${providerType} ${label}, autoMode=${autoModeAtStart}): ${msg}. Falling back to manual mode.`
+        );
+        delete process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
+        await runEnsure();
+      } else {
+        throw error;
       }
-    );
+    }
     const tokenMtimeAfter = await getTokenFileMtime(token.filePath);
     await recordManualHistory(token, 'success', startedAt, tokenMtimeAfter);
     console.log(chalk.green('✓'), '认证完成，Token 文件已更新');

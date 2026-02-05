@@ -23,6 +23,16 @@ const __dirname = path.dirname(__filename);
 const TOKEN_DAEMON_PID_FILE = path.join(homedir(), '.routecodex', 'token-daemon.pid');
 const CLI_ENTRY = path.resolve(__dirname, '../cli.js');
 
+async function safeInteractiveRefresh(selector: string, options: { force?: boolean }): Promise<void> {
+  try {
+    await interactiveRefresh(selector, options);
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error(`✗ OAuth failed: ${msg}`);
+    process.exitCode = 1;
+  }
+}
+
 export function createTokenDaemonCommand(): Command {
   const cmd = new Command('token-daemon');
   cmd
@@ -36,7 +46,7 @@ export function createTokenDaemonCommand(): Command {
         cmd.outputHelp();
         return;
       }
-      await interactiveRefresh(selector, { force: true });
+      await safeInteractiveRefresh(selector, { force: true });
     });
 
   cmd
@@ -113,7 +123,7 @@ export function createTokenDaemonCommand(): Command {
       'Token selector: file basename, full path, or provider id (e.g. "iflow-oauth-1-work.json")'
     )
     .action(async (selector: string) => {
-      await interactiveRefresh(selector, { force: true });
+      await safeInteractiveRefresh(selector, { force: true });
     });
 
   return cmd;
