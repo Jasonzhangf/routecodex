@@ -255,6 +255,12 @@ function resolveGenFingerprintScriptPath(): string | null {
 }
 
 function computeOsPolicy(provider?: string | null, alias?: string | null): string | undefined {
+  const forced = String(process.env.ROUTECODEX_CAMOUFOX_FORCE_OS || process.env.RCC_CAMOUFOX_FORCE_OS || '')
+    .trim()
+    .toLowerCase();
+  if (forced === 'windows' || forced === 'macos') {
+    return forced;
+  }
   const family = getProviderFamily(provider);
   const effectiveAlias = alias && alias.trim() ? alias.trim().toLowerCase() : 'default';
 
@@ -461,6 +467,63 @@ export async function openAuthInCamoufox(options: CamoufoxLaunchOptions): Promis
 
   // Ensure profile directory exists ahead of launch so that fingerprint/profile data can be persisted per token.
   ensureCamoufoxProfileDir(options.provider, options.alias);
+
+  // --- Safety guard: Google OAuth pages must be readable.
+  // Some Camoufox fingerprints (notably "windows" fonts) can render Google pages as garbled digits
+  // on macOS hosts. Auto-repair by re-generating the fingerprint using macos policy for this profileId.
+  try {
+    const autoRepairRaw = String(
+      process.env.ROUTECODEX_CAMOUFOX_AUTO_REPAIR_OS_MISMATCH ||
+        process.env.RCC_CAMOUFOX_AUTO_REPAIR_OS_MISMATCH ||
+        '1'
+    )
+      .trim()
+      .toLowerCase();
+    const autoRepairEnabled = autoRepairRaw !== '0' && autoRepairRaw !== 'false' && autoRepairRaw !== 'no';
+    const family = getProviderFamily(options.provider);
+    const isGoogleFlow = family === 'gemini';
+    if (autoRepairEnabled && isGoogleFlow && process.platform === 'darwin') {
+      const fpPath = getFingerprintPath(profileId);
+      const existingEnv = loadFingerprintEnv(profileId);
+      const rawCfg = existingEnv?.CAMOU_CONFIG_1;
+      if (rawCfg) {
+        try {
+          const cfg = JSON.parse(rawCfg) as Record<string, unknown>;
+          const platform = typeof cfg['navigator.platform'] === 'string' ? String(cfg['navigator.platform']) : '';
+          const wantsRepair = platform.toLowerCase() === 'win32';
+          if (wantsRepair) {
+            const backupPath = `${fpPath}.bak.${Date.now()}`;
+            console.warn(
+              `[OAuth] Camoufox fingerprint OS mismatch (host=macos, fp=${platform}). ` +
+                `Repairing to macos fingerprint for profileId=${profileId} (backup=${backupPath}).`
+            );
+            try {
+              fs.renameSync(fpPath, backupPath);
+            } catch {
+              // If backup fails, do not delete/overwrite; just continue with existing fingerprint.
+              console.warn('[OAuth] Camoufox fingerprint repair skipped (backup failed).');
+            }
+            const prevForcedOs = process.env.ROUTECODEX_CAMOUFOX_FORCE_OS;
+            process.env.ROUTECODEX_CAMOUFOX_FORCE_OS = 'macos';
+            try {
+              // Re-generate fingerprint file for this profileId (best-effort).
+              void ensureFingerprintEnv(profileId, options.provider, options.alias);
+            } finally {
+              if (prevForcedOs === undefined) {
+                delete process.env.ROUTECODEX_CAMOUFOX_FORCE_OS;
+              } else {
+                process.env.ROUTECODEX_CAMOUFOX_FORCE_OS = prevForcedOs;
+              }
+            }
+          }
+        } catch {
+          // ignore parse errors
+        }
+      }
+    }
+  } catch {
+    // guardrail must never block OAuth
+  }
 
   const fingerprintEnv = ensureFingerprintEnv(profileId, options.provider, options.alias);
 
