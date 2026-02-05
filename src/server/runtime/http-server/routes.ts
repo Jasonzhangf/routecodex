@@ -280,7 +280,6 @@ export function registerHttpRoutes(options: RouteOptions): void {
     if (!(await holdUntilReady(res))) {return;}
     await handleResponses(req, res, buildHandlerContext(), {
       entryEndpoint: '/v1/responses.submit_tool_outputs',
-      forceStream: true,
       responseIdFromPath: req.params?.id
     });
   });

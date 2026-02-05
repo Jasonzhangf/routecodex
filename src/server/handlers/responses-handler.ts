@@ -35,6 +35,10 @@ export async function handleResponses(
   options: ResponsesHandlerOptions = {}
 ): Promise<void> {
   const entryEndpoint = options.entryEndpoint || '/v1/responses';
+  const isSubmitToolOutputs = entryEndpoint === '/v1/responses.submit_tool_outputs';
+  // Some client endpoints are "synthetic" entrypoints used only for Hub/Pipeline semantics
+  // (e.g. submit_tool_outputs). We may rewrite the pipeline entryEndpoint after preprocessing.
+  let pipelineEntryEndpoint = entryEndpoint;
   const { clientRequestId, providerRequestId } = nextRequestIdentifiers(req.headers['x-request-id'], { entryEndpoint });
   const requestId = providerRequestId;
   const rawTimeout = String(
@@ -72,7 +76,9 @@ export async function handleResponses(
     const acceptsSse = typeof req.headers['accept'] === 'string'
       && (req.headers['accept'] as string).includes('text/event-stream');
     const originalStream = payload?.stream === true;
-    const inboundStream = acceptsSse || originalStream;
+    // submit_tool_outputs is a synthetic entrypoint: do not infer streaming from Accept headers.
+    // Some upstreams (e.g. OpenAI-compatible local servers) do not implement streaming on submit paths.
+    const inboundStream = isSubmitToolOutputs ? originalStream : (acceptsSse || originalStream);
     const outboundStream = originalStream;
     let resumeMeta: Record<string, unknown> | undefined;
     if (entryEndpoint === '/v1/responses.submit_tool_outputs') {
@@ -87,6 +93,10 @@ export async function handleResponses(
         const resumeResult = await resumeResponsesConversation(responseId, payload, { requestId });
         payload = (resumeResult.payload ?? {}) as ResponsesPayload;
         resumeMeta = resumeResult.meta;
+        // After resuming, the outbound request becomes a normal `/v1/responses` create request.
+        // Keeping the synthetic entrypoint would cause the outbound mapper to rebuild an upstream
+        // submit_tool_outputs payload (which many OpenAI-compatible upstreams do not implement).
+        pipelineEntryEndpoint = '/v1/responses';
       } catch (error: unknown) {
         const structured = error as { status?: number; code?: string; origin?: string };
         const origin = typeof structured?.origin === 'string' ? structured.origin : undefined;
@@ -114,7 +124,7 @@ export async function handleResponses(
         return;
       }
     }
-    if ((acceptsSse || options.forceStream) && (!originalStream || options.forceStream)) {
+    if (!isSubmitToolOutputs && (acceptsSse || options.forceStream) && (!originalStream || options.forceStream)) {
       payload.stream = true;
     }
     const wantsStream = typeof options.forceStream === 'boolean' ? options.forceStream : inboundStream;
@@ -143,7 +153,7 @@ export async function handleResponses(
         ? String((payload as { metadata?: Record<string, unknown> }).metadata?.mockSampleReqId).trim()
         : undefined;
 	    const pipelineInput = {
-	      entryEndpoint,
+	      entryEndpoint: pipelineEntryEndpoint,
 	      method: req.method,
 	      requestId,
 	      headers: req.headers as Record<string, unknown>,
@@ -247,7 +257,9 @@ export async function handleResponses(
     const acceptsSse = typeof req.headers['accept'] === 'string'
       && (req.headers['accept'] as string).includes('text/event-stream');
     const originalStream = Boolean(req.body && typeof req.body === 'object' && (req.body as ResponsesPayload).stream === true);
-    const wantsStream = acceptsSse || originalStream || options.forceStream === true;
+    const wantsStream = isSubmitToolOutputs
+      ? (options.forceStream === true || originalStream)
+      : (acceptsSse || originalStream || options.forceStream === true);
     await respondWithPipelineError(res, ctx, error, entryEndpoint, requestId, { forceSse: wantsStream });
   }
 }
