@@ -33,8 +33,8 @@ const LOG_FLAG = String(process.env.ROUTECODEX_TOKEN_DAEMON_LOG || '').trim().to
 const LOG_ENABLED = LOG_FLAG === '1' || LOG_FLAG === 'true';
 
 const DEFAULT_INTERVAL_MS = 60_000;
-// 默认行为：在到期前 5 分钟进入自动刷新窗口。
-const DEFAULT_REFRESH_AHEAD_MINUTES = 5;
+// 默认行为：在到期前 30 分钟进入自动刷新窗口（对齐 docs/OAUTH.md）。
+const DEFAULT_REFRESH_AHEAD_MINUTES = 30;
 const MIN_REFRESH_INTERVAL_MS = 5 * 60_000;
 const GEMINI_PROVIDER_IDS = new Set(['gemini-cli', 'antigravity']);
 const ANTIGRAVITY_METADATA_ENSURE_INTERVAL_MS = 10 * 60_000;
@@ -119,10 +119,20 @@ export class TokenDaemon {
 
   constructor(options?: Partial<TokenDaemonOptions>) {
     this.intervalMs = options?.intervalMs && options.intervalMs > 0 ? options.intervalMs : DEFAULT_INTERVAL_MS;
+    const envRefreshAhead = Number.parseInt(
+      String(
+        process.env.ROUTECODEX_TOKEN_REFRESH_AHEAD_MIN ||
+          process.env.RCC_TOKEN_REFRESH_AHEAD_MIN ||
+          ''
+      ).trim(),
+      10
+    );
+    const effectiveEnvRefreshAhead =
+      Number.isFinite(envRefreshAhead) && envRefreshAhead > 0 ? envRefreshAhead : null;
     this.refreshAheadMinutes =
       options?.refreshAheadMinutes && options.refreshAheadMinutes > 0
         ? options.refreshAheadMinutes
-        : DEFAULT_REFRESH_AHEAD_MINUTES;
+        : effectiveEnvRefreshAhead ?? DEFAULT_REFRESH_AHEAD_MINUTES;
     this.historyStore = new TokenHistoryStore();
   }
 
@@ -328,8 +338,10 @@ export class TokenDaemon {
       const isPermanentAuthFailure = failureInfo.isPermanentAuthFailure;
       // Permanent refresh failures should not spam logs nor block traffic.
       // Best-effort: persist a per-token "noRefresh" flag so future daemon runs won't keep retrying.
+      let tokenMtimeAfterFailure: number | null | undefined = tokenMtimeBefore;
       if (isPermanentAuthFailure) {
         await maybeMarkTokenFileNoRefresh(token.filePath);
+        tokenMtimeAfterFailure = await getTokenFileMtime(token.filePath);
       }
       if (LOG_ENABLED || DEBUG_ENABLED) {
         if (isUserTimeout) {
@@ -347,7 +359,8 @@ export class TokenDaemon {
       }
       await this.recordHistoryEvent(token, 'failure', startedAt, {
         error,
-        tokenFileMtime: tokenMtimeBefore,
+        // Use post-write mtime so daemon's own "noRefresh" write does not clear auto-suspension immediately.
+        tokenFileMtime: tokenMtimeAfterFailure,
         countTowardsFailureStreak: isUserTimeout || isPermanentAuthFailure,
         forceAutoSuspend: isUserTimeout,
         autoSuspendImmediately: isPermanentAuthFailure

@@ -66,10 +66,23 @@ export interface TokenHistoryEvent {
   error?: string;
 }
 
-const HOME = homedir();
-const STATICS_DIR = path.join(HOME, '.routecodex', 'statics');
-const HISTORY_FILE = path.join(STATICS_DIR, 'token-daemon-history.json');
-const EVENTS_FILE = path.join(STATICS_DIR, 'token-daemon-events.log');
+function resolveHomeDir(): string {
+  // Prefer $HOME so tests (and edge environments) can sandbox state.
+  const envHome = String(process.env.HOME || '').trim();
+  return envHome || homedir();
+}
+
+export function resolveTokenHistoryDirectory(): string {
+  return path.join(resolveHomeDir(), '.routecodex', 'statics');
+}
+
+export function resolveTokenHistoryFilePath(): string {
+  return path.join(resolveTokenHistoryDirectory(), 'token-daemon-history.json');
+}
+
+export function resolveTokenHistoryEventsFilePath(): string {
+  return path.join(resolveTokenHistoryDirectory(), 'token-daemon-events.log');
+}
 
 function createDefaultHistory(): TokenDaemonHistoryFile {
   return {
@@ -82,13 +95,22 @@ function createDefaultHistory(): TokenDaemonHistoryFile {
 export class TokenHistoryStore {
   private historyReady = false;
   private cachedHistory: TokenDaemonHistoryFile | null = null;
+  private readonly staticsDir: string;
+  private readonly historyFile: string;
+  private readonly eventsFile: string;
+
+  constructor() {
+    this.staticsDir = resolveTokenHistoryDirectory();
+    this.historyFile = resolveTokenHistoryFilePath();
+    this.eventsFile = resolveTokenHistoryEventsFilePath();
+  }
 
   get historyFilePath(): string {
-    return HISTORY_FILE;
+    return this.historyFile;
   }
 
   get eventsFilePath(): string {
-    return EVENTS_FILE;
+    return this.eventsFile;
   }
 
   async getSnapshot(): Promise<TokenHistorySnapshot> {
@@ -232,13 +254,13 @@ export class TokenHistoryStore {
     if (this.historyReady) {
       return;
     }
-    await fs.mkdir(STATICS_DIR, { recursive: true });
+    await fs.mkdir(this.staticsDir, { recursive: true });
     this.historyReady = true;
   }
 
   private async historyExists(): Promise<boolean> {
     try {
-      await fs.access(HISTORY_FILE);
+      await fs.access(this.historyFile);
       return true;
     } catch {
       return false;
@@ -251,7 +273,7 @@ export class TokenHistoryStore {
       return this.cachedHistory;
     }
     try {
-      const raw = await fs.readFile(HISTORY_FILE, 'utf8');
+      const raw = await fs.readFile(this.historyFile, 'utf8');
       const parsed = JSON.parse(raw) as TokenDaemonHistoryFile;
       if (!parsed || typeof parsed !== 'object' || parsed.version !== 1 || !parsed.tokens) {
         this.cachedHistory = createDefaultHistory();
@@ -267,7 +289,7 @@ export class TokenHistoryStore {
   private async writeHistoryFile(data: TokenDaemonHistoryFile): Promise<void> {
     await this.ensureDir();
     const payload = JSON.stringify(data, null, 2);
-    await fs.writeFile(HISTORY_FILE, payload, 'utf8');
+    await fs.writeFile(this.historyFile, payload, 'utf8');
     this.cachedHistory = data;
   }
 
@@ -275,7 +297,7 @@ export class TokenHistoryStore {
     const payload = JSON.stringify(event);
     try {
       await this.ensureDir();
-      await fs.appendFile(EVENTS_FILE, `${payload}\n`, 'utf8');
+      await fs.appendFile(this.eventsFile, `${payload}\n`, 'utf8');
     } catch {
       // ignore append errors to avoid blocking daemon
     }
@@ -287,7 +309,4 @@ export async function readTokenHistorySnapshot(): Promise<TokenHistorySnapshot> 
   return store.getSnapshot();
 }
 
-export const TOKEN_HISTORY_DIRECTORY = STATICS_DIR;
-export const TOKEN_HISTORY_FILE = HISTORY_FILE;
-export const TOKEN_HISTORY_EVENTS_FILE = EVENTS_FILE;
 export { MAX_AUTO_FAILURES };

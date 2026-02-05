@@ -72,6 +72,12 @@ WebUI（daemon-admin）里点 “Authorize OAuth” 时也会强制走 Camoufox�
 
 CLI `oauth <selector>` 若发现 quota-manager 已将该 alias 标记为 `verify required`，也会打印明确警告与验证 URL（即使 token 文件仍显示 valid）。
 
+同时 CLI 会提供“一步打开”：
+
+- 在 TTY 下会询问是否立刻用 Camoufox 打开验证 URL（默认 **Y**，open-only，不等 callback）
+- 若你希望不提示直接打开：设置 `ROUTECODEX_OAUTH_AUTO_OPEN_VERIFY=1`（或 `RCC_OAUTH_AUTO_OPEN_VERIFY=1`），或在命令上加 `--headful`
+- 若你只想打印 URL：回答 `n`
+
 Portal 健康检查（`/health`）默认会等待 **300s**（网络慢时避免过早 timeout），可用环境变量调整：
 
 - `ROUTECODEX_OAUTH_PORTAL_READY_TIMEOUT_MS`（总等待）

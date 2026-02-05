@@ -23,7 +23,7 @@ import {
 } from './server-utils.js';
 import {
   TokenHistoryStore,
-  TOKEN_HISTORY_FILE,
+  resolveTokenHistoryFilePath,
   type RefreshOutcome
 } from './history-store.js';
 import { ensureLocalTokenPortalEnv, shutdownLocalTokenPortalEnv } from '../token-portal/local-token-portal.js';
@@ -186,7 +186,7 @@ export async function printStatus(json = false): Promise<void> {
   rows.push('== Refresh History ==');
   const historyEntries = Object.values(historySnapshot.data.tokens);
   if (historyEntries.length === 0) {
-    rows.push(`(no refresh history yet - stats will be persisted to ${TOKEN_HISTORY_FILE})`);
+    rows.push(`(no refresh history yet - stats will be persisted to ${resolveTokenHistoryFilePath()})`);
   } else {
     historyEntries.sort((a, b) => {
       const left = a.lastAttemptAt ?? 0;
@@ -216,7 +216,7 @@ export async function printStatus(json = false): Promise<void> {
       );
     }
     rows.push('');
-    rows.push(`History file: ${TOKEN_HISTORY_FILE}`);
+    rows.push(`History file: ${resolveTokenHistoryFilePath()}`);
     if (hasSuspended) {
       rows.push('* auto-refresh suspended after repeated failures; will resume after a new user-triggered token update.');
     }
