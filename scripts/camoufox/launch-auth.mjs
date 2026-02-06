@@ -53,6 +53,51 @@ function stripAnsi(input) {
   return input.replace(/\u001b\[[0-9;]*m/g, '');
 }
 
+function resolveGoogleLanguageHint() {
+  const raw = String(
+    process.env.ROUTECODEX_OAUTH_GOOGLE_HL ||
+    process.env.RCC_OAUTH_GOOGLE_HL ||
+    'en'
+  ).trim();
+  if (!raw) {
+    return 'en';
+  }
+  const lowered = raw.toLowerCase();
+  if (lowered === 'auto' || lowered === 'off' || lowered === 'none' || lowered === '0' || lowered === 'false') {
+    return 'en';
+  }
+  return raw.replace(/_/g, '-');
+}
+
+function buildLocaleEnv() {
+  const localeTag = resolveGoogleLanguageHint();
+  const parts = String(localeTag || 'en').split('-').filter(Boolean);
+  const language = (parts[0] || 'en').toLowerCase();
+  const region = (parts[1] || (language === 'zh' ? 'CN' : language === 'ja' ? 'JP' : language === 'ko' ? 'KR' : 'US')).toUpperCase();
+  const normalizedTag = `${language}-${region}`;
+  const posixLocale = `${language}_${region}.UTF-8`;
+  return {
+    LANG: posixLocale,
+    LC_ALL: posixLocale,
+    LANGUAGE: normalizedTag
+  };
+}
+
+function buildFirefoxUserPrefs() {
+  const lang = resolveGoogleLanguageHint();
+  return {
+    'intl.accept_languages': lang,
+    'javascript.use_us_english_locale': true
+  };
+}
+
+function buildCamoufoxLaunchEnv() {
+  return {
+    ...process.env,
+    ...buildLocaleEnv()
+  };
+}
+
 async function getCamoufoxCacheRoot() {
   const timeoutMs = Number(process.env.ROUTECODEX_CAMOUFOX_PATH_TIMEOUT_MS || 8000);
   return new Promise((resolve) => {
@@ -311,7 +356,8 @@ async function launchManualCamoufox({ camoufoxBinary, profileDir, url }) {
   try {
     browser = spawn(camoufoxBinary, ['-profile', profileDir, url], {
       detached: false,
-      stdio: 'ignore'
+      stdio: 'ignore',
+      env: buildCamoufoxLaunchEnv()
     });
 
     browserExitCode = await new Promise((resolve) => {
@@ -334,7 +380,8 @@ async function launchCamoufoxDetached({ camoufoxBinary, profileDir, url }) {
   try {
     const child = spawn(camoufoxBinary, ['-profile', profileDir, url], {
       detached: true,
-      stdio: 'ignore'
+      stdio: 'ignore',
+      env: buildCamoufoxLaunchEnv()
     });
     child.unref();
   } catch (error) {
@@ -374,7 +421,8 @@ async function runHeadedManualAssistFlow({ url, profileDir, camoufoxBinary, time
   const context = await firefox.launchPersistentContext(profileDir, {
     executablePath: camoufoxBinary,
     headless: false,
-    acceptDownloads: false
+    acceptDownloads: false,
+    firefoxUserPrefs: buildFirefoxUserPrefs()
   });
 
   let closed = false;
@@ -465,7 +513,8 @@ async function runHeadedQwenManualAssistFlow({ url, profileDir, camoufoxBinary, 
   const context = await firefox.launchPersistentContext(profileDir, {
     executablePath: camoufoxBinary,
     headless: false,
-    acceptDownloads: false
+    acceptDownloads: false,
+    firefoxUserPrefs: buildFirefoxUserPrefs()
   });
 
   let closed = false;
@@ -516,7 +565,8 @@ async function runIflowAutoFlow({ url, profileDir, profileId, camoufoxBinary, de
   const context = await firefox.launchPersistentContext(profileDir, {
     executablePath: camoufoxBinary,
     headless,
-    acceptDownloads: false
+    acceptDownloads: false,
+    firefoxUserPrefs: buildFirefoxUserPrefs()
   });
   let closing = false;
   const shutdown = async () => {
@@ -649,7 +699,8 @@ async function runGeminiAutoFlow({ url, profileDir, camoufoxBinary, devMode }) {
   const context = await firefox.launchPersistentContext(profileDir, {
     executablePath: camoufoxBinary,
     headless: !devMode,
-    acceptDownloads: false
+    acceptDownloads: false,
+    firefoxUserPrefs: buildFirefoxUserPrefs()
   });
   let closing = false;
   const shutdown = async () => {
@@ -751,7 +802,8 @@ async function runAntigravityAutoFlow({ url, profileDir, camoufoxBinary, devMode
   const context = await firefox.launchPersistentContext(profileDir, {
     executablePath: camoufoxBinary,
     headless: !devMode,
-    acceptDownloads: false
+    acceptDownloads: false,
+    firefoxUserPrefs: buildFirefoxUserPrefs()
   });
   let closing = false;
   const shutdown = async () => {
@@ -900,7 +952,8 @@ async function runQwenAutoFlow({ url, profileDir, camoufoxBinary, devMode }) {
   const context = await firefox.launchPersistentContext(profileDir, {
     executablePath: camoufoxBinary,
     headless: !devMode,
-    acceptDownloads: false
+    acceptDownloads: false,
+    firefoxUserPrefs: buildFirefoxUserPrefs()
   });
   let closing = false;
   const shutdown = async () => {

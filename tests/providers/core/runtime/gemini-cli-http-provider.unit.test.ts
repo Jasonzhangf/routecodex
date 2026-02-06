@@ -86,7 +86,7 @@ describe('GeminiCLIHttpProvider basic behaviour', () => {
         expect.objectContaining({ role: 'system' })
       );
       expect(typeof (processed as any).requestId).toBe('string');
-      expect(String((processed as any).requestId)).toContain('req-');
+      expect(String((processed as any).requestId)).toContain('agent-');
       expect((processed as any).requestType).toBeUndefined();
       expect((processed as any).userAgent).toBeUndefined();
       expect((processed as any).session_id).toBeUndefined();

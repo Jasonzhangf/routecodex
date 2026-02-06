@@ -96,6 +96,52 @@ function resolveGoogleUiLanguage(): string | null {
   return raw;
 }
 
+function normalizeLocaleTag(raw: string): string | null {
+  const trimmed = String(raw || '').trim();
+  if (!trimmed) {
+    return null;
+  }
+  const normalized = trimmed.replace(/_/g, '-');
+  const parts = normalized.split('-').filter(Boolean);
+  if (!parts.length) {
+    return null;
+  }
+  const language = parts[0].toLowerCase();
+  const region = parts[1] ? parts[1].toUpperCase() : '';
+  return region ? `${language}-${region}` : language;
+}
+
+function defaultRegionForLanguage(language: string): string {
+  const normalized = String(language || '').trim().toLowerCase();
+  if (normalized === 'zh') {
+    return 'CN';
+  }
+  if (normalized === 'ja') {
+    return 'JP';
+  }
+  if (normalized === 'ko') {
+    return 'KR';
+  }
+  return 'US';
+}
+
+export function resolveCamoufoxLocaleEnv(): Record<string, string> {
+  const googleLang = resolveGoogleUiLanguage();
+  const localeTag = normalizeLocaleTag(googleLang || 'en');
+  if (!localeTag) {
+    return {};
+  }
+  const [languageRaw, regionRaw] = localeTag.split('-');
+  const language = (languageRaw || 'en').toLowerCase();
+  const region = (regionRaw || defaultRegionForLanguage(language)).toUpperCase();
+  const posixLocale = `${language}_${region}.UTF-8`;
+  return {
+    LANG: posixLocale,
+    LC_ALL: posixLocale,
+    LANGUAGE: `${language}-${region}`
+  };
+}
+
 function shouldApplyGoogleLocaleHint(hostnameRaw: string): boolean {
   const hostname = String(hostnameRaw || '').trim().toLowerCase();
   if (!hostname) {
@@ -576,6 +622,7 @@ export async function openAuthInCamoufox(options: CamoufoxLaunchOptions): Promis
   }
 
   const fingerprintEnv = ensureFingerprintEnv(profileId, options.provider, options.alias);
+  const localeEnv = resolveCamoufoxLocaleEnv();
 
   try {
     const autoMode = (process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE || '').trim();
@@ -594,6 +641,7 @@ export async function openAuthInCamoufox(options: CamoufoxLaunchOptions): Promis
       env: {
         ...process.env,
         ...fingerprintEnv,
+        ...localeEnv,
         BROWSER_PROFILE_ID: profileId,
         BROWSER_INITIAL_URL: launchUrl
       }

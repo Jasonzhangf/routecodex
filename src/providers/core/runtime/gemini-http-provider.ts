@@ -316,7 +316,7 @@ export class GeminiHttpProvider extends HttpTransportProvider {
     }
 
     const existingReqId = record.requestId;
-    const prefix = headerMode === 'minimal' ? 'req-' : 'agent-';
+    const prefix = 'agent-';
     if (typeof existingReqId !== 'string' || !existingReqId.trim().startsWith(prefix)) {
       record.requestId = `${prefix}${randomUUID()}`;
     }

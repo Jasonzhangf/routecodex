@@ -1,4 +1,4 @@
-import { applyGoogleLocaleHint, getCamoufoxOsPolicy } from '../../../../src/providers/core/config/camoufox-launcher.js';
+import { applyGoogleLocaleHint, getCamoufoxOsPolicy, resolveCamoufoxLocaleEnv } from '../../../../src/providers/core/config/camoufox-launcher.js';
 
 describe('camoufox-launcher os policy', () => {
   test('never returns linux', () => {
@@ -35,6 +35,40 @@ describe('camoufox-launcher os policy', () => {
     try {
       const raw = 'https://accounts.google.com/signin/continue?flowName=GlifWebSignIn';
       expect(applyGoogleLocaleHint(raw)).toBe(raw);
+    } finally {
+      if (prev === undefined) {
+        delete process.env.ROUTECODEX_OAUTH_GOOGLE_HL;
+      } else {
+        process.env.ROUTECODEX_OAUTH_GOOGLE_HL = prev;
+      }
+    }
+  });
+
+  test('builds locale env from Google language hint', () => {
+    const prev = process.env.ROUTECODEX_OAUTH_GOOGLE_HL;
+    process.env.ROUTECODEX_OAUTH_GOOGLE_HL = 'ja-JP';
+    try {
+      const env = resolveCamoufoxLocaleEnv();
+      expect(env.LANG).toBe('ja_JP.UTF-8');
+      expect(env.LC_ALL).toBe('ja_JP.UTF-8');
+      expect(env.LANGUAGE).toBe('ja-JP');
+    } finally {
+      if (prev === undefined) {
+        delete process.env.ROUTECODEX_OAUTH_GOOGLE_HL;
+      } else {
+        process.env.ROUTECODEX_OAUTH_GOOGLE_HL = prev;
+      }
+    }
+  });
+
+  test('falls back to en-US locale env when hint disabled', () => {
+    const prev = process.env.ROUTECODEX_OAUTH_GOOGLE_HL;
+    process.env.ROUTECODEX_OAUTH_GOOGLE_HL = 'off';
+    try {
+      const env = resolveCamoufoxLocaleEnv();
+      expect(env.LANG).toBe('en_US.UTF-8');
+      expect(env.LC_ALL).toBe('en_US.UTF-8');
+      expect(env.LANGUAGE).toBe('en-US');
     } finally {
       if (prev === undefined) {
         delete process.env.ROUTECODEX_OAUTH_GOOGLE_HL;
