@@ -56,6 +56,18 @@ This document replaces the old “architecture novel” with a concise set of ru
 - `sharedmodule/llmswitch-core`: `npm run build` (matrix) whenever shared code changes.
 - Host repo: `npm run build:dev`, `npm run install:global`。
 - Provider-specific tweaks: run the relevant script in `scripts/provider-*` or `scripts/responses-*` to ensure upstream compatibility.
+- Replay confirmation (mandatory): at least one same-shape replay for the failing provider + one control replay for an unaffected provider before claiming fix complete.
+
+### 6.1 Compatibility Debug SOP (single implementation)
+
+1. First check existing bd records before coding: `bd --no-db ready` + `bd --no-db search "<provider/error keywords>"`; continue on existing issue when matched.
+2. Create/update a `bd --no-db` issue (with clear acceptance criteria and failing sample).
+3. Reproduce with one minimal sample and record `requestId`, `providerKey`, `providerProtocol`, route, and model.
+4. Triage layer before coding: routing/config issue vs compat shape issue vs provider transport issue.
+5. Tool/shape/`reasoning_content`/tool-id fixes must live in llmswitch-core compat (profile/action/Hub compat stage), not in Virtual Router or provider transport.
+6. Keep a single source of truth for fallback behavior (only one resolver location); do not duplicate heuristics across layers.
+7. Add a targeted regression script plus matrix hook when behavior changes.
+8. Close only with replay evidence: compat profile hit + key field before/after + unaffected control replay.
 
 Keep this file short. If a rule needs more nuance, add a doc in `docs/` and link it here instead of expanding this page.
 

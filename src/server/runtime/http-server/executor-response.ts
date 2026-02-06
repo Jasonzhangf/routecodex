@@ -72,6 +72,18 @@ export async function convertProviderResponseIfNeeded(
     const metadataBag = asRecord(options.pipelineMetadata);
     const aliasMap = extractAnthropicToolAliasMap(metadataBag);
     const originalModelId = extractClientModelId(metadataBag ?? {}, options.originalRequest);
+    const assignedModelId =
+      typeof (metadataBag as Record<string, unknown> | undefined)?.assignedModelId === 'string'
+        ? String((metadataBag as Record<string, unknown>).assignedModelId)
+        : metadataBag &&
+            typeof metadataBag === 'object' &&
+            metadataBag.target &&
+            typeof metadataBag.target === 'object' &&
+            typeof (metadataBag.target as Record<string, unknown>).modelId === 'string'
+          ? ((metadataBag.target as Record<string, unknown>).modelId as string)
+          : typeof (metadataBag as Record<string, unknown> | undefined)?.modelId === 'string'
+            ? String((metadataBag as Record<string, unknown>).modelId)
+            : undefined;
     const baseContext: Record<string, unknown> = {
       ...(metadataBag ?? {})
     };
@@ -82,8 +94,24 @@ export async function convertProviderResponseIfNeeded(
     baseContext.entryEndpoint = options.entryEndpoint || entry;
     baseContext.providerProtocol = providerProtocol;
     baseContext.originalModelId = originalModelId;
+    if (assignedModelId && assignedModelId.trim()) {
+      baseContext.modelId = assignedModelId.trim();
+    }
     applyClientConnectionStateToContext(metadataBag, baseContext);
     const adapterContext = baseContext;
+    const compatProfile =
+      typeof (metadataBag as Record<string, unknown> | undefined)?.compatibilityProfile === 'string'
+        ? String((metadataBag as Record<string, unknown>).compatibilityProfile)
+        : metadataBag &&
+            typeof metadataBag === 'object' &&
+            metadataBag.target &&
+            typeof metadataBag.target === 'object' &&
+            typeof (metadataBag.target as Record<string, unknown>).compatibilityProfile === 'string'
+          ? ((metadataBag.target as Record<string, unknown>).compatibilityProfile as string)
+          : undefined;
+    if (compatProfile && compatProfile.trim()) {
+      adapterContext.compatibilityProfile = compatProfile.trim();
+    }
     if (aliasMap) {
       (adapterContext as Record<string, unknown>).anthropicToolNameMap = aliasMap;
     }

@@ -1555,6 +1555,14 @@ export class RouteCodexHttpServer {
           requestId: input.requestId
         });
       }
+      // Ensure response-side conversion has access to route-selected target metadata (compat profiles, etc.).
+      // This is an execution metadata carrier only; tool/routing semantics still live in llmswitch-core.
+      if (!mergedMetadata.target) {
+        mergedMetadata.target = target;
+      }
+      if (!mergedMetadata.compatibilityProfile && typeof target.compatibilityProfile === 'string' && target.compatibilityProfile.trim()) {
+        mergedMetadata.compatibilityProfile = target.compatibilityProfile.trim();
+      }
 
       const runtimeKey = target.runtimeKey || this.providerKeyToRuntimeKey.get(target.providerKey);
       if (!runtimeKey) {
@@ -1846,8 +1854,10 @@ export class RouteCodexHttpServer {
       providerKey: string;
       providerType: string;
       outboundProfile: string;
+      compatibilityProfile?: string;
       runtimeKey?: string;
       processMode?: string;
+      modelId?: string;
     };
     routingDecision?: { routeName?: string; pool?: string[] };
     processMode: string;
@@ -2304,6 +2314,18 @@ export class RouteCodexHttpServer {
       const providerProtocol = mapProviderProtocol(options.providerType);
       const metadataBag = asRecord(options.pipelineMetadata);
       const originalModelId = this.extractClientModelId(metadataBag, options.originalRequest);
+      const assignedModelId =
+        typeof (metadataBag as Record<string, unknown> | undefined)?.assignedModelId === 'string'
+          ? String((metadataBag as Record<string, unknown>).assignedModelId)
+          : metadataBag &&
+              typeof metadataBag === 'object' &&
+              metadataBag.target &&
+              typeof metadataBag.target === 'object' &&
+              typeof (metadataBag.target as Record<string, unknown>).modelId === 'string'
+            ? ((metadataBag.target as Record<string, unknown>).modelId as string)
+            : typeof (metadataBag as Record<string, unknown> | undefined)?.modelId === 'string'
+              ? String((metadataBag as Record<string, unknown>).modelId)
+              : undefined;
 
       // 以 HubPipeline metadata 为基础构建 AdapterContext，确保诸如
       // capturedChatRequest / webSearch / routeHint 等字段在响应侧可见，
@@ -2320,15 +2342,20 @@ export class RouteCodexHttpServer {
       baseContext.entryEndpoint = options.entryEndpoint || entry;
       baseContext.providerProtocol = providerProtocol;
       baseContext.originalModelId = originalModelId;
+      if (assignedModelId && assignedModelId.trim()) {
+        baseContext.modelId = assignedModelId.trim();
+      }
       const adapterContext = baseContext;
       const compatProfile =
-        metadataBag &&
-          typeof metadataBag === 'object' &&
-          metadataBag.target &&
-          typeof metadataBag.target === 'object' &&
-          typeof (metadataBag.target as Record<string, unknown>).compatibilityProfile === 'string'
-          ? ((metadataBag.target as Record<string, unknown>).compatibilityProfile as string)
-          : undefined;
+        typeof (metadataBag as Record<string, unknown> | undefined)?.compatibilityProfile === 'string'
+          ? String((metadataBag as Record<string, unknown>).compatibilityProfile)
+          : metadataBag &&
+              typeof metadataBag === 'object' &&
+              metadataBag.target &&
+              typeof metadataBag.target === 'object' &&
+              typeof (metadataBag.target as Record<string, unknown>).compatibilityProfile === 'string'
+            ? ((metadataBag.target as Record<string, unknown>).compatibilityProfile as string)
+            : undefined;
       if (compatProfile && compatProfile.trim()) {
         adapterContext.compatibilityProfile = compatProfile.trim();
       }

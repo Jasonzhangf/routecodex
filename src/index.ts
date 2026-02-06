@@ -767,6 +767,51 @@ async function gracefulShutdown(app: RouteCodexApp): Promise<void> {
   }
 }
 
+function resolveRestartEntryScript(argv: string[]): string | null {
+  if (!Array.isArray(argv) || argv.length === 0) {
+    return null;
+  }
+  const raw = typeof argv[0] === 'string' ? argv[0].trim() : '';
+  if (!raw) {
+    return null;
+  }
+  if (raw.startsWith('-')) {
+    return null;
+  }
+  return path.isAbsolute(raw) ? raw : path.resolve(process.cwd(), raw);
+}
+
+function parseRestartEntryWaitMs(): number {
+  const raw = process.env.ROUTECODEX_RESTART_ENTRY_WAIT_MS;
+  const parsed = typeof raw === 'string' ? Number(raw.trim()) : NaN;
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return 12_000;
+  }
+  return Math.floor(parsed);
+}
+
+async function ensureRestartEntryReady(argv: string[]): Promise<{ ready: boolean; entryPath?: string; waitedMs: number }> {
+  const entryPath = resolveRestartEntryScript(argv);
+  if (!entryPath) {
+    return { ready: true, waitedMs: 0 };
+  }
+
+  const maxWaitMs = parseRestartEntryWaitMs();
+  const stepMs = 200;
+  const startedAt = Date.now();
+
+  while (true) {
+    if (fsSync.existsSync(entryPath)) {
+      return { ready: true, entryPath, waitedMs: Date.now() - startedAt };
+    }
+    const elapsed = Date.now() - startedAt;
+    if (elapsed >= maxWaitMs) {
+      return { ready: false, entryPath, waitedMs: elapsed };
+    }
+    await new Promise((resolve) => setTimeout(resolve, Math.min(stepMs, Math.max(1, maxWaitMs - elapsed))));
+  }
+}
+
 async function restartSelf(app: RouteCodexApp, signal: NodeJS.Signals): Promise<void> {
   if (restartInProgress) {
     return;
@@ -781,6 +826,27 @@ async function restartSelf(app: RouteCodexApp, signal: NodeJS.Signals): Promise<
   // IMPORTANT: avoid inheriting a stale ROUTECODEX_VERSION across restarts.
   // The child process should re-resolve version from the current code/package on disk.
   delete env.ROUTECODEX_VERSION;
+
+  const entryCheck = await ensureRestartEntryReady(argv);
+  if (!entryCheck.ready) {
+    await reportCliError(
+      'SERVER_RESTART_ENTRY_MISSING',
+      'Restart aborted because restart entry script is missing',
+      new Error(`restart entry missing: ${entryCheck.entryPath || 'unknown'}`),
+      'high',
+      {
+        signal,
+        waitedMs: entryCheck.waitedMs,
+        entryPath: entryCheck.entryPath
+      }
+    ).catch(() => {});
+    console.error(
+      `❌ Restart aborted: entry script is missing (${entryCheck.entryPath || 'unknown'}) after waiting ${entryCheck.waitedMs}ms.`
+    );
+    console.error('💡 Hint: run `npm run build:dev` (or wait for current build) and retry `routecodex restart`.');
+    restartInProgress = false;
+    return;
+  }
 
   try {
     await app.stop();

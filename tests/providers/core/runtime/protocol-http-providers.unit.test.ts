@@ -5,6 +5,7 @@ import { OpenAIHttpProvider } from '../../../../src/providers/core/runtime/opena
 import { ResponsesHttpProvider } from '../../../../src/providers/core/runtime/responses-http-provider.js';
 import { AnthropicHttpProvider } from '../../../../src/providers/core/runtime/anthropic-http-provider.js';
 import { iFlowHttpProvider } from '../../../../src/providers/core/runtime/iflow-http-provider.js';
+import { attachProviderRuntimeMetadata } from '../../../../src/providers/core/runtime/provider-runtime-metadata.js';
 
 const emptyDeps: ModuleDependencies = {} as ModuleDependencies;
 
@@ -16,7 +17,7 @@ describe('Protocol HTTP providers (V2) - basic behavior', () => {
       config: {
         providerType: 'responses',
         providerId: 'test',
-        auth: { type: 'apikey', apiKey: 'test-key' },
+        auth: { type: 'apikey', apiKey: 'test-key-1234567890' },
         overrides: { baseUrl: 'https://example.invalid', endpoint: '/chat/completions' }
       }
     } as unknown as OpenAIStandardConfig;
@@ -32,7 +33,7 @@ describe('Protocol HTTP providers (V2) - basic behavior', () => {
       config: {
         providerType: 'openai',
         providerId: 'test',
-        auth: { type: 'apikey', apiKey: 'test-key' },
+        auth: { type: 'apikey', apiKey: 'test-key-1234567890' },
         overrides: { baseUrl: 'https://example.invalid', endpoint: '/responses' }
       }
     } as unknown as OpenAIStandardConfig;
@@ -48,7 +49,7 @@ describe('Protocol HTTP providers (V2) - basic behavior', () => {
       config: {
         providerType: 'openai',
         providerId: 'test',
-        auth: { type: 'apikey', apiKey: 'test-key' },
+        auth: { type: 'apikey', apiKey: 'test-key-1234567890' },
         overrides: { baseUrl: 'https://example.invalid', endpoint: '/v1/messages' }
       }
     } as unknown as OpenAIStandardConfig;
@@ -77,7 +78,7 @@ describe('Protocol HTTP providers (V2) - basic behavior', () => {
       type: 'iflow-http-provider',
       config: {
         providerType: 'openai',
-        auth: { type: 'apikey', apiKey: 'test-key' }
+        auth: { type: 'apikey', apiKey: 'test-key-1234567890' }
       }
     } as unknown as OpenAIStandardConfig;
     const provider = new iFlowHttpProvider(config, emptyDeps) as any;
@@ -100,6 +101,79 @@ describe('Protocol HTTP providers (V2) - basic behavior', () => {
 
     const body = provider.buildHttpRequestBody({ metadata: { iflowWebSearch: true }, data: { q: 'x' } });
     expect(body).toEqual({ q: 'x' });
+  });
+
+  test('iFlowHttpProvider treats HTTP 200 business error envelope as provider error', async () => {
+    const config: OpenAIStandardConfig = {
+      id: 'test-iflow-business-envelope',
+      type: 'iflow-http-provider',
+      config: {
+        providerType: 'openai',
+        providerId: 'iflow',
+        auth: { type: 'apikey', apiKey: 'test-key-1234567890' },
+        overrides: { baseUrl: 'https://example.invalid', endpoint: '/chat/completions' }
+      }
+    } as unknown as OpenAIStandardConfig;
+
+    class IflowBusinessEnvelopeProvider extends iFlowHttpProvider {
+      protected override createHttpClient(): void {
+        this.httpClient = {
+          post: async () => ({
+            data: { error_code: 'AllModelsFailed', msg: '请求供应商服务器失败' },
+            status: 200,
+            statusText: 'OK',
+            headers: {},
+            url: 'https://example.invalid/chat/completions'
+          }),
+          postStream: async () => {
+            throw new Error('postStream not expected');
+          },
+          get: async () => ({
+            data: {},
+            status: 200,
+            statusText: 'OK',
+            headers: {},
+            url: 'https://example.invalid/health'
+          })
+        } as any;
+      }
+    }
+
+    const provider = new IflowBusinessEnvelopeProvider(config, emptyDeps) as any;
+    await provider.initialize();
+
+    const request = {
+      metadata: { stream: false },
+      data: { model: 'kimi-k2.5', messages: [{ role: 'user', content: 'hi' }] }
+    };
+
+    attachProviderRuntimeMetadata(request as Record<string, unknown>, {
+      requestId: 'req-iflow-business-envelope',
+      providerId: 'iflow',
+      providerKey: 'iflow.key1.kimi-k2.5',
+      providerType: 'openai',
+      providerFamily: 'iflow',
+      providerProtocol: 'openai-chat',
+      routeName: 'test',
+      metadata: { entryEndpoint: '/v1/responses' },
+      target: {
+        providerKey: 'iflow.key1.kimi-k2.5',
+        providerType: 'openai',
+        runtimeKey: 'iflow.key1',
+        modelId: 'kimi-k2.5'
+      }
+    });
+
+    let caught: any;
+    try {
+      await provider.processIncoming(request as any);
+    } catch (error) {
+      caught = error as any;
+    }
+
+    expect(caught).toBeTruthy();
+    expect(String(caught.message || '')).toContain('iFlow business error');
+    expect(String(caught.message || '')).toContain('AllModelsFailed');
   });
 });
 

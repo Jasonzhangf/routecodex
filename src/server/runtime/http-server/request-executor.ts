@@ -278,6 +278,14 @@ export class HubRequestExecutor implements RequestExecutor {
             requestId: input.requestId
           });
         }
+        // Ensure response-side conversion has access to route-selected target metadata (compat profiles, etc.).
+        // This is an execution metadata carrier only; tool/routing semantics still live in llmswitch-core.
+        if (!mergedMetadata.target) {
+          mergedMetadata.target = target;
+        }
+        if (!mergedMetadata.compatibilityProfile && typeof target.compatibilityProfile === 'string' && target.compatibilityProfile.trim()) {
+          mergedMetadata.compatibilityProfile = target.compatibilityProfile.trim();
+        }
 
         const runtimeKey = target.runtimeKey || this.deps.runtimeManager.resolveRuntimeKey(target.providerKey);
         if (!runtimeKey) {
@@ -599,6 +607,18 @@ export class HubRequestExecutor implements RequestExecutor {
     try {
       const metadataBag = asRecord(options.pipelineMetadata);
       const originalModelId = this.extractClientModelId(metadataBag, options.originalRequest);
+      const assignedModelId =
+        typeof (metadataBag as Record<string, unknown> | undefined)?.assignedModelId === 'string'
+          ? String((metadataBag as Record<string, unknown>).assignedModelId)
+          : metadataBag &&
+              typeof metadataBag === 'object' &&
+              metadataBag.target &&
+              typeof metadataBag.target === 'object' &&
+              typeof (metadataBag.target as Record<string, unknown>).modelId === 'string'
+            ? ((metadataBag.target as Record<string, unknown>).modelId as string)
+            : typeof (metadataBag as Record<string, unknown> | undefined)?.modelId === 'string'
+              ? String((metadataBag as Record<string, unknown>).modelId)
+              : undefined;
       const baseContext: Record<string, unknown> = {
         ...(metadataBag ?? {})
       };
@@ -607,9 +627,25 @@ export class HubRequestExecutor implements RequestExecutor {
       }
       baseContext.requestId = options.requestId;
       baseContext.entryEndpoint = options.entryEndpoint || entry;
-      baseContext._providerProtocol = options.providerProtocol;
+      baseContext.providerProtocol = options.providerProtocol;
       baseContext.originalModelId = originalModelId;
+      if (assignedModelId && assignedModelId.trim()) {
+        baseContext.modelId = assignedModelId.trim();
+      }
       const adapterContext = baseContext;
+      const compatProfile =
+        typeof (metadataBag as Record<string, unknown> | undefined)?.compatibilityProfile === 'string'
+          ? String((metadataBag as Record<string, unknown>).compatibilityProfile)
+          : metadataBag &&
+              typeof metadataBag === 'object' &&
+              metadataBag.target &&
+              typeof metadataBag.target === 'object' &&
+              typeof (metadataBag.target as Record<string, unknown>).compatibilityProfile === 'string'
+            ? ((metadataBag.target as Record<string, unknown>).compatibilityProfile as string)
+            : undefined;
+      if (compatProfile && compatProfile.trim()) {
+        adapterContext.compatibilityProfile = compatProfile.trim();
+      }
       const stageRecorder = await bridgeCreateSnapshotRecorder(
         adapterContext,
         typeof (adapterContext as Record<string, unknown>).entryEndpoint === 'string'

@@ -13,6 +13,7 @@ describe('oauth command', () => {
     const cmd = createOauthCommand();
     const rootOptionFlags = cmd.options.map((o) => o.long);
     expect(rootOptionFlags).toContain('--headful');
+    expect(rootOptionFlags).toContain('--soft');
 
     const qwen = cmd.commands.find((c) => c.name() === 'qwen-auto');
     expect(qwen).toBeDefined();

@@ -150,6 +150,139 @@ describe('stop_message_auto servertool', () => {
     expect(typeof persisted?.state?.stopMessageLastUsedAt).toBe('number');
   });
 
+  test('allows retrigger on stop_message_flow followup hops', async () => {
+    const sessionId = 'stopmessage-spec-session-followup-allow';
+    const state: RoutingInstructionState = {
+      forcedTarget: undefined,
+      stickyTarget: undefined,
+      allowedProviders: new Set(),
+      disabledProviders: new Set(),
+      disabledKeys: new Map(),
+      disabledModels: new Map(),
+      stopMessageText: '继续',
+      stopMessageMaxRepeats: 30,
+      stopMessageUsed: 0
+    };
+    writeRoutingStateForSession(sessionId, state);
+
+    const chatResponse: JsonObject = {
+      id: 'chatcmpl-stop-followup-allow',
+      object: 'chat.completion',
+      model: 'gpt-test',
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: 'assistant',
+            content: 'ok'
+          },
+          finish_reason: 'stop'
+        }
+      ]
+    };
+
+    const adapterContext: AdapterContext = {
+      requestId: 'req-stopmessage-followup-allow',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      sessionId,
+      capturedChatRequest: {
+        model: 'gpt-test',
+        messages: [{ role: 'user', content: 'hi' }]
+      },
+      __rt: {
+        serverToolFollowup: true,
+        serverToolLoopState: {
+          flowId: 'stop_message_flow',
+          repeatCount: 1,
+          payloadHash: 'seed'
+        }
+      }
+    } as any;
+
+    const result = await runServerSideToolEngine({
+      chatResponse,
+      adapterContext,
+      entryEndpoint: '/v1/chat/completions',
+      requestId: 'req-stopmessage-followup-allow',
+      providerProtocol: 'openai-chat'
+    });
+
+    expect(result.mode).toBe('tool_flow');
+    expect(result.execution?.flowId).toBe('stop_message_flow');
+
+    const persisted = await readJsonFileUntil<{ state?: { stopMessageUsed?: number } }>(
+      path.join(SESSION_DIR, `session-${sessionId}.json`),
+      (data) => data?.state?.stopMessageUsed === 1
+    );
+    expect(persisted?.state?.stopMessageUsed).toBe(1);
+  });
+
+  test('skips stop_message retrigger for non-stop followup flows', async () => {
+    const sessionId = 'stopmessage-spec-session-followup-cross-flow';
+    const state: RoutingInstructionState = {
+      forcedTarget: undefined,
+      stickyTarget: undefined,
+      allowedProviders: new Set(),
+      disabledProviders: new Set(),
+      disabledKeys: new Map(),
+      disabledModels: new Map(),
+      stopMessageText: '继续',
+      stopMessageMaxRepeats: 30,
+      stopMessageUsed: 0
+    };
+    writeRoutingStateForSession(sessionId, state);
+
+    const chatResponse: JsonObject = {
+      id: 'chatcmpl-stop-followup-cross-flow',
+      object: 'chat.completion',
+      model: 'gpt-test',
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: 'assistant',
+            content: 'ok'
+          },
+          finish_reason: 'stop'
+        }
+      ]
+    };
+
+    const adapterContext: AdapterContext = {
+      requestId: 'req-stopmessage-followup-cross-flow',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      sessionId,
+      capturedChatRequest: {
+        model: 'gpt-test',
+        messages: [{ role: 'user', content: 'hi' }]
+      },
+      __rt: {
+        serverToolFollowup: true,
+        serverToolLoopState: {
+          flowId: 'web_search_flow',
+          repeatCount: 1,
+          payloadHash: 'seed'
+        }
+      }
+    } as any;
+
+    const result = await runServerSideToolEngine({
+      chatResponse,
+      adapterContext,
+      entryEndpoint: '/v1/chat/completions',
+      requestId: 'req-stopmessage-followup-cross-flow',
+      providerProtocol: 'openai-chat'
+    });
+
+    expect(result.mode).toBe('passthrough');
+
+    const persisted = await readJsonFileWithRetry<{ state?: { stopMessageUsed?: number } }>(
+      path.join(SESSION_DIR, `session-${sessionId}.json`)
+    );
+    expect(persisted?.state?.stopMessageUsed).toBe(0);
+  });
   test('builds /v1/responses followup and preserves parameters (non-streaming)', async () => {
     const sessionId = 'stopmessage-spec-session-responses';
     const state: RoutingInstructionState = {
@@ -232,9 +365,8 @@ describe('stop_message_auto servertool', () => {
         typeof (data as any)?.state?.stopMessageUpdatedAt === 'number' &&
         typeof (data as any)?.state?.stopMessageLastUsedAt === 'number'
     );
-    // With stop_message_flow followups allowed to re-trigger servertool orchestration, the followup
-    // response runs stop_message_auto again. Since maxRepeats=1, it auto-clears state and leaves
-    // a tombstone timestamp pair to prevent accidental re-application.
+    // stopMessage is now one-shot per request chain. For maxRepeats=1, state is cleared at trigger-time
+    // and leaves a tombstone timestamp pair to prevent accidental re-application.
     expect(persisted?.state?.stopMessageText).toBeUndefined();
     expect(persisted?.state?.stopMessageMaxRepeats).toBeUndefined();
     expect(persisted?.state?.stopMessageUsed).toBeUndefined();

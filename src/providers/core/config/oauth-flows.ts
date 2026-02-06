@@ -7,6 +7,7 @@
 import type { UnknownObject } from '../../../types/common-types.js';
 import * as crypto from 'node:crypto';
 import { openAuthInCamoufox } from './camoufox-launcher.js';
+import { logOAuthDebug } from '../../auth/oauth-logger.js';
 
 type BrowserOpener = (url: string) => Promise<void> | void;
 type OpenModule = {
@@ -221,7 +222,14 @@ export abstract class BaseOAuthFlowStrategy {
       let opened = false;
       const envPref = (process.env.ROUTECODEX_OAUTH_BROWSER || '').toLowerCase();
       const camoufoxExplicit = envPref === 'camoufox';
-      const preferCamoufox = envPref ? camoufoxExplicit : true;
+      const devModeRaw = String(process.env.ROUTECODEX_CAMOUFOX_DEV_MODE || '').trim().toLowerCase();
+      const headfulRequested = devModeRaw !== '' && devModeRaw !== '0' && devModeRaw !== 'false' && devModeRaw !== 'no';
+      const preferCamoufox = headfulRequested ? true : (envPref ? camoufoxExplicit : true);
+      logOAuthDebug(
+        '[OAuth] browser preference: env=' + (envPref || '<empty>') +
+        ' headful=' + (headfulRequested ? '1' : '0') +
+        ' preferCamoufox=' + (preferCamoufox ? '1' : '0')
+      );
 
       if (preferCamoufox) {
         const meta = this.extractTokenPortalMetadata(portalUrl);
