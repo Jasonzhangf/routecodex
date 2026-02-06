@@ -539,4 +539,76 @@ describe('token-daemon interactiveRefresh', () => {
     }
   });
 
+
+  it('uses open-only mode for manual interactive OAuth refresh', async () => {
+    jest.resetModules();
+    const ensureValidOAuthToken = jest.fn(async () => {});
+
+    jest.unstable_mockModule('../../src/providers/auth/oauth-lifecycle.js', () => ({
+      ensureValidOAuthToken
+    }));
+    jest.unstable_mockModule('../../src/token-portal/local-token-portal.js', () => ({
+      ensureLocalTokenPortalEnv: async () => {},
+      shutdownLocalTokenPortalEnv: async () => {}
+    }));
+
+    const prevAutoMode = process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
+    const prevAutoConfirm = process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM;
+    const prevOpenOnly = process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY;
+    process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE = 'gemini';
+    process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM = '1';
+    process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY = '0';
+
+    const tokenDaemonModule = await import('../../src/token-daemon/index.js');
+    const tokenDaemon = await import('../../src/token-daemon/token-daemon.js');
+
+    jest.spyOn(tokenDaemon.TokenDaemon, 'findTokenBySelector').mockResolvedValue({
+      provider: 'antigravity',
+      filePath: '/tmp/antigravity-oauth-3-antonsoltan.json',
+      sequence: 3,
+      alias: 'antonsoltan',
+      displayName: 'antonsoltan',
+      state: {
+        hasAccessToken: false,
+        hasRefreshToken: true,
+        hasApiKey: false,
+        expiresAt: null,
+        msUntilExpiry: -1,
+        status: 'invalid',
+        noRefresh: false
+      }
+    } as any);
+
+    let seenAutoMode = '';
+    let seenAutoConfirm = '';
+    let seenOpenOnly = '';
+    ensureValidOAuthToken.mockImplementationOnce(async () => {
+      seenAutoMode = String(process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE || '');
+      seenAutoConfirm = String(process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM || '');
+      seenOpenOnly = String(process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY || '');
+    });
+
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const log = jest.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      await tokenDaemonModule.interactiveRefresh('antigravity-oauth-3-antonsoltan.json', { force: true, mode: 'manual' });
+      expect(ensureValidOAuthToken).toHaveBeenCalled();
+      expect(seenAutoMode).toBe('');
+      expect(seenAutoConfirm).toBe('');
+      expect(seenOpenOnly).toBe('1');
+      expect(process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE).toBe('gemini');
+      expect(process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM).toBe('1');
+      expect(process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY).toBe('0');
+    } finally {
+      warn.mockRestore();
+      log.mockRestore();
+      if (prevAutoMode === undefined) delete process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
+      else process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE = prevAutoMode;
+      if (prevAutoConfirm === undefined) delete process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM;
+      else process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM = prevAutoConfirm;
+      if (prevOpenOnly === undefined) delete process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY;
+      else process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY = prevOpenOnly;
+    }
+  });
+
 });

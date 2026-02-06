@@ -54,6 +54,22 @@ type StoredToken = UnknownObject & AuthCodeTokenResponse & {
   expired?: string;
 };
 
+function resolveGoogleUiLanguageHint(): string | null {
+  const raw = String(
+    process.env.ROUTECODEX_OAUTH_GOOGLE_HL ||
+      process.env.RCC_OAUTH_GOOGLE_HL ||
+      'en'
+  ).trim();
+  if (!raw) {
+    return null;
+  }
+  const lowered = raw.toLowerCase();
+  if (lowered === 'auto' || lowered === 'off' || lowered === 'none' || lowered === '0' || lowered === 'false') {
+    return null;
+  }
+  return raw;
+}
+
 const normalizeFlowStyle = (value: string | undefined, fallback: FlowStyle): FlowStyle => {
   if (value === 'web' || value === 'standard' || value === 'legacy') {
     return value;
@@ -176,6 +192,10 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
     const hostname = authUrl.hostname;
     const isIflowHost = /(?:^|\.)iflow\.cn$/.test(hostname);
     const isGoogleOAuthHost = /(?:^|\.)accounts\.google\.com$/i.test(hostname);
+    const googleUiLanguage = resolveGoogleUiLanguageHint();
+    if (isGoogleOAuthHost && googleUiLanguage) {
+      authUrl.searchParams.set('hl', googleUiLanguage);
+    }
     const styleEnv = (process.env.IFLOW_AUTH_STYLE || '').toLowerCase();
     const style: FlowStyle = isIflowHost
       ? normalizeFlowStyle(styleEnv, 'web')

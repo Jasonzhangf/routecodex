@@ -5,6 +5,7 @@ import type { ManagerModule } from '../../../../manager/types.js';
 import type { QuotaManagerModule, QuotaRecord } from '../../../../manager/modules/quota/index.js';
 import type { ProviderQuotaDaemonModule } from '../../../../manager/modules/quota/index.js';
 import { loadTokenPortalFingerprintSummary } from '../../../../token-portal/fingerprint-summary.js';
+import { findGoogleAccountVerificationIssue } from '../../../../token-daemon/quota-auth-issue.js';
 
 function getQuotaModule(options: DaemonAdminRouteOptions): QuotaManagerModule | null {
   const daemon = options.getManagerDaemon() as
@@ -20,6 +21,44 @@ function getQuotaModule(options: DaemonAdminRouteOptions): QuotaManagerModule | 
     return null;
   }
   return mod as unknown as QuotaManagerModule;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function normalizeGoogleVerifyUrl(rawUrl: unknown): string | null {
+  if (typeof rawUrl !== 'string') {
+    return null;
+  }
+  const normalized = rawUrl.trim().replace(/[\"']+$/g, '').replace(/[),.]+$/g, '');
+  return normalized || null;
+}
+
+function rankGoogleVerifyUrl(url: string | null): number {
+  if (!url) {
+    return 0;
+  }
+  const lowered = url.toLowerCase();
+  if (lowered.includes('accounts.google.com/signin/continue')) {
+    return 3;
+  }
+  if (lowered.includes('accounts.google.com/')) {
+    return 2;
+  }
+  if (lowered.includes('support.google.com/accounts?p=al_alert')) {
+    return 1;
+  }
+  return 0;
+}
+
+function pickBetterGoogleVerifyUrl(currentUrl: unknown, recoveredUrl: string | null): string | null {
+  const current = normalizeGoogleVerifyUrl(currentUrl);
+  const recovered = normalizeGoogleVerifyUrl(recoveredUrl);
+  if (!recovered) {
+    return current;
+  }
+  return rankGoogleVerifyUrl(recovered) > rankGoogleVerifyUrl(current) ? recovered : current;
 }
 
 function getProviderQuotaModule(options: DaemonAdminRouteOptions): ProviderQuotaDaemonModule | null {
@@ -111,6 +150,7 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
 
       // Enrich Antigravity providers with camoufox fingerprint info (per alias).
       const aliases = new Set<string>();
+      const verifyAliases = new Set<string>();
       for (const p of entries) {
         const key = typeof p.providerKey === 'string' ? p.providerKey : '';
         if (!key.toLowerCase().startsWith('antigravity.')) {
@@ -118,20 +158,28 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
         }
         const parts = key.split('.');
         const alias = parts.length >= 2 ? String(parts[1] || '').trim().toLowerCase() : '';
-        if (alias) {
-          aliases.add(alias);
+        if (!alias) {
+          continue;
+        }
+        aliases.add(alias);
+
+        if (isRecord(p.authIssue) && String(p.authIssue.kind || '') === 'google_account_verification') {
+          verifyAliases.add(alias);
         }
       }
 
       const fpByAlias = new Map<string, Awaited<ReturnType<typeof loadTokenPortalFingerprintSummary>> | null>();
-      if (aliases.size) {
-        await Promise.allSettled(
-          Array.from(aliases).map(async (alias) => {
-            const fp = await loadTokenPortalFingerprintSummary('antigravity', alias).catch(() => null);
-            fpByAlias.set(alias, fp);
-          })
-        );
-      }
+      const verifyUrlByAlias = new Map<string, string | null>();
+      await Promise.allSettled([
+        ...Array.from(aliases).map(async (alias) => {
+          const fp = await loadTokenPortalFingerprintSummary('antigravity', alias).catch(() => null);
+          fpByAlias.set(alias, fp);
+        }),
+        ...Array.from(verifyAliases).map(async (alias) => {
+          const issue = await findGoogleAccountVerificationIssue('antigravity', alias).catch(() => null);
+          verifyUrlByAlias.set(alias, normalizeGoogleVerifyUrl(issue?.url ?? null));
+        })
+      ]);
 
       const providers = entries.map((p) => {
         const key = typeof p.providerKey === 'string' ? p.providerKey : '';
@@ -141,8 +189,21 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
         const parts = key.split('.');
         const alias = parts.length >= 2 ? String(parts[1] || '').trim().toLowerCase() : '';
         const fp = alias ? fpByAlias.get(alias) : null;
+
+        let authIssue = p.authIssue;
+        if (alias && isRecord(authIssue) && String(authIssue.kind || '') === 'google_account_verification') {
+          const betterUrl = pickBetterGoogleVerifyUrl(authIssue.url, verifyUrlByAlias.get(alias) ?? null);
+          if (betterUrl && betterUrl !== authIssue.url) {
+            authIssue = {
+              ...authIssue,
+              url: betterUrl
+            };
+          }
+        }
+
         return {
           ...p,
+          authIssue,
           fpAlias: alias || null,
           fpProfileId: fp?.profileId || null,
           fpSuffix: fp?.suffix || null,

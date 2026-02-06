@@ -79,6 +79,55 @@ function expandHome(p: string): string {
   return p;
 }
 
+function resolveGoogleUiLanguage(): string | null {
+  const raw = String(
+    process.env.ROUTECODEX_OAUTH_GOOGLE_HL ||
+      process.env.RCC_OAUTH_GOOGLE_HL ||
+      'en'
+  )
+    .trim();
+  if (!raw) {
+    return null;
+  }
+  const lowered = raw.toLowerCase();
+  if (lowered === 'auto' || lowered === 'off' || lowered === 'none' || lowered === '0' || lowered === 'false') {
+    return null;
+  }
+  return raw;
+}
+
+function shouldApplyGoogleLocaleHint(hostnameRaw: string): boolean {
+  const hostname = String(hostnameRaw || '').trim().toLowerCase();
+  if (!hostname) {
+    return false;
+  }
+  return (
+    hostname === 'accounts.google.com' ||
+    hostname === 'myaccount.google.com' ||
+    hostname === 'support.google.com'
+  );
+}
+
+export function applyGoogleLocaleHint(rawUrl: string): string {
+  if (!rawUrl || typeof rawUrl !== 'string') {
+    return rawUrl;
+  }
+  const lang = resolveGoogleUiLanguage();
+  if (!lang) {
+    return rawUrl;
+  }
+  try {
+    const parsed = new URL(rawUrl);
+    if (!shouldApplyGoogleLocaleHint(parsed.hostname)) {
+      return rawUrl;
+    }
+    parsed.searchParams.set('hl', lang);
+    return parsed.toString();
+  } catch {
+    return rawUrl;
+  }
+}
+
 function getProviderFamily(provider?: string | null): string {
   const rawProvider = provider && provider.trim() ? provider.trim().toLowerCase() : '';
 
@@ -460,6 +509,7 @@ export async function openAuthInCamoufox(options: CamoufoxLaunchOptions): Promis
     logOAuthDebug('[OAuth] Camoufox: invalid or empty URL; falling back to default browser');
     return false;
   }
+  const launchUrl = applyGoogleLocaleHint(url);
 
   const profileId = options.profileId && options.profileId.trim().length > 0
     ? options.profileId.trim()
@@ -534,7 +584,7 @@ export async function openAuthInCamoufox(options: CamoufoxLaunchOptions): Promis
       `[OAuth] Camoufox launcher spawn: profileId=${profileId} autoMode=${autoMode || '-'} devMode=${devMode || '0'}`
     );
     logOAuthDebug(`[OAuth] Camoufox: spawning launcher script=${scriptPath} profileId=${profileId}`);
-    const args = [scriptPath, '--profile', profileId, '--url', url];
+    const args = [scriptPath, '--profile', profileId, '--url', launchUrl];
     if (autoMode) {
       args.push('--auto-mode', autoMode);
     }
@@ -545,7 +595,7 @@ export async function openAuthInCamoufox(options: CamoufoxLaunchOptions): Promis
         ...process.env,
         ...fingerprintEnv,
         BROWSER_PROFILE_ID: profileId,
-        BROWSER_INITIAL_URL: url
+        BROWSER_INITIAL_URL: launchUrl
       }
     });
     registerLauncher(child);

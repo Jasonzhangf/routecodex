@@ -384,6 +384,7 @@ export async function interactiveRefresh(selector: string, options: InteractiveR
   const label = formatTokenLabel(token);
   const force = Boolean(options?.force);
   const interactionMode = options?.mode === 'auto' ? 'auto' : 'manual';
+  let quotaVerifyWarned = false;
 
   const maybeOpenQuotaVerifyUrl = async (url: string): Promise<void> => {
     const shouldAutoOpen =
@@ -444,6 +445,7 @@ export async function interactiveRefresh(selector: string, options: InteractiveR
       if (!issue) {
         return;
       }
+      quotaVerifyWarned = true;
       console.warn(
         chalk.yellow('⚠'),
         `Quota manager marks ${token.provider}.${token.alias || 'default'} as "verify required" (google_account_verification). ` +
@@ -487,6 +489,10 @@ export async function interactiveRefresh(selector: string, options: InteractiveR
       return;
     }
   }
+
+  // Even when token is expired/invalid, surface verification URL first so manual flow can
+  // complete the right browser step before OAuth re-authorize.
+  await warnIfQuotaVerifyRequired();
 
   console.log('');
   console.log(
@@ -541,11 +547,13 @@ export async function interactiveRefresh(selector: string, options: InteractiveR
   const startedAt = Date.now();
   const prevCamoufoxAutoMode = process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
   const prevOAuthAutoConfirm = process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM;
+  const prevCamoufoxOpenOnly = process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY;
   try {
     await ensureLocalTokenPortalEnv();
     if (interactionMode === 'manual') {
       delete process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
       delete process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM;
+      process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY = '1';
     }
     const runEnsure = async () =>
       ensureValidOAuthToken(
@@ -582,7 +590,9 @@ export async function interactiveRefresh(selector: string, options: InteractiveR
     const tokenMtimeAfter = await getTokenFileMtime(token.filePath);
     await recordManualHistory(token, 'success', startedAt, tokenMtimeAfter);
     console.log(chalk.green('✓'), '认证完成，Token 文件已更新');
-    await warnIfQuotaVerifyRequired();
+    if (!quotaVerifyWarned) {
+      await warnIfQuotaVerifyRequired();
+    }
   } catch (error) {
     await recordManualHistory(token, 'failure', startedAt, tokenMtimeBefore, error);
     throw error;
@@ -596,6 +606,11 @@ export async function interactiveRefresh(selector: string, options: InteractiveR
       delete process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM;
     } else {
       process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM = prevOAuthAutoConfirm;
+    }
+    if (prevCamoufoxOpenOnly === undefined) {
+      delete process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY;
+    } else {
+      process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY = prevCamoufoxOpenOnly;
     }
     await cleanupInteractiveOAuthArtifacts();
   }
