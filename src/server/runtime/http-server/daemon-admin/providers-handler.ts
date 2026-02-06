@@ -918,7 +918,8 @@ function validateAndNormalizeProviderConfig(
   const authRec = auth as Record<string, unknown>;
   const secretFields = ['apiKey', 'api_key', 'value', 'clientSecret', 'client_secret', 'secret'];
   for (const field of secretFields) {
-    if (typeof authRec[field] === 'string' && authRec[field].trim()) {
+    const authFieldValue = authRec[field];
+    if (typeof authFieldValue === 'string' && authFieldValue.trim()) {
       return {
         ok: false,
         message: `provider.auth must not include inline secret field "${field}". Use secretRef (authfile-...) or tokenFile.`

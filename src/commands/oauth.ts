@@ -6,7 +6,7 @@ import {
 } from '../token-daemon/index.js';
 import { clearAntigravityReauthRequired, readAntigravityReauthRequiredState } from '../providers/auth/antigravity-reauth-state.js';
 
-async function safeInteractiveRefresh(selector: string, options: { force?: boolean }): Promise<boolean> {
+async function safeInteractiveRefresh(selector: string, options: { force?: boolean; mode?: 'manual' | 'auto' }): Promise<boolean> {
   try {
     await interactiveRefresh(selector, options);
     return true;
@@ -28,9 +28,10 @@ export function createOauthCommand(): Command {
       'Usage: "oauth <selector>" or "oauth validate <selector|all> [--json]"'
     )
     .option('--json', 'Output JSON result (only for validate)', false)
-    .option('--force', 'Force re-authorize in browser even if token is still valid', false)
+    .option('--force', 'Force re-authorize in browser even if token is still valid (default for oauth <selector>)', false)
+    .option('--soft', 'Do not force re-authorize when token is still valid', false)
     .option('--headful', 'Open Camoufox in headed mode (OAuth refresh only)', false)
-    .action(async (args: string[], options: { json?: boolean; force?: boolean; headful?: boolean }) => {
+    .action(async (args: string[], options: { json?: boolean; force?: boolean; soft?: boolean; headful?: boolean }) => {
       const list = Array.isArray(args) ? args : [];
       const first = list[0];
       if (!first) {
@@ -46,16 +47,47 @@ export function createOauthCommand(): Command {
         return;
       }
       const prevDevMode = process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
+      const prevBrowser = process.env.ROUTECODEX_OAUTH_BROWSER;
+      const prevAutoMode = process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
+      const prevAutoConfirm = process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM;
+      const prevAccountText = process.env.ROUTECODEX_CAMOUFOX_ACCOUNT_TEXT;
+      delete process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
+      delete process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM;
+      delete process.env.ROUTECODEX_CAMOUFOX_ACCOUNT_TEXT;
       if (options?.headful) {
         process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = '1';
+        process.env.ROUTECODEX_OAUTH_BROWSER = 'camoufox';
       }
       try {
-        await safeInteractiveRefresh(first, { force: Boolean(options?.force) });
+        // UX convention: `oauth <selector>` means "start manual auth now".
+        // Keep legacy `--soft` for users who want token-valid short-circuit behavior.
+        const forceReauth = options?.soft ? Boolean(options?.force) : true;
+        await safeInteractiveRefresh(first, { force: forceReauth, mode: 'manual' });
       } finally {
         if (prevDevMode === undefined) {
           delete process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
         } else {
           process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = prevDevMode;
+        }
+        if (prevBrowser === undefined) {
+          delete process.env.ROUTECODEX_OAUTH_BROWSER;
+        } else {
+          process.env.ROUTECODEX_OAUTH_BROWSER = prevBrowser;
+        }
+        if (prevAutoMode === undefined) {
+          delete process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
+        } else {
+          process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE = prevAutoMode;
+        }
+        if (prevAutoConfirm === undefined) {
+          delete process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM;
+        } else {
+          process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM = prevAutoConfirm;
+        }
+        if (prevAccountText === undefined) {
+          delete process.env.ROUTECODEX_CAMOUFOX_ACCOUNT_TEXT;
+        } else {
+          process.env.ROUTECODEX_CAMOUFOX_ACCOUNT_TEXT = prevAccountText;
         }
       }
     });
@@ -97,7 +129,7 @@ export function createOauthCommand(): Command {
           const rec = state[alias];
           const selector = rec?.tokenFile || `antigravity-oauth-*-` + alias + `.json`;
           console.log(`Re-auth required: alias=${alias}${rec?.fromSuffix ? ` from=${rec.fromSuffix}` : ''}${rec?.toSuffix ? ` to=${rec.toSuffix}` : ''}`);
-          const ok = await safeInteractiveRefresh(selector, { force: true });
+          const ok = await safeInteractiveRefresh(selector, { force: true, mode: 'auto' });
           if (!ok) {
             return;
           }
@@ -150,7 +182,7 @@ export function createOauthCommand(): Command {
         delete process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
       }
       try {
-        await safeInteractiveRefresh(selector, { force: true });
+        await safeInteractiveRefresh(selector, { force: true, mode: 'auto' });
       } finally {
         if (prevBrowser === undefined) {
           delete process.env.ROUTECODEX_OAUTH_BROWSER;
@@ -207,7 +239,7 @@ export function createOauthCommand(): Command {
           delete process.env.ROUTECODEX_CAMOUFOX_ACCOUNT_TEXT;
         }
         try {
-          const ok = await safeInteractiveRefresh(selector, { force: true });
+          const ok = await safeInteractiveRefresh(selector, { force: true, mode: 'auto' });
           if (!ok) {
             return;
           }
@@ -257,7 +289,7 @@ export function createOauthCommand(): Command {
         delete process.env.ROUTECODEX_CAMOUFOX_ACCOUNT_TEXT;
       }
       try {
-        await safeInteractiveRefresh(selector, { force: true });
+        await safeInteractiveRefresh(selector, { force: true, mode: 'auto' });
         if (token && token.provider === 'gemini-cli' && token.alias && token.alias !== 'static') {
           await clearAntigravityReauthRequired(token.alias);
         }
@@ -308,7 +340,7 @@ export function createOauthCommand(): Command {
         delete process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
       }
       try {
-        await safeInteractiveRefresh(selector, { force: true });
+        await safeInteractiveRefresh(selector, { force: true, mode: 'auto' });
       } finally {
         if (prevBrowser === undefined) {
           delete process.env.ROUTECODEX_OAUTH_BROWSER;
@@ -359,7 +391,7 @@ export function createOauthCommand(): Command {
         delete process.env.ROUTECODEX_CAMOUFOX_ACCOUNT_TEXT;
       }
       try {
-        await safeInteractiveRefresh(selector, { force: true });
+        await safeInteractiveRefresh(selector, { force: true, mode: 'auto' });
         if (token && token.provider === 'antigravity' && token.alias && token.alias !== 'static') {
           await clearAntigravityReauthRequired(token.alias);
         }

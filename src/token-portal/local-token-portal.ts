@@ -77,6 +77,12 @@ class LocalTokenPortalServer {
     }
 
     const url = new URL(req.url, `${HTTP_PROTOCOLS.HTTP}${LOCAL_HOSTS.IPV4}`);
+    if (url.pathname === '/health') {
+      res.statusCode = 200;
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.end(JSON.stringify({ ok: true }));
+      return;
+    }
     if (url.pathname !== '/token-auth/demo') {
       res.statusCode = 404;
       res.end('Not Found');

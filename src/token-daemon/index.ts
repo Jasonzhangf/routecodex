@@ -343,6 +343,7 @@ export async function printTokens(json = false): Promise<void> {
 
 type InteractiveRefreshOptions = {
   force?: boolean;
+  mode?: 'manual' | 'auto';
 };
 
 function configHasProviderId(userConfig: unknown, providerId: string): boolean {
@@ -382,6 +383,7 @@ export async function interactiveRefresh(selector: string, options: InteractiveR
 
   const label = formatTokenLabel(token);
   const force = Boolean(options?.force);
+  const interactionMode = options?.mode === 'auto' ? 'auto' : 'manual';
 
   const maybeOpenQuotaVerifyUrl = async (url: string): Promise<void> => {
     const shouldAutoOpen =
@@ -538,12 +540,12 @@ export async function interactiveRefresh(selector: string, options: InteractiveR
   const tokenMtimeBefore = await getTokenFileMtime(token.filePath);
   const startedAt = Date.now();
   const prevCamoufoxAutoMode = process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
+  const prevOAuthAutoConfirm = process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM;
   try {
     await ensureLocalTokenPortalEnv();
-    // Qwen: default to Camoufox auto mode so the authorize page Confirm button can be clicked automatically.
-    // This avoids users getting stuck at the post-portal confirm screen when using `routecodex oauth <qwen-token>`.
-    if (providerType === 'qwen') {
-      process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE = 'qwen';
+    if (interactionMode === 'manual') {
+      delete process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
+      delete process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM;
     }
     const runEnsure = async () =>
       ensureValidOAuthToken(
@@ -589,6 +591,11 @@ export async function interactiveRefresh(selector: string, options: InteractiveR
       delete process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
     } else {
       process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE = prevCamoufoxAutoMode;
+    }
+    if (prevOAuthAutoConfirm === undefined) {
+      delete process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM;
+    } else {
+      process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM = prevOAuthAutoConfirm;
     }
     await cleanupInteractiveOAuthArtifacts();
   }
