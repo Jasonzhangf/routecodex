@@ -228,4 +228,315 @@ describe('token-daemon interactiveRefresh', () => {
       }
     }
   });
+
+
+  it('uses accounts verify URL when quota authIssue contains escaped newline payload', async () => {
+    jest.resetModules();
+    const ensureValidOAuthToken = jest.fn(async () => {
+      throw new Error('ensureValidOAuthToken should not be called for valid token without --force');
+    });
+    const openAuthInCamoufox = jest.fn(async () => true);
+
+    jest.unstable_mockModule('../../src/providers/auth/oauth-lifecycle.js', () => ({
+      ensureValidOAuthToken
+    }));
+    jest.unstable_mockModule('../../src/providers/core/config/camoufox-launcher.js', () => ({
+      shutdownCamoufoxLaunchers: async () => {},
+      getCamoufoxProfileDir: () => '/tmp/rc-test-camoufox-profile',
+      ensureCamoufoxProfileDir: () => '/tmp/rc-test-camoufox-profile',
+      getCamoufoxOsPolicy: () => undefined,
+      ensureCamoufoxFingerprintForToken: () => {},
+      isCamoufoxAvailable: () => true,
+      openAuthInCamoufox
+    }));
+
+    const prevHome = process.env.HOME;
+    const prevHeadful = process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
+    process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = '1';
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-quota-authissue-escaped-'));
+    process.env.HOME = tmpHome;
+    const quotaPath = path.join(tmpHome, '.routecodex', 'quota', 'quota-manager.json');
+    fs.mkdirSync(path.dirname(quotaPath), { recursive: true });
+    fs.writeFileSync(
+      quotaPath,
+      JSON.stringify(
+        {
+          providers: {
+            'antigravity.xfour8605.claude-sonnet-4-5-thinking': {
+              providerKey: 'antigravity.xfour8605.claude-sonnet-4-5-thinking',
+              inPool: false,
+              reason: 'authVerify',
+              authIssue: {
+                kind: 'google_account_verification',
+                url: 'To continue, verify your account at\n\nhttps://accounts.google.com/signin/continue?sarp=1&scc=1&authuser\n\nLearn more\n\nhttps://support.google.com/accounts?p=al_alert\n',
+                message: 'verify your account'
+              }
+            }
+          }
+        },
+        null,
+        2
+      ),
+      'utf8'
+    );
+
+    const tokenDaemonModule = await import('../../src/token-daemon/index.js');
+    const tokenDaemon = await import('../../src/token-daemon/token-daemon.js');
+
+    jest.spyOn(tokenDaemon.TokenDaemon, 'findTokenBySelector').mockResolvedValue({
+      provider: 'antigravity',
+      filePath: '/tmp/antigravity-oauth-4-xfour8605.json',
+      sequence: 4,
+      alias: 'xfour8605',
+      displayName: 'xfour8605',
+      state: {
+        hasAccessToken: true,
+        hasRefreshToken: true,
+        hasApiKey: false,
+        expiresAt: Date.now() + 60 * 60_000,
+        msUntilExpiry: 60 * 60_000,
+        status: 'valid',
+        noRefresh: false
+      }
+    } as any);
+
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const log = jest.spyOn(console, 'log').mockImplementation(() => {});
+
+    try {
+      await tokenDaemonModule.interactiveRefresh('antigravity-oauth-4-xfour8605.json', { force: false });
+      expect(openAuthInCamoufox).toHaveBeenCalled();
+      const arg = openAuthInCamoufox.mock.calls[0]?.[0];
+      expect(String(arg?.url || '')).toContain('accounts.google.com/signin/continue');
+      expect(String(arg?.url || '')).not.toContain('support.google.com/accounts?p=al_alert');
+      expect(arg?.provider).toBe('antigravity');
+      expect(arg?.alias).toBe('xfour8605');
+    } finally {
+      warn.mockRestore();
+      log.mockRestore();
+      if (prevHeadful === undefined) delete process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
+      else process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = prevHeadful;
+      if (prevHome === undefined) delete process.env.HOME;
+      else process.env.HOME = prevHome;
+      try {
+        fs.rmSync(tmpHome, { recursive: true, force: true });
+      } catch {
+        // ignore
+      }
+    }
+  });
+
+
+  it('recovers verify URL from provider-errors log when quota snapshot only has help URL', async () => {
+    jest.resetModules();
+    const ensureValidOAuthToken = jest.fn(async () => {
+      throw new Error('ensureValidOAuthToken should not be called for valid token without --force');
+    });
+    const openAuthInCamoufox = jest.fn(async () => true);
+
+    jest.unstable_mockModule('../../src/providers/auth/oauth-lifecycle.js', () => ({
+      ensureValidOAuthToken
+    }));
+    jest.unstable_mockModule('../../src/providers/core/config/camoufox-launcher.js', () => ({
+      shutdownCamoufoxLaunchers: async () => {},
+      getCamoufoxProfileDir: () => '/tmp/rc-test-camoufox-profile',
+      ensureCamoufoxProfileDir: () => '/tmp/rc-test-camoufox-profile',
+      getCamoufoxOsPolicy: () => undefined,
+      ensureCamoufoxFingerprintForToken: () => {},
+      isCamoufoxAvailable: () => true,
+      openAuthInCamoufox
+    }));
+
+    const prevHome = process.env.HOME;
+    const prevHeadful = process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
+    process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = '1';
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-quota-authissue-recover-'));
+    process.env.HOME = tmpHome;
+    const quotaDir = path.join(tmpHome, '.routecodex', 'quota');
+    const quotaPath = path.join(quotaDir, 'quota-manager.json');
+    const errorLogPath = path.join(quotaDir, 'provider-errors.ndjson');
+    fs.mkdirSync(path.dirname(quotaPath), { recursive: true });
+    fs.writeFileSync(
+      quotaPath,
+      JSON.stringify(
+        {
+          providers: {
+            'antigravity.xfour8605.claude-sonnet-4-5-thinking': {
+              providerKey: 'antigravity.xfour8605.claude-sonnet-4-5-thinking',
+              inPool: false,
+              reason: 'authVerify',
+              authIssue: {
+                kind: 'google_account_verification',
+                url: 'https://support.google.com/accounts?p=al_alert\"',
+                message: 'verify your account'
+              }
+            }
+          }
+        },
+        null,
+        2
+      ),
+      'utf8'
+    );
+    fs.writeFileSync(
+      errorLogPath,
+      [
+        JSON.stringify({
+          ts: new Date().toISOString(),
+          providerKey: 'antigravity.xfour8605.claude-sonnet-4-5-thinking',
+          message:
+            'HTTP 403: {"error":{"message":"To continue, verify your account at\n\nhttps://accounts.google.com/signin/continue?sarp=1&scc=1&authuser\n\nLearn more\n\nhttps://support.google.com/accounts?p=al_alert\n"}}',
+          details: {
+            authIssue: {
+              kind: 'google_account_verification',
+              url: 'https://accounts.google.com/signin/continue?sarp=1&scc=1&authuser\n\nLearn'
+            }
+          }
+        })
+      ] .join('\n') + '\n',
+      'utf8'
+    );
+
+    const tokenDaemonModule = await import('../../src/token-daemon/index.js');
+    const tokenDaemon = await import('../../src/token-daemon/token-daemon.js');
+
+    jest.spyOn(tokenDaemon.TokenDaemon, 'findTokenBySelector').mockResolvedValue({
+      provider: 'antigravity',
+      filePath: '/tmp/antigravity-oauth-4-xfour8605.json',
+      sequence: 4,
+      alias: 'xfour8605',
+      displayName: 'xfour8605',
+      state: {
+        hasAccessToken: true,
+        hasRefreshToken: true,
+        hasApiKey: false,
+        expiresAt: Date.now() + 60 * 60_000,
+        msUntilExpiry: 60 * 60_000,
+        status: 'valid',
+        noRefresh: false
+      }
+    } as any);
+
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const log = jest.spyOn(console, 'log').mockImplementation(() => {});
+
+    try {
+      await tokenDaemonModule.interactiveRefresh('antigravity-oauth-4-xfour8605.json', { force: false });
+      expect(openAuthInCamoufox).toHaveBeenCalled();
+      const arg = openAuthInCamoufox.mock.calls[0]?.[0];
+      expect(String(arg?.url || '')).toContain('accounts.google.com/signin/continue');
+      expect(String(arg?.url || '')).not.toContain('support.google.com/accounts?p=al_alert');
+      expect(arg?.provider).toBe('antigravity');
+      expect(arg?.alias).toBe('xfour8605');
+    } finally {
+      warn.mockRestore();
+      log.mockRestore();
+      if (prevHeadful === undefined) delete process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
+      else process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = prevHeadful;
+      if (prevHome === undefined) delete process.env.HOME;
+      else process.env.HOME = prevHome;
+      try {
+        fs.rmSync(tmpHome, { recursive: true, force: true });
+      } catch {
+        // ignore
+      }
+    }
+  });
+
+  it('falls back to Google support URL when quota authIssue URL is truncated', async () => {
+    jest.resetModules();
+    const ensureValidOAuthToken = jest.fn(async () => {
+      throw new Error('ensureValidOAuthToken should not be called for valid token without --force');
+    });
+    const openAuthInCamoufox = jest.fn(async () => true);
+
+    jest.unstable_mockModule('../../src/providers/auth/oauth-lifecycle.js', () => ({
+      ensureValidOAuthToken
+    }));
+    jest.unstable_mockModule('../../src/providers/core/config/camoufox-launcher.js', () => ({
+      shutdownCamoufoxLaunchers: async () => {},
+      getCamoufoxProfileDir: () => '/tmp/rc-test-camoufox-profile',
+      ensureCamoufoxProfileDir: () => '/tmp/rc-test-camoufox-profile',
+      getCamoufoxOsPolicy: () => undefined,
+      ensureCamoufoxFingerprintForToken: () => {},
+      isCamoufoxAvailable: () => true,
+      openAuthInCamoufox
+    }));
+
+    const prevHome = process.env.HOME;
+    const prevHeadful = process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
+    process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = '1';
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-quota-authissue-truncated-'));
+    process.env.HOME = tmpHome;
+    const quotaPath = path.join(tmpHome, '.routecodex', 'quota', 'quota-manager.json');
+    fs.mkdirSync(path.dirname(quotaPath), { recursive: true });
+    fs.writeFileSync(
+      quotaPath,
+      JSON.stringify(
+        {
+          providers: {
+            'antigravity.xfour8605.claude-sonnet-4-5-thinking': {
+              providerKey: 'antigravity.xfour8605.claude-sonnet-4-5-thinking',
+              inPool: false,
+              reason: 'authVerify',
+              authIssue: {
+                kind: 'google_account_verification',
+                url: 'https://accounts.goo...[truncated',
+                message: 'verify your account'
+              }
+            }
+          }
+        },
+        null,
+        2
+      ),
+      'utf8'
+    );
+
+    const tokenDaemonModule = await import('../../src/token-daemon/index.js');
+    const tokenDaemon = await import('../../src/token-daemon/token-daemon.js');
+
+    jest.spyOn(tokenDaemon.TokenDaemon, 'findTokenBySelector').mockResolvedValue({
+      provider: 'antigravity',
+      filePath: '/tmp/antigravity-oauth-4-xfour8605.json',
+      sequence: 4,
+      alias: 'xfour8605',
+      displayName: 'xfour8605',
+      state: {
+        hasAccessToken: true,
+        hasRefreshToken: true,
+        hasApiKey: false,
+        expiresAt: Date.now() + 60 * 60_000,
+        msUntilExpiry: 60 * 60_000,
+        status: 'valid',
+        noRefresh: false
+      }
+    } as any);
+
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const log = jest.spyOn(console, 'log').mockImplementation(() => {});
+
+    try {
+      await tokenDaemonModule.interactiveRefresh('antigravity-oauth-4-xfour8605.json', { force: false });
+      expect(openAuthInCamoufox).toHaveBeenCalled();
+      const arg = openAuthInCamoufox.mock.calls[0]?.[0];
+      expect(String(arg?.url || '')).toBe('https://support.google.com/accounts?p=al_alert');
+      expect(String(arg?.url || '')).not.toContain('truncated');
+      expect(arg?.provider).toBe('antigravity');
+      expect(arg?.alias).toBe('xfour8605');
+    } finally {
+      warn.mockRestore();
+      log.mockRestore();
+      if (prevHeadful === undefined) delete process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
+      else process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = prevHeadful;
+      if (prevHome === undefined) delete process.env.HOME;
+      else process.env.HOME = prevHome;
+      try {
+        fs.rmSync(tmpHome, { recursive: true, force: true });
+      } catch {
+        // ignore
+      }
+    }
+  });
+
 });

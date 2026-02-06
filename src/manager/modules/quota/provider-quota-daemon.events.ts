@@ -446,7 +446,8 @@ function parseAntigravityGoogleAccountVerification(event: ProviderErrorEvent): {
   if (!raw) {
     return null;
   }
-  const lowered = raw.toLowerCase();
+  const normalized = normalizeOAuthErrorMessageForUrl(raw);
+  const lowered = normalized.toLowerCase();
   const isMatch =
     lowered.includes('verify your account') ||
     // Antigravity-Manager alignment: 403 validation gating keywords.
@@ -460,8 +461,9 @@ function parseAntigravityGoogleAccountVerification(event: ProviderErrorEvent): {
     return null;
   }
   const url =
-    extractFirstUrl(raw, /https?:\/\/accounts\.google\.com\/signin\/continue[^\s"'<>)]*/i) ||
-    extractFirstUrl(raw, /https?:\/\/support\.google\.com\/accounts\?p=al_alert[^\s"'<>)]*/i) ||
+    extractFirstUrl(normalized, /https?:\/\/accounts\.google\.com\/signin\/continue[^\s"'<>)]*/i) ||
+    extractFirstUrl(normalized, /https?:\/\/accounts\.google\.com\/[^\s"'<>)]*/i) ||
+    extractFirstUrl(normalized, /https?:\/\/support\.google\.com\/accounts\?p=al_alert[^\s"'<>)]*/i) ||
     null;
   return {
     url,
@@ -501,11 +503,23 @@ function isAntigravityReauthRequired403(event: ProviderErrorEvent): boolean {
   }
 }
 
+function normalizeOAuthErrorMessageForUrl(input: string): string {
+  return String(input || '')
+    .replace(/\\\//g, '/')
+    .replace(/\\u0026/gi, '&')
+    .replace(/\\u003d/gi, '=')
+    .replace(/\\x26/gi, '&')
+    .replace(/\\x3d/gi, '=')
+    .replace(/\\n/g, '\n')
+    .replace(/\\r/g, '\n');
+}
+
 function extractFirstUrl(input: string, pattern: RegExp): string | null {
   try {
     const match = pattern.exec(input);
     if (!match) return null;
-    const url = String(match[0] || '').trim();
+    const raw = String(match[0] || '').trim();
+    const url = raw.replace(/[\\"']+$/g, '').replace(/[),.]+$/g, '');
     return url ? url : null;
   } catch {
     return null;

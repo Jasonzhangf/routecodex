@@ -54,6 +54,56 @@ describe('oauth-lifecycle: non-blocking upstream repair', () => {
     expect(String(url || '')).toContain('accounts.google.com/signin/continue');
   });
 
+
+  it('prefers accounts verify URL when upstream payload also contains support link', async () => {
+    jest.resetModules();
+    const ensureValid = jest.fn(async (_providerType: string, _auth: any, opts: any) => {
+      if (opts && opts.openBrowser === true) {
+        return await new Promise(() => {});
+      }
+      return {};
+    });
+
+    const openAuthInCamoufox = jest.fn(async () => true);
+    jest.unstable_mockModule('../../../src/providers/core/config/camoufox-launcher.js', () => ({
+      shutdownCamoufoxLaunchers: async () => {},
+      getCamoufoxProfileDir: () => '/tmp/rc-test-camoufox-profile',
+      ensureCamoufoxProfileDir: () => '/tmp/rc-test-camoufox-profile',
+      isCamoufoxAvailable: () => true,
+      getCamoufoxOsPolicy: () => undefined,
+      ensureCamoufoxFingerprintForToken: () => {},
+      openAuthInCamoufox
+    }));
+
+    const { handleUpstreamInvalidOAuthToken } = await import('../../../src/providers/auth/oauth-lifecycle.js');
+
+    const err = {
+      statusCode: 403,
+      message:
+        'HTTP 403: {"error":{"code":403,"message":"To continue, verify your account at\n\nhttps://accounts.google.com/signin/continue?sarp=1&scc=1&authuser\n\nLearn more\n\nhttps://support.google.com/accounts?p=al_alert\n"}}'
+    };
+    const tokenFile = '/tmp/routecodex-test-antigravity-oauth-' + Date.now() + '-' + Math.random() + '.json';
+
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = await Promise.race([
+      handleUpstreamInvalidOAuthToken(
+        'antigravity',
+        { type: 'oauth', tokenFile } as any,
+        err as any,
+        { allowBlocking: false, ensureValidOAuthToken: ensureValid as any }
+      ),
+      new Promise((resolve) => setTimeout(() => resolve('timeout'), 500))
+    ]);
+    warn.mockRestore();
+
+    expect(result).not.toBe('timeout');
+    expect(result).toBe(false);
+    expect(openAuthInCamoufox).toHaveBeenCalled();
+    const url = openAuthInCamoufox.mock.calls[0]?.[0]?.url;
+    expect(String(url || '')).toContain('accounts.google.com/signin/continue');
+    expect(String(url || '')).not.toContain('support.google.com/accounts?p=al_alert');
+  });
+
   it('tries silent refresh first for generic invalid token, then starts interactive in background', async () => {
     jest.resetModules();
     const ensureValid = jest.fn(async (_providerType: string, _auth: any, opts: any) => {
