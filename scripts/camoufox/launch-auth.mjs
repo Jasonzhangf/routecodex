@@ -1066,34 +1066,54 @@ async function waitForAnyElementInPages(context, selectors, timeoutMs) {
   return null;
 }
 
-async function waitForCallback(context, fallbackPage, timeoutMs = 120000) {
+async function waitForCallback(context, _fallbackPage, timeoutMs = 120000) {
   const isCallbackUrl = (current) => {
-    if (typeof current !== 'string') {
+    if (typeof current !== 'string' || !current) {
       return false;
     }
-    const lower = current.toLowerCase();
-    return (
-      lower.startsWith('http://127.0.0.1') ||
-      lower.startsWith('http://localhost') ||
-      lower.startsWith('https://127.0.0.1')
-    );
+    try {
+      const parsed = new URL(current);
+      const host = parsed.hostname.toLowerCase();
+      if (host !== '127.0.0.1' && host !== 'localhost') {
+        return false;
+      }
+      const pathname = parsed.pathname.toLowerCase();
+      const isOAuthCallback = pathname === '/oauth2callback' || /oauth.*callback/.test(pathname);
+      if (!isOAuthCallback) {
+        return false;
+      }
+      return parsed.searchParams.has('code') || parsed.searchParams.has('error');
+    } catch {
+      return false;
+    }
   };
 
-  const currentPages = context.pages();
-  for (const page of currentPages) {
-    if (isCallbackUrl(page.url())) {
-      return page;
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    for (const page of context.pages()) {
+      try {
+        if (isCallbackUrl(page.url())) {
+          await page.waitForLoadState('domcontentloaded', { timeout: 60000 }).catch(() => {});
+          return page;
+        }
+      } catch {
+        // ignore closed page races
+      }
+    }
+
+    const elapsed = Date.now() - startedAt;
+    const remaining = timeoutMs - elapsed;
+    const waitSlice = Math.min(1000, remaining);
+    if (waitSlice <= 0) {
+      break;
+    }
+
+    try {
+      await context.waitForEvent('page', { timeout: waitSlice });
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, waitSlice));
     }
   }
 
-  try {
-    await fallbackPage.waitForURL((current) => isCallbackUrl(current), { timeout: timeoutMs });
-    return fallbackPage;
-  } catch {
-    // ignore and wait for popup
-  }
-
-  const callback = await context.waitForEvent('page', { timeout: timeoutMs });
-  await callback.waitForLoadState('domcontentloaded', { timeout: 60000 }).catch(() => {});
-  return callback;
+  throw new Error('Timed out waiting for OAuth callback URL (code/error not observed)');
 }
