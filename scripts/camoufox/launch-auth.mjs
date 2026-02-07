@@ -85,9 +85,32 @@ function buildLocaleEnv() {
 
 function buildFirefoxUserPrefs() {
   const lang = resolveGoogleLanguageHint();
+  const osFonts = process.platform === 'darwin'
+    ? {
+        sansCn: 'PingFang SC, Hiragino Sans GB, Heiti SC',
+        serifCn: 'Songti SC, STSong',
+        sansJa: 'Hiragino Sans, Yu Gothic, Osaka',
+        sansKo: 'Apple SD Gothic Neo, Nanum Gothic'
+      }
+    : {
+        sansCn: 'Noto Sans CJK SC, Microsoft YaHei, SimHei',
+        serifCn: 'Noto Serif CJK SC, SimSun',
+        sansJa: 'Noto Sans CJK JP, Yu Gothic',
+        sansKo: 'Noto Sans CJK KR, Malgun Gothic'
+      };
+
   return {
     'intl.accept_languages': lang,
-    'javascript.use_us_english_locale': true
+    'javascript.use_us_english_locale': true,
+    'intl.charset.fallback.override': 'UTF-8',
+    'gfx.downloadable_fonts.enabled': true,
+    'font.default.x-western': 'sans-serif',
+    'font.name.sans-serif.x-western': 'Arial',
+    'font.name.serif.x-western': 'Times New Roman',
+    'font.name.sans-serif.zh-CN': osFonts.sansCn,
+    'font.name.serif.zh-CN': osFonts.serifCn,
+    'font.name.sans-serif.ja': osFonts.sansJa,
+    'font.name.sans-serif.ko': osFonts.sansKo
   };
 }
 
@@ -96,6 +119,51 @@ function buildCamoufoxLaunchEnv() {
     ...process.env,
     ...buildLocaleEnv()
   };
+}
+
+function quoteUserPrefValue(value) {
+  if (typeof value === 'string') {
+    return JSON.stringify(value);
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+  return JSON.stringify(String(value));
+}
+
+function buildManagedUserPrefBlock() {
+  const start = '// ROUTECODEX_CAMOUFOX_PREFS_BEGIN';
+  const end = '// ROUTECODEX_CAMOUFOX_PREFS_END';
+  const prefs = buildFirefoxUserPrefs();
+  const lines = [start];
+  for (const [key, value] of Object.entries(prefs)) {
+    lines.push('user_pref(' + JSON.stringify(key) + ', ' + quoteUserPrefValue(value) + ');');
+  }
+  lines.push(end);
+  return lines.join('\n') + '\n';
+}
+
+function ensureManagedProfilePrefs(profileDir) {
+  const userJsPath = path.join(profileDir, 'user.js');
+  const start = '// ROUTECODEX_CAMOUFOX_PREFS_BEGIN';
+  const end = '// ROUTECODEX_CAMOUFOX_PREFS_END';
+  const managedBlock = buildManagedUserPrefBlock();
+  let existing = '';
+  try {
+    existing = fs.readFileSync(userJsPath, 'utf8');
+  } catch {
+    existing = '';
+  }
+
+  let nextContent = managedBlock;
+  if (existing && existing.includes(start) && existing.includes(end)) {
+    const pattern = new RegExp(start + '[\\s\\S]*?' + end + '\n?', 'm');
+    nextContent = existing.replace(pattern, managedBlock);
+  } else if (existing.trim().length > 0) {
+    nextContent = existing.trimEnd() + '\n\n' + managedBlock;
+  }
+
+  fs.writeFileSync(userJsPath, nextContent, 'utf8');
 }
 
 async function getCamoufoxCacheRoot() {
@@ -213,6 +281,14 @@ async function main() {
 
   const profileId = profile || 'default';
   const profileDir = await ensureProfileDir(profileId);
+  try {
+    ensureManagedProfilePrefs(profileDir);
+  } catch (error) {
+    console.warn(
+      '[camoufox-launch-auth] Failed to persist managed profile prefs:',
+      error instanceof Error ? error.message : String(error)
+    );
+  }
 
   const urlPreview = String(url).length > 160 ? `${String(url).slice(0, 160)}…` : String(url);
   console.log(

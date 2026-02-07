@@ -53,6 +53,22 @@ describe('withOAuthRepairEnv', () => {
     expect(process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM).toBe(prevConfirm);
   });
 
+  test('scopes camoufox env for iflow', async () => {
+    const prevAuto = process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
+    const prevBrowser = process.env.ROUTECODEX_OAUTH_BROWSER;
+    const prevConfirm = process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM;
+
+    await withOAuthRepairEnv('iflow', async () => {
+      expect(process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE).toBe('iflow');
+      expect(process.env.ROUTECODEX_OAUTH_BROWSER).toBe('camoufox');
+      expect(process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM).toBe('1');
+    });
+
+    expect(process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE).toBe(prevAuto);
+    expect(process.env.ROUTECODEX_OAUTH_BROWSER).toBe(prevBrowser);
+    expect(process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM).toBe(prevConfirm);
+  });
+
   test('scopes camoufox env for gemini + gemini-cli', async () => {
     const prevAuto = process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
     const prevBrowser = process.env.ROUTECODEX_OAUTH_BROWSER;

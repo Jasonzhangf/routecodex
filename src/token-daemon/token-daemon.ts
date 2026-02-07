@@ -311,6 +311,8 @@ export class TokenDaemon {
         await (this as any).runIflowAutoAuthorization(token);
       } else if (providerType === 'antigravity') {
         await (this as any).runAntigravityAutoAuthorization(token);
+      } else if (providerType === 'gemini-cli') {
+        await (this as any).runGeminiCliAutoAuthorization(token);
       } else if (providerType === 'qwen') {
         await (this as any).runQwenAutoAuthorization(token);
       } else {
@@ -425,6 +427,28 @@ export class TokenDaemon {
     });
   }
 
+  private async runGeminiCliAutoAuthorization(token: TokenDescriptor): Promise<void> {
+    try {
+      await this.ensureTokenWithOverrides(token, {
+        useCamoufox: true,
+        autoMode: 'gemini',
+        devMode: false
+      });
+      return;
+    } catch (autoError) {
+      const message = autoError instanceof Error ? autoError.message : String(autoError);
+      console.warn(
+        chalk.yellow('!'),
+        `Camoufox auto OAuth failed for gemini-cli (${token.displayName}): ${message}. Falling back to manual mode.`
+      );
+    }
+    await this.ensureTokenWithOverrides(token, {
+      useCamoufox: true,
+      autoMode: null,
+      devMode: true
+    });
+  }
+
   private async runQwenAutoAuthorization(token: TokenDescriptor): Promise<void> {
     try {
       await this.ensureTokenWithOverrides(token, {
@@ -455,7 +479,7 @@ export class TokenDaemon {
     const rawType = `${providerType}-oauth`;
     const wantsInteractive = Boolean(camoufoxOptions?.useCamoufox);
     // IMPORTANT: Token daemon must not pop interactive OAuth during background refresh.
-    // Only explicit auto-authorization flows (iflow/antigravity) opt into interactive mode via Camoufox.
+    // Only explicit auto-authorization flows (iflow/qwen/gemini-cli/antigravity) opt into interactive mode via Camoufox.
     const runner = () =>
       ensureValidOAuthToken(
         providerType,

@@ -40,6 +40,62 @@ describe('TokenDaemon ensureTokenWithOverrides', () => {
     });
   });
 
+  it('uses camoufox auto mode for gemini-cli auto authorization', async () => {
+    jest.resetModules();
+    const prevAuto = process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
+    const prevBrowser = process.env.ROUTECODEX_OAUTH_BROWSER;
+    const prevDevMode = process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
+
+    let insideAuto: string | undefined;
+    let insideBrowser: string | undefined;
+    let insideDevMode: string | undefined;
+
+    const ensureValidOAuthToken = jest.fn(async () => {
+      insideAuto = process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
+      insideBrowser = process.env.ROUTECODEX_OAUTH_BROWSER;
+      insideDevMode = process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
+    });
+
+    jest.unstable_mockModule('../../src/providers/auth/oauth-lifecycle.js', () => ({
+      ensureValidOAuthToken
+    }));
+
+    const mod = await import('../../src/token-daemon/token-daemon.js');
+    const daemon = new mod.TokenDaemon({ intervalMs: 999999, refreshAheadMinutes: 5 });
+
+    await (daemon as any).runGeminiCliAutoAuthorization({
+      provider: 'gemini-cli',
+      filePath: '/tmp/gemini-oauth-1-default.json',
+      sequence: 1,
+      alias: 'default',
+      displayName: 'default',
+      state: {
+        hasAccessToken: true,
+        hasRefreshToken: true,
+        hasApiKey: false,
+        expiresAt: Date.now() + 1000,
+        msUntilExpiry: 1000,
+        status: 'expiring',
+        noRefresh: false
+      }
+    });
+
+    expect(ensureValidOAuthToken).toHaveBeenCalledTimes(1);
+    const opts = ensureValidOAuthToken.mock.calls[0]?.[2];
+    expect(opts).toMatchObject({
+      openBrowser: true,
+      forceReacquireIfRefreshFails: true,
+      forceReauthorize: false
+    });
+    expect(insideAuto).toBe('gemini');
+    expect(insideBrowser).toBe('camoufox');
+    expect(insideDevMode).toBeUndefined();
+
+    expect(process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE).toBe(prevAuto);
+    expect(process.env.ROUTECODEX_OAUTH_BROWSER).toBe(prevBrowser);
+    expect(process.env.ROUTECODEX_CAMOUFOX_DEV_MODE).toBe(prevDevMode);
+  });
+
   it('persists noRefresh and auto-suspends on permanent refresh failures', async () => {
     const prevHome = process.env.HOME;
     const tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-token-daemon-perm-'));
