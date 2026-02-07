@@ -11,6 +11,7 @@ import {
 import { buildResponsesRequestFromChat } from '../../sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.js';
 
 const SESSION_DIR = path.join(process.cwd(), 'tmp', 'jest-stopmessage-sessions');
+const USER_DIR = path.join(process.cwd(), 'tmp', 'jest-stopmessage-userdir');
 
 function writeRoutingStateForSession(sessionId: string, state: RoutingInstructionState): void {
   fs.mkdirSync(SESSION_DIR, { recursive: true });
@@ -73,6 +74,9 @@ async function readJsonFileUntil<T>(
 describe('stop_message_auto servertool', () => {
   beforeAll(() => {
     process.env.ROUTECODEX_SESSION_DIR = SESSION_DIR;
+    process.env.ROUTECODEX_USER_DIR = USER_DIR;
+    process.env.ROUTECODEX_STOPMESSAGE_STAGE_MODE = 'off';
+    fs.mkdirSync(USER_DIR, { recursive: true });
   });
 
   test('schedules followup when stopMessage is active and finish_reason=stop', async () => {
@@ -150,7 +154,7 @@ describe('stop_message_auto servertool', () => {
     expect(typeof persisted?.state?.stopMessageLastUsedAt).toBe('number');
   });
 
-  test('allows retrigger on stop_message_flow followup hops', async () => {
+  test('skips stop_message retrigger on stop_message_flow followup hops', async () => {
     const sessionId = 'stopmessage-spec-session-followup-allow';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
@@ -208,14 +212,13 @@ describe('stop_message_auto servertool', () => {
       providerProtocol: 'openai-chat'
     });
 
-    expect(result.mode).toBe('tool_flow');
-    expect(result.execution?.flowId).toBe('stop_message_flow');
+    expect(result.mode).toBe('passthrough');
 
     const persisted = await readJsonFileUntil<{ state?: { stopMessageUsed?: number } }>(
       path.join(SESSION_DIR, `session-${sessionId}.json`),
-      (data) => data?.state?.stopMessageUsed === 1
+      (data) => data?.state?.stopMessageUsed === 0
     );
-    expect(persisted?.state?.stopMessageUsed).toBe(1);
+    expect(persisted?.state?.stopMessageUsed).toBe(0);
   });
 
   test('skips stop_message retrigger for non-stop followup flows', async () => {
@@ -702,6 +705,7 @@ describe('stop_message_auto servertool', () => {
     expect((orchestration.chat as any)?.id).toBe('chatcmpl-followup-nonempty');
   });
 
+
   test('errors when stop_followup stays empty after retry', async () => {
     const sessionId = 'stopmessage-spec-session-empty-error';
     const state: RoutingInstructionState = {
@@ -778,4 +782,226 @@ describe('stop_message_auto servertool', () => {
     expect(persisted?.state?.stopMessageText).toBeUndefined();
     expect(persisted?.state?.stopMessageMaxRepeats).toBeUndefined();
   });
+
+  test('uses staged status-check template on first followup', async () => {
+    const tempUserDir = fs.mkdtempSync(path.join(process.cwd(), 'tmp', 'stopmessage-stage-userdir-'));
+    const prevUserDir = process.env.ROUTECODEX_USER_DIR;
+    const prevStageMode = process.env.ROUTECODEX_STOPMESSAGE_STAGE_MODE;
+    try {
+      fs.mkdirSync(path.join(tempUserDir, 'stopMessage'), { recursive: true });
+      fs.writeFileSync(
+        path.join(tempUserDir, 'stopMessage', 'stage-status-check.md'),
+        '阶段A：先看 BD 状态\n{{BASE_STOP_MESSAGE}}',
+        'utf8'
+      );
+      fs.writeFileSync(
+        path.join(tempUserDir, 'stopMessage', 'stage-loop-self-check.md'),
+        '阶段B：循环自检\n{{BASE_STOP_MESSAGE}}',
+        'utf8'
+      );
+      process.env.ROUTECODEX_USER_DIR = tempUserDir;
+      process.env.ROUTECODEX_STOPMESSAGE_STAGE_MODE = 'on';
+
+      const sessionId = 'stopmessage-spec-session-stage-1';
+      const state: RoutingInstructionState = {
+        forcedTarget: undefined,
+        stickyTarget: undefined,
+        allowedProviders: new Set(),
+        disabledProviders: new Set(),
+        disabledKeys: new Map(),
+        disabledModels: new Map(),
+        stopMessageText: '先执行、后汇报',
+        stopMessageMaxRepeats: 5,
+        stopMessageUsed: 0
+      };
+      writeRoutingStateForSession(sessionId, state);
+
+      const chatResponse: JsonObject = {
+        id: 'chatcmpl-stage-1',
+        object: 'chat.completion',
+        model: 'gpt-test',
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: 'assistant',
+              content: 'ok'
+            },
+            finish_reason: 'stop'
+          }
+        ]
+      };
+
+      const adapterContext: AdapterContext = {
+        requestId: 'req-stopmessage-stage-1',
+        entryEndpoint: '/v1/chat/completions',
+        providerProtocol: 'openai-chat',
+        sessionId,
+        capturedChatRequest: {
+          model: 'gpt-test',
+          messages: [
+            { role: 'user', content: '先执行任务' },
+            { role: 'assistant', content: '收到' },
+            { role: 'tool', content: 'bd --no-db show routecodex-77\nstatus: in_progress' }
+          ]
+        }
+      } as any;
+
+      const result = await runServerSideToolEngine({
+        chatResponse,
+        adapterContext,
+        entryEndpoint: '/v1/chat/completions',
+        requestId: 'req-stopmessage-stage-1',
+        providerProtocol: 'openai-chat'
+      });
+
+      expect(result.mode).toBe('tool_flow');
+      const followup = result.execution?.followup as any;
+      const ops = Array.isArray(followup?.injection?.ops) ? followup.injection.ops : [];
+      const appendUserText = ops.find((entry: any) => entry?.op === 'append_user_text');
+      expect(appendUserText?.text).toContain('阶段A：先看 BD 状态');
+      expect(appendUserText?.text).toContain('先执行、后汇报');
+
+      const persisted = await readJsonFileUntil<{ state?: { stopMessageStage?: string; stopMessageObservationStableCount?: number } }>(
+        path.join(SESSION_DIR, `session-${sessionId}.json`),
+        (data) => data?.state?.stopMessageStage === 'status_probe'
+      );
+      expect(persisted?.state?.stopMessageStage).toBe('status_probe');
+      expect(persisted?.state?.stopMessageObservationStableCount).toBe(0);
+    } finally {
+      if (prevUserDir === undefined) {
+        delete process.env.ROUTECODEX_USER_DIR;
+      } else {
+        process.env.ROUTECODEX_USER_DIR = prevUserDir;
+      }
+      if (prevStageMode === undefined) {
+        delete process.env.ROUTECODEX_STOPMESSAGE_STAGE_MODE;
+      } else {
+        process.env.ROUTECODEX_STOPMESSAGE_STAGE_MODE = prevStageMode;
+      }
+      fs.rmSync(tempUserDir, { recursive: true, force: true });
+    }
+  });
+
+  test('stops staged followup after repeated unchanged observations', async () => {
+    const tempUserDir = fs.mkdtempSync(path.join(process.cwd(), 'tmp', 'stopmessage-stage-loop-userdir-'));
+    const prevUserDir = process.env.ROUTECODEX_USER_DIR;
+    const prevStageMode = process.env.ROUTECODEX_STOPMESSAGE_STAGE_MODE;
+    try {
+      fs.mkdirSync(path.join(tempUserDir, 'stopMessage'), { recursive: true });
+      fs.writeFileSync(
+        path.join(tempUserDir, 'stopMessage', 'stage-status-check.md'),
+        '阶段A：状态确认\n{{BASE_STOP_MESSAGE}}',
+        'utf8'
+      );
+      fs.writeFileSync(
+        path.join(tempUserDir, 'stopMessage', 'stage-loop-self-check.md'),
+        '阶段B：循环自检\n{{BASE_STOP_MESSAGE}}',
+        'utf8'
+      );
+      process.env.ROUTECODEX_USER_DIR = tempUserDir;
+      process.env.ROUTECODEX_STOPMESSAGE_STAGE_MODE = 'on';
+
+      const sessionId = 'stopmessage-spec-session-stage-loop';
+      const state: RoutingInstructionState = {
+        forcedTarget: undefined,
+        stickyTarget: undefined,
+        allowedProviders: new Set(),
+        disabledProviders: new Set(),
+        disabledKeys: new Map(),
+        disabledModels: new Map(),
+        stopMessageText: '继续推进同一任务',
+        stopMessageMaxRepeats: 10,
+        stopMessageUsed: 0
+      };
+      writeRoutingStateForSession(sessionId, state);
+
+      const chatResponse: JsonObject = {
+        id: 'chatcmpl-stage-loop',
+        object: 'chat.completion',
+        model: 'gpt-test',
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: 'assistant',
+              content: 'ok'
+            },
+            finish_reason: 'stop'
+          }
+        ]
+      };
+
+      const adapterContext: AdapterContext = {
+        requestId: 'req-stopmessage-stage-loop',
+        entryEndpoint: '/v1/chat/completions',
+        providerProtocol: 'openai-chat',
+        sessionId,
+        capturedChatRequest: {
+          model: 'gpt-test',
+          messages: [
+            { role: 'user', content: '继续处理' },
+            { role: 'assistant', content: '处理中' },
+            { role: 'tool', content: 'bd --no-db show routecodex-77\nstatus: in_progress' }
+          ]
+        }
+      } as any;
+
+      const first = await runServerSideToolEngine({
+        chatResponse,
+        adapterContext,
+        entryEndpoint: '/v1/chat/completions',
+        requestId: 'req-stopmessage-stage-loop-1',
+        providerProtocol: 'openai-chat'
+      });
+      expect(first.mode).toBe('tool_flow');
+      await readJsonFileUntil<{ state?: { stopMessageObservationStableCount?: number } }>(
+        path.join(SESSION_DIR, `session-${sessionId}.json`),
+        (data) => data?.state?.stopMessageObservationStableCount === 0
+      );
+
+      const second = await runServerSideToolEngine({
+        chatResponse,
+        adapterContext,
+        entryEndpoint: '/v1/chat/completions',
+        requestId: 'req-stopmessage-stage-loop-2',
+        providerProtocol: 'openai-chat'
+      });
+      expect(second.mode).toBe('tool_flow');
+      await readJsonFileUntil<{ state?: { stopMessageObservationStableCount?: number } }>(
+        path.join(SESSION_DIR, `session-${sessionId}.json`),
+        (data) => data?.state?.stopMessageObservationStableCount === 1
+      );
+
+      const third = await runServerSideToolEngine({
+        chatResponse,
+        adapterContext,
+        entryEndpoint: '/v1/chat/completions',
+        requestId: 'req-stopmessage-stage-loop-3',
+        providerProtocol: 'openai-chat'
+      });
+      expect(third.mode).toBe('passthrough');
+
+      const persisted = await readJsonFileUntil<{ state?: { stopMessageText?: unknown; stopMessageMaxRepeats?: unknown } }>(
+        path.join(SESSION_DIR, `session-${sessionId}.json`),
+        (data) => data?.state?.stopMessageText === undefined && data?.state?.stopMessageMaxRepeats === undefined
+      );
+      expect(persisted?.state?.stopMessageText).toBeUndefined();
+      expect(persisted?.state?.stopMessageMaxRepeats).toBeUndefined();
+    } finally {
+      if (prevUserDir === undefined) {
+        delete process.env.ROUTECODEX_USER_DIR;
+      } else {
+        process.env.ROUTECODEX_USER_DIR = prevUserDir;
+      }
+      if (prevStageMode === undefined) {
+        delete process.env.ROUTECODEX_STOPMESSAGE_STAGE_MODE;
+      } else {
+        process.env.ROUTECODEX_STOPMESSAGE_STAGE_MODE = prevStageMode;
+      }
+      fs.rmSync(tempUserDir, { recursive: true, force: true });
+    }
+  });
+
+
 });

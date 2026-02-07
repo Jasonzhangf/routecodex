@@ -140,6 +140,26 @@ describe('Routing instruction parsing and application', () => {
     expect(restored.stopMessageUsed).toBe(0);
   });
 
+
+  test('serializes staged stopMessage metadata fields', () => {
+    const baseState = createState({
+      stopMessageText: '继续',
+      stopMessageMaxRepeats: 2,
+      stopMessageUsed: 1,
+      stopMessageStage: 'loop_self_check',
+      stopMessageObservationHash: 'abc123',
+      stopMessageObservationStableCount: 1,
+      stopMessageBdWorkState: 'active'
+    });
+
+    const serialized = serializeRoutingInstructionState(baseState);
+    const restored = deserializeRoutingInstructionState(serialized);
+    expect(restored.stopMessageStage).toBe('loop_self_check');
+    expect(restored.stopMessageObservationHash).toBe('abc123');
+    expect(restored.stopMessageObservationStableCount).toBe(1);
+    expect(restored.stopMessageBdWorkState).toBe('active');
+  });
+
   test('parses stopMessage from file:// ref (relative to ~/.routecodex)', () => {
     const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-stopMessage-'));
     const prev = process.env.ROUTECODEX_USER_DIR;
