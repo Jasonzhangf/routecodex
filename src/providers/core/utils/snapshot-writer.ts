@@ -14,6 +14,18 @@ type Phase =
   | 'provider-body-debug';
 type ClientPhase = 'client-request';
 
+type ProviderSnapshotWriteOptions = {
+  phase: Phase;
+  requestId: string;
+  data: unknown;
+  headers?: Record<string, unknown>;
+  url?: string;
+  entryEndpoint?: string;
+  clientRequestId?: string;
+  providerKey?: string;
+  providerId?: string;
+};
+
 function resolveSnapshotBase(): string {
   const override = String(process.env.ROUTECODEX_SNAPSHOT_DIR || process.env.RCC_SNAPSHOT_DIR || '').trim();
   if (override) {
@@ -133,20 +145,92 @@ async function writeUniqueFile(dir: string, baseName: string, contents: string):
   await fsp.writeFile(path.join(dir, fallback), contents, 'utf-8');
 }
 
-export async function writeProviderSnapshot(options: {
-  phase: Phase;
+
+type ProviderSnapshotPersistInput = {
+  endpoint: string;
+  folder: string;
+  stage: string;
   requestId: string;
-  data: unknown;
-  headers?: Record<string, unknown>;
-  url?: string;
-  entryEndpoint?: string;
-  clientRequestId?: string;
-  providerKey?: string;
-  providerId?: string;
-}): Promise<void> {
-  if (!runtimeFlags.snapshotsEnabled) {
+  groupRequestId: string;
+  providerToken: string;
+  payload: ReturnType<typeof buildSnapshotPayload>;
+};
+
+type SnapshotBufferGlobal = {
+  __routecodexProviderSnapshotErrorBuffer?: Map<string, ProviderSnapshotPersistInput[]>;
+};
+
+const PROVIDER_SNAPSHOT_BUFFER_MAX_REQUESTS = 128;
+const PROVIDER_SNAPSHOT_BUFFER_MAX_ENTRIES_PER_REQUEST = 24;
+
+function getProviderSnapshotErrorBuffer(): Map<string, ProviderSnapshotPersistInput[]> {
+  const scope = globalThis as SnapshotBufferGlobal;
+  if (!scope.__routecodexProviderSnapshotErrorBuffer) {
+    scope.__routecodexProviderSnapshotErrorBuffer = new Map<string, ProviderSnapshotPersistInput[]>();
+  }
+  return scope.__routecodexProviderSnapshotErrorBuffer;
+}
+
+function shouldFlushSnapshotBuffer(stage: string): boolean {
+  const normalized = String(stage || '').trim().toLowerCase();
+  return normalized.includes('error');
+}
+
+function bufferProviderSnapshotForErrorFlush(input: ProviderSnapshotPersistInput): void {
+  const buffer = getProviderSnapshotErrorBuffer();
+  const bucket = buffer.get(input.groupRequestId) ?? [];
+  bucket.push(input);
+  if (bucket.length > PROVIDER_SNAPSHOT_BUFFER_MAX_ENTRIES_PER_REQUEST) {
+    bucket.splice(0, bucket.length - PROVIDER_SNAPSHOT_BUFFER_MAX_ENTRIES_PER_REQUEST);
+  }
+  buffer.set(input.groupRequestId, bucket);
+
+  while (buffer.size > PROVIDER_SNAPSHOT_BUFFER_MAX_REQUESTS) {
+    const oldest = buffer.keys().next().value;
+    if (!oldest) {
+      break;
+    }
+    buffer.delete(oldest);
+  }
+}
+
+async function persistProviderSnapshot(input: ProviderSnapshotPersistInput): Promise<void> {
+  try {
+    await writeSnapshotViaHooks({
+      endpoint: input.endpoint,
+      stage: input.stage,
+      requestId: input.requestId,
+      groupRequestId: input.groupRequestId,
+      providerKey: input.providerToken || undefined,
+      data: input.payload,
+      verbosity: 'verbose'
+    });
+    return;
+  } catch {
+    try {
+      const dir = path.join(resolveSnapshotBase(), input.folder, input.providerToken || '__pending__', input.groupRequestId);
+      await ensureDir(dir);
+      const safeStage = input.stage.replace(/[^\w.-]/g, '_') || 'snapshot';
+      await writeUniqueFile(dir, safeStage + '.json', JSON.stringify(input.payload, null, 2));
+    } catch {
+      // non-blocking fallback failure
+    }
+  }
+}
+
+async function flushBufferedProviderSnapshots(groupRequestId: string): Promise<void> {
+  const buffer = getProviderSnapshotErrorBuffer();
+  const batch = buffer.get(groupRequestId);
+  if (!batch || batch.length === 0) {
     return;
   }
+  buffer.delete(groupRequestId);
+  for (const entry of batch) {
+    await persistProviderSnapshot(entry);
+  }
+}
+
+function buildProviderSnapshotPersistInput(options: ProviderSnapshotWriteOptions): ProviderSnapshotPersistInput {
   const { endpoint, folder } = resolveEndpoint(options.entryEndpoint || options.url);
   const stage = options.phase;
   const requestId = normalizeRequestId(options.requestId);
@@ -165,27 +249,25 @@ export async function writeProviderSnapshot(options: {
     }
   });
 
-  try {
-    await writeSnapshotViaHooks({
-      endpoint,
-      stage,
-      requestId,
-      groupRequestId,
-      providerKey: providerToken || undefined,
-      data: payload,
-      verbosity: 'verbose'
-    });
-    return;
-  } catch {
-    try {
-      const dir = path.join(resolveSnapshotBase(), folder, providerToken || '__pending__', groupRequestId);
-      await ensureDir(dir);
-      const safeStage = stage.replace(/[^\w.-]/g, '_') || 'snapshot';
-      await writeUniqueFile(dir, `${safeStage}.json`, JSON.stringify(payload, null, 2));
-    } catch {
-      // non-blocking fallback failure
+  return { endpoint, folder, stage, requestId, groupRequestId, providerToken, payload };
+}
+
+export function __resetProviderSnapshotErrorBufferForTests(): void {
+  getProviderSnapshotErrorBuffer().clear();
+}
+
+export async function writeProviderSnapshot(options: ProviderSnapshotWriteOptions): Promise<void> {
+  const snapshot = buildProviderSnapshotPersistInput(options);
+
+  if (!runtimeFlags.snapshotsEnabled) {
+    bufferProviderSnapshotForErrorFlush(snapshot);
+    if (shouldFlushSnapshotBuffer(snapshot.stage)) {
+      await flushBufferedProviderSnapshots(snapshot.groupRequestId);
     }
+    return;
   }
+
+  await persistProviderSnapshot(snapshot);
 }
 
 type StreamSnapshotOptions = {

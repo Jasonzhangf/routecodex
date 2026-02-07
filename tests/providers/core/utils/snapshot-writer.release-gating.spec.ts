@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {
+  __resetProviderSnapshotErrorBufferForTests,
   writeClientSnapshot,
   writeProviderRetrySnapshot,
   writeRepairFeedbackSnapshot
@@ -16,6 +17,7 @@ describe('snapshot writer release gating', () => {
 
     process.env.ROUTECODEX_SNAPSHOT_DIR = tempDir;
     setRuntimeFlag('snapshotsEnabled', false);
+    __resetProviderSnapshotErrorBufferForTests();
 
     try {
       await writeProviderRetrySnapshot({
@@ -39,6 +41,7 @@ describe('snapshot writer release gating', () => {
       const entries = await fs.readdir(tempDir);
       expect(entries).toHaveLength(0);
     } finally {
+      __resetProviderSnapshotErrorBufferForTests();
       setRuntimeFlag('snapshotsEnabled', previousSnapshotFlag);
       if (previousSnapshotDir === undefined) {
         delete process.env.ROUTECODEX_SNAPSHOT_DIR;

@@ -132,4 +132,32 @@ describe('TokenFileAuthProvider (qwen) resolves tokenFile alias and auth dir fal
       // ignore
     }
   });
+
+  test('creates configured token file when explicit tokenFile path is missing', async () => {
+    const prevHome = process.env.HOME;
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-tokenfile-qwen-'));
+    process.env.HOME = tmpHome;
+
+    const configured = '~/.routecodex/auth/qwen-oauth-custom.json';
+    const resolved = path.join(tmpHome, '.routecodex', 'auth', 'qwen-oauth-custom.json');
+
+    const provider = new TokenFileAuthProvider({
+      type: 'qwen-oauth',
+      tokenFile: configured,
+      oauthProviderId: 'qwen'
+    } as any);
+
+    await provider.initialize();
+
+    expect(fs.existsSync(resolved)).toBe(true);
+    expect(fs.readFileSync(resolved, 'utf8').trim()).toBe('{}');
+    expect(provider.getStatus().isValid).toBe(false);
+
+    process.env.HOME = prevHome;
+    try {
+      fs.rmSync(tmpHome, { recursive: true, force: true });
+    } catch {
+      // ignore
+    }
+  });
 });

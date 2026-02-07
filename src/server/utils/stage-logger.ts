@@ -93,7 +93,10 @@ function shouldLogStage(scope: string, level: StageLevel, verbose: boolean): boo
   if (verbose) {
     return true;
   }
-  return scope.startsWith('response') || scope.startsWith('servertool');
+  if (scope.startsWith('response.sse')) {
+    return false;
+  }
+  return scope.startsWith('request') || scope.startsWith('servertool');
 }
 
 function parseStage(stage: string): { scope: string; action: string } {

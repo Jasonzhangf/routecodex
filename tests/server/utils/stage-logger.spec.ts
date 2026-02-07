@@ -29,7 +29,7 @@ describe('stage logger verbosity filtering', () => {
     expect(logSpy).not.toHaveBeenCalled();
   });
 
-  it('keeps response logs and only prints request id by default', async () => {
+  it('keeps request logs and only prints request id by default', async () => {
     process.env.NODE_ENV = 'development';
     delete process.env.ROUTECODEX_STAGE_LOG;
     delete process.env.ROUTECODEX_STAGE_LOG_VERBOSE;
@@ -37,13 +37,26 @@ describe('stage logger verbosity filtering', () => {
     const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
     const { logPipelineStage } = await importStageLogger();
 
-    logPipelineStage('response.dispatch.start', 'req_response', { status: 200, stream: true });
+    logPipelineStage('request.received', 'req_request', { endpoint: '/v1/responses', stream: true });
 
     expect(logSpy).toHaveBeenCalledTimes(1);
     const rendered = String(logSpy.mock.calls[0]?.[0] ?? '');
-    expect(rendered).toContain('[response.dispatch][req_response] start');
-    expect(rendered).not.toContain('status');
+    expect(rendered).toContain('[request][req_request] received');
+    expect(rendered).not.toContain('endpoint');
     expect(rendered).not.toContain('stream');
+  });
+
+  it('suppresses response sse logs by default', async () => {
+    process.env.NODE_ENV = 'development';
+    delete process.env.ROUTECODEX_STAGE_LOG;
+    delete process.env.ROUTECODEX_STAGE_LOG_VERBOSE;
+
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const { logPipelineStage } = await importStageLogger();
+
+    logPipelineStage('response.sse.stream.start', 'req_sse', { status: 200 });
+
+    expect(logSpy).not.toHaveBeenCalled();
   });
 
   it('always prints errors with details', async () => {

@@ -310,8 +310,9 @@ class BaseOAuthClient implements IOAuthClient {
     }
   }
 
+
   async initialize(): Promise<void> {
-    // 基础实现
+    await this.ensureTokenFileExists();
   }
 
   async getAccessToken(): Promise<string> {
@@ -357,13 +358,35 @@ class BaseOAuthClient implements IOAuthClient {
         this.currentToken = j;
         logOAuthDebug(`[OAuth] Token loaded from: ${this.tokenFilePath}`);
         return j;
-      } catch {
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code === 'ENOENT') {
+          await this.ensureTokenFileExists();
+        }
         // fallthrough to memory
       }
     }
     return this.currentToken;
   }
 
+  private async ensureTokenFileExists(): Promise<void> {
+    if (!this.tokenFilePath) {
+      return;
+    }
+    try {
+      const dir = path.dirname(this.tokenFilePath);
+      await fs.mkdir(dir, { recursive: true });
+      try {
+        await fs.access(this.tokenFilePath);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+          await fs.writeFile(this.tokenFilePath, '{}\n', 'utf-8');
+        }
+      }
+    } catch {
+      // best-effort bootstrap; keep existing auth flow behavior when file creation fails
+    }
+  }
   updateTokenStorage(storage: TokenStorage, tokenData: unknown): void {
     // 更新token存储
     Object.assign(storage, tokenData);

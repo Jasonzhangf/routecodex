@@ -202,6 +202,7 @@ export class TokenFileAuthProvider implements IAuthProvider {
     return this.token ? { ...this.token } : null;
   }
 
+
   // ---- helpers ----
   private pickTokenFileIfItContainsApiKey(candidatePath: string): string | null {
     try {
@@ -215,17 +216,34 @@ export class TokenFileAuthProvider implements IAuthProvider {
     }
   }
 
+  private getConfiguredProviderId(): string {
+    const providerIdRaw =
+      typeof (this.config as unknown as { oauthProviderId?: unknown }).oauthProviderId === 'string'
+        ? String((this.config as unknown as { oauthProviderId: string }).oauthProviderId).trim()
+        : '';
+    return providerIdRaw ? providerIdRaw.toLowerCase() : '';
+  }
+
+  private ensureTokenFileExists(candidatePath: string): string {
+    const filePath = this.expandHome(candidatePath);
+    try {
+      if (!fs.existsSync(filePath)) {
+        fs.mkdirSync(path.dirname(filePath), { recursive: true });
+        fs.writeFileSync(filePath, '{}\n', 'utf8');
+      }
+    } catch {
+      // best-effort bootstrap: keep original flow if file creation fails
+    }
+    return filePath;
+  }
+
   private resolveTokenFile(): string | null {
     // Prefer explicit tokenFile from config
     const tf = typeof this.config.tokenFile === 'string' ? this.config.tokenFile.trim() : '';
     if (tf) {
+      const providerId = this.getConfiguredProviderId();
       // Alias (no path separators / no .json suffix): resolve to ~/.routecodex/auth/<provider>-oauth-<seq>-<alias>.json
       if (!tf.includes('/') && !tf.includes('\\') && !tf.endsWith('.json')) {
-        const providerIdRaw =
-          typeof (this.config as unknown as { oauthProviderId?: unknown }).oauthProviderId === 'string'
-            ? String((this.config as unknown as { oauthProviderId: string }).oauthProviderId).trim()
-            : '';
-        const providerId = providerIdRaw ? providerIdRaw.toLowerCase() : '';
         if (providerId) {
           // Qwen: pin tokenFile="default" to a stable file name when present, to avoid "I reauthed but server reads another seq".
           if (providerId === 'qwen' && tf === 'default') {
@@ -242,17 +260,15 @@ export class TokenFileAuthProvider implements IAuthProvider {
           if (match) {
             return match;
           }
+
+          const aliasFallback = path.join(resolveAuthDir(), `${providerId}-oauth-1-${tf}.json`);
+          return this.ensureTokenFileExists(aliasFallback);
         }
         return null;
       }
 
       const resolved = this.expandHome(tf);
       // Qwen: allow legacy single-file token path, but fall back to auth dir token set when missing.
-      const providerIdRaw =
-        typeof (this.config as unknown as { oauthProviderId?: unknown }).oauthProviderId === 'string'
-          ? String((this.config as unknown as { oauthProviderId: string }).oauthProviderId).trim()
-          : '';
-      const providerId = providerIdRaw ? providerIdRaw.toLowerCase() : '';
       if (providerId === 'qwen') {
         try {
           if (!fs.existsSync(resolved)) {
@@ -265,14 +281,10 @@ export class TokenFileAuthProvider implements IAuthProvider {
           // ignore
         }
       }
-      return resolved;
+      return this.ensureTokenFileExists(resolved);
     }
 
-    const providerIdRaw =
-      typeof (this.config as unknown as { oauthProviderId?: unknown }).oauthProviderId === 'string'
-        ? String((this.config as unknown as { oauthProviderId: string }).oauthProviderId).trim()
-        : '';
-    const providerId = providerIdRaw ? providerIdRaw.toLowerCase() : '';
+    const providerId = this.getConfiguredProviderId();
     if (providerId === 'iflow') {
       // iFlow CLI stores an already-usable API key in ~/.iflow/settings.json (field: apiKey).
       // Prefer it and DO NOT fall back to access_token-only files (iFlow business calls require apiKey).
@@ -325,7 +337,6 @@ export class TokenFileAuthProvider implements IAuthProvider {
   private expandHome(p: string): string {
     return p.startsWith('~/') ? p.replace(/^~\//, `${process.env.HOME || ''}/`) : p;
   }
-
   private readJson(p: string): TokenPayload | null {
     try {
       const parsed = JSON.parse(fs.readFileSync(p, 'utf-8')) as unknown;
