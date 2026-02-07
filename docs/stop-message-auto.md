@@ -19,7 +19,6 @@
   - `"继续"`：自动补发的用户消息内容，内部如需引号，用 `\"` 转义。
   - `3`：本会话最多自动续写 3 轮；省略时默认 `10`。
 - 仅设置文案（默认 10 次）：`<**stopMessage:"继续"**>` → `maxRepeats = 10`。
-- 简写启用（就地续写）：`<**stopMessage:on**>继续执行`（默认 10 次）；可写 `<**stopMessage:on,3**>继续执行`。
 - 清理：`<**stopMessage:clear**>` → 清空本会话 stopMessage 状态。
 
 > 注意：这些标签仅用于路由与 servertool，不应出现在发给 provider 的文本中。

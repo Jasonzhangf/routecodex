@@ -125,26 +125,6 @@ describe('Routing instruction parsing and application', () => {
     expect(inst.stopMessageMaxRepeats).toBe(3);
   });
 
-  test('parses stopMessage mode-on shorthand with trailing text', () => {
-    const instructions = parseRoutingInstructions(buildMessages('<**stopMessage:on**>继续'));
-    expect(instructions).toHaveLength(1);
-    const inst = instructions[0] as any;
-    expect(inst.type).toBe('stopMessageSet');
-    expect(inst.stopMessageText).toBe('继续');
-    expect(inst.stopMessageStageMode).toBe('on');
-    expect(inst.stopMessageMaxRepeats).toBe(10);
-  });
-
-  test('parses stopMessage mode-on shorthand with explicit repeat and trailing text', () => {
-    const instructions = parseRoutingInstructions(buildMessages('<**stopMessage:on,3**>继续'));
-    expect(instructions).toHaveLength(1);
-    const inst = instructions[0] as any;
-    expect(inst.type).toBe('stopMessageSet');
-    expect(inst.stopMessageText).toBe('继续');
-    expect(inst.stopMessageStageMode).toBe('on');
-    expect(inst.stopMessageMaxRepeats).toBe(3);
-  });
-
   test('applies and serializes stopMessage state', () => {
     const baseState = createState();
     const instructions = parseRoutingInstructions(buildMessages('<**stopMessage:"继续",2**>'));
