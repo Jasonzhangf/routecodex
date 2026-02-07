@@ -1,12 +1,32 @@
 #!/usr/bin/env node
+import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-async function loadModule(relPath) {
-  const modulePath = pathToFileURL(path.join(ROOT, relPath)).href;
-  return import(modulePath);
+async function loadModule(relPaths) {
+  const candidates = Array.isArray(relPaths) ? relPaths : [relPaths];
+  const errors = [];
+
+  for (const relPath of candidates) {
+    const absolutePath = path.join(ROOT, relPath);
+    try {
+      await fs.access(absolutePath);
+    } catch {
+      errors.push(`${relPath}: missing`);
+      continue;
+    }
+
+    try {
+      return await import(pathToFileURL(absolutePath).href);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      errors.push(`${relPath}: ${message}`);
+    }
+  }
+
+  throw new Error(`Unable to load module from dist candidates (${errors.join('; ')})`);
 }
 
 class RecordingHttpClient {
@@ -82,8 +102,16 @@ async function main() {
     }
   };
 
-  const { HttpTransportProvider } = await loadModule('dist/providers/core/runtime/http-transport-provider.js');
-  const { attachProviderRuntimeMetadata } = await loadModule('dist/providers/core/runtime/provider-runtime-metadata.js');
+  const { HttpTransportProvider } = await loadModule([
+    'dist/providers/core/runtime/http-transport-provider.js',
+    'dist/providers/core/runtime/http-transport-provider.mjs',
+    'dist/providers/core/runtime/http-transport-provider/index.js'
+  ]);
+  const { attachProviderRuntimeMetadata } = await loadModule([
+    'dist/providers/core/runtime/provider-runtime-metadata.js',
+    'dist/providers/core/runtime/provider-runtime-metadata.mjs',
+    'dist/providers/core/runtime/provider-runtime-metadata/index.js'
+  ]);
 
   class TestProvider extends HttpTransportProvider {
     createHttpClient() {
