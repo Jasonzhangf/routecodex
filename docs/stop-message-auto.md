@@ -32,6 +32,7 @@
 - `stopMessageUsed: number` — 已执行的自动续写次数，初始为 `0`。
 - `stopMessageUpdatedAt?: number` — 最近一次解析 `<**stopMessage:"..."**>` 指令的时间戳。
 - `stopMessageLastUsedAt?: number` — 最近一次 servertool 自动补发 stopMessage 的时间戳。
+- BD 状态判断默认走真实命令（`bd --no-db list/ready --json`），失败时回退到消息启发式；可通过 `ROUTECODEX_STOPMESSAGE_BD_MODE=auto|runtime|heuristic` 配置。
 
 行为：
 

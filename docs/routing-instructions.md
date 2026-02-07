@@ -177,6 +177,9 @@ RouteCodex 支持通过用户消息中的特殊指令 `<**...**>` 来动态控�
   - `stopMessageText`：自动补发的用户消息内容；
   - `stopMessageMaxRepeats`：允许自动续写的最大次数（>=1）；
   - `stopMessageUsed`：已执行次数（从 0 开始计数）；
+- stopMessage 阶段策略的 BD 状态判定：默认优先尝试真实命令查询（`bd --no-db list/ready --json`），命令失败时回退到历史消息启发式；
+  - 可用 `ROUTECODEX_STOPMESSAGE_BD_MODE=auto|runtime|heuristic` 控制（默认 `auto`）；
+  - 可用 `ROUTECODEX_STOPMESSAGE_BD_TIMEOUT_MS`、`ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS`、`ROUTECODEX_STOPMESSAGE_BD_WORKDIR` 调整运行参数；
 - 当满足以下条件时，servertool 会自动发起后续请求：
   - 当前响应的 `choices[0].finish_reason === "stop"`；
   - 当前轮没有工具调用（`tool_calls` 为空）；

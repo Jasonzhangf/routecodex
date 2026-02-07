@@ -9,6 +9,11 @@ import {
   type RoutingInstructionState
 } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-instructions.js';
 import { buildResponsesRequestFromChat } from '../../sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.js';
+import {
+  resetStopMessageBdRuntimeCacheForTests,
+  resolveBdWorkStateFromRuntime,
+  resolveStopMessageStageDecision
+} from '../../sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-stage-policy.js';
 
 const SESSION_DIR = path.join(process.cwd(), 'tmp', 'jest-stopmessage-sessions');
 const USER_DIR = path.join(process.cwd(), 'tmp', 'jest-stopmessage-userdir');
@@ -1110,5 +1115,109 @@ describe('stop_message_auto servertool', () => {
     }
   });
 
+
+  test('bd runtime resolver reports active when in_progress exists', () => {
+    const prevMode = process.env.ROUTECODEX_STOPMESSAGE_BD_MODE;
+    const prevTtl = process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS;
+    try {
+      process.env.ROUTECODEX_STOPMESSAGE_BD_MODE = 'runtime';
+      process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS = '0';
+      resetStopMessageBdRuntimeCacheForTests();
+
+      const calls: string[][] = [];
+      const state = resolveBdWorkStateFromRuntime({
+        bdCommandRunner: (args) => {
+          calls.push(args);
+          if (args.includes('in_progress')) {
+            return { status: 0, stdout: '[{"id":"routecodex-1"}]', stderr: '' };
+          }
+          return { status: 0, stdout: '[]', stderr: '' };
+        },
+        nowMs: 100
+      });
+
+      expect(state).toBe('active');
+      expect(calls.length).toBe(1);
+      expect(calls[0]).toContain('in_progress');
+    } finally {
+      if (prevMode === undefined) {
+        delete process.env.ROUTECODEX_STOPMESSAGE_BD_MODE;
+      } else {
+        process.env.ROUTECODEX_STOPMESSAGE_BD_MODE = prevMode;
+      }
+      if (prevTtl === undefined) {
+        delete process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS;
+      } else {
+        process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS = prevTtl;
+      }
+      resetStopMessageBdRuntimeCacheForTests();
+    }
+  });
+
+  test('stage policy prefers runtime idle result over heuristic active text', () => {
+    const prevMode = process.env.ROUTECODEX_STOPMESSAGE_BD_MODE;
+    const prevTtl = process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS;
+    try {
+      process.env.ROUTECODEX_STOPMESSAGE_BD_MODE = 'runtime';
+      process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS = '0';
+      resetStopMessageBdRuntimeCacheForTests();
+
+      const decision = resolveStopMessageStageDecision({
+        baseText: '继续执行',
+        state: { stopMessageStageMode: 'on' },
+        capturedMessages: [{ role: 'tool', content: 'bd --no-db show routecodex-77\nstatus: in_progress' }],
+        bdCommandRunner: () => ({ status: 0, stdout: '[]', stderr: '' })
+      });
+
+      expect(decision.action).toBe('stop');
+      expect(decision.stopReason).toBe('bd_idle');
+      expect(decision.bdWorkState).toBe('idle');
+    } finally {
+      if (prevMode === undefined) {
+        delete process.env.ROUTECODEX_STOPMESSAGE_BD_MODE;
+      } else {
+        process.env.ROUTECODEX_STOPMESSAGE_BD_MODE = prevMode;
+      }
+      if (prevTtl === undefined) {
+        delete process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS;
+      } else {
+        process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS = prevTtl;
+      }
+      resetStopMessageBdRuntimeCacheForTests();
+    }
+  });
+
+  test('stage policy falls back to heuristic when runtime probe fails in auto mode', () => {
+    const prevMode = process.env.ROUTECODEX_STOPMESSAGE_BD_MODE;
+    const prevTtl = process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS;
+    try {
+      process.env.ROUTECODEX_STOPMESSAGE_BD_MODE = 'auto';
+      process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS = '0';
+      resetStopMessageBdRuntimeCacheForTests();
+
+      const decision = resolveStopMessageStageDecision({
+        baseText: '继续执行',
+        state: { stopMessageStageMode: 'on' },
+        capturedMessages: [{ role: 'tool', content: 'bd --no-db show routecodex-77\nstatus: in_progress' }],
+        bdCommandRunner: () => ({ status: 1, stdout: 'bd command failed', stderr: 'error' })
+      });
+
+      expect(decision.action).toBe('followup');
+      expect(decision.stage).toBe('active_continue');
+      expect(decision.bdWorkState).toBe('active');
+    } finally {
+      if (prevMode === undefined) {
+        delete process.env.ROUTECODEX_STOPMESSAGE_BD_MODE;
+      } else {
+        process.env.ROUTECODEX_STOPMESSAGE_BD_MODE = prevMode;
+      }
+      if (prevTtl === undefined) {
+        delete process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS;
+      } else {
+        process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS = prevTtl;
+      }
+      resetStopMessageBdRuntimeCacheForTests();
+    }
+  });
 
 });
