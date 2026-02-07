@@ -53,6 +53,31 @@ function isPipelineConsoleLoggingEnabled(): boolean {
   return buildInfo.mode !== 'release' || releaseOverride;
 }
 
+function isProviderDetailConsoleLoggingEnabled(): boolean {
+  return resolveBoolFromEnv(
+    process.env.ROUTECODEX_PROVIDER_LOG_VERBOSE
+      ?? process.env.RCC_PROVIDER_LOG_VERBOSE
+      ?? process.env.ROUTECODEX_PIPELINE_LOG_VERBOSE
+      ?? process.env.RCC_PIPELINE_LOG_VERBOSE,
+    false
+  );
+}
+
+function isErrorLikeAction(action: string): boolean {
+  const normalized = action.trim().toLowerCase();
+  return normalized.includes('error') || normalized.includes('fail');
+}
+
+function isProviderModule(module: string): boolean {
+  const normalized = module.trim().toLowerCase();
+  return (
+    normalized === 'provider'
+    || normalized.startsWith('provider:')
+    || normalized.startsWith('provider.')
+    || normalized.startsWith('provider-')
+  );
+}
+
 export class PipelineDebugLogger {
   private readonly options: Required<LoggerOptions>;
   private readonly requestLogs = new Map<string, DebugLogEntry[]>();
@@ -60,12 +85,14 @@ export class PipelineDebugLogger {
   private readonly transformations: TransformationLogEntry[] = [];
   private readonly providerLogs: ProviderRequestLogEntry[] = [];
   private readonly recentLogs: DebugLogEntry[] = [];
+  private readonly providerDetailConsoleLoggingEnabled: boolean;
   private colored?: ColoredLogger;
 
   constructor(_config?: unknown, options?: LoggerOptions) {
     const isDev = buildInfo.mode !== 'release';
     const consoleLoggingEnabled = isPipelineConsoleLoggingEnabled();
     this.colored = consoleLoggingEnabled ? new ColoredLogger({ isDev }) : undefined;
+    this.providerDetailConsoleLoggingEnabled = isProviderDetailConsoleLoggingEnabled();
     this.options = {
       maxEntries: options?.maxEntries ?? DEFAULT_OPTIONS.maxEntries,
       enableConsoleLogging: (options?.enableConsoleLogging ?? DEFAULT_OPTIONS.enableConsoleLogging) && consoleLoggingEnabled
@@ -73,7 +100,13 @@ export class PipelineDebugLogger {
   }
 
   logModule(module: string, action: string, data?: LogData): void {
-    if (this.colored) { this.colored.logModule(module, action, data); return; }
+    if (this.colored) {
+      if (!this.providerDetailConsoleLoggingEnabled && isProviderModule(module) && !isErrorLikeAction(action)) {
+        return;
+      }
+      this.colored.logModule(module, action, data);
+      return;
+    }
     this.record({
       timestamp: Date.now(),
       level: 'info',
@@ -109,7 +142,13 @@ export class PipelineDebugLogger {
   }
 
   logRequest(requestId: string, action: string, data?: LogData): void {
-    if (this.colored) { this.colored.logProviderRequest(requestId, action as any, data); return; }
+    if (this.colored) {
+      if (!this.providerDetailConsoleLoggingEnabled && !isErrorLikeAction(action)) {
+        return;
+      }
+      this.colored.logProviderRequest(requestId, action as any, data);
+      return;
+    }
     this.appendScoped(this.requestLogs, requestId, {
       timestamp: Date.now(),
       level: 'info',
@@ -148,7 +187,13 @@ export class PipelineDebugLogger {
   }
 
   logProviderRequest(requestId: string, action: string, request?: LogData, response?: LogData): void {
-    if (this.colored) { this.colored.logProviderRequest(requestId, action as any, { request, response }); return; }
+    if (this.colored) {
+      if (!this.providerDetailConsoleLoggingEnabled && !isErrorLikeAction(action)) {
+        return;
+      }
+      this.colored.logProviderRequest(requestId, action as any, { request, response });
+      return;
+    }
     this.providerLogs.push({
       timestamp: Date.now(),
       level: 'info',
