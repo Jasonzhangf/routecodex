@@ -164,9 +164,10 @@ RouteCodex 支持通过用户消息中的特殊指令 `<**...**>` 来动态控�
 **语法：**
 
 - 启用 / 更新自动续写：
-  - `<**stopMessage:"继续"**>` → 默认最多自动续写 1 次；
+  - `<**stopMessage:"继续"**>` → 默认最多自动续写 10 次；
   - `<**stopMessage:"继续",3**>` → 最多自动续写 3 次；
   - `<**stopMessage:<file://stopMessage/message1.md>**>` → 读取 `~/.routecodex/stopMessage/message1.md` 作为 stopMessage 文案（设置时读取并缓存到内存）；
+  - `<**stopMessage:on**>继续执行`（默认 10 次），可写 `<**stopMessage:on,3**>继续执行`；
 - 清理 stopMessage 状态：
   - `<**stopMessage:clear**>`
 

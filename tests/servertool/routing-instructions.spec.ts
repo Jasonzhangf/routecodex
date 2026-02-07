@@ -113,7 +113,7 @@ describe('Routing instruction parsing and application', () => {
     const inst = instructions[0] as any;
     expect(inst.type).toBe('stopMessageSet');
     expect(inst.stopMessageText).toBe('继续');
-    expect(inst.stopMessageMaxRepeats).toBe(1);
+    expect(inst.stopMessageMaxRepeats).toBe(10);
   });
 
   test('parses stopMessage with explicit repeat', () => {
@@ -122,6 +122,26 @@ describe('Routing instruction parsing and application', () => {
     const inst = instructions[0] as any;
     expect(inst.type).toBe('stopMessageSet');
     expect(inst.stopMessageText).toBe('继续');
+    expect(inst.stopMessageMaxRepeats).toBe(3);
+  });
+
+  test('parses stopMessage mode-on shorthand with trailing text', () => {
+    const instructions = parseRoutingInstructions(buildMessages('<**stopMessage:on**>继续'));
+    expect(instructions).toHaveLength(1);
+    const inst = instructions[0] as any;
+    expect(inst.type).toBe('stopMessageSet');
+    expect(inst.stopMessageText).toBe('继续');
+    expect(inst.stopMessageStageMode).toBe('on');
+    expect(inst.stopMessageMaxRepeats).toBe(10);
+  });
+
+  test('parses stopMessage mode-on shorthand with explicit repeat and trailing text', () => {
+    const instructions = parseRoutingInstructions(buildMessages('<**stopMessage:on,3**>继续'));
+    expect(instructions).toHaveLength(1);
+    const inst = instructions[0] as any;
+    expect(inst.type).toBe('stopMessageSet');
+    expect(inst.stopMessageText).toBe('继续');
+    expect(inst.stopMessageStageMode).toBe('on');
     expect(inst.stopMessageMaxRepeats).toBe(3);
   });
 
@@ -139,7 +159,6 @@ describe('Routing instruction parsing and application', () => {
     expect(restored.stopMessageMaxRepeats).toBe(2);
     expect(restored.stopMessageUsed).toBe(0);
   });
-
 
   test('serializes staged stopMessage metadata fields', () => {
     const baseState = createState({
@@ -176,7 +195,7 @@ describe('Routing instruction parsing and application', () => {
       expect(inst.type).toBe('stopMessageSet');
       expect(inst.stopMessageText).toContain('第一行');
       expect(inst.stopMessageText).toContain('第二行');
-      expect(inst.stopMessageMaxRepeats).toBe(1);
+      expect(inst.stopMessageMaxRepeats).toBe(10);
     } finally {
       if (prev === undefined) {
         delete process.env.ROUTECODEX_USER_DIR;
