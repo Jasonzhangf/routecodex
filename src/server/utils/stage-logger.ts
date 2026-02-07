@@ -1,6 +1,7 @@
 const truthy = new Set(['1', 'true', 'yes']);
 const falsy = new Set(['0', 'false', 'no']);
 let cachedStageLoggingFlag: boolean | null = null;
+let cachedStageVerboseFlag: boolean | null = null;
 
 const COLOR_RESET = '\x1b[0m';
 const COLOR_INFO = '\x1b[90m';
@@ -9,6 +10,14 @@ const COLOR_SUCCESS = '\x1b[32m';
 const COLOR_ERROR = '\x1b[31m';
 
 type StageLevel = 'info' | 'start' | 'success' | 'error';
+
+function resolveBoolFromEnv(value: string | undefined, fallback: boolean): boolean {
+  if (!value) {return fallback;}
+  const normalized = value.trim().toLowerCase();
+  if (truthy.has(normalized)) {return true;}
+  if (falsy.has(normalized)) {return false;}
+  return fallback;
+}
 
 function computeStageLoggingEnabled(): boolean {
   const raw = String(process.env.ROUTECODEX_STAGE_LOG || '').trim().toLowerCase();
@@ -22,6 +31,23 @@ function computeStageLoggingEnabled(): boolean {
   return nodeEnv === 'development';
 }
 
+function computeStageVerboseEnabled(): boolean {
+  return resolveBoolFromEnv(
+    process.env.ROUTECODEX_STAGE_LOG_VERBOSE
+      ?? process.env.RCC_STAGE_LOG_VERBOSE
+      ?? process.env.ROUTECODEX_PIPELINE_LOG_VERBOSE
+      ?? process.env.RCC_PIPELINE_LOG_VERBOSE,
+    false
+  );
+}
+
+function isStageVerboseEnabled(): boolean {
+  if (cachedStageVerboseFlag === null) {
+    cachedStageVerboseFlag = computeStageVerboseEnabled();
+  }
+  return cachedStageVerboseFlag;
+}
+
 export function isStageLoggingEnabled(): boolean {
   if (cachedStageLoggingFlag === null) {
     cachedStageLoggingFlag = computeStageLoggingEnabled();
@@ -33,20 +59,41 @@ export function logPipelineStage(stage: string, requestId: string, details?: Rec
   if (!isStageLoggingEnabled()) {
     return;
   }
-  const providerLabel = typeof details?.providerLabel === 'string' ? details?.providerLabel : undefined;
-  const detailPayload = providerLabel
-    ? (() => {
-        const clone = { ...details } as Record<string, unknown>;
-        delete clone.providerLabel;
-        return clone;
-      })()
-    : details;
-  const suffix = detailPayload && Object.keys(detailPayload).length ? ` ${JSON.stringify(detailPayload)}` : '';
+
   const { scope, action } = parseStage(stage);
   const level = detectStageLevel(stage);
+  const verbose = isStageVerboseEnabled();
+
+  if (!shouldLogStage(scope, level, verbose)) {
+    return;
+  }
+
+  const showDetail = verbose || level === 'error';
+  const providerLabel = showDetail && typeof details?.providerLabel === 'string' ? details?.providerLabel : undefined;
+  const detailPayload = showDetail
+    ? (providerLabel
+      ? (() => {
+          const clone = { ...details } as Record<string, unknown>;
+          delete clone.providerLabel;
+          return clone;
+        })()
+      : details)
+    : undefined;
+
+  const suffix = detailPayload && Object.keys(detailPayload).length ? ` ${JSON.stringify(detailPayload)}` : '';
   const label = `[${scope}][${requestId}] ${action}`;
   const providerTag = providerLabel ? ` ${colorizeProviderLabel(level, providerLabel)}` : '';
   console.log(`${colorize(level, label)}${providerTag}${suffix}`);
+}
+
+function shouldLogStage(scope: string, level: StageLevel, verbose: boolean): boolean {
+  if (level === 'error') {
+    return true;
+  }
+  if (verbose) {
+    return true;
+  }
+  return scope.startsWith('response') || scope.startsWith('servertool');
 }
 
 function parseStage(stage: string): { scope: string; action: string } {
