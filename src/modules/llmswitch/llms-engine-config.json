@@ -79,6 +79,72 @@
       "wasmExport": "convert_responses_sse_to_json",
       "coverage": "100%",
       "note": "1/1 blackbox tests passed"
+    },
+    {
+      "tsPath": "router/virtual-router/tool-signals",
+      "wasmExport": "tool_signals",
+      "coverage": "96.85%",
+      "note": "unit tests 96.85% coverage"
+    },
+    {
+      "tsPath": "conversion/shared/tool-session-compat",
+      "wasmExport": "tool_session_compat",
+      "coverage": "95.33%",
+      "note": "unit tests 95.33% coverage"
+    },
+    {
+      "tsPath": "sse/shared/serializers/chat-serializer",
+      "wasmExport": "sse_chat_serializer",
+      "coverage": "96.45%",
+      "note": "unit tests 96.45% coverage"
+    },
+    {
+      "tsPath": "conversion/shared/tool-argument-repairer",
+      "wasmExport": "tool_argument_repairer",
+      "coverage": "97.29%",
+      "note": "unit tests 97.29% coverage"
+    },
+    {
+      "tsPath": "conversion/shared/tool-call-utils",
+      "wasmExport": "tool_call_utils",
+      "coverage": "90.47%",
+      "note": "unit tests 90.47% coverage"
+    },
+    {
+      "tsPath": "conversion/shared/bridge-id-utils",
+      "wasmExport": "bridge_id_utils",
+      "coverage": "98.92%",
+      "note": "unit tests 98.92% coverage"
+    },
+    {
+      "tsPath": "conversion/shared/bridge-message-utils",
+      "wasmExport": "bridge_message_utils",
+      "coverage": "98.07%",
+      "note": "unit tests 98.07% coverage"
+    },
+    {
+      "tsPath": "conversion/shared/output-content-normalizer",
+      "wasmExport": "output_content_normalizer",
+      "coverage": "91.31%",
+      "note": "unit tests 91.31% coverage"
+    },
+    {
+      "tsPath": "conversion/shared/chat-output-normalizer",
+      "wasmExport": "chat_output_normalizer",
+      "coverage": "95.13%",
+      "note": "unit tests 95.13% coverage"
+    },
+    {
+      "tsPath": "conversion/shared/jsonish",
+      "wasmExport": "jsonish",
+      "coverage": "90.75%",
+      "note": "unit tests 90.75% coverage"
+    },
+    {
+      "tsPath": "sse/shared/sse-utils",
+      "wasmExport": "sse_utils",
+      "coverage": "99.57%",
+      "note": "unit tests 99.57% coverage"
     }
   ]
 }
