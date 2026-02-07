@@ -842,7 +842,7 @@ describe('stop_message_auto servertool', () => {
           messages: [
             { role: 'user', content: '先执行任务' },
             { role: 'assistant', content: '收到' },
-            { role: 'tool', content: 'bd --no-db show routecodex-77\nstatus: in_progress' }
+            { role: 'tool', content: '执行了代码修改并准备验证' }
           ]
         }
       } as any;
@@ -859,15 +859,122 @@ describe('stop_message_auto servertool', () => {
       const followup = result.execution?.followup as any;
       const ops = Array.isArray(followup?.injection?.ops) ? followup.injection.ops : [];
       const appendUserText = ops.find((entry: any) => entry?.op === 'append_user_text');
-      expect(appendUserText?.text).toContain('阶段A：先看 BD 状态');
       expect(appendUserText?.text).toContain('先执行、后汇报');
 
       const persisted = await readJsonFileUntil<{ state?: { stopMessageStage?: string; stopMessageObservationStableCount?: number } }>(
         path.join(SESSION_DIR, `session-${sessionId}.json`),
-        (data) => data?.state?.stopMessageStage === 'status_probe'
+        (data) => data?.state?.stopMessageStage === 'status_probe' || data?.state?.stopMessageStage === 'active_continue'
       );
-      expect(persisted?.state?.stopMessageStage).toBe('status_probe');
+      if (persisted?.state?.stopMessageStage === 'status_probe') {
+        expect(appendUserText?.text).toContain('阶段A：先看 BD 状态');
+      } else {
+        expect(appendUserText?.text).toContain('继续执行');
+      }
       expect(persisted?.state?.stopMessageObservationStableCount).toBe(0);
+    } finally {
+      if (prevUserDir === undefined) {
+        delete process.env.ROUTECODEX_USER_DIR;
+      } else {
+        process.env.ROUTECODEX_USER_DIR = prevUserDir;
+      }
+      if (prevStageMode === undefined) {
+        delete process.env.ROUTECODEX_STOPMESSAGE_STAGE_MODE;
+      } else {
+        process.env.ROUTECODEX_STOPMESSAGE_STAGE_MODE = prevStageMode;
+      }
+      fs.rmSync(tempUserDir, { recursive: true, force: true });
+    }
+  });
+
+
+  test('uses active-continue template when bd has in_progress', async () => {
+    const tempUserDir = fs.mkdtempSync(path.join(process.cwd(), 'tmp', 'stopmessage-stage-active-userdir-'));
+    const prevUserDir = process.env.ROUTECODEX_USER_DIR;
+    const prevStageMode = process.env.ROUTECODEX_STOPMESSAGE_STAGE_MODE;
+    try {
+      fs.mkdirSync(path.join(tempUserDir, 'stopMessage'), { recursive: true });
+      fs.writeFileSync(
+        path.join(tempUserDir, 'stopMessage', 'stage-status-check.md'),
+        '阶段A：状态确认\n{{BASE_STOP_MESSAGE}}',
+        'utf8'
+      );
+      fs.writeFileSync(
+        path.join(tempUserDir, 'stopMessage', 'stage-active-continue.md'),
+        '阶段A2：强制继续执行\n{{BASE_STOP_MESSAGE}}',
+        'utf8'
+      );
+      fs.writeFileSync(
+        path.join(tempUserDir, 'stopMessage', 'stage-loop-self-check.md'),
+        '阶段B：循环自检\n{{BASE_STOP_MESSAGE}}',
+        'utf8'
+      );
+      process.env.ROUTECODEX_USER_DIR = tempUserDir;
+      process.env.ROUTECODEX_STOPMESSAGE_STAGE_MODE = 'on';
+
+      const sessionId = 'stopmessage-spec-session-stage-active';
+      const state: RoutingInstructionState = {
+        forcedTarget: undefined,
+        stickyTarget: undefined,
+        allowedProviders: new Set(),
+        disabledProviders: new Set(),
+        disabledKeys: new Map(),
+        disabledModels: new Map(),
+        stopMessageText: '继续推进任务',
+        stopMessageMaxRepeats: 5,
+        stopMessageUsed: 0
+      };
+      writeRoutingStateForSession(sessionId, state);
+
+      const chatResponse: JsonObject = {
+        id: 'chatcmpl-stage-active',
+        object: 'chat.completion',
+        model: 'gpt-test',
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: 'assistant',
+              content: 'ok'
+            },
+            finish_reason: 'stop'
+          }
+        ]
+      };
+
+      const adapterContext: AdapterContext = {
+        requestId: 'req-stopmessage-stage-active',
+        entryEndpoint: '/v1/chat/completions',
+        providerProtocol: 'openai-chat',
+        sessionId,
+        capturedChatRequest: {
+          model: 'gpt-test',
+          messages: [
+            { role: 'user', content: '继续执行' },
+            { role: 'tool', content: 'bd --no-db show routecodex-77\nstatus: in_progress' }
+          ]
+        }
+      } as any;
+
+      const result = await runServerSideToolEngine({
+        chatResponse,
+        adapterContext,
+        entryEndpoint: '/v1/chat/completions',
+        requestId: 'req-stopmessage-stage-active',
+        providerProtocol: 'openai-chat'
+      });
+
+      expect(result.mode).toBe('tool_flow');
+      const followup = result.execution?.followup as any;
+      const ops = Array.isArray(followup?.injection?.ops) ? followup.injection.ops : [];
+      const appendUserText = ops.find((entry: any) => entry?.op === 'append_user_text');
+      expect(appendUserText?.text).toContain('阶段A2：强制继续执行');
+      expect(appendUserText?.text).toContain('继续推进任务');
+
+      const persisted = await readJsonFileUntil<{ state?: { stopMessageStage?: string } }>(
+        path.join(SESSION_DIR, `session-${sessionId}.json`),
+        (data) => data?.state?.stopMessageStage === 'active_continue'
+      );
+      expect(persisted?.state?.stopMessageStage).toBe('active_continue');
     } finally {
       if (prevUserDir === undefined) {
         delete process.env.ROUTECODEX_USER_DIR;
