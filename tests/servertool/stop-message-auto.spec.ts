@@ -75,7 +75,7 @@ describe('stop_message_auto servertool', () => {
   beforeAll(() => {
     process.env.ROUTECODEX_SESSION_DIR = SESSION_DIR;
     process.env.ROUTECODEX_USER_DIR = USER_DIR;
-    process.env.ROUTECODEX_STOPMESSAGE_STAGE_MODE = 'off';
+    process.env.ROUTECODEX_STOPMESSAGE_STAGE_MODE = 'auto';
     fs.mkdirSync(USER_DIR, { recursive: true });
   });
 
