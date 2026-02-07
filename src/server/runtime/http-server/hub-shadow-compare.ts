@@ -30,9 +30,8 @@ function clamp01(n: number): number {
 }
 
 export function resolveHubShadowCompareConfig(): HubShadowCompareConfig {
-  // Default-on: this is a black-box gate and only writes to disk when it detects a diff.
-  // Can be disabled explicitly via ROUTECODEX_UNIFIED_HUB_SHADOW_COMPARE=0.
-  const defaultEnabled = true;
+  // Default: enabled in dev, disabled in release (can be overridden via env).
+  const defaultEnabled = buildInfo.mode !== 'release';
   const enabled = resolveBoolFromEnv(process.env.ROUTECODEX_UNIFIED_HUB_SHADOW_COMPARE, defaultEnabled);
   const sampleRate = clamp01(resolveNumberFromEnv(process.env.ROUTECODEX_UNIFIED_HUB_SHADOW_COMPARE_SAMPLE_RATE, 1));
   const baselineModeRaw = String(process.env.ROUTECODEX_UNIFIED_HUB_SHADOW_BASELINE_MODE || 'off').trim().toLowerCase();

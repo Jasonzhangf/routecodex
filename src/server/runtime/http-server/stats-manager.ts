@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { buildInfo } from '../../../build-info.js';
 
 type UsageShape = {
   prompt_tokens?: number;
@@ -79,6 +80,34 @@ export type StatsPersistOptions = {
 
 const DEFAULT_STATS_LOG_PATH = path.join(os.homedir(), '.routecodex', 'logs', 'provider-stats.jsonl');
 
+function resolveBoolFromEnv(value: string | undefined, fallback: boolean): boolean {
+  if (!value) {
+    return fallback;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) {
+    return true;
+  }
+  if (['0', 'false', 'no', 'off'].includes(normalized)) {
+    return false;
+  }
+  return fallback;
+}
+
+function isStatsEnabledByDefault(): boolean {
+  return resolveBoolFromEnv(
+    process.env.ROUTECODEX_STATS_ENABLED ?? process.env.RCC_STATS_ENABLED,
+    buildInfo.mode !== 'release'
+  );
+}
+
+function isStatsVerboseEnabled(enabled: boolean): boolean {
+  return resolveBoolFromEnv(
+    process.env.ROUTECODEX_STATS_VERBOSE ?? process.env.RCC_STATS_VERBOSE,
+    enabled && buildInfo.mode !== 'release'
+  );
+}
+
 export class StatsManager {
   private readonly inflight = new Map<string, ProviderSample>();
   private readonly buckets = new Map<string, ProviderStatsBucket>();
@@ -87,6 +116,8 @@ export class StatsManager {
   private readonly toolProviderTotals = new Map<string, { providerKey: string; model?: string; totalCalls: number; totalResponses: number }>();
   private totalToolCalls = 0;
   private totalToolResponses = 0;
+  private readonly enabled: boolean;
+  private readonly verboseLogging: boolean;
   private statsLogPath: string;
   private historicalBuckets = new Map<string, ProviderStatsBucket>();
   private historicalToolAggregate = new Map<string, ToolStatsBucket>();
@@ -102,12 +133,16 @@ export class StatsManager {
   private historicalLoaded = false;
 
   constructor() {
+    this.enabled = isStatsEnabledByDefault();
+    this.verboseLogging = isStatsVerboseEnabled(this.enabled);
     this.statsLogPath = this.resolveLogPath();
-    this.loadHistoricalFromDisk(this.statsLogPath, true);
+    if (this.enabled) {
+      this.loadHistoricalFromDisk(this.statsLogPath, true);
+    }
   }
 
   recordRequestStart(requestId: string): void {
-    if (!requestId) {
+    if (!this.enabled || !requestId) {
       return;
     }
     this.inflight.set(requestId, {
@@ -119,7 +154,7 @@ export class StatsManager {
     requestId: string,
     meta: { providerKey?: string; providerType?: string; model?: string }
   ): void {
-    if (!requestId) {
+    if (!this.enabled || !requestId) {
       return;
     }
     const sample = this.inflight.get(requestId);
@@ -139,7 +174,7 @@ export class StatsManager {
     requestId: string,
     options?: { usage?: UsageShape; error?: boolean }
   ): void {
-    if (!requestId) {
+    if (!this.enabled || !requestId) {
       return;
     }
     const sample = this.inflight.get(requestId);
@@ -186,6 +221,9 @@ export class StatsManager {
     meta: { providerKey?: string; model?: string },
     payload: unknown
   ): void {
+    if (!this.enabled) {
+      return;
+    }
     const providerKey =
       typeof meta.providerKey === 'string' && meta.providerKey.trim() ? meta.providerKey.trim() : '';
     if (!providerKey) {
@@ -259,6 +297,13 @@ export class StatsManager {
   }
 
   snapshot(uptimeMs: number): StatsSnapshot {
+    if (!this.enabled) {
+      return {
+        generatedAt: Date.now(),
+        uptimeMs,
+        totals: []
+      };
+    }
     const totals: ProviderStatsView[] = Array.from(this.buckets.values()).map(bucket => ({
       ...bucket,
       averageLatencyMs: bucket.requestCount ? bucket.totalLatencyMs / bucket.requestCount : 0,
@@ -276,8 +321,15 @@ export class StatsManager {
   }
 
   logSummary(uptimeMs: number): StatsSnapshot {
-    this.ensureHistoricalLoaded();
     const snapshot = this.snapshot(uptimeMs);
+    if (!this.enabled) {
+      return snapshot;
+    }
+    this.ensureHistoricalLoaded();
+    this.mergeSnapshotIntoHistorical(snapshot);
+    if (!this.verboseLogging) {
+      return snapshot;
+    }
     if (!snapshot.totals.length) {
       console.log('[Stats] No provider activity recorded');
       return snapshot;
@@ -309,11 +361,13 @@ export class StatsManager {
       );
     }
     this.logToolSummary(snapshot.tools);
-    this.mergeSnapshotIntoHistorical(snapshot);
     return snapshot;
   }
 
   async persistSnapshot(snapshot: StatsSnapshot, options?: StatsPersistOptions): Promise<void> {
+    if (!this.enabled) {
+      return;
+    }
     try {
       const logPath = this.normalizeLogPath(options?.logPath);
       await fs.mkdir(path.dirname(logPath), { recursive: true });
@@ -332,6 +386,9 @@ export class StatsManager {
    * 打印历史 provider-stats 聚合（内存中实时维护，异常退出前也能看到历史）。
    */
   async logHistoricalSummary(options?: { logPath?: string }): Promise<void> {
+    if (!this.enabled || !this.verboseLogging) {
+      return;
+    }
     if (options?.logPath && options.logPath.trim()) {
       this.normalizeLogPath(options.logPath);
     } else {
@@ -341,6 +398,14 @@ export class StatsManager {
   }
 
   snapshotHistorical(): HistoricalStatsSnapshot {
+    if (!this.enabled) {
+      return {
+        generatedAt: Date.now(),
+        snapshotCount: 0,
+        sampleCount: 0,
+        totals: []
+      };
+    }
     this.ensureHistoricalLoaded();
     const totals: ProviderStatsView[] = Array.from(this.historicalBuckets.values()).map(bucket => ({
       ...bucket,
@@ -753,7 +818,7 @@ export class StatsManager {
   }
 
   private ensureHistoricalLoaded(): void {
-    if (this.historicalLoaded) {
+    if (!this.enabled || this.historicalLoaded) {
       return;
     }
     this.loadHistoricalFromDisk(this.statsLogPath, true);

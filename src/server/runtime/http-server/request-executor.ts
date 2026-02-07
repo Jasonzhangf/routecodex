@@ -21,6 +21,7 @@ import {
   createSnapshotRecorder as bridgeCreateSnapshotRecorder,
 } from '../../../modules/llmswitch/bridge.js';
 import { ensureHubPipeline, runHubPipeline } from './executor-pipeline.js';
+import { buildInfo } from '../../../build-info.js';
 
 export type RequestExecutorDeps = {
   runtimeManager: ProviderRuntimeManager;
@@ -36,6 +37,27 @@ export interface RequestExecutor {
 
 const DEFAULT_MAX_PROVIDER_ATTEMPTS = 6;
 const DEFAULT_ANTIGRAVITY_MAX_PROVIDER_ATTEMPTS = 20;
+
+function resolveBoolFromEnv(value: string | undefined, fallback: boolean): boolean {
+  if (!value) {
+    return fallback;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) {
+    return true;
+  }
+  if (['0', 'false', 'no', 'off'].includes(normalized)) {
+    return false;
+  }
+  return fallback;
+}
+
+function isUsageLoggingEnabled(): boolean {
+  return resolveBoolFromEnv(
+    process.env.ROUTECODEX_USAGE_LOG ?? process.env.RCC_USAGE_LOG,
+    buildInfo.mode !== 'release'
+  );
+}
 
 function resolveMaxProviderAttempts(): number {
   const raw = String(
@@ -913,7 +935,7 @@ export class HubRequestExecutor implements RequestExecutor {
     requestId: string,
     info: { providerKey?: string; model?: string; usage?: UsageMetrics; latencyMs: number }
   ): void {
-    if (process.env.ROUTECODEX_USAGE_LOG === '0') {
+    if (!isUsageLoggingEnabled()) {
       return;
     }
     const providerLabel = this.buildProviderLabel(info.providerKey, info.model) ?? '-';

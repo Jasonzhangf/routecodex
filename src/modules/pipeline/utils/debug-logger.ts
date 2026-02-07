@@ -1,4 +1,5 @@
 import type { LogData } from '../../../types/common-types.js';
+import { buildInfo } from '../../../build-info.js';
 import { ColoredLogger } from './colored-logger.js';
 
 export type DebugLogEntry = {
@@ -30,6 +31,28 @@ const DEFAULT_OPTIONS: Required<LoggerOptions> = {
   enableConsoleLogging: false
 };
 
+function resolveBoolFromEnv(value: string | undefined, fallback: boolean): boolean {
+  if (!value) {
+    return fallback;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) {
+    return true;
+  }
+  if (['0', 'false', 'no', 'off'].includes(normalized)) {
+    return false;
+  }
+  return fallback;
+}
+
+function isPipelineConsoleLoggingEnabled(): boolean {
+  const releaseOverride = resolveBoolFromEnv(
+    process.env.ROUTECODEX_PIPELINE_LOG_VERBOSE ?? process.env.RCC_PIPELINE_LOG_VERBOSE,
+    false
+  );
+  return buildInfo.mode !== 'release' || releaseOverride;
+}
+
 export class PipelineDebugLogger {
   private readonly options: Required<LoggerOptions>;
   private readonly requestLogs = new Map<string, DebugLogEntry[]>();
@@ -40,11 +63,12 @@ export class PipelineDebugLogger {
   private colored?: ColoredLogger;
 
   constructor(_config?: unknown, options?: LoggerOptions) {
-    const isDev = String(process.env.BUILD_MODE || process.env.RCC_BUILD_MODE || 'release').toLowerCase() === 'dev';
-    this.colored = new ColoredLogger({ isDev });
+    const isDev = buildInfo.mode !== 'release';
+    const consoleLoggingEnabled = isPipelineConsoleLoggingEnabled();
+    this.colored = consoleLoggingEnabled ? new ColoredLogger({ isDev }) : undefined;
     this.options = {
       maxEntries: options?.maxEntries ?? DEFAULT_OPTIONS.maxEntries,
-      enableConsoleLogging: options?.enableConsoleLogging ?? DEFAULT_OPTIONS.enableConsoleLogging
+      enableConsoleLogging: (options?.enableConsoleLogging ?? DEFAULT_OPTIONS.enableConsoleLogging) && consoleLoggingEnabled
     };
   }
 

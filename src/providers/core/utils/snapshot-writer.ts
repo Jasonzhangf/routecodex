@@ -314,6 +314,9 @@ export async function writeProviderRetrySnapshot(options: {
   providerKey?: string;
   providerId?: string;
 }): Promise<void> {
+  if (!runtimeFlags.snapshotsEnabled) {
+    return;
+  }
   const { endpoint, folder } = resolveEndpoint(options.entryEndpoint || options.url);
   const stage = options.type === 'request' ? 'provider-request.retry' : 'provider-response.retry';
   const requestId = normalizeRequestId(options.requestId);
@@ -358,6 +361,9 @@ export async function writeRepairFeedbackSnapshot(options: {
   providerId?: string;
   groupRequestId?: string;
 }): Promise<void> {
+  if (!runtimeFlags.snapshotsEnabled) {
+    return;
+  }
   try {
     // const requestId = normalizeRequestId(options.requestId);
     const { folder } = resolveEndpoint(options.entryEndpoint);
@@ -387,6 +393,9 @@ export async function writeClientSnapshot(options: {
   metadata?: Record<string, unknown>;
   providerKey?: string;
 }): Promise<void> {
+  if (!runtimeFlags.snapshotsEnabled) {
+    return;
+  }
   try {
     const stage: ClientPhase = 'client-request';
     const { endpoint, folder } = resolveEndpoint(options.entryEndpoint);
