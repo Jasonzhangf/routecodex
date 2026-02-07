@@ -54,7 +54,7 @@ describe('gemini_empty_reply_continue servertool', () => {
     });
 
     expect(orchestration.executed).toBe(true);
-    expect(orchestration.flowId).toBe('gemini_empty_reply_continue');
+    expect(orchestration.flowId).toBe('empty_reply_continue');
     const followupMeta = sawFollowupPayload?.metadata as any;
     const followupRt = followupMeta?.__rt ?? followupMeta;
     expect(followupRt?.serverToolFollowup).toBe(true);

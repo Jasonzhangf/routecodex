@@ -105,9 +105,28 @@ async function runOnce(args: {
   });
 }
 
+function normalizeDynamicClockHints<T>(value: T): T {
+  if (typeof value === 'string') {
+    return value
+      .replace(/\[Time\/Date\]: utc=`[^`]+` local=`[^`]+` tz=`[^`]+` nowMs=`[^`]+` ntpOffsetMs=`[^`]+`/g, '[Time/Date]: <normalized>')
+      .replace(/\[Clock\]: utc=`[^`]+` local=`[^`]+` tz=`[^`]+` nowMs=`[^`]+` ntpOffsetMs=`[^`]+`/g, '[Clock]: <normalized>') as T;
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) => normalizeDynamicClockHints(entry)) as T;
+  }
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+      out[key] = normalizeDynamicClockHints(child);
+    }
+    return out as T;
+  }
+  return value;
+}
+
 function stableSubset(result: any) {
   return {
-    providerPayload: result?.providerPayload,
+    providerPayload: normalizeDynamicClockHints(result?.providerPayload),
     target: {
       providerKey: result?.target?.providerKey,
       providerType: result?.target?.providerType,

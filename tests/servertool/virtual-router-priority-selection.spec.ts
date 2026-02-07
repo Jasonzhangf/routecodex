@@ -57,7 +57,7 @@ describe('virtual-router priority pool selection', () => {
     }
   });
 
-  test('priority pools can be shifted by quota selectionPenalty (soft)', () => {
+  test('priority mode keeps strict group preference despite selectionPenalty', () => {
     const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
     const primary = 'mock1.primary.gpt-5.2';
     const secondary = 'mock2.secondary.gpt-5.2';
@@ -69,11 +69,11 @@ describe('virtual-router priority pool selection', () => {
             providerKey,
             inPool: true,
             priorityTier: 100,
-            selectionPenalty: 9,
+            selectionPenalty: 50,
             cooldownUntil: null,
             blacklistUntil: null,
             lastErrorAtMs: Date.now(),
-            consecutiveErrorCount: 9
+            consecutiveErrorCount: 50
           };
         }
         if (providerKey === secondary) {
@@ -129,18 +129,6 @@ describe('virtual-router priority pool selection', () => {
       };
 
       expect(engine.route(request, metadata).target.providerKey).toBe(primary);
-
-      // Increase penalty until it cancels the 10-point group gap: 100 - 10 == 90.
-      const quotaViewPenalty10 = (providerKey: string) => {
-        const entry = quotaView(providerKey);
-        if (entry && providerKey === primary) {
-          return { ...entry, selectionPenalty: 10, consecutiveErrorCount: 10 };
-        }
-        return entry;
-      };
-      engine.updateDeps({ quotaView: quotaViewPenalty10 });
-
-      expect(engine.route(request, metadata).target.providerKey).toBe(secondary);
     } finally {
       logSpy.mockRestore();
     }
