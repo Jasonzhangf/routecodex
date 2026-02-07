@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { buildInfo } from '../../../build-info.js';
 import { writeErrorsampleJson } from '../../../utils/errorsamples.js';
 import { resolveLlmswitchCoreVersion } from '../../../utils/runtime-versions.js';
@@ -29,9 +32,48 @@ function clamp01(n: number): number {
   return n;
 }
 
+
+let cachedRuntimePackageName: string | undefined;
+
+function resolveRuntimePackageName(): string | undefined {
+  if (cachedRuntimePackageName !== undefined) {
+    return cachedRuntimePackageName;
+  }
+
+  const envName = String(process.env.ROUTECODEX_PACKAGE_NAME || process.env.npm_package_name || '').trim();
+  if (envName) {
+    cachedRuntimePackageName = envName;
+    return cachedRuntimePackageName;
+  }
+
+  try {
+    let currentDir = path.dirname(fileURLToPath(import.meta.url));
+    for (let i = 0; i < 8; i += 1) {
+      const pkgPath = path.join(currentDir, 'package.json');
+      if (fs.existsSync(pkgPath)) {
+        const parsed = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as { name?: unknown };
+        if (typeof parsed.name === 'string' && parsed.name.trim()) {
+          cachedRuntimePackageName = parsed.name.trim();
+          return cachedRuntimePackageName;
+        }
+      }
+      const parent = path.dirname(currentDir);
+      if (!parent || parent === currentDir) {break;}
+      currentDir = parent;
+    }
+  } catch {
+    // ignore: keep undefined fallback
+  }
+
+  cachedRuntimePackageName = '';
+  return undefined;
+}
+
 export function resolveHubShadowCompareConfig(): HubShadowCompareConfig {
-  // Default: enabled in dev, disabled in release (can be overridden via env).
-  const defaultEnabled = buildInfo.mode !== 'release';
+  // Default: enabled only for rccx package (can be overridden via env).
+  const runtimePackageName = resolveRuntimePackageName();
+  const isRccx = runtimePackageName === '@jsonstudio/rccx';
+  const defaultEnabled = isRccx;
   const enabled = resolveBoolFromEnv(process.env.ROUTECODEX_UNIFIED_HUB_SHADOW_COMPARE, defaultEnabled);
   const sampleRate = clamp01(resolveNumberFromEnv(process.env.ROUTECODEX_UNIFIED_HUB_SHADOW_COMPARE_SAMPLE_RATE, 1));
   const baselineModeRaw = String(process.env.ROUTECODEX_UNIFIED_HUB_SHADOW_BASELINE_MODE || 'off').trim().toLowerCase();
