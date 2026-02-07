@@ -218,6 +218,9 @@ export function registerCredentialRoutes(app: Application, options: DaemonAdminR
     const alias = typeof body?.alias === 'string' && body.alias.trim() ? body.alias.trim() : '';
     const openBrowser = body?.openBrowser !== false;
     const forceReauthorize = body?.forceReauthorize === true;
+    const modeRaw = typeof body?.mode === 'string' ? body.mode.trim().toLowerCase() : 'manual';
+    const mode: 'manual' | 'auto' = modeRaw === 'auto' ? 'auto' : 'manual';
+    const headful = body?.headful === true;
     if (!provider) {
       res.status(400).json({ error: { message: 'provider is required', code: 'bad_request' } });
       return;
@@ -277,6 +280,9 @@ export function registerCredentialRoutes(app: Application, options: DaemonAdminR
       }
 
       const prevDevMode = process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
+      const prevAutoMode = process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
+      const prevAutoConfirm = process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM;
+      const prevAccountText = process.env.ROUTECODEX_CAMOUFOX_ACCOUNT_TEXT;
       const restoreDevMode = () => {
         if (prevDevMode === undefined) {
           delete process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
@@ -284,26 +290,59 @@ export function registerCredentialRoutes(app: Application, options: DaemonAdminR
           process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = prevDevMode;
         }
       };
-      // For explicit user-triggered authorization, prefer a headed Camoufox window so the user
-      // can complete login/2FA if needed. Auto flow still runs; failures fall back to manual assist.
-      if (openBrowser && !process.env.ROUTECODEX_CAMOUFOX_DEV_MODE) {
+      const restoreOauthModeEnv = () => {
+        if (prevAutoMode === undefined) {
+          delete process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
+        } else {
+          process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE = prevAutoMode;
+        }
+        if (prevAutoConfirm === undefined) {
+          delete process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM;
+        } else {
+          process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM = prevAutoConfirm;
+        }
+        if (prevAccountText === undefined) {
+          delete process.env.ROUTECODEX_CAMOUFOX_ACCOUNT_TEXT;
+        } else {
+          process.env.ROUTECODEX_CAMOUFOX_ACCOUNT_TEXT = prevAccountText;
+        }
+      };
+
+      // Manual mode must not carry auto flags from any previous flow.
+      if (mode === 'manual') {
+        delete process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
+        delete process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM;
+        delete process.env.ROUTECODEX_CAMOUFOX_ACCOUNT_TEXT;
+      }
+
+      // Manual flow defaults to headed browser; auto flow only goes headed when debug is requested.
+      const shouldForceHeadful = openBrowser && (mode === 'manual' || headful);
+      if (shouldForceHeadful && !process.env.ROUTECODEX_CAMOUFOX_DEV_MODE) {
         process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = '1';
       }
       try {
-        await withOAuthRepairEnv(provider, async () => {
+        const runEnsure = async () => {
           await ensureValidOAuthToken(provider, auth, {
             openBrowser,
             forceReauthorize,
             forceReacquireIfRefreshFails: true
           });
-        });
+        };
+
+        if (mode === 'auto') {
+          await withOAuthRepairEnv(provider, runEnsure);
+        } else {
+          await runEnsure();
+        }
       } finally {
         restoreDevMode();
+        restoreOauthModeEnv();
       }
       res.status(200).json({
         ok: true,
         provider,
         alias,
+        mode,
         tokenFile: typeof auth.tokenFile === 'string' ? auth.tokenFile : null
       });
     } catch (error: unknown) {

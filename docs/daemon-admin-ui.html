@@ -557,6 +557,40 @@
         color: rgba(255, 255, 255, 0.82);
       }
 
+
+      .auth-selection-summary {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 6px;
+      }
+
+      .auth-mode-panels {
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 10px;
+        background: rgba(0, 0, 0, 0.16);
+        margin-bottom: 10px;
+      }
+
+      .auth-mode-panel .section-sub {
+        margin-bottom: 8px;
+      }
+
+      .auth-verify-url {
+        margin: 8px 0;
+        white-space: pre-wrap;
+        word-break: break-all;
+      }
+
+      .auth-mode-tabs {
+        margin: 10px 0;
+      }
+
+      .auth-mode-tabs .tab {
+        min-width: 120px;
+      }
+
       .log {
         white-space: pre-wrap;
         font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
@@ -1052,9 +1086,9 @@
         </section>
 
         <section id="panelCredentials" data-panel="credentials" style="display:none;">
-          <div class="grid">
+          <div class="grid grid-wide-right">
             <div class="card" style="box-shadow:none;">
-              <p class="section-title">Credentials</p>
+              <p class="section-title">Auth Inventory</p>
               <p class="section-sub">
                 Token files + API key authfiles in <span class="mono">~/.routecodex/auth</span>.
               </p>
@@ -1079,10 +1113,11 @@
             </div>
 
             <div class="card" style="box-shadow:none;">
-              <p class="section-title">OAuth / Browser settings</p>
+              <p class="section-title">Auth Workbench</p>
               <p class="section-sub">
-                Set <span class="mono">ROUTECODEX_OAUTH_BROWSER</span> via config so “Authorize” can auto-open with Camoufox.
+                Manual and Auto flows are isolated. Use Manual for explicit user-driven login; use Auto only for provider auto-mode replay.
               </p>
+
               <div class="row" style="margin-bottom: 10px;">
                 <label for="oauthBrowserSelect">oauthBrowser</label>
                 <select id="oauthBrowserSelect">
@@ -1092,8 +1127,8 @@
                 <button id="saveOauthBrowserBtn" class="primary">Save</button>
               </div>
 
-              <p class="section-title" style="margin-top: 10px;">Authorize OAuth</p>
-              <div class="row" style="margin-bottom: 10px;">
+              <p class="section-title" style="margin-top: 10px;">Auth Context</p>
+              <div class="row" style="margin-bottom: 8px;">
                 <label for="oauthProviderSelect">provider</label>
                 <select id="oauthProviderSelect">
                   <option value="qwen">qwen</option>
@@ -1104,13 +1139,52 @@
                 <label for="oauthAuthAliasInput">alias</label>
                 <input id="oauthAuthAliasInput" type="text" placeholder="default" style="width: 240px;" />
               </div>
-              <div id="oauthAuthIssueHint" class="notice" style="display:none; margin-bottom: 10px; white-space: pre-wrap;"></div>
-              <div class="row" style="margin-bottom: 10px;">
-                <label><input id="oauthOpenBrowser" type="checkbox" checked /> open browser</label>
-                <label><input id="oauthForceReauth" type="checkbox" /> force reauthorize</label>
-                <button id="oauthAuthorizeBtn" class="primary">Authorize</button>
+              <div class="auth-selection-summary" style="margin-bottom: 10px;">
+                <span id="oauthSelectionStatusPill" class="pill">status: —</span>
+                <span id="oauthSelectionExpiryPill" class="pill">expires: —</span>
+                <span id="oauthSelectionIssuePill" class="pill">issue: —</span>
               </div>
 
+              <div class="tabs auth-mode-tabs">
+                <button id="oauthModeManualBtn" class="tab active" type="button">Manual Auth</button>
+                <button id="oauthModeAutoBtn" class="tab" type="button">Auto Auth</button>
+              </div>
+
+              <div class="auth-mode-panels">
+                <div id="oauthManualPanel" class="auth-mode-panel">
+                  <p class="section-sub">Pure manual mode (no auto selector / no auto confirm injection).</p>
+                  <div class="row" style="margin-bottom: 6px;">
+                    <label><input id="oauthManualOpenBrowser" type="checkbox" checked /> open browser</label>
+                    <label><input id="oauthManualForceReauth" type="checkbox" checked /> force reauthorize</label>
+                    <label><input id="oauthManualHeadful" type="checkbox" checked /> headed window</label>
+                    <button id="oauthAuthorizeManualBtn" class="primary" type="button">Start Manual Auth</button>
+                  </div>
+                </div>
+                <div id="oauthAutoPanel" class="auth-mode-panel" style="display:none;">
+                  <p class="section-sub">Auto mode (provider-specific Camoufox auto-mode, fallback handled by runtime).</p>
+                  <div class="row" style="margin-bottom: 6px;">
+                    <label><input id="oauthAutoOpenBrowser" type="checkbox" checked /> open browser</label>
+                    <label><input id="oauthAutoForceReauth" type="checkbox" checked /> force reauthorize</label>
+                    <label><input id="oauthAutoHeadful" type="checkbox" /> debug headful</label>
+                    <button id="oauthAuthorizeAutoBtn" class="primary" type="button">Run Auto Auth</button>
+                  </div>
+                </div>
+              </div>
+
+              <div id="oauthAuthIssueHint" class="notice" style="display:none; margin-bottom: 10px; white-space: pre-wrap;"></div>
+
+              <div id="oauthVerifyCenter" class="notice" style="display:none; margin-bottom: 10px;">
+                <p class="section-title" style="margin-bottom: 4px;">Verify Center</p>
+                <p class="section-sub" style="margin-bottom: 6px;">If upstream requires account verification, complete it here before re-authorizing.</p>
+                <div id="oauthVerifyUrl" class="mono auth-verify-url">—</div>
+                <div class="row">
+                  <button id="oauthVerifyOpenBtn" type="button">Open Verify in Camoufox</button>
+                  <button id="oauthVerifyCopyBtn" type="button">Copy Verify URL</button>
+                  <button id="oauthVerifyRecheckBtn" type="button">Recheck Status</button>
+                </div>
+              </div>
+
+              <p class="section-title" style="margin-top: 10px;">Run Console</p>
               <div id="credentialOpLog" class="log" style="display:none;"></div>
             </div>
           </div>
@@ -1283,23 +1357,25 @@
     <script>
       const $ = (id) => document.getElementById(id);
 			      const UI = {
-			        selectedProviderId: "",
-			        lastUnauthorizedToastAt: 0,
-			        adminAuth: null,
+              selectedProviderId: "",
+              lastUnauthorizedToastAt: 0,
+              adminAuth: null,
               controlSnapshot: null,
               controlSnapshotUpdatedAt: 0,
-			        quotaProviders: [],
-			        quotaProvidersUpdatedAt: 0,
-			        quotaProviderMap: null,
+              quotaProviders: [],
+              quotaProvidersUpdatedAt: 0,
+              quotaProviderMap: null,
               quotaSelection: new Set(),
               quotaRenderedVisibleKeys: [],
               quotaRenderedGroups: new Map(),
-			        routingTargets: null,
-			        routingTargetsUpdatedAt: 0,
-			        routingSources: [],
-			        routingSourcesUpdatedAt: 0,
-			        routingLocation: "virtualrouter.routing"
-		      };
+              routingTargets: null,
+              routingTargetsUpdatedAt: 0,
+              routingSources: [],
+              routingSourcesUpdatedAt: 0,
+              routingLocation: "virtualrouter.routing",
+              credentials: [],
+              oauthMode: "manual"
+            };
       let toastTimer = null;
 
       function toast(msg, kind = "err") {
@@ -2385,6 +2461,112 @@
         return null;
       }
 
+      function findCredentialForSelection(providerRaw, aliasRaw) {
+        const provider = textOf(providerRaw || "").trim().toLowerCase();
+        const alias = textOf(aliasRaw || "default").trim().toLowerCase() || "default";
+        const list = Array.isArray(UI.credentials) ? UI.credentials : [];
+        for (const item of list) {
+          const itemProvider = textOf(item && item.provider ? item.provider : "").trim().toLowerCase();
+          const itemAlias = textOf(item && item.alias ? item.alias : "default").trim().toLowerCase() || "default";
+          const kind = textOf(item && item.kind ? item.kind : "").trim().toLowerCase();
+          if (kind !== "oauth") continue;
+          if (itemProvider === provider && itemAlias === alias) {
+            return item;
+          }
+        }
+        return null;
+      }
+
+      function formatCredentialExpiry(cred) {
+        if (!cred || cred.expiresInSec == null) return "—";
+        const sec = Number(cred.expiresInSec);
+        if (!Number.isFinite(sec)) return "—";
+        if (sec <= 0) return "expired";
+        if (sec < 60) return `${sec}s`;
+        const min = Math.round(sec / 60);
+        if (min < 60) return `${min}m`;
+        const hour = Math.round(min / 60);
+        return `${hour}h`;
+      }
+
+      function setOauthMode(modeRaw) {
+        const mode = modeRaw === "auto" ? "auto" : "manual";
+        UI.oauthMode = mode;
+        const manualBtn = $("oauthModeManualBtn");
+        const autoBtn = $("oauthModeAutoBtn");
+        const manualPanel = $("oauthManualPanel");
+        const autoPanel = $("oauthAutoPanel");
+        if (manualBtn) manualBtn.classList.toggle("active", mode === "manual");
+        if (autoBtn) autoBtn.classList.toggle("active", mode === "auto");
+        if (manualPanel) manualPanel.style.display = mode === "manual" ? "block" : "none";
+        if (autoPanel) autoPanel.style.display = mode === "auto" ? "block" : "none";
+      }
+
+      function updateOauthAuthIssueHint() {
+        const issueHint = $("oauthAuthIssueHint");
+        const verifyCenter = $("oauthVerifyCenter");
+        const verifyUrlEl = $("oauthVerifyUrl");
+        const provider = textOf($("oauthProviderSelect").value || "").trim().toLowerCase();
+        const alias = textOf($("oauthAuthAliasInput").value || "default").trim().toLowerCase() || "default";
+        const issue = findAuthIssueForProviderAlias(provider, alias);
+        const cred = findCredentialForSelection(provider, alias);
+
+        const statusPill = $("oauthSelectionStatusPill");
+        const expiryPill = $("oauthSelectionExpiryPill");
+        const issuePill = $("oauthSelectionIssuePill");
+        if (statusPill) {
+          statusPill.textContent = `status: ${cred ? textOf(cred.status || "—") : "not found"}`;
+          statusPill.className = "pill";
+          const statusRaw = textOf(cred && cred.status ? cred.status : "").trim().toLowerCase();
+          if (statusRaw === "valid") statusPill.classList.add("ok");
+          else if (statusRaw === "expired" || statusRaw === "invalid") statusPill.classList.add("bad");
+          else if (statusRaw) statusPill.classList.add("warn");
+        }
+        if (expiryPill) {
+          expiryPill.textContent = `expires: ${formatCredentialExpiry(cred)}`;
+          expiryPill.className = "pill";
+          const exp = Number(cred && cred.expiresInSec != null ? cred.expiresInSec : NaN);
+          if (Number.isFinite(exp) && exp > 0 && exp < 600) {
+            expiryPill.classList.add("warn");
+          }
+        }
+        if (issuePill) {
+          const hasIssue = Boolean(issue);
+          issuePill.textContent = hasIssue ? "issue: verify required" : "issue: —";
+          issuePill.className = `pill${hasIssue ? " bad" : ""}`;
+        }
+
+        if (!issue) {
+          if (issueHint) {
+            issueHint.style.display = "none";
+            issueHint.textContent = "";
+          }
+          if (verifyCenter) verifyCenter.style.display = "none";
+          if (verifyUrlEl) verifyUrlEl.textContent = "—";
+          return null;
+        }
+
+        if (issue.kind === "google_account_verification") {
+          if (issueHint) {
+            issueHint.textContent =
+              `⚠ Google requires account verification for alias "${alias}".\n` +
+              `Use Verify Center to open the exact verify URL in Camoufox, then re-run auth.`;
+            issueHint.style.display = "block";
+          }
+          if (verifyCenter) verifyCenter.style.display = "block";
+          if (verifyUrlEl) verifyUrlEl.textContent = issue.url || "(missing verify url from quota state)";
+          return issue;
+        }
+
+        if (issueHint) {
+          issueHint.style.display = "none";
+          issueHint.textContent = "";
+        }
+        if (verifyCenter) verifyCenter.style.display = "none";
+        if (verifyUrlEl) verifyUrlEl.textContent = "—";
+        return issue;
+      }
+
       async function openAuthIssueInCamoufox(provider, alias, url) {
         setLog("credentialOpLog", "");
         try {
@@ -2398,26 +2580,31 @@
         }
       }
 
-      function updateOauthAuthIssueHint() {
-        const el = $("oauthAuthIssueHint");
-        if (!el) return;
+      async function openSelectedVerifyUrl() {
         const provider = textOf($("oauthProviderSelect").value || "").trim().toLowerCase();
-        const alias = textOf($("oauthAuthAliasInput").value || "default").trim().toLowerCase();
+        const alias = textOf($("oauthAuthAliasInput").value || "default").trim().toLowerCase() || "default";
         const issue = findAuthIssueForProviderAlias(provider, alias);
-        if (!issue) {
-          el.style.display = "none";
-          el.textContent = "";
+        if (!issue || !issue.url) {
+          setLog("credentialOpLog", "No verify URL available for current provider/alias.");
           return;
         }
-        if (issue.kind === "google_account_verification") {
-          el.textContent =
-            `⚠ Google requires account verification for alias \"${alias}\".\n` +
-            `Complete the Camoufox verification flow (click “open”), then click Authorize again.`;
-          el.style.display = "block";
+        await openAuthIssueInCamoufox(provider, alias, issue.url);
+      }
+
+      async function copySelectedVerifyUrl() {
+        const provider = textOf($("oauthProviderSelect").value || "").trim().toLowerCase();
+        const alias = textOf($("oauthAuthAliasInput").value || "default").trim().toLowerCase() || "default";
+        const issue = findAuthIssueForProviderAlias(provider, alias);
+        if (!issue || !issue.url) {
+          setLog("credentialOpLog", "No verify URL available for current provider/alias.");
           return;
         }
-        el.style.display = "none";
-        el.textContent = "";
+        try {
+          await navigator.clipboard.writeText(issue.url);
+          setLog("credentialOpLog", "Verify URL copied.");
+        } catch (e) {
+          setLog("credentialOpLog", `Copy failed: ${e && e.message ? e.message : String(e)}`);
+        }
       }
 
       function listAntigravityProviderKeysByAlias(aliasRaw) {
@@ -2466,6 +2653,7 @@
         body.replaceChildren();
         try {
           const items = await apiFetch("/daemon/credentials");
+          UI.credentials = Array.isArray(items) ? items : [];
           // Best-effort: load quota provider state so we can surface upstream auth issues (e.g. Google verify required).
           try {
             const quota = await apiFetch("/quota/providers");
@@ -2477,7 +2665,6 @@
             // ignore
           }
 
-          updateOauthAuthIssueHint();
           for (const c of items || []) {
             const tr = document.createElement("tr");
             const exp = c.expiresInSec == null ? "—" : `${c.expiresInSec}s`;
@@ -2508,8 +2695,10 @@
             tr.appendChild(createCell("td", c.secretRef || "—", "mono"));
             body.appendChild(tr);
           }
+          updateOauthAuthIssueHint();
         } catch (e) {
           body.appendChild(createErrorRow(6, e && e.message ? e.message : e));
+          updateOauthAuthIssueHint();
         }
       }
 
@@ -2535,37 +2724,45 @@
         }
       }
 
-	      async function authorizeOauth() {
-	        setLog("credentialOpLog", "");
-	        const provider = $("oauthProviderSelect").value;
-	        const alias = ($("oauthAuthAliasInput").value || "default").trim() || "default";
-	        updateOauthAuthIssueHint();
-	        const openBrowser = $("oauthOpenBrowser").checked;
-	        const forceReauthorize = $("oauthForceReauth").checked;
-	        try {
-	          const out = await apiFetch("/daemon/oauth/authorize", {
-	            method: "POST",
-	            body: JSON.stringify({ provider, alias, openBrowser, forceReauthorize })
-	          });
-	          setLog("credentialOpLog", `OK. tokenFile: ${out.tokenFile || "—"}`);
-	          await refreshCredentials();
-	          // If OAuth was blocked by Google account verification and the user just completed it,
-	          // attempt to recover the alias back into the pool.
-	          if (textOf(provider).trim().toLowerCase() === "antigravity") {
-	            try {
-	              await recoverAntigravityAliasIfAuthVerify(alias);
-	            } catch {}
-	            try {
-	              await refreshQuota();
-	              await refreshCredentials();
-	            } catch {}
-	          }
-	        } catch (e) {
-	          setLog("credentialOpLog", `Authorize failed: ${e.message}`);
-	        }
-	      }
+      async function authorizeOauth(mode = "manual") {
+        const safeMode = mode === "auto" ? "auto" : "manual";
+        setLog("credentialOpLog", "");
+        const provider = $("oauthProviderSelect").value;
+        const alias = ($("oauthAuthAliasInput").value || "default").trim() || "default";
+        updateOauthAuthIssueHint();
 
-	      const routingEditorState = {
+        const openBrowser = safeMode === "auto"
+          ? Boolean($("oauthAutoOpenBrowser") && $("oauthAutoOpenBrowser").checked)
+          : Boolean($("oauthManualOpenBrowser") && $("oauthManualOpenBrowser").checked);
+        const forceReauthorize = safeMode === "auto"
+          ? Boolean($("oauthAutoForceReauth") && $("oauthAutoForceReauth").checked)
+          : Boolean($("oauthManualForceReauth") && $("oauthManualForceReauth").checked);
+        const headful = safeMode === "auto"
+          ? Boolean($("oauthAutoHeadful") && $("oauthAutoHeadful").checked)
+          : Boolean($("oauthManualHeadful") && $("oauthManualHeadful").checked);
+
+        try {
+          const out = await apiFetch("/daemon/oauth/authorize", {
+            method: "POST",
+            body: JSON.stringify({ provider, alias, openBrowser, forceReauthorize, mode: safeMode, headful })
+          });
+          setLog("credentialOpLog", `[${safeMode}] OK. tokenFile: ${out.tokenFile || "—"}`);
+          await refreshCredentials();
+          if (textOf(provider).trim().toLowerCase() === "antigravity") {
+            try {
+              await recoverAntigravityAliasIfAuthVerify(alias);
+            } catch {}
+            try {
+              await refreshQuota();
+              await refreshCredentials();
+            } catch {}
+          }
+        } catch (e) {
+          setLog("credentialOpLog", `[${safeMode}] Authorize failed: ${e.message}`);
+        }
+      }
+
+      const routingEditorState = {
 	        value: {},
 	        dirty: false
 	      };
@@ -4258,9 +4455,24 @@
 
       $("refreshCredentialsBtn").addEventListener("click", refreshCredentials);
       $("saveOauthBrowserBtn").addEventListener("click", saveSettings);
-      $("oauthAuthorizeBtn").addEventListener("click", authorizeOauth);
+      $("oauthModeManualBtn").addEventListener("click", () => setOauthMode("manual"));
+      $("oauthModeAutoBtn").addEventListener("click", () => setOauthMode("auto"));
+      $("oauthAuthorizeManualBtn").addEventListener("click", () => void authorizeOauth("manual"));
+      $("oauthAuthorizeAutoBtn").addEventListener("click", () => void authorizeOauth("auto"));
+      $("oauthVerifyOpenBtn").addEventListener("click", () => void openSelectedVerifyUrl());
+      $("oauthVerifyCopyBtn").addEventListener("click", () => void copySelectedVerifyUrl());
+      $("oauthVerifyRecheckBtn").addEventListener("click", async () => {
+        try {
+          await refreshQuota();
+          await refreshCredentials();
+          setLog("credentialOpLog", "Rechecked quota/credential state.");
+        } catch (e) {
+          setLog("credentialOpLog", `Recheck failed: ${e && e.message ? e.message : String(e)}`);
+        }
+      });
       $("oauthProviderSelect").addEventListener("change", updateOauthAuthIssueHint);
       $("oauthAuthAliasInput").addEventListener("input", updateOauthAuthIssueHint);
+      setOauthMode("manual");
 
 	      $("refreshQuotaBtn").addEventListener("click", refreshQuota);
 	      $("refreshQuotaSnapshotBtn").addEventListener("click", refreshQuotaSnapshotNow);
