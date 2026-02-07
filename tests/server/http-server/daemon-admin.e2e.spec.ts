@@ -197,7 +197,7 @@ describe('Daemon admin HTTP endpoints (smoke)', () => {
       expect(status.body).toHaveProperty('ok', true);
 
       // Control snapshot should expose antigravity alias lease state when the persisted file is present.
-      const leasePath = path.join(configDir, 'home', '.routecodex', 'state', 'antigravity-alias-leases.json');
+      const leasePath = path.join(os.homedir(), '.routecodex', 'state', 'antigravity-alias-leases.json');
       await fs.mkdir(path.dirname(leasePath), { recursive: true });
       await fs.writeFile(
         leasePath,
