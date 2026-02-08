@@ -788,6 +788,256 @@ describe('stop_message_auto servertool', () => {
     expect(persisted?.state?.stopMessageMaxRepeats).toBeUndefined();
   });
 
+
+  test('injects loop-break warning after 5 identical stopMessage request/response rounds', async () => {
+    const sessionId = 'stopmessage-spec-session-loop-warn';
+    const state: RoutingInstructionState = {
+      forcedTarget: undefined,
+      stickyTarget: undefined,
+      allowedProviders: new Set(),
+      disabledProviders: new Set(),
+      disabledKeys: new Map(),
+      disabledModels: new Map(),
+      stopMessageText: '继续',
+      stopMessageMaxRepeats: 30,
+      stopMessageUsed: 0
+    };
+    writeRoutingStateForSession(sessionId, state);
+
+    const capturedChatRequest: JsonObject = {
+      model: 'gpt-test',
+      messages: [{ role: 'user', content: 'hi' }]
+    };
+
+    const chatResponse: JsonObject = {
+      id: 'chatcmpl-stop-loop-warn',
+      object: 'chat.completion',
+      model: 'gpt-test',
+      choices: [
+        {
+          index: 0,
+          message: { role: 'assistant', content: 'ok' },
+          finish_reason: 'stop'
+        }
+      ]
+    };
+
+    const adapterContext: AdapterContext = {
+      requestId: 'req-stopmessage-loop-warn',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      sessionId,
+      capturedChatRequest
+    } as any;
+
+    let lastFollowupBody: JsonObject | undefined;
+    for (let round = 1; round <= 5; round += 1) {
+      let nextLoopState: Record<string, unknown> | undefined;
+      const orchestration = await runServerToolOrchestration({
+        chat: chatResponse,
+        adapterContext,
+        requestId: `req-stopmessage-loop-warn-${round}`,
+        entryEndpoint: '/v1/chat/completions',
+        providerProtocol: 'openai-chat',
+        reenterPipeline: async (opts: any) => {
+          nextLoopState = opts?.metadata?.__rt?.serverToolLoopState as Record<string, unknown> | undefined;
+          lastFollowupBody = opts?.body as JsonObject;
+          return {
+            body: {
+              id: 'chatcmpl-followup-loop-warn',
+              object: 'chat.completion',
+              model: 'gpt-test',
+              choices: [{ index: 0, message: { role: 'assistant', content: 'done' }, finish_reason: 'stop' }]
+            } as JsonObject
+          };
+        }
+      });
+
+      expect(orchestration.executed).toBe(true);
+      expect(orchestration.flowId).toBe('stop_message_flow');
+      adapterContext.__rt = nextLoopState ? { serverToolLoopState: nextLoopState } : undefined;
+    }
+
+    const messages = Array.isArray((lastFollowupBody as any)?.messages) ? ((lastFollowupBody as any).messages as any[]) : [];
+    expect(
+      messages.some(
+        (item) =>
+          item &&
+          typeof item === 'object' &&
+          item.role === 'system' &&
+          typeof item.content === 'string' &&
+          item.content.includes('连续 5 轮一致')
+      )
+    ).toBe(true);
+  });
+
+  test('returns fetch failed after 10 identical stopMessage request/response rounds', async () => {
+    const sessionId = 'stopmessage-spec-session-loop-fail';
+    const state: RoutingInstructionState = {
+      forcedTarget: undefined,
+      stickyTarget: undefined,
+      allowedProviders: new Set(),
+      disabledProviders: new Set(),
+      disabledKeys: new Map(),
+      disabledModels: new Map(),
+      stopMessageText: '继续',
+      stopMessageMaxRepeats: 30,
+      stopMessageUsed: 0
+    };
+    writeRoutingStateForSession(sessionId, state);
+
+    const capturedChatRequest: JsonObject = {
+      model: 'gpt-test',
+      messages: [{ role: 'user', content: 'hi' }]
+    };
+
+    const chatResponse: JsonObject = {
+      id: 'chatcmpl-stop-loop-fail',
+      object: 'chat.completion',
+      model: 'gpt-test',
+      choices: [
+        {
+          index: 0,
+          message: { role: 'assistant', content: 'ok' },
+          finish_reason: 'stop'
+        }
+      ]
+    };
+
+    const adapterContext: AdapterContext = {
+      requestId: 'req-stopmessage-loop-fail',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      sessionId,
+      capturedChatRequest
+    } as any;
+
+    for (let round = 1; round <= 9; round += 1) {
+      let nextLoopState: Record<string, unknown> | undefined;
+      const orchestration = await runServerToolOrchestration({
+        chat: chatResponse,
+        adapterContext,
+        requestId: `req-stopmessage-loop-fail-${round}`,
+        entryEndpoint: '/v1/chat/completions',
+        providerProtocol: 'openai-chat',
+        reenterPipeline: async (opts: any) => {
+          nextLoopState = opts?.metadata?.__rt?.serverToolLoopState as Record<string, unknown> | undefined;
+          return {
+            body: {
+              id: 'chatcmpl-followup-loop-fail',
+              object: 'chat.completion',
+              model: 'gpt-test',
+              choices: [{ index: 0, message: { role: 'assistant', content: 'done' }, finish_reason: 'stop' }]
+            } as JsonObject
+          };
+        }
+      });
+      expect(orchestration.executed).toBe(true);
+      adapterContext.__rt = nextLoopState ? { serverToolLoopState: nextLoopState } : undefined;
+    }
+
+    let followupCalled = false;
+    await expect(
+      runServerToolOrchestration({
+        chat: chatResponse,
+        adapterContext,
+        requestId: 'req-stopmessage-loop-fail-10',
+        entryEndpoint: '/v1/chat/completions',
+        providerProtocol: 'openai-chat',
+        reenterPipeline: async () => {
+          followupCalled = true;
+          return {
+            body: {
+              id: 'chatcmpl-followup-loop-fail-10',
+              object: 'chat.completion',
+              model: 'gpt-test',
+              choices: [{ index: 0, message: { role: 'assistant', content: 'done' }, finish_reason: 'stop' }]
+            } as JsonObject
+          };
+        }
+      })
+    ).rejects.toMatchObject({
+      code: 'SERVERTOOL_TIMEOUT',
+      status: 502
+    });
+    expect(followupCalled).toBe(false);
+  });
+
+  test('returns fetch failed when stopMessage flow elapsed time exceeds 900 seconds', async () => {
+    const sessionId = 'stopmessage-spec-session-stage-timeout';
+    const state: RoutingInstructionState = {
+      forcedTarget: undefined,
+      stickyTarget: undefined,
+      allowedProviders: new Set(),
+      disabledProviders: new Set(),
+      disabledKeys: new Map(),
+      disabledModels: new Map(),
+      stopMessageText: '继续',
+      stopMessageMaxRepeats: 30,
+      stopMessageUsed: 0
+    };
+    writeRoutingStateForSession(sessionId, state);
+
+    const capturedChatRequest: JsonObject = {
+      model: 'gpt-test',
+      messages: [{ role: 'user', content: 'hi' }]
+    };
+
+    const chatResponse: JsonObject = {
+      id: 'chatcmpl-stop-stage-timeout',
+      object: 'chat.completion',
+      model: 'gpt-test',
+      choices: [
+        {
+          index: 0,
+          message: { role: 'assistant', content: 'ok' },
+          finish_reason: 'stop'
+        }
+      ]
+    };
+
+    const adapterContext: AdapterContext = {
+      requestId: 'req-stopmessage-stage-timeout',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      sessionId,
+      capturedChatRequest,
+      __rt: {
+        serverToolLoopState: {
+          flowId: 'stop_message_flow',
+          payloadHash: '__servertool_auto__',
+          repeatCount: 7,
+          startedAtMs: Date.now() - 901_000
+        }
+      }
+    } as any;
+
+    let followupCalled = false;
+    await expect(
+      runServerToolOrchestration({
+        chat: chatResponse,
+        adapterContext,
+        requestId: 'req-stopmessage-stage-timeout-1',
+        entryEndpoint: '/v1/chat/completions',
+        providerProtocol: 'openai-chat',
+        reenterPipeline: async () => {
+          followupCalled = true;
+          return {
+            body: {
+              id: 'chatcmpl-followup-stage-timeout',
+              object: 'chat.completion',
+              model: 'gpt-test',
+              choices: [{ index: 0, message: { role: 'assistant', content: 'done' }, finish_reason: 'stop' }]
+            } as JsonObject
+          };
+        }
+      })
+    ).rejects.toMatchObject({
+      code: 'SERVERTOOL_TIMEOUT',
+      status: 502
+    });
+    expect(followupCalled).toBe(false);
+  });
   test('uses staged status-check template on first followup', async () => {
     const tempUserDir = fs.mkdtempSync(path.join(process.cwd(), 'tmp', 'stopmessage-stage-userdir-'));
     const prevUserDir = process.env.ROUTECODEX_USER_DIR;
