@@ -22,7 +22,7 @@ describe('servertool progress logging', () => {
       disabledKeys: new Map(),
       disabledModels: new Map(),
       stopMessageText: '继续',
-      stopMessageMaxRepeats: 1,
+      stopMessageMaxRepeats: 10,
       stopMessageUsed: 0,
       stopMessageUpdatedAt: Date.now()
     };

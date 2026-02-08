@@ -225,7 +225,7 @@ describe('servertool:clock', () => {
 
     const processedRequest = processed.processedRequest as any;
     const last = processedRequest.messages?.[processedRequest.messages.length - 1];
-    expect(last?.role).toBe('system');
+    expect(last?.role).toBe('user');
     expect(typeof last?.content === 'string' ? last.content : '').toContain('[scheduled task:"do the thing"');
 
     const reservation = processedRequest.metadata?.__clockReservation;
