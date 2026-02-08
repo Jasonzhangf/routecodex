@@ -145,6 +145,84 @@
       "wasmExport": "sse_utils",
       "coverage": "99.57%",
       "note": "unit tests 99.57% coverage"
+    },
+    {
+      "tsPath": "conversion/shared/reasoning-normalizer",
+      "wasmExport": "reasoning_normalizer",
+      "coverage": "95.47%",
+      "note": "unit tests 95.47% coverage"
+    },
+    {
+      "tsPath": "conversion/sse/sse-to-json/responses-sse-to-json-converter",
+      "wasmExport": "sse_responses_sse_to_json_converter",
+      "coverage": "95.39%",
+      "note": "unit tests 95.39% coverage"
+    },
+    {
+      "tsPath": "conversion/shared/reasoning-mapping",
+      "wasmExport": "reasoning_mapping",
+      "coverage": "97.92%",
+      "note": "unit tests 97.92% coverage"
+    },
+    {
+      "tsPath": "conversion/shared/anthropic-text-coerce",
+      "wasmExport": "anthropic_text_coerce",
+      "coverage": "98.82%",
+      "note": "unit tests 98.82% coverage"
+    },
+    {
+      "tsPath": "conversion/shared/tool-governance",
+      "wasmExport": "tool_governance",
+      "coverage": "95.18%",
+      "note": "unit tests 95.18% coverage"
+    },
+    {
+      "tsPath": "conversion/shared/anthropic-tool-message",
+      "wasmExport": "anthropic_tool_message",
+      "coverage": "97.98%",
+      "note": "unit tests 97.98% coverage"
+    },
+    {
+      "tsPath": "conversion/shared/anthropic-image-utils",
+      "wasmExport": "anthropic_image_utils",
+      "coverage": "99.07%",
+      "note": "unit tests 99.07% coverage"
+    },
+    {
+      "tsPath": "conversion/shared/anthropic-tool-choice",
+      "wasmExport": "anthropic_tool_choice",
+      "coverage": "98.46%",
+      "note": "unit tests 98.46% coverage"
+    },
+    {
+      "tsPath": "conversion/shared/anthropic-tool-mapping",
+      "wasmExport": "anthropic_tool_mapping",
+      "coverage": "98.26%",
+      "note": "unit tests 98.26% coverage"
+    },
+    {
+      "tsPath": "conversion/shared/anthropic-utils",
+      "wasmExport": "anthropic_utils",
+      "coverage": "96.17%",
+      "note": "unit tests 96.17% coverage"
+    },
+    {
+      "tsPath": "conversion/shared/sse-chat-sse-to-json-converter",
+      "wasmExport": "sse_chat_sse_to_json_converter",
+      "coverage": "91.47%",
+      "note": "unit tests 91.47% coverage - target 95%"
+    },
+    {
+      "tsPath": "conversion/shared/tool-filters",
+      "wasmExport": "tool_filters",
+      "coverage": "90.35%",
+      "note": "unit tests 90.35% coverage - target 95%"
+    },
+    {
+      "tsPath": "conversion/shared/sse-anthropic-serializer",
+      "wasmExport": "sse_anthropic_serializer",
+      "coverage": "87.73%",
+      "note": "unit tests 87.73% coverage - target 95%"
     }
   ]
 }
