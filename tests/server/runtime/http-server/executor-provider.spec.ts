@@ -22,6 +22,22 @@ describe('executor-provider retry policy', () => {
     expect(shouldRetryProviderError(nonRetriable)).toBe(false);
   });
 
+  it('treats iflow business 514 model error as retryable', () => {
+    const error = Object.assign(new Error('HTTP 400: iFlow business error (514): model error'), {
+      statusCode: 400,
+      providerFamily: 'iflow',
+      response: {
+        data: {
+          error: {
+            code: '514',
+            message: 'model error'
+          }
+        }
+      }
+    });
+    expect(shouldRetryProviderError(error)).toBe(true);
+  });
+
   it('surface message from arbitrary error via describeRetryReason', () => {
     const error = Object.assign(new Error('something bad'), { statusCode: 500 });
     expect(describeRetryReason(error)).toContain('something bad');

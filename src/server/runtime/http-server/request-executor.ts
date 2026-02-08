@@ -436,25 +436,59 @@ export class HubRequestExecutor implements RequestExecutor {
             response: normalized,
             pipelineMetadata: mergedMetadata
           });
-          // For Antigravity/Gemini, we may receive an error-shaped response (status=429/400) instead of a thrown error,
-          // so llmswitch-core servertool can attempt thoughtSignature bootstrap + replay.
-          // If it is still an error after conversion, treat it as a provider failure and continue the retry loop.
-          if (
-            typeof converted.status === 'number' &&
-            converted.status >= 400 &&
+          // Treat upstream 429 as provider failure across protocols to avoid
+          // silently returning success and to let Virtual Router failover to other candidates.
+          // Keep existing Gemini compatibility behavior for 400/4xx thoughtSignature-like failures.
+          const convertedStatus = typeof converted.status === 'number' ? converted.status : undefined;
+          const isGlobalRetryable429 = convertedStatus === 429;
+          const isGeminiCompatFailure =
+            typeof convertedStatus === 'number' &&
+            convertedStatus >= 400 &&
             (isAntigravityProviderKey(target.providerKey) ||
               (typeof target.providerKey === 'string' && target.providerKey.startsWith('gemini-cli.'))) &&
-            providerProtocol === 'gemini-chat'
-          ) {
+            providerProtocol === 'gemini-chat';
+
+          if (isGlobalRetryable429 || isGeminiCompatFailure) {
             const bodyForError = converted.body && typeof converted.body === 'object' ? (converted.body as Record<string, unknown>) : undefined;
             const errMsg =
               bodyForError && bodyForError.error && typeof bodyForError.error === 'object'
                 ? String((bodyForError.error as any).message || bodyForError.error || '')
                 : '';
-            const errorToThrow: any = new Error(errMsg && errMsg.trim().length ? errMsg : `HTTP ${converted.status}`);
-            errorToThrow.statusCode = converted.status;
-            errorToThrow.status = converted.status;
+            const statusCode = typeof convertedStatus === 'number' ? convertedStatus : 500;
+            const errorToThrow: any = new Error(errMsg && errMsg.trim().length ? errMsg : `HTTP ${statusCode}`);
+            errorToThrow.statusCode = statusCode;
+            errorToThrow.status = statusCode;
             errorToThrow.response = { data: bodyForError };
+            try {
+              const { emitProviderError } = await import('../../../providers/core/utils/provider-error-reporter.js');
+              emitProviderError({
+                error: errorToThrow,
+                stage: 'provider.http',
+                runtime: {
+                  requestId: input.requestId,
+                  providerKey: target.providerKey,
+                  providerId: handle.providerId,
+                  providerType: handle.providerType,
+                  providerFamily: handle.providerFamily,
+                  providerProtocol,
+                  routeName: pipelineResult.routingDecision?.routeName,
+                  pipelineId: target.providerKey,
+                  target,
+                  runtimeKey
+                },
+                dependencies: this.deps.getModuleDependencies(),
+                statusCode,
+                recoverable: statusCode === 429,
+                affectsHealth: true,
+                details: {
+                  source: 'converted_response_status',
+                  convertedStatus: statusCode,
+                  wrappedErrorResponse: true
+                }
+              });
+            } catch {
+              // best-effort; never block retry/failover path
+            }
             throw errorToThrow;
           }
           const usage = this.extractUsageFromResult(converted, mergedMetadata);
@@ -797,23 +831,10 @@ export class HubRequestExecutor implements RequestExecutor {
           body: { __sse_responses: converted.__sse_responses }
         };
       }
-      const merged: PipelineExecutionResult = {
+      return {
         ...options.response,
         body: converted.body ?? body
       };
-      // Special case: some Antigravity/Gemini upstream failures are intentionally passed through as
-      // an error-shaped response (status=429/400) so llmswitch-core servertool can recover via followup.
-      // If recovery succeeded, the final client payload will NOT contain an error envelope.
-      if (typeof options.response.status === 'number' && options.response.status >= 400) {
-        const out = merged.body;
-        if (out && typeof out === 'object' && !Array.isArray(out)) {
-          const hasError = Object.prototype.hasOwnProperty.call(out as Record<string, unknown>, 'error');
-          if (!hasError) {
-            merged.status = 200;
-          }
-        }
-      }
-      return merged;
     } catch (error) {
       const err = error as Error | unknown;
       const message = err instanceof Error ? err.message : String(err ?? 'Unknown error');

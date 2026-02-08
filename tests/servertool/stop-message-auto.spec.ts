@@ -1818,6 +1818,88 @@ describe('stop_message_auto servertool', () => {
     }
   });
 
+  test('stage policy treats same command with different args as non-stable observations', () => {
+    const prevMode = process.env.ROUTECODEX_STOPMESSAGE_BD_MODE;
+    const prevTtl = process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS;
+    try {
+      process.env.ROUTECODEX_STOPMESSAGE_BD_MODE = 'runtime';
+      process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS = '0';
+      resetStopMessageBdRuntimeCacheForTests();
+
+      const first = resolveStopMessageStageDecision({
+        baseText: '继续执行',
+        state: { stopMessageStageMode: 'on' },
+        capturedMessages: [
+          {
+            role: 'assistant',
+            content: null,
+            tool_calls: [
+              {
+                id: 'call_exec_1',
+                type: 'function',
+                function: {
+                  name: 'exec_command',
+                  arguments: JSON.stringify({ cmd: 'ls -la /tmp/work-a' })
+                }
+              }
+            ]
+          }
+        ],
+        bdCommandRunner: () => ({ status: 0, stdout: '[{"id":"routecodex-active-1"}]', stderr: '' })
+      });
+
+      expect(first.action).toBe('followup');
+      expect(typeof first.toolSignatureHash).toBe('string');
+
+      const second = resolveStopMessageStageDecision({
+        baseText: '继续执行',
+        state: {
+          stopMessageStageMode: 'on',
+          stopMessageStage: first.stage,
+          stopMessageBdWorkState: first.bdWorkState,
+          stopMessageObservationHash: first.observationHash,
+          stopMessageObservationStableCount: first.observationStableCount
+        },
+        capturedMessages: [
+          {
+            role: 'assistant',
+            content: null,
+            tool_calls: [
+              {
+                id: 'call_exec_2',
+                type: 'function',
+                function: {
+                  name: 'exec_command',
+                  arguments: JSON.stringify({ cmd: 'ls -la /tmp/work-b' })
+                }
+              }
+            ]
+          }
+        ],
+        bdCommandRunner: () => ({ status: 0, stdout: '[{"id":"routecodex-active-1"}]', stderr: '' })
+      });
+
+      expect(second.action).toBe('followup');
+      expect(second.observationStableCount).toBe(0);
+      expect(second.stopReason).toBeUndefined();
+      expect(second.observationHash).not.toBe(first.observationHash);
+      expect(typeof second.toolSignatureHash).toBe('string');
+      expect(second.toolSignatureHash).not.toBe(first.toolSignatureHash);
+    } finally {
+      if (prevMode === undefined) {
+        delete process.env.ROUTECODEX_STOPMESSAGE_BD_MODE;
+      } else {
+        process.env.ROUTECODEX_STOPMESSAGE_BD_MODE = prevMode;
+      }
+      if (prevTtl === undefined) {
+        delete process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS;
+      } else {
+        process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS = prevTtl;
+      }
+      resetStopMessageBdRuntimeCacheForTests();
+    }
+  });
+
   test('stage policy keeps followup in auto mode when stage templates are not enabled', () => {
     const prevMode = process.env.ROUTECODEX_STOPMESSAGE_BD_MODE;
     const prevTtl = process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS;

@@ -36,6 +36,20 @@ interface DeviceCodeData extends Record<string, unknown> {
   code_verifier?: string;
 }
 
+function resolvePollingIntervalMs(intervalRaw: unknown): number | null {
+  const value = Number(intervalRaw);
+  if (!Number.isFinite(value) || value <= 0) {
+    return null;
+  }
+  // Backward compatibility:
+  // - provider configs historically used milliseconds (e.g. 5000)
+  // - OAuth device endpoints typically return seconds (e.g. 5)
+  // Treat >=1000 as milliseconds, otherwise seconds.
+  const ms = value >= 1000 ? value : value * 1000;
+  // Guard rail: avoid zero/negative or unreasonably large accidental values.
+  return Math.min(Math.max(ms, 1000), 120000);
+}
+
 type UserInfoPayload = {
   apiKey?: string;
   data?: {
@@ -245,7 +259,10 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
    */
   private async pollForToken(deviceCodeData: DeviceCodeData): Promise<DeviceCodeTokenResponse> {
     const maxAttempts = this.config.polling?.maxAttempts || 60;
-    const interval = (this.config.polling?.interval || 5) * 1000;
+    const interval =
+      resolvePollingIntervalMs(deviceCodeData.interval) ??
+      resolvePollingIntervalMs(this.config.polling?.interval) ??
+      5000;
     const deviceCode = deviceCodeData.device_code;
     const codeVerifier: string | undefined = deviceCodeData.code_verifier;
 

@@ -24,6 +24,7 @@ import { HTTP_PROTOCOLS, LOCAL_HOSTS } from '../../constants/index.js';
 import { withOAuthRepairEnv } from './oauth-repair-env.js';
 import {
   markInteractiveOAuthRepairAttempt,
+  markInteractiveOAuthRepairSuccess,
   shouldSkipInteractiveOAuthRepair,
   type OAuthRepairCooldownReason
 } from './oauth-repair-cooldown.js';
@@ -913,7 +914,12 @@ function resolveTokenPortalBaseUrl(): string | null {
     return configured;
   }
 
-  const envPort = Number(process.env.ROUTECODEX_PORT || process.env.RCC_PORT || NaN);
+  const envPort = Number(
+    process.env.ROUTECODEX_PORT ||
+    process.env.RCC_PORT ||
+    process.env.ROUTECODEX_SERVER_PORT ||
+    NaN
+  );
   if (!Number.isFinite(envPort) || envPort <= 0) {
     // No reliable server port detected; disable portal and fall back to direct OAuth URL
     return null;
@@ -1047,7 +1053,18 @@ async function maybeEnrichToken(
       }
       return merged;
     } catch (error) {
-      console.error(`[OAuth] Antigravity: failed to fetch metadata - ${error instanceof Error ? error.message : String(error)}`);
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error(`[OAuth] Antigravity: failed to fetch metadata - ${msg}`);
+      const normalized = msg.toLowerCase();
+      const isAuthError =
+        normalized.includes('401') ||
+        normalized.includes('unauthorized') ||
+        normalized.includes('invalid_grant') ||
+        normalized.includes('invalid_token') ||
+        normalized.includes('permission denied');
+      if (isAuthError) {
+        throw error instanceof Error ? error : new Error(msg);
+      }
     }
   } else if (isGeminiCliFamily(providerType)) {
     const label = 'Gemini CLI';
@@ -1463,8 +1480,9 @@ export async function handleUpstreamInvalidOAuthToken(
     });
     if (gate.skip) {
       const msLeft = typeof gate.msLeft === 'number' ? gate.msLeft : 0;
+      const attempts = typeof gate.record?.attemptCount === 'number' ? gate.record.attemptCount : 0;
       console.warn(
-        `[OAuth] interactive repair skipped due to cooldown (provider=${providerType} status=${statusCode ?? 'unknown'} reason=${cooldownReason} msLeft=${msLeft} tokenFile=${tokenFilePath})`
+        `[OAuth] interactive repair skipped (provider=${providerType} status=${statusCode ?? 'unknown'} reason=${cooldownReason} attempts=${attempts} msLeft=${msLeft} tokenFile=${tokenFilePath})`
       );
       return false;
     }
@@ -1499,6 +1517,10 @@ export async function handleUpstreamInvalidOAuthToken(
             forceReauthorize: false
           });
         });
+        await markInteractiveOAuthRepairSuccess({
+          providerType,
+          tokenFile: tokenFilePath
+        });
         return true;
       } catch {
         // ignore silent refresh errors; fall through to background interactive flow
@@ -1527,6 +1549,10 @@ export async function handleUpstreamInvalidOAuthToken(
     };
     await withOAuthRepairEnv(providerType, async () => {
       await ensureValid(providerType, auth, opts);
+    });
+    await markInteractiveOAuthRepairSuccess({
+      providerType,
+      tokenFile: tokenFilePath
     });
     return true;
   } catch {

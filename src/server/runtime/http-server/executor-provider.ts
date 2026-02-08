@@ -84,6 +84,10 @@ export function shouldRetryProviderError(error: unknown): boolean {
   if (providerError.retryable === true) {
     return true;
   }
+  // iFlow 业务错误 514(model error) 多为上游瞬态失败，允许虚拟路由切换候选继续执行。
+  if (isIflowModelError(error)) {
+    return true;
+  }
   if (isNetworkTransportError(error)) {
     return true;
   }
@@ -95,6 +99,74 @@ export function shouldRetryProviderError(error: unknown): boolean {
     return true;
   }
   return false;
+}
+
+function isIflowModelError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+  const record = error as {
+    message?: unknown;
+    upstreamMessage?: unknown;
+    response?: unknown;
+    details?: unknown;
+    providerFamily?: unknown;
+    providerId?: unknown;
+  };
+
+  const providerHint = String(record.providerFamily || record.providerId || '').toLowerCase();
+
+  const messages: string[] = [];
+  if (typeof record.message === 'string' && record.message.trim()) {
+    messages.push(record.message);
+  }
+  if (typeof record.upstreamMessage === 'string' && record.upstreamMessage.trim()) {
+    messages.push(record.upstreamMessage);
+  }
+
+  const details = record.details;
+  if (details && typeof details === 'object') {
+    const detailMessage = (details as { upstreamMessage?: unknown }).upstreamMessage;
+    if (typeof detailMessage === 'string' && detailMessage.trim()) {
+      messages.push(detailMessage);
+    }
+  }
+
+  const response = record.response;
+  if (response && typeof response === 'object') {
+    const responseData = (response as { data?: unknown }).data;
+    if (responseData && typeof responseData === 'object') {
+      const err = (responseData as { error?: unknown }).error;
+      if (err && typeof err === 'object') {
+        const code = (err as { code?: unknown }).code;
+        const message = (err as { message?: unknown }).message;
+        if (typeof code === 'string' && code.trim()) {
+          messages.push(code);
+        }
+        if (typeof code === 'number' && Number.isFinite(code)) {
+          messages.push(String(code));
+        }
+        if (typeof message === 'string' && message.trim()) {
+          messages.push(message);
+        }
+      }
+    }
+  }
+
+  const combined = messages.join(' | ').toLowerCase();
+  if (!combined) {
+    return false;
+  }
+
+  const looksIflow514 =
+    (combined.includes('iflow business error (514)') || combined.includes('error_code":514') || combined.includes('code":"514"') || combined.includes('code:514')) &&
+    combined.includes('model error');
+
+  if (!looksIflow514) {
+    return false;
+  }
+
+  return providerHint ? providerHint.includes('iflow') : true;
 }
 
 export async function waitBeforeRetry(error: unknown): Promise<void> {

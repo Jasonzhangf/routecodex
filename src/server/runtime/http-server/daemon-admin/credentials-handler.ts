@@ -167,15 +167,81 @@ export function registerCredentialRoutes(app: Application, options: DaemonAdminR
     }
   });
 
-  app.post('/daemon/credentials/:id/refresh', (req: Request, res: Response) => {
+  app.post('/daemon/credentials/:id/refresh', async (req: Request, res: Response) => {
     if (reject(req, res)) {return;}
-    // 为避免在 HTTP 请求路径中触发复杂的交互式 OAuth 流程，当前先返回明确的未实现标记。
-    res.status(501).json({
-      error: {
-        message: 'manual refresh endpoint is not yet implemented; use CLI-based auth helpers instead',
-        code: 'not_implemented'
+    const id = String(req.params.id || '').trim();
+    if (!id) {
+      res.status(400).json({ error: { message: 'id is required', code: 'bad_request' } });
+      return;
+    }
+    try {
+      const items = await buildCredentialSummaries();
+      const summary = items.find((c) => c.id === id);
+      if (!summary) {
+        res.status(404).json({ error: { message: 'credential not found', code: 'not_found' } });
+        return;
       }
-    });
+      if (summary.kind !== 'oauth') {
+        res.status(400).json({
+          error: {
+            message: 'credential refresh only supports oauth credentials',
+            code: 'bad_request'
+          }
+        });
+        return;
+      }
+
+      const provider = String(summary.provider || '').trim().toLowerCase();
+      const alias = String(summary.alias || 'default').trim() || 'default';
+      if (!provider || !SUPPORTED_OAUTH_PROVIDERS.has(provider)) {
+        res.status(400).json({
+          error: {
+            message: `unsupported oauth provider: ${provider || 'unknown'}`,
+            code: 'bad_request'
+          }
+        });
+        return;
+      }
+
+      const authType: OAuthAuthType =
+        provider === 'gemini-cli' ? 'gemini-cli-oauth' : (`${provider}-oauth` as OAuthAuthType);
+      const auth: OAuthAuth = {
+        type: authType,
+        tokenFile: alias
+      };
+
+      const beforeToken = await readTokenFile(summary.tokenFile);
+      const before = evaluateTokenState(beforeToken, Date.now());
+
+      await ensureValidOAuthToken(provider, auth, {
+        openBrowser: false,
+        forceReauthorize: false,
+        forceReacquireIfRefreshFails: false
+      });
+
+      const afterToken = await readTokenFile(summary.tokenFile);
+      const after = evaluateTokenState(afterToken, Date.now());
+      const refreshed =
+        (before.expiresAt ?? null) !== (after.expiresAt ?? null) ||
+        before.status !== after.status;
+
+      res.status(200).json({
+        ok: true,
+        id,
+        provider,
+        alias,
+        refreshed,
+        status: after.status,
+        expiresInSec:
+          after.msUntilExpiry !== null && after.msUntilExpiry !== undefined
+            ? Math.round(after.msUntilExpiry / 1000)
+            : null,
+        checkedAt: Date.now()
+      });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ error: { message } });
+    }
   });
 
   app.post('/daemon/credentials/apikey', async (req: Request, res: Response) => {

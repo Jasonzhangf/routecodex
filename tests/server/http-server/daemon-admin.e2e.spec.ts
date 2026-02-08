@@ -231,6 +231,10 @@ describe('Daemon admin HTTP endpoints (smoke)', () => {
       expect(creds.status).toBe(200);
       expect(Array.isArray(creds.body)).toBe(true);
 
+      const missingRefresh = await postJson(baseUrl, '/daemon/credentials/non-existent/refresh', undefined, cookie);
+      expect(missingRefresh.status).toBe(404);
+      expect(missingRefresh.body).toHaveProperty('error.code', 'not_found');
+
       const quota = await getJson(baseUrl, '/quota/summary', cookie);
       expect(quota.status).toBe(200);
       expect(quota.body).toHaveProperty('records');

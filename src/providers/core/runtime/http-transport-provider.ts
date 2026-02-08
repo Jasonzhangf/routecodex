@@ -18,7 +18,11 @@ import { OAuthAuthProvider } from '../../auth/oauth-auth.js';
 import { logOAuthDebug } from '../../auth/oauth-logger.js';
 import { TokenFileAuthProvider } from '../../auth/tokenfile-auth.js';
 import { IflowCookieAuthProvider } from '../../auth/iflow-cookie-auth.js';
-import { ensureValidOAuthToken, handleUpstreamInvalidOAuthToken } from '../../auth/oauth-lifecycle.js';
+import {
+  ensureValidOAuthToken,
+  handleUpstreamInvalidOAuthToken,
+  shouldTriggerInteractiveOAuthRepair
+} from '../../auth/oauth-lifecycle.js';
 import {
   attachProviderSseSnapshotStream,
   writeProviderSnapshot
@@ -918,8 +922,30 @@ export class HttpTransportProvider extends BaseProvider {
         } catch (error) {
           const err = error as { message?: string };
           const msg = err?.message ? String(err.message) : String(error);
-          // Non-blocking: do not start device-code polling or crash requests here.
-          // We'll let the upstream 401/403 path trigger interactive repair when appropriate.
+          const authErr = (error instanceof Error ? error : new Error(msg)) as Error & {
+            statusCode?: number;
+            status?: number;
+            code?: string;
+          };
+          const needsInteractiveRepair = shouldTriggerInteractiveOAuthRepair(oauthProviderId, authErr);
+          if (needsInteractiveRepair) {
+            if (typeof authErr.statusCode !== 'number' && typeof authErr.status !== 'number') {
+              authErr.statusCode = 401;
+              authErr.status = 401;
+            }
+            if (typeof authErr.code !== 'string' || !authErr.code.trim()) {
+              authErr.code = 'AUTH_INVALID_TOKEN';
+            }
+            // 非阻塞：后台触发修复，不等待本请求。
+            void handleUpstreamInvalidOAuthToken(oauthProviderId, oauthAuth, authErr, {
+              allowBlocking: false
+            }).catch(() => {
+              // ignore background repair errors
+            });
+            (authErr as Error & { __routecodexAuthPreflightFatal?: boolean }).__routecodexAuthPreflightFatal = true;
+            throw authErr;
+          }
+          // 非认证类的 ensureValid 错误只做日志，避免影响正常流量。
           logOAuthDebug(`[OAuth] [headers] ensureValid skipped: ${msg}`);
         }
         try {
@@ -928,7 +954,14 @@ export class HttpTransportProvider extends BaseProvider {
           // ignore
         }
       }
-    } catch {
+    } catch (error) {
+      if (
+        error &&
+        typeof error === 'object' &&
+        (error as { __routecodexAuthPreflightFatal?: unknown }).__routecodexAuthPreflightFatal === true
+      ) {
+        throw error;
+      }
       // bubble up in authHeaders build below
     }
 

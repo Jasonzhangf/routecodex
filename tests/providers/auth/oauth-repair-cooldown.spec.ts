@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import {
+  markInteractiveOAuthRepairSuccess,
   markInteractiveOAuthRepairAttempt,
   shouldSkipInteractiveOAuthRepair
 } from '../../../src/providers/auth/oauth-repair-cooldown.js';
@@ -38,5 +39,37 @@ describe('oauth-repair-cooldown', () => {
     if (prevHome === undefined) delete process.env.HOME;
     else process.env.HOME = prevHome;
   });
-});
 
+  test('generic reason does not use cooldown, but stops at max attempts and resets on success', async () => {
+    const prevHome = process.env.HOME;
+    const prevMax = process.env.ROUTECODEX_OAUTH_INTERACTIVE_MAX_ATTEMPTS;
+
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-oauth-attempts-'));
+    process.env.HOME = tmp;
+    process.env.ROUTECODEX_OAUTH_INTERACTIVE_MAX_ATTEMPTS = '3';
+
+    const providerType = 'antigravity';
+    const tokenFile = path.join(tmp, 'auth', 'antigravity-oauth-1-a.json');
+
+    await markInteractiveOAuthRepairAttempt({ providerType, tokenFile, reason: 'generic' });
+    await markInteractiveOAuthRepairAttempt({ providerType, tokenFile, reason: 'generic' });
+
+    const gate2 = await shouldSkipInteractiveOAuthRepair({ providerType, tokenFile, reason: 'generic' });
+    expect(gate2.skip).toBe(false);
+    expect((gate2.record as any)?.attemptCount).toBe(2);
+
+    await markInteractiveOAuthRepairAttempt({ providerType, tokenFile, reason: 'generic' });
+    const gate3 = await shouldSkipInteractiveOAuthRepair({ providerType, tokenFile, reason: 'generic' });
+    expect(gate3.skip).toBe(true);
+    expect((gate3.record as any)?.attemptCount).toBe(3);
+
+    await markInteractiveOAuthRepairSuccess({ providerType, tokenFile });
+    const gateAfterSuccess = await shouldSkipInteractiveOAuthRepair({ providerType, tokenFile, reason: 'generic' });
+    expect(gateAfterSuccess.skip).toBe(false);
+
+    if (prevMax === undefined) delete process.env.ROUTECODEX_OAUTH_INTERACTIVE_MAX_ATTEMPTS;
+    else process.env.ROUTECODEX_OAUTH_INTERACTIVE_MAX_ATTEMPTS = prevMax;
+    if (prevHome === undefined) delete process.env.HOME;
+    else process.env.HOME = prevHome;
+  });
+});

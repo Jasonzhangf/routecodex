@@ -105,4 +105,94 @@ describe('RouteCodexHttpServer.executePipeline failover', () => {
     expect(providerHandles.get('runtime:A')!.instance.processIncoming).toHaveBeenCalledTimes(1);
     expect(providerHandles.get('runtime:B')!.instance.processIncoming).toHaveBeenCalledTimes(1);
   });
+
+  it('re-enters hub pipeline when converted response status is 429 without error envelope', async () => {
+    const server = new RouteCodexHttpServer(createTestConfig());
+
+    const providerA = 'tab.key1.gpt-5.2';
+    const providerB = 'tab.key2.gpt-5.2';
+
+    (server as any).hubPipeline = {};
+
+    const runHubPipeline = jest.fn()
+      .mockResolvedValueOnce({
+        requestId: 'req_conv_429',
+        providerPayload: { model: 'gpt-5.2' },
+        target: {
+          providerKey: providerA,
+          providerType: 'responses',
+          outboundProfile: 'openai-responses',
+          runtimeKey: 'runtime:A',
+          processMode: 'standard'
+        },
+        routingDecision: { routeName: 'coding' },
+        processMode: 'standard',
+        metadata: {}
+      })
+      .mockResolvedValueOnce({
+        requestId: 'req_conv_429',
+        providerPayload: { model: 'gpt-5.2' },
+        target: {
+          providerKey: providerB,
+          providerType: 'responses',
+          outboundProfile: 'openai-responses',
+          runtimeKey: 'runtime:B',
+          processMode: 'standard'
+        },
+        routingDecision: { routeName: 'coding' },
+        processMode: 'standard',
+        metadata: {}
+      });
+    (server as any).runHubPipeline = runHubPipeline;
+
+    const providerHandles = new Map<string, any>();
+    providerHandles.set('runtime:A', {
+      providerType: 'responses',
+      providerFamily: 'openai',
+      providerId: 'tab',
+      providerProtocol: 'openai-responses',
+      instance: {
+        processIncoming: jest.fn(async () => ({ status: 200, data: { id: 'raw_a' } })),
+        initialize: jest.fn(),
+        cleanup: jest.fn()
+      }
+    });
+    providerHandles.set('runtime:B', {
+      providerType: 'responses',
+      providerFamily: 'openai',
+      providerId: 'tab',
+      providerProtocol: 'openai-responses',
+      instance: {
+        processIncoming: jest.fn(async () => ({ status: 200, data: { id: 'raw_b' } })),
+        initialize: jest.fn(),
+        cleanup: jest.fn()
+      }
+    });
+    (server as any).providerHandles = providerHandles;
+
+    const providerKeyToRuntimeKey = new Map<string, string>();
+    providerKeyToRuntimeKey.set(providerA, 'runtime:A');
+    providerKeyToRuntimeKey.set(providerB, 'runtime:B');
+    (server as any).providerKeyToRuntimeKey = providerKeyToRuntimeKey;
+
+    (server as any).convertProviderResponseIfNeeded = jest
+      .fn()
+      .mockResolvedValueOnce({ status: 429, body: { id: 'converted_429_without_error' } })
+      .mockResolvedValueOnce({ status: 200, body: { id: 'converted_ok' } });
+
+    const result = await (server as any).executePipeline({
+      requestId: 'req_conv_429',
+      entryEndpoint: '/v1/responses',
+      headers: {},
+      body: { messages: [{ role: 'user', content: 'ping' }] },
+      metadata: { stream: false, inboundStream: false }
+    });
+
+    expect(result.status).toBe(200);
+    expect(runHubPipeline).toHaveBeenCalledTimes(2);
+    const secondMetadata = runHubPipeline.mock.calls[1][1] as Record<string, unknown>;
+    expect(secondMetadata.excludedProviderKeys).toEqual([providerA]);
+    expect(providerHandles.get('runtime:A')!.instance.processIncoming).toHaveBeenCalledTimes(1);
+    expect(providerHandles.get('runtime:B')!.instance.processIncoming).toHaveBeenCalledTimes(1);
+  });
 });

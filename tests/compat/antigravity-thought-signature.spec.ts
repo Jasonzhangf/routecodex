@@ -583,4 +583,83 @@ describe('antigravity thoughtSignature (gemini-chat)', () => {
     expect(typeof tailParts[0]?.thoughtSignature).toBe('string');
     expect((tailParts[0]?.thoughtSignature || '').length).toBeGreaterThan(10);
   });
+
+  it('enables gemini-cli thoughtSignature compat via adapter context without antigravity userAgent/requestId hints', () => {
+    resetAntigravitySessionSignatureCachesForTests();
+
+    const baseAdapterContext = {
+      providerProtocol: 'gemini-chat',
+      providerId: 'gemini-cli',
+      runtimeKey: 'gemini-cli.aliasA',
+      entryEndpoint: '/v1/responses',
+      routeId: 'longcontext'
+    } as any;
+
+    const firstRequestId = 'openai-responses-gemini-cli.aliasA.gemini-2.5-pro-gemini-2.5-pro-20260130T000000000-911';
+    const followupRequestId = 'openai-responses-gemini-cli.aliasA.gemini-2.5-pro-gemini-2.5-pro-20260130T000000000-912';
+
+    const baseRequest = {
+      model: 'gemini-2.5-pro',
+      project: 'test-project',
+      requestId: firstRequestId,
+      requestType: 'agent',
+      userAgent: 'routecodex',
+      request: {
+        contents: [
+          { role: 'user', parts: [{ text: 'session seed: gemini-cli adapter-context enablement' }] },
+          { role: 'model', parts: [{ text: 'ok' }] }
+        ],
+        tools: [{ functionDeclarations: [{ name: 'exec_command', parameters: { type: 'object' } }] }]
+      }
+    } as any;
+
+    const first = applyRequestCompat('chat:gemini-cli', baseRequest, {
+      adapterContext: { ...baseAdapterContext, requestId: firstRequestId }
+    });
+    expect(first.appliedProfile).toBe('chat:gemini-cli');
+
+    const responsePayload = {
+      candidates: [
+        {
+          content: {
+            role: 'model',
+            parts: [
+              {
+                thoughtSignature: `EiYK${'e'.repeat(80)}`,
+                functionCall: { name: 'exec_command', args: { command: 'echo hi' } }
+              }
+            ]
+          }
+        }
+      ],
+      request_id: firstRequestId
+    } as any;
+
+    const cached = applyResponseCompat('chat:gemini-cli', responsePayload, {
+      adapterContext: { ...baseAdapterContext, requestId: firstRequestId }
+    });
+    expect(cached.appliedProfile).toBe('chat:gemini-cli');
+
+    const followupRequest = {
+      ...baseRequest,
+      requestId: followupRequestId,
+      request: {
+        ...baseRequest.request,
+        contents: [
+          ...baseRequest.request.contents,
+          { role: 'model', parts: [{ functionCall: { id: 'fc_0', name: 'exec_command', args: { command: 'pwd' } } }] }
+        ]
+      }
+    } as any;
+
+    const second = applyRequestCompat('chat:gemini-cli', followupRequest, {
+      adapterContext: { ...baseAdapterContext, requestId: followupRequestId }
+    });
+    expect(second.appliedProfile).toBe('chat:gemini-cli');
+
+    const tailParts = (second.payload as any)?.request?.contents?.slice(-1)?.[0]?.parts ?? [];
+    expect(tailParts[0]?.functionCall?.name).toBe('exec_command');
+    expect(typeof tailParts[0]?.thoughtSignature).toBe('string');
+    expect((tailParts[0]?.thoughtSignature || '').length).toBeGreaterThan(10);
+  });
 });

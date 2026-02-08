@@ -724,7 +724,14 @@ export class RouteCodexHttpServer {
       this.server = this.app.listen(this.config.server.port, this.config.server.host, () => {
         this._isRunning = true;
 
-        console.log(`[RouteCodexHttpServer] Server started on ${this.config.server.host}:${this.config.server.port}`);
+        const boundAddress = this.server?.address();
+        const resolvedPort =
+          boundAddress && typeof boundAddress === 'object' && typeof boundAddress.port === 'number'
+            ? boundAddress.port
+            : this.config.server.port;
+        process.env.ROUTECODEX_SERVER_PORT = String(resolvedPort);
+
+        console.log(`[RouteCodexHttpServer] Server started on ${this.config.server.host}:${resolvedPort}`);
         resolve();
       });
 
@@ -1729,6 +1736,63 @@ export class RouteCodexHttpServer {
           response: normalized,
           pipelineMetadata: mergedMetadata
         });
+
+        // Treat upstream 429 as provider failure across protocols to avoid
+        // silently returning success and to let Virtual Router failover to other candidates.
+        // Keep existing Gemini compatibility behavior for 400/4xx thoughtSignature-like failures.
+        const convertedStatus = typeof converted.status === 'number' ? converted.status : undefined;
+        const isGlobalRetryable429 = convertedStatus === 429;
+        const isGeminiCompatFailure =
+          typeof convertedStatus === 'number' &&
+          convertedStatus >= 400 &&
+          (isAntigravityProviderKey(target.providerKey) ||
+            (typeof target.providerKey === 'string' && target.providerKey.startsWith('gemini-cli.'))) &&
+          providerProtocol === 'gemini-chat';
+        if (isGlobalRetryable429 || isGeminiCompatFailure) {
+          const bodyForError = converted.body && typeof converted.body === 'object'
+            ? (converted.body as Record<string, unknown>)
+            : undefined;
+          const errMsg =
+            bodyForError && bodyForError.error && typeof bodyForError.error === 'object'
+              ? String((bodyForError.error as any).message || bodyForError.error || '')
+              : '';
+          const statusCode = typeof convertedStatus === 'number' ? convertedStatus : 500;
+          const errorToThrow: any = new Error(errMsg && errMsg.trim().length ? errMsg : `HTTP ${statusCode}`);
+          errorToThrow.statusCode = statusCode;
+          errorToThrow.status = statusCode;
+          errorToThrow.response = { data: bodyForError };
+          try {
+            const { emitProviderError } = await import('../../../providers/core/utils/provider-error-reporter.js');
+            emitProviderError({
+              error: errorToThrow,
+              stage: 'provider.http',
+              runtime: {
+                requestId: input.requestId,
+                providerKey: target.providerKey,
+                providerId: handle.providerId,
+                providerType: handle.providerType,
+                providerFamily: handle.providerFamily,
+                providerProtocol,
+                routeName: pipelineResult.routingDecision?.routeName,
+                pipelineId: target.providerKey,
+                target,
+                runtimeKey
+              },
+              dependencies: this.getModuleDependencies(),
+              statusCode,
+              recoverable: statusCode === 429,
+              affectsHealth: true,
+              details: {
+                source: 'converted_response_status',
+                convertedStatus: statusCode,
+                wrappedErrorResponse: true
+              }
+            });
+          } catch {
+            // best-effort; never block retry/failover path
+          }
+          throw errorToThrow;
+        }
 
         const usage = this.extractUsageFromResult(converted, mergedMetadata);
         // QuotaManager listens to provider error/success events; avoid duplicating accounting here.

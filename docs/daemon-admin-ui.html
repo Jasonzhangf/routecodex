@@ -502,6 +502,19 @@
         justify-content: flex-end;
       }
 
+      .auth-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      .auth-action-btn {
+        padding: 3px 8px;
+        font-size: 11px;
+        border-radius: 8px;
+        white-space: nowrap;
+      }
+
       .truncate {
         white-space: nowrap;
         overflow: hidden;
@@ -585,10 +598,17 @@
 
       .auth-mode-tabs {
         margin: 10px 0;
+        position: relative;
+        z-index: 2;
       }
 
       .auth-mode-tabs .tab {
         min-width: 120px;
+      }
+
+      .auth-mode-panels {
+        position: relative;
+        z-index: 2;
       }
 
       .log {
@@ -1105,6 +1125,7 @@
                       <th>status</th>
                       <th>expires</th>
                       <th>secretRef</th>
+                      <th>action</th>
                     </tr>
                   </thead>
                   <tbody id="credentialsTbody"></tbody>
@@ -1202,7 +1223,7 @@
 		                <label for="quotaFilterInput">filter</label>
 		                <input id="quotaFilterInput" type="text" placeholder="providerKey contains…" style="width: 320px;" />
 		                <label><input id="quotaHideOkToggle" type="checkbox" /> hide ok</label>
-		                <label><input id="quotaOnlyRoutedTargetsToggle" type="checkbox" checked /> only routed targets</label>
+		                <label><input id="quotaOnlyRoutedTargetsToggle" type="checkbox" checked disabled /> routed models only</label>
                     <button id="quotaSelectVisibleBtn">Select visible</button>
                     <button id="quotaClearSelectionBtn">Clear selection</button>
                     <label><input id="quotaAutoRefreshToggle" type="checkbox" checked /> auto refresh</label>
@@ -1416,8 +1437,17 @@
         el.style.display = value ? "block" : "none";
         const raw = value || "";
         const max = 12000;
-        const out = raw.length > max ? raw.slice(0, max) + "\n…(truncated)" : raw;
+        const out = raw.length > max ? raw.slice(0, max) + "\n...(truncated)" : raw;
         el.textContent = out;
+      }
+
+      function appendLog(id, line) {
+        const el = $(id);
+        if (!el) return;
+        const prev = textOf(el.textContent || "").trim();
+        const nextLine = textOf(line || "").trim();
+        if (!nextLine) return;
+        setLog(id, prev ? (prev + "\n" + nextLine) : nextLine);
       }
 
       function getApiKey() {
@@ -1460,7 +1490,7 @@
       }
 
       function selectTab(name) {
-        document.querySelectorAll(".tab").forEach((btn) => {
+        document.querySelectorAll(".tab[data-tab]").forEach((btn) => {
           btn.classList.toggle("active", btn.getAttribute("data-tab") === name);
         });
         const panels = [
@@ -1480,7 +1510,7 @@
       }
 
       function getActiveTab() {
-        const active = document.querySelector(".tab.active");
+        const active = document.querySelector(".tab[data-tab].active");
         const name = active ? active.getAttribute("data-tab") : null;
         return name || "providers";
       }
@@ -2672,32 +2702,59 @@
             tr.appendChild(createCell("td", c.provider || "", "mono"));
             tr.appendChild(createCell("td", c.alias || "", "mono"));
             const statusTd = document.createElement("td");
-            statusTd.appendChild(pill(c.status || "—", (c.status || "") === "valid" ? "ok" : "warn"));
+            const statusRaw = textOf(c.status || "").trim().toLowerCase();
+            statusTd.appendChild(pill(c.status || "—", statusRaw === "valid" ? "ok" : "warn"));
             const issue = findAuthIssueForProviderAlias(c.provider, c.alias);
             if (issue) {
               statusTd.appendChild(document.createTextNode(" "));
               statusTd.appendChild(pill("verify required", "bad"));
-              if (issue.url) {
-                statusTd.appendChild(document.createTextNode(" "));
-                const a = document.createElement("a");
-                a.href = "#";
-                a.textContent = "open";
-                a.className = "mono";
-                a.addEventListener("click", (ev) => {
-                  ev.preventDefault();
-                  void openAuthIssueInCamoufox(c.provider, c.alias, issue.url);
-                });
-                statusTd.appendChild(a);
-              }
             }
             tr.appendChild(statusTd);
             tr.appendChild(createCell("td", exp, "mono"));
             tr.appendChild(createCell("td", c.secretRef || "—", "mono"));
+
+            const actionTd = document.createElement("td");
+            actionTd.className = "actions-cell";
+            const actions = document.createElement("div");
+            actions.className = "auth-actions";
+            let hasAction = false;
+
+            if (issue && issue.url) {
+              const openVerify = document.createElement("button");
+              openVerify.type = "button";
+              openVerify.className = "auth-action-btn";
+              openVerify.textContent = "Open Verify";
+              openVerify.addEventListener("click", () => {
+                void openAuthIssueInCamoufox(c.provider, c.alias, issue.url);
+              });
+              actions.appendChild(openVerify);
+              hasAction = true;
+            }
+
+            if (textOf(c.kind || "").trim().toLowerCase() === "oauth" && (statusRaw === "expired" || statusRaw === "invalid")) {
+              const recover = document.createElement("button");
+              recover.type = "button";
+              recover.className = "auth-action-btn primary";
+              recover.textContent = "Recover";
+              recover.addEventListener("click", () => {
+                void runCredentialAutoRecovery(c);
+              });
+              actions.appendChild(recover);
+              hasAction = true;
+            }
+
+            if (hasAction) {
+              actionTd.appendChild(actions);
+            } else {
+              actionTd.classList.add("mono");
+              actionTd.textContent = "—";
+            }
+            tr.appendChild(actionTd);
             body.appendChild(tr);
           }
           updateOauthAuthIssueHint();
         } catch (e) {
-          body.appendChild(createErrorRow(6, e && e.message ? e.message : e));
+          body.appendChild(createErrorRow(7, e && e.message ? e.message : e));
           updateOauthAuthIssueHint();
         }
       }
@@ -2727,6 +2784,7 @@
       async function authorizeOauth(mode = "manual") {
         const safeMode = mode === "auto" ? "auto" : "manual";
         setLog("credentialOpLog", "");
+        appendLog("credentialOpLog", `[${safeMode}] start authorize request ...`);
         const provider = $("oauthProviderSelect").value;
         const alias = ($("oauthAuthAliasInput").value || "default").trim() || "default";
         updateOauthAuthIssueHint();
@@ -2759,6 +2817,167 @@
           }
         } catch (e) {
           setLog("credentialOpLog", `[${safeMode}] Authorize failed: ${e.message}`);
+        }
+      }
+
+      function setOauthContext(providerRaw, aliasRaw) {
+        const provider = textOf(providerRaw || "").trim().toLowerCase();
+        const alias = textOf(aliasRaw || "default").trim() || "default";
+        const providerSelect = $("oauthProviderSelect");
+        if (providerSelect) {
+          const optionExists = Array.from(providerSelect.options || []).some((opt) => textOf(opt.value).trim().toLowerCase() === provider);
+          if (optionExists) {
+            providerSelect.value = provider;
+          }
+        }
+        const aliasInput = $("oauthAuthAliasInput");
+        if (aliasInput) {
+          aliasInput.value = alias;
+        }
+        updateOauthAuthIssueHint();
+      }
+
+      async function openManualAuthFallback(providerRaw, aliasRaw, reason) {
+        const provider = textOf(providerRaw || "").trim().toLowerCase();
+        const alias = textOf(aliasRaw || "default").trim() || "default";
+        selectTab("credentials");
+        setOauthMode("manual");
+        setOauthContext(provider, alias);
+        if (reason) {
+          appendLog("credentialOpLog", reason);
+        }
+
+        appendLog("credentialOpLog", "[step3] 自动启动 Manual Auth（headful）…");
+        try {
+          await apiFetch("/config/settings", {
+            method: "PUT",
+            body: JSON.stringify({ oauthBrowser: "camoufox" })
+          });
+        } catch (e) {
+          appendLog("credentialOpLog", "[step3] set oauthBrowser=camoufox failed: " + (e && e.message ? e.message : String(e)));
+        }
+
+        try {
+          const out = await apiFetch("/daemon/oauth/authorize", {
+            method: "POST",
+            body: JSON.stringify({
+              provider,
+              alias,
+              mode: "manual",
+              openBrowser: true,
+              forceReauthorize: true,
+              headful: true
+            })
+          });
+          appendLog("credentialOpLog", "[step3] manual auth started: tokenFile=" + textOf(out && out.tokenFile ? out.tokenFile : "—"));
+          appendLog("credentialOpLog", "[manual] 已尝试弹出认证窗口；若未自动完成，请在弹出的 portal 完成登录。");
+          toast("Manual auth started: " + provider + "." + alias, "ok");
+          return true;
+        } catch (e) {
+          appendLog("credentialOpLog", "[step3] manual auth auto-start failed: " + (e && e.message ? e.message : String(e)));
+          appendLog("credentialOpLog", "[manual] 请点击 Start Manual Auth 重试。");
+        }
+
+        try {
+          const btn = $("oauthAuthorizeManualBtn");
+          if (btn && typeof btn.scrollIntoView === "function") {
+            btn.scrollIntoView({ behavior: "smooth", block: "center" });
+          }
+          if (btn && typeof btn.focus === "function") {
+            btn.focus();
+          }
+        } catch {
+          // ignore focus/scroll failures
+        }
+        return false;
+      }
+
+      async function runCredentialAutoRecovery(cred) {
+        const id = textOf(cred && cred.id ? cred.id : "").trim();
+        const provider = textOf(cred && cred.provider ? cred.provider : "").trim().toLowerCase();
+        const alias = textOf(cred && cred.alias ? cred.alias : "default").trim() || "default";
+        if (!id || !provider) {
+          setLog("credentialOpLog", "[recover] missing credential id/provider");
+          return;
+        }
+
+        selectTab("credentials");
+        setOauthContext(provider, alias);
+        setLog("credentialOpLog", "[recover] " + provider + "." + alias + " (id=" + id + ")");
+
+        let refreshOk = false;
+        appendLog("credentialOpLog", "[step1] 尝试 refresh token …");
+        try {
+          const out = await apiFetch("/daemon/credentials/" + encodeURIComponent(id) + "/refresh", {
+            method: "POST"
+          });
+          appendLog(
+            "credentialOpLog",
+            "[step1] refresh result: status=" + textOf(out && out.status ? out.status : "—") + " refreshed=" + (out && out.refreshed === true ? "yes" : "no")
+          );
+          await refreshCredentials();
+          const latest = findCredentialForSelection(provider, alias);
+          const latestStatus = textOf(latest && latest.status ? latest.status : "").trim().toLowerCase();
+          const exp = Number(latest && latest.expiresInSec != null ? latest.expiresInSec : NaN);
+          if (latestStatus === "valid" && (!Number.isFinite(exp) || exp > 0)) {
+            refreshOk = true;
+            appendLog("credentialOpLog", "[done] refresh 后已恢复有效 token。");
+            toast("OAuth refreshed: " + provider + "." + alias, "ok");
+          }
+        } catch (e) {
+          appendLog("credentialOpLog", "[step1] refresh failed: " + (e && e.message ? e.message : String(e)));
+        }
+        if (refreshOk) {
+          return;
+        }
+
+        appendLog("credentialOpLog", "[step2] refresh 未恢复，启动 Camoufox auto oauth …");
+        try {
+          await apiFetch("/config/settings", {
+            method: "PUT",
+            body: JSON.stringify({ oauthBrowser: "camoufox" })
+          });
+        } catch (e) {
+          appendLog("credentialOpLog", "[step2] set oauthBrowser=camoufox failed: " + (e && e.message ? e.message : String(e)));
+        }
+
+        try {
+          const out = await apiFetch("/daemon/oauth/authorize", {
+            method: "POST",
+            body: JSON.stringify({
+              provider,
+              alias,
+              mode: "auto",
+              openBrowser: true,
+              forceReauthorize: false,
+              headful: false
+            })
+          });
+          appendLog("credentialOpLog", "[step2] auto oauth ok: tokenFile=" + textOf(out && out.tokenFile ? out.tokenFile : "—"));
+          await refreshCredentials();
+          if (provider === "antigravity") {
+            try {
+              await refreshQuota();
+              await refreshCredentials();
+            } catch {
+              // ignore quota refresh errors in recovery path
+            }
+          }
+          const latest = findCredentialForSelection(provider, alias);
+          const latestStatus = textOf(latest && latest.status ? latest.status : "").trim().toLowerCase();
+          if (latestStatus === "valid") {
+            appendLog("credentialOpLog", "[done] auto oauth 后 token 已恢复有效。");
+            toast("OAuth recovered: " + provider + "." + alias, "ok");
+            return;
+          }
+          appendLog("credentialOpLog", "[step2] auto oauth 执行完成，但状态仍非 valid。");
+        } catch (e) {
+          appendLog("credentialOpLog", "[step2] auto oauth failed: " + (e && e.message ? e.message : String(e)));
+        }
+
+        const manualStarted = await openManualAuthFallback(provider, alias, "[step3] 自动恢复失败，切换到手动认证。");
+        if (!manualStarted) {
+          toast("Auto recovery failed, switched to manual auth (" + provider + "." + alias + ").");
         }
       }
 
@@ -2873,29 +3092,69 @@
 	        return false;
 	      }
 
-	      function resolveTargetToProviderKeys(target) {
-	        const raw = textOf(target).trim();
-	        if (!raw) return [];
-	        const list = Array.isArray(UI.quotaProviders) ? UI.quotaProviders : [];
-	        const keys = list.map((p) => textOf(p && p.providerKey ? p.providerKey : "")).filter(Boolean);
-	        const known = new Set(keys);
-	        if (known.has(raw)) return [raw];
-	        const dot = raw.indexOf(".");
-	        if (dot <= 0) return [];
-	        const providerId = raw.slice(0, dot);
-	        const modelId = raw.slice(dot + 1);
-	        if (!providerId || !modelId) return [];
-	        const prefix = `${providerId}.`;
-	        const suffix = `.${modelId}`;
-	        const out = [];
-	        for (const k of keys) {
-	          if (k.startsWith(prefix) && k.endsWith(suffix)) out.push(k);
-	        }
-	        out.sort((a, b) => a.localeCompare(b));
-	        return out;
-	      }
+	      function resolveTargetToProviderKeys(target, providersOverride) {
+        const raw = textOf(target).trim();
+        if (!raw) return [];
+        const list = Array.isArray(providersOverride)
+          ? providersOverride
+          : (Array.isArray(UI.quotaProviders) ? UI.quotaProviders : []);
+        const keys = list.map((p) => textOf(p && p.providerKey ? p.providerKey : "")).filter(Boolean);
+        const known = new Set(keys);
+        if (!known.size) return [];
+        if (known.has(raw)) return [raw];
 
-	      function getQuotaStateByProviderKey(providerKey) {
+        const candidates = new Set();
+        const bracketMatch = raw.match(/^([^.[\]]+)\[([^\]]+)\]\.(.+)$/);
+        if (bracketMatch) {
+          const providerId = textOf(bracketMatch[1]).trim();
+          const authAlias = textOf(bracketMatch[2]).trim();
+          const modelId = textOf(bracketMatch[3]).trim();
+          if (providerId && authAlias && modelId) {
+            candidates.add(providerId + "." + authAlias + "." + modelId);
+          }
+        }
+
+        const dotted = raw.split(".").filter(Boolean);
+        if (dotted.length >= 3) {
+          const providerId = dotted[0];
+          const modelId = dotted.slice(2).join(".");
+          if (providerId && modelId) {
+            candidates.add(raw);
+            candidates.add(providerId + "." + modelId);
+          }
+        } else if (dotted.length === 2) {
+          candidates.add(raw);
+        }
+
+        for (const c of candidates) {
+          if (known.has(c)) return [c];
+        }
+
+        const out = [];
+        const addByProviderModel = (providerId, modelId) => {
+          if (!providerId || !modelId) return;
+          const prefix = providerId + ".";
+          const suffix = "." + modelId;
+          for (const k of keys) {
+            if (k.startsWith(prefix) && k.endsWith(suffix)) out.push(k);
+          }
+        };
+
+        if (bracketMatch) {
+          addByProviderModel(textOf(bracketMatch[1]).trim(), textOf(bracketMatch[3]).trim());
+        }
+
+        if (dotted.length >= 2) {
+          addByProviderModel(dotted[0], dotted.slice(1).join("."));
+          if (dotted.length >= 3) {
+            addByProviderModel(dotted[0], dotted.slice(2).join("."));
+          }
+        }
+
+        return Array.from(new Set(out)).sort((a, b) => a.localeCompare(b));
+      }
+
+      function getQuotaStateByProviderKey(providerKey) {
 	        const map = UI.quotaProviderMap instanceof Map ? UI.quotaProviderMap : null;
 	        if (map && map.has(providerKey)) return map.get(providerKey);
 	        const list = Array.isArray(UI.quotaProviders) ? UI.quotaProviders : [];
@@ -3378,31 +3637,13 @@
       function resolveRoutedProviderKeys(routingTargets, providers) {
         const targets = routingTargets instanceof Set ? Array.from(routingTargets) : [];
         const list = Array.isArray(providers) ? providers : [];
-        const keys = [];
-        for (const p of list) {
-          const k = textOf(p && p.providerKey ? p.providerKey : "");
-          if (k) keys.push(k);
-        }
-        const known = new Set(keys);
         const resolved = new Set();
-        if (!targets.length || !known.size) return resolved;
+        if (!targets.length || !list.length) return resolved;
 
         for (const t of targets) {
-          const target = textOf(t);
-          if (!target) continue;
-          if (known.has(target)) {
-            resolved.add(target);
-            continue;
-          }
-          const dot = target.indexOf(".");
-          if (dot <= 0) continue;
-          const providerId = target.slice(0, dot);
-          const modelId = target.slice(dot + 1);
-          if (!providerId || !modelId) continue;
-          const prefix = `${providerId}.`;
-          const suffix = `.${modelId}`;
-          for (const k of known) {
-            if (k.startsWith(prefix) && k.endsWith(suffix)) resolved.add(k);
+          const mapped = resolveTargetToProviderKeys(t, list);
+          for (const key of mapped) {
+            if (key) resolved.add(key);
           }
         }
         return resolved;
@@ -3557,16 +3798,16 @@
 
 	        const filter = textOf($("quotaFilterInput").value || "").trim().toLowerCase();
 	        const hideOk = Boolean($("quotaHideOkToggle").checked);
-	        const onlyRoutedTargets = Boolean($("quotaOnlyRoutedTargetsToggle").checked);
-        const routedProviderKeys = onlyRoutedTargets ? resolveRoutedProviderKeys(UI.routingTargets, UI.quotaProviders) : null;
+        const routedProviderKeys = resolveRoutedProviderKeys(UI.routingTargets, UI.quotaProviders);
 
         const list = Array.isArray(UI.quotaProviders) ? UI.quotaProviders : [];
         const next = list
           .filter((q) => {
-            const key = textOf(q && q.providerKey ? q.providerKey : "").toLowerCase();
+            const keyRaw = textOf(q && q.providerKey ? q.providerKey : "");
+            const key = keyRaw.toLowerCase();
             if (filter && !key.includes(filter)) return false;
             if (hideOk && q && q.inPool === true) return false;
-            if (routedProviderKeys && !routedProviderKeys.has(textOf(q && q.providerKey ? q.providerKey : ""))) return false;
+            if (!routedProviderKeys.has(keyRaw)) return false;
             return true;
           })
           .slice();
@@ -4063,7 +4304,7 @@
             body.appendChild(tr);
           }
         } catch (e) {
-          body.appendChild(createErrorRow(6, e && e.message ? e.message : e));
+          body.appendChild(createErrorRow(7, e && e.message ? e.message : e));
         }
       }
 
@@ -4173,7 +4414,7 @@
       }
 
       // Bind events
-      document.querySelectorAll(".tab").forEach((btn) => {
+      document.querySelectorAll(".tab[data-tab]").forEach((btn) => {
         btn.addEventListener("click", () => selectTab(btn.getAttribute("data-tab")));
       });
 
@@ -4455,10 +4696,22 @@
 
       $("refreshCredentialsBtn").addEventListener("click", refreshCredentials);
       $("saveOauthBrowserBtn").addEventListener("click", saveSettings);
-      $("oauthModeManualBtn").addEventListener("click", () => setOauthMode("manual"));
-      $("oauthModeAutoBtn").addEventListener("click", () => setOauthMode("auto"));
-      $("oauthAuthorizeManualBtn").addEventListener("click", () => void authorizeOauth("manual"));
-      $("oauthAuthorizeAutoBtn").addEventListener("click", () => void authorizeOauth("auto"));
+      $("oauthModeManualBtn").addEventListener("click", () => {
+        setOauthMode("manual");
+        appendLog("credentialOpLog", "[ui] switched to manual mode");
+      });
+      $("oauthModeAutoBtn").addEventListener("click", () => {
+        setOauthMode("auto");
+        appendLog("credentialOpLog", "[ui] switched to auto mode");
+      });
+      $("oauthAuthorizeManualBtn").addEventListener("click", () => {
+        appendLog("credentialOpLog", "[ui] click Start Manual Auth");
+        void authorizeOauth("manual");
+      });
+      $("oauthAuthorizeAutoBtn").addEventListener("click", () => {
+        appendLog("credentialOpLog", "[ui] click Run Auto Auth");
+        void authorizeOauth("auto");
+      });
       $("oauthVerifyOpenBtn").addEventListener("click", () => void openSelectedVerifyUrl());
       $("oauthVerifyCopyBtn").addEventListener("click", () => void copySelectedVerifyUrl());
       $("oauthVerifyRecheckBtn").addEventListener("click", async () => {

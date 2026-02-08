@@ -8,6 +8,7 @@ export type OAuthRepairCooldownRecord = {
   providerType: string;
   tokenFile: string;
   reason: OAuthRepairCooldownReason;
+  attemptCount: number;
   updatedAt: number;
 };
 
@@ -86,6 +87,16 @@ function resolveCooldownMs(reason: OAuthRepairCooldownReason): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 30 * 60_000;
 }
 
+function resolveMaxAttempts(): number {
+  const raw = String(
+    process.env.ROUTECODEX_OAUTH_INTERACTIVE_MAX_ATTEMPTS ||
+      process.env.RCC_OAUTH_INTERACTIVE_MAX_ATTEMPTS ||
+      '3'
+  ).trim();
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 3;
+}
+
 export async function shouldSkipInteractiveOAuthRepair(args: {
   providerType: string;
   tokenFile: string;
@@ -101,6 +112,19 @@ export async function shouldSkipInteractiveOAuthRepair(args: {
   const record = state.records[key];
   if (!record || typeof record.updatedAt !== 'number' || !Number.isFinite(record.updatedAt)) {
     return { skip: false, record: null };
+  }
+  const maxAttempts = resolveMaxAttempts();
+  const attemptCount =
+    typeof record.attemptCount === 'number' && Number.isFinite(record.attemptCount) && record.attemptCount > 0
+      ? Math.floor(record.attemptCount)
+      : 0;
+  if (attemptCount >= maxAttempts) {
+    return { skip: true, record };
+  }
+  // Generic token-invalid errors should retry interactive flow until max attempts is reached.
+  // Do not apply long cooldown windows here, otherwise reauth may never be surfaced in practice.
+  if (args.reason === 'generic') {
+    return { skip: false, record };
   }
   const cooldownMs = resolveCooldownMs(args.reason);
   const elapsed = Date.now() - record.updatedAt;
@@ -122,12 +146,37 @@ export async function markInteractiveOAuthRepairAttempt(args: {
   }
   const key = buildKey(pt, tokenFile);
   const state = await readState();
+  const existing = state.records[key];
+  const prevAttempts =
+    existing && typeof existing.attemptCount === 'number' && Number.isFinite(existing.attemptCount) && existing.attemptCount > 0
+      ? Math.floor(existing.attemptCount)
+      : 0;
   state.records[key] = {
     providerType: pt,
     tokenFile,
     reason: args.reason,
+    attemptCount: prevAttempts + 1,
     updatedAt: Date.now()
   };
+  state.updatedAt = Date.now();
+  await writeState(state);
+}
+
+export async function markInteractiveOAuthRepairSuccess(args: {
+  providerType: string;
+  tokenFile: string;
+}): Promise<void> {
+  const pt = normalizeProviderType(args.providerType);
+  const tokenFile = normalizeTokenFile(args.tokenFile);
+  if (!pt || !tokenFile) {
+    return;
+  }
+  const key = buildKey(pt, tokenFile);
+  const state = await readState();
+  if (!state.records[key]) {
+    return;
+  }
+  delete state.records[key];
   state.updatedAt = Date.now();
   await writeState(state);
 }

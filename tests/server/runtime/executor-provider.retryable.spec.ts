@@ -16,6 +16,14 @@ describe('shouldRetryProviderError', () => {
     expect(shouldRetryProviderError(err)).toBe(true);
   });
 
+  it('retries iflow business 514 model error', () => {
+    const err: any = new Error('HTTP 400: iFlow business error (514): model error');
+    err.statusCode = 400;
+    err.providerFamily = 'iflow';
+    err.response = { data: { error: { code: '514', message: 'model error' } } };
+    expect(shouldRetryProviderError(err)).toBe(true);
+  });
+
   it('does not retry on generic 400 errors', () => {
     const err: any = new Error('HTTP 400: {"error":{"message":"bad request"}}');
     err.statusCode = 400;

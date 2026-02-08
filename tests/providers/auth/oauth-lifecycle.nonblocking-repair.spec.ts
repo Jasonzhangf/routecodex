@@ -140,4 +140,53 @@ describe('oauth-lifecycle: non-blocking upstream repair', () => {
     expect(callArgs.some((o) => o && o.openBrowser === false)).toBe(true);
     expect(callArgs.some((o) => o && o.openBrowser === true)).toBe(true);
   });
+
+  it('stops reauth after three interactive attempts (no further ensureValid calls)', async () => {
+    jest.resetModules();
+    const prevHome = process.env.HOME;
+    const prevMax = process.env.ROUTECODEX_OAUTH_INTERACTIVE_MAX_ATTEMPTS;
+    const os = await import('node:os');
+    const fs = await import('node:fs/promises');
+    const path = await import('node:path');
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-oauth-repair-limit-'));
+    process.env.HOME = tmp;
+    process.env.ROUTECODEX_OAUTH_INTERACTIVE_MAX_ATTEMPTS = '3';
+
+    const ensureValid = jest.fn(async (_providerType: string, _auth: any, opts: any) => {
+      if (opts && opts.openBrowser === false) {
+        throw new Error('refresh failed');
+      }
+      throw new Error('interactive failed');
+    });
+
+    const { handleUpstreamInvalidOAuthToken } = await import('../../../src/providers/auth/oauth-lifecycle.js');
+
+    const err = { statusCode: 401, message: 'HTTP 401: unauthorized (invalid_token)' };
+    const tokenFile = path.join(tmp, 'auth', `qwen-oauth-${Date.now()}.json`);
+
+    for (let i = 0; i < 3; i += 1) {
+      await handleUpstreamInvalidOAuthToken(
+        'qwen',
+        { type: 'oauth', tokenFile } as any,
+        err as any,
+        { allowBlocking: false, ensureValidOAuthToken: ensureValid as any }
+      );
+    }
+
+    const callCountAfterThree = ensureValid.mock.calls.length;
+
+    await handleUpstreamInvalidOAuthToken(
+      'qwen',
+      { type: 'oauth', tokenFile } as any,
+      err as any,
+      { allowBlocking: false, ensureValidOAuthToken: ensureValid as any }
+    );
+
+    expect(ensureValid.mock.calls.length).toBe(callCountAfterThree);
+
+    if (prevMax === undefined) delete process.env.ROUTECODEX_OAUTH_INTERACTIVE_MAX_ATTEMPTS;
+    else process.env.ROUTECODEX_OAUTH_INTERACTIVE_MAX_ATTEMPTS = prevMax;
+    if (prevHome === undefined) delete process.env.HOME;
+    else process.env.HOME = prevHome;
+  });
 });
