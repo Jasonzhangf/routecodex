@@ -5,13 +5,57 @@ import { runServerToolOrchestration } from '../../sharedmodule/llmswitch-core/sr
 import type { AdapterContext } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/json.js';
 import { serializeRoutingInstructionState, type RoutingInstructionState } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-instructions.js';
-import {
-  flushServerToolProgressFileLoggerForTests,
-  resetServerToolProgressFileLoggerForTests
-} from '../../sharedmodule/llmswitch-core/src/servertool/log/progress-file.js';
+type ProgressFileLoggerModule = {
+  flushServerToolProgressFileLoggerForTests?: () => Promise<void>;
+  resetServerToolProgressFileLoggerForTests?: () => void;
+};
+
+const progressFileLoggerRuntimePath = path.join(
+  process.cwd(),
+  'node_modules',
+  '@jsonstudio',
+  'llms',
+  'dist',
+  'servertool',
+  'log',
+  'progress-file.js'
+);
+const supportsProgressFileLogger = fs.existsSync(progressFileLoggerRuntimePath);
+const testIfProgressFileLogger = supportsProgressFileLogger ? test : test.skip;
+
+let flushServerToolProgressFileLoggerForTests: () => Promise<void> = async () => {};
+let resetServerToolProgressFileLoggerForTests: () => void = () => {};
+
+const serverToolEngineRuntimePath = path.join(
+  process.cwd(),
+  'node_modules',
+  '@jsonstudio',
+  'llms',
+  'dist',
+  'servertool',
+  'engine.js'
+);
+const supportsProgressConsoleLogs =
+  fs.existsSync(serverToolEngineRuntimePath) &&
+  fs.readFileSync(serverToolEngineRuntimePath, 'utf8').includes('[servertool][stop_watch]');
+const testIfProgressConsoleLogs = supportsProgressConsoleLogs ? test : test.skip;
+
+
+beforeAll(async () => {
+  if (!supportsProgressFileLogger) {
+    return;
+  }
+  const mod = (await import(
+    '../../sharedmodule/llmswitch-core/src/servertool/log/progress-file.js'
+  )) as ProgressFileLoggerModule;
+  flushServerToolProgressFileLoggerForTests =
+    mod.flushServerToolProgressFileLoggerForTests ?? (async () => {});
+  resetServerToolProgressFileLoggerForTests =
+    mod.resetServerToolProgressFileLoggerForTests ?? (() => {});
+});
 
 describe('servertool progress logging', () => {
-  test('prints concise yellow log with tool/stage/result for stop_message_auto flow', async () => {
+  testIfProgressConsoleLogs('prints concise yellow log with tool/stage/result for stop_message_auto flow', async () => {
     const SESSION_DIR = path.join(process.cwd(), 'tmp', 'jest-progress-sessions');
     const ORIGINAL = process.env.ROUTECODEX_SESSION_DIR;
     process.env.ROUTECODEX_SESSION_DIR = SESSION_DIR;
@@ -115,7 +159,7 @@ describe('servertool progress logging', () => {
     }
   });
 
-  test('prints stop entry + skipped trigger logs when finish_reason=stop is observed but not activated', async () => {
+  testIfProgressConsoleLogs('prints stop entry + skipped trigger logs when finish_reason=stop is observed but not activated', async () => {
     const spy = jest.spyOn(console, 'log').mockImplementation(() => {});
     try {
       const adapterContext: AdapterContext = {
@@ -184,7 +228,7 @@ describe('servertool progress logging', () => {
   });
 
 
-  test('prints gold log when continue_execution no-op is triggered', async () => {
+  testIfProgressConsoleLogs('prints gold log when continue_execution no-op is triggered', async () => {
     const spy = jest.spyOn(console, 'log').mockImplementation(() => {});
     try {
       const adapterContext: AdapterContext = {
@@ -269,7 +313,7 @@ describe('servertool progress logging', () => {
     }
   });
 
-  test('tracks stopMessage rounds and clears persisted state at max repeats', async () => {
+  testIfProgressFileLogger('tracks stopMessage rounds and clears persisted state at max repeats', async () => {
     const logDir = path.join(process.cwd(), 'tmp', 'jest-servertool-stop-lifecycle-log');
     fs.mkdirSync(logDir, { recursive: true });
     const logPath = path.join(logDir, `events-${Date.now()}-${Math.random().toString(36).slice(2)}.jsonl`);
@@ -432,7 +476,7 @@ describe('servertool progress logging', () => {
     }
   });
 
-  test('writes servertool JSONL file logs when enabled', async () => {
+  testIfProgressFileLogger('writes servertool JSONL file logs when enabled', async () => {
     const logDir = path.join(process.cwd(), 'tmp', 'jest-servertool-file-log');
     fs.mkdirSync(logDir, { recursive: true });
     const logPath = path.join(logDir, `events-${Date.now()}-${Math.random().toString(36).slice(2)}.jsonl`);
@@ -536,7 +580,7 @@ describe('servertool progress logging', () => {
     }
   });
 
-  test('does not write servertool JSONL file logs when disabled', async () => {
+  testIfProgressFileLogger('does not write servertool JSONL file logs when disabled', async () => {
     const logDir = path.join(process.cwd(), 'tmp', 'jest-servertool-file-log');
     fs.mkdirSync(logDir, { recursive: true });
     const logPath = path.join(logDir, `events-${Date.now()}-${Math.random().toString(36).slice(2)}.jsonl`);

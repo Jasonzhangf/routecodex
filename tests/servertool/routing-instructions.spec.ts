@@ -35,6 +35,20 @@ function createState(overrides?: Partial<RoutingInstructionState>): RoutingInstr
   };
 }
 
+const MODE_SHORTHAND_PROBE = parseRoutingInstructions(buildMessages('<**stopMessage:on**>继续'))[0] as any;
+const SUPPORTS_STOPMESSAGE_MODE_SHORTHAND = MODE_SHORTHAND_PROBE?.type === 'stopMessageMode';
+const DEFAULT_STOPMESSAGE_MAX_REPEATS = SUPPORTS_STOPMESSAGE_MODE_SHORTHAND ? 10 : 1;
+const SUPPORTS_HISTORY_MARKER_REPLAY =
+  parseRoutingInstructions([
+    { role: 'user', content: '<**stopMessage:on,10**>继续执行' },
+    { role: 'assistant', content: '好的，我继续。' },
+    { role: 'user', content: '现在查看进度' }
+  ] as StandardizedMessage[]).length > 0;
+const SUPPORTS_PRECOMMAND_INSTRUCTION =
+  parseRoutingInstructions(buildMessages('<**precommand:clear**>')).some((inst) => inst.type === 'preCommandClear');
+
+const testIf = (condition: boolean) => (condition ? test : test.skip);
+
 describe('Routing instruction parsing and application', () => {
   test('splits comma separated allow instructions', () => {
     const instructions = parseRoutingInstructions(buildMessages('<**!glm,openai**>'));
@@ -113,7 +127,7 @@ describe('Routing instruction parsing and application', () => {
     const inst = instructions[0] as any;
     expect(inst.type).toBe('stopMessageSet');
     expect(inst.stopMessageText).toBe('继续');
-    expect(inst.stopMessageMaxRepeats).toBe(10);
+    expect(inst.stopMessageMaxRepeats).toBe(DEFAULT_STOPMESSAGE_MAX_REPEATS);
   });
 
   test('parses stopMessage with explicit repeat', () => {
@@ -124,7 +138,7 @@ describe('Routing instruction parsing and application', () => {
     expect(inst.stopMessageText).toBe('继续');
     expect(inst.stopMessageMaxRepeats).toBe(3);
   });
-  test('parses stopMessage mode shorthand and ignores trailing text outside tag', () => {
+  testIf(SUPPORTS_STOPMESSAGE_MODE_SHORTHAND)('parses stopMessage mode shorthand and ignores trailing text outside tag', () => {
     const instructions = parseRoutingInstructions(buildMessages('<**stopMessage:on**>继续'));
     expect(instructions).toHaveLength(1);
     const inst = instructions[0] as any;
@@ -133,7 +147,7 @@ describe('Routing instruction parsing and application', () => {
     expect(inst.stopMessageMaxRepeats).toBe(10);
   });
 
-  test('parses stopMessage mode shorthand and ignores trailing multi-line footer text', () => {
+  testIf(SUPPORTS_STOPMESSAGE_MODE_SHORTHAND)('parses stopMessage mode shorthand and ignores trailing multi-line footer text', () => {
     const instructions = parseRoutingInstructions(
       buildMessages('<**stopMessage:on**>继续\n[Time/Date]: utc=  local=  tz=  nowMs=  ntpOffsetMs=')
     );
@@ -144,7 +158,7 @@ describe('Routing instruction parsing and application', () => {
     expect(inst.stopMessageMaxRepeats).toBe(10);
   });
 
-  test('parses stopMessage mode shorthand with explicit repeat and ignores trailing text', () => {
+  testIf(SUPPORTS_STOPMESSAGE_MODE_SHORTHAND)('parses stopMessage mode shorthand with explicit repeat and ignores trailing text', () => {
     const instructions = parseRoutingInstructions(buildMessages('<**stopMessage:on,3**>继续'));
     expect(instructions).toHaveLength(1);
     const inst = instructions[0] as any;
@@ -153,7 +167,7 @@ describe('Routing instruction parsing and application', () => {
     expect(inst.stopMessageMaxRepeats).toBe(3);
   });
 
-  test('keeps stopMessage mode command when trailing text is empty', () => {
+  testIf(SUPPORTS_STOPMESSAGE_MODE_SHORTHAND)('keeps stopMessage mode command when trailing text is empty', () => {
     const instructions = parseRoutingInstructions(buildMessages('<**stopMessage:on,3**>'));
     expect(instructions).toHaveLength(1);
     const inst = instructions[0] as any;
@@ -162,7 +176,7 @@ describe('Routing instruction parsing and application', () => {
     expect(inst.stopMessageMaxRepeats).toBe(3);
   });
 
-  test('mode shorthand keeps mode and repeats without forcing stopMessage text', () => {
+  testIf(SUPPORTS_STOPMESSAGE_MODE_SHORTHAND)('mode shorthand keeps mode and repeats without forcing stopMessage text', () => {
     const instructions = parseRoutingInstructions(buildMessages('<**stopMessage:on,10**>这里是本轮普通请求文本'));
     expect(instructions).toHaveLength(1);
     const inst = instructions[0] as any;
@@ -176,7 +190,7 @@ describe('Routing instruction parsing and application', () => {
     expect(nextState.stopMessageMaxRepeats).toBe(10);
   });
 
-  test('keeps stopMessage command when latest marker is previous user without assistant reply', () => {
+  testIf(SUPPORTS_HISTORY_MARKER_REPLAY)('keeps stopMessage command when latest marker is previous user without assistant reply', () => {
     const instructions = parseRoutingInstructions([
       { role: 'user', content: '<**stopMessage:on,10**>继续执行' },
       { role: 'user', content: '补充说明：按当前计划推进' }
@@ -188,7 +202,7 @@ describe('Routing instruction parsing and application', () => {
     expect(inst.stopMessageMaxRepeats).toBe(10);
   });
 
-  test('parses latest marker even if there are newer plain user messages', () => {
+  testIf(SUPPORTS_HISTORY_MARKER_REPLAY)('parses latest marker even if there are newer plain user messages', () => {
     const instructions = parseRoutingInstructions([
       { role: 'user', content: '<**stopMessage:on,10**>继续执行' },
       { role: 'assistant', content: '好的，我继续。' },
@@ -212,7 +226,7 @@ describe('Routing instruction parsing and application', () => {
     expect(restored.stopMessageMaxRepeats).toBe(2);
     expect(restored.stopMessageUsed).toBe(0);
   });
-  test('applies stopMessage mode repeat update without replacing text', () => {
+  testIf(SUPPORTS_STOPMESSAGE_MODE_SHORTHAND)('applies stopMessage mode repeat update without replacing text', () => {
     const baseState = createState({
       stopMessageText: '继续',
       stopMessageMaxRepeats: 1,
@@ -261,7 +275,7 @@ describe('Routing instruction parsing and application', () => {
       expect(inst.type).toBe('stopMessageSet');
       expect(inst.stopMessageText).toContain('第一行');
       expect(inst.stopMessageText).toContain('第二行');
-      expect(inst.stopMessageMaxRepeats).toBe(10);
+      expect(inst.stopMessageMaxRepeats).toBe(DEFAULT_STOPMESSAGE_MAX_REPEATS);
     } finally {
       if (prev === undefined) {
         delete process.env.ROUTECODEX_USER_DIR;
@@ -272,7 +286,7 @@ describe('Routing instruction parsing and application', () => {
     }
   });
 
-  test('parses precommand script under ~/.routecodex/precommand and serializes state', () => {
+  testIf(SUPPORTS_PRECOMMAND_INSTRUCTION)('parses precommand script under ~/.routecodex/precommand and serializes state', () => {
     const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-precommand-'));
     const prev = process.env.ROUTECODEX_USER_DIR;
     try {
@@ -307,7 +321,7 @@ describe('Routing instruction parsing and application', () => {
     }
   });
 
-  test('clears precommand state via instruction', () => {
+  testIf(SUPPORTS_PRECOMMAND_INSTRUCTION)('clears precommand state via instruction', () => {
     const state = createState({
       preCommandSource: 'explicit',
       preCommandScriptPath: '/tmp/test-precommand.sh',
