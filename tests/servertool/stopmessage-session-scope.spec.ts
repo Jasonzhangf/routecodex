@@ -50,7 +50,7 @@ describe('stopMessage is session-scoped', () => {
     const engine = buildEngine();
     const request: StandardizedRequest = {
       model: 'gpt-test',
-      messages: [{ role: 'user', content: '<**stopMessage:\"继续\"**>\\nhello' }],
+      messages: [{ role: 'user', content: '<**stopMessage:"继续"**>\\nhello' }],
       tools: [],
       parameters: {}
     } as any;
@@ -69,7 +69,7 @@ describe('stopMessage is session-scoped', () => {
     const sessionId = 'sess-123';
     const request: StandardizedRequest = {
       model: 'gpt-test',
-      messages: [{ role: 'user', content: '<**stopMessage:\"继续\",2**>\\nhello' }],
+      messages: [{ role: 'user', content: '<**stopMessage:"继续",2**>\\nhello' }],
       tools: [],
       parameters: {}
     } as any;
@@ -89,12 +89,151 @@ describe('stopMessage is session-scoped', () => {
     expect(fs.existsSync(path.join(SESSION_DIR, 'conversation-conv-should-not-be-used.json'))).toBe(false);
   });
 
+  test('mode-only stopMessage:on persists default max without capturing plain text', () => {
+    const engine = buildEngine();
+    const sessionId = 'sess-mode-only-default';
+    const request: StandardizedRequest = {
+      model: 'gpt-test',
+      messages: [{ role: 'user', content: '<**stopMessage:on**>继续执行当前任务' }],
+      tools: [],
+      parameters: {}
+    } as any;
+
+    engine.route(request, {
+      requestId: 'req_stopmessage_mode_only_default',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      sessionId,
+      routeHint: 'default'
+    } as any);
+
+    const persisted = readSessionState(sessionId);
+    expect(persisted?.state?.stopMessageText).toBeUndefined();
+    expect(persisted?.state?.stopMessageStageMode).toBe('on');
+    expect(persisted?.state?.stopMessageMaxRepeats).toBe(10);
+    expect(persisted?.state?.stopMessageUsed).toBe(0);
+  });
+
+  test('mode-only stopMessage:on is exposed to runtime snapshot', () => {
+    const engine = buildEngine();
+    const sessionId = 'sess-mode-only-snapshot';
+    const request: StandardizedRequest = {
+      model: 'gpt-test',
+      messages: [{ role: 'user', content: '<**stopMessage:on,10**>继续执行当前任务' }],
+      tools: [],
+      parameters: {}
+    } as any;
+
+    const metadata = {
+      requestId: 'req_stopmessage_mode_only_snapshot',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      sessionId,
+      routeHint: 'default'
+    } as any;
+
+    engine.route(request, metadata);
+
+    const snapshot = engine.getStopMessageState(metadata);
+    expect(snapshot).not.toBeNull();
+    expect(snapshot?.stopMessageText).toBeUndefined();
+    expect(snapshot?.stopMessageStageMode).toBe('on');
+    expect(snapshot?.stopMessageMaxRepeats).toBe(10);
+  });
+
+  test('mode-only stopMessage persists across engine restart', () => {
+    const sessionId = 'sess-mode-only-restart';
+    const request: StandardizedRequest = {
+      model: 'gpt-test',
+      messages: [{ role: 'user', content: '<**stopMessage:on,10**>继续执行当前任务' }],
+      tools: [],
+      parameters: {}
+    } as any;
+
+    const metadata = {
+      requestId: 'req_stopmessage_mode_only_restart',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      sessionId,
+      routeHint: 'default'
+    } as any;
+
+    const engine1 = buildEngine();
+    engine1.route(request, metadata);
+
+    const engine2 = buildEngine();
+    const snapshot = engine2.getStopMessageState(metadata);
+    expect(snapshot).not.toBeNull();
+    expect(snapshot?.stopMessageText).toBeUndefined();
+    expect(snapshot?.stopMessageStageMode).toBe('on');
+    expect(snapshot?.stopMessageMaxRepeats).toBe(10);
+  });
+
+  test('restores stopMessage across restart when server-scoped session dir changes', () => {
+    const sessionId = 'sess-mode-only-restart-scoped-fallback';
+    const request: StandardizedRequest = {
+      model: 'gpt-test',
+      messages: [{ role: 'user', content: '<**stopMessage:on,10**>继续执行当前任务' }],
+      tools: [],
+      parameters: {}
+    } as any;
+
+    const metadata = {
+      requestId: 'req_stopmessage_mode_only_restart_scoped_1',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      sessionId,
+      routeHint: 'default'
+    } as any;
+
+    const scopedRoot = path.join(SESSION_DIR, 'scoped-restart-recovery', 'sessions');
+    const firstScopedDir = path.join(scopedRoot, '127.0.0.1_5520');
+    const secondScopedDir = path.join(scopedRoot, '0.0.0.0_5520');
+
+    fs.rmSync(path.join(SESSION_DIR, 'scoped-restart-recovery'), { recursive: true, force: true });
+    fs.mkdirSync(firstScopedDir, { recursive: true });
+    fs.mkdirSync(secondScopedDir, { recursive: true });
+
+    const previousSessionDir = process.env.ROUTECODEX_SESSION_DIR;
+
+    try {
+      process.env.ROUTECODEX_SESSION_DIR = firstScopedDir;
+      const engine1 = buildEngine();
+      engine1.route(request, metadata);
+
+      const legacyScopedFile = path.join(firstScopedDir, 'session-' + sessionId + '.json');
+      expect(fs.existsSync(legacyScopedFile)).toBe(true);
+
+      process.env.ROUTECODEX_SESSION_DIR = secondScopedDir;
+      const engine2 = buildEngine();
+      const snapshot = engine2.getStopMessageState({
+        ...metadata,
+        requestId: 'req_stopmessage_mode_only_restart_scoped_2'
+      } as any);
+
+      expect(snapshot).not.toBeNull();
+      expect(snapshot?.stopMessageText).toBeUndefined();
+      expect(snapshot?.stopMessageStageMode).toBe('on');
+      expect(snapshot?.stopMessageMaxRepeats).toBe(10);
+      const migratedFile = path.join(secondScopedDir, 'session-' + sessionId + '.json');
+      expect(fs.existsSync(migratedFile)).toBe(true);
+    } finally {
+      if (previousSessionDir === undefined) {
+        process.env.ROUTECODEX_SESSION_DIR = SESSION_DIR;
+      } else {
+        process.env.ROUTECODEX_SESSION_DIR = previousSessionDir;
+      }
+      fs.rmSync(path.join(SESSION_DIR, 'scoped-restart-recovery'), { recursive: true, force: true });
+    }
+  });
+
+
   test('clears stopMessage with a monotonic updatedAt timestamp', () => {
     const engine = buildEngine();
     const sessionId = 'sess-clear-1';
     const setRequest: StandardizedRequest = {
       model: 'gpt-test',
-      messages: [{ role: 'user', content: '<**stopMessage:\"继续\",1**>\\nhello' }],
+      messages: [{ role: 'user', content: '<**stopMessage:"继续",1**>\\nhello' }],
       tools: [],
       parameters: {}
     } as any;
@@ -138,10 +277,9 @@ describe('stopMessage is session-scoped', () => {
     const engine = buildEngine();
     const sessionId = 'sess-no-reapply-1';
 
-    // Initial set (marker in the last user message).
     const setRequest: StandardizedRequest = {
       model: 'gpt-test',
-      messages: [{ role: 'user', content: '<**stopMessage:\"继续\",1**>\\nhello' }],
+      messages: [{ role: 'user', content: '<**stopMessage:"继续",1**>\\nhello' }],
       tools: [],
       parameters: {}
     } as any;
@@ -153,7 +291,6 @@ describe('stopMessage is session-scoped', () => {
       routeHint: 'default'
     } as any);
 
-    // Simulate "consumed and cleared" by servertool reservation (no user clear marker in history).
     const clearedAt = Date.now();
     saveRoutingInstructionStateSync(`session:${sessionId}`, {
       forcedTarget: undefined,
@@ -169,12 +306,10 @@ describe('stopMessage is session-scoped', () => {
       stopMessageLastUsedAt: clearedAt
     } as any);
 
-    // Next request resends full history (includes the original stopMessage marker),
-    // but the latest user message has no marker. stopMessage must NOT be re-applied.
     const nextRequest: StandardizedRequest = {
       model: 'gpt-test',
       messages: [
-        { role: 'user', content: '<**stopMessage:\"继续\",1**>\\nhello' },
+        { role: 'user', content: '<**stopMessage:"继续",1**>\\nhello' },
         { role: 'assistant', content: 'ok' },
         { role: 'user', content: 'hi again' }
       ],
@@ -200,7 +335,7 @@ describe('stopMessage is session-scoped', () => {
 
     const setRequest: StandardizedRequest = {
       model: 'gpt-test',
-      messages: [{ role: 'user', content: '<**stopMessage:\"继续\",1**>\\nhello' }],
+      messages: [{ role: 'user', content: '<**stopMessage:"继续",1**>\\nhello' }],
       tools: [],
       parameters: {}
     } as any;
@@ -219,7 +354,6 @@ describe('stopMessage is session-scoped', () => {
     const beforeUpdatedAt = before?.state?.stopMessageUpdatedAt;
     expect(typeof beforeUpdatedAt === 'number').toBe(true);
 
-    // Simulate servertool exhausting stopMessage (used === maxRepeats).
     const exhaustedAt = Date.now();
     saveRoutingInstructionStateSync(`session:${sessionId}`, {
       forcedTarget: undefined,
@@ -238,7 +372,7 @@ describe('stopMessage is session-scoped', () => {
 
     const setAgainRequest: StandardizedRequest = {
       model: 'gpt-test',
-      messages: [{ role: 'user', content: '<**stopMessage:\"继续\",1**>\\nhello again' }],
+      messages: [{ role: 'user', content: '<**stopMessage:"继续",1**>\\nhello again' }],
       tools: [],
       parameters: {}
     } as any;

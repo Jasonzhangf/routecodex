@@ -644,6 +644,14 @@ export class HubRequestExecutor implements RequestExecutor {
       const baseContext: Record<string, unknown> = {
         ...(metadataBag ?? {})
       };
+      if (
+        baseContext.capturedChatRequest === undefined &&
+        options.originalRequest &&
+        typeof options.originalRequest === 'object' &&
+        !Array.isArray(options.originalRequest)
+      ) {
+        baseContext.capturedChatRequest = options.originalRequest;
+      }
       if (typeof (metadataBag as Record<string, unknown> | undefined)?.routeName === 'string') {
         baseContext.routeId = (metadataBag as Record<string, unknown>).routeName as string;
       }

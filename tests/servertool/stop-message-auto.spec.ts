@@ -159,6 +159,216 @@ describe('stop_message_auto servertool', () => {
     expect(typeof persisted?.state?.stopMessageLastUsedAt).toBe('number');
   });
 
+
+  test('triggers stopMessage when a later choice has finish_reason=stop', async () => {
+    const sessionId = 'stopmessage-spec-session-multi-choice-stop';
+    const state: RoutingInstructionState = {
+      forcedTarget: undefined,
+      stickyTarget: undefined,
+      allowedProviders: new Set(),
+      disabledProviders: new Set(),
+      disabledKeys: new Map(),
+      disabledModels: new Map(),
+      stopMessageText: '继续',
+      stopMessageMaxRepeats: 2,
+      stopMessageUsed: 0
+    };
+    writeRoutingStateForSession(sessionId, state);
+
+    const chatResponse: JsonObject = {
+      id: 'chatcmpl-stop-multi-choice',
+      object: 'chat.completion',
+      model: 'gpt-test',
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: 'assistant',
+            content: 'ignored'
+          },
+          finish_reason: 'content_filter'
+        },
+        {
+          index: 1,
+          message: {
+            role: 'assistant',
+            content: 'ok'
+          },
+          finish_reason: 'stop'
+        }
+      ]
+    };
+
+    const adapterContext: AdapterContext = {
+      requestId: 'req-stopmessage-multi-choice',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-chat',
+      sessionId,
+      capturedChatRequest: {
+        model: 'gpt-test',
+        messages: [{ role: 'user', content: '继续处理' }]
+      }
+    } as any;
+
+    const result = await runServerSideToolEngine({
+      chatResponse,
+      adapterContext,
+      entryEndpoint: '/v1/responses',
+      requestId: 'req-stopmessage-multi-choice',
+      providerProtocol: 'openai-chat'
+    });
+
+    expect(result.mode).toBe('tool_flow');
+    expect(result.execution?.flowId).toBe('stop_message_flow');
+  });
+
+
+  test('resolves stopMessage session scope from adapterContext.metadata.sessionId', async () => {
+    const sessionId = 'stopmessage-spec-session-metadata-scope';
+    const state: RoutingInstructionState = {
+      forcedTarget: undefined,
+      stickyTarget: undefined,
+      allowedProviders: new Set(),
+      disabledProviders: new Set(),
+      disabledKeys: new Map(),
+      disabledModels: new Map(),
+      stopMessageText: '继续',
+      stopMessageMaxRepeats: 2,
+      stopMessageUsed: 0
+    };
+    writeRoutingStateForSession(sessionId, state);
+
+    const chatResponse: JsonObject = {
+      id: 'chatcmpl-stop-metadata-scope',
+      object: 'chat.completion',
+      model: 'gpt-test',
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: 'assistant',
+            content: 'ok'
+          },
+          finish_reason: 'stop'
+        }
+      ]
+    };
+
+    const adapterContext: AdapterContext = {
+      requestId: 'req-stopmessage-metadata-scope',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses',
+      metadata: {
+        sessionId
+      },
+      capturedChatRequest: {
+        model: 'gpt-test',
+        messages: [
+          {
+            role: 'user',
+            content: '继续处理'
+          }
+        ]
+      }
+    } as any;
+
+    const result = await runServerSideToolEngine({
+      chatResponse,
+      adapterContext,
+      entryEndpoint: '/v1/responses',
+      requestId: 'req-stopmessage-metadata-scope',
+      providerProtocol: 'openai-chat'
+    });
+
+    expect(result.mode).toBe('tool_flow');
+    expect(result.execution?.flowId).toBe('stop_message_flow');
+
+    const persisted = await readJsonFileUntil<{ state?: { stopMessageUsed?: number; stopMessageLastUsedAt?: number } }>(
+      path.join(SESSION_DIR, `session-${sessionId}.json`),
+      (data) => data?.state?.stopMessageUsed === 1 && typeof data?.state?.stopMessageLastUsedAt === 'number'
+    );
+    expect(persisted?.state?.stopMessageUsed).toBe(1);
+  });
+
+
+  test('uses adapterContext.originalRequest as captured seed fallback', async () => {
+    const sessionId = 'stopmessage-spec-session-original-request-fallback';
+    const state: RoutingInstructionState = {
+      forcedTarget: undefined,
+      stickyTarget: undefined,
+      allowedProviders: new Set(),
+      disabledProviders: new Set(),
+      disabledKeys: new Map(),
+      disabledModels: new Map(),
+      stopMessageText: '继续',
+      stopMessageMaxRepeats: 2,
+      stopMessageUsed: 0
+    };
+    writeRoutingStateForSession(sessionId, state);
+
+    const chatResponse: JsonObject = {
+      id: 'chatcmpl-stop-original-fallback',
+      object: 'chat.completion',
+      model: 'gpt-test',
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: 'assistant',
+            content: 'ok'
+          },
+          finish_reason: 'stop'
+        }
+      ]
+    };
+
+    const adapterContext: AdapterContext = {
+      requestId: 'req-stopmessage-original-fallback',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses',
+      sessionId,
+      originalRequest: {
+        model: 'gpt-test',
+        messages: [
+          {
+            role: 'user',
+            content: '继续处理'
+          }
+        ],
+        tools: [
+          {
+            type: 'function',
+            function: {
+              name: 'exec_command',
+              parameters: {
+                type: 'object',
+                properties: {
+                  cmd: { type: 'string' }
+                },
+                required: ['cmd']
+              }
+            }
+          }
+        ]
+      }
+    } as any;
+
+    const result = await runServerSideToolEngine({
+      chatResponse,
+      adapterContext,
+      entryEndpoint: '/v1/responses',
+      requestId: 'req-stopmessage-original-fallback',
+      providerProtocol: 'openai-responses'
+    });
+
+    expect(result.mode).toBe('tool_flow');
+    expect(result.execution?.flowId).toBe('stop_message_flow');
+    const followup = result.execution?.followup as any;
+    expect(followup).toBeDefined();
+    const ops = followup.injection.ops as any[];
+    expect(ops.some((op) => op?.op === 'append_user_text' && typeof op?.text === 'string')).toBe(true);
+  });
+
   test('skips stop_message retrigger on stop_message_flow followup hops', async () => {
     const sessionId = 'stopmessage-spec-session-followup-allow';
     const state: RoutingInstructionState = {
@@ -1142,6 +1352,119 @@ describe('stop_message_auto servertool', () => {
   });
 
 
+  test('mode-only stopMessage uses staged template by BD state without forcing base text', async () => {
+    const tempUserDir = fs.mkdtempSync(path.join(process.cwd(), 'tmp', 'stopmessage-stage-mode-only-userdir-'));
+    const prevUserDir = process.env.ROUTECODEX_USER_DIR;
+    const prevStageMode = process.env.ROUTECODEX_STOPMESSAGE_STAGE_MODE;
+    const prevBdMode = process.env.ROUTECODEX_STOPMESSAGE_BD_MODE;
+    try {
+      fs.mkdirSync(path.join(tempUserDir, 'stopMessage'), { recursive: true });
+      fs.writeFileSync(
+        path.join(tempUserDir, 'stopMessage', 'stage-status-check.md'),
+        '阶段A：状态确认\n{{BASE_STOP_MESSAGE}}',
+        'utf8'
+      );
+      fs.writeFileSync(
+        path.join(tempUserDir, 'stopMessage', 'stage-active-continue.md'),
+        '阶段A2：根据 BD 状态继续执行\n{{BASE_STOP_MESSAGE}}',
+        'utf8'
+      );
+      fs.writeFileSync(
+        path.join(tempUserDir, 'stopMessage', 'stage-loop-self-check.md'),
+        '阶段B：循环自检\n{{BASE_STOP_MESSAGE}}',
+        'utf8'
+      );
+      process.env.ROUTECODEX_USER_DIR = tempUserDir;
+      process.env.ROUTECODEX_STOPMESSAGE_STAGE_MODE = 'on';
+      process.env.ROUTECODEX_STOPMESSAGE_BD_MODE = 'heuristic';
+
+      const sessionId = 'stopmessage-spec-session-stage-mode-only';
+      const state: RoutingInstructionState = {
+        forcedTarget: undefined,
+        stickyTarget: undefined,
+        allowedProviders: new Set(),
+        disabledProviders: new Set(),
+        disabledKeys: new Map(),
+        disabledModels: new Map(),
+        stopMessageMaxRepeats: 10,
+        stopMessageUsed: 0,
+        stopMessageStageMode: 'on'
+      };
+      writeRoutingStateForSession(sessionId, state);
+
+      const chatResponse: JsonObject = {
+        id: 'chatcmpl-stage-mode-only',
+        object: 'chat.completion',
+        model: 'gpt-test',
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: 'assistant',
+              content: 'ok'
+            },
+            finish_reason: 'stop'
+          }
+        ]
+      };
+
+      const adapterContext: AdapterContext = {
+        requestId: 'req-stopmessage-stage-mode-only',
+        entryEndpoint: '/v1/chat/completions',
+        providerProtocol: 'openai-chat',
+        sessionId,
+        capturedChatRequest: {
+          model: 'gpt-test',
+          messages: [
+            { role: 'user', content: '继续执行' },
+            { role: 'tool', content: 'bd --no-db show routecodex-95\nstatus: in_progress' }
+          ]
+        }
+      } as any;
+
+      const result = await runServerSideToolEngine({
+        chatResponse,
+        adapterContext,
+        entryEndpoint: '/v1/chat/completions',
+        requestId: 'req-stopmessage-stage-mode-only',
+        providerProtocol: 'openai-chat'
+      });
+
+      expect(result.mode).toBe('tool_flow');
+      const followup = result.execution?.followup as any;
+      const ops = Array.isArray(followup?.injection?.ops) ? followup.injection.ops : [];
+      const appendUserText = ops.find((entry: any) => entry?.op === 'append_user_text');
+      expect(appendUserText?.text).toContain('阶段A2：根据 BD 状态继续执行');
+      expect(appendUserText?.text).not.toContain('{{BASE_STOP_MESSAGE}}');
+      expect(appendUserText?.text).not.toContain('原始约束');
+
+      const persisted = await readJsonFileUntil<{ state?: { stopMessageStage?: string; stopMessageUsed?: number } }>(
+        path.join(SESSION_DIR, `session-${sessionId}.json`),
+        (data) => data?.state?.stopMessageStage === 'active_continue'
+      );
+      expect(persisted?.state?.stopMessageStage).toBe('active_continue');
+      expect(persisted?.state?.stopMessageUsed).toBe(1);
+    } finally {
+      if (prevUserDir === undefined) {
+        delete process.env.ROUTECODEX_USER_DIR;
+      } else {
+        process.env.ROUTECODEX_USER_DIR = prevUserDir;
+      }
+      if (prevStageMode === undefined) {
+        delete process.env.ROUTECODEX_STOPMESSAGE_STAGE_MODE;
+      } else {
+        process.env.ROUTECODEX_STOPMESSAGE_STAGE_MODE = prevStageMode;
+      }
+      if (prevBdMode === undefined) {
+        delete process.env.ROUTECODEX_STOPMESSAGE_BD_MODE;
+      } else {
+        process.env.ROUTECODEX_STOPMESSAGE_BD_MODE = prevBdMode;
+      }
+      fs.rmSync(tempUserDir, { recursive: true, force: true });
+    }
+  });
+
+
   test('uses active-continue template when bd has in_progress', async () => {
     const tempUserDir = fs.mkdtempSync(path.join(process.cwd(), 'tmp', 'stopmessage-stage-active-userdir-'));
     const prevUserDir = process.env.ROUTECODEX_USER_DIR;
@@ -1404,7 +1727,98 @@ describe('stop_message_auto servertool', () => {
     }
   });
 
-  test('stage policy prefers runtime idle result over heuristic active text', () => {
+  test('bd runtime resolver treats blocked tasks as active work', () => {
+    const prevMode = process.env.ROUTECODEX_STOPMESSAGE_BD_MODE;
+    const prevTtl = process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS;
+    try {
+      process.env.ROUTECODEX_STOPMESSAGE_BD_MODE = 'runtime';
+      process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS = '0';
+      resetStopMessageBdRuntimeCacheForTests();
+
+      const calls: string[][] = [];
+      const state = resolveBdWorkStateFromRuntime({
+        bdCommandRunner: (args) => {
+          calls.push(args);
+          if (args.includes('blocked')) {
+            return { status: 0, stdout: '[{"id":"routecodex-blocked-1"}]', stderr: '' };
+          }
+          return { status: 0, stdout: '[]', stderr: '' };
+        },
+        nowMs: 101
+      });
+
+      expect(state).toBe('active');
+      expect(calls.length).toBe(4);
+      expect(calls[0]).toContain('in_progress');
+      expect(calls[1]).toContain('ready');
+      expect(calls[2]).toContain('open');
+      expect(calls[3]).toContain('blocked');
+    } finally {
+      if (prevMode === undefined) {
+        delete process.env.ROUTECODEX_STOPMESSAGE_BD_MODE;
+      } else {
+        process.env.ROUTECODEX_STOPMESSAGE_BD_MODE = prevMode;
+      }
+      if (prevTtl === undefined) {
+        delete process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS;
+      } else {
+        process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS = prevTtl;
+      }
+      resetStopMessageBdRuntimeCacheForTests();
+    }
+  });
+
+  test('stage policy probes once before stopping when mode=on and runtime is idle', () => {
+    const prevMode = process.env.ROUTECODEX_STOPMESSAGE_BD_MODE;
+    const prevTtl = process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS;
+    try {
+      process.env.ROUTECODEX_STOPMESSAGE_BD_MODE = 'runtime';
+      process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS = '0';
+      resetStopMessageBdRuntimeCacheForTests();
+
+      const first = resolveStopMessageStageDecision({
+        baseText: '继续执行',
+        state: { stopMessageStageMode: 'on' },
+        capturedMessages: [{ role: 'tool', content: 'bd --no-db show routecodex-77\nstatus: in_progress' }],
+        bdCommandRunner: () => ({ status: 0, stdout: '[]', stderr: '' })
+      });
+
+      expect(first.action).toBe('followup');
+      expect(first.stage).toBe('status_probe');
+      expect(first.bdWorkState).toBe('idle');
+
+      const second = resolveStopMessageStageDecision({
+        baseText: '继续执行',
+        state: {
+          stopMessageStageMode: 'on',
+          stopMessageStage: 'status_probe',
+          stopMessageBdWorkState: 'idle',
+          stopMessageObservationHash: first.observationHash,
+          stopMessageObservationStableCount: first.observationStableCount
+        },
+        capturedMessages: [{ role: 'tool', content: 'bd --no-db show routecodex-77\nstatus: in_progress' }],
+        bdCommandRunner: () => ({ status: 0, stdout: '[]', stderr: '' })
+      });
+
+      expect(second.action).toBe('stop');
+      expect(second.stopReason).toBe('bd_idle');
+      expect(second.bdWorkState).toBe('idle');
+    } finally {
+      if (prevMode === undefined) {
+        delete process.env.ROUTECODEX_STOPMESSAGE_BD_MODE;
+      } else {
+        process.env.ROUTECODEX_STOPMESSAGE_BD_MODE = prevMode;
+      }
+      if (prevTtl === undefined) {
+        delete process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS;
+      } else {
+        process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS = prevTtl;
+      }
+      resetStopMessageBdRuntimeCacheForTests();
+    }
+  });
+
+  test('stage policy keeps followup in auto mode when stage templates are not enabled', () => {
     const prevMode = process.env.ROUTECODEX_STOPMESSAGE_BD_MODE;
     const prevTtl = process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS;
     try {
@@ -1414,14 +1828,14 @@ describe('stop_message_auto servertool', () => {
 
       const decision = resolveStopMessageStageDecision({
         baseText: '继续执行',
-        state: { stopMessageStageMode: 'on' },
+        state: { stopMessageStageMode: 'auto' },
         capturedMessages: [{ role: 'tool', content: 'bd --no-db show routecodex-77\nstatus: in_progress' }],
         bdCommandRunner: () => ({ status: 0, stdout: '[]', stderr: '' })
       });
 
-      expect(decision.action).toBe('stop');
-      expect(decision.stopReason).toBe('bd_idle');
-      expect(decision.bdWorkState).toBe('idle');
+      expect(decision.action).toBe('followup');
+      expect(decision.stage).toBeUndefined();
+      expect(decision.bdWorkState).toBe('unknown');
     } finally {
       if (prevMode === undefined) {
         delete process.env.ROUTECODEX_STOPMESSAGE_BD_MODE;

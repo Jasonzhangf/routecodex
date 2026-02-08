@@ -2333,6 +2333,14 @@ export class RouteCodexHttpServer {
       const baseContext: Record<string, unknown> = {
         ...(metadataBag ?? {})
       };
+      if (
+        baseContext.capturedChatRequest === undefined &&
+        options.originalRequest &&
+        typeof options.originalRequest === 'object' &&
+        !Array.isArray(options.originalRequest)
+      ) {
+        baseContext.capturedChatRequest = options.originalRequest;
+      }
       // 将 HubPipeline metadata.routeName 映射为 AdapterContext.routeId，
       // 便于 llmswitch-core 在第三跳中使用 routeHint 复用首次路由决策。
       if (typeof (metadataBag as Record<string, unknown> | undefined)?.routeName === 'string') {

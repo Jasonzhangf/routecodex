@@ -198,4 +198,54 @@ describe('Chat semantics stage 1 bridge', () => {
     );
     expect(hasWebSearchTool).toBe(false);
   });
+
+  it('injects continue_execution tool and directive when stopMessage is not active', async () => {
+    const chat = buildChatEnvelope();
+    const standardized = chatEnvelopeToStandardized(chat, {
+      adapterContext,
+      endpoint: '/v1/chat/completions',
+      requestId: 'req-continue-default'
+    });
+
+    const result = await runProcessWithRequest(standardized);
+    const hasContinueTool = (result.processedRequest?.tools ?? []).some(
+      (tool) => tool.function?.name === 'continue_execution'
+    );
+    expect(hasContinueTool).toBe(true);
+
+    const userMessages = (result.processedRequest?.messages ?? []).filter((message) => message.role === 'user');
+    const lastUser = userMessages[userMessages.length - 1];
+    const content = typeof lastUser?.content === 'string' ? lastUser.content : '';
+    expect(content).toContain('[routecodex:continue_execution_directive]');
+  });
+
+  it('suppresses continue_execution injection when mode-only stopMessage state is active', async () => {
+    const chat = buildChatEnvelope();
+    const standardized = chatEnvelopeToStandardized(chat, {
+      adapterContext,
+      endpoint: '/v1/chat/completions',
+      requestId: 'req-continue-stop-active'
+    });
+
+    const result = await runProcessWithRequest(standardized, {
+      sessionId: 'session-stopmessage-mode-only',
+      __rt: {
+        stopMessageState: {
+          stopMessageStageMode: 'on',
+          stopMessageMaxRepeats: 10
+        }
+      }
+    });
+
+    const hasContinueTool = (result.processedRequest?.tools ?? []).some(
+      (tool) => tool.function?.name === 'continue_execution'
+    );
+    expect(hasContinueTool).toBe(false);
+
+    const userMessages = (result.processedRequest?.messages ?? []).filter((message) => message.role === 'user');
+    const lastUser = userMessages[userMessages.length - 1];
+    const content = typeof lastUser?.content === 'string' ? lastUser.content : '';
+    expect(content).not.toContain('[routecodex:continue_execution_directive]');
+  });
+
 });

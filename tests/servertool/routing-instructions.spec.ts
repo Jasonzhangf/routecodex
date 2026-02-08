@@ -124,6 +124,79 @@ describe('Routing instruction parsing and application', () => {
     expect(inst.stopMessageText).toBe('继续');
     expect(inst.stopMessageMaxRepeats).toBe(3);
   });
+  test('parses stopMessage mode shorthand and ignores trailing text outside tag', () => {
+    const instructions = parseRoutingInstructions(buildMessages('<**stopMessage:on**>继续'));
+    expect(instructions).toHaveLength(1);
+    const inst = instructions[0] as any;
+    expect(inst.type).toBe('stopMessageMode');
+    expect(inst.stopMessageStageMode).toBe('on');
+    expect(inst.stopMessageMaxRepeats).toBe(10);
+  });
+
+  test('parses stopMessage mode shorthand and ignores trailing multi-line footer text', () => {
+    const instructions = parseRoutingInstructions(
+      buildMessages('<**stopMessage:on**>继续\n[Time/Date]: utc=  local=  tz=  nowMs=  ntpOffsetMs=')
+    );
+    expect(instructions).toHaveLength(1);
+    const inst = instructions[0] as any;
+    expect(inst.type).toBe('stopMessageMode');
+    expect(inst.stopMessageStageMode).toBe('on');
+    expect(inst.stopMessageMaxRepeats).toBe(10);
+  });
+
+  test('parses stopMessage mode shorthand with explicit repeat and ignores trailing text', () => {
+    const instructions = parseRoutingInstructions(buildMessages('<**stopMessage:on,3**>继续'));
+    expect(instructions).toHaveLength(1);
+    const inst = instructions[0] as any;
+    expect(inst.type).toBe('stopMessageMode');
+    expect(inst.stopMessageStageMode).toBe('on');
+    expect(inst.stopMessageMaxRepeats).toBe(3);
+  });
+
+  test('keeps stopMessage mode command when trailing text is empty', () => {
+    const instructions = parseRoutingInstructions(buildMessages('<**stopMessage:on,3**>'));
+    expect(instructions).toHaveLength(1);
+    const inst = instructions[0] as any;
+    expect(inst.type).toBe('stopMessageMode');
+    expect(inst.stopMessageStageMode).toBe('on');
+    expect(inst.stopMessageMaxRepeats).toBe(3);
+  });
+
+  test('mode shorthand keeps mode and repeats without forcing stopMessage text', () => {
+    const instructions = parseRoutingInstructions(buildMessages('<**stopMessage:on,10**>这里是本轮普通请求文本'));
+    expect(instructions).toHaveLength(1);
+    const inst = instructions[0] as any;
+    expect(inst.type).toBe('stopMessageMode');
+    expect(inst.stopMessageStageMode).toBe('on');
+    expect(inst.stopMessageMaxRepeats).toBe(10);
+
+    const nextState = applyRoutingInstructions(instructions, createState());
+    expect(nextState.stopMessageText).toBeUndefined();
+    expect(nextState.stopMessageStageMode).toBe('on');
+    expect(nextState.stopMessageMaxRepeats).toBe(10);
+  });
+
+  test('keeps stopMessage command when latest marker is previous user without assistant reply', () => {
+    const instructions = parseRoutingInstructions([
+      { role: 'user', content: '<**stopMessage:on,10**>继续执行' },
+      { role: 'user', content: '补充说明：按当前计划推进' }
+    ] as StandardizedMessage[]);
+    expect(instructions).toHaveLength(1);
+    const inst = instructions[0] as any;
+    expect(inst.type).toBe('stopMessageMode');
+    expect(inst.stopMessageStageMode).toBe('on');
+    expect(inst.stopMessageMaxRepeats).toBe(10);
+  });
+
+  test('parses latest marker even if there are newer plain user messages', () => {
+    const instructions = parseRoutingInstructions([
+      { role: 'user', content: '<**stopMessage:on,10**>继续执行' },
+      { role: 'assistant', content: '好的，我继续。' },
+      { role: 'user', content: '现在查看进度' }
+    ] as StandardizedMessage[]);
+    expect(instructions).toHaveLength(1);
+    expect((instructions[0] as any).type).toBe('stopMessageMode');
+  });
 
   test('applies and serializes stopMessage state', () => {
     const baseState = createState();
@@ -139,6 +212,19 @@ describe('Routing instruction parsing and application', () => {
     expect(restored.stopMessageMaxRepeats).toBe(2);
     expect(restored.stopMessageUsed).toBe(0);
   });
+  test('applies stopMessage mode repeat update without replacing text', () => {
+    const baseState = createState({
+      stopMessageText: '继续',
+      stopMessageMaxRepeats: 1,
+      stopMessageStageMode: 'on'
+    });
+    const instructions = parseRoutingInstructions(buildMessages('<**stopMessage:on,3**>'));
+    const nextState = applyRoutingInstructions(instructions, baseState);
+    expect(nextState.stopMessageText).toBe('继续');
+    expect(nextState.stopMessageStageMode).toBe('on');
+    expect(nextState.stopMessageMaxRepeats).toBe(3);
+  });
+
 
   test('serializes staged stopMessage metadata fields', () => {
     const baseState = createState({
@@ -184,5 +270,52 @@ describe('Routing instruction parsing and application', () => {
       }
       fs.rmSync(temp, { recursive: true, force: true });
     }
+  });
+
+  test('parses precommand script under ~/.routecodex/precommand and serializes state', () => {
+    const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-precommand-'));
+    const prev = process.env.ROUTECODEX_USER_DIR;
+    try {
+      process.env.ROUTECODEX_USER_DIR = temp;
+      fs.mkdirSync(path.join(temp, 'precommand'), { recursive: true });
+      const scriptPath = path.join(temp, 'precommand', 'fix-exec.sh');
+      fs.writeFileSync(scriptPath, '#!/usr/bin/env bash\necho ok\n', 'utf8');
+
+      const instructions = parseRoutingInstructions(
+        buildMessages('<**precommand:<file://precommand/fix-exec.sh>**>')
+      );
+      expect(instructions).toHaveLength(1);
+      const inst = instructions[0] as any;
+      expect(inst.type).toBe('preCommandSet');
+      expect(inst.preCommandScriptPath).toBe(scriptPath);
+
+      const nextState = applyRoutingInstructions(instructions, createState());
+      expect(nextState.preCommandScriptPath).toBe(scriptPath);
+      expect(nextState.preCommandSource).toBe('explicit');
+
+      const serialized = serializeRoutingInstructionState(nextState);
+      const restored = deserializeRoutingInstructionState(serialized);
+      expect(restored.preCommandScriptPath).toBe(scriptPath);
+      expect(restored.preCommandSource).toBe('explicit');
+    } finally {
+      if (prev === undefined) {
+        delete process.env.ROUTECODEX_USER_DIR;
+      } else {
+        process.env.ROUTECODEX_USER_DIR = prev;
+      }
+      fs.rmSync(temp, { recursive: true, force: true });
+    }
+  });
+
+  test('clears precommand state via instruction', () => {
+    const state = createState({
+      preCommandSource: 'explicit',
+      preCommandScriptPath: '/tmp/test-precommand.sh',
+      preCommandUpdatedAt: Date.now()
+    });
+    const instructions = parseRoutingInstructions(buildMessages('<**precommand:clear**>'));
+    const nextState = applyRoutingInstructions(instructions, state);
+    expect(nextState.preCommandScriptPath).toBeUndefined();
+    expect(nextState.preCommandSource).toBeUndefined();
   });
 });

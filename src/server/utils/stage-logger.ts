@@ -1,3 +1,5 @@
+import { buildInfo } from '../../build-info.js';
+
 const truthy = new Set(['1', 'true', 'yes']);
 const falsy = new Set(['0', 'false', 'no']);
 let cachedStageLoggingFlag: boolean | null = null;
@@ -20,15 +22,25 @@ function resolveBoolFromEnv(value: string | undefined, fallback: boolean): boole
 }
 
 function computeStageLoggingEnabled(): boolean {
-  const raw = String(process.env.ROUTECODEX_STAGE_LOG || '').trim().toLowerCase();
+  const raw = String(process.env.ROUTECODEX_STAGE_LOG ?? process.env.RCC_STAGE_LOG ?? '').trim().toLowerCase();
   if (truthy.has(raw)) {
     return true;
   }
   if (falsy.has(raw)) {
     return false;
   }
+
   const nodeEnv = String(process.env.NODE_ENV || '').trim().toLowerCase();
-  return nodeEnv === 'development';
+  if (nodeEnv === 'development') {
+    return true;
+  }
+
+  const runtimeBuildMode = String(process.env.ROUTECODEX_BUILD_MODE ?? process.env.BUILD_MODE ?? '').trim().toLowerCase();
+  if (runtimeBuildMode === 'dev' || runtimeBuildMode === 'development') {
+    return true;
+  }
+
+  return buildInfo.mode === 'dev';
 }
 
 function computeStageVerboseEnabled(): boolean {
@@ -96,7 +108,7 @@ function shouldLogStage(scope: string, level: StageLevel, verbose: boolean): boo
   if (scope.startsWith('response.sse')) {
     return false;
   }
-  return scope.startsWith('request') || scope.startsWith('servertool');
+  return true;
 }
 
 function parseStage(stage: string): { scope: string; action: string } {

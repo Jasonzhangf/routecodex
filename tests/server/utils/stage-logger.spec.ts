@@ -13,7 +13,7 @@ describe('stage logger verbosity filtering', () => {
     return import('../../../src/server/utils/stage-logger.js');
   }
 
-  it('suppresses provider info logs in development by default', async () => {
+  it('prints provider stage status in development by default without details', async () => {
     process.env.NODE_ENV = 'development';
     delete process.env.ROUTECODEX_STAGE_LOG;
     delete process.env.ROUTECODEX_STAGE_LOG_VERBOSE;
@@ -26,7 +26,11 @@ describe('stage logger verbosity filtering', () => {
       model: 'kimi-k2.5'
     });
 
-    expect(logSpy).not.toHaveBeenCalled();
+    expect(logSpy).toHaveBeenCalledTimes(1);
+    const rendered = String(logSpy.mock.calls[0]?.[0] ?? '');
+    expect(rendered).toContain('[provider.send][req_provider] start');
+    expect(rendered).not.toContain('model');
+    expect(rendered).not.toContain('iflow.key1.kimi-k2.5');
   });
 
   it('keeps request logs and only prints request id by default', async () => {
@@ -59,7 +63,7 @@ describe('stage logger verbosity filtering', () => {
     expect(logSpy).not.toHaveBeenCalled();
   });
 
-  it('always prints errors with details', async () => {
+  it('always prints errors with details when stage logging is enabled', async () => {
     process.env.NODE_ENV = 'development';
     delete process.env.ROUTECODEX_STAGE_LOG;
     delete process.env.ROUTECODEX_STAGE_LOG_VERBOSE;
@@ -75,7 +79,7 @@ describe('stage logger verbosity filtering', () => {
     expect(rendered).toContain('boom');
   });
 
-  it('prints provider info logs when verbose override is enabled', async () => {
+  it('prints provider info logs with details when verbose override is enabled', async () => {
     process.env.NODE_ENV = 'development';
     process.env.ROUTECODEX_STAGE_LOG_VERBOSE = '1';
 
@@ -91,5 +95,23 @@ describe('stage logger verbosity filtering', () => {
     const rendered = String(logSpy.mock.calls[0]?.[0] ?? '');
     expect(rendered).toContain('[provider.send][req_provider_verbose] start');
     expect(rendered).toContain('model');
+    expect(rendered).toContain('crs.key1.gpt-5.2-codex');
+  });
+
+  it('enables stage logging in dev build mode even when NODE_ENV is production', async () => {
+    process.env.NODE_ENV = 'production';
+    process.env.ROUTECODEX_BUILD_MODE = 'dev';
+    delete process.env.ROUTECODEX_STAGE_LOG;
+    delete process.env.ROUTECODEX_STAGE_LOG_VERBOSE;
+
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const { logPipelineStage } = await importStageLogger();
+
+    logPipelineStage('hub.completed', 'req_build_mode', { route: 'thinking' });
+
+    expect(logSpy).toHaveBeenCalledTimes(1);
+    const rendered = String(logSpy.mock.calls[0]?.[0] ?? '');
+    expect(rendered).toContain('[hub][req_build_mode] completed');
+    expect(rendered).not.toContain('route');
   });
 });

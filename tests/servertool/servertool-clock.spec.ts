@@ -4,6 +4,7 @@ import * as path from 'node:path';
 
 import { runReqProcessStage1ToolGovernance } from '../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/req_process/req_process_stage1_tool_governance/index.js';
 import type { StandardizedRequest } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.js';
+import { runHubChatProcess } from '../../sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process.js';
 import { runServerSideToolEngine } from '../../sharedmodule/llmswitch-core/src/servertool/server-side-tools.js';
 import type { AdapterContext } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.js';
 
@@ -334,6 +335,154 @@ describe('servertool:clock', () => {
     ]) {
       expect(toolNames).toContain(name);
     }
+  });
+
+  test('clock config defaults holdNonStreaming=true when omitted', () => {
+    const resolved = normalizeClockConfig({ enabled: true });
+    expect(resolved).toBeTruthy();
+    expect(resolved?.holdNonStreaming).toBe(true);
+  });
+
+  test('clock_auto triggers followup in current request when already in due window', async () => {
+    const sessionId = 's-clock-hold-in-window';
+    const clockConfig = normalizeClockConfig({ enabled: true, tickMs: 0, dueWindowMs: 60_000 });
+    if (!clockConfig) throw new Error('clockConfig should not be null');
+    await scheduleClockTasks(sessionId, [{ dueAtMs: Date.now() + 30_000, task: 'due-now-window' }], clockConfig);
+
+    const result = await runServerSideToolEngine({
+      chatResponse: {
+        choices: [
+          {
+            message: { role: 'assistant', content: 'done' },
+            finish_reason: 'stop'
+          }
+        ]
+      } as any,
+      adapterContext: {
+        requestId: 'req-clock-hold-window',
+        entryEndpoint: '/v1/chat/completions',
+        providerProtocol: 'openai-chat',
+        sessionId,
+        stream: true,
+        capturedChatRequest: { model: 'gpt-test', messages: [{ role: 'user', content: 'hi' }] },
+        __rt: { clock: { enabled: true, tickMs: 0, dueWindowMs: 60_000 } }
+      } as any,
+      entryEndpoint: '/v1/chat/completions',
+      requestId: 'req-clock-hold-window',
+      providerProtocol: 'openai-chat'
+    });
+
+    expect(result.execution?.flowId).toBe('clock_hold_flow');
+    expect(result.execution?.followup).toBeTruthy();
+  });
+
+  test('clock_auto can hold non-streaming by default when in due window', async () => {
+    const sessionId = 's-clock-hold-in-window-json';
+    const clockConfig = normalizeClockConfig({ enabled: true, tickMs: 0, dueWindowMs: 60_000 });
+    if (!clockConfig) throw new Error('clockConfig should not be null');
+    await scheduleClockTasks(sessionId, [{ dueAtMs: Date.now() + 30_000, task: 'due-now-window-json' }], clockConfig);
+
+    const result = await runServerSideToolEngine({
+      chatResponse: {
+        choices: [
+          {
+            message: { role: 'assistant', content: 'done' },
+            finish_reason: 'stop'
+          }
+        ]
+      } as any,
+      adapterContext: {
+        requestId: 'req-clock-hold-window-json',
+        entryEndpoint: '/v1/chat/completions',
+        providerProtocol: 'openai-chat',
+        sessionId,
+        stream: false,
+        capturedChatRequest: { model: 'gpt-test', messages: [{ role: 'user', content: 'hi' }] },
+        __rt: { clock: { enabled: true, tickMs: 0, dueWindowMs: 60_000 } }
+      } as any,
+      entryEndpoint: '/v1/chat/completions',
+      requestId: 'req-clock-hold-window-json',
+      providerProtocol: 'openai-chat'
+    });
+
+    expect(result.execution?.flowId).toBe('clock_hold_flow');
+    expect(result.execution?.followup).toBeTruthy();
+  });
+
+  test('clock_auto holds until due window for stop response when stop_message_auto does not trigger', async () => {
+    const sessionId = 's-clock-hold-wait-window';
+    const clockConfig = normalizeClockConfig({ enabled: true, tickMs: 0, dueWindowMs: 0, holdMaxMs: 2_000 });
+    if (!clockConfig) throw new Error('clockConfig should not be null');
+    await scheduleClockTasks(sessionId, [{ dueAtMs: Date.now() + 500, task: 'wait-until-window' }], clockConfig);
+
+    const startedAt = Date.now();
+    const result = await runServerSideToolEngine({
+      chatResponse: {
+        choices: [
+          {
+            message: { role: 'assistant', content: 'done' },
+            finish_reason: 'stop'
+          }
+        ]
+      } as any,
+      adapterContext: {
+        requestId: 'req-clock-hold-wait-window',
+        entryEndpoint: '/v1/chat/completions',
+        providerProtocol: 'openai-chat',
+        sessionId,
+        stream: false,
+        capturedChatRequest: { model: 'gpt-test', messages: [{ role: 'user', content: 'hi' }] },
+        __rt: { clock: { enabled: true, tickMs: 0, dueWindowMs: 0, holdMaxMs: 2_000 } }
+      } as any,
+      entryEndpoint: '/v1/chat/completions',
+      requestId: 'req-clock-hold-wait-window',
+      providerProtocol: 'openai-chat'
+    });
+    const elapsedMs = Date.now() - startedAt;
+
+    expect(result.execution?.flowId).toBe('clock_hold_flow');
+    expect(result.execution?.followup).toBeTruthy();
+    expect(elapsedMs).toBeGreaterThanOrEqual(180);
+  });
+
+  test('clock reminders can inject on servertool followup when explicitly enabled', async () => {
+    const sessionId = 's-clock-followup-reminder';
+    const clockConfig = normalizeClockConfig({ enabled: true, tickMs: 0, dueWindowMs: 60_000 });
+    if (!clockConfig) throw new Error('clockConfig should not be null');
+    await scheduleClockTasks(sessionId, [{ dueAtMs: Date.now() + 20_000, task: 'followup-inject' }], clockConfig);
+
+    const baseRequest = {
+      model: 'gpt-test',
+      messages: [{ role: 'user', content: 'hello' }],
+      tools: [],
+      parameters: { stream: false },
+      metadata: { originalEndpoint: '/v1/chat/completions' }
+    } as any;
+
+    const result = await runHubChatProcess({
+      request: baseRequest,
+      requestId: 'req_clock_followup_inject',
+      entryEndpoint: '/v1/chat/completions',
+      rawPayload: {},
+      metadata: {
+        providerProtocol: 'openai-chat',
+        sessionId,
+        clock: { enabled: true, tickMs: 0, dueWindowMs: 60_000 },
+        requestId: 'req_clock_followup_inject',
+        __rt: {
+          serverToolFollowup: true,
+          clockFollowupInjectReminders: true
+        }
+      }
+    });
+
+    const processed = result.processedRequest as any;
+    const messages = Array.isArray(processed.messages) ? processed.messages : [];
+    const merged = messages
+      .map((item: any) => (typeof item?.content === 'string' ? item.content : ''))
+      .join('\n');
+    expect(merged).toContain('[Clock Reminder]: scheduled tasks are due.');
+    expect(merged).toContain('[scheduled task:');
   });
 
   test('unit: schedule/list/cancel/clear via clock handler outputs', async () => {

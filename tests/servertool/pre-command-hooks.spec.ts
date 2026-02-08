@@ -55,6 +55,7 @@ function extractExecCommandArgs(chatResponse: JsonObject): Record<string, unknow
 
 describe('servertool pre-command hooks', () => {
   const originalHooksFile = process.env.ROUTECODEX_PRE_COMMAND_HOOKS_FILE;
+  const originalUserDir = process.env.ROUTECODEX_USER_DIR;
 
   beforeEach(() => {
     fs.mkdirSync(HOOK_DIR, { recursive: true });
@@ -67,6 +68,11 @@ describe('servertool pre-command hooks', () => {
       delete process.env.ROUTECODEX_PRE_COMMAND_HOOKS_FILE;
     } else {
       process.env.ROUTECODEX_PRE_COMMAND_HOOKS_FILE = originalHooksFile;
+    }
+    if (originalUserDir === undefined) {
+      delete process.env.ROUTECODEX_USER_DIR;
+    } else {
+      process.env.ROUTECODEX_USER_DIR = originalUserDir;
     }
   });
 
@@ -243,5 +249,73 @@ describe('servertool pre-command hooks', () => {
           event.result === 'error'
       )
     ).toBe(true);
+  });
+
+  test('uses runtime precommand state from __rt and bypasses config fallback', async () => {
+    const routecodexDir = path.join(HOOK_DIR, 'runtime-user-' + Date.now());
+    const precommandDir = path.join(routecodexDir, 'precommand');
+    fs.mkdirSync(precommandDir, { recursive: true });
+    const runtimeScript = path.join(precommandDir, 'rewrite.sh');
+    fs.writeFileSync(
+      runtimeScript,
+      '#!/usr/bin/env bash\ncat <<\'JSON\'\n{"cmd":"runtime::echo from-runtime","workdir":"/tmp"}\nJSON\n',
+      { encoding: 'utf8', mode: 0o755 }
+    );
+
+    const hookFile = path.join(HOOK_DIR, 'pre-command-' + Date.now() + '-runtime-fallback.json');
+    fs.writeFileSync(
+      hookFile,
+      JSON.stringify(
+        {
+          enabled: true,
+          hooks: [
+            {
+              id: 'config-fallback-hook',
+              tool: 'exec_command',
+              priority: 1,
+              jq: '.cmd = ("config::" + .cmd)'
+            }
+          ]
+        },
+        null,
+        2
+      )
+    );
+    process.env.ROUTECODEX_PRE_COMMAND_HOOKS_FILE = hookFile;
+    process.env.ROUTECODEX_USER_DIR = routecodexDir;
+    resetPreCommandHooksCacheForTests();
+
+    const traces: ServerToolAutoHookTraceEvent[] = [];
+    const adapterContext: AdapterContext = {
+      requestId: 'req-pre-command-runtime-state',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses',
+      __rt: {
+        preCommandState: {
+          preCommandScriptPath: runtimeScript
+        }
+      }
+    } as any;
+
+    const result = await runServerSideToolEngine({
+      chatResponse: buildToolCallResponse('echo from-runtime'),
+      adapterContext,
+      entryEndpoint: '/v1/responses',
+      requestId: 'req-pre-command-runtime-state',
+      providerProtocol: 'openai-responses',
+      onAutoHookTrace: (event) => traces.push(event)
+    });
+
+    const args = extractExecCommandArgs(result.finalChatResponse);
+    expect(args.cmd).toBe('runtime::echo from-runtime');
+    expect(
+      traces.some(
+        (event) =>
+          event.phase === 'pre_command' &&
+          event.hookId.startsWith('runtime_precommand:') &&
+          event.result === 'match'
+      )
+    ).toBe(true);
+    expect(traces.some((event) => event.hookId === 'config-fallback-hook')).toBe(false);
   });
 });
