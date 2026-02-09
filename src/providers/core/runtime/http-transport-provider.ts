@@ -9,7 +9,7 @@
  * 各协议具体行为（OpenAI Chat、Responses、Anthropic、Gemini 等）通过子类覆写钩子实现。
  */
 
-import { createHash } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import { BaseProvider } from './base-provider.js';
 import { HttpClient } from '../utils/http-client.js';
 import { DynamicProfileLoader, ServiceProfileValidator } from '../config/service-profiles.js';
@@ -1050,6 +1050,10 @@ export class HttpTransportProvider extends BaseProvider {
       this.deleteHeader(finalHeaders, 'conversation_id');
     }
 
+    if (isIflow) {
+      this.enforceIflowCliHeaders(finalHeaders);
+    }
+
     return finalHeaders;
   }
 
@@ -1199,6 +1203,69 @@ export class HttpTransportProvider extends BaseProvider {
       return;
     }
     this.assignHeader(headers, target, value);
+  }
+
+  private enforceIflowCliHeaders(headers: Record<string, string>): void {
+    const resolvedSessionId =
+      this.findHeaderValue(headers, 'session-id') ??
+      this.findHeaderValue(headers, 'session_id') ??
+      '';
+    const resolvedConversationId =
+      this.findHeaderValue(headers, 'conversation-id') ??
+      this.findHeaderValue(headers, 'conversation_id') ??
+      resolvedSessionId;
+
+    if (resolvedSessionId) {
+      this.assignHeader(headers, 'session-id', resolvedSessionId);
+    }
+    if (resolvedConversationId) {
+      this.assignHeader(headers, 'conversation-id', resolvedConversationId);
+    }
+
+    const bearerApiKey = this.extractBearerApiKey(headers);
+    if (!bearerApiKey) {
+      return;
+    }
+
+    const userAgent = this.findHeaderValue(headers, 'User-Agent') ?? 'iFlow-Cli';
+    const timestamp = Date.now().toString();
+    const signature = this.buildIflowSignature(userAgent, resolvedSessionId, timestamp, bearerApiKey);
+    if (!signature) {
+      return;
+    }
+
+    this.assignHeader(headers, 'x-iflow-timestamp', timestamp);
+    this.assignHeader(headers, 'x-iflow-signature', signature);
+  }
+
+  private extractBearerApiKey(headers: Record<string, string>): string | undefined {
+    const authorization = this.findHeaderValue(headers, 'Authorization');
+    if (!authorization) {
+      return undefined;
+    }
+    const matched = authorization.match(/^Bearer\s+(.+)$/i);
+    if (!matched || !matched[1]) {
+      return undefined;
+    }
+    const apiKey = matched[1].trim();
+    return apiKey || undefined;
+  }
+
+  private buildIflowSignature(
+    userAgent: string,
+    sessionId: string,
+    timestamp: string,
+    apiKey: string
+  ): string | undefined {
+    if (!apiKey) {
+      return undefined;
+    }
+    const payload = `${userAgent}:${sessionId}:${timestamp}`;
+    try {
+      return createHmac('sha256', apiKey).update(payload, 'utf8').digest('hex');
+    } catch {
+      return undefined;
+    }
   }
 
   private buildCodexIdentifier(

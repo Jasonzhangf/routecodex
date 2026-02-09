@@ -1,4 +1,5 @@
 import { HttpTransportProvider } from '../../../../src/providers/core/runtime/http-transport-provider.js';
+import { createHmac } from 'node:crypto';
 import type { OpenAIStandardConfig } from '../../../../src/providers/core/api/provider-config.js';
 import type { ModuleDependencies, PipelineDebugLogger } from '../../../../src/modules/pipeline/interfaces/pipeline-interfaces.js';
 import { attachProviderRuntimeMetadata } from '../../../../src/providers/core/runtime/provider-runtime-metadata.js';
@@ -263,5 +264,72 @@ describe('HttpTransportProvider header propagation', () => {
     const client = (provider as unknown as { httpClient: RecordingHttpClient }).httpClient;
     const headers = client.lastHeaders || {};
     expect(headers['User-Agent']).toBe('iFlow-Cli');
+  });
+
+  test('iflow aligns CLI-style session/signature headers', async () => {
+    const iflowConfig = {
+      id: 'test-http-provider-iflow-signature',
+      type: 'openai-http-provider',
+      config: {
+        providerType: 'openai',
+        providerId: 'iflow',
+        auth: { type: 'apikey', apiKey: 'sk-test-iflow-signature-1234567890' },
+        overrides: {
+          baseUrl: 'https://example.invalid/iflow',
+          endpoint: '/chat/completions',
+          defaultModel: 'kimi-k2.5'
+        }
+      }
+    } as unknown as typeof config;
+
+    const provider = new TestHttpTransportProvider(iflowConfig, deps);
+    await provider.initialize();
+
+    const providerRequest = {
+      metadata: {
+        stream: false,
+        clientHeaders: { accept: 'application/json', session_id: 'sess-iflow-001', conversation_id: 'conv-iflow-001' }
+      },
+      data: {
+        model: 'kimi-k2.5',
+        messages: [{ role: 'user', content: 'hi' }]
+      }
+    };
+
+    attachProviderRuntimeMetadata(providerRequest as Record<string, unknown>, {
+      requestId: 'req-test-iflow-signature',
+      providerId: 'iflow',
+      providerKey: 'iflow.key1.kimi-k2.5',
+      providerType: 'openai',
+      providerProtocol: 'openai-chat',
+      routeName: 'test',
+      metadata: {
+        entryEndpoint: '/v1/chat/completions',
+        clientHeaders: { accept: 'application/json', session_id: 'sess-iflow-001', conversation_id: 'conv-iflow-001' }
+      },
+      target: {
+        providerKey: 'iflow.key1.kimi-k2.5',
+        providerType: 'openai',
+        compatibilityProfile: undefined,
+        runtimeKey: 'iflow.key1',
+        modelId: 'kimi-k2.5'
+      }
+    });
+
+    await provider.processIncoming(providerRequest as any);
+
+    const client = (provider as unknown as { httpClient: RecordingHttpClient }).httpClient;
+    const headers = client.lastHeaders || {};
+
+    expect(headers['session-id']).toBe('sess-iflow-001');
+    expect(headers['conversation-id']).toBe('conv-iflow-001');
+    expect(typeof headers['x-iflow-timestamp']).toBe('string');
+    expect(typeof headers['x-iflow-signature']).toBe('string');
+
+    const expected = createHmac('sha256', 'sk-test-iflow-signature-1234567890')
+      .update(`iFlow-Cli:sess-iflow-001:${headers['x-iflow-timestamp']}`, 'utf8')
+      .digest('hex');
+
+    expect(headers['x-iflow-signature']).toBe(expected);
   });
 });
