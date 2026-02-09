@@ -5,6 +5,7 @@ import type {
   ProviderFamilyProfile,
   ResolveBusinessResponseErrorInput,
   ResolveEndpointInput,
+  ResolveOAuthTokenFileInput,
   ResolveUserAgentInput
 } from '../profile-contracts.js';
 
@@ -167,6 +168,10 @@ function buildIflowBusinessEnvelopeError(
   return error;
 }
 
+function hasConfiguredOAuthClient(auth: ResolveOAuthTokenFileInput['auth']): boolean {
+  return !!auth.clientId || !!auth.tokenUrl || !!auth.deviceCodeUrl;
+}
+
 export const iflowFamilyProfile: ProviderFamilyProfile = {
   id: 'iflow/default',
   providerFamily: 'iflow',
@@ -259,5 +264,11 @@ export const iflowFamilyProfile: ProviderFamilyProfile = {
     }
 
     return undefined;
+  },
+  resolveOAuthTokenFileMode(input: ResolveOAuthTokenFileInput): boolean | undefined {
+    if (input.oauthProviderId !== 'iflow') {
+      return undefined;
+    }
+    return !hasConfiguredOAuthClient(input.auth);
   }
 };

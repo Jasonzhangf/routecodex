@@ -351,14 +351,30 @@ export class HttpTransportProvider extends BaseProvider {
       const oauthAuth = auth as OAuthAuthExtended;
       const oauthProviderId = resolvedOAuthProviderId ?? serviceProfileKey;
       this.oauthProviderId = oauthProviderId;
+      const familyProfile = getProviderFamilyProfile({
+        providerId: this.config.config.providerId,
+        providerType: this.providerType,
+        oauthProviderId
+      });
+      const profileTokenFileMode = familyProfile?.resolveOAuthTokenFileMode?.({
+        oauthProviderId,
+        auth: {
+          clientId: oauthAuth.clientId,
+          tokenUrl: oauthAuth.tokenUrl,
+          deviceCodeUrl: oauthAuth.deviceCodeUrl
+        },
+        moduleType: this.type
+      });
       // For providers like Qwen/iflow/Gemini CLI where public OAuth client may not be available,
       // allow reading tokens produced by external login tools (CLIProxyAPI) via token file.
       const useTokenFile =
-        (
-          oauthProviderId === 'qwen' ||
-          oauthProviderId === 'iflow' ||
-          this.type === 'gemini-cli-http-provider'
-        ) &&
+        (typeof profileTokenFileMode === 'boolean'
+          ? profileTokenFileMode
+          : (
+              oauthProviderId === 'qwen' ||
+              oauthProviderId === 'iflow' ||
+              this.type === 'gemini-cli-http-provider'
+            )) &&
         !oauthAuth.clientId &&
         !oauthAuth.tokenUrl &&
         !oauthAuth.deviceCodeUrl;
@@ -838,7 +854,6 @@ export class HttpTransportProvider extends BaseProvider {
     const familyProfile = this.resolveFamilyProfile(runtimeMetadata);
 
     const defaultBody = this.protocolClient.buildRequestBody(request as ProtocolRequestPayload);
-    this.applyProviderSpecificBodyAdjustments(defaultBody);
 
     const profileBody = familyProfile?.buildRequestBody?.({
       request,
@@ -1748,51 +1763,6 @@ export class HttpTransportProvider extends BaseProvider {
       }
     }
     return Object.keys(normalized).length ? normalized : undefined;
-  }
-
-  private applyProviderSpecificBodyAdjustments(body: UnknownObject): void {
-    if (!body || typeof body !== 'object') {
-      return;
-    }
-    if (this.providerType === 'glm') {
-      this.trimGlmRequestMessages(body as Record<string, unknown>);
-    }
-  }
-
-  private trimGlmRequestMessages(body: Record<string, unknown>): void {
-    const container = body as { messages?: unknown };
-    const rawMessages = container.messages;
-    if (!Array.isArray(rawMessages) || rawMessages.length === 0) {
-      return;
-    }
-    const messages = rawMessages as unknown[];
-
-    for (let idx = messages.length - 1; idx >= 0; idx -= 1) {
-      const entry = messages[idx];
-      if (!entry || typeof entry !== 'object') {
-        continue;
-      }
-      if ((entry as Record<string, unknown>).role !== 'assistant') {
-        continue;
-      }
-      const contentNode = (entry as { content?: unknown }).content;
-      if (typeof contentNode === 'string') {
-        continue;
-      }
-      if (contentNode === null || typeof contentNode === 'undefined') {
-        (entry as { content?: string }).content = '';
-        continue;
-      }
-      if (typeof contentNode === 'object') {
-        try {
-          (entry as { content?: string }).content = JSON.stringify(contentNode);
-        } catch {
-          (entry as { content?: string }).content = '';
-        }
-        continue;
-      }
-      (entry as { content?: string }).content = String(contentNode);
-    }
   }
 
 }

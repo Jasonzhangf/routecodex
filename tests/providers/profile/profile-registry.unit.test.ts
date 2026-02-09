@@ -23,6 +23,16 @@ describe('provider family profile registry', () => {
     expect(hasProviderFamilyProfile({ providerType: 'anthropic' })).toBe(true);
   });
 
+  test('resolves glm/qwen profiles from providerId', () => {
+    const glmProfile = getProviderFamilyProfile({ providerId: 'glm' });
+    const qwenProfile = getProviderFamilyProfile({ providerId: 'qwen' });
+
+    expect(glmProfile?.providerFamily).toBe('glm');
+    expect(qwenProfile?.providerFamily).toBe('qwen');
+    expect(hasProviderFamilyProfile({ providerId: 'glm' })).toBe(true);
+    expect(hasProviderFamilyProfile({ providerId: 'qwen' })).toBe(true);
+  });
+
   test('iflow profile resolves endpoint/body for web search requests', () => {
     const profile = getProviderFamilyProfile({ providerId: 'iflow' });
     expect(profile).toBeTruthy();
@@ -173,5 +183,57 @@ describe('provider family profile registry', () => {
       context: {} as any
     });
     expect(body.stream).toBe(true);
+  });
+
+  test('glm profile trims assistant non-string content in request body', () => {
+    const profile = getProviderFamilyProfile({ providerId: 'glm' });
+    expect(profile).toBeTruthy();
+
+    const output = profile?.buildRequestBody?.({
+      request: {
+        model: 'glm-4.7',
+        messages: []
+      } as any,
+      defaultBody: {
+        model: 'glm-4.7',
+        messages: [
+          { role: 'user', content: 'hi' },
+          { role: 'assistant', content: { foo: 'bar' } },
+          { role: 'assistant', content: null }
+        ]
+      } as any
+    }) as any;
+
+    expect(output.messages[1].content).toBe('{"foo":"bar"}');
+    expect(output.messages[2].content).toBe('');
+  });
+
+  test('qwen/iflow profiles decide OAuth token-file mode', () => {
+    const qwenProfile = getProviderFamilyProfile({ providerId: 'qwen' });
+    const iflowProfile = getProviderFamilyProfile({ providerId: 'iflow' });
+
+    expect(
+      qwenProfile?.resolveOAuthTokenFileMode?.({
+        oauthProviderId: 'qwen',
+        auth: {},
+        moduleType: 'openai-http-provider'
+      })
+    ).toBe(true);
+
+    expect(
+      qwenProfile?.resolveOAuthTokenFileMode?.({
+        oauthProviderId: 'qwen',
+        auth: { clientId: 'qwen-client' },
+        moduleType: 'openai-http-provider'
+      })
+    ).toBe(false);
+
+    expect(
+      iflowProfile?.resolveOAuthTokenFileMode?.({
+        oauthProviderId: 'iflow',
+        auth: {},
+        moduleType: 'iflow-http-provider'
+      })
+    ).toBe(true);
   });
 });
