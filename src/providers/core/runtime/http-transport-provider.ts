@@ -44,6 +44,8 @@ import { OpenAIChatProtocolClient } from '../../../client/openai/chat-protocol-c
 import { HttpRequestExecutor, type HttpRequestExecutorDeps, type PreparedHttpRequest } from './http-request-executor.js';
 import type { ProviderErrorAugmented } from './provider-error-types.js';
 import { extractStatusCodeFromError } from './provider-error-classifier.js';
+import { getProviderFamilyProfile } from '../../profile/profile-registry.js';
+import type { ProviderFamilyProfile } from '../../profile/profile-contracts.js';
 
 type ProtocolClient = HttpProtocolClient<ProtocolRequestPayload>;
 type OAuthAuthExtended = OAuthAuth & { rawType?: string; oauthProviderId?: string; tokenFile?: string };
@@ -778,47 +780,122 @@ export class HttpTransportProvider extends BaseProvider {
    * 为特定请求确定最终 endpoint（默认使用配置值，可由子类覆写）
    */
   protected resolveRequestEndpoint(request: UnknownObject, defaultEndpoint: string): string {
-    const metadataNode =
-      (request as MetadataContainer)?.metadata &&
-      typeof (request as MetadataContainer).metadata === 'object'
-        ? ((request as MetadataContainer).metadata as Record<string, unknown>)
-        : undefined;
-    const isIflowWebSearch =
-      metadataNode?.iflowWebSearch === true;
-    if (isIflowWebSearch) {
-      const entryEndpoint =
-        typeof metadataNode?.entryEndpoint === 'string' && metadataNode.entryEndpoint.trim()
-          ? metadataNode.entryEndpoint.trim()
-          : undefined;
-      return entryEndpoint || '/chat/retrieve';
-    }
-    return this.protocolClient.resolveEndpoint(
+    const protocolResolvedEndpoint = this.protocolClient.resolveEndpoint(
       request as ProtocolRequestPayload,
       defaultEndpoint
     );
+    const runtimeMetadata = this.getCurrentRuntimeMetadata();
+    const familyProfile = this.resolveFamilyProfile(runtimeMetadata);
+    const profileResolvedEndpoint = familyProfile?.resolveEndpoint?.({
+      request,
+      defaultEndpoint: protocolResolvedEndpoint,
+      runtimeMetadata
+    });
+    if (typeof profileResolvedEndpoint === 'string' && profileResolvedEndpoint.trim()) {
+      return profileResolvedEndpoint.trim();
+    }
+
+    const legacyEndpoint = this.resolveLegacyIflowEndpoint(request);
+    if (legacyEndpoint) {
+      return legacyEndpoint;
+    }
+
+    return protocolResolvedEndpoint;
   }
 
   /**
    * 构造最终发送到上游的请求体，默认实现包含模型/令牌治理，可由子类覆写
    */
   protected buildHttpRequestBody(request: UnknownObject): UnknownObject {
-    const metadataNode =
-      (request as MetadataContainer)?.metadata &&
-      typeof (request as MetadataContainer).metadata === 'object'
-        ? ((request as MetadataContainer).metadata as Record<string, unknown>)
-        : undefined;
-    const isIflowWebSearch =
-      metadataNode?.iflowWebSearch === true;
-    if (isIflowWebSearch) {
-      const dataNode = (request as { data?: UnknownObject }).data;
-      if (dataNode && typeof dataNode === 'object') {
-        return dataNode as UnknownObject;
-      }
-      return {};
+    const runtimeMetadata = this.getCurrentRuntimeMetadata();
+    const familyProfile = this.resolveFamilyProfile(runtimeMetadata);
+
+    const defaultBody = this.protocolClient.buildRequestBody(request as ProtocolRequestPayload);
+    this.applyProviderSpecificBodyAdjustments(defaultBody);
+
+    const profileBody = familyProfile?.buildRequestBody?.({
+      request,
+      defaultBody,
+      runtimeMetadata
+    });
+    if (profileBody && typeof profileBody === 'object') {
+      return profileBody as UnknownObject;
     }
-    const built = this.protocolClient.buildRequestBody(request as ProtocolRequestPayload);
-    this.applyProviderSpecificBodyAdjustments(built);
-    return built;
+
+    const legacyBody = this.resolveLegacyIflowRequestBody(request);
+    if (legacyBody && typeof legacyBody === 'object') {
+      return legacyBody;
+    }
+
+    return defaultBody;
+  }
+
+  private resolveFamilyProfile(runtimeMetadata?: ProviderRuntimeMetadata): ProviderFamilyProfile | undefined {
+    const targetNode =
+      runtimeMetadata?.target && typeof runtimeMetadata.target === 'object'
+        ? (runtimeMetadata.target as Record<string, unknown>)
+        : undefined;
+
+    const normalize = (value: unknown): string | undefined => {
+      if (typeof value !== 'string') {
+        return undefined;
+      }
+      const normalized = value.trim().toLowerCase();
+      return normalized.length ? normalized : undefined;
+    };
+
+    return getProviderFamilyProfile({
+      providerFamily:
+        normalize(runtimeMetadata?.providerFamily) ??
+        normalize(this.getRuntimeProfile()?.providerFamily),
+      providerId:
+        normalize(runtimeMetadata?.providerId) ??
+        normalize(targetNode?.providerId) ??
+        normalize(this.config?.config?.providerId),
+      providerKey:
+        normalize(runtimeMetadata?.providerKey) ??
+        normalize(targetNode?.providerKey) ??
+        normalize(this.getRuntimeProfile()?.providerKey),
+      oauthProviderId: normalize(this.oauthProviderId)
+    });
+  }
+
+  private isIflowWebSearchRequest(request: UnknownObject): boolean {
+    const metadata = (request as { metadata?: unknown }).metadata;
+    if (!metadata || typeof metadata !== 'object') {
+      return false;
+    }
+    const flag = (metadata as { iflowWebSearch?: unknown }).iflowWebSearch;
+    return flag === true;
+  }
+
+  private resolveLegacyIflowEndpoint(request: UnknownObject): string | undefined {
+    if (!this.isIflowTransportRuntime(this.getCurrentRuntimeMetadata())) {
+      return undefined;
+    }
+    if (!this.isIflowWebSearchRequest(request)) {
+      return undefined;
+    }
+    const metadata = (request as { metadata?: unknown }).metadata;
+    const endpoint =
+      metadata && typeof (metadata as { entryEndpoint?: unknown }).entryEndpoint === 'string'
+        ? ((metadata as { entryEndpoint: string }).entryEndpoint || '').trim()
+        : '';
+    return endpoint || '/chat/retrieve';
+  }
+
+  private resolveLegacyIflowRequestBody(request: UnknownObject): UnknownObject | undefined {
+    if (!this.isIflowTransportRuntime(this.getCurrentRuntimeMetadata())) {
+      return undefined;
+    }
+    if (!this.isIflowWebSearchRequest(request)) {
+      return undefined;
+    }
+    const data = (request as { data?: unknown }).data;
+    if (data && typeof data === 'object') {
+      return data as UnknownObject;
+    }
+    return {};
   }
 
   /**
@@ -995,9 +1072,17 @@ export class HttpTransportProvider extends BaseProvider {
     // 因此对 iflow：service/profile 的 UA 优先级应高于 inbound client userAgent，
     // 否则客户端 UA 会把模拟头部冲掉，触发 HTTP 200 + status=435 "Model not support"。
     const isIflow = this.isIflowTransportRuntime(runtimeMetadata);
-    const resolvedUa = isIflow
+    const familyProfile = this.resolveFamilyProfile(runtimeMetadata);
+    const profileResolvedUa = familyProfile?.resolveUserAgent?.({
+      uaFromConfig,
+      uaFromService,
+      inboundUserAgent,
+      defaultUserAgent: DEFAULT_USER_AGENT,
+      runtimeMetadata
+    });
+    const resolvedUa = profileResolvedUa ?? (isIflow
       ? (uaFromConfig ?? uaFromService ?? inboundUserAgent ?? DEFAULT_USER_AGENT)
-      : (uaFromConfig ?? inboundUserAgent ?? uaFromService ?? DEFAULT_USER_AGENT);
+      : (uaFromConfig ?? inboundUserAgent ?? uaFromService ?? DEFAULT_USER_AGENT));
     this.assignHeader(finalHeaders, 'User-Agent', resolvedUa);
 
     // originator: do not invent one; only forward from config or inbound client.

@@ -99,8 +99,11 @@ describe('Protocol HTTP providers (V2) - basic behavior', () => {
     );
     expect(fallbackEndpoint).toBe('/chat/retrieve');
 
-    const body = provider.buildHttpRequestBody({ metadata: { iflowWebSearch: true }, data: { q: 'x' } });
-    expect(body).toEqual({ q: 'x' });
+    const body = provider.buildHttpRequestBody({
+      metadata: { iflowWebSearch: true },
+      data: { model: 'kimi-k2.5', q: 'x' }
+    });
+    expect(body).toEqual({ model: 'kimi-k2.5', q: 'x' });
   });
 
   test('iFlowHttpProvider treats HTTP 200 business error envelope as provider error', async () => {
