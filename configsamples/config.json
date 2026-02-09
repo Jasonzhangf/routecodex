@@ -366,6 +366,25 @@
           "targets": ["crs.gpt-5.1-codex:200", "tab.gpt-5.2-codex:100"]
         }
       ],
+      "multimodal": [
+        {
+          "id": "multimodal-primary",
+          "mode": "priority",
+          "priority": 200,
+          "targets": [
+            "iflow.kimi-k2.5"
+          ]
+        },
+        {
+          "id": "multimodal-backup",
+          "mode": "priority",
+          "priority": 100,
+          "backup": true,
+          "targets": [
+            "tab.gpt-5.2-codex"
+          ]
+        }
+      ],
       "vision": [
         {
           "id": "vision-primary",

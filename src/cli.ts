@@ -349,6 +349,7 @@ registerStopCommand(program, {
   killPidBestEffort,
   sleep,
   stopTokenDaemonIfRunning,
+  fetchImpl: fetch,
   env: process.env,
   exit: (code) => process.exit(code)
 });

@@ -77,6 +77,34 @@ describe('Routing instruction parsing and application', () => {
     expect(instruction.pathLength).toBe(2);
   });
 
+  test('prefer instruction supports :passthrough mode suffix', () => {
+    const instructions = parseRoutingInstructions(buildMessages('<**!tab.gpt-5.3-codex:passthrough**>'));
+    expect(instructions).toHaveLength(1);
+    const instruction = instructions[0];
+    expect(instruction.type).toBe('prefer');
+    expect(instruction.provider).toBe('tab');
+    expect(instruction.model).toBe('gpt-5.3-codex');
+    expect(instruction.processMode).toBe('passthrough');
+  });
+
+  test('prefer instruction ignores unknown mode suffix and keeps regular mode', () => {
+    const instructions = parseRoutingInstructions(buildMessages('<**!tab.gpt-5.3-codex:unknown_mode**>'));
+    expect(instructions).toHaveLength(1);
+    const instruction = instructions[0];
+    expect(instruction.type).toBe('prefer');
+    expect(instruction.provider).toBe('tab');
+    expect(instruction.model).toBe('gpt-5.3-codex');
+    expect(instruction.processMode).toBeUndefined();
+  });
+
+  test('applyRoutingInstructions persists processMode on prefer target', () => {
+    const instructions = parseRoutingInstructions(buildMessages('<**!tab.gpt-5.3-codex:passthrough**>'));
+    const nextState = applyRoutingInstructions(instructions, createState());
+    expect(nextState.preferTarget?.provider).toBe('tab');
+    expect(nextState.preferTarget?.model).toBe('gpt-5.3-codex');
+    expect(nextState.preferTarget?.processMode).toBe('passthrough');
+  });
+
   test('disable instructions override previous blacklist entries', () => {
     const initialState = createState({
       disabledProviders: new Set(['anthropic']),

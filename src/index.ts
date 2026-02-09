@@ -16,6 +16,8 @@ import { buildInfo } from './build-info.js';
 import { isDirectExecution } from './utils/is-direct-execution.js';
 import { parseNetstatListeningPids } from './utils/windows-netstat.js';
 import { reportRouteError } from './error-handling/route-error-hub.js';
+import { flushProcessLifecycleLogQueue, logProcessLifecycle, logProcessLifecycleSync } from './utils/process-lifecycle-logger.js';
+import { getShutdownCallerContext } from './utils/shutdown-caller-context.js';
 import { resolveRouteCodexConfigPath } from './config/config-paths.js';
 import { loadRouteCodexConfig } from './config/routecodex-config-loader.js';
 import type { RouteCodexHttpServer } from './server/runtime/http-server.js';
@@ -110,9 +112,15 @@ process.on('exit', (code) => {
   };
   if (reason.kind === 'signal') {
     payload.signal = reason.signal;
+    payload.caller = resolveSignalCaller(reason.signal);
   } else if (reason.kind === 'uncaughtException' || reason.kind === 'startupError' || reason.kind === 'stopError') {
     payload.message = reason.message;
   }
+  logProcessLifecycleSync({
+    event: 'process_exit',
+    source: 'index.process.on.exit',
+    details: payload
+  });
   // Single-line JSON for easy grep in logs
   console.log('[routecodex:shutdown]', JSON.stringify(payload));
 });
@@ -159,6 +167,34 @@ function readRecordBoolean(record: UnknownRecord | undefined, key: string): bool
     return undefined;
   }
   return readBoolean(record[key]);
+}
+
+function resolveSignalCaller(signal: string): Record<string, unknown> {
+  const fromShutdownRoute = getShutdownCallerContext({ maxAgeMs: 10 * 60 * 1000 });
+  if (fromShutdownRoute) {
+    return {
+      callerType: 'shutdown_route_context',
+      signal,
+      ...fromShutdownRoute
+    };
+  }
+
+  let parentCommand = '';
+  try {
+    const ps = spawnSync('ps', ['-o', 'command=', '-p', String(process.ppid)], { encoding: 'utf8' });
+    parentCommand = String(ps.stdout || '').trim().slice(0, 1024);
+  } catch {
+    parentCommand = '';
+  }
+
+  return {
+    callerType: 'unknown_signal_sender',
+    signal,
+    observedTs: new Date().toISOString(),
+    processPid: process.pid,
+    processPpid: process.ppid,
+    parentCommand
+  };
 }
 
 if (!process.env.ROUTECODEX_VERSION) {
@@ -650,8 +686,18 @@ async function ensurePortAvailable(port: number, opts: { attemptGraceful?: boole
   // Fall back to SIGTERM/SIGKILL processes listening on the port (avoid self-kill by probing first)
   const pids = await listPidsOnPort(port);
   if (!pids.length) {
+    logProcessLifecycle({
+      event: 'port_cleanup',
+      source: 'index.ensurePortAvailable',
+      details: { port, result: 'no_listener' }
+    });
     return;
   }
+  logProcessLifecycle({
+    event: 'port_cleanup',
+    source: 'index.ensurePortAvailable',
+    details: { port, result: 'listener_found', pids }
+  });
   for (const pid of pids) {
     killPidBestEffort(Number(pid), { force: false });
   }
@@ -662,6 +708,13 @@ async function ensurePortAvailable(port: number, opts: { attemptGraceful?: boole
     }
   }
   const remain = await listPidsOnPort(port);
+  if (remain.length) {
+    logProcessLifecycle({
+      event: 'port_cleanup',
+      source: 'index.ensurePortAvailable',
+      details: { port, result: 'force_kill', pids: remain }
+    });
+  }
   for (const pid of remain) {
     killPidBestEffort(Number(pid), { force: true });
   }
@@ -672,22 +725,51 @@ function killPidBestEffort(pid: number, opts: { force: boolean }): void {
   if (!Number.isFinite(pid) || pid <= 0) {
     return;
   }
+  const signal = opts.force ? 'SIGKILL' : 'SIGTERM';
   if (process.platform === 'win32') {
     const args = ['/PID', String(pid), '/T'];
     if (opts.force) {
       args.push('/F');
     }
+    logProcessLifecycle({
+      event: 'kill_attempt',
+      source: 'index.ensurePortAvailable',
+      details: { targetPid: pid, signal: opts.force ? 'TASKKILL_F' : 'TASKKILL', result: 'attempt' }
+    });
     try {
       spawnSync('taskkill', args, { stdio: 'ignore', encoding: 'utf8' });
-    } catch {
-      // best-effort
+      logProcessLifecycle({
+        event: 'kill_attempt',
+        source: 'index.ensurePortAvailable',
+        details: { targetPid: pid, signal: opts.force ? 'TASKKILL_F' : 'TASKKILL', result: 'success' }
+      });
+    } catch (error) {
+      logProcessLifecycle({
+        event: 'kill_attempt',
+        source: 'index.ensurePortAvailable',
+        details: { targetPid: pid, signal: opts.force ? 'TASKKILL_F' : 'TASKKILL', result: 'failed', error }
+      });
     }
     return;
   }
+  logProcessLifecycle({
+    event: 'kill_attempt',
+    source: 'index.ensurePortAvailable',
+    details: { targetPid: pid, signal, result: 'attempt' }
+  });
   try {
-    process.kill(pid, opts.force ? 'SIGKILL' : 'SIGTERM');
-  } catch {
-    // best-effort
+    process.kill(pid, signal);
+    logProcessLifecycle({
+      event: 'kill_attempt',
+      source: 'index.ensurePortAvailable',
+      details: { targetPid: pid, signal, result: 'success' }
+    });
+  } catch (error) {
+    logProcessLifecycle({
+      event: 'kill_attempt',
+      source: 'index.ensurePortAvailable',
+      details: { targetPid: pid, signal, result: 'failed', error }
+    });
   }
 }
 
@@ -737,8 +819,21 @@ async function attemptHttpShutdown(port: number): Promise<boolean> {
       signal: controller.signal
     }).catch(() => null);
     clearTimeout(timeout);
-    return !!(res && res.ok);
-  } catch { return false; }
+    const ok = !!(res && res.ok);
+    logProcessLifecycle({
+      event: 'http_shutdown_probe',
+      source: 'index.attemptHttpShutdown',
+      details: { port, result: ok ? 'ok' : 'not_ready', status: res?.status }
+    });
+    return ok;
+  } catch (error) {
+    logProcessLifecycle({
+      event: 'http_shutdown_probe',
+      source: 'index.attemptHttpShutdown',
+      details: { port, result: 'failed', error }
+    });
+    return false;
+  }
 }
 
 /**
@@ -757,12 +852,33 @@ async function gracefulShutdown(app: RouteCodexApp): Promise<void> {
             ? 'reason=stopError'
             : 'reason=unknown';
   console.log(`\n🛑 Stopping RouteCodex server gracefully... (${reasonLabel})`);
+  logProcessLifecycle({
+    event: 'graceful_shutdown',
+    source: 'index.gracefulShutdown',
+    details: {
+      reason: reasonLabel,
+      result: 'start',
+      caller: reason.kind === 'signal' ? resolveSignalCaller(reason.signal) : getShutdownCallerContext({ maxAgeMs: 10 * 60 * 1000 })
+    }
+  });
   try {
     await app.stop();
+    logProcessLifecycle({
+      event: 'graceful_shutdown',
+      source: 'index.gracefulShutdown',
+      details: { reason: reasonLabel, result: 'success' }
+    });
+    await flushProcessLifecycleLogQueue();
     process.exit(0);
   } catch (error) {
     await reportCliError('GRACEFUL_SHUTDOWN_FAILED', 'Error during graceful shutdown', error, 'high');
     console.error('❌ Error during graceful shutdown:', error);
+    logProcessLifecycle({
+      event: 'graceful_shutdown',
+      source: 'index.gracefulShutdown',
+      details: { reason: reasonLabel, result: 'failed', error }
+    });
+    await flushProcessLifecycleLogQueue();
     process.exit(1);
   }
 }
@@ -818,6 +934,11 @@ async function restartSelf(app: RouteCodexApp, signal: NodeJS.Signals): Promise<
   }
   restartInProgress = true;
   recordShutdownReason({ kind: 'signal', signal });
+  logProcessLifecycle({
+    event: 'restart_signal_received',
+    source: 'index.restartSelf',
+    details: { signal }
+  });
   console.log(`\n🔄 Restart signal received (${signal}). Restarting RouteCodex server process...`);
 
   const argv = process.argv.slice(1);
@@ -857,13 +978,20 @@ async function restartSelf(app: RouteCodexApp, signal: NodeJS.Signals): Promise<
 
   try {
     const child = spawn(process.execPath, argv, { stdio: 'inherit', env });
+    logProcessLifecycle({
+      event: 'restart_spawn_child',
+      source: 'index.restartSelf',
+      details: { signal, childPid: child.pid ?? null, argv }
+    });
     console.log(`[routecodex:restart] spawned pid=${child.pid ?? 'unknown'}`);
   } catch (error) {
     await reportCliError('SERVER_RESTART_SPAWN_FAILED', 'Failed to spawn restarted server', error, 'critical').catch(() => {});
     console.error('❌ Failed to spawn restarted server:', error);
+    await flushProcessLifecycleLogQueue();
     process.exit(1);
   }
 
+  await flushProcessLifecycleLogQueue();
   process.exit(0);
 }
 
@@ -876,10 +1004,20 @@ async function main(): Promise<void> {
 
   // Setup signal handlers for graceful shutdown
   process.on('SIGTERM', () => {
+    logProcessLifecycleSync({
+      event: 'signal_received',
+      source: 'index.main',
+      details: { signal: 'SIGTERM', caller: resolveSignalCaller('SIGTERM') }
+    });
     recordShutdownReason({ kind: 'signal', signal: 'SIGTERM' });
     void gracefulShutdown(app);
   });
   process.on('SIGINT', () => {
+    logProcessLifecycleSync({
+      event: 'signal_received',
+      source: 'index.main',
+      details: { signal: 'SIGINT', caller: resolveSignalCaller('SIGINT') }
+    });
     recordShutdownReason({ kind: 'signal', signal: 'SIGINT' });
     void gracefulShutdown(app);
   });
@@ -889,9 +1027,19 @@ async function main(): Promise<void> {
   // - The server respawns itself (same argv), then exits.
   if (process.platform !== 'win32') {
     process.on('SIGUSR2', () => {
+      logProcessLifecycle({
+        event: 'signal_received',
+        source: 'index.main',
+        details: { signal: 'SIGUSR2' }
+      });
       void restartSelf(app, 'SIGUSR2');
     });
     process.on('SIGHUP', () => {
+      logProcessLifecycle({
+        event: 'signal_received',
+        source: 'index.main',
+        details: { signal: 'SIGHUP' }
+      });
       void restartSelf(app, 'SIGHUP');
     });
   }
@@ -899,6 +1047,11 @@ async function main(): Promise<void> {
   // Handle uncaught exceptions
   process.on('uncaughtException', (error) => {
     const message = error instanceof Error ? error.message : String(error ?? '');
+    logProcessLifecycle({
+      event: 'uncaught_exception',
+      source: 'index.main',
+      details: { message, error }
+    });
     recordShutdownReason({ kind: 'uncaughtException', message });
     void reportCliError('UNCAUGHT_EXCEPTION', 'Uncaught Exception', error, 'critical');
     console.error('❌ Uncaught Exception:', error);

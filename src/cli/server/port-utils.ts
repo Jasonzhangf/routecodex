@@ -1,6 +1,7 @@
 import { spawnSync as nodeSpawnSync } from 'node:child_process';
 
 import { API_PATHS, HTTP_PROTOCOLS, LOCAL_HOSTS } from '../../constants/index.js';
+import { logProcessLifecycle } from '../../utils/process-lifecycle-logger.js';
 
 export type PortUtilsSpinner = {
   start(text?: string): PortUtilsSpinner;
@@ -33,22 +34,53 @@ export function killPidBestEffortImpl(args: {
   if (!Number.isFinite(pid) || pid <= 0) {
     return;
   }
+
   if (isWindows) {
     const taskkillArgs = ['/PID', String(pid), '/T'];
     if (force) {
       taskkillArgs.push('/F');
     }
+    logProcessLifecycle({
+      event: 'kill_attempt',
+      source: 'cli.port-utils',
+      details: { targetPid: pid, signal: force ? 'TASKKILL_F' : 'TASKKILL', result: 'attempt' }
+    });
     try {
       spawnSyncImpl('taskkill', taskkillArgs, { stdio: 'ignore', encoding: 'utf8' });
-    } catch {
-      // best-effort
+      logProcessLifecycle({
+        event: 'kill_attempt',
+        source: 'cli.port-utils',
+        details: { targetPid: pid, signal: force ? 'TASKKILL_F' : 'TASKKILL', result: 'success' }
+      });
+    } catch (error) {
+      logProcessLifecycle({
+        event: 'kill_attempt',
+        source: 'cli.port-utils',
+        details: { targetPid: pid, signal: force ? 'TASKKILL_F' : 'TASKKILL', result: 'failed', error }
+      });
     }
     return;
   }
+
+  const signal = force ? 'SIGKILL' : 'SIGTERM';
+  logProcessLifecycle({
+    event: 'kill_attempt',
+    source: 'cli.port-utils',
+    details: { targetPid: pid, signal, result: 'attempt' }
+  });
   try {
-    processKill(pid, force ? 'SIGKILL' : 'SIGTERM');
-  } catch {
-    // best-effort
+    processKill(pid, signal);
+    logProcessLifecycle({
+      event: 'kill_attempt',
+      source: 'cli.port-utils',
+      details: { targetPid: pid, signal, result: 'success' }
+    });
+  } catch (error) {
+    logProcessLifecycle({
+      event: 'kill_attempt',
+      source: 'cli.port-utils',
+      details: { targetPid: pid, signal, result: 'failed', error }
+    });
   }
 }
 
@@ -139,6 +171,12 @@ export async function ensurePortAvailableImpl(args: {
     return;
   }
 
+  logProcessLifecycle({
+    event: 'port_check_start',
+    source: 'cli.ensurePortAvailable',
+    details: { port, restart: Boolean(opts.restart) }
+  });
+
   // Best-effort HTTP shutdown on common loopback hosts to cover IPv4/IPv6
   try {
     const candidates = [LOCAL_HOSTS.IPV4, LOCAL_HOSTS.LOCALHOST];
@@ -152,10 +190,41 @@ export async function ensurePortAvailableImpl(args: {
             /* ignore */
           }
         }, 700);
+        const callerTs = new Date().toISOString();
+        logProcessLifecycle({
+          event: 'port_http_shutdown',
+          source: 'cli.ensurePortAvailable',
+          details: {
+            result: 'attempt',
+            host: h,
+            port,
+            callerTs,
+            callerPid: process.pid,
+            callerCwd: process.cwd(),
+            callerCmd: process.argv.join(' ').slice(0, 1024)
+          }
+        });
         await args.fetchImpl(`http://${h}:${port}/shutdown`, {
           method: 'POST',
-          signal: controller.signal
-        }).catch(() => {});
+          signal: controller.signal,
+          headers: {
+            'x-routecodex-stop-caller-pid': String(process.pid),
+            'x-routecodex-stop-caller-ts': callerTs,
+            'x-routecodex-stop-caller-cwd': process.cwd(),
+            'x-routecodex-stop-caller-cmd': process.argv.join(' ').slice(0, 1024)
+          }
+        }).catch((error) => {
+          logProcessLifecycle({
+            event: 'port_http_shutdown',
+            source: 'cli.ensurePortAvailable',
+            details: {
+              result: 'failed',
+              host: h,
+              port,
+              error
+            }
+          });
+        });
         clearTimeout(t);
       } catch {
         /* ignore */
@@ -168,11 +237,27 @@ export async function ensurePortAvailableImpl(args: {
 
   const initialPids = args.findListeningPids(port);
   if (initialPids.length === 0) {
+    logProcessLifecycle({
+      event: 'port_check_result',
+      source: 'cli.ensurePortAvailable',
+      details: { port, result: 'free' }
+    });
     return;
   }
 
+  logProcessLifecycle({
+    event: 'port_check_result',
+    source: 'cli.ensurePortAvailable',
+    details: { port, result: 'occupied', pids: initialPids }
+  });
+
   const healthy = await args.isServerHealthyQuick(port);
   if (healthy && !opts.restart) {
+    logProcessLifecycle({
+      event: 'port_check_result',
+      source: 'cli.ensurePortAvailable',
+      details: { port, result: 'already_running', pids: initialPids }
+    });
     parentSpinner.stop();
     args.logger.success(`RouteCodex is already running on port ${port}.`);
     args.logger.info(`Use 'rcc stop' or 'rcc start --restart' to restart.`);
@@ -197,6 +282,11 @@ export async function ensurePortAvailableImpl(args: {
   const gracefulDeadline = Date.now() + gracefulTimeout;
   while (Date.now() < gracefulDeadline) {
     if (args.findListeningPids(port).length === 0) {
+      logProcessLifecycle({
+        event: 'port_check_result',
+        source: 'cli.ensurePortAvailable',
+        details: { port, result: 'freed_after_graceful' }
+      });
       stopSpinner.succeed(`Port ${port} freed after graceful stop.`);
       args.logger.success(`Port ${port} freed after graceful stop.`);
       parentSpinner.start('Starting RouteCodex server...');
@@ -207,6 +297,11 @@ export async function ensurePortAvailableImpl(args: {
 
   let remaining = args.findListeningPids(port);
   if (remaining.length) {
+    logProcessLifecycle({
+      event: 'port_check_result',
+      source: 'cli.ensurePortAvailable',
+      details: { port, result: 'graceful_timeout', pids: remaining }
+    });
     stopSpinner.warn(`Graceful stop timed out, sending SIGKILL to PID(s): ${remaining.join(', ')}`);
     args.logger.warning(`Graceful stop timed out. Forcing SIGKILL to PID(s): ${remaining.join(', ')}`);
     for (const pid of remaining) {
@@ -222,6 +317,11 @@ export async function ensurePortAvailableImpl(args: {
     const killDeadline = Date.now() + killTimeout;
     while (Date.now() < killDeadline) {
       if (args.findListeningPids(port).length === 0) {
+        logProcessLifecycle({
+          event: 'port_check_result',
+          source: 'cli.ensurePortAvailable',
+          details: { port, result: 'freed_after_force' }
+        });
         stopSpinner.succeed(`Port ${port} freed after SIGKILL.`);
         args.logger.success(`Port ${port} freed after SIGKILL.`);
         parentSpinner.start('Starting RouteCodex server...');
@@ -233,13 +333,22 @@ export async function ensurePortAvailableImpl(args: {
 
   remaining = args.findListeningPids(port);
   if (remaining.length) {
+    logProcessLifecycle({
+      event: 'port_check_result',
+      source: 'cli.ensurePortAvailable',
+      details: { port, result: 'failed', pids: remaining }
+    });
     stopSpinner.fail(`Failed to free port ${port}. Still held by PID(s): ${remaining.join(', ')}`);
     args.logger.error(`Failed to free port ${port}. Still held by PID(s): ${remaining.join(', ')}`);
     throw new Error(`Failed to free port ${port}`);
   }
 
+  logProcessLifecycle({
+    event: 'port_check_result',
+    source: 'cli.ensurePortAvailable',
+    details: { port, result: 'freed' }
+  });
   stopSpinner.succeed(`Port ${port} freed.`);
   args.logger.success(`Port ${port} freed.`);
   parentSpinner.start('Starting RouteCodex server...');
 }
-

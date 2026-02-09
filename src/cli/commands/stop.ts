@@ -2,6 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { homedir } from 'node:os';
 import type { Command } from 'commander';
+import { LOCAL_HOSTS } from '../../constants/index.js';
+import { logProcessLifecycleSync } from '../../utils/process-lifecycle-logger.js';
 
 type Spinner = {
   start(text?: string): Spinner;
@@ -18,6 +20,17 @@ type LoggerLike = {
   error: (msg: string) => void;
 };
 
+interface StopCommandOptions {
+  password?: string;
+}
+
+interface StopCallerAudit {
+  callerTs: string;
+  callerPid: number;
+  callerCwd: string;
+  callerCmd: string;
+}
+
 export type StopCommandContext = {
   isDevPackage: boolean;
   defaultDevPort: number;
@@ -27,6 +40,7 @@ export type StopCommandContext = {
   killPidBestEffort: (pid: number, opts: { force: boolean }) => void;
   sleep: (ms: number) => Promise<void>;
   stopTokenDaemonIfRunning?: () => Promise<void>;
+  fetchImpl?: typeof fetch;
   env?: Record<string, string | undefined>;
   fsImpl?: Pick<typeof fs, 'existsSync' | 'readFileSync'>;
   pathImpl?: Pick<typeof path, 'join'>;
@@ -87,32 +101,216 @@ function resolveStopPort(ctx: StopCommandContext, spinner: Spinner): number {
   return port;
 }
 
+function resolveStopPassword(ctx: StopCommandContext): string {
+  const configured = ctx.env?.ROUTECODEX_STOP_PASSWORD || ctx.env?.RCC_STOP_PASSWORD;
+  if (typeof configured === 'string' && configured.trim()) {
+    return configured.trim();
+  }
+  return '123';
+}
+
+function enforceStopPassword(
+  providedPassword: string | undefined,
+  expectedPassword: string,
+  spinner: Spinner,
+  ctx: StopCommandContext
+): void {
+  if (providedPassword === expectedPassword) {
+    return;
+  }
+  spinner.fail('Stop denied: invalid password.');
+  ctx.logger.error('Stop denied. Use --password <value> (or configure ROUTECODEX_STOP_PASSWORD).');
+  ctx.exit(1);
+}
+
+function buildCallerAudit(): StopCallerAudit {
+  return {
+    callerTs: new Date().toISOString(),
+    callerPid: process.pid,
+    callerCwd: process.cwd(),
+    callerCmd: process.argv.join(' ').slice(0, 1024)
+  };
+}
+
+function resolveFetchImpl(ctx: StopCommandContext): typeof fetch | null {
+  if (typeof ctx.fetchImpl === 'function') {
+    return ctx.fetchImpl;
+  }
+  if (typeof fetch === 'function') {
+    return fetch;
+  }
+  return null;
+}
+
+async function attemptHttpShutdown(
+  ctx: StopCommandContext,
+  resolvedPort: number,
+  callerAudit: StopCallerAudit
+): Promise<boolean> {
+  const fetchImpl = resolveFetchImpl(ctx);
+  if (!fetchImpl) {
+    return false;
+  }
+
+  const candidates = [LOCAL_HOSTS.IPV4, LOCAL_HOSTS.LOCALHOST];
+  for (const host of candidates) {
+    try {
+      logProcessLifecycleSync({
+        event: 'stop_http_shutdown',
+        source: 'cli.stop',
+        details: {
+          result: 'attempt',
+          host,
+          port: resolvedPort,
+          ...callerAudit
+        }
+      });
+      const controller = new AbortController();
+      const timeout = setTimeout(() => {
+        try {
+          controller.abort();
+        } catch {
+          /* ignore */
+        }
+      }, 1200);
+
+      const response = await fetchImpl(`http://${host}:${resolvedPort}/shutdown`, {
+        method: 'POST',
+        signal: controller.signal,
+        headers: {
+          'x-routecodex-stop-caller-pid': String(callerAudit.callerPid),
+          'x-routecodex-stop-caller-ts': callerAudit.callerTs,
+          'x-routecodex-stop-caller-cwd': callerAudit.callerCwd,
+          'x-routecodex-stop-caller-cmd': callerAudit.callerCmd
+        }
+      });
+      clearTimeout(timeout);
+
+      logProcessLifecycleSync({
+        event: 'stop_http_shutdown',
+        source: 'cli.stop',
+        details: {
+          result: response.ok ? 'accepted' : 'rejected',
+          host,
+          port: resolvedPort,
+          statusCode: response.status,
+          ...callerAudit
+        }
+      });
+
+      if (response.ok) {
+        return true;
+      }
+    } catch (error) {
+      logProcessLifecycleSync({
+        event: 'stop_http_shutdown',
+        source: 'cli.stop',
+        details: {
+          result: 'failed',
+          host,
+          port: resolvedPort,
+          error,
+          ...callerAudit
+        }
+      });
+    }
+  }
+
+  return false;
+}
+
 export function createStopCommand(program: Command, ctx: StopCommandContext): void {
   program
     .command('stop')
     .description('Stop the RouteCodex server')
-    .action(async () => {
+    .option('--password <password>', 'Password required to stop server')
+    .action(async (options: StopCommandOptions) => {
       const spinner = await ctx.createSpinner('Stopping RouteCodex server...');
+      const callerAudit = buildCallerAudit();
       try {
+        const expectedPassword = resolveStopPassword(ctx);
+        enforceStopPassword(options?.password, expectedPassword, spinner, ctx);
+
         const resolvedPort = resolveStopPort(ctx, spinner);
+        logProcessLifecycleSync({
+          event: 'stop_command',
+          source: 'cli.stop',
+          details: {
+            result: 'requested',
+            port: resolvedPort,
+            ...callerAudit
+          }
+        });
 
         const pids = ctx.findListeningPids(resolvedPort);
         if (!pids.length) {
           spinner.succeed(`No server listening on ${resolvedPort}.`);
+          logProcessLifecycleSync({
+            event: 'stop_command',
+            source: 'cli.stop',
+            details: {
+              result: 'no_server',
+              port: resolvedPort,
+              ...callerAudit
+            }
+          });
           if (ctx.isDevPackage) {
             await ctx.stopTokenDaemonIfRunning?.();
           }
           return;
         }
 
-        for (const pid of pids) {
+        const httpShutdownAccepted = await attemptHttpShutdown(ctx, resolvedPort, callerAudit);
+        const gracefulDeadline = Date.now() + 3000;
+        while (Date.now() < gracefulDeadline) {
+          if (ctx.findListeningPids(resolvedPort).length === 0) {
+            spinner.succeed(`Stopped server on ${resolvedPort}.`);
+            logProcessLifecycleSync({
+              event: 'stop_command',
+              source: 'cli.stop',
+              details: {
+                result: httpShutdownAccepted ? 'stopped_via_http_shutdown' : 'stopped_after_wait',
+                port: resolvedPort,
+                ...callerAudit
+              }
+            });
+            if (ctx.isDevPackage) {
+              await ctx.stopTokenDaemonIfRunning?.();
+            }
+            return;
+          }
+          await ctx.sleep(100);
+        }
+
+        const remainAfterWait = ctx.findListeningPids(resolvedPort);
+        for (const pid of remainAfterWait) {
+          logProcessLifecycleSync({
+            event: 'stop_signal_fallback',
+            source: 'cli.stop',
+            details: {
+              result: 'attempt',
+              port: resolvedPort,
+              targetPid: pid,
+              signal: 'SIGTERM',
+              ...callerAudit
+            }
+          });
           ctx.killPidBestEffort(pid, { force: false });
         }
 
-        const deadline = Date.now() + 3000;
-        while (Date.now() < deadline) {
+        const termDeadline = Date.now() + 3000;
+        while (Date.now() < termDeadline) {
           if (ctx.findListeningPids(resolvedPort).length === 0) {
             spinner.succeed(`Stopped server on ${resolvedPort}.`);
+            logProcessLifecycleSync({
+              event: 'stop_command',
+              source: 'cli.stop',
+              details: {
+                result: 'stopped_after_sigterm',
+                port: resolvedPort,
+                ...callerAudit
+              }
+            });
             if (ctx.isDevPackage) {
               await ctx.stopTokenDaemonIfRunning?.();
             }
@@ -124,14 +322,44 @@ export function createStopCommand(program: Command, ctx: StopCommandContext): vo
         const remain = ctx.findListeningPids(resolvedPort);
         if (remain.length) {
           for (const pid of remain) {
+            logProcessLifecycleSync({
+              event: 'stop_signal_fallback',
+              source: 'cli.stop',
+              details: {
+                result: 'attempt',
+                port: resolvedPort,
+                targetPid: pid,
+                signal: 'SIGKILL',
+                ...callerAudit
+              }
+            });
             ctx.killPidBestEffort(pid, { force: true });
           }
         }
         spinner.succeed(`Force stopped server on ${resolvedPort}.`);
+        logProcessLifecycleSync({
+          event: 'stop_command',
+          source: 'cli.stop',
+          details: {
+            result: 'force_stopped',
+            port: resolvedPort,
+            remainingPidsBeforeForce: remain,
+            ...callerAudit
+          }
+        });
         if (ctx.isDevPackage) {
           await ctx.stopTokenDaemonIfRunning?.();
         }
       } catch (e) {
+        logProcessLifecycleSync({
+          event: 'stop_command',
+          source: 'cli.stop',
+          details: {
+            result: 'failed',
+            error: e,
+            ...callerAudit
+          }
+        });
         spinner.fail(`Failed to stop: ${(e as Error).message}`);
         ctx.exit(1);
       }

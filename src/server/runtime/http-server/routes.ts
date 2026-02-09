@@ -11,6 +11,8 @@ import { loadTokenPortalFingerprintSummary } from '../../../token-portal/fingerp
 import { registerDaemonAdminRoutes, rejectNonLocalOrUnauthorizedAdmin } from './daemon-admin-routes.js';
 import type { HistoricalStatsSnapshot, StatsSnapshot } from './stats-manager.js';
 import { buildInfo } from '../../../build-info.js';
+import { logProcessLifecycleSync } from '../../../utils/process-lifecycle-logger.js';
+import { setShutdownCallerContext } from '../../../utils/shutdown-caller-context.js';
 
 interface RouteOptions {
   app: Application;
@@ -207,19 +209,77 @@ export function registerHttpRoutes(options: RouteOptions): void {
     try {
       const ip = req.socket?.remoteAddress || '';
       const allowed = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
+      const shutdownAudit = {
+        requestTs: new Date().toISOString(),
+        remoteIp: ip,
+        method: req.method,
+        path: req.path,
+        userAgent: req.get('user-agent') || '',
+        forwardedFor: req.get('x-forwarded-for') || '',
+        origin: req.get('origin') || '',
+        referer: req.get('referer') || '',
+        authPresent: Boolean(req.get('authorization') || req.get('x-api-key')),
+        callerPid: (req.get('x-routecodex-stop-caller-pid') || '').slice(0, 64),
+        callerTs: (req.get('x-routecodex-stop-caller-ts') || '').slice(0, 128),
+        callerCwd: (req.get('x-routecodex-stop-caller-cwd') || '').slice(0, 512),
+        callerCmd: (req.get('x-routecodex-stop-caller-cmd') || '').slice(0, 1024)
+      };
       if (!allowed) {
+        logProcessLifecycleSync({
+          event: 'shutdown_route',
+          source: 'http.routes.shutdown',
+          details: { result: 'forbidden', ...shutdownAudit }
+        });
         res.status(403).json({ error: { message: 'forbidden' } });
         return;
       }
+
+      setShutdownCallerContext({
+        source: 'http.routes.shutdown',
+        requestTs: shutdownAudit.requestTs,
+        remoteIp: shutdownAudit.remoteIp,
+        method: shutdownAudit.method,
+        path: shutdownAudit.path,
+        userAgent: shutdownAudit.userAgent,
+        forwardedFor: shutdownAudit.forwardedFor,
+        origin: shutdownAudit.origin,
+        referer: shutdownAudit.referer,
+        authPresent: shutdownAudit.authPresent,
+        callerPid: shutdownAudit.callerPid,
+        callerTs: shutdownAudit.callerTs,
+        callerCwd: shutdownAudit.callerCwd,
+        callerCmd: shutdownAudit.callerCmd
+      });
+
+      logProcessLifecycleSync({
+        event: 'shutdown_route',
+        source: 'http.routes.shutdown',
+        details: { result: 'accepted', ...shutdownAudit }
+      });
       res.status(200).json({ ok: true });
       setTimeout(() => {
         try {
+          logProcessLifecycleSync({
+            event: 'kill_attempt',
+            source: 'http.routes.shutdown',
+            details: { targetPid: process.pid, signal: 'SIGTERM', result: 'attempt' }
+          });
           process.kill(process.pid, 'SIGTERM');
-        } catch {
+        } catch (error) {
+          logProcessLifecycleSync({
+            event: 'kill_attempt',
+            source: 'http.routes.shutdown',
+            details: { targetPid: process.pid, signal: 'SIGTERM', result: 'failed', error }
+          });
           return;
         }
       }, 50);
-    } catch {
+    } catch (error) {
+      logProcessLifecycleSync({
+        event: 'shutdown_route',
+        source: 'http.routes.shutdown',
+        details: { result: 'exception', requestTs: new Date().toISOString(), error }
+      });
       try {
         res.status(200).json({ ok: true });
       } catch {
@@ -227,8 +287,18 @@ export function registerHttpRoutes(options: RouteOptions): void {
       }
       setTimeout(() => {
         try {
+          logProcessLifecycleSync({
+            event: 'kill_attempt',
+            source: 'http.routes.shutdown',
+            details: { targetPid: process.pid, signal: 'SIGTERM', result: 'attempt' }
+          });
           process.kill(process.pid, 'SIGTERM');
-        } catch {
+        } catch (innerError) {
+          logProcessLifecycleSync({
+            event: 'kill_attempt',
+            source: 'http.routes.shutdown',
+            details: { targetPid: process.pid, signal: 'SIGTERM', result: 'failed', error: innerError }
+          });
           return;
         }
       }, 50);

@@ -1,6 +1,10 @@
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import { describe, expect, it } from '@jest/globals';
 
 import { findListeningPidsImpl, killPidBestEffortImpl } from '../../src/cli/server/port-utils.js';
+import { flushProcessLifecycleLogQueue } from '../../src/utils/process-lifecycle-logger.js';
 
 describe('cli server port-utils', () => {
   it('killPidBestEffortImpl calls process.kill with SIGTERM/SIGKILL on non-windows', () => {
@@ -68,5 +72,48 @@ describe('cli server port-utils', () => {
 
     expect(pids).toEqual([1001]);
     expect(parseCalls).toEqual([{ stdout: 'NETSTAT', port: 5520 }]);
+  });
+
+  it('writes lifecycle kill_attempt entries', async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-port-utils-'));
+    const logPath = path.join(tempDir, 'process-lifecycle.jsonl');
+    const prevPath = process.env.ROUTECODEX_PROCESS_LIFECYCLE_LOG;
+    const prevConsole = process.env.ROUTECODEX_PROCESS_LIFECYCLE_CONSOLE;
+
+    process.env.ROUTECODEX_PROCESS_LIFECYCLE_LOG = logPath;
+    process.env.ROUTECODEX_PROCESS_LIFECYCLE_CONSOLE = '0';
+
+    try {
+      const processKill = (() => true) as any;
+      killPidBestEffortImpl({ pid: 321, force: false, isWindows: false, processKill });
+      await flushProcessLifecycleLogQueue();
+
+      const lines = fs
+        .readFileSync(logPath, 'utf8')
+        .trim()
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+
+      const attempts = lines.filter((entry) => entry.event === 'kill_attempt');
+      expect(attempts.length).toBeGreaterThanOrEqual(2);
+      expect(
+        attempts.some((entry) => (entry.details as Record<string, unknown>)?.result === 'attempt')
+      ).toBe(true);
+      expect(
+        attempts.some((entry) => (entry.details as Record<string, unknown>)?.result === 'success')
+      ).toBe(true);
+    } finally {
+      if (prevPath === undefined) {
+        delete process.env.ROUTECODEX_PROCESS_LIFECYCLE_LOG;
+      } else {
+        process.env.ROUTECODEX_PROCESS_LIFECYCLE_LOG = prevPath;
+      }
+      if (prevConsole === undefined) {
+        delete process.env.ROUTECODEX_PROCESS_LIFECYCLE_CONSOLE;
+      } else {
+        process.env.ROUTECODEX_PROCESS_LIFECYCLE_CONSOLE = prevConsole;
+      }
+    }
   });
 });

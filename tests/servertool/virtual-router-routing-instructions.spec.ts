@@ -171,6 +171,23 @@ describe('VirtualRouterEngine routing instructions', () => {
     expect(target.providerKey.includes('gemini-3-pro-high')).toBe(true);
   });
 
+  test('prefer instructions propagate :passthrough mode to target metadata', () => {
+    const engine = buildEngine();
+    const request = buildRequest('<**!antigravity.gemini-3-pro-high:passthrough**>');
+    const { target, decision } = engine.route(request, buildMetadata({ sessionId: 'session-prefer-passthrough' }));
+    expect(decision.routeName).toBe('prefer');
+    expect(target.providerKey.includes('gemini-3-pro-high')).toBe(true);
+    expect(target.processMode).toBe('passthrough');
+  });
+
+  test('prefer instructions without :passthrough keep regular chat mode', () => {
+    const engine = buildEngine();
+    const request = buildRequest('<**!antigravity.gemini-3-pro-high**>');
+    const { target } = engine.route(request, buildMetadata({ sessionId: 'session-prefer-chat-mode' }));
+    expect(target.providerKey.includes('gemini-3-pro-high')).toBe(true);
+    expect(target.processMode).toBe('chat');
+  });
+
   test('prefer instructions honor provider[alias].model syntax', () => {
     const engine = buildEngine();
     const request = buildRequest('<**!antigravity[geminikey].gemini-3-pro-high**>');

@@ -36,6 +36,25 @@ describe('cli stop command', () => {
     expect(program.commands.some((c) => c.name() === 'stop')).toBe(true);
   });
 
+  it('denies stop when password is missing', async () => {
+    const program = new Command();
+    createStopCommand(program, {
+      isDevPackage: true,
+      defaultDevPort: 5520,
+      createSpinner: async () => createStubSpinner(),
+      logger: { info: () => {}, error: () => {} },
+      findListeningPids: () => [],
+      killPidBestEffort: () => {},
+      sleep: async () => {},
+      env: {},
+      exit: (code) => {
+        throw new Error(`exit:${code}`);
+      }
+    });
+
+    await expect(program.parseAsync(['node', 'routecodex', 'stop'], { from: 'node' })).rejects.toThrow('exit:1');
+  });
+
   it('exits with 1 in release mode when config is missing', async () => {
     const errors: string[] = [];
     const info: string[] = [];
@@ -61,7 +80,9 @@ describe('cli stop command', () => {
       }
     });
 
-    await expect(program.parseAsync(['node', 'rcc', 'stop'], { from: 'node' })).rejects.toThrow('exit:1');
+    await expect(program.parseAsync(['node', 'rcc', 'stop', '--password', '123'], { from: 'node' })).rejects.toThrow(
+      'exit:1'
+    );
     expect(errors.join('\n')).toContain('Cannot determine server port');
     expect(info.join('\n')).toContain('rcc config init');
   });
@@ -89,7 +110,7 @@ describe('cli stop command', () => {
       }
     });
 
-    await program.parseAsync(['node', 'routecodex', 'stop'], { from: 'node' });
+    await program.parseAsync(['node', 'routecodex', 'stop', '--password', '123'], { from: 'node' });
     expect(succeeded.join('\n')).toContain('No server listening on 5520');
   });
 });
