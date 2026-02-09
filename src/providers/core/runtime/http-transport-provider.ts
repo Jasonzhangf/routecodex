@@ -584,8 +584,15 @@ export class HttpTransportProvider extends BaseProvider {
     return this.requestExecutor.execute(request, context);
   }
 
-  protected wantsUpstreamSse(_request: UnknownObject, _context: ProviderContext): boolean {
-    return false;
+  protected wantsUpstreamSse(request: UnknownObject, context: ProviderContext): boolean {
+    const runtimeMetadata = context.runtimeMetadata ?? this.getCurrentRuntimeMetadata();
+    const familyProfile = this.resolveFamilyProfile(runtimeMetadata);
+    const profileResolved = familyProfile?.resolveStreamIntent?.({
+      request,
+      context,
+      runtimeMetadata
+    });
+    return typeof profileResolved === 'boolean' ? profileResolved : false;
   }
 
   protected applyStreamModeHeaders(headers: Record<string, string>, wantsSse: boolean): Record<string, string> {
@@ -601,8 +608,15 @@ export class HttpTransportProvider extends BaseProvider {
     return normalized;
   }
 
-  protected prepareSseRequestBody(_body: UnknownObject, _context: ProviderContext): void {
-    // default no-op
+  protected prepareSseRequestBody(body: UnknownObject, context?: ProviderContext): void {
+    const runtimeMetadata = context?.runtimeMetadata ?? this.getCurrentRuntimeMetadata();
+    const familyProfile = this.resolveFamilyProfile(runtimeMetadata);
+    const effectiveContext = context ?? this.createProviderContext();
+    familyProfile?.prepareStreamBody?.({
+      body,
+      context: effectiveContext,
+      runtimeMetadata
+    });
   }
 
   protected async wrapUpstreamSseResponse(stream: NodeJS.ReadableStream, _context: ProviderContext): Promise<UnknownObject> {
@@ -869,6 +883,11 @@ export class HttpTransportProvider extends BaseProvider {
         normalize(runtimeMetadata?.providerKey) ??
         normalize(targetNode?.providerKey) ??
         normalize(this.getRuntimeProfile()?.providerKey),
+      providerType:
+        normalize(runtimeMetadata?.providerType) ??
+        normalize(targetNode?.providerType) ??
+        normalize(this.config?.config?.providerType) ??
+        normalize(this.providerType),
       oauthProviderId: normalize(this.oauthProviderId)
     });
   }
@@ -1139,7 +1158,8 @@ export class HttpTransportProvider extends BaseProvider {
       }
     }
 
-    if (!isAntigravity && this.isCodexUaMode()) {
+    const codexUaMode = this.isCodexUaMode();
+    if (!isAntigravity && codexUaMode) {
       this.ensureCodexSessionHeaders(finalHeaders, runtimeMetadata);
     }
 
@@ -1150,7 +1170,8 @@ export class HttpTransportProvider extends BaseProvider {
 
     const profileAdjustedHeaders = familyProfile?.applyRequestHeaders?.({
       headers: finalHeaders,
-      runtimeMetadata
+      runtimeMetadata,
+      isCodexUaMode: codexUaMode
     });
     if (profileAdjustedHeaders && typeof profileAdjustedHeaders === 'object') {
       return profileAdjustedHeaders;

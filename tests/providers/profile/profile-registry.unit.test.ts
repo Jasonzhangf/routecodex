@@ -13,6 +13,16 @@ describe('provider family profile registry', () => {
     expect(hasProviderFamilyProfile({ providerKey: 'iflow.3-138.kimi-k2.5' })).toBe(true);
   });
 
+  test('resolves responses/anthropic profiles from providerType', () => {
+    const responsesProfile = getProviderFamilyProfile({ providerType: 'responses' });
+    const anthropicProfile = getProviderFamilyProfile({ providerType: 'anthropic' });
+
+    expect(responsesProfile?.providerFamily).toBe('responses');
+    expect(anthropicProfile?.providerFamily).toBe('anthropic');
+    expect(hasProviderFamilyProfile({ providerType: 'responses' })).toBe(true);
+    expect(hasProviderFamilyProfile({ providerType: 'anthropic' })).toBe(true);
+  });
+
   test('iflow profile resolves endpoint/body for web search requests', () => {
     const profile = getProviderFamilyProfile({ providerId: 'iflow' });
     expect(profile).toBeTruthy();
@@ -110,5 +120,58 @@ describe('provider family profile registry', () => {
       }
     });
     expect(String(tokenExpired?.message || '')).toContain('token has expired');
+  });
+
+  test('responses profile enforces codex UA header policy', () => {
+    const profile = getProviderFamilyProfile({ providerType: 'responses' });
+    expect(profile).toBeTruthy();
+
+    const untouched = profile?.applyRequestHeaders?.({
+      headers: {
+        'User-Agent': 'curl/8.7.1'
+      },
+      isCodexUaMode: false
+    });
+    expect(untouched).toBeUndefined();
+
+    const adjusted = profile?.applyRequestHeaders?.({
+      headers: {
+        'User-Agent': 'curl/8.7.1'
+      },
+      isCodexUaMode: true
+    });
+
+    expect(adjusted?.['User-Agent']).toContain('codex_cli_rs/0.73.0');
+    expect(adjusted?.originator).toBe('codex_cli_rs');
+  });
+
+  test('anthropic profile derives stream intent and prepares stream body', () => {
+    const profile = getProviderFamilyProfile({ providerType: 'anthropic' });
+    expect(profile).toBeTruthy();
+
+    const fromContext = profile?.resolveStreamIntent?.({
+      request: { stream: false } as any,
+      context: { metadata: { stream: true } } as any
+    });
+    expect(fromContext).toBe(true);
+
+    const fromRequest = profile?.resolveStreamIntent?.({
+      request: { stream: true } as any,
+      context: { metadata: {} } as any
+    });
+    expect(fromRequest).toBe(true);
+
+    const defaultFalse = profile?.resolveStreamIntent?.({
+      request: {} as any,
+      context: { metadata: {} } as any
+    });
+    expect(defaultFalse).toBe(false);
+
+    const body: Record<string, unknown> = {};
+    profile?.prepareStreamBody?.({
+      body,
+      context: {} as any
+    });
+    expect(body.stream).toBe(true);
   });
 });

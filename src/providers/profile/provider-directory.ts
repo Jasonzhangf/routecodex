@@ -42,6 +42,8 @@ export function resolveProviderFamilyFromDirectory(input: ProviderFamilyLookupIn
     extractTopLevel(input.providerId),
     normalizeToken(input.providerKey),
     extractTopLevel(input.providerKey),
+    normalizeToken(input.providerType),
+    extractTopLevel(input.providerType),
     normalizeToken(input.oauthProviderId),
     extractTopLevel(input.oauthProviderId)
   ];

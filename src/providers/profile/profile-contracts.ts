@@ -1,4 +1,5 @@
 import type { UnknownObject } from '../../types/common-types.js';
+import type { ProviderContext } from '../core/api/provider-types.js';
 import type { ProviderRuntimeMetadata } from '../core/runtime/provider-runtime-metadata.js';
 
 export interface ResolveEndpointInput {
@@ -24,10 +25,23 @@ export interface ResolveUserAgentInput {
 export interface ApplyRequestHeadersInput {
   headers: Record<string, string>;
   runtimeMetadata?: ProviderRuntimeMetadata;
+  isCodexUaMode?: boolean;
 }
 
 export interface ResolveBusinessResponseErrorInput {
   response: unknown;
+  runtimeMetadata?: ProviderRuntimeMetadata;
+}
+
+export interface ResolveStreamIntentInput {
+  request: UnknownObject;
+  context: ProviderContext;
+  runtimeMetadata?: ProviderRuntimeMetadata;
+}
+
+export interface PrepareStreamBodyInput {
+  body: UnknownObject;
+  context: ProviderContext;
   runtimeMetadata?: ProviderRuntimeMetadata;
 }
 
@@ -39,11 +53,14 @@ export interface ProviderFamilyProfile {
   resolveUserAgent?(input: ResolveUserAgentInput): string | undefined;
   applyRequestHeaders?(input: ApplyRequestHeadersInput): Record<string, string> | undefined;
   resolveBusinessResponseError?(input: ResolveBusinessResponseErrorInput): Error | undefined;
+  resolveStreamIntent?(input: ResolveStreamIntentInput): boolean | undefined;
+  prepareStreamBody?(input: PrepareStreamBodyInput): void;
 }
 
 export interface ProviderFamilyLookupInput {
   providerId?: string;
   providerFamily?: string;
   providerKey?: string;
+  providerType?: string;
   oauthProviderId?: string;
 }
