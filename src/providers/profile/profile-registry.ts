@@ -1,5 +1,6 @@
 import type { ProviderFamilyLookupInput, ProviderFamilyProfile } from './profile-contracts.js';
 import { resolveProviderFamilyFromDirectory } from './provider-directory.js';
+import { antigravityFamilyProfile } from './families/antigravity-profile.js';
 import { anthropicFamilyProfile } from './families/anthropic-profile.js';
 import { glmFamilyProfile } from './families/glm-profile.js';
 import { iflowFamilyProfile } from './families/iflow-profile.js';
@@ -11,11 +12,28 @@ const FAMILY_PROFILES = new Map<string, ProviderFamilyProfile>([
   ['responses', responsesFamilyProfile],
   ['anthropic', anthropicFamilyProfile],
   ['glm', glmFamilyProfile],
-  ['qwen', qwenFamilyProfile]
+  ['qwen', qwenFamilyProfile],
+  ['antigravity', antigravityFamilyProfile]
 ]);
 
+function normalizeToken(value?: string): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const normalized = value.trim().toLowerCase();
+  return normalized.length ? normalized : undefined;
+}
+
 export function getProviderFamilyProfile(input: ProviderFamilyLookupInput): ProviderFamilyProfile | undefined {
-  const family = resolveProviderFamilyFromDirectory(input);
+  const explicitFamily = normalizeToken(input.providerFamily);
+  if (explicitFamily && FAMILY_PROFILES.has(explicitFamily)) {
+    return FAMILY_PROFILES.get(explicitFamily);
+  }
+
+  const family = resolveProviderFamilyFromDirectory({
+    ...input,
+    ...(explicitFamily && !FAMILY_PROFILES.has(explicitFamily) ? { providerFamily: undefined } : {})
+  });
   if (!family) {
     return undefined;
   }

@@ -24,8 +24,15 @@ export interface ResolveUserAgentInput {
 
 export interface ApplyRequestHeadersInput {
   headers: Record<string, string>;
+  request?: UnknownObject;
   runtimeMetadata?: ProviderRuntimeMetadata;
   isCodexUaMode?: boolean;
+}
+
+export interface ApplyStreamModeHeadersInput {
+  headers: Record<string, string>;
+  wantsSse: boolean;
+  runtimeMetadata?: ProviderRuntimeMetadata;
 }
 
 export interface ResolveBusinessResponseErrorInput {
@@ -60,8 +67,9 @@ export interface ProviderFamilyProfile {
   providerFamily: string;
   resolveEndpoint?(input: ResolveEndpointInput): string | undefined;
   buildRequestBody?(input: BuildRequestBodyInput): UnknownObject | undefined;
-  resolveUserAgent?(input: ResolveUserAgentInput): string | undefined;
+  resolveUserAgent?(input: ResolveUserAgentInput): string | undefined | Promise<string | undefined>;
   applyRequestHeaders?(input: ApplyRequestHeadersInput): Record<string, string> | undefined;
+  applyStreamModeHeaders?(input: ApplyStreamModeHeadersInput): Record<string, string> | undefined;
   resolveBusinessResponseError?(input: ResolveBusinessResponseErrorInput): Error | undefined;
   resolveStreamIntent?(input: ResolveStreamIntentInput): boolean | undefined;
   prepareStreamBody?(input: PrepareStreamBodyInput): void;

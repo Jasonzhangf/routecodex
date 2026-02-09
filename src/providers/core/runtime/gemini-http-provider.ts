@@ -20,7 +20,6 @@ import {
   lookupAntigravitySessionSignatureEntry
 } from '../../../modules/llmswitch/bridge.js';
 import { GeminiProtocolClient } from '../../../client/gemini/gemini-protocol-client.js';
-import { resolveAntigravityUserAgent } from '../../auth/antigravity-user-agent.js';
 
 type DataEnvelope = UnknownObject & { data?: UnknownObject };
 
@@ -70,63 +69,6 @@ export class GeminiHttpProvider extends HttpTransportProvider {
     return processedRequest;
   }
 
-
-  protected override applyStreamModeHeaders(headers: Record<string, string>, wantsSse: boolean): Record<string, string> {
-    if (!this.isAntigravityRuntime()) {
-      return super.applyStreamModeHeaders(headers, wantsSse);
-    }
-    if (this.getAntigravityHeaderMode() === 'minimal') {
-      return { ...headers, Accept: '*/*' };
-    }
-    return super.applyStreamModeHeaders(headers, wantsSse);
-  }
-
-  protected override async finalizeRequestHeaders(
-    headers: Record<string, string>,
-    request: UnknownObject
-  ): Promise<Record<string, string>> {
-    const finalized = await super.finalizeRequestHeaders(headers, request);
-    if (!this.isAntigravityRuntime()) {
-      return finalized;
-    }
-
-    const headerMode = this.getAntigravityHeaderMode();
-    const deleteHeaderInsensitive = (key: string): void => {
-      const target = key.toLowerCase();
-      for (const k of Object.keys(finalized)) {
-        if (k.toLowerCase() === target) {
-          delete finalized[k];
-        }
-      }
-    };
-
-    const alias = this.extractAntigravityAliasFromRuntime();
-    finalized['User-Agent'] = await resolveAntigravityUserAgent({ alias });
-
-    // Antigravity-Manager alignment: keep headers minimal (no Google client identifiers).
-    deleteHeaderInsensitive('x-goog-api-client');
-    deleteHeaderInsensitive('client-metadata');
-    deleteHeaderInsensitive('accept-encoding');
-    deleteHeaderInsensitive('originator');
-
-    if (headerMode === 'minimal') {
-      const record = request as Record<string, unknown>;
-      const reqId = typeof record.requestId === 'string' ? record.requestId : undefined;
-      if (reqId && reqId.trim()) {
-        (finalized as any).requestId = reqId;
-      }
-      const hasImageAttachment =
-        (request as any)?.metadata &&
-        (((request as any).metadata as Record<string, unknown>).hasImageAttachment === true ||
-          ((request as any).metadata as Record<string, unknown>).hasImageAttachment === 'true');
-      (finalized as any).requestType = hasImageAttachment ? 'image_gen' : 'agent';
-    } else {
-      deleteHeaderInsensitive('requestId');
-      deleteHeaderInsensitive('requestType');
-    }
-
-    return finalized;
-  }
 
   protected override async postprocessResponse(response: unknown, _context: ProviderContext): Promise<UnknownObject> {
     if (response && typeof response === 'object') {

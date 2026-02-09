@@ -208,6 +208,69 @@ describe('provider family profile registry', () => {
     expect(output.messages[2].content).toBe('');
   });
 
+  test('resolves antigravity profile and applies header/ua contracts', async () => {
+    const previousUa = process.env.ROUTECODEX_ANTIGRAVITY_USER_AGENT;
+    process.env.ROUTECODEX_ANTIGRAVITY_USER_AGENT = 'antigravity/9.9.9 windows/amd64';
+
+    try {
+      const profile = getProviderFamilyProfile({ providerId: 'antigravity' });
+      expect(profile).toBeTruthy();
+      expect(profile?.providerFamily).toBe('antigravity');
+      expect(hasProviderFamilyProfile({ providerId: 'antigravity' })).toBe(true);
+
+      const resolvedUa = await profile?.resolveUserAgent?.({
+        defaultUserAgent: 'routecodex/default',
+        runtimeMetadata: {
+          runtimeKey: 'antigravity.test',
+          providerKey: 'antigravity.test.gemini-3-pro-high'
+        } as any
+      });
+      expect(resolvedUa).toBe('antigravity/9.9.9 windows/amd64');
+
+      const previousHeaderMode = process.env.ROUTECODEX_ANTIGRAVITY_HEADER_MODE;
+      process.env.ROUTECODEX_ANTIGRAVITY_HEADER_MODE = 'minimal';
+      try {
+        const adjusted = profile?.applyRequestHeaders?.({
+          headers: {
+            'X-Goog-Api-Client': 'foo',
+            'Client-Metadata': 'bar',
+            'Accept-Encoding': 'gzip',
+            originator: 'codex_cli_rs'
+          },
+          request: {
+            requestId: 'agent-123',
+            metadata: { hasImageAttachment: true }
+          } as any
+        });
+
+        expect(adjusted?.['X-Goog-Api-Client']).toBeUndefined();
+        expect(adjusted?.['Client-Metadata']).toBeUndefined();
+        expect(adjusted?.['Accept-Encoding']).toBeUndefined();
+        expect(adjusted?.originator).toBeUndefined();
+        expect(adjusted?.requestId).toBe('agent-123');
+        expect(adjusted?.requestType).toBe('image_gen');
+
+        const streamHeaders = profile?.applyStreamModeHeaders?.({
+          headers: { Accept: 'text/event-stream' },
+          wantsSse: true
+        } as any);
+        expect(streamHeaders?.Accept).toBe('*/*');
+      } finally {
+        if (previousHeaderMode === undefined) {
+          delete process.env.ROUTECODEX_ANTIGRAVITY_HEADER_MODE;
+        } else {
+          process.env.ROUTECODEX_ANTIGRAVITY_HEADER_MODE = previousHeaderMode;
+        }
+      }
+    } finally {
+      if (previousUa === undefined) {
+        delete process.env.ROUTECODEX_ANTIGRAVITY_USER_AGENT;
+      } else {
+        process.env.ROUTECODEX_ANTIGRAVITY_USER_AGENT = previousUa;
+      }
+    }
+  });
+
   test('qwen/iflow profiles decide OAuth token-file mode', () => {
     const qwenProfile = getProviderFamilyProfile({ providerId: 'qwen' });
     const iflowProfile = getProviderFamilyProfile({ providerId: 'iflow' });

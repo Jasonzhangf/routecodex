@@ -26,7 +26,6 @@ import {
 } from '../../../modules/llmswitch/bridge.js';
 import { GeminiCLIProtocolClient } from '../../../client/gemini-cli/gemini-cli-protocol-client.js';
 import { getDefaultProjectId } from '../../auth/gemini-cli-userinfo-helper.js';
-import { resolveAntigravityUserAgent } from '../../auth/antigravity-user-agent.js';
 import { resolveAntigravityApiBaseCandidates } from '../../auth/antigravity-userinfo-helper.js';
 
 type DataEnvelope = UnknownObject & { data?: UnknownObject };
@@ -132,17 +131,6 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
       ...(headers ? { headers } : {}),
       data: errorBody
     } as UnknownObject;
-  }
-
-  protected override applyStreamModeHeaders(headers: Record<string, string>, wantsSse: boolean): Record<string, string> {
-    if (!this.isAntigravityRuntime()) {
-      return super.applyStreamModeHeaders(headers, wantsSse);
-    }
-    if (this.getAntigravityHeaderMode() === 'minimal') {
-      return { ...headers, Accept: '*/*' };
-    }
-    // Antigravity manager alignment: keep standard SSE Accept header behavior.
-    return super.applyStreamModeHeaders(headers, wantsSse);
   }
 
   protected override getBaseUrlCandidates(_context: ProviderContext): string[] | undefined {
@@ -291,47 +279,6 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
             : false;
     this.applyStreamAction(request, wantsStream);
     return wantsStream;
-  }
-
-  protected override async finalizeRequestHeaders(
-    headers: Record<string, string>,
-    request: UnknownObject
-  ): Promise<Record<string, string>> {
-    const finalized = await super.finalizeRequestHeaders(headers, request);
-    if (this.isAntigravityRuntime()) {
-      const headerMode = this.getAntigravityHeaderMode();
-      const deleteHeaderInsensitive = (key: string): void => {
-        const target = key.toLowerCase();
-        for (const k of Object.keys(finalized)) {
-          if (k.toLowerCase() === target) {
-            delete finalized[k];
-          }
-        }
-      };
-
-      const alias = this.extractAntigravityAliasFromRuntime();
-      finalized['User-Agent'] = await resolveAntigravityUserAgent({ alias });
-      // Antigravity-Manager alignment: keep headers minimal (no Google client identifiers).
-      deleteHeaderInsensitive('x-goog-api-client');
-      deleteHeaderInsensitive('client-metadata');
-      deleteHeaderInsensitive('accept-encoding');
-      deleteHeaderInsensitive('originator');
-      if (headerMode === 'minimal') {
-        const record = request as Record<string, unknown>;
-        const reqId = typeof record.requestId === 'string' ? record.requestId : undefined;
-        if (reqId && reqId.trim()) {
-          finalized.requestId = reqId;
-        }
-        const hasImageAttachment =
-          (request as any)?.metadata && (((request as any).metadata as Record<string, unknown>).hasImageAttachment === true ||
-            ((request as any).metadata as Record<string, unknown>).hasImageAttachment === 'true');
-        finalized.requestType = hasImageAttachment ? 'image_gen' : 'agent';
-      } else {
-        deleteHeaderInsensitive('requestId');
-        deleteHeaderInsensitive('requestType');
-      }
-    }
-    return finalized;
   }
 
   private extractAntigravityAliasFromRuntime(): string | undefined {

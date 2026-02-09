@@ -621,6 +621,18 @@ export class HttpTransportProvider extends BaseProvider {
       delete normalized[acceptKey];
     }
     normalized['Accept'] = wantsSse ? 'text/event-stream' : 'application/json';
+
+    const runtimeMetadata = this.getCurrentRuntimeMetadata();
+    const familyProfile = this.resolveFamilyProfile(runtimeMetadata);
+    const profileHeaders = familyProfile?.applyStreamModeHeaders?.({
+      headers: normalized,
+      wantsSse,
+      runtimeMetadata
+    });
+    if (profileHeaders && typeof profileHeaders === 'object') {
+      return profileHeaders;
+    }
+
     return normalized;
   }
 
@@ -952,10 +964,40 @@ export class HttpTransportProvider extends BaseProvider {
     headers: Record<string, string>,
     request: UnknownObject
   ): Promise<Record<string, string>> {
-    return await this.protocolClient.finalizeHeaders(
+    const finalized = await this.protocolClient.finalizeHeaders(
       headers,
       request as ProtocolRequestPayload
     );
+
+    const runtimeMetadata = this.getCurrentRuntimeMetadata();
+    const familyProfile = this.resolveFamilyProfile(runtimeMetadata);
+
+    const profileResolvedUa = await familyProfile?.resolveUserAgent?.({
+      uaFromConfig: this.findHeaderValue(finalized, 'User-Agent'),
+      uaFromService: undefined,
+      inboundUserAgent: undefined,
+      defaultUserAgent: DEFAULT_USER_AGENT,
+      runtimeMetadata
+    });
+    if (typeof profileResolvedUa === 'string' && profileResolvedUa.trim()) {
+      this.assignHeader(finalized, 'User-Agent', profileResolvedUa.trim());
+    }
+
+    const profileAdjustedHeaders = familyProfile?.applyRequestHeaders?.({
+      headers: finalized,
+      request,
+      runtimeMetadata,
+      isCodexUaMode: this.isCodexUaMode()
+    });
+    if (profileAdjustedHeaders && typeof profileAdjustedHeaders === 'object') {
+      return profileAdjustedHeaders;
+    }
+
+    if (this.isIflowTransportRuntime(runtimeMetadata)) {
+      this.enforceIflowCliHeaders(finalized);
+    }
+
+    return finalized;
   }
 
   // 私有方法
@@ -1120,7 +1162,7 @@ export class HttpTransportProvider extends BaseProvider {
     // 否则客户端 UA 会把模拟头部冲掉，触发 HTTP 200 + status=435 "Model not support"。
     const isIflow = this.isIflowTransportRuntime(runtimeMetadata);
     const familyProfile = this.resolveFamilyProfile(runtimeMetadata);
-    const profileResolvedUa = familyProfile?.resolveUserAgent?.({
+    const profileResolvedUa = await familyProfile?.resolveUserAgent?.({
       uaFromConfig,
       uaFromService,
       inboundUserAgent,
@@ -1181,15 +1223,6 @@ export class HttpTransportProvider extends BaseProvider {
     if (isAntigravity) {
       this.deleteHeader(finalHeaders, 'session_id');
       this.deleteHeader(finalHeaders, 'conversation_id');
-    }
-
-    const profileAdjustedHeaders = familyProfile?.applyRequestHeaders?.({
-      headers: finalHeaders,
-      runtimeMetadata,
-      isCodexUaMode: codexUaMode
-    });
-    if (profileAdjustedHeaders && typeof profileAdjustedHeaders === 'object') {
-      return profileAdjustedHeaders;
     }
 
     if (isIflow) {
