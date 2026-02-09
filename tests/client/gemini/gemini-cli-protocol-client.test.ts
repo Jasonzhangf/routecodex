@@ -10,11 +10,11 @@ describe('GeminiCLIProtocolClient', () => {
       contents: [{ role: 'user', parts: [{ text: 'hi' }] }],
       metadata: {
         __rcc_stream: true,
-        clientHeaders: { accept: 'application/json' },
+        clientHeaders: { accept: 'application/json' }
       },
       requestId: 'req-test',
       userAgent: 'routecodex',
-      requestType: 'agent',
+      requestType: 'agent'
     } as any);
 
     expect(body).toHaveProperty('model', 'gemini-3-pro-high');
@@ -28,5 +28,24 @@ describe('GeminiCLIProtocolClient', () => {
     expect((body as any).request).not.toHaveProperty('action');
     expect((body as any).request).not.toHaveProperty('metadata');
   });
-});
 
+  test('strips nested action fields recursively from request body', () => {
+    const client = new GeminiCLIProtocolClient();
+    const body = client.buildRequestBody({
+      model: 'gemini-3-pro-high',
+      action: 'streamGenerateContent',
+      request: {
+        contents: [{ role: 'user', parts: [{ text: 'hello' }] }],
+        nested: {
+          action: 'should-be-removed',
+          deeper: [{ action: 'removed-too' }]
+        }
+      }
+    } as any);
+
+    expect(body).toHaveProperty('request');
+    expect((body as any).request.action).toBeUndefined();
+    expect((body as any).request.nested.action).toBeUndefined();
+    expect((body as any).request.nested.deeper[0].action).toBeUndefined();
+  });
+});
