@@ -21,12 +21,24 @@ export interface ResolveUserAgentInput {
   runtimeMetadata?: ProviderRuntimeMetadata;
 }
 
+export interface ApplyRequestHeadersInput {
+  headers: Record<string, string>;
+  runtimeMetadata?: ProviderRuntimeMetadata;
+}
+
+export interface ResolveBusinessResponseErrorInput {
+  response: unknown;
+  runtimeMetadata?: ProviderRuntimeMetadata;
+}
+
 export interface ProviderFamilyProfile {
   id: string;
   providerFamily: string;
   resolveEndpoint?(input: ResolveEndpointInput): string | undefined;
   buildRequestBody?(input: BuildRequestBodyInput): UnknownObject | undefined;
   resolveUserAgent?(input: ResolveUserAgentInput): string | undefined;
+  applyRequestHeaders?(input: ApplyRequestHeadersInput): Record<string, string> | undefined;
+  resolveBusinessResponseError?(input: ResolveBusinessResponseErrorInput): Error | undefined;
 }
 
 export interface ProviderFamilyLookupInput {

@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto';
 import { describe, expect, test } from '@jest/globals';
 import { getProviderFamilyProfile, hasProviderFamilyProfile } from '../../../src/providers/profile/profile-registry.js';
 
@@ -56,5 +57,58 @@ describe('provider family profile registry', () => {
       defaultUserAgent: 'routecodex/default'
     });
     expect(fromFallback).toBe('routecodex/default');
+  });
+
+  test('iflow profile applies CLI session/signature headers', () => {
+    const profile = getProviderFamilyProfile({ providerId: 'iflow' });
+    expect(profile).toBeTruthy();
+
+    const headers = profile?.applyRequestHeaders?.({
+      headers: {
+        Authorization: 'Bearer sk-test-iflow-signature-1234567890',
+        'User-Agent': 'iFlow-Cli',
+        session_id: 'sess-iflow-001',
+        conversation_id: 'conv-iflow-001'
+      }
+    });
+
+    expect(headers).toBeTruthy();
+    expect(headers?.['session-id']).toBe('sess-iflow-001');
+    expect(headers?.['conversation-id']).toBe('conv-iflow-001');
+    expect(typeof headers?.['x-iflow-timestamp']).toBe('string');
+    expect(typeof headers?.['x-iflow-signature']).toBe('string');
+
+    const expected = createHmac('sha256', 'sk-test-iflow-signature-1234567890')
+      .update(`iFlow-Cli:sess-iflow-001:${headers?.['x-iflow-timestamp']}`, 'utf8')
+      .digest('hex');
+
+    expect(headers?.['x-iflow-signature']).toBe(expected);
+  });
+
+  test('iflow profile maps HTTP200 business envelope to provider error', () => {
+    const profile = getProviderFamilyProfile({ providerId: 'iflow' });
+    expect(profile).toBeTruthy();
+
+    const businessError = profile?.resolveBusinessResponseError?.({
+      response: {
+        data: {
+          error_code: 'iflow_business_error',
+          msg: 'Model not support'
+        }
+      }
+    });
+
+    expect(businessError).toBeTruthy();
+    expect(String(businessError?.message || '')).toContain('Model not support');
+
+    const tokenExpired = profile?.resolveBusinessResponseError?.({
+      response: {
+        data: {
+          status: 439,
+          msg: 'token has expired'
+        }
+      }
+    });
+    expect(String(tokenExpired?.message || '')).toContain('token has expired');
   });
 });

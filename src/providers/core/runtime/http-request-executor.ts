@@ -48,6 +48,7 @@ export type HttpRequestExecutorDeps = {
     captureSse: boolean,
     context: ProviderContext
   ): Promise<unknown | undefined>;
+  resolveBusinessResponseError?(response: unknown, context: ProviderContext): Error | undefined;
   normalizeHttpError(
     error: unknown,
     processedRequest: UnknownObject,
@@ -494,6 +495,10 @@ export class HttpRequestExecutor {
       });
     } catch {
       /* ignore snapshot failures */
+    }
+    const profileBusinessError = this.deps.resolveBusinessResponseError?.(response, context);
+    if (profileBusinessError) {
+      throw profileBusinessError;
     }
 
     // iFlow 特例：部分 OAuth 失效错误通过 HTTP 200 + body.status=439 返回，

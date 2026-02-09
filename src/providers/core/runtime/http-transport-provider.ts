@@ -450,6 +450,7 @@ export class HttpTransportProvider extends BaseProvider {
       shouldRetryHttpError: this.shouldRetryHttpError.bind(this),
       delayBeforeHttpRetry: this.delayBeforeHttpRetry.bind(this),
       tryRecoverOAuthAndReplay: this.tryRecoverOAuthAndReplay.bind(this),
+      resolveBusinessResponseError: this.resolveProfileBusinessResponseError.bind(this),
       normalizeHttpError: this.normalizeHttpError.bind(this)
     };
   }
@@ -774,6 +775,18 @@ export class HttpTransportProvider extends BaseProvider {
     } catch { /* non-blocking */ }
 
     return normalized;
+  }
+
+  private resolveProfileBusinessResponseError(response: unknown, context: ProviderContext): Error | undefined {
+    const runtimeMetadata = context.runtimeMetadata ?? this.getCurrentRuntimeMetadata();
+    const familyProfile = this.resolveFamilyProfile(runtimeMetadata);
+    if (!familyProfile?.resolveBusinessResponseError) {
+      return undefined;
+    }
+    return familyProfile.resolveBusinessResponseError({
+      response,
+      runtimeMetadata
+    });
   }
 
   /**
@@ -1133,6 +1146,14 @@ export class HttpTransportProvider extends BaseProvider {
     if (isAntigravity) {
       this.deleteHeader(finalHeaders, 'session_id');
       this.deleteHeader(finalHeaders, 'conversation_id');
+    }
+
+    const profileAdjustedHeaders = familyProfile?.applyRequestHeaders?.({
+      headers: finalHeaders,
+      runtimeMetadata
+    });
+    if (profileAdjustedHeaders && typeof profileAdjustedHeaders === 'object') {
+      return profileAdjustedHeaders;
     }
 
     if (isIflow) {
