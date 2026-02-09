@@ -39,20 +39,66 @@ function resolveBaseFromConfig(cfgPath: string): { host: string; port: number; b
   return { host: h, port, base: `http://${h}:${port}` };
 }
 
-async function ensureServer(configPath: string, verbose = false): Promise<{ base: string }> {
+async function ensureServer(configPath: string, verbose = false): Promise<{ base: string; started: boolean; stop: () => Promise<void> }> {
   const { base } = resolveBaseFromConfig(configPath);
   if (verbose) console.log(`[validate] Checking server at ${base}`);
   const ok = await waitReady(base, 1000);
-  if (ok) return { base };
+  if (ok) {
+    return { base, started: false, stop: async () => {} };
+  }
   // spawn rcc start --config <configPath>
   const { spawn } = await import('child_process');
   const startArgs = ['start', '--config', configPath];
   if (verbose) console.log(`[validate] Spawning: rcc ${startArgs.join(' ')}`);
-  const child = spawn('rcc', startArgs, { stdio: 'ignore', detached: true, env: { ...process.env, ROUTECODEX_CONFIG: configPath } });
-  try { child.unref(); } catch { /* ignore */ }
+  const child = spawn('rcc', startArgs, { stdio: 'ignore', detached: false, env: { ...process.env, ROUTECODEX_CONFIG: configPath } });
   const ready = await waitReady(base, 30000);
-  if (!ready) throw new Error('Server not ready after start');
-  return { base };
+  if (!ready) {
+    try {
+      if (child.exitCode === null) {
+        child.kill('SIGTERM');
+      }
+    } catch {
+      // ignore
+    }
+    await new Promise<void>((resolve) => {
+      if (child.exitCode !== null) return resolve();
+      const timer = setTimeout(() => {
+        try { if (child.exitCode === null) child.kill('SIGKILL'); } catch { /* ignore */ }
+        resolve();
+      }, 2000);
+      child.once('exit', () => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+    throw new Error('Server not ready after start');
+  }
+  const stop = async (): Promise<void> => {
+    try {
+      await fetch(`${base}/shutdown`, { method: 'POST' } as any).catch(() => {});
+    } catch {
+      // ignore
+    }
+    try {
+      if (child.exitCode === null) {
+        child.kill('SIGTERM');
+      }
+    } catch {
+      // ignore
+    }
+    await new Promise<void>((resolve) => {
+      if (child.exitCode !== null) return resolve();
+      const timer = setTimeout(() => {
+        try { if (child.exitCode === null) child.kill('SIGKILL'); } catch { /* ignore */ }
+        resolve();
+      }, 3500);
+      child.once('exit', () => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+  };
+  return { base, started: true, stop };
 }
 
 function samplePayload(endpoint: string, scenario: string, model: string): any {
@@ -172,10 +218,17 @@ export function createValidateCommand(): Command {
     .option('--timeout <ms>', 'Request timeout in ms', '45000')
     .option('--verbose', 'Verbose logs', false)
     .action(async (opts) => {
+      let stopServer: () => Promise<void> = async () => {};
+      let started = false;
+      let exitCode = 0;
       try {
         const cfg = opts.config || path.join(homedir(), '.routecodex', 'config.json');
         const verbose = !!opts.verbose;
-        const { base } = await ensureServer(cfg, verbose);
+        const { base, started: didStart, stop } = await ensureServer(cfg, verbose);
+        if (didStart) {
+          started = true;
+          stopServer = stop;
+        }
         const endpoint = String(opts.endpoint || 'chat');
         const scenario = String(opts.scenario || 'basic');
         const defaultModel = resolveDefaultModelFromConfig(cfg, endpoint);
@@ -191,8 +244,7 @@ export function createValidateCommand(): Command {
         const tmo = Number(opts.timeout || 45000);
         const res = await sendRequest(base, endpoint, payload, tmo);
         if (!res.ok) {
-          console.error(`[validate] HTTP ${res.status}: ${res.text?.slice(0, 400)}`);
-          process.exit(1);
+          throw new Error(`[validate] HTTP ${res.status}: ${res.text?.slice(0, 400)}`);
         }
         // Basic assertions
         let passed = true;
@@ -255,13 +307,23 @@ export function createValidateCommand(): Command {
           }
         }
         if (!passed) {
-          console.error(`[validate] FAILED: ${reason}`);
-          process.exit(1);
+          throw new Error(`[validate] FAILED: ${reason}`);
         }
         console.log('[validate] PASS');
       } catch (e: any) {
         console.error('[validate] ERROR:', e?.message || String(e));
-        process.exit(1);
+        exitCode = 1;
+      } finally {
+        if (started) {
+          try {
+            await stopServer();
+          } catch {
+            // ignore cleanup failures
+          }
+        }
+        if (exitCode !== 0) {
+          process.exit(exitCode);
+        }
       }
     });
 }
