@@ -45,6 +45,9 @@ npm run replay:codex-sample -- \
   --label wave-<n>-same-shape
 ```
 
+脚本就绪状态（2026-02-09）：`package.json` 已存在 `replay:codex-sample -> node scripts/replay-codex-sample.mjs`。
+若后续脚本不可用，需在 `routecodex-113.5` 新增“replay script readiness”子任务后再推进 wave gate。
+
 ### 3.3 证据最小字段
 
 - requestId
@@ -84,14 +87,14 @@ npm run replay:codex-sample -- \
 
 ## 5. Shadow Diff 验证模板
 
-## 5.1 必比字段
+### 5.1 必比字段
 
 - endpoint
 - header 关键键（UA、签名、protocol 相关头）
 - body 关键键（messages/tools/stream/metadata）
 - response.status / error.code / upstreamCode
 
-## 5.2 通过阈值（建议默认）
+### 5.2 通过阈值（建议默认）
 
 - P0/P1 差异：0
 - 关键错误分类一致率：>= 99%

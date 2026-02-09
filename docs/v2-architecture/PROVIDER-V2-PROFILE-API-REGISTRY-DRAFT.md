@@ -109,6 +109,8 @@ interface ProviderProfileRegistry {
 
 - Provider 层只“解析并透传” `compatibilityProfile`，不在 transport 内执行 compat 语义。
 - compat 的实际转换仍由 llmswitch-core 负责（保持 AGENTS 既有边界）。
+- Factory 仅负责组装 runtime 依赖，不负责 profile 解析与实例化。
+- Registry resolver 仅做 binding 解析；profile 实例由预注册集合提供，禁止在 resolver/factory 内临时 `new` profile。
 
 ## 5. Protocol 与 Profile 的交互边界
 
@@ -197,4 +199,3 @@ src/providers/
 - Protocol/Profile 边界：见第 5 节。
 - 向后兼容：见第 6 节。
 - 最小目录结构：见第 7 节。
-

@@ -26,13 +26,13 @@
 | M07 | `src/providers/core/runtime/http-request-executor.ts:531` | iFlow business envelope `error_code/msg` -> HTTP_400 | Family Profile（iflow） | 抽离为 `iflow.errorPolicy.toProviderError()` | 高 | Wave-1（iflow） |
 | M08 | `src/providers/core/runtime/http-transport-provider.ts:888` | Gemini-family 注入 `X-Goog-Api-Client` / `Client-Metadata` | Family Profile（gemini, qwen） | 下沉到对应 profile header policy | 中 | Wave-2（gemini/qwen） |
 | M09 | `src/providers/core/runtime/http-transport-provider.ts:1048` | Antigravity 删除 `session_id/conversation_id` | Family Profile（antigravity） | 抽离为 `antigravity.headerPolicy.cleanup()` | 中 | Wave-2（antigravity） |
-| M10 | `src/providers/core/runtime/http-request-executor.ts:403` | Antigravity 多 base fallback 条件（429/400/context-error） | Family Profile（antigravity）+ Kernel retry SPI | 先抽 SPI，再由 antigravity profile 提供策略 | 高 | Wave-2（antigravity） |
+| M10 | `src/providers/core/runtime/http-request-executor.ts:403` | Antigravity 多 base fallback 条件（429/400/context-error） | Family Profile（antigravity）+ Kernel retry SPI | 先抽 Kernel Retry SPI（实现重试），profile 仅提供 retry 条件策略（不实现重试流程） | 高 | Wave-2（antigravity） |
 | M11 | `src/providers/core/runtime/gemini-http-provider.ts:70` | OpenAI 消息转 Gemini `contents/systemInstruction` | Protocol（gemini） | 保留在 Gemini Protocol Adapter，统一入口 | 中 | Wave-3（protocol） |
 | M12 | `src/providers/core/runtime/gemini-http-provider.ts:176` | Antigravity 签名类错误包装为 response | Family Profile（antigravity） | 抽离为 profile response policy | 中 | Wave-2（antigravity） |
-| M13 | `src/providers/core/runtime/provider-factory.ts:388` | `gemini-cli-oauth` 决定实例化 GeminiCLI provider | Protocol + Profile 选择器 | factory 仅装配，选择逻辑迁到 registry resolver | 中 | Wave-3（factory clean） |
+| M13 | `src/providers/core/runtime/provider-factory.ts:388` | `gemini-cli-oauth` 决定实例化 GeminiCLI provider | Protocol + Profile 选择器 | factory 仅装配（不解析/不实例化 profile）；选择逻辑迁到 registry resolver（只解析不实例化） | 中 | Wave-3（factory clean） |
 | M14 | `src/providers/core/runtime/base-provider.ts:582` | gemini-cli/antigravity 429 bucket 粒度按 model | Family Profile（antigravity/gemini-cli） | 抽离为 rate-limit profile policy | 中 | Wave-2 |
 | M15 | `src/providers/core/config/service-profiles.ts:123` | glm/qwen/iflow/gemini-cli 默认 header/base/model 混在基础 profile | Profile 目录（family defaults） | 拆成 protocol-base + family-default overlay | 中 | Wave-3 |
-| M16 | `src/providers/core/utils/provider-type-utils.ts:14` | LEGACY family->type 映射与协议映射耦合 | Registry（provider 目录映射） | 单独迁入 provider-directory map | 中 | Wave-3 |
+| M16 | `src/providers/core/utils/provider-type-utils.ts:14` | LEGACY family->type 映射与协议映射耦合 | Registry（provider 目录映射） | 单独迁入 provider-directory map；归一完成即冻结，runtime 禁止二次推断 | 中 | Wave-3 |
 | M17 | `src/providers/core/config/provider-oauth-configs.ts:26` | OAuth 配置按 providerId 硬编码（qwen/iflow/gemini-cli/antigravity） | Family Profile（auth policy） | 抽为 profile-auth config，kernel 仅执行 flow | 中 | Wave-2 |
 | M18 | `src/providers/core/runtime/http-transport-provider.ts:1290` | `isIflow/isAntigravity` 运行时识别散落在 transport | Registry + Profile resolver | 由配置 `providerId` + provider目录映射统一识别 | 高 | Wave-1/2 |
 
