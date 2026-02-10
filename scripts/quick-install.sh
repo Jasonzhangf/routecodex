@@ -43,7 +43,7 @@ if [ ! -f "dist/cli.js" ]; then
     exit 1
 fi
 
-chmod +x dist/cli.js
+node scripts/ensure-cli-executable.mjs || true
 
 # 全局安装
 echo "🌍 全局安装..."

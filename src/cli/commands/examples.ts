@@ -32,19 +32,16 @@ export function createExamplesCommand(program: Command, ctx: ExamplesCommandCont
       ctx.log('  # Start with custom config');
       ctx.log('  rcc start --config ./config/lmstudio-config.json');
       ctx.log('');
-      ctx.log('  # Note: Port must be specified in configuration file');
-      ctx.log('  # Server will not start without valid port configuration');
-      ctx.log('');
 
-      ctx.log(chalk.yellow('3. Launch Claude Code:'));
-      ctx.log('  # Launch Claude Code with automatic server start');
-      ctx.log('  rcc code --ensure-server');
+      ctx.log(chalk.yellow('3. Launch Tooling (auto-start server):'));
+      ctx.log('  # Launch Claude (recommended replacement for deprecated `rcc code`)');
+      ctx.log('  rcc claude -- --help');
       ctx.log('');
-      ctx.log('  # Launch Claude Code with specific model');
-      ctx.log('  rcc code --model claude-3-haiku');
+      ctx.log('  # Launch Codex');
+      ctx.log('  rcc codex -- --help');
       ctx.log('');
-      ctx.log('  # Launch Claude Code with custom profile');
-      ctx.log('  rcc code --profile my-profile');
+      ctx.log('  # Pin model/profile when needed');
+      ctx.log('  rcc claude --model claude-sonnet-4-5 --profile my-profile');
       ctx.log('');
 
       ctx.log(chalk.yellow('4. Configuration Management:'));
@@ -58,20 +55,20 @@ export function createExamplesCommand(program: Command, ctx: ExamplesCommandCont
       ctx.log('  rcc config validate');
       ctx.log('');
 
-      ctx.log(chalk.yellow('6. Environment Variables:'));
-      ctx.log('  # Set LM Studio API Key');
-      ctx.log('  export LM_STUDIO_API_KEY="your-api-key"');
-      ctx.log('');
+      ctx.log(chalk.yellow('5. Environment Variables:'));
       ctx.log('  # Set OpenAI API Key');
       ctx.log('  export OPENAI_API_KEY="your-api-key"');
       ctx.log('');
+      ctx.log('  # Set Tab API Key');
+      ctx.log('  export TAB_API_KEY="your-api-key"');
+      ctx.log('');
 
-      ctx.log(chalk.yellow('7. Testing:'));
+      ctx.log(chalk.yellow('6. Testing:'));
       ctx.log('  # Test with curl');
       ctx.log('  curl -X POST http://localhost:5506/v1/chat/completions \\');
       ctx.log('    -H "Content-Type: application/json" \\');
       ctx.log('    -H "Authorization: Bearer test-key" \\');
-      ctx.log('    -d \'{"model": "gpt-4", "messages": [{"role": "user", "content": "Hello!"}]}\'');
+      ctx.log("    -d '{\"model\": \"gpt-4\", \"messages\": [{\"role\": \"user\", \"content\": \"Hello!\"}]}'");
       ctx.log('');
     });
 }

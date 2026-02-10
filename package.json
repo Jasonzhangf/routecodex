@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.89.1858",
+  "version": "0.89.1877",
   "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support",
   "type": "module",
   "main": "dist/index.js",
@@ -31,9 +31,9 @@
     "node": ">=20 <26"
   },
   "scripts": {
-    "build": "npm run llmswitch:ensure && node scripts/build-core.mjs && node scripts/vendor-core.mjs && npm run clean && node scripts/gen-build-info.mjs && tsc && node scripts/copy-compat-assets.mjs && node scripts/copy-modules-config.mjs",
-    "build:dev": "bash -lc 'export BUILD_MODE=dev; npm run build && npm run test:unified-hub-shadow && npm run verify:e2e-toolcall && npm run verify:apply-patch && npm run verify:apply-patch-regressions && npm run verify:exec-command && npm run test:routing-instructions && npm run test:cli && npm run install:global && npm run mock:regressions && npm run test:blackbox-antigravity-parity && npm run verify:errorsamples && npm run verify:e2e-gemini-followup-sample'",
-    "build:min": "npm run llmswitch:ensure && node scripts/build-core.mjs && node scripts/vendor-core.mjs && npm run clean && node scripts/gen-build-info.mjs && tsc && node scripts/copy-compat-assets.mjs && node scripts/copy-modules-config.mjs",
+    "build": "npm run llmswitch:ensure && node scripts/build-core.mjs && node scripts/vendor-core.mjs && npm run clean && node scripts/gen-build-info.mjs && tsc && node scripts/copy-compat-assets.mjs && node scripts/copy-modules-config.mjs && npm run fix:cli-permission",
+    "build:dev": "bash -lc 'export BUILD_MODE=dev; npm run build && npm run fix:cli-permission && npm run test:unified-hub-shadow && npm run verify:e2e-toolcall && npm run verify:apply-patch && npm run verify:apply-patch-regressions && npm run verify:exec-command && npm run test:routing-instructions && npm run test:cli && npm run install:global && npm run mock:regressions && npm run test:blackbox-antigravity-parity && npm run verify:errorsamples && npm run verify:e2e-gemini-followup-sample'",
+    "build:min": "npm run llmswitch:ensure && node scripts/build-core.mjs && node scripts/vendor-core.mjs && npm run clean && node scripts/gen-build-info.mjs && tsc && node scripts/copy-compat-assets.mjs && node scripts/copy-modules-config.mjs && npm run fix:cli-permission",
     "prepack": "echo skip-prepack",
     "postbuild": "node scripts/ensure-cli-executable.mjs",
     "build:watch": "tsc --watch",
@@ -146,7 +146,8 @@
     "publish:rcc": "node scripts/publish-rcc.mjs",
     "pack:rcc": "node scripts/pack-rcc.mjs",
     "build:rccx": "npm run build:min && node scripts/pack-mode.mjs --name @jsonstudio/rccx --bin rccx",
-    "compare:codex:rccx": "node scripts/compare-codex-rccx.mjs"
+    "compare:codex:rccx": "node scripts/compare-codex-rccx.mjs",
+    "fix:cli-permission": "node scripts/ensure-cli-executable.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.65.0",

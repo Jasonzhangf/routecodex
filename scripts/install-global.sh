@@ -87,8 +87,8 @@ build_project() {
        echo "💡 尝试手动构建：npm run build"
        exit 1
    }
-    # 确保CLI可执行
-    chmod +x dist/cli.js
+    # 确保CLI可执行（本地 + 全局目标自愈）
+    node scripts/ensure-cli-executable.mjs || true
 
     # 检查构建结果
     if [ ! -f "dist/cli.js" ]; then
@@ -126,6 +126,9 @@ global_install() {
 
     # 执行安装（跳过可选依赖，减少体积；允许脚本执行以生成可执行文件）
     npm install -g . --no-audit --no-fund --omit=optional
+
+    # 全局安装后再次修复可执行位（解决偶发 permission denied）
+    node scripts/ensure-cli-executable.mjs || true
 
     if [ $? -eq 0 ]; then
         echo "✅ 全局安装成功"

@@ -388,13 +388,15 @@ describe('cli init command', () => {
 
     expect(writes.has('/tmp/config.json')).toBe(true);
     const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
-    expect(parsed?.virtualrouter?.providers?.openai).toBeTruthy();
+    expect(parsed?.virtualrouterMode).toBe('v2');
     expect(parsed?.virtualrouter?.routing?.default?.[0]?.targets?.[0]).toContain('openai.');
+    const providerV2 = JSON.parse(writes.get('/tmp/.routecodex/provider/openai/config.v2.json') || '{}');
+    expect(providerV2?.providerId).toBe('openai');
   });
 
   it('init supports interactive flow via ctx.prompt', async () => {
     const writes = new Map<string, string>();
-    const answers = ['1', '0.0.0.0', '8888'];
+    const answers = ['1', 'd', '0.0.0.0', '8888', '', '', '', 'save'];
     const program = new Command();
     createInitCommand(program, {
       logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
@@ -423,7 +425,9 @@ describe('cli init command', () => {
     const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
     expect(parsed.httpserver.host).toBe('0.0.0.0');
     expect(parsed.httpserver.port).toBe(8888);
-    expect(parsed.virtualrouter.providers.openai).toBeTruthy();
+    expect(parsed.virtualrouterMode).toBe('v2');
+    const providerV2 = JSON.parse(writes.get('/tmp/.routecodex/provider/openai/config.v2.json') || '{}');
+    expect(providerV2?.providerId).toBe('openai');
   });
 
   it('list-providers prints provider ids and does not write config', async () => {

@@ -9,7 +9,7 @@ import { Command } from 'commander';
 import fs from 'fs';
 import path from 'path';
 import { homedir, tmpdir } from 'os';
-import { spawn, spawnSync } from 'child_process';
+import { spawn, spawnSync, type SpawnOptions } from 'child_process';
 import { fileURLToPath } from 'url';
 import { DEFAULT_CONFIG } from './constants/index.js';
 import { buildInfo } from './build-info.js';
@@ -31,6 +31,8 @@ import { registerRestartCommand } from './cli/register/restart-command.js';
 import { registerStopCommand } from './cli/register/stop-command.js';
 import { registerStartCommand } from './cli/register/start-command.js';
 import { registerCodeCommand } from './cli/register/code-command.js';
+import { registerClaudeCommand } from './cli/register/claude-command.js';
+import { registerCodexCommand } from './cli/register/codex-command.js';
 import { registerCamoufoxCommand } from './cli/register/camoufox-command.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -228,8 +230,14 @@ try {
   program.addCommand(createValidateCommand());
 } catch { /* optional */ }
 
-// Code command - Launch Claude Code interface
+// Deprecated `code` command (guides users to `claude`)
 registerCodeCommand(program, {
+  logger,
+  exit: (code) => process.exit(code)
+});
+
+// Claude/Codex launcher commands
+const launcherContext = {
   isDevPackage: IS_DEV_PACKAGE,
   isWindows: IS_WINDOWS,
   defaultDevPort: DEFAULT_DEV_PORT,
@@ -242,16 +250,19 @@ registerCodeCommand(program, {
   cwd: () => process.cwd(),
   sleep,
   fetch,
-  spawn: (cmd, args, opts) => spawn(cmd, args, opts),
+  spawn: (cmd: string, args: string[], opts: SpawnOptions) => spawn(cmd, args, opts),
   getModulesConfigPath,
   resolveServerEntryPath: () => path.resolve(__dirname, 'index.js'),
   waitForever: () =>
     new Promise<void>(() => {
       return;
     }),
-  onSignal: (sig, cb) => process.on(sig, cb),
-  exit: (code) => process.exit(code)
-});
+  onSignal: (sig: NodeJS.Signals, cb: () => void) => process.on(sig, cb),
+  exit: (code: number) => process.exit(code)
+};
+
+registerClaudeCommand(program, launcherContext);
+registerCodexCommand(program, launcherContext);
 
 // Init command - guided config generation
 registerInitCommand(program, {
@@ -317,7 +328,7 @@ registerStartCommand(program, {
   killPidBestEffort,
   getModulesConfigPath,
   resolveServerEntryPath: () => path.resolve(__dirname, 'index.js'),
-  spawn: (cmd, args, opts) => spawn(cmd, args, opts),
+  spawn: (cmd: string, args: string[], opts: SpawnOptions) => spawn(cmd, args, opts),
   fetch,
   setupKeypress,
   waitForever: () =>

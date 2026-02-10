@@ -51,7 +51,7 @@ build_project() {
 # 设置执行权限
 set_permissions() {
     echo "🔑 设置执行权限..."
-    chmod +x dist/cli.js || true
+    node scripts/ensure-cli-executable.mjs || true
 }
 
 # 验证安装
