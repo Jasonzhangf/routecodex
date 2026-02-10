@@ -43,10 +43,42 @@ export async function loadRouteCodexConfig(explicitPath?: string): Promise<Loade
       routing: v2Input.routing
     };
   } else {
+    const providers = isRecord(userConfig.providers) ? userConfig.providers : {};
+    const routing = isRecord(userConfig.routing) ? userConfig.routing : {};
+
     if (!isRecord(userConfig.virtualrouter)) {
-      const providers = isRecord(userConfig.providers) ? userConfig.providers : {};
-      const routing = isRecord(userConfig.routing) ? userConfig.routing : {};
       userConfig.virtualrouter = { providers, routing };
+    } else {
+      const vr = userConfig.virtualrouter as UnknownRecord;
+      const mergedProviders: UnknownRecord = {
+        ...(isRecord(vr.providers) ? (vr.providers as UnknownRecord) : providers)
+      };
+
+      for (const [key, value] of Object.entries(vr)) {
+        if (key === 'providers' || key === 'routing') {
+          continue;
+        }
+        if (!isRecord(value)) {
+          continue;
+        }
+        const maybeProviderNode = value as UnknownRecord;
+        const looksLikeProviderNode =
+          typeof maybeProviderNode.type === 'string' ||
+          typeof maybeProviderNode.providerType === 'string' ||
+          isRecord(maybeProviderNode.models) ||
+          isRecord(maybeProviderNode.auth);
+        if (!looksLikeProviderNode) {
+          continue;
+        }
+        if (!isRecord(mergedProviders[key])) {
+          mergedProviders[key] = maybeProviderNode;
+        }
+      }
+
+      vr.providers = mergedProviders;
+      if (!isRecord(vr.routing)) {
+        vr.routing = routing;
+      }
     }
   }
 

@@ -29,23 +29,36 @@ describe('GeminiCLIProtocolClient', () => {
     expect((body as any).request).not.toHaveProperty('metadata');
   });
 
-  test('strips nested action fields recursively from request body', () => {
+  test('keeps nested action fields in tool schemas', () => {
     const client = new GeminiCLIProtocolClient();
     const body = client.buildRequestBody({
       model: 'gemini-3-pro-high',
       action: 'streamGenerateContent',
-      request: {
-        contents: [{ role: 'user', parts: [{ text: 'hello' }] }],
-        nested: {
-          action: 'should-be-removed',
-          deeper: [{ action: 'removed-too' }]
+      tools: [
+        {
+          functionDeclarations: [
+            {
+              name: 'clock',
+              parameters: {
+                type: 'object',
+                properties: {
+                  action: {
+                    type: 'string',
+                    enum: ['get', 'schedule', 'list', 'cancel', 'clear']
+                  },
+                  taskId: { type: 'string' }
+                },
+                required: ['action', 'taskId']
+              }
+            }
+          ]
         }
-      }
+      ]
     } as any);
 
-    expect(body).toHaveProperty('request');
-    expect((body as any).request.action).toBeUndefined();
-    expect((body as any).request.nested.action).toBeUndefined();
-    expect((body as any).request.nested.deeper[0].action).toBeUndefined();
+    expect(body).toHaveProperty('request.tools');
+    const decl = (body as any).request.tools[0].functionDeclarations[0];
+    expect(decl.parameters.properties.action).toBeDefined();
+    expect(decl.parameters.required).toEqual(['action', 'taskId']);
   });
 });

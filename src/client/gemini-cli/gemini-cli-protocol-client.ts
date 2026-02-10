@@ -33,29 +33,6 @@ function hasDataEnvelope(payload: ProtocolRequestPayload): payload is ProtocolRe
   return typeof payload === 'object' && payload !== null && 'data' in payload;
 }
 
-function stripActionDeep(node: unknown): void {
-  if (!node || typeof node !== 'object') {
-    return;
-  }
-  if (Array.isArray(node)) {
-    for (const item of node) {
-      stripActionDeep(item);
-    }
-    return;
-  }
-
-  const record = node as Record<string, unknown>;
-  if ('action' in record) {
-    delete record.action;
-  }
-
-  for (const value of Object.values(record)) {
-    if (value && typeof value === 'object') {
-      stripActionDeep(value);
-    }
-  }
-}
-
 export class GeminiCLIProtocolClient implements HttpProtocolClient<ProtocolRequestPayload> {
   buildRequestBody(request: ProtocolRequestPayload): Record<string, unknown> {
     const payload = this.extractPayload(request);
@@ -113,7 +90,6 @@ export class GeminiCLIProtocolClient implements HttpProtocolClient<ProtocolReque
       body.request = finalRequest;
     }
 
-    stripActionDeep(body);
     return stripInternalKeysDeep(body);
   }
 

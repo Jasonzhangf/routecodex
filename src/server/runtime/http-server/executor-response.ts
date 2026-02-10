@@ -52,7 +52,7 @@ export async function convertProviderResponseIfNeeded(
   options: ConvertProviderResponseOptions,
   deps: ConvertProviderResponseDeps
 ): Promise<PipelineExecutionResult> {
-  if (options.processMode === 'passthrough') {
+  if (options.processMode === 'passthrough' && !options.wantsStream) {
     return options.response;
   }
   const entry = (options.entryEndpoint || '').toLowerCase();

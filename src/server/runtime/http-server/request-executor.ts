@@ -274,7 +274,29 @@ export class HubRequestExecutor implements RequestExecutor {
           attempt
         });
 
-    const pipelineResult = await runHubPipeline(hubPipeline, input, metadataForAttempt);
+    let pipelineResult: Awaited<ReturnType<typeof runHubPipeline>>;
+        try {
+          pipelineResult = await runHubPipeline(hubPipeline, input, metadataForAttempt);
+        } catch (pipelineError) {
+          const pipelineErrorCode =
+            typeof (pipelineError as { code?: unknown }).code === 'string'
+              ? String((pipelineError as { code?: string }).code).trim()
+              : '';
+          const pipelineErrorMessage =
+            pipelineError instanceof Error
+              ? pipelineError.message
+              : String(pipelineError ?? 'Unknown error');
+          const isPoolExhaustedError =
+            pipelineErrorCode === 'PROVIDER_NOT_AVAILABLE' ||
+            pipelineErrorCode === 'ERR_NO_PROVIDER_TARGET' ||
+            /all providers unavailable/i.test(pipelineErrorMessage) ||
+            /virtual router did not produce a provider target/i.test(pipelineErrorMessage);
+
+          if (lastError && isPoolExhaustedError) {
+            throw lastError;
+          }
+          throw pipelineError;
+        }
         const pipelineMetadata = pipelineResult.metadata ?? {};
         const mergedMetadata = { ...metadataForAttempt, ...pipelineMetadata };
         const mergedClientHeaders =
@@ -647,7 +669,7 @@ export class HubRequestExecutor implements RequestExecutor {
         throw error;
       }
     }
-    if (options.processMode === 'passthrough') {
+    if (options.processMode === 'passthrough' && !options.wantsStream) {
       return options.response;
     }
     const entry = (options.entryEndpoint || '').toLowerCase();

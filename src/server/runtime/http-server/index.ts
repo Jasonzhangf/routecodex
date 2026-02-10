@@ -1543,7 +1543,29 @@ export class RouteCodexHttpServer {
         stream: metadataForIteration.stream
       });
       const originalRequestSnapshot = this.cloneRequestPayload(input.body);
-      const pipelineResult = await this.runHubPipeline(input, metadataForIteration);
+      let pipelineResult: Awaited<ReturnType<RouteCodexHttpServer['runHubPipeline']>>;
+      try {
+        pipelineResult = await this.runHubPipeline(input, metadataForIteration);
+      } catch (pipelineError) {
+        const pipelineErrorCode =
+          typeof (pipelineError as { code?: unknown }).code === 'string'
+            ? String((pipelineError as { code?: string }).code).trim()
+            : '';
+        const pipelineErrorMessage =
+          pipelineError instanceof Error
+            ? pipelineError.message
+            : String(pipelineError ?? 'Unknown error');
+        const isPoolExhaustedError =
+          pipelineErrorCode === 'PROVIDER_NOT_AVAILABLE' ||
+          pipelineErrorCode === 'ERR_NO_PROVIDER_TARGET' ||
+          /all providers unavailable/i.test(pipelineErrorMessage) ||
+          /virtual router did not produce a provider target/i.test(pipelineErrorMessage);
+
+        if (firstError && isPoolExhaustedError) {
+          throw firstError;
+        }
+        throw pipelineError;
+      }
       const pipelineMetadata = pipelineResult.metadata ?? {};
       const mergedMetadata = { ...metadataForIteration, ...pipelineMetadata };
       this.logStage(`${pipelineLabel}.completed`, providerRequestId, {
@@ -2361,7 +2383,7 @@ export class RouteCodexHttpServer {
         throw error;
       }
     }
-    if (options.processMode === 'passthrough') {
+    if (options.processMode === 'passthrough' && !options.wantsStream) {
       return options.response;
     }
     const entry = (options.entryEndpoint || '').toLowerCase();

@@ -200,21 +200,57 @@ export const iflowFamilyProfile: ProviderFamilyProfile = {
   },
   applyRequestHeaders(input: ApplyRequestHeadersInput): Record<string, string> {
     const headers = { ...(input.headers || {}) };
+    const runtimeMetadata =
+      input.runtimeMetadata && typeof input.runtimeMetadata === 'object' && !Array.isArray(input.runtimeMetadata)
+        ? (input.runtimeMetadata as UnknownRecord)
+        : undefined;
+    const metadata =
+      runtimeMetadata?.metadata && typeof runtimeMetadata.metadata === 'object' && !Array.isArray(runtimeMetadata.metadata)
+        ? (runtimeMetadata.metadata as UnknownRecord)
+        : undefined;
+    const pickString = (...values: unknown[]): string | undefined => {
+      for (const value of values) {
+        if (typeof value === 'string' && value.trim()) {
+          return value.trim();
+        }
+      }
+      return undefined;
+    };
+
+    const metadataSessionId = pickString(metadata?.sessionId, metadata?.session_id);
+    const metadataConversationId = pickString(metadata?.conversationId, metadata?.conversation_id);
+    const requestScopedId = pickString(runtimeMetadata?.requestId, metadata?.clientRequestId);
+
     const resolvedSessionId =
-      findHeaderValue(headers, 'session-id') ??
-      findHeaderValue(headers, 'session_id') ??
-      '';
+      pickString(
+        findHeaderValue(headers, 'session-id'),
+        findHeaderValue(headers, 'session_id'),
+        metadataSessionId,
+        metadataConversationId,
+        requestScopedId
+      ) ?? '';
     const resolvedConversationId =
-      findHeaderValue(headers, 'conversation-id') ??
-      findHeaderValue(headers, 'conversation_id') ??
-      resolvedSessionId;
+      pickString(
+        findHeaderValue(headers, 'conversation-id'),
+        findHeaderValue(headers, 'conversation_id'),
+        metadataConversationId,
+        metadataSessionId,
+        resolvedSessionId
+      ) ?? resolvedSessionId;
 
     if (resolvedSessionId) {
+      assignHeader(headers, 'session_id', resolvedSessionId);
       assignHeader(headers, 'session-id', resolvedSessionId);
     }
     if (resolvedConversationId) {
+      assignHeader(headers, 'conversation_id', resolvedConversationId);
       assignHeader(headers, 'conversation-id', resolvedConversationId);
     }
+
+    const resolvedOriginator =
+      pickString(findHeaderValue(headers, 'originator'), metadata?.clientOriginator, metadata?.originator) ??
+      'codex_cli_rs';
+    assignHeader(headers, 'originator', resolvedOriginator);
 
     const bearerApiKey = extractBearerApiKey(headers);
     if (!bearerApiKey) {

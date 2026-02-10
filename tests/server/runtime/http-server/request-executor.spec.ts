@@ -182,4 +182,147 @@ describe('HubRequestExecutor failover', () => {
     expect(successProcess).toHaveBeenCalledTimes(1);
     expect(result).toEqual(expect.objectContaining({ status: 200 }));
   });
+  test('preserves first upstream error when retry-exhausted routing reports provider unavailable', async () => {
+    const firstProviderKey = 'iflow.1-186.kimi-k2.5';
+    const firstError = Object.assign(new Error('HTTP 429: quota exhausted'), {
+      statusCode: 429,
+      code: 'HTTP_429'
+    });
+
+    const failingProcess = jest.fn(async () => {
+      throw firstError;
+    });
+    const failureHandle = buildHandle(firstProviderKey, failingProcess);
+
+    const handles = new Map<string, ProviderHandle>([[firstProviderKey, failureHandle]]);
+
+    const runtimeManager = {
+      resolveRuntimeKey: (providerKey: string) => providerKey,
+      getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey ? handles.get(runtimeKey) : undefined)
+    };
+
+    const pipeline = {
+      execute: jest.fn()
+        .mockResolvedValueOnce({
+          requestId: 'req-pool-exhausted',
+          providerPayload: {},
+          target: {
+            providerKey: firstProviderKey,
+            providerType: 'openai',
+            outboundProfile: 'openai-chat',
+            runtimeKey: firstProviderKey
+          },
+          routingDecision: { routeName: 'direct' },
+          metadata: {}
+        })
+        .mockRejectedValueOnce(
+          Object.assign(new Error('All providers unavailable for model iflow.kimi-k2.5'), {
+            code: 'PROVIDER_NOT_AVAILABLE'
+          })
+        ),
+      updateVirtualRouterConfig: jest.fn()
+    };
+
+    const deps = {
+      runtimeManager,
+      getHubPipeline: () => pipeline,
+      getModuleDependencies: () => ({
+        errorHandlingCenter: {
+          handleError: jest.fn(async () => undefined)
+        }
+      }),
+      logStage: jest.fn(),
+      stats: new StatsManager()
+    };
+
+    const executor = createRequestExecutor(deps);
+
+    await expect(executor.execute({
+      requestId: 'req-pool-exhausted',
+      entryEndpoint: '/v1/chat/completions',
+      body: {},
+      headers: {},
+      metadata: {}
+    })).rejects.toMatchObject({
+      message: 'HTTP 429: quota exhausted',
+      statusCode: 429,
+      code: 'HTTP_429'
+    });
+
+    expect(pipeline.execute).toHaveBeenCalledTimes(2);
+    const secondCallMetadata = pipeline.execute.mock.calls[1][0].metadata as Record<string, unknown>;
+    expect(secondCallMetadata.excludedProviderKeys).toEqual([firstProviderKey]);
+  });
+  test('preserves first upstream error when single-provider pool reroute reports provider unavailable', async () => {
+    const firstProviderKey = 'glm.key1.glm-4.7';
+    const firstError = Object.assign(new Error('HTTP 429: quota exhausted'), {
+      statusCode: 429,
+      code: 'HTTP_429'
+    });
+
+    const failingProcess = jest.fn(async () => {
+      throw firstError;
+    });
+    const failureHandle = buildHandle(firstProviderKey, failingProcess);
+
+    const handles = new Map<string, ProviderHandle>([[firstProviderKey, failureHandle]]);
+
+    const runtimeManager = {
+      resolveRuntimeKey: (providerKey: string) => providerKey,
+      getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey ? handles.get(runtimeKey) : undefined)
+    };
+
+    const pipeline = {
+      execute: jest.fn()
+        .mockResolvedValueOnce({
+          requestId: 'req-single-pool-unavailable',
+          providerPayload: {},
+          target: {
+            providerKey: firstProviderKey,
+            providerType: 'openai',
+            outboundProfile: 'openai-chat',
+            runtimeKey: firstProviderKey
+          },
+          routingDecision: { routeName: 'direct', pool: [firstProviderKey] },
+          metadata: {}
+        })
+        .mockRejectedValueOnce(
+          Object.assign(new Error('All providers unavailable for model glm.glm-4.7'), {
+            code: 'PROVIDER_NOT_AVAILABLE'
+          })
+        ),
+      updateVirtualRouterConfig: jest.fn()
+    };
+
+    const deps = {
+      runtimeManager,
+      getHubPipeline: () => pipeline,
+      getModuleDependencies: () => ({
+        errorHandlingCenter: {
+          handleError: jest.fn(async () => undefined)
+        }
+      }),
+      logStage: jest.fn(),
+      stats: new StatsManager()
+    };
+
+    const executor = createRequestExecutor(deps);
+
+    await expect(executor.execute({
+      requestId: 'req-single-pool-unavailable',
+      entryEndpoint: '/v1/chat/completions',
+      body: {},
+      headers: {},
+      metadata: {}
+    })).rejects.toMatchObject({
+      message: 'HTTP 429: quota exhausted',
+      statusCode: 429,
+      code: 'HTTP_429'
+    });
+
+    expect(pipeline.execute).toHaveBeenCalledTimes(2);
+    const secondCallMetadata = pipeline.execute.mock.calls[1][0].metadata as Record<string, unknown>;
+    expect(secondCallMetadata.excludedProviderKeys).toBeUndefined();
+  });
+
 });
