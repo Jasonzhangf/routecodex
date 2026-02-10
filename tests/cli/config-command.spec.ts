@@ -543,17 +543,24 @@ describe('cli init command', () => {
   it('prompts for duplicate provider handling during v1->v2 migration', async () => {
     const writes = new Map<string, string>();
     const answers = ['y', 'k'];
+    let startCount = 0;
+    let stopCount = 0;
     const program = new Command();
     createInitCommand(program, {
       logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
       createSpinner: async () =>
         ({
-          start: () => ({} as any),
+          start: () => {
+            startCount += 1;
+            return {} as any;
+          },
           succeed: () => {},
           fail: () => {},
           warn: () => {},
           info: () => {},
-          stop: () => {},
+          stop: () => {
+            stopCount += 1;
+          },
           text: ''
         }) as any,
       fsImpl: {
@@ -597,10 +604,20 @@ describe('cli init command', () => {
       } as any,
       pathImpl: path as any,
       getHomeDir: () => '/tmp',
-      prompt: async () => String(answers.shift() ?? '')
+      prompt: async (question) => {
+        if (String(question).includes('Provider "openai" already exists')) {
+          // Spinner should be stopped before asking how to handle duplicates.
+          expect(stopCount).toBeGreaterThanOrEqual(2);
+          expect(startCount).toBeGreaterThanOrEqual(1);
+        }
+        return String(answers.shift() ?? '');
+      }
     });
 
     await program.parseAsync(['node', 'routecodex', 'init', '--config', '/tmp/config.json'], { from: 'node' });
+
+    expect(startCount).toBeGreaterThanOrEqual(2);
+    expect(stopCount).toBeGreaterThanOrEqual(2);
 
     // Kept existing provider.v2, but should still rewrite main config to v2.
     const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');

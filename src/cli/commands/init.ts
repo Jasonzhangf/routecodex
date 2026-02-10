@@ -627,6 +627,32 @@ async function migrateV1ToV2(args: {
 
   ensureDir(fsImpl, providerRoot);
 
+  let spinnerPausedForPrompt = false;
+  let spinnerResumeText = spinner.text || 'Converting V1 -> V2...';
+  const pauseSpinnerForPrompt = () => {
+    if (spinnerPausedForPrompt) {
+      return;
+    }
+    try {
+      spinnerResumeText = spinner.text || spinnerResumeText;
+      spinner.stop();
+    } catch {
+      // ignore
+    }
+    spinnerPausedForPrompt = true;
+  };
+  const resumeSpinnerAfterPrompt = () => {
+    if (!spinnerPausedForPrompt) {
+      return;
+    }
+    try {
+      spinner.start(spinnerResumeText);
+    } catch {
+      // ignore
+    }
+    spinnerPausedForPrompt = false;
+  };
+
   const resolutions = new Map<string, DuplicateProviderResolution>();
   for (const [providerId] of providerEntries) {
     const v2Path = getProviderV2Path(pathImpl, providerRoot, providerId);
@@ -638,12 +664,15 @@ async function migrateV1ToV2(args: {
       continue;
     }
     if (prompt) {
+      pauseSpinnerForPrompt();
       resolutions.set(providerId, await promptDuplicateProviderResolution(prompt, providerId));
       continue;
     }
     resolutions.set(providerId, 'keep');
     logger.info(`Provider ${providerId} already exists; keeping existing config.v2.json (non-interactive mode)`);
   }
+
+  resumeSpinnerAfterPrompt();
 
   const convertedProviders: string[] = [];
   for (const [providerId, providerNode] of providerEntries) {
@@ -1044,10 +1073,12 @@ Examples:
             doConvert = await promptYesNo(promptBundle.prompt, 'Detected V1 config. Convert to V2 now?', true);
           }
           if (!doConvert) {
-            spinner.info('Skipped V1 -> V2 conversion.');
+            // Do not rely on spinner output after stop(); print explicit logs.
+            ctx.logger.info('Skipped V1 -> V2 conversion.');
             return;
           }
 
+          ctx.logger.info('Starting V1 -> V2 conversion...');
           safeSpinnerStart('Converting V1 -> V2...');
 
           const migrated = await migrateV1ToV2({
@@ -1063,6 +1094,7 @@ Examples:
           });
 
           spinner.succeed(`Converted V1 -> V2: ${configPath}`);
+          ctx.logger.info(`Converted V1 -> V2: ${configPath}`);
           if (migrated.backupPath) {
             ctx.logger.info(`Backup saved: ${migrated.backupPath}`);
           }
