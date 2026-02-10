@@ -73,6 +73,25 @@ export interface HistoricalStatsSnapshot {
   totals: ProviderStatsView[];
 }
 
+type ProviderSummaryTableRow = {
+  providerKey: string;
+  model: string;
+  requests: string;
+  ok: string;
+  err: string;
+  avgLatencyMs: string;
+  avgTokens: string;
+  totalTokens: string;
+  window?: string;
+};
+
+type SummaryTableColumn = {
+  key: keyof ProviderSummaryTableRow;
+  title: string;
+  align: 'left' | 'right';
+  maxWidth?: number;
+};
+
 export type StatsPersistOptions = {
   logPath?: string;
   reason?: string;
@@ -339,27 +358,10 @@ export class StatsManager {
       Math.round(snapshot.uptimeMs),
       snapshot.totals.reduce((sum, bucket) => sum + bucket.requestCount, 0)
     );
-    for (const bucket of snapshot.totals) {
-      const label = this.formatProviderLabel(bucket.providerKey, bucket.model);
-      const okCount = bucket.requestCount - bucket.errorCount;
-      console.log(
-        '  - %s | requests=%d (%d ok / %d err) | avgLatency=%s ms | avgTokens in/out/total=%s/%s/%s',
-        label,
-        bucket.requestCount,
-        okCount,
-        bucket.errorCount,
-        bucket.averageLatencyMs.toFixed(1),
-        bucket.averagePromptTokens.toFixed(1),
-        bucket.averageCompletionTokens.toFixed(1),
-        bucket.averageOutputTokens.toFixed(1)
-      );
-      console.log(
-        '      totals tokens in/out/total=%s/%s/%s',
-        bucket.totalPromptTokens,
-        bucket.totalCompletionTokens,
-        bucket.totalOutputTokens
-      );
-    }
+    this.logProviderSummaryTable(
+      snapshot.totals.map((bucket) => this.buildSessionProviderRow(bucket)),
+      false
+    );
     this.logToolSummary(snapshot.tools);
     return snapshot;
   }
@@ -787,34 +789,158 @@ export class StatsManager {
     const sorted = Array.from(this.historicalBuckets.values()).sort((a, b) =>
       a.providerKey.localeCompare(b.providerKey)
     );
-    for (const bucket of sorted) {
-      const label = this.formatProviderLabel(bucket.providerKey, bucket.model);
-      const okCount = bucket.requestCount - bucket.errorCount;
-      const avgLatency = bucket.requestCount ? bucket.totalLatencyMs / bucket.requestCount : 0;
-      const avgPrompt = bucket.requestCount ? bucket.totalPromptTokens / bucket.requestCount : 0;
-      const avgCompletion = bucket.requestCount ? bucket.totalCompletionTokens / bucket.requestCount : 0;
-      const avgTotal = bucket.requestCount ? bucket.totalOutputTokens / bucket.requestCount : 0;
-      console.log(
-        '  - %s | requests=%d (%d ok / %d err) | avgLatency=%s ms | avgTokens in/out/total=%s/%s/%s',
-        label,
-        bucket.requestCount,
-        okCount,
-        bucket.errorCount,
-        avgLatency.toFixed(1),
-        avgPrompt.toFixed(1),
-        avgCompletion.toFixed(1),
-        avgTotal.toFixed(1)
-      );
-      console.log(
-        '      totals tokens in/out/total=%s/%s/%s | window=%s → %s',
+    this.logProviderSummaryTable(
+      sorted.map((bucket) => this.buildHistoricalProviderRow(bucket)),
+      true
+    );
+    this.logHistoricalToolSummary(this.historicalToolAggregate, this.historicalToolByProvider);
+  }
+
+  private buildSessionProviderRow(bucket: ProviderStatsView): ProviderSummaryTableRow {
+    const okCount = bucket.requestCount - bucket.errorCount;
+    return {
+      providerKey: this.normalizeCellValue(bucket.providerKey),
+      model: this.normalizeCellValue(bucket.model),
+      requests: String(bucket.requestCount),
+      ok: String(okCount),
+      err: String(bucket.errorCount),
+      avgLatencyMs: bucket.averageLatencyMs.toFixed(1),
+      avgTokens: this.formatAverageTokenTriple(
+        bucket.averagePromptTokens,
+        bucket.averageCompletionTokens,
+        bucket.averageOutputTokens
+      ),
+      totalTokens: this.formatTotalTokenTriple(
         bucket.totalPromptTokens,
         bucket.totalCompletionTokens,
-        bucket.totalOutputTokens,
-        this.formatIso(bucket.firstRequestAt),
-        this.formatIso(bucket.lastRequestAt)
-      );
+        bucket.totalOutputTokens
+      )
+    };
+  }
+
+  private buildHistoricalProviderRow(bucket: ProviderStatsBucket): ProviderSummaryTableRow {
+    const okCount = bucket.requestCount - bucket.errorCount;
+    const avgLatency = bucket.requestCount ? bucket.totalLatencyMs / bucket.requestCount : 0;
+    const avgPrompt = bucket.requestCount ? bucket.totalPromptTokens / bucket.requestCount : 0;
+    const avgCompletion = bucket.requestCount ? bucket.totalCompletionTokens / bucket.requestCount : 0;
+    const avgTotal = bucket.requestCount ? bucket.totalOutputTokens / bucket.requestCount : 0;
+    return {
+      providerKey: this.normalizeCellValue(bucket.providerKey),
+      model: this.normalizeCellValue(bucket.model),
+      requests: String(bucket.requestCount),
+      ok: String(okCount),
+      err: String(bucket.errorCount),
+      avgLatencyMs: avgLatency.toFixed(1),
+      avgTokens: this.formatAverageTokenTriple(avgPrompt, avgCompletion, avgTotal),
+      totalTokens: this.formatTotalTokenTriple(
+        bucket.totalPromptTokens,
+        bucket.totalCompletionTokens,
+        bucket.totalOutputTokens
+      ),
+      window: this.formatWindowRange(bucket.firstRequestAt, bucket.lastRequestAt)
+    };
+  }
+
+  private logProviderSummaryTable(rows: ProviderSummaryTableRow[], includeWindow: boolean): void {
+    if (!rows.length) {
+      return;
     }
-    this.logHistoricalToolSummary(this.historicalToolAggregate, this.historicalToolByProvider);
+
+    const columns: SummaryTableColumn[] = [
+      { key: 'providerKey', title: 'providerKey', align: 'left', maxWidth: 44 },
+      { key: 'model', title: 'model', align: 'left', maxWidth: 28 },
+      { key: 'requests', title: 'req', align: 'right' },
+      { key: 'ok', title: 'ok', align: 'right' },
+      { key: 'err', title: 'err', align: 'right' },
+      { key: 'avgLatencyMs', title: 'avgMs', align: 'right' },
+      { key: 'avgTokens', title: 'avgTok(i/o/t)', align: 'right', maxWidth: 22 },
+      { key: 'totalTokens', title: 'totTok(i/o/t)', align: 'right', maxWidth: 22 }
+    ];
+    if (includeWindow) {
+      columns.push({ key: 'window', title: 'window', align: 'left', maxWidth: 41 });
+    }
+
+    const widths = columns.map((column) => {
+      const maxCellLength = rows.reduce((maxLength, row) => {
+        const value = this.normalizeCellValue(row[column.key]);
+        const clipped = this.clipCellValue(value, column.maxWidth);
+        return Math.max(maxLength, clipped.length);
+      }, column.title.length);
+      if (typeof column.maxWidth === 'number' && column.maxWidth > 0) {
+        return Math.min(Math.max(column.title.length, maxCellLength), column.maxWidth);
+      }
+      return Math.max(column.title.length, maxCellLength);
+    });
+
+    console.log(this.renderTableRow(columns, widths, undefined, true));
+    console.log(this.renderTableSeparator(widths));
+    for (const row of rows) {
+      console.log(this.renderTableRow(columns, widths, row, false));
+    }
+  }
+
+  private renderTableRow(
+    columns: SummaryTableColumn[],
+    widths: number[],
+    row: ProviderSummaryTableRow | undefined,
+    isHeader: boolean
+  ): string {
+    const cells = columns.map((column, index) => {
+      const value = isHeader
+        ? column.title
+        : this.normalizeCellValue(row?.[column.key]);
+      const clipped = this.clipCellValue(value, widths[index]);
+      return column.align === 'right'
+        ? clipped.padStart(widths[index], ' ')
+        : clipped.padEnd(widths[index], ' ');
+    });
+    return `  | ${cells.join(' | ')} |`;
+  }
+
+  private renderTableSeparator(widths: number[]): string {
+    return `  |-` + widths.map((width) => '-'.repeat(width)).join('-|-') + '-|';
+  }
+
+  private clipCellValue(value: string, maxWidth?: number): string {
+    if (!Number.isFinite(maxWidth) || typeof maxWidth !== 'number' || maxWidth <= 0) {
+      return value;
+    }
+    if (value.length <= maxWidth) {
+      return value;
+    }
+    if (maxWidth <= 1) {
+      return '…';
+    }
+    if (maxWidth <= 3) {
+      return value.slice(0, maxWidth);
+    }
+    return `${value.slice(0, maxWidth - 1)}…`;
+  }
+
+  private normalizeCellValue(value: string | number | undefined): string {
+    if (value === undefined || value === null) {
+      return '-';
+    }
+    const normalized = String(value).trim();
+    return normalized.length ? normalized : '-';
+  }
+
+  private formatAverageTokenTriple(prompt: number, completion: number, total: number): string {
+    if (prompt === 0 && completion === 0 && total === 0) {
+      return '-';
+    }
+    return `${prompt.toFixed(1)}/${completion.toFixed(1)}/${total.toFixed(1)}`;
+  }
+
+  private formatTotalTokenTriple(prompt: number, completion: number, total: number): string {
+    if (prompt === 0 && completion === 0 && total === 0) {
+      return '-';
+    }
+    return `${prompt}/${completion}/${total}`;
+  }
+
+  private formatWindowRange(firstAt: number, lastAt: number): string {
+    return `${this.formatIso(firstAt)}→${this.formatIso(lastAt)}`;
   }
 
   private ensureHistoricalLoaded(): void {
