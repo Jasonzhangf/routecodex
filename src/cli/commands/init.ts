@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { homedir } from 'node:os';
-import readline from 'node:readline/promises';
+import readline from 'node:readline';
 import { stdin as input, stdout as output } from 'node:process';
 import type { Command } from 'commander';
 
@@ -37,6 +37,7 @@ type ProviderV2Payload = {
 };
 
 type DuplicateProviderResolution = 'keep' | 'overwrite' | 'merge';
+type DuplicateMigrationStrategy = 'overwrite_all' | 'per_provider' | 'keep_all';
 
 type PromptLike = (question: string) => Promise<string>;
 
@@ -45,6 +46,20 @@ type ConfigState =
   | { kind: 'invalid'; message: string }
   | { kind: 'v1'; data: UnknownRecord }
   | { kind: 'v2'; data: UnknownRecord };
+
+type CustomProtocolPreset = {
+  id: '1' | '2' | '3' | '4';
+  key: 'openai-chat' | 'openai-responses' | 'anthropic' | 'gemini';
+  label: string;
+  providerType: string;
+};
+
+const CUSTOM_PROTOCOL_PRESETS: CustomProtocolPreset[] = [
+  { id: '1', key: 'openai-chat', label: 'OpenAI Chat', providerType: 'openai' },
+  { id: '2', key: 'openai-responses', label: 'OpenAI Responses', providerType: 'responses' },
+  { id: '3', key: 'anthropic', label: 'Anthropic Messages', providerType: 'anthropic' },
+  { id: '4', key: 'gemini', label: 'Gemini Chat', providerType: 'gemini' }
+];
 
 export type InitCommandContext = {
   logger: LoggerLike;
@@ -63,6 +78,7 @@ type InitCommandOptions = {
   host?: string;
   port?: string;
   listProviders?: boolean;
+  listCurrentProviders?: boolean;
 };
 
 function isRecord(value: unknown): value is UnknownRecord {
@@ -108,9 +124,37 @@ function buildInteractivePrompt(
   if (!input.isTTY || !output.isTTY) {
     return null;
   }
-  const rl = readline.createInterface({ input, output });
+  const rl = readline.createInterface({ input, output, terminal: true });
   return {
-    prompt: async (question: string) => rl.question(question),
+    prompt: (question: string) =>
+      new Promise((resolve) => {
+        let settled = false;
+        const onClose = () => {
+          if (settled) {
+            return;
+          }
+          settled = true;
+          rl.off('close', onClose);
+          resolve('');
+        };
+
+        try {
+          // Ensure stdin stays active in shells where stdin may be paused.
+          input.resume();
+        } catch {
+          // ignore
+        }
+
+        rl.once('close', onClose);
+        rl.question(question, (answer) => {
+          if (settled) {
+            return;
+          }
+          settled = true;
+          rl.off('close', onClose);
+          resolve(answer);
+        });
+      }),
     close: () => rl.close()
   };
 }
@@ -279,9 +323,10 @@ async function promptDuplicateProviderResolution(
   providerId: string
 ): Promise<DuplicateProviderResolution> {
   while (true) {
-    const answer = (await prompt(
+    const answerRaw = await prompt(
       `Provider "${providerId}" already exists in v2 provider root. Choose: (k)eep / (o)verwrite / (m)erge (default=k)\n> `
-    ))
+    );
+    const answer = String(answerRaw ?? '')
       .trim()
       .toLowerCase();
 
@@ -293,6 +338,32 @@ async function promptDuplicateProviderResolution(
     }
     if (answer === 'm' || answer === 'merge') {
       return 'merge';
+    }
+  }
+}
+
+async function promptDuplicateMigrationStrategy(
+  prompt: PromptLike,
+  duplicateProviderIds: string[]
+): Promise<DuplicateMigrationStrategy> {
+  const providersPreview = duplicateProviderIds.join(', ');
+  while (true) {
+    const answerRaw = await prompt(
+      `Detected existing provider configs in provider dir: ${providersPreview}\n` +
+      `Choose migration strategy: (a) overwrite all / (s) decide per-provider / (k) keep all (default=s)\n> `
+    );
+    const answer = String(answerRaw ?? '')
+      .trim()
+      .toLowerCase();
+
+    if (!answer || answer === 's' || answer === 'split' || answer === 'per-provider' || answer === 'per_provider') {
+      return 'per_provider';
+    }
+    if (answer === 'a' || answer === 'all' || answer === 'overwrite_all' || answer === 'overwrite-all') {
+      return 'overwrite_all';
+    }
+    if (answer === 'k' || answer === 'keep' || answer === 'keep_all' || answer === 'keep-all') {
+      return 'keep_all';
     }
   }
 }
@@ -372,9 +443,229 @@ function loadProviderV2Map(fsImpl: typeof fs, pathImpl: typeof path, providerRoo
   return result;
 }
 
+function maskSecretTail3(raw: string): string {
+  const value = String(raw ?? '').trim();
+  if (!value) {
+    return '****';
+  }
+  const alphaNumTail = Array.from(value).filter((char) => /[A-Za-z0-9]/.test(char)).join('');
+  const tail = (alphaNumTail || value).slice(-3);
+  return `****${tail}`;
+}
+
+function collectProviderKeyMasks(providerNode: UnknownRecord): string[] {
+  const authNode = asRecord(providerNode.auth);
+  const masks: string[] = [];
+  const seen = new Set<string>();
+
+  const addMasked = (value: unknown) => {
+    if (typeof value !== 'string') {
+      return;
+    }
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return;
+    }
+    const masked = maskSecretTail3(trimmed);
+    if (seen.has(masked)) {
+      return;
+    }
+    seen.add(masked);
+    masks.push(masked);
+  };
+
+  addMasked(authNode.apiKey);
+  addMasked(authNode.key);
+
+  const keys = asRecord(authNode.keys);
+  for (const value of Object.values(keys)) {
+    addMasked(value);
+  }
+
+  return masks;
+}
+
+function collectOauthTokenNames(providerNode: UnknownRecord): string[] {
+  const authNode = asRecord(providerNode.auth);
+  const authType = typeof authNode.type === 'string' ? authNode.type.trim().toLowerCase() : '';
+  const looksOauth = authType.includes('oauth') || typeof authNode.tokenFile === 'string' || Array.isArray(authNode.entries);
+  if (!looksOauth) {
+    return [];
+  }
+
+  const labels: string[] = [];
+  const seen = new Set<string>();
+  const addLabel = (label: string) => {
+    const normalized = label.trim();
+    if (!normalized || seen.has(normalized)) {
+      return;
+    }
+    seen.add(normalized);
+    labels.push(normalized);
+  };
+
+  const baseTokenFile = typeof authNode.tokenFile === 'string' ? authNode.tokenFile.trim() : '';
+  if (baseTokenFile) {
+    addLabel(path.basename(baseTokenFile));
+  }
+
+  const entries = Array.isArray(authNode.entries) ? authNode.entries : [];
+  for (const entry of entries) {
+    const node = asRecord(entry);
+    const alias = typeof node.alias === 'string' ? node.alias.trim() : '';
+    const tokenFile = typeof node.tokenFile === 'string' ? node.tokenFile.trim() : '';
+    const tokenName = tokenFile ? path.basename(tokenFile) : '';
+
+    if (alias && tokenName) {
+      addLabel(`${alias}(${tokenName})`);
+      continue;
+    }
+    if (alias) {
+      addLabel(alias);
+      continue;
+    }
+    if (tokenName) {
+      addLabel(tokenName);
+    }
+  }
+
+  return labels;
+}
+
+function getProviderSummaryLine(providerId: string, payload: ProviderV2Payload): string {
+  const providerNode = asRecord(payload.provider);
+  const enabled = providerNode.enabled === false ? 'disabled' : 'enabled';
+  const baseUrl = typeof providerNode.baseURL === 'string' && providerNode.baseURL.trim() ? providerNode.baseURL.trim() : '(unset)';
+  const models = asRecord(providerNode.models);
+  const modelCount = Object.keys(models).length;
+  const keyMasks = collectProviderKeyMasks(providerNode);
+  const oauthTokens = collectOauthTokenNames(providerNode);
+  return (
+    `${providerId} | ${enabled} | models=${modelCount} | ` +
+    `keys=${keyMasks.length}${keyMasks.length ? ` [${keyMasks.join(', ')}]` : ''} | ` +
+    `oauth=${oauthTokens.length ? oauthTokens.join(', ') : '-'} | baseURL=${baseUrl}`
+  );
+}
+
+function normalizeEnvVarName(providerId: string): string {
+  const normalized = providerId
+    .replace(/[^A-Za-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .toUpperCase();
+  return normalized ? `${normalized}_API_KEY` : 'PROVIDER_API_KEY';
+}
+
+function isBackInput(value: string): boolean {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  return normalized === 'b' || normalized === 'back' || normalized === '0';
+}
+
+async function interactiveCreateCustomProvider(
+  prompt: PromptLike,
+  existingProviderIds: Set<string>,
+  logger: LoggerLike
+): Promise<{ providerId: string; providerNode: UnknownRecord } | null> {
+  const providerId = (await prompt('Custom provider id (e.g. myprovider, b=back):\n> ')).trim();
+  if (isBackInput(providerId)) {
+    logger.info('Back to add-provider menu.');
+    return null;
+  }
+  if (!providerId) {
+    logger.info('Custom provider creation cancelled (empty provider id).');
+    return null;
+  }
+  if (!/^[A-Za-z0-9._-]+$/.test(providerId)) {
+    logger.info('Invalid provider id. Use only letters, numbers, dot, underscore, dash.');
+    return null;
+  }
+  if (existingProviderIds.has(providerId)) {
+    logger.info(`Provider ${providerId} already exists.`);
+    return null;
+  }
+
+  const protocolLines = CUSTOM_PROTOCOL_PRESETS.map((preset) => `  ${preset.id}) ${preset.label}`);
+  let protocol: CustomProtocolPreset | undefined;
+  while (!protocol) {
+    const protocolPick = (await prompt(`Select protocol (b=back):\n${protocolLines.join('\n')}\n> `)).trim();
+    if (isBackInput(protocolPick)) {
+      logger.info('Back to add-provider menu.');
+      return null;
+    }
+    if (!protocolPick) {
+      protocol = CUSTOM_PROTOCOL_PRESETS[0];
+      break;
+    }
+    protocol = CUSTOM_PROTOCOL_PRESETS.find((preset) => preset.id === protocolPick);
+    if (!protocol) {
+      logger.info('Invalid protocol choice. Select 1/2/3/4.');
+    }
+  }
+
+  const defaultBase =
+    protocol.providerType === 'anthropic'
+      ? 'https://api.anthropic.com/v1'
+      : protocol.providerType === 'gemini'
+        ? 'https://generativelanguage.googleapis.com/v1beta'
+        : 'https://api.example.com/v1';
+  const baseURLInput = (await prompt(`Base URL (default=${defaultBase}, b=back):\n> `)).trim();
+  if (isBackInput(baseURLInput)) {
+    logger.info('Back to add-provider menu.');
+    return null;
+  }
+  const baseURL = baseURLInput || defaultBase;
+
+  const modelIdInput = (await prompt('Default model id (e.g. gpt-5.2, b=back):\n> ')).trim();
+  if (isBackInput(modelIdInput)) {
+    logger.info('Back to add-provider menu.');
+    return null;
+  }
+  const modelId = modelIdInput || 'default-model';
+  const defaultEnvVar = normalizeEnvVarName(providerId);
+  const envVarInput = (await prompt(`API key env var (default=${defaultEnvVar}, b=back):\n> `)).trim();
+  if (isBackInput(envVarInput)) {
+    logger.info('Back to add-provider menu.');
+    return null;
+  }
+  const envVar = envVarInput || defaultEnvVar;
+
+  const providerNode: UnknownRecord = {
+    id: providerId,
+    enabled: true,
+    type: protocol.providerType,
+    baseURL,
+    auth: {
+      type: 'apikey',
+      apiKey: `\${${envVar}}`
+    },
+    models: {
+      [modelId]: { supportsStreaming: true }
+    }
+  };
+
+  if (protocol.providerType === 'responses') {
+    providerNode.responses = { process: 'chat', streaming: 'always' };
+    providerNode.config = { responses: { streaming: 'always' } };
+  }
+
+  return { providerId, providerNode };
+}
+
+function printConfiguredProviders(logger: LoggerLike, providerMap: Record<string, ProviderV2Payload>): void {
+  const providerIds = Object.keys(providerMap).sort();
+  if (!providerIds.length) {
+    logger.info('No configured providers found in provider root.');
+    return;
+  }
+  logger.info(`Configured providers (${providerIds.length}):`);
+  for (const providerId of providerIds) {
+    logger.info(`  - ${getProviderSummaryLine(providerId, providerMap[providerId])}`);
+  }
+}
+
 async function promptYesNo(prompt: PromptLike, question: string, defaultYes = true): Promise<boolean> {
   const suffix = defaultYes ? 'Y/n' : 'y/N';
-  const answer = (await prompt(`${question} (${suffix})\n> `)).trim().toLowerCase();
+  const answerRaw = await prompt(`${question} (${suffix})\n> `);
+  const answer = String(answerRaw ?? '').trim().toLowerCase();
   if (!answer) {
     return defaultYes;
   }
@@ -477,7 +768,7 @@ async function interactiveRoutingWizard(
   prompt: PromptLike,
   existingRouting: RoutingConfig,
   defaultTarget: string
-): Promise<RoutingConfig> {
+): Promise<RoutingConfig | null> {
   const keys: Array<'default' | 'thinking' | 'tools'> = ['default', 'thinking', 'tools'];
   const targets: Record<'default' | 'thinking' | 'tools', string> = {
     default: readPrimaryTargetFromRoute(existingRouting.default) || defaultTarget,
@@ -493,7 +784,10 @@ async function interactiveRoutingWizard(
     ))
       .trim();
 
-    if (answer.toLowerCase() === 'b') {
+    if (isBackInput(answer)) {
+      if (index === 0) {
+        return null;
+      }
       if (index > 0) {
         index -= 1;
       }
@@ -512,15 +806,21 @@ async function interactiveRoutingWizard(
 
   while (true) {
     const summary = keys.map((key) => `${key}=${targets[key]}`).join(', ');
-    const answer = (await prompt(`Routing summary: ${summary}\nType route key to edit or 'save' to continue\n> `))
+    const answer = (await prompt(`Routing summary: ${summary}\nType route key to edit, 'save' to continue, 'b' to cancel\n> `))
       .trim()
       .toLowerCase();
+    if (isBackInput(answer)) {
+      return null;
+    }
     if (!answer || answer === 'save') {
       break;
     }
     if ((keys as string[]).includes(answer)) {
       const key = answer as 'default' | 'thinking' | 'tools';
-      const edit = (await prompt(`New target for ${key} (provider.model), current=${targets[key]}\n> `)).trim();
+      const edit = (await prompt(`New target for ${key} (provider.model), current=${targets[key]}, b=back\n> `)).trim();
+      if (isBackInput(edit)) {
+        continue;
+      }
       if (isValidTargetFormat(edit)) {
         targets[key] = edit;
       }
@@ -653,23 +953,43 @@ async function migrateV1ToV2(args: {
     spinnerPausedForPrompt = false;
   };
 
-  const resolutions = new Map<string, DuplicateProviderResolution>();
+  const duplicateProviderIds: string[] = [];
   for (const [providerId] of providerEntries) {
     const v2Path = getProviderV2Path(pathImpl, providerRoot, providerId);
     if (!fsImpl.existsSync(v2Path)) {
       continue;
     }
+    duplicateProviderIds.push(providerId);
+  }
+
+  const resolutions = new Map<string, DuplicateProviderResolution>();
+  let strategy: DuplicateMigrationStrategy = 'per_provider';
+  if (duplicateProviderIds.length > 0) {
     if (forceOverwriteProviders) {
-      resolutions.set(providerId, 'overwrite');
-      continue;
-    }
-    if (prompt) {
+      strategy = 'overwrite_all';
+    } else if (prompt) {
       pauseSpinnerForPrompt();
-      resolutions.set(providerId, await promptDuplicateProviderResolution(prompt, providerId));
-      continue;
+      strategy = await promptDuplicateMigrationStrategy(prompt, duplicateProviderIds);
+    } else {
+      strategy = 'keep_all';
+      logger.info(
+        `Detected existing provider configs (${duplicateProviderIds.join(', ')}); keeping existing config.v2.json in non-interactive mode`
+      );
     }
-    resolutions.set(providerId, 'keep');
-    logger.info(`Provider ${providerId} already exists; keeping existing config.v2.json (non-interactive mode)`);
+
+    if (strategy === 'overwrite_all') {
+      for (const providerId of duplicateProviderIds) {
+        resolutions.set(providerId, 'overwrite');
+      }
+    } else if (strategy === 'keep_all') {
+      for (const providerId of duplicateProviderIds) {
+        resolutions.set(providerId, 'keep');
+      }
+    } else if (prompt) {
+      for (const providerId of duplicateProviderIds) {
+        resolutions.set(providerId, await promptDuplicateProviderResolution(prompt, providerId));
+      }
+    }
   }
 
   resumeSpinnerAfterPrompt();
@@ -753,26 +1073,76 @@ async function runV2MaintenanceMenu(args: {
       `  2) Delete provider\n` +
       `  3) Modify provider\n` +
       `  4) Modify routing\n` +
-      `  5) Save and exit\n` +
-      `  6) Exit without changes\n> `
+      `  5) List providers\n` +
+      `  6) Save and exit\n` +
+      `  7) Exit without changes\n> `
     ))
       .trim();
 
     if (answer === '1') {
-      const addable = catalog.filter((provider) => !providerIds.includes(provider.id));
-      if (!addable.length) {
-        logger.info('No remaining built-in providers to add.');
+      const mode = (await prompt(
+        `Add provider:\n` +
+        `  1) Add built-in provider\n` +
+        `  2) Add custom provider (select protocol)\n` +
+        `  b) Back\n> `
+      )).trim();
+
+      if (isBackInput(mode)) {
+        logger.info('Back to V2 menu.');
         continue;
       }
-      const lines = addable.map((provider, index) => `  ${index + 1}) ${provider.id} - ${provider.label}`);
-      const pick = (await prompt(`Choose provider to add:\n${lines.join('\n')}\n> `)).trim();
-      const index = Number(pick);
-      if (!Number.isFinite(index) || index <= 0 || Math.floor(index) > addable.length) {
+
+      if (!mode || mode === '1') {
+        const lines = catalog.map((provider, index) => {
+          const exists = providerIds.includes(provider.id) ? ' [exists]' : ' [new]';
+          return `  ${index + 1}) ${provider.id} - ${provider.label}${exists}`;
+        });
+        const pick = (await prompt(`Choose built-in provider (b=back):\n${lines.join('\n')}\n> `)).trim();
+        if (isBackInput(pick)) {
+          logger.info('Back to add-provider menu.');
+          continue;
+        }
+        const index = Number(pick);
+        if (!Number.isFinite(index) || index <= 0 || Math.floor(index) > catalog.length) {
+          logger.info('Invalid provider selection.');
+          continue;
+        }
+        const selected = catalog[Math.floor(index) - 1];
+
+        if (providerIds.includes(selected.id)) {
+          const resolution = (await prompt(
+            `Provider ${selected.id} already exists. (o)verwrite with built-in template / (k)eep / (b)ack\n> `
+          )).trim().toLowerCase();
+          if (isBackInput(resolution)) {
+            logger.info('Back to add-provider menu.');
+            continue;
+          }
+          if (!resolution || resolution === 'k' || resolution === 'keep') {
+            logger.info(`Skipped existing provider: ${selected.id}`);
+            continue;
+          }
+          if (resolution !== 'o' && resolution !== 'overwrite') {
+            logger.info('Invalid choice. Use o / k / b.');
+            continue;
+          }
+        }
+
+        writeProviderV2(fsImpl, pathImpl, providerRoot, selected.id, asRecord(selected.provider));
+        logger.info(providerIds.includes(selected.id) ? `Updated built-in provider template: ${selected.id}` : `Added provider: ${selected.id}`);
         continue;
       }
-      const selected = addable[Math.floor(index) - 1];
-      writeProviderV2(fsImpl, pathImpl, providerRoot, selected.id, asRecord(selected.provider));
-      logger.info(`Added provider: ${selected.id}`);
+
+      if (mode === '2') {
+        const created = await interactiveCreateCustomProvider(prompt, new Set(providerIds), logger);
+        if (!created) {
+          continue;
+        }
+        writeProviderV2(fsImpl, pathImpl, providerRoot, created.providerId, created.providerNode);
+        logger.info(`Added custom provider: ${created.providerId}`);
+        continue;
+      }
+
+      logger.info('Unknown add mode. Choose 1 (built-in), 2 (custom), or b (back).');
       continue;
     }
 
@@ -782,14 +1152,24 @@ async function runV2MaintenanceMenu(args: {
         continue;
       }
       const lines = providerIds.map((providerId, index) => `  ${index + 1}) ${providerId}`);
-      const pick = (await prompt(`Choose provider to delete:\n${lines.join('\n')}\n> `)).trim();
+      const pick = (await prompt(`Choose provider to delete (b=back):\n${lines.join('\n')}\n> `)).trim();
+      if (isBackInput(pick)) {
+        logger.info('Back to V2 menu.');
+        continue;
+      }
       const index = Number(pick);
       if (!Number.isFinite(index) || index <= 0 || Math.floor(index) > providerIds.length) {
+        logger.info('Invalid provider selection.');
         continue;
       }
       const providerId = providerIds[Math.floor(index) - 1];
-      const confirmed = await promptYesNo(prompt, `Delete provider ${providerId}?`, false);
-      if (!confirmed) {
+      const confirmDelete = (await prompt(`Delete provider ${providerId}? (y/n, b=back)\n> `)).trim().toLowerCase();
+      if (isBackInput(confirmDelete)) {
+        logger.info('Back to V2 menu.');
+        continue;
+      }
+      if (!(confirmDelete === 'y' || confirmDelete === 'yes')) {
+        logger.info(`Delete cancelled: ${providerId}`);
         continue;
       }
       const filePath = getProviderV2Path(pathImpl, providerRoot, providerId);
@@ -812,9 +1192,14 @@ async function runV2MaintenanceMenu(args: {
         continue;
       }
       const lines = providerIds.map((providerId, index) => `  ${index + 1}) ${providerId}`);
-      const pick = (await prompt(`Choose provider to modify:\n${lines.join('\n')}\n> `)).trim();
+      const pick = (await prompt(`Choose provider to modify (b=back):\n${lines.join('\n')}\n> `)).trim();
+      if (isBackInput(pick)) {
+        logger.info('Back to V2 menu.');
+        continue;
+      }
       const index = Number(pick);
       if (!Number.isFinite(index) || index <= 0 || Math.floor(index) > providerIds.length) {
+        logger.info('Invalid provider selection.');
         continue;
       }
       const providerId = providerIds[Math.floor(index) - 1];
@@ -833,16 +1218,26 @@ async function runV2MaintenanceMenu(args: {
           `  1) Toggle enabled\n` +
           `  2) Set baseURL\n` +
           `  3) Replace with catalog template\n` +
-          `  4) Save provider\n> `
+          `  4) Save provider\n` +
+          `  b) Back without saving\n> `
         ))
           .trim();
+
+        if (isBackInput(action)) {
+          logger.info(`Back to V2 menu without saving provider: ${providerId}`);
+          break;
+        }
 
         if (action === '1') {
           providerNode.enabled = providerNode.enabled === false;
           continue;
         }
         if (action === '2') {
-          const nextBase = (await prompt('New baseURL:\n> ')).trim();
+          const nextBase = (await prompt('New baseURL (b=back):\n> ')).trim();
+          if (isBackInput(nextBase)) {
+            logger.info('Back to modify-provider menu.');
+            continue;
+          }
           if (nextBase) {
             providerNode.baseURL = nextBase;
           }
@@ -862,6 +1257,7 @@ async function runV2MaintenanceMenu(args: {
           logger.info(`Saved provider: ${providerId}`);
           break;
         }
+        logger.info('Unknown modify action. Choose 1/2/3/4/b.');
       }
       continue;
     }
@@ -874,6 +1270,10 @@ async function runV2MaintenanceMenu(args: {
         : 'gpt-4o-mini';
       const fallbackTarget = `${fallbackProviderId}.${fallbackModel}`;
       const nextRouting = await interactiveRoutingWizard(prompt, routing, fallbackTarget);
+      if (!nextRouting) {
+        logger.info('Back to V2 menu without routing changes.');
+        continue;
+      }
       const host = normalizeHost(String(asRecord(currentConfig.httpserver).host || '')) || '127.0.0.1';
       const port = normalizePort(asRecord(currentConfig.httpserver).port as string | number | undefined) || 5555;
       currentConfig = buildV2ConfigFromExisting(currentConfig, nextRouting, host, port);
@@ -881,6 +1281,11 @@ async function runV2MaintenanceMenu(args: {
     }
 
     if (answer === '5') {
+      printConfiguredProviders(logger, providerMap);
+      continue;
+    }
+
+    if (answer === '6') {
       const providerIdsSet = new Set(Object.keys(loadProviderV2Map(fsImpl, pathImpl, providerRoot)));
       const routing = readRoutingFromConfig(currentConfig);
       const missingTargets = ensureTargetProvidersExist(routing, providerIdsSet);
@@ -893,7 +1298,7 @@ async function runV2MaintenanceMenu(args: {
       return;
     }
 
-    if (answer === '6') {
+    if (answer === '7') {
       spinner.info('Exit without saving changes to main config.');
       return;
     }
@@ -915,6 +1320,7 @@ export function createInitCommand(program: Command, ctx: InitCommandContext): vo
 Examples:
   ${bin} init
   ${bin} init --list-providers
+  ${bin} init --list-current-providers
   ${bin} init --providers openai,tab --default-provider tab
 `
     )
@@ -925,6 +1331,7 @@ Examples:
     .option('--host <host>', 'Server host (httpserver.host)')
     .option('--port <port>', 'Server port (httpserver.port)')
     .option('--list-providers', 'List built-in provider ids and exit')
+    .option('--list-current-providers', 'List configured providers from ~/.routecodex/provider and exit')
     .action(async (options: InitCommandOptions) => {
       const spinner = await ctx.createSpinner('Initializing configuration...');
 
@@ -956,6 +1363,13 @@ Examples:
         for (const entry of catalog) {
           ctx.logger.info(`${entry.id} - ${entry.label}: ${entry.description}`);
         }
+        return;
+      }
+
+      if (options.listCurrentProviders) {
+        spinner.stop();
+        const providerMap = loadProviderV2Map(fsImpl, pathImpl, providerRoot);
+        printConfiguredProviders(ctx.logger, providerMap);
         return;
       }
 
@@ -1025,7 +1439,7 @@ Examples:
 
           const baseRouting = buildRouting(defaultTarget);
           const routing = promptBundle
-            ? (safeSpinnerStop(), await interactiveRoutingWizard(promptBundle.prompt, baseRouting, defaultTarget))
+            ? (safeSpinnerStop(), (await interactiveRoutingWizard(promptBundle.prompt, baseRouting, defaultTarget)) ?? baseRouting)
             : baseRouting;
 
           if (fsImpl.existsSync(configPath) && !options.force) {

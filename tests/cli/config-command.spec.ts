@@ -467,6 +467,582 @@ describe('cli init command', () => {
     expect(infos.join('\n')).toContain('openai');
   });
 
+  it('list-current-providers prints configured provider summary', async () => {
+    const infos: string[] = [];
+    const program = new Command();
+    createInitCommand(program, {
+      logger: {
+        info: (msg) => infos.push(msg),
+        warning: () => {},
+        success: () => {},
+        error: () => {}
+      },
+      createSpinner: async () =>
+        ({
+          start: () => ({} as any),
+          succeed: () => {},
+          fail: () => {},
+          warn: () => {},
+          info: () => {},
+          stop: () => {},
+          text: ''
+        }) as any,
+      fsImpl: {
+        existsSync: (p: any) => {
+          const target = String(p);
+          return (
+            target === '/tmp/.routecodex/provider' ||
+            target === '/tmp/.routecodex/provider/openai/config.v2.json' ||
+            target === '/tmp/.routecodex/provider/glm/config.v2.json'
+          );
+        },
+        readdirSync: () => [
+          { name: 'openai', isDirectory: () => true },
+          { name: 'glm', isDirectory: () => true }
+        ],
+        readFileSync: (p: any) => {
+          const target = String(p);
+          if (target.includes('/openai/config.v2.json')) {
+            return JSON.stringify({
+              version: '2.0.0',
+              providerId: 'openai',
+              provider: {
+                enabled: true,
+                baseURL: 'https://api.openai.com',
+                auth: { type: 'apikey', keys: { key1: 'sk-live-abcdef123' } },
+                models: { 'gpt-5.2': {}, 'gpt-5.3': {} }
+              }
+            });
+          }
+          if (target.includes('/glm/config.v2.json')) {
+            return JSON.stringify({
+              version: '2.0.0',
+              providerId: 'glm',
+              provider: {
+                enabled: false,
+                auth: {
+                  type: 'gemini-cli-oauth',
+                  entries: [
+                    { alias: 'alice', tokenFile: '~/.routecodex/auth/gemini-oauth-1-alice.json' },
+                    { alias: 'bob', tokenFile: '~/.routecodex/auth/gemini-oauth-2-bob.json' }
+                  ]
+                },
+                models: { 'glm-4.7': {} }
+              }
+            });
+          }
+          return '';
+        },
+        writeFileSync: () => {},
+        mkdirSync: () => {}
+      } as any,
+      getHomeDir: () => '/tmp',
+      pathImpl: path as any
+    });
+
+    await program.parseAsync(['node', 'routecodex', 'init', '--list-current-providers'], { from: 'node' });
+
+    expect(infos.join('\n')).toContain('Configured providers (2):');
+    expect(infos.join('\n')).toContain('openai | enabled | models=2 | keys=1 [****123] | oauth=- | baseURL=https://api.openai.com');
+    expect(infos.join('\n')).toContain(
+      'glm | disabled | models=1 | keys=0 | oauth=alice(gemini-oauth-1-alice.json), bob(gemini-oauth-2-bob.json) | baseURL=(unset)'
+    );
+  });
+
+  it('v2 maintenance menu can list providers', async () => {
+    const infos: string[] = [];
+    const writes: string[] = [];
+    const answers = ['5', '7'];
+    const program = new Command();
+    createInitCommand(program, {
+      logger: {
+        info: (msg) => infos.push(msg),
+        warning: () => {},
+        success: () => {},
+        error: () => {}
+      },
+      createSpinner: async () =>
+        ({
+          start: () => ({} as any),
+          succeed: () => {},
+          fail: () => {},
+          warn: () => {},
+          info: (msg: string) => infos.push(msg),
+          stop: () => {},
+          text: ''
+        }) as any,
+      fsImpl: {
+        existsSync: (p: any) => {
+          const target = String(p);
+          return (
+            target === '/tmp/config.json' ||
+            target === '/tmp/.routecodex/provider' ||
+            target === '/tmp/.routecodex/provider/openai/config.v2.json'
+          );
+        },
+        readdirSync: () => [{ name: 'openai', isDirectory: () => true }],
+        readFileSync: (p: any) => {
+          const target = String(p);
+          if (target === '/tmp/config.json') {
+            return JSON.stringify({
+              version: '2.0.0',
+              virtualrouterMode: 'v2',
+              httpserver: { host: '127.0.0.1', port: 5520 },
+              virtualrouter: { routing: { default: [{ id: 'primary', mode: 'priority', targets: ['openai.gpt-5.2'] }] } }
+            });
+          }
+          if (target.includes('/openai/config.v2.json')) {
+            return JSON.stringify({
+              version: '2.0.0',
+              providerId: 'openai',
+              provider: {
+                enabled: true,
+                auth: { type: 'apikey', apiKey: 'sk-test-xyz789' },
+                models: { 'gpt-5.2': {} }
+              }
+            });
+          }
+          return '';
+        },
+        writeFileSync: (p: any) => writes.push(String(p)),
+        mkdirSync: () => {},
+        rmdirSync: () => {},
+        unlinkSync: () => {}
+      } as any,
+      getHomeDir: () => '/tmp',
+      pathImpl: path as any,
+      prompt: async () => String(answers.shift() ?? '')
+    });
+
+    await program.parseAsync(['node', 'routecodex', 'init', '--config', '/tmp/config.json'], { from: 'node' });
+
+    expect(infos.join('\n')).toContain('Configured providers (1):');
+    expect(infos.join('\n')).toContain('openai | enabled | models=1 | keys=1 [****789] | oauth=- | baseURL=(unset)');
+    expect(infos.join('\n')).toContain('Exit without saving changes to main config.');
+    expect(writes.some((item) => item === '/tmp/config.json')).toBe(false);
+  });
+
+  it('v2 maintenance add custom provider supports protocol selection and writes config.v2.json', async () => {
+    const infos: string[] = [];
+    const writes = new Map<string, string>();
+    const answers = [
+      '1',
+      '2',
+      'custom-gemini',
+      '4',
+      'https://gemini.example.com/v1beta',
+      'gemini-2.5-pro',
+      'CUSTOM_GEMINI_KEY',
+      '7'
+    ];
+    const program = new Command();
+    createInitCommand(program, {
+      logger: {
+        info: (msg) => infos.push(msg),
+        warning: () => {},
+        success: () => {},
+        error: () => {}
+      },
+      createSpinner: async () =>
+        ({
+          start: () => ({} as any),
+          succeed: () => {},
+          fail: () => {},
+          warn: () => {},
+          info: () => {},
+          stop: () => {},
+          text: ''
+        }) as any,
+      fsImpl: {
+        existsSync: (p: any) => {
+          const target = String(p);
+          return target === '/tmp/config.json' || target === '/tmp/.routecodex/provider';
+        },
+        readdirSync: () => [],
+        readFileSync: (p: any) => {
+          const target = String(p);
+          if (target === '/tmp/config.json') {
+            return JSON.stringify({
+              version: '2.0.0',
+              virtualrouterMode: 'v2',
+              httpserver: { host: '127.0.0.1', port: 5520 },
+              virtualrouter: { routing: { default: [{ id: 'primary', mode: 'priority', targets: ['openai.gpt-5.2'] }] } }
+            });
+          }
+          return '';
+        },
+        writeFileSync: (p: any, content: any) => writes.set(String(p), String(content)),
+        mkdirSync: () => {},
+        rmdirSync: () => {},
+        unlinkSync: () => {}
+      } as any,
+      getHomeDir: () => '/tmp',
+      pathImpl: path as any,
+      prompt: async () => String(answers.shift() ?? '')
+    });
+
+    await program.parseAsync(['node', 'routecodex', 'init', '--config', '/tmp/config.json'], { from: 'node' });
+
+    const customPath = '/tmp/.routecodex/provider/custom-gemini/config.v2.json';
+    expect(writes.has(customPath)).toBe(true);
+    const payload = JSON.parse(writes.get(customPath) || '{}');
+    expect(payload.providerId).toBe('custom-gemini');
+    expect(payload.provider?.type).toBe('gemini');
+    expect(payload.provider?.baseURL).toBe('https://gemini.example.com/v1beta');
+    expect(payload.provider?.auth?.apiKey).toBe('${CUSTOM_GEMINI_KEY}');
+    expect(payload.provider?.models?.['gemini-2.5-pro']).toBeTruthy();
+    expect(infos.join('\n')).toContain('Added custom provider: custom-gemini');
+  });
+
+  it('v2 maintenance add custom provider shows validation hints for invalid mode and protocol', async () => {
+    const infos: string[] = [];
+    const writes = new Map<string, string>();
+    const answers = [
+      '1',
+      '9',
+      '1',
+      '2',
+      'custom-openai',
+      '9',
+      '1',
+      '',
+      'gpt-5.2',
+      '',
+      '7'
+    ];
+    const program = new Command();
+    createInitCommand(program, {
+      logger: {
+        info: (msg) => infos.push(msg),
+        warning: () => {},
+        success: () => {},
+        error: () => {}
+      },
+      createSpinner: async () =>
+        ({
+          start: () => ({} as any),
+          succeed: () => {},
+          fail: () => {},
+          warn: () => {},
+          info: (msg: string) => infos.push(msg),
+          stop: () => {},
+          text: ''
+        }) as any,
+      fsImpl: {
+        existsSync: (p: any) => {
+          const target = String(p);
+          return target === '/tmp/config.json' || target === '/tmp/.routecodex/provider';
+        },
+        readdirSync: () => [],
+        readFileSync: (p: any) => {
+          const target = String(p);
+          if (target === '/tmp/config.json') {
+            return JSON.stringify({
+              version: '2.0.0',
+              virtualrouterMode: 'v2',
+              httpserver: { host: '127.0.0.1', port: 5520 },
+              virtualrouter: { routing: { default: [{ id: 'primary', mode: 'priority', targets: ['openai.gpt-5.2'] }] } }
+            });
+          }
+          return '';
+        },
+        writeFileSync: (p: any, content: any) => writes.set(String(p), String(content)),
+        mkdirSync: () => {},
+        rmdirSync: () => {},
+        unlinkSync: () => {}
+      } as any,
+      getHomeDir: () => '/tmp',
+      pathImpl: path as any,
+      prompt: async () => String(answers.shift() ?? '')
+    });
+
+    await program.parseAsync(['node', 'routecodex', 'init', '--config', '/tmp/config.json'], { from: 'node' });
+
+    expect(infos.join('\n')).toContain('Unknown add mode. Choose 1 (built-in), 2 (custom), or b (back).');
+    expect(infos.join('\n')).toContain('Invalid protocol choice. Select 1/2/3/4.');
+    expect(writes.has('/tmp/.routecodex/provider/custom-openai/config.v2.json')).toBe(true);
+  });
+
+  it('v2 maintenance add built-in provider can overwrite existing provider and supports back', async () => {
+    const infos: string[] = [];
+    const writes = new Map<string, string>();
+    const answers = [
+      '1',
+      '1',
+      '1',
+      'o',
+      '1',
+      '1',
+      '1',
+      'k',
+      '1',
+      'b',
+      '7'
+    ];
+
+    const program = new Command();
+    createInitCommand(program, {
+      logger: {
+        info: (msg) => infos.push(msg),
+        warning: () => {},
+        success: () => {},
+        error: () => {}
+      },
+      createSpinner: async () =>
+        ({
+          start: () => ({} as any),
+          succeed: () => {},
+          fail: () => {},
+          warn: () => {},
+          info: () => {},
+          stop: () => {},
+          text: ''
+        }) as any,
+      fsImpl: {
+        existsSync: (p: any) => {
+          const target = String(p);
+          return (
+            target === '/tmp/config.json' ||
+            target === '/tmp/.routecodex/provider' ||
+            target === '/tmp/.routecodex/provider/openai/config.v2.json'
+          );
+        },
+        readdirSync: () => [{ name: 'openai', isDirectory: () => true }],
+        readFileSync: (p: any) => {
+          const target = String(p);
+          if (target === '/tmp/config.json') {
+            return JSON.stringify({
+              version: '2.0.0',
+              virtualrouterMode: 'v2',
+              httpserver: { host: '127.0.0.1', port: 5520 },
+              virtualrouter: { routing: { default: [{ id: 'primary', mode: 'priority', targets: ['openai.gpt-5.2'] }] } }
+            });
+          }
+          if (target === '/tmp/.routecodex/provider/openai/config.v2.json') {
+            return JSON.stringify({
+              version: '2.0.0',
+              providerId: 'openai',
+              provider: { id: 'openai', enabled: true, type: 'openai', baseURL: 'https://old.example.com', models: { old: {} } }
+            });
+          }
+          return '';
+        },
+        writeFileSync: (p: any, content: any) => writes.set(String(p), String(content)),
+        mkdirSync: () => {},
+        rmdirSync: () => {},
+        unlinkSync: () => {}
+      } as any,
+      getHomeDir: () => '/tmp',
+      pathImpl: path as any,
+      prompt: async () => String(answers.shift() ?? '')
+    });
+
+    await program.parseAsync(['node', 'routecodex', 'init', '--config', '/tmp/config.json'], { from: 'node' });
+
+    const openaiPath = '/tmp/.routecodex/provider/openai/config.v2.json';
+    expect(writes.has(openaiPath)).toBe(true);
+    const payload = JSON.parse(writes.get(openaiPath) || '{}');
+    expect(payload.provider?.baseURL).toBe('https://api.openai.com/v1');
+    expect(infos.join('\n')).toContain('Updated built-in provider template: openai');
+    expect(infos.join('\n')).toContain('Skipped existing provider: openai');
+    expect(infos.join('\n')).toContain('Back to V2 menu.');
+  });
+
+  it('v2 maintenance delete provider supports back and cancel', async () => {
+    const infos: string[] = [];
+    const writes: string[] = [];
+    const answers = ['2', 'b', '2', '1', 'n', '7'];
+
+    const program = new Command();
+    createInitCommand(program, {
+      logger: { info: (msg) => infos.push(msg), warning: () => {}, success: () => {}, error: () => {} },
+      createSpinner: async () =>
+        ({
+          start: () => ({} as any),
+          succeed: () => {},
+          fail: () => {},
+          warn: () => {},
+          info: () => {},
+          stop: () => {},
+          text: ''
+        }) as any,
+      fsImpl: {
+        existsSync: (p: any) => {
+          const target = String(p);
+          return (
+            target === '/tmp/config.json' ||
+            target === '/tmp/.routecodex/provider' ||
+            target === '/tmp/.routecodex/provider/openai/config.v2.json'
+          );
+        },
+        readdirSync: () => [{ name: 'openai', isDirectory: () => true }],
+        readFileSync: (p: any) => {
+          const target = String(p);
+          if (target === '/tmp/config.json') {
+            return JSON.stringify({
+              version: '2.0.0',
+              virtualrouterMode: 'v2',
+              httpserver: { host: '127.0.0.1', port: 5520 },
+              virtualrouter: { routing: { default: [{ id: 'primary', mode: 'priority', targets: ['openai.gpt-5.2'] }] } }
+            });
+          }
+          if (target === '/tmp/.routecodex/provider/openai/config.v2.json') {
+            return JSON.stringify({
+              version: '2.0.0',
+              providerId: 'openai',
+              provider: { id: 'openai', enabled: true, type: 'openai', models: { 'gpt-5.2': {} } }
+            });
+          }
+          return '';
+        },
+        writeFileSync: (p: any) => writes.push(String(p)),
+        mkdirSync: () => {},
+        rmdirSync: () => {},
+        unlinkSync: (p: any) => writes.push(`unlink:${String(p)}`)
+      } as any,
+      getHomeDir: () => '/tmp',
+      pathImpl: path as any,
+      prompt: async () => String(answers.shift() ?? '')
+    });
+
+    await program.parseAsync(['node', 'routecodex', 'init', '--config', '/tmp/config.json'], { from: 'node' });
+
+    expect(infos.join('\n')).toContain('Back to V2 menu.');
+    expect(infos.join('\n')).toContain('Delete cancelled: openai');
+    expect(writes.some((line) => line.startsWith('unlink:'))).toBe(false);
+  });
+
+  it('v2 maintenance modify provider supports back without saving', async () => {
+    const infos: string[] = [];
+    const writes = new Map<string, string>();
+    const answers = ['3', '1', '2', 'b', 'b', '7'];
+
+    const program = new Command();
+    createInitCommand(program, {
+      logger: { info: (msg) => infos.push(msg), warning: () => {}, success: () => {}, error: () => {} },
+      createSpinner: async () =>
+        ({
+          start: () => ({} as any),
+          succeed: () => {},
+          fail: () => {},
+          warn: () => {},
+          info: () => {},
+          stop: () => {},
+          text: ''
+        }) as any,
+      fsImpl: {
+        existsSync: (p: any) => {
+          const target = String(p);
+          return (
+            target === '/tmp/config.json' ||
+            target === '/tmp/.routecodex/provider' ||
+            target === '/tmp/.routecodex/provider/openai/config.v2.json'
+          );
+        },
+        readdirSync: () => [{ name: 'openai', isDirectory: () => true }],
+        readFileSync: (p: any) => {
+          const target = String(p);
+          if (target === '/tmp/config.json') {
+            return JSON.stringify({
+              version: '2.0.0',
+              virtualrouterMode: 'v2',
+              httpserver: { host: '127.0.0.1', port: 5520 },
+              virtualrouter: { routing: { default: [{ id: 'primary', mode: 'priority', targets: ['openai.gpt-5.2'] }] } }
+            });
+          }
+          if (target === '/tmp/.routecodex/provider/openai/config.v2.json') {
+            return JSON.stringify({
+              version: '2.0.0',
+              providerId: 'openai',
+              provider: {
+                id: 'openai',
+                enabled: true,
+                type: 'openai',
+                baseURL: 'https://old.example.com',
+                models: { 'gpt-5.2': {} }
+              }
+            });
+          }
+          return '';
+        },
+        writeFileSync: (p: any, content: any) => writes.set(String(p), String(content)),
+        mkdirSync: () => {},
+        rmdirSync: () => {},
+        unlinkSync: () => {}
+      } as any,
+      getHomeDir: () => '/tmp',
+      pathImpl: path as any,
+      prompt: async () => String(answers.shift() ?? '')
+    });
+
+    await program.parseAsync(['node', 'routecodex', 'init', '--config', '/tmp/config.json'], { from: 'node' });
+
+    expect(infos.join('\n')).toContain('Back to modify-provider menu.');
+    expect(infos.join('\n')).toContain('Back to V2 menu without saving provider: openai');
+    expect(writes.has('/tmp/.routecodex/provider/openai/config.v2.json')).toBe(false);
+  });
+
+  it('v2 maintenance modify routing supports back/cancel without changes', async () => {
+    const infos: string[] = [];
+    const writes = new Map<string, string>();
+    const answers = ['4', 'b', '7'];
+
+    const program = new Command();
+    createInitCommand(program, {
+      logger: { info: (msg) => infos.push(msg), warning: () => {}, success: () => {}, error: () => {} },
+      createSpinner: async () =>
+        ({
+          start: () => ({} as any),
+          succeed: () => {},
+          fail: () => {},
+          warn: () => {},
+          info: () => {},
+          stop: () => {},
+          text: ''
+        }) as any,
+      fsImpl: {
+        existsSync: (p: any) => {
+          const target = String(p);
+          return target === '/tmp/config.json' || target === '/tmp/.routecodex/provider' || target === '/tmp/.routecodex/provider/openai/config.v2.json';
+        },
+        readdirSync: () => [{ name: 'openai', isDirectory: () => true }],
+        readFileSync: (p: any) => {
+          const target = String(p);
+          if (target === '/tmp/config.json') {
+            return JSON.stringify({
+              version: '2.0.0',
+              virtualrouterMode: 'v2',
+              httpserver: { host: '127.0.0.1', port: 5520 },
+              virtualrouter: {
+                routing: {
+                  default: [{ id: 'primary', mode: 'priority', targets: ['openai.gpt-5.2'] }],
+                  thinking: [{ id: 'thinking-primary', mode: 'priority', targets: ['openai.gpt-5.2'] }],
+                  tools: [{ id: 'tools-primary', mode: 'priority', targets: ['openai.gpt-5.2'] }]
+                }
+              }
+            });
+          }
+          if (target === '/tmp/.routecodex/provider/openai/config.v2.json') {
+            return JSON.stringify({ version: '2.0.0', providerId: 'openai', provider: { id: 'openai', enabled: true, type: 'openai', models: { 'gpt-5.2': {} } } });
+          }
+          return '';
+        },
+        writeFileSync: (p: any, content: any) => writes.set(String(p), String(content)),
+        mkdirSync: () => {},
+        rmdirSync: () => {},
+        unlinkSync: () => {}
+      } as any,
+      getHomeDir: () => '/tmp',
+      pathImpl: path as any,
+      prompt: async () => String(answers.shift() ?? '')
+    });
+
+    await program.parseAsync(['node', 'routecodex', 'init', '--config', '/tmp/config.json'], { from: 'node' });
+
+    expect(infos.join('\n')).toContain('Back to V2 menu without routing changes.');
+    expect(writes.has('/tmp/config.json')).toBe(false);
+  });
+
   it('init reports error when non-interactive and no providers are provided', async () => {
     const errors: string[] = [];
     const program = new Command();
@@ -540,9 +1116,89 @@ describe('cli init command', () => {
     expect(writes.size).toBe(0);
   });
 
+  it('treats empty/undefined prompt answer as default yes for v1->v2 conversion', async () => {
+    const writes = new Map<string, string>();
+    const program = new Command();
+    createInitCommand(program, {
+      logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
+      createSpinner: async () =>
+        ({
+          start: () => ({} as any),
+          succeed: () => {},
+          fail: () => {},
+          warn: () => {},
+          info: () => {},
+          stop: () => {},
+          text: ''
+        }) as any,
+      fsImpl: {
+        existsSync: (p: any) => String(p) === '/tmp/config.json',
+        readFileSync: () =>
+          JSON.stringify({
+            version: '1.0.0',
+            httpserver: { host: '127.0.0.1', port: 5520 },
+            virtualrouter: { providers: { openai: { id: 'openai', type: 'openai', enabled: true, models: { 'gpt-5.2': {} } } } }
+          }),
+        writeFileSync: (p: any, content: any) => writes.set(String(p), String(content)),
+        mkdirSync: () => {},
+        readdirSync: () => [],
+        rmdirSync: () => {},
+        unlinkSync: () => {}
+      } as any,
+      pathImpl: path as any,
+      getHomeDir: () => '/tmp',
+      prompt: async () => undefined as any
+    });
+
+    await program.parseAsync(['node', 'routecodex', 'init', '--config', '/tmp/config.json'], { from: 'node' });
+
+    const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
+    expect(parsed.virtualrouterMode).toBe('v2');
+  });
+
+  it('falls back to default yes when prompt interface closes unexpectedly', async () => {
+    const writes = new Map<string, string>();
+    const program = new Command();
+    createInitCommand(program, {
+      logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
+      createSpinner: async () =>
+        ({
+          start: () => ({} as any),
+          succeed: () => {},
+          fail: () => {},
+          warn: () => {},
+          info: () => {},
+          stop: () => {},
+          text: ''
+        }) as any,
+      fsImpl: {
+        existsSync: (p: any) => String(p) === '/tmp/config.json',
+        readFileSync: () =>
+          JSON.stringify({
+            version: '1.0.0',
+            httpserver: { host: '127.0.0.1', port: 5520 },
+            virtualrouter: { providers: { openai: { id: 'openai', type: 'openai', enabled: true, models: { 'gpt-5.2': {} } } } }
+          }),
+        writeFileSync: (p: any, content: any) => writes.set(String(p), String(content)),
+        mkdirSync: () => {},
+        readdirSync: () => [],
+        rmdirSync: () => {},
+        unlinkSync: () => {}
+      } as any,
+      pathImpl: path as any,
+      getHomeDir: () => '/tmp',
+      prompt: async () => ''
+    });
+
+    await program.parseAsync(['node', 'routecodex', 'init', '--config', '/tmp/config.json'], { from: 'node' });
+
+    const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
+    expect(parsed.virtualrouterMode).toBe('v2');
+  });
+
   it('prompts for duplicate provider handling during v1->v2 migration', async () => {
     const writes = new Map<string, string>();
-    const answers = ['y', 'k'];
+    const answers = ['y', 's', 'k'];
     let startCount = 0;
     let stopCount = 0;
     const program = new Command();
@@ -605,6 +1261,10 @@ describe('cli init command', () => {
       pathImpl: path as any,
       getHomeDir: () => '/tmp',
       prompt: async (question) => {
+        if (String(question).includes('Detected existing provider configs in provider dir')) {
+          expect(stopCount).toBeGreaterThanOrEqual(2);
+          expect(startCount).toBeGreaterThanOrEqual(1);
+        }
         if (String(question).includes('Provider "openai" already exists')) {
           // Spinner should be stopped before asking how to handle duplicates.
           expect(stopCount).toBeGreaterThanOrEqual(2);
@@ -623,6 +1283,78 @@ describe('cli init command', () => {
     const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
     expect(parsed.virtualrouterMode).toBe('v2');
     expect(writes.has('/tmp/.routecodex/provider/openai/config.v2.json')).toBe(false);
+  });
+
+  it('supports overwrite-all strategy during duplicate v1->v2 migration', async () => {
+    const writes = new Map<string, string>();
+    const answers = ['y', 'a'];
+    const program = new Command();
+    createInitCommand(program, {
+      logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
+      createSpinner: async () =>
+        ({
+          start: () => ({} as any),
+          succeed: () => {},
+          fail: () => {},
+          warn: () => {},
+          info: () => {},
+          stop: () => {},
+          text: ''
+        }) as any,
+      fsImpl: {
+        existsSync: (p: any) => {
+          const target = String(p);
+          return target === '/tmp/config.json' || target === '/tmp/.routecodex/provider/openai/config.v2.json';
+        },
+        readdirSync: () => [{ name: 'openai', isDirectory: () => true }],
+        readFileSync: (p: any) => {
+          const target = String(p);
+          if (target === '/tmp/config.json') {
+            return JSON.stringify({
+              version: '1.0.0',
+              httpserver: { host: '127.0.0.1', port: 5520 },
+              virtualrouter: {
+                providers: {
+                  openai: {
+                    id: 'openai',
+                    type: 'openai',
+                    enabled: true,
+                    baseURL: 'https://new.example.com',
+                    models: { 'gpt-5.2': {} }
+                  }
+                }
+              }
+            });
+          }
+          if (target === '/tmp/.routecodex/provider/openai/config.v2.json') {
+            return JSON.stringify({
+              version: '2.0.0',
+              providerId: 'openai',
+              provider: {
+                id: 'openai',
+                type: 'openai',
+                enabled: true,
+                baseURL: 'https://old.example.com',
+                models: { 'gpt-5.1': {} }
+              }
+            });
+          }
+          return '';
+        },
+        writeFileSync: (p: any, content: any) => writes.set(String(p), String(content)),
+        mkdirSync: () => {},
+        rmdirSync: () => {},
+        unlinkSync: () => {}
+      } as any,
+      pathImpl: path as any,
+      getHomeDir: () => '/tmp',
+      prompt: async () => String(answers.shift() ?? '')
+    });
+
+    await program.parseAsync(['node', 'routecodex', 'init', '--config', '/tmp/config.json'], { from: 'node' });
+
+    const rewrittenProvider = JSON.parse(writes.get('/tmp/.routecodex/provider/openai/config.v2.json') || '{}');
+    expect(rewrittenProvider?.provider?.baseURL).toBe('https://new.example.com');
   });
 });
 

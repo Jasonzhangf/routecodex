@@ -463,4 +463,11 @@ function getModulesConfigPath(): string {
 }
 
 // Parse command line arguments (must be last)
-program.parse();
+async function main(): Promise<void> {
+  await program.parseAsync(process.argv);
+}
+
+void main().catch((error) => {
+  logger.error(error instanceof Error ? error.message : String(error));
+  process.exit(1);
+});

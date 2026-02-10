@@ -70,6 +70,35 @@ This document replaces the old “architecture novel” with a concise set of ru
 7. Add a targeted regression script plus matrix hook when behavior changes.
 8. Close only with replay evidence: compat profile hit + key field before/after + unaffected control replay.
 
+### 6.2 LSP 跨仓管理（RouteCodex + llmswitch-core）
+
+> `sharedmodule/llmswitch-core` 是独立仓库（git 根在 `../sharedmodule`），必须按“双仓”管理。
+
+1. **双 Workspace 启动**
+   - 必须分别启动 LSP：
+     - `lsp server start /Users/fanzhang/Documents/github/routecodex`
+     - `lsp server start /Users/fanzhang/Documents/github/sharedmodule/llmswitch-core`
+   - 禁止仅启动 host 仓库后就声称完成跨仓影响分析。
+
+2. **桥接边界是单一入口**
+   - Host 侧仅以 `src/modules/llmswitch/bridge.ts` 为 llmswitch-core 语义边界。
+   - 分析顺序固定：`outline -> doc -> definition -> reference`。
+   - 禁止在 host 其他模块直接把 llmswitch-core 作为“主分析入口”并据此推断影响面。
+
+3. **跨仓追踪最小清单**
+   - 在 RouteCodex 上先定位 bridge 导出符号与调用点（`lsp reference`）。
+   - 再在 llmswitch-core 源码仓定位对应实现（`lsp definition/outline`）。
+   - 每次涉及 bridge 变更，必须在 BD 备注里记录：`bridge symbol -> core file -> host callsites`。
+
+4. **提交与验证顺序**
+   - llmswitch-core 变更先在 sharedmodule 仓提交并 `npm run build`。
+   - RouteCodex 再执行 `npm run build:dev` 与 `npm run install:global` 验证接入。
+   - 不允许把 sharedmodule 未提交状态当作 RouteCodex 已完成结果。
+
+5. **会话收尾**
+   - 结束前执行 `lsp server list` 并停止相关 server（`lsp server stop <path>`）。
+   - 避免后台 server 残留导致后续分析串仓或结果污染。
+
 Keep this file short. If a rule needs more nuance, add a doc in `docs/` and link it here instead of expanding this page.
 
 ## 7. Task Tracking（Beads / `bd`）
