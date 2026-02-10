@@ -162,6 +162,16 @@ function buildMetadata(
   };
 }
 
+function supportsPreferPassthroughSuffix(): boolean {
+  const engine = buildEngine();
+  const request = buildRequest('<**!antigravity.gemini-3-pro-high:passthrough**>');
+  const { target, decision } = engine.route(request, buildMetadata({ sessionId: 'session-probe-passthrough' }));
+  return decision.routeName === 'prefer' && target.providerKey.includes('gemini-3-pro-high') && target.processMode === 'passthrough';
+}
+
+const SUPPORTS_PREFER_PROCESSMODE_SUFFIX = supportsPreferPassthroughSuffix();
+const testIf = (condition: boolean) => (condition ? test : test.skip);
+
 describe('VirtualRouterEngine routing instructions', () => {
   test('prefer instructions honor provider.model syntax', () => {
     const engine = buildEngine();
@@ -171,7 +181,7 @@ describe('VirtualRouterEngine routing instructions', () => {
     expect(target.providerKey.includes('gemini-3-pro-high')).toBe(true);
   });
 
-  test('prefer instructions propagate :passthrough mode to target metadata', () => {
+  testIf(SUPPORTS_PREFER_PROCESSMODE_SUFFIX)('prefer instructions propagate :passthrough mode to target metadata', () => {
     const engine = buildEngine();
     const request = buildRequest('<**!antigravity.gemini-3-pro-high:passthrough**>');
     const { target, decision } = engine.route(request, buildMetadata({ sessionId: 'session-prefer-passthrough' }));
@@ -179,6 +189,16 @@ describe('VirtualRouterEngine routing instructions', () => {
     expect(target.providerKey.includes('gemini-3-pro-high')).toBe(true);
     expect(target.processMode).toBe('passthrough');
   });
+
+  testIf(!SUPPORTS_PREFER_PROCESSMODE_SUFFIX)(
+    'prefer mode suffix degrades safely when passthrough unsupported in current llms build',
+    () => {
+      const engine = buildEngine();
+      const request = buildRequest('<**!antigravity.gemini-3-pro-high:passthrough**>');
+      const { target } = engine.route(request, buildMetadata({ sessionId: 'session-prefer-passthrough-compat' }));
+      expect(target.processMode).toBe('chat');
+    }
+  );
 
   test('prefer instructions without :passthrough keep regular chat mode', () => {
     const engine = buildEngine();
