@@ -499,6 +499,114 @@ describe('cli init command', () => {
 
     expect(errors.join('\n')).toContain('Non-interactive init requires --providers');
   });
+
+  it('prompts before migrating v1 config to v2 (does not auto-convert)', async () => {
+    const writes = new Map<string, string>();
+    const answers = ['n'];
+    const program = new Command();
+    createInitCommand(program, {
+      logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
+      createSpinner: async () =>
+        ({
+          start: () => ({} as any),
+          succeed: () => {},
+          fail: () => {},
+          warn: () => {},
+          info: () => {},
+          stop: () => {},
+          text: ''
+        }) as any,
+      fsImpl: {
+        existsSync: (p: any) => String(p) === '/tmp/config.json',
+        readFileSync: () =>
+          JSON.stringify({
+            version: '1.0.0',
+            httpserver: { host: '127.0.0.1', port: 5520 },
+            virtualrouter: { providers: { openai: { id: 'openai', type: 'openai', enabled: true, models: { 'gpt-5.2': {} } } } }
+          }),
+        writeFileSync: (p: any, content: any) => writes.set(String(p), String(content)),
+        mkdirSync: () => {},
+        readdirSync: () => [],
+        rmdirSync: () => {},
+        unlinkSync: () => {}
+      } as any,
+      pathImpl: path as any,
+      getHomeDir: () => '/tmp',
+      prompt: async () => String(answers.shift() ?? '')
+    });
+
+    await program.parseAsync(['node', 'routecodex', 'init', '--config', '/tmp/config.json'], { from: 'node' });
+
+    expect(writes.size).toBe(0);
+  });
+
+  it('prompts for duplicate provider handling during v1->v2 migration', async () => {
+    const writes = new Map<string, string>();
+    const answers = ['y', 'k'];
+    const program = new Command();
+    createInitCommand(program, {
+      logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
+      createSpinner: async () =>
+        ({
+          start: () => ({} as any),
+          succeed: () => {},
+          fail: () => {},
+          warn: () => {},
+          info: () => {},
+          stop: () => {},
+          text: ''
+        }) as any,
+      fsImpl: {
+        existsSync: (p: any) => {
+          const path = String(p);
+          if (path === '/tmp/config.json') {
+            return true;
+          }
+          if (path === '/tmp/.routecodex/provider/openai/config.v2.json') {
+            return true;
+          }
+          return false;
+        },
+        readdirSync: () => [{ name: 'openai', isDirectory: () => true }],
+        readFileSync: (p: any) => {
+          const path = String(p);
+          if (path === '/tmp/config.json') {
+            return JSON.stringify({
+              version: '1.0.0',
+              httpserver: { host: '127.0.0.1', port: 5520 },
+              virtualrouter: {
+                providers: {
+                  openai: { id: 'openai', type: 'openai', enabled: true, models: { 'gpt-5.2': {} } }
+                }
+              }
+            });
+          }
+          if (path === '/tmp/.routecodex/provider/openai/config.v2.json') {
+            return JSON.stringify({
+              version: '2.0.0',
+              providerId: 'openai',
+              provider: { id: 'openai', type: 'openai', enabled: true, baseURL: 'https://example.com', models: { 'gpt-5.2': {} } }
+            });
+          }
+          return '';
+        },
+        writeFileSync: (p: any, content: any) => writes.set(String(p), String(content)),
+        mkdirSync: () => {},
+        rmdirSync: () => {},
+        unlinkSync: () => {}
+      } as any,
+      pathImpl: path as any,
+      getHomeDir: () => '/tmp',
+      prompt: async () => String(answers.shift() ?? '')
+    });
+
+    await program.parseAsync(['node', 'routecodex', 'init', '--config', '/tmp/config.json'], { from: 'node' });
+
+    // Kept existing provider.v2, but should still rewrite main config to v2.
+    const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
+    expect(parsed.virtualrouterMode).toBe('v2');
+    expect(writes.has('/tmp/.routecodex/provider/openai/config.v2.json')).toBe(false);
+  });
 });
 
 describe('init-config', () => {

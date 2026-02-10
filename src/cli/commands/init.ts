@@ -36,6 +36,8 @@ type ProviderV2Payload = {
   provider: UnknownRecord;
 };
 
+type DuplicateProviderResolution = 'keep' | 'overwrite' | 'merge';
+
 type PromptLike = (question: string) => Promise<string>;
 
 type ConfigState =
@@ -209,6 +211,89 @@ function inspectConfigState(fsImpl: typeof fs, configPath: string): ConfigState 
 function ensureDir(fsImpl: typeof fs, dirPath: string): void {
   if (!fsImpl.existsSync(dirPath)) {
     fsImpl.mkdirSync(dirPath, { recursive: true });
+  }
+}
+
+function mergeRecordsPreferExisting(baseFromV1: UnknownRecord, existing: UnknownRecord): UnknownRecord {
+  const result: UnknownRecord = { ...baseFromV1 };
+  for (const [key, existingValue] of Object.entries(existing)) {
+    const baseValue = result[key];
+    if (Array.isArray(existingValue)) {
+      result[key] = existingValue.length ? existingValue : baseValue;
+      continue;
+    }
+    if (isRecord(existingValue) && isRecord(baseValue)) {
+      result[key] = mergeRecordsPreferExisting(baseValue, existingValue);
+      continue;
+    }
+    result[key] = existingValue;
+  }
+  return result;
+}
+
+function readProviderV2Payload(
+  fsImpl: typeof fs,
+  filePath: string
+): ProviderV2Payload | null {
+  try {
+    if (!fsImpl.existsSync(filePath)) {
+      return null;
+    }
+    const raw = fsImpl.readFileSync(filePath, 'utf8');
+    const parsed = raw.trim() ? JSON.parse(raw) : {};
+    if (!isRecord(parsed)) {
+      return null;
+    }
+    const providerIdRaw = parsed.providerId;
+    const providerNode = parsed.provider;
+    if (typeof providerIdRaw !== 'string' || !providerIdRaw.trim() || !isRecord(providerNode)) {
+      return null;
+    }
+    const versionRaw = parsed.version;
+    const version = typeof versionRaw === 'string' && versionRaw.trim() ? versionRaw.trim() : '2.0.0';
+    return {
+      version,
+      providerId: providerIdRaw.trim(),
+      provider: providerNode
+    };
+  } catch {
+    return null;
+  }
+}
+
+function backupFileBestEffort(fsImpl: typeof fs, filePath: string): string | null {
+  try {
+    if (!fsImpl.existsSync(filePath)) {
+      return null;
+    }
+    const backupPath = computeBackupPath(fsImpl, filePath);
+    fsImpl.writeFileSync(backupPath, fsImpl.readFileSync(filePath, 'utf8'), 'utf8');
+    return backupPath;
+  } catch {
+    return null;
+  }
+}
+
+async function promptDuplicateProviderResolution(
+  prompt: PromptLike,
+  providerId: string
+): Promise<DuplicateProviderResolution> {
+  while (true) {
+    const answer = (await prompt(
+      `Provider "${providerId}" already exists in v2 provider root. Choose: (k)eep / (o)verwrite / (m)erge (default=k)\n> `
+    ))
+      .trim()
+      .toLowerCase();
+
+    if (!answer || answer === 'k' || answer === 'keep') {
+      return 'keep';
+    }
+    if (answer === 'o' || answer === 'overwrite') {
+      return 'overwrite';
+    }
+    if (answer === 'm' || answer === 'merge') {
+      return 'merge';
+    }
   }
 }
 
@@ -519,8 +604,21 @@ async function migrateV1ToV2(args: {
   providerRoot: string;
   v1Config: UnknownRecord;
   spinner: Spinner;
+  logger: LoggerLike;
+  prompt?: PromptLike;
+  forceOverwriteProviders?: boolean;
 }): Promise<{ convertedProviders: string[]; backupPath: string | null }> {
-  const { fsImpl, pathImpl, configPath, providerRoot, v1Config, spinner } = args;
+  const {
+    fsImpl,
+    pathImpl,
+    configPath,
+    providerRoot,
+    v1Config,
+    spinner,
+    logger,
+    prompt,
+    forceOverwriteProviders
+  } = args;
   const providers = readProvidersFromV1(v1Config);
   const providerEntries = Object.entries(providers);
   if (!providerEntries.length) {
@@ -528,8 +626,48 @@ async function migrateV1ToV2(args: {
   }
 
   ensureDir(fsImpl, providerRoot);
+
+  const resolutions = new Map<string, DuplicateProviderResolution>();
+  for (const [providerId] of providerEntries) {
+    const v2Path = getProviderV2Path(pathImpl, providerRoot, providerId);
+    if (!fsImpl.existsSync(v2Path)) {
+      continue;
+    }
+    if (forceOverwriteProviders) {
+      resolutions.set(providerId, 'overwrite');
+      continue;
+    }
+    if (prompt) {
+      resolutions.set(providerId, await promptDuplicateProviderResolution(prompt, providerId));
+      continue;
+    }
+    resolutions.set(providerId, 'keep');
+    logger.info(`Provider ${providerId} already exists; keeping existing config.v2.json (non-interactive mode)`);
+  }
+
   const convertedProviders: string[] = [];
   for (const [providerId, providerNode] of providerEntries) {
+    const resolution = resolutions.get(providerId) ?? 'overwrite';
+    if (resolution === 'keep') {
+      continue;
+    }
+
+    const v2Path = getProviderV2Path(pathImpl, providerRoot, providerId);
+    if (resolution === 'merge') {
+      const existingPayload = readProviderV2Payload(fsImpl, v2Path);
+      if (existingPayload) {
+        backupFileBestEffort(fsImpl, v2Path);
+        const mergedProvider = mergeRecordsPreferExisting(providerNode, existingPayload.provider);
+        writeProviderV2(fsImpl, pathImpl, providerRoot, providerId, mergedProvider);
+        convertedProviders.push(providerId);
+        continue;
+      }
+      // fall through to overwrite when existing payload cannot be parsed.
+    }
+
+    if (fsImpl.existsSync(v2Path)) {
+      backupFileBestEffort(fsImpl, v2Path);
+    }
     writeProviderV2(fsImpl, pathImpl, providerRoot, providerId, providerNode);
     convertedProviders.push(providerId);
   }
@@ -761,6 +899,22 @@ Examples:
     .action(async (options: InitCommandOptions) => {
       const spinner = await ctx.createSpinner('Initializing configuration...');
 
+      const safeSpinnerStop = () => {
+        try {
+          spinner.stop();
+        } catch {
+          // ignore
+        }
+      };
+
+      const safeSpinnerStart = (text: string) => {
+        try {
+          spinner.start(text);
+        } catch {
+          // ignore
+        }
+      };
+
       const configPath = options.config || pathImpl.join(home(), '.routecodex', 'config.json');
       const providerRoot = getProviderRoot(pathImpl, home());
 
@@ -798,6 +952,7 @@ Examples:
               return;
             }
           } else if (promptBundle) {
+            safeSpinnerStop();
             selectedTemplates = await interactiveSelectProviders(promptBundle.prompt, catalog);
           } else {
             spinner.fail('Failed to initialize configuration');
@@ -817,6 +972,7 @@ Examples:
 
           if (!defaultProviderId) {
             if (promptBundle) {
+              safeSpinnerStop();
               defaultProviderId = await interactivePickDefaultProvider(promptBundle.prompt, selectedTemplates);
             } else {
               defaultProviderId = selectedTemplates[0].id;
@@ -832,6 +988,7 @@ Examples:
           let host = defaultHost;
           let port = defaultPort;
           if (promptBundle && options.host === undefined && options.port === undefined) {
+            safeSpinnerStop();
             const hp = await interactiveHostPort(promptBundle.prompt, { host, port });
             host = hp.host;
             port = hp.port;
@@ -839,7 +996,7 @@ Examples:
 
           const baseRouting = buildRouting(defaultTarget);
           const routing = promptBundle
-            ? await interactiveRoutingWizard(promptBundle.prompt, baseRouting, defaultTarget)
+            ? (safeSpinnerStop(), await interactiveRoutingWizard(promptBundle.prompt, baseRouting, defaultTarget))
             : baseRouting;
 
           if (fsImpl.existsSync(configPath) && !options.force) {
@@ -882,6 +1039,8 @@ Examples:
         if (state.kind === 'v1') {
           let doConvert = Boolean(options.force);
           if (promptBundle) {
+            // Avoid spinner interfering with readline prompts.
+            safeSpinnerStop();
             doConvert = await promptYesNo(promptBundle.prompt, 'Detected V1 config. Convert to V2 now?', true);
           }
           if (!doConvert) {
@@ -889,13 +1048,18 @@ Examples:
             return;
           }
 
+          safeSpinnerStart('Converting V1 -> V2...');
+
           const migrated = await migrateV1ToV2({
             fsImpl,
             pathImpl,
             configPath,
             providerRoot,
             v1Config: state.data,
-            spinner
+            spinner,
+            logger: ctx.logger,
+            prompt: promptBundle?.prompt,
+            forceOverwriteProviders: Boolean(options.force)
           });
 
           spinner.succeed(`Converted V1 -> V2: ${configPath}`);
@@ -906,6 +1070,7 @@ Examples:
           ctx.logger.info(`Provider root: ${providerRoot}`);
 
           if (promptBundle) {
+            safeSpinnerStop();
             const maintainNow = await promptYesNo(promptBundle.prompt, 'Open V2 maintenance menu now?', true);
             if (maintainNow) {
               const refreshedState = inspectConfigState(fsImpl, configPath);
@@ -934,6 +1099,7 @@ Examples:
             return;
           }
 
+          safeSpinnerStop();
           await runV2MaintenanceMenu({
             prompt: promptBundle.prompt,
             fsImpl,
