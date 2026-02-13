@@ -6,8 +6,10 @@ import { attachProviderRuntimeMetadata } from '../../../../src/providers/core/ru
 
 class RecordingHttpClient {
   public lastHeaders: Record<string, string> | undefined;
+  public lastEndpoint: string | undefined;
 
   async post(endpoint: string, _data?: unknown, headers?: Record<string, string>) {
+    this.lastEndpoint = endpoint;
     this.lastHeaders = headers ? { ...headers } : {};
     return {
       data: { ok: true },
@@ -23,6 +25,7 @@ class RecordingHttpClient {
   }
 
   async get(endpoint: string, headers?: Record<string, string>) {
+    this.lastEndpoint = endpoint;
     return {
       data: {},
       status: 200,
@@ -331,5 +334,22 @@ describe('HttpTransportProvider header propagation', () => {
       .digest('hex');
 
     expect(headers['x-iflow-signature']).toBe(expected);
+  });
+
+  test('prefers first absolute baseUrl when runtime profile baseUrl is malformed', async () => {
+    const provider = new TestHttpTransportProvider(config, deps);
+    await provider.initialize();
+    provider.setRuntimeProfile({
+      runtimeKey: 'bad.runtime',
+      providerId: 'crs.key1',
+      providerType: 'responses',
+      providerKey: 'crs.key1.gpt-5.1-codex',
+      baseUrl: '/v1beta/models:generateContent/v1beta/models:generateContent',
+      endpoint: '/responses'
+    } as any);
+
+    await executeProviderRequest(provider, { accept: 'application/json' });
+    const client = (provider as unknown as { httpClient: RecordingHttpClient }).httpClient;
+    expect(client.lastEndpoint).toBe('https://example.invalid/openai/responses');
   });
 });

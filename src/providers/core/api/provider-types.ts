@@ -10,6 +10,7 @@ import type { OpenAIStandardConfig } from './provider-config.js';
 import type { ProviderHooks } from '../config/provider-hooks.js';
 import type { TargetMetadata } from '../../../modules/pipeline/orchestrator/pipeline-context.js';
 import type { ProviderRuntimeMetadata } from '../runtime/provider-runtime-metadata.js';
+import type { DeepSeekProviderRuntimeOptions } from '../contracts/deepseek-provider-contract.js';
 
 // Re-export ProviderHooks for external use
 export type { ProviderHooks } from '../config/provider-hooks.js';
@@ -107,6 +108,10 @@ export interface ProviderRuntimeAuth {
   refreshUrl?: string;
   oauthProviderId?: string;
   rawType?: string;
+  mobile?: string;
+  password?: string;
+  accountFile?: string;
+  accountAlias?: string;
 }
 
 export interface ProviderRuntimeProfile {
@@ -153,6 +158,7 @@ export interface ProviderRuntimeProfile {
     streaming?: 'auto' | 'always' | 'never';
     instructionsMode?: 'default' | 'inline';
   };
+  deepseek?: Partial<DeepSeekProviderRuntimeOptions>;
 }
 
 /**

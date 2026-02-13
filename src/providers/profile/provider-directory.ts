@@ -7,6 +7,7 @@ const KNOWN_FAMILIES = new Set([
   'gemini',
   'gemini-cli',
   'iflow',
+  'deepseek',
   'qwen',
   'glm',
   'lmstudio',

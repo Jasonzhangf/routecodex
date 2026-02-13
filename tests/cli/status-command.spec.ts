@@ -29,7 +29,8 @@ describe('cli status command', () => {
         ({
           ok: true,
           json: async () => ({ status: 'healthy' })
-        }) as any) as any
+        }) as any) as any,
+      listManagedZombieChildren: () => []
     });
 
     await program.parseAsync(['node', 'routecodex', 'status'], { from: 'node' });
@@ -70,5 +71,39 @@ describe('cli status command', () => {
     expect(parsed.host).toBe('127.0.0.1');
     expect(parsed.port).toBe(5520);
   });
-});
 
+  it('warns when managed zombie children are detected', async () => {
+    const warn: string[] = [];
+    const success: string[] = [];
+
+    const program = new Command();
+    createStatusCommand(program, {
+      logger: {
+        info: () => {},
+        warning: (msg) => warn.push(msg),
+        success: (msg) => success.push(msg),
+        error: () => {}
+      },
+      log: () => {},
+      loadConfig: async () =>
+        ({
+          configPath: '/tmp/config.json',
+          userConfig: { httpserver: { host: '127.0.0.1', port: 5520 } },
+          providerProfiles: {} as any
+        }) as any,
+      fetch: (async () =>
+        ({
+          ok: true,
+          json: async () => ({ status: 'healthy' })
+        }) as any) as any,
+      listManagedZombieChildren: () => [
+        { pid: 1234, ppid: 777, stat: 'Z+', command: 'child <defunct>' }
+      ]
+    });
+
+    await program.parseAsync(['node', 'routecodex', 'status'], { from: 'node' });
+
+    expect(success.join('\n')).toContain('Server is running on 127.0.0.1:5520');
+    expect(warn.join('\n')).toContain('Detected 1 zombie child process(es) under managed RouteCodex parent(s): 1234(ppid=777)');
+  });
+});

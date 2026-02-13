@@ -14,7 +14,6 @@ import { fileURLToPath } from 'url';
 import { DEFAULT_CONFIG } from './constants/index.js';
 import { buildInfo } from './build-info.js';
 import { ensureLocalTokenPortalEnv } from './token-portal/local-token-portal.js';
-import { parseNetstatListeningPids } from './utils/windows-netstat.js';
 import {
   ensurePortAvailableImpl,
   findListeningPidsImpl,
@@ -34,6 +33,9 @@ import { registerCodeCommand } from './cli/register/code-command.js';
 import { registerClaudeCommand } from './cli/register/claude-command.js';
 import { registerCodexCommand } from './cli/register/codex-command.js';
 import { registerCamoufoxCommand } from './cli/register/camoufox-command.js';
+import { registerTmuxInjectCommand } from './cli/register/tmux-inject-command.js';
+import { registerClockAdminCommand } from './cli/register/clock-admin-command.js';
+import { listManagedServerZombieChildrenByPort } from './utils/managed-server-pids.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -264,6 +266,29 @@ const launcherContext = {
 registerClaudeCommand(program, launcherContext);
 registerCodexCommand(program, launcherContext);
 
+// External tmux injection command
+registerTmuxInjectCommand(program, {
+  isDevPackage: IS_DEV_PACKAGE,
+  defaultDevPort: DEFAULT_DEV_PORT,
+  logger,
+  log: (line) => console.log(line),
+  loadConfig: (explicitPath?: string) => loadRouteCodexConfig(explicitPath),
+  fetch,
+  env: process.env,
+  exit: (code) => process.exit(code)
+});
+
+registerClockAdminCommand(program, {
+  isDevPackage: IS_DEV_PACKAGE,
+  defaultDevPort: DEFAULT_DEV_PORT,
+  logger,
+  log: (line) => console.log(line),
+  loadConfig: (explicitPath?: string) => loadRouteCodexConfig(explicitPath),
+  fetch,
+  env: process.env,
+  exit: (code) => process.exit(code)
+});
+
 // Init command - guided config generation
 registerInitCommand(program, {
   logger,
@@ -327,6 +352,7 @@ registerStartCommand(program, {
   findListeningPids,
   killPidBestEffort,
   getModulesConfigPath,
+  resolveCliEntryPath: () => path.resolve(__dirname, 'cli.js'),
   resolveServerEntryPath: () => path.resolve(__dirname, 'index.js'),
   spawn: (cmd: string, args: string[], opts: SpawnOptions) => spawn(cmd, args, opts),
   fetch,
@@ -346,7 +372,8 @@ registerStatusConfigCommands(program, {
     logger,
     log: (line) => console.log(line),
     loadConfig: () => loadRouteCodexConfig(),
-    fetch
+    fetch,
+    listManagedZombieChildren: (port: number) => listManagedServerZombieChildrenByPort(port)
   }
 });
 
@@ -410,10 +437,9 @@ async function ensurePortAvailable(port: number, parentSpinner: Spinner, opts: {
 function findListeningPids(port: number): number[] {
   return findListeningPidsImpl({
     port,
-    isWindows: IS_WINDOWS,
     spawnSyncImpl: spawnSync,
     logger,
-    parseNetstatListeningPids
+    processKill: process.kill.bind(process)
   });
 }
 

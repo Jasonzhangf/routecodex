@@ -1,6 +1,10 @@
 import type { Application, Request, Response } from 'express';
 import express from 'express';
 import type { ServerConfigV2 } from './types.js';
+import {
+  extractClockClientDaemonIdFromApiKey,
+  matchesExpectedClientApiKey
+} from '../../../utils/clock-client-token.js';
 
 function isLocalhostRequest(req: Request): boolean {
   const ip = req.socket?.remoteAddress || '';
@@ -46,6 +50,19 @@ export function extractApiKeyFromRequest(req: Request): string {
   }
   const match = auth.match(/^(?:Bearer|ApiKey)\s+(.+)$/i);
   return match ? normalizeString(match[1]) : '';
+}
+
+function attachClockDaemonHint(req: Request, daemonId: string | undefined): void {
+  if (!daemonId) {
+    return;
+  }
+  try {
+    const headers = req.headers as Record<string, unknown>;
+    headers['x-routecodex-clock-daemon-id'] = daemonId;
+    headers['x-routecodex-daemon-id'] = daemonId;
+  } catch {
+    // best-effort only
+  }
 }
 
 export function registerApiKeyAuthMiddleware(app: Application, config: ServerConfigV2): void {
@@ -103,7 +120,8 @@ export function registerApiKeyAuthMiddleware(app: Application, config: ServerCon
     }
 
     const provided = extractApiKeyFromRequest(req);
-    if (provided && provided === expectedKey) {
+    if (provided && matchesExpectedClientApiKey(provided, expectedKey)) {
+      attachClockDaemonHint(req, extractClockClientDaemonIdFromApiKey(provided));
       next();
       return;
     }

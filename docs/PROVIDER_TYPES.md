@@ -31,9 +31,11 @@
 }
 ```
 
-### OpenAI-compatible（例如 GLM/Qwen/Kimi 等）
+### OpenAI-compatible（例如 GLM/Qwen/Kimi/DeepSeek Web 等）
 
 仍然建议 `type: "openai"`，并通过 `compatibilityProfile` 做最小字段适配：
+
+- DeepSeek Web 账号模式建议：`type: "openai"` + `compatibilityProfile: "chat:deepseek-web"` + `auth.type = "deepseek-account"`。
 
 ```jsonc
 {

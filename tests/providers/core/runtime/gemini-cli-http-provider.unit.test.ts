@@ -29,6 +29,21 @@ function stableSid(raw: string): string {
 }
 
 describe('GeminiCLIHttpProvider basic behaviour', () => {
+  test('falls back to service default baseUrl when configured baseUrl is malformed endpoint path', () => {
+    const malformedConfig: OpenAIStandardConfig = {
+      ...baseConfig,
+      config: {
+        ...(baseConfig.config as any),
+        baseUrl: '/v1beta/models:generateContent'
+      }
+    } as unknown as OpenAIStandardConfig;
+
+    const provider = new GeminiCLIHttpProvider(malformedConfig, emptyDeps) as any;
+    const resolvedBaseUrl = provider.getEffectiveBaseUrl();
+
+    expect(resolvedBaseUrl).toBe('https://cloudcode-pa.googleapis.com');
+  });
+
   test('constructs and exposes service profile from config-core', () => {
     const provider = new GeminiCLIHttpProvider(baseConfig, emptyDeps);
 

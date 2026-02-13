@@ -3,6 +3,8 @@ import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import express from 'express';
 
+import { encodeClockClientApiKey } from '../../../src/utils/clock-client-token.js';
+
 type MiddlewareMod = typeof import('../../../src/server/runtime/http-server/middleware.js');
 
 async function startAppWithApiKey(apikey: string): Promise<{ baseUrl: string; close: () => Promise<void> }> {
@@ -11,8 +13,12 @@ async function startAppWithApiKey(apikey: string): Promise<{ baseUrl: string; cl
   const app = express();
   registerApiKeyAuthMiddleware(app, { server: { apikey } } as any);
 
-  app.get('/hello', (_req, res) => {
-    res.status(200).json({ ok: true });
+  app.get('/hello', (req, res) => {
+    const daemonIdHeader =
+      typeof req.headers['x-routecodex-clock-daemon-id'] === 'string'
+        ? req.headers['x-routecodex-clock-daemon-id']
+        : undefined;
+    res.status(200).json({ ok: true, daemonIdHeader: daemonIdHeader || null });
   });
 
   const server = http.createServer(app);
@@ -45,6 +51,23 @@ describe('httpserver apikey env reference', () => {
 
       const ok = await fetch(`${baseUrl}/hello`, { headers: { 'x-api-key': 'dummy-http-apikey' } });
       expect(ok.status).toBe(200);
+      const body = await ok.json();
+      expect(body?.daemonIdHeader).toBeNull();
+    } finally {
+      await close();
+      delete process.env.TEST_HTTP_APIKEY;
+    }
+  });
+
+  it('accepts daemon-suffixed apikey and exposes daemon hint header', async () => {
+    process.env.TEST_HTTP_APIKEY = 'dummy-http-apikey';
+    const { baseUrl, close } = await startAppWithApiKey('${TEST_HTTP_APIKEY}');
+    try {
+      const encoded = encodeClockClientApiKey('dummy-http-apikey', 'clockd_bind_1');
+      const ok = await fetch(`${baseUrl}/hello`, { headers: { authorization: `Bearer ${encoded}` } });
+      expect(ok.status).toBe(200);
+      const body = await ok.json();
+      expect(body?.daemonIdHeader).toBe('clockd_bind_1');
     } finally {
       await close();
       delete process.env.TEST_HTTP_APIKEY;
@@ -64,4 +87,3 @@ describe('httpserver apikey env reference', () => {
     }
   });
 });
-

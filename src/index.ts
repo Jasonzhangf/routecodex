@@ -6,6 +6,7 @@
 import { LOCAL_HOSTS, HTTP_PROTOCOLS, API_PATHS } from './constants/index.js';
 import fs from 'fs/promises';
 import fsSync from 'fs';
+import fsAsync from 'fs/promises';
 import path from 'path';
 import { homedir } from 'os';
 import net from 'net';
@@ -14,16 +15,88 @@ import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { buildInfo } from './build-info.js';
 import { isDirectExecution } from './utils/is-direct-execution.js';
-import { parseNetstatListeningPids } from './utils/windows-netstat.js';
 import { reportRouteError } from './error-handling/route-error-hub.js';
 import { flushProcessLifecycleLogQueue, logProcessLifecycle, logProcessLifecycleSync } from './utils/process-lifecycle-logger.js';
 import { getShutdownCallerContext } from './utils/shutdown-caller-context.js';
+import { listManagedServerPidsByPort } from './utils/managed-server-pids.js';
+import {
+  inferUngracefulPreviousExit,
+  resolveRuntimeLifecyclePath,
+  safeMarkRuntimeExit,
+  safeReadRuntimeLifecycle,
+  safeWriteRuntimeLifecycle,
+  type RuntimeLifecycleState
+} from './utils/runtime-exit-forensics.js';
 import { resolveRouteCodexConfigPath } from './config/config-paths.js';
 import { loadRouteCodexConfig } from './config/routecodex-config-loader.js';
 import type { RouteCodexHttpServer } from './server/runtime/http-server.js';
 
 type NodeGlobalWithRequire = typeof globalThis & { require?: NodeJS.Require };
 type UnknownRecord = Record<string, unknown>;
+let runtimeMinimalLogFilterInstalled = false;
+
+function resolveBoolFromEnv(value: string | undefined, fallback: boolean): boolean {
+  if (!value) {
+    return fallback;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on') {
+    return true;
+  }
+  if (normalized === '0' || normalized === 'false' || normalized === 'no' || normalized === 'off') {
+    return false;
+  }
+  return fallback;
+}
+
+function isMinimalRuntimeLogEnabled(): boolean {
+  return resolveBoolFromEnv(
+    process.env.ROUTECODEX_MINIMAL_RUNTIME_LOGS ?? process.env.RCC_MINIMAL_RUNTIME_LOGS,
+    true
+  );
+}
+
+function stringifyLogArg(value: unknown): string {
+  if (typeof value === 'string') {
+    return value;
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function shouldSuppressRuntimeLogLine(text: string): boolean {
+  if (!text) {
+    return false;
+  }
+  return (
+    text.includes('[servertool][') ||
+    text.includes('[virtual-router]')
+  );
+}
+
+function installMinimalRuntimeLogFilter(): void {
+  if (runtimeMinimalLogFilterInstalled || !isMinimalRuntimeLogEnabled()) {
+    return;
+  }
+  runtimeMinimalLogFilterInstalled = true;
+
+  const originalLog = console.log.bind(console);
+  const originalInfo = console.info.bind(console);
+
+  const filter = (original: (...args: unknown[]) => void) => (...args: unknown[]) => {
+    const line = args.map(stringifyLogArg).join(' ');
+    if (shouldSuppressRuntimeLogLine(line)) {
+      return;
+    }
+    original(...args);
+  };
+
+  console.log = filter(originalLog) as typeof console.log;
+  console.info = filter(originalInfo) as typeof console.info;
+}
 
 // Polyfill CommonJS require for ESM runtime to satisfy dependencies that call require()
 let moduleRequire: NodeJS.Require | null = null;
@@ -97,8 +170,36 @@ type ShutdownReason =
 
 let lastShutdownReason: ShutdownReason = { kind: 'unknown' };
 let restartInProgress = false;
+let currentRuntimeLifecyclePath: string | null = null;
+
+function setCurrentRuntimeLifecyclePath(value: string | null): void {
+  currentRuntimeLifecyclePath = typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function createRuntimeRunId(): string {
+  try {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
+  } catch {
+    // ignore
+  }
+  return `run_${Date.now()}_${Math.random().toString(16).slice(2, 10)}`;
+}
 
 function recordShutdownReason(reason: ShutdownReason): void {
+  if (reason.kind === 'signal' && reason.signal === 'SIGKILL') {
+    logProcessLifecycleSync({
+      event: 'self_termination',
+      source: 'index.recordShutdownReason',
+      details: {
+        reason: 'self_kill_signal',
+        signal: 'SIGKILL',
+        pid: process.pid,
+        caller: resolveSignalCaller('SIGKILL')
+      }
+    });
+  }
   if (lastShutdownReason.kind === 'unknown') {
     lastShutdownReason = reason;
   }
@@ -116,6 +217,21 @@ process.on('exit', (code) => {
   } else if (reason.kind === 'uncaughtException' || reason.kind === 'startupError' || reason.kind === 'stopError') {
     payload.message = reason.message;
   }
+
+  if (currentRuntimeLifecyclePath) {
+    void safeMarkRuntimeExit(currentRuntimeLifecyclePath, {
+      kind: reason.kind,
+      code: typeof code === 'number' ? code : null,
+      ...(reason.kind === 'signal' ? { signal: reason.signal } : {}),
+      ...(reason.kind === 'uncaughtException' || reason.kind === 'startupError' || reason.kind === 'stopError'
+        ? { message: reason.message }
+        : {}),
+      recordedAt: new Date().toISOString()
+    }).catch(() => {
+      // ignore cleanup errors
+    });
+  }
+
   logProcessLifecycleSync({
     event: 'process_exit',
     source: 'index.process.on.exit',
@@ -288,6 +404,8 @@ class RouteCodexApp {
    */
   async start(): Promise<void> {
     try {
+      installMinimalRuntimeLogFilter();
+
       console.log('🚀 Starting RouteCodex server...');
       console.log(`📁 Modules configuration file: ${this.modulesConfigPath}`);
 
@@ -406,6 +524,7 @@ class RouteCodexApp {
         }
         return value;
       };
+      this.prepareRuntimeExitForensics(bindPort);
       process.env.ROUTECODEX_PORT = String(bindPort);
       process.env.RCC_PORT = String(bindPort);
       process.env.ROUTECODEX_HTTP_HOST = bindHost;
@@ -416,7 +535,7 @@ class RouteCodexApp {
         process.env.ROUTECODEX_TOKEN_PORTAL_BASE = portalBaseUrl;
       }
 
-      // 5. 启动 HTTP Server 监听端口（若端口被占用，先尝试优雅释放）
+    // 5. 启动 HTTP Server 监听端口（若端口被占用，先尝试优雅释放）
       //    必须在 provider OAuth 初始化之前完成监听，否则本地 token portal 无法访问。
       // Ensure the port is available before continuing. Attempt graceful shutdown first.
       await ensurePortAvailable(port, { attemptGraceful: true });
@@ -441,6 +560,17 @@ class RouteCodexApp {
 
       // 6. 在服务已监听的前提下初始化运行时（包括 Hub Pipeline 和 Provider OAuth）
       await this.httpServer.initializeWithUserConfig(userConfig, { providerProfiles });
+
+      // 异步写入 PID 文件，不阻塞启动流程
+      void (async () => {
+        try {
+          const routeCodexHome = path.join(homedir(), '.routecodex');
+          await fs.mkdir(routeCodexHome, { recursive: true });
+          await fs.writeFile(path.join(routeCodexHome, `server-${bindPort}.pid`), String(process.pid), 'utf8');
+        } catch {
+          // ignore pid file write failures
+        }
+      })();
 
       this._isRunning = true;
 
@@ -509,6 +639,55 @@ class RouteCodexApp {
       await reportCliError('SERVER_STOP_FAILED', 'Failed to stop RouteCodex server', error, 'high');
       console.error('❌ Failed to stop RouteCodex server:', error);
       process.exit(1);
+    }
+  }
+
+  private prepareRuntimeExitForensics(port: number): void {
+    try {
+      const lifecyclePath = resolveRuntimeLifecyclePath(port);
+      const previous = safeReadRuntimeLifecycle(lifecyclePath);
+      const inference = inferUngracefulPreviousExit({
+        previous,
+        currentPid: process.pid
+      });
+
+      if (inference.shouldReport) {
+        logProcessLifecycle({
+          event: 'previous_ungraceful_exit_detected',
+          source: 'index.start',
+          details: {
+            port,
+            markerPath: lifecyclePath,
+            reason: inference.reason,
+            previousPid: previous?.pid ?? null,
+            previousRunId: previous?.runId ?? null,
+            previousStartedAt: previous?.startedAt ?? null,
+            inference: 'likely_external_kill_or_forced_termination'
+          }
+        });
+        console.warn(
+          '[routecodex:forensics] detected previous ungraceful exit on port=' + String(port) +
+          ' (pid=' + String(previous?.pid ?? 'unknown') + ', runId=' + String(previous?.runId ?? 'unknown') + ')'
+        );
+      }
+
+      const currentState: RuntimeLifecycleState = {
+        runId: createRuntimeRunId(),
+        pid: process.pid,
+        port,
+        startedAt: new Date().toISOString(),
+        buildVersion: buildInfo.version,
+        buildMode: buildInfo.mode
+      };
+      void safeWriteRuntimeLifecycle(lifecyclePath, currentState).then((ok) => {
+        if (ok) {
+          setCurrentRuntimeLifecyclePath(lifecyclePath);
+        }
+      }).catch(() => {
+        // forensics path is best-effort and must never block startup
+      });
+    } catch {
+      // forensics path is best-effort and must never block startup
     }
   }
 
@@ -683,20 +862,31 @@ async function ensurePortAvailable(port: number, opts: { attemptGraceful?: boole
     }
   }
 
-  // Fall back to SIGTERM/SIGKILL processes listening on the port (avoid self-kill by probing first)
-  const pids = await listPidsOnPort(port);
+  // Fall back to SIGTERM/SIGKILL on managed RouteCodex pid files only.
+  const pids = listManagedServerPidsByPort(port).map(String);
   if (!pids.length) {
+    const occupied = !(await canBind(port));
+    if (occupied) {
+      logProcessLifecycle({
+        event: 'port_cleanup',
+        source: 'index.ensurePortAvailable',
+        details: { port, result: 'occupied_unmanaged' }
+      });
+      throw new Error(
+        `Port ${port} is occupied by unmanaged process; refusing blind kill. Stop process manually or call /shutdown if it is RouteCodex.`
+      );
+    }
     logProcessLifecycle({
       event: 'port_cleanup',
       source: 'index.ensurePortAvailable',
-      details: { port, result: 'no_listener' }
+      details: { port, result: 'no_managed_pid' }
     });
     return;
   }
   logProcessLifecycle({
     event: 'port_cleanup',
     source: 'index.ensurePortAvailable',
-    details: { port, result: 'listener_found', pids }
+    details: { port, result: 'managed_pid_found', pids }
   });
   for (const pid of pids) {
     killPidBestEffort(Number(pid), { force: false });
@@ -707,7 +897,7 @@ async function ensurePortAvailable(port: number, opts: { attemptGraceful?: boole
       return;
     }
   }
-  const remain = await listPidsOnPort(port);
+  const remain = listManagedServerPidsByPort(port).map(String);
   if (remain.length) {
     logProcessLifecycle({
       event: 'port_cleanup',
@@ -723,6 +913,20 @@ async function ensurePortAvailable(port: number, opts: { attemptGraceful?: boole
 
 function killPidBestEffort(pid: number, opts: { force: boolean }): void {
   if (!Number.isFinite(pid) || pid <= 0) {
+    return;
+  }
+  if (pid === process.pid) {
+    logProcessLifecycle({
+      event: 'kill_attempt',
+      source: 'index.ensurePortAvailable',
+      details: {
+        targetPid: pid,
+        signal: 'SKIP_SELF',
+        result: 'skipped',
+        reason: 'self_kill_guard',
+        caller: resolveSignalCaller('SELF_GUARD')
+      }
+    });
     return;
   }
   const signal = opts.force ? 'SIGKILL' : 'SIGTERM';
@@ -782,29 +986,6 @@ async function canBind(port: number): Promise<boolean> {
         s.close(() => resolve(true));
       });
     } catch { resolve(false); }
-  });
-}
-
-async function listPidsOnPort(port: number): Promise<string[]> {
-  if (process.platform === 'win32') {
-    try {
-      const result = spawnSync('netstat', ['-ano', '-p', 'tcp'], { encoding: 'utf8' });
-      if (result.error) {
-        return [];
-      }
-      return parseNetstatListeningPids(result.stdout || '', port).map(String);
-    } catch {
-      return [];
-    }
-  }
-  return await new Promise<string[]>(resolve => {
-    try {
-      const ps = spawn('lsof', ['-ti', `:${port}`]);
-      let out = '';
-      ps.stdout.on('data', d => (out += String(d)));
-      ps.on('close', () => resolve(out.split(/\s+/).map(s => s.trim()).filter(Boolean)));
-      ps.on('error', () => resolve([]));
-    } catch { resolve([]); }
   });
 }
 

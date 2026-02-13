@@ -811,6 +811,228 @@ export async function bootstrapVirtualRouterConfig(input: AnyRecord): Promise<An
   return fn(input);
 }
 
+type ClockTaskStoreModule = {
+  resolveClockConfig?: (input: unknown) => unknown | null;
+  reserveDueTasksForRequest?: (args: {
+    reservationId: string;
+    sessionId: string;
+    config: unknown;
+    requestId?: string;
+  }) => Promise<{ reservation: unknown | null; injectText?: string }>;
+  commitClockReservation?: (reservation: unknown, config: unknown) => Promise<void>;
+  listClockSessionIds?: () => Promise<string[]>;
+  listClockTasks?: (sessionId: string, config: unknown) => Promise<unknown[]>;
+  scheduleClockTasks?: (sessionId: string, items: unknown[], config: unknown) => Promise<unknown[]>;
+  updateClockTask?: (sessionId: string, taskId: string, patch: Record<string, unknown>, config: unknown) => Promise<unknown | null>;
+  cancelClockTask?: (sessionId: string, taskId: string, config: unknown) => Promise<boolean>;
+  clearClockTasks?: (sessionId: string, config: unknown) => Promise<number>;
+};
+
+type ClockTaskStoreLegacyTasksModule = Pick<
+  ClockTaskStoreModule,
+  | 'reserveDueTasksForRequest'
+  | 'commitClockReservation'
+  | 'listClockSessionIds'
+  | 'listClockTasks'
+  | 'scheduleClockTasks'
+  | 'updateClockTask'
+  | 'cancelClockTask'
+  | 'clearClockTasks'
+>;
+
+type ClockTaskStoreLegacyConfigModule = Pick<ClockTaskStoreModule, 'resolveClockConfig'>;
+
+let cachedClockTaskStoreModule: ClockTaskStoreModule | null | undefined = undefined;
+let clockTaskStoreLastLoadAttemptAtMs = 0;
+let hasLoggedClockTaskStoreLoadFailure = false;
+
+const CLOCK_TASK_STORE_RETRY_INTERVAL_MS = 30_000;
+
+async function tryLoadClockTaskStoreModule(): Promise<ClockTaskStoreModule | null> {
+  try {
+    return await importCoreDist<ClockTaskStoreModule>('servertool/clock/task-store');
+  } catch {
+    // fallback to legacy split exports
+  }
+
+  try {
+    const [tasksModule, configModule] = await Promise.all([
+      importCoreDist<ClockTaskStoreLegacyTasksModule>('servertool/clock/tasks'),
+      importCoreDist<ClockTaskStoreLegacyConfigModule>('servertool/clock/config')
+    ]);
+    return {
+      ...tasksModule,
+      resolveClockConfig: configModule.resolveClockConfig
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function getClockTaskStoreModuleSafe(): Promise<ClockTaskStoreModule | null> {
+  if (cachedClockTaskStoreModule) {
+    return cachedClockTaskStoreModule;
+  }
+
+  const now = Date.now();
+  if (
+    cachedClockTaskStoreModule === null &&
+    now - clockTaskStoreLastLoadAttemptAtMs < CLOCK_TASK_STORE_RETRY_INTERVAL_MS
+  ) {
+    return null;
+  }
+
+  clockTaskStoreLastLoadAttemptAtMs = now;
+  const loaded = await tryLoadClockTaskStoreModule();
+  if (loaded) {
+    cachedClockTaskStoreModule = loaded;
+    hasLoggedClockTaskStoreLoadFailure = false;
+    return loaded;
+  }
+
+  cachedClockTaskStoreModule = null;
+  if (!hasLoggedClockTaskStoreLoadFailure) {
+    hasLoggedClockTaskStoreLoadFailure = true;
+    console.warn(
+      '[llmswitch-bridge] clock task-store module unavailable; clock daemon inject/tasks are temporarily disabled. Please ensure @jsonstudio/llms dist is built and installed.'
+    );
+  }
+
+  return null;
+}
+
+export async function resolveClockConfigSnapshot(input: unknown): Promise<unknown | null> {
+  const mod = await getClockTaskStoreModuleSafe();
+  const fn = mod?.resolveClockConfig;
+  if (typeof fn !== 'function') {
+    return null;
+  }
+  try {
+    return fn(input) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function reserveClockDueTasks(args: {
+  reservationId: string;
+  sessionId: string;
+  config: unknown;
+  requestId?: string;
+}): Promise<{ reservation: unknown | null; injectText?: string }> {
+  const mod = await getClockTaskStoreModuleSafe();
+  const fn = mod?.reserveDueTasksForRequest;
+  if (typeof fn !== 'function') {
+    return { reservation: null };
+  }
+  try {
+    return await fn(args);
+  } catch {
+    return { reservation: null };
+  }
+}
+
+export async function commitClockDueReservation(args: { reservation: unknown; config: unknown }): Promise<void> {
+  const mod = await getClockTaskStoreModuleSafe();
+  const fn = mod?.commitClockReservation;
+  if (typeof fn !== 'function') {
+    return;
+  }
+  try {
+    await fn(args.reservation, args.config);
+  } catch {
+    // best-effort only
+  }
+}
+
+export async function listClockSessionIdsSnapshot(): Promise<string[]> {
+  const mod = await getClockTaskStoreModuleSafe();
+  const fn = mod?.listClockSessionIds;
+  if (typeof fn !== 'function') {
+    return [];
+  }
+  try {
+    const out = await fn();
+    return Array.isArray(out) ? out.filter((item) => typeof item === 'string' && item.trim()).map((item) => item.trim()) : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function listClockTasksSnapshot(args: { sessionId: string; config: unknown }): Promise<unknown[]> {
+  const mod = await getClockTaskStoreModuleSafe();
+  const fn = mod?.listClockTasks;
+  if (typeof fn !== 'function') {
+    return [];
+  }
+  try {
+    const out = await fn(args.sessionId, args.config);
+    return Array.isArray(out) ? out : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function scheduleClockTasksSnapshot(args: { sessionId: string; items: unknown[]; config: unknown }): Promise<unknown[]> {
+  const mod = await getClockTaskStoreModuleSafe();
+  const fn = mod?.scheduleClockTasks;
+  if (typeof fn !== 'function') {
+    return [];
+  }
+  try {
+    const out = await fn(args.sessionId, Array.isArray(args.items) ? args.items : [], args.config);
+    return Array.isArray(out) ? out : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function updateClockTaskSnapshot(args: {
+  sessionId: string;
+  taskId: string;
+  patch: Record<string, unknown>;
+  config: unknown;
+}): Promise<unknown | null> {
+  const mod = await getClockTaskStoreModuleSafe();
+  const fn = mod?.updateClockTask;
+  if (typeof fn !== 'function') {
+    return null;
+  }
+  try {
+    return await fn(args.sessionId, args.taskId, args.patch, args.config);
+  } catch {
+    return null;
+  }
+}
+
+export async function cancelClockTaskSnapshot(args: { sessionId: string; taskId: string; config: unknown }): Promise<boolean> {
+  const mod = await getClockTaskStoreModuleSafe();
+  const fn = mod?.cancelClockTask;
+  if (typeof fn !== 'function') {
+    return false;
+  }
+  try {
+    return Boolean(await fn(args.sessionId, args.taskId, args.config));
+  } catch {
+    return false;
+  }
+}
+
+export async function clearClockTasksSnapshot(args: { sessionId: string; config: unknown }): Promise<number> {
+  const mod = await getClockTaskStoreModuleSafe();
+  const fn = mod?.clearClockTasks;
+  if (typeof fn !== 'function') {
+    return 0;
+  }
+  try {
+    const removed = await fn(args.sessionId, args.config);
+    return Number.isFinite(Number(removed)) ? Math.max(0, Math.floor(Number(removed))) : 0;
+  } catch {
+    return 0;
+  }
+}
+
+
 type HubPipelineModule = {
   HubPipeline?: new (config: AnyRecord) => AnyRecord;
 };

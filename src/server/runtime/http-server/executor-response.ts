@@ -6,6 +6,7 @@ import {
   createSnapshotRecorder as bridgeCreateSnapshotRecorder
 } from '../../../modules/llmswitch/bridge.js';
 import { applyClientConnectionStateToContext } from '../../utils/client-connection-state.js';
+import { getClockClientRegistry, injectClockClientPrompt } from './clock-client-registry.js';
 
 export interface ConvertProviderResponseOptions {
   entryEndpoint?: string;
@@ -46,6 +47,35 @@ function extractClientModelId(
     }
   }
   return undefined;
+}
+
+function normalizeSessionToken(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+function bindClockConversationSession(metadata: Record<string, unknown>): void {
+  const conversationSessionId = normalizeSessionToken(metadata.sessionId);
+  if (!conversationSessionId) {
+    return;
+  }
+
+  const tmuxSessionId = normalizeSessionToken(metadata.tmuxSessionId);
+  const daemonId = normalizeSessionToken(metadata.clockDaemonId)
+    ?? normalizeSessionToken(metadata.clockClientDaemonId);
+
+  try {
+    getClockClientRegistry().bindConversationSession({
+      conversationSessionId,
+      ...(tmuxSessionId ? { tmuxSessionId } : {}),
+      ...(daemonId ? { daemonId } : {})
+    });
+  } catch {
+    // best-effort only
+  }
 }
 
 export async function convertProviderResponseIfNeeded(
@@ -178,6 +208,8 @@ export async function convertProviderResponseIfNeeded(
         stage: 'inbound'
       };
 
+      bindClockConversationSession(nestedMetadata);
+
       const nestedInput: PipelineExecutionInput = {
         entryEndpoint: nestedEntry,
         method: 'POST',
@@ -187,6 +219,29 @@ export async function convertProviderResponseIfNeeded(
         body: reenterOpts.body,
         metadata: nestedMetadata
       };
+
+      try {
+        const requestBody = reenterOpts.body as Record<string, unknown>;
+        const messages = Array.isArray(requestBody.messages) ? (requestBody.messages as unknown[]) : [];
+        const lastUser = [...messages]
+          .reverse()
+          .find((entry) => entry && typeof entry === 'object' && (entry as Record<string, unknown>).role === 'user') as
+          | Record<string, unknown>
+          | undefined;
+        const text = typeof lastUser?.content === 'string' ? String(lastUser.content) : '';
+        if (text.includes('<**clock:{') && text.includes('}**>')) {
+          await injectClockClientPrompt({
+            tmuxSessionId: typeof nestedMetadata.tmuxSessionId === 'string' ? nestedMetadata.tmuxSessionId : undefined,
+            sessionId: typeof nestedMetadata.sessionId === 'string' ? nestedMetadata.sessionId : undefined,
+            text,
+            requestId: reenterOpts.requestId,
+            source: 'servertool.reenter'
+          });
+        }
+      } catch {
+        // best-effort only
+      }
+
       const nestedResult = await deps.executeNested(nestedInput);
       const nestedBody =
         nestedResult.body && typeof nestedResult.body === 'object'

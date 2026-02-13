@@ -21,6 +21,7 @@ import {
 } from '../providers/core/config/camoufox-launcher.js';
 import { loadRouteCodexConfig } from '../config/routecodex-config-loader.js';
 import { ensureAntigravityTokenProjectMetadata } from '../providers/auth/antigravity-userinfo-helper.js';
+import { DEFAULT_TOKEN_DAEMON } from '../constants/index.js';
 
 export interface TokenDaemonOptions {
   intervalMs: number;
@@ -32,12 +33,7 @@ const DEBUG_ENABLED = DEBUG_FLAG === '1' || DEBUG_FLAG === 'true';
 const LOG_FLAG = String(process.env.ROUTECODEX_TOKEN_DAEMON_LOG || '').trim().toLowerCase();
 const LOG_ENABLED = LOG_FLAG === '1' || LOG_FLAG === 'true';
 
-const DEFAULT_INTERVAL_MS = 60_000;
-// 默认行为：在到期前 30 分钟进入自动刷新窗口（对齐 docs/OAUTH.md）。
-const DEFAULT_REFRESH_AHEAD_MINUTES = 30;
-const MIN_REFRESH_INTERVAL_MS = 5 * 60_000;
 const GEMINI_PROVIDER_IDS = new Set(['gemini-cli', 'antigravity']);
-const ANTIGRAVITY_METADATA_ENSURE_INTERVAL_MS = 10 * 60_000;
 const USER_TIMEOUT_PATTERNS = [
   'device authorization timed out',
   'authorization timed out',
@@ -59,7 +55,7 @@ function resolveConfiguredProviders(userConfig: unknown): Set<OAuthProviderId> {
   const cfg = (userConfig ?? {}) as any;
   const vr = (cfg.virtualrouter ?? cfg.virtualRouter ?? cfg.router ?? cfg) as any;
   const providers = vr?.providers;
-  const addIfSupported = (idRaw: unknown, enabledRaw: unknown): void => {
+  const addIfSupported = (idRaw: unknown, enabledRaw: unknown, providerNode?: unknown): void => {
     const id = typeof idRaw === 'string' ? idRaw.trim().toLowerCase() : '';
     if (!id) {
       return;
@@ -72,17 +68,23 @@ function resolveConfiguredProviders(userConfig: unknown): Set<OAuthProviderId> {
     if (match) {
       configured.add(match);
     }
+    const node = providerNode && typeof providerNode === 'object' ? (providerNode as Record<string, unknown>) : null;
+    const authNode = node?.auth && typeof node.auth === 'object' ? (node.auth as Record<string, unknown>) : null;
+    const authType = typeof authNode?.type === 'string' ? authNode.type.trim().toLowerCase() : '';
+    if (authType === 'deepseek-account') {
+      configured.add('deepseek-account');
+    }
   };
   if (Array.isArray(providers)) {
     for (const p of providers) {
-      addIfSupported(p?.id, p?.enabled);
+      addIfSupported(p?.id, p?.enabled, p);
     }
     return configured;
   }
   if (providers && typeof providers === 'object') {
     for (const [key, value] of Object.entries(providers)) {
       const v = value as any;
-      addIfSupported(v?.id ?? key, v?.enabled);
+      addIfSupported(v?.id ?? key, v?.enabled, v);
     }
   }
   return configured;
@@ -118,7 +120,9 @@ export class TokenDaemon {
   }> = new Map();
 
   constructor(options?: Partial<TokenDaemonOptions>) {
-    this.intervalMs = options?.intervalMs && options.intervalMs > 0 ? options.intervalMs : DEFAULT_INTERVAL_MS;
+    this.intervalMs = options?.intervalMs && options.intervalMs > 0
+      ? options.intervalMs
+      : DEFAULT_TOKEN_DAEMON.INTERVAL_MS;
     const envRefreshAhead = Number.parseInt(
       String(
         process.env.ROUTECODEX_TOKEN_REFRESH_AHEAD_MIN ||
@@ -132,7 +136,7 @@ export class TokenDaemon {
     this.refreshAheadMinutes =
       options?.refreshAheadMinutes && options.refreshAheadMinutes > 0
         ? options.refreshAheadMinutes
-        : effectiveEnvRefreshAhead ?? DEFAULT_REFRESH_AHEAD_MINUTES;
+        : effectiveEnvRefreshAhead ?? DEFAULT_TOKEN_DAEMON.REFRESH_AHEAD_MINUTES;
     this.historyStore = new TokenHistoryStore();
   }
 
@@ -257,9 +261,9 @@ export class TokenDaemon {
         }
 
         const last = this.lastRefreshAttempt.get(key) || 0;
-        if (now - last < MIN_REFRESH_INTERVAL_MS) {
+        if (now - last < DEFAULT_TOKEN_DAEMON.MIN_REFRESH_INTERVAL_MS) {
           this.logDebug(
-            `[daemon] skip token throttle alias=${token.alias} sinceLast=${now - last}ms minInterval=${MIN_REFRESH_INTERVAL_MS}`
+            `[daemon] skip token throttle alias=${token.alias} sinceLast=${now - last}ms minInterval=${DEFAULT_TOKEN_DAEMON.MIN_REFRESH_INTERVAL_MS}`
           );
           continue;
         }
@@ -278,6 +282,12 @@ export class TokenDaemon {
 
   private async trySilentRefresh(token: TokenDescriptor): Promise<void> {
     const providerType: OAuthProviderId = token.provider;
+    if (providerType === 'deepseek-account') {
+      this.logDebug(
+        `[daemon] skip refresh provider=${providerType} alias=${token.alias} reason=non_refreshable_token_file`
+      );
+      return;
+    }
 
     const tokenMtimeBefore = await getTokenFileMtime(token.filePath);
     if (await this.historyStore.isAutoSuspended(token, tokenMtimeBefore)) {
@@ -563,6 +573,27 @@ export class TokenDaemon {
     if (!normalized) {
       return null;
     }
+    const normalizeProviderSelector = (raw: string): OAuthProviderId | undefined => {
+      if (SUPPORTED_OAUTH_PROVIDERS.includes(raw as OAuthProviderId)) {
+        return raw as OAuthProviderId;
+      }
+      if (raw === 'deepseek' || raw === 'deepseek-web') {
+        return 'deepseek-account';
+      }
+      return undefined;
+    };
+    // Provider selector takes precedence over fuzzy file matching.
+    // Example: "deepseek-account" should return the first deepseek token, not
+    // trigger a multi-match error because all filenames contain that prefix.
+    const explicitProvider = normalizeProviderSelector(normalized);
+    if (explicitProvider) {
+      const byProvider = snapshot.providers.find((p) => p.provider === explicitProvider);
+      const first = byProvider?.tokens[0];
+      if (first) {
+        return first;
+      }
+      return createSyntheticTokenDescriptor(explicitProvider);
+    }
     const candidates: TokenDescriptor[] = [];
 
     for (const providerSnapshot of snapshot.providers) {
@@ -590,7 +621,7 @@ export class TokenDaemon {
     }
 
     // No direct match; allow provider name selector
-    const providerMatch = SUPPORTED_OAUTH_PROVIDERS.find((p) => p === normalized);
+    const providerMatch = normalizeProviderSelector(normalized);
     if (providerMatch) {
       const byProvider = snapshot.providers.find((p) => p.provider === providerMatch);
       const first = byProvider?.tokens[0];
@@ -618,7 +649,7 @@ export class TokenDaemon {
     const force = options?.force === true;
     if (!force) {
       const last = this.antigravityMetadataEnsureTimestamps.get(filePath) || 0;
-      if (now - last < ANTIGRAVITY_METADATA_ENSURE_INTERVAL_MS) {
+      if (now - last < DEFAULT_TOKEN_DAEMON.ANTIGRAVITY_METADATA_ENSURE_INTERVAL_MS) {
         return;
       }
     }
@@ -857,6 +888,9 @@ function defaultTokenFilePath(provider: OAuthProviderId): string {
   if (GEMINI_PROVIDER_IDS.has(provider)) {
     const file = provider === 'antigravity' ? 'antigravity-oauth.json' : 'gemini-oauth.json';
     return path.join(home, '.routecodex', 'auth', file);
+  }
+  if (provider === 'deepseek-account') {
+    return path.join(home, '.routecodex', 'auth', 'deepseek-account-default.json');
   }
   return path.join(home, '.routecodex', 'auth', `${provider}-oauth-1-default.json`);
 }

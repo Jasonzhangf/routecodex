@@ -58,6 +58,30 @@ export function hasSsePayload(body: unknown): body is SsePayloadShape {
 const SHOULD_LOG_HTTP_EVENTS = buildInfo.mode !== 'release'
   || process.env.ROUTECODEX_HTTP_LOG_VERBOSE === '1';
 
+function resolveBoolFromEnv(value: string | undefined, fallback: boolean): boolean {
+  if (!value) {
+    return fallback;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on') {
+    return true;
+  }
+  if (normalized === '0' || normalized === 'false' || normalized === 'no' || normalized === 'off') {
+    return false;
+  }
+  return fallback;
+}
+
+function shouldLogHttpErrorMeta(): boolean {
+  return resolveBoolFromEnv(
+    process.env.ROUTECODEX_HTTP_ERROR_META_LOG
+      ?? process.env.RCC_HTTP_ERROR_META_LOG
+      ?? process.env.ROUTECODEX_ERROR_VERBOSE
+      ?? process.env.RCC_ERROR_VERBOSE,
+    false
+  );
+}
+
 function formatRequestId(value?: string): string {
   return resolveEffectiveRequestId(value);
 }
@@ -368,7 +392,7 @@ export function logRequestError(endpoint: string, requestId: string, error: unkn
   const summary = rawMeta?.rawErrorSnippet ?? formatted.text;
   const chalkError = typeof chalk?.redBright === 'function' ? chalk.redBright : (value: string) => value;
   console.error(chalkError(`❌ [${endpoint}] request ${resolvedId} failed: ${summary}`));
-  if (rawMeta) {
+  if (rawMeta && shouldLogHttpErrorMeta()) {
     const payload = {
       requestId: resolvedId,
       endpoint,

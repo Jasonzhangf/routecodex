@@ -348,9 +348,9 @@ describe('ProviderQuotaDaemonModule', () => {
     expect(state.inPool).toBe(false);
     expect(state.reason).toBe('cooldown');
     expect(state.blacklistUntil).toBeNull();
-    expect(state.cooldownUntil).toBe(baseNow + 2_000 + 60_000);
+    expect(state.cooldownUntil).toBe(baseNow + 2_000 + 31_000);
 
-    await jest.advanceTimersByTimeAsync(60_000 + 2_000 + 5);
+    await jest.advanceTimersByTimeAsync(31_000 + 2_000 + 5);
     const view = mod.getQuotaView();
     const entry = view?.('tab.default.gpt-5.1');
     expect(entry?.inPool).toBe(true);
@@ -406,7 +406,7 @@ describe('ProviderQuotaDaemonModule', () => {
     }
   });
 
-  it('caps repeated 429 backoff at 3h and then retries cyclically', async () => {
+  it('caps repeated 429 backoff at 61s and keeps capped step within chain window', async () => {
     jest.useFakeTimers();
     jest.setSystemTime(new Date('2026-01-16T00:00:00.000Z'));
 
@@ -442,15 +442,15 @@ describe('ProviderQuotaDaemonModule', () => {
     expect(state.inPool).toBe(false);
     expect(state.reason).toBe('cooldown');
     expect(state.blacklistUntil).toBeNull();
-    expect(state.cooldownUntil).toBe(baseNow + (eventCount - 1) * 1000 + 10_000_000);
+    expect(state.cooldownUntil).toBe(baseNow + (eventCount - 1) * 1000 + 61_000);
 
-    // After cooldown expiry, it should re-enter the pool and reset its streak.
-    await jest.advanceTimersByTimeAsync(10_000_000 + (eventCount - 1) * 1000 + 5);
+    // After cooldown expiry, it should re-enter the pool.
+    await jest.advanceTimersByTimeAsync(61_000 + (eventCount - 1) * 1000 + 5);
     const view = mod.getQuotaView();
     const entry = view?.('tab.default.gpt-5.1');
     expect(entry?.inPool).toBe(true);
 
-    // Next 429 should start the schedule from the first step again (5s).
+    // Next 429 within the chain window stays at capped step.
     const afterCooldownNow = Date.now();
     center.emit({
       code: 'HTTP_429',
@@ -469,7 +469,7 @@ describe('ProviderQuotaDaemonModule', () => {
     await jest.advanceTimersByTimeAsync(5);
     const snap2 = mod.getAdminSnapshot();
     expect(snap2['tab.default.gpt-5.1'].reason).toBe('cooldown');
-    expect(snap2['tab.default.gpt-5.1'].cooldownUntil).toBe(afterCooldownNow + 5_000);
+    expect(snap2['tab.default.gpt-5.1'].cooldownUntil).toBe(afterCooldownNow + 61_000);
 
     await mod.stop();
   });

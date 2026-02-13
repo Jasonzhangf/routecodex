@@ -1,9 +1,10 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import net from 'node:net';
 import { describe, expect, it } from '@jest/globals';
 
-import { findListeningPidsImpl, killPidBestEffortImpl } from '../../src/cli/server/port-utils.js';
+import { ensurePortAvailableImpl, findListeningPidsImpl, killPidBestEffortImpl } from '../../src/cli/server/port-utils.js';
 import { flushProcessLifecycleLogQueue } from '../../src/utils/process-lifecycle-logger.js';
 
 describe('cli server port-utils', () => {
@@ -38,40 +39,61 @@ describe('cli server port-utils', () => {
     expect(spawnCalls[1]!.args).toEqual(['/PID', '789', '/T', '/F']);
   });
 
-  it('findListeningPidsImpl parses lsof output on non-windows', () => {
-    const spawnSyncImpl = (() => ({ stdout: '123\n456\n', error: undefined })) as any;
+  it('findListeningPidsImpl reads managed pid file on non-windows', () => {
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-managed-pids-'));
+    const pidFile = path.join(tmpHome, 'server-5555.pid');
+    fs.writeFileSync(pidFile, String(process.pid), 'utf8');
     const logger = { warning: () => {}, info: () => {}, success: () => {}, error: () => {} };
 
     const pids = findListeningPidsImpl({
       port: 5555,
-      isWindows: false,
-      spawnSyncImpl,
+      routeCodexHomeDir: tmpHome,
       logger,
-      parseNetstatListeningPids: () => []
+      processKill: ((pid: number, signal?: NodeJS.Signals | number) => {
+        if (signal === 0 && pid === process.pid) {
+          return true as any;
+        }
+        throw new Error('unexpected processKill call');
+      }) as any,
+      spawnSyncImpl: ((cmd: string, args: string[]) => {
+        if (cmd === 'ps') {
+          return {
+            stdout: `${process.execPath} /Users/fanzhang/Documents/github/routecodex/dist/index.js config/modules.json`,
+            status: 0,
+            error: undefined
+          } as any;
+        }
+        throw new Error(`unexpected command: ${cmd} ${args.join(' ')}`);
+      }) as any
     });
 
-    expect(pids).toEqual([123, 456]);
+    expect(pids).toEqual([process.pid]);
   });
 
-  it('findListeningPidsImpl delegates to parseNetstatListeningPids on windows', () => {
-    const spawnSyncImpl = (() => ({ stdout: 'NETSTAT', error: undefined })) as any;
+  it('findListeningPidsImpl returns empty when pid file command is not trusted', () => {
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-managed-pids-untrusted-'));
+    fs.writeFileSync(path.join(tmpHome, 'server-5520.pid'), '12345', 'utf8');
     const logger = { warning: () => {}, info: () => {}, success: () => {}, error: () => {} };
-    const parseCalls: Array<{ stdout: string; port: number }> = [];
-    const parseNetstatListeningPids = (stdout: string, port: number) => {
-      parseCalls.push({ stdout, port });
-      return [1001];
-    };
 
     const pids = findListeningPidsImpl({
       port: 5520,
-      isWindows: true,
-      spawnSyncImpl,
+      routeCodexHomeDir: tmpHome,
       logger,
-      parseNetstatListeningPids
+      processKill: ((pid: number, signal?: NodeJS.Signals | number) => {
+        if (signal === 0 && pid === 12345) {
+          return true as any;
+        }
+        throw new Error('unexpected processKill call');
+      }) as any,
+      spawnSyncImpl: ((cmd: string) => {
+        if (cmd === 'ps') {
+          return { stdout: 'node /tmp/not-routecodex.js', status: 0, error: undefined } as any;
+        }
+        throw new Error('unexpected command');
+      }) as any
     });
 
-    expect(pids).toEqual([1001]);
-    expect(parseCalls).toEqual([{ stdout: 'NETSTAT', port: 5520 }]);
+    expect(pids).toEqual([]);
   });
 
   it('writes lifecycle kill_attempt entries', async () => {
@@ -114,6 +136,46 @@ describe('cli server port-utils', () => {
       } else {
         process.env.ROUTECODEX_PROCESS_LIFECYCLE_CONSOLE = prevConsole;
       }
+    }
+  });
+
+  it('ensurePortAvailableImpl fails on unmanaged occupied port', async () => {
+    const probe = net.createServer();
+    await new Promise<void>((resolve, reject) => {
+      probe.listen({ host: '0.0.0.0', port: 0 }, () => resolve());
+      probe.once('error', reject);
+    });
+    const address = probe.address();
+    const occupiedPort = typeof address === 'object' && address ? address.port : 0;
+
+    const spinner = {
+      start: () => spinner,
+      succeed: () => {},
+      fail: () => {},
+      warn: () => {},
+      info: () => {},
+      stop: () => {},
+      text: ''
+    };
+    const logger = { warning: () => {}, info: () => {}, success: () => {}, error: () => {} };
+
+    try {
+      await expect(ensurePortAvailableImpl({
+        port: occupiedPort,
+        parentSpinner: spinner,
+        opts: { restart: true },
+        fetchImpl: (async () => ({ ok: false })) as any,
+        sleep: async () => {},
+        env: {},
+        logger,
+        createSpinner: async () => spinner,
+        findListeningPids: () => [],
+        killPidBestEffort: () => {},
+        isServerHealthyQuick: async () => false,
+        exit: (() => { throw new Error('exit should not be called'); }) as any
+      })).rejects.toThrow('unmanaged process');
+    } finally {
+      await new Promise<void>((resolve) => probe.close(() => resolve()));
     }
   });
 });

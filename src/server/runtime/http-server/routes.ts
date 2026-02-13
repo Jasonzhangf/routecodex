@@ -9,6 +9,7 @@ import { mapErrorToHttp } from '../../utils/http-error-mapper.js';
 import { renderTokenPortalPage } from '../../../token-portal/render.js';
 import { loadTokenPortalFingerprintSummary } from '../../../token-portal/fingerprint-summary.js';
 import { registerDaemonAdminRoutes, rejectNonLocalOrUnauthorizedAdmin } from './daemon-admin-routes.js';
+import { registerClockClientRoutes } from './clock-client-routes.js';
 import type { HistoricalStatsSnapshot, StatsSnapshot } from './stats-manager.js';
 import { buildInfo } from '../../../build-info.js';
 import { logProcessLifecycleSync } from '../../../utils/process-lifecycle-logger.js';
@@ -202,6 +203,9 @@ export function registerHttpRoutes(options: RouteOptions): void {
         : `${config.server.host}:${config.server.port}`)
   });
 
+  // Local-only clock client daemon endpoints (register/heartbeat/inject/unregister)
+  registerClockClientRoutes(app);
+
   // OAuth Portal route is registered early in constructor, so we skip it here
   // to avoid duplicate route registration
 
@@ -260,6 +264,17 @@ export function registerHttpRoutes(options: RouteOptions): void {
       setTimeout(() => {
         try {
           logProcessLifecycleSync({
+            event: 'self_termination',
+            source: 'http.routes.shutdown',
+            details: {
+              result: 'intent',
+              reason: 'shutdown_route_requested',
+              signal: 'SIGTERM',
+              targetPid: process.pid,
+              ...shutdownAudit
+            }
+          });
+          logProcessLifecycleSync({
             event: 'kill_attempt',
             source: 'http.routes.shutdown',
             details: { targetPid: process.pid, signal: 'SIGTERM', result: 'attempt' }
@@ -287,6 +302,16 @@ export function registerHttpRoutes(options: RouteOptions): void {
       }
       setTimeout(() => {
         try {
+          logProcessLifecycleSync({
+            event: 'self_termination',
+            source: 'http.routes.shutdown',
+            details: {
+              result: 'intent',
+              reason: 'shutdown_route_exception_fallback',
+              signal: 'SIGTERM',
+              targetPid: process.pid
+            }
+          });
           logProcessLifecycleSync({
             event: 'kill_attempt',
             source: 'http.routes.shutdown',

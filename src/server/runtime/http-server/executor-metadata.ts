@@ -1,6 +1,7 @@
 import type { PipelineExecutionInput } from '../../handlers/types.js';
 import { asRecord } from './provider-utils.js';
 import { extractSessionIdentifiersFromMetadata } from '../../../modules/llmswitch/bridge.js';
+import { extractClockClientDaemonIdFromApiKey } from '../../../utils/clock-client-token.js';
 
 export function cloneClientHeaders(source: unknown): Record<string, string> | undefined {
   if (!source || typeof source !== 'object') {
@@ -38,6 +39,50 @@ export function resolveClientRequestId(metadata: Record<string, unknown>, fallba
   return clientRequestId || fallback;
 }
 
+function extractClockDaemonId(
+  userMeta: Record<string, unknown>,
+  headers: Record<string, unknown> | undefined
+): string | undefined {
+  const fromMeta =
+    (typeof userMeta.clockDaemonId === 'string' && userMeta.clockDaemonId.trim())
+      ? userMeta.clockDaemonId.trim()
+      : ((typeof userMeta.clockClientDaemonId === 'string' && userMeta.clockClientDaemonId.trim())
+        ? userMeta.clockClientDaemonId.trim()
+        : undefined);
+  if (fromMeta) {
+    return fromMeta;
+  }
+
+  const fromExplicitHeader =
+    extractHeaderValue(headers, 'x-routecodex-clock-daemon-id')
+    || extractHeaderValue(headers, 'x-routecodex-daemon-id');
+  if (fromExplicitHeader) {
+    return fromExplicitHeader;
+  }
+
+  const fromApiKeyHeader =
+    extractHeaderValue(headers, 'x-routecodex-api-key')
+    || extractHeaderValue(headers, 'x-api-key')
+    || extractHeaderValue(headers, 'x-routecodex-apikey')
+    || extractHeaderValue(headers, 'api-key')
+    || extractHeaderValue(headers, 'apikey');
+  const fromApiKey = extractClockClientDaemonIdFromApiKey(fromApiKeyHeader);
+  if (fromApiKey) {
+    return fromApiKey;
+  }
+
+  const authorization = extractHeaderValue(headers, 'authorization');
+  if (authorization) {
+    const match = authorization.match(/^(?:Bearer|ApiKey)\s+(.+)$/i);
+    const fromAuth = extractClockClientDaemonIdFromApiKey(match ? String(match[1]) : authorization);
+    if (fromAuth) {
+      return fromAuth;
+    }
+  }
+
+  return undefined;
+}
+
 export function buildRequestMetadata(input: PipelineExecutionInput): Record<string, unknown> {
   const userMeta = asRecord(input.metadata);
   const headers = asRecord(input.headers);
@@ -58,6 +103,7 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
       : inboundOriginator;
   const routeHint = extractRouteHint(input) ?? userMeta.routeHint;
   const processMode = (userMeta.processMode as string) || 'chat';
+  const resolvedClockDaemonId = extractClockDaemonId(userMeta, headers);
   const metadata: Record<string, unknown> = {
     ...userMeta,
     entryEndpoint: input.entryEndpoint,
@@ -67,7 +113,8 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
     routeHint,
     stream: userMeta.stream === true,
     ...(resolvedUserAgent ? { userAgent: resolvedUserAgent } : {}),
-    ...(resolvedOriginator ? { clientOriginator: resolvedOriginator } : {})
+    ...(resolvedOriginator ? { clientOriginator: resolvedOriginator } : {}),
+    ...(resolvedClockDaemonId ? { clockDaemonId: resolvedClockDaemonId } : {})
   };
 
   if (normalizedClientHeaders) {

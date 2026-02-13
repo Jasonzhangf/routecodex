@@ -11,6 +11,9 @@
 import express, { type Application } from 'express';
 import type { Server } from 'http';
 import type { Socket } from 'node:net';
+import type { Dirent } from 'node:fs';
+import * as fs from 'node:fs/promises';
+import path from 'node:path';
 import { ErrorHandlingCenter } from 'rcc-errorhandling';
 import type { UnknownObject } from '../../../types/common-types.js';
 import type { HandlerContext, PipelineExecutionInput, PipelineExecutionResult } from '../../handlers/types.js';
@@ -26,6 +29,7 @@ import type {
 import { attachProviderRuntimeMetadata } from '../../../providers/core/runtime/provider-runtime-metadata.js';
 import { preloadAntigravityAliasUserAgents, primeAntigravityUserAgentVersion } from '../../../providers/auth/antigravity-user-agent.js';
 import { getAntigravityWarmupBlacklistDurationMs, isAntigravityWarmupEnabled, warmupCheckAntigravityAlias } from '../../../providers/auth/antigravity-warmup.js';
+import { shutdownCamoufoxLaunchers } from '../../../providers/core/config/camoufox-launcher.js';
 import { AuthFileResolver } from '../../../config/auth-file-resolver.js';
 import type { ProviderRuntimeProfile } from '../../../providers/core/api/provider-types.js';
 import type { ProviderProfile, ProviderProfileCollection } from '../../../providers/profile/provider-profile.js';
@@ -43,7 +47,11 @@ import {
   extractSessionIdentifiersFromMetadata,
   bootstrapVirtualRouterConfig,
   getProviderSuccessCenter,
-  getHubPipelineCtor
+  getHubPipelineCtor,
+  resolveClockConfigSnapshot,
+  reserveClockDueTasks,
+  commitClockDueReservation,
+  clearClockTasksSnapshot
 } from '../../../modules/llmswitch/bridge.js';
 import {
   initializeRouteErrorHub,
@@ -75,6 +83,10 @@ import { canonicalizeServerId } from './server-id.js';
 import { StatsManager, type UsageMetrics } from './stats-manager.js';
 import { loadRouteCodexConfig } from '../../../config/routecodex-config-loader.js';
 import { buildInfo } from '../../../build-info.js';
+import { getClockClientRegistry } from './clock-client-registry.js';
+import { toExactMatchClockConfig } from './clock-daemon-inject-config.js';
+import { isTmuxSessionAlive, killManagedTmuxSession } from './tmux-session-probe.js';
+import { terminateManagedClientProcess } from './managed-process-probe.js';
 import {
   recordHubShadowCompareDiff,
   resolveHubShadowCompareConfig,
@@ -98,10 +110,114 @@ type LegacyAuthFields = ProviderRuntimeProfile['auth'] & {
   user_info_url?: unknown;
   refresh_url?: unknown;
   scope?: unknown;
+  mobile?: unknown;
+  account?: unknown;
+  username?: unknown;
+  password?: unknown;
+  accountFile?: unknown;
+  account_file?: unknown;
+  accountAlias?: unknown;
+  account_alias?: unknown;
 };
 
 const DEFAULT_MAX_PROVIDER_ATTEMPTS = 6;
 const DEFAULT_ANTIGRAVITY_MAX_PROVIDER_ATTEMPTS = 20;
+
+type SseWrapperErrorInfo = {
+  message: string;
+  errorCode?: string;
+  retryable: boolean;
+};
+
+const RETRYABLE_SSE_ERROR_CODE_HINTS = [
+  'internal_network_failure',
+  'network_error',
+  'api_connection_error',
+  'service_unavailable',
+  'internal_server_error',
+  'overloaded_error',
+  'rate_limit_error',
+  'request_timeout',
+  'timeout'
+];
+const RETRYABLE_SSE_MESSAGE_HINTS = [
+  'internal network failure',
+  'network failure',
+  'network error',
+  'temporarily unavailable',
+  'temporarily unreachable',
+  'upstream disconnected',
+  'connection reset',
+  'connection closed',
+  'timed out',
+  'timeout'
+];
+
+function resolveBoolFromEnv(value: string | undefined, fallback: boolean): boolean {
+  if (!value) {
+    return fallback;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) {
+    return true;
+  }
+  if (['0', 'false', 'no', 'off'].includes(normalized)) {
+    return false;
+  }
+  return fallback;
+}
+
+function isVerboseErrorLoggingEnabled(): boolean {
+  return resolveBoolFromEnv(
+    process.env.ROUTECODEX_ERROR_VERBOSE
+      ?? process.env.RCC_ERROR_VERBOSE,
+    false
+  );
+}
+
+function isClockManagedTerminationEnabled(): boolean {
+  return resolveBoolFromEnv(
+    process.env.ROUTECODEX_CLOCK_REAPER_TERMINATE_MANAGED
+      ?? process.env.RCC_CLOCK_REAPER_TERMINATE_MANAGED,
+    false
+  );
+}
+
+function firstNonEmptyString(candidates: unknown[]): string | undefined {
+  for (const candidate of candidates) {
+    if (typeof candidate !== 'string') {
+      continue;
+    }
+    const trimmed = candidate.trim();
+    if (trimmed) {
+      return trimmed;
+    }
+  }
+  return undefined;
+}
+
+function firstFiniteNumber(candidates: unknown[]): number | undefined {
+  for (const candidate of candidates) {
+    if (typeof candidate === 'number' && Number.isFinite(candidate)) {
+      return candidate;
+    }
+  }
+  return undefined;
+}
+
+function isRetryableSseWrapperError(message: string, errorCode?: string, status?: number): boolean {
+  if (typeof status === 'number' && Number.isFinite(status)) {
+    if (status === 408 || status === 425 || status === 429 || status >= 500) {
+      return true;
+    }
+  }
+  const normalizedCode = typeof errorCode === 'string' ? errorCode.trim().toLowerCase() : '';
+  if (normalizedCode && RETRYABLE_SSE_ERROR_CODE_HINTS.some((hint) => normalizedCode.includes(hint))) {
+    return true;
+  }
+  const loweredMessage = message.toLowerCase();
+  return RETRYABLE_SSE_MESSAGE_HINTS.some((hint) => loweredMessage.includes(hint));
+}
 
 function resolveMaxProviderAttempts(): number {
   const raw = String(
@@ -138,6 +254,36 @@ function extractStatusCodeFromError(err: unknown): number | undefined {
   return undefined;
 }
 
+function isCredentialMissingInitError(error: unknown): { missing: boolean; reason: string } {
+  const message = error instanceof Error ? error.message : String(error ?? 'unknown');
+  const code =
+    error && typeof error === 'object' && typeof (error as { code?: unknown }).code === 'string'
+      ? String((error as { code?: string }).code).trim().toUpperCase()
+      : '';
+
+  if (code.includes('AUTH_MISSING') || code.includes('MISSING_API_KEY')) {
+    return { missing: true, reason: message };
+  }
+
+  const normalized = message.toLowerCase();
+  if (/environment variable\s+[a-z0-9_]+\s+is not defined/i.test(message)) {
+    return { missing: true, reason: message };
+  }
+  if (normalized.includes('missing api key')) {
+    return { missing: true, reason: message };
+  }
+  if (normalized.includes('missing inline apikey value')) {
+    return { missing: true, reason: message };
+  }
+  if (normalized.includes('token is missing')) {
+    return { missing: true, reason: message };
+  }
+  if (normalized.includes('expected tokenfile')) {
+    return { missing: true, reason: message };
+  }
+  return { missing: false, reason: message };
+}
+
 /**
  * RouteCodex Server V2
  *
@@ -157,6 +303,8 @@ export class RouteCodexHttpServer {
   private providerHandles: Map<string, ProviderHandle> = new Map();
   private providerKeyToRuntimeKey: Map<string, string> = new Map();
   private providerRuntimeInitErrors: Map<string, Error> = new Map();
+  private runtimeKeyCredentialSkipped: Set<string> = new Set();
+  private startupExcludedProviderKeys: Set<string> = new Set();
   private pipelineLogger: PipelineDebugLogger = createNoopPipelineLogger();
   private authResolver = new AuthFileResolver();
   private userConfig: UnknownObject = {};
@@ -182,6 +330,10 @@ export class RouteCodexHttpServer {
   private hubPolicyMode: string | null = null;
   private hubPipelineEngineShadow: HubPipeline | null = null;
   private hubPipelineConfigForShadow: Record<string, unknown> | null = null;
+  private clockDaemonInjectTimer: NodeJS.Timeout | null = null;
+  private clockDaemonInjectTickInFlight = false;
+  private lastClockDaemonInjectErrorAtMs = 0;
+  private lastClockDaemonCleanupAtMs = 0;
 
   constructor(config: ServerConfigV2) {
     this.config = config;
@@ -386,6 +538,9 @@ export class RouteCodexHttpServer {
     }
     if (!patched.defaultModel && profile.metadata?.defaultModel) {
       patched.defaultModel = profile.metadata.defaultModel;
+    }
+    if (!patched.deepseek && profile.metadata?.deepseek) {
+      patched.deepseek = profile.metadata.deepseek;
     }
 
     return this.canonicalizeRuntimeProvider(patched);
@@ -599,6 +754,250 @@ export class RouteCodexHttpServer {
     return true;
   }
 
+  private shouldEnableClockDaemonInjectLoop(): boolean {
+    const raw = String(process.env.ROUTECODEX_CLOCK_DAEMON_INJECT_ENABLE || process.env.RCC_CLOCK_DAEMON_INJECT_ENABLE || '').trim().toLowerCase();
+    if (raw === '0' || raw === 'false' || raw === 'off' || raw === 'no') {
+      return false;
+    }
+    if (raw === '1' || raw === 'true' || raw === 'on' || raw === 'yes') {
+      return true;
+    }
+    if (process.env.JEST_WORKER_ID || process.env.NODE_ENV === 'test') {
+      return false;
+    }
+    return true;
+  }
+
+  private resolveRawClockConfig(): unknown {
+    const user = this.userConfig && typeof this.userConfig === 'object' ? (this.userConfig as Record<string, unknown>) : {};
+    const vr = user.virtualrouter && typeof user.virtualrouter === 'object' ? (user.virtualrouter as Record<string, unknown>) : null;
+    if (vr && Object.prototype.hasOwnProperty.call(vr, 'clock')) {
+      return vr.clock;
+    }
+    if (Object.prototype.hasOwnProperty.call(user, 'clock')) {
+      return (user as Record<string, unknown>).clock;
+    }
+
+    const artCfg =
+      this.currentRouterArtifacts &&
+      this.currentRouterArtifacts.config &&
+      typeof this.currentRouterArtifacts.config === 'object'
+        ? (this.currentRouterArtifacts.config as Record<string, unknown>)
+        : null;
+    if (artCfg && Object.prototype.hasOwnProperty.call(artCfg, 'clock')) {
+      return artCfg.clock;
+    }
+    return undefined;
+  }
+
+  private stopClockDaemonInjectLoop(): void {
+    if (this.clockDaemonInjectTimer) {
+      clearInterval(this.clockDaemonInjectTimer);
+      this.clockDaemonInjectTimer = null;
+    }
+  }
+
+  private startClockDaemonInjectLoop(): void {
+    this.stopClockDaemonInjectLoop();
+    if (!this.shouldEnableClockDaemonInjectLoop()) {
+      return;
+    }
+
+    const rawTick = String(process.env.ROUTECODEX_CLOCK_DAEMON_INJECT_TICK_MS || process.env.RCC_CLOCK_DAEMON_INJECT_TICK_MS || '').trim();
+    const parsedTick = rawTick ? Number.parseInt(rawTick, 10) : NaN;
+    const tickMs = Number.isFinite(parsedTick) && parsedTick >= 200 ? Math.floor(parsedTick) : 1500;
+
+    this.clockDaemonInjectTimer = setInterval(() => {
+      void this.tickClockDaemonInjectLoop();
+    }, tickMs);
+    this.clockDaemonInjectTimer.unref?.();
+
+    void this.tickClockDaemonInjectLoop();
+  }
+
+  private async tickClockDaemonInjectLoop(): Promise<void> {
+    if (this.clockDaemonInjectTickInFlight) {
+      return;
+    }
+    this.clockDaemonInjectTickInFlight = true;
+    try {
+      const rawClockConfig = this.resolveRawClockConfig();
+      const resolvedClockConfig = await resolveClockConfigSnapshot(rawClockConfig);
+      if (!resolvedClockConfig) {
+        return;
+      }
+      const clockConfig = toExactMatchClockConfig(resolvedClockConfig);
+
+      const sessionDir = String(process.env.ROUTECODEX_SESSION_DIR || '').trim();
+      const clockDir = sessionDir ? path.join(sessionDir, 'clock') : '';
+      const entries = clockDir
+        ? await fs.readdir(clockDir, { withFileTypes: true }).catch(() => [] as Dirent[])
+        : [] as Dirent[];
+
+      const registry = getClockClientRegistry();
+      const now = Date.now();
+      const cleanupRequestId = `clock_cleanup_${now}_${Math.random().toString(16).slice(2, 8)}`;
+      const allowManagedTermination = isClockManagedTerminationEnabled();
+
+      const deadTmuxCleanup = registry.cleanupDeadTmuxSessions({
+        isTmuxSessionAlive,
+        ...(allowManagedTermination
+          ? {
+              terminateManagedTmuxSession: (tmuxSessionId: string) => killManagedTmuxSession(tmuxSessionId),
+              terminateManagedClientProcess: (processInfo: {
+                daemonId: string;
+                pid: number;
+                commandHint?: string;
+                clientType?: string;
+              }) => terminateManagedClientProcess(processInfo)
+            }
+          : {})
+      });
+      const staleCleanup = registry.cleanupStaleHeartbeats({
+        nowMs: now,
+        ...(allowManagedTermination
+          ? {
+              terminateManagedTmuxSession: (tmuxSessionId: string) => killManagedTmuxSession(tmuxSessionId),
+              terminateManagedClientProcess: (processInfo: {
+                daemonId: string;
+                pid: number;
+                commandHint?: string;
+                clientType?: string;
+              }) => terminateManagedClientProcess(processInfo)
+            }
+          : {})
+      });
+
+      const removedConversationSessionIds = Array.from(new Set<string>([
+        ...staleCleanup.removedConversationSessionIds,
+        ...deadTmuxCleanup.removedConversationSessionIds
+      ]));
+      const removedTmuxSessionIds = Array.from(new Set<string>([
+        ...staleCleanup.removedTmuxSessionIds,
+        ...deadTmuxCleanup.removedTmuxSessionIds
+      ]));
+      const cleanupClockSessionIds = Array.from(new Set<string>([
+        ...removedConversationSessionIds,
+        ...removedTmuxSessionIds
+      ]));
+
+      if (cleanupClockSessionIds.length > 0) {
+        for (const cleanupSessionId of cleanupClockSessionIds) {
+          await clearClockTasksSnapshot({
+            sessionId: cleanupSessionId,
+            config: clockConfig
+          });
+        }
+      }
+
+      const hasCleanupActions =
+        staleCleanup.removedDaemonIds.length > 0
+        || deadTmuxCleanup.removedDaemonIds.length > 0;
+      if (hasCleanupActions && Date.now() - this.lastClockDaemonCleanupAtMs > 2000) {
+        this.lastClockDaemonCleanupAtMs = Date.now();
+        console.log('[RouteCodexHttpServer] clock daemon cleanup audit:', {
+          requestId: cleanupRequestId,
+          managedTerminationEnabled: allowManagedTermination,
+          staleHeartbeat: {
+            reason: 'heartbeat_timeout',
+            staleAfterMs: staleCleanup.staleAfterMs,
+            removedDaemonIds: staleCleanup.removedDaemonIds,
+            removedTmuxSessionIds: staleCleanup.removedTmuxSessionIds,
+            removedConversationSessionIds: staleCleanup.removedConversationSessionIds,
+            killedTmuxSessionIds: staleCleanup.killedTmuxSessionIds,
+            failedKillTmuxSessionIds: staleCleanup.failedKillTmuxSessionIds,
+            skippedKillTmuxSessionIds: staleCleanup.skippedKillTmuxSessionIds,
+            killedManagedClientPids: staleCleanup.killedManagedClientPids,
+            failedKillManagedClientPids: staleCleanup.failedKillManagedClientPids,
+            skippedKillManagedClientPids: staleCleanup.skippedKillManagedClientPids
+          },
+          deadTmux: {
+            reason: 'tmux_not_alive',
+            removedDaemonIds: deadTmuxCleanup.removedDaemonIds,
+            removedTmuxSessionIds: deadTmuxCleanup.removedTmuxSessionIds,
+            removedConversationSessionIds: deadTmuxCleanup.removedConversationSessionIds,
+            killedTmuxSessionIds: deadTmuxCleanup.killedTmuxSessionIds,
+            failedKillTmuxSessionIds: deadTmuxCleanup.failedKillTmuxSessionIds,
+            skippedKillTmuxSessionIds: deadTmuxCleanup.skippedKillTmuxSessionIds,
+            killedManagedClientPids: deadTmuxCleanup.killedManagedClientPids,
+            failedKillManagedClientPids: deadTmuxCleanup.failedKillManagedClientPids,
+            skippedKillManagedClientPids: deadTmuxCleanup.skippedKillManagedClientPids
+          }
+        });
+      }
+
+      for (const entry of entries) {
+        if (!entry || typeof entry.name !== 'string') {
+          continue;
+        }
+        if (!entry.name.endsWith('.json')) {
+          continue;
+        }
+        if (typeof entry.isFile === 'function' && !entry.isFile()) {
+          continue;
+        }
+        const sessionId = entry.name.slice(0, -'.json'.length).trim();
+        if (!sessionId) {
+          continue;
+        }
+
+        const reservationId = 'clockd_inject_' + now + '_' + Math.random().toString(16).slice(2, 8);
+        const reserved = await reserveClockDueTasks({
+          reservationId,
+          sessionId,
+          config: clockConfig,
+          requestId: reservationId
+        });
+
+        if (!reserved || !reserved.reservation || typeof reserved.injectText !== 'string' || !reserved.injectText.trim()) {
+          continue;
+        }
+
+        const bind = registry.bindConversationSession({ conversationSessionId: sessionId });
+
+        const text = [
+          '[Clock Reminder]: scheduled tasks are due.',
+          reserved.injectText.trim(),
+          'Only call tools that are actually available in your current runtime.'
+        ].join('\n');
+
+        const injected = await registry.inject({
+          sessionId,
+          text,
+          requestId: reservationId,
+          source: 'clock.daemon.inject'
+        });
+
+        if (!injected.ok) {
+          const nowWarn = Date.now();
+          if (nowWarn - this.lastClockDaemonInjectErrorAtMs > 5000) {
+            this.lastClockDaemonInjectErrorAtMs = nowWarn;
+            console.warn('[RouteCodexHttpServer] clock daemon inject skipped:', {
+              sessionId,
+              injectReason: injected.reason,
+              bindOk: bind.ok,
+              bindReason: bind.reason
+            });
+          }
+          continue;
+        }
+
+        await commitClockDueReservation({
+          reservation: reserved.reservation,
+          config: clockConfig
+        });
+      }
+    } catch (error) {
+      const now = Date.now();
+      if (now - this.lastClockDaemonInjectErrorAtMs > 5000) {
+        this.lastClockDaemonInjectErrorAtMs = now;
+        console.warn('[RouteCodexHttpServer] clock daemon inject loop tick failed:', error);
+      }
+    } finally {
+      this.clockDaemonInjectTickInFlight = false;
+    }
+  }
+
   /**
    * 初始化服务器
    */
@@ -763,6 +1162,15 @@ export class RouteCodexHttpServer {
    * 停止服务器
    */
   public async stop(): Promise<void> {
+    this.stopClockDaemonInjectLoop();
+    try {
+      await shutdownCamoufoxLaunchers();
+    } catch {
+      // ignore launcher cleanup errors
+    }
+    if (!this.server) {
+      return;
+    }
     if (this.server) {
       // Best-effort: close any open keep-alive sockets so server.close can finish.
       for (const socket of this.activeSockets) {
@@ -1032,6 +1440,7 @@ export class RouteCodexHttpServer {
     this.hubPipelineEngineShadow = null;
 
     await this.initializeProviderRuntimes(bootstrapArtifacts);
+    this.startClockDaemonInjectLoop();
   }
 
   private buildHandlerContext(): HandlerContext {
@@ -1049,6 +1458,8 @@ export class RouteCodexHttpServer {
     await this.disposeProviders();
     this.providerKeyToRuntimeKey.clear();
     this.providerRuntimeInitErrors.clear();
+    this.runtimeKeyCredentialSkipped.clear();
+    this.startupExcludedProviderKeys.clear();
 
     // Antigravity UA preload (best-effort):
     // - fetch latest UA version once (cached)
@@ -1189,6 +1600,9 @@ export class RouteCodexHttpServer {
           : null;
 
       if (failedRuntimeKeys.has(runtimeKey)) {
+        if (this.runtimeKeyCredentialSkipped.has(runtimeKey)) {
+          this.startupExcludedProviderKeys.add(providerKey);
+        }
         continue;
       }
 
@@ -1219,11 +1633,20 @@ export class RouteCodexHttpServer {
         } catch (error) {
           // Non-blocking: do not crash server startup when a provider is misconfigured (e.g. missing env var).
           // Emit a provider error so health/quota modules can mark it unhealthy and routing can fail over.
+          const credentialMissing = isCredentialMissingInitError(error);
           failedRuntimeKeys.add(runtimeKey);
           if (error instanceof Error) {
             this.providerRuntimeInitErrors.set(runtimeKey, error);
           } else {
             this.providerRuntimeInitErrors.set(runtimeKey, new Error(String(error)));
+          }
+          if (credentialMissing.missing) {
+            this.runtimeKeyCredentialSkipped.add(runtimeKey);
+            this.startupExcludedProviderKeys.add(providerKey);
+            console.warn(
+              `[provider.init.skip] providerKey=${providerKey} runtimeKey=${runtimeKey} reason=credential_missing detail=${credentialMissing.reason}`
+            );
+            continue;
           }
           try {
             const { emitProviderError } = await import('../../../providers/core/utils/provider-error-reporter.js');
@@ -1362,6 +1785,21 @@ export class RouteCodexHttpServer {
       if (rawType === 'iflow-cookie') {
         return { ...auth, type: 'apikey', rawType: auth.rawType ?? 'iflow-cookie' };
       }
+      if (rawType === 'deepseek-account') {
+        // Compatibility note:
+        // legacy deepseek configs may still carry value/secretRef/mobile/password/clientId/clientSecret.
+        // Runtime auth for deepseek-account is tokenFile(+alias)-only; we strip legacy fields instead of
+        // failing init so existing deployments can migrate without downtime.
+        const tokenFile = pickString(authRecord.tokenFile, authRecord.token_file);
+        const accountAlias = pickString(authRecord.accountAlias, authRecord.account_alias, runtime.keyAlias);
+        return {
+          type: 'apikey',
+          rawType: auth.rawType ?? 'deepseek-account',
+          value: '',
+          ...(accountAlias ? { accountAlias } : {}),
+          ...(tokenFile ? { tokenFile } : {})
+        };
+      }
       const value = await this.resolveApiKeyValue(runtime, auth);
       return { ...auth, type: 'apikey', value };
     }
@@ -1466,6 +1904,7 @@ export class RouteCodexHttpServer {
       })
     );
     this.providerHandles.clear();
+    (ProviderFactory as unknown as { clearInstanceCache?: () => void }).clearInstanceCache?.();
   }
 
   private async executePipeline(input: PipelineExecutionInput): Promise<PipelineExecutionResult> {
@@ -1517,7 +1956,7 @@ export class RouteCodexHttpServer {
     let attempt = 0;
     let firstError: unknown | null = null;
     const originalBodySnapshot = this.cloneRequestPayload(input.body);
-    const excludedProviderKeys = new Set<string>();
+    const excludedProviderKeys = new Set<string>(this.startupExcludedProviderKeys);
     let initialRoutePool: string[] | null = null;
 
     while (attempt < maxAttempts) {
@@ -1600,6 +2039,32 @@ export class RouteCodexHttpServer {
           requestId: input.requestId,
           retryable: true
         });
+        try {
+          const { emitProviderError } = await import('../../../providers/core/utils/provider-error-reporter.js');
+          emitProviderError({
+            error,
+            stage: 'provider.runtime.resolve',
+            runtime: {
+              requestId: input.requestId,
+              providerKey: target.providerKey,
+              providerId: target.providerKey.split('.')[0],
+              providerType: String((target as any).providerType || 'unknown'),
+              providerProtocol: String((target as any).outboundProfile || ''),
+              routeName: pipelineResult.routingDecision?.routeName,
+              pipelineId: target.providerKey,
+              target
+            },
+            dependencies: this.getModuleDependencies(),
+            recoverable: false,
+            affectsHealth: true,
+            details: {
+              reason: 'runtime_not_initialized',
+              providerKey: target.providerKey
+            }
+          });
+        } catch {
+          // best-effort
+        }
         if (!firstError) {
           firstError = error;
         }
@@ -1629,6 +2094,34 @@ export class RouteCodexHttpServer {
           retryable: true
           }
         );
+        try {
+          const { emitProviderError } = await import('../../../providers/core/utils/provider-error-reporter.js');
+          emitProviderError({
+            error: initError ?? error,
+            stage: 'provider.runtime.resolve',
+            runtime: {
+              requestId: input.requestId,
+              providerKey: target.providerKey,
+              providerId: target.providerKey.split('.')[0],
+              providerType: String((target as any).providerType || 'unknown'),
+              providerProtocol: String((target as any).outboundProfile || ''),
+              routeName: pipelineResult.routingDecision?.routeName,
+              pipelineId: target.providerKey,
+              runtimeKey,
+              target
+            },
+            dependencies: this.getModuleDependencies(),
+            recoverable: false,
+            affectsHealth: true,
+            details: {
+              reason: 'runtime_handle_missing',
+              providerKey: target.providerKey,
+              runtimeKey
+            }
+          });
+        } catch {
+          // best-effort
+        }
         if (!firstError) {
           firstError = error;
         }
@@ -2378,8 +2871,23 @@ export class RouteCodexHttpServer {
     if (body && typeof body === 'object') {
       const wrapperError = this.extractSseWrapperError(body as Record<string, unknown>);
       if (wrapperError) {
-        const error = new Error(`[RouteCodexHttpServer] Upstream SSE terminated: ${wrapperError}`) as Error & { code?: string };
+        const codeSuffix = wrapperError.errorCode ? ` [${wrapperError.errorCode}]` : '';
+        const error = new Error(`Upstream SSE error event${codeSuffix}: ${wrapperError.message}`) as Error & {
+          code?: string;
+          status?: number;
+          statusCode?: number;
+          retryable?: boolean;
+          upstreamCode?: string;
+        };
         error.code = 'SSE_DECODE_ERROR';
+        if (wrapperError.errorCode) {
+          error.upstreamCode = wrapperError.errorCode;
+        }
+        error.retryable = wrapperError.retryable;
+        if (wrapperError.retryable) {
+          error.status = 503;
+          error.statusCode = 503;
+        }
         throw error;
       }
     }
@@ -2582,29 +3090,34 @@ export class RouteCodexHttpServer {
       const isStreamingConversion = Boolean(options.wantsStream && (needsAnthropicConversion || needsResponsesConversion || needsChatConversion));
 
       if (isSseDecodeError || isServerToolFollowupError || isStreamingConversion || (isProviderProtocolError && typeof statusCandidate === 'number')) {
-        console.error('[RouteCodexHttpServer] Fatal conversion error, bubbling as HTTP error', error);
+        if (isVerboseErrorLoggingEnabled()) {
+          console.error('[RouteCodexHttpServer] Fatal conversion error, bubbling as HTTP error', error);
+        }
         throw error;
       }
-      console.error('[RouteCodexHttpServer] Failed to convert provider response via llmswitch-core', error);
+      if (isVerboseErrorLoggingEnabled()) {
+        console.error('[RouteCodexHttpServer] Failed to convert provider response via llmswitch-core', error);
+      }
       return options.response;
     }
   }
 
-  private extractSseWrapperError(payload: Record<string, unknown> | undefined): string | undefined {
+  private extractSseWrapperError(payload: Record<string, unknown> | undefined): SseWrapperErrorInfo | undefined {
     return this.findSseWrapperError(payload, 2);
   }
 
   private findSseWrapperError(
     record: Record<string, unknown> | undefined,
     depth: number
-  ): string | undefined {
+  ): SseWrapperErrorInfo | undefined {
     if (!record || typeof record !== 'object' || depth < 0) {
       return undefined;
     }
-    const mode = record.mode;
-    const errVal = record.error;
-    if (mode === 'sse' && typeof errVal === 'string' && errVal.trim()) {
-      return errVal.trim();
+    if (record.mode === 'sse') {
+      const normalized = this.normalizeSseWrapperErrorValue(record.error, depth);
+      if (normalized) {
+        return normalized;
+      }
     }
     const nestedKeys = ['body', 'data', 'payload', 'response'];
     for (const key of nestedKeys) {
@@ -2617,6 +3130,92 @@ export class RouteCodexHttpServer {
         return found;
       }
     }
+    return undefined;
+  }
+
+  private normalizeSseWrapperErrorValue(value: unknown, depth: number): SseWrapperErrorInfo | undefined {
+    if (value === undefined || value === null || depth < 0) {
+      return undefined;
+    }
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (!trimmed) {
+        return undefined;
+      }
+      if (depth > 0 && (trimmed.startsWith('{') || trimmed.startsWith('['))) {
+        try {
+          const parsed = JSON.parse(trimmed);
+          const parsedInfo = this.normalizeSseWrapperErrorValue(parsed, depth - 1);
+          if (parsedInfo) {
+            return parsedInfo;
+          }
+        } catch {
+          // fallback to raw string
+        }
+      }
+      return {
+        message: trimmed,
+        retryable: isRetryableSseWrapperError(trimmed)
+      };
+    }
+    if (typeof value !== 'object' || Array.isArray(value)) {
+      return undefined;
+    }
+    const record = value as Record<string, unknown>;
+    const directMessage = firstNonEmptyString([
+      record.message,
+      record.error_message,
+      record.errorMessage
+    ]);
+    const directCode = firstNonEmptyString([
+      record.code,
+      record.error_code,
+      record.errorCode,
+      record.type
+    ]);
+    const directStatus = firstFiniteNumber([
+      record.status,
+      record.statusCode,
+      record.status_code,
+      record.http_status
+    ]);
+
+    if (depth > 0) {
+      for (const key of ['error', 'data', 'payload', 'details', 'body', 'response']) {
+        const nestedInfo = this.normalizeSseWrapperErrorValue(record[key], depth - 1);
+        if (nestedInfo) {
+          const mergedCode = nestedInfo.errorCode ?? directCode;
+          const retryable = nestedInfo.retryable || isRetryableSseWrapperError(nestedInfo.message, mergedCode, directStatus);
+          return {
+            message: nestedInfo.message,
+            ...(mergedCode ? { errorCode: mergedCode } : {}),
+            retryable
+          };
+        }
+      }
+    }
+
+    if (directMessage) {
+      return {
+        message: directMessage,
+        ...(directCode ? { errorCode: directCode } : {}),
+        retryable: isRetryableSseWrapperError(directMessage, directCode, directStatus)
+      };
+    }
+
+    try {
+      const serialized = JSON.stringify(record);
+      if (serialized && serialized !== '{}') {
+        return {
+          message: serialized,
+          ...(directCode ? { errorCode: directCode } : {}),
+          retryable: isRetryableSseWrapperError(serialized, directCode, directStatus)
+        };
+      }
+    } catch {
+      // ignore stringify failures
+    }
+
     return undefined;
   }
 

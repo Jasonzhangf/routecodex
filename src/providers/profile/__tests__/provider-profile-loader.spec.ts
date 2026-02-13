@@ -61,6 +61,50 @@ describe('provider-profile-loader', () => {
     expect(profile.compatibilityProfile).toEqual('responses:c4m');
   });
 
+  it('parses deepseek family as openai protocol with deepseek metadata', () => {
+    const config: Record<string, unknown> = {
+      providers: {
+        deepseek: {
+          type: 'deepseek',
+          baseUrl: 'https://chat.deepseek.com',
+          compatibilityProfile: 'chat:deepseek-web',
+          auth: {
+            type: 'deepseek-account',
+            mobile: '${DEEPSEEK_MOBILE}',
+            password: '${DEEPSEEK_PASSWORD}',
+            tokenFile: '~/.routecodex/auth/deepseek-account-1.json'
+          },
+          deepseek: {
+            strictToolRequired: true,
+            textToolFallback: false,
+            powTimeoutMs: 9000,
+            powMaxAttempts: 3,
+            sessionReuseTtlMs: 120000
+          }
+        }
+      }
+    };
+
+    const result = buildProviderProfiles(config);
+    const profile = result.byId.deepseek;
+    expect(profile.protocol).toBe('openai');
+    expect(profile.compatibilityProfile).toBe('chat:deepseek-web');
+    expect(profile.metadata?.deepseek).toEqual({
+      strictToolRequired: true,
+      textToolFallback: false,
+      powTimeoutMs: 9000,
+      powMaxAttempts: 3,
+      sessionReuseTtlMs: 120000
+    });
+    expect(profile.auth.kind).toBe('apikey');
+    if (profile.auth.kind === 'apikey') {
+      expect(profile.auth.rawType).toBe('deepseek-account');
+      expect(profile.auth.mobile).toBe('${DEEPSEEK_MOBILE}');
+      expect(profile.auth.password).toBe('${DEEPSEEK_PASSWORD}');
+      expect(profile.auth.tokenFile).toBe('~/.routecodex/auth/deepseek-account-1.json');
+    }
+  });
+
   it('throws when legacy compatibility fields are used', () => {
     const config: Record<string, unknown> = {
       providers: {

@@ -51,7 +51,7 @@ export class ColoredLogger {
 
   logVirtualRouterHit(routeName: string, providerKey: string, model?: string): void {
     const colorizer = this.resolveRouteColor(routeName);
-    const line = `[virtual-router] ${routeName} -> ${providerKey}${model ? `.${  model}` : ''}`;
+    const line = `[virtual-router-hit] ${routeName} -> ${providerKey}${model ? `.${  model}` : ''}`;
     console.log(colorizer(line));
   }
 

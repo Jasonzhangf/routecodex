@@ -38,6 +38,10 @@ import {
   shouldCaptureVisionDebug,
   summarizeVisionMessages
 } from './vision-debug-utils.js';
+import {
+  DEFAULT_PROVIDER,
+  CODEX_IDENTIFIER_MAX_LENGTH
+} from '../../../constants/index.js';
 import type { ProviderRuntimeMetadata } from './provider-runtime-metadata.js';
 import type { HttpProtocolClient, ProtocolRequestPayload } from '../../../client/http-protocol-client.js';
 import { OpenAIChatProtocolClient } from '../../../client/openai/chat-protocol-client.js';
@@ -75,7 +79,7 @@ export type ProviderConfigInternal = OpenAIStandardConfig['config'] & {
   };
 };
 
-const DEFAULT_USER_AGENT = 'codex_cli_rs/0.73.0 (Mac OS 15.6.1; arm64) iTerm.app/3.6.5';
+const DEFAULT_USER_AGENT = DEFAULT_PROVIDER.USER_AGENT;
 
 
 export class HttpTransportProvider extends BaseProvider {
@@ -255,13 +259,13 @@ export class HttpTransportProvider extends BaseProvider {
       const timeout =
         typeof timeoutFromCfg === 'number'
           ? timeoutFromCfg
-          // 默认 Provider 请求超时时间：500s
-          : (baseProfile?.timeout ?? 500000);
+          // 默认 Provider 请求超时时间
+          : (baseProfile?.timeout ?? DEFAULT_PROVIDER.TIMEOUT_MS);
 
       const maxRetries =
         typeof maxRetriesFromCfg === 'number'
           ? maxRetriesFromCfg
-          : (baseProfile?.maxRetries ?? 3);
+          : (baseProfile?.maxRetries ?? DEFAULT_PROVIDER.MAX_RETRIES);
 
       return {
         defaultBaseUrl,
@@ -395,12 +399,12 @@ export class HttpTransportProvider extends BaseProvider {
     const envTimeout = Number(process.env.ROUTECODEX_PROVIDER_TIMEOUT_MS || process.env.RCC_PROVIDER_TIMEOUT_MS || NaN);
     const effectiveTimeout = Number.isFinite(envTimeout) && envTimeout > 0
       ? envTimeout
-      // 默认 Provider 请求超时时间：500s（可被 env / overrides 覆盖）
-      : (this.config.config.overrides?.timeout ?? profile.timeout ?? 500000);
+      // 默认 Provider 请求超时时间（可被 env / overrides 覆盖）
+      : (this.config.config.overrides?.timeout ?? profile.timeout ?? DEFAULT_PROVIDER.TIMEOUT_MS);
     const envRetries = Number(process.env.ROUTECODEX_PROVIDER_RETRIES || process.env.RCC_PROVIDER_RETRIES || NaN);
     const effectiveRetries = Number.isFinite(envRetries) && envRetries >= 0
       ? envRetries
-      : (this.config.config.overrides?.maxRetries ?? profile.maxRetries ?? 3);
+      : (this.config.config.overrides?.maxRetries ?? profile.maxRetries ?? DEFAULT_PROVIDER.MAX_RETRIES);
 
     const overrideHeaders =
       this.config.config.overrides?.headers ||
@@ -692,6 +696,42 @@ export class HttpTransportProvider extends BaseProvider {
   ): Promise<unknown | undefined> {
     try {
       const providerAuth = this.config.config.auth;
+      const authRawType =
+        typeof (providerAuth as { rawType?: unknown }).rawType === 'string'
+          ? String((providerAuth as { rawType?: string }).rawType).trim().toLowerCase()
+          : '';
+      const isDeepSeekAccount = authRawType === 'deepseek-account';
+
+      if (isDeepSeekAccount) {
+        const statusCode = extractStatusCodeFromError(error as ProviderErrorAugmented);
+        const authProvider = this.authProvider;
+        if (statusCode === 401 && authProvider?.refreshCredentials) {
+          await authProvider.refreshCredentials();
+          const retryHeaders = await this.buildRequestHeaders();
+          let finalRetryHeaders = await this.finalizeRequestHeaders(retryHeaders, processedRequest);
+          finalRetryHeaders = this.applyStreamModeHeaders(finalRetryHeaders, requestInfo.wantsSse);
+          if (requestInfo.wantsSse) {
+            const upstreamStream = await this.httpClient.postStream(requestInfo.targetUrl, requestInfo.body, finalRetryHeaders);
+            const streamForHost = captureSse
+              ? attachProviderSseSnapshotStream(upstreamStream, {
+                requestId: context.requestId,
+                headers: finalRetryHeaders,
+                url: requestInfo.targetUrl,
+                entryEndpoint: requestInfo.entryEndpoint,
+                clientRequestId: requestInfo.clientRequestId,
+                providerKey: context.providerKey,
+                providerId: context.providerId,
+                extra: { retry: true, authRefresh: true }
+              })
+              : upstreamStream;
+            return await this.wrapUpstreamSseResponse(streamForHost, context);
+          }
+          const response = await this.httpClient.post(requestInfo.targetUrl, requestInfo.body, finalRetryHeaders);
+          return response;
+        }
+        return undefined;
+      }
+
       if (this.normalizeAuthMode(providerAuth.type) !== 'oauth') {
         return undefined;
       }
@@ -1132,6 +1172,15 @@ export class HttpTransportProvider extends BaseProvider {
     }
 
     // 认证头部（如为 OAuth，若当前无有效 token 则尝试拉取/刷新一次再取 headers）
+    const providerAuth = this.config.config.auth;
+    const authRawType =
+      typeof (providerAuth as { rawType?: unknown }).rawType === 'string'
+        ? String((providerAuth as { rawType?: string }).rawType).trim().toLowerCase()
+        : '';
+    if (authRawType === 'deepseek-account' && this.authProvider?.validateCredentials) {
+      await this.authProvider.validateCredentials();
+    }
+
     let authHeaders: Record<string, string> = {};
     authHeaders = this.authProvider?.buildHeaders() || {};
 
@@ -1437,7 +1486,7 @@ export class HttpTransportProvider extends BaseProvider {
     }
     const payload = `${userAgent}:${sessionId}:${timestamp}`;
     try {
-      return createHmac('sha256', apiKey).update(payload, 'utf8').digest('hex');
+      return createHmac(DEFAULT_PROVIDER.IFLOW_SIGNATURE_ALGORITHM, apiKey).update(payload, 'utf8').digest('hex');
     } catch {
       return undefined;
     }
@@ -1522,17 +1571,50 @@ export class HttpTransportProvider extends BaseProvider {
   protected getEffectiveBaseUrl(): string {
     const runtime = this.getRuntimeProfile();
     const runtimeEndpoint = this.pickRuntimeBaseUrl(runtime);
-    return (
-      runtimeEndpoint ||
-      runtime?.baseUrl ||
-      this.config.config.overrides?.baseUrl ||
-      this.config.config.baseUrl ||
+    const candidates = [
+      runtimeEndpoint,
+      runtime?.baseUrl,
+      this.config.config.overrides?.baseUrl,
+      this.config.config.baseUrl,
       this.serviceProfile.defaultBaseUrl
-    );
+    ]
+      .map((value) => (typeof value === 'string' ? value.trim() : ''))
+      .filter((value) => value.length > 0);
+
+    // Self-heal malformed runtime baseUrl values (for example an endpoint path accidentally
+    // injected into baseUrl) by preferring the first absolute URL candidate.
+    const firstAbsolute = candidates.find((value) => this.looksLikeAbsoluteUrl(value));
+    if (firstAbsolute) {
+      return firstAbsolute;
+    }
+
+    const serviceDefault = String(this.serviceProfile.defaultBaseUrl || '').trim();
+    if (serviceDefault && this.looksLikeAbsoluteUrl(serviceDefault)) {
+      return serviceDefault;
+    }
+
+    const staticServiceDefault = this.resolveStaticServiceDefaultBaseUrl();
+    if (staticServiceDefault && this.looksLikeAbsoluteUrl(staticServiceDefault)) {
+      return staticServiceDefault;
+    }
+
+    return candidates[0] || this.serviceProfile.defaultBaseUrl;
   }
 
   protected getBaseUrlCandidates(_context: ProviderContext): string[] | undefined {
     return undefined;
+  }
+
+  private resolveStaticServiceDefaultBaseUrl(): string | undefined {
+    const cfg = this.config.config as ProviderConfigInternal;
+    const profileKey = this.resolveProfileKey(cfg);
+    const baseProfile =
+      DynamicProfileLoader.buildServiceProfile(profileKey) ||
+      DynamicProfileLoader.buildServiceProfile(this.providerType);
+    const candidate = typeof baseProfile?.defaultBaseUrl === 'string'
+      ? baseProfile.defaultBaseUrl.trim()
+      : '';
+    return candidate || undefined;
   }
 
   protected getEffectiveEndpoint(): string {
@@ -1799,4 +1881,3 @@ export class HttpTransportProvider extends BaseProvider {
   }
 
 }
-const CODEX_IDENTIFIER_MAX_LENGTH = 64;

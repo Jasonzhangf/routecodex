@@ -1,4 +1,4 @@
-import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess, type SpawnSyncOptions, type SpawnSyncReturns } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -14,6 +14,16 @@ export interface CamoufoxLaunchOptions {
 
 type LaunchHandle = {
   child: ChildProcess;
+};
+
+type PythonLauncher = {
+  command: string;
+  argsPrefix: string[];
+};
+
+type PythonRunResult = {
+  launcher: PythonLauncher | null;
+  result: SpawnSyncReturns<string | Buffer> | null;
 };
 
 const activeLaunchers: Set<LaunchHandle> = new Set();
@@ -273,15 +283,67 @@ function resolveCamoufoxScriptPath(): string | null {
   return null;
 }
 
-function runCamoufoxPathCheck(): boolean {
-  try {
-    const result = spawnSync('python3', ['-m', 'camoufox', 'path'], {
-      stdio: 'ignore'
-    });
-    return result.status === 0;
-  } catch {
-    return false;
+function makeLauncherKey(launcher: PythonLauncher): string {
+  return `${launcher.command}\u0000${launcher.argsPrefix.join('\u0000')}`;
+}
+
+function pushUniqueLauncher(target: PythonLauncher[], launcher: PythonLauncher): void {
+  if (!launcher.command.trim()) {
+    return;
   }
+  const key = makeLauncherKey(launcher);
+  if (target.some((item) => makeLauncherKey(item) === key)) {
+    return;
+  }
+  target.push(launcher);
+}
+
+export function resolveCamoufoxPythonLaunchers(
+  platform: NodeJS.Platform = process.platform,
+  env: Record<string, string | undefined> = process.env
+): PythonLauncher[] {
+  const launchers: PythonLauncher[] = [];
+  const configured = String(env.ROUTECODEX_PYTHON || env.RCC_PYTHON || '').trim();
+  if (configured) {
+    pushUniqueLauncher(launchers, { command: configured, argsPrefix: [] });
+  }
+  if (platform === 'win32') {
+    pushUniqueLauncher(launchers, { command: 'py', argsPrefix: ['-3'] });
+    pushUniqueLauncher(launchers, { command: 'python3', argsPrefix: [] });
+    pushUniqueLauncher(launchers, { command: 'python', argsPrefix: [] });
+    return launchers;
+  }
+  pushUniqueLauncher(launchers, { command: 'python3', argsPrefix: [] });
+  pushUniqueLauncher(launchers, { command: 'python', argsPrefix: [] });
+  return launchers;
+}
+
+function runPythonWithLaunchers(
+  buildArgs: (launcher: PythonLauncher) => string[],
+  options: SpawnSyncOptions
+): PythonRunResult {
+  const launchers = resolveCamoufoxPythonLaunchers();
+  for (const launcher of launchers) {
+    try {
+      const result = spawnSync(launcher.command, buildArgs(launcher), options);
+      const code = (result.error as NodeJS.ErrnoException | undefined)?.code;
+      if (code === 'ENOENT') {
+        continue;
+      }
+      return { launcher, result };
+    } catch {
+      continue;
+    }
+  }
+  return { launcher: null, result: null };
+}
+
+function runCamoufoxPathCheck(): boolean {
+  const execution = runPythonWithLaunchers(
+    (launcher) => [...launcher.argsPrefix, '-m', 'camoufox', 'path'],
+    { stdio: 'ignore' }
+  );
+  return execution.result?.status === 0;
 }
 
 export function isCamoufoxAvailable(): boolean {
@@ -289,15 +351,18 @@ export function isCamoufoxAvailable(): boolean {
 }
 
 function installCamoufox(): boolean {
-  console.warn('[OAuth] Camoufox not detected. Installing via python3 -m pip ...');
-  try {
-    const result = spawnSync('python3', ['-m', 'pip', 'install', '--user', '-U', 'camoufox'], {
-      stdio: 'inherit'
-    });
-    return result.status === 0;
-  } catch {
+  const execution = runPythonWithLaunchers(
+    (launcher) => [...launcher.argsPrefix, '-m', 'pip', 'install', '--user', '-U', 'camoufox'],
+    { stdio: 'inherit' }
+  );
+  if (!execution.result) {
     return false;
   }
+  const launcherPreview = execution.launcher
+    ? `${execution.launcher.command} ${execution.launcher.argsPrefix.join(' ')}`.trim()
+    : 'python';
+  logOAuthDebug(`[OAuth] Camoufox: install attempted via ${launcherPreview}`);
+  return execution.result.status === 0;
 }
 
 function ensureCamoufoxInstalled(): boolean {
@@ -316,10 +381,11 @@ function ensureCamoufoxInstalled(): boolean {
     logOAuthDebug('[OAuth] Camoufox: auto-install disabled; camoufox not available');
     return false;
   }
+  console.warn('[OAuth] Camoufox not detected. Installing via Python launcher ...');
   logOAuthDebug('[OAuth] Camoufox: python module not available, attempting install...');
   const installed = installCamoufox();
   if (!installed) {
-    logOAuthDebug('[OAuth] Camoufox: auto-install failed or python3 unavailable');
+    logOAuthDebug('[OAuth] Camoufox: auto-install failed or Python launcher unavailable');
     return false;
   }
   const ready = runCamoufoxPathCheck();
@@ -327,6 +393,10 @@ function ensureCamoufoxInstalled(): boolean {
     logOAuthDebug('[OAuth] Camoufox: install completed but camoufox path still unresolved');
   }
   return ready;
+}
+
+export function ensureCamoufoxInstalledForInit(): boolean {
+  return ensureCamoufoxInstalled();
 }
 
 function resolveGenFingerprintScriptPath(): string | null {
@@ -469,9 +539,9 @@ function ensureFingerprintEnv(profileId: string, provider?: string | null, alias
     // non-fatal
   }
 
-  const args = [scriptPath, '--profile-id', profileId, '--output-dir', fpRoot];
+  const scriptArgs = ['--profile-id', profileId, '--output-dir', fpRoot];
   if (osPolicy) {
-    args.push('--os', osPolicy);
+    scriptArgs.push('--os', osPolicy);
   }
 
   logOAuthDebug(
@@ -481,11 +551,16 @@ function ensureFingerprintEnv(profileId: string, provider?: string | null, alias
   const timeoutMsRaw = String(process.env.ROUTECODEX_CAMOUFOX_FINGERPRINT_TIMEOUT_MS || '').trim();
   const timeoutMs = timeoutMsRaw ? Number(timeoutMsRaw) : NaN;
   const effectiveTimeoutMs = Number.isFinite(timeoutMs) && timeoutMs > 0 ? Math.floor(timeoutMs) : 30_000;
-  const result = spawnSync('python3', args, {
+  const execution = runPythonWithLaunchers((launcher) => [...launcher.argsPrefix, scriptPath, ...scriptArgs], {
     stdio: 'ignore',
     timeout: effectiveTimeoutMs
   });
+  const result = execution.result;
 
+  if (!result) {
+    logOAuthDebug('[OAuth] Camoufox: no Python launcher available for fingerprint generation');
+    return writeMinimalFingerprintEnv(profileId, osPolicy);
+  }
   if (result.error) {
     logOAuthDebug(
       `[OAuth] Camoufox: fingerprint generator failed - ${result.error instanceof Error ? result.error.message : String(
@@ -532,7 +607,7 @@ export async function openAuthInCamoufox(options: CamoufoxLaunchOptions): Promis
   );
   if (!ensureCamoufoxInstalled()) {
     try {
-      console.warn('[OAuth] Camoufox not available (python3 -m camoufox path failed). Falling back to system browser.');
+      console.warn('[OAuth] Camoufox not available (Python launcher check failed). Falling back to system browser.');
     } catch {
       // ignore
     }

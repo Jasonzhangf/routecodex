@@ -191,7 +191,9 @@ export class QuotaManagerModule implements ManagerModule {
     } catch {
       // ignore persistence failures
     }
-    this.saveSnapshotToDisk();
+    void this.saveSnapshotToDisk().catch(() => {
+      // best-effort; ignore persistence errors
+    });
   }
 
   /**
@@ -271,7 +273,9 @@ export class QuotaManagerModule implements ManagerModule {
       this.applyAntigravityQuotaToCore(providerKey, record, now);
     }
     this.snapshot = next;
-    this.saveSnapshotToDisk();
+    void this.saveSnapshotToDisk().catch(() => {
+      // best-effort; ignore persistence errors
+    });
   }
 
   /**
@@ -652,7 +656,9 @@ export class QuotaManagerModule implements ManagerModule {
       // No token files -> no valid aliases -> drop any persisted snapshot rows.
       if (this.snapshot && Object.keys(this.snapshot).length) {
         this.snapshot = {};
-        this.saveSnapshotToDisk();
+        void this.saveSnapshotToDisk().catch(() => {
+      // best-effort; ignore persistence errors
+    });
       }
       return;
     }
@@ -706,7 +712,9 @@ export class QuotaManagerModule implements ManagerModule {
       }
       if (changed) {
         this.snapshot = cleaned;
-        this.saveSnapshotToDisk();
+        void this.saveSnapshotToDisk().catch(() => {
+      // best-effort; ignore persistence errors
+    });
       }
     }
 
@@ -727,7 +735,9 @@ export class QuotaManagerModule implements ManagerModule {
       }
       if (changed) {
         this.snapshot = cleaned;
-        this.saveSnapshotToDisk();
+        void this.saveSnapshotToDisk().catch(() => {
+      // best-effort; ignore persistence errors
+    });
       }
     }
   }
@@ -779,10 +789,10 @@ export class QuotaManagerModule implements ManagerModule {
     }
   }
 
-  private saveSnapshotToDisk(): void {
+  private async saveSnapshotToDisk(): Promise<void> {
     const filePath = this.resolveStatePath();
     try {
-      fs.writeFileSync(filePath, `${JSON.stringify(this.snapshot, null, 2)}\n`, 'utf8');
+      await fsAsync.writeFile(filePath, `${JSON.stringify(this.snapshot, null, 2)}\n`, 'utf8');
     } catch {
       // best effort
     }

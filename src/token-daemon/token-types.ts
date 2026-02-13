@@ -1,12 +1,13 @@
 import path from 'path';
 
-export type OAuthProviderId = 'iflow' | 'qwen' | 'gemini-cli' | 'antigravity';
+export type OAuthProviderId = 'iflow' | 'qwen' | 'gemini-cli' | 'antigravity' | 'deepseek-account';
 
 export const SUPPORTED_OAUTH_PROVIDERS: OAuthProviderId[] = [
   'iflow',
   'qwen',
   'gemini-cli',
-  'antigravity'
+  'antigravity',
+  'deepseek-account'
 ];
 
 export interface RawTokenPayload {

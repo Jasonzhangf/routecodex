@@ -1,7 +1,9 @@
 import { spawnSync as nodeSpawnSync } from 'node:child_process';
+import net from 'node:net';
 
 import { API_PATHS, HTTP_PROTOCOLS, LOCAL_HOSTS } from '../../constants/index.js';
 import { logProcessLifecycle } from '../../utils/process-lifecycle-logger.js';
+import { listManagedServerPidsByPort } from '../../utils/managed-server-pids.js';
 
 export type PortUtilsSpinner = {
   start(text?: string): PortUtilsSpinner;
@@ -32,6 +34,20 @@ export function killPidBestEffortImpl(args: {
   const processKill = args.processKill ?? process.kill.bind(process);
 
   if (!Number.isFinite(pid) || pid <= 0) {
+    return;
+  }
+
+  if (pid === process.pid) {
+    logProcessLifecycle({
+      event: 'self_termination',
+      source: 'cli.port-utils',
+      details: {
+        result: 'blocked',
+        reason: 'self_kill_guard',
+        signal: force ? 'SIGKILL' : 'SIGTERM',
+        targetPid: pid
+      }
+    });
     return;
   }
 
@@ -86,41 +102,24 @@ export function killPidBestEffortImpl(args: {
 
 export function findListeningPidsImpl(args: {
   port: number;
-  isWindows: boolean;
+  isWindows?: boolean;
+  routeCodexHomeDir?: string;
+  processKill?: typeof process.kill;
   spawnSyncImpl?: typeof nodeSpawnSync;
   logger: PortUtilsLogger;
-  parseNetstatListeningPids: (stdout: string, port: number) => number[];
 }): number[] {
-  const { port, isWindows, logger, parseNetstatListeningPids } = args;
+  const { port } = args;
   const spawnSyncImpl = args.spawnSyncImpl ?? nodeSpawnSync;
+  const processKill = args.processKill ?? process.kill.bind(process);
 
   try {
-    if (isWindows) {
-      const result = spawnSyncImpl('netstat', ['-ano', '-p', 'tcp'], { encoding: 'utf8' });
-      if (result.error) {
-        logger.warning(`netstat not available to inspect port usage: ${result.error.message}`);
-        return [];
-      }
-      return parseNetstatListeningPids(result.stdout || '', port);
-    }
-
-    // macOS/BSD lsof expects either "-i TCP:port" or "-tiTCP:port" as a single argument.
-    // Use the compact form to avoid treating ":port" as a filename.
-    const result = spawnSyncImpl('lsof', [`-tiTCP:${port}`, '-sTCP:LISTEN'], { encoding: 'utf8' });
-    if (result.error) {
-      logger.warning(`lsof not available to inspect port usage: ${result.error.message}`);
-      return [];
-    }
-
-    const out = String(result.stdout || '').trim();
-    if (!out) {
-      return [];
-    }
-    return out
-      .split(/\s+/g)
-      .map((s) => Number(String(s).trim()))
-      .filter((n) => Number.isFinite(n) && n > 0);
+    return listManagedServerPidsByPort(port, {
+      routeCodexHomeDir: args.routeCodexHomeDir,
+      processKill,
+      spawnSyncImpl
+    });
   } catch {
+    args.logger.warning(`Failed to resolve managed pid for port ${port}`);
     return [];
   }
 }
@@ -176,6 +175,20 @@ export async function ensurePortAvailableImpl(args: {
     source: 'cli.ensurePortAvailable',
     details: { port, restart: Boolean(opts.restart) }
   });
+
+  const canBindPort = async (): Promise<boolean> => {
+    return await new Promise<boolean>((resolve) => {
+      try {
+        const server = net.createServer();
+        server.once('error', () => resolve(false));
+        server.listen({ host: '0.0.0.0', port }, () => {
+          server.close(() => resolve(true));
+        });
+      } catch {
+        resolve(false);
+      }
+    });
+  };
 
   // Best-effort HTTP shutdown on common loopback hosts to cover IPv4/IPv6
   try {
@@ -235,14 +248,37 @@ export async function ensurePortAvailableImpl(args: {
     /* ignore */
   }
 
-  const initialPids = args.findListeningPids(port);
-  if (initialPids.length === 0) {
+  if (await canBindPort()) {
     logProcessLifecycle({
       event: 'port_check_result',
       source: 'cli.ensurePortAvailable',
       details: { port, result: 'free' }
     });
     return;
+  }
+
+  const initialPids = args.findListeningPids(port);
+  if (initialPids.length === 0) {
+    const healthyWithoutPid = await args.isServerHealthyQuick(port);
+    if (healthyWithoutPid && !opts.restart) {
+      logProcessLifecycle({
+        event: 'port_check_result',
+        source: 'cli.ensurePortAvailable',
+        details: { port, result: 'already_running_unmanaged' }
+      });
+      parentSpinner.stop();
+      args.logger.success(`RouteCodex is already running on port ${port}.`);
+      args.logger.info(`Use 'rcc stop --port ${port}' for graceful shutdown.`);
+      args.exit(0);
+    }
+    logProcessLifecycle({
+      event: 'port_check_result',
+      source: 'cli.ensurePortAvailable',
+      details: { port, result: 'occupied_unmanaged' }
+    });
+    throw new Error(
+      `Port ${port} is occupied by an unmanaged process. Refusing blind kill; stop it manually or use /shutdown if it is RouteCodex.`
+    );
   }
 
   logProcessLifecycle({

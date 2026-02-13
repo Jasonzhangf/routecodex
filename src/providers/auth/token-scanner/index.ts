@@ -31,6 +31,7 @@ function resolveAuthDir(): string {
  * 例如: iflow-oauth-1-work.json -> provider=iflow, sequence=1, alias=work
  */
 const TOKEN_FILE_PATTERN = /^(.+)-oauth-(\d+)(?:-(.+))?\.json$/;
+const DEEPSEEK_ACCOUNT_TOKEN_PATTERN = /^deepseek-account-(.+)\.json$/i;
 
 /**
  * 扫描auth目录下指定provider的所有token文件
@@ -87,6 +88,61 @@ export async function scanProviderTokenFiles(provider: string): Promise<TokenFil
     return matches;
   } catch (error) {
     // 目录不存在或读取失败，返回空列表
+    return [];
+  }
+}
+
+/**
+ * 扫描 auth 目录下 DeepSeek 账号 token 文件。
+ * 命名规范: deepseek-account-<alias>.json
+ * 例如: deepseek-account-1.json, deepseek-account-3-13823250570.json
+ */
+export async function scanDeepSeekAccountTokenFiles(): Promise<TokenFileMatch[]> {
+  try {
+    const authDir = resolveAuthDir();
+    const entries = await fs.readdir(authDir);
+    const matches: Array<{ filePath: string; alias: string; numericPrefix?: number }> = [];
+
+    for (const entry of entries) {
+      if (!entry.endsWith('.json')) {
+        continue;
+      }
+      if (entry.includes('.bak')) {
+        continue;
+      }
+      const match = entry.match(DEEPSEEK_ACCOUNT_TOKEN_PATTERN);
+      if (!match) {
+        continue;
+      }
+      const aliasRaw = String(match[1] || '').trim();
+      if (!aliasRaw) {
+        continue;
+      }
+      const numericMatch = aliasRaw.match(/^(\d+)(?:-|$)/);
+      const numericPrefix = numericMatch ? Number.parseInt(numericMatch[1], 10) : undefined;
+      matches.push({
+        filePath: path.join(authDir, entry),
+        alias: aliasRaw,
+        ...(Number.isFinite(numericPrefix as number) ? { numericPrefix } : {})
+      });
+    }
+
+    matches.sort((a, b) => {
+      const aNum = typeof a.numericPrefix === 'number' ? a.numericPrefix : Number.POSITIVE_INFINITY;
+      const bNum = typeof b.numericPrefix === 'number' ? b.numericPrefix : Number.POSITIVE_INFINITY;
+      if (aNum !== bNum) {
+        return aNum - bNum;
+      }
+      return a.alias.localeCompare(b.alias);
+    });
+
+    return matches.map((entry, index) => ({
+      filePath: entry.filePath,
+      providerPrefix: 'deepseek-account',
+      sequence: index + 1,
+      alias: entry.alias
+    }));
+  } catch {
     return [];
   }
 }

@@ -82,6 +82,15 @@ describe('RouteCodexHttpServer hub policy injection', () => {
       createResponsesSseToJsonConverter: async () => ({
         convertSseToJson: async () => ({})
       }),
+      resolveClockConfigSnapshot: async () => null,
+      reserveClockDueTasks: async () => ({ reservation: null }),
+      commitClockDueReservation: async () => {},
+      listClockSessionIdsSnapshot: async () => [],
+      listClockTasksSnapshot: async () => [],
+      scheduleClockTasksSnapshot: async () => [],
+      updateClockTaskSnapshot: async () => null,
+      cancelClockTaskSnapshot: async () => false,
+      clearClockTasksSnapshot: async () => 0,
       getHubPipelineCtor: async () =>
         class HubPipelineMock {
           constructor(config: any) {
@@ -162,6 +171,15 @@ describe('RouteCodexHttpServer hub policy injection', () => {
       createResponsesSseToJsonConverter: async () => ({
         convertSseToJson: async () => ({})
       }),
+      resolveClockConfigSnapshot: async () => null,
+      reserveClockDueTasks: async () => ({ reservation: null }),
+      commitClockDueReservation: async () => {},
+      listClockSessionIdsSnapshot: async () => [],
+      listClockTasksSnapshot: async () => [],
+      scheduleClockTasksSnapshot: async () => [],
+      updateClockTaskSnapshot: async () => null,
+      cancelClockTaskSnapshot: async () => false,
+      clearClockTasksSnapshot: async () => 0,
       getHubPipelineCtor: async () =>
         class HubPipelineMock {
           constructor(config: any) {
@@ -243,6 +261,15 @@ describe('RouteCodexHttpServer hub policy injection', () => {
       createResponsesSseToJsonConverter: async () => ({
         convertSseToJson: async () => ({})
       }),
+      resolveClockConfigSnapshot: async () => null,
+      reserveClockDueTasks: async () => ({ reservation: null }),
+      commitClockDueReservation: async () => {},
+      listClockSessionIdsSnapshot: async () => [],
+      listClockTasksSnapshot: async () => [],
+      scheduleClockTasksSnapshot: async () => [],
+      updateClockTaskSnapshot: async () => null,
+      cancelClockTaskSnapshot: async () => false,
+      clearClockTasksSnapshot: async () => 0,
       getHubPipelineCtor: async () =>
         class HubPipelineMock {
           constructor(config: any) {

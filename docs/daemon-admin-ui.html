@@ -376,6 +376,10 @@
         grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr);
       }
 
+      .grid.grid-clock {
+        grid-template-columns: minmax(0, 2.2fr) minmax(0, 0.8fr);
+      }
+
       .grid.grid-one {
         grid-template-columns: minmax(0, 1fr);
       }
@@ -463,6 +467,71 @@
         background: rgba(255, 255, 255, 0.02);
         color: rgba(255, 255, 255, 0.86);
         font-weight: 650;
+      }
+
+      .table tr.clock-detail-row td {
+        background: rgba(255, 255, 255, 0.01);
+      }
+
+      .clock-group-toggle {
+        all: unset;
+        cursor: pointer;
+        display: block;
+        width: 100%;
+        white-space: normal;
+        line-height: 1.35;
+      }
+
+      .clock-group-summary {
+        margin-top: 4px;
+        font-size: 11px;
+        color: var(--muted);
+        white-space: normal;
+        overflow-wrap: anywhere;
+        line-height: 1.3;
+      }
+
+      .clock-detail-list {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding: 4px 0;
+      }
+
+      .clock-detail-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+      }
+
+      .clock-detail-item .clock-detail-content {
+        min-width: 0;
+        flex: 1;
+        white-space: normal;
+        overflow-wrap: anywhere;
+        line-height: 1.3;
+      }
+
+      .table.table-clock-merged th:nth-child(1),
+      .table.table-clock-merged td:nth-child(1) {
+        width: 10%;
+      }
+      .table.table-clock-merged th:nth-child(2),
+      .table.table-clock-merged td:nth-child(2) {
+        width: 50%;
+      }
+      .table.table-clock-merged th:nth-child(3),
+      .table.table-clock-merged td:nth-child(3) {
+        width: 14%;
+      }
+      .table.table-clock-merged th:nth-child(4),
+      .table.table-clock-merged td:nth-child(4) {
+        width: 14%;
+      }
+      .table.table-clock-merged th:nth-child(5),
+      .table.table-clock-merged td:nth-child(5) {
+        width: 12%;
       }
 
       .table tr.provider-row:hover td {
@@ -659,6 +728,7 @@
             <div class="pill"><span id="statusDot" class="dot"></span><span id="statusText">connecting…</span></div>
             <div class="pill"><span class="mono" id="serverId">serverId: —</span></div>
             <div class="pill"><span class="mono" id="serverVersion">version: —</span></div>
+            <div class="pill"><span class="mono" id="clockOverviewText">clock: loading…</span></div>
             <button id="restartRuntimeBtn" class="primary">Restart runtime</button>
           </div>
         </header>
@@ -722,6 +792,7 @@
           <button class="tab" data-tab="credentials">Auth Provider Pool</button>
           <button class="tab" data-tab="quota">Quota Pool</button>
           <button class="tab" data-tab="routing">Runtime Routing Pool</button>
+          <button class="tab" data-tab="clock">Clock</button>
         </div>
 
         <section id="panelControl" data-panel="control" style="display:none;">
@@ -808,6 +879,59 @@
                     </tr>
                   </thead>
                   <tbody id="controlQuotaProvidersTbody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="panelClock" data-panel="clock" style="display:none;">
+          <div class="grid grid-clock">
+            <div class="card" style="box-shadow: none;">
+              <p class="section-title">Clock tasks (merged)</p>
+              <p class="section-sub">Merged by content + recurrence + tool to reduce repeated rows. Expand a row to inspect per-time details.</p>
+              <div class="row" style="margin-bottom: 10px;">
+                <label for="clockSessionFilterInput">session filter</label>
+                <input id="clockSessionFilterInput" type="text" placeholder="conversation session id (optional)" style="min-width: 320px; flex: 1;" />
+                <button id="refreshClockBtn" class="primary">Refresh</button>
+                <span id="clockHint" class="muted" style="margin-left:auto; font-size:12px;"></span>
+              </div>
+              <div id="clockSummaryPills" class="row" style="margin-bottom: 10px;"></div>
+
+              <p class="section-title" style="margin-top: 8px;">Merged list</p>
+              <div class="table-wrap">
+                <table class="table table-clock-merged">
+                  <thead>
+                    <tr>
+                      <th>status</th>
+                      <th>task (foldable)</th>
+                      <th>next due</th>
+                      <th>time plan</th>
+                      <th>scope</th>
+                    </tr>
+                  </thead>
+                  <tbody id="clockMergedTbody"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="card" style="box-shadow: none;">
+              <p class="section-title">Clock daemon bindings</p>
+              <p class="section-sub">tmux daemon registry and heartbeat state used by clock injection.</p>
+              <div class="table-wrap">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>daemonId</th>
+                      <th>tmuxSession</th>
+                      <th>boundConversations</th>
+                      <th>heartbeat</th>
+                      <th>lastInject</th>
+                      <th>status</th>
+                      <th>lastError</th>
+                    </tr>
+                  </thead>
+                  <tbody id="clockDaemonsTbody"></tbody>
                 </table>
               </div>
             </div>
@@ -1383,6 +1507,9 @@
               adminAuth: null,
               controlSnapshot: null,
               controlSnapshotUpdatedAt: 0,
+              clockSnapshot: null,
+              clockSnapshotUpdatedAt: 0,
+              clockExpandedGroups: {},
               quotaProviders: [],
               quotaProvidersUpdatedAt: 0,
               quotaProviderMap: null,
@@ -1500,7 +1627,8 @@
           { name: "tokens", el: $("panelTokens") },
           { name: "credentials", el: $("panelCredentials") },
           { name: "quota", el: $("panelQuota") },
-          { name: "routing", el: $("panelRouting") }
+          { name: "routing", el: $("panelRouting") },
+          { name: "clock", el: $("panelClock") }
         ];
         for (const p of panels) p.el.style.display = p.name === name ? "block" : "none";
 
@@ -1522,7 +1650,8 @@
         tokens: 0,
         credentials: 0,
         quota: 0,
-        routing: 0
+        routing: 0,
+        clock: 0
       };
 
       async function maybeRefreshTab(name) {
@@ -1545,6 +1674,9 @@
           else if (key === "routing") {
             await refreshRuntimes();
             await refreshRoutingSources();
+          }
+          else if (key === "clock") {
+            await refreshClockTab();
           }
         } catch {
           // ignore refresh failures on tab switch
@@ -2130,6 +2262,486 @@
         };
       }
 
+      async function refreshClockOverview() {
+        const overviewEl = $("clockOverviewText");
+        if (!overviewEl) return;
+        try {
+          const res = await fetch("/daemon/clock/tasks");
+          if (!res || !res.ok) throw new Error(res ? String(res.status) : "request_failed");
+          const data = await res.json().catch(() => ({}));
+          const sessions = data && Array.isArray(data.sessions) ? data.sessions : [];
+          const records = data && Array.isArray(data.records) ? data.records : [];
+          const now = Date.now();
+          let taskCount = 0;
+          let dueCount = 0;
+          for (const session of sessions) {
+            const tasks = session && Array.isArray(session.tasks) ? session.tasks : [];
+            taskCount += tasks.length;
+            for (const task of tasks) {
+              let dueAtMs = Number(task && task.dueAtMs);
+              if (!Number.isFinite(dueAtMs) && task && typeof task.dueAt === "string") {
+                const parsed = Date.parse(task.dueAt);
+                dueAtMs = Number.isFinite(parsed) ? parsed : NaN;
+              }
+              if (Number.isFinite(dueAtMs) && dueAtMs <= now) {
+                dueCount += 1;
+              }
+            }
+          }
+          const onlineCount = records.filter((record) => {
+            const hb = Number(record && record.lastHeartbeatAtMs);
+            return Number.isFinite(hb) && now - hb <= 45_000;
+          }).length;
+          overviewEl.textContent = "clock: tasks " + taskCount + " · due " + dueCount + " · daemon " + onlineCount + "/" + records.length;
+        } catch {
+          overviewEl.textContent = "clock: unavailable";
+        }
+      }
+
+      function clockParseDueAtMs(task) {
+        const rawMs = Number(task && task.dueAtMs);
+        if (Number.isFinite(rawMs)) return Math.floor(rawMs);
+        const rawIso = task && typeof task.dueAt === "string" ? task.dueAt.trim() : "";
+        if (!rawIso) return NaN;
+        const parsed = Date.parse(rawIso);
+        return Number.isFinite(parsed) ? Math.floor(parsed) : NaN;
+      }
+
+      function clockTaskStatusKind(task, now) {
+        const dueAtMs = clockParseDueAtMs(task);
+        if (!Number.isFinite(dueAtMs)) return "warn";
+        const delta = dueAtMs - now;
+        if (delta < -60_000) return "bad";
+        if (delta <= 0) return "warn";
+        return "ok";
+      }
+
+      function clockTaskStatusText(task, now) {
+        const dueAtMs = clockParseDueAtMs(task);
+        if (!Number.isFinite(dueAtMs)) return "invalid";
+        const delta = dueAtMs - now;
+        if (delta < -60_000) return "overdue";
+        if (delta <= 0) return "due";
+        if (delta <= 60_000) return "soon";
+        return "scheduled";
+      }
+
+      function clockRecurrenceText(task) {
+        const rec = task && task.recurrence && typeof task.recurrence === "object" ? task.recurrence : null;
+        if (!rec) return "one-shot";
+        const kind = textOf(rec.kind || "").trim() || "recurring";
+        const maxRuns = Number(rec.maxRuns);
+        const count = Number(task && task.deliveryCount);
+        let base = kind;
+        if (kind === "interval") {
+          const everyMinutes = Number(rec.everyMinutes);
+          if (Number.isFinite(everyMinutes) && everyMinutes > 0) {
+            base += "/" + Math.floor(everyMinutes) + "m";
+          }
+        }
+        if (Number.isFinite(maxRuns) && maxRuns > 0) {
+          const safeCount = Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
+          base += " " + safeCount + "/" + Math.floor(maxRuns);
+        }
+        return base;
+      }
+
+      function clockNormalizeContent(value) {
+        return textOf(value).trim().replace(/\s+/g, " ");
+      }
+
+      function clockShortLabel(value, head = 8, tail = 4) {
+        const raw = textOf(value).trim();
+        if (!raw) return "—";
+        const maxLen = Math.max(6, head + tail + 1);
+        if (raw.length <= maxLen) return raw;
+        return raw.slice(0, head) + "…" + raw.slice(-tail);
+      }
+
+      function clockSessionPreview(sessionIds, limit = 3) {
+        const ids = Array.isArray(sessionIds) ? sessionIds.filter(Boolean) : [];
+        if (!ids.length) return "—";
+        const shown = ids.slice(0, limit).map((id) => clockShortLabel(id, 6, 3));
+        if (ids.length > limit) {
+          shown.push("+" + String(ids.length - limit));
+        }
+        return shown.join(", ");
+      }
+
+      function clockFormatCompactTs(ms) {
+        if (!Number.isFinite(ms) || ms <= 0) return "—";
+        const d = new Date(ms);
+        if (Number.isNaN(d.getTime())) return "—";
+        const pad = (n) => String(n).padStart(2, "0");
+        return pad(d.getMonth() + 1) + "-" + pad(d.getDate()) + " " + pad(d.getHours()) + ":" + pad(d.getMinutes());
+      }
+
+      function clockReadableTmuxSessionId(value) {
+        const raw = textOf(value).trim();
+        if (!raw) return "—";
+        const managed = /^rcc_([a-zA-Z0-9_-]+)_(\d{13})_([a-f0-9]{4,})$/i.exec(raw);
+        if (!managed) return clockShortLabel(raw, 10, 6);
+        const role = textOf(managed[1]).replace(/_/g, "-");
+        const startedAt = Number(managed[2]);
+        const startedText = clockFormatCompactTs(startedAt);
+        const suffix = textOf(managed[3]).slice(0, 4);
+        return role + "@" + startedText + "#" + suffix;
+      }
+
+      function clockTmuxPreview(values, limit = 2) {
+        const list = Array.isArray(values) ? values.filter((v) => textOf(v).trim() && textOf(v).trim() !== "—") : [];
+        if (!list.length) return "—";
+        const uniq = Array.from(new Set(list));
+        const shown = uniq.slice(0, limit);
+        if (uniq.length > limit) {
+          shown.push("+" + String(uniq.length - limit));
+        }
+        return shown.join(", ");
+      }
+
+      function clockRecurrenceShort(task) {
+        const rec = task && task.recurrence && typeof task.recurrence === "object" ? task.recurrence : null;
+        if (!rec) return "1x";
+        const kind = textOf(rec.kind || "").trim().toLowerCase();
+        const maxRuns = Number(rec.maxRuns);
+        let prefix = "R";
+        if (kind === "daily") prefix = "D";
+        else if (kind === "weekly") prefix = "W";
+        else if (kind === "interval") {
+          const everyMinutes = Number(rec.everyMinutes);
+          prefix = Number.isFinite(everyMinutes) && everyMinutes > 0 ? "I" + String(Math.floor(everyMinutes)) + "m" : "I";
+        }
+        if (Number.isFinite(maxRuns) && maxRuns > 0) {
+          return prefix + "/" + String(Math.floor(maxRuns));
+        }
+        return prefix;
+      }
+
+      function clockBuildGroupKey(task) {
+        const content = clockNormalizeContent(task && task.task);
+        const tool = textOf(task && task.tool).trim();
+        return [content || "(empty)", tool || "tool:none"].join("||");
+      }
+
+      function renderClockTabFromSnapshot() {
+        const snap = UI.clockSnapshot && typeof UI.clockSnapshot === "object" ? UI.clockSnapshot : {};
+        const sessions = Array.isArray(snap.sessions) ? snap.sessions : [];
+        const records = Array.isArray(snap.records) ? snap.records : [];
+
+        const mergedBody = $("clockMergedTbody");
+        const daemonBody = $("clockDaemonsTbody");
+        const summaryBox = $("clockSummaryPills");
+        const hint = $("clockHint");
+
+        if (mergedBody) mergedBody.replaceChildren();
+        if (daemonBody) daemonBody.replaceChildren();
+        if (summaryBox) summaryBox.replaceChildren();
+
+        const now = Date.now();
+        const groups = new Map();
+        const rows = [];
+        const conversationToTmuxSession = new Map();
+        for (const record of records) {
+          const tmuxSession = textOf((record && record.tmuxSessionId) || (record && record.sessionId)).trim();
+          if (!tmuxSession) continue;
+          const conversationIds = Array.isArray(record && record.conversationSessionIds) ? record.conversationSessionIds : [];
+          for (const cid of conversationIds) {
+            const key = textOf(cid).trim();
+            if (!key || conversationToTmuxSession.has(key)) continue;
+            conversationToTmuxSession.set(key, tmuxSession);
+          }
+        }
+        for (const session of sessions) {
+          const sessionId = textOf(session && session.sessionId).trim();
+          const mappedTmuxSessionId = textOf(conversationToTmuxSession.get(sessionId)).trim();
+          const mappedTmuxShort = clockReadableTmuxSessionId(mappedTmuxSessionId);
+          const tasks = session && Array.isArray(session.tasks) ? session.tasks : [];
+          for (const task of tasks) {
+            const key = clockBuildGroupKey(task);
+            const dueMs = clockParseDueAtMs(task);
+            const status = clockTaskStatusText(task, now);
+            const statusKind = clockTaskStatusKind(task, now);
+            const taskId = textOf(task && task.taskId).trim();
+            const recurrence = clockRecurrenceText(task);
+            const tool = textOf(task && task.tool).trim() || "—";
+            const deliveryCount = Number(task && task.deliveryCount);
+            const row = {
+              groupKey: key,
+              sessionId,
+              sessionShort: clockShortLabel(sessionId, 6, 3),
+              tmuxSessionId: mappedTmuxSessionId,
+              tmuxShort: mappedTmuxShort,
+              taskId,
+              taskShort: clockShortLabel(taskId, 6, 4),
+              content: textOf(task && task.task).trim(),
+              dueMs,
+              dueAt: Number.isFinite(dueMs) ? formatEpochWithDelta(dueMs) : "—",
+              dueCompact: Number.isFinite(dueMs) ? formatEpochMs(dueMs) : "—",
+              status,
+              statusKind,
+              recurrence,
+              recurrenceShort: clockRecurrenceShort(task),
+              deliveryCount,
+              tool,
+              toolShort: clockShortLabel(tool, 8, 3)
+            };
+            row.metaShort = row.toolShort + " · " + row.recurrenceShort + (Number.isFinite(row.deliveryCount) ? " · #" + String(Math.max(0, Math.floor(row.deliveryCount))) : "");
+            rows.push(row);
+
+            if (!groups.has(key)) {
+              groups.set(key, {
+                groupKey: key,
+                content: row.content || "(empty)",
+                sessionIds: new Set(),
+                tmuxDisplays: new Set(),
+                taskCount: 0,
+                dueMin: Number.isFinite(dueMs) ? dueMs : NaN,
+                dueMax: Number.isFinite(dueMs) ? dueMs : NaN,
+                dueCount: 0,
+                overdueCount: 0,
+                statusKind: row.statusKind,
+                toolSet: new Set(),
+                recurrenceSet: new Set(),
+                rows: []
+              });
+            }
+            const group = groups.get(key);
+            group.sessionIds.add(sessionId || "—");
+            if (row.tmuxShort && row.tmuxShort !== "—") {
+              group.tmuxDisplays.add(row.tmuxShort);
+            }
+            group.toolSet.add(row.toolShort);
+            group.recurrenceSet.add(row.recurrenceShort);
+            group.taskCount += 1;
+            group.rows.push(row);
+            if (row.status === "due") group.dueCount += 1;
+            if (row.status === "overdue") group.overdueCount += 1;
+            if (Number.isFinite(dueMs)) {
+              if (!Number.isFinite(group.dueMin) || dueMs < group.dueMin) group.dueMin = dueMs;
+              if (!Number.isFinite(group.dueMax) || dueMs > group.dueMax) group.dueMax = dueMs;
+            }
+            if (row.statusKind === "bad") group.statusKind = "bad";
+            else if (row.statusKind === "warn" && group.statusKind !== "bad") group.statusKind = "warn";
+          }
+        }
+
+        const merged = Array.from(groups.values());
+        merged.sort((a, b) => {
+          const aDue = Number.isFinite(a.dueMin) ? a.dueMin : Number.POSITIVE_INFINITY;
+          const bDue = Number.isFinite(b.dueMin) ? b.dueMin : Number.POSITIVE_INFINITY;
+          if (aDue !== bDue) return aDue - bDue;
+          return b.taskCount - a.taskCount;
+        });
+
+        rows.sort((a, b) => {
+          const aDue = Number.isFinite(a.dueMs) ? a.dueMs : Number.POSITIVE_INFINITY;
+          const bDue = Number.isFinite(b.dueMs) ? b.dueMs : Number.POSITIVE_INFINITY;
+          if (aDue !== bDue) return aDue - bDue;
+          return a.sessionId.localeCompare(b.sessionId);
+        });
+
+        if (!UI.clockExpandedGroups || typeof UI.clockExpandedGroups !== "object") {
+          UI.clockExpandedGroups = {};
+        }
+
+        if (summaryBox) {
+          const dueNow = rows.filter((r) => r.status === "due").length;
+          const overdue = rows.filter((r) => r.status === "overdue").length;
+          const recurring = rows.filter((r) => r.recurrence !== "one-shot").length;
+          const onlineDaemon = records.filter((record) => {
+            const hb = Number(record && record.lastHeartbeatAtMs);
+            return Number.isFinite(hb) && now - hb <= 45_000;
+          }).length;
+          const pills = [
+            ["sessions", sessions.length, ""],
+            ["tasks", rows.length, ""],
+            ["merged", merged.length, ""],
+            ["due", dueNow, dueNow ? "warn" : "ok"],
+            ["overdue", overdue, overdue ? "bad" : "ok"],
+            ["recurring", recurring, ""],
+            ["daemon", onlineDaemon + "/" + records.length, onlineDaemon ? "ok" : "warn"]
+          ];
+          for (const [label, value, kind] of pills) {
+            summaryBox.appendChild(pill(label + ": " + value, kind));
+          }
+        }
+
+        if (mergedBody) {
+          if (!merged.length) {
+            mergedBody.appendChild(createInfoRow(5, "No clock tasks."));
+          } else {
+            for (const item of merged) {
+              const isExpanded = !!UI.clockExpandedGroups[item.groupKey];
+              const tr = document.createElement("tr");
+              tr.className = "group-row";
+              const statusText = item.overdueCount > 0
+                ? "overdue " + item.overdueCount
+                : item.dueCount > 0
+                  ? "due " + item.dueCount
+                  : "scheduled";
+              const statusTd = document.createElement("td");
+              statusTd.appendChild(pill(statusText, item.statusKind));
+              tr.appendChild(statusTd);
+
+              const taskTd = document.createElement("td");
+              const toggleBtn = document.createElement("button");
+              toggleBtn.type = "button";
+              toggleBtn.className = "clock-group-toggle mono";
+              toggleBtn.textContent = (isExpanded ? "▾ " : "▸ ") + (item.content || "(empty)");
+              toggleBtn.title = isExpanded ? "collapse" : "expand";
+              toggleBtn.addEventListener("click", () => {
+                UI.clockExpandedGroups[item.groupKey] = !UI.clockExpandedGroups[item.groupKey];
+                renderClockTabFromSnapshot();
+              });
+              taskTd.appendChild(toggleBtn);
+              const groupSummary = document.createElement("div");
+              groupSummary.className = "clock-group-summary mono";
+              const toolPart = Array.from(item.toolSet).slice(0, 2).join(", ") || "—";
+              const recPart = Array.from(item.recurrenceSet).slice(0, 2).join(", ") || "1x";
+              groupSummary.textContent = "tool " + toolPart + " · rec " + recPart;
+              groupSummary.title = groupSummary.textContent;
+              taskTd.appendChild(groupSummary);
+              tr.appendChild(taskTd);
+
+              const nextDueText = Number.isFinite(item.dueMin) ? formatEpochWithDelta(item.dueMin) : "—";
+              tr.appendChild(createCell("td", nextDueText, "mono truncate", { title: true }));
+
+              const sortedDueRows = item.rows
+                .filter((r) => Number.isFinite(r.dueMs))
+                .sort((a, b) => a.dueMs - b.dueMs);
+              let planText = "—";
+              if (sortedDueRows.length) {
+                planText = sortedDueRows.slice(0, 3).map((r) => r.dueCompact).join(" | ");
+                if (sortedDueRows.length > 3) {
+                  planText += " +" + String(sortedDueRows.length - 3);
+                }
+              }
+              tr.appendChild(createCell("td", planText, "mono truncate", { title: true }));
+
+              const sessionList = Array.from(item.sessionIds);
+              const tmuxPreview = clockTmuxPreview(Array.from(item.tmuxDisplays));
+              const scopeText = String(item.taskCount) + " task" + (item.taskCount > 1 ? "s" : "") + " · " + String(sessionList.length) + " session" + (sessionList.length > 1 ? "s" : "") + " · tmux " + tmuxPreview;
+              tr.appendChild(createCell("td", scopeText, "mono truncate", { title: true }));
+              mergedBody.appendChild(tr);
+
+              const detailTr = document.createElement("tr");
+              detailTr.className = "clock-detail-row";
+              if (!isExpanded) detailTr.style.display = "none";
+              const detailTd = document.createElement("td");
+              detailTd.colSpan = 5;
+              if (isExpanded) {
+                const detailList = document.createElement("div");
+                detailList.className = "clock-detail-list";
+                const detailRows = item.rows.slice().sort((a, b) => {
+                  const aDue = Number.isFinite(a.dueMs) ? a.dueMs : Number.POSITIVE_INFINITY;
+                  const bDue = Number.isFinite(b.dueMs) ? b.dueMs : Number.POSITIVE_INFINITY;
+                  if (aDue !== bDue) return aDue - bDue;
+                  return a.sessionId.localeCompare(b.sessionId);
+                });
+                for (const detail of detailRows.slice(0, 40)) {
+                  const line = document.createElement("div");
+                  line.className = "clock-detail-item mono";
+
+                  const timeSpan = document.createElement("span");
+                  timeSpan.textContent = detail.dueCompact;
+                  timeSpan.title = detail.dueAt;
+                  line.appendChild(timeSpan);
+
+                  line.appendChild(pill(detail.status, detail.statusKind));
+
+                  const idSpan = document.createElement("span");
+                  const tmuxPrefix = detail.tmuxShort && detail.tmuxShort !== "—" ? "tmux " + detail.tmuxShort + " · " : "";
+                  idSpan.textContent = tmuxPrefix + "sid " + detail.sessionShort + " · id " + detail.taskShort + " · " + detail.metaShort;
+                  idSpan.title = "tmux " + (detail.tmuxSessionId || "—") + " | session " + detail.sessionId + " | task " + detail.taskId + " | " + detail.tool + " | " + detail.recurrence;
+                  line.appendChild(idSpan);
+
+                  const contentSpan = document.createElement("span");
+                  contentSpan.className = "clock-detail-content";
+                  contentSpan.textContent = detail.content || "(empty)";
+                  contentSpan.title = detail.content || "(empty)";
+                  line.appendChild(contentSpan);
+
+                  detailList.appendChild(line);
+                }
+                if (detailRows.length > 40) {
+                  const more = document.createElement("div");
+                  more.className = "mono muted";
+                  more.textContent = "… " + String(detailRows.length - 40) + " more";
+                  detailList.appendChild(more);
+                }
+                detailTd.appendChild(detailList);
+              }
+              detailTr.appendChild(detailTd);
+              mergedBody.appendChild(detailTr);
+            }
+          }
+        }
+
+        if (daemonBody) {
+          if (!records.length) {
+            daemonBody.appendChild(createInfoRow(7, "No clock daemon bindings."));
+          } else {
+            for (const rec of records) {
+              const tr = document.createElement("tr");
+              const daemonId = textOf(rec && rec.daemonId).trim() || "—";
+              const tmuxSession = textOf((rec && rec.tmuxSessionId) || (rec && rec.sessionId)).trim() || "—";
+              const conversations = Array.isArray(rec && rec.conversationSessionIds) ? rec.conversationSessionIds : [];
+              const hb = Number(rec && rec.lastHeartbeatAtMs);
+              const inject = Number(rec && rec.lastInjectAtMs);
+              const errText = textOf(rec && rec.lastError).trim();
+              const isOnline = Number.isFinite(hb) && now - hb <= 45_000;
+              const statusKind = errText ? "bad" : isOnline ? "ok" : "warn";
+              const statusText = errText ? "error" : isOnline ? "online" : "stale";
+
+              tr.appendChild(createCell("td", daemonId, "mono truncate", { title: true }));
+              const tmuxReadable = clockReadableTmuxSessionId(tmuxSession);
+              const tmuxCell = createCell("td", tmuxReadable, "mono truncate", { title: true });
+              tmuxCell.title = tmuxSession || tmuxReadable;
+              tr.appendChild(tmuxCell);
+              tr.appendChild(createCell("td", String(conversations.length), "mono"));
+              tr.appendChild(createCell("td", Number.isFinite(hb) ? formatEpochWithDelta(hb) : "—", "mono truncate", { title: true }));
+              tr.appendChild(createCell("td", Number.isFinite(inject) ? formatEpochWithDelta(inject) : "—", "mono truncate", { title: true }));
+              const statusTd = document.createElement("td");
+              statusTd.appendChild(pill(statusText, statusKind));
+              tr.appendChild(statusTd);
+              tr.appendChild(createCell("td", errText || "—", "mono truncate", { title: true }));
+              daemonBody.appendChild(tr);
+            }
+          }
+        }
+
+        if (hint) {
+          hint.textContent = "groups " + merged.length + " · tasks " + rows.length + " · updated: " + formatTs(UI.clockSnapshotUpdatedAt);
+        }
+      }
+
+      async function refreshClockTab() {
+        try {
+          const filter = textOf($("clockSessionFilterInput") && $("clockSessionFilterInput").value).trim();
+          const path = filter
+            ? "/daemon/clock/tasks?sessionId=" + encodeURIComponent(filter)
+            : "/daemon/clock/tasks";
+          const data = await apiFetch(path);
+          UI.clockSnapshot = data && typeof data === "object" ? data : {};
+          UI.clockSnapshotUpdatedAt = Date.now();
+          renderClockTabFromSnapshot();
+        } catch (e) {
+          const mergedBody = $("clockMergedTbody");
+          const daemonBody = $("clockDaemonsTbody");
+          if (mergedBody) {
+            mergedBody.replaceChildren();
+            mergedBody.appendChild(createErrorRow(5, e && e.message ? e.message : String(e)));
+          }
+          if (daemonBody) {
+            daemonBody.replaceChildren();
+            daemonBody.appendChild(createInfoRow(7, "No daemon bindings."));
+          }
+          const hint = $("clockHint");
+          if (hint) hint.textContent = "clock snapshot failed";
+          if (e && e.status === 401) notifyUnauthorizedOnce("clock");
+        }
+      }
+
       async function refreshStatus() {
         // /health is public; use it to always show version even before admin login.
         try {
@@ -2151,6 +2763,7 @@
           $("statusDot").classList.add("err");
           $("serverId").textContent = "serverId: —";
         }
+        await refreshClockOverview();
       }
 
       function formatTs(ms) {
@@ -4548,6 +5161,14 @@
           .then(refreshStatus)
           .then(() => selectTab(getActiveTab()))
           .catch(() => {});
+      });
+
+      $("refreshClockBtn").addEventListener("click", refreshClockTab);
+      $("clockSessionFilterInput").addEventListener("keydown", (ev) => {
+        if (ev && ev.key === "Enter") {
+          ev.preventDefault();
+          void refreshClockTab();
+        }
       });
 
       $("restartRuntimeBtn").addEventListener("click", async () => {

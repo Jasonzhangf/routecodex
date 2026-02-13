@@ -8,6 +8,8 @@
  * - 自动清理过期的错误记录
  */
 
+import { DEFAULT_KEY_429_TRACKER } from '../constants/index.js';
+
 export interface Key429ErrorRecord {
   key: string;
   timestamp: number;
@@ -33,11 +35,11 @@ export class Key429Tracker {
 
   constructor(config?: Partial<Key429TrackerConfig>) {
     this.config = {
-      maxConsecutiveErrors: 3,
-      minIntervalMs: 60 * 1000, // 1 分钟
-      blacklistDurationMs: 30 * 60 * 1000, // 30 分钟
-      cleanupIntervalMs: 5 * 60 * 1000, // 5 分钟
-      maxRecordAgeMs: 2 * 60 * 60 * 1000, // 2 小时
+      maxConsecutiveErrors: DEFAULT_KEY_429_TRACKER.MAX_CONSECUTIVE_ERRORS,
+      minIntervalMs: DEFAULT_KEY_429_TRACKER.MIN_INTERVAL_MS,
+      blacklistDurationMs: DEFAULT_KEY_429_TRACKER.BLACKLIST_DURATION_MS,
+      cleanupIntervalMs: DEFAULT_KEY_429_TRACKER.CLEANUP_INTERVAL_MS,
+      maxRecordAgeMs: DEFAULT_KEY_429_TRACKER.MAX_RECORD_AGE_MS,
       ...config,
     };
 

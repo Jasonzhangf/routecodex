@@ -1,9 +1,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import crypto from 'node:crypto';
 import type { ChildProcess, SpawnOptions } from 'node:child_process';
 import type { Command } from 'commander';
 
 import { LOCAL_HOSTS } from '../../constants/index.js';
+import { encodeClockClientApiKey } from '../../utils/clock-client-token.js';
+import { logProcessLifecycle } from '../../utils/process-lifecycle-logger.js';
 
 type Spinner = {
   start(text?: string): Spinner;
@@ -38,6 +43,7 @@ export type LauncherCommandContext = {
   sleep: (ms: number) => Promise<void>;
   fetch: typeof fetch;
   spawn: (command: string, args: string[], options: SpawnOptions) => ChildProcess;
+  spawnSyncImpl?: typeof spawnSync;
   getModulesConfigPath: () => string;
   resolveServerEntryPath: () => string;
   waitForever: () => Promise<void>;
@@ -89,6 +95,27 @@ type ResolvedServerConnection = {
   portPart: string;
   serverUrl: string;
   configuredApiKey: string | null;
+};
+
+type ClockClientService = {
+  daemonId: string;
+  tmuxSessionId: string;
+  tmuxTarget?: string;
+  syncHeartbeat: () => Promise<boolean>;
+  stop: () => Promise<void>;
+};
+
+type ManagedTmuxSession = {
+  sessionName: string;
+  tmuxTarget: string;
+  reused: boolean;
+  stop: () => void;
+};
+
+type TmuxSelfHealPolicy = {
+  enabled: boolean;
+  maxRetries: number;
+  retryDelaySec: number;
 };
 
 function resolveBinary(options: {
@@ -155,6 +182,55 @@ function parseServerUrl(
   const rawPath = typeof parsed.pathname === 'string' ? parsed.pathname : '';
   const basePath = rawPath && rawPath !== '/' ? rawPath.replace(/\/+$/, '') : '';
   return { protocol, host, port: Number.isFinite(port as number) ? (port as number) : null, basePath };
+}
+
+function resolveBoolFromEnv(value: unknown, fallback: boolean): boolean {
+  if (typeof value !== 'string') {
+    return fallback;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) {
+    return true;
+  }
+  if (['0', 'false', 'no', 'off'].includes(normalized)) {
+    return false;
+  }
+  return fallback;
+}
+
+function resolveIntFromEnv(value: unknown, fallback: number, min: number, max: number): number {
+  if (typeof value !== 'string') {
+    return fallback;
+  }
+  const parsed = Number.parseInt(value.trim(), 10);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  return Math.max(min, Math.min(max, Math.floor(parsed)));
+}
+
+function resolveTmuxSelfHealPolicy(env: NodeJS.ProcessEnv): TmuxSelfHealPolicy {
+  const enabled = resolveBoolFromEnv(
+    env.ROUTECODEX_TMUX_SELF_HEAL_ENABLE ?? env.RCC_TMUX_SELF_HEAL_ENABLE,
+    true
+  );
+  const maxRetries = resolveIntFromEnv(
+    env.ROUTECODEX_TMUX_SELF_HEAL_MAX_RETRIES ?? env.RCC_TMUX_SELF_HEAL_MAX_RETRIES,
+    3,
+    0,
+    20
+  );
+  const retryDelayMs = resolveIntFromEnv(
+    env.ROUTECODEX_TMUX_SELF_HEAL_RETRY_DELAY_MS ?? env.RCC_TMUX_SELF_HEAL_RETRY_DELAY_MS,
+    2000,
+    200,
+    60_000
+  );
+  return {
+    enabled,
+    maxRetries,
+    retryDelaySec: Math.max(1, Math.ceil(retryDelayMs / 1000))
+  };
 }
 
 function readConfigApiKey(fsImpl: typeof fs, configPath: string): string | null {
@@ -239,19 +315,27 @@ function resolveServerConnection(
     actualBasePath = parsed.basePath;
   }
 
-  if (ctx.isDevPackage) {
+  if (!(typeof options.url === 'string' && options.url.trim())) {
     if (!actualPort) {
-      const envPort = toIntegerPort(ctx.env.ROUTECODEX_PORT || ctx.env.RCC_PORT);
-      actualPort = envPort || ctx.defaultDevPort;
-      ctx.logger.info(`Using dev default port ${actualPort} for routecodex ${ctx.isDevPackage ? 'launcher' : 'rcc'} mode`);
-    }
-  } else {
-    if (!actualPort && !(typeof options.url === 'string' && options.url.trim())) {
       const configMaybe = tryReadConfigHostPort(fsImpl, configPath);
-      actualPort = configMaybe.port;
+      if (configMaybe.port) {
+        actualPort = configMaybe.port;
+      }
       if (configMaybe.host) {
         actualHost = configMaybe.host;
       }
+    }
+
+    if (!actualPort) {
+      const envPort = toIntegerPort(ctx.env.ROUTECODEX_PORT || ctx.env.RCC_PORT);
+      if (envPort) {
+        actualPort = envPort;
+      }
+    }
+
+    if (!actualPort && ctx.isDevPackage) {
+      actualPort = ctx.defaultDevPort;
+      ctx.logger.info(`Using dev default port ${actualPort} for routecodex launcher mode`);
     }
   }
 
@@ -291,16 +375,41 @@ async function checkServerReady(
   timeoutMs = 2500
 ): Promise<boolean> {
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     const headers = apiKey ? { 'x-api-key': apiKey } : undefined;
-    const response = await ctx.fetch(`${serverUrl}/ready`, { signal: controller.signal, method: 'GET', headers }).catch(() => null);
-    clearTimeout(timeoutId);
-    if (!response || !response.ok) {
+
+    const probe = async (pathSuffix: '/ready' | '/health'): Promise<{ ok: boolean; body: any | null }> => {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const response = await ctx.fetch(`${serverUrl}${pathSuffix}`, {
+          signal: controller.signal,
+          method: 'GET',
+          headers
+        }).catch(() => null);
+        if (!response || !response.ok) {
+          return { ok: false, body: null };
+        }
+        const body = await response.json().catch(() => null);
+        return { ok: true, body };
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    };
+
+    const readyProbe = await probe('/ready');
+    if (readyProbe.ok) {
+      const status = typeof readyProbe.body?.status === 'string' ? readyProbe.body.status : '';
+      if (status.toLowerCase() === 'ready' || readyProbe.body?.ready === true) {
+        return true;
+      }
+    }
+
+    const healthProbe = await probe('/health');
+    if (!healthProbe.ok) {
       return false;
     }
-    const body = await response.json().catch(() => null);
-    return body?.status === 'ready';
+    const status = typeof healthProbe.body?.status === 'string' ? healthProbe.body.status.toLowerCase() : '';
+    return status === 'ok' || status === 'ready' || healthProbe.body?.ready === true || healthProbe.body?.pipelineReady === true;
   } catch {
     return false;
   }
@@ -383,16 +492,80 @@ async function ensureServerReady(
     RCC_PORT: String(resolved.port)
   } as NodeJS.ProcessEnv;
 
+  logProcessLifecycle({
+    event: 'detached_spawn',
+    source: 'cli.launcher.ensureServerReady',
+    details: {
+      role: 'routecodex-server',
+      result: 'attempt',
+      port: resolved.port,
+      command: ctx.nodeBin,
+      args: [ctx.resolveServerEntryPath(), ctx.getModulesConfigPath()],
+      logPath
+    }
+  });
+
   try {
-    const serverProcess = ctx.spawn(ctx.nodeBin, [ctx.resolveServerEntryPath(), ctx.getModulesConfigPath()], {
-      stdio: ['ignore', logFd, logFd],
-      env,
-      detached: true
-    });
     try {
-      serverProcess.unref?.();
-    } catch {
-      // ignore
+      const serverProcess = ctx.spawn(ctx.nodeBin, [ctx.resolveServerEntryPath(), ctx.getModulesConfigPath()], {
+        stdio: ['ignore', logFd, logFd],
+        env,
+        detached: true
+      });
+      logProcessLifecycle({
+        event: 'detached_spawn',
+        source: 'cli.launcher.ensureServerReady',
+        details: {
+          role: 'routecodex-server',
+          result: 'success',
+          port: resolved.port,
+          command: ctx.nodeBin,
+          args: [ctx.resolveServerEntryPath(), ctx.getModulesConfigPath()],
+          childPid: serverProcess.pid ?? null,
+          logPath
+        }
+      });
+      const onChildError = (error: unknown) => {
+        logProcessLifecycle({
+          event: 'detached_spawn',
+          source: 'cli.launcher.ensureServerReady',
+          details: {
+            role: 'routecodex-server',
+            result: 'failed',
+            port: resolved.port,
+            command: ctx.nodeBin,
+            args: [ctx.resolveServerEntryPath(), ctx.getModulesConfigPath()],
+            childPid: serverProcess.pid ?? null,
+            logPath,
+            error
+          }
+        });
+      };
+      if (typeof (serverProcess as { once?: unknown }).once === 'function') {
+        (serverProcess as { once: (event: string, listener: (error: unknown) => void) => void }).once('error', onChildError);
+      } else if (typeof (serverProcess as { on?: unknown }).on === 'function') {
+        (serverProcess as { on: (event: string, listener: (error: unknown) => void) => void }).on('error', onChildError);
+      }
+      try {
+        serverProcess.unref?.();
+      } catch {
+        // ignore
+      }
+    } catch (error) {
+      logProcessLifecycle({
+        event: 'detached_spawn',
+        source: 'cli.launcher.ensureServerReady',
+        details: {
+          role: 'routecodex-server',
+          result: 'failed',
+          port: resolved.port,
+          command: ctx.nodeBin,
+          args: [ctx.resolveServerEntryPath(), ctx.getModulesConfigPath()],
+          logPath,
+          error
+        }
+      });
+      throw error;
     }
   } finally {
     try {
@@ -411,6 +584,17 @@ async function ensureServerReady(
     }
   }
 
+  logProcessLifecycle({
+    event: 'detached_spawn',
+    source: 'cli.launcher.ensureServerReady',
+    details: {
+      role: 'routecodex-server',
+      result: 'not_ready_timeout',
+      port: resolved.port,
+      logPath
+    }
+  });
+
   throw new Error(`RouteCodex server did not become ready in time. Check logs: ${logPath}`);
 }
 
@@ -427,6 +611,638 @@ function resolveWorkingDirectory(ctx: LauncherCommandContext, fsImpl: typeof fs,
   }
   return getCwd();
 }
+
+function isTmuxAvailable(spawnSyncImpl: typeof spawnSync = spawnSync): boolean {
+  try {
+    const result = spawnSyncImpl('tmux', ['-V'], { encoding: 'utf8' });
+    return result.status === 0;
+  } catch {
+    return false;
+  }
+}
+
+function resolveCurrentTmuxTarget(env: NodeJS.ProcessEnv, spawnSyncImpl: typeof spawnSync = spawnSync): string | null {
+  const tmuxEnv = typeof env.TMUX === 'string' ? env.TMUX.trim() : '';
+  if (!tmuxEnv) {
+    return null;
+  }
+  try {
+    const result = spawnSyncImpl('tmux', ['display-message', '-p', '#S:#I.#P'], { encoding: 'utf8' });
+    if (result.status !== 0) {
+      return null;
+    }
+    const target = String(result.stdout || '').trim();
+    return target || null;
+  } catch {
+    return null;
+  }
+}
+
+function isReusableTmuxPaneTarget(
+  spawnSyncImpl: typeof spawnSync,
+  tmuxTarget: string,
+  cwd: string
+): boolean {
+  const normalizedTarget = String(tmuxTarget || '').trim();
+  if (!normalizedTarget) {
+    return false;
+  }
+  const expectedCwd = normalizePathForComparison(cwd);
+  if (!expectedCwd) {
+    return false;
+  }
+  try {
+    const paneResult = spawnSyncImpl(
+      'tmux',
+      ['list-panes', '-t', normalizedTarget, '-F', '#{pane_current_command}\t#{pane_current_path}'],
+      { encoding: 'utf8' }
+    );
+    if (paneResult.status !== 0) {
+      return false;
+    }
+    const firstLine = String(paneResult.stdout || '')
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find(Boolean);
+    if (!firstLine) {
+      return false;
+    }
+    const [command, panePath] = firstLine.split('\t');
+    const normalizedPanePath = normalizePathForComparison(String(panePath || '').trim());
+    return isReusableIdlePaneCommand(String(command || '').trim()) && normalizedPanePath === expectedCwd;
+  } catch {
+    return false;
+  }
+}
+
+function shellQuote(value: string): string {
+  return `'${String(value ?? '').replace(/'/g, `'"'"'`)}'`;
+}
+
+function buildShellCommand(tokens: string[]): string {
+  return tokens.map((token) => shellQuote(token)).join(' ');
+}
+
+type EnvDiff = {
+  set: Array<[string, string]>;
+  unset: string[];
+};
+
+function collectChangedEnv(baseEnv: NodeJS.ProcessEnv, nextEnv: NodeJS.ProcessEnv): EnvDiff {
+  const set: Array<[string, string]> = [];
+  const unset: string[] = [];
+
+  for (const [key, value] of Object.entries(nextEnv)) {
+    if (typeof value !== 'string') {
+      continue;
+    }
+    if (baseEnv[key] !== value) {
+      set.push([key, value]);
+    }
+  }
+
+  for (const [key, value] of Object.entries(baseEnv)) {
+    if (typeof value !== 'string') {
+      continue;
+    }
+    if (typeof nextEnv[key] === 'undefined') {
+      unset.push(key);
+    }
+  }
+
+  return { set, unset };
+}
+
+function sendTmuxSubmitKey(
+  spawnSyncImpl: typeof spawnSync,
+  tmuxTarget: string,
+  clientType?: string
+): { ok: true } | { ok: false; error: string } {
+  const type = String(clientType || '').trim().toLowerCase();
+  const submitKeys = type === 'codex' || type === 'claude'
+    ? ['Enter', 'C-m', 'KPEnter']
+    : ['Enter', 'C-m'];
+  let lastError = '';
+  for (const submitKey of submitKeys) {
+    try {
+      const result = spawnSyncImpl('tmux', ['send-keys', '-t', tmuxTarget, submitKey], { encoding: 'utf8' });
+      if (result.status === 0) {
+        return { ok: true };
+      }
+      lastError =
+        String(result.stderr || result.stdout || `tmux send-keys ${submitKey} failed`).trim()
+        || `tmux send-keys ${submitKey} failed`;
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error ?? `tmux send-keys ${submitKey} failed`);
+    }
+  }
+  for (const fallback of ['\r', '\n']) {
+    try {
+      const literal = spawnSyncImpl('tmux', ['send-keys', '-t', tmuxTarget, '-l', '--', fallback], { encoding: 'utf8' });
+      if (literal.status === 0) {
+        return { ok: true };
+      }
+      lastError =
+        String(literal.stderr || literal.stdout || 'tmux send-keys literal newline failed').trim()
+        || 'tmux send-keys literal newline failed';
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error ?? 'tmux send-keys literal newline failed');
+    }
+  }
+  return { ok: false, error: lastError || 'tmux send-keys submit failed' };
+}
+
+function isReusableIdlePaneCommand(command: string): boolean {
+  const normalized = String(command || '').trim().toLowerCase();
+  if (!normalized) {
+    return true;
+  }
+  return normalized === 'zsh'
+    || normalized === 'bash'
+    || normalized === 'sh'
+    || normalized === 'fish'
+    || normalized === 'nu';
+}
+
+function normalizeSessionToken(value: string): string {
+  return String(value || '').replace(/[^a-zA-Z0-9_-]+/g, '_') || 'launcher';
+}
+
+function normalizePathForComparison(candidate: string): string {
+  const raw = String(candidate || '').trim();
+  if (!raw) {
+    return '';
+  }
+  try {
+    const resolved = path.resolve(raw).replace(/[\\/]+$/, '');
+    if (process.platform === 'win32') {
+      return resolved.toLowerCase();
+    }
+    return resolved;
+  } catch {
+    return raw;
+  }
+}
+
+function findReusableManagedTmuxSession(
+  spawnSyncImpl: typeof spawnSync,
+  cwd: string,
+  commandName: string
+): { sessionName: string; tmuxTarget: string } | null {
+  const expectedCwd = normalizePathForComparison(cwd);
+  const expectedSessionPrefix = `rcc_${normalizeSessionToken(commandName)}_`;
+  try {
+    const listResult = spawnSyncImpl('tmux', ['list-sessions', '-F', '#S	#{session_attached}'], { encoding: 'utf8' });
+    if (listResult.status !== 0) {
+      return null;
+    }
+
+    const lines = String(listResult.stdout || '')
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    for (const line of lines) {
+      const [sessionName, attachedFlag] = line.split('	');
+      const normalizedName = String(sessionName || '').trim();
+      if (!normalizedName.startsWith(expectedSessionPrefix)) {
+        continue;
+      }
+      if (String(attachedFlag || '').trim() === '1') {
+        continue;
+      }
+
+      const panesResult = spawnSyncImpl(
+        'tmux',
+        [
+          'list-panes',
+          '-t',
+          normalizedName,
+          '-F',
+          '#{session_name}:#{window_index}.#{pane_index}	#{pane_current_command}	#{pane_current_path}'
+        ],
+        { encoding: 'utf8' }
+      );
+      if (panesResult.status !== 0) {
+        continue;
+      }
+
+      const panes = String(panesResult.stdout || '')
+        .split(/\r?\n/)
+        .map((paneLine) => paneLine.trim())
+        .filter(Boolean);
+
+      for (const pane of panes) {
+        const [target, command, panePath] = pane.split('	');
+        const tmuxTarget = String(target || '').trim();
+        const currentCommand = String(command || '').trim().toLowerCase();
+        const normalizedPanePath = normalizePathForComparison(String(panePath || '').trim());
+        if (!tmuxTarget) {
+          continue;
+        }
+        if (!isReusableIdlePaneCommand(currentCommand)) {
+          continue;
+        }
+        if (!normalizedPanePath || normalizedPanePath !== expectedCwd) {
+          continue;
+        }
+        return { sessionName: normalizedName, tmuxTarget };
+      }
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function createManagedTmuxSession(args: {
+  spawnSyncImpl: typeof spawnSync;
+  cwd: string;
+  commandName: string;
+}): ManagedTmuxSession | null {
+  const { spawnSyncImpl, cwd, commandName } = args;
+
+  const reusable = findReusableManagedTmuxSession(spawnSyncImpl, cwd, commandName);
+  if (reusable) {
+    return {
+      sessionName: reusable.sessionName,
+      tmuxTarget: reusable.tmuxTarget,
+      reused: true,
+      stop: () => {
+        try {
+          spawnSyncImpl('tmux', ['kill-session', '-t', reusable.sessionName], { encoding: 'utf8' });
+        } catch {
+          // ignore
+        }
+      }
+    };
+  }
+
+  const sessionName = (() => {
+    const token = normalizeSessionToken(commandName);
+    return `rcc_${token}_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
+  })();
+
+  try {
+    const result = spawnSyncImpl('tmux', ['new-session', '-d', '-s', sessionName, '-c', cwd], { encoding: 'utf8' });
+    if (result.status !== 0) {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+
+  const tmuxTarget = `${sessionName}:0.0`;
+  return {
+    sessionName,
+    tmuxTarget,
+    reused: false,
+    stop: () => {
+      try {
+        spawnSyncImpl('tmux', ['kill-session', '-t', sessionName], { encoding: 'utf8' });
+      } catch {
+        // ignore
+      }
+    }
+  };
+}
+
+function launchCommandInTmuxPane(args: {
+  spawnSyncImpl: typeof spawnSync;
+  tmuxTarget: string;
+  cwd: string;
+  command: string;
+  commandName: string;
+  commandArgs: string[];
+  envOverrides: EnvDiff;
+  selfHealPolicy: TmuxSelfHealPolicy;
+}): boolean {
+  const { spawnSyncImpl, tmuxTarget, cwd, command, commandName, commandArgs, envOverrides, selfHealPolicy } = args;
+  const envTokens = [
+    ...envOverrides.unset.flatMap((key) => ['-u', key]),
+    ...envOverrides.set.map(([key, value]) => `${key}=${value}`)
+  ];
+  const baseCommand = buildShellCommand(['env', ...envTokens, command, ...commandArgs]);
+  // Keep the managed tmux session alive when the client process exits.
+  // Session cleanup is handled by managed heartbeat/reaper logic, not by inline shell self-kill.
+  const shellCommand = (() => {
+    if (!selfHealPolicy.enabled || selfHealPolicy.maxRetries <= 0) {
+      return `cd -- ${shellQuote(cwd)} && ${baseCommand}`;
+    }
+    const safeCommandName = shellQuote(commandName || command || 'client');
+    const loopBody = [
+      `${baseCommand}`,
+      '__rcc_exit=$?',
+      'if [ "$__rcc_exit" -eq 0 ] || [ "$__rcc_exit" -eq 130 ] || [ "$__rcc_exit" -eq 143 ]; then exit "$__rcc_exit"; fi',
+      'if [ "$__rcc_try" -ge "$__rcc_max" ]; then exit "$__rcc_exit"; fi',
+      '__rcc_try=$((__rcc_try + 1))',
+      `echo "[routecodex][self-heal] ${safeCommandName} exited with code $__rcc_exit; retry $__rcc_try/$__rcc_max in $__rcc_delay s" >&2`,
+      'sleep "$__rcc_delay"'
+    ].join('; ');
+    return [
+      `cd -- ${shellQuote(cwd)} || exit 1`,
+      '__rcc_try=0',
+      `__rcc_max=${selfHealPolicy.maxRetries}`,
+      `__rcc_delay=${selfHealPolicy.retryDelaySec}`,
+      `while true; do ${loopBody}; done`
+    ].join('; ');
+  })();
+  try {
+    // Prefer respawn-pane for deterministic execution in managed sessions.
+    // This avoids flaky "typed but not submitted" behavior from send-keys on some terminals.
+    const respawn = spawnSyncImpl('tmux', ['respawn-pane', '-k', '-t', tmuxTarget, shellCommand], { encoding: 'utf8' });
+    if (respawn.status === 0) {
+      return true;
+    }
+  } catch {
+    // fallback to send-keys injection
+  }
+  try {
+    // Best-effort exit copy-mode before injecting and submitting shell command.
+    spawnSyncImpl('tmux', ['send-keys', '-t', tmuxTarget, '-X', 'cancel'], { encoding: 'utf8' });
+    // Reset any stale partially-typed command in reusable panes before injecting.
+    // This prevents duplicated/concatenated command lines when previous launches failed to submit.
+    spawnSyncImpl('tmux', ['send-keys', '-t', tmuxTarget, 'C-u'], { encoding: 'utf8' });
+    const literal = spawnSyncImpl('tmux', ['send-keys', '-t', tmuxTarget, '-l', '--', shellCommand], { encoding: 'utf8' });
+    if (literal.status !== 0) {
+      return false;
+    }
+    const submit = sendTmuxSubmitKey(spawnSyncImpl, tmuxTarget, commandName);
+    return submit.ok;
+  } catch {
+    return false;
+  }
+}
+
+function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+  return new Promise((resolve) => {
+    const chunks: Buffer[] = [];
+    req.on('data', (chunk) => {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
+    });
+    req.on('end', () => {
+      if (!chunks.length) {
+        resolve({});
+        return;
+      }
+      try {
+        const payload = JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>;
+        resolve(payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {});
+      } catch {
+        resolve({});
+      }
+    });
+    req.on('error', () => resolve({}));
+  });
+}
+
+function sendJson(res: ServerResponse, status: number, payload: Record<string, unknown>): void {
+  const body = JSON.stringify(payload);
+  res.statusCode = status;
+  res.setHeader('content-type', 'application/json');
+  res.end(body);
+}
+
+async function startClockClientService(args: {
+  ctx: LauncherCommandContext;
+  resolved: ResolvedServerConnection;
+  tmuxTarget: string | null;
+  spawnSyncImpl: typeof spawnSync;
+  clientType: string;
+  managedTmuxSession: boolean;
+  getManagedProcessState?: () => {
+    managedClientProcess?: boolean;
+    managedClientPid?: number | null;
+    managedClientCommandHint?: string;
+  };
+}): Promise<ClockClientService | null> {
+  const {
+    ctx,
+    resolved,
+    tmuxTarget,
+    spawnSyncImpl,
+    clientType,
+    managedTmuxSession,
+    getManagedProcessState
+  } = args;
+
+  const daemonId = (() => {
+    try {
+      return `clockd_${crypto.randomUUID()}`;
+    } catch {
+      return `clockd_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    }
+  })();
+
+  const normalizedTmuxTarget = String(tmuxTarget || '').trim();
+  const tmuxSessionId = (() => {
+    if (!normalizedTmuxTarget) {
+      return daemonId;
+    }
+    const idx = normalizedTmuxTarget.indexOf(':');
+    const candidate = (idx >= 0 ? normalizedTmuxTarget.slice(0, idx) : normalizedTmuxTarget).trim();
+    return candidate || daemonId;
+  })();
+
+  let server: ReturnType<typeof createServer> | null = null;
+  let callbackUrl = 'http://127.0.0.1:0/inject';
+
+  if (normalizedTmuxTarget) {
+    server = createServer(async (req, res) => {
+      if (req.method !== 'POST' || req.url !== '/inject') {
+        sendJson(res, 404, { ok: false, message: 'not_found' });
+        return;
+      }
+      const body = await readJsonBody(req);
+      const text = typeof body.text === 'string' ? body.text.trim() : '';
+      if (!text) {
+        sendJson(res, 400, { ok: false, message: 'text is required' });
+        return;
+      }
+      try {
+        const literal = spawnSyncImpl('tmux', ['send-keys', '-t', normalizedTmuxTarget, '-l', '--', text], { encoding: 'utf8' });
+        if (literal.status !== 0) {
+          sendJson(res, 500, {
+            ok: false,
+            message: String(literal.stderr || literal.stdout || 'tmux send-keys failed').trim() || 'tmux send-keys failed'
+          });
+          return;
+        }
+        await ctx.sleep(80);
+        const submit = sendTmuxSubmitKey(spawnSyncImpl, normalizedTmuxTarget, clientType);
+        if (!submit.ok) {
+          sendJson(res, 500, {
+            ok: false,
+            message: submit.error
+          });
+          return;
+        }
+        sendJson(res, 200, { ok: true, tmuxTarget: normalizedTmuxTarget });
+      } catch (error) {
+        sendJson(res, 500, { ok: false, message: error instanceof Error ? error.message : String(error ?? 'unknown') });
+      }
+    });
+
+    const port = await new Promise<number>((resolve, reject) => {
+      server?.once('error', reject);
+      server?.listen(0, '127.0.0.1', () => {
+        const address = server?.address();
+        if (!address || typeof address === 'string') {
+          reject(new Error('failed to resolve clock daemon callback address'));
+          return;
+        }
+        resolve(address.port);
+      });
+    }).catch(() => 0);
+
+    if (!port) {
+      try {
+        server.close();
+      } catch {
+        // ignore
+      }
+      return null;
+    }
+
+    callbackUrl = `http://127.0.0.1:${port}/inject`;
+  }
+
+  const controlUrl = `${resolved.protocol}://127.0.0.1:${resolved.port}${resolved.basePath}`;
+
+  const normalizeManagedProcessPayload = (): Record<string, unknown> => {
+    const state = typeof getManagedProcessState === 'function' ? getManagedProcessState() : undefined;
+    const managedClientProcess = state?.managedClientProcess === true;
+    const managedClientPid = typeof state?.managedClientPid === 'number' && Number.isFinite(state.managedClientPid) && state.managedClientPid > 0
+      ? Math.floor(state.managedClientPid)
+      : undefined;
+    const managedClientCommandHint = typeof state?.managedClientCommandHint === 'string' && state.managedClientCommandHint.trim()
+      ? state.managedClientCommandHint.trim()
+      : undefined;
+
+    return {
+      ...(managedClientProcess ? { managedClientProcess: true } : {}),
+      ...(managedClientPid ? { managedClientPid } : {}),
+      ...(managedClientCommandHint ? { managedClientCommandHint } : {})
+    };
+  };
+
+  const post = async (
+    pathSuffix: string,
+    payload: Record<string, unknown>
+  ): Promise<{ ok: boolean; status: number }> => {
+    try {
+      const response = await ctx.fetch(`${controlUrl}${pathSuffix}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      return { ok: response.ok, status: response.status };
+    } catch {
+      return { ok: false, status: 0 };
+    }
+  };
+
+  const reRegisterBackoffMs = resolveIntFromEnv(
+    ctx.env.ROUTECODEX_CLOCK_CLIENT_REREGISTER_BACKOFF_MS ?? ctx.env.RCC_CLOCK_CLIENT_REREGISTER_BACKOFF_MS,
+    1500,
+    200,
+    60_000
+  );
+  let registerInFlight: Promise<boolean> | null = null;
+  let lastRegisterAttemptAtMs = 0;
+
+  const registerDaemon = async (): Promise<boolean> => {
+    if (registerInFlight) {
+      return await registerInFlight;
+    }
+    registerInFlight = (async () => {
+      lastRegisterAttemptAtMs = Date.now();
+      const result = await post('/daemon/clock-client/register', {
+        daemonId,
+        tmuxSessionId,
+        sessionId: tmuxSessionId,
+        clientType,
+        ...(normalizedTmuxTarget ? { tmuxTarget: normalizedTmuxTarget } : {}),
+        managedTmuxSession,
+        callbackUrl,
+        ...normalizeManagedProcessPayload()
+      });
+      return result.ok;
+    })();
+    try {
+      return await registerInFlight;
+    } finally {
+      registerInFlight = null;
+    }
+  };
+
+  const syncHeartbeat = async (): Promise<boolean> => {
+    const heartbeat = await post('/daemon/clock-client/heartbeat', {
+      daemonId,
+      tmuxSessionId,
+      sessionId: tmuxSessionId,
+      managedTmuxSession,
+      ...normalizeManagedProcessPayload()
+    });
+    if (heartbeat.ok) {
+      return true;
+    }
+    const shouldReRegister =
+      heartbeat.status === 404
+      || heartbeat.status === 410
+      || heartbeat.status === 0
+      || heartbeat.status >= 500;
+    if (!shouldReRegister) {
+      return false;
+    }
+    const allowImmediateReRegister = heartbeat.status === 404 || heartbeat.status === 410;
+    if (!allowImmediateReRegister && Date.now() - lastRegisterAttemptAtMs < reRegisterBackoffMs) {
+      return false;
+    }
+    return await registerDaemon();
+  };
+
+  const registered = await registerDaemon();
+
+  if (!registered) {
+    if (server) {
+      try {
+        server.close();
+      } catch {
+        // ignore
+      }
+    }
+    return null;
+  }
+
+  const heartbeat = setInterval(() => {
+    void syncHeartbeat();
+  }, 10_000);
+  heartbeat.unref?.();
+
+  return {
+    daemonId,
+    tmuxSessionId,
+    ...(normalizedTmuxTarget ? { tmuxTarget: normalizedTmuxTarget } : {}),
+    syncHeartbeat,
+    stop: async () => {
+      clearInterval(heartbeat);
+      await post('/daemon/clock-client/unregister', { daemonId });
+      if (!server) {
+        return;
+      }
+      await new Promise<void>((resolve) => {
+        try {
+          server?.close(() => resolve());
+        } catch {
+          resolve();
+        }
+      });
+    }
+  };
+}
+
 
 function collectPassThroughArgs(args: {
   rawArgv: string[];
@@ -494,7 +1310,7 @@ export function createLauncherCommand(program: Command, ctx: LauncherCommandCont
   const command = program
     .command(spec.commandName)
     .description(spec.description)
-    .option('-p, --port <port>', 'RouteCodex server port (overrides config file)')
+    .option('--port <port>', 'RouteCodex server port (overrides config file)')
     .option('-h, --host <host>', 'RouteCodex server host', LOCAL_HOSTS.ANY)
     .option('--url <url>', 'RouteCodex base URL (overrides host/port), e.g. https://proxy.example.com')
     .option('-c, --config <config>', 'RouteCodex configuration file path')
@@ -524,26 +1340,13 @@ export function createLauncherCommand(program: Command, ctx: LauncherCommandCont
 
       const baseUrl = `${resolved.protocol}://${resolved.connectHost}${resolved.portPart}${resolved.basePath}`;
       const currentCwd = resolveWorkingDirectory(ctx, fsImpl, pathImpl, options.cwd);
-      const toolEnv = spec.buildEnv({
-        env: {
-          ...ctx.env,
-          PWD: currentCwd,
-          RCC_WORKDIR: currentCwd,
-          ROUTECODEX_WORKDIR: currentCwd,
-          OPENAI_BASE_URL: normalizeOpenAiBaseUrl(baseUrl),
-          OPENAI_API_BASE: normalizeOpenAiBaseUrl(baseUrl),
-          OPENAI_API_BASE_URL: normalizeOpenAiBaseUrl(baseUrl),
-          OPENAI_API_KEY: resolved.configuredApiKey || 'rcc-proxy-key'
-        } as NodeJS.ProcessEnv,
-        baseUrl,
-        configuredApiKey: resolved.configuredApiKey,
-        cwd: currentCwd
-      });
+
+      const spawnSyncImpl = ctx.spawnSyncImpl ?? spawnSync;
+      const tmuxSelfHealPolicy = resolveTmuxSelfHealPolicy(ctx.env);
 
       const toolArgs: string[] = spec.buildArgs(options);
 
       const knownOptions = new Set<string>([
-        '-p',
         '--port',
         '-h',
         '--host',
@@ -556,7 +1359,6 @@ export function createLauncherCommand(program: Command, ctx: LauncherCommandCont
         ...spec.extraKnownOptions
       ]);
       const requiredValueOptions = new Set<string>([
-        '-p',
         '--port',
         '-h',
         '--host',
@@ -601,31 +1403,165 @@ export function createLauncherCommand(program: Command, ctx: LauncherCommandCont
         command: binaryCandidate
       });
 
+      let managedTmuxSession: ManagedTmuxSession | null = null;
+      const tmuxEnabled = isTmuxAvailable(spawnSyncImpl);
+      if (!tmuxEnabled) {
+        ctx.logger.warning('[clock-advanced] tmux not found; advanced clock client service disabled (launcher will continue).');
+      }
+      let tmuxTarget = tmuxEnabled ? resolveCurrentTmuxTarget(ctx.env, spawnSyncImpl) : null;
+      if (tmuxTarget && !isReusableTmuxPaneTarget(spawnSyncImpl, tmuxTarget, currentCwd)) {
+        tmuxTarget = null;
+      }
+      if (tmuxEnabled && !tmuxTarget) {
+        managedTmuxSession = createManagedTmuxSession({
+          spawnSyncImpl,
+          cwd: currentCwd,
+          commandName: spec.commandName
+        });
+        if (managedTmuxSession) {
+          tmuxTarget = managedTmuxSession.tmuxTarget;
+          if (managedTmuxSession.reused) {
+            ctx.logger.info('[clock-advanced] reused existing managed tmux session and rebound launcher automatically.');
+          } else {
+            ctx.logger.info('[clock-advanced] started managed tmux session automatically; no manual tmux setup needed.');
+          }
+        } else {
+          ctx.logger.warning('[clock-advanced] failed to start managed tmux session; launcher continues without advanced mode.');
+        }
+      }
+
+      const managedClientProcessEnabled = !managedTmuxSession;
+      let managedClientPid: number | null = null;
+      const managedClientCommandHint = managedClientProcessEnabled ? resolvedBinary : undefined;
+
+      const reclaimRequiredRaw = String(
+        ctx.env.ROUTECODEX_CLOCK_RECLAIM_REQUIRED
+          ?? ctx.env.RCC_CLOCK_RECLAIM_REQUIRED
+          ?? '1'
+      )
+        .trim()
+        .toLowerCase();
+      const reclaimRequired = reclaimRequiredRaw !== '0' && reclaimRequiredRaw !== 'false' && reclaimRequiredRaw !== 'no';
+
+      const clockClientService = await startClockClientService({
+        ctx,
+        resolved,
+        tmuxTarget,
+        spawnSyncImpl,
+        clientType: spec.commandName,
+        managedTmuxSession: Boolean(managedTmuxSession),
+        getManagedProcessState: () => ({
+          managedClientProcess: managedClientProcessEnabled,
+          managedClientPid,
+          managedClientCommandHint
+        })
+      });
+      if (managedClientProcessEnabled && reclaimRequired && !clockClientService) {
+        throw new Error('clock client registration failed for managed child process; aborting launch to avoid orphan process');
+      }
+      if (tmuxTarget && !clockClientService) {
+        ctx.logger.warning('[clock-advanced] failed to start clock client daemon service; launcher continues without advanced mode.');
+      }
+
+      const clockAdvancedEnabled = Boolean(clockClientService && tmuxTarget);
+      const clockClientApiKey = clockAdvancedEnabled && clockClientService
+        ? encodeClockClientApiKey(resolved.configuredApiKey || 'rcc-proxy-key', clockClientService.daemonId)
+        : (resolved.configuredApiKey || 'rcc-proxy-key');
+
+      const toolEnv = spec.buildEnv({
+        env: {
+          ...ctx.env,
+          PWD: currentCwd,
+          RCC_WORKDIR: currentCwd,
+          ROUTECODEX_WORKDIR: currentCwd,
+          OPENAI_BASE_URL: normalizeOpenAiBaseUrl(baseUrl),
+          OPENAI_API_BASE: normalizeOpenAiBaseUrl(baseUrl),
+          OPENAI_API_BASE_URL: normalizeOpenAiBaseUrl(baseUrl),
+          OPENAI_API_KEY: clockClientApiKey,
+          RCC_CLOCK_ADVANCED_ENABLED: clockAdvancedEnabled ? '1' : '0',
+          ...(clockAdvancedEnabled && clockClientService
+            ? {
+              RCC_CLOCK_CLIENT_SESSION_ID: clockClientService.tmuxSessionId,
+              RCC_CLOCK_CLIENT_TMUX_SESSION_ID: clockClientService.tmuxSessionId,
+              RCC_CLOCK_CLIENT_DAEMON_ID: clockClientService.daemonId
+            }
+            : {})
+        } as NodeJS.ProcessEnv,
+        baseUrl,
+        configuredApiKey: resolved.configuredApiKey,
+        cwd: currentCwd
+      });
+
       const shouldUseShell =
         ctx.isWindows &&
         !pathImpl.extname(resolvedBinary) &&
         !resolvedBinary.includes('/') &&
         !resolvedBinary.includes('\\');
 
-      const toolProcess = ctx.spawn(resolvedBinary, toolArgs, {
-        stdio: 'inherit',
-        env: toolEnv,
-        cwd: currentCwd,
-        shell: shouldUseShell
-      });
+      const toolProcess = (() => {
+        if (managedTmuxSession) {
+          const envOverrides = collectChangedEnv(ctx.env, toolEnv);
+          const launched = launchCommandInTmuxPane({
+            spawnSyncImpl,
+            tmuxTarget: managedTmuxSession.tmuxTarget,
+            cwd: currentCwd,
+            command: resolvedBinary,
+            commandName: spec.commandName,
+            commandArgs: toolArgs,
+            envOverrides,
+            selfHealPolicy: tmuxSelfHealPolicy
+          });
+          if (!launched) {
+            managedTmuxSession.stop();
+            managedTmuxSession = null;
+            throw new Error(`Failed to send ${spec.displayName} command to managed tmux session`);
+          }
+          return ctx.spawn('tmux', ['attach-session', '-t', managedTmuxSession.sessionName], {
+            stdio: 'inherit',
+            env: ctx.env,
+            cwd: currentCwd
+          });
+        }
+
+        return ctx.spawn(resolvedBinary, toolArgs, {
+          stdio: 'inherit',
+          env: toolEnv,
+          cwd: currentCwd,
+          shell: shouldUseShell
+        });
+      })();
+
+      managedClientPid = typeof toolProcess.pid === 'number' && Number.isFinite(toolProcess.pid)
+        ? Math.floor(toolProcess.pid)
+        : null;
+      if (clockClientService && managedClientProcessEnabled && managedClientPid) {
+        void clockClientService.syncHeartbeat();
+      }
 
       spinner.succeed(`${spec.displayName} launched with RouteCodex proxy`);
-      ctx.logger.info(`Using RouteCodex server at: ${baseUrl}`);
-      ctx.logger.info(`${spec.displayName} binary: ${resolvedBinary}`);
-      if (ensureResult.started && ensureResult.logPath) {
-        ctx.logger.info(`RouteCodex auto-start logs: ${ensureResult.logPath}`);
+      if (!managedTmuxSession) {
+        ctx.logger.info(`Using RouteCodex server at: ${baseUrl}`);
+        ctx.logger.info(`${spec.displayName} binary: ${resolvedBinary}`);
+        if (ensureResult.started && ensureResult.logPath) {
+          ctx.logger.info(`RouteCodex auto-start logs: ${ensureResult.logPath}`);
+        }
+        ctx.logger.info(`Working directory for ${spec.displayName}: ${currentCwd}`);
+        ctx.logger.info(`Press Ctrl+C to exit ${spec.displayName}`);
       }
-      ctx.logger.info(`Working directory for ${spec.displayName}: ${currentCwd}`);
-      ctx.logger.info(`Press Ctrl+C to exit ${spec.displayName}`);
 
       const shutdown = async (signal: NodeJS.Signals) => {
         try {
           toolProcess.kill(signal);
+        } catch {
+          // ignore
+        }
+        try {
+          await clockClientService?.stop();
+        } catch {
+          // ignore
+        }
+        try {
+          managedTmuxSession?.stop();
         } catch {
           // ignore
         }
@@ -641,22 +1577,46 @@ export function createLauncherCommand(program: Command, ctx: LauncherCommandCont
       });
 
       toolProcess.on('error', (error) => {
-        try {
-          ctx.logger.error(
-            `Failed to launch ${spec.displayName} (${resolvedBinary}): ${error instanceof Error ? error.message : String(error)}`
-          );
-        } catch {
-          // ignore
-        }
-        ctx.exit(1);
+        void (async () => {
+          try {
+            ctx.logger.error(
+              `Failed to launch ${spec.displayName} (${resolvedBinary}): ${error instanceof Error ? error.message : String(error)}`
+            );
+          } catch {
+            // ignore
+          }
+          try {
+            await clockClientService?.stop();
+          } catch {
+            // ignore
+          }
+          try {
+            managedTmuxSession?.stop();
+          } catch {
+            // ignore
+          }
+          ctx.exit(1);
+        })();
       });
 
       toolProcess.on('exit', (code, signal) => {
-        if (signal) {
-          ctx.exit(0);
-          return;
-        }
-        ctx.exit(code ?? 0);
+        void (async () => {
+          try {
+            await clockClientService?.stop();
+          } catch {
+            // ignore
+          }
+          try {
+            managedTmuxSession?.stop();
+          } catch {
+            // ignore
+          }
+          if (signal) {
+            ctx.exit(0);
+            return;
+          }
+          ctx.exit(code ?? 0);
+        })();
       });
 
       await ctx.waitForever();

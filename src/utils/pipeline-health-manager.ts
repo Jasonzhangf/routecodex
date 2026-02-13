@@ -23,6 +23,8 @@ export interface PipelineHealthStatus {
   recoveryTime?: number;
 }
 
+import { DEFAULT_PIPELINE_HEALTH } from '../constants/index.js';
+
 export interface PipelineHealthConfig {
   maxConsecutiveErrors: number;
   healthCheckIntervalMs: number;
@@ -40,13 +42,13 @@ export class PipelineHealthManager {
 
   constructor(config?: Partial<PipelineHealthConfig>) {
     this.config = {
-      maxConsecutiveErrors: 3,
-      healthCheckIntervalMs: 30 * 1000, // 30 秒
-      errorThreshold: 5,
-      successThreshold: 3,
+      maxConsecutiveErrors: DEFAULT_PIPELINE_HEALTH.MAX_CONSECUTIVE_ERRORS,
+      healthCheckIntervalMs: DEFAULT_PIPELINE_HEALTH.CHECK_INTERVAL_MS,
+      errorThreshold: DEFAULT_PIPELINE_HEALTH.ERROR_THRESHOLD,
+      successThreshold: DEFAULT_PIPELINE_HEALTH.SUCCESS_THRESHOLD,
       autoRecoveryEnabled: true,
-      recoveryIntervalMs: 5 * 60 * 1000, // 5 分钟
-      healthCheckTimeoutMs: 10 * 1000, // 10 秒
+      recoveryIntervalMs: DEFAULT_PIPELINE_HEALTH.RECOVERY_INTERVAL_MS,
+      healthCheckTimeoutMs: DEFAULT_PIPELINE_HEALTH.CHECK_TIMEOUT_MS,
       ...config,
     };
 

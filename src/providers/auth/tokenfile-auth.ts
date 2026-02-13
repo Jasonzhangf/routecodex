@@ -9,6 +9,7 @@
  */
 
 import fs from 'fs';
+import fsAsync from 'fs/promises';
 import path from 'path';
 import type { IAuthProvider, AuthStatus } from './auth-interface.js';
 import type { OAuthAuth } from '../core/api/provider-config.js';
@@ -226,14 +227,18 @@ export class TokenFileAuthProvider implements IAuthProvider {
 
   private ensureTokenFileExists(candidatePath: string): string {
     const filePath = this.expandHome(candidatePath);
-    try {
-      if (!fs.existsSync(filePath)) {
-        fs.mkdirSync(path.dirname(filePath), { recursive: true });
-        fs.writeFileSync(filePath, '{}\n', 'utf8');
+    // 异步创建文件，不阻塞主流程
+    void (async () => {
+      try {
+        const exists = await fsAsync.access(filePath).then(() => true).catch(() => false);
+        if (!exists) {
+          await fsAsync.mkdir(path.dirname(filePath), { recursive: true });
+          await fsAsync.writeFile(filePath, '{}\n', 'utf8');
+        }
+      } catch {
+        // best-effort bootstrap: keep original flow if file creation fails
       }
-    } catch {
-      // best-effort bootstrap: keep original flow if file creation fails
-    }
+    })();
     return filePath;
   }
 

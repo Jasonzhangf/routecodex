@@ -193,4 +193,68 @@ describe('cli start command', () => {
     await expect(program.parseAsync(['node', 'rcc', 'start'], { from: 'node' })).rejects.toThrow('exit:1');
     expect(errors.join('\n')).toContain('Please create a RouteCodex user config');
   });
+
+  it('release start runs daemon supervisor process by default', async () => {
+    const spawnCalls: Array<{ command: string; args: string[]; options: any; unrefCalled?: boolean }> = [];
+    const program = new Command();
+
+    createStartCommand(program, {
+      isDevPackage: false,
+      isWindows: false,
+      defaultDevPort: 5520,
+      nodeBin: 'node',
+      createSpinner: async () => createStubSpinner(),
+      logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
+      env: {},
+      fsImpl: {
+        existsSync: () => true,
+        statSync: () => ({ isDirectory: () => false } as any),
+        readFileSync: () => JSON.stringify({ httpserver: { port: 5520, host: '127.0.0.1' } }),
+        writeFileSync: () => {},
+        mkdtempSync: () => '/tmp/rc',
+        mkdirSync: () => {}
+      } as any,
+      pathImpl: {
+        join: (...parts: string[]) => parts.join('/'),
+        resolve: (...parts: string[]) => parts.join('/')
+      } as any,
+      homedir: () => '/home/test',
+      tmpdir: () => '/tmp',
+      sleep: async () => {},
+      ensureLocalTokenPortalEnv: async () => {},
+      ensureTokenDaemonAutoStart: async () => {},
+      ensurePortAvailable: async () => {},
+      findListeningPids: () => [],
+      killPidBestEffort: () => {},
+      getModulesConfigPath: () => '/tmp/modules.json',
+      resolveCliEntryPath: () => '/tmp/cli.js',
+      resolveServerEntryPath: () => '/tmp/index.js',
+      spawn: (command, args, options) => {
+        const call = { command, args, options, unrefCalled: false };
+        spawnCalls.push(call);
+        return {
+          pid: 43210,
+          on: () => {},
+          kill: () => true,
+          unref: () => { call.unrefCalled = true; }
+        } as any;
+      },
+      fetch: (async () => ({ ok: true })) as any,
+      setupKeypress: () => () => {},
+      waitForever: async () => {},
+      exit: (code) => {
+        throw new Error(`exit:${code}`);
+      }
+    });
+
+    await expect(program.parseAsync(['node', 'rcc', 'start'], { from: 'node' })).rejects.toThrow('exit:0');
+    expect(spawnCalls).toHaveLength(1);
+    expect(spawnCalls[0].command).toBe('node');
+    expect(spawnCalls[0].args).toContain('/tmp/cli.js');
+    expect(spawnCalls[0].args).toContain('start');
+    expect(spawnCalls[0].options?.detached).toBe(true);
+    expect(spawnCalls[0].options?.stdio).toBe('ignore');
+    expect(spawnCalls[0].options?.env?.ROUTECODEX_DAEMON_SUPERVISOR).toBe('1');
+    expect(spawnCalls[0].unrefCalled).toBe(true);
+  });
 });

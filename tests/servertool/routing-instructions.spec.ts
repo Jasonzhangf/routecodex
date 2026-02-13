@@ -82,6 +82,30 @@ describe('Routing instruction parsing and application', () => {
     expect(instruction.pathLength).toBe(2);
   });
 
+  test('sticky:provider.model instructions are parsed and persisted as stickyTarget', () => {
+    const instructions = parseRoutingInstructions(buildMessages('<**sticky:deepseek-web.deepseek-chat**>'));
+    expect(instructions).toHaveLength(1);
+    const instruction = instructions[0];
+    expect(instruction.type).toBe('sticky');
+    expect(instruction.provider).toBe('deepseek-web');
+    expect(instruction.model).toBe('deepseek-chat');
+    expect(instruction.pathLength).toBe(2);
+
+    const nextState = applyRoutingInstructions(instructions, createState());
+    expect(nextState.stickyTarget?.provider).toBe('deepseek-web');
+    expect(nextState.stickyTarget?.model).toBe('deepseek-chat');
+  });
+
+  test('force:provider.model instructions are parsed as force target', () => {
+    const instructions = parseRoutingInstructions(buildMessages('<**force:deepseek-web.deepseek-chat**>'));
+    expect(instructions).toHaveLength(1);
+    const instruction = instructions[0];
+    expect(instruction.type).toBe('force');
+    expect(instruction.provider).toBe('deepseek-web');
+    expect(instruction.model).toBe('deepseek-chat');
+    expect(instruction.pathLength).toBe(2);
+  });
+
   testIf(SUPPORTS_PREFER_PROCESSMODE_SUFFIX)('prefer instruction supports :passthrough mode suffix', () => {
     const instructions = parseRoutingInstructions(buildMessages('<**!tab.gpt-5.3-codex:passthrough**>'));
     expect(instructions).toHaveLength(1);

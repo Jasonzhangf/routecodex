@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import type { Command } from 'commander';
 import { LOCAL_HOSTS } from '../../constants/index.js';
 import { logProcessLifecycleSync } from '../../utils/process-lifecycle-logger.js';
+import { writeDaemonStopIntent } from '../../utils/daemon-stop-intent.js';
 
 type Spinner = {
   start(text?: string): Spinner;
@@ -241,6 +242,18 @@ export function createStopCommand(program: Command, ctx: StopCommandContext): vo
             ...callerAudit
           }
         });
+
+        try {
+          const pathImpl = ctx.pathImpl ?? path;
+          const home = ctx.getHomeDir ?? (() => homedir());
+          writeDaemonStopIntent(resolvedPort, {
+            source: 'cli.stop',
+            routeCodexHomeDir: pathImpl.join(home(), '.routecodex'),
+            pid: process.pid
+          });
+        } catch {
+          /* ignore */
+        }
 
         const pids = ctx.findListeningPids(resolvedPort);
         if (!pids.length) {

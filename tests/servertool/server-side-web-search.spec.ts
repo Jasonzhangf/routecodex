@@ -1,5 +1,6 @@
 import { runServerSideToolEngine } from '../../sharedmodule/llmswitch-core/src/servertool/server-side-tools.js';
 import { runServerToolOrchestration } from '../../sharedmodule/llmswitch-core/src/servertool/engine.js';
+import { executeWebSearchBackendPlan } from '../../sharedmodule/llmswitch-core/src/servertool/handlers/web-search.js';
 import type {
   ProviderInvoker,
   ServerSideToolEngineOptions
@@ -419,6 +420,57 @@ describe('ServerTool web_search engine (generic)', () => {
     const contentObj = JSON.parse(outputs[0].content);
     expect(contentObj.engine).toBe('enabled');
     expect(contentObj.summary).toBe('enabled backend search result');
+  });
+
+  test('iflow web_search backend uses retrieve route and does not bind model', async () => {
+    const invocations: any[] = [];
+    const result = await executeWebSearchBackendPlan({
+      plan: {
+        kind: 'web_search',
+        requestIdSuffix: ':web_search',
+        query: 'routecodex',
+        recency: 'day',
+        resultCount: 5,
+        engines: [
+          {
+            id: 'iflow-engine',
+            providerKey: 'iflow.1-186.minimax-m2.5',
+            searchEngineList: ['GOOGLE']
+          }
+        ]
+      } as any,
+      options: {
+        chatResponse: {},
+        adapterContext: { requestId: 'req-iflow-web', providerProtocol: 'openai-chat' } as any,
+        entryEndpoint: '/v1/chat/completions',
+        requestId: 'req-iflow-web',
+        providerProtocol: 'openai-chat',
+        providerInvoker: async (options: any) => {
+          invocations.push(options);
+          return {
+            providerResponse: {
+              success: true,
+              data: [
+                {
+                  title: 'RouteCodex',
+                  link: 'https://example.com',
+                  content: 'result'
+                }
+              ]
+            }
+          };
+        }
+      } as any
+    });
+
+    expect(result.kind).toBe('web_search');
+    expect(invocations.length).toBe(1);
+    const call = invocations[0];
+    expect(call.entryEndpoint).toBe('/v1/chat/retrieve');
+    expect(call.modelId).toBeUndefined();
+    expect(call.payload?.model).toBeUndefined();
+    expect(call.payload?.metadata?.iflowWebSearch).toBe(true);
+    expect(call.payload?.data?.query).toBe('routecodex');
   });
 });
 

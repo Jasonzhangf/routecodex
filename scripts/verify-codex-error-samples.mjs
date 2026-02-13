@@ -41,14 +41,35 @@ async function fileExists(p) {
 }
 
 async function collectSampleFiles(rootDir) {
-  const entries = await fs.readdir(rootDir, { withFileTypes: true });
   const files = [];
-  for (const entry of entries) {
-    if (!entry.isFile()) continue;
-    if (!entry.name.toLowerCase().endsWith('.json')) continue;
-    files.push(path.join(rootDir, entry.name));
+  const queue = [rootDir];
+
+  while (queue.length > 0) {
+    const currentDir = queue.shift();
+    if (!currentDir) {
+      continue;
+    }
+
+    let entries = [];
+    try {
+      entries = await fs.readdir(currentDir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      const fullPath = path.join(currentDir, entry.name);
+      if (entry.isDirectory()) {
+        queue.push(fullPath);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      if (!entry.name.toLowerCase().endsWith('.json')) continue;
+      files.push(fullPath);
+    }
   }
-  return files;
+
+  return files.sort();
 }
 
 async function checkFile(filePath) {

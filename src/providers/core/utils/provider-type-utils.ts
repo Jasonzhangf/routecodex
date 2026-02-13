@@ -17,7 +17,8 @@ const LEGACY_FAMILY_TO_TYPE: Record<string, ProviderType> = {
   iflow: 'openai',
   lmstudio: 'openai',
   kimi: 'openai',
-  modelscope: 'openai'
+  modelscope: 'openai',
+  deepseek: 'openai'
 };
 
 export function isProviderType(value: string): value is ProviderType {

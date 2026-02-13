@@ -5,6 +5,8 @@
  * 该层仅关注用户配置的声明式信息，与 runtime profile 解密后的密钥/令牌相区分。
  */
 
+import type { DeepSeekProviderRuntimeOptions } from '../core/contracts/deepseek-provider-contract.js';
+
 export type ProviderProtocol = 'openai' | 'responses' | 'anthropic' | 'gemini' | 'gemini-cli';
 
 export interface ProviderTransportConfig {
@@ -34,6 +36,12 @@ export interface ApiKeyAuthConfig {
    * 传统配置中用于表示环境变量名的字段
    */
   env?: string;
+  rawType?: string;
+  mobile?: string;
+  password?: string;
+  accountFile?: string;
+  accountAlias?: string;
+  tokenFile?: string;
 }
 
 export interface OAuthAuthConfig {
@@ -70,6 +78,7 @@ export interface ProviderProfile {
   metadata?: {
     defaultModel?: string;
     supportedModels?: string[];
+    deepseek?: Partial<DeepSeekProviderRuntimeOptions>;
   };
 }
 

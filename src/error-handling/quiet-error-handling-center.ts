@@ -46,6 +46,27 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return undefined;
 }
 
+function resolveBoolFromEnv(value: string | undefined, fallback: boolean): boolean {
+  if (!value) {
+    return fallback;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) {
+    return true;
+  }
+  if (['0', 'false', 'no', 'off'].includes(normalized)) {
+    return false;
+  }
+  return fallback;
+}
+
+function shouldLogRouteErrorToConsole(): boolean {
+  return resolveBoolFromEnv(
+    process.env.ROUTECODEX_ROUTE_ERROR_LOG ?? process.env.RCC_ROUTE_ERROR_LOG,
+    false
+  );
+}
+
 function extractDetails(context: ErrorContext): {
   requestId?: string;
   endpoint?: string;
@@ -128,7 +149,9 @@ export class QuietErrorHandlingCenter extends ErrorHandlingCenter {
       source: errorContext.source,
       severity: errorContext.severity
     };
-    console.error('[route-error]', JSON.stringify(payload));
+    if (shouldLogRouteErrorToConsole()) {
+      console.error('[route-error]', JSON.stringify(payload));
+    }
     const response: ErrorResponse = {
       success: true,
       message: `Error processed: ${message}`,

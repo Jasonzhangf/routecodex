@@ -15,11 +15,16 @@ import {
   ensureClientHeadersOnPayload,
   resolveClientRequestId
 } from './executor-metadata.js';
-import { describeRetryReason, isNetworkTransportError, shouldRetryProviderError, waitBeforeRetry } from './executor-provider.js';
+import {
+  describeRetryReason,
+  shouldRetryProviderError,
+  waitBeforeRetry
+} from './executor-provider.js';
 import {
   convertProviderResponse as bridgeConvertProviderResponse,
   createSnapshotRecorder as bridgeCreateSnapshotRecorder,
 } from '../../../modules/llmswitch/bridge.js';
+import { getClockClientRegistry, injectClockClientPrompt } from './clock-client-registry.js';
 import { ensureHubPipeline, runHubPipeline } from './executor-pipeline.js';
 import { buildInfo } from '../../../build-info.js';
 
@@ -35,8 +40,73 @@ export interface RequestExecutor {
   execute(input: PipelineExecutionInput): Promise<PipelineExecutionResult>;
 }
 
+type SseWrapperErrorInfo = {
+  message: string;
+  errorCode?: string;
+  retryable: boolean;
+};
+
 const DEFAULT_MAX_PROVIDER_ATTEMPTS = 6;
 const DEFAULT_ANTIGRAVITY_MAX_PROVIDER_ATTEMPTS = 20;
+const RETRYABLE_SSE_ERROR_CODE_HINTS = [
+  'internal_network_failure',
+  'network_error',
+  'api_connection_error',
+  'service_unavailable',
+  'internal_server_error',
+  'overloaded_error',
+  'rate_limit_error',
+  'request_timeout',
+  'timeout'
+];
+const RETRYABLE_SSE_MESSAGE_HINTS = [
+  'internal network failure',
+  'network failure',
+  'network error',
+  'temporarily unavailable',
+  'temporarily unreachable',
+  'upstream disconnected',
+  'connection reset',
+  'connection closed',
+  'timed out',
+  'timeout'
+];
+
+function firstNonEmptyString(candidates: unknown[]): string | undefined {
+  for (const candidate of candidates) {
+    if (typeof candidate !== 'string') {
+      continue;
+    }
+    const trimmed = candidate.trim();
+    if (trimmed) {
+      return trimmed;
+    }
+  }
+  return undefined;
+}
+
+function firstFiniteNumber(candidates: unknown[]): number | undefined {
+  for (const candidate of candidates) {
+    if (typeof candidate === 'number' && Number.isFinite(candidate)) {
+      return candidate;
+    }
+  }
+  return undefined;
+}
+
+function isRetryableSseWrapperError(message: string, errorCode?: string, status?: number): boolean {
+  if (typeof status === 'number' && Number.isFinite(status)) {
+    if (status === 408 || status === 425 || status === 429 || status >= 500) {
+      return true;
+    }
+  }
+  const normalizedCode = typeof errorCode === 'string' ? errorCode.trim().toLowerCase() : '';
+  if (normalizedCode && RETRYABLE_SSE_ERROR_CODE_HINTS.some((hint) => normalizedCode.includes(hint))) {
+    return true;
+  }
+  const loweredMessage = message.toLowerCase();
+  return RETRYABLE_SSE_MESSAGE_HINTS.some((hint) => loweredMessage.includes(hint));
+}
 
 function resolveBoolFromEnv(value: string | undefined, fallback: boolean): boolean {
   if (!value) {
@@ -56,6 +126,14 @@ function isUsageLoggingEnabled(): boolean {
   return resolveBoolFromEnv(
     process.env.ROUTECODEX_USAGE_LOG ?? process.env.RCC_USAGE_LOG,
     buildInfo.mode !== 'release'
+  );
+}
+
+function isVerboseErrorLoggingEnabled(): boolean {
+  return resolveBoolFromEnv(
+    process.env.ROUTECODEX_ERROR_VERBOSE
+      ?? process.env.RCC_ERROR_VERBOSE,
+    false
   );
 }
 
@@ -194,6 +272,53 @@ function injectAntigravityRetrySignal(
   };
 }
 
+function normalizeSessionToken(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+function inferClockClientTypeFromMetadata(metadata: Record<string, unknown>): string | undefined {
+  const direct = normalizeSessionToken(metadata.clockClientType) ?? normalizeSessionToken(metadata.clientType);
+  if (direct) {
+    return direct;
+  }
+
+  const userAgent = normalizeSessionToken(metadata.userAgent)?.toLowerCase() ?? '';
+  if (userAgent.includes('codex')) {
+    return 'codex';
+  }
+  if (userAgent.includes('claude')) {
+    return 'claude';
+  }
+  return undefined;
+}
+
+function bindClockConversationSession(metadata: Record<string, unknown>): void {
+  const conversationSessionId = normalizeSessionToken(metadata.sessionId);
+  if (!conversationSessionId) {
+    return;
+  }
+
+  const tmuxSessionId = normalizeSessionToken(metadata.tmuxSessionId);
+  const daemonId = normalizeSessionToken(metadata.clockDaemonId)
+    ?? normalizeSessionToken(metadata.clockClientDaemonId);
+  const clientType = inferClockClientTypeFromMetadata(metadata);
+
+  try {
+    getClockClientRegistry().bindConversationSession({
+      conversationSessionId,
+      ...(tmuxSessionId ? { tmuxSessionId } : {}),
+      ...(daemonId ? { daemonId } : {}),
+      ...(clientType ? { clientType } : {})
+    });
+  } catch {
+    // best-effort only
+  }
+}
+
 export class HubRequestExecutor implements RequestExecutor {
   constructor(private readonly deps: RequestExecutorDeps) { }
 
@@ -210,6 +335,7 @@ export class HubRequestExecutor implements RequestExecutor {
     try {
       const hubPipeline = ensureHubPipeline(this.deps.getHubPipeline);
       const initialMetadata = buildRequestMetadata(input);
+      bindClockConversationSession(initialMetadata);
       const inboundClientHeaders = cloneClientHeaders(initialMetadata?.clientHeaders);
       const providerRequestId = input.requestId;
       const clientRequestId = resolveClientRequestId(initialMetadata, providerRequestId);
@@ -333,6 +459,37 @@ export class HubRequestExecutor implements RequestExecutor {
 
         const runtimeKey = target.runtimeKey || this.deps.runtimeManager.resolveRuntimeKey(target.providerKey);
         if (!runtimeKey) {
+          const runtimeResolveError = Object.assign(new Error(`Runtime for provider ${target.providerKey} not initialized`), {
+            code: 'ERR_RUNTIME_NOT_FOUND',
+            requestId: input.requestId,
+            retryable: true
+          });
+          try {
+            const { emitProviderError } = await import('../../../providers/core/utils/provider-error-reporter.js');
+            emitProviderError({
+              error: runtimeResolveError,
+              stage: 'provider.runtime.resolve',
+              runtime: {
+                requestId: input.requestId,
+                providerKey: target.providerKey,
+                providerId: target.providerKey.split('.')[0],
+                providerType: String((target as any).providerType || 'unknown'),
+                providerProtocol: String((target as any).outboundProfile || ''),
+                routeName: pipelineResult.routingDecision?.routeName,
+                pipelineId: target.providerKey,
+                target
+              },
+              dependencies: this.deps.getModuleDependencies(),
+              recoverable: false,
+              affectsHealth: true,
+              details: {
+                reason: 'runtime_not_initialized',
+                providerKey: target.providerKey
+              }
+            });
+          } catch {
+            // best-effort
+          }
           throw Object.assign(new Error(`Runtime for provider ${target.providerKey} not initialized`), {
             code: 'ERR_RUNTIME_NOT_FOUND',
             requestId: input.requestId
@@ -341,6 +498,39 @@ export class HubRequestExecutor implements RequestExecutor {
 
         const handle = this.deps.runtimeManager.getHandleByRuntimeKey(runtimeKey);
         if (!handle) {
+          const runtimeMissingError = Object.assign(new Error(`Provider runtime ${runtimeKey} not found`), {
+            code: 'ERR_PROVIDER_NOT_FOUND',
+            requestId: input.requestId,
+            retryable: true
+          });
+          try {
+            const { emitProviderError } = await import('../../../providers/core/utils/provider-error-reporter.js');
+            emitProviderError({
+              error: runtimeMissingError,
+              stage: 'provider.runtime.resolve',
+              runtime: {
+                requestId: input.requestId,
+                providerKey: target.providerKey,
+                providerId: target.providerKey.split('.')[0],
+                providerType: String((target as any).providerType || 'unknown'),
+                providerProtocol: String((target as any).outboundProfile || ''),
+                routeName: pipelineResult.routingDecision?.routeName,
+                pipelineId: target.providerKey,
+                runtimeKey,
+                target
+              },
+              dependencies: this.deps.getModuleDependencies(),
+              recoverable: false,
+              affectsHealth: true,
+              details: {
+                reason: 'runtime_handle_missing',
+                providerKey: target.providerKey,
+                runtimeKey
+              }
+            });
+          } catch {
+            // best-effort
+          }
           throw Object.assign(new Error(`Provider runtime ${runtimeKey} not found`), {
             code: 'ERR_PROVIDER_NOT_FOUND',
             requestId: input.requestId
@@ -570,10 +760,9 @@ export class HubRequestExecutor implements RequestExecutor {
           const singleProviderPool =
             Boolean(initialRoutePool && initialRoutePool.length === 1 && initialRoutePool[0] === target.providerKey);
           if (singleProviderPool) {
-            if (isNetworkTransportError(error)) {
-              await waitBeforeRetry(error);
-            }
-          } else if (target.providerKey) {
+            await waitBeforeRetry(error);
+          }
+          if (!singleProviderPool && target.providerKey) {
             const is429 = status === 429;
             if (isAntigravityProviderKey(target.providerKey) && (isVerify || is429)) {
               // For Antigravity 403 verify / 429 states:
@@ -664,8 +853,23 @@ export class HubRequestExecutor implements RequestExecutor {
     if (body && typeof body === 'object') {
       const wrapperError = this.extractSseWrapperError(body as Record<string, unknown>);
       if (wrapperError) {
-        const error = new Error(`[RequestExecutor] Upstream SSE terminated: ${wrapperError}`) as Error & { code?: string };
+        const codeSuffix = wrapperError.errorCode ? ` [${wrapperError.errorCode}]` : '';
+        const error = new Error(`Upstream SSE error event${codeSuffix}: ${wrapperError.message}`) as Error & {
+          code?: string;
+          status?: number;
+          statusCode?: number;
+          retryable?: boolean;
+          upstreamCode?: string;
+        };
         error.code = 'SSE_DECODE_ERROR';
+        if (wrapperError.errorCode) {
+          error.upstreamCode = wrapperError.errorCode;
+        }
+        error.retryable = wrapperError.retryable;
+        if (wrapperError.retryable) {
+          error.status = 503;
+          error.statusCode = 503;
+        }
         throw error;
       }
     }
@@ -819,6 +1023,8 @@ export class HubRequestExecutor implements RequestExecutor {
           delete nestedMetadata.clientRequestId;
         }
 
+        bindClockConversationSession(nestedMetadata);
+
         const nestedInput: PipelineExecutionInput = {
           entryEndpoint: nestedEntry,
           method: 'POST',
@@ -828,6 +1034,29 @@ export class HubRequestExecutor implements RequestExecutor {
           body: reenterOpts.body,
           metadata: nestedMetadata
         };
+
+        try {
+          const requestBody = reenterOpts.body as Record<string, unknown>;
+          const messages = Array.isArray(requestBody.messages) ? (requestBody.messages as unknown[]) : [];
+          const lastUser = [...messages]
+            .reverse()
+            .find((entry) => entry && typeof entry === 'object' && (entry as Record<string, unknown>).role === 'user') as
+            | Record<string, unknown>
+            | undefined;
+          const text = typeof lastUser?.content === 'string' ? String(lastUser.content) : '';
+          if (text.includes('<**clock:{') && text.includes('}**>')) {
+            await injectClockClientPrompt({
+              tmuxSessionId: typeof nestedMetadata.tmuxSessionId === 'string' ? nestedMetadata.tmuxSessionId : undefined,
+              sessionId: typeof nestedMetadata.sessionId === 'string' ? nestedMetadata.sessionId : undefined,
+              text,
+              requestId: reenterOpts.requestId,
+              source: 'servertool.reenter'
+            });
+          }
+        } catch {
+          // best-effort only
+        }
+
         const nestedResult = await this.execute(nestedInput);
         const nestedBody =
           nestedResult.body && typeof nestedResult.body === 'object'
@@ -875,33 +1104,38 @@ export class HubRequestExecutor implements RequestExecutor {
         (typeof errCode === 'string' && errCode.startsWith('SERVERTOOL_'));
 
       if (isSseDecodeError || isServerToolFollowupError) {
-        console.error(
-          '[RequestExecutor] Fatal conversion error, bubbling as HTTP error',
-          error
-        );
+        if (isVerboseErrorLoggingEnabled()) {
+          console.error(
+            '[RequestExecutor] Fatal conversion error, bubbling as HTTP error',
+            error
+          );
+        }
         throw error;
       }
 
-      console.error('[RequestExecutor] Failed to convert provider response via llmswitch-core', error);
+      if (isVerboseErrorLoggingEnabled()) {
+        console.error('[RequestExecutor] Failed to convert provider response via llmswitch-core', error);
+      }
       return options.response;
     }
   }
 
-  private extractSseWrapperError(payload: Record<string, unknown> | undefined): string | undefined {
+  private extractSseWrapperError(payload: Record<string, unknown> | undefined): SseWrapperErrorInfo | undefined {
     return this.findSseWrapperError(payload, 2);
   }
 
   private findSseWrapperError(
     record: Record<string, unknown> | undefined,
     depth: number
-  ): string | undefined {
+  ): SseWrapperErrorInfo | undefined {
     if (!record || typeof record !== 'object' || depth < 0) {
       return undefined;
     }
-    const mode = record.mode;
-    const errVal = record.error;
-    if (mode === 'sse' && typeof errVal === 'string' && errVal.trim()) {
-      return errVal.trim();
+    if (record.mode === 'sse') {
+      const normalized = this.normalizeSseWrapperErrorValue(record.error, depth);
+      if (normalized) {
+        return normalized;
+      }
     }
     const nestedKeys = ['body', 'data', 'payload', 'response'];
     for (const key of nestedKeys) {
@@ -914,6 +1148,92 @@ export class HubRequestExecutor implements RequestExecutor {
         return found;
       }
     }
+    return undefined;
+  }
+
+  private normalizeSseWrapperErrorValue(value: unknown, depth: number): SseWrapperErrorInfo | undefined {
+    if (value === undefined || value === null || depth < 0) {
+      return undefined;
+    }
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (!trimmed) {
+        return undefined;
+      }
+      if (depth > 0 && (trimmed.startsWith('{') || trimmed.startsWith('['))) {
+        try {
+          const parsed = JSON.parse(trimmed);
+          const parsedInfo = this.normalizeSseWrapperErrorValue(parsed, depth - 1);
+          if (parsedInfo) {
+            return parsedInfo;
+          }
+        } catch {
+          // fallback to raw string
+        }
+      }
+      return {
+        message: trimmed,
+        retryable: isRetryableSseWrapperError(trimmed)
+      };
+    }
+    if (typeof value !== 'object' || Array.isArray(value)) {
+      return undefined;
+    }
+    const record = value as Record<string, unknown>;
+    const directMessage = firstNonEmptyString([
+      record.message,
+      record.error_message,
+      record.errorMessage
+    ]);
+    const directCode = firstNonEmptyString([
+      record.code,
+      record.error_code,
+      record.errorCode,
+      record.type
+    ]);
+    const directStatus = firstFiniteNumber([
+      record.status,
+      record.statusCode,
+      record.status_code,
+      record.http_status
+    ]);
+
+    if (depth > 0) {
+      for (const key of ['error', 'data', 'payload', 'details', 'body', 'response']) {
+        const nestedInfo = this.normalizeSseWrapperErrorValue(record[key], depth - 1);
+        if (nestedInfo) {
+          const mergedCode = nestedInfo.errorCode ?? directCode;
+          const retryable = nestedInfo.retryable || isRetryableSseWrapperError(nestedInfo.message, mergedCode, directStatus);
+          return {
+            message: nestedInfo.message,
+            ...(mergedCode ? { errorCode: mergedCode } : {}),
+            retryable
+          };
+        }
+      }
+    }
+
+    if (directMessage) {
+      return {
+        message: directMessage,
+        ...(directCode ? { errorCode: directCode } : {}),
+        retryable: isRetryableSseWrapperError(directMessage, directCode, directStatus)
+      };
+    }
+
+    try {
+      const serialized = JSON.stringify(record);
+      if (serialized && serialized !== '{}') {
+        return {
+          message: serialized,
+          ...(directCode ? { errorCode: directCode } : {}),
+          retryable: isRetryableSseWrapperError(serialized, directCode, directStatus)
+        };
+      }
+    } catch {
+      // ignore stringify failures
+    }
+
     return undefined;
   }
 

@@ -17,6 +17,64 @@ function createTestConfig(): ServerConfigV2 {
 describe('RouteCodexHttpServer.executePipeline failover', () => {
   jest.setTimeout(30000);
 
+  it('injects startup-excluded provider keys into first hub iteration metadata', async () => {
+    const server = new RouteCodexHttpServer(createTestConfig());
+    const excludedAtStartup = 'deepseek-web.2.deepseek-chat';
+    const providerB = 'deepseek-web.1.deepseek-chat';
+
+    (server as any).hubPipeline = {};
+    (server as any).startupExcludedProviderKeys = new Set([excludedAtStartup]);
+
+    const runHubPipeline = jest.fn().mockResolvedValueOnce({
+      requestId: 'req_startup_excluded',
+      providerPayload: { model: 'deepseek-chat' },
+      target: {
+        providerKey: providerB,
+        providerType: 'openai',
+        outboundProfile: 'openai-chat',
+        runtimeKey: 'runtime:B',
+        processMode: 'chat'
+      },
+      routingDecision: { routeName: 'default' },
+      processMode: 'chat',
+      metadata: {}
+    });
+    (server as any).runHubPipeline = runHubPipeline;
+
+    const providerHandles = new Map<string, any>();
+    providerHandles.set('runtime:B', {
+      providerType: 'openai',
+      providerFamily: 'deepseek',
+      providerId: 'deepseek-web',
+      providerProtocol: 'openai-chat',
+      instance: {
+        processIncoming: jest.fn(async () => ({ status: 200, data: { ok: true } })),
+        initialize: jest.fn(),
+        cleanup: jest.fn()
+      }
+    });
+    (server as any).providerHandles = providerHandles;
+
+    const providerKeyToRuntimeKey = new Map<string, string>();
+    providerKeyToRuntimeKey.set(providerB, 'runtime:B');
+    (server as any).providerKeyToRuntimeKey = providerKeyToRuntimeKey;
+
+    (server as any).convertProviderResponseIfNeeded = jest.fn(async ({ response }: any) => response);
+
+    const result = await (server as any).executePipeline({
+      requestId: 'req_startup_excluded',
+      entryEndpoint: '/v1/responses',
+      headers: {},
+      body: { messages: [{ role: 'user', content: 'ping' }] },
+      metadata: { stream: false, inboundStream: false }
+    });
+
+    expect(result.status).toBe(200);
+    expect(runHubPipeline).toHaveBeenCalledTimes(1);
+    const firstMetadata = runHubPipeline.mock.calls[0][1] as Record<string, unknown>;
+    expect(firstMetadata.excludedProviderKeys).toEqual([excludedAtStartup]);
+  });
+
   it('re-enters hub pipeline once with excludedProviderKeys on retryable provider error', async () => {
     const server = new RouteCodexHttpServer(createTestConfig());
 

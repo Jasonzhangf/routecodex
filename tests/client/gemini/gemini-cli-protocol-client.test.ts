@@ -61,4 +61,28 @@ describe('GeminiCLIProtocolClient', () => {
     expect(decl.parameters.properties.action).toBeDefined();
     expect(decl.parameters.required).toEqual(['action', 'taskId']);
   });
+
+  test('normalizes endpoint/action to avoid duplicated gemini path segments', () => {
+    const client = new GeminiCLIProtocolClient();
+    const endpoint = client.resolveEndpoint(
+      {
+        action: '/v1beta/models:streamGenerateContent?alt=sse'
+      } as any,
+      '/v1beta/models:generateContent/v1beta/models:generateContent'
+    );
+
+    expect(endpoint).toBe('/v1beta/models:streamGenerateContent?alt=sse');
+  });
+
+  test('falls back to v1internal prefix when default endpoint is empty', () => {
+    const client = new GeminiCLIProtocolClient();
+    const endpoint = client.resolveEndpoint(
+      {
+        action: 'countTokens'
+      } as any,
+      ''
+    );
+
+    expect(endpoint).toBe('/v1internal:countTokens');
+  });
 });

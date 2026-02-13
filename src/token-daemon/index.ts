@@ -66,16 +66,30 @@ function computeTokenUsageForServer(
   const normalizedTokenPath = normalizeTokenFilePath(token.filePath);
   const usages: TokenUsage[] = [];
   for (const p of serverSnapshot.providers) {
-    if (p.auth.kind !== 'oauth' || !p.auth.tokenFile) {
+    if (p.auth.kind === 'oauth' && p.auth.tokenFile) {
+      const authPath = normalizeTokenFilePath(p.auth.tokenFile);
+      if (authPath === normalizedTokenPath) {
+        usages.push({
+          serverId: serverSnapshot.server.id,
+          providerId: p.id,
+          protocol: p.protocol
+        });
+      }
       continue;
     }
-    const authPath = normalizeTokenFilePath(p.auth.tokenFile);
-    if (authPath === normalizedTokenPath) {
-      usages.push({
-        serverId: serverSnapshot.server.id,
-        providerId: p.id,
-        protocol: p.protocol
-      });
+    if (
+      p.auth.kind === 'apikey' &&
+      p.auth.rawType === 'deepseek-account' &&
+      p.auth.tokenFile
+    ) {
+      const authPath = normalizeTokenFilePath(p.auth.tokenFile);
+      if (authPath === normalizedTokenPath) {
+        usages.push({
+          serverId: serverSnapshot.server.id,
+          providerId: p.id,
+          protocol: p.protocol
+        });
+      }
     }
   }
   return usages;
@@ -170,7 +184,11 @@ export async function printStatus(json = false): Promise<void> {
       let details = '';
       if (authKind === 'apikey') {
         const src = p.auth.apiKeySource ?? '-';
-        details = `source=${src}${  p.auth.apiKeyPreview ? ` value=${p.auth.apiKeyPreview}` : ''}`;
+        if (p.auth.rawType === 'deepseek-account') {
+          details = `rawType=deepseek-account tokenFile=${p.auth.tokenFile ?? '-'}`;
+        } else {
+          details = `source=${src}${  p.auth.apiKeyPreview ? ` value=${p.auth.apiKeyPreview}` : ''}`;
+        }
       } else if (authKind === 'oauth') {
         details = `tokenFile=${p.auth.tokenFile ?? '-'}`;
       } else {
@@ -268,7 +286,11 @@ export async function printProviders(json = false): Promise<void> {
     let details = '';
     if (authKind === 'apikey') {
       const src = p.auth.apiKeySource ?? '-';
-      details = `source=${src}${  p.auth.apiKeyPreview ? ` value=${p.auth.apiKeyPreview}` : ''}`;
+      if (p.auth.rawType === 'deepseek-account') {
+        details = `rawType=deepseek-account tokenFile=${p.auth.tokenFile ?? '-'}`;
+      } else {
+        details = `source=${src}${  p.auth.apiKeyPreview ? ` value=${p.auth.apiKeyPreview}` : ''}`;
+      }
     } else if (authKind === 'oauth') {
       details = `tokenFile=${p.auth.tokenFile ?? '-'}`;
     } else {
@@ -379,6 +401,25 @@ export async function interactiveRefresh(selector: string, options: InteractiveR
       'Token with alias "static" is read-only. Please create a new token with a different alias to re-authenticate.'
     );
     return;
+  }
+
+  if (token.provider === 'deepseek-account') {
+    const label = formatTokenLabel(token);
+    const tokenMtimeBefore = await getTokenFileMtime(token.filePath);
+    const startedAt = Date.now();
+    const raw = await readTokenFile(token.filePath);
+    const state = evaluateTokenState(raw, Date.now());
+    const valid = state.status === 'valid' || state.status === 'expiring';
+    if (valid) {
+      await recordManualHistory(token, 'success', startedAt, tokenMtimeBefore);
+      console.log(chalk.green('✓'), `DeepSeek token file is valid (${label})`);
+      return;
+    }
+    const message =
+      `DeepSeek token file missing valid access_token: ${token.filePath}. ` +
+      'Please refresh this token file via your fingerprint login flow, then retry.';
+    await recordManualHistory(token, 'failure', startedAt, tokenMtimeBefore, message);
+    throw new Error(message);
   }
 
   const label = formatTokenLabel(token);
@@ -641,6 +682,16 @@ async function validateSingleToken(token: TokenDescriptor): Promise<OAuthValidat
 
   const raw = await readTokenFile(token.filePath);
   const state = evaluateTokenState(raw, Date.now());
+  if (token.provider === 'deepseek-account') {
+    if (state.status === 'valid' || state.status === 'expiring') {
+      return { ...base, status: 'ok' };
+    }
+    return {
+      ...base,
+      status: 'needs_reauth',
+      message: 'deepseek-account token file missing valid access_token'
+    };
+  }
 
   if (state.noRefresh) {
     return { ...base, status: 'skipped', message: 'norefresh flag set' };

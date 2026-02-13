@@ -7,6 +7,7 @@ import type {
 } from './provider-profile.js';
 
 type UnknownRecord = Record<string, unknown>;
+type DeepSeekMetadata = NonNullable<NonNullable<ProviderProfile['metadata']>['deepseek']>;
 
 export function buildProviderProfiles(config: UnknownRecord): ProviderProfileCollection {
   const providersNode = collectProviderNodes(config);
@@ -70,7 +71,7 @@ function resolveProtocol(id: string, raw: UnknownRecord, moduleType?: string): P
 }
 
 const protocolAliases = {
-  openai: new Set(['openai', 'glm', 'qwen', 'lmstudio', 'iflow', 'chat', 'openai-http', 'openai-standard', 'mock']),
+  openai: new Set(['openai', 'glm', 'qwen', 'lmstudio', 'iflow', 'deepseek', 'deepseek-http', 'chat', 'openai-http', 'openai-standard', 'mock']),
   responses: new Set(['responses', 'openai-responses', 'responses-http']),
   anthropic: new Set(['anthropic', 'anthropic-http', 'claude']),
   gemini: new Set(['gemini', 'gemini2', 'gemini-chat', 'gemini-http']),
@@ -154,7 +155,13 @@ function extractAuth(raw: UnknownRecord): ProviderAuthConfig {
       kind: 'apikey',
       apiKey: apiKeyValue,
       secretRef: secretRefValue,
-      env: envRefValue
+      env: envRefValue,
+      rawType: typeHint,
+      mobile: pickString(authNode?.mobile ?? authNode?.account ?? authNode?.username ?? raw.mobile ?? raw.account),
+      password: pickString(authNode?.password ?? raw.password),
+      accountFile: pickString(authNode?.accountFile ?? authNode?.account_file ?? raw.accountFile ?? raw.account_file),
+      accountAlias: pickString(authNode?.accountAlias ?? authNode?.account_alias ?? raw.accountAlias ?? raw.account_alias),
+      tokenFile: pickString(authNode?.tokenFile ?? authNode?.token_file ?? raw.tokenFile ?? raw.token_file)
     };
   }
   return { kind: 'none' };
@@ -215,8 +222,9 @@ function extractMetadata(raw: UnknownRecord): ProviderProfile['metadata'] {
   const defaultModel = pickString(raw.defaultModel ?? raw.default_model);
   const modelsNode = isRecord(raw.models) ? raw.models : undefined;
   const supportedModels = modelsNode ? Object.keys(modelsNode) : undefined;
+  const deepseek = extractDeepSeekMetadata(raw.deepseek ?? (isRecord(raw.extensions) ? (raw.extensions as UnknownRecord).deepseek : undefined));
 
-  if (!defaultModel && (!supportedModels || supportedModels.length === 0)) {
+  if (!defaultModel && (!supportedModels || supportedModels.length === 0) && !deepseek) {
     return undefined;
   }
 
@@ -227,7 +235,43 @@ function extractMetadata(raw: UnknownRecord): ProviderProfile['metadata'] {
   if (supportedModels && supportedModels.length > 0) {
     metadata.supportedModels = supportedModels;
   }
+  if (deepseek) {
+    metadata.deepseek = deepseek;
+  }
   return Object.keys(metadata).length ? metadata : undefined;
+}
+
+function extractDeepSeekMetadata(raw: unknown): DeepSeekMetadata | undefined {
+  if (!isRecord(raw)) {
+    return undefined;
+  }
+  const node = raw as UnknownRecord;
+  const toBool = (value: unknown): boolean | undefined => {
+    if (typeof value === 'boolean') {
+      return value;
+    }
+    if (typeof value === 'string') {
+      const normalized = value.trim().toLowerCase();
+      if (normalized === 'true' || normalized === '1' || normalized === 'yes' || normalized === 'on') {
+        return true;
+      }
+      if (normalized === 'false' || normalized === '0' || normalized === 'no' || normalized === 'off') {
+        return false;
+      }
+    }
+    return undefined;
+  };
+
+  const normalized = {
+    strictToolRequired: toBool(node.strictToolRequired),
+    textToolFallback: toBool(node.textToolFallback),
+    powTimeoutMs: pickNumber(node.powTimeoutMs),
+    powMaxAttempts: pickNumber(node.powMaxAttempts),
+    sessionReuseTtlMs: pickNumber(node.sessionReuseTtlMs)
+  } as Record<string, unknown>;
+
+  const pruned = Object.fromEntries(Object.entries(normalized).filter(([, value]) => value !== undefined));
+  return Object.keys(pruned).length ? (pruned as DeepSeekMetadata) : undefined;
 }
 
 function collectProviderNodes(config: UnknownRecord): Record<string, UnknownRecord> {

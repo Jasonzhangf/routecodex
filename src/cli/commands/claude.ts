@@ -36,7 +36,11 @@ export function createClaudeCommand(program: Command, ctx: ClaudeCommandContext)
         CLAUDE_WORKDIR: cwd,
         ANTHROPIC_BASE_URL: baseUrl,
         ANTHROPIC_API_URL: baseUrl,
-        ANTHROPIC_API_KEY: configuredApiKey || 'rcc-proxy-key'
+        ANTHROPIC_API_KEY: (typeof env.ANTHROPIC_API_KEY === 'string' && env.ANTHROPIC_API_KEY.trim())
+          ? env.ANTHROPIC_API_KEY.trim()
+          : ((typeof env.OPENAI_API_KEY === 'string' && env.OPENAI_API_KEY.trim())
+            ? env.OPENAI_API_KEY.trim()
+            : (configuredApiKey || 'rcc-proxy-key'))
       } as NodeJS.ProcessEnv;
 
       try {

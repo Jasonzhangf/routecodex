@@ -9,7 +9,7 @@ import {
   type TokenState,
   SUPPORTED_OAUTH_PROVIDERS
 } from './token-types.js';
-import { scanProviderTokenFiles } from '../providers/auth/token-scanner/index.js';
+import { scanDeepSeekAccountTokenFiles, scanProviderTokenFiles } from '../providers/auth/token-scanner/index.js';
 
 export function resolveAuthDir(): string {
   const override = String(process.env.ROUTECODEX_AUTH_DIR || process.env.RCC_AUTH_DIR || '').trim();
@@ -163,7 +163,10 @@ export async function collectTokenSnapshot(): Promise<TokenDaemonSnapshot> {
   for (const provider of SUPPORTED_OAUTH_PROVIDERS) {
     let matches: TokenFileMatch[] = [];
     try {
-      matches = await scanProviderTokenFiles(provider);
+      matches =
+        provider === 'deepseek-account'
+          ? await scanDeepSeekAccountTokenFiles()
+          : await scanProviderTokenFiles(provider);
     } catch {
       matches = [];
     }

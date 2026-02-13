@@ -52,6 +52,40 @@ export function getInitProviderCatalog(): InitProviderTemplate[] {
       defaultModel: 'gpt-5.2'
     },
     {
+      id: 'deepseek-web',
+      label: 'DeepSeek Web (Account)',
+      description: 'DeepSeek Web account provider (chat:deepseek-web compatibility)',
+      provider: {
+        id: 'deepseek-web',
+        enabled: true,
+        type: 'openai',
+        baseURL: 'https://chat.deepseek.com',
+        compatibilityProfile: 'chat:deepseek-web',
+        auth: {
+          type: 'deepseek-account',
+          entries: [
+            {
+              alias: '1',
+              type: 'deepseek-account',
+              tokenFile: '~/.routecodex/auth/deepseek-account-1.json'
+            }
+          ]
+        },
+        deepseek: {
+          strictToolRequired: true,
+          textToolFallback: true,
+          powTimeoutMs: 15000,
+          powMaxAttempts: 2,
+          sessionReuseTtlMs: 1800000
+        },
+        models: {
+          'deepseek-chat': { supportsStreaming: true },
+          'deepseek-reasoner': { supportsStreaming: true }
+        }
+      },
+      defaultModel: 'deepseek-chat'
+    },
+    {
       id: 'glm',
       label: 'GLM (OpenAI-compatible)',
       description: 'Zhipu/BigModel OpenAI-compatible endpoint',

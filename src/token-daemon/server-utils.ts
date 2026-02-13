@@ -26,6 +26,7 @@ export interface ProviderAuthView {
   };
   auth: {
     kind: 'apikey' | 'oauth' | 'none';
+    rawType?: string;
     apiKeySource?: 'inline' | 'secretRef' | 'env';
     apiKeyPreview?: string;
     secretRef?: string;
@@ -153,6 +154,7 @@ function projectProviderAuth(
         typeof auth.apiKey === 'string' && auth.apiKey.trim()
           ? anonymizeSecret(auth.apiKey.trim())
           : undefined;
+      const rawType = typeof auth.rawType === 'string' && auth.rawType.trim() ? auth.rawType.trim() : undefined;
       const apiKeySource: ProviderAuthView['auth']['apiKeySource'] =
         apiKeyPreview ? 'inline'
         : auth.secretRef ? 'secretRef'
@@ -164,10 +166,12 @@ function projectProviderAuth(
         transport: { baseUrl, endpoint },
         auth: {
           kind: 'apikey',
+          rawType,
           apiKeySource,
           apiKeyPreview,
           secretRef: auth.secretRef,
-          env: auth.env
+          env: auth.env,
+          tokenFile: auth.tokenFile
         }
       });
       continue;

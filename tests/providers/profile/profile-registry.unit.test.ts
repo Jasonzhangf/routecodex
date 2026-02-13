@@ -48,6 +48,17 @@ describe('provider family profile registry', () => {
     });
     expect(endpoint).toBe('/chat/retrieve');
 
+    const entryEndpointFallback = profile?.resolveEndpoint?.({
+      request: {
+        metadata: {
+          iflowWebSearch: true,
+          entryEndpoint: '/v1/messages'
+        }
+      } as any,
+      defaultEndpoint: '/chat/completions'
+    });
+    expect(entryEndpointFallback).toBe('/chat/completions');
+
     const body = profile?.buildRequestBody?.({
       request: {
         metadata: { iflowWebSearch: true },
@@ -56,6 +67,15 @@ describe('provider family profile registry', () => {
       defaultBody: { model: 'kimi-k2.5', messages: [] } as any
     });
     expect(body).toEqual({ query: 'routecodex' });
+
+    const bodyFromDefault = profile?.buildRequestBody?.({
+      request: {
+        metadata: { iflowWebSearch: true, entryEndpoint: '/v1/messages' },
+        data: { query: 'legacy-shape' }
+      } as any,
+      defaultBody: { model: 'minimax-m2.5', messages: [{ role: 'user', content: 'hi' }] } as any
+    });
+    expect(bodyFromDefault).toEqual({ model: 'minimax-m2.5', messages: [{ role: 'user', content: 'hi' }] });
   });
 
   test('iflow profile user-agent policy keeps config/service priority', () => {
@@ -103,6 +123,26 @@ describe('provider family profile registry', () => {
       .digest('hex');
 
     expect(headers?.['x-iflow-signature']).toBe(expected);
+  });
+
+  test('iflow profile does not auto-inject originator/session from request id', () => {
+    const profile = getProviderFamilyProfile({ providerId: 'iflow' });
+    expect(profile).toBeTruthy();
+
+    const headers = profile?.applyRequestHeaders?.({
+      headers: {
+        Authorization: 'Bearer sk-test-iflow-signature-1234567890',
+        'User-Agent': 'iFlow-Cli'
+      },
+      runtimeMetadata: {
+        requestId: 'req-iflow-001',
+        metadata: {}
+      } as any
+    });
+
+    expect(headers?.originator).toBeUndefined();
+    expect(headers?.['session_id']).toBeUndefined();
+    expect(headers?.['session-id']).toBeUndefined();
   });
 
   test('iflow profile maps HTTP200 business envelope to provider error', () => {

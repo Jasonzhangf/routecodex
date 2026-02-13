@@ -6,13 +6,16 @@ import { runReqProcessStage1ToolGovernance } from '../../sharedmodule/llmswitch-
 import type { StandardizedRequest } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.js';
 import { runHubChatProcess } from '../../sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process.js';
 import { runServerSideToolEngine } from '../../sharedmodule/llmswitch-core/src/servertool/server-side-tools.js';
+import { runServerToolOrchestration } from '../../sharedmodule/llmswitch-core/src/servertool/engine.js';
 import type { AdapterContext } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.js';
+import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/json.js';
 
 import {
   normalizeClockConfig,
   scheduleClockTasks,
   loadClockSessionState,
-  commitClockReservation
+  commitClockReservation,
+  reserveDueTasksForRequest
 } from '../../sharedmodule/llmswitch-core/src/servertool/clock/task-store.js';
 
 const SESSION_DIR = path.join(process.cwd(), 'tmp', 'jest-clock-sessions');
@@ -255,6 +258,101 @@ describe('servertool:clock', () => {
     expect(stateAfter.tasks[0].deliveryCount).toBe(1);
   });
 
+
+  test('overdue one-shot tasks are auto-removed after overdue window', async () => {
+    const sessionId = 's-clock-overdue-auto-remove';
+    const clockConfig = normalizeClockConfig({ enabled: true, tickMs: 0, dueWindowMs: 0, retentionMs: 20 * 60_000 });
+    if (!clockConfig) {
+      throw new Error('clockConfig should not be null');
+    }
+
+    await scheduleClockTasks(
+      sessionId,
+      [{ dueAtMs: Date.now() - 90_000, task: 'stale-overdue-task' }],
+      clockConfig
+    );
+    const staleState = await loadClockSessionState(sessionId, clockConfig);
+    expect(staleState.tasks).toHaveLength(0);
+
+    await scheduleClockTasks(
+      sessionId,
+      [{ dueAtMs: Date.now() - 20_000, task: 'recent-due-task' }],
+      clockConfig
+    );
+    const recentState = await loadClockSessionState(sessionId, clockConfig);
+    expect(recentState.tasks.some((task) => task.task === 'recent-due-task')).toBe(true);
+  });
+
+  test('clock_hold_flow followup keeps original providerKey pinned', async () => {
+    const sessionId = 's-clock-hold-provider-pin';
+    const clockConfig = normalizeClockConfig({ enabled: true, tickMs: 0, dueWindowMs: 60_000, holdNonStreaming: true });
+    if (!clockConfig) {
+      throw new Error('clockConfig should not be null');
+    }
+
+    await scheduleClockTasks(
+      sessionId,
+      [{ dueAtMs: Date.now() - 1000, task: 'provider pin check' }],
+      clockConfig
+    );
+
+    const providerKey = 'iflow.test.kimi-k2.5';
+    const chatResponse: JsonObject = {
+      id: 'chatcmpl-clock-hold-1',
+      object: 'chat.completion',
+      model: 'kimi-k2.5',
+      choices: [
+        {
+          index: 0,
+          message: { role: 'assistant', content: 'ok' },
+          finish_reason: 'stop'
+        }
+      ]
+    };
+
+    const adapterContext: AdapterContext = {
+      requestId: 'req-clock-hold-pin-1',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      providerKey,
+      sessionId,
+      stream: true,
+      __rt: { clock: { enabled: true, tickMs: 0, dueWindowMs: 60_000, holdNonStreaming: true } },
+      capturedChatRequest: {
+        model: 'kimi-k2.5',
+        messages: [{ role: 'user', content: 'hi' }]
+      }
+    } as any;
+
+    let capturedFollowupMeta: Record<string, unknown> | null = null;
+    const orchestration = await runServerToolOrchestration({
+      chat: chatResponse,
+      adapterContext,
+      requestId: 'req-clock-hold-pin-1',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      reenterPipeline: async (opts: any) => {
+        capturedFollowupMeta =
+          opts?.metadata && typeof opts.metadata === 'object'
+            ? (opts.metadata as Record<string, unknown>)
+            : null;
+        return {
+          body: {
+            id: 'chatcmpl-clock-hold-followup-1',
+            object: 'chat.completion',
+            model: 'kimi-k2.5',
+            choices: [{ index: 0, message: { role: 'assistant', content: 'done' }, finish_reason: 'stop' }]
+          } as JsonObject
+        };
+      }
+    });
+
+    expect(orchestration.executed).toBe(true);
+    expect(orchestration.flowId).toBe('clock_hold_flow');
+    expect(capturedFollowupMeta).toBeTruthy();
+    expect((capturedFollowupMeta as any)?.__shadowCompareForcedProviderKey).toBe(providerKey);
+  });
+
   test('injects time tag as user message when last role is user', async () => {
     const request = buildRequest([{ role: 'user', content: 'hi' }]);
     const result = await runReqProcessStage1ToolGovernance({
@@ -449,7 +547,7 @@ describe('servertool:clock', () => {
     const sessionId = 's-clock-followup-reminder';
     const clockConfig = normalizeClockConfig({ enabled: true, tickMs: 0, dueWindowMs: 60_000 });
     if (!clockConfig) throw new Error('clockConfig should not be null');
-    await scheduleClockTasks(sessionId, [{ dueAtMs: Date.now() + 20_000, task: 'followup-inject' }], clockConfig);
+    await scheduleClockTasks(sessionId, [{ dueAtMs: Date.now() - 200, task: 'followup-inject' }], clockConfig);
 
     const baseRequest = {
       model: 'gpt-test',
@@ -483,9 +581,11 @@ describe('servertool:clock', () => {
       .join('\n');
     expect(merged).toContain('[Clock Reminder]: scheduled tasks are due.');
     expect(merged).toContain('[scheduled task:');
+    const toolNames = (Array.isArray(processed.tools) ? processed.tools : []).map((tool: any) => tool?.function?.name);
+    expect(toolNames).toContain('clock');
   });
 
-  test('unit: schedule/list/cancel/clear via clock handler outputs', async () => {
+  test('unit: schedule/update/list/cancel/clear via clock handler outputs', async () => {
     const sessionId = 's-clock-handler';
     const adapterContext: AdapterContext = {
       requestId: 'req-clock-handler-1',
@@ -536,6 +636,41 @@ describe('servertool:clock', () => {
     const scheduledTaskId = schedulePayload.scheduled?.[0]?.taskId;
     expect(typeof scheduledTaskId).toBe('string');
 
+    const dueAtUpdated = new Date(Date.now() + 120_000).toISOString();
+    const update = await runServerSideToolEngine({
+      chatResponse: {
+        choices: [
+          {
+            message: {
+              role: 'assistant',
+              content: null,
+              tool_calls: [
+                {
+                  id: 'call_clock_update',
+                  type: 'function',
+                  function: {
+                    name: 'clock',
+                    arguments: JSON.stringify({ action: 'update', taskId: scheduledTaskId, items: [{ dueAt: dueAtUpdated, task: 't1-updated' }] })
+                  }
+                }
+              ]
+            },
+            finish_reason: 'tool_calls'
+          }
+        ]
+      } as any,
+      adapterContext,
+      entryEndpoint: '/v1/chat/completions',
+      requestId: 'req-clock-handler-update',
+      providerProtocol: 'openai-chat'
+    });
+    const updatePayload = JSON.parse((update.finalChatResponse as any).tool_outputs.slice(-1)[0].content);
+    expect(updatePayload.ok).toBe(true);
+    expect(updatePayload.action).toBe('update');
+    expect(updatePayload.updated?.taskId).toBe(scheduledTaskId);
+    expect(updatePayload.updated?.task).toBe('t1-updated');
+    expect(updatePayload.updated?.dueAt).toBe(dueAtUpdated);
+
     const list = await runServerSideToolEngine({
       chatResponse: {
         choices: [
@@ -565,6 +700,8 @@ describe('servertool:clock', () => {
     expect(listPayload.action).toBe('list');
     expect(Array.isArray(listPayload.items)).toBe(true);
     expect(listPayload.items).toHaveLength(1);
+    expect(listPayload.items[0]?.task).toBe('t1-updated');
+    expect(listPayload.items[0]?.taskId).toBe(scheduledTaskId);
 
     const cancel = await runServerSideToolEngine({
       chatResponse: {
@@ -713,6 +850,254 @@ describe('servertool:clock', () => {
     const payload = JSON.parse((result.finalChatResponse as any).tool_outputs.slice(-1)[0].content);
     expect(payload.ok).toBe(false);
     expect(String(payload.message || '')).toContain('virtualrouter.clock.enabled=true');
+  });
+
+  test('parses <**clock:{time,message}**> marker and schedules task with tool-call style messages', async () => {
+    const sessionId = 's-clock-marker-schedule';
+    const dueAtIso = new Date(Date.now() + 120_000).toISOString();
+    const request = buildRequest([
+      {
+        role: 'user',
+        content: `please remind me later\n<**clock:{"time":"${dueAtIso}","message":"marker-task","recurrence":{"kind":"daily","maxRuns":2}}**>`
+      }
+    ]);
+
+    const result = await runHubChatProcess({
+      request,
+      requestId: 'req-clock-marker-1',
+      entryEndpoint: '/v1/chat/completions',
+      rawPayload: {},
+      metadata: {
+        providerProtocol: 'openai-chat',
+        sessionId,
+        clock: { enabled: true, tickMs: 0 }
+      }
+    });
+
+    const processed = result.processedRequest as any;
+    expect(Array.isArray(processed.messages)).toBe(true);
+
+    const assistantWithClockTool = (processed.messages as any[]).find(
+      (msg) => msg?.role === 'assistant' && Array.isArray(msg?.tool_calls)
+        && msg.tool_calls.some((call: any) => call?.function?.name === 'clock')
+    );
+    expect(assistantWithClockTool).toBeDefined();
+    const callId = String(assistantWithClockTool.tool_calls[0].id || '');
+    expect(callId).toContain('call_clock_marker_');
+
+    const toolMessage = (processed.messages as any[]).find(
+      (msg) => msg?.role === 'tool' && msg?.tool_call_id === callId && msg?.name === 'clock'
+    );
+    expect(toolMessage).toBeDefined();
+    const payload = JSON.parse(String(toolMessage.content || '{}'));
+    expect(payload.ok).toBe(true);
+    expect(payload.action).toBe('schedule');
+
+    const firstToolCallArgs = JSON.parse(String(assistantWithClockTool.tool_calls[0]?.function?.arguments || '{}'));
+    expect(firstToolCallArgs.items?.[0]?.recurrence?.kind).toBe('daily');
+    expect(firstToolCallArgs.items?.[0]?.recurrence?.maxRuns).toBe(2);
+
+    const state = await loadClockSessionState(sessionId, normalizeClockConfig({ enabled: true, tickMs: 0 })!);
+    expect(Array.isArray(state.tasks)).toBe(true);
+    expect(state.tasks.some((task) => task.task === 'marker-task')).toBe(true);
+    const markerTask = state.tasks.find((task) => task.task === 'marker-task');
+    expect(markerTask?.recurrence?.kind).toBe('daily');
+    expect(markerTask?.recurrence?.maxRuns).toBe(2);
+  });
+
+
+  test('keeps malformed <**clock:{time,message}**> marker unchanged and skips scheduling', async () => {
+    const sessionId = 's-clock-marker-invalid';
+    const request = buildRequest([
+      {
+        role: 'user',
+        content: 'please remind me later\n<**clock:{"time":"not-a-time","message":"marker-task"}**>'
+      }
+    ]);
+
+    const result = await runHubChatProcess({
+      request,
+      requestId: 'req-clock-marker-invalid-1',
+      entryEndpoint: '/v1/chat/completions',
+      rawPayload: {},
+      metadata: {
+        providerProtocol: 'openai-chat',
+        sessionId,
+        clock: { enabled: true, tickMs: 0 }
+      }
+    });
+
+    const processed = result.processedRequest as any;
+    expect(Array.isArray(processed.messages)).toBe(true);
+
+    const latestUser = (processed.messages as any[])
+      .slice()
+      .reverse()
+      .find((msg) => msg?.role === 'user');
+    expect(String(latestUser?.content || '')).toContain('<**clock:{"time":"not-a-time","message":"marker-task"}**>');
+
+    const assistantWithClockTool = (processed.messages as any[]).find(
+      (msg) => msg?.role === 'assistant' && Array.isArray(msg?.tool_calls)
+        && msg.tool_calls.some((call: any) => call?.function?.name === 'clock')
+    );
+    expect(assistantWithClockTool).toBeUndefined();
+
+    const state = await loadClockSessionState(sessionId, normalizeClockConfig({ enabled: true, tickMs: 0 })!);
+    expect(Array.isArray(state.tasks)).toBe(true);
+    expect(state.tasks).toHaveLength(0);
+  });
+
+  test('clock.schedule supports recurrence with maxRuns', async () => {
+    const sessionId = `s-clock-recur-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const adapterContext: AdapterContext = {
+      requestId: 'req-clock-recur-1',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      sessionId,
+      __rt: { clock: { enabled: true, tickMs: 0 } },
+      capturedChatRequest: {
+        model: 'gpt-test',
+        messages: [{ role: 'user', content: 'schedule recurring task' }]
+      }
+    } as any;
+
+    const dueAt = new Date(Date.now() + 30_000).toISOString();
+    const schedule = await runServerSideToolEngine({
+      chatResponse: {
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: 'assistant',
+              content: null,
+              tool_calls: [
+                {
+                  id: 'call_clock_schedule_recur',
+                  type: 'function',
+                  function: {
+                    name: 'clock',
+                    arguments: JSON.stringify({
+                      action: 'schedule',
+                      items: [
+                        {
+                          dueAt,
+                          task: 'recurring-task',
+                          recurrence: { kind: 'interval', everyMinutes: 2, maxRuns: 3 }
+                        }
+                      ]
+                    })
+                  }
+                }
+              ]
+            },
+            finish_reason: 'tool_calls'
+          }
+        ]
+      } as JsonObject,
+      adapterContext,
+      requestId: 'req-clock-recur-1',
+      entryEndpoint: '/v1/chat/completions'
+    });
+
+    const outputs = (schedule.finalChatResponse as any)?.tool_outputs || [];
+    expect(outputs.length).toBeGreaterThan(0);
+    const payload = JSON.parse(String(outputs[outputs.length - 1]?.content || '{}'));
+    expect(payload.ok).toBe(true);
+    expect(Array.isArray(payload.scheduled)).toBe(true);
+    expect(payload.scheduled[0]?.recurrence?.kind).toBe('interval');
+    expect(payload.scheduled[0]?.recurrence?.maxRuns).toBe(3);
+  });
+
+  test('recurring tasks are persisted and re-scheduled until maxRuns', async () => {
+    const sessionId = `s-clock-recurring-commit-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const clockConfig = normalizeClockConfig({ enabled: true, tickMs: 0, dueWindowMs: 0 });
+    if (!clockConfig) {
+      throw new Error('clockConfig should not be null');
+    }
+
+    await scheduleClockTasks(
+      sessionId,
+      [
+        {
+          dueAtMs: Date.now() - 100,
+          task: 'recurring-commit',
+          recurrence: { kind: 'interval', everyMinutes: 1, maxRuns: 2 }
+        }
+      ],
+      clockConfig
+    );
+
+    const reserved1 = await reserveDueTasksForRequest({
+      reservationId: 'resv-1',
+      sessionId,
+      config: clockConfig,
+      requestId: 'req-resv-1'
+    });
+    expect(reserved1.reservation).toBeTruthy();
+    await commitClockReservation(reserved1.reservation as any, clockConfig);
+
+    const afterFirst = await loadClockSessionState(sessionId, clockConfig);
+    expect(afterFirst.tasks).toHaveLength(1);
+    expect(afterFirst.tasks[0].deliveryCount).toBe(1);
+    expect(afterFirst.tasks[0].deliveredAtMs).toBeUndefined();
+
+    const reserved2 = await reserveDueTasksForRequest({
+      reservationId: 'resv-2',
+      sessionId,
+      config: clockConfig,
+      requestId: 'req-resv-2'
+    });
+    const guard = reserved2.reservation || {
+      reservationId: 'resv-2-fallback',
+      sessionId,
+      taskIds: [afterFirst.tasks[0].taskId],
+      reservedAtMs: Date.now()
+    };
+    await commitClockReservation(guard as any, clockConfig);
+
+    const stateFile = path.join(SESSION_DIR, 'clock', `${sessionId}.json`);
+    expect(fs.existsSync(stateFile)).toBe(false);
+  });
+
+  test('clock handler auto-generates tool_call_id when missing', async () => {
+    const adapterContext: AdapterContext = {
+      requestId: 'req-clock-missing-id',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      sessionId: 's-clock-missing-id',
+      __rt: { clock: { enabled: true, tickMs: 0 } }
+    } as any;
+
+    const result = await runServerSideToolEngine({
+      chatResponse: {
+        choices: [
+          {
+            message: {
+              role: 'assistant',
+              content: null,
+              tool_calls: [
+                {
+                  id: '',
+                  type: 'function',
+                  function: { name: 'clock', arguments: JSON.stringify({ action: 'list' }) }
+                }
+              ]
+            },
+            finish_reason: 'tool_calls'
+          }
+        ]
+      } as any,
+      adapterContext,
+      entryEndpoint: '/v1/chat/completions',
+      requestId: 'req-clock-missing-id',
+      providerProtocol: 'openai-chat'
+    });
+
+    const outputs = (result.finalChatResponse as any).tool_outputs;
+    expect(Array.isArray(outputs)).toBe(true);
+    const last = outputs[outputs.length - 1];
+    expect(typeof last.tool_call_id).toBe('string');
+    expect(String(last.tool_call_id)).toContain('call_servertool_fallback_');
   });
 
   afterAll(() => {

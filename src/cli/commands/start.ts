@@ -5,6 +5,11 @@ import type { ChildProcess, SpawnOptions } from 'node:child_process';
 import type { Command } from 'commander';
 
 import { API_PATHS, HTTP_PROTOCOLS, LOCAL_HOSTS } from '../../constants/index.js';
+import { logProcessLifecycleSync } from '../../utils/process-lifecycle-logger.js';
+import {
+  clearDaemonStopIntent,
+  consumeDaemonStopIntent
+} from '../../utils/daemon-stop-intent.js';
 
 type Spinner = {
   start(text?: string): Spinner;
@@ -60,6 +65,7 @@ export type StartCommandContext = {
   findListeningPids: (port: number) => number[];
   killPidBestEffort: (pid: number, opts: { force: boolean }) => void;
   getModulesConfigPath: () => string;
+  resolveCliEntryPath?: () => string;
   resolveServerEntryPath: () => string;
   spawn: (command: string, args: string[], options: SpawnOptions) => ChildProcess;
   fetch: typeof fetch;
@@ -92,6 +98,60 @@ function normalizeRunMode(value: unknown): RccRunMode | null {
     return normalized;
   }
   return null;
+}
+
+function resolveReleaseDaemonEnabled(env: NodeJS.ProcessEnv): boolean {
+  const raw = String(
+    env.ROUTECODEX_START_DAEMON
+      ?? env.RCC_START_DAEMON
+      ?? '1'
+  )
+    .trim()
+    .toLowerCase();
+  if (['0', 'false', 'no', 'off'].includes(raw)) {
+    return false;
+  }
+  return true;
+}
+
+function isDaemonSupervisorProcess(env: NodeJS.ProcessEnv): boolean {
+  const raw = String(env.ROUTECODEX_DAEMON_SUPERVISOR ?? '').trim().toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
+}
+
+function appendFlag(args: string[], enabled: boolean, flag: string): void {
+  if (enabled) {
+    args.push(flag);
+  }
+}
+
+function buildStartCommandArgs(options: StartCommandOptions, configPath: string, runMode: RccRunMode): string[] {
+  const args: string[] = ['start', '--config', configPath, '--mode', runMode];
+  if (typeof options.logLevel === 'string' && options.logLevel.trim()) {
+    args.push('--log-level', options.logLevel.trim());
+  }
+  if (typeof options.ua === 'string' && options.ua.trim()) {
+    args.push('--ua', options.ua.trim());
+  }
+  if (typeof options.quotaRouting === 'string' && options.quotaRouting.trim()) {
+    args.push('--quota-routing', options.quotaRouting.trim());
+  }
+  appendFlag(args, options.codex === true, '--codex');
+  appendFlag(args, options.claude === true, '--claude');
+  appendFlag(args, options.snap === true, '--snap');
+  appendFlag(args, options.snapOff === true, '--snap-off');
+  appendFlag(args, options.verboseErrors === true, '--verbose-errors');
+  appendFlag(args, options.quietErrors === true, '--quiet-errors');
+  return args;
+}
+
+function resolveDaemonRestartDelayMs(env: NodeJS.ProcessEnv): number {
+  const raw = String(env.ROUTECODEX_DAEMON_RESTART_DELAY_MS ?? env.RCC_DAEMON_RESTART_DELAY_MS ?? '').trim();
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return 1200;
+  }
+  return Math.min(60_000, parsed);
 }
 
 export function createStartCommand(program: Command, ctx: StartCommandContext): void {
@@ -305,14 +365,128 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
         }
 
         const args: string[] = [serverEntry, modulesConfigPath];
-        const childProc = ctx.spawn(nodeBin, args, { stdio: 'inherit', env });
+        const routeCodexHome = pathImpl.join(home(), '.routecodex');
+        const writePidFile = (pid: number | undefined): void => {
+          try {
+            fsImpl.mkdirSync(routeCodexHome, { recursive: true });
+            const pidFile = pathImpl.join(routeCodexHome, `server-${resolvedPort}.pid`);
+            fsImpl.writeFileSync(pidFile, String(pid ?? ''), 'utf8');
+          } catch {
+            /* ignore */
+          }
+        };
 
-        try {
-          const pidFile = pathImpl.join(home(), '.routecodex', 'server.cli.pid');
-          fsImpl.writeFileSync(pidFile, String(childProc.pid ?? ''), 'utf8');
-        } catch {
-          /* ignore */
+        const daemonEnabled = !ctx.isDevPackage && resolveReleaseDaemonEnabled(ctx.env);
+        const daemonSupervisor = daemonEnabled && isDaemonSupervisorProcess(ctx.env);
+        const daemonRestartDelayMs = resolveDaemonRestartDelayMs(ctx.env);
+
+        if (daemonEnabled && !daemonSupervisor) {
+          const cliEntry = (() => {
+            const resolved = ctx.resolveCliEntryPath?.();
+            if (typeof resolved === 'string' && resolved.trim()) {
+              return resolved.trim();
+            }
+            const fallback = String(process.argv[1] || '').trim();
+            return fallback || serverEntry;
+          })();
+
+          clearDaemonStopIntent(resolvedPort, routeCodexHome);
+          const daemonEnv = {
+            ...env,
+            ROUTECODEX_DAEMON_SUPERVISOR: '1',
+            RCC_DAEMON_SUPERVISOR: '1',
+            ROUTECODEX_PORT: String(resolvedPort),
+            RCC_PORT: String(resolvedPort)
+          } as NodeJS.ProcessEnv;
+          const daemonArgs = [cliEntry, ...buildStartCommandArgs(options, configPath, runMode)];
+          const daemonProc = ctx.spawn(nodeBin, daemonArgs, {
+            stdio: 'ignore',
+            env: daemonEnv,
+            detached: true
+          });
+          writePidFile(daemonProc.pid);
+          try {
+            daemonProc.unref?.();
+          } catch {
+            /* ignore */
+          }
+          spinner.succeed(`RouteCodex daemon supervisor started on ${serverHost}:${resolvedPort}`);
+          ctx.logger.info(`Configuration loaded from: ${configPath}`);
+          ctx.logger.info(`Supervisor PID: ${daemonProc.pid ?? 'unknown'}`);
+          ctx.logger.info('Use `rcc stop --password <password>` to stop.');
+          ctx.exit(0);
         }
+
+        const consumeStopIntent = (): { matched: boolean; source?: string; requestedAtMs?: number } =>
+          consumeDaemonStopIntent(resolvedPort, { routeCodexHomeDir: routeCodexHome });
+
+        if (daemonSupervisor) {
+          spinner.succeed(`RouteCodex daemon supervisor active on ${serverHost}:${resolvedPort}`);
+          ctx.logger.info(`Configuration loaded from: ${configPath}`);
+          ctx.logger.info(`Restart policy: always restart unless explicit stop intent is received`);
+
+          while (true) {
+            const pendingStop = consumeStopIntent();
+            if (pendingStop.matched) {
+              logProcessLifecycleSync({
+                event: 'daemon_supervisor',
+                source: 'cli.start',
+                details: {
+                  result: 'stop_intent_consumed',
+                  port: resolvedPort,
+                  source: pendingStop.source ?? 'unknown',
+                  requestedAtMs: pendingStop.requestedAtMs
+                }
+              });
+              ctx.exit(0);
+            }
+
+            const childProc = ctx.spawn(nodeBin, args, { stdio: 'inherit', env });
+            writePidFile(childProc.pid);
+
+            const exitInfo = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
+              childProc.on('exit', (code, signal) => {
+                resolve({ code, signal });
+              });
+              childProc.on('error', () => {
+                resolve({ code: 1, signal: null });
+              });
+            });
+
+            const stopIntent = consumeStopIntent();
+            if (stopIntent.matched) {
+              logProcessLifecycleSync({
+                event: 'daemon_supervisor',
+                source: 'cli.start',
+                details: {
+                  result: 'stopped_by_intent_after_child_exit',
+                  port: resolvedPort,
+                  childExitCode: exitInfo.code,
+                  childSignal: exitInfo.signal,
+                  source: stopIntent.source ?? 'unknown',
+                  requestedAtMs: stopIntent.requestedAtMs
+                }
+              });
+              ctx.exit(0);
+            }
+
+            logProcessLifecycleSync({
+              event: 'daemon_supervisor',
+              source: 'cli.start',
+              details: {
+                result: 'child_exited_restart_scheduled',
+                port: resolvedPort,
+                childExitCode: exitInfo.code,
+                childSignal: exitInfo.signal,
+                restartDelayMs: daemonRestartDelayMs
+              }
+            });
+            await ctx.sleep(daemonRestartDelayMs);
+          }
+        }
+
+        const childProc = ctx.spawn(nodeBin, args, { stdio: 'inherit', env });
+        writePidFile(childProc.pid);
 
         spinner.succeed(`RouteCodex server starting on ${serverHost}:${resolvedPort}`);
         ctx.logger.info(`Configuration loaded from: ${configPath}`);
@@ -326,6 +500,19 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
             /* ignore */
           }
           try {
+            if (childProc.pid && childProc.pid === process.pid) {
+              logProcessLifecycleSync({
+                event: 'self_termination',
+                source: 'cli.start.shutdown',
+                details: {
+                  reason: 'self_kill_guard',
+                  signal: sig,
+                  childPid: childProc.pid,
+                  parentPid: process.pid,
+                  result: 'blocked'
+                }
+              });
+            }
             childProc.kill(sig);
           } catch {
             /* ignore */
@@ -357,6 +544,16 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
           if (still.length) {
             for (const pid of still) {ctx.killPidBestEffort(pid, { force: true });}
           }
+          logProcessLifecycleSync({
+            event: 'self_termination',
+            source: 'cli.start.shutdown',
+            details: {
+              reason: 'shutdown_sequence_completed',
+              signal: sig,
+              targetPort: resolvedPort,
+              remainingPids: still
+            }
+          });
           if (ctx.isDevPackage) {
             await ctx.stopTokenDaemonIfRunning?.();
           }
@@ -380,6 +577,9 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
 
         await ctx.waitForever();
       } catch (error) {
+        if (error instanceof Error && /^exit:\d+$/.test(error.message)) {
+          throw error;
+        }
         spinner.fail('Failed to start server');
         ctx.logger.error(error instanceof Error ? error.message : String(error));
         ctx.exit(1);

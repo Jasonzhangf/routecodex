@@ -4,6 +4,7 @@ import path from 'node:path';
 
 import { createConfigCommand } from '../../src/cli/commands/config.js';
 import { createInitCommand } from '../../src/cli/commands/init.js';
+import { installBundledDefaultConfigBestEffort } from '../../src/cli/config/bundled-default-config.js';
 import { buildInitConfigObject, initializeConfigV1, parseProvidersArg } from '../../src/cli/config/init-config.js';
 import { installBundledDocsBestEffort } from '../../src/cli/config/bundled-docs.js';
 
@@ -394,9 +395,167 @@ describe('cli init command', () => {
     expect(providerV2?.providerId).toBe('openai');
   });
 
+  it('init prepares camoufox environment when selected provider requires oauth/deepseek fingerprint', async () => {
+    const writes = new Map<string, string>();
+    let prepareCalls = 0;
+    const program = new Command();
+    createInitCommand(program, {
+      logger: {
+        info: () => {},
+        warning: () => {},
+        success: () => {},
+        error: () => {}
+      },
+      createSpinner: async () =>
+        ({
+          start: () => ({} as any),
+          succeed: () => {},
+          fail: () => {},
+          warn: () => {},
+          info: () => {},
+          stop: () => {},
+          text: ''
+        }) as any,
+      fsImpl: {
+        existsSync: () => false,
+        readFileSync: () => '',
+        writeFileSync: (p: any, content: any) => {
+          writes.set(String(p), String(content));
+        },
+        mkdirSync: () => {}
+      },
+      pathImpl: path as any,
+      getHomeDir: () => '/tmp',
+      prepareCamoufoxEnvironment: () => {
+        prepareCalls += 1;
+        return true;
+      }
+    });
+
+    await program.parseAsync(
+      ['node', 'routecodex', 'init', '--config', '/tmp/config.json', '--providers', 'deepseek-web', '--force'],
+      { from: 'node' }
+    );
+
+    expect(writes.has('/tmp/config.json')).toBe(true);
+    expect(prepareCalls).toBe(1);
+  });
+
+  it('init supports explicit --camoufox trigger even when selected provider does not require it', async () => {
+    const writes = new Map<string, string>();
+    let prepareCalls = 0;
+    const program = new Command();
+    createInitCommand(program, {
+      logger: {
+        info: () => {},
+        warning: () => {},
+        success: () => {},
+        error: () => {}
+      },
+      createSpinner: async () =>
+        ({
+          start: () => ({} as any),
+          succeed: () => {},
+          fail: () => {},
+          warn: () => {},
+          info: () => {},
+          stop: () => {},
+          text: ''
+        }) as any,
+      fsImpl: {
+        existsSync: () => false,
+        readFileSync: () => '',
+        writeFileSync: (p: any, content: any) => {
+          writes.set(String(p), String(content));
+        },
+        mkdirSync: () => {}
+      },
+      pathImpl: path as any,
+      getHomeDir: () => '/tmp',
+      prepareCamoufoxEnvironment: () => {
+        prepareCalls += 1;
+        return true;
+      }
+    });
+
+    await program.parseAsync(
+      ['node', 'routecodex', 'init', '--config', '/tmp/config.json', '--providers', 'openai', '--camoufox', '--force'],
+      { from: 'node' }
+    );
+
+    expect(writes.has('/tmp/config.json')).toBe(true);
+    expect(prepareCalls).toBe(1);
+  });
+
+  it('init copies bundled default config when config is missing and no providers are specified', async () => {
+    const writes = new Map<string, string>();
+    const infos: string[] = [];
+    const warnings: string[] = [];
+    const sourcePath = '/pkg/dist/configsamples/config.v1.quickstart.sanitized.json';
+    const bundledContent = JSON.stringify({
+      version: '1.0.0',
+      virtualrouterMode: 'v1',
+      httpserver: { host: '127.0.0.1', port: 5555 }
+    });
+    let promptCalls = 0;
+
+    const program = new Command();
+    createInitCommand(program, {
+      logger: {
+        info: (msg) => infos.push(msg),
+        warning: (msg) => warnings.push(msg),
+        success: () => {},
+        error: () => {}
+      },
+      createSpinner: async () =>
+        ({
+          start: () => ({} as any),
+          succeed: () => {},
+          fail: () => {},
+          warn: () => {},
+          info: () => {},
+          stop: () => {},
+          text: ''
+        }) as any,
+      fsImpl: {
+        existsSync: (p: any) => {
+          const target = String(p);
+          if (target === '/tmp/config.json') {
+            return false;
+          }
+          return target.endsWith('/config.v1.quickstart.sanitized.json') || target === sourcePath;
+        },
+        readFileSync: (p: any) => {
+          const target = String(p);
+          if (target === sourcePath || target.endsWith('/config.v1.quickstart.sanitized.json')) {
+            return bundledContent;
+          }
+          return '';
+        },
+        writeFileSync: (p: any, content: any) => {
+          writes.set(String(p), String(content));
+        },
+        mkdirSync: () => {}
+      } as any,
+      pathImpl: path as any,
+      getHomeDir: () => '/tmp',
+      prompt: async () => {
+        promptCalls += 1;
+        return '';
+      }
+    });
+
+    await program.parseAsync(['node', 'routecodex', 'init', '--config', '/tmp/config.json'], { from: 'node' });
+
+    expect(writes.get('/tmp/config.json')).toBe(bundledContent);
+    expect(infos.join('\n')).toContain('Default config copied');
+    expect(warnings.length).toBe(0);
+    expect(promptCalls).toBe(0);
+  });
+
   it('init supports interactive flow via ctx.prompt', async () => {
     const writes = new Map<string, string>();
-    const answers = ['1', 'd', '0.0.0.0', '8888', '', '', '', 'save'];
+    const answers = ['0.0.0.0', '8888', '', '', '', 'save'];
     const program = new Command();
     createInitCommand(program, {
       logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
@@ -420,7 +579,10 @@ describe('cli init command', () => {
       prompt: async () => String(answers.shift() ?? '')
     });
 
-    await program.parseAsync(['node', 'routecodex', 'init', '--config', '/tmp/config.json', '--force'], { from: 'node' });
+    await program.parseAsync(
+      ['node', 'routecodex', 'init', '--config', '/tmp/config.json', '--providers', 'openai', '--force'],
+      { from: 'node' }
+    );
 
     const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
     expect(parsed.httpserver.host).toBe('0.0.0.0');
@@ -1615,6 +1777,58 @@ describe('bundled-docs', () => {
       expect(result.targetDir).toBe(targetDir);
       expect(result.copied.length).toBeGreaterThanOrEqual(1);
       expect(files.get(`${targetDir}/INSTALLATION_AND_QUICKSTART.md`)).toContain('INSTALLATION_AND_QUICKSTART.md');
+    }
+  });
+});
+
+describe('bundled-default-config', () => {
+  it('returns missing_source when bundled default config cannot be found', () => {
+    const result = installBundledDefaultConfigBestEffort({
+      targetConfigPath: '/tmp/config.json',
+      fsImpl: {
+        existsSync: () => false,
+        mkdirSync: () => {},
+        readFileSync: () => '',
+        writeFileSync: () => {}
+      },
+      pathImpl: path as any,
+      sourceConfigPath: undefined
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe('missing_source');
+    }
+  });
+
+  it('copies bundled default config to target path', () => {
+    const files = new Map<string, string>();
+    const exists = new Set<string>();
+    const sourceConfigPath = '/pkg/configsamples/config.v1.quickstart.sanitized.json';
+    files.set(sourceConfigPath, '{"version":"1.0.0"}');
+    exists.add(sourceConfigPath);
+
+    const result = installBundledDefaultConfigBestEffort({
+      sourceConfigPath,
+      targetConfigPath: '/tmp/.routecodex/config.json',
+      fsImpl: {
+        existsSync: (p: any) => exists.has(String(p)),
+        mkdirSync: (p: any) => {
+          exists.add(String(p));
+        },
+        readFileSync: (p: any) => files.get(String(p)) || '',
+        writeFileSync: (p: any, content: any) => {
+          files.set(String(p), String(content));
+          exists.add(String(p));
+        }
+      },
+      pathImpl: path as any
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.targetPath).toBe(path.resolve('/tmp/.routecodex/config.json'));
+      expect(files.get(path.resolve('/tmp/.routecodex/config.json'))).toBe('{"version":"1.0.0"}');
     }
   });
 });

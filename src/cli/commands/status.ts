@@ -2,6 +2,7 @@ import type { Command } from 'commander';
 
 import { LOCAL_HOSTS } from '../../constants/index.js';
 import type { LoadedRouteCodexConfig } from '../../config/routecodex-config-loader.js';
+import type { ManagedZombieProcess } from '../../utils/managed-server-pids.js';
 
 type LoggerLike = {
   info: (msg: string) => void;
@@ -25,6 +26,7 @@ export type StatusCommandContext = {
   log: (line: string) => void;
   loadConfig: () => Promise<LoadedRouteCodexConfig>;
   fetch: typeof fetch;
+  listManagedZombieChildren?: (port: number) => ManagedZombieProcess[];
 };
 
 function pickPortHost(userConfig: Record<string, any>): { port: number | null; host: string } {
@@ -91,6 +93,18 @@ function printHuman(ctx: StatusCommandContext, status: HealthCheckResult): void 
   }
 }
 
+function resolveManagedZombieChildren(ctx: StatusCommandContext, port: number): ManagedZombieProcess[] {
+  if (typeof ctx.listManagedZombieChildren !== 'function') {
+    return [];
+  }
+  try {
+    const out = ctx.listManagedZombieChildren(port);
+    return Array.isArray(out) ? out : [];
+  } catch {
+    return [];
+  }
+}
+
 export function createStatusCommand(program: Command, ctx: StatusCommandContext): void {
   program
     .command('status')
@@ -130,10 +144,24 @@ export function createStatusCommand(program: Command, ctx: StatusCommandContext)
         }
 
         const status = await checkServer(ctx, port, host);
+        const managedZombieChildren = resolveManagedZombieChildren(ctx, port);
+
         if (options.json) {
-          ctx.log(JSON.stringify(status, null, 2));
+          ctx.log(JSON.stringify({
+            ...status,
+            managedZombieChildren
+          }, null, 2));
         } else {
           printHuman(ctx, status);
+          if (managedZombieChildren.length > 0) {
+            const preview = managedZombieChildren
+              .slice(0, 5)
+              .map((item) => `${item.pid}(ppid=${item.ppid})`)
+              .join(', ');
+            ctx.logger.warning(
+              `Detected ${managedZombieChildren.length} zombie child process(es) under managed RouteCodex parent(s): ${preview}`
+            );
+          }
         }
       } catch (error) {
         ctx.logger.error(`Status check failed: ${error instanceof Error ? error.message : String(error)}`);

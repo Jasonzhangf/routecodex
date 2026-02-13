@@ -16,6 +16,7 @@ import {
   tryAcquireTokenManagerLeader,
   releaseTokenManagerLeader
 } from '../token-daemon/leader-lock.js';
+import { logProcessLifecycle } from '../utils/process-lifecycle-logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -176,15 +177,69 @@ async function startDaemonForeground(options: { interval?: string; refreshAheadM
 
 async function startDaemonBackground(options: { interval?: string; refreshAheadMinutes?: string }): Promise<void> {
   const args = buildStartArgs(options);
-  const child = spawn(process.execPath, args, {
-    stdio: 'ignore',
-    detached: true,
-    env: { ...process.env }
+  logProcessLifecycle({
+    event: 'detached_spawn',
+    source: 'token-daemon.startBackground',
+    details: {
+      role: 'token-daemon',
+      result: 'attempt',
+      command: process.execPath,
+      args
+    }
   });
+
   try {
-    child.unref();
-  } catch {
-    // ignore
+    const child = spawn(process.execPath, args, {
+      stdio: 'ignore',
+      detached: true,
+      env: { ...process.env }
+    });
+
+    child.once('error', (error) => {
+      logProcessLifecycle({
+        event: 'detached_spawn',
+        source: 'token-daemon.startBackground',
+        details: {
+          role: 'token-daemon',
+          result: 'failed',
+          command: process.execPath,
+          args,
+          childPid: child.pid ?? null,
+          error
+        }
+      });
+    });
+
+    logProcessLifecycle({
+      event: 'detached_spawn',
+      source: 'token-daemon.startBackground',
+      details: {
+        role: 'token-daemon',
+        result: 'success',
+        command: process.execPath,
+        args,
+        childPid: child.pid ?? null
+      }
+    });
+
+    try {
+      child.unref();
+    } catch {
+      // ignore
+    }
+  } catch (error) {
+    logProcessLifecycle({
+      event: 'detached_spawn',
+      source: 'token-daemon.startBackground',
+      details: {
+        role: 'token-daemon',
+        result: 'failed',
+        command: process.execPath,
+        args,
+        error
+      }
+    });
+    throw error;
   }
 }
 

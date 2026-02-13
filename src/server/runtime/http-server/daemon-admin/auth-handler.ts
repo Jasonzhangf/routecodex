@@ -1,6 +1,6 @@
 import type { Application, Request, Response } from 'express';
 import { isLocalRequest } from '../daemon-admin-routes.js';
-import { establishDaemonSession, isDaemonSessionAuthenticated, clearDaemonSession } from './auth-session.js';
+import { establishDaemonSession, isDaemonSessionAuthenticated, clearDaemonSessionFromRequest } from './auth-session.js';
 import { readDaemonLoginRecord, verifyDaemonPassword, writeDaemonLoginRecord } from './auth-store.js';
 
 function normalizePassword(value: unknown): string {
@@ -102,8 +102,8 @@ export function registerDaemonAuthRoutes(app: Application): void {
     res.status(200).json({ ok: true });
   });
 
-  app.post('/daemon/auth/logout', async (_req: Request, res: Response) => {
-    clearDaemonSession(res);
+  app.post('/daemon/auth/logout', async (req: Request, res: Response) => {
+    clearDaemonSessionFromRequest(req, res);
     res.status(200).json({ ok: true });
   });
 }

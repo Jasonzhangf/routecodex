@@ -7,7 +7,7 @@ import type { DaemonAdminRouteOptions } from '../daemon-admin-routes.js';
 import { rejectNonLocalOrUnauthorizedAdmin } from '../daemon-admin-routes.js';
 
 import { API_PATHS, HTTP_PROTOCOLS, LOCAL_HOSTS } from '../../../../constants/index.js';
-import { findListeningPidsImpl } from '../../../../cli/server/port-utils.js';
+import { listManagedServerPidsByPort } from '../../../../utils/managed-server-pids.js';
 import * as llmsBridge from '../../../../modules/llmswitch/bridge.js';
 import { loadPolicyFromConfigPath, writePolicyToConfigPath } from './routing-policy.js';
 
@@ -38,10 +38,6 @@ type ControlSnapshot = {
   stats?: unknown;
   llmsStats?: unknown;
 };
-
-function parseNetstatListeningPidsNoop(): number[] {
-  return [];
-}
 
 function getSessionCandidatePorts(): number[] {
   const base = path.join(homedir(), '.routecodex', 'sessions');
@@ -118,17 +114,7 @@ function listLocalServers(options: { includePorts?: number[]; includeDevDefault?
 }
 
 function findPidsByPort(port: number): number[] {
-  return findListeningPidsImpl({
-    port,
-    isWindows: process.platform === 'win32',
-    logger: {
-      info: () => {},
-      success: () => {},
-      warning: () => {},
-      error: () => {}
-    },
-    parseNetstatListeningPids: (_stdout: string, _port: number) => parseNetstatListeningPidsNoop()
-  });
+  return listManagedServerPidsByPort(port, { processKill: process.kill.bind(process) });
 }
 
 async function discoverServers(): Promise<ControlServerInfo[]> {

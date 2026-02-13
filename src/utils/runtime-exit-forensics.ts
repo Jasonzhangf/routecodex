@@ -82,7 +82,7 @@ export async function safeWriteRuntimeLifecycle(filePath: string, state: Runtime
   }
 }
 
-export function safeMarkRuntimeExit(filePath: string, marker: RuntimeExitMarker): boolean {
+export async function safeMarkRuntimeExit(filePath: string, marker: RuntimeExitMarker): Promise<boolean> {
   try {
     const existing = safeReadRuntimeLifecycle(filePath);
     if (!existing) {
@@ -92,7 +92,7 @@ export function safeMarkRuntimeExit(filePath: string, marker: RuntimeExitMarker)
       ...existing,
       exit: marker
     };
-    return safeWriteRuntimeLifecycle(filePath, next);
+    return await safeWriteRuntimeLifecycle(filePath, next);
   } catch {
     return false;
   }

@@ -179,6 +179,33 @@ export async function handleListProviderTemplates(req: Request, res: Response): 
           type: 'iflow',
           auth: { type: 'iflow-oauth' }
         }
+      },
+      {
+        id: 'deepseek-web-account',
+        label: 'DeepSeek Web 账号模板',
+        type: 'openai',
+        description: 'DeepSeek Web provider 模板（auth.type=deepseek-account，compatibilityProfile=chat:deepseek-web）',
+        defaults: {
+          type: 'openai',
+          compatibilityProfile: 'chat:deepseek-web',
+          auth: {
+            type: 'deepseek-account',
+            entries: [
+              {
+                alias: '1',
+                type: 'deepseek-account',
+                tokenFile: '~/.routecodex/auth/deepseek-account-1.json'
+              }
+            ]
+          },
+          deepseek: {
+            strictToolRequired: true,
+            textToolFallback: true,
+            powTimeoutMs: 15000,
+            powMaxAttempts: 2,
+            sessionReuseTtlMs: 1800000
+          }
+        }
       }
     ];
 

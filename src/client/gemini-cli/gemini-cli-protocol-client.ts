@@ -33,6 +33,62 @@ function hasDataEnvelope(payload: ProtocolRequestPayload): payload is ProtocolRe
   return typeof payload === 'object' && payload !== null && 'data' in payload;
 }
 
+function normalizeEndpointPath(endpoint: string): string {
+  const trimmed = endpoint.trim();
+  if (!trimmed) {
+    return '';
+  }
+  const withoutQuery = trimmed.split('?')[0]?.split('#')[0] || '';
+  if (!withoutQuery) {
+    return '';
+  }
+  const withLeadingSlash = withoutQuery.startsWith('/') ? withoutQuery : `/${withoutQuery}`;
+  return withLeadingSlash.replace(/\/{2,}/g, '/');
+}
+
+function deriveActionPrefix(defaultEndpoint: string): string {
+  const normalized = normalizeEndpointPath(defaultEndpoint);
+  if (!normalized) {
+    return '/v1internal';
+  }
+  const segments = normalized.split('/').filter(Boolean);
+  if (!segments.length) {
+    return '/v1internal';
+  }
+  const prefixParts: string[] = [];
+  for (const segment of segments) {
+    const colonIndex = segment.indexOf(':');
+    if (colonIndex >= 0) {
+      const beforeAction = segment.slice(0, colonIndex).trim();
+      if (beforeAction) {
+        prefixParts.push(beforeAction);
+      }
+      break;
+    }
+    prefixParts.push(segment);
+  }
+  const prefix = `/${prefixParts.join('/')}`.replace(/\/{2,}/g, '/');
+  return prefix === '/' ? '/v1internal' : prefix;
+}
+
+function normalizeAction(rawAction: unknown): 'generateContent' | 'streamGenerateContent' | 'countTokens' {
+  const trimmed = typeof rawAction === 'string' ? rawAction.trim() : '';
+  if (!trimmed) {
+    return 'generateContent';
+  }
+  const leaf = trimmed
+    .split('?')[0]
+    .split('#')[0]
+    .split('/')
+    .pop()
+    ?.trim() || '';
+  const action = leaf.includes(':') ? leaf.split(':').pop()?.trim() || '' : leaf;
+  if (action === 'streamGenerateContent' || action === 'countTokens') {
+    return action;
+  }
+  return 'generateContent';
+}
+
 export class GeminiCLIProtocolClient implements HttpProtocolClient<ProtocolRequestPayload> {
   buildRequestBody(request: ProtocolRequestPayload): Record<string, unknown> {
     const payload = this.extractPayload(request);
@@ -95,12 +151,8 @@ export class GeminiCLIProtocolClient implements HttpProtocolClient<ProtocolReque
 
   resolveEndpoint(request: ProtocolRequestPayload, _defaultEndpoint: string): string {
     const payload = this.extractPayload(request);
-    const action = (payload.action as string) || 'generateContent';
-    const defaultEndpoint = typeof _defaultEndpoint === 'string' ? _defaultEndpoint.trim() : '';
-    const base =
-      defaultEndpoint && defaultEndpoint.includes(':')
-        ? defaultEndpoint.replace(/:[^/?]+/, '')
-        : '/v1internal';
+    const action = normalizeAction(payload.action);
+    const base = deriveActionPrefix(typeof _defaultEndpoint === 'string' ? _defaultEndpoint : '');
     const endpoint = `${base}:${action}`;
 
     // 根据 action 返回对应的 endpoint

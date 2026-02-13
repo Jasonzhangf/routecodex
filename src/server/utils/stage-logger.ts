@@ -76,7 +76,7 @@ export function logPipelineStage(stage: string, requestId: string, details?: Rec
   const level = detectStageLevel(stage);
   const verbose = isStageVerboseEnabled();
 
-  if (!shouldLogStage(scope, level, verbose)) {
+  if (!shouldLogStage(stage, scope, level, verbose)) {
     return;
   }
 
@@ -98,17 +98,46 @@ export function logPipelineStage(stage: string, requestId: string, details?: Rec
   console.log(`${colorize(level, label)}${providerTag}${suffix}`);
 }
 
-function shouldLogStage(scope: string, level: StageLevel, verbose: boolean): boolean {
-  if (level === 'error') {
-    return true;
+function shouldLogStage(
+  stage: string,
+  scope: string,
+  level: StageLevel,
+  verbose: boolean
+): boolean {
+  const normalizedScope = scope.trim().toLowerCase();
+  const normalizedStage = stage.trim().toLowerCase();
+
+  // HTTP handlers already emit one concise colored request-failed line.
+  // Keep provider.send.error silent even in verbose mode to avoid duplicates.
+  if (normalizedScope === 'provider.send' && normalizedStage.endsWith('.error')) {
+    return false;
   }
+
   if (verbose) {
     return true;
   }
+
+  // Keep default runtime logs concise:
+  // - only errors are printed by stage logger
+  // - detailed pipeline/hub/provider lifecycle logs are available in verbose mode.
+  if (level === 'error') {
+    // HTTP handlers already print a single colored terminal error line.
+    // Suppress provider send errors here to avoid duplicate console output.
+    if (normalizedScope === 'provider.send' || normalizedStage.startsWith('provider.send.')) {
+      return false;
+    }
+    return true;
+  }
+
+  if (normalizedScope === 'response.sse' || normalizedStage.startsWith('response.sse')) {
+    return false;
+  }
+
   if (scope.startsWith('response.sse')) {
     return false;
   }
-  return true;
+
+  return false;
 }
 
 function parseStage(stage: string): { scope: string; action: string } {

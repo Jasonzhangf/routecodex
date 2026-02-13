@@ -56,9 +56,7 @@ function isPipelineConsoleLoggingEnabled(): boolean {
 function isProviderDetailConsoleLoggingEnabled(): boolean {
   return resolveBoolFromEnv(
     process.env.ROUTECODEX_PROVIDER_LOG_VERBOSE
-      ?? process.env.RCC_PROVIDER_LOG_VERBOSE
-      ?? process.env.ROUTECODEX_PIPELINE_LOG_VERBOSE
-      ?? process.env.RCC_PIPELINE_LOG_VERBOSE,
+      ?? process.env.RCC_PROVIDER_LOG_VERBOSE,
     false
   );
 }
@@ -101,7 +99,7 @@ export class PipelineDebugLogger {
 
   logModule(module: string, action: string, data?: LogData): void {
     if (this.colored) {
-      if (!this.providerDetailConsoleLoggingEnabled && isProviderModule(module) && !isErrorLikeAction(action)) {
+      if (!this.providerDetailConsoleLoggingEnabled && isProviderModule(module)) {
         return;
       }
       this.colored.logModule(module, action, data);
@@ -188,7 +186,7 @@ export class PipelineDebugLogger {
 
   logProviderRequest(requestId: string, action: string, request?: LogData, response?: LogData): void {
     if (this.colored) {
-      if (!this.providerDetailConsoleLoggingEnabled && !isErrorLikeAction(action)) {
+      if (!this.providerDetailConsoleLoggingEnabled) {
         return;
       }
       this.colored.logProviderRequest(requestId, action as any, { request, response });

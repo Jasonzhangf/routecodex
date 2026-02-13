@@ -15,6 +15,7 @@ const FAMILY_TO_CANONICAL: Record<string, CanonicalProviderType> = {
   glm: 'openai',
   qwen: 'openai',
   iflow: 'openai',
+  deepseek: 'openai',
   lmstudio: 'openai',
   chat: 'openai',
   responses: 'responses',
@@ -81,6 +82,9 @@ export function mapProviderModule(providerType: string): string {
   if (normalized === 'iflow') {
     return 'iflow-http-provider';
   }
+  if (normalized === 'deepseek') {
+    return 'deepseek-http-provider';
+  }
   if (normalized === 'openai' || normalized === 'glm' || normalized === 'qwen' || normalized === 'lmstudio') {
     return 'openai-http-provider';
   }
@@ -104,7 +108,7 @@ export function mapProviderProtocol(providerType?: string): ProviderProtocol {
   if (normalized === 'gemini-cli') {
     return 'gemini-chat';
   }
-  if (normalized === 'openai' || normalized === 'glm' || normalized === 'qwen' || normalized === 'iflow' || normalized === 'lmstudio') {
+  if (normalized === 'openai' || normalized === 'glm' || normalized === 'qwen' || normalized === 'iflow' || normalized === 'lmstudio' || normalized === 'deepseek') {
     return 'openai-chat';
   }
   if (normalized === 'mock') {
@@ -127,7 +131,7 @@ export function defaultEndpointForProvider(providerType?: string): string {
   if (normalized === 'gemini-cli') {
     return '/v1internal:generateContent';
   }
-  if (normalized === 'openai' || normalized === 'glm' || normalized === 'qwen' || normalized === 'iflow' || normalized === 'lmstudio') {
+  if (normalized === 'openai' || normalized === 'glm' || normalized === 'qwen' || normalized === 'iflow' || normalized === 'lmstudio' || normalized === 'deepseek') {
     return '/v1/chat/completions';
   }
   if (normalized === 'mock') {

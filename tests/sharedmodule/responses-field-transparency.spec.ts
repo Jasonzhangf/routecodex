@@ -46,10 +46,13 @@ describe('responses same-protocol field transparency', () => {
     expect((outbound.payload as any).prompt_cache_key).toBe('cache-key-1');
     expect((outbound.payload as any).reasoning).toEqual({ effort: 'high' });
     expect((outbound.payload as any).service_tier).toBe('default');
-    expect((outbound.payload as any).truncation).toBe('disabled');
-    expect((outbound.payload as any).include).toEqual(['output_text']);
-    expect((outbound.payload as any).store).toBe(true);
-  });
+     expect((outbound.payload as any).truncation).toBe('disabled');
+     expect((outbound.payload as any).include).toEqual(['output_text']);
+     expect((outbound.payload as any).store).toBe(true);
+      // temperature/top_p are filtered for openai-responses providers (HTTP 400 prevention)
+      expect((outbound.payload as any).temperature).toBeUndefined();
+      expect((outbound.payload as any).top_p).toBeUndefined();
+   });
 
   it('retains responses top-level fields and output detail from snapshot', () => {
     const requestId = 'req-responses-transparency-2';

@@ -257,6 +257,17 @@ describe('Daemon admin HTTP endpoints (smoke)', () => {
     }
   });
 
+  it('does not expose legacy /daemon/clock-admin route', async () => {
+    const { server, baseUrl, configDir, restoreEnv } = await startTestServer();
+    try {
+      const cookie = await setupDaemonAdminAuth(baseUrl);
+      const out = await getJson(baseUrl, '/daemon/clock-admin', cookie);
+      expect(out.status).toBe(404);
+    } finally {
+      await stopTestServer(server, configDir, restoreEnv);
+    }
+  });
+
   it('supports /daemon/restart for reloading config from disk', async () => {
     const { server, baseUrl, configDir, restoreEnv } = await startTestServer();
     try {
@@ -268,6 +279,27 @@ describe('Daemon admin HTTP endpoints (smoke)', () => {
       expect(out.body).toHaveProperty('ok', true);
       expect(out.body).toHaveProperty('reloadedAt');
       expect(out.body).toHaveProperty('configPath');
+    } finally {
+      await stopTestServer(server, configDir, restoreEnv);
+    }
+  });
+
+  it('logout clears server-side session entry', async () => {
+    const { server, baseUrl, configDir, restoreEnv } = await startTestServer();
+    try {
+      const cookie = await setupDaemonAdminAuth(baseUrl);
+
+      const statusBefore = await getJson(baseUrl, '/daemon/auth/status', cookie);
+      expect(statusBefore.status).toBe(200);
+      expect(statusBefore.body).toHaveProperty('authenticated', true);
+
+      const logout = await postJson(baseUrl, '/daemon/auth/logout', undefined, cookie);
+      expect(logout.status).toBe(200);
+      expect(logout.body).toHaveProperty('ok', true);
+
+      const statusAfter = await getJson(baseUrl, '/daemon/auth/status', cookie);
+      expect(statusAfter.status).toBe(200);
+      expect(statusAfter.body).toHaveProperty('authenticated', false);
     } finally {
       await stopTestServer(server, configDir, restoreEnv);
     }

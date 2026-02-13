@@ -37,7 +37,7 @@ describe('PipelineDebugLogger provider noise filtering in dev', () => {
     expect(logSpy).not.toHaveBeenCalled();
   });
 
-  it('still logs provider errors in dev', async () => {
+  it('suppresses provider errors in dev when provider verbose logging is disabled', async () => {
     delete process.env.ROUTECODEX_PROVIDER_LOG_VERBOSE;
     delete process.env.ROUTECODEX_PIPELINE_LOG_VERBOSE;
 
@@ -47,10 +47,7 @@ describe('PipelineDebugLogger provider noise filtering in dev', () => {
 
     logger.logProviderRequest('provider:crs.key1', 'request-error', { message: 'boom' });
 
-    expect(logSpy).toHaveBeenCalledTimes(1);
-    const rendered = String(logSpy.mock.calls[0]?.[0] ?? '');
-    expect(rendered).toContain('request-error');
-    expect(rendered).toContain('boom');
+    expect(logSpy).not.toHaveBeenCalled();
   });
 
   it('suppresses provider module info logs by default in dev', async () => {

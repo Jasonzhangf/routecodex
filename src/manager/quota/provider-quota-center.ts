@@ -75,13 +75,10 @@ export interface UsageEventForQuota {
 
 const WINDOW_DURATION_MS = 60_000;
 const COOLDOWN_SCHEDULE_429_MS = [
-  5_000,
-  30_000,
-  60_000,
-  300_000,
-  1_800_000,
-  3_600_000,
-  10_000_000
+  3_000,
+  10_000,
+  31_000,
+  61_000
 ] as const;
 const COOLDOWN_SCHEDULE_FATAL_MS = [
   5 * 60_000,
@@ -91,13 +88,10 @@ const COOLDOWN_SCHEDULE_FATAL_MS = [
   3 * 60 * 60_000
 ] as const;
 const COOLDOWN_SCHEDULE_DEFAULT_MS = [
-  5_000,
-  30_000,
-  60_000,
-  300_000,
-  1_800_000,
-  3_600_000,
-  10_000_000
+  3_000,
+  10_000,
+  31_000,
+  61_000
 ] as const;
 const ERROR_CHAIN_WINDOW_MS = 10 * 60_000;
 

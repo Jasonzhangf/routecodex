@@ -8,6 +8,8 @@ async function copyModulesConfig() {
   const distModulesConfig = path.join(root, 'dist', 'config', 'modules.json');
   const srcDaemonAdminUi = path.join(root, 'docs', 'daemon-admin-ui.html');
   const distDaemonAdminUi = path.join(root, 'dist', 'docs', 'daemon-admin-ui.html');
+  const srcQuickstartConfig = path.join(root, 'configsamples', 'config.v1.quickstart.sanitized.json');
+  const distQuickstartConfig = path.join(root, 'dist', 'configsamples', 'config.v1.quickstart.sanitized.json');
 
   try {
     // 确保源文件存在
@@ -26,11 +28,28 @@ async function copyModulesConfig() {
       await fs.mkdir(path.dirname(distDaemonAdminUi), { recursive: true });
       await fs.copyFile(srcDaemonAdminUi, distDaemonAdminUi);
       console.log('[copy-modules-config] copied daemon-admin-ui.html to dist/docs/daemon-admin-ui.html');
+
     } catch (error) {
       if (error.code === 'ENOENT') {
         console.warn('[copy-modules-config] docs/daemon-admin-ui.html not found, skipping');
       } else {
         console.error('[copy-modules-config] failed to copy daemon admin ui:', error.message);
+        process.exit(1);
+      }
+    }
+
+    try {
+      await fs.access(srcQuickstartConfig);
+      await fs.mkdir(path.dirname(distQuickstartConfig), { recursive: true });
+      await fs.copyFile(srcQuickstartConfig, distQuickstartConfig);
+      console.log(
+        '[copy-modules-config] copied config.v1.quickstart.sanitized.json to dist/configsamples/config.v1.quickstart.sanitized.json'
+      );
+    } catch (error) {
+      if (error.code === 'ENOENT') {
+        console.warn('[copy-modules-config] configsamples/config.v1.quickstart.sanitized.json not found, skipping');
+      } else {
+        console.error('[copy-modules-config] failed to copy quickstart config:', error.message);
         process.exit(1);
       }
     }

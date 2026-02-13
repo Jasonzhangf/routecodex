@@ -1,13 +1,25 @@
-import { describe, expect, test } from '@jest/globals';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+
+import { afterEach, describe, expect, test } from '@jest/globals';
 import type { OpenAIStandardConfig } from '../../../../src/providers/core/api/provider-config.js';
 import type { ModuleDependencies } from '../../../../src/modules/pipeline/interfaces/pipeline-interfaces.js';
 import { OpenAIHttpProvider } from '../../../../src/providers/core/runtime/openai-http-provider.js';
 import { ResponsesHttpProvider } from '../../../../src/providers/core/runtime/responses-http-provider.js';
 import { AnthropicHttpProvider } from '../../../../src/providers/core/runtime/anthropic-http-provider.js';
 import { iFlowHttpProvider } from '../../../../src/providers/core/runtime/iflow-http-provider.js';
+import { DeepSeekHttpProvider } from '../../../../src/providers/core/runtime/deepseek-http-provider.js';
 import { attachProviderRuntimeMetadata } from '../../../../src/providers/core/runtime/provider-runtime-metadata.js';
 
 const emptyDeps: ModuleDependencies = {} as ModuleDependencies;
+const tempDirs: string[] = [];
+
+afterEach(async () => {
+  for (const dir of tempDirs.splice(0, tempDirs.length)) {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
 
 describe('Protocol HTTP providers (V2) - basic behavior', () => {
   test('OpenAIHttpProvider forces providerType=openai', () => {
@@ -99,11 +111,56 @@ describe('Protocol HTTP providers (V2) - basic behavior', () => {
     );
     expect(fallbackEndpoint).toBe('/chat/retrieve');
 
+    const messagesEntryEndpoint = provider.resolveRequestEndpoint(
+      { metadata: { iflowWebSearch: true, entryEndpoint: '/v1/messages' } },
+      '/chat/completions'
+    );
+    expect(messagesEntryEndpoint).toBe('/chat/completions');
+
     const body = provider.buildHttpRequestBody({
       metadata: { iflowWebSearch: true },
       data: { model: 'kimi-k2.5', q: 'x' }
     });
     expect(body).toEqual({ model: 'kimi-k2.5', q: 'x' });
+
+    const bodyFallback = provider.buildHttpRequestBody({
+      metadata: { iflowWebSearch: true, entryEndpoint: '/v1/messages' },
+      model: 'minimax-m2.5',
+      messages: [{ role: 'user', content: 'hello' }]
+    });
+    expect(bodyFallback).toEqual({
+      model: 'minimax-m2.5',
+      max_tokens: 8192,
+      messages: [{ role: 'user', content: 'hello' }]
+    });
+  });
+
+  test('DeepSeekHttpProvider keeps openai providerType and deepseek module type', async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-deepseek-protocol-'));
+    tempDirs.push(tempDir);
+    const tokenFile = path.join(tempDir, 'deepseek-account-1.json');
+    await fs.writeFile(tokenFile, JSON.stringify({ access_token: 'deepseek-token' }, null, 2) + '\n', 'utf8');
+
+    const config: OpenAIStandardConfig = {
+      id: 'test-deepseek',
+      type: 'deepseek-http-provider',
+      config: {
+        providerType: 'openai',
+        providerId: 'deepseek',
+        auth: {
+          type: 'apikey',
+          rawType: 'deepseek-account',
+          apiKey: '',
+          tokenFile
+        }
+      }
+    } as unknown as OpenAIStandardConfig;
+
+    const provider = new DeepSeekHttpProvider(config, emptyDeps);
+    await provider.initialize();
+
+    expect(provider.providerType).toBe('openai');
+    expect(provider.type).toBe('deepseek-http-provider');
   });
 
   test('iFlowHttpProvider treats HTTP 200 business error envelope as provider error', async () => {
@@ -179,4 +236,3 @@ describe('Protocol HTTP providers (V2) - basic behavior', () => {
     expect(String(caught.message || '')).toContain('AllModelsFailed');
   });
 });
-

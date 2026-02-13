@@ -28,6 +28,45 @@ function isIflowWebSearch(input: ResolveEndpointInput | BuildRequestBodyInput): 
   return metadata?.iflowWebSearch === true;
 }
 
+function isKnownPublicEntryEndpoint(value: string): boolean {
+  const lowered = value.trim().toLowerCase();
+  return lowered === '/v1/messages'
+    || lowered === '/v1/responses'
+    || lowered === '/v1/chat/completions';
+}
+
+function normalizeIflowRetrieveEndpoint(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  if (!trimmed.startsWith('/')) {
+    return undefined;
+  }
+  const pathOnly = trimmed.split('?')[0]?.replace(/\/+$/, '').toLowerCase();
+  if (pathOnly === '/chat/retrieve') {
+    return trimmed;
+  }
+  return undefined;
+}
+
+function shouldUseLegacyIflowWebSearchTransport(metadata?: UnknownRecord): boolean {
+  const rawEntryEndpoint =
+    typeof metadata?.entryEndpoint === 'string' && metadata.entryEndpoint.trim()
+      ? metadata.entryEndpoint.trim()
+      : '';
+  if (!rawEntryEndpoint) {
+    return true;
+  }
+  if (normalizeIflowRetrieveEndpoint(rawEntryEndpoint)) {
+    return true;
+  }
+  if (isKnownPublicEntryEndpoint(rawEntryEndpoint)) {
+    return false;
+  }
+  return true;
+}
+
 function normalizeHeaderKey(value: string): string {
   return value.replace(/[\s_-]+/g, '');
 }
@@ -180,20 +219,40 @@ export const iflowFamilyProfile: ProviderFamilyProfile = {
       return undefined;
     }
     const metadata = getMetadata(input.request);
-    const entryEndpoint =
-      typeof metadata?.entryEndpoint === 'string' && metadata.entryEndpoint.trim()
-        ? metadata.entryEndpoint.trim()
-        : undefined;
-    return entryEndpoint || '/chat/retrieve';
+    const retrieveEndpoint = normalizeIflowRetrieveEndpoint(metadata?.entryEndpoint);
+    if (retrieveEndpoint) {
+      return retrieveEndpoint;
+    }
+    if (!shouldUseLegacyIflowWebSearchTransport(metadata)) {
+      const fallbackDefault =
+        typeof input.defaultEndpoint === 'string' && input.defaultEndpoint.trim()
+          ? input.defaultEndpoint.trim()
+          : '/chat/completions';
+      return fallbackDefault;
+    }
+    return '/chat/retrieve';
   },
   buildRequestBody(input: BuildRequestBodyInput) {
     if (!isIflowWebSearch(input)) {
       return undefined;
     }
-    if (isRecord(input.request) && isRecord(input.request.data)) {
-      return input.request.data;
+    const metadata = getMetadata(input.request);
+    if (!shouldUseLegacyIflowWebSearchTransport(metadata)) {
+      return isRecord(input.defaultBody) ? input.defaultBody : undefined;
     }
-    return {};
+
+    const sourceBody =
+      isRecord(input.request) && isRecord(input.request.data)
+        ? input.request.data
+        : isRecord(input.defaultBody)
+          ? input.defaultBody
+          : {};
+
+    const body = { ...sourceBody };
+    delete body.metadata;
+    delete body.iflowWebSearch;
+    delete body.entryEndpoint;
+    return body;
   },
   resolveUserAgent(input: ResolveUserAgentInput): string | undefined {
     return input.uaFromConfig ?? input.uaFromService ?? input.inboundUserAgent ?? input.defaultUserAgent;
@@ -219,16 +278,13 @@ export const iflowFamilyProfile: ProviderFamilyProfile = {
 
     const metadataSessionId = pickString(metadata?.sessionId, metadata?.session_id);
     const metadataConversationId = pickString(metadata?.conversationId, metadata?.conversation_id);
-    const requestScopedId = pickString(runtimeMetadata?.requestId, metadata?.clientRequestId);
-
     const resolvedSessionId =
       pickString(
         findHeaderValue(headers, 'session-id'),
         findHeaderValue(headers, 'session_id'),
         metadataSessionId,
-        metadataConversationId,
-        requestScopedId
-      ) ?? '';
+        metadataConversationId
+      );
     const resolvedConversationId =
       pickString(
         findHeaderValue(headers, 'conversation-id'),
@@ -236,7 +292,7 @@ export const iflowFamilyProfile: ProviderFamilyProfile = {
         metadataConversationId,
         metadataSessionId,
         resolvedSessionId
-      ) ?? resolvedSessionId;
+      );
 
     if (resolvedSessionId) {
       assignHeader(headers, 'session_id', resolvedSessionId);
@@ -248,9 +304,10 @@ export const iflowFamilyProfile: ProviderFamilyProfile = {
     }
 
     const resolvedOriginator =
-      pickString(findHeaderValue(headers, 'originator'), metadata?.clientOriginator, metadata?.originator) ??
-      'codex_cli_rs';
-    assignHeader(headers, 'originator', resolvedOriginator);
+      pickString(findHeaderValue(headers, 'originator'), metadata?.clientOriginator, metadata?.originator);
+    if (resolvedOriginator) {
+      assignHeader(headers, 'originator', resolvedOriginator);
+    }
 
     const bearerApiKey = extractBearerApiKey(headers);
     if (!bearerApiKey) {
@@ -259,7 +316,7 @@ export const iflowFamilyProfile: ProviderFamilyProfile = {
 
     const userAgent = findHeaderValue(headers, 'User-Agent') ?? 'iFlow-Cli';
     const timestamp = Date.now().toString();
-    const signature = buildIflowSignature(userAgent, resolvedSessionId, timestamp, bearerApiKey);
+    const signature = buildIflowSignature(userAgent, resolvedSessionId ?? '', timestamp, bearerApiKey);
     if (!signature) {
       return headers;
     }

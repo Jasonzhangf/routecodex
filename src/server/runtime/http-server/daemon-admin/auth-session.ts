@@ -37,6 +37,15 @@ function parseCookieHeader(cookieHeader: string | undefined): Record<string, str
   return out;
 }
 
+function getSessionIdFromRequest(req: Request): string | null {
+  const cookies = parseCookieHeader(req.headers?.cookie);
+  const sessionId = cookies[COOKIE_NAME];
+  if (typeof sessionId !== 'string' || !sessionId.trim()) {
+    return null;
+  }
+  return sessionId.trim();
+}
+
 export function getDaemonSessionCookieName(): string {
   return COOKIE_NAME;
 }
@@ -44,8 +53,7 @@ export function getDaemonSessionCookieName(): string {
 export function isDaemonSessionAuthenticated(req: Request): boolean {
   const now = Date.now();
   cleanupExpiredSessions(now);
-  const cookies = parseCookieHeader(req.headers?.cookie);
-  const sessionId = cookies[COOKIE_NAME];
+  const sessionId = getSessionIdFromRequest(req);
   if (!sessionId) {
     return false;
   }
@@ -85,4 +93,14 @@ export function clearDaemonSession(res: Response): void {
     'Max-Age=0'
   ];
   res.setHeader('Set-Cookie', attrs.join('; '));
+}
+
+export function clearDaemonSessionFromRequest(req: Request, res: Response): void {
+  const now = Date.now();
+  cleanupExpiredSessions(now);
+  const sessionId = getSessionIdFromRequest(req);
+  if (sessionId) {
+    sessions.delete(sessionId);
+  }
+  clearDaemonSession(res);
 }

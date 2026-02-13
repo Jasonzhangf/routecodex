@@ -13,7 +13,7 @@ describe('stage logger verbosity filtering', () => {
     return import('../../../src/server/utils/stage-logger.js');
   }
 
-  it('prints provider stage status in development by default without details', async () => {
+  it('suppresses provider stage status in development by default', async () => {
     process.env.NODE_ENV = 'development';
     delete process.env.ROUTECODEX_STAGE_LOG;
     delete process.env.ROUTECODEX_STAGE_LOG_VERBOSE;
@@ -26,14 +26,10 @@ describe('stage logger verbosity filtering', () => {
       model: 'kimi-k2.5'
     });
 
-    expect(logSpy).toHaveBeenCalledTimes(1);
-    const rendered = String(logSpy.mock.calls[0]?.[0] ?? '');
-    expect(rendered).toContain('[provider.send][req_provider] start');
-    expect(rendered).not.toContain('model');
-    expect(rendered).not.toContain('iflow.key1.kimi-k2.5');
+    expect(logSpy).not.toHaveBeenCalled();
   });
 
-  it('keeps request logs and only prints request id by default', async () => {
+  it('suppresses request logs by default', async () => {
     process.env.NODE_ENV = 'development';
     delete process.env.ROUTECODEX_STAGE_LOG;
     delete process.env.ROUTECODEX_STAGE_LOG_VERBOSE;
@@ -43,11 +39,20 @@ describe('stage logger verbosity filtering', () => {
 
     logPipelineStage('request.received', 'req_request', { endpoint: '/v1/responses', stream: true });
 
-    expect(logSpy).toHaveBeenCalledTimes(1);
-    const rendered = String(logSpy.mock.calls[0]?.[0] ?? '');
-    expect(rendered).toContain('[request][req_request] received');
-    expect(rendered).not.toContain('endpoint');
-    expect(rendered).not.toContain('stream');
+    expect(logSpy).not.toHaveBeenCalled();
+  });
+
+  it('suppresses provider completion logs by default', async () => {
+    process.env.NODE_ENV = 'development';
+    delete process.env.ROUTECODEX_STAGE_LOG;
+    delete process.env.ROUTECODEX_STAGE_LOG_VERBOSE;
+
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const { logPipelineStage } = await importStageLogger();
+
+    logPipelineStage('provider.send.completed', 'req_completed', { status: 200 });
+
+    expect(logSpy).not.toHaveBeenCalled();
   });
 
   it('suppresses response sse logs by default', async () => {
@@ -63,7 +68,7 @@ describe('stage logger verbosity filtering', () => {
     expect(logSpy).not.toHaveBeenCalled();
   });
 
-  it('always prints errors with details when stage logging is enabled', async () => {
+  it('suppresses provider send errors by default to avoid duplicate HTTP error logs', async () => {
     process.env.NODE_ENV = 'development';
     delete process.env.ROUTECODEX_STAGE_LOG;
     delete process.env.ROUTECODEX_STAGE_LOG_VERBOSE;
@@ -73,9 +78,22 @@ describe('stage logger verbosity filtering', () => {
 
     logPipelineStage('provider.send.error', 'req_error', { message: 'boom' });
 
+    expect(logSpy).not.toHaveBeenCalled();
+  });
+
+  it('prints non-provider errors with details when stage logging is enabled', async () => {
+    process.env.NODE_ENV = 'development';
+    delete process.env.ROUTECODEX_STAGE_LOG;
+    delete process.env.ROUTECODEX_STAGE_LOG_VERBOSE;
+
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const { logPipelineStage } = await importStageLogger();
+
+    logPipelineStage('response.sse.stream.error', 'req_error', { message: 'boom' });
+
     expect(logSpy).toHaveBeenCalledTimes(1);
     const rendered = String(logSpy.mock.calls[0]?.[0] ?? '');
-    expect(rendered).toContain('[provider.send][req_error] error');
+    expect(rendered).toContain('[response.sse.stream][req_error] error');
     expect(rendered).toContain('boom');
   });
 
@@ -98,7 +116,19 @@ describe('stage logger verbosity filtering', () => {
     expect(rendered).toContain('crs.key1.gpt-5.2-codex');
   });
 
-  it('enables stage logging in dev build mode even when NODE_ENV is production', async () => {
+  it('still suppresses provider.send.error when verbose is enabled', async () => {
+    process.env.NODE_ENV = 'development';
+    process.env.ROUTECODEX_STAGE_LOG_VERBOSE = '1';
+
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const { logPipelineStage } = await importStageLogger();
+
+    logPipelineStage('provider.send.error', 'req_provider_verbose_err', { message: 'boom' });
+
+    expect(logSpy).not.toHaveBeenCalled();
+  });
+
+  it('keeps hub completion logs suppressed in dev build mode without verbose', async () => {
     process.env.NODE_ENV = 'production';
     process.env.ROUTECODEX_BUILD_MODE = 'dev';
     delete process.env.ROUTECODEX_STAGE_LOG;
@@ -109,9 +139,6 @@ describe('stage logger verbosity filtering', () => {
 
     logPipelineStage('hub.completed', 'req_build_mode', { route: 'thinking' });
 
-    expect(logSpy).toHaveBeenCalledTimes(1);
-    const rendered = String(logSpy.mock.calls[0]?.[0] ?? '');
-    expect(rendered).toContain('[hub][req_build_mode] completed');
-    expect(rendered).not.toContain('route');
+    expect(logSpy).not.toHaveBeenCalled();
   });
 });

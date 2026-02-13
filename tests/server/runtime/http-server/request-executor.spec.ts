@@ -325,4 +325,157 @@ describe('HubRequestExecutor failover', () => {
     expect(secondCallMetadata.excludedProviderKeys).toBeUndefined();
   });
 
+  test('retries failover when upstream SSE error event is retryable network failure', async () => {
+    const firstProviderKey = 'deepseek-web.primary.deepseek-chat';
+    const secondProviderKey = 'deepseek-web.backup.deepseek-chat';
+
+    const failingProcess = jest.fn(async () => ({
+      status: 200,
+      data: {
+        mode: 'sse',
+        error: {
+          type: 'error',
+          error: {
+            type: 'api_error',
+            message: 'Internal Network Failure'
+          }
+        }
+      }
+    }));
+    const successProcess = jest.fn(async () => ({ status: 200, data: { id: 'resp_ok' } }));
+
+    const handles = new Map<string, ProviderHandle>([
+      [firstProviderKey, buildHandle(firstProviderKey, failingProcess)],
+      [secondProviderKey, buildHandle(secondProviderKey, successProcess)]
+    ]);
+
+    const runtimeManager = {
+      resolveRuntimeKey: (providerKey: string) => providerKey,
+      getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey ? handles.get(runtimeKey) : undefined)
+    };
+
+    const pipeline = {
+      execute: jest.fn(async (input: any) => {
+        const disabled = new Set<string>(
+          Array.isArray(input.metadata?.excludedProviderKeys)
+            ? input.metadata.excludedProviderKeys
+            : []
+        );
+        const providerKey = disabled.has(firstProviderKey)
+          ? secondProviderKey
+          : firstProviderKey;
+        return {
+          requestId: input.id,
+          providerPayload: {},
+          target: {
+            providerKey,
+            providerType: 'openai',
+            outboundProfile: 'openai-chat',
+            runtimeKey: providerKey
+          },
+          routingDecision: { routeName: 'deepseek' },
+          metadata: {}
+        };
+      }),
+      updateVirtualRouterConfig: jest.fn()
+    };
+
+    const deps = {
+      runtimeManager,
+      getHubPipeline: () => pipeline,
+      getModuleDependencies: () => ({
+        errorHandlingCenter: {
+          handleError: jest.fn(async () => undefined)
+        }
+      }),
+      logStage: jest.fn(),
+      stats: new StatsManager()
+    };
+
+    const executor = createRequestExecutor(deps);
+    const result = await executor.execute({
+      requestId: 'req-sse-network-retry',
+      entryEndpoint: '/v1/messages',
+      body: {},
+      headers: {},
+      metadata: {}
+    });
+
+    expect(pipeline.execute).toHaveBeenCalledTimes(2);
+    expect(failingProcess).toHaveBeenCalledTimes(1);
+    expect(successProcess).toHaveBeenCalledTimes(1);
+    expect(result).toEqual(expect.objectContaining({ status: 200 }));
+  });
+
+  test('surfaces readable SSE error message when upstream error event is non-retryable', async () => {
+    const providerKey = 'deepseek-web.primary.deepseek-chat';
+
+    const failingProcess = jest.fn(async () => ({
+      status: 200,
+      data: {
+        mode: 'sse',
+        error: {
+          type: 'error',
+          error: {
+            type: 'invalid_request_error',
+            message: 'Invalid request payload'
+          }
+        }
+      }
+    }));
+
+    const handles = new Map<string, ProviderHandle>([
+      [providerKey, buildHandle(providerKey, failingProcess)]
+    ]);
+
+    const runtimeManager = {
+      resolveRuntimeKey: (key: string) => key,
+      getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey ? handles.get(runtimeKey) : undefined)
+    };
+
+    const pipeline = {
+      execute: jest.fn(async (input: any) => ({
+        requestId: input.id,
+        providerPayload: {},
+        target: {
+          providerKey,
+          providerType: 'openai',
+          outboundProfile: 'openai-chat',
+          runtimeKey: providerKey
+        },
+        routingDecision: { routeName: 'deepseek' },
+        metadata: {}
+      })),
+      updateVirtualRouterConfig: jest.fn()
+    };
+
+    const deps = {
+      runtimeManager,
+      getHubPipeline: () => pipeline,
+      getModuleDependencies: () => ({
+        errorHandlingCenter: {
+          handleError: jest.fn(async () => undefined)
+        }
+      }),
+      logStage: jest.fn(),
+      stats: new StatsManager()
+    };
+
+    const executor = createRequestExecutor(deps);
+
+    await expect(executor.execute({
+      requestId: 'req-sse-readable',
+      entryEndpoint: '/v1/messages',
+      body: {},
+      headers: {},
+      metadata: {}
+    })).rejects.toMatchObject({
+      code: 'SSE_DECODE_ERROR',
+      message: expect.stringContaining('Upstream SSE error event [invalid_request_error]: Invalid request payload')
+    });
+
+    expect(pipeline.execute).toHaveBeenCalledTimes(1);
+    expect(failingProcess).toHaveBeenCalledTimes(1);
+  });
+
 });
