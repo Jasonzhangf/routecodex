@@ -105,7 +105,7 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
   },
   'gemini-cli': {
     defaultBaseUrl: 'https://cloudcode-pa.googleapis.com',
-    defaultEndpoint: '/v1internal:generateContent',
+    defaultEndpoint: '/models:generateContent',
     defaultModel: 'gemini-2.5-flash-lite',
     requiredAuth: ['oauth'],
     optionalAuth: [],
@@ -174,6 +174,26 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
       'User-Agent': 'iFlow-Cli'
     },
     // 默认 Provider 请求超时时间：500s
+    timeout: 500000,
+    maxRetries: 3
+  },
+
+  deepseek: {
+    defaultBaseUrl: 'https://chat.deepseek.com',
+    defaultEndpoint: '/api/v0/chat/completion',
+    defaultModel: 'deepseek-chat',
+    requiredAuth: ['apikey'],
+    optionalAuth: [],
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+      'Accept-Encoding': 'gzip',
+      'x-client-platform': 'android',
+      'x-client-version': '1.3.0-auto-resume',
+      'x-client-locale': 'zh_CN',
+      'accept-charset': 'UTF-8',
+      'User-Agent': 'DeepSeek/1.0.13 Android/35'
+    },
     timeout: 500000,
     maxRetries: 3
   },
