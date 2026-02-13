@@ -54,3 +54,4 @@ scripts/demo-*.mjs
 # Track only `.beads/issues.jsonl` (single source of truth); everything else in `.beads/*` is local runtime state.
 .beads/**
 !.beads/issues.jsonl
+src/utils/daemon-stop-intent.ts
