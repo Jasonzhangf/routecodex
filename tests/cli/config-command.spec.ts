@@ -395,6 +395,50 @@ describe('cli init command', () => {
     expect(providerV2?.providerId).toBe('openai');
   });
 
+  it('init (non-interactive) injects model-less iflow webSearch defaults when iflow is selected', async () => {
+    const writes = new Map<string, string>();
+    const program = new Command();
+    createInitCommand(program, {
+      logger: {
+        info: () => {},
+        warning: () => {},
+        success: () => {},
+        error: () => {}
+      },
+      createSpinner: async () =>
+        ({
+          start: () => ({} as any),
+          succeed: () => {},
+          fail: () => {},
+          warn: () => {},
+          info: () => {},
+          stop: () => {},
+          text: ''
+        }) as any,
+      fsImpl: {
+        existsSync: () => false,
+        readFileSync: () => '',
+        writeFileSync: (p: any, content: any) => {
+          writes.set(String(p), String(content));
+        },
+        mkdirSync: () => {}
+      },
+      pathImpl: path as any,
+      getHomeDir: () => '/tmp'
+    });
+
+    await program.parseAsync(
+      ['node', 'routecodex', 'init', '--config', '/tmp/config.json', '--providers', 'iflow', '--force'],
+      { from: 'node' }
+    );
+
+    const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
+    expect(parsed?.virtualrouter?.routing?.web_search?.[0]?.targets?.[0]).toContain('iflow.');
+    expect(parsed?.virtualrouter?.webSearch?.engines?.[0]?.id).toBe('iflow:web_search');
+    expect(parsed?.virtualrouter?.webSearch?.engines?.[0]?.providerKey).toBe('iflow');
+    expect(parsed?.virtualrouter?.webSearch?.search?.['iflow:web_search']?.providerKey).toBe('iflow');
+  });
+
   it('init prepares camoufox environment when selected provider requires oauth/deepseek fingerprint', async () => {
     const writes = new Map<string, string>();
     let prepareCalls = 0;
@@ -1623,6 +1667,50 @@ describe('init-config', () => {
     expect(parsed.virtualrouter.providers.openai).toBeTruthy();
     expect(parsed.virtualrouter.providers.tab).toBeTruthy();
     expect(parsed.virtualrouter.routing.default[0].targets[0]).toContain('tab.');
+  });
+
+  it('writes model-less iflow webSearch defaults when iflow is selected', async () => {
+    const writes = new Map<string, string>();
+    const result = await initializeConfigV1(
+      {
+        fsImpl: {
+          existsSync: () => false,
+          mkdirSync: () => {},
+          readFileSync: () => '',
+          writeFileSync: (p: any, content: any) => writes.set(String(p), String(content))
+        },
+        pathImpl: path as any
+      },
+      { configPath: '/tmp/config.json', force: true, providers: ['iflow'] }
+    );
+
+    expect(result.ok).toBe(true);
+    const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
+    expect(parsed.webSearch.engines[0].id).toBe('iflow:web_search');
+    expect(parsed.webSearch.engines[0].providerKey).toBe('iflow');
+    expect(parsed.webSearch.search['iflow:web_search'].providerKey).toBe('iflow');
+    expect(parsed.virtualrouter.routing.web_search[0].targets[0]).toContain('iflow.');
+  });
+
+  it('does not inject webSearch defaults when iflow is not selected', async () => {
+    const writes = new Map<string, string>();
+    const result = await initializeConfigV1(
+      {
+        fsImpl: {
+          existsSync: () => false,
+          mkdirSync: () => {},
+          readFileSync: () => '',
+          writeFileSync: (p: any, content: any) => writes.set(String(p), String(content))
+        },
+        pathImpl: path as any
+      },
+      { configPath: '/tmp/config.json', force: true, providers: ['openai'] }
+    );
+
+    expect(result.ok).toBe(true);
+    const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
+    expect(parsed.webSearch).toBeUndefined();
+    expect(parsed.virtualrouter.routing.web_search).toBeUndefined();
   });
 
   it('buildInitConfigObject throws when providers list is empty', () => {

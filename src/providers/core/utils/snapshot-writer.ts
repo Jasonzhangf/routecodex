@@ -65,16 +65,15 @@ function normalizeProviderToken(value?: string): string {
   return trimmed.replace(/[^A-Za-z0-9_.-]/g, '_');
 }
 
-function resolveEndpoint(url?: string): { endpoint: string; folder: string } {
-  const rawUrl = String(url || '').toLowerCase();
-  if (rawUrl.includes('/responses')) {
+function resolveEndpoint(entryEndpoint?: string): { endpoint: string; folder: string } {
+  // Bucket codex-samples strictly by inbound API entry endpoint.
+  // Never infer snapshot folder from upstream provider URL/protocol.
+  const ep = String(entryEndpoint || '').trim().toLowerCase();
+  if (ep.includes('/v1/responses') || ep.includes('/responses.submit')) {
     return { endpoint: '/v1/responses', folder: 'openai-responses' };
   }
-  if (rawUrl.includes('/messages')) {
+  if (ep.includes('/v1/messages')) {
     return { endpoint: '/v1/messages', folder: 'anthropic-messages' };
-  }
-  if (rawUrl.includes('/v1/openai')) {
-    return { endpoint: '/v1/chat/completions', folder: 'openai-chat' };
   }
   return { endpoint: '/v1/chat/completions', folder: 'openai-chat' };
 }
@@ -231,7 +230,7 @@ async function flushBufferedProviderSnapshots(groupRequestId: string): Promise<v
 }
 
 function buildProviderSnapshotPersistInput(options: ProviderSnapshotWriteOptions): ProviderSnapshotPersistInput {
-  const { endpoint, folder } = resolveEndpoint(options.entryEndpoint || options.url);
+  const { endpoint, folder } = resolveEndpoint(options.entryEndpoint);
   const stage = options.phase;
   const requestId = normalizeRequestId(options.requestId);
   const groupRequestId = normalizeRequestId(options.clientRequestId || options.requestId);
@@ -399,7 +398,7 @@ export async function writeProviderRetrySnapshot(options: {
   if (!runtimeFlags.snapshotsEnabled) {
     return;
   }
-  const { endpoint, folder } = resolveEndpoint(options.entryEndpoint || options.url);
+  const { endpoint, folder } = resolveEndpoint(options.entryEndpoint);
   const stage = options.type === 'request' ? 'provider-request.retry' : 'provider-response.retry';
   const requestId = normalizeRequestId(options.requestId);
   const groupRequestId = normalizeRequestId(options.clientRequestId || options.requestId);

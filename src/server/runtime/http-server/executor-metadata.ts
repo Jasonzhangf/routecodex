@@ -83,8 +83,34 @@ function extractClockDaemonId(
   return undefined;
 }
 
+function extractSessionTokenFromBodyMeta(meta: Record<string, unknown>): { sessionId?: string; conversationId?: string } {
+  const pick = (...keys: string[]): string | undefined => {
+    for (const key of keys) {
+      const value = meta[key];
+      if (typeof value === 'string' && value.trim()) {
+        return value.trim();
+      }
+    }
+    return undefined;
+  };
+
+  const explicitSessionId = pick('sessionId', 'session_id');
+  const explicitConversationId = pick('conversationId', 'conversation_id');
+  const userId = pick('user_id');
+  const userIdSessionMatch = userId ? userId.match(/(?:^|[_-])session[_-]([a-z0-9-]{8,})/i) : null;
+  const derivedSessionId = userIdSessionMatch?.[1]?.trim();
+
+  const sessionId = explicitSessionId || derivedSessionId;
+  const conversationId = explicitConversationId || sessionId;
+  return {
+    ...(sessionId ? { sessionId } : {}),
+    ...(conversationId ? { conversationId } : {})
+  };
+}
+
 export function buildRequestMetadata(input: PipelineExecutionInput): Record<string, unknown> {
   const userMeta = asRecord(input.metadata);
+  const bodyMeta = asRecord(asRecord(input.body).metadata);
   const headers = asRecord(input.headers);
   const inboundUserAgent = extractHeaderValue(headers, 'user-agent');
   const inboundOriginator = extractHeaderValue(headers, 'originator');
@@ -121,12 +147,25 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
     metadata.clientHeaders = normalizedClientHeaders;
   }
 
-  const sessionIdentifiers = extractSessionIdentifiersFromMetadata(metadata);
+  const sessionIdentifierSource: Record<string, unknown> = {
+    ...bodyMeta,
+    ...metadata
+  };
+  const sessionIdentifiers = extractSessionIdentifiersFromMetadata(sessionIdentifierSource);
   if (sessionIdentifiers.sessionId) {
     metadata.sessionId = sessionIdentifiers.sessionId;
   }
   if (sessionIdentifiers.conversationId) {
     metadata.conversationId = sessionIdentifiers.conversationId;
+  }
+  if (!metadata.sessionId || !metadata.conversationId) {
+    const fallback = extractSessionTokenFromBodyMeta(bodyMeta);
+    if (!metadata.sessionId && fallback.sessionId) {
+      metadata.sessionId = fallback.sessionId;
+    }
+    if (!metadata.conversationId && fallback.conversationId) {
+      metadata.conversationId = fallback.conversationId;
+    }
   }
 
   return metadata;

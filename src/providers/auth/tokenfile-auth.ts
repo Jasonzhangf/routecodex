@@ -8,8 +8,8 @@
  * 更新：支持iFlow的API Key模式 - 优先使用api_key字段，回退到access_token
  */
 
-import fs from 'fs';
 import fsAsync from 'fs/promises';
+import fs from 'fs';
 import path from 'path';
 import type { IAuthProvider, AuthStatus } from './auth-interface.js';
 import type { OAuthAuth } from '../core/api/provider-config.js';

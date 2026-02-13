@@ -1,13 +1,15 @@
 import type { Application, Request, Response } from 'express';
 import type { DaemonAdminRouteOptions } from '../daemon-admin-routes.js';
 import { rejectNonLocalOrUnauthorizedAdmin } from '../daemon-admin-routes.js';
+import { x7eGate, getGateState } from './routecodex-x7e-gate.js';
 import type { ManagerModule } from '../../../../manager/types.js';
-import type { QuotaManagerModule, QuotaRecord } from '../../../../manager/modules/quota/index.js';
+import type { QuotaManagerModule, QuotaRecord, QuotaManagerAdapter } from '../../../../manager/modules/quota/index.js';
 import type { ProviderQuotaDaemonModule } from '../../../../manager/modules/quota/index.js';
 import { loadTokenPortalFingerprintSummary } from '../../../../token-portal/fingerprint-summary.js';
 import { findGoogleAccountVerificationIssue } from '../../../../token-daemon/quota-auth-issue.js';
+import { createQuotaManagerAdapter } from '../../../../manager/modules/quota/quota-adapter.js';
 
-function getQuotaModule(options: DaemonAdminRouteOptions): QuotaManagerModule | null {
+function getQuotaModule(options: DaemonAdminRouteOptions): QuotaManagerAdapter | null {
   const daemon = options.getManagerDaemon() as
     | {
         getModule?: (id: string) => ManagerModule | undefined;
@@ -20,7 +22,56 @@ function getQuotaModule(options: DaemonAdminRouteOptions): QuotaManagerModule | 
   if (!mod) {
     return null;
   }
-  return mod as unknown as QuotaManagerModule;
+  const quotaModule = mod as unknown as QuotaManagerModule;
+  const providerQuotaModule = typeof daemon.getModule === 'function' ? (daemon.getModule('provider-quota') as ManagerModule | undefined) : undefined;
+
+  const coreLike = quotaModule && typeof (quotaModule as any).getCoreQuotaManager === 'function'
+    ? (quotaModule as any).getCoreQuotaManager()
+    : null;
+
+  return createQuotaManagerAdapter({
+    coreManager: coreLike,
+    legacyDaemon: providerQuotaModule as unknown as ProviderQuotaDaemonModule | null,
+    quotaRoutingEnabled: true
+  });
+}
+
+function getQuotaRefreshModule(options: DaemonAdminRouteOptions): (QuotaManagerModule & { refreshNow?: () => Promise<unknown> }) | null {
+  const daemon = options.getManagerDaemon() as
+    | {
+        getModule?: (id: string) => ManagerModule | undefined;
+      }
+    | null;
+  if (!daemon || typeof daemon.getModule !== 'function') {
+    return null;
+  }
+  const mod = daemon.getModule('quota') as ManagerModule | undefined;
+  if (!mod) {
+    return null;
+  }
+  return mod as unknown as QuotaManagerModule & { refreshNow?: () => Promise<unknown> };
+}
+
+function getQuotaRawSnapshot(options: DaemonAdminRouteOptions): Record<string, QuotaRecord> {
+  const daemon = options.getManagerDaemon() as
+    | {
+        getModule?: (id: string) => ManagerModule | undefined;
+      }
+    | null;
+  if (!daemon || typeof daemon.getModule !== 'function') {
+    return {};
+  }
+  const quotaModule = daemon.getModule('quota') as
+    | (ManagerModule & { getRawSnapshot?: () => Record<string, QuotaRecord> })
+    | undefined;
+  if (!quotaModule || typeof quotaModule.getRawSnapshot !== 'function') {
+    return {};
+  }
+  try {
+    return quotaModule.getRawSnapshot() ?? {};
+  } catch {
+    return {};
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -86,9 +137,7 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
   app.post('/quota/refresh', async (req: Request, res: Response) => {
     if (rejectNonLocalOrUnauthorizedAdmin(req, res)) {return;}
     try {
-      const quotaModule = getQuotaModule(options) as
-        | (QuotaManagerModule & { refreshNow?: () => Promise<unknown> })
-        | null;
+      const quotaModule = getQuotaRefreshModule(options);
       const refreshMod = quotaModule as { refreshNow?: () => Promise<unknown> };
       if (!quotaModule || typeof refreshMod.refreshNow !== 'function') {
         res.status(503).json({ error: { message: 'quota module not available', code: 'not_ready' } });
@@ -105,8 +154,7 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
   app.get('/quota/summary', (req: Request, res: Response) => {
     if (rejectNonLocalOrUnauthorizedAdmin(req, res)) {return;}
     try {
-      const quotaModule = getQuotaModule(options);
-      const snapshot: Record<string, QuotaRecord> = quotaModule ? quotaModule.getRawSnapshot() : {};
+      const snapshot: Record<string, QuotaRecord> = getQuotaRawSnapshot(options);
       const records = Object.entries(snapshot).map(([key, value]) => ({
         key,
         remainingFraction: value.remainingFraction,
@@ -126,14 +174,11 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
   app.get('/quota/providers', async (req: Request, res: Response) => {
     if (rejectNonLocalOrUnauthorizedAdmin(req, res)) {return;}
     try {
-      const mod = getProviderQuotaModule(options);
-      interface AdminSnapshotModule { getAdminSnapshot?: () => Record<string, unknown> }
-      const snapshot = mod && typeof (mod as AdminSnapshotModule).getAdminSnapshot === 'function'
-        ? (mod as AdminSnapshotModule).getAdminSnapshot?.() ?? {}
-        : {};
+      const quotaAdapter = getQuotaModule(options);
+      const snapshot = quotaAdapter ? quotaAdapter.getAdminSnapshot() : {};
 
-      const entries = Object.values(snapshot).map((state: unknown) => {
-        const record = state && typeof state === 'object' ? (state as Record<string, unknown>) : {};
+      const entries = Object.values(snapshot).map((state) => {
+        const record = state;
         const providerKey = typeof record.providerKey === 'string' ? record.providerKey : '';
         return {
           providerKey,
@@ -227,12 +272,9 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
       res.status(400).json({ error: { message: 'providerKey is required', code: 'bad_request' } });
       return;
     }
-    const mod = getProviderQuotaModule(options) as
-      | (ProviderQuotaDaemonModule & { resetProvider?: (providerKey: string) => Promise<unknown> })
-      | null;
-    const resetMod = mod as { resetProvider?: (key: string) => Promise<unknown> };
-    if (!mod || typeof resetMod.resetProvider !== 'function') {
-      res.status(503).json({ error: { message: 'provider-quota module not available', code: 'not_ready' } });
+    const mod = getQuotaModule(options);
+    if (!mod || typeof mod.resetProvider !== 'function') {
+      res.status(503).json({ error: { message: 'quota module not available', code: 'not_ready' } });
       return;
     }
     try {
@@ -242,8 +284,7 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
       if (providerKey.toLowerCase().startsWith('antigravity.')) {
         const parts = providerKey.split('.');
         const alias = parts.length >= 2 ? String(parts[1] || '').trim().toLowerCase() : '';
-        const getter = mod as unknown as { getAdminSnapshot?: () => Record<string, unknown> };
-        const snapshot = typeof getter.getAdminSnapshot === 'function' ? getter.getAdminSnapshot() : null;
+        const snapshot = mod.getAdminSnapshot();
         if (alias && snapshot && typeof snapshot === 'object') {
           const prefix = `antigravity.${alias}.`;
           const expanded = Object.keys(snapshot).filter((k) => String(k || '').trim().toLowerCase().startsWith(prefix));
@@ -255,14 +296,14 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
 
       let result: unknown = null;
       for (const key of keys) {
-        result = await resetMod.resetProvider(key);
+        result = await mod.resetProvider(key);
       }
       // If this provider supports external quota refresh (e.g. antigravity), force-refresh immediately
       // so the virtual-router pool state can converge without waiting for the periodic timer.
       let quotaRefresh: unknown = null;
       if (providerKey.toLowerCase().startsWith('antigravity.')) {
         try {
-          const quotaModule = getQuotaModule(options) as unknown as { refreshNow?: () => Promise<unknown> } | null;
+          const quotaModule = getQuotaRefreshModule(options) as unknown as { refreshNow?: () => Promise<unknown> } | null;
           if (quotaModule && typeof quotaModule.refreshNow === 'function') {
             quotaRefresh = await quotaModule.refreshNow();
           }
@@ -297,12 +338,9 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
       res.status(400).json({ error: { message: 'providerKey is required', code: 'bad_request' } });
       return;
     }
-    const mod = getProviderQuotaModule(options) as
-      | (ProviderQuotaDaemonModule & { recoverProvider?: (providerKey: string) => Promise<unknown> })
-      | null;
-    const recoverMod = mod as { recoverProvider?: (key: string) => Promise<unknown> };
-    if (!mod || typeof recoverMod.recoverProvider !== 'function') {
-      res.status(503).json({ error: { message: 'provider-quota module not available', code: 'not_ready' } });
+    const mod = getQuotaModule(options);
+    if (!mod || typeof mod.recoverProvider !== 'function') {
+      res.status(503).json({ error: { message: 'quota module not available', code: 'not_ready' } });
       return;
     }
     try {
@@ -310,8 +348,7 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
       if (providerKey.toLowerCase().startsWith('antigravity.')) {
         const parts = providerKey.split('.');
         const alias = parts.length >= 2 ? String(parts[1] || '').trim().toLowerCase() : '';
-        const getter = mod as unknown as { getAdminSnapshot?: () => Record<string, unknown> };
-        const snapshot = typeof getter.getAdminSnapshot === 'function' ? getter.getAdminSnapshot() : null;
+        const snapshot = mod.getAdminSnapshot();
         if (alias && snapshot && typeof snapshot === 'object') {
           const prefix = `antigravity.${alias}.`;
           const expanded = Object.keys(snapshot).filter((k) => String(k || '').trim().toLowerCase().startsWith(prefix));
@@ -323,7 +360,7 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
 
       let result: unknown = null;
       for (const key of keys) {
-        result = await recoverMod.recoverProvider(key);
+        result = await mod.recoverProvider(key);
       }
       res.status(200).json({ ok: true, providerKey, action: 'recover', result });
     } catch (error: unknown) {
@@ -354,16 +391,13 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
       res.status(400).json({ error: { message: 'durationMs or durationMinutes is required', code: 'bad_request' } });
       return;
     }
-    const mod = getProviderQuotaModule(options) as
-      | (ProviderQuotaDaemonModule & { disableProvider?: (options: unknown) => Promise<unknown> })
-      | null;
-    const disableMod = mod as { disableProvider?: (options: unknown) => Promise<unknown> };
-    if (!mod || typeof disableMod.disableProvider !== 'function') {
-      res.status(503).json({ error: { message: 'provider-quota module not available', code: 'not_ready' } });
+    const mod = getQuotaModule(options);
+    if (!mod || typeof mod.disableProvider !== 'function') {
+      res.status(503).json({ error: { message: 'quota module not available', code: 'not_ready' } });
       return;
     }
     try {
-      const result = await disableMod.disableProvider({ providerKey, mode, durationMs });
+      const result = await mod.disableProvider({ providerKey, mode, durationMs });
       res.status(200).json({ ok: true, providerKey, action: 'disable', mode, durationMs, result });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
@@ -376,8 +410,7 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
     const runtimeKey = typeof req.query.runtimeKey === 'string' ? req.query.runtimeKey : undefined;
     const providerKey = typeof req.query.providerKey === 'string' ? req.query.providerKey : undefined;
     try {
-      const quotaModule = getQuotaModule(options);
-      const snapshot: Record<string, QuotaRecord> = quotaModule ? quotaModule.getRawSnapshot() : {};
+      const snapshot: Record<string, QuotaRecord> = getQuotaRawSnapshot(options);
       // 当前仅针对 antigravity 语义；snapshot 键格式为 "antigravity://alias/modelId"
       const items: Array<{
         key: string;
@@ -423,6 +456,22 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
     // 目前 VirtualRouter 的 series cooldown 状态未通过稳定 API 暴露；
     // 为避免与核心路由实现交叉，先返回空列表，占位以便前端视图对接。
     res.status(200).json([]);
+  });
+
+  // X7E Phase 0: Gate status endpoint for observability and debugging
+  app.get('/quota/x7e-gate', (req: Request, res: Response) => {
+    if (rejectNonLocalOrUnauthorizedAdmin(req, res)) {return;}
+    res.status(200).json({
+      gate: getGateState(),
+      legacyMode: x7eGate.isLegacyMode(),
+      phases: {
+        phase0: x7eGate.phase0Enabled,
+        phase1: x7eGate.phase1UnifiedQuota,
+        phase2: x7eGate.phase2UnifiedControl,
+        phase3: x7eGate.phase3ExecutorSeparation,
+        phase4: x7eGate.phase4UnifiedLogging
+      }
+    });
   });
 }
 

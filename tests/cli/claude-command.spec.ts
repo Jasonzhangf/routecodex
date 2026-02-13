@@ -188,6 +188,7 @@ describe('cli claude command', () => {
   it('unsets anthropic auth tokens when launching claude in managed tmux session', async () => {
     const spawnCalls: Array<{ command: string; args: string[]; options: any }> = [];
     const tmuxCalls: Array<{ command: string; args: string[] }> = [];
+    let registeredDaemonId = '';
     const program = new Command();
 
     createClaudeCommand(program, {
@@ -211,6 +212,14 @@ describe('cli claude command', () => {
           return { ok: true, status: 200, json: async () => ({ status: 'ok', ready: true }) } as any;
         }
         if (url.includes('/daemon/clock-client/register')) {
+          try {
+            const parsed = JSON.parse(String((init as RequestInit | undefined)?.body ?? '{}')) as Record<string, unknown>;
+            if (typeof parsed.daemonId === 'string' && parsed.daemonId.trim()) {
+              registeredDaemonId = parsed.daemonId.trim();
+            }
+          } catch {
+            // ignore
+          }
           return { ok: true, status: 200, json: async () => ({ ok: true }) } as any;
         }
         return { ok: true, status: 200, json: async () => ({}) } as any;
@@ -255,6 +264,12 @@ describe('cli claude command', () => {
     const shellCommand = extractTmuxLaunchShellCommand(launchCall);
     expect(shellCommand).toContain("'-u' 'ANTHROPIC_AUTH_TOKEN'");
     expect(shellCommand).toContain("'-u' 'ANTHROPIC_TOKEN'");
+    expect(shellCommand).toContain('ANTHROPIC_API_KEY=');
+    expect(shellCommand).toContain('::rcc-clockd:');
+    if (registeredDaemonId) {
+      expect(shellCommand).toContain(registeredDaemonId);
+    }
+    expect(shellCommand).not.toContain('ANTHROPIC_API_KEY=ak-test');
     expect(shellCommand).toContain('while true; do');
     expect(shellCommand).not.toContain('while true; do;');
   });

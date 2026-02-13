@@ -6,6 +6,7 @@ import type { Command } from 'commander';
 
 import { API_PATHS, HTTP_PROTOCOLS, LOCAL_HOSTS } from '../../constants/index.js';
 import { logProcessLifecycleSync } from '../../utils/process-lifecycle-logger.js';
+import { ensureDefaultPrecommandScriptBestEffort } from '../config/precommand-default-script.js';
 import {
   clearDaemonStopIntent,
   consumeDaemonStopIntent
@@ -366,6 +367,16 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
 
         const args: string[] = [serverEntry, modulesConfigPath];
         const routeCodexHome = pathImpl.join(home(), '.routecodex');
+        const defaultPrecommand = ensureDefaultPrecommandScriptBestEffort({
+          fsImpl,
+          pathImpl,
+          homeDir: home()
+        });
+        if (!defaultPrecommand.ok) {
+          spinner.warn(
+            `Failed to ensure default precommand script (${defaultPrecommand.scriptPath}): ${defaultPrecommand.message || 'unknown error'}`
+          );
+        }
         const writePidFile = (pid: number | undefined): void => {
           try {
             fsImpl.mkdirSync(routeCodexHome, { recursive: true });

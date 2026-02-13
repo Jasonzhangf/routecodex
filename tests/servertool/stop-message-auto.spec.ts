@@ -369,7 +369,7 @@ describe('stop_message_auto servertool', () => {
     expect(ops.some((op) => op?.op === 'append_user_text' && typeof op?.text === 'string')).toBe(true);
   });
 
-  test('skips stop_message retrigger on stop_message_flow followup hops', async () => {
+  test('allows stop_message retrigger on stop_message_flow followup hops', async () => {
     const sessionId = 'stopmessage-spec-session-followup-allow';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
@@ -427,13 +427,14 @@ describe('stop_message_auto servertool', () => {
       providerProtocol: 'openai-chat'
     });
 
-    expect(result.mode).toBe('passthrough');
+    expect(result.mode).toBe('tool_flow');
+    expect(result.execution?.flowId).toBe('stop_message_flow');
 
     const persisted = await readJsonFileUntil<{ state?: { stopMessageUsed?: number } }>(
       path.join(SESSION_DIR, `session-${sessionId}.json`),
-      (data) => data?.state?.stopMessageUsed === 0
+      (data) => data?.state?.stopMessageUsed === 1
     );
-    expect(persisted?.state?.stopMessageUsed).toBe(0);
+    expect(persisted?.state?.stopMessageUsed).toBe(1);
   });
 
   test('skips stop_message retrigger for non-stop followup flows', async () => {
@@ -697,7 +698,7 @@ describe('stop_message_auto servertool', () => {
     expect(inputText).toContain('继续执行');
   });
 
-  test('skips followup when client disconnects mid-stream', async () => {
+  test('still arms stopMessage followup when client is already disconnected', async () => {
     const sessionId = 'stopmessage-spec-session-disconnected';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
@@ -755,7 +756,163 @@ describe('stop_message_auto servertool', () => {
       providerProtocol: 'openai-chat'
     });
 
-    expect(result.mode).toBe('passthrough');
+    expect(result.mode).toBe('tool_flow');
+    expect(result.execution?.flowId).toBe('stop_message_flow');
+    const persisted = await readJsonFileUntil<{ state?: { stopMessageUsed?: number; stopMessageLastUsedAt?: number } }>(
+      path.join(SESSION_DIR, `session-${sessionId}.json`),
+      (data) => data?.state?.stopMessageUsed === 1 && typeof data?.state?.stopMessageLastUsedAt === 'number'
+    );
+    expect(persisted?.state?.stopMessageUsed).toBe(1);
+  });
+
+  test('emits stop compare context even when client is already disconnected', async () => {
+    const sessionId = 'stopmessage-spec-session-disconnected-compare';
+    const state: RoutingInstructionState = {
+      forcedTarget: undefined,
+      stickyTarget: undefined,
+      allowedProviders: new Set(),
+      disabledProviders: new Set(),
+      disabledKeys: new Map(),
+      disabledModels: new Map(),
+      stopMessageText: '继续',
+      stopMessageMaxRepeats: 2,
+      stopMessageUsed: 0
+    };
+    writeRoutingStateForSession(sessionId, state);
+
+    const chatResponse: JsonObject = {
+      id: 'chatcmpl-stop-disconnected-compare',
+      object: 'chat.completion',
+      model: 'gpt-test',
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: 'assistant',
+            content: 'ok'
+          },
+          finish_reason: 'stop'
+        }
+      ]
+    };
+
+    const adapterContext: AdapterContext = {
+      requestId: 'req-stopmessage-disconnected-compare',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      sessionId,
+      capturedChatRequest: {
+        model: 'gpt-test',
+        messages: [{ role: 'user', content: 'hi' }]
+      },
+      clientConnectionState: { disconnected: true }
+    } as any;
+
+    const records: Array<{ stage: string; payload: Record<string, unknown> }> = [];
+    const stageRecorder = {
+      record(stage: string, payload: Record<string, unknown>) {
+        records.push({ stage, payload });
+      }
+    } as any;
+
+    const result = await runServerToolOrchestration({
+      chat: chatResponse,
+      adapterContext,
+      requestId: 'req-stopmessage-disconnected-compare',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      stageRecorder
+    });
+
+    expect(result.executed).toBe(true);
+    expect(result.flowId).toBe('stop_message_flow');
+    const compare = records.find((entry) => entry.stage === 'servertool.stop_compare')?.payload as any;
+    expect(compare).toBeDefined();
+    expect(typeof compare?.summary).toBe('string');
+    expect(String(compare?.summary)).not.toContain('no_context');
+    expect(compare?.compare?.reason).toBe('triggered');
+  });
+
+  test('stops waiting followup when client disconnects during reenter', async () => {
+    const sessionId = 'stopmessage-spec-session-disconnect-during-followup';
+    const state: RoutingInstructionState = {
+      forcedTarget: undefined,
+      stickyTarget: undefined,
+      allowedProviders: new Set(),
+      disabledProviders: new Set(),
+      disabledKeys: new Map(),
+      disabledModels: new Map(),
+      stopMessageText: '继续',
+      stopMessageMaxRepeats: 2,
+      stopMessageUsed: 0
+    };
+    writeRoutingStateForSession(sessionId, state);
+
+    const capturedChatRequest: JsonObject = {
+      model: 'gpt-test',
+      messages: [
+        {
+          role: 'user',
+          content: 'hi'
+        }
+      ]
+    };
+
+    const chatResponse: JsonObject = {
+      id: 'chatcmpl-stop-disconnect-during-followup',
+      object: 'chat.completion',
+      model: 'gpt-test',
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: 'assistant',
+            content: 'ok'
+          },
+          finish_reason: 'stop'
+        }
+      ]
+    };
+
+    const connectionState = { disconnected: false };
+    const adapterContext: AdapterContext = {
+      requestId: 'req-stopmessage-disconnect-during-followup',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      sessionId,
+      capturedChatRequest,
+      clientConnectionState: connectionState
+    } as any;
+
+    let reenterCalls = 0;
+    setTimeout(() => {
+      connectionState.disconnected = true;
+    }, 30);
+
+    const orchestration = await runServerToolOrchestration({
+      chat: chatResponse,
+      adapterContext,
+      requestId: 'req-stopmessage-disconnect-during-followup',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      reenterPipeline: async () => {
+        reenterCalls += 1;
+        await new Promise((resolve) => setTimeout(resolve, 220));
+        return {
+          body: {
+            id: 'chatcmpl-stop-disconnect-during-followup-final',
+            object: 'chat.completion',
+            model: 'gpt-test',
+            choices: [{ index: 0, message: { role: 'assistant', content: 'done' }, finish_reason: 'stop' }]
+          } as JsonObject
+        };
+      }
+    });
+
+    expect(reenterCalls).toBe(1);
+    expect(orchestration.executed).toBe(true);
+    expect(orchestration.flowId).toBe('stop_message_flow');
+    expect((orchestration.chat as any)?.choices?.[0]?.message?.content).toBe('ok');
   });
 
   test('forces followup stream=false even when captured parameters.stream=true', async () => {
@@ -997,7 +1154,6 @@ describe('stop_message_auto servertool', () => {
     expect(persisted?.state?.stopMessageText).toBeUndefined();
     expect(persisted?.state?.stopMessageMaxRepeats).toBeUndefined();
   });
-
 
   test('injects loop-break warning after 5 identical stopMessage request/response rounds', async () => {
     const sessionId = 'stopmessage-spec-session-loop-warn';
@@ -1464,6 +1620,70 @@ describe('stop_message_auto servertool', () => {
     }
   });
 
+  test('self-heals legacy mode-only session state without maxRepeats and still triggers followup', async () => {
+    const sessionId = 'stopmessage-spec-session-legacy-mode-only-no-max';
+    const state: RoutingInstructionState = {
+      forcedTarget: undefined,
+      stickyTarget: undefined,
+      allowedProviders: new Set(),
+      disabledProviders: new Set(),
+      disabledKeys: new Map(),
+      disabledModels: new Map(),
+      stopMessageUsed: 0,
+      stopMessageStageMode: 'on'
+    };
+    writeRoutingStateForSession(sessionId, state);
+
+    const chatResponse: JsonObject = {
+      id: 'chatcmpl-stage-legacy-no-max',
+      object: 'chat.completion',
+      model: 'gpt-test',
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: 'assistant',
+            content: '继续'
+          },
+          finish_reason: 'stop'
+        }
+      ]
+    };
+
+    const adapterContext: AdapterContext = {
+      requestId: 'req-stopmessage-legacy-mode-only-no-max',
+      entryEndpoint: '/v1/messages',
+      providerProtocol: 'anthropic-messages',
+      sessionId,
+      capturedChatRequest: {
+        model: 'gpt-test',
+        messages: [{ role: 'user', content: '继续' }]
+      }
+    } as any;
+
+    const result = await runServerSideToolEngine({
+      chatResponse,
+      adapterContext,
+      entryEndpoint: '/v1/messages',
+      requestId: 'req-stopmessage-legacy-mode-only-no-max',
+      providerProtocol: 'anthropic-messages'
+    });
+
+    expect(result.mode).toBe('tool_flow');
+    expect(result.execution?.flowId).toBe('stop_message_flow');
+
+    const persisted = await readJsonFileUntil<{ state?: { stopMessageMaxRepeats?: number; stopMessageUsed?: number } }>(
+      path.join(SESSION_DIR, `session-${sessionId}.json`),
+      (data) =>
+        typeof data?.state?.stopMessageMaxRepeats === 'number' &&
+        data.state.stopMessageMaxRepeats >= 1 &&
+        typeof data?.state?.stopMessageUsed === 'number' &&
+        data.state.stopMessageUsed >= 1
+    );
+    expect(persisted?.state?.stopMessageMaxRepeats).toBe(10);
+    expect((persisted?.state?.stopMessageUsed ?? 0) >= 1).toBe(true);
+  });
+
 
   test('uses active-continue template when bd has in_progress', async () => {
     const tempUserDir = fs.mkdtempSync(path.join(process.cwd(), 'tmp', 'stopmessage-stage-active-userdir-'));
@@ -1665,14 +1885,17 @@ describe('stop_message_auto servertool', () => {
         requestId: 'req-stopmessage-stage-loop-3',
         providerProtocol: 'openai-chat'
       });
-      expect(third.mode).toBe('passthrough');
+      expect(third.mode).toBe('tool_flow');
 
-      const persisted = await readJsonFileUntil<{ state?: { stopMessageText?: unknown; stopMessageMaxRepeats?: unknown } }>(
+      const persisted = await readJsonFileUntil<{ state?: { stopMessageText?: unknown; stopMessageMaxRepeats?: unknown; stopMessageUsed?: number } }>(
         path.join(SESSION_DIR, `session-${sessionId}.json`),
-        (data) => data?.state?.stopMessageText === undefined && data?.state?.stopMessageMaxRepeats === undefined
+        (data) =>
+          data?.state?.stopMessageText === '继续推进同一任务' &&
+          data?.state?.stopMessageMaxRepeats === 10 &&
+          data?.state?.stopMessageUsed === 3
       );
-      expect(persisted?.state?.stopMessageText).toBeUndefined();
-      expect(persisted?.state?.stopMessageMaxRepeats).toBeUndefined();
+      expect(persisted?.state?.stopMessageText).toBe('继续推进同一任务');
+      expect(persisted?.state?.stopMessageMaxRepeats).toBe(10);
     } finally {
       if (prevUserDir === undefined) {
         delete process.env.ROUTECODEX_USER_DIR;
@@ -1768,7 +1991,7 @@ describe('stop_message_auto servertool', () => {
     }
   });
 
-  test('stage policy probes once before stopping when mode=on and runtime is idle', () => {
+  test('stage policy keeps followup when mode=on and runtime is idle', () => {
     const prevMode = process.env.ROUTECODEX_STOPMESSAGE_BD_MODE;
     const prevTtl = process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS;
     try {
@@ -1800,8 +2023,9 @@ describe('stop_message_auto servertool', () => {
         bdCommandRunner: () => ({ status: 0, stdout: '[]', stderr: '' })
       });
 
-      expect(second.action).toBe('stop');
-      expect(second.stopReason).toBe('bd_idle');
+      expect(second.action).toBe('followup');
+      expect(second.stage).toBe('loop_self_check');
+      expect(second.stopReason).toBeUndefined();
       expect(second.bdWorkState).toBe('idle');
     } finally {
       if (prevMode === undefined) {

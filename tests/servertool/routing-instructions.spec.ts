@@ -305,6 +305,22 @@ describe('Routing instruction parsing and application', () => {
     expect(restored.stopMessageMaxRepeats).toBe(2);
     expect(restored.stopMessageUsed).toBe(0);
   });
+
+  testIf(SUPPORTS_STOPMESSAGE_MODE_SHORTHAND)(
+    'self-heals legacy mode-only stopMessage snapshot without maxRepeats',
+    () => {
+      const restored = deserializeRoutingInstructionState({
+        stopMessageStageMode: 'on',
+        stopMessageUsed: 3
+      } as Record<string, unknown>);
+
+      expect(restored.stopMessageText).toBeUndefined();
+      expect(restored.stopMessageStageMode).toBe('on');
+      expect(restored.stopMessageMaxRepeats).toBe(DEFAULT_STOPMESSAGE_MAX_REPEATS);
+      expect(restored.stopMessageUsed).toBe(3);
+    }
+  );
+
   testIf(SUPPORTS_STOPMESSAGE_MODE_SHORTHAND)('applies stopMessage mode repeat update without replacing text', () => {
     const baseState = createState({
       stopMessageText: '继续',
@@ -316,6 +332,16 @@ describe('Routing instruction parsing and application', () => {
     expect(nextState.stopMessageText).toBe('继续');
     expect(nextState.stopMessageStageMode).toBe('on');
     expect(nextState.stopMessageMaxRepeats).toBe(3);
+  });
+
+  test('defaults stopMessage mode repeats to 10 when instruction omits repeat', () => {
+    const nextState = applyRoutingInstructions(
+      [{ type: 'stopMessageMode', stopMessageStageMode: 'on' }],
+      createState()
+    );
+    expect(nextState.stopMessageStageMode).toBe('on');
+    expect(nextState.stopMessageMaxRepeats).toBe(DEFAULT_STOPMESSAGE_MAX_REPEATS);
+    expect(nextState.stopMessageUsed).toBe(0);
   });
 
 
@@ -390,6 +416,30 @@ describe('Routing instruction parsing and application', () => {
       const restored = deserializeRoutingInstructionState(serialized);
       expect(restored.preCommandScriptPath).toBe(scriptPath);
       expect(restored.preCommandSource).toBe('explicit');
+    } finally {
+      if (prev === undefined) {
+        delete process.env.ROUTECODEX_USER_DIR;
+      } else {
+        process.env.ROUTECODEX_USER_DIR = prev;
+      }
+      fs.rmSync(temp, { recursive: true, force: true });
+    }
+  });
+
+  testIf(SUPPORTS_PRECOMMAND_INSTRUCTION)('auto-creates precommand default.sh for precommand:on', () => {
+    const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-precommand-default-'));
+    const prev = process.env.ROUTECODEX_USER_DIR;
+    try {
+      process.env.ROUTECODEX_USER_DIR = temp;
+      const instructions = parseRoutingInstructions(buildMessages('<**precommand:on**>继续'));
+      expect(instructions).toHaveLength(1);
+      const inst = instructions[0] as any;
+      expect(inst.type).toBe('preCommandSet');
+      expect(typeof inst.preCommandScriptPath).toBe('string');
+      const scriptPath = String(inst.preCommandScriptPath);
+      expect(path.basename(scriptPath)).toBe('default.sh');
+      expect(fs.existsSync(scriptPath)).toBe(true);
+      expect(fs.statSync(scriptPath).isFile()).toBe(true);
     } finally {
       if (prev === undefined) {
         delete process.env.ROUTECODEX_USER_DIR;

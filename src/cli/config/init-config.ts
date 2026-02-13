@@ -70,6 +70,32 @@ function buildRouting(defaultProviderId: string, defaultModel: string) {
   };
 }
 
+function buildDefaultWebSearchConfig(
+  providers: InitProviderTemplate[]
+): { webSearchRouteTarget: string; webSearchConfig: Record<string, unknown> } | null {
+  const iflowProvider = providers.find((provider) => provider.id === 'iflow');
+  if (!iflowProvider) {
+    return null;
+  }
+  return {
+    webSearchRouteTarget: `${iflowProvider.id}.${iflowProvider.defaultModel}`,
+    webSearchConfig: {
+      engines: [
+        {
+          id: 'iflow:web_search',
+          providerKey: 'iflow',
+          description: 'iFlow web_search backend'
+        }
+      ],
+      search: {
+        'iflow:web_search': {
+          providerKey: 'iflow'
+        }
+      }
+    }
+  };
+}
+
 export function buildInitConfigObject(
   selection: { providers: InitProviderTemplate[]; defaultProviderId: string; host: string; port: number }
 ): Record<string, unknown> {
@@ -81,14 +107,33 @@ export function buildInitConfigObject(
   if (!defaultProvider) {
     throw new Error('No providers selected');
   }
-  return {
+  const webSearchDefaults = buildDefaultWebSearchConfig(selection.providers);
+  const routing = buildRouting(
+    defaultProvider.id,
+    defaultProvider.defaultModel
+  ) as Record<string, unknown>;
+  if (webSearchDefaults) {
+    routing.web_search = [
+      {
+        id: 'web_search-primary',
+        mode: 'priority',
+        targets: [webSearchDefaults.webSearchRouteTarget]
+      }
+    ];
+  }
+
+  const result: Record<string, unknown> = {
     version: '1.0.0',
     httpserver: { host: selection.host, port: selection.port },
     virtualrouter: {
       providers: providersNode,
-      routing: buildRouting(defaultProvider.id, defaultProvider.defaultModel)
+      routing
     }
   };
+  if (webSearchDefaults) {
+    result.webSearch = webSearchDefaults.webSearchConfig;
+  }
+  return result;
 }
 
 async function interactiveSelectProviders(prompt: InitConfigPrompt['prompt']): Promise<string[]> {

@@ -34,6 +34,7 @@ export async function handleProviderQuotaErrorEvent(
   if (!ctx.quotaRoutingEnabled) {
     return;
   }
+
   if (!event) {
     return;
   }

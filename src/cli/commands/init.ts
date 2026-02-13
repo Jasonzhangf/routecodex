@@ -7,6 +7,7 @@ import { getInitProviderCatalog, type InitProviderTemplate } from '../config/ini
 import { parseProvidersArg } from '../config/init-config.js';
 import { installBundledDocsBestEffort } from '../config/bundled-docs.js';
 import { installBundledDefaultConfigBestEffort } from '../config/bundled-default-config.js';
+import { ensureDefaultPrecommandScriptBestEffort } from '../config/precommand-default-script.js';
 import {
   asRecord,
   buildInteractivePrompt,
@@ -39,6 +40,32 @@ import { migrateV1ToV2, runV2MaintenanceMenu } from './init/workflows.js';
 import type { InitCommandContext, InitCommandOptions } from './init/shared.js';
 
 export type { InitCommandContext } from './init/shared.js';
+
+function buildIfLowWebSearchDefaults(
+  templates: InitProviderTemplate[]
+): { routeTarget: string; webSearch: Record<string, unknown> } | null {
+  const iflowTemplate = templates.find((provider) => provider.id === 'iflow');
+  if (!iflowTemplate) {
+    return null;
+  }
+  return {
+    routeTarget: `${iflowTemplate.id}.${iflowTemplate.defaultModel}`,
+    webSearch: {
+      engines: [
+        {
+          id: 'iflow:web_search',
+          providerKey: 'iflow',
+          description: 'iFlow web_search backend'
+        }
+      ],
+      search: {
+        'iflow:web_search': {
+          providerKey: 'iflow'
+        }
+      }
+    }
+  };
+}
 
 export function createInitCommand(program: Command, ctx: InitCommandContext): void {
   const fsImpl = (ctx.fsImpl ?? fs) as typeof fs;
@@ -114,6 +141,18 @@ Examples:
 
       const providersFromArg = parseProvidersArg(options.providers);
       const promptBundle = buildInteractivePrompt(ctx);
+      const ensureDefaultPrecommandScript = () => {
+        const defaultPrecommand = ensureDefaultPrecommandScriptBestEffort({
+          fsImpl,
+          pathImpl,
+          homeDir: home()
+        });
+        if (!defaultPrecommand.ok) {
+          ctx.logger.warning(
+            `Failed to ensure default precommand script (${defaultPrecommand.scriptPath}): ${defaultPrecommand.message || 'unknown error'}`
+          );
+        }
+      };
 
       try {
         if (forceCamoufoxPrep) {
@@ -142,6 +181,7 @@ Examples:
             });
 
             if (installedDefault.ok) {
+              ensureDefaultPrecommandScript();
               spinner.succeed(`Configuration initialized: ${configPath}`);
               ctx.logger.info(`Default config copied: ${installedDefault.sourcePath}`);
               maybePrepareCamoufoxEnvironment(ctx, ctx.logger, autoCamoufoxPrep);
@@ -218,6 +258,20 @@ Examples:
           const routing = promptBundle
             ? (safeSpinnerStop(), (await interactiveRoutingWizard(promptBundle.prompt, baseRouting, defaultTarget)) ?? baseRouting)
             : baseRouting;
+          const webSearchDefaults = buildIfLowWebSearchDefaults(selectedTemplates);
+          const routingWithWebSearch = { ...(routing as Record<string, unknown>) };
+          if (webSearchDefaults) {
+            const existingWebSearchRoute = routingWithWebSearch.web_search;
+            if (!Array.isArray(existingWebSearchRoute) || existingWebSearchRoute.length === 0) {
+              routingWithWebSearch.web_search = [
+                {
+                  id: 'web_search-primary',
+                  mode: 'priority',
+                  targets: [webSearchDefaults.routeTarget]
+                }
+              ];
+            }
+          }
 
           if (fsImpl.existsSync(configPath) && !options.force) {
             spinner.fail('Failed to initialize configuration');
@@ -246,10 +300,12 @@ Examples:
               port
             },
             virtualrouter: {
-              routing
+              routing: routingWithWebSearch,
+              ...(webSearchDefaults ? { webSearch: webSearchDefaults.webSearch } : {})
             }
           };
           writeJsonFile(fsImpl, configPath, configPayload);
+          ensureDefaultPrecommandScript();
 
           spinner.succeed(`Configuration initialized: ${configPath}`);
           if (backupPath) {
@@ -296,6 +352,7 @@ Examples:
             prompt: promptBundle?.prompt,
             forceOverwriteProviders: Boolean(options.force)
           });
+          ensureDefaultPrecommandScript();
 
           spinner.succeed(`Converted V1 -> V2: ${configPath}`);
           ctx.logger.info(`Converted V1 -> V2: ${configPath}`);

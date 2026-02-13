@@ -1,5 +1,6 @@
 import fs from 'fs/promises';
 import fsSync from 'fs';
+import fsAsync from 'fs/promises';
 import os from 'os';
 import path from 'path';
 

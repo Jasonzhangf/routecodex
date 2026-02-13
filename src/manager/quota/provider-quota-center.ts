@@ -1,3 +1,14 @@
+/**
+ * RouteCodex-X7E Phase 1: Quota State Types & Utilities
+ *
+ * This file now serves as the pure type definitions and utility library for quota operations.
+ * All state mutations are performed through QuotaManagerAdapter (SSOT).
+ *
+ * Migration status:
+ * - Phase 1: This file becomes read-only; all writes go through QuotaManagerAdapter.
+ * - Legacy "write" paths are preserved for migration compatibility but should not be used.
+ */
+
 export type QuotaReason = 'ok' | 'cooldown' | 'blacklist' | 'quotaDepleted' | 'fatal' | 'authVerify';
 
 export type QuotaAuthType = 'apikey' | 'oauth' | 'unknown';
@@ -215,8 +226,11 @@ function normalizeErrorKey(event: ErrorEventForQuota): string {
   return 'ERR_UNKNOWN';
 }
 
-function computeCooldownMs(consecutive: number): number | null {
-  return computeCooldownMsBySeries('EOTHER', consecutive);
+// UNUSED: Kept for backward compatibility during X7E migration
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function computeCooldownMsLegacy(_consecutive: number): number | null {
+  // This function is deprecated; cooldown logic now handled by core QuotaManager
+  return null;
 }
 
 function computeCooldownMsBySeries(series: ErrorSeries, consecutive: number): number | null {

@@ -10,6 +10,8 @@ import { API_PATHS, HTTP_PROTOCOLS, LOCAL_HOSTS } from '../../../../constants/in
 import { listManagedServerPidsByPort } from '../../../../utils/managed-server-pids.js';
 import * as llmsBridge from '../../../../modules/llmswitch/bridge.js';
 import { loadPolicyFromConfigPath, writePolicyToConfigPath } from './routing-policy.js';
+import { x7eGate, getGateState } from './routecodex-x7e-gate.js';
+import { createQuotaManagerAdapter } from '../../../../manager/modules/quota/quota-adapter.js';
 
 type ControlServerInfo = {
   host: string;
@@ -37,6 +39,10 @@ type ControlSnapshot = {
   };
   stats?: unknown;
   llmsStats?: unknown;
+  x7e?: {
+    gate: Record<string, boolean | string>;
+    phase0ApiCompatible: boolean;
+  };
 };
 
 function getSessionCandidatePorts(): number[] {
@@ -146,6 +152,26 @@ function getQuotaModule(options: DaemonAdminRouteOptions): any | null {
   return daemon.getModule('quota') ?? null;
 }
 
+function getQuotaAdapter(options: DaemonAdminRouteOptions): any | null {
+  const daemon = options.getManagerDaemon() as { getModule?: (id: string) => any } | null;
+  if (!daemon || typeof daemon.getModule !== 'function') {
+    return null;
+  }
+  const quotaModule = daemon.getModule('quota') ?? null;
+  if (!quotaModule) {
+    return null;
+  }
+  const providerQuotaModule = daemon.getModule('provider-quota') ?? null;
+  const coreLike = typeof quotaModule.getCoreQuotaManager === 'function' ? quotaModule.getCoreQuotaManager() : null;
+  return createQuotaManagerAdapter({
+    coreManager: coreLike,
+    legacyDaemon: providerQuotaModule,
+    quotaRoutingEnabled: true
+  });
+}
+
+
+
 export function registerControlRoutes(app: Application, options: DaemonAdminRouteOptions): void {
   app.get('/daemon/control/snapshot', async (req: Request, res: Response) => {
     if (rejectNonLocalOrUnauthorizedAdmin(req, res)) {return;}
@@ -217,7 +243,11 @@ export function registerControlRoutes(app: Application, options: DaemonAdminRout
         antigravityAliasLeases
       },
       stats: typeof options.getStatsSnapshot === 'function' ? options.getStatsSnapshot() : undefined,
-      llmsStats: llmsBridge.getLlmsStatsSnapshot?.() ?? undefined
+      llmsStats: llmsBridge.getLlmsStatsSnapshot?.() ?? undefined,
+      x7e: {
+        gate: getGateState(),
+        phase0ApiCompatible: true
+      }
     };
     res.status(200).json(snapshot);
   });
@@ -338,7 +368,7 @@ export function registerControlRoutes(app: Application, options: DaemonAdminRout
         res.status(400).json({ error: { message: 'providerKey and durationMs are required', code: 'bad_request' } });
         return;
       }
-      const quotaMod = getQuotaModule(options);
+      const quotaMod = getQuotaAdapter(options);
       if (!quotaMod || typeof quotaMod.disableProvider !== 'function') {
         res.status(503).json({ error: { message: 'quota module not available', code: 'not_ready' } });
         return;
@@ -354,7 +384,7 @@ export function registerControlRoutes(app: Application, options: DaemonAdminRout
         res.status(400).json({ error: { message: 'providerKey is required', code: 'bad_request' } });
         return;
       }
-      const quotaMod = getQuotaModule(options);
+      const quotaMod = getQuotaAdapter(options);
       if (!quotaMod || typeof quotaMod.recoverProvider !== 'function') {
         res.status(503).json({ error: { message: 'quota module not available', code: 'not_ready' } });
         return;
@@ -370,7 +400,7 @@ export function registerControlRoutes(app: Application, options: DaemonAdminRout
         res.status(400).json({ error: { message: 'providerKey is required', code: 'bad_request' } });
         return;
       }
-      const quotaMod = getQuotaModule(options);
+      const quotaMod = getQuotaAdapter(options);
       if (!quotaMod || typeof quotaMod.resetProvider !== 'function') {
         res.status(503).json({ error: { message: 'quota module not available', code: 'not_ready' } });
         return;
@@ -381,7 +411,7 @@ export function registerControlRoutes(app: Application, options: DaemonAdminRout
     }
 
     if (action === 'quota.refresh') {
-      const quotaMod = getQuotaModule(options);
+      const quotaMod = getQuotaAdapter(options);
       if (!quotaMod || typeof quotaMod.refreshNow !== 'function') {
         res.status(503).json({ error: { message: 'quota module not available', code: 'not_ready' } });
         return;

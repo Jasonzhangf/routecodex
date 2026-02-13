@@ -1,5 +1,6 @@
 import { spawn, spawnSync, type ChildProcess, type SpawnSyncOptions, type SpawnSyncReturns } from 'node:child_process';
 import fs from 'node:fs';
+import fsAsync from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -508,13 +509,16 @@ function writeMinimalFingerprintEnv(profileId: string, osPolicy?: string | undef
   };
   const cfg = osPolicy === 'macos' ? macos : windows;
   const env = { CAMOU_CONFIG_1: JSON.stringify(cfg) };
-  try {
-    fs.mkdirSync(path.dirname(fpPath), { recursive: true });
-    const payload = { env };
-    fs.writeFileSync(fpPath, JSON.stringify(payload), { encoding: 'utf-8' });
-  } catch {
-    // best-effort
-  }
+  // 异步写入，不阻塞启动流程
+  void (async () => {
+    try {
+      await fsAsync.mkdir(path.dirname(fpPath), { recursive: true });
+      const payload = { env };
+      await fsAsync.writeFile(fpPath, JSON.stringify(payload), { encoding: 'utf-8' });
+    } catch {
+      // best-effort
+    }
+  })();
   return env;
 }
 

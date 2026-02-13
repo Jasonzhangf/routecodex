@@ -2,6 +2,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
 import { importCoreModule, resolveCoreModulePath, type LlmsImpl } from './core-loader.js';
+import { x7eGate } from '../../server/runtime/http-server/daemon-admin/routecodex-x7e-gate.js';
 import type { ProviderErrorEvent, ProviderSuccessEvent } from '@jsonstudio/llms/dist/router/virtual-router/types.js';
 import { writeErrorsampleJson } from '../../utils/errorsamples.js';
 import {
@@ -280,6 +281,10 @@ async function importQuotaModule(): Promise<QuotaModule | null> {
 }
 
 export async function createCoreQuotaManager(options?: { store?: unknown }): Promise<unknown> {
+  // X7E Phase 0 Gate: fallback to null if unified quota path is disabled
+  if (!x7eGate.phase1UnifiedQuota) {
+    return null;
+  }
   const mod = await importQuotaModule();
   const Ctor = mod?.QuotaManager;
   if (typeof Ctor !== 'function') {

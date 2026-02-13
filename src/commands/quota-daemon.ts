@@ -6,6 +6,7 @@ import { homedir } from 'node:os';
 
 import { applyErrorEvent, createInitialQuotaState, tickQuotaStateTime, type QuotaState } from '../manager/quota/provider-quota-center.js';
 import { loadProviderQuotaSnapshot, saveProviderQuotaSnapshot } from '../manager/quota/provider-quota-store.js';
+import { x7eGate } from '../server/runtime/http-server/daemon-admin/routecodex-x7e-gate.js';
 
 type ReplayRecord = {
   ts?: string;
@@ -30,6 +31,17 @@ export function createQuotaDaemonCommand(): Command {
     .action(async (opts: { once?: boolean; replayErrors?: string | boolean; dryRun?: boolean; json?: boolean }) => {
       if (!opts.once && !opts.replayErrors) {
         cmd.help({ error: true });
+        return;
+      }
+
+      // X7E Phase 1: legacy quota daemon command becomes no-op in unified quota mode.
+      if (x7eGate.phase1UnifiedQuota) {
+        const msg = '[quota-daemon] skipped: unified quota mode is enabled (ROUTECODEX_X7E_PHASE_1_UNIFIED_QUOTA=true)';
+        if (opts.json) {
+          console.log(JSON.stringify({ skipped: true, reason: 'unified_quota_mode', message: msg }, null, 2));
+        } else {
+          console.log(msg);
+        }
         return;
       }
 

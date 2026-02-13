@@ -45,7 +45,7 @@
       "engines": [
         {
           "id": "iflow:web_search",
-          "providerKey": "iflow.kimi-k2",
+          "providerKey": "iflow",
           "description": "iFlow native web search via /chat/retrieve",
           "default": true,
           "searchEngineList": ["GOOGLE"]

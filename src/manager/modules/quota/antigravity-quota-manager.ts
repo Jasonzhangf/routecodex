@@ -338,6 +338,14 @@ export class QuotaManagerModule implements ManagerModule {
     return providers;
   }
 
+  /**
+   * X7E Phase 1: Expose core quota manager for adapter layer.
+   * Returns null when quota routing is disabled (Phase 1 gate off).
+   */
+  getCoreQuotaManager(): typeof this.coreQuotaManager | null {
+    return this.quotaRoutingEnabled ? (this.coreQuotaManager as typeof this.coreQuotaManager) : null;
+  }
+
   registerProviderStaticConfig(
     providerKey: string,
     config: { authType?: string | null; priorityTier?: number | null; apikeyDailyResetTime?: string | null } = {}

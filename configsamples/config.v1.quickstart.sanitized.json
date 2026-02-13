@@ -23,7 +23,7 @@
     "engines": [
       {
         "id": "iflow:web_search",
-        "providerKey": "iflow.glm-4.7",
+        "providerKey": "iflow",
         "description": "iFlow  web search backend",
         "default": true,
         "searchEngineList": [
@@ -45,7 +45,7 @@
     "force": false,
     "search": {
       "iflow:web_search": {
-        "providerKey": "iflow.glm-4.7",
+        "providerKey": "iflow",
         "weight": 1
       },
       "gemini-2.5-flash-lite": {

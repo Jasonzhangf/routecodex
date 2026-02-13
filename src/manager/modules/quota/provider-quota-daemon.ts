@@ -44,6 +44,7 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
 
   async init(context: ManagerContext): Promise<void> {
     this.quotaRoutingEnabled = context.quotaRoutingEnabled !== false;
+
     try {
       await this.loadSnapshotIntoMemory();
     } catch {
@@ -58,6 +59,7 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
 
   async reset(options: { persist?: boolean } = {}): Promise<{ resetAt: number; persisted: boolean }> {
     const nowMs = Date.now();
+
     this.quotaStates = new Map();
     this.modelBackoff.clearAll();
 
@@ -105,18 +107,18 @@ export class ProviderQuotaDaemonModule implements ManagerModule {
     const nowMs = Date.now();
     const previous =
       this.quotaStates.get(key) ?? createInitialQuotaState(key, this.staticConfigs.get(key), nowMs);
-	    const next: QuotaState = {
-	      ...previous,
-	      inPool: true,
-	      reason: 'ok',
-	      authIssue: null,
-	      cooldownUntil: null,
-	      blacklistUntil: null,
-	      lastErrorSeries: null,
-	      lastErrorCode: null,
-	      lastErrorAtMs: null,
-	      consecutiveErrorCount: 0
-	    };
+    const next: QuotaState = {
+      ...previous,
+      inPool: true,
+      reason: 'ok',
+      authIssue: null,
+      cooldownUntil: null,
+      blacklistUntil: null,
+      lastErrorSeries: null,
+      lastErrorCode: null,
+      lastErrorAtMs: null,
+      consecutiveErrorCount: 0
+    };
     this.modelBackoff.recordSuccess(key);
     this.quotaStates.set(key, next);
     try {

@@ -1,12 +1,11 @@
 import type { ModuleDependencies } from '../../../modules/pipeline/interfaces/pipeline-interfaces.js';
 import type { PipelineExecutionInput, PipelineExecutionResult } from '../../handlers/types.js';
-import type { HubPipeline, ProviderProtocol } from './types.js';
+import type { HubPipeline, ProviderHandle, ProviderProtocol } from './types.js';
 import { writeClientSnapshot } from '../../../providers/core/utils/snapshot-writer.js';
 import { asRecord } from './provider-utils.js';
 import { attachProviderRuntimeMetadata } from '../../../providers/core/runtime/provider-runtime-metadata.js';
 import { extractAnthropicToolAliasMap } from './anthropic-tool-alias.js';
 import { enhanceProviderRequestId } from '../../utils/request-id-manager.js';
-import type { ProviderRuntimeManager } from './runtime-manager.js';
 import type { StatsManager, UsageMetrics } from './stats-manager.js';
 import {
   buildRequestMetadata,
@@ -24,12 +23,16 @@ import {
   convertProviderResponse as bridgeConvertProviderResponse,
   createSnapshotRecorder as bridgeCreateSnapshotRecorder,
 } from '../../../modules/llmswitch/bridge.js';
+import { applyClientConnectionStateToContext } from '../../utils/client-connection-state.js';
 import { getClockClientRegistry, injectClockClientPrompt } from './clock-client-registry.js';
 import { ensureHubPipeline, runHubPipeline } from './executor-pipeline.js';
 import { buildInfo } from '../../../build-info.js';
 
 export type RequestExecutorDeps = {
-  runtimeManager: ProviderRuntimeManager;
+  runtimeManager: {
+    resolveRuntimeKey(providerKey?: string, fallback?: string): string | undefined;
+    getHandleByRuntimeKey(runtimeKey?: string): ProviderHandle | undefined;
+  };
   getHubPipeline(): HubPipeline | null;
   getModuleDependencies(): ModuleDependencies;
   logStage(stage: string, requestId: string, details?: Record<string, unknown>): void;
@@ -922,6 +925,7 @@ export class HubRequestExecutor implements RequestExecutor {
       if (assignedModelId && assignedModelId.trim()) {
         baseContext.modelId = assignedModelId.trim();
       }
+      applyClientConnectionStateToContext(metadataBag, baseContext);
       const adapterContext = baseContext;
       const compatProfile =
         typeof (metadataBag as Record<string, unknown> | undefined)?.compatibilityProfile === 'string'

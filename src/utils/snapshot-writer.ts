@@ -42,11 +42,11 @@ function resolveSnapshotRoot(): string {
 }
 
 function mapEndpointToFolder(entryEndpoint?: string): string {
-  const ep = String(entryEndpoint || '').toLowerCase();
-  if (ep.includes('/v1/responses')) {
+  const ep = String(entryEndpoint || '').trim().toLowerCase();
+  if (ep.includes('/v1/responses') || ep.includes('/responses.submit')) {
     return 'openai-responses';
   }
-  if (ep.includes('/v1/messages') || ep.includes('/anthropic')) {
+  if (ep.includes('/v1/messages')) {
     return 'anthropic-messages';
   }
   return 'openai-chat';
