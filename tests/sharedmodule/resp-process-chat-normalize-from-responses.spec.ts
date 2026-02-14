@@ -38,4 +38,41 @@ tool:exec_command (tool:exec_command)
     expect(String(msg.content)).toContain('tool:exec_command');
     expect(Array.isArray(msg?.tool_calls) ? msg.tool_calls.length : 0).toBe(0);
   });
+
+  it('harvests JSON tool_calls wrapper when upstream emits empty tool_calls array', async () => {
+    const payload: any = {
+      id: 'chat_test_empty_tool_calls',
+      object: 'chat.completion',
+      created: Math.floor(Date.now() / 1000),
+      model: 'deepseek-chat',
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: 'assistant',
+            content:
+              '{"tool_calls":[{"name":"shell_command","input":{"command":"bd --no-db ready"}},{"name":"shell_command","input":{"command":"bd --no-db list --status in_progress"}}]}',
+            tool_calls: []
+          },
+          finish_reason: 'stop'
+        }
+      ]
+    };
+
+    const result = await runRespProcessStage1ToolGovernance({
+      payload,
+      entryEndpoint: '/v1/messages',
+      requestId: 'req_test_empty_tool_calls_json_wrapper',
+      clientProtocol: 'anthropic-messages'
+    });
+
+    const governed: any = result.governedPayload;
+    const calls = Array.isArray(governed?.choices?.[0]?.message?.tool_calls) ? governed.choices[0].message.tool_calls : [];
+    expect(calls.length).toBe(2);
+    expect(calls[0]?.function?.name).toBe('exec_command');
+    expect(calls[1]?.function?.name).toBe('exec_command');
+    expect(JSON.parse(String(calls[0]?.function?.arguments || '{}')).cmd).toBe('bd --no-db ready');
+    expect(JSON.parse(String(calls[1]?.function?.arguments || '{}')).cmd).toBe('bd --no-db list --status in_progress');
+    expect(governed?.choices?.[0]?.finish_reason).toBe('tool_calls');
+  });
 });
