@@ -79,6 +79,7 @@ export type ConvertProviderResponseOptions = {
   providerProtocol: string;
   providerType?: string;
   requestId: string;
+  serverToolsEnabled?: boolean;
   wantsStream: boolean;
   originalRequest?: Record<string, unknown> | undefined;
   requestSemantics?: Record<string, unknown> | undefined;
@@ -196,6 +197,11 @@ export async function convertProviderResponseIfNeeded(
     const compatProfile = hasTargetMetadata ? targetCompatProfile : metadataCompatProfile;
     if (compatProfile && compatProfile.trim()) {
       adapterContext.compatibilityProfile = compatProfile.trim();
+    }
+    const serverToolsEnabled = options.serverToolsEnabled !== false;
+    (adapterContext as Record<string, unknown>).serverToolsEnabled = serverToolsEnabled;
+    if (!serverToolsEnabled) {
+      (adapterContext as Record<string, unknown>).serverToolsDisabled = true;
     }
     const stageRecorder = await bridgeCreateSnapshotRecorder(
       adapterContext,
@@ -340,9 +346,9 @@ export async function convertProviderResponseIfNeeded(
       entryEndpoint: options.entryEndpoint || entry,
       wantsStream: options.wantsStream,
       requestSemantics: options.requestSemantics,
-      providerInvoker,
+      providerInvoker: serverToolsEnabled ? providerInvoker : undefined,
       stageRecorder,
-      reenterPipeline
+      reenterPipeline: serverToolsEnabled ? reenterPipeline : undefined
     });
     if (converted.__sse_responses) {
       return {

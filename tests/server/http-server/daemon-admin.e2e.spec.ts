@@ -214,11 +214,65 @@ describe('Daemon admin HTTP endpoints (smoke)', () => {
         ),
         'utf8'
       );
+      const serverToolLogPath = path.join(os.homedir(), '.routecodex', 'logs', 'servertool-events.jsonl');
+      await fs.mkdir(path.dirname(serverToolLogPath), { recursive: true });
+      await fs.writeFile(
+        serverToolLogPath,
+        [
+          JSON.stringify({
+            ts: new Date(Date.now() - 1000).toISOString(),
+            requestId: 'req_servertool_test_1',
+            flowId: 'continue_execution_flow',
+            tool: 'continue_execution',
+            stage: 'match',
+            result: 'matched',
+            message: 'matched'
+          }),
+          JSON.stringify({
+            ts: new Date().toISOString(),
+            requestId: 'req_servertool_test_1',
+            flowId: 'continue_execution_flow',
+            tool: 'continue_execution',
+            stage: 'final',
+            result: 'completed',
+            message: 'completed'
+          })
+        ].join('\n') + '\n',
+        'utf8'
+      );
       const controlSnap = await getJson(baseUrl, '/daemon/control/snapshot', cookie);
       expect(controlSnap.status).toBe(200);
       expect(controlSnap.body).toHaveProperty('routing');
       expect(controlSnap.body.routing).toHaveProperty('antigravityAliasLeases');
       expect(controlSnap.body.routing.antigravityAliasLeases).toHaveProperty('leases');
+      expect(controlSnap.body).toHaveProperty('serverTool');
+      expect(controlSnap.body.serverTool.state).toHaveProperty('enabled', true);
+      expect(controlSnap.body.serverTool.stats).toHaveProperty('executions', 1);
+      expect(controlSnap.body.serverTool.stats).toHaveProperty('success', 1);
+      expect(Array.isArray(controlSnap.body.serverTool.stats?.byTool)).toBe(true);
+
+      const disableServerTool = await postJson(
+        baseUrl,
+        '/daemon/control/mutate',
+        { action: 'servertool.set_enabled', enabled: false },
+        cookie
+      );
+      expect(disableServerTool.status).toBe(200);
+      expect(disableServerTool.body).toHaveProperty('ok', true);
+      expect(disableServerTool.body.state).toHaveProperty('enabled', false);
+      const controlSnapAfterDisable = await getJson(baseUrl, '/daemon/control/snapshot', cookie);
+      expect(controlSnapAfterDisable.status).toBe(200);
+      expect(controlSnapAfterDisable.body.serverTool.state).toHaveProperty('enabled', false);
+
+      const enableServerTool = await postJson(
+        baseUrl,
+        '/daemon/control/mutate',
+        { action: 'servertool.set_enabled', enabled: true },
+        cookie
+      );
+      expect(enableServerTool.status).toBe(200);
+      expect(enableServerTool.body).toHaveProperty('ok', true);
+      expect(enableServerTool.body.state).toHaveProperty('enabled', true);
 
       const stats = await getJson(baseUrl, '/daemon/stats', cookie);
       expect(stats.status).toBe(200);

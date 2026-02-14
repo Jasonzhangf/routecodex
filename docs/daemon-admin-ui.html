@@ -881,6 +881,35 @@
                   <tbody id="controlQuotaProvidersTbody"></tbody>
                 </table>
               </div>
+
+              <p class="section-title" style="margin-top: 14px;">ServerTool runtime</p>
+              <p class="section-sub">
+                Toggle servertool orchestration on/off instantly for this server process.
+              </p>
+              <div class="row" style="margin-bottom: 10px;">
+                <span id="controlServerToolStatus" class="pill">state: —</span>
+                <span id="controlServerToolUpdatedAt" class="mono muted">updated: —</span>
+                <button id="controlServerToolToggleBtn" class="primary">Toggle</button>
+              </div>
+              <div class="notice mono" id="controlServerToolCountsBox" style="white-space: pre-wrap; margin-bottom: 10px;">
+                executions: —
+                success: —
+                failure: —
+              </div>
+              <div class="table-wrap">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>tool</th>
+                      <th>executions</th>
+                      <th>success</th>
+                      <th>failure</th>
+                      <th>details</th>
+                    </tr>
+                  </thead>
+                  <tbody id="controlServerToolToolsTbody"></tbody>
+                </table>
+              </div>
             </div>
           </div>
         </section>
@@ -2782,13 +2811,24 @@
         const serversBody = $("controlServersTbody");
         const hitsBody = $("controlHitsTbody");
         const quotaBody = $("controlQuotaProvidersTbody");
+        const serverToolBody = $("controlServerToolToolsTbody");
+        const serverToolStatus = $("controlServerToolStatus");
+        const serverToolUpdatedAt = $("controlServerToolUpdatedAt");
+        const serverToolCountsBox = $("controlServerToolCountsBox");
+        const serverToolToggleBtn = $("controlServerToolToggleBtn");
         if (serversBody) serversBody.replaceChildren();
         if (hitsBody) hitsBody.replaceChildren();
         if (quotaBody) quotaBody.replaceChildren();
+        if (serverToolBody) serverToolBody.replaceChildren();
         if (!snap || typeof snap !== "object") {
           if (serversBody) serversBody.appendChild(createErrorRow(4, "No snapshot"));
           if (hitsBody) hitsBody.appendChild(createErrorRow(2, "No snapshot"));
           if (quotaBody) quotaBody.appendChild(createErrorRow(5, "No snapshot"));
+          if (serverToolBody) serverToolBody.appendChild(createErrorRow(5, "No snapshot"));
+          if (serverToolStatus) serverToolStatus.textContent = "state: —";
+          if (serverToolUpdatedAt) serverToolUpdatedAt.textContent = "updated: —";
+          if (serverToolCountsBox) serverToolCountsBox.textContent = "executions: —\nsuccess: —\nfailure: —";
+          if (serverToolToggleBtn) serverToolToggleBtn.textContent = "Toggle";
           return;
         }
         const servers = Array.isArray(snap.servers) ? snap.servers : [];
@@ -2865,9 +2905,108 @@
           }
         }
 
+        try {
+          const serverTool = snap.serverTool && typeof snap.serverTool === "object" ? snap.serverTool : null;
+          const state = serverTool && serverTool.state && typeof serverTool.state === "object" ? serverTool.state : null;
+          const stats = serverTool && serverTool.stats && typeof serverTool.stats === "object" ? serverTool.stats : null;
+          const enabled = state && state.enabled === true;
+          if (serverToolStatus) {
+            serverToolStatus.textContent = enabled ? "state: enabled" : "state: disabled";
+            serverToolStatus.className = enabled ? "pill ok" : "pill bad";
+          }
+          if (serverToolUpdatedAt) {
+            const updatedBy = state && state.updatedBy ? String(state.updatedBy) : "—";
+            const updatedAt = state && state.updatedAtMs ? formatTs(state.updatedAtMs) : "—";
+            serverToolUpdatedAt.textContent = `updated: ${updatedAt} by ${updatedBy}`;
+          }
+          if (serverToolToggleBtn) {
+            serverToolToggleBtn.textContent = enabled ? "Disable now" : "Enable now";
+            serverToolToggleBtn.className = enabled ? "danger" : "primary";
+          }
+
+          const executions = stats && Number.isFinite(Number(stats.executions)) ? Number(stats.executions) : 0;
+          const successCount = stats && Number.isFinite(Number(stats.success)) ? Number(stats.success) : 0;
+          const failureCount = stats && Number.isFinite(Number(stats.failure)) ? Number(stats.failure) : 0;
+          const scannedLines = stats && Number.isFinite(Number(stats.scannedLines)) ? Number(stats.scannedLines) : 0;
+          if (serverToolCountsBox) {
+            serverToolCountsBox.textContent =
+              `executions: ${formatInt(executions)}\n` +
+              `success: ${formatInt(successCount)}\n` +
+              `failure: ${formatInt(failureCount)}\n` +
+              `log lines scanned: ${formatInt(scannedLines)}`;
+          }
+
+          const byTool = stats && Array.isArray(stats.byTool) ? stats.byTool : [];
+          const recent = stats && Array.isArray(stats.recent) ? stats.recent : [];
+          const recentByTool = new Map();
+          for (const ev of recent) {
+            const tool = textOf(ev && ev.tool ? ev.tool : "unknown");
+            if (!recentByTool.has(tool)) recentByTool.set(tool, []);
+            recentByTool.get(tool).push(ev);
+          }
+
+          if (!byTool.length) {
+            if (serverToolBody) serverToolBody.appendChild(createErrorRow(5, "No servertool execution records"));
+          } else if (serverToolBody) {
+            for (const row of byTool.slice(0, 30)) {
+              const tool = textOf(row.tool);
+              const tr = document.createElement("tr");
+              tr.appendChild(createCell("td", tool || "—", "mono"));
+              tr.appendChild(createCell("td", formatInt(Number(row.executions || 0)), "mono"));
+              tr.appendChild(createCell("td", formatInt(Number(row.success || 0)), "mono"));
+              tr.appendChild(createCell("td", formatInt(Number(row.failure || 0)), "mono"));
+
+              const detailsTd = document.createElement("td");
+              const detailList = Array.isArray(recentByTool.get(tool)) ? recentByTool.get(tool).slice(0, 8) : [];
+              if (!detailList.length) {
+                detailsTd.textContent = "—";
+              } else {
+                const details = document.createElement("details");
+                const summary = document.createElement("summary");
+                summary.textContent = `${detailList.length} recent`;
+                details.appendChild(summary);
+                const pre = document.createElement("pre");
+                pre.className = "mono";
+                pre.style.margin = "8px 0 0";
+                pre.style.whiteSpace = "pre-wrap";
+                pre.style.wordBreak = "break-word";
+                pre.textContent = detailList
+                  .map((ev) => {
+                    const ts = textOf(ev.ts || "—");
+                    const stage = textOf(ev.stage || "—");
+                    const result = textOf(ev.result || "—");
+                    const req = textOf(ev.requestId || "—");
+                    const msg = textOf(ev.message || "");
+                    return `${ts} | ${req} | ${stage}/${result}${msg ? ` | ${msg}` : ""}`;
+                  })
+                  .join("\n");
+                details.appendChild(pre);
+                detailsTd.appendChild(details);
+              }
+              tr.appendChild(detailsTd);
+              serverToolBody.appendChild(tr);
+            }
+            if (byTool.length > 30) {
+              const tr = document.createElement("tr");
+              const td = document.createElement("td");
+              td.colSpan = 5;
+              td.className = "muted";
+              td.textContent = `… ${byTool.length - 30} more hidden`;
+              tr.appendChild(td);
+              serverToolBody.appendChild(tr);
+            }
+          }
+        } catch {
+          if (serverToolBody) serverToolBody.appendChild(createErrorRow(5, "Failed to parse servertool stats"));
+        }
+
         const hint = $("controlHint");
         if (hint) {
-          hint.textContent = `servers: ${servers.length} · quota keys: ${list.length} · updated: ${formatTs(snap.nowMs)}`;
+          const st = snap.serverTool && snap.serverTool.stats && typeof snap.serverTool.stats === "object"
+            ? snap.serverTool.stats
+            : null;
+          const stCount = st && Number.isFinite(Number(st.executions)) ? Number(st.executions) : 0;
+          hint.textContent = `servers: ${servers.length} · quota keys: ${list.length} · servertool exec: ${stCount} · updated: ${formatTs(snap.nowMs)}`;
         }
       }
 
@@ -5210,6 +5349,22 @@
           await refreshControl();
         } catch (e) {
           setLog("controlOpLog", `Quota refresh failed: ${e.message || e}`);
+        }
+      });
+      $("controlServerToolToggleBtn").addEventListener("click", async () => {
+        setLog("controlOpLog", "");
+        try {
+          const snap = UI.controlSnapshot && typeof UI.controlSnapshot === "object" ? UI.controlSnapshot : null;
+          const state = snap && snap.serverTool && typeof snap.serverTool === "object" && snap.serverTool.state
+            ? snap.serverTool.state
+            : null;
+          const enabled = state && state.enabled === true;
+          const nextEnabled = !enabled;
+          const out = await controlMutate("servertool.set_enabled", { enabled: nextEnabled });
+          setLog("controlOpLog", `ServerTool ${nextEnabled ? "enabled" : "disabled"}.\n${JSON.stringify(out, null, 2)}`);
+          await refreshControl();
+        } catch (e) {
+          setLog("controlOpLog", `ServerTool toggle failed: ${e.message || e}`);
         }
       });
       $("controlQuotaOfflineBtn").addEventListener("click", async () => {

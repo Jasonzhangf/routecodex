@@ -12,6 +12,11 @@ import * as llmsBridge from '../../../../modules/llmswitch/bridge.js';
 import { loadPolicyFromConfigPath, writePolicyToConfigPath } from './routing-policy.js';
 import { x7eGate, getGateState } from './routecodex-x7e-gate.js';
 import { createQuotaManagerAdapter } from '../../../../manager/modules/quota/quota-adapter.js';
+import {
+  getServerToolRuntimeState,
+  readServerToolStatsSnapshot,
+  setServerToolEnabled
+} from '../servertool-admin-state.js';
 
 type ControlServerInfo = {
   host: string;
@@ -26,6 +31,10 @@ type ControlSnapshot = {
   nowMs: number;
   controlServer: { serverId: string };
   servers: ControlServerInfo[];
+  serverTool?: {
+    state: ReturnType<typeof getServerToolRuntimeState>;
+    stats: ReturnType<typeof readServerToolStatsSnapshot>;
+  };
   quota?: {
     providers?: unknown[];
     antigravitySnapshot?: unknown;
@@ -232,6 +241,10 @@ export function registerControlRoutes(app: Application, options: DaemonAdminRout
       nowMs,
       controlServer: { serverId: options.getServerId() },
       servers,
+      serverTool: {
+        state: getServerToolRuntimeState(),
+        stats: readServerToolStatsSnapshot()
+      },
       quota: {
         providers: quotaProviders,
         antigravitySnapshot,
@@ -421,6 +434,22 @@ export function registerControlRoutes(app: Application, options: DaemonAdminRout
       }
       const result = await quotaMod.refreshNow();
       res.status(200).json({ ok: true, action, nowMs, result, ...(x7eGate.phase2UnifiedControl ? { schema: 'v2', updatedVia: 'unified_control' } : {}) });
+      return;
+    }
+
+    if (action === 'servertool.set_enabled') {
+      if (typeof body.enabled !== 'boolean') {
+        res.status(400).json({ error: { message: 'enabled(boolean) is required', code: 'bad_request' } });
+        return;
+      }
+      const state = setServerToolEnabled(body.enabled, 'daemon-admin.control');
+      res.status(200).json({
+        ok: true,
+        action,
+        nowMs,
+        state,
+        ...(x7eGate.phase2UnifiedControl ? { schema: 'v2', updatedVia: 'unified_control' } : {})
+      });
       return;
     }
 

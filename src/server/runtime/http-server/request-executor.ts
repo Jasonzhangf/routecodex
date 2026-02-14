@@ -62,6 +62,7 @@ import {
 import { resolveProviderRuntimeOrThrow } from './executor/provider-runtime-resolver.js';
 import { resolveProviderRequestContext } from './executor/provider-request-context.js';
 import { logUsageSummary } from './executor/usage-logger.js';
+import { isServerToolEnabled } from './servertool-admin-state.js';
 
 export type RequestExecutorDeps = {
   runtimeManager: {
@@ -288,6 +289,7 @@ export class HubRequestExecutor implements RequestExecutor {
             providerProtocol,
             providerType: handle.providerType,
             requestId: input.requestId,
+            serverToolsEnabled: isServerToolEnabled(),
             wantsStream: wantsStreamBase,
             originalRequest: originalRequestSnapshot,
             requestSemantics,
