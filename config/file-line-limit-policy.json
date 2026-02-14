@@ -1,0 +1,21 @@
+{
+  "limit": 500,
+  "extensions": [
+    ".ts",
+    ".tsx",
+    ".js",
+    ".mjs",
+    ".cjs",
+    ".mts",
+    ".cts",
+    ".py",
+    ".sh"
+  ],
+  "excludeDirs": [
+    "dist/",
+    "coverage/",
+    "node_modules/",
+    ".beads/"
+  ],
+  "allowList": []
+}

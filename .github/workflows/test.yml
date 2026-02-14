@@ -17,6 +17,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -25,6 +27,8 @@ jobs:
       - run: npm ci
       - name: Repo sanity (no root junk)
         run: npm run verify:repo-sanity
+      - name: File line-limit gate (<500)
+        run: npm run verify:file-line-limit
       - name: Ensure release llms module
         run: BUILD_MODE=release npm run llmswitch:ensure
       - name: Build (release)
@@ -45,6 +49,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -53,6 +59,8 @@ jobs:
       - run: npm ci
       - name: Repo sanity (no root junk)
         run: npm run verify:repo-sanity
+      - name: File line-limit gate (<500)
+        run: npm run verify:file-line-limit
       - name: Ensure release llms module
         run: BUILD_MODE=release npm run llmswitch:ensure
       - name: Build (release)
