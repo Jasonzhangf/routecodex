@@ -57,13 +57,19 @@ describe('resp_inbound stage1 SSE stream rewind', () => {
         payload: {
           __sse_stream: Readable.from([ssePayload], { objectMode: false })
         } as any,
-        adapterContext: { requestId: 'rewind-stage1-deepseek-toast' } as any,
+        adapterContext: {
+          requestId: 'rewind-stage1-deepseek-toast',
+          reqTokens: 1116403,
+          target: { maxContextTokens: 512000 }
+        } as any,
         wantsStream: false
       })
     ).rejects.toMatchObject({
       code: 'SSE_DECODE_ERROR',
       details: {
-        reason: 'context_length_exceeded'
+        reason: 'context_length_exceeded',
+        estimatedPromptTokens: 1116403,
+        maxContextTokens: 512000
       }
     });
   });
