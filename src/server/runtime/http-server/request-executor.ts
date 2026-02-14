@@ -3,7 +3,6 @@ import type { PipelineExecutionInput, PipelineExecutionResult } from '../../hand
 import type { HubPipeline, ProviderHandle, ProviderProtocol } from './types.js';
 import { asRecord } from './provider-utils.js';
 import { attachProviderRuntimeMetadata } from '../../../providers/core/runtime/provider-runtime-metadata.js';
-import { enhanceProviderRequestId } from '../../utils/request-id-manager.js';
 import type { StatsManager } from './stats-manager.js';
 import {
   buildRequestMetadata,
@@ -13,11 +12,9 @@ import {
   resolveClientRequestId
 } from './executor-metadata.js';
 import {
-  convertProviderResponse as bridgeConvertProviderResponse,
-  createSnapshotRecorder as bridgeCreateSnapshotRecorder,
-} from '../../../modules/llmswitch/bridge.js';
-import { applyClientConnectionStateToContext } from '../../utils/client-connection-state.js';
-import { injectClockClientPrompt } from './clock-client-registry.js';
+  type ConvertProviderResponseOptions,
+  convertProviderResponseIfNeeded as convertProviderResponseWithBridge
+} from './executor/provider-response-converter.js';
 import { ensureHubPipeline, runHubPipeline } from './executor-pipeline.js';
 
 // Import from new executor submodules
@@ -32,14 +29,12 @@ import {
   waitBeforeRetry
 } from './executor/retry-engine.js';
 import {
-  extractSseWrapperError,
   type SseWrapperErrorInfo
 } from './executor/sse-error-handler.js';
 import {
   type UsageMetrics,
   extractUsageFromResult,
-  mergeUsageMetrics,
-  buildUsageLogText
+  mergeUsageMetrics
 } from './executor/usage-aggregator.js';
 import {
   type AntigravityRetrySignal,
@@ -50,15 +45,12 @@ import {
   isAntigravityProviderKey,
   isAntigravityReauthRequired403,
   isGoogleAccountVerificationRequiredError,
-  isRateLimitLikeError,
   isSseDecodeRateLimitError,
   resolveAntigravityMaxProviderAttempts,
   shouldRotateAntigravityAliasOnRetry
 } from './executor/request-retry-helpers.js';
 import {
-  buildProviderLabel,
   cloneRequestPayload,
-  extractClientModelId,
   extractProviderModel,
   extractResponseStatus,
   normalizeProviderResponse
@@ -67,6 +59,9 @@ import {
   isPoolExhaustedPipelineError,
   writeInboundClientSnapshot
 } from './executor/request-executor-core-utils.js';
+import { resolveProviderRuntimeOrThrow } from './executor/provider-runtime-resolver.js';
+import { resolveProviderRequestContext } from './executor/provider-request-context.js';
+import { logUsageSummary } from './executor/usage-logger.js';
 
 export type RequestExecutorDeps = {
   runtimeManager: {
@@ -189,117 +184,35 @@ export class HubRequestExecutor implements RequestExecutor {
           mergedMetadata.compatibilityProfile = target.compatibilityProfile.trim();
         }
 
-        const runtimeKey = target.runtimeKey || this.deps.runtimeManager.resolveRuntimeKey(target.providerKey);
-        if (!runtimeKey) {
-          const runtimeResolveError = Object.assign(new Error(`Runtime for provider ${target.providerKey} not initialized`), {
-            code: 'ERR_RUNTIME_NOT_FOUND',
-            requestId: input.requestId,
-            retryable: true
-          });
-          try {
-            const { emitProviderError } = await import('../../../providers/core/utils/provider-error-reporter.js');
-            emitProviderError({
-              error: runtimeResolveError,
-              stage: 'provider.runtime.resolve',
-              runtime: {
-                requestId: input.requestId,
-                providerKey: target.providerKey,
-                providerId: target.providerKey.split('.')[0],
-                providerType: String((target as any).providerType || 'unknown'),
-                providerProtocol: String((target as any).outboundProfile || ''),
-                routeName: pipelineResult.routingDecision?.routeName,
-                pipelineId: target.providerKey,
-                target
-              },
-              dependencies: this.deps.getModuleDependencies(),
-              recoverable: false,
-              affectsHealth: true,
-              details: {
-                reason: 'runtime_not_initialized',
-                providerKey: target.providerKey
-              }
-            });
-          } catch {
-            // best-effort
-          }
-          throw Object.assign(new Error(`Runtime for provider ${target.providerKey} not initialized`), {
-            code: 'ERR_RUNTIME_NOT_FOUND',
-            requestId: input.requestId
-          });
-        }
-
-        const handle = this.deps.runtimeManager.getHandleByRuntimeKey(runtimeKey);
-        if (!handle) {
-          const runtimeMissingError = Object.assign(new Error(`Provider runtime ${runtimeKey} not found`), {
-            code: 'ERR_PROVIDER_NOT_FOUND',
-            requestId: input.requestId,
-            retryable: true
-          });
-          try {
-            const { emitProviderError } = await import('../../../providers/core/utils/provider-error-reporter.js');
-            emitProviderError({
-              error: runtimeMissingError,
-              stage: 'provider.runtime.resolve',
-              runtime: {
-                requestId: input.requestId,
-                providerKey: target.providerKey,
-                providerId: target.providerKey.split('.')[0],
-                providerType: String((target as any).providerType || 'unknown'),
-                providerProtocol: String((target as any).outboundProfile || ''),
-                routeName: pipelineResult.routingDecision?.routeName,
-                pipelineId: target.providerKey,
-                runtimeKey,
-                target
-              },
-              dependencies: this.deps.getModuleDependencies(),
-              recoverable: false,
-              affectsHealth: true,
-              details: {
-                reason: 'runtime_handle_missing',
-                providerKey: target.providerKey,
-                runtimeKey
-              }
-            });
-          } catch {
-            // best-effort
-          }
-          throw Object.assign(new Error(`Provider runtime ${runtimeKey} not found`), {
-            code: 'ERR_PROVIDER_NOT_FOUND',
-            requestId: input.requestId
-          });
-        }
-
-        const providerProtocol = (target.outboundProfile as ProviderProtocol) || handle.providerProtocol;
-        const metadataModel =
-          mergedMetadata?.target && typeof mergedMetadata.target === 'object'
-            ? (mergedMetadata.target as Record<string, unknown>).clientModelId
-            : undefined;
-        const rawModel =
-          extractProviderModel(providerPayload) ||
-          (typeof metadataModel === 'string' ? metadataModel : undefined);
-        const providerAlias =
-          typeof target.providerKey === 'string' && target.providerKey.includes('.')
-            ? target.providerKey.split('.').slice(0, 2).join('.')
-            : target.providerKey;
-        const providerIdToken = providerAlias || handle.providerId || runtimeKey;
-        if (!providerIdToken) {
-          throw Object.assign(new Error('Provider identifier missing for request'), {
-            code: 'ERR_PROVIDER_ID_MISSING',
-            requestId: providerRequestId
-          });
-        }
-
-        const enhancedRequestId = enhanceProviderRequestId(providerRequestId, {
-          entryEndpoint: input.entryEndpoint,
-          providerId: providerIdToken,
-          model: rawModel
+        const { runtimeKey, handle } = await resolveProviderRuntimeOrThrow({
+          requestId: input.requestId,
+          target: {
+            providerKey: target.providerKey,
+            outboundProfile: String((target as any).outboundProfile || ''),
+            providerType: String((target as any).providerType || '')
+          },
+          routeName: pipelineResult.routingDecision?.routeName,
+          runtimeKeyHint: target.runtimeKey,
+          runtimeManager: this.deps.runtimeManager,
+          dependencies: this.deps.getModuleDependencies()
         });
-        if (enhancedRequestId !== input.requestId) {
-          input.requestId = enhancedRequestId;
-        }
 
-        const providerModel = rawModel;
-        const providerLabel = buildProviderLabel(target.providerKey, providerModel);
+        const providerContext = resolveProviderRequestContext({
+          providerRequestId,
+          entryEndpoint: input.entryEndpoint,
+          target: {
+            providerKey: target.providerKey,
+            outboundProfile: target.outboundProfile as ProviderProtocol
+          },
+          handle,
+          runtimeKey,
+          providerPayload,
+          mergedMetadata
+        });
+        if (providerContext.requestId !== input.requestId) {
+          input.requestId = providerContext.requestId;
+        }
+        const { providerProtocol, providerModel, providerLabel } = providerContext;
         if (clientHeadersForAttempt) {
           ensureClientHeadersOnPayload(providerPayload, clientHeadersForAttempt);
         }
@@ -448,7 +361,7 @@ export class HubRequestExecutor implements RequestExecutor {
           }
 
           recordAttempt({ usage: aggregatedUsage, error: false });
-          this.logUsageSummary(input.requestId, {
+          logUsageSummary(input.requestId, {
             providerKey: target.providerKey,
             model: providerModel,
             usage: aggregatedUsage,
@@ -571,320 +484,12 @@ export class HubRequestExecutor implements RequestExecutor {
     }
 
   }
-
-  private async convertProviderResponseIfNeeded(options: {
-    entryEndpoint?: string;
-    providerProtocol: string;
-    providerType?: string;
-    requestId: string;
-    wantsStream: boolean;
-    originalRequest?: Record<string, unknown> | undefined;
-    requestSemantics?: Record<string, unknown> | undefined;
-    processMode?: string;
-    response: PipelineExecutionResult;
-    pipelineMetadata?: Record<string, unknown>;
-  }): Promise<PipelineExecutionResult> {
-    const body = options.response.body;
-    if (body && typeof body === 'object') {
-      const wrapperError = extractSseWrapperError(body as Record<string, unknown>);
-      if (wrapperError) {
-        const codeSuffix = wrapperError.errorCode ? ` [${wrapperError.errorCode}]` : '';
-        const error = new Error(`Upstream SSE error event${codeSuffix}: ${wrapperError.message}`) as Error & {
-          code?: string;
-          status?: number;
-          statusCode?: number;
-          retryable?: boolean;
-          upstreamCode?: string;
-        };
-        error.code = 'SSE_DECODE_ERROR';
-        if (wrapperError.errorCode) {
-          error.upstreamCode = wrapperError.errorCode;
-        }
-        error.retryable = wrapperError.retryable;
-        if (isRateLimitLikeError(wrapperError.message, wrapperError.errorCode)) {
-          error.code = 'HTTP_429';
-          error.status = 429;
-          error.statusCode = 429;
-          error.retryable = true;
-        } else if (wrapperError.retryable) {
-          error.status = 503;
-          error.statusCode = 503;
-        }
-        throw error;
-      }
-    }
-    if (options.processMode === 'passthrough' && !options.wantsStream) {
-      return options.response;
-    }
-    const entry = (options.entryEndpoint || '').toLowerCase();
-    const needsAnthropicConversion = entry.includes('/v1/messages');
-    const needsResponsesConversion = entry.includes('/v1/responses');
-    const needsChatConversion = entry.includes('/v1/chat/completions');
-    if (!needsAnthropicConversion && !needsResponsesConversion && !needsChatConversion) {
-      return options.response;
-    }
-    if (!body || typeof body !== 'object') {
-      return options.response;
-    }
-    try {
-      const metadataBag = asRecord(options.pipelineMetadata);
-      const originalModelId = extractClientModelId(metadataBag, options.originalRequest);
-      const assignedModelId =
-        typeof (metadataBag as Record<string, unknown> | undefined)?.assignedModelId === 'string'
-          ? String((metadataBag as Record<string, unknown>).assignedModelId)
-          : metadataBag &&
-              typeof metadataBag === 'object' &&
-              metadataBag.target &&
-              typeof metadataBag.target === 'object' &&
-              typeof (metadataBag.target as Record<string, unknown>).modelId === 'string'
-            ? ((metadataBag.target as Record<string, unknown>).modelId as string)
-            : typeof (metadataBag as Record<string, unknown> | undefined)?.modelId === 'string'
-              ? String((metadataBag as Record<string, unknown>).modelId)
-              : undefined;
-      const baseContext: Record<string, unknown> = {
-        ...(metadataBag ?? {})
-      };
-      if (
-        baseContext.capturedChatRequest === undefined &&
-        options.originalRequest &&
-        typeof options.originalRequest === 'object' &&
-        !Array.isArray(options.originalRequest)
-      ) {
-        baseContext.capturedChatRequest = options.originalRequest;
-      }
-      if (typeof (metadataBag as Record<string, unknown> | undefined)?.routeName === 'string') {
-        baseContext.routeId = (metadataBag as Record<string, unknown>).routeName as string;
-      }
-      baseContext.requestId = options.requestId;
-      baseContext.entryEndpoint = options.entryEndpoint || entry;
-      baseContext.providerProtocol = options.providerProtocol;
-      baseContext.originalModelId = originalModelId;
-      if (assignedModelId && assignedModelId.trim()) {
-        baseContext.modelId = assignedModelId.trim();
-      }
-      applyClientConnectionStateToContext(metadataBag, baseContext);
-      const adapterContext = baseContext;
-      const compatProfile =
-        metadataBag &&
-        typeof metadataBag === 'object' &&
-        metadataBag.target &&
-        typeof metadataBag.target === 'object' &&
-        typeof (metadataBag.target as Record<string, unknown>).compatibilityProfile === 'string'
-          ? ((metadataBag.target as Record<string, unknown>).compatibilityProfile as string)
-          : typeof (metadataBag as Record<string, unknown> | undefined)?.compatibilityProfile === 'string'
-            ? String((metadataBag as Record<string, unknown>).compatibilityProfile)
-            : undefined;
-      if (compatProfile && compatProfile.trim()) {
-        adapterContext.compatibilityProfile = compatProfile.trim();
-      }
-      const stageRecorder = await bridgeCreateSnapshotRecorder(
-        adapterContext,
-        typeof (adapterContext as Record<string, unknown>).entryEndpoint === 'string'
-          ? ((adapterContext as Record<string, unknown>).entryEndpoint as string)
-          : options.entryEndpoint || entry
-      );
-
-      const providerInvoker = async (invokeOptions: {
-        providerKey: string;
-        providerType?: string;
-        modelId?: string;
-        providerProtocol: string;
-        payload: Record<string, unknown>;
-        entryEndpoint: string;
-        requestId: string;
-        routeHint?: string;
-      }): Promise<{ providerResponse: Record<string, unknown> }> => {
-        // 将 server-side 工具的 routeHint 注入到内部 payload 的 metadata，
-        // 以便后续在标准 HubPipeline 中保持路由上下文一致（例如强制 web_search）。
-        if (invokeOptions.routeHint) {
-          const carrier = invokeOptions.payload as { metadata?: Record<string, unknown> };
-          const existingMeta =
-            carrier.metadata && typeof carrier.metadata === 'object'
-              ? (carrier.metadata as Record<string, unknown>)
-              : {};
-          carrier.metadata = {
-            ...existingMeta,
-            routeHint: existingMeta.routeHint ?? invokeOptions.routeHint
-          };
-        }
-
-        // Delegate to existing runtimeManager / Provider V2 stack.
-        const runtimeKey = this.deps.runtimeManager.resolveRuntimeKey(invokeOptions.providerKey);
-        if (!runtimeKey) {
-          throw new Error(`Runtime for provider ${invokeOptions.providerKey} not initialized`);
-        }
-        const handle = this.deps.runtimeManager.getHandleByRuntimeKey(runtimeKey);
-        if (!handle) {
-          throw new Error(`Provider runtime ${runtimeKey} not found`);
-        }
-        const providerResponse = await handle.instance.processIncoming(invokeOptions.payload);
-        const normalized = normalizeProviderResponse(providerResponse);
-        const bodyPayload =
-          normalized.body && typeof normalized.body === 'object'
-            ? (normalized.body as Record<string, unknown>)
-            : (normalized as unknown as Record<string, unknown>);
-        return { providerResponse: bodyPayload };
-      };
-
-      const reenterPipeline = async (reenterOpts: {
-        entryEndpoint: string;
-        requestId: string;
-        body: Record<string, unknown>;
-        metadata?: Record<string, unknown>;
-      }): Promise<{ body?: Record<string, unknown>; __sse_responses?: unknown; format?: string }> => {
-        const nestedEntry = reenterOpts.entryEndpoint || options.entryEndpoint || entry;
-        const nestedExtra = asRecord(reenterOpts.metadata) ?? {};
-
-        // 基于首次 HubPipeline metadata + 调用方注入的 metadata 构建新的请求 metadata。
-        // 不在 Host 层编码 servertool/web_search 等语义，由 llmswitch-core 负责。
-        const nestedMetadata: Record<string, unknown> = {
-          ...(metadataBag ?? {}),
-          ...nestedExtra,
-          entryEndpoint: nestedEntry,
-          direction: 'request',
-          stage: 'inbound'
-        };
-        // E1: merge internal runtime metadata carrier (`__rt`) instead of clobbering it.
-        // ServerTool followup metadata always adds fields under __rt, while the base pipeline
-        // metadata may already contain runtime configs (webSearch/clock/etc).
-        try {
-          const baseRt = asRecord((metadataBag as any)?.__rt) ?? {};
-          const extraRt = asRecord((nestedExtra as any)?.__rt) ?? {};
-          if (Object.keys(baseRt).length || Object.keys(extraRt).length) {
-            (nestedMetadata as any).__rt = { ...baseRt, ...extraRt };
-          }
-        } catch {
-          // best-effort
-        }
-
-        // servertool followup 是内部二跳请求：不应继承客户端 headers 偏好（尤其是 Accept），
-        // 否则会导致上游返回非 SSE 响应而被当作 SSE 解析，出现“空回复”。
-        if (asRecord((nestedMetadata as any).__rt)?.serverToolFollowup === true) {
-          delete nestedMetadata.clientHeaders;
-          delete nestedMetadata.clientRequestId;
-        }
-
-        bindClockConversationSession(nestedMetadata);
-
-        const nestedInput: PipelineExecutionInput = {
-          entryEndpoint: nestedEntry,
-          method: 'POST',
-          requestId: reenterOpts.requestId,
-          headers: {},
-          query: {},
-          body: reenterOpts.body,
-          metadata: nestedMetadata
-        };
-
-        try {
-          const requestBody = reenterOpts.body as Record<string, unknown>;
-          const messages = Array.isArray(requestBody.messages) ? (requestBody.messages as unknown[]) : [];
-          const lastUser = [...messages]
-            .reverse()
-            .find((entry) => entry && typeof entry === 'object' && (entry as Record<string, unknown>).role === 'user') as
-            | Record<string, unknown>
-            | undefined;
-          const text = typeof lastUser?.content === 'string' ? String(lastUser.content) : '';
-          if (text.includes('<**clock:{') && text.includes('}**>')) {
-            await injectClockClientPrompt({
-              tmuxSessionId: typeof nestedMetadata.tmuxSessionId === 'string' ? nestedMetadata.tmuxSessionId : undefined,
-              sessionId: typeof nestedMetadata.sessionId === 'string' ? nestedMetadata.sessionId : undefined,
-              text,
-              requestId: reenterOpts.requestId,
-              source: 'servertool.reenter'
-            });
-          }
-        } catch {
-          // best-effort only
-        }
-
-        const nestedResult = await this.execute(nestedInput);
-        const nestedBody =
-          nestedResult.body && typeof nestedResult.body === 'object'
-            ? (nestedResult.body as Record<string, unknown>)
-            : undefined;
-        return { body: nestedBody };
-      };
-
-      const converted = await bridgeConvertProviderResponse({
-        providerProtocol: options.providerProtocol,
-        providerResponse: body as Record<string, unknown>,
-        context: adapterContext,
-        entryEndpoint: options.entryEndpoint || entry,
-        wantsStream: options.wantsStream,
-        requestSemantics: options.requestSemantics,
-        providerInvoker,
-        stageRecorder,
-        reenterPipeline
-      });
-      if (converted.__sse_responses) {
-        return {
-          ...options.response,
-          body: { __sse_responses: converted.__sse_responses }
-        };
-      }
-      return {
-        ...options.response,
-        body: converted.body ?? body
-      };
-    } catch (error) {
-      const err = error as Error | unknown;
-      const message = err instanceof Error ? err.message : String(err ?? 'Unknown error');
-
-      // 对于 SSE 解码失败（含上游终止），直接抛出错误并透传到 HTTP 层。
-      // 否则回退到原始 payload 会让客户端挂起，无法感知失败。
-      const errRecord = err as Record<string, unknown>;
-      const errCode = typeof errRecord.code === 'string' ? errRecord.code : undefined;
-      const upstreamCode = typeof errRecord.upstreamCode === 'string' ? errRecord.upstreamCode : undefined;
-      const errName = typeof errRecord.name === 'string' ? errRecord.name : undefined;
-      const isSseDecodeError =
-        errCode === 'SSE_DECODE_ERROR' ||
-        (errName === 'ProviderProtocolError' && message.toLowerCase().includes('sse'));
-      const isServerToolFollowupError =
-        errCode === 'SERVERTOOL_FOLLOWUP_FAILED' ||
-        errCode === 'SERVERTOOL_EMPTY_FOLLOWUP' ||
-        (typeof errCode === 'string' && errCode.startsWith('SERVERTOOL_'));
-
-      if (isSseDecodeError || isServerToolFollowupError) {
-        if (isSseDecodeError && isRateLimitLikeError(message, errCode, upstreamCode)) {
-          (errRecord as any).status = 429;
-          (errRecord as any).statusCode = 429;
-          (errRecord as any).retryable = true;
-          if (typeof errRecord.code !== 'string' || !String(errRecord.code).trim()) {
-            (errRecord as any).code = 'HTTP_429';
-          }
-        }
-        if (isVerboseErrorLoggingEnabled()) {
-          console.error(
-            '[RequestExecutor] Fatal conversion error, bubbling as HTTP error',
-            error
-          );
-        }
-        throw error;
-      }
-
-      if (isVerboseErrorLoggingEnabled()) {
-        console.error('[RequestExecutor] Failed to convert provider response via llmswitch-core', error);
-      }
-      return options.response;
-    }
-  }
-
   private logStage(stage: string, requestId: string, details?: Record<string, unknown>): void {
     this.deps.logStage(stage, requestId, details);
   }
 
-  private logUsageSummary(
-    requestId: string,
-    info: { providerKey?: string; model?: string; usage?: UsageMetrics; latencyMs: number }
-  ): void {
-    if (!isUsageLoggingEnabled()) {
-      return;
-    }
-    const providerLabel = buildProviderLabel(info.providerKey, info.model) ?? '-';
-    const usageText = buildUsageLogText(info.usage);
-    const latency = info.latencyMs.toFixed(1);
-    console.log(`[usage] request ${requestId} provider=${providerLabel} latency=${latency}ms (${usageText})`);
+  private async convertProviderResponseIfNeeded(options: ConvertProviderResponseOptions): Promise<PipelineExecutionResult> {
+    return convertProviderResponseWithBridge(options, { runtimeManager: this.deps.runtimeManager, executeNested: (nestedInput) => this.execute(nestedInput) });
   }
 
 }
