@@ -367,6 +367,15 @@ export async function convertProviderResponseIfNeeded(
     const errCode = typeof errRecord.code === 'string' ? errRecord.code : undefined;
     const upstreamCode = typeof errRecord.upstreamCode === 'string' ? errRecord.upstreamCode : undefined;
     const errName = typeof errRecord.name === 'string' ? errRecord.name : undefined;
+    const detailRecord = asRecord(errRecord.details);
+    const detailUpstreamCode =
+      typeof (detailRecord as Record<string, unknown> | undefined)?.upstreamCode === 'string'
+        ? String((detailRecord as Record<string, unknown>).upstreamCode)
+        : undefined;
+    const detailReason =
+      typeof (detailRecord as Record<string, unknown> | undefined)?.reason === 'string'
+        ? String((detailRecord as Record<string, unknown>).reason)
+        : undefined;
     const isSseDecodeError =
       errCode === 'SSE_DECODE_ERROR' ||
       (errName === 'ProviderProtocolError' && message.toLowerCase().includes('sse'));
@@ -374,9 +383,25 @@ export async function convertProviderResponseIfNeeded(
       errCode === 'SERVERTOOL_FOLLOWUP_FAILED' ||
       errCode === 'SERVERTOOL_EMPTY_FOLLOWUP' ||
       (typeof errCode === 'string' && errCode.startsWith('SERVERTOOL_'));
+    const normalizedUpstreamCode = (upstreamCode || detailUpstreamCode || '').trim().toLowerCase();
+    const normalizedMessage = message.toLowerCase();
+    const isContextLengthExceeded =
+      normalizedUpstreamCode.includes('context_length_exceeded') ||
+      normalizedMessage.includes('context_length_exceeded') ||
+      normalizedMessage.includes('达到对话长度上限') ||
+      normalizedMessage.includes('对话长度上限') ||
+      (detailReason || '').toLowerCase() === 'context_length_exceeded';
 
     if (isSseDecodeError || isServerToolFollowupError) {
-      if (isSseDecodeError && isRateLimitLikeError(message, errCode, upstreamCode)) {
+      if (isSseDecodeError && isContextLengthExceeded) {
+        (errRecord as any).status = 400;
+        (errRecord as any).statusCode = 400;
+        (errRecord as any).retryable = false;
+        (errRecord as any).code = 'CONTEXT_LENGTH_EXCEEDED';
+        if (typeof errRecord.upstreamCode !== 'string' || !String(errRecord.upstreamCode).trim()) {
+          (errRecord as any).upstreamCode = upstreamCode || detailUpstreamCode || 'context_length_exceeded';
+        }
+      } else if (isSseDecodeError && isRateLimitLikeError(message, errCode, upstreamCode || detailUpstreamCode)) {
         (errRecord as any).status = 429;
         (errRecord as any).statusCode = 429;
         (errRecord as any).retryable = true;

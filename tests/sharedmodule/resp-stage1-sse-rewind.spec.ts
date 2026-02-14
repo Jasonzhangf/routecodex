@@ -42,4 +42,29 @@ describe('resp_inbound stage1 SSE stream rewind', () => {
     expect(messageContent).toContain('tool_calls');
     expect(messageContent).toContain('bd --no-db ready');
   });
+
+  it('raises SSE_DECODE_ERROR for deepseek toast error events', async () => {
+    const ssePayload = [
+      'event: ready\ndata: {"request_message_id":31,"response_message_id":32}\n\n',
+      'event: finish\ndata: {}\n\n',
+      'event: toast\ndata: {"type":"error","content":"达到对话长度上限，请开启新对话","finish_reason":"context_length_exceeded"}\n\n',
+      'event: close\ndata: {"click_behavior":"none","auto_resume":false}\n\n'
+    ].join('');
+
+    await expect(
+      runRespInboundStage1SseDecode({
+        providerProtocol: 'openai-chat',
+        payload: {
+          __sse_stream: Readable.from([ssePayload], { objectMode: false })
+        } as any,
+        adapterContext: { requestId: 'rewind-stage1-deepseek-toast' } as any,
+        wantsStream: false
+      })
+    ).rejects.toMatchObject({
+      code: 'SSE_DECODE_ERROR',
+      details: {
+        reason: 'context_length_exceeded'
+      }
+    });
+  });
 });

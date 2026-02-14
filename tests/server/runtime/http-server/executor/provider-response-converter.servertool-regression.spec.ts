@@ -145,4 +145,53 @@ describe('provider-response-converter servertool regressions', () => {
     expect(nestedMetadata.sessionId).toBe('sess_123');
     expect(nestedMetadata.conversationId).toBe('conv_456');
   });
+
+  it('maps deepseek context-length SSE decode errors to explicit 400 error', async () => {
+    jest.resetModules();
+    mockConvertProviderResponse.mockReset();
+    mockCreateSnapshotRecorder.mockClear();
+
+    mockConvertProviderResponse.mockImplementation(async () => {
+      const err = Object.assign(
+        new Error('[chat_process.resp.stage1.sse_decode] ... context_length_exceeded'),
+        {
+          name: 'ProviderProtocolError',
+          code: 'SSE_DECODE_ERROR',
+          details: {
+            upstreamCode: 'context_length_exceeded',
+            reason: 'context_length_exceeded'
+          }
+        }
+      );
+      throw err;
+    });
+
+    const { convertProviderResponseIfNeeded } = await import(
+      '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
+    );
+
+    await expect(
+      convertProviderResponseIfNeeded(
+        {
+          entryEndpoint: '/v1/messages',
+          providerProtocol: 'openai-chat',
+          requestId: 'req_ctx_len_1',
+          wantsStream: false,
+          response: { body: { id: 'upstream_body' } } as any,
+          pipelineMetadata: {}
+        },
+        {
+          runtimeManager: {
+            resolveRuntimeKey: () => undefined,
+            getHandleByRuntimeKey: () => undefined
+          },
+          executeNested: async () => ({ body: { ok: true } } as any)
+        }
+      )
+    ).rejects.toMatchObject({
+      code: 'CONTEXT_LENGTH_EXCEEDED',
+      status: 400,
+      statusCode: 400
+    });
+  });
 });
