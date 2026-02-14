@@ -133,7 +133,7 @@ describe('DeepSeekHttpProvider', () => {
     });
   });
 
-  it('fails fast when compat payload prompt is missing', async () => {
+  it('derives compat prompt from chat messages when prompt is missing', async () => {
     const tokenFile = await createDeepSeekTokenFile('prompt-token');
     const fakeSessionPow: FakeSessionPow = {
       ensureChatSession: jest.fn(async () => 'session-xyz'),
@@ -171,11 +171,58 @@ describe('DeepSeekHttpProvider', () => {
       }
     );
 
+    const body = (provider as any).buildHttpRequestBody({
+      data: {
+        model: 'deepseek-chat',
+        messages: [{ role: 'user', content: 'hi' }]
+      }
+    });
+
+    expect(body.prompt).toContain('hi');
+    expect(body.chat_session_id).toBe('session-xyz');
+  });
+
+  it('fails fast when compat payload prompt and messages are both missing', async () => {
+    const tokenFile = await createDeepSeekTokenFile('prompt-token');
+    const fakeSessionPow: FakeSessionPow = {
+      ensureChatSession: jest.fn(async () => 'session-xyz'),
+      createPowResponse: jest.fn(async () => 'pow-encoded'),
+      cleanup: jest.fn(async () => {})
+    };
+
+    const provider = new TestDeepSeekHttpProvider(
+      {
+        type: 'deepseek-http-provider',
+        config: {
+          providerType: 'openai',
+          providerId: 'deepseek',
+          baseUrl: 'https://chat.deepseek.com',
+          auth: {
+            type: 'apikey',
+            rawType: 'deepseek-account',
+            apiKey: '',
+            tokenFile
+          }
+        }
+      } as unknown as OpenAIStandardConfig,
+      deps,
+      fakeSessionPow
+    );
+
+    await provider.initialize();
+    await (provider as any).finalizeRequestHeaders(
+      {},
+      {
+        data: {
+          model: 'deepseek-chat'
+        }
+      }
+    );
+
     expect(() =>
       (provider as any).buildHttpRequestBody({
         data: {
-          model: 'deepseek-chat',
-          messages: [{ role: 'user', content: 'hi' }]
+          model: 'deepseek-chat'
         }
       })
     ).toThrow();

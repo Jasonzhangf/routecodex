@@ -63,6 +63,167 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+function stringifyUnknown(value: unknown): string {
+  if (typeof value === 'string') {
+    return value;
+  }
+  if (value === null || value === undefined) {
+    return '';
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function normalizeMessageContentToText(content: unknown): string {
+  if (typeof content === 'string') {
+    return content.trim();
+  }
+  if (content === null || content === undefined) {
+    return '';
+  }
+  if (!Array.isArray(content)) {
+    return stringifyUnknown(content).trim();
+  }
+
+  const parts: string[] = [];
+  for (const item of content) {
+    if (!isRecord(item)) {
+      continue;
+    }
+    const type = normalizeString(item.type)?.toLowerCase();
+    const text = normalizeString(item.text);
+    if (
+      text &&
+      (type === 'text' || type === 'input_text' || type === 'output_text' || type === 'text_delta')
+    ) {
+      parts.push(text);
+      continue;
+    }
+    if (text) {
+      parts.push(text);
+      continue;
+    }
+    const contentText = normalizeString(item.content);
+    if (contentText) {
+      parts.push(contentText);
+      continue;
+    }
+    if (type === 'tool_use') {
+      const toolName = normalizeString(item.name) || 'tool_call';
+      const toolInput = item.input ?? {};
+      parts.push(stringifyUnknown({ tool_calls: [{ name: toolName, input: toolInput }] }));
+      continue;
+    }
+    if (type === 'tool_result' && item.content !== undefined) {
+      parts.push(stringifyUnknown(item.content));
+      continue;
+    }
+  }
+  return parts.join('\n').trim();
+}
+
+function normalizeToolCallsAsText(toolCallsRaw: unknown): string {
+  if (!Array.isArray(toolCallsRaw) || toolCallsRaw.length === 0) {
+    return '';
+  }
+  const toolCalls = toolCallsRaw
+    .filter((item) => isRecord(item))
+    .map((item) => {
+      const fn = isRecord(item.function) ? item.function : item;
+      const name = normalizeString(fn.name);
+      if (!name) {
+        return null;
+      }
+      const argsRaw = fn.arguments;
+      let input: unknown = {};
+      if (typeof argsRaw === 'string') {
+        const trimmed = argsRaw.trim();
+        if (trimmed) {
+          try {
+            input = JSON.parse(trimmed);
+          } catch {
+            input = { _raw: trimmed };
+          }
+        }
+      } else if (argsRaw !== undefined) {
+        input = argsRaw;
+      }
+      return { name, input };
+    })
+    .filter((item): item is { name: string; input: unknown } => Boolean(item));
+
+  if (!toolCalls.length) {
+    return '';
+  }
+  return stringifyUnknown({ tool_calls: toolCalls });
+}
+
+function buildPromptFromMessages(messagesRaw: unknown): string | undefined {
+  if (!Array.isArray(messagesRaw) || messagesRaw.length === 0) {
+    return undefined;
+  }
+  const messages: Array<{ role: string; text: string }> = [];
+
+  for (const item of messagesRaw) {
+    if (!isRecord(item)) {
+      continue;
+    }
+    const role = normalizeString(item.role)?.toLowerCase();
+    if (!role) {
+      continue;
+    }
+    const contentText = normalizeMessageContentToText(item.content);
+    const toolCallsText = normalizeToolCallsAsText(item.tool_calls);
+    const reasoning =
+      normalizeString(item.reasoning_content) || normalizeString(item.reasoning) || '';
+    const text = [contentText, toolCallsText, reasoning].filter(Boolean).join('\n').trim();
+    if (!text) {
+      continue;
+    }
+    messages.push({ role, text });
+  }
+
+  if (!messages.length) {
+    return undefined;
+  }
+
+  const merged = [{ ...messages[0] }];
+  for (const item of messages.slice(1)) {
+    const last = merged[merged.length - 1];
+    if (last.role === item.role) {
+      last.text = [last.text, item.text].filter(Boolean).join('\n\n');
+      continue;
+    }
+    merged.push({ ...item });
+  }
+
+  const parts: string[] = [];
+  merged.forEach((block, index) => {
+    if (block.role === 'assistant') {
+      parts.push(`<｜Assistant｜>${block.text}<｜end▁of▁sentence｜>`);
+      return;
+    }
+    if (block.role === 'user' || block.role === 'system' || block.role === 'tool') {
+      if (index > 0) {
+        parts.push(`<｜User｜>${block.text}`);
+      } else {
+        parts.push(block.text);
+      }
+      return;
+    }
+    parts.push(block.text);
+  });
+
+  const prompt = parts
+    .join('')
+    .replace(/!\[(.*?)\]\((.*?)\)/g, '[$1]($2)')
+    .trim();
+  return prompt || undefined;
+}
+
 function createProviderError(code: string, message: string, statusCode: number, details?: Record<string, unknown>): DeepSeekProviderError {
   const error = new Error(message) as DeepSeekProviderError;
   error.code = code;
@@ -338,8 +499,16 @@ export class DeepSeekHttpProvider extends HttpTransportProvider {
     if (direct) {
       return direct;
     }
+    const messagePrompt = buildPromptFromMessages(body.messages);
+    if (messagePrompt) {
+      return messagePrompt;
+    }
     const dataNode = isRecord(request) && isRecord(request.data) ? request.data : undefined;
-    return normalizeString(dataNode?.prompt);
+    const nestedPrompt = normalizeString(dataNode?.prompt);
+    if (nestedPrompt) {
+      return nestedPrompt;
+    }
+    return buildPromptFromMessages(dataNode?.messages);
   }
 
   private extractSessionIdFromMetadata(request: UnknownObject): string | undefined {

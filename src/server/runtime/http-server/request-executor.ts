@@ -4,9 +4,8 @@ import type { HubPipeline, ProviderHandle, ProviderProtocol } from './types.js';
 import { writeClientSnapshot } from '../../../providers/core/utils/snapshot-writer.js';
 import { asRecord } from './provider-utils.js';
 import { attachProviderRuntimeMetadata } from '../../../providers/core/runtime/provider-runtime-metadata.js';
-import { extractAnthropicToolAliasMap } from './anthropic-tool-alias.js';
 import { enhanceProviderRequestId } from '../../utils/request-id-manager.js';
-import type { StatsManager, UsageMetrics } from './stats-manager.js';
+import type { StatsManager } from './stats-manager.js';
 import {
   buildRequestMetadata,
   cloneClientHeaders,
@@ -15,18 +14,43 @@ import {
   resolveClientRequestId
 } from './executor-metadata.js';
 import {
-  describeRetryReason,
-  shouldRetryProviderError,
-  waitBeforeRetry
-} from './executor-provider.js';
-import {
   convertProviderResponse as bridgeConvertProviderResponse,
   createSnapshotRecorder as bridgeCreateSnapshotRecorder,
 } from '../../../modules/llmswitch/bridge.js';
 import { applyClientConnectionStateToContext } from '../../utils/client-connection-state.js';
 import { getClockClientRegistry, injectClockClientPrompt } from './clock-client-registry.js';
 import { ensureHubPipeline, runHubPipeline } from './executor-pipeline.js';
-import { buildInfo } from '../../../build-info.js';
+
+// Import from new executor submodules
+import {
+  isUsageLoggingEnabled,
+  isVerboseErrorLoggingEnabled
+} from './executor/env-config.js';
+import {
+  resolveMaxProviderAttempts,
+  describeRetryReason,
+  shouldRetryProviderError,
+  waitBeforeRetry
+} from './executor/retry-engine.js';
+import {
+  type SseWrapperErrorInfo
+} from './executor/sse-error-handler.js';
+import {
+  type UsageMetrics,
+  extractUsageFromResult,
+  normalizeUsage,
+  extractEstimatedInputTokens,
+  reconcileUsageWithEstimate,
+  patchUsageCandidate,
+  mergeUsageMetrics,
+  buildUsageLogText
+} from './executor/usage-aggregator.js';
+import {
+  firstNonEmptyString,
+  firstFiniteNumber
+} from './executor/utils.js';
+
+import { isRetryableSseWrapperError } from './executor/retry-engine.js';
 
 export type RequestExecutorDeps = {
   runtimeManager: {
@@ -43,113 +67,11 @@ export interface RequestExecutor {
   execute(input: PipelineExecutionInput): Promise<PipelineExecutionResult>;
 }
 
-type SseWrapperErrorInfo = {
-  message: string;
-  errorCode?: string;
-  retryable: boolean;
-};
-
 const DEFAULT_MAX_PROVIDER_ATTEMPTS = 6;
 const DEFAULT_ANTIGRAVITY_MAX_PROVIDER_ATTEMPTS = 20;
-const RETRYABLE_SSE_ERROR_CODE_HINTS = [
-  'internal_network_failure',
-  'network_error',
-  'api_connection_error',
-  'service_unavailable',
-  'internal_server_error',
-  'overloaded_error',
-  'rate_limit_error',
-  'request_timeout',
-  'timeout'
-];
-const RETRYABLE_SSE_MESSAGE_HINTS = [
-  'internal network failure',
-  'network failure',
-  'network error',
-  'temporarily unavailable',
-  'temporarily unreachable',
-  'upstream disconnected',
-  'connection reset',
-  'connection closed',
-  'timed out',
-  'timeout'
-];
 
-function firstNonEmptyString(candidates: unknown[]): string | undefined {
-  for (const candidate of candidates) {
-    if (typeof candidate !== 'string') {
-      continue;
-    }
-    const trimmed = candidate.trim();
-    if (trimmed) {
-      return trimmed;
-    }
-  }
-  return undefined;
-}
-
-function firstFiniteNumber(candidates: unknown[]): number | undefined {
-  for (const candidate of candidates) {
-    if (typeof candidate === 'number' && Number.isFinite(candidate)) {
-      return candidate;
-    }
-  }
-  return undefined;
-}
-
-function isRetryableSseWrapperError(message: string, errorCode?: string, status?: number): boolean {
-  if (typeof status === 'number' && Number.isFinite(status)) {
-    if (status === 408 || status === 425 || status === 429 || status >= 500) {
-      return true;
-    }
-  }
-  const normalizedCode = typeof errorCode === 'string' ? errorCode.trim().toLowerCase() : '';
-  if (normalizedCode && RETRYABLE_SSE_ERROR_CODE_HINTS.some((hint) => normalizedCode.includes(hint))) {
-    return true;
-  }
-  const loweredMessage = message.toLowerCase();
-  return RETRYABLE_SSE_MESSAGE_HINTS.some((hint) => loweredMessage.includes(hint));
-}
-
-function resolveBoolFromEnv(value: string | undefined, fallback: boolean): boolean {
-  if (!value) {
-    return fallback;
-  }
-  const normalized = value.trim().toLowerCase();
-  if (['1', 'true', 'yes', 'on'].includes(normalized)) {
-    return true;
-  }
-  if (['0', 'false', 'no', 'off'].includes(normalized)) {
-    return false;
-  }
-  return fallback;
-}
-
-function isUsageLoggingEnabled(): boolean {
-  return resolveBoolFromEnv(
-    process.env.ROUTECODEX_USAGE_LOG ?? process.env.RCC_USAGE_LOG,
-    buildInfo.mode !== 'release'
-  );
-}
-
-function isVerboseErrorLoggingEnabled(): boolean {
-  return resolveBoolFromEnv(
-    process.env.ROUTECODEX_ERROR_VERBOSE
-      ?? process.env.RCC_ERROR_VERBOSE,
-    false
-  );
-}
-
-function resolveMaxProviderAttempts(): number {
-  const raw = String(
-    process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS || process.env.RCC_MAX_PROVIDER_ATTEMPTS || ''
-  )
-    .trim()
-    .toLowerCase();
-  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
-  const candidate = Number.isFinite(parsed) ? parsed : DEFAULT_MAX_PROVIDER_ATTEMPTS;
-  return Math.max(1, Math.min(20, candidate));
-}
+// Re-export for backward compatibility
+export type { SseWrapperErrorInfo };
 
 function resolveAntigravityMaxProviderAttempts(): number {
   const raw = String(
@@ -164,6 +86,44 @@ function resolveAntigravityMaxProviderAttempts(): number {
 
 function isAntigravityProviderKey(providerKey: string | undefined): boolean {
   return typeof providerKey === 'string' && providerKey.startsWith('antigravity.');
+}
+
+const RATE_LIMIT_ERROR_CODE_HINTS = [
+  '429',
+  '1302',
+  'rate_limit',
+  'rate-limit',
+  'too_many_requests',
+  'too-many-requests',
+  'too many requests'
+];
+
+const RATE_LIMIT_MESSAGE_HINTS = [
+  'rate limit',
+  'too many requests',
+  'request limit',
+  'rate limited',
+  'quota exceeded',
+  'slow down',
+  '速率限制',
+  '请求频率',
+  '请求过于频繁',
+  '频率限制'
+];
+
+function coerceErrorCode(value: unknown): string {
+  return typeof value === 'string' ? value.trim().toLowerCase() : '';
+}
+
+function isRateLimitLikeError(message: string, ...codes: Array<string | undefined>): boolean {
+  const loweredMessage = String(message || '').toLowerCase();
+  const normalizedCodes = codes
+    .map((code) => coerceErrorCode(code))
+    .filter((code) => code.length > 0);
+  if (normalizedCodes.some((code) => RATE_LIMIT_ERROR_CODE_HINTS.some((hint) => code.includes(hint)))) {
+    return true;
+  }
+  return RATE_LIMIT_MESSAGE_HINTS.some((hint) => loweredMessage.includes(hint));
 }
 
 function isGoogleAccountVerificationRequiredError(err: unknown): boolean {
@@ -231,7 +191,35 @@ function extractStatusCodeFromError(err: unknown): number | undefined {
   if (typeof direct === 'number') return direct;
   const nested = (err as any).status;
   if (typeof nested === 'number') return nested;
+  const details = (err as any).details;
+  if (details && typeof details === 'object') {
+    const detailStatusCode = (details as any).statusCode;
+    if (typeof detailStatusCode === 'number') return detailStatusCode;
+    const detailStatus = (details as any).status;
+    if (typeof detailStatus === 'number') return detailStatus;
+  }
+  const response = (err as any).response;
+  if (response && typeof response === 'object') {
+    const responseStatus = (response as any).status;
+    if (typeof responseStatus === 'number') return responseStatus;
+  }
   return undefined;
+}
+
+function isSseDecodeRateLimitError(error: unknown, status: number | undefined): boolean {
+  if (status !== 429 || !error || typeof error !== 'object') {
+    return false;
+  }
+  const record = error as Record<string, unknown>;
+  const message = typeof record.message === 'string' ? record.message : '';
+  const code = typeof record.code === 'string' ? record.code : '';
+  const upstreamCode = typeof record.upstreamCode === 'string' ? record.upstreamCode : '';
+  const name = typeof record.name === 'string' ? record.name.toLowerCase() : '';
+  const sseLike =
+    code === 'SSE_DECODE_ERROR' ||
+    name === 'providerprotocolerror' ||
+    message.toLowerCase().includes('sse');
+  return sseLike && isRateLimitLikeError(message, code, upstreamCode);
 }
 
 function extractRetryErrorSignature(err: unknown): string {
@@ -451,12 +439,11 @@ export class HubRequestExecutor implements RequestExecutor {
             requestId: input.requestId
           });
         }
-        // Ensure response-side conversion has access to route-selected target metadata (compat profiles, etc.).
-        // This is an execution metadata carrier only; tool/routing semantics still live in llmswitch-core.
-        if (!mergedMetadata.target) {
-          mergedMetadata.target = target;
-        }
-        if (!mergedMetadata.compatibilityProfile && typeof target.compatibilityProfile === 'string' && target.compatibilityProfile.trim()) {
+        // Ensure response-side conversion always uses the route-selected target metadata.
+        // ServerTool followups may carry stale metadata from the previous hop; response compat
+        // must follow the current target/provider, not the inherited request profile.
+        mergedMetadata.target = target;
+        if (typeof target.compatibilityProfile === 'string' && target.compatibilityProfile.trim()) {
           mergedMetadata.compatibilityProfile = target.compatibilityProfile.trim();
         }
 
@@ -727,9 +714,10 @@ export class HubRequestExecutor implements RequestExecutor {
           });
           return converted;
         } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error ?? 'Unknown error');
           this.logStage('provider.send.error', input.requestId, {
             providerKey: target.providerKey,
-            message: error instanceof Error ? error.message : String(error ?? 'Unknown error'),
+            message: errorMessage,
             providerType: handle.providerType,
             providerFamily: handle.providerFamily,
             model: providerModel,
@@ -748,6 +736,39 @@ export class HubRequestExecutor implements RequestExecutor {
             antigravityRetrySignal = null;
           }
           const status = extractStatusCodeFromError(error);
+          if (isSseDecodeRateLimitError(error, status)) {
+            try {
+              const { emitProviderError } = await import('../../../providers/core/utils/provider-error-reporter.js');
+              emitProviderError({
+                error,
+                stage: 'provider.sse_decode',
+                runtime: {
+                  requestId: input.requestId,
+                  providerKey: target.providerKey,
+                  providerId: handle.providerId,
+                  providerType: handle.providerType,
+                  providerFamily: handle.providerFamily,
+                  providerProtocol,
+                  routeName: pipelineResult.routingDecision?.routeName,
+                  pipelineId: target.providerKey,
+                  target,
+                  runtimeKey
+                },
+                dependencies: this.deps.getModuleDependencies(),
+                statusCode: 429,
+                recoverable: true,
+                affectsHealth: true,
+                details: {
+                  source: 'sse_decode_rate_limit',
+                  errorCode: typeof (error as any)?.code === 'string' ? String((error as any).code) : undefined,
+                  upstreamCode: typeof (error as any)?.upstreamCode === 'string' ? String((error as any).upstreamCode) : undefined,
+                  message: errorMessage
+                }
+              });
+            } catch {
+              // best-effort; never block retry/failover path
+            }
+          }
           const isVerify = status === 403 && isGoogleAccountVerificationRequiredError(error);
           const isReauth = status === 403 && isAntigravityReauthRequired403(error);
           const shouldRetry =
@@ -869,7 +890,12 @@ export class HubRequestExecutor implements RequestExecutor {
           error.upstreamCode = wrapperError.errorCode;
         }
         error.retryable = wrapperError.retryable;
-        if (wrapperError.retryable) {
+        if (isRateLimitLikeError(wrapperError.message, wrapperError.errorCode)) {
+          error.code = 'HTTP_429';
+          error.status = 429;
+          error.statusCode = 429;
+          error.retryable = true;
+        } else if (wrapperError.retryable) {
           error.status = 503;
           error.statusCode = 503;
         }
@@ -928,14 +954,14 @@ export class HubRequestExecutor implements RequestExecutor {
       applyClientConnectionStateToContext(metadataBag, baseContext);
       const adapterContext = baseContext;
       const compatProfile =
-        typeof (metadataBag as Record<string, unknown> | undefined)?.compatibilityProfile === 'string'
-          ? String((metadataBag as Record<string, unknown>).compatibilityProfile)
-          : metadataBag &&
-              typeof metadataBag === 'object' &&
-              metadataBag.target &&
-              typeof metadataBag.target === 'object' &&
-              typeof (metadataBag.target as Record<string, unknown>).compatibilityProfile === 'string'
-            ? ((metadataBag.target as Record<string, unknown>).compatibilityProfile as string)
+        metadataBag &&
+        typeof metadataBag === 'object' &&
+        metadataBag.target &&
+        typeof metadataBag.target === 'object' &&
+        typeof (metadataBag.target as Record<string, unknown>).compatibilityProfile === 'string'
+          ? ((metadataBag.target as Record<string, unknown>).compatibilityProfile as string)
+          : typeof (metadataBag as Record<string, unknown> | undefined)?.compatibilityProfile === 'string'
+            ? String((metadataBag as Record<string, unknown>).compatibilityProfile)
             : undefined;
       if (compatProfile && compatProfile.trim()) {
         adapterContext.compatibilityProfile = compatProfile.trim();
@@ -1098,6 +1124,7 @@ export class HubRequestExecutor implements RequestExecutor {
       // 否则回退到原始 payload 会让客户端挂起，无法感知失败。
       const errRecord = err as Record<string, unknown>;
       const errCode = typeof errRecord.code === 'string' ? errRecord.code : undefined;
+      const upstreamCode = typeof errRecord.upstreamCode === 'string' ? errRecord.upstreamCode : undefined;
       const errName = typeof errRecord.name === 'string' ? errRecord.name : undefined;
       const isSseDecodeError =
         errCode === 'SSE_DECODE_ERROR' ||
@@ -1108,6 +1135,14 @@ export class HubRequestExecutor implements RequestExecutor {
         (typeof errCode === 'string' && errCode.startsWith('SERVERTOOL_'));
 
       if (isSseDecodeError || isServerToolFollowupError) {
+        if (isSseDecodeError && isRateLimitLikeError(message, errCode, upstreamCode)) {
+          (errRecord as any).status = 429;
+          (errRecord as any).statusCode = 429;
+          (errRecord as any).retryable = true;
+          if (typeof errRecord.code !== 'string' || !String(errRecord.code).trim()) {
+            (errRecord as any).code = 'HTTP_429';
+          }
+        }
         if (isVerboseErrorLoggingEnabled()) {
           console.error(
             '[RequestExecutor] Fatal conversion error, bubbling as HTTP error',
@@ -1314,10 +1349,7 @@ export class HubRequestExecutor implements RequestExecutor {
       return;
     }
     const providerLabel = this.buildProviderLabel(info.providerKey, info.model) ?? '-';
-    const prompt = info.usage?.prompt_tokens;
-    const completion = info.usage?.completion_tokens;
-    const total = info.usage?.total_tokens ?? (prompt !== undefined && completion !== undefined ? prompt + completion : undefined);
-    const usageText = `prompt=${prompt ?? 'n/a'} completion=${completion ?? 'n/a'} total=${total ?? 'n/a'}`;
+    const usageText = buildUsageLogText(info.usage);
     const latency = info.latencyMs.toFixed(1);
     console.log(`[usage] request ${requestId} provider=${providerLabel} latency=${latency}ms (${usageText})`);
   }

@@ -211,8 +211,15 @@ export function mergeUsageMetrics(base?: UsageMetrics, delta?: UsageMetrics): Us
  * Build usage log text for logging
  */
 export function buildUsageLogText(usage?: UsageMetrics): string {
-  const prompt = usage?.prompt_tokens;
-  const completion = usage?.completion_tokens;
-  const total = usage?.total_tokens ?? (prompt !== undefined && completion !== undefined ? prompt + completion : undefined);
-  return `prompt=${prompt ?? 'n/a'} completion=${completion ?? 'n/a'} total=${total ?? 'n/a'}`;
+  const requestTokens = usage?.prompt_tokens;
+  let responseTokens = usage?.completion_tokens;
+  const total =
+    usage?.total_tokens ??
+    (requestTokens !== undefined && responseTokens !== undefined
+      ? requestTokens + responseTokens
+      : undefined);
+  if (responseTokens === undefined && total !== undefined && requestTokens !== undefined) {
+    responseTokens = Math.max(0, total - requestTokens);
+  }
+  return `request=${requestTokens ?? 'n/a'} response=${responseTokens ?? 'n/a'} total=${total ?? 'n/a'}`;
 }
