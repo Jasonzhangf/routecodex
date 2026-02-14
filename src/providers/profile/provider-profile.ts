@@ -25,9 +25,13 @@ export interface ProviderTransportConfig {
 export interface ApiKeyAuthConfig {
   kind: 'apikey';
   /**
-   * 直接填入的 API Key（可包含环境变量占位符）
+   * 直接填入的 API Key（可包含环境变量占位符，兼容单 key 模式）
    */
   apiKey?: string;
+  /**
+   * 多 API Key 条目（用于轮询）
+   */
+  entries?: ApiKeyEntry[];
   /**
    * 指向外部存储（例如 secretRef/env）的引用
    */
@@ -42,6 +46,18 @@ export interface ApiKeyAuthConfig {
   accountFile?: string;
   accountAlias?: string;
   tokenFile?: string;
+}
+
+/**
+ * 单个 API Key 条目
+ */
+export interface ApiKeyEntry {
+  alias?: string;
+  apiKey?: string;
+  secretRef?: string;
+  env?: string;
+  headerName?: string;
+  prefix?: string;
 }
 
 export interface OAuthAuthConfig {

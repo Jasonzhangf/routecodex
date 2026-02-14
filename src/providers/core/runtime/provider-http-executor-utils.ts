@@ -7,6 +7,8 @@ import type { ProviderErrorAugmented } from './provider-error-types.js';
 import { extractStatusCodeFromError } from './provider-error-classifier.js';
 import { OAuthRecoveryHandler } from './transport/oauth-recovery-handler.js';
 import type { HttpClient } from '../utils/http-client.js';
+import { writeProviderSnapshot } from '../utils/snapshot-writer.js';
+import { ProviderPayloadUtils } from './transport/provider-payload-utils.js';
 
 export function getProviderHttpRetryLimit(): number {
   // Provider 层禁止重复尝试；失败后由虚拟路由负责 failover。
@@ -65,4 +67,68 @@ export async function tryRecoverOAuthAndReplay(options: {
   } catch {
     return undefined;
   }
+}
+
+export async function normalizeProviderHttpError(options: {
+  error: unknown;
+  processedRequest: UnknownObject;
+  requestInfo: PreparedHttpRequest;
+  context: ProviderContext;
+}): Promise<ProviderErrorAugmented> {
+  const normalized: ProviderErrorAugmented = options.error as ProviderErrorAugmented;
+  try {
+    const statusCode = extractStatusCodeFromError(normalized);
+    if (statusCode && !Number.isNaN(statusCode)) {
+      normalized.statusCode = statusCode;
+      if (!normalized.status) {
+        normalized.status = statusCode;
+      }
+      if (!normalized.code) {
+        normalized.code = `HTTP_${statusCode}`;
+      }
+    }
+    if (!normalized.response) {
+      normalized.response = {};
+    }
+    if (!normalized.response.data) {
+      normalized.response.data = {};
+    }
+    if (!normalized.response.data.error) {
+      normalized.response.data.error = {};
+    }
+    if (normalized.code && !normalized.response.data.error.code) {
+      normalized.response.data.error.code = normalized.code;
+    }
+    if (normalized.message && !normalized.response.data.error.message) {
+      normalized.response.data.error.message = normalized.message;
+    }
+  } catch {
+    // keep original error shape when normalization fails
+  }
+
+  try {
+    await writeProviderSnapshot({
+      phase: 'provider-error',
+      requestId: options.context.requestId,
+      data: {
+        status: normalized?.statusCode ?? normalized?.status ?? null,
+        code: normalized?.code ?? null,
+        error: typeof normalized?.message === 'string' ? normalized.message : String(options.error || '')
+      },
+      headers: options.requestInfo.headers,
+      url: options.requestInfo.targetUrl,
+      entryEndpoint:
+        options.requestInfo.entryEndpoint
+        ?? ProviderPayloadUtils.extractEntryEndpointFromPayload(options.processedRequest),
+      clientRequestId:
+        options.requestInfo.clientRequestId
+        ?? ProviderPayloadUtils.getClientRequestIdFromContext(options.context),
+      providerKey: options.context.providerKey,
+      providerId: options.context.providerId
+    });
+  } catch {
+    // snapshot is best-effort only
+  }
+
+  return normalized;
 }

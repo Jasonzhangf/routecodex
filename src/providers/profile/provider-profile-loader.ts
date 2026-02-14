@@ -6,6 +6,8 @@ import type {
   ProviderProtocol
 } from './provider-profile.js';
 
+import type { ApiKeyEntry, ApiKeyAuthConfig } from './provider-profile.js';
+
 type UnknownRecord = Record<string, unknown>;
 type DeepSeekMetadata = NonNullable<NonNullable<ProviderProfile['metadata']>['deepseek']>;
 
@@ -150,11 +152,12 @@ function extractAuth(raw: UnknownRecord): ProviderAuthConfig {
       scopes
     };
   }
-  if (normalizedType === 'apikey') {
-    return {
-      kind: 'apikey',
-      apiKey: apiKeyValue,
-      secretRef: secretRefValue,
+ if (normalizedType === 'apikey') {
+   return {
+     kind: 'apikey',
+     entries: extractApiKeyEntriesArray(authNode),
+     apiKey: apiKeyValue,
+     secretRef: secretRefValue,
       env: envRefValue,
       rawType: typeHint,
       mobile: pickString(authNode?.mobile ?? authNode?.account ?? authNode?.username ?? raw.mobile ?? raw.account),
@@ -164,7 +167,43 @@ function extractAuth(raw: UnknownRecord): ProviderAuthConfig {
       tokenFile: pickString(authNode?.tokenFile ?? authNode?.token_file ?? raw.tokenFile ?? raw.token_file)
     };
   }
-  return { kind: 'none' };
+ return { kind: 'none' };
+}
+
+/**
+ * 从 authNode 提取 API Key entries 数组
+ */
+function extractApiKeyEntriesArray(authNode: UnknownRecord | undefined): ApiKeyEntry[] | undefined {
+  if (!authNode || !Array.isArray(authNode.entries)) {
+    return undefined;
+  }
+  const entries = authNode.entries
+    .filter((e: unknown) => isRecord(e))
+    .map((e: unknown) => ({
+      alias: pickString((e as UnknownRecord).alias),
+      apiKey: pickString((e as UnknownRecord).apiKey),
+      secretRef: pickString((e as UnknownRecord).secretRef),
+      env: pickString((e as UnknownRecord).env ?? (e as UnknownRecord).envRef),
+    }));
+  return entries.length > 0 ? entries : undefined;
+}
+
+/**
+ * 从 ApiKeyAuthConfig 提取所有 API Key 条目（统一单 key 和多 key 模式）
+ */
+export function extractApiKeyEntries(auth: ApiKeyAuthConfig): ApiKeyEntry[] {
+  if (auth.entries && auth.entries.length > 0) {
+    return auth.entries;
+  }
+  const singleEntry: ApiKeyEntry = {
+    apiKey: auth.apiKey,
+    secretRef: auth.secretRef,
+    env: auth.env
+  };
+  if (singleEntry.apiKey || singleEntry.secretRef || singleEntry.env) {
+    return [singleEntry];
+  }
+  return [];
 }
 
 function normalizeAuthType(

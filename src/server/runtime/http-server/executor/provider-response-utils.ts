@@ -95,3 +95,16 @@ export function buildProviderLabel(providerKey?: string, model?: string): string
   }
   return key || modelId;
 }
+
+export function resolveRequestSemantics(
+  processed?: Record<string, unknown>,
+  standardized?: Record<string, unknown>
+): Record<string, unknown> | undefined {
+  if (processed && typeof processed.semantics === 'object' && processed.semantics) {
+    return processed.semantics as Record<string, unknown>;
+  }
+  if (standardized && typeof standardized.semantics === 'object' && standardized.semantics) {
+    return standardized.semantics as Record<string, unknown>;
+  }
+  return undefined;
+}

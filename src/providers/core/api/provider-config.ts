@@ -62,6 +62,14 @@ export interface ApiKeyAuth {
   password?: string;
   accountFile?: string;
   accountAlias?: string;
+  entries?: Array<{
+    alias?: string;
+    apiKey?: string;
+    env?: string;
+    secretRef?: string;
+    headerName?: string;
+    prefix?: string;
+  }>;
 }
 
 /**

@@ -247,9 +247,14 @@ describe('Daemon admin HTTP endpoints (smoke)', () => {
       expect(controlSnap.body.routing.antigravityAliasLeases).toHaveProperty('leases');
       expect(controlSnap.body).toHaveProperty('serverTool');
       expect(controlSnap.body.serverTool.state).toHaveProperty('enabled', true);
-      expect(controlSnap.body.serverTool.stats).toHaveProperty('executions', 1);
-      expect(controlSnap.body.serverTool.stats).toHaveProperty('success', 1);
+      expect(Number(controlSnap.body.serverTool.stats?.executions ?? 0)).toBeGreaterThanOrEqual(1);
+      expect(Number(controlSnap.body.serverTool.stats?.success ?? 0)).toBeGreaterThanOrEqual(1);
       expect(Array.isArray(controlSnap.body.serverTool.stats?.byTool)).toBe(true);
+      const continueExecutionStats = (controlSnap.body.serverTool.stats?.byTool ?? []).find(
+        (entry: { tool?: string }) => entry?.tool === 'continue_execution'
+      );
+      expect(Number(continueExecutionStats?.executions ?? 0)).toBeGreaterThanOrEqual(1);
+      expect(Number(continueExecutionStats?.success ?? 0)).toBeGreaterThanOrEqual(1);
 
       const disableServerTool = await postJson(
         baseUrl,

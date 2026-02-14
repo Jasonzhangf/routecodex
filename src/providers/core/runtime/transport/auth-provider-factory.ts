@@ -12,6 +12,7 @@ import { ApiKeyAuthProvider } from '../../../auth/apikey-auth.js';
 import { OAuthAuthProvider } from '../../../auth/oauth-auth.js';
 import { TokenFileAuthProvider } from '../../../auth/tokenfile-auth.js';
 import { IflowCookieAuthProvider } from '../../../auth/iflow-cookie-auth.js';
+import { ApiKeyRotator } from '../../../auth/apikey-auth.js';
 import { getProviderFamilyProfile } from '../../../profile/profile-registry.js';
 import type { IAuthProvider } from '../../../auth/auth-interface.js';
 import type { ApiKeyAuth, OAuthAuth } from '../../api/provider-config.js';
@@ -21,6 +22,15 @@ type OAuthAuthExtended = OAuthAuth & {
   rawType?: string;
   oauthProviderId?: string;
   tokenFile?: string;
+};
+
+type ApiKeyAuthWithEntries = ApiKeyAuth & {
+  entries?: Array<{
+    alias?: string;
+    apiKey?: string;
+    env?: string;
+    secretRef?: string;
+  }>;
 };
 
 export interface AuthProviderFactoryContext {
@@ -88,6 +98,13 @@ export class AuthProviderFactory {
             typeof (auth as unknown as { cookieFile?: unknown }).cookieFile === 'string')))
     ) {
       return new IflowCookieAuthProvider(auth as unknown as Record<string, unknown>);
+    }
+
+    // 检查是否有多 key entries，有则使用轮询模式
+    const authWithEntries = auth as ApiKeyAuthWithEntries;
+    if (authWithEntries.entries && authWithEntries.entries.length > 0) {
+      const rotator = new ApiKeyRotator(authWithEntries.entries);
+      return new ApiKeyAuthProvider(auth as ApiKeyAuth, rotator);
     }
 
     return new ApiKeyAuthProvider(auth as ApiKeyAuth);

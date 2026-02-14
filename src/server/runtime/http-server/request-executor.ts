@@ -53,7 +53,8 @@ import {
   cloneRequestPayload,
   extractProviderModel,
   extractResponseStatus,
-  normalizeProviderResponse
+  normalizeProviderResponse,
+  resolveRequestSemantics
 } from './executor/provider-response-utils.js';
 import {
   isPoolExhaustedPipelineError,
@@ -63,7 +64,6 @@ import { resolveProviderRuntimeOrThrow } from './executor/provider-runtime-resol
 import { resolveProviderRequestContext } from './executor/provider-request-context.js';
 import { logUsageSummary } from './executor/usage-logger.js';
 import { isServerToolEnabled } from './servertool-admin-state.js';
-
 export type RequestExecutorDeps = {
   runtimeManager: {
     resolveRuntimeKey(providerKey?: string, fallback?: string): string | undefined;
@@ -142,8 +142,7 @@ export class HubRequestExecutor implements RequestExecutor {
           stream: metadataForAttempt.stream,
           attempt
         });
-
-    let pipelineResult: Awaited<ReturnType<typeof runHubPipeline>>;
+        let pipelineResult: Awaited<ReturnType<typeof runHubPipeline>>;
         try {
           pipelineResult = await runHubPipeline(hubPipeline, input, metadataForAttempt);
         } catch (pipelineError) {
@@ -276,14 +275,10 @@ export class HubRequestExecutor implements RequestExecutor {
           });
           const wantsStreamBase = Boolean(input.metadata?.inboundStream ?? input.metadata?.stream);
           const normalized = normalizeProviderResponse(providerResponse);
-          const pipelineProcessed = pipelineResult.processedRequest;
-          const pipelineStandardized = pipelineResult.standardizedRequest;
-          const requestSemantics =
-            pipelineProcessed && typeof pipelineProcessed === 'object' && typeof (pipelineProcessed as any).semantics === 'object'
-              ? ((pipelineProcessed as any).semantics as Record<string, unknown>)
-              : pipelineStandardized && typeof pipelineStandardized === 'object' && typeof (pipelineStandardized as any).semantics === 'object'
-                ? ((pipelineStandardized as any).semantics as Record<string, unknown>)
-                : undefined;
+          const requestSemantics = resolveRequestSemantics(
+            pipelineResult.processedRequest as Record<string, unknown> | undefined,
+            pipelineResult.standardizedRequest as Record<string, unknown> | undefined
+          );
           const converted = await this.convertProviderResponseIfNeeded({
             entryEndpoint: input.entryEndpoint,
             providerProtocol,
@@ -486,7 +481,6 @@ export class HubRequestExecutor implements RequestExecutor {
       }
       throw error;
     }
-
   }
   private logStage(stage: string, requestId: string, details?: Record<string, unknown>): void {
     this.deps.logStage(stage, requestId, details);

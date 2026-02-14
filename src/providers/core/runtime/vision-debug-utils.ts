@@ -1,5 +1,6 @@
 import type { UnknownObject } from '../../../types/common-types.js';
 import { extractProviderRuntimeMetadata } from './provider-runtime-metadata.js';
+import { writeProviderSnapshot } from '../utils/snapshot-writer.js';
 
 const DEBUG_ENV_KEY = 'ROUTECODEX_VISION_DEBUG';
 
@@ -128,4 +129,39 @@ export function buildVisionSnapshotPayload(
     snapshot.extras = safeClone(extras) ?? extras;
   }
   return snapshot;
+}
+
+export function logVisionDebugSummary(stage: string, payload: UnknownObject): void {
+  const debug = shouldCaptureVisionDebug(payload);
+  if (!debug.enabled) {
+    return;
+  }
+  const summary = summarizeVisionMessages(payload);
+  const label = debug.routeName ?? 'vision';
+  console.debug(`[vision-debug][${stage}] route=${label} request=${debug.requestId ?? '-'} ${summary}`);
+}
+
+export async function captureVisionDebugPayloadSnapshot(
+  stage: 'provider-preprocess-debug' | 'provider-body-debug',
+  payload: UnknownObject
+): Promise<void> {
+  const debug = shouldCaptureVisionDebug(payload);
+  if (!debug.enabled || !debug.requestId) {
+    return;
+  }
+  try {
+    const metadataNode = (payload as { metadata?: unknown }).metadata;
+    const entryEndpoint =
+      metadataNode && typeof metadataNode === 'object' && typeof (metadataNode as Record<string, unknown>).entryEndpoint === 'string'
+        ? ((metadataNode as Record<string, unknown>).entryEndpoint as string)
+        : undefined;
+    await writeProviderSnapshot({
+      phase: stage,
+      requestId: debug.requestId,
+      data: buildVisionSnapshotPayload(payload),
+      entryEndpoint
+    });
+  } catch {
+    // snapshot is best-effort only
+  }
 }

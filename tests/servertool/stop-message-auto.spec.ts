@@ -95,7 +95,7 @@ describe('stop_message_auto servertool', () => {
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),
-      stopMessageText: '继续',
+      stopMessageText: '立即执行待处理任务',
       stopMessageMaxRepeats: 2,
       stopMessageUsed: 0
     };
@@ -150,7 +150,7 @@ describe('stop_message_auto servertool', () => {
     expect(followup.entryEndpoint).toBe('/v1/chat/completions');
     expect(Array.isArray(followup.injection?.ops)).toBe(true);
     const ops = followup.injection.ops as any[];
-    expect(ops.some((op) => op?.op === 'append_user_text' && op?.text === '继续')).toBe(true);
+    expect(ops.some((op) => op?.op === 'append_user_text' && op?.text === '立即执行待处理任务')).toBe(true);
 
     const persisted = await readJsonFileUntil<{ state?: { stopMessageUsed?: number; stopMessageLastUsedAt?: number } }>(
       path.join(SESSION_DIR, `session-${sessionId}.json`),
@@ -171,7 +171,7 @@ describe('stop_message_auto servertool', () => {
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),
-      stopMessageText: '继续',
+      stopMessageText: '立即执行待处理任务',
       stopMessageMaxRepeats: 2,
       stopMessageUsed: 0
     };
@@ -234,7 +234,7 @@ describe('stop_message_auto servertool', () => {
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),
-      stopMessageText: '继续',
+      stopMessageText: '立即执行待处理任务',
       stopMessageMaxRepeats: 2,
       stopMessageUsed: 0
     };
@@ -302,7 +302,7 @@ describe('stop_message_auto servertool', () => {
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),
-      stopMessageText: '继续',
+      stopMessageText: '立即执行待处理任务',
       stopMessageMaxRepeats: 2,
       stopMessageUsed: 0
     };
@@ -380,7 +380,7 @@ describe('stop_message_auto servertool', () => {
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),
-      stopMessageText: '继续',
+      stopMessageText: '立即执行待处理任务',
       stopMessageMaxRepeats: 30,
       stopMessageUsed: 0
     };
@@ -447,7 +447,7 @@ describe('stop_message_auto servertool', () => {
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),
-      stopMessageText: '继续',
+      stopMessageText: '立即执行待处理任务',
       stopMessageMaxRepeats: 30,
       stopMessageUsed: 0
     };
@@ -708,7 +708,7 @@ describe('stop_message_auto servertool', () => {
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),
-      stopMessageText: '继续',
+      stopMessageText: '立即执行待处理任务',
       stopMessageMaxRepeats: 2,
       stopMessageUsed: 0
     };
@@ -775,7 +775,7 @@ describe('stop_message_auto servertool', () => {
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),
-      stopMessageText: '继续',
+      stopMessageText: '立即执行待处理任务',
       stopMessageMaxRepeats: 2,
       stopMessageUsed: 0
     };
@@ -843,7 +843,7 @@ describe('stop_message_auto servertool', () => {
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),
-      stopMessageText: '继续',
+      stopMessageText: '立即执行待处理任务',
       stopMessageMaxRepeats: 2,
       stopMessageUsed: 0
     };
@@ -925,7 +925,7 @@ describe('stop_message_auto servertool', () => {
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),
-      stopMessageText: '继续',
+      stopMessageText: '立即执行待处理任务',
       stopMessageMaxRepeats: 1,
       stopMessageUsed: 0
     };
@@ -1002,7 +1002,7 @@ describe('stop_message_auto servertool', () => {
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),
-      stopMessageText: '继续',
+      stopMessageText: '立即执行待处理任务',
       stopMessageMaxRepeats: 1,
       stopMessageUsed: 0
     };
@@ -1088,7 +1088,7 @@ describe('stop_message_auto servertool', () => {
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),
-      stopMessageText: '继续',
+      stopMessageText: '立即执行待处理任务',
       stopMessageMaxRepeats: 1,
       stopMessageUsed: 0
     };
@@ -1156,6 +1156,83 @@ describe('stop_message_auto servertool', () => {
     expect(persisted?.state?.stopMessageMaxRepeats).toBeUndefined();
   });
 
+  test('throws explicit empty-followup error when both followup and original response are empty', async () => {
+    const sessionId = 'stopmessage-spec-session-empty-error-empty-original';
+    const state: RoutingInstructionState = {
+      forcedTarget: undefined,
+      stickyTarget: undefined,
+      allowedProviders: new Set(),
+      disabledProviders: new Set(),
+      disabledKeys: new Map(),
+      disabledModels: new Map(),
+      stopMessageText: '立即执行待处理任务',
+      stopMessageMaxRepeats: 1,
+      stopMessageUsed: 0
+    };
+    writeRoutingStateForSession(sessionId, state);
+
+    const capturedChatRequest: JsonObject = {
+      model: 'gpt-test',
+      messages: [{ role: 'user', content: 'hi' }]
+    };
+
+    const chatResponse: JsonObject = {
+      id: 'chatcmpl-stop-empty-original',
+      object: 'chat.completion',
+      model: 'gpt-test',
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: 'assistant',
+            content: ''
+          },
+          finish_reason: 'stop'
+        }
+      ]
+    };
+
+    const adapterContext: AdapterContext = {
+      requestId: 'req-stopmessage-empty-original',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      sessionId,
+      capturedChatRequest
+    } as any;
+
+    let callCount = 0;
+    await expect(
+      runServerToolOrchestration({
+        chat: chatResponse,
+        adapterContext,
+        requestId: 'req-stopmessage-empty-original',
+        entryEndpoint: '/v1/chat/completions',
+        providerProtocol: 'openai-chat',
+        reenterPipeline: async () => {
+          callCount += 1;
+          return {
+            body: {
+              id: 'chatcmpl-followup-empty-empty-original',
+              object: 'chat.completion',
+              model: 'gpt-test',
+              choices: [{ index: 0, message: { role: 'assistant', content: '' }, finish_reason: 'stop' }]
+            } as JsonObject
+          };
+        }
+      })
+    ).rejects.toMatchObject({
+      code: 'SERVERTOOL_EMPTY_FOLLOWUP',
+      status: 502
+    });
+    expect(callCount).toBe(2);
+
+    const persisted = await readJsonFileWithRetry<{ state?: { stopMessageText?: unknown; stopMessageMaxRepeats?: unknown } }>(
+      path.join(SESSION_DIR, `session-${sessionId}.json`)
+    );
+    expect(persisted?.state?.stopMessageText).toBeUndefined();
+    expect(persisted?.state?.stopMessageMaxRepeats).toBeUndefined();
+  });
+
   test('injects loop-break warning after 5 identical stopMessage request/response rounds', async () => {
     const sessionId = 'stopmessage-spec-session-loop-warn';
     const state: RoutingInstructionState = {
@@ -1165,7 +1242,7 @@ describe('stop_message_auto servertool', () => {
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),
-      stopMessageText: '继续',
+      stopMessageText: '立即执行待处理任务',
       stopMessageMaxRepeats: 30,
       stopMessageUsed: 0
     };
@@ -1247,7 +1324,7 @@ describe('stop_message_auto servertool', () => {
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),
-      stopMessageText: '继续',
+      stopMessageText: '立即执行待处理任务',
       stopMessageMaxRepeats: 30,
       stopMessageUsed: 0
     };
@@ -1339,7 +1416,7 @@ describe('stop_message_auto servertool', () => {
       disabledProviders: new Set(),
       disabledKeys: new Map(),
       disabledModels: new Map(),
-      stopMessageText: '继续',
+      stopMessageText: '立即执行待处理任务',
       stopMessageMaxRepeats: 30,
       stopMessageUsed: 0
     };
