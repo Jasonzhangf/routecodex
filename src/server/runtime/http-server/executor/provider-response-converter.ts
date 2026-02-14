@@ -16,6 +16,64 @@ import { isVerboseErrorLoggingEnabled } from './env-config.js';
 import { extractSseWrapperError } from './sse-error-handler.js';
 import { isRateLimitLikeError } from './request-retry-helpers.js';
 
+const FOLLOWUP_SESSION_HEADER_KEYS = new Set([
+  'sessionid',
+  'conversationid',
+  'xsessionid',
+  'xconversationid',
+  'anthropicsessionid',
+  'anthropicconversationid',
+  'xroutecodexsessionid',
+  'xroutecodexconversationid'
+]);
+
+function canonicalizeHeaderName(headerName: string): string {
+  return headerName.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function extractFollowupSessionHeaders(
+  headers: unknown
+): Record<string, string> | undefined {
+  if (!headers || typeof headers !== 'object' || Array.isArray(headers)) {
+    return undefined;
+  }
+  const source = headers as Record<string, unknown>;
+  const preserved: Record<string, string> = {};
+  for (const [headerName, headerValue] of Object.entries(source)) {
+    if (!FOLLOWUP_SESSION_HEADER_KEYS.has(canonicalizeHeaderName(headerName))) {
+      continue;
+    }
+    if (typeof headerValue !== 'string') {
+      continue;
+    }
+    const normalizedValue = headerValue.trim();
+    if (!normalizedValue) {
+      continue;
+    }
+    preserved[headerName] = normalizedValue;
+  }
+  return Object.keys(preserved).length ? preserved : undefined;
+}
+
+function extractPreservedSessionToken(
+  headers: Record<string, string> | undefined,
+  field: 'session' | 'conversation'
+): string | undefined {
+  if (!headers) {
+    return undefined;
+  }
+  for (const [headerName, headerValue] of Object.entries(headers)) {
+    const normalizedName = canonicalizeHeaderName(headerName);
+    if (field === 'session' && normalizedName.endsWith('sessionid')) {
+      return headerValue;
+    }
+    if (field === 'conversation' && normalizedName.endsWith('conversationid')) {
+      return headerValue;
+    }
+  }
+  return undefined;
+}
+
 export type ConvertProviderResponseOptions = {
   entryEndpoint?: string;
   providerProtocol: string;
@@ -212,7 +270,24 @@ export async function convertProviderResponseIfNeeded(
       }
 
       if (asRecord((nestedMetadata as any).__rt)?.serverToolFollowup === true) {
-        delete nestedMetadata.clientHeaders;
+        const preservedClientHeaders = extractFollowupSessionHeaders(nestedMetadata.clientHeaders);
+        if (preservedClientHeaders) {
+          nestedMetadata.clientHeaders = preservedClientHeaders;
+          if (typeof nestedMetadata.sessionId !== 'string' || !nestedMetadata.sessionId.trim()) {
+            const sessionId = extractPreservedSessionToken(preservedClientHeaders, 'session');
+            if (sessionId) {
+              nestedMetadata.sessionId = sessionId;
+            }
+          }
+          if (typeof nestedMetadata.conversationId !== 'string' || !nestedMetadata.conversationId.trim()) {
+            const conversationId = extractPreservedSessionToken(preservedClientHeaders, 'conversation');
+            if (conversationId) {
+              nestedMetadata.conversationId = conversationId;
+            }
+          }
+        } else {
+          delete nestedMetadata.clientHeaders;
+        }
         delete nestedMetadata.clientRequestId;
       }
 
