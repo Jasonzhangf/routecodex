@@ -218,6 +218,7 @@ describe('servertool:clock', () => {
     const stateBefore = readClockStateFile(sessionId);
     expect(Array.isArray(stateBefore.tasks)).toBe(true);
     expect(stateBefore.tasks).toHaveLength(1);
+    expect(stateBefore.tasks[0].setBy).toBe('agent');
     expect(stateBefore.tasks[0].deliveredAtMs).toBeUndefined();
 
     // Next request: should inject due reminders + attach reservation.
@@ -237,6 +238,8 @@ describe('servertool:clock', () => {
     const dueMsg = messages.findLast((m: any) => m?.role === 'user' && typeof m?.content === 'string' && m.content.includes('[Clock Reminder]'));
     expect(dueMsg).toBeDefined();
     expect(typeof dueMsg?.content === 'string' ? dueMsg.content : '').toContain('[scheduled task:"do the thing"');
+    expect(typeof dueMsg?.content === 'string' ? dueMsg.content : '').toContain('setBy=agent');
+    expect(typeof dueMsg?.content === 'string' ? dueMsg.content : '').toContain('setAt=');
     const last = messages[messages.length - 1];
     expect(last?.role).toBe('user');
     expect(typeof last?.content === 'string' ? last.content : '').toContain('[Time/Date]:');
@@ -633,6 +636,8 @@ describe('servertool:clock', () => {
     const schedulePayload = JSON.parse(scheduleOutputs[scheduleOutputs.length - 1].content);
     expect(schedulePayload.ok).toBe(true);
     expect(schedulePayload.action).toBe('schedule');
+    expect(schedulePayload.scheduled?.[0]?.setBy).toBe('agent');
+    expect(typeof schedulePayload.scheduled?.[0]?.setAt).toBe('string');
     const scheduledTaskId = schedulePayload.scheduled?.[0]?.taskId;
     expect(typeof scheduledTaskId).toBe('string');
 
@@ -702,6 +707,8 @@ describe('servertool:clock', () => {
     expect(listPayload.items).toHaveLength(1);
     expect(listPayload.items[0]?.task).toBe('t1-updated');
     expect(listPayload.items[0]?.taskId).toBe(scheduledTaskId);
+    expect(listPayload.items[0]?.setBy).toBe('agent');
+    expect(typeof listPayload.items[0]?.setAt).toBe('string');
 
     const cancel = await runServerSideToolEngine({
       chatResponse: {
@@ -901,6 +908,7 @@ describe('servertool:clock', () => {
     expect(Array.isArray(state.tasks)).toBe(true);
     expect(state.tasks.some((task) => task.task === 'marker-task')).toBe(true);
     const markerTask = state.tasks.find((task) => task.task === 'marker-task');
+    expect(markerTask?.setBy).toBe('user');
     expect(markerTask?.recurrence?.kind).toBe('daily');
     expect(markerTask?.recurrence?.maxRuns).toBe(2);
   });

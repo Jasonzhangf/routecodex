@@ -186,6 +186,7 @@ function normalizeTaskCreateItems(body: Record<string, unknown>): { items: Recor
     }
     const payload: Record<string, unknown> = {
       dueAtMs,
+      setBy: 'user',
       task,
       ...(parseString(record.tool) ? { tool: parseString(record.tool) } : {}),
       ...(record.arguments && typeof record.arguments === 'object' && !Array.isArray(record.arguments)
