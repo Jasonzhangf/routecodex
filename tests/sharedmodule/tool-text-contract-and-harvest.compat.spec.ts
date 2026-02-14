@@ -5,7 +5,7 @@ const { applyRequestCompat, applyResponseCompat } = await import(
 );
 
 describe('tool text contract + harvest (action/config)', () => {
-  it('injects request guidance for chat:glm when tools are present', () => {
+  it('does not inject deepseek-only request guidance for chat:glm', () => {
     const payload = {
       model: 'glm-4.7',
       messages: [{ role: 'user', content: 'run bd status checks' }],
@@ -30,9 +30,8 @@ describe('tool text contract + harvest (action/config)', () => {
     }).payload as any;
 
     expect(Array.isArray(out.messages)).toBe(true);
-    expect(out.messages[0]?.role).toBe('system');
-    expect(String(out.messages[0]?.content || '')).toContain('Tool-call output contract (STRICT)');
-    expect(String(out.messages[0]?.content || '')).toContain('exec_command');
+    expect(out.messages[0]?.role).toBe('user');
+    expect(JSON.stringify(out.messages)).not.toContain('Tool-call output contract (STRICT)');
   });
 
   it('injects request guidance for chat:deepseek-web when tools are present', () => {
@@ -67,7 +66,7 @@ describe('tool text contract + harvest (action/config)', () => {
     expect(markerHits.length).toBe(1);
   });
 
-  it('preserves structured system content shape when appending guidance', () => {
+  it('keeps structured system content unchanged for chat:glm', () => {
     const payload = {
       model: 'glm-4.7',
       messages: [
@@ -98,8 +97,7 @@ describe('tool text contract + harvest (action/config)', () => {
 
     expect(Array.isArray(out.messages?.[0]?.content)).toBe(true);
     expect(String(out.messages[0].content[0]?.text || '')).toContain('base system rule');
-    const serialized = JSON.stringify(out.messages[0].content);
-    expect(serialized).toContain('Tool-call output contract (STRICT)');
+    expect(JSON.stringify(out.messages[0].content)).toBe(JSON.stringify(payload.messages[0].content));
   });
 
   it('harvests JSON text tool_calls for chat:glm response via compat action', () => {

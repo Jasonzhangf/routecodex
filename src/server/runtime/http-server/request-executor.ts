@@ -182,6 +182,8 @@ export class HubRequestExecutor implements RequestExecutor {
         mergedMetadata.target = target;
         if (typeof target.compatibilityProfile === 'string' && target.compatibilityProfile.trim()) {
           mergedMetadata.compatibilityProfile = target.compatibilityProfile.trim();
+        } else if (Object.prototype.hasOwnProperty.call(mergedMetadata, 'compatibilityProfile')) {
+          delete mergedMetadata.compatibilityProfile;
         }
 
         const { runtimeKey, handle } = await resolveProviderRuntimeOrThrow({

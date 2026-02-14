@@ -421,6 +421,80 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     );
   });
 
+  it('drops inherited compatibility profile when route target has no compatibility profile', async () => {
+    const handle = createRuntimeHandle(async () => ({ data: { id: 'resp_ok' }, status: 200 }));
+    const pipelineResultNoCompat: PipelineExecutionResult = {
+      providerPayload: { data: { messages: [] } },
+      target: {
+        providerKey: 'tabglm.key1.glm-5',
+        providerType: 'anthropic',
+        outboundProfile: 'anthropic-messages',
+        runtimeKey: 'runtime:tabglm',
+        processMode: 'standard'
+      },
+      processMode: 'standard',
+      metadata: {}
+    };
+    const fakePipeline: HubPipeline = {
+      execute: jest.fn().mockResolvedValueOnce(pipelineResultNoCompat)
+    };
+    const runtimeManager: ProviderRuntimeManager = {
+      resolveRuntimeKey: jest.fn(),
+      getHandleByRuntimeKey: jest.fn().mockReturnValue(handle),
+      getHandleByProviderKey: jest.fn(),
+      disposeAll: jest.fn(),
+      initialize: jest.fn()
+    } as unknown as ProviderRuntimeManager;
+    const stats = {
+      recordRequestStart: jest.fn(),
+      recordCompletion: jest.fn(),
+      bindProvider: jest.fn(),
+      recordToolUsage: jest.fn()
+    };
+    const deps = {
+      runtimeManager,
+      getHubPipeline: () => fakePipeline,
+      getModuleDependencies: (): ModuleDependencies => ({
+        errorHandlingCenter: {
+          handleError: jest.fn().mockResolvedValue({ success: true })
+        }
+      } as ModuleDependencies),
+      logStage: jest.fn(),
+      stats
+    };
+
+    const executor = new HubRequestExecutor(deps);
+    const convertSpy = jest
+      .spyOn(executor as any, 'convertProviderResponseIfNeeded')
+      .mockImplementation(async (options: any) => options.response);
+
+    const request: PipelineExecutionInput = {
+      requestId: 'req_profile_drop',
+      entryEndpoint: '/v1/messages',
+      headers: {},
+      body: { messages: [{ role: 'user', content: 'ping' }] },
+      metadata: {
+        stream: false,
+        inboundStream: false,
+        compatibilityProfile: 'chat:glm',
+        target: {
+          providerKey: 'glm.1.glm-4.6',
+          compatibilityProfile: 'chat:glm'
+        }
+      } as Record<string, unknown>
+    };
+
+    await executor.execute(request);
+
+    expect(convertSpy).toHaveBeenCalledTimes(1);
+    const convertOptions = convertSpy.mock.calls[0]?.[0] as { pipelineMetadata?: Record<string, unknown> };
+    expect(convertOptions?.pipelineMetadata?.compatibilityProfile).toBeUndefined();
+    expect((convertOptions?.pipelineMetadata?.target as Record<string, unknown>)?.providerKey).toBe(
+      'tabglm.key1.glm-5'
+    );
+    expect((convertOptions?.pipelineMetadata?.target as Record<string, unknown>)?.compatibilityProfile).toBeUndefined();
+  });
+
   it('does not retry unrecoverable provider errors', async () => {
     const fatal = Object.assign(new Error('HTTP 401'), { statusCode: 401, retryable: false });
     const handle = createRuntimeHandle(async () => {
