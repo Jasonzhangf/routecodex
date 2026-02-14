@@ -132,6 +132,39 @@ describe('deepseek-web text tool-call harvest', () => {
 `);
   });
 
+  it('maps exec_command fallback to allowed Bash tool name when request toolset uses Claude naming', () => {
+    const adapterContextBash: any = {
+      capturedChatRequest: {
+        tools: [{ type: 'function', function: { name: 'Bash' } }],
+        tool_choice: 'required'
+      }
+    };
+    const content = '{"tool_calls":[{"name":"exec_command","input":{"command":"echo hello"}}]}';
+
+    const payload: any = {
+      id: 'chatcmpl_deepseek_harvest_bash_alias_1',
+      object: 'chat.completion',
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: 'assistant',
+            content
+          },
+          finish_reason: 'stop'
+        }
+      ]
+    };
+
+    const out: any = applyDeepSeekWebResponseTransform(payload, adapterContextBash);
+    const call = out.choices?.[0]?.message?.tool_calls?.[0];
+    expect(call?.function?.name).toBe('Bash');
+    const args = JSON.parse(String(call?.function?.arguments || '{}'));
+    expect(args.command).toBe('echo hello');
+    expect(args.cmd).toBe('echo hello');
+    expect(out.choices?.[0]?.finish_reason).toBe('tool_calls');
+  });
+
   it('harvests malformed tool:exec_command parameter markup into exec_command tool_call', () => {
     const adapterContextExec: any = {
       capturedChatRequest: {

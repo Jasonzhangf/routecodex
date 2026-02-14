@@ -114,6 +114,11 @@ describe('anthropic-messages tool alias remap', () => {
                 function: { name: 'shell_command', arguments: '{"cmd":"ls"}' }
               },
               {
+                id: 'call_exec',
+                type: 'function',
+                function: { name: 'exec_command', arguments: '{"cmd":"pwd"}' }
+              },
+              {
                 id: 'call_glob',
                 type: 'function',
                 function: { name: 'glob', arguments: '{"pattern":"**/*.ts"}' }
@@ -150,7 +155,7 @@ describe('anthropic-messages tool alias remap', () => {
       .filter((b) => b && b.type === 'tool_use')
       .map((b) => b.name);
 
-    expect(toolUseNames).toEqual(['Bash', 'Glob', 'Grep', 'Read', 'Task']);
+    expect(toolUseNames).toEqual(['Bash', 'Bash', 'Glob', 'Grep', 'Read', 'Task']);
   });
 
   it('falls back to clientToolsRaw when toolNameAliasMap is missing', () => {
@@ -194,5 +199,51 @@ describe('anthropic-messages tool alias remap', () => {
       .map((b) => b.name);
 
     expect(toolUseNames).toEqual(['Bash', 'Glob']);
+  });
+
+  it('normalizes shell-like array command args into string for anthropic tool_use', () => {
+    const semantics = {
+      tools: {
+        toolNameAliasMap: {
+          shell_command: 'Bash'
+        }
+      }
+    };
+
+    const chatResponse = {
+      id: 'chatcmpl_test_shell_array',
+      model: 'glm-4.6',
+      choices: [
+        {
+          index: 0,
+          finish_reason: 'tool_calls',
+          message: {
+            role: 'assistant',
+            content: '',
+            tool_calls: [
+              {
+                id: 'call_shell_array',
+                type: 'function',
+                function: {
+                  name: 'shell',
+                  arguments: '{"command":["bash","-lc","pwd && ls -la"],"workdir":"/tmp"}'
+                }
+              }
+            ]
+          }
+        }
+      ]
+    };
+
+    const clientPayload = runRespOutboundStage1ClientRemap({
+      payload: chatResponse as any,
+      clientProtocol: 'anthropic-messages',
+      requestId: 'req_shell_array',
+      requestSemantics: semantics as any
+    }) as any;
+
+    const toolUse = (clientPayload.content as any[]).find((b) => b && b.type === 'tool_use');
+    expect(toolUse?.name).toBe('Bash');
+    expect(toolUse?.input?.command).toBe('bash -lc pwd && ls -la');
   });
 });

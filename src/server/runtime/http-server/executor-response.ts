@@ -130,14 +130,14 @@ export async function convertProviderResponseIfNeeded(
     applyClientConnectionStateToContext(metadataBag, baseContext);
     const adapterContext = baseContext;
     const compatProfile =
-      typeof (metadataBag as Record<string, unknown> | undefined)?.compatibilityProfile === 'string'
-        ? String((metadataBag as Record<string, unknown>).compatibilityProfile)
-        : metadataBag &&
-            typeof metadataBag === 'object' &&
-            metadataBag.target &&
-            typeof metadataBag.target === 'object' &&
-            typeof (metadataBag.target as Record<string, unknown>).compatibilityProfile === 'string'
-          ? ((metadataBag.target as Record<string, unknown>).compatibilityProfile as string)
+      metadataBag &&
+      typeof metadataBag === 'object' &&
+      metadataBag.target &&
+      typeof metadataBag.target === 'object' &&
+      typeof (metadataBag.target as Record<string, unknown>).compatibilityProfile === 'string'
+        ? ((metadataBag.target as Record<string, unknown>).compatibilityProfile as string)
+        : typeof (metadataBag as Record<string, unknown> | undefined)?.compatibilityProfile === 'string'
+          ? String((metadataBag as Record<string, unknown>).compatibilityProfile)
           : undefined;
     if (compatProfile && compatProfile.trim()) {
       adapterContext.compatibilityProfile = compatProfile.trim();

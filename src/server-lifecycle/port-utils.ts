@@ -9,16 +9,7 @@ import { spawnSync } from 'child_process';
 import { logProcessLifecycle } from '../utils/process-lifecycle-logger.js';
 import { HTTP_PROTOCOLS, LOCAL_HOSTS, API_PATHS } from '../constants/index.js';
 import { listManagedServerPidsByPort } from '../utils/managed-server-pids.js';
-
-function resolveSignalCaller(signal: string): Record<string, unknown> {
-  return {
-    callerType: 'unknown_signal_sender',
-    signal,
-    observedTs: new Date().toISOString(),
-    processPid: process.pid,
-    processPpid: process.ppid
-  };
-}
+import { resolveSignalCaller } from '../sharedmodule/process-snapshot.js';
 
 async function canBind(port: number): Promise<boolean> {
   return await new Promise<boolean>(resolve => {
@@ -209,4 +200,4 @@ async function ensurePortAvailable(port: number, opts: { attemptGraceful?: boole
   await new Promise(r => setTimeout(r, 500));
 }
 
-export { ensurePortAvailable, killPidBestEffort, canBind, attemptHttpShutdown, resolveSignalCaller };
+export { ensurePortAvailable, killPidBestEffort, canBind, attemptHttpShutdown };

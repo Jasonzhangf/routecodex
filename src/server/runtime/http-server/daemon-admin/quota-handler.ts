@@ -177,6 +177,9 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
       const quotaAdapter = getQuotaModule(options);
       const snapshot = quotaAdapter ? quotaAdapter.getAdminSnapshot() : {};
 
+      // Phase 2: Unified control plane DTO
+      const unifiedDto = x7eGate.phase2UnifiedControl;
+
       const entries = Object.values(snapshot).map((state) => {
         const record = state;
         const providerKey = typeof record.providerKey === 'string' ? record.providerKey : '';
@@ -189,7 +192,8 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
           priorityTier: typeof record.priorityTier === 'number' ? record.priorityTier : null,
           cooldownUntil: record.cooldownUntil ?? null,
           blacklistUntil: record.blacklistUntil ?? null,
-          consecutiveErrorCount: typeof record.consecutiveErrorCount === 'number' ? record.consecutiveErrorCount : 0
+          consecutiveErrorCount: typeof record.consecutiveErrorCount === 'number' ? record.consecutiveErrorCount : 0,
+          ...(unifiedDto ? { schema: 'v2', updatedVia: 'unified_control' } : {})
         };
       });
 
@@ -258,7 +262,7 @@ export function registerQuotaRoutes(app: Application, options: DaemonAdminRouteO
           fpOscpu: fp?.navigatorOscpu || null
         };
       });
-      res.status(200).json({ updatedAt: Date.now(), providers });
+      res.status(200).json({ updatedAt: Date.now(), providers, ...(unifiedDto ? { schema: 'v2' } : {}) });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       res.status(500).json({ error: { message } });

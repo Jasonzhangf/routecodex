@@ -13,22 +13,18 @@ import { createHash, createHmac } from 'node:crypto';
 import { BaseProvider } from './base-provider.js';
 import { HttpClient } from '../utils/http-client.js';
 import { DynamicProfileLoader, ServiceProfileValidator } from '../config/service-profiles.js';
-import { ApiKeyAuthProvider } from '../../auth/apikey-auth.js';
-import { OAuthAuthProvider } from '../../auth/oauth-auth.js';
+import {
+  attachProviderSseSnapshotStream,
+  writeProviderSnapshot
+} from '../utils/snapshot-writer.js';
 import { logOAuthDebug } from '../../auth/oauth-logger.js';
-import { TokenFileAuthProvider } from '../../auth/tokenfile-auth.js';
-import { IflowCookieAuthProvider } from '../../auth/iflow-cookie-auth.js';
 import {
   ensureValidOAuthToken,
   handleUpstreamInvalidOAuthToken,
   shouldTriggerInteractiveOAuthRepair
 } from '../../auth/oauth-lifecycle.js';
-import {
-  attachProviderSseSnapshotStream,
-  writeProviderSnapshot
-} from '../utils/snapshot-writer.js';
 import type { IAuthProvider } from '../../auth/auth-interface.js';
-import type { ApiKeyAuth, OAuthAuth, OpenAIStandardConfig } from '../api/provider-config.js';
+import type { OAuthAuth, OpenAIStandardConfig } from '../api/provider-config.js';
 import type { ProviderContext, ProviderRuntimeProfile, ServiceProfile, ProviderType } from '../api/provider-types.js';
 import type { UnknownObject } from '../../../types/common-types.js';
 import type { ModuleDependencies } from '../../../modules/pipeline/interfaces/pipeline-interfaces.js';
@@ -50,6 +46,9 @@ import type { ProviderErrorAugmented } from './provider-error-types.js';
 import { extractStatusCodeFromError } from './provider-error-classifier.js';
 import { getProviderFamilyProfile } from '../../profile/profile-registry.js';
 import type { ProviderFamilyProfile } from '../../profile/profile-contracts.js';
+
+// Transport submodules
+import { AuthProviderFactory } from './transport/index.js';
 
 type ProtocolClient = HttpProtocolClient<ProtocolRequestPayload>;
 type OAuthAuthExtended = OAuthAuth & { rawType?: string; oauthProviderId?: string; tokenFile?: string };
@@ -320,77 +319,19 @@ export class HttpTransportProvider extends BaseProvider {
     }
 
     // 根据认证类型创建对应的认证提供者
-    if (authMode === 'apikey') {
-      const rawTypeValue =
-        typeof (auth as unknown as { rawType?: unknown }).rawType === 'string'
-          ? String((auth as unknown as { rawType: string }).rawType)
-          : typeof (auth as { type?: unknown }).type === 'string'
-            ? String((auth as { type: string }).type)
-            : '';
-      const rawType = rawTypeValue.toLowerCase();
-      const providerId = typeof (this.config.config.providerId) === 'string'
-        ? this.config.config.providerId.toLowerCase()
-        : '';
-      const baseUrl = typeof this.config.config.baseUrl === 'string'
-        ? this.config.config.baseUrl.toLowerCase()
-        : '';
-      const isIflowFamily =
-        providerId === 'iflow' ||
-        baseUrl.includes('apis.iflow.cn') ||
-        baseUrl.includes('iflow.cn');
-
-      // iFlow Cookie 模式：使用浏览器导出的 Cookie 交换 API Key，避免频繁走 OAuth。
-      if (
-        isIflowFamily &&
-        (rawType === 'iflow-cookie' ||
-          (!((auth as ApiKeyAuth).apiKey) &&
-            (typeof (auth as unknown as { cookie?: unknown }).cookie === 'string' ||
-              typeof (auth as unknown as { cookieFile?: unknown }).cookieFile === 'string')))
-      ) {
-        return new IflowCookieAuthProvider(auth as unknown as Record<string, unknown>);
-      }
-
-      return new ApiKeyAuthProvider(auth as ApiKeyAuth);
-    } else if (authMode === 'oauth') {
+    const authFactory = new AuthProviderFactory({
+      providerType: this.providerType,
+      moduleType: this.type,
+      config: this.config,
+      serviceProfile: this.serviceProfile
+    });
+    const authProvider = authFactory.createAuthProvider();
+    if (authMode === 'oauth') {
       const oauthAuth = auth as OAuthAuthExtended;
       const oauthProviderId = resolvedOAuthProviderId ?? serviceProfileKey;
       this.oauthProviderId = oauthProviderId;
-      const familyProfile = getProviderFamilyProfile({
-        providerId: this.config.config.providerId,
-        providerType: this.providerType,
-        oauthProviderId
-      });
-      const profileTokenFileMode = familyProfile?.resolveOAuthTokenFileMode?.({
-        oauthProviderId,
-        auth: {
-          clientId: oauthAuth.clientId,
-          tokenUrl: oauthAuth.tokenUrl,
-          deviceCodeUrl: oauthAuth.deviceCodeUrl
-        },
-        moduleType: this.type
-      });
-      // For providers like Qwen/iflow/Gemini CLI where public OAuth client may not be available,
-      // allow reading tokens produced by external login tools (CLIProxyAPI) via token file.
-      const useTokenFile =
-        (typeof profileTokenFileMode === 'boolean'
-          ? profileTokenFileMode
-          : (
-              oauthProviderId === 'qwen' ||
-              oauthProviderId === 'iflow' ||
-              this.type === 'gemini-cli-http-provider'
-            )) &&
-        !oauthAuth.clientId &&
-        !oauthAuth.tokenUrl &&
-        !oauthAuth.deviceCodeUrl;
-      if (useTokenFile) {
-        // Keep TokenFileAuthProvider pure: do not infer providerId from type/rawType.
-        // The creator already knows oauthProviderId and must pass it explicitly.
-        return new TokenFileAuthProvider({ ...oauthAuth, oauthProviderId } as OAuthAuthExtended);
-      }
-      return new OAuthAuthProvider(oauthAuth, oauthProviderId);
-    } else {
-      throw new Error(`Unsupported auth type: ${auth.type}`);
     }
+    return authProvider;
   }
 
   protected createHttpClient(): void {

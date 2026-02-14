@@ -110,5 +110,58 @@ describe('tool-registry validateToolCall (all tools)', () => {
     expect(parsed.server).toBe('my-server');
     expect(parsed.cursor).toBe('next');
   });
-});
 
+  it('rejects destructive git reset --hard in exec_command', () => {
+    const args = JSON.stringify({
+      cmd: 'git reset --hard HEAD',
+      workdir: '/workspace'
+    });
+    const result = validateToolCall('exec_command', args);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('forbidden_git_reset_hard');
+    expect(result.message).toContain('git reset --hard');
+  });
+
+  it('allows git checkout for one file only in exec_command', () => {
+    const args = JSON.stringify({
+      cmd: 'git checkout -- src/index.ts',
+      workdir: '/workspace'
+    });
+    const result = validateToolCall('exec_command', args);
+    expect(result.ok).toBe(true);
+    const parsed = toArgsObject(result);
+    expect(parsed.cmd).toBe('git checkout -- src/index.ts');
+  });
+
+  it('rejects git checkout without file scope in exec_command', () => {
+    const args = JSON.stringify({
+      cmd: 'git checkout feature/new-flow',
+      workdir: '/workspace'
+    });
+    const result = validateToolCall('exec_command', args);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('forbidden_git_checkout_scope');
+    expect(result.message).toContain('single file');
+  });
+
+  it('rejects git checkout with multiple files in exec_command', () => {
+    const args = JSON.stringify({
+      cmd: 'git checkout -- src/a.ts src/b.ts',
+      workdir: '/workspace'
+    });
+    const result = validateToolCall('exec_command', args);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('forbidden_git_checkout_scope');
+  });
+
+  it('rejects git checkout when chained with additional commands', () => {
+    const args = JSON.stringify({
+      cmd: 'git checkout -- src/a.ts && git status',
+      workdir: '/workspace'
+    });
+    const result = validateToolCall('exec_command', args);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('forbidden_git_checkout_scope');
+    expect(result.message).toContain('standalone');
+  });
+});

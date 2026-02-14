@@ -166,4 +166,38 @@ describe('DeepSeekSessionPowManager', () => {
     expect(typeof resolvedSolverPath === 'string' && fs.existsSync(resolvedSolverPath)).toBe(true);
     expect(typeof resolvedWasmPath === 'string' && fs.existsSync(resolvedWasmPath)).toBe(true);
   });
+
+  it('re-resolves solver/wasm before execution when cached paths become invalid', async () => {
+    const manager = new DeepSeekSessionPowManager({
+      baseUrl: 'https://chat.deepseek.com'
+    });
+
+    (manager as any).solverPath = '/tmp/definitely-missing-runtime-solver.mjs';
+    (manager as any).wasmPath = '/tmp/definitely-missing-runtime.wasm';
+
+    const spawnSpy = jest.spyOn(manager as any, 'spawnPowSolver').mockResolvedValue(42);
+
+    const answer = await (manager as any).solvePowChallenge({
+      algorithm: 'DeepSeekHashV1',
+      challenge: 'abc',
+      salt: 'salt',
+      difficulty: 123,
+      expireAt: 1770856259868,
+      signature: 'sig',
+      targetPath: '/api/v0/chat/completion'
+    });
+
+    expect(answer).toBe(42);
+    expect(spawnSpy).toHaveBeenCalledTimes(1);
+
+    const [payload, resolvedSolverPath, resolvedWasmPath] = spawnSpy.mock.calls[0] as [
+      Record<string, unknown>,
+      string,
+      string | undefined
+    ];
+    expect(resolvedSolverPath).not.toBe('/tmp/definitely-missing-runtime-solver.mjs');
+    expect(fs.existsSync(resolvedSolverPath)).toBe(true);
+    expect(typeof resolvedWasmPath === 'string' && fs.existsSync(resolvedWasmPath)).toBe(true);
+    expect(payload.wasmPath).toBe(resolvedWasmPath);
+  });
 });

@@ -9,8 +9,10 @@ import {
   type RoutingInstructionState
 } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-instructions.js';
 import { buildResponsesRequestFromChat } from '../../sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.js';
+import { extractBlockedReportFromMessagesForTests } from '../../sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.js';
 import {
   resetStopMessageBdRuntimeCacheForTests,
+  resolveBdTaskSelectionFromRuntime,
   resolveBdWorkStateFromRuntime,
   resolveStopMessageStageDecision
 } from '../../sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-stage-policy.js';
@@ -369,7 +371,7 @@ describe('stop_message_auto servertool', () => {
     expect(ops.some((op) => op?.op === 'append_user_text' && typeof op?.text === 'string')).toBe(true);
   });
 
-  test('allows stop_message retrigger on stop_message_flow followup hops', async () => {
+  test('skips stop_message retrigger on stop_message_flow followup hops', async () => {
     const sessionId = 'stopmessage-spec-session-followup-allow';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
@@ -427,14 +429,13 @@ describe('stop_message_auto servertool', () => {
       providerProtocol: 'openai-chat'
     });
 
-    expect(result.mode).toBe('tool_flow');
-    expect(result.execution?.flowId).toBe('stop_message_flow');
+    expect(result.mode).toBe('passthrough');
+    expect(result.execution).toBeUndefined();
 
-    const persisted = await readJsonFileUntil<{ state?: { stopMessageUsed?: number } }>(
+    const persisted = await readJsonFileWithRetry<{ state?: { stopMessageUsed?: number } }>(
       path.join(SESSION_DIR, `session-${sessionId}.json`),
-      (data) => data?.state?.stopMessageUsed === 1
     );
-    expect(persisted?.state?.stopMessageUsed).toBe(1);
+    expect(persisted?.state?.stopMessageUsed).toBe(0);
   });
 
   test('skips stop_message retrigger for non-stop followup flows', async () => {
@@ -1489,7 +1490,8 @@ describe('stop_message_auto servertool', () => {
       if (persisted?.state?.stopMessageStage === 'status_probe') {
         expect(appendUserText?.text).toContain('阶段A：先看 BD 状态');
       } else {
-        expect(appendUserText?.text).toContain('继续执行');
+        expect(appendUserText?.text).toContain('检测到当前任务可继续，请直接推进工程动作');
+        expect(appendUserText?.text).toContain('不要自行用 bd ready/list 选择任务');
       }
       expect(persisted?.state?.stopMessageObservationStableCount).toBe(0);
     } finally {
@@ -1991,7 +1993,7 @@ describe('stop_message_auto servertool', () => {
     }
   });
 
-  test('stage policy keeps followup when mode=on and runtime is idle', () => {
+  test('stage policy uses one-shot summary then stops when no task is available', () => {
     const prevMode = process.env.ROUTECODEX_STOPMESSAGE_BD_MODE;
     const prevTtl = process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS;
     try {
@@ -2009,6 +2011,8 @@ describe('stop_message_auto servertool', () => {
       expect(first.action).toBe('followup');
       expect(first.stage).toBe('status_probe');
       expect(first.bdWorkState).toBe('idle');
+      expect(first.noTaskSummaryUsed).toBe(true);
+      expect(first.followupText).toContain('当前未发现可推进任务');
 
       const second = resolveStopMessageStageDecision({
         baseText: '继续执行',
@@ -2017,15 +2021,15 @@ describe('stop_message_auto servertool', () => {
           stopMessageStage: 'status_probe',
           stopMessageBdWorkState: 'idle',
           stopMessageObservationHash: first.observationHash,
-          stopMessageObservationStableCount: first.observationStableCount
+          stopMessageObservationStableCount: first.observationStableCount,
+          stopMessageNoTaskSummaryUsed: true
         },
         capturedMessages: [{ role: 'tool', content: 'bd --no-db show routecodex-77\nstatus: in_progress' }],
         bdCommandRunner: () => ({ status: 0, stdout: '[]', stderr: '' })
       });
 
-      expect(second.action).toBe('followup');
-      expect(second.stage).toBe('loop_self_check');
-      expect(second.stopReason).toBeUndefined();
+      expect(second.action).toBe('stop');
+      expect(second.stopReason).toBe('no_task_after_summary');
       expect(second.bdWorkState).toBe('idle');
     } finally {
       if (prevMode === undefined) {
@@ -2124,6 +2128,64 @@ describe('stop_message_auto servertool', () => {
     }
   });
 
+  test('stage policy switches to loop_self_check on repeated active observations', () => {
+    const prevMode = process.env.ROUTECODEX_STOPMESSAGE_BD_MODE;
+    const prevTtl = process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS;
+    try {
+      process.env.ROUTECODEX_STOPMESSAGE_BD_MODE = 'runtime';
+      process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS = '0';
+      resetStopMessageBdRuntimeCacheForTests();
+
+      const activeRunner = (args: string[]) => {
+        if (args.includes('in_progress')) {
+          return { status: 0, stdout: '[{"id":"routecodex-1"}]', stderr: '' };
+        }
+        return { status: 0, stdout: '[]', stderr: '' };
+      };
+
+      const first = resolveStopMessageStageDecision({
+        baseText: '继续执行',
+        state: { stopMessageStageMode: 'on' },
+        capturedMessages: [{ role: 'tool', content: 'bd --no-db show routecodex-77\nstatus: in_progress' }],
+        bdCommandRunner: activeRunner
+      });
+
+      expect(first.action).toBe('followup');
+      expect(first.stage).toBe('active_continue');
+      expect(first.bdWorkState).toBe('active');
+
+      const second = resolveStopMessageStageDecision({
+        baseText: '继续执行',
+        state: {
+          stopMessageStageMode: 'on',
+          stopMessageStage: first.stage,
+          stopMessageBdWorkState: first.bdWorkState,
+          stopMessageObservationHash: first.observationHash,
+          stopMessageObservationStableCount: first.observationStableCount
+        },
+        capturedMessages: [{ role: 'tool', content: 'bd --no-db show routecodex-77\nstatus: in_progress' }],
+        bdCommandRunner: activeRunner
+      });
+
+      expect(second.action).toBe('followup');
+      expect(second.stage).toBe('loop_self_check');
+      expect(second.bdWorkState).toBe('active');
+      expect((second.followupText || '').includes('重复')).toBe(true);
+    } finally {
+      if (prevMode === undefined) {
+        delete process.env.ROUTECODEX_STOPMESSAGE_BD_MODE;
+      } else {
+        process.env.ROUTECODEX_STOPMESSAGE_BD_MODE = prevMode;
+      }
+      if (prevTtl === undefined) {
+        delete process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS;
+      } else {
+        process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS = prevTtl;
+      }
+      resetStopMessageBdRuntimeCacheForTests();
+    }
+  });
+
   test('stage policy keeps followup in auto mode when stage templates are not enabled', () => {
     const prevMode = process.env.ROUTECODEX_STOPMESSAGE_BD_MODE;
     const prevTtl = process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS;
@@ -2188,6 +2250,57 @@ describe('stop_message_auto servertool', () => {
       }
       resetStopMessageBdRuntimeCacheForTests();
     }
+  });
+
+  test('bd task selection prioritizes in_progress over ready/open and sorts by priority+id', () => {
+    const selection = resolveBdTaskSelectionFromRuntime({
+      bdCommandRunner: (args) => {
+        if (args.includes('in_progress')) {
+          return {
+            status: 0,
+            stdout: JSON.stringify([
+              { id: 'routecodex-201', title: 'later', priority: 2 },
+              { id: 'routecodex-110', title: 'first', priority: 0 },
+              { id: 'routecodex-109', title: 'second', priority: 0 }
+            ]),
+            stderr: ''
+          };
+        }
+        if (args.includes('ready')) {
+          return { status: 0, stdout: '[{"id":"routecodex-1","priority":0}]', stderr: '' };
+        }
+        return { status: 0, stdout: '[]', stderr: '' };
+      }
+    });
+
+    expect(selection.status).toBe('ok');
+    expect(selection.task?.source).toBe('in_progress');
+    expect(selection.task?.issueId).toBe('routecodex-109');
+  });
+
+  test('extracts structured blocked JSON report from assistant text payload', () => {
+    const report = extractBlockedReportFromMessagesForTests([
+      {
+        role: 'assistant',
+        content: [
+          {
+            type: 'text',
+            text: [
+              '执行受阻，请建单：',
+              '```json',
+              '{"type":"blocked","summary":"deepseek token refresh failed","blocker":"HTTP 401 from oauth endpoint","impact":"cannot continue auth flow","next_action":"rotate credential and retry","evidence":["requestId=req_1","provider=deepseek-web.3"]}',
+              '```'
+            ].join('\n')
+          }
+        ]
+      }
+    ]);
+
+    expect(report).toBeTruthy();
+    expect(report?.summary).toBe('deepseek token refresh failed');
+    expect(report?.blocker).toBe('HTTP 401 from oauth endpoint');
+    expect(report?.nextAction).toBe('rotate credential and retry');
+    expect(report?.evidence).toEqual(['requestId=req_1', 'provider=deepseek-web.3']);
   });
 
 });

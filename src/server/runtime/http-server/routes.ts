@@ -79,7 +79,7 @@ export function registerHttpRoutes(options: RouteOptions): void {
     getVirtualRouterArtifacts
   } = options;
 
-  console.log('[RouteCodexHttpServer] Setting up routes...');
+  // [RouteCodexHttpServer] Setting up routes
 
   app.get('/health', (_req: Request, res: Response) => {
     const ready = typeof getPipelineReady === 'function' ? Boolean(getPipelineReady()) : false;
@@ -421,5 +421,5 @@ export function registerHttpRoutes(options: RouteOptions): void {
     res.status(mapped.status).json(mapped.body);
   });
 
-  console.log('[RouteCodexHttpServer] Routes setup completed');
+  // [RouteCodexHttpServer] Routes setup completed
 }

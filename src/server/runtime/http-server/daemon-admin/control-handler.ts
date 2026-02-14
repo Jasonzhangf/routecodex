@@ -193,7 +193,8 @@ export function registerControlRoutes(app: Application, options: DaemonAdminRout
           priorityTier: typeof state?.priorityTier === 'number' ? state.priorityTier : null,
           cooldownUntil: state?.cooldownUntil ?? null,
           blacklistUntil: state?.blacklistUntil ?? null,
-          consecutiveErrorCount: typeof state?.consecutiveErrorCount === 'number' ? state.consecutiveErrorCount : 0
+          consecutiveErrorCount: typeof state?.consecutiveErrorCount === 'number' ? state.consecutiveErrorCount : 0,
+          ...(x7eGate.phase2UnifiedControl ? { schema: 'v2', updatedVia: 'unified_control' } : {})
         }));
       }
     } catch {
@@ -234,7 +235,8 @@ export function registerControlRoutes(app: Application, options: DaemonAdminRout
       quota: {
         providers: quotaProviders,
         antigravitySnapshot,
-        updatedAtMs: nowMs
+        updatedAtMs: nowMs,
+        ...(x7eGate.phase2UnifiedControl ? { schema: 'v2', updatedVia: 'unified_control' } : {})
       },
       routing: {
         virtualRouterConfig: vrConfig,
@@ -300,7 +302,8 @@ export function registerControlRoutes(app: Application, options: DaemonAdminRout
           configPath,
           policyHash: writeResult.policyHash,
           wroteAtMs: writeResult.wroteAtMs,
-          selfReload
+          selfReload,
+          ...(x7eGate.phase2UnifiedControl ? { schema: 'v2', updatedVia: 'unified_control' } : {})
         });
       } catch (e: any) {
         res.status(400).json({ error: { message: e?.message || 'invalid policy', code: 'bad_request' } });
@@ -356,7 +359,7 @@ export function registerControlRoutes(app: Application, options: DaemonAdminRout
         }
       }
 
-      res.status(200).json({ ok: true, action, nowMs, results });
+      res.status(200).json({ ok: true, action, nowMs, results, ...(x7eGate.phase2UnifiedControl ? { schema: 'v2', updatedVia: 'unified_control' } : {}) });
       return;
     }
 
@@ -374,7 +377,7 @@ export function registerControlRoutes(app: Application, options: DaemonAdminRout
         return;
       }
       const result = await quotaMod.disableProvider({ providerKey, mode, durationMs });
-      res.status(200).json({ ok: true, action, nowMs, result });
+      res.status(200).json({ ok: true, action, nowMs, result, ...(x7eGate.phase2UnifiedControl ? { schema: 'v2', updatedVia: 'unified_control' } : {}) });
       return;
     }
 
@@ -390,7 +393,7 @@ export function registerControlRoutes(app: Application, options: DaemonAdminRout
         return;
       }
       const result = await quotaMod.recoverProvider(providerKey);
-      res.status(200).json({ ok: true, action, nowMs, result });
+      res.status(200).json({ ok: true, action, nowMs, result, ...(x7eGate.phase2UnifiedControl ? { schema: 'v2', updatedVia: 'unified_control' } : {}) });
       return;
     }
 
@@ -406,7 +409,7 @@ export function registerControlRoutes(app: Application, options: DaemonAdminRout
         return;
       }
       const result = await quotaMod.resetProvider(providerKey);
-      res.status(200).json({ ok: true, action, nowMs, result });
+      res.status(200).json({ ok: true, action, nowMs, result, ...(x7eGate.phase2UnifiedControl ? { schema: 'v2', updatedVia: 'unified_control' } : {}) });
       return;
     }
 
@@ -417,7 +420,7 @@ export function registerControlRoutes(app: Application, options: DaemonAdminRout
         return;
       }
       const result = await quotaMod.refreshNow();
-      res.status(200).json({ ok: true, action, nowMs, result });
+      res.status(200).json({ ok: true, action, nowMs, result, ...(x7eGate.phase2UnifiedControl ? { schema: 'v2', updatedVia: 'unified_control' } : {}) });
       return;
     }
 
@@ -427,7 +430,7 @@ export function registerControlRoutes(app: Application, options: DaemonAdminRout
         return;
       }
       const result = await options.restartRuntimeFromDisk();
-      res.status(200).json({ ok: true, action, nowMs, result });
+      res.status(200).json({ ok: true, action, nowMs, result, ...(x7eGate.phase2UnifiedControl ? { schema: 'v2', updatedVia: 'unified_control' } : {}) });
       return;
     }
 

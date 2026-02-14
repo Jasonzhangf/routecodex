@@ -4,4 +4,4 @@
  * Port management, signal handling, and process lifecycle utilities.
  */
 
-export { ensurePortAvailable, killPidBestEffort, canBind, attemptHttpShutdown, resolveSignalCaller } from './port-utils.js';
+export { ensurePortAvailable, killPidBestEffort, canBind, attemptHttpShutdown } from './port-utils.js';

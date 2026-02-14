@@ -14,6 +14,17 @@ async function ensureDir(p) {
   await fs.mkdir(p, { recursive: true }).catch(() => {});
 }
 
+async function assertFileExists(filePath, message) {
+  try {
+    const stats = await fs.stat(filePath);
+    if (!stats.isFile()) {
+      throw new Error(message);
+    }
+  } catch {
+    throw new Error(message);
+  }
+}
+
 async function main() {
   const PROMPT_SRC = path.resolve(process.cwd(), 'src/config/system-prompts');
   const PROMPT_DIST = path.resolve(process.cwd(), 'dist/config/system-prompts');
@@ -21,6 +32,7 @@ async function main() {
   const CAMOUFOX_DIST = path.resolve(process.cwd(), 'dist/scripts/camoufox');
   const DEEPSEEK_SRC = path.resolve(process.cwd(), 'scripts/deepseek');
   const DEEPSEEK_DIST = path.resolve(process.cwd(), 'dist/scripts/deepseek');
+  const REQUIRED_DEEPSEEK_ASSETS = ['pow-solver.mjs', 'sha3_wasm_bg.7b9ca65ddd.wasm'];
   const promptCopied = [];
   const camoufoxCopied = [];
   const deepseekCopied = [];
@@ -69,6 +81,20 @@ async function main() {
     } catch (deepseekErr) {
       if (deepseekErr && deepseekErr.code !== 'ENOENT') throw deepseekErr;
     }
+
+    for (const rel of REQUIRED_DEEPSEEK_ASSETS) {
+      const sourcePath = path.join(DEEPSEEK_SRC, rel);
+      const distPath = path.join(DEEPSEEK_DIST, rel);
+      await assertFileExists(
+        sourcePath,
+        `[copy-compat-assets] missing required deepseek source asset: ${sourcePath}`
+      );
+      await assertFileExists(
+        distPath,
+        `[copy-compat-assets] missing required deepseek dist asset after copy: ${distPath}`
+      );
+    }
+
     console.log(`[copy-compat-assets] prompts copied: ${promptCopied.length}`);
     console.log(`[copy-compat-assets] camoufox assets copied: ${camoufoxCopied.length}`);
     console.log(`[copy-compat-assets] deepseek assets copied: ${deepseekCopied.length}`);

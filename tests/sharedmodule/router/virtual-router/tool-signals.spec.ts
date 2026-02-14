@@ -132,4 +132,50 @@ describe('shell command classification', () => {
     const result = detectLastAssistantToolCategory(messages);
     expect(result?.category).toBe('read');
   });
+
+  it('classifies codex Read tool name as read even without shell command args', () => {
+    const messages: StandardizedMessage[] = [
+      {
+        role: 'assistant',
+        content: '',
+        tool_calls: [
+          {
+            id: 'call_read',
+            type: 'function',
+            function: {
+              name: 'Read',
+              arguments: JSON.stringify({ file_path: 'src/index.ts' })
+            }
+          } as any
+        ]
+      }
+    ];
+    const result = detectLastAssistantToolCategory(messages);
+    expect(result?.category).toBe('read');
+  });
+
+  it('classifies codex Edit tool name as write even without shell command args', () => {
+    const messages: StandardizedMessage[] = [
+      {
+        role: 'assistant',
+        content: '',
+        tool_calls: [
+          {
+            id: 'call_edit',
+            type: 'function',
+            function: {
+              name: 'Edit',
+              arguments: JSON.stringify({
+                file_path: 'src/index.ts',
+                old_string: 'a',
+                new_string: 'b'
+              })
+            }
+          } as any
+        ]
+      }
+    ];
+    const result = detectLastAssistantToolCategory(messages);
+    expect(result?.category).toBe('write');
+  });
 });

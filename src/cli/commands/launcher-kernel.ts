@@ -10,286 +10,41 @@ import { LOCAL_HOSTS } from '../../constants/index.js';
 import { encodeClockClientApiKey } from '../../utils/clock-client-token.js';
 import { logProcessLifecycle } from '../../utils/process-lifecycle-logger.js';
 
-type Spinner = {
-  start(text?: string): Spinner;
-  succeed(text?: string): void;
-  fail(text?: string): void;
-  warn(text?: string): void;
-  info(text?: string): void;
-  stop(): void;
-  text: string;
-};
+// Import from new launcher submodules
+import type {
+  Spinner,
+  LoggerLike,
+  LauncherCommandContext,
+  LauncherCommandOptions,
+  LauncherSpec,
+  ResolvedServerConnection,
+  ClockClientService,
+  ManagedTmuxSession,
+  TmuxSelfHealPolicy
+} from './launcher/types.js';
+import {
+  resolveBinary,
+  parseServerUrl,
+  resolveTmuxSelfHealPolicy,
+  readConfigApiKey,
+  normalizeConnectHost,
+  toIntegerPort,
+  tryReadConfigHostPort,
+  resolveIntFromEnv
+} from './launcher/utils.js';
 
-type LoggerLike = {
-  info: (msg: string) => void;
-  warning: (msg: string) => void;
-  success: (msg: string) => void;
-  error: (msg: string) => void;
-};
-
-export type LauncherCommandContext = {
-  isDevPackage: boolean;
-  isWindows: boolean;
-  defaultDevPort: number;
-  nodeBin: string;
-  createSpinner: (text: string) => Promise<Spinner>;
-  logger: LoggerLike;
-  env: NodeJS.ProcessEnv;
-  rawArgv: string[];
-  fsImpl?: typeof fs;
-  pathImpl?: typeof path;
-  homedir: () => string;
-  cwd?: () => string;
-  sleep: (ms: number) => Promise<void>;
-  fetch: typeof fetch;
-  spawn: (command: string, args: string[], options: SpawnOptions) => ChildProcess;
-  spawnSyncImpl?: typeof spawnSync;
-  getModulesConfigPath: () => string;
-  resolveServerEntryPath: () => string;
-  waitForever: () => Promise<void>;
-  onSignal?: (signal: NodeJS.Signals, cb: () => void) => void;
-  exit: (code: number) => never;
-};
-
-type LauncherCommandOptions = {
-  port?: string;
-  host: string;
-  url?: string;
-  config?: string;
-  apikey?: string;
-  cwd?: string;
-  model?: string;
-  profile?: string;
-  ensureServer?: boolean;
-  [key: string]: unknown;
-};
-
-type LauncherSpec = {
-  commandName: string;
-  displayName: string;
-  description: string;
-  binaryOptionFlags: string;
-  binaryOptionName: string;
-  binaryOptionDescription: string;
-  binaryDefault: string;
-  binaryEnvKey?: string;
-  extraKnownOptions: string[];
-  withModelOption?: boolean;
-  withProfileOption?: boolean;
-  buildArgs: (options: LauncherCommandOptions) => string[];
-  buildEnv: (args: {
-    env: NodeJS.ProcessEnv;
-    baseUrl: string;
-    configuredApiKey: string | null;
-    cwd: string;
-  }) => NodeJS.ProcessEnv;
-};
-
-type ResolvedServerConnection = {
-  configPath: string;
-  protocol: 'http' | 'https';
-  host: string;
-  connectHost: string;
-  port: number;
-  basePath: string;
-  portPart: string;
-  serverUrl: string;
-  configuredApiKey: string | null;
-};
-
-type ClockClientService = {
-  daemonId: string;
-  tmuxSessionId: string;
-  tmuxTarget?: string;
-  syncHeartbeat: () => Promise<boolean>;
-  stop: () => Promise<void>;
-};
-
-type ManagedTmuxSession = {
-  sessionName: string;
-  tmuxTarget: string;
-  reused: boolean;
-  stop: () => void;
-};
-
-type TmuxSelfHealPolicy = {
-  enabled: boolean;
-  maxRetries: number;
-  retryDelaySec: number;
-};
-
-function resolveBinary(options: {
-  fsImpl: typeof fs;
-  pathImpl: typeof path;
-  homedir: () => string;
-  command: string;
-}): string {
-  const raw = String(options.command || '').trim();
-  if (!raw) {
-    return '';
-  }
-  if (raw.includes('/') || raw.includes('\\')) {
-    return raw;
-  }
-
-  const candidates: string[] = [];
-  try {
-    candidates.push(options.pathImpl.join('/opt/homebrew/bin', raw));
-  } catch {
-    // ignore
-  }
-  try {
-    candidates.push(options.pathImpl.join('/usr/local/bin', raw));
-  } catch {
-    // ignore
-  }
-  try {
-    candidates.push(options.pathImpl.join(options.homedir(), '.local', 'bin', raw));
-  } catch {
-    // ignore
-  }
-
-  for (const candidate of candidates) {
-    try {
-      if (candidate && options.fsImpl.existsSync(candidate)) {
-        return candidate;
-      }
-    } catch {
-      // ignore
-    }
-  }
-
-  return raw;
-}
-
-function parseServerUrl(
-  raw: string
-): { protocol: 'http' | 'https'; host: string; port: number | null; basePath: string } {
-  const trimmed = String(raw || '').trim();
-  if (!trimmed) {
-    throw new Error('--url is empty');
-  }
-  let parsed: URL;
-  try {
-    parsed = new URL(trimmed);
-  } catch {
-    parsed = new URL(`http://${trimmed}`);
-  }
-  const protocol = parsed.protocol === 'https:' ? 'https' : 'http';
-  const host = parsed.hostname;
-  const hasExplicitPort = Boolean(parsed.port && parsed.port.trim());
-  const port = hasExplicitPort ? Number(parsed.port) : null;
-  const rawPath = typeof parsed.pathname === 'string' ? parsed.pathname : '';
-  const basePath = rawPath && rawPath !== '/' ? rawPath.replace(/\/+$/, '') : '';
-  return { protocol, host, port: Number.isFinite(port as number) ? (port as number) : null, basePath };
-}
-
-function resolveBoolFromEnv(value: unknown, fallback: boolean): boolean {
-  if (typeof value !== 'string') {
-    return fallback;
-  }
-  const normalized = value.trim().toLowerCase();
-  if (['1', 'true', 'yes', 'on'].includes(normalized)) {
-    return true;
-  }
-  if (['0', 'false', 'no', 'off'].includes(normalized)) {
-    return false;
-  }
-  return fallback;
-}
-
-function resolveIntFromEnv(value: unknown, fallback: number, min: number, max: number): number {
-  if (typeof value !== 'string') {
-    return fallback;
-  }
-  const parsed = Number.parseInt(value.trim(), 10);
-  if (!Number.isFinite(parsed)) {
-    return fallback;
-  }
-  return Math.max(min, Math.min(max, Math.floor(parsed)));
-}
-
-function resolveTmuxSelfHealPolicy(env: NodeJS.ProcessEnv): TmuxSelfHealPolicy {
-  const enabled = resolveBoolFromEnv(
-    env.ROUTECODEX_TMUX_SELF_HEAL_ENABLE ?? env.RCC_TMUX_SELF_HEAL_ENABLE,
-    true
-  );
-  const maxRetries = resolveIntFromEnv(
-    env.ROUTECODEX_TMUX_SELF_HEAL_MAX_RETRIES ?? env.RCC_TMUX_SELF_HEAL_MAX_RETRIES,
-    3,
-    0,
-    20
-  );
-  const retryDelayMs = resolveIntFromEnv(
-    env.ROUTECODEX_TMUX_SELF_HEAL_RETRY_DELAY_MS ?? env.RCC_TMUX_SELF_HEAL_RETRY_DELAY_MS,
-    2000,
-    200,
-    60_000
-  );
-  return {
-    enabled,
-    maxRetries,
-    retryDelaySec: Math.max(1, Math.ceil(retryDelayMs / 1000))
-  };
-}
-
-function readConfigApiKey(fsImpl: typeof fs, configPath: string): string | null {
-  try {
-    if (!configPath || !fsImpl.existsSync(configPath)) {
-      return null;
-    }
-    const txt = fsImpl.readFileSync(configPath, 'utf8');
-    const cfg = JSON.parse(txt);
-    const direct = cfg?.httpserver?.apikey ?? cfg?.modules?.httpserver?.config?.apikey ?? cfg?.server?.apikey;
-    const value = typeof direct === 'string' ? direct.trim() : '';
-    return value ? value : null;
-  } catch {
-    return null;
-  }
-}
-
-function normalizeConnectHost(host: string): string {
-  const value = String(host || '').toLowerCase();
-  if (value === '0.0.0.0') {
-    return '0.0.0.0';
-  }
-  if (value === '::' || value === '::1' || value === 'localhost') {
-    return '0.0.0.0';
-  }
-  return host || '0.0.0.0';
-}
-
-function toIntegerPort(value: unknown): number | null {
-  if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
-    return Math.floor(value);
-  }
-  if (typeof value === 'string' && value.trim()) {
-    const parsed = Number(value.trim());
-    if (Number.isFinite(parsed) && parsed > 0) {
-      return Math.floor(parsed);
-    }
-  }
-  return null;
-}
-
-function tryReadConfigHostPort(
-  fsImpl: typeof fs,
-  configPath: string
-): { host: string | null; port: number | null } {
-  if (!configPath || !fsImpl.existsSync(configPath)) {
-    return { host: null, port: null };
-  }
-  try {
-    const configContent = fsImpl.readFileSync(configPath, 'utf8');
-    const config = JSON.parse(configContent);
-    const port = toIntegerPort(config?.httpserver?.port ?? config?.server?.port ?? config?.port);
-    const hostRaw = config?.httpserver?.host ?? config?.server?.host ?? config?.host;
-    const host = typeof hostRaw === 'string' && hostRaw.trim() ? hostRaw.trim() : null;
-    return { host, port };
-  } catch {
-    return { host: null, port: null };
-  }
-}
+// Re-export for backward compatibility
+export type {
+  Spinner,
+  LoggerLike,
+  LauncherCommandContext,
+  LauncherCommandOptions,
+  LauncherSpec,
+  ResolvedServerConnection,
+  ClockClientService,
+  ManagedTmuxSession,
+  TmuxSelfHealPolicy
+} from './launcher/types.js';
 
 function resolveServerConnection(
   ctx: LauncherCommandContext,

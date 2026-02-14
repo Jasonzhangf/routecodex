@@ -455,7 +455,10 @@ export class DeepSeekSessionPowManager {
       return await this.solvePowOverride(input);
     }
 
-    if (!this.solverPath) {
+    const solverPath = resolvePathWithFallback(this.solverPath, resolveBuiltInPowSolverPath());
+    const wasmPath = resolvePathWithFallback(this.wasmPath, resolveBuiltInPowWasmPath());
+
+    if (!solverPath) {
       throw createDeepSeekSessionPowError({
         code: DEEPSEEK_ERROR_CODES.POW_SOLVE_FAILED,
         message: 'DeepSeek pow solver path is not configured',
@@ -470,16 +473,20 @@ export class DeepSeekSessionPowManager {
       difficulty: input.difficulty,
       expireAt: input.expireAt
     };
-    if (this.wasmPath) {
-      payload.wasmPath = this.wasmPath;
+    if (wasmPath) {
+      payload.wasmPath = wasmPath;
     }
 
-    return await this.spawnPowSolver(payload);
+    return await this.spawnPowSolver(payload, solverPath, wasmPath);
   }
 
-  private async spawnPowSolver(payload: Record<string, unknown>): Promise<number> {
+  private async spawnPowSolver(
+    payload: Record<string, unknown>,
+    solverPath: string,
+    wasmPath?: string
+  ): Promise<number> {
     return await new Promise<number>((resolve, reject) => {
-      const child = spawn(process.execPath, [this.solverPath as string], {
+      const child = spawn(process.execPath, [solverPath], {
         stdio: ['pipe', 'pipe', 'pipe']
       });
 
@@ -544,8 +551,8 @@ export class DeepSeekSessionPowManager {
                 (stderrSnippet ? `: ${stderrSnippet}` : ''),
               statusCode: 502,
               details: {
-                solverPath: this.solverPath,
-                wasmPath: this.wasmPath,
+                solverPath,
+                wasmPath,
                 stderr: stderrSnippet,
                 stdout: stdoutSnippet
               }

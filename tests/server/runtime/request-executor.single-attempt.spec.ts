@@ -256,6 +256,171 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     expect(secondCallMetadata.excludedProviderKeys).toEqual(['tab.key1']);
   });
 
+  it('reroutes when SSE wrapper carries Anthropic 1302 rate-limit error', async () => {
+    const rateLimitedHandle = createRuntimeHandle(async () => ({
+      status: 200,
+      data: {
+        mode: 'sse',
+        error: 'Anthropic SSE error event [1302] 您的账户已达到速率限制，请您控制请求频率'
+      }
+    }));
+    const successHandle = createRuntimeHandle(async () => ({ status: 200, data: { ok: true } }));
+
+    const pipelineResultOne: PipelineExecutionResult = {
+      providerPayload: { data: { messages: [] } },
+      target: {
+        providerKey: 'tab.key1',
+        providerType: 'responses',
+        outboundProfile: 'openai-responses',
+        runtimeKey: 'runtime:one',
+        processMode: 'standard'
+      },
+      processMode: 'standard',
+      metadata: {}
+    };
+    const pipelineResultTwo: PipelineExecutionResult = {
+      providerPayload: { data: { messages: [] } },
+      target: {
+        providerKey: 'tab.key2',
+        providerType: 'responses',
+        outboundProfile: 'openai-responses',
+        runtimeKey: 'runtime:two',
+        processMode: 'standard'
+      },
+      processMode: 'standard',
+      metadata: {}
+    };
+
+    const fakePipeline: HubPipeline = {
+      execute: jest.fn().mockResolvedValueOnce(pipelineResultOne).mockResolvedValueOnce(pipelineResultTwo)
+    };
+
+    const runtimeManager: ProviderRuntimeManager = {
+      resolveRuntimeKey: jest.fn(),
+      getHandleByRuntimeKey: jest.fn((runtimeKey: string) =>
+        runtimeKey === 'runtime:one' ? rateLimitedHandle : successHandle
+      ),
+      getHandleByProviderKey: jest.fn(),
+      disposeAll: jest.fn(),
+      initialize: jest.fn()
+    } as unknown as ProviderRuntimeManager;
+
+    const stats = {
+      recordRequestStart: jest.fn(),
+      recordCompletion: jest.fn(),
+      bindProvider: jest.fn(),
+      recordToolUsage: jest.fn()
+    };
+
+    const deps = {
+      runtimeManager,
+      getHubPipeline: () => fakePipeline,
+      getModuleDependencies: (): ModuleDependencies => ({
+        errorHandlingCenter: {
+          handleError: jest.fn().mockResolvedValue({ success: true })
+        }
+      } as ModuleDependencies),
+      logStage: jest.fn(),
+      stats
+    };
+
+    const executor = new HubRequestExecutor(deps);
+    const request: PipelineExecutionInput = {
+      requestId: 'req_retry_1302',
+      entryEndpoint: '/internal/test',
+      headers: {},
+      body: { messages: [{ role: 'user', content: 'retry me' }] },
+      metadata: { stream: false, inboundStream: false }
+    };
+
+    const response = await executor.execute(request);
+
+    expect(response).toEqual(expect.objectContaining({ status: 200 }));
+    expect(fakePipeline.execute).toHaveBeenCalledTimes(2);
+    expect(rateLimitedHandle.instance.processIncoming).toHaveBeenCalledTimes(1);
+    expect(successHandle.instance.processIncoming).toHaveBeenCalledTimes(1);
+    const secondCallMetadata = fakePipeline.execute.mock.calls[1][0]
+      .metadata as Record<string, unknown>;
+    expect(secondCallMetadata.excludedProviderKeys).toEqual(['tab.key1']);
+  });
+
+  it('prefers route-selected target compatibility profile for response conversion metadata', async () => {
+    const handle = createRuntimeHandle(async () => ({ data: { id: 'resp_ok' }, status: 200 }));
+    const pipelineResultDeepSeek: PipelineExecutionResult = {
+      providerPayload: { data: { messages: [] } },
+      target: {
+        providerKey: 'deepseek-web.3.deepseek-chat',
+        providerType: 'responses',
+        outboundProfile: 'openai-responses',
+        runtimeKey: 'runtime:deepseek',
+        processMode: 'standard',
+        compatibilityProfile: 'chat:deepseek-web'
+      },
+      processMode: 'standard',
+      metadata: {}
+    };
+    const fakePipeline: HubPipeline = {
+      execute: jest.fn().mockResolvedValueOnce(pipelineResultDeepSeek)
+    };
+    const runtimeManager: ProviderRuntimeManager = {
+      resolveRuntimeKey: jest.fn(),
+      getHandleByRuntimeKey: jest.fn().mockReturnValue(handle),
+      getHandleByProviderKey: jest.fn(),
+      disposeAll: jest.fn(),
+      initialize: jest.fn()
+    } as unknown as ProviderRuntimeManager;
+    const stats = {
+      recordRequestStart: jest.fn(),
+      recordCompletion: jest.fn(),
+      bindProvider: jest.fn(),
+      recordToolUsage: jest.fn()
+    };
+    const deps = {
+      runtimeManager,
+      getHubPipeline: () => fakePipeline,
+      getModuleDependencies: (): ModuleDependencies => ({
+        errorHandlingCenter: {
+          handleError: jest.fn().mockResolvedValue({ success: true })
+        }
+      } as ModuleDependencies),
+      logStage: jest.fn(),
+      stats
+    };
+
+    const executor = new HubRequestExecutor(deps);
+    const convertSpy = jest
+      .spyOn(executor as any, 'convertProviderResponseIfNeeded')
+      .mockImplementation(async (options: any) => options.response);
+
+    const request: PipelineExecutionInput = {
+      requestId: 'req_profile_override',
+      entryEndpoint: '/v1/responses',
+      headers: {},
+      body: { messages: [{ role: 'user', content: 'ping' }] },
+      metadata: {
+        stream: false,
+        inboundStream: false,
+        compatibilityProfile: 'chat:qwen',
+        target: {
+          providerKey: 'qwen.1.qwen3-coder-plus',
+          compatibilityProfile: 'chat:qwen'
+        }
+      } as Record<string, unknown>
+    };
+
+    await executor.execute(request);
+
+    expect(convertSpy).toHaveBeenCalledTimes(1);
+    const convertOptions = convertSpy.mock.calls[0]?.[0] as { pipelineMetadata?: Record<string, unknown> };
+    expect(convertOptions?.pipelineMetadata?.compatibilityProfile).toBe('chat:deepseek-web');
+    expect((convertOptions?.pipelineMetadata?.target as Record<string, unknown>)?.providerKey).toBe(
+      'deepseek-web.3.deepseek-chat'
+    );
+    expect((convertOptions?.pipelineMetadata?.target as Record<string, unknown>)?.compatibilityProfile).toBe(
+      'chat:deepseek-web'
+    );
+  });
+
   it('does not retry unrecoverable provider errors', async () => {
     const fatal = Object.assign(new Error('HTTP 401'), { statusCode: 401, retryable: false });
     const handle = createRuntimeHandle(async () => {

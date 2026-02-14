@@ -46,6 +46,7 @@ import { StatsManager } from './stats-manager.js';
 import { resolveHubShadowCompareConfig } from './hub-shadow-compare.js';
 import { resolveLlmsEngineShadowConfig } from '../../../utils/llms-engine-shadow.js';
 import { createRequestExecutor, type RequestExecutor } from './request-executor.js';
+import { startClockReaper, stopClockReaper } from './clock-client-reaper.js';
 import {
   resolveVirtualRouterInput,
   getModuleDependencies,
@@ -332,9 +333,12 @@ export class RouteCodexHttpServer {
 
   public async start(): Promise<void> {
     await startHttpServer(this);
+    // Start the clock reaper after server is running
+    startClockReaper();
   }
 
   public async stop(): Promise<void> {
+    stopClockReaper();
     await stopHttpServer(this);
   }
 

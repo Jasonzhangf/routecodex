@@ -959,7 +959,7 @@
             "antigravity.claude-sonnet-4-5",
             "tabglm.glm-4.7",
             "antigravity.gemini-3-pro-high",
-            "antigravity.gemini-3-pro-low",
+            "deepseek-web.deepseek-reasoner",
             "deepseek-web.deepseek-chat"
           ]
         },
@@ -1018,8 +1018,8 @@
           "backup": true,
           "mode": "priority",
           "targets": [
-            "gemini-cli.gemini-2.5-pro",
-            "antigravity.gemini-3-pro-low"
+            "deepseek-web.deepseek-chat",
+            "deepseek-web.deepseek-reasoner"
           ]
         }
       ],
@@ -1041,7 +1041,7 @@
           "mode": "priority",
           "targets": [
             "antigravity.gemini-3-pro-high",
-            "gemini-cli.gemini-2.5-pro"
+            "deepseek-web.deepseek-chat"
           ]
         }
       ],

@@ -42,26 +42,26 @@ export class ManagerDaemon {
     for (const module of this.modules.values()) {
       const startedAt = Date.now();
       // eslint-disable-next-line no-console
-      console.log(`[ManagerDaemon] init start module=${module.id}`);
+      // [ManagerDaemon] init start removed
       await this.withTimeout(
         Promise.resolve(module.init(this.context)),
         timeoutMs,
         `[ManagerDaemon] init timeout module=${module.id} after ${timeoutMs}ms`
       );
       // eslint-disable-next-line no-console
-      console.log(`[ManagerDaemon] init ok module=${module.id} elapsedMs=${Date.now() - startedAt}`);
+      // [ManagerDaemon] init ok removed
     }
     for (const module of this.modules.values()) {
       const startedAt = Date.now();
       // eslint-disable-next-line no-console
-      console.log(`[ManagerDaemon] start begin module=${module.id}`);
+      // [ManagerDaemon] start begin removed
       await this.withTimeout(
         Promise.resolve(module.start()),
         timeoutMs,
         `[ManagerDaemon] start timeout module=${module.id} after ${timeoutMs}ms`
       );
       // eslint-disable-next-line no-console
-      console.log(`[ManagerDaemon] start ok module=${module.id} elapsedMs=${Date.now() - startedAt}`);
+      // [ManagerDaemon] start ok removed
     }
   }
 

@@ -7,27 +7,6 @@
 import path from 'path';
 import { openAuthInCamoufox } from '../../core/config/camoufox-launcher.js';
 
-/**
- * Resolve Camoufox alias from auth configuration
- */
-export function resolveCamoufoxAliasForAuth(providerType: string, auth: { tokenFile?: string }): string {
-  const raw = typeof auth.tokenFile === 'string' ? auth.tokenFile.trim() : '';
-  if (raw && !raw.includes('/') && !raw.includes('\\') && !raw.endsWith('.json')) {
-    return raw;
-  }
-  const base = raw ? path.basename(raw) : '';
-  const pt = String(providerType || '').trim().toLowerCase();
-  if (base && pt) {
-    const re = new RegExp(`^${pt}-oauth-\\d+(?:-(.+))?\\.json$`, 'i');
-    const m = base.match(re);
-    const alias = m && m[1] ? String(m[1]).trim() : '';
-    if (alias) {
-      return alias;
-    }
-  }
-  return 'default';
-}
-
 type ExtendedOAuthAuth = {
   tokenFile?: string;
 };
