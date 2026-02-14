@@ -1,7 +1,6 @@
 import type { ModuleDependencies } from '../../../modules/pipeline/interfaces/pipeline-interfaces.js';
 import type { PipelineExecutionInput, PipelineExecutionResult } from '../../handlers/types.js';
 import type { HubPipeline, ProviderHandle, ProviderProtocol } from './types.js';
-import { writeClientSnapshot } from '../../../providers/core/utils/snapshot-writer.js';
 import { asRecord } from './provider-utils.js';
 import { attachProviderRuntimeMetadata } from '../../../providers/core/runtime/provider-runtime-metadata.js';
 import { enhanceProviderRequestId } from '../../utils/request-id-manager.js';
@@ -18,7 +17,7 @@ import {
   createSnapshotRecorder as bridgeCreateSnapshotRecorder,
 } from '../../../modules/llmswitch/bridge.js';
 import { applyClientConnectionStateToContext } from '../../utils/client-connection-state.js';
-import { getClockClientRegistry, injectClockClientPrompt } from './clock-client-registry.js';
+import { injectClockClientPrompt } from './clock-client-registry.js';
 import { ensureHubPipeline, runHubPipeline } from './executor-pipeline.js';
 
 // Import from new executor submodules
@@ -33,24 +32,41 @@ import {
   waitBeforeRetry
 } from './executor/retry-engine.js';
 import {
+  extractSseWrapperError,
   type SseWrapperErrorInfo
 } from './executor/sse-error-handler.js';
 import {
   type UsageMetrics,
   extractUsageFromResult,
-  normalizeUsage,
-  extractEstimatedInputTokens,
-  reconcileUsageWithEstimate,
-  patchUsageCandidate,
   mergeUsageMetrics,
   buildUsageLogText
 } from './executor/usage-aggregator.js';
 import {
-  firstNonEmptyString,
-  firstFiniteNumber
-} from './executor/utils.js';
-
-import { isRetryableSseWrapperError } from './executor/retry-engine.js';
+  type AntigravityRetrySignal,
+  bindClockConversationSession,
+  extractRetryErrorSignature,
+  extractStatusCodeFromError,
+  injectAntigravityRetrySignal,
+  isAntigravityProviderKey,
+  isAntigravityReauthRequired403,
+  isGoogleAccountVerificationRequiredError,
+  isRateLimitLikeError,
+  isSseDecodeRateLimitError,
+  resolveAntigravityMaxProviderAttempts,
+  shouldRotateAntigravityAliasOnRetry
+} from './executor/request-retry-helpers.js';
+import {
+  buildProviderLabel,
+  cloneRequestPayload,
+  extractClientModelId,
+  extractProviderModel,
+  extractResponseStatus,
+  normalizeProviderResponse
+} from './executor/provider-response-utils.js';
+import {
+  isPoolExhaustedPipelineError,
+  writeInboundClientSnapshot
+} from './executor/request-executor-core-utils.js';
 
 export type RequestExecutorDeps = {
   runtimeManager: {
@@ -68,247 +84,8 @@ export interface RequestExecutor {
 }
 
 const DEFAULT_MAX_PROVIDER_ATTEMPTS = 6;
-const DEFAULT_ANTIGRAVITY_MAX_PROVIDER_ATTEMPTS = 20;
-
 // Re-export for backward compatibility
 export type { SseWrapperErrorInfo };
-
-function resolveAntigravityMaxProviderAttempts(): number {
-  const raw = String(
-    process.env.ROUTECODEX_ANTIGRAVITY_MAX_PROVIDER_ATTEMPTS || process.env.RCC_ANTIGRAVITY_MAX_PROVIDER_ATTEMPTS || ''
-  )
-    .trim()
-    .toLowerCase();
-  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
-  const candidate = Number.isFinite(parsed) ? parsed : DEFAULT_ANTIGRAVITY_MAX_PROVIDER_ATTEMPTS;
-  return Math.max(1, Math.min(60, candidate));
-}
-
-function isAntigravityProviderKey(providerKey: string | undefined): boolean {
-  return typeof providerKey === 'string' && providerKey.startsWith('antigravity.');
-}
-
-const RATE_LIMIT_ERROR_CODE_HINTS = [
-  '429',
-  '1302',
-  'rate_limit',
-  'rate-limit',
-  'too_many_requests',
-  'too-many-requests',
-  'too many requests'
-];
-
-const RATE_LIMIT_MESSAGE_HINTS = [
-  'rate limit',
-  'too many requests',
-  'request limit',
-  'rate limited',
-  'quota exceeded',
-  'slow down',
-  '速率限制',
-  '请求频率',
-  '请求过于频繁',
-  '频率限制'
-];
-
-function coerceErrorCode(value: unknown): string {
-  return typeof value === 'string' ? value.trim().toLowerCase() : '';
-}
-
-function isRateLimitLikeError(message: string, ...codes: Array<string | undefined>): boolean {
-  const loweredMessage = String(message || '').toLowerCase();
-  const normalizedCodes = codes
-    .map((code) => coerceErrorCode(code))
-    .filter((code) => code.length > 0);
-  if (normalizedCodes.some((code) => RATE_LIMIT_ERROR_CODE_HINTS.some((hint) => code.includes(hint)))) {
-    return true;
-  }
-  return RATE_LIMIT_MESSAGE_HINTS.some((hint) => loweredMessage.includes(hint));
-}
-
-function isGoogleAccountVerificationRequiredError(err: unknown): boolean {
-  if (!err || typeof err !== 'object') {
-    return false;
-  }
-  const messageRaw = (err as { message?: unknown }).message;
-  const message = typeof messageRaw === 'string' ? messageRaw : '';
-  if (!message) {
-    return false;
-  }
-  const lowered = message.toLowerCase();
-  return (
-    lowered.includes('verify your account') ||
-    // Antigravity-Manager alignment: 403 validation gating keywords.
-    lowered.includes('validation_required') ||
-    lowered.includes('validation required') ||
-    lowered.includes('validation_url') ||
-    lowered.includes('validation url') ||
-    lowered.includes('accounts.google.com/signin/continue') ||
-    lowered.includes('support.google.com/accounts?p=al_alert')
-  );
-}
-
-function isAntigravityReauthRequired403(err: unknown): boolean {
-  if (!err || typeof err !== 'object') {
-    return false;
-  }
-  const status = extractStatusCodeFromError(err);
-  if (status !== 403) {
-    return false;
-  }
-  if (isGoogleAccountVerificationRequiredError(err)) {
-    return false;
-  }
-  const messageRaw = (err as { message?: unknown }).message;
-  const message = typeof messageRaw === 'string' ? messageRaw : '';
-  if (!message) {
-    return false;
-  }
-  const lowered = message.toLowerCase();
-  return (
-    lowered.includes('please authenticate with google oauth first') ||
-    lowered.includes('authenticate with google oauth') ||
-    lowered.includes('missing required authentication credential') ||
-    lowered.includes('request is missing required authentication') ||
-    lowered.includes('unauthenticated') ||
-    lowered.includes('invalid token') ||
-    lowered.includes('invalid_grant') ||
-    lowered.includes('unauthorized') ||
-    lowered.includes('token expired') ||
-    lowered.includes('expired token')
-  );
-}
-
-function shouldRotateAntigravityAliasOnRetry(error: unknown): boolean {
-  // Antigravity safety: do not rotate between Antigravity aliases within a single request.
-  // Multi-account switching (especially during 4xx/429 states) can cascade into cross-account reauth (403 verify) events.
-  return false;
-}
-
-function extractStatusCodeFromError(err: unknown): number | undefined {
-  if (!err || typeof err !== 'object') return undefined;
-  const direct = (err as any).statusCode;
-  if (typeof direct === 'number') return direct;
-  const nested = (err as any).status;
-  if (typeof nested === 'number') return nested;
-  const details = (err as any).details;
-  if (details && typeof details === 'object') {
-    const detailStatusCode = (details as any).statusCode;
-    if (typeof detailStatusCode === 'number') return detailStatusCode;
-    const detailStatus = (details as any).status;
-    if (typeof detailStatus === 'number') return detailStatus;
-  }
-  const response = (err as any).response;
-  if (response && typeof response === 'object') {
-    const responseStatus = (response as any).status;
-    if (typeof responseStatus === 'number') return responseStatus;
-  }
-  return undefined;
-}
-
-function isSseDecodeRateLimitError(error: unknown, status: number | undefined): boolean {
-  if (status !== 429 || !error || typeof error !== 'object') {
-    return false;
-  }
-  const record = error as Record<string, unknown>;
-  const message = typeof record.message === 'string' ? record.message : '';
-  const code = typeof record.code === 'string' ? record.code : '';
-  const upstreamCode = typeof record.upstreamCode === 'string' ? record.upstreamCode : '';
-  const name = typeof record.name === 'string' ? record.name.toLowerCase() : '';
-  const sseLike =
-    code === 'SSE_DECODE_ERROR' ||
-    name === 'providerprotocolerror' ||
-    message.toLowerCase().includes('sse');
-  return sseLike && isRateLimitLikeError(message, code, upstreamCode);
-}
-
-function extractRetryErrorSignature(err: unknown): string {
-  if (!err || typeof err !== 'object') {
-    return 'unknown';
-  }
-  const status = extractStatusCodeFromError(err);
-  if (status === 403 && isGoogleAccountVerificationRequiredError(err)) {
-    return '403:GOOGLE_VERIFY';
-  }
-  if (status === 403 && isAntigravityReauthRequired403(err)) {
-    return '403:OAUTH_REAUTH';
-  }
-  const codeRaw = (err as { code?: unknown }).code;
-  const upstreamCodeRaw = (err as { upstreamCode?: unknown }).upstreamCode;
-  const upstreamCode =
-    typeof upstreamCodeRaw === 'string' && upstreamCodeRaw.trim() ? upstreamCodeRaw.trim() : undefined;
-  const code = typeof codeRaw === 'string' && codeRaw.trim() ? codeRaw.trim() : undefined;
-  const parts = [
-    typeof status === 'number' && Number.isFinite(status) ? String(status) : '',
-    upstreamCode || '',
-    code || ''
-  ].filter((p) => p.length > 0);
-  return parts.length ? parts.join(':') : 'unknown';
-}
-
-function injectAntigravityRetrySignal(
-  metadata: Record<string, unknown>,
-  signal: { signature: string; consecutive: number; avoidAllOnRetry?: boolean } | null
-): void {
-  if (!signal || !signal.signature || signal.consecutive <= 0) {
-    return;
-  }
-  const carrier = metadata as { __rt?: unknown };
-  const existing = carrier.__rt && typeof carrier.__rt === 'object' && !Array.isArray(carrier.__rt) ? carrier.__rt : {};
-  carrier.__rt = {
-    ...(existing as Record<string, unknown>),
-    antigravityRetryErrorSignature: signal.signature,
-    antigravityRetryErrorConsecutive: signal.consecutive,
-    ...(signal.avoidAllOnRetry === true ? { antigravityAvoidAllOnRetry: true } : {})
-  };
-}
-
-function normalizeSessionToken(value: unknown): string | undefined {
-  if (typeof value !== 'string') {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  return trimmed || undefined;
-}
-
-function inferClockClientTypeFromMetadata(metadata: Record<string, unknown>): string | undefined {
-  const direct = normalizeSessionToken(metadata.clockClientType) ?? normalizeSessionToken(metadata.clientType);
-  if (direct) {
-    return direct;
-  }
-
-  const userAgent = normalizeSessionToken(metadata.userAgent)?.toLowerCase() ?? '';
-  if (userAgent.includes('codex')) {
-    return 'codex';
-  }
-  if (userAgent.includes('claude')) {
-    return 'claude';
-  }
-  return undefined;
-}
-
-function bindClockConversationSession(metadata: Record<string, unknown>): void {
-  const conversationSessionId = normalizeSessionToken(metadata.sessionId);
-  if (!conversationSessionId) {
-    return;
-  }
-
-  const tmuxSessionId = normalizeSessionToken(metadata.tmuxSessionId);
-  const daemonId = normalizeSessionToken(metadata.clockDaemonId)
-    ?? normalizeSessionToken(metadata.clockClientDaemonId);
-  const clientType = inferClockClientTypeFromMetadata(metadata);
-
-  try {
-    getClockClientRegistry().bindConversationSession({
-      conversationSessionId,
-      ...(tmuxSessionId ? { tmuxSessionId } : {}),
-      ...(daemonId ? { daemonId } : {}),
-      ...(clientType ? { clientType } : {})
-    });
-  } catch {
-    // best-effort only
-  }
-}
 
 export class HubRequestExecutor implements RequestExecutor {
   constructor(private readonly deps: RequestExecutorDeps) { }
@@ -336,44 +113,23 @@ export class HubRequestExecutor implements RequestExecutor {
         stream: initialMetadata.stream === true
       });
 
-      try {
-        const headerUa =
-          (typeof input.headers?.['user-agent'] === 'string' && input.headers['user-agent']) ||
-          (typeof input.headers?.['User-Agent'] === 'string' && input.headers['User-Agent']);
-        const headerOriginator =
-          (typeof input.headers?.['originator'] === 'string' && input.headers['originator']) ||
-          (typeof input.headers?.['Originator'] === 'string' && input.headers['Originator']);
-        await writeClientSnapshot({
-          entryEndpoint: input.entryEndpoint,
-          requestId: input.requestId,
-          headers: asRecord(input.headers),
-          body: input.body,
-          metadata: {
-            ...initialMetadata,
-            clientRequestId,
-            userAgent: headerUa,
-            clientOriginator: headerOriginator
-          }
-        });
-      } catch {
-        /* snapshot failure should not block request path */
-      }
+      await writeInboundClientSnapshot({ input, initialMetadata, clientRequestId });
 
       const pipelineLabel = 'hub';
       let aggregatedUsage: UsageMetrics | undefined;
       const excludedProviderKeys = new Set<string>();
       let maxAttempts = resolveMaxProviderAttempts();
-      const originalRequestSnapshot = this.cloneRequestPayload(input.body);
+      const originalRequestSnapshot = cloneRequestPayload(input.body);
       let attempt = 0;
       let lastError: unknown;
       let initialRoutePool: string[] | null = null;
-      let antigravityRetrySignal: { signature: string; consecutive: number; avoidAllOnRetry?: boolean } | null = null;
+      let antigravityRetrySignal: AntigravityRetrySignal | null = null;
 
       while (attempt < maxAttempts) {
         attempt += 1;
         if (originalRequestSnapshot && typeof originalRequestSnapshot === 'object') {
           const cloned =
-            this.cloneRequestPayload(originalRequestSnapshot) ??
+            cloneRequestPayload(originalRequestSnapshot) ??
             ({ ...(originalRequestSnapshot as Record<string, unknown>) } as Record<string, unknown>);
           input.body = cloned;
         }
@@ -395,21 +151,7 @@ export class HubRequestExecutor implements RequestExecutor {
         try {
           pipelineResult = await runHubPipeline(hubPipeline, input, metadataForAttempt);
         } catch (pipelineError) {
-          const pipelineErrorCode =
-            typeof (pipelineError as { code?: unknown }).code === 'string'
-              ? String((pipelineError as { code?: string }).code).trim()
-              : '';
-          const pipelineErrorMessage =
-            pipelineError instanceof Error
-              ? pipelineError.message
-              : String(pipelineError ?? 'Unknown error');
-          const isPoolExhaustedError =
-            pipelineErrorCode === 'PROVIDER_NOT_AVAILABLE' ||
-            pipelineErrorCode === 'ERR_NO_PROVIDER_TARGET' ||
-            /all providers unavailable/i.test(pipelineErrorMessage) ||
-            /virtual router did not produce a provider target/i.test(pipelineErrorMessage);
-
-          if (lastError && isPoolExhaustedError) {
+          if (lastError && isPoolExhaustedPipelineError(pipelineError)) {
             throw lastError;
           }
           throw pipelineError;
@@ -533,7 +275,7 @@ export class HubRequestExecutor implements RequestExecutor {
             ? (mergedMetadata.target as Record<string, unknown>).clientModelId
             : undefined;
         const rawModel =
-          this.extractProviderModel(providerPayload) ||
+          extractProviderModel(providerPayload) ||
           (typeof metadataModel === 'string' ? metadataModel : undefined);
         const providerAlias =
           typeof target.providerKey === 'string' && target.providerKey.includes('.')
@@ -557,7 +299,7 @@ export class HubRequestExecutor implements RequestExecutor {
         }
 
         const providerModel = rawModel;
-        const providerLabel = this.buildProviderLabel(target.providerKey, providerModel);
+        const providerLabel = buildProviderLabel(target.providerKey, providerModel);
         if (clientHeadersForAttempt) {
           ensureClientHeadersOnPayload(providerPayload, clientHeadersForAttempt);
         }
@@ -606,7 +348,7 @@ export class HubRequestExecutor implements RequestExecutor {
 
         try {
           const providerResponse = await handle.instance.processIncoming(providerPayload);
-          const responseStatus = this.extractResponseStatus(providerResponse);
+          const responseStatus = extractResponseStatus(providerResponse);
           this.logStage('provider.send.completed', input.requestId, {
             providerKey: target.providerKey,
             status: responseStatus,
@@ -617,7 +359,7 @@ export class HubRequestExecutor implements RequestExecutor {
             attempt
           });
           const wantsStreamBase = Boolean(input.metadata?.inboundStream ?? input.metadata?.stream);
-          const normalized = this.normalizeProviderResponse(providerResponse);
+          const normalized = normalizeProviderResponse(providerResponse);
           const pipelineProcessed = pipelineResult.processedRequest;
           const pipelineStandardized = pipelineResult.standardizedRequest;
           const requestSemantics =
@@ -693,8 +435,8 @@ export class HubRequestExecutor implements RequestExecutor {
             }
             throw errorToThrow;
           }
-          const usage = this.extractUsageFromResult(converted, mergedMetadata);
-          aggregatedUsage = this.mergeUsageMetrics(aggregatedUsage, usage);
+          const usage = extractUsageFromResult(converted, mergedMetadata);
+          aggregatedUsage = mergeUsageMetrics(aggregatedUsage, usage);
           if (converted.body && typeof converted.body === 'object') {
             const body = converted.body as Record<string, unknown>;
             if (!('__sse_responses' in body)) {
@@ -830,37 +572,6 @@ export class HubRequestExecutor implements RequestExecutor {
 
   }
 
-  private extractResponseStatus(response: unknown): number | undefined {
-    if (!response || typeof response !== 'object') {
-      return undefined;
-    }
-    const candidate = (response as { status?: unknown }).status;
-    return typeof candidate === 'number' ? candidate : undefined;
-  }
-
-  private normalizeProviderResponse(response: unknown): PipelineExecutionResult {
-    const status = this.extractResponseStatus(response);
-    const headers = this.normalizeProviderResponseHeaders(
-      response && typeof response === 'object' ? (response as Record<string, unknown>).headers : undefined
-    );
-    const body =
-      response && typeof response === 'object' && 'data' in (response as Record<string, unknown>)
-        ? (response as Record<string, unknown>).data
-        : response;
-    return { status, headers, body };
-  }
-
-  private normalizeProviderResponseHeaders(headers: unknown): Record<string, string> | undefined {
-    if (!headers || typeof headers !== 'object') { return undefined; }
-    const normalized: Record<string, string> = {};
-    for (const [key, value] of Object.entries(headers as Record<string, unknown>)) {
-      if (typeof value === 'string') {
-        normalized[key.toLowerCase()] = value;
-      }
-    }
-    return Object.keys(normalized).length ? normalized : undefined;
-  }
-
   private async convertProviderResponseIfNeeded(options: {
     entryEndpoint?: string;
     providerProtocol: string;
@@ -875,7 +586,7 @@ export class HubRequestExecutor implements RequestExecutor {
   }): Promise<PipelineExecutionResult> {
     const body = options.response.body;
     if (body && typeof body === 'object') {
-      const wrapperError = this.extractSseWrapperError(body as Record<string, unknown>);
+      const wrapperError = extractSseWrapperError(body as Record<string, unknown>);
       if (wrapperError) {
         const codeSuffix = wrapperError.errorCode ? ` [${wrapperError.errorCode}]` : '';
         const error = new Error(`Upstream SSE error event${codeSuffix}: ${wrapperError.message}`) as Error & {
@@ -917,7 +628,7 @@ export class HubRequestExecutor implements RequestExecutor {
     }
     try {
       const metadataBag = asRecord(options.pipelineMetadata);
-      const originalModelId = this.extractClientModelId(metadataBag, options.originalRequest);
+      const originalModelId = extractClientModelId(metadataBag, options.originalRequest);
       const assignedModelId =
         typeof (metadataBag as Record<string, unknown> | undefined)?.assignedModelId === 'string'
           ? String((metadataBag as Record<string, unknown>).assignedModelId)
@@ -1007,7 +718,7 @@ export class HubRequestExecutor implements RequestExecutor {
           throw new Error(`Provider runtime ${runtimeKey} not found`);
         }
         const providerResponse = await handle.instance.processIncoming(invokeOptions.payload);
-        const normalized = this.normalizeProviderResponse(providerResponse);
+        const normalized = normalizeProviderResponse(providerResponse);
         const bodyPayload =
           normalized.body && typeof normalized.body === 'object'
             ? (normalized.body as Record<string, unknown>)
@@ -1159,184 +870,6 @@ export class HubRequestExecutor implements RequestExecutor {
     }
   }
 
-  private extractSseWrapperError(payload: Record<string, unknown> | undefined): SseWrapperErrorInfo | undefined {
-    return this.findSseWrapperError(payload, 2);
-  }
-
-  private findSseWrapperError(
-    record: Record<string, unknown> | undefined,
-    depth: number
-  ): SseWrapperErrorInfo | undefined {
-    if (!record || typeof record !== 'object' || depth < 0) {
-      return undefined;
-    }
-    if (record.mode === 'sse') {
-      const normalized = this.normalizeSseWrapperErrorValue(record.error, depth);
-      if (normalized) {
-        return normalized;
-      }
-    }
-    const nestedKeys = ['body', 'data', 'payload', 'response'];
-    for (const key of nestedKeys) {
-      const nested = record[key];
-      if (!nested || typeof nested !== 'object' || Array.isArray(nested)) {
-        continue;
-      }
-      const found = this.findSseWrapperError(nested as Record<string, unknown>, depth - 1);
-      if (found) {
-        return found;
-      }
-    }
-    return undefined;
-  }
-
-  private normalizeSseWrapperErrorValue(value: unknown, depth: number): SseWrapperErrorInfo | undefined {
-    if (value === undefined || value === null || depth < 0) {
-      return undefined;
-    }
-    if (typeof value === 'string') {
-      const trimmed = value.trim();
-      if (!trimmed) {
-        return undefined;
-      }
-      if (depth > 0 && (trimmed.startsWith('{') || trimmed.startsWith('['))) {
-        try {
-          const parsed = JSON.parse(trimmed);
-          const parsedInfo = this.normalizeSseWrapperErrorValue(parsed, depth - 1);
-          if (parsedInfo) {
-            return parsedInfo;
-          }
-        } catch {
-          // fallback to raw string
-        }
-      }
-      return {
-        message: trimmed,
-        retryable: isRetryableSseWrapperError(trimmed)
-      };
-    }
-    if (typeof value !== 'object' || Array.isArray(value)) {
-      return undefined;
-    }
-    const record = value as Record<string, unknown>;
-    const directMessage = firstNonEmptyString([
-      record.message,
-      record.error_message,
-      record.errorMessage
-    ]);
-    const directCode = firstNonEmptyString([
-      record.code,
-      record.error_code,
-      record.errorCode,
-      record.type
-    ]);
-    const directStatus = firstFiniteNumber([
-      record.status,
-      record.statusCode,
-      record.status_code,
-      record.http_status
-    ]);
-
-    if (depth > 0) {
-      for (const key of ['error', 'data', 'payload', 'details', 'body', 'response']) {
-        const nestedInfo = this.normalizeSseWrapperErrorValue(record[key], depth - 1);
-        if (nestedInfo) {
-          const mergedCode = nestedInfo.errorCode ?? directCode;
-          const retryable = nestedInfo.retryable || isRetryableSseWrapperError(nestedInfo.message, mergedCode, directStatus);
-          return {
-            message: nestedInfo.message,
-            ...(mergedCode ? { errorCode: mergedCode } : {}),
-            retryable
-          };
-        }
-      }
-    }
-
-    if (directMessage) {
-      return {
-        message: directMessage,
-        ...(directCode ? { errorCode: directCode } : {}),
-        retryable: isRetryableSseWrapperError(directMessage, directCode, directStatus)
-      };
-    }
-
-    try {
-      const serialized = JSON.stringify(record);
-      if (serialized && serialized !== '{}') {
-        return {
-          message: serialized,
-          ...(directCode ? { errorCode: directCode } : {}),
-          retryable: isRetryableSseWrapperError(serialized, directCode, directStatus)
-        };
-      }
-    } catch {
-      // ignore stringify failures
-    }
-
-    return undefined;
-  }
-
-  private extractClientModelId(
-    metadata: Record<string, unknown>,
-    originalRequest?: Record<string, unknown>
-  ): string | undefined {
-    const candidates = [
-      metadata.clientModelId,
-      metadata.originalModelId,
-      (metadata.target && typeof metadata.target === 'object'
-        ? (metadata.target as Record<string, unknown>).clientModelId
-        : undefined),
-      originalRequest && typeof originalRequest === 'object'
-        ? (originalRequest as Record<string, unknown>).model
-        : undefined,
-      originalRequest && typeof originalRequest === 'object'
-        ? (originalRequest as Record<string, unknown>).originalModelId
-        : undefined
-    ];
-    for (const candidate of candidates) {
-      if (typeof candidate === 'string' && candidate.trim()) {
-        return candidate.trim();
-      }
-    }
-    return undefined;
-  }
-
-  private cloneRequestPayload(payload: unknown): Record<string, unknown> | undefined {
-    if (!payload || typeof payload !== 'object') { return undefined; }
-    try {
-      return JSON.parse(JSON.stringify(payload));
-    } catch {
-      return undefined;
-    }
-  }
-
-  private extractProviderModel(payload?: Record<string, unknown>): string | undefined {
-    if (!payload) {
-      return undefined;
-    }
-    const source =
-      payload.data && typeof payload.data === 'object'
-        ? (payload.data as Record<string, unknown>)
-        : payload;
-    const raw = (source as Record<string, unknown>).model;
-    if (typeof raw === 'string' && raw.trim()) {
-      return raw.trim();
-    }
-    return undefined;
-  }
-
-  private buildProviderLabel(providerKey?: string, model?: string): string | undefined {
-    const key = typeof providerKey === 'string' && providerKey.trim() ? providerKey.trim() : undefined;
-    const modelId = typeof model === 'string' && model.trim() ? model.trim() : undefined;
-    if (!key && !modelId) {
-      return undefined;
-    }
-    if (key && modelId) {
-      return `${key}.${modelId}`;
-    }
-    return key || modelId;
-  }
-
   private logStage(stage: string, requestId: string, details?: Record<string, unknown>): void {
     this.deps.logStage(stage, requestId, details);
   }
@@ -1348,176 +881,10 @@ export class HubRequestExecutor implements RequestExecutor {
     if (!isUsageLoggingEnabled()) {
       return;
     }
-    const providerLabel = this.buildProviderLabel(info.providerKey, info.model) ?? '-';
+    const providerLabel = buildProviderLabel(info.providerKey, info.model) ?? '-';
     const usageText = buildUsageLogText(info.usage);
     const latency = info.latencyMs.toFixed(1);
     console.log(`[usage] request ${requestId} provider=${providerLabel} latency=${latency}ms (${usageText})`);
-  }
-
-  private extractUsageFromResult(
-    result: PipelineExecutionResult,
-    metadata?: Record<string, unknown>
-  ): UsageMetrics | undefined {
-    const estimatedInput = this.extractEstimatedInputTokens(metadata);
-    const candidates: unknown[] = [];
-    if (metadata && typeof metadata === 'object') {
-      const bag = metadata as Record<string, unknown>;
-      if (bag.usage) {
-        candidates.push(bag.usage);
-      }
-    }
-    if (result.body && typeof result.body === 'object') {
-      const body = result.body as Record<string, unknown>;
-      if (body.usage) {
-        candidates.push(body.usage);
-      }
-      if (body.response && typeof body.response === 'object') {
-        const responseNode = body.response as Record<string, unknown>;
-        if (responseNode.usage) {
-          candidates.push(responseNode.usage);
-        }
-      }
-    }
-    for (const candidate of candidates) {
-      const normalized = this.normalizeUsage(candidate);
-      if (normalized) {
-        const reconciled = this.reconcileUsageWithEstimate(normalized, estimatedInput, candidate);
-        return reconciled;
-      }
-    }
-    return undefined;
-  }
-
-  private normalizeUsage(value: unknown): UsageMetrics | undefined {
-    if (!value || typeof value !== 'object') {
-      return undefined;
-    }
-    const record = value as Record<string, unknown>;
-    const basePrompt =
-      typeof record.prompt_tokens === 'number'
-        ? record.prompt_tokens
-        : typeof record.input_tokens === 'number'
-          ? record.input_tokens
-          : undefined;
-    let cacheRead: number | undefined =
-      typeof record.cache_read_input_tokens === 'number' ? record.cache_read_input_tokens : undefined;
-    if (cacheRead === undefined && record.input_tokens_details && typeof record.input_tokens_details === 'object') {
-      const details = record.input_tokens_details as Record<string, unknown>;
-      if (typeof details.cached_tokens === 'number') {
-        cacheRead = details.cached_tokens;
-      }
-    }
-    const prompt =
-      basePrompt !== undefined || cacheRead !== undefined
-        ? (basePrompt ?? 0) + (cacheRead ?? 0)
-        : undefined;
-    const completion =
-      typeof record.completion_tokens === 'number'
-        ? record.completion_tokens
-        : typeof record.output_tokens === 'number'
-          ? record.output_tokens
-          : undefined;
-    let total =
-      typeof record.total_tokens === 'number'
-        ? record.total_tokens
-        : undefined;
-    if (total === undefined && prompt !== undefined && completion !== undefined) {
-      total = prompt + completion;
-    }
-    if (prompt === undefined && completion === undefined && total === undefined) {
-      return undefined;
-    }
-    return {
-      prompt_tokens: prompt,
-      completion_tokens: completion,
-      total_tokens: total
-    };
-  }
-
-  private extractEstimatedInputTokens(metadata?: Record<string, unknown>): number | undefined {
-    if (!metadata || typeof metadata !== 'object') {
-      return undefined;
-    }
-    const bag = metadata as Record<string, unknown>;
-    const raw =
-      (bag.estimatedInputTokens as unknown) ??
-      (bag.estimated_tokens as unknown) ??
-      (bag.estimatedTokens as unknown);
-    const value = typeof raw === 'number' ? raw : Number(raw);
-    if (!Number.isFinite(value) || value <= 0) {
-      return undefined;
-    }
-    return value;
-  }
-
-  private reconcileUsageWithEstimate(
-    usage: UsageMetrics,
-    estimatedInput?: number,
-    candidate?: unknown
-  ): UsageMetrics {
-    if (!estimatedInput || !Number.isFinite(estimatedInput) || estimatedInput <= 0) {
-      return usage;
-    }
-    const upstreamPrompt = usage.prompt_tokens ?? usage.total_tokens ?? undefined;
-    const completion = usage.completion_tokens ?? 0;
-
-    // 若上游缺失 prompt/total，直接使用我们估算的输入 token。
-    if (upstreamPrompt === undefined || upstreamPrompt <= 0) {
-      const total = estimatedInput + completion;
-      this.patchUsageCandidate(candidate, estimatedInput, completion, total);
-      return {
-        prompt_tokens: estimatedInput,
-        completion_tokens: completion,
-        total_tokens: total
-      };
-    }
-
-    const ratio = upstreamPrompt > 0 ? upstreamPrompt / estimatedInput : 1;
-    // 差异过大（数量级不一致）时，优先采用本地估算值。
-    if (ratio > 5 || ratio < 0.2) {
-      const total = estimatedInput + completion;
-      this.patchUsageCandidate(candidate, estimatedInput, completion, total);
-      return {
-        prompt_tokens: estimatedInput,
-        completion_tokens: completion,
-        total_tokens: total
-      };
-    }
-
-    return usage;
-  }
-
-  private patchUsageCandidate(
-    candidate: unknown,
-    prompt: number,
-    completion: number,
-    total: number
-  ): void {
-    if (!candidate || typeof candidate !== 'object') {
-      return;
-    }
-    const record = candidate as Record<string, unknown>;
-    record.prompt_tokens = prompt;
-    record.input_tokens = prompt;
-    record.completion_tokens = completion;
-    record.output_tokens = completion;
-    record.total_tokens = total;
-  }
-
-  private mergeUsageMetrics(base?: UsageMetrics, delta?: UsageMetrics): UsageMetrics | undefined {
-    if (!delta) {
-      return base;
-    }
-    if (!base) {
-      return { ...delta };
-    }
-    const merged: UsageMetrics = {
-      prompt_tokens: (base.prompt_tokens ?? 0) + (delta.prompt_tokens ?? 0),
-      completion_tokens: (base.completion_tokens ?? 0) + (delta.completion_tokens ?? 0)
-    };
-    const total = (base.total_tokens ?? 0) + (delta.total_tokens ?? 0);
-    merged.total_tokens = total || undefined;
-    return merged;
   }
 
 }

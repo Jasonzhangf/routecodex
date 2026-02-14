@@ -9,34 +9,25 @@
  * 各协议具体行为（OpenAI Chat、Responses、Anthropic、Gemini 等）通过子类覆写钩子实现。
  */
 
-import { createHash, createHmac } from 'node:crypto';
 import { BaseProvider } from './base-provider.js';
 import { HttpClient } from '../utils/http-client.js';
-import { DynamicProfileLoader, ServiceProfileValidator } from '../config/service-profiles.js';
+import { ServiceProfileValidator } from '../config/service-profiles.js';
 import {
   attachProviderSseSnapshotStream,
   writeProviderSnapshot
 } from '../utils/snapshot-writer.js';
-import { logOAuthDebug } from '../../auth/oauth-logger.js';
-import {
-  ensureValidOAuthToken,
-  handleUpstreamInvalidOAuthToken,
-  shouldTriggerInteractiveOAuthRepair
-} from '../../auth/oauth-lifecycle.js';
 import type { IAuthProvider } from '../../auth/auth-interface.js';
 import type { OAuthAuth, OpenAIStandardConfig } from '../api/provider-config.js';
-import type { ProviderContext, ProviderRuntimeProfile, ServiceProfile, ProviderType } from '../api/provider-types.js';
+import type { ProviderContext, ServiceProfile, ProviderType } from '../api/provider-types.js';
 import type { UnknownObject } from '../../../types/common-types.js';
 import type { ModuleDependencies } from '../../../modules/pipeline/interfaces/pipeline-interfaces.js';
-import { attachProviderRuntimeMetadata, extractProviderRuntimeMetadata } from './provider-runtime-metadata.js';
 import {
   buildVisionSnapshotPayload,
   shouldCaptureVisionDebug,
   summarizeVisionMessages
 } from './vision-debug-utils.js';
 import {
-  DEFAULT_PROVIDER,
-  CODEX_IDENTIFIER_MAX_LENGTH
+  DEFAULT_PROVIDER
 } from '../../../constants/index.js';
 import type { ProviderRuntimeMetadata } from './provider-runtime-metadata.js';
 import type { HttpProtocolClient, ProtocolRequestPayload } from '../../../client/http-protocol-client.js';
@@ -44,28 +35,29 @@ import { OpenAIChatProtocolClient } from '../../../client/openai/chat-protocol-c
 import { HttpRequestExecutor, type HttpRequestExecutorDeps, type PreparedHttpRequest } from './http-request-executor.js';
 import type { ProviderErrorAugmented } from './provider-error-types.js';
 import { extractStatusCodeFromError } from './provider-error-classifier.js';
+import { RuntimeEndpointResolver } from './runtime-endpoint-resolver.js';
+import { ProviderRequestPreprocessor } from './provider-request-preprocessor.js';
+import { ServiceProfileResolver } from './service-profile-resolver.js';
 import { getProviderFamilyProfile } from '../../profile/profile-registry.js';
 import type { ProviderFamilyProfile } from '../../profile/profile-contracts.js';
 
 // Transport submodules
-import { AuthProviderFactory } from './transport/index.js';
+import {
+  AuthProviderFactory,
+  AuthModeUtils,
+  HeaderUtils,
+  IflowSigner,
+  OAuthHeaderPreflight,
+  OAuthRecoveryHandler,
+  ProviderPayloadUtils,
+  RequestHeaderBuilder,
+  SessionHeaderUtils,
+  RuntimeDetector
+} from './transport/index.js';
 
 type ProtocolClient = HttpProtocolClient<ProtocolRequestPayload>;
 type OAuthAuthExtended = OAuthAuth & { rawType?: string; oauthProviderId?: string; tokenFile?: string };
-type OAuthAwareAuthProvider = IAuthProvider & {
-  getOAuthClient?: () => { loadToken?: () => void };
-};
 type MetadataContainer = { metadata?: Record<string, unknown> };
-type ResponseRecord = Record<string, unknown> & {
-  data?: ResponseRecord;
-  headers?: Record<string, unknown>;
-  status?: number;
-  model?: string;
-  usage?: UnknownObject;
-};
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null;
 
 export type ProviderConfigInternal = OpenAIStandardConfig['config'] & {
   endpoint?: string;
@@ -124,7 +116,7 @@ export class HttpTransportProvider extends BaseProvider {
         await this.authProvider.initialize();
         const providerConfig = this.config.config;
         const auth = providerConfig.auth;
-        const authMode = this.normalizeAuthMode(auth.type);
+        const authMode = AuthModeUtils.normalizeAuthMode(auth.type);
         // Token 管理迁移后，OAuth 初始化交由 TokenManager/TokenDaemon 负责，
         // 这里不再在服务器启动阶段主动跑 ensureValidOAuthToken，避免多余日志和上游调用。
         if (authMode !== 'oauth') {
@@ -171,135 +163,21 @@ export class HttpTransportProvider extends BaseProvider {
   protected getServiceProfile(): ServiceProfile {
     const cfg = this.config.config as ProviderConfigInternal;
     const profileKey = this.resolveProfileKey(cfg);
-
-    // Feature flag: 优先/强制使用 config-core 输出的 provider 行为字段
-    const useConfigCoreEnv = String(
-      process.env.ROUTECODEX_USE_CONFIG_CORE_PROVIDER_DEFAULTS ||
-      process.env.RCC_USE_CONFIG_CORE_PROVIDER_DEFAULTS ||
-      ''
-    ).trim().toLowerCase();
-    const forceConfigCoreDefaults =
-      useConfigCoreEnv === '1' ||
-      useConfigCoreEnv === 'true' ||
-      useConfigCoreEnv === 'yes' ||
-      useConfigCoreEnv === 'on';
-
-    const baseFromCfg = (cfg.baseUrl || cfg.overrides?.baseUrl || '').trim();
-    const endpointFromCfg = (cfg.overrides?.endpoint || cfg.endpoint || '').trim();
-    const defaultModelFromCfg = (cfg.overrides?.defaultModel || cfg.defaultModel || '').trim();
-    const timeoutFromCfg = cfg.overrides?.timeout ?? cfg.timeout;
-    const maxRetriesFromCfg = cfg.overrides?.maxRetries ?? cfg.maxRetries;
-    const headersFromCfg = (cfg.overrides?.headers || cfg.headers) as Record<string, string> | undefined;
-    const authCapsFromCfg = cfg.authCapabilities;
-
-    const hasConfigCoreProfile =
-      !!baseFromCfg ||
-      !!endpointFromCfg ||
-      !!defaultModelFromCfg ||
-      typeof timeoutFromCfg === 'number' ||
-      typeof maxRetriesFromCfg === 'number' ||
-      !!authCapsFromCfg ||
-      !!headersFromCfg;
-
-    // 先从 service-profiles 取出基础 profile（用于补全缺失字段/校验）
-    const baseProfile =
-      DynamicProfileLoader.buildServiceProfile(profileKey) ||
-      DynamicProfileLoader.buildServiceProfile(this.providerType);
-
-    // 如果 config-core 已提供字段，或强制要求使用 config-core，则以 config-core 为主
-    if (hasConfigCoreProfile || forceConfigCoreDefaults) {
-      if (forceConfigCoreDefaults) {
-        // 严格模式下，关键字段缺失直接 Fail Fast
-        if (!baseFromCfg) {
-          throw new Error(
-            `Provider config-core defaults missing baseUrl for providerId=${profileKey}`
-          );
-        }
-        if (!endpointFromCfg && !baseProfile?.defaultEndpoint) {
-          throw new Error(
-            `Provider config-core defaults missing endpoint for providerId=${profileKey}`
-          );
-        }
-      }
-
-      const defaultBaseUrl =
-        baseFromCfg ||
-        baseProfile?.defaultBaseUrl ||
-        'https://api.openai.com/v1';
-
-      const defaultEndpoint =
-        endpointFromCfg ||
-        baseProfile?.defaultEndpoint ||
-        '/chat/completions';
-
-      const defaultModel =
-        (defaultModelFromCfg && defaultModelFromCfg.length > 0)
-          ? defaultModelFromCfg
-          : (baseProfile?.defaultModel ?? '');
-
-      const genericRequiredAuth: string[] = [];
-      const genericOptionalAuth: string[] = ['apikey', 'oauth'];
-
-      const requiredAuth =
-        authCapsFromCfg?.required && authCapsFromCfg.required.length
-          ? authCapsFromCfg.required
-          : (baseProfile?.requiredAuth ?? genericRequiredAuth);
-
-      const optionalAuth =
-        authCapsFromCfg?.optional && authCapsFromCfg.optional.length
-          ? authCapsFromCfg.optional
-          : (baseProfile?.optionalAuth ?? genericOptionalAuth);
-
-      const mergedHeaders: Record<string, string> = {
-        ...(baseProfile?.headers || {}),
-        ...(headersFromCfg || {})
-      };
-
-      const timeout =
-        typeof timeoutFromCfg === 'number'
-          ? timeoutFromCfg
-          // 默认 Provider 请求超时时间
-          : (baseProfile?.timeout ?? DEFAULT_PROVIDER.TIMEOUT_MS);
-
-      const maxRetries =
-        typeof maxRetriesFromCfg === 'number'
-          ? maxRetriesFromCfg
-          : (baseProfile?.maxRetries ?? DEFAULT_PROVIDER.MAX_RETRIES);
-
-      return {
-        defaultBaseUrl,
-        defaultEndpoint,
-        defaultModel,
-        requiredAuth,
-        optionalAuth,
-        headers: mergedHeaders,
-        timeout,
-        maxRetries,
-        hooks: baseProfile?.hooks,
-        features: baseProfile?.features,
-        extensions: {
-          ...(baseProfile?.extensions || {}),
-          protocol: (cfg as { protocol?: string }).protocol || (baseProfile?.extensions as Record<string, unknown> | undefined)?.protocol
-        }
-      };
-    }
-
-    // 未提供 config-core provider 行为字段时，保持原有 service-profiles 行为
-    if (baseProfile) {
-      return baseProfile;
-    }
-
-    throw new Error(`Unknown providerType='${this.providerType}' (no service profile registered)`);
+    return ServiceProfileResolver.resolve({
+      cfg,
+      profileKey,
+      providerType: this.providerType
+    });
   }
 
   protected createAuthProvider(): IAuthProvider {
     const auth = this.config.config.auth;
     const extensions = this.getConfigExtensions();
-    const authMode = this.normalizeAuthMode(auth.type);
+    const authMode = AuthModeUtils.normalizeAuthMode(auth.type);
     this.authMode = authMode;
     const resolvedOAuthProviderId =
       authMode === 'oauth'
-        ? this.ensureOAuthProviderId(auth as OAuthAuthExtended, extensions)
+        ? AuthModeUtils.ensureOAuthProviderId(auth as OAuthAuthExtended, extensions)
         : undefined;
 
     const serviceProfileKey =
@@ -404,8 +282,8 @@ export class HttpTransportProvider extends BaseProvider {
       getBaseUrlCandidates: this.getBaseUrlCandidates.bind(this),
       buildHttpRequestBody: this.buildHttpRequestBody.bind(this),
       prepareSseRequestBody: this.prepareSseRequestBody.bind(this),
-      getEntryEndpointFromPayload: this.getEntryEndpointFromPayload.bind(this),
-      getClientRequestIdFromContext: this.getClientRequestIdFromContext.bind(this),
+      getEntryEndpointFromPayload: (payload) => ProviderPayloadUtils.extractEntryEndpointFromPayload(payload),
+      getClientRequestIdFromContext: (context) => ProviderPayloadUtils.getClientRequestIdFromContext(context),
       wrapUpstreamSseResponse: this.wrapUpstreamSseResponse.bind(this),
       getHttpRetryLimit: () => this.getHttpRetryLimit(),
       shouldRetryHttpError: this.shouldRetryHttpError.bind(this),
@@ -419,57 +297,8 @@ export class HttpTransportProvider extends BaseProvider {
   protected async preprocessRequest(request: UnknownObject): Promise<UnknownObject> {
     const context = this.createProviderContext();
     const runtimeMetadata = context.runtimeMetadata;
-    const headersFromRequest = this.normalizeClientHeaders((request as MetadataContainer)?.metadata?.clientHeaders);
-    const headersFromRuntime = this.normalizeClientHeaders(
-      runtimeMetadata?.metadata && typeof runtimeMetadata.metadata === 'object'
-        ? (runtimeMetadata.metadata as Record<string, unknown>).clientHeaders
-        : undefined
-    );
-    const effectiveClientHeaders = headersFromRequest ?? headersFromRuntime;
-    if (effectiveClientHeaders) {
-      if (runtimeMetadata) {
-        if (!runtimeMetadata.metadata || typeof runtimeMetadata.metadata !== 'object') {
-          runtimeMetadata.metadata = {};
-        }
-        (runtimeMetadata.metadata as Record<string, unknown>).clientHeaders = effectiveClientHeaders;
-      }
-    }
-
-    const ensureRuntimeMetadata = (payload: UnknownObject): void => {
-      if (!runtimeMetadata || !payload || typeof payload !== 'object') {
-        return;
-      }
-      attachProviderRuntimeMetadata(payload as Record<string, unknown>, runtimeMetadata);
-    };
-
-    // 初始请求预处理
     this.getRuntimeProfile();
-    const processedRequest: UnknownObject = { ...request };
-    ensureRuntimeMetadata(processedRequest);
-    // 记录入站原始模型，便于响应阶段还原（不影响上游请求体）
-    try {
-      const requestCarrier = request as MetadataContainer & {
-        model?: unknown;
-        entryEndpoint?: string;
-        stream?: boolean;
-      };
-      const inboundModel = typeof requestCarrier?.model === 'string' ? requestCarrier.model : undefined;
-      const entryEndpoint =
-        typeof requestCarrier?.metadata?.entryEndpoint === 'string'
-          ? requestCarrier.metadata.entryEndpoint
-          : requestCarrier?.entryEndpoint;
-      const streamFlag = typeof requestCarrier?.metadata?.stream === 'boolean'
-        ? requestCarrier.metadata.stream
-        : requestCarrier?.stream;
-    const processedMetadata = (processedRequest as MetadataContainer).metadata ?? {};
-    (processedRequest as MetadataContainer).metadata = {
-      ...processedMetadata,
-      ...(entryEndpoint ? { entryEndpoint } : {}),
-      ...(typeof streamFlag === 'boolean' ? { stream: !!streamFlag } : {}),
-      ...(effectiveClientHeaders ? { clientHeaders: effectiveClientHeaders } : {}),
-      __origModel: inboundModel
-    };
-    } catch { /* ignore */ }
+    const processedRequest = ProviderRequestPreprocessor.preprocess(request, runtimeMetadata);
     this.logVisionDebug('preprocess', processedRequest);
     await this.captureVisionDebugSnapshot('provider-preprocess-debug', processedRequest);
     return processedRequest;
@@ -480,8 +309,8 @@ export class HttpTransportProvider extends BaseProvider {
     const processingTime = Date.now() - context.startTime;
 
     const processedResponse = response;
-    const originalRecord = this.asResponseRecord(response);
-    const processedRecord = this.asResponseRecord(processedResponse);
+    const originalRecord = ProviderPayloadUtils.asResponseRecord(response);
+    const processedRecord = ProviderPayloadUtils.asResponseRecord(processedResponse);
 
     const sseStream =
       processedRecord.__sse_responses ||
@@ -499,8 +328,8 @@ export class HttpTransportProvider extends BaseProvider {
         processingTime,
         providerType: this.providerType,
         // 对外暴露的 model 统一为入站模型
-        model: context.model ?? this.extractModel(processedRecord) ?? this.extractModel(originalRecord),
-        usage: this.extractUsage(processedRecord) ?? this.extractUsage(originalRecord)
+        model: context.model ?? ProviderPayloadUtils.extractModel(processedRecord) ?? ProviderPayloadUtils.extractModel(originalRecord),
+        usage: ProviderPayloadUtils.extractUsage(processedRecord) ?? ProviderPayloadUtils.extractUsage(originalRecord)
       }
     } as UnknownObject;
   }
@@ -636,107 +465,24 @@ export class HttpTransportProvider extends BaseProvider {
     context: ProviderContext
   ): Promise<unknown | undefined> {
     try {
-      const providerAuth = this.config.config.auth;
-      const authRawType =
-        typeof (providerAuth as { rawType?: unknown }).rawType === 'string'
-          ? String((providerAuth as { rawType?: string }).rawType).trim().toLowerCase()
-          : '';
-      const isDeepSeekAccount = authRawType === 'deepseek-account';
-
-      if (isDeepSeekAccount) {
-        const statusCode = extractStatusCodeFromError(error as ProviderErrorAugmented);
-        const authProvider = this.authProvider;
-        if (statusCode === 401 && authProvider?.refreshCredentials) {
-          await authProvider.refreshCredentials();
-          const retryHeaders = await this.buildRequestHeaders();
-          let finalRetryHeaders = await this.finalizeRequestHeaders(retryHeaders, processedRequest);
-          finalRetryHeaders = this.applyStreamModeHeaders(finalRetryHeaders, requestInfo.wantsSse);
-          if (requestInfo.wantsSse) {
-            const upstreamStream = await this.httpClient.postStream(requestInfo.targetUrl, requestInfo.body, finalRetryHeaders);
-            const streamForHost = captureSse
-              ? attachProviderSseSnapshotStream(upstreamStream, {
-                requestId: context.requestId,
-                headers: finalRetryHeaders,
-                url: requestInfo.targetUrl,
-                entryEndpoint: requestInfo.entryEndpoint,
-                clientRequestId: requestInfo.clientRequestId,
-                providerKey: context.providerKey,
-                providerId: context.providerId,
-                extra: { retry: true, authRefresh: true }
-              })
-              : upstreamStream;
-            return await this.wrapUpstreamSseResponse(streamForHost, context);
-          }
-          const response = await this.httpClient.post(requestInfo.targetUrl, requestInfo.body, finalRetryHeaders);
-          return response;
-        }
-        return undefined;
-      }
-
-      if (this.normalizeAuthMode(providerAuth.type) !== 'oauth') {
-        return undefined;
-      }
-      const shouldRetry = await handleUpstreamInvalidOAuthToken(
-        this.oauthProviderId || this.providerType,
-        providerAuth as OAuthAuthExtended,
+      const recovery = new OAuthRecoveryHandler({
+        authProvider: this.authProvider,
+        oauthProviderId: this.oauthProviderId,
+        providerType: this.providerType,
+        config: this.config,
+        httpClient: this.httpClient
+      });
+      return await recovery.tryRecoverOAuthAndReplay(
         error,
-        // Never block server requests waiting for interactive OAuth.
-        // The repair flow (if needed) will run in background and Virtual Router should failover immediately.
-        { allowBlocking: false }
+        requestInfo,
+        processedRequest,
+        captureSse,
+        context,
+        () => this.buildRequestHeaders(),
+        (headers, req) => this.finalizeRequestHeaders(headers, req),
+        (headers, wantsSse) => this.applyStreamModeHeaders(headers, wantsSse),
+        (stream, ctx) => this.wrapUpstreamSseResponse(stream, ctx)
       );
-      if (!shouldRetry) {
-        return undefined;
-      }
-      const retryHeaders = await this.buildRequestHeaders();
-      let finalRetryHeaders = await this.finalizeRequestHeaders(retryHeaders, processedRequest);
-      finalRetryHeaders = this.applyStreamModeHeaders(finalRetryHeaders, requestInfo.wantsSse);
-      if (requestInfo.wantsSse) {
-        const upstreamStream = await this.httpClient.postStream(requestInfo.targetUrl, requestInfo.body, finalRetryHeaders);
-        const streamForHost = captureSse
-          ? attachProviderSseSnapshotStream(upstreamStream, {
-            requestId: context.requestId,
-            headers: finalRetryHeaders,
-            url: requestInfo.targetUrl,
-            entryEndpoint: requestInfo.entryEndpoint,
-            clientRequestId: requestInfo.clientRequestId,
-            providerKey: context.providerKey,
-            providerId: context.providerId,
-            extra: { retry: true }
-          })
-          : upstreamStream;
-        const wrapped = await this.wrapUpstreamSseResponse(streamForHost, context);
-        if (!captureSse) {
-          try {
-            await writeProviderSnapshot({
-              phase: 'provider-response',
-              requestId: context.requestId,
-              data: { mode: 'sse', retry: true },
-              headers: finalRetryHeaders,
-              url: requestInfo.targetUrl,
-              entryEndpoint: requestInfo.entryEndpoint,
-              clientRequestId: requestInfo.clientRequestId,
-              providerKey: context.providerKey,
-              providerId: context.providerId
-            });
-          } catch { /* non-blocking */ }
-        }
-        return wrapped;
-      }
-      const response = await this.httpClient.post(requestInfo.targetUrl, requestInfo.body, finalRetryHeaders);
-      try {
-        await writeProviderSnapshot({
-          phase: 'provider-response',
-          requestId: context.requestId,
-          data: response,
-          headers: finalRetryHeaders,
-          url: requestInfo.targetUrl,
-          entryEndpoint: requestInfo.entryEndpoint,
-          clientRequestId: requestInfo.clientRequestId,
-          providerKey: context.providerKey,
-          providerId: context.providerId
-        });
-      } catch { /* non-blocking */ }
-      return response;
     } catch {
       return undefined;
     }
@@ -790,8 +536,8 @@ export class HttpTransportProvider extends BaseProvider {
         },
         headers: requestInfo.headers,
         url: requestInfo.targetUrl,
-        entryEndpoint: requestInfo.entryEndpoint ?? this.getEntryEndpointFromPayload(processedRequest),
-        clientRequestId: requestInfo.clientRequestId ?? this.getClientRequestIdFromContext(context),
+        entryEndpoint: requestInfo.entryEndpoint ?? ProviderPayloadUtils.extractEntryEndpointFromPayload(processedRequest),
+        clientRequestId: requestInfo.clientRequestId ?? ProviderPayloadUtils.getClientRequestIdFromContext(context),
         providerKey: context.providerKey,
         providerId: context.providerId
       });
@@ -954,14 +700,14 @@ export class HttpTransportProvider extends BaseProvider {
     const familyProfile = this.resolveFamilyProfile(runtimeMetadata);
 
     const profileResolvedUa = await familyProfile?.resolveUserAgent?.({
-      uaFromConfig: this.findHeaderValue(finalized, 'User-Agent'),
+      uaFromConfig: HeaderUtils.findHeaderValue(finalized, 'User-Agent'),
       uaFromService: undefined,
       inboundUserAgent: undefined,
       defaultUserAgent: DEFAULT_USER_AGENT,
       runtimeMetadata
     });
     if (typeof profileResolvedUa === 'string' && profileResolvedUa.trim()) {
-      this.assignHeader(finalized, 'User-Agent', profileResolvedUa.trim());
+      HeaderUtils.assignHeader(finalized, 'User-Agent', profileResolvedUa.trim());
     }
 
     const profileAdjustedHeaders = familyProfile?.applyRequestHeaders?.({
@@ -975,7 +721,7 @@ export class HttpTransportProvider extends BaseProvider {
     }
 
     if (this.isIflowTransportRuntime(runtimeMetadata)) {
-      this.enforceIflowCliHeaders(finalized);
+      IflowSigner.enforceIflowCliHeaders(finalized);
     }
 
     return finalized;
@@ -987,7 +733,7 @@ export class HttpTransportProvider extends BaseProvider {
     const cfg = this.config.config as ProviderConfigInternal;
     const profileKey = this.resolveProfileKey(cfg);
     const auth = this.config.config.auth;
-    const authMode = this.normalizeAuthMode(auth.type);
+    const authMode = AuthModeUtils.normalizeAuthMode(auth.type);
 
     // 验证认证类型
     const supportedAuthTypes = [...profile.requiredAuth, ...profile.optionalAuth];
@@ -1020,8 +766,9 @@ export class HttpTransportProvider extends BaseProvider {
       typeof inboundMetadata?.clientOriginator === 'string' && inboundMetadata.clientOriginator.trim()
         ? inboundMetadata.clientOriginator.trim()
         : undefined;
-    const inboundClientHeaders = this.extractClientHeaders(runtimeMetadata);
-    const normalizedClientHeaders = this.normalizeCodexClientHeaders(inboundClientHeaders);
+    const codexUaMode = this.isCodexUaMode();
+    const inboundClientHeaders = SessionHeaderUtils.extractClientHeaders(runtimeMetadata);
+    const normalizedClientHeaders = SessionHeaderUtils.normalizeCodexClientHeaders(inboundClientHeaders, codexUaMode);
     const isAntigravity = this.isAntigravityTransportRuntime(runtimeMetadata);
 
     // 服务特定头部
@@ -1030,77 +777,18 @@ export class HttpTransportProvider extends BaseProvider {
     // 配置覆盖头部
     const overrideHeaders = this.config.config.overrides?.headers || {};
     const runtimeHeaders = this.getRuntimeProfile()?.headers || {};
-
-    // ========== 风控增强：添加 Google 客户端标识和元数据 ==========
-    if (this.isGeminiFamilyTransport() && !isAntigravity) {
-      // Google 客户端标识
-      this.assignHeader(baseHeaders, 'X-Goog-Api-Client', 'gl-node/22.17.0');
-      
-      // 客户端元数据
-      const clientMetadata = this.buildClientMetadata(runtimeMetadata);
-      if (clientMetadata) {
-        this.assignHeader(baseHeaders, 'Client-Metadata', clientMetadata);
-      }
-      
-      // Accept 编码
-      this.assignHeader(baseHeaders, 'Accept-Encoding', 'gzip, deflate, br');
-      
-      // Accept 类型（用于流式响应）
-      const isStreaming = runtimeMetadata?.streaming === true;
-      this.assignHeader(baseHeaders, 'Accept', isStreaming ? 'text/event-stream' : 'application/json');
+    const isGeminiFamily = this.isGeminiFamilyTransport();
+    if (isGeminiFamily && !isAntigravity) {
+      RequestHeaderBuilder.buildGeminiDefaultHeaders(baseHeaders, runtimeMetadata);
     }
 
     // OAuth：请求前确保令牌有效（提前刷新）
     try {
-      const auth = this.config.config.auth;
-      if (this.normalizeAuthMode(auth.type) === 'oauth') {
-        const oauthAuth = auth as OAuthAuthExtended;
-        const oauthProviderId = this.oauthProviderId || this.ensureOAuthProviderId(oauthAuth);
-        logOAuthDebug('[OAuth] [headers] ensureValid start (silent refresh only)');
-        try {
-          // 请求前仅尝试静默刷新，不主动打开浏览器；
-          // 真正令牌失效由 handleUpstreamInvalidOAuthToken 触发交互式修复。
-          await ensureValidOAuthToken(oauthProviderId, oauthAuth, {
-            forceReacquireIfRefreshFails: false,
-            openBrowser: false,
-            forceReauthorize: false
-          });
-          logOAuthDebug('[OAuth] [headers] ensureValid OK');
-        } catch (error) {
-          const err = error as { message?: string };
-          const msg = err?.message ? String(err.message) : String(error);
-          const authErr = (error instanceof Error ? error : new Error(msg)) as Error & {
-            statusCode?: number;
-            status?: number;
-            code?: string;
-          };
-          const needsInteractiveRepair = shouldTriggerInteractiveOAuthRepair(oauthProviderId, authErr);
-          if (needsInteractiveRepair) {
-            if (typeof authErr.statusCode !== 'number' && typeof authErr.status !== 'number') {
-              authErr.statusCode = 401;
-              authErr.status = 401;
-            }
-            if (typeof authErr.code !== 'string' || !authErr.code.trim()) {
-              authErr.code = 'AUTH_INVALID_TOKEN';
-            }
-            // 非阻塞：后台触发修复，不等待本请求。
-            void handleUpstreamInvalidOAuthToken(oauthProviderId, oauthAuth, authErr, {
-              allowBlocking: false
-            }).catch(() => {
-              // ignore background repair errors
-            });
-            (authErr as Error & { __routecodexAuthPreflightFatal?: boolean }).__routecodexAuthPreflightFatal = true;
-            throw authErr;
-          }
-          // 非认证类的 ensureValid 错误只做日志，避免影响正常流量。
-          logOAuthDebug(`[OAuth] [headers] ensureValid skipped: ${msg}`);
-        }
-        try {
-          (this.authProvider as OAuthAwareAuthProvider).getOAuthClient?.()?.loadToken?.();
-        } catch {
-          // ignore
-        }
-      }
+      await OAuthHeaderPreflight.ensureTokenReady({
+        auth: this.config.config.auth,
+        authProvider: this.authProvider,
+        oauthProviderId: this.oauthProviderId
+      });
     } catch (error) {
       if (
         error &&
@@ -1122,104 +810,28 @@ export class HttpTransportProvider extends BaseProvider {
       await this.authProvider.validateCredentials();
     }
 
-    let authHeaders: Record<string, string> = {};
-    authHeaders = this.authProvider?.buildHeaders() || {};
-
-    const finalHeaders: Record<string, string> = {
-      ...baseHeaders,
-      ...serviceHeaders,
-      ...overrideHeaders,
-      ...runtimeHeaders,
-      ...authHeaders
-    };
-
-    // 保留客户端 Accept；无则默认为 application/json
-    const clientAccept = normalizedClientHeaders ? this.findHeaderValue(normalizedClientHeaders, 'Accept') : undefined;
-    if (clientAccept) {
-      this.assignHeader(finalHeaders, 'Accept', clientAccept);
-    } else if (!this.findHeaderValue(finalHeaders, 'Accept')) {
-      this.assignHeader(finalHeaders, 'Accept', 'application/json');
-    }
-
-    // Header priority:
-    // - user/provider config (overrides/runtime) wins
-    // - otherwise inherit from inbound client headers
-    // - otherwise fall back to defaults
-    const uaFromConfig = this.findHeaderValue({ ...overrideHeaders, ...runtimeHeaders }, 'User-Agent');
-    const uaFromService = this.findHeaderValue(serviceHeaders, 'User-Agent');
-    // iFlow 特例：部分模型（例如 glm-4.7）对 UA 有强约束，必须模拟 iFlow CLI。
-    // 因此对 iflow：service/profile 的 UA 优先级应高于 inbound client userAgent，
-    // 否则客户端 UA 会把模拟头部冲掉，触发 HTTP 200 + status=435 "Model not support"。
+    const authHeaders = this.authProvider?.buildHeaders() || {};
     const isIflow = this.isIflowTransportRuntime(runtimeMetadata);
     const familyProfile = this.resolveFamilyProfile(runtimeMetadata);
-    const profileResolvedUa = await familyProfile?.resolveUserAgent?.({
-      uaFromConfig,
-      uaFromService,
+
+    return await RequestHeaderBuilder.buildHeaders({
+      baseHeaders,
+      serviceHeaders,
+      overrideHeaders,
+      runtimeHeaders,
+      authHeaders,
+      normalizedClientHeaders,
+      inboundMetadata: inboundMetadata as Record<string, unknown> | undefined,
       inboundUserAgent,
+      inboundOriginator,
+      runtimeMetadata,
+      familyProfile,
       defaultUserAgent: DEFAULT_USER_AGENT,
-      runtimeMetadata
+      isGeminiFamily,
+      isAntigravity,
+      isIflow,
+      codexUaMode
     });
-    const resolvedUa = profileResolvedUa ?? (isIflow
-      ? (uaFromConfig ?? uaFromService ?? inboundUserAgent ?? DEFAULT_USER_AGENT)
-      : (uaFromConfig ?? inboundUserAgent ?? uaFromService ?? DEFAULT_USER_AGENT));
-    this.assignHeader(finalHeaders, 'User-Agent', resolvedUa);
-
-    // originator: do not invent one; only forward from config or inbound client.
-    // gcli2api alignment: Gemini-family upstreams do not expect/need originator; avoid leaking client identifiers.
-    if (!this.isGeminiFamilyTransport()) {
-      const originatorFromConfig = this.findHeaderValue({ ...overrideHeaders, ...runtimeHeaders }, 'originator');
-      const originatorFromService = this.findHeaderValue(serviceHeaders, 'originator');
-      const resolvedOriginator = originatorFromConfig ?? inboundOriginator ?? originatorFromService;
-      if (resolvedOriginator) {
-        this.assignHeader(finalHeaders, 'originator', resolvedOriginator);
-      }
-    }
-
-    if (!isAntigravity && normalizedClientHeaders) {
-      const conversationId = this.findHeaderValue(normalizedClientHeaders, 'conversation_id');
-      if (conversationId) {
-        this.assignHeader(finalHeaders, 'conversation_id', conversationId);
-      }
-      const sessionId = this.findHeaderValue(normalizedClientHeaders, 'session_id');
-      if (sessionId) {
-        this.assignHeader(finalHeaders, 'session_id', sessionId);
-      }
-    }
-
-    // Inbound metadata may already carry parsed session identifiers (e.g. when client sends
-    // metadata.sessionId / metadata.conversationId instead of headers). Inject them only
-    // if not already provided by config/runtime headers or inbound client headers.
-    if (!isAntigravity && inboundMetadata && typeof inboundMetadata === 'object') {
-      const meta = inboundMetadata as Record<string, unknown>;
-      const metaSessionId =
-        typeof meta.sessionId === 'string' && meta.sessionId.trim() ? meta.sessionId.trim() : '';
-      const metaConversationId =
-        typeof meta.conversationId === 'string' && meta.conversationId.trim() ? meta.conversationId.trim() : '';
-      const resolvedSessionId = metaSessionId || metaConversationId;
-      const resolvedConversationId = metaConversationId || metaSessionId;
-      if (resolvedSessionId && !this.findHeaderValue(finalHeaders, 'session_id')) {
-        this.assignHeader(finalHeaders, 'session_id', resolvedSessionId);
-      }
-      if (resolvedConversationId && !this.findHeaderValue(finalHeaders, 'conversation_id')) {
-        this.assignHeader(finalHeaders, 'conversation_id', resolvedConversationId);
-      }
-    }
-
-    const codexUaMode = this.isCodexUaMode();
-    if (!isAntigravity && codexUaMode) {
-      this.ensureCodexSessionHeaders(finalHeaders, runtimeMetadata);
-    }
-
-    if (isAntigravity) {
-      this.deleteHeader(finalHeaders, 'session_id');
-      this.deleteHeader(finalHeaders, 'conversation_id');
-    }
-
-    if (isIflow) {
-      this.enforceIflowCliHeaders(finalHeaders);
-    }
-
-    return finalHeaders;
   }
 
   protected isCodexUaMode(): boolean {
@@ -1235,7 +847,7 @@ export class HttpTransportProvider extends BaseProvider {
     }
 
     const providerType = (runtime.providerType as ProviderType) || this.providerType;
-    const entryEndpoint = this.getEntryEndpointFromRuntime(runtime);
+    const entryEndpoint = ProviderPayloadUtils.extractEntryEndpointFromRuntime(runtime);
 
     // 显式 UA 模式（--codex / --ua codex）：对所有 provider 激活
     if (normalized === 'codex') {
@@ -1253,343 +865,37 @@ export class HttpTransportProvider extends BaseProvider {
     return false;
   }
 
-  private normalizeCodexClientHeaders(headers?: Record<string, string>): Record<string, string> | undefined {
-    if (!headers) {
-      return undefined;
-    }
-    if (!this.isCodexUaMode()) {
-      return headers;
-    }
-    const normalizedHeaders = { ...headers };
-    this.copyHeaderValue(normalizedHeaders, headers, 'anthropic-session-id', 'session_id');
-    this.copyHeaderValue(normalizedHeaders, headers, 'anthropic-conversation-id', 'conversation_id');
-    this.copyHeaderValue(normalizedHeaders, headers, 'anthropic-user-agent', 'User-Agent');
-    this.copyHeaderValue(normalizedHeaders, headers, 'anthropic-originator', 'originator');
-    return normalizedHeaders;
-  }
-
-  private copyHeaderValue(
-    target: Record<string, string>,
-    source: Record<string, string>,
-    from: string,
-    to: string
-  ): void {
-    if (this.findHeaderValue(target, to)) {
-      return;
-    }
-    const value = this.findHeaderValue(source, from);
-    if (value) {
-      target[to] = value;
-    }
-  }
-
-  private findHeaderValue(headers: Record<string, string>, target: string): string | undefined {
-    const lowered = typeof target === 'string' ? target.toLowerCase() : '';
-    if (!lowered) {
-      return undefined;
-    }
-    const normalizedTarget = this.normalizeHeaderKey(lowered);
-    for (const [key, value] of Object.entries(headers)) {
-      if (typeof value !== 'string') {
-        continue;
-      }
-      const trimmed = value.trim();
-      if (!trimmed) {
-        continue;
-      }
-      const loweredKey = key.toLowerCase();
-      if (loweredKey === lowered) {
-        return trimmed;
-      }
-      if (this.normalizeHeaderKey(loweredKey) === normalizedTarget) {
-        return trimmed;
-      }
-    }
-    return undefined;
-  }
-
-  private normalizeHeaderKey(value: string): string {
-    if (!value) {
-      return '';
-    }
-    return value.replace(/[\s_-]+/g, '');
-  }
-
-  private assignHeader(headers: Record<string, string>, target: string, value: string): void {
-    if (!value || !value.trim()) {
-      return;
-    }
-    const lowered = target.toLowerCase();
-    for (const key of Object.keys(headers)) {
-      if (key.toLowerCase() === lowered) {
-        headers[key] = value;
-        return;
-      }
-    }
-    headers[target] = value;
-  }
-
-  private deleteHeader(headers: Record<string, string>, target: string): void {
-    const lowered = typeof target === 'string' ? target.toLowerCase() : '';
-    if (!lowered) {
-      return;
-    }
-    const normalizedTarget = this.normalizeHeaderKey(lowered);
-    for (const key of Object.keys(headers)) {
-      const loweredKey = key.toLowerCase();
-      if (loweredKey === lowered) {
-        delete headers[key];
-        continue;
-      }
-      if (this.normalizeHeaderKey(loweredKey) === normalizedTarget) {
-        delete headers[key];
-      }
-    }
-  }
-
-  private ensureCodexSessionHeaders(
-    headers: Record<string, string>,
-    runtimeMetadata?: ProviderRuntimeMetadata
-  ): void {
-    this.setHeaderIfMissing(headers, 'session_id', this.buildCodexIdentifier('session', runtimeMetadata));
-    this.setHeaderIfMissing(
-      headers,
-      'conversation_id',
-      this.buildCodexIdentifier('conversation', runtimeMetadata)
-    );
-  }
-
-  private setHeaderIfMissing(
-    headers: Record<string, string>,
-    target: string,
-    value: string
-  ): void {
-    if (this.findHeaderValue(headers, target)) {
-      return;
-    }
-    this.assignHeader(headers, target, value);
-  }
-
-  private enforceIflowCliHeaders(headers: Record<string, string>): void {
-    const resolvedSessionId =
-      this.findHeaderValue(headers, 'session-id') ??
-      this.findHeaderValue(headers, 'session_id') ??
-      '';
-    const resolvedConversationId =
-      this.findHeaderValue(headers, 'conversation-id') ??
-      this.findHeaderValue(headers, 'conversation_id') ??
-      resolvedSessionId;
-
-    if (resolvedSessionId) {
-      this.assignHeader(headers, 'session-id', resolvedSessionId);
-    }
-    if (resolvedConversationId) {
-      this.assignHeader(headers, 'conversation-id', resolvedConversationId);
-    }
-
-    const bearerApiKey = this.extractBearerApiKey(headers);
-    if (!bearerApiKey) {
-      return;
-    }
-
-    const userAgent = this.findHeaderValue(headers, 'User-Agent') ?? 'iFlow-Cli';
-    const timestamp = Date.now().toString();
-    const signature = this.buildIflowSignature(userAgent, resolvedSessionId, timestamp, bearerApiKey);
-    if (!signature) {
-      return;
-    }
-
-    this.assignHeader(headers, 'x-iflow-timestamp', timestamp);
-    this.assignHeader(headers, 'x-iflow-signature', signature);
-  }
-
-  private extractBearerApiKey(headers: Record<string, string>): string | undefined {
-    const authorization = this.findHeaderValue(headers, 'Authorization');
-    if (!authorization) {
-      return undefined;
-    }
-    const matched = authorization.match(/^Bearer\s+(.+)$/i);
-    if (!matched || !matched[1]) {
-      return undefined;
-    }
-    const apiKey = matched[1].trim();
-    return apiKey || undefined;
-  }
-
-  private buildIflowSignature(
-    userAgent: string,
-    sessionId: string,
-    timestamp: string,
-    apiKey: string
-  ): string | undefined {
-    if (!apiKey) {
-      return undefined;
-    }
-    const payload = `${userAgent}:${sessionId}:${timestamp}`;
-    try {
-      return createHmac(DEFAULT_PROVIDER.IFLOW_SIGNATURE_ALGORITHM, apiKey).update(payload, 'utf8').digest('hex');
-    } catch {
-      return undefined;
-    }
-  }
-
-  private buildCodexIdentifier(
-    kind: 'session' | 'conversation',
-    runtimeMetadata?: ProviderRuntimeMetadata
-  ): string {
-    const fallbackId = runtimeMetadata?.metadata && typeof runtimeMetadata.metadata === 'object'
-      ? (runtimeMetadata.metadata as Record<string, unknown>).clientRequestId
-      : undefined;
-    const requestId = runtimeMetadata?.requestId ?? fallbackId;
-    const routeName = runtimeMetadata?.routeName;
-    const suffix = (requestId ?? `req-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
-      .toString()
-      .replace(/[^A-Za-z0-9_-]/g, '_');
-    const parts = ['codex_cli', kind, suffix];
-    if (routeName) {
-      parts.push(routeName.replace(/[^A-Za-z0-9_-]/g, '_'));
-    }
-    return this.enforceCodexIdentifierLength(parts.join('_'));
-  }
-
   private isAntigravityTransportRuntime(runtimeMetadata?: ProviderRuntimeMetadata): boolean {
-    const fromConfig =
-      typeof this.config?.config?.providerId === 'string' && this.config.config.providerId.trim()
-        ? this.config.config.providerId.trim().toLowerCase()
-        : '';
-    const fromRuntime =
-      typeof runtimeMetadata?.providerId === 'string' && runtimeMetadata.providerId.trim()
-        ? runtimeMetadata.providerId.trim().toLowerCase()
-        : '';
-    const fromProviderKey =
-      typeof runtimeMetadata?.providerKey === 'string' && runtimeMetadata.providerKey.trim()
-        ? runtimeMetadata.providerKey.trim().toLowerCase()
-        : '';
-    const fromOAuth = typeof this.oauthProviderId === 'string' ? this.oauthProviderId.trim().toLowerCase() : '';
-
-    if (fromConfig === 'antigravity' || fromRuntime === 'antigravity' || fromOAuth === 'antigravity') {
-      return true;
-    }
-    if (fromProviderKey.startsWith('antigravity.')) {
-      return true;
-    }
-    return false;
+    return this.getRuntimeDetector().isAntigravity(runtimeMetadata);
   }
 
   private isIflowTransportRuntime(runtimeMetadata?: ProviderRuntimeMetadata): boolean {
-    const fromConfig =
-      typeof this.config?.config?.providerId === 'string' && this.config.config.providerId.trim()
-        ? this.config.config.providerId.trim().toLowerCase()
-        : '';
-    const fromRuntime =
-      typeof runtimeMetadata?.providerId === 'string' && runtimeMetadata.providerId.trim()
-        ? runtimeMetadata.providerId.trim().toLowerCase()
-        : '';
-    const fromProviderKey =
-      typeof runtimeMetadata?.providerKey === 'string' && runtimeMetadata.providerKey.trim()
-        ? runtimeMetadata.providerKey.trim().toLowerCase()
-        : '';
-    const fromOAuth = typeof this.oauthProviderId === 'string' ? this.oauthProviderId.trim().toLowerCase() : '';
-
-    if (fromConfig === 'iflow' || fromRuntime === 'iflow' || fromOAuth === 'iflow') {
-      return true;
-    }
-    if (fromProviderKey.startsWith('iflow.')) {
-      return true;
-    }
-    return false;
-  }
-
-  private enforceCodexIdentifierLength(value: string): string {
-    if (value.length <= CODEX_IDENTIFIER_MAX_LENGTH) {
-      return value;
-    }
-    const hash = createHash('sha256').update(value).digest('hex').slice(0, 10);
-    const keep = Math.max(1, CODEX_IDENTIFIER_MAX_LENGTH - hash.length - 1);
-    return `${value.slice(0, keep)}_${hash}`;
+    return this.getRuntimeDetector().isIflow(runtimeMetadata);
   }
 
   protected getEffectiveBaseUrl(): string {
-    const runtime = this.getRuntimeProfile();
-    const runtimeEndpoint = this.pickRuntimeBaseUrl(runtime);
-    const candidates = [
-      runtimeEndpoint,
-      runtime?.baseUrl,
-      this.config.config.overrides?.baseUrl,
-      this.config.config.baseUrl,
-      this.serviceProfile.defaultBaseUrl
-    ]
-      .map((value) => (typeof value === 'string' ? value.trim() : ''))
-      .filter((value) => value.length > 0);
-
-    // Self-heal malformed runtime baseUrl values (for example an endpoint path accidentally
-    // injected into baseUrl) by preferring the first absolute URL candidate.
-    const firstAbsolute = candidates.find((value) => this.looksLikeAbsoluteUrl(value));
-    if (firstAbsolute) {
-      return firstAbsolute;
-    }
-
-    const serviceDefault = String(this.serviceProfile.defaultBaseUrl || '').trim();
-    if (serviceDefault && this.looksLikeAbsoluteUrl(serviceDefault)) {
-      return serviceDefault;
-    }
-
-    const staticServiceDefault = this.resolveStaticServiceDefaultBaseUrl();
-    if (staticServiceDefault && this.looksLikeAbsoluteUrl(staticServiceDefault)) {
-      return staticServiceDefault;
-    }
-
-    return candidates[0] || this.serviceProfile.defaultBaseUrl;
+    const cfg = this.config.config as ProviderConfigInternal;
+    const profileKey = this.resolveProfileKey(cfg);
+    return RuntimeEndpointResolver.resolveEffectiveBaseUrl({
+      runtime: this.getRuntimeProfile(),
+      overrideBaseUrl: this.config.config.overrides?.baseUrl,
+      configBaseUrl: this.config.config.baseUrl,
+      serviceDefaultBaseUrl: this.serviceProfile.defaultBaseUrl,
+      profileKey,
+      providerType: this.providerType
+    });
   }
 
   protected getBaseUrlCandidates(_context: ProviderContext): string[] | undefined {
     return undefined;
   }
 
-  private resolveStaticServiceDefaultBaseUrl(): string | undefined {
-    const cfg = this.config.config as ProviderConfigInternal;
-    const profileKey = this.resolveProfileKey(cfg);
-    const baseProfile =
-      DynamicProfileLoader.buildServiceProfile(profileKey) ||
-      DynamicProfileLoader.buildServiceProfile(this.providerType);
-    const candidate = typeof baseProfile?.defaultBaseUrl === 'string'
-      ? baseProfile.defaultBaseUrl.trim()
-      : '';
-    return candidate || undefined;
-  }
-
   protected getEffectiveEndpoint(): string {
-    const runtime = this.getRuntimeProfile();
-    const runtimeEndpoint =
-      runtime?.endpoint && !this.looksLikeAbsoluteUrl(runtime.endpoint)
-        ? runtime.endpoint
-        : undefined;
-    return (
-      runtimeEndpoint ||
-      this.config.config.overrides?.endpoint ||
-      this.serviceProfile.defaultEndpoint
-    );
-  }
-
-  private pickRuntimeBaseUrl(runtime?: ProviderRuntimeProfile): string | undefined {
-    if (!runtime) {
-      return undefined;
-    }
-    if (typeof runtime.baseUrl === 'string' && runtime.baseUrl.trim()) {
-      return runtime.baseUrl.trim();
-    }
-    if (typeof runtime.endpoint === 'string' && this.looksLikeAbsoluteUrl(runtime.endpoint)) {
-      return runtime.endpoint.trim();
-    }
-    return undefined;
-  }
-
-  private looksLikeAbsoluteUrl(value?: string): boolean {
-    if (!value) {
-      return false;
-    }
-    const trimmed = value.trim();
-    return /^https?:\/\//i.test(trimmed) || trimmed.startsWith('//');
+    return RuntimeEndpointResolver.resolveEffectiveEndpoint({
+      runtime: this.getRuntimeProfile(),
+      overrideEndpoint: this.config.config.overrides?.endpoint,
+      serviceDefaultEndpoint: this.serviceProfile.defaultEndpoint
+    });
   }
 
   // （工具自动修复辅助函数已删除）
@@ -1598,73 +904,6 @@ export class HttpTransportProvider extends BaseProvider {
     return extensions && typeof extensions === 'object'
       ? extensions as Record<string, unknown>
       : {};
-  }
-
-  private getEntryEndpointFromPayload(payload: UnknownObject): string | undefined {
-    const runtimeMeta = extractProviderRuntimeMetadata(payload as Record<string, unknown>);
-    const metadata = (runtimeMeta && typeof runtimeMeta.metadata === 'object')
-      ? (runtimeMeta.metadata as Record<string, unknown>)
-      : (payload as MetadataContainer).metadata;
-    if (metadata && typeof metadata.entryEndpoint === 'string' && metadata.entryEndpoint.trim()) {
-      return metadata.entryEndpoint;
-    }
-    return undefined;
-  }
-
-  private getEntryEndpointFromRuntime(runtime?: ProviderRuntimeMetadata): string | undefined {
-    if (!runtime || !runtime.metadata || typeof runtime.metadata !== 'object') {
-      return undefined;
-    }
-    const meta = runtime.metadata as Record<string, unknown>;
-    const value = meta.entryEndpoint;
-    return typeof value === 'string' && value.trim().length ? value : undefined;
-  }
-
-  private asResponseRecord(value: unknown): ResponseRecord {
-    if (isRecord(value)) {
-      return value as ResponseRecord;
-    }
-    return {};
-  }
-
-  private extractModel(record: ResponseRecord): string | undefined {
-    if (typeof record.model === 'string' && record.model.trim()) {
-      return record.model;
-    }
-    if (record.data && typeof record.data.model === 'string' && record.data.model.trim()) {
-      return record.data.model;
-    }
-    return undefined;
-  }
-
-  private extractUsage(record: ResponseRecord): UnknownObject | undefined {
-    if (record.usage && typeof record.usage === 'object') {
-      return record.usage as UnknownObject;
-    }
-    if (record.data && record.data.usage && typeof record.data.usage === 'object') {
-      return record.data.usage as UnknownObject;
-    }
-    return undefined;
-  }
-
-  private getClientRequestIdFromContext(context: ProviderContext): string | undefined {
-    const fromMetadata = this.extractClientId(context.metadata);
-    if (fromMetadata) {
-      return fromMetadata;
-    }
-    const runtimeMeta = context.runtimeMetadata?.metadata;
-    return this.extractClientId(runtimeMeta);
-  }
-
-  private extractClientId(source: Record<string, unknown> | undefined): string | undefined {
-    if (!source || typeof source !== 'object') {
-      return undefined;
-    }
-    const value = (source as Record<string, unknown>).clientRequestId;
-    if (typeof value === 'string' && value.trim().length) {
-      return value.trim();
-    }
-    return undefined;
   }
 
   protected createProviderContext(): ProviderContext {
@@ -1695,130 +934,15 @@ export class HttpTransportProvider extends BaseProvider {
     return direct || this.providerType;
   }
 
-  private normalizeAuthMode(type: unknown): 'apikey' | 'oauth' {
-    return typeof type === 'string' && type.toLowerCase().includes('oauth') ? 'oauth' : 'apikey';
-  }
-
-  private resolveOAuthProviderId(type: unknown): string | undefined {
-    if (typeof type !== 'string') {
-      return undefined;
-    }
-    const match = type.toLowerCase().match(/^([a-z0-9._-]+)-oauth$/);
-    return match ? match[1] : undefined;
-  }
-
-  private ensureOAuthProviderId(auth: OAuthAuthExtended, extensions?: Record<string, unknown>): string {
-    const fromExtension =
-      typeof extensions?.oauthProviderId === 'string' && extensions.oauthProviderId.trim()
-        ? extensions.oauthProviderId.trim()
-        : undefined;
-    if (fromExtension) {
-      return fromExtension;
-    }
-    const fromAuthField =
-      typeof auth?.oauthProviderId === 'string' && auth.oauthProviderId.trim()
-        ? auth.oauthProviderId.trim()
-        : undefined;
-    if (fromAuthField) {
-      return fromAuthField;
-    }
-    const providerId = this.resolveOAuthProviderId(auth?.rawType ?? auth?.type);
-    if (providerId) {
-      return providerId;
-    }
-    const fallback = this.resolveOAuthProviderId(auth?.type);
-    if (fallback) {
-      return fallback;
-    }
-    throw new Error(
-      `OAuth auth.type must be declared as "<provider>-oauth" (received ${typeof auth?.rawType === 'string' ? auth.rawType : auth?.type ?? 'unknown'})`
-    );
-  }
-
-  private ensureOAuthProviderIdLegacy(type: unknown): string {
-    const providerId = this.resolveOAuthProviderId(type);
-    if (!providerId) {
-      throw new Error(
-        `OAuth auth.type must be declared as "<provider>-oauth" (received ${typeof type === 'string' ? type : 'unknown'})`
-      );
-    }
-    return providerId;
-  }
-
-  private extractClientHeaders(source?: Record<string, unknown> | ProviderRuntimeMetadata): Record<string, string> | undefined {
-    const normalize = (value: unknown): Record<string, string> | undefined => {
-      return this.normalizeClientHeaders(value);
-    };
-    if (!source || typeof source !== 'object') {
-      return undefined;
-    }
-    const candidates: unknown[] = [];
-    const metadataNode = (source as { metadata?: unknown }).metadata;
-    if (metadataNode && typeof metadataNode === 'object') {
-      const headersNode = (metadataNode as Record<string, unknown>).clientHeaders;
-      if (headersNode) {
-        candidates.push(headersNode);
-      }
-    }
-    const directNode = (source as { clientHeaders?: unknown }).clientHeaders;
-    if (directNode) {
-      candidates.push(directNode);
-    }
-    for (const candidate of candidates) {
-      const normalized = normalize(candidate);
-      if (normalized) {
-        return normalized;
-      }
-    }
-    return undefined;
-  }
-
-  /**
-   * 构建客户端元数据（用于风控和调试）
-   */
-  private buildClientMetadata(runtimeMetadata?: Record<string, unknown> | undefined): string {
-    // Keep this string stable and minimal to match gcli2api snapshots.
-    // Avoid embedding client identifiers (originator/session) into upstream headers.
-    return 'ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI';
-  }
-
-  /**
-   * 构建请求类型（用于区分不同类型的请求）
-   */
-  private buildRequestType(runtimeMetadata?: Record<string, unknown> | undefined): string | undefined {
-    const model = runtimeMetadata?.target as { clientModelId?: string } | undefined;
-    const modelId = model?.clientModelId || '';
-    
-    // 根据模型名称判断请求类型
-    if (modelId.includes('image') || modelId.includes('imagen')) {
-      return 'image_gen';
-    }
-    
-    // 默认为 agent 类型
-    return 'agent';
-  }
-
   /**
    * 检查是否为 Gemini 系列传输
    */
   private isGeminiFamilyTransport(): boolean {
-    const providerType = this.providerType.toLowerCase();
-    return providerType === 'gemini' || 
-           providerType === 'gemini-cli' ||
-           providerType === 'antigravity';
+    return this.getRuntimeDetector().isGeminiFamily();
   }
 
-  private normalizeClientHeaders(value: unknown): Record<string, string> | undefined {
-    if (!value || typeof value !== 'object') {
-      return undefined;
-    }
-    const normalized: Record<string, string> = {};
-    for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
-      if (typeof raw === 'string' && raw.trim()) {
-        normalized[key] = raw;
-      }
-    }
-    return Object.keys(normalized).length ? normalized : undefined;
+  private getRuntimeDetector(): RuntimeDetector {
+    return new RuntimeDetector(this.config, this.providerType, this.oauthProviderId);
   }
 
 }
