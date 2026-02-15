@@ -29,18 +29,52 @@ import {
   type OAuthRepairCooldownReason
 } from './oauth-repair-cooldown.js';
 import { openAuthInCamoufox } from '../core/config/camoufox-launcher.js';
+import {
+  isGeminiCliFamily,
+  type ExtendedOAuthAuth,
+  resolveTokenFilePath,
+  resolveCamoufoxAliasForAuth
+} from './oauth-lifecycle/path-resolver.js';
+import {
+  keyFor,
+  shouldThrottle,
+  updateThrottle,
+  inFlight,
+  interactiveTail
+} from './oauth-lifecycle/throttle.js';
+import {
+  extractStatusCode,
+  isGoogleAccountVerificationRequiredMessage,
+  extractGoogleAccountVerificationUrl
+} from './oauth-lifecycle/error-detection.js';
+import {
+  type StoredOAuthToken,
+  hasNonEmptyString,
+  extractAccessToken,
+  extractApiKey,
+  hasApiKeyField,
+  hasStableQwenApiKey,
+  hasAccessToken,
+  getExpiresAt,
+  resolveProjectId,
+  coerceExpiryTimestampSeconds,
+  hasNoRefreshFlag,
+  evaluateTokenState
+} from './oauth-lifecycle/token-helpers.js';
+import {
+  normalizeGeminiCliAccountToken,
+  sanitizeToken,
+  readTokenFromFile,
+  backupTokenFile,
+  restoreTokenFileFromBackup,
+  discardBackupFile,
+  readRawTokenFile
+} from './oauth-lifecycle/token-io.js';
 
 type EnsureOpts = {
   forceReacquireIfRefreshFails?: boolean;
   openBrowser?: boolean;
   forceReauthorize?: boolean;
-};
-
-type ExtendedOAuthAuth = OAuthAuth & {
-  tokenFile?: string;
-  authorizationUrl?: string;
-  userInfoUrl?: string;
-  redirectUri?: string;
 };
 
 type OAuthStrategy = {
@@ -49,232 +83,7 @@ type OAuthStrategy = {
   saveToken?(token: UnknownObject | null): Promise<void>;
 };
 
-type StoredOAuthToken = UnknownObject & {
-  access_token?: string;
-  AccessToken?: string;
-  refresh_token?: string;
-  api_key?: string;
-  apiKey?: string;
-  expires_at?: number | string;
-  expired?: number | string;
-  expiry_date?: number | string;
-  // 可选：标记该 token 仅供读取，不做自动刷新或重新授权
-  norefresh?: boolean;
-};
-
 const TOKEN_REFRESH_SKEW_MS = 60_000;
-
-const inFlight: Map<string, Promise<void>> = new Map();
-const lastRunAt: Map<string, number> = new Map();
-let interactiveTail: Promise<void> = Promise.resolve();
-const GEMINI_CLI_PROVIDER_IDS = new Set(['gemini-cli', 'antigravity']);
-
-function isGeminiCliFamily(providerType: string): boolean {
-  return GEMINI_CLI_PROVIDER_IDS.has(providerType.toLowerCase());
-}
-
-function keyFor(providerType: string, tokenFile?: string): string {
-  return `${providerType}::${tokenFile || ''}`;
-}
-
-function expandHome(p: string): string {
-  return p.startsWith('~/') ? p.replace(/^~\//, `${process.env.HOME || ''}/`) : p;
-}
-
-function defaultTokenFile(providerType: string): string {
-  const home = process.env.HOME || '';
-  if (providerType === 'iflow') {
-    return path.join(home, '.iflow', 'oauth_creds.json');
-  }
-  if (providerType === 'qwen') {
-    // Align with TokenFileAuthProvider + token-daemon defaults:
-    // keep a stable, well-known Qwen token file for alias="default".
-    return path.join(home, '.routecodex', 'auth', 'qwen-oauth-1-default.json');
-  }
-  if (isGeminiCliFamily(providerType)) {
-    const file = providerType.toLowerCase() === 'antigravity'
-      ? 'antigravity-oauth.json'
-      : 'gemini-oauth.json';
-    return path.join(home, '.routecodex', 'auth', file);
-  }
-  return path.join(home, '.routecodex', 'tokens', `${providerType}-default.json`);
-}
-
-function resolveTokenFilePath(auth: ExtendedOAuthAuth, providerType: string): string {
-  const raw = typeof auth.tokenFile === 'string' ? auth.tokenFile.trim() : '';
-
-  // 没有任何配置：使用 provider 默认 token 文件（兼容单 token 场景）
-  if (!raw) {
-    const fallback = defaultTokenFile(providerType);
-    auth.tokenFile = fallback;
-    return fallback;
-  }
-
-  // 显式路径（包含路径分隔符或 .json），直接扩展 ~ 并返回
-  if (raw.includes('/') || raw.includes('\\') || raw.endsWith('.json')) {
-    const resolved = expandHome(raw);
-    auth.tokenFile = resolved;
-    return resolved;
-  }
-
-  // 纯 alias：在 ~/.routecodex/auth 下按 <provider>-oauth-*-<alias>.json 规则匹配（同步版本）
-  const alias = raw;
-  const homeDir = process.env.HOME || os.homedir();
-  const authDir = path.join(homeDir, '.routecodex', 'auth');
-  const pattern = new RegExp(`^${providerType}-oauth-(\\d+)(?:-(.+))?\\.json$`, 'i');
-
-  const pt = providerType.toLowerCase();
-  // Qwen: keep a stable "default" file name whenever possible.
-  if (pt === 'qwen' && alias === 'default') {
-    const pinned = path.join(authDir, 'qwen-oauth-1-default.json');
-    try {
-      if (fsSync.existsSync(pinned)) {
-        auth.tokenFile = pinned;
-        return pinned;
-      }
-    } catch {
-      // ignore and fall back to scanning
-    }
-  }
-
-  let existingPath: string | null = null;
-  let bestSeqForAlias = 0;
-  let maxSeq = 0;
-  try {
-    const entries = fsSync.readdirSync(authDir);
-    for (const entry of entries) {
-      const match = entry.match(pattern);
-      if (!match) {
-        continue;
-      }
-      const seq = parseInt(match[1], 10);
-      if (!Number.isFinite(seq) || seq <= 0) {
-        continue;
-      }
-      const entryAlias = (match[2] || 'default');
-      if (entryAlias === alias && seq >= bestSeqForAlias) {
-        bestSeqForAlias = seq;
-        existingPath = path.join(authDir, entry);
-      }
-      if (seq > maxSeq) {
-        maxSeq = seq;
-      }
-    }
-  } catch {
-    // ignore directory errors; treat as no existing tokens
-  }
-
-  if (existingPath) {
-    auth.tokenFile = existingPath;
-    return existingPath;
-  }
-
-  // When we don't have any existing token for this alias:
-  // - Qwen default alias should always map to seq=1 for stability.
-  // - Otherwise, allocate next seq to avoid collisions.
-  const nextSeq = (pt === 'qwen' && alias === 'default') ? 1 : (maxSeq + 1);
-  const fileName = `${providerType}-oauth-${nextSeq}-${alias}.json`;
-  const fullPath = path.join(authDir, fileName);
-  auth.tokenFile = fullPath;
-  return fullPath;
-}
-
-function shouldThrottle(k: string, ms = 60_000): boolean {
-  const t = lastRunAt.get(k) || 0;
-  return Date.now() - t < ms;
-}
-
-function updateThrottle(k: string): void {
-  lastRunAt.set(k, Date.now());
-}
-
-function extractStatusCode(upstreamError: unknown): number | undefined {
-  if (!upstreamError || typeof upstreamError !== 'object') {
-    return undefined;
-  }
-  const anyErr = upstreamError as any;
-  const direct = anyErr.statusCode;
-  if (typeof direct === 'number' && Number.isFinite(direct)) {
-    return direct;
-  }
-  const status = anyErr.status;
-  if (typeof status === 'number' && Number.isFinite(status)) {
-    return status;
-  }
-  const response = anyErr.response;
-  if (response && typeof response === 'object') {
-    const respStatus = (response as any).status;
-    if (typeof respStatus === 'number' && Number.isFinite(respStatus)) {
-      return respStatus;
-    }
-    const respStatusCode = (response as any).statusCode;
-    if (typeof respStatusCode === 'number' && Number.isFinite(respStatusCode)) {
-      return respStatusCode;
-    }
-  }
-  return undefined;
-}
-
-function isGoogleAccountVerificationRequiredMessage(lower: string): boolean {
-  if (!lower) {
-    return false;
-  }
-  return (
-    lower.includes('verify your account') ||
-    lower.includes('validation_required') ||
-    lower.includes('validation required') ||
-    lower.includes('validation_url') ||
-    lower.includes('validation url') ||
-    lower.includes('accounts.google.com/signin/continue') ||
-    lower.includes('support.google.com/accounts?p=al_alert')
-  );
-}
-
-function extractGoogleAccountVerificationUrl(message: string): string | null {
-  const msg = typeof message === 'string' ? message : '';
-  if (!msg) {
-    return null;
-  }
-  const normalized = msg
-    .replace(/\\\//g, '/')
-    .replace(/\\u0026/gi, '&')
-    .replace(/\\u003d/gi, '=')
-    .replace(/\\x26/gi, '&')
-    .replace(/\\x3d/gi, '=');
-  const patterns: RegExp[] = [
-    /https:\/\/accounts\.google\.com\/signin\/continue[^\s"'\\<>)]*/i,
-    /https:\/\/accounts\.google\.com\/[^\s"'\\<>)]*/i,
-    /https:\/\/support\.google\.com\/accounts\?p=al_alert[^\s"'\\<>)]*/i
-  ];
-  for (const re of patterns) {
-    const m = normalized.match(re);
-    if (m && m[0]) {
-      const url = String(m[0]).trim().replace(/[\\"']+$/g, '').replace(/[),.]+$/g, '');
-      if (url) {
-        return url;
-      }
-    }
-  }
-  return null;
-}
-
-function resolveCamoufoxAliasForAuth(providerType: string, auth: ExtendedOAuthAuth): string {
-  const raw = typeof auth.tokenFile === 'string' ? auth.tokenFile.trim() : '';
-  if (raw && !raw.includes('/') && !raw.includes('\\') && !raw.endsWith('.json')) {
-    return raw;
-  }
-  const base = raw ? path.basename(raw) : '';
-  const pt = String(providerType || '').trim().toLowerCase();
-  if (base && pt) {
-    const re = new RegExp(`^${pt}-oauth-\\d+(?:-(.+))?\\.json$`, 'i');
-    const m = base.match(re);
-    const alias = m && m[1] ? String(m[1]).trim() : '';
-    if (alias) {
-      return alias;
-    }
-  }
-  return 'default';
-}
 
 async function openGoogleAccountVerificationInCamoufox(args: {
   providerType: string;
@@ -332,247 +141,10 @@ function isOAuthConfig(auth: OAuthAuth): auth is ExtendedOAuthAuth {
   return Boolean(auth && typeof auth.type === 'string' && auth.type.toLowerCase().includes('oauth'));
 }
 
-function hasNonEmptyString(value: unknown): value is string {
-  return typeof value === 'string' && value.trim().length > 0;
-}
-
-function normalizeGeminiCliAccountToken(token: UnknownObject): StoredOAuthToken | null {
-  const raw = token as { token?: UnknownObject };
-  const tokenNode = raw.token;
-  if (!tokenNode || typeof tokenNode !== 'object') {
-    return null;
-  }
-  const tokenObj = tokenNode as UnknownObject;
-  const access = tokenObj.access_token;
-  if (!hasNonEmptyString(access)) {
-    return null;
-  }
-
-  const out = { ...(tokenObj as StoredOAuthToken) };
-  const root = token as UnknownObject;
-
-  if (typeof root.disabled === 'boolean') out.disabled = root.disabled;
-  if (typeof root.disabled_reason === 'string') out.disabled_reason = root.disabled_reason;
-  if (typeof root.disabled_at === 'number' || typeof root.disabled_at === 'string') out.disabled_at = root.disabled_at;
-
-  if (typeof root.proxy_disabled === 'boolean') out.proxy_disabled = root.proxy_disabled;
-  if (typeof root.proxyDisabled === 'boolean') out.proxyDisabled = root.proxyDisabled;
-  if (typeof root.proxy_disabled_reason === 'string') out.proxy_disabled_reason = root.proxy_disabled_reason;
-  if (typeof root.proxy_disabled_at === 'number' || typeof root.proxy_disabled_at === 'string') {
-    out.proxy_disabled_at = root.proxy_disabled_at;
-  }
-
-  if (Array.isArray(root.protected_models)) out.protected_models = root.protected_models;
-  if (Array.isArray(root.protectedModels)) out.protectedModels = root.protectedModels;
-
-  if (!hasNonEmptyString(out.project_id) && hasNonEmptyString(root.project_id)) {
-    out.project_id = String(root.project_id);
-  }
-  if (!hasNonEmptyString(out.projectId) && hasNonEmptyString(root.projectId)) {
-    out.projectId = String(root.projectId);
-  }
-  if (!Array.isArray(out.projects) && Array.isArray(root.projects)) {
-    out.projects = root.projects;
-  }
-  if (!hasNonEmptyString(out.email) && hasNonEmptyString(root.email)) {
-    out.email = String(root.email);
-  }
-
-  const expiryTimestamp = (tokenObj as { expiry_timestamp?: unknown }).expiry_timestamp;
-  if (!hasNonEmptyString(out.expires_at) && typeof expiryTimestamp === 'number') {
-    out.expires_at = expiryTimestamp > 10_000_000_000 ? expiryTimestamp : expiryTimestamp * 1000;
-  }
-
-  return out;
-}
-
-function sanitizeToken(token: UnknownObject | null): StoredOAuthToken | null {
-  if (!token || typeof token !== 'object') {
-    return null;
-  }
-  const normalized = normalizeGeminiCliAccountToken(token);
-  if (normalized) {
-    return normalized;
-  }
-  const copy = { ...token } as StoredOAuthToken;
-  if (!hasNonEmptyString(copy.apiKey) && hasNonEmptyString(copy.api_key)) {
-    copy.apiKey = copy.api_key;
-  }
-  return copy;
-}
-
-async function readTokenFromFile(file: string): Promise<StoredOAuthToken | null> {
-  try {
-    const txt = await fs.readFile(file, 'utf-8');
-    return sanitizeToken(JSON.parse(txt) as UnknownObject);
-  } catch {
-    return null;
-  }
-}
-
-async function backupTokenFile(file: string): Promise<string | null> {
-  if (!file) {
-    return null;
-  }
-  try {
-    await fs.access(file);
-  } catch (error) {
-    const code = (error as { code?: string } | null)?.code;
-    if (code === 'ENOENT') {
-      return null;
-    }
-    throw error;
-  }
-  const backup = `${file}.${Date.now()}.bak`;
-  try {
-    await fs.copyFile(file, backup);
-    logOAuthDebug(`[OAuth] token.backup: ${backup}`);
-    return backup;
-  } catch (error) {
-    logOAuthDebug(
-      `[OAuth] token.backup failed (${file}): ${error instanceof Error ? error.message : String(error)}`
-    );
-    return null;
-  }
-}
-
-async function restoreTokenFileFromBackup(backupFile: string | null, target: string): Promise<void> {
-  if (!backupFile) {
-    return;
-  }
-  try {
-    await fs.copyFile(backupFile, target);
-    logOAuthDebug(`[OAuth] token.restore: ${target}`);
-  } catch (error) {
-    logOAuthDebug(
-      `[OAuth] token.restore failed (${target}): ${error instanceof Error ? error.message : String(error)}`
-    );
-  } finally {
-    try {
-      await fs.unlink(backupFile);
-    } catch {
-      // ignore cleanup failure
-    }
-  }
-}
-
-async function discardBackupFile(backupFile: string | null): Promise<void> {
-  if (!backupFile) {
-    return;
-  }
-  try {
-    await fs.unlink(backupFile);
-  } catch {
-    // ignore
-  }
-}
-
-function extractAccessToken(token: StoredOAuthToken | null): string | undefined {
-  if (!token) {
-    return undefined;
-  }
-  if (hasNonEmptyString(token.access_token)) {
-    return token.access_token;
-  }
-  if (hasNonEmptyString(token.AccessToken)) {
-    return token.AccessToken;
-  }
-  return undefined;
-}
-
-function extractApiKey(token: StoredOAuthToken | null): string | undefined {
-  if (!token) {
-    return undefined;
-  }
-  const candidate = token.apiKey ?? token.api_key;
-  return hasNonEmptyString(candidate) ? String(candidate) : undefined;
-}
-
-function hasApiKeyField(token: StoredOAuthToken | null): boolean {
-  if (!token) {
-    return false;
-  }
-  return hasNonEmptyString(token.apiKey ?? token.api_key);
-}
-
 /**
- * Qwen: api_key 可能被降级为 access_token（userInfo 404 时的兼容写法），这种情况不应被视为“稳定 API Key”。
+ * Qwen: api_key 可能被降级为 access_token（userInfo 404 时的兼容写法），这种情况不应被视为"稳定 API Key"。
  * 只有当 api_key 存在且与 access_token 不同（或缺失 access_token）时，才认为可以长期复用并跳过刷新。
  */
-function hasStableQwenApiKey(token: StoredOAuthToken | null): boolean {
-  const apiKey = extractApiKey(token);
-  if (!apiKey) {
-    return false;
-  }
-  const access = extractAccessToken(token);
-  return !access || apiKey !== access;
-}
-
-function hasAccessToken(token: StoredOAuthToken | null): boolean {
-  return hasNonEmptyString(token?.access_token) || hasNonEmptyString(token?.AccessToken);
-}
-
-function getExpiresAt(token: StoredOAuthToken | null): number | null {
-  if (!token) {
-    return null;
-  }
-  const raw = token.expires_at ?? token.expired ?? token.expiry_date;
-  if (typeof raw === 'number' && Number.isFinite(raw)) {
-    return raw;
-  }
-  if (typeof raw === 'string') {
-    const parsed = Number(raw);
-    if (Number.isFinite(parsed)) {
-      return parsed;
-    }
-    const ts = Date.parse(raw);
-    return Number.isFinite(ts) ? ts : null;
-  }
-  return null;
-}
-
-function resolveProjectId(token: UnknownObject | null): string | undefined {
-  if (!token || typeof token !== 'object') {
-    return undefined;
-  }
-  const record = token as Record<string, unknown>;
-  if (hasNonEmptyString(record.project_id)) {
-    return record.project_id;
-  }
-  if (hasNonEmptyString(record.projectId)) {
-    return record.projectId;
-  }
-  return undefined;
-}
-
-async function readRawTokenFile(file: string): Promise<UnknownObject | null> {
-  if (!file) {
-    return null;
-  }
-  try {
-    const txt = await fs.readFile(file, 'utf-8');
-    const parsed = JSON.parse(txt) as UnknownObject;
-    return parsed && typeof parsed === 'object' ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
-function coerceExpiryTimestampSeconds(token: StoredOAuthToken | null): number | undefined {
-  if (!token) {
-    return undefined;
-  }
-  const rawExpiry = (token as UnknownObject).expiry_timestamp;
-  if (typeof rawExpiry === 'number' && Number.isFinite(rawExpiry)) {
-    return rawExpiry > 10_000_000_000 ? Math.floor(rawExpiry / 1000) : rawExpiry;
-  }
-  const expiresAt = getExpiresAt(token);
-  if (!expiresAt) {
-    return undefined;
-  }
-  return expiresAt > 10_000_000_000 ? Math.floor(expiresAt / 1000) : Math.floor(expiresAt);
-}
-
 async function wrapGeminiCliTokenForStorage(
   tokenData: UnknownObject,
   tokenFilePath: string
@@ -692,41 +264,7 @@ async function prepareTokenForStorage(
   if (isGeminiCliFamily(providerType)) {
     return await wrapGeminiCliTokenForStorage(tokenData, tokenFilePath);
   }
-  return tokenData;
-}
-
-function hasNoRefreshFlag(token: StoredOAuthToken | null): boolean {
-  if (!token) {
-    return false;
-  }
-  const direct = (token as any).norefresh ?? (token as any).noRefresh;
-  if (typeof direct === 'boolean') {
-    return direct;
-  }
-  if (typeof direct === 'string') {
-    const normalized = direct.trim().toLowerCase();
-    return normalized === '1' || normalized === 'true' || normalized === 'yes';
-  }
-  return false;
-}
-
-function evaluateTokenState(token: StoredOAuthToken | null, providerType: string) {
-  const hasApiKey = hasApiKeyField(token);
-  const hasAccess = hasAccessToken(token);
-  const expiresAt = getExpiresAt(token);
-  const isExpiredOrNear = expiresAt !== null && Date.now() >= (expiresAt - TOKEN_REFRESH_SKEW_MS);
-  let validAccess: boolean;
-  const pt = providerType.toLowerCase();
-  if (pt === 'iflow') {
-    validAccess = hasApiKey || (!isExpiredOrNear && hasAccess);
-  } else if (pt === 'qwen') {
-    // Qwen: 当获取到稳定 api_key 后，可跳过 refresh/reauth；否则仍依赖 access_token 的有效期。
-    validAccess = hasStableQwenApiKey(token) || (!isExpiredOrNear && (hasAccess || hasApiKey));
-  } else {
-    validAccess = (hasApiKey || hasAccess) && !isExpiredOrNear;
-  }
-
-  return { hasApiKey, hasAccess, expiresAt, isExpiredOrNear, validAccess };
+ return tokenData;
 }
 
 function logTokenSnapshot(providerType: string, token: StoredOAuthToken | null, endpoints: OAuthEndpoints): void {
@@ -1209,7 +747,7 @@ async function runInteractiveAuthorizationFlow(
   }
 
   const label = `${providerType}:${tokenFilePath}`;
-  const queued = interactiveTail
+  const queued = interactiveTail.current
     .catch(() => {
       // ignore previous rejection so queue continues
     })
@@ -1221,7 +759,7 @@ async function runInteractiveAuthorizationFlow(
         logOAuthDebug(`[OAuth] interactive queue leave ${label}`);
       }
     });
-  interactiveTail = queued.then(
+  interactiveTail.next = queued.then(
     () => undefined,
     () => undefined
   );
