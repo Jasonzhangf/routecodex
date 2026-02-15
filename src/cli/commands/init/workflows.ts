@@ -16,8 +16,6 @@ import {
   normalizeHost,
   normalizePort,
   printConfiguredProviders,
-  promptDuplicateMigrationStrategy,
-  promptDuplicateProviderResolution,
   readProviderV2Payload,
   readProvidersFromV1,
   readRoutingFromConfig,
@@ -27,6 +25,7 @@ import {
   mergeRecordsPreferExisting
 } from './basic.js';
 import { interactiveCreateCustomProvider, interactiveRoutingWizard } from './interactive.js';
+import { promptDuplicateMigrationStrategy, promptDuplicateProviderResolution } from './prompt-utils.js';
 import type { LoggerLike, PromptLike, Spinner, UnknownRecord } from './shared.js';
 
 export async function migrateV1ToV2(args: {

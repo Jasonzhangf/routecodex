@@ -10,7 +10,6 @@ import { installBundledDefaultConfigBestEffort } from '../config/bundled-default
 import { ensureDefaultPrecommandScriptBestEffort } from '../config/precommand-default-script.js';
 import {
   asRecord,
-  buildInteractivePrompt,
   buildRouting,
   computeBackupPath,
   ensureDir,
@@ -24,6 +23,7 @@ import {
   writeJsonFile,
   writeProviderV2
 } from './init/basic.js';
+import { buildInteractivePrompt } from './init/prompt-utils.js';
 import {
   maybePrepareCamoufoxEnvironment,
   shouldPrepareCamoufoxForProviderMap,
