@@ -6,6 +6,11 @@
 
 import type { UnknownObject } from '../../../types/common-types.js';
 import type { ProviderContext } from '../api/provider-types.js';
+import {
+  formatDataForOutput,
+  outputDebugInfo,
+  outputFinalDebugInfo
+} from './provider-debug-output-utils.js';
 
 /**
  * Hook执行上下文 - 包含完整的执行信息
@@ -381,7 +386,14 @@ export class BidirectionalHookManager {
 
         // 输出调试信息
         if (debugEnabled && hook.isDebugHook) {
-          this.outputDebugInfo(hook, dataPacket, fullContext, hookChanges, hookObservations);
+          outputDebugInfo({
+            hook,
+            dataPacket,
+            changes: hookChanges,
+            observations: hookObservations,
+            debugConfig: this.debugConfig,
+            formatDataForOutput: (payload) => formatDataForOutput(payload, this.debugConfig, this.calculateDataSize)
+          });
         }
 
       } catch (error) {
@@ -409,7 +421,13 @@ export class BidirectionalHookManager {
 
     // 最终调试输出
     if (debugEnabled && relevantHooks.length > 0) {
-      this.outputFinalDebugInfo(stage, target, allChanges, allObservations, totalExecutionTime);
+      outputFinalDebugInfo({
+        stage,
+        target,
+        changes: allChanges,
+        observations: allObservations,
+        executionTime: totalExecutionTime
+      });
     }
 
     return {
@@ -458,79 +476,6 @@ export class BidirectionalHookManager {
     return JSON.parse(JSON.stringify(data));
   }
 
-  /**
-   * 输出调试信息
-   */
-  private static outputDebugInfo(
-    hook: BidirectionalHook,
-    dataPacket: HookDataPacket,
-    context: HookExecutionContext,
-    changes: DataChange[],
-    observations: string[]
-  ): void {
-    console.log(`\n🔍 [DEBUG Hook] ${hook.name} (${hook.stage})`);
-    console.log(`📊 数据大小: ${dataPacket.metadata.size} bytes`);
-    console.log(`📝 变化数量: ${changes.length}`);
-    console.log(`💭 观察记录: ${observations.length}`);
-
-    if (this.debugConfig.level === 'detailed' || this.debugConfig.level === 'verbose') {
-      console.log(`📋 数据快照:`, this.formatDataForOutput(dataPacket.data));
-    }
-
-    if (changes.length > 0) {
-      console.log(`🔄 变化详情:`);
-      changes.forEach(change => {
-        console.log(`  ${change.type}: ${change.path} = ${JSON.stringify(change.newValue)}`);
-      });
-    }
-
-    if (observations.length > 0 && this.debugConfig.level === 'verbose') {
-      console.log(`👁️ 观察详情:`);
-      observations.forEach(obs => console.log(`  - ${obs}`));
-    }
-  }
-
-  /**
-   * 输出最终调试信息
-   */
-  private static outputFinalDebugInfo(
-    stage: HookStage,
-    target: string,
-    changes: DataChange[],
-    observations: string[],
-    executionTime: number
-  ): void {
-    console.log(`\n✅ [DEBUG Hook] ${stage} 阶段完成 (${target})`);
-    console.log(`⏱️  总执行时间: ${executionTime}ms`);
-    console.log(`🔄 总变化数量: ${changes.length}`);
-    console.log(`💭 总观察记录: ${observations.length}`);
-
-    if (changes.length > 0) {
-      console.log(`📊 变化统计:`);
-      const stats = changes.reduce((acc, change) => {
-        acc[change.type] = (acc[change.type] || 0) + 1;
-        return acc;
-      }, {} as Record<string, number>);
-
-      Object.entries(stats).forEach(([type, count]) => {
-        console.log(`  ${type}: ${count}`);
-      });
-    }
-  }
-
-  /**
-   * 格式化数据输出
-   */
-  private static formatDataForOutput(data: UnknownObject): UnknownObject {
-    if (this.debugConfig.maxDataSize > 0 && this.calculateDataSize(data) > this.debugConfig.maxDataSize) {
-      return {
-        __truncated: true,
-        __originalSize: this.calculateDataSize(data),
-        __preview: `${JSON.stringify(data).substring(0, 200)  }...`
-      };
-    }
-    return data;
-  }
 }
 
 export default BidirectionalHookManager;
