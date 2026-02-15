@@ -1,139 +1,24 @@
-type ClockClientRecord = {
-  daemonId: string;
-  tmuxSessionId?: string;
-  sessionId?: string;
-  conversationSessionIds?: string[];
-  clientType?: string;
-  callbackUrl: string;
-  tmuxTarget?: string;
-  managedTmuxSession?: boolean;
-  managedClientProcess?: boolean;
-  managedClientPid?: number;
-  managedClientCommandHint?: string;
-  registeredAtMs: number;
-  lastHeartbeatAtMs: number;
-  lastInjectAtMs?: number;
-  lastError?: string;
-};
-
-type ClockClientInjectArgs = {
-  tmuxSessionId?: string;
-  sessionId?: string;
-  text: string;
-  requestId?: string;
-  source?: string;
-};
-
-type ClockClientInjectResult = {
-  ok: boolean;
-  daemonId?: string;
-  reason?: string;
-};
-
-type ClockConversationBindArgs = {
-  conversationSessionId: string;
-  tmuxSessionId?: string;
-  daemonId?: string;
-  clientType?: string;
-};
-
-type ClockCleanupResult = {
-  removedDaemonIds: string[];
-  removedTmuxSessionIds: string[];
-  removedConversationSessionIds: string[];
-  killedTmuxSessionIds: string[];
-  failedKillTmuxSessionIds: string[];
-  skippedKillTmuxSessionIds: string[];
-  killedManagedClientPids: number[];
-  failedKillManagedClientPids: number[];
-  skippedKillManagedClientPids: number[];
-};
-
-type ClockStaleCleanupResult = ClockCleanupResult & {
-  staleAfterMs: number;
-};
-
-const HEARTBEAT_TTL_MS = 45_000;
-
-function normalizeString(value: unknown): string | undefined {
-  if (typeof value !== 'string') {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  return trimmed || undefined;
-}
-
-function resolveHeartbeatTtlMs(): number {
-  const raw = String(
-    process.env.ROUTECODEX_CLOCK_CLIENT_HEARTBEAT_TTL_MS
-      || process.env.RCC_CLOCK_CLIENT_HEARTBEAT_TTL_MS
-      || ''
-  ).trim();
-  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
-  if (Number.isFinite(parsed) && parsed >= 5_000) {
-    return Math.floor(parsed);
-  }
-  return HEARTBEAT_TTL_MS;
-}
-
-function resolveManagedTmuxSessionState(args: {
-  previousManagedTmuxSession?: boolean;
-  managedTmuxSessionInput?: boolean;
-}): boolean {
-  if (args.managedTmuxSessionInput === true) {
-    return true;
-  }
-  if (args.managedTmuxSessionInput === false) {
-    return false;
-  }
-  return args.previousManagedTmuxSession === true;
-}
-
-function resolveManagedClientProcessState(args: {
-  previousManagedClientProcess?: boolean;
-  managedClientProcessInput?: boolean;
-}): boolean {
-  if (args.managedClientProcessInput === true) {
-    return true;
-  }
-  if (args.managedClientProcessInput === false) {
-    return false;
-  }
-  return args.previousManagedClientProcess === true;
-}
-
-function normalizePositiveInt(value: unknown): number | undefined {
-  if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
-    return Math.floor(value);
-  }
-  if (typeof value === 'string') {
-    const parsed = Number.parseInt(value.trim(), 10);
-    if (Number.isFinite(parsed) && parsed > 0) {
-      return Math.floor(parsed);
-    }
-  }
-  return undefined;
-}
+import {
+  cleanupDeadTmuxSessionsFromRegistry,
+  cleanupStaleHeartbeatsFromRegistry,
+  normalizePositiveInt,
+  normalizeString,
+  resolveHeartbeatTtlMs,
+  resolveManagedClientProcessState,
+  resolveManagedTmuxSessionState
+} from './clock-client-registry-utils.js';
+import type {
+  ClockCleanupResult,
+  ClockClientInjectArgs,
+  ClockClientInjectResult,
+  ClockClientRecord,
+  ClockConversationBindArgs,
+  ClockStaleCleanupResult
+} from './clock-client-registry-utils.js';
 
 export class ClockClientRegistry {
   private readonly records = new Map<string, ClockClientRecord>();
   private readonly conversationToTmuxSession = new Map<string, string>();
-
-  private removeConversationMappingsByTmuxSession(tmuxSessionId: string): string[] {
-    const normalizedTmuxSessionId = normalizeString(tmuxSessionId);
-    if (!normalizedTmuxSessionId) {
-      return [];
-    }
-    const removed: string[] = [];
-    for (const [conversationSessionId, mappedTmuxSessionId] of this.conversationToTmuxSession.entries()) {
-      if (normalizeString(mappedTmuxSessionId) !== normalizedTmuxSessionId) {
-        continue;
-      }
-      this.conversationToTmuxSession.delete(conversationSessionId);
-      removed.push(conversationSessionId);
-    }
-    return removed;
-  }
 
   register(input: {
     daemonId: string;
@@ -303,75 +188,11 @@ export class ClockClientRegistry {
       clientType?: string;
     }) => boolean;
   }): ClockStaleCleanupResult {
-    const nowMs = Number.isFinite(args?.nowMs as number) ? Math.floor(args?.nowMs as number) : Date.now();
-    const staleAfterMs = Number.isFinite(args?.staleAfterMs as number)
-      ? Math.max(1, Math.floor(args?.staleAfterMs as number))
-      : resolveHeartbeatTtlMs();
-
-    const removedDaemonIds: string[] = [];
-    const removedTmuxSessionIds: string[] = [];
-    const removedConversationSessionIdsSet = new Set<string>();
-    const killedTmuxSessionIds: string[] = [];
-    const failedKillTmuxSessionIds: string[] = [];
-    const skippedKillTmuxSessionIds: string[] = [];
-    const killedManagedClientPids: number[] = [];
-    const failedKillManagedClientPids: number[] = [];
-    const skippedKillManagedClientPids: number[] = [];
-
-    for (const [daemonId, record] of this.records.entries()) {
-      if (nowMs - record.lastHeartbeatAtMs <= staleAfterMs) {
-        continue;
-      }
-
-      const tmuxSessionId = normalizeString(record.tmuxSessionId) ?? normalizeString(record.sessionId);
-      if (tmuxSessionId) {
-        // Guardrail: stale heartbeat cleanup must never terminate tmux sessions.
-        skippedKillTmuxSessionIds.push(tmuxSessionId);
-      }
-
-      const managedClientPid = normalizePositiveInt(record.managedClientPid);
-      if (managedClientPid) {
-        // Guardrail: stale heartbeat cleanup must never terminate managed client processes.
-        skippedKillManagedClientPids.push(managedClientPid);
-      }
-
-      removedDaemonIds.push(daemonId);
-      if (tmuxSessionId) {
-        removedTmuxSessionIds.push(tmuxSessionId);
-      }
-
-      const conversationSessionIds = Array.isArray(record.conversationSessionIds)
-        ? record.conversationSessionIds.filter((item) => normalizeString(item))
-        : [];
-
-      for (const conversationSessionId of conversationSessionIds) {
-        const mapped = this.conversationToTmuxSession.get(conversationSessionId);
-        if (mapped && (!tmuxSessionId || mapped === tmuxSessionId)) {
-          this.conversationToTmuxSession.delete(conversationSessionId);
-          removedConversationSessionIdsSet.add(conversationSessionId);
-        }
-      }
-      if (tmuxSessionId) {
-        for (const conversationSessionId of this.removeConversationMappingsByTmuxSession(tmuxSessionId)) {
-          removedConversationSessionIdsSet.add(conversationSessionId);
-        }
-      }
-
-      this.records.delete(daemonId);
-    }
-
-    return {
-      staleAfterMs,
-      removedDaemonIds,
-      removedTmuxSessionIds,
-      removedConversationSessionIds: Array.from(removedConversationSessionIdsSet),
-      killedTmuxSessionIds,
-      failedKillTmuxSessionIds,
-      skippedKillTmuxSessionIds,
-      killedManagedClientPids,
-      failedKillManagedClientPids,
-      skippedKillManagedClientPids
-    };
+    return cleanupStaleHeartbeatsFromRegistry({
+      records: this.records,
+      conversationToTmuxSession: this.conversationToTmuxSession,
+      ...args
+    });
   }
 
   cleanupDeadTmuxSessions(args: {
@@ -384,135 +205,11 @@ export class ClockClientRegistry {
       clientType?: string;
     }) => boolean;
   }): ClockCleanupResult {
-    const removedDaemonIds: string[] = [];
-    const removedTmuxSessionIds: string[] = [];
-    const removedConversationSessionIdsSet = new Set<string>();
-    const killedTmuxSessionIds: string[] = [];
-    const failedKillTmuxSessionIds: string[] = [];
-    const skippedKillTmuxSessionIds: string[] = [];
-    const killedManagedClientPids: number[] = [];
-    const failedKillManagedClientPids: number[] = [];
-    const skippedKillManagedClientPids: number[] = [];
-    const killedSessionOnce = new Set<string>();
-    const sessionKillOutcome = new Map<string, boolean>();
-    const killedProcessOnce = new Set<number>();
-    const processKillOutcome = new Map<number, boolean>();
-
-    for (const [daemonId, record] of this.records.entries()) {
-      const tmuxSessionId = normalizeString(record.tmuxSessionId) ?? normalizeString(record.sessionId);
-      if (!tmuxSessionId) {
-        continue;
-      }
-      let alive = true;
-      try {
-        alive = args.isTmuxSessionAlive(tmuxSessionId);
-      } catch {
-        alive = true;
-      }
-      if (alive) {
-        continue;
-      }
-
-      let canRemoveRecord = true;
-
-      if (record.managedTmuxSession) {
-        if (killedSessionOnce.has(tmuxSessionId)) {
-          skippedKillTmuxSessionIds.push(tmuxSessionId);
-          if (sessionKillOutcome.get(tmuxSessionId) === false) {
-            canRemoveRecord = false;
-          }
-        } else if (typeof args.terminateManagedTmuxSession === 'function') {
-          let killed = false;
-          try {
-            killed = Boolean(args.terminateManagedTmuxSession(tmuxSessionId));
-          } catch {
-            killed = false;
-          }
-          if (killed) {
-            killedTmuxSessionIds.push(tmuxSessionId);
-          } else {
-            failedKillTmuxSessionIds.push(tmuxSessionId);
-            canRemoveRecord = false;
-          }
-          killedSessionOnce.add(tmuxSessionId);
-          sessionKillOutcome.set(tmuxSessionId, killed);
-        } else {
-          skippedKillTmuxSessionIds.push(tmuxSessionId);
-        }
-      } else {
-        skippedKillTmuxSessionIds.push(tmuxSessionId);
-      }
-
-      const managedClientPid = normalizePositiveInt(record.managedClientPid);
-      if (record.managedClientProcess && managedClientPid) {
-        if (killedProcessOnce.has(managedClientPid)) {
-          skippedKillManagedClientPids.push(managedClientPid);
-          if (processKillOutcome.get(managedClientPid) === false) {
-            canRemoveRecord = false;
-          }
-        } else if (typeof args.terminateManagedClientProcess === 'function') {
-          let killed = false;
-          try {
-            killed = Boolean(args.terminateManagedClientProcess({
-              daemonId,
-              pid: managedClientPid,
-              commandHint: normalizeString(record.managedClientCommandHint),
-              clientType: normalizeString(record.clientType)
-            }));
-          } catch {
-            killed = false;
-          }
-          if (killed) {
-            killedManagedClientPids.push(managedClientPid);
-          } else {
-            failedKillManagedClientPids.push(managedClientPid);
-            canRemoveRecord = false;
-          }
-          killedProcessOnce.add(managedClientPid);
-          processKillOutcome.set(managedClientPid, killed);
-        } else {
-          skippedKillManagedClientPids.push(managedClientPid);
-        }
-      } else if (managedClientPid) {
-        skippedKillManagedClientPids.push(managedClientPid);
-      }
-
-      if (!canRemoveRecord) {
-        continue;
-      }
-
-      removedDaemonIds.push(daemonId);
-      removedTmuxSessionIds.push(tmuxSessionId);
-
-      const conversationSessionIds = Array.isArray(record.conversationSessionIds)
-        ? record.conversationSessionIds.filter((item) => normalizeString(item))
-        : [];
-
-      for (const conversationSessionId of conversationSessionIds) {
-        const mapped = this.conversationToTmuxSession.get(conversationSessionId);
-        if (mapped === tmuxSessionId) {
-          this.conversationToTmuxSession.delete(conversationSessionId);
-          removedConversationSessionIdsSet.add(conversationSessionId);
-        }
-      }
-      for (const conversationSessionId of this.removeConversationMappingsByTmuxSession(tmuxSessionId)) {
-        removedConversationSessionIdsSet.add(conversationSessionId);
-      }
-
-      this.records.delete(daemonId);
-    }
-
-    return {
-      removedDaemonIds,
-      removedTmuxSessionIds,
-      removedConversationSessionIds: Array.from(removedConversationSessionIdsSet),
-      killedTmuxSessionIds,
-      failedKillTmuxSessionIds,
-      skippedKillTmuxSessionIds,
-      killedManagedClientPids,
-      failedKillManagedClientPids,
-      skippedKillManagedClientPids
-    };
+    return cleanupDeadTmuxSessionsFromRegistry({
+      records: this.records,
+      conversationToTmuxSession: this.conversationToTmuxSession,
+      ...args
+    });
   }
 
   private isAlive(record: ClockClientRecord): boolean {
