@@ -1,22 +1,19 @@
 import { Buffer } from 'node:buffer';
 import { spawn } from 'node:child_process';
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-
 import {
   DEEPSEEK_ERROR_CODES,
   type DeepSeekErrorCode
 } from '../contracts/deepseek-provider-contract.js';
-
-type DeepSeekSessionPowError = Error & {
-  code?: string;
-  statusCode?: number;
-  status?: number;
-  upstreamCode?: string;
-  details?: Record<string, unknown>;
-};
-
+import {
+  createDeepSeekSessionPowError,
+  normalizeInteger,
+  normalizeString,
+  resolveBuiltInPowSolverPath,
+  resolveBuiltInPowWasmPath,
+  resolvePathWithFallback,
+  safeParseJson,
+  type DeepSeekSessionPowError
+} from './deepseek-session-pow-helpers.js';
 type DeepSeekSessionResponse = {
   code?: number;
   msg?: string;
@@ -43,7 +40,6 @@ type DeepSeekSessionCache = {
   sessionId: string;
   expiresAt: number;
 };
-
 type FetchLike = typeof fetch;
 
 export interface DeepSeekSessionPowManagerOptions {
@@ -80,116 +76,6 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_POW_TIMEOUT_MS = 15_000;
 const DEFAULT_POW_MAX_ATTEMPTS = 2;
 const DEFAULT_SESSION_REUSE_TTL_MS = 30 * 60 * 1000;
-
-function normalizeString(value: unknown): string | undefined {
-  if (typeof value !== 'string') {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  return trimmed.length ? trimmed : undefined;
-}
-
-function normalizeInteger(value: unknown, fallback: number, min: number, max: number): number {
-  const parsed =
-    typeof value === 'number'
-      ? value
-      : typeof value === 'string'
-        ? Number.parseInt(value, 10)
-        : NaN;
-  if (!Number.isFinite(parsed)) {
-    return fallback;
-  }
-  const floored = Math.floor(parsed);
-  if (floored < min) {
-    return min;
-  }
-  if (floored > max) {
-    return max;
-  }
-  return floored;
-}
-
-function createDeepSeekSessionPowError(params: {
-  code: DeepSeekErrorCode;
-  message: string;
-  statusCode?: number;
-  upstreamCode?: string;
-  details?: Record<string, unknown>;
-}): DeepSeekSessionPowError {
-  const error = new Error(params.message) as DeepSeekSessionPowError;
-  error.code = params.code;
-  if (typeof params.statusCode === 'number') {
-    error.statusCode = params.statusCode;
-    error.status = params.statusCode;
-  }
-  if (typeof params.upstreamCode === 'string' && params.upstreamCode.trim()) {
-    error.upstreamCode = params.upstreamCode.trim();
-  }
-  if (params.details) {
-    error.details = params.details;
-  }
-  return error;
-}
-
-function safeParseJson(raw: string): unknown {
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return undefined;
-  }
-}
-
-function resolveBuiltInPowSolverPath(): string | undefined {
-  const currentDir = path.dirname(fileURLToPath(import.meta.url));
-  const candidates = [
-    path.resolve(currentDir, '../../../scripts/deepseek/pow-solver.mjs'),
-    path.resolve(currentDir, '../../../../scripts/deepseek/pow-solver.mjs'),
-    path.resolve(process.cwd(), 'dist/scripts/deepseek/pow-solver.mjs'),
-    path.resolve(process.cwd(), 'scripts/deepseek/pow-solver.mjs')
-  ];
-  return firstExistingPath(candidates);
-}
-
-function resolveBuiltInPowWasmPath(): string | undefined {
-  const currentDir = path.dirname(fileURLToPath(import.meta.url));
-  const candidates = [
-    path.resolve(currentDir, '../../../scripts/deepseek/sha3_wasm_bg.7b9ca65ddd.wasm'),
-    path.resolve(currentDir, '../../../../scripts/deepseek/sha3_wasm_bg.7b9ca65ddd.wasm'),
-    path.resolve(process.cwd(), 'dist/scripts/deepseek/sha3_wasm_bg.7b9ca65ddd.wasm'),
-    path.resolve(process.cwd(), 'scripts/deepseek/sha3_wasm_bg.7b9ca65ddd.wasm')
-  ];
-  return firstExistingPath(candidates);
-}
-
-function firstExistingPath(candidates: string[]): string | undefined {
-  for (const candidate of candidates) {
-    try {
-      if (fs.existsSync(candidate)) {
-        return candidate;
-      }
-    } catch {
-      // ignore
-    }
-  }
-  return undefined;
-}
-
-function resolvePathWithFallback(
-  preferredPath: string | undefined,
-  builtInPath: string | undefined
-): string | undefined {
-  const preferred = normalizeString(preferredPath);
-  if (preferred) {
-    try {
-      if (fs.existsSync(preferred)) {
-        return preferred;
-      }
-    } catch {
-      // ignore
-    }
-  }
-  return builtInPath;
-}
 
 export class DeepSeekSessionPowManager {
   private readonly baseUrl: string;
@@ -229,8 +115,8 @@ export class DeepSeekSessionPowManager {
     const preferredWasmPath =
       normalizeString(options.wasmPath) ||
       normalizeString(process.env.ROUTECODEX_DEEPSEEK_POW_WASM);
-    this.solverPath = resolvePathWithFallback(preferredSolverPath, resolveBuiltInPowSolverPath());
-    this.wasmPath = resolvePathWithFallback(preferredWasmPath, resolveBuiltInPowWasmPath());
+    this.solverPath = resolvePathWithFallback(preferredSolverPath, resolveBuiltInPowSolverPath(import.meta.url));
+    this.wasmPath = resolvePathWithFallback(preferredWasmPath, resolveBuiltInPowWasmPath(import.meta.url));
     this.fetchImpl = options.fetchImpl || fetch;
     this.solvePowOverride = options.solvePow;
     this.logger = options.logger;
@@ -455,8 +341,8 @@ export class DeepSeekSessionPowManager {
       return await this.solvePowOverride(input);
     }
 
-    const solverPath = resolvePathWithFallback(this.solverPath, resolveBuiltInPowSolverPath());
-    const wasmPath = resolvePathWithFallback(this.wasmPath, resolveBuiltInPowWasmPath());
+    const solverPath = resolvePathWithFallback(this.solverPath, resolveBuiltInPowSolverPath(import.meta.url));
+    const wasmPath = resolvePathWithFallback(this.wasmPath, resolveBuiltInPowWasmPath(import.meta.url));
 
     if (!solverPath) {
       throw createDeepSeekSessionPowError({

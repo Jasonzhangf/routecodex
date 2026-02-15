@@ -21,19 +21,24 @@ import {
 import type { HttpClient } from '../utils/http-client.js';
 import { ResponsesProtocolClient } from '../../../client/responses/responses-protocol-client.js';
 import { emitProviderError, buildRuntimeFromProviderContext } from '../utils/provider-error-reporter.js';
+import {
+  buildSubmitToolOutputsEndpoint,
+  buildTargetUrl,
+  detectResponsesFailure,
+  extractClientRequestId,
+  extractEntryEndpoint,
+  extractResponsesConfig,
+  extractStreamFlagFromBody,
+  extractSubmitToolOutputsPayload,
+  normalizeUpstreamError,
+  type ResponsesProviderConfig,
+  type ResponsesStreamingMode,
+  type SubmitToolOutputsPayload
+} from './responses-provider-helpers.js';
 
 type ResponsesHttpClient = Pick<HttpClient, 'post' | 'postStream'>;
-type ResponsesStreamingMode = 'auto' | 'always' | 'never';
 type ResponsesSseConverter = {
   convertSseToJson(stream: unknown, options: { requestId: string; model: string }): Promise<unknown>;
-};
-type ResponsesProviderConfig = {
-  streaming?: ResponsesStreamingMode;
-};
-
-type SubmitToolOutputsPayload = {
-  responseId: string;
-  body: Record<string, unknown>;
 };
 export class ResponsesProvider extends HttpTransportProvider {
   private readonly responsesClient: ResponsesProtocolClient;
@@ -71,15 +76,15 @@ export class ResponsesProvider extends HttpTransportProvider {
     const headers = await this.finalizeRequestHeaders(baseHeaders, request);
 
     const context = this.createProviderContext();
-    const entryEndpoint = this.extractEntryEndpoint(request) ?? this.extractEntryEndpoint(context);
+    const entryEndpoint = extractEntryEndpoint(request) ?? extractEntryEndpoint(context);
 
     const submitPayload =
       typeof entryEndpoint === 'string' && entryEndpoint.trim().toLowerCase() === '/v1/responses.submit_tool_outputs'
-        ? this.extractSubmitToolOutputsPayload(request)
+        ? extractSubmitToolOutputsPayload(request)
         : null;
     if (submitPayload) {
-      const submitEndpoint = this.buildSubmitToolOutputsEndpoint(endpoint, submitPayload.responseId);
-      const submitTargetUrl = this.buildTargetUrl(this.getEffectiveBaseUrl(), submitEndpoint);
+      const submitEndpoint = buildSubmitToolOutputsEndpoint(endpoint, submitPayload.responseId);
+      const submitTargetUrl = buildTargetUrl(this.getEffectiveBaseUrl(), submitEndpoint);
       return await this.sendSubmitToolOutputsRequest({
         endpoint: submitEndpoint,
         body: submitPayload.body,
@@ -87,16 +92,16 @@ export class ResponsesProvider extends HttpTransportProvider {
         context,
         targetUrl: submitTargetUrl,
         entryEndpoint,
-        providerStream: this.extractStreamFlagFromBody(submitPayload.body),
+        providerStream: extractStreamFlagFromBody(submitPayload.body),
         httpClient: this.httpClient
       });
     }
 
-    const targetUrl = this.buildTargetUrl(this.getEffectiveBaseUrl(), endpoint);
+    const targetUrl = buildTargetUrl(this.getEffectiveBaseUrl(), endpoint);
     const finalBody = this.responsesClient.buildRequestBody(request);
     this.assertResponsesWireShape(finalBody);
 
-    const explicitStream = this.extractStreamFlagFromBody(finalBody);
+    const explicitStream = extractStreamFlagFromBody(finalBody);
     const streamingPreference = this.responsesClient.getStreamingPreference();
     const useSse: boolean =
       streamingPreference === 'always'
@@ -140,7 +145,7 @@ export class ResponsesProvider extends HttpTransportProvider {
         httpClient: this.httpClient
       });
     } catch (error) {
-      const normalizedError = this.normalizeUpstreamError(error);
+      const normalizedError = normalizeUpstreamError(error);
       await this.snapshotPhase(
         'provider-error',
         context,
@@ -175,76 +180,6 @@ export class ResponsesProvider extends HttpTransportProvider {
     }
   }
 
-  private buildTargetUrl(baseUrl: string, endpoint: string): string {
-    const normalizedBase = baseUrl.replace(/\/$/, '');
-    const normalizedEndpoint = endpoint.startsWith('/') ? endpoint.slice(1) : endpoint;
-    return `${normalizedBase}/${normalizedEndpoint}`;
-  }
-
-  private extractStreamFlagFromBody(body: Record<string, unknown>): boolean | undefined {
-    if (!body || typeof body !== 'object') {
-      return undefined;
-    }
-    const direct = (body as Record<string, unknown>).stream;
-    if (typeof direct === 'boolean') {
-      return direct;
-    }
-    const parameters = (body as Record<string, unknown>).parameters;
-    if (parameters && typeof parameters === 'object') {
-      const nested = (parameters as Record<string, unknown>).stream;
-      if (typeof nested === 'boolean') {
-        return nested;
-      }
-    }
-    return undefined;
-  }
-
-  private extractEntryEndpoint(source: unknown): string | undefined {
-    if (!source || typeof source !== 'object') {
-      return undefined;
-    }
-    const metadata = (source as { metadata?: unknown }).metadata;
-    if (metadata && typeof metadata === 'object' && 'entryEndpoint' in metadata) {
-      const value = (metadata as Record<string, unknown>).entryEndpoint;
-      return typeof value === 'string' ? value : undefined;
-    }
-    return undefined;
-  }
-
-  private extractSubmitToolOutputsPayload(request: UnknownObject): SubmitToolOutputsPayload | null {
-    if (!request || typeof request !== 'object') {
-      return null;
-    }
-    const record = request as Record<string, unknown>;
-    const rawId =
-      typeof record.response_id === 'string'
-        ? record.response_id
-        : typeof record.responseId === 'string'
-          ? record.responseId
-          : undefined;
-    const responseId = rawId && rawId.trim().length ? rawId.trim() : undefined;
-    if (!responseId) {
-      return null;
-    }
-    const toolOutputs = Array.isArray(record.tool_outputs) ? record.tool_outputs : null;
-    if (!toolOutputs || !toolOutputs.length) {
-      return null;
-    }
-    const submitBody = JSON.parse(JSON.stringify(record)) as Record<string, unknown>;
-    delete submitBody.response_id;
-    delete submitBody.responseId;
-    return {
-      responseId,
-      body: submitBody
-    };
-  }
-
-  private buildSubmitToolOutputsEndpoint(baseEndpoint: string, responseId: string): string {
-    const normalizedBase = baseEndpoint.replace(/\/+$/, '');
-    const encodedId = encodeURIComponent(responseId);
-    return `${normalizedBase}/${encodedId}/submit_tool_outputs`;
-  }
-
   private async snapshotPhase(
     phase: 'provider-request' | 'provider-response' | 'provider-error',
     context: ProviderContext,
@@ -254,7 +189,7 @@ export class ResponsesProvider extends HttpTransportProvider {
     entryEndpoint?: string
   ): Promise<void> {
     try {
-      const clientRequestId = this.extractClientRequestId(context);
+      const clientRequestId = extractClientRequestId(context);
       await writeProviderSnapshot({
         phase,
         requestId: context.requestId,
@@ -269,23 +204,6 @@ export class ResponsesProvider extends HttpTransportProvider {
     } catch {
       // non-blocking
     }
-  }
-
-  private extractClientRequestId(context: ProviderContext): string | undefined {
-    const metaValue = context.metadata && typeof context.metadata === 'object'
-      ? (context.metadata as Record<string, unknown>).clientRequestId
-      : undefined;
-    if (typeof metaValue === 'string' && metaValue.trim().length) {
-      return metaValue.trim();
-    }
-    const runtimeMeta = context.runtimeMetadata?.metadata;
-    if (runtimeMeta && typeof runtimeMeta === 'object') {
-      const candidate = (runtimeMeta as Record<string, unknown>).clientRequestId;
-      if (typeof candidate === 'string' && candidate.trim().length) {
-        return candidate.trim();
-      }
-    }
-    return undefined;
   }
 
   private async sendSseRequest(options: {
@@ -311,7 +229,7 @@ export class ResponsesProvider extends HttpTransportProvider {
         headers,
         url: targetUrl,
         entryEndpoint,
-        clientRequestId: this.extractClientRequestId(context),
+        clientRequestId: extractClientRequestId(context),
         providerKey: context.providerKey,
         providerId: context.providerId
       })
@@ -371,7 +289,7 @@ export class ResponsesProvider extends HttpTransportProvider {
           headers,
           url: targetUrl,
           entryEndpoint,
-          clientRequestId: this.extractClientRequestId(context),
+          clientRequestId: extractClientRequestId(context),
           providerKey: context.providerKey,
           providerId: context.providerId
         })
@@ -405,7 +323,7 @@ export class ResponsesProvider extends HttpTransportProvider {
         url: targetUrl
       };
     } catch (error) {
-      const normalizedError = this.normalizeUpstreamError(error);
+      const normalizedError = normalizeUpstreamError(error);
       await this.snapshotPhase(
         'provider-error',
         context,
@@ -441,59 +359,12 @@ export class ResponsesProvider extends HttpTransportProvider {
     return response;
   }
 
-  private normalizeUpstreamError(error: unknown): Error & {
-    status?: number;
-    statusCode?: number;
-    code?: string;
-    response?: {
-      data?: {
-        error?: Record<string, unknown>;
-      };
-    };
-  } {
-    const normalized = error instanceof Error ? error : new Error(String(error ?? 'Unknown error'));
-    const err = normalized as Error & {
-      status?: number;
-      statusCode?: number;
-      code?: string;
-      response?: {
-        data?: {
-          error?: Record<string, unknown>;
-        };
-      };
-    };
-    const message = typeof err.message === 'string' ? err.message : String(err || '');
-    const match = message.match(/HTTP\s+(\d{3})/i);
-    const existing = typeof err.statusCode === 'number' ? err.statusCode : typeof err.status === 'number' ? err.status : undefined;
-    const statusCode = existing ?? (match ? Number(match[1]) : undefined);
-    if (typeof statusCode === 'number' && !Number.isNaN(statusCode)) {
-      err.statusCode = statusCode;
-      err.status = statusCode;
-      if (!err.code) {
-        err.code = `HTTP_${statusCode}`;
-      }
-    }
-    if (!err.response) {
-      err.response = {};
-    }
-    if (!err.response.data) {
-      err.response.data = {};
-    }
-    if (!err.response.data.error) {
-      err.response.data.error = {};
-    }
-    if (err.code && !err.response.data.error.code) {
-      err.response.data.error.code = err.code;
-    }
-    return err;
-  }
-
   private async loadResponsesSseConverter(): Promise<ResponsesSseConverter> {
     return await createResponsesSseToJsonConverter();
   }
 
   private reportResponsesFailureIfNeeded(payload: unknown, context: ProviderContext): void {
-    const failure = this.detectResponsesFailure(payload);
+    const failure = detectResponsesFailure(payload);
     if (!failure) {
       return;
     }
@@ -513,123 +384,6 @@ export class ResponsesProvider extends HttpTransportProvider {
       }
     });
   }
-
-  private detectResponsesFailure(payload: unknown): ResponsesFailure | null {
-    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-      return null;
-    }
-    const record = payload as Record<string, unknown>;
-    const status = typeof record.status === 'string' ? record.status : undefined;
-    const errorCandidate = record.error;
-    const errorRecord = errorCandidate && typeof errorCandidate === 'object' && !Array.isArray(errorCandidate)
-      ? (errorCandidate as Record<string, unknown>)
-      : undefined;
-    if (status !== 'failed' && !errorRecord) {
-      return null;
-    }
-    const message = typeof errorRecord?.message === 'string'
-      ? errorRecord.message
-      : `Responses request failed${status ? ` (${status})` : ''}`;
-    const code = typeof errorRecord?.code === 'string'
-      ? errorRecord.code
-      : status === 'failed'
-        ? 'RESPONSES_FAILED'
-        : undefined;
-    const httpStatus = typeof errorRecord?.['http_status'] === 'number'
-      ? (errorRecord['http_status'] as number)
-      : undefined;
-    const embeddedStatus = typeof errorRecord?.status === 'number'
-      ? (errorRecord.status as number)
-      : undefined;
-    const statusCode = httpStatus ?? embeddedStatus ?? this.extractStatusFromErrorCode(code);
-    const recoverable = this.isRecoverableStatus(statusCode, code);
-    return {
-      message,
-      statusCode,
-      code,
-      recoverable,
-      status,
-      rawError: errorRecord
-    };
-  }
-
-  private extractStatusFromErrorCode(code?: string): number | undefined {
-    if (typeof code !== 'string') {
-      return undefined;
-    }
-    const numericMatch = code.match(/(\d{3})/);
-    if (numericMatch) {
-      const candidate = Number(numericMatch[1] ?? numericMatch[0]);
-      if (!Number.isNaN(candidate)) {
-        return candidate;
-      }
-    }
-    const lowered = code.toLowerCase();
-    if (lowered.includes('quota') || lowered.includes('billing')) {
-      return 402;
-    }
-    if (lowered.includes('unauthorized') || lowered.includes('auth')) {
-      return 401;
-    }
-    if (lowered.includes('rate') || lowered.includes('limit')) {
-      return 429;
-    }
-    return undefined;
-  }
-
-  private isRecoverableStatus(statusCode?: number, code?: string): boolean {
-    if (statusCode === 429 || statusCode === 408) {
-      return true;
-    }
-    if (!code) {
-      return false;
-    }
-    const lowered = code.toLowerCase();
-    return lowered.includes('rate') || lowered.includes('timeout') || lowered.includes('retry');
-  }
-}
-
-function parseStreamingMode(value: unknown): ResponsesStreamingMode {
-  if (typeof value === 'string') {
-    const lowered = value.trim().toLowerCase();
-    if (lowered === 'always' || lowered === 'never') {
-      return lowered;
-    }
-    if (lowered === 'auto') {
-      return 'auto';
-    }
-  }
-  return 'auto';
-}
-
-function extractResponsesConfig(config: UnknownObject): ResponsesProviderConfig {
-  const container = isRecord(config) ? (config as Record<string, unknown>) : {};
-  const providerConfig = isRecord(container.config)
-    ? (container.config as Record<string, unknown>)
-    : undefined;
-  const responsesCfg = providerConfig && isRecord(providerConfig.responses)
-      ? (providerConfig.responses as Record<string, unknown>)
-      : isRecord(container.responses)
-      ? (container.responses as Record<string, unknown>)
-      : undefined;
-  if (!responsesCfg) {
-    return {};
-  }
-  return {
-    streaming: 'streaming' in responsesCfg ? parseStreamingMode(responsesCfg.streaming) : undefined
-  };
 }
 
 export default ResponsesProvider;
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
-type ResponsesFailure = {
-  message: string;
-  status?: string;
-  statusCode?: number;
-  code?: string;
-  recoverable: boolean;
-  rawError?: Record<string, unknown>;
-};

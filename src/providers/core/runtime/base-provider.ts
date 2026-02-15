@@ -14,7 +14,6 @@ import {
   buildRuntimeFromProviderContext
 } from '../utils/provider-error-reporter.js';
 import { classifyProviderError } from './provider-error-classifier.js';
-import type { ProviderErrorAugmented } from './provider-error-types.js';
 import { getStatsCenterSafe as getStatsCenterSafeFromBridge } from '../../../modules/llmswitch/bridge.js';
 import type { ProviderUsageEvent } from '../../../modules/llmswitch/bridge.js';
 import { RateLimitCooldownError } from './rate-limit-manager.js';
@@ -487,5 +486,8 @@ export abstract class BaseProvider implements IProviderV2 {
     BaseProvider.rateLimitFailures.set(bucketKey, BaseProvider.RATE_LIMIT_THRESHOLD);
   }
 
-  private static parseDurationToMs(value?: string): number | null { return parseSeriesCooldownDurationToMs(value); }
+  // Kept for compatibility with existing tests/introspection helpers.
+  private static parseDurationToMs(value?: string): number | null {
+    return parseSeriesCooldownDurationToMs(value);
+  }
 }
