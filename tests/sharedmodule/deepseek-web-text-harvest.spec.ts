@@ -317,4 +317,82 @@ describe('deepseek-web text tool-call harvest', () => {
     expect(patchText).toContain('app.get(\'/tabs/:tabId/view\'');
     expect(out.choices?.[0]?.finish_reason).toBe('tool_calls');
   });
+
+  it('harvests escaped tool_calls transcript into exec_command tool_call', () => {
+    const adapterContextExec: any = {
+      capturedChatRequest: {
+        tools: [{ type: 'function', function: { name: 'exec_command' } }],
+        tool_choice: 'required'
+      }
+    };
+    const content = [
+      '{\\"tool_calls\\":[{\\"name\\":\\"exec_command\\",\\"input\\":{\\"cmd\\":\\"npm run build:dev\\",\\"workdir\\":\\"/Users/fanzhang/Documents/github/routecodex\\"}}]}',
+      '<｜User｜>> routecodex@0.89.2125 build:dev',
+      '<｜Assistant｜>继续执行'
+    ].join('');
+
+    const payload: any = {
+      id: 'chatcmpl_deepseek_harvest_escaped_transcript_1',
+      object: 'chat.completion',
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: 'assistant',
+            content
+          },
+          finish_reason: 'stop'
+        }
+      ]
+    };
+
+    const out: any = applyDeepSeekWebResponseTransform(payload, adapterContextExec);
+    const call = out.choices?.[0]?.message?.tool_calls?.[0];
+    expect(call?.function?.name).toBe('exec_command');
+    const args = JSON.parse(String(call?.function?.arguments || '{}'));
+    expect(args.cmd).toBe('npm run build:dev');
+    expect(args.workdir).toBe('/Users/fanzhang/Documents/github/routecodex');
+    expect(out.choices?.[0]?.finish_reason).toBe('tool_calls');
+  });
+
+  it('harvests trailing JSON tool_calls after prose into exec_command tool_call', () => {
+    const adapterContextExec: any = {
+      capturedChatRequest: {
+        tools: [{ type: 'function', function: { name: 'exec_command' } }],
+        tool_choice: 'required'
+      }
+    };
+    const content = [
+      '我将按以下步骤执行：',
+      '',
+      '1. 先检查项目状态',
+      '2. 再执行构建',
+      '',
+      '让我立即开始：',
+      '',
+      '{"tool_calls":[{"name":"exec_command","input":{"command":"bd --no-db ready"}}]}'
+    ].join('\n');
+
+    const payload: any = {
+      id: 'chatcmpl_deepseek_harvest_trailing_json_1',
+      object: 'chat.completion',
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: 'assistant',
+            content
+          },
+          finish_reason: 'stop'
+        }
+      ]
+    };
+
+    const out: any = applyDeepSeekWebResponseTransform(payload, adapterContextExec);
+    const call = out.choices?.[0]?.message?.tool_calls?.[0];
+    expect(call?.function?.name).toBe('exec_command');
+    const args = JSON.parse(String(call?.function?.arguments || '{}'));
+    expect(args.cmd).toBe('bd --no-db ready');
+    expect(out.choices?.[0]?.finish_reason).toBe('tool_calls');
+  });
 });
