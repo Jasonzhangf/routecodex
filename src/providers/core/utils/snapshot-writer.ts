@@ -5,6 +5,13 @@ import { PassThrough } from 'node:stream';
 import { writeSnapshotViaHooks } from '../../../modules/llmswitch/bridge.js';
 import { buildInfo } from '../../../build-info.js';
 import { runtimeFlags } from '../../../runtime/runtime-flags.js';
+import {
+  bufferProviderSnapshotForErrorFlush,
+  resetProviderSnapshotErrorBufferForTests,
+  shouldFlushSnapshotBuffer,
+  takeBufferedProviderSnapshots
+} from './snapshot-writer-buffer.js';
+import type { ProviderSnapshotPersistInput } from './snapshot-writer-buffer.js';
 
 type Phase =
   | 'provider-request'
@@ -144,55 +151,6 @@ async function writeUniqueFile(dir: string, baseName: string, contents: string):
   await fsp.writeFile(path.join(dir, fallback), contents, 'utf-8');
 }
 
-
-type ProviderSnapshotPersistInput = {
-  endpoint: string;
-  folder: string;
-  stage: string;
-  requestId: string;
-  groupRequestId: string;
-  providerToken: string;
-  payload: ReturnType<typeof buildSnapshotPayload>;
-};
-
-type SnapshotBufferGlobal = {
-  __routecodexProviderSnapshotErrorBuffer?: Map<string, ProviderSnapshotPersistInput[]>;
-};
-
-const PROVIDER_SNAPSHOT_BUFFER_MAX_REQUESTS = 128;
-const PROVIDER_SNAPSHOT_BUFFER_MAX_ENTRIES_PER_REQUEST = 24;
-
-function getProviderSnapshotErrorBuffer(): Map<string, ProviderSnapshotPersistInput[]> {
-  const scope = globalThis as SnapshotBufferGlobal;
-  if (!scope.__routecodexProviderSnapshotErrorBuffer) {
-    scope.__routecodexProviderSnapshotErrorBuffer = new Map<string, ProviderSnapshotPersistInput[]>();
-  }
-  return scope.__routecodexProviderSnapshotErrorBuffer;
-}
-
-function shouldFlushSnapshotBuffer(stage: string): boolean {
-  const normalized = String(stage || '').trim().toLowerCase();
-  return normalized.includes('error');
-}
-
-function bufferProviderSnapshotForErrorFlush(input: ProviderSnapshotPersistInput): void {
-  const buffer = getProviderSnapshotErrorBuffer();
-  const bucket = buffer.get(input.groupRequestId) ?? [];
-  bucket.push(input);
-  if (bucket.length > PROVIDER_SNAPSHOT_BUFFER_MAX_ENTRIES_PER_REQUEST) {
-    bucket.splice(0, bucket.length - PROVIDER_SNAPSHOT_BUFFER_MAX_ENTRIES_PER_REQUEST);
-  }
-  buffer.set(input.groupRequestId, bucket);
-
-  while (buffer.size > PROVIDER_SNAPSHOT_BUFFER_MAX_REQUESTS) {
-    const oldest = buffer.keys().next().value;
-    if (!oldest) {
-      break;
-    }
-    buffer.delete(oldest);
-  }
-}
-
 async function persistProviderSnapshot(input: ProviderSnapshotPersistInput): Promise<void> {
   try {
     await writeSnapshotViaHooks({
@@ -218,12 +176,10 @@ async function persistProviderSnapshot(input: ProviderSnapshotPersistInput): Pro
 }
 
 async function flushBufferedProviderSnapshots(groupRequestId: string): Promise<void> {
-  const buffer = getProviderSnapshotErrorBuffer();
-  const batch = buffer.get(groupRequestId);
-  if (!batch || batch.length === 0) {
+  const batch = takeBufferedProviderSnapshots(groupRequestId);
+  if (batch.length === 0) {
     return;
   }
-  buffer.delete(groupRequestId);
   for (const entry of batch) {
     await persistProviderSnapshot(entry);
   }
@@ -252,7 +208,7 @@ function buildProviderSnapshotPersistInput(options: ProviderSnapshotWriteOptions
 }
 
 export function __resetProviderSnapshotErrorBufferForTests(): void {
-  getProviderSnapshotErrorBuffer().clear();
+  resetProviderSnapshotErrorBufferForTests();
 }
 
 export async function writeProviderSnapshot(options: ProviderSnapshotWriteOptions): Promise<void> {
