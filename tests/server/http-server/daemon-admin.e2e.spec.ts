@@ -395,6 +395,47 @@ describe('Daemon admin HTTP endpoints (smoke)', () => {
     }
   });
 
+  it('supports unified quota mutate actions (setQuota/clearCooldown/restoreNow)', async () => {
+    const { server, baseUrl, configDir, restoreEnv } = await startTestServer();
+    const cookie = await setupDaemonAdminAuth(baseUrl);
+    const providerKey = 'mock.dummy';
+    try {
+      const setDepleted = await postJson(
+        baseUrl,
+        '/daemon/control/mutate',
+        { action: 'quota.setQuota', providerKey, quota: 0 },
+        cookie
+      );
+      expect(setDepleted.status).toBe(200);
+      expect(setDepleted.body).toHaveProperty('ok', true);
+      expect(setDepleted.body.snapshot).toHaveProperty('providerKey', providerKey);
+      expect(setDepleted.body.snapshot).toHaveProperty('inPool', false);
+
+      const clearCooldown = await postJson(
+        baseUrl,
+        '/daemon/control/mutate',
+        { action: 'quota.clearCooldown', providerKey },
+        cookie
+      );
+      expect(clearCooldown.status).toBe(200);
+      expect(clearCooldown.body).toHaveProperty('ok', true);
+      expect(clearCooldown.body.snapshot).toHaveProperty('providerKey', providerKey);
+      expect(clearCooldown.body.snapshot).toHaveProperty('inPool', true);
+
+      const restoreNow = await postJson(
+        baseUrl,
+        '/daemon/control/mutate',
+        { action: 'quota.restoreNow', providerKey },
+        cookie
+      );
+      expect(restoreNow.status).toBe(200);
+      expect(restoreNow.body).toHaveProperty('ok', true);
+      expect(restoreNow.body.snapshot).toHaveProperty('providerKey', providerKey);
+    } finally {
+      await stopTestServer(server, configDir, restoreEnv);
+    }
+  });
+
   it('exposes routing policy + supports routing.policy.set', async () => {
     const { server, baseUrl, configDir, configPath, restoreEnv } = await startTestServer();
     try {

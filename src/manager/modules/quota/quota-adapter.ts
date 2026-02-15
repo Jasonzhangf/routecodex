@@ -38,6 +38,9 @@ export interface QuotaManagerAdapter {
   disableProvider(options: { providerKey: string; mode: 'cooldown' | 'blacklist'; durationMs: number }): Promise<unknown>;
   recoverProvider(providerKey: string): Promise<unknown>;
   resetProvider(providerKey: string): Promise<unknown>;
+  clearCooldown(providerKey: string): Promise<unknown>;
+  restoreNow(providerKey: string): Promise<unknown>;
+  setQuota(options: { providerKey: string; quota: number; reason?: string }): Promise<unknown>;
   registerProviderStaticConfig(providerKey: string, config: StaticQuotaConfig): void;
 
   // Event handlers
@@ -195,6 +198,62 @@ export function createQuotaManagerAdapter(options: {
 
     if (legacy?.resetProvider) {
       return await legacy.resetProvider(providerKey);
+    }
+
+    return { ok: false, reason: 'no_quota_manager_available' };
+  }
+
+  async function clearCooldown(providerKey: string): Promise<unknown> {
+    return await recoverProvider(providerKey);
+  }
+
+  async function restoreNow(providerKey: string): Promise<unknown> {
+    return await resetProvider(providerKey);
+  }
+
+  async function setQuota(options: { providerKey: string; quota: number; reason?: string }): Promise<unknown> {
+    if (!quotaRoutingEnabled) {
+      return { ok: false, reason: 'quota_routing_disabled' };
+    }
+    const providerKey = typeof options.providerKey === 'string' ? options.providerKey.trim() : '';
+    const quota = Number(options.quota);
+    const depletedReason =
+      typeof options.reason === 'string' && options.reason.trim().length
+        ? options.reason.trim()
+        : 'quotaDepleted';
+
+    if (!providerKey || !Number.isFinite(quota)) {
+      return { ok: false, reason: 'providerKey_and_quota_required' };
+    }
+
+    if (hasCore) {
+      if (core?.recoverProvider) {
+        core.recoverProvider(providerKey);
+      }
+      const inPool = quota > 0;
+      if (core?.updateProviderPoolState) {
+        core.updateProviderPoolState({
+          providerKey,
+          inPool,
+          reason: inPool ? 'ok' : depletedReason
+        });
+      } else if (!inPool && core?.disableProvider) {
+        // Fallback for older core manager signatures.
+        core.disableProvider({ providerKey, mode: 'cooldown', durationMs: 60_000, reason: depletedReason });
+      }
+      if (core?.persistNow) {
+        await core.persistNow().catch(() => {});
+      }
+      return { ok: true, providerKey, quota, inPool, reason: inPool ? 'ok' : depletedReason, source: 'core' };
+    }
+
+    if (legacy?.recoverProvider && quota > 0) {
+      const result = await legacy.recoverProvider(providerKey);
+      return { ok: true, providerKey, quota, inPool: true, reason: 'ok', source: 'legacy', result };
+    }
+    if (legacy?.disableProvider && quota <= 0) {
+      const result = await legacy.disableProvider({ providerKey, mode: 'cooldown', durationMs: 5 * 60_000 });
+      return { ok: true, providerKey, quota, inPool: false, reason: depletedReason, source: 'legacy', result };
     }
 
     return { ok: false, reason: 'no_quota_manager_available' };
@@ -384,6 +443,9 @@ export function createQuotaManagerAdapter(options: {
     disableProvider,
     recoverProvider,
     resetProvider,
+    clearCooldown,
+    restoreNow,
+    setQuota,
     registerProviderStaticConfig,
     onProviderError,
     onProviderSuccess,

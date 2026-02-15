@@ -179,6 +179,17 @@ function getQuotaAdapter(options: DaemonAdminRouteOptions): any | null {
   });
 }
 
+function readQuotaProviderSnapshot(quotaMod: any, providerKey: string): unknown {
+  try {
+    const snapshot = typeof quotaMod?.getAdminSnapshot === 'function' ? quotaMod.getAdminSnapshot() : null;
+    if (!snapshot || typeof snapshot !== 'object') {
+      return null;
+    }
+    return (snapshot as Record<string, unknown>)[providerKey] ?? null;
+  } catch {
+    return null;
+  }
+}
 
 
 export function registerControlRoutes(app: Application, options: DaemonAdminRouteOptions): void {
@@ -423,6 +434,80 @@ export function registerControlRoutes(app: Application, options: DaemonAdminRout
       }
       const result = await quotaMod.resetProvider(providerKey);
       res.status(200).json({ ok: true, action, nowMs, result, ...(x7eGate.phase2UnifiedControl ? { schema: 'v2', updatedVia: 'unified_control' } : {}) });
+      return;
+    }
+
+    if (action === 'quota.clearCooldown' || action === 'quota.clear_cooldown') {
+      const providerKey = typeof body.providerKey === 'string' ? body.providerKey.trim() : '';
+      if (!providerKey) {
+        res.status(400).json({ error: { message: 'providerKey is required', code: 'bad_request' } });
+        return;
+      }
+      const quotaMod = getQuotaAdapter(options);
+      if (!quotaMod || typeof quotaMod.clearCooldown !== 'function') {
+        res.status(503).json({ error: { message: 'quota module not available', code: 'not_ready' } });
+        return;
+      }
+      const result = await quotaMod.clearCooldown(providerKey);
+      const snapshot = readQuotaProviderSnapshot(quotaMod, providerKey);
+      res.status(200).json({
+        ok: true,
+        action,
+        nowMs,
+        result,
+        snapshot,
+        ...(x7eGate.phase2UnifiedControl ? { schema: 'v2', updatedVia: 'unified_control' } : {})
+      });
+      return;
+    }
+
+    if (action === 'quota.restoreNow' || action === 'quota.restore_now') {
+      const providerKey = typeof body.providerKey === 'string' ? body.providerKey.trim() : '';
+      if (!providerKey) {
+        res.status(400).json({ error: { message: 'providerKey is required', code: 'bad_request' } });
+        return;
+      }
+      const quotaMod = getQuotaAdapter(options);
+      if (!quotaMod || typeof quotaMod.restoreNow !== 'function') {
+        res.status(503).json({ error: { message: 'quota module not available', code: 'not_ready' } });
+        return;
+      }
+      const result = await quotaMod.restoreNow(providerKey);
+      const snapshot = readQuotaProviderSnapshot(quotaMod, providerKey);
+      res.status(200).json({
+        ok: true,
+        action,
+        nowMs,
+        result,
+        snapshot,
+        ...(x7eGate.phase2UnifiedControl ? { schema: 'v2', updatedVia: 'unified_control' } : {})
+      });
+      return;
+    }
+
+    if (action === 'quota.setQuota' || action === 'quota.set_quota' || action === 'quota.set') {
+      const providerKey = typeof body.providerKey === 'string' ? body.providerKey.trim() : '';
+      const quota = typeof body.quota === 'number' ? body.quota : Number.NaN;
+      const reason = typeof body.reason === 'string' ? body.reason.trim() : undefined;
+      if (!providerKey || !Number.isFinite(quota)) {
+        res.status(400).json({ error: { message: 'providerKey and quota(number) are required', code: 'bad_request' } });
+        return;
+      }
+      const quotaMod = getQuotaAdapter(options);
+      if (!quotaMod || typeof quotaMod.setQuota !== 'function') {
+        res.status(503).json({ error: { message: 'quota module not available', code: 'not_ready' } });
+        return;
+      }
+      const result = await quotaMod.setQuota({ providerKey, quota, ...(reason ? { reason } : {}) });
+      const snapshot = readQuotaProviderSnapshot(quotaMod, providerKey);
+      res.status(200).json({
+        ok: true,
+        action,
+        nowMs,
+        result,
+        snapshot,
+        ...(x7eGate.phase2UnifiedControl ? { schema: 'v2', updatedVia: 'unified_control' } : {})
+      });
       return;
     }
 
