@@ -1482,7 +1482,7 @@
 	            <div class="card" style="box-shadow:none;">
 	              <p class="section-title">Routing editor</p>
 	              <p class="section-sub">
-	                Edits routing in a selected config file (auto-detects <span class="mono">virtualrouter.routing</span> or <span class="mono">routing</span>).
+	                Edits routing policy in a selected config file (auto-detects <span class="mono">virtualrouter.routing + virtualrouter.loadBalancing</span> or <span class="mono">routing + loadBalancing</span>).
 	              </p>
 	              <div class="row" style="margin-bottom: 10px;">
 	                <label for="routingSourceSelect">source</label>
@@ -1510,6 +1510,8 @@
 	              <div class="row" style="margin-bottom: 10px;">
 	                <button id="loadRoutingBtn" class="primary">Load</button>
 	                <button id="saveRoutingBtn" class="primary">Save</button>
+                  <button id="saveRoutingRestartLocalBtn">Save + Restart local</button>
+                  <button id="saveRoutingRestartAllBtn">Save + Restart all</button>
                   <button id="refreshRoutingPoolBtn">Refresh pool status</button>
 	                <button id="routingRegExpandBtn">Expand all</button>
 	                <button id="routingRegCollapseBtn">Collapse all</button>
@@ -1550,6 +1552,7 @@
               routingSources: [],
               routingSourcesUpdatedAt: 0,
               routingLocation: "virtualrouter.routing",
+              routingHasLoadBalancing: false,
               credentials: [],
               oauthMode: "manual"
             };
@@ -4007,7 +4010,7 @@
 	          try { container.innerHTML = ""; } catch {}
 	        }
 	        try {
-	          container.appendChild(routingEditorRenderNode("routing", routingEditorState.value || {}, [], 0, true));
+	          container.appendChild(routingEditorRenderNode("routingPolicy", routingEditorState.value || {}, [], 0, true));
 	        } catch (e) {
 	          const msg = e && e.message ? e.message : String(e);
 	          try { container.textContent = `Render failed: ${msg}`; } catch {}
@@ -4236,6 +4239,43 @@
 	        return details;
 	      }
 
+      function toPlainObjectOrNull(value) {
+        if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+        return value;
+      }
+
+      function buildRoutingPolicyEditorValue(snapshot) {
+        const routingObj = toPlainObjectOrNull(snapshot && snapshot.routing) || {};
+        const hasLoadBalancing = Boolean(snapshot && snapshot.hasLoadBalancing === true);
+        const loadBalancingObj = toPlainObjectOrNull(snapshot && snapshot.loadBalancing) || {};
+        UI.routingHasLoadBalancing = hasLoadBalancing;
+        return {
+          routing: routingObj,
+          loadBalancing: loadBalancingObj
+        };
+      }
+
+      function parseRoutingPolicyEditorValue(value) {
+        const policy = toPlainObjectOrNull(value) || {};
+        const routing = toPlainObjectOrNull(policy.routing) || {};
+        const hasLoadBalancingField = Object.prototype.hasOwnProperty.call(policy, "loadBalancing");
+        const rawLoadBalancing = hasLoadBalancingField ? policy.loadBalancing : undefined;
+        if (
+          rawLoadBalancing !== undefined
+          && rawLoadBalancing !== null
+          && (typeof rawLoadBalancing !== "object" || Array.isArray(rawLoadBalancing))
+        ) {
+          throw new Error("routingPolicy.loadBalancing must be an object");
+        }
+        const loadBalancingNode = toPlainObjectOrNull(rawLoadBalancing);
+        const hasLoadBalancingData = Boolean(loadBalancingNode && Object.keys(loadBalancingNode).length > 0);
+        return {
+          routing,
+          loadBalancing: loadBalancingNode,
+          shouldWriteLoadBalancing: hasLoadBalancingData || UI.routingHasLoadBalancing === true
+        };
+      }
+
 	      async function loadRouting() {
 	        setLog("routingOpLog", "");
 	        const auth = UI.adminAuth ? UI.adminAuth : await refreshAdminAuthStatus();
@@ -4248,9 +4288,12 @@
 	          const query = selectedPath ? `?path=${encodeURIComponent(selectedPath)}` : "";
 	          const out = await apiFetch(`/config/routing${query}`);
 	          UI.routingLocation = out.location || "virtualrouter.routing";
-	          routingEditorSetValue(out.routing || {});
-	          setLog("routingOpLog", `Loaded. Path: ${out.path || "—"}\nLocation: ${UI.routingLocation}`);
-	          toast("Routing loaded.", "ok");
+	          routingEditorSetValue(buildRoutingPolicyEditorValue(out));
+	          setLog(
+              "routingOpLog",
+              `Loaded. Path: ${out.path || "—"}\nLocation: ${UI.routingLocation}\nloadBalancing: ${UI.routingHasLoadBalancing ? "present" : "absent"}`
+            );
+	          toast("Routing policy loaded.", "ok");
 	        } catch (e) {
 	          if (e && e.status === 401) notifyUnauthorizedOnce("routing");
 	          setLog("routingOpLog", `Load failed: ${e.message}`);
@@ -4263,26 +4306,83 @@
 	        const auth = UI.adminAuth ? UI.adminAuth : await refreshAdminAuthStatus();
 	        if (!auth || !auth.authenticated) {
 	          notifyUnauthorizedOnce("routing save");
-	          return;
+	          return null;
 	        }
 	        try {
 	          const selectedPath = textOf($("routingSourceSelect").value || "").trim();
 	          const query = selectedPath ? `?path=${encodeURIComponent(selectedPath)}` : "";
-	          const routing = routingEditorGetValue() || {};
+	          const policy = parseRoutingPolicyEditorValue(routingEditorGetValue() || {});
+            const payload = {
+              routing: policy.routing,
+              location: UI.routingLocation,
+              path: selectedPath || undefined
+            };
+            if (policy.shouldWriteLoadBalancing) {
+              payload.loadBalancing = policy.loadBalancing || {};
+            }
 	          const out = await apiFetch(`/config/routing${query}`, {
 	            method: "PUT",
-	            body: JSON.stringify({ routing, location: UI.routingLocation, path: selectedPath || undefined })
+	            body: JSON.stringify(payload)
 	          });
 	          UI.routingLocation = out.location || UI.routingLocation;
-	          setLog("routingOpLog", `Saved. Path: ${out.path || "—"}\nLocation: ${UI.routingLocation}\nRestart required to apply.`);
-	          toast("Routing saved.", "ok");
+            if (typeof out.hasLoadBalancing === "boolean") {
+              UI.routingHasLoadBalancing = out.hasLoadBalancing;
+            }
+	          setLog(
+              "routingOpLog",
+              `Saved. Path: ${out.path || "—"}\nLocation: ${UI.routingLocation}\nloadBalancing: ${UI.routingHasLoadBalancing ? "present" : "absent"}\nRestart required to apply.`
+            );
+	          toast("Routing policy saved.", "ok");
 	          routingEditorSetDirty(false);
+            return out;
 	        } catch (e) {
 	          if (e && e.status === 401) notifyUnauthorizedOnce("routing save");
 	          setLog("routingOpLog", `Save failed: ${e.message}`);
 	          toast(`Save failed: ${e.message}`);
+            return null;
 	        }
 	      }
+
+      async function saveRoutingAndRestartLocal() {
+        const saved = await saveRouting();
+        if (!saved) return;
+        if (!confirm("Restart this RouteCodex runtime now to apply routing policy changes?")) return;
+        try {
+          const out = await apiFetch("/daemon/restart", { method: "POST" });
+          const warnings = Array.isArray(out.warnings) && out.warnings.length ? `\nWarnings:\n- ${out.warnings.join("\n- ")}` : "";
+          setLog(
+            "routingOpLog",
+            `Saved + restarted local.\nconfigPath: ${out.configPath || "—"}\nreloadedAt: ${out.reloadedAt || "—"}${warnings}`
+          );
+          toast("Routing saved and local runtime restarted.", "ok");
+          await refreshStatus();
+          await refreshProviders();
+          await refreshCredentials();
+          await refreshQuota();
+          await refreshQuotaSnapshot();
+          await refreshRuntimes();
+          await refreshControl();
+        } catch (e) {
+          setLog("routingOpLog", `Local restart failed: ${e && e.message ? e.message : String(e)}`);
+          toast(`Local restart failed: ${e && e.message ? e.message : String(e)}`);
+        }
+      }
+
+      async function saveRoutingAndRestartAll() {
+        const saved = await saveRouting();
+        if (!saved) return;
+        if (!confirm("Broadcast restart all local RouteCodex servers now?")) return;
+        try {
+          const out = await controlMutate("servers.restart", {});
+          setLog("routingOpLog", `Saved + restart-all requested.\n${JSON.stringify(out, null, 2)}`);
+          toast("Routing saved and restart-all requested.", "ok");
+          await refreshControl();
+          await refreshStatus();
+        } catch (e) {
+          setLog("routingOpLog", `Restart-all failed: ${e && e.message ? e.message : String(e)}`);
+          toast(`Restart-all failed: ${e && e.message ? e.message : String(e)}`);
+        }
+      }
 
 	      async function refreshRoutingSources() {
 	        const select = $("routingSourceSelect");
@@ -5540,6 +5640,8 @@
 
       $("loadRoutingBtn").addEventListener("click", loadRouting);
       $("saveRoutingBtn").addEventListener("click", saveRouting);
+      $("saveRoutingRestartLocalBtn").addEventListener("click", () => void saveRoutingAndRestartLocal());
+      $("saveRoutingRestartAllBtn").addEventListener("click", () => void saveRoutingAndRestartAll());
       $("refreshRoutingSourcesBtn").addEventListener("click", refreshRoutingSources);
       $("routingSourceSelect").addEventListener("change", loadRouting);
       $("routingRegExpandBtn").addEventListener("click", () => setAllDetailsOpen($("routingKvEditor"), true));

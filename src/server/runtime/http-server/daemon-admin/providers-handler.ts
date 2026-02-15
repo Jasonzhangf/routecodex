@@ -32,6 +32,8 @@ interface ProviderConfigV2Summary {
 type RoutingLocation = 'virtualrouter.routing' | 'routing';
 interface RoutingSnapshot {
   routing: Record<string, unknown>;
+  loadBalancing: Record<string, unknown>;
+  hasLoadBalancing: boolean;
   location: RoutingLocation;
   version: string | null;
 }
@@ -372,9 +374,18 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
     if (reject(req, res)) {return;}
     const body = req.body as Record<string, unknown>;
     const routingNode = body?.routing;
+    const loadBalancingNode = body?.loadBalancing;
     const locationNode = body?.location;
     if (!routingNode || typeof routingNode !== 'object' || Array.isArray(routingNode)) {
       res.status(400).json({ error: { message: 'routing must be an object', code: 'bad_request' } });
+      return;
+    }
+    if (
+      loadBalancingNode !== undefined
+      && loadBalancingNode !== null
+      && (typeof loadBalancingNode !== 'object' || Array.isArray(loadBalancingNode))
+    ) {
+      res.status(400).json({ error: { message: 'loadBalancing must be an object or null', code: 'bad_request' } });
       return;
     }
     if (locationNode !== undefined && locationNode !== 'virtualrouter.routing' && locationNode !== 'routing') {
@@ -389,10 +400,29 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
       const parsed = raw.trim() ? JSON.parse(raw) : {};
       const detected = extractRoutingSnapshot(parsed);
       const location = (locationNode as RoutingLocation | undefined) ?? detected.location;
-      const next = applyRoutingAtLocation(parsed, routingNode as Record<string, unknown>, location);
+      const shouldApplyLoadBalancing = loadBalancingNode !== undefined;
+      const next = applyRoutingAtLocation(
+        parsed,
+        routingNode as Record<string, unknown>,
+        location,
+        {
+          applyLoadBalancing: shouldApplyLoadBalancing,
+          loadBalancing: shouldApplyLoadBalancing
+            ? (loadBalancingNode === null ? null : (loadBalancingNode as Record<string, unknown>))
+            : undefined
+        }
+      );
       await backupFile(configPath);
       await fs.writeFile(configPath, JSON.stringify(next, null, 2), 'utf8');
-      res.status(200).json({ ok: true, path: configPath, location });
+      const snapshot = extractRoutingSnapshot(next);
+      res.status(200).json({
+        ok: true,
+        path: configPath,
+        location: snapshot.location,
+        routing: snapshot.routing,
+        loadBalancing: snapshot.loadBalancing,
+        hasLoadBalancing: snapshot.hasLoadBalancing
+      });
     } catch (error: unknown) {
       const code = (error as { code?: string } | null)?.code;
       if (code === 'forbidden_path') {
@@ -691,7 +721,13 @@ function pickUserConfigPath(): string {
 
 function extractRoutingSnapshot(config: unknown): RoutingSnapshot {
   if (!config || typeof config !== 'object' || Array.isArray(config)) {
-    return { routing: {}, location: 'virtualrouter.routing', version: null };
+    return {
+      routing: {},
+      loadBalancing: {},
+      hasLoadBalancing: false,
+      location: 'virtualrouter.routing',
+      version: null
+    };
   }
   const root = config as Record<string, unknown>;
   const version = typeof root.version === 'string' ? root.version : null;
@@ -699,35 +735,89 @@ function extractRoutingSnapshot(config: unknown): RoutingSnapshot {
   const vr = root.virtualrouter;
   if (vr && typeof vr === 'object' && !Array.isArray(vr)) {
     const routingNode = (vr as Record<string, unknown>).routing;
+    const loadBalancingNode = (vr as Record<string, unknown>).loadBalancing;
+    const hasLoadBalancing = Boolean(
+      loadBalancingNode && typeof loadBalancingNode === 'object' && !Array.isArray(loadBalancingNode)
+    );
     if (routingNode && typeof routingNode === 'object' && !Array.isArray(routingNode)) {
-      return { routing: routingNode as Record<string, unknown>, location: 'virtualrouter.routing', version };
+      return {
+        routing: routingNode as Record<string, unknown>,
+        loadBalancing: hasLoadBalancing ? (loadBalancingNode as Record<string, unknown>) : {},
+        hasLoadBalancing,
+        location: 'virtualrouter.routing',
+        version
+      };
     }
-    return { routing: {}, location: 'virtualrouter.routing', version };
+    return {
+      routing: {},
+      loadBalancing: hasLoadBalancing ? (loadBalancingNode as Record<string, unknown>) : {},
+      hasLoadBalancing,
+      location: 'virtualrouter.routing',
+      version
+    };
   }
 
   const routingNode = root.routing;
+  const loadBalancingNode = root.loadBalancing;
+  const hasLoadBalancing = Boolean(
+    loadBalancingNode && typeof loadBalancingNode === 'object' && !Array.isArray(loadBalancingNode)
+  );
   if (routingNode && typeof routingNode === 'object' && !Array.isArray(routingNode)) {
-    return { routing: routingNode as Record<string, unknown>, location: 'routing', version };
+    return {
+      routing: routingNode as Record<string, unknown>,
+      loadBalancing: hasLoadBalancing ? (loadBalancingNode as Record<string, unknown>) : {},
+      hasLoadBalancing,
+      location: 'routing',
+      version
+    };
   }
-  return { routing: {}, location: 'routing', version };
+  return {
+    routing: {},
+    loadBalancing: hasLoadBalancing ? (loadBalancingNode as Record<string, unknown>) : {},
+    hasLoadBalancing,
+    location: 'routing',
+    version
+  };
 }
 
 function applyRoutingAtLocation(
   config: unknown,
   routing: Record<string, unknown>,
-  location: RoutingLocation
+  location: RoutingLocation,
+  options?: {
+    applyLoadBalancing?: boolean;
+    loadBalancing?: Record<string, unknown> | null;
+  }
 ): Record<string, unknown> {
   const root = (config && typeof config === 'object' && !Array.isArray(config))
     ? (config as Record<string, unknown>)
     : {};
+  const shouldApplyLoadBalancing = options?.applyLoadBalancing === true;
+  const loadBalancing = options?.loadBalancing;
   if (location === 'routing') {
-    return { ...root, routing };
+    if (!shouldApplyLoadBalancing) {
+      return { ...root, routing };
+    }
+    if (loadBalancing === null) {
+      const rest = { ...root };
+      delete rest.loadBalancing;
+      return { ...rest, routing };
+    }
+    return { ...root, routing, loadBalancing: loadBalancing ?? {} };
   }
   const vrNode = root.virtualrouter;
   const vr = (vrNode && typeof vrNode === 'object' && !Array.isArray(vrNode))
     ? (vrNode as Record<string, unknown>)
     : {};
-  return { ...root, virtualrouter: { ...vr, routing } };
+  if (!shouldApplyLoadBalancing) {
+    return { ...root, virtualrouter: { ...vr, routing } };
+  }
+  if (loadBalancing === null) {
+    const vrRest = { ...vr };
+    delete vrRest.loadBalancing;
+    return { ...root, virtualrouter: { ...vrRest, routing } };
+  }
+  return { ...root, virtualrouter: { ...vr, routing, loadBalancing: loadBalancing ?? {} } };
 }
 
 function readQueryString(req: Request, key: string): string | undefined {

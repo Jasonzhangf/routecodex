@@ -41,28 +41,51 @@ import type { InitCommandContext, InitCommandOptions } from './init/shared.js';
 
 export type { InitCommandContext } from './init/shared.js';
 
-function buildIfLowWebSearchDefaults(
+function buildWebSearchDefaults(
   templates: InitProviderTemplate[]
-): { routeTarget: string; webSearch: Record<string, unknown> } | null {
+): { routeTargets: string[]; webSearch: Record<string, unknown> } | null {
+  const deepseekTemplate = templates.find((provider) => provider.id === 'deepseek-web');
   const iflowTemplate = templates.find((provider) => provider.id === 'iflow');
-  if (!iflowTemplate) {
+  if (!deepseekTemplate && !iflowTemplate) {
     return null;
   }
+
+  const routeTargets: string[] = [];
+  const engines: Array<Record<string, unknown>> = [];
+  const search: Record<string, unknown> = {};
+
+  if (deepseekTemplate) {
+    const providerKey = `${deepseekTemplate.id}.deepseek-chat-search`;
+    routeTargets.push(providerKey);
+    engines.push({
+      id: 'deepseek:web_search',
+      providerKey,
+      description: 'DeepSeek native web_search backend',
+      default: true
+    });
+    search['deepseek:web_search'] = {
+      providerKey
+    };
+  }
+
+  if (iflowTemplate) {
+    routeTargets.push(`${iflowTemplate.id}.${iflowTemplate.defaultModel}`);
+    engines.push({
+      id: 'iflow:web_search',
+      providerKey: 'iflow',
+      description: 'iFlow web_search backend',
+      ...(deepseekTemplate ? {} : { default: true })
+    });
+    search['iflow:web_search'] = {
+      providerKey: 'iflow'
+    };
+  }
+
   return {
-    routeTarget: `${iflowTemplate.id}.${iflowTemplate.defaultModel}`,
+    routeTargets,
     webSearch: {
-      engines: [
-        {
-          id: 'iflow:web_search',
-          providerKey: 'iflow',
-          description: 'iFlow web_search backend'
-        }
-      ],
-      search: {
-        'iflow:web_search': {
-          providerKey: 'iflow'
-        }
-      }
+      engines,
+      search
     }
   };
 }
@@ -258,7 +281,7 @@ Examples:
           const routing = promptBundle
             ? (safeSpinnerStop(), (await interactiveRoutingWizard(promptBundle.prompt, baseRouting, defaultTarget)) ?? baseRouting)
             : baseRouting;
-          const webSearchDefaults = buildIfLowWebSearchDefaults(selectedTemplates);
+          const webSearchDefaults = buildWebSearchDefaults(selectedTemplates);
           const routingWithWebSearch = { ...(routing as Record<string, unknown>) };
           if (webSearchDefaults) {
             const existingWebSearchRoute = routingWithWebSearch.web_search;
@@ -267,7 +290,7 @@ Examples:
                 {
                   id: 'web_search-primary',
                   mode: 'priority',
-                  targets: [webSearchDefaults.routeTarget]
+                  targets: webSearchDefaults.routeTargets
                 }
               ];
             }

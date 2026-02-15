@@ -283,6 +283,90 @@ describe('DeepSeekHttpProvider', () => {
     });
   });
 
+  it('forces upstream SSE for search models even when stream=false', async () => {
+    const tokenFile = await createDeepSeekTokenFile('sse-search-token');
+    const fakeSessionPow: FakeSessionPow = {
+      ensureChatSession: jest.fn(async () => 'session-sse-1'),
+      createPowResponse: jest.fn(async () => 'pow-sse-1'),
+      cleanup: jest.fn(async () => {})
+    };
+
+    const provider = new TestDeepSeekHttpProvider(
+      {
+        type: 'deepseek-http-provider',
+        config: {
+          providerType: 'openai',
+          providerId: 'deepseek',
+          baseUrl: 'https://chat.deepseek.com',
+          auth: {
+            type: 'apikey',
+            rawType: 'deepseek-account',
+            apiKey: '',
+            tokenFile
+          }
+        }
+      } as unknown as OpenAIStandardConfig,
+      deps,
+      fakeSessionPow
+    );
+
+    await provider.initialize();
+    const wantsSse = (provider as any).wantsUpstreamSse(
+      {
+        data: {
+          model: 'deepseek-chat-search',
+          search_enabled: true,
+          stream: false
+        }
+      },
+      { requestId: 'req-deepseek-sse-search' } as any
+    );
+
+    expect(wantsSse).toBe(true);
+  });
+
+  it('keeps non-search requests in non-SSE mode when stream=false', async () => {
+    const tokenFile = await createDeepSeekTokenFile('sse-regular-token');
+    const fakeSessionPow: FakeSessionPow = {
+      ensureChatSession: jest.fn(async () => 'session-sse-2'),
+      createPowResponse: jest.fn(async () => 'pow-sse-2'),
+      cleanup: jest.fn(async () => {})
+    };
+
+    const provider = new TestDeepSeekHttpProvider(
+      {
+        type: 'deepseek-http-provider',
+        config: {
+          providerType: 'openai',
+          providerId: 'deepseek',
+          baseUrl: 'https://chat.deepseek.com',
+          auth: {
+            type: 'apikey',
+            rawType: 'deepseek-account',
+            apiKey: '',
+            tokenFile
+          }
+        }
+      } as unknown as OpenAIStandardConfig,
+      deps,
+      fakeSessionPow
+    );
+
+    await provider.initialize();
+    const wantsSse = (provider as any).wantsUpstreamSse(
+      {
+        data: {
+          model: 'deepseek-chat',
+          search_enabled: false,
+          stream: false
+        }
+      },
+      { requestId: 'req-deepseek-sse-regular' } as any
+    );
+
+    expect(wantsSse).toBe(false);
+  });
+
   it('applies camoufox fingerprint headers for deepseek alias', async () => {
     const tempHome = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-deepseek-fp-'));
     tempDirs.push(tempHome);

@@ -15,6 +15,120 @@ This document describes how RouteCodex/llmswitch-core selects a `providerKey` fr
   - `priorityTier` (static)
   - `selectionPenalty`, `lastErrorAtMs`, `consecutiveErrorCount` (soft health signals)
 
+## Selection Engine I/O (for API/WebUI alignment)
+
+The core selection call is conceptually:
+
+```
+input: {
+  routeName,
+  tier.targets[],
+  request features (tokens/tools/attachments),
+  metadata (sessionId/conversationId/antigravitySessionId, excludedProviderKeys, instructions),
+  provider registry,
+  quotaView? (optional),
+  health state
+}
+
+output: {
+  providerKey | null,
+  poolTargets,
+  tierId,
+  failureHint?
+}
+```
+
+When no `providerKey` is selectable in the current pool, the router continues to the next pool/route according to routing policy.
+This means selection output is always deterministic and explainable via `failureHint` and hit logs.
+
+## Session Binding (Claude/Gemini)
+
+`antigravitySessionBinding` is configured under:
+
+- `virtualrouter.loadBalancing.aliasSelection.antigravitySessionBinding`
+- Allowed values: `"lease"` (default), `"strict"`
+
+Current implementation scope:
+
+- Antigravity **Gemini** aliases use session binding/lease.
+- Antigravity **Claude** aliases are not bound by Gemini lease scope.
+- Strict binding depends on persisted Antigravity signature pin state (session ↔ alias pin).
+
+Rules:
+
+- `"lease"`:
+  - session prefers its last committed alias when that alias is still selectable;
+  - can rotate to another alias when needed (quota/health/exclusion), then commits the new alias on provider success.
+- `"strict"`:
+  - once a session has a pinned alias, it will not rotate to another Antigravity Gemini alias;
+  - if pinned alias becomes unavailable, router falls back to other providers/routes instead of cross-alias retry.
+
+Persistence behavior:
+
+- With persistence available: strict pin survives restart and binding is restored.
+- Without persistence / degraded persistence: host clears pins for safety, so router will not keep stale strict stickiness.
+
+## quotaView Gating Principle
+
+`quotaView` is the source of truth when injected:
+
+- Router availability uses `quotaView` (`inPool`, `cooldownUntil`, `blacklistUntil`).
+- Router-local cooldown TTLs are bypassed in quotaView mode.
+- Health/series cooldown signals are still recorded, but final selectability is gated by quotaView.
+
+If `quotaView` is absent:
+
+- router falls back to local health/cooldown state for availability decisions.
+
+## Config Example (WebUI field names)
+
+Use the same field names in JSON and WebUI forms:
+
+```json
+{
+  "virtualrouter": {
+    "loadBalancing": {
+      "strategy": "round-robin",
+      "aliasSelection": {
+        "sessionLeaseCooldownMs": 300000,
+        "antigravitySessionBinding": "lease"
+      },
+      "healthWeighted": {
+        "enabled": true,
+        "baseWeight": 100,
+        "minMultiplier": 0.5,
+        "beta": 0.1,
+        "halfLifeMs": 600000,
+        "recoverToBestOnRetry": true
+      }
+    }
+  }
+}
+```
+
+For strict mode:
+
+```json
+{
+  "virtualrouter": {
+    "loadBalancing": {
+      "aliasSelection": {
+        "antigravitySessionBinding": "strict"
+      }
+    }
+  }
+}
+```
+
+## Migration Notes (legacy sticky/health -> current model)
+
+- Legacy sticky-first behavior:
+  - moved to explicit routing instructions and session-binding policy.
+- Legacy router-local health dominance:
+  - in quota mode, replaced by `quotaView` gating to avoid split-brain decisions.
+- Legacy implicit alias stickiness:
+  - replaced by explicit `aliasSelection.antigravitySessionBinding` (`lease`/`strict`) and observable hit reasons.
+
 ## Priority Pools (`mode: "priority"`)
 
 Goal: always use the highest-priority candidate first, and only fall back when the current best becomes unavailable.

@@ -14,6 +14,7 @@ import {
 import { GeminiCLIProtocolClient } from '../../../client/gemini-cli/gemini-cli-protocol-client.js';
 import { getDefaultProjectId } from '../../auth/gemini-cli-userinfo-helper.js';
 import { resolveAntigravityApiBaseCandidates } from '../../auth/antigravity-userinfo-helper.js';
+import { resolveAntigravityRequestTypeFromPayload } from './antigravity-request-type.js';
 
 type DataEnvelope = UnknownObject & { data?: UnknownObject };
 
@@ -177,9 +178,7 @@ export class GeminiCLIHttpProvider extends HttpTransportProvider {
           record.userAgent = 'antigravity';
         }
         if (!this.hasNonEmptyString(record.requestType)) {
-          const hasImageAttachment =
-            metadata && (metadata.hasImageAttachment === true || metadata.hasImageAttachment === 'true');
-          record.requestType = hasImageAttachment ? 'image_gen' : 'agent';
+          record.requestType = resolveAntigravityRequestTypeFromPayload(processedRequest);
         }
       } else {
         delete record.userAgent;

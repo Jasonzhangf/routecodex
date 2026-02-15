@@ -72,26 +72,50 @@ function buildRouting(defaultProviderId: string, defaultModel: string) {
 
 function buildDefaultWebSearchConfig(
   providers: InitProviderTemplate[]
-): { webSearchRouteTarget: string; webSearchConfig: Record<string, unknown> } | null {
+): { webSearchRouteTargets: string[]; webSearchConfig: Record<string, unknown> } | null {
+  const deepseekProvider = providers.find((provider) => provider.id === 'deepseek-web');
   const iflowProvider = providers.find((provider) => provider.id === 'iflow');
-  if (!iflowProvider) {
+  if (!deepseekProvider && !iflowProvider) {
     return null;
   }
+
+  const webSearchRouteTargets: string[] = [];
+  const engines: Array<Record<string, unknown>> = [];
+  const search: Record<string, unknown> = {};
+
+  if (deepseekProvider) {
+    const providerKey = `${deepseekProvider.id}.deepseek-chat-search`;
+    webSearchRouteTargets.push(providerKey);
+    engines.push({
+      id: 'deepseek:web_search',
+      providerKey,
+      description: 'DeepSeek native web_search backend',
+      default: true
+    });
+    search['deepseek:web_search'] = {
+      providerKey
+    };
+  }
+
+  if (iflowProvider) {
+    const routeTarget = `${iflowProvider.id}.${iflowProvider.defaultModel}`;
+    webSearchRouteTargets.push(routeTarget);
+    engines.push({
+      id: 'iflow:web_search',
+      providerKey: 'iflow',
+      description: 'iFlow web_search backend',
+      ...(deepseekProvider ? {} : { default: true })
+    });
+    search['iflow:web_search'] = {
+      providerKey: 'iflow'
+    };
+  }
+
   return {
-    webSearchRouteTarget: `${iflowProvider.id}.${iflowProvider.defaultModel}`,
+    webSearchRouteTargets,
     webSearchConfig: {
-      engines: [
-        {
-          id: 'iflow:web_search',
-          providerKey: 'iflow',
-          description: 'iFlow web_search backend'
-        }
-      ],
-      search: {
-        'iflow:web_search': {
-          providerKey: 'iflow'
-        }
-      }
+      engines,
+      search
     }
   };
 }
@@ -117,7 +141,7 @@ export function buildInitConfigObject(
       {
         id: 'web_search-primary',
         mode: 'priority',
-        targets: [webSearchDefaults.webSearchRouteTarget]
+        targets: webSearchDefaults.webSearchRouteTargets
       }
     ];
   }

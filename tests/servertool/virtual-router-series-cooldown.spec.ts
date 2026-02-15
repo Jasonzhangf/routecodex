@@ -1,9 +1,15 @@
 import { RateLimitBackoffManager, RateLimitCooldownError } from '../../src/providers/core/runtime/rate-limit-manager.js';
 import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine.js';
 import { deserializeRoutingInstructionState } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-instructions.js';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import {
   cacheAntigravitySessionSignature,
-  extractAntigravityGeminiSessionId
+  configureAntigravitySessionSignaturePersistence,
+  extractAntigravityGeminiSessionId,
+  flushAntigravitySessionSignaturePersistenceSync,
+  resetAntigravitySessionSignatureCachesForTests
 } from '../../sharedmodule/llmswitch-core/src/conversion/compat/antigravity-session-signature.js';
 import type {
   VirtualRouterConfig,
@@ -220,6 +226,190 @@ describe('Virtual router antigravity strict session alias binding', () => {
 
     const second = engine.route(request, { ...metadata, requestId: 'req_ag_strict_2' });
     expect(second.target.providerKey).toBe(fallback);
+  });
+
+  it('restores strict alias binding from persisted signature state after restart', () => {
+    const ag1 = 'antigravity.alias1.gemini-3-pro-high';
+    const ag2 = 'antigravity.alias2.gemini-3-pro-high';
+    const fallback = 'tab.key1.gpt-5.2';
+    const sessionId = extractAntigravityGeminiSessionId({ contents: [{ role: 'user', parts: [{ text: 'hello' }] }] });
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-ag-bind-'));
+
+    const buildConfig = (targets: string[]): VirtualRouterConfig => ({
+      routing: {
+        default: [
+          {
+            id: 'primary',
+            mode: 'priority',
+            targets,
+            priority: 1
+          }
+        ]
+      },
+      providers: {
+        [ag1]: {
+          providerKey: ag1,
+          providerType: 'gemini',
+          endpoint: 'https://example.invalid',
+          auth: { type: 'apiKey', value: 'test' },
+          outboundProfile: 'gemini-chat',
+          runtimeKey: 'runtime:ag1',
+          modelId: 'gemini-3-pro-high'
+        },
+        [ag2]: {
+          providerKey: ag2,
+          providerType: 'gemini',
+          endpoint: 'https://example.invalid',
+          auth: { type: 'apiKey', value: 'test' },
+          outboundProfile: 'gemini-chat',
+          runtimeKey: 'runtime:ag2',
+          modelId: 'gemini-3-pro-high'
+        },
+        [fallback]: {
+          providerKey: fallback,
+          providerType: 'responses',
+          endpoint: 'https://example.invalid',
+          auth: { type: 'apiKey', value: 'test' },
+          outboundProfile: 'openai-responses',
+          runtimeKey: 'runtime:tab',
+          modelId: 'gpt-5.2'
+        }
+      },
+      loadBalancing: {
+        strategy: 'round-robin',
+        aliasSelection: { antigravitySessionBinding: 'strict' }
+      },
+      classifier: {},
+      health: { failureThreshold: 3, cooldownMs: 5_000, fatalCooldownMs: 60_000 }
+    });
+
+    const request: StandardizedRequest = {
+      model: 'client-model',
+      messages: [{ role: 'user', content: 'hello' }],
+      parameters: {},
+      metadata: { originalEndpoint: '/v1/responses', processMode: 'chat' }
+    };
+    const metadata: RouterMetadataInput = {
+      requestId: 'req_ag_restart_bind',
+      entryEndpoint: '/v1/responses',
+      processMode: 'chat',
+      stream: true,
+      direction: 'request',
+      sessionId: 'session-restart-bind',
+      antigravitySessionId: sessionId
+    };
+
+    try {
+      resetAntigravitySessionSignatureCachesForTests();
+      configureAntigravitySessionSignaturePersistence({ stateDir: tempDir });
+
+      const engine = new VirtualRouterEngine();
+      engine.initialize(buildConfig([ag1, ag2, fallback]));
+      const first = engine.route(request, metadata);
+      expect(first.target.providerKey).toBe(ag1);
+
+      cacheAntigravitySessionSignature('antigravity.alias1', sessionId, 'x'.repeat(60), 1);
+      flushAntigravitySessionSignaturePersistenceSync();
+
+      resetAntigravitySessionSignatureCachesForTests();
+      configureAntigravitySessionSignaturePersistence({ stateDir: tempDir });
+
+      const restarted = new VirtualRouterEngine();
+      restarted.initialize(buildConfig([ag2, ag1, fallback]));
+      const second = restarted.route(request, { ...metadata, requestId: 'req_ag_restart_bind_2' });
+      expect(second.target.providerKey).toBe(ag1);
+    } finally {
+      configureAntigravitySessionSignaturePersistence(null);
+      resetAntigravitySessionSignatureCachesForTests();
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('does not restore strict alias binding after restart when persistence is unavailable', () => {
+    const ag1 = 'antigravity.alias1.gemini-3-pro-high';
+    const ag2 = 'antigravity.alias2.gemini-3-pro-high';
+    const fallback = 'tab.key1.gpt-5.2';
+    const sessionId = extractAntigravityGeminiSessionId({ contents: [{ role: 'user', parts: [{ text: 'hello' }] }] });
+
+    const config: VirtualRouterConfig = {
+      routing: {
+        default: [
+          {
+            id: 'primary',
+            mode: 'priority',
+            targets: [ag2, ag1, fallback],
+            priority: 1
+          }
+        ]
+      },
+      providers: {
+        [ag1]: {
+          providerKey: ag1,
+          providerType: 'gemini',
+          endpoint: 'https://example.invalid',
+          auth: { type: 'apiKey', value: 'test' },
+          outboundProfile: 'gemini-chat',
+          runtimeKey: 'runtime:ag1',
+          modelId: 'gemini-3-pro-high'
+        },
+        [ag2]: {
+          providerKey: ag2,
+          providerType: 'gemini',
+          endpoint: 'https://example.invalid',
+          auth: { type: 'apiKey', value: 'test' },
+          outboundProfile: 'gemini-chat',
+          runtimeKey: 'runtime:ag2',
+          modelId: 'gemini-3-pro-high'
+        },
+        [fallback]: {
+          providerKey: fallback,
+          providerType: 'responses',
+          endpoint: 'https://example.invalid',
+          auth: { type: 'apiKey', value: 'test' },
+          outboundProfile: 'openai-responses',
+          runtimeKey: 'runtime:tab',
+          modelId: 'gpt-5.2'
+        }
+      },
+      loadBalancing: {
+        strategy: 'round-robin',
+        aliasSelection: { antigravitySessionBinding: 'strict' }
+      },
+      classifier: {},
+      health: { failureThreshold: 3, cooldownMs: 5_000, fatalCooldownMs: 60_000 }
+    };
+
+    const request: StandardizedRequest = {
+      model: 'client-model',
+      messages: [{ role: 'user', content: 'hello' }],
+      parameters: {},
+      metadata: { originalEndpoint: '/v1/responses', processMode: 'chat' }
+    };
+
+    const metadata: RouterMetadataInput = {
+      requestId: 'req_ag_restart_no_persist',
+      entryEndpoint: '/v1/responses',
+      processMode: 'chat',
+      stream: true,
+      direction: 'request',
+      sessionId: 'session-restart-no-persist',
+      antigravitySessionId: sessionId
+    };
+
+    try {
+      resetAntigravitySessionSignatureCachesForTests();
+      configureAntigravitySessionSignaturePersistence(null);
+      cacheAntigravitySessionSignature('antigravity.alias1', sessionId, 'x'.repeat(60), 1);
+      resetAntigravitySessionSignatureCachesForTests();
+
+      const engine = new VirtualRouterEngine();
+      engine.initialize(config);
+      const routed = engine.route(request, metadata);
+      expect(routed.target.providerKey).toBe(ag2);
+    } finally {
+      configureAntigravitySessionSignaturePersistence(null);
+      resetAntigravitySessionSignatureCachesForTests();
+    }
   });
 });
 

@@ -136,17 +136,38 @@ describe('Daemon admin provider pool (v1 config) - e2e', () => {
 
       await fs.writeFile(
         defaultConfigPath,
-        JSON.stringify({ version: '1.0.0', virtualrouter: { providers: {}, routing: { default: ['mock.dummy'] } } }, null, 2),
+        JSON.stringify({
+          version: '1.0.0',
+          virtualrouter: {
+            providers: {},
+            routing: { default: ['mock.dummy'] },
+            loadBalancing: { strategy: 'priority' }
+          }
+        }, null, 2),
         'utf8'
       );
       await fs.writeFile(
         importedConfigPath,
-        JSON.stringify({ version: '1.0.0', virtualrouter: { providers: {}, routing: { default: ['mock.dummy'], tools: [] } } }, null, 2),
+        JSON.stringify({
+          version: '1.0.0',
+          virtualrouter: {
+            providers: {},
+            routing: { default: ['mock.dummy'], tools: [] },
+            loadBalancing: { strategy: 'priority' }
+          }
+        }, null, 2),
         'utf8'
       );
       await fs.writeFile(
         providerConfigPath,
-        JSON.stringify({ version: '1.0.0', virtualrouter: { providers: {}, routing: { default: ['demo.model'] } } }, null, 2),
+        JSON.stringify({
+          version: '1.0.0',
+          virtualrouter: {
+            providers: {},
+            routing: { default: ['demo.model'] },
+            loadBalancing: { strategy: 'priority' }
+          }
+        }, null, 2),
         'utf8'
       );
 
@@ -169,26 +190,53 @@ describe('Daemon admin provider pool (v1 config) - e2e', () => {
       expect(importedBody).toHaveProperty('ok', true);
       expect(importedBody).toHaveProperty('location', 'virtualrouter.routing');
       expect(importedBody).toHaveProperty('routing.default');
+      expect(importedBody).toHaveProperty('hasLoadBalancing', true);
+      expect(importedBody).toHaveProperty('loadBalancing.strategy', 'priority');
 
       const nextRouting = { ...(importedBody.routing || {}), tools: ['mock.dummy'] };
+      const nextLoadBalancing = { ...(importedBody.loadBalancing || {}), strategy: 'round-robin' };
       const importedPut = await fetch(
         `${baseUrl}/config/routing?path=${encodeURIComponent(importedConfigPath)}`,
         {
           method: 'PUT',
           headers: { 'content-type': 'application/json', cookie },
-          body: JSON.stringify({ routing: nextRouting, location: importedBody.location })
+          body: JSON.stringify({
+            routing: nextRouting,
+            loadBalancing: nextLoadBalancing,
+            location: importedBody.location
+          })
         }
       );
       expect(importedPut.status).toBe(200);
       const putBody = await readJson(importedPut);
       expect(putBody).toHaveProperty('ok', true);
       expect(putBody).toHaveProperty('location', 'virtualrouter.routing');
+      expect(putBody).toHaveProperty('hasLoadBalancing', true);
+      expect(putBody).toHaveProperty('loadBalancing.strategy', 'round-robin');
+
+      const preservePut = await fetch(
+        `${baseUrl}/config/routing?path=${encodeURIComponent(importedConfigPath)}`,
+        {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json', cookie },
+          body: JSON.stringify({
+            routing: { ...(nextRouting || {}), default: ['mock.dummy'] },
+            location: importedBody.location
+          })
+        }
+      );
+      expect(preservePut.status).toBe(200);
+      const preserveBody = await readJson(preservePut);
+      expect(preserveBody).toHaveProperty('ok', true);
+      expect(preserveBody).toHaveProperty('hasLoadBalancing', true);
+      expect(preserveBody).toHaveProperty('loadBalancing.strategy', 'round-robin');
 
       const afterText = await fs.readFile(importedConfigPath, 'utf8');
       const after = JSON.parse(afterText);
       expect(after).toHaveProperty('virtualrouter.routing.tools');
       expect(Array.isArray(after.virtualrouter.routing.tools)).toBe(true);
       expect(after.virtualrouter.routing.tools).toEqual(['mock.dummy']);
+      expect(after).toHaveProperty('virtualrouter.loadBalancing.strategy', 'round-robin');
 
       const forbidden = await fetch(
         `${baseUrl}/config/routing?path=${encodeURIComponent('/etc/passwd')}`,

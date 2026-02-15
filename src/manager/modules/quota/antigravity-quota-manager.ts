@@ -27,17 +27,35 @@ interface AntigravityTokenRegistration {
   apiBase: string;
 }
 
+type QuotaStorePersistenceStatus =
+  | 'unknown'
+  | 'loaded'
+  | 'missing'
+  | 'load_error'
+  | 'save_error';
+
+const ANTIGRAVITY_PROTECTED_REASON = 'protected';
+
+type ParsedAntigravityProviderKey = {
+  alias: string;
+  modelId: string;
+};
+
 export class QuotaManagerModule implements ManagerModule {
   readonly id = 'quota';
 
   private snapshot: Record<string, QuotaRecord> = {};
   private antigravityTokens: Map<string, AntigravityTokenRegistration> = new Map();
+  private antigravityProtectedModels: Map<string, Set<string>> = new Map();
+  private registeredProviderKeys: Set<string> = new Set();
   private refreshTimer: NodeJS.Timeout | null = null;
   private quotaRoutingEnabled = true;
   private refreshFailures = 0;
   private refreshDisabled = false;
   private providerErrorUnsub: (() => void) | null = null;
   private providerSuccessUnsub: (() => void) | null = null;
+  private quotaStorePersistenceStatus: QuotaStorePersistenceStatus = 'unknown';
+  private quotaStoreLastUnbindReason: string | null = null;
 
   private coreQuotaManager:
     | {
@@ -116,6 +134,9 @@ export class QuotaManagerModule implements ManagerModule {
     if (this.coreQuotaManager && typeof this.coreQuotaManager.hydrateFromStore === 'function') {
       await this.coreQuotaManager.hydrateFromStore().catch(() => {});
     }
+    if (this.quotaStorePersistenceStatus === 'missing' || this.quotaStorePersistenceStatus === 'load_error') {
+      this.handleSessionUnbindForQuotaPersistenceIssue(`quota_store_${this.quotaStorePersistenceStatus}`);
+    }
 
     // Apply persisted Antigravity snapshot into the unified quota view (best-effort),
     // so restarts don't temporarily “forget” known depleted keys.
@@ -128,6 +149,7 @@ export class QuotaManagerModule implements ManagerModule {
         }
         this.applyAntigravityQuotaToCore(`antigravity.${parsed.alias}.${parsed.modelId}`, record, nowMs);
       }
+      this.reconcileProtectedStatesForRegisteredProviders();
     } catch {
       // ignore snapshot apply failures
     }
@@ -243,6 +265,18 @@ export class QuotaManagerModule implements ManagerModule {
       tokenFile: cleanToken,
       apiBase: cleanBase
     });
+    void this.readProtectedModelsFromTokenFile(cleanToken)
+      .then((protectedModels) => {
+        if (protectedModels.size > 0) {
+          this.antigravityProtectedModels.set(cleanAlias, protectedModels);
+        } else {
+          this.antigravityProtectedModels.delete(cleanAlias);
+        }
+        this.reconcileProtectedStatesForRegisteredProviders();
+      })
+      .catch(() => {
+        // best-effort only
+      });
   }
 
   /**
@@ -285,6 +319,9 @@ export class QuotaManagerModule implements ManagerModule {
     const alias = this.extractAntigravityAlias(providerKey);
     if (!alias || !modelId) {
       return true;
+    }
+    if (this.isAntigravityModelProtected(alias, modelId)) {
+      return false;
     }
     const key = this.buildAntigravityKey(alias, modelId);
     const record = this.snapshot[key];
@@ -365,8 +402,10 @@ export class QuotaManagerModule implements ManagerModule {
       ...(authType === 'apikey' || authType === 'oauth' ? { authType: authType as any } : {}),
       ...(apikeyDailyResetTime ? { apikeyDailyResetTime } : {})
     };
+    this.registeredProviderKeys.add(key);
     try {
       this.coreQuotaManager?.registerProviderStaticConfig?.(key, cfg);
+      this.reconcileProtectedStateForProviderKey(key);
     } catch {
       // ignore
     }
@@ -422,6 +461,205 @@ export class QuotaManagerModule implements ManagerModule {
       return null;
     }
     return { alias, modelId };
+  }
+
+  private parseAntigravityProviderKey(providerKey?: string): ParsedAntigravityProviderKey | null {
+    if (!providerKey || typeof providerKey !== 'string') {
+      return null;
+    }
+    const trimmed = providerKey.trim();
+    if (!trimmed.toLowerCase().startsWith('antigravity.')) {
+      return null;
+    }
+    const segments = trimmed.split('.');
+    if (segments.length < 3) {
+      return null;
+    }
+    const alias = String(segments[1] || '').trim();
+    const modelId = String(segments.slice(2).join('.') || '').trim();
+    if (!alias || !modelId) {
+      return null;
+    }
+    return { alias, modelId };
+  }
+
+  private normalizeProtectedModelFlag(raw: string): string[] {
+    const normalized = raw.trim().toLowerCase();
+    if (!normalized) {
+      return [];
+    }
+    if (normalized.startsWith('gemini-3-pro-image') || normalized.includes('pro-image')) {
+      return ['gemini-3-pro-image'];
+    }
+    if (normalized === 'gemini-pro' || normalized === 'gemini-3-pro-high') {
+      return ['gemini-pro', 'gemini-3-pro-high'];
+    }
+    if (normalized === 'gemini-flash' || normalized === 'gemini-3-flash') {
+      return ['gemini-flash', 'gemini-3-flash'];
+    }
+    if (
+      normalized === 'claude' ||
+      normalized.includes('claude') ||
+      normalized.includes('sonnet') ||
+      normalized.includes('opus') ||
+      normalized.includes('haiku')
+    ) {
+      return ['claude'];
+    }
+    return [normalized];
+  }
+
+  private resolveProtectedModelCandidates(modelId: string): Set<string> {
+    const normalized = String(modelId || '').trim().toLowerCase();
+    const candidates = new Set<string>();
+    if (!normalized) {
+      return candidates;
+    }
+    candidates.add(normalized);
+    if (normalized.startsWith('gemini-3-pro-image') || normalized.includes('pro-image')) {
+      candidates.add('gemini-3-pro-image');
+    }
+    if (normalized.includes('flash')) {
+      candidates.add('gemini-flash');
+      candidates.add('gemini-3-flash');
+    }
+    if (normalized.includes('pro') && !normalized.includes('image')) {
+      candidates.add('gemini-pro');
+      candidates.add('gemini-3-pro-high');
+    }
+    if (
+      normalized.includes('claude') ||
+      normalized.includes('sonnet') ||
+      normalized.includes('opus') ||
+      normalized.includes('haiku')
+    ) {
+      candidates.add('claude');
+    }
+    return candidates;
+  }
+
+  private async readProtectedModelsFromTokenFile(tokenFile: string): Promise<Set<string>> {
+    const out = new Set<string>();
+    try {
+      const raw = await fsAsync.readFile(tokenFile, 'utf8');
+      const parsed = JSON.parse(String(raw || '').trim() || 'null') as Record<string, unknown> | null;
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return out;
+      }
+      const nodes: Array<Record<string, unknown>> = [parsed];
+      if (parsed.token && typeof parsed.token === 'object' && !Array.isArray(parsed.token)) {
+        nodes.push(parsed.token as Record<string, unknown>);
+      }
+      for (const node of nodes) {
+        const rawModels =
+          Array.isArray(node.protected_models)
+            ? node.protected_models
+            : Array.isArray(node.protectedModels)
+              ? node.protectedModels
+              : [];
+        for (const item of rawModels) {
+          if (typeof item !== 'string') {
+            continue;
+          }
+          for (const normalized of this.normalizeProtectedModelFlag(item)) {
+            out.add(normalized);
+          }
+        }
+      }
+      return out;
+    } catch {
+      return out;
+    }
+  }
+
+  private isAntigravityModelProtected(alias: string, modelId: string): boolean {
+    const protectedModels = this.antigravityProtectedModels.get(alias);
+    if (!protectedModels || protectedModels.size === 0) {
+      return false;
+    }
+    const candidates = this.resolveProtectedModelCandidates(modelId);
+    for (const candidate of candidates) {
+      if (protectedModels.has(candidate)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private isAntigravityProviderProtected(providerKey: string): boolean {
+    const parsed = this.parseAntigravityProviderKey(providerKey);
+    if (!parsed) {
+      return false;
+    }
+    return this.isAntigravityModelProtected(parsed.alias, parsed.modelId);
+  }
+
+  private reconcileProtectedStateForProviderKey(providerKey: string): void {
+    const mgr = this.coreQuotaManager as
+      | {
+          updateProviderPoolState?: (options: {
+            providerKey: string;
+            inPool: boolean;
+            reason?: string | null;
+            cooldownUntil?: number | null;
+            blacklistUntil?: number | null;
+          }) => void;
+          getQuotaView?: () => (providerKey: string) => unknown;
+        }
+      | null;
+    if (!mgr || typeof mgr.updateProviderPoolState !== 'function') {
+      return;
+    }
+    const parsed = this.parseAntigravityProviderKey(providerKey);
+    if (!parsed) {
+      return;
+    }
+    if (this.isAntigravityModelProtected(parsed.alias, parsed.modelId)) {
+      mgr.updateProviderPoolState({
+        providerKey,
+        inPool: false,
+        reason: ANTIGRAVITY_PROTECTED_REASON,
+        cooldownUntil: null,
+        blacklistUntil: null
+      });
+      return;
+    }
+
+    let currentReason = '';
+    try {
+      const viewFn = typeof mgr.getQuotaView === 'function' ? mgr.getQuotaView() : null;
+      const current = typeof viewFn === 'function' ? (viewFn(providerKey) as { reason?: unknown } | null) : null;
+      currentReason = typeof current?.reason === 'string' ? current.reason.trim().toLowerCase() : '';
+    } catch {
+      currentReason = '';
+    }
+    if (currentReason !== ANTIGRAVITY_PROTECTED_REASON) {
+      return;
+    }
+    const snapshotKey = this.buildAntigravityKey(parsed.alias, parsed.modelId);
+    const record = this.snapshot[snapshotKey];
+    if (record) {
+      this.applyAntigravityQuotaToCore(providerKey, record, Date.now());
+      return;
+    }
+    mgr.updateProviderPoolState({
+      providerKey,
+      inPool: false,
+      reason: 'quotaDepleted',
+      cooldownUntil: null,
+      blacklistUntil: null
+    });
+  }
+
+  private reconcileProtectedStatesForRegisteredProviders(): void {
+    const keys = new Set<string>(this.registeredProviderKeys);
+    const snapshot = this.getAdminSnapshot();
+    for (const providerKey of Object.keys(snapshot)) {
+      keys.add(providerKey);
+    }
+    for (const key of keys) {
+      this.reconcileProtectedStateForProviderKey(key);
+    }
   }
 
   private extractAntigravityAlias(providerKey?: string): string | null {
@@ -491,6 +729,16 @@ export class QuotaManagerModule implements ManagerModule {
     if (!mgr || typeof (mgr as any).updateProviderPoolState !== 'function') {
       return;
     }
+    if (this.isAntigravityProviderProtected(providerKey)) {
+      (mgr as any).updateProviderPoolState({
+        providerKey,
+        inPool: false,
+        reason: ANTIGRAVITY_PROTECTED_REASON,
+        cooldownUntil: null,
+        blacklistUntil: null
+      });
+      return;
+    }
     const remaining = record.remainingFraction;
     const resetAt = typeof record.resetAt === 'number' && Number.isFinite(record.resetAt) ? record.resetAt : null;
     const withinResetWindow = typeof resetAt === 'number' && resetAt > nowMs;
@@ -508,27 +756,69 @@ export class QuotaManagerModule implements ManagerModule {
     });
   }
 
+  private handleSessionUnbindForQuotaPersistenceIssue(reason: string): void {
+    const issue = typeof reason === 'string' ? reason.trim() : '';
+    if (!issue) {
+      return;
+    }
+    if (this.quotaStoreLastUnbindReason === issue) {
+      return;
+    }
+    this.quotaStoreLastUnbindReason = issue;
+    let clearedBySession = 0;
+    let clearedByAlias = 0;
+    try {
+      const out = llmsBridge.clearAntigravitySessionAliasPins?.({ hydrate: true });
+      clearedBySession =
+        typeof out?.clearedBySession === 'number' && Number.isFinite(out.clearedBySession)
+          ? Math.max(0, Math.floor(out.clearedBySession))
+          : 0;
+      clearedByAlias =
+        typeof out?.clearedByAlias === 'number' && Number.isFinite(out.clearedByAlias)
+          ? Math.max(0, Math.floor(out.clearedByAlias))
+          : 0;
+    } catch {
+      // best-effort only
+    }
+    const quotaPath = this.quotaStorePath || '(unknown)';
+    console.warn(
+      `[quota] persistence issue (${issue}); cleared antigravity session bindings for safety ` +
+      `(sessionPins=${clearedBySession}, aliasPins=${clearedByAlias}, store=${quotaPath})`
+    );
+  }
+
   private createQuotaStore(): { load: () => Promise<QuotaStoreSnapshot | null>; save: (snapshot: QuotaStoreSnapshot) => Promise<void> } {
     const dir = this.resolveQuotaManagerDir();
     const filePath = path.join(dir, 'quota-manager.json');
     this.quotaStorePath = filePath;
     return {
       load: async () => {
+        let primaryLoadFailed = false;
+        let primaryExists = false;
+        try {
+          primaryExists = fs.existsSync(filePath);
+        } catch {
+          primaryExists = false;
+        }
         // Preferred: new snapshot.
         try {
           const raw = await fsAsync.readFile(filePath, 'utf8');
           const parsed = JSON.parse(String(raw || '').trim() || 'null') as QuotaStoreSnapshot | null;
           if (parsed && typeof parsed === 'object' && parsed.providers && typeof parsed.providers === 'object') {
+            this.quotaStorePersistenceStatus = 'loaded';
+            this.quotaStoreLastUnbindReason = null;
             return parsed;
           }
         } catch {
-          // ignore
+          primaryLoadFailed = primaryExists;
         }
         // Fallback: migrate from legacy provider-quota snapshot if present.
         try {
           const legacy = await loadProviderQuotaSnapshot();
           if (legacy && legacy.providers && typeof legacy.providers === 'object') {
             const nowMs = Date.now();
+            this.quotaStorePersistenceStatus = 'loaded';
+            this.quotaStoreLastUnbindReason = null;
             return {
               savedAtMs: Number.isFinite(Date.parse(legacy.updatedAt)) ? Date.parse(legacy.updatedAt) : nowMs,
               providers: legacy.providers as any
@@ -537,6 +827,7 @@ export class QuotaManagerModule implements ManagerModule {
         } catch {
           // ignore
         }
+        this.quotaStorePersistenceStatus = primaryLoadFailed ? 'load_error' : 'missing';
         return null;
       },
       save: async (snapshot: QuotaStoreSnapshot) => {
@@ -550,7 +841,11 @@ export class QuotaManagerModule implements ManagerModule {
         try {
           await fsAsync.writeFile(tmp, text, 'utf8');
           await fsAsync.rename(tmp, filePath);
+          this.quotaStorePersistenceStatus = 'loaded';
+          this.quotaStoreLastUnbindReason = null;
         } catch {
+          this.quotaStorePersistenceStatus = 'save_error';
+          this.handleSessionUnbindForQuotaPersistenceIssue('quota_store_save_error');
           try { await fsAsync.unlink(tmp); } catch { /* ignore */ }
         }
       }
@@ -661,6 +956,7 @@ export class QuotaManagerModule implements ManagerModule {
     }
     if (!matches.length) {
       this.antigravityTokens.clear();
+      this.antigravityProtectedModels.clear();
       // No token files -> no valid aliases -> drop any persisted snapshot rows.
       if (this.snapshot && Object.keys(this.snapshot).length) {
         this.snapshot = {};
@@ -668,11 +964,13 @@ export class QuotaManagerModule implements ManagerModule {
       // best-effort; ignore persistence errors
     });
       }
+      this.reconcileProtectedStatesForRegisteredProviders();
       return;
     }
 
     const base = resolveAntigravityApiBase();
     const next = new Map<string, AntigravityTokenRegistration>();
+    const nextProtectedModels = new Map<string, Set<string>>();
     const legacyAliases: string[] = [];
     for (const match of matches) {
       // IMPORTANT: alias must match providerKey alias used by VirtualRouter/provider registry:
@@ -692,6 +990,10 @@ export class QuotaManagerModule implements ManagerModule {
         tokenFile: match.filePath,
         apiBase: base
       });
+      const protectedModels = await this.readProtectedModelsFromTokenFile(match.filePath);
+      if (protectedModels.size > 0) {
+        nextProtectedModels.set(alias, protectedModels);
+      }
     }
 
     // 若已有显式注册的 alias，保留其覆盖权
@@ -702,6 +1004,7 @@ export class QuotaManagerModule implements ManagerModule {
     }
 
     this.antigravityTokens = next;
+    this.antigravityProtectedModels = nextProtectedModels;
 
     // Cleanup legacy snapshot keys created by older builds (sequence-prefixed alias like "1-foo").
     // Those keys never match VirtualRouter providerKey aliases and only cause duplicate/stale rows in admin views.
@@ -748,6 +1051,8 @@ export class QuotaManagerModule implements ManagerModule {
     });
       }
     }
+
+    this.reconcileProtectedStatesForRegisteredProviders();
   }
 
   private resolveStatePath(): string {

@@ -25,6 +25,7 @@ export {
   getAntigravityLatestSignatureSessionIdForAlias,
   lookupAntigravitySessionSignatureEntry,
   invalidateAntigravitySessionSignature,
+  clearAntigravitySessionAliasPins,
   resetAntigravitySessionSignatureCachesForTests,
   configureAntigravitySessionSignaturePersistence,
   flushAntigravitySessionSignaturePersistenceSync

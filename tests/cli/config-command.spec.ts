@@ -391,6 +391,8 @@ describe('cli init command', () => {
     const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
     expect(parsed?.virtualrouterMode).toBe('v2');
     expect(parsed?.virtualrouter?.routing?.default?.[0]?.targets?.[0]).toContain('openai.');
+    expect(parsed?.virtualrouter?.routing?.web_search).toBeUndefined();
+    expect(parsed?.virtualrouter?.webSearch).toBeUndefined();
     const providerV2 = JSON.parse(writes.get('/tmp/.routecodex/provider/openai/config.v2.json') || '{}');
     expect(providerV2?.providerId).toBe('openai');
   });
@@ -436,6 +438,103 @@ describe('cli init command', () => {
     expect(parsed?.virtualrouter?.routing?.web_search?.[0]?.targets?.[0]).toContain('iflow.');
     expect(parsed?.virtualrouter?.webSearch?.engines?.[0]?.id).toBe('iflow:web_search');
     expect(parsed?.virtualrouter?.webSearch?.engines?.[0]?.providerKey).toBe('iflow');
+    expect(parsed?.virtualrouter?.webSearch?.search?.['iflow:web_search']?.providerKey).toBe('iflow');
+  });
+
+  it('init (non-interactive) injects deepseek webSearch defaults when deepseek-web is selected', async () => {
+    const writes = new Map<string, string>();
+    const program = new Command();
+    createInitCommand(program, {
+      logger: {
+        info: () => {},
+        warning: () => {},
+        success: () => {},
+        error: () => {}
+      },
+      createSpinner: async () =>
+        ({
+          start: () => ({} as any),
+          succeed: () => {},
+          fail: () => {},
+          warn: () => {},
+          info: () => {},
+          stop: () => {},
+          text: ''
+        }) as any,
+      fsImpl: {
+        existsSync: () => false,
+        readFileSync: () => '',
+        writeFileSync: (p: any, content: any) => {
+          writes.set(String(p), String(content));
+        },
+        mkdirSync: () => {}
+      },
+      pathImpl: path as any,
+      getHomeDir: () => '/tmp'
+    });
+
+    await program.parseAsync(
+      ['node', 'routecodex', 'init', '--config', '/tmp/config.json', '--providers', 'deepseek-web', '--force'],
+      { from: 'node' }
+    );
+
+    const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
+    expect(parsed?.virtualrouter?.routing?.web_search?.[0]?.targets?.[0]).toBe('deepseek-web.deepseek-chat-search');
+    expect(parsed?.virtualrouter?.webSearch?.engines?.[0]?.id).toBe('deepseek:web_search');
+    expect(parsed?.virtualrouter?.webSearch?.engines?.[0]?.providerKey).toBe('deepseek-web.deepseek-chat-search');
+    expect(parsed?.virtualrouter?.webSearch?.search?.['deepseek:web_search']?.providerKey).toBe(
+      'deepseek-web.deepseek-chat-search'
+    );
+  });
+
+  it('init (non-interactive) prioritizes deepseek then falls back to iflow when both are selected', async () => {
+    const writes = new Map<string, string>();
+    const program = new Command();
+    createInitCommand(program, {
+      logger: {
+        info: () => {},
+        warning: () => {},
+        success: () => {},
+        error: () => {}
+      },
+      createSpinner: async () =>
+        ({
+          start: () => ({} as any),
+          succeed: () => {},
+          fail: () => {},
+          warn: () => {},
+          info: () => {},
+          stop: () => {},
+          text: ''
+        }) as any,
+      fsImpl: {
+        existsSync: () => false,
+        readFileSync: () => '',
+        writeFileSync: (p: any, content: any) => {
+          writes.set(String(p), String(content));
+        },
+        mkdirSync: () => {}
+      },
+      pathImpl: path as any,
+      getHomeDir: () => '/tmp'
+    });
+
+    await program.parseAsync(
+      ['node', 'routecodex', 'init', '--config', '/tmp/config.json', '--providers', 'deepseek-web,iflow', '--force'],
+      { from: 'node' }
+    );
+
+    const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
+    expect(parsed?.virtualrouter?.routing?.web_search?.[0]?.targets).toEqual([
+      'deepseek-web.deepseek-chat-search',
+      expect.stringContaining('iflow.')
+    ]);
+    expect(parsed?.virtualrouter?.webSearch?.engines?.[0]?.id).toBe('deepseek:web_search');
+    expect(parsed?.virtualrouter?.webSearch?.engines?.[0]?.default).toBe(true);
+    expect(parsed?.virtualrouter?.webSearch?.engines?.[1]?.id).toBe('iflow:web_search');
+    expect(parsed?.virtualrouter?.webSearch?.search?.['deepseek:web_search']?.providerKey).toBe(
+      'deepseek-web.deepseek-chat-search'
+    );
     expect(parsed?.virtualrouter?.webSearch?.search?.['iflow:web_search']?.providerKey).toBe('iflow');
   });
 
@@ -1690,6 +1789,57 @@ describe('init-config', () => {
     expect(parsed.webSearch.engines[0].providerKey).toBe('iflow');
     expect(parsed.webSearch.search['iflow:web_search'].providerKey).toBe('iflow');
     expect(parsed.virtualrouter.routing.web_search[0].targets[0]).toContain('iflow.');
+  });
+
+  it('writes deepseek webSearch defaults when deepseek-web is selected', async () => {
+    const writes = new Map<string, string>();
+    const result = await initializeConfigV1(
+      {
+        fsImpl: {
+          existsSync: () => false,
+          mkdirSync: () => {},
+          readFileSync: () => '',
+          writeFileSync: (p: any, content: any) => writes.set(String(p), String(content))
+        },
+        pathImpl: path as any
+      },
+      { configPath: '/tmp/config.json', force: true, providers: ['deepseek-web'] }
+    );
+
+    expect(result.ok).toBe(true);
+    const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
+    expect(parsed.webSearch.engines[0].id).toBe('deepseek:web_search');
+    expect(parsed.webSearch.engines[0].providerKey).toBe('deepseek-web.deepseek-chat-search');
+    expect(parsed.webSearch.search['deepseek:web_search'].providerKey).toBe('deepseek-web.deepseek-chat-search');
+    expect(parsed.virtualrouter.routing.web_search[0].targets[0]).toBe('deepseek-web.deepseek-chat-search');
+  });
+
+  it('prioritizes deepseek then falls back to iflow when both are selected', async () => {
+    const writes = new Map<string, string>();
+    const result = await initializeConfigV1(
+      {
+        fsImpl: {
+          existsSync: () => false,
+          mkdirSync: () => {},
+          readFileSync: () => '',
+          writeFileSync: (p: any, content: any) => writes.set(String(p), String(content))
+        },
+        pathImpl: path as any
+      },
+      { configPath: '/tmp/config.json', force: true, providers: ['deepseek-web', 'iflow'] }
+    );
+
+    expect(result.ok).toBe(true);
+    const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
+    expect(parsed.webSearch.engines[0].id).toBe('deepseek:web_search');
+    expect(parsed.webSearch.engines[0].default).toBe(true);
+    expect(parsed.webSearch.engines[1].id).toBe('iflow:web_search');
+    expect(parsed.webSearch.search['deepseek:web_search'].providerKey).toBe('deepseek-web.deepseek-chat-search');
+    expect(parsed.webSearch.search['iflow:web_search'].providerKey).toBe('iflow');
+    expect(parsed.virtualrouter.routing.web_search[0].targets).toEqual([
+      'deepseek-web.deepseek-chat-search',
+      expect.stringContaining('iflow.')
+    ]);
   });
 
   it('does not inject webSearch defaults when iflow is not selected', async () => {

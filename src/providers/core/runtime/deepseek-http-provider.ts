@@ -364,7 +364,7 @@ export class DeepSeekHttpProvider extends HttpTransportProvider {
   }
 
   protected override wantsUpstreamSse(request: UnknownObject, context: ProviderContext): boolean {
-    if (this.readStreamIntent(request)) {
+    if (this.readStreamIntent(request) || this.shouldForceUpstreamSseForSearch(request)) {
       return true;
     }
     return super.wantsUpstreamSse(request, context);
@@ -536,6 +536,31 @@ export class DeepSeekHttpProvider extends HttpTransportProvider {
       return true;
     }
     return false;
+  }
+
+  private shouldForceUpstreamSseForSearch(request: UnknownObject): boolean {
+    const direct = isRecord(request) ? request : {};
+    const dataNode = isRecord(direct.data) ? direct.data : undefined;
+
+    if (direct.search_enabled === true || dataNode?.search_enabled === true) {
+      return true;
+    }
+
+    const modelRaw =
+      normalizeString(direct.model) ||
+      normalizeString(dataNode?.model) ||
+      normalizeString((isRecord(direct.metadata) ? direct.metadata.model : undefined));
+    if (!modelRaw) {
+      return false;
+    }
+
+    const model = modelRaw.toLowerCase();
+    return (
+      model.includes('deepseek-chat-search') ||
+      model.includes('deepseek-v3-search') ||
+      model.includes('deepseek-reasoner-search') ||
+      model.includes('deepseek-r1-search')
+    );
   }
 
   private resolveDeepSeekRuntimeAlias(): string | undefined {

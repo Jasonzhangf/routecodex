@@ -1,4 +1,5 @@
 import { resolveAntigravityUserAgent } from '../../auth/antigravity-user-agent.js';
+import { resolveAntigravityRequestTypeFromPayload } from '../../core/runtime/antigravity-request-type.js';
 import type {
   ApplyRequestHeadersInput,
   ApplyStreamModeHeadersInput,
@@ -65,17 +66,7 @@ function extractRequestId(request: unknown): string | undefined {
 }
 
 function resolveRequestType(request: unknown): string {
-  if (!request || typeof request !== 'object' || Array.isArray(request)) {
-    return 'agent';
-  }
-  const metadataRaw = (request as Record<string, unknown>).metadata;
-  if (!metadataRaw || typeof metadataRaw !== 'object' || Array.isArray(metadataRaw)) {
-    return 'agent';
-  }
-  const hasImageAttachment =
-    (metadataRaw as Record<string, unknown>).hasImageAttachment === true ||
-    (metadataRaw as Record<string, unknown>).hasImageAttachment === 'true';
-  return hasImageAttachment ? 'image_gen' : 'agent';
+  return resolveAntigravityRequestTypeFromPayload(request);
 }
 
 function applyAntigravityHeaderContract(headers: Record<string, string>, request?: unknown): Record<string, string> {

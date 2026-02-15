@@ -24,12 +24,19 @@ jest.unstable_mockModule('../../../src/providers/auth/antigravity-userinfo-helpe
   resolveAntigravityApiBase: () => 'https://example.invalid'
 }));
 
+const clearAntigravitySessionAliasPins = jest.fn(() => ({ clearedBySession: 0, clearedByAlias: 0 }));
+const hydratedStoreSnapshots: unknown[] = [];
+
 const mockLlmsBridgeModule = () => ({
-  createCoreQuotaManager: async () => {
+  createCoreQuotaManager: async (options?: { store?: { load?: () => Promise<unknown>; save?: (snapshot: unknown) => Promise<void> } }) => {
+    const store = options?.store;
     const poolState = new Map<string, unknown>();
     const staticCfg = new Map<string, unknown>();
     return {
-      hydrateFromStore: async () => {},
+      hydrateFromStore: async () => {
+        const loaded = await store?.load?.();
+        hydratedStoreSnapshots.push(loaded ?? null);
+      },
       registerProviderStaticConfig: (providerKey: string, cfg: unknown) => {
         staticCfg.set(providerKey, cfg);
       },
@@ -52,7 +59,9 @@ const mockLlmsBridgeModule = () => ({
         poolState: Object.fromEntries(poolState.entries()),
         staticCfg: Object.fromEntries(staticCfg.entries())
       }),
-      persistNow: async () => {}
+      persistNow: async () => {
+        await store?.save?.({ savedAtMs: Date.now(), providers: {} });
+      }
     };
   },
   getProviderErrorCenter: async () => ({ emit: () => {} }),
@@ -60,6 +69,7 @@ const mockLlmsBridgeModule = () => ({
   cacheAntigravitySessionSignature: () => {},
   lookupAntigravitySessionSignatureEntry: () => undefined,
   getAntigravityLatestSignatureSessionIdForAlias: () => undefined,
+  clearAntigravitySessionAliasPins,
   resetAntigravitySessionSignatureCachesForTests: () => {},
   warmupAntigravitySessionSignatureModule: async () => {}
 });
@@ -70,16 +80,26 @@ jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.ts', mockLlmsBri
 
 describe('QuotaManagerModule refresh behavior', () => {
   const originalHome = process.env.HOME;
+  const originalQuotaDir = process.env.ROUTECODEX_QUOTA_DIR;
+  const originalQuotaDirCompat = process.env.RCC_QUOTA_DIR;
   let tempHome: string | null = null;
 
   beforeEach(async () => {
     tempHome = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-quota-home-'));
     process.env.HOME = tempHome;
+    process.env.ROUTECODEX_QUOTA_DIR = path.join(tempHome, '.routecodex', 'quota');
+    process.env.RCC_QUOTA_DIR = process.env.ROUTECODEX_QUOTA_DIR;
+    clearAntigravitySessionAliasPins.mockClear();
+    hydratedStoreSnapshots.length = 0;
   });
 
   afterEach(async () => {
     if (originalHome === undefined) delete process.env.HOME;
     else process.env.HOME = originalHome;
+    if (originalQuotaDir === undefined) delete process.env.ROUTECODEX_QUOTA_DIR;
+    else process.env.ROUTECODEX_QUOTA_DIR = originalQuotaDir;
+    if (originalQuotaDirCompat === undefined) delete process.env.RCC_QUOTA_DIR;
+    else process.env.RCC_QUOTA_DIR = originalQuotaDirCompat;
     if (tempHome) {
       try {
         await fs.rm(tempHome, { recursive: true, force: true });
@@ -152,6 +172,84 @@ describe('QuotaManagerModule refresh behavior', () => {
     }
   });
 
+  it('hydrates persisted cooldown/blacklist entries from quota-manager snapshot on init', async () => {
+    const quotaDir = path.join(tempHome as string, '.routecodex', 'quota');
+    await fs.mkdir(quotaDir, { recursive: true });
+    await fs.writeFile(
+      path.join(quotaDir, 'quota-manager.json'),
+      JSON.stringify({
+        savedAtMs: Date.now(),
+        providers: {
+          'antigravity.a1.claude-sonnet-4-5': {
+            providerKey: 'antigravity.a1.claude-sonnet-4-5',
+            inPool: false,
+            reason: 'cooldown',
+            cooldownUntil: Date.now() + 120_000,
+            blacklistUntil: null
+          },
+          'antigravity.a1.gemini-3-pro-high': {
+            providerKey: 'antigravity.a1.gemini-3-pro-high',
+            inPool: false,
+            reason: 'blacklist',
+            cooldownUntil: null,
+            blacklistUntil: Date.now() + 300_000
+          }
+        }
+      }, null, 2),
+      'utf8'
+    );
+
+    const { QuotaManagerModule } = await import('../../../src/manager/modules/quota/index.js');
+    const mod = new QuotaManagerModule();
+    await mod.init({ serverId: 'test' } as any);
+    try {
+      expect(hydratedStoreSnapshots.length).toBeGreaterThan(0);
+      const latest = hydratedStoreSnapshots[hydratedStoreSnapshots.length - 1] as any;
+      expect(latest).toBeTruthy();
+      expect(latest.providers['antigravity.a1.claude-sonnet-4-5'].cooldownUntil).toBeTruthy();
+      expect(latest.providers['antigravity.a1.gemini-3-pro-high'].blacklistUntil).toBeTruthy();
+    } finally {
+      await mod.stop();
+    }
+  });
+
+  it('projects token protected_models into quotaView and keeps antigravity model out of pool', async () => {
+    const authDir = path.join(tempHome as string, 'auth');
+    await fs.mkdir(authDir, { recursive: true });
+    const tokenFile = path.join(authDir, 'antigravity-oauth-1-a1.json');
+    await fs.writeFile(
+      tokenFile,
+      JSON.stringify({ access_token: 'token-a1', protected_models: ['claude'] }, null, 2),
+      'utf8'
+    );
+    scanProviderTokenFiles.mockResolvedValue([{ filePath: tokenFile, sequence: 1, alias: 'a1' }]);
+
+    const { QuotaManagerModule } = await import('../../../src/manager/modules/quota/index.js');
+    const mod = new QuotaManagerModule();
+    await mod.init({ serverId: 'test' } as any);
+    try {
+      mod.registerProviderStaticConfig('antigravity.a1.claude-sonnet-4-5-thinking', { authType: 'oauth' });
+      const view1 = mod.getQuotaView();
+      const entry1 = view1('antigravity.a1.claude-sonnet-4-5-thinking') as Record<string, unknown> | null;
+      expect(entry1?.inPool).toBe(false);
+      expect(entry1?.reason).toBe('protected');
+      expect(mod.hasQuotaForAntigravity('antigravity.a1.claude-sonnet-4-5-thinking', 'claude-sonnet-4-5-thinking')).toBe(false);
+
+      await fs.writeFile(
+        tokenFile,
+        JSON.stringify({ access_token: 'token-a1', protected_models: [] }, null, 2),
+        'utf8'
+      );
+      await (mod as any).syncAntigravityTokensFromDisk();
+      const view2 = mod.getQuotaView();
+      const entry2 = view2('antigravity.a1.claude-sonnet-4-5-thinking') as Record<string, unknown> | null;
+      expect(entry2?.reason).toBe('quotaDepleted');
+      expect(entry2?.inPool).toBe(false);
+    } finally {
+      await mod.stop();
+    }
+  });
+
   it('prunes persisted aliases that have no token file (no phantom alias)', async () => {
     // Simulate: legacy state has alias a1, but current token scan only has alias b2.
     scanProviderTokenFiles.mockResolvedValueOnce([{ filePath: '/tmp/token2.json', sequence: 2, alias: 'b2' }]);
@@ -184,6 +282,49 @@ describe('QuotaManagerModule refresh behavior', () => {
       const onDisk = JSON.parse(await fs.readFile(snapPath, 'utf8')) as Record<string, unknown>;
       expect(Object.keys(onDisk).some((k) => k.startsWith('antigravity://a1/'))).toBe(false);
     } finally {
+      await mod.stop();
+    }
+  });
+
+  it('clears antigravity session bindings when quota store snapshot is missing at startup', async () => {
+    const { QuotaManagerModule } = await import('../../../src/manager/modules/quota/index.js');
+    const mod = new QuotaManagerModule();
+    await mod.init({ serverId: 'test' } as any);
+    try {
+      expect(clearAntigravitySessionAliasPins).toHaveBeenCalledTimes(1);
+      expect(clearAntigravitySessionAliasPins).toHaveBeenCalledWith({ hydrate: true });
+    } finally {
+      await mod.stop();
+    }
+  });
+
+  it('clears antigravity session bindings when quota store persistence fails on save', async () => {
+    const quotaDir = path.join(tempHome as string, '.routecodex', 'quota');
+    await fs.mkdir(quotaDir, { recursive: true });
+    await fs.mkdir(path.join(quotaDir, 'quota-manager.json'), { recursive: true });
+    await fs.writeFile(
+      path.join(quotaDir, 'provider-quota.json'),
+      JSON.stringify({ savedAtMs: Date.now(), providers: {} }, null, 2),
+      'utf8'
+    );
+
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const { QuotaManagerModule } = await import('../../../src/manager/modules/quota/index.js');
+    const mod = new QuotaManagerModule();
+    await mod.init({ serverId: 'test' } as any);
+    const mgr = mod.getCoreQuotaManager() as { persistNow?: () => Promise<void> } | null;
+    try {
+      clearAntigravitySessionAliasPins.mockClear();
+      await mgr?.persistNow?.();
+      expect(clearAntigravitySessionAliasPins).toHaveBeenCalledTimes(1);
+      expect(clearAntigravitySessionAliasPins).toHaveBeenCalledWith({ hydrate: true });
+      expect(warnSpy).toHaveBeenCalled();
+      const logged = String(warnSpy.mock.calls[0]?.[0] ?? '');
+      expect(logged).toContain('persistence issue');
+      expect(logged).toContain('quota_store_save_error');
+    } finally {
+      warnSpy.mockRestore();
       await mod.stop();
     }
   });

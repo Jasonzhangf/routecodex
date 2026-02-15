@@ -2,6 +2,85 @@ import { jest } from '@jest/globals';
 import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine.js';
 
 describe('VirtualRouterEngine antigravity alias session lease', () => {
+  test('lease mode prefers the committed alias for the same session', () => {
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const nowSpy = jest.spyOn(Date, 'now');
+
+    const a = 'antigravity.aliasA.gemini-3-pro-high';
+    const b = 'antigravity.aliasB.gemini-3-pro-high';
+
+    try {
+      const engine = new VirtualRouterEngine();
+      engine.initialize({
+        routing: {
+          default: [{ id: 'primary', targets: [a, b], priority: 1, mode: 'round-robin' }]
+        },
+        providers: {
+          [a]: {
+            providerKey: a,
+            providerType: 'gemini',
+            endpoint: 'https://example.invalid',
+            auth: { type: 'apiKey', value: 'test' },
+            outboundProfile: 'gemini-chat',
+            modelId: 'gemini-3-pro-high'
+          },
+          [b]: {
+            providerKey: b,
+            providerType: 'gemini',
+            endpoint: 'https://example.invalid',
+            auth: { type: 'apiKey', value: 'test' },
+            outboundProfile: 'gemini-chat',
+            modelId: 'gemini-3-pro-high'
+          }
+        },
+        classifier: { longContextThresholdTokens: 180000, thinkingKeywords: [], backgroundKeywords: [] },
+        loadBalancing: { strategy: 'round-robin', aliasSelection: { sessionLeaseCooldownMs: 5 * 60_000 } },
+        contextRouting: { warnRatio: 0.9, hardLimit: false },
+        health: { failureThreshold: 3, cooldownMs: 5_000, fatalCooldownMs: 10_000 }
+      } as any);
+
+      const request: any = { model: 'gemini-3-pro-high', messages: [{ role: 'user', content: 'hi' }], tools: [] };
+
+      nowSpy.mockReturnValue(5_000_000);
+      const firstPick = engine.route(request, {
+        requestId: 'req_sess_commit_1',
+        entryEndpoint: '/v1/chat/completions',
+        providerProtocol: 'openai-chat',
+        routeHint: 'default',
+        sessionId: 'sessionA'
+      } as any).target.providerKey;
+
+      engine.handleProviderSuccess({
+        runtime: { providerKey: firstPick },
+        metadata: { sessionId: 'sessionA' }
+      } as any);
+
+      nowSpy.mockReturnValue(5_000_010);
+      const secondPick = engine.route(request, {
+        requestId: 'req_sess_commit_2',
+        entryEndpoint: '/v1/chat/completions',
+        providerProtocol: 'openai-chat',
+        routeHint: 'default',
+        sessionId: 'sessionA'
+      } as any).target.providerKey;
+
+      nowSpy.mockReturnValue(5_000_020);
+      const otherSessionPick = engine.route(request, {
+        requestId: 'req_sess_commit_3',
+        entryEndpoint: '/v1/chat/completions',
+        providerProtocol: 'openai-chat',
+        routeHint: 'default',
+        sessionId: 'sessionB'
+      } as any).target.providerKey;
+
+      expect(secondPick).toBe(firstPick);
+      expect(otherSessionPick).not.toBe(firstPick);
+    } finally {
+      nowSpy.mockRestore();
+      logSpy.mockRestore();
+    }
+  });
+
   test('does not share the same alias across different sessions within cooldown', () => {
     const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
     const nowSpy = jest.spyOn(Date, 'now');
@@ -236,6 +315,7 @@ describe('VirtualRouterEngine antigravity alias session lease', () => {
       const engine = new VirtualRouterEngine();
       engine.initialize({
         routing: {
+          default: [{ id: 'default', targets: [fallback], priority: 1, mode: 'round-robin' }],
           gemini: [{ id: 'primary', targets: [gemini], priority: 1, mode: 'round-robin' }],
           claude: [{ id: 'primary', targets: [claude, fallback], priority: 1, mode: 'round-robin' }]
         },

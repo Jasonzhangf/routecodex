@@ -29,6 +29,23 @@ function stableSid(raw: string): string {
 }
 
 describe('GeminiCLIHttpProvider basic behaviour', () => {
+  test('uses v1internal endpoint defaults when endpoint is not explicitly configured', () => {
+    const configWithoutEndpoint: OpenAIStandardConfig = {
+      ...baseConfig,
+      config: {
+        ...(baseConfig.config as any),
+        endpoint: undefined
+      }
+    } as unknown as OpenAIStandardConfig;
+    const provider = new GeminiCLIHttpProvider(configWithoutEndpoint, emptyDeps) as any;
+    const endpoint = provider.getEffectiveEndpoint();
+
+    expect(endpoint).toBe('/v1internal:generateContent');
+    expect(
+      provider.resolveRequestEndpoint({ action: 'streamGenerateContent' }, endpoint)
+    ).toBe('/v1internal:streamGenerateContent?alt=sse');
+  });
+
   test('falls back to service default baseUrl when configured baseUrl is malformed endpoint path', () => {
     const malformedConfig: OpenAIStandardConfig = {
       ...baseConfig,
@@ -123,6 +140,45 @@ describe('GeminiCLIHttpProvider basic behaviour', () => {
       expect((body as any).userAgent).toBeUndefined();
       expect((body as any).request).toBeTruthy();
       expect((body as any).contents).toBeUndefined();
+    } finally {
+      if (prevHeaderMode === undefined) {
+        delete process.env.ROUTECODEX_ANTIGRAVITY_HEADER_MODE;
+      } else {
+        process.env.ROUTECODEX_ANTIGRAVITY_HEADER_MODE = prevHeaderMode;
+      }
+      if (prevRccHeaderMode === undefined) {
+        delete process.env.RCC_ANTIGRAVITY_HEADER_MODE;
+      } else {
+        process.env.RCC_ANTIGRAVITY_HEADER_MODE = prevRccHeaderMode;
+      }
+    }
+  });
+
+  test('antigravity requestType resolves to web_search in minimal mode for online/networking requests', async () => {
+    const prevHeaderMode = process.env.ROUTECODEX_ANTIGRAVITY_HEADER_MODE;
+    const prevRccHeaderMode = process.env.RCC_ANTIGRAVITY_HEADER_MODE;
+    process.env.ROUTECODEX_ANTIGRAVITY_HEADER_MODE = 'minimal';
+    process.env.RCC_ANTIGRAVITY_HEADER_MODE = 'minimal';
+    try {
+      const cfg: OpenAIStandardConfig = {
+        ...baseConfig,
+        config: {
+          ...(baseConfig.config as any),
+          providerId: 'antigravity'
+        }
+      } as unknown as OpenAIStandardConfig;
+
+      const provider = new GeminiCLIHttpProvider(cfg, emptyDeps);
+      const processed = await (provider as any).preprocessRequest({
+        model: 'gemini-3-pro-high-online',
+        tools: [{ function: { name: 'web_search' } }],
+        contents: [{ role: 'user', parts: [{ text: 'search latest updates' }] }],
+        stream: true
+      });
+
+      const headers = await (provider as any).finalizeRequestHeaders({}, processed);
+      expect(headers.requestType).toBe('web_search');
+      expect((processed as any).requestType).toBeUndefined();
     } finally {
       if (prevHeaderMode === undefined) {
         delete process.env.ROUTECODEX_ANTIGRAVITY_HEADER_MODE;
@@ -258,6 +314,66 @@ describe('GeminiCLIHttpProvider basic behaviour', () => {
         process.env.RCC_ANTIGRAVITY_HEADER_MODE = prevRccHeaderMode;
       }
     }
+  });
+
+  test('antigravity default mode sets requestType=web_search for online model when missing', async () => {
+    const prevHeaderMode = process.env.ROUTECODEX_ANTIGRAVITY_HEADER_MODE;
+    const prevRccHeaderMode = process.env.RCC_ANTIGRAVITY_HEADER_MODE;
+    delete process.env.ROUTECODEX_ANTIGRAVITY_HEADER_MODE;
+    delete process.env.RCC_ANTIGRAVITY_HEADER_MODE;
+    try {
+      const cfg: OpenAIStandardConfig = {
+        ...baseConfig,
+        config: {
+          ...(baseConfig.config as any),
+          providerId: 'antigravity'
+        }
+      } as unknown as OpenAIStandardConfig;
+      const provider = new GeminiCLIHttpProvider(cfg, emptyDeps);
+
+      const processed = await (provider as any).preprocessRequest({
+        model: 'gemini-3-pro-high-online',
+        contents: [{ role: 'user', parts: [{ text: 'search web' }] }],
+        stream: true
+      });
+
+      expect((processed as any).requestType).toBe('web_search');
+      const body = (provider as any).buildHttpRequestBody(processed);
+      expect((body as any).requestType).toBe('web_search');
+    } finally {
+      if (prevHeaderMode === undefined) {
+        delete process.env.ROUTECODEX_ANTIGRAVITY_HEADER_MODE;
+      } else {
+        process.env.ROUTECODEX_ANTIGRAVITY_HEADER_MODE = prevHeaderMode;
+      }
+      if (prevRccHeaderMode === undefined) {
+        delete process.env.RCC_ANTIGRAVITY_HEADER_MODE;
+      } else {
+        process.env.RCC_ANTIGRAVITY_HEADER_MODE = prevRccHeaderMode;
+      }
+    }
+  });
+
+  test('antigravity transport keeps model id unchanged (no provider-side downgrade/fallback)', async () => {
+    const cfg: OpenAIStandardConfig = {
+      ...baseConfig,
+      config: {
+        ...(baseConfig.config as any),
+        providerId: 'antigravity'
+      }
+    } as unknown as OpenAIStandardConfig;
+
+    const provider = new GeminiCLIHttpProvider(cfg, emptyDeps);
+    const model = 'gemini-3-pro-low-online';
+    const processed = await (provider as any).preprocessRequest({
+      model,
+      contents: [{ role: 'user', parts: [{ text: 'search web' }] }],
+      stream: true
+    });
+
+    expect((processed as any).model).toBe(model);
+    const body = (provider as any).buildHttpRequestBody(processed);
+    expect((body as any).model).toBe(model);
   });
 
   test('antigravity thoughtSignature session swap: reuse alias signature sessionId when available', async () => {

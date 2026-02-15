@@ -4,6 +4,9 @@ import { bootstrapVirtualRouterConfig } from '../../sharedmodule/llmswitch-core/
 import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine.js';
 import { VirtualRouterError } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/types.js';
 import { saveRoutingInstructionStateSync } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/sticky-session-store.js';
+import { runServerSideToolEngine } from '../../sharedmodule/llmswitch-core/src/servertool/server-side-tools.js';
+import type { AdapterContext } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.js';
+import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/json.js';
 import type { StandardizedRequest } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.js';
 
 const SESSION_DIR = path.join(process.cwd(), 'tmp', 'jest-stopmessage-session-scope');
@@ -331,6 +334,120 @@ describe('stopMessage is session-scoped', () => {
     expect(after?.state?.stopMessageMaxRepeats).toBeUndefined();
     expect(typeof after?.state?.stopMessageUpdatedAt).toBe('number');
     expect(after?.state?.stopMessageUpdatedAt).toBeGreaterThanOrEqual(beforeUpdatedAt);
+  });
+
+  test('generic <**clear**> clears mode-only stopMessage:on,10 state', () => {
+    const engine = buildEngine();
+    const sessionId = 'sess-clear-generic-mode-only-1';
+    const setRequest: StandardizedRequest = {
+      model: 'gpt-test',
+      messages: [{ role: 'user', content: '<**stopMessage:on,10**>继续执行当前任务' }],
+      tools: [],
+      parameters: {}
+    } as any;
+
+    engine.route(setRequest, {
+      requestId: 'req_stopmessage_set_generic_clear',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      sessionId,
+      routeHint: 'default'
+    } as any);
+
+    const clearRequest: StandardizedRequest = {
+      model: 'gpt-test',
+      messages: [{ role: 'user', content: '<**clear**>\\n继续执行当前任务' }],
+      tools: [],
+      parameters: {}
+    } as any;
+
+    engine.route(clearRequest, {
+      requestId: 'req_stopmessage_generic_clear',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      sessionId,
+      routeHint: 'default'
+    } as any);
+
+    const after = readSessionState(sessionId);
+    expect(after?.state?.stopMessageText).toBeUndefined();
+    expect(after?.state?.stopMessageMaxRepeats).toBeUndefined();
+    expect(after?.state?.stopMessageStageMode).toBeUndefined();
+  });
+
+  test('activate then <**clear**> does not trigger stop_message followup', async () => {
+    const engine = buildEngine();
+    const sessionId = 'sess-clear-no-followup-1';
+    const metadata = {
+      requestId: 'req_stopmessage_set_before_clear',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      sessionId,
+      routeHint: 'default'
+    } as any;
+
+    engine.route(
+      {
+        model: 'gpt-test',
+        messages: [{ role: 'user', content: '<**stopMessage:on,10**>继续执行当前任务' }],
+        tools: [],
+        parameters: {}
+      } as any,
+      metadata
+    );
+
+    engine.route(
+      {
+        model: 'gpt-test',
+        messages: [{ role: 'user', content: '<**clear**>\\n继续执行' }],
+        tools: [],
+        parameters: {}
+      } as any,
+      {
+        ...metadata,
+        requestId: 'req_stopmessage_clear_before_followup'
+      }
+    );
+
+    const persisted = readSessionState(sessionId);
+    expect(persisted?.state?.stopMessageText).toBeUndefined();
+    expect(persisted?.state?.stopMessageMaxRepeats).toBeUndefined();
+    expect(persisted?.state?.stopMessageStageMode).toBeUndefined();
+
+    const adapterContext: AdapterContext = {
+      requestId: 'req_stopmessage_clear_no_followup',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      sessionId,
+      capturedChatRequest: {
+        model: 'gpt-test',
+        messages: [{ role: 'user', content: '继续执行当前任务' }]
+      }
+    } as any;
+
+    const stopResponse: JsonObject = {
+      id: 'chatcmpl-stop-after-clear-1',
+      object: 'chat.completion',
+      model: 'gpt-test',
+      choices: [
+        {
+          index: 0,
+          message: { role: 'assistant', content: 'ok' },
+          finish_reason: 'stop'
+        }
+      ]
+    };
+
+    const result = await runServerSideToolEngine({
+      chatResponse: stopResponse,
+      adapterContext,
+      requestId: 'req_stopmessage_clear_no_followup',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat'
+    });
+
+    expect(result.mode).toBe('passthrough');
+    expect(result.execution).toBeUndefined();
   });
 
   test('does not reapply stopMessage from history after it is cleared/consumed', () => {

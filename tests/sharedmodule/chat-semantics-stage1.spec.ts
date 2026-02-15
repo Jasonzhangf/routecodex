@@ -199,6 +199,80 @@ describe('Chat semantics stage 1 bridge', () => {
     expect(hasWebSearchTool).toBe(false);
   });
 
+  it('bypasses servertool web_search injection when deepseek native search engine is highest priority', async () => {
+    const chat = buildChatEnvelope();
+    const standardized = chatEnvelopeToStandardized(chat, {
+      adapterContext,
+      endpoint: '/v1/chat/completions',
+      requestId: 'req-sem-deepseek-native'
+    });
+    standardized.messages = [
+      standardized.messages[0],
+      {
+        role: 'user',
+        content: '请上网搜索今天 RouteCodex 的更新'
+      }
+    ];
+
+    const result = await runProcessWithRequest(standardized, {
+      __rt: {
+        webSearch: {
+          injectPolicy: 'selective',
+          engines: [
+            {
+              id: 'deepseek:web_search',
+              providerKey: 'deepseek-web.deepseek-chat-search',
+              default: true
+            },
+            {
+              id: 'iflow:web_search',
+              providerKey: 'iflow'
+            }
+          ]
+        }
+      }
+    });
+    const hasWebSearchTool = (result.processedRequest?.tools ?? []).some(
+      (tool) => tool.function?.name === 'web_search'
+    );
+    expect(hasWebSearchTool).toBe(false);
+  });
+
+  it('keeps servertool web_search injection for non-deepseek search engines', async () => {
+    const chat = buildChatEnvelope();
+    const standardized = chatEnvelopeToStandardized(chat, {
+      adapterContext,
+      endpoint: '/v1/chat/completions',
+      requestId: 'req-sem-iflow-search'
+    });
+    standardized.messages = [
+      standardized.messages[0],
+      {
+        role: 'user',
+        content: '请联网搜索 RouteCodex 最新版本'
+      }
+    ];
+
+    const result = await runProcessWithRequest(standardized, {
+      __rt: {
+        webSearch: {
+          injectPolicy: 'selective',
+          engines: [
+            {
+              id: 'iflow:web_search',
+              providerKey: 'iflow',
+              default: true
+            }
+          ]
+        }
+      }
+    });
+    const hasWebSearchTool = (result.processedRequest?.tools ?? []).some(
+      (tool) => tool.function?.name === 'web_search'
+    );
+    expect(hasWebSearchTool).toBe(true);
+  });
+
   it('injects continue_execution tool and directive when stopMessage is not active', async () => {
     const chat = buildChatEnvelope();
     const standardized = chatEnvelopeToStandardized(chat, {

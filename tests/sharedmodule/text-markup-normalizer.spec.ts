@@ -170,6 +170,46 @@ tool:exec_command (tool:exec_command)
 `);
   });
 
+  it('harvests noisy marker + trailing text wrapper around JSON tool_calls', () => {
+    const message = {
+      role: 'assistant',
+      content: [
+        '先处理一下：',
+        '',
+        '⏺ {"tool_calls":[{"name":"shell_command","input":{"command":"bd --no-db ready"}}]}',
+        '',
+        '✻ Baked for 12s'
+      ].join('\n')
+    };
+
+    const normalized = normalizeAssistantTextToToolCalls(message);
+    const toolCalls = Array.isArray((normalized as any).tool_calls) ? (normalized as any).tool_calls : [];
+    expect(toolCalls.length).toBe(1);
+    expect(toolCalls[0]?.function?.name).toBe('exec_command');
+    const args = JSON.parse(String(toolCalls[0]?.function?.arguments || '{}'));
+    expect(args.cmd).toBe('bd --no-db ready');
+    expect((normalized as any).content).toBe('');
+  });
+
+  it('does not harvest JSON tool_calls embedded inside quote envelope', () => {
+    const message = {
+      role: 'assistant',
+      content: [
+        '<quote>',
+        '不要废话',
+        '',
+        '⏺ {"tool_calls":[{"name":"shell_command","input":{"command":"bd --no-db list --status in_progress"}}]}',
+        '</quote>'
+      ].join('\n')
+    };
+
+    const normalized = normalizeAssistantTextToToolCalls(message);
+    const toolCalls = Array.isArray((normalized as any).tool_calls) ? (normalized as any).tool_calls : [];
+    expect(toolCalls.length).toBe(0);
+    expect((normalized as any).content).toContain('<quote>');
+    expect((normalized as any).content).toContain('tool_calls');
+  });
+
   it('harvests plain Begin/End Patch transcript into apply_patch tool_calls', () => {
     const message = {
       role: 'assistant',

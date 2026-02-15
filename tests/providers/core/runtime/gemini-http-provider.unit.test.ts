@@ -35,6 +35,26 @@ describe('GeminiHttpProvider auth validation', () => {
 });
 
 describe('GeminiHttpProvider antigravity compat', () => {
+  test('keeps antigravity model id unchanged at transport layer', async () => {
+    const cfg: OpenAIStandardConfig = {
+      ...oauthConfig,
+      config: {
+        ...(oauthConfig.config as any),
+        providerId: 'antigravity'
+      }
+    } as unknown as OpenAIStandardConfig;
+
+    const provider = new GeminiHttpProvider(cfg, emptyDeps);
+    const model = 'gemini-3-pro-low-online';
+    const processed = await (provider as any).preprocessRequest({
+      model,
+      contents: [{ role: 'user', parts: [{ text: 'search web' }] }],
+      stream: true
+    });
+
+    expect((processed as any).model).toBe(model);
+  });
+
   test('derives antigravitySessionId from first user message (ignores metadata.sessionId)', async () => {
     await warmupAntigravitySessionSignatureModule();
     resetAntigravitySessionSignatureCachesForTests();

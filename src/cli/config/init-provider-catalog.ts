@@ -80,7 +80,9 @@ export function getInitProviderCatalog(): InitProviderTemplate[] {
         },
         models: {
           'deepseek-chat': { supportsStreaming: true },
-          'deepseek-reasoner': { supportsStreaming: true }
+          'deepseek-reasoner': { supportsStreaming: true },
+          'deepseek-chat-search': { supportsStreaming: true },
+          'deepseek-reasoner-search': { supportsStreaming: true }
         }
       },
       defaultModel: 'deepseek-chat'

@@ -73,9 +73,26 @@ describe('provider family profile registry', () => {
         metadata: { iflowWebSearch: true, entryEndpoint: '/v1/messages' },
         data: { query: 'legacy-shape' }
       } as any,
-      defaultBody: { model: 'minimax-m2.5', messages: [{ role: 'user', content: 'hi' }] } as any
+      defaultBody: { model: 'minimax-m2.5', max_tokens: 32000, messages: [{ role: 'user', content: 'hi' }] } as any
     });
-    expect(bodyFromDefault).toEqual({ model: 'minimax-m2.5', messages: [{ role: 'user', content: 'hi' }] });
+    expect(bodyFromDefault).toEqual({
+      model: 'minimax-m2.5',
+      max_tokens: 8192,
+      messages: [{ role: 'user', content: 'hi' }]
+    });
+
+    const bodyFromDefaultNonMinimax = profile?.buildRequestBody?.({
+      request: {
+        metadata: { iflowWebSearch: true, entryEndpoint: '/v1/messages' },
+        data: { query: 'legacy-shape' }
+      } as any,
+      defaultBody: { model: 'kimi-k2.5', max_tokens: 32000, messages: [{ role: 'user', content: 'hi' }] } as any
+    });
+    expect(bodyFromDefaultNonMinimax).toEqual({
+      model: 'kimi-k2.5',
+      max_tokens: 32000,
+      messages: [{ role: 'user', content: 'hi' }]
+    });
   });
 
   test('iflow profile user-agent policy keeps config/service priority', () => {
@@ -289,6 +306,15 @@ describe('provider family profile registry', () => {
         expect(adjusted?.originator).toBeUndefined();
         expect(adjusted?.requestId).toBe('agent-123');
         expect(adjusted?.requestType).toBe('image_gen');
+
+        const adjustedWebSearch = profile?.applyRequestHeaders?.({
+          headers: {},
+          request: {
+            model: 'gemini-3-pro-high-online',
+            tools: [{ function: { name: 'web_search' } }]
+          } as any
+        });
+        expect(adjustedWebSearch?.requestType).toBe('web_search');
 
         const streamHeaders = profile?.applyStreamModeHeaders?.({
           headers: { Accept: 'text/event-stream' },

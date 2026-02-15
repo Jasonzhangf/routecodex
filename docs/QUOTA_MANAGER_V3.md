@@ -52,3 +52,6 @@ You can set the default daily reset time used for **HTTP 402 without upstream `r
 ## Persistence
 - Core `QuotaManager` persists via host `QuotaStore` at `~/.routecodex/quota/quota-manager.json`.
 - Legacy fallback migration reads `~/.routecodex/quota/provider-quota.json` when the new snapshot is missing.
+- If both snapshots are missing, or quota-store save fails, host treats quota persistence as degraded:
+  - it does **not** write back into user config;
+  - it proactively clears Antigravity session alias pins (unbind safety) and logs a warning so routing can rebind on next success.

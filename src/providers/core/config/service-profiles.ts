@@ -105,7 +105,7 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
   },
   'gemini-cli': {
     defaultBaseUrl: 'https://cloudcode-pa.googleapis.com',
-    defaultEndpoint: '/models:generateContent',
+    defaultEndpoint: '/v1internal:generateContent',
     defaultModel: 'gemini-2.5-flash-lite',
     requiredAuth: ['oauth'],
     optionalAuth: [],

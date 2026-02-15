@@ -1568,7 +1568,7 @@ describe('stop_message_auto servertool', () => {
         expect(appendUserText?.text).toContain('阶段A：先看 BD 状态');
       } else {
         expect(appendUserText?.text).toContain('检测到当前任务可继续，请直接推进工程动作');
-        expect(appendUserText?.text).toContain('不要自行用 bd ready/list 选择任务');
+        expect(appendUserText?.text).toContain('请直接执行该任务，优先推进实现、修复与验证');
       }
       expect(persisted?.state?.stopMessageObservationStableCount).toBe(0);
     } finally {

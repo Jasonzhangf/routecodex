@@ -20,6 +20,7 @@ import {
   lookupAntigravitySessionSignatureEntry
 } from '../../../modules/llmswitch/bridge.js';
 import { GeminiProtocolClient } from '../../../client/gemini/gemini-protocol-client.js';
+import { resolveAntigravityRequestTypeFromPayload } from './antigravity-request-type.js';
 
 type DataEnvelope = UnknownObject & { data?: UnknownObject };
 
@@ -211,8 +212,7 @@ export class GeminiHttpProvider extends HttpTransportProvider {
         record.userAgent = 'antigravity';
       }
       if (typeof record.requestType !== 'string' || !record.requestType.trim()) {
-        const hasImageAttachment = metadata && (metadata.hasImageAttachment === true || metadata.hasImageAttachment === 'true');
-        record.requestType = hasImageAttachment ? 'image_gen' : 'agent';
+        record.requestType = resolveAntigravityRequestTypeFromPayload(target);
       }
     } else {
       delete (record as { userAgent?: unknown }).userAgent;

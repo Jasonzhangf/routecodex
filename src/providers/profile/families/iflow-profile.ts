@@ -67,6 +67,29 @@ function shouldUseLegacyIflowWebSearchTransport(metadata?: UnknownRecord): boole
   return true;
 }
 
+function isMinimaxModel(model: unknown): boolean {
+  return typeof model === 'string' && model.trim().toLowerCase().startsWith('minimax-');
+}
+
+function clampIflowWebSearchMaxTokensForMinimax(body: UnknownRecord): void {
+  if (!isMinimaxModel(body.model)) {
+    return;
+  }
+
+  const value = body.max_tokens;
+  if (typeof value === 'number' && Number.isFinite(value) && value > 8192) {
+    body.max_tokens = 8192;
+    return;
+  }
+
+  if (typeof value === 'string') {
+    const parsed = Number(value.trim());
+    if (Number.isFinite(parsed) && parsed > 8192) {
+      body.max_tokens = 8192;
+    }
+  }
+}
+
 function normalizeHeaderKey(value: string): string {
   return value.replace(/[\s_-]+/g, '');
 }
@@ -238,7 +261,15 @@ export const iflowFamilyProfile: ProviderFamilyProfile = {
     }
     const metadata = getMetadata(input.request);
     if (!shouldUseLegacyIflowWebSearchTransport(metadata)) {
-      return isRecord(input.defaultBody) ? input.defaultBody : undefined;
+      if (!isRecord(input.defaultBody)) {
+        return undefined;
+      }
+      const body = { ...input.defaultBody };
+      delete body.metadata;
+      delete body.iflowWebSearch;
+      delete body.entryEndpoint;
+      clampIflowWebSearchMaxTokensForMinimax(body);
+      return body;
     }
 
     const sourceBody =

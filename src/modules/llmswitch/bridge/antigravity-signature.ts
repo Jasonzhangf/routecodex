@@ -12,6 +12,7 @@ type AntigravitySessionSignatureModule = {
   getAntigravityLatestSignatureSessionIdForAlias?: (aliasKey: string, options?: { hydrate?: boolean }) => string | undefined;
   lookupAntigravitySessionSignatureEntry?: (aliasKey: string, sessionId: string, options?: { hydrate?: boolean }) => unknown;
   invalidateAntigravitySessionSignature?: (aliasKey: string, sessionId: string) => void;
+  clearAntigravitySessionAliasPins?: (options?: { hydrate?: boolean }) => { clearedBySession: number; clearedByAlias: number };
   resetAntigravitySessionSignatureCachesForTests?: () => void;
   configureAntigravitySessionSignaturePersistence?: (input: { stateDir: string; fileName?: string } | null) => void;
   flushAntigravitySessionSignaturePersistenceSync?: () => void;
@@ -139,6 +140,29 @@ export function invalidateAntigravitySessionSignature(aliasKey: string, sessionI
     fn(aliasKey, sessionId);
   } catch {
     // best-effort only
+  }
+}
+
+export function clearAntigravitySessionAliasPins(options?: { hydrate?: boolean }): {
+  clearedBySession: number;
+  clearedByAlias: number;
+} {
+  const mod = loadAntigravitySignatureModule();
+  const fn = mod?.clearAntigravitySessionAliasPins;
+  if (typeof fn !== 'function') {
+    return { clearedBySession: 0, clearedByAlias: 0 };
+  }
+  try {
+    const out = fn(options);
+    const clearedBySession = typeof out?.clearedBySession === 'number' && Number.isFinite(out.clearedBySession)
+      ? Math.max(0, Math.floor(out.clearedBySession))
+      : 0;
+    const clearedByAlias = typeof out?.clearedByAlias === 'number' && Number.isFinite(out.clearedByAlias)
+      ? Math.max(0, Math.floor(out.clearedByAlias))
+      : 0;
+    return { clearedBySession, clearedByAlias };
+  } catch {
+    return { clearedBySession: 0, clearedByAlias: 0 };
   }
 }
 
