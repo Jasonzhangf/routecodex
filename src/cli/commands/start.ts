@@ -1,7 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { homedir, tmpdir } from 'node:os';
-import type { ChildProcess, SpawnOptions } from 'node:child_process';
 import type { Command } from 'commander';
 
 import { API_PATHS, HTTP_PROTOCOLS, LOCAL_HOSTS } from '../../constants/index.js';
@@ -11,149 +10,17 @@ import {
   clearDaemonStopIntent,
   consumeDaemonStopIntent
 } from '../../utils/daemon-stop-intent.js';
+import {
+  buildStartCommandArgs,
+  isDaemonSupervisorProcess,
+  normalizeRunMode,
+  parseBoolish,
+  resolveDaemonRestartDelayMs,
+  resolveReleaseDaemonEnabled
+} from './start-utils.js';
+import type { StartCommandContext, StartCommandOptions } from './start-types.js';
 
-type Spinner = {
-  start(text?: string): Spinner;
-  succeed(text?: string): void;
-  fail(text?: string): void;
-  warn(text?: string): void;
-  info(text?: string): void;
-  stop(): void;
-  text: string;
-};
-
-type LoggerLike = {
-  info: (msg: string) => void;
-  warning: (msg: string) => void;
-  success: (msg: string) => void;
-  error: (msg: string) => void;
-};
-
-export type StartCommandOptions = {
-  config?: string;
-  port?: string;
-  mode?: string;
-  quotaRouting?: unknown;
-  logLevel?: string;
-  codex?: boolean;
-  claude?: boolean;
-  ua?: string;
-  snap?: boolean;
-  snapOff?: boolean;
-  verboseErrors?: boolean;
-  quietErrors?: boolean;
-  restart?: boolean;
-  exclusive?: boolean;
-};
-
-export type StartCommandContext = {
-  isDevPackage: boolean;
-  isWindows: boolean;
-  defaultDevPort: number;
-  nodeBin: string;
-  createSpinner: (text: string) => Promise<Spinner>;
-  logger: LoggerLike;
-  env: NodeJS.ProcessEnv;
-  fsImpl?: typeof fs;
-  pathImpl?: typeof path;
-  homedir?: () => string;
-  tmpdir?: () => string;
-  sleep: (ms: number) => Promise<void>;
-  ensureLocalTokenPortalEnv: () => Promise<unknown>;
-  ensureTokenDaemonAutoStart: () => Promise<void>;
-  stopTokenDaemonIfRunning?: () => Promise<void>;
-  ensurePortAvailable: (port: number, spinner: Spinner, opts?: { restart?: boolean }) => Promise<void>;
-  findListeningPids: (port: number) => number[];
-  killPidBestEffort: (pid: number, opts: { force: boolean }) => void;
-  getModulesConfigPath: () => string;
-  resolveCliEntryPath?: () => string;
-  resolveServerEntryPath: () => string;
-  spawn: (command: string, args: string[], options: SpawnOptions) => ChildProcess;
-  fetch: typeof fetch;
-  setupKeypress: (onInterrupt: () => void) => () => void;
-  waitForever: () => Promise<void>;
-  onSignal?: (signal: NodeJS.Signals, cb: () => void) => void;
-  exit: (code: number) => never;
-};
-
-function parseBoolish(value: unknown): boolean | undefined {
-  if (typeof value !== 'string') {return undefined;}
-  const normalized = value.trim().toLowerCase();
-  if (!normalized) {return undefined;}
-  if (['1', 'true', 'yes', 'on', 'enable', 'enabled'].includes(normalized)) {return true;}
-  if (['0', 'false', 'no', 'off', 'disable', 'disabled'].includes(normalized)) {return false;}
-  return undefined;
-}
-
-type RccRunMode = 'router' | 'analysis' | 'server';
-
-function normalizeRunMode(value: unknown): RccRunMode | null {
-  if (typeof value !== 'string') {
-    return null;
-  }
-  const normalized = value.trim().toLowerCase();
-  if (!normalized) {
-    return null;
-  }
-  if (normalized === 'router' || normalized === 'analysis' || normalized === 'server') {
-    return normalized;
-  }
-  return null;
-}
-
-function resolveReleaseDaemonEnabled(env: NodeJS.ProcessEnv): boolean {
-  const raw = String(
-    env.ROUTECODEX_START_DAEMON
-      ?? env.RCC_START_DAEMON
-      ?? '1'
-  )
-    .trim()
-    .toLowerCase();
-  if (['0', 'false', 'no', 'off'].includes(raw)) {
-    return false;
-  }
-  return true;
-}
-
-function isDaemonSupervisorProcess(env: NodeJS.ProcessEnv): boolean {
-  const raw = String(env.ROUTECODEX_DAEMON_SUPERVISOR ?? '').trim().toLowerCase();
-  return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
-}
-
-function appendFlag(args: string[], enabled: boolean, flag: string): void {
-  if (enabled) {
-    args.push(flag);
-  }
-}
-
-function buildStartCommandArgs(options: StartCommandOptions, configPath: string, runMode: RccRunMode): string[] {
-  const args: string[] = ['start', '--config', configPath, '--mode', runMode];
-  if (typeof options.logLevel === 'string' && options.logLevel.trim()) {
-    args.push('--log-level', options.logLevel.trim());
-  }
-  if (typeof options.ua === 'string' && options.ua.trim()) {
-    args.push('--ua', options.ua.trim());
-  }
-  if (typeof options.quotaRouting === 'string' && options.quotaRouting.trim()) {
-    args.push('--quota-routing', options.quotaRouting.trim());
-  }
-  appendFlag(args, options.codex === true, '--codex');
-  appendFlag(args, options.claude === true, '--claude');
-  appendFlag(args, options.snap === true, '--snap');
-  appendFlag(args, options.snapOff === true, '--snap-off');
-  appendFlag(args, options.verboseErrors === true, '--verbose-errors');
-  appendFlag(args, options.quietErrors === true, '--quiet-errors');
-  return args;
-}
-
-function resolveDaemonRestartDelayMs(env: NodeJS.ProcessEnv): number {
-  const raw = String(env.ROUTECODEX_DAEMON_RESTART_DELAY_MS ?? env.RCC_DAEMON_RESTART_DELAY_MS ?? '').trim();
-  const parsed = Number.parseInt(raw, 10);
-  if (!Number.isFinite(parsed) || parsed < 0) {
-    return 1200;
-  }
-  return Math.min(60_000, parsed);
-}
+export type { StartCommandContext, StartCommandOptions } from './start-types.js';
 
 export function createStartCommand(program: Command, ctx: StartCommandContext): void {
   program
