@@ -48,7 +48,7 @@ describe('servertool auto hook trace', () => {
     expect(
       traces.some(
         (event) =>
-          event.hookId === 'recursive_detection_guard' &&
+          event.hookId === 'stop_message_auto' &&
           event.result === 'miss' &&
           event.reason === 'predicate_false'
       )
