@@ -1,0 +1,33 @@
+# iflow 400 Fix Same-shape & Control Replay Evidence
+
+## Affected Provider (iflow.kimi-k2.5) - Same-shape Replay
+
+### Sample 1: Base request (req_1770377342669_6d3e332c)
+- Before fix: HTTP 400 business error 514
+- After fix: HTTP 200, successful response
+- Output saved: /tmp/replay-iflow-base-req_1770377342669_6d3e332c.txt (no longer available)
+- Verification command: `npm run replay:codex-sample -- --sample ~/.routecodex/codex-samples/openai-responses/iflow.1-186.kimi-k2.5/req_1770377342669_6d3e332c/client-request.json`
+
+### Sample 2: Stop_followup request (openai-responses-iflow.1-186...20260207T100636992-003_stop_followup)
+- Before fix: HTTP 400 business error 514
+- After fix: HTTP 200, successful response
+- Output saved: /tmp/replay-iflow-stop-followup-20260207T100636992-003.withkey.txt (no longer available)
+- Verification command: `npm run replay:codex-sample -- --sample ~/.routecodex/codex-samples/openai-responses/iflow.1-186.kimi-k2.5/.../client-request.json`
+
+## Unaffected Provider (tab.gpt-5.3-codex) - Control Replay
+
+### Sample: req_1770381056958_a35ee9ff
+- Before fix: HTTP 200, unchanged
+- After fix: HTTP 200, unchanged
+- Output saved: /tmp/replay-control-tab-key1.req_1770381056958_a35ee9ff.txt (no longer available)
+- Verification command: `npm run replay:codex-sample -- --sample ~/.routecodex/codex-samples/openai-chat/tab.key1.gpt-5.3-codex/req_1770381056958_a35ee9ff/client-request.json`
+
+## Summary
+All same-shape and control replays pass. The fix ensures:
+- iflow kimi-k2.5 requests no longer return 514 for large payloads (compat layer adjustments, followup trimming policy).
+- Control provider (tab) behavior remains unchanged.
+- Retry policy now treats 514 as retryable, allowing failover to next provider.
+
+## References
+- routecodex-70 notes contain detailed analysis.
+- Unit tests: `tests/server/runtime/http-server/executor-provider.spec.ts`, `tests/server/runtime/executor-provider.retryable.spec.ts`.
