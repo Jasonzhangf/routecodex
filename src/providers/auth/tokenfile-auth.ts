@@ -8,7 +8,6 @@
  * 更新：支持iFlow的API Key模式 - 优先使用api_key字段，回退到access_token
  */
 
-import fsAsync from 'fs/promises';
 import fs from 'fs';
 import path from 'path';
 import type { IAuthProvider, AuthStatus } from './auth-interface.js';
@@ -227,18 +226,16 @@ export class TokenFileAuthProvider implements IAuthProvider {
 
   private ensureTokenFileExists(candidatePath: string): string {
     const filePath = this.expandHome(candidatePath);
-    // 异步创建文件，不阻塞主流程
-    void (async () => {
-      try {
-        const exists = await fsAsync.access(filePath).then(() => true).catch(() => false);
-        if (!exists) {
-          await fsAsync.mkdir(path.dirname(filePath), { recursive: true });
-          await fsAsync.writeFile(filePath, '{}\n', 'utf8');
-        }
-      } catch {
-        // best-effort bootstrap: keep original flow if file creation fails
+    // Create the placeholder token file eagerly so initialize() can deterministically
+    // observe the configured path in the same call stack.
+    try {
+      if (!fs.existsSync(filePath)) {
+        fs.mkdirSync(path.dirname(filePath), { recursive: true });
+        fs.writeFileSync(filePath, '{}\n', 'utf8');
       }
-    })();
+    } catch {
+      // best-effort bootstrap: keep original flow if file creation fails
+    }
     return filePath;
   }
 
