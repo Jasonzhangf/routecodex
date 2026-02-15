@@ -5,11 +5,9 @@ import { PassThrough } from 'node:stream';
 import { writeSnapshotViaHooks } from '../../../modules/llmswitch/bridge.js';
 import { buildInfo } from '../../../build-info.js';
 import { runtimeFlags } from '../../../runtime/runtime-flags.js';
+import { writeErrorsampleJson } from '../../../utils/errorsamples.js';
 import {
-  bufferProviderSnapshotForErrorFlush,
   resetProviderSnapshotErrorBufferForTests,
-  shouldFlushSnapshotBuffer,
-  takeBufferedProviderSnapshots
 } from './snapshot-writer-buffer.js';
 import type { ProviderSnapshotPersistInput } from './snapshot-writer-buffer.js';
 
@@ -175,16 +173,6 @@ async function persistProviderSnapshot(input: ProviderSnapshotPersistInput): Pro
   }
 }
 
-async function flushBufferedProviderSnapshots(groupRequestId: string): Promise<void> {
-  const batch = takeBufferedProviderSnapshots(groupRequestId);
-  if (batch.length === 0) {
-    return;
-  }
-  for (const entry of batch) {
-    await persistProviderSnapshot(entry);
-  }
-}
-
 function buildProviderSnapshotPersistInput(options: ProviderSnapshotWriteOptions): ProviderSnapshotPersistInput {
   const { endpoint, folder } = resolveEndpoint(options.entryEndpoint);
   const stage = options.phase;
@@ -211,13 +199,37 @@ export function __resetProviderSnapshotErrorBufferForTests(): void {
   resetProviderSnapshotErrorBufferForTests();
 }
 
+function isErrorPhase(phase: string): boolean {
+  return String(phase || '').trim().toLowerCase().includes('error');
+}
+
+function writeProviderErrorsample(snapshot: ProviderSnapshotPersistInput): void {
+  void writeErrorsampleJson({
+    group: 'provider-error',
+    kind: snapshot.stage,
+    payload: {
+      kind: 'provider_runtime_error',
+      timestamp: new Date().toISOString(),
+      endpoint: snapshot.endpoint,
+      stage: snapshot.stage,
+      requestId: snapshot.requestId,
+      groupRequestId: snapshot.groupRequestId,
+      providerKey: snapshot.providerToken || undefined,
+      versions: {
+        routecodex: buildInfo.version,
+        node: process.version
+      },
+      observation: snapshot.payload
+    }
+  }).catch(() => {});
+}
+
 export async function writeProviderSnapshot(options: ProviderSnapshotWriteOptions): Promise<void> {
   const snapshot = buildProviderSnapshotPersistInput(options);
 
   if (!runtimeFlags.snapshotsEnabled) {
-    bufferProviderSnapshotForErrorFlush(snapshot);
-    if (shouldFlushSnapshotBuffer(snapshot.stage)) {
-      await flushBufferedProviderSnapshots(snapshot.groupRequestId);
+    if (isErrorPhase(snapshot.stage)) {
+      writeProviderErrorsample(snapshot);
     }
     return;
   }

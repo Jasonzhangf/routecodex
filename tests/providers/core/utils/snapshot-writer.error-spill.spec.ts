@@ -29,12 +29,15 @@ async function listFilesRecursively(root: string): Promise<string[]> {
 }
 
 describe('snapshot writer error spill in release mode', () => {
-  it('buffers provider snapshots in memory and spills them on provider-error', async () => {
+  it('does not write codex snapshots when disabled, and writes provider-error to errorsamples', async () => {
     const previousSnapshotFlag = runtimeFlags.snapshotsEnabled;
     const previousSnapshotDir = process.env.ROUTECODEX_SNAPSHOT_DIR;
+    const previousErrorsamplesDir = process.env.ROUTECODEX_ERRORSAMPLES_DIR;
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-snapshot-error-spill-'));
+    const errorsDir = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-errorsamples-provider-'));
 
     process.env.ROUTECODEX_SNAPSHOT_DIR = tempDir;
+    process.env.ROUTECODEX_ERRORSAMPLES_DIR = errorsDir;
     setRuntimeFlag('snapshotsEnabled', false);
     __resetProviderSnapshotErrorBufferForTests();
 
@@ -71,9 +74,10 @@ describe('snapshot writer error spill in release mode', () => {
       });
 
       const files = await listFilesRecursively(tempDir);
-      expect(files.some((file) => /provider-request(_\d+)?\.json$/.test(file))).toBe(true);
-      expect(files.some((file) => /provider-response(_\d+)?\.json$/.test(file))).toBe(true);
-      expect(files.some((file) => /provider-error(_\d+)?\.json$/.test(file))).toBe(true);
+      expect(files).toHaveLength(0);
+
+      const errorSampleFiles = await listFilesRecursively(errorsDir);
+      expect(errorSampleFiles.some((file) => file.includes('/provider-error/'))).toBe(true);
     } finally {
       __resetProviderSnapshotErrorBufferForTests();
       setRuntimeFlag('snapshotsEnabled', previousSnapshotFlag);
@@ -82,7 +86,13 @@ describe('snapshot writer error spill in release mode', () => {
       } else {
         process.env.ROUTECODEX_SNAPSHOT_DIR = previousSnapshotDir;
       }
+      if (previousErrorsamplesDir === undefined) {
+        delete process.env.ROUTECODEX_ERRORSAMPLES_DIR;
+      } else {
+        process.env.ROUTECODEX_ERRORSAMPLES_DIR = previousErrorsamplesDir;
+      }
       await fs.rm(tempDir, { recursive: true, force: true });
+      await fs.rm(errorsDir, { recursive: true, force: true });
     }
   });
 });

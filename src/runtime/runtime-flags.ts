@@ -16,7 +16,7 @@ function resolveBoolFromEnv(value: string | undefined, fallback: boolean): boole
   return fallback;
 }
 
-const defaultSnapshot = buildInfo.mode !== 'release';
+const defaultSnapshot = false;
 const defaultVerbose = buildInfo.mode !== 'release';
 
 const snapshotsEnabled = resolveBoolFromEnv(
