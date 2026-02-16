@@ -880,7 +880,7 @@ async function maybeMarkTokenFileNoRefresh(filePath: string): Promise<void> {
 function defaultTokenFilePath(provider: OAuthProviderId): string {
   const home = homedir();
   if (provider === 'iflow') {
-    return path.join(home, '.iflow', 'oauth_creds.json');
+    return path.join(home, '.routecodex', 'auth', 'iflow-oauth-1-default.json');
   }
   if (provider === 'qwen') {
     return path.join(home, '.routecodex', 'auth', 'qwen-oauth-1-default.json');

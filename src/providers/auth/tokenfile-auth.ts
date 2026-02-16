@@ -288,16 +288,17 @@ export class TokenFileAuthProvider implements IAuthProvider {
 
     const providerId = this.getConfiguredProviderId();
     if (providerId === 'iflow') {
-      // iFlow CLI stores an already-usable API key in ~/.iflow/settings.json (field: apiKey).
-      // Prefer it and DO NOT fall back to access_token-only files (iFlow business calls require apiKey).
-      const home = process.env.HOME || '';
-      const settings = this.pickTokenFileIfItContainsApiKey(path.join(home, '.iflow', 'settings.json'));
-      if (settings) {
-        return settings;
+      // RouteCodex iFlow auth only accepts RouteCodex-managed OAuth files.
+      const latest = pickLatestTokenFile({ providerPrefix: 'iflow' });
+      if (latest) {
+        const latestWithApiKey = this.pickTokenFileIfItContainsApiKey(latest);
+        if (latestWithApiKey) {
+          return latestWithApiKey;
+        }
       }
-      const creds = this.pickTokenFileIfItContainsApiKey(path.join(home, '.iflow', 'oauth_creds.json'));
-      if (creds) {
-        return creds;
+      const pinned = this.pickTokenFileIfItContainsApiKey(path.join(resolveAuthDir(), 'iflow-oauth-1-default.json'));
+      if (pinned) {
+        return pinned;
       }
       return null;
     }

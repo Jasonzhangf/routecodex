@@ -18,8 +18,28 @@ async function safeInteractiveRefresh(selector: string, options: { force?: boole
   }
 }
 
+function resolveAutoModeByProvider(provider?: string | null): 'iflow' | 'gemini' | 'qwen' | 'antigravity' | null {
+  const raw = String(provider || '').trim().toLowerCase();
+  if (!raw) {
+    return null;
+  }
+  if (raw === 'iflow') {
+    return 'iflow';
+  }
+  if (raw === 'gemini-cli') {
+    return 'gemini';
+  }
+  if (raw === 'qwen') {
+    return 'qwen';
+  }
+  if (raw === 'antigravity') {
+    return 'antigravity';
+  }
+  return null;
+}
+
 export function createOauthCommand(): Command {
-  const cmd = new Command('oauth');
+  const cmd = new Command('oauth').enablePositionalOptions();
 
   cmd
     .description('OAuth tools: refresh token or validate tokens without opening a browser')
@@ -54,15 +74,20 @@ export function createOauthCommand(): Command {
       delete process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
       delete process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM;
       delete process.env.ROUTECODEX_CAMOUFOX_ACCOUNT_TEXT;
+      process.env.ROUTECODEX_OAUTH_BROWSER = 'camoufox';
       if (options?.headful) {
         process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = '1';
-        process.env.ROUTECODEX_OAUTH_BROWSER = 'camoufox';
       }
       try {
-        // UX convention: `oauth <selector>` means "start manual auth now".
+        const token = await TokenDaemon.findTokenBySelector(first).catch(() => null);
+        const autoMode = resolveAutoModeByProvider(token?.provider);
+        if (autoMode) {
+          process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE = autoMode;
+          process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM = '1';
+        }
         // Keep legacy `--soft` for users who want token-valid short-circuit behavior.
         const forceReauth = options?.soft ? Boolean(options?.force) : true;
-        await safeInteractiveRefresh(first, { force: forceReauth, mode: 'manual' });
+        await safeInteractiveRefresh(first, { force: forceReauth, mode: autoMode ? 'auto' : 'manual' });
       } finally {
         if (prevDevMode === undefined) {
           delete process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;

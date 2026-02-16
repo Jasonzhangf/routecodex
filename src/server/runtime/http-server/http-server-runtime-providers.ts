@@ -27,6 +27,14 @@ type LegacyAuthFields = ProviderRuntimeProfile['auth'] & {
   account_alias?: unknown;
 };
 
+function resolveOAuthProviderIdFromType(rawType?: string): string | undefined {
+  if (typeof rawType !== 'string') {
+    return undefined;
+  }
+  const match = rawType.trim().toLowerCase().match(/^([a-z0-9._-]+)-oauth$/);
+  return match ? match[1] : undefined;
+}
+
 function isCredentialMissingInitError(error: unknown): { missing: boolean; reason: string } {
   const message = error instanceof Error ? error.message : String(error ?? 'unknown');
   const normalized = message.toLowerCase();
@@ -386,8 +394,11 @@ export async function resolveRuntimeAuth(server: any, runtime: ProviderRuntimePr
     type: 'oauth',
     secretRef: auth.secretRef,
     value: auth.value,
-    oauthProviderId: auth.oauthProviderId,
-    rawType: auth.rawType,
+    oauthProviderId:
+      pickString(auth.oauthProviderId) ??
+      resolveOAuthProviderIdFromType(pickString(auth.rawType, auth.type)) ??
+      pickString(runtime.providerId, runtime.providerFamily),
+    rawType: pickString(auth.rawType, auth.type),
     tokenFile: pickString(authRecord.tokenFile, authRecord.token_file),
     tokenUrl: pickString(authRecord.tokenUrl, authRecord.token_url),
     deviceCodeUrl: pickString(authRecord.deviceCodeUrl, authRecord.device_code_url),

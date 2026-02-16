@@ -29,12 +29,12 @@ export function evaluateTokenState(token: StoredOAuthToken | null, providerType:
 
   const pt = providerType.toLowerCase();
   if (pt === 'iflow') {
-    validAccess = hasApiKey || (!isExpiredOrNear && hasAccess);
+    validAccess = !isExpiredOrNear && hasAccess;
   } else if (pt === 'qwen') {
     // Qwen: when stable api_key is obtained, skip refresh/reauth; otherwise rely on access_token expiry
-    validAccess = hasStableQwenApiKey(token) || (!isExpiredOrNear && (hasAccess || hasApiKey));
+    validAccess = hasStableQwenApiKey(token) || (!isExpiredOrNear && hasAccess);
   } else {
-    validAccess = (hasApiKey || hasAccess) && !isExpiredOrNear;
+    validAccess = !isExpiredOrNear && hasAccess;
   }
 
   return { hasApiKey, hasAccess, expiresAt, isExpiredOrNear, validAccess };

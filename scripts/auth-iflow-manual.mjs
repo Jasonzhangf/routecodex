@@ -2,7 +2,6 @@
 import os from 'os';
 import path from 'path';
 import fs from 'fs/promises';
-import { createProviderOAuthStrategy } from '../dist/providers/core/config/provider-oauth-configs.js';
 
 async function resolveIflowTokenPath() {
   const envFile = process.env.IFLOW_TOKEN_FILE;
@@ -41,28 +40,19 @@ async function run() {
   await fs.mkdir(path.dirname(tokenPath), { recursive: true });
   try { await fs.access(tokenPath); } catch { await fs.writeFile(tokenPath, '{}', 'utf-8'); }
   
-  // Use device code flow but let user open the URL manually
-  const strategy = createProviderOAuthStrategy('iflow', {
-    flowType: 'device_code',
-    endpoints: {
-      deviceCodeUrl: 'https://iflow.cn/oauth/device/code',
-      tokenUrl: 'https://iflow.cn/oauth/token',
-      userInfoUrl: 'https://iflow.cn/api/oauth/getUserInfo'
+  // Route through the same OAuth lifecycle as runtime to avoid stale per-script endpoint drift.
+  const { ensureValidOAuthToken } = await import('../dist/providers/auth/oauth-lifecycle.js');
+  await ensureValidOAuthToken(
+    'iflow',
+    {
+      type: 'iflow-oauth',
+      tokenFile: tokenPath
     },
-    client: { clientId: '10009311001', scopes: ['openid','profile','email','api'] }
-  }, tokenPath);
-  
-  // Manually trigger device code flow
-  const deviceCodeData = await strategy.initiateDeviceCodeFlow();
-  console.log('Please open this URL in your browser:');
-  console.log(deviceCodeData.verification_uri);
-  console.log('User code:', deviceCodeData.user_code);
-  console.log('Press Enter when you have authorized...');
-  
-  await new Promise(resolve => process.stdin.once('data', resolve));
-  
-  const token = await strategy.pollForToken(deviceCodeData);
-  await strategy.saveToken(token);
+    {
+      forceReauthorize: true,
+      openBrowser: true
+    }
+  );
 
   // clean up duplicate token files for the same sequence
   for (const dup of duplicates) {
@@ -75,7 +65,7 @@ async function run() {
     }
   }
 
-  console.log(`[iflow-manual] Token saved to: ${tokenPath}`);
+  console.log(`[iflow-manual] Token refreshed and saved to: ${tokenPath}`);
 }
 
 run().catch(err => { console.error('[iflow-manual] Error:', err); process.exit(1); });

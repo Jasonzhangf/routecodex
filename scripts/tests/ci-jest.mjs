@@ -69,6 +69,7 @@ const routingInstructionTests = [
   'tests/sharedmodule/virtual-router-hit-log.spec.ts',
   'tests/unified-hub/hub-v1-single-path-imports.spec.ts',
   'tests/unified-hub/policy-errorsample-write.spec.ts',
+  'tests/unified-hub/runtime-error-errorsample-write.spec.ts',
   'tests/unified-hub/policy-observe-shadow.spec.ts',
   'tests/unified-hub/shadow-runtime-compare.errorsamples.spec.ts'
 ];

@@ -408,7 +408,7 @@ export async function interactiveRefresh(selector: string, options: InteractiveR
     const tokenMtimeBefore = await getTokenFileMtime(token.filePath);
     const startedAt = Date.now();
     const raw = await readTokenFile(token.filePath);
-    const state = evaluateTokenState(raw, Date.now());
+    const state = evaluateTokenState(raw, Date.now(), token.provider);
     const valid = state.status === 'valid' || state.status === 'expiring';
     if (valid) {
       await recordManualHistory(token, 'success', startedAt, tokenMtimeBefore);
@@ -589,6 +589,7 @@ export async function interactiveRefresh(selector: string, options: InteractiveR
   const prevCamoufoxAutoMode = process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
   const prevOAuthAutoConfirm = process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM;
   const prevCamoufoxOpenOnly = process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY;
+  const prevOAuthBrowser = process.env.ROUTECODEX_OAUTH_BROWSER;
   try {
     await ensureLocalTokenPortalEnv();
     if (interactionMode === 'manual') {
@@ -653,6 +654,11 @@ export async function interactiveRefresh(selector: string, options: InteractiveR
     } else {
       process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY = prevCamoufoxOpenOnly;
     }
+    if (prevOAuthBrowser === undefined) {
+      delete process.env.ROUTECODEX_OAUTH_BROWSER;
+    } else {
+      process.env.ROUTECODEX_OAUTH_BROWSER = prevOAuthBrowser;
+    }
     await cleanupInteractiveOAuthArtifacts();
   }
 }
@@ -681,7 +687,7 @@ async function validateSingleToken(token: TokenDescriptor): Promise<OAuthValidat
   }
 
   const raw = await readTokenFile(token.filePath);
-  const state = evaluateTokenState(raw, Date.now());
+  const state = evaluateTokenState(raw, Date.now(), token.provider);
   if (token.provider === 'deepseek-account') {
     if (state.status === 'valid' || state.status === 'expiring') {
       return { ...base, status: 'ok' };
@@ -719,7 +725,7 @@ async function validateSingleToken(token: TokenDescriptor): Promise<OAuthValidat
       }
     );
     const refreshed = await readTokenFile(token.filePath);
-    const nextState = evaluateTokenState(refreshed, Date.now());
+    const nextState = evaluateTokenState(refreshed, Date.now(), token.provider);
     if (nextState.status === 'valid' || nextState.status === 'expiring') {
       return { ...base, status: 'ok' };
     }

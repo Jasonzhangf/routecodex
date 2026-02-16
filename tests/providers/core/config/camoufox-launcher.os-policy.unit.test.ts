@@ -1,4 +1,9 @@
-import { applyGoogleLocaleHint, getCamoufoxOsPolicy, resolveCamoufoxLocaleEnv } from '../../../../src/providers/core/config/camoufox-launcher.js';
+import {
+  applyGoogleLocaleHint,
+  getCamoufoxOsPolicy,
+  resolveCamoufoxLocaleEnv,
+  sanitizeCamouConfigForOAuth
+} from '../../../../src/providers/core/config/camoufox-launcher.js';
 
 describe('camoufox-launcher os policy', () => {
   test('never returns linux', () => {
@@ -76,6 +81,47 @@ describe('camoufox-launcher os policy', () => {
         process.env.ROUTECODEX_OAUTH_GOOGLE_HL = prev;
       }
     }
+  });
+
+  test('sanitizes iflow CAMOU_CONFIG_1 by removing timezone (keep fingerprint injection)', () => {
+    const env = {
+      CAMOU_CONFIG_1: JSON.stringify({
+        'navigator.platform': 'MacIntel',
+        timezone: 'America/Los_Angeles',
+        'locale:language': 'en'
+      })
+    };
+    const next = sanitizeCamouConfigForOAuth('iflow', env);
+    const parsed = JSON.parse(String(next.CAMOU_CONFIG_1 || '{}')) as Record<string, unknown>;
+    expect(parsed['navigator.platform']).toBe('MacIntel');
+    expect(parsed['locale:language']).toBe('en');
+    expect(Object.prototype.hasOwnProperty.call(parsed, 'timezone')).toBe(false);
+  });
+
+  test('keeps non-iflow CAMOU_CONFIG_1 unchanged', () => {
+    const env = {
+      CAMOU_CONFIG_1: JSON.stringify({
+        'navigator.platform': 'MacIntel',
+        timezone: 'America/Los_Angeles'
+      })
+    };
+    const next = sanitizeCamouConfigForOAuth('antigravity', env);
+    const parsed = JSON.parse(String(next.CAMOU_CONFIG_1 || '{}')) as Record<string, unknown>;
+    expect(parsed['navigator.platform']).toBe('MacIntel');
+    expect(parsed.timezone).toBe('America/Los_Angeles');
+  });
+
+  test('handles invalid CAMOU_CONFIG_1 payload safely', () => {
+    const env = { CAMOU_CONFIG_1: '{bad-json' };
+    const next = sanitizeCamouConfigForOAuth('iflow', env);
+    expect(next.CAMOU_CONFIG_1).toBe('{bad-json');
+  });
+
+  test('returns empty object when no CAMOU_CONFIG_1 present', () => {
+    const next = sanitizeCamouConfigForOAuth('iflow', {});
+    expect(next).toEqual({});
+    const other = sanitizeCamouConfigForOAuth('iflow', { A: '1' });
+    expect(other).toEqual({ A: '1' });
   });
 
 });

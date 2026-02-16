@@ -112,17 +112,33 @@ export function coerceExpiryTimestampSeconds(token: StoredOAuthToken | null): nu
 }
 
 export function hasNoRefreshFlag(token: StoredOAuthToken | null): boolean {
-  return token?.norefresh === true;
+  if (!token) {
+    return false;
+  }
+  const direct = (token as UnknownObject).norefresh ?? (token as UnknownObject).noRefresh;
+  if (typeof direct === 'boolean') {
+    return direct;
+  }
+  if (typeof direct === 'string') {
+    const normalized = direct.trim().toLowerCase();
+    return normalized === '1' || normalized === 'true' || normalized === 'yes';
+  }
+  return false;
 }
 
 export function evaluateTokenState(token: StoredOAuthToken | null, providerType: string) {
   const hasApiKey = hasApiKeyField(token);
+  const hasStableQwenKey = providerType === 'qwen' ? hasStableQwenApiKey(token) : false;
   const hasAccess = hasAccessToken(token);
   const expiresAt = getExpiresAt(token);
   const isExpired = expiresAt !== null && Date.now() >= expiresAt - 60_000;
   const isNearExpiry = expiresAt !== null && Date.now() >= expiresAt - 300_000;
 
-  const validAccess = hasApiKey || (hasAccess && !isExpired);
+  // qwen: only stable api_key can bypass expiry checks.
+  // iflow and other OAuth providers must rely on non-expired access_token/refresh flow
+  // so expired api_key never short-circuits token refresh/reauth.
+  const apiKeyBypassesExpiry = providerType === 'qwen' && hasStableQwenKey;
+  const validAccess = apiKeyBypassesExpiry || (hasAccess && !isExpired);
   const isExpiredOrNear = isExpired || isNearExpiry;
 
   return {

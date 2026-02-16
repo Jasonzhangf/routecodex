@@ -33,7 +33,8 @@ import {
   isGeminiCliFamily,
   type ExtendedOAuthAuth,
   resolveTokenFilePath,
-  resolveCamoufoxAliasForAuth
+  resolveCamoufoxAliasForAuth,
+  resolveIflowCredentialCandidates
 } from './oauth-lifecycle/path-resolver.js';
 import {
   keyFor,
@@ -84,6 +85,77 @@ type OAuthStrategy = {
 };
 
 const TOKEN_REFRESH_SKEW_MS = 60_000;
+
+type IflowTokenCandidate = {
+  token: StoredOAuthToken;
+  sourcePath: string;
+  expiresAt: number | null;
+};
+
+async function selectBestIflowTokenCandidate(targetTokenFilePath: string): Promise<IflowTokenCandidate | null> {
+  const targetResolved = path.resolve(targetTokenFilePath);
+  const candidates = resolveIflowCredentialCandidates();
+  let best: IflowTokenCandidate | null = null;
+
+  for (const candidatePath of candidates) {
+    if (!candidatePath) {
+      continue;
+    }
+    const resolved = path.resolve(candidatePath);
+    if (resolved === targetResolved) {
+      continue;
+    }
+    const token = await readTokenFromFile(candidatePath);
+    if (!token) {
+      continue;
+    }
+    const state = evaluateTokenState(token, 'iflow');
+    if (!state.validAccess) {
+      continue;
+    }
+    const expiresAt = state.expiresAt ?? null;
+    if (!best) {
+      best = { token, sourcePath: candidatePath, expiresAt };
+      continue;
+    }
+    const bestExpiry = best.expiresAt ?? -1;
+    const currentExpiry = expiresAt ?? -1;
+    if (currentExpiry > bestExpiry) {
+      best = { token, sourcePath: candidatePath, expiresAt };
+    }
+  }
+
+  return best;
+}
+
+async function maybeAdoptIflowExternalToken(
+  strategy: OAuthStrategy,
+  tokenFilePath: string,
+  existingToken: StoredOAuthToken | null
+): Promise<StoredOAuthToken | null> {
+  const currentState = evaluateTokenState(existingToken, 'iflow');
+  if (currentState.validAccess) {
+    return existingToken;
+  }
+  const bestCandidate = await selectBestIflowTokenCandidate(tokenFilePath);
+  if (!bestCandidate) {
+    return existingToken;
+  }
+
+  // Keep per-alias token files in RouteCodex, but adopt fresh credentials from iFlow-native stores when available.
+  const prepared = await prepareTokenForStorage('iflow', tokenFilePath, bestCandidate.token as UnknownObject);
+  if (typeof strategy.saveToken === 'function') {
+    await strategy.saveToken(prepared);
+  } else {
+    await fs.mkdir(path.dirname(tokenFilePath), { recursive: true });
+    await fs.writeFile(tokenFilePath, `${JSON.stringify(prepared, null, 2)}\n`, 'utf8');
+  }
+  const normalized = sanitizeToken(prepared as UnknownObject) ?? bestCandidate.token;
+  logOAuthDebug(
+    `[OAuth] iflow token adopted from ${bestCandidate.sourcePath} -> ${tokenFilePath}`
+  );
+  return normalized;
+}
 
 async function openGoogleAccountVerificationInCamoufox(args: {
   providerType: string;
@@ -264,7 +336,19 @@ async function prepareTokenForStorage(
   if (isGeminiCliFamily(providerType)) {
     return await wrapGeminiCliTokenForStorage(tokenData, tokenFilePath);
   }
- return tokenData;
+  if (providerType === 'iflow') {
+    const token = sanitizeToken(tokenData) ?? (tokenData as StoredOAuthToken);
+    const expiresAt = getExpiresAt(token);
+    if (typeof expiresAt === 'number' && Number.isFinite(expiresAt)) {
+      const expiresAtMs = expiresAt > 10_000_000_000 ? Math.floor(expiresAt) : Math.floor(expiresAt * 1000);
+      return {
+        ...(tokenData as Record<string, unknown>),
+        expires_at: expiresAtMs,
+        expired: new Date(expiresAtMs).toISOString()
+      } as UnknownObject;
+    }
+  }
+  return tokenData;
 }
 
 function logTokenSnapshot(providerType: string, token: StoredOAuthToken | null, endpoints: OAuthEndpoints): void {
@@ -838,8 +922,9 @@ export async function ensureValidOAuthToken(
     return;
   }
 
-  const envAutoOpen = String(process.env.ROUTECODEX_OAUTH_AUTO_OPEN || '1') === '1';
-  const openBrowser = opts.openBrowser ?? envAutoOpen;
+  // Browser-based OAuth must be opt-in by caller.
+  // This prevents server startup / preflight paths from accidentally entering interactive flow.
+  const openBrowser = opts.openBrowser === true;
   const forceReauth =
     opts.forceReauthorize === true || String(process.env.ROUTECODEX_OAUTH_FORCE_REAUTH || '0') === '1';
 
@@ -855,6 +940,9 @@ export async function ensureValidOAuthToken(
     logOAuthSetup(providerType, defaults, overrides, endpoints, client, tokenFilePath, openBrowser, forceReauth);
     const strategy = createStrategy(providerType, overrides, tokenFilePath);
     let token = await readTokenFromFile(tokenFilePath);
+    if (providerType === 'iflow') {
+      token = await maybeAdoptIflowExternalToken(strategy, tokenFilePath, token);
+    }
     const hadExistingTokenFile = token !== null;
 
     // Qwen: ensure api_key is present even when access_token is still valid.

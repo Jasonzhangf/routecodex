@@ -20,7 +20,9 @@ interface AuthCodeTokenResponse {
   refresh_token?: string;
   token_type?: string;
   scope?: string;
-  expires_in: number;
+  expires_in?: number | string;
+  expiresIn?: number | string;
+  expires?: number | string;
   // Provider-specific fields
   resource_url?: string;
   apiKey?: string;
@@ -132,14 +134,7 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
       // 3.2 更新授权URL中的重定向参数（与本地回调服务一致），再打开浏览器
       try {
         const urlObj = new URL(authCodeData.authUrl);
-        const style = authCodeData.flowStyle;
-        if (style === 'web' || style === 'legacy') {
-          // iflow web 登录样式：redirect=<redirectUri> & state=<state>
-          // 由 URLSearchParams 负责一次性编码，避免双重编码；state 保持独立参数
-          urlObj.searchParams.set('redirect', serverResult.redirectUri);
-        } else {
-          urlObj.searchParams.set('redirect_uri', serverResult.redirectUri);
-        }
+        this.applyAuthRedirectParams(urlObj, authCodeData.flowStyle, serverResult.redirectUri, authCodeData.state);
         authCodeData.authUrl = urlObj.toString();
         authCodeData.redirectUri = serverResult.redirectUri;
       } catch { /* ignore */ }
@@ -198,6 +193,9 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
     }
     const styleEnv = (process.env.IFLOW_AUTH_STYLE || '').toLowerCase();
     const style: FlowStyle = isIflowHost
+      // Official iFlow CLI auth URL shape:
+      // redirect=<encoded callback>&state=<state>&client_id=...
+      // In URLSearchParams this corresponds to "web" style (redirect raw + state top-level).
       ? normalizeFlowStyle(styleEnv, 'web')
       : styleEnv === 'legacy'
         ? 'legacy'
@@ -208,12 +206,9 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
       const redirectUri = this.config.client.redirectUri!;
       authUrl.searchParams.set('loginMethod', 'phone');
       authUrl.searchParams.set('type', 'phone');
-      authUrl.searchParams.set('redirect', encodeURIComponent(redirectUri));
+      authUrl.searchParams.set('redirect', redirectUri);
       authUrl.searchParams.set('state', state);
       authUrl.searchParams.set('client_id', this.config.client.clientId);
-      // 可选：保留 PKCE 参数（服务端可能忽略）
-      authUrl.searchParams.set('code_challenge', codeChallenge);
-      authUrl.searchParams.set('code_challenge_method', 'S256');
     } else if (style === 'legacy') {
       // 老式 iflow Web 登录参数（state 融合在 redirect），兼容历史
       const redirectUri = this.config.client.redirectUri!;
@@ -221,8 +216,6 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
       authUrl.searchParams.set('type', 'phone');
       authUrl.searchParams.set('redirect', `${encodeURIComponent(redirectUri)}&state=${state}`);
       authUrl.searchParams.set('client_id', this.config.client.clientId);
-      authUrl.searchParams.set('code_challenge', codeChallenge);
-      authUrl.searchParams.set('code_challenge_method', 'S256');
     } else {
       // 标准 OAuth2 授权码样式
       authUrl.searchParams.set('response_type', 'code');
@@ -263,7 +256,8 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
     const http = await import('http');
     const url = await import('url');
 
-    // 固定回调路径为 /oauth2callback，但监听地址放宽为所有本地地址，避免 IPv4/IPv6 解析差异导致浏览器可访问但 Node 端口未监听
+    // 回调路径固定为 /oauth2callback；监听地址放宽为所有本地地址，
+    // 避免 localhost 在 IPv4/IPv6 解析差异时出现连接拒绝。
     const configured = this.config.client.redirectUri;
     let redirectHost = 'localhost';
     let port: number = 8080;
@@ -280,13 +274,49 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
       }
     } catch { /* ignore parsing errors */ }
 
+    const envPortRaw = String(process.env.OAUTH_CALLBACK_PORT || '').trim();
+    if (this.isIflowOAuthProvider() && !envPortRaw) {
+      // Align with official iFlow CLI: choose ephemeral callback port by default.
+      port = 0;
+    }
+    if (envPortRaw) {
+      const parsedEnvPort = Number(envPortRaw);
+      if (!Number.isFinite(parsedEnvPort) || parsedEnvPort <= 0 || parsedEnvPort > 65535) {
+        throw new Error(`Invalid value for OAUTH_CALLBACK_PORT: "${envPortRaw}"`);
+      }
+      port = parsedEnvPort;
+    }
+
     let timeoutHandle: NodeJS.Timeout | null = null;
+    let listeningPort = port;
+
+    let startupSettled = false;
+    let resolveStartup: ((boundPort: number) => void) | null = null;
+    let rejectStartup: ((error: Error) => void) | null = null;
+    const startupPromise = new Promise<number>((resolve, reject) => {
+      resolveStartup = resolve;
+      rejectStartup = reject;
+    });
+    const settleStartupSuccess = (boundPort: number): void => {
+      if (startupSettled) {
+        return;
+      }
+      startupSettled = true;
+      resolveStartup?.(boundPort);
+    };
+    const settleStartupFailure = (message: string): void => {
+      if (startupSettled) {
+        return;
+      }
+      startupSettled = true;
+      rejectStartup?.(new Error(message));
+    };
 
     const callbackPromise = new Promise<{ code: string; verifier: string }>((resolve, reject) => {
       const server = http.createServer(async (req, res) => {
         try {
           logOAuthDebug(`[OAuth] Callback server received request: ${req.url}`);
-          const full = new url.URL(req.url || '/', `http://${redirectHost}:${port}`);
+          const full = new url.URL(req.url || '/', `http://${redirectHost}:${listeningPort}`);
           const reqPath = full.pathname || '';
           const okPath = reqPath === pathName || /oauth.*callback/i.test(reqPath);
 
@@ -368,25 +398,49 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
         }
       });
 
-      // 添加服务器错误处理
-      server.on('error', (error: Error) => {
+      let retriedWithEphemeralPort = false;
+      server.on('error', (error: Error & { code?: string }) => {
         logOAuthDebug(`[OAuth] Callback server error: ${error.message}`);
+        if (error.code === 'EADDRINUSE' && !retriedWithEphemeralPort) {
+          retriedWithEphemeralPort = true;
+          console.warn(
+            `[OAuth] Callback port ${port} is in use; retrying with an ephemeral local port.`
+          );
+          try {
+            server.listen(0);
+            return;
+          } catch (listenError) {
+            const msg = listenError instanceof Error ? listenError.message : String(listenError);
+            const startupMsg = `Failed to retry callback server on ephemeral port: ${msg}`;
+            settleStartupFailure(startupMsg);
+            if (timeoutHandle) {clearTimeout(timeoutHandle);}
+            reject(new Error(startupMsg));
+            return;
+          }
+        }
+
         console.error(
           '[OAuth] Callback server failed to start or encountered an error:',
           error.message
         );
+        const startupMsg = `Failed to start callback server: ${error.message}`;
+        settleStartupFailure(startupMsg);
         if (timeoutHandle) {clearTimeout(timeoutHandle);}
-        reject(new Error(`Failed to start callback server: ${error.message}`));
+        reject(new Error(startupMsg));
       });
 
-      // 等待服务器完全启动
-      // 不指定 host，监听所有地址，避免 localhost 解析到仅 IPv6 或仅 IPv4 时造成连接被拒绝
-      server.listen(port, () => {
+      server.on('listening', () => {
+        const addr = server.address();
+        if (addr && typeof addr === 'object' && 'port' in addr && typeof addr.port === 'number') {
+          listeningPort = addr.port;
+        }
+        settleStartupSuccess(listeningPort);
+
         logOAuthDebug(
-          `[OAuth] Callback server listening on 0.0.0.0:${port}${pathName} (redirect host=${redirectHost})`
+          `[OAuth] Callback server listening on 0.0.0.0:${listeningPort}${pathName} (redirect host=${redirectHost})`
         );
         console.log(
-          `[OAuth] Waiting for OAuth callback at http://${redirectHost}:${port}${pathName}`
+          `[OAuth] Waiting for OAuth callback at http://${redirectHost}:${listeningPort}${pathName}`
         );
         console.log(`[OAuth] You have 10 minutes to complete the authentication in your browser`);
         try {
@@ -415,10 +469,22 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
           reject(new Error('OAuth callback timeout after 10 minutes'));
         }, 10 * 60 * 1000);
       });
+
+      // 不指定 host，监听所有地址，避免 localhost 解析到仅 IPv6 或仅 IPv4 时造成连接被拒绝
+      try {
+        server.listen(port);
+      } catch (listenError) {
+        const msg = listenError instanceof Error ? listenError.message : String(listenError);
+        const startupMsg = `Failed to start callback server: ${msg}`;
+        settleStartupFailure(startupMsg);
+        reject(new Error(startupMsg));
+      }
     });
 
+    // Wait for callback server to bind. This also allows EADDRINUSE fallback to settle final port.
+    listeningPort = await startupPromise;
     // 更新重定向URI（使用配置中的路径或默认）
-    const redirectUri = `http://${redirectHost}:${port}${pathName}`;
+    const redirectUri = `http://${redirectHost}:${listeningPort}${pathName}`;
     logOAuthDebug(`[OAuth] Callback redirect URI: ${redirectUri}`);
 
     return { callbackPromise, redirectUri };
@@ -436,12 +502,7 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
 
       // 更新授权URL中的重定向参数
       const authUrl = new URL(data.authUrl);
-      if (data.flowStyle === 'web' || data.flowStyle === 'legacy') {
-        // 由 URLSearchParams 统一编码，不手动 encodeURIComponent，避免双重编码
-        authUrl.searchParams.set('redirect', serverResult.redirectUri);
-      } else {
-        authUrl.searchParams.set('redirect_uri', serverResult.redirectUri);
-      }
+      this.applyAuthRedirectParams(authUrl, data.flowStyle, serverResult.redirectUri, data.state);
       data.authUrl = authUrl.toString();
       data.redirectUri = serverResult.redirectUri;
 
@@ -473,23 +534,14 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
       formData.append('client_secret', this.config.client.clientSecret);
     }
 
-    // iflow web 登录样式常用 Basic(client_id:client_secret)
-    const tokenHeaders: Record<string, string> = { 'Content-Type': 'application/x-www-form-urlencoded' };
-    if (this.config.client.clientSecret) {
-      const basic = Buffer.from(`${this.config.client.clientId}:${this.config.client.clientSecret}`).toString('base64');
-      tokenHeaders['Authorization'] = `Basic ${basic}`;
-    }
-    const response = await this.makeRequest(this.config.endpoints.tokenUrl, {
-      method: 'POST',
-      headers: tokenHeaders,
-      body: formData
-    });
+    const response = await this.requestTokenEndpoint(formData);
 
     if (!response.ok) {
       throw await this.parseErrorResponse(response);
     }
 
-    return await response.json() as AuthCodeTokenResponse;
+    const raw = await response.json() as UnknownObject;
+    return this.normalizeTokenResponse(raw);
   }
 
   /**
@@ -508,10 +560,10 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
     // 尝试获取API密钥（如果有用户信息端点）
     if (this.config.features?.supportsApiKeyExchange && this.config.endpoints.userInfoUrl && tokenResponse.access_token) {
       try {
-        const userInfoResponse = await this.makeRequest(
-          `${this.config.endpoints.userInfoUrl}?accessToken=${encodeURIComponent(tokenResponse.access_token)}`,
-          { method: 'GET' }
-        );
+        const userInfoUrl = `${this.config.endpoints.userInfoUrl}?accessToken=${encodeURIComponent(tokenResponse.access_token)}`;
+        const userInfoResponse = this.isIflowOAuthProvider()
+          ? await this.fetchIflowUserInfoWithRetry(userInfoUrl)
+          : await this.makeRequest(userInfoUrl, { method: 'GET' });
 
         if (userInfoResponse.ok) {
           const userInfo = await userInfoResponse.json() as UserInfoPayload;
@@ -541,10 +593,200 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
     }
 
     // 转换为标准格式
-    const expiresAt = Date.now() + (tokenResponse.expires_in * 1000);
+    const expiresIn = this.resolveExpiresInSeconds(tokenResponse);
+    const expiresAt = Date.now() + (expiresIn * 1000);
+    enrichedToken.expires_in = expiresIn;
     enrichedToken.expires_at = expiresAt;
     enrichedToken.expired = new Date(expiresAt).toISOString();
     return enrichedToken;
+  }
+
+  private resolveExpiresInSeconds(tokenResponse: AuthCodeTokenResponse): number {
+    const parsePositiveNumber = (value: unknown): number | null => {
+      if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+        return value;
+      }
+      if (typeof value === 'string') {
+        const parsed = Number(value.trim());
+        if (Number.isFinite(parsed) && parsed > 0) {
+          return parsed;
+        }
+      }
+      return null;
+    };
+
+    const direct =
+      parsePositiveNumber(tokenResponse.expires_in) ??
+      parsePositiveNumber(tokenResponse.expiresIn) ??
+      parsePositiveNumber(tokenResponse.expires);
+    if (direct !== null) {
+      return direct;
+    }
+
+    const storedExpiresAt = this.tokenStorage?.expires_at;
+    const remainingMs =
+      typeof storedExpiresAt === 'number' && Number.isFinite(storedExpiresAt)
+        ? storedExpiresAt - Date.now()
+        : NaN;
+    if (Number.isFinite(remainingMs) && remainingMs > 60_000) {
+      return Math.floor(remainingMs / 1000);
+    }
+
+    // Fallback: avoid NaN timestamp crashes when provider omits expires_in.
+    return 3600;
+  }
+
+  private readPositiveNumber(value: unknown): number | null {
+    if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+      return value;
+    }
+    if (typeof value === 'string') {
+      const parsed = Number(value.trim());
+      if (Number.isFinite(parsed) && parsed > 0) {
+        return parsed;
+      }
+    }
+    return null;
+  }
+
+  private readNonEmptyString(value: unknown): string | undefined {
+    return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
+  }
+
+  private normalizeTokenResponse(payload: UnknownObject): AuthCodeTokenResponse {
+    const root = payload && typeof payload === 'object'
+      ? payload as Record<string, unknown>
+      : {};
+    const data = root.data && typeof root.data === 'object'
+      ? root.data as Record<string, unknown>
+      : root;
+
+    const accessToken =
+      this.readNonEmptyString(data.access_token) ??
+      this.readNonEmptyString(data.accessToken) ??
+      this.readNonEmptyString(data.token);
+
+    const message =
+      this.readNonEmptyString(root.message) ??
+      this.readNonEmptyString(root.msg) ??
+      this.readNonEmptyString(root.error_description) ??
+      this.readNonEmptyString((root.error as Record<string, unknown> | undefined)?.message);
+    const code = this.readNonEmptyString(root.code);
+    const markedFailure = root.success === false || (code !== undefined && code !== '' && code !== '0');
+
+    if (!accessToken) {
+      if (markedFailure) {
+        throw new Error(`OAuth token endpoint rejected request${code ? ` (${code})` : ''}: ${message || 'unknown error'}`);
+      }
+      throw new Error(`OAuth token endpoint response missing access_token${message ? `: ${message}` : ''}`);
+    }
+
+    return {
+      access_token: accessToken,
+      refresh_token:
+        this.readNonEmptyString(data.refresh_token) ??
+        this.readNonEmptyString(data.refreshToken),
+      token_type:
+        this.readNonEmptyString(data.token_type) ??
+        this.readNonEmptyString(data.tokenType),
+      scope: this.readNonEmptyString(data.scope),
+      expires_in:
+        this.readPositiveNumber(data.expires_in) ??
+        this.readPositiveNumber(data.expiresIn) ??
+        this.readPositiveNumber(data.expires) ??
+        undefined,
+      resource_url: this.readNonEmptyString(data.resource_url) ?? this.readNonEmptyString(data.resourceUrl),
+      apiKey: this.readNonEmptyString(data.apiKey) ?? this.readNonEmptyString(data.api_key)
+    };
+  }
+
+  private buildTokenRequestHeaders(): Record<string, string> {
+    const tokenHeaders: Record<string, string> = {
+      'Content-Type': 'application/x-www-form-urlencoded'
+    };
+    if (this.config.client.clientSecret) {
+      const basic = Buffer.from(`${this.config.client.clientId}:${this.config.client.clientSecret}`).toString('base64');
+      tokenHeaders.Authorization = `Basic ${basic}`;
+    }
+    return tokenHeaders;
+  }
+
+  /**
+   * Token endpoint requests keep headers minimal and bypass provider-level common headers,
+   * matching iFlow CLI behavior and avoiding compat surprises.
+   */
+  private async requestTokenEndpoint(formData: URLSearchParams): Promise<Response> {
+    return this.httpClient(this.config.endpoints.tokenUrl, {
+      method: 'POST',
+      headers: this.buildTokenRequestHeaders(),
+      body: formData.toString()
+    });
+  }
+
+  private isIflowOAuthProvider(): boolean {
+    const authUrl = String(this.config.endpoints.authorizationUrl || '').toLowerCase();
+    const tokenUrl = String(this.config.endpoints.tokenUrl || '').toLowerCase();
+    const userInfoUrl = String(this.config.endpoints.userInfoUrl || '').toLowerCase();
+    return (
+      authUrl.includes('iflow.cn') ||
+      tokenUrl.includes('iflow.cn/oauth/token') ||
+      userInfoUrl.includes('iflow.cn/api/oauth/getuserinfo')
+    );
+  }
+
+  private async fetchIflowUserInfoWithRetry(url: string): Promise<Response> {
+    const retryDelaysMs = [1000, 2000, 3000];
+    let lastError: unknown;
+    for (let attempt = 0; attempt < retryDelaysMs.length; attempt++) {
+      try {
+        const response = await this.httpClient(url, { method: 'GET' });
+        if (response.ok) {
+          return response;
+        }
+        const shouldRetry =
+          (response.status >= 500 || response.status === 408 || response.status === 429) &&
+          attempt < retryDelaysMs.length - 1;
+        if (!shouldRetry) {
+          return response;
+        }
+      } catch (error) {
+        lastError = error;
+        if (attempt >= retryDelaysMs.length - 1) {
+          break;
+        }
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, retryDelaysMs[attempt]));
+    }
+
+    throw lastError instanceof Error ? lastError : new Error('Failed to fetch iFlow user info');
+  }
+
+  private applyAuthRedirectParams(
+    authUrl: URL,
+    flowStyle: FlowStyle,
+    redirectUri: string,
+    state: string
+  ): void {
+    if (flowStyle === 'legacy') {
+      // Keep parity with official iFlow CLI:
+      // redirect=<encodeURIComponent(redirectUri)>&state=<state> (state embedded in redirect).
+      authUrl.searchParams.delete('state');
+      authUrl.searchParams.delete('redirect_uri');
+      authUrl.searchParams.set('redirect', `${encodeURIComponent(redirectUri)}&state=${state}`);
+      return;
+    }
+
+    if (flowStyle === 'web') {
+      authUrl.searchParams.delete('redirect_uri');
+      authUrl.searchParams.set('redirect', redirectUri);
+      authUrl.searchParams.set('state', state);
+      return;
+    }
+
+    authUrl.searchParams.delete('redirect');
+    authUrl.searchParams.delete('state');
+    authUrl.searchParams.set('redirect_uri', redirectUri);
   }
 
   private coerceStoredToken(token: UnknownObject | null | undefined): StoredToken | null {
@@ -555,7 +797,25 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
     const candidate = record.token && typeof record.token === 'object'
       ? (record.token as Record<string, unknown>)
       : record;
-    if (typeof candidate.access_token === 'string' && typeof candidate.expires_in === 'number') {
+    if (typeof candidate.access_token !== 'string') {
+      return null;
+    }
+    const expiresInRaw = candidate.expires_in ?? candidate.expiresIn ?? candidate.expires;
+    if (typeof expiresInRaw === 'number' && Number.isFinite(expiresInRaw) && expiresInRaw > 0) {
+      candidate.expires_in = expiresInRaw;
+      return candidate as StoredToken;
+    }
+    if (typeof expiresInRaw === 'string') {
+      const parsed = Number(expiresInRaw.trim());
+      if (Number.isFinite(parsed) && parsed > 0) {
+        candidate.expires_in = parsed;
+        return candidate as StoredToken;
+      }
+    }
+    if (typeof candidate.expires_at === 'number' && Number.isFinite(candidate.expires_at)) {
+      return candidate as StoredToken;
+    }
+    if (typeof candidate.expired === 'string' && Number.isFinite(Date.parse(candidate.expired))) {
       return candidate as StoredToken;
     }
     return null;
@@ -594,19 +854,14 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
           formData.append('client_secret', this.config.client.clientSecret);
         }
 
-        const response = await this.makeRequest(this.config.endpoints.tokenUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded'
-          },
-          body: formData
-        });
+        const response = await this.requestTokenEndpoint(formData);
 
         if (!response.ok) {
           throw await this.parseErrorResponse(response);
         }
 
-        const tokenData = await response.json() as AuthCodeTokenResponse;
+        const raw = await response.json() as UnknownObject;
+        const tokenData = this.normalizeTokenResponse(raw);
 
         // Google OAuth doesn't always return a new refresh_token during refresh
         // Preserve the original refresh_token if not provided in the new response

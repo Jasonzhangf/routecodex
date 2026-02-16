@@ -611,4 +611,84 @@ describe('token-daemon interactiveRefresh', () => {
     }
   });
 
+  it('keeps camoufox browser for manual iflow interactive OAuth', async () => {
+    jest.resetModules();
+    const ensureValidOAuthToken = jest.fn(async () => {});
+
+    jest.unstable_mockModule('../../src/providers/auth/oauth-lifecycle.js', () => ({
+      ensureValidOAuthToken
+    }));
+    jest.unstable_mockModule('../../src/token-portal/local-token-portal.js', () => ({
+      ensureLocalTokenPortalEnv: async () => {},
+      shutdownLocalTokenPortalEnv: async () => {}
+    }));
+
+    const prevBrowser = process.env.ROUTECODEX_OAUTH_BROWSER;
+    const prevAutoMode = process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
+    const prevAutoConfirm = process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM;
+    const prevOpenOnly = process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY;
+
+    process.env.ROUTECODEX_OAUTH_BROWSER = 'camoufox';
+    process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE = 'iflow';
+    process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM = '1';
+    process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY = '0';
+
+    const tokenDaemonModule = await import('../../src/token-daemon/index.js');
+    const tokenDaemon = await import('../../src/token-daemon/token-daemon.js');
+
+    jest.spyOn(tokenDaemon.TokenDaemon, 'findTokenBySelector').mockResolvedValue({
+      provider: 'iflow',
+      filePath: '/tmp/iflow-oauth-3-138.json',
+      sequence: 3,
+      alias: '138',
+      displayName: '138',
+      state: {
+        hasAccessToken: false,
+        hasRefreshToken: true,
+        hasApiKey: false,
+        expiresAt: null,
+        msUntilExpiry: -1,
+        status: 'invalid',
+        noRefresh: false
+      }
+    } as any);
+
+    let seenBrowser = '';
+    let seenAutoMode = '';
+    let seenAutoConfirm = '';
+    let seenOpenOnly = '';
+    ensureValidOAuthToken.mockImplementationOnce(async () => {
+      seenBrowser = String(process.env.ROUTECODEX_OAUTH_BROWSER || '');
+      seenAutoMode = String(process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE || '');
+      seenAutoConfirm = String(process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM || '');
+      seenOpenOnly = String(process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY || '');
+    });
+
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const log = jest.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      await tokenDaemonModule.interactiveRefresh('iflow-oauth-3-138.json', { force: true, mode: 'manual' });
+      expect(ensureValidOAuthToken).toHaveBeenCalled();
+      expect(seenBrowser).toBe('camoufox');
+      expect(seenAutoMode).toBe('');
+      expect(seenAutoConfirm).toBe('');
+      expect(seenOpenOnly).toBe('1');
+      expect(process.env.ROUTECODEX_OAUTH_BROWSER).toBe('camoufox');
+      expect(process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE).toBe('iflow');
+      expect(process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM).toBe('1');
+      expect(process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY).toBe('0');
+    } finally {
+      warn.mockRestore();
+      log.mockRestore();
+      if (prevBrowser === undefined) delete process.env.ROUTECODEX_OAUTH_BROWSER;
+      else process.env.ROUTECODEX_OAUTH_BROWSER = prevBrowser;
+      if (prevAutoMode === undefined) delete process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
+      else process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE = prevAutoMode;
+      if (prevAutoConfirm === undefined) delete process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM;
+      else process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM = prevAutoConfirm;
+      if (prevOpenOnly === undefined) delete process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY;
+      else process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY = prevOpenOnly;
+    }
+  });
+
 });

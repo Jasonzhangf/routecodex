@@ -104,6 +104,14 @@ function buildFirefoxUserPrefs() {
     'javascript.use_us_english_locale': true,
     'intl.charset.fallback.override': 'UTF-8',
     'gfx.downloadable_fonts.enabled': true,
+    'browser.startup.page': 0,
+    'browser.sessionstore.resume_from_crash': false,
+    'browser.sessionstore.resume_session_once': false,
+    'browser.sessionstore.max_resumed_crashes': 0,
+    'layers.acceleration.disabled': true,
+    'gfx.webrender.all': false,
+    'gfx.webrender.software': true,
+    'media.hardware-video-decoding.enabled': false,
     'font.default.x-western': 'sans-serif',
     'font.name.sans-serif.x-western': 'Arial',
     'font.name.serif.x-western': 'Times New Roman',
@@ -270,6 +278,92 @@ function cleanupExistingCamoufox(profileDir) {
       // ignore lock cleanup failure
     }
   }
+  const volatileStatePaths = [
+    'sessionstore.jsonlz4',
+    'sessionstore-backups',
+    'recovery.jsonlz4',
+    'recovery.baklz4',
+    'previous.jsonlz4',
+    'sessionCheckpoints.json',
+    'startupCache'
+  ];
+  for (const rel of volatileStatePaths) {
+    const target = path.join(profileDir, rel);
+    try {
+      if (fs.existsSync(target)) {
+        fs.rmSync(target, { recursive: true, force: true });
+      }
+    } catch {
+      // ignore volatile state cleanup failure
+    }
+  }
+}
+
+function hasRunningCamoufoxForProfile(profileDir) {
+  if (!profileDir) {
+    return false;
+  }
+  try {
+    const running = listRunningCamoufoxProcesses();
+    return running.some((proc) => String(proc.command || '').includes(profileDir));
+  } catch {
+    return false;
+  }
+}
+
+function hasAnyRunningCamoufox() {
+  try {
+    return listRunningCamoufoxProcesses().length > 0;
+  } catch {
+    return false;
+  }
+}
+
+function listRunningCamoufoxProcesses() {
+  const probe = spawnSync('pgrep', ['-fal', 'camoufox'], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'ignore']
+  });
+  if (!probe || probe.status !== 0) {
+    return [];
+  }
+
+  const selfPid = process.pid;
+  const lines = String(probe.stdout || '')
+    .split(/\r?\n/)
+    .map((line) => String(line || '').trim())
+    .filter(Boolean);
+
+  const result = [];
+  for (const line of lines) {
+    const spaceIdx = line.indexOf(' ');
+    if (spaceIdx <= 0) {
+      continue;
+    }
+    const pid = Number(line.slice(0, spaceIdx));
+    const command = line.slice(spaceIdx + 1).trim();
+    if (!Number.isFinite(pid) || pid <= 0 || pid === selfPid) {
+      continue;
+    }
+    const cmd = command.toLowerCase();
+    if (!cmd) {
+      continue;
+    }
+    if (cmd.includes('launch-auth.mjs')) {
+      continue;
+    }
+    if (cmd.includes('pgrep -fal camoufox')) {
+      continue;
+    }
+    const looksLikeCamoufox =
+      cmd.includes('camoufox.app/contents/macos/camoufox') ||
+      /(^|\/)camoufox(\s|$)/.test(cmd);
+    if (!looksLikeCamoufox) {
+      continue;
+    }
+    result.push({ pid, command });
+  }
+  return result;
 }
 
 async function main() {
@@ -413,6 +507,16 @@ async function launchManualCamoufox({ camoufoxBinary, profileDir, url }) {
   console.log(`[camoufox-launch-auth] binary=${camoufoxBinary}`);
   console.log(`[camoufox-launch-auth] profileDir=${profileDir}`);
   console.log(`[camoufox-launch-auth] url=${url}`);
+  if (hasRunningCamoufoxForProfile(profileDir)) {
+    console.log(
+      '[camoufox-launch-auth] Same OAuth profile is already running; cleaning stale session state and relaunching isolated instance.'
+    );
+    cleanupExistingCamoufox(profileDir);
+  } else if (hasAnyRunningCamoufox()) {
+    console.log(
+      '[camoufox-launch-auth] Detected other Camoufox instances with different profiles; launching isolated OAuth instance with -no-remote.'
+    );
+  }
   let browserExitCode = 0;
   let browser = null;
   const shutdownBrowser = (signal = 'SIGTERM') => {
@@ -430,7 +534,7 @@ async function launchManualCamoufox({ camoufoxBinary, profileDir, url }) {
   });
 
   try {
-    browser = spawn(camoufoxBinary, ['-profile', profileDir, url], {
+    browser = spawn(camoufoxBinary, ['-no-remote', '-profile', profileDir, url], {
       detached: false,
       stdio: 'ignore',
       env: buildCamoufoxLaunchEnv()
@@ -453,8 +557,18 @@ async function launchManualCamoufox({ camoufoxBinary, profileDir, url }) {
 
 async function launchCamoufoxDetached({ camoufoxBinary, profileDir, url }) {
   console.log('[camoufox-launch-auth] Launching Camoufox (detached) ...');
+  if (hasRunningCamoufoxForProfile(profileDir)) {
+    console.log(
+      '[camoufox-launch-auth] Same OAuth profile is already running; cleaning stale session state and relaunching isolated instance.'
+    );
+    cleanupExistingCamoufox(profileDir);
+  } else if (hasAnyRunningCamoufox()) {
+    console.log(
+      '[camoufox-launch-auth] Detected other Camoufox instances with different profiles; launching isolated OAuth instance with -no-remote.'
+    );
+  }
   try {
-    const child = spawn(camoufoxBinary, ['-profile', profileDir, url], {
+    const child = spawn(camoufoxBinary, ['-no-remote', '-profile', profileDir, url], {
       detached: true,
       stdio: 'ignore',
       env: buildCamoufoxLaunchEnv()
@@ -474,9 +588,14 @@ function isSelectorOrTimeoutError(error) {
   return (
     /timeout/i.test(message) ||
     /waiting for selector/i.test(message) ||
+    /selector[^.\n]*not detected/i.test(message) ||
+    /page\/account selector not detected/i.test(message) ||
+    /not detected/i.test(message) ||
     /strict mode violation/i.test(message) ||
+    /target page, context or browser has been closed/i.test(message) ||
     message.includes('未能定位') ||
-    message.includes('无法定位')
+    message.includes('无法定位') ||
+    message.includes('未检测到')
   );
 }
 
@@ -636,6 +755,7 @@ async function runIflowAutoFlow({ url, profileDir, profileId, camoufoxBinary, de
   }
 
   const headless = !devMode;
+  const timeoutMs = Number(process.env.ROUTECODEX_CAMOUFOX_IFLOW_TIMEOUT_MS || 300_000);
   console.log(`[camoufox-launch-auth] Launching Camoufox in ${headless ? 'headless' : 'headed'} mode...`);
   cleanupExistingCamoufox(profileDir);
   const context = await firefox.launchPersistentContext(profileDir, {
@@ -668,7 +788,7 @@ async function runIflowAutoFlow({ url, profileDir, profileId, camoufoxBinary, de
     await button.click();
     console.log('[camoufox-launch-auth] Continue button clicked, waiting for iFlow window...');
     const popup = await popupPromise;
-    const iflowPage = popup ?? page;
+    let iflowPage = popup ?? page;
     const selectors = [
       'span.accountName--ZKlffRBc',
       'span[class^="accountName--"]',
@@ -678,16 +798,44 @@ async function runIflowAutoFlow({ url, profileDir, profileId, camoufoxBinary, de
     ];
     const selectorQuery = selectors.join(', ');
     console.log('[camoufox-launch-auth] Waiting for iFlow OAuth URL or account DOM to load...');
+    const waitForCallbackPromise = waitForCallback(context, iflowPage, 60000)
+      .then((callbackPage) => ({ kind: 'callback', callbackPage }))
+      .catch((error) => {
+        const msg = error instanceof Error ? error.message : String(error);
+        console.warn('[camoufox-launch-auth] waitForCallback did not settle:', msg);
+        return null;
+      });
     const waitForUrlPromise = iflowPage
       .waitForURL((current) => typeof current === 'string' && current.includes('iflow.cn'), { timeout: 60000 })
-      .then(() => 'url');
+      .then(() => ({ kind: 'url' }))
+      .catch((error) => {
+        const msg = error instanceof Error ? error.message : String(error);
+        console.warn('[camoufox-launch-auth] waitForURL did not settle:', msg);
+        return null;
+      });
     const waitForDomPromise = iflowPage
       .waitForSelector(selectorQuery, { timeout: 60000 })
-      .then(() => 'dom');
-    const raceResult = await Promise.race([waitForUrlPromise, waitForDomPromise]);
-    waitForUrlPromise.catch(() => {});
-    waitForDomPromise.catch(() => {});
-    if (raceResult === 'url') {
+      .then(() => ({ kind: 'dom' }))
+      .catch((error) => {
+        const msg = error instanceof Error ? error.message : String(error);
+        console.warn('[camoufox-launch-auth] waitForSelector did not settle:', msg);
+        return null;
+      });
+    const raceResult = await Promise.race([waitForUrlPromise, waitForDomPromise, waitForCallbackPromise]);
+    if (!raceResult) {
+      const fallback = await waitForAnyElementInPages(context, selectors, 60000);
+      if (fallback?.page) {
+        iflowPage = fallback.page;
+        console.log('[camoufox-launch-auth] Fallback page with account DOM detected, continuing...');
+      } else {
+        throw new Error('iFlow OAuth page/account selector not detected');
+      }
+    } else if (raceResult.kind === 'callback') {
+      callbackObserved = true;
+      await raceResult.callbackPage.waitForLoadState('load', { timeout: timeoutMs }).catch(() => {});
+      console.log('[camoufox-launch-auth] OAuth callback detected before account selection, automation complete.');
+      return;
+    } else if (raceResult.kind === 'url') {
       console.log(`[camoufox-launch-auth] iFlow URL detected: ${await iflowPage.url()}`);
       await iflowPage.waitForSelector(selectorQuery, { timeout: 60000 });
     } else {

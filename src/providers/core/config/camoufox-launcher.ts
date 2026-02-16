@@ -197,6 +197,36 @@ function getProviderFamily(provider?: string | null): string {
   return rawProvider;
 }
 
+export function sanitizeCamouConfigForOAuth(
+  provider: string | null | undefined,
+  fingerprintEnv: Record<string, string>
+): Record<string, string> {
+  const env = { ...(fingerprintEnv || {}) };
+  const raw = env.CAMOU_CONFIG_1;
+  if (!raw || typeof raw !== 'string') {
+    return env;
+  }
+  let parsed: Record<string, unknown> | null = null;
+  try {
+    const node = JSON.parse(raw);
+    if (node && typeof node === 'object' && !Array.isArray(node)) {
+      parsed = node as Record<string, unknown>;
+    }
+  } catch {
+    return env;
+  }
+  if (!parsed) {
+    return env;
+  }
+
+  const family = getProviderFamily(provider);
+  if (family === 'iflow' && Object.prototype.hasOwnProperty.call(parsed, 'timezone')) {
+    delete parsed.timezone;
+    env.CAMOU_CONFIG_1 = JSON.stringify(parsed);
+  }
+  return env;
+}
+
 function buildProfileId(provider?: string | null, alias?: string | null): string {
   const parts: string[] = [];
   const rawProvider = getProviderFamily(provider);
@@ -700,7 +730,8 @@ export async function openAuthInCamoufox(options: CamoufoxLaunchOptions): Promis
     // guardrail must never block OAuth
   }
 
-  const fingerprintEnv = ensureFingerprintEnv(profileId, options.provider, options.alias);
+  const rawFingerprintEnv = ensureFingerprintEnv(profileId, options.provider, options.alias);
+  const fingerprintEnv = sanitizeCamouConfigForOAuth(options.provider, rawFingerprintEnv);
   const localeEnv = resolveCamoufoxLocaleEnv();
 
   try {

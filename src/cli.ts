@@ -56,6 +56,7 @@ await ensureCoreOrFail();
 
 // CLI program setup
 const program = new Command();
+program.enablePositionalOptions();
 
 // Resolve version from package.json at runtime to avoid hardcoding mismatches
 const pkgVersion: string = (() => {

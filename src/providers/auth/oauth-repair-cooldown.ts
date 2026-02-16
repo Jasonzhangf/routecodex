@@ -118,16 +118,21 @@ export async function shouldSkipInteractiveOAuthRepair(args: {
     typeof record.attemptCount === 'number' && Number.isFinite(record.attemptCount) && record.attemptCount > 0
       ? Math.floor(record.attemptCount)
       : 0;
+  const cooldownMs = resolveCooldownMs(args.reason);
+  const elapsed = Date.now() - record.updatedAt;
   if (attemptCount >= maxAttempts) {
-    return { skip: true, record };
+    // Do not permanently lock interactive repair.
+    // Once cooldown window passes, allow retry attempts again.
+    if (elapsed < cooldownMs) {
+      return { skip: true, msLeft: Math.max(0, cooldownMs - elapsed), record };
+    }
+    return { skip: false, record };
   }
   // Generic token-invalid errors should retry interactive flow until max attempts is reached.
   // Do not apply long cooldown windows here, otherwise reauth may never be surfaced in practice.
   if (args.reason === 'generic') {
     return { skip: false, record };
   }
-  const cooldownMs = resolveCooldownMs(args.reason);
-  const elapsed = Date.now() - record.updatedAt;
   if (elapsed < cooldownMs) {
     return { skip: true, msLeft: Math.max(0, cooldownMs - elapsed), record };
   }

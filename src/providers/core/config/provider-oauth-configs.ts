@@ -62,13 +62,16 @@ function registerProviderOAuthConfigs(): void {
     }
   });
 
-  // iFlow OAuth配置 - 对齐CLIProxyAPI和官方CLI，使用标准OAuth端点
+  // iFlow OAuth默认配置：优先授权码流程（回调链路）
+  // 说明：
+  // - /oauth/device/code 当前会返回 HTML 页面而非 device-code JSON，导致手动 OAuth 在首步即失败。
+  // - 默认改为授权码流程，走 /oauth + localhost 回调，保留 iflow-device 作为显式设备码备用。
   OAuthFlowConfigManager.registerDefaultConfig('iflow', {
-    flowType: OAuthFlowType.DEVICE_CODE,
+    flowType: OAuthFlowType.AUTHORIZATION_CODE,
     activationType: OAuthActivationType.AUTO_BROWSER,
     endpoints: {
-      // 对齐CLIProxyAPI：使用标准OAuth端点，移除/api/oauth2/前缀
-      deviceCodeUrl: 'https://iflow.cn/oauth/device/code',
+      // 授权码主链路
+      deviceCodeUrl: 'https://iflow.cn/api/oauth2/device/code',
       tokenUrl: 'https://iflow.cn/oauth/token',
       authorizationUrl: 'https://iflow.cn/oauth',
       userInfoUrl: 'https://iflow.cn/api/oauth/getUserInfo'
@@ -78,7 +81,8 @@ function registerProviderOAuthConfigs(): void {
       clientId: '10009311001',
       clientSecret: '4Z3YjXycVsQvyGF1etiNlIBB4RsqSDtW',
       scopes: ['openid', 'profile', 'email', 'api'],
-      redirectUri: `${HTTP_PROTOCOLS.HTTP}${LOCAL_HOSTS.LOCALHOST}:${DEFAULT_CONFIG.OAUTH_CALLBACK_PORT}${API_PATHS.OAUTH_CALLBACK}`
+      // 对齐 CLIProxyAPI：iflow OAuth callback 默认使用 11451，避免与主服务端口冲突
+      redirectUri: `${HTTP_PROTOCOLS.HTTP}${LOCAL_HOSTS.LOCALHOST}:11451${API_PATHS.OAUTH_CALLBACK}`
     },
     headers: {
       'User-Agent': 'iflow-cli/2.0',
@@ -106,14 +110,14 @@ function registerProviderOAuthConfigs(): void {
     }
   });
 
-  // iFlow OAuth设备码配置（备用）- 对齐CLIProxyAPI
+  // iFlow OAuth设备码配置（备用）
   OAuthFlowConfigManager.registerDefaultConfig('iflow-device', {
     flowType: OAuthFlowType.DEVICE_CODE,
     activationType: OAuthActivationType.AUTO_BROWSER,
     endpoints: {
-      // 使用标准OAuth端点，与CLIProxyAPI一致
-      deviceCodeUrl: 'https://iflow.cn/oauth/device/code',
-      tokenUrl: 'https://iflow.cn/oauth/token',
+      // 兼容历史 CLI 链路：设备码端点仍使用 /api/oauth2 前缀
+      deviceCodeUrl: 'https://iflow.cn/api/oauth2/device/code',
+      tokenUrl: 'https://iflow.cn/api/oauth2/token',
       userInfoUrl: 'https://iflow.cn/api/oauth/getUserInfo'
     },
     client: {

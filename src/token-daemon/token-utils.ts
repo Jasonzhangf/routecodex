@@ -83,6 +83,18 @@ export function hasApiKey(token: RawTokenPayload | null): boolean {
   return typeof cand === 'string' && cand.trim().length > 0;
 }
 
+function hasStableQwenApiKey(token: RawTokenPayload | null): boolean {
+  if (!token) {
+    return false;
+  }
+  const apiKey = token.apiKey ?? token.api_key;
+  if (typeof apiKey !== 'string' || !apiKey.trim()) {
+    return false;
+  }
+  const access = token.access_token ?? token.AccessToken;
+  return typeof access !== 'string' || !access.trim() || access.trim() !== apiKey.trim();
+}
+
 export function hasRefreshToken(token: RawTokenPayload | null): boolean {
   if (!token) {
     return false;
@@ -91,9 +103,14 @@ export function hasRefreshToken(token: RawTokenPayload | null): boolean {
   return typeof cand === 'string' && cand.trim().length > 0;
 }
 
-export function evaluateTokenState(token: RawTokenPayload | null, now: number): TokenState {
+export function evaluateTokenState(
+  token: RawTokenPayload | null,
+  now: number,
+  provider?: OAuthProviderId
+): TokenState {
   const access = hasAccessToken(token);
   const apiKey = hasApiKey(token);
+  const apiKeyBypassesExpiry = provider === 'qwen' && hasStableQwenApiKey(token);
   const refresh = hasRefreshToken(token);
   const expiresAt = getExpiresAtMillis(token);
   const msUntilExpiry = expiresAt !== null ? expiresAt - now : null;
@@ -101,8 +118,11 @@ export function evaluateTokenState(token: RawTokenPayload | null, now: number): 
     token !== null && (token.norefresh === true || (typeof token.noRefresh === 'boolean' && token.noRefresh));
 
   let status: TokenState['status'] = 'invalid';
-  if (!access && !apiKey) {
+  if (!access && !apiKeyBypassesExpiry) {
     status = 'invalid';
+  } else if (apiKeyBypassesExpiry) {
+    // qwen reaches this branch only when api_key is stable (not a copy of access_token).
+    status = 'valid';
   } else if (expiresAt === null) {
     status = 'valid';
   } else if (msUntilExpiry !== null && msUntilExpiry <= 0) {
@@ -173,7 +193,7 @@ export async function collectTokenSnapshot(): Promise<TokenDaemonSnapshot> {
     const tokens: TokenDescriptor[] = [];
     for (const match of matches) {
       const token = await readTokenFile(match.filePath);
-      const state = evaluateTokenState(token, now);
+      const state = evaluateTokenState(token, now, provider);
       const displayName = resolveDisplayName(match, token);
       tokens.push({
         provider,

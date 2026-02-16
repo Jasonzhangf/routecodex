@@ -126,4 +126,81 @@ describe('runtime parse/exec errorsamples', () => {
     );
     expect(entries.length).toBe(1);
   });
+
+  it('writes client-tool-error sample with stage trace for exec_command failures', async () => {
+    const recorder = await createSnapshotRecorder(
+      {
+        requestId: 'req_client_tool_1',
+        providerId: 'mock',
+        providerProtocol: 'openai-responses'
+      },
+      '/v1/responses'
+    );
+
+    (recorder as any).record('chat_process.req.stage2.semantic_map', {
+      messages: [{ role: 'user', content: 'hello' }]
+    });
+    (recorder as any).record('chat_process.req.stage6.outbound.semantic_map', {
+      messages: [
+        {
+          role: 'tool',
+          name: 'exec_command',
+          tool_call_id: 'exec_command:1',
+          call_id: 'exec_command:1',
+          content: 'Chunk ID: test\nProcess exited with code 2\nOutput: permission denied'
+        }
+      ]
+    });
+
+    const clientToolDir = path.join(errorsDir, 'client-tool-error');
+    const file = await waitForFile(
+      clientToolDir,
+      (name) => name.startsWith('chat_process.req.stage6.outbound.semantic_map.exec_command-')
+    );
+    const json = JSON.parse(await fs.readFile(file, 'utf8')) as any;
+    expect(json.kind).toBe('client_tool_execution_error');
+    expect(json.toolName).toBe('exec_command');
+    expect(json.errorType).toBe('exec_command_non_zero_exit');
+    expect(json.requestId).toBe('req_client_tool_1');
+    expect(json.stage).toBe('chat_process.req.stage6.outbound.semantic_map');
+    expect(Array.isArray(json.trace)).toBe(true);
+    expect(json.trace.length).toBeGreaterThanOrEqual(2);
+    expect(json.trace[0].stage).toBe('chat_process.req.stage2.semantic_map');
+    expect(json.trace[json.trace.length - 1].stage).toBe('chat_process.req.stage6.outbound.semantic_map');
+  });
+
+  it('writes client-tool-error sample for shell_command argument validation failure', async () => {
+    const recorder = await createSnapshotRecorder(
+      {
+        requestId: 'req_client_tool_shell_1',
+        providerId: 'mock',
+        providerProtocol: 'openai-responses'
+      },
+      '/v1/responses'
+    );
+
+    (recorder as any).record('chat_process.req.stage2.semantic_map', {
+      messages: [
+        {
+          role: 'tool',
+          name: 'shell_command',
+          tool_call_id: 'call_shell_1',
+          call_id: 'call_shell_1',
+          content: 'failed to parse function arguments: missing field `command` at line 1 column 65'
+        }
+      ]
+    });
+
+    const clientToolDir = path.join(errorsDir, 'client-tool-error');
+    const file = await waitForFile(
+      clientToolDir,
+      (name) => name.startsWith('chat_process.req.stage2.semantic_map.shell_command-')
+    );
+    const json = JSON.parse(await fs.readFile(file, 'utf8')) as any;
+    expect(json.kind).toBe('client_tool_execution_error');
+    expect(json.toolName).toBe('shell_command');
+    expect(json.errorType).toBe('shell_command_args_missing_command');
+    expect(json.requestId).toBe('req_client_tool_shell_1');
+    expect(json.stage).toBe('chat_process.req.stage2.semantic_map');
+  });
 });

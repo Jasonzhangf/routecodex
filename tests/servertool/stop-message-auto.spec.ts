@@ -1482,7 +1482,7 @@ describe('stop_message_auto servertool', () => {
     });
     expect(followupCalled).toBe(false);
   });
-  test('uses plain stopMessage text on first followup (no staged template)', async () => {
+  test('uses stage policy followup text on first followup when templates are available', async () => {
     const tempUserDir = fs.mkdtempSync(path.join(process.cwd(), 'tmp', 'stopmessage-stage-userdir-'));
     const prevUserDir = process.env.ROUTECODEX_USER_DIR;
     const prevStageMode = process.env.ROUTECODEX_STOPMESSAGE_STAGE_MODE;
@@ -1565,7 +1565,7 @@ describe('stop_message_auto servertool', () => {
         (data) => data?.state?.stopMessageUsed === 1
       );
       expect(appendUserText?.text).not.toContain('阶段A：先看 BD 状态');
-      expect(persisted?.state?.stopMessageStage).toBeUndefined();
+      expect(persisted?.state?.stopMessageStage).toBe('active_continue');
     } finally {
       if (prevUserDir === undefined) {
         delete process.env.ROUTECODEX_USER_DIR;
@@ -1582,7 +1582,7 @@ describe('stop_message_auto servertool', () => {
   });
 
 
-  test('mode-only stopMessage is ignored and does not trigger followup', async () => {
+  test('mode-only stopMessage triggers followup when stage mode is on', async () => {
     const tempUserDir = fs.mkdtempSync(path.join(process.cwd(), 'tmp', 'stopmessage-stage-mode-only-userdir-'));
     const prevUserDir = process.env.ROUTECODEX_USER_DIR;
     const prevStageMode = process.env.ROUTECODEX_STOPMESSAGE_STAGE_MODE;
@@ -1660,15 +1660,17 @@ describe('stop_message_auto servertool', () => {
         providerProtocol: 'openai-chat'
       });
 
-      expect(result.mode).toBe('passthrough');
+      expect(result.mode).toBe('tool_flow');
+      expect(result.execution?.flowId).toBe('stop_message_flow');
       const persisted = await readJsonFileUntil<{ state?: { stopMessageText?: unknown; stopMessageStageMode?: unknown; stopMessageUsed?: unknown } }>(
         path.join(SESSION_DIR, `session-${sessionId}.json`),
         (data) =>
           data?.state?.stopMessageText === undefined &&
-          data?.state?.stopMessageStageMode === undefined &&
-          data?.state?.stopMessageUsed === undefined
+          data?.state?.stopMessageStageMode === 'on' &&
+          data?.state?.stopMessageUsed === 1
       );
       expect(persisted?.state?.stopMessageText).toBeUndefined();
+      expect(persisted?.state?.stopMessageStageMode).toBe('on');
     } finally {
       if (prevUserDir === undefined) {
         delete process.env.ROUTECODEX_USER_DIR;
@@ -1689,7 +1691,7 @@ describe('stop_message_auto servertool', () => {
     }
   });
 
-  test('clears legacy mode-only session state without maxRepeats', async () => {
+  test('self-heals legacy mode-only session state without maxRepeats and continues flow', async () => {
     const sessionId = 'stopmessage-spec-session-legacy-mode-only-no-max';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
@@ -1738,22 +1740,24 @@ describe('stop_message_auto servertool', () => {
       providerProtocol: 'anthropic-messages'
     });
 
-    expect(result.mode).toBe('passthrough');
-    expect(result.execution?.flowId).toBeUndefined();
+    expect(result.mode).toBe('tool_flow');
+    expect(result.execution?.flowId).toBe('stop_message_flow');
 
     const persisted = await readJsonFileUntil<{ state?: { stopMessageText?: unknown; stopMessageStageMode?: unknown; stopMessageMaxRepeats?: unknown; stopMessageUsed?: unknown } }>(
       path.join(SESSION_DIR, `session-${sessionId}.json`),
       (data) =>
         data?.state?.stopMessageText === undefined &&
-        data?.state?.stopMessageStageMode === undefined &&
-        data?.state?.stopMessageMaxRepeats === undefined &&
-        data?.state?.stopMessageUsed === undefined
+        data?.state?.stopMessageStageMode === 'on' &&
+        data?.state?.stopMessageMaxRepeats === 10 &&
+        data?.state?.stopMessageUsed === 1
     );
     expect(persisted?.state?.stopMessageText).toBeUndefined();
+    expect(persisted?.state?.stopMessageStageMode).toBe('on');
+    expect(persisted?.state?.stopMessageMaxRepeats).toBe(10);
   });
 
 
-  test('uses plain stopMessage text when bd has in_progress (no staged template)', async () => {
+  test('uses active-continue stage template when bd has in_progress', async () => {
     const tempUserDir = fs.mkdtempSync(path.join(process.cwd(), 'tmp', 'stopmessage-stage-active-userdir-'));
     const prevUserDir = process.env.ROUTECODEX_USER_DIR;
     const prevStageMode = process.env.ROUTECODEX_STOPMESSAGE_STAGE_MODE;
@@ -1834,12 +1838,12 @@ describe('stop_message_auto servertool', () => {
       const ops = Array.isArray(followup?.injection?.ops) ? followup.injection.ops : [];
       const appendUserText = ops.find((entry: any) => entry?.op === 'append_user_text');
       expect(appendUserText?.text).toContain('继续推进任务');
-      expect(appendUserText?.text).not.toContain('阶段A2：强制继续执行');
+      expect(appendUserText?.text).toContain('阶段A2：强制继续执行');
       const persisted = await readJsonFileUntil<{ state?: { stopMessageUsed?: number; stopMessageStage?: unknown } }>(
         path.join(SESSION_DIR, `session-${sessionId}.json`),
         (data) => data?.state?.stopMessageUsed === 1
       );
-      expect(persisted?.state?.stopMessageStage).toBeUndefined();
+      expect(persisted?.state?.stopMessageStage).toBe('active_continue');
     } finally {
       if (prevUserDir === undefined) {
         delete process.env.ROUTECODEX_USER_DIR;

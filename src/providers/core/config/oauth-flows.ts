@@ -220,14 +220,19 @@ export abstract class BaseOAuthFlowStrategy {
       }
 
       let opened = false;
-      const envPref = (process.env.ROUTECODEX_OAUTH_BROWSER || '').toLowerCase();
+      const envPref = String(process.env.ROUTECODEX_OAUTH_BROWSER || '').trim().toLowerCase();
       const camoufoxExplicit = envPref === 'camoufox';
+      const systemExplicit = envPref === 'system' || envPref === 'default';
       const devModeRaw = String(process.env.ROUTECODEX_CAMOUFOX_DEV_MODE || '').trim().toLowerCase();
       const headfulRequested = devModeRaw !== '' && devModeRaw !== '0' && devModeRaw !== 'false' && devModeRaw !== 'no';
-      const preferCamoufox = headfulRequested ? true : (envPref ? camoufoxExplicit : true);
+      const autoModeRaw = String(process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE || '').trim();
+      const autoModeEnabled = autoModeRaw.length > 0;
+      // Default browser for OAuth is Camoufox unless user explicitly requests system/default.
+      const preferCamoufox = !systemExplicit || headfulRequested || autoModeEnabled;
       logOAuthDebug(
         '[OAuth] browser preference: env=' + (envPref || '<empty>') +
         ' headful=' + (headfulRequested ? '1' : '0') +
+        ' autoMode=' + (autoModeEnabled ? '1' : '0') +
         ' preferCamoufox=' + (preferCamoufox ? '1' : '0')
       );
 

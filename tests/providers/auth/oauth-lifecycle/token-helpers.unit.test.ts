@@ -101,11 +101,37 @@ describe('token-helpers', () => {
   });
 
   describe('evaluateTokenState', () => {
-    it('returns validAccess true for apiKey', () => {
-      const token: StoredOAuthToken = { apiKey: 'key' };
+    it('returns validAccess true for stable qwen apiKey', () => {
+      const token: StoredOAuthToken = { apiKey: 'stable-key', access_token: 'temp-token' };
       const state = evaluateTokenState(token, 'qwen');
       expect(state.validAccess).toBe(true);
       expect(state.hasApiKey).toBe(true);
+    });
+    it('does not treat qwen fallback apiKey(access_token) as stable', () => {
+      const token: StoredOAuthToken = {
+        apiKey: 'same-token',
+        access_token: 'same-token',
+        expires_at: Date.now() - 10_000
+      };
+      const state = evaluateTokenState(token, 'qwen');
+      expect(state.isExpired).toBe(true);
+      expect(state.validAccess).toBe(false);
+    });
+    it('does not treat iflow apiKey as perpetual valid credential', () => {
+      const token: StoredOAuthToken = { apiKey: 'iflow-key', expires_at: Date.now() - 10_000 };
+      const state = evaluateTokenState(token, 'iflow');
+      expect(state.isExpired).toBe(true);
+      expect(state.validAccess).toBe(false);
+    });
+    it('treats iflow non-expired access_token as valid', () => {
+      const token: StoredOAuthToken = {
+        apiKey: 'iflow-key',
+        access_token: 'iflow-access',
+        expires_at: Date.now() + 120_000
+      };
+      const state = evaluateTokenState(token, 'iflow');
+      expect(state.isExpired).toBe(false);
+      expect(state.validAccess).toBe(true);
     });
     it('returns validAccess false for expired token', () => {
       const token: StoredOAuthToken = { access_token: 'expired', expires_at: Date.now() - 10000 };

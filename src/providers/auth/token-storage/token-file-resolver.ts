@@ -28,7 +28,7 @@ function expandHome(p: string): string {
 function defaultTokenFile(providerType: string): string {
   const home = process.env.HOME || '';
   if (providerType === 'iflow') {
-    return path.join(home, '.iflow', 'oauth_creds.json');
+    return path.join(home, '.routecodex', 'auth', 'iflow-oauth-1-default.json');
   }
   if (providerType === 'qwen') {
     // Align with TokenFileAuthProvider + token-daemon defaults:

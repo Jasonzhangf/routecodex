@@ -6,6 +6,7 @@ import {
   isGeminiCliFamily,
   expandHome,
   defaultTokenFile,
+  resolveIflowCredentialCandidates,
   resolveCamoufoxAliasForAuth,
   type ExtendedOAuthAuth
 } from '../../../../src/providers/auth/oauth-lifecycle/path-resolver.js';
@@ -54,7 +55,7 @@ describe('path-resolver', () => {
 
   describe('defaultTokenFile', () => {
     it('returns iflow default path', () => {
-      expect(defaultTokenFile('iflow')).toBe('/home/testuser/.iflow/oauth_creds.json');
+      expect(defaultTokenFile('iflow')).toBe('/home/testuser/.routecodex/auth/iflow-oauth-1-default.json');
     });
 
     it('returns qwen default path', () => {
@@ -71,6 +72,28 @@ describe('path-resolver', () => {
 
     it('returns generic default path for unknown providers', () => {
       expect(defaultTokenFile('unknown')).toBe('/home/testuser/.routecodex/tokens/unknown-default.json');
+    });
+  });
+
+  describe('resolveIflowCredentialCandidates', () => {
+    const originalIflowFile = process.env.IFLOW_OAUTH_TOKEN_FILE;
+
+    afterEach(() => {
+      process.env.IFLOW_OAUTH_TOKEN_FILE = originalIflowFile;
+    });
+
+    it('includes env override only', () => {
+      process.env.IFLOW_OAUTH_TOKEN_FILE = '~/custom/iflow-creds.json';
+      expect(resolveIflowCredentialCandidates()).toEqual([
+        '/home/testuser/custom/iflow-creds.json'
+      ]);
+    });
+
+    it('deduplicates duplicate candidate paths', () => {
+      process.env.IFLOW_OAUTH_TOKEN_FILE = '/home/testuser/custom/iflow-creds.json';
+      expect(resolveIflowCredentialCandidates()).toEqual([
+        '/home/testuser/custom/iflow-creds.json'
+      ]);
     });
   });
 

@@ -40,35 +40,51 @@ describe('oauth-repair-cooldown', () => {
     else process.env.HOME = prevHome;
   });
 
-  test('generic reason does not use cooldown, but stops at max attempts and resets on success', async () => {
+  test('generic reason stops at max attempts but reopens after cooldown and resets on success', async () => {
     const prevHome = process.env.HOME;
     const prevMax = process.env.ROUTECODEX_OAUTH_INTERACTIVE_MAX_ATTEMPTS;
+    const prevCooldown = process.env.ROUTECODEX_OAUTH_INTERACTIVE_COOLDOWN_MS;
+    const nowSpy = jest.spyOn(Date, 'now');
 
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-oauth-attempts-'));
     process.env.HOME = tmp;
     process.env.ROUTECODEX_OAUTH_INTERACTIVE_MAX_ATTEMPTS = '3';
+    process.env.ROUTECODEX_OAUTH_INTERACTIVE_COOLDOWN_MS = '1000';
 
     const providerType = 'antigravity';
     const tokenFile = path.join(tmp, 'auth', 'antigravity-oauth-1-a.json');
 
+    nowSpy.mockReturnValue(2_000_000);
     await markInteractiveOAuthRepairAttempt({ providerType, tokenFile, reason: 'generic' });
+    nowSpy.mockReturnValue(2_000_100);
     await markInteractiveOAuthRepairAttempt({ providerType, tokenFile, reason: 'generic' });
 
+    nowSpy.mockReturnValue(2_000_200);
     const gate2 = await shouldSkipInteractiveOAuthRepair({ providerType, tokenFile, reason: 'generic' });
     expect(gate2.skip).toBe(false);
     expect((gate2.record as any)?.attemptCount).toBe(2);
 
+    nowSpy.mockReturnValue(2_000_300);
     await markInteractiveOAuthRepairAttempt({ providerType, tokenFile, reason: 'generic' });
+    nowSpy.mockReturnValue(2_000_800);
     const gate3 = await shouldSkipInteractiveOAuthRepair({ providerType, tokenFile, reason: 'generic' });
     expect(gate3.skip).toBe(true);
     expect((gate3.record as any)?.attemptCount).toBe(3);
 
+    nowSpy.mockReturnValue(2_001_500);
+    const gateAfterCooldown = await shouldSkipInteractiveOAuthRepair({ providerType, tokenFile, reason: 'generic' });
+    expect(gateAfterCooldown.skip).toBe(false);
+
     await markInteractiveOAuthRepairSuccess({ providerType, tokenFile });
+    nowSpy.mockReturnValue(2_001_600);
     const gateAfterSuccess = await shouldSkipInteractiveOAuthRepair({ providerType, tokenFile, reason: 'generic' });
     expect(gateAfterSuccess.skip).toBe(false);
 
+    nowSpy.mockRestore();
     if (prevMax === undefined) delete process.env.ROUTECODEX_OAUTH_INTERACTIVE_MAX_ATTEMPTS;
     else process.env.ROUTECODEX_OAUTH_INTERACTIVE_MAX_ATTEMPTS = prevMax;
+    if (prevCooldown === undefined) delete process.env.ROUTECODEX_OAUTH_INTERACTIVE_COOLDOWN_MS;
+    else process.env.ROUTECODEX_OAUTH_INTERACTIVE_COOLDOWN_MS = prevCooldown;
     if (prevHome === undefined) delete process.env.HOME;
     else process.env.HOME = prevHome;
   });
