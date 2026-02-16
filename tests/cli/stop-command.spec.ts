@@ -36,7 +36,34 @@ describe('cli stop command', () => {
     expect(program.commands.some((c) => c.name() === 'stop')).toBe(true);
   });
 
-  it('denies stop when password is missing', async () => {
+  it('allows stop when password is not configured', async () => {
+    const program = new Command();
+    const succeeded: string[] = [];
+    createStopCommand(program, {
+      isDevPackage: true,
+      defaultDevPort: 5520,
+      createSpinner: async () =>
+        ({
+          ...createStubSpinner(),
+          succeed: (msg?: string) => {
+            if (msg) succeeded.push(msg);
+          }
+        }) as any,
+      logger: { info: () => {}, error: () => {} },
+      findListeningPids: () => [],
+      killPidBestEffort: () => {},
+      sleep: async () => {},
+      env: {},
+      exit: (code) => {
+        throw new Error(`exit:${code}`);
+      }
+    });
+
+    await program.parseAsync(['node', 'routecodex', 'stop'], { from: 'node' });
+    expect(succeeded.join('\n')).toContain('No server listening on 5520');
+  });
+
+  it('denies stop when password is configured but missing', async () => {
     const program = new Command();
     createStopCommand(program, {
       isDevPackage: true,
@@ -46,7 +73,7 @@ describe('cli stop command', () => {
       findListeningPids: () => [],
       killPidBestEffort: () => {},
       sleep: async () => {},
-      env: {},
+      env: { ROUTECODEX_STOP_PASSWORD: 'welcome4zcam#' },
       exit: (code) => {
         throw new Error(`exit:${code}`);
       }
@@ -80,7 +107,7 @@ describe('cli stop command', () => {
       }
     });
 
-    await expect(program.parseAsync(['node', 'rcc', 'stop', '--password', '123'], { from: 'node' })).rejects.toThrow(
+    await expect(program.parseAsync(['node', 'rcc', 'stop'], { from: 'node' })).rejects.toThrow(
       'exit:1'
     );
     expect(errors.join('\n')).toContain('Cannot determine server port');
@@ -110,7 +137,7 @@ describe('cli stop command', () => {
       }
     });
 
-    await program.parseAsync(['node', 'routecodex', 'stop', '--password', '123'], { from: 'node' });
+    await program.parseAsync(['node', 'routecodex', 'stop'], { from: 'node' });
     expect(succeeded.join('\n')).toContain('No server listening on 5520');
   });
 });

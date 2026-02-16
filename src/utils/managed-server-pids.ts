@@ -78,6 +78,40 @@ function parseEnvPortFromCommand(command: string): number | null {
   return null;
 }
 
+function listListeningPidsByPort(port: number, spawnSyncImpl: SpawnSyncLike): number[] {
+  if (!Number.isFinite(port) || port <= 0 || process.platform === 'win32') {
+    return [];
+  }
+
+  try {
+    const result = spawnSyncImpl(
+      'lsof',
+      ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-t'],
+      { encoding: 'utf8' }
+    );
+    if (result.error || Number(result.status ?? 0) !== 0) {
+      return [];
+    }
+    const out: number[] = [];
+    const seen = new Set<number>();
+    const lines = String(result.stdout || '')
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    for (const line of lines) {
+      const pid = Number.parseInt(line, 10);
+      if (!Number.isFinite(pid) || pid <= 0 || seen.has(pid)) {
+        continue;
+      }
+      seen.add(pid);
+      out.push(pid);
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
 export function isTrustedRouteCodexCommand(command: string): boolean {
   const normalized = String(command || '').trim().toLowerCase();
   if (!normalized) {
@@ -109,26 +143,37 @@ export function listManagedServerPidsByPort(
   const seen = new Set<number>();
   const out: number[] = [];
 
-  for (const filePath of files) {
-    const pid = tryReadPid(filePath);
+  const maybeAcceptPid = (pid: number): void => {
     if (!pid || seen.has(pid)) {
-      continue;
+      return;
     }
     if (!isPidAlive(pid, processKill)) {
-      continue;
+      return;
     }
     if (process.platform !== 'win32') {
       const command = readProcessCommand(pid, spawnSyncImpl);
       if (!isTrustedRouteCodexCommand(command)) {
-        continue;
+        return;
       }
       const envPort = parseEnvPortFromCommand(command);
       if (typeof envPort === 'number' && Number.isFinite(envPort) && envPort > 0 && envPort !== port) {
-        continue;
+        return;
       }
     }
     seen.add(pid);
     out.push(pid);
+  };
+
+  for (const filePath of files) {
+    const pid = tryReadPid(filePath);
+    maybeAcceptPid(pid ?? 0);
+  }
+
+  // Fallback for stale/missing pid files: discover listeners by port and
+  // keep only trusted RouteCodex/RCC commands.
+  const listeningPids = listListeningPidsByPort(port, spawnSyncImpl);
+  for (const pid of listeningPids) {
+    maybeAcceptPid(pid);
   }
 
   return out;

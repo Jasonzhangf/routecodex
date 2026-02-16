@@ -47,7 +47,7 @@ export function resolveReleaseDaemonEnabled(env: NodeJS.ProcessEnv): boolean {
   const raw = String(
     env.ROUTECODEX_START_DAEMON
       ?? env.RCC_START_DAEMON
-      ?? '1'
+      ?? '0'
   )
     .trim()
     .toLowerCase();

@@ -4,7 +4,7 @@ import path from 'path';
 import net from 'node:net';
 import { describe, expect, it } from '@jest/globals';
 
-import { ensurePortAvailableImpl, findListeningPidsImpl, killPidBestEffortImpl } from '../../src/cli/server/port-utils.js';
+import { ensurePortAvailableImpl, findListeningPidsImpl, isServerHealthyQuickImpl, killPidBestEffortImpl } from '../../src/cli/server/port-utils.js';
 import { flushProcessLifecycleLogQueue } from '../../src/utils/process-lifecycle-logger.js';
 
 describe('cli server port-utils', () => {
@@ -177,5 +177,64 @@ describe('cli server port-utils', () => {
     } finally {
       await new Promise<void>((resolve) => probe.close(() => resolve()));
     }
+  });
+
+  it('ensurePortAvailableImpl does not trigger shutdown/kill when restart is false', async () => {
+    const probe = net.createServer();
+    await new Promise<void>((resolve, reject) => {
+      probe.listen({ host: '0.0.0.0', port: 0 }, () => resolve());
+      probe.once('error', reject);
+    });
+    const address = probe.address();
+    const occupiedPort = typeof address === 'object' && address ? address.port : 0;
+
+    const spinner = {
+      start: () => spinner,
+      succeed: () => {},
+      fail: () => {},
+      warn: () => {},
+      info: () => {},
+      stop: () => {},
+      text: ''
+    };
+    const logger = { warning: () => {}, info: () => {}, success: () => {}, error: () => {} };
+    let fetchCalled = false;
+    let killCalled = false;
+
+    try {
+      await expect(ensurePortAvailableImpl({
+        port: occupiedPort,
+        parentSpinner: spinner,
+        opts: { restart: false },
+        fetchImpl: (async () => {
+          fetchCalled = true;
+          return { ok: false };
+        }) as any,
+        sleep: async () => {},
+        env: {},
+        logger,
+        createSpinner: async () => spinner,
+        findListeningPids: () => [12345],
+        killPidBestEffort: () => { killCalled = true; },
+        isServerHealthyQuick: async () => false,
+        exit: (() => { throw new Error('exit should not be called'); }) as any
+      })).rejects.toThrow("Use 'rcc stop' or 'rcc start --restart'");
+
+      expect(fetchCalled).toBe(false);
+      expect(killCalled).toBe(false);
+    } finally {
+      await new Promise<void>((resolve) => probe.close(() => resolve()));
+    }
+  });
+
+  it('isServerHealthyQuickImpl treats status=ok as healthy', async () => {
+    const healthy = await isServerHealthyQuickImpl({
+      port: 5520,
+      fetchImpl: (async () => ({
+        ok: true,
+        json: async () => ({ status: 'ok' })
+      })) as any
+    });
+    expect(healthy).toBe(true);
   });
 });

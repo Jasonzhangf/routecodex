@@ -102,20 +102,23 @@ function resolveStopPort(ctx: StopCommandContext, spinner: Spinner): number {
   return port;
 }
 
-function resolveStopPassword(ctx: StopCommandContext): string {
+function resolveStopPassword(ctx: StopCommandContext): string | null {
   const configured = ctx.env?.ROUTECODEX_STOP_PASSWORD || ctx.env?.RCC_STOP_PASSWORD;
   if (typeof configured === 'string' && configured.trim()) {
     return configured.trim();
   }
-  return '123';
+  return null;
 }
 
 function enforceStopPassword(
   providedPassword: string | undefined,
-  expectedPassword: string,
+  expectedPassword: string | null,
   spinner: Spinner,
   ctx: StopCommandContext
 ): void {
+  if (!expectedPassword) {
+    return;
+  }
   if (providedPassword === expectedPassword) {
     return;
   }

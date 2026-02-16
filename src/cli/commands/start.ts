@@ -195,9 +195,10 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
           resolvedPort = port;
         }
 
-        // Ensure port state aligns with requested behavior
-        // Preserve existing CLI behavior: always attempt takeover; "restart" flag is informational only here.
-        await ctx.ensurePortAvailable(resolvedPort, spinner, { restart: true });
+        // Ensure port state aligns with requested behavior.
+        // Default behavior should be non-disruptive: if already running, return success without restart.
+        const shouldRestart = Boolean(options.restart || options.exclusive);
+        await ctx.ensurePortAvailable(resolvedPort, spinner, { restart: shouldRestart });
 
         const resolveServerHost = (): string => {
           if (typeof config?.httpserver?.host === 'string' && config.httpserver.host.trim()) {return config.httpserver.host;}
@@ -296,7 +297,13 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
           spinner.succeed(`RouteCodex daemon supervisor started on ${serverHost}:${resolvedPort}`);
           ctx.logger.info(`Configuration loaded from: ${configPath}`);
           ctx.logger.info(`Supervisor PID: ${daemonProc.pid ?? 'unknown'}`);
-          ctx.logger.info('Use `rcc stop --password <password>` to stop.');
+          const configuredStopPassword =
+            (ctx.env.ROUTECODEX_STOP_PASSWORD || ctx.env.RCC_STOP_PASSWORD || '').trim();
+          if (configuredStopPassword) {
+            ctx.logger.info('Use `rcc stop --password <password>` to stop.');
+          } else {
+            ctx.logger.info('Use `rcc stop` to stop.');
+          }
           ctx.exit(0);
         }
 
@@ -368,12 +375,72 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
           }
         }
 
-        const childProc = ctx.spawn(nodeBin, args, { stdio: 'inherit', env: childProcessEnv });
+        let serverLogPath: string | null = null;
+        let serverLogStream: fs.WriteStream | null = null;
+        let spawnOptions: any = { stdio: 'inherit', env: childProcessEnv };
+        try {
+          const logsDir = pathImpl.join(routeCodexHome, 'logs');
+          fsImpl.mkdirSync(logsDir, { recursive: true });
+          serverLogPath = pathImpl.join(logsDir, `server-${resolvedPort}.log`);
+          serverLogStream = fsImpl.createWriteStream(serverLogPath, { flags: 'a' });
+          spawnOptions = { stdio: ['inherit', 'pipe', 'pipe'], env: childProcessEnv };
+        } catch {
+          if (serverLogStream) {
+            try { serverLogStream.end(); } catch { /* ignore */ }
+            serverLogStream = null;
+          }
+          serverLogPath = null;
+          spawnOptions = { stdio: 'inherit', env: childProcessEnv };
+        }
+
+        const childProc = ctx.spawn(nodeBin, args, spawnOptions);
         writePidFile(childProc.pid);
+
+        const closeServerLogStream = () => {
+          if (!serverLogStream) {
+            return;
+          }
+          try {
+            serverLogStream.end();
+          } catch {
+            /* ignore */
+          }
+          serverLogStream = null;
+        };
+
+        const forwardToConsoleAndLog = (
+          stream: NodeJS.ReadableStream | null | undefined,
+          output: NodeJS.WriteStream
+        ) => {
+          if (!stream) {
+            return;
+          }
+          stream.on('data', (chunk: unknown) => {
+            const data = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
+            try {
+              output.write(data);
+            } catch {
+              /* ignore */
+            }
+            if (serverLogStream) {
+              try {
+                serverLogStream.write(data);
+              } catch {
+                /* ignore */
+              }
+            }
+          });
+        };
+
+        forwardToConsoleAndLog((childProc as unknown as { stdout?: NodeJS.ReadableStream | null }).stdout, process.stdout);
+        forwardToConsoleAndLog((childProc as unknown as { stderr?: NodeJS.ReadableStream | null }).stderr, process.stderr);
 
         spinner.succeed(`RouteCodex server starting on ${serverHost}:${resolvedPort}`);
         ctx.logger.info(`Configuration loaded from: ${configPath}`);
         ctx.logger.info(`Server will run on port: ${resolvedPort}`);
+        if (serverLogPath) {
+          ctx.logger.info(`Server log file: ${serverLogPath}`);
+        }
         ctx.logger.info('Press Ctrl+C to stop the server');
 
         const shutdown = async (sig: NodeJS.Signals) => {
@@ -433,6 +500,7 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
           if (ctx.isDevPackage) {
             await ctx.stopTokenDaemonIfRunning?.();
           }
+          closeServerLogStream();
           try {
             ctx.exit(0);
           } catch {
@@ -446,6 +514,7 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
 
         const cleanupKeypress = ctx.setupKeypress(() => { void shutdown('SIGINT'); });
         childProc.on('exit', (code, signal) => {
+          closeServerLogStream();
           try { cleanupKeypress(); } catch { /* ignore */ }
           if (signal) {ctx.exit(0);}
           ctx.exit(code ?? 0);

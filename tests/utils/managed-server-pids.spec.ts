@@ -79,6 +79,44 @@ describe('managed server pid discovery', () => {
     expect(pids).toEqual([]);
   });
 
+  it('listManagedServerPidsByPort falls back to listening pid when pid file is stale', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-managed-pids-fallback-'));
+    fs.writeFileSync(path.join(home, 'server-5520.pid'), '99999', 'utf8');
+
+    const pids = listManagedServerPidsByPort(5520, {
+      routeCodexHomeDir: home,
+      processKill: ((pid: number, signal?: NodeJS.Signals | number) => {
+        if (signal === 0 && pid === 22222) {
+          return true as any;
+        }
+        throw new Error('unexpected processKill call');
+      }) as any,
+      spawnSyncImpl: ((cmd: string, args?: string[]) => {
+        if (cmd === 'lsof') {
+          return {
+            stdout: '22222\n',
+            status: 0,
+            error: undefined
+          } as any;
+        }
+        if (cmd === 'ps') {
+          const joined = Array.isArray(args) ? args.join(' ') : '';
+          if (joined.includes('-p 22222')) {
+            return {
+              stdout: '/opt/homebrew/bin/node /opt/homebrew/lib/node_modules/@jsonstudio/rcc/dist/index.js config/modules.json',
+              status: 0,
+              error: undefined
+            } as any;
+          }
+          return { stdout: '', status: 1, error: undefined } as any;
+        }
+        throw new Error('unexpected command');
+      }) as any
+    });
+
+    expect(pids).toEqual([22222]);
+  });
+
   it('listZombieChildrenByParentPids filters zombie processes by parent pid', () => {
     const zombies = listZombieChildrenByParentPids([200, 999], {
       spawnSyncImpl: ((cmd: string) => {

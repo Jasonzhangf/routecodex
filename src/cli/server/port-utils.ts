@@ -143,7 +143,8 @@ export async function isServerHealthyQuickImpl(args: { port: number; fetchImpl: 
       return false;
     }
     const data = await res.json().catch(() => null);
-    return !!data && (data.status === 'healthy' || data.status === 'ready');
+    const status = typeof data?.status === 'string' ? data.status.toLowerCase() : '';
+    return !!data && (status === 'healthy' || status === 'ready' || status === 'ok' || data?.ready === true || data?.pipelineReady === true);
   } catch {
     return false;
   }
@@ -190,62 +191,65 @@ export async function ensurePortAvailableImpl(args: {
     });
   };
 
-  // Best-effort HTTP shutdown on common loopback hosts to cover IPv4/IPv6
-  try {
-    const candidates = [LOCAL_HOSTS.IPV4, LOCAL_HOSTS.LOCALHOST];
-    for (const h of candidates) {
-      try {
-        const controller = new AbortController();
-        const t = setTimeout(() => {
-          try {
-            controller.abort();
-          } catch {
-            /* ignore */
-          }
-        }, 700);
-        const callerTs = new Date().toISOString();
-        logProcessLifecycle({
-          event: 'port_http_shutdown',
-          source: 'cli.ensurePortAvailable',
-          details: {
-            result: 'attempt',
-            host: h,
-            port,
-            callerTs,
-            callerPid: process.pid,
-            callerCwd: process.cwd(),
-            callerCmd: process.argv.join(' ').slice(0, 1024)
-          }
-        });
-        await args.fetchImpl(`http://${h}:${port}/shutdown`, {
-          method: 'POST',
-          signal: controller.signal,
-          headers: {
-            'x-routecodex-stop-caller-pid': String(process.pid),
-            'x-routecodex-stop-caller-ts': callerTs,
-            'x-routecodex-stop-caller-cwd': process.cwd(),
-            'x-routecodex-stop-caller-cmd': process.argv.join(' ').slice(0, 1024)
-          }
-        }).catch((error) => {
+  // Best-effort HTTP shutdown on common loopback hosts to cover IPv4/IPv6.
+  // This is restart-only behavior; plain `rcc start` must not disrupt existing servers.
+  if (opts.restart) {
+    try {
+      const candidates = [LOCAL_HOSTS.IPV4, LOCAL_HOSTS.LOCALHOST];
+      for (const h of candidates) {
+        try {
+          const controller = new AbortController();
+          const t = setTimeout(() => {
+            try {
+              controller.abort();
+            } catch {
+              /* ignore */
+            }
+          }, 700);
+          const callerTs = new Date().toISOString();
           logProcessLifecycle({
             event: 'port_http_shutdown',
             source: 'cli.ensurePortAvailable',
             details: {
-              result: 'failed',
+              result: 'attempt',
               host: h,
               port,
-              error
+              callerTs,
+              callerPid: process.pid,
+              callerCwd: process.cwd(),
+              callerCmd: process.argv.join(' ').slice(0, 1024)
             }
           });
-        });
-        clearTimeout(t);
-      } catch {
-        /* ignore */
+          await args.fetchImpl(`http://${h}:${port}/shutdown`, {
+            method: 'POST',
+            signal: controller.signal,
+            headers: {
+              'x-routecodex-stop-caller-pid': String(process.pid),
+              'x-routecodex-stop-caller-ts': callerTs,
+              'x-routecodex-stop-caller-cwd': process.cwd(),
+              'x-routecodex-stop-caller-cmd': process.argv.join(' ').slice(0, 1024)
+            }
+          }).catch((error) => {
+            logProcessLifecycle({
+              event: 'port_http_shutdown',
+              source: 'cli.ensurePortAvailable',
+              details: {
+                result: 'failed',
+                host: h,
+                port,
+                error
+              }
+            });
+          });
+          clearTimeout(t);
+        } catch {
+          /* ignore */
+        }
       }
+      await args.sleep(300);
+    } catch {
+      /* ignore */
     }
-    await args.sleep(300);
-  } catch {
-    /* ignore */
   }
 
   if (await canBindPort()) {
@@ -266,11 +270,11 @@ export async function ensurePortAvailableImpl(args: {
         source: 'cli.ensurePortAvailable',
         details: { port, result: 'already_running_unmanaged' }
       });
-      parentSpinner.stop();
-      args.logger.success(`RouteCodex is already running on port ${port}.`);
-      args.logger.info(`Use 'rcc stop --port ${port}' for graceful shutdown.`);
-      args.exit(0);
-    }
+    parentSpinner.stop();
+    args.logger.success(`RouteCodex is already running on port ${port}.`);
+    args.logger.info(`Use 'rcc stop' for graceful shutdown.`);
+    args.exit(0);
+  }
     logProcessLifecycle({
       event: 'port_check_result',
       source: 'cli.ensurePortAvailable',
@@ -298,6 +302,17 @@ export async function ensurePortAvailableImpl(args: {
     args.logger.success(`RouteCodex is already running on port ${port}.`);
     args.logger.info(`Use 'rcc stop' or 'rcc start --restart' to restart.`);
     args.exit(0);
+  }
+
+  if (!opts.restart) {
+    logProcessLifecycle({
+      event: 'port_check_result',
+      source: 'cli.ensurePortAvailable',
+      details: { port, result: 'occupied_no_restart', pids: initialPids, healthy }
+    });
+    throw new Error(
+      `Port ${port} is occupied by RouteCodex process(es). Use 'rcc stop' or 'rcc start --restart' to take over.`
+    );
   }
 
   parentSpinner.stop();
