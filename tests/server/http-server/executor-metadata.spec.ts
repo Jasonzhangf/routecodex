@@ -2,6 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 import { EventEmitter } from 'node:events';
 
 import { buildRequestMetadata } from '../../../src/server/runtime/http-server/executor-metadata.js';
+import { getClockClientRegistry } from '../../../src/server/runtime/http-server/clock-client-registry.js';
 import { trackClientConnectionState } from '../../../src/server/utils/client-connection-state.js';
 import { encodeClockClientApiKey } from '../../../src/utils/clock-client-token.js';
 
@@ -64,6 +65,33 @@ describe('executor metadata clock daemon extraction', () => {
     expect(metadata.clockDaemonId).toBe('clockd_header_2');
     expect(metadata.sessionId).toBe('conv_from_body_meta');
     expect(metadata.conversationId).toBe('conv_from_body_meta');
+  });
+
+  it('resolves workdir from clock daemon registry when request metadata omits it', () => {
+    const daemonId = 'clockd_meta_workdir_1';
+    const registry = getClockClientRegistry();
+    registry.register({
+      daemonId,
+      callbackUrl: 'http://127.0.0.1:65560/inject',
+      tmuxSessionId: 'tmux_meta_workdir_1',
+      workdir: '/tmp/routecodex-meta-workdir-1'
+    });
+
+    const metadata = buildRequestMetadata({
+      entryEndpoint: '/v1/chat/completions',
+      method: 'POST',
+      requestId: 'req-meta-4',
+      headers: {
+        authorization: `Bearer ${encodeClockClientApiKey('sk-base', daemonId)}`
+      },
+      query: {},
+      body: { messages: [] },
+      metadata: { sessionId: 'conv_meta_4' }
+    } as any);
+
+    expect(metadata.clockDaemonId).toBe(daemonId);
+    expect(metadata.workdir).toBe('/tmp/routecodex-meta-workdir-1');
+    registry.unregister(daemonId);
   });
 });
 

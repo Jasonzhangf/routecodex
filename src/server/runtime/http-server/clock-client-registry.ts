@@ -3,6 +3,7 @@ import {
   cleanupStaleHeartbeatsFromRegistry,
   normalizePositiveInt,
   normalizeString,
+  normalizeWorkdir,
   resolveHeartbeatTtlMs,
   resolveManagedClientProcessState,
   resolveManagedTmuxSessionState
@@ -25,6 +26,7 @@ export class ClockClientRegistry {
     callbackUrl: string;
     tmuxSessionId?: string;
     sessionId?: string;
+    workdir?: string;
     clientType?: string;
     tmuxTarget?: string;
     managedTmuxSession?: boolean;
@@ -35,6 +37,7 @@ export class ClockClientRegistry {
     const now = Date.now();
     const resolvedTmuxSessionId = normalizeString(input.tmuxSessionId) ?? normalizeString(input.sessionId);
     const previous = this.records.get(input.daemonId);
+    const resolvedWorkdir = normalizeWorkdir(input.workdir) ?? normalizeWorkdir(previous?.workdir);
     const preservedConversationIds = Array.isArray(previous?.conversationSessionIds)
       ? previous?.conversationSessionIds.filter((item) => normalizeString(item))
       : [];
@@ -54,6 +57,7 @@ export class ClockClientRegistry {
       daemonId: input.daemonId,
       callbackUrl: input.callbackUrl,
       ...(resolvedTmuxSessionId ? { tmuxSessionId: resolvedTmuxSessionId, sessionId: resolvedTmuxSessionId } : {}),
+      ...(resolvedWorkdir ? { workdir: resolvedWorkdir } : {}),
       ...(preservedConversationIds.length ? { conversationSessionIds: preservedConversationIds } : {}),
       ...(input.clientType ? { clientType: input.clientType } : {}),
       ...(input.tmuxTarget ? { tmuxTarget: input.tmuxTarget } : {}),
@@ -78,6 +82,7 @@ export class ClockClientRegistry {
 
   heartbeat(daemonId: string, input?: {
     tmuxSessionId?: string;
+    workdir?: string;
     managedTmuxSession?: boolean;
     managedClientProcess?: boolean;
     managedClientPid?: number;
@@ -97,6 +102,10 @@ export class ClockClientRegistry {
     if (resolvedTmuxSessionId) {
       rec.tmuxSessionId = resolvedTmuxSessionId;
       rec.sessionId = resolvedTmuxSessionId;
+    }
+    const workdir = normalizeWorkdir(input?.workdir);
+    if (workdir) {
+      rec.workdir = workdir;
     }
 
     rec.managedTmuxSession = resolveManagedTmuxSessionState({
@@ -156,6 +165,23 @@ export class ClockClientRegistry {
           : {})
       }))
       .sort((a, b) => b.lastHeartbeatAtMs - a.lastHeartbeatAtMs);
+  }
+
+  findByDaemonId(daemonIdRaw: string): ClockClientRecord | undefined {
+    const daemonId = normalizeString(daemonIdRaw);
+    if (!daemonId) {
+      return undefined;
+    }
+    const record = this.records.get(daemonId);
+    if (!record) {
+      return undefined;
+    }
+    return {
+      ...record,
+      ...(Array.isArray(record.conversationSessionIds)
+        ? { conversationSessionIds: [...record.conversationSessionIds] }
+        : {})
+    };
   }
 
   unbindConversationSession(conversationSessionIdRaw: string): { ok: boolean; removed: boolean; daemonIds: string[] } {
@@ -220,6 +246,7 @@ export class ClockClientRegistry {
     tmuxSessionId?: string;
     daemonId?: string;
     clientType?: string;
+    workdir?: string;
   }): ClockClientRecord[] {
     let records = Array.from(this.records.values()).filter((entry) => this.isAlive(entry));
 
@@ -238,7 +265,23 @@ export class ClockClientRegistry {
       records = records.filter((entry) => normalizeString(entry.clientType) === clientType);
     }
 
+    const workdir = normalizeWorkdir(filters?.workdir);
+    if (workdir) {
+      records = records.filter((entry) => normalizeWorkdir(entry.workdir) === workdir);
+    }
+
     return records.sort((a, b) => b.lastHeartbeatAtMs - a.lastHeartbeatAtMs);
+  }
+
+  private resolveNoBindingReason(workdirHint: string | undefined): string {
+    if (!workdirHint) {
+      return 'no_binding_candidate';
+    }
+    const alive = this.pickAliveCandidates();
+    if (!alive.length) {
+      return 'no_binding_candidate';
+    }
+    return 'no_binding_candidate_for_workdir';
   }
 
   bindConversationSession(args: ClockConversationBindArgs): { ok: boolean; reason?: string; daemonId?: string; tmuxSessionId?: string } {
@@ -250,40 +293,51 @@ export class ClockClientRegistry {
     const tmuxSessionHint = normalizeString(args.tmuxSessionId);
     const daemonHint = normalizeString(args.daemonId);
     const clientTypeHint = normalizeString(args.clientType);
+    const workdirHint = normalizeWorkdir(args.workdir);
+    const filteredCandidates = (filters?: {
+      tmuxSessionId?: string;
+      daemonId?: string;
+      clientType?: string;
+    }): ClockClientRecord[] => (
+      this.pickAliveCandidates({
+        ...(filters ?? {}),
+        ...(workdirHint ? { workdir: workdirHint } : {})
+      })
+    );
 
     let candidate: ClockClientRecord | undefined;
 
     if (daemonHint) {
-      candidate = this.pickAliveCandidates({ daemonId: daemonHint })[0];
+      candidate = filteredCandidates({ daemonId: daemonHint })[0];
     }
 
     if (!candidate && tmuxSessionHint) {
-      candidate = this.pickAliveCandidates({ tmuxSessionId: tmuxSessionHint })[0];
+      candidate = filteredCandidates({ tmuxSessionId: tmuxSessionHint })[0];
     }
 
     if (!candidate) {
       const mappedTmuxSession = normalizeString(this.conversationToTmuxSession.get(conversationSessionId));
       if (mappedTmuxSession) {
-        candidate = this.pickAliveCandidates({ tmuxSessionId: mappedTmuxSession })[0];
+        candidate = filteredCandidates({ tmuxSessionId: mappedTmuxSession })[0];
       }
     }
 
     if (!candidate && clientTypeHint) {
-      const byClientType = this.pickAliveCandidates({ clientType: clientTypeHint });
+      const byClientType = filteredCandidates({ clientType: clientTypeHint });
       if (byClientType.length === 1) {
         candidate = byClientType[0];
       }
     }
 
     if (!candidate) {
-      const onlyAlive = this.pickAliveCandidates();
+      const onlyAlive = filteredCandidates();
       if (onlyAlive.length === 1) {
         candidate = onlyAlive[0];
       }
     }
 
     if (!candidate) {
-      return { ok: false, reason: 'no_binding_candidate' };
+      return { ok: false, reason: this.resolveNoBindingReason(workdirHint) };
     }
 
     const tmuxSessionId = normalizeString(candidate.tmuxSessionId) ?? normalizeString(candidate.sessionId);
@@ -305,7 +359,7 @@ export class ClockClientRegistry {
     return { ok: true, daemonId: candidate.daemonId, tmuxSessionId };
   }
 
-  private resolveInjectTmuxSessionId(args: ClockClientInjectArgs): string | undefined {
+  private resolveInjectTmuxSessionId(args: ClockClientInjectArgs, workdirHint?: string): string | undefined {
     const directTmuxSession = normalizeString(args.tmuxSessionId);
     if (directTmuxSession) {
       return directTmuxSession;
@@ -316,7 +370,10 @@ export class ClockClientRegistry {
       return undefined;
     }
 
-    const asTmuxSession = this.pickAliveCandidates({ tmuxSessionId: sessionAlias });
+    const asTmuxSession = this.pickAliveCandidates({
+      tmuxSessionId: sessionAlias,
+      ...(workdirHint ? { workdir: workdirHint } : {})
+    });
     if (asTmuxSession.length > 0) {
       return sessionAlias;
     }
@@ -335,13 +392,20 @@ export class ClockClientRegistry {
       return { ok: false, reason: 'empty_text' };
     }
 
-    const tmuxSessionId = this.resolveInjectTmuxSessionId(args);
+    const workdirHint = normalizeWorkdir(args.workdir);
+    const tmuxSessionId = this.resolveInjectTmuxSessionId(args, workdirHint);
     if (!tmuxSessionId) {
       return { ok: false, reason: 'tmux_session_required' };
     }
 
-    const candidates = this.pickAliveCandidates({ tmuxSessionId });
+    const candidates = this.pickAliveCandidates({
+      tmuxSessionId,
+      ...(workdirHint ? { workdir: workdirHint } : {})
+    });
     if (!candidates.length) {
+      if (workdirHint && this.pickAliveCandidates({ tmuxSessionId }).length > 0) {
+        return { ok: false, reason: 'workdir_mismatch' };
+      }
       return { ok: false, reason: 'no_matching_tmux_session_daemon' };
     }
 
@@ -357,7 +421,8 @@ export class ClockClientRegistry {
             requestId: args.requestId,
             source: args.source,
             tmuxSessionId,
-            sessionId: tmuxSessionId
+            sessionId: tmuxSessionId,
+            ...(workdirHint ? { workdir: workdirHint } : {})
           }),
           signal: controller.signal
         });

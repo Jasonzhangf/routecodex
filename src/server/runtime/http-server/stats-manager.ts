@@ -92,6 +92,8 @@ export type StatsPersistOptions = {
 };
 
 const DEFAULT_STATS_LOG_PATH = path.join(os.homedir(), '.routecodex', 'logs', 'provider-stats.jsonl');
+const DEFAULT_HISTORY_MAX_TAIL_BYTES = 8 * 1024 * 1024;
+const DEFAULT_HISTORY_MAX_LINES = 20000;
 
 function resolveBoolFromEnv(value: string | undefined, fallback: boolean): boolean {
   if (!value) {
@@ -119,6 +121,49 @@ function isStatsVerboseEnabled(enabled: boolean): boolean {
     process.env.ROUTECODEX_STATS_VERBOSE ?? process.env.RCC_STATS_VERBOSE,
     enabled && buildInfo.mode !== 'release'
   );
+}
+
+function resolvePositiveIntEnv(primary: string | undefined, secondary: string | undefined, fallback: number): number {
+  const values = [primary, secondary];
+  for (const value of values) {
+    const parsed = Number(String(value || '').trim());
+    if (Number.isFinite(parsed) && parsed >= 1) {
+      return Math.floor(parsed);
+    }
+  }
+  return fallback;
+}
+
+function readTailLines(filePath: string, maxTailBytes: number, maxLines: number): string[] {
+  let text = '';
+  const stat = fsSync.statSync(filePath);
+  if (!Number.isFinite(stat.size) || stat.size <= 0) {
+    return [];
+  }
+
+  if (stat.size <= maxTailBytes) {
+    text = fsSync.readFileSync(filePath, 'utf-8');
+  } else {
+    const start = Math.max(0, stat.size - maxTailBytes);
+    const fd = fsSync.openSync(filePath, 'r');
+    try {
+      const length = stat.size - start;
+      const buffer = Buffer.alloc(length);
+      const read = fsSync.readSync(fd, buffer, 0, length, start);
+      text = buffer.toString('utf8', 0, read);
+      const firstNl = text.indexOf('\n');
+      if (firstNl >= 0) {
+        text = text.slice(firstNl + 1);
+      }
+    } finally {
+      fsSync.closeSync(fd);
+    }
+  }
+
+  return text
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .slice(-maxLines);
 }
 
 export class StatsManager {
@@ -412,8 +457,17 @@ export class StatsManager {
       this.historicalSampleCount = 0;
     }
     try {
-      const raw = fsSync.readFileSync(logPath, 'utf-8');
-      const lines = raw.split(/\r?\n/).filter(Boolean);
+      const maxTailBytes = resolvePositiveIntEnv(
+        process.env.ROUTECODEX_STATS_HISTORY_MAX_TAIL_BYTES,
+        process.env.RCC_STATS_HISTORY_MAX_TAIL_BYTES,
+        DEFAULT_HISTORY_MAX_TAIL_BYTES
+      );
+      const maxLines = resolvePositiveIntEnv(
+        process.env.ROUTECODEX_STATS_HISTORY_MAX_LINES,
+        process.env.RCC_STATS_HISTORY_MAX_LINES,
+        DEFAULT_HISTORY_MAX_LINES
+      );
+      const lines = readTailLines(logPath, maxTailBytes, maxLines);
       for (const line of lines) {
         try {
           const record = JSON.parse(line) as StatsSnapshot & { reason?: string; pid?: number };

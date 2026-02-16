@@ -2,6 +2,7 @@ import type { PipelineExecutionInput } from '../../handlers/types.js';
 import { asRecord } from './provider-utils.js';
 import { extractSessionIdentifiersFromMetadata } from '../../../modules/llmswitch/bridge.js';
 import { extractClockClientDaemonIdFromApiKey } from '../../../utils/clock-client-token.js';
+import { getClockClientRegistry } from './clock-client-registry.js';
 
 export function cloneClientHeaders(source: unknown): Record<string, string> | undefined {
   if (!source || typeof source !== 'object') {
@@ -108,6 +109,56 @@ function extractSessionTokenFromBodyMeta(meta: Record<string, unknown>): { sessi
   };
 }
 
+function extractWorkdir(
+  userMeta: Record<string, unknown>,
+  bodyMeta: Record<string, unknown>,
+  headers: Record<string, unknown> | undefined,
+  clientHeaders?: Record<string, string>
+): string | undefined {
+  const directCandidates = [
+    userMeta.workdir,
+    userMeta.cwd,
+    userMeta.workingDirectory,
+    bodyMeta.workdir,
+    bodyMeta.cwd,
+    bodyMeta.workingDirectory
+  ];
+  for (const candidate of directCandidates) {
+    if (typeof candidate === 'string' && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+
+  const headerSources: Array<Record<string, unknown> | undefined> = [
+    headers,
+    clientHeaders ? (clientHeaders as unknown as Record<string, unknown>) : undefined
+  ];
+  for (const source of headerSources) {
+    const fromHeader =
+      extractHeaderValue(source, 'x-routecodex-workdir')
+      || extractHeaderValue(source, 'x-rcc-workdir')
+      || extractHeaderValue(source, 'x-workdir');
+    if (fromHeader) {
+      return fromHeader;
+    }
+  }
+
+  return undefined;
+}
+
+function resolveWorkdirFromClockDaemon(daemonId: string | undefined): string | undefined {
+  if (!daemonId) {
+    return undefined;
+  }
+  try {
+    const record = getClockClientRegistry().findByDaemonId(daemonId);
+    const workdir = typeof record?.workdir === 'string' ? record.workdir.trim() : '';
+    return workdir || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function buildRequestMetadata(input: PipelineExecutionInput): Record<string, unknown> {
   const userMeta = asRecord(input.metadata);
   const bodyMeta = asRecord(asRecord(input.body).metadata);
@@ -130,6 +181,9 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
   const routeHint = extractRouteHint(input) ?? userMeta.routeHint;
   const processMode = (userMeta.processMode as string) || 'chat';
   const resolvedClockDaemonId = extractClockDaemonId(userMeta, headers);
+  const resolvedWorkdir =
+    extractWorkdir(userMeta, bodyMeta, headers, normalizedClientHeaders)
+    || resolveWorkdirFromClockDaemon(resolvedClockDaemonId);
   const metadata: Record<string, unknown> = {
     ...userMeta,
     entryEndpoint: input.entryEndpoint,
@@ -140,7 +194,8 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
     stream: userMeta.stream === true,
     ...(resolvedUserAgent ? { userAgent: resolvedUserAgent } : {}),
     ...(resolvedOriginator ? { clientOriginator: resolvedOriginator } : {}),
-    ...(resolvedClockDaemonId ? { clockDaemonId: resolvedClockDaemonId } : {})
+    ...(resolvedClockDaemonId ? { clockDaemonId: resolvedClockDaemonId } : {}),
+    ...(resolvedWorkdir ? { workdir: resolvedWorkdir } : {})
   };
 
   if (normalizedClientHeaders) {

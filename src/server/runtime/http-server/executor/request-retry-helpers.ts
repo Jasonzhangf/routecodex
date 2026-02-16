@@ -229,13 +229,17 @@ export function bindClockConversationSession(metadata: Record<string, unknown>):
   const daemonId = normalizeSessionToken(metadata.clockDaemonId)
     ?? normalizeSessionToken(metadata.clockClientDaemonId);
   const clientType = inferClockClientTypeFromMetadata(metadata);
+  const workdir = normalizeSessionToken(metadata.workdir)
+    ?? normalizeSessionToken(metadata.cwd)
+    ?? normalizeSessionToken(metadata.workingDirectory);
 
   try {
     getClockClientRegistry().bindConversationSession({
       conversationSessionId,
       ...(tmuxSessionId ? { tmuxSessionId } : {}),
       ...(daemonId ? { daemonId } : {}),
-      ...(clientType ? { clientType } : {})
+      ...(clientType ? { clientType } : {}),
+      ...(workdir ? { workdir } : {})
     });
   } catch {
     // best-effort only

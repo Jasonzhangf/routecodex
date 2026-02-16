@@ -355,16 +355,23 @@ async function ensureServerReady(
 
 function resolveWorkingDirectory(ctx: LauncherCommandContext, fsImpl: typeof fs, pathImpl: typeof path, requested?: string): string {
   const getCwd = ctx.cwd ?? (() => process.cwd());
-  try {
-    const candidate = requested ? String(requested) : getCwd();
-    const resolved = pathImpl.resolve(candidate);
-    if (fsImpl.existsSync(resolved)) {
-      return resolved;
+  const normalizeRequested = typeof requested === 'string' ? requested.trim() : '';
+  if (normalizeRequested) {
+    const resolved = pathImpl.resolve(normalizeRequested);
+    if (!fsImpl.existsSync(resolved)) {
+      throw new Error(`Invalid --cwd: path does not exist: ${resolved}`);
     }
+    const stats = fsImpl.statSync(resolved);
+    if (!stats || typeof stats.isDirectory !== 'function' || !stats.isDirectory()) {
+      throw new Error(`Invalid --cwd: path is not a directory: ${resolved}`);
+    }
+    return resolved;
+  }
+  try {
+    return pathImpl.resolve(getCwd());
   } catch {
     return getCwd();
   }
-  return getCwd();
 }
 
 function isTmuxAvailable(spawnSyncImpl: typeof spawnSync = spawnSync): boolean {
@@ -762,6 +769,7 @@ function sendJson(res: ServerResponse, status: number, payload: Record<string, u
 async function startClockClientService(args: {
   ctx: LauncherCommandContext;
   resolved: ResolvedServerConnection;
+  workdir: string;
   tmuxTarget: string | null;
   spawnSyncImpl: typeof spawnSync;
   clientType: string;
@@ -775,6 +783,7 @@ async function startClockClientService(args: {
   const {
     ctx,
     resolved,
+    workdir,
     tmuxTarget,
     spawnSyncImpl,
     clientType,
@@ -917,6 +926,7 @@ async function startClockClientService(args: {
         daemonId,
         tmuxSessionId,
         sessionId: tmuxSessionId,
+        workdir,
         clientType,
         ...(normalizedTmuxTarget ? { tmuxTarget: normalizedTmuxTarget } : {}),
         managedTmuxSession,
@@ -937,6 +947,7 @@ async function startClockClientService(args: {
       daemonId,
       tmuxSessionId,
       sessionId: tmuxSessionId,
+      workdir,
       managedTmuxSession,
       ...normalizeManagedProcessPayload()
     });
@@ -1201,6 +1212,7 @@ export function createLauncherCommand(program: Command, ctx: LauncherCommandCont
       const clockClientService = await startClockClientService({
         ctx,
         resolved,
+        workdir: currentCwd,
         tmuxTarget,
         spawnSyncImpl,
         clientType: spec.commandName,

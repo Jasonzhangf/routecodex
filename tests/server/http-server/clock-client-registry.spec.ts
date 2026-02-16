@@ -311,4 +311,97 @@ describe('ClockClientRegistry cleanup', () => {
     expect(cleanup.skippedKillTmuxSessionIds).toEqual(['rcc_dead_unmanaged']);
     expect(killed).toEqual([]);
   });
+
+  it('bindConversationSession enforces workdir-scoped candidate selection', () => {
+    const registry = new ClockClientRegistry();
+    registry.register({
+      daemonId: 'clockd_workdir_a',
+      callbackUrl: 'http://127.0.0.1:65550/inject',
+      tmuxSessionId: 'rcc_workdir_a',
+      clientType: 'codex',
+      workdir: '/tmp/routecodex-workdir-a'
+    });
+    registry.register({
+      daemonId: 'clockd_workdir_b',
+      callbackUrl: 'http://127.0.0.1:65551/inject',
+      tmuxSessionId: 'rcc_workdir_b',
+      clientType: 'codex',
+      workdir: '/tmp/routecodex-workdir-b'
+    });
+
+    const bindA = registry.bindConversationSession({
+      conversationSessionId: 'conv_workdir_a',
+      clientType: 'codex',
+      workdir: '/tmp/routecodex-workdir-a'
+    });
+    expect(bindA.ok).toBe(true);
+    expect(bindA.daemonId).toBe('clockd_workdir_a');
+
+    const bindMissing = registry.bindConversationSession({
+      conversationSessionId: 'conv_workdir_missing',
+      clientType: 'codex',
+      workdir: '/tmp/routecodex-workdir-missing'
+    });
+    expect(bindMissing.ok).toBe(false);
+    expect(bindMissing.reason).toBe('no_binding_candidate_for_workdir');
+  });
+
+  it('inject enforces workdir when tmux session is shared', async () => {
+    const registry = new ClockClientRegistry();
+    registry.register({
+      daemonId: 'clockd_shared_tmux_a',
+      callbackUrl: 'http://127.0.0.1:65552/inject',
+      tmuxSessionId: 'rcc_shared_tmux_workdir',
+      workdir: '/tmp/routecodex-shared-workdir-a'
+    });
+    registry.register({
+      daemonId: 'clockd_shared_tmux_b',
+      callbackUrl: 'http://127.0.0.1:65553/inject',
+      tmuxSessionId: 'rcc_shared_tmux_workdir',
+      workdir: '/tmp/routecodex-shared-workdir-b'
+    });
+
+    const originalFetch = global.fetch;
+    const hits: string[] = [];
+    global.fetch = (async (input: RequestInfo | URL) => {
+      hits.push(String(input));
+      return {
+        ok: true,
+        status: 200,
+        text: async () => ''
+      } as unknown as Response;
+    }) as typeof fetch;
+
+    try {
+      const injectA = await registry.inject({
+        tmuxSessionId: 'rcc_shared_tmux_workdir',
+        workdir: '/tmp/routecodex-shared-workdir-a',
+        text: 'hello-a'
+      });
+      expect(injectA.ok).toBe(true);
+      expect(injectA.daemonId).toBe('clockd_shared_tmux_a');
+
+      const injectB = await registry.inject({
+        tmuxSessionId: 'rcc_shared_tmux_workdir',
+        workdir: '/tmp/routecodex-shared-workdir-b',
+        text: 'hello-b'
+      });
+      expect(injectB.ok).toBe(true);
+      expect(injectB.daemonId).toBe('clockd_shared_tmux_b');
+
+      const mismatch = await registry.inject({
+        tmuxSessionId: 'rcc_shared_tmux_workdir',
+        workdir: '/tmp/routecodex-shared-workdir-c',
+        text: 'hello-c'
+      });
+      expect(mismatch.ok).toBe(false);
+      expect(mismatch.reason).toBe('workdir_mismatch');
+      expect(hits).toEqual([
+        'http://127.0.0.1:65552/inject',
+        'http://127.0.0.1:65553/inject'
+      ]);
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
 });

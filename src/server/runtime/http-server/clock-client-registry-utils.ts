@@ -1,7 +1,10 @@
+import path from 'node:path';
+
 export type ClockClientRecord = {
   daemonId: string;
   tmuxSessionId?: string;
   sessionId?: string;
+  workdir?: string;
   conversationSessionIds?: string[];
   clientType?: string;
   callbackUrl: string;
@@ -19,6 +22,7 @@ export type ClockClientRecord = {
 export type ClockClientInjectArgs = {
   tmuxSessionId?: string;
   sessionId?: string;
+  workdir?: string;
   text: string;
   requestId?: string;
   source?: string;
@@ -35,6 +39,7 @@ export type ClockConversationBindArgs = {
   tmuxSessionId?: string;
   daemonId?: string;
   clientType?: string;
+  workdir?: string;
 };
 
 export type ClockCleanupResult = {
@@ -68,6 +73,24 @@ export function normalizeString(value: unknown): string | undefined {
   }
   const trimmed = value.trim();
   return trimmed || undefined;
+}
+
+export function normalizeWorkdir(value: unknown): string | undefined {
+  const normalized = normalizeString(value);
+  if (!normalized) {
+    return undefined;
+  }
+  if (!path.isAbsolute(normalized)) {
+    return undefined;
+  }
+  const resolved = path.normalize(normalized);
+  if (!resolved) {
+    return undefined;
+  }
+  if (process.platform === 'win32') {
+    return resolved.toLowerCase();
+  }
+  return resolved;
 }
 
 export function resolveHeartbeatTtlMs(): number {

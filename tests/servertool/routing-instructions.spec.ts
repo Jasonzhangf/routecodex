@@ -255,7 +255,7 @@ describe('Routing instruction parsing and application', () => {
     expect(inst.stopMessageMaxRepeats).toBe(3);
   });
 
-  testIf(SUPPORTS_STOPMESSAGE_MODE_SHORTHAND)('mode shorthand keeps mode and repeats without forcing stopMessage text', () => {
+  testIf(SUPPORTS_STOPMESSAGE_MODE_SHORTHAND)('mode shorthand no longer arms stopMessage without text', () => {
     const instructions = parseRoutingInstructions(buildMessages('<**stopMessage:on,10**>这里是本轮普通请求文本'));
     expect(instructions).toHaveLength(1);
     const inst = instructions[0] as any;
@@ -265,8 +265,8 @@ describe('Routing instruction parsing and application', () => {
 
     const nextState = applyRoutingInstructions(instructions, createState());
     expect(nextState.stopMessageText).toBeUndefined();
-    expect(nextState.stopMessageStageMode).toBe('on');
-    expect(nextState.stopMessageMaxRepeats).toBe(10);
+    expect(nextState.stopMessageStageMode).toBeUndefined();
+    expect(nextState.stopMessageMaxRepeats).toBeUndefined();
   });
 
   testIf(SUPPORTS_HISTORY_MARKER_REPLAY)('keeps stopMessage command when latest marker is previous user without assistant reply', () => {
@@ -321,7 +321,7 @@ describe('Routing instruction parsing and application', () => {
     }
   );
 
-  testIf(SUPPORTS_STOPMESSAGE_MODE_SHORTHAND)('applies stopMessage mode repeat update without replacing text', () => {
+  testIf(SUPPORTS_STOPMESSAGE_MODE_SHORTHAND)('mode shorthand no longer updates repeats without text', () => {
     const baseState = createState({
       stopMessageText: '继续',
       stopMessageMaxRepeats: 1,
@@ -331,17 +331,17 @@ describe('Routing instruction parsing and application', () => {
     const nextState = applyRoutingInstructions(instructions, baseState);
     expect(nextState.stopMessageText).toBe('继续');
     expect(nextState.stopMessageStageMode).toBe('on');
-    expect(nextState.stopMessageMaxRepeats).toBe(3);
+    expect(nextState.stopMessageMaxRepeats).toBe(1);
   });
 
-  test('defaults stopMessage mode repeats to 10 when instruction omits repeat', () => {
+  test('mode-only instruction does not create stopMessage state when text is absent', () => {
     const nextState = applyRoutingInstructions(
       [{ type: 'stopMessageMode', stopMessageStageMode: 'on' }],
       createState()
     );
-    expect(nextState.stopMessageStageMode).toBe('on');
-    expect(nextState.stopMessageMaxRepeats).toBe(DEFAULT_STOPMESSAGE_MAX_REPEATS);
-    expect(nextState.stopMessageUsed).toBe(0);
+    expect(nextState.stopMessageStageMode).toBeUndefined();
+    expect(nextState.stopMessageMaxRepeats).toBeUndefined();
+    expect(nextState.stopMessageUsed).toBeUndefined();
   });
 
 

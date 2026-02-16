@@ -66,12 +66,16 @@ function bindClockConversationSession(metadata: Record<string, unknown>): void {
   const tmuxSessionId = normalizeSessionToken(metadata.tmuxSessionId);
   const daemonId = normalizeSessionToken(metadata.clockDaemonId)
     ?? normalizeSessionToken(metadata.clockClientDaemonId);
+  const workdir = normalizeSessionToken(metadata.workdir)
+    ?? normalizeSessionToken(metadata.cwd)
+    ?? normalizeSessionToken(metadata.workingDirectory);
 
   try {
     getClockClientRegistry().bindConversationSession({
       conversationSessionId,
       ...(tmuxSessionId ? { tmuxSessionId } : {}),
-      ...(daemonId ? { daemonId } : {})
+      ...(daemonId ? { daemonId } : {}),
+      ...(workdir ? { workdir } : {})
     });
   } catch {
     // best-effort only
@@ -238,6 +242,7 @@ export async function convertProviderResponseIfNeeded(
           await injectClockClientPrompt({
             tmuxSessionId: typeof nestedMetadata.tmuxSessionId === 'string' ? nestedMetadata.tmuxSessionId : undefined,
             sessionId: typeof nestedMetadata.sessionId === 'string' ? nestedMetadata.sessionId : undefined,
+            workdir: typeof nestedMetadata.workdir === 'string' ? nestedMetadata.workdir : undefined,
             text,
             requestId: reenterOpts.requestId,
             source: 'servertool.reenter'

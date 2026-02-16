@@ -49,6 +49,22 @@ function resolveBoolFromEnv(value: string | undefined, fallback: boolean): boole
   return fallback;
 }
 
+function resolveExpectedParentPid(): number | null {
+  const raw = String(process.env.ROUTECODEX_EXPECT_PARENT_PID ?? process.env.RCC_EXPECT_PARENT_PID ?? '').trim();
+  if (!raw) {
+    return null;
+  }
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return null;
+  }
+  return parsed;
+}
+
+function shouldPrintShutdownSummary(): boolean {
+  return resolveBoolFromEnv(process.env.ROUTECODEX_SHUTDOWN_CONSOLE ?? process.env.RCC_SHUTDOWN_CONSOLE, false);
+}
+
 function isMinimalRuntimeLogEnabled(): boolean {
   return resolveBoolFromEnv(
     process.env.ROUTECODEX_MINIMAL_RUNTIME_LOGS ?? process.env.RCC_MINIMAL_RUNTIME_LOGS,
@@ -237,8 +253,10 @@ process.on('exit', (code) => {
     source: 'index.process.on.exit',
     details: payload
   });
-  // Single-line JSON for easy grep in logs
-  console.log('[routecodex:shutdown]', JSON.stringify(payload));
+  // Optional console summary; lifecycle JSONL always records this event.
+  if (shouldPrintShutdownSummary()) {
+    console.log('[routecodex:shutdown]', JSON.stringify(payload));
+  }
 });
 
 function readString(value: unknown): string | undefined {
@@ -1216,6 +1234,62 @@ async function gracefulShutdown(app: RouteCodexApp): Promise<void> {
   }
 }
 
+function startParentExitGuard(app: RouteCodexApp): void {
+  const expectedParentPid = resolveExpectedParentPid();
+  if (!expectedParentPid) {
+    return;
+  }
+
+  let shutdownTriggered = false;
+  logProcessLifecycle({
+    event: 'parent_guard',
+    source: 'index.parentExitGuard',
+    details: {
+      result: 'armed',
+      expectedParentPid,
+      currentParentPid: process.ppid
+    }
+  });
+
+  const checkParent = () => {
+    if (shutdownTriggered) {
+      return;
+    }
+    if (process.ppid === expectedParentPid) {
+      return;
+    }
+
+    let expectedParentAlive = true;
+    try {
+      process.kill(expectedParentPid, 0);
+    } catch {
+      expectedParentAlive = false;
+    }
+
+    if (expectedParentAlive && process.ppid > 1) {
+      return;
+    }
+
+    shutdownTriggered = true;
+    logProcessLifecycle({
+      event: 'parent_guard',
+      source: 'index.parentExitGuard',
+      details: {
+        result: 'parent_missing_shutdown',
+        expectedParentPid,
+        currentParentPid: process.ppid,
+        expectedParentAlive
+      }
+    });
+    recordShutdownReason({ kind: 'signal', signal: 'SIGTERM' });
+    void gracefulShutdown(app);
+  };
+
+  const timer = setInterval(checkParent, 1500);
+  timer.unref?.();
+  checkParent();
+}
+
 function resolveRestartEntryScript(argv: string[]): string | null {
   if (!Array.isArray(argv) || argv.length === 0) {
     return null;
@@ -1401,6 +1475,7 @@ async function main(): Promise<void> {
 
   // Start the server
   await app.start();
+  startParentExitGuard(app);
 }
 
 // Start the application if this file is run directly

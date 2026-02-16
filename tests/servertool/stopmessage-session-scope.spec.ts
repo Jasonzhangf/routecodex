@@ -92,7 +92,7 @@ describe('stopMessage is session-scoped', () => {
     expect(fs.existsSync(path.join(SESSION_DIR, 'conversation-conv-should-not-be-used.json'))).toBe(false);
   });
 
-  test('mode-only stopMessage:on persists default max without capturing plain text', () => {
+  test('mode-only stopMessage:on is ignored and does not persist state', () => {
     const engine = buildEngine();
     const sessionId = 'sess-mode-only-default';
     const request: StandardizedRequest = {
@@ -110,14 +110,10 @@ describe('stopMessage is session-scoped', () => {
       routeHint: 'default'
     } as any);
 
-    const persisted = readSessionState(sessionId);
-    expect(persisted?.state?.stopMessageText).toBeUndefined();
-    expect(persisted?.state?.stopMessageStageMode).toBe('on');
-    expect(persisted?.state?.stopMessageMaxRepeats).toBe(10);
-    expect(persisted?.state?.stopMessageUsed).toBe(0);
+    expect(fs.existsSync(path.join(SESSION_DIR, `session-${sessionId}.json`))).toBe(false);
   });
 
-  test('mode-only stopMessage:on is exposed to runtime snapshot', () => {
+  test('mode-only stopMessage:on is not exposed to runtime snapshot', () => {
     const engine = buildEngine();
     const sessionId = 'sess-mode-only-snapshot';
     const request: StandardizedRequest = {
@@ -138,13 +134,10 @@ describe('stopMessage is session-scoped', () => {
     engine.route(request, metadata);
 
     const snapshot = engine.getStopMessageState(metadata);
-    expect(snapshot).not.toBeNull();
-    expect(snapshot?.stopMessageText).toBeUndefined();
-    expect(snapshot?.stopMessageStageMode).toBe('on');
-    expect(snapshot?.stopMessageMaxRepeats).toBe(10);
+    expect(snapshot).toBeNull();
   });
 
-  test('mode-only stopMessage:on,10 re-arms used counter when explicitly set again', () => {
+  test('mode-only stopMessage:on,10 clears legacy mode-only state when explicitly set again', () => {
     const engine = buildEngine();
     const sessionId = 'sess-mode-only-rearm';
     const metadata = {
@@ -154,18 +147,7 @@ describe('stopMessage is session-scoped', () => {
       sessionId,
       routeHint: 'default'
     } as any;
-    const request: StandardizedRequest = {
-      model: 'gpt-test',
-      messages: [{ role: 'user', content: '<**stopMessage:on,10**>继续执行当前任务' }],
-      tools: [],
-      parameters: {}
-    } as any;
-
-    engine.route(request, metadata);
-    const before = readSessionState(sessionId);
-    const beforeUpdatedAt = before?.state?.stopMessageUpdatedAt;
-    expect(before?.state?.stopMessageUsed).toBe(0);
-
+    const beforeUpdatedAt = Date.now() - 100;
     const consumedAt = Date.now();
     saveRoutingInstructionStateSync(`session:${sessionId}`, {
       forcedTarget: undefined,
@@ -196,15 +178,17 @@ describe('stopMessage is session-scoped', () => {
       }
     );
 
+    const snapshot = engine.getStopMessageState(metadata);
+    expect(snapshot).toBeNull();
     const after = readSessionState(sessionId);
-    expect(after?.state?.stopMessageUsed).toBe(0);
-    expect(after?.state?.stopMessageMaxRepeats).toBe(10);
-    expect(after?.state?.stopMessageLastUsedAt).toBeUndefined();
+    expect(after?.state?.stopMessageText).toBeUndefined();
+    expect(after?.state?.stopMessageStageMode).toBeUndefined();
+    expect(after?.state?.stopMessageMaxRepeats).toBeUndefined();
     expect(typeof after?.state?.stopMessageUpdatedAt).toBe('number');
     expect(after?.state?.stopMessageUpdatedAt).toBeGreaterThanOrEqual(beforeUpdatedAt);
   });
 
-  test('mode-only stopMessage persists across engine restart', () => {
+  test('mode-only stopMessage does not persist across engine restart', () => {
     const sessionId = 'sess-mode-only-restart';
     const request: StandardizedRequest = {
       model: 'gpt-test',
@@ -226,13 +210,10 @@ describe('stopMessage is session-scoped', () => {
 
     const engine2 = buildEngine();
     const snapshot = engine2.getStopMessageState(metadata);
-    expect(snapshot).not.toBeNull();
-    expect(snapshot?.stopMessageText).toBeUndefined();
-    expect(snapshot?.stopMessageStageMode).toBe('on');
-    expect(snapshot?.stopMessageMaxRepeats).toBe(10);
+    expect(snapshot).toBeNull();
   });
 
-  test('restores stopMessage across restart when server-scoped session dir changes', () => {
+  test('does not restore mode-only stopMessage across restart when server-scoped session dir changes', () => {
     const sessionId = 'sess-mode-only-restart-scoped-fallback';
     const request: StandardizedRequest = {
       model: 'gpt-test',
@@ -265,7 +246,7 @@ describe('stopMessage is session-scoped', () => {
       engine1.route(request, metadata);
 
       const legacyScopedFile = path.join(firstScopedDir, 'session-' + sessionId + '.json');
-      expect(fs.existsSync(legacyScopedFile)).toBe(true);
+      expect(fs.existsSync(legacyScopedFile)).toBe(false);
 
       process.env.ROUTECODEX_SESSION_DIR = secondScopedDir;
       const engine2 = buildEngine();
@@ -274,12 +255,9 @@ describe('stopMessage is session-scoped', () => {
         requestId: 'req_stopmessage_mode_only_restart_scoped_2'
       } as any);
 
-      expect(snapshot).not.toBeNull();
-      expect(snapshot?.stopMessageText).toBeUndefined();
-      expect(snapshot?.stopMessageStageMode).toBe('on');
-      expect(snapshot?.stopMessageMaxRepeats).toBe(10);
+      expect(snapshot).toBeNull();
       const migratedFile = path.join(secondScopedDir, 'session-' + sessionId + '.json');
-      expect(fs.existsSync(migratedFile)).toBe(true);
+      expect(fs.existsSync(migratedFile)).toBe(false);
     } finally {
       if (previousSessionDir === undefined) {
         process.env.ROUTECODEX_SESSION_DIR = SESSION_DIR;

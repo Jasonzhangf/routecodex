@@ -10,6 +10,7 @@ import {
   updateClockTaskSnapshot
 } from '../../../modules/llmswitch/bridge.js';
 import { getClockClientRegistry } from './clock-client-registry.js';
+import { normalizeWorkdir } from './clock-client-registry-utils.js';
 import { isLocalRequest } from './daemon-admin-routes.js';
 import { isTmuxSessionAlive, killManagedTmuxSession } from './tmux-session-probe.js';
 import { terminateManagedClientProcess } from './managed-process-probe.js';
@@ -46,6 +47,7 @@ export function registerClockClientRoutes(app: Application): void {
     }
 
     const tmuxSessionId = parseString(body.tmuxSessionId) || parseString(body.sessionId);
+    const workdir = normalizeWorkdir(parseString(body.workdir) || parseString(body.cwd) || parseString(body.workingDirectory));
     const managedTmuxSession = parseBoolean(body.managedTmuxSession);
     const managedClientProcess = parseBoolean(body.managedClientProcess);
     const managedClientPid = parsePositiveInt(body.managedClientPid);
@@ -54,6 +56,7 @@ export function registerClockClientRoutes(app: Application): void {
       daemonId,
       callbackUrl,
       ...(tmuxSessionId ? { tmuxSessionId } : {}),
+      ...(workdir ? { workdir } : {}),
       clientType: parseString(body.clientType),
       tmuxTarget: parseString(body.tmuxTarget),
       ...(managedTmuxSession !== undefined ? { managedTmuxSession } : {}),
@@ -68,7 +71,8 @@ export function registerClockClientRoutes(app: Application): void {
         conversationSessionId,
         ...(tmuxSessionId ? { tmuxSessionId } : {}),
         daemonId,
-        ...(rec.clientType ? { clientType: rec.clientType } : {})
+        ...(rec.clientType ? { clientType: rec.clientType } : {}),
+        ...(rec.workdir ? { workdir: rec.workdir } : {})
       });
     }
 
@@ -87,6 +91,7 @@ export function registerClockClientRoutes(app: Application): void {
     }
     const ok = registry.heartbeat(daemonId, {
       tmuxSessionId: parseString(body.tmuxSessionId) || parseString(body.sessionId),
+      workdir: normalizeWorkdir(parseString(body.workdir) || parseString(body.cwd) || parseString(body.workingDirectory)),
       managedTmuxSession: parseBoolean(body.managedTmuxSession),
       managedClientProcess: parseBoolean(body.managedClientProcess),
       managedClientPid: parsePositiveInt(body.managedClientPid),
@@ -133,6 +138,7 @@ export function registerClockClientRoutes(app: Application): void {
 
     const tmuxSessionId = parseString(body.tmuxSessionId);
     const sessionAlias = parseString(body.sessionId);
+    const workdir = normalizeWorkdir(parseString(body.workdir) || parseString(body.cwd) || parseString(body.workingDirectory));
     if (!tmuxSessionId && !sessionAlias) {
       res.status(400).json({ error: { message: 'tmuxSessionId is required', code: 'bad_request' } });
       return;
@@ -142,7 +148,8 @@ export function registerClockClientRoutes(app: Application): void {
       registry.bindConversationSession({
         conversationSessionId: sessionAlias,
         tmuxSessionId,
-        clientType: parseString(body.clientType)
+        clientType: parseString(body.clientType),
+        ...(workdir ? { workdir } : {})
       });
     }
 
@@ -150,6 +157,7 @@ export function registerClockClientRoutes(app: Application): void {
       text,
       ...(tmuxSessionId ? { tmuxSessionId } : {}),
       ...(sessionAlias ? { sessionId: sessionAlias } : {}),
+      ...(workdir ? { workdir } : {}),
       requestId: parseString(body.requestId),
       source: parseString(body.source)
     });

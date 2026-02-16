@@ -231,6 +231,11 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
         if (ctx.isDevPackage) {
           env.ROUTECODEX_PORT = String(resolvedPort);
         }
+        const childProcessEnv = {
+          ...env,
+          ROUTECODEX_EXPECT_PARENT_PID: String(process.pid),
+          RCC_EXPECT_PARENT_PID: String(process.pid)
+        } as NodeJS.ProcessEnv;
 
         const args: string[] = [serverEntry, modulesConfigPath];
         const routeCodexHome = pathImpl.join(home(), '.routecodex');
@@ -319,7 +324,7 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
               ctx.exit(0);
             }
 
-            const childProc = ctx.spawn(nodeBin, args, { stdio: 'inherit', env });
+            const childProc = ctx.spawn(nodeBin, args, { stdio: 'inherit', env: childProcessEnv });
             writePidFile(childProc.pid);
 
             const exitInfo = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
@@ -363,7 +368,7 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
           }
         }
 
-        const childProc = ctx.spawn(nodeBin, args, { stdio: 'inherit', env });
+        const childProc = ctx.spawn(nodeBin, args, { stdio: 'inherit', env: childProcessEnv });
         writePidFile(childProc.pid);
 
         spinner.succeed(`RouteCodex server starting on ${serverHost}:${resolvedPort}`);
@@ -395,15 +400,8 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
           } catch {
             /* ignore */
           }
-          if (!ctx.isWindows) {
-            try {
-              if (childProc.pid) {
-                process.kill(-childProc.pid, sig);
-              }
-            } catch {
-              /* ignore */
-            }
-          }
+          // Avoid process-group signals here; only target the known child pid,
+          // then rely on managed pid discovery + graceful/force cleanup below.
           const deadline = Date.now() + 3500;
           while (Date.now() < deadline) {
             if (ctx.findListeningPids(resolvedPort).length === 0) {break;}

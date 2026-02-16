@@ -293,7 +293,7 @@ describe('Chat semantics stage 1 bridge', () => {
     expect(content).toContain('[routecodex:continue_execution_directive]');
   });
 
-  it('suppresses continue_execution injection when mode-only stopMessage state is active', async () => {
+  it('keeps continue_execution injection when stopMessage is mode-only (mode-only disabled)', async () => {
     const chat = buildChatEnvelope();
     const standardized = chatEnvelopeToStandardized(chat, {
       adapterContext,
@@ -314,12 +314,12 @@ describe('Chat semantics stage 1 bridge', () => {
     const hasContinueTool = (result.processedRequest?.tools ?? []).some(
       (tool) => tool.function?.name === 'continue_execution'
     );
-    expect(hasContinueTool).toBe(false);
+    expect(hasContinueTool).toBe(true);
 
     const userMessages = (result.processedRequest?.messages ?? []).filter((message) => message.role === 'user');
     const lastUser = userMessages[userMessages.length - 1];
     const content = typeof lastUser?.content === 'string' ? lastUser.content : '';
-    expect(content).not.toContain('[routecodex:continue_execution_directive]');
+    expect(content).toContain('[routecodex:continue_execution_directive]');
   });
 
 });

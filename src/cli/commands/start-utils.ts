@@ -91,7 +91,8 @@ export function buildStartCommandArgs(options: StartCommandArgOptions, configPat
 export function resolveDaemonRestartDelayMs(env: NodeJS.ProcessEnv): number {
   const raw = String(env.ROUTECODEX_DAEMON_RESTART_DELAY_MS ?? env.RCC_DAEMON_RESTART_DELAY_MS ?? '').trim();
   const parsed = Number.parseInt(raw, 10);
-  if (!Number.isFinite(parsed) || parsed < 0) {
+  // Guardrail: 0ms can cause a hot restart loop when child exits immediately.
+  if (!Number.isFinite(parsed) || parsed < 200) {
     return 1200;
   }
   return Math.min(60_000, parsed);

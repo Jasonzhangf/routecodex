@@ -275,21 +275,59 @@ export function shouldCaptureProviderStreamSnapshots(): boolean {
   return runtimeFlags.snapshotsEnabled && buildInfo.mode !== 'release';
 }
 
+function resolveProviderStreamSnapshotMaxBytes(): number {
+  const raw = String(
+    process.env.ROUTECODEX_PROVIDER_STREAM_SNAPSHOT_MAX_BYTES ||
+      process.env.RCC_PROVIDER_STREAM_SNAPSHOT_MAX_BYTES ||
+      '2000000'
+  ).trim();
+  const parsed = Number(raw);
+  if (!raw) {
+    return 2_000_000;
+  }
+  if (Number.isFinite(parsed) && parsed >= 0) {
+    return Math.floor(parsed);
+  }
+  return 2_000_000;
+}
+
 export function attachProviderSseSnapshotStream(
   stream: NodeJS.ReadableStream,
   options: StreamSnapshotOptions
 ): NodeJS.ReadableStream {
+  const maxBytes = resolveProviderStreamSnapshotMaxBytes();
+  if (maxBytes <= 0) {
+    return stream;
+  }
+
   const tee = new PassThrough();
   const capture = new PassThrough();
   stream.pipe(tee);
   stream.pipe(capture);
 
   const chunks: Buffer[] = [];
+  let size = 0;
+  let truncated = false;
   capture.on('data', (chunk) => {
     const buf = toBuffer(chunk);
-    if (buf.length) {
-      chunks.push(buf);
+    if (!buf.length) {
+      return;
     }
+    if (truncated || size >= maxBytes) {
+      truncated = true;
+      return;
+    }
+    const remaining = maxBytes - size;
+    if (buf.length <= remaining) {
+      chunks.push(buf);
+      size += buf.length;
+      return;
+    }
+    if (remaining > 0) {
+      chunks.push(buf.slice(0, remaining));
+      size += remaining;
+    }
+    truncated = true;
   });
 
   let flushed = false;
@@ -308,6 +346,10 @@ export function attachProviderSseSnapshotStream(
     const payload: Record<string, unknown> = { mode: 'sse' };
     if (raw) {
       payload.raw = raw;
+    }
+    if (truncated) {
+      payload.truncated = true;
+      payload.maxBytes = maxBytes;
     }
     if (options.extra) {
       Object.assign(payload, options.extra);

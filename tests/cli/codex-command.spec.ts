@@ -30,6 +30,25 @@ function createStubFs() {
   } as any;
 }
 
+function createDirectoryFs(existingDirs: string[]) {
+  const normalized = new Set(existingDirs.map((entry) => entry.replace(/[\\/]+$/, '')));
+  return {
+    existsSync: (target: string) => normalized.has(String(target).replace(/[\\/]+$/, '')),
+    readFileSync: () => {
+      throw new Error('unexpected readFileSync');
+    },
+    statSync: (target: string) => ({
+      isDirectory: () => normalized.has(String(target).replace(/[\\/]+$/, '')),
+      isFile: () => !normalized.has(String(target).replace(/[\\/]+$/, ''))
+    }),
+    mkdirSync: () => {},
+    openSync: () => 1,
+    closeSync: () => {},
+    renameSync: () => {},
+    unlinkSync: () => {}
+  } as any;
+}
+
 
 function createConfigFs(port: number, apiKey = 'sk-config-key') {
   const configPath = '/home/test/.routecodex/config.json';
@@ -83,6 +102,87 @@ function extractTmuxLaunchShellCommand(call: { command: string; args: string[] }
 }
 
 describe('cli codex command', () => {
+  it('uses explicit --cwd as launch working directory', async () => {
+    const spawnCalls: Array<{ command: string; args: string[]; options: any }> = [];
+    const program = new Command();
+    const explicitCwd = '/home/test/workspace-explicit';
+
+    createCodexCommand(program, {
+      isDevPackage: false,
+      isWindows: false,
+      defaultDevPort: 5555,
+      nodeBin: 'node',
+      createSpinner: async () => createStubSpinner(),
+      logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
+      env: {},
+      rawArgv: ['codex', '--url', 'http://localhost:5520/proxy', '--cwd', explicitCwd],
+      fsImpl: createDirectoryFs([explicitCwd]),
+      homedir: () => '/home/test',
+      cwd: () => '/home/test/default',
+      sleep: async () => {},
+      fetch: (async () => ({ ok: true, json: async () => ({ status: 'ready' }) })) as any,
+      spawnSyncImpl: () => ({ status: 1, stdout: '', stderr: 'tmux not found' }) as any,
+      spawn: (command, args, options) => {
+        spawnCalls.push({ command, args, options });
+        return { on: () => {}, kill: () => true } as any;
+      },
+      getModulesConfigPath: () => '/tmp/modules.json',
+      resolveServerEntryPath: () => '/tmp/index.js',
+      waitForever: async () => {},
+      exit: (code) => {
+        throw new Error(`exit:${code}`);
+      }
+    });
+
+    await program.parseAsync(['node', 'routecodex', 'codex', '--url', 'http://localhost:5520/proxy', '--cwd', explicitCwd], { from: 'node' });
+
+    expect(spawnCalls).toHaveLength(1);
+    expect(spawnCalls[0].options?.cwd).toBe(explicitCwd);
+    expect(spawnCalls[0].options?.env?.RCC_WORKDIR).toBe(explicitCwd);
+    expect(spawnCalls[0].options?.env?.ROUTECODEX_WORKDIR).toBe(explicitCwd);
+  });
+
+  it('fails fast when explicit --cwd does not exist', async () => {
+    const spawnCalls: Array<{ command: string; args: string[]; options: any }> = [];
+    const errors: string[] = [];
+    const program = new Command();
+    const invalidCwd = '/home/test/missing-workspace';
+
+    createCodexCommand(program, {
+      isDevPackage: false,
+      isWindows: false,
+      defaultDevPort: 5555,
+      nodeBin: 'node',
+      createSpinner: async () => createStubSpinner(),
+      logger: { info: () => {}, warning: () => {}, success: () => {}, error: (msg) => errors.push(String(msg)) },
+      env: {},
+      rawArgv: ['codex', '--url', 'http://localhost:5520/proxy', '--cwd', invalidCwd],
+      fsImpl: createDirectoryFs([]),
+      homedir: () => '/home/test',
+      cwd: () => '/home/test/default',
+      sleep: async () => {},
+      fetch: (async () => ({ ok: true, json: async () => ({ status: 'ready' }) })) as any,
+      spawnSyncImpl: () => ({ status: 1, stdout: '', stderr: 'tmux not found' }) as any,
+      spawn: (command, args, options) => {
+        spawnCalls.push({ command, args, options });
+        return { on: () => {}, kill: () => true } as any;
+      },
+      getModulesConfigPath: () => '/tmp/modules.json',
+      resolveServerEntryPath: () => '/tmp/index.js',
+      waitForever: async () => {},
+      exit: (code) => {
+        throw new Error(`exit:${code}`);
+      }
+    });
+
+    await expect(
+      program.parseAsync(['node', 'routecodex', 'codex', '--url', 'http://localhost:5520/proxy', '--cwd', invalidCwd], { from: 'node' })
+    ).rejects.toThrow('exit:1');
+
+    expect(spawnCalls).toHaveLength(0);
+    expect(errors.some((line) => line.includes('Invalid --cwd: path does not exist'))).toBe(true);
+  });
+
   it('launches codex and exports OpenAI proxy env vars', async () => {
     const spawnCalls: Array<{ command: string; args: string[]; options: any }> = [];
     const program = new Command();

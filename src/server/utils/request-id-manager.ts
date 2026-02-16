@@ -19,11 +19,23 @@ type RequestIdComponents = {
   sequence: string;
 };
 
+type TimedValue<T> = {
+  value: T;
+  expiresAtMs: number;
+};
+
 // const CLIENT_SEQ_MAP = new Map<string, number>();
 const PROVIDER_SEQ_MAP = new Map<string, number>();
-const REQUEST_COMPONENTS = new Map<string, RequestIdComponents>();
-const REQUEST_ALIAS = new Map<string, string>();
+const REQUEST_COMPONENTS = new Map<string, TimedValue<RequestIdComponents>>();
+const REQUEST_ALIAS = new Map<string, TimedValue<string>>();
 const COMPONENT_TTL_MS = 5 * 60 * 1000;
+const COMPONENT_SWEEP_INTERVAL_MS = 30 * 1000;
+const PROVIDER_SEQ_MAX_KEYS = resolvePositiveIntFromEnv(
+  process.env.ROUTECODEX_REQUEST_ID_SEQ_MAX_KEYS,
+  process.env.RCC_REQUEST_ID_SEQ_MAX_KEYS,
+  2048
+);
+let cleanupTimer: NodeJS.Timeout | null = null;
 
 export function generateRequestIdentifiers(candidate?: unknown, meta?: RequestIdMeta): RequestIdentifiers {
   const clientRequestId = normalizeClientRequestId(candidate);
@@ -61,7 +73,7 @@ export function enhanceProviderRequestId(
     return currentId;
   }
   const { baseId, suffix } = splitRequestId(currentId);
-  const components = REQUEST_COMPONENTS.get(baseId);
+  const components = getRequestComponents(baseId);
   if (!components) {
     return currentId;
   }
@@ -89,9 +101,9 @@ export function enhanceProviderRequestId(
 export function resolveEffectiveRequestId(requestId?: string): string {
   let current = typeof requestId === 'string' && requestId.trim() ? requestId.trim() : 'unknown';
   const visited = new Set<string>();
-  while (REQUEST_ALIAS.has(current) && !visited.has(current)) {
+  while (!visited.has(current)) {
     visited.add(current);
-    const alias = REQUEST_ALIAS.get(current);
+    const alias = getAlias(current);
     if (!alias) {
       break;
     }
@@ -131,28 +143,27 @@ function nextSequence(key: string, map: Map<string, number>): string {
   const current = map.get(key) || 0;
   const next = current + 1;
   map.set(key, next);
+  pruneOldestEntries(map, PROVIDER_SEQ_MAX_KEYS);
   return String(next).padStart(3, '0');
 }
 
 function storeRequestComponents(id: string, components: RequestIdComponents): void {
-  REQUEST_COMPONENTS.set(id, components);
-  setTimeout(() => {
-    if (REQUEST_COMPONENTS.get(id) === components) {
-      REQUEST_COMPONENTS.delete(id);
-    }
-  }, COMPONENT_TTL_MS);
+  REQUEST_COMPONENTS.set(id, {
+    value: components,
+    expiresAtMs: Date.now() + COMPONENT_TTL_MS
+  });
+  ensureCleanupTimer();
 }
 
 function registerAlias(originalId: string, aliasId: string): void {
   if (!originalId || originalId === aliasId) {
     return;
   }
-  REQUEST_ALIAS.set(originalId, aliasId);
-  setTimeout(() => {
-    if (REQUEST_ALIAS.get(originalId) === aliasId) {
-      REQUEST_ALIAS.delete(originalId);
-    }
-  }, COMPONENT_TTL_MS);
+  REQUEST_ALIAS.set(originalId, {
+    value: aliasId,
+    expiresAtMs: Date.now() + COMPONENT_TTL_MS
+  });
+  ensureCleanupTimer();
 }
 
 function splitRequestId(requestId: string): { baseId: string; suffix: string } {
@@ -166,5 +177,102 @@ function splitRequestId(requestId: string): { baseId: string; suffix: string } {
   return {
     baseId: requestId.slice(0, delimiterIndex),
     suffix: requestId.slice(delimiterIndex)
+  };
+}
+
+function resolvePositiveIntFromEnv(primary: string | undefined, secondary: string | undefined, fallback: number): number {
+  const values = [primary, secondary];
+  for (const candidate of values) {
+    const parsed = Number(String(candidate || '').trim());
+    if (Number.isFinite(parsed) && parsed >= 1) {
+      return Math.floor(parsed);
+    }
+  }
+  return fallback;
+}
+
+function pruneOldestEntries<T>(map: Map<string, T>, maxSize: number): void {
+  if (!Number.isFinite(maxSize) || maxSize < 1) {
+    return;
+  }
+  while (map.size > maxSize) {
+    const oldestKey = map.keys().next().value as string | undefined;
+    if (!oldestKey) {
+      break;
+    }
+    map.delete(oldestKey);
+  }
+}
+
+function getRequestComponents(id: string): RequestIdComponents | undefined {
+  const record = REQUEST_COMPONENTS.get(id);
+  if (!record) {
+    return undefined;
+  }
+  if (record.expiresAtMs <= Date.now()) {
+    REQUEST_COMPONENTS.delete(id);
+    maybeStopCleanupTimer();
+    return undefined;
+  }
+  return record.value;
+}
+
+function getAlias(id: string): string | undefined {
+  const record = REQUEST_ALIAS.get(id);
+  if (!record) {
+    return undefined;
+  }
+  if (record.expiresAtMs <= Date.now()) {
+    REQUEST_ALIAS.delete(id);
+    maybeStopCleanupTimer();
+    return undefined;
+  }
+  return record.value;
+}
+
+function sweepExpiredEntries(nowMs = Date.now()): void {
+  for (const [key, value] of REQUEST_COMPONENTS.entries()) {
+    if (value.expiresAtMs <= nowMs) {
+      REQUEST_COMPONENTS.delete(key);
+    }
+  }
+  for (const [key, value] of REQUEST_ALIAS.entries()) {
+    if (value.expiresAtMs <= nowMs) {
+      REQUEST_ALIAS.delete(key);
+    }
+  }
+  maybeStopCleanupTimer();
+}
+
+function ensureCleanupTimer(): void {
+  if (cleanupTimer) {
+    return;
+  }
+  cleanupTimer = setInterval(() => {
+    sweepExpiredEntries();
+  }, COMPONENT_SWEEP_INTERVAL_MS);
+  cleanupTimer.unref?.();
+}
+
+function maybeStopCleanupTimer(): void {
+  if (!cleanupTimer) {
+    return;
+  }
+  if (REQUEST_COMPONENTS.size || REQUEST_ALIAS.size) {
+    return;
+  }
+  clearInterval(cleanupTimer);
+  cleanupTimer = null;
+}
+
+export function __unsafeSweepRequestIdCaches(nowMs = Date.now()): void {
+  sweepExpiredEntries(nowMs);
+}
+
+export function __unsafeRequestIdCacheSize(): { components: number; aliases: number; seqKeys: number } {
+  return {
+    components: REQUEST_COMPONENTS.size,
+    aliases: REQUEST_ALIAS.size,
+    seqKeys: PROVIDER_SEQ_MAP.size
   };
 }

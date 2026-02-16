@@ -319,6 +319,91 @@ describe('clock-client routes', () => {
     }
   });
 
+  it('inject enforces workdir when tmux session id is shared', async () => {
+    const app = express();
+    app.use(express.json({ limit: '256kb' }));
+    registerClockClientRoutes(app);
+
+    const server = http.createServer(app);
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const addr = server.address() as AddressInfo;
+    const baseUrl = `http://127.0.0.1:${addr.port}`;
+
+    let injectHitA = 0;
+    let injectHitB = 0;
+    const callbackServerA = http.createServer((req, res) => {
+      if (req.method === 'POST' && req.url === '/inject') {
+        injectHitA += 1;
+      }
+      res.statusCode = 200;
+      res.setHeader('content-type', 'application/json');
+      res.end('{"ok":true}');
+    });
+    const callbackServerB = http.createServer((req, res) => {
+      if (req.method === 'POST' && req.url === '/inject') {
+        injectHitB += 1;
+      }
+      res.statusCode = 200;
+      res.setHeader('content-type', 'application/json');
+      res.end('{"ok":true}');
+    });
+
+    await new Promise<void>((resolve) => callbackServerA.listen(0, '127.0.0.1', resolve));
+    await new Promise<void>((resolve) => callbackServerB.listen(0, '127.0.0.1', resolve));
+    const callbackAddrA = callbackServerA.address() as AddressInfo;
+    const callbackAddrB = callbackServerB.address() as AddressInfo;
+
+    try {
+      const sharedTmuxSessionId = 'rcc_shared_workdir_route';
+      const regA = await localFetch(baseUrl, '/daemon/clock-client/register', {
+        daemonId: 'clockd_route_workdir_a',
+        callbackUrl: `http://127.0.0.1:${callbackAddrA.port}/inject`,
+        tmuxSessionId: sharedTmuxSessionId,
+        workdir: '/tmp/routecodex-route-workdir-a'
+      });
+      expect(regA.status).toBe(200);
+      const regB = await localFetch(baseUrl, '/daemon/clock-client/register', {
+        daemonId: 'clockd_route_workdir_b',
+        callbackUrl: `http://127.0.0.1:${callbackAddrB.port}/inject`,
+        tmuxSessionId: sharedTmuxSessionId,
+        workdir: '/tmp/routecodex-route-workdir-b'
+      });
+      expect(regB.status).toBe(200);
+
+      const injectA = await localFetch(baseUrl, '/daemon/clock-client/inject', {
+        text: 'hello-a',
+        tmuxSessionId: sharedTmuxSessionId,
+        workdir: '/tmp/routecodex-route-workdir-a'
+      });
+      expect(injectA.status).toBe(200);
+      expect(injectA.payload?.daemonId).toBe('clockd_route_workdir_a');
+      expect(injectHitA).toBe(1);
+      expect(injectHitB).toBe(0);
+
+      const injectB = await localFetch(baseUrl, '/daemon/clock-client/inject', {
+        text: 'hello-b',
+        tmuxSessionId: sharedTmuxSessionId,
+        workdir: '/tmp/routecodex-route-workdir-b'
+      });
+      expect(injectB.status).toBe(200);
+      expect(injectB.payload?.daemonId).toBe('clockd_route_workdir_b');
+      expect(injectHitA).toBe(1);
+      expect(injectHitB).toBe(1);
+
+      const injectMismatch = await localFetch(baseUrl, '/daemon/clock-client/inject', {
+        text: 'hello-c',
+        tmuxSessionId: sharedTmuxSessionId,
+        workdir: '/tmp/routecodex-route-workdir-missing'
+      });
+      expect(injectMismatch.status).toBe(503);
+      expect(injectMismatch.payload?.reason).toBe('workdir_mismatch');
+    } finally {
+      await new Promise<void>((resolve) => callbackServerA.close(() => resolve()));
+      await new Promise<void>((resolve) => callbackServerB.close(() => resolve()));
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it('supports clock task list + CRUD + recurrence fields', async () => {
     const app = express();
     app.use(express.json({ limit: '256kb' }));

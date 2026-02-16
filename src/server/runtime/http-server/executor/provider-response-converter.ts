@@ -322,6 +322,7 @@ export async function convertProviderResponseIfNeeded(
           await injectClockClientPrompt({
             tmuxSessionId: typeof nestedMetadata.tmuxSessionId === 'string' ? nestedMetadata.tmuxSessionId : undefined,
             sessionId: typeof nestedMetadata.sessionId === 'string' ? nestedMetadata.sessionId : undefined,
+            workdir: typeof nestedMetadata.workdir === 'string' ? nestedMetadata.workdir : undefined,
             text,
             requestId: reenterOpts.requestId,
             source: 'servertool.reenter'

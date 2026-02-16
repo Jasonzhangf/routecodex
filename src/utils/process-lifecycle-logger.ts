@@ -24,8 +24,11 @@ interface ProcessLifecycleRecord {
 
 const DEFAULT_LOG_DIR = path.join(os.homedir(), '.routecodex', 'logs');
 const DEFAULT_LOG_PATH = path.join(DEFAULT_LOG_DIR, 'process-lifecycle.jsonl');
+const DEFAULT_MAX_PENDING_WRITES = 2000;
 
 let writeQueue: Promise<void> = Promise.resolve();
+let pendingWriteCount = 0;
+let droppedWriteCount = 0;
 
 function parseBool(value: string | undefined, defaultValue: boolean): boolean {
   if (typeof value !== 'string') {
@@ -54,6 +57,22 @@ function resolveLogPath(): string {
 
 function shouldConsoleLog(): boolean {
   return parseBool(process.env.ROUTECODEX_PROCESS_LIFECYCLE_CONSOLE || process.env.RCC_PROCESS_LIFECYCLE_CONSOLE, true);
+}
+
+function resolveMaxPendingWrites(): number {
+  const raw = String(
+    process.env.ROUTECODEX_PROCESS_LIFECYCLE_MAX_PENDING ||
+      process.env.RCC_PROCESS_LIFECYCLE_MAX_PENDING ||
+      DEFAULT_MAX_PENDING_WRITES
+  ).trim();
+  const parsed = Number(raw);
+  if (!raw) {
+    return DEFAULT_MAX_PENDING_WRITES;
+  }
+  if (Number.isFinite(parsed) && parsed >= 0) {
+    return Math.floor(parsed);
+  }
+  return DEFAULT_MAX_PENDING_WRITES;
 }
 
 function serializeUnknown(value: unknown): JsonLike {
@@ -144,13 +163,42 @@ function appendRecordSync(record: ProcessLifecycleRecord): void {
 }
 
 function enqueueWrite(task: () => Promise<void>): void {
-  writeQueue = writeQueue.then(async () => {
-    try {
-      await task();
-    } catch {
-      // Never throw from lifecycle logging.
-    }
-  });
+  const maxPending = resolveMaxPendingWrites();
+  if (pendingWriteCount >= maxPending) {
+    droppedWriteCount += 1;
+    return;
+  }
+  pendingWriteCount += 1;
+  writeQueue = writeQueue
+    .then(async () => {
+      try {
+        await task();
+      } catch {
+        // Never throw from lifecycle logging.
+      }
+    })
+    .finally(() => {
+      pendingWriteCount = Math.max(0, pendingWriteCount - 1);
+    });
+}
+
+function flushDroppedWriteSummarySync(): void {
+  if (droppedWriteCount <= 0) {
+    return;
+  }
+  const dropped = droppedWriteCount;
+  droppedWriteCount = 0;
+  appendRecordSync(
+    buildRecord({
+      event: 'lifecycle_log_backpressure',
+      source: 'process-lifecycle-logger',
+      details: {
+        result: 'dropped_async_events',
+        droppedCount: dropped,
+        maxPending: resolveMaxPendingWrites()
+      }
+    })
+  );
 }
 
 export function logProcessLifecycle(event: ProcessLifecycleEvent): void {
@@ -177,5 +225,5 @@ export async function flushProcessLifecycleLogQueue(): Promise<void> {
   } catch {
     // Never throw from lifecycle logging.
   }
+  flushDroppedWriteSummarySync();
 }
-
