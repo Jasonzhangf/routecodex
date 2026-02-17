@@ -365,4 +365,35 @@ describe('provider family profile registry', () => {
       })
     ).toBe(true);
   });
+
+  test('qwen profile applies DashScope headers and removes legacy Gemini metadata headers', () => {
+    const previousUaVersion = process.env.ROUTECODEX_QWEN_UA_VERSION;
+    process.env.ROUTECODEX_QWEN_UA_VERSION = '0.10.3';
+
+    try {
+      const qwenProfile = getProviderFamilyProfile({ providerId: 'qwen' });
+      expect(qwenProfile).toBeTruthy();
+
+      const headers = qwenProfile?.applyRequestHeaders?.({
+        headers: {
+          Authorization: 'Bearer sk-qwen-test-token',
+          'X-Goog-Api-Client': 'gl-node/22.17.0',
+          'Client-Metadata': 'legacy'
+        }
+      } as any);
+
+      expect(headers?.['X-Goog-Api-Client']).toBeUndefined();
+      expect(headers?.['Client-Metadata']).toBeUndefined();
+      expect(headers?.['X-DashScope-CacheControl']).toBe('enable');
+      expect(headers?.['X-DashScope-AuthType']).toBe('qwen-oauth');
+      expect(headers?.['User-Agent']).toContain('QwenCode/0.10.3');
+      expect(headers?.['X-DashScope-UserAgent']).toBe(headers?.['User-Agent']);
+    } finally {
+      if (previousUaVersion === undefined) {
+        delete process.env.ROUTECODEX_QWEN_UA_VERSION;
+      } else {
+        process.env.ROUTECODEX_QWEN_UA_VERSION = previousUaVersion;
+      }
+    }
+  });
 });

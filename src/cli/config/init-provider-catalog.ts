@@ -186,7 +186,8 @@ export function getInitProviderCatalog(): InitProviderTemplate[] {
           tokenFile: 'default'
         },
         models: {
-          'qwen3-coder-plus': { supportsStreaming: true }
+          'qwen3-coder-plus': { supportsStreaming: true },
+          'qwen3.5-plus': { supportsStreaming: true }
         }
       },
       defaultModel: 'qwen3-coder-plus'

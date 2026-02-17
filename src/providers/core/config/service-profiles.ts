@@ -29,6 +29,16 @@ function resolveGeminiCliUserAgent(): string {
   return `GeminiCLI/${version} (${system}; ${arch})`;
 }
 
+function resolveQwenCodeUserAgent(): string {
+  const fromEnv =
+    process.env.ROUTECODEX_QWEN_UA_VERSION ||
+    process.env.RCC_QWEN_UA_VERSION ||
+    process.env.ROUTECODEX_QWEN_CODE_UA_VERSION ||
+    process.env.RCC_QWEN_CODE_UA_VERSION;
+  const version = typeof fromEnv === 'string' && fromEnv.trim() ? fromEnv.trim() : '0.10.3';
+  return `QwenCode/${version} (${process.platform}; ${process.arch})`;
+}
+
 /**
  * 动态服务配置档案构建器
  *
@@ -149,10 +159,11 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
     headers: {
       'Content-Type': 'application/json',
       'Accept': 'application/json',
-      // 对齐 CLIProxyAPI 的默认客户端标识（Qwen 官方示例）
-      'User-Agent': 'google-api-nodejs-client/9.15.1',
-      'X-Goog-Api-Client': 'gl-node/22.17.0',
-      'Client-Metadata': 'ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI'
+      // 对齐 Qwen Code（DashScope OpenAI-compatible）默认请求头。
+      'User-Agent': resolveQwenCodeUserAgent(),
+      'X-DashScope-CacheControl': 'enable',
+      'X-DashScope-UserAgent': resolveQwenCodeUserAgent(),
+      'X-DashScope-AuthType': 'qwen-oauth'
     },
     // 默认 Provider 请求超时时间：500s
     timeout: 500000,
