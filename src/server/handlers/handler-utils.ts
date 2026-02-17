@@ -38,6 +38,10 @@ type RequestLogMeta = Record<string, unknown> | undefined;
 
 const SHOULD_LOG_HTTP_EVENTS = buildInfo.mode !== 'release'
   || process.env.ROUTECODEX_HTTP_LOG_VERBOSE === '1';
+const SHOULD_LOG_HTTP_META = resolveBoolFromEnv(
+  process.env.ROUTECODEX_HTTP_LOG_META ?? process.env.RCC_HTTP_LOG_META,
+  false
+);
 
 function resolveBoolFromEnv(value: string | undefined, fallback: boolean): boolean {
   if (!value) {
@@ -85,11 +89,8 @@ export function logRequestStart(endpoint: string, requestId: string, meta?: Requ
   if (!SHOULD_LOG_HTTP_EVENTS) {
     return;
   }
-  const displayId = typeof meta?.clientRequestId === 'string' && meta.clientRequestId.trim()
-    ? meta.clientRequestId.trim()
-    : requestId;
-  const suffix = formatMeta(meta);
-  console.log(`➡️  [${endpoint}] request ${formatRequestId(displayId)}${suffix}`);
+  const suffix = SHOULD_LOG_HTTP_META ? formatMeta(meta) : '';
+  console.log(`➡️  [${endpoint}] request ${formatRequestId(requestId)}${suffix}`);
 }
 
 export function logRequestComplete(endpoint: string, requestId: string, status: number): void {

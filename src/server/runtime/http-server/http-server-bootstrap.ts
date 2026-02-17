@@ -240,6 +240,11 @@ export function buildProviderLabel(_server: any, providerKey?: string, model?: s
     return undefined;
   }
   if (key && modelId) {
+    const normalizedKey = key.toLowerCase();
+    const normalizedModel = modelId.toLowerCase();
+    if (normalizedKey === normalizedModel || normalizedKey.endsWith(`.${normalizedModel}`)) {
+      return key;
+    }
     return `${key}.${modelId}`;
   }
   return key || modelId;

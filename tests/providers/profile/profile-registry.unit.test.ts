@@ -396,4 +396,101 @@ describe('provider family profile registry', () => {
       }
     }
   });
+
+  test('qwen profile remaps oauth request model to coder-model', () => {
+    const qwenProfile = getProviderFamilyProfile({ providerId: 'qwen' });
+    expect(qwenProfile).toBeTruthy();
+
+    const body = qwenProfile?.buildRequestBody?.({
+      request: {
+        metadata: { authType: 'qwen-oauth' }
+      } as any,
+      defaultBody: {
+        model: 'qwen3.5-plus',
+        messages: [{ role: 'user', content: 'hello' }]
+      } as any,
+      runtimeMetadata: {
+        authType: 'qwen-oauth'
+      } as any
+    } as any);
+
+    expect((body as any)?.model).toBe('coder-model');
+  });
+
+  test('qwen profile maps oauth vision model id to vision-model', () => {
+    const qwenProfile = getProviderFamilyProfile({ providerId: 'qwen' });
+    expect(qwenProfile).toBeTruthy();
+
+    const body = qwenProfile?.buildRequestBody?.({
+      request: {
+        metadata: { authType: 'qwen-oauth' }
+      } as any,
+      defaultBody: {
+        model: 'qwen-vl-max',
+        messages: [{ role: 'user', content: 'describe this image' }]
+      } as any,
+      runtimeMetadata: {
+        authType: 'qwen-oauth'
+      } as any
+    } as any);
+
+    expect((body as any)?.model).toBe('vision-model');
+  });
+
+  test('qwen profile keeps non-oauth model unchanged', () => {
+    const qwenProfile = getProviderFamilyProfile({ providerId: 'qwen' });
+    expect(qwenProfile).toBeTruthy();
+
+    const body = qwenProfile?.buildRequestBody?.({
+      request: {
+        metadata: { authType: 'apikey' }
+      } as any,
+      defaultBody: {
+        model: 'qwen3.5-plus',
+        messages: [{ role: 'user', content: 'hello' }]
+      } as any,
+      runtimeMetadata: {
+        authType: 'apikey'
+      } as any
+    } as any);
+
+    expect(body).toBeUndefined();
+  });
+
+  test('qwen profile resolves native web_search endpoint and body shape', () => {
+    const qwenProfile = getProviderFamilyProfile({ providerId: 'qwen' });
+    expect(qwenProfile).toBeTruthy();
+
+    const endpoint = qwenProfile?.resolveEndpoint?.({
+      request: {
+        metadata: {
+          qwenWebSearch: true,
+          entryEndpoint: '/api/v1/indices/plugin/web_search'
+        }
+      } as any,
+      defaultEndpoint: '/chat/completions'
+    });
+    expect(endpoint).toBe('/api/v1/indices/plugin/web_search');
+
+    const body = qwenProfile?.buildRequestBody?.({
+      request: {
+        metadata: { qwenWebSearch: true },
+        data: {
+          uq: 'routecodex',
+          page: 1,
+          rows: 5
+        }
+      } as any,
+      defaultBody: {
+        model: 'qwen3.5-plus',
+        messages: [{ role: 'user', content: 'ignored' }]
+      } as any
+    } as any);
+
+    expect(body).toEqual({
+      uq: 'routecodex',
+      page: 1,
+      rows: 5
+    });
+  });
 });

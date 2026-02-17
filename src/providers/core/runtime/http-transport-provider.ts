@@ -55,6 +55,9 @@ import {
 } from './transport/index.js';
 
 type ProtocolClient = HttpProtocolClient<ProtocolRequestPayload>;
+type TokenPayloadReader = {
+  getTokenPayload?: () => Record<string, unknown> | null;
+};
 
 export type ProviderConfigInternal = OpenAIStandardConfig['config'] & {
   endpoint?: string;
@@ -217,6 +220,24 @@ export class HttpTransportProvider extends BaseProvider {
   protected async preprocessRequest(request: UnknownObject): Promise<UnknownObject> {
     const context = this.createProviderContext();
     const runtimeMetadata = context.runtimeMetadata;
+    const configuredAuthType =
+      this.config?.config?.auth && typeof this.config.config.auth.type === 'string'
+        ? this.config.config.auth.type.trim()
+        : '';
+    if (runtimeMetadata && configuredAuthType) {
+      runtimeMetadata.authType = configuredAuthType.toLowerCase();
+    }
+    const requestMetadata =
+      request && typeof request === 'object' && typeof (request as { metadata?: unknown }).metadata === 'object'
+        ? ((request as { metadata: Record<string, unknown> }).metadata || {})
+        : undefined;
+    if (runtimeMetadata && requestMetadata?.qwenWebSearch === true) {
+      runtimeMetadata.qwenWebSearch = true;
+      if (!runtimeMetadata.metadata || typeof runtimeMetadata.metadata !== 'object') {
+        runtimeMetadata.metadata = {};
+      }
+      (runtimeMetadata.metadata as Record<string, unknown>).qwenWebSearch = true;
+    }
     this.getRuntimeProfile();
     const processedRequest = ProviderRequestPreprocessor.preprocess(request, runtimeMetadata);
     logVisionDebugSummary('preprocess', processedRequest);
@@ -441,9 +462,10 @@ export class HttpTransportProvider extends BaseProvider {
       providerType: this.providerType,
       providerId: typeof cfg.providerId === 'string' ? cfg.providerId : undefined
     });
+    const authResourceBaseUrl = this.resolveAuthResourceBaseUrlOverride();
     return RuntimeEndpointResolver.resolveEffectiveBaseUrl({
       runtime: this.getRuntimeProfile(),
-      overrideBaseUrl: this.config.config.overrides?.baseUrl,
+      overrideBaseUrl: authResourceBaseUrl ?? this.config.config.overrides?.baseUrl,
       configBaseUrl: this.config.config.baseUrl,
       serviceDefaultBaseUrl: this.serviceProfile.defaultBaseUrl,
       profileKey,
@@ -480,6 +502,54 @@ export class HttpTransportProvider extends BaseProvider {
 
   private getRuntimeDetector(): RuntimeDetector {
     return new RuntimeDetector(this.config, this.providerType, this.oauthProviderId);
+  }
+
+  private resolveAuthResourceBaseUrlOverride(): string | undefined {
+    const cfg = this.config.config as ProviderConfigInternal & { providerId?: string };
+    const providerId = typeof cfg.providerId === 'string' ? cfg.providerId.trim().toLowerCase() : '';
+    if (providerId !== 'qwen') {
+      return undefined;
+    }
+
+    const authReader = this.authProvider as TokenPayloadReader | null;
+    if (!authReader?.getTokenPayload) {
+      return undefined;
+    }
+
+    let payload: Record<string, unknown> | null = null;
+    try {
+      payload = authReader.getTokenPayload();
+    } catch {
+      return undefined;
+    }
+    if (!payload || typeof payload !== 'object') {
+      return undefined;
+    }
+
+    const raw =
+      (typeof payload.resource_url === 'string' && payload.resource_url.trim()) ||
+      (typeof payload.resourceUrl === 'string' && payload.resourceUrl.trim())
+        ? String((payload.resource_url ?? payload.resourceUrl)).trim()
+        : '';
+    if (!raw) {
+      return undefined;
+    }
+
+    let baseUrl = raw;
+    if (!/^https?:\/\//i.test(baseUrl)) {
+      baseUrl = `https://${baseUrl}`;
+    }
+    baseUrl = baseUrl.replace(/\/+$/, '');
+    const runtimeMetadata = this.getCurrentRuntimeMetadata();
+    const isQwenWebSearchRequest =
+      runtimeMetadata?.qwenWebSearch === true ||
+      (runtimeMetadata?.metadata &&
+        typeof runtimeMetadata.metadata === 'object' &&
+        (runtimeMetadata.metadata as Record<string, unknown>).qwenWebSearch === true);
+    if (!isQwenWebSearchRequest && !/\/v1$/i.test(baseUrl)) {
+      baseUrl = `${baseUrl}/v1`;
+    }
+    return baseUrl;
   }
 
 }

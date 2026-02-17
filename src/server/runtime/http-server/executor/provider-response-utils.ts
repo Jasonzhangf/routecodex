@@ -91,6 +91,11 @@ export function buildProviderLabel(providerKey?: string, model?: string): string
     return undefined;
   }
   if (key && modelId) {
+    const normalizedKey = key.toLowerCase();
+    const normalizedModel = modelId.toLowerCase();
+    if (normalizedKey === normalizedModel || normalizedKey.endsWith(`.${normalizedModel}`)) {
+      return key;
+    }
     return `${key}.${modelId}`;
   }
   return key || modelId;

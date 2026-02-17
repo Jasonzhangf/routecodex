@@ -48,3 +48,54 @@ export function isPoolExhaustedPipelineError(pipelineError: unknown): boolean {
     /virtual router did not produce a provider target/i.test(pipelineErrorMessage)
   );
 }
+
+const POOL_COOLDOWN_WAIT_MAX_MS = 3 * 60 * 1000;
+
+function coercePositiveMs(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+    return Math.floor(value);
+  }
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number.parseInt(value.trim(), 10);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return Math.floor(parsed);
+    }
+  }
+  return undefined;
+}
+
+export function resolvePoolCooldownWaitMs(pipelineError: unknown): number | undefined {
+  if (!pipelineError || typeof pipelineError !== 'object') {
+    return undefined;
+  }
+  const details = (pipelineError as { details?: unknown }).details;
+  if (!details || typeof details !== 'object' || Array.isArray(details)) {
+    return undefined;
+  }
+  const record = details as Record<string, unknown>;
+  const direct = coercePositiveMs(record.minRecoverableCooldownMs);
+  const hints = Array.isArray(record.recoverableCooldownHints) ? record.recoverableCooldownHints : [];
+  const hinted = hints.reduce<number | undefined>((best, item) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      return best;
+    }
+    const waitMs = coercePositiveMs((item as Record<string, unknown>).waitMs);
+    if (!waitMs) {
+      return best;
+    }
+    if (!best || waitMs < best) {
+      return waitMs;
+    }
+    return best;
+  }, undefined);
+  const candidate = (() => {
+    if (direct && hinted) {
+      return Math.min(direct, hinted);
+    }
+    return direct ?? hinted;
+  })();
+  if (!candidate || candidate > POOL_COOLDOWN_WAIT_MAX_MS) {
+    return undefined;
+  }
+  return Math.max(50, candidate);
+}

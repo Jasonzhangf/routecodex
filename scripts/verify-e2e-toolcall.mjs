@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import process from 'node:process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -32,6 +32,16 @@ const AGENTS_INSTRUCTIONS = (() => {
     return '';
   }
 })();
+
+function cleanupStaleServerPidFiles() {
+  try {
+    spawnSync('node', [path.join(__dirname, 'cleanup-stale-server-pids.mjs'), '--quiet'], {
+      stdio: 'ignore'
+    });
+  } catch {
+    // ignore cleanup failures
+  }
+}
 
 function readServerApiKeyFromConfig(configPath) {
   try {
@@ -102,6 +112,7 @@ async function main() {
     await runGeminiCliStartupCheck();
   } finally {
     shutdown();
+    cleanupStaleServerPidFiles();
     if (resolved.tempDir) {
       try {
         fs.rmSync(resolved.tempDir, { recursive: true, force: true });

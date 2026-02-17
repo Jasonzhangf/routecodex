@@ -13,6 +13,8 @@ import { shouldClearClockTasksForInjectSkip, shouldLogClockDaemonInjectSkip } fr
 import { isTmuxSessionAlive, killManagedTmuxSession } from './tmux-session-probe.js';
 import { terminateManagedClientProcess } from './managed-process-probe.js';
 
+const CLOCK_DAEMON_SESSION_PREFIX = 'clockd.';
+
 function resolveBoolFromEnv(value: string | undefined, fallback: boolean): boolean {
   if (!value) {
     return fallback;
@@ -48,6 +50,15 @@ export function shouldEnableClockDaemonInjectLoop(): boolean {
     return false;
   }
   return true;
+}
+
+function extractClockDaemonIdFromSessionScope(sessionId: string): string | undefined {
+  const normalized = String(sessionId || '').trim();
+  if (!normalized.startsWith(CLOCK_DAEMON_SESSION_PREFIX)) {
+    return undefined;
+  }
+  const daemonId = normalized.slice(CLOCK_DAEMON_SESSION_PREFIX.length).trim();
+  return daemonId || undefined;
 }
 
 export function resolveRawClockConfig(server: any): unknown {
@@ -226,7 +237,11 @@ export async function tickClockDaemonInjectLoop(server: any): Promise<void> {
         continue;
       }
 
-      const bind = registry.bindConversationSession({ conversationSessionId: sessionId });
+      const daemonId = extractClockDaemonIdFromSessionScope(sessionId);
+      const bind = registry.bindConversationSession({
+        conversationSessionId: sessionId,
+        ...(daemonId ? { daemonId } : {})
+      });
 
       const text = [
         '[Clock Reminder]: scheduled tasks are due.',

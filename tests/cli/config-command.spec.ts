@@ -441,6 +441,53 @@ describe('cli init command', () => {
     expect(parsed?.virtualrouter?.webSearch?.search?.['iflow:web_search']?.providerKey).toBe('iflow');
   });
 
+  it('init (non-interactive) injects qwen as fallback engine when iflow and qwen are selected', async () => {
+    const writes = new Map<string, string>();
+    const program = new Command();
+    createInitCommand(program, {
+      logger: {
+        info: () => {},
+        warning: () => {},
+        success: () => {},
+        error: () => {}
+      },
+      createSpinner: async () =>
+        ({
+          start: () => ({} as any),
+          succeed: () => {},
+          fail: () => {},
+          warn: () => {},
+          info: () => {},
+          stop: () => {},
+          text: ''
+        }) as any,
+      fsImpl: {
+        existsSync: () => false,
+        readFileSync: () => '',
+        writeFileSync: (p: any, content: any) => {
+          writes.set(String(p), String(content));
+        },
+        mkdirSync: () => {}
+      },
+      pathImpl: path as any,
+      getHomeDir: () => '/tmp'
+    });
+
+    await program.parseAsync(
+      ['node', 'routecodex', 'init', '--config', '/tmp/config.json', '--providers', 'iflow,qwen', '--force'],
+      { from: 'node' }
+    );
+
+    const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
+    expect(parsed?.virtualrouter?.routing?.web_search?.[0]?.targets).toEqual([
+      expect.stringContaining('iflow.'),
+      'qwen.qwen3-coder-plus'
+    ]);
+    expect(parsed?.virtualrouter?.webSearch?.engines?.[0]?.id).toBe('iflow:web_search');
+    expect(parsed?.virtualrouter?.webSearch?.engines?.[1]?.id).toBe('qwen:web_search');
+    expect(parsed?.virtualrouter?.webSearch?.search?.['qwen:web_search']?.providerKey).toBe('qwen.qwen3-coder-plus');
+  });
+
   it('init (non-interactive) injects deepseek webSearch defaults when deepseek-web is selected', async () => {
     const writes = new Map<string, string>();
     const program = new Command();
@@ -1789,6 +1836,33 @@ describe('init-config', () => {
     expect(parsed.webSearch.engines[0].providerKey).toBe('iflow');
     expect(parsed.webSearch.search['iflow:web_search'].providerKey).toBe('iflow');
     expect(parsed.virtualrouter.routing.web_search[0].targets[0]).toContain('iflow.');
+  });
+
+  it('writes qwen as fallback webSearch engine when iflow and qwen are selected', async () => {
+    const writes = new Map<string, string>();
+    const result = await initializeConfigV1(
+      {
+        fsImpl: {
+          existsSync: () => false,
+          mkdirSync: () => {},
+          readFileSync: () => '',
+          writeFileSync: (p: any, content: any) => writes.set(String(p), String(content))
+        },
+        pathImpl: path as any
+      },
+      { configPath: '/tmp/config.json', force: true, providers: ['iflow', 'qwen'] }
+    );
+
+    expect(result.ok).toBe(true);
+    const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
+    expect(parsed.webSearch.engines[0].id).toBe('iflow:web_search');
+    expect(parsed.webSearch.engines[1].id).toBe('qwen:web_search');
+    expect(parsed.webSearch.search['iflow:web_search'].providerKey).toBe('iflow');
+    expect(parsed.webSearch.search['qwen:web_search'].providerKey).toBe('qwen.qwen3-coder-plus');
+    expect(parsed.virtualrouter.routing.web_search[0].targets).toEqual([
+      expect.stringContaining('iflow.'),
+      'qwen.qwen3-coder-plus'
+    ]);
   });
 
   it('writes deepseek webSearch defaults when deepseek-web is selected', async () => {

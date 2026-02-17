@@ -135,6 +135,42 @@ describe('Protocol HTTP providers (V2) - basic behavior', () => {
     });
   });
 
+  test('OpenAIHttpProvider (qwen) uses native web_search endpoint/body and resource_url base override', () => {
+    const config: OpenAIStandardConfig = {
+      id: 'test-qwen',
+      type: 'openai-http-provider',
+      config: {
+        providerType: 'openai',
+        providerId: 'qwen',
+        auth: { type: 'qwen-oauth', apiKey: 'test-key-1234567890' },
+        overrides: { baseUrl: 'https://portal.qwen.ai/v1', endpoint: '/chat/completions' }
+      }
+    } as unknown as OpenAIStandardConfig;
+    const provider = new OpenAIHttpProvider(config, emptyDeps) as any;
+
+    provider.authProvider = {
+      getTokenPayload: () => ({ resource_url: 'portal.qwen.ai' })
+    };
+
+    const endpoint = provider.resolveRequestEndpoint(
+      { metadata: { qwenWebSearch: true, entryEndpoint: '/api/v1/indices/plugin/web_search' } },
+      '/chat/completions'
+    );
+    expect(endpoint).toBe('/api/v1/indices/plugin/web_search');
+
+    const body = provider.buildHttpRequestBody({
+      metadata: { qwenWebSearch: true },
+      data: { model: 'qwen3-coder-plus', uq: 'routecodex', page: 1, rows: 5 }
+    });
+    expect(body).toEqual({ uq: 'routecodex', page: 1, rows: 5 });
+
+    provider.lastRuntimeMetadata = { metadata: { qwenWebSearch: true } };
+    expect(provider.resolveAuthResourceBaseUrlOverride()).toBe('https://portal.qwen.ai');
+
+    provider.lastRuntimeMetadata = { metadata: {} };
+    expect(provider.resolveAuthResourceBaseUrlOverride()).toBe('https://portal.qwen.ai/v1');
+  });
+
   test('DeepSeekHttpProvider keeps openai providerType and deepseek module type', async () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-deepseek-protocol-'));
     tempDirs.push(tempDir);

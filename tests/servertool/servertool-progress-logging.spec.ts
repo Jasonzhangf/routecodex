@@ -40,8 +40,32 @@ const supportsProgressConsoleLogs =
   fs.readFileSync(serverToolEngineRuntimePath, 'utf8').includes('[servertool][stop_watch]');
 const testIfProgressConsoleLogs = supportsProgressConsoleLogs ? test : test.skip;
 
+const PROGRESS_MOCK_IFLOW_BIN_PATH = path.join(process.cwd(), 'tmp', 'jest-progress-mock-iflow.sh');
+const ORIGINAL_STOPMESSAGE_AUTOMESSAGE_IFLOW = process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW;
+const ORIGINAL_STOPMESSAGE_AUTOMESSAGE_IFLOW_BIN = process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW_BIN;
 
 beforeAll(async () => {
+  fs.writeFileSync(
+    PROGRESS_MOCK_IFLOW_BIN_PATH,
+    [
+      '#!/usr/bin/env bash',
+      'if [ "$1" = "-p" ]; then',
+      '  candidate="$(printf \'%s\\n\' "$2" | sed -n \'s/^candidateFollowup: //p\' | head -n1)"',
+      '  if [ -n "$candidate" ] && [ "$candidate" != "n/a" ]; then',
+      '    printf \'%s\\n\' "$candidate"',
+      '  else',
+      "    echo '继续执行'",
+      '  fi',
+      '  exit 0',
+      'fi',
+      'exit 2'
+    ].join('\n'),
+    { encoding: 'utf8' }
+  );
+  fs.chmodSync(PROGRESS_MOCK_IFLOW_BIN_PATH, 0o755);
+  process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW = '1';
+  process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW_BIN = PROGRESS_MOCK_IFLOW_BIN_PATH;
+
   if (!supportsProgressFileLogger) {
     return;
   }
@@ -52,6 +76,22 @@ beforeAll(async () => {
     mod.flushServerToolProgressFileLoggerForTests ?? (async () => {});
   resetServerToolProgressFileLoggerForTests =
     mod.resetServerToolProgressFileLoggerForTests ?? (() => {});
+});
+
+afterAll(() => {
+  if (ORIGINAL_STOPMESSAGE_AUTOMESSAGE_IFLOW === undefined) {
+    delete process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW;
+  } else {
+    process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW = ORIGINAL_STOPMESSAGE_AUTOMESSAGE_IFLOW;
+  }
+  if (ORIGINAL_STOPMESSAGE_AUTOMESSAGE_IFLOW_BIN === undefined) {
+    delete process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW_BIN;
+  } else {
+    process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW_BIN = ORIGINAL_STOPMESSAGE_AUTOMESSAGE_IFLOW_BIN;
+  }
+  if (fs.existsSync(PROGRESS_MOCK_IFLOW_BIN_PATH)) {
+    fs.unlinkSync(PROGRESS_MOCK_IFLOW_BIN_PATH);
+  }
 });
 
 describe('servertool progress logging', () => {
@@ -82,8 +122,8 @@ describe('servertool progress logging', () => {
     try {
       const adapterContext: AdapterContext = {
         requestId: 'req-progress-1',
-        entryEndpoint: '/v1/responses',
-        providerProtocol: 'openai-responses',
+        entryEndpoint: '/v1/chat/completions',
+        providerProtocol: 'openai-chat',
         sessionId,
         capturedChatRequest: {
           model: 'gpt-test',
@@ -92,27 +132,43 @@ describe('servertool progress logging', () => {
       } as any;
 
       const responsesPayload: JsonObject = {
-        id: 'resp-progress-1',
-        object: 'response',
+        id: 'chatcmpl-progress-1',
+        object: 'chat.completion',
         model: 'gpt-test',
-        status: 'completed',
-        output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'ok' }] }]
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: 'assistant',
+              content: 'ok'
+            },
+            finish_reason: 'stop'
+          }
+        ]
       };
 
       await runServerToolOrchestration({
         chat: responsesPayload,
         adapterContext,
         requestId: 'req-progress-1',
-        entryEndpoint: '/v1/responses',
-        providerProtocol: 'openai-responses',
+        entryEndpoint: '/v1/chat/completions',
+        providerProtocol: 'openai-chat',
         reenterPipeline: async () => {
           return {
             body: {
-              id: 'resp-progress-followup-1',
-              object: 'response',
+              id: 'chatcmpl-progress-followup-1',
+              object: 'chat.completion',
               model: 'gpt-test',
-              status: 'completed',
-              output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'done' }] }]
+              choices: [
+                {
+                  index: 0,
+                  message: {
+                    role: 'assistant',
+                    content: 'done'
+                  },
+                  finish_reason: 'stop'
+                }
+              ]
             } as JsonObject
           };
         }
@@ -350,8 +406,8 @@ describe('servertool progress logging', () => {
     try {
       const adapterContext: AdapterContext = {
         requestId: 'req-stop-lifecycle-1',
-        entryEndpoint: '/v1/responses',
-        providerProtocol: 'openai-responses',
+        entryEndpoint: '/v1/chat/completions',
+        providerProtocol: 'openai-chat',
         sessionId,
         capturedChatRequest: {
           model: 'gpt-test',
@@ -360,26 +416,42 @@ describe('servertool progress logging', () => {
       } as any;
 
       const payload: JsonObject = {
-        id: 'resp-stop-lifecycle',
-        object: 'response',
+        id: 'chatcmpl-stop-lifecycle',
+        object: 'chat.completion',
         model: 'gpt-test',
-        status: 'completed',
-        output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'ok' }] }]
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: 'assistant',
+              content: 'ok'
+            },
+            finish_reason: 'stop'
+          }
+        ]
       };
 
       await runServerToolOrchestration({
         chat: payload,
         adapterContext,
         requestId: 'req-stop-lifecycle-1',
-        entryEndpoint: '/v1/responses',
-        providerProtocol: 'openai-responses',
+        entryEndpoint: '/v1/chat/completions',
+        providerProtocol: 'openai-chat',
         reenterPipeline: async () => ({
           body: {
-            id: 'resp-stop-lifecycle-followup-1',
-            object: 'response',
+            id: 'chatcmpl-stop-lifecycle-followup-1',
+            object: 'chat.completion',
             model: 'gpt-test',
-            status: 'completed',
-            output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'done-1' }] }]
+            choices: [
+              {
+                index: 0,
+                message: {
+                  role: 'assistant',
+                  content: 'done-1'
+                },
+                finish_reason: 'stop'
+              }
+            ]
           } as JsonObject
         })
       });
@@ -393,15 +465,23 @@ describe('servertool progress logging', () => {
         chat: payload,
         adapterContext,
         requestId: 'req-stop-lifecycle-2',
-        entryEndpoint: '/v1/responses',
-        providerProtocol: 'openai-responses',
+        entryEndpoint: '/v1/chat/completions',
+        providerProtocol: 'openai-chat',
         reenterPipeline: async () => ({
           body: {
-            id: 'resp-stop-lifecycle-followup-2',
-            object: 'response',
+            id: 'chatcmpl-stop-lifecycle-followup-2',
+            object: 'chat.completion',
             model: 'gpt-test',
-            status: 'completed',
-            output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'done-2' }] }]
+            choices: [
+              {
+                index: 0,
+                message: {
+                  role: 'assistant',
+                  content: 'done-2'
+                },
+                finish_reason: 'stop'
+              }
+            ]
           } as JsonObject
         })
       });
@@ -511,8 +591,8 @@ describe('servertool progress logging', () => {
     try {
       const adapterContext: AdapterContext = {
         requestId: 'req-filelog-enabled',
-        entryEndpoint: '/v1/responses',
-        providerProtocol: 'openai-responses',
+        entryEndpoint: '/v1/chat/completions',
+        providerProtocol: 'openai-chat',
         sessionId,
         capturedChatRequest: {
           model: 'gpt-test',
@@ -521,26 +601,42 @@ describe('servertool progress logging', () => {
       } as any;
 
       const payload: JsonObject = {
-        id: 'resp-filelog-enabled',
-        object: 'response',
+        id: 'chatcmpl-filelog-enabled',
+        object: 'chat.completion',
         model: 'gpt-test',
-        status: 'completed',
-        output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'ok' }] }]
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: 'assistant',
+              content: 'ok'
+            },
+            finish_reason: 'stop'
+          }
+        ]
       };
 
       await runServerToolOrchestration({
         chat: payload,
         adapterContext,
         requestId: 'req-filelog-enabled',
-        entryEndpoint: '/v1/responses',
-        providerProtocol: 'openai-responses',
+        entryEndpoint: '/v1/chat/completions',
+        providerProtocol: 'openai-chat',
         reenterPipeline: async () => ({
           body: {
-            id: 'resp-filelog-enabled-followup',
-            object: 'response',
+            id: 'chatcmpl-filelog-enabled-followup',
+            object: 'chat.completion',
             model: 'gpt-test',
-            status: 'completed',
-            output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'done' }] }]
+            choices: [
+              {
+                index: 0,
+                message: {
+                  role: 'assistant',
+                  content: 'done'
+                },
+                finish_reason: 'stop'
+              }
+            ]
           } as JsonObject
         })
       });
@@ -615,8 +711,8 @@ describe('servertool progress logging', () => {
     try {
       const adapterContext: AdapterContext = {
         requestId: 'req-filelog-disabled',
-        entryEndpoint: '/v1/responses',
-        providerProtocol: 'openai-responses',
+        entryEndpoint: '/v1/chat/completions',
+        providerProtocol: 'openai-chat',
         sessionId,
         capturedChatRequest: {
           model: 'gpt-test',
@@ -625,26 +721,42 @@ describe('servertool progress logging', () => {
       } as any;
 
       const payload: JsonObject = {
-        id: 'resp-filelog-disabled',
-        object: 'response',
+        id: 'chatcmpl-filelog-disabled',
+        object: 'chat.completion',
         model: 'gpt-test',
-        status: 'completed',
-        output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'ok' }] }]
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: 'assistant',
+              content: 'ok'
+            },
+            finish_reason: 'stop'
+          }
+        ]
       };
 
       await runServerToolOrchestration({
         chat: payload,
         adapterContext,
         requestId: 'req-filelog-disabled',
-        entryEndpoint: '/v1/responses',
-        providerProtocol: 'openai-responses',
+        entryEndpoint: '/v1/chat/completions',
+        providerProtocol: 'openai-chat',
         reenterPipeline: async () => ({
           body: {
-            id: 'resp-filelog-disabled-followup',
-            object: 'response',
+            id: 'chatcmpl-filelog-disabled-followup',
+            object: 'chat.completion',
             model: 'gpt-test',
-            status: 'completed',
-            output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'done' }] }]
+            choices: [
+              {
+                index: 0,
+                message: {
+                  role: 'assistant',
+                  content: 'done'
+                },
+                finish_reason: 'stop'
+              }
+            ]
           } as JsonObject
         })
       });

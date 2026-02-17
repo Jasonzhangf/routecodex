@@ -28,6 +28,76 @@ function buildHandle(providerKey: string, processFn: () => Promise<unknown>): Pr
 }
 
 describe('HubRequestExecutor failover', () => {
+  test('waits for short recoverable cooldown on pool exhaustion before retrying route selection', async () => {
+    const providerKey = 'deepseek-web.1.deepseek-chat';
+    const handle = buildHandle(providerKey, async () => ({ status: 200, data: { id: 'ok-after-wait' } }));
+
+    const runtimeManager = {
+      resolveRuntimeKey: (key: string) => key,
+      getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey ? (runtimeKey === providerKey ? handle : undefined) : undefined)
+    };
+
+    const pipeline = {
+      execute: jest.fn()
+        .mockRejectedValueOnce(
+          Object.assign(new Error('All providers unavailable for route default'), {
+            code: 'PROVIDER_NOT_AVAILABLE',
+            details: {
+              routeName: 'default',
+              attempted: ['default:default-primary:health'],
+              minRecoverableCooldownMs: 120
+            }
+          })
+        )
+        .mockResolvedValueOnce({
+          requestId: 'req-cooldown-wait',
+          providerPayload: {},
+          target: {
+            providerKey,
+            providerType: 'openai',
+            outboundProfile: 'openai-chat',
+            runtimeKey: providerKey
+          },
+          routingDecision: { routeName: 'default' },
+          metadata: {}
+        }),
+      updateVirtualRouterConfig: jest.fn()
+    };
+
+    const logStage = jest.fn();
+    const deps = {
+      runtimeManager,
+      getHubPipeline: () => pipeline,
+      getModuleDependencies: () => ({
+        errorHandlingCenter: {
+          handleError: jest.fn(async () => undefined)
+        }
+      }),
+      logStage,
+      stats: new StatsManager()
+    };
+
+    const executor = createRequestExecutor(deps);
+    const startedAt = Date.now();
+    const result = await executor.execute({
+      requestId: 'req-cooldown-wait',
+      entryEndpoint: '/v1/responses',
+      body: {},
+      headers: {},
+      metadata: {}
+    });
+    const elapsed = Date.now() - startedAt;
+
+    expect(result).toEqual(expect.objectContaining({ status: 200 }));
+    expect(pipeline.execute).toHaveBeenCalledTimes(2);
+    expect(elapsed).toBeGreaterThanOrEqual(50);
+    expect(
+      logStage.mock.calls.some(
+        (call) => call[0] === 'provider.route_pool_cooldown_wait' && typeof call[2]?.waitMs === 'number'
+      )
+    ).toBe(true);
+  });
+
   test('retries with alternate provider after recoverable error', async () => {
     const firstProviderKey = 'antigravity.1-geetasamodgeetasamoda.claude-sonnet-4-5-thinking';
     const secondProviderKey = 'antigravity.2-geetasamodgeetasamoda.claude-sonnet-4-5-thinking';

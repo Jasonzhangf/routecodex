@@ -38,7 +38,8 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
     .option('--snap-off', 'Disable snapshot capture')
     .option('--verbose-errors', 'Print verbose error stacks in console output')
     .option('--quiet-errors', 'Silence detailed error stacks')
-    .option('--restart', 'Restart if an instance is already running')
+    .option('--restart', 'Restart if an instance is already running (default: on)', true)
+    .option('--no-restart', 'Do not restart when an instance is already running')
     .option('--exclusive', 'Always take over the port (kill existing listeners)')
     .action(async (options: StartCommandOptions) => {
       const spinner = await ctx.createSpinner('Starting RouteCodex server...');
@@ -196,8 +197,8 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
         }
 
         // Ensure port state aligns with requested behavior.
-        // Default behavior should be non-disruptive: if already running, return success without restart.
-        const shouldRestart = Boolean(options.restart || options.exclusive);
+        // Default behavior is takeover/restart; pass --no-restart for legacy non-disruptive mode.
+        const shouldRestart = options.restart !== false || options.exclusive === true;
         await ctx.ensurePortAvailable(resolvedPort, spinner, { restart: shouldRestart });
 
         const resolveServerHost = (): string => {

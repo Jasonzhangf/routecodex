@@ -56,16 +56,36 @@ function isManagedTerminationEnabled(): boolean {
   return false;
 }
 
+function shouldLogStaleOnlyCleanup(): boolean {
+  const raw = String(
+    process.env.ROUTECODEX_CLOCK_REAPER_LOG_STALE_ONLY
+      ?? process.env.RCC_CLOCK_REAPER_LOG_STALE_ONLY
+      ?? ''
+  ).trim().toLowerCase();
+  if (!raw) {
+    return false;
+  }
+  if (raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on') {
+    return true;
+  }
+  if (raw === '0' || raw === 'false' || raw === 'no' || raw === 'off') {
+    return false;
+  }
+  return false;
+}
+
 export class ClockReaper {
   private timer: NodeJS.Timeout | null = null;
   private readonly intervalMs: number;
   private readonly gracePeriodMs: number;
   private readonly enableManagedTermination: boolean;
+  private readonly logStaleOnlyCleanup: boolean;
 
   constructor(config?: ClockReaperConfig) {
     this.intervalMs = config?.intervalMs ?? readReaperIntervalFromEnv();
     this.gracePeriodMs = config?.gracePeriodMs ?? readGracePeriodFromEnv();
     this.enableManagedTermination = config?.enableManagedTermination ?? isManagedTerminationEnabled();
+    this.logStaleOnlyCleanup = shouldLogStaleOnlyCleanup();
   }
 
   start(): void {
@@ -146,12 +166,26 @@ export class ClockReaper {
       staleResult.removedTmuxSessionIds.length;
     const totalKilledSessions = deadTmuxResult.killedTmuxSessionIds.length;
     const totalKilledProcesses = deadTmuxResult.killedManagedClientPids.length;
+    const totalFailedKills =
+      deadTmuxResult.failedKillTmuxSessionIds.length +
+      deadTmuxResult.failedKillManagedClientPids.length;
+    const hasDeadTmuxCleanup = deadTmuxResult.removedTmuxSessionIds.length > 0;
+    const hasStaleOnlyCleanup =
+      staleResult.removedTmuxSessionIds.length > 0 &&
+      !hasDeadTmuxCleanup &&
+      totalKilledSessions === 0 &&
+      totalKilledProcesses === 0 &&
+      totalFailedKills === 0;
 
-    if (totalRemovedSessions > 0 || totalKilledSessions > 0 || totalKilledProcesses > 0) {
+    if (totalRemovedSessions > 0 || totalKilledSessions > 0 || totalKilledProcesses > 0 || totalFailedKills > 0) {
+      if (hasStaleOnlyCleanup && !this.logStaleOnlyCleanup) {
+        return;
+      }
       logProcessLifecycle({
         event: 'clock_reaper_cleanup',
         source: 'clock-client-reaper',
         details: {
+          result: hasStaleOnlyCleanup ? 'stale_only_cleanup' : 'cleanup_performed',
           deadTmuxRemoved: deadTmuxResult.removedTmuxSessionIds.length,
           deadTmuxKilled: deadTmuxResult.killedTmuxSessionIds.length,
           deadTmuxFailedKill: deadTmuxResult.failedKillTmuxSessionIds.length,

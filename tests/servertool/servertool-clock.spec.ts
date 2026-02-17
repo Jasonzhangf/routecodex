@@ -261,6 +261,89 @@ describe('servertool:clock', () => {
     expect(stateAfter.tasks[0].deliveryCount).toBe(1);
   });
 
+  test('daemon-scoped clock session isolates tasks when sessionId is shared', async () => {
+    const sharedSessionId = 's-clock-shared-session';
+    const dueAtIso = new Date(Date.now() + 60_000).toISOString();
+
+    const runClockTool = async (requestId: string, daemonId: string, action: 'schedule' | 'list', task?: string) => {
+      const toolCallArgs =
+        action === 'schedule'
+          ? {
+              action: 'schedule',
+              items: [{ dueAt: dueAtIso, task: task || 'task' }]
+            }
+          : { action: 'list' };
+      return await runServerSideToolEngine({
+        chatResponse: {
+          id: `chatcmpl-${requestId}`,
+          object: 'chat.completion',
+          model: 'gpt-test',
+          choices: [
+            {
+              index: 0,
+              message: {
+                role: 'assistant',
+                content: null,
+                tool_calls: [
+                  {
+                    id: `call_${requestId}`,
+                    type: 'function',
+                    function: {
+                      name: 'clock',
+                      arguments: JSON.stringify(toolCallArgs)
+                    }
+                  }
+                ]
+              },
+              finish_reason: 'tool_calls'
+            }
+          ]
+        } as any,
+        adapterContext: {
+          requestId,
+          entryEndpoint: '/v1/chat/completions',
+          providerProtocol: 'openai-chat',
+          sessionId: sharedSessionId,
+          clockDaemonId: daemonId,
+          __rt: { clock: { enabled: true, tickMs: 0 } },
+          capturedChatRequest: {
+            model: 'gpt-test',
+            messages: [{ role: 'user', content: 'hi' }]
+          }
+        } as any,
+        entryEndpoint: '/v1/chat/completions',
+        requestId,
+        providerProtocol: 'openai-chat'
+      });
+    };
+
+    await runClockTool('req-clock-scope-da', 'clockd_A', 'schedule', 'task-da');
+    await runClockTool('req-clock-scope-db', 'clockd_B', 'schedule', 'task-db');
+
+    expect(fs.existsSync(path.join(SESSION_DIR, 'clock', 'clockd.clockd_A.json'))).toBe(true);
+    expect(fs.existsSync(path.join(SESSION_DIR, 'clock', 'clockd.clockd_B.json'))).toBe(true);
+
+    const stateA = readClockStateFile('clockd.clockd_A');
+    const stateB = readClockStateFile('clockd.clockd_B');
+    expect(stateA.tasks.map((item: any) => item.task)).toContain('task-da');
+    expect(stateA.tasks.map((item: any) => item.task)).not.toContain('task-db');
+    expect(stateB.tasks.map((item: any) => item.task)).toContain('task-db');
+    expect(stateB.tasks.map((item: any) => item.task)).not.toContain('task-da');
+
+    const listA = await runClockTool('req-clock-scope-da-list', 'clockd_A', 'list');
+    const listB = await runClockTool('req-clock-scope-db-list', 'clockd_B', 'list');
+    const listPayloadA = JSON.parse(
+      String(((listA.finalChatResponse as any)?.tool_outputs?.[0] as any)?.content || '{}')
+    ) as { items?: Array<{ task?: string }> };
+    const listPayloadB = JSON.parse(
+      String(((listB.finalChatResponse as any)?.tool_outputs?.[0] as any)?.content || '{}')
+    ) as { items?: Array<{ task?: string }> };
+    expect((listPayloadA.items || []).map((item) => item.task)).toContain('task-da');
+    expect((listPayloadA.items || []).map((item) => item.task)).not.toContain('task-db');
+    expect((listPayloadB.items || []).map((item) => item.task)).toContain('task-db');
+    expect((listPayloadB.items || []).map((item) => item.task)).not.toContain('task-da');
+  });
+
 
   test('overdue one-shot tasks are auto-removed after overdue window', async () => {
     const sessionId = 's-clock-overdue-auto-remove';
@@ -911,6 +994,46 @@ describe('servertool:clock', () => {
     expect(markerTask?.setBy).toBe('user');
     expect(markerTask?.recurrence?.kind).toBe('daily');
     expect(markerTask?.recurrence?.maxRuns).toBe(2);
+  });
+
+  test('clock marker scheduling prefers daemon-scoped clock session when clockDaemonId exists', async () => {
+    const sharedSessionId = 's-clock-marker-shared';
+    const daemonId = 'clockd_marker_A';
+    const dueAtIso = new Date(Date.now() + 120_000).toISOString();
+    const request = buildRequest([
+      {
+        role: 'user',
+        content: `please remind me later\n<**clock:{"time":"${dueAtIso}","message":"marker-daemon-task"}**>`
+      }
+    ]);
+
+    const result = await runHubChatProcess({
+      request,
+      requestId: 'req-clock-marker-daemon-1',
+      entryEndpoint: '/v1/chat/completions',
+      rawPayload: {},
+      metadata: {
+        providerProtocol: 'openai-chat',
+        sessionId: sharedSessionId,
+        clockDaemonId: daemonId,
+        clock: { enabled: true, tickMs: 0 }
+      }
+    });
+
+    const processed = result.processedRequest as any;
+    const toolMessage = (processed.messages as any[]).find(
+      (msg) => msg?.role === 'tool' && msg?.name === 'clock'
+    );
+    expect(toolMessage).toBeDefined();
+    const payload = JSON.parse(String(toolMessage.content || '{}'));
+    expect(payload.ok).toBe(true);
+    expect(payload.action).toBe('schedule');
+
+    const config = normalizeClockConfig({ enabled: true, tickMs: 0 })!;
+    const daemonScopedState = await loadClockSessionState(`clockd.${daemonId}`, config);
+    const sharedSessionState = await loadClockSessionState(sharedSessionId, config);
+    expect(daemonScopedState.tasks.some((task) => task.task === 'marker-daemon-task')).toBe(true);
+    expect(sharedSessionState.tasks).toHaveLength(0);
   });
 
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
 import { setTimeout as sleep } from 'node:timers/promises';
 import http from 'node:http';
@@ -20,6 +20,16 @@ function resolveRoutecodexBinary() {
     }
   }
   return 'routecodex';
+}
+
+function cleanupStaleServerPidFiles() {
+  try {
+    spawnSync('node', [path.join(process.cwd(), 'scripts', 'cleanup-stale-server-pids.mjs'), '--quiet'], {
+      stdio: 'ignore'
+    });
+  } catch {
+    // ignore cleanup failures
+  }
 }
 
 async function waitForHealth(timeoutMs = 60000) {
@@ -165,6 +175,7 @@ async function main() {
     if (mockServer) {
       await mockServer.close();
     }
+    cleanupStaleServerPidFiles();
   }
 }
 

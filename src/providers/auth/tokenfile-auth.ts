@@ -140,20 +140,13 @@ export class TokenFileAuthProvider implements IAuthProvider {
       throw new Error('TokenFileAuthProvider not initialized');
     }
 
-    // iFlow专用：优先使用API Key，回退到access_token
-    const apiKey = this.extractApiKey(this.token);
-    if (apiKey) {
-      this.updateStatus(true, true);
-      return { Authorization: `Bearer ${apiKey}` };
-    }
-
-    const access = this.extractAccessToken(this.token);
-    if (!access) {
+    const bearer = this.resolveBearerCredential(this.token);
+    if (!bearer) {
       this.updateStatus(false, false, 'missing_access_token_or_api_key');
       throw new Error('TokenFileAuthProvider not initialized');
     }
     this.updateStatus(true, true);
-    return { Authorization: `Bearer ${access}` };
+    return { Authorization: `Bearer ${bearer}` };
   }
 
   async validateCredentials(): Promise<boolean> {
@@ -377,6 +370,22 @@ export class TokenFileAuthProvider implements IAuthProvider {
       return cand.trim();
     }
     return null;
+  }
+
+  private resolveBearerCredential(tok: TokenPayload | null): string | null {
+    const providerId = this.getConfiguredProviderId();
+
+    // Keep iFlow behavior: api_key is the effective credential for business requests.
+    if (providerId === 'iflow') {
+      return this.extractApiKey(tok) || this.extractAccessToken(tok);
+    }
+
+    // Align with Qwen CLI qwen-oauth branch: access_token is the primary runtime credential.
+    if (providerId === 'qwen') {
+      return this.extractAccessToken(tok) || this.extractApiKey(tok);
+    }
+
+    return this.extractAccessToken(tok) || this.extractApiKey(tok);
   }
 
   private extractExpiresAt(tok: TokenPayload | null): number | null {

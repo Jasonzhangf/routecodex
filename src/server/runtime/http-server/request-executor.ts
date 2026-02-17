@@ -58,6 +58,7 @@ import {
 } from './executor/provider-response-utils.js';
 import {
   isPoolExhaustedPipelineError,
+  resolvePoolCooldownWaitMs,
   writeInboundClientSnapshot
 } from './executor/request-executor-core-utils.js';
 import { resolveProviderRuntimeOrThrow } from './executor/provider-runtime-resolver.js';
@@ -120,6 +121,7 @@ export class HubRequestExecutor implements RequestExecutor {
       let lastError: unknown;
       let initialRoutePool: string[] | null = null;
       let antigravityRetrySignal: AntigravityRetrySignal | null = null;
+      let poolCooldownWaitBudgetMs = 3 * 60 * 1000;
 
       while (attempt < maxAttempts) {
         attempt += 1;
@@ -146,8 +148,27 @@ export class HubRequestExecutor implements RequestExecutor {
         try {
           pipelineResult = await runHubPipeline(hubPipeline, input, metadataForAttempt);
         } catch (pipelineError) {
-          if (lastError && isPoolExhaustedPipelineError(pipelineError)) {
-            throw lastError;
+          if (isPoolExhaustedPipelineError(pipelineError)) {
+            const cooldownWaitMs = resolvePoolCooldownWaitMs(pipelineError);
+            if (
+              cooldownWaitMs &&
+              attempt < maxAttempts &&
+              poolCooldownWaitBudgetMs >= cooldownWaitMs
+            ) {
+              this.logStage('provider.route_pool_cooldown_wait', providerRequestId, {
+                attempt,
+                waitMs: cooldownWaitMs,
+                waitBudgetMs: poolCooldownWaitBudgetMs,
+                reason: 'provider_pool_cooling_down'
+              });
+              poolCooldownWaitBudgetMs -= cooldownWaitMs;
+              await new Promise((resolve) => setTimeout(resolve, cooldownWaitMs));
+              attempt = Math.max(0, attempt - 1);
+              continue;
+            }
+            if (lastError) {
+              throw lastError;
+            }
           }
           throw pipelineError;
         }

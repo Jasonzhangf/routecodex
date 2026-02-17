@@ -314,7 +314,7 @@ describe('cli start command', () => {
     expect(spawnCalls[0].unrefCalled).toBe(true);
   });
 
-  it('does not force restart by default', async () => {
+  it('forces restart by default', async () => {
     const program = new Command();
     const portChecks: Array<{ restart?: boolean }> = [];
 
@@ -358,7 +358,7 @@ describe('cli start command', () => {
 
     await program.parseAsync(['node', 'routecodex', 'start'], { from: 'node' });
     expect(portChecks).toHaveLength(1);
-    expect(portChecks[0]?.restart).toBe(false);
+    expect(portChecks[0]?.restart).toBe(true);
   });
 
   it('uses restart flow when --restart is provided', async () => {
@@ -406,5 +406,52 @@ describe('cli start command', () => {
     await program.parseAsync(['node', 'routecodex', 'start', '--restart'], { from: 'node' });
     expect(portChecks).toHaveLength(1);
     expect(portChecks[0]?.restart).toBe(true);
+  });
+
+  it('uses non-restart flow when --no-restart is provided', async () => {
+    const program = new Command();
+    const portChecks: Array<{ restart?: boolean }> = [];
+
+    createStartCommand(program, {
+      isDevPackage: true,
+      isWindows: false,
+      defaultDevPort: 5520,
+      nodeBin: 'node',
+      createSpinner: async () => createStubSpinner(),
+      logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
+      env: {},
+      fsImpl: {
+        existsSync: () => true,
+        statSync: () => ({ isDirectory: () => false } as any),
+        readFileSync: () => JSON.stringify({ httpserver: { port: 5520, host: '127.0.0.1' } }),
+        writeFileSync: () => {},
+        mkdtempSync: () => '/tmp/rc',
+        mkdirSync: () => {}
+      } as any,
+      pathImpl: { join: (...parts: string[]) => parts.join('/'), resolve: (...parts: string[]) => parts.join('/') } as any,
+      homedir: () => '/home/test',
+      tmpdir: () => '/tmp',
+      sleep: async () => {},
+      ensureLocalTokenPortalEnv: async () => {},
+      ensureTokenDaemonAutoStart: async () => {},
+      ensurePortAvailable: async (_port, _spinner, opts) => {
+        portChecks.push(opts ?? {});
+      },
+      findListeningPids: () => [],
+      killPidBestEffort: () => {},
+      getModulesConfigPath: () => '/tmp/modules.json',
+      resolveServerEntryPath: () => '/tmp/index.js',
+      spawn: () => ({ pid: 1, on: () => {}, kill: () => true } as any),
+      fetch: (async () => ({ ok: true })) as any,
+      setupKeypress: () => () => {},
+      waitForever: async () => {},
+      exit: (code) => {
+        throw new Error(`exit:${code}`);
+      }
+    });
+
+    await program.parseAsync(['node', 'routecodex', 'start', '--no-restart'], { from: 'node' });
+    expect(portChecks).toHaveLength(1);
+    expect(portChecks[0]?.restart).toBe(false);
   });
 });

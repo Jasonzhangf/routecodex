@@ -75,7 +75,8 @@ function buildDefaultWebSearchConfig(
 ): { webSearchRouteTargets: string[]; webSearchConfig: Record<string, unknown> } | null {
   const deepseekProvider = providers.find((provider) => provider.id === 'deepseek-web');
   const iflowProvider = providers.find((provider) => provider.id === 'iflow');
-  if (!deepseekProvider && !iflowProvider) {
+  const qwenProvider = providers.find((provider) => provider.id === 'qwen');
+  if (!deepseekProvider && !iflowProvider && !qwenProvider) {
     return null;
   }
 
@@ -108,6 +109,20 @@ function buildDefaultWebSearchConfig(
     });
     search['iflow:web_search'] = {
       providerKey: 'iflow'
+    };
+  }
+
+  if (qwenProvider) {
+    const routeTarget = `${qwenProvider.id}.${qwenProvider.defaultModel}`;
+    webSearchRouteTargets.push(routeTarget);
+    engines.push({
+      id: 'qwen:web_search',
+      providerKey: routeTarget,
+      description: 'Qwen native web_search backend',
+      ...(!deepseekProvider && !iflowProvider ? { default: true } : {})
+    });
+    search['qwen:web_search'] = {
+      providerKey: routeTarget
     };
   }
 

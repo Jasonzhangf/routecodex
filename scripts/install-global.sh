@@ -244,11 +244,13 @@ cleanup_old_install() {
 main() {
     check_node
     cleanup_old_install
+    node scripts/cleanup-stale-server-pids.mjs --quiet || true
     build_project
     global_install
     link_global_llms_dev
     verify_install
     verify_server_health
+    node scripts/cleanup-stale-server-pids.mjs --quiet || true
 
     echo ""
     echo "🎉 全局安装完成!"

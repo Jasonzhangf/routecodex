@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.89.2203",
+  "version": "0.89.2238",
   "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support",
   "type": "module",
   "main": "dist/index.js",
@@ -32,7 +32,7 @@
   },
   "scripts": {
     "build": "npm run llmswitch:ensure && node scripts/build-core.mjs && node scripts/vendor-core.mjs && npm run clean && node scripts/gen-build-info.mjs && tsc && node scripts/copy-compat-assets.mjs && node scripts/copy-modules-config.mjs && npm run fix:cli-permission",
-    "build:dev": "bash -lc 'export BUILD_MODE=dev; npm run build && npm run fix:cli-permission && npm run test:unified-hub-shadow && npm run verify:e2e-toolcall && npm run verify:apply-patch && npm run verify:apply-patch-regressions && npm run verify:exec-command && npm run test:routing-instructions && npm run test:cli && npm run install:global && npm run mock:regressions && npm run test:blackbox-antigravity-parity && npm run verify:errorsamples && npm run verify:e2e-gemini-followup-sample'",
+    "build:dev": "bash -lc 'export BUILD_MODE=dev; npm run cleanup:stale-server-pids || true; trap \"npm run cleanup:stale-server-pids >/dev/null 2>&1 || true\" EXIT; npm run build && npm run fix:cli-permission && npm run test:unified-hub-shadow && npm run verify:e2e-toolcall && npm run verify:apply-patch && npm run verify:apply-patch-regressions && npm run verify:exec-command && npm run test:routing-instructions && npm run test:cli && npm run install:global && npm run mock:regressions && npm run test:blackbox-antigravity-parity && npm run verify:errorsamples && npm run verify:e2e-gemini-followup-sample'",
     "build:min": "npm run llmswitch:ensure && node scripts/build-core.mjs && node scripts/vendor-core.mjs && npm run clean && node scripts/gen-build-info.mjs && tsc && node scripts/copy-compat-assets.mjs && node scripts/copy-modules-config.mjs && npm run fix:cli-permission",
     "prepack": "echo skip-prepack",
     "postbuild": "node scripts/ensure-cli-executable.mjs",
@@ -65,6 +65,7 @@
     "lint:fix": "ESLINT_USE_FLAT_CONFIG=1 eslint \"src/**/*.ts\" --fix --no-cache",
     "lint:strict": "ESLINT_USE_FLAT_CONFIG=1 eslint \"src/**/*.ts\" --max-warnings 0 --no-cache",
     "clean": "rm -rf dist coverage",
+    "cleanup:stale-server-pids": "node scripts/cleanup-stale-server-pids.mjs --quiet",
     "prebuild": "npm run verify:repo-sanity && echo skip-lint",
     "prepare": "",
     "postinstall": "node scripts/ensure-cli-executable.mjs",

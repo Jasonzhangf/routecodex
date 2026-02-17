@@ -472,6 +472,57 @@ describe('ServerTool web_search engine (generic)', () => {
     expect(call.payload?.metadata?.iflowWebSearch).toBe(true);
     expect(call.payload?.data?.query).toBe('routecodex');
   });
+
+  test('qwen web_search backend uses native search endpoint and parses docs', async () => {
+    const invocations: any[] = [];
+    const result = await executeWebSearchBackendPlan({
+      plan: {
+        kind: 'web_search',
+        requestIdSuffix: ':web_search',
+        query: 'routecodex',
+        resultCount: 3,
+        engines: [
+          {
+            id: 'qwen-search',
+            providerKey: 'qwen.qwen3-coder-plus'
+          }
+        ]
+      } as any,
+      options: {
+        chatResponse: {},
+        adapterContext: { requestId: 'req-qwen-web', providerProtocol: 'openai-chat' } as any,
+        entryEndpoint: '/v1/chat/completions',
+        requestId: 'req-qwen-web',
+        providerProtocol: 'openai-chat',
+        providerInvoker: async (options: any) => {
+          invocations.push(options);
+          return {
+            providerResponse: {
+              status: 0,
+              data: {
+                docs: [
+                  {
+                    title: 'RouteCodex',
+                    url: 'https://example.com',
+                    snippet: 'result'
+                  }
+                ]
+              }
+            }
+          };
+        }
+      } as any
+    });
+
+    expect(result.kind).toBe('web_search');
+    expect(invocations.length).toBe(1);
+    const call = invocations[0];
+    expect(call.entryEndpoint).toBe('/api/v1/indices/plugin/web_search');
+    expect(call.payload?.metadata?.qwenWebSearch).toBe(true);
+    expect(call.payload?.data?.uq).toBe('routecodex');
+    expect(call.payload?.data?.rows).toBe(3);
+    expect((result as any)?.result?.hits?.[0]?.link).toBe('https://example.com');
+  });
 });
 
 describe('ServerTool web_search engine (Gemini backend)', () => {

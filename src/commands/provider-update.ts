@@ -212,6 +212,7 @@ interface ProviderTemplate {
   providerTypeHint: string;
   defaultBaseUrl?: string;
   defaultModel?: string;
+  seedModels?: string[];
   defaultCompat?: string;
   defaultAuthType?: string;
 }
@@ -232,6 +233,7 @@ const PROVIDER_TEMPLATES: ProviderTemplate[] = [
     providerTypeHint: 'qwen',
     defaultBaseUrl: 'https://portal.qwen.ai/v1',
     defaultModel: 'qwen3-coder-plus',
+    seedModels: ['qwen3-coder-plus', 'qwen3.5-plus', 'qwen3-vl-plus'],
     defaultCompat: 'chat:qwen',
     defaultAuthType: 'qwen-oauth'
   },
@@ -241,6 +243,7 @@ const PROVIDER_TEMPLATES: ProviderTemplate[] = [
     providerTypeHint: 'iflow',
     defaultBaseUrl: 'https://apis.iflow.cn/v1',
     defaultModel: 'kimi-k2',
+    seedModels: ['qwen3-vl-plus'],
     defaultCompat: 'chat:iflow',
     defaultAuthType: 'iflow-oauth'
   },
@@ -345,6 +348,16 @@ function buildProviderFromTemplate(
   }
 
   const models: Record<string, UnknownRecord> = {};
+  const seedModels = Array.isArray(tpl.seedModels) ? tpl.seedModels : [];
+  for (const modelId of seedModels) {
+    const normalizedModelId = typeof modelId === 'string' ? modelId.trim() : '';
+    if (!normalizedModelId) {
+      continue;
+    }
+    models[normalizedModelId] = {
+      supportsStreaming: true
+    };
+  }
   if (primaryModelId.trim()) {
     models[primaryModelId.trim()] = {
       supportsStreaming: true

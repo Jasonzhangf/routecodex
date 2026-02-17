@@ -203,6 +203,15 @@ function normalizeSessionToken(value: unknown): string | undefined {
   return trimmed || undefined;
 }
 
+function resolveClockConversationSessionId(metadata: Record<string, unknown>): string | undefined {
+  const daemonId = normalizeSessionToken(metadata.clockDaemonId)
+    ?? normalizeSessionToken(metadata.clockClientDaemonId);
+  if (daemonId) {
+    return `clockd.${daemonId}`;
+  }
+  return normalizeSessionToken(metadata.sessionId);
+}
+
 function inferClockClientTypeFromMetadata(metadata: Record<string, unknown>): string | undefined {
   const direct = normalizeSessionToken(metadata.clockClientType) ?? normalizeSessionToken(metadata.clientType);
   if (direct) {
@@ -220,7 +229,7 @@ function inferClockClientTypeFromMetadata(metadata: Record<string, unknown>): st
 }
 
 export function bindClockConversationSession(metadata: Record<string, unknown>): void {
-  const conversationSessionId = normalizeSessionToken(metadata.sessionId);
+  const conversationSessionId = resolveClockConversationSessionId(metadata);
   if (!conversationSessionId) {
     return;
   }

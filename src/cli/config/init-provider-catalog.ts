@@ -187,7 +187,8 @@ export function getInitProviderCatalog(): InitProviderTemplate[] {
         },
         models: {
           'qwen3-coder-plus': { supportsStreaming: true },
-          'qwen3.5-plus': { supportsStreaming: true }
+          'qwen3.5-plus': { supportsStreaming: true },
+          'qwen3-vl-plus': { supportsStreaming: true }
         }
       },
       defaultModel: 'qwen3-coder-plus'
@@ -207,7 +208,8 @@ export function getInitProviderCatalog(): InitProviderTemplate[] {
           cookieFile: '~/.routecodex/auth/iflow-work.cookie'
         },
         models: {
-          'qwen3-coder-plus': { supportsStreaming: true }
+          'qwen3-coder-plus': { supportsStreaming: true },
+          'qwen3-vl-plus': { supportsStreaming: true }
         }
       },
       defaultModel: 'qwen3-coder-plus'
