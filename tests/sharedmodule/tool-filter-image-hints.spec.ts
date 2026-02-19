@@ -32,8 +32,8 @@ const buildTools = () => ([
   }
 ]);
 
-describe('applyLocalToolGovernance / detectImageHint (view_image gating)', () => {
-  it('removes view_image when last user message has no image hint, even if earlier messages mention images', async () => {
+describe('tool filters keep view_image exposed', () => {
+  it('keeps view_image when last user message has no image hint, even if earlier messages mention images', async () => {
     const req = {
       model: 'gpt-4o-mini',
       messages: [
@@ -51,7 +51,7 @@ describe('applyLocalToolGovernance / detectImageHint (view_image gating)', () =>
     const tools = Array.isArray((filtered as any).tools) ? (filtered as any).tools : [];
     const names = tools.map((t: any) => t?.function?.name).filter(Boolean);
     expect(names).toContain('shell');
-    expect(names).not.toContain('view_image');
+    expect(names).toContain('view_image');
   });
 
   it('keeps view_image when last user message contains an image-like path', async () => {
@@ -98,4 +98,3 @@ describe('applyLocalToolGovernance / detectImageHint (view_image gating)', () =>
     expect(names).toContain('view_image');
   });
 });
-

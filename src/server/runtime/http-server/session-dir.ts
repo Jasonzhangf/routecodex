@@ -9,6 +9,18 @@ function sanitizeSegment(value: string): string {
     .replace(/^_+|_+$/g, '');
 }
 
+function normalizeSessionDirEnvValue(raw: unknown): string {
+  const normalized = String(raw || '').trim();
+  if (!normalized) {
+    return '';
+  }
+  const lowered = normalized.toLowerCase();
+  if (lowered === 'undefined' || lowered === 'null') {
+    return '';
+  }
+  return normalized;
+}
+
 export function resolveServerScopedSessionDir(serverId: string): string | null {
   try {
     const home = os.homedir();
@@ -26,7 +38,7 @@ export function resolveServerScopedSessionDir(serverId: string): string | null {
 }
 
 export function ensureServerScopedSessionDir(serverId: string): string | null {
-  const existing = String(process.env.ROUTECODEX_SESSION_DIR || '').trim();
+  const existing = normalizeSessionDirEnvValue(process.env.ROUTECODEX_SESSION_DIR);
   const resolved = resolveServerScopedSessionDir(serverId);
   if (!resolved) {
     return existing || null;

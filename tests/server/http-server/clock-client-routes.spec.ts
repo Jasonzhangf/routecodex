@@ -555,7 +555,11 @@ describe('clock-client routes', () => {
       expect(listedAfterDelete.status).toBe(200);
       expect(listedAfterDelete.payload?.sessions?.[0]?.taskCount).toBe(0);
     } finally {
-      process.env.ROUTECODEX_SESSION_DIR = prevSessionDir;
+      if (prevSessionDir === undefined) {
+        delete process.env.ROUTECODEX_SESSION_DIR;
+      } else {
+        process.env.ROUTECODEX_SESSION_DIR = prevSessionDir;
+      }
       fs.rmSync(tmpSessionDir, { recursive: true, force: true });
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
@@ -593,7 +597,11 @@ describe('clock-client routes', () => {
       expect(cleanup.payload?.cleanup?.removedTmuxSessionIds).toContain(tmuxSessionId);
       expect(cleanup.payload?.clearedTaskSessions).toBeGreaterThanOrEqual(1);
     } finally {
-      process.env.ROUTECODEX_SESSION_DIR = prevSessionDir;
+      if (prevSessionDir === undefined) {
+        delete process.env.ROUTECODEX_SESSION_DIR;
+      } else {
+        process.env.ROUTECODEX_SESSION_DIR = prevSessionDir;
+      }
       fs.rmSync(tmpSessionDir, { recursive: true, force: true });
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }

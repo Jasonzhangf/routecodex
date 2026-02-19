@@ -3,6 +3,7 @@ import path from 'node:path';
 import {
   cleanupDeadTmuxSessionsFromRegistry,
   cleanupStaleHeartbeatsFromRegistry,
+  isWorkdirCompatible,
   normalizePositiveInt,
   normalizeString,
   normalizeWorkdir,
@@ -25,8 +26,20 @@ export class ClockClientRegistry {
   private bindingsLoaded = false;
   private bindingsStorePath: string | undefined;
 
+  private normalizeSessionDirEnvValue(raw: unknown): string | undefined {
+    const normalized = normalizeString(raw);
+    if (!normalized) {
+      return undefined;
+    }
+    const lowered = normalized.toLowerCase();
+    if (lowered === 'undefined' || lowered === 'null') {
+      return undefined;
+    }
+    return normalized;
+  }
+
   private resolveBindingsStorePath(): string | undefined {
-    const sessionDir = normalizeString(process.env.ROUTECODEX_SESSION_DIR);
+    const sessionDir = this.normalizeSessionDirEnvValue(process.env.ROUTECODEX_SESSION_DIR);
     if (!sessionDir) {
       return undefined;
     }
@@ -360,7 +373,7 @@ export class ClockClientRegistry {
 
     const workdir = normalizeWorkdir(filters?.workdir);
     if (workdir) {
-      records = records.filter((entry) => normalizeWorkdir(entry.workdir) === workdir);
+      records = records.filter((entry) => isWorkdirCompatible(entry.workdir, workdir));
     }
 
     return records.sort((a, b) => b.lastHeartbeatAtMs - a.lastHeartbeatAtMs);
@@ -461,6 +474,50 @@ export class ClockClientRegistry {
       return undefined;
     }
     return normalizeString(this.conversationToTmuxSession.get(conversationSessionId));
+  }
+
+  resolveBoundWorkdir(conversationSessionIdRaw: string): string | undefined {
+    this.ensureConversationBindingsLoaded();
+    const conversationSessionId = normalizeString(conversationSessionIdRaw);
+    if (!conversationSessionId) {
+      return undefined;
+    }
+
+    const tmuxSessionId = normalizeString(this.conversationToTmuxSession.get(conversationSessionId));
+    if (!tmuxSessionId) {
+      return undefined;
+    }
+
+    const aliveCandidates = this.pickAliveCandidates({ tmuxSessionId });
+    const aliveWorkdirs = Array.from(
+      new Set(
+        aliveCandidates
+          .map((entry) => normalizeWorkdir(entry.workdir))
+          .filter((entry): entry is string => Boolean(entry))
+      )
+    );
+    if (aliveWorkdirs.length === 1) {
+      return aliveWorkdirs[0];
+    }
+    if (aliveWorkdirs.length > 1) {
+      return undefined;
+    }
+
+    const historical = Array.from(this.records.values())
+      .filter((entry) => {
+        const recordTmuxSessionId = normalizeString(entry.tmuxSessionId) ?? normalizeString(entry.sessionId);
+        return recordTmuxSessionId === tmuxSessionId;
+      })
+      .sort((a, b) => b.lastHeartbeatAtMs - a.lastHeartbeatAtMs);
+
+    for (const entry of historical) {
+      const workdir = normalizeWorkdir(entry.workdir);
+      if (workdir) {
+        return workdir;
+      }
+    }
+
+    return undefined;
   }
 
   private resolveInjectTmuxSessionId(args: ClockClientInjectArgs, workdirHint?: string): string | undefined {

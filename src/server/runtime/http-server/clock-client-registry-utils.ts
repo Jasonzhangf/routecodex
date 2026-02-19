@@ -93,6 +93,30 @@ export function normalizeWorkdir(value: unknown): string | undefined {
   return resolved;
 }
 
+function isSameOrDescendantPath(parentDir: string, childDir: string): boolean {
+  const relative = path.relative(parentDir, childDir);
+  if (!relative) {
+    return true;
+  }
+  if (relative === '..') {
+    return false;
+  }
+  if (relative.startsWith(`..${path.sep}`)) {
+    return false;
+  }
+  return !path.isAbsolute(relative);
+}
+
+export function isWorkdirCompatible(recordWorkdirRaw: unknown, hintWorkdirRaw: unknown): boolean {
+  const recordWorkdir = normalizeWorkdir(recordWorkdirRaw);
+  const hintWorkdir = normalizeWorkdir(hintWorkdirRaw);
+  if (!recordWorkdir || !hintWorkdir) {
+    return false;
+  }
+
+  return isSameOrDescendantPath(recordWorkdir, hintWorkdir) || isSameOrDescendantPath(hintWorkdir, recordWorkdir);
+}
+
 export function resolveHeartbeatTtlMs(): number {
   const raw = String(
     process.env.ROUTECODEX_CLOCK_CLIENT_HEARTBEAT_TTL_MS

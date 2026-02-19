@@ -465,6 +465,14 @@ describe('ClockClientRegistry cleanup', () => {
     expect(bindA.ok).toBe(true);
     expect(bindA.daemonId).toBe('clockd_workdir_a');
 
+    const bindAChild = registry.bindConversationSession({
+      conversationSessionId: 'conv_workdir_a_child',
+      clientType: 'codex',
+      workdir: '/tmp/routecodex-workdir-a/subdir/nested'
+    });
+    expect(bindAChild.ok).toBe(true);
+    expect(bindAChild.daemonId).toBe('clockd_workdir_a');
+
     const bindMissing = registry.bindConversationSession({
       conversationSessionId: 'conv_workdir_missing',
       clientType: 'codex',
@@ -472,6 +480,26 @@ describe('ClockClientRegistry cleanup', () => {
     });
     expect(bindMissing.ok).toBe(false);
     expect(bindMissing.reason).toBe('no_binding_candidate_for_workdir');
+  });
+
+  it('bindConversationSession accepts ancestor workdir when only one daemon matches path tree', () => {
+    const registry = new ClockClientRegistry();
+    registry.register({
+      daemonId: 'clockd_workdir_single',
+      callbackUrl: 'http://127.0.0.1:65581/inject',
+      tmuxSessionId: 'rcc_workdir_single',
+      clientType: 'codex',
+      workdir: '/tmp/routecodex-workdir-single/subdir'
+    });
+
+    const bindByAncestor = registry.bindConversationSession({
+      conversationSessionId: 'conv_workdir_single_ancestor',
+      clientType: 'codex',
+      workdir: '/tmp/routecodex-workdir-single'
+    });
+
+    expect(bindByAncestor.ok).toBe(true);
+    expect(bindByAncestor.daemonId).toBe('clockd_workdir_single');
   });
 
   it('inject enforces workdir when tmux session is shared', async () => {
@@ -509,6 +537,14 @@ describe('ClockClientRegistry cleanup', () => {
       expect(injectA.ok).toBe(true);
       expect(injectA.daemonId).toBe('clockd_shared_tmux_a');
 
+      const injectAChild = await registry.inject({
+        tmuxSessionId: 'rcc_shared_tmux_workdir',
+        workdir: '/tmp/routecodex-shared-workdir-a/subdir',
+        text: 'hello-a-child'
+      });
+      expect(injectAChild.ok).toBe(true);
+      expect(injectAChild.daemonId).toBe('clockd_shared_tmux_a');
+
       const injectB = await registry.inject({
         tmuxSessionId: 'rcc_shared_tmux_workdir',
         workdir: '/tmp/routecodex-shared-workdir-b',
@@ -525,6 +561,7 @@ describe('ClockClientRegistry cleanup', () => {
       expect(mismatch.ok).toBe(false);
       expect(mismatch.reason).toBe('workdir_mismatch');
       expect(hits).toEqual([
+        'http://127.0.0.1:65552/inject',
         'http://127.0.0.1:65552/inject',
         'http://127.0.0.1:65553/inject'
       ]);
@@ -578,8 +615,54 @@ describe('ClockClientRegistry cleanup', () => {
         global.fetch = originalFetch;
       }
     } finally {
-      process.env.ROUTECODEX_SESSION_DIR = originalSessionDir;
+      if (originalSessionDir === undefined) {
+        delete process.env.ROUTECODEX_SESSION_DIR;
+      } else {
+        process.env.ROUTECODEX_SESSION_DIR = originalSessionDir;
+      }
       fs.rmSync(tempSessionDir, { recursive: true, force: true });
     }
+  });
+
+  it('resolveBoundWorkdir prefers daemon startup workdir for bound conversation', () => {
+    const registry = new ClockClientRegistry();
+    registry.register({
+      daemonId: 'clockd_bound_workdir',
+      callbackUrl: 'http://127.0.0.1:65591/inject',
+      tmuxSessionId: 'rcc_bound_workdir',
+      workdir: '/tmp/routecodex-bound-workdir/root'
+    });
+    const bind = registry.bindConversationSession({
+      conversationSessionId: 'conv_bound_workdir',
+      daemonId: 'clockd_bound_workdir'
+    });
+    expect(bind.ok).toBe(true);
+
+    const workdir = registry.resolveBoundWorkdir('conv_bound_workdir');
+    expect(workdir).toBe('/tmp/routecodex-bound-workdir/root');
+  });
+
+  it('resolveBoundWorkdir returns undefined when multiple alive daemons under same tmux disagree', () => {
+    const registry = new ClockClientRegistry();
+    registry.register({
+      daemonId: 'clockd_bound_conflict_a',
+      callbackUrl: 'http://127.0.0.1:65592/inject',
+      tmuxSessionId: 'rcc_bound_conflict',
+      workdir: '/tmp/routecodex-bound-conflict/a'
+    });
+    registry.register({
+      daemonId: 'clockd_bound_conflict_b',
+      callbackUrl: 'http://127.0.0.1:65593/inject',
+      tmuxSessionId: 'rcc_bound_conflict',
+      workdir: '/tmp/routecodex-bound-conflict/b'
+    });
+    const bind = registry.bindConversationSession({
+      conversationSessionId: 'conv_bound_conflict',
+      tmuxSessionId: 'rcc_bound_conflict'
+    });
+    expect(bind.ok).toBe(true);
+
+    const workdir = registry.resolveBoundWorkdir('conv_bound_conflict');
+    expect(workdir).toBeUndefined();
   });
 });

@@ -5,7 +5,8 @@ import {
   resolveClockConfigSnapshot,
   reserveClockDueTasks,
   commitClockDueReservation,
-  clearClockTasksSnapshot
+  clearClockTasksSnapshot,
+  listClockTasksSnapshot
 } from '../../../modules/llmswitch/bridge.js';
 import { getClockClientRegistry } from './clock-client-registry.js';
 import { toExactMatchClockConfig } from './clock-daemon-inject-config.js';
@@ -14,6 +15,80 @@ import { isTmuxSessionAlive, killManagedTmuxSession } from './tmux-session-probe
 import { terminateManagedClientProcess } from './managed-process-probe.js';
 
 const CLOCK_DAEMON_SESSION_PREFIX = 'clockd.';
+
+function readString(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+function readSessionDirFromEnv(value: unknown): string | undefined {
+  const normalized = readString(value);
+  if (!normalized) {
+    return undefined;
+  }
+  const lowered = normalized.toLowerCase();
+  if (lowered === 'undefined' || lowered === 'null') {
+    return undefined;
+  }
+  return normalized;
+}
+
+function extractReservationTaskIds(reservation: unknown): Set<string> {
+  if (!reservation || typeof reservation !== 'object') {
+    return new Set<string>();
+  }
+  const rawTaskIds = (reservation as { taskIds?: unknown }).taskIds;
+  if (!Array.isArray(rawTaskIds)) {
+    return new Set<string>();
+  }
+  const taskIds = new Set<string>();
+  for (const entry of rawTaskIds) {
+    const taskId = readString(entry);
+    if (taskId) {
+      taskIds.add(taskId);
+    }
+  }
+  return taskIds;
+}
+
+export function extractWorkdirHintFromReservationTasks(
+  tasks: unknown[],
+  reservationTaskIds: Set<string>
+): string | undefined {
+  if (!Array.isArray(tasks) || reservationTaskIds.size < 1) {
+    return undefined;
+  }
+
+  const candidates = new Set<string>();
+  for (const task of tasks) {
+    if (!task || typeof task !== 'object') {
+      continue;
+    }
+    const taskId = readString((task as { taskId?: unknown }).taskId);
+    if (!taskId || !reservationTaskIds.has(taskId)) {
+      continue;
+    }
+    const args = (task as { arguments?: unknown }).arguments;
+    if (!args || typeof args !== 'object' || Array.isArray(args)) {
+      continue;
+    }
+    const workdir =
+      readString((args as { workdir?: unknown }).workdir)
+      ?? readString((args as { cwd?: unknown }).cwd)
+      ?? readString((args as { workingDirectory?: unknown }).workingDirectory);
+    if (workdir) {
+      candidates.add(workdir);
+    }
+  }
+
+  if (candidates.size !== 1) {
+    return undefined;
+  }
+  return Array.from(candidates)[0];
+}
 
 function resolveBoolFromEnv(value: string | undefined, fallback: boolean): boolean {
   if (!value) {
@@ -121,7 +196,7 @@ export async function tickClockDaemonInjectLoop(server: any): Promise<void> {
     }
     const clockConfig = toExactMatchClockConfig(resolvedClockConfig);
 
-    const sessionDir = String(process.env.ROUTECODEX_SESSION_DIR || '').trim();
+    const sessionDir = readSessionDirFromEnv(process.env.ROUTECODEX_SESSION_DIR) || '';
     const clockDir = sessionDir ? path.join(sessionDir, 'clock') : '';
     const entries = clockDir ? await fs.readdir(clockDir, { withFileTypes: true }).catch(() => [] as Dirent[]) : ([] as Dirent[]);
 
@@ -239,10 +314,20 @@ export async function tickClockDaemonInjectLoop(server: any): Promise<void> {
 
       const daemonId = extractClockDaemonIdFromSessionScope(sessionId);
       const persistedTmuxSessionId = registry.resolveBoundTmuxSession(sessionId);
+      const daemonWorkdirHint = daemonId ? readString(registry.findByDaemonId(daemonId)?.workdir) : undefined;
+      const boundWorkdirHint = registry.resolveBoundWorkdir(sessionId);
+      let taskWorkdirHint: string | undefined;
+      const reservationTaskIds = extractReservationTaskIds(reserved.reservation);
+      if (reservationTaskIds.size > 0) {
+        const tasks = await listClockTasksSnapshot({ sessionId, config: clockConfig });
+        taskWorkdirHint = extractWorkdirHintFromReservationTasks(tasks, reservationTaskIds);
+      }
+      const workdirHint = daemonWorkdirHint ?? boundWorkdirHint ?? taskWorkdirHint;
       const bind = registry.bindConversationSession({
         conversationSessionId: sessionId,
         ...(persistedTmuxSessionId ? { tmuxSessionId: persistedTmuxSessionId } : {}),
-        ...(daemonId ? { daemonId } : {})
+        ...(daemonId ? { daemonId } : {}),
+        ...(workdirHint ? { workdir: workdirHint } : {})
       });
       const tmuxSessionId = bind.tmuxSessionId || persistedTmuxSessionId;
 
@@ -255,6 +340,7 @@ export async function tickClockDaemonInjectLoop(server: any): Promise<void> {
       const injected = await registry.inject({
         sessionId,
         ...(tmuxSessionId ? { tmuxSessionId } : {}),
+        ...(workdirHint ? { workdir: workdirHint } : {}),
         text,
         requestId: reservationId,
         source: 'clock.daemon.inject'
@@ -286,6 +372,7 @@ export async function tickClockDaemonInjectLoop(server: any): Promise<void> {
             injectReason: injected.reason,
             bindOk: bind.ok,
             bindReason: bind.reason,
+            ...(workdirHint ? { workdirHint } : {}),
             ...(shouldClearOrphanTasks ? { clearedClockTasks } : {})
           });
         }

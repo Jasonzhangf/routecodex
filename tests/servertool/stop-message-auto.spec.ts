@@ -21,6 +21,7 @@ const ORIGINAL_STOPMESSAGE_AI_FOLLOWUP_ENABLED = process.env.ROUTECODEX_STOPMESS
 const ORIGINAL_STOPMESSAGE_AI_FOLLOWUP_BACKEND = process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_BACKEND;
 const ORIGINAL_STOPMESSAGE_AI_FOLLOWUP_IFLOW_BIN = process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_IFLOW_BIN;
 const ORIGINAL_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN = process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN;
+const ORIGINAL_STOPMESSAGE_AI_APPROVED_MARKER = process.env.ROUTECODEX_STOPMESSAGE_AI_APPROVED_MARKER;
 const ORIGINAL_STOPMESSAGE_AUTOMESSAGE_IFLOW = process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW;
 const ORIGINAL_STOPMESSAGE_AUTOMESSAGE_IFLOW_BIN = process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW_BIN;
 const ORIGINAL_STOPMESSAGE_AUTOMESSAGE_BACKEND = process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_BACKEND;
@@ -148,6 +149,11 @@ describe('stop_message_auto servertool', () => {
       delete process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN;
     } else {
       process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN = ORIGINAL_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN;
+    }
+    if (ORIGINAL_STOPMESSAGE_AI_APPROVED_MARKER === undefined) {
+      delete process.env.ROUTECODEX_STOPMESSAGE_AI_APPROVED_MARKER;
+    } else {
+      process.env.ROUTECODEX_STOPMESSAGE_AI_APPROVED_MARKER = ORIGINAL_STOPMESSAGE_AI_APPROVED_MARKER;
     }
     if (ORIGINAL_STOPMESSAGE_AUTOMESSAGE_IFLOW === undefined) {
       delete process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW;
@@ -603,6 +609,205 @@ describe('stop_message_auto servertool', () => {
       }
       if (fs.existsSync(promptCapturePath)) {
         fs.unlinkSync(promptCapturePath);
+      }
+      if (fs.existsSync(mockIflowBinPath)) {
+        fs.unlinkSync(mockIflowBinPath);
+      }
+    }
+  });
+
+  test('main done marker does not terminate until ai-followup reviewer approves', async () => {
+    const sessionId = 'stopmessage-spec-session-done-marker-review-reject';
+    const state: RoutingInstructionState = {
+      forcedTarget: undefined,
+      stickyTarget: undefined,
+      allowedProviders: new Set(),
+      disabledProviders: new Set(),
+      disabledKeys: new Map(),
+      disabledModels: new Map(),
+      stopMessageText: '继续推进并执行下一步',
+      stopMessageMaxRepeats: 3,
+      stopMessageUsed: 0,
+      stopMessageStageMode: 'auto',
+      stopMessageAiMode: 'on'
+    };
+    writeRoutingStateForSession(sessionId, state);
+
+    const previousAiIflowBin = process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_IFLOW_BIN;
+    const previousIflowBin = process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW_BIN;
+    const mockIflowBinPath = path.join(USER_DIR, 'mock-iflow-review-reject.sh');
+    try {
+      fs.writeFileSync(
+        mockIflowBinPath,
+        [
+          '#!/usr/bin/env bash',
+          "if [ \"$1\" = \"-p\" ]; then",
+          "  if printf '%s' \"$2\" | grep -q 'completionClaimedByMainModel: yes'; then",
+          "    echo '继续执行：先补充完成证据并运行验证，再决定是否结束。'",
+          '  else',
+          "    echo '继续执行'",
+          '  fi',
+          '  exit 0',
+          'fi',
+          'exit 2'
+        ].join('\n'),
+        { encoding: 'utf8' }
+      );
+      fs.chmodSync(mockIflowBinPath, 0o755);
+      process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_IFLOW_BIN = mockIflowBinPath;
+      process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW_BIN = mockIflowBinPath;
+
+      const result = await runServerSideToolEngine({
+        chatResponse: {
+          id: 'chatcmpl-stop-done-marker-review-reject',
+          object: 'chat.completion',
+          model: 'gpt-test',
+          choices: [
+            {
+              index: 0,
+              message: {
+                role: 'assistant',
+                content: '阶段已完成 [STOPMESSAGE_DONE]'
+              },
+              finish_reason: 'stop'
+            }
+          ]
+        } as JsonObject,
+        adapterContext: {
+          requestId: 'req-stopmessage-done-marker-review-reject',
+          entryEndpoint: '/v1/chat/completions',
+          providerProtocol: 'openai-chat',
+          sessionId,
+          capturedChatRequest: {
+            model: 'gpt-test',
+            messages: [{ role: 'user', content: '继续处理当前任务' }]
+          }
+        } as any,
+        entryEndpoint: '/v1/chat/completions',
+        requestId: 'req-stopmessage-done-marker-review-reject',
+        providerProtocol: 'openai-chat'
+      });
+
+      expect(result.mode).toBe('tool_flow');
+      const followup = result.execution?.followup as any;
+      const appendOp = (followup?.injection?.ops as any[]).find((op) => op?.op === 'append_user_text');
+      expect(appendOp?.text).toContain('继续执行：先补充完成证据并运行验证');
+      expect(appendOp?.text).toContain(EXECUTION_APPEND_TEXT);
+
+      const persisted = await readJsonFileUntil<{ state?: { stopMessageUsed?: number } }>(
+        path.join(SESSION_DIR, `session-${sessionId}.json`),
+        (data) => data?.state?.stopMessageUsed === 1
+      );
+      expect(persisted?.state?.stopMessageUsed).toBe(1);
+    } finally {
+      if (previousAiIflowBin === undefined) {
+        delete process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_IFLOW_BIN;
+      } else {
+        process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_IFLOW_BIN = previousAiIflowBin;
+      }
+      if (previousIflowBin === undefined) {
+        delete process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW_BIN;
+      } else {
+        process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW_BIN = previousIflowBin;
+      }
+      if (fs.existsSync(mockIflowBinPath)) {
+        fs.unlinkSync(mockIflowBinPath);
+      }
+    }
+  });
+
+  test('main done marker terminates only when ai-followup returns approval marker', async () => {
+    const sessionId = 'stopmessage-spec-session-done-marker-review-approve';
+    const state: RoutingInstructionState = {
+      forcedTarget: undefined,
+      stickyTarget: undefined,
+      allowedProviders: new Set(),
+      disabledProviders: new Set(),
+      disabledKeys: new Map(),
+      disabledModels: new Map(),
+      stopMessageText: '继续推进并执行下一步',
+      stopMessageMaxRepeats: 3,
+      stopMessageUsed: 0,
+      stopMessageStageMode: 'auto',
+      stopMessageAiMode: 'on'
+    };
+    writeRoutingStateForSession(sessionId, state);
+
+    const previousAiIflowBin = process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_IFLOW_BIN;
+    const previousIflowBin = process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW_BIN;
+    const previousApprovedMarker = process.env.ROUTECODEX_STOPMESSAGE_AI_APPROVED_MARKER;
+    const mockIflowBinPath = path.join(USER_DIR, 'mock-iflow-review-approve.sh');
+    try {
+      fs.writeFileSync(
+        mockIflowBinPath,
+        [
+          '#!/usr/bin/env bash',
+          "if [ \"$1\" = \"-p\" ]; then",
+          "  if printf '%s' \"$2\" | grep -q 'completionClaimedByMainModel: yes'; then",
+          "    echo '[STOPMESSAGE_APPROVED]'",
+          '  else',
+          "    echo '继续执行'",
+          '  fi',
+          '  exit 0',
+          'fi',
+          'exit 2'
+        ].join('\n'),
+        { encoding: 'utf8' }
+      );
+      fs.chmodSync(mockIflowBinPath, 0o755);
+      process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_IFLOW_BIN = mockIflowBinPath;
+      process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW_BIN = mockIflowBinPath;
+      process.env.ROUTECODEX_STOPMESSAGE_AI_APPROVED_MARKER = '[STOPMESSAGE_APPROVED]';
+
+      const result = await runServerSideToolEngine({
+        chatResponse: {
+          id: 'chatcmpl-stop-done-marker-review-approve',
+          object: 'chat.completion',
+          model: 'gpt-test',
+          choices: [
+            {
+              index: 0,
+              message: {
+                role: 'assistant',
+                content: '阶段已完成 [STOPMESSAGE_DONE]'
+              },
+              finish_reason: 'stop'
+            }
+          ]
+        } as JsonObject,
+        adapterContext: {
+          requestId: 'req-stopmessage-done-marker-review-approve',
+          entryEndpoint: '/v1/chat/completions',
+          providerProtocol: 'openai-chat',
+          sessionId,
+          capturedChatRequest: {
+            model: 'gpt-test',
+            messages: [{ role: 'user', content: '继续处理当前任务' }]
+          }
+        } as any,
+        entryEndpoint: '/v1/chat/completions',
+        requestId: 'req-stopmessage-done-marker-review-approve',
+        providerProtocol: 'openai-chat'
+      });
+
+      expect(result.mode).toBe('passthrough');
+      expect(result.execution).toBeUndefined();
+      expect(fs.existsSync(path.join(SESSION_DIR, `session-${sessionId}.json`))).toBe(false);
+    } finally {
+      if (previousAiIflowBin === undefined) {
+        delete process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_IFLOW_BIN;
+      } else {
+        process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_IFLOW_BIN = previousAiIflowBin;
+      }
+      if (previousIflowBin === undefined) {
+        delete process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW_BIN;
+      } else {
+        process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW_BIN = previousIflowBin;
+      }
+      if (previousApprovedMarker === undefined) {
+        delete process.env.ROUTECODEX_STOPMESSAGE_AI_APPROVED_MARKER;
+      } else {
+        process.env.ROUTECODEX_STOPMESSAGE_AI_APPROVED_MARKER = previousApprovedMarker;
       }
       if (fs.existsSync(mockIflowBinPath)) {
         fs.unlinkSync(mockIflowBinPath);

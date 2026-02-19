@@ -720,4 +720,54 @@ describe('stopMessage is session-scoped', () => {
     expect(after?.state?.stopMessageUpdatedAt).toBeGreaterThanOrEqual(beforeUpdatedAt);
     expect(after?.state?.stopMessageLastUsedAt).toBeUndefined();
   });
+
+  test('explicit stopMessage set overrides previous runtime markers and clears counters/history', () => {
+    const engine = buildEngine();
+    const sessionId = 'sess-stopmessage-explicit-override-runtime';
+    const now = Date.now();
+
+    saveRoutingInstructionStateSync(`session:${sessionId}`, {
+      forcedTarget: undefined,
+      stickyTarget: undefined,
+      allowedProviders: new Set(),
+      disabledProviders: new Set(),
+      disabledKeys: new Map(),
+      disabledModels: new Map(),
+      stopMessageText: '旧目标',
+      stopMessageMaxRepeats: 5,
+      stopMessageUsed: 0,
+      stopMessageUpdatedAt: now - 10_000,
+      stopMessageLastUsedAt: undefined,
+      stopMessageStageMode: 'on',
+      stopMessageAiMode: 'on',
+      stopMessageSource: 'explicit_text',
+      stopMessageAiSeedPrompt: '旧 followup 种子',
+      stopMessageAiHistory: [{ round: 1, followupText: '旧 followup' }]
+    } as any);
+
+    const request: StandardizedRequest = {
+      model: 'gpt-test',
+      messages: [{ role: 'user', content: '<**stopMessage:"新目标",3,ai:on**>继续' }],
+      tools: [],
+      parameters: {}
+    } as any;
+
+    engine.route(request, {
+      requestId: 'req_stopmessage_explicit_override_runtime',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      sessionId,
+      routeHint: 'default'
+    } as any);
+
+    const persisted = readSessionState(sessionId);
+    expect(persisted?.state?.stopMessageText).toBe('新目标');
+    expect(persisted?.state?.stopMessageMaxRepeats).toBe(3);
+    expect(persisted?.state?.stopMessageUsed).toBe(0);
+    expect(persisted?.state?.stopMessageStageMode).toBe('on');
+    expect(persisted?.state?.stopMessageAiMode).toBe('on');
+    expect(persisted?.state?.stopMessageLastUsedAt).toBeUndefined();
+    expect(persisted?.state?.stopMessageAiSeedPrompt).toBeUndefined();
+    expect(persisted?.state?.stopMessageAiHistory).toBeUndefined();
+  });
 });
