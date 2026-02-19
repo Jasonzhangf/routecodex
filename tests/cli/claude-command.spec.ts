@@ -282,6 +282,8 @@ describe('cli claude command', () => {
     expect(spawnCalls).toHaveLength(2);
     expect(spawnCalls[0].command).toBe('node');
     expect(Array.isArray(spawnCalls[0].options?.stdio)).toBe(true);
+    expect(spawnCalls[0].options?.env?.ROUTECODEX_EXPECT_PARENT_PID).toBe(String(process.pid));
+    expect(spawnCalls[0].options?.env?.RCC_EXPECT_PARENT_PID).toBe(String(process.pid));
     expect(spawnCalls[1].command).toBe('claude');
   });
 

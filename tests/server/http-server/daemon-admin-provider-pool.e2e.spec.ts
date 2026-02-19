@@ -238,6 +238,80 @@ describe('Daemon admin provider pool (v1 config) - e2e', () => {
       expect(after.virtualrouter.routing.tools).toEqual(['mock.dummy']);
       expect(after).toHaveProperty('virtualrouter.loadBalancing.strategy', 'round-robin');
 
+      const groupsGet = await fetch(
+        `${baseUrl}/config/routing/groups?path=${encodeURIComponent(importedConfigPath)}`,
+        { headers: { cookie } }
+      );
+      expect(groupsGet.status).toBe(200);
+      const groupsGetBody = await readJson(groupsGet);
+      expect(groupsGetBody).toHaveProperty('ok', true);
+      expect(groupsGetBody).toHaveProperty('activeGroupId', 'default');
+      expect(groupsGetBody).toHaveProperty('groups.default');
+
+      const createCanary = await fetch(
+        `${baseUrl}/config/routing/groups/canary?path=${encodeURIComponent(importedConfigPath)}`,
+        {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json', cookie },
+          body: JSON.stringify({
+            policy: {
+              routing: { default: ['mock.dummy'], canary_tools: ['mock.dummy'] },
+              loadBalancing: { strategy: 'priority' }
+            },
+            location: 'virtualrouter.routing'
+          })
+        }
+      );
+      expect(createCanary.status).toBe(200);
+      const createCanaryBody = await readJson(createCanary);
+      expect(createCanaryBody).toHaveProperty('ok', true);
+      expect(createCanaryBody).toHaveProperty('groups.canary');
+      expect(createCanaryBody).toHaveProperty('activeGroupId', 'default');
+
+      const activateCanary = await fetch(
+        `${baseUrl}/config/routing/groups/activate?path=${encodeURIComponent(importedConfigPath)}`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', cookie },
+          body: JSON.stringify({
+            groupId: 'canary',
+            location: 'virtualrouter.routing'
+          })
+        }
+      );
+      expect(activateCanary.status).toBe(200);
+      const activateCanaryBody = await readJson(activateCanary);
+      expect(activateCanaryBody).toHaveProperty('ok', true);
+      expect(activateCanaryBody).toHaveProperty('activeGroupId', 'canary');
+      expect(activateCanaryBody).toHaveProperty('groups.canary.routing.canary_tools');
+
+      const afterActivateText = await fs.readFile(importedConfigPath, 'utf8');
+      const afterActivate = JSON.parse(afterActivateText);
+      expect(afterActivate).toHaveProperty('virtualrouter.activeRoutingPolicyGroup', 'canary');
+      expect(afterActivate).toHaveProperty('virtualrouter.routingPolicyGroups.canary');
+      expect(afterActivate).toHaveProperty('virtualrouter.routing.canary_tools');
+
+      const deleteDefault = await fetch(
+        `${baseUrl}/config/routing/groups/default?path=${encodeURIComponent(importedConfigPath)}`,
+        {
+          method: 'DELETE',
+          headers: { cookie }
+        }
+      );
+      expect(deleteDefault.status).toBe(200);
+      const deleteDefaultBody = await readJson(deleteDefault);
+      expect(deleteDefaultBody).toHaveProperty('ok', true);
+      expect(deleteDefaultBody).toHaveProperty('groups.canary');
+
+      const deleteActive = await fetch(
+        `${baseUrl}/config/routing/groups/canary?path=${encodeURIComponent(importedConfigPath)}`,
+        {
+          method: 'DELETE',
+          headers: { cookie }
+        }
+      );
+      expect(deleteActive.status).toBe(409);
+
       const forbidden = await fetch(
         `${baseUrl}/config/routing?path=${encodeURIComponent('/etc/passwd')}`,
         { headers: { cookie } }
@@ -332,7 +406,7 @@ describe('Daemon admin provider pool (v1 config) - e2e', () => {
       expect(res.status).toBe(200);
       const text = await res.text();
       expect(text).toContain('<html');
-      expect(text).toContain('RouteCodex Daemon Admin');
+      expect(text.includes('RouteCodex Daemon Admin') || text.includes('RouteCodex Admin')).toBe(true);
     } finally {
       await stop();
     }

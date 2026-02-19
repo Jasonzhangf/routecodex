@@ -286,11 +286,23 @@ describe('Chat semantics stage 1 bridge', () => {
       (tool) => tool.function?.name === 'continue_execution'
     );
     expect(hasContinueTool).toBe(true);
+    const continueTool = (result.processedRequest?.tools ?? []).find(
+      (tool) => tool.function?.name === 'continue_execution'
+    );
+    expect(continueTool?.function?.description ?? '').toContain('progress reporting without interrupting execution');
+
+    const clockTool = (result.processedRequest?.tools ?? []).find(
+      (tool) => tool.function?.name === 'clock'
+    );
+    expect(clockTool?.function?.description ?? '').toContain('waiting longer than 2 minutes');
+    expect(clockTool?.function?.description ?? '').toContain('"action":"schedule"');
 
     const userMessages = (result.processedRequest?.messages ?? []).filter((message) => message.role === 'user');
     const lastUser = userMessages[userMessages.length - 1];
     const content = typeof lastUser?.content === 'string' ? lastUser.content : '';
     expect(content).toContain('[routecodex:continue_execution_directive]');
+    expect(content).toContain('If waiting longer than 2 minutes is required');
+    expect(content).toContain('emit CONTINUE execution');
   });
 
   it('skips continue_execution injection when stopMessage is mode-only active', async () => {

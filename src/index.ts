@@ -87,6 +87,9 @@ function shouldSuppressRuntimeLogLine(text: string): boolean {
   if (!text) {
     return false;
   }
+  if (text.includes('[servertool][iflow-automessage]') || text.includes('[servertool][ai-followup]')) {
+    return false;
+  }
   return (
     text.includes('[servertool][') ||
     text.includes('[virtual-router]')
@@ -186,6 +189,7 @@ type ShutdownReason =
 
 let lastShutdownReason: ShutdownReason = { kind: 'unknown' };
 let restartInProgress = false;
+let shutdownInProgress = false;
 let currentRuntimeLifecyclePath: string | null = null;
 
 function setCurrentRuntimeLifecyclePath(value: string | null): void {
@@ -1202,6 +1206,24 @@ async function gracefulShutdown(app: RouteCodexApp): Promise<void> {
           : reason.kind === 'stopError'
             ? 'reason=stopError'
             : 'reason=unknown';
+  const caller = reason.kind === 'signal'
+    ? resolveSignalCaller(reason.signal)
+    : getShutdownCallerContext({ maxAgeMs: 10 * 60 * 1000 });
+
+  if (shutdownInProgress) {
+    logProcessLifecycle({
+      event: 'graceful_shutdown',
+      source: 'index.gracefulShutdown',
+      details: {
+        reason: reasonLabel,
+        result: 'duplicate_ignored',
+        caller
+      }
+    });
+    return;
+  }
+  shutdownInProgress = true;
+
   console.log(`\n🛑 Stopping RouteCodex server gracefully... (${reasonLabel})`);
   logProcessLifecycle({
     event: 'graceful_shutdown',
@@ -1209,7 +1231,7 @@ async function gracefulShutdown(app: RouteCodexApp): Promise<void> {
     details: {
       reason: reasonLabel,
       result: 'start',
-      caller: reason.kind === 'signal' ? resolveSignalCaller(reason.signal) : getShutdownCallerContext({ maxAgeMs: 10 * 60 * 1000 })
+      caller
     }
   });
   try {

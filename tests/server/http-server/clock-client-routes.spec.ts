@@ -319,6 +319,102 @@ describe('clock-client routes', () => {
     }
   });
 
+  it('conversation session injection does not cross tmux sessions across workdirs', async () => {
+    const app = express();
+    app.use(express.json({ limit: '256kb' }));
+    registerClockClientRoutes(app);
+
+    const server = http.createServer(app);
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const addr = server.address() as AddressInfo;
+    const baseUrl = `http://127.0.0.1:${addr.port}`;
+
+    let injectHitA = 0;
+    let injectHitB = 0;
+    const callbackServerA = http.createServer((req, res) => {
+      if (req.method === 'POST' && req.url === '/inject') {
+        injectHitA += 1;
+      }
+      res.statusCode = 200;
+      res.setHeader('content-type', 'application/json');
+      res.end('{"ok":true}');
+    });
+    const callbackServerB = http.createServer((req, res) => {
+      if (req.method === 'POST' && req.url === '/inject') {
+        injectHitB += 1;
+      }
+      res.statusCode = 200;
+      res.setHeader('content-type', 'application/json');
+      res.end('{"ok":true}');
+    });
+
+    await new Promise<void>((resolve) => callbackServerA.listen(0, '127.0.0.1', resolve));
+    await new Promise<void>((resolve) => callbackServerB.listen(0, '127.0.0.1', resolve));
+    const callbackAddrA = callbackServerA.address() as AddressInfo;
+    const callbackAddrB = callbackServerB.address() as AddressInfo;
+
+    const daemonIdA = 'clockd_conv_isolation_a';
+    const daemonIdB = 'clockd_conv_isolation_b';
+    const tmuxSessionIdA = 'rcc_conv_isolation_a';
+    const tmuxSessionIdB = 'rcc_conv_isolation_b';
+    const workdirA = '/tmp/routecodex-conv-isolation-a';
+    const workdirB = '/tmp/routecodex-conv-isolation-b';
+
+    try {
+      const regA = await localFetch(baseUrl, '/daemon/clock-client/register', {
+        daemonId: daemonIdA,
+        callbackUrl: `http://127.0.0.1:${callbackAddrA.port}/inject`,
+        tmuxSessionId: tmuxSessionIdA,
+        workdir: workdirA,
+        clientType: 'unit-test'
+      });
+      expect(regA.status).toBe(200);
+
+      const regB = await localFetch(baseUrl, '/daemon/clock-client/register', {
+        daemonId: daemonIdB,
+        callbackUrl: `http://127.0.0.1:${callbackAddrB.port}/inject`,
+        tmuxSessionId: tmuxSessionIdB,
+        workdir: workdirB,
+        clientType: 'unit-test'
+      });
+      expect(regB.status).toBe(200);
+
+      const bind = getClockClientRegistry().bindConversationSession({
+        conversationSessionId: 'conv_isolation_a',
+        clientType: 'unit-test',
+        workdir: workdirA
+      });
+      expect(bind.ok).toBe(true);
+      expect(bind.daemonId).toBe(daemonIdA);
+
+      const injectA = await localFetch(baseUrl, '/daemon/clock-client/inject', {
+        text: 'conv-a',
+        sessionId: 'conv_isolation_a',
+        workdir: workdirA
+      });
+      expect(injectA.status).toBe(200);
+      expect(injectA.payload?.daemonId).toBe(daemonIdA);
+      expect(injectHitA).toBe(1);
+      expect(injectHitB).toBe(0);
+
+      const injectWrongWorkdir = await localFetch(baseUrl, '/daemon/clock-client/inject', {
+        text: 'conv-a-wrong-workdir',
+        sessionId: 'conv_isolation_a',
+        workdir: workdirB
+      });
+      expect(injectWrongWorkdir.status).toBe(503);
+      expect(injectWrongWorkdir.payload?.reason).toBe('workdir_mismatch');
+      expect(injectHitA).toBe(1);
+      expect(injectHitB).toBe(0);
+    } finally {
+      await localFetch(baseUrl, '/daemon/clock-client/unregister', { daemonId: daemonIdA });
+      await localFetch(baseUrl, '/daemon/clock-client/unregister', { daemonId: daemonIdB });
+      await new Promise<void>((resolve) => callbackServerA.close(() => resolve()));
+      await new Promise<void>((resolve) => callbackServerB.close(() => resolve()));
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it('inject enforces workdir when tmux session id is shared', async () => {
     const app = express();
     app.use(express.json({ limit: '256kb' }));

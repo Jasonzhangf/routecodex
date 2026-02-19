@@ -38,11 +38,25 @@ export function buildVirtualRouterInputFromUserConfig(userConfig: UnknownRecord)
     : isRecord(userConfig.providers)
     ? (userConfig.providers as VirtualRouterProvidersConfig)
     : {};
-  const routingSource = isRecord(vrNode.routing)
-    ? (vrNode.routing as VirtualRouterRoutingConfig)
-    : isRecord(userConfig.routing)
-    ? (userConfig.routing as VirtualRouterRoutingConfig)
-    : {};
+  let routingSource: VirtualRouterRoutingConfig = {};
+  if (isRecord(vrNode.routing)) {
+    routingSource = vrNode.routing as VirtualRouterRoutingConfig;
+  } else if (isRecord(vrNode.routingPolicyGroups)) {
+    const groupsNode = vrNode.routingPolicyGroups as UnknownRecord;
+    const entries = Object.entries(groupsNode)
+      .filter(([groupId, groupNode]) => Boolean(groupId.trim()) && isRecord(groupNode))
+      .map(([groupId, groupNode]) => [groupId, groupNode as UnknownRecord] as const);
+    const activeCandidate = typeof vrNode.activeRoutingPolicyGroup === 'string' ? vrNode.activeRoutingPolicyGroup.trim() : '';
+    const activeEntry =
+      (activeCandidate ? entries.find(([groupId]) => groupId === activeCandidate) : undefined)
+      ?? entries.find(([groupId]) => groupId === 'default')
+      ?? entries.sort((a, b) => a[0].localeCompare(b[0]))[0];
+    if (activeEntry && isRecord(activeEntry[1].routing)) {
+      routingSource = activeEntry[1].routing as VirtualRouterRoutingConfig;
+    }
+  } else if (isRecord(userConfig.routing)) {
+    routingSource = userConfig.routing as VirtualRouterRoutingConfig;
+  }
 
   return {
     ...vrNode,
@@ -50,4 +64,3 @@ export function buildVirtualRouterInputFromUserConfig(userConfig: UnknownRecord)
     routing: Array.isArray(routingSource) ? {} : { ...routingSource }
   };
 }
-

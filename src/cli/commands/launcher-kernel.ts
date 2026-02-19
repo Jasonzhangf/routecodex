@@ -25,6 +25,7 @@ import type {
 import {
   resolveBinary,
   parseServerUrl,
+  resolveBoolFromEnv,
   resolveTmuxSelfHealPolicy,
   readConfigApiKey,
   normalizeConnectHost,
@@ -45,6 +46,41 @@ export type {
   ManagedTmuxSession,
   TmuxSelfHealPolicy
 } from './launcher/types.js';
+
+function shouldForwardLauncherSignalToTool(
+  signal: NodeJS.Signals,
+  env: NodeJS.ProcessEnv
+): boolean {
+  if (signal === 'SIGINT') {
+    return true;
+  }
+  if (signal !== 'SIGTERM') {
+    return false;
+  }
+  return resolveBoolFromEnv(
+    env.ROUTECODEX_LAUNCHER_FORWARD_SIGTERM ?? env.RCC_LAUNCHER_FORWARD_SIGTERM,
+    false
+  );
+}
+
+function shouldReapLauncherChildOnShutdown(env: NodeJS.ProcessEnv): boolean {
+  return resolveBoolFromEnv(
+    env.ROUTECODEX_LAUNCHER_REAP_CHILD_ON_SHUTDOWN ?? env.RCC_LAUNCHER_REAP_CHILD_ON_SHUTDOWN,
+    true
+  );
+}
+
+function isProcessAlive(pid: number | null | undefined): boolean {
+  if (!pid || !Number.isFinite(pid) || pid <= 0) {
+    return false;
+  }
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function resolveServerConnection(
   ctx: LauncherCommandContext,
@@ -244,7 +280,11 @@ async function ensureServerReady(
     ROUTECODEX_CONFIG: resolved.configPath,
     ROUTECODEX_CONFIG_PATH: resolved.configPath,
     ROUTECODEX_PORT: String(resolved.port),
-    RCC_PORT: String(resolved.port)
+    RCC_PORT: String(resolved.port),
+    // Launcher auto-started server must follow launcher lifecycle.
+    // If launcher exits, parent-guard in server process should self-shutdown.
+    ROUTECODEX_EXPECT_PARENT_PID: String(process.pid),
+    RCC_EXPECT_PARENT_PID: String(process.pid)
   } as NodeJS.ProcessEnv;
 
   logProcessLifecycle({
@@ -1316,11 +1356,74 @@ export function createLauncherCommand(program: Command, ctx: LauncherCommandCont
         ctx.logger.info(`Press Ctrl+C to exit ${spec.displayName}`);
       }
 
+      let shutdownTriggered = false;
       const shutdown = async (signal: NodeJS.Signals) => {
-        try {
-          toolProcess.kill(signal);
-        } catch {
-          // ignore
+        if (shutdownTriggered) {
+          return;
+        }
+        shutdownTriggered = true;
+
+        const shouldForward = shouldForwardLauncherSignalToTool(signal, ctx.env);
+        logProcessLifecycle({
+          event: 'launcher_signal_forward',
+          source: 'cli.launcher.shutdown',
+          details: {
+            commandName: spec.commandName,
+            signal,
+            forwarded: shouldForward,
+            targetPid: toolProcess.pid ?? null
+          }
+        });
+        if (shouldForward) {
+          try {
+            toolProcess.kill(signal);
+          } catch {
+            // ignore
+          }
+        } else if (
+          managedClientProcessEnabled
+          && shouldReapLauncherChildOnShutdown(ctx.env)
+          && isProcessAlive(toolProcess.pid ?? null)
+        ) {
+          // Give terminal/session signals a brief chance to reach child naturally.
+          await ctx.sleep(250);
+          if (isProcessAlive(toolProcess.pid ?? null)) {
+            logProcessLifecycle({
+              event: 'launcher_orphan_reap',
+              source: 'cli.launcher.shutdown',
+              details: {
+                commandName: spec.commandName,
+                signal: 'SIGTERM',
+                targetPid: toolProcess.pid ?? null,
+                result: 'attempt'
+              }
+            });
+            try {
+              toolProcess.kill('SIGTERM');
+              logProcessLifecycle({
+                event: 'launcher_orphan_reap',
+                source: 'cli.launcher.shutdown',
+                details: {
+                  commandName: spec.commandName,
+                  signal: 'SIGTERM',
+                  targetPid: toolProcess.pid ?? null,
+                  result: 'success'
+                }
+              });
+            } catch (error) {
+              logProcessLifecycle({
+                event: 'launcher_orphan_reap',
+                source: 'cli.launcher.shutdown',
+                details: {
+                  commandName: spec.commandName,
+                  signal: 'SIGTERM',
+                  targetPid: toolProcess.pid ?? null,
+                  result: 'failed',
+                  error
+                }
+              });
+            }
+          }
         }
         try {
           await clockClientService?.stop();

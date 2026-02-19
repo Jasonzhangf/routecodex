@@ -91,6 +91,7 @@ function checkRootLayout() {
     'task.md',
     'tests',
     'tmp',
+    'tsconfig.jest.json',
     'tsconfig.json',
     'vendor',
   ]);

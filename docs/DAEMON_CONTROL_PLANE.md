@@ -27,6 +27,7 @@ Supported actions:
 - `quota.recover` `{ providerKey }`
 - `quota.reset` `{ providerKey }`
 - `routing.policy.set` `{ policy }` (writes policy into config file and triggers best-effort broadcast restart)
+- `routing.group.activate` `{ groupId, restartScope?: "self"|"all" }` (switches active routing policy group and reloads runtime; optional broadcast restart)
 - `runtime.restart` (reload config from disk for current server)
 
 ## Discovery

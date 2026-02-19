@@ -106,7 +106,7 @@ describe('servertool auto hook trace', () => {
     expect(match?.flowId).toBe('empty_reply_continue');
   });
 
-  test('keeps optional primary hooks in empty -> stop -> clock order', async () => {
+  test('keeps optional primary hooks in empty -> clock -> stop order', async () => {
     const traces: ServerToolAutoHookTraceEvent[] = [];
     const adapterContext: AdapterContext = {
       requestId: 'req-hook-trace-order',
@@ -153,7 +153,7 @@ describe('servertool auto hook trace', () => {
     expect(emptyIndex).toBeGreaterThanOrEqual(0);
     expect(stopIndex).toBeGreaterThanOrEqual(0);
     expect(clockIndex).toBeGreaterThanOrEqual(0);
-    expect(emptyIndex).toBeLessThan(stopIndex);
-    expect(stopIndex).toBeLessThan(clockIndex);
+    expect(emptyIndex).toBeLessThan(clockIndex);
+    expect(clockIndex).toBeLessThan(stopIndex);
   });
 });

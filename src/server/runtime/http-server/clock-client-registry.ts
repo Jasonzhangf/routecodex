@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import {
   cleanupDeadTmuxSessionsFromRegistry,
   cleanupStaleHeartbeatsFromRegistry,
@@ -20,6 +22,72 @@ import type {
 export class ClockClientRegistry {
   private readonly records = new Map<string, ClockClientRecord>();
   private readonly conversationToTmuxSession = new Map<string, string>();
+  private bindingsLoaded = false;
+  private bindingsStorePath: string | undefined;
+
+  private resolveBindingsStorePath(): string | undefined {
+    const sessionDir = normalizeString(process.env.ROUTECODEX_SESSION_DIR);
+    if (!sessionDir) {
+      return undefined;
+    }
+    return path.join(sessionDir, 'clock-session-bindings.json');
+  }
+
+  private ensureConversationBindingsLoaded(): void {
+    const nextStorePath = this.resolveBindingsStorePath();
+    if (this.bindingsLoaded && this.bindingsStorePath === nextStorePath) {
+      return;
+    }
+
+    this.conversationToTmuxSession.clear();
+    this.bindingsLoaded = true;
+    this.bindingsStorePath = nextStorePath;
+    if (!nextStorePath) {
+      return;
+    }
+
+    try {
+      const raw = fs.readFileSync(nextStorePath, 'utf8');
+      const parsed = JSON.parse(raw) as unknown;
+      const container = parsed && typeof parsed === 'object'
+        ? (parsed as Record<string, unknown>)
+        : {};
+      const rawMappings =
+        container.conversationToTmuxSession && typeof container.conversationToTmuxSession === 'object'
+          ? (container.conversationToTmuxSession as Record<string, unknown>)
+          : (container as Record<string, unknown>);
+      for (const [conversationSessionIdRaw, tmuxSessionIdRaw] of Object.entries(rawMappings)) {
+        const conversationSessionId = normalizeString(conversationSessionIdRaw);
+        const tmuxSessionId = normalizeString(tmuxSessionIdRaw);
+        if (!conversationSessionId || !tmuxSessionId) {
+          continue;
+        }
+        this.conversationToTmuxSession.set(conversationSessionId, tmuxSessionId);
+      }
+    } catch {
+      // best-effort only
+    }
+  }
+
+  private persistConversationBindings(): void {
+    this.ensureConversationBindingsLoaded();
+    if (!this.bindingsStorePath) {
+      return;
+    }
+
+    try {
+      fs.mkdirSync(path.dirname(this.bindingsStorePath), { recursive: true });
+      const payload: Record<string, unknown> = {
+        updatedAtMs: Date.now(),
+        conversationToTmuxSession: Object.fromEntries(this.conversationToTmuxSession.entries())
+      };
+      const tempPath = `${this.bindingsStorePath}.tmp`;
+      fs.writeFileSync(tempPath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+      fs.renameSync(tempPath, this.bindingsStorePath);
+    } catch {
+      // best-effort only
+    }
+  }
 
   register(input: {
     daemonId: string;
@@ -34,6 +102,7 @@ export class ClockClientRegistry {
     managedClientPid?: number;
     managedClientCommandHint?: string;
   }): ClockClientRecord {
+    this.ensureConversationBindingsLoaded();
     const now = Date.now();
     const resolvedTmuxSessionId = normalizeString(input.tmuxSessionId) ?? normalizeString(input.sessionId);
     const previous = this.records.get(input.daemonId);
@@ -75,6 +144,7 @@ export class ClockClientRegistry {
       for (const conversationSessionId of preservedConversationIds) {
         this.conversationToTmuxSession.set(conversationSessionId, resolvedTmuxSessionId);
       }
+      this.persistConversationBindings();
     }
 
     return { ...record, ...(record.conversationSessionIds ? { conversationSessionIds: [...record.conversationSessionIds] } : {}) };
@@ -88,6 +158,7 @@ export class ClockClientRegistry {
     managedClientPid?: number;
     managedClientCommandHint?: string;
   }): boolean {
+    this.ensureConversationBindingsLoaded();
     const rec = this.records.get(daemonId);
     if (!rec) {
       return false;
@@ -133,6 +204,7 @@ export class ClockClientRegistry {
           this.conversationToTmuxSession.set(normalizedConversationSessionId, resolvedTmuxSessionId);
         }
       }
+      this.persistConversationBindings();
     }
 
     this.records.set(daemonId, rec);
@@ -140,7 +212,9 @@ export class ClockClientRegistry {
   }
 
   unregister(daemonId: string): boolean {
+    this.ensureConversationBindingsLoaded();
     const record = this.records.get(daemonId);
+    let mappingChanged = false;
     if (record) {
       const tmuxSessionId = normalizeString(record.tmuxSessionId) ?? normalizeString(record.sessionId);
       const boundConversationSessionIds = Array.isArray(record.conversationSessionIds)
@@ -150,10 +224,15 @@ export class ClockClientRegistry {
         const mapped = this.conversationToTmuxSession.get(conversationSessionId);
         if (mapped && tmuxSessionId && mapped === tmuxSessionId) {
           this.conversationToTmuxSession.delete(conversationSessionId);
+          mappingChanged = true;
         }
       }
     }
-    return this.records.delete(daemonId);
+    const removed = this.records.delete(daemonId);
+    if (mappingChanged) {
+      this.persistConversationBindings();
+    }
+    return removed;
   }
 
   list(): ClockClientRecord[] {
@@ -185,6 +264,7 @@ export class ClockClientRegistry {
   }
 
   unbindConversationSession(conversationSessionIdRaw: string): { ok: boolean; removed: boolean; daemonIds: string[] } {
+    this.ensureConversationBindingsLoaded();
     const conversationSessionId = normalizeString(conversationSessionIdRaw);
     if (!conversationSessionId) {
       return { ok: false, removed: false, daemonIds: [] };
@@ -200,6 +280,9 @@ export class ClockClientRegistry {
       }
     }
     const removed = this.conversationToTmuxSession.delete(conversationSessionId) || daemonIds.length > 0;
+    if (removed) {
+      this.persistConversationBindings();
+    }
     return { ok: true, removed, daemonIds };
   }
 
@@ -214,11 +297,16 @@ export class ClockClientRegistry {
       clientType?: string;
     }) => boolean;
   }): ClockStaleCleanupResult {
-    return cleanupStaleHeartbeatsFromRegistry({
+    this.ensureConversationBindingsLoaded();
+    const result = cleanupStaleHeartbeatsFromRegistry({
       records: this.records,
       conversationToTmuxSession: this.conversationToTmuxSession,
       ...args
     });
+    if (result.removedConversationSessionIds.length > 0) {
+      this.persistConversationBindings();
+    }
+    return result;
   }
 
   cleanupDeadTmuxSessions(args: {
@@ -231,11 +319,16 @@ export class ClockClientRegistry {
       clientType?: string;
     }) => boolean;
   }): ClockCleanupResult {
-    return cleanupDeadTmuxSessionsFromRegistry({
+    this.ensureConversationBindingsLoaded();
+    const result = cleanupDeadTmuxSessionsFromRegistry({
       records: this.records,
       conversationToTmuxSession: this.conversationToTmuxSession,
       ...args
     });
+    if (result.removedConversationSessionIds.length > 0) {
+      this.persistConversationBindings();
+    }
+    return result;
   }
 
   private isAlive(record: ClockClientRecord): boolean {
@@ -285,6 +378,7 @@ export class ClockClientRegistry {
   }
 
   bindConversationSession(args: ClockConversationBindArgs): { ok: boolean; reason?: string; daemonId?: string; tmuxSessionId?: string } {
+    this.ensureConversationBindingsLoaded();
     const conversationSessionId = normalizeString(args.conversationSessionId);
     if (!conversationSessionId) {
       return { ok: false, reason: 'conversation_session_required' };
@@ -355,11 +449,22 @@ export class ClockClientRegistry {
     candidate.conversationSessionIds = existingConversationIds;
     this.records.set(candidate.daemonId, candidate);
     this.conversationToTmuxSession.set(conversationSessionId, tmuxSessionId);
+    this.persistConversationBindings();
 
     return { ok: true, daemonId: candidate.daemonId, tmuxSessionId };
   }
 
+  resolveBoundTmuxSession(conversationSessionIdRaw: string): string | undefined {
+    this.ensureConversationBindingsLoaded();
+    const conversationSessionId = normalizeString(conversationSessionIdRaw);
+    if (!conversationSessionId) {
+      return undefined;
+    }
+    return normalizeString(this.conversationToTmuxSession.get(conversationSessionId));
+  }
+
   private resolveInjectTmuxSessionId(args: ClockClientInjectArgs, workdirHint?: string): string | undefined {
+    this.ensureConversationBindingsLoaded();
     const directTmuxSession = normalizeString(args.tmuxSessionId);
     if (directTmuxSession) {
       return directTmuxSession;

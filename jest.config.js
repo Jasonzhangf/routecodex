@@ -8,7 +8,7 @@ const config = {
       'ts-jest',
       {
         useESM: true,
-        tsconfig: '<rootDir>/tsconfig.json',
+        tsconfig: '<rootDir>/tsconfig.jest.json',
       },
     ],
   },
@@ -16,12 +16,15 @@ const config = {
     // Allow transforming specific modules that might be ESM
     'node_modules/(?!(rcc-debugcenter|rcc-basemodule|rcc-errorhandling|@jsonstudio/llms|chalk)/)',
   ],
-  roots: ['<rootDir>/src', '<rootDir>/tests'],
-  testMatch: ['**/__tests__/**/*.ts', '**/?(*.)+(spec|test).ts'],
+  roots: ['<rootDir>/src', '<rootDir>/tests', '<rootDir>/webui/src'],
+  testMatch: ['**/__tests__/**/*.ts', '**/__tests__/**/*.tsx', '**/?(*.)+(spec|test).ts', '**/?(*.)+(spec|test).tsx'],
   collectCoverageFrom: [
     'src/**/*.ts',
+    'webui/src/**/*.ts',
+    'webui/src/**/*.tsx',
     '!src/**/*.d.ts',
     '!src/index.ts',
+    '!webui/src/main.tsx',
   ],
   coverageDirectory: 'coverage',
   coverageReporters: ['text', 'lcov', 'html'],
@@ -35,6 +38,12 @@ const config = {
       lines: 1,
       statements: 1,
     },
+    './webui/src/App.tsx': {
+      branches: 40,
+      functions: 55,
+      lines: 60,
+      statements: 60
+    }
   },
   moduleNameMapper: (() => {
     // By default, run tests against the vendored `sharedmodule/llmswitch-core` source in this repo.

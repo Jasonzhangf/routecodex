@@ -441,14 +441,14 @@ export async function interactiveRefresh(selector: string, options: InteractiveR
     if (!isCamoufoxAvailable()) {
       console.warn(
         chalk.yellow('⚠'),
-        'Camoufox is required to open the verification URL. Install it first: python3 -m pip install --user -U camoufox'
+        'camo CLI is required to open the verification URL. Install/enable `camo` first.'
       );
       return;
     }
 
     let proceed = shouldAutoOpen;
     if (!proceed) {
-      proceed = await askYesNo('Open verification URL in Camoufox now? (Y/n) ', true);
+      proceed = await askYesNo('Open verification URL in camo browser now? (Y/n) ', true);
     }
     if (!proceed) {
       return;
@@ -465,7 +465,7 @@ export async function interactiveRefresh(selector: string, options: InteractiveR
             alias: token.alias || 'default'
           });
           if (ok) {
-            console.log(chalk.blue('ℹ'), 'Opened verification URL in Camoufox.');
+            console.log(chalk.blue('ℹ'), 'Opened verification URL in camo browser.');
           }
         });
       } finally {

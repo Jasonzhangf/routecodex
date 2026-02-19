@@ -3,6 +3,10 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import { stableStringify } from '../../../../monitoring/semantic-tracker.js';
+import {
+  applyRoutingPolicyAtLocation,
+  extractRoutingGroupsSnapshot
+} from './providers-handler-routing-utils.js';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -24,11 +28,6 @@ function isRecord(value: unknown): value is UnknownRecord {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
-function pickVirtualRouterNode(rawConfig: UnknownRecord): UnknownRecord {
-  const vr = rawConfig.virtualrouter;
-  return isRecord(vr) ? (vr as UnknownRecord) : {};
-}
-
 function coercePolicyVirtualRouterNode(policy: unknown): UnknownRecord | null {
   if (!isRecord(policy)) {
     return null;
@@ -42,19 +41,21 @@ function coercePolicyVirtualRouterNode(policy: unknown): UnknownRecord | null {
 }
 
 export function canonicalizePolicyFromRawConfig(rawConfig: UnknownRecord): RoutingPolicySnapshotV1 | null {
-  const vrNode = pickVirtualRouterNode(rawConfig);
-  const routing = vrNode.routing ?? rawConfig.routing;
+  const preferredLocation = isRecord(rawConfig.virtualrouter) ? 'virtualrouter.routing' : 'routing';
+  const groupsSnapshot = extractRoutingGroupsSnapshot(rawConfig, preferredLocation);
+  const activePolicy = groupsSnapshot.groups[groupsSnapshot.activeGroupId];
+  const routing = activePolicy?.routing;
   if (!isRecord(routing)) {
     return null;
   }
 
-  const loadBalancing = vrNode.loadBalancing ?? rawConfig.loadBalancing;
-  const classifier = vrNode.classifier ?? rawConfig.classifier;
-  const health = vrNode.health ?? rawConfig.health;
-  const contextRouting = vrNode.contextRouting ?? rawConfig.contextRouting;
-  const webSearch = vrNode.webSearch ?? rawConfig.webSearch;
-  const execCommandGuard = vrNode.execCommandGuard ?? rawConfig.execCommandGuard;
-  const clock = vrNode.clock ?? rawConfig.clock;
+  const loadBalancing = activePolicy.loadBalancing;
+  const classifier = activePolicy.classifier;
+  const health = activePolicy.health;
+  const contextRouting = activePolicy.contextRouting;
+  const webSearch = activePolicy.webSearch;
+  const execCommandGuard = activePolicy.execCommandGuard;
+  const clock = activePolicy.clock;
 
   const vr: RoutingPolicySnapshotV1['virtualrouter'] = {
     routing,
@@ -129,33 +130,21 @@ export async function writePolicyToConfigPath(options: {
       ...(clock !== undefined ? { clock } : {})
     }
   };
-  const policyHash = hashRoutingPolicy(canonical);
-
   const raw = await fs.readFile(options.configPath, 'utf8');
   const parsed = raw.trim() ? JSON.parse(raw) : {};
   const cfg: UnknownRecord = isRecord(parsed) ? parsed : {};
-  const vrNode = pickVirtualRouterNode(cfg);
-
-  const nextVr: UnknownRecord = {
-    ...vrNode,
-    routing,
-    ...(loadBalancing !== undefined ? { loadBalancing } : {}),
-    ...(classifier !== undefined ? { classifier } : {}),
-    ...(health !== undefined ? { health } : {}),
-    ...(contextRouting !== undefined ? { contextRouting } : {}),
-    ...(webSearch !== undefined ? { webSearch } : {}),
-    ...(execCommandGuard !== undefined ? { execCommandGuard } : {}),
-    ...(clock !== undefined ? { clock } : {})
-  };
-  cfg.virtualrouter = nextVr;
+  const location = isRecord(cfg.virtualrouter) ? 'virtualrouter.routing' : 'routing';
+  const nextConfig = applyRoutingPolicyAtLocation(cfg, canonical.virtualrouter, location);
 
   const wroteAtMs = Date.now();
-  const serialized = `${JSON.stringify(cfg, null, 2)}\n`;
+  const serialized = `${JSON.stringify(nextConfig, null, 2)}\n`;
   const tmpPath = `${options.configPath}.tmp.${process.pid}.${wroteAtMs}`;
   await fs.writeFile(tmpPath, serialized, 'utf8');
   await fs.rename(tmpPath, options.configPath);
 
-  return { policy: canonical, policyHash, wroteAtMs };
+  const persistedPolicy = canonicalizePolicyFromRawConfig(nextConfig) ?? canonical;
+  const policyHash = hashRoutingPolicy(persistedPolicy);
+  return { policy: persistedPolicy, policyHash, wroteAtMs };
 }
 
 export function buildPolicyPathForLog(configPath: string): string {
@@ -167,4 +156,3 @@ export function buildPolicyPathForLog(configPath: string): string {
     return configPath;
   }
 }
-

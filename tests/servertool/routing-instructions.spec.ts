@@ -217,6 +217,44 @@ describe('Routing instruction parsing and application', () => {
     expect(inst.stopMessageText).toBe('继续');
     expect(inst.stopMessageMaxRepeats).toBe(3);
   });
+
+  test('parses lowercase stopmessage marker (case-insensitive)', () => {
+    const instructions = parseRoutingInstructions(buildMessages('<**stopmessage:on,10**>继续执行'));
+    expect(instructions).toHaveLength(1);
+    const inst = instructions[0] as any;
+    expect(inst.type).toBe('stopMessageMode');
+    expect(inst.stopMessageStageMode).toBe('on');
+    expect(inst.stopMessageMaxRepeats).toBe(10);
+  });
+
+  test('without clear, only the last stopMessage directive is effective', () => {
+    const instructions = parseRoutingInstructions(
+      buildMessages('<**stopMessage:"先前指令",2**><**stopMessage:on,10**>继续执行')
+    );
+    expect(instructions).toHaveLength(1);
+    const inst = instructions[0] as any;
+    expect(inst.type).toBe('stopMessageMode');
+    expect(inst.stopMessageStageMode).toBe('on');
+    expect(inst.stopMessageMaxRepeats).toBe(10);
+  });
+
+  test('with clear, stopMessage clear wins and other stopMessage directives are ignored', () => {
+    const instructions = parseRoutingInstructions(
+      buildMessages('<**stopMessage:"先前指令",2**><**stopMessage:clear**><**stopMessage:on,10**>继续执行')
+    );
+    expect(instructions).toHaveLength(1);
+    const inst = instructions[0] as any;
+    expect(inst.type).toBe('stopMessageClear');
+  });
+
+  test('with global clear, all other directives are ignored', () => {
+    const instructions = parseRoutingInstructions(
+      buildMessages('<**!glm**><**stopMessage:on,10**><**clear**><**force:crs.gpt-5.3-codex**>继续执行')
+    );
+    expect(instructions).toHaveLength(1);
+    const inst = instructions[0] as any;
+    expect(inst.type).toBe('clear');
+  });
   testIf(SUPPORTS_STOPMESSAGE_MODE_SHORTHAND)('parses stopMessage mode shorthand and ignores trailing text outside tag', () => {
     const instructions = parseRoutingInstructions(buildMessages('<**stopMessage:on**>继续'));
     expect(instructions).toHaveLength(1);
@@ -267,7 +305,7 @@ describe('Routing instruction parsing and application', () => {
     expect(nextState.stopMessageText).toBeUndefined();
     expect(nextState.stopMessageStageMode).toBe('on');
     expect(nextState.stopMessageMaxRepeats).toBe(10);
-    expect(nextState.stopMessageUsed).toBe(0);
+    expect(nextState.stopMessageUsed).toBeUndefined();
   });
 
   testIf(SUPPORTS_HISTORY_MARKER_REPLAY)('keeps stopMessage command when latest marker is previous user without assistant reply', () => {
@@ -343,11 +381,11 @@ describe('Routing instruction parsing and application', () => {
     expect(nextState.stopMessageText).toBeUndefined();
     expect(nextState.stopMessageStageMode).toBe('on');
     expect(nextState.stopMessageMaxRepeats).toBe(DEFAULT_STOPMESSAGE_MAX_REPEATS);
-    expect(nextState.stopMessageUsed).toBe(0);
+    expect(nextState.stopMessageUsed).toBeUndefined();
   });
 
 
-  test('serializes staged stopMessage metadata fields', () => {
+  test('drops legacy staged stopMessage metadata fields during serialization', () => {
     const baseState = createState({
       stopMessageText: '继续',
       stopMessageMaxRepeats: 2,
@@ -360,10 +398,10 @@ describe('Routing instruction parsing and application', () => {
 
     const serialized = serializeRoutingInstructionState(baseState);
     const restored = deserializeRoutingInstructionState(serialized);
-    expect(restored.stopMessageStage).toBe('loop_self_check');
-    expect(restored.stopMessageObservationHash).toBe('abc123');
-    expect(restored.stopMessageObservationStableCount).toBe(1);
-    expect(restored.stopMessageBdWorkState).toBe('active');
+    expect(restored.stopMessageStage).toBeUndefined();
+    expect(restored.stopMessageObservationHash).toBeUndefined();
+    expect(restored.stopMessageObservationStableCount).toBeUndefined();
+    expect(restored.stopMessageBdWorkState).toBeUndefined();
   });
 
   test('parses stopMessage from file:// ref (relative to ~/.routecodex)', () => {

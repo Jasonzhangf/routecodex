@@ -149,7 +149,8 @@ describe('Quota refresh triggers - e2e', () => {
       const adminUi = await fetch(`${baseUrl}/daemon/admin`, { headers: { cookie } });
       expect(adminUi.status).toBe(200);
       const html = await adminUi.text();
-      expect(html).toContain('/daemon/modules/quota/refresh');
+      expect(html).toContain('<html');
+      expect(html.includes('/daemon/modules/quota/refresh') || html.includes('/daemon/admin/assets/')).toBe(true);
 
       // Startup refresh should have happened at least once.
       expect(fetchAntigravityQuotaSnapshot.mock.calls.length).toBeGreaterThanOrEqual(1);

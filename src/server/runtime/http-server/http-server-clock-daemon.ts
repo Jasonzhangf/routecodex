@@ -238,10 +238,13 @@ export async function tickClockDaemonInjectLoop(server: any): Promise<void> {
       }
 
       const daemonId = extractClockDaemonIdFromSessionScope(sessionId);
+      const persistedTmuxSessionId = registry.resolveBoundTmuxSession(sessionId);
       const bind = registry.bindConversationSession({
         conversationSessionId: sessionId,
+        ...(persistedTmuxSessionId ? { tmuxSessionId: persistedTmuxSessionId } : {}),
         ...(daemonId ? { daemonId } : {})
       });
+      const tmuxSessionId = bind.tmuxSessionId || persistedTmuxSessionId;
 
       const text = [
         '[Clock Reminder]: scheduled tasks are due.',
@@ -251,6 +254,7 @@ export async function tickClockDaemonInjectLoop(server: any): Promise<void> {
 
       const injected = await registry.inject({
         sessionId,
+        ...(tmuxSessionId ? { tmuxSessionId } : {}),
         text,
         requestId: reservationId,
         source: 'clock.daemon.inject'

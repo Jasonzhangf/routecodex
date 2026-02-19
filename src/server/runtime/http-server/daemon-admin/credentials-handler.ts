@@ -266,7 +266,7 @@ export function registerCredentialRoutes(app: Application, options: DaemonAdminR
             error: {
               code: 'camoufox_missing',
               message:
-                'Camoufox is required for OAuth authorization. Install it first: python3 -m pip install --user -U camoufox'
+                'camo CLI is required for OAuth authorization. Install/enable `camo` first.'
             }
           });
           return;
@@ -388,7 +388,7 @@ export function registerCredentialRoutes(app: Application, options: DaemonAdminR
           error: {
             code: 'camoufox_missing',
             message:
-              'Camoufox is required to open the verification URL. Install it first: python3 -m pip install --user -U camoufox'
+              'camo CLI is required to open the verification URL. Install/enable `camo` first.'
           }
         });
         return;

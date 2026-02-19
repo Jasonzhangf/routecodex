@@ -164,6 +164,27 @@ export function removeConversationMappingsByTmuxSession(
   return removed;
 }
 
+function hasOtherDaemonForTmuxSession(args: {
+  records: Map<string, ClockClientRecord>;
+  daemonId: string;
+  tmuxSessionId: string;
+}): boolean {
+  const targetTmuxSessionId = normalizeString(args.tmuxSessionId);
+  if (!targetTmuxSessionId) {
+    return false;
+  }
+  for (const [daemonId, record] of args.records.entries()) {
+    if (daemonId === args.daemonId) {
+      continue;
+    }
+    const recordTmuxSessionId = normalizeString(record.tmuxSessionId) ?? normalizeString(record.sessionId);
+    if (recordTmuxSessionId === targetTmuxSessionId) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export function cleanupStaleHeartbeatsFromRegistry(args: {
   records: Map<string, ClockClientRecord>;
   conversationToTmuxSession: Map<string, string>;
@@ -193,6 +214,9 @@ export function cleanupStaleHeartbeatsFromRegistry(args: {
     }
 
     const tmuxSessionId = normalizeString(record.tmuxSessionId) ?? normalizeString(record.sessionId);
+    const hasSharedTmuxPeer = tmuxSessionId
+      ? hasOtherDaemonForTmuxSession({ records: args.records, daemonId, tmuxSessionId })
+      : false;
     if (tmuxSessionId) {
       // Guardrail: stale heartbeat cleanup must never terminate tmux sessions.
       skippedKillTmuxSessionIds.push(tmuxSessionId);
@@ -213,16 +237,18 @@ export function cleanupStaleHeartbeatsFromRegistry(args: {
       ? record.conversationSessionIds.filter((item) => normalizeString(item))
       : [];
 
-    for (const conversationSessionId of conversationSessionIds) {
-      const mapped = args.conversationToTmuxSession.get(conversationSessionId);
-      if (mapped && (!tmuxSessionId || mapped === tmuxSessionId)) {
-        args.conversationToTmuxSession.delete(conversationSessionId);
-        removedConversationSessionIdsSet.add(conversationSessionId);
+    if (!hasSharedTmuxPeer) {
+      for (const conversationSessionId of conversationSessionIds) {
+        const mapped = args.conversationToTmuxSession.get(conversationSessionId);
+        if (mapped && (!tmuxSessionId || mapped === tmuxSessionId)) {
+          args.conversationToTmuxSession.delete(conversationSessionId);
+          removedConversationSessionIdsSet.add(conversationSessionId);
+        }
       }
-    }
-    if (tmuxSessionId) {
-      for (const conversationSessionId of removeConversationMappingsByTmuxSession(args.conversationToTmuxSession, tmuxSessionId)) {
-        removedConversationSessionIdsSet.add(conversationSessionId);
+      if (tmuxSessionId) {
+        for (const conversationSessionId of removeConversationMappingsByTmuxSession(args.conversationToTmuxSession, tmuxSessionId)) {
+          removedConversationSessionIdsSet.add(conversationSessionId);
+        }
       }
     }
 
@@ -265,7 +291,23 @@ export function cleanupDeadTmuxSessionsFromRegistry(args: {
   const processKillOutcome = new Map<number, boolean>();
 
   for (const [daemonId, record] of args.records.entries()) {
+    const tmuxTarget = normalizeString(record.tmuxTarget);
+
+    // Process-managed records without tmux target are non-tmux clients.
+    // Skip dead-tmux cleanup for these records to avoid terminating
+    // foreground-managed client processes by mistake.
+    if (record.managedClientProcess && !record.managedTmuxSession && !tmuxTarget) {
+      const managedClientPid = normalizePositiveInt(record.managedClientPid);
+      if (managedClientPid) {
+        skippedKillManagedClientPids.push(managedClientPid);
+      }
+      continue;
+    }
+
     const tmuxSessionId = normalizeString(record.tmuxSessionId) ?? normalizeString(record.sessionId);
+    const hasSharedTmuxPeer = tmuxSessionId
+      ? hasOtherDaemonForTmuxSession({ records: args.records, daemonId, tmuxSessionId })
+      : false;
     if (!tmuxSessionId) {
       continue;
     }
@@ -354,15 +396,17 @@ export function cleanupDeadTmuxSessionsFromRegistry(args: {
       ? record.conversationSessionIds.filter((item) => normalizeString(item))
       : [];
 
-    for (const conversationSessionId of conversationSessionIds) {
-      const mapped = args.conversationToTmuxSession.get(conversationSessionId);
-      if (mapped === tmuxSessionId) {
-        args.conversationToTmuxSession.delete(conversationSessionId);
+    if (!hasSharedTmuxPeer) {
+      for (const conversationSessionId of conversationSessionIds) {
+        const mapped = args.conversationToTmuxSession.get(conversationSessionId);
+        if (mapped === tmuxSessionId) {
+          args.conversationToTmuxSession.delete(conversationSessionId);
+          removedConversationSessionIdsSet.add(conversationSessionId);
+        }
+      }
+      for (const conversationSessionId of removeConversationMappingsByTmuxSession(args.conversationToTmuxSession, tmuxSessionId)) {
         removedConversationSessionIdsSet.add(conversationSessionId);
       }
-    }
-    for (const conversationSessionId of removeConversationMappingsByTmuxSession(args.conversationToTmuxSession, tmuxSessionId)) {
-      removedConversationSessionIdsSet.add(conversationSessionId);
     }
 
     args.records.delete(daemonId);

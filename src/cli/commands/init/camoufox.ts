@@ -68,7 +68,7 @@ export function maybePrepareCamoufoxEnvironment(
     logger.info('Camoufox environment ready.');
   } else {
     logger.warning(
-      'Camoufox is unavailable. Install Python + camoufox, or run OAuth/DeepSeek auth once dependencies are ready.'
+      'camo CLI is unavailable. Install/enable `camo` first, then retry OAuth/DeepSeek auth.'
     );
   }
 }

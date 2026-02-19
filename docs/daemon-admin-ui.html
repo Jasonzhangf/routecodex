@@ -1489,6 +1489,14 @@
 	                <select id="routingSourceSelect" style="width: 420px;"></select>
 	                <button id="refreshRoutingSourcesBtn">Refresh sources</button>
 	              </div>
+                <div class="row" style="margin-bottom: 10px;">
+                  <label for="routingGroupSelect">group</label>
+                  <select id="routingGroupSelect" style="width: 240px;"></select>
+                  <input id="routingGroupNameInput" type="text" placeholder="new group id" style="width: 200px;" />
+                  <button id="createRoutingGroupBtn">Create/Copy group</button>
+                  <button id="deleteRoutingGroupBtn" class="danger">Delete group</button>
+                  <span id="routingActiveGroupHint" class="mono muted" style="margin-left:auto;"></span>
+                </div>
 	              <div class="row" style="margin-bottom: 10px;">
 	                <label for="routingQuotaModeSelect">mode</label>
 	                <select id="routingQuotaModeSelect" style="width: 160px;">
@@ -1509,9 +1517,9 @@
 	              </div>
 	              <div class="row" style="margin-bottom: 10px;">
 	                <button id="loadRoutingBtn" class="primary">Load</button>
-	                <button id="saveRoutingBtn" class="primary">Save</button>
-                  <button id="saveRoutingRestartLocalBtn">Save + Restart local</button>
-                  <button id="saveRoutingRestartAllBtn">Save + Restart all</button>
+	                <button id="saveRoutingBtn" class="primary">Save group</button>
+                  <button id="saveRoutingRestartLocalBtn">Activate group</button>
+                  <button id="saveRoutingRestartAllBtn">Activate + Restart all</button>
                   <button id="refreshRoutingPoolBtn">Refresh pool status</button>
 	                <button id="routingRegExpandBtn">Expand all</button>
 	                <button id="routingRegCollapseBtn">Collapse all</button>
@@ -1551,6 +1559,9 @@
               routingTargetsUpdatedAt: 0,
               routingSources: [],
               routingSourcesUpdatedAt: 0,
+              routingGroups: {},
+              routingActiveGroupId: "",
+              routingSelectedGroupId: "",
               routingLocation: "virtualrouter.routing",
               routingHasLoadBalancing: false,
               credentials: [],
@@ -4245,9 +4256,13 @@
       }
 
       function buildRoutingPolicyEditorValue(snapshot) {
-        const routingObj = toPlainObjectOrNull(snapshot && snapshot.routing) || {};
-        const hasLoadBalancing = Boolean(snapshot && snapshot.hasLoadBalancing === true);
-        const loadBalancingObj = toPlainObjectOrNull(snapshot && snapshot.loadBalancing) || {};
+        const source = toPlainObjectOrNull(snapshot) || {};
+        const routingObj = toPlainObjectOrNull(source.routing) || {};
+        const loadBalancingObj = toPlainObjectOrNull(source.loadBalancing) || {};
+        const hasLoadBalancing =
+          typeof source.hasLoadBalancing === "boolean"
+            ? Boolean(source.hasLoadBalancing)
+            : Boolean(loadBalancingObj && Object.keys(loadBalancingObj).length > 0);
         UI.routingHasLoadBalancing = hasLoadBalancing;
         return {
           routing: routingObj,
@@ -4276,30 +4291,114 @@
         };
       }
 
-	      async function loadRouting() {
-	        setLog("routingOpLog", "");
-	        const auth = UI.adminAuth ? UI.adminAuth : await refreshAdminAuthStatus();
-	        if (!auth || !auth.authenticated) {
-	          notifyUnauthorizedOnce("routing");
-	          return;
-	        }
-	        try {
-	          const selectedPath = textOf($("routingSourceSelect").value || "").trim();
-	          const query = selectedPath ? `?path=${encodeURIComponent(selectedPath)}` : "";
-	          const out = await apiFetch(`/config/routing${query}`);
-	          UI.routingLocation = out.location || "virtualrouter.routing";
-	          routingEditorSetValue(buildRoutingPolicyEditorValue(out));
-	          setLog(
-              "routingOpLog",
-              `Loaded. Path: ${out.path || "—"}\nLocation: ${UI.routingLocation}\nloadBalancing: ${UI.routingHasLoadBalancing ? "present" : "absent"}`
-            );
-	          toast("Routing policy loaded.", "ok");
-	        } catch (e) {
-	          if (e && e.status === 401) notifyUnauthorizedOnce("routing");
-	          setLog("routingOpLog", `Load failed: ${e.message}`);
-	          toast(`Load failed: ${e.message}`);
-	        }
-	      }
+      function normalizeRoutingGroupsMap(value) {
+        const out = {};
+        if (!value || typeof value !== "object" || Array.isArray(value)) return out;
+        for (const [groupId, groupPolicy] of Object.entries(value)) {
+          const policyObj = toPlainObjectOrNull(groupPolicy);
+          if (!groupId || !policyObj) continue;
+          out[groupId] = policyObj;
+        }
+        return out;
+      }
+
+      function currentRoutingSourcePath() {
+        return textOf($("routingSourceSelect").value || "").trim();
+      }
+
+      function currentRoutingSourceQuery() {
+        const selectedPath = currentRoutingSourcePath();
+        return selectedPath ? `?path=${encodeURIComponent(selectedPath)}` : "";
+      }
+
+      function updateRoutingGroupHint() {
+        const hint = $("routingActiveGroupHint");
+        if (!hint) return;
+        const selected = textOf(UI.routingSelectedGroupId || "").trim();
+        const active = textOf(UI.routingActiveGroupId || "").trim();
+        if (!selected && !active) {
+          hint.textContent = "group: —";
+          return;
+        }
+        hint.textContent = `selected=${selected || "—"} · active=${active || "—"}`;
+      }
+
+      function renderRoutingGroupSelect(preferredGroupId) {
+        const select = $("routingGroupSelect");
+        if (!select) return "";
+        const groups = normalizeRoutingGroupsMap(UI.routingGroups);
+        let ids = Object.keys(groups).sort((a, b) => a.localeCompare(b));
+        if (!ids.length) {
+          groups.default = { routing: {} };
+          ids = ["default"];
+        }
+        UI.routingGroups = groups;
+
+        const prev = textOf(select.value || "").trim();
+        select.replaceChildren();
+        for (const id of ids) {
+          const opt = document.createElement("option");
+          opt.value = id;
+          opt.textContent = id === UI.routingActiveGroupId ? `${id} (active)` : id;
+          select.appendChild(opt);
+        }
+        const nextSelected =
+          (preferredGroupId && groups[preferredGroupId] ? preferredGroupId : "")
+          || (prev && groups[prev] ? prev : "")
+          || (UI.routingSelectedGroupId && groups[UI.routingSelectedGroupId] ? UI.routingSelectedGroupId : "")
+          || (UI.routingActiveGroupId && groups[UI.routingActiveGroupId] ? UI.routingActiveGroupId : "")
+          || ids[0];
+        select.value = nextSelected;
+        UI.routingSelectedGroupId = nextSelected;
+        updateRoutingGroupHint();
+        return nextSelected;
+      }
+
+      function getSelectedRoutingGroupId() {
+        const select = $("routingGroupSelect");
+        const selected = textOf((select && select.value) || UI.routingSelectedGroupId || "").trim();
+        if (selected) UI.routingSelectedGroupId = selected;
+        return selected;
+      }
+
+      function loadSelectedRoutingGroupIntoEditor() {
+        const selectedGroupId = getSelectedRoutingGroupId();
+        const groups = normalizeRoutingGroupsMap(UI.routingGroups);
+        const selectedPolicy = toPlainObjectOrNull(groups[selectedGroupId]) || { routing: {} };
+        routingEditorSetValue(buildRoutingPolicyEditorValue(selectedPolicy));
+        updateRoutingGroupHint();
+      }
+
+      async function loadRouting(preferredGroupId) {
+        setLog("routingOpLog", "");
+        const auth = UI.adminAuth ? UI.adminAuth : await refreshAdminAuthStatus();
+        if (!auth || !auth.authenticated) {
+          notifyUnauthorizedOnce("routing");
+          return;
+        }
+        try {
+          const selectedPath = currentRoutingSourcePath();
+          const query = currentRoutingSourceQuery();
+          const out = await apiFetch(`/config/routing/groups${query}`);
+          UI.routingLocation = out.location || "virtualrouter.routing";
+          UI.routingGroups = normalizeRoutingGroupsMap(out.groups);
+          UI.routingActiveGroupId = textOf(out.activeGroupId || "").trim();
+          const selectedGroupId = renderRoutingGroupSelect(preferredGroupId);
+          if (!UI.routingActiveGroupId && selectedGroupId) {
+            UI.routingActiveGroupId = selectedGroupId;
+          }
+          loadSelectedRoutingGroupIntoEditor();
+          setLog(
+            "routingOpLog",
+            `Loaded groups. Path: ${out.path || selectedPath || "—"}\nLocation: ${UI.routingLocation}\nselected: ${UI.routingSelectedGroupId || "—"}\nactive: ${UI.routingActiveGroupId || "—"}\nloadBalancing: ${UI.routingHasLoadBalancing ? "present" : "absent"}`
+          );
+          toast("Routing groups loaded.", "ok");
+        } catch (e) {
+          if (e && e.status === 401) notifyUnauthorizedOnce("routing");
+          setLog("routingOpLog", `Load failed: ${e.message}`);
+          toast(`Load failed: ${e.message}`);
+        }
+      }
 
 	      async function saveRouting() {
 	        setLog("routingOpLog", "");
@@ -4309,30 +4408,41 @@
 	          return null;
 	        }
 	        try {
-	          const selectedPath = textOf($("routingSourceSelect").value || "").trim();
-	          const query = selectedPath ? `?path=${encodeURIComponent(selectedPath)}` : "";
+	          const selectedPath = currentRoutingSourcePath();
+	          const query = currentRoutingSourceQuery();
+            const selectedGroupId = getSelectedRoutingGroupId();
+            if (!selectedGroupId) {
+              throw new Error("No routing group selected");
+            }
 	          const policy = parseRoutingPolicyEditorValue(routingEditorGetValue() || {});
-            const payload = {
-              routing: policy.routing,
-              location: UI.routingLocation,
-              path: selectedPath || undefined
+            const basePolicy = toPlainObjectOrNull((UI.routingGroups || {})[selectedGroupId]) || {};
+            const nextPolicy = {
+              ...basePolicy,
+              routing: policy.routing
             };
             if (policy.shouldWriteLoadBalancing) {
-              payload.loadBalancing = policy.loadBalancing || {};
+              nextPolicy.loadBalancing = policy.loadBalancing || {};
+            } else {
+              delete nextPolicy.loadBalancing;
             }
-	          const out = await apiFetch(`/config/routing${query}`, {
+	          const out = await apiFetch(`/config/routing/groups/${encodeURIComponent(selectedGroupId)}${query}`, {
 	            method: "PUT",
-	            body: JSON.stringify(payload)
+	            body: JSON.stringify({
+                policy: nextPolicy,
+                location: UI.routingLocation,
+                path: selectedPath || undefined
+              })
 	          });
-	          UI.routingLocation = out.location || UI.routingLocation;
-            if (typeof out.hasLoadBalancing === "boolean") {
-              UI.routingHasLoadBalancing = out.hasLoadBalancing;
-            }
+            UI.routingLocation = out.location || UI.routingLocation;
+            UI.routingGroups = normalizeRoutingGroupsMap(out.groups);
+            UI.routingActiveGroupId = textOf(out.activeGroupId || UI.routingActiveGroupId || "").trim();
+            renderRoutingGroupSelect(selectedGroupId);
+            loadSelectedRoutingGroupIntoEditor();
 	          setLog(
               "routingOpLog",
-              `Saved. Path: ${out.path || "—"}\nLocation: ${UI.routingLocation}\nloadBalancing: ${UI.routingHasLoadBalancing ? "present" : "absent"}\nRestart required to apply.`
+              `Saved group. Path: ${out.path || selectedPath || "—"}\nLocation: ${UI.routingLocation}\nselected: ${UI.routingSelectedGroupId || "—"}\nactive: ${UI.routingActiveGroupId || "—"}`
             );
-	          toast("Routing policy saved.", "ok");
+	          toast("Routing group saved.", "ok");
 	          routingEditorSetDirty(false);
             return out;
 	        } catch (e) {
@@ -4344,17 +4454,39 @@
 	      }
 
       async function saveRoutingAndRestartLocal() {
-        const saved = await saveRouting();
-        if (!saved) return;
-        if (!confirm("Restart this RouteCodex runtime now to apply routing policy changes?")) return;
+        const selectedGroupId = getSelectedRoutingGroupId();
+        if (!selectedGroupId) {
+          toast("No routing group selected.");
+          return;
+        }
+        if (routingEditorState.dirty) {
+          const shouldSave = confirm("Current group has unsaved changes. Save now before activation?");
+          if (!shouldSave) return;
+          const saved = await saveRouting();
+          if (!saved) return;
+        }
+        if (!confirm(`Activate routing group \"${selectedGroupId}\" and reload local runtime now?`)) return;
         try {
-          const out = await apiFetch("/daemon/restart", { method: "POST" });
-          const warnings = Array.isArray(out.warnings) && out.warnings.length ? `\nWarnings:\n- ${out.warnings.join("\n- ")}` : "";
+          const selectedPath = currentRoutingSourcePath();
+          const query = currentRoutingSourceQuery();
+          const out = await apiFetch(`/config/routing/groups/activate${query}`, {
+            method: "POST",
+            body: JSON.stringify({
+              groupId: selectedGroupId,
+              location: UI.routingLocation,
+              path: selectedPath || undefined
+            })
+          });
+          UI.routingLocation = out.location || UI.routingLocation;
+          UI.routingGroups = normalizeRoutingGroupsMap(out.groups);
+          UI.routingActiveGroupId = textOf(out.activeGroupId || selectedGroupId).trim();
+          renderRoutingGroupSelect(selectedGroupId);
+          loadSelectedRoutingGroupIntoEditor();
           setLog(
             "routingOpLog",
-            `Saved + restarted local.\nconfigPath: ${out.configPath || "—"}\nreloadedAt: ${out.reloadedAt || "—"}${warnings}`
+            `Activated local.\nPath: ${out.path || selectedPath || "—"}\nselected: ${UI.routingSelectedGroupId || "—"}\nactive: ${UI.routingActiveGroupId || "—"}\nselfReload: ${JSON.stringify(out.selfReload ?? null, null, 2)}`
           );
-          toast("Routing saved and local runtime restarted.", "ok");
+          toast("Routing group activated (local).", "ok");
           await refreshStatus();
           await refreshProviders();
           await refreshCredentials();
@@ -4369,18 +4501,142 @@
       }
 
       async function saveRoutingAndRestartAll() {
-        const saved = await saveRouting();
-        if (!saved) return;
+        const selectedGroupId = getSelectedRoutingGroupId();
+        if (!selectedGroupId) {
+          toast("No routing group selected.");
+          return;
+        }
+        if (routingEditorState.dirty) {
+          const shouldSave = confirm("Current group has unsaved changes. Save now before activation?");
+          if (!shouldSave) return;
+          const saved = await saveRouting();
+          if (!saved) return;
+        }
         if (!confirm("Broadcast restart all local RouteCodex servers now?")) return;
         try {
+          const selectedPath = currentRoutingSourcePath();
+          const query = currentRoutingSourceQuery();
+          const activated = await apiFetch(`/config/routing/groups/activate${query}`, {
+            method: "POST",
+            body: JSON.stringify({
+              groupId: selectedGroupId,
+              location: UI.routingLocation,
+              path: selectedPath || undefined
+            })
+          });
+          UI.routingLocation = activated.location || UI.routingLocation;
+          UI.routingGroups = normalizeRoutingGroupsMap(activated.groups);
+          UI.routingActiveGroupId = textOf(activated.activeGroupId || selectedGroupId).trim();
+          renderRoutingGroupSelect(selectedGroupId);
+          loadSelectedRoutingGroupIntoEditor();
           const out = await controlMutate("servers.restart", {});
-          setLog("routingOpLog", `Saved + restart-all requested.\n${JSON.stringify(out, null, 2)}`);
-          toast("Routing saved and restart-all requested.", "ok");
+          setLog("routingOpLog", `Activated + restart-all requested.\n${JSON.stringify(out, null, 2)}`);
+          toast("Routing group activated and restart-all requested.", "ok");
           await refreshControl();
           await refreshStatus();
         } catch (e) {
           setLog("routingOpLog", `Restart-all failed: ${e && e.message ? e.message : String(e)}`);
           toast(`Restart-all failed: ${e && e.message ? e.message : String(e)}`);
+        }
+      }
+
+      function buildRoutingTemplatePolicyForNewGroup() {
+        const selectedGroupId = getSelectedRoutingGroupId();
+        const groups = normalizeRoutingGroupsMap(UI.routingGroups);
+        const base = toPlainObjectOrNull(groups[selectedGroupId]) || { routing: {} };
+        if (!routingEditorState.dirty) {
+          return { ...base };
+        }
+        const parsed = parseRoutingPolicyEditorValue(routingEditorGetValue() || {});
+        const next = {
+          ...base,
+          routing: parsed.routing
+        };
+        if (parsed.shouldWriteLoadBalancing) {
+          next.loadBalancing = parsed.loadBalancing || {};
+        } else {
+          delete next.loadBalancing;
+        }
+        return next;
+      }
+
+      async function createRoutingGroup() {
+        setLog("routingOpLog", "");
+        const auth = UI.adminAuth ? UI.adminAuth : await refreshAdminAuthStatus();
+        if (!auth || !auth.authenticated) {
+          notifyUnauthorizedOnce("routing groups");
+          return;
+        }
+        const input = $("routingGroupNameInput");
+        const groupId = textOf((input && input.value) || "").trim();
+        if (!groupId) {
+          toast("Group id is required.");
+          return;
+        }
+        const selectedPath = currentRoutingSourcePath();
+        const query = currentRoutingSourceQuery();
+        try {
+          const policy = buildRoutingTemplatePolicyForNewGroup();
+          const out = await apiFetch(`/config/routing/groups/${encodeURIComponent(groupId)}${query}`, {
+            method: "PUT",
+            body: JSON.stringify({
+              policy,
+              location: UI.routingLocation,
+              path: selectedPath || undefined
+            })
+          });
+          UI.routingLocation = out.location || UI.routingLocation;
+          UI.routingGroups = normalizeRoutingGroupsMap(out.groups);
+          UI.routingActiveGroupId = textOf(out.activeGroupId || UI.routingActiveGroupId || "").trim();
+          renderRoutingGroupSelect(groupId);
+          loadSelectedRoutingGroupIntoEditor();
+          if (input) input.value = "";
+          setLog(
+            "routingOpLog",
+            `Created/updated group.\nPath: ${out.path || selectedPath || "—"}\nselected: ${UI.routingSelectedGroupId || "—"}\nactive: ${UI.routingActiveGroupId || "—"}`
+          );
+          toast("Routing group created/updated.", "ok");
+        } catch (e) {
+          if (e && e.status === 401) notifyUnauthorizedOnce("routing groups");
+          setLog("routingOpLog", `Create group failed: ${e && e.message ? e.message : String(e)}`);
+          toast(`Create group failed: ${e && e.message ? e.message : String(e)}`);
+        }
+      }
+
+      async function deleteRoutingGroup() {
+        setLog("routingOpLog", "");
+        const auth = UI.adminAuth ? UI.adminAuth : await refreshAdminAuthStatus();
+        if (!auth || !auth.authenticated) {
+          notifyUnauthorizedOnce("routing groups");
+          return;
+        }
+        const groupId = getSelectedRoutingGroupId();
+        if (!groupId) {
+          toast("No routing group selected.");
+          return;
+        }
+        if (!confirm(`Delete routing group \"${groupId}\"?`)) return;
+        try {
+          const queryBase = currentRoutingSourceQuery();
+          const locationPart = UI.routingLocation ? `${queryBase ? "&" : "?"}location=${encodeURIComponent(UI.routingLocation)}` : "";
+          const query = `${queryBase}${locationPart}`;
+          const out = await apiFetch(`/config/routing/groups/${encodeURIComponent(groupId)}${query}`, {
+            method: "DELETE"
+          });
+          UI.routingLocation = out.location || UI.routingLocation;
+          UI.routingGroups = normalizeRoutingGroupsMap(out.groups);
+          UI.routingActiveGroupId = textOf(out.activeGroupId || UI.routingActiveGroupId || "").trim();
+          renderRoutingGroupSelect();
+          loadSelectedRoutingGroupIntoEditor();
+          setLog(
+            "routingOpLog",
+            `Deleted group \"${groupId}\".\nPath: ${out.path || currentRoutingSourcePath() || "—"}\nselected: ${UI.routingSelectedGroupId || "—"}\nactive: ${UI.routingActiveGroupId || "—"}`
+          );
+          toast("Routing group deleted.", "ok");
+        } catch (e) {
+          if (e && e.status === 401) notifyUnauthorizedOnce("routing groups");
+          setLog("routingOpLog", `Delete group failed: ${e && e.message ? e.message : String(e)}`);
+          toast(`Delete group failed: ${e && e.message ? e.message : String(e)}`);
         }
       }
 
@@ -5642,8 +5898,23 @@
       $("saveRoutingBtn").addEventListener("click", saveRouting);
       $("saveRoutingRestartLocalBtn").addEventListener("click", () => void saveRoutingAndRestartLocal());
       $("saveRoutingRestartAllBtn").addEventListener("click", () => void saveRoutingAndRestartAll());
+      $("createRoutingGroupBtn").addEventListener("click", () => void createRoutingGroup());
+      $("deleteRoutingGroupBtn").addEventListener("click", () => void deleteRoutingGroup());
       $("refreshRoutingSourcesBtn").addEventListener("click", refreshRoutingSources);
-      $("routingSourceSelect").addEventListener("change", loadRouting);
+      $("routingSourceSelect").addEventListener("change", async () => {
+        if (routingEditorState.dirty && !confirm("Discard unsaved routing editor changes and switch source?")) {
+          return;
+        }
+        await loadRouting();
+      });
+      $("routingGroupSelect").addEventListener("change", () => {
+        if (routingEditorState.dirty && !confirm("Discard unsaved routing editor changes and switch group?")) {
+          renderRoutingGroupSelect(UI.routingSelectedGroupId || UI.routingActiveGroupId || "");
+          return;
+        }
+        UI.routingSelectedGroupId = textOf($("routingGroupSelect").value || "").trim();
+        loadSelectedRoutingGroupIntoEditor();
+      });
       $("routingRegExpandBtn").addEventListener("click", () => setAllDetailsOpen($("routingKvEditor"), true));
       $("routingRegCollapseBtn").addEventListener("click", () => setAllDetailsOpen($("routingKvEditor"), false));
       $("refreshRoutingPoolBtn").addEventListener("click", async () => {

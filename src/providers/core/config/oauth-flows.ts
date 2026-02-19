@@ -9,14 +9,6 @@ import * as crypto from 'node:crypto';
 import { openAuthInCamoufox } from './camoufox-launcher.js';
 import { logOAuthDebug } from '../../auth/oauth-logger.js';
 
-type BrowserOpener = (url: string) => Promise<void> | void;
-type OpenModule = {
-  default?: BrowserOpener;
-  open?: BrowserOpener;
-};
-type ShellExecOptions = { shell?: boolean | string };
-type ExecAsyncFn = (command: string, options?: ShellExecOptions) => Promise<{ stdout: string; stderr: string }>;
-
 /**
  * OAuth认证流程类型
  */
@@ -254,51 +246,13 @@ export abstract class BaseOAuthFlowStrategy {
         }
       }
 
-      if (!opened && camoufoxExplicit) {
-        throw new Error(
-          'Camoufox OAuth is required but Camoufox is not available. Please install Camoufox first (python3 -m pip install --user -U camoufox) and retry.'
-        );
-      }
-
       if (!opened) {
-        console.warn('[OAuth] Camoufox launch not available; falling back to system browser.');
-        try {
-          const openImport = (await import('open')) as unknown;
-          let opener: BrowserOpener | undefined;
-          if (typeof openImport === 'function') {
-            opener = openImport as BrowserOpener;
-          } else {
-            const moduleRef = openImport as OpenModule;
-            opener = moduleRef.default ?? moduleRef.open;
-          }
-          if (typeof opener === 'function') {
-            await opener(resolvedUrl);
-            opened = true;
-          }
-        } catch {
-          /* ignore and fallback */
+        if (camoufoxExplicit) {
+          throw new Error(
+            'camo CLI OAuth is required but launch failed. Please ensure `camo` is installed and retry.'
+          );
         }
-      }
-
-      if (!opened) {
-        try {
-          const { exec } = await import('node:child_process');
-          const { promisify } = await import('node:util');
-          const execAsync = promisify(exec) as ExecAsyncFn;
-          await execAsync(`open "${resolvedUrl}"`).catch(async () => {
-            await execAsync(`xdg-open "${resolvedUrl}"`).catch(async () => {
-              const shellOptions: ShellExecOptions = { shell: true };
-              await execAsync(`start "" "${resolvedUrl}"`, shellOptions);
-            });
-          });
-          opened = true;
-        } catch {
-          /* ignore */
-        }
-      }
-
-      if (!opened) {
-        console.log('Could not open browser automatically. Please manually visit the URL.');
+        throw new Error('OAuth browser launch failed (camo CLI).');
       }
     }
   }

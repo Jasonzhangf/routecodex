@@ -5,7 +5,47 @@ import os from 'node:os';
 import path from 'node:path';
 import { resolveRouteCodexConfigPath } from '../../../../config/config-paths.js';
 
+type UnknownRecord = Record<string, unknown>;
+
+const ROUTING_POLICY_OPTIONAL_KEYS = [
+  'loadBalancing',
+  'classifier',
+  'health',
+  'contextRouting',
+  'webSearch',
+  'execCommandGuard',
+  'clock'
+] as const;
+
+type RoutingPolicyOptionalKey = (typeof ROUTING_POLICY_OPTIONAL_KEYS)[number];
+
+type RoutingGroupErrorCode =
+  | 'invalid_group_id'
+  | 'invalid_policy'
+  | 'group_not_found'
+  | 'group_in_use'
+  | 'group_last_one';
+
 export type RoutingLocation = 'virtualrouter.routing' | 'routing';
+
+export interface RoutingPolicyGroup {
+  routing: Record<string, unknown>;
+  loadBalancing?: Record<string, unknown>;
+  classifier?: Record<string, unknown>;
+  health?: Record<string, unknown>;
+  contextRouting?: Record<string, unknown>;
+  webSearch?: Record<string, unknown>;
+  execCommandGuard?: Record<string, unknown>;
+  clock?: Record<string, unknown>;
+}
+
+export interface RoutingGroupsSnapshot {
+  groups: Record<string, RoutingPolicyGroup>;
+  activeGroupId: string;
+  hasRoutingPolicyGroups: boolean;
+  location: RoutingLocation;
+  version: string | null;
+}
 
 export interface RoutingSnapshot {
   routing: Record<string, unknown>;
@@ -13,6 +53,8 @@ export interface RoutingSnapshot {
   hasLoadBalancing: boolean;
   location: RoutingLocation;
   version: string | null;
+  activeGroupId?: string;
+  hasRoutingPolicyGroups?: boolean;
 }
 
 export interface RoutingSourceSummary {
@@ -22,6 +64,225 @@ export interface RoutingSourceSummary {
   path: string;
   location: RoutingLocation;
   version: string | null;
+}
+
+function isRecord(value: unknown): value is UnknownRecord {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function createRoutingGroupError(code: RoutingGroupErrorCode, message: string): Error & { code: RoutingGroupErrorCode } {
+  const error = new Error(message) as Error & { code: RoutingGroupErrorCode };
+  error.code = code;
+  return error;
+}
+
+function cloneRecord(value: Record<string, unknown>): Record<string, unknown> {
+  return { ...value };
+}
+
+function getRoutingPolicyOptionalValue(
+  input: RoutingPolicyGroup,
+  key: RoutingPolicyOptionalKey
+): Record<string, unknown> | undefined {
+  switch (key) {
+    case 'loadBalancing':
+      return input.loadBalancing;
+    case 'classifier':
+      return input.classifier;
+    case 'health':
+      return input.health;
+    case 'contextRouting':
+      return input.contextRouting;
+    case 'webSearch':
+      return input.webSearch;
+    case 'execCommandGuard':
+      return input.execCommandGuard;
+    case 'clock':
+      return input.clock;
+    default:
+      return undefined;
+  }
+}
+
+function setRoutingPolicyOptionalValue(
+  target: RoutingPolicyGroup,
+  key: RoutingPolicyOptionalKey,
+  value: Record<string, unknown>
+): void {
+  switch (key) {
+    case 'loadBalancing':
+      target.loadBalancing = value;
+      return;
+    case 'classifier':
+      target.classifier = value;
+      return;
+    case 'health':
+      target.health = value;
+      return;
+    case 'contextRouting':
+      target.contextRouting = value;
+      return;
+    case 'webSearch':
+      target.webSearch = value;
+      return;
+    case 'execCommandGuard':
+      target.execCommandGuard = value;
+      return;
+    case 'clock':
+      target.clock = value;
+      return;
+  }
+}
+
+function normalizeRoutingPolicyGroupNode(
+  input: unknown,
+  options?: { strictRouting?: boolean }
+): RoutingPolicyGroup {
+  if (!isRecord(input)) {
+    if (options?.strictRouting) {
+      throw createRoutingGroupError('invalid_policy', 'policy must be an object');
+    }
+    return { routing: {} };
+  }
+
+  const inputRouting = input.routing;
+  if (!isRecord(inputRouting)) {
+    if (options?.strictRouting) {
+      throw createRoutingGroupError('invalid_policy', 'policy.routing must be an object');
+    }
+  }
+
+  const out: RoutingPolicyGroup = {
+    routing: isRecord(inputRouting) ? cloneRecord(inputRouting) : {}
+  };
+
+  for (const key of ROUTING_POLICY_OPTIONAL_KEYS) {
+    const value = input[key];
+    if (isRecord(value)) {
+      setRoutingPolicyOptionalValue(out, key, cloneRecord(value));
+    }
+  }
+
+  return out;
+}
+
+function serializeRoutingPolicyGroupNode(input: RoutingPolicyGroup): Record<string, unknown> {
+  const out: Record<string, unknown> = {
+    routing: cloneRecord(isRecord(input.routing) ? input.routing : {})
+  };
+  for (const key of ROUTING_POLICY_OPTIONAL_KEYS) {
+    const value = getRoutingPolicyOptionalValue(input, key);
+    if (isRecord(value)) {
+      out[key] = cloneRecord(value);
+    }
+  }
+  return out;
+}
+
+function detectRoutingLocation(root: UnknownRecord): RoutingLocation {
+  return isRecord(root.virtualrouter) ? 'virtualrouter.routing' : 'routing';
+}
+
+function getLocationContainer(root: UnknownRecord, location: RoutingLocation): UnknownRecord {
+  if (location === 'routing') {
+    return root;
+  }
+  const vr = root.virtualrouter;
+  return isRecord(vr) ? (vr as UnknownRecord) : {};
+}
+
+function withLocationContainer(
+  root: UnknownRecord,
+  location: RoutingLocation,
+  updater: (container: UnknownRecord) => UnknownRecord
+): UnknownRecord {
+  if (location === 'routing') {
+    return updater(cloneRecord(root));
+  }
+  const vr = isRecord(root.virtualrouter) ? (root.virtualrouter as UnknownRecord) : {};
+  const nextVr = updater(cloneRecord(vr));
+  return {
+    ...root,
+    virtualrouter: nextVr
+  };
+}
+
+function hasRoutingPolicyGroupConfig(container: UnknownRecord): boolean {
+  const groupsNode = container.routingPolicyGroups;
+  if (isRecord(groupsNode)) {
+    return true;
+  }
+  const activeNode = container.activeRoutingPolicyGroup;
+  return typeof activeNode === 'string' && activeNode.trim().length > 0;
+}
+
+function extractPolicyFromContainer(container: UnknownRecord): RoutingPolicyGroup {
+  return normalizeRoutingPolicyGroupNode(container);
+}
+
+function resolveActiveGroupId(groups: Record<string, RoutingPolicyGroup>, preferred: unknown): string {
+  const names = Object.keys(groups);
+  if (!names.length) {
+    return 'default';
+  }
+
+  if (typeof preferred === 'string') {
+    const candidate = preferred.trim();
+    if (candidate && groups[candidate]) {
+      return candidate;
+    }
+  }
+
+  if (groups.default) {
+    return 'default';
+  }
+
+  names.sort((a, b) => a.localeCompare(b));
+  return names[0];
+}
+
+function materializePolicyIntoContainer(
+  container: UnknownRecord,
+  policy: RoutingPolicyGroup,
+  options?: { preserveOptionalWhenMissing?: boolean }
+): UnknownRecord {
+  const next = cloneRecord(container);
+  next.routing = cloneRecord(isRecord(policy.routing) ? policy.routing : {});
+
+  for (const key of ROUTING_POLICY_OPTIONAL_KEYS) {
+    const value = getRoutingPolicyOptionalValue(policy, key);
+    if (isRecord(value)) {
+      next[key] = cloneRecord(value);
+      continue;
+    }
+    if (options?.preserveOptionalWhenMissing) {
+      continue;
+    }
+    delete next[key];
+  }
+
+  return next;
+}
+
+function serializeRoutingGroups(groups: Record<string, RoutingPolicyGroup>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  const keys = Object.keys(groups).sort((a, b) => a.localeCompare(b));
+  for (const key of keys) {
+    out[key] = serializeRoutingPolicyGroupNode(groups[key]);
+  }
+  return out;
+}
+
+function applyRoutingGroupsIntoContainer(
+  container: UnknownRecord,
+  groups: Record<string, RoutingPolicyGroup>,
+  activeGroupId: string
+): UnknownRecord {
+  const activePolicy = groups[activeGroupId] ?? { routing: {} };
+  const withMirror = materializePolicyIntoContainer(container, activePolicy);
+  withMirror.activeRoutingPolicyGroup = activeGroupId;
+  withMirror.routingPolicyGroups = serializeRoutingGroups(groups);
+  return withMirror;
 }
 
 export function pickProviderRootDir(): string {
@@ -59,64 +320,58 @@ export function pickUserConfigPath(): string {
   return resolveRouteCodexConfigPath();
 }
 
-export function extractRoutingSnapshot(config: unknown): RoutingSnapshot {
-  if (!config || typeof config !== 'object' || Array.isArray(config)) {
-    return {
-      routing: {},
-      loadBalancing: {},
-      hasLoadBalancing: false,
-      location: 'virtualrouter.routing',
-      version: null
-    };
-  }
-  const root = config as Record<string, unknown>;
+export function extractRoutingGroupsSnapshot(
+  config: unknown,
+  preferredLocation?: RoutingLocation
+): RoutingGroupsSnapshot {
+  const root = isRecord(config) ? (config as UnknownRecord) : {};
   const version = typeof root.version === 'string' ? root.version : null;
+  const location = preferredLocation ?? detectRoutingLocation(root);
+  const container = getLocationContainer(root, location);
 
-  const vr = root.virtualrouter;
-  if (vr && typeof vr === 'object' && !Array.isArray(vr)) {
-    const routingNode = (vr as Record<string, unknown>).routing;
-    const loadBalancingNode = (vr as Record<string, unknown>).loadBalancing;
-    const hasLoadBalancing = Boolean(
-      loadBalancingNode && typeof loadBalancingNode === 'object' && !Array.isArray(loadBalancingNode)
-    );
-    if (routingNode && typeof routingNode === 'object' && !Array.isArray(routingNode)) {
-      return {
-        routing: routingNode as Record<string, unknown>,
-        loadBalancing: hasLoadBalancing ? (loadBalancingNode as Record<string, unknown>) : {},
-        hasLoadBalancing,
-        location: 'virtualrouter.routing',
-        version
-      };
+  const groupsNode = container.routingPolicyGroups;
+  const groups: Record<string, RoutingPolicyGroup> = {};
+
+  if (isRecord(groupsNode)) {
+    for (const [groupId, groupNode] of Object.entries(groupsNode)) {
+      if (typeof groupId !== 'string' || !groupId.trim()) {
+        continue;
+      }
+      if (!isRecord(groupNode)) {
+        continue;
+      }
+      groups[groupId] = normalizeRoutingPolicyGroupNode(groupNode);
     }
-    return {
-      routing: {},
-      loadBalancing: hasLoadBalancing ? (loadBalancingNode as Record<string, unknown>) : {},
-      hasLoadBalancing,
-      location: 'virtualrouter.routing',
-      version
-    };
   }
 
-  const routingNode = root.routing;
-  const loadBalancingNode = root.loadBalancing;
-  const hasLoadBalancing = Boolean(
-    loadBalancingNode && typeof loadBalancingNode === 'object' && !Array.isArray(loadBalancingNode)
-  );
-  if (routingNode && typeof routingNode === 'object' && !Array.isArray(routingNode)) {
-    return {
-      routing: routingNode as Record<string, unknown>,
-      loadBalancing: hasLoadBalancing ? (loadBalancingNode as Record<string, unknown>) : {},
-      hasLoadBalancing,
-      location: 'routing',
-      version
-    };
+  if (!Object.keys(groups).length) {
+    groups.default = extractPolicyFromContainer(container);
   }
+
+  const activeGroupId = resolveActiveGroupId(groups, container.activeRoutingPolicyGroup);
+
   return {
-    routing: {},
-    loadBalancing: hasLoadBalancing ? (loadBalancingNode as Record<string, unknown>) : {},
-    hasLoadBalancing,
-    location: 'routing',
+    groups,
+    activeGroupId,
+    hasRoutingPolicyGroups: isRecord(groupsNode),
+    location,
     version
+  };
+}
+
+export function extractRoutingSnapshot(config: unknown): RoutingSnapshot {
+  const groupsSnapshot = extractRoutingGroupsSnapshot(config);
+  const activePolicy = groupsSnapshot.groups[groupsSnapshot.activeGroupId] ?? { routing: {} };
+  const hasLoadBalancing = isRecord(activePolicy.loadBalancing);
+
+  return {
+    routing: cloneRecord(isRecord(activePolicy.routing) ? activePolicy.routing : {}),
+    loadBalancing: hasLoadBalancing ? cloneRecord(activePolicy.loadBalancing as Record<string, unknown>) : {},
+    hasLoadBalancing,
+    location: groupsSnapshot.location,
+    version: groupsSnapshot.version,
+    activeGroupId: groupsSnapshot.activeGroupId,
+    hasRoutingPolicyGroups: groupsSnapshot.hasRoutingPolicyGroups
   };
 }
 
@@ -129,35 +384,165 @@ export function applyRoutingAtLocation(
     loadBalancing?: Record<string, unknown> | null;
   }
 ): Record<string, unknown> {
-  const root = (config && typeof config === 'object' && !Array.isArray(config))
-    ? (config as Record<string, unknown>)
-    : {};
+  const root = isRecord(config) ? (config as UnknownRecord) : {};
   const shouldApplyLoadBalancing = options?.applyLoadBalancing === true;
-  const loadBalancing = options?.loadBalancing;
-  if (location === 'routing') {
-    if (!shouldApplyLoadBalancing) {
-      return { ...root, routing };
+  const nextRouting = cloneRecord(isRecord(routing) ? routing : {});
+
+  const container = getLocationContainer(root, location);
+  if (!hasRoutingPolicyGroupConfig(container)) {
+    return withLocationContainer(root, location, (baseContainer) => {
+      if (!shouldApplyLoadBalancing) {
+        return {
+          ...baseContainer,
+          routing: nextRouting
+        };
+      }
+
+      if (options?.loadBalancing === null) {
+        const rest = { ...baseContainer, routing: nextRouting } as UnknownRecord;
+        delete rest.loadBalancing;
+        return rest;
+      }
+
+      return {
+        ...baseContainer,
+        routing: nextRouting,
+        loadBalancing: cloneRecord(options?.loadBalancing ?? {})
+      };
+    });
+  }
+
+  const groupsSnapshot = extractRoutingGroupsSnapshot(root, location);
+  const groups = { ...groupsSnapshot.groups };
+  const activeGroupId = groupsSnapshot.activeGroupId;
+  const baseActive = groups[activeGroupId] ?? { routing: {} };
+  const nextActive: RoutingPolicyGroup = {
+    ...baseActive,
+    routing: nextRouting
+  };
+
+  if (shouldApplyLoadBalancing) {
+    if (options?.loadBalancing === null) {
+      delete nextActive.loadBalancing;
+    } else {
+      nextActive.loadBalancing = cloneRecord(options?.loadBalancing ?? {});
     }
-    if (loadBalancing === null) {
-      const rest = { ...root };
-      delete rest.loadBalancing;
-      return { ...rest, routing };
-    }
-    return { ...root, routing, loadBalancing: loadBalancing ?? {} };
   }
-  const vrNode = root.virtualrouter;
-  const vr = (vrNode && typeof vrNode === 'object' && !Array.isArray(vrNode))
-    ? (vrNode as Record<string, unknown>)
-    : {};
-  if (!shouldApplyLoadBalancing) {
-    return { ...root, virtualrouter: { ...vr, routing } };
+
+  groups[activeGroupId] = nextActive;
+
+  return withLocationContainer(root, location, (baseContainer) =>
+    applyRoutingGroupsIntoContainer(baseContainer, groups, activeGroupId)
+  );
+}
+
+export function applyRoutingPolicyAtLocation(
+  config: unknown,
+  policy: unknown,
+  location: RoutingLocation
+): Record<string, unknown> {
+  const root = isRecord(config) ? (config as UnknownRecord) : {};
+  const normalizedPolicy = normalizeRoutingPolicyGroupNode(policy, { strictRouting: true });
+  const container = getLocationContainer(root, location);
+
+  if (!hasRoutingPolicyGroupConfig(container)) {
+    return withLocationContainer(root, location, (baseContainer) =>
+      materializePolicyIntoContainer(baseContainer, normalizedPolicy)
+    );
   }
-  if (loadBalancing === null) {
-    const vrRest = { ...vr };
-    delete vrRest.loadBalancing;
-    return { ...root, virtualrouter: { ...vrRest, routing } };
+
+  const groupsSnapshot = extractRoutingGroupsSnapshot(root, location);
+  const groups = {
+    ...groupsSnapshot.groups,
+    [groupsSnapshot.activeGroupId]: normalizedPolicy
+  };
+
+  return withLocationContainer(root, location, (baseContainer) =>
+    applyRoutingGroupsIntoContainer(baseContainer, groups, groupsSnapshot.activeGroupId)
+  );
+}
+
+export function upsertRoutingGroupAtLocation(
+  config: unknown,
+  groupId: string,
+  policy: unknown,
+  location: RoutingLocation
+): Record<string, unknown> {
+  const normalizedGroupId = typeof groupId === 'string' ? groupId.trim() : '';
+  if (!normalizedGroupId) {
+    throw createRoutingGroupError('invalid_group_id', 'groupId is required');
   }
-  return { ...root, virtualrouter: { ...vr, routing, loadBalancing: loadBalancing ?? {} } };
+
+  const normalizedPolicy = normalizeRoutingPolicyGroupNode(policy, { strictRouting: true });
+  const root = isRecord(config) ? (config as UnknownRecord) : {};
+  const groupsSnapshot = extractRoutingGroupsSnapshot(root, location);
+
+  const groups = {
+    ...groupsSnapshot.groups,
+    [normalizedGroupId]: normalizedPolicy
+  };
+
+  const activeGroupId = resolveActiveGroupId(groups, groupsSnapshot.activeGroupId);
+
+  return withLocationContainer(root, location, (baseContainer) =>
+    applyRoutingGroupsIntoContainer(baseContainer, groups, activeGroupId)
+  );
+}
+
+export function deleteRoutingGroupAtLocation(
+  config: unknown,
+  groupId: string,
+  location: RoutingLocation
+): Record<string, unknown> {
+  const normalizedGroupId = typeof groupId === 'string' ? groupId.trim() : '';
+  if (!normalizedGroupId) {
+    throw createRoutingGroupError('invalid_group_id', 'groupId is required');
+  }
+
+  const root = isRecord(config) ? (config as UnknownRecord) : {};
+  const groupsSnapshot = extractRoutingGroupsSnapshot(root, location);
+  const groups = { ...groupsSnapshot.groups };
+
+  if (!groups[normalizedGroupId]) {
+    throw createRoutingGroupError('group_not_found', `group not found: ${normalizedGroupId}`);
+  }
+
+  if (groupsSnapshot.activeGroupId === normalizedGroupId) {
+    throw createRoutingGroupError('group_in_use', `cannot delete active group: ${normalizedGroupId}`);
+  }
+
+  if (Object.keys(groups).length <= 1) {
+    throw createRoutingGroupError('group_last_one', 'cannot delete the last routing policy group');
+  }
+
+  delete groups[normalizedGroupId];
+
+  const activeGroupId = resolveActiveGroupId(groups, groupsSnapshot.activeGroupId);
+
+  return withLocationContainer(root, location, (baseContainer) =>
+    applyRoutingGroupsIntoContainer(baseContainer, groups, activeGroupId)
+  );
+}
+
+export function activateRoutingGroupAtLocation(
+  config: unknown,
+  groupId: string,
+  location: RoutingLocation
+): Record<string, unknown> {
+  const normalizedGroupId = typeof groupId === 'string' ? groupId.trim() : '';
+  if (!normalizedGroupId) {
+    throw createRoutingGroupError('invalid_group_id', 'groupId is required');
+  }
+
+  const root = isRecord(config) ? (config as UnknownRecord) : {};
+  const groupsSnapshot = extractRoutingGroupsSnapshot(root, location);
+  if (!groupsSnapshot.groups[normalizedGroupId]) {
+    throw createRoutingGroupError('group_not_found', `group not found: ${normalizedGroupId}`);
+  }
+
+  return withLocationContainer(root, location, (baseContainer) =>
+    applyRoutingGroupsIntoContainer(baseContainer, groupsSnapshot.groups, normalizedGroupId)
+  );
 }
 
 export function readQueryString(req: Request, key: string): string | undefined {

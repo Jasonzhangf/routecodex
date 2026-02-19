@@ -102,6 +102,145 @@ function extractTmuxLaunchShellCommand(call: { command: string; args: string[] }
 }
 
 describe('cli codex command', () => {
+  it('reaps codex child on SIGTERM by default to avoid orphan process', async () => {
+    const signalHandlers = new Map<NodeJS.Signals, () => void>();
+    const killSignals: string[] = [];
+    const program = new Command();
+
+    createCodexCommand(program, {
+      isDevPackage: false,
+      isWindows: false,
+      defaultDevPort: 5555,
+      nodeBin: 'node',
+      createSpinner: async () => createStubSpinner(),
+      logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
+      env: {},
+      rawArgv: ['codex', '--url', 'http://localhost:5520/proxy'],
+      fsImpl: createStubFs(),
+      homedir: () => '/home/test',
+      sleep: async () => {},
+      fetch: (async () => ({ ok: true, json: async () => ({ status: 'ready', ok: true }) })) as any,
+      spawnSyncImpl: () => ({ status: 1, stdout: '', stderr: 'tmux not found' }) as any,
+      spawn: () => ({
+        pid: process.pid,
+        on: () => {},
+        kill: (signal: NodeJS.Signals) => {
+          killSignals.push(String(signal));
+          return true;
+        }
+      }) as any,
+      onSignal: (signal, cb) => {
+        signalHandlers.set(signal, cb);
+      },
+      getModulesConfigPath: () => '/tmp/modules.json',
+      resolveServerEntryPath: () => '/tmp/index.js',
+      waitForever: async () => {
+        const handler = signalHandlers.get('SIGTERM');
+        handler?.();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      },
+      exit: () => undefined as never
+    });
+
+    await program.parseAsync(['node', 'routecodex', 'codex', '--url', 'http://localhost:5520/proxy'], { from: 'node' });
+
+    expect(killSignals).toContain('SIGTERM');
+  });
+
+  it('does not kill codex child on SIGTERM when orphan-reap is explicitly disabled', async () => {
+    const signalHandlers = new Map<NodeJS.Signals, () => void>();
+    const killSignals: string[] = [];
+    const program = new Command();
+
+    createCodexCommand(program, {
+      isDevPackage: false,
+      isWindows: false,
+      defaultDevPort: 5555,
+      nodeBin: 'node',
+      createSpinner: async () => createStubSpinner(),
+      logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
+      env: {
+        ROUTECODEX_LAUNCHER_REAP_CHILD_ON_SHUTDOWN: '0'
+      },
+      rawArgv: ['codex', '--url', 'http://localhost:5520/proxy'],
+      fsImpl: createStubFs(),
+      homedir: () => '/home/test',
+      sleep: async () => {},
+      fetch: (async () => ({ ok: true, json: async () => ({ status: 'ready', ok: true }) })) as any,
+      spawnSyncImpl: () => ({ status: 1, stdout: '', stderr: 'tmux not found' }) as any,
+      spawn: () => ({
+        pid: process.pid,
+        on: () => {},
+        kill: (signal: NodeJS.Signals) => {
+          killSignals.push(String(signal));
+          return true;
+        }
+      }) as any,
+      onSignal: (signal, cb) => {
+        signalHandlers.set(signal, cb);
+      },
+      getModulesConfigPath: () => '/tmp/modules.json',
+      resolveServerEntryPath: () => '/tmp/index.js',
+      waitForever: async () => {
+        const handler = signalHandlers.get('SIGTERM');
+        handler?.();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      },
+      exit: () => undefined as never
+    });
+
+    await program.parseAsync(['node', 'routecodex', 'codex', '--url', 'http://localhost:5520/proxy'], { from: 'node' });
+
+    expect(killSignals).toEqual([]);
+  });
+
+  it('forwards SIGTERM to codex child when explicit env switch is enabled', async () => {
+    const signalHandlers = new Map<NodeJS.Signals, () => void>();
+    const killSignals: string[] = [];
+    const program = new Command();
+
+    createCodexCommand(program, {
+      isDevPackage: false,
+      isWindows: false,
+      defaultDevPort: 5555,
+      nodeBin: 'node',
+      createSpinner: async () => createStubSpinner(),
+      logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
+      env: {
+        ROUTECODEX_LAUNCHER_FORWARD_SIGTERM: '1'
+      },
+      rawArgv: ['codex', '--url', 'http://localhost:5520/proxy'],
+      fsImpl: createStubFs(),
+      homedir: () => '/home/test',
+      sleep: async () => {},
+      fetch: (async () => ({ ok: true, json: async () => ({ status: 'ready', ok: true }) })) as any,
+      spawnSyncImpl: () => ({ status: 1, stdout: '', stderr: 'tmux not found' }) as any,
+      spawn: () => ({
+        pid: process.pid,
+        on: () => {},
+        kill: (signal: NodeJS.Signals) => {
+          killSignals.push(String(signal));
+          return true;
+        }
+      }) as any,
+      onSignal: (signal, cb) => {
+        signalHandlers.set(signal, cb);
+      },
+      getModulesConfigPath: () => '/tmp/modules.json',
+      resolveServerEntryPath: () => '/tmp/index.js',
+      waitForever: async () => {
+        const handler = signalHandlers.get('SIGTERM');
+        handler?.();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      },
+      exit: () => undefined as never
+    });
+
+    await program.parseAsync(['node', 'routecodex', 'codex', '--url', 'http://localhost:5520/proxy'], { from: 'node' });
+
+    expect(killSignals).toContain('SIGTERM');
+  });
+
   it('uses explicit --cwd as launch working directory', async () => {
     const spawnCalls: Array<{ command: string; args: string[]; options: any }> = [];
     const program = new Command();

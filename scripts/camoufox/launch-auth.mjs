@@ -13,6 +13,30 @@ function isTruthy(value) {
   return v === '1' || v === 'true' || v === 'yes' || v === 'on';
 }
 
+function isFalsy(value) {
+  if (!value) return false;
+  const v = String(value).trim().toLowerCase();
+  return v === '0' || v === 'false' || v === 'no' || v === 'off';
+}
+
+function resolveIflowHeadlessMode(devMode) {
+  if (devMode) {
+    return false;
+  }
+  const raw = String(
+    process.env.ROUTECODEX_CAMOUFOX_IFLOW_HEADLESS ||
+    process.env.RCC_CAMOUFOX_IFLOW_HEADLESS ||
+    ''
+  ).trim();
+  if (!raw) {
+    return false;
+  }
+  if (isFalsy(raw)) {
+    return false;
+  }
+  return isTruthy(raw);
+}
+
 function parseArgs(argv) {
   const args = { profile: 'default', url: '', autoMode: '', devMode: false };
   const list = argv.slice(2);
@@ -754,7 +778,9 @@ async function runIflowAutoFlow({ url, profileDir, profileId, camoufoxBinary, de
     );
   }
 
-  const headless = !devMode;
+  // iFlow OAuth has poor reliability under headless mode (often returns anti-bot/garbled pages).
+  // Keep default headed to match camo CLI behavior; allow opt-in headless via env.
+  const headless = resolveIflowHeadlessMode(devMode);
   const timeoutMs = Number(process.env.ROUTECODEX_CAMOUFOX_IFLOW_TIMEOUT_MS || 300_000);
   console.log(`[camoufox-launch-auth] Launching Camoufox in ${headless ? 'headless' : 'headed'} mode...`);
   cleanupExistingCamoufox(profileDir);

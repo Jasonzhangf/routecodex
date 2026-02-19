@@ -8,6 +8,16 @@ import { buildVirtualRouterInputV2 } from './virtual-router-builder.js';
 
 type UnknownRecord = Record<string, unknown>;
 
+const ROUTING_POLICY_OPTIONAL_KEYS = [
+  'loadBalancing',
+  'classifier',
+  'health',
+  'contextRouting',
+  'webSearch',
+  'execCommandGuard',
+  'clock'
+] as const;
+
 export interface LoadedRouteCodexConfig {
   configPath: string;
   userConfig: UnknownRecord;
@@ -30,6 +40,8 @@ export async function loadRouteCodexConfig(explicitPath?: string): Promise<Loade
   if (oauthBrowserRaw && !process.env.ROUTECODEX_OAUTH_BROWSER) {
     process.env.ROUTECODEX_OAUTH_BROWSER = oauthBrowserRaw;
   }
+
+  materializeActiveRoutingPolicyGroup(userConfig);
 
   const modeRaw = (userConfig as UnknownRecord).virtualrouterMode;
   const mode = typeof modeRaw === 'string' && modeRaw.trim().toLowerCase() === 'v2' ? 'v2' : 'v1';
@@ -104,4 +116,53 @@ async function resolveConfigPath(explicit?: string): Promise<string> {
 
 function isRecord(value: unknown): value is UnknownRecord {
   return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function materializeActiveRoutingPolicyGroup(userConfig: UnknownRecord): void {
+  const vr = isRecord(userConfig.virtualrouter) ? (userConfig.virtualrouter as UnknownRecord) : null;
+  if (!vr) {
+    return;
+  }
+
+  const groupsNode = vr.routingPolicyGroups;
+  if (!isRecord(groupsNode)) {
+    return;
+  }
+
+  const groups: Record<string, UnknownRecord> = {};
+  for (const [groupId, groupNode] of Object.entries(groupsNode)) {
+    if (!groupId.trim() || !isRecord(groupNode)) {
+      continue;
+    }
+    groups[groupId] = groupNode as UnknownRecord;
+  }
+  const groupIds = Object.keys(groups);
+  if (!groupIds.length) {
+    return;
+  }
+
+  const activeCandidate = typeof vr.activeRoutingPolicyGroup === 'string' ? vr.activeRoutingPolicyGroup.trim() : '';
+  const activeGroupId =
+    activeCandidate && groups[activeCandidate]
+      ? activeCandidate
+      : groups.default
+        ? 'default'
+        : groupIds.sort((a, b) => a.localeCompare(b))[0];
+
+  const activePolicy = groups[activeGroupId];
+  if (!isRecord(activePolicy.routing)) {
+    return;
+  }
+
+  vr.activeRoutingPolicyGroup = activeGroupId;
+  vr.routing = activePolicy.routing;
+
+  for (const key of ROUTING_POLICY_OPTIONAL_KEYS) {
+    const value = activePolicy[key];
+    if (isRecord(value)) {
+      vr[key] = value;
+      continue;
+    }
+    delete vr[key];
+  }
 }

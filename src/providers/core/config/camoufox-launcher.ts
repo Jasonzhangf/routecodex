@@ -197,6 +197,55 @@ function getProviderFamily(provider?: string | null): string {
   return rawProvider;
 }
 
+function isDisabledFlag(value: string | undefined): boolean {
+  const raw = String(value || '').trim().toLowerCase();
+  return raw === '0' || raw === 'false' || raw === 'no' || raw === 'off';
+}
+
+export function shouldPreferCamoCliForOAuth(provider?: string | null): boolean {
+  if (isDisabledFlag(process.env.ROUTECODEX_OAUTH_CAMO_CLI) || isDisabledFlag(process.env.RCC_OAUTH_CAMO_CLI)) {
+    return false;
+  }
+  void provider;
+  return true;
+}
+
+function resolveCamoCliCommand(): string {
+  const configured = String(process.env.ROUTECODEX_CAMO_CLI_PATH || process.env.RCC_CAMO_CLI_PATH || '').trim();
+  return configured || 'camo';
+}
+
+function runCamoCliCheck(): boolean {
+  try {
+    const result = spawnSync(resolveCamoCliCommand(), ['--help'], {
+      stdio: 'ignore'
+    });
+    const code = (result.error as NodeJS.ErrnoException | undefined)?.code;
+    if (code === 'ENOENT') {
+      return false;
+    }
+    return result.status === 0;
+  } catch {
+    return false;
+  }
+}
+
+export function shouldRepairCamoufoxFingerprintForOAuth(
+  providerFamily: string,
+  navigatorPlatform: string,
+  hostPlatform: NodeJS.Platform = process.platform
+): boolean {
+  const family = String(providerFamily || '').trim().toLowerCase();
+  const platform = String(navigatorPlatform || '').trim().toLowerCase();
+  if (hostPlatform !== 'darwin') {
+    return false;
+  }
+  if (platform !== 'win32') {
+    return false;
+  }
+  return family === 'gemini' || family === 'iflow' || family === 'qwen';
+}
+
 export function sanitizeCamouConfigForOAuth(
   provider: string | null | undefined,
   fingerprintEnv: Record<string, string>
@@ -220,8 +269,12 @@ export function sanitizeCamouConfigForOAuth(
   }
 
   const family = getProviderFamily(provider);
-  if (family === 'iflow' && Object.prototype.hasOwnProperty.call(parsed, 'timezone')) {
-    delete parsed.timezone;
+  if (family === 'iflow') {
+    // iFlow OAuth 页面在部分指纹下会因 header 覆盖导致页面乱码；OAuth 场景统一移除该覆盖。
+    delete parsed['headers.Accept-Encoding'];
+    if (Object.prototype.hasOwnProperty.call(parsed, 'timezone')) {
+      delete parsed.timezone;
+    }
     env.CAMOU_CONFIG_1 = JSON.stringify(parsed);
   }
   return env;
@@ -378,7 +431,7 @@ function runCamoufoxPathCheck(): boolean {
 }
 
 export function isCamoufoxAvailable(): boolean {
-  return runCamoufoxPathCheck();
+  return runCamoCliCheck();
 }
 
 function installCamoufox(): boolean {
@@ -397,33 +450,11 @@ function installCamoufox(): boolean {
 }
 
 function ensureCamoufoxInstalled(): boolean {
-  if (runCamoufoxPathCheck()) {
+  if (runCamoCliCheck()) {
     return true;
   }
-  const autoInstallRaw = String(
-    process.env.ROUTECODEX_CAMOUFOX_AUTO_INSTALL ||
-      process.env.RCC_CAMOUFOX_AUTO_INSTALL ||
-      '1'
-  )
-    .trim()
-    .toLowerCase();
-  const autoInstallEnabled = autoInstallRaw !== '0' && autoInstallRaw !== 'false' && autoInstallRaw !== 'no';
-  if (!autoInstallEnabled) {
-    logOAuthDebug('[OAuth] Camoufox: auto-install disabled; camoufox not available');
-    return false;
-  }
-  console.warn('[OAuth] Camoufox not detected. Installing via Python launcher ...');
-  logOAuthDebug('[OAuth] Camoufox: python module not available, attempting install...');
-  const installed = installCamoufox();
-  if (!installed) {
-    logOAuthDebug('[OAuth] Camoufox: auto-install failed or Python launcher unavailable');
-    return false;
-  }
-  const ready = runCamoufoxPathCheck();
-  if (!ready) {
-    logOAuthDebug('[OAuth] Camoufox: install completed but camoufox path still unresolved');
-  }
-  return ready;
+  logOAuthDebug('[OAuth] camo-cli not available');
+  return false;
 }
 
 export function ensureCamoufoxInstalledForInit(): boolean {
@@ -639,26 +670,6 @@ export async function openAuthInCamoufox(options: CamoufoxLaunchOptions): Promis
     `[OAuth] Camoufox: launch requested url=${options.url} provider=${options.provider ?? ''} alias=${options.alias ?? ''
     }`
   );
-  if (!ensureCamoufoxInstalled()) {
-    try {
-      console.warn('[OAuth] Camoufox not available (Python launcher check failed). Falling back to system browser.');
-    } catch {
-      // ignore
-    }
-    logOAuthDebug('[OAuth] Camoufox: installation missing; falling back to default browser');
-    return false;
-  }
-  const scriptPath = resolveCamoufoxScriptPath();
-  if (!scriptPath) {
-    try {
-      console.warn('[OAuth] Camoufox launcher script not found. Falling back to system browser.');
-    } catch {
-      // ignore
-    }
-    logOAuthDebug('[OAuth] Camoufox: launcher script not resolved; falling back to default browser');
-    return false;
-  }
-
   const url = options.url;
   if (!url || typeof url !== 'string') {
     logOAuthDebug('[OAuth] Camoufox: invalid or empty URL; falling back to default browser');
@@ -673,132 +684,59 @@ export async function openAuthInCamoufox(options: CamoufoxLaunchOptions): Promis
   // Ensure profile directory exists ahead of launch so that fingerprint/profile data can be persisted per token.
   ensureCamoufoxProfileDir(options.provider, options.alias);
 
-  // --- Safety guard: Google OAuth pages must be readable.
-  // Some Camoufox fingerprints (notably "windows" fonts) can render Google pages as garbled digits
-  // on macOS hosts. Auto-repair by re-generating the fingerprint using macos policy for this profileId.
-  try {
-    const autoRepairRaw = String(
-      process.env.ROUTECODEX_CAMOUFOX_AUTO_REPAIR_OS_MISMATCH ||
-        process.env.RCC_CAMOUFOX_AUTO_REPAIR_OS_MISMATCH ||
-        '1'
-    )
-      .trim()
-      .toLowerCase();
-    const autoRepairEnabled = autoRepairRaw !== '0' && autoRepairRaw !== 'false' && autoRepairRaw !== 'no';
-    const family = getProviderFamily(options.provider);
-    const isGoogleFlow = family === 'gemini';
-    if (autoRepairEnabled && isGoogleFlow && process.platform === 'darwin') {
-      const fpPath = getFingerprintPath(profileId);
-      const existingEnv = loadFingerprintEnv(profileId);
-      const rawCfg = existingEnv?.CAMOU_CONFIG_1;
-      if (rawCfg) {
-        try {
-          const cfg = JSON.parse(rawCfg) as Record<string, unknown>;
-          const platform = typeof cfg['navigator.platform'] === 'string' ? String(cfg['navigator.platform']) : '';
-          const wantsRepair = platform.toLowerCase() === 'win32';
-          if (wantsRepair) {
-            const backupPath = `${fpPath}.bak.${Date.now()}`;
-            console.warn(
-              `[OAuth] Camoufox fingerprint OS mismatch (host=macos, fp=${platform}). ` +
-                `Repairing to macos fingerprint for profileId=${profileId} (backup=${backupPath}).`
-            );
-            try {
-              fs.renameSync(fpPath, backupPath);
-            } catch {
-              // If backup fails, do not delete/overwrite; just continue with existing fingerprint.
-              console.warn('[OAuth] Camoufox fingerprint repair skipped (backup failed).');
-            }
-            const prevForcedOs = process.env.ROUTECODEX_CAMOUFOX_FORCE_OS;
-            process.env.ROUTECODEX_CAMOUFOX_FORCE_OS = 'macos';
-            try {
-              // Re-generate fingerprint file for this profileId (best-effort).
-              void ensureFingerprintEnv(profileId, options.provider, options.alias);
-            } finally {
-              if (prevForcedOs === undefined) {
-                delete process.env.ROUTECODEX_CAMOUFOX_FORCE_OS;
-              } else {
-                process.env.ROUTECODEX_CAMOUFOX_FORCE_OS = prevForcedOs;
-              }
-            }
-          }
-        } catch {
-          // ignore parse errors
-        }
-      }
-    }
-  } catch {
-    // guardrail must never block OAuth
+  if (!shouldPreferCamoCliForOAuth(options.provider)) {
+    logOAuthDebug('[OAuth] camo-cli launch skipped (provider disabled)');
+    return false;
   }
 
-  const rawFingerprintEnv = ensureFingerprintEnv(profileId, options.provider, options.alias);
-  const fingerprintEnv = sanitizeCamouConfigForOAuth(options.provider, rawFingerprintEnv);
-  const localeEnv = resolveCamoufoxLocaleEnv();
+  const devMode = String(process.env.ROUTECODEX_CAMOUFOX_DEV_MODE || '').trim().toLowerCase();
+  const headless = !(devMode === '1' || devMode === 'true' || devMode === 'yes' || devMode === 'on');
+  const camoCommand = resolveCamoCliCommand();
 
   try {
-    const autoMode = (process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE || '').trim();
-    const devMode = (process.env.ROUTECODEX_CAMOUFOX_DEV_MODE || '').trim();
     console.log(
-      `[OAuth] Camoufox launcher spawn: profileId=${profileId} autoMode=${autoMode || '-'} devMode=${devMode || '0'}`
+      `[OAuth] Camoufox launcher spawn via camo-cli: profileId=${profileId} headless=${headless ? '1' : '0'}`
     );
-    logOAuthDebug(`[OAuth] Camoufox: spawning launcher script=${scriptPath} profileId=${profileId}`);
-    const args = [scriptPath, '--profile', profileId, '--url', launchUrl];
-    if (autoMode) {
-      args.push('--auto-mode', autoMode);
+    const startArgs = ['start', profileId];
+    if (headless) {
+      startArgs.push('--headless');
     }
-    const child = spawn(process.execPath, args, {
-      detached: false,
+    const sharedEnv = {
+      ...process.env,
+      BROWSER_PROFILE_ID: profileId,
+      BROWSER_INITIAL_URL: launchUrl
+    };
+
+    const start = spawnSync(camoCommand, startArgs, {
       stdio: 'inherit',
-      env: {
-        ...process.env,
-        ...fingerprintEnv,
-        ...localeEnv,
-        BROWSER_PROFILE_ID: profileId,
-        BROWSER_INITIAL_URL: launchUrl
-      }
+      env: sharedEnv
     });
-    registerLauncher(child);
-
-    // If the launcher exits immediately with a non-zero code (missing python/camoufox/etc),
-    // report failure so the caller can fall back to the system browser.
-    const quickCheckMs = 800;
-    const ok = await new Promise<boolean>((resolve) => {
-      let settled = false;
-      const settle = (value: boolean) => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        clearTimeout(timer);
-        resolve(value);
-      };
-      const timer = setTimeout(() => settle(true), quickCheckMs);
-      if (typeof timer.unref === 'function') {
-        timer.unref();
-      }
-      child.once('error', () => settle(false));
-      child.once('exit', (code) => {
-        if (typeof code === 'number' && code !== 0) {
-          settle(false);
-        } else {
-          settle(true);
-        }
-      });
-    });
-
-    if (!ok) {
-      try {
-        console.warn('[OAuth] Camoufox launcher exited early; falling back to system browser.');
-      } catch {
-        // ignore
-      }
+    if (start.status !== 0 || start.error) {
+      logOAuthDebug(
+        `[OAuth] camo-cli start failed - status=${start.status ?? 'n/a'} error=${
+          start.error instanceof Error ? start.error.message : String(start.error || '')
+        }`
+      );
+      return false;
     }
-    // Do not keep the parent process alive solely for the launcher; interactive flows
-    // will keep running due to the callback server anyway. Cleanup will terminate it.
-    child.unref();
-    return ok;
+
+    // Ensure we always navigate to the requested URL even when the session already exists.
+    const goto = spawnSync(camoCommand, ['goto', profileId, launchUrl], {
+      stdio: 'inherit',
+      env: sharedEnv
+    });
+    if (goto.status !== 0 || goto.error) {
+      logOAuthDebug(
+        `[OAuth] camo-cli goto failed - status=${goto.status ?? 'n/a'} error=${
+          goto.error instanceof Error ? goto.error.message : String(goto.error || '')
+        }`
+      );
+      return false;
+    }
+    return true;
   } catch (error) {
     logOAuthDebug(
-      `[OAuth] Camoufox: failed to spawn launcher - ${error instanceof Error ? error.message : String(error)}`
+      `[OAuth] camo-cli launch failed - ${error instanceof Error ? error.message : String(error)}`
     );
     return false;
   }

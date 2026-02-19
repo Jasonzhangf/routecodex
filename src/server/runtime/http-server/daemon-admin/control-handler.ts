@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import fsPromises from 'node:fs/promises';
 import path from 'node:path';
 import { homedir } from 'node:os';
 
@@ -10,6 +11,11 @@ import { API_PATHS, HTTP_PROTOCOLS, LOCAL_HOSTS } from '../../../../constants/in
 import { listManagedServerPidsByPort } from '../../../../utils/managed-server-pids.js';
 import * as llmsBridge from '../../../../modules/llmswitch/bridge.js';
 import { loadPolicyFromConfigPath, writePolicyToConfigPath } from './routing-policy.js';
+import {
+  activateRoutingGroupAtLocation,
+  extractRoutingGroupsSnapshot,
+  extractRoutingSnapshot
+} from './providers-handler-routing-utils.js';
 import { x7eGate, getGateState } from './routecodex-x7e-gate.js';
 import { createQuotaManagerAdapter } from '../../../../manager/modules/quota/quota-adapter.js';
 import {
@@ -191,6 +197,59 @@ function readQuotaProviderSnapshot(quotaMod: any, providerKey: string): unknown 
   }
 }
 
+function mapRoutingGroupErrorToStatus(error: unknown): number {
+  const code = (error as { code?: string } | null)?.code;
+  if (code === 'group_not_found') {
+    return 404;
+  }
+  if (code === 'group_in_use' || code === 'group_last_one') {
+    return 409;
+  }
+  if (code === 'invalid_group_id' || code === 'invalid_policy') {
+    return 400;
+  }
+  return 500;
+}
+
+async function broadcastRestartToOtherServers(selfId: string): Promise<void> {
+  const servers = await discoverServers();
+  for (const t of servers) {
+    const sid = `${LOCAL_HOSTS.LOCALHOST}:${t.port}`;
+    if (sid === selfId) {
+      continue;
+    }
+    const pids = Array.isArray(t.pids) ? t.pids : findPidsByPort(t.port);
+    for (const pid of pids) {
+      try { process.kill(pid, 'SIGUSR2'); } catch { /* ignore */ }
+    }
+  }
+}
+
+async function activateRoutingGroupAtConfigPath(options: {
+  configPath: string;
+  groupId: string;
+}): Promise<{ activeGroupId: string; wroteAtMs: number }> {
+  const raw = await fsPromises.readFile(options.configPath, 'utf8');
+  const parsed = raw.trim() ? JSON.parse(raw) : {};
+  const root = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+    ? (parsed as Record<string, unknown>)
+    : {};
+  const detected = extractRoutingSnapshot(root);
+  const nextConfig = activateRoutingGroupAtLocation(root, options.groupId, detected.location);
+  const groupsSnapshot = extractRoutingGroupsSnapshot(nextConfig, detected.location);
+
+  const wroteAtMs = Date.now();
+  const tmpPath = `${options.configPath}.tmp.${process.pid}.${wroteAtMs}`;
+  const serialized = `${JSON.stringify(nextConfig, null, 2)}\n`;
+  await fsPromises.writeFile(tmpPath, serialized, 'utf8');
+  await fsPromises.rename(tmpPath, options.configPath);
+
+  return {
+    activeGroupId: groupsSnapshot.activeGroupId,
+    wroteAtMs
+  };
+}
+
 
 export function registerControlRoutes(app: Application, options: DaemonAdminRouteOptions): void {
   app.get('/daemon/control/snapshot', async (req: Request, res: Response) => {
@@ -304,18 +363,7 @@ export function registerControlRoutes(app: Application, options: DaemonAdminRout
         }
         // Best-effort: ask other servers to restart to pick up the new config from disk.
         try {
-          const servers = await discoverServers();
-          const selfId = options.getServerId();
-          for (const t of servers) {
-            const sid = `${LOCAL_HOSTS.LOCALHOST}:${t.port}`;
-            if (sid === selfId) {
-              continue;
-            }
-            const pids = Array.isArray(t.pids) ? t.pids : findPidsByPort(t.port);
-            for (const pid of pids) {
-              try { process.kill(pid, 'SIGUSR2'); } catch { /* ignore */ }
-            }
-          }
+          await broadcastRestartToOtherServers(options.getServerId());
         } catch {
           // ignore broadcast errors
         }
@@ -331,6 +379,61 @@ export function registerControlRoutes(app: Application, options: DaemonAdminRout
         });
       } catch (e: any) {
         res.status(400).json({ error: { message: e?.message || 'invalid policy', code: 'bad_request' } });
+      }
+      return;
+    }
+
+    if (action === 'routing.group.activate') {
+      const configPath = typeof options.getConfigPath === 'function' ? options.getConfigPath() : null;
+      if (!configPath) {
+        res.status(503).json({ error: { message: 'configPath not available', code: 'not_ready' } });
+        return;
+      }
+      const groupId = typeof body.groupId === 'string' ? body.groupId.trim() : '';
+      if (!groupId) {
+        res.status(400).json({ error: { message: 'groupId is required', code: 'bad_request' } });
+        return;
+      }
+      const restartScope = body.restartScope === 'all' ? 'all' : 'self';
+
+      try {
+        const writeResult = await activateRoutingGroupAtConfigPath({ configPath, groupId });
+
+        let selfReload: unknown = null;
+        try {
+          if (typeof options.restartRuntimeFromDisk === 'function') {
+            selfReload = await options.restartRuntimeFromDisk();
+          }
+        } catch (e: any) {
+          selfReload = { ok: false, message: e?.message || 'self reload failed' };
+        }
+
+        if (restartScope === 'all') {
+          try {
+            await broadcastRestartToOtherServers(options.getServerId());
+          } catch {
+            // ignore broadcast errors
+          }
+        }
+
+        const { policyHash } = await loadPolicyFromConfigPath(configPath);
+        res.status(200).json({
+          ok: true,
+          action,
+          nowMs,
+          configPath,
+          activeGroupId: writeResult.activeGroupId,
+          restartScope,
+          policyHash,
+          wroteAtMs: writeResult.wroteAtMs,
+          selfReload,
+          ...(x7eGate.phase2UnifiedControl ? { schema: 'v2', updatedVia: 'unified_control' } : {})
+        });
+      } catch (error: unknown) {
+        const status = mapRoutingGroupErrorToStatus(error);
+        const message = error instanceof Error ? error.message : String(error);
+        const code = (error as { code?: string } | null)?.code;
+        res.status(status).json({ error: { message, code: status === 500 ? 'internal_error' : code || 'bad_request' } });
       }
       return;
     }

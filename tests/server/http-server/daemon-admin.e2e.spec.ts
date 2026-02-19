@@ -475,4 +475,51 @@ describe('Daemon admin HTTP endpoints (smoke)', () => {
       await stopTestServer(server, configDir, restoreEnv);
     }
   });
+
+  it('supports routing.group.activate mutate action', async () => {
+    const { server, baseUrl, configDir, configPath, restoreEnv } = await startTestServer();
+    try {
+      const cookie = await setupDaemonAdminAuth(baseUrl);
+
+      const cfgRaw = await fs.readFile(configPath, 'utf8');
+      const cfg = cfgRaw.trim() ? JSON.parse(cfgRaw) : {};
+      cfg.virtualrouter = cfg.virtualrouter || {};
+      cfg.virtualrouter.routingPolicyGroups = {
+        default: {
+          routing: { default: ['mock.dummy'] }
+        },
+        canary: {
+          routing: { default: ['mock.dummy'], canary: ['mock.dummy'] },
+          loadBalancing: { strategy: 'round-robin' }
+        }
+      };
+      cfg.virtualrouter.activeRoutingPolicyGroup = 'default';
+      cfg.virtualrouter.routing = { default: ['mock.dummy'] };
+      await fs.writeFile(configPath, JSON.stringify(cfg, null, 2), 'utf8');
+
+      const mutate = await postJson(
+        baseUrl,
+        '/daemon/control/mutate',
+        { action: 'routing.group.activate', groupId: 'canary', restartScope: 'self' },
+        cookie
+      );
+      expect(mutate.status).toBe(200);
+      expect(mutate.body).toHaveProperty('ok', true);
+      expect(mutate.body).toHaveProperty('activeGroupId', 'canary');
+      expect(mutate.body).toHaveProperty('restartScope', 'self');
+
+      const afterRaw = await fs.readFile(configPath, 'utf8');
+      const after = afterRaw.trim() ? JSON.parse(afterRaw) : {};
+      expect(after).toHaveProperty('virtualrouter.activeRoutingPolicyGroup', 'canary');
+      expect(after).toHaveProperty('virtualrouter.routing.canary');
+      expect(after).toHaveProperty('virtualrouter.loadBalancing.strategy', 'round-robin');
+
+      const snap = await getJson(baseUrl, '/daemon/control/snapshot', cookie);
+      expect(snap.status).toBe(200);
+      expect(snap.body.routing.policy).toHaveProperty('virtualrouter.routing.canary');
+      expect(snap.body.routing.policy).toHaveProperty('virtualrouter.loadBalancing.strategy', 'round-robin');
+    } finally {
+      await stopTestServer(server, configDir, restoreEnv);
+    }
+  });
 });

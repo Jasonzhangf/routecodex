@@ -20,14 +20,18 @@ import {
   validateAndNormalizeProviderConfigV1
 } from './providers-handler-utils.js';
 import {
+  activateRoutingGroupAtLocation,
   applyRoutingAtLocation,
   backupFile,
+  deleteRoutingGroupAtLocation,
+  extractRoutingGroupsSnapshot,
   extractRoutingSnapshot,
   listRoutingSources,
   pickProviderRootDir,
   pickUserConfigPath,
   readQueryString,
   resolveAllowedAdminFilePath,
+  upsertRoutingGroupAtLocation,
   type RoutingLocation
 } from './providers-handler-routing-utils.js';
 
@@ -48,6 +52,20 @@ interface ProviderConfigV2Summary {
   defaultModels?: string[];
   credentialsRef?: string;
   version: string;
+}
+
+function mapRoutingGroupErrorToStatus(error: unknown): number {
+  const code = (error as { code?: string } | null)?.code;
+  if (code === 'group_not_found') {
+    return 404;
+  }
+  if (code === 'group_in_use' || code === 'group_last_one') {
+    return 409;
+  }
+  if (code === 'invalid_policy' || code === 'invalid_group_id') {
+    return 400;
+  }
+  return 500;
 }
 
 export function registerProviderRoutes(app: Application, options: DaemonAdminRouteOptions): void {
@@ -351,6 +369,179 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       res.status(500).json({ error: { message } });
+    }
+  });
+
+  app.get('/config/routing/groups', async (req: Request, res: Response) => {
+    if (reject(req, res)) {return;}
+    try {
+      const configPath = resolveAllowedAdminFilePath(readQueryString(req, 'path'));
+      const raw = await fs.readFile(configPath, 'utf8');
+      const parsed = raw.trim() ? JSON.parse(raw) : {};
+      const detected = extractRoutingSnapshot(parsed);
+      const groupsSnapshot = extractRoutingGroupsSnapshot(parsed, detected.location);
+      res.status(200).json({
+        ok: true,
+        path: configPath,
+        location: groupsSnapshot.location,
+        version: groupsSnapshot.version,
+        activeGroupId: groupsSnapshot.activeGroupId,
+        hasRoutingPolicyGroups: groupsSnapshot.hasRoutingPolicyGroups,
+        groups: groupsSnapshot.groups
+      });
+    } catch (error: unknown) {
+      const code = (error as { code?: string } | null)?.code;
+      if (code === 'forbidden_path') {
+        res.status(403).json({ error: { message: 'path is not allowed', code: 'forbidden' } });
+        return;
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ error: { message } });
+    }
+  });
+
+  app.post('/config/routing/groups/activate', async (req: Request, res: Response) => {
+    if (reject(req, res)) {return;}
+    const body = req.body as Record<string, unknown>;
+    const groupId = typeof body?.groupId === 'string' ? body.groupId.trim() : '';
+    const locationNode = body?.location;
+    if (!groupId) {
+      res.status(400).json({ error: { message: 'groupId is required', code: 'bad_request' } });
+      return;
+    }
+    if (locationNode !== undefined && locationNode !== 'virtualrouter.routing' && locationNode !== 'routing') {
+      res.status(400).json({ error: { message: 'location must be \"virtualrouter.routing\" or \"routing\"', code: 'bad_request' } });
+      return;
+    }
+    try {
+      const configPath = resolveAllowedAdminFilePath(
+        readQueryString(req, 'path') || (typeof body?.path === 'string' ? body.path : undefined)
+      );
+      const raw = await fs.readFile(configPath, 'utf8');
+      const parsed = raw.trim() ? JSON.parse(raw) : {};
+      const detected = extractRoutingSnapshot(parsed);
+      const location = (locationNode as RoutingLocation | undefined) ?? detected.location;
+      const next = activateRoutingGroupAtLocation(parsed, groupId, location);
+      await backupFile(configPath);
+      await fs.writeFile(configPath, JSON.stringify(next, null, 2), 'utf8');
+      const groupsSnapshot = extractRoutingGroupsSnapshot(next, location);
+      const selfReload =
+        typeof options.restartRuntimeFromDisk === 'function'
+          ? await options.restartRuntimeFromDisk().catch((e: unknown) => ({
+            ok: false,
+            message: e instanceof Error ? e.message : String(e)
+          }))
+          : null;
+      res.status(200).json({
+        ok: true,
+        path: configPath,
+        location: groupsSnapshot.location,
+        activeGroupId: groupsSnapshot.activeGroupId,
+        hasRoutingPolicyGroups: groupsSnapshot.hasRoutingPolicyGroups,
+        groups: groupsSnapshot.groups,
+        selfReload
+      });
+    } catch (error: unknown) {
+      const code = (error as { code?: string } | null)?.code;
+      if (code === 'forbidden_path') {
+        res.status(403).json({ error: { message: 'path is not allowed', code: 'forbidden' } });
+        return;
+      }
+      const status = mapRoutingGroupErrorToStatus(error);
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(status).json({ error: { message, code: status === 500 ? 'internal_error' : code || 'bad_request' } });
+    }
+  });
+
+  app.put('/config/routing/groups/:groupId', async (req: Request, res: Response) => {
+    if (reject(req, res)) {return;}
+    const groupId = String(req.params.groupId || '').trim();
+    const body = req.body as Record<string, unknown>;
+    const policyNode = body?.policy;
+    const locationNode = body?.location;
+    if (!groupId) {
+      res.status(400).json({ error: { message: 'groupId is required', code: 'bad_request' } });
+      return;
+    }
+    if (!policyNode || typeof policyNode !== 'object' || Array.isArray(policyNode)) {
+      res.status(400).json({ error: { message: 'policy must be an object', code: 'bad_request' } });
+      return;
+    }
+    if (locationNode !== undefined && locationNode !== 'virtualrouter.routing' && locationNode !== 'routing') {
+      res.status(400).json({ error: { message: 'location must be \"virtualrouter.routing\" or \"routing\"', code: 'bad_request' } });
+      return;
+    }
+    try {
+      const configPath = resolveAllowedAdminFilePath(
+        readQueryString(req, 'path') || (typeof body?.path === 'string' ? body.path : undefined)
+      );
+      const raw = await fs.readFile(configPath, 'utf8');
+      const parsed = raw.trim() ? JSON.parse(raw) : {};
+      const detected = extractRoutingSnapshot(parsed);
+      const location = (locationNode as RoutingLocation | undefined) ?? detected.location;
+      const next = upsertRoutingGroupAtLocation(parsed, groupId, policyNode, location);
+      await backupFile(configPath);
+      await fs.writeFile(configPath, JSON.stringify(next, null, 2), 'utf8');
+      const groupsSnapshot = extractRoutingGroupsSnapshot(next, location);
+      res.status(200).json({
+        ok: true,
+        path: configPath,
+        location: groupsSnapshot.location,
+        activeGroupId: groupsSnapshot.activeGroupId,
+        hasRoutingPolicyGroups: groupsSnapshot.hasRoutingPolicyGroups,
+        groups: groupsSnapshot.groups
+      });
+    } catch (error: unknown) {
+      const code = (error as { code?: string } | null)?.code;
+      if (code === 'forbidden_path') {
+        res.status(403).json({ error: { message: 'path is not allowed', code: 'forbidden' } });
+        return;
+      }
+      const status = mapRoutingGroupErrorToStatus(error);
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(status).json({ error: { message, code: status === 500 ? 'internal_error' : code || 'bad_request' } });
+    }
+  });
+
+  app.delete('/config/routing/groups/:groupId', async (req: Request, res: Response) => {
+    if (reject(req, res)) {return;}
+    const groupId = String(req.params.groupId || '').trim();
+    const locationNode = req.query?.location;
+    if (!groupId) {
+      res.status(400).json({ error: { message: 'groupId is required', code: 'bad_request' } });
+      return;
+    }
+    if (locationNode !== undefined && locationNode !== 'virtualrouter.routing' && locationNode !== 'routing') {
+      res.status(400).json({ error: { message: 'location must be \"virtualrouter.routing\" or \"routing\"', code: 'bad_request' } });
+      return;
+    }
+    try {
+      const configPath = resolveAllowedAdminFilePath(readQueryString(req, 'path'));
+      const raw = await fs.readFile(configPath, 'utf8');
+      const parsed = raw.trim() ? JSON.parse(raw) : {};
+      const detected = extractRoutingSnapshot(parsed);
+      const location = (locationNode as RoutingLocation | undefined) ?? detected.location;
+      const next = deleteRoutingGroupAtLocation(parsed, groupId, location);
+      await backupFile(configPath);
+      await fs.writeFile(configPath, JSON.stringify(next, null, 2), 'utf8');
+      const groupsSnapshot = extractRoutingGroupsSnapshot(next, location);
+      res.status(200).json({
+        ok: true,
+        path: configPath,
+        location: groupsSnapshot.location,
+        activeGroupId: groupsSnapshot.activeGroupId,
+        hasRoutingPolicyGroups: groupsSnapshot.hasRoutingPolicyGroups,
+        groups: groupsSnapshot.groups
+      });
+    } catch (error: unknown) {
+      const code = (error as { code?: string } | null)?.code;
+      if (code === 'forbidden_path') {
+        res.status(403).json({ error: { message: 'path is not allowed', code: 'forbidden' } });
+        return;
+      }
+      const status = mapRoutingGroupErrorToStatus(error);
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(status).json({ error: { message, code: status === 500 ? 'internal_error' : code || 'bad_request' } });
     }
   });
 

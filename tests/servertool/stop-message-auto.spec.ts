@@ -10,19 +10,21 @@ import {
 } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-instructions.js';
 import { buildResponsesRequestFromChat } from '../../sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.js';
 import { extractBlockedReportFromMessagesForTests } from '../../sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto.js';
-import {
-  resetStopMessageBdRuntimeCacheForTests,
-  resolveBdTaskSelectionFromRuntime,
-  resolveBdWorkStateFromRuntime,
-  resolveStopMessageStageDecision
-} from '../../sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-stage-policy.js';
 import { resolveStickyKey } from '../../sharedmodule/llmswitch-core/src/servertool/handlers/stop-message-auto/runtime-utils.js';
 
 const SESSION_DIR = path.join(process.cwd(), 'tmp', 'jest-stopmessage-sessions');
 const USER_DIR = path.join(process.cwd(), 'tmp', 'jest-stopmessage-userdir');
 const DEFAULT_MOCK_IFLOW_BIN_PATH = path.join(USER_DIR, 'mock-iflow-default.sh');
+const DEFAULT_MOCK_CODEX_BIN_PATH = path.join(USER_DIR, 'mock-codex-default.sh');
+const EXECUTION_APPEND_TEXT = '请直接继续执行，不要进行状态汇总';
+const ORIGINAL_STOPMESSAGE_AI_FOLLOWUP_ENABLED = process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_ENABLED;
+const ORIGINAL_STOPMESSAGE_AI_FOLLOWUP_BACKEND = process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_BACKEND;
+const ORIGINAL_STOPMESSAGE_AI_FOLLOWUP_IFLOW_BIN = process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_IFLOW_BIN;
+const ORIGINAL_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN = process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN;
 const ORIGINAL_STOPMESSAGE_AUTOMESSAGE_IFLOW = process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW;
 const ORIGINAL_STOPMESSAGE_AUTOMESSAGE_IFLOW_BIN = process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW_BIN;
+const ORIGINAL_STOPMESSAGE_AUTOMESSAGE_BACKEND = process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_BACKEND;
+const ORIGINAL_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN = process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN;
 
 function writeRoutingStateForSession(sessionId: string, state: RoutingInstructionState): void {
   fs.mkdirSync(SESSION_DIR, { recursive: true });
@@ -93,11 +95,60 @@ describe('stop_message_auto servertool', () => {
       { encoding: 'utf8' }
     );
     fs.chmodSync(DEFAULT_MOCK_IFLOW_BIN_PATH, 0o755);
+    fs.writeFileSync(
+      DEFAULT_MOCK_CODEX_BIN_PATH,
+      [
+        '#!/usr/bin/env bash',
+        'if [ "$1" = "exec" ]; then',
+        '  output=""',
+        '  idx=1',
+        '  while [ $idx -le $# ]; do',
+        '    arg="${!idx}"',
+        '    if [ "$arg" = "--output-last-message" ]; then',
+        '      idx=$((idx + 1))',
+        '      output="${!idx}"',
+        '    fi',
+        '    idx=$((idx + 1))',
+        '  done',
+        '  if [ -n "$output" ]; then',
+        '    printf \'%s\\n\' "$PWD" > "$output"',
+        '  fi',
+        '  exit 0',
+        'fi',
+        'exit 2'
+      ].join('\n'),
+      { encoding: 'utf8' }
+    );
+    fs.chmodSync(DEFAULT_MOCK_CODEX_BIN_PATH, 0o755);
+    process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_ENABLED = '1';
+    process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_BACKEND = 'iflow';
+    process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_IFLOW_BIN = DEFAULT_MOCK_IFLOW_BIN_PATH;
     process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW = '1';
     process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW_BIN = DEFAULT_MOCK_IFLOW_BIN_PATH;
+    process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_BACKEND = 'iflow';
   });
 
   afterAll(() => {
+    if (ORIGINAL_STOPMESSAGE_AI_FOLLOWUP_ENABLED === undefined) {
+      delete process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_ENABLED;
+    } else {
+      process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_ENABLED = ORIGINAL_STOPMESSAGE_AI_FOLLOWUP_ENABLED;
+    }
+    if (ORIGINAL_STOPMESSAGE_AI_FOLLOWUP_BACKEND === undefined) {
+      delete process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_BACKEND;
+    } else {
+      process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_BACKEND = ORIGINAL_STOPMESSAGE_AI_FOLLOWUP_BACKEND;
+    }
+    if (ORIGINAL_STOPMESSAGE_AI_FOLLOWUP_IFLOW_BIN === undefined) {
+      delete process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_IFLOW_BIN;
+    } else {
+      process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_IFLOW_BIN = ORIGINAL_STOPMESSAGE_AI_FOLLOWUP_IFLOW_BIN;
+    }
+    if (ORIGINAL_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN === undefined) {
+      delete process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN;
+    } else {
+      process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN = ORIGINAL_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN;
+    }
     if (ORIGINAL_STOPMESSAGE_AUTOMESSAGE_IFLOW === undefined) {
       delete process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW;
     } else {
@@ -108,8 +159,21 @@ describe('stop_message_auto servertool', () => {
     } else {
       process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW_BIN = ORIGINAL_STOPMESSAGE_AUTOMESSAGE_IFLOW_BIN;
     }
+    if (ORIGINAL_STOPMESSAGE_AUTOMESSAGE_BACKEND === undefined) {
+      delete process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_BACKEND;
+    } else {
+      process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_BACKEND = ORIGINAL_STOPMESSAGE_AUTOMESSAGE_BACKEND;
+    }
+    if (ORIGINAL_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN === undefined) {
+      delete process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN;
+    } else {
+      process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN = ORIGINAL_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN;
+    }
     if (fs.existsSync(DEFAULT_MOCK_IFLOW_BIN_PATH)) {
       fs.unlinkSync(DEFAULT_MOCK_IFLOW_BIN_PATH);
+    }
+    if (fs.existsSync(DEFAULT_MOCK_CODEX_BIN_PATH)) {
+      fs.unlinkSync(DEFAULT_MOCK_CODEX_BIN_PATH);
     }
   });
 
@@ -177,7 +241,15 @@ describe('stop_message_auto servertool', () => {
     expect(followup.entryEndpoint).toBe('/v1/chat/completions');
     expect(Array.isArray(followup.injection?.ops)).toBe(true);
     const ops = followup.injection.ops as any[];
-    expect(ops.some((op) => op?.op === 'append_user_text' && op?.text === '立即执行待处理任务')).toBe(true);
+    expect(
+      ops.some(
+        (op) =>
+          op?.op === 'append_user_text' &&
+          typeof op?.text === 'string' &&
+          op.text.includes('立即执行待处理任务') &&
+          op.text.includes(EXECUTION_APPEND_TEXT)
+      )
+    ).toBe(true);
 
     const persisted = await readJsonFileUntil<{ state?: { stopMessageUsed?: number; stopMessageLastUsedAt?: number } }>(
       path.join(SESSION_DIR, `session-${sessionId}.json`),
@@ -186,6 +258,233 @@ describe('stop_message_auto servertool', () => {
     // llmswitch-core main: stopMessage usage counter increments as soon as we decide to trigger followup.
     expect(persisted?.state?.stopMessageUsed).toBe(1);
     expect(typeof persisted?.state?.stopMessageLastUsedAt).toBe('number');
+  });
+
+  test('codex backend uses session workdir as spawn cwd', async () => {
+    const previousAiBackend = process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_BACKEND;
+    const previousAiCodexBin = process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN;
+    const previousBackend = process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_BACKEND;
+    const previousCodexBin = process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN;
+    const sessionId = 'stopmessage-spec-session-codex-cwd';
+    const workdir = path.join(USER_DIR, 'codex-cwd-workdir');
+    const promptCapturePath = path.join(USER_DIR, 'mock-codex-prompt.txt');
+    const mockCodexBinPath = path.join(USER_DIR, 'mock-codex-cwd.sh');
+    fs.mkdirSync(workdir, { recursive: true });
+    process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_BACKEND = 'codex';
+    process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN = mockCodexBinPath;
+    process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_BACKEND = 'codex';
+    process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN = mockCodexBinPath;
+    try {
+      fs.writeFileSync(
+        mockCodexBinPath,
+        [
+          '#!/usr/bin/env bash',
+          'output=""',
+          'idx=1',
+          'while [ $idx -le $# ]; do',
+          '  arg="${!idx}"',
+          '  if [ "$arg" = "--output-last-message" ]; then',
+          '    idx=$((idx + 1))',
+          '    output="${!idx}"',
+          '  fi',
+          '  idx=$((idx + 1))',
+          'done',
+          `printf '%s' "\${!#}" > ${JSON.stringify(promptCapturePath)}`,
+          'if [ -n "$output" ]; then',
+          "  printf '%s\\n' \"$PWD\" > \"$output\"",
+          'fi',
+          'exit 0'
+        ].join('\n'),
+        { encoding: 'utf8' }
+      );
+      fs.chmodSync(mockCodexBinPath, 0o755);
+
+      writeRoutingStateForSession(sessionId, {
+        forcedTarget: undefined,
+        stickyTarget: undefined,
+        allowedProviders: new Set(),
+        disabledProviders: new Set(),
+        disabledKeys: new Map(),
+        disabledModels: new Map(),
+        stopMessageText: '继续推进任务',
+        stopMessageMaxRepeats: 2,
+        stopMessageUsed: 0,
+        stopMessageAiMode: 'on'
+      });
+
+      const chatResponse: JsonObject = {
+        id: 'chatcmpl-stop-codex-cwd',
+        object: 'chat.completion',
+        model: 'gpt-test',
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: 'assistant',
+              content: 'ok'
+            },
+            finish_reason: 'stop'
+          }
+        ]
+      };
+
+      const adapterContext: AdapterContext = {
+        requestId: 'req-stopmessage-codex-cwd',
+        entryEndpoint: '/v1/chat/completions',
+        providerProtocol: 'openai-chat',
+        sessionId,
+        workdir,
+        capturedChatRequest: {
+          model: 'gpt-test',
+          messages: [{ role: 'user', content: 'hi' }]
+        }
+      } as any;
+
+      const result = await runServerSideToolEngine({
+        chatResponse,
+        adapterContext,
+        entryEndpoint: '/v1/chat/completions',
+        requestId: 'req-stopmessage-codex-cwd',
+        providerProtocol: 'openai-chat'
+      });
+
+      expect(result.mode).toBe('tool_flow');
+      expect(result.execution?.flowId).toBe('stop_message_flow');
+      const followup = result.execution?.followup as any;
+      const ops = Array.isArray(followup?.injection?.ops) ? (followup.injection.ops as any[]) : [];
+      const appendUserOp = ops.find((op) => op?.op === 'append_user_text');
+      expect(appendUserOp?.text).toContain(workdir);
+      expect(appendUserOp?.text).toContain(EXECUTION_APPEND_TEXT);
+      const capturedPrompt = fs.readFileSync(promptCapturePath, 'utf8');
+      expect(capturedPrompt).toContain('先做代码 review（最多一句），再给指令：必须结合 workingDirectory 下当前实现/测试/构建状态给出建议；不能只做抽象建议。');
+      expect(capturedPrompt).toContain('只有在消息内容或历史记录里存在明确证据时，才允许判断“偏离目标”；否则按同轨推进，不要泛化指责偏离。');
+      expect(capturedPrompt).toContain('禁止连续安排纯只读/纯汇报命令（如 cargo llvm-cov report、cat/head/tail/rg/git status）');
+      expect(capturedPrompt).toContain('禁止把 review 责任交回主模型');
+    } finally {
+      if (previousAiBackend === undefined) {
+        delete process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_BACKEND;
+      } else {
+        process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_BACKEND = previousAiBackend;
+      }
+      if (previousAiCodexBin === undefined) {
+        delete process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN;
+      } else {
+        process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN = previousAiCodexBin;
+      }
+      if (previousBackend === undefined) {
+        delete process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_BACKEND;
+      } else {
+        process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_BACKEND = previousBackend;
+      }
+      if (previousCodexBin === undefined) {
+        delete process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN;
+      } else {
+        process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN = previousCodexBin;
+      }
+      if (fs.existsSync(promptCapturePath)) {
+        fs.unlinkSync(promptCapturePath);
+      }
+      if (fs.existsSync(mockCodexBinPath)) {
+        fs.unlinkSync(mockCodexBinPath);
+      }
+    }
+  });
+
+  test('default backend falls back codex->iflow when codex is unavailable', async () => {
+    const sessionId = 'stopmessage-spec-session-ai-followup-fallback';
+    writeRoutingStateForSession(sessionId, {
+      forcedTarget: undefined,
+      stickyTarget: undefined,
+      allowedProviders: new Set(),
+      disabledProviders: new Set(),
+      disabledKeys: new Map(),
+      disabledModels: new Map(),
+      stopMessageText: '继续推进并执行下一步',
+      stopMessageMaxRepeats: 2,
+      stopMessageUsed: 0,
+      stopMessageAiMode: 'on'
+    });
+
+    const previousAiBackend = process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_BACKEND;
+    const previousAiCodexBin = process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN;
+    const previousAiIflowBin = process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_IFLOW_BIN;
+    const previousBackend = process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_BACKEND;
+    const previousCodexBin = process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN;
+    const previousIflowBin = process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW_BIN;
+    const mockIflowBinPath = path.join(USER_DIR, 'mock-iflow-fallback-after-codex.sh');
+
+    try {
+      delete process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_BACKEND;
+      delete process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_BACKEND;
+      process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN = path.join(USER_DIR, 'missing-codex-bin');
+      process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN = path.join(USER_DIR, 'missing-codex-bin');
+      process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_IFLOW_BIN = mockIflowBinPath;
+      process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW_BIN = mockIflowBinPath;
+      fs.writeFileSync(
+        mockIflowBinPath,
+        [
+          '#!/usr/bin/env bash',
+          "if [ \"$1\" = \"-p\" ]; then",
+          "  echo 'fallback-from-iflow'",
+          '  exit 0',
+          'fi',
+          'exit 2'
+        ].join('\n'),
+        { encoding: 'utf8' }
+      );
+      fs.chmodSync(mockIflowBinPath, 0o755);
+
+      const result = await runServerSideToolEngine({
+        chatResponse: {
+          id: 'chatcmpl-stop-ai-fallback',
+          object: 'chat.completion',
+          model: 'gpt-test',
+          choices: [
+            {
+              index: 0,
+              message: { role: 'assistant', content: 'ok' },
+              finish_reason: 'stop'
+            }
+          ]
+        } as JsonObject,
+        adapterContext: {
+          requestId: 'req-stopmessage-ai-fallback',
+          entryEndpoint: '/v1/chat/completions',
+          providerProtocol: 'openai-chat',
+          sessionId,
+          capturedChatRequest: {
+            model: 'gpt-test',
+            messages: [{ role: 'user', content: '继续处理当前任务' }]
+          }
+        } as any,
+        entryEndpoint: '/v1/chat/completions',
+        requestId: 'req-stopmessage-ai-fallback',
+        providerProtocol: 'openai-chat'
+      });
+
+      expect(result.mode).toBe('tool_flow');
+      const followup = result.execution?.followup as any;
+      expect(Array.isArray(followup?.injection?.ops)).toBe(true);
+      const appendOp = (followup.injection.ops as any[]).find((op) => op?.op === 'append_user_text');
+      expect(appendOp?.text).toContain('fallback-from-iflow');
+      expect(appendOp?.text).toContain(EXECUTION_APPEND_TEXT);
+    } finally {
+      if (previousAiBackend === undefined) delete process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_BACKEND;
+      else process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_BACKEND = previousAiBackend;
+      if (previousAiCodexBin === undefined) delete process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN;
+      else process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN = previousAiCodexBin;
+      if (previousAiIflowBin === undefined) delete process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_IFLOW_BIN;
+      else process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_IFLOW_BIN = previousAiIflowBin;
+      if (previousBackend === undefined) delete process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_BACKEND;
+      else process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_BACKEND = previousBackend;
+      if (previousCodexBin === undefined) delete process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN;
+      else process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN = previousCodexBin;
+      if (previousIflowBin === undefined) delete process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW_BIN;
+      else process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW_BIN = previousIflowBin;
+      if (fs.existsSync(mockIflowBinPath)) {
+        fs.unlinkSync(mockIflowBinPath);
+      }
+    }
   });
 
   test('auto mode uses iflow -p output as followup text', async () => {
@@ -200,11 +499,13 @@ describe('stop_message_auto servertool', () => {
       stopMessageText: '继续推进并执行下一步',
       stopMessageMaxRepeats: 2,
       stopMessageUsed: 0,
-      stopMessageStageMode: 'auto'
+      stopMessageStageMode: 'auto',
+      stopMessageAiMode: 'on'
     };
     writeRoutingStateForSession(sessionId, state);
 
     const prevBdMode = process.env.ROUTECODEX_STOPMESSAGE_BD_MODE;
+    const prevAiIflowBin = process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_IFLOW_BIN;
     const prevIflowEnabled = process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW;
     const prevIflowBin = process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW_BIN;
     const promptCapturePath = path.join(USER_DIR, 'mock-iflow-prompt.txt');
@@ -213,6 +514,7 @@ describe('stop_message_auto servertool', () => {
     try {
       process.env.ROUTECODEX_STOPMESSAGE_BD_MODE = 'heuristic';
       process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW = '1';
+      process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_IFLOW_BIN = mockIflowBinPath;
       process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW_BIN = mockIflowBinPath;
       fs.writeFileSync(
         mockIflowBinPath,
@@ -265,7 +567,8 @@ describe('stop_message_auto servertool', () => {
       const followup = result.execution?.followup as any;
       expect(Array.isArray(followup?.injection?.ops)).toBe(true);
       const appendOp = (followup.injection.ops as any[]).find((op) => op?.op === 'append_user_text');
-      expect(appendOp?.text).toBe('请继续完成当前拆分，并先运行构建验证。');
+      expect(appendOp?.text).toContain('请继续完成当前拆分，并先运行构建验证。');
+      expect(appendOp?.text).toContain(EXECUTION_APPEND_TEXT);
 
       const capturedPrompt = fs.readFileSync(promptCapturePath, 'utf8');
       expect(capturedPrompt).toContain('baseStopMessage: 继续推进并执行下一步');
@@ -273,6 +576,10 @@ describe('stop_message_auto servertool', () => {
       expect(capturedPrompt).toContain('这里是正文输出');
       expect(capturedPrompt).toContain('reasoningText:');
       expect(capturedPrompt).toContain('这里是推理输出');
+      expect(capturedPrompt).toContain('先做代码 review（最多一句），再给指令：必须结合 workingDirectory 下当前实现/测试/构建状态给出建议；不能只做抽象建议。');
+      expect(capturedPrompt).toContain('只有在消息内容或历史记录里存在明确证据时，才允许判断“偏离目标”；否则按同轨推进，不要泛化指责偏离。');
+      expect(capturedPrompt).toContain('覆盖率类命令只能作为写动作后的验证步骤，不能作为本轮唯一或首要动作。');
+      expect(capturedPrompt).toContain('禁止把 review 责任交回主模型');
     } finally {
       if (prevBdMode === undefined) {
         delete process.env.ROUTECODEX_STOPMESSAGE_BD_MODE;
@@ -283,6 +590,11 @@ describe('stop_message_auto servertool', () => {
         delete process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW;
       } else {
         process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW = prevIflowEnabled;
+      }
+      if (prevAiIflowBin === undefined) {
+        delete process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_IFLOW_BIN;
+      } else {
+        process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_IFLOW_BIN = prevAiIflowBin;
       }
       if (prevIflowBin === undefined) {
         delete process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW_BIN;
@@ -298,7 +610,7 @@ describe('stop_message_auto servertool', () => {
     }
   });
 
-  test('auto mode falls back to continue_execution when iflow -p fails', async () => {
+  test('auto mode falls back to fixed "继续执行" when ai-followup backends fail', async () => {
     const sessionId = 'stopmessage-spec-session-iflow-followup-fallback';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
@@ -310,19 +622,26 @@ describe('stop_message_auto servertool', () => {
       stopMessageText: '请继续执行当前任务',
       stopMessageMaxRepeats: 2,
       stopMessageUsed: 0,
-      stopMessageStageMode: 'auto'
+      stopMessageStageMode: 'auto',
+      stopMessageAiMode: 'on'
     };
     writeRoutingStateForSession(sessionId, state);
 
     const prevBdMode = process.env.ROUTECODEX_STOPMESSAGE_BD_MODE;
+    const prevAiIflowBin = process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_IFLOW_BIN;
+    const prevAiCodexBin = process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN;
     const prevIflowEnabled = process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW;
     const prevIflowBin = process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW_BIN;
+    const prevCodexBin = process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN;
     const mockIflowBinPath = path.join(USER_DIR, 'mock-iflow-fail.sh');
 
     try {
       process.env.ROUTECODEX_STOPMESSAGE_BD_MODE = 'heuristic';
       process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW = '1';
+      process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_IFLOW_BIN = mockIflowBinPath;
       process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW_BIN = mockIflowBinPath;
+      process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN = path.join(USER_DIR, 'missing-codex-bin');
+      process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN = path.join(USER_DIR, 'missing-codex-bin');
       fs.writeFileSync(
         mockIflowBinPath,
         ['#!/usr/bin/env bash', "echo 'auth required' 1>&2", 'exit 1'].join('\n'),
@@ -362,7 +681,8 @@ describe('stop_message_auto servertool', () => {
       const followup = result.execution?.followup as any;
       expect(Array.isArray(followup?.injection?.ops)).toBe(true);
       const appendOp = (followup.injection.ops as any[]).find((op) => op?.op === 'append_user_text');
-      expect(appendOp?.text).toBe('继续执行');
+      expect(appendOp?.text).toContain('继续执行');
+      expect(appendOp?.text).toContain(EXECUTION_APPEND_TEXT);
     } finally {
       if (prevBdMode === undefined) {
         delete process.env.ROUTECODEX_STOPMESSAGE_BD_MODE;
@@ -374,10 +694,136 @@ describe('stop_message_auto servertool', () => {
       } else {
         process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW = prevIflowEnabled;
       }
+      if (prevAiIflowBin === undefined) {
+        delete process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_IFLOW_BIN;
+      } else {
+        process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_IFLOW_BIN = prevAiIflowBin;
+      }
       if (prevIflowBin === undefined) {
         delete process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW_BIN;
       } else {
         process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW_BIN = prevIflowBin;
+      }
+      if (prevAiCodexBin === undefined) {
+        delete process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN;
+      } else {
+        process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN = prevAiCodexBin;
+      }
+      if (prevCodexBin === undefined) {
+        delete process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN;
+      } else {
+        process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN = prevCodexBin;
+      }
+      if (fs.existsSync(mockIflowBinPath)) {
+        fs.unlinkSync(mockIflowBinPath);
+      }
+    }
+  });
+
+  test('auto mode ignores fixed file text and falls back to "继续执行" when ai-followup backends fail', async () => {
+    const sessionId = 'stopmessage-spec-session-iflow-followup-fallback-file';
+    const state: RoutingInstructionState = {
+      forcedTarget: undefined,
+      stickyTarget: undefined,
+      allowedProviders: new Set(),
+      disabledProviders: new Set(),
+      disabledKeys: new Map(),
+      disabledModels: new Map(),
+      stopMessageText: '文件策略：先运行验证，再汇报结果',
+      stopMessageSource: 'explicit_file',
+      stopMessageMaxRepeats: 2,
+      stopMessageUsed: 0,
+      stopMessageStageMode: 'auto',
+      stopMessageAiMode: 'on'
+    };
+    writeRoutingStateForSession(sessionId, state);
+
+    const prevBdMode = process.env.ROUTECODEX_STOPMESSAGE_BD_MODE;
+    const prevAiIflowBin = process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_IFLOW_BIN;
+    const prevAiCodexBin = process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN;
+    const prevIflowEnabled = process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW;
+    const prevIflowBin = process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW_BIN;
+    const prevCodexBin = process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN;
+    const mockIflowBinPath = path.join(USER_DIR, 'mock-iflow-fail-file.sh');
+
+    try {
+      process.env.ROUTECODEX_STOPMESSAGE_BD_MODE = 'heuristic';
+      process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW = '1';
+      process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_IFLOW_BIN = mockIflowBinPath;
+      process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW_BIN = mockIflowBinPath;
+      process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN = path.join(USER_DIR, 'missing-codex-bin');
+      process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN = path.join(USER_DIR, 'missing-codex-bin');
+      fs.writeFileSync(
+        mockIflowBinPath,
+        ['#!/usr/bin/env bash', "echo 'auth required' 1>&2", 'exit 1'].join('\n'),
+        { encoding: 'utf8' }
+      );
+      fs.chmodSync(mockIflowBinPath, 0o755);
+
+      const result = await runServerSideToolEngine({
+        chatResponse: {
+          id: 'chatcmpl-stop-iflow-followup-fallback-file',
+          object: 'chat.completion',
+          model: 'gpt-test',
+          choices: [
+            {
+              index: 0,
+              message: { role: 'assistant', content: 'ok' },
+              finish_reason: 'stop'
+            }
+          ]
+        } as JsonObject,
+        adapterContext: {
+          requestId: 'req-stopmessage-iflow-followup-fallback-file',
+          entryEndpoint: '/v1/chat/completions',
+          providerProtocol: 'openai-chat',
+          sessionId,
+          capturedChatRequest: {
+            model: 'gpt-test',
+            messages: [{ role: 'user', content: '继续处理当前任务' }]
+          }
+        } as any,
+        entryEndpoint: '/v1/chat/completions',
+        requestId: 'req-stopmessage-iflow-followup-fallback-file',
+        providerProtocol: 'openai-chat'
+      });
+
+      expect(result.mode).toBe('tool_flow');
+      const followup = result.execution?.followup as any;
+      expect(Array.isArray(followup?.injection?.ops)).toBe(true);
+      const appendOp = (followup.injection.ops as any[]).find((op) => op?.op === 'append_user_text');
+      expect(appendOp?.text).toContain('继续执行');
+      expect(appendOp?.text).toContain(EXECUTION_APPEND_TEXT);
+    } finally {
+      if (prevBdMode === undefined) {
+        delete process.env.ROUTECODEX_STOPMESSAGE_BD_MODE;
+      } else {
+        process.env.ROUTECODEX_STOPMESSAGE_BD_MODE = prevBdMode;
+      }
+      if (prevIflowEnabled === undefined) {
+        delete process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW;
+      } else {
+        process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW = prevIflowEnabled;
+      }
+      if (prevAiIflowBin === undefined) {
+        delete process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_IFLOW_BIN;
+      } else {
+        process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_IFLOW_BIN = prevAiIflowBin;
+      }
+      if (prevIflowBin === undefined) {
+        delete process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW_BIN;
+      } else {
+        process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW_BIN = prevIflowBin;
+      }
+      if (prevAiCodexBin === undefined) {
+        delete process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN;
+      } else {
+        process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN = prevAiCodexBin;
+      }
+      if (prevCodexBin === undefined) {
+        delete process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN;
+      } else {
+        process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN = prevCodexBin;
       }
       if (fs.existsSync(mockIflowBinPath)) {
         fs.unlinkSync(mockIflowBinPath);
@@ -595,7 +1041,74 @@ describe('stop_message_auto servertool', () => {
     expect(ops.some((op) => op?.op === 'append_user_text' && typeof op?.text === 'string')).toBe(true);
   });
 
-  test('openai-responses sticky key prefers session scope over request chain', () => {
+  test('does not resolve stopMessage session scope from capturedContext fallback (prevents cross-session leakage)', async () => {
+    const sessionId = 'stopmessage-spec-session-captured-context-only';
+    const state: RoutingInstructionState = {
+      forcedTarget: undefined,
+      stickyTarget: undefined,
+      allowedProviders: new Set(),
+      disabledProviders: new Set(),
+      disabledKeys: new Map(),
+      disabledModels: new Map(),
+      stopMessageText: '立即执行待处理任务',
+      stopMessageMaxRepeats: 2,
+      stopMessageUsed: 0
+    };
+    writeRoutingStateForSession(sessionId, state);
+
+    const chatResponse: JsonObject = {
+      id: 'chatcmpl-stop-captured-context-only',
+      object: 'chat.completion',
+      model: 'gpt-test',
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: 'assistant',
+            content: 'ok'
+          },
+          finish_reason: 'stop'
+        }
+      ]
+    };
+
+    const adapterContext: AdapterContext = {
+      requestId: 'req-stopmessage-captured-context-only',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      metadata: {
+        capturedContext: {
+          __hub_capture: {
+            context: {
+              sessionId
+            }
+          }
+        }
+      },
+      capturedChatRequest: {
+        model: 'gpt-test',
+        messages: [
+          {
+            role: 'user',
+            content: '继续处理'
+          }
+        ]
+      }
+    } as any;
+
+    const result = await runServerSideToolEngine({
+      chatResponse,
+      adapterContext,
+      entryEndpoint: '/v1/chat/completions',
+      requestId: 'req-stopmessage-captured-context-only',
+      providerProtocol: 'openai-chat'
+    });
+
+    expect(result.mode).toBe('passthrough');
+    expect(result.execution).toBeUndefined();
+  });
+
+  test('openai-responses sticky key prefers request chain over session scope', () => {
     const key = resolveStickyKey({
       providerProtocol: 'openai-responses',
       requestId: 'req-responses-stopmessage',
@@ -603,7 +1116,67 @@ describe('stop_message_auto servertool', () => {
       responsesResume: { previousRequestId: 'req-responses-root' }
     });
 
+    expect(key).toBe('req-responses-root');
+  });
+
+  test('openai-responses sticky key falls back to session scope when previousRequestId is missing', () => {
+    const key = resolveStickyKey({
+      providerProtocol: 'openai-responses',
+      requestId: 'req-responses-stopmessage',
+      sessionId: 'session-should-win'
+    });
+
     expect(key).toBe('session:session-should-win');
+  });
+
+  test('openai-responses does not trigger stop_message when session stage mode is off', async () => {
+    const sessionId = 'stopmessage-spec-session-responses-mode-off';
+    const state: RoutingInstructionState = {
+      forcedTarget: undefined,
+      stickyTarget: undefined,
+      allowedProviders: new Set(),
+      disabledProviders: new Set(),
+      disabledKeys: new Map(),
+      disabledModels: new Map(),
+      stopMessageStageMode: 'off'
+    };
+    writeRoutingStateForSession(sessionId, state);
+
+    const chatResponse: JsonObject = {
+      id: 'resp-stop-mode-off',
+      object: 'response',
+      status: 'completed',
+      model: 'gpt-test',
+      output: [
+        {
+          type: 'message',
+          role: 'assistant',
+          content: [{ type: 'output_text', text: 'ok' }]
+        }
+      ]
+    };
+
+    const adapterContext: AdapterContext = {
+      requestId: 'req-stopmessage-responses-mode-off',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-responses',
+      sessionId,
+      capturedChatRequest: {
+        model: 'gpt-test',
+        input: [{ role: 'user', content: [{ type: 'input_text', text: '继续处理' }] }]
+      }
+    } as any;
+
+    const result = await runServerSideToolEngine({
+      chatResponse,
+      adapterContext,
+      entryEndpoint: '/v1/responses',
+      requestId: 'req-stopmessage-responses-mode-off',
+      providerProtocol: 'openai-responses'
+    });
+
+    expect(result.mode).toBe('passthrough');
+    expect(result.execution?.flowId).toBeUndefined();
   });
 
   test('skips stop_message retrigger on stop_message_flow followup hops', async () => {
@@ -803,30 +1376,7 @@ describe('stop_message_auto servertool', () => {
     expect(orchestration.executed).toBe(true);
     expect(orchestration.flowId).toBe('stop_message_flow');
 
-    const persisted = await readJsonFileUntil<{
-      state?: {
-        stopMessageText?: unknown;
-        stopMessageMaxRepeats?: unknown;
-        stopMessageUsed?: unknown;
-        stopMessageUpdatedAt?: unknown;
-        stopMessageLastUsedAt?: unknown;
-      };
-    }>(
-      path.join(SESSION_DIR, `session-${sessionId}.json`),
-      (data) =>
-        (data as any)?.state?.stopMessageText === undefined &&
-        (data as any)?.state?.stopMessageMaxRepeats === undefined &&
-        (data as any)?.state?.stopMessageUsed === undefined &&
-        typeof (data as any)?.state?.stopMessageUpdatedAt === 'number' &&
-        typeof (data as any)?.state?.stopMessageLastUsedAt === 'number'
-    );
-    // stopMessage is now one-shot per request chain. For maxRepeats=1, state is cleared at trigger-time
-    // and leaves a tombstone timestamp pair to prevent accidental re-application.
-    expect(persisted?.state?.stopMessageText).toBeUndefined();
-    expect(persisted?.state?.stopMessageMaxRepeats).toBeUndefined();
-    expect(persisted?.state?.stopMessageUsed).toBeUndefined();
-    expect(typeof persisted?.state?.stopMessageLastUsedAt).toBe('number');
-    expect(typeof persisted?.state?.stopMessageUpdatedAt).toBe('number');
+    expect(fs.existsSync(path.join(SESSION_DIR, `session-${sessionId}.json`))).toBe(false);
 
     expect(capturedFollowup).toBeTruthy();
     expect(capturedFollowup?.entryEndpoint).toBe('/v1/responses');
@@ -1384,11 +1934,7 @@ describe('stop_message_auto servertool', () => {
     expect(orchestration.flowId).toBe('stop_message_flow');
     expect((orchestration.chat as any)?.id).toBe('chatcmpl-stop-empty-2');
 
-    const persisted = await readJsonFileWithRetry<{ state?: { stopMessageText?: unknown; stopMessageMaxRepeats?: unknown } }>(
-      path.join(SESSION_DIR, `session-${sessionId}.json`)
-    );
-    expect(persisted?.state?.stopMessageText).toBeUndefined();
-    expect(persisted?.state?.stopMessageMaxRepeats).toBeUndefined();
+    expect(fs.existsSync(path.join(SESSION_DIR, `session-${sessionId}.json`))).toBe(false);
   });
 
   test('throws explicit empty-followup error when both followup and original response are empty', async () => {
@@ -1461,11 +2007,7 @@ describe('stop_message_auto servertool', () => {
     });
     expect(callCount).toBe(2);
 
-    const persisted = await readJsonFileWithRetry<{ state?: { stopMessageText?: unknown; stopMessageMaxRepeats?: unknown } }>(
-      path.join(SESSION_DIR, `session-${sessionId}.json`)
-    );
-    expect(persisted?.state?.stopMessageText).toBeUndefined();
-    expect(persisted?.state?.stopMessageMaxRepeats).toBeUndefined();
+    expect(fs.existsSync(path.join(SESSION_DIR, `session-${sessionId}.json`))).toBe(false);
   });
 
   test('injects loop-break warning after 5 identical stopMessage request/response rounds', async () => {
@@ -1817,7 +2359,7 @@ describe('stop_message_auto servertool', () => {
   });
 
 
-  test('mode-only stopMessage triggers followup when stage mode is on', async () => {
+  test('mode-only stopMessage does not trigger followup without text', async () => {
     const tempUserDir = fs.mkdtempSync(path.join(process.cwd(), 'tmp', 'stopmessage-stage-mode-only-userdir-'));
     const prevUserDir = process.env.ROUTECODEX_USER_DIR;
     const prevStageMode = process.env.ROUTECODEX_STOPMESSAGE_STAGE_MODE;
@@ -1895,14 +2437,14 @@ describe('stop_message_auto servertool', () => {
         providerProtocol: 'openai-chat'
       });
 
-      expect(result.mode).toBe('tool_flow');
-      expect(result.execution?.flowId).toBe('stop_message_flow');
+      expect(result.mode).toBe('passthrough');
+      expect(result.execution).toBeUndefined();
       const persisted = await readJsonFileUntil<{ state?: { stopMessageText?: unknown; stopMessageStageMode?: unknown; stopMessageUsed?: unknown } }>(
         path.join(SESSION_DIR, `session-${sessionId}.json`),
         (data) =>
           data?.state?.stopMessageText === undefined &&
           data?.state?.stopMessageStageMode === 'on' &&
-          data?.state?.stopMessageUsed === 1
+          data?.state?.stopMessageUsed === 0
       );
       expect(persisted?.state?.stopMessageText).toBeUndefined();
       expect(persisted?.state?.stopMessageStageMode).toBe('on');
@@ -1926,7 +2468,7 @@ describe('stop_message_auto servertool', () => {
     }
   });
 
-  test('mode-only stopMessage triggers by default without state-machine flag', async () => {
+  test('mode-only stopMessage remains inactive by default without text', async () => {
     const sessionId = 'stopmessage-spec-session-stage-mode-only-default';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
@@ -1976,17 +2518,17 @@ describe('stop_message_auto servertool', () => {
       providerProtocol: 'openai-chat'
     });
 
-    expect(result.mode).toBe('tool_flow');
-    expect(result.execution?.flowId).toBe('stop_message_flow');
+    expect(result.mode).toBe('passthrough');
+    expect(result.execution).toBeUndefined();
     const persisted = await readJsonFileUntil<{ state?: { stopMessageUsed?: unknown; stopMessageStageMode?: unknown } }>(
       path.join(SESSION_DIR, `session-${sessionId}.json`),
-      (data) => data?.state?.stopMessageUsed === 1
+      (data) => data?.state?.stopMessageUsed === 0
     );
-    expect(persisted?.state?.stopMessageUsed).toBe(1);
+    expect(persisted?.state?.stopMessageUsed).toBe(0);
     expect(persisted?.state?.stopMessageStageMode).toBe('on');
   });
 
-  test('self-heals legacy mode-only session state without maxRepeats and continues flow', async () => {
+  test('legacy mode-only session state without text does not self-activate', async () => {
     const sessionId = 'stopmessage-spec-session-legacy-mode-only-no-max';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
@@ -2035,20 +2577,20 @@ describe('stop_message_auto servertool', () => {
       providerProtocol: 'anthropic-messages'
     });
 
-    expect(result.mode).toBe('tool_flow');
-    expect(result.execution?.flowId).toBe('stop_message_flow');
+    expect(result.mode).toBe('passthrough');
+    expect(result.execution).toBeUndefined();
 
     const persisted = await readJsonFileUntil<{ state?: { stopMessageText?: unknown; stopMessageStageMode?: unknown; stopMessageMaxRepeats?: unknown; stopMessageUsed?: unknown } }>(
       path.join(SESSION_DIR, `session-${sessionId}.json`),
       (data) =>
         data?.state?.stopMessageText === undefined &&
         data?.state?.stopMessageStageMode === 'on' &&
-        data?.state?.stopMessageMaxRepeats === 10 &&
-        data?.state?.stopMessageUsed === 1
+        data?.state?.stopMessageMaxRepeats === undefined &&
+        data?.state?.stopMessageUsed === 0
     );
     expect(persisted?.state?.stopMessageText).toBeUndefined();
     expect(persisted?.state?.stopMessageStageMode).toBe('on');
-    expect(persisted?.state?.stopMessageMaxRepeats).toBe(10);
+    expect(persisted?.state?.stopMessageMaxRepeats).toBeUndefined();
   });
 
 
@@ -2276,448 +2818,6 @@ describe('stop_message_auto servertool', () => {
     }
   });
 
-
-  test('bd runtime resolver reports active when in_progress exists', () => {
-    const prevMode = process.env.ROUTECODEX_STOPMESSAGE_BD_MODE;
-    const prevTtl = process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS;
-    try {
-      process.env.ROUTECODEX_STOPMESSAGE_BD_MODE = 'runtime';
-      process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS = '0';
-      resetStopMessageBdRuntimeCacheForTests();
-
-      const calls: string[][] = [];
-      const state = resolveBdWorkStateFromRuntime({
-        bdCommandRunner: (args) => {
-          calls.push(args);
-          if (args.includes('in_progress')) {
-            return { status: 0, stdout: '[{"id":"routecodex-1"}]', stderr: '' };
-          }
-          return { status: 0, stdout: '[]', stderr: '' };
-        },
-        nowMs: 100
-      });
-
-      expect(state).toBe('active');
-      expect(calls.length).toBe(1);
-      expect(calls[0]).toContain('in_progress');
-    } finally {
-      if (prevMode === undefined) {
-        delete process.env.ROUTECODEX_STOPMESSAGE_BD_MODE;
-      } else {
-        process.env.ROUTECODEX_STOPMESSAGE_BD_MODE = prevMode;
-      }
-      if (prevTtl === undefined) {
-        delete process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS;
-      } else {
-        process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS = prevTtl;
-      }
-      resetStopMessageBdRuntimeCacheForTests();
-    }
-  });
-
-  test('bd runtime resolver uses explicit cwd override to avoid cross-project probing', () => {
-    const prevMode = process.env.ROUTECODEX_STOPMESSAGE_BD_MODE;
-    const prevTtl = process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS;
-    try {
-      process.env.ROUTECODEX_STOPMESSAGE_BD_MODE = 'runtime';
-      process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS = '0';
-      resetStopMessageBdRuntimeCacheForTests();
-
-      const cwdCalls: string[] = [];
-      const state = resolveBdWorkStateFromRuntime({
-        cwd: '/tmp/routecodex-bd-cwd-a',
-        bdCommandRunner: (_args, options) => {
-          cwdCalls.push(options.cwd);
-          return { status: 0, stdout: '[]', stderr: '' };
-        },
-        nowMs: 110
-      });
-
-      expect(state).toBe('idle');
-      expect(cwdCalls.length).toBeGreaterThan(0);
-      for (const cwd of cwdCalls) {
-        expect(cwd).toBe(path.resolve('/tmp/routecodex-bd-cwd-a'));
-      }
-    } finally {
-      if (prevMode === undefined) {
-        delete process.env.ROUTECODEX_STOPMESSAGE_BD_MODE;
-      } else {
-        process.env.ROUTECODEX_STOPMESSAGE_BD_MODE = prevMode;
-      }
-      if (prevTtl === undefined) {
-        delete process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS;
-      } else {
-        process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS = prevTtl;
-      }
-      resetStopMessageBdRuntimeCacheForTests();
-    }
-  });
-
-  test('bd runtime resolver treats blocked tasks as active work', () => {
-    const prevMode = process.env.ROUTECODEX_STOPMESSAGE_BD_MODE;
-    const prevTtl = process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS;
-    try {
-      process.env.ROUTECODEX_STOPMESSAGE_BD_MODE = 'runtime';
-      process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS = '0';
-      resetStopMessageBdRuntimeCacheForTests();
-
-      const calls: string[][] = [];
-      const state = resolveBdWorkStateFromRuntime({
-        bdCommandRunner: (args) => {
-          calls.push(args);
-          if (args.includes('blocked')) {
-            return { status: 0, stdout: '[{"id":"routecodex-blocked-1"}]', stderr: '' };
-          }
-          return { status: 0, stdout: '[]', stderr: '' };
-        },
-        nowMs: 101
-      });
-
-      expect(state).toBe('active');
-      expect(calls.length).toBe(4);
-      expect(calls[0]).toContain('in_progress');
-      expect(calls[1]).toContain('ready');
-      expect(calls[2]).toContain('open');
-      expect(calls[3]).toContain('blocked');
-    } finally {
-      if (prevMode === undefined) {
-        delete process.env.ROUTECODEX_STOPMESSAGE_BD_MODE;
-      } else {
-        process.env.ROUTECODEX_STOPMESSAGE_BD_MODE = prevMode;
-      }
-      if (prevTtl === undefined) {
-        delete process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS;
-      } else {
-        process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS = prevTtl;
-      }
-      resetStopMessageBdRuntimeCacheForTests();
-    }
-  });
-
-  test('stage policy uses one-shot summary then stops when no task is available', () => {
-    const prevMode = process.env.ROUTECODEX_STOPMESSAGE_BD_MODE;
-    const prevTtl = process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS;
-    try {
-      process.env.ROUTECODEX_STOPMESSAGE_BD_MODE = 'runtime';
-      process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS = '0';
-      resetStopMessageBdRuntimeCacheForTests();
-
-      const first = resolveStopMessageStageDecision({
-        baseText: '继续执行',
-        state: { stopMessageStageMode: 'on' },
-        capturedMessages: [{ role: 'tool', content: 'bd --no-db show routecodex-77\nstatus: in_progress' }],
-        bdCommandRunner: () => ({ status: 0, stdout: '[]', stderr: '' })
-      });
-
-      expect(first.action).toBe('followup');
-      expect(first.stage).toBe('status_probe');
-      expect(first.bdWorkState).toBe('idle');
-      expect(first.noTaskSummaryUsed).toBe(true);
-      expect(first.followupText).toContain('当前未发现可推进任务');
-
-      const second = resolveStopMessageStageDecision({
-        baseText: '继续执行',
-        state: {
-          stopMessageStageMode: 'on',
-          stopMessageStage: 'status_probe',
-          stopMessageBdWorkState: 'idle',
-          stopMessageObservationHash: first.observationHash,
-          stopMessageObservationStableCount: first.observationStableCount,
-          stopMessageNoTaskSummaryUsed: true
-        },
-        capturedMessages: [{ role: 'tool', content: 'bd --no-db show routecodex-77\nstatus: in_progress' }],
-        bdCommandRunner: () => ({ status: 0, stdout: '[]', stderr: '' })
-      });
-
-      expect(second.action).toBe('stop');
-      expect(second.stopReason).toBe('no_task_after_summary');
-      expect(second.bdWorkState).toBe('idle');
-    } finally {
-      if (prevMode === undefined) {
-        delete process.env.ROUTECODEX_STOPMESSAGE_BD_MODE;
-      } else {
-        process.env.ROUTECODEX_STOPMESSAGE_BD_MODE = prevMode;
-      }
-      if (prevTtl === undefined) {
-        delete process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS;
-      } else {
-        process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS = prevTtl;
-      }
-      resetStopMessageBdRuntimeCacheForTests();
-    }
-  });
-
-  test('stage policy forwards per-request bdWorkingDirectory to runtime probe', () => {
-    const prevMode = process.env.ROUTECODEX_STOPMESSAGE_BD_MODE;
-    const prevTtl = process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS;
-    try {
-      process.env.ROUTECODEX_STOPMESSAGE_BD_MODE = 'runtime';
-      process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS = '0';
-      resetStopMessageBdRuntimeCacheForTests();
-
-      const cwdCalls: string[] = [];
-      const decision = resolveStopMessageStageDecision({
-        baseText: '继续执行',
-        state: { stopMessageStageMode: 'on' },
-        capturedMessages: [{ role: 'tool', content: 'bd --no-db show routecodex-77\nstatus: in_progress' }],
-        bdWorkingDirectory: '/tmp/routecodex-stage-bd-cwd',
-        bdCommandRunner: (_args, options) => {
-          cwdCalls.push(options.cwd);
-          return { status: 0, stdout: '[{"id":"routecodex-1","title":"task","priority":0}]', stderr: '' };
-        }
-      });
-
-      expect(decision.action).toBe('followup');
-      expect(cwdCalls.length).toBeGreaterThan(0);
-      for (const cwd of cwdCalls) {
-        expect(cwd).toBe(path.resolve('/tmp/routecodex-stage-bd-cwd'));
-      }
-    } finally {
-      if (prevMode === undefined) {
-        delete process.env.ROUTECODEX_STOPMESSAGE_BD_MODE;
-      } else {
-        process.env.ROUTECODEX_STOPMESSAGE_BD_MODE = prevMode;
-      }
-      if (prevTtl === undefined) {
-        delete process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS;
-      } else {
-        process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS = prevTtl;
-      }
-      resetStopMessageBdRuntimeCacheForTests();
-    }
-  });
-
-  test('stage policy treats same command with different args as non-stable observations', () => {
-    const prevMode = process.env.ROUTECODEX_STOPMESSAGE_BD_MODE;
-    const prevTtl = process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS;
-    try {
-      process.env.ROUTECODEX_STOPMESSAGE_BD_MODE = 'runtime';
-      process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS = '0';
-      resetStopMessageBdRuntimeCacheForTests();
-
-      const first = resolveStopMessageStageDecision({
-        baseText: '继续执行',
-        state: { stopMessageStageMode: 'on' },
-        capturedMessages: [
-          {
-            role: 'assistant',
-            content: null,
-            tool_calls: [
-              {
-                id: 'call_exec_1',
-                type: 'function',
-                function: {
-                  name: 'exec_command',
-                  arguments: JSON.stringify({ cmd: 'ls -la /tmp/work-a' })
-                }
-              }
-            ]
-          }
-        ],
-        bdCommandRunner: () => ({ status: 0, stdout: '[{"id":"routecodex-active-1"}]', stderr: '' })
-      });
-
-      expect(first.action).toBe('followup');
-      expect(typeof first.toolSignatureHash).toBe('string');
-
-      const second = resolveStopMessageStageDecision({
-        baseText: '继续执行',
-        state: {
-          stopMessageStageMode: 'on',
-          stopMessageStage: first.stage,
-          stopMessageBdWorkState: first.bdWorkState,
-          stopMessageObservationHash: first.observationHash,
-          stopMessageObservationStableCount: first.observationStableCount
-        },
-        capturedMessages: [
-          {
-            role: 'assistant',
-            content: null,
-            tool_calls: [
-              {
-                id: 'call_exec_2',
-                type: 'function',
-                function: {
-                  name: 'exec_command',
-                  arguments: JSON.stringify({ cmd: 'ls -la /tmp/work-b' })
-                }
-              }
-            ]
-          }
-        ],
-        bdCommandRunner: () => ({ status: 0, stdout: '[{"id":"routecodex-active-1"}]', stderr: '' })
-      });
-
-      expect(second.action).toBe('followup');
-      expect(second.observationStableCount).toBe(0);
-      expect(second.stopReason).toBeUndefined();
-      expect(second.observationHash).not.toBe(first.observationHash);
-      expect(typeof second.toolSignatureHash).toBe('string');
-      expect(second.toolSignatureHash).not.toBe(first.toolSignatureHash);
-    } finally {
-      if (prevMode === undefined) {
-        delete process.env.ROUTECODEX_STOPMESSAGE_BD_MODE;
-      } else {
-        process.env.ROUTECODEX_STOPMESSAGE_BD_MODE = prevMode;
-      }
-      if (prevTtl === undefined) {
-        delete process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS;
-      } else {
-        process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS = prevTtl;
-      }
-      resetStopMessageBdRuntimeCacheForTests();
-    }
-  });
-
-  test('stage policy switches to loop_self_check on repeated active observations', () => {
-    const prevMode = process.env.ROUTECODEX_STOPMESSAGE_BD_MODE;
-    const prevTtl = process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS;
-    try {
-      process.env.ROUTECODEX_STOPMESSAGE_BD_MODE = 'runtime';
-      process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS = '0';
-      resetStopMessageBdRuntimeCacheForTests();
-
-      const activeRunner = (args: string[]) => {
-        if (args.includes('in_progress')) {
-          return { status: 0, stdout: '[{"id":"routecodex-1"}]', stderr: '' };
-        }
-        return { status: 0, stdout: '[]', stderr: '' };
-      };
-
-      const first = resolveStopMessageStageDecision({
-        baseText: '继续执行',
-        state: { stopMessageStageMode: 'on' },
-        capturedMessages: [{ role: 'tool', content: 'bd --no-db show routecodex-77\nstatus: in_progress' }],
-        bdCommandRunner: activeRunner
-      });
-
-      expect(first.action).toBe('followup');
-      expect(first.stage).toBe('active_continue');
-      expect(first.bdWorkState).toBe('active');
-
-      const second = resolveStopMessageStageDecision({
-        baseText: '继续执行',
-        state: {
-          stopMessageStageMode: 'on',
-          stopMessageStage: first.stage,
-          stopMessageBdWorkState: first.bdWorkState,
-          stopMessageObservationHash: first.observationHash,
-          stopMessageObservationStableCount: first.observationStableCount
-        },
-        capturedMessages: [{ role: 'tool', content: 'bd --no-db show routecodex-77\nstatus: in_progress' }],
-        bdCommandRunner: activeRunner
-      });
-
-      expect(second.action).toBe('followup');
-      expect(second.stage).toBe('loop_self_check');
-      expect(second.bdWorkState).toBe('active');
-      expect((second.followupText || '').includes('重复')).toBe(true);
-    } finally {
-      if (prevMode === undefined) {
-        delete process.env.ROUTECODEX_STOPMESSAGE_BD_MODE;
-      } else {
-        process.env.ROUTECODEX_STOPMESSAGE_BD_MODE = prevMode;
-      }
-      if (prevTtl === undefined) {
-        delete process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS;
-      } else {
-        process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS = prevTtl;
-      }
-      resetStopMessageBdRuntimeCacheForTests();
-    }
-  });
-
-  test('stage policy keeps followup in auto mode when stage templates are not enabled', () => {
-    const prevMode = process.env.ROUTECODEX_STOPMESSAGE_BD_MODE;
-    const prevTtl = process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS;
-    try {
-      process.env.ROUTECODEX_STOPMESSAGE_BD_MODE = 'runtime';
-      process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS = '0';
-      resetStopMessageBdRuntimeCacheForTests();
-
-      const decision = resolveStopMessageStageDecision({
-        baseText: '继续执行',
-        state: { stopMessageStageMode: 'auto' },
-        capturedMessages: [{ role: 'tool', content: 'bd --no-db show routecodex-77\nstatus: in_progress' }],
-        bdCommandRunner: () => ({ status: 0, stdout: '[]', stderr: '' })
-      });
-
-      expect(decision.action).toBe('followup');
-      expect(decision.stage).toBeUndefined();
-      expect(decision.bdWorkState).toBe('unknown');
-    } finally {
-      if (prevMode === undefined) {
-        delete process.env.ROUTECODEX_STOPMESSAGE_BD_MODE;
-      } else {
-        process.env.ROUTECODEX_STOPMESSAGE_BD_MODE = prevMode;
-      }
-      if (prevTtl === undefined) {
-        delete process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS;
-      } else {
-        process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS = prevTtl;
-      }
-      resetStopMessageBdRuntimeCacheForTests();
-    }
-  });
-
-  test('stage policy falls back to heuristic when runtime probe fails in auto mode', () => {
-    const prevMode = process.env.ROUTECODEX_STOPMESSAGE_BD_MODE;
-    const prevTtl = process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS;
-    try {
-      process.env.ROUTECODEX_STOPMESSAGE_BD_MODE = 'auto';
-      process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS = '0';
-      resetStopMessageBdRuntimeCacheForTests();
-
-      const decision = resolveStopMessageStageDecision({
-        baseText: '继续执行',
-        state: { stopMessageStageMode: 'on' },
-        capturedMessages: [{ role: 'tool', content: 'bd --no-db show routecodex-77\nstatus: in_progress' }],
-        bdCommandRunner: () => ({ status: 1, stdout: 'bd command failed', stderr: 'error' })
-      });
-
-      expect(decision.action).toBe('followup');
-      expect(decision.stage).toBe('active_continue');
-      expect(decision.bdWorkState).toBe('active');
-    } finally {
-      if (prevMode === undefined) {
-        delete process.env.ROUTECODEX_STOPMESSAGE_BD_MODE;
-      } else {
-        process.env.ROUTECODEX_STOPMESSAGE_BD_MODE = prevMode;
-      }
-      if (prevTtl === undefined) {
-        delete process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS;
-      } else {
-        process.env.ROUTECODEX_STOPMESSAGE_BD_CACHE_TTL_MS = prevTtl;
-      }
-      resetStopMessageBdRuntimeCacheForTests();
-    }
-  });
-
-  test('bd task selection prioritizes in_progress over ready/open and sorts by priority+id', () => {
-    const selection = resolveBdTaskSelectionFromRuntime({
-      bdCommandRunner: (args) => {
-        if (args.includes('in_progress')) {
-          return {
-            status: 0,
-            stdout: JSON.stringify([
-              { id: 'routecodex-201', title: 'later', priority: 2 },
-              { id: 'routecodex-110', title: 'first', priority: 0 },
-              { id: 'routecodex-109', title: 'second', priority: 0 }
-            ]),
-            stderr: ''
-          };
-        }
-        if (args.includes('ready')) {
-          return { status: 0, stdout: '[{"id":"routecodex-1","priority":0}]', stderr: '' };
-        }
-        return { status: 0, stdout: '[]', stderr: '' };
-      }
-    });
-
-    expect(selection.status).toBe('ok');
-    expect(selection.task?.source).toBe('in_progress');
-    expect(selection.task?.issueId).toBe('routecodex-109');
-  });
 
   test('extracts structured blocked JSON report from assistant text payload', () => {
     const report = extractBlockedReportFromMessagesForTests([

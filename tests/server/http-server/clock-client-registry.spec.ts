@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { ClockClientRegistry } from '../../../src/server/runtime/http-server/clock-client-registry.js';
 
 describe('ClockClientRegistry cleanup', () => {
@@ -100,6 +103,68 @@ describe('ClockClientRegistry cleanup', () => {
     const remaining = registry.list().map((item) => item.daemonId);
     expect(remaining).toContain('clockd_live_shared');
     expect(remaining).not.toContain('clockd_stale_shared');
+  });
+
+  it('keeps conversation->tmux mapping when only one of shared tmux daemon records is stale', async () => {
+    const registry = new ClockClientRegistry();
+    registry.register({
+      daemonId: 'clockd_stale_shared_mapping',
+      callbackUrl: 'http://127.0.0.1:65532/inject',
+      tmuxSessionId: 'rcc_shared_tmux_mapping',
+      managedTmuxSession: true
+    });
+    registry.register({
+      daemonId: 'clockd_live_shared_mapping',
+      callbackUrl: 'http://127.0.0.1:65533/inject',
+      tmuxSessionId: 'rcc_shared_tmux_mapping',
+      managedTmuxSession: true
+    });
+    registry.bindConversationSession({
+      conversationSessionId: 'conv_shared_mapping',
+      daemonId: 'clockd_live_shared_mapping'
+    });
+
+    const registryInternal = registry as unknown as {
+      records: Map<string, { lastHeartbeatAtMs: number }>;
+    };
+    const staleRecord = registryInternal.records.get('clockd_stale_shared_mapping');
+    const liveRecord = registryInternal.records.get('clockd_live_shared_mapping');
+    expect(staleRecord).toBeDefined();
+    expect(liveRecord).toBeDefined();
+    if (staleRecord) {
+      staleRecord.lastHeartbeatAtMs = 0;
+    }
+    if (liveRecord) {
+      liveRecord.lastHeartbeatAtMs = Date.now();
+    }
+
+    const cleanup = registry.cleanupStaleHeartbeats({
+      nowMs: Date.now() + 500,
+      staleAfterMs: 1_000
+    });
+    expect(cleanup.removedDaemonIds).toEqual(['clockd_stale_shared_mapping']);
+
+    const originalFetch = global.fetch;
+    const hits: string[] = [];
+    global.fetch = (async (input: RequestInfo | URL) => {
+      hits.push(String(input));
+      return {
+        ok: true,
+        status: 200,
+        text: async () => ''
+      } as unknown as Response;
+    }) as typeof fetch;
+    try {
+      const injected = await registry.inject({
+        sessionId: 'conv_shared_mapping',
+        text: 'shared tmux mapping still alive'
+      });
+      expect(injected.ok).toBe(true);
+      expect(injected.daemonId).toBe('clockd_live_shared_mapping');
+      expect(hits).toEqual(['http://127.0.0.1:65533/inject']);
+    } finally {
+      global.fetch = originalFetch;
+    }
   });
 
   it('stale heartbeat cleanup removes record but never kills managed child pid', () => {
@@ -312,6 +377,69 @@ describe('ClockClientRegistry cleanup', () => {
     expect(killed).toEqual([]);
   });
 
+  it('dead tmux cleanup does not terminate managed process without managed tmux session', () => {
+    const registry = new ClockClientRegistry();
+    registry.register({
+      daemonId: 'clockd_proc_only',
+      callbackUrl: 'http://127.0.0.1:65559/inject',
+      sessionId: 'clockd_proc_only',
+      managedClientProcess: true,
+      managedClientPid: 77889,
+      managedClientCommandHint: 'codex',
+      clientType: 'codex'
+    });
+
+    const killedPids: number[] = [];
+    const cleanup = registry.cleanupDeadTmuxSessions({
+      isTmuxSessionAlive: () => false,
+      terminateManagedClientProcess: ({ pid }) => {
+        killedPids.push(pid);
+        return true;
+      }
+    });
+
+    expect(cleanup.removedDaemonIds).toEqual([]);
+    expect(cleanup.killedManagedClientPids).toEqual([]);
+    expect(cleanup.skippedKillManagedClientPids).toEqual([77889]);
+    expect(killedPids).toEqual([]);
+    expect(registry.list().map((item) => item.daemonId)).toContain('clockd_proc_only');
+  });
+
+  it('dead tmux cleanup still removes unmanaged tmux records when process-only managed clients exist', () => {
+    const registry = new ClockClientRegistry();
+    registry.register({
+      daemonId: 'clockd_dead_unmanaged_cov',
+      callbackUrl: 'http://127.0.0.1:65560/inject',
+      tmuxSessionId: 'rcc_dead_unmanaged_cov'
+    });
+    registry.register({
+      daemonId: 'clockd_proc_only_cov',
+      callbackUrl: 'http://127.0.0.1:65561/inject',
+      sessionId: 'clockd_proc_only_cov',
+      managedClientProcess: true,
+      managedClientPid: 88990,
+      managedClientCommandHint: 'claude',
+      clientType: 'claude'
+    });
+
+    const killedPids: number[] = [];
+    const cleanup = registry.cleanupDeadTmuxSessions({
+      isTmuxSessionAlive: () => false,
+      terminateManagedClientProcess: ({ pid }) => {
+        killedPids.push(pid);
+        return true;
+      }
+    });
+
+    expect(cleanup.removedDaemonIds).toContain('clockd_dead_unmanaged_cov');
+    expect(cleanup.removedDaemonIds).not.toContain('clockd_proc_only_cov');
+    expect(cleanup.removedTmuxSessionIds).toContain('rcc_dead_unmanaged_cov');
+    expect(cleanup.skippedKillManagedClientPids).toContain(88990);
+    expect(cleanup.killedManagedClientPids).toEqual([]);
+    expect(killedPids).toEqual([]);
+    expect(registry.list().map((item) => item.daemonId)).toContain('clockd_proc_only_cov');
+  });
+
   it('bindConversationSession enforces workdir-scoped candidate selection', () => {
     const registry = new ClockClientRegistry();
     registry.register({
@@ -402,6 +530,56 @@ describe('ClockClientRegistry cleanup', () => {
       ]);
     } finally {
       global.fetch = originalFetch;
+    }
+  });
+
+  it('persists conversation->tmux bindings across registry instances', async () => {
+    const originalSessionDir = process.env.ROUTECODEX_SESSION_DIR;
+    const tempSessionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-clock-bindings-'));
+    process.env.ROUTECODEX_SESSION_DIR = tempSessionDir;
+
+    const daemonId = 'clockd_persist_bindings';
+    const tmuxSessionId = 'rcc_persist_bindings';
+    const callbackUrl = 'http://127.0.0.1:65559/inject';
+    try {
+      const registryA = new ClockClientRegistry();
+      registryA.register({
+        daemonId,
+        callbackUrl,
+        tmuxSessionId
+      });
+      const bound = registryA.bindConversationSession({
+        conversationSessionId: 'conv_persist_bindings'
+      });
+      expect(bound.ok).toBe(true);
+      expect(bound.tmuxSessionId).toBe(tmuxSessionId);
+
+      const registryB = new ClockClientRegistry();
+      registryB.register({
+        daemonId,
+        callbackUrl,
+        tmuxSessionId
+      });
+
+      const originalFetch = global.fetch;
+      global.fetch = (async () => ({
+        ok: true,
+        status: 200,
+        text: async () => ''
+      })) as typeof fetch;
+      try {
+        const injected = await registryB.inject({
+          sessionId: 'conv_persist_bindings',
+          text: 'persisted binding works'
+        });
+        expect(injected.ok).toBe(true);
+        expect(injected.daemonId).toBe(daemonId);
+      } finally {
+        global.fetch = originalFetch;
+      }
+    } finally {
+      process.env.ROUTECODEX_SESSION_DIR = originalSessionDir;
+      fs.rmSync(tempSessionDir, { recursive: true, force: true });
     }
   });
 });

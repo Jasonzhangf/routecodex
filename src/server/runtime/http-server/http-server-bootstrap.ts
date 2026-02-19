@@ -34,17 +34,22 @@ export function getModuleDependencies(server: any): ModuleDependencies {
 }
 
 export function registerDaemonAdminUiRoute(server: any): void {
-  server.app.get('/daemon/admin', async (_req: unknown, res: any) => {
+  server.app.get(['/daemon/admin', '/daemon/admin/'], async (_req: unknown, res: any) => {
     try {
       const fs = await import('node:fs/promises');
+      const path = await import('node:path');
+      const builtIndex = path.join(process.cwd(), 'dist', 'daemon-admin-ui', 'index.html');
+      const legacyFile = path.join(process.cwd(), 'docs', 'daemon-admin-ui.html');
       let html = '';
       try {
-        const filePath = new URL('../../../../docs/daemon-admin-ui.html', import.meta.url);
-        html = await fs.readFile(filePath, 'utf8');
+        html = await fs.readFile(builtIndex, 'utf8');
       } catch {
-        const path = await import('node:path');
-        const fallback = path.join(process.cwd(), 'docs', 'daemon-admin-ui.html');
-        html = await fs.readFile(fallback, 'utf8');
+        try {
+          const filePath = new URL('../../../../docs/daemon-admin-ui.html', import.meta.url);
+          html = await fs.readFile(filePath, 'utf8');
+        } catch {
+          html = await fs.readFile(legacyFile, 'utf8');
+        }
       }
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
       res.setHeader('Cache-Control', 'no-store, max-age=0');
@@ -61,6 +66,40 @@ export function registerDaemonAdminUiRoute(server: any): void {
           message: `Daemon admin UI not available: ${message}`
         }
       });
+    }
+  });
+
+  server.app.get('/daemon/admin/*', async (req: any, res: any, next: any) => {
+    try {
+      const path = await import('node:path');
+      const fs = await import('node:fs/promises');
+      const root = path.join(process.cwd(), 'dist', 'daemon-admin-ui');
+      const relPath = String(req.path || '').replace(/^\/daemon\/admin\/?/, '').trim();
+      if (!relPath) {
+        next();
+        return;
+      }
+      const normalized = path.normalize(relPath).replace(/^(\.\.(\/|\\|$))+/, '');
+      const target = path.join(root, normalized);
+      if (!target.startsWith(root)) {
+        res.status(404).end();
+        return;
+      }
+      const stat = await fs.stat(target).catch(() => null);
+      if (!stat || !stat.isFile()) {
+        next();
+        return;
+      }
+      const ext = path.extname(target).toLowerCase();
+      if (ext === '.js') {
+        res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+      } else if (ext === '.css') {
+        res.setHeader('Content-Type', 'text/css; charset=utf-8');
+      }
+      res.setHeader('Cache-Control', 'no-store, max-age=0');
+      res.sendFile(target);
+    } catch {
+      next();
     }
   });
 }

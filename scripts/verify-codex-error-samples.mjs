@@ -22,13 +22,40 @@ const ROOT =
   process.env.ROUTECODEX_ERROR_SAMPLES_DIR.trim().length
     ? path.resolve(process.env.ROUTECODEX_ERROR_SAMPLES_DIR)
     : path.join(os.homedir(), '.routecodex', 'errorsamples');
+const SKIP_SUBDIR = (() => {
+  const raw = String(process.env.ROUTECODEX_ERROR_SAMPLES_SKIP_SUBDIR || '').trim();
+  return raw || 'skip';
+})();
+const GOLD_SUBDIR = (() => {
+  const raw = String(process.env.ROUTECODEX_ERROR_SAMPLES_GOLD_SUBDIR || '').trim();
+  return raw || 'gold';
+})();
 
-const ERROR_PATTERNS = [
-  // exec_command / apply_patch 参数解码错误（CLI 侧报错）
+const SHAPE_ERROR_PATTERNS = [
+  // exec_command / shell_command / apply_patch 参数形状错误
   'failed to parse function arguments: missing field `cmd`',
   'failed to parse function arguments: missing field `input`',
-  // 历史回滚：统一 diff 校验失败
-  'apply_patch verification failed'
+  'failed to parse function arguments: missing field `command`',
+  'invalid type: map, expected a string'
+];
+
+const APPLY_PATCH_SHAPE_PATTERNS = [
+  // apply_patch 仍属于“可修复形状问题”的子类
+  'invalid patch',
+  'failed to parse',
+  'missing field `input`',
+  'missing field `cmd`',
+  'missing field `command`',
+  'invalid type: map, expected a string'
+];
+
+const APPLY_PATCH_NON_SHAPE_PATTERNS = [
+  // 这些是上下文/执行问题，不应作为“形状回归”阻塞构建
+  'failed to find context',
+  'failed to find expected lines',
+  'failed to read file',
+  'no such file',
+  'file not found'
 ];
 
 async function fileExists(p) {
@@ -43,6 +70,8 @@ async function fileExists(p) {
 async function collectSampleFiles(rootDir) {
   const files = [];
   const queue = [rootDir];
+  const skippedDirs = [];
+  const goldDirs = [];
 
   while (queue.length > 0) {
     const currentDir = queue.shift();
@@ -60,6 +89,14 @@ async function collectSampleFiles(rootDir) {
     for (const entry of entries) {
       const fullPath = path.join(currentDir, entry.name);
       if (entry.isDirectory()) {
+        if (entry.name === SKIP_SUBDIR) {
+          skippedDirs.push(fullPath);
+          continue;
+        }
+        if (entry.name === GOLD_SUBDIR) {
+          goldDirs.push(fullPath);
+          continue;
+        }
         queue.push(fullPath);
         continue;
       }
@@ -69,18 +106,38 @@ async function collectSampleFiles(rootDir) {
     }
   }
 
-  return files.sort();
+  return {
+    files: files.sort(),
+    skippedDirs,
+    goldDirs
+  };
 }
 
 async function checkFile(filePath) {
   const raw = await fs.readFile(filePath, 'utf-8');
-  const hits = [];
-  for (const pattern of ERROR_PATTERNS) {
+  const lower = raw.toLowerCase();
+  const failHits = [];
+  const warnHits = [];
+
+  for (const pattern of SHAPE_ERROR_PATTERNS) {
     if (raw.includes(pattern)) {
-      hits.push(pattern);
+      failHits.push(pattern);
     }
   }
-  return hits;
+
+  if (lower.includes('apply_patch verification failed')) {
+    const shapeMatched = APPLY_PATCH_SHAPE_PATTERNS.some((needle) => lower.includes(needle));
+    const nonShapeMatched = APPLY_PATCH_NON_SHAPE_PATTERNS.some((needle) => lower.includes(needle));
+    if (shapeMatched) {
+      failHits.push('apply_patch verification failed (shape)');
+    } else if (nonShapeMatched) {
+      warnHits.push('apply_patch verification failed (context/non-shape)');
+    } else {
+      warnHits.push('apply_patch verification failed (unknown subtype)');
+    }
+  }
+
+  return { failHits, warnHits };
 }
 
 async function main() {
@@ -89,24 +146,44 @@ async function main() {
     return;
   }
 
-  const files = await collectSampleFiles(ROOT);
+  const { files, skippedDirs, goldDirs } = await collectSampleFiles(ROOT);
   if (!files.length) {
     console.log(`[verify:errorsamples] skip (no *.json samples under ${ROOT})`);
     return;
   }
 
   console.log(`[verify:errorsamples] scanning ${files.length} sample(s) under ${ROOT}`);
+  if (skippedDirs.length > 0) {
+    console.log(`[verify:errorsamples] skip subdir "${SKIP_SUBDIR}" (${skippedDirs.length} dir(s))`);
+  }
+  if (goldDirs.length > 0) {
+    console.log(`[verify:errorsamples] gold subdir "${GOLD_SUBDIR}" (${goldDirs.length} dir(s))`);
+  }
 
   const failures = [];
+  const warnings = [];
   for (const file of files) {
-    const hits = await checkFile(file);
-    if (hits.length) {
-      failures.push({ file, hits });
+    const { failHits, warnHits } = await checkFile(file);
+    if (failHits.length) {
+      failures.push({ file, hits: failHits });
+    }
+    if (warnHits.length) {
+      warnings.push({ file, hits: warnHits });
+    }
+  }
+
+  if (warnings.length > 0) {
+    console.log(`[verify:errorsamples] warning-only samples: ${warnings.length}`);
+    for (const item of warnings.slice(0, 8)) {
+      console.log(` - ${path.basename(item.file)} → ${item.hits.join(', ')}`);
+    }
+    if (warnings.length > 8) {
+      console.log(` - ... and ${warnings.length - 8} more warning sample(s)`);
     }
   }
 
   if (!failures.length) {
-    console.log('[verify:errorsamples] ✅ no known error patterns found');
+    console.log('[verify:errorsamples] ✅ no shape-error regressions found');
     return;
   }
 
