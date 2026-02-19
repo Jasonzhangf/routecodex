@@ -17,6 +17,7 @@ This document replaces the old “architecture novel” with a concise set of ru
 3. **Deception is professional misconduct** – Fabricating results, hiding errors, claiming work that wasn't done, or misrepresenting task status constitutes serious professional misconduct and violates the trust foundation of this working agreement.
 4. **No deletions without approval** – Never delete existing repo files without explicit user approval. If removal seems necessary, propose the change and wait for confirmation.
 5. **Untracked-first review & dangerous-action gate** – When new/untracked files are detected, review them first as potential valid fixes. Do not delete/clean/checkout/reset these files by default. If they truly violate policy and require removal or rollback, ask the user before any destructive action.
+6. **Process-kill commands are prohibited** – Agent must not execute any process termination command, including `kill`, `pkill`, `killall`, `taskkill`, `launchctl kill`, or port-based mass termination patterns (e.g. `lsof ... | xargs kill`). Process stop/restart must use explicit project CLI control flow only, and never by direct signal commands.
 
 ---
 
