@@ -6,7 +6,8 @@ import {
   createSnapshotRecorder as bridgeCreateSnapshotRecorder
 } from '../../../modules/llmswitch/bridge.js';
 import { applyClientConnectionStateToContext } from '../../utils/client-connection-state.js';
-import { getClockClientRegistry, injectClockClientPrompt } from './clock-client-registry.js';
+import { injectClockClientPrompt } from './clock-client-registry.js';
+import { bindClockConversationSession } from './executor/request-retry-helpers.js';
 
 export interface ConvertProviderResponseOptions {
   entryEndpoint?: string;
@@ -47,51 +48,6 @@ function extractClientModelId(
     }
   }
   return undefined;
-}
-
-function normalizeSessionToken(value: unknown): string | undefined {
-  if (typeof value !== 'string') {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  return trimmed || undefined;
-}
-
-function resolveClockConversationSessionId(metadata: Record<string, unknown>): string | undefined {
-  const daemonId = normalizeSessionToken(metadata.clockDaemonId)
-    ?? normalizeSessionToken(metadata.clockClientDaemonId);
-  if (daemonId) {
-    return `clockd.${daemonId}`;
-  }
-  return normalizeSessionToken(metadata.sessionId);
-}
-
-function bindClockConversationSession(metadata: Record<string, unknown>): void {
-  const conversationSessionId = resolveClockConversationSessionId(metadata);
-  if (!conversationSessionId) {
-    return;
-  }
-
-  const tmuxSessionId = normalizeSessionToken(metadata.tmuxSessionId);
-  if (!tmuxSessionId) {
-    return;
-  }
-  const daemonId = normalizeSessionToken(metadata.clockDaemonId)
-    ?? normalizeSessionToken(metadata.clockClientDaemonId);
-  const workdir = normalizeSessionToken(metadata.workdir)
-    ?? normalizeSessionToken(metadata.cwd)
-    ?? normalizeSessionToken(metadata.workingDirectory);
-
-  try {
-    getClockClientRegistry().bindConversationSession({
-      conversationSessionId,
-      ...(tmuxSessionId ? { tmuxSessionId } : {}),
-      ...(daemonId ? { daemonId } : {}),
-      ...(workdir ? { workdir } : {})
-    });
-  } catch {
-    // best-effort only
-  }
 }
 
 export async function convertProviderResponseIfNeeded(

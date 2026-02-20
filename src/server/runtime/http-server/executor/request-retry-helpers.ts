@@ -234,12 +234,12 @@ export function bindClockConversationSession(metadata: Record<string, unknown>):
     return;
   }
 
-  const tmuxSessionId = normalizeSessionToken(metadata.tmuxSessionId);
-  if (!tmuxSessionId) {
-    return;
-  }
   const daemonId = normalizeSessionToken(metadata.clockDaemonId)
     ?? normalizeSessionToken(metadata.clockClientDaemonId);
+  const tmuxSessionId = normalizeSessionToken(metadata.tmuxSessionId);
+  if (!tmuxSessionId && !daemonId) {
+    return;
+  }
   const clientType = inferClockClientTypeFromMetadata(metadata);
   const workdir = normalizeSessionToken(metadata.workdir)
     ?? normalizeSessionToken(metadata.cwd)
