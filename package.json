@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.89.2288",
+  "version": "0.89.2316",
   "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support",
   "type": "module",
   "main": "dist/index.js",
@@ -32,7 +32,8 @@
   },
   "scripts": {
     "build": "npm run llmswitch:ensure && node scripts/build-core.mjs && node scripts/vendor-core.mjs && npm run clean && node scripts/gen-build-info.mjs && tsc && npm run build:webui && node scripts/copy-compat-assets.mjs && node scripts/copy-modules-config.mjs && npm run fix:cli-permission",
-    "build:dev": "bash -lc 'export BUILD_MODE=dev; npm run cleanup:stale-server-pids || true; trap \"npm run cleanup:stale-server-pids >/dev/null 2>&1 || true\" EXIT; npm run build && npm run fix:cli-permission && npm run test:unified-hub-shadow && npm run verify:e2e-toolcall && npm run verify:apply-patch && npm run verify:apply-patch-regressions && npm run verify:exec-command && npm run test:routing-instructions && npm run test:cli && npm run install:global && npm run mock:regressions && npm run test:blackbox-antigravity-parity && npm run verify:errorsamples && npm run verify:e2e-gemini-followup-sample'",
+    "build:dev": "bash -lc 'export BUILD_MODE=dev; npm run build && npm run fix:cli-permission && npm run install:global'",
+    "build:dev:full": "bash -lc 'export BUILD_MODE=dev; npm run cleanup:stale-server-pids || true; trap \"npm run cleanup:stale-server-pids >/dev/null 2>&1 || true\" EXIT; npm run build && npm run fix:cli-permission && npm run test:unified-hub-shadow && npm run verify:e2e-toolcall && npm run verify:apply-patch && npm run verify:apply-patch-regressions && npm run verify:exec-command && npm run test:routing-instructions && npm run test:cli && npm run install:global && npm run mock:regressions && npm run test:blackbox-antigravity-parity && npm run verify:errorsamples && npm run verify:e2e-gemini-followup-sample'",
     "build:min": "npm run llmswitch:ensure && node scripts/build-core.mjs && node scripts/vendor-core.mjs && npm run clean && node scripts/gen-build-info.mjs && tsc && npm run build:webui && node scripts/copy-compat-assets.mjs && node scripts/copy-modules-config.mjs && npm run fix:cli-permission",
     "build:webui": "vite build --config webui/vite.config.ts",
     "prepack": "echo skip-prepack",
@@ -42,6 +43,7 @@
     "dev": "tsx watch src/index.ts",
     "jest:run": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js",
     "test": "npm run test:routing-instructions && npm run mock:regressions",
+    "test:regressions": "npm run test:unified-hub-shadow && npm run mock:regressions && npm run test:blackbox-antigravity-parity && npm run verify:errorsamples",
     "test:blackbox-antigravity-parity": "node scripts/tests/blackbox-rcc-vs-routecodex-antigravity.mjs",
     "test:ci:jest": "node scripts/tests/ci-jest.mjs",
     "test:ci:jest:coverage": "node scripts/tests/ci-jest.mjs --coverage",

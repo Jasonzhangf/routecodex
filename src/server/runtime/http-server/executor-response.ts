@@ -73,6 +73,9 @@ function bindClockConversationSession(metadata: Record<string, unknown>): void {
   }
 
   const tmuxSessionId = normalizeSessionToken(metadata.tmuxSessionId);
+  if (!tmuxSessionId) {
+    return;
+  }
   const daemonId = normalizeSessionToken(metadata.clockDaemonId)
     ?? normalizeSessionToken(metadata.clockClientDaemonId);
   const workdir = normalizeSessionToken(metadata.workdir)

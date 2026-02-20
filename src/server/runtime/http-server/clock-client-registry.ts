@@ -545,7 +545,7 @@ export class ClockClientRegistry {
       return mapped;
     }
 
-    return sessionAlias;
+    return undefined;
   }
 
   async inject(args: ClockClientInjectArgs): Promise<ClockClientInjectResult> {

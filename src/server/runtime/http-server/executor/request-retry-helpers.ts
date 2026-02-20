@@ -235,6 +235,9 @@ export function bindClockConversationSession(metadata: Record<string, unknown>):
   }
 
   const tmuxSessionId = normalizeSessionToken(metadata.tmuxSessionId);
+  if (!tmuxSessionId) {
+    return;
+  }
   const daemonId = normalizeSessionToken(metadata.clockDaemonId)
     ?? normalizeSessionToken(metadata.clockClientDaemonId);
   const clientType = inferClockClientTypeFromMetadata(metadata);

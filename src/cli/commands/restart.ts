@@ -68,6 +68,15 @@ function parsePortOption(ctx: RestartCommandContext, spinner: Spinner, value: un
   return port;
 }
 
+function resolveRestartWaitMs(ctx: RestartCommandContext): number {
+  const raw = String(ctx.env?.ROUTECODEX_RESTART_WAIT_MS ?? ctx.env?.RCC_RESTART_WAIT_MS ?? '').trim();
+  const parsed = Number(raw);
+  if (Number.isFinite(parsed) && parsed >= 5000) {
+    return Math.floor(parsed);
+  }
+  return 45000;
+}
+
 function resolveConfigPortHostMaybe(
   ctx: RestartCommandContext,
   options: RestartCommandOptions,
@@ -264,28 +273,44 @@ async function resolveRestartTargets(ctx: RestartCommandContext, options: Restar
 }
 
 async function waitForRestart(ctx: RestartCommandContext, host: string, port: number, oldPids: number[]): Promise<void> {
-  const deadline = Date.now() + 15000;
+  const deadline = Date.now() + resolveRestartWaitMs(ctx);
   const old = new Set(oldPids);
   let sawNewPid = false;
+  let sawEndpointUnavailable = false;
+  let samePidHealthyStreak = 0;
   while (Date.now() < deadline) {
     const current = ctx.findListeningPids(port);
+    if (!current.length) {
+      sawEndpointUnavailable = true;
+      samePidHealthyStreak = 0;
+      await ctx.sleep(150);
+      continue;
+    }
     if (current.some((pid) => !old.has(pid))) {
       sawNewPid = true;
-      try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => {
-          try { controller.abort(); } catch { /* ignore */ }
-        }, 750);
-        const res = await ctx.fetch(`${HTTP_PROTOCOLS.HTTP}${host}:${port}${API_PATHS.HEALTH}`, { signal: controller.signal }).catch(() => null);
-        clearTimeout(timeout);
-        if (res && res.ok) {
-          return;
-        }
-      } catch {
-        // ignore health failures during restart window
-      }
     }
-    await ctx.sleep(sawNewPid ? 250 : 150);
+    const healthy = await isRouteCodexServer(ctx, host, port);
+    if (!healthy) {
+      sawEndpointUnavailable = true;
+      samePidHealthyStreak = 0;
+      await ctx.sleep(sawNewPid ? 250 : 150);
+      continue;
+    }
+    if (sawNewPid || sawEndpointUnavailable) {
+      return;
+    }
+    const allCurrentPidsAreOld = current.length > 0 && current.every((pid) => old.has(pid));
+    if (allCurrentPidsAreOld) {
+      // In-process runtime reload may keep the same listening PID. Accept this after
+      // multiple successful health probes so restart does not false-timeout.
+      samePidHealthyStreak += 1;
+      if (samePidHealthyStreak >= 3) {
+        return;
+      }
+    } else {
+      samePidHealthyStreak = 0;
+    }
+    await ctx.sleep(150);
   }
   throw new Error('Timeout waiting for server to restart');
 }

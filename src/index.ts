@@ -878,6 +878,34 @@ class RouteCodexApp {
     };
   }
 
+  getServerConfig(): { host: string; port: number } | null {
+    if (!this.httpServer) {
+      return null;
+    }
+    try {
+      const config = this.httpServer.getServerConfig();
+      if (!config || !Number.isFinite(config.port) || config.port <= 0) {
+        return null;
+      }
+      return { host: String(config.host || '0.0.0.0'), port: Number(config.port) };
+    } catch {
+      return null;
+    }
+  }
+
+  async restartRuntimeFromDisk(): Promise<{ reloadedAt: number; configPath: string; warnings?: string[] }> {
+    if (!this.httpServer) {
+      throw new Error('HTTP server not initialized');
+    }
+    const runtimeRestart = (this.httpServer as unknown as {
+      restartRuntimeFromDisk?: () => Promise<{ reloadedAt: number; configPath: string; warnings?: string[] }>;
+    }).restartRuntimeFromDisk;
+    if (typeof runtimeRestart !== 'function') {
+      throw new Error('HTTP runtime restart hook unavailable');
+    }
+    return await runtimeRestart.call(this.httpServer);
+  }
+
   /**
    * Detect server port from user configuration
    */
@@ -1357,6 +1385,11 @@ async function ensureRestartEntryReady(argv: string[]): Promise<{ ready: boolean
   }
 }
 
+function resolveRestartMode(): 'runtime' | 'process' {
+  const raw = String(process.env.ROUTECODEX_RESTART_MODE || process.env.RCC_RESTART_MODE || '').trim().toLowerCase();
+  return raw === 'process' ? 'process' : 'runtime';
+}
+
 async function restartSelf(app: RouteCodexApp, signal: NodeJS.Signals): Promise<void> {
   if (restartInProgress) {
     return;
@@ -1368,10 +1401,53 @@ async function restartSelf(app: RouteCodexApp, signal: NodeJS.Signals): Promise<
     source: 'index.restartSelf',
     details: { signal }
   });
-  console.log(`\n🔄 Restart signal received (${signal}). Restarting RouteCodex server process...`);
+  console.log(`\n🔄 Restart signal received (${signal}).`);
+
+  const restartMode = resolveRestartMode();
+  if (restartMode === 'runtime') {
+    try {
+      const result = await app.restartRuntimeFromDisk();
+      logProcessLifecycle({
+        event: 'restart_runtime_reloaded',
+        source: 'index.restartSelf',
+        details: {
+          signal,
+          configPath: result.configPath,
+          reloadedAt: result.reloadedAt
+        }
+      });
+      console.log(
+        `[routecodex:restart] runtime reloaded from ${result.configPath} at ${new Date(result.reloadedAt).toISOString()}`
+      );
+      restartInProgress = false;
+      return;
+    } catch (error) {
+      await reportCliError(
+        'SERVER_RESTART_RUNTIME_RELOAD_FAILED',
+        'Failed to reload runtime in-place',
+        error,
+        'high',
+        { signal, mode: 'runtime' }
+      ).catch(() => {});
+      console.error('❌ Runtime reload failed:', error);
+      restartInProgress = false;
+      return;
+    }
+  }
+
+  console.log('🔁 Falling back to process replacement restart mode.');
 
   const argv = process.argv.slice(1);
   const env = { ...process.env } as NodeJS.ProcessEnv;
+  const currentServerConfig = app.getServerConfig();
+  if (currentServerConfig?.port && Number.isFinite(currentServerConfig.port) && currentServerConfig.port > 0) {
+    env.ROUTECODEX_PORT = String(currentServerConfig.port);
+    env.RCC_PORT = String(currentServerConfig.port);
+    env.ROUTECODEX_HTTP_PORT = String(currentServerConfig.port);
+    if (typeof currentServerConfig.host === 'string' && currentServerConfig.host.trim()) {
+      env.ROUTECODEX_HTTP_HOST = currentServerConfig.host;
+    }
+  }
   env.ROUTECODEX_RESTARTED_AT = String(Date.now());
   // IMPORTANT: avoid inheriting a stale ROUTECODEX_VERSION across restarts.
   // The child process should re-resolve version from the current code/package on disk.
@@ -1452,8 +1528,9 @@ async function main(): Promise<void> {
   });
 
   // Restart signal:
-  // - CLI sends SIGUSR2 to ask the server to restart with new code/config from disk.
-  // - The server respawns itself (same argv), then exits.
+  // - CLI sends SIGUSR2 to request runtime reload.
+  // - Default mode is in-process runtime reload from disk.
+  // - Set ROUTECODEX_RESTART_MODE=process to use process replacement restart.
   if (process.platform !== 'win32') {
     process.on('SIGUSR2', () => {
       logProcessLifecycle({

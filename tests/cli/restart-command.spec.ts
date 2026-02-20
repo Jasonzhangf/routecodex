@@ -132,4 +132,40 @@ describe('cli restart command', () => {
     await program.parseAsync(['node', 'routecodex', 'restart', '--port', '5520'], { from: 'node' });
     expect(signals).toEqual([{ pid: 333, signal: 'SIGUSR2' }]);
   });
+
+  it('accepts same-pid healthy restart without timing out', async () => {
+    const program = new Command();
+    const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
+    createRestartCommand(program, {
+      isDevPackage: true,
+      isWindows: false,
+      defaultDevPort: 5520,
+      createSpinner: async () => createStubSpinner(),
+      logger: { info: () => {}, error: () => {} },
+      findListeningPids: () => [777],
+      sleep: async () => {},
+      sendSignal: (pid, signal) => {
+        signals.push({ pid, signal });
+      },
+      fetch: (async () => ({ ok: true, json: async () => ({ server: 'routecodex', status: 'ok' }) })) as any,
+      env: {},
+      fsImpl: {
+        existsSync: () => true,
+        readFileSync: () =>
+          JSON.stringify({
+            httpserver: { port: 5520, host: '127.0.0.1' },
+            virtualrouter: { providers: { tabglm: { id: 'tabglm', enabled: true } } }
+          }),
+        writeFileSync: () => {}
+      } as any,
+      pathImpl: { join: (...parts: string[]) => parts.join('/') } as any,
+      getHomeDir: () => '/home/test',
+      exit: (code) => {
+        throw new Error(`exit:${code}`);
+      }
+    });
+
+    await program.parseAsync(['node', 'routecodex', 'restart'], { from: 'node' });
+    expect(signals).toEqual([{ pid: 777, signal: 'SIGUSR2' }]);
+  });
 });
