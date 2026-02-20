@@ -46,11 +46,11 @@ async function createTempUserConfig(): Promise<string> {
   return filePath;
 }
 
-function createTestConfig(port: number, configPath: string, apikey?: string): ServerConfigV2 {
+function createTestConfig(port: number, configPath: string, apikey?: string, host = '127.0.0.1'): ServerConfigV2 {
   return {
     configPath,
     server: {
-      host: '127.0.0.1',
+      host,
       port,
       ...(apikey ? { apikey } : {})
     },
@@ -63,7 +63,7 @@ function createTestConfig(port: number, configPath: string, apikey?: string): Se
   };
 }
 
-async function startTestServer(): Promise<{
+async function startTestServer(host = '127.0.0.1'): Promise<{
   server: RouteCodexHttpServer;
   baseUrl: string;
   configPath: string;
@@ -87,7 +87,7 @@ async function startTestServer(): Promise<{
     for (const fn of restores.reverse()) fn();
   };
   const apikey = 'test-http-apikey';
-  const tmpConfig = createTestConfig(0, configPath, apikey);
+  const tmpConfig = createTestConfig(0, configPath, apikey, host);
   const server = new RouteCodexHttpServer(tmpConfig);
   // 使用私有方法启动监听，以便读取实际端口；这里复用 start() 逻辑。
   await server.start();
@@ -316,6 +316,38 @@ describe('Daemon admin HTTP endpoints (smoke)', () => {
     }
   });
 
+  it('skips daemon-admin password auth when bind host is loopback', async () => {
+    const { server, baseUrl, configDir, restoreEnv } = await startTestServer('127.0.0.1');
+    try {
+      const authStatus = await getJson(baseUrl, '/daemon/auth/status');
+      expect(authStatus.status).toBe(200);
+      expect(authStatus.body).toHaveProperty('authRequired', false);
+      expect(authStatus.body).toHaveProperty('authenticated', true);
+
+      const status = await getJson(baseUrl, '/daemon/status');
+      expect(status.status).toBe(200);
+      expect(status.body).toHaveProperty('ok', true);
+    } finally {
+      await stopTestServer(server, configDir, restoreEnv);
+    }
+  });
+
+  it('requires daemon-admin auth when bind host is non-loopback', async () => {
+    const { server, baseUrl, configDir, restoreEnv } = await startTestServer('0.0.0.0');
+    try {
+      const authStatus = await getJson(baseUrl, '/daemon/auth/status');
+      expect(authStatus.status).toBe(200);
+      expect(authStatus.body).toHaveProperty('authRequired', true);
+      expect(authStatus.body).toHaveProperty('authenticated', false);
+
+      const status = await getJson(baseUrl, '/daemon/status');
+      expect(status.status).toBe(401);
+      expect(status.body).toHaveProperty('error.code', 'unauthorized');
+    } finally {
+      await stopTestServer(server, configDir, restoreEnv);
+    }
+  });
+
   it('does not expose legacy /daemon/clock-admin route', async () => {
     const { server, baseUrl, configDir, restoreEnv } = await startTestServer();
     try {
@@ -344,7 +376,7 @@ describe('Daemon admin HTTP endpoints (smoke)', () => {
   });
 
   it('logout clears server-side session entry', async () => {
-    const { server, baseUrl, configDir, restoreEnv } = await startTestServer();
+    const { server, baseUrl, configDir, restoreEnv } = await startTestServer('0.0.0.0');
     try {
       const cookie = await setupDaemonAdminAuth(baseUrl);
 

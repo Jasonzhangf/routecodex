@@ -11,14 +11,14 @@ import {
 } from '../../webui/src/App';
 
 describe('webui render smoke', () => {
-  it('renders top-level app shell with five primary nav labels', () => {
+  it('renders top-level app shell with integrated navigation labels', () => {
     const html = renderToString(<App />);
-    expect(html).toContain('Provider');
-    expect(html).toContain('OAuth');
-    expect(html).toContain('Routing');
-    expect(html).toContain('Stats');
-    expect(html).toContain('Quota');
-    expect(html).toContain('Advanced');
+    expect(html).toContain('Providers');
+    expect(html).toContain('Routing &amp; Capacity');
+    expect(html).toContain('Ops');
+    expect(html).toContain('Provider Catalog');
+    expect(html).toContain('OAuth &amp; Credentials');
+    expect(html).toContain('Refresh View (R)');
   });
 
   it('renders each major page panel title without crashing', () => {

@@ -10,11 +10,16 @@ import {
 } from '../../../modules/llmswitch/bridge.js';
 import { getClockClientRegistry } from './clock-client-registry.js';
 import { toExactMatchClockConfig } from './clock-daemon-inject-config.js';
-import { shouldClearClockTasksForInjectSkip, shouldLogClockDaemonInjectSkip } from './clock-daemon-log-throttle.js';
+import {
+  shouldClearClockTasksForInjectSkip,
+  shouldLogClockDaemonCleanupAudit,
+  shouldLogClockDaemonInjectSkip
+} from './clock-daemon-log-throttle.js';
 import { isTmuxSessionAlive, killManagedTmuxSession } from './tmux-session-probe.js';
 import { terminateManagedClientProcess } from './managed-process-probe.js';
 
 const CLOCK_DAEMON_SESSION_PREFIX = 'clockd.';
+const CLOCK_CLEANUP_AUDIT_SAMPLE_LIMIT = 3;
 
 function readString(value: unknown): string | undefined {
   if (typeof value !== 'string') {
@@ -102,6 +107,37 @@ function resolveBoolFromEnv(value: string | undefined, fallback: boolean): boole
     return false;
   }
   return fallback;
+}
+
+function shouldEnableClockCleanupAuditLog(): boolean {
+  return resolveBoolFromEnv(
+    process.env.ROUTECODEX_CLOCK_DAEMON_CLEANUP_AUDIT_LOG ?? process.env.RCC_CLOCK_DAEMON_CLEANUP_AUDIT_LOG,
+    false
+  );
+}
+
+function summarizeStringList(values: string[]): { count: number; sample: string[] } {
+  if (!Array.isArray(values) || values.length < 1) {
+    return { count: 0, sample: [] };
+  }
+  const normalized = values
+    .map((entry) => readString(entry))
+    .filter((entry): entry is string => Boolean(entry));
+  return {
+    count: normalized.length,
+    sample: normalized.slice(0, CLOCK_CLEANUP_AUDIT_SAMPLE_LIMIT)
+  };
+}
+
+function summarizeNumberList(values: number[]): { count: number; sample: number[] } {
+  if (!Array.isArray(values) || values.length < 1) {
+    return { count: 0, sample: [] };
+  }
+  const normalized = values.filter((entry) => Number.isFinite(entry)).map((entry) => Math.floor(entry));
+  return {
+    count: normalized.length,
+    sample: normalized.slice(0, CLOCK_CLEANUP_AUDIT_SAMPLE_LIMIT)
+  };
 }
 
 function isClockManagedTerminationEnabled(): boolean {
@@ -204,6 +240,7 @@ export async function tickClockDaemonInjectLoop(server: any): Promise<void> {
     const now = Date.now();
     const cleanupRequestId = `clock_cleanup_${now}_${Math.random().toString(16).slice(2, 8)}`;
     const allowManagedTermination = isClockManagedTerminationEnabled();
+    const enableCleanupAuditLog = shouldEnableClockCleanupAuditLog();
 
     const deadTmuxCleanup = registry.cleanupDeadTmuxSessions({
       isTmuxSessionAlive,
@@ -252,7 +289,26 @@ export async function tickClockDaemonInjectLoop(server: any): Promise<void> {
     }
 
     const hasCleanupActions = staleCleanup.removedDaemonIds.length > 0 || deadTmuxCleanup.removedDaemonIds.length > 0;
-    if (hasCleanupActions && Date.now() - server.lastClockDaemonCleanupAtMs > 2000) {
+    if (
+      hasCleanupActions
+      && enableCleanupAuditLog
+      && Date.now() - server.lastClockDaemonCleanupAtMs > 2000
+      && shouldLogClockDaemonCleanupAudit({
+        cache: server.clockDaemonCleanupLogByKey,
+        input: {
+          managedTerminationEnabled: allowManagedTermination,
+          staleRemovedDaemonIds: staleCleanup.removedDaemonIds,
+          staleRemovedTmuxSessionIds: staleCleanup.removedTmuxSessionIds,
+          deadRemovedDaemonIds: deadTmuxCleanup.removedDaemonIds,
+          deadRemovedTmuxSessionIds: deadTmuxCleanup.removedTmuxSessionIds,
+          failedKillTmuxSessionIds: [...staleCleanup.failedKillTmuxSessionIds, ...deadTmuxCleanup.failedKillTmuxSessionIds],
+          failedKillManagedClientPids: [
+            ...staleCleanup.failedKillManagedClientPids,
+            ...deadTmuxCleanup.failedKillManagedClientPids
+          ]
+        }
+      })
+    ) {
       server.lastClockDaemonCleanupAtMs = Date.now();
       console.log('[RouteCodexHttpServer] clock daemon cleanup audit:', {
         requestId: cleanupRequestId,
@@ -260,27 +316,27 @@ export async function tickClockDaemonInjectLoop(server: any): Promise<void> {
         staleHeartbeat: {
           reason: 'heartbeat_timeout',
           staleAfterMs: staleCleanup.staleAfterMs,
-          removedDaemonIds: staleCleanup.removedDaemonIds,
-          removedTmuxSessionIds: staleCleanup.removedTmuxSessionIds,
-          removedConversationSessionIds: staleCleanup.removedConversationSessionIds,
-          killedTmuxSessionIds: staleCleanup.killedTmuxSessionIds,
-          failedKillTmuxSessionIds: staleCleanup.failedKillTmuxSessionIds,
-          skippedKillTmuxSessionIds: staleCleanup.skippedKillTmuxSessionIds,
-          killedManagedClientPids: staleCleanup.killedManagedClientPids,
-          failedKillManagedClientPids: staleCleanup.failedKillManagedClientPids,
-          skippedKillManagedClientPids: staleCleanup.skippedKillManagedClientPids
+          removedDaemonIds: summarizeStringList(staleCleanup.removedDaemonIds),
+          removedTmuxSessionIds: summarizeStringList(staleCleanup.removedTmuxSessionIds),
+          removedConversationSessionIds: summarizeStringList(staleCleanup.removedConversationSessionIds),
+          killedTmuxSessionIds: summarizeStringList(staleCleanup.killedTmuxSessionIds),
+          failedKillTmuxSessionIds: summarizeStringList(staleCleanup.failedKillTmuxSessionIds),
+          skippedKillTmuxSessionIds: summarizeStringList(staleCleanup.skippedKillTmuxSessionIds),
+          killedManagedClientPids: summarizeNumberList(staleCleanup.killedManagedClientPids),
+          failedKillManagedClientPids: summarizeNumberList(staleCleanup.failedKillManagedClientPids),
+          skippedKillManagedClientPids: summarizeNumberList(staleCleanup.skippedKillManagedClientPids)
         },
         deadTmux: {
           reason: 'tmux_not_alive',
-          removedDaemonIds: deadTmuxCleanup.removedDaemonIds,
-          removedTmuxSessionIds: deadTmuxCleanup.removedTmuxSessionIds,
-          removedConversationSessionIds: deadTmuxCleanup.removedConversationSessionIds,
-          killedTmuxSessionIds: deadTmuxCleanup.killedTmuxSessionIds,
-          failedKillTmuxSessionIds: deadTmuxCleanup.failedKillTmuxSessionIds,
-          skippedKillTmuxSessionIds: deadTmuxCleanup.skippedKillTmuxSessionIds,
-          killedManagedClientPids: deadTmuxCleanup.killedManagedClientPids,
-          failedKillManagedClientPids: deadTmuxCleanup.failedKillManagedClientPids,
-          skippedKillManagedClientPids: deadTmuxCleanup.skippedKillManagedClientPids
+          removedDaemonIds: summarizeStringList(deadTmuxCleanup.removedDaemonIds),
+          removedTmuxSessionIds: summarizeStringList(deadTmuxCleanup.removedTmuxSessionIds),
+          removedConversationSessionIds: summarizeStringList(deadTmuxCleanup.removedConversationSessionIds),
+          killedTmuxSessionIds: summarizeStringList(deadTmuxCleanup.killedTmuxSessionIds),
+          failedKillTmuxSessionIds: summarizeStringList(deadTmuxCleanup.failedKillTmuxSessionIds),
+          skippedKillTmuxSessionIds: summarizeStringList(deadTmuxCleanup.skippedKillTmuxSessionIds),
+          killedManagedClientPids: summarizeNumberList(deadTmuxCleanup.killedManagedClientPids),
+          failedKillManagedClientPids: summarizeNumberList(deadTmuxCleanup.failedKillManagedClientPids),
+          skippedKillManagedClientPids: summarizeNumberList(deadTmuxCleanup.skippedKillManagedClientPids)
         }
       });
     }

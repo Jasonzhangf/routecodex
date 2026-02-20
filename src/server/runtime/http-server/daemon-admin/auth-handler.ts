@@ -1,5 +1,5 @@
 import type { Application, Request, Response } from 'express';
-import { isLocalRequest } from '../daemon-admin-routes.js';
+import { isDaemonAdminAuthRequired, isLocalRequest } from '../daemon-admin-routes.js';
 import { establishDaemonSession, isDaemonSessionAuthenticated, clearDaemonSessionFromRequest } from './auth-session.js';
 import { readDaemonLoginRecord, verifyDaemonPassword, writeDaemonLoginRecord } from './auth-store.js';
 
@@ -12,6 +12,7 @@ function normalizePassword(value: unknown): string {
 
 export function registerDaemonAuthRoutes(app: Application): void {
   app.get('/daemon/auth/status', async (req: Request, res: Response) => {
+    const authRequired = isDaemonAdminAuthRequired(req);
     const loaded = await readDaemonLoginRecord();
     if (!loaded.ok) {
       res.status(500).json({ error: { message: loaded.error.message, code: 'login_file_error' } });
@@ -19,8 +20,9 @@ export function registerDaemonAuthRoutes(app: Application): void {
     }
     res.status(200).json({
       ok: true,
-      hasPassword: Boolean(loaded.record),
-      authenticated: isDaemonSessionAuthenticated(req)
+      authRequired,
+      hasPassword: authRequired ? Boolean(loaded.record) : false,
+      authenticated: authRequired ? isDaemonSessionAuthenticated(req) : true
     });
   });
 

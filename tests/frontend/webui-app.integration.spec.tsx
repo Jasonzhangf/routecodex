@@ -565,13 +565,18 @@ describe('webui integration flows (feature coverage)', () => {
           return json({ error: { message: 'clock fetch failed' } }, 500);
         }
         return json({
-          tasks: [
+          sessions: [
             {
-              id: 'clock-1',
-              status: 'scheduled',
-              dueAtMs: Date.now() + 60_000,
-              tool: 'mockTool',
-              sessionId: 'session-1'
+              sessionId: 'session-1',
+              taskCount: 1,
+              tasks: [
+                {
+                  id: 'clock-1',
+                  status: 'scheduled',
+                  dueAtMs: Date.now() + 60_000,
+                  tool: 'mockTool'
+                }
+              ]
             }
           ],
           records: [
@@ -603,7 +608,9 @@ describe('webui integration flows (feature coverage)', () => {
     hit('provider.list');
 
     const panelByTitle = (title: string) => {
-      const node = screen.getByText(title);
+      const node = screen
+        .getAllByText(title)
+        .find((item) => item.classList.contains('card-title') || item.classList.contains('card-sub')) || screen.getAllByText(title)[0];
       const panel = node.closest('.panel');
       if (!panel) throw new Error(`panel not found for ${title}`);
       return panel as HTMLElement;
@@ -647,7 +654,7 @@ describe('webui integration flows (feature coverage)', () => {
     hit('provider.delete');
 
     // OAuth page
-    fireEvent.click(screen.getByText('OAuth'));
+    fireEvent.click(screen.getByText('OAuth & Credentials'));
     await waitFor(() => expect(screen.getByText('Auth Inventory')).toBeTruthy());
 
     const oauthPanel = panelByTitle('OAuth Workbench');
@@ -674,7 +681,8 @@ describe('webui integration flows (feature coverage)', () => {
     hit('oauth.verify_open');
 
     // Routing page
-    fireEvent.click(screen.getByText('Routing'));
+    fireEvent.click(screen.getByText('Routing & Capacity'));
+    fireEvent.click(screen.getByText('Routing Groups'));
     await waitFor(() => expect(screen.getByText('Routing Management')).toBeTruthy());
 
     fireEvent.change(screen.getByPlaceholderText('new group id'), { target: { value: 'canary' } });
@@ -695,13 +703,15 @@ describe('webui integration flows (feature coverage)', () => {
     hit('routing.activate_all');
 
     // Stats page
+    fireEvent.click(screen.getByText('Ops'));
     fireEvent.click(screen.getByText('Stats'));
     await waitFor(() => expect(screen.getByText('Stats Management')).toBeTruthy());
     fireEvent.click(within(panelByTitle('Stats Management')).getByText('Refresh'));
     hit('stats.refresh');
 
     // Quota page
-    fireEvent.click(screen.getByText('Quota'));
+    fireEvent.click(screen.getByText('Routing & Capacity'));
+    fireEvent.click(screen.getByText('Quota Pool'));
     await waitFor(() => expect(screen.getByText('Quota Pool Management')).toBeTruthy());
     const quotaPanel = panelByTitle('Quota Pool Management');
 
@@ -729,9 +739,10 @@ describe('webui integration flows (feature coverage)', () => {
     await waitFor(() => expect(screen.getByText(/Quota snapshot refreshed\./)).toBeTruthy());
     hit('quota.snapshot_refresh');
 
-    // Advanced Control
-    fireEvent.click(screen.getByText('Advanced'));
-    await waitFor(() => expect(screen.getByText('Control Plane')).toBeTruthy());
+    // Ops / Control Plane
+    fireEvent.click(screen.getByText('Ops'));
+    fireEvent.click(screen.getByText('Control Plane'));
+    await waitFor(() => expect(panelByTitle('Control Plane')).toBeTruthy());
     const controlPanel = panelByTitle('Control Plane');
 
     fireEvent.click(within(controlPanel).getByText('Restart All Servers'));
@@ -745,11 +756,12 @@ describe('webui integration flows (feature coverage)', () => {
     await waitFor(() => expect(screen.getByText(/quota\.disable done\./)).toBeTruthy());
     hit('advanced.control_quota_offline');
 
-    // Advanced Clock
+    // Ops / Clock
     fireEvent.click(screen.getByText('Clock'));
     await waitFor(() => expect(screen.getByText('Clock Tasks')).toBeTruthy());
     fireEvent.click(within(panelByTitle('Clock Tasks')).getByText('Refresh'));
     await waitFor(() => expect(screen.getByText(/Clock snapshot refreshed\./)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('clock-1')).toBeTruthy());
     hit('advanced.clock_refresh');
 
     // Auth flows: logout + login + change password
@@ -803,11 +815,16 @@ describe('webui integration flows (feature coverage)', () => {
     await waitFor(() => expect(screen.getByText('Provider Pool')).toBeTruthy());
 
     const panelByTitle = (title: string) => {
-      const node = screen.getByText(title);
+      const node = screen
+        .getAllByText(title)
+        .find((item) => item.classList.contains('card-title') || item.classList.contains('card-sub')) || screen.getAllByText(title)[0];
       const panel = node.closest('.panel');
       if (!panel) throw new Error(`panel not found for ${title}`);
       return panel as HTMLElement;
     };
+
+    const providerPoolPanel = panelByTitle('Provider Pool');
+    fireEvent.click(within(providerPoolPanel).getByText('New'));
 
     const providerEditorPanel = panelByTitle('Provider Editor');
     fireEvent.click(within(providerEditorPanel).getByText('Save'));
@@ -824,7 +841,7 @@ describe('webui integration flows (feature coverage)', () => {
     await waitFor(() => expect(screen.getByText(/api key is required/i)).toBeTruthy());
     expect((within(modelPanel).getByText('Apply to provider') as HTMLButtonElement).disabled).toBe(true);
 
-    fireEvent.click(screen.getByText('OAuth'));
+    fireEvent.click(screen.getByText('OAuth & Credentials'));
     await waitFor(() => expect(screen.getByText('OAuth Workbench')).toBeTruthy());
     const oauthPanel = panelByTitle('OAuth Workbench');
     const providerSelect = oauthPanel.querySelectorAll('select')[1] as HTMLSelectElement;
@@ -836,7 +853,8 @@ describe('webui integration flows (feature coverage)', () => {
     fireEvent.click(within(oauthPanel).getByText('Copy URL'));
     await waitFor(() => expect(screen.getByText(/No verify URL available\./i)).toBeTruthy());
 
-    fireEvent.click(screen.getByText('Routing'));
+    fireEvent.click(screen.getByText('Routing & Capacity'));
+    fireEvent.click(screen.getByText('Routing Groups'));
     await waitFor(() => expect(screen.getByText('Routing Management')).toBeTruthy());
     const routingPanel = panelByTitle('Routing Management');
     fireEvent.click(screen.getByText('Create/Copy Group'));
@@ -855,7 +873,8 @@ describe('webui integration flows (feature coverage)', () => {
     fireEvent.click(screen.getByText('Delete Group'));
     await waitFor(() => expect(screen.getAllByText(/cannot delete active group/i).length).toBeGreaterThan(0));
 
-    fireEvent.click(screen.getByText('Quota'));
+    fireEvent.click(screen.getByText('Routing & Capacity'));
+    fireEvent.click(screen.getByText('Quota Pool'));
     await waitFor(() => expect(screen.getByText('Quota Pool Management')).toBeTruthy());
     const quotaPanel = panelByTitle('Quota Pool Management');
     fireEvent.click(within(quotaPanel).getByText('Refresh Provider Pool'));
@@ -865,8 +884,9 @@ describe('webui integration flows (feature coverage)', () => {
     fireEvent.click(within(bulkRow).getByText('Offline'));
     await waitFor(() => expect(screen.getByText(/providerKey required or select rows/i)).toBeTruthy());
 
-    fireEvent.click(screen.getByText('Advanced'));
-    await waitFor(() => expect(screen.getByText('Control Plane')).toBeTruthy());
+    fireEvent.click(screen.getByText('Ops'));
+    fireEvent.click(screen.getByText('Control Plane'));
+    await waitFor(() => expect(panelByTitle('Control Plane')).toBeTruthy());
     fireEvent.click(within(panelByTitle('Control Plane')).getByText('Restart All Servers'));
     await waitFor(() => expect(screen.getAllByText(/control mutate failed/i).length).toBeGreaterThan(0));
 

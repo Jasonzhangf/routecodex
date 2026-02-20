@@ -153,6 +153,7 @@ export class RouteCodexHttpServer {
   private clockDaemonInjectTickInFlight = false;
   private lastClockDaemonInjectErrorAtMs = 0;
   private readonly clockDaemonInjectSkipLogByKey: Map<string, number> = new Map();
+  private readonly clockDaemonCleanupLogByKey: Map<string, number> = new Map();
   private lastClockDaemonCleanupAtMs = 0;
   private readonly requestExecutor: RequestExecutor;
 

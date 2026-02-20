@@ -200,7 +200,8 @@ export function registerHttpRoutes(options: RouteOptions): void {
     getServerId: () =>
       (typeof options.getServerId === 'function'
         ? options.getServerId()
-        : `${config.server.host}:${config.server.port}`)
+        : `${config.server.host}:${config.server.port}`),
+    getServerHost: () => String(config.server.host || '')
   });
 
   // Local-only clock client daemon endpoints (register/heartbeat/inject/unregister)

@@ -34,6 +34,13 @@ export interface DaemonAdminRouteOptions {
    */
   getExpectedApiKey?: () => string | undefined;
   /**
+   * Return the bind host used by current HTTP server instance.
+   * Daemon-admin auth policy is host-aware:
+   * - loopback host (127.0.0.1/localhost/::1): no password session required
+   * - non-loopback host (e.g. 0.0.0.0): password session required
+   */
+  getServerHost?: () => string;
+  /**
    * 触发服务重新读取 config 并重建 runtime（不退出进程）。
    */
   restartRuntimeFromDisk?: () => Promise<{
@@ -53,7 +60,37 @@ export function isLocalRequest(req: Request): boolean {
   return ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
 }
 
+const DAEMON_ADMIN_AUTH_REQUIRED_LOCAL_KEY = '__routecodexDaemonAdminAuthRequired';
+
+function normalizeHost(value: unknown): string {
+  if (typeof value !== 'string') {
+    return '';
+  }
+  return value.trim().toLowerCase();
+}
+
+function isLoopbackBindHost(hostRaw: unknown): boolean {
+  const host = normalizeHost(hostRaw);
+  return host === '127.0.0.1' || host === 'localhost' || host === '::1' || host === '::ffff:127.0.0.1';
+}
+
+function setDaemonAdminAuthRequiredForApp(app: Application, required: boolean): void {
+  (app.locals as Record<string, unknown>)[DAEMON_ADMIN_AUTH_REQUIRED_LOCAL_KEY] = required;
+}
+
+export function isDaemonAdminAuthRequired(req: Request): boolean {
+  const raw = (req.app?.locals as Record<string, unknown> | undefined)?.[DAEMON_ADMIN_AUTH_REQUIRED_LOCAL_KEY];
+  if (typeof raw === 'boolean') {
+    return raw;
+  }
+  // Fail safe: require auth when policy is unavailable.
+  return true;
+}
+
 export function isDaemonAdminAuthenticated(req: Request): boolean {
+  if (!isDaemonAdminAuthRequired(req)) {
+    return true;
+  }
   return isDaemonSessionAuthenticated(req);
 }
 
@@ -78,6 +115,8 @@ export function rejectNonLocalOrUnauthorizedAdmin(
 
 export function registerDaemonAdminRoutes(options: DaemonAdminRouteOptions): void {
   const { app } = options;
+  const bindHost = typeof options.getServerHost === 'function' ? options.getServerHost() : '';
+  setDaemonAdminAuthRequiredForApp(app, !isLoopbackBindHost(bindHost));
 
   // Daemon admin password auth (setup/login/logout/status)
   registerDaemonAuthRoutes(app);

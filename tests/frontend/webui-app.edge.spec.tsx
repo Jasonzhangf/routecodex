@@ -531,7 +531,16 @@ describe('webui edge coverage', () => {
             daemonRecords: [{ daemonId: 'd-fallback', tmuxSession: 'tmux-fallback', heartbeatAtMs: Date.now(), status: 'online', lastError: '' }]
           });
         }
-        return responseJson({ tasks: [], daemonRecords: [] });
+        return responseJson({
+          sessions: [
+            {
+              sessionId: 'sid-a',
+              taskCount: 1,
+              tasks: [{ id: 'clock-session-task', status: 'scheduled', dueAtMs: Date.now() + 5000, tool: 'tool-b' }]
+            }
+          ],
+          records: [{ daemonId: 'd-session', tmuxSessionId: 'tmux-session', heartbeatAt: Date.now(), status: 'online', lastError: '' }]
+        });
       }
 
       return responseJson({});
@@ -608,7 +617,7 @@ describe('webui edge coverage', () => {
 
     fireEvent.change(screen.getByPlaceholderText('conversation session id'), { target: { value: 'sid-a' } });
     fireEvent.click(screen.getByText('Refresh'));
-    await waitFor(() => expect(screen.getByText('No clock tasks.')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('clock-session-task')).toBeTruthy());
     clockView.unmount();
   });
 });
