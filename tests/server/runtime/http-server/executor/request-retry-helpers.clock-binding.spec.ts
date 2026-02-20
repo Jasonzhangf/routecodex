@@ -62,4 +62,24 @@ describe('bindClockConversationSession', () => {
       conversationSessionId: 'session_only'
     });
   });
+
+  it('falls back to conversationId when sessionId is absent', async () => {
+    jest.resetModules();
+    mockBindConversationSession.mockReset();
+    mockGetClockClientRegistry.mockClear();
+
+    const { bindClockConversationSession } = await import(
+      '../../../../../src/server/runtime/http-server/executor/request-retry-helpers.js'
+    );
+
+    bindClockConversationSession({
+      conversationId: 'conv_only'
+    });
+
+    expect(mockGetClockClientRegistry).toHaveBeenCalledTimes(1);
+    expect(mockBindConversationSession).toHaveBeenCalledTimes(1);
+    expect(mockBindConversationSession).toHaveBeenCalledWith({
+      conversationSessionId: 'conv_only'
+    });
+  });
 });

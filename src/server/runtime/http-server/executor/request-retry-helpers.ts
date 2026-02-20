@@ -209,7 +209,12 @@ function resolveClockConversationSessionId(metadata: Record<string, unknown>): s
   if (daemonId) {
     return `clockd.${daemonId}`;
   }
-  return normalizeSessionToken(metadata.sessionId);
+  return (
+    normalizeSessionToken(metadata.sessionId)
+    ?? normalizeSessionToken(metadata.session_id)
+    ?? normalizeSessionToken(metadata.conversationId)
+    ?? normalizeSessionToken(metadata.conversation_id)
+  );
 }
 
 function inferClockClientTypeFromMetadata(metadata: Record<string, unknown>): string | undefined {
