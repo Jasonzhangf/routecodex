@@ -10,6 +10,7 @@ const buildMode = buildModeRaw === 'dev' ? 'dev' : 'release';
 const tsc = path.join(root, 'node_modules', 'typescript', 'bin', 'tsc');
 const proj = path.join(root, 'sharedmodule', 'llmswitch-core', 'tsconfig.json');
 const coreRoot = path.join(root, 'sharedmodule', 'llmswitch-core');
+const nativeBuildScript = path.join(coreRoot, 'scripts', 'build-native-hotpath.mjs');
 const outDir = path.join(coreRoot, 'dist');
 const requiredOutputs = [
   path.join(outDir, 'bridge', 'routecodex-adapter.js'),
@@ -75,6 +76,16 @@ function shouldSkipBuild() {
   return distMtime >= srcMtime;
 }
 
+function runNativeBuild() {
+  if (!fs.existsSync(nativeBuildScript)) {
+    fail(`native build script missing: ${nativeBuildScript}`);
+  }
+  const res = spawnSync(process.execPath, [nativeBuildScript], { stdio: 'inherit', cwd: coreRoot });
+  if ((res.status ?? 0) !== 0) {
+    fail('native build failed for llmswitch-core');
+  }
+}
+
 if (!fs.existsSync(tsc)) fail('TypeScript not installed in root node_modules. Run npm i.');
 if (!fs.existsSync(proj)) {
   console.log('[build-core] llmswitch-core source not found under sharedmodule; skip local core build (依赖包将用于运行/打包)');
@@ -92,6 +103,7 @@ if (skip === '1' || skip === 'true' || skip === 'yes') {
   console.log('[build-core] skip requested by env (ROUTECODEX_SKIP_CORE_BUILD/SKIP_CORE_BUILD)');
   process.exit(0);
 }
+runNativeBuild();
 if (shouldSkipBuild()) {
   console.log('[build-core] dist up-to-date; skip rebuild:', outDir);
   process.exit(0);
