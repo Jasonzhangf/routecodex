@@ -43,7 +43,7 @@ describe('bindClockConversationSession', () => {
     });
   });
 
-  it('skips binding when both daemonId and tmuxSessionId are absent', async () => {
+  it('still attempts binding by conversation session when daemonId/tmuxSessionId are absent', async () => {
     jest.resetModules();
     mockBindConversationSession.mockReset();
     mockGetClockClientRegistry.mockClear();
@@ -56,7 +56,10 @@ describe('bindClockConversationSession', () => {
       sessionId: 'session_only'
     });
 
-    expect(mockGetClockClientRegistry).toHaveBeenCalledTimes(0);
-    expect(mockBindConversationSession).toHaveBeenCalledTimes(0);
+    expect(mockGetClockClientRegistry).toHaveBeenCalledTimes(1);
+    expect(mockBindConversationSession).toHaveBeenCalledTimes(1);
+    expect(mockBindConversationSession).toHaveBeenCalledWith({
+      conversationSessionId: 'session_only'
+    });
   });
 });

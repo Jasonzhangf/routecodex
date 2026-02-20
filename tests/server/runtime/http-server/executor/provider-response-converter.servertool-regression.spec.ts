@@ -6,9 +6,20 @@ const mockBridgeModule = () => ({
   convertProviderResponse: mockConvertProviderResponse,
   createSnapshotRecorder: mockCreateSnapshotRecorder
 });
+const mockInjectClockClientPromptWithResult = jest.fn(async () => ({ ok: true }));
+const mockUnbindConversationSession = jest.fn();
+const mockGetClockClientRegistry = jest.fn(() => ({
+  unbindConversationSession: mockUnbindConversationSession
+}));
+const mockClockRegistryModule = () => ({
+  injectClockClientPromptWithResult: mockInjectClockClientPromptWithResult,
+  getClockClientRegistry: mockGetClockClientRegistry
+});
 
 jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge.js', mockBridgeModule);
 jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge.ts', mockBridgeModule);
+jest.unstable_mockModule('../../../../../src/server/runtime/http-server/clock-client-registry.js', mockClockRegistryModule);
+jest.unstable_mockModule('../../../../../src/server/runtime/http-server/clock-client-registry.ts', mockClockRegistryModule);
 
 describe('provider-response-converter servertool regressions', () => {
   it('disables servertool orchestration when serverToolsEnabled=false', async () => {
@@ -193,5 +204,65 @@ describe('provider-response-converter servertool regressions', () => {
       status: 400,
       statusCode: 400
     });
+  });
+
+  it('fails followup when client inject cannot resolve tmux binding and unbinds stale session', async () => {
+    jest.resetModules();
+    mockConvertProviderResponse.mockReset();
+    mockCreateSnapshotRecorder.mockClear();
+    mockInjectClockClientPromptWithResult.mockReset();
+    mockInjectClockClientPromptWithResult.mockResolvedValue({
+      ok: false,
+      reason: 'no_matching_tmux_session_daemon'
+    });
+    mockGetClockClientRegistry.mockClear();
+    mockUnbindConversationSession.mockReset();
+
+    mockConvertProviderResponse.mockImplementation(async ({ reenterPipeline }) => {
+      await reenterPipeline({
+        entryEndpoint: '/v1/messages',
+        requestId: 'followup_req_inject_fail',
+        body: { messages: [{ role: 'user', content: '继续执行' }] },
+        metadata: {
+          __rt: { serverToolFollowup: true },
+          sessionId: 'sess_stale',
+          clientInjectOnly: true,
+          clientInjectText: '继续执行',
+          clientInjectSource: 'servertool.continue_execution'
+        }
+      });
+      return { body: { type: 'message', id: 'msg_followup_should_not_reach' } };
+    });
+
+    const { convertProviderResponseIfNeeded } = await import(
+      '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
+    );
+
+    await expect(
+      convertProviderResponseIfNeeded(
+        {
+          entryEndpoint: '/v1/messages',
+          providerProtocol: 'anthropic-messages',
+          requestId: 'req_inject_fail_1',
+          wantsStream: false,
+          response: { body: { id: 'upstream_body' } } as any,
+          pipelineMetadata: {}
+        },
+        {
+          runtimeManager: {
+            resolveRuntimeKey: () => undefined,
+            getHandleByRuntimeKey: () => undefined
+          },
+          executeNested: async () => ({ body: { ok: true } } as any)
+        }
+      )
+    ).rejects.toMatchObject({
+      code: 'SERVERTOOL_FOLLOWUP_FAILED',
+      upstreamCode: 'clock_client_inject_failed'
+    });
+
+    expect(mockInjectClockClientPromptWithResult).toHaveBeenCalledTimes(1);
+    expect(mockGetClockClientRegistry).toHaveBeenCalled();
+    expect(mockUnbindConversationSession).toHaveBeenCalledWith('sess_stale');
   });
 });

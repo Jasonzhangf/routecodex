@@ -616,6 +616,10 @@ export function getClockClientRegistry(): ClockClientRegistry {
   return singleton;
 }
 
+export async function injectClockClientPromptWithResult(args: ClockClientInjectArgs): Promise<ClockClientInjectResult> {
+  return await singleton.inject(args);
+}
+
 export async function injectClockClientPrompt(args: ClockClientInjectArgs): Promise<void> {
   try {
     await singleton.inject(args);

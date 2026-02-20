@@ -6,7 +6,10 @@ import {
   createSnapshotRecorder as bridgeCreateSnapshotRecorder
 } from '../../../../modules/llmswitch/bridge.js';
 import { applyClientConnectionStateToContext } from '../../../utils/client-connection-state.js';
-import { injectClockClientPrompt } from '../clock-client-registry.js';
+import {
+  getClockClientRegistry,
+  injectClockClientPromptWithResult
+} from '../clock-client-registry.js';
 import { bindClockConversationSession } from './request-retry-helpers.js';
 import {
   extractClientModelId,
@@ -72,6 +75,71 @@ function extractPreservedSessionToken(
     }
   }
   return undefined;
+}
+
+function shouldUnbindConversationSessionOnInjectFailure(reasonRaw: unknown): boolean {
+  const reason = typeof reasonRaw === 'string' ? reasonRaw.trim().toLowerCase() : '';
+  return (
+    reason === 'tmux_session_required' ||
+    reason === 'no_matching_tmux_session_daemon' ||
+    reason === 'workdir_mismatch' ||
+    reason === 'inject_failed'
+  );
+}
+
+async function injectClockClientPromptStrict(args: {
+  tmuxSessionId?: string;
+  sessionId?: string;
+  workdir?: string;
+  requestId?: string;
+  text: string;
+  source: string;
+}): Promise<void> {
+  const result = await injectClockClientPromptWithResult({
+    tmuxSessionId: args.tmuxSessionId,
+    sessionId: args.sessionId,
+    workdir: args.workdir,
+    requestId: args.requestId,
+    text: args.text,
+    source: args.source
+  });
+  if (result.ok) {
+    return;
+  }
+
+  const reason = typeof result.reason === 'string' ? result.reason : 'inject_failed';
+  const normalizedSessionId = typeof args.sessionId === 'string' ? args.sessionId.trim() : '';
+  if (normalizedSessionId && shouldUnbindConversationSessionOnInjectFailure(reason)) {
+    try {
+      getClockClientRegistry().unbindConversationSession(normalizedSessionId);
+    } catch {
+      // best-effort cleanup only
+    }
+  }
+
+  const error = new Error(
+    `[servertool.inject] clock client injection failed: ${reason}`
+  ) as Error & {
+    code?: string;
+    upstreamCode?: string;
+    details?: Record<string, unknown>;
+    status?: number;
+    statusCode?: number;
+    retryable?: boolean;
+  };
+  error.code = 'SERVERTOOL_FOLLOWUP_FAILED';
+  error.upstreamCode = 'clock_client_inject_failed';
+  error.details = {
+    reason,
+    source: args.source,
+    requestId: args.requestId,
+    sessionId: args.sessionId,
+    tmuxSessionId: args.tmuxSessionId
+  };
+  error.status = 503;
+  error.statusCode = 503;
+  error.retryable = false;
+  throw error;
 }
 
 export type ConvertProviderResponseOptions = {
@@ -343,7 +411,7 @@ export async function convertProviderResponseIfNeeded(
         };
         if (clientInjectOnly) {
           const injectText = clientInjectText || text || '继续执行';
-          await injectClockClientPrompt({
+          await injectClockClientPromptStrict({
             ...injectTarget,
             text: injectText,
             source: clientInjectSource
@@ -351,21 +419,27 @@ export async function convertProviderResponseIfNeeded(
           return { body: { ok: true, mode: 'client_inject_only' } };
         }
         if (text.includes('<**clock:{') && text.includes('}**>')) {
-          await injectClockClientPrompt({
+          await injectClockClientPromptStrict({
             ...injectTarget,
             text,
             source: 'servertool.reenter'
           });
         }
         if (lastToolRole === 'tool' && lastToolName === 'continue_execution') {
-          await injectClockClientPrompt({
+          await injectClockClientPromptStrict({
             ...injectTarget,
             text: '继续执行',
             source: 'servertool.continue_execution'
           });
         }
-      } catch {
-        // best-effort only
+      } catch (error) {
+        const code = typeof (error as { code?: unknown })?.code === 'string'
+          ? String((error as { code?: string }).code)
+          : '';
+        if (code === 'SERVERTOOL_FOLLOWUP_FAILED') {
+          throw error;
+        }
+        // best-effort only for non-critical inject attempts
       }
 
       const nestedResult = await deps.executeNested(nestedInput);
