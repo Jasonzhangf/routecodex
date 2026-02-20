@@ -64,7 +64,7 @@ function matchesPrefix(subpath: string, prefixes: string[]): boolean {
 
 export function resolveLlmsEngineShadowConfig(): LlmsEngineShadowConfig {
   const enabled = resolveBoolFromEnv(process.env.ROUTECODEX_LLMS_ENGINE_ENABLE, false);
-  const sampleRate = clamp01(resolveNumberFromEnv(process.env.ROUTECODEX_LLMS_SHADOW_SAMPLE_RATE, 1));
+  const sampleRate = clamp01(resolveNumberFromEnv(process.env.ROUTECODEX_LLMS_SHADOW_SAMPLE_RATE, 0.1));
   const shadowPrefixes = parsePrefixList(process.env.ROUTECODEX_LLMS_SHADOW_PREFIXES);
   const dir =
     (process.env.ROUTECODEX_LLMS_SHADOW_DIR && process.env.ROUTECODEX_LLMS_SHADOW_DIR.trim())

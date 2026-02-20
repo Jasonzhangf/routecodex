@@ -75,7 +75,7 @@ export function resolveHubShadowCompareConfig(): HubShadowCompareConfig {
   const isRccx = runtimePackageName === '@jsonstudio/rccx';
   const defaultEnabled = isRccx;
   const enabled = resolveBoolFromEnv(process.env.ROUTECODEX_UNIFIED_HUB_SHADOW_COMPARE, defaultEnabled);
-  const sampleRate = clamp01(resolveNumberFromEnv(process.env.ROUTECODEX_UNIFIED_HUB_SHADOW_COMPARE_SAMPLE_RATE, 1));
+  const sampleRate = clamp01(resolveNumberFromEnv(process.env.ROUTECODEX_UNIFIED_HUB_SHADOW_COMPARE_SAMPLE_RATE, 0.1));
   const baselineModeRaw = String(process.env.ROUTECODEX_UNIFIED_HUB_SHADOW_BASELINE_MODE || 'off').trim().toLowerCase();
   const baselineMode =
     baselineModeRaw === 'observe' || baselineModeRaw === 'enforce' ? baselineModeRaw : 'off';
