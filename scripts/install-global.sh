@@ -196,6 +196,12 @@ verify_install() {
 }
 
 verify_server_health() {
+    if [ "${ROUTECODEX_INSTALL_SKIP_E2E:-0}" = "1" ]; then
+        echo ""
+        echo "⏭️  已跳过全局 CLI 端到端检查（ROUTECODEX_INSTALL_SKIP_E2E=1）"
+        return
+    fi
+
     local HEALTH_LOG="/tmp/routecodex-install-health-$(date +%s).log"
     echo ""
     echo "🩺 执行服务器健康&端到端检查 (chat + anthropic SSE)..."

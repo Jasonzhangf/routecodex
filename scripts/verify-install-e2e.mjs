@@ -7,19 +7,20 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const PORT = Number(process.env.ROUTECODEX_INSTALL_VERIFY_PORT || process.env.RCC_INSTALL_VERIFY_PORT || 5560);
+const REQUESTED_PORT = Number(process.env.ROUTECODEX_INSTALL_VERIFY_PORT || process.env.RCC_INSTALL_VERIFY_PORT || 5560);
 const HOST = process.env.ROUTECODEX_INSTALL_VERIFY_HOST || '127.0.0.1';
-const BASE_URL = `http://${HOST}:${PORT}`;
+const PORT_SEARCH_LIMIT = 50;
 
-function resolveRoutecodexBinary() {
-  const prefix = process.env.npm_config_prefix || process.env.PREFIX;
-  if (prefix) {
-    const candidate = path.join(prefix, 'bin', process.platform === 'win32' ? 'routecodex.cmd' : 'routecodex');
-    if (fs.existsSync(candidate)) {
-      return candidate;
-    }
+function resolveServerEntryArgs() {
+  const serverEntry = path.join(process.cwd(), 'dist', 'index.js');
+  const modulesConfigPath = path.join(process.cwd(), 'dist', 'config', 'modules.json');
+  if (!fs.existsSync(serverEntry)) {
+    throw new Error(`verify-install-e2e missing server entry: ${serverEntry}`);
   }
-  return 'routecodex';
+  if (!fs.existsSync(modulesConfigPath)) {
+    throw new Error(`verify-install-e2e missing modules config: ${modulesConfigPath}`);
+  }
+  return [serverEntry, modulesConfigPath];
 }
 
 function cleanupStaleServerPidFiles() {
@@ -32,11 +33,11 @@ function cleanupStaleServerPidFiles() {
   }
 }
 
-async function waitForHealth(timeoutMs = 60000) {
+async function waitForHealth(baseUrl, timeoutMs = 60000) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     try {
-      const res = await fetch(`${BASE_URL}/health`);
+      const res = await fetch(`${baseUrl}/health`);
       if (res.ok) {
         return;
       }
@@ -48,7 +49,7 @@ async function waitForHealth(timeoutMs = 60000) {
   throw new Error('Timed out waiting for /health');
 }
 
-async function runChatTest() {
+async function runChatTest(baseUrl) {
   const payload = {
     model: process.env.ROUTECODEX_VERIFY_CHAT_MODEL || 'glm-4.6',
     messages: [
@@ -57,7 +58,7 @@ async function runChatTest() {
     ],
     stream: false
   };
-  const res = await fetch(`${BASE_URL}/v1/chat/completions`, {
+  const res = await fetch(`${baseUrl}/v1/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
@@ -76,7 +77,7 @@ async function runChatTest() {
   }
 }
 
-async function runAnthropicSseTest() {
+async function runAnthropicSseTest(baseUrl) {
   const payload = {
     model: process.env.ROUTECODEX_VERIFY_ANTHROPIC_MODEL || 'glm-4.6',
     messages: [
@@ -84,7 +85,7 @@ async function runAnthropicSseTest() {
     ],
     stream: true
   };
-  const res = await fetch(`${BASE_URL}/v1/messages`, {
+  const res = await fetch(`${baseUrl}/v1/messages`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -125,14 +126,16 @@ async function runAnthropicSseTest() {
 }
 
 async function main() {
-  const routecodexBin = resolveRoutecodexBinary();
+  const port = await resolveVerifyPort(REQUESTED_PORT, HOST);
+  const baseUrl = `http://${HOST}:${port}`;
+  const serverArgs = resolveServerEntryArgs();
   const customConfigPath = process.env.ROUTECODEX_INSTALL_CONFIG;
   const mockServer = customConfigPath ? null : await startMockProviderServer();
-  const verifyConfigPath = customConfigPath || await writeVerifyConfig(mockServer.baseUrl);
+  const verifyConfigPath = customConfigPath || await writeVerifyConfig(mockServer.baseUrl, HOST, port);
   const env = {
     ...process.env,
-    ROUTECODEX_PORT: String(PORT),
-    RCC_PORT: String(PORT),
+    ROUTECODEX_PORT: String(port),
+    RCC_PORT: String(port),
     ROUTECODEX_HOST: HOST,
     RCC_HOST: HOST,
     ROUTECODEX_CONFIG: verifyConfigPath,
@@ -142,7 +145,7 @@ async function main() {
     // does not depend on external network availability.
     ROUTECODEX_USE_MOCK: '1'
   };
-  const server = spawn(routecodexBin, ['start'], {
+  const server = spawn(process.execPath, serverArgs, {
     env,
     stdio: ['ignore', 'pipe', 'pipe']
   });
@@ -164,9 +167,9 @@ async function main() {
   });
 
   try {
-    await waitForHealth();
-    await runChatTest();
-    await runAnthropicSseTest();
+    await waitForHealth(baseUrl);
+    await runChatTest(baseUrl);
+    await runAnthropicSseTest(baseUrl);
   } finally {
     if (!serverExited) {
       server.kill('SIGTERM');
@@ -295,14 +298,14 @@ function extractUserPrompt(payload) {
     : 'verification prompt';
 }
 
-async function writeVerifyConfig(baseUrl) {
+async function writeVerifyConfig(baseUrl, host, port) {
   const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'routecodex-verify-'));
   const filePath = path.join(dir, 'config.json');
   const config = {
     version: '1.0.0',
     httpserver: {
-      host: HOST,
-      port: PORT
+      host,
+      port
     },
     virtualrouter: {
       inputProtocol: 'openai',
@@ -334,4 +337,31 @@ async function writeVerifyConfig(baseUrl) {
   };
   await fs.promises.writeFile(filePath, JSON.stringify(config, null, 2), 'utf8');
   return filePath;
+}
+
+async function resolveVerifyPort(preferredPort, host) {
+  const basePort = Number.isFinite(preferredPort) && preferredPort > 0 ? preferredPort : 5560;
+  for (let offset = 0; offset < PORT_SEARCH_LIMIT; offset += 1) {
+    const port = basePort + offset;
+    // eslint-disable-next-line no-await-in-loop
+    if (await canListenOnPort(port, host)) {
+      return port;
+    }
+  }
+  throw new Error(`No available verification port in range ${basePort}-${basePort + PORT_SEARCH_LIMIT - 1}`);
+}
+
+async function canListenOnPort(port, host) {
+  const probe = http.createServer();
+  try {
+    await new Promise((resolve, reject) => {
+      probe.once('error', reject);
+      probe.listen(port, host, resolve);
+    });
+    return true;
+  } catch {
+    return false;
+  } finally {
+    await new Promise((resolve) => probe.close(() => resolve(undefined))).catch(() => {});
+  }
 }
