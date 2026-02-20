@@ -247,14 +247,50 @@ export async function convertProviderResponseIfNeeded(
           | Record<string, unknown>
           | undefined;
         const text = typeof lastUser?.content === 'string' ? String(lastUser.content) : '';
+        const lastMessage = messages.length > 0 ? messages[messages.length - 1] : undefined;
+        const lastTool =
+          lastMessage && typeof lastMessage === 'object' && !Array.isArray(lastMessage)
+            ? (lastMessage as Record<string, unknown>)
+            : undefined;
+        const lastToolRole = typeof lastTool?.role === 'string' ? lastTool.role : '';
+        const lastToolName = typeof lastTool?.name === 'string' ? String(lastTool.name).trim() : '';
+        const clientInjectOnlyRaw = nestedMetadata.clientInjectOnly;
+        const clientInjectOnly =
+          clientInjectOnlyRaw === true ||
+          (typeof clientInjectOnlyRaw === 'string' && clientInjectOnlyRaw.trim().toLowerCase() === 'true');
+        const clientInjectText =
+          typeof nestedMetadata.clientInjectText === 'string' ? nestedMetadata.clientInjectText.trim() : '';
+        const clientInjectSource =
+          typeof nestedMetadata.clientInjectSource === 'string' && nestedMetadata.clientInjectSource.trim()
+            ? nestedMetadata.clientInjectSource.trim()
+            : 'servertool.client_inject';
+        const injectTarget = {
+          tmuxSessionId: typeof nestedMetadata.tmuxSessionId === 'string' ? nestedMetadata.tmuxSessionId : undefined,
+          sessionId: typeof nestedMetadata.sessionId === 'string' ? nestedMetadata.sessionId : undefined,
+          workdir: typeof nestedMetadata.workdir === 'string' ? nestedMetadata.workdir : undefined,
+          requestId: reenterOpts.requestId
+        };
+        if (clientInjectOnly) {
+          const injectText = clientInjectText || text || '继续执行';
+          await injectClockClientPrompt({
+            ...injectTarget,
+            text: injectText,
+            source: clientInjectSource
+          });
+          return { body: { ok: true, mode: 'client_inject_only' } };
+        }
         if (text.includes('<**clock:{') && text.includes('}**>')) {
           await injectClockClientPrompt({
-            tmuxSessionId: typeof nestedMetadata.tmuxSessionId === 'string' ? nestedMetadata.tmuxSessionId : undefined,
-            sessionId: typeof nestedMetadata.sessionId === 'string' ? nestedMetadata.sessionId : undefined,
-            workdir: typeof nestedMetadata.workdir === 'string' ? nestedMetadata.workdir : undefined,
+            ...injectTarget,
             text,
-            requestId: reenterOpts.requestId,
             source: 'servertool.reenter'
+          });
+        }
+        if (lastToolRole === 'tool' && lastToolName === 'continue_execution') {
+          await injectClockClientPrompt({
+            ...injectTarget,
+            text: '继续执行',
+            source: 'servertool.continue_execution'
           });
         }
       } catch {

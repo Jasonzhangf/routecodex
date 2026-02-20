@@ -72,6 +72,18 @@ async function readJsonFileWithRetry<T>(filepath: string, attempts = 50, delayMs
   return readJsonFileUntil<T>(filepath, () => true, attempts, delayMs);
 }
 
+function readClientInjectMeta(followup: any): { clientInjectOnly: boolean; clientInjectText: string } {
+  const metadata = followup?.metadata && typeof followup.metadata === 'object' ? followup.metadata : {};
+  const rawOnly = (metadata as Record<string, unknown>).clientInjectOnly;
+  const clientInjectOnly =
+    rawOnly === true || (typeof rawOnly === 'string' && rawOnly.trim().toLowerCase() === 'true');
+  const clientInjectText =
+    typeof (metadata as Record<string, unknown>).clientInjectText === 'string'
+      ? String((metadata as Record<string, unknown>).clientInjectText)
+      : '';
+  return { clientInjectOnly, clientInjectText };
+}
+
 describe('stop_message_auto servertool', () => {
   beforeAll(() => {
     process.env.ROUTECODEX_SESSION_DIR = SESSION_DIR;
@@ -246,16 +258,10 @@ describe('stop_message_auto servertool', () => {
     expect(followup).toBeDefined();
     expect(followup.entryEndpoint).toBe('/v1/chat/completions');
     expect(Array.isArray(followup.injection?.ops)).toBe(true);
-    const ops = followup.injection.ops as any[];
-    expect(
-      ops.some(
-        (op) =>
-          op?.op === 'append_user_text' &&
-          typeof op?.text === 'string' &&
-          op.text.includes('立即执行待处理任务') &&
-          op.text.includes(EXECUTION_APPEND_TEXT)
-      )
-    ).toBe(true);
+    const injectMeta = readClientInjectMeta(followup);
+    expect(injectMeta.clientInjectOnly).toBe(true);
+    expect(injectMeta.clientInjectText).toContain('立即执行待处理任务');
+    expect(injectMeta.clientInjectText).toContain(EXECUTION_APPEND_TEXT);
 
     const persisted = await readJsonFileUntil<{ state?: { stopMessageUsed?: number; stopMessageLastUsedAt?: number } }>(
       path.join(SESSION_DIR, `session-${sessionId}.json`),
@@ -357,10 +363,10 @@ describe('stop_message_auto servertool', () => {
       expect(result.mode).toBe('tool_flow');
       expect(result.execution?.flowId).toBe('stop_message_flow');
       const followup = result.execution?.followup as any;
-      const ops = Array.isArray(followup?.injection?.ops) ? (followup.injection.ops as any[]) : [];
-      const appendUserOp = ops.find((op) => op?.op === 'append_user_text');
-      expect(appendUserOp?.text).toContain(workdir);
-      expect(appendUserOp?.text).toContain(EXECUTION_APPEND_TEXT);
+      const injectMeta = readClientInjectMeta(followup);
+      expect(injectMeta.clientInjectOnly).toBe(true);
+      expect(injectMeta.clientInjectText).toContain(workdir);
+      expect(injectMeta.clientInjectText).toContain(EXECUTION_APPEND_TEXT);
       const capturedPrompt = fs.readFileSync(promptCapturePath, 'utf8');
       expect(capturedPrompt).toContain('先做代码 review（最多一句），再给指令：必须结合 workingDirectory 下当前实现/测试/构建状态给出建议；不能只做抽象建议。');
       expect(capturedPrompt).toContain('只有在消息内容或历史记录里存在明确证据时，才允许判断“偏离目标”；否则按同轨推进，不要泛化指责偏离。');
@@ -471,9 +477,10 @@ describe('stop_message_auto servertool', () => {
       expect(result.mode).toBe('tool_flow');
       const followup = result.execution?.followup as any;
       expect(Array.isArray(followup?.injection?.ops)).toBe(true);
-      const appendOp = (followup.injection.ops as any[]).find((op) => op?.op === 'append_user_text');
-      expect(appendOp?.text).toContain('fallback-from-iflow');
-      expect(appendOp?.text).toContain(EXECUTION_APPEND_TEXT);
+      const injectMeta = readClientInjectMeta(followup);
+      expect(injectMeta.clientInjectOnly).toBe(true);
+      expect(injectMeta.clientInjectText).toContain('fallback-from-iflow');
+      expect(injectMeta.clientInjectText).toContain(EXECUTION_APPEND_TEXT);
     } finally {
       if (previousAiBackend === undefined) delete process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_BACKEND;
       else process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_BACKEND = previousAiBackend;
@@ -572,9 +579,10 @@ describe('stop_message_auto servertool', () => {
       expect(result.mode).toBe('tool_flow');
       const followup = result.execution?.followup as any;
       expect(Array.isArray(followup?.injection?.ops)).toBe(true);
-      const appendOp = (followup.injection.ops as any[]).find((op) => op?.op === 'append_user_text');
-      expect(appendOp?.text).toContain('请继续完成当前拆分，并先运行构建验证。');
-      expect(appendOp?.text).toContain(EXECUTION_APPEND_TEXT);
+      const injectMeta = readClientInjectMeta(followup);
+      expect(injectMeta.clientInjectOnly).toBe(true);
+      expect(injectMeta.clientInjectText).toContain('请继续完成当前拆分，并先运行构建验证。');
+      expect(injectMeta.clientInjectText).toContain(EXECUTION_APPEND_TEXT);
 
       const capturedPrompt = fs.readFileSync(promptCapturePath, 'utf8');
       expect(capturedPrompt).toContain('baseStopMessage: 继续推进并执行下一步');
@@ -690,9 +698,10 @@ describe('stop_message_auto servertool', () => {
 
       expect(result.mode).toBe('tool_flow');
       const followup = result.execution?.followup as any;
-      const appendOp = (followup?.injection?.ops as any[]).find((op) => op?.op === 'append_user_text');
-      expect(appendOp?.text).toContain('继续执行：先补充完成证据并运行验证');
-      expect(appendOp?.text).toContain(EXECUTION_APPEND_TEXT);
+      const injectMeta = readClientInjectMeta(followup);
+      expect(injectMeta.clientInjectOnly).toBe(true);
+      expect(injectMeta.clientInjectText).toContain('继续执行：先补充完成证据并运行验证');
+      expect(injectMeta.clientInjectText).toContain(EXECUTION_APPEND_TEXT);
 
       const persisted = await readJsonFileUntil<{ state?: { stopMessageUsed?: number } }>(
         path.join(SESSION_DIR, `session-${sessionId}.json`),
@@ -885,9 +894,10 @@ describe('stop_message_auto servertool', () => {
       expect(result.mode).toBe('tool_flow');
       const followup = result.execution?.followup as any;
       expect(Array.isArray(followup?.injection?.ops)).toBe(true);
-      const appendOp = (followup.injection.ops as any[]).find((op) => op?.op === 'append_user_text');
-      expect(appendOp?.text).toContain('继续执行');
-      expect(appendOp?.text).toContain(EXECUTION_APPEND_TEXT);
+      const injectMeta = readClientInjectMeta(followup);
+      expect(injectMeta.clientInjectOnly).toBe(true);
+      expect(injectMeta.clientInjectText).toContain('继续执行');
+      expect(injectMeta.clientInjectText).toContain(EXECUTION_APPEND_TEXT);
     } finally {
       if (prevBdMode === undefined) {
         delete process.env.ROUTECODEX_STOPMESSAGE_BD_MODE;
@@ -996,9 +1006,10 @@ describe('stop_message_auto servertool', () => {
       expect(result.mode).toBe('tool_flow');
       const followup = result.execution?.followup as any;
       expect(Array.isArray(followup?.injection?.ops)).toBe(true);
-      const appendOp = (followup.injection.ops as any[]).find((op) => op?.op === 'append_user_text');
-      expect(appendOp?.text).toContain('继续执行');
-      expect(appendOp?.text).toContain(EXECUTION_APPEND_TEXT);
+      const injectMeta = readClientInjectMeta(followup);
+      expect(injectMeta.clientInjectOnly).toBe(true);
+      expect(injectMeta.clientInjectText).toContain('继续执行');
+      expect(injectMeta.clientInjectText).toContain(EXECUTION_APPEND_TEXT);
     } finally {
       if (prevBdMode === undefined) {
         delete process.env.ROUTECODEX_STOPMESSAGE_BD_MODE;
@@ -1242,8 +1253,9 @@ describe('stop_message_auto servertool', () => {
     expect(result.execution?.flowId).toBe('stop_message_flow');
     const followup = result.execution?.followup as any;
     expect(followup).toBeDefined();
-    const ops = followup.injection.ops as any[];
-    expect(ops.some((op) => op?.op === 'append_user_text' && typeof op?.text === 'string')).toBe(true);
+    const injectMeta = readClientInjectMeta(followup);
+    expect(injectMeta.clientInjectOnly).toBe(true);
+    expect(injectMeta.clientInjectText.length).toBeGreaterThan(0);
   });
 
   test('does not resolve stopMessage session scope from capturedContext fallback (prevents cross-session leakage)', async () => {
@@ -1983,7 +1995,7 @@ describe('stop_message_auto servertool', () => {
     expect(sawFollowupStreamFalse).toBe(true);
   });
 
-  test('retries once on empty stop_followup and then succeeds', async () => {
+  test('client-inject stop followup runs once and returns original response', async () => {
     const sessionId = 'stopmessage-spec-session-empty-retry';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
@@ -2064,8 +2076,8 @@ describe('stop_message_auto servertool', () => {
 
     expect(orchestration.executed).toBe(true);
     expect(orchestration.flowId).toBe('stop_message_flow');
-    expect(callCount).toBe(2);
-    expect((orchestration.chat as any)?.id).toBe('chatcmpl-followup-nonempty');
+    expect(callCount).toBe(1);
+    expect((orchestration.chat as any)?.id).toBe('chatcmpl-stop-empty-1');
   });
 
 
@@ -2142,7 +2154,7 @@ describe('stop_message_auto servertool', () => {
     expect(fs.existsSync(path.join(SESSION_DIR, `session-${sessionId}.json`))).toBe(false);
   });
 
-  test('throws explicit empty-followup error when both followup and original response are empty', async () => {
+  test('does not throw empty-followup error when both followup and original response are empty in client-inject mode', async () => {
     const sessionId = 'stopmessage-spec-session-empty-error-empty-original';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
@@ -2187,30 +2199,28 @@ describe('stop_message_auto servertool', () => {
     } as any;
 
     let callCount = 0;
-    await expect(
-      runServerToolOrchestration({
-        chat: chatResponse,
-        adapterContext,
-        requestId: 'req-stopmessage-empty-original',
-        entryEndpoint: '/v1/chat/completions',
-        providerProtocol: 'openai-chat',
-        reenterPipeline: async () => {
-          callCount += 1;
-          return {
-            body: {
-              id: 'chatcmpl-followup-empty-empty-original',
-              object: 'chat.completion',
-              model: 'gpt-test',
-              choices: [{ index: 0, message: { role: 'assistant', content: '' }, finish_reason: 'stop' }]
-            } as JsonObject
-          };
-        }
-      })
-    ).rejects.toMatchObject({
-      code: 'SERVERTOOL_EMPTY_FOLLOWUP',
-      status: 502
+    const orchestration = await runServerToolOrchestration({
+      chat: chatResponse,
+      adapterContext,
+      requestId: 'req-stopmessage-empty-original',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      reenterPipeline: async () => {
+        callCount += 1;
+        return {
+          body: {
+            id: 'chatcmpl-followup-empty-empty-original',
+            object: 'chat.completion',
+            model: 'gpt-test',
+            choices: [{ index: 0, message: { role: 'assistant', content: '' }, finish_reason: 'stop' }]
+          } as JsonObject
+        };
+      }
     });
-    expect(callCount).toBe(2);
+    expect(orchestration.executed).toBe(true);
+    expect(orchestration.flowId).toBe('stop_message_flow');
+    expect((orchestration.chat as any)?.id).toBe('chatcmpl-stop-empty-original');
+    expect(callCount).toBe(1);
 
     expect(fs.existsSync(path.join(SESSION_DIR, `session-${sessionId}.json`))).toBe(false);
   });
@@ -2538,15 +2548,15 @@ describe('stop_message_auto servertool', () => {
 
       expect(result.mode).toBe('tool_flow');
       const followup = result.execution?.followup as any;
-      const ops = Array.isArray(followup?.injection?.ops) ? followup.injection.ops : [];
-      const appendUserText = ops.find((entry: any) => entry?.op === 'append_user_text');
-      expect(appendUserText?.text).toContain('先执行、后汇报');
+      const injectMeta = readClientInjectMeta(followup);
+      expect(injectMeta.clientInjectOnly).toBe(true);
+      expect(injectMeta.clientInjectText).toContain('先执行、后汇报');
 
       const persisted = await readJsonFileUntil<{ state?: { stopMessageUsed?: number; stopMessageStage?: unknown } }>(
         path.join(SESSION_DIR, `session-${sessionId}.json`),
         (data) => data?.state?.stopMessageUsed === 1
       );
-      expect(appendUserText?.text).not.toContain('阶段A：先看 BD 状态');
+      expect(injectMeta.clientInjectText).not.toContain('阶段A：先看 BD 状态');
       expect(persisted?.state?.stopMessageStage).toBeUndefined();
     } finally {
       if (prevUserDir === undefined) {
@@ -2877,9 +2887,9 @@ describe('stop_message_auto servertool', () => {
 
       expect(result.mode).toBe('tool_flow');
       const followup = result.execution?.followup as any;
-      const ops = Array.isArray(followup?.injection?.ops) ? followup.injection.ops : [];
-      const appendUserText = ops.find((entry: any) => entry?.op === 'append_user_text');
-      expect(appendUserText?.text).toContain('继续推进任务');
+      const injectMeta = readClientInjectMeta(followup);
+      expect(injectMeta.clientInjectOnly).toBe(true);
+      expect(injectMeta.clientInjectText).toContain('继续推进任务');
       const persisted = await readJsonFileUntil<{ state?: { stopMessageUsed?: number; stopMessageStage?: unknown } }>(
         path.join(SESSION_DIR, `session-${sessionId}.json`),
         (data) => data?.state?.stopMessageUsed === 1
