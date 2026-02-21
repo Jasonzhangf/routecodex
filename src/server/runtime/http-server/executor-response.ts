@@ -19,6 +19,7 @@ export interface ConvertProviderResponseOptions {
   wantsStream: boolean;
   originalRequest?: Record<string, unknown> | undefined;
   processMode?: string;
+  serverToolsEnabled?: boolean;
   response: PipelineExecutionResult;
   pipelineMetadata?: Record<string, unknown>;
 }
@@ -314,7 +315,7 @@ export async function convertProviderResponseIfNeeded(
   options: ConvertProviderResponseOptions,
   deps: ConvertProviderResponseDeps
 ): Promise<PipelineExecutionResult> {
-  if (options.processMode === 'passthrough' && !options.wantsStream) {
+  if (options.processMode === 'passthrough' && !options.wantsStream && options.serverToolsEnabled === false) {
     return options.response;
   }
   const entry = (options.entryEndpoint || '').toLowerCase();

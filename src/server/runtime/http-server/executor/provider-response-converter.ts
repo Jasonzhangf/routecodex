@@ -389,7 +389,7 @@ export async function convertProviderResponseIfNeeded(
       throw error;
     }
   }
-  if (options.processMode === 'passthrough' && !options.wantsStream) {
+  if (options.processMode === 'passthrough' && !options.wantsStream && options.serverToolsEnabled === false) {
     return options.response;
   }
   const entry = (options.entryEndpoint || '').toLowerCase();

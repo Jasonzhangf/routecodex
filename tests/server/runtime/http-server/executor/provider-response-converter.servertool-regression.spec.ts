@@ -97,6 +97,70 @@ describe('provider-response-converter servertool regressions', () => {
     expect(call.context?.serverToolsDisabled).toBeUndefined();
   });
 
+  it('does not short-circuit passthrough responses when servertools stay enabled', async () => {
+    jest.resetModules();
+    mockConvertProviderResponse.mockClear();
+    mockCreateSnapshotRecorder.mockClear();
+
+    const { convertProviderResponseIfNeeded } = await import(
+      '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
+    );
+
+    await convertProviderResponseIfNeeded(
+      {
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-responses',
+        requestId: 'req_passthrough_servertool_on',
+        processMode: 'passthrough',
+        wantsStream: false,
+        response: { body: { id: 'upstream' } } as any,
+        pipelineMetadata: {}
+      },
+      {
+        runtimeManager: {
+          resolveRuntimeKey: () => undefined,
+          getHandleByRuntimeKey: () => undefined
+        },
+        executeNested: async () => ({ body: { ok: true } } as any)
+      }
+    );
+
+    expect(mockConvertProviderResponse).toHaveBeenCalledTimes(1);
+  });
+
+  it('still short-circuits passthrough responses when servertools are disabled explicitly', async () => {
+    jest.resetModules();
+    mockConvertProviderResponse.mockClear();
+    mockCreateSnapshotRecorder.mockClear();
+
+    const { convertProviderResponseIfNeeded } = await import(
+      '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
+    );
+
+    const converted = await convertProviderResponseIfNeeded(
+      {
+        entryEndpoint: '/v1/responses',
+        providerProtocol: 'openai-responses',
+        requestId: 'req_passthrough_servertool_off',
+        processMode: 'passthrough',
+        serverToolsEnabled: false,
+        wantsStream: false,
+        response: { body: { id: 'upstream_passthrough' } } as any,
+        pipelineMetadata: {}
+      },
+      {
+        runtimeManager: {
+          resolveRuntimeKey: () => undefined,
+          getHandleByRuntimeKey: () => undefined
+        },
+        executeNested: async () => ({ body: { ok: true } } as any)
+      }
+    );
+
+    expect(mockConvertProviderResponse).not.toHaveBeenCalled();
+    expect((converted as any).body).toEqual({ id: 'upstream_passthrough' });
+  });
+
   it('preserves followup session headers and strips clientRequestId', async () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
