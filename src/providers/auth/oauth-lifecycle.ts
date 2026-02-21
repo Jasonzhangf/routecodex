@@ -8,6 +8,7 @@ import fs from 'fs/promises';
 import fsSync from 'fs';
 import path from 'path';
 import os from 'os';
+import { spawnSync } from 'node:child_process';
 import type { UnknownObject } from '../../modules/pipeline/types/common-types.js';
 import { fetchIFlowUserInfo, mergeIFlowTokenData } from './iflow-userinfo-helper.js';
 import { fetchQwenUserInfo, mergeQwenTokenData } from './qwen-userinfo-helper.js';
@@ -72,6 +73,24 @@ import {
   clearTokenFile,
   readRawTokenFile
 } from './oauth-lifecycle/token-io.js';
+
+type InteractiveOAuthLockRecord = {
+  pid: number;
+  providerType: string;
+  tokenFile: string;
+  startedAt: number;
+  callbackPort?: number;
+};
+
+type IflowAutoFailureRecord = {
+  count: number;
+  manualRequired: boolean;
+  updatedAt: number;
+  lastError?: string;
+};
+
+const OAUTH_INTERACTIVE_LOCK_FILE = path.join(os.homedir(), '.routecodex', 'auth', '.oauth-interactive.lock.json');
+const IFLOW_AUTO_FAILURE_FILE = path.join(os.homedir(), '.routecodex', 'auth', '.iflow-auto-failures.json');
 
 type EnsureOpts = {
   forceReacquireIfRefreshFails?: boolean;
@@ -796,6 +815,263 @@ function createStrategy(
   return createProviderOAuthStrategy(providerType, overrides, tokenFilePath) as OAuthStrategy;
 }
 
+function resolveCamoCommand(): string {
+  const configured = String(process.env.ROUTECODEX_CAMO_CLI_PATH || process.env.RCC_CAMO_CLI_PATH || '').trim();
+  return configured || 'camo';
+}
+
+function isTruthyFlag(value: string | undefined): boolean {
+  const raw = String(value || '').trim().toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
+}
+
+function resolveOAuthProfileId(providerType: string, tokenFilePath: string): string {
+  const parsed = parseTokenSequenceFromPath(tokenFilePath);
+  const alias = String(parsed?.alias || 'default').trim().toLowerCase();
+  const normalizedAlias = alias.replace(/[^a-z0-9._-]+/gi, '-');
+  const normalizedProvider = String(providerType || '').trim().toLowerCase();
+  const providerFamily = normalizedProvider === 'gemini-cli' || normalizedProvider === 'antigravity'
+    ? 'gemini'
+    : normalizedProvider;
+  const base = providerFamily ? `${providerFamily}.${normalizedAlias || 'default'}` : (normalizedAlias || 'default');
+  const profile = `rc-${base}`;
+  return profile.length > 64 ? profile.slice(0, 64) : profile;
+}
+
+function closeOAuthAuthResources(providerType: string, tokenFilePath: string): void {
+  const profileId = resolveOAuthProfileId(providerType, tokenFilePath);
+  try {
+    const result = spawnSync(resolveCamoCommand(), ['stop', profileId], {
+      stdio: 'ignore',
+      env: process.env
+    });
+    if (result.status === 0) {
+      logOAuthDebug(`[OAuth] auth cleanup: stopped camo profile=${profileId}`);
+    } else {
+      logOAuthDebug(`[OAuth] auth cleanup: camo stop profile=${profileId} status=${result.status ?? 'n/a'}`);
+    }
+  } catch (error) {
+    logOAuthDebug(
+      `[OAuth] auth cleanup failed profile=${profileId}: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+}
+
+function readInteractiveOAuthLock(): InteractiveOAuthLockRecord | null {
+  try {
+    if (!fsSync.existsSync(OAUTH_INTERACTIVE_LOCK_FILE)) {
+      return null;
+    }
+    const raw = fsSync.readFileSync(OAUTH_INTERACTIVE_LOCK_FILE, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') {
+      return null;
+    }
+    const node = parsed as Record<string, unknown>;
+    if (typeof node.pid !== 'number' || typeof node.tokenFile !== 'string' || typeof node.providerType !== 'string') {
+      return null;
+    }
+    return {
+      pid: node.pid,
+      tokenFile: node.tokenFile,
+      providerType: node.providerType,
+      startedAt: typeof node.startedAt === 'number' ? node.startedAt : Date.now(),
+      callbackPort: typeof node.callbackPort === 'number' ? node.callbackPort : undefined
+    };
+  } catch {
+    return null;
+  }
+}
+
+function isSameInteractiveOAuthLock(
+  left: Pick<InteractiveOAuthLockRecord, 'pid' | 'providerType' | 'tokenFile'>,
+  right: Pick<InteractiveOAuthLockRecord, 'pid' | 'providerType' | 'tokenFile'>
+): boolean {
+  return (
+    left.pid === right.pid &&
+    left.providerType === right.providerType &&
+    path.resolve(left.tokenFile) === path.resolve(right.tokenFile)
+  );
+}
+
+function isProcessAlive(pid: number): boolean {
+  if (!Number.isFinite(pid) || pid <= 0) {
+    return false;
+  }
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function forceReclaimInteractiveOAuthLock(lock: InteractiveOAuthLockRecord): Promise<boolean> {
+  try {
+    const existing = readInteractiveOAuthLock();
+    if (!existing || !isSameInteractiveOAuthLock(existing, lock)) {
+      return false;
+    }
+    await fs.unlink(OAUTH_INTERACTIVE_LOCK_FILE);
+    logOAuthDebug(
+      `[OAuth] interactive lock reclaimed pid=${lock.pid} token=${lock.tokenFile} provider=${lock.providerType}`
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function notifyOAuthLockCancel(lock: InteractiveOAuthLockRecord): Promise<void> {
+  if (!lock.callbackPort || !Number.isFinite(lock.callbackPort) || lock.callbackPort <= 0) {
+    return;
+  }
+  const url = `http://127.0.0.1:${lock.callbackPort}/oauth2callback?error=cancelled_by_new_auth`;
+  try {
+    await fetch(url, { method: 'GET' });
+    logOAuthDebug(`[OAuth] interactive lock cancel signal sent port=${lock.callbackPort}`);
+  } catch (error) {
+    logOAuthDebug(
+      `[OAuth] interactive lock cancel signal failed port=${lock.callbackPort}: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+}
+
+async function acquireInteractiveOAuthLock(providerType: string, tokenFilePath: string): Promise<() => void> {
+  await fs.mkdir(path.dirname(OAUTH_INTERACTIVE_LOCK_FILE), { recursive: true });
+  const current: InteractiveOAuthLockRecord = {
+    pid: process.pid,
+    providerType,
+    tokenFile: path.resolve(tokenFilePath),
+    startedAt: Date.now()
+  };
+
+  const maxAttempts = 20;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      await fs.writeFile(OAUTH_INTERACTIVE_LOCK_FILE, `${JSON.stringify(current, null, 2)}\n`, { flag: 'wx' });
+      process.env.ROUTECODEX_OAUTH_INTERACTIVE_LOCK_FILE = OAUTH_INTERACTIVE_LOCK_FILE;
+      return () => {
+        try {
+          const lock = readInteractiveOAuthLock();
+          if (lock && lock.pid === process.pid && path.resolve(lock.tokenFile) === current.tokenFile) {
+            fsSync.unlinkSync(OAUTH_INTERACTIVE_LOCK_FILE);
+          }
+        } catch {
+          // ignore release errors
+        } finally {
+          if (process.env.ROUTECODEX_OAUTH_INTERACTIVE_LOCK_FILE === OAUTH_INTERACTIVE_LOCK_FILE) {
+            delete process.env.ROUTECODEX_OAUTH_INTERACTIVE_LOCK_FILE;
+          }
+        }
+      };
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException | null)?.code || '';
+      if (code !== 'EEXIST') {
+        throw error;
+      }
+      const existing = readInteractiveOAuthLock();
+      if (!existing) {
+        try {
+          await fs.unlink(OAUTH_INTERACTIVE_LOCK_FILE);
+        } catch {
+          // ignore
+        }
+        continue;
+      }
+      if (!isProcessAlive(existing.pid)) {
+        try {
+          await fs.unlink(OAUTH_INTERACTIVE_LOCK_FILE);
+        } catch {
+          // ignore
+        }
+        continue;
+      }
+      const sameToken = path.resolve(existing.tokenFile) === current.tokenFile;
+      if (sameToken) {
+        await notifyOAuthLockCancel(existing);
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        const afterCancel = readInteractiveOAuthLock();
+        const stuckOnSameLock =
+          !!afterCancel && isSameInteractiveOAuthLock(afterCancel, existing);
+        if (stuckOnSameLock) {
+          const lockAgeMs = Math.max(0, Date.now() - (afterCancel.startedAt || Date.now()));
+          const shouldForceReclaim = attempt >= 3 || lockAgeMs >= 15_000;
+          if (shouldForceReclaim) {
+            await forceReclaimInteractiveOAuthLock(afterCancel);
+          }
+        }
+        continue;
+      }
+      throw new Error(
+        `Interactive OAuth is already running for token=${existing.tokenFile}. Concurrent auth is disabled.`
+      );
+    }
+  }
+  throw new Error('Failed to acquire interactive OAuth lock after multiple attempts');
+}
+
+function readIflowAutoFailureState(): Record<string, IflowAutoFailureRecord> {
+  try {
+    if (!fsSync.existsSync(IFLOW_AUTO_FAILURE_FILE)) {
+      return {};
+    }
+    const raw = fsSync.readFileSync(IFLOW_AUTO_FAILURE_FILE, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return {};
+    }
+    return parsed as Record<string, IflowAutoFailureRecord>;
+  } catch {
+    return {};
+  }
+}
+
+function writeIflowAutoFailureState(state: Record<string, IflowAutoFailureRecord>): void {
+  try {
+    fsSync.mkdirSync(path.dirname(IFLOW_AUTO_FAILURE_FILE), { recursive: true });
+    fsSync.writeFileSync(IFLOW_AUTO_FAILURE_FILE, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
+  } catch {
+    // ignore persistence failures
+  }
+}
+
+function resolveIflowFailureKey(tokenFilePath: string): string {
+  return path.resolve(tokenFilePath);
+}
+
+function clearIflowAutoFailureState(tokenFilePath: string): void {
+  const state = readIflowAutoFailureState();
+  const key = resolveIflowFailureKey(tokenFilePath);
+  if (!state[key]) {
+    return;
+  }
+  delete state[key];
+  writeIflowAutoFailureState(state);
+}
+
+function markIflowAutoFailureState(tokenFilePath: string, maxAttempts: number, errorText: string): IflowAutoFailureRecord {
+  const state = readIflowAutoFailureState();
+  const key = resolveIflowFailureKey(tokenFilePath);
+  const previous = state[key];
+  const nextCount = (previous?.count || 0) + 1;
+  const record: IflowAutoFailureRecord = {
+    count: nextCount,
+    manualRequired: nextCount >= maxAttempts,
+    updatedAt: Date.now(),
+    lastError: errorText
+  };
+  state[key] = record;
+  writeIflowAutoFailureState(state);
+  return record;
+}
+
+function getIflowAutoFailureState(tokenFilePath: string): IflowAutoFailureRecord | null {
+  const state = readIflowAutoFailureState();
+  const key = resolveIflowFailureKey(tokenFilePath);
+  return state[key] || null;
+}
+
 async function runInteractiveAuthorizationFlow(
   providerType: string,
   overrides: Record<string, unknown>,
@@ -820,6 +1096,10 @@ async function runInteractiveAuthorizationFlow(
         await finalizeTokenWrite(providerType, strategy, tokenFilePath, authed, 'acquired');
       }
       await discardBackupFile(backupFile);
+      if (openBrowser) {
+        // Close only after token is fully written; never close browser on failed auth.
+        closeOAuthAuthResources(providerType, tokenFilePath);
+      }
     } catch (error) {
       await restoreTokenFileFromBackup(backupFile, tokenFilePath);
       throw error;
@@ -838,9 +1118,11 @@ async function runInteractiveAuthorizationFlow(
     })
     .then(async () => {
       logOAuthDebug(`[OAuth] interactive queue enter ${label}`);
+      const releaseLock = await acquireInteractiveOAuthLock(providerType, tokenFilePath);
       try {
         await execute();
       } finally {
+        releaseLock();
         logOAuthDebug(`[OAuth] interactive queue leave ${label}`);
       }
     });
@@ -858,6 +1140,12 @@ async function runIflowAuthorizationSequence(
   forceReauth: boolean
 ): Promise<void> {
   const authCodeOverrides = { ...overrides, flowType: OAuthFlowType.AUTHORIZATION_CODE };
+  const autoMode = String(process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE || '').trim().toLowerCase();
+  if (autoMode === 'iflow') {
+    // Auto mode should stay single-path to keep retry lifecycle deterministic.
+    await executeAuthFlow(providerType, authCodeOverrides, tokenFilePath, forceReauth);
+    return;
+  }
   try {
     await executeAuthFlow(providerType, authCodeOverrides, tokenFilePath, forceReauth);
     return;
@@ -892,40 +1180,58 @@ async function executeAuthFlow(
   const iflowAutoEnabled = providerType === 'iflow' && autoMode === 'iflow';
   if (!iflowAutoEnabled) {
     await runOnce();
+    if (providerType === 'iflow') {
+      clearIflowAutoFailureState(tokenFilePath);
+    }
+    return;
+  }
+  const headfulMode = isTruthyFlag(process.env.ROUTECODEX_CAMOUFOX_DEV_MODE);
+  const maxAutoAttemptsRaw = Number.parseInt(String(process.env.ROUTECODEX_IFLOW_AUTO_MAX_ATTEMPTS || '').trim(), 10);
+  const maxAutoAttempts = Number.isFinite(maxAutoAttemptsRaw) && maxAutoAttemptsRaw > 0 ? maxAutoAttemptsRaw : 3;
+  const retryDelayRaw = Number.parseInt(String(process.env.ROUTECODEX_IFLOW_AUTO_RETRY_DELAY_MS || '').trim(), 10);
+  const retryDelayMs = Number.isFinite(retryDelayRaw) && retryDelayRaw >= 0 ? retryDelayRaw : 1000;
+
+  // Headful run is considered manual trigger; successful manual run clears auto failure gate.
+  if (headfulMode) {
+    await runOnce();
+    clearIflowAutoFailureState(tokenFilePath);
     return;
   }
 
-  try {
-    await runOnce();
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error || '');
-    logOAuthDebug(`[OAuth] iflow auto auth failed, fallback to headful manual: ${msg}`);
-    const prevAutoMode = process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
-    const prevAutoConfirm = process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM;
-    const prevDevMode = process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
+  const existingFailure = getIflowAutoFailureState(tokenFilePath);
+  if (existingFailure?.manualRequired) {
+    throw new Error(
+      `[OAuth] iflow auto auth is disabled for token=${tokenFilePath} after ${existingFailure.count} failures. Manual trigger required.`
+    );
+  }
+
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= maxAutoAttempts; attempt += 1) {
     try {
-      delete process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
-      delete process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM;
-      process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = '1';
       await runOnce();
-    } finally {
-      if (prevAutoMode === undefined) {
-        delete process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
-      } else {
-        process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE = prevAutoMode;
-      }
-      if (prevAutoConfirm === undefined) {
-        delete process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM;
-      } else {
-        process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM = prevAutoConfirm;
-      }
-      if (prevDevMode === undefined) {
-        delete process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
-      } else {
-        process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = prevDevMode;
+      clearIflowAutoFailureState(tokenFilePath);
+      return;
+    } catch (error) {
+      lastError = error;
+      const msg = error instanceof Error ? error.message : String(error || '');
+      const record = markIflowAutoFailureState(tokenFilePath, maxAutoAttempts, msg);
+      logOAuthDebug(
+        `[OAuth] iflow auto auth attempt ${attempt}/${maxAutoAttempts} failed: ${msg} ` +
+          `(failureCount=${record.count} manualRequired=${record.manualRequired ? '1' : '0'})`
+      );
+      if (attempt < maxAutoAttempts) {
+        await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
       }
     }
   }
+
+  const finalRecord = getIflowAutoFailureState(tokenFilePath);
+  if (finalRecord?.manualRequired) {
+    throw new Error(
+      `[OAuth] iflow auto auth failed ${finalRecord.count} times; manual trigger is required and auto retries are suspended.`
+    );
+  }
+  throw (lastError instanceof Error ? lastError : new Error(String(lastError || 'iflow auto auth failed')));
 }
 
 export async function ensureValidOAuthToken(

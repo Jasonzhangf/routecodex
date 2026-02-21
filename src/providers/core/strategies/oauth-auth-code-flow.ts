@@ -7,6 +7,7 @@ import type { UnknownObject } from '../../../types/common-types.js';
 import { BaseOAuthFlowStrategy, OAuthFlowType } from '../config/oauth-flows.js';
 import type { OAuthFlowConfig } from '../config/oauth-flows.js';
 import fs from 'fs/promises';
+import fsSync from 'fs';
 import path from 'path';
 import { logOAuthDebug } from '../../auth/oauth-logger.js';
 import crypto from 'crypto';
@@ -72,12 +73,58 @@ function resolveGoogleUiLanguageHint(): string | null {
   return raw;
 }
 
+function isTruthyFlag(value: string | undefined): boolean {
+  const raw = String(value || '').trim().toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
+}
+
 const normalizeFlowStyle = (value: string | undefined, fallback: FlowStyle): FlowStyle => {
   if (value === 'web' || value === 'standard' || value === 'legacy') {
     return value;
   }
   return fallback;
 };
+
+function resolveCallbackTimeoutMs(isIflowOAuth: boolean): number {
+  const envRaw = String(process.env.ROUTECODEX_OAUTH_CALLBACK_TIMEOUT_MS || '').trim();
+  const parsed = Number.parseInt(envRaw, 10);
+  if (Number.isFinite(parsed) && parsed > 0) {
+    return parsed;
+  }
+  const autoMode = String(process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE || '').trim().toLowerCase();
+  const headful = isTruthyFlag(process.env.ROUTECODEX_CAMOUFOX_DEV_MODE);
+  if (isIflowOAuth && autoMode === 'iflow' && !headful) {
+    // Automatic iFlow auth should fail fast and retry, instead of hanging for 10 minutes.
+    return 90_000;
+  }
+  return 10 * 60 * 1000;
+}
+
+function publishInteractiveLockCallbackPort(port: number): void {
+  const lockFile = String(process.env.ROUTECODEX_OAUTH_INTERACTIVE_LOCK_FILE || '').trim();
+  if (!lockFile || !Number.isFinite(port) || port <= 0) {
+    return;
+  }
+  try {
+    if (!fsSync.existsSync(lockFile)) {
+      return;
+    }
+    const raw = fsSync.readFileSync(lockFile, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') {
+      return;
+    }
+    const node = parsed as Record<string, unknown>;
+    if (typeof node.pid !== 'number' || node.pid !== process.pid) {
+      return;
+    }
+    node.callbackPort = port;
+    node.updatedAt = Date.now();
+    fsSync.writeFileSync(lockFile, `${JSON.stringify(node, null, 2)}\n`, 'utf8');
+  } catch {
+    // non-fatal
+  }
+}
 
 /**
  * OAuth授权码流程策略
@@ -130,6 +177,8 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
 
       // 3.1 启动本地回调服务（固定 localhost:8080，路径 /oauth2callback）
       const serverResult = await this.startCallbackServer(authCodeData.state, authCodeData.codeVerifier);
+      // Avoid unhandled rejection when callback promise settles after early activate failure.
+      void serverResult.callbackPromise.catch(() => {});
 
       // 3.2 更新授权URL中的重定向参数（与本地回调服务一致），再打开浏览器
       try {
@@ -139,7 +188,12 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
         authCodeData.redirectUri = serverResult.redirectUri;
       } catch { /* ignore */ }
 
-      await this.activate(authCodeData, options);
+      try {
+        await this.activate(authCodeData, options);
+      } catch (activateError) {
+        await this.abortPendingCallbackServer(serverResult.redirectUri, 'browser_launch_failed');
+        throw activateError;
+      }
 
       // 3.3 等待回调，获取授权码
       try {
@@ -289,6 +343,7 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
 
     let timeoutHandle: NodeJS.Timeout | null = null;
     let listeningPort = port;
+    const callbackTimeoutMs = resolveCallbackTimeoutMs(this.isIflowOAuthProvider());
 
     let startupSettled = false;
     let resolveStartup: ((boundPort: number) => void) | null = null;
@@ -351,10 +406,9 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
             res.statusCode = 400;
             res.setHeader('Content-Type', 'text/html');
             res.end('<html><body><h1>OAuth Error</h1><p>State mismatch. Possible CSRF attack. You can close this window.</p></body></html>');
-
-            if (timeoutHandle) {clearTimeout(timeoutHandle);}
-            server.close();
-            reject(new Error('State mismatch. Possible CSRF attack'));
+            // Do not terminate the whole auth flow for a single stale/foreign callback.
+            // Keep waiting for a callback carrying the expected state.
+            logOAuthDebug('[OAuth] Ignoring mismatched state callback and continuing to wait for valid callback');
             return;
           }
 
@@ -442,7 +496,10 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
         console.log(
           `[OAuth] Waiting for OAuth callback at http://${redirectHost}:${listeningPort}${pathName}`
         );
-        console.log(`[OAuth] You have 10 minutes to complete the authentication in your browser`);
+        console.log(
+          `[OAuth] You have ${Math.max(1, Math.floor(callbackTimeoutMs / 1000))} seconds to complete the authentication in your browser`
+        );
+        publishInteractiveLockCallbackPort(listeningPort);
         try {
           const envBrowser = String(process.env.ROUTECODEX_OAUTH_BROWSER || '').trim().toLowerCase();
           const camoufoxDefault = !envBrowser || envBrowser === 'camoufox';
@@ -461,13 +518,13 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
           // ignore
         }
 
-        // 设置 10 分钟超时
+        // Timeout is adaptive: fast-fail for headless auto mode, long timeout for manual/headful.
         timeoutHandle = setTimeout(() => {
-          logOAuthDebug('[OAuth] Callback server timeout (10 minutes)');
-          console.warn('[OAuth] OAuth callback timeout after 10 minutes. Please try again.');
+          logOAuthDebug(`[OAuth] Callback server timeout (${callbackTimeoutMs} ms)`);
+          console.warn(`[OAuth] OAuth callback timeout after ${Math.floor(callbackTimeoutMs / 1000)} seconds. Please try again.`);
           server.close();
-          reject(new Error('OAuth callback timeout after 10 minutes'));
-        }, 10 * 60 * 1000);
+          reject(new Error(`OAuth callback timeout after ${Math.floor(callbackTimeoutMs / 1000)} seconds`));
+        }, callbackTimeoutMs);
       });
 
       // 不指定 host，监听所有地址，避免 localhost 解析到仅 IPv6 或仅 IPv4 时造成连接被拒绝
@@ -787,6 +844,20 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
     authUrl.searchParams.delete('redirect');
     authUrl.searchParams.delete('state');
     authUrl.searchParams.set('redirect_uri', redirectUri);
+    authUrl.searchParams.set('state', state);
+  }
+
+  private async abortPendingCallbackServer(redirectUri: string, reason: string): Promise<void> {
+    try {
+      const url = new URL(redirectUri);
+      url.searchParams.set('error', reason || 'cancelled');
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 1200);
+      await fetch(url.toString(), { method: 'GET', signal: controller.signal });
+      clearTimeout(timeout);
+    } catch {
+      // best-effort callback abort
+    }
   }
 
   private coerceStoredToken(token: UnknownObject | null | undefined): StoredToken | null {

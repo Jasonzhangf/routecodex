@@ -27,7 +27,7 @@ import {
   type RefreshOutcome
 } from './history-store.js';
 import { ensureLocalTokenPortalEnv, shutdownLocalTokenPortalEnv } from '../token-portal/local-token-portal.js';
-import { shutdownCamoufoxLaunchers, isCamoufoxAvailable, openAuthInCamoufox } from '../providers/core/config/camoufox-launcher.js';
+import { isCamoufoxAvailable, openAuthInCamoufox } from '../providers/core/config/camoufox-launcher.js';
 import { loadRouteCodexConfig } from '../config/routecodex-config-loader.js';
 import { withOAuthRepairEnv } from '../providers/auth/oauth-repair-env.js';
 import { findGoogleAccountVerificationIssue } from './quota-auth-issue.js';
@@ -37,11 +37,6 @@ export { TokenDaemon };
 const historyStore = new TokenHistoryStore();
 
 async function cleanupInteractiveOAuthArtifacts(): Promise<void> {
-  try {
-    await shutdownCamoufoxLaunchers();
-  } catch {
-    // ignore cleanup errors
-  }
   try {
     await shutdownLocalTokenPortalEnv();
   } catch {
@@ -366,6 +361,7 @@ export async function printTokens(json = false): Promise<void> {
 type InteractiveRefreshOptions = {
   force?: boolean;
   mode?: 'manual' | 'auto';
+  noAutoFallback?: boolean;
 };
 
 function configHasProviderId(userConfig: unknown, providerId: string): boolean {
@@ -425,6 +421,7 @@ export async function interactiveRefresh(selector: string, options: InteractiveR
   const label = formatTokenLabel(token);
   const force = Boolean(options?.force);
   const interactionMode = options?.mode === 'auto' ? 'auto' : 'manual';
+  const noAutoFallback = options?.noAutoFallback === true;
   let quotaVerifyWarned = false;
 
   const maybeOpenQuotaVerifyUrl = async (url: string): Promise<void> => {
@@ -617,7 +614,7 @@ export async function interactiveRefresh(selector: string, options: InteractiveR
     } catch (error) {
       // When Camoufox auto mode fails (selector mismatch / locale / popup differences),
       // immediately fall back to a visible manual flow in the same command invocation.
-      if (autoModeAtStart) {
+      if (autoModeAtStart && !noAutoFallback) {
         const msg = error instanceof Error ? error.message : String(error);
         console.warn(
           chalk.yellow('!'),

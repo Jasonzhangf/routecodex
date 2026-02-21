@@ -6,7 +6,10 @@ import {
 } from '../token-daemon/index.js';
 import { clearAntigravityReauthRequired, readAntigravityReauthRequiredState } from '../providers/auth/antigravity-reauth-state.js';
 
-async function safeInteractiveRefresh(selector: string, options: { force?: boolean; mode?: 'manual' | 'auto' }): Promise<boolean> {
+async function safeInteractiveRefresh(
+  selector: string,
+  options: { force?: boolean; mode?: 'manual' | 'auto'; noAutoFallback?: boolean }
+): Promise<boolean> {
   try {
     await interactiveRefresh(selector, options);
     return true;
@@ -154,7 +157,7 @@ export function createOauthCommand(): Command {
           const rec = state[alias];
           const selector = rec?.tokenFile || `antigravity-oauth-*-` + alias + `.json`;
           console.log(`Re-auth required: alias=${alias}${rec?.fromSuffix ? ` from=${rec.fromSuffix}` : ''}${rec?.toSuffix ? ` to=${rec.toSuffix}` : ''}`);
-          const ok = await safeInteractiveRefresh(selector, { force: true, mode: 'auto' });
+          const ok = await safeInteractiveRefresh(selector, { force: true, mode: 'auto', noAutoFallback: true });
           if (!ok) {
             return;
           }
@@ -207,7 +210,7 @@ export function createOauthCommand(): Command {
         delete process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
       }
       try {
-        await safeInteractiveRefresh(selector, { force: true, mode: 'auto' });
+        await safeInteractiveRefresh(selector, { force: true, mode: 'auto', noAutoFallback: true });
       } finally {
         if (prevBrowser === undefined) {
           delete process.env.ROUTECODEX_OAUTH_BROWSER;
@@ -264,7 +267,7 @@ export function createOauthCommand(): Command {
           delete process.env.ROUTECODEX_CAMOUFOX_ACCOUNT_TEXT;
         }
         try {
-          const ok = await safeInteractiveRefresh(selector, { force: true, mode: 'auto' });
+          const ok = await safeInteractiveRefresh(selector, { force: true, mode: 'auto', noAutoFallback: true });
           if (!ok) {
             return;
           }
@@ -314,7 +317,7 @@ export function createOauthCommand(): Command {
         delete process.env.ROUTECODEX_CAMOUFOX_ACCOUNT_TEXT;
       }
       try {
-        await safeInteractiveRefresh(selector, { force: true, mode: 'auto' });
+        await safeInteractiveRefresh(selector, { force: true, mode: 'auto', noAutoFallback: true });
         if (token && token.provider === 'gemini-cli' && token.alias && token.alias !== 'static') {
           await clearAntigravityReauthRequired(token.alias);
         }
@@ -365,7 +368,7 @@ export function createOauthCommand(): Command {
         delete process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
       }
       try {
-        await safeInteractiveRefresh(selector, { force: true, mode: 'auto' });
+        await safeInteractiveRefresh(selector, { force: true, mode: 'auto', noAutoFallback: true });
       } finally {
         if (prevBrowser === undefined) {
           delete process.env.ROUTECODEX_OAUTH_BROWSER;
@@ -416,7 +419,7 @@ export function createOauthCommand(): Command {
         delete process.env.ROUTECODEX_CAMOUFOX_ACCOUNT_TEXT;
       }
       try {
-        await safeInteractiveRefresh(selector, { force: true, mode: 'auto' });
+        await safeInteractiveRefresh(selector, { force: true, mode: 'auto', noAutoFallback: true });
         if (token && token.provider === 'antigravity' && token.alias && token.alias !== 'static') {
           await clearAntigravityReauthRequired(token.alias);
         }
