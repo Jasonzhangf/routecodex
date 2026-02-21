@@ -840,10 +840,12 @@ async function startClockClientService(args: {
   })();
 
   const normalizedTmuxTarget = String(tmuxTarget || '').trim();
+  if (!normalizedTmuxTarget) {
+    // No tmux target means no reliable stdin injection path.
+    // Do not register a clock-client daemon with a synthetic session id.
+    return null;
+  }
   const tmuxSessionId = (() => {
-    if (!normalizedTmuxTarget) {
-      return daemonId;
-    }
     const idx = normalizedTmuxTarget.indexOf(':');
     const candidate = (idx >= 0 ? normalizedTmuxTarget.slice(0, idx) : normalizedTmuxTarget).trim();
     return candidate || daemonId;
@@ -1263,7 +1265,7 @@ export function createLauncherCommand(program: Command, ctx: LauncherCommandCont
           managedClientCommandHint
         })
       });
-      if (managedClientProcessEnabled && reclaimRequired && !clockClientService) {
+      if (managedClientProcessEnabled && reclaimRequired && tmuxTarget && !clockClientService) {
         throw new Error('clock client registration failed for managed child process; aborting launch to avoid orphan process');
       }
       if (tmuxTarget && !clockClientService) {

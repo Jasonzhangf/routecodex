@@ -118,6 +118,7 @@ describe('cli codex command', () => {
       rawArgv: ['codex', '--url', 'http://localhost:5520/proxy'],
       fsImpl: createStubFs(),
       homedir: () => '/home/test',
+      cwd: () => '/home/test',
       sleep: async () => {},
       fetch: (async () => ({ ok: true, json: async () => ({ status: 'ready', ok: true }) })) as any,
       spawnSyncImpl: () => ({ status: 1, stdout: '', stderr: 'tmux not found' }) as any,
@@ -578,7 +579,7 @@ describe('cli codex command', () => {
     expect(warnings.some((line) => line.includes('tmux not found'))).toBe(true);
   });
 
-  it('fails fast when managed child clock registration fails', async () => {
+  it('continues launch when clock registration is unavailable without strict tmux-managed child context', async () => {
     const spawnCalls: Array<{ command: string; args: string[]; options: any }> = [];
     const errors: string[] = [];
     const program = new Command();
@@ -591,7 +592,8 @@ describe('cli codex command', () => {
       createSpinner: async () => createStubSpinner(),
       logger: { info: () => {}, warning: () => {}, success: () => {}, error: (msg) => errors.push(msg) },
       env: {
-        ROUTECODEX_CLOCK_RECLAIM_REQUIRED: '1'
+        ROUTECODEX_CLOCK_RECLAIM_REQUIRED: '1',
+        TMUX: '/tmp/tmux,123,0'
       },
       rawArgv: ['codex', '--url', 'http://localhost:5520/proxy'],
       fsImpl: createStubFs(),
@@ -606,7 +608,21 @@ describe('cli codex command', () => {
         }
         return { ok: true, status: 200, json: async () => ({}) } as any;
       }) as any,
-      spawnSyncImpl: () => ({ status: 1, stdout: '', stderr: 'tmux not found' }) as any,
+      spawnSyncImpl: (command: string, args: string[]) => {
+        if (command !== 'tmux') {
+          return { status: 1, stdout: '', stderr: 'unknown command' } as any;
+        }
+        if (args[0] === '-V') {
+          return { status: 0, stdout: 'tmux 3.4', stderr: '' } as any;
+        }
+        if (args[0] === 'display-message') {
+          return { status: 0, stdout: 's-main:0.0\n', stderr: '' } as any;
+        }
+        if (args[0] === 'list-panes') {
+          return { status: 0, stdout: 'zsh\t/home/test\n', stderr: '' } as any;
+        }
+        return { status: 0, stdout: '', stderr: '' } as any;
+      },
       spawn: (command, args, options) => {
         spawnCalls.push({ command, args, options });
         return { on: () => {}, kill: () => true } as any;
@@ -619,12 +635,10 @@ describe('cli codex command', () => {
       }
     });
 
-    await expect(
-      program.parseAsync(['node', 'routecodex', 'codex', '--url', 'http://localhost:5520/proxy'], { from: 'node' })
-    ).rejects.toThrow('exit:1');
+    await program.parseAsync(['node', 'routecodex', 'codex', '--url', 'http://localhost:5520/proxy'], { from: 'node' });
 
-    expect(spawnCalls).toHaveLength(0);
-    expect(errors.some((line) => line.includes('clock client registration failed'))).toBe(true);
+    expect(spawnCalls).toHaveLength(1);
+    expect(errors.some((line) => line.includes('clock client registration failed'))).toBe(false);
   });
 
   it('re-registers clock client daemon after heartbeat reports missing daemon', async () => {
@@ -640,10 +654,11 @@ describe('cli codex command', () => {
       nodeBin: 'node',
       createSpinner: async () => createStubSpinner(),
       logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
-      env: {},
+      env: { TMUX: '/tmp/tmux,123,0' },
       rawArgv: ['codex', '--url', 'http://localhost:5520/proxy'],
       fsImpl: createStubFs(),
       homedir: () => '/home/test',
+      cwd: () => '/home/test',
       sleep: async () => {},
       fetch: (async (url: string) => {
         if (url.endsWith('/ready') || url.endsWith('/health')) {
@@ -659,7 +674,21 @@ describe('cli codex command', () => {
         }
         return { ok: true, status: 200, json: async () => ({}) } as any;
       }) as any,
-      spawnSyncImpl: () => ({ status: 1, stdout: '', stderr: 'tmux not found' }) as any,
+      spawnSyncImpl: (command: string, args: string[]) => {
+        if (command !== 'tmux') {
+          return { status: 1, stdout: '', stderr: 'unknown command' } as any;
+        }
+        if (args[0] === '-V') {
+          return { status: 0, stdout: 'tmux 3.4', stderr: '' } as any;
+        }
+        if (args[0] === 'display-message') {
+          return { status: 0, stdout: 's-main:0.0\n', stderr: '' } as any;
+        }
+        if (args[0] === 'list-panes') {
+          return { status: 0, stdout: 'zsh\t/home/test\n', stderr: '' } as any;
+        }
+        return { status: 0, stdout: '', stderr: '' } as any;
+      },
       spawn: (command, args, options) => {
         spawnCalls.push({ command, args, options });
         return { pid: 1234, on: () => {}, kill: () => true } as any;

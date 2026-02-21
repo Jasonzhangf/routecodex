@@ -146,6 +146,41 @@ function extractWorkdir(
   return undefined;
 }
 
+function extractTmuxSessionId(
+  userMeta: Record<string, unknown>,
+  bodyMeta: Record<string, unknown>,
+  headers: Record<string, unknown> | undefined,
+  clientHeaders?: Record<string, string>
+): string | undefined {
+  const directCandidates = [
+    userMeta.tmuxSessionId,
+    userMeta.tmux_session_id,
+    bodyMeta.tmuxSessionId,
+    bodyMeta.tmux_session_id
+  ];
+  for (const candidate of directCandidates) {
+    if (typeof candidate === 'string' && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+
+  const headerSources: Array<Record<string, unknown> | undefined> = [
+    headers,
+    clientHeaders ? (clientHeaders as unknown as Record<string, unknown>) : undefined
+  ];
+  for (const source of headerSources) {
+    const fromHeader =
+      extractHeaderValue(source, 'x-routecodex-tmux-session-id')
+      || extractHeaderValue(source, 'x-rcc-tmux-session-id')
+      || extractHeaderValue(source, 'x-tmux-session-id');
+    if (fromHeader) {
+      return fromHeader;
+    }
+  }
+
+  return undefined;
+}
+
 function resolveWorkdirFromClockDaemon(daemonId: string | undefined): string | undefined {
   if (!daemonId) {
     return undefined;
@@ -154,6 +189,23 @@ function resolveWorkdirFromClockDaemon(daemonId: string | undefined): string | u
     const record = getClockClientRegistry().findByDaemonId(daemonId);
     const workdir = typeof record?.workdir === 'string' ? record.workdir.trim() : '';
     return workdir || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function resolveTmuxSessionIdFromClockDaemon(daemonId: string | undefined): string | undefined {
+  if (!daemonId) {
+    return undefined;
+  }
+  try {
+    const record = getClockClientRegistry().findByDaemonId(daemonId);
+    const tmuxSessionId = typeof record?.tmuxSessionId === 'string' ? record.tmuxSessionId.trim() : '';
+    if (tmuxSessionId) {
+      return tmuxSessionId;
+    }
+    const sessionId = typeof record?.sessionId === 'string' ? record.sessionId.trim() : '';
+    return sessionId || undefined;
   } catch {
     return undefined;
   }
@@ -184,6 +236,11 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
   const resolvedWorkdir =
     extractWorkdir(userMeta, bodyMeta, headers, normalizedClientHeaders)
     || resolveWorkdirFromClockDaemon(resolvedClockDaemonId);
+  const resolvedTmuxSessionId =
+    extractTmuxSessionId(userMeta, bodyMeta, headers, normalizedClientHeaders)
+    || resolveTmuxSessionIdFromClockDaemon(resolvedClockDaemonId);
+  const clientInjectReady = Boolean(resolvedTmuxSessionId);
+  const clientInjectReason = clientInjectReady ? 'tmux_session_ready' : 'tmux_session_missing';
   const metadata: Record<string, unknown> = {
     ...userMeta,
     entryEndpoint: input.entryEndpoint,
@@ -195,7 +252,10 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
     ...(resolvedUserAgent ? { userAgent: resolvedUserAgent } : {}),
     ...(resolvedOriginator ? { clientOriginator: resolvedOriginator } : {}),
     ...(resolvedClockDaemonId ? { clockDaemonId: resolvedClockDaemonId } : {}),
-    ...(resolvedWorkdir ? { workdir: resolvedWorkdir } : {})
+    ...(resolvedWorkdir ? { workdir: resolvedWorkdir } : {}),
+    ...(resolvedTmuxSessionId ? { tmuxSessionId: resolvedTmuxSessionId } : {}),
+    clientInjectReady,
+    clientInjectReason
   };
 
   if (normalizedClientHeaders) {

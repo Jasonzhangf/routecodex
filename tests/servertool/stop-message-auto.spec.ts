@@ -1959,24 +1959,25 @@ describe('stop_message_auto servertool', () => {
     } as any;
 
     let reenterCalls = 0;
-    const orchestration = await runServerToolOrchestration({
-      chat: chatResponse,
-      adapterContext,
-      requestId: 'req-stopmessage-client-inject-fail',
-      entryEndpoint: '/v1/chat/completions',
-      providerProtocol: 'openai-chat',
-      reenterPipeline: async () => {
-        reenterCalls += 1;
-        const error = new Error('inject failed') as Error & { code?: string };
-        error.code = 'SERVERTOOL_FOLLOWUP_FAILED';
-        throw error;
-      }
+    await expect(
+      runServerToolOrchestration({
+        chat: chatResponse,
+        adapterContext,
+        requestId: 'req-stopmessage-client-inject-fail',
+        entryEndpoint: '/v1/chat/completions',
+        providerProtocol: 'openai-chat',
+        reenterPipeline: async () => {
+          reenterCalls += 1;
+          const error = new Error('inject failed') as Error & { code?: string };
+          error.code = 'SERVERTOOL_FOLLOWUP_FAILED';
+          throw error;
+        }
+      })
+    ).rejects.toMatchObject({
+      code: 'SERVERTOOL_FOLLOWUP_FAILED'
     });
 
     expect(reenterCalls).toBe(1);
-    expect(orchestration.executed).toBe(true);
-    expect(orchestration.flowId).toBe('stop_message_flow');
-    expect((orchestration.chat as any)?.id).toBe('chatcmpl-stop-client-inject-fail');
 
     const persisted = await readJsonFileWithRetry<{ state?: Record<string, unknown> }>(
       path.join(SESSION_DIR, `session-${sessionId}.json`)
@@ -2198,26 +2199,25 @@ describe('stop_message_auto servertool', () => {
       capturedChatRequest
     } as any;
 
-    const orchestration = await runServerToolOrchestration({
-      chat: chatResponse,
-      adapterContext,
-      requestId: 'req-stopmessage-empty-2',
-      entryEndpoint: '/v1/chat/completions',
-      providerProtocol: 'openai-chat',
-      reenterPipeline: async () => ({
-        body: {
-          id: 'chatcmpl-followup-empty',
-          object: 'chat.completion',
-          model: 'gpt-test',
-          choices: [{ index: 0, message: { role: 'assistant', content: '' }, finish_reason: 'stop' }]
-        } as JsonObject
+    await expect(
+      runServerToolOrchestration({
+        chat: chatResponse,
+        adapterContext,
+        requestId: 'req-stopmessage-empty-2',
+        entryEndpoint: '/v1/chat/completions',
+        providerProtocol: 'openai-chat',
+        reenterPipeline: async () => ({
+          body: {
+            id: 'chatcmpl-followup-empty',
+            object: 'chat.completion',
+            model: 'gpt-test',
+            choices: [{ index: 0, message: { role: 'assistant', content: '' }, finish_reason: 'stop' }]
+          } as JsonObject
+        })
       })
+    ).rejects.toMatchObject({
+      code: 'SERVERTOOL_EMPTY_FOLLOWUP'
     });
-
-    // stopMessage followup empty: should not bubble 502; return original response and disable stopMessage to avoid loops.
-    expect(orchestration.executed).toBe(true);
-    expect(orchestration.flowId).toBe('stop_message_flow');
-    expect((orchestration.chat as any)?.id).toBe('chatcmpl-stop-empty-2');
 
     expect(fs.existsSync(path.join(SESSION_DIR, `session-${sessionId}.json`))).toBe(false);
   });
