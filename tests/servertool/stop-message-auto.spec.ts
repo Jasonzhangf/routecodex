@@ -1925,6 +1925,67 @@ describe('stop_message_auto servertool', () => {
     expect((orchestration.chat as any)?.choices?.[0]?.message?.content).toBe('ok');
   });
 
+  test('client-inject stop followup runs once and clears stopMessage on inject failure', async () => {
+    const sessionId = 'stopmessage-spec-session-client-inject-fail';
+    const state: RoutingInstructionState = {
+      forcedTarget: undefined,
+      stickyTarget: undefined,
+      allowedProviders: new Set(),
+      disabledProviders: new Set(),
+      disabledKeys: new Map(),
+      disabledModels: new Map(),
+      stopMessageText: '立即执行待处理任务',
+      stopMessageMaxRepeats: 2,
+      stopMessageUsed: 0
+    };
+    writeRoutingStateForSession(sessionId, state);
+
+    const capturedChatRequest: JsonObject = {
+      model: 'gpt-test',
+      messages: [{ role: 'user', content: 'hi' }]
+    };
+    const chatResponse: JsonObject = {
+      id: 'chatcmpl-stop-client-inject-fail',
+      object: 'chat.completion',
+      model: 'gpt-test',
+      choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }]
+    };
+    const adapterContext: AdapterContext = {
+      requestId: 'req-stopmessage-client-inject-fail',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      sessionId,
+      capturedChatRequest
+    } as any;
+
+    let reenterCalls = 0;
+    const orchestration = await runServerToolOrchestration({
+      chat: chatResponse,
+      adapterContext,
+      requestId: 'req-stopmessage-client-inject-fail',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      reenterPipeline: async () => {
+        reenterCalls += 1;
+        const error = new Error('inject failed') as Error & { code?: string };
+        error.code = 'SERVERTOOL_FOLLOWUP_FAILED';
+        throw error;
+      }
+    });
+
+    expect(reenterCalls).toBe(1);
+    expect(orchestration.executed).toBe(true);
+    expect(orchestration.flowId).toBe('stop_message_flow');
+    expect((orchestration.chat as any)?.id).toBe('chatcmpl-stop-client-inject-fail');
+
+    const persisted = await readJsonFileWithRetry<{ state?: Record<string, unknown> }>(
+      path.join(SESSION_DIR, `session-${sessionId}.json`)
+    );
+    expect(persisted?.state?.stopMessageText).toBeUndefined();
+    expect(persisted?.state?.stopMessageMaxRepeats).toBeUndefined();
+    expect(persisted?.state?.stopMessageUsed).toBeUndefined();
+  });
+
   test.skip('forces followup stream=false even when captured parameters.stream=true', async () => {
     const sessionId = 'stopmessage-spec-session-stream-override';
     const state: RoutingInstructionState = {

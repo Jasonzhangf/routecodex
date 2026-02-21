@@ -63,6 +63,110 @@ function shouldUnbindConversationSessionOnInjectFailure(reasonRaw: unknown): boo
   );
 }
 
+function createClockInjectFailureError(args: {
+  reason: string;
+  source: string;
+  requestId?: string;
+  sessionId?: string;
+  tmuxSessionId?: string;
+}): Error & {
+  code?: string;
+  upstreamCode?: string;
+  details?: Record<string, unknown>;
+  status?: number;
+  statusCode?: number;
+  retryable?: boolean;
+} {
+  const error = new Error(
+    `[servertool.inject] clock client injection failed: ${args.reason}`
+  ) as Error & {
+    code?: string;
+    upstreamCode?: string;
+    details?: Record<string, unknown>;
+    status?: number;
+    statusCode?: number;
+    retryable?: boolean;
+  };
+  error.code = 'SERVERTOOL_FOLLOWUP_FAILED';
+  error.upstreamCode = 'clock_client_inject_failed';
+  error.details = {
+    reason: args.reason,
+    source: args.source,
+    requestId: args.requestId,
+    sessionId: args.sessionId,
+    tmuxSessionId: args.tmuxSessionId
+  };
+  error.status = 503;
+  error.statusCode = 503;
+  error.retryable = false;
+  return error;
+}
+
+function normalizeInjectToken(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+function resolveStrictClientInjectTarget(args: {
+  tmuxSessionId?: unknown;
+  sessionId?: unknown;
+  requestId?: string;
+  source: string;
+}): { tmuxSessionId?: string; sessionId?: string } {
+  const registry = getClockClientRegistry();
+  const tmuxSessionId = normalizeInjectToken(args.tmuxSessionId);
+  const sessionId = normalizeInjectToken(args.sessionId);
+  if (!tmuxSessionId && !sessionId) {
+    throw createClockInjectFailureError({
+      reason: 'session_binding_required',
+      source: args.source,
+      requestId: args.requestId
+    });
+  }
+  if (!sessionId) {
+    return { ...(tmuxSessionId ? { tmuxSessionId } : {}) };
+  }
+
+  const boundTmuxSessionId = normalizeInjectToken(registry.resolveBoundTmuxSession(sessionId));
+  if (!boundTmuxSessionId) {
+    try {
+      registry.unbindConversationSession(sessionId);
+    } catch {
+      // best-effort cleanup
+    }
+    throw createClockInjectFailureError({
+      reason: 'conversation_session_unbound',
+      source: args.source,
+      requestId: args.requestId,
+      sessionId,
+      ...(tmuxSessionId ? { tmuxSessionId } : {})
+    });
+  }
+
+  if (tmuxSessionId && tmuxSessionId !== boundTmuxSessionId) {
+    try {
+      registry.unbindConversationSession(sessionId);
+    } catch {
+      // best-effort cleanup
+    }
+    throw createClockInjectFailureError({
+      reason: 'conversation_tmux_binding_mismatch',
+      source: args.source,
+      requestId: args.requestId,
+      sessionId,
+      tmuxSessionId
+    });
+  }
+
+  return {
+    sessionId,
+    tmuxSessionId: boundTmuxSessionId
+  };
+}
+
 async function injectClockClientPromptStrict(args: {
   tmuxSessionId?: string;
   sessionId?: string;
@@ -93,29 +197,13 @@ async function injectClockClientPromptStrict(args: {
     }
   }
 
-  const error = new Error(
-    `[servertool.inject] clock client injection failed: ${reason}`
-  ) as Error & {
-    code?: string;
-    upstreamCode?: string;
-    details?: Record<string, unknown>;
-    status?: number;
-    statusCode?: number;
-    retryable?: boolean;
-  };
-  error.code = 'SERVERTOOL_FOLLOWUP_FAILED';
-  error.upstreamCode = 'clock_client_inject_failed';
-  error.details = {
+  throw createClockInjectFailureError({
     reason,
     source: args.source,
     requestId: args.requestId,
     sessionId: args.sessionId,
     tmuxSessionId: args.tmuxSessionId
-  };
-  error.status = 503;
-  error.statusCode = 503;
-  error.retryable = false;
-  throw error;
+  });
 }
 
 export async function convertProviderResponseIfNeeded(
@@ -253,8 +341,6 @@ export async function convertProviderResponseIfNeeded(
         stage: 'inbound'
       };
 
-      bindClockConversationSession(nestedMetadata);
-
       const nestedInput: PipelineExecutionInput = {
         entryEndpoint: nestedEntry,
         method: 'POST',
@@ -266,21 +352,6 @@ export async function convertProviderResponseIfNeeded(
       };
 
       try {
-        const requestBody = reenterOpts.body as Record<string, unknown>;
-        const messages = Array.isArray(requestBody.messages) ? (requestBody.messages as unknown[]) : [];
-        const lastUser = [...messages]
-          .reverse()
-          .find((entry) => entry && typeof entry === 'object' && (entry as Record<string, unknown>).role === 'user') as
-          | Record<string, unknown>
-          | undefined;
-        const text = typeof lastUser?.content === 'string' ? String(lastUser.content) : '';
-        const lastMessage = messages.length > 0 ? messages[messages.length - 1] : undefined;
-        const lastTool =
-          lastMessage && typeof lastMessage === 'object' && !Array.isArray(lastMessage)
-            ? (lastMessage as Record<string, unknown>)
-            : undefined;
-        const lastToolRole = typeof lastTool?.role === 'string' ? lastTool.role : '';
-        const lastToolName = typeof lastTool?.name === 'string' ? String(lastTool.name).trim() : '';
         const clientInjectOnlyRaw = nestedMetadata.clientInjectOnly;
         const clientInjectOnly =
           clientInjectOnlyRaw === true ||
@@ -291,6 +362,17 @@ export async function convertProviderResponseIfNeeded(
           typeof nestedMetadata.clientInjectSource === 'string' && nestedMetadata.clientInjectSource.trim()
             ? nestedMetadata.clientInjectSource.trim()
             : 'servertool.client_inject';
+        const requestBody =
+          reenterOpts.body && typeof reenterOpts.body === 'object' && !Array.isArray(reenterOpts.body)
+            ? (reenterOpts.body as Record<string, unknown>)
+            : {};
+        const messages = Array.isArray(requestBody.messages) ? (requestBody.messages as unknown[]) : [];
+        const lastUser = [...messages]
+          .reverse()
+          .find((entry) => entry && typeof entry === 'object' && (entry as Record<string, unknown>).role === 'user') as
+          | Record<string, unknown>
+          | undefined;
+        const text = typeof lastUser?.content === 'string' ? String(lastUser.content) : '';
         const injectTarget = {
           tmuxSessionId: typeof nestedMetadata.tmuxSessionId === 'string' ? nestedMetadata.tmuxSessionId : undefined,
           sessionId: typeof nestedMetadata.sessionId === 'string' ? nestedMetadata.sessionId : undefined,
@@ -298,14 +380,29 @@ export async function convertProviderResponseIfNeeded(
           requestId: reenterOpts.requestId
         };
         if (clientInjectOnly) {
+          const strictTarget = resolveStrictClientInjectTarget({
+            tmuxSessionId: injectTarget.tmuxSessionId,
+            sessionId: injectTarget.sessionId,
+            requestId: reenterOpts.requestId,
+            source: clientInjectSource
+          });
           const injectText = clientInjectText || text || '继续执行';
           await injectClockClientPromptStrict({
             ...injectTarget,
+            ...strictTarget,
             text: injectText,
             source: clientInjectSource
           });
           return { body: { ok: true, mode: 'client_inject_only' } };
         }
+        bindClockConversationSession(nestedMetadata);
+        const lastMessage = messages.length > 0 ? messages[messages.length - 1] : undefined;
+        const lastTool =
+          lastMessage && typeof lastMessage === 'object' && !Array.isArray(lastMessage)
+            ? (lastMessage as Record<string, unknown>)
+            : undefined;
+        const lastToolRole = typeof lastTool?.role === 'string' ? lastTool.role : '';
+        const lastToolName = typeof lastTool?.name === 'string' ? String(lastTool.name).trim() : '';
         if (text.includes('<**clock:{') && text.includes('}**>')) {
           await injectClockClientPromptStrict({
             ...injectTarget,
