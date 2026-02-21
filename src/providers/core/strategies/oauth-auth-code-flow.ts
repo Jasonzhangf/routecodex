@@ -833,7 +833,9 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
    * 刷新令牌
    */
   async refreshToken(refreshToken: string): Promise<UnknownObject> {
-    const maxAttempts = this.config.retry?.maxAttempts || 3;
+    const configuredMaxAttempts = this.config.retry?.maxAttempts || 3;
+    // Align iFlow CLI auth behavior: refresh endpoint errors should not loop retries.
+    const maxAttempts = this.isIflowOAuthProvider() ? 1 : configuredMaxAttempts;
     let lastError: unknown;
     let abortedEarly = false;
 

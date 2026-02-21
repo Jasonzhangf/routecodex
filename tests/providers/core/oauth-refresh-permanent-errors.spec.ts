@@ -65,6 +65,31 @@ describe('OAuth refreshToken aborts early on permanent errors', () => {
     warn.mockRestore();
   });
 
+  test('iflow auth-code flow does not retry refresh on token endpoint errors', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const calls: string[] = [];
+    const strategy = new OAuthAuthCodeFlowStrategy(
+      {
+        flowType: 'authorization_code' as any,
+        endpoints: { deviceCodeUrl: 'https://x/device', tokenUrl: 'https://iflow.cn/oauth/token' },
+        client: { clientId: 'iflow-code', redirectUri: 'http://localhost:8080/oauth2callback' },
+        retry: { maxAttempts: 3, backoffMs: 1 }
+      } as any,
+      (async (url: string) => {
+        calls.push(url);
+        return jsonResponse(200, {
+          code: 500,
+          message: '当前找我聊的人太多了，可以晚点再来问我哦。'
+        });
+      }) as any,
+      '/tmp/unused.json'
+    );
+
+    await expect(strategy.refreshToken('bad-refresh')).rejects.toThrow('after 1 attempts');
+    expect(calls).toHaveLength(1);
+    warn.mockRestore();
+  });
+
   test('auth-code refresh tolerates missing expires_in and does not throw Invalid time value', async () => {
     const strategy = new OAuthAuthCodeFlowStrategy(
       {

@@ -384,7 +384,9 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
    * 刷新令牌
    */
   async refreshToken(refreshToken: string): Promise<StoredToken> {
-    const maxAttempts = this.config.retry?.maxAttempts || 3;
+    const configuredMaxAttempts = this.config.retry?.maxAttempts || 3;
+    const tokenUrl = String(this.config.endpoints.tokenUrl || '').toLowerCase();
+    const maxAttempts = tokenUrl.includes('iflow.cn/oauth/token') ? 1 : configuredMaxAttempts;
     let lastError: unknown;
     let abortedEarly = false;
 

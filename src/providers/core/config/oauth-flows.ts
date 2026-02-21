@@ -456,12 +456,11 @@ export abstract class BaseOAuthFlowStrategy {
    * 解析错误响应
    */
   protected async parseErrorResponse(response: Response): Promise<Error> {
+    const errorText = await response.text();
     try {
-      const errorText = await response.text();
       const errorData = JSON.parse(errorText);
       return new Error(`OAuth error: ${errorData.error} - ${errorData.error_description || 'No description'}`);
     } catch {
-      const errorText = await response.text();
       return new Error(`HTTP error: ${response.status} ${response.statusText} - ${errorText}`);
     }
   }

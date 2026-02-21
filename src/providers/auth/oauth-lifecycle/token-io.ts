@@ -143,6 +143,20 @@ export async function discardBackupFile(backupFile: string | null): Promise<void
   }
 }
 
+export async function clearTokenFile(file: string): Promise<void> {
+  if (!file) {
+    return;
+  }
+  try {
+    await fs.writeFile(file, '{}\n', { mode: 0o600 });
+    logOAuthDebug(`[OAuth] token.clear: ${file}`);
+  } catch (error) {
+    logOAuthDebug(
+      `[OAuth] token.clear failed (${file}): ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+}
+
 export async function readRawTokenFile(file: string): Promise<UnknownObject | null> {
   if (!file) {
     return null;

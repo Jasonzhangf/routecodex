@@ -69,6 +69,7 @@ import {
   backupTokenFile,
   restoreTokenFileFromBackup,
   discardBackupFile,
+  clearTokenFile,
   readRawTokenFile
 } from './oauth-lifecycle/token-io.js';
 
@@ -1025,9 +1026,19 @@ export async function ensureValidOAuthToken(
         updateThrottle(cacheKey);
         return;
       } catch (error) {
+        const message = error instanceof Error ? error.message : String(error || '');
+        if (providerType === 'iflow') {
+          // Align iFlow CLI behavior: refresh failure invalidates local token cache first.
+          await clearTokenFile(tokenFilePath);
+        }
         if (!opts.forceReacquireIfRefreshFails) {
+          if (providerType === 'iflow') {
+            updateThrottle(cacheKey);
+            return;
+          }
           throw error;
         }
+        logOAuthDebug(`[OAuth] refresh failed (${providerType}): ${message}`);
         logOAuthDebug('[OAuth] refresh failed, attempting interactive authorization...');
       }
     }
