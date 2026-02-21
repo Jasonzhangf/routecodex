@@ -99,3 +99,19 @@ export function resolvePoolCooldownWaitMs(pipelineError: unknown): number | unde
   }
   return Math.max(50, candidate);
 }
+
+export function mergeMetadataPreservingDefined(
+  base: Record<string, unknown>,
+  overlay?: Record<string, unknown> | null
+): Record<string, unknown> {
+  const merged: Record<string, unknown> = { ...base };
+  if (!overlay || typeof overlay !== 'object') {
+    return merged;
+  }
+  for (const [key, value] of Object.entries(overlay)) {
+    if (value !== undefined) {
+      merged[key] = value;
+    }
+  }
+  return merged;
+}

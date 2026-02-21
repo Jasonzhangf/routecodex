@@ -58,6 +58,7 @@ import {
 } from './executor/provider-response-utils.js';
 import {
   isPoolExhaustedPipelineError,
+  mergeMetadataPreservingDefined,
   resolvePoolCooldownWaitMs,
   writeInboundClientSnapshot
 } from './executor/request-executor-core-utils.js';
@@ -173,7 +174,7 @@ export class HubRequestExecutor implements RequestExecutor {
           throw pipelineError;
         }
         const pipelineMetadata = pipelineResult.metadata ?? {};
-        const mergedMetadata = { ...metadataForAttempt, ...pipelineMetadata };
+        const mergedMetadata = mergeMetadataPreservingDefined(metadataForAttempt, pipelineMetadata);
         const mergedClientHeaders =
           cloneClientHeaders(mergedMetadata?.clientHeaders) || clientHeadersForAttempt;
         if (mergedClientHeaders) {
