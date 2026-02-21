@@ -876,15 +876,56 @@ async function executeAuthFlow(
   tokenFilePath: string,
   forceReauth: boolean
 ): Promise<void> {
-  const strategy = createStrategy(providerType, overrides, tokenFilePath);
-  const authed = await strategy.authenticate?.({ openBrowser: true, forceReauthorize: forceReauth });
-  await finalizeTokenWrite(
-    providerType,
-    strategy,
-    tokenFilePath,
-    authed,
-    overrides.flowType ? `acquired (${String(overrides.flowType)})` : 'acquired'
-  );
+  const runOnce = async (): Promise<void> => {
+    const strategy = createStrategy(providerType, overrides, tokenFilePath);
+    const authed = await strategy.authenticate?.({ openBrowser: true, forceReauthorize: forceReauth });
+    await finalizeTokenWrite(
+      providerType,
+      strategy,
+      tokenFilePath,
+      authed,
+      overrides.flowType ? `acquired (${String(overrides.flowType)})` : 'acquired'
+    );
+  };
+
+  const autoMode = String(process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE || '').trim().toLowerCase();
+  const iflowAutoEnabled = providerType === 'iflow' && autoMode === 'iflow';
+  if (!iflowAutoEnabled) {
+    await runOnce();
+    return;
+  }
+
+  try {
+    await runOnce();
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error || '');
+    logOAuthDebug(`[OAuth] iflow auto auth failed, fallback to headful manual: ${msg}`);
+    const prevAutoMode = process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
+    const prevAutoConfirm = process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM;
+    const prevDevMode = process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
+    try {
+      delete process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
+      delete process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM;
+      process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = '1';
+      await runOnce();
+    } finally {
+      if (prevAutoMode === undefined) {
+        delete process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
+      } else {
+        process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE = prevAutoMode;
+      }
+      if (prevAutoConfirm === undefined) {
+        delete process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM;
+      } else {
+        process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM = prevAutoConfirm;
+      }
+      if (prevDevMode === undefined) {
+        delete process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
+      } else {
+        process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = prevDevMode;
+      }
+    }
+  }
 }
 
 export async function ensureValidOAuthToken(
@@ -1032,10 +1073,6 @@ export async function ensureValidOAuthToken(
           await clearTokenFile(tokenFilePath);
         }
         if (!opts.forceReacquireIfRefreshFails) {
-          if (providerType === 'iflow') {
-            updateThrottle(cacheKey);
-            return;
-          }
           throw error;
         }
         logOAuthDebug(`[OAuth] refresh failed (${providerType}): ${message}`);

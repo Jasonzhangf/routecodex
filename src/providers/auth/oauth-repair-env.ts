@@ -37,11 +37,9 @@ export async function withOAuthRepairEnv<T>(providerType: string, fn: () => Prom
   }
   if (pt === 'iflow') {
     const restore = setEnvScoped({
-      // iFlow repair defaults to manual/system browser flow.
-      // Camoufox auto mode for iFlow remains available via explicit oauth iflow-auto command.
-      ROUTECODEX_OAUTH_BROWSER: 'system',
-      ROUTECODEX_CAMOUFOX_AUTO_MODE: undefined,
-      ROUTECODEX_OAUTH_AUTO_CONFIRM: undefined
+      ROUTECODEX_OAUTH_BROWSER: 'camoufox',
+      ROUTECODEX_CAMOUFOX_AUTO_MODE: 'iflow',
+      ROUTECODEX_OAUTH_AUTO_CONFIRM: '1'
     });
     try {
       return await fn();

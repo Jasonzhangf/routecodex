@@ -15,7 +15,7 @@ function readJson(filePath: string): any {
 }
 
 describe('ensureValidOAuthToken (iflow) aligns refresh-failure handling', () => {
-  test('clears token file when refresh endpoint fails in non-interactive flow', async () => {
+  test('clears token file and throws when refresh endpoint fails in non-interactive flow', async () => {
     const prevFetch = globalThis.fetch;
     const prevHome = process.env.HOME;
     const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-oauth-iflow-refresh-'));
@@ -44,14 +44,16 @@ describe('ensureValidOAuthToken (iflow) aligns refresh-failure handling', () => 
     }) as any;
 
     try {
-      await ensureValidOAuthToken(
-        'iflow',
-        {
-          type: 'iflow-oauth',
-          tokenFile
-        } as any,
-        { openBrowser: false, forceReauthorize: false, forceReacquireIfRefreshFails: false }
-      );
+      await expect(
+        ensureValidOAuthToken(
+          'iflow',
+          {
+            type: 'iflow-oauth',
+            tokenFile
+          } as any,
+          { openBrowser: false, forceReauthorize: false, forceReacquireIfRefreshFails: false }
+        )
+      ).rejects.toThrow();
 
       const cleared = readJson(tokenFile);
       expect(cleared.access_token).toBeUndefined();
