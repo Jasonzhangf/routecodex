@@ -857,6 +857,19 @@ function closeOAuthAuthResources(providerType: string, tokenFilePath: string): v
   }
 }
 
+function shouldAutoCloseOAuthBrowserSession(): boolean {
+  const raw = String(
+    process.env.ROUTECODEX_OAUTH_AUTO_CLOSE_BROWSER ??
+    process.env.RCC_OAUTH_AUTO_CLOSE_BROWSER ??
+    ''
+  ).trim().toLowerCase();
+  if (!raw) {
+    // Default: keep browser session alive and rely on camo idle-timeout cleanup.
+    return false;
+  }
+  return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
+}
+
 function readInteractiveOAuthLock(): InteractiveOAuthLockRecord | null {
   try {
     if (!fsSync.existsSync(OAUTH_INTERACTIVE_LOCK_FILE)) {
@@ -1096,8 +1109,8 @@ async function runInteractiveAuthorizationFlow(
         await finalizeTokenWrite(providerType, strategy, tokenFilePath, authed, 'acquired');
       }
       await discardBackupFile(backupFile);
-      if (openBrowser) {
-        // Close only after token is fully written; never close browser on failed auth.
+      if (openBrowser && shouldAutoCloseOAuthBrowserSession()) {
+        // Optional: close only after token is fully written; never close browser on failed auth.
         closeOAuthAuthResources(providerType, tokenFilePath);
       }
     } catch (error) {

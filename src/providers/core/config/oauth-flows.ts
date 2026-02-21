@@ -249,7 +249,7 @@ export abstract class BaseOAuthFlowStrategy {
       if (!opened) {
         if (camoufoxExplicit) {
           throw new Error(
-            'camo CLI OAuth is required but launch failed. Please ensure `camo` is installed and retry.'
+            'camo CLI OAuth launch/automation failed. Check OAuth debug logs and retry.'
           );
         }
         throw new Error('OAuth browser launch failed (camo CLI).');

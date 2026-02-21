@@ -7,6 +7,8 @@ import { fileURLToPath } from 'node:url';
 import { logOAuthDebug } from '../../auth/oauth-logger.js';
 import {
   CAMO_CLICK_TARGETS,
+  clickCamoGoogleAccountByHint,
+  clickCamoGoogleSignInBySelector,
   clickCamoTarget,
   ensureCamoProfile,
   getActiveCamoPageUrl,
@@ -718,13 +720,13 @@ function resolvePortalOauthUrl(rawUrl: string): string | null {
 async function maybeAdvanceTokenPortal(options: {
   launchUrl: string;
   actionContext: CamoActionContext;
-  headless: boolean;
 }): Promise<boolean> {
   if (!isTokenPortalUrl(options.launchUrl)) {
     return true;
   }
-  if (!options.headless) {
-    logOAuthDebug('[OAuth] camo-cli portal advance skipped (headful manual mode)');
+  const autoMode = String(process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE || '').trim();
+  const autoModeEnabled = autoMode.length > 0;
+  if (!autoModeEnabled) {
     return true;
   }
   const activeUrl = getActiveCamoPageUrl(options.actionContext);
@@ -737,8 +739,6 @@ async function maybeAdvanceTokenPortal(options: {
     return true;
   }
 
-  const autoMode = String(process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE || '').trim();
-  const autoModeEnabled = autoMode.length > 0;
   const retryCount = parsePositiveInt(
     process.env.ROUTECODEX_CAMOUFOX_PORTAL_CLICK_RETRIES,
     autoModeEnabled ? 8 : 2
@@ -792,12 +792,8 @@ function isGoogleAuthUrl(rawUrl: string): boolean {
 
 async function maybeAdvanceQwenAuthorization(options: {
   provider?: string | null;
-  headless: boolean;
   actionContext: CamoActionContext;
 }): Promise<boolean> {
-  if (!options.headless) {
-    return true;
-  }
   const provider = String(options.provider || '').trim().toLowerCase();
   if (provider !== 'qwen') {
     return true;
@@ -808,6 +804,9 @@ async function maybeAdvanceQwenAuthorization(options: {
   }
   const autoMode = String(process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE || '').trim().toLowerCase();
   const autoModeEnabled = autoMode === 'qwen';
+  if (!autoModeEnabled) {
+    return true;
+  }
   const retryCount = parsePositiveInt(process.env.ROUTECODEX_CAMOUFOX_QWEN_CLICK_RETRIES, autoModeEnabled ? 6 : 2);
   const retryDelayMs = parsePositiveInt(process.env.ROUTECODEX_CAMOUFOX_QWEN_CLICK_RETRY_DELAY_MS, 350);
 
@@ -827,14 +826,15 @@ async function maybeAdvanceQwenAuthorization(options: {
 
 async function maybeAdvanceIflowAccountSelection(options: {
   provider?: string | null;
-  headless: boolean;
   actionContext: CamoActionContext;
 }): Promise<boolean> {
-  if (!options.headless) {
-    return true;
-  }
   const provider = String(options.provider || '').trim().toLowerCase();
   if (provider !== 'iflow') {
+    return true;
+  }
+  const autoMode = String(process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE || '').trim().toLowerCase();
+  const autoModeEnabled = autoMode === 'iflow';
+  if (!autoModeEnabled) {
     return true;
   }
   let activeUrl = getActiveCamoPageUrl(options.actionContext);
@@ -858,8 +858,6 @@ async function maybeAdvanceIflowAccountSelection(options: {
     return true;
   }
   logOAuthDebug(`[OAuth] camo-cli iflow oauth page ready: ${activeUrl}`);
-  const autoMode = String(process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE || '').trim().toLowerCase();
-  const autoModeEnabled = autoMode === 'iflow';
   const retryCount = parsePositiveInt(
     process.env.ROUTECODEX_CAMOUFOX_IFLOW_ACCOUNT_CLICK_RETRIES,
     autoModeEnabled ? 6 : 2
@@ -896,14 +894,16 @@ async function waitForGoogleAuthPage(options: {
 
 async function maybeAdvanceGoogleAuth(options: {
   provider?: string | null;
-  headless: boolean;
+  alias?: string | null;
   actionContext: CamoActionContext;
 }): Promise<boolean> {
-  if (!options.headless) {
-    return true;
-  }
   const provider = String(options.provider || '').trim().toLowerCase();
   if (provider !== 'gemini-cli' && provider !== 'antigravity' && provider !== 'qwen') {
+    return true;
+  }
+  const autoMode = String(process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE || '').trim().toLowerCase();
+  const autoModeEnabled = autoMode === 'gemini' || autoMode === 'antigravity' || autoMode === 'qwen';
+  if (!autoModeEnabled) {
     return true;
   }
   let activeUrl = getActiveCamoPageUrl(options.actionContext);
@@ -921,25 +921,55 @@ async function maybeAdvanceGoogleAuth(options: {
   if (!activeUrl || !isGoogleAuthUrl(activeUrl)) {
     return true;
   }
-  const autoMode = String(process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE || '').trim().toLowerCase();
-  const autoModeEnabled = autoMode === 'gemini' || autoMode === 'antigravity' || autoMode === 'qwen';
   const retryCount = parsePositiveInt(process.env.ROUTECODEX_CAMOUFOX_GOOGLE_CLICK_RETRIES, autoModeEnabled ? 4 : 2);
   const retryDelayMs = parsePositiveInt(process.env.ROUTECODEX_CAMOUFOX_GOOGLE_CLICK_RETRY_DELAY_MS, 350);
-  await clickCamoTarget(options.actionContext, CAMO_CLICK_TARGETS.googleAccountSelect, {
-    retries: retryCount,
-    retryDelayMs,
+  const signInRetryCount = parsePositiveInt(process.env.ROUTECODEX_CAMOUFOX_GOOGLE_SIGNIN_RETRIES, autoModeEnabled ? 12 : retryCount);
+  const signInRetryDelayMs = parsePositiveInt(process.env.ROUTECODEX_CAMOUFOX_GOOGLE_SIGNIN_RETRY_DELAY_MS, autoModeEnabled ? 500 : retryDelayMs);
+  const accountHint = String(
+    process.env.ROUTECODEX_CAMOUFOX_ACCOUNT_TEXT ||
+    process.env.RCC_CAMOUFOX_ACCOUNT_TEXT ||
+    options.alias ||
+    ''
+  ).trim();
+  const hasEmailHint = accountHint.includes('@');
+  if (accountHint) {
+    const hintClicked = await clickCamoGoogleAccountByHint(options.actionContext, accountHint, {
+      retries: retryCount,
+      retryDelayMs,
+      required: autoModeEnabled && hasEmailHint
+    });
+    if (!hintClicked) {
+      return false;
+    }
+  }
+  // If we matched a concrete email hint, do not run generic account fallback.
+  if (!hasEmailHint) {
+    const accountFallbackClicked = await clickCamoTarget(options.actionContext, CAMO_CLICK_TARGETS.googleAccountSelect, {
+      retries: retryCount,
+      retryDelayMs,
+      required: autoModeEnabled
+    });
+    if (!accountFallbackClicked) {
+      return false;
+    }
+  }
+  const signInUrl = getActiveCamoPageUrl(options.actionContext);
+  if (!signInUrl) {
+    logOAuthDebug('[OAuth] camo-cli google sign-in step failed: active page unavailable (session may be closed)');
+    return false;
+  }
+  if (!isGoogleAuthUrl(signInUrl)) {
+    logOAuthDebug(`[OAuth] camo-cli google sign-in step skipped (active page is non-google): ${signInUrl || 'n/a'}`);
+    return true;
+  }
+  const signInClicked = await clickCamoGoogleSignInBySelector(options.actionContext, {
+    retries: signInRetryCount,
+    retryDelayMs: signInRetryDelayMs,
     required: false
   });
-  await clickCamoTarget(options.actionContext, CAMO_CLICK_TARGETS.googleNextStep, {
-    retries: retryCount,
-    retryDelayMs,
-    required: false
-  });
-  await clickCamoTarget(options.actionContext, CAMO_CLICK_TARGETS.googleConsentApprove, {
-    retries: retryCount,
-    retryDelayMs,
-    required: false
-  });
+  if (!signInClicked) {
+    return false;
+  }
   return true;
 }
 
@@ -1105,8 +1135,7 @@ export async function openAuthInCamoufox(options: CamoufoxLaunchOptions): Promis
 
     const portalAdvanced = await maybeAdvanceTokenPortal({
       launchUrl,
-      actionContext,
-      headless
+      actionContext
     });
     if (!portalAdvanced) {
       return false;
@@ -1114,7 +1143,6 @@ export async function openAuthInCamoufox(options: CamoufoxLaunchOptions): Promis
 
     const iflowAdvanced = await maybeAdvanceIflowAccountSelection({
       provider: options.provider,
-      headless,
       actionContext
     });
     if (!iflowAdvanced) {
@@ -1122,7 +1150,6 @@ export async function openAuthInCamoufox(options: CamoufoxLaunchOptions): Promis
     }
     const qwenAdvanced = await maybeAdvanceQwenAuthorization({
       provider: options.provider,
-      headless,
       actionContext
     });
     if (!qwenAdvanced) {
@@ -1130,7 +1157,7 @@ export async function openAuthInCamoufox(options: CamoufoxLaunchOptions): Promis
     }
     const googleAdvanced = await maybeAdvanceGoogleAuth({
       provider: options.provider,
-      headless,
+      alias: options.alias,
       actionContext
     });
     if (!googleAdvanced) {

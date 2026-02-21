@@ -1,17 +1,14 @@
 import { spawnSync } from 'node:child_process';
 import { logOAuthDebug } from '../../auth/oauth-logger.js';
-
 export interface CamoActionContext {
   camoCommand: string;
   profileId: string;
   env: Record<string, string | undefined>;
 }
-
 export interface CamoClickTarget {
   key: string;
   selectors: string[];
 }
-
 export const CAMO_CLICK_TARGETS: Record<string, CamoClickTarget> = {
   tokenPortalContinue: {
     key: 'tokenPortalContinue',
@@ -48,32 +45,14 @@ export const CAMO_CLICK_TARGETS: Record<string, CamoClickTarget> = {
       '[data-profileindex]',
       '[data-identifier] [role="link"]'
     ]
-  },
-  googleNextStep: {
-    key: 'googleNextStep',
-    selectors: [
-      '#identifierNext',
-      '#idvPreregisteredPhoneNext'
-    ]
-  },
-  googleConsentApprove: {
-    key: 'googleConsentApprove',
-    selectors: [
-      '#submit_approve_access',
-      "button[name='allow']",
-      "button[id*='approve']"
-    ]
   }
 };
-
 type CamoStdio = 'inherit' | 'ignore';
-
 type CamoActionResult = {
   ok: boolean;
   status: number | null;
   errorText: string;
 };
-
 type CamoCaptureResult = {
   ok: boolean;
   status: number | null;
@@ -81,7 +60,12 @@ type CamoCaptureResult = {
   stdout: string;
   stderr: string;
 };
-
+type CamoEvalResult = {
+  ok: boolean;
+  value: string;
+  status: number | null;
+  errorText: string;
+};
 function resolveErrorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error || '');
 }
@@ -119,6 +103,69 @@ function runCamoCliCapture(context: CamoActionContext, args: string[]): CamoCapt
     stdout: typeof result.stdout === 'string' ? result.stdout : '',
     stderr: typeof result.stderr === 'string' ? result.stderr : ''
   };
+}
+
+function runCamoDevtoolsEval(context: CamoActionContext, expression: string): CamoEvalResult {
+  const capture = runCamoCliCapture(context, ['devtools', 'eval', context.profileId, expression]);
+  if (!capture.ok) {
+    return {
+      ok: false,
+      value: '',
+      status: capture.status,
+      errorText: capture.errorText || capture.stderr
+    };
+  }
+  try {
+    const parsed = JSON.parse(capture.stdout);
+    const value = parsed?.result?.value;
+    return {
+      ok: true,
+      value: typeof value === 'string' ? value : String(value ?? ''),
+      status: capture.status,
+      errorText: ''
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      value: '',
+      status: capture.status,
+      errorText: resolveErrorText(error)
+    };
+  }
+}
+
+function resolveVisibleSelector(context: CamoActionContext, selectors: string[]): string | null {
+  const normalizedSelectors = selectors.map((s) => String(s || '').trim()).filter(Boolean);
+  if (normalizedSelectors.length === 0) {
+    return null;
+  }
+  const expression =
+    `(() => {
+      const selectors = ${JSON.stringify(normalizedSelectors)};
+      const isVisible = (el) => {
+        if (!el) return false;
+        const style = window.getComputedStyle(el);
+        if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity || '1') === 0) return false;
+        const rect = el.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) return false;
+        if (rect.bottom < 0 || rect.right < 0) return false;
+        if (rect.top > window.innerHeight || rect.left > window.innerWidth) return false;
+        return true;
+      };
+      for (const selector of selectors) {
+        let nodes = [];
+        try { nodes = Array.from(document.querySelectorAll(selector)); } catch { nodes = []; }
+        const matched = nodes.find((node) => isVisible(node));
+        if (matched) return selector;
+      }
+      return '';
+    })()`;
+  const evalResult = runCamoDevtoolsEval(context, expression);
+  if (!evalResult.ok) {
+    return null;
+  }
+  const selected = String(evalResult.value || '').trim();
+  return selected || null;
 }
 
 function parseJsonObject(raw: string): Record<string, unknown> | null {
@@ -203,19 +250,19 @@ function isTargetSessionActive(context: CamoActionContext): boolean {
   return profiles.includes(context.profileId);
 }
 
-function stopActiveProfile(context: CamoActionContext, profileId: string): void {
-  const result = runCamoCliAction(context, ['stop', profileId], 'inherit');
-  if (!result.ok) {
-    logOAuthDebug(
-      `[OAuth] camo-cli stop profile=${profileId} failed status=${result.status ?? 'n/a'} error=${result.errorText}`
-    );
-  }
-}
-
 function printIfAny(text: string): void {
   if (text && text.trim()) {
     console.log(text.trim());
   }
+}
+
+function shouldRestartActiveSession(context: CamoActionContext): boolean {
+  const explicit = String(context.env.ROUTECODEX_CAMOUFOX_FORCE_FRESH_SESSION ?? context.env.RCC_CAMOUFOX_FORCE_FRESH_SESSION ?? '').trim().toLowerCase();
+  if (explicit) {
+    return explicit === '1' || explicit === 'true' || explicit === 'yes' || explicit === 'on';
+  }
+  const autoMode = String(context.env.ROUTECODEX_CAMOUFOX_AUTO_MODE || '').trim();
+  return autoMode.length > 0;
 }
 
 export function startCamoSession(context: CamoActionContext, headless: boolean): boolean {
@@ -232,14 +279,24 @@ export function startCamoSession(context: CamoActionContext, headless: boolean):
     startArgs.push('--idle-timeout', idleTimeout);
   }
 
-  // OAuth flow requires fresh callback state. Reusing an existing session can keep
-  // stale portal URLs (old state/redirect port) and break callback delivery.
   const activeBeforeStart = listActiveProfiles(context);
   if (activeBeforeStart.includes(context.profileId)) {
-    logOAuthDebug(
-      `[OAuth] camo-cli target profile already active; reusing active session profile=${context.profileId} headless=${headless ? '1' : '0'}`
-    );
-    return true;
+    if (shouldRestartActiveSession(context)) {
+      logOAuthDebug(
+        `[OAuth] camo-cli target profile already active; restarting for fresh oauth state profile=${context.profileId}`
+      );
+      const stopResult = runCamoCliAction(context, ['stop', context.profileId], 'inherit');
+      if (!stopResult.ok) {
+        logOAuthDebug(
+          `[OAuth] camo-cli stop profile=${context.profileId} failed status=${stopResult.status ?? 'n/a'} error=${stopResult.errorText}`
+        );
+      }
+    } else {
+      logOAuthDebug(
+        `[OAuth] camo-cli target profile already active; reusing active session profile=${context.profileId} headless=${headless ? '1' : '0'}`
+      );
+      return true;
+    }
   }
 
   const firstStart = runCamoCliCapture(context, startArgs);
@@ -328,20 +385,15 @@ export async function clickCamoTarget(
 ): Promise<boolean> {
   const retries = options.retries > 0 ? options.retries : 1;
   for (let attempt = 1; attempt <= retries; attempt += 1) {
-    for (const selector of target.selectors) {
-      const args = ['click', context.profileId, selector, '--no-highlight'];
-      const result = runCamoCliAction(context, args, 'inherit');
+    const preferredSelector = resolveVisibleSelector(context, target.selectors);
+    const selectorsToTry = preferredSelector ? [preferredSelector] : target.selectors;
+    for (const selector of selectorsToTry) {
+      const result = runCamoCliAction(context, ['click', context.profileId, selector, '--no-highlight'], 'inherit');
       if (result.ok) {
-        logOAuthDebug(
-          `[OAuth] camo-cli click target=${target.key} selector=${selector} ok attempt=${attempt}/${retries}`
-        );
+        logOAuthDebug(`[OAuth] camo-cli click target=${target.key} selector=${selector} ok attempt=${attempt}/${retries}`);
         return true;
       }
-      logOAuthDebug(
-        `[OAuth] camo-cli click target=${target.key} selector=${selector} failed attempt=${attempt}/${retries} status=${
-          result.status ?? 'n/a'
-        } error=${result.errorText}`
-      );
+      logOAuthDebug(`[OAuth] camo-cli click target=${target.key} selector=${selector} failed attempt=${attempt}/${retries} status=${result.status ?? 'n/a'} error=${result.errorText}`);
     }
     if (attempt < retries && options.retryDelayMs > 0) {
       await new Promise((resolve) => setTimeout(resolve, options.retryDelayMs));
@@ -353,4 +405,94 @@ export async function clickCamoTarget(
   }
   logOAuthDebug(`[OAuth] camo-cli click target=${target.key} not matched (non-required)`);
   return true;
+}
+
+export async function clickCamoGoogleSignInBySelector(
+  context: CamoActionContext,
+  options: { retries: number; retryDelayMs: number; required: boolean }
+): Promise<boolean> {
+  const retries = options.retries > 0 ? options.retries : 1;
+  const selectors = ['[data-rcx-signin="1"]', 'div.VfPpkd-RLmnJb'];
+  for (let attempt = 1; attempt <= retries; attempt += 1) {
+    runCamoDevtoolsEval(
+      context,
+      `(() => {
+        const vis = (el) => { if (!el) return false; const r = el.getBoundingClientRect(); const s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.display !== 'none' && s.visibility !== 'hidden' && Number(s.opacity || '1') !== 0; };
+        for (const el of Array.from(document.querySelectorAll('[data-rcx-signin]'))) el.removeAttribute('data-rcx-signin');
+        const buttons = Array.from(document.querySelectorAll('button,[role="button"]')).filter(vis);
+        const byText = buttons.find((b) => /sign\\s*in|登录/i.test(String(b.innerText || b.textContent || ''))) || null;
+        let target = byText;
+        if (!target) {
+          const divs = Array.from(document.querySelectorAll('div.VfPpkd-RLmnJb')).filter(vis);
+          const guess = divs.length >= 2 ? divs[1] : (divs[0] || null);
+          target = guess ? (guess.closest('button,[role="button"]') || guess) : null;
+        }
+        if (!target) return 'not_found';
+        target.setAttribute('data-rcx-signin', '1');
+        const inner = target.querySelector?.('div.VfPpkd-RLmnJb'); if (inner) inner.setAttribute('data-rcx-signin', '1');
+        return 'ok';
+      })()`
+    );
+    const preferredSelector = resolveVisibleSelector(context, selectors);
+    for (const selector of (preferredSelector ? [preferredSelector] : selectors)) {
+      const result = runCamoCliAction(context, ['click', context.profileId, selector, '--no-highlight'], 'inherit');
+      if (result.ok) {
+        logOAuthDebug(`[OAuth] camo-cli click-google-sign-in-selector ok selector=${selector} attempt=${attempt}/${retries}`);
+        return true;
+      }
+      const err = String(result.errorText || '').toLowerCase();
+      if (err.includes('execution context was destroyed')) return true;
+      if (err.includes('session for profile') && err.includes('not started')) return !options.required;
+      logOAuthDebug(`[OAuth] camo-cli click-google-sign-in-selector failed selector=${selector} attempt=${attempt}/${retries} status=${result.status ?? 'n/a'} error=${result.errorText}`);
+    }
+    if (attempt < retries && options.retryDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, options.retryDelayMs));
+  }
+  if (options.required) { logOAuthDebug('[OAuth] camo-cli click-google-sign-in-selector required but not matched'); return false; }
+  return true;
+}
+export async function clickCamoGoogleAccountByHint(context: CamoActionContext, hint: string, options: { retries: number; retryDelayMs: number; required: boolean }): Promise<boolean> {
+  const normalizedHint = String(hint || '').trim().toLowerCase();
+  if (!normalizedHint) return !options.required;
+  const retries = options.retries > 0 ? options.retries : 1;
+  for (let attempt = 1; attempt <= retries; attempt += 1) {
+    const expression =
+      `(() => {
+        const normalize = (s) => String(s || '').replace(/\\s+/g, ' ').trim().toLowerCase();
+        const hint = ${JSON.stringify(normalizedHint)};
+        const emailNodes = Array.from(document.querySelectorAll('div.yAlK0b[data-email], [data-email], [data-identifier]'));
+        emailNodes.forEach((node) => node.removeAttribute('data-rcx-account-hit'));
+        for (const node of emailNodes) {
+          const attr = normalize(node.getAttribute('data-email') || node.getAttribute('data-identifier') || '');
+          const text = normalize(node.textContent || '');
+          if (!(attr === hint || text === hint || attr.includes(hint) || text.includes(hint))) continue;
+          const clickable = node.closest('div.L6LTWe, [jsname], [role="link"], [role="button"], button, a') || node;
+          if (typeof clickable.scrollIntoView === 'function') clickable.scrollIntoView({ block: 'center', inline: 'center' });
+          clickable.setAttribute('data-rcx-account-hit', '1');
+          return 'selected:' + (attr || text);
+        }
+        return 'not_found';
+      })()`;
+    const result = runCamoDevtoolsEval(context, expression);
+    if (result.ok && String(result.value).startsWith('selected:')) {
+      const preferredSelector = resolveVisibleSelector(context, ['div.yAlK0b[data-rcx-account-hit="1"]', '[data-rcx-account-hit="1"]']);
+      if (preferredSelector) {
+        const clickResult = runCamoCliAction(context, ['click', context.profileId, preferredSelector, '--no-highlight'], 'inherit');
+        if (clickResult.ok) {
+          if (!isTargetSessionActive(context)) { logOAuthDebug(`[OAuth] camo-cli click-google-account-hint session lost after click hint=${normalizedHint} selector=${preferredSelector}`); return false; }
+          logOAuthDebug(`[OAuth] camo-cli click-google-account-hint ok hint=${normalizedHint} selector=${preferredSelector} attempt=${attempt}/${retries}`);
+          return true;
+        }
+        const clickErr = String(clickResult.errorText || '').toLowerCase();
+        if (clickErr.includes('target page, context or browser has been closed') && isTargetSessionActive(context)) {
+          logOAuthDebug(`[OAuth] camo-cli click-google-account-hint treat-as-ok after context switch hint=${normalizedHint} selector=${preferredSelector}`);
+          return true;
+        }
+        logOAuthDebug(`[OAuth] camo-cli click-google-account-hint click failed hint=${normalizedHint} selector=${preferredSelector} status=${clickResult.status ?? 'n/a'} error=${clickResult.errorText}`);
+      }
+    }
+    logOAuthDebug(`[OAuth] camo-cli click-google-account-hint failed hint=${normalizedHint} attempt=${attempt}/${retries} status=${result.status ?? 'n/a'} error=${result.errorText || result.value}`);
+    if (attempt < retries && options.retryDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, options.retryDelayMs));
+  }
+  if (options.required) { logOAuthDebug(`[OAuth] camo-cli click-google-account-hint required but not matched hint=${normalizedHint}`); return false; }
+  logOAuthDebug(`[OAuth] camo-cli click-google-account-hint not matched (non-required) hint=${normalizedHint}`); return true;
 }

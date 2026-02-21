@@ -100,6 +100,16 @@ function resolveCallbackTimeoutMs(isIflowOAuth: boolean): number {
   return 10 * 60 * 1000;
 }
 
+function shouldAllowLenientStateCallback(): boolean {
+  const overrideRaw = String(process.env.ROUTECODEX_OAUTH_LENIENT_STATE || process.env.RCC_OAUTH_LENIENT_STATE || '').trim();
+  if (overrideRaw) {
+    return isTruthyFlag(overrideRaw);
+  }
+  const autoMode = String(process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE || '').trim();
+  const headful = isTruthyFlag(process.env.ROUTECODEX_CAMOUFOX_DEV_MODE);
+  return autoMode.length > 0 && headful;
+}
+
 function publishInteractiveLockCallbackPort(port: number): void {
   const lockFile = String(process.env.ROUTECODEX_OAUTH_INTERACTIVE_LOCK_FILE || '').trim();
   if (!lockFile || !Number.isFinite(port) || port <= 0) {
@@ -188,11 +198,20 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
         authCodeData.redirectUri = serverResult.redirectUri;
       } catch { /* ignore */ }
 
+      const autoMode = String(process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE || '').trim();
+      const devMode = String(process.env.ROUTECODEX_CAMOUFOX_DEV_MODE || '').trim();
+      const camoufoxHeadfulAuto = autoMode.length > 0 && devMode.length > 0;
+      let activateFailed: unknown = null;
       try {
         await this.activate(authCodeData, options);
       } catch (activateError) {
-        await this.abortPendingCallbackServer(serverResult.redirectUri, 'browser_launch_failed');
-        throw activateError;
+        activateFailed = activateError;
+        if (!camoufoxHeadfulAuto) {
+          await this.abortPendingCallbackServer(serverResult.redirectUri, 'browser_launch_failed');
+          throw activateError;
+        }
+        const msg = activateError instanceof Error ? activateError.message : String(activateError);
+        console.warn(`[OAuth] Camoufox automation failed in headful mode; keep callback server alive for manual recovery: ${msg}`);
       }
 
       // 3.3 等待回调，获取授权码
@@ -202,6 +221,9 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
         authCodeData.codeVerifier = cb.verifier;
       } catch (err) {
         console.error('OAuth authorization callback error:', err instanceof Error ? err.message : String(err));
+        if (activateFailed) {
+          throw activateFailed instanceof Error ? activateFailed : new Error(String(activateFailed));
+        }
         throw err;
       }
 
@@ -403,6 +425,18 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
           const receivedState = params.get('state');
           if (receivedState !== state) {
             logOAuthDebug(`[OAuth] State mismatch: expected ${state}, got ${receivedState}`);
+            const mismatchCode = params.get('code');
+            if (mismatchCode && shouldAllowLenientStateCallback()) {
+              console.warn('[OAuth] State mismatch detected, but accepting callback code in headful-auto compatibility mode.');
+              logOAuthDebug('[OAuth] Lenient state mode accepted callback code despite mismatch');
+              res.statusCode = 200;
+              res.setHeader('Content-Type', 'text/html');
+              res.end('<html><body><h1>OAuth Success!</h1><p>Authentication successful. You can close this window now.</p><script>setTimeout(function(){window.close()},3000);</script></body></html>');
+              if (timeoutHandle) {clearTimeout(timeoutHandle);}
+              server.close();
+              resolve({ code: mismatchCode, verifier: codeVerifier });
+              return;
+            }
             res.statusCode = 400;
             res.setHeader('Content-Type', 'text/html');
             res.end('<html><body><h1>OAuth Error</h1><p>State mismatch. Possible CSRF attack. You can close this window.</p></body></html>');
