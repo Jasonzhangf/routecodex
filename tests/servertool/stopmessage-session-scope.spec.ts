@@ -2,7 +2,6 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { bootstrapVirtualRouterConfig } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/bootstrap.js';
 import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine.js';
-import { VirtualRouterError } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/types.js';
 import { saveRoutingInstructionStateSync } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/sticky-session-store.js';
 import { runServerSideToolEngine } from '../../sharedmodule/llmswitch-core/src/servertool/server-side-tools.js';
 import type { AdapterContext } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.js';
@@ -33,13 +32,19 @@ function buildEngine(): VirtualRouterEngine {
 }
 
 function readSessionState(sessionId: string): any {
-  const filepath = path.join(SESSION_DIR, `session-${sessionId}.json`);
+  const sessionFile = path.join(SESSION_DIR, `session-${sessionId}.json`);
+  const tmuxFile = path.join(SESSION_DIR, `tmux-${sessionId}.json`);
+  const filepath = fs.existsSync(sessionFile) ? sessionFile : tmuxFile;
   const raw = fs.readFileSync(filepath, 'utf8');
   return JSON.parse(raw);
 }
 
 function sessionStatePath(sessionId: string): string {
-  return path.join(SESSION_DIR, `session-${sessionId}.json`);
+  const sessionFile = path.join(SESSION_DIR, `session-${sessionId}.json`);
+  if (fs.existsSync(sessionFile)) {
+    return sessionFile;
+  }
+  return path.join(SESSION_DIR, `tmux-${sessionId}.json`);
 }
 
 describe('stopMessage is session-scoped', () => {
@@ -53,7 +58,7 @@ describe('stopMessage is session-scoped', () => {
     fs.rmSync(SESSION_DIR, { recursive: true, force: true });
   });
 
-  test('throws when stopMessage is set without sessionId', () => {
+  test('ignores stopMessage instruction when tmux scope is missing', () => {
     const engine = buildEngine();
     const request: StandardizedRequest = {
       model: 'gpt-test',
@@ -61,14 +66,13 @@ describe('stopMessage is session-scoped', () => {
       tools: [],
       parameters: {}
     } as any;
-    expect(() =>
-      engine.route(request, {
-        requestId: 'req_stopmessage_missing_session',
-        entryEndpoint: '/v1/chat/completions',
-        providerProtocol: 'openai-chat',
-        routeHint: 'default'
-      } as any)
-    ).toThrow(VirtualRouterError);
+    engine.route(request, {
+      requestId: 'req_stopmessage_missing_session',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      routeHint: 'default'
+    } as any);
+    expect(fs.existsSync(path.join(SESSION_DIR, 'session-undefined.json'))).toBe(false);
   });
 
   test('persists stopMessage under session:<sessionId> only', () => {
@@ -86,6 +90,7 @@ describe('stopMessage is session-scoped', () => {
       entryEndpoint: '/v1/chat/completions',
       providerProtocol: 'openai-chat',
       sessionId,
+      tmuxSessionId: sessionId,
       conversationId: 'conv-should-not-be-used',
       routeHint: 'default'
     } as any);
@@ -96,7 +101,40 @@ describe('stopMessage is session-scoped', () => {
     expect(fs.existsSync(path.join(SESSION_DIR, 'conversation-conv-should-not-be-used.json'))).toBe(false);
   });
 
-  test('mode-only stopMessage:on persists state', () => {
+  test('legacy session-scoped stopMessage is auto-cleared when tmux/daemon scope is missing', () => {
+    const engine = buildEngine();
+    const sessionId = 'sess-legacy-cleanup';
+    saveRoutingInstructionStateSync(`session:${sessionId}`, {
+      forcedTarget: undefined,
+      stickyTarget: undefined,
+      allowedProviders: new Set(),
+      disabledProviders: new Set(),
+      disabledKeys: new Map(),
+      disabledModels: new Map(),
+      stopMessageText: 'legacy-stop',
+      stopMessageMaxRepeats: 5,
+      stopMessageUsed: 0,
+      stopMessageStageMode: 'on',
+      stopMessageAiMode: 'on',
+      preCommandScriptPath: '/tmp/legacy-pre-command.sh',
+      preCommandUpdatedAt: Date.now()
+    } as any);
+
+    const metadata = {
+      requestId: 'req-stopmessage-legacy-cleanup',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      sessionId,
+      routeHint: 'default'
+    } as any;
+
+    expect(engine.getStopMessageState(metadata)).toBeNull();
+    expect(engine.getPreCommandState(metadata)).toBeNull();
+
+    expect(fs.existsSync(sessionStatePath(sessionId))).toBe(false);
+  });
+
+  test('mode-only stopMessage:on no longer persists state', () => {
     const engine = buildEngine();
     const sessionId = 'sess-mode-only-default';
     const request: StandardizedRequest = {
@@ -114,12 +152,7 @@ describe('stopMessage is session-scoped', () => {
       routeHint: 'default'
     } as any);
 
-    const persisted = readSessionState(sessionId);
-    expect(fs.existsSync(path.join(SESSION_DIR, `session-${sessionId}.json`))).toBe(true);
-    expect(persisted?.state?.stopMessageText).toBeUndefined();
-    expect(persisted?.state?.stopMessageStageMode).toBe('on');
-    expect(persisted?.state?.stopMessageMaxRepeats).toBe(10);
-    expect(persisted?.state?.stopMessageUsed).toBeUndefined();
+    expect(fs.existsSync(path.join(SESSION_DIR, `session-${sessionId}.json`))).toBe(false);
   });
 
   test('mode-only stopMessage:on does not expose runtime snapshot without text', () => {
@@ -154,11 +187,12 @@ describe('stopMessage is session-scoped', () => {
       entryEndpoint: '/v1/chat/completions',
       providerProtocol: 'openai-chat',
       sessionId,
+      tmuxSessionId: sessionId,
       routeHint: 'default'
     } as any;
     const beforeUpdatedAt = Date.now() - 100;
     const consumedAt = Date.now();
-    saveRoutingInstructionStateSync(`session:${sessionId}`, {
+    saveRoutingInstructionStateSync(`tmux:${sessionId}`, {
       forcedTarget: undefined,
       stickyTarget: undefined,
       allowedProviders: new Set(),
@@ -198,7 +232,7 @@ describe('stopMessage is session-scoped', () => {
     expect(after?.state?.stopMessageUpdatedAt).toBeGreaterThanOrEqual(beforeUpdatedAt);
   });
 
-  test('mode-only stopMessage persists across engine restart but remains inactive without text', () => {
+  test('mode-only stopMessage remains non-persistent across engine restart', () => {
     const sessionId = 'sess-mode-only-restart';
     const request: StandardizedRequest = {
       model: 'gpt-test',
@@ -221,12 +255,10 @@ describe('stopMessage is session-scoped', () => {
     const engine2 = buildEngine();
     const snapshot = engine2.getStopMessageState(metadata);
     expect(snapshot).toBeNull();
-    const persisted = readSessionState(sessionId);
-    expect(persisted?.state?.stopMessageStageMode).toBe('on');
-    expect(persisted?.state?.stopMessageMaxRepeats).toBe(10);
+    expect(fs.existsSync(path.join(SESSION_DIR, `session-${sessionId}.json`))).toBe(false);
   });
 
-  test('restores mode-only stopMessage metadata across restart when server-scoped session dir changes', () => {
+  test('mode-only stopMessage does not create scoped state across restart when session dir changes', () => {
     const sessionId = 'sess-mode-only-restart-scoped-fallback';
     const request: StandardizedRequest = {
       model: 'gpt-test',
@@ -259,7 +291,7 @@ describe('stopMessage is session-scoped', () => {
       engine1.route(request, metadata);
 
       const legacyScopedFile = path.join(firstScopedDir, 'session-' + sessionId + '.json');
-      expect(fs.existsSync(legacyScopedFile)).toBe(true);
+      expect(fs.existsSync(legacyScopedFile)).toBe(false);
 
       process.env.ROUTECODEX_SESSION_DIR = secondScopedDir;
       const engine2 = buildEngine();
@@ -270,10 +302,7 @@ describe('stopMessage is session-scoped', () => {
 
       expect(snapshot).toBeNull();
       const migratedFile = path.join(secondScopedDir, 'session-' + sessionId + '.json');
-      expect(fs.existsSync(migratedFile)).toBe(true);
-      const migratedRaw = JSON.parse(fs.readFileSync(migratedFile, 'utf8'));
-      expect(migratedRaw?.state?.stopMessageStageMode).toBe('on');
-      expect(migratedRaw?.state?.stopMessageMaxRepeats).toBe(10);
+      expect(fs.existsSync(migratedFile)).toBe(false);
     } finally {
       if (previousSessionDir === undefined) {
         process.env.ROUTECODEX_SESSION_DIR = SESSION_DIR;
@@ -300,6 +329,7 @@ describe('stopMessage is session-scoped', () => {
       entryEndpoint: '/v1/chat/completions',
       providerProtocol: 'openai-chat',
       sessionId,
+      tmuxSessionId: sessionId,
       routeHint: 'default'
     } as any);
 
@@ -318,6 +348,7 @@ describe('stopMessage is session-scoped', () => {
       entryEndpoint: '/v1/chat/completions',
       providerProtocol: 'openai-chat',
       sessionId,
+      tmuxSessionId: sessionId,
       routeHint: 'default'
     } as any);
 
@@ -340,6 +371,7 @@ describe('stopMessage is session-scoped', () => {
         entryEndpoint: '/v1/chat/completions',
         providerProtocol: 'openai-chat',
         sessionId,
+        tmuxSessionId: sessionId,
         routeHint: 'default'
       } as any
     );
@@ -356,6 +388,7 @@ describe('stopMessage is session-scoped', () => {
         entryEndpoint: '/v1/chat/completions',
         providerProtocol: 'openai-chat',
         sessionId,
+        tmuxSessionId: sessionId,
         routeHint: 'default'
       } as any
     );
@@ -379,6 +412,7 @@ describe('stopMessage is session-scoped', () => {
         entryEndpoint: '/v1/chat/completions',
         providerProtocol: 'openai-chat',
         sessionId,
+        tmuxSessionId: sessionId,
         routeHint: 'default'
       } as any
     );
@@ -399,6 +433,7 @@ describe('stopMessage is session-scoped', () => {
         entryEndpoint: '/v1/chat/completions',
         providerProtocol: 'openai-chat',
         sessionId,
+        tmuxSessionId: sessionId,
         routeHint: 'default'
       } as any
     );
@@ -531,11 +566,12 @@ describe('stopMessage is session-scoped', () => {
       entryEndpoint: '/v1/chat/completions',
       providerProtocol: 'openai-chat',
       sessionId,
+      tmuxSessionId: sessionId,
       routeHint: 'default'
     } as any);
 
     const clearedAt = Date.now();
-    saveRoutingInstructionStateSync(`session:${sessionId}`, {
+    saveRoutingInstructionStateSync(`tmux:${sessionId}`, {
       forcedTarget: undefined,
       stickyTarget: undefined,
       allowedProviders: new Set(),
@@ -564,6 +600,7 @@ describe('stopMessage is session-scoped', () => {
       entryEndpoint: '/v1/chat/completions',
       providerProtocol: 'openai-chat',
       sessionId,
+      tmuxSessionId: sessionId,
       routeHint: 'default'
     } as any);
 
@@ -588,12 +625,13 @@ describe('stopMessage is session-scoped', () => {
         entryEndpoint: '/v1/chat/completions',
         providerProtocol: 'openai-chat',
         sessionId,
+        tmuxSessionId: sessionId,
         routeHint: 'default'
       } as any
     );
 
     const clearedAt = Date.now();
-    saveRoutingInstructionStateSync(`session:${sessionId}`, {
+    saveRoutingInstructionStateSync(`tmux:${sessionId}`, {
       forcedTarget: undefined,
       stickyTarget: undefined,
       allowedProviders: new Set(),
@@ -622,6 +660,7 @@ describe('stopMessage is session-scoped', () => {
         entryEndpoint: '/v1/chat/completions',
         providerProtocol: 'openai-chat',
         sessionId,
+        tmuxSessionId: sessionId,
         routeHint: 'default'
       } as any
     );
@@ -672,6 +711,7 @@ describe('stopMessage is session-scoped', () => {
       entryEndpoint: '/v1/chat/completions',
       providerProtocol: 'openai-chat',
       sessionId,
+      tmuxSessionId: sessionId,
       routeHint: 'default'
     } as any);
 
@@ -683,7 +723,7 @@ describe('stopMessage is session-scoped', () => {
     expect(typeof beforeUpdatedAt === 'number').toBe(true);
 
     const exhaustedAt = Date.now();
-    saveRoutingInstructionStateSync(`session:${sessionId}`, {
+    saveRoutingInstructionStateSync(`tmux:${sessionId}`, {
       forcedTarget: undefined,
       stickyTarget: undefined,
       allowedProviders: new Set(),
@@ -709,6 +749,7 @@ describe('stopMessage is session-scoped', () => {
       entryEndpoint: '/v1/chat/completions',
       providerProtocol: 'openai-chat',
       sessionId,
+      tmuxSessionId: sessionId,
       routeHint: 'default'
     } as any);
 
@@ -726,7 +767,7 @@ describe('stopMessage is session-scoped', () => {
     const sessionId = 'sess-stopmessage-explicit-override-runtime';
     const now = Date.now();
 
-    saveRoutingInstructionStateSync(`session:${sessionId}`, {
+    saveRoutingInstructionStateSync(`tmux:${sessionId}`, {
       forcedTarget: undefined,
       stickyTarget: undefined,
       allowedProviders: new Set(),
@@ -757,6 +798,7 @@ describe('stopMessage is session-scoped', () => {
       entryEndpoint: '/v1/chat/completions',
       providerProtocol: 'openai-chat',
       sessionId,
+      tmuxSessionId: sessionId,
       routeHint: 'default'
     } as any);
 

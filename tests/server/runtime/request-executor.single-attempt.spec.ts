@@ -62,7 +62,7 @@ function createExecutor(pipelineResult: PipelineExecutionResult, handle: Provide
     metadata: { stream: false, inboundStream: false }
   };
 
-  return { executor, request, handle, runtimeManager };
+  return { executor, request, handle, runtimeManager, logStage: deps.logStage };
 }
 
 describe('HubRequestExecutor single attempt behaviour', () => {

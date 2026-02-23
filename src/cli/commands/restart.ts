@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import type { Command } from 'commander';
 
 import { API_PATHS, HTTP_PROTOCOLS, LOCAL_HOSTS } from '../../constants/index.js';
+import type { GuardianLifecycleEvent, GuardianRegistration } from '../guardian/types.js';
 
 type Spinner = {
   start(text?: string): Spinner;
@@ -39,7 +40,10 @@ export type RestartCommandContext = {
   sleep: (ms: number) => Promise<void>;
   sendSignal: (pid: number, signal: NodeJS.Signals) => void;
   fetch: typeof fetch;
+  ensureGuardianDaemon?: () => Promise<void>;
+  registerGuardianProcess?: (registration: GuardianRegistration) => Promise<void>;
   env?: NodeJS.ProcessEnv;
+  reportGuardianLifecycle?: (event: GuardianLifecycleEvent) => Promise<boolean>;
   fsImpl?: Pick<typeof fs, 'existsSync' | 'readFileSync' | 'readdirSync' | 'statSync'>;
   pathImpl?: Pick<typeof path, 'join'>;
   getHomeDir?: () => string;
@@ -269,7 +273,14 @@ async function resolveRestartTargets(ctx: RestartCommandContext, options: Restar
 
   // Deterministic ordering for logs/tests.
   targets.sort((a, b) => a.port - b.port);
-  return targets;
+  if (targets.length > 1) {
+    const candidates = targets.map((item) => `${item.host}:${item.port}`).join(', ');
+    spinner.fail('Multiple RouteCodex servers detected; broadcast restart is disabled');
+    ctx.logger.error(`Detected servers: ${candidates}`);
+    ctx.logger.info('Use explicit single target: routecodex restart --port <port>');
+    ctx.exit(1);
+  }
+  return [targets[0]];
 }
 
 async function waitForRestart(ctx: RestartCommandContext, host: string, port: number, oldPids: number[]): Promise<void> {
@@ -315,10 +326,32 @@ async function waitForRestart(ctx: RestartCommandContext, host: string, port: nu
   throw new Error('Timeout waiting for server to restart');
 }
 
+async function requestDaemonRestart(ctx: RestartCommandContext, host: string, port: number): Promise<void> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => {
+    try {
+      controller.abort();
+    } catch {
+      // ignore
+    }
+  }, 4000);
+  try {
+    const response = await ctx.fetch(`${HTTP_PROTOCOLS.HTTP}${host}:${port}/daemon/restart`, {
+      method: 'POST',
+      signal: controller.signal
+    }).catch(() => null);
+    if (!response?.ok) {
+      throw new Error(`daemon restart endpoint rejected request (status=${response?.status ?? 'n/a'})`);
+    }
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export function createRestartCommand(program: Command, ctx: RestartCommandContext): void {
   program
     .command('restart')
-    .description('Restart RouteCodex server(s) (default: broadcast to all running servers)')
+    .description('Restart one RouteCodex server (broadcast restart disabled)')
     .option('-c, --config <config>', 'Configuration file path')
     .option('-p, --port <port>', 'Restart a specific RouteCodex server port')
     .option('--host <host>', 'Host for health probing (default: localhost)')
@@ -328,43 +361,47 @@ export function createRestartCommand(program: Command, ctx: RestartCommandContex
     .action(async (options: RestartCommandOptions) => {
       const spinner = await ctx.createSpinner('Restarting RouteCodex server(s)...');
       try {
-        // Prompt flags cannot be applied via a signal-based restart (server reloads from its own config/env).
+        // Prompt flags cannot be applied via restart endpoint (server reloads from its own config/env).
         if (options.codex || options.claude) {
           spinner.fail('Flags --codex/--claude are not supported for restart; edit config/env and restart again.');
           ctx.exit(1);
         }
 
-        if (ctx.isWindows) {
-          spinner.fail('Signal-based restart is not supported on Windows');
-          ctx.exit(1);
-        }
-
         const targets = await resolveRestartTargets(ctx, options, spinner);
-
-        const pidSeen = new Set<number>();
-        const totalPids = targets.reduce((acc, t) => acc + t.oldPids.length, 0);
-        spinner.text = `Sending restart signal to ${targets.length} server(s) (${totalPids} process(es))...`;
-        for (const t of targets) {
-          for (const pid of t.oldPids) {
-            if (pidSeen.has(pid)) {
-              continue;
-            }
-            pidSeen.add(pid);
-            try {
-              ctx.sendSignal(pid, 'SIGUSR2');
-            } catch {
-              // best-effort: continue broadcasting
-            }
+        await ctx.ensureGuardianDaemon?.();
+        await ctx.registerGuardianProcess?.({
+          source: 'restart',
+          pid: process.pid,
+          ppid: process.ppid,
+          metadata: {
+            targets: targets.map((item) => `${item.host}:${item.port}`)
           }
+        });
+
+        spinner.text = 'Requesting daemon-managed restart...';
+        for (const t of targets) {
+          const approved = await ctx.reportGuardianLifecycle?.({
+            action: 'restart_request',
+            source: 'cli.restart',
+            actorPid: process.pid,
+            metadata: {
+              host: t.host,
+              port: t.port
+            }
+          });
+          if (ctx.reportGuardianLifecycle && approved !== true) {
+            throw new Error(`guardian lifecycle apply rejected for ${t.host}:${t.port}`);
+          }
+          await requestDaemonRestart(ctx, t.host || LOCAL_HOSTS.LOCALHOST, t.port);
         }
 
-        spinner.text = 'Waiting for server(s) to restart...';
+        spinner.text = 'Waiting for server to restart...';
         for (const t of targets) {
           await waitForRestart(ctx, t.host || LOCAL_HOSTS.LOCALHOST, t.port, t.oldPids);
         }
 
         const ports = targets.map((t) => `${t.host}:${t.port}`).join(', ');
-        spinner.succeed(`RouteCodex server(s) restarted: ${ports}`);
+        spinner.succeed(`RouteCodex server restarted: ${ports}`);
       } catch (e) {
         spinner.fail(`Failed to restart: ${(e as Error).message}`);
         ctx.exit(1);

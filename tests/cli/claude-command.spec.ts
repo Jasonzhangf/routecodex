@@ -237,7 +237,7 @@ describe('cli claude command', () => {
     expect(spawnCalls[0].options?.env?.ANTHROPIC_BASE_URL).toBe('http://0.0.0.0:5520');
   });
 
-  it('auto-starts server in background when routecodex is unavailable', async () => {
+  it('does not auto-start server when routecodex is unavailable', async () => {
     const spawnCalls: Array<{ command: string; args: string[]; options: any }> = [];
     let readyChecks = 0;
 
@@ -279,12 +279,8 @@ describe('cli claude command', () => {
 
     await program.parseAsync(['node', 'routecodex', 'claude', '--', '--help'], { from: 'node' });
 
-    expect(spawnCalls).toHaveLength(2);
-    expect(spawnCalls[0].command).toBe('node');
-    expect(Array.isArray(spawnCalls[0].options?.stdio)).toBe(true);
-    expect(spawnCalls[0].options?.env?.ROUTECODEX_EXPECT_PARENT_PID).toBe(String(process.pid));
-    expect(spawnCalls[0].options?.env?.RCC_EXPECT_PARENT_PID).toBe(String(process.pid));
-    expect(spawnCalls[1].command).toBe('claude');
+    expect(spawnCalls).toHaveLength(1);
+    expect(spawnCalls[0].command).toBe('claude');
   });
 
   it('unsets anthropic auth tokens when launching claude in managed tmux session', async () => {
@@ -368,6 +364,7 @@ describe('cli claude command', () => {
     expect(shellCommand).toContain("'-u' 'ANTHROPIC_TOKEN'");
     expect(shellCommand).toContain('ANTHROPIC_API_KEY=');
     expect(shellCommand).toContain('::rcc-clockd:');
+    expect(shellCommand).toContain('::rcc-tmux:rcc_claude_');
     if (registeredDaemonId) {
       expect(shellCommand).toContain(registeredDaemonId);
     }

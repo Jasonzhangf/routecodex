@@ -5,6 +5,7 @@ import type { Command } from 'commander';
 import { LOCAL_HOSTS } from '../../constants/index.js';
 import { logProcessLifecycleSync } from '../../utils/process-lifecycle-logger.js';
 import { writeDaemonStopIntent } from '../../utils/daemon-stop-intent.js';
+import type { GuardianLifecycleEvent, GuardianStopResult } from '../guardian/types.js';
 
 type Spinner = {
   start(text?: string): Spinner;
@@ -41,6 +42,8 @@ export type StopCommandContext = {
   killPidBestEffort: (pid: number, opts: { force: boolean }) => void;
   sleep: (ms: number) => Promise<void>;
   stopTokenDaemonIfRunning?: () => Promise<void>;
+  stopGuardianDaemon?: () => Promise<GuardianStopResult>;
+  reportGuardianLifecycle?: (event: GuardianLifecycleEvent) => Promise<boolean>;
   fetchImpl?: typeof fetch;
   env?: Record<string, string | undefined>;
   fsImpl?: Pick<typeof fs, 'existsSync' | 'readFileSync'>;
@@ -236,6 +239,24 @@ export function createStopCommand(program: Command, ctx: StopCommandContext): vo
         enforceStopPassword(options?.password, expectedPassword, spinner, ctx);
 
         const resolvedPort = resolveStopPort(ctx, spinner);
+        const reportLifecycle = async (event: GuardianLifecycleEvent): Promise<void> => {
+          const ok = await ctx.reportGuardianLifecycle?.(event);
+          if (ctx.reportGuardianLifecycle && ok !== true) {
+            throw new Error(`guardian lifecycle apply rejected (${event.action})`);
+          }
+        };
+        const finalizeStop = async (): Promise<void> => {
+          await reportLifecycle({
+            action: 'stop_finalize',
+            source: 'cli.stop',
+            actorPid: process.pid,
+            metadata: { port: resolvedPort }
+          });
+          if (ctx.isDevPackage) {
+            await ctx.stopTokenDaemonIfRunning?.();
+          }
+          await ctx.stopGuardianDaemon?.();
+        };
         logProcessLifecycleSync({
           event: 'stop_command',
           source: 'cli.stop',
@@ -270,12 +291,16 @@ export function createStopCommand(program: Command, ctx: StopCommandContext): vo
               ...callerAudit
             }
           });
-          if (ctx.isDevPackage) {
-            await ctx.stopTokenDaemonIfRunning?.();
-          }
+          await finalizeStop();
           return;
         }
 
+        await reportLifecycle({
+          action: 'stop_http_shutdown_request',
+          source: 'cli.stop',
+          actorPid: process.pid,
+          metadata: { port: resolvedPort }
+        });
         const httpShutdownAccepted = await attemptHttpShutdown(ctx, resolvedPort, callerAudit);
         const gracefulDeadline = Date.now() + 3000;
         while (Date.now() < gracefulDeadline) {
@@ -290,82 +315,25 @@ export function createStopCommand(program: Command, ctx: StopCommandContext): vo
                 ...callerAudit
               }
             });
-            if (ctx.isDevPackage) {
-              await ctx.stopTokenDaemonIfRunning?.();
-            }
-            return;
-          }
-          await ctx.sleep(100);
-        }
-
-        const remainAfterWait = ctx.findListeningPids(resolvedPort);
-        for (const pid of remainAfterWait) {
-          logProcessLifecycleSync({
-            event: 'stop_signal_fallback',
-            source: 'cli.stop',
-            details: {
-              result: 'attempt',
-              port: resolvedPort,
-              targetPid: pid,
-              signal: 'SIGTERM',
-              ...callerAudit
-            }
-          });
-          ctx.killPidBestEffort(pid, { force: false });
-        }
-
-        const termDeadline = Date.now() + 3000;
-        while (Date.now() < termDeadline) {
-          if (ctx.findListeningPids(resolvedPort).length === 0) {
-            spinner.succeed(`Stopped server on ${resolvedPort}.`);
-            logProcessLifecycleSync({
-              event: 'stop_command',
-              source: 'cli.stop',
-              details: {
-                result: 'stopped_after_sigterm',
-                port: resolvedPort,
-                ...callerAudit
-              }
-            });
-            if (ctx.isDevPackage) {
-              await ctx.stopTokenDaemonIfRunning?.();
-            }
+            await finalizeStop();
             return;
           }
           await ctx.sleep(100);
         }
 
         const remain = ctx.findListeningPids(resolvedPort);
-        if (remain.length) {
-          for (const pid of remain) {
-            logProcessLifecycleSync({
-              event: 'stop_signal_fallback',
-              source: 'cli.stop',
-              details: {
-                result: 'attempt',
-                port: resolvedPort,
-                targetPid: pid,
-                signal: 'SIGKILL',
-                ...callerAudit
-              }
-            });
-            ctx.killPidBestEffort(pid, { force: true });
-          }
-        }
-        spinner.succeed(`Force stopped server on ${resolvedPort}.`);
+        spinner.fail(`Graceful stop timed out on ${resolvedPort}; direct signal fallback is disabled.`);
         logProcessLifecycleSync({
           event: 'stop_command',
           source: 'cli.stop',
           details: {
-            result: 'force_stopped',
+            result: 'graceful_timeout_no_fallback',
             port: resolvedPort,
-            remainingPidsBeforeForce: remain,
+            remainingPids: remain,
             ...callerAudit
           }
         });
-        if (ctx.isDevPackage) {
-          await ctx.stopTokenDaemonIfRunning?.();
-        }
+        ctx.exit(1);
       } catch (e) {
         logProcessLifecycleSync({
           event: 'stop_command',

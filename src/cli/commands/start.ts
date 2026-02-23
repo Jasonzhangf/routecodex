@@ -196,6 +196,39 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
           resolvedPort = port;
         }
 
+        await ctx.ensureGuardianDaemon?.();
+        await ctx.registerGuardianProcess?.({
+          source: 'start',
+          pid: process.pid,
+          ppid: process.ppid,
+          port: resolvedPort,
+          metadata: {
+            mode: runMode,
+            configPath
+          }
+        });
+        const applyLifecycleOrThrow = async (args: {
+          action: string;
+          signal?: string;
+          targetPid?: number | null;
+          metadata?: Record<string, unknown>;
+        }): Promise<void> => {
+          const accepted = await ctx.reportGuardianLifecycle?.({
+            action: args.action,
+            source: 'cli.start',
+            actorPid: process.pid,
+            targetPid: args.targetPid && args.targetPid > 0 ? args.targetPid : undefined,
+            signal: args.signal,
+            metadata: {
+              port: resolvedPort,
+              ...(args.metadata || {})
+            }
+          });
+          if (ctx.reportGuardianLifecycle && accepted !== true) {
+            throw new Error(`guardian lifecycle apply rejected (${args.action})`);
+          }
+        };
+
         // Ensure port state aligns with requested behavior.
         // Default behavior is takeover/restart; pass --no-restart for legacy non-disruptive mode.
         const shouldRestart = options.restart !== false || options.exclusive === true;
@@ -233,10 +266,17 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
         if (ctx.isDevPackage) {
           env.ROUTECODEX_PORT = String(resolvedPort);
         }
+        const bindServerToParent = parseBoolish(
+          ctx.env.ROUTECODEX_SERVER_PARENT_GUARD ?? ctx.env.RCC_SERVER_PARENT_GUARD
+        ) ?? false;
         const childProcessEnv = {
           ...env,
-          ROUTECODEX_EXPECT_PARENT_PID: String(process.pid),
-          RCC_EXPECT_PARENT_PID: String(process.pid)
+          ...(bindServerToParent
+            ? {
+              ROUTECODEX_EXPECT_PARENT_PID: String(process.pid),
+              RCC_EXPECT_PARENT_PID: String(process.pid)
+            }
+            : {})
         } as NodeJS.ProcessEnv;
 
         const args: string[] = [serverEntry, modulesConfigPath];
@@ -446,66 +486,78 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
 
         const shutdown = async (sig: NodeJS.Signals) => {
           try {
-            await ctx.fetch(`${HTTP_PROTOCOLS.HTTP}${LOCAL_HOSTS.IPV4}:${resolvedPort}${API_PATHS.SHUTDOWN}`, { method: 'POST' }).catch(() => {});
-          } catch {
-            /* ignore */
-          }
-          try {
-            if (childProc.pid && childProc.pid === process.pid) {
-              logProcessLifecycleSync({
-                event: 'self_termination',
-                source: 'cli.start.shutdown',
-                details: {
-                  reason: 'self_kill_guard',
-                  signal: sig,
-                  childPid: childProc.pid,
-                  parentPid: process.pid,
-                  result: 'blocked'
-                }
-              });
-            }
-            childProc.kill(sig);
-          } catch {
-            /* ignore */
-          }
-          // Avoid process-group signals here; only target the known child pid,
-          // then rely on managed pid discovery + graceful/force cleanup below.
-          const deadline = Date.now() + 3500;
-          while (Date.now() < deadline) {
-            if (ctx.findListeningPids(resolvedPort).length === 0) {break;}
-            await ctx.sleep(120);
-          }
-          const remain = ctx.findListeningPids(resolvedPort);
-          if (remain.length) {
-            for (const pid of remain) {ctx.killPidBestEffort(pid, { force: false });}
-            const killDeadline = Date.now() + 1500;
-            while (Date.now() < killDeadline) {
-              if (ctx.findListeningPids(resolvedPort).length === 0) {break;}
-              await ctx.sleep(100);
-            }
-          }
-          const still = ctx.findListeningPids(resolvedPort);
-          if (still.length) {
-            for (const pid of still) {ctx.killPidBestEffort(pid, { force: true });}
-          }
-          logProcessLifecycleSync({
-            event: 'self_termination',
-            source: 'cli.start.shutdown',
-            details: {
-              reason: 'shutdown_sequence_completed',
+            await applyLifecycleOrThrow({
+              action: 'server_shutdown_requested',
               signal: sig,
-              targetPort: resolvedPort,
-              remainingPids: still
+              targetPid: childProc.pid ?? null
+            });
+            try {
+              await ctx.fetch(`${HTTP_PROTOCOLS.HTTP}${LOCAL_HOSTS.IPV4}:${resolvedPort}${API_PATHS.SHUTDOWN}`, { method: 'POST' }).catch(() => {});
+            } catch {
+              /* ignore */
             }
-          });
-          if (ctx.isDevPackage) {
-            await ctx.stopTokenDaemonIfRunning?.();
-          }
-          closeServerLogStream();
-          try {
-            ctx.exit(0);
-          } catch {
-            /* ignore */
+            try {
+              if (childProc.pid && childProc.pid === process.pid) {
+                logProcessLifecycleSync({
+                  event: 'self_termination',
+                  source: 'cli.start.shutdown',
+                  details: {
+                    reason: 'self_kill_guard',
+                    signal: sig,
+                    childPid: childProc.pid,
+                    parentPid: process.pid,
+                    result: 'blocked'
+                  }
+                });
+              }
+              childProc.kill(sig);
+            } catch {
+              /* ignore */
+            }
+            const childExited = await new Promise<boolean>((resolve) => {
+              let settled = false;
+              const complete = (value: boolean) => {
+                if (settled) {
+                  return;
+                }
+                settled = true;
+                resolve(value);
+              };
+              childProc.once('exit', () => complete(true));
+              setTimeout(() => complete(false), 3500);
+            });
+            logProcessLifecycleSync({
+              event: 'self_termination',
+              source: 'cli.start.shutdown',
+              details: {
+                reason: 'shutdown_sequence_completed',
+                signal: sig,
+                targetPort: resolvedPort,
+                childPid: childProc.pid ?? null,
+                childExited
+              }
+            });
+            await applyLifecycleOrThrow({
+              action: 'server_shutdown_complete',
+              signal: sig,
+              targetPid: childProc.pid ?? null,
+              metadata: {
+                childExited
+              }
+            });
+            if (ctx.isDevPackage) {
+              await ctx.stopTokenDaemonIfRunning?.();
+            }
+            closeServerLogStream();
+            try {
+              ctx.exit(0);
+            } catch {
+              /* ignore */
+            }
+          } catch (error) {
+            closeServerLogStream();
+            ctx.logger.error(error instanceof Error ? error.message : String(error));
+            ctx.exit(1);
           }
         };
 

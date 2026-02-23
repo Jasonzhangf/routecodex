@@ -22,6 +22,7 @@ import {
   parsePositiveInt,
   parseString
 } from './clock-client-route-utils.js';
+import { migrateStopMessageTmuxScope } from './stopmessage-scope-rebind.js';
 
 function rejectNonLocal(req: Request, res: Response): boolean {
   if (isLocalRequest(req)) {
@@ -52,6 +53,15 @@ export function registerClockClientRoutes(app: Application): void {
     const managedClientProcess = parseBoolean(body.managedClientProcess);
     const managedClientPid = parsePositiveInt(body.managedClientPid);
     const managedClientCommandHint = parseString(body.managedClientCommandHint);
+    const previousRecord = registry.findByDaemonId(daemonId);
+    const previousDaemonTmuxSessionId =
+      parseString((previousRecord as Record<string, unknown> | undefined)?.tmuxSessionId) ||
+      parseString((previousRecord as Record<string, unknown> | undefined)?.sessionId);
+    const conversationSessionId = parseString(body.conversationSessionId);
+    const previousConversationTmuxSessionId = conversationSessionId
+      ? registry.resolveBoundTmuxSession(conversationSessionId)
+      : undefined;
+
     const rec = registry.register({
       daemonId,
       callbackUrl,
@@ -65,7 +75,6 @@ export function registerClockClientRoutes(app: Application): void {
       ...(managedClientCommandHint ? { managedClientCommandHint } : {})
     });
 
-    const conversationSessionId = parseString(body.conversationSessionId);
     if (conversationSessionId) {
       registry.bindConversationSession({
         conversationSessionId,
@@ -74,6 +83,27 @@ export function registerClockClientRoutes(app: Application): void {
         ...(rec.clientType ? { clientType: rec.clientType } : {}),
         ...(rec.workdir ? { workdir: rec.workdir } : {})
       });
+    }
+
+    const effectiveTmuxSessionId = parseString(rec.tmuxSessionId) || parseString(rec.sessionId);
+    const rebindOldTmuxCandidates = Array.from(
+      new Set(
+        [previousDaemonTmuxSessionId, previousConversationTmuxSessionId]
+          .map((entry) => parseString(entry))
+          .filter((entry): entry is string => Boolean(entry))
+      )
+    );
+    for (const oldTmuxSessionId of rebindOldTmuxCandidates) {
+      const rebindResult = migrateStopMessageTmuxScope({
+        oldTmuxSessionId,
+        newTmuxSessionId: effectiveTmuxSessionId,
+        reason: 'clock_client_register'
+      });
+      if (rebindResult.migrated) {
+        console.log(
+          `[stop_scope][rebind] stage=register daemon=${daemonId} old=${rebindResult.oldScope || 'n/a'} new=${rebindResult.newScope || 'n/a'} result=migrated`
+        );
+      }
     }
 
     res.status(200).json({ ok: true, record: rec });
@@ -89,6 +119,10 @@ export function registerClockClientRoutes(app: Application): void {
       res.status(400).json({ error: { message: 'daemonId is required', code: 'bad_request' } });
       return;
     }
+    const previousRecord = registry.findByDaemonId(daemonId);
+    const previousTmuxSessionId =
+      parseString((previousRecord as Record<string, unknown> | undefined)?.tmuxSessionId) ||
+      parseString((previousRecord as Record<string, unknown> | undefined)?.sessionId);
     const ok = registry.heartbeat(daemonId, {
       tmuxSessionId: parseString(body.tmuxSessionId) || parseString(body.sessionId),
       workdir: normalizeWorkdir(parseString(body.workdir) || parseString(body.cwd) || parseString(body.workingDirectory)),
@@ -100,6 +134,20 @@ export function registerClockClientRoutes(app: Application): void {
     if (!ok) {
       res.status(404).json({ error: { message: 'daemon not found', code: 'not_found' } });
       return;
+    }
+    const updatedRecord = registry.findByDaemonId(daemonId);
+    const updatedTmuxSessionId =
+      parseString((updatedRecord as Record<string, unknown> | undefined)?.tmuxSessionId) ||
+      parseString((updatedRecord as Record<string, unknown> | undefined)?.sessionId);
+    const rebindResult = migrateStopMessageTmuxScope({
+      oldTmuxSessionId: previousTmuxSessionId,
+      newTmuxSessionId: updatedTmuxSessionId,
+      reason: 'clock_client_heartbeat'
+    });
+    if (rebindResult.migrated) {
+      console.log(
+        `[stop_scope][rebind] stage=heartbeat daemon=${daemonId} old=${rebindResult.oldScope || 'n/a'} new=${rebindResult.newScope || 'n/a'} result=migrated`
+      );
     }
     res.status(200).json({ ok: true });
   });
@@ -307,18 +355,20 @@ export function registerClockClientRoutes(app: Application): void {
     }
 
     if (mode === 'unbind') {
-      const conversationSessionId = parseString(body.conversationSessionId);
-      if (!conversationSessionId) {
-        res.status(400).json({ ok: false, reason: 'conversationSessionId is required for mode=unbind' });
+      const sessionScope = parseString(body.sessionScope) || parseString(body.conversationSessionId);
+      if (!sessionScope) {
+        res.status(400).json({ ok: false, reason: 'sessionScope is required for mode=unbind' });
         return;
       }
-      const unbound = registry.unbindConversationSession(conversationSessionId);
+      const unbound = sessionScope.startsWith('clockd.') || sessionScope.startsWith('tmux:')
+        ? registry.unbindSessionScope(sessionScope)
+        : registry.unbindConversationSession(sessionScope);
       const clearTasks = parseBoolean(body.clearTasks) === true;
       let cleared = 0;
       if (clearTasks) {
-        cleared = await clearClockTasksSnapshot({ sessionId: conversationSessionId, config: clockConfig });
+        cleared = await clearClockTasksSnapshot({ sessionId: sessionScope, config: clockConfig });
       }
-      res.status(200).json({ ok: true, mode, unbound, cleared });
+      res.status(200).json({ ok: true, mode, sessionScope, unbound, cleared });
       return;
     }
 

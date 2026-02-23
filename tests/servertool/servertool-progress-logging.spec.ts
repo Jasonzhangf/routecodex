@@ -1,7 +1,7 @@
 import { jest } from '@jest/globals';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { runServerToolOrchestration } from '../../sharedmodule/llmswitch-core/src/servertool/engine.js';
+import { runServerToolOrchestration as runServerToolOrchestrationRaw } from '../../sharedmodule/llmswitch-core/src/servertool/engine.js';
 import type { AdapterContext } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/json.js';
 import { serializeRoutingInstructionState, type RoutingInstructionState } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-instructions.js';
@@ -25,6 +25,36 @@ const testIfProgressFileLogger = supportsProgressFileLogger ? test : test.skip;
 
 let flushServerToolProgressFileLoggerForTests: () => Promise<void> = async () => {};
 let resetServerToolProgressFileLoggerForTests: () => void = () => {};
+
+async function runServerToolOrchestration(
+  args: Parameters<typeof runServerToolOrchestrationRaw>[0]
+): ReturnType<typeof runServerToolOrchestrationRaw> {
+  const nextArgs = {
+    ...args,
+    ...(typeof (args as Record<string, unknown>).clientInjectDispatch === 'function'
+      ? {}
+      : {
+          clientInjectDispatch: async (dispatchArgs: {
+            entryEndpoint: string;
+            requestId: string;
+            body?: JsonObject;
+            metadata?: JsonObject;
+          }) => {
+            if (typeof (args as Record<string, unknown>).reenterPipeline !== 'function') {
+              return { ok: false as const, reason: 'client_inject_dispatcher_unavailable' };
+            }
+            await (args as Record<string, any>).reenterPipeline({
+              entryEndpoint: dispatchArgs.entryEndpoint,
+              requestId: dispatchArgs.requestId,
+              body: (dispatchArgs.body as JsonObject) ?? ({} as JsonObject),
+              metadata: dispatchArgs.metadata
+            });
+            return { ok: true as const };
+          }
+        })
+  } as Parameters<typeof runServerToolOrchestrationRaw>[0];
+  return runServerToolOrchestrationRaw(nextArgs);
+}
 
 const serverToolEngineRuntimePath = path.join(
   process.cwd(),
@@ -101,7 +131,7 @@ describe('servertool progress logging', () => {
     process.env.ROUTECODEX_SESSION_DIR = SESSION_DIR;
     const sessionId = 'sess-progress-1';
     fs.mkdirSync(SESSION_DIR, { recursive: true });
-    const filepath = path.join(SESSION_DIR, `session-${sessionId}.json`);
+    const filepath = path.join(SESSION_DIR, `tmux-${sessionId}.json`);
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
       stickyTarget: undefined,
@@ -125,6 +155,8 @@ describe('servertool progress logging', () => {
         entryEndpoint: '/v1/chat/completions',
         providerProtocol: 'openai-chat',
         sessionId,
+        tmuxSessionId: sessionId,
+        clientTmuxSessionId: sessionId,
         capturedChatRequest: {
           model: 'gpt-test',
           messages: [{ role: 'user', content: 'hi' }]
@@ -386,7 +418,7 @@ describe('servertool progress logging', () => {
 
     const sessionId = `sess-stop-lifecycle-${Date.now()}`;
     fs.mkdirSync(sessionDir, { recursive: true });
-    const sessionFile = path.join(sessionDir, `session-${sessionId}.json`);
+    const sessionFile = path.join(sessionDir, `tmux-${sessionId}.json`);
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
       stickyTarget: undefined,
@@ -409,6 +441,8 @@ describe('servertool progress logging', () => {
         entryEndpoint: '/v1/chat/completions',
         providerProtocol: 'openai-chat',
         sessionId,
+        tmuxSessionId: sessionId,
+        clientTmuxSessionId: sessionId,
         capturedChatRequest: {
           model: 'gpt-test',
           messages: [{ role: 'user', content: '继续执行' }]
@@ -568,7 +602,7 @@ describe('servertool progress logging', () => {
 
     const sessionId = `sess-filelog-enabled-${Date.now()}`;
     fs.mkdirSync(sessionDir, { recursive: true });
-    const sessionFile = path.join(sessionDir, `session-${sessionId}.json`);
+    const sessionFile = path.join(sessionDir, `tmux-${sessionId}.json`);
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
       stickyTarget: undefined,
@@ -589,6 +623,8 @@ describe('servertool progress logging', () => {
         entryEndpoint: '/v1/chat/completions',
         providerProtocol: 'openai-chat',
         sessionId,
+        tmuxSessionId: sessionId,
+        clientTmuxSessionId: sessionId,
         capturedChatRequest: {
           model: 'gpt-test',
           messages: [{ role: 'user', content: 'hi' }]
@@ -688,7 +724,7 @@ describe('servertool progress logging', () => {
 
     const sessionId = `sess-filelog-disabled-${Date.now()}`;
     fs.mkdirSync(sessionDir, { recursive: true });
-    const sessionFile = path.join(sessionDir, `session-${sessionId}.json`);
+    const sessionFile = path.join(sessionDir, `tmux-${sessionId}.json`);
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
       stickyTarget: undefined,
@@ -709,6 +745,8 @@ describe('servertool progress logging', () => {
         entryEndpoint: '/v1/chat/completions',
         providerProtocol: 'openai-chat',
         sessionId,
+        tmuxSessionId: sessionId,
+        clientTmuxSessionId: sessionId,
         capturedChatRequest: {
           model: 'gpt-test',
           messages: [{ role: 'user', content: 'hi' }]

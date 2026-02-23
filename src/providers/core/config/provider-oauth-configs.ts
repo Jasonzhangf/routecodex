@@ -164,8 +164,8 @@ function registerProviderOAuthConfigs(): void {
     },
     client: {
       // 复用 CLIProxyAPI 中的公开客户端配置
-      clientId: '681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com',
-      clientSecret: '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',
+      clientId: 'ROUTECODEX_GEMINI_CLI_GOOGLE_CLIENT_ID_NOT_SET',
+      clientSecret: 'ROUTECODEX_GEMINI_CLI_GOOGLE_CLIENT_SECRET_NOT_SET',
       scopes: [
         'https://www.googleapis.com/auth/cloud-platform',
         'https://www.googleapis.com/auth/userinfo.email',
@@ -207,8 +207,8 @@ function registerProviderOAuthConfigs(): void {
       deviceCodeUrl: 'https://oauth2.googleapis.com/device/code'
     },
     client: {
-      clientId: '1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com',
-      clientSecret: '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',
+      clientId: 'ROUTECODEX_ANTIGRAVITY_GOOGLE_CLIENT_ID_NOT_SET',
+      clientSecret: 'ROUTECODEX_ANTIGRAVITY_GOOGLE_CLIENT_SECRET_NOT_SET',
       scopes: [
         'https://www.googleapis.com/auth/cloud-platform',
         'https://www.googleapis.com/auth/userinfo.email',

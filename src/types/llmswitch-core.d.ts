@@ -158,6 +158,12 @@ declare module '@jsonstudio/llms/dist/conversion/hub/response/provider-response.
       body: Record<string, unknown>;
       metadata?: Record<string, unknown>;
     }) => Promise<{ body?: Record<string, unknown>; __sse_responses?: Readable; format?: string }>;
+    clientInjectDispatch?: (options: {
+      entryEndpoint: string;
+      requestId: string;
+      body?: Record<string, unknown>;
+      metadata?: Record<string, unknown>;
+    }) => Promise<{ ok: boolean; reason?: string }>;
   }): Promise<{ body?: Record<string, unknown>; __sse_responses?: Readable; format?: string }>;
 }
 

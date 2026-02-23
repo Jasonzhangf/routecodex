@@ -7,10 +7,9 @@ import {
 } from '../../../modules/llmswitch/bridge.js';
 import { applyClientConnectionStateToContext } from '../../utils/client-connection-state.js';
 import {
-  getClockClientRegistry,
-  injectClockClientPromptWithResult
-} from './clock-client-registry.js';
-import { bindClockConversationSession } from './executor/request-retry-helpers.js';
+  resolveStopMessageClientInjectReadiness,
+  runClientInjectionFlowBeforeReenter
+} from './executor/client-injection-flow.js';
 
 export interface ConvertProviderResponseOptions {
   entryEndpoint?: string;
@@ -52,263 +51,6 @@ function extractClientModelId(
     }
   }
   return undefined;
-}
-
-function shouldUnbindConversationSessionOnInjectFailure(reasonRaw: unknown): boolean {
-  const reason = typeof reasonRaw === 'string' ? reasonRaw.trim().toLowerCase() : '';
-  return (
-    reason === 'tmux_session_required' ||
-    reason === 'no_matching_tmux_session_daemon' ||
-    reason === 'workdir_mismatch' ||
-    reason === 'inject_failed'
-  );
-}
-
-function createClockInjectFailureError(args: {
-  reason: string;
-  source: string;
-  requestId?: string;
-  sessionId?: string;
-  tmuxSessionId?: string;
-}): Error & {
-  code?: string;
-  upstreamCode?: string;
-  details?: Record<string, unknown>;
-  status?: number;
-  statusCode?: number;
-  retryable?: boolean;
-} {
-  const error = new Error(
-    `[servertool.inject] clock client injection failed: ${args.reason}`
-  ) as Error & {
-    code?: string;
-    upstreamCode?: string;
-    details?: Record<string, unknown>;
-    status?: number;
-    statusCode?: number;
-    retryable?: boolean;
-  };
-  error.code = 'SERVERTOOL_FOLLOWUP_FAILED';
-  error.upstreamCode = 'clock_client_inject_failed';
-  error.details = {
-    reason: args.reason,
-    source: args.source,
-    requestId: args.requestId,
-    sessionId: args.sessionId,
-    tmuxSessionId: args.tmuxSessionId
-  };
-  error.status = 503;
-  error.statusCode = 503;
-  error.retryable = false;
-  return error;
-}
-
-function normalizeInjectToken(value: unknown): string | undefined {
-  if (typeof value !== 'string') {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  return trimmed || undefined;
-}
-
-function resolveInjectWorkdir(metadata: Record<string, unknown>): string | undefined {
-  return (
-    normalizeInjectToken(metadata.workdir) ||
-    normalizeInjectToken(metadata.cwd) ||
-    normalizeInjectToken(metadata.workingDirectory)
-  );
-}
-
-function resolveInjectConversationSessionId(metadata: Record<string, unknown>): string | undefined {
-  const daemonId =
-    normalizeInjectToken(metadata.clockDaemonId) ||
-    normalizeInjectToken(metadata.clockClientDaemonId);
-  if (daemonId) {
-    return `clockd.${daemonId}`;
-  }
-  return (
-    normalizeInjectToken(metadata.sessionId) ||
-    normalizeInjectToken(metadata.session_id) ||
-    normalizeInjectToken(metadata.conversationId) ||
-    normalizeInjectToken(metadata.conversation_id)
-  );
-}
-
-function resolveStopMessageClientInjectReadiness(metadata: Record<string, unknown>): {
-  ready: boolean;
-  reason: string;
-  sessionScope?: string;
-  tmuxSessionId?: string;
-} {
-  const registry = getClockClientRegistry();
-  const explicitClientInjectReadyRaw = metadata.clientInjectReady ?? metadata.client_inject_ready;
-  const explicitClientInjectReady =
-    explicitClientInjectReadyRaw === true
-      ? true
-      : explicitClientInjectReadyRaw === false
-        ? false
-        : (typeof explicitClientInjectReadyRaw === 'string'
-          ? (explicitClientInjectReadyRaw.trim().toLowerCase() === 'true'
-            ? true
-            : (explicitClientInjectReadyRaw.trim().toLowerCase() === 'false' ? false : undefined))
-          : undefined);
-  if (explicitClientInjectReady === false) {
-    const explicitReason =
-      typeof metadata.clientInjectReason === 'string'
-        ? metadata.clientInjectReason.trim()
-        : (typeof metadata.client_inject_reason === 'string' ? metadata.client_inject_reason.trim() : '');
-    return { ready: false, reason: explicitReason || 'client_inject_unready' };
-  }
-  const tmuxSessionId = normalizeInjectToken(metadata.tmuxSessionId);
-  const sessionScope = resolveInjectConversationSessionId(metadata);
-  const daemonId =
-    normalizeInjectToken(metadata.clockDaemonId) ||
-    normalizeInjectToken(metadata.clockClientDaemonId);
-  const workdir = resolveInjectWorkdir(metadata);
-  const clientType = normalizeInjectToken(metadata.clockClientType) || normalizeInjectToken(metadata.clientType);
-  if (tmuxSessionId) {
-    return { ready: true, reason: 'tmux_direct', tmuxSessionId, ...(sessionScope ? { sessionScope } : {}) };
-  }
-  if (!sessionScope) {
-    return { ready: false, reason: 'tmux_scope_binding_required' };
-  }
-
-  const mappedTmuxSessionId = normalizeInjectToken(registry.resolveBoundTmuxSession(sessionScope));
-  if (mappedTmuxSessionId) {
-    return { ready: true, reason: 'tmux_bound', sessionScope, tmuxSessionId: mappedTmuxSessionId };
-  }
-
-  const bind = registry.bindConversationSession({
-    conversationSessionId: sessionScope,
-    ...(daemonId ? { daemonId } : {}),
-    ...(workdir ? { workdir } : {}),
-    ...(clientType ? { clientType } : {})
-  });
-  if (bind.ok && normalizeInjectToken(bind.tmuxSessionId)) {
-    return {
-      ready: true,
-      reason: 'tmux_bound_on_demand',
-      sessionScope,
-      tmuxSessionId: normalizeInjectToken(bind.tmuxSessionId)
-    };
-  }
-  return {
-    ready: false,
-    reason: normalizeInjectToken(bind.reason) || 'conversation_session_unbound',
-    sessionScope
-  };
-}
-
-function resolveStrictClientInjectTarget(args: {
-  tmuxSessionId?: unknown;
-  clockDaemonId?: unknown;
-  conversationSessionId?: unknown;
-  clientInjectReady?: unknown;
-  clientInjectReason?: unknown;
-  requestId?: string;
-  source: string;
-}): { tmuxSessionId?: string; sessionId?: string } {
-  const registry = getClockClientRegistry();
-  const tmuxSessionId = normalizeInjectToken(args.tmuxSessionId);
-  const daemonId = normalizeInjectToken(args.clockDaemonId);
-  const conversationScopeSessionId = normalizeInjectToken(args.conversationSessionId);
-  const explicitClientInjectReadyRaw = args.clientInjectReady;
-  const explicitClientInjectReady =
-    explicitClientInjectReadyRaw === true
-      ? true
-      : explicitClientInjectReadyRaw === false
-        ? false
-        : (typeof explicitClientInjectReadyRaw === 'string'
-          ? (explicitClientInjectReadyRaw.trim().toLowerCase() === 'true'
-            ? true
-            : (explicitClientInjectReadyRaw.trim().toLowerCase() === 'false' ? false : undefined))
-          : undefined);
-  if (explicitClientInjectReady === false) {
-    throw createClockInjectFailureError({
-      reason: normalizeInjectToken(args.clientInjectReason) || 'client_inject_unready',
-      source: args.source,
-      requestId: args.requestId
-    });
-  }
-  const daemonScopeSessionId = daemonId ? `clockd.${daemonId}` : undefined;
-  if (!tmuxSessionId && !daemonScopeSessionId && !conversationScopeSessionId) {
-    throw createClockInjectFailureError({
-      reason: 'tmux_scope_binding_required',
-      source: args.source,
-      requestId: args.requestId
-    });
-  }
-  if (tmuxSessionId) {
-    return { tmuxSessionId };
-  }
-  const targetSessionId = daemonScopeSessionId || conversationScopeSessionId;
-
-  const daemonRecord = daemonId ? registry.findByDaemonId(daemonId) : undefined;
-  const sessionScopedTmuxSessionId =
-    normalizeInjectToken(targetSessionId ? registry.resolveBoundTmuxSession(targetSessionId) : undefined);
-  const boundTmuxSessionId =
-    normalizeInjectToken(daemonRecord?.tmuxSessionId) ||
-    normalizeInjectToken(daemonRecord?.sessionId) ||
-    sessionScopedTmuxSessionId;
-  if (!boundTmuxSessionId) {
-    if (targetSessionId) {
-      try {
-        registry.unbindConversationSession(targetSessionId);
-      } catch {
-        // best-effort cleanup
-      }
-    }
-    throw createClockInjectFailureError({
-      reason: 'conversation_session_unbound',
-      source: args.source,
-      requestId: args.requestId,
-      sessionId: targetSessionId
-    });
-  }
-
-  return {
-    sessionId: targetSessionId,
-    tmuxSessionId: boundTmuxSessionId
-  };
-}
-
-async function injectClockClientPromptStrict(args: {
-  tmuxSessionId?: string;
-  sessionId?: string;
-  workdir?: string;
-  requestId?: string;
-  text: string;
-  source: string;
-}): Promise<void> {
-  const result = await injectClockClientPromptWithResult({
-    tmuxSessionId: args.tmuxSessionId,
-    sessionId: args.sessionId,
-    workdir: args.workdir,
-    requestId: args.requestId,
-    text: args.text,
-    source: args.source
-  });
-  if (result.ok) {
-    return;
-  }
-
-  const reason = typeof result.reason === 'string' ? result.reason : 'inject_failed';
-  const normalizedSessionId = typeof args.sessionId === 'string' ? args.sessionId.trim() : '';
-  if (normalizedSessionId && shouldUnbindConversationSessionOnInjectFailure(reason)) {
-    try {
-      getClockClientRegistry().unbindConversationSession(normalizedSessionId);
-    } catch {
-      // best-effort cleanup only
-    }
-  }
-
-  throw createClockInjectFailureError({
-    reason,
-    source: args.source,
-    requestId: args.requestId,
-    sessionId: args.sessionId,
-    tmuxSessionId: args.tmuxSessionId
-  });
 }
 
 export async function convertProviderResponseIfNeeded(
@@ -472,97 +214,20 @@ export async function convertProviderResponseIfNeeded(
       };
 
       try {
-        const clientInjectOnlyRaw = nestedMetadata.clientInjectOnly;
-        const clientInjectOnly =
-          clientInjectOnlyRaw === true ||
-          (typeof clientInjectOnlyRaw === 'string' && clientInjectOnlyRaw.trim().toLowerCase() === 'true');
-        const clientInjectText =
-          typeof nestedMetadata.clientInjectText === 'string' ? nestedMetadata.clientInjectText.trim() : '';
-        const clientInjectSource =
-          typeof nestedMetadata.clientInjectSource === 'string' && nestedMetadata.clientInjectSource.trim()
-            ? nestedMetadata.clientInjectSource.trim()
-            : 'servertool.client_inject';
         const requestBody =
           reenterOpts.body && typeof reenterOpts.body === 'object' && !Array.isArray(reenterOpts.body)
             ? (reenterOpts.body as Record<string, unknown>)
             : {};
-        const messages = Array.isArray(requestBody.messages) ? (requestBody.messages as unknown[]) : [];
-        const lastUser = [...messages]
-          .reverse()
-          .find((entry) => entry && typeof entry === 'object' && (entry as Record<string, unknown>).role === 'user') as
-          | Record<string, unknown>
-          | undefined;
-        const text = typeof lastUser?.content === 'string' ? String(lastUser.content) : '';
-        const injectTarget = {
-          tmuxSessionId: typeof nestedMetadata.tmuxSessionId === 'string' ? nestedMetadata.tmuxSessionId : undefined,
-          sessionId: typeof nestedMetadata.sessionId === 'string' ? nestedMetadata.sessionId : undefined,
-          workdir: typeof nestedMetadata.workdir === 'string' ? nestedMetadata.workdir : undefined,
+        const injectResult = await runClientInjectionFlowBeforeReenter({
+          nestedMetadata,
+          requestBody,
           requestId: reenterOpts.requestId
-        };
-        if (clientInjectOnly) {
-          bindClockConversationSession(nestedMetadata);
-          const strictTarget = resolveStrictClientInjectTarget({
-            tmuxSessionId: injectTarget.tmuxSessionId,
-            clockDaemonId:
-              typeof nestedMetadata.clockDaemonId === 'string'
-                ? nestedMetadata.clockDaemonId
-                : (typeof nestedMetadata.clockClientDaemonId === 'string' ? nestedMetadata.clockClientDaemonId : undefined),
-            conversationSessionId:
-              typeof nestedMetadata.sessionId === 'string'
-                ? nestedMetadata.sessionId
-                : typeof nestedMetadata.session_id === 'string'
-                  ? nestedMetadata.session_id
-                  : typeof nestedMetadata.conversationId === 'string'
-                    ? nestedMetadata.conversationId
-                    : (typeof nestedMetadata.conversation_id === 'string' ? nestedMetadata.conversation_id : undefined),
-            clientInjectReady:
-              nestedMetadata.clientInjectReady ?? nestedMetadata.client_inject_ready,
-            clientInjectReason:
-              nestedMetadata.clientInjectReason ?? nestedMetadata.client_inject_reason,
-            requestId: reenterOpts.requestId,
-            source: clientInjectSource
-          });
-          const injectText = clientInjectText || text || '继续执行';
-          await injectClockClientPromptStrict({
-            tmuxSessionId: strictTarget.tmuxSessionId,
-            sessionId: strictTarget.sessionId,
-            workdir: injectTarget.workdir,
-            requestId: injectTarget.requestId,
-            text: injectText,
-            source: clientInjectSource
-          });
+        });
+        if (injectResult.clientInjectOnlyHandled) {
           return { body: { ok: true, mode: 'client_inject_only' } };
         }
-        bindClockConversationSession(nestedMetadata);
-        const lastMessage = messages.length > 0 ? messages[messages.length - 1] : undefined;
-        const lastTool =
-          lastMessage && typeof lastMessage === 'object' && !Array.isArray(lastMessage)
-            ? (lastMessage as Record<string, unknown>)
-            : undefined;
-        const lastToolRole = typeof lastTool?.role === 'string' ? lastTool.role : '';
-        const lastToolName = typeof lastTool?.name === 'string' ? String(lastTool.name).trim() : '';
-        if (text.includes('<**clock:{') && text.includes('}**>')) {
-          await injectClockClientPromptStrict({
-            ...injectTarget,
-            text,
-            source: 'servertool.reenter'
-          });
-        }
-        if (lastToolRole === 'tool' && lastToolName === 'continue_execution') {
-          await injectClockClientPromptStrict({
-            ...injectTarget,
-            text: '继续执行',
-            source: 'servertool.continue_execution'
-          });
-        }
       } catch (error) {
-        const code = typeof (error as { code?: unknown })?.code === 'string'
-          ? String((error as { code?: string }).code)
-          : '';
-        if (code === 'SERVERTOOL_FOLLOWUP_FAILED') {
-          throw error;
-        }
-        // best-effort only for non-critical inject attempts
+        throw error;
       }
 
       const nestedResult = await deps.executeNested(nestedInput);
@@ -599,10 +264,37 @@ export async function convertProviderResponseIfNeeded(
     const err = error as Error | unknown;
     const message = err instanceof Error ? err.message : String(err ?? 'Unknown error');
     const providerProtocol = mapProviderProtocol(options.providerType);
+    const errRecord = err as Record<string, unknown>;
+    const errCode = typeof errRecord.code === 'string' ? errRecord.code : undefined;
+    const upstreamCode = typeof errRecord.upstreamCode === 'string' ? errRecord.upstreamCode : undefined;
+    const detailRecord = asRecord(errRecord.details);
+    const detailReason =
+      typeof (detailRecord as Record<string, unknown> | undefined)?.reason === 'string'
+        ? String((detailRecord as Record<string, unknown>).reason)
+        : undefined;
+    const detailUpstreamCode =
+      typeof (detailRecord as Record<string, unknown> | undefined)?.upstreamCode === 'string'
+        ? String((detailRecord as Record<string, unknown>).upstreamCode)
+        : undefined;
 
     const isSseConvertFailure =
       typeof message === 'string' &&
       message.toLowerCase().includes('failed to convert sse payload');
+    const isServerToolFollowupError =
+      errCode === 'SERVERTOOL_FOLLOWUP_FAILED' ||
+      errCode === 'SERVERTOOL_EMPTY_FOLLOWUP' ||
+      (typeof errCode === 'string' && errCode.startsWith('SERVERTOOL_'));
+
+    if (isServerToolFollowupError) {
+      console.error('[RequestExecutor] ServerTool followup failed', {
+        requestId: options.requestId,
+        code: errCode,
+        upstreamCode: upstreamCode || detailUpstreamCode,
+        reason: detailReason,
+        message
+      });
+      throw error;
+    }
 
     if (providerProtocol === 'gemini-chat' && isSseConvertFailure) {
       console.error(

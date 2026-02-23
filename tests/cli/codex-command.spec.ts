@@ -102,7 +102,7 @@ function extractTmuxLaunchShellCommand(call: { command: string; args: string[] }
 }
 
 describe('cli codex command', () => {
-  it('reaps codex child on SIGTERM by default to avoid orphan process', async () => {
+  it('does not forward SIGTERM to codex child by default', async () => {
     const signalHandlers = new Map<NodeJS.Signals, () => void>();
     const killSignals: string[] = [];
     const program = new Command();
@@ -145,7 +145,7 @@ describe('cli codex command', () => {
 
     await program.parseAsync(['node', 'routecodex', 'codex', '--url', 'http://localhost:5520/proxy'], { from: 'node' });
 
-    expect(killSignals).toContain('SIGTERM');
+    expect(killSignals).toEqual([]);
   });
 
   it('does not kill codex child on SIGTERM when orphan-reap is explicitly disabled', async () => {
@@ -195,7 +195,7 @@ describe('cli codex command', () => {
     expect(killSignals).toEqual([]);
   });
 
-  it('forwards SIGTERM to codex child when explicit env switch is enabled', async () => {
+  it('does not forward SIGTERM even when legacy forward env switch is enabled', async () => {
     const signalHandlers = new Map<NodeJS.Signals, () => void>();
     const killSignals: string[] = [];
     const program = new Command();
@@ -239,7 +239,7 @@ describe('cli codex command', () => {
 
     await program.parseAsync(['node', 'routecodex', 'codex', '--url', 'http://localhost:5520/proxy'], { from: 'node' });
 
-    expect(killSignals).toContain('SIGTERM');
+    expect(killSignals).toEqual([]);
   });
 
   it('uses explicit --cwd as launch working directory', async () => {
@@ -1225,12 +1225,59 @@ describe('cli codex command', () => {
     const shellCommand = extractTmuxLaunchShellCommand(launchCall);
     expect(shellCommand).toContain("cd -- '/home/test/workspace-clock'");
     expect(shellCommand).toContain("OPENAI_API_KEY=rcc-proxy-key::rcc-clockd:");
+    expect(shellCommand).toContain("::rcc-tmux:rcc_codex_");
     expect(shellCommand).toContain("RCC_CLOCK_CLIENT_DAEMON_ID=clockd_");
     expect(shellCommand).toContain("[routecodex][self-heal]");
     expect(shellCommand).toContain("__rcc_max=");
     expect(shellCommand).toContain("while true; do");
     expect(shellCommand).not.toContain("while true; do;");
     expect(shellCommand).not.toContain("tmux kill-session -t 'rcc_codex_");
+  });
+
+  it('does not auto-start server when routecodex is unavailable', async () => {
+    const spawnCalls: Array<{ command: string; args: string[]; options: any }> = [];
+    let readyChecks = 0;
+
+    const program = new Command();
+    createCodexCommand(program, {
+      isDevPackage: true,
+      isWindows: false,
+      defaultDevPort: 5555,
+      nodeBin: 'node',
+      createSpinner: async () => createStubSpinner(),
+      logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
+      env: { ROUTECODEX_CLOCK_RECLAIM_REQUIRED: '0' },
+      rawArgv: ['codex', '--', '--help'],
+      fsImpl: createStubFs(),
+      homedir: () => '/home/test',
+      sleep: async () => {},
+      fetch: (async (url: string) => {
+        if (url.endsWith('/ready') || url.endsWith('/health')) {
+          readyChecks += 1;
+          if (readyChecks <= 2) {
+            return { ok: false, status: 503, json: async () => ({}) } as any;
+          }
+          return { ok: true, status: 200, json: async () => ({ status: 'ok', ready: true }) } as any;
+        }
+        return { ok: true, status: 200, json: async () => ({}) } as any;
+      }) as any,
+      spawnSyncImpl: () => ({ status: 1, stdout: '', stderr: 'tmux not found' }) as any,
+      spawn: (command, args, options) => {
+        spawnCalls.push({ command, args, options });
+        return { on: () => {}, kill: () => true, unref: () => {} } as any;
+      },
+      getModulesConfigPath: () => '/tmp/modules.json',
+      resolveServerEntryPath: () => '/tmp/index.js',
+      waitForever: async () => {},
+      exit: (code) => {
+        throw new Error(`exit:${code}`);
+      }
+    });
+
+    await program.parseAsync(['node', 'routecodex', 'codex', '--', '--help'], { from: 'node' });
+
+    expect(spawnCalls).toHaveLength(1);
+    expect(spawnCalls[0].command).toBe('codex');
   });
 
 });

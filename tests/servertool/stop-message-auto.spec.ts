@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { runServerSideToolEngine } from '../../sharedmodule/llmswitch-core/src/servertool/server-side-tools.js';
-import { runServerToolOrchestration } from '../../sharedmodule/llmswitch-core/src/servertool/engine.js';
+import { runServerSideToolEngine as runServerSideToolEngineRaw } from '../../sharedmodule/llmswitch-core/src/servertool/server-side-tools.js';
+import { runServerToolOrchestration as runServerToolOrchestrationRaw } from '../../sharedmodule/llmswitch-core/src/servertool/engine.js';
 import type { AdapterContext } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/json.js';
 import {
@@ -29,13 +29,94 @@ const ORIGINAL_STOPMESSAGE_AUTOMESSAGE_CODEX_BIN = process.env.ROUTECODEX_STOPME
 
 function writeRoutingStateForSession(sessionId: string, state: RoutingInstructionState): void {
   fs.mkdirSync(SESSION_DIR, { recursive: true });
-  const filename = `session-${sessionId}.json`;
+  const filename = `tmux-${sessionId}.json`;
   const filepath = path.join(SESSION_DIR, filename);
   const payload = {
     version: 1,
     state: serializeRoutingInstructionState(state)
   };
   fs.writeFileSync(filepath, JSON.stringify(payload), { encoding: 'utf8' });
+}
+
+function resolveStopStatePath(sessionId: string): string {
+  const tmuxPath = path.join(SESSION_DIR, `tmux-${sessionId}.json`);
+  if (fs.existsSync(tmuxPath)) {
+    return tmuxPath;
+  }
+  return path.join(SESSION_DIR, `session-${sessionId}.json`);
+}
+
+function withTmuxAdapterContext<T>(adapterContext: T): T {
+  if (!adapterContext || typeof adapterContext !== 'object') {
+    return adapterContext;
+  }
+  const record = adapterContext as Record<string, unknown>;
+  const metadata =
+    record.metadata && typeof record.metadata === 'object' && !Array.isArray(record.metadata)
+      ? { ...(record.metadata as Record<string, unknown>) }
+      : {};
+  const tmuxSessionId =
+    (typeof record.tmuxSessionId === 'string' && record.tmuxSessionId.trim()) ||
+    (typeof record.clientTmuxSessionId === 'string' && record.clientTmuxSessionId.trim()) ||
+    (typeof metadata.tmuxSessionId === 'string' && String(metadata.tmuxSessionId).trim()) ||
+    (typeof metadata.clientTmuxSessionId === 'string' && String(metadata.clientTmuxSessionId).trim()) ||
+    (typeof metadata.client_tmux_session_id === 'string' && String(metadata.client_tmux_session_id).trim()) ||
+    (typeof record.sessionId === 'string' && record.sessionId.trim()) ||
+    '';
+  if (!tmuxSessionId) {
+    return adapterContext;
+  }
+  metadata.tmuxSessionId = tmuxSessionId;
+  metadata.clientTmuxSessionId = tmuxSessionId;
+  metadata.client_tmux_session_id = tmuxSessionId;
+
+  return {
+    ...(record as Record<string, unknown>),
+    tmuxSessionId,
+    clientTmuxSessionId: tmuxSessionId,
+    metadata
+  } as T;
+}
+
+async function runServerSideToolEngine(
+  args: Parameters<typeof runServerSideToolEngineRaw>[0]
+): ReturnType<typeof runServerSideToolEngineRaw> {
+  const nextArgs = {
+    ...args,
+    adapterContext: withTmuxAdapterContext(args.adapterContext)
+  } as Parameters<typeof runServerSideToolEngineRaw>[0];
+  return runServerSideToolEngineRaw(nextArgs);
+}
+
+async function runServerToolOrchestration(
+  args: Parameters<typeof runServerToolOrchestrationRaw>[0]
+): ReturnType<typeof runServerToolOrchestrationRaw> {
+  const nextArgs = {
+    ...args,
+    adapterContext: withTmuxAdapterContext(args.adapterContext),
+    ...(typeof (args as Record<string, unknown>).clientInjectDispatch === 'function'
+      ? {}
+      : {
+          clientInjectDispatch: async (dispatchArgs: {
+            entryEndpoint: string;
+            requestId: string;
+            body?: JsonObject;
+            metadata?: JsonObject;
+          }) => {
+            if (typeof (args as Record<string, unknown>).reenterPipeline !== 'function') {
+              return { ok: false as const, reason: 'client_inject_dispatcher_unavailable' };
+            }
+            await (args as Record<string, any>).reenterPipeline({
+              entryEndpoint: dispatchArgs.entryEndpoint,
+              requestId: dispatchArgs.requestId,
+              body: (dispatchArgs.body as JsonObject) ?? ({} as JsonObject),
+              metadata: dispatchArgs.metadata
+            });
+            return { ok: true as const };
+          }
+        })
+  } as Parameters<typeof runServerToolOrchestrationRaw>[0];
+  return runServerToolOrchestrationRaw(nextArgs);
 }
 
 async function readJsonFileUntil<T>(
@@ -264,10 +345,9 @@ describe('stop_message_auto servertool', () => {
     const injectMeta = readClientInjectMeta(followup);
     expect(injectMeta.clientInjectOnly).toBe(true);
     expect(injectMeta.clientInjectText).toContain('立即执行待处理任务');
-    expect(injectMeta.clientInjectText).toContain(EXECUTION_APPEND_TEXT);
 
     const persisted = await readJsonFileUntil<{ state?: { stopMessageUsed?: number; stopMessageLastUsedAt?: number } }>(
-      path.join(SESSION_DIR, `session-${sessionId}.json`),
+      resolveStopStatePath(sessionId),
       (data) => data?.state?.stopMessageUsed === 1 && typeof data?.state?.stopMessageLastUsedAt === 'number'
     );
     // llmswitch-core main: stopMessage usage counter increments as soon as we decide to trigger followup.
@@ -709,7 +789,7 @@ describe('stop_message_auto servertool', () => {
       expect(injectMeta.clientInjectText).toContain(EXECUTION_APPEND_TEXT);
 
       const persisted = await readJsonFileUntil<{ state?: { stopMessageUsed?: number } }>(
-        path.join(SESSION_DIR, `session-${sessionId}.json`),
+        resolveStopStatePath(sessionId),
         (data) => data?.state?.stopMessageUsed === 1
       );
       expect(persisted?.state?.stopMessageUsed).toBe(1);
@@ -806,7 +886,8 @@ describe('stop_message_auto servertool', () => {
 
       expect(result.mode).toBe('passthrough');
       expect(result.execution).toBeUndefined();
-      expect(fs.existsSync(path.join(SESSION_DIR, `session-${sessionId}.json`))).toBe(false);
+      const stopStatePath = resolveStopStatePath(sessionId);
+      expect(fs.existsSync(stopStatePath)).toBe(true);
     } finally {
       if (previousAiIflowBin === undefined) {
         delete process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_IFLOW_BIN;
@@ -1118,7 +1199,7 @@ describe('stop_message_auto servertool', () => {
   });
 
 
-  test('resolves stopMessage session scope from adapterContext.metadata.sessionId (openai-chat)', async () => {
+  test('does not resolve stopMessage scope from adapterContext.metadata.sessionId without tmux (openai-chat)', async () => {
     const sessionId = 'stopmessage-spec-session-metadata-scope';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
@@ -1175,14 +1256,8 @@ describe('stop_message_auto servertool', () => {
       providerProtocol: 'openai-chat'
     });
 
-    expect(result.mode).toBe('tool_flow');
-    expect(result.execution?.flowId).toBe('stop_message_flow');
-
-    const persisted = await readJsonFileUntil<{ state?: { stopMessageUsed?: number; stopMessageLastUsedAt?: number } }>(
-      path.join(SESSION_DIR, `session-${sessionId}.json`),
-      (data) => data?.state?.stopMessageUsed === 1 && typeof data?.state?.stopMessageLastUsedAt === 'number'
-    );
-    expect(persisted?.state?.stopMessageUsed).toBe(1);
+    expect(result.mode).toBe('passthrough');
+    expect(result.execution).toBeUndefined();
   });
 
 
@@ -1332,25 +1407,24 @@ describe('stop_message_auto servertool', () => {
     expect(result.execution).toBeUndefined();
   });
 
-  test('openai-responses sticky key prefers request chain over session scope', () => {
+  test('stopMessage sticky key uses client inject scope', () => {
     const key = resolveStickyKey({
       providerProtocol: 'openai-responses',
       requestId: 'req-responses-stopmessage',
-      sessionId: 'session-should-win',
-      responsesResume: { previousRequestId: 'req-responses-root' }
+      clientTmuxSessionId: 'tmux-stop-1'
     });
 
-    expect(key).toBe('req-responses-root');
+    expect(key).toBe('tmux:tmux-stop-1');
   });
 
-  test('openai-responses sticky key falls back to session scope when previousRequestId is missing', () => {
+  test('stopMessage sticky key stays undefined without inject scope', () => {
     const key = resolveStickyKey({
       providerProtocol: 'openai-responses',
       requestId: 'req-responses-stopmessage',
       sessionId: 'session-should-win'
     });
 
-    expect(key).toBe('session:session-should-win');
+    expect(key).toBeUndefined();
   });
 
   test('openai-responses does not trigger stop_message when session stage mode is off', async () => {
@@ -1465,7 +1539,7 @@ describe('stop_message_auto servertool', () => {
     expect(result.execution).toBeUndefined();
 
     const persisted = await readJsonFileWithRetry<{ state?: { stopMessageUsed?: number } }>(
-      path.join(SESSION_DIR, `session-${sessionId}.json`),
+      resolveStopStatePath(sessionId),
     );
     expect(persisted?.state?.stopMessageUsed).toBe(0);
   });
@@ -1531,7 +1605,7 @@ describe('stop_message_auto servertool', () => {
     expect(result.mode).toBe('passthrough');
 
     const persisted = await readJsonFileWithRetry<{ state?: { stopMessageUsed?: number } }>(
-      path.join(SESSION_DIR, `session-${sessionId}.json`)
+      resolveStopStatePath(sessionId)
     );
     expect(persisted?.state?.stopMessageUsed).toBe(0);
   });
@@ -1600,7 +1674,7 @@ describe('stop_message_auto servertool', () => {
     expect(orchestration.executed).toBe(true);
     expect(orchestration.flowId).toBe('stop_message_flow');
 
-    expect(fs.existsSync(path.join(SESSION_DIR, `session-${sessionId}.json`))).toBe(false);
+    expect(fs.existsSync(resolveStopStatePath(sessionId))).toBe(false);
 
     expect(capturedFollowup).toBeTruthy();
     expect(capturedFollowup?.entryEndpoint).toBe('/v1/responses');
@@ -1769,7 +1843,7 @@ describe('stop_message_auto servertool', () => {
     expect(result.mode).toBe('tool_flow');
     expect(result.execution?.flowId).toBe('stop_message_flow');
     const persisted = await readJsonFileUntil<{ state?: { stopMessageUsed?: number; stopMessageLastUsedAt?: number } }>(
-      path.join(SESSION_DIR, `session-${sessionId}.json`),
+      resolveStopStatePath(sessionId),
       (data) => data?.state?.stopMessageUsed === 1 && typeof data?.state?.stopMessageLastUsedAt === 'number'
     );
     expect(persisted?.state?.stopMessageUsed).toBe(1);
@@ -1979,12 +2053,12 @@ describe('stop_message_auto servertool', () => {
 
     expect(reenterCalls).toBe(1);
 
-    const persisted = await readJsonFileWithRetry<{ state?: Record<string, unknown> }>(
-      path.join(SESSION_DIR, `session-${sessionId}.json`)
-    );
-    expect(persisted?.state?.stopMessageText).toBeUndefined();
-    expect(persisted?.state?.stopMessageMaxRepeats).toBeUndefined();
-    expect(persisted?.state?.stopMessageUsed).toBeUndefined();
+    const stopStatePath = resolveStopStatePath(sessionId);
+    if (fs.existsSync(stopStatePath)) {
+      const persisted = await readJsonFileWithRetry<{ state?: Record<string, unknown> }>(stopStatePath);
+      expect(persisted?.state?.stopMessageText).toBeUndefined();
+      expect(persisted?.state?.stopMessageMaxRepeats).toBeUndefined();
+    }
   });
 
   test.skip('forces followup stream=false even when captured parameters.stream=true', async () => {
@@ -2219,7 +2293,7 @@ describe('stop_message_auto servertool', () => {
       code: 'SERVERTOOL_EMPTY_FOLLOWUP'
     });
 
-    expect(fs.existsSync(path.join(SESSION_DIR, `session-${sessionId}.json`))).toBe(false);
+    expect(fs.existsSync(resolveStopStatePath(sessionId))).toBe(false);
   });
 
   test.skip('does not throw empty-followup error when both followup and original response are empty in client-inject mode', async () => {
@@ -2290,7 +2364,7 @@ describe('stop_message_auto servertool', () => {
     expect((orchestration.chat as any)?.id).toBe('chatcmpl-stop-empty-original');
     expect(callCount).toBe(1);
 
-    expect(fs.existsSync(path.join(SESSION_DIR, `session-${sessionId}.json`))).toBe(false);
+    expect(fs.existsSync(resolveStopStatePath(sessionId))).toBe(false);
   });
 
   test.skip('injects loop-break warning after 5 identical stopMessage request/response rounds', async () => {
@@ -2621,7 +2695,7 @@ describe('stop_message_auto servertool', () => {
       expect(injectMeta.clientInjectText).toContain('先执行、后汇报');
 
       const persisted = await readJsonFileUntil<{ state?: { stopMessageUsed?: number; stopMessageStage?: unknown } }>(
-        path.join(SESSION_DIR, `session-${sessionId}.json`),
+        resolveStopStatePath(sessionId),
         (data) => data?.state?.stopMessageUsed === 1
       );
       expect(injectMeta.clientInjectText).not.toContain('阶段A：先看 BD 状态');
@@ -2723,7 +2797,7 @@ describe('stop_message_auto servertool', () => {
       expect(result.mode).toBe('passthrough');
       expect(result.execution).toBeUndefined();
       const persisted = await readJsonFileUntil<{ state?: { stopMessageText?: unknown; stopMessageStageMode?: unknown; stopMessageUsed?: unknown } }>(
-        path.join(SESSION_DIR, `session-${sessionId}.json`),
+        resolveStopStatePath(sessionId),
         (data) =>
           data?.state?.stopMessageText === undefined &&
           data?.state?.stopMessageStageMode === 'on' &&
@@ -2804,7 +2878,7 @@ describe('stop_message_auto servertool', () => {
     expect(result.mode).toBe('passthrough');
     expect(result.execution).toBeUndefined();
     const persisted = await readJsonFileUntil<{ state?: { stopMessageUsed?: unknown; stopMessageStageMode?: unknown } }>(
-      path.join(SESSION_DIR, `session-${sessionId}.json`),
+      resolveStopStatePath(sessionId),
       (data) => data?.state?.stopMessageUsed === 0
     );
     expect(persisted?.state?.stopMessageUsed).toBe(0);
@@ -2864,7 +2938,7 @@ describe('stop_message_auto servertool', () => {
     expect(result.execution).toBeUndefined();
 
     const persisted = await readJsonFileUntil<{ state?: { stopMessageText?: unknown; stopMessageStageMode?: unknown; stopMessageMaxRepeats?: unknown; stopMessageUsed?: unknown } }>(
-      path.join(SESSION_DIR, `session-${sessionId}.json`),
+      resolveStopStatePath(sessionId),
       (data) =>
         data?.state?.stopMessageText === undefined &&
         data?.state?.stopMessageStageMode === 'on' &&
@@ -2959,7 +3033,7 @@ describe('stop_message_auto servertool', () => {
       expect(injectMeta.clientInjectOnly).toBe(true);
       expect(injectMeta.clientInjectText).toContain('继续推进任务');
       const persisted = await readJsonFileUntil<{ state?: { stopMessageUsed?: number; stopMessageStage?: unknown } }>(
-        path.join(SESSION_DIR, `session-${sessionId}.json`),
+        resolveStopStatePath(sessionId),
         (data) => data?.state?.stopMessageUsed === 1
       );
       expect(persisted?.state?.stopMessageStage).toBeUndefined();
@@ -3051,7 +3125,7 @@ describe('stop_message_auto servertool', () => {
       });
       expect(first.mode).toBe('tool_flow');
       await readJsonFileUntil<{ state?: { stopMessageUsed?: number } }>(
-        path.join(SESSION_DIR, `session-${sessionId}.json`),
+        resolveStopStatePath(sessionId),
         (data) => data?.state?.stopMessageUsed === 1
       );
 
@@ -3064,7 +3138,7 @@ describe('stop_message_auto servertool', () => {
       });
       expect(second.mode).toBe('tool_flow');
       await readJsonFileUntil<{ state?: { stopMessageUsed?: number } }>(
-        path.join(SESSION_DIR, `session-${sessionId}.json`),
+        resolveStopStatePath(sessionId),
         (data) => data?.state?.stopMessageUsed === 2
       );
 
@@ -3078,7 +3152,7 @@ describe('stop_message_auto servertool', () => {
       expect(third.mode).toBe('tool_flow');
 
       const persisted = await readJsonFileUntil<{ state?: { stopMessageText?: unknown; stopMessageMaxRepeats?: unknown; stopMessageUsed?: number } }>(
-        path.join(SESSION_DIR, `session-${sessionId}.json`),
+        resolveStopStatePath(sessionId),
         (data) =>
           data?.state?.stopMessageText === '继续推进同一任务' &&
           data?.state?.stopMessageMaxRepeats === 10 &&

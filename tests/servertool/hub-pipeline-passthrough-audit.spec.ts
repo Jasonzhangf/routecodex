@@ -26,6 +26,30 @@ function createPipeline(providerType: 'openai' | 'responses' = 'openai') {
   });
 }
 
+function createMemoryRoutingStateStore() {
+  const stateMap = new Map<string, unknown>();
+  return {
+    stateMap,
+    store: {
+      loadSync: (key: string) => (stateMap.has(key) ? stateMap.get(key) : null),
+      saveAsync: (key: string, state: unknown) => {
+        if (!state) {
+          stateMap.delete(key);
+          return;
+        }
+        stateMap.set(key, state);
+      },
+      saveSync: (key: string, state: unknown) => {
+        if (!state) {
+          stateMap.delete(key);
+          return;
+        }
+        stateMap.set(key, state);
+      }
+    }
+  };
+}
+
 describe('HubPipeline passthrough audit', () => {
   test('activates passthrough from routing instruction and records audit snapshots', async () => {
     const pipeline = createPipeline();
@@ -168,5 +192,38 @@ describe('HubPipeline passthrough audit', () => {
 
     expect(result?.metadata?.processMode).toBe('chat');
     expect((result?.metadata as any)?.passthroughAudit).toBeUndefined();
+  });
+
+  test('propagates tmux scope into router metadata so stopMessage persists under tmux key', async () => {
+    const routingState = createMemoryRoutingStateStore();
+    const artifacts = bootstrapVirtualRouterConfig({ virtualrouter: buildVirtualRouterConfig('openai') } as any) as any;
+    const pipeline = new HubPipeline({
+      virtualRouter: artifacts.config,
+      routingStateStore: routingState.store as any
+    });
+    const tmuxSessionId = 'rcc_tmux_scope_pipeline';
+
+    await pipeline.execute({
+      id: 'stopmessage-tmux-propagation-1',
+      endpoint: '/v1/chat/completions',
+      payload: {
+        model: 'dummy',
+        messages: [{ role: 'user', content: '<**stopMessage:"继续执行",2**>\n请继续处理任务' }],
+        tools: []
+      },
+      metadata: {
+        entryEndpoint: '/v1/chat/completions',
+        providerProtocol: 'openai-chat',
+        processMode: 'chat',
+        routeHint: 'default',
+        sessionId: 'session-should-not-be-used',
+        clientTmuxSessionId: tmuxSessionId
+      }
+    });
+
+    const persisted = routingState.stateMap.get(`tmux:${tmuxSessionId}`) as any;
+    expect(persisted?.stopMessageText).toBe('继续执行');
+    expect(persisted?.stopMessageMaxRepeats).toBe(2);
+    expect(routingState.stateMap.has('session:session-should-not-be-used')).toBe(false);
   });
 });

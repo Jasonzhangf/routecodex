@@ -9,6 +9,7 @@ export function createClaudeCommand(program: Command, ctx: ClaudeCommandContext)
     commandName: 'claude',
     displayName: 'Claude',
     description: 'Launch Claude with RouteCodex as proxy (args after this command are passed through)',
+    allowAutoStartServer: false,
     binaryOptionFlags: '--claude-path <path>',
     binaryOptionName: 'claudePath',
     binaryOptionDescription: 'Path to Claude executable',

@@ -7,7 +7,12 @@ import type { ChildProcess, SpawnOptions } from 'node:child_process';
 import type { Command } from 'commander';
 
 import { LOCAL_HOSTS } from '../../constants/index.js';
-import { encodeClockClientApiKey } from '../../utils/clock-client-token.js';
+import {
+  encodeClockClientApiKey,
+  extractClockClientDaemonIdFromApiKey,
+  extractClockClientTmuxSessionIdFromApiKey
+} from '../../utils/clock-client-token.js';
+import { isClockScopeTraceEnabled, isClockScopeTraceVerbose } from '../../utils/clock-scope-trace.js';
 import { logProcessLifecycle } from '../../utils/process-lifecycle-logger.js';
 
 // Import from new launcher submodules
@@ -47,39 +52,105 @@ export type {
   TmuxSelfHealPolicy
 } from './launcher/types.js';
 
-function shouldForwardLauncherSignalToTool(
-  signal: NodeJS.Signals,
-  env: NodeJS.ProcessEnv
-): boolean {
+function shouldStopManagedTmuxOnShutdown(signal: NodeJS.Signals, env: NodeJS.ProcessEnv): boolean {
   if (signal === 'SIGINT') {
     return true;
   }
   if (signal !== 'SIGTERM') {
-    return false;
+    return true;
   }
   return resolveBoolFromEnv(
-    env.ROUTECODEX_LAUNCHER_FORWARD_SIGTERM ?? env.RCC_LAUNCHER_FORWARD_SIGTERM,
+    env.ROUTECODEX_LAUNCHER_STOP_MANAGED_TMUX_ON_SIGTERM
+      ?? env.RCC_LAUNCHER_STOP_MANAGED_TMUX_ON_SIGTERM,
     false
   );
 }
 
-function shouldReapLauncherChildOnShutdown(env: NodeJS.ProcessEnv): boolean {
+function shouldStopManagedTmuxOnToolExit(env: NodeJS.ProcessEnv): boolean {
   return resolveBoolFromEnv(
-    env.ROUTECODEX_LAUNCHER_REAP_CHILD_ON_SHUTDOWN ?? env.RCC_LAUNCHER_REAP_CHILD_ON_SHUTDOWN,
-    true
+    env.ROUTECODEX_LAUNCHER_STOP_MANAGED_TMUX_ON_TOOL_EXIT
+      ?? env.RCC_LAUNCHER_STOP_MANAGED_TMUX_ON_TOOL_EXIT,
+    false
   );
 }
 
-function isProcessAlive(pid: number | null | undefined): boolean {
-  if (!pid || !Number.isFinite(pid) || pid <= 0) {
-    return false;
+function readProcessPpidAndCommand(pid: number): { ppid: number | null; command: string } {
+  if (process.platform === 'win32') {
+    return { ppid: null, command: '' };
   }
   try {
-    process.kill(pid, 0);
-    return true;
+    const out = spawnSync('ps', ['-p', String(pid), '-o', 'ppid=,command='], { encoding: 'utf8' });
+    if (out.error || Number(out.status ?? 0) !== 0) {
+      return { ppid: null, command: '' };
+    }
+    const line = String(out.stdout || '')
+      .split(/\r?\n/)
+      .map((item) => item.trim())
+      .find(Boolean);
+    if (!line) {
+      return { ppid: null, command: '' };
+    }
+    const match = line.match(/^(\d+)\s+(.+)$/);
+    if (!match) {
+      return { ppid: null, command: line };
+    }
+    const ppid = Number.parseInt(match[1], 10);
+    return {
+      ppid: Number.isFinite(ppid) && ppid > 0 ? ppid : null,
+      command: match[2] || ''
+    };
   } catch {
-    return false;
+    return { ppid: null, command: '' };
   }
+}
+
+function commandLikelyMatchesHint(command: string, commandHint: string): boolean {
+  const normalizedCommand = String(command || '').toLowerCase();
+  const normalizedHint = String(commandHint || '').toLowerCase().trim();
+  if (!normalizedHint) {
+    return true;
+  }
+  const hintBase = path.basename(normalizedHint);
+  if (hintBase && normalizedCommand.includes(hintBase)) {
+    return true;
+  }
+  const tokens = normalizedHint
+    .split(/[\\/\s]+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 3);
+  return tokens.some((token) => normalizedCommand.includes(token));
+}
+
+function canSignalOwnedToolProcess(args: {
+  env: NodeJS.ProcessEnv;
+  pid: number | null | undefined;
+  expectedParentPid: number;
+  commandHint: string;
+}): { ok: boolean; reason: string } {
+  const strictGuard = resolveBoolFromEnv(
+    args.env.ROUTECODEX_LAUNCHER_STRICT_SIGNAL_GUARD ?? args.env.RCC_LAUNCHER_STRICT_SIGNAL_GUARD,
+    true
+  );
+  if (!strictGuard) {
+    return { ok: true, reason: 'strict_guard_disabled' };
+  }
+  if (!args.pid || !Number.isFinite(args.pid) || args.pid <= 1) {
+    return { ok: false, reason: 'invalid_pid' };
+  }
+  if (process.platform === 'win32') {
+    return { ok: true, reason: 'unsupported_platform' };
+  }
+  const snapshot = readProcessPpidAndCommand(args.pid);
+  if (!snapshot.ppid) {
+    return { ok: false, reason: 'ppid_unavailable' };
+  }
+  if (snapshot.ppid !== args.expectedParentPid) {
+    return { ok: false, reason: 'ppid_mismatch' };
+  }
+  if (!commandLikelyMatchesHint(snapshot.command, args.commandHint)) {
+    return { ok: false, reason: 'command_mismatch' };
+  }
+  return { ok: true, reason: 'owned_child' };
 }
 
 function resolveServerConnection(
@@ -259,11 +330,16 @@ async function ensureServerReady(
   pathImpl: typeof path,
   spinner: Spinner,
   options: LauncherCommandOptions,
-  resolved: ResolvedServerConnection
-): Promise<{ started: boolean; logPath?: string }> {
+  resolved: ResolvedServerConnection,
+  allowAutoStartServer: boolean
+): Promise<{ started: boolean; ready: boolean; logPath?: string }> {
   const alreadyReady = await checkServerReady(ctx, resolved.serverUrl, resolved.configuredApiKey);
   if (alreadyReady) {
-    return { started: false };
+    return { started: false, ready: true };
+  }
+
+  if (!allowAutoStartServer) {
+    return { started: false, ready: false };
   }
 
   const hasExplicitUrl = typeof options.url === 'string' && options.url.trim().length > 0;
@@ -275,16 +351,27 @@ async function ensureServerReady(
   const logPath = ensureServerLogPath(ctx, fsImpl, pathImpl, resolved.port);
 
   const logFd = fsImpl.openSync(logPath, 'a');
+  // Launcher auto-started server follows launcher lifecycle by default.
+  // This is intentionally different from `routecodex start`, which is persistent by default.
+  const bindServerToParent = resolveBoolFromEnv(
+    ctx.env.ROUTECODEX_LAUNCHER_SERVER_PARENT_GUARD
+      ?? ctx.env.RCC_LAUNCHER_SERVER_PARENT_GUARD
+      ?? ctx.env.ROUTECODEX_SERVER_PARENT_GUARD
+      ?? ctx.env.RCC_SERVER_PARENT_GUARD,
+    true
+  );
   const env = {
     ...ctx.env,
     ROUTECODEX_CONFIG: resolved.configPath,
     ROUTECODEX_CONFIG_PATH: resolved.configPath,
     ROUTECODEX_PORT: String(resolved.port),
     RCC_PORT: String(resolved.port),
-    // Launcher auto-started server must follow launcher lifecycle.
-    // If launcher exits, parent-guard in server process should self-shutdown.
-    ROUTECODEX_EXPECT_PARENT_PID: String(process.pid),
-    RCC_EXPECT_PARENT_PID: String(process.pid)
+    ...(bindServerToParent
+      ? {
+        ROUTECODEX_EXPECT_PARENT_PID: String(process.pid),
+        RCC_EXPECT_PARENT_PID: String(process.pid)
+      }
+      : {})
   } as NodeJS.ProcessEnv;
 
   logProcessLifecycle({
@@ -375,7 +462,7 @@ async function ensureServerReady(
     await ctx.sleep(1000);
     const ready = await checkServerReady(ctx, resolved.serverUrl, resolved.configuredApiKey, 1500);
     if (ready) {
-      return { started: true, logPath };
+      return { started: true, ready: true, logPath };
     }
   }
 
@@ -438,6 +525,19 @@ function resolveCurrentTmuxTarget(env: NodeJS.ProcessEnv, spawnSyncImpl: typeof 
   } catch {
     return null;
   }
+}
+
+function inferTmuxSessionIdFromTarget(tmuxTarget: string | null | undefined): string | null {
+  const normalized = String(tmuxTarget || '').trim();
+  if (!normalized) {
+    return null;
+  }
+  const index = normalized.indexOf(':');
+  if (index <= 0) {
+    return null;
+  }
+  const sessionName = normalized.slice(0, index).trim();
+  return sessionName || null;
 }
 
 function isReusableTmuxPaneTarget(
@@ -806,6 +906,16 @@ function sendJson(res: ServerResponse, status: number, payload: Record<string, u
   res.end(body);
 }
 
+function normalizeTmuxInjectedText(raw: string): string {
+  return raw
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .join(' ')
+    .trim();
+}
+
 async function startClockClientService(args: {
   ctx: LauncherCommandContext;
   resolved: ResolvedServerConnection;
@@ -861,12 +971,14 @@ async function startClockClientService(args: {
         return;
       }
       const body = await readJsonBody(req);
-      const text = typeof body.text === 'string' ? body.text.trim() : '';
+      const text = typeof body.text === 'string' ? normalizeTmuxInjectedText(body.text) : '';
       if (!text) {
         sendJson(res, 400, { ok: false, message: 'text is required' });
         return;
       }
       try {
+        // Ensure pane is not stuck in copy-mode before literal injection + submit.
+        spawnSyncImpl('tmux', ['send-keys', '-t', normalizedTmuxTarget, '-X', 'cancel'], { encoding: 'utf8' });
         const literal = spawnSyncImpl('tmux', ['send-keys', '-t', normalizedTmuxTarget, '-l', '--', text], { encoding: 'utf8' });
         if (literal.status !== 0) {
           sendJson(res, 500, {
@@ -1142,7 +1254,19 @@ export function createLauncherCommand(program: Command, ctx: LauncherCommandCont
 
     try {
       const resolved = resolveServerConnection(ctx, fsImpl, pathImpl, options);
-      const ensureResult = await ensureServerReady(ctx, fsImpl, pathImpl, spinner, options, resolved);
+      await ctx.ensureGuardianDaemon?.();
+      const ensureResult = await ensureServerReady(
+        ctx,
+        fsImpl,
+        pathImpl,
+        spinner,
+        options,
+        resolved,
+        spec.allowAutoStartServer === true
+      );
+      if (!ensureResult.ready) {
+        spinner.info('RouteCodex server is not running; launcher will continue and wait for your next requests.');
+      }
 
       spinner.text = `Launching ${spec.displayName}...`;
 
@@ -1273,9 +1397,69 @@ export function createLauncherCommand(program: Command, ctx: LauncherCommandCont
       }
 
       const clockAdvancedEnabled = Boolean(clockClientService && tmuxTarget);
-      const clockClientApiKey = clockAdvancedEnabled && clockClientService
-        ? encodeClockClientApiKey(resolved.configuredApiKey || 'rcc-proxy-key', clockClientService.daemonId)
-        : (resolved.configuredApiKey || 'rcc-proxy-key');
+      const inferredTmuxSessionId =
+        clockClientService?.tmuxSessionId ||
+        inferTmuxSessionIdFromTarget(tmuxTarget) ||
+        undefined;
+      const inferredDaemonId =
+        clockClientService?.daemonId ||
+        (inferredTmuxSessionId ? `clockd_unbound_${process.pid}` : undefined);
+      const clockClientApiKey =
+        inferredTmuxSessionId && inferredDaemonId
+          ? encodeClockClientApiKey(
+            resolved.configuredApiKey || 'rcc-proxy-key',
+            inferredDaemonId,
+            inferredTmuxSessionId
+          )
+          : (resolved.configuredApiKey || 'rcc-proxy-key');
+      if (isClockScopeTraceEnabled()) {
+        try {
+          const parsedDaemonId = extractClockClientDaemonIdFromApiKey(clockClientApiKey) || 'none';
+          const parsedTmuxSessionId = extractClockClientTmuxSessionIdFromApiKey(clockClientApiKey) || 'none';
+          const verbose = isClockScopeTraceVerbose();
+          ctx.logger.info(
+            `[clock-scope][launch] command=${spec.commandName} advanced=${clockAdvancedEnabled ? 'on' : 'off'} ` +
+            `daemon=${parsedDaemonId} tmux=${parsedTmuxSessionId} tmuxTarget=${tmuxTarget || 'none'}` +
+            (verbose ? ` managedTmux=${managedTmuxSession ? 'yes' : 'no'} serverStarted=${ensureResult.started ? 'yes' : 'no'}` : '')
+          );
+        } catch {
+          // best-effort diagnostics only
+        }
+      }
+      await ctx.registerGuardianProcess?.({
+        source: spec.commandName,
+        pid: process.pid,
+        ppid: process.ppid,
+        port: resolved.port,
+        tmuxSessionId: clockClientService?.tmuxSessionId || inferTmuxSessionIdFromTarget(tmuxTarget) || undefined,
+        tmuxTarget: tmuxTarget || undefined,
+        metadata: {
+          workingDirectory: currentCwd,
+          binary: resolvedBinary,
+          managedTmuxSession: Boolean(managedTmuxSession),
+          autoStartedServer: ensureResult.started === true
+        }
+      });
+      const applyLifecycleOrThrow = async (args: {
+        action: string;
+        signal?: string;
+        targetPid?: number | null;
+      }): Promise<void> => {
+        const accepted = await ctx.reportGuardianLifecycle?.({
+          action: args.action,
+          source: `cli.launcher.${spec.commandName}`,
+          actorPid: process.pid,
+          targetPid: args.targetPid && args.targetPid > 0 ? args.targetPid : undefined,
+          signal: args.signal,
+          metadata: {
+            port: resolved.port,
+            serverUrl: resolved.serverUrl
+          }
+        });
+        if (ctx.reportGuardianLifecycle && accepted !== true) {
+          throw new Error(`guardian lifecycle apply rejected (${args.action})`);
+        }
+      };
 
       const toolEnv = spec.buildEnv({
         env: {
@@ -1288,12 +1472,15 @@ export function createLauncherCommand(program: Command, ctx: LauncherCommandCont
           OPENAI_API_BASE_URL: normalizeOpenAiBaseUrl(baseUrl),
           OPENAI_API_KEY: clockClientApiKey,
           RCC_CLOCK_ADVANCED_ENABLED: clockAdvancedEnabled ? '1' : '0',
-          ...(clockAdvancedEnabled && clockClientService
+          ...(inferredTmuxSessionId
             ? {
-              RCC_CLOCK_CLIENT_SESSION_ID: clockClientService.tmuxSessionId,
-              RCC_CLOCK_CLIENT_TMUX_SESSION_ID: clockClientService.tmuxSessionId,
-              RCC_CLOCK_CLIENT_DAEMON_ID: clockClientService.daemonId
+              RCC_CLOCK_CLIENT_SESSION_ID: inferredTmuxSessionId,
+              RCC_CLOCK_CLIENT_TMUX_SESSION_ID: inferredTmuxSessionId
             }
+            : {})
+          ,
+          ...(inferredDaemonId
+            ? { RCC_CLOCK_CLIENT_DAEMON_ID: inferredDaemonId }
             : {})
         } as NodeJS.ProcessEnv,
         baseUrl,
@@ -1359,85 +1546,103 @@ export function createLauncherCommand(program: Command, ctx: LauncherCommandCont
       }
 
       let shutdownTriggered = false;
-      const shutdown = async (signal: NodeJS.Signals) => {
-        if (shutdownTriggered) {
+      let toolProcessClosing = false;
+      let observedToolExitCode: number | null | undefined;
+      let observedToolExitSignal: NodeJS.Signals | null = null;
+      let requestedShutdownSignal: NodeJS.Signals | null = null;
+      const finalizeToolTermination = async (options?: { forceExitCode?: number }): Promise<void> => {
+        if (toolProcessClosing) {
           return;
         }
-        shutdownTriggered = true;
+        toolProcessClosing = true;
 
-        const shouldForward = shouldForwardLauncherSignalToTool(signal, ctx.env);
-        logProcessLifecycle({
-          event: 'launcher_signal_forward',
-          source: 'cli.launcher.shutdown',
-          details: {
-            commandName: spec.commandName,
-            signal,
-            forwarded: shouldForward,
-            targetPid: toolProcess.pid ?? null
-          }
-        });
-        if (shouldForward) {
-          try {
-            toolProcess.kill(signal);
-          } catch {
-            // ignore
-          }
-        } else if (
-          managedClientProcessEnabled
-          && shouldReapLauncherChildOnShutdown(ctx.env)
-          && isProcessAlive(toolProcess.pid ?? null)
-        ) {
-          // Give terminal/session signals a brief chance to reach child naturally.
-          await ctx.sleep(250);
-          if (isProcessAlive(toolProcess.pid ?? null)) {
-            logProcessLifecycle({
-              event: 'launcher_orphan_reap',
-              source: 'cli.launcher.shutdown',
-              details: {
-                commandName: spec.commandName,
-                signal: 'SIGTERM',
-                targetPid: toolProcess.pid ?? null,
-                result: 'attempt'
-              }
-            });
-            try {
-              toolProcess.kill('SIGTERM');
-              logProcessLifecycle({
-                event: 'launcher_orphan_reap',
-                source: 'cli.launcher.shutdown',
-                details: {
-                  commandName: spec.commandName,
-                  signal: 'SIGTERM',
-                  targetPid: toolProcess.pid ?? null,
-                  result: 'success'
-                }
-              });
-            } catch (error) {
-              logProcessLifecycle({
-                event: 'launcher_orphan_reap',
-                source: 'cli.launcher.shutdown',
-                details: {
-                  commandName: spec.commandName,
-                  signal: 'SIGTERM',
-                  targetPid: toolProcess.pid ?? null,
-                  result: 'failed',
-                  error
-                }
-              });
-            }
-          }
-        }
         try {
           await clockClientService?.stop();
         } catch {
           // ignore
         }
         try {
-          managedTmuxSession?.stop();
+          if (managedTmuxSession && shouldStopManagedTmuxOnToolExit(ctx.env)) {
+            managedTmuxSession.stop();
+          }
         } catch {
           // ignore
         }
-        ctx.exit(0);
+        try {
+          await applyLifecycleOrThrow({
+            action: 'launcher_tool_exit',
+            signal: observedToolExitSignal ? String(observedToolExitSignal) : undefined,
+            targetPid: toolProcess.pid ?? null
+          });
+        } catch {
+          // ignore lifecycle logging errors in exit path
+        }
+        const forcedExitCode = options?.forceExitCode;
+        if (typeof forcedExitCode === 'number' && Number.isFinite(forcedExitCode)) {
+          ctx.exit(Math.max(0, Math.floor(forcedExitCode)));
+          return;
+        }
+        if (requestedShutdownSignal || observedToolExitSignal) {
+          ctx.exit(0);
+          return;
+        }
+        ctx.exit(observedToolExitCode ?? 0);
+      };
+      const shutdown = async (signal: NodeJS.Signals) => {
+        if (shutdownTriggered) {
+          return;
+        }
+        shutdownTriggered = true;
+        requestedShutdownSignal = signal;
+
+        const targetGuard = canSignalOwnedToolProcess({
+          env: ctx.env,
+          pid: toolProcess.pid ?? null,
+          expectedParentPid: process.pid,
+          commandHint: resolvedBinary
+        });
+        logProcessLifecycle({
+          event: 'launcher_signal_guard',
+          source: 'cli.launcher.shutdown',
+          details: {
+            commandName: spec.commandName,
+            signal,
+            targetPid: toolProcess.pid ?? null,
+            result: targetGuard.ok ? 'allowed' : 'blocked',
+            reason: targetGuard.reason
+          }
+        });
+        logProcessLifecycle({
+          event: 'launcher_signal_forward',
+          source: 'cli.launcher.shutdown',
+          details: {
+            commandName: spec.commandName,
+            signal,
+            forwarded: false,
+            targetPid: toolProcess.pid ?? null,
+            reason: 'disabled_no_forward'
+          }
+        });
+        try {
+          await applyLifecycleOrThrow({
+            action: 'launcher_exit_signal',
+            signal,
+            targetPid: toolProcess.pid ?? null
+          });
+        } catch (error) {
+          try {
+            ctx.logger.error(error instanceof Error ? error.message : String(error));
+          } catch {
+            // ignore
+          }
+        }
+        try {
+          if (managedTmuxSession && shouldStopManagedTmuxOnShutdown(signal, ctx.env)) {
+            managedTmuxSession.stop();
+          }
+        } catch {
+          // ignore
+        }
       };
 
       const onSignal = ctx.onSignal ?? ((signal: NodeJS.Signals, cb: () => void) => process.on(signal, cb));
@@ -1458,37 +1663,30 @@ export function createLauncherCommand(program: Command, ctx: LauncherCommandCont
             // ignore
           }
           try {
-            await clockClientService?.stop();
+            await applyLifecycleOrThrow({
+              action: 'launcher_tool_error_exit',
+              targetPid: toolProcess.pid ?? null
+            });
           } catch {
-            // ignore
+            // ignore lifecycle logging errors for terminal error path
           }
-          try {
-            managedTmuxSession?.stop();
-          } catch {
-            // ignore
-          }
-          ctx.exit(1);
+          await finalizeToolTermination({ forceExitCode: 1 });
         })();
       });
 
       toolProcess.on('exit', (code, signal) => {
-        void (async () => {
-          try {
-            await clockClientService?.stop();
-          } catch {
-            // ignore
-          }
-          try {
-            managedTmuxSession?.stop();
-          } catch {
-            // ignore
-          }
-          if (signal) {
-            ctx.exit(0);
-            return;
-          }
-          ctx.exit(code ?? 0);
-        })();
+        observedToolExitCode = code;
+        observedToolExitSignal = signal ?? null;
+      });
+
+      toolProcess.on('close', (code, signal) => {
+        if (observedToolExitCode === undefined) {
+          observedToolExitCode = code;
+        }
+        if (!observedToolExitSignal) {
+          observedToolExitSignal = signal ?? null;
+        }
+        void finalizeToolTermination();
       });
 
       await ctx.waitForever();

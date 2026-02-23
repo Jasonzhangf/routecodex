@@ -1,7 +1,6 @@
 import type { ModuleDependencies } from '../../../modules/pipeline/interfaces/pipeline-interfaces.js';
 import type { PipelineExecutionInput, PipelineExecutionResult } from '../../handlers/types.js';
 import type { HubPipeline, ProviderHandle, ProviderProtocol } from './types.js';
-import { asRecord } from './provider-utils.js';
 import { attachProviderRuntimeMetadata } from '../../../providers/core/runtime/provider-runtime-metadata.js';
 import type { StatsManager } from './stats-manager.js';
 import {
@@ -301,12 +300,13 @@ export class HubRequestExecutor implements RequestExecutor {
             pipelineResult.processedRequest as Record<string, unknown> | undefined,
             pipelineResult.standardizedRequest as Record<string, unknown> | undefined
           );
+          const serverToolsEnabled = isServerToolEnabled();
           const converted = await this.convertProviderResponseIfNeeded({
             entryEndpoint: input.entryEndpoint,
             providerProtocol,
             providerType: handle.providerType,
             requestId: input.requestId,
-            serverToolsEnabled: isServerToolEnabled(),
+            serverToolsEnabled,
             wantsStream: wantsStreamBase,
             originalRequest: originalRequestSnapshot,
             requestSemantics,

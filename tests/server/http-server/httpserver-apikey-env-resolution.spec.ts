@@ -18,7 +18,15 @@ async function startAppWithApiKey(apikey: string): Promise<{ baseUrl: string; cl
       typeof req.headers['x-routecodex-clock-daemon-id'] === 'string'
         ? req.headers['x-routecodex-clock-daemon-id']
         : undefined;
-    res.status(200).json({ ok: true, daemonIdHeader: daemonIdHeader || null });
+    const tmuxSessionIdHeader =
+      typeof req.headers['x-routecodex-client-tmux-session-id'] === 'string'
+        ? req.headers['x-routecodex-client-tmux-session-id']
+        : undefined;
+    res.status(200).json({
+      ok: true,
+      daemonIdHeader: daemonIdHeader || null,
+      tmuxSessionIdHeader: tmuxSessionIdHeader || null
+    });
   });
 
   const server = http.createServer(app);
@@ -68,6 +76,23 @@ describe('httpserver apikey env reference', () => {
       expect(ok.status).toBe(200);
       const body = await ok.json();
       expect(body?.daemonIdHeader).toBe('clockd_bind_1');
+      expect(body?.tmuxSessionIdHeader).toBeNull();
+    } finally {
+      await close();
+      delete process.env.TEST_HTTP_APIKEY;
+    }
+  });
+
+  it('accepts daemon+tmux suffixed apikey and exposes both daemon/tmux hint headers', async () => {
+    process.env.TEST_HTTP_APIKEY = 'dummy-http-apikey';
+    const { baseUrl, close } = await startAppWithApiKey('${TEST_HTTP_APIKEY}');
+    try {
+      const encoded = encodeClockClientApiKey('dummy-http-apikey', 'clockd_bind_2', 'rcc_codex_test_2');
+      const ok = await fetch(`${baseUrl}/hello`, { headers: { authorization: `Bearer ${encoded}` } });
+      expect(ok.status).toBe(200);
+      const body = await ok.json();
+      expect(body?.daemonIdHeader).toBe('clockd_bind_2');
+      expect(body?.tmuxSessionIdHeader).toBe('rcc_codex_test_2');
     } finally {
       await close();
       delete process.env.TEST_HTTP_APIKEY;

@@ -2,7 +2,11 @@ import type { PipelineExecutionInput } from '../../handlers/types.js';
 import { asRecord } from './provider-utils.js';
 import { extractSessionIdentifiersFromMetadata } from '../../../modules/llmswitch/bridge.js';
 import { extractClockClientDaemonIdFromApiKey } from '../../../utils/clock-client-token.js';
+import {
+  shouldTraceClockScopeByContext
+} from '../../../utils/clock-scope-trace.js';
 import { getClockClientRegistry } from './clock-client-registry.js';
+import { resolveTmuxSessionIdAndSource } from './clock-scope-resolution.js';
 
 export function cloneClientHeaders(source: unknown): Record<string, string> | undefined {
   if (!source || typeof source !== 'object') {
@@ -45,17 +49,33 @@ function extractClockDaemonId(
   headers: Record<string, unknown> | undefined
 ): string | undefined {
   const fromMeta =
+    (typeof userMeta.clientDaemonId === 'string' && userMeta.clientDaemonId.trim())
+      ? userMeta.clientDaemonId.trim()
+      : ((typeof userMeta.client_daemon_id === 'string' && userMeta.client_daemon_id.trim())
+        ? userMeta.client_daemon_id.trim()
+        : ((typeof userMeta.clockDaemonId === 'string' && userMeta.clockDaemonId.trim())
+          ? userMeta.clockDaemonId.trim()
+          : ((typeof userMeta.clockClientDaemonId === 'string' && userMeta.clockClientDaemonId.trim())
+            ? userMeta.clockClientDaemonId.trim()
+            : undefined)));
+  if (fromMeta) {
+    return fromMeta;
+  }
+
+  const fromLegacyMeta =
     (typeof userMeta.clockDaemonId === 'string' && userMeta.clockDaemonId.trim())
       ? userMeta.clockDaemonId.trim()
       : ((typeof userMeta.clockClientDaemonId === 'string' && userMeta.clockClientDaemonId.trim())
         ? userMeta.clockClientDaemonId.trim()
         : undefined);
-  if (fromMeta) {
-    return fromMeta;
+  if (fromLegacyMeta) {
+    return fromLegacyMeta;
   }
 
   const fromExplicitHeader =
-    extractHeaderValue(headers, 'x-routecodex-clock-daemon-id')
+    extractHeaderValue(headers, 'x-routecodex-client-daemon-id')
+    || extractHeaderValue(headers, 'x-routecodex-clientd-id')
+    || extractHeaderValue(headers, 'x-routecodex-clock-daemon-id')
     || extractHeaderValue(headers, 'x-routecodex-daemon-id');
   if (fromExplicitHeader) {
     return fromExplicitHeader;
@@ -109,6 +129,44 @@ function extractSessionTokenFromBodyMeta(meta: Record<string, unknown>): { sessi
   };
 }
 
+function extractSessionTokenFromHeaderSources(
+  headers: Record<string, unknown> | undefined,
+  clientHeaders?: Record<string, string>
+): { sessionId?: string; conversationId?: string } {
+  const sources: Array<Record<string, unknown> | undefined> = [
+    headers,
+    clientHeaders as unknown as Record<string, unknown> | undefined
+  ];
+  let sessionId: string | undefined;
+  let conversationId: string | undefined;
+  for (const source of sources) {
+    if (!source) {
+      continue;
+    }
+    if (!sessionId) {
+      sessionId =
+        extractHeaderValue(source, 'session_id')
+        || extractHeaderValue(source, 'session-id')
+        || extractHeaderValue(source, 'x-session-id')
+        || extractHeaderValue(source, 'anthropic-session-id')
+        || undefined;
+    }
+    if (!conversationId) {
+      conversationId =
+        extractHeaderValue(source, 'conversation_id')
+        || extractHeaderValue(source, 'conversation-id')
+        || extractHeaderValue(source, 'x-conversation-id')
+        || extractHeaderValue(source, 'anthropic-conversation-id')
+        || extractHeaderValue(source, 'openai-conversation-id')
+        || undefined;
+    }
+  }
+  return {
+    ...(sessionId ? { sessionId } : {}),
+    ...(conversationId ? { conversationId } : {})
+  };
+}
+
 function extractWorkdir(
   userMeta: Record<string, unknown>,
   bodyMeta: Record<string, unknown>,
@@ -141,43 +199,75 @@ function extractWorkdir(
     if (fromHeader) {
       return fromHeader;
     }
+    const fromTurnMetadata = extractWorkdirFromTurnMetadata(
+      extractHeaderValue(source, 'x-codex-turn-metadata')
+    );
+    if (fromTurnMetadata) {
+      return fromTurnMetadata;
+    }
   }
 
   return undefined;
 }
 
-function extractTmuxSessionId(
-  userMeta: Record<string, unknown>,
-  bodyMeta: Record<string, unknown>,
-  headers: Record<string, unknown> | undefined,
-  clientHeaders?: Record<string, string>
-): string | undefined {
-  const directCandidates = [
-    userMeta.tmuxSessionId,
-    userMeta.tmux_session_id,
-    bodyMeta.tmuxSessionId,
-    bodyMeta.tmux_session_id
-  ];
-  for (const candidate of directCandidates) {
-    if (typeof candidate === 'string' && candidate.trim()) {
-      return candidate.trim();
-    }
+function extractWorkdirFromTurnMetadata(rawTurnMetadata: string | undefined): string | undefined {
+  if (!rawTurnMetadata) {
+    return undefined;
   }
-
-  const headerSources: Array<Record<string, unknown> | undefined> = [
-    headers,
-    clientHeaders ? (clientHeaders as unknown as Record<string, unknown>) : undefined
-  ];
-  for (const source of headerSources) {
-    const fromHeader =
-      extractHeaderValue(source, 'x-routecodex-tmux-session-id')
-      || extractHeaderValue(source, 'x-rcc-tmux-session-id')
-      || extractHeaderValue(source, 'x-tmux-session-id');
-    if (fromHeader) {
-      return fromHeader;
+  try {
+    const parsed = JSON.parse(rawTurnMetadata) as Record<string, unknown>;
+    const direct =
+      (typeof parsed.workdir === 'string' && parsed.workdir.trim())
+      || (typeof parsed.cwd === 'string' && parsed.cwd.trim())
+      || (typeof parsed.workingDirectory === 'string' && parsed.workingDirectory.trim())
+      || (typeof parsed.working_directory === 'string' && parsed.working_directory.trim())
+      || undefined;
+    if (direct) {
+      return direct;
     }
+    const workspaces = parsed.workspaces;
+    if (!workspaces || typeof workspaces !== 'object' || Array.isArray(workspaces)) {
+      return undefined;
+    }
+    const workspaceKeys = Object.keys(workspaces)
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.startsWith('/'));
+    if (workspaceKeys.length === 1) {
+      return workspaceKeys[0];
+    }
+    if (workspaceKeys.length > 1) {
+      // Prefer the most specific path when multiple workspaces are present.
+      return workspaceKeys.sort((a, b) => b.length - a.length)[0];
+    }
+  } catch {
+    // ignore invalid turn metadata payload
   }
+  return undefined;
+}
 
+function normalizeToken(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+function inferClockClientType(metadata: Record<string, unknown>): string | undefined {
+  const direct =
+    normalizeToken(metadata.clockClientType)
+    || normalizeToken(metadata.clientType);
+  if (direct) {
+    return direct;
+  }
+  const userAgent = normalizeToken(metadata.userAgent)?.toLowerCase() || '';
+  const originator = normalizeToken(metadata.clientOriginator)?.toLowerCase() || '';
+  if (originator.includes('codex') || userAgent.includes('codex')) {
+    return 'codex';
+  }
+  if (originator.includes('claude') || userAgent.includes('claude')) {
+    return 'claude';
+  }
   return undefined;
 }
 
@@ -211,6 +301,55 @@ function resolveTmuxSessionIdFromClockDaemon(daemonId: string | undefined): stri
   }
 }
 
+function resolveTmuxTargetFromClockDaemon(daemonId: string | undefined): string | undefined {
+  if (!daemonId) {
+    return undefined;
+  }
+  try {
+    const record = getClockClientRegistry().findByDaemonId(daemonId);
+    const tmuxTarget = typeof record?.tmuxTarget === 'string' ? record.tmuxTarget.trim() : '';
+    return tmuxTarget || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function shouldTraceClockScopeMetadata(args: {
+  entryEndpoint: string;
+  userAgent?: string;
+  originator?: string;
+  clientHeaders?: Record<string, string>;
+}): boolean {
+  const hasTurnMeta = typeof args.clientHeaders?.['x-codex-turn-metadata'] === 'string'
+    && args.clientHeaders['x-codex-turn-metadata'].trim().length > 0;
+  return shouldTraceClockScopeByContext({
+    endpointOrPath: args.entryEndpoint || '',
+    userAgent: args.userAgent,
+    originator: args.originator,
+    hasTurnMetadata: hasTurnMeta
+  });
+}
+
+function logClockScopeMetadata(args: {
+  requestId?: string;
+  entryEndpoint: string;
+  userAgent?: string;
+  originator?: string;
+  resolvedClockDaemonId?: string;
+  resolvedTmuxSessionId?: string;
+  resolvedWorkdir?: string;
+  clientInjectReady: boolean;
+  tmuxSource?: string;
+}): void {
+  console.log(
+    `[clock-scope][metadata] requestId=${args.requestId || 'n/a'} endpoint=${args.entryEndpoint || 'n/a'} ` +
+    `daemon=${args.resolvedClockDaemonId || 'none'} tmux=${args.resolvedTmuxSessionId || 'none'} ` +
+    `ready=${args.clientInjectReady ? 'yes' : 'no'} workdir=${args.resolvedWorkdir || 'none'} ` +
+    `originator=${args.originator || 'n/a'} ua=${args.userAgent || 'n/a'} ` +
+    `tmuxSource=${args.tmuxSource || 'none'}`
+  );
+}
+
 export function buildRequestMetadata(input: PipelineExecutionInput): Record<string, unknown> {
   const userMeta = asRecord(input.metadata);
   const bodyMeta = asRecord(asRecord(input.body).metadata);
@@ -232,15 +371,32 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
       : inboundOriginator;
   const routeHint = extractRouteHint(input) ?? userMeta.routeHint;
   const processMode = (userMeta.processMode as string) || 'chat';
-  const resolvedClockDaemonId = extractClockDaemonId(userMeta, headers);
+  let resolvedClockDaemonId = extractClockDaemonId(userMeta, headers);
+  const inferredClientType = inferClockClientType(userMeta);
+  const resolvedTmuxTarget =
+    normalizeToken(userMeta.clientTmuxTarget)
+    || normalizeToken(userMeta.client_tmux_target)
+    || normalizeToken(userMeta.tmuxTarget)
+    || normalizeToken(bodyMeta.clientTmuxTarget)
+    || normalizeToken(bodyMeta.client_tmux_target)
+    || normalizeToken(bodyMeta.tmuxTarget)
+    || resolveTmuxTargetFromClockDaemon(resolvedClockDaemonId);
   const resolvedWorkdir =
     extractWorkdir(userMeta, bodyMeta, headers, normalizedClientHeaders)
     || resolveWorkdirFromClockDaemon(resolvedClockDaemonId);
-  const resolvedTmuxSessionId =
-    extractTmuxSessionId(userMeta, bodyMeta, headers, normalizedClientHeaders)
-    || resolveTmuxSessionIdFromClockDaemon(resolvedClockDaemonId);
-  const clientInjectReady = Boolean(resolvedTmuxSessionId);
-  const clientInjectReason = clientInjectReady ? 'tmux_session_ready' : 'tmux_session_missing';
+  const tmuxResolution = resolveTmuxSessionIdAndSource({
+    userMeta,
+    bodyMeta,
+    headers: headers ?? undefined,
+    clientHeaders: normalizedClientHeaders,
+    daemonId: resolvedClockDaemonId,
+    resolveTmuxSessionIdFromDaemon: resolveTmuxSessionIdFromClockDaemon
+  });
+  let resolvedTmuxSessionId = tmuxResolution.tmuxSessionId;
+  let tmuxSource = tmuxResolution.source;
+  let clientInjectReady = Boolean(resolvedTmuxSessionId);
+  let clientInjectReason = clientInjectReady ? 'tmux_session_ready' : 'tmux_session_missing';
+  let stopMessageClientInjectSessionScope = resolvedTmuxSessionId ? `tmux:${resolvedTmuxSessionId}` : undefined;
   const metadata: Record<string, unknown> = {
     ...userMeta,
     entryEndpoint: input.entryEndpoint,
@@ -251,9 +407,40 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
     stream: userMeta.stream === true,
     ...(resolvedUserAgent ? { userAgent: resolvedUserAgent } : {}),
     ...(resolvedOriginator ? { clientOriginator: resolvedOriginator } : {}),
-    ...(resolvedClockDaemonId ? { clockDaemonId: resolvedClockDaemonId } : {}),
-    ...(resolvedWorkdir ? { workdir: resolvedWorkdir } : {}),
-    ...(resolvedTmuxSessionId ? { tmuxSessionId: resolvedTmuxSessionId } : {}),
+    ...(resolvedClockDaemonId
+      ? {
+          clientDaemonId: resolvedClockDaemonId,
+          clockDaemonId: resolvedClockDaemonId,
+          clockClientDaemonId: resolvedClockDaemonId
+        }
+      : {}),
+    ...(resolvedWorkdir
+      ? {
+          clientWorkdir: resolvedWorkdir,
+          workdir: resolvedWorkdir
+        }
+      : {}),
+    ...(resolvedTmuxSessionId
+      ? {
+          clientTmuxSessionId: resolvedTmuxSessionId,
+          tmuxSessionId: resolvedTmuxSessionId
+        }
+      : {}),
+    ...(resolvedTmuxTarget
+      ? {
+          clientTmuxTarget: resolvedTmuxTarget,
+          tmuxTarget: resolvedTmuxTarget
+        }
+      : {}),
+    ...(inferredClientType
+      ? {
+          clockClientType: inferredClientType,
+          clientType: inferredClientType
+        }
+      : {}),
+    ...(stopMessageClientInjectSessionScope
+      ? { stopMessageClientInjectSessionScope }
+      : {}),
     clientInjectReady,
     clientInjectReason
   };
@@ -281,6 +468,70 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
     if (!metadata.conversationId && fallback.conversationId) {
       metadata.conversationId = fallback.conversationId;
     }
+  }
+
+  if (!metadata.sessionId || !metadata.conversationId) {
+    const fromHeaders = extractSessionTokenFromHeaderSources(headers, normalizedClientHeaders);
+    if (!metadata.sessionId && fromHeaders.sessionId) {
+      metadata.sessionId = fromHeaders.sessionId;
+    }
+    if (!metadata.conversationId && fromHeaders.conversationId) {
+      metadata.conversationId = fromHeaders.conversationId;
+    }
+    if (!metadata.conversationId && metadata.sessionId) {
+      metadata.conversationId = String(metadata.sessionId);
+    }
+  }
+
+  if (!resolvedTmuxSessionId) {
+    const conversationSessionId =
+      normalizeToken(metadata.sessionId)
+      || normalizeToken(metadata.conversationId);
+    if (conversationSessionId && resolvedWorkdir) {
+      const bindResult = getClockClientRegistry().bindConversationSession({
+        conversationSessionId,
+        ...(resolvedClockDaemonId ? { daemonId: resolvedClockDaemonId } : {}),
+        workdir: resolvedWorkdir,
+        ...(inferredClientType ? { clientType: inferredClientType } : {})
+      });
+      if (bindResult.ok && bindResult.tmuxSessionId) {
+        resolvedTmuxSessionId = bindResult.tmuxSessionId;
+        tmuxSource = 'registry_by_binding';
+        clientInjectReady = true;
+        clientInjectReason = 'tmux_session_ready';
+        stopMessageClientInjectSessionScope = `tmux:${resolvedTmuxSessionId}`;
+        metadata.clientTmuxSessionId = resolvedTmuxSessionId;
+        metadata.tmuxSessionId = resolvedTmuxSessionId;
+        metadata.stopMessageClientInjectSessionScope = stopMessageClientInjectSessionScope;
+        metadata.clientInjectReady = true;
+        metadata.clientInjectReason = 'tmux_session_ready';
+        if (!resolvedClockDaemonId && bindResult.daemonId) {
+          resolvedClockDaemonId = bindResult.daemonId;
+          metadata.clientDaemonId = bindResult.daemonId;
+          metadata.clockDaemonId = bindResult.daemonId;
+          metadata.clockClientDaemonId = bindResult.daemonId;
+        }
+      }
+    }
+  }
+
+  if (shouldTraceClockScopeMetadata({
+    entryEndpoint: input.entryEndpoint,
+    userAgent: resolvedUserAgent,
+    originator: resolvedOriginator,
+    clientHeaders: normalizedClientHeaders
+  })) {
+    logClockScopeMetadata({
+      requestId: input.requestId,
+      entryEndpoint: input.entryEndpoint,
+      userAgent: resolvedUserAgent,
+      originator: resolvedOriginator,
+      resolvedClockDaemonId,
+      resolvedTmuxSessionId,
+      resolvedWorkdir,
+      clientInjectReady,
+      tmuxSource
+    });
   }
 
   return metadata;

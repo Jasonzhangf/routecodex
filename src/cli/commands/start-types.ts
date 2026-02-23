@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ChildProcess, SpawnOptions } from 'node:child_process';
+import type { GuardianLifecycleEvent, GuardianRegistration } from '../guardian/types.js';
 
 export type Spinner = {
   start(text?: string): Spinner;
@@ -60,6 +61,9 @@ export type StartCommandContext = {
   resolveServerEntryPath: () => string;
   spawn: (command: string, args: string[], options: SpawnOptions) => ChildProcess;
   fetch: typeof fetch;
+  ensureGuardianDaemon?: () => Promise<void>;
+  registerGuardianProcess?: (registration: GuardianRegistration) => Promise<void>;
+  reportGuardianLifecycle?: (event: GuardianLifecycleEvent) => Promise<boolean>;
   setupKeypress: (onInterrupt: () => void) => () => void;
   waitForever: () => Promise<void>;
   onSignal?: (signal: NodeJS.Signals, cb: () => void) => void;

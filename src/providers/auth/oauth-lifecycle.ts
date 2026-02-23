@@ -1400,6 +1400,16 @@ export async function ensureValidOAuthToken(
     }
 
     try {
+      const flowTypeRaw = String(overrides.flowType || defaults.flowType || '').trim().toLowerCase();
+      const authorizationCodeFlow =
+        flowTypeRaw === String(OAuthFlowType.AUTHORIZATION_CODE).trim().toLowerCase();
+      if (!openBrowser && authorizationCodeFlow) {
+        // Non-interactive contexts must never enter auth-code callback/manual prompts.
+        // Let callers decide whether to retry in explicit interactive mode.
+        throw new Error(
+          `[OAuth] interactive authorization requires openBrowser=true for ${providerType} (flow=${flowTypeRaw || 'authorization_code'})`
+        );
+      }
       await runInteractiveAuthorizationFlow(
         providerType,
         overrides,

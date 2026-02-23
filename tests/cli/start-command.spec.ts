@@ -248,6 +248,8 @@ describe('cli start command', () => {
     expect(spawnCalls[0].args).toContain('/tmp/index.js');
     expect(spawnCalls[0].options?.detached).toBeUndefined();
     expect(spawnCalls[0].options?.env?.ROUTECODEX_DAEMON_SUPERVISOR).toBeUndefined();
+    expect(spawnCalls[0].options?.env?.ROUTECODEX_EXPECT_PARENT_PID).toBeUndefined();
+    expect(spawnCalls[0].options?.env?.RCC_EXPECT_PARENT_PID).toBeUndefined();
   });
 
   it('release start runs daemon supervisor when ROUTECODEX_START_DAEMON=1', async () => {

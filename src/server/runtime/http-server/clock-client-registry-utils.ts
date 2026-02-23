@@ -21,8 +21,11 @@ export type ClockClientRecord = {
 
 export type ClockClientInjectArgs = {
   tmuxSessionId?: string;
+  tmuxTarget?: string;
   sessionId?: string;
   workdir?: string;
+  clientType?: string;
+  tmuxOnly?: boolean;
   text: string;
   requestId?: string;
   source?: string;

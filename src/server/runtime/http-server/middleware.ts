@@ -3,8 +3,12 @@ import express from 'express';
 import type { ServerConfigV2 } from './types.js';
 import {
   extractClockClientDaemonIdFromApiKey,
+  extractClockClientTmuxSessionIdFromApiKey,
   matchesExpectedClientApiKey
 } from '../../../utils/clock-client-token.js';
+import {
+  shouldTraceClockScopeByContext
+} from '../../../utils/clock-scope-trace.js';
 
 function isLocalhostRequest(req: Request): boolean {
   const ip = req.socket?.remoteAddress || '';
@@ -52,17 +56,69 @@ export function extractApiKeyFromRequest(req: Request): string {
   return match ? normalizeString(match[1]) : '';
 }
 
-function attachClockDaemonHint(req: Request, daemonId: string | undefined): void {
+function attachClientDaemonHint(req: Request, daemonId: string | undefined): void {
   if (!daemonId) {
     return;
   }
   try {
     const headers = req.headers as Record<string, unknown>;
+    headers['x-routecodex-client-daemon-id'] = daemonId;
+    headers['x-routecodex-clientd-id'] = daemonId;
     headers['x-routecodex-clock-daemon-id'] = daemonId;
     headers['x-routecodex-daemon-id'] = daemonId;
   } catch {
     // best-effort only
   }
+}
+
+function attachClientTmuxHint(req: Request, tmuxSessionId: string | undefined): void {
+  if (!tmuxSessionId) {
+    return;
+  }
+  try {
+    const headers = req.headers as Record<string, unknown>;
+    headers['x-routecodex-client-tmux-session-id'] = tmuxSessionId;
+    headers['x-rcc-client-tmux-session-id'] = tmuxSessionId;
+    headers['x-routecodex-tmux-session-id'] = tmuxSessionId;
+    headers['x-rcc-tmux-session-id'] = tmuxSessionId;
+    headers['x-tmux-session-id'] = tmuxSessionId;
+  } catch {
+    // best-effort only
+  }
+}
+
+function shouldTraceClockScope(req: Request): boolean {
+  const path = typeof req.path === 'string' ? req.path : '';
+  const userAgent = normalizeString(req.header('user-agent')).toLowerCase();
+  const originator = normalizeString(req.header('originator')).toLowerCase();
+  const hasCodexTurnMetadata = normalizeString(req.header('x-codex-turn-metadata')).length > 0;
+  return shouldTraceClockScopeByContext({
+    endpointOrPath: path,
+    userAgent,
+    originator,
+    hasTurnMetadata: hasCodexTurnMetadata
+  });
+}
+
+function logClockScopeParse(args: {
+  req: Request;
+  requestId: string;
+  hasApiKey: boolean;
+  daemonId?: string;
+  tmuxSessionId?: string;
+}): void {
+  if (!shouldTraceClockScope(args.req)) {
+    return;
+  }
+  const path = typeof args.req.path === 'string' ? args.req.path : 'n/a';
+  const userAgent = normalizeString(args.req.header('user-agent')) || 'n/a';
+  const originator = normalizeString(args.req.header('originator')) || 'n/a';
+  const hasTurnMetadata = normalizeString(args.req.header('x-codex-turn-metadata')).length > 0;
+  console.log(
+    `[clock-scope][parse] requestId=${args.requestId} path=${path} hasApiKey=${args.hasApiKey ? 'yes' : 'no'} ` +
+    `daemon=${args.daemonId || 'none'} tmux=${args.tmuxSessionId || 'none'} originator=${originator} ua=${userAgent}` +
+    ` hasTurnMeta=${hasTurnMetadata ? 'yes' : 'no'}`
+  );
 }
 
 export function registerApiKeyAuthMiddleware(app: Application, config: ServerConfigV2): void {
@@ -71,6 +127,26 @@ export function registerApiKeyAuthMiddleware(app: Application, config: ServerCon
       next();
       return;
     }
+
+    const provided = extractApiKeyFromRequest(req);
+    let parsedDaemonId: string | undefined;
+    let parsedTmuxSessionId: string | undefined;
+    if (provided) {
+      // Always decode daemon/tmux hints when a client token is present, even when apikey auth is disabled.
+      // This keeps stopMessage/client-injection scope available in dev/no-auth deployments.
+      parsedDaemonId = extractClockClientDaemonIdFromApiKey(provided);
+      parsedTmuxSessionId = extractClockClientTmuxSessionIdFromApiKey(provided);
+      attachClientDaemonHint(req, parsedDaemonId);
+      attachClientTmuxHint(req, parsedTmuxSessionId);
+    }
+    const requestId = normalizeString(req.header('x-request-id')) || 'n/a';
+    logClockScopeParse({
+      req,
+      requestId,
+      hasApiKey: Boolean(provided),
+      daemonId: parsedDaemonId,
+      tmuxSessionId: parsedTmuxSessionId
+    });
 
     const expectedResolved = resolveEnvSecretReference(normalizeString(config?.server?.apikey));
     if (!expectedResolved.ok) {
@@ -119,9 +195,7 @@ export function registerApiKeyAuthMiddleware(app: Application, config: ServerCon
       return;
     }
 
-    const provided = extractApiKeyFromRequest(req);
     if (provided && matchesExpectedClientApiKey(provided, expectedKey)) {
-      attachClockDaemonHint(req, extractClockClientDaemonIdFromApiKey(provided));
       next();
       return;
     }

@@ -35,7 +35,15 @@ import { registerCodexCommand } from './cli/register/codex-command.js';
 import { registerCamoufoxCommand } from './cli/register/camoufox-command.js';
 import { registerTmuxInjectCommand } from './cli/register/tmux-inject-command.js';
 import { registerClockAdminCommand } from './cli/register/clock-admin-command.js';
+import { registerGuardianDaemonCommand } from './cli/register/guardian-daemon-command.js';
 import { listManagedServerZombieChildrenByPort } from './utils/managed-server-pids.js';
+import {
+  ensureGuardianDaemon,
+  registerGuardianProcess,
+  reportGuardianLifecycleEvent,
+  stopGuardianDaemon
+} from './cli/guardian/client.js';
+import type { GuardianLifecycleEvent, GuardianRegistration, GuardianStopResult } from './cli/guardian/types.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -94,10 +102,49 @@ const IS_DEV_PACKAGE = pkgName === 'routecodex';
 const IS_WINDOWS = process.platform === 'win32';
 const DEFAULT_DEV_PORT = 5555;
 const TOKEN_DAEMON_PID_FILE = path.join(homedir(), '.routecodex', 'token-daemon.pid');
+
+async function ensureGlobalGuardian(): Promise<void> {
+  await ensureGuardianDaemon({
+    homeDir: homedir(),
+    nodeBin: process.execPath,
+    cliEntryPath: path.resolve(__dirname, 'cli.js'),
+    env: process.env,
+    fetchImpl: fetch,
+    spawn: (cmd: string, args: string[], opts: SpawnOptions) => spawn(cmd, args, opts),
+    sleep
+  });
+}
+
+async function registerGuardianLifecycle(registration: GuardianRegistration): Promise<void> {
+  await registerGuardianProcess({
+    homeDir: homedir(),
+    fetchImpl: fetch,
+    registration
+  });
+}
+
+async function reportGuardianLifecycle(event: GuardianLifecycleEvent): Promise<boolean> {
+  return reportGuardianLifecycleEvent({
+    homeDir: homedir(),
+    fetchImpl: fetch,
+    event
+  });
+}
+
+async function stopGlobalGuardian(): Promise<GuardianStopResult> {
+  return stopGuardianDaemon({
+    homeDir: homedir(),
+    fetchImpl: fetch,
+    sleep
+  });
+}
 program
   .name(pkgName === 'rcc' ? 'rcc' : 'routecodex')
   .description('RouteCodex CLI - Multi-provider OpenAI proxy server and Claude Code interface')
   .version(cliVersion);
+
+// Internal singleton guardian daemon entrypoint.
+registerGuardianDaemonCommand(program);
 
 program.addHelpText(
   'after',
@@ -254,7 +301,11 @@ const launcherContext = {
   sleep,
   fetch,
   spawn: (cmd: string, args: string[], opts: SpawnOptions) => spawn(cmd, args, opts),
+  ensureGuardianDaemon: ensureGlobalGuardian,
+  registerGuardianProcess: registerGuardianLifecycle,
+  reportGuardianLifecycle,
   getModulesConfigPath,
+  resolveCliEntryPath: () => path.resolve(__dirname, 'cli.js'),
   resolveServerEntryPath: () => path.resolve(__dirname, 'index.js'),
   waitForever: () =>
     new Promise<void>(() => {
@@ -349,6 +400,9 @@ registerStartCommand(program, {
   ensureLocalTokenPortalEnv,
   ensureTokenDaemonAutoStart,
   stopTokenDaemonIfRunning,
+  ensureGuardianDaemon: ensureGlobalGuardian,
+  registerGuardianProcess: registerGuardianLifecycle,
+  reportGuardianLifecycle,
   ensurePortAvailable,
   findListeningPids,
   killPidBestEffort,
@@ -388,6 +442,8 @@ registerStopCommand(program, {
   killPidBestEffort,
   sleep,
   stopTokenDaemonIfRunning,
+  stopGuardianDaemon: stopGlobalGuardian,
+  reportGuardianLifecycle,
   fetchImpl: fetch,
   env: process.env,
   exit: (code) => process.exit(code)
@@ -404,7 +460,10 @@ registerRestartCommand(program, {
   sleep,
   sendSignal: (pid, signal) => process.kill(pid, signal),
   fetch,
+  ensureGuardianDaemon: ensureGlobalGuardian,
+  registerGuardianProcess: registerGuardianLifecycle,
   env: process.env,
+  reportGuardianLifecycle,
   exit: (code) => process.exit(code)
 });
 

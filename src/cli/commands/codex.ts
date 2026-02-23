@@ -9,6 +9,7 @@ export function createCodexCommand(program: Command, ctx: CodexCommandContext): 
     commandName: 'codex',
     displayName: 'Codex',
     description: 'Launch Codex with RouteCodex as proxy (args after this command are passed through)',
+    allowAutoStartServer: false,
     binaryOptionFlags: '--codex-path <path>',
     binaryOptionName: 'codexPath',
     binaryOptionDescription: 'Path to Codex executable',

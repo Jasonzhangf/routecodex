@@ -19,7 +19,32 @@ jest.unstable_mockModule(
 );
 
 describe('bindClockConversationSession', () => {
-  it('binds by daemonId when tmuxSessionId is absent', async () => {
+  it('binds by tmuxSessionId when client metadata uses new fields', async () => {
+    jest.resetModules();
+    mockBindConversationSession.mockReset();
+    mockGetClockClientRegistry.mockClear();
+
+    const { bindClockConversationSession } = await import(
+      '../../../../../src/server/runtime/http-server/executor/request-retry-helpers.js'
+    );
+
+    bindClockConversationSession({
+      clientDaemonId: 'clientd_case_1',
+      clientTmuxSessionId: 'tmux_case_1',
+      sessionId: 'session_should_not_override_daemon',
+      clientWorkdir: '/tmp/routecodex-bind-clientd'
+    });
+
+    expect(mockGetClockClientRegistry).toHaveBeenCalledTimes(1);
+    expect(mockBindConversationSession).toHaveBeenCalledTimes(1);
+    expect(mockBindConversationSession).toHaveBeenCalledWith({
+      conversationSessionId: 'tmux:tmux_case_1',
+      tmuxSessionId: 'tmux_case_1',
+      workdir: '/tmp/routecodex-bind-clientd'
+    });
+  });
+
+  it('skips binding when tmuxSessionId is absent even if daemonId exists', async () => {
     jest.resetModules();
     mockBindConversationSession.mockReset();
     mockGetClockClientRegistry.mockClear();
@@ -34,16 +59,11 @@ describe('bindClockConversationSession', () => {
       workdir: '/tmp/routecodex-bind-daemon'
     });
 
-    expect(mockGetClockClientRegistry).toHaveBeenCalledTimes(1);
-    expect(mockBindConversationSession).toHaveBeenCalledTimes(1);
-    expect(mockBindConversationSession).toHaveBeenCalledWith({
-      conversationSessionId: 'clockd.clockd_case_1',
-      daemonId: 'clockd_case_1',
-      workdir: '/tmp/routecodex-bind-daemon'
-    });
+    expect(mockGetClockClientRegistry).not.toHaveBeenCalled();
+    expect(mockBindConversationSession).not.toHaveBeenCalled();
   });
 
-  it('still attempts binding by conversation session when daemonId/tmuxSessionId are absent', async () => {
+  it('skips binding when daemonId is absent', async () => {
     jest.resetModules();
     mockBindConversationSession.mockReset();
     mockGetClockClientRegistry.mockClear();
@@ -56,14 +76,11 @@ describe('bindClockConversationSession', () => {
       sessionId: 'session_only'
     });
 
-    expect(mockGetClockClientRegistry).toHaveBeenCalledTimes(1);
-    expect(mockBindConversationSession).toHaveBeenCalledTimes(1);
-    expect(mockBindConversationSession).toHaveBeenCalledWith({
-      conversationSessionId: 'session_only'
-    });
+    expect(mockGetClockClientRegistry).not.toHaveBeenCalled();
+    expect(mockBindConversationSession).not.toHaveBeenCalled();
   });
 
-  it('falls back to conversationId when sessionId is absent', async () => {
+  it('does not bind from conversationId fallback when daemonId is absent', async () => {
     jest.resetModules();
     mockBindConversationSession.mockReset();
     mockGetClockClientRegistry.mockClear();
@@ -76,10 +93,7 @@ describe('bindClockConversationSession', () => {
       conversationId: 'conv_only'
     });
 
-    expect(mockGetClockClientRegistry).toHaveBeenCalledTimes(1);
-    expect(mockBindConversationSession).toHaveBeenCalledTimes(1);
-    expect(mockBindConversationSession).toHaveBeenCalledWith({
-      conversationSessionId: 'conv_only'
-    });
+    expect(mockGetClockClientRegistry).not.toHaveBeenCalled();
+    expect(mockBindConversationSession).not.toHaveBeenCalled();
   });
 });

@@ -204,17 +204,14 @@ function normalizeSessionToken(value: unknown): string | undefined {
 }
 
 function resolveClockConversationSessionId(metadata: Record<string, unknown>): string | undefined {
-  const daemonId = normalizeSessionToken(metadata.clockDaemonId)
-    ?? normalizeSessionToken(metadata.clockClientDaemonId);
-  if (daemonId) {
-    return `clockd.${daemonId}`;
+  const tmuxSessionId = normalizeSessionToken(metadata.clientTmuxSessionId)
+    ?? normalizeSessionToken(metadata.client_tmux_session_id)
+    ?? normalizeSessionToken(metadata.tmuxSessionId)
+    ?? normalizeSessionToken(metadata.tmux_session_id);
+  if (tmuxSessionId) {
+    return `tmux:${tmuxSessionId}`;
   }
-  return (
-    normalizeSessionToken(metadata.sessionId)
-    ?? normalizeSessionToken(metadata.session_id)
-    ?? normalizeSessionToken(metadata.conversationId)
-    ?? normalizeSessionToken(metadata.conversation_id)
-  );
+  return undefined;
 }
 
 function inferClockClientTypeFromMetadata(metadata: Record<string, unknown>): string | undefined {
@@ -239,22 +236,29 @@ export function bindClockConversationSession(metadata: Record<string, unknown>):
     return;
   }
 
-  const daemonId = normalizeSessionToken(metadata.clockDaemonId)
-    ?? normalizeSessionToken(metadata.clockClientDaemonId);
-  const tmuxSessionId = normalizeSessionToken(metadata.tmuxSessionId);
+  const tmuxSessionId = normalizeSessionToken(metadata.clientTmuxSessionId)
+    ?? normalizeSessionToken(metadata.client_tmux_session_id)
+    ?? normalizeSessionToken(metadata.tmuxSessionId);
   const clientType = inferClockClientTypeFromMetadata(metadata);
-  const workdir = normalizeSessionToken(metadata.workdir)
+  const workdir = normalizeSessionToken(metadata.clientWorkdir)
+    ?? normalizeSessionToken(metadata.client_workdir)
+    ?? normalizeSessionToken(metadata.workdir)
     ?? normalizeSessionToken(metadata.cwd)
     ?? normalizeSessionToken(metadata.workingDirectory);
 
   try {
-    getClockClientRegistry().bindConversationSession({
+    const bindInput: {
+      conversationSessionId: string;
+      tmuxSessionId?: string;
+      clientType?: string;
+      workdir?: string;
+    } = {
       conversationSessionId,
       ...(tmuxSessionId ? { tmuxSessionId } : {}),
-      ...(daemonId ? { daemonId } : {}),
       ...(clientType ? { clientType } : {}),
       ...(workdir ? { workdir } : {})
-    });
+    };
+    getClockClientRegistry().bindConversationSession(bindInput);
   } catch {
     // best-effort only
   }

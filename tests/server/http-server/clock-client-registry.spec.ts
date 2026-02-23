@@ -665,4 +665,56 @@ describe('ClockClientRegistry cleanup', () => {
     const workdir = registry.resolveBoundWorkdir('conv_bound_conflict');
     expect(workdir).toBeUndefined();
   });
+
+  it('unbindSessionScope removes daemon-scoped conversation mapping', () => {
+    const registry = new ClockClientRegistry();
+    registry.register({
+      daemonId: 'clockd_scope_unbind',
+      callbackUrl: 'http://127.0.0.1:65594/inject',
+      tmuxSessionId: 'rcc_scope_unbind'
+    });
+    const bind = registry.bindConversationSession({
+      conversationSessionId: 'clockd.clockd_scope_unbind',
+      daemonId: 'clockd_scope_unbind'
+    });
+    expect(bind.ok).toBe(true);
+
+    const result = registry.unbindSessionScope('clockd.clockd_scope_unbind');
+    expect(result.ok).toBe(true);
+    expect(result.removed).toBe(true);
+    expect(result.daemonIds).toEqual(['clockd_scope_unbind']);
+  });
+
+  it('unbindSessionScope removes all mappings for tmux scope', () => {
+    const registry = new ClockClientRegistry();
+    registry.register({
+      daemonId: 'clockd_tmux_scope_a',
+      callbackUrl: 'http://127.0.0.1:65595/inject',
+      tmuxSessionId: 'rcc_scope_tmux_a'
+    });
+    registry.register({
+      daemonId: 'clockd_tmux_scope_b',
+      callbackUrl: 'http://127.0.0.1:65596/inject',
+      tmuxSessionId: 'rcc_scope_tmux_a'
+    });
+    expect(
+      registry.bindConversationSession({
+        conversationSessionId: 'clockd.clockd_tmux_scope_a',
+        daemonId: 'clockd_tmux_scope_a'
+      }).ok
+    ).toBe(true);
+    expect(
+      registry.bindConversationSession({
+        conversationSessionId: 'clockd.clockd_tmux_scope_b',
+        daemonId: 'clockd_tmux_scope_b'
+      }).ok
+    ).toBe(true);
+
+    const result = registry.unbindSessionScope('tmux:rcc_scope_tmux_a');
+    expect(result.ok).toBe(true);
+    expect(result.removed).toBe(true);
+    expect(result.daemonIds.sort()).toEqual(['clockd_tmux_scope_a', 'clockd_tmux_scope_b']);
+    expect(registry.resolveBoundTmuxSession('clockd.clockd_tmux_scope_a')).toBeUndefined();
+    expect(registry.resolveBoundTmuxSession('clockd.clockd_tmux_scope_b')).toBeUndefined();
+  });
 });

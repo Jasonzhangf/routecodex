@@ -83,11 +83,82 @@ function stringifyLogArg(value: unknown): string {
   }
 }
 
+const ANSI_RESET = '\x1b[0m';
+const ANSI_BLUE = '\x1b[34m';
+const ANSI_CYAN = '\x1b[36m';
+const ANSI_MAGENTA = '\x1b[35m';
+const ANSI_YELLOW = '\x1b[33m';
+const ANSI_GREEN = '\x1b[32m';
+const ANSI_RED = '\x1b[31m';
+const ANSI_PATTERN = /\x1b\[[0-9;]*m/;
+
+function isConsoleColorEnabled(): boolean {
+  if (String(process.env.NO_COLOR || '').trim()) {
+    return false;
+  }
+  const forceColor = String(process.env.FORCE_COLOR || '').trim();
+  if (forceColor === '0') {
+    return false;
+  }
+  return process.stdout?.isTTY === true;
+}
+
+function wrapAnsi(text: string, color: string): string {
+  return `${color}${text}${ANSI_RESET}`;
+}
+
+function colorizeRuntimeLogLine(line: string): string {
+  if (!line || !isConsoleColorEnabled() || ANSI_PATTERN.test(line)) {
+    return line;
+  }
+
+  if (line.includes('[virtual-router][stop_scope]')) {
+    if (line.includes('stage=apply')) {
+      return wrapAnsi(line, ANSI_GREEN);
+    }
+    if (line.includes('stage=drop')) {
+      return wrapAnsi(line, ANSI_RED);
+    }
+    return wrapAnsi(line, ANSI_MAGENTA);
+  }
+  if (line.includes('[virtual-router][instruction_parse]')) {
+    return wrapAnsi(line, ANSI_MAGENTA);
+  }
+  if (line.includes('[servertool][stop_compare]')) {
+    return wrapAnsi(line, ANSI_BLUE);
+  }
+  if (line.includes('[servertool][stop_watch]')) {
+    return wrapAnsi(line, ANSI_CYAN);
+  }
+  if (line.includes('tool=stop_message_auto')) {
+    if (line.includes('result=failed')) {
+      return wrapAnsi(line, ANSI_RED);
+    }
+    if (line.includes('result=completed') || line.includes('result=matched')) {
+      return wrapAnsi(line, ANSI_GREEN);
+    }
+    return wrapAnsi(line, ANSI_YELLOW);
+  }
+  if (line.includes('[clock-scope][metadata]') || line.includes('[clock-scope][parse]')) {
+    return wrapAnsi(line, ANSI_YELLOW);
+  }
+  if (line.includes('[stop_scope][rebind]')) {
+    return wrapAnsi(line, ANSI_CYAN);
+  }
+  return line;
+}
+
 function shouldSuppressRuntimeLogLine(text: string): boolean {
   if (!text) {
     return false;
   }
+  if (text.includes('[virtual-router][instruction_parse]') || text.includes('[virtual-router][stop_scope]')) {
+    return false;
+  }
   if (text.includes('[servertool][iflow-automessage]') || text.includes('[servertool][ai-followup]')) {
+    return false;
+  }
+  if (text.includes('[servertool][stop_compare]') || text.includes('[servertool][stop_watch]')) {
     return false;
   }
   return (
@@ -108,6 +179,11 @@ function installMinimalRuntimeLogFilter(): void {
   const filter = (original: (...args: unknown[]) => void) => (...args: unknown[]) => {
     const line = args.map(stringifyLogArg).join(' ');
     if (shouldSuppressRuntimeLogLine(line)) {
+      return;
+    }
+    const colorized = colorizeRuntimeLogLine(line);
+    if (colorized !== line) {
+      original(colorized);
       return;
     }
     original(...args);
@@ -1387,7 +1463,7 @@ async function ensureRestartEntryReady(argv: string[]): Promise<{ ready: boolean
 
 function resolveRestartMode(): 'runtime' | 'process' {
   const raw = String(process.env.ROUTECODEX_RESTART_MODE || process.env.RCC_RESTART_MODE || '').trim().toLowerCase();
-  return raw === 'process' ? 'process' : 'runtime';
+  return raw === 'runtime' ? 'runtime' : 'process';
 }
 
 async function restartSelf(app: RouteCodexApp, signal: NodeJS.Signals): Promise<void> {
@@ -1528,9 +1604,9 @@ async function main(): Promise<void> {
   });
 
   // Restart signal:
-  // - CLI sends SIGUSR2 to request runtime reload.
-  // - Default mode is in-process runtime reload from disk.
-  // - Set ROUTECODEX_RESTART_MODE=process to use process replacement restart.
+  // - CLI sends SIGUSR2 to request service restart.
+  // - Default mode is process replacement restart (reloads code + config).
+  // - Set ROUTECODEX_RESTART_MODE=runtime to use in-process runtime reload from disk.
   if (process.platform !== 'win32') {
     process.on('SIGUSR2', () => {
       logProcessLifecycle({

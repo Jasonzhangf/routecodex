@@ -37,7 +37,12 @@ function createState(overrides?: Partial<RoutingInstructionState>): RoutingInstr
 
 const MODE_SHORTHAND_PROBE = parseRoutingInstructions(buildMessages('<**stopMessage:on**>继续'))[0] as any;
 const SUPPORTS_STOPMESSAGE_MODE_SHORTHAND = MODE_SHORTHAND_PROBE?.type === 'stopMessageMode';
-const DEFAULT_STOPMESSAGE_MAX_REPEATS = SUPPORTS_STOPMESSAGE_MODE_SHORTHAND ? 10 : 1;
+const STOPMESSAGE_DEFAULT_REPEAT_PROBE =
+  parseRoutingInstructions(buildMessages('<**stopMessage:"继续"**>'))[0] as any;
+const DEFAULT_STOPMESSAGE_MAX_REPEATS =
+  typeof STOPMESSAGE_DEFAULT_REPEAT_PROBE?.stopMessageMaxRepeats === 'number'
+    ? STOPMESSAGE_DEFAULT_REPEAT_PROBE.stopMessageMaxRepeats
+    : 10;
 const PASSTHROUGH_PREFER_PROBE = parseRoutingInstructions(
   buildMessages('<**!tab.gpt-5.3-codex:passthrough**>')
 )[0] as any;
@@ -218,24 +223,40 @@ describe('Routing instruction parsing and application', () => {
     expect(inst.stopMessageMaxRepeats).toBe(3);
   });
 
-  test('parses lowercase stopmessage marker (case-insensitive)', () => {
-    const instructions = parseRoutingInstructions(buildMessages('<**stopmessage:on,10**>继续执行'));
+  test('parses stopMessage when command token is quoted', () => {
+    const instructions = parseRoutingInstructions(buildMessages('<**"stopMessage","继续",ai:on,10**>'));
     expect(instructions).toHaveLength(1);
     const inst = instructions[0] as any;
-    expect(inst.type).toBe('stopMessageMode');
-    expect(inst.stopMessageStageMode).toBe('on');
+    expect(inst.type).toBe('stopMessageSet');
+    expect(inst.stopMessageText).toBe('继续');
     expect(inst.stopMessageMaxRepeats).toBe(10);
+    expect(inst.stopMessageAiMode).toBe('on');
   });
 
-  test('without clear, only the last stopMessage directive is effective', () => {
+  test('parses stopMessage when command token has zero-width leading char', () => {
+    const instructions = parseRoutingInstructions(buildMessages('<**\u200BstopMessage,"继续",ai:on,10**>'));
+    expect(instructions).toHaveLength(1);
+    const inst = instructions[0] as any;
+    expect(inst.type).toBe('stopMessageSet');
+    expect(inst.stopMessageText).toBe('继续');
+    expect(inst.stopMessageMaxRepeats).toBe(10);
+    expect(inst.stopMessageAiMode).toBe('on');
+  });
+
+  test('lowercase stopmessage marker is ignored (case-sensitive parser)', () => {
+    const instructions = parseRoutingInstructions(buildMessages('<**stopmessage:on,10**>继续执行'));
+    expect(instructions).toHaveLength(0);
+  });
+
+  test('without clear, invalid mode-only directive is ignored and latest valid directive stays effective', () => {
     const instructions = parseRoutingInstructions(
       buildMessages('<**stopMessage:"先前指令",2**><**stopMessage:on,10**>继续执行')
     );
     expect(instructions).toHaveLength(1);
     const inst = instructions[0] as any;
-    expect(inst.type).toBe('stopMessageMode');
-    expect(inst.stopMessageStageMode).toBe('on');
-    expect(inst.stopMessageMaxRepeats).toBe(10);
+    expect(inst.type).toBe('stopMessageSet');
+    expect(inst.stopMessageText).toBe('先前指令');
+    expect(inst.stopMessageMaxRepeats).toBe(2);
   });
 
   test('with clear, stopMessage clear wins and other stopMessage directives are ignored', () => {

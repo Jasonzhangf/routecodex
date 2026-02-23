@@ -8,6 +8,7 @@ import type { ChildProcess, SpawnOptions } from 'node:child_process';
 import type fs from 'node:fs';
 import type path from 'node:path';
 import type { spawnSync } from 'node:child_process';
+import type { GuardianLifecycleEvent, GuardianRegistration } from '../../guardian/types.js';
 
 export type Spinner = {
   start(text?: string): Spinner;
@@ -43,7 +44,11 @@ export type LauncherCommandContext = {
   fetch: typeof fetch;
   spawn: (command: string, args: string[], options: SpawnOptions) => ChildProcess;
   spawnSyncImpl?: typeof spawnSync;
+  ensureGuardianDaemon?: () => Promise<void>;
+  registerGuardianProcess?: (registration: GuardianRegistration) => Promise<void>;
+  reportGuardianLifecycle?: (event: GuardianLifecycleEvent) => Promise<boolean>;
   getModulesConfigPath: () => string;
+  resolveCliEntryPath?: () => string;
   resolveServerEntryPath: () => string;
   waitForever: () => Promise<void>;
   onSignal?: (signal: NodeJS.Signals, cb: () => void) => void;
@@ -67,6 +72,7 @@ export type LauncherSpec = {
   commandName: string;
   displayName: string;
   description: string;
+  allowAutoStartServer?: boolean;
   binaryOptionFlags: string;
   binaryOptionName: string;
   binaryOptionDescription: string;

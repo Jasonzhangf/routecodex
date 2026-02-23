@@ -7,10 +7,9 @@ import {
 } from '../../../../modules/llmswitch/bridge.js';
 import { applyClientConnectionStateToContext } from '../../../utils/client-connection-state.js';
 import {
-  getClockClientRegistry,
-  injectClockClientPromptWithResult
-} from '../clock-client-registry.js';
-import { bindClockConversationSession } from './request-retry-helpers.js';
+  resolveStopMessageClientInjectReadiness,
+  runClientInjectionFlowBeforeReenter
+} from './client-injection-flow.js';
 import {
   extractClientModelId,
   normalizeProviderResponse
@@ -27,7 +26,23 @@ const FOLLOWUP_SESSION_HEADER_KEYS = new Set([
   'anthropicsessionid',
   'anthropicconversationid',
   'xroutecodexsessionid',
-  'xroutecodexconversationid'
+  'xroutecodexconversationid',
+  'xroutecodexclientdaemonid',
+  'xroutecodexclientdid',
+  'xrccclientdaemonid',
+  'xroutecodexclockdaemonid',
+  'xroutecodexdaemonid',
+  'xrccclockdaemonid',
+  'xroutecodexclienttmuxsessionid',
+  'xrccclienttmuxsessionid',
+  'xroutecodextmuxsessionid',
+  'xrcctmuxsessionid',
+  'xtmuxsessionid',
+  'xroutecodexclientworkdir',
+  'xrccclientworkdir',
+  'xroutecodexworkdir',
+  'xrccworkdir',
+  'xworkdir'
 ]);
 
 function canonicalizeHeaderName(headerName: string): string {
@@ -77,261 +92,26 @@ function extractPreservedSessionToken(
   return undefined;
 }
 
-function shouldUnbindConversationSessionOnInjectFailure(reasonRaw: unknown): boolean {
-  const reason = typeof reasonRaw === 'string' ? reasonRaw.trim().toLowerCase() : '';
-  return (
-    reason === 'tmux_session_required' ||
-    reason === 'no_matching_tmux_session_daemon' ||
-    reason === 'workdir_mismatch' ||
-    reason === 'inject_failed'
-  );
-}
-
-function createClockInjectFailureError(args: {
-  reason: string;
-  source: string;
-  requestId?: string;
-  sessionId?: string;
-  tmuxSessionId?: string;
-}): Error & {
-  code?: string;
-  upstreamCode?: string;
-  details?: Record<string, unknown>;
-  status?: number;
-  statusCode?: number;
-  retryable?: boolean;
-} {
-  const error = new Error(
-    `[servertool.inject] clock client injection failed: ${args.reason}`
-  ) as Error & {
-    code?: string;
-    upstreamCode?: string;
-    details?: Record<string, unknown>;
-    status?: number;
-    statusCode?: number;
-    retryable?: boolean;
-  };
-  error.code = 'SERVERTOOL_FOLLOWUP_FAILED';
-  error.upstreamCode = 'clock_client_inject_failed';
-  error.details = {
-    reason: args.reason,
-    source: args.source,
-    requestId: args.requestId,
-    sessionId: args.sessionId,
-    tmuxSessionId: args.tmuxSessionId
-  };
-  error.status = 503;
-  error.statusCode = 503;
-  error.retryable = false;
-  return error;
-}
-
-function normalizeInjectToken(value: unknown): string | undefined {
-  if (typeof value !== 'string') {
+function extractPreservedDaemonOrInjectToken(
+  headers: Record<string, string> | undefined,
+  field: 'daemon' | 'tmux' | 'workdir'
+): string | undefined {
+  if (!headers) {
     return undefined;
   }
-  const trimmed = value.trim();
-  return trimmed || undefined;
-}
-
-function resolveInjectWorkdir(metadata: Record<string, unknown>): string | undefined {
-  return (
-    normalizeInjectToken(metadata.workdir) ||
-    normalizeInjectToken(metadata.cwd) ||
-    normalizeInjectToken(metadata.workingDirectory)
-  );
-}
-
-function resolveInjectConversationSessionId(metadata: Record<string, unknown>): string | undefined {
-  const daemonId =
-    normalizeInjectToken(metadata.clockDaemonId) ||
-    normalizeInjectToken(metadata.clockClientDaemonId);
-  if (daemonId) {
-    return `clockd.${daemonId}`;
-  }
-  return (
-    normalizeInjectToken(metadata.sessionId) ||
-    normalizeInjectToken(metadata.session_id) ||
-    normalizeInjectToken(metadata.conversationId) ||
-    normalizeInjectToken(metadata.conversation_id)
-  );
-}
-
-function resolveStopMessageClientInjectReadiness(metadata: Record<string, unknown>): {
-  ready: boolean;
-  reason: string;
-  sessionScope?: string;
-  tmuxSessionId?: string;
-} {
-  const registry = getClockClientRegistry();
-  const explicitClientInjectReadyRaw = metadata.clientInjectReady ?? metadata.client_inject_ready;
-  const explicitClientInjectReady =
-    explicitClientInjectReadyRaw === true
-      ? true
-      : explicitClientInjectReadyRaw === false
-        ? false
-        : (typeof explicitClientInjectReadyRaw === 'string'
-          ? (explicitClientInjectReadyRaw.trim().toLowerCase() === 'true'
-            ? true
-            : (explicitClientInjectReadyRaw.trim().toLowerCase() === 'false' ? false : undefined))
-          : undefined);
-  if (explicitClientInjectReady === false) {
-    const explicitReason =
-      typeof metadata.clientInjectReason === 'string'
-        ? metadata.clientInjectReason.trim()
-        : (typeof metadata.client_inject_reason === 'string' ? metadata.client_inject_reason.trim() : '');
-    return { ready: false, reason: explicitReason || 'client_inject_unready' };
-  }
-  const tmuxSessionId = normalizeInjectToken(metadata.tmuxSessionId);
-  const sessionScope = resolveInjectConversationSessionId(metadata);
-  const daemonId =
-    normalizeInjectToken(metadata.clockDaemonId) ||
-    normalizeInjectToken(metadata.clockClientDaemonId);
-  const workdir = resolveInjectWorkdir(metadata);
-  const clientType = normalizeInjectToken(metadata.clockClientType) || normalizeInjectToken(metadata.clientType);
-  if (tmuxSessionId) {
-    return { ready: true, reason: 'tmux_direct', tmuxSessionId, ...(sessionScope ? { sessionScope } : {}) };
-  }
-  if (!sessionScope) {
-    return { ready: false, reason: 'tmux_scope_binding_required' };
-  }
-
-  const mappedTmuxSessionId = normalizeInjectToken(registry.resolveBoundTmuxSession(sessionScope));
-  if (mappedTmuxSessionId) {
-    return { ready: true, reason: 'tmux_bound', sessionScope, tmuxSessionId: mappedTmuxSessionId };
-  }
-
-  const bind = registry.bindConversationSession({
-    conversationSessionId: sessionScope,
-    ...(daemonId ? { daemonId } : {}),
-    ...(workdir ? { workdir } : {}),
-    ...(clientType ? { clientType } : {})
-  });
-  if (bind.ok && normalizeInjectToken(bind.tmuxSessionId)) {
-    return {
-      ready: true,
-      reason: 'tmux_bound_on_demand',
-      sessionScope,
-      tmuxSessionId: normalizeInjectToken(bind.tmuxSessionId)
-    };
-  }
-  return {
-    ready: false,
-    reason: normalizeInjectToken(bind.reason) || 'conversation_session_unbound',
-    sessionScope
-  };
-}
-
-function resolveStrictClientInjectTarget(args: {
-  tmuxSessionId?: unknown;
-  clockDaemonId?: unknown;
-  conversationSessionId?: unknown;
-  clientInjectReady?: unknown;
-  clientInjectReason?: unknown;
-  requestId?: string;
-  source: string;
-}): { tmuxSessionId?: string; sessionId?: string } {
-  const registry = getClockClientRegistry();
-  const tmuxSessionId = normalizeInjectToken(args.tmuxSessionId);
-  const daemonId = normalizeInjectToken(args.clockDaemonId);
-  const conversationScopeSessionId = normalizeInjectToken(args.conversationSessionId);
-  const explicitClientInjectReadyRaw = args.clientInjectReady;
-  const explicitClientInjectReady =
-    explicitClientInjectReadyRaw === true
-      ? true
-      : explicitClientInjectReadyRaw === false
-        ? false
-        : (typeof explicitClientInjectReadyRaw === 'string'
-          ? (explicitClientInjectReadyRaw.trim().toLowerCase() === 'true'
-            ? true
-            : (explicitClientInjectReadyRaw.trim().toLowerCase() === 'false' ? false : undefined))
-          : undefined);
-  if (explicitClientInjectReady === false) {
-    throw createClockInjectFailureError({
-      reason: normalizeInjectToken(args.clientInjectReason) || 'client_inject_unready',
-      source: args.source,
-      requestId: args.requestId
-    });
-  }
-  const daemonScopeSessionId = daemonId ? `clockd.${daemonId}` : undefined;
-  if (!tmuxSessionId && !daemonScopeSessionId && !conversationScopeSessionId) {
-    throw createClockInjectFailureError({
-      reason: 'tmux_scope_binding_required',
-      source: args.source,
-      requestId: args.requestId
-    });
-  }
-  if (tmuxSessionId) {
-    return { tmuxSessionId };
-  }
-  const targetSessionId = daemonScopeSessionId || conversationScopeSessionId;
-  const daemonRecord = daemonId ? registry.findByDaemonId(daemonId) : undefined;
-  const sessionScopedTmuxSessionId =
-    normalizeInjectToken(targetSessionId ? registry.resolveBoundTmuxSession(targetSessionId) : undefined);
-  const boundTmuxSessionId =
-    normalizeInjectToken(daemonRecord?.tmuxSessionId) ||
-    normalizeInjectToken(daemonRecord?.sessionId) ||
-    sessionScopedTmuxSessionId;
-
-  if (!boundTmuxSessionId) {
-    if (targetSessionId) {
-      try {
-        registry.unbindConversationSession(targetSessionId);
-      } catch {
-        // best-effort cleanup
-      }
+  for (const [headerName, headerValue] of Object.entries(headers)) {
+    const normalizedName = canonicalizeHeaderName(headerName);
+    if (field === 'daemon' && (normalizedName.endsWith('clockdaemonid') || normalizedName.endsWith('daemonid'))) {
+      return headerValue;
     }
-    throw createClockInjectFailureError({
-      reason: 'conversation_session_unbound',
-      source: args.source,
-      requestId: args.requestId,
-      sessionId: targetSessionId
-    });
-  }
-
-  return {
-    sessionId: targetSessionId,
-    tmuxSessionId: boundTmuxSessionId
-  };
-}
-
-async function injectClockClientPromptStrict(args: {
-  tmuxSessionId?: string;
-  sessionId?: string;
-  workdir?: string;
-  requestId?: string;
-  text: string;
-  source: string;
-}): Promise<void> {
-  const result = await injectClockClientPromptWithResult({
-    tmuxSessionId: args.tmuxSessionId,
-    sessionId: args.sessionId,
-    workdir: args.workdir,
-    requestId: args.requestId,
-    text: args.text,
-    source: args.source
-  });
-  if (result.ok) {
-    return;
-  }
-
-  const reason = typeof result.reason === 'string' ? result.reason : 'inject_failed';
-  const normalizedSessionId = typeof args.sessionId === 'string' ? args.sessionId.trim() : '';
-  if (normalizedSessionId && shouldUnbindConversationSessionOnInjectFailure(reason)) {
-    try {
-      getClockClientRegistry().unbindConversationSession(normalizedSessionId);
-    } catch {
-      // best-effort cleanup only
+    if (field === 'tmux' && normalizedName.endsWith('tmuxsessionid')) {
+      return headerValue;
+    }
+    if (field === 'workdir' && normalizedName.endsWith('workdir')) {
+      return headerValue;
     }
   }
-
-  throw createClockInjectFailureError({
-    reason,
-    source: args.source,
-    requestId: args.requestId,
-    sessionId: args.sessionId,
-    tmuxSessionId: args.tmuxSessionId
-  });
+  return undefined;
 }
 
 export type ConvertProviderResponseOptions = {
@@ -533,44 +313,82 @@ export async function convertProviderResponseIfNeeded(
       const nestedEntry = reenterOpts.entryEndpoint || options.entryEndpoint || entry;
       const nestedExtra = asRecord(reenterOpts.metadata) ?? {};
 
-      const nestedMetadata: Record<string, unknown> = {
-        ...(metadataBag ?? {}),
-        ...nestedExtra,
-        entryEndpoint: nestedEntry,
-        direction: 'request',
-        stage: 'inbound'
-      };
-      try {
-        const baseRt = asRecord((metadataBag as any)?.__rt) ?? {};
-        const extraRt = asRecord((nestedExtra as any)?.__rt) ?? {};
-        if (Object.keys(baseRt).length || Object.keys(extraRt).length) {
-          (nestedMetadata as any).__rt = { ...baseRt, ...extraRt };
+      const buildNestedMetadata = (extra: Record<string, unknown>, resolvedEntry: string): Record<string, unknown> => {
+        const out: Record<string, unknown> = {
+          ...(metadataBag ?? {}),
+          ...extra,
+          entryEndpoint: resolvedEntry,
+          direction: 'request',
+          stage: 'inbound'
+        };
+        try {
+          const baseRt = asRecord((metadataBag as any)?.__rt) ?? {};
+          const extraRt = asRecord((extra as any)?.__rt) ?? {};
+          if (Object.keys(baseRt).length || Object.keys(extraRt).length) {
+            (out as any).__rt = { ...baseRt, ...extraRt };
+          }
+        } catch {
+          // best-effort
         }
-      } catch {
-        // best-effort
-      }
 
-      if (asRecord((nestedMetadata as any).__rt)?.serverToolFollowup === true) {
-        const preservedClientHeaders = extractFollowupSessionHeaders(nestedMetadata.clientHeaders);
-        if (preservedClientHeaders) {
-          nestedMetadata.clientHeaders = preservedClientHeaders;
-          if (typeof nestedMetadata.sessionId !== 'string' || !nestedMetadata.sessionId.trim()) {
-            const sessionId = extractPreservedSessionToken(preservedClientHeaders, 'session');
-            if (sessionId) {
-              nestedMetadata.sessionId = sessionId;
+        if (asRecord((out as any).__rt)?.serverToolFollowup === true) {
+          const preservedClientHeaders = extractFollowupSessionHeaders(out.clientHeaders);
+          if (preservedClientHeaders) {
+            out.clientHeaders = preservedClientHeaders;
+            if (typeof out.sessionId !== 'string' || !out.sessionId.trim()) {
+              const sessionId = extractPreservedSessionToken(preservedClientHeaders, 'session');
+              if (sessionId) {
+                out.sessionId = sessionId;
+              }
             }
-          }
-          if (typeof nestedMetadata.conversationId !== 'string' || !nestedMetadata.conversationId.trim()) {
-            const conversationId = extractPreservedSessionToken(preservedClientHeaders, 'conversation');
-            if (conversationId) {
-              nestedMetadata.conversationId = conversationId;
+            if (typeof out.conversationId !== 'string' || !out.conversationId.trim()) {
+              const conversationId = extractPreservedSessionToken(preservedClientHeaders, 'conversation');
+              if (conversationId) {
+                out.conversationId = conversationId;
+              }
             }
+            if (typeof out.clockDaemonId !== 'string' || !out.clockDaemonId.trim()) {
+              const daemonId =
+                (typeof out.clientDaemonId === 'string' && out.clientDaemonId.trim())
+                  ? out.clientDaemonId
+                  : extractPreservedDaemonOrInjectToken(preservedClientHeaders, 'daemon');
+              if (daemonId) {
+                out.clientDaemonId = daemonId;
+                out.clockDaemonId = daemonId;
+              }
+            } else if (typeof out.clientDaemonId !== 'string' || !out.clientDaemonId.trim()) {
+              out.clientDaemonId = out.clockDaemonId;
+            }
+            if (typeof out.clientTmuxSessionId !== 'string' || !out.clientTmuxSessionId.trim()) {
+              const tmuxSessionId = extractPreservedDaemonOrInjectToken(preservedClientHeaders, 'tmux');
+              if (tmuxSessionId) {
+                out.clientTmuxSessionId = tmuxSessionId;
+                out.tmuxSessionId = tmuxSessionId;
+              }
+            } else if (typeof out.tmuxSessionId !== 'string' || !out.tmuxSessionId.trim()) {
+              out.tmuxSessionId = out.clientTmuxSessionId;
+            }
+            if (typeof out.clientWorkdir !== 'string' || !out.clientWorkdir.trim()) {
+              const workdir =
+                (typeof out.workdir === 'string' && out.workdir.trim())
+                  ? out.workdir
+                  : extractPreservedDaemonOrInjectToken(preservedClientHeaders, 'workdir');
+              if (workdir) {
+                out.clientWorkdir = workdir;
+                out.workdir = workdir;
+              }
+            } else if (typeof out.workdir !== 'string' || !out.workdir.trim()) {
+              out.workdir = out.clientWorkdir;
+            }
+          } else {
+            delete out.clientHeaders;
           }
-        } else {
-          delete nestedMetadata.clientHeaders;
+          delete out.clientRequestId;
         }
-        delete nestedMetadata.clientRequestId;
-      }
+        return out;
+      };
+
+      const nestedMetadata: Record<string, unknown> = buildNestedMetadata(nestedExtra, nestedEntry);
 
       const nestedInput: PipelineExecutionInput = {
         entryEndpoint: nestedEntry,
@@ -582,106 +400,110 @@ export async function convertProviderResponseIfNeeded(
         metadata: nestedMetadata
       };
 
-      try {
-        const clientInjectOnlyRaw = nestedMetadata.clientInjectOnly;
-        const clientInjectOnly =
-          clientInjectOnlyRaw === true ||
-          (typeof clientInjectOnlyRaw === 'string' && clientInjectOnlyRaw.trim().toLowerCase() === 'true');
-        const clientInjectText =
-          typeof nestedMetadata.clientInjectText === 'string' ? nestedMetadata.clientInjectText.trim() : '';
-        const clientInjectSource =
-          typeof nestedMetadata.clientInjectSource === 'string' && nestedMetadata.clientInjectSource.trim()
-            ? nestedMetadata.clientInjectSource.trim()
-            : 'servertool.client_inject';
-        const requestBody =
-          reenterOpts.body && typeof reenterOpts.body === 'object' && !Array.isArray(reenterOpts.body)
-            ? (reenterOpts.body as Record<string, unknown>)
-            : {};
-        const messages = Array.isArray(requestBody.messages) ? (requestBody.messages as unknown[]) : [];
-        const lastUser = [...messages]
-          .reverse()
-          .find((entry) => entry && typeof entry === 'object' && (entry as Record<string, unknown>).role === 'user') as
-          | Record<string, unknown>
-          | undefined;
-        const text = typeof lastUser?.content === 'string' ? String(lastUser.content) : '';
-        const injectTarget = {
-          tmuxSessionId: typeof nestedMetadata.tmuxSessionId === 'string' ? nestedMetadata.tmuxSessionId : undefined,
-          sessionId: typeof nestedMetadata.sessionId === 'string' ? nestedMetadata.sessionId : undefined,
-          workdir: typeof nestedMetadata.workdir === 'string' ? nestedMetadata.workdir : undefined,
-          requestId: reenterOpts.requestId
-        };
-        if (clientInjectOnly) {
-          bindClockConversationSession(nestedMetadata);
-          const strictTarget = resolveStrictClientInjectTarget({
-            tmuxSessionId: injectTarget.tmuxSessionId,
-            clockDaemonId:
-              typeof nestedMetadata.clockDaemonId === 'string'
-                ? nestedMetadata.clockDaemonId
-                : (typeof nestedMetadata.clockClientDaemonId === 'string' ? nestedMetadata.clockClientDaemonId : undefined),
-            conversationSessionId:
-              typeof nestedMetadata.sessionId === 'string'
-                ? nestedMetadata.sessionId
-                : typeof nestedMetadata.session_id === 'string'
-                  ? nestedMetadata.session_id
-                  : typeof nestedMetadata.conversationId === 'string'
-                    ? nestedMetadata.conversationId
-                    : (typeof nestedMetadata.conversation_id === 'string' ? nestedMetadata.conversation_id : undefined),
-            clientInjectReady:
-              nestedMetadata.clientInjectReady ?? nestedMetadata.client_inject_ready,
-            clientInjectReason:
-              nestedMetadata.clientInjectReason ?? nestedMetadata.client_inject_reason,
-            requestId: reenterOpts.requestId,
-            source: clientInjectSource
-          });
-          const injectText = clientInjectText || text || '继续执行';
-          await injectClockClientPromptStrict({
-            tmuxSessionId: strictTarget.tmuxSessionId,
-            sessionId: strictTarget.sessionId,
-            workdir: injectTarget.workdir,
-            requestId: injectTarget.requestId,
-            text: injectText,
-            source: clientInjectSource
-          });
-          return { body: { ok: true, mode: 'client_inject_only' } };
-        }
-        bindClockConversationSession(nestedMetadata);
-        const lastMessage = messages.length > 0 ? messages[messages.length - 1] : undefined;
-        const lastTool =
-          lastMessage && typeof lastMessage === 'object' && !Array.isArray(lastMessage)
-            ? (lastMessage as Record<string, unknown>)
-            : undefined;
-        const lastToolRole = typeof lastTool?.role === 'string' ? lastTool.role : '';
-        const lastToolName = typeof lastTool?.name === 'string' ? String(lastTool.name).trim() : '';
-        if (text.includes('<**clock:{') && text.includes('}**>')) {
-          await injectClockClientPromptStrict({
-            ...injectTarget,
-            text,
-            source: 'servertool.reenter'
-          });
-        }
-        if (lastToolRole === 'tool' && lastToolName === 'continue_execution') {
-          await injectClockClientPromptStrict({
-            ...injectTarget,
-            text: '继续执行',
-            source: 'servertool.continue_execution'
-          });
-        }
-      } catch (error) {
-        const code = typeof (error as { code?: unknown })?.code === 'string'
-          ? String((error as { code?: string }).code)
-          : '';
-        if (code === 'SERVERTOOL_FOLLOWUP_FAILED') {
-          throw error;
-        }
-        // best-effort only for non-critical inject attempts
-      }
-
       const nestedResult = await deps.executeNested(nestedInput);
       const nestedBody =
         nestedResult.body && typeof nestedResult.body === 'object'
           ? (nestedResult.body as Record<string, unknown>)
           : undefined;
       return { body: nestedBody };
+    };
+
+    const clientInjectDispatch = async (injectOpts: {
+      entryEndpoint: string;
+      requestId: string;
+      body?: Record<string, unknown>;
+      metadata?: Record<string, unknown>;
+    }): Promise<{ ok: boolean; reason?: string }> => {
+      const nestedEntry = injectOpts.entryEndpoint || options.entryEndpoint || entry;
+      const nestedExtra = asRecord(injectOpts.metadata) ?? {};
+      const nestedMetadata: Record<string, unknown> = (() => {
+        const out: Record<string, unknown> = {
+        ...(metadataBag ?? {}),
+        ...nestedExtra,
+        entryEndpoint: nestedEntry,
+        direction: 'request',
+        stage: 'inbound'
+      };
+      try {
+        const baseRt = asRecord((metadataBag as any)?.__rt) ?? {};
+        const extraRt = asRecord((nestedExtra as any)?.__rt) ?? {};
+        if (Object.keys(baseRt).length || Object.keys(extraRt).length) {
+            (out as any).__rt = { ...baseRt, ...extraRt };
+        }
+      } catch {
+        // best-effort
+      }
+
+      if (asRecord((out as any).__rt)?.serverToolFollowup === true) {
+          const preservedClientHeaders = extractFollowupSessionHeaders(out.clientHeaders);
+        if (preservedClientHeaders) {
+            out.clientHeaders = preservedClientHeaders;
+            if (typeof out.sessionId !== 'string' || !out.sessionId.trim()) {
+            const sessionId = extractPreservedSessionToken(preservedClientHeaders, 'session');
+            if (sessionId) {
+                out.sessionId = sessionId;
+            }
+          }
+            if (typeof out.conversationId !== 'string' || !out.conversationId.trim()) {
+            const conversationId = extractPreservedSessionToken(preservedClientHeaders, 'conversation');
+            if (conversationId) {
+                out.conversationId = conversationId;
+            }
+          }
+            if (typeof out.clockDaemonId !== 'string' || !out.clockDaemonId.trim()) {
+            const daemonId =
+                (typeof out.clientDaemonId === 'string' && out.clientDaemonId.trim())
+                  ? out.clientDaemonId
+                : extractPreservedDaemonOrInjectToken(preservedClientHeaders, 'daemon');
+            if (daemonId) {
+                out.clientDaemonId = daemonId;
+                out.clockDaemonId = daemonId;
+            }
+            } else if (typeof out.clientDaemonId !== 'string' || !out.clientDaemonId.trim()) {
+              out.clientDaemonId = out.clockDaemonId;
+          }
+            if (typeof out.clientTmuxSessionId !== 'string' || !out.clientTmuxSessionId.trim()) {
+            const tmuxSessionId = extractPreservedDaemonOrInjectToken(preservedClientHeaders, 'tmux');
+            if (tmuxSessionId) {
+                out.clientTmuxSessionId = tmuxSessionId;
+                out.tmuxSessionId = tmuxSessionId;
+            }
+            } else if (typeof out.tmuxSessionId !== 'string' || !out.tmuxSessionId.trim()) {
+              out.tmuxSessionId = out.clientTmuxSessionId;
+          }
+            if (typeof out.clientWorkdir !== 'string' || !out.clientWorkdir.trim()) {
+            const workdir =
+                (typeof out.workdir === 'string' && out.workdir.trim())
+                  ? out.workdir
+                : extractPreservedDaemonOrInjectToken(preservedClientHeaders, 'workdir');
+            if (workdir) {
+                out.clientWorkdir = workdir;
+                out.workdir = workdir;
+            }
+            } else if (typeof out.workdir !== 'string' || !out.workdir.trim()) {
+              out.workdir = out.clientWorkdir;
+          }
+        } else {
+            delete out.clientHeaders;
+        }
+          delete out.clientRequestId;
+      }
+        return out;
+      })();
+
+      const requestBody =
+        injectOpts.body && typeof injectOpts.body === 'object' && !Array.isArray(injectOpts.body)
+          ? (injectOpts.body as Record<string, unknown>)
+          : {};
+      const injectResult = await runClientInjectionFlowBeforeReenter({
+        nestedMetadata,
+        requestBody,
+        requestId: injectOpts.requestId
+      });
+      if (injectResult.clientInjectOnlyHandled) {
+        return { ok: true };
+      }
+      return { ok: false, reason: 'client_inject_not_handled' };
     };
 
     const converted = await bridgeConvertProviderResponse({
@@ -693,7 +515,8 @@ export async function convertProviderResponseIfNeeded(
       requestSemantics: options.requestSemantics,
       providerInvoker: serverToolsEnabled ? providerInvoker : undefined,
       stageRecorder,
-      reenterPipeline: serverToolsEnabled ? reenterPipeline : undefined
+      reenterPipeline: serverToolsEnabled ? reenterPipeline : undefined,
+      clientInjectDispatch: serverToolsEnabled ? clientInjectDispatch : undefined
     });
     if (converted.__sse_responses) {
       return {
@@ -752,6 +575,19 @@ export async function convertProviderResponseIfNeeded(
         (errRecord as any).retryable = true;
         if (typeof errRecord.code !== 'string' || !String(errRecord.code).trim()) {
           (errRecord as any).code = 'HTTP_429';
+        }
+      }
+      if (isServerToolFollowupError) {
+        console.error('[RequestExecutor] ServerTool followup failed', {
+          requestId: options.requestId,
+          code: errCode,
+          upstreamCode: upstreamCode || detailUpstreamCode,
+          reason: detailReason,
+          message
+        });
+        if (normalizedUpstreamCode === 'client_inject_failed') {
+          // Followup rejection should not break the main assistant response.
+          return options.response;
         }
       }
       if (isVerboseErrorLoggingEnabled()) {

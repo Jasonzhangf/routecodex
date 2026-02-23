@@ -6,7 +6,8 @@ import {
   reserveClockDueTasks,
   commitClockDueReservation,
   clearClockTasksSnapshot,
-  listClockTasksSnapshot
+  listClockTasksSnapshot,
+  saveRoutingInstructionStateSync
 } from '../../../modules/llmswitch/bridge.js';
 import { getClockClientRegistry } from './clock-client-registry.js';
 import { toExactMatchClockConfig } from './clock-daemon-inject-config.js';
@@ -138,6 +139,34 @@ function summarizeNumberList(values: number[]): { count: number; sample: number[
     count: normalized.length,
     sample: normalized.slice(0, CLOCK_CLEANUP_AUDIT_SAMPLE_LIMIT)
   };
+}
+
+function clearScopedRoutingStateByScope(scope: string | undefined): void {
+  const normalized = readString(scope);
+  if (!normalized) {
+    return;
+  }
+  try {
+    saveRoutingInstructionStateSync(normalized, null);
+  } catch {
+    // best-effort only
+  }
+}
+
+function clearScopedRoutingStateForClockCleanup(args: {
+  removedDaemonIds: string[];
+  removedTmuxSessionIds: string[];
+  extraScopes?: string[];
+}): void {
+  for (const daemonId of args.removedDaemonIds) {
+    clearScopedRoutingStateByScope(`clockd.${daemonId}`);
+  }
+  for (const tmuxSessionId of args.removedTmuxSessionIds) {
+    clearScopedRoutingStateByScope(`tmux:${tmuxSessionId}`);
+  }
+  for (const scope of args.extraScopes || []) {
+    clearScopedRoutingStateByScope(scope);
+  }
 }
 
 function isClockManagedTerminationEnabled(): boolean {
@@ -278,6 +307,14 @@ export async function tickClockDaemonInjectLoop(server: any): Promise<void> {
       new Set<string>([...staleCleanup.removedTmuxSessionIds, ...deadTmuxCleanup.removedTmuxSessionIds])
     );
     const cleanupClockSessionIds = Array.from(new Set<string>([...removedConversationSessionIds, ...removedTmuxSessionIds]));
+    clearScopedRoutingStateForClockCleanup({
+      removedDaemonIds: Array.from(new Set<string>([
+        ...staleCleanup.removedDaemonIds,
+        ...deadTmuxCleanup.removedDaemonIds
+      ])),
+      removedTmuxSessionIds,
+      extraScopes: removedConversationSessionIds
+    });
 
     if (cleanupClockSessionIds.length > 0) {
       for (const cleanupSessionId of cleanupClockSessionIds) {
@@ -410,8 +447,12 @@ export async function tickClockDaemonInjectLoop(server: any): Promise<void> {
         });
         let clearedClockTasks = 0;
         if (shouldClearOrphanTasks) {
-          registry.unbindConversationSession(sessionId);
+          registry.unbindSessionScope(sessionId);
           clearedClockTasks = await clearClockTasksSnapshot({ sessionId, config: clockConfig });
+          clearScopedRoutingStateByScope(sessionId);
+          if (tmuxSessionId) {
+            clearScopedRoutingStateByScope(`tmux:${tmuxSessionId}`);
+          }
         }
         if (
           shouldLogClockDaemonInjectSkip({

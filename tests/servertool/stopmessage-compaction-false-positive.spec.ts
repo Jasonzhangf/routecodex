@@ -4,20 +4,15 @@ import { runServerSideToolEngine } from '../../sharedmodule/llmswitch-core/src/s
 import type { AdapterContext } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.js';
 import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/json.js';
 import {
-  serializeRoutingInstructionState,
   type RoutingInstructionState
 } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-instructions.js';
+import { saveRoutingInstructionStateSync } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/sticky-session-store.js';
 
 const SESSION_DIR = path.join(process.cwd(), 'tmp', 'jest-stopmessage-compaction-false-positive');
 
 function writeRoutingStateForSession(sessionId: string, state: RoutingInstructionState): void {
   fs.mkdirSync(SESSION_DIR, { recursive: true });
-  const filepath = path.join(SESSION_DIR, `session-${sessionId}.json`);
-  fs.writeFileSync(
-    filepath,
-    JSON.stringify({ version: 1, state: serializeRoutingInstructionState(state) }),
-    { encoding: 'utf8' }
-  );
+  saveRoutingInstructionStateSync(`tmux:${sessionId}`, state as any);
 }
 
 describe('stopMessage should not be disabled by compaction marker substring', () => {
@@ -83,6 +78,8 @@ describe('stopMessage should not be disabled by compaction marker substring', ()
       entryEndpoint: '/v1/responses',
       providerProtocol: 'gemini-chat',
       sessionId,
+      tmuxSessionId: sessionId,
+      clientTmuxSessionId: sessionId,
       capturedChatRequest: capturedResponsesPayload
     } as any;
 
@@ -98,4 +95,3 @@ describe('stopMessage should not be disabled by compaction marker substring', ()
     expect(result.execution?.flowId).toBe('stop_message_flow');
   });
 });
-

@@ -61,7 +61,7 @@ describe('cli restart command', () => {
     ).rejects.toThrow('exit:1');
   });
 
-  it('broadcasts a restart signal to the running server', async () => {
+  it('requests daemon-managed restart for the running server', async () => {
     const program = new Command();
     const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
     let call = 0;
@@ -98,10 +98,10 @@ describe('cli restart command', () => {
     });
 
     await program.parseAsync(['node', 'routecodex', 'restart'], { from: 'node' });
-    expect(signals).toEqual([{ pid: 111, signal: 'SIGUSR2' }]);
+    expect(signals).toEqual([]);
   });
 
-  it('supports --port to target a specific server', async () => {
+  it('supports --port to target a specific server via daemon endpoint', async () => {
     const program = new Command();
     const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
     let call = 0;
@@ -130,10 +130,10 @@ describe('cli restart command', () => {
     });
 
     await program.parseAsync(['node', 'routecodex', 'restart', '--port', '5520'], { from: 'node' });
-    expect(signals).toEqual([{ pid: 333, signal: 'SIGUSR2' }]);
+    expect(signals).toEqual([]);
   });
 
-  it('accepts same-pid healthy restart without timing out', async () => {
+  it('accepts same-pid healthy restart without timing out via daemon endpoint', async () => {
     const program = new Command();
     const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
     createRestartCommand(program, {
@@ -166,6 +166,6 @@ describe('cli restart command', () => {
     });
 
     await program.parseAsync(['node', 'routecodex', 'restart'], { from: 'node' });
-    expect(signals).toEqual([{ pid: 777, signal: 'SIGUSR2' }]);
+    expect(signals).toEqual([]);
   });
 });

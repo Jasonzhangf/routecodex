@@ -261,11 +261,20 @@ describe('servertool:clock', () => {
     expect(stateAfter.tasks[0].deliveryCount).toBe(1);
   });
 
-  test('daemon-scoped clock session isolates tasks when sessionId is shared', async () => {
+  test('tmux-scoped clock session isolates tasks when sessionId is shared', async () => {
     const sharedSessionId = 's-clock-shared-session';
     const dueAtIso = new Date(Date.now() + 60_000).toISOString();
+    const clockConfig = normalizeClockConfig({ enabled: true, tickMs: 0 });
+    if (!clockConfig) {
+      throw new Error('clockConfig should not be null');
+    }
 
-    const runClockTool = async (requestId: string, daemonId: string, action: 'schedule' | 'list', task?: string) => {
+    const runClockTool = async (
+      requestId: string,
+      tmuxSessionId: string,
+      action: 'schedule' | 'list',
+      task?: string
+    ) => {
       const toolCallArgs =
         action === 'schedule'
           ? {
@@ -304,7 +313,8 @@ describe('servertool:clock', () => {
           entryEndpoint: '/v1/chat/completions',
           providerProtocol: 'openai-chat',
           sessionId: sharedSessionId,
-          clockDaemonId: daemonId,
+          tmuxSessionId,
+          clientTmuxSessionId: tmuxSessionId,
           __rt: { clock: { enabled: true, tickMs: 0 } },
           capturedChatRequest: {
             model: 'gpt-test',
@@ -320,11 +330,8 @@ describe('servertool:clock', () => {
     await runClockTool('req-clock-scope-da', 'clockd_A', 'schedule', 'task-da');
     await runClockTool('req-clock-scope-db', 'clockd_B', 'schedule', 'task-db');
 
-    expect(fs.existsSync(path.join(SESSION_DIR, 'clock', 'clockd.clockd_A.json'))).toBe(true);
-    expect(fs.existsSync(path.join(SESSION_DIR, 'clock', 'clockd.clockd_B.json'))).toBe(true);
-
-    const stateA = readClockStateFile('clockd.clockd_A');
-    const stateB = readClockStateFile('clockd.clockd_B');
+    const stateA = await loadClockSessionState('tmux:clockd_A', clockConfig);
+    const stateB = await loadClockSessionState('tmux:clockd_B', clockConfig);
     expect(stateA.tasks.map((item: any) => item.task)).toContain('task-da');
     expect(stateA.tasks.map((item: any) => item.task)).not.toContain('task-db');
     expect(stateB.tasks.map((item: any) => item.task)).toContain('task-db');
@@ -996,9 +1003,9 @@ describe('servertool:clock', () => {
     expect(markerTask?.recurrence?.maxRuns).toBe(2);
   });
 
-  test('clock marker scheduling prefers daemon-scoped clock session when clockDaemonId exists', async () => {
+  test('clock marker scheduling prefers tmux-scoped clock session when tmuxSessionId exists', async () => {
     const sharedSessionId = 's-clock-marker-shared';
-    const daemonId = 'clockd_marker_A';
+    const tmuxSessionId = 'clockd_marker_A';
     const dueAtIso = new Date(Date.now() + 120_000).toISOString();
     const request = buildRequest([
       {
@@ -1015,7 +1022,8 @@ describe('servertool:clock', () => {
       metadata: {
         providerProtocol: 'openai-chat',
         sessionId: sharedSessionId,
-        clockDaemonId: daemonId,
+        tmuxSessionId,
+        clientTmuxSessionId: tmuxSessionId,
         clock: { enabled: true, tickMs: 0 }
       }
     });
@@ -1030,7 +1038,7 @@ describe('servertool:clock', () => {
     expect(payload.action).toBe('schedule');
 
     const config = normalizeClockConfig({ enabled: true, tickMs: 0 })!;
-    const daemonScopedState = await loadClockSessionState(`clockd.${daemonId}`, config);
+    const daemonScopedState = await loadClockSessionState(`tmux:${tmuxSessionId}`, config);
     const sharedSessionState = await loadClockSessionState(sharedSessionId, config);
     expect(daemonScopedState.tasks.some((task) => task.task === 'marker-daemon-task')).toBe(true);
     expect(sharedSessionState.tasks).toHaveLength(0);
