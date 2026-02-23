@@ -112,17 +112,8 @@ function colorizeRuntimeLogLine(line: string): string {
     return line;
   }
 
-  if (line.includes('[virtual-router][stop_scope]')) {
-    if (line.includes('stage=apply')) {
-      return wrapAnsi(line, ANSI_GREEN);
-    }
-    if (line.includes('stage=drop')) {
-      return wrapAnsi(line, ANSI_RED);
-    }
-    return wrapAnsi(line, ANSI_MAGENTA);
-  }
-  if (line.includes('[virtual-router][instruction_parse]')) {
-    return wrapAnsi(line, ANSI_MAGENTA);
+  if (line.includes('[virtual-router][instruction_parse]') || line.includes('[virtual-router][stop_scope]')) {
+    return wrapAnsi(line, ANSI_GREEN);
   }
   if (line.includes('[servertool][stop_compare]')) {
     return wrapAnsi(line, ANSI_BLUE);

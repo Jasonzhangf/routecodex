@@ -46,17 +46,15 @@ describe('continue_execution servertool followup provider pin', () => {
     } as any;
 
     let capturedFollowupMeta: Record<string, unknown> | null = null;
+    let reenterCalled = false;
     const orchestration = await runServerToolOrchestration({
       chat: buildContinueExecutionToolCallPayload(),
       adapterContext,
       requestId: 'req-continue-pin-1',
       entryEndpoint: '/v1/messages',
       providerProtocol: 'anthropic-messages',
-      reenterPipeline: async (opts: any) => {
-        capturedFollowupMeta =
-          opts?.metadata && typeof opts.metadata === 'object'
-            ? (opts.metadata as Record<string, unknown>)
-            : null;
+      reenterPipeline: async () => {
+        reenterCalled = true;
         return {
           body: {
             id: 'chatcmpl-continue-followup-1',
@@ -65,6 +63,13 @@ describe('continue_execution servertool followup provider pin', () => {
             choices: [{ index: 0, message: { role: 'assistant', content: '继续执行中' }, finish_reason: 'stop' }]
           } as JsonObject
         };
+      },
+      clientInjectDispatch: async (opts: any) => {
+        capturedFollowupMeta =
+          opts?.metadata && typeof opts.metadata === 'object'
+            ? (opts.metadata as Record<string, unknown>)
+            : null;
+        return { ok: true } as any;
       }
     });
 
@@ -72,6 +77,7 @@ describe('continue_execution servertool followup provider pin', () => {
     expect(orchestration.flowId).toBe('continue_execution_flow');
     expect(capturedFollowupMeta).toBeTruthy();
     expect((capturedFollowupMeta as any)?.__shadowCompareForcedProviderKey).toBe(providerKey);
+    expect(reenterCalled).toBe(false);
   });
 
   test('keeps followup unpinned when adapter context has no provider key', async () => {
@@ -87,17 +93,15 @@ describe('continue_execution servertool followup provider pin', () => {
     } as any;
 
     let capturedFollowupMeta: Record<string, unknown> | null = null;
+    let reenterCalled = false;
     const orchestration = await runServerToolOrchestration({
       chat: buildContinueExecutionToolCallPayload(),
       adapterContext,
       requestId: 'req-continue-pin-2',
       entryEndpoint: '/v1/messages',
       providerProtocol: 'anthropic-messages',
-      reenterPipeline: async (opts: any) => {
-        capturedFollowupMeta =
-          opts?.metadata && typeof opts.metadata === 'object'
-            ? (opts.metadata as Record<string, unknown>)
-            : null;
+      reenterPipeline: async () => {
+        reenterCalled = true;
         return {
           body: {
             id: 'chatcmpl-continue-followup-2',
@@ -106,6 +110,13 @@ describe('continue_execution servertool followup provider pin', () => {
             choices: [{ index: 0, message: { role: 'assistant', content: '继续' }, finish_reason: 'stop' }]
           } as JsonObject
         };
+      },
+      clientInjectDispatch: async (opts: any) => {
+        capturedFollowupMeta =
+          opts?.metadata && typeof opts.metadata === 'object'
+            ? (opts.metadata as Record<string, unknown>)
+            : null;
+        return { ok: true } as any;
       }
     });
 
@@ -113,5 +124,6 @@ describe('continue_execution servertool followup provider pin', () => {
     expect(orchestration.flowId).toBe('continue_execution_flow');
     expect(capturedFollowupMeta).toBeTruthy();
     expect((capturedFollowupMeta as any)?.__shadowCompareForcedProviderKey).toBeUndefined();
+    expect(reenterCalled).toBe(false);
   });
 });

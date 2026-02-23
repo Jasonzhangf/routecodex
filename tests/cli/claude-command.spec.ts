@@ -74,6 +74,62 @@ function extractTmuxLaunchShellCommand(call: { command: string; args: string[] }
 }
 
 describe('cli claude command', () => {
+  it('prints claude exit summary after child close', async () => {
+    const infos: string[] = [];
+    const exitCodes: number[] = [];
+    let onExit: ((code: number | null, signal: NodeJS.Signals | null) => void) | null = null;
+    let onClose: ((code: number | null, signal: NodeJS.Signals | null) => void) | null = null;
+    const program = new Command();
+
+    createClaudeCommand(program, {
+      isDevPackage: false,
+      isWindows: false,
+      defaultDevPort: 5555,
+      nodeBin: 'node',
+      createSpinner: async () => createStubSpinner(),
+      logger: { info: (msg) => infos.push(String(msg)), warning: () => {}, success: () => {}, error: () => {} },
+      env: {},
+      rawArgv: ['claude', '--url', 'http://localhost:1234/proxy'],
+      fsImpl: createStubFs(),
+      homedir: () => '/home/test',
+      cwd: () => '/home/test',
+      sleep: async () => {},
+      fetch: (async () => ({ ok: true, json: async () => ({ status: 'ready', ok: true }) })) as any,
+      spawnSyncImpl: () => ({ status: 1, stdout: '', stderr: 'tmux not found' }) as any,
+      spawn: () =>
+        ({
+          pid: 9528,
+          on: (event: string, cb: (...args: any[]) => void) => {
+            if (event === 'exit') {
+              onExit = cb as (code: number | null, signal: NodeJS.Signals | null) => void;
+            }
+            if (event === 'close') {
+              onClose = cb as (code: number | null, signal: NodeJS.Signals | null) => void;
+            }
+          },
+          kill: () => true
+        }) as any,
+      getModulesConfigPath: () => '/tmp/modules.json',
+      resolveServerEntryPath: () => '/tmp/index.js',
+      waitForever: async () => {
+        onExit?.(9, null);
+        onClose?.(9, null);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      },
+      exit: (code) => {
+        exitCodes.push(Number(code));
+        return undefined as never;
+      }
+    });
+
+    await program.parseAsync(['node', 'routecodex', 'claude', '--url', 'http://localhost:1234/proxy'], {
+      from: 'node'
+    });
+
+    expect(infos.some((line) => line.includes('[client-exit] Claude exited (code=9, signal=none)'))).toBe(true);
+    expect(exitCodes).toContain(9);
+  });
+
   it('uses explicit --cwd as launch working directory', async () => {
     const spawnCalls: Array<{ command: string; args: string[]; options: any }> = [];
     const program = new Command();

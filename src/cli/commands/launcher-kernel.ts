@@ -74,6 +74,11 @@ function shouldStopManagedTmuxOnToolExit(env: NodeJS.ProcessEnv): boolean {
   );
 }
 
+function shouldLogClientExitSummary(commandName: string): boolean {
+  const normalized = String(commandName || '').trim().toLowerCase();
+  return normalized === 'codex' || normalized === 'claude';
+}
+
 function readProcessPpidAndCommand(pid: number): { ppid: number | null; command: string } {
   if (process.platform === 'win32') {
     return { ppid: null, command: '' };
@@ -1027,6 +1032,12 @@ async function startClockClientService(args: {
   }
 
   const controlUrl = `${resolved.protocol}://127.0.0.1:${resolved.port}${resolved.basePath}`;
+  const controlRequestTimeoutMs = resolveIntFromEnv(
+    ctx.env.ROUTECODEX_CLOCK_CLIENT_CONTROL_TIMEOUT_MS ?? ctx.env.RCC_CLOCK_CLIENT_CONTROL_TIMEOUT_MS,
+    1500,
+    200,
+    30_000
+  );
 
   const normalizeManagedProcessPayload = (): Record<string, unknown> => {
     const state = typeof getManagedProcessState === 'function' ? getManagedProcessState() : undefined;
@@ -1049,15 +1060,33 @@ async function startClockClientService(args: {
     pathSuffix: string,
     payload: Record<string, unknown>
   ): Promise<{ ok: boolean; status: number }> => {
+    const abortController = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timeoutHandle = abortController
+      ? setTimeout(() => {
+          try {
+            abortController.abort();
+          } catch {
+            // ignore abort failures
+          }
+        }, controlRequestTimeoutMs)
+      : null;
+    if (timeoutHandle && typeof (timeoutHandle as NodeJS.Timeout).unref === 'function') {
+      (timeoutHandle as NodeJS.Timeout).unref();
+    }
     try {
       const response = await ctx.fetch(`${controlUrl}${pathSuffix}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
+        ...(abortController ? { signal: abortController.signal } : {})
       });
       return { ok: response.ok, status: response.status };
     } catch {
       return { ok: false, status: 0 };
+    } finally {
+      if (timeoutHandle) {
+        clearTimeout(timeoutHandle);
+      }
     }
   };
 
@@ -1550,6 +1579,19 @@ export function createLauncherCommand(program: Command, ctx: LauncherCommandCont
       let observedToolExitCode: number | null | undefined;
       let observedToolExitSignal: NodeJS.Signals | null = null;
       let requestedShutdownSignal: NodeJS.Signals | null = null;
+      let clientExitSummaryLogged = false;
+      const logClientExitSummary = (): void => {
+        if (clientExitSummaryLogged || !shouldLogClientExitSummary(spec.commandName)) {
+          return;
+        }
+        clientExitSummaryLogged = true;
+        const codeLabel =
+          typeof observedToolExitCode === 'number' && Number.isFinite(observedToolExitCode)
+            ? String(observedToolExitCode)
+            : 'n/a';
+        const signalLabel = observedToolExitSignal || 'none';
+        ctx.logger.info(`[client-exit] ${spec.displayName} exited (code=${codeLabel}, signal=${signalLabel})`);
+      };
       const finalizeToolTermination = async (options?: { forceExitCode?: number }): Promise<void> => {
         if (toolProcessClosing) {
           return;
@@ -1686,6 +1728,7 @@ export function createLauncherCommand(program: Command, ctx: LauncherCommandCont
         if (!observedToolExitSignal) {
           observedToolExitSignal = signal ?? null;
         }
+        logClientExitSummary();
         void finalizeToolTermination();
       });
 

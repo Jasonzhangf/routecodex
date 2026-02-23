@@ -311,6 +311,11 @@ describe('Chat semantics stage 1 bridge', () => {
       (tool) => tool.function?.name === 'continue_execution'
     );
     expect(continueTool?.function?.description ?? '').toContain('progress reporting without interrupting execution');
+    const reviewTool = (result.processedRequest?.tools ?? []).find(
+      (tool) => tool.function?.name === 'review'
+    );
+    expect(reviewTool).toBeTruthy();
+    expect(reviewTool?.function?.description ?? '').toContain('Independent reviewer handoff');
 
     const clockTool = (result.processedRequest?.tools ?? []).find(
       (tool) => tool.function?.name === 'clock'
@@ -367,8 +372,12 @@ describe('Chat semantics stage 1 bridge', () => {
     const hasClockTool = (result.processedRequest?.tools ?? []).some(
       (tool) => tool.function?.name === 'clock'
     );
+    const hasReviewTool = (result.processedRequest?.tools ?? []).some(
+      (tool) => tool.function?.name === 'review'
+    );
     expect(hasContinueTool).toBe(false);
     expect(hasClockTool).toBe(false);
+    expect(hasReviewTool).toBe(false);
 
     expect(hasUserDirective(result.processedRequest?.messages ?? [], '[routecodex:continue_execution_injection]')).toBe(false);
   });

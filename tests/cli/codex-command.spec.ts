@@ -102,6 +102,62 @@ function extractTmuxLaunchShellCommand(call: { command: string; args: string[] }
 }
 
 describe('cli codex command', () => {
+  it('prints codex exit summary after child close', async () => {
+    const infos: string[] = [];
+    const exitCodes: number[] = [];
+    let onExit: ((code: number | null, signal: NodeJS.Signals | null) => void) | null = null;
+    let onClose: ((code: number | null, signal: NodeJS.Signals | null) => void) | null = null;
+    const program = new Command();
+
+    createCodexCommand(program, {
+      isDevPackage: false,
+      isWindows: false,
+      defaultDevPort: 5555,
+      nodeBin: 'node',
+      createSpinner: async () => createStubSpinner(),
+      logger: { info: (msg) => infos.push(String(msg)), warning: () => {}, success: () => {}, error: () => {} },
+      env: {},
+      rawArgv: ['codex', '--url', 'http://localhost:5520/proxy'],
+      fsImpl: createStubFs(),
+      homedir: () => '/home/test',
+      cwd: () => '/home/test',
+      sleep: async () => {},
+      fetch: (async () => ({ ok: true, json: async () => ({ status: 'ready', ok: true }) })) as any,
+      spawnSyncImpl: () => ({ status: 1, stdout: '', stderr: 'tmux not found' }) as any,
+      spawn: () =>
+        ({
+          pid: 9527,
+          on: (event: string, cb: (...args: any[]) => void) => {
+            if (event === 'exit') {
+              onExit = cb as (code: number | null, signal: NodeJS.Signals | null) => void;
+            }
+            if (event === 'close') {
+              onClose = cb as (code: number | null, signal: NodeJS.Signals | null) => void;
+            }
+          },
+          kill: () => true
+        }) as any,
+      getModulesConfigPath: () => '/tmp/modules.json',
+      resolveServerEntryPath: () => '/tmp/index.js',
+      waitForever: async () => {
+        onExit?.(17, null);
+        onClose?.(17, null);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      },
+      exit: (code) => {
+        exitCodes.push(Number(code));
+        return undefined as never;
+      }
+    });
+
+    await program.parseAsync(['node', 'routecodex', 'codex', '--url', 'http://localhost:5520/proxy'], {
+      from: 'node'
+    });
+
+    expect(infos.some((line) => line.includes('[client-exit] Codex exited (code=17, signal=none)'))).toBe(true);
+    expect(exitCodes).toContain(17);
+  });
+
   it('does not forward SIGTERM to codex child by default', async () => {
     const signalHandlers = new Map<NodeJS.Signals, () => void>();
     const killSignals: string[] = [];
