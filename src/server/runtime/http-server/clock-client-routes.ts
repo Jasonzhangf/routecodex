@@ -12,8 +12,7 @@ import {
 import { getClockClientRegistry } from './clock-client-registry.js';
 import { normalizeWorkdir } from './clock-client-registry-utils.js';
 import { isLocalRequest } from './daemon-admin-routes.js';
-import { isTmuxSessionAlive, killManagedTmuxSession } from './tmux-session-probe.js';
-import { terminateManagedClientProcess } from './managed-process-probe.js';
+import { isTmuxSessionAlive } from './tmux-session-probe.js';
 import {
   isClockManagedTerminationEnabled,
   normalizeTaskCreateItems,
@@ -373,28 +372,15 @@ export function registerClockClientRoutes(app: Application): void {
     }
 
     const modeSafe = mode.toLowerCase();
-    const allowManagedTermination =
+    const requestedTerminateManaged =
       parseBoolean(body.terminateManaged) ?? isClockManagedTerminationEnabled();
-    const terminateHandlers = allowManagedTermination
-      ? {
-          terminateManagedTmuxSession: (tmuxSessionId: string) => killManagedTmuxSession(tmuxSessionId),
-          terminateManagedClientProcess: (processInfo: {
-            daemonId: string;
-            pid: number;
-            commandHint?: string;
-            clientType?: string;
-          }) => terminateManagedClientProcess(processInfo)
-        }
-      : {};
-
+    const allowManagedTermination = false;
     const cleanup = modeSafe === 'stale_heartbeat'
       ? registry.cleanupStaleHeartbeats({
-        ...terminateHandlers,
         staleAfterMs: Number.isFinite(Number(body.staleAfterMs)) ? Number(body.staleAfterMs) : undefined
       })
       : registry.cleanupDeadTmuxSessions({
-        isTmuxSessionAlive,
-        ...terminateHandlers
+        isTmuxSessionAlive
       });
     const cleanupClockSessionIds = Array.from(new Set<string>([
       ...cleanup.removedConversationSessionIds,
@@ -411,6 +397,7 @@ export function registerClockClientRoutes(app: Application): void {
       ok: true,
       mode: modeSafe === 'stale_heartbeat' ? 'stale_heartbeat' : 'dead_tmux',
       terminateManaged: allowManagedTermination,
+      terminateManagedRequested: requestedTerminateManaged,
       cleanup,
       clearedTaskSessions
     });

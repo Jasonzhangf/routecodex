@@ -2,7 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import net from 'node:net';
-import { describe, expect, it } from '@jest/globals';
+import { describe, expect, it, jest } from '@jest/globals';
 
 import { ensurePortAvailableImpl, findListeningPidsImpl, isServerHealthyQuickImpl, killPidBestEffortImpl } from '../../src/cli/server/port-utils.js';
 import { flushProcessLifecycleLogQueue } from '../../src/utils/process-lifecycle-logger.js';
@@ -224,6 +224,46 @@ describe('cli server port-utils', () => {
       expect(killCalled).toBe(false);
     } finally {
       await new Promise<void>((resolve) => probe.close(() => resolve()));
+    }
+  });
+
+  it('ensurePortAvailableImpl uses in-place restart and exits in build restart-only mode', async () => {
+    const spinner = {
+      start: () => spinner,
+      succeed: () => {},
+      fail: () => {},
+      warn: () => {},
+      info: () => {},
+      stop: () => {},
+      text: ''
+    };
+    const logger = { warning: () => {}, info: () => {}, success: () => {}, error: () => {} };
+    let fetchCalled = false;
+    const killSpy = jest.spyOn(process, 'kill').mockImplementation((() => true) as any);
+
+    try {
+      await expect(ensurePortAvailableImpl({
+        port: 5520,
+        parentSpinner: spinner,
+        opts: { restart: true },
+        fetchImpl: (async () => {
+          fetchCalled = true;
+          return { ok: false };
+        }) as any,
+        sleep: async () => {},
+        env: { ROUTECODEX_BUILD_RESTART_ONLY: '1' },
+        logger,
+        createSpinner: async () => spinner,
+        findListeningPids: () => [12345],
+        killPidBestEffort: () => {},
+        isServerHealthyQuick: async () => true,
+        exit: ((code: number) => { throw new Error(`exit:${code}`); }) as any
+      })).rejects.toThrow('exit:0');
+
+      expect(fetchCalled).toBe(false);
+      expect(killSpy).toHaveBeenCalledWith(12345, 'SIGUSR2');
+    } finally {
+      killSpy.mockRestore();
     }
   });
 

@@ -45,18 +45,7 @@ export function shouldTraceClockScopeByContext(args: {
   if (mode === 'on' || mode === 'verbose') {
     return true;
   }
-
-  const endpoint = args.endpointOrPath || '';
-  if (!(endpoint.startsWith('/v1/') || endpoint.startsWith('/openai/') || endpoint.startsWith('/responses'))) {
-    return false;
-  }
-  const userAgent = (args.userAgent || '').toLowerCase();
-  const originator = (args.originator || '').toLowerCase();
-  return (
-    userAgent.includes('codex')
-    || userAgent.includes('claude')
-    || originator.includes('codex')
-    || originator.includes('claude')
-    || args.hasTurnMetadata === true
-  );
+  void args;
+  // auto mode defaults to silent to avoid noisy request-path logging in normal runs.
+  return false;
 }

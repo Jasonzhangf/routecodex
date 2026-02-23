@@ -166,6 +166,10 @@ export async function ensurePortAvailableImpl(args: {
 }): Promise<void> {
   const { port, parentSpinner } = args;
   const opts = args.opts ?? {};
+  const buildRestartOnly = (() => {
+    const raw = String(args.env.ROUTECODEX_BUILD_RESTART_ONLY ?? args.env.RCC_BUILD_RESTART_ONLY ?? '').trim().toLowerCase();
+    return raw === '1' || raw === 'true' || raw === 'on' || raw === 'yes';
+  })();
 
   if (!port || Number.isNaN(port)) {
     return;
@@ -193,7 +197,8 @@ export async function ensurePortAvailableImpl(args: {
 
   // Best-effort HTTP shutdown on common loopback hosts to cover IPv4/IPv6.
   // This is restart-only behavior; plain `rcc start` must not disrupt existing servers.
-  if (opts.restart) {
+  // In build-restart-only mode, never send shutdown requests.
+  if (opts.restart && !buildRestartOnly) {
     try {
       const candidates = [LOCAL_HOSTS.IPV4, LOCAL_HOSTS.LOCALHOST];
       for (const h of candidates) {
@@ -264,6 +269,17 @@ export async function ensurePortAvailableImpl(args: {
   const initialPids = args.findListeningPids(port);
   if (initialPids.length === 0) {
     const healthyWithoutPid = await args.isServerHealthyQuick(port);
+    if (healthyWithoutPid && opts.restart && buildRestartOnly) {
+      logProcessLifecycle({
+        event: 'port_check_result',
+        source: 'cli.ensurePortAvailable',
+        details: { port, result: 'restart_only_existing_unmanaged' }
+      });
+      parentSpinner.stop();
+      args.logger.success(`RouteCodex is already running on port ${port}.`);
+      args.logger.info(`Build restart-only mode: reusing existing server without shutdown.`);
+      args.exit(0);
+    }
     if (healthyWithoutPid && !opts.restart) {
       logProcessLifecycle({
         event: 'port_check_result',
@@ -290,6 +306,46 @@ export async function ensurePortAvailableImpl(args: {
     source: 'cli.ensurePortAvailable',
     details: { port, result: 'occupied', pids: initialPids }
   });
+
+  if (opts.restart && buildRestartOnly) {
+    parentSpinner.stop();
+    args.logger.info(`Build restart-only mode: sending in-place restart to managed PID(s): ${initialPids.join(', ')}`);
+    let signaled = 0;
+    for (const pid of initialPids) {
+      try {
+        logProcessLifecycle({
+          event: 'port_restart_signal',
+          source: 'cli.ensurePortAvailable',
+          details: { port, pid, signal: 'SIGUSR2', result: 'attempt' }
+        });
+        process.kill(pid, 'SIGUSR2');
+        signaled += 1;
+        logProcessLifecycle({
+          event: 'port_restart_signal',
+          source: 'cli.ensurePortAvailable',
+          details: { port, pid, signal: 'SIGUSR2', result: 'success' }
+        });
+      } catch (error) {
+        logProcessLifecycle({
+          event: 'port_restart_signal',
+          source: 'cli.ensurePortAvailable',
+          details: { port, pid, signal: 'SIGUSR2', result: 'failed', error }
+        });
+      }
+    }
+    if (signaled <= 0) {
+      throw new Error(`Build restart-only mode failed: unable to signal SIGUSR2 to managed PID(s) on port ${port}`);
+    }
+    const deadline = Date.now() + 15000;
+    while (Date.now() < deadline) {
+      if (await args.isServerHealthyQuick(port)) {
+        args.logger.success(`Build restart-only mode: RouteCodex restarted in place on port ${port}.`);
+        args.exit(0);
+      }
+      await args.sleep(150);
+    }
+    throw new Error(`Build restart-only mode timed out waiting for restarted server on port ${port}`);
+  }
 
   const healthy = await args.isServerHealthyQuick(port);
   if (healthy && !opts.restart) {

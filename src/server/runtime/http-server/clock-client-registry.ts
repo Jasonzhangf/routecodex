@@ -22,6 +22,35 @@ import type {
   ClockStaleCleanupResult
 } from './clock-client-registry-utils.js';
 
+const CLIENT_TMUX_INJECT_DELAY_MS = 10_000;
+
+function resolveClientTmuxInjectDelayMs(): number {
+  const raw =
+    process.env.ROUTECODEX_CLIENT_INJECT_DELAY_MS ??
+    process.env.RCC_CLIENT_INJECT_DELAY_MS;
+  if (typeof raw === 'string' && raw.trim()) {
+    const parsed = Number.parseInt(raw.trim(), 10);
+    if (Number.isFinite(parsed) && parsed >= 0) {
+      return parsed;
+    }
+  }
+  // Keep tests fast; runtime default remains 10s.
+  if (process.env.NODE_ENV === 'test') {
+    return 0;
+  }
+  return CLIENT_TMUX_INJECT_DELAY_MS;
+}
+
+async function waitClientTmuxInjectDelay(): Promise<void> {
+  const delayMs = resolveClientTmuxInjectDelayMs();
+  if (delayMs <= 0) {
+    return;
+  }
+  await new Promise<void>((resolve) => {
+    setTimeout(resolve, delayMs);
+  });
+}
+
 export class ClockClientRegistry {
   private readonly records = new Map<string, ClockClientRecord>();
   private readonly conversationToTmuxSession = new Map<string, string>();
@@ -676,6 +705,7 @@ export class ClockClientRegistry {
       || normalizeString(candidates[0]?.tmuxTarget)
       || tmuxSessionId;
     const directClientType = normalizeString(args.clientType) || normalizeString(candidates[0]?.clientType);
+    await waitClientTmuxInjectDelay();
     const directResult = await injectTmuxSessionText({
       tmuxSessionId: directTarget,
       ...(directClientType ? { clientType: directClientType } : {}),

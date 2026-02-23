@@ -214,33 +214,82 @@ function extractWorkdirFromTurnMetadata(rawTurnMetadata: string | undefined): st
   if (!rawTurnMetadata) {
     return undefined;
   }
+  const candidates = [rawTurnMetadata];
   try {
-    const parsed = JSON.parse(rawTurnMetadata) as Record<string, unknown>;
-    const direct =
-      (typeof parsed.workdir === 'string' && parsed.workdir.trim())
-      || (typeof parsed.cwd === 'string' && parsed.cwd.trim())
-      || (typeof parsed.workingDirectory === 'string' && parsed.workingDirectory.trim())
-      || (typeof parsed.working_directory === 'string' && parsed.working_directory.trim())
-      || undefined;
-    if (direct) {
-      return direct;
-    }
-    const workspaces = parsed.workspaces;
-    if (!workspaces || typeof workspaces !== 'object' || Array.isArray(workspaces)) {
-      return undefined;
-    }
-    const workspaceKeys = Object.keys(workspaces)
-      .map((entry) => entry.trim())
-      .filter((entry) => entry.startsWith('/'));
-    if (workspaceKeys.length === 1) {
-      return workspaceKeys[0];
-    }
-    if (workspaceKeys.length > 1) {
-      // Prefer the most specific path when multiple workspaces are present.
-      return workspaceKeys.sort((a, b) => b.length - a.length)[0];
-    }
+    candidates.push(decodeURIComponent(rawTurnMetadata));
   } catch {
-    // ignore invalid turn metadata payload
+    // ignore URI decode failures
+  }
+  for (const candidate of [...candidates]) {
+    const normalized = candidate.trim();
+    if (!normalized) {
+      continue;
+    }
+    if (!/^[A-Za-z0-9+/=_-]+$/.test(normalized) || normalized.length < 12) {
+      continue;
+    }
+    try {
+      const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=');
+      const decoded = Buffer.from(padded, 'base64').toString('utf8').trim();
+      if (decoded) {
+        candidates.push(decoded);
+      }
+    } catch {
+      // ignore base64 decoding errors
+    }
+  }
+
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate) as Record<string, unknown>;
+      const fromJson = extractWorkdirFromTurnMetadataObject(parsed);
+      if (fromJson) {
+        return fromJson;
+      }
+    } catch {
+      // continue to querystring parsing
+    }
+
+    try {
+      const params = new URLSearchParams(candidate);
+      const fromParams =
+        (params.get('workdir') || '').trim()
+        || (params.get('cwd') || '').trim()
+        || (params.get('workingDirectory') || '').trim()
+        || (params.get('working_directory') || '').trim();
+      if (fromParams) {
+        return fromParams;
+      }
+    } catch {
+      // ignore non-URLSearchParams text
+    }
+  }
+  return undefined;
+}
+
+function extractWorkdirFromTurnMetadataObject(parsed: Record<string, unknown>): string | undefined {
+  const direct =
+    (typeof parsed.workdir === 'string' && parsed.workdir.trim())
+    || (typeof parsed.cwd === 'string' && parsed.cwd.trim())
+    || (typeof parsed.workingDirectory === 'string' && parsed.workingDirectory.trim())
+    || (typeof parsed.working_directory === 'string' && parsed.working_directory.trim())
+    || undefined;
+  if (direct) {
+    return direct;
+  }
+  const workspaces = parsed.workspaces;
+  if (!workspaces || typeof workspaces !== 'object' || Array.isArray(workspaces)) {
+    return undefined;
+  }
+  const workspaceKeys = Object.keys(workspaces)
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.startsWith('/'));
+  if (workspaceKeys.length === 1) {
+    return workspaceKeys[0];
+  }
+  if (workspaceKeys.length > 1) {
+    // Prefer the most specific path when multiple workspaces are present.
+    return workspaceKeys.sort((a, b) => b.length - a.length)[0];
   }
   return undefined;
 }

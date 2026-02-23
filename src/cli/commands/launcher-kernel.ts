@@ -62,7 +62,7 @@ function shouldStopManagedTmuxOnShutdown(signal: NodeJS.Signals, env: NodeJS.Pro
   return resolveBoolFromEnv(
     env.ROUTECODEX_LAUNCHER_STOP_MANAGED_TMUX_ON_SIGTERM
       ?? env.RCC_LAUNCHER_STOP_MANAGED_TMUX_ON_SIGTERM,
-    false
+    true
   );
 }
 
@@ -70,7 +70,7 @@ function shouldStopManagedTmuxOnToolExit(env: NodeJS.ProcessEnv): boolean {
   return resolveBoolFromEnv(
     env.ROUTECODEX_LAUNCHER_STOP_MANAGED_TMUX_ON_TOOL_EXIT
       ?? env.RCC_LAUNCHER_STOP_MANAGED_TMUX_ON_TOOL_EXIT,
-    false
+    true
   );
 }
 
@@ -241,44 +241,90 @@ async function checkServerReady(
   apiKey: string | null,
   timeoutMs = 2500
 ): Promise<boolean> {
-  try {
-    const headers = apiKey ? { 'x-api-key': apiKey } : undefined;
-
-    const probe = async (pathSuffix: '/ready' | '/health'): Promise<{ ok: boolean; body: any | null }> => {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  const headers = apiKey ? { 'x-api-key': apiKey } : undefined;
+  const probeTargets = resolveServerProbeTargets(serverUrl);
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    for (const target of probeTargets) {
       try {
-        const response = await ctx.fetch(`${serverUrl}${pathSuffix}`, {
-          signal: controller.signal,
-          method: 'GET',
-          headers
-        }).catch(() => null);
-        if (!response || !response.ok) {
-          return { ok: false, body: null };
+        const healthProbe = await probeServerState(ctx, `${target}/health`, headers, timeoutMs);
+        if (healthProbe.ok) {
+          const status = typeof healthProbe.body?.status === 'string' ? healthProbe.body.status.toLowerCase() : '';
+          if (
+            status === 'ok' ||
+            status === 'ready' ||
+            healthProbe.body?.ready === true ||
+            healthProbe.body?.pipelineReady === true ||
+            healthProbe.body === null
+          ) {
+            return true;
+          }
         }
-        const body = await response.json().catch(() => null);
-        return { ok: true, body };
-      } finally {
-        clearTimeout(timeoutId);
-      }
-    };
 
-    const readyProbe = await probe('/ready');
-    if (readyProbe.ok) {
-      const status = typeof readyProbe.body?.status === 'string' ? readyProbe.body.status : '';
-      if (status.toLowerCase() === 'ready' || readyProbe.body?.ready === true) {
-        return true;
+        const readyProbe = await probeServerState(ctx, `${target}/ready`, headers, timeoutMs);
+        if (readyProbe.ok) {
+          const status = typeof readyProbe.body?.status === 'string' ? readyProbe.body.status.toLowerCase() : '';
+          if (status === 'ready' || readyProbe.body?.ready === true || readyProbe.body === null) {
+            return true;
+          }
+        }
+      } catch {
+        // try next target
       }
     }
-
-    const healthProbe = await probe('/health');
-    if (!healthProbe.ok) {
-      return false;
+    if (attempt < 1) {
+      await new Promise((resolve) => setTimeout(resolve, 150));
     }
-    const status = typeof healthProbe.body?.status === 'string' ? healthProbe.body.status.toLowerCase() : '';
-    return status === 'ok' || status === 'ready' || healthProbe.body?.ready === true || healthProbe.body?.pipelineReady === true;
+  }
+  return false;
+}
+
+function resolveServerProbeTargets(serverUrl: string): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const pushTarget = (value: string) => {
+    const normalized = value.trim().replace(/\/+$/, '');
+    if (!normalized || seen.has(normalized)) {
+      return;
+    }
+    seen.add(normalized);
+    out.push(normalized);
+  };
+
+  pushTarget(serverUrl);
+  try {
+    const parsed = new URL(serverUrl);
+    if (parsed.hostname === '0.0.0.0' || parsed.hostname === '::' || parsed.hostname === '::1' || parsed.hostname === 'localhost') {
+      const loopback = new URL(serverUrl);
+      loopback.hostname = '127.0.0.1';
+      pushTarget(loopback.toString());
+    }
   } catch {
-    return false;
+    // ignore invalid URL parse; keep original
+  }
+  return out;
+}
+
+async function probeServerState(
+  ctx: LauncherCommandContext,
+  url: string,
+  headers: Record<string, string> | undefined,
+  timeoutMs: number
+): Promise<{ ok: boolean; body: any | null }> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await ctx.fetch(url, {
+      signal: controller.signal,
+      method: 'GET',
+      headers
+    }).catch(() => null);
+    if (!response || !response.ok) {
+      return { ok: false, body: null };
+    }
+    const body = await response.json().catch(() => null);
+    return { ok: true, body };
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
@@ -763,28 +809,42 @@ function findReusableManagedTmuxSession(
   }
 }
 
+function requestManagedTmuxSessionExit(
+  spawnSyncImpl: typeof spawnSync,
+  sessionName: string
+): void {
+  const target = String(sessionName || '').trim();
+  if (!target) {
+    return;
+  }
+  try {
+    spawnSyncImpl('tmux', ['send-keys', '-t', target, '-X', 'cancel'], { encoding: 'utf8' });
+  } catch {
+    // ignore
+  }
+  try {
+    spawnSyncImpl('tmux', ['send-keys', '-t', target, 'C-c'], { encoding: 'utf8' });
+  } catch {
+    // ignore
+  }
+  try {
+    spawnSyncImpl('tmux', ['send-keys', '-t', target, '-l', '--', 'exit'], { encoding: 'utf8' });
+  } catch {
+    // ignore
+  }
+  try {
+    sendTmuxSubmitKey(spawnSyncImpl, target);
+  } catch {
+    // ignore
+  }
+}
+
 function createManagedTmuxSession(args: {
   spawnSyncImpl: typeof spawnSync;
   cwd: string;
   commandName: string;
 }): ManagedTmuxSession | null {
   const { spawnSyncImpl, cwd, commandName } = args;
-
-  const reusable = findReusableManagedTmuxSession(spawnSyncImpl, cwd, commandName);
-  if (reusable) {
-    return {
-      sessionName: reusable.sessionName,
-      tmuxTarget: reusable.tmuxTarget,
-      reused: true,
-      stop: () => {
-        try {
-          spawnSyncImpl('tmux', ['kill-session', '-t', reusable.sessionName], { encoding: 'utf8' });
-        } catch {
-          // ignore
-        }
-      }
-    };
-  }
 
   const sessionName = (() => {
     const token = normalizeSessionToken(commandName);
@@ -806,11 +866,7 @@ function createManagedTmuxSession(args: {
     tmuxTarget,
     reused: false,
     stop: () => {
-      try {
-        spawnSyncImpl('tmux', ['kill-session', '-t', sessionName], { encoding: 'utf8' });
-      } catch {
-        // ignore
-      }
+      requestManagedTmuxSessionExit(spawnSyncImpl, sessionName);
     }
   };
 }
@@ -826,23 +882,26 @@ function launchCommandInTmuxPane(args: {
   selfHealPolicy: TmuxSelfHealPolicy;
 }): boolean {
   const { spawnSyncImpl, tmuxTarget, cwd, command, commandName, commandArgs, envOverrides, selfHealPolicy } = args;
+  const tmuxSessionName = (() => {
+    const idx = String(tmuxTarget || '').indexOf(':');
+    const name = idx >= 0 ? String(tmuxTarget).slice(0, idx) : String(tmuxTarget || '');
+    return name.trim();
+  })();
   const envTokens = [
     ...envOverrides.unset.flatMap((key) => ['-u', key]),
     ...envOverrides.set.map(([key, value]) => `${key}=${value}`)
   ];
   const baseCommand = buildShellCommand(['env', ...envTokens, command, ...commandArgs]);
-  // Keep the managed tmux session alive when the client process exits.
-  // Session cleanup is handled by managed heartbeat/reaper logic, not by inline shell self-kill.
-  const shellCommand = (() => {
+  const commandBody = (() => {
     if (!selfHealPolicy.enabled || selfHealPolicy.maxRetries <= 0) {
-      return `cd -- ${shellQuote(cwd)} && ${baseCommand}`;
+      return `cd -- ${shellQuote(cwd)} || exit 1; ${baseCommand}; __rcc_exit=$?`;
     }
     const safeCommandName = shellQuote(commandName || command || 'client');
     const loopBody = [
       `${baseCommand}`,
       '__rcc_exit=$?',
-      'if [ "$__rcc_exit" -eq 0 ] || [ "$__rcc_exit" -eq 130 ] || [ "$__rcc_exit" -eq 143 ]; then exit "$__rcc_exit"; fi',
-      'if [ "$__rcc_try" -ge "$__rcc_max" ]; then exit "$__rcc_exit"; fi',
+      'if [ "$__rcc_exit" -eq 0 ] || [ "$__rcc_exit" -eq 130 ] || [ "$__rcc_exit" -eq 143 ]; then break; fi',
+      'if [ "$__rcc_try" -ge "$__rcc_max" ]; then break; fi',
       '__rcc_try=$((__rcc_try + 1))',
       `echo "[routecodex][self-heal] ${safeCommandName} exited with code $__rcc_exit; retry $__rcc_try/$__rcc_max in $__rcc_delay s" >&2`,
       'sleep "$__rcc_delay"'
@@ -855,6 +914,14 @@ function launchCommandInTmuxPane(args: {
       `while true; do ${loopBody}; done`
     ].join('; ');
   })();
+  // Client lifecycle owns managed tmux lifecycle: once command exits, destroy session.
+  const shellCommand = [
+    commandBody,
+    tmuxSessionName
+      ? `tmux kill-session -t ${shellQuote(tmuxSessionName)} >/dev/null 2>&1 || true`
+      : ':',
+    'exit "$__rcc_exit"'
+  ].join('; ');
   try {
     // Prefer respawn-pane for deterministic execution in managed sessions.
     // This avoids flaky "typed but not submitted" behavior from send-keys on some terminals.

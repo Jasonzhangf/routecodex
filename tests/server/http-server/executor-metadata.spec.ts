@@ -205,6 +205,28 @@ describe('executor metadata clock daemon extraction', () => {
     expect(metadata.clientInjectReason).toBe('tmux_session_ready');
   });
 
+  it('extracts workdir from URL-encoded base64 turn metadata in client headers', () => {
+    const encodedTurnMeta = encodeURIComponent(
+      Buffer.from(JSON.stringify({ workdir: '/tmp/turn-meta-workdir-2' }), 'utf8').toString('base64')
+    );
+    const metadata = buildRequestMetadata({
+      entryEndpoint: '/v1/responses',
+      method: 'POST',
+      requestId: 'req-meta-turn-workdir-2',
+      headers: {},
+      query: {},
+      body: { input: [] },
+      metadata: {
+        clientHeaders: {
+          'x-codex-turn-metadata': encodedTurnMeta
+        }
+      }
+    } as any);
+
+    expect(metadata.clientWorkdir).toBe('/tmp/turn-meta-workdir-2');
+    expect(metadata.workdir).toBe('/tmp/turn-meta-workdir-2');
+  });
+
   it('binds tmux scope by session/workdir when request has no direct tmux metadata', () => {
     const daemonId = 'clockd_bind_workdir_1';
     const tmuxSessionId = 'rcc_bind_tmux_1';

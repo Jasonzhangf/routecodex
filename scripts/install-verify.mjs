@@ -25,6 +25,7 @@ const state = {
   logStream: null,
   logPath: '',
   baseUrl: '',
+  ownsServer: false,
 };
 let shuttingDown = false;
 let responsesSseParser = null;
@@ -791,8 +792,11 @@ async function verifyChatStreaming(baseUrl, model, timeoutMs, samplePayload, cha
 async function stopServer() {
   const proc = state.serverProc;
   const baseUrl = state.baseUrl;
-  if (baseUrl) {
+  if (state.ownsServer && baseUrl) {
     try { await fetch(`${baseUrl}/shutdown`, { method: 'POST' }).catch(() => {}); } catch { /* ignore */ }
+  }
+  if (!state.ownsServer) {
+    return;
   }
   if (!proc) {
     if (state.logStream) {
@@ -903,17 +907,22 @@ async function main() {
 
   const model = resolveModel(config);
   console.log(`🔁 模型: ${model}, 端口: ${port}`);
+  const buildRestartOnly = (() => {
+    const raw = String(process.env.ROUTECODEX_BUILD_RESTART_ONLY ?? process.env.RCC_BUILD_RESTART_ONLY ?? '').trim().toLowerCase();
+    return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
+  })();
 
   const listeners = detectPortPids(port);
-  if (listeners.length) {
+  const reuseExistingServer = buildRestartOnly && listeners.length > 0;
+  if (listeners.length && !reuseExistingServer) {
     throw new Error(`端口 ${port} 已被使用 (PID: ${listeners.join(', ')}). 请先停止正在运行的 RouteCodex 实例再重试。`);
+  }
+  if (reuseExistingServer) {
+    console.log(`ℹ build-restart-only: 检测到已运行服务 (PID: ${listeners.join(', ')})，复用现有实例进行验证。`);
   }
 
   console.log('🛠️ 动态生成最新的 pipeline 配置...');
   regeneratePipelineConfig({ port, configPath });
-
-  state.logPath = path.join(os.tmpdir(), `routecodex-install-verify-${Date.now()}.log`);
-  const logStream = fs.createWriteStream(state.logPath, { flags: 'a' });
 
   let command;
   let commandArgs;
@@ -933,17 +942,25 @@ async function main() {
     env.RCC_PORT = String(port);
   }
 
-  console.log(`🚀 启动 RouteCodex server... (launcher=${launcher === 'cli' ? command : 'node dist/index.js'})`);
-  const serverProc = spawn(command, commandArgs, {
-    cwd,
-    env,
-    stdio: ['ignore', 'pipe', 'pipe'],
-    detached: false,
-  });
-  serverProc.stdout.pipe(logStream, { end: false });
-  serverProc.stderr.pipe(logStream, { end: false });
-  state.serverProc = serverProc;
-  state.logStream = logStream;
+  if (!reuseExistingServer) {
+    state.logPath = path.join(os.tmpdir(), `routecodex-install-verify-${Date.now()}.log`);
+    const logStream = fs.createWriteStream(state.logPath, { flags: 'a' });
+    state.ownsServer = true;
+    console.log(`🚀 启动 RouteCodex server... (launcher=${launcher === 'cli' ? command : 'node dist/index.js'})`);
+    const serverProc = spawn(command, commandArgs, {
+      cwd,
+      env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      detached: false,
+    });
+    serverProc.stdout.pipe(logStream, { end: false });
+    serverProc.stderr.pipe(logStream, { end: false });
+    state.serverProc = serverProc;
+    state.logStream = logStream;
+  } else {
+    state.ownsServer = false;
+    state.serverProc = null;
+  }
 
   await waitForHealth(baseUrl, 90000);
   console.log('✅ server 健康检查通过');

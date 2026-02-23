@@ -1,6 +1,5 @@
 import { getClockClientRegistry } from './clock-client-registry.js';
-import { isTmuxSessionAlive, killManagedTmuxSession } from './tmux-session-probe.js';
-import { terminateManagedClientProcess } from './managed-process-probe.js';
+import { isTmuxSessionAlive } from './tmux-session-probe.js';
 import { logProcessLifecycle } from '../../../utils/process-lifecycle-logger.js';
 
 const DEFAULT_REAPER_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
@@ -38,24 +37,6 @@ function readGracePeriodFromEnv(): number {
   return DEFAULT_GRACE_PERIOD_MS;
 }
 
-function isManagedTerminationEnabled(): boolean {
-  const raw = String(
-    process.env.ROUTECODEX_CLOCK_REAPER_TERMINATE_MANAGED
-      ?? process.env.RCC_CLOCK_REAPER_TERMINATE_MANAGED
-      ?? ''
-  ).trim().toLowerCase();
-  if (!raw) {
-    return false;
-  }
-  if (raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on') {
-    return true;
-  }
-  if (raw === '0' || raw === 'false' || raw === 'no' || raw === 'off') {
-    return false;
-  }
-  return false;
-}
-
 function shouldLogStaleOnlyCleanup(): boolean {
   const raw = String(
     process.env.ROUTECODEX_CLOCK_REAPER_LOG_STALE_ONLY
@@ -84,7 +65,7 @@ export class ClockReaper {
   constructor(config?: ClockReaperConfig) {
     this.intervalMs = config?.intervalMs ?? readReaperIntervalFromEnv();
     this.gracePeriodMs = config?.gracePeriodMs ?? readGracePeriodFromEnv();
-    this.enableManagedTermination = config?.enableManagedTermination ?? isManagedTerminationEnabled();
+    this.enableManagedTermination = false;
     this.logStaleOnlyCleanup = shouldLogStaleOnlyCleanup();
   }
 
@@ -137,22 +118,9 @@ export class ClockReaper {
     const registry = getClockClientRegistry();
     const now = Date.now();
 
-    const terminateHandlers = this.enableManagedTermination
-      ? {
-          terminateManagedTmuxSession: (tmuxSessionId: string) => killManagedTmuxSession(tmuxSessionId),
-          terminateManagedClientProcess: (processInfo: {
-            daemonId: string;
-            pid: number;
-            commandHint?: string;
-            clientType?: string;
-          }) => terminateManagedClientProcess(processInfo)
-        }
-      : {};
-
     // 先清理僵死 tmux 会话
     const deadTmuxResult = registry.cleanupDeadTmuxSessions({
-      isTmuxSessionAlive,
-      ...terminateHandlers
+      isTmuxSessionAlive
     });
 
     // 再清理心跳过期的客户端（但不终止进程，仅移除记录）

@@ -284,13 +284,44 @@ function cleanupExistingCamoufox(profileDir) {
   if (!profileDir) {
     return;
   }
-  console.log('[camoufox-launch-auth] Ensuring Camoufox profile is clean before launch...');
-  const pkillArgs = ['-f', profileDir];
+  // 清理已知进程，不使用 pkill 普杀
+  // 使用 pgrep 查找匹配的进程，然后逐个验证后终止
   try {
-    spawnSync('pkill', pkillArgs, { stdio: 'ignore' });
+    const probe = spawnSync('pgrep', ['-f', profileDir], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore']
+    });
+    
+    if (probe.status === 0 && probe.stdout) {
+      const selfPid = process.pid;
+      const lines = String(probe.stdout).split(/\r?\n/).filter(Boolean);
+      
+      for (const line of lines) {
+        const pid = Number.parseInt(line.trim(), 10);
+        if (!Number.isFinite(pid) || pid <= 0 || pid === selfPid) {
+          continue;
+        }
+        // 验证进程命令包含 camoufox
+        try {
+          const cmdProbe = spawnSync('ps', ['-p', String(pid), '-o', 'command='], { encoding: 'utf8' });
+          const cmd = String(cmdProbe.stdout || '').toLowerCase();
+          if (cmd.includes('camoufox')) {
+            console.log(`[camoufox-launch-auth] Stopping known Camoufox process PID ${pid}`);
+            try {
+              process.kill(pid, 'SIGTERM');
+            } catch {
+              // 忽略终止失败
+            }
+          }
+        } catch {
+          // 忽略 ps 查询失败
+        }
+      }
+    }
   } catch {
-    // pkill may not exist; ignore
+    // pgrep 可能不存在，忽略
   }
+  console.log('[camoufox-launch-auth] Ensuring Camoufox profile is clean before launch...');
   const lockNames = ['.parentlock', 'parent.lock', 'lock'];
   for (const name of lockNames) {
     const target = path.join(profileDir, name);

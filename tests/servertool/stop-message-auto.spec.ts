@@ -884,8 +884,11 @@ describe('stop_message_auto servertool', () => {
         providerProtocol: 'openai-chat'
       });
 
-      expect(result.mode).toBe('passthrough');
-      expect(result.execution).toBeUndefined();
+      expect(result.mode).toBe('tool_flow');
+      const followup = result.execution?.followup as any;
+      const injectMeta = readClientInjectMeta(followup);
+      expect(injectMeta.clientInjectOnly).toBe(true);
+      expect(injectMeta.clientInjectText).toContain('[STOPMESSAGE_APPROVED]');
       const stopStatePath = resolveStopStatePath(sessionId);
       expect(fs.existsSync(stopStatePath)).toBe(true);
     } finally {

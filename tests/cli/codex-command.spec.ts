@@ -50,9 +50,9 @@ function createDirectoryFs(existingDirs: string[]) {
 }
 
 
-function createConfigFs(port: number, apiKey = 'sk-config-key') {
+function createConfigFs(port: number, apiKey = 'sk-config-key', host = '0.0.0.0') {
   const configPath = '/home/test/.routecodex/config.json';
-  const config = JSON.stringify({ httpserver: { port, apikey: apiKey } });
+  const config = JSON.stringify({ httpserver: { port, apikey: apiKey, host } });
   return {
     existsSync: (target: string) => String(target) === configPath,
     readFileSync: (target: string) => {
@@ -464,6 +464,53 @@ describe('cli codex command', () => {
     expect(spawnCalls[0].options?.env?.OPENAI_BASE_URL).toBe('http://0.0.0.0:7788/v1');
   });
 
+  it('treats server as ready when configured host 0.0.0.0 is unreachable but loopback is reachable', async () => {
+    const spawnCalls: Array<{ command: string; args: string[]; options: any }> = [];
+    const probeUrls: string[] = [];
+    const program = new Command();
+
+    createCodexCommand(program, {
+      isDevPackage: true,
+      isWindows: false,
+      defaultDevPort: 5555,
+      nodeBin: 'node',
+      createSpinner: async () => createStubSpinner(),
+      logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
+      env: {},
+      rawArgv: ['codex'],
+      fsImpl: createConfigFs(5520, 'sk-config-key', '0.0.0.0'),
+      homedir: () => '/home/test',
+      sleep: async () => {},
+      fetch: (async (url: string) => {
+        probeUrls.push(String(url));
+        if (String(url).startsWith('http://0.0.0.0:5520/')) {
+          return { ok: false, status: 503, json: async () => ({}) } as any;
+        }
+        if (String(url) === 'http://127.0.0.1:5520/health') {
+          return { ok: true, status: 200, json: async () => ({ status: 'ok', ready: true }) } as any;
+        }
+        return { ok: false, status: 404, json: async () => ({}) } as any;
+      }) as any,
+      spawnSyncImpl: () => ({ status: 1, stdout: '', stderr: 'tmux not found' }) as any,
+      spawn: (command, args, options) => {
+        spawnCalls.push({ command, args, options });
+        return { on: () => {}, kill: () => true } as any;
+      },
+      getModulesConfigPath: () => '/tmp/modules.json',
+      resolveServerEntryPath: () => '/tmp/index.js',
+      waitForever: async () => {},
+      exit: (code) => {
+        throw new Error(`exit:${code}`);
+      }
+    });
+
+    await program.parseAsync(['node', 'routecodex', 'codex'], { from: 'node' });
+
+    expect(spawnCalls).toHaveLength(1);
+    expect(probeUrls.some((url) => url.startsWith('http://0.0.0.0:5520/'))).toBe(true);
+    expect(probeUrls.some((url) => url.startsWith('http://127.0.0.1:5520/'))).toBe(true);
+  });
+
   it('lets --port override ~/.routecodex/config.json port when --url is omitted', async () => {
     const spawnCalls: Array<{ command: string; args: string[]; options: any }> = [];
     const program = new Command();
@@ -830,6 +877,94 @@ describe('cli codex command', () => {
     expect(tmuxCalls.some((call) => call.args[0] === 'new-session')).toBe(true);
     expect(tmuxCalls.some((call) => call.args[0] === 'respawn-pane' || call.args[0] === 'send-keys')).toBe(true);
     expect(warnings.some((line) => line.includes('not running inside tmux'))).toBe(false);
+  });
+
+  it('requests managed tmux session self-exit on codex close without kill-session', async () => {
+    const tmuxCalls: Array<{ command: string; args: string[] }> = [];
+    const spawnCalls: Array<{ command: string; args: string[]; options: any }> = [];
+    let onExit: ((code: number | null, signal: NodeJS.Signals | null) => void) | null = null;
+    let onClose: ((code: number | null, signal: NodeJS.Signals | null) => void) | null = null;
+    const program = new Command();
+
+    createCodexCommand(program, {
+      isDevPackage: false,
+      isWindows: false,
+      defaultDevPort: 5555,
+      nodeBin: 'node',
+      createSpinner: async () => createStubSpinner(),
+      logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
+      env: {},
+      rawArgv: ['codex', '--url', 'http://localhost:5520/proxy'],
+      fsImpl: createStubFs(),
+      homedir: () => '/home/test',
+      cwd: () => '/home/test',
+      sleep: async () => {},
+      fetch: (async (url: string) => {
+        if (url.endsWith('/ready') || url.endsWith('/health')) {
+          return { ok: true, status: 200, json: async () => ({ status: 'ok', ready: true }) } as any;
+        }
+        if (url.includes('/daemon/clock-client/register')) {
+          return { ok: true, status: 200, json: async () => ({ ok: true }) } as any;
+        }
+        return { ok: true, status: 200, json: async () => ({ ok: true }) } as any;
+      }) as any,
+      spawnSyncImpl: (command: string, args: string[]) => {
+        tmuxCalls.push({ command, args });
+        if (command !== 'tmux') {
+          return { status: 1, stdout: '', stderr: 'unknown command' } as any;
+        }
+        if (args[0] === '-V') {
+          return { status: 0, stdout: 'tmux 3.4', stderr: '' } as any;
+        }
+        if (args[0] === 'list-sessions') {
+          return { status: 0, stdout: '', stderr: '' } as any;
+        }
+        if (args[0] === 'new-session') {
+          return { status: 0, stdout: '', stderr: '' } as any;
+        }
+        if (args[0] === 'respawn-pane') {
+          return { status: 0, stdout: '', stderr: '' } as any;
+        }
+        if (args[0] === 'send-keys') {
+          return { status: 0, stdout: '', stderr: '' } as any;
+        }
+        return { status: 0, stdout: '', stderr: '' } as any;
+      },
+      spawn: (command, args, options) => {
+        spawnCalls.push({ command, args, options });
+        return {
+          pid: 4242,
+          on: (event: string, cb: (...eventArgs: any[]) => void) => {
+            if (event === 'exit') {
+              onExit = cb as (code: number | null, signal: NodeJS.Signals | null) => void;
+            }
+            if (event === 'close') {
+              onClose = cb as (code: number | null, signal: NodeJS.Signals | null) => void;
+            }
+          },
+          kill: () => true
+        } as any;
+      },
+      getModulesConfigPath: () => '/tmp/modules.json',
+      resolveServerEntryPath: () => '/tmp/index.js',
+      waitForever: async () => {
+        onExit?.(0, null);
+        onClose?.(0, null);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      },
+      exit: () => undefined as never
+    });
+
+    await program.parseAsync(['node', 'routecodex', 'codex', '--url', 'http://localhost:5520/proxy'], { from: 'node' });
+
+    expect(spawnCalls).toHaveLength(1);
+    expect(spawnCalls[0].command).toBe('tmux');
+    expect(tmuxCalls.some((call) => call.args[0] === 'kill-session')).toBe(false);
+    expect(
+      tmuxCalls.some(
+        (call) => call.args[0] === 'send-keys' && call.args.includes('-l') && call.args.includes('exit')
+      )
+    ).toBe(true);
   });
 
   it('reuses orphan managed tmux session before creating a new one', async () => {

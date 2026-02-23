@@ -16,8 +16,7 @@ import {
   shouldLogClockDaemonCleanupAudit,
   shouldLogClockDaemonInjectSkip
 } from './clock-daemon-log-throttle.js';
-import { isTmuxSessionAlive, killManagedTmuxSession } from './tmux-session-probe.js';
-import { terminateManagedClientProcess } from './managed-process-probe.js';
+import { isTmuxSessionAlive } from './tmux-session-probe.js';
 
 const CLOCK_DAEMON_SESSION_PREFIX = 'clockd.';
 const CLOCK_CLEANUP_AUDIT_SAMPLE_LIMIT = 3;
@@ -169,13 +168,6 @@ function clearScopedRoutingStateForClockCleanup(args: {
   }
 }
 
-function isClockManagedTerminationEnabled(): boolean {
-  return resolveBoolFromEnv(
-    process.env.ROUTECODEX_CLOCK_REAPER_TERMINATE_MANAGED ?? process.env.RCC_CLOCK_REAPER_TERMINATE_MANAGED,
-    false
-  );
-}
-
 export function shouldEnableClockDaemonInjectLoop(): boolean {
   const raw = String(process.env.ROUTECODEX_CLOCK_DAEMON_INJECT_ENABLE || process.env.RCC_CLOCK_DAEMON_INJECT_ENABLE || '')
     .trim()
@@ -268,36 +260,13 @@ export async function tickClockDaemonInjectLoop(server: any): Promise<void> {
     const registry = getClockClientRegistry();
     const now = Date.now();
     const cleanupRequestId = `clock_cleanup_${now}_${Math.random().toString(16).slice(2, 8)}`;
-    const allowManagedTermination = isClockManagedTerminationEnabled();
     const enableCleanupAuditLog = shouldEnableClockCleanupAuditLog();
 
     const deadTmuxCleanup = registry.cleanupDeadTmuxSessions({
-      isTmuxSessionAlive,
-      ...(allowManagedTermination
-        ? {
-            terminateManagedTmuxSession: (tmuxSessionId: string) => killManagedTmuxSession(tmuxSessionId),
-            terminateManagedClientProcess: (processInfo: {
-              daemonId: string;
-              pid: number;
-              commandHint?: string;
-              clientType?: string;
-            }) => terminateManagedClientProcess(processInfo)
-          }
-        : {})
+      isTmuxSessionAlive
     });
     const staleCleanup = registry.cleanupStaleHeartbeats({
-      nowMs: now,
-      ...(allowManagedTermination
-        ? {
-            terminateManagedTmuxSession: (tmuxSessionId: string) => killManagedTmuxSession(tmuxSessionId),
-            terminateManagedClientProcess: (processInfo: {
-              daemonId: string;
-              pid: number;
-              commandHint?: string;
-              clientType?: string;
-            }) => terminateManagedClientProcess(processInfo)
-          }
-        : {})
+      nowMs: now
     });
 
     const removedConversationSessionIds = Array.from(
@@ -333,7 +302,7 @@ export async function tickClockDaemonInjectLoop(server: any): Promise<void> {
       && shouldLogClockDaemonCleanupAudit({
         cache: server.clockDaemonCleanupLogByKey,
         input: {
-          managedTerminationEnabled: allowManagedTermination,
+          managedTerminationEnabled: false,
           staleRemovedDaemonIds: staleCleanup.removedDaemonIds,
           staleRemovedTmuxSessionIds: staleCleanup.removedTmuxSessionIds,
           deadRemovedDaemonIds: deadTmuxCleanup.removedDaemonIds,
@@ -349,7 +318,7 @@ export async function tickClockDaemonInjectLoop(server: any): Promise<void> {
       server.lastClockDaemonCleanupAtMs = Date.now();
       console.log('[RouteCodexHttpServer] clock daemon cleanup audit:', {
         requestId: cleanupRequestId,
-        managedTerminationEnabled: allowManagedTermination,
+        managedTerminationEnabled: false,
         staleHeartbeat: {
           reason: 'heartbeat_timeout',
           staleAfterMs: staleCleanup.staleAfterMs,

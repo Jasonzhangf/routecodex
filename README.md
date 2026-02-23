@@ -12,6 +12,33 @@ Both provide a **unified gateway for AI providers**, handling **routing + protoc
 
 > **Note**: This README covers both tools. For CLI-specific usage, see `docs/INSTALLATION_AND_QUICKSTART.md`.
 
+## 最新更新 (2026-02-23)
+
+### 进程生命周期管理规范（重要）
+
+本项目已全面清理高危进程终止代码，严格执行**自管理进程**原则：
+
+- **禁止普杀**：代码库中已移除所有 `pkill`、`killall`、`lsof | xargs kill` 等批量终止模式
+- **仅管理已知进程**：只有通过 pid file 或注册表明确记录的进程才能被终止
+- **归属验证**：终止前必须通过 `ps` 验证进程命令归属，防止 PID 复用误杀
+- **自杀优先**：推荐进程通过信号处理自行退出，而非外部强制终止
+
+#### managed tmux 会话生命周期
+- 客户端退出即自动销毁 tmux 会话（`launcher-kernel.ts:921`）
+- SIGTERM 信号下默认销毁 managed tmux（`launcher-kernel.ts:55`）
+- 不再复用旧会话，始终新建（`launcher-kernel.ts:842`）
+
+#### Server 侧 Cleanup 策略
+- Cleanup 端点仅做状态清理，**不终止客户端进程**（`clock-client-routes.ts:377`）
+- `allowManagedTermination` 已硬编码为 `false`，确保不会越界终止
+
+#### 启动脚本行为
+- `run-bg.sh` / `run-fg-gtimeout.sh` 偏向"停旧服再起"策略
+- 自动识别 RouteCodex server 进程并优雅替换
+- 非 RouteCodex listener 坚决拒绝终止（防误杀）
+
+详见 [AGENTS.md](./AGENTS.md) 第 1.1 条。
+
 ## 主要功能
 
 - **多入口同时支持（同一服务端口）**

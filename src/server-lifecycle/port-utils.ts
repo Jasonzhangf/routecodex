@@ -23,6 +23,33 @@ async function canBind(port: number): Promise<boolean> {
   });
 }
 
+function isBuildRestartOnlyMode(): boolean {
+  const raw = String(process.env.ROUTECODEX_BUILD_RESTART_ONLY ?? process.env.RCC_BUILD_RESTART_ONLY ?? '').trim().toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
+}
+
+async function isServerHealthyQuick(port: number): Promise<boolean> {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => {
+      try { controller.abort(); } catch { /* ignore */ }
+    }, 800);
+    const res = await fetch(`${HTTP_PROTOCOLS.HTTP}${LOCAL_HOSTS.IPV4}:${port}/health`, {
+      method: 'GET',
+      signal: controller.signal
+    }).catch(() => null);
+    clearTimeout(timeout);
+    if (!res || !res.ok) {
+      return false;
+    }
+    const data = await res.json().catch(() => null);
+    const status = typeof data?.status === 'string' ? data.status.toLowerCase() : '';
+    return !!data && (status === 'healthy' || status === 'ready' || status === 'ok' || data?.ready === true || data?.pipelineReady === true);
+  } catch {
+    return false;
+  }
+}
+
 async function attemptHttpShutdown(port: number): Promise<boolean> {
   try {
     const controller = new AbortController();
@@ -121,7 +148,11 @@ function killPidBestEffort(pid: number, opts: { force: boolean }): void {
  * Ensure a TCP port is available by attempting graceful shutdown of any process holding it,
  * then force-killing as a last resort.
  */
-async function ensurePortAvailable(port: number, opts: { attemptGraceful?: boolean } = {}): Promise<void> {
+async function ensurePortAvailable(
+  port: number,
+  opts: { attemptGraceful?: boolean; restartInPlaceOnly?: boolean } = {}
+): Promise<'available' | 'handled_existing_server'> {
+  const restartInPlaceOnly = Boolean(opts.restartInPlaceOnly ?? isBuildRestartOnlyMode());
   // Quick probe first; if we can bind, it's free
   try {
     const probe = net.createServer();
@@ -131,10 +162,63 @@ async function ensurePortAvailable(port: number, opts: { attemptGraceful?: boole
     });
     if (canListen) {
       await new Promise(r => probe.close(() => r(null)));
-      return; // free
+      return 'available'; // free
     }
   } catch {
     // fallthrough
+  }
+
+  if (restartInPlaceOnly) {
+    const managedPids = listManagedServerPidsByPort(port).map(Number).filter(pid => Number.isFinite(pid) && pid > 0);
+    if (managedPids.length > 0) {
+      let signaled = 0;
+      for (const pid of managedPids) {
+        try {
+          logProcessLifecycle({
+            event: 'port_restart_signal',
+            source: 'index.ensurePortAvailable',
+            details: { port, pid, signal: 'SIGUSR2', result: 'attempt' }
+          });
+          process.kill(pid, 'SIGUSR2');
+          signaled += 1;
+          logProcessLifecycle({
+            event: 'port_restart_signal',
+            source: 'index.ensurePortAvailable',
+            details: { port, pid, signal: 'SIGUSR2', result: 'success' }
+          });
+        } catch (error) {
+          logProcessLifecycle({
+            event: 'port_restart_signal',
+            source: 'index.ensurePortAvailable',
+            details: { port, pid, signal: 'SIGUSR2', result: 'failed', error }
+          });
+        }
+      }
+      if (signaled > 0) {
+        const deadline = Date.now() + 15000;
+        while (Date.now() < deadline) {
+          if (await isServerHealthyQuick(port)) {
+            return 'handled_existing_server';
+          }
+          await new Promise(r => setTimeout(r, 150));
+        }
+        throw new Error(`Build restart-only mode timed out waiting for restarted server on port ${port}`);
+      }
+      throw new Error(`Build restart-only mode failed: unable to signal SIGUSR2 to managed PID(s) on port ${port}`);
+    }
+
+    if (await isServerHealthyQuick(port)) {
+      logProcessLifecycle({
+        event: 'port_check_result',
+        source: 'index.ensurePortAvailable',
+        details: { port, result: 'restart_only_reuse_existing' }
+      });
+      return 'handled_existing_server';
+    }
+
+    throw new Error(
+      `Port ${port} is occupied by unmanaged process; build restart-only mode refuses shutdown/kill.`
+    );
   }
 
   // Try graceful HTTP shutdown if a compatible server is there
@@ -145,7 +229,7 @@ async function ensurePortAvailable(port: number, opts: { attemptGraceful?: boole
       for (let i = 0; i < 10; i++) {
         await new Promise(r => setTimeout(r, 300));
         if (await canBind(port)) {
-          return;
+          return 'available';
         }
       }
     }
@@ -170,7 +254,7 @@ async function ensurePortAvailable(port: number, opts: { attemptGraceful?: boole
       source: 'index.ensurePortAvailable',
       details: { port, result: 'no_managed_pid' }
     });
-    return;
+    return 'available';
   }
   logProcessLifecycle({
     event: 'port_cleanup',
@@ -183,7 +267,7 @@ async function ensurePortAvailable(port: number, opts: { attemptGraceful?: boole
   for (let i = 0; i < 10; i++) {
     await new Promise(r => setTimeout(r, 300));
     if (await canBind(port)) {
-      return;
+      return 'available';
     }
   }
   const remain = listManagedServerPidsByPort(port).map(String);
@@ -198,6 +282,7 @@ async function ensurePortAvailable(port: number, opts: { attemptGraceful?: boole
     killPidBestEffort(Number(pid), { force: true });
   }
   await new Promise(r => setTimeout(r, 500));
+  return 'available';
 }
 
 export { ensurePortAvailable, killPidBestEffort, canBind, attemptHttpShutdown };

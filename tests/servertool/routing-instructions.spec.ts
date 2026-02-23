@@ -351,6 +351,49 @@ describe('Routing instruction parsing and application', () => {
     expect((instructions[0] as any).type).toBe('stopMessageMode');
   });
 
+  test('parses routing marker only from latest message', () => {
+    const fromHistoricalUser = parseRoutingInstructions([
+      { role: 'user', content: '<**stopMessage:"继续执行",10**>' },
+      { role: 'assistant', content: '收到，继续执行。' }
+    ] as StandardizedMessage[]);
+    expect(fromHistoricalUser).toHaveLength(0);
+
+    const fromLatestPlainUser = parseRoutingInstructions([
+      { role: 'user', content: '<**stopMessage:"继续执行",10**>' },
+      { role: 'user', content: '这条是普通补充说明' }
+    ] as StandardizedMessage[]);
+    expect(fromLatestPlainUser).toHaveLength(0);
+
+    const fromLatestMarkerUser = parseRoutingInstructions([
+      { role: 'user', content: '普通内容' },
+      { role: 'user', content: '<**stopMessage:"继续执行",10**>' }
+    ] as StandardizedMessage[]);
+    expect(fromLatestMarkerUser).toHaveLength(1);
+    expect((fromLatestMarkerUser[0] as any).type).toBe('stopMessageSet');
+  });
+
+  test('does not re-arm cleared stopMessage state from historical user marker replay', () => {
+      const instructions = [
+        {
+          type: 'stopMessageSet',
+          stopMessageText: '按照 docs/RUNTIME_SPEC.md进行完整实现',
+          stopMessageMaxRepeats: 10,
+          stopMessageStageMode: 'on',
+          fromHistoricalUserMessage: true
+        }
+      ] as any;
+      const baseState = createState({
+        stopMessageUpdatedAt: Date.now(),
+        stopMessageText: undefined,
+        stopMessageMaxRepeats: undefined,
+        stopMessageUsed: undefined
+      });
+      const nextState = applyRoutingInstructions(instructions, baseState);
+      expect(nextState.stopMessageText).toBeUndefined();
+      expect(nextState.stopMessageMaxRepeats).toBeUndefined();
+      expect(nextState.stopMessageUsed).toBeUndefined();
+  });
+
   test('applies and serializes stopMessage state', () => {
     const baseState = createState();
     const instructions = parseRoutingInstructions(buildMessages('<**stopMessage:"继续",2**>'));

@@ -520,7 +520,12 @@ describe('servertool progress logging', () => {
         })
       });
 
-      expect(fs.existsSync(sessionFile)).toBe(false);
+      expect(fs.existsSync(sessionFile)).toBe(true);
+      const persistedAfterSecond = JSON.parse(fs.readFileSync(sessionFile, 'utf8')) as any;
+      expect(persistedAfterSecond?.state?.stopMessageText).toBeUndefined();
+      expect(persistedAfterSecond?.state?.stopMessageMaxRepeats).toBeUndefined();
+      expect(persistedAfterSecond?.state?.stopMessageUsed).toBeUndefined();
+      expect(typeof persistedAfterSecond?.state?.stopMessageUpdatedAt).toBe('number');
 
       await flushServerToolProgressFileLoggerForTests();
       const lines = fs.readFileSync(logPath, 'utf8').trim().split('\n').filter(Boolean);

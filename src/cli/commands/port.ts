@@ -46,7 +46,7 @@ export function createPortCommand(program: Command, ctx: PortCommandContext): vo
     .description('Port utilities (doctor)')
     .argument('<sub>', 'Subcommand: doctor')
     .argument('[port]', `Port number (e.g., ${ctx.defaultPort})`)
-    .option('--kill', 'Kill all listeners on the port')
+    .option('--kill', 'Stop managed RouteCodex server on the port (only stops known managed servers via pid file, refuses to kill unknown listeners)')
     .action(async (sub: string, portArg: string | undefined, opts: { kill?: boolean }) => {
       if ((sub || '').toLowerCase() !== 'doctor') {
         ctx.error(chalk.red('Unknown subcommand. Use: rcc port doctor [port] [--kill]'));
@@ -71,9 +71,10 @@ export function createPortCommand(program: Command, ctx: PortCommandContext): vo
           ctx.exit(1);
         }
 
+        // findListeningPids 返回的是 managed pids（已通过 pid file + command 验证）
         const pids = ctx.findListeningPids(port);
         spinner.stop();
-        ctx.log(chalk.cyan(`Port ${port} listeners:`));
+        ctx.log(chalk.cyan(`Port ${port} managed RouteCodex servers:`));
 
         if (!pids.length) {
           ctx.log('  (none)');
@@ -92,22 +93,39 @@ export function createPortCommand(program: Command, ctx: PortCommandContext): vo
           }
         }
 
+        // --kill 只能杀 managed server，不能杀任意监听者
+        // 通过 findListeningPids 已经返回的是 managed pids（已验证是 routecodex）
         if (opts.kill && pids.length) {
-          const ksp = await ctx.createSpinner(`Killing ${pids.length} listener(s) on ${port}...`);
+          const ksp = await ctx.createSpinner(`Stopping ${pids.length} managed RouteCodex server(s) on ${port}...`);
           for (const pid of pids) {
             try {
-              ctx.killPidBestEffort(pid, { force: true });
+              ctx.killPidBestEffort(pid, { force: false });
             } catch (e) {
-              ksp.warn(`Failed to kill ${pid}: ${(e as Error).message}`);
+              ksp.warn(`Failed to stop PID ${pid}: ${(e as Error).message}`);
             }
           }
-          await ctx.sleep(300);
+          await ctx.sleep(500);
           const remain = ctx.findListeningPids(port);
           if (remain.length) {
-            ksp.fail(`Some listeners remain: ${remain.join(', ')}`);
-            ctx.exit(1);
+            ksp.warn(`Graceful stop timed out, forcing SIGKILL to managed PID(s): ${remain.join(', ')}`);
+            for (const pid of remain) {
+              try {
+                ctx.killPidBestEffort(pid, { force: true });
+              } catch (e) {
+                ksp.warn(`Failed to force-stop PID ${pid}: ${(e as Error).message}`);
+              }
+            }
+            await ctx.sleep(300);
+            const stillRemain = ctx.findListeningPids(port);
+            if (stillRemain.length) {
+              ksp.fail(`Some managed processes remain: ${stillRemain.join(', ')}`);
+              ctx.exit(1);
+            }
           }
           ksp.succeed(`Port ${port} is now free.`);
+        } else if (opts.kill && !pids.length) {
+          ctx.log(chalk.yellow('No managed RouteCodex server found on this port. Refusing to kill unknown listeners.'));
+          ctx.log(chalk.gray('Use lsof/ps to identify the listener and stop it manually if needed.'));
         }
       } catch (e) {
         spinner.fail('Port inspection failed');

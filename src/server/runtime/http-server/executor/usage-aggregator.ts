@@ -30,10 +30,40 @@ export function extractUsageFromResult(
     if (body.usage) {
       candidates.push(body.usage);
     }
+    if (body.metadata && typeof body.metadata === 'object') {
+      const bodyMeta = body.metadata as Record<string, unknown>;
+      if (bodyMeta.usage) {
+        candidates.push(bodyMeta.usage);
+      }
+    }
+    if (body.data && typeof body.data === 'object') {
+      const bodyData = body.data as Record<string, unknown>;
+      if (bodyData.usage) {
+        candidates.push(bodyData.usage);
+      }
+      if (bodyData.metadata && typeof bodyData.metadata === 'object') {
+        const bodyDataMeta = bodyData.metadata as Record<string, unknown>;
+        if (bodyDataMeta.usage) {
+          candidates.push(bodyDataMeta.usage);
+        }
+      }
+    }
     if (body.response && typeof body.response === 'object') {
       const responseNode = body.response as Record<string, unknown>;
       if (responseNode.usage) {
         candidates.push(responseNode.usage);
+      }
+    }
+  }
+
+  if (result.headers && typeof result.headers === 'object') {
+    const usageHeader =
+      (result.headers['x-usage'] || result.headers['X-Usage'] || result.headers['x-routecodex-usage']) as unknown;
+    if (typeof usageHeader === 'string' && usageHeader.trim()) {
+      try {
+        candidates.push(JSON.parse(usageHeader));
+      } catch {
+        // ignore non-json usage header
       }
     }
   }
@@ -58,20 +88,39 @@ export function normalizeUsage(value: unknown): UsageMetrics | undefined {
   }
 
   const record = value as Record<string, unknown>;
+  const usageRecord =
+    record.usageMetadata && typeof record.usageMetadata === 'object'
+      ? (record.usageMetadata as Record<string, unknown>)
+      : record;
+
+  const readNumeric = (raw: unknown): number | undefined => {
+    if (typeof raw === 'number' && Number.isFinite(raw)) {
+      return raw;
+    }
+    if (typeof raw === 'string' && raw.trim()) {
+      const parsed = Number(raw);
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+    return undefined;
+  };
   const basePrompt =
-    typeof record.prompt_tokens === 'number'
-      ? record.prompt_tokens
-      : typeof record.input_tokens === 'number'
-        ? record.input_tokens
-        : undefined;
+    readNumeric(usageRecord.prompt_tokens) ??
+    readNumeric(usageRecord.input_tokens) ??
+    readNumeric(usageRecord.promptTokens) ??
+    readNumeric(usageRecord.inputTokens) ??
+    readNumeric(usageRecord.request_tokens) ??
+    readNumeric(usageRecord.requestTokens);
 
   let cacheRead: number | undefined =
-    typeof record.cache_read_input_tokens === 'number' ? record.cache_read_input_tokens : undefined;
+    readNumeric(usageRecord.cache_read_input_tokens);
 
-  if (cacheRead === undefined && record.input_tokens_details && typeof record.input_tokens_details === 'object') {
-    const details = record.input_tokens_details as Record<string, unknown>;
-    if (typeof details.cached_tokens === 'number') {
-      cacheRead = details.cached_tokens;
+  if (cacheRead === undefined && usageRecord.input_tokens_details && typeof usageRecord.input_tokens_details === 'object') {
+    const details = usageRecord.input_tokens_details as Record<string, unknown>;
+    const cached = readNumeric(details.cached_tokens);
+    if (cached !== undefined) {
+      cacheRead = cached;
     }
   }
 
@@ -81,13 +130,16 @@ export function normalizeUsage(value: unknown): UsageMetrics | undefined {
       : undefined;
 
   const completion =
-    typeof record.completion_tokens === 'number'
-      ? record.completion_tokens
-      : typeof record.output_tokens === 'number'
-        ? record.output_tokens
-        : undefined;
+    readNumeric(usageRecord.completion_tokens) ??
+    readNumeric(usageRecord.output_tokens) ??
+    readNumeric(usageRecord.completionTokens) ??
+    readNumeric(usageRecord.outputTokens) ??
+    readNumeric(usageRecord.response_tokens) ??
+    readNumeric(usageRecord.responseTokens);
 
-  let total = typeof record.total_tokens === 'number' ? record.total_tokens : undefined;
+  let total =
+    readNumeric(usageRecord.total_tokens) ??
+    readNumeric(usageRecord.totalTokens);
 
   if (total === undefined && prompt !== undefined && completion !== undefined) {
     total = prompt + completion;
