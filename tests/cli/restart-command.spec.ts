@@ -61,7 +61,7 @@ describe('cli restart command', () => {
     ).rejects.toThrow('exit:1');
   });
 
-  it('requests daemon-managed restart for the running server', async () => {
+  it('requests in-place restart for the running server', async () => {
     const program = new Command();
     const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
     let call = 0;
@@ -98,10 +98,10 @@ describe('cli restart command', () => {
     });
 
     await program.parseAsync(['node', 'routecodex', 'restart'], { from: 'node' });
-    expect(signals).toEqual([]);
+    expect(signals).toEqual([{ pid: 111, signal: 'SIGUSR2' }]);
   });
 
-  it('supports --port to target a specific server via daemon endpoint', async () => {
+  it('supports --port to target a specific server for in-place restart', async () => {
     const program = new Command();
     const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
     let call = 0;
@@ -130,10 +130,49 @@ describe('cli restart command', () => {
     });
 
     await program.parseAsync(['node', 'routecodex', 'restart', '--port', '5520'], { from: 'node' });
-    expect(signals).toEqual([]);
+    expect(signals).toEqual([{ pid: 333, signal: 'SIGUSR2' }]);
   });
 
-  it('accepts same-pid healthy restart without timing out via daemon endpoint', async () => {
+  it('still signals restart for --port when health probe is temporarily unavailable', async () => {
+    const program = new Command();
+    const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
+    let healthCall = 0;
+    let call = 0;
+    createRestartCommand(program, {
+      isDevPackage: true,
+      isWindows: false,
+      defaultDevPort: 5555,
+      createSpinner: async () => createStubSpinner(),
+      logger: { info: () => {}, error: () => {} },
+      findListeningPids: (port) => {
+        call += 1;
+        if (port !== 5520) {
+          return [];
+        }
+        return call <= 1 ? [555] : [666];
+      },
+      sleep: async () => {},
+      sendSignal: (pid, signal) => {
+        signals.push({ pid, signal });
+      },
+      fetch: (async () => {
+        healthCall += 1;
+        if (healthCall <= 2) {
+          return { ok: false, json: async () => ({}) };
+        }
+        return { ok: true, json: async () => ({ server: 'routecodex', status: 'ok' }) };
+      }) as any,
+      env: {},
+      exit: (code) => {
+        throw new Error(`exit:${code}`);
+      }
+    });
+
+    await program.parseAsync(['node', 'routecodex', 'restart', '--port', '5520'], { from: 'node' });
+    expect(signals).toEqual([{ pid: 555, signal: 'SIGUSR2' }]);
+  });
+
+  it('accepts same-pid healthy restart without timing out via in-place signal', async () => {
     const program = new Command();
     const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
     createRestartCommand(program, {
@@ -166,6 +205,6 @@ describe('cli restart command', () => {
     });
 
     await program.parseAsync(['node', 'routecodex', 'restart'], { from: 'node' });
-    expect(signals).toEqual([]);
+    expect(signals).toEqual([{ pid: 777, signal: 'SIGUSR2' }]);
   });
 });

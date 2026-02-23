@@ -210,8 +210,9 @@ async function resolveRestartTargets(ctx: RestartCommandContext, options: Restar
     const ok = await isRouteCodexServer(ctx, host === LOCAL_HOSTS.LOCALHOST ? LOCAL_HOSTS.IPV4 : host, explicitPort)
       || await isRouteCodexServer(ctx, host, explicitPort);
     if (!ok) {
-      spinner.fail(`No RouteCodex server found on ${host}:${explicitPort}`);
-      ctx.exit(1);
+      // Allow explicit-port restart when managed PIDs are present but health probe
+      // is timing out; SIGUSR2 restart is used as recovery in this degraded state.
+      spinner.warn(`Health probe timed out on ${host}:${explicitPort}; sending in-place restart signal to managed pid(s).`);
     }
     return [{ host, port: explicitPort, oldPids: pids }];
   }
@@ -326,25 +327,19 @@ async function waitForRestart(ctx: RestartCommandContext, host: string, port: nu
   throw new Error('Timeout waiting for server to restart');
 }
 
-async function requestDaemonRestart(ctx: RestartCommandContext, host: string, port: number): Promise<void> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => {
+function requestInPlaceRestart(ctx: RestartCommandContext, target: RestartTarget): void {
+  const pids = Array.isArray(target.oldPids) ? target.oldPids : [];
+  let signaled = 0;
+  for (const pid of pids) {
     try {
-      controller.abort();
+      ctx.sendSignal(pid, 'SIGUSR2');
+      signaled += 1;
     } catch {
-      // ignore
+      // ignore; wait phase will verify
     }
-  }, 4000);
-  try {
-    const response = await ctx.fetch(`${HTTP_PROTOCOLS.HTTP}${host}:${port}/daemon/restart`, {
-      method: 'POST',
-      signal: controller.signal
-    }).catch(() => null);
-    if (!response?.ok) {
-      throw new Error(`daemon restart endpoint rejected request (status=${response?.status ?? 'n/a'})`);
-    }
-  } finally {
-    clearTimeout(timeout);
+  }
+  if (signaled <= 0) {
+    throw new Error(`failed to signal restart to ${target.host}:${target.port}`);
   }
 }
 
@@ -378,7 +373,7 @@ export function createRestartCommand(program: Command, ctx: RestartCommandContex
           }
         });
 
-        spinner.text = 'Requesting daemon-managed restart...';
+        spinner.text = 'Requesting in-place restart...';
         for (const t of targets) {
           const approved = await ctx.reportGuardianLifecycle?.({
             action: 'restart_request',
@@ -392,7 +387,7 @@ export function createRestartCommand(program: Command, ctx: RestartCommandContex
           if (ctx.reportGuardianLifecycle && approved !== true) {
             throw new Error(`guardian lifecycle apply rejected for ${t.host}:${t.port}`);
           }
-          await requestDaemonRestart(ctx, t.host || LOCAL_HOSTS.LOCALHOST, t.port);
+          requestInPlaceRestart(ctx, t);
         }
 
         spinner.text = 'Waiting for server to restart...';
