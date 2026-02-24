@@ -157,12 +157,16 @@ export async function convertProviderResponseIfNeeded(
         error.upstreamCode = wrapperError.errorCode;
       }
       error.retryable = wrapperError.retryable;
+      if (typeof wrapperError.statusCode === 'number' && Number.isFinite(wrapperError.statusCode)) {
+        error.status = wrapperError.statusCode;
+        error.statusCode = wrapperError.statusCode;
+      }
       if (isRateLimitLikeError(wrapperError.message, wrapperError.errorCode)) {
         error.code = 'HTTP_429';
         error.status = 429;
         error.statusCode = 429;
         error.retryable = true;
-      } else if (wrapperError.retryable) {
+      } else if (wrapperError.retryable && error.statusCode === undefined) {
         error.status = 503;
         error.statusCode = 503;
       }

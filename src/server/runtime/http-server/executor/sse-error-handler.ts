@@ -10,6 +10,7 @@ import { firstNonEmptyString, firstFiniteNumber } from '../executor/utils.js';
 export type SseWrapperErrorInfo = {
   message: string;
   errorCode?: string;
+  statusCode?: number;
   retryable: boolean;
 };
 
@@ -84,9 +85,18 @@ function normalizeSseWrapperErrorValue(
       }
     }
 
+    const bracketCodeMatch = trimmed.match(/\[([^\]]+)\]/);
+    const bracketCode = bracketCodeMatch && bracketCodeMatch[1] ? bracketCodeMatch[1].trim() : '';
+    const parsedStatus =
+      /^\d+$/.test(bracketCode) && Number(bracketCode) >= 100 && Number(bracketCode) <= 599
+        ? Number(bracketCode)
+        : undefined;
+
     return {
       message: trimmed,
-      retryable: isRetryableSseWrapperError(trimmed)
+      ...(bracketCode ? { errorCode: bracketCode } : {}),
+      ...(parsedStatus !== undefined ? { statusCode: parsedStatus } : {}),
+      retryable: isRetryableSseWrapperError(trimmed, bracketCode || undefined, parsedStatus)
     };
   }
 
@@ -118,11 +128,13 @@ function normalizeSseWrapperErrorValue(
       const nestedInfo = normalizeSseWrapperErrorValue(record[key], depth - 1);
       if (nestedInfo) {
         const mergedCode = nestedInfo.errorCode ?? directCode;
+        const mergedStatus = nestedInfo.statusCode ?? directStatus;
         const retryable = nestedInfo.retryable ||
-          isRetryableSseWrapperError(nestedInfo.message, mergedCode, directStatus);
+          isRetryableSseWrapperError(nestedInfo.message, mergedCode, mergedStatus);
         return {
           message: nestedInfo.message,
           ...(mergedCode ? { errorCode: mergedCode } : {}),
+          ...(mergedStatus !== undefined ? { statusCode: mergedStatus } : {}),
           retryable
         };
       }
@@ -133,6 +145,7 @@ function normalizeSseWrapperErrorValue(
     return {
       message: directMessage,
       ...(directCode ? { errorCode: directCode } : {}),
+      ...(directStatus !== undefined ? { statusCode: directStatus } : {}),
       retryable: isRetryableSseWrapperError(directMessage, directCode, directStatus)
     };
   }
@@ -143,6 +156,7 @@ function normalizeSseWrapperErrorValue(
       return {
         message: serialized,
         ...(directCode ? { errorCode: directCode } : {}),
+        ...(directStatus !== undefined ? { statusCode: directStatus } : {}),
         retryable: isRetryableSseWrapperError(serialized, directCode, directStatus)
       };
     }

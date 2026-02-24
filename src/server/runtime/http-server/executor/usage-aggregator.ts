@@ -54,6 +54,24 @@ export function extractUsageFromResult(
         candidates.push(responseNode.usage);
       }
     }
+    if (body.payload && typeof body.payload === 'object') {
+      const payload = body.payload as Record<string, unknown>;
+      if (payload.usage) {
+        candidates.push(payload.usage);
+      }
+      if (payload.metadata && typeof payload.metadata === 'object') {
+        const payloadMeta = payload.metadata as Record<string, unknown>;
+        if (payloadMeta.usage) {
+          candidates.push(payloadMeta.usage);
+        }
+      }
+      if (payload.response && typeof payload.response === 'object') {
+        const payloadResponse = payload.response as Record<string, unknown>;
+        if (payloadResponse.usage) {
+          candidates.push(payloadResponse.usage);
+        }
+      }
+    }
   }
 
   if (result.headers && typeof result.headers === 'object') {

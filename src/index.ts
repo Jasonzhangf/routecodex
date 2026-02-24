@@ -139,9 +139,25 @@ function colorizeRuntimeLogLine(line: string): string {
   return line;
 }
 
+function isServertoolSkipDiagnosticLine(text: string): boolean {
+  if (!text) {
+    return false;
+  }
+  if (text.includes('[servertool][stop_compare]')) {
+    return text.includes('decision=skip');
+  }
+  if (text.includes('[servertool][stop_watch]')) {
+    return !text.includes('result=activated');
+  }
+  return false;
+}
+
 function shouldSuppressRuntimeLogLine(text: string): boolean {
   if (!text) {
     return false;
+  }
+  if (isServertoolSkipDiagnosticLine(text)) {
+    return true;
   }
   if (text.includes('[virtual-router][instruction_parse]') || text.includes('[virtual-router][stop_scope]')) {
     return false;

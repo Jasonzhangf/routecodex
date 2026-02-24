@@ -8,6 +8,7 @@ import { logOAuthDebug } from '../../auth/oauth-logger.js';
 import {
   CAMO_CLICK_TARGETS,
   clickCamoGoogleAccountByHint,
+  hasCamoGoogleSignInPrompt,
   clickCamoGoogleSignInBySelector,
   clickCamoTarget,
   ensureCamoProfile,
@@ -798,7 +799,22 @@ async function maybeAdvanceQwenAuthorization(options: {
   if (provider !== 'qwen') {
     return true;
   }
-  const activeUrl = getActiveCamoPageUrl(options.actionContext);
+  let activeUrl = getActiveCamoPageUrl(options.actionContext);
+  if (activeUrl && !isQwenAuthorizeUrl(activeUrl) && isTokenPortalUrl(activeUrl)) {
+    const settleTimeoutMs = parsePositiveInt(process.env.ROUTECODEX_CAMOUFOX_QWEN_OAUTH_SETTLE_MS, 8000);
+    const pollIntervalMs = parsePositiveInt(process.env.ROUTECODEX_CAMOUFOX_QWEN_OAUTH_POLL_MS, 250);
+    const deadline = Date.now() + settleTimeoutMs;
+    while (Date.now() <= deadline) {
+      const currentUrl = getActiveCamoPageUrl(options.actionContext);
+      if (currentUrl) {
+        activeUrl = currentUrl;
+        if (isQwenAuthorizeUrl(currentUrl) || isGoogleAuthUrl(currentUrl)) {
+          break;
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+    }
+  }
   if (!activeUrl || !isQwenAuthorizeUrl(activeUrl)) {
     return true;
   }
@@ -866,7 +882,7 @@ async function maybeAdvanceIflowAccountSelection(options: {
   return clickCamoTarget(options.actionContext, CAMO_CLICK_TARGETS.iflowAccountSelect, {
     retries: retryCount,
     retryDelayMs,
-    required: false
+    required: autoModeEnabled
   });
 }
 
@@ -890,6 +906,34 @@ async function waitForGoogleAuthPage(options: {
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
   return isGoogleAuthUrl(lastUrl || '') ? lastUrl : null;
+}
+
+async function waitForGoogleSignInPrompt(options: {
+  actionContext: CamoActionContext;
+  settleTimeoutMs: number;
+  pollIntervalMs: number;
+}): Promise<{ activeUrl: string | null; promptDetected: boolean }> {
+  const timeoutMs = options.settleTimeoutMs > 0 ? options.settleTimeoutMs : 12_000;
+  const intervalMs = options.pollIntervalMs > 0 ? options.pollIntervalMs : 400;
+  const deadline = Date.now() + timeoutMs;
+  let lastUrl: string | null = null;
+  while (Date.now() <= deadline) {
+    const activeUrl = getActiveCamoPageUrl(options.actionContext);
+    if (activeUrl) {
+      lastUrl = activeUrl;
+      if (!isGoogleAuthUrl(activeUrl)) {
+        return { activeUrl, promptDetected: false };
+      }
+      if (hasCamoGoogleSignInPrompt(options.actionContext)) {
+        return { activeUrl, promptDetected: true };
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  return {
+    activeUrl: lastUrl,
+    promptDetected: !!lastUrl && isGoogleAuthUrl(lastUrl) && hasCamoGoogleSignInPrompt(options.actionContext)
+  };
 }
 
 async function maybeAdvanceGoogleAuth(options: {
@@ -962,12 +1006,27 @@ async function maybeAdvanceGoogleAuth(options: {
     logOAuthDebug(`[OAuth] camo-cli google sign-in step skipped (active page is non-google): ${signInUrl || 'n/a'}`);
     return true;
   }
-  const signInClicked = await clickCamoGoogleSignInBySelector(options.actionContext, {
-    retries: signInRetryCount,
-    retryDelayMs: signInRetryDelayMs,
-    required: false
+  const strictRequired = provider === 'gemini-cli' || provider === 'antigravity';
+  const signInSettleMs = parsePositiveInt(process.env.ROUTECODEX_CAMOUFOX_GOOGLE_SIGNIN_SETTLE_MS, strictRequired ? 16_000 : 8_000);
+  const signInPollMs = parsePositiveInt(process.env.ROUTECODEX_CAMOUFOX_GOOGLE_SIGNIN_POLL_MS, 400);
+  const signInProbe = await waitForGoogleSignInPrompt({
+    actionContext: options.actionContext,
+    settleTimeoutMs: signInSettleMs,
+    pollIntervalMs: signInPollMs
   });
-  if (!signInClicked) {
+  if (signInProbe.promptDetected) {
+    const signInClicked = await clickCamoGoogleSignInBySelector(options.actionContext, {
+      retries: signInRetryCount,
+      retryDelayMs: signInRetryDelayMs,
+      required: true
+    });
+    if (!signInClicked) {
+      return false;
+    }
+  } else if (strictRequired && signInProbe.activeUrl && isGoogleAuthUrl(signInProbe.activeUrl)) {
+    logOAuthDebug(
+      `[OAuth] camo-cli google sign-in prompt not observed on strict provider=${provider} url=${signInProbe.activeUrl}`
+    );
     return false;
   }
   return true;

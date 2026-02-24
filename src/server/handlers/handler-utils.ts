@@ -38,10 +38,6 @@ type RequestLogMeta = Record<string, unknown> | undefined;
 
 const SHOULD_LOG_HTTP_EVENTS = buildInfo.mode !== 'release'
   || process.env.ROUTECODEX_HTTP_LOG_VERBOSE === '1';
-const SHOULD_LOG_HTTP_META = resolveBoolFromEnv(
-  process.env.ROUTECODEX_HTTP_LOG_META ?? process.env.RCC_HTTP_LOG_META,
-  false
-);
 
 function resolveBoolFromEnv(value: string | undefined, fallback: boolean): boolean {
   if (!value) {
@@ -89,8 +85,9 @@ export function logRequestStart(endpoint: string, requestId: string, meta?: Requ
   if (!SHOULD_LOG_HTTP_EVENTS) {
     return;
   }
-  const suffix = SHOULD_LOG_HTTP_META ? formatMeta(meta) : '';
-  console.log(`➡️  [${endpoint}] request ${formatRequestId(requestId)}${suffix}`);
+  void endpoint;
+  void requestId;
+  void meta;
 }
 
 export function logRequestComplete(endpoint: string, requestId: string, status: number): void {
@@ -247,14 +244,4 @@ function normalizeError(error: unknown, requestId: string, endpoint: string): Er
     enriched.endpoint = endpoint;
   }
   return enriched;
-}
-
-function formatMeta(meta?: RequestLogMeta): string {
-  if (!meta || typeof meta !== 'object') {
-    return '';
-  }
-  const entries = Object.entries(meta)
-    .filter(([_, value]) => value !== undefined && value !== null && value !== '')
-    .map(([key, value]) => `${key}=${typeof value === 'object' ? JSON.stringify(value) : value}`);
-  return entries.length ? ` (${entries.join(', ')})` : '';
 }

@@ -3,14 +3,13 @@ import { resolveEffectiveRequestId } from '../utils/request-id-manager.js';
 
 export type RequestLogMeta = Record<string, unknown> | undefined;
 
-const chalkRequest = typeof chalk?.greenBright === 'function' ? chalk.greenBright : (value: string) => value;
 const chalkSuccess = typeof chalk?.blueBright === 'function' ? chalk.blueBright : (value: string) => value;
 const chalkError = typeof chalk?.redBright === 'function' ? chalk.redBright : (value: string) => value;
 
 export function logRequestStart(endpoint: string, requestId: string, meta?: RequestLogMeta): void {
-  const suffix = formatMeta(meta);
-  const message = `➡️  [${endpoint}] request ${deriveRequestLabel(requestId, meta)}${suffix}`;
-  console.log(chalkRequest(message));
+  void endpoint;
+  void requestId;
+  void meta;
 }
 
 export function logRequestComplete(endpoint: string, requestId: string, status: number, meta?: RequestLogMeta): void {

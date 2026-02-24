@@ -42,6 +42,10 @@ export const CAMO_CLICK_TARGETS: Record<string, CamoClickTarget> = {
     key: 'googleAccountSelect',
     selectors: [
       'div[data-identifier]',
+      'div[data-email]',
+      'div.yAlK0b',
+      'div[role="link"][data-identifier]',
+      'div[role="button"][data-identifier]',
       '[data-profileindex]',
       '[data-identifier] [role="link"]'
     ]
@@ -412,32 +416,45 @@ export async function clickCamoGoogleSignInBySelector(
   options: { retries: number; retryDelayMs: number; required: boolean }
 ): Promise<boolean> {
   const retries = options.retries > 0 ? options.retries : 1;
-  const selectors = ['[data-rcx-signin="1"]', 'div.VfPpkd-RLmnJb'];
+  const selectors = ['[data-rcx-signin="1"]'];
   for (let attempt = 1; attempt <= retries; attempt += 1) {
-    runCamoDevtoolsEval(
+    const markResult = runCamoDevtoolsEval(
       context,
       `(() => {
-        const vis = (el) => { if (!el) return false; const r = el.getBoundingClientRect(); const s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.display !== 'none' && s.visibility !== 'hidden' && Number(s.opacity || '1') !== 0; };
+        const vis = (el) => {
+          if (!el) return false;
+          const r = el.getBoundingClientRect();
+          const s = getComputedStyle(el);
+          return r.width > 0 && r.height > 0 && s.display !== 'none' && s.visibility !== 'hidden' && Number(s.opacity || '1') !== 0;
+        };
+        const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim().toLowerCase();
+        const isSignInText = (value) => /sign\\s*in|登录|登入/.test(normalize(value));
         for (const el of Array.from(document.querySelectorAll('[data-rcx-signin]'))) el.removeAttribute('data-rcx-signin');
-        const buttons = Array.from(document.querySelectorAll('button,[role="button"]')).filter(vis);
-        const byText = buttons.find((b) => /sign\\s*in|登录/i.test(String(b.innerText || b.textContent || ''))) || null;
-        let target = byText;
-        if (!target) {
-          const divs = Array.from(document.querySelectorAll('div.VfPpkd-RLmnJb')).filter(vis);
-          const guess = divs.length >= 2 ? divs[1] : (divs[0] || null);
-          target = guess ? (guess.closest('button,[role="button"]') || guess) : null;
-        }
+        const buttons = Array.from(document.querySelectorAll('button,[role="button"],div[role="button"]')).filter(vis);
+        const target = buttons.find((button) => isSignInText(button.innerText || button.textContent || '')) || null;
         if (!target) return 'not_found';
-        target.setAttribute('data-rcx-signin', '1');
-        const inner = target.querySelector?.('div.VfPpkd-RLmnJb'); if (inner) inner.setAttribute('data-rcx-signin', '1');
-        return 'ok';
+        const clickable = target.closest('button,[role="button"],div[role="button"]') || target;
+        clickable.setAttribute('data-rcx-signin', '1');
+        return 'ok:' + normalize(clickable.innerText || clickable.textContent || '');
       })()`
     );
+    const markValue = String(markResult.value || '').trim();
+    if (!markResult.ok || markValue === 'not_found') {
+      logOAuthDebug(
+        `[OAuth] camo-cli click-google-sign-in-selector sign-in prompt not ready attempt=${attempt}/${retries} status=${markResult.status ?? 'n/a'} error=${markResult.errorText || markValue}`
+      );
+      if (attempt < retries && options.retryDelayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, options.retryDelayMs));
+      }
+      continue;
+    }
     const preferredSelector = resolveVisibleSelector(context, selectors);
     for (const selector of (preferredSelector ? [preferredSelector] : selectors)) {
       const result = runCamoCliAction(context, ['click', context.profileId, selector, '--no-highlight'], 'inherit');
       if (result.ok) {
-        logOAuthDebug(`[OAuth] camo-cli click-google-sign-in-selector ok selector=${selector} attempt=${attempt}/${retries}`);
+        logOAuthDebug(
+          `[OAuth] camo-cli click-google-sign-in-selector ok selector=${selector} target=${markValue} attempt=${attempt}/${retries}`
+        );
         return true;
       }
       const err = String(result.errorText || '').toLowerCase();
@@ -449,6 +466,26 @@ export async function clickCamoGoogleSignInBySelector(
   }
   if (options.required) { logOAuthDebug('[OAuth] camo-cli click-google-sign-in-selector required but not matched'); return false; }
   return true;
+}
+
+export function hasCamoGoogleSignInPrompt(context: CamoActionContext): boolean {
+  const evalResult = runCamoDevtoolsEval(
+    context,
+    `(() => {
+      const vis = (el) => {
+        if (!el) return false;
+        const r = el.getBoundingClientRect();
+        const s = getComputedStyle(el);
+        return r.width > 0 && r.height > 0 && s.display !== 'none' && s.visibility !== 'hidden' && Number(s.opacity || '1') !== 0;
+      };
+      const buttons = Array.from(document.querySelectorAll('button,[role="button"],div[role="button"]')).filter(vis);
+      return buttons.some((b) => /sign\\s*in|登录|登入/i.test(String(b.innerText || b.textContent || ''))) ? '1' : '0';
+    })()`
+  );
+  if (!evalResult.ok) {
+    return false;
+  }
+  return String(evalResult.value || '').trim() === '1';
 }
 export async function clickCamoGoogleAccountByHint(context: CamoActionContext, hint: string, options: { retries: number; retryDelayMs: number; required: boolean }): Promise<boolean> {
   const normalizedHint = String(hint || '').trim().toLowerCase();

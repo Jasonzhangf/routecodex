@@ -9,6 +9,7 @@ This document replaces the old “architecture novel” with a concise set of ru
 3. **Provider layer = transport** – V2 providers handle auth, HTTP, retries, and compatibility hooks. They do not inspect user payload semantics.
 4. **Fail fast** – Any upstream error (HTTP, auth, compat) is bubbled via `providerErrorCenter` + `errorHandlingCenter`. No silent fallbacks.
 5. **Config-driven** – Host consumes `bootstrapVirtualRouterConfig` output only. Do not reassemble “merged configs” or patch runtime data on the fly.
+6. **No backtracking** – Never revert changes or apply patches to fix bugs. Always identify and fix the root cause.
 
 ## 1.1 Agent Conduct & Accountability
 
@@ -255,3 +256,5 @@ bd --no-db list --status open --priority 1 --label-any urgent,critical --no-assi
 - 关键时刻强制落盘：结束会话/交接前跑一次 `bd sync`（把 debounce 窗口里的改动立刻刷到 JSONL）
 - 约定：git 只追踪 `.beads/issues.jsonl`/`.gitattributes`/`.beads/.gitignore`，不要提交 `.beads/beads.db` 之类本地文件
 - 如果用 git worktree：别开 daemon（`export BEADS_NO_DAEMON=1` 或每次加 `--no-daemon`），主要依赖 hooks + 需要时手动 `bd sync`
+
+

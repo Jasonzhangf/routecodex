@@ -62,7 +62,7 @@ function createExecutor(pipelineResult: PipelineExecutionResult, handle: Provide
     metadata: { stream: false, inboundStream: false }
   };
 
-  return { executor, request, handle, runtimeManager, logStage: deps.logStage };
+  return { executor, request, handle, runtimeManager, logStage: deps.logStage, stats };
 }
 
 describe('HubRequestExecutor single attempt behaviour', () => {
@@ -87,6 +87,35 @@ describe('HubRequestExecutor single attempt behaviour', () => {
 
     expect(response).toBeDefined();
     expect(handle.instance.processIncoming).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps usage from provider response when converted payload has no usage', async () => {
+    const handle = createRuntimeHandle(async () => ({
+      status: 200,
+      data: {
+        id: 'raw_provider_payload',
+        usage: {
+          prompt_tokens: 12,
+          completion_tokens: 5,
+          total_tokens: 17
+        }
+      }
+    }));
+    const { executor, request, stats } = createExecutor(pipelineResult, handle);
+    jest
+      .spyOn(executor as any, 'convertProviderResponseIfNeeded')
+      .mockResolvedValue({ status: 200, body: { id: 'converted_payload_without_usage' } });
+
+    await executor.execute(request);
+
+    const completionCalls = stats.recordCompletion.mock.calls;
+    const successCall = completionCalls.find((call) => call[1] && call[1].error === false);
+    expect(successCall).toBeDefined();
+    expect(successCall?.[1]?.usage).toEqual({
+      prompt_tokens: 12,
+      completion_tokens: 5,
+      total_tokens: 17
+    });
   });
 
   it('retries retryable provider errors and re-runs pipeline', async () => {
@@ -338,6 +367,94 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     expect(response).toEqual(expect.objectContaining({ status: 200 }));
     expect(fakePipeline.execute).toHaveBeenCalledTimes(2);
     expect(rateLimitedHandle.instance.processIncoming).toHaveBeenCalledTimes(1);
+    expect(successHandle.instance.processIncoming).toHaveBeenCalledTimes(1);
+    const secondCallMetadata = fakePipeline.execute.mock.calls[1][0]
+      .metadata as Record<string, unknown>;
+    expect(secondCallMetadata.excludedProviderKeys).toEqual(['tab.key1']);
+  });
+
+  it('reroutes when SSE wrapper carries Anthropic 500 upstream failure', async () => {
+    const failingHandle = createRuntimeHandle(async () => ({
+      status: 200,
+      data: {
+        mode: 'sse',
+        error: 'Anthropic SSE error event [500] Operation failed (request_id=req500)'
+      }
+    }));
+    const successHandle = createRuntimeHandle(async () => ({ status: 200, data: { ok: true } }));
+
+    const firstResult: PipelineExecutionResult = {
+      providerPayload: { data: { messages: [] } },
+      target: {
+        providerKey: 'tab.key1',
+        providerType: 'responses',
+        outboundProfile: 'openai-responses',
+        runtimeKey: 'runtime:one',
+        processMode: 'standard'
+      },
+      processMode: 'standard',
+      metadata: {}
+    };
+    const secondResult: PipelineExecutionResult = {
+      providerPayload: { data: { messages: [] } },
+      target: {
+        providerKey: 'tab.key2',
+        providerType: 'responses',
+        outboundProfile: 'openai-responses',
+        runtimeKey: 'runtime:two',
+        processMode: 'standard'
+      },
+      processMode: 'standard',
+      metadata: {}
+    };
+
+    const fakePipeline: HubPipeline = {
+      execute: jest.fn().mockResolvedValueOnce(firstResult).mockResolvedValueOnce(secondResult)
+    };
+
+    const runtimeManager: ProviderRuntimeManager = {
+      resolveRuntimeKey: jest.fn(),
+      getHandleByRuntimeKey: jest.fn((runtimeKey: string) =>
+        runtimeKey === 'runtime:one' ? failingHandle : successHandle
+      ),
+      getHandleByProviderKey: jest.fn(),
+      disposeAll: jest.fn(),
+      initialize: jest.fn()
+    } as unknown as ProviderRuntimeManager;
+
+    const stats = {
+      recordRequestStart: jest.fn(),
+      recordCompletion: jest.fn(),
+      bindProvider: jest.fn(),
+      recordToolUsage: jest.fn()
+    };
+
+    const deps = {
+      runtimeManager,
+      getHubPipeline: () => fakePipeline,
+      getModuleDependencies: (): ModuleDependencies => ({
+        errorHandlingCenter: {
+          handleError: jest.fn().mockResolvedValue({ success: true })
+        }
+      } as ModuleDependencies),
+      logStage: jest.fn(),
+      stats
+    };
+
+    const executor = new HubRequestExecutor(deps);
+    const request: PipelineExecutionInput = {
+      requestId: 'req_retry_sse_500',
+      entryEndpoint: '/internal/test',
+      headers: {},
+      body: { messages: [{ role: 'user', content: 'retry me' }] },
+      metadata: { stream: false, inboundStream: false }
+    };
+
+    const response = await executor.execute(request);
+
+    expect(response).toEqual(expect.objectContaining({ status: 200 }));
+    expect(fakePipeline.execute).toHaveBeenCalledTimes(2);
+    expect(failingHandle.instance.processIncoming).toHaveBeenCalledTimes(1);
     expect(successHandle.instance.processIncoming).toHaveBeenCalledTimes(1);
     const secondCallMetadata = fakePipeline.execute.mock.calls[1][0]
       .metadata as Record<string, unknown>;

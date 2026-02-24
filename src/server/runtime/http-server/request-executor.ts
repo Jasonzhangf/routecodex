@@ -296,6 +296,7 @@ export class HubRequestExecutor implements RequestExecutor {
           });
           const wantsStreamBase = Boolean(input.metadata?.inboundStream ?? input.metadata?.stream);
           const normalized = normalizeProviderResponse(providerResponse);
+          const usageFromProvider = extractUsageFromResult(normalized, mergedMetadata);
           const requestSemantics = resolveRequestSemantics(
             pipelineResult.processedRequest as Record<string, unknown> | undefined,
             pipelineResult.standardizedRequest as Record<string, unknown> | undefined
@@ -369,7 +370,7 @@ export class HubRequestExecutor implements RequestExecutor {
             }
             throw errorToThrow;
           }
-          const usage = extractUsageFromResult(converted, mergedMetadata);
+          const usage = extractUsageFromResult(converted, mergedMetadata) ?? usageFromProvider;
           aggregatedUsage = mergeUsageMetrics(aggregatedUsage, usage);
           if (converted.body && typeof converted.body === 'object') {
             const body = converted.body as Record<string, unknown>;

@@ -60,4 +60,46 @@ describe('usage log text', () => {
       total_tokens: 150
     });
   });
+
+  it('extracts usage from body.payload.usage', () => {
+    const usage = extractUsageFromResult({
+      body: {
+        payload: {
+          usage: {
+            input_tokens: 559,
+            output_tokens: 969,
+            cache_read_input_tokens: 107392
+          }
+        }
+      }
+    });
+
+    expect(usage).toEqual({
+      prompt_tokens: 107951,
+      completion_tokens: 969,
+      total_tokens: 108920
+    });
+  });
+
+  it('extracts usage from body.payload.response.usage', () => {
+    const usage = extractUsageFromResult({
+      body: {
+        payload: {
+          response: {
+            usage: {
+              prompt_tokens: 10,
+              completion_tokens: 5,
+              total_tokens: 15
+            }
+          }
+        }
+      }
+    });
+
+    expect(usage).toEqual({
+      prompt_tokens: 10,
+      completion_tokens: 5,
+      total_tokens: 15
+    });
+  });
 });

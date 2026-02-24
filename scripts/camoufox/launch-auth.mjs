@@ -1229,6 +1229,8 @@ async function runQwenAutoFlow({ url, profileDir, camoufoxBinary, devMode }) {
   }
 
   const timeoutMs = Number(process.env.ROUTECODEX_CAMOUFOX_QWEN_TIMEOUT_MS || 120_000);
+  const accountPreference = (process.env.ROUTECODEX_CAMOUFOX_ACCOUNT_TEXT || '').trim();
+  const accountWaitMs = Number(process.env.ROUTECODEX_CAMOUFOX_QWEN_ACCOUNT_TIMEOUT_MS || 15_000);
   cleanupExistingCamoufox(profileDir);
   const context = await firefox.launchPersistentContext(profileDir, {
     executablePath: camoufoxBinary,
@@ -1286,6 +1288,54 @@ async function runQwenAutoFlow({ url, profileDir, camoufoxBinary, devMode }) {
         authPage = page;
       }
       await authPage.waitForLoadState('domcontentloaded', { timeout: pageLoadTimeoutMs }).catch(() => {});
+    }
+
+    const qwenAccountSelectors = [
+      'div.yAlK0b[jsname="bQIQze"]',
+      'div.pGzURd[jsname="V1ur5d"]',
+      'span.accountName--ZKlffRBc',
+      'span[class^="accountName--"]',
+      'span[class*="accountName--"]',
+      '.account-item',
+      '[class*="account-item"]',
+      '[class*="accountItem"]',
+      '[data-testid*="account"]',
+      '[data-test*="account"]'
+    ];
+    const accountResult = await waitForAnyElementInPages(context, qwenAccountSelectors, accountWaitMs);
+    if (accountResult) {
+      let targetAccount = accountResult.locator.first();
+      if (accountPreference) {
+        const preferred = accountResult.locator.filter({ hasText: accountPreference });
+        if (await preferred.count()) {
+          console.log(`[camoufox-launch-auth] Qwen selecting account matching preference "${accountPreference}"`);
+          targetAccount = preferred.first();
+        } else {
+          console.warn(
+            `[camoufox-launch-auth] Qwen preferred account text "${accountPreference}" not found; falling back to first account`
+          );
+        }
+      }
+      await targetAccount.scrollIntoViewIfNeeded().catch(() => {});
+      await targetAccount.hover({ force: true }).catch(() => {});
+      const handle = await targetAccount.elementHandle();
+      const accountText = await targetAccount.innerText().catch(() => '');
+      if (handle) {
+        console.log(
+          `[camoufox-launch-auth] Qwen account element detected (${accountText || 'unknown label'}), clicking...`
+        );
+        await accountResult.page.evaluate((el) => {
+          const events = ['mouseenter', 'mouseover', 'mousemove', 'mousedown', 'mouseup', 'click'];
+          for (const type of events) {
+            el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+          }
+        }, handle);
+      } else {
+        await targetAccount.click({ timeout: Math.min(timeoutMs, 10_000) }).catch(() => {});
+      }
+      await accountResult.page.waitForLoadState('domcontentloaded', { timeout: Math.min(timeoutMs, 15_000) }).catch(() => {});
+    } else {
+      console.log('[camoufox-launch-auth] Qwen account selector not detected; proceeding to confirm step...');
     }
 
     console.log('[camoufox-launch-auth] Qwen authorize page loaded, waiting for confirm button...');
