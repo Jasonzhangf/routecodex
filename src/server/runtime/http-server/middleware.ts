@@ -15,6 +15,18 @@ function isLocalhostRequest(req: Request): boolean {
   return ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
 }
 
+function normalizeHost(value: unknown): string {
+  if (typeof value !== 'string') {
+    return '';
+  }
+  return value.trim().toLowerCase();
+}
+
+function isLoopbackBindHost(hostRaw: unknown): boolean {
+  const host = normalizeHost(hostRaw);
+  return host === '127.0.0.1' || host === 'localhost' || host === '::1' || host === '::ffff:127.0.0.1';
+}
+
 function normalizeString(value: unknown): string {
   if (typeof value !== 'string') {
     return '';
@@ -164,8 +176,16 @@ export function registerApiKeyAuthMiddleware(app: Application, config: ServerCon
       next();
       return;
     }
+    if (isLoopbackBindHost(config?.server?.host)) {
+      next();
+      return;
+    }
 
     const path = typeof req.path === 'string' ? req.path : '';
+    if (path === '/') {
+      next();
+      return;
+    }
     // Daemon admin UI/API has its own password auth (not apikey).
     if (path === '/daemon/admin' || path === '/daemon/admin/' || path.startsWith('/daemon/')) {
       next();

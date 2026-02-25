@@ -34,6 +34,10 @@ export function getModuleDependencies(server: any): ModuleDependencies {
 }
 
 export function registerDaemonAdminUiRoute(server: any): void {
+  server.app.get('/', (_req: unknown, res: any) => {
+    res.redirect(302, '/daemon/admin');
+  });
+
   server.app.get(['/daemon/admin', '/daemon/admin/'], async (_req: unknown, res: any) => {
     try {
       const fs = await import('node:fs/promises');

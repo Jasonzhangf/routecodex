@@ -1570,9 +1570,9 @@ async function ensureRestartEntryReady(argv: string[]): Promise<{ ready: boolean
 
 function resolveRestartMode(): 'runtime' | 'process' {
   const raw = String(process.env.ROUTECODEX_RESTART_MODE || process.env.RCC_RESTART_MODE || '').trim().toLowerCase();
-  // Default to in-process runtime reload so `routecodex restart` keeps the
-  // same server process and working directory unless explicitly overridden.
-  return raw === 'process' ? 'process' : 'runtime';
+  // Default to process replacement so restart can pick up newly built code/native binaries.
+  // Use ROUTECODEX_RESTART_MODE=runtime to keep legacy in-process runtime reload behavior.
+  return raw === 'runtime' ? 'runtime' : 'process';
 }
 
 async function restartSelf(app: RouteCodexApp, signal: NodeJS.Signals): Promise<void> {
@@ -1714,8 +1714,8 @@ async function main(): Promise<void> {
 
   // Restart signal:
   // - CLI sends SIGUSR2 to request service restart.
-  // - Default mode is in-process runtime reload from disk.
-  // - Set ROUTECODEX_RESTART_MODE=process to force process replacement restart.
+  // - Default mode is process replacement restart (loads latest build artifacts).
+  // - Set ROUTECODEX_RESTART_MODE=runtime for in-process runtime reload from disk.
   if (process.platform !== 'win32') {
     process.on('SIGUSR2', () => {
       logProcessLifecycle({

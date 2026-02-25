@@ -188,7 +188,7 @@ describe('Daemon admin HTTP endpoints (smoke)', () => {
   });
 
   it('exposes /daemon/status and basic admin endpoints without crashing', async () => {
-    const { server, baseUrl, configDir, restoreEnv, apikey } = await startTestServer();
+    const { server, baseUrl, configDir, restoreEnv, apikey } = await startTestServer('0.0.0.0');
     try {
       const cookie = await setupDaemonAdminAuth(baseUrl);
 
@@ -332,17 +332,17 @@ describe('Daemon admin HTTP endpoints (smoke)', () => {
     }
   });
 
-  it('requires daemon-admin auth when bind host is non-loopback', async () => {
+  it('skips daemon-admin auth for loopback request even when bind host is non-loopback', async () => {
     const { server, baseUrl, configDir, restoreEnv } = await startTestServer('0.0.0.0');
     try {
       const authStatus = await getJson(baseUrl, '/daemon/auth/status');
       expect(authStatus.status).toBe(200);
-      expect(authStatus.body).toHaveProperty('authRequired', true);
-      expect(authStatus.body).toHaveProperty('authenticated', false);
+      expect(authStatus.body).toHaveProperty('authRequired', false);
+      expect(authStatus.body).toHaveProperty('authenticated', true);
 
       const status = await getJson(baseUrl, '/daemon/status');
-      expect(status.status).toBe(401);
-      expect(status.body).toHaveProperty('error.code', 'unauthorized');
+      expect(status.status).toBe(200);
+      expect(status.body).toHaveProperty('ok', true);
     } finally {
       await stopTestServer(server, configDir, restoreEnv);
     }
@@ -375,22 +375,26 @@ describe('Daemon admin HTTP endpoints (smoke)', () => {
     }
   });
 
-  it('logout clears server-side session entry', async () => {
+  it('logout clears daemon session cookie and preserves loopback auth bypass', async () => {
     const { server, baseUrl, configDir, restoreEnv } = await startTestServer('0.0.0.0');
     try {
       const cookie = await setupDaemonAdminAuth(baseUrl);
 
       const statusBefore = await getJson(baseUrl, '/daemon/auth/status', cookie);
       expect(statusBefore.status).toBe(200);
+      expect(statusBefore.body).toHaveProperty('authRequired', false);
       expect(statusBefore.body).toHaveProperty('authenticated', true);
 
       const logout = await postJson(baseUrl, '/daemon/auth/logout', undefined, cookie);
       expect(logout.status).toBe(200);
       expect(logout.body).toHaveProperty('ok', true);
+      expect(typeof logout.setCookie).toBe('string');
+      expect(String(logout.setCookie || '')).toContain('Max-Age=0');
 
       const statusAfter = await getJson(baseUrl, '/daemon/auth/status', cookie);
       expect(statusAfter.status).toBe(200);
-      expect(statusAfter.body).toHaveProperty('authenticated', false);
+      expect(statusAfter.body).toHaveProperty('authRequired', false);
+      expect(statusAfter.body).toHaveProperty('authenticated', true);
     } finally {
       await stopTestServer(server, configDir, restoreEnv);
     }

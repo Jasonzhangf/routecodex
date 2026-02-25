@@ -35,9 +35,7 @@ export interface DaemonAdminRouteOptions {
   getExpectedApiKey?: () => string | undefined;
   /**
    * Return the bind host used by current HTTP server instance.
-   * Daemon-admin auth policy is host-aware:
-   * - loopback host (127.0.0.1/localhost/::1): no password session required
-   * - non-loopback host (e.g. 0.0.0.0): password session required
+   * Daemon-admin auth policy baseline for non-local requests.
    */
   getServerHost?: () => string;
   /**
@@ -79,6 +77,9 @@ function setDaemonAdminAuthRequiredForApp(app: Application, required: boolean): 
 }
 
 export function isDaemonAdminAuthRequired(req: Request): boolean {
+  if (isLocalRequest(req)) {
+    return false;
+  }
   const raw = (req.app?.locals as Record<string, unknown> | undefined)?.[DAEMON_ADMIN_AUTH_REQUIRED_LOCAL_KEY];
   if (typeof raw === 'boolean') {
     return raw;
