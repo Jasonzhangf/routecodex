@@ -44,7 +44,7 @@ function normalizeIflowRetrieveEndpoint(value: unknown): string | undefined {
     return undefined;
   }
   const pathOnly = trimmed.split('?')[0]?.replace(/\/+$/, '').toLowerCase();
-  if (pathOnly === '/chat/retrieve') {
+  if (pathOnly === '/chat/retrieve' || pathOnly === '/chat/qaretrieve') {
     return trimmed;
   }
   return undefined;
@@ -253,7 +253,7 @@ export const iflowFamilyProfile: ProviderFamilyProfile = {
           : '/chat/completions';
       return fallbackDefault;
     }
-    return '/chat/retrieve';
+    return '/chat/qaRetrieve';
   },
   buildRequestBody(input: BuildRequestBodyInput) {
     if (!isIflowWebSearch(input)) {

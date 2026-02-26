@@ -12,23 +12,58 @@ export function extractStatusCode(upstreamError: unknown): number | undefined {
     return undefined;
   }
   const anyErr = upstreamError as any;
-  const direct = anyErr.statusCode;
-  if (typeof direct === 'number' && Number.isFinite(direct)) {
+  const direct = parseStatusCandidate(anyErr.statusCode);
+  if (typeof direct === 'number') {
     return direct;
   }
-  const status = anyErr.status;
-  if (typeof status === 'number' && Number.isFinite(status)) {
+  const status = parseStatusCandidate(anyErr.status);
+  if (typeof status === 'number') {
     return status;
   }
   const response = anyErr.response;
   if (response && typeof response === 'object') {
-    const respStatus = (response as any).status;
-    if (typeof respStatus === 'number' && Number.isFinite(respStatus)) {
+    const responseData = (response as any).data;
+    if (responseData && typeof responseData === 'object') {
+      const upstreamStatus = parseStatusCandidate((responseData as any).upstream?.status);
+      if (typeof upstreamStatus === 'number') {
+        return upstreamStatus;
+      }
+      const dataStatus = parseStatusCandidate((responseData as any).status);
+      if (typeof dataStatus === 'number') {
+        return dataStatus;
+      }
+      const dataErrorStatus = parseStatusCandidate((responseData as any).error?.status);
+      if (typeof dataErrorStatus === 'number') {
+        return dataErrorStatus;
+      }
+    }
+    const respStatus = parseStatusCandidate((response as any).status);
+    if (typeof respStatus === 'number') {
       return respStatus;
     }
-    const respStatusCode = (response as any).statusCode;
-    if (typeof respStatusCode === 'number' && Number.isFinite(respStatusCode)) {
+    const respStatusCode = parseStatusCandidate((response as any).statusCode);
+    if (typeof respStatusCode === 'number') {
       return respStatusCode;
+    }
+  }
+  const upstreamStatus = parseStatusCandidate(anyErr.upstream?.status);
+  if (typeof upstreamStatus === 'number') {
+    return upstreamStatus;
+  }
+  return undefined;
+}
+
+function parseStatusCandidate(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (/^\d{3}$/.test(trimmed)) {
+      const parsed = Number.parseInt(trimmed, 10);
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
     }
   }
   return undefined;

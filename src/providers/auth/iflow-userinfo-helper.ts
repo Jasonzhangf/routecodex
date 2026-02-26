@@ -39,7 +39,7 @@ export async function fetchIFlowUserInfo(accessToken: string): Promise<IFlowUser
       method: 'GET',
       headers: {
         'Accept': 'application/json',
-        'User-Agent': 'iflow-cli/2.0'
+        'User-Agent': 'iFlow-Cli'
       }
     });
 

@@ -54,6 +54,7 @@ export function classifyProviderError(options: ProviderErrorClassifierOptions): 
   const upstreamCode = err.code || upstream?.error?.code;
   const upstreamMessage = upstream?.error?.message;
   const upstreamMessageLower = typeof upstreamMessage === 'string' ? upstreamMessage.toLowerCase() : '';
+  const upstreamCodeLower = typeof upstreamCode === 'string' ? upstreamCode.toLowerCase() : '';
 
   const statusText = String(statusCode ?? '');
   const msgLower = message.toLowerCase();
@@ -76,6 +77,11 @@ export function classifyProviderError(options: ProviderErrorClassifierOptions): 
   const is402 = statusText.includes('402') || msgLower.includes('402');
   const is500 = statusText.includes('500') || msgLower.includes('500');
   const is524 = statusText.includes('524') || msgLower.includes('524');
+  const isIflowAkBlocked =
+    statusCodeValue === 434 ||
+    upstreamCodeLower === '434' ||
+    msgLower.includes('access to the current ak has been blocked due to unauthorized requests') ||
+    upstreamMessageLower.includes('access to the current ak has been blocked due to unauthorized requests');
 
   const isGenericClientError = isClient4xx && !is401 && !is402 && !isRateLimit;
 
@@ -129,6 +135,12 @@ export function classifyProviderError(options: ProviderErrorClassifierOptions): 
   if (isSseToJsonError) {
     recoverable = true;
     affectsHealth = false;
+    forceFatalRateLimit = false;
+  }
+  if (isIflowAkBlocked) {
+    // iFlow 434 = account-level block; never retry automatically.
+    recoverable = false;
+    affectsHealth = true;
     forceFatalRateLimit = false;
   }
 
@@ -186,23 +198,32 @@ export function looksLikeNetworkTransportError(error: ProviderErrorAugmented, ms
 
 function readStatusCodeFromResponse(error: ProviderErrorAugmented): number | undefined {
   const response = error?.response as Record<string, unknown> | undefined;
-  const directStatus = typeof response?.status === 'number' ? response.status : undefined;
-  const directStatusCode = typeof (response as { statusCode?: number })?.statusCode === 'number'
-    ? (response as { statusCode?: number }).statusCode
-    : undefined;
-  const nestedStatus =
-    response &&
-    typeof response === 'object' &&
-    typeof (response as { data?: Record<string, unknown> })?.data?.status === 'number'
-      ? ((response as { data?: Record<string, unknown> }).data!.status as number)
-      : undefined;
-  const nestedErrorStatus =
-    response &&
-    typeof response === 'object' &&
-    typeof (response as { data?: { error?: { status?: number } } })?.data?.error?.status === 'number'
-      ? ((response as { data?: { error?: { status?: number } } }).data!.error!.status as number)
-      : undefined;
-  return [directStatus, directStatusCode, nestedStatus, nestedErrorStatus].find(
+  const directStatus = parseStatusCandidate(response?.status);
+  const directStatusCode = parseStatusCandidate((response as { statusCode?: unknown })?.statusCode);
+  const nestedStatus = parseStatusCandidate((response as { data?: Record<string, unknown> })?.data?.status);
+  const nestedErrorStatus = parseStatusCandidate(
+    (response as { data?: { error?: { status?: unknown } } })?.data?.error?.status
+  );
+  const nestedUpstreamStatus = parseStatusCandidate(
+    (response as { data?: { upstream?: { status?: unknown } } })?.data?.upstream?.status
+  );
+  return [nestedUpstreamStatus, nestedErrorStatus, nestedStatus, directStatus, directStatusCode].find(
     (candidate): candidate is number => typeof candidate === 'number' && Number.isFinite(candidate)
   );
+}
+
+function parseStatusCandidate(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (/^\d{3}$/.test(trimmed)) {
+      const parsed = Number.parseInt(trimmed, 10);
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+  }
+  return undefined;
 }

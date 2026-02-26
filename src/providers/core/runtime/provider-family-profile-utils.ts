@@ -69,7 +69,7 @@ export function resolveLegacyIflowEndpoint(options: {
     metadata && typeof (metadata as { entryEndpoint?: unknown }).entryEndpoint === 'string'
       ? ((metadata as { entryEndpoint: string }).entryEndpoint || '').trim()
       : '';
-  return endpoint || '/chat/retrieve';
+  return endpoint || '/chat/qaRetrieve';
 }
 
 export function resolveLegacyIflowRequestBody(options: {

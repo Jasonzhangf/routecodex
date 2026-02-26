@@ -6,7 +6,7 @@
 
 import type { UnknownObject } from '../../../types/common-types.js';
 import * as crypto from 'node:crypto';
-import { openAuthInCamoufox } from './camoufox-launcher.js';
+import { getLastCamoufoxLaunchFailureReason, openAuthInCamoufox } from './camoufox-launcher.js';
 import { logOAuthDebug } from '../../auth/oauth-logger.js';
 
 /**
@@ -247,12 +247,15 @@ export abstract class BaseOAuthFlowStrategy {
       }
 
       if (!opened) {
+        const camoufoxFailureReason = getLastCamoufoxLaunchFailureReason();
         if (camoufoxExplicit) {
           throw new Error(
-            'camo CLI OAuth launch/automation failed. Check OAuth debug logs and retry.'
+            `camo CLI OAuth launch/automation failed${camoufoxFailureReason ? ` (${camoufoxFailureReason})` : ''}. Check OAuth debug logs and retry.`
           );
         }
-        throw new Error('OAuth browser launch failed (camo CLI).');
+        throw new Error(
+          `OAuth browser launch failed (camo CLI)${camoufoxFailureReason ? `: ${camoufoxFailureReason}` : ''}.`
+        );
       }
     }
   }

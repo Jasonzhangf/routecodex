@@ -269,16 +269,16 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
     }
     const styleEnv = (process.env.IFLOW_AUTH_STYLE || '').toLowerCase();
     const style: FlowStyle = isIflowHost
-      // Official iFlow CLI auth URL shape:
-      // redirect=<encoded callback>&state=<state>&client_id=...
-      // In URLSearchParams this corresponds to "web" style (redirect raw + state top-level).
+      // iFlow default should stay on web-style redirect/state split:
+      // redirect=<callback>&state=<state>&client_id=...
+      // legacy format is still available via IFLOW_AUTH_STYLE=legacy.
       ? normalizeFlowStyle(styleEnv, 'web')
       : styleEnv === 'legacy'
         ? 'legacy'
         : 'standard';
 
     if (style === 'web') {
-      // 对齐你粘贴的 iflow 页面 URL：loginMethod=phone&type=phone&redirect=<encoded(redirectUri)>&state=<state>&client_id=...
+      // iflow web 风格：redirect 为原始回调 URL，state 顶层参数。
       const redirectUri = this.config.client.redirectUri!;
       authUrl.searchParams.set('loginMethod', 'phone');
       authUrl.searchParams.set('type', 'phone');

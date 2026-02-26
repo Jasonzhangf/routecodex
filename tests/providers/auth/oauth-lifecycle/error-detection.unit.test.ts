@@ -30,6 +30,16 @@ describe('error-detection', () => {
       expect(extractStatusCode(error)).toBe(502);
     });
 
+    it('extracts from response.data.upstream.status string', () => {
+      const error = { response: { data: { upstream: { status: '434' } } } };
+      expect(extractStatusCode(error)).toBe(434);
+    });
+
+    it('prefers response.data.upstream.status over wrapped response.status=400', () => {
+      const error = { response: { status: 400, data: { upstream: { status: '434' } } } };
+      expect(extractStatusCode(error)).toBe(434);
+    });
+
     it('returns undefined for null/undefined', () => {
       expect(extractStatusCode(null)).toBeUndefined();
       expect(extractStatusCode(undefined)).toBeUndefined();

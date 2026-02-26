@@ -57,5 +57,44 @@ describe('req_inbound stage3 tool shape repair', () => {
     expect(content).toContain('[RouteCodex precheck]');
     expect(content).toContain('缺少字段 "command"');
   });
-});
 
+  it('injects diagnostics across tool_outputs / required_action / responses input blocks', async () => {
+    const parseErr = 'failed to parse function arguments: missing field `command` at line 1 column 66';
+    const rawRequest: any = {
+      tool_outputs: [
+        {
+          name: 'exec_command',
+          tool_call_id: 'call_top_1',
+          output: parseErr
+        }
+      ],
+      required_action: {
+        submit_tool_outputs: {
+          tool_outputs: [
+            {
+              name: 'shell_command',
+              tool_call_id: 'call_req_1',
+              output: parseErr
+            }
+          ]
+        }
+      },
+      input: [
+        {
+          type: 'function_call_output',
+          name: 'terminal',
+          content: parseErr
+        }
+      ]
+    };
+
+    await runReqInboundStage3ContextCapture({
+      rawRequest,
+      adapterContext: { providerProtocol: 'openai-responses' } as any
+    });
+
+    expect(String(rawRequest.tool_outputs[0].output || '')).toContain('[RouteCodex precheck]');
+    expect(String(rawRequest.required_action.submit_tool_outputs.tool_outputs[0].output || '')).toContain('[RouteCodex precheck]');
+    expect(String(rawRequest.input[0].content || '')).toContain('[RouteCodex precheck]');
+  });
+});

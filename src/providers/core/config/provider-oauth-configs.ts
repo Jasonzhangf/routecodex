@@ -85,7 +85,7 @@ function registerProviderOAuthConfigs(): void {
       redirectUri: `${HTTP_PROTOCOLS.HTTP}${LOCAL_HOSTS.LOCALHOST}:11451${API_PATHS.OAUTH_CALLBACK}`
     },
     headers: {
-      'User-Agent': 'iflow-cli/2.0',
+      'User-Agent': 'iFlow-Cli',
       'X-Requested-With': 'XMLHttpRequest',
       'Origin': 'https://iflow.cn',
       'Referer': 'https://iflow.cn/oauth',
@@ -127,7 +127,7 @@ function registerProviderOAuthConfigs(): void {
       scopes: ['openid', 'profile', 'email', 'api']
     },
     headers: {
-      'User-Agent': 'iflow-cli/2.0',
+      'User-Agent': 'iFlow-Cli',
       'X-Requested-With': 'XMLHttpRequest',
       'Origin': 'https://iflow.cn',
       'Referer': 'https://iflow.cn/oauth',

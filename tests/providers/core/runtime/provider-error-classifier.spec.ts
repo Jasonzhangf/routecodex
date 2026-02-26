@@ -118,4 +118,34 @@ describe('Provider error classifier - internal conversion errors', () => {
     expect(classification.affectsHealth).toBe(false);
     expect(classification.isRateLimit).toBe(false);
   });
+
+  it('treats iflow upstream 434 blocked-account as non-recoverable and health-affecting', () => {
+    const error = Object.assign(
+      new Error('HTTP 400: iFlow business error (434): Access to the current AK has been blocked due to unauthorized requests'),
+      {
+        response: {
+          status: 400,
+          data: {
+            upstream: {
+              status: '434',
+              msg: 'Access to the current AK has been blocked due to unauthorized requests'
+            }
+          }
+        }
+      }
+    );
+    const classification = classifyProviderError({
+      error,
+      context: baseContext,
+      detectDailyLimit: () => false,
+      registerRateLimitFailure: () => false,
+      forceRateLimitFailure: () => {},
+      authMode: 'oauth'
+    });
+
+    expect(classification.statusCode).toBe(434);
+    expect(classification.recoverable).toBe(false);
+    expect(classification.affectsHealth).toBe(true);
+    expect(classification.isRateLimit).toBe(false);
+  });
 });

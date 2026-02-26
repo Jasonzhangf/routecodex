@@ -41,6 +41,15 @@ type PythonRunResult = {
 };
 
 const activeLaunchers: Set<LaunchHandle> = new Set();
+let lastCamoufoxLaunchFailureReason: string | null = null;
+
+function setCamoufoxLaunchFailureReason(reason: string | null): void {
+  lastCamoufoxLaunchFailureReason = reason && reason.trim().length > 0 ? reason.trim() : null;
+}
+
+export function getLastCamoufoxLaunchFailureReason(): string | null {
+  return lastCamoufoxLaunchFailureReason;
+}
 
 function registerLauncher(child: ChildProcess): void {
   const handle: LaunchHandle = { child };
@@ -1073,6 +1082,7 @@ async function waitForIflowOAuthPage(options: {
 }
 
 export async function openAuthInCamoufox(options: CamoufoxLaunchOptions): Promise<boolean> {
+  setCamoufoxLaunchFailureReason(null);
   logOAuthDebug(
     `[OAuth] Camoufox: launch requested url=${options.url} provider=${options.provider ?? ''} alias=${options.alias ?? ''
     }`
@@ -1080,6 +1090,7 @@ export async function openAuthInCamoufox(options: CamoufoxLaunchOptions): Promis
   const url = options.url;
   if (!url || typeof url !== 'string') {
     logOAuthDebug('[OAuth] Camoufox: invalid or empty URL; falling back to default browser');
+    setCamoufoxLaunchFailureReason('invalid_launch_url');
     return false;
   }
   const launchUrl = applyGoogleLocaleHint(url);
@@ -1105,6 +1116,7 @@ export async function openAuthInCamoufox(options: CamoufoxLaunchOptions): Promis
 
   if (!shouldPreferCamoCliForOAuth(options.provider)) {
     logOAuthDebug('[OAuth] camo-cli launch skipped (provider disabled)');
+    setCamoufoxLaunchFailureReason('provider_disabled');
     return false;
   }
 
@@ -1142,14 +1154,17 @@ export async function openAuthInCamoufox(options: CamoufoxLaunchOptions): Promis
     };
 
     if (!ensureCamoProfile(actionContext)) {
+      setCamoufoxLaunchFailureReason('profile_create_failed');
       return false;
     }
     // camo currently resolves session routing by default profile in some paths.
     if (!setDefaultCamoProfile(actionContext)) {
+      setCamoufoxLaunchFailureReason('profile_default_set_failed');
       return false;
     }
 
     if (!startCamoSession(actionContext, headless)) {
+      setCamoufoxLaunchFailureReason('session_start_failed');
       return false;
     }
 
@@ -1189,6 +1204,7 @@ export async function openAuthInCamoufox(options: CamoufoxLaunchOptions): Promis
       }
     }
     if (!gotoOk) {
+      setCamoufoxLaunchFailureReason('goto_failed');
       return false;
     }
 
@@ -1197,6 +1213,7 @@ export async function openAuthInCamoufox(options: CamoufoxLaunchOptions): Promis
       actionContext
     });
     if (!portalAdvanced) {
+      setCamoufoxLaunchFailureReason('element_not_found:token_portal_continue');
       return false;
     }
 
@@ -1205,6 +1222,7 @@ export async function openAuthInCamoufox(options: CamoufoxLaunchOptions): Promis
       actionContext
     });
     if (!iflowAdvanced) {
+      setCamoufoxLaunchFailureReason('element_not_found:iflow_account_select');
       return false;
     }
     const qwenAdvanced = await maybeAdvanceQwenAuthorization({
@@ -1212,6 +1230,7 @@ export async function openAuthInCamoufox(options: CamoufoxLaunchOptions): Promis
       actionContext
     });
     if (!qwenAdvanced) {
+      setCamoufoxLaunchFailureReason('element_not_found:qwen_authorization');
       return false;
     }
     const googleAdvanced = await maybeAdvanceGoogleAuth({
@@ -1220,10 +1239,15 @@ export async function openAuthInCamoufox(options: CamoufoxLaunchOptions): Promis
       actionContext
     });
     if (!googleAdvanced) {
+      setCamoufoxLaunchFailureReason('element_not_found:google_auth_step');
       return false;
     }
+    setCamoufoxLaunchFailureReason(null);
     return true;
   } catch (error) {
+    setCamoufoxLaunchFailureReason(
+      `exception:${error instanceof Error ? error.message : String(error)}`
+    );
     logOAuthDebug(
       `[OAuth] camo-cli launch failed - ${error instanceof Error ? error.message : String(error)}`
     );
