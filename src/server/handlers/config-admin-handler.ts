@@ -287,14 +287,16 @@ function validateUserConfig(config: JsonObject): string[] {
     errors.push('Configuration must be an object');
     return errors;
   }
+  const v2Mode = resolveVirtualRouterMode(config) === 'v2';
   const providers = resolveProviders(config);
   const routing = resolveRouting(config);
-  if (!Object.keys(providers).length) {
+  if (!Object.keys(providers).length && !v2Mode) {
     errors.push('virtualrouter.providers (or providers) must include at least one provider entry');
   }
   if (!Object.keys(routing).length) {
     errors.push('virtualrouter.routing (or routing) must define at least one route');
   }
+  const shouldValidateProviderRefs = Object.keys(providers).length > 0;
   for (const [routeName, entries] of Object.entries(routing)) {
     if (!Array.isArray(entries) || !entries.length) {
       errors.push(`Route "${routeName}" must list at least one provider key`);
@@ -306,12 +308,18 @@ function validateUserConfig(config: JsonObject): string[] {
         continue;
       }
       const providerId = key.split('.')[0];
-      if (!providers[providerId]) {
+      if (shouldValidateProviderRefs && !providers[providerId]) {
         errors.push(`Route "${routeName}" references unknown provider "${providerId}"`);
       }
     }
   }
   return errors;
+}
+
+function resolveVirtualRouterMode(config: JsonObject): 'v1' | 'v2' {
+  const raw = (config as { virtualrouterMode?: unknown }).virtualrouterMode;
+  const mode = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+  return mode === 'v2' ? 'v2' : 'v1';
 }
 
 function resolveProviders(config: JsonObject): Record<string, unknown> {

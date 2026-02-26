@@ -45,9 +45,6 @@ export {
   type UsageMetrics,
   extractUsageFromResult,
   normalizeUsage,
-  extractEstimatedInputTokens,
-  reconcileUsageWithEstimate,
-  patchUsageCandidate,
   mergeUsageMetrics,
   buildUsageLogText
 } from './usage-aggregator.js';

@@ -71,7 +71,8 @@ export async function initializeHttpServer(server: any): Promise<void> {
       getVirtualRouterArtifacts: () => server.currentRouterArtifacts,
       getStatsSnapshot: () => ({
         session: server.stats.snapshot(Math.round(process.uptime() * 1000)),
-        historical: server.stats.snapshotHistorical()
+        historical: server.stats.snapshotHistorical(),
+        periods: server.stats.snapshotHistoricalPeriods()
       }),
       getServerId: () => canonicalizeServerId(server.config.server.host, server.config.server.port)
     });
@@ -232,9 +233,8 @@ export async function stopHttpServer(server: any): Promise<void> {
 
       try {
         const uptimeMs = Math.round(process.uptime() * 1000);
-        const snapshot = server.stats.logSummary(uptimeMs);
-        await server.stats.persistSnapshot(snapshot, { reason: 'server_shutdown' });
-        await server.stats.logHistoricalSummary();
+        const summary = server.stats.logFinalSummary(uptimeMs);
+        await server.stats.persistSnapshot(summary.session, { reason: 'server_shutdown' });
       } catch {
         // stats logging must never block shutdown
       }

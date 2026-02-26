@@ -36,7 +36,13 @@
       "pattern": "\\b(xargs\\s+rm\\b|for\\s+[^;\\n]+;\\s*do\\s+rm\\b|while\\s+[^;\\n]+;\\s*do\\s+rm\\b)",
       "flags": "i",
       "reason": "Loop/batch deletion is not allowed"
+    },
+    {
+      "id": "deny-mass-kill-commands",
+      "type": "regex",
+      "pattern": "\\bpkill\\b|\\bkillall\\b|\\btaskkill\\b|\\bxargs\\b[^\\n]*\\bkill\\b|\\blsof\\b[^\\n]*\\|[^\\n]*\\bxargs\\b[^\\n]*\\bkill\\b",
+      "flags": "i",
+      "reason": "mass kill command is not allowed"
     }
   ]
 }
-

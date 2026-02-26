@@ -102,4 +102,52 @@ describe('usage log text', () => {
       total_tokens: 15
     });
   });
+
+  it('prefers response usage and ignores metadata usage bag', () => {
+    const usage = extractUsageFromResult(
+      {
+        body: {
+          usage: {
+            prompt_tokens: 20,
+            completion_tokens: 8,
+            total_tokens: 28
+          }
+        }
+      },
+      {
+        usage: {
+          prompt_tokens: 999999,
+          completion_tokens: 1,
+          total_tokens: 1000000
+        },
+        estimatedInputTokens: 777777
+      }
+    );
+
+    expect(usage).toEqual({
+      prompt_tokens: 20,
+      completion_tokens: 8,
+      total_tokens: 28
+    });
+  });
+
+  it('does not fabricate usage from request metadata when response usage is absent', () => {
+    const usage = extractUsageFromResult(
+      {
+        body: {
+          message: 'ok'
+        }
+      },
+      {
+        usage: {
+          prompt_tokens: 123,
+          completion_tokens: 4,
+          total_tokens: 127
+        },
+        estimatedInputTokens: 1000
+      }
+    );
+
+    expect(usage).toBeUndefined();
+  });
 });

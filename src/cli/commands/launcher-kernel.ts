@@ -76,7 +76,7 @@ function shouldStopManagedTmuxOnToolExit(env: NodeJS.ProcessEnv): boolean {
 
 function shouldLogClientExitSummary(commandName: string): boolean {
   const normalized = String(commandName || '').trim().toLowerCase();
-  return normalized === 'codex' || normalized === 'claude';
+  return normalized === 'codex' || normalized === 'claude' || normalized === 'routecodex';
 }
 
 function readProcessPpidAndCommand(pid: number): { ppid: number | null; command: string } {
@@ -1664,6 +1664,7 @@ export function createLauncherCommand(program: Command, ctx: LauncherCommandCont
           return;
         }
         toolProcessClosing = true;
+        logClientExitSummary();
 
         try {
           await clockClientService?.stop();

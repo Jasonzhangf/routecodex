@@ -34,7 +34,10 @@ Canonical snapshot shape:
     "health": {},
     "contextRouting": {},
     "webSearch": {},
-    "execCommandGuard": {},
+    "execCommandGuard": {
+      "enabled": true,
+      "policyFile": "~/.routecodex/policy/exec-command-guard.v1.json"
+    },
     "clock": {}
   }
 }
@@ -44,4 +47,3 @@ Notes:
 - `virtualrouter.routing` is required; other fields are optional.
 - For compatibility, `routing.policy.set` also accepts a flattened input shape (`{ routing, loadBalancing, ... }`) and will normalize it into the canonical form.
 - The control plane does **not** interpret or validate routing semantics; llmswitch-core remains the single source of truth for routing behavior.
-

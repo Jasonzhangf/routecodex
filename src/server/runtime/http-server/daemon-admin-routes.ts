@@ -7,7 +7,7 @@ import { registerProviderRoutes } from './daemon-admin/providers-handler.js';
 import { registerRestartRoutes } from './daemon-admin/restart-handler.js';
 import { registerStatsRoutes } from './daemon-admin/stats-handler.js';
 import { registerControlRoutes } from './daemon-admin/control-handler.js';
-import type { HistoricalStatsSnapshot, StatsSnapshot } from './stats-manager.js';
+import type { HistoricalPeriodsSnapshot, HistoricalStatsSnapshot, StatsSnapshot } from './stats-manager.js';
 import { isDaemonSessionAuthenticated } from './daemon-admin/auth-session.js';
 
 export interface DaemonAdminRouteOptions {
@@ -50,7 +50,11 @@ export interface DaemonAdminRouteOptions {
    * 返回当前进程的 token/usage 统计（session + historical）。
    * 由 HTTP server 负责组装；daemon-admin 仅展示。
    */
-  getStatsSnapshot?: () => { session: StatsSnapshot; historical: HistoricalStatsSnapshot };
+  getStatsSnapshot?: () => {
+    session: StatsSnapshot;
+    historical: HistoricalStatsSnapshot;
+    periods?: HistoricalPeriodsSnapshot;
+  };
 }
 
 export function isLocalRequest(req: Request): boolean {

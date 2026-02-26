@@ -88,4 +88,29 @@ describe('StatsManager provider summary table output', () => {
     expect(output).toContain('iflow.1-186.kimi-k2.5');
     expect(output).not.toContain('totals tokens in/out/total=');
   });
+
+  it('prints compact final summary with session and historical provider token totals', () => {
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const stats = new StatsManager();
+
+    stats.recordRequestStart('req-final-1');
+    stats.bindProvider('req-final-1', { providerKey: 'iflow.2-173', model: 'kimi-k2.5' });
+    stats.recordCompletion('req-final-1', {
+      usage: { prompt_tokens: 10, completion_tokens: 4, total_tokens: 14 }
+    });
+
+    stats.recordRequestStart('req-final-2');
+    stats.bindProvider('req-final-2', { providerKey: 'qwen.1', model: 'qwen3.5-plus' });
+    stats.recordCompletion('req-final-2', {
+      usage: { prompt_tokens: 8, completion_tokens: 2, total_tokens: 10 }
+    });
+
+    stats.logFinalSummary(4321);
+
+    const output = logSpy.mock.calls.map((call) => call.join(' ')).join('\n');
+    expect(output).toContain('[Stats][final][session]');
+    expect(output).toContain('[Stats][final][historical]');
+    expect(output).toContain('iflow.2-173 / kimi-k2.5 calls=1 tokens=10/4/14');
+    expect(output).toContain('qwen.1 / qwen3.5-plus calls=1 tokens=8/2/10');
+  });
 });

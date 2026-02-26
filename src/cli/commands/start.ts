@@ -383,6 +383,10 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
                 resolve({ code: 1, signal: null });
               });
             });
+            const codeLabel =
+              typeof exitInfo.code === 'number' && Number.isFinite(exitInfo.code) ? String(exitInfo.code) : 'n/a';
+            const signalLabel = exitInfo.signal || 'none';
+            ctx.logger.info(`[client-exit] RouteCodex exited (code=${codeLabel}, signal=${signalLabel})`);
 
             const stopIntent = consumeStopIntent();
             if (stopIntent.matched) {
@@ -569,6 +573,9 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
         childProc.on('exit', (code, signal) => {
           closeServerLogStream();
           try { cleanupKeypress(); } catch { /* ignore */ }
+          const codeLabel = typeof code === 'number' && Number.isFinite(code) ? String(code) : 'n/a';
+          const signalLabel = signal || 'none';
+          ctx.logger.info(`[client-exit] RouteCodex exited (code=${codeLabel}, signal=${signalLabel})`);
           if (signal) {ctx.exit(0);}
           ctx.exit(code ?? 0);
         });

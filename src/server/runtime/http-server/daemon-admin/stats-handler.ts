@@ -2,7 +2,7 @@ import type { Application, Request, Response } from 'express';
 import type { DaemonAdminRouteOptions } from '../daemon-admin-routes.js';
 
 import { rejectNonLocalOrUnauthorizedAdmin } from '../daemon-admin-routes.js';
-import type { HistoricalStatsSnapshot, StatsSnapshot, ProviderStatsView } from '../stats-manager.js';
+import type { HistoricalPeriodsSnapshot, HistoricalStatsSnapshot, StatsSnapshot, ProviderStatsView } from '../stats-manager.js';
 
 type TokenTotals = {
   requestCount: number;
@@ -44,9 +44,11 @@ export function registerStatsRoutes(app: Application, options: DaemonAdminRouteO
     }
 
     try {
+      const now = Date.now();
       const snapshot = options.getStatsSnapshot() as {
         session: StatsSnapshot;
         historical: HistoricalStatsSnapshot;
+        periods?: HistoricalPeriodsSnapshot;
       };
 
       const sessionTotals = sumTotals(snapshot.session?.totals);
@@ -58,6 +60,7 @@ export function registerStatsRoutes(app: Application, options: DaemonAdminRouteO
         uptimeSec: process.uptime(),
         session: snapshot.session,
         historical: snapshot.historical,
+        periods: snapshot.periods ?? { generatedAt: now, daily: [], weekly: [], monthly: [] },
         totals: {
           session: sessionTotals,
           historical: historicalTotals

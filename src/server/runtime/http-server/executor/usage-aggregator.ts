@@ -15,15 +15,8 @@ export function extractUsageFromResult(
   result: { body?: unknown; status?: number; headers?: Record<string, string> },
   metadata?: Record<string, unknown>
 ): UsageMetrics | undefined {
-  const estimatedInput = extractEstimatedInputTokens(metadata);
+  void metadata;
   const candidates: unknown[] = [];
-
-  if (metadata && typeof metadata === 'object') {
-    const bag = metadata as Record<string, unknown>;
-    if (bag.usage) {
-      candidates.push(bag.usage);
-    }
-  }
 
   if (result.body && typeof result.body === 'object') {
     const body = result.body as Record<string, unknown>;
@@ -89,8 +82,7 @@ export function extractUsageFromResult(
   for (const candidate of candidates) {
     const normalized = normalizeUsage(candidate);
     if (normalized) {
-      const reconciled = reconcileUsageWithEstimate(normalized, estimatedInput, candidate);
-      return reconciled;
+      return normalized;
     }
   }
 
@@ -172,87 +164,6 @@ export function normalizeUsage(value: unknown): UsageMetrics | undefined {
     completion_tokens: completion,
     total_tokens: total
   };
-}
-
-/**
- * Extract estimated input tokens from metadata
- */
-export function extractEstimatedInputTokens(metadata?: Record<string, unknown>): number | undefined {
-  if (!metadata || typeof metadata !== 'object') {
-    return undefined;
-  }
-  const bag = metadata as Record<string, unknown>;
-  const raw =
-    (bag.estimatedInputTokens as unknown) ??
-    (bag.estimated_tokens as unknown) ??
-    (bag.estimatedTokens as unknown);
-  const value = typeof raw === 'number' ? raw : Number(raw);
-  if (!Number.isFinite(value) || value <= 0) {
-    return undefined;
-  }
-  return value;
-}
-
-/**
- * Reconcile upstream usage with local estimate
- */
-export function reconcileUsageWithEstimate(
-  usage: UsageMetrics,
-  estimatedInput?: number,
-  candidate?: unknown
-): UsageMetrics {
-  if (!estimatedInput || !Number.isFinite(estimatedInput) || estimatedInput <= 0) {
-    return usage;
-  }
-
-  const upstreamPrompt = usage.prompt_tokens ?? usage.total_tokens ?? undefined;
-  const completion = usage.completion_tokens ?? 0;
-
-  // Use local estimate if upstream is missing
-  if (upstreamPrompt === undefined || upstreamPrompt <= 0) {
-    const total = estimatedInput + completion;
-    patchUsageCandidate(candidate, estimatedInput, completion, total);
-    return {
-      prompt_tokens: estimatedInput,
-      completion_tokens: completion,
-      total_tokens: total
-    };
-  }
-
-  const ratio = upstreamPrompt > 0 ? upstreamPrompt / estimatedInput : 1;
-
-  // Use local estimate if difference is too large
-  if (ratio > 5 || ratio < 0.2) {
-    const total = estimatedInput + completion;
-    patchUsageCandidate(candidate, estimatedInput, completion, total);
-    return {
-      prompt_tokens: estimatedInput,
-      completion_tokens: completion,
-      total_tokens: total
-    };
-  }
-
-  return usage;
-}
-
-/**
- * Patch usage candidate object with reconciled values
- */
-export function patchUsageCandidate(
-  candidate: unknown,
-  prompt: number,
-  completion: number,
-  total: number
-): void {
-  if (!candidate || typeof candidate !== 'object') {
-    return;
-  }
-  const record = candidate as Record<string, unknown>;
-  record.prompt_tokens = prompt;
-  record.input_tokens = prompt;
-  record.completion_tokens = completion;
-  record.output_tokens = completion;
-  record.total_tokens = total;
 }
 
 /**

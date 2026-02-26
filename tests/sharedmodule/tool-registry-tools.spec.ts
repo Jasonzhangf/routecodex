@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { validateToolCall } from '../../sharedmodule/llmswitch-core/src/tools/tool-registry.js';
 
 const toArgsObject = (result: { normalizedArgs?: string }): Record<string, unknown> => {
@@ -7,7 +9,34 @@ const toArgsObject = (result: { normalizedArgs?: string }): Record<string, unkno
   return JSON.parse(result.normalizedArgs) as Record<string, unknown>;
 };
 
+const TMP_DIR = path.join(process.cwd(), 'tmp', 'jest-tool-registry-exec-guard');
+const POLICY_PATH = path.join(TMP_DIR, 'exec-command-guard-policy.v1.json');
+
 describe('tool-registry validateToolCall (all tools)', () => {
+  beforeAll(() => {
+    fs.mkdirSync(TMP_DIR, { recursive: true });
+    fs.writeFileSync(
+      POLICY_PATH,
+      JSON.stringify(
+        {
+          version: 1,
+          rules: [
+            {
+              id: 'deny-mass-kill',
+              type: 'regex',
+              pattern:
+                '\\bpkill\\b|\\bkillall\\b|\\btaskkill\\b|\\bxargs\\b[^\\n]*\\bkill\\b|\\blsof\\b[^\\n]*\\|[^\\n]*\\bxargs\\b[^\\n]*\\bkill\\b',
+              flags: 'i',
+              reason: 'mass kill command is not allowed'
+            }
+          ]
+        },
+        null,
+        2
+      )
+    );
+  });
+
   it('validates shell tool arguments', () => {
     const args = JSON.stringify({
       command: ['echo', 'hello'],
@@ -163,5 +192,31 @@ describe('tool-registry validateToolCall (all tools)', () => {
     expect(result.ok).toBe(false);
     expect(result.reason).toBe('forbidden_git_checkout_scope');
     expect(result.message).toContain('standalone');
+  });
+
+  it('rejects pkill-based mass kill in exec_command', () => {
+    const args = JSON.stringify({
+      cmd: 'pkill -9 node',
+      workdir: '/workspace'
+    });
+    const result = validateToolCall('exec_command', args, {
+      execCommandGuard: { enabled: true, policyFile: POLICY_PATH }
+    });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('forbidden_exec_command_policy');
+    expect(result.message).toContain('mass kill command is not allowed');
+  });
+
+  it('rejects lsof | xargs kill mass kill in exec_command', () => {
+    const args = JSON.stringify({
+      cmd: 'lsof -ti :7701 | xargs kill -9',
+      workdir: '/workspace'
+    });
+    const result = validateToolCall('exec_command', args, {
+      execCommandGuard: { enabled: true, policyFile: POLICY_PATH }
+    });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('forbidden_exec_command_policy');
+    expect(result.message).toContain('mass kill command is not allowed');
   });
 });

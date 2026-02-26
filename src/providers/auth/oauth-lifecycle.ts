@@ -41,6 +41,7 @@ import {
   keyFor,
   shouldThrottle,
   updateThrottle,
+  lastRunAt,
   inFlight,
   interactiveTail
 } from './oauth-lifecycle/throttle.js';
@@ -91,6 +92,8 @@ type IflowAutoFailureRecord = {
 
 const OAUTH_INTERACTIVE_LOCK_FILE = path.join(os.homedir(), '.routecodex', 'auth', '.oauth-interactive.lock.json');
 const IFLOW_AUTO_FAILURE_FILE = path.join(os.homedir(), '.routecodex', 'auth', '.iflow-auto-failures.json');
+const OAUTH_THROTTLE_WINDOW_MS = 60_000;
+const IFLOW_REFRESH_FAILURE_BACKOFF_MS = 5 * 60_000;
 
 type EnsureOpts = {
   forceReacquireIfRefreshFails?: boolean;
@@ -220,6 +223,74 @@ async function openGoogleAccountVerificationInCamoufox(args: {
       delete process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
     } else {
       process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = prevDevMode;
+    }
+    if (prevOpenOnly === undefined) {
+      delete process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY;
+    } else {
+      process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY = prevOpenOnly;
+    }
+  }
+}
+
+function isIflowRefreshEndpointRejectionMessage(message: string): boolean {
+  const normalized = (message || '').toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+  return (
+    normalized.includes('oauth token endpoint rejected request') ||
+    (normalized.includes('token refresh failed') && normalized.includes('iflow.cn/oauth/token'))
+  );
+}
+
+function applyRefreshFailureBackoff(cacheKey: string, providerType: string, message: string): void {
+  if (providerType !== 'iflow' || !isIflowRefreshEndpointRejectionMessage(message)) {
+    return;
+  }
+  // For iFlow refresh endpoint 500/generic failures, avoid hammering token endpoint
+  // from preflight/retry loops. Keep a longer cooldown before next refresh attempt.
+  lastRunAt.set(cacheKey, Date.now() + IFLOW_REFRESH_FAILURE_BACKOFF_MS - OAUTH_THROTTLE_WINDOW_MS);
+}
+
+async function runInteractiveRepairWithAutoFallback(args: {
+  providerType: string;
+  auth: OAuthAuth;
+  ensureValid: typeof ensureValidOAuthToken;
+  opts: EnsureOpts;
+}): Promise<void> {
+  const { providerType, auth, ensureValid, opts } = args;
+  const autoModeAtStart = String(process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE || '').trim();
+  try {
+    await ensureValid(providerType, auth, opts);
+    return;
+  } catch (error) {
+    if (!autoModeAtStart) {
+      throw error;
+    }
+    const msg = error instanceof Error ? error.message : String(error || '');
+    console.warn(
+      `[OAuth] Camoufox auto OAuth failed (${providerType}, autoMode=${autoModeAtStart}): ${msg}. Falling back to manual mode.`
+    );
+  }
+
+  const prevAutoMode = process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
+  const prevAutoConfirm = process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM;
+  const prevOpenOnly = process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY;
+  try {
+    delete process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
+    delete process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM;
+    process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY = '1';
+    await ensureValid(providerType, auth, opts);
+  } finally {
+    if (prevAutoMode === undefined) {
+      delete process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
+    } else {
+      process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE = prevAutoMode;
+    }
+    if (prevAutoConfirm === undefined) {
+      delete process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM;
+    } else {
+      process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM = prevAutoConfirm;
     }
     if (prevOpenOnly === undefined) {
       delete process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY;
@@ -1387,6 +1458,7 @@ export async function ensureValidOAuthToken(
         return;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error || '');
+        applyRefreshFailureBackoff(cacheKey, providerType, message);
         if (providerType === 'iflow') {
           // Align iFlow CLI behavior: refresh failure invalidates local token cache first.
           await clearTokenFile(tokenFilePath);
@@ -1512,21 +1584,24 @@ export async function handleUpstreamInvalidOAuthToken(
         }
         return false;
       }
-      try {
-        await withOAuthRepairEnv(providerType, async () => {
-          await ensureValid(providerType, auth, {
-            forceReacquireIfRefreshFails: false,
-            openBrowser: false,
-            forceReauthorize: false
+      const refreshRejectedForIflow = pt === 'iflow' && isIflowRefreshEndpointRejectionMessage(lower);
+      if (!refreshRejectedForIflow) {
+        try {
+          await withOAuthRepairEnv(providerType, async () => {
+            await ensureValid(providerType, auth, {
+              forceReacquireIfRefreshFails: false,
+              openBrowser: false,
+              forceReauthorize: false
+            });
           });
-        });
-        await markInteractiveOAuthRepairSuccess({
-          providerType,
-          tokenFile: tokenFilePath
-        });
-        return true;
-      } catch {
-        // ignore silent refresh errors; fall through to background interactive flow
+          await markInteractiveOAuthRepairSuccess({
+            providerType,
+            tokenFile: tokenFilePath
+          });
+          return true;
+        } catch {
+          // ignore silent refresh errors; fall through to background interactive flow
+        }
       }
       const interactiveOpts: EnsureOpts = {
         forceReacquireIfRefreshFails: true,
@@ -1536,7 +1611,12 @@ export async function handleUpstreamInvalidOAuthToken(
         forceReauthorize: pt === 'gemini' || pt === 'gemini-cli' || pt === 'antigravity' || pt === 'iflow' || pt === 'qwen'
       };
       void withOAuthRepairEnv(providerType, async () => {
-        await ensureValid(providerType, auth, interactiveOpts);
+        await runInteractiveRepairWithAutoFallback({
+          providerType,
+          auth,
+          ensureValid,
+          opts: interactiveOpts
+        });
       }).catch(() => {
         // background repair failure must never block requests
       });
@@ -1551,7 +1631,12 @@ export async function handleUpstreamInvalidOAuthToken(
       forceReauthorize: pt === 'gemini' || pt === 'gemini-cli' || pt === 'antigravity' || pt === 'iflow' || pt === 'qwen'
     };
     await withOAuthRepairEnv(providerType, async () => {
-      await ensureValid(providerType, auth, opts);
+      await runInteractiveRepairWithAutoFallback({
+        providerType,
+        auth,
+        ensureValid,
+        opts
+      });
     });
     await markInteractiveOAuthRepairSuccess({
       providerType,
@@ -1589,6 +1674,9 @@ export function shouldTriggerInteractiveOAuthRepair(providerType: string, upstre
     ) {
       looksInvalid = true;
     }
+  }
+  if (!looksInvalid && pt === 'iflow' && isIflowRefreshEndpointRejectionMessage(lower)) {
+    looksInvalid = true;
   }
 
   // 对于 gemini / gemini-cli / antigravity，排除纯服务开关类错误，

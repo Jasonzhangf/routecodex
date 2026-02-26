@@ -86,6 +86,22 @@ export interface HistoricalStatsSnapshot {
   totals: ProviderStatsView[];
 }
 
+export interface HistoricalPeriodBucket {
+  period: string;
+  requestCount: number;
+  errorCount: number;
+  totalPromptTokens: number;
+  totalCompletionTokens: number;
+  totalOutputTokens: number;
+}
+
+export interface HistoricalPeriodsSnapshot {
+  generatedAt: number;
+  daily: HistoricalPeriodBucket[];
+  weekly: HistoricalPeriodBucket[];
+  monthly: HistoricalPeriodBucket[];
+}
+
 export type StatsPersistOptions = {
   logPath?: string;
   reason?: string;
@@ -94,6 +110,10 @@ export type StatsPersistOptions = {
 const DEFAULT_STATS_LOG_PATH = path.join(os.homedir(), '.routecodex', 'logs', 'provider-stats.jsonl');
 const DEFAULT_HISTORY_MAX_TAIL_BYTES = 8 * 1024 * 1024;
 const DEFAULT_HISTORY_MAX_LINES = 20000;
+const DEFAULT_PERSIST_INTERVAL_MS = 30000;
+const DEFAULT_DAILY_PERIODS = 90;
+const DEFAULT_WEEKLY_PERIODS = 104;
+const DEFAULT_MONTHLY_PERIODS = 36;
 
 function resolveBoolFromEnv(value: string | undefined, fallback: boolean): boolean {
   if (!value) {
@@ -132,6 +152,95 @@ function resolvePositiveIntEnv(primary: string | undefined, secondary: string | 
     }
   }
   return fallback;
+}
+
+function toUtcDayKey(ts: number): string {
+  const date = new Date(ts);
+  const y = date.getUTCFullYear();
+  const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(date.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function toUtcMonthKey(ts: number): string {
+  const date = new Date(ts);
+  const y = date.getUTCFullYear();
+  const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+  return `${y}-${m}`;
+}
+
+function toUtcIsoWeekKey(ts: number): string {
+  const date = new Date(ts);
+  const day = date.getUTCDay() || 7;
+  date.setUTCDate(date.getUTCDate() + 4 - day);
+  const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+  const week = Math.ceil((((date.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+  return `${date.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
+}
+
+function sumSnapshotTotals(rows: ProviderStatsView[]): Omit<HistoricalPeriodBucket, 'period'> {
+  const totals = {
+    requestCount: 0,
+    errorCount: 0,
+    totalPromptTokens: 0,
+    totalCompletionTokens: 0,
+    totalOutputTokens: 0
+  };
+  for (const row of rows) {
+    totals.requestCount += row.requestCount ?? 0;
+    totals.errorCount += row.errorCount ?? 0;
+    totals.totalPromptTokens += row.totalPromptTokens ?? 0;
+    totals.totalCompletionTokens += row.totalCompletionTokens ?? 0;
+    totals.totalOutputTokens += row.totalOutputTokens ?? 0;
+  }
+  return totals;
+}
+
+function sortSummaryRows(rows: ProviderStatsView[]): ProviderStatsView[] {
+  return rows
+    .slice()
+    .sort((a, b) => {
+      const requestDelta = (b.requestCount ?? 0) - (a.requestCount ?? 0);
+      if (requestDelta !== 0) {
+        return requestDelta;
+      }
+      const keyA = composeBucketKey(a.providerKey, a.model);
+      const keyB = composeBucketKey(b.providerKey, b.model);
+      return keyA.localeCompare(keyB);
+    });
+}
+
+function upsertPeriodBucket(
+  map: Map<string, Omit<HistoricalPeriodBucket, 'period'>>,
+  period: string,
+  delta: Omit<HistoricalPeriodBucket, 'period'>
+): void {
+  const current = map.get(period) ?? {
+    requestCount: 0,
+    errorCount: 0,
+    totalPromptTokens: 0,
+    totalCompletionTokens: 0,
+    totalOutputTokens: 0
+  };
+  current.requestCount += delta.requestCount;
+  current.errorCount += delta.errorCount;
+  current.totalPromptTokens += delta.totalPromptTokens;
+  current.totalCompletionTokens += delta.totalCompletionTokens;
+  current.totalOutputTokens += delta.totalOutputTokens;
+  map.set(period, current);
+}
+
+function trimPeriodMap(map: Map<string, Omit<HistoricalPeriodBucket, 'period'>>, maxEntries: number): void {
+  if (map.size <= maxEntries) {
+    return;
+  }
+  const keys = Array.from(map.keys()).sort((a, b) => a.localeCompare(b));
+  while (map.size > maxEntries && keys.length) {
+    const key = keys.shift();
+    if (key) {
+      map.delete(key);
+    }
+  }
 }
 
 function readTailLines(filePath: string, maxTailBytes: number, maxLines: number): string[] {
@@ -194,13 +303,47 @@ export class StatsManager {
   private historicalSnapshotCount = 0;
   private historicalSampleCount = 0;
   private historicalLoaded = false;
+  private readonly dailyPeriods = new Map<string, Omit<HistoricalPeriodBucket, 'period'>>();
+  private readonly weeklyPeriods = new Map<string, Omit<HistoricalPeriodBucket, 'period'>>();
+  private readonly monthlyPeriods = new Map<string, Omit<HistoricalPeriodBucket, 'period'>>();
+  private readonly persistIntervalMs: number;
+  private readonly maxDailyPeriods: number;
+  private readonly maxWeeklyPeriods: number;
+  private readonly maxMonthlyPeriods: number;
+  private periodicPersistTimer: NodeJS.Timeout | null = null;
+  private persistSeq = 0;
+  private lastPeriodicSignature = '';
+  private readonly persistSessionId = `${process.pid}-${Date.now().toString(36)}-${Math.random()
+    .toString(36)
+    .slice(2, 8)}`;
 
   constructor() {
     this.enabled = isStatsEnabledByDefault();
     this.verboseLogging = isStatsVerboseEnabled(this.enabled);
     this.statsLogPath = this.resolveLogPath();
+    this.persistIntervalMs = resolvePositiveIntEnv(
+      process.env.ROUTECODEX_STATS_PERSIST_INTERVAL_MS,
+      process.env.RCC_STATS_PERSIST_INTERVAL_MS,
+      DEFAULT_PERSIST_INTERVAL_MS
+    );
+    this.maxDailyPeriods = resolvePositiveIntEnv(
+      process.env.ROUTECODEX_STATS_DAILY_MAX_PERIODS,
+      process.env.RCC_STATS_DAILY_MAX_PERIODS,
+      DEFAULT_DAILY_PERIODS
+    );
+    this.maxWeeklyPeriods = resolvePositiveIntEnv(
+      process.env.ROUTECODEX_STATS_WEEKLY_MAX_PERIODS,
+      process.env.RCC_STATS_WEEKLY_MAX_PERIODS,
+      DEFAULT_WEEKLY_PERIODS
+    );
+    this.maxMonthlyPeriods = resolvePositiveIntEnv(
+      process.env.ROUTECODEX_STATS_MONTHLY_MAX_PERIODS,
+      process.env.RCC_STATS_MONTHLY_MAX_PERIODS,
+      DEFAULT_MONTHLY_PERIODS
+    );
     if (this.enabled) {
       this.loadHistoricalFromDisk(this.statsLogPath, true);
+      this.startPeriodicPersistence();
     }
   }
 
@@ -363,16 +506,7 @@ export class StatsManager {
       return snapshot;
     }
     this.ensureHistoricalLoaded();
-    const merged = mergeSnapshotIntoHistorical({
-      snapshot,
-      historicalBuckets: this.historicalBuckets,
-      historicalToolAggregate: this.historicalToolAggregate,
-      historicalToolByProvider: this.historicalToolByProvider,
-      historicalSnapshotCount: this.historicalSnapshotCount,
-      historicalSampleCount: this.historicalSampleCount
-    });
-    this.historicalSnapshotCount = merged.historicalSnapshotCount;
-    this.historicalSampleCount = merged.historicalSampleCount;
+    this.mergeSnapshotIntoHistorical(snapshot);
 
     if (!this.verboseLogging) {
       return snapshot;
@@ -391,6 +525,77 @@ export class StatsManager {
     return snapshot;
   }
 
+  logFinalSummary(uptimeMs: number): { session: StatsSnapshot; historical: HistoricalStatsSnapshot } {
+    const session = this.snapshot(uptimeMs);
+    if (!this.enabled) {
+      return { session, historical: this.snapshotHistorical() };
+    }
+
+    this.ensureHistoricalLoaded();
+    this.mergeSnapshotIntoHistorical(session);
+    const historical = this.snapshotHistorical();
+
+    const sessionTotals = sumSnapshotTotals(session.totals);
+    const historicalTotals = sumSnapshotTotals(historical.totals);
+    const sessionRows = sortSummaryRows(session.totals);
+    const historicalRows = sortSummaryRows(historical.totals);
+
+    console.log(
+      '\n[Stats][final][session] calls=%d errors=%d tokens(prompt/completion/total)=%d/%d/%d uptimeMs=%d',
+      sessionTotals.requestCount,
+      sessionTotals.errorCount,
+      sessionTotals.totalPromptTokens,
+      sessionTotals.totalCompletionTokens,
+      sessionTotals.totalOutputTokens,
+      Math.round(session.uptimeMs)
+    );
+    if (!sessionRows.length) {
+      console.log('[Stats][final][session] providers: none');
+    } else {
+      console.log('[Stats][final][session] providers:');
+      for (const row of sessionRows) {
+        const providerLabel = formatProviderLabel(row.providerKey, row.model);
+        console.log(
+          '  - %s calls=%d tokens=%d/%d/%d',
+          providerLabel,
+          row.requestCount,
+          row.totalPromptTokens,
+          row.totalCompletionTokens,
+          row.totalOutputTokens
+        );
+      }
+    }
+
+    console.log(
+      '\n[Stats][final][historical] calls=%d errors=%d tokens(prompt/completion/total)=%d/%d/%d snapshots=%d samples=%d',
+      historicalTotals.requestCount,
+      historicalTotals.errorCount,
+      historicalTotals.totalPromptTokens,
+      historicalTotals.totalCompletionTokens,
+      historicalTotals.totalOutputTokens,
+      historical.snapshotCount,
+      historical.sampleCount
+    );
+    if (!historicalRows.length) {
+      console.log('[Stats][final][historical] providers: none');
+    } else {
+      console.log('[Stats][final][historical] providers:');
+      for (const row of historicalRows) {
+        const providerLabel = formatProviderLabel(row.providerKey, row.model);
+        console.log(
+          '  - %s calls=%d tokens=%d/%d/%d',
+          providerLabel,
+          row.requestCount,
+          row.totalPromptTokens,
+          row.totalCompletionTokens,
+          row.totalOutputTokens
+        );
+      }
+    }
+
+    return { session, historical };
+  }
+
   async persistSnapshot(snapshot: StatsSnapshot, options?: StatsPersistOptions): Promise<void> {
     if (!this.enabled) {
       return;
@@ -401,8 +606,17 @@ export class StatsManager {
       const record = {
         ...snapshot,
         reason: options?.reason ?? 'shutdown',
-        pid: process.pid
-      } satisfies StatsSnapshot & { reason: string; pid: number };
+        pid: process.pid,
+        sessionId: this.persistSessionId,
+        snapshotSeq: ++this.persistSeq,
+        persistedAt: Date.now()
+      } satisfies StatsSnapshot & {
+        reason: string;
+        pid: number;
+        sessionId: string;
+        snapshotSeq: number;
+        persistedAt: number;
+      };
       await fs.appendFile(logPath, `${JSON.stringify(record)}\n`, 'utf-8');
     } catch (error) {
       console.warn('[Stats] Failed to persist provider stats snapshot', error);
@@ -441,11 +655,104 @@ export class StatsManager {
     };
   }
 
+  snapshotHistoricalPeriods(): HistoricalPeriodsSnapshot {
+    if (!this.enabled) {
+      return { generatedAt: Date.now(), daily: [], weekly: [], monthly: [] };
+    }
+    this.ensureHistoricalLoaded();
+    const toRows = (map: Map<string, Omit<HistoricalPeriodBucket, 'period'>>): HistoricalPeriodBucket[] =>
+      Array.from(map.entries())
+        .sort((a, b) => b[0].localeCompare(a[0]))
+        .map(([period, bucket]) => ({ period, ...bucket }));
+    return {
+      generatedAt: Date.now(),
+      daily: toRows(this.dailyPeriods),
+      weekly: toRows(this.weeklyPeriods),
+      monthly: toRows(this.monthlyPeriods)
+    };
+  }
+
   private ensureHistoricalLoaded(): void {
     if (!this.enabled || this.historicalLoaded) {
       return;
     }
     this.loadHistoricalFromDisk(this.statsLogPath, true);
+  }
+
+  private startPeriodicPersistence(): void {
+    if (!this.enabled || this.persistIntervalMs <= 0) {
+      return;
+    }
+    this.periodicPersistTimer = setInterval(() => {
+      void this.persistPeriodicSnapshot();
+    }, this.persistIntervalMs);
+    this.periodicPersistTimer.unref?.();
+  }
+
+  private async persistPeriodicSnapshot(): Promise<void> {
+    try {
+      const snapshot = this.snapshot(Math.round(process.uptime() * 1000));
+      if (!snapshot.totals.length) {
+        return;
+      }
+      const signature = this.buildSnapshotSignature(snapshot);
+      if (signature === this.lastPeriodicSignature) {
+        return;
+      }
+      await this.persistSnapshot(snapshot, { reason: 'periodic' });
+      this.lastPeriodicSignature = signature;
+    } catch {
+      // persistence must be best-effort
+    }
+  }
+
+  private buildSnapshotSignature(snapshot: StatsSnapshot): string {
+    const totals = sumSnapshotTotals(snapshot.totals || []);
+    const toolCalls = typeof snapshot.tools?.totalCalls === 'number' ? snapshot.tools.totalCalls : 0;
+    const toolResponses = typeof snapshot.tools?.totalResponses === 'number' ? snapshot.tools.totalResponses : 0;
+    return [
+      totals.requestCount,
+      totals.errorCount,
+      totals.totalPromptTokens,
+      totals.totalCompletionTokens,
+      totals.totalOutputTokens,
+      toolCalls,
+      toolResponses
+    ].join(':');
+  }
+
+  private mergeSnapshotIntoPeriods(snapshot: StatsSnapshot): void {
+    const generatedAt = typeof snapshot.generatedAt === 'number' && Number.isFinite(snapshot.generatedAt)
+      ? snapshot.generatedAt
+      : Date.now();
+    const totals = Array.isArray(snapshot.totals) ? snapshot.totals : [];
+    if (!totals.length) {
+      return;
+    }
+    const delta = sumSnapshotTotals(totals);
+    const day = toUtcDayKey(generatedAt);
+    const week = toUtcIsoWeekKey(generatedAt);
+    const month = toUtcMonthKey(generatedAt);
+    upsertPeriodBucket(this.dailyPeriods, day, delta);
+    upsertPeriodBucket(this.weeklyPeriods, week, delta);
+    upsertPeriodBucket(this.monthlyPeriods, month, delta);
+    trimPeriodMap(this.dailyPeriods, this.maxDailyPeriods);
+    trimPeriodMap(this.weeklyPeriods, this.maxWeeklyPeriods);
+    trimPeriodMap(this.monthlyPeriods, this.maxMonthlyPeriods);
+  }
+
+  private mergeSnapshotIntoHistorical(snapshot: StatsSnapshot): void {
+    const merged = mergeSnapshotIntoHistorical({
+      snapshot,
+      historicalBuckets: this.historicalBuckets,
+      historicalToolAggregate: this.historicalToolAggregate,
+      historicalToolByProvider: this.historicalToolByProvider,
+      historicalSnapshotCount: this.historicalSnapshotCount,
+      historicalSampleCount: this.historicalSampleCount
+    });
+    this.historicalSnapshotCount = merged.historicalSnapshotCount;
+    this.historicalSampleCount = merged.historicalSampleCount;
+    this.mergeSnapshotIntoPeriods(snapshot);
   }
 
   private loadHistoricalFromDisk(logPath: string, reset: boolean): void {
@@ -455,6 +762,9 @@ export class StatsManager {
       this.historicalToolByProvider.clear();
       this.historicalSnapshotCount = 0;
       this.historicalSampleCount = 0;
+      this.dailyPeriods.clear();
+      this.weeklyPeriods.clear();
+      this.monthlyPeriods.clear();
     }
     try {
       const maxTailBytes = resolvePositiveIntEnv(
@@ -468,22 +778,61 @@ export class StatsManager {
         DEFAULT_HISTORY_MAX_LINES
       );
       const lines = readTailLines(logPath, maxTailBytes, maxLines);
+      const latestBySession = new Map<string, StatsSnapshot & { snapshotSeq: number }>();
+      const legacyRecords: StatsSnapshot[] = [];
       for (const line of lines) {
         try {
-          const record = JSON.parse(line) as StatsSnapshot & { reason?: string; pid?: number };
-          const merged = mergeSnapshotIntoHistorical({
-            snapshot: record,
-            historicalBuckets: this.historicalBuckets,
-            historicalToolAggregate: this.historicalToolAggregate,
-            historicalToolByProvider: this.historicalToolByProvider,
-            historicalSnapshotCount: this.historicalSnapshotCount,
-            historicalSampleCount: this.historicalSampleCount
-          });
-          this.historicalSnapshotCount = merged.historicalSnapshotCount;
-          this.historicalSampleCount = merged.historicalSampleCount;
+          const record = JSON.parse(line) as StatsSnapshot & {
+            reason?: string;
+            pid?: number;
+            sessionId?: string;
+            snapshotSeq?: number;
+          };
+          if (
+            typeof record?.sessionId === 'string' &&
+            record.sessionId.trim() &&
+            typeof record?.snapshotSeq === 'number' &&
+            Number.isFinite(record.snapshotSeq)
+          ) {
+            const key = record.sessionId.trim();
+            const seq = Math.floor(record.snapshotSeq);
+            const existing = latestBySession.get(key);
+            if (
+              !existing ||
+              seq > existing.snapshotSeq ||
+              (seq === existing.snapshotSeq &&
+                (typeof record.generatedAt === 'number' ? record.generatedAt : 0) >
+                  (typeof existing.generatedAt === 'number' ? existing.generatedAt : 0))
+            ) {
+              latestBySession.set(key, { ...record, snapshotSeq: seq });
+            }
+          } else {
+            legacyRecords.push(record);
+          }
         } catch {
           continue;
         }
+      }
+      const dedupedRecords: StatsSnapshot[] = [
+        ...legacyRecords,
+        ...Array.from(latestBySession.values())
+      ].sort(
+        (a, b) =>
+          (typeof a.generatedAt === 'number' ? a.generatedAt : 0) -
+          (typeof b.generatedAt === 'number' ? b.generatedAt : 0)
+      );
+      for (const record of dedupedRecords) {
+        const merged = mergeSnapshotIntoHistorical({
+          snapshot: record,
+          historicalBuckets: this.historicalBuckets,
+          historicalToolAggregate: this.historicalToolAggregate,
+          historicalToolByProvider: this.historicalToolByProvider,
+          historicalSnapshotCount: this.historicalSnapshotCount,
+          historicalSampleCount: this.historicalSampleCount
+        });
+        this.historicalSnapshotCount = merged.historicalSnapshotCount;
+        this.historicalSampleCount = merged.historicalSampleCount;
+        this.mergeSnapshotIntoPeriods(record);
       }
     } catch {
       // File missing or unreadable -> treat as empty history.

@@ -57,7 +57,7 @@ describe('Antigravity Gemini web search tools alignment', () => {
     const payload = outbound.payload as Record<string, unknown>;
 
     expect(payload.requestType).toBe('web_search');
-    expect(payload.model).toBe('gemini-2.5-flash');
+    expect(payload.model).toBe('gemini-3-pro-high');
     expect(Array.isArray(payload.tools)).toBe(true);
     expect((payload.tools as Array<Record<string, unknown>>).length).toBe(1);
     expect((payload.tools as Array<Record<string, unknown>>)[0]).toHaveProperty('googleSearch');

@@ -10,7 +10,7 @@ import { renderTokenPortalPage } from '../../../token-portal/render.js';
 import { loadTokenPortalFingerprintSummary } from '../../../token-portal/fingerprint-summary.js';
 import { registerDaemonAdminRoutes, rejectNonLocalOrUnauthorizedAdmin } from './daemon-admin-routes.js';
 import { registerClockClientRoutes } from './clock-client-routes.js';
-import type { HistoricalStatsSnapshot, StatsSnapshot } from './stats-manager.js';
+import type { HistoricalPeriodsSnapshot, HistoricalStatsSnapshot, StatsSnapshot } from './stats-manager.js';
 import { buildInfo } from '../../../build-info.js';
 import { logProcessLifecycleSync } from '../../../utils/process-lifecycle-logger.js';
 import { setShutdownCallerContext } from '../../../utils/shutdown-caller-context.js';
@@ -27,7 +27,11 @@ interface RouteOptions {
   getManagerDaemon?: () => unknown | null;
   getVirtualRouterArtifacts?: () => unknown | null;
   getServerId?: () => string;
-  getStatsSnapshot?: () => { session: StatsSnapshot; historical: HistoricalStatsSnapshot };
+  getStatsSnapshot?: () => {
+    session: StatsSnapshot;
+    historical: HistoricalStatsSnapshot;
+    periods?: HistoricalPeriodsSnapshot;
+  };
   restartRuntimeFromDisk?: () => Promise<{
     reloadedAt: number;
     configPath: string;
@@ -193,7 +197,8 @@ export function registerHttpRoutes(options: RouteOptions): void {
         ? options.getStatsSnapshot()
         : {
           session: { generatedAt: now, uptimeMs: 0, totals: [] },
-          historical: { generatedAt: now, snapshotCount: 0, sampleCount: 0, totals: [] }
+          historical: { generatedAt: now, snapshotCount: 0, sampleCount: 0, totals: [] },
+          periods: { generatedAt: now, daily: [], weekly: [], monthly: [] }
         };
     },
     restartRuntimeFromDisk: options.restartRuntimeFromDisk,

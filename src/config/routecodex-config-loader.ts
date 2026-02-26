@@ -49,11 +49,14 @@ export async function loadRouteCodexConfig(explicitPath?: string): Promise<Loade
   if (mode === 'v2') {
     const vrBase = isRecord(userConfig.virtualrouter) ? (userConfig.virtualrouter as UnknownRecord) : {};
     const v2Input = await buildVirtualRouterInputV2(userConfig);
+    const effectiveWebSearch = resolveEffectiveV2WebSearch(userConfig, vrBase);
     userConfig.virtualrouter = {
       ...vrBase,
       providers: v2Input.providers,
-      routing: v2Input.routing
+      routing: v2Input.routing,
+      ...(effectiveWebSearch ? { webSearch: effectiveWebSearch } : {})
     };
+    delete (userConfig as UnknownRecord).webSearch;
   } else {
     const providers = isRecord(userConfig.providers) ? userConfig.providers : {};
     const routing = isRecord(userConfig.routing) ? userConfig.routing : {};
@@ -101,6 +104,21 @@ export async function loadRouteCodexConfig(explicitPath?: string): Promise<Loade
     userConfig,
     providerProfiles
   };
+}
+
+function resolveEffectiveV2WebSearch(
+  userConfig: UnknownRecord,
+  virtualRouterBase: UnknownRecord
+): UnknownRecord | undefined {
+  const vrWebSearch = virtualRouterBase.webSearch;
+  if (isRecord(vrWebSearch)) {
+    return { ...(vrWebSearch as UnknownRecord) };
+  }
+  const topLevelWebSearch = (userConfig as UnknownRecord).webSearch;
+  if (isRecord(topLevelWebSearch)) {
+    return { ...(topLevelWebSearch as UnknownRecord) };
+  }
+  return undefined;
 }
 
 async function resolveConfigPath(explicit?: string): Promise<string> {
