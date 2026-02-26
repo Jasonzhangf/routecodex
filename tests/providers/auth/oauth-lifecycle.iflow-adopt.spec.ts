@@ -14,7 +14,7 @@ function readJson(filePath: string): any {
 }
 
 describe('ensureValidOAuthToken (iflow) token source fallback', () => {
-  test('adopts fresh token from IFLOW_OAUTH_TOKEN_FILE when alias token is expired', async () => {
+  test('does not adopt token from IFLOW_OAUTH_TOKEN_FILE when alias token is expired', async () => {
     const prevFetch = globalThis.fetch;
     const prevHome = process.env.HOME;
     const prevIflowTokenFile = process.env.IFLOW_OAUTH_TOKEN_FILE;
@@ -51,21 +51,22 @@ describe('ensureValidOAuthToken (iflow) token source fallback', () => {
     }) as unknown as typeof fetch;
 
     try {
-      await ensureValidOAuthToken(
-        'iflow',
-        {
-          type: 'iflow-oauth',
-          tokenFile: routeTokenFile
-        } as any,
-        { openBrowser: false, forceReauthorize: false, forceReacquireIfRefreshFails: true }
-      );
+      await expect(
+        ensureValidOAuthToken(
+          'iflow',
+          {
+            type: 'iflow-oauth',
+            tokenFile: routeTokenFile
+          } as any,
+          { openBrowser: false, forceReauthorize: false, forceReacquireIfRefreshFails: false }
+        )
+      ).rejects.toThrow();
 
       const updated = readJson(routeTokenFile);
-      expect(updated.access_token).toBe('fresh-access-token');
-      expect(updated.refresh_token).toBe('fresh-refresh-token');
-      expect(updated.apiKey || updated.api_key).toBe('fresh-api-key');
-      expect(updated.expires_at || updated.expiry_date).toBeDefined();
-      expect(fetchCalls).toBe(0);
+      expect(updated.access_token).toBe('expired-access');
+      expect(updated.refresh_token).toBe('expired-refresh');
+      expect(updated.apiKey || updated.api_key).toBe('expired-api-key');
+      expect(fetchCalls).toBeGreaterThan(0);
     } finally {
       globalThis.fetch = prevFetch as typeof fetch;
       process.env.HOME = prevHome;

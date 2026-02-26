@@ -144,6 +144,10 @@ export function isFatalForQuota(event: ProviderErrorEvent): boolean {
   const code = typeof event.code === 'string' ? event.code.toUpperCase() : '';
   const stage = typeof event.stage === 'string' ? event.stage.toLowerCase() : '';
 
+  if (isIflowAkBlocked434(event)) {
+    return true;
+  }
+
   if (status === 401 || status === 402 || status === 403) {
     return true;
   }
@@ -160,4 +164,43 @@ export function isFatalForQuota(event: ProviderErrorEvent): boolean {
     return true;
   }
   return false;
+}
+
+export function isIflowAkBlocked434(event: ProviderErrorEvent): boolean {
+  const status = typeof event.status === 'number' ? event.status : undefined;
+  if (status === 434) {
+    return true;
+  }
+
+  const message = typeof event.message === 'string' ? event.message.toLowerCase() : '';
+  if (message.includes('access to the current ak has been blocked due to unauthorized requests')) {
+    return true;
+  }
+  if (message.includes('iflow business error (434)')) {
+    return true;
+  }
+
+  const details = event.details && typeof event.details === 'object'
+    ? (event.details as Record<string, unknown>)
+    : null;
+  if (!details) {
+    return false;
+  }
+
+  const upstreamCode = typeof details.upstreamCode === 'string'
+    ? details.upstreamCode.trim().toLowerCase()
+    : '';
+  if (upstreamCode === '434') {
+    return true;
+  }
+
+  const statusCode = typeof details.statusCode === 'number' ? details.statusCode : undefined;
+  if (statusCode === 434) {
+    return true;
+  }
+
+  const upstreamMessage = typeof details.upstreamMessage === 'string'
+    ? details.upstreamMessage.toLowerCase()
+    : '';
+  return upstreamMessage.includes('access to the current ak has been blocked due to unauthorized requests');
 }

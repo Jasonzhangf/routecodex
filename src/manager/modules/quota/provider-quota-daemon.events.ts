@@ -20,6 +20,7 @@ import { isModelCapacityExhausted429, ProviderModelBackoffTracker } from './prov
 import {
   extractAntigravityAlias,
   extractProviderKey,
+  isIflowAkBlocked434,
   isAntigravityReauthRequired403,
   isFatalForQuota,
   listAntigravityProviderKeysByAlias,
@@ -62,6 +63,46 @@ export async function handleProviderQuotaErrorEvent(
   const previous =
     ctx.quotaStates.get(providerKey) ??
     createInitialQuotaState(providerKey, ctx.staticConfigs.get(providerKey), nowMs);
+
+  if (isIflowAkBlocked434(event)) {
+    const blacklistMs = readPositiveNumberFromEnv('ROUTECODEX_IFLOW_434_BLACKLIST_MS', 30 * 24 * 60 * 60_000);
+    const nextState: QuotaState = {
+      ...previous,
+      inPool: false,
+      reason: 'blacklist',
+      blacklistUntil: nowMs + blacklistMs,
+      cooldownUntil: null,
+      lastErrorSeries: 'EFATAL',
+      lastErrorCode: 'IFLOW_434',
+      lastErrorAtMs: nowMs,
+      consecutiveErrorCount:
+        typeof previous.consecutiveErrorCount === 'number' && previous.consecutiveErrorCount > 0
+          ? previous.consecutiveErrorCount + 1
+          : 1
+    };
+    ctx.quotaStates.set(providerKey, nextState);
+    ctx.schedulePersist(nowMs);
+
+    const tsIso = new Date(nowMs).toISOString();
+    try {
+      await appendProviderErrorEvent({
+        ts: tsIso,
+        providerKey,
+        code: typeof event.code === 'string' ? event.code : 'IFLOW_434',
+        httpStatus: typeof event.status === 'number' ? event.status : undefined,
+        message: event.message,
+        details: {
+          stage: event.stage,
+          routeName: (event.runtime as { routeName?: string }).routeName,
+          entryEndpoint: (event.runtime as { entryEndpoint?: string }).entryEndpoint,
+          authIssue: { kind: 'iflow_ak_blocked_434', blacklistUntil: nowMs + blacklistMs }
+        }
+      });
+    } catch {
+      // logging failure is non-fatal
+    }
+    return;
+  }
 
   // Manual/operator blacklist is rigid: do not override it with automated error/quota signals.
   if (previous.reason === 'blacklist' && previous.blacklistUntil && nowMs < previous.blacklistUntil) {
@@ -397,4 +438,16 @@ export async function handleProviderQuotaErrorEvent(
   } catch {
     // best-effort persistence only
   }
+}
+
+function readPositiveNumberFromEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) {
+    return fallback;
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
+  }
+  return Math.floor(parsed);
 }

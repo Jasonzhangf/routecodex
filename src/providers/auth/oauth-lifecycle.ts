@@ -34,8 +34,7 @@ import {
   isGeminiCliFamily,
   type ExtendedOAuthAuth,
   resolveTokenFilePath,
-  resolveCamoufoxAliasForAuth,
-  resolveIflowCredentialCandidates
+  resolveCamoufoxAliasForAuth
 } from './oauth-lifecycle/path-resolver.js';
 import {
   keyFor,
@@ -109,77 +108,6 @@ type OAuthStrategy = {
 
 const TOKEN_REFRESH_SKEW_MS = 60_000;
 
-type IflowTokenCandidate = {
-  token: StoredOAuthToken;
-  sourcePath: string;
-  expiresAt: number | null;
-};
-
-async function selectBestIflowTokenCandidate(targetTokenFilePath: string): Promise<IflowTokenCandidate | null> {
-  const targetResolved = path.resolve(targetTokenFilePath);
-  const candidates = resolveIflowCredentialCandidates();
-  let best: IflowTokenCandidate | null = null;
-
-  for (const candidatePath of candidates) {
-    if (!candidatePath) {
-      continue;
-    }
-    const resolved = path.resolve(candidatePath);
-    if (resolved === targetResolved) {
-      continue;
-    }
-    const token = await readTokenFromFile(candidatePath);
-    if (!token) {
-      continue;
-    }
-    const state = evaluateTokenState(token, 'iflow');
-    if (!state.validAccess) {
-      continue;
-    }
-    const expiresAt = state.expiresAt ?? null;
-    if (!best) {
-      best = { token, sourcePath: candidatePath, expiresAt };
-      continue;
-    }
-    const bestExpiry = best.expiresAt ?? -1;
-    const currentExpiry = expiresAt ?? -1;
-    if (currentExpiry > bestExpiry) {
-      best = { token, sourcePath: candidatePath, expiresAt };
-    }
-  }
-
-  return best;
-}
-
-async function maybeAdoptIflowExternalToken(
-  strategy: OAuthStrategy,
-  tokenFilePath: string,
-  existingToken: StoredOAuthToken | null
-): Promise<StoredOAuthToken | null> {
-  const currentState = evaluateTokenState(existingToken, 'iflow');
-  if (currentState.validAccess) {
-    return existingToken;
-  }
-  const bestCandidate = await selectBestIflowTokenCandidate(tokenFilePath);
-  if (!bestCandidate) {
-    return existingToken;
-  }
-
-  // Keep per-alias token files in RouteCodex, but adopt fresh credentials from iFlow-native stores when available.
-  const prepared = await prepareTokenForStorage('iflow', tokenFilePath, bestCandidate.token as UnknownObject);
-  if (typeof strategy.saveToken === 'function') {
-    await strategy.saveToken(prepared);
-  } else {
-    await fs.mkdir(path.dirname(tokenFilePath), { recursive: true });
-    await fs.writeFile(tokenFilePath, `${JSON.stringify(prepared, null, 2)}\n`, 'utf8');
-  }
-  const normalized = sanitizeToken(prepared as UnknownObject) ?? bestCandidate.token;
-  logOAuthDebug(
-    `[OAuth] iflow token adopted from ${bestCandidate.sourcePath} -> ${tokenFilePath}`
-  );
-  return normalized;
-}
-
 async function openGoogleAccountVerificationInCamoufox(args: {
   providerType: string;
   auth: ExtendedOAuthAuth;
@@ -243,6 +171,44 @@ function isIflowRefreshEndpointRejectionMessage(message: string): boolean {
   );
 }
 
+function isIflowAkBlockedMessage(message: string): boolean {
+  const normalized = (message || '').toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+  return normalized.includes('access to the current ak has been blocked due to unauthorized requests');
+}
+
+function shouldClearIflowTokenOnRefreshFailure(message: string): boolean {
+  const normalized = (message || '').toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+  if (isIflowAkBlockedMessage(normalized)) {
+    return false;
+  }
+  if (normalized.includes('oauth error: invalid_grant')) {
+    return true;
+  }
+  if (normalized.includes('oauth error: invalid_client')) {
+    return true;
+  }
+  if (normalized.includes('oauth error: unauthorized_client')) {
+    return true;
+  }
+  if (
+    normalized.includes('oauth error: invalid_request') &&
+    (
+      normalized.includes('refresh token') ||
+      normalized.includes('refresh_token') ||
+      normalized.includes('client_id')
+    )
+  ) {
+    return true;
+  }
+  return false;
+}
+
 function applyRefreshFailureBackoff(cacheKey: string, providerType: string, message: string): void {
   if (providerType !== 'iflow' || !isIflowRefreshEndpointRejectionMessage(message)) {
     return;
@@ -250,6 +216,18 @@ function applyRefreshFailureBackoff(cacheKey: string, providerType: string, mess
   // For iFlow refresh endpoint 500/generic failures, avoid hammering token endpoint
   // from preflight/retry loops. Keep a longer cooldown before next refresh attempt.
   lastRunAt.set(cacheKey, Date.now() + IFLOW_REFRESH_FAILURE_BACKOFF_MS - OAUTH_THROTTLE_WINDOW_MS);
+}
+
+function isElementMissingAutomationFailure(message: string): boolean {
+  const normalized = String(message || '').toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+  return (
+    normalized.includes('element not found') ||
+    normalized.includes('element_not_found') ||
+    normalized.includes('required but not matched')
+  );
 }
 
 async function runInteractiveRepairWithAutoFallback(args: {
@@ -260,6 +238,7 @@ async function runInteractiveRepairWithAutoFallback(args: {
 }): Promise<void> {
   const { providerType, auth, ensureValid, opts } = args;
   const autoModeAtStart = String(process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE || '').trim();
+  let needsHeadfulManual = false;
   try {
     await ensureValid(providerType, auth, opts);
     return;
@@ -268,17 +247,36 @@ async function runInteractiveRepairWithAutoFallback(args: {
       throw error;
     }
     const msg = error instanceof Error ? error.message : String(error || '');
+    needsHeadfulManual = isElementMissingAutomationFailure(msg);
     console.warn(
       `[OAuth] Camoufox auto OAuth failed (${providerType}, autoMode=${autoModeAtStart}): ${msg}. Falling back to manual mode.`
     );
+    if (needsHeadfulManual) {
+      let tokenFilePath = '';
+      try {
+        tokenFilePath = resolveTokenFilePath(auth as ExtendedOAuthAuth, providerType);
+      } catch {
+        tokenFilePath = '';
+      }
+      if (tokenFilePath) {
+        closeOAuthAuthResources(providerType, tokenFilePath);
+      }
+      console.warn(
+        `[OAuth] Camoufox auto selector step failed; switched to headful manual mode (provider=${providerType}${tokenFilePath ? ` tokenFile=${tokenFilePath}` : ''}).`
+      );
+    }
   }
 
   const prevAutoMode = process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
   const prevAutoConfirm = process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM;
+  const prevDevMode = process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
   const prevOpenOnly = process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY;
   try {
     delete process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
     delete process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM;
+    if (needsHeadfulManual) {
+      process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = '1';
+    }
     process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY = '1';
     await ensureValid(providerType, auth, opts);
   } finally {
@@ -291,6 +289,11 @@ async function runInteractiveRepairWithAutoFallback(args: {
       delete process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM;
     } else {
       process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM = prevAutoConfirm;
+    }
+    if (prevDevMode === undefined) {
+      delete process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
+    } else {
+      process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = prevDevMode;
     }
     if (prevOpenOnly === undefined) {
       delete process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY;
@@ -606,7 +609,7 @@ function buildHeaderOverrides(defaults: OAuthFlowConfig, providerType: string): 
   if (providerType === 'iflow') {
     return {
       ...baseHeaders,
-      'User-Agent': 'iflow-cli/2.0',
+      'User-Agent': 'iFlow-Cli',
       'X-Requested-With': 'XMLHttpRequest',
       'Origin': 'https://iflow.cn',
       'Referer': 'https://iflow.cn/oauth',
@@ -1372,9 +1375,6 @@ export async function ensureValidOAuthToken(
     logOAuthSetup(providerType, defaults, overrides, endpoints, client, tokenFilePath, openBrowser, forceReauth);
     const strategy = createStrategy(providerType, overrides, tokenFilePath);
     let token = await readTokenFromFile(tokenFilePath);
-    if (providerType === 'iflow') {
-      token = await maybeAdoptIflowExternalToken(strategy, tokenFilePath, token);
-    }
     const hadExistingTokenFile = token !== null;
 
     // Qwen: ensure api_key is present even when access_token is still valid.
@@ -1459,8 +1459,8 @@ export async function ensureValidOAuthToken(
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error || '');
         applyRefreshFailureBackoff(cacheKey, providerType, message);
-        if (providerType === 'iflow') {
-          // Align iFlow CLI behavior: refresh failure invalidates local token cache first.
+        if (providerType === 'iflow' && shouldClearIflowTokenOnRefreshFailure(message)) {
+          // Only clear token file for permanent refresh-credential failures.
           await clearTokenFile(tokenFilePath);
         }
         if (!opts.forceReacquireIfRefreshFails) {
@@ -1658,6 +1658,11 @@ export function shouldTriggerInteractiveOAuthRepair(providerType: string, upstre
         : String(upstreamError || '');
   const lower = msg.toLowerCase();
   const statusCode = extractStatusCode(upstreamError);
+
+  if (pt === 'iflow' && (statusCode === 434 || isIflowAkBlockedMessage(lower))) {
+    // iFlow 434 是账号级封禁，必须人工恢复，不走自动修复。
+    return false;
+  }
 
   // 基本令牌失效判定：只看典型 OAuth 文案
   let looksInvalid =
