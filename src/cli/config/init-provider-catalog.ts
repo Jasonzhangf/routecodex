@@ -268,7 +268,7 @@ export function getInitProviderCatalog(): InitProviderTemplate[] {
         enabled: true,
         type: 'gemini-cli-http-provider',
         providerType: 'gemini',
-        compatibilityProfile: 'chat:gemini',
+        compatibilityProfile: 'chat:gemini-cli',
         baseURL: 'https://daily-cloudcode-pa.sandbox.googleapis.com',
         auth: {
           type: 'antigravity-oauth',
@@ -288,11 +288,16 @@ export function getInitProviderCatalog(): InitProviderTemplate[] {
           // gemini-3-pro-low has a smaller context window than the high tier.
           'gemini-3-pro-low': { supportsStreaming: true, maxContext: 256000 },
           'gemini-3-flash-preview': { supportsStreaming: true },
+          'claude-sonnet-4-6': { supportsStreaming: true },
+          'claude-sonnet-4-6-thinking': { supportsStreaming: true },
+          'claude-opus-4-6-thinking': { supportsStreaming: true },
+          // Keep legacy aliases for compatibility with existing local routes.
           'claude-sonnet-4-5': { supportsStreaming: true },
-          'claude-sonnet-4-5-thinking': { supportsStreaming: true }
+          'claude-sonnet-4-5-thinking': { supportsStreaming: true },
+          'claude-opus-4-5-thinking': { supportsStreaming: true }
         }
       },
-      defaultModel: 'claude-sonnet-4-5'
+      defaultModel: 'claude-sonnet-4-6-thinking'
     }
   ];
 }

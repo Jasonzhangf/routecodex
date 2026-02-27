@@ -23,7 +23,7 @@ describe('antigravity-warmup', () => {
 
     // Keep tests hermetic: never hit remote version endpoint.
     process.env.ROUTECODEX_ANTIGRAVITY_UA_DISABLE_REMOTE = '1';
-    process.env.ROUTECODEX_ANTIGRAVITY_UA_VERSION = '1.11.9';
+    process.env.ROUTECODEX_ANTIGRAVITY_UA_VERSION = '4.1.24';
   });
 
   afterEach(() => {
@@ -43,7 +43,7 @@ describe('antigravity-warmup', () => {
       expect(result.profileId).toBe('rc-gemini.test');
       expect(result.expectedSuffix).toBe('windows/amd64');
       expect(result.actualSuffix).toBe('windows/amd64');
-      expect(result.actualUserAgent).toBe('antigravity/1.11.9 windows/amd64');
+      expect(result.actualUserAgent).toBe('antigravity/4.1.24 windows/amd64');
     }
   });
 

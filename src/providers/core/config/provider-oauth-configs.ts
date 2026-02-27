@@ -3,6 +3,9 @@
  *
  * 基于iflow和qwen的实际配置，提供预定义的OAuth流程配置
  */
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { LOCAL_HOSTS, HTTP_PROTOCOLS, DEFAULT_CONFIG, API_PATHS } from "../../../constants/index.js";
 import { OAuthFlowConfigManager, OAuthFlowType, OAuthActivationType, type OAuthFlowConfig } from './oauth-flows.js';
 import type { ProviderProfileCollection } from '../../profile/provider-profile.js';
@@ -11,33 +14,81 @@ import { OAuthDeviceFlowStrategyFactory } from '../strategies/oauth-device-flow.
 import { OAuthAuthCodeFlowStrategyFactory } from '../strategies/oauth-auth-code-flow.js';
 import { OAuthHybridFlowStrategyFactory } from '../strategies/oauth-hybrid-flow.js';
 
-function readOAuthEnv(primary: string, secondary: string, fallback: string): string {
+type OAuthClientField = 'clientId' | 'clientSecret';
+type LocalOAuthClientConfig = Record<string, Partial<Record<OAuthClientField, string>>>;
+
+const LOCAL_OAUTH_CLIENTS_FILE = path.join(os.homedir(), '.routecodex', 'auth', 'oauth-clients.local.json');
+
+let localOAuthClientsCache: LocalOAuthClientConfig | null | undefined;
+
+function readLocalOAuthClients(): LocalOAuthClientConfig | null {
+  if (localOAuthClientsCache !== undefined) {
+    return localOAuthClientsCache;
+  }
+  try {
+    const raw = fs.readFileSync(LOCAL_OAUTH_CLIENTS_FILE, 'utf8');
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      localOAuthClientsCache = null;
+      return null;
+    }
+    localOAuthClientsCache = parsed as LocalOAuthClientConfig;
+    return localOAuthClientsCache;
+  } catch {
+    localOAuthClientsCache = null;
+    return null;
+  }
+}
+
+function readOAuthCredential(
+  primary: string,
+  secondary: string,
+  fallback: string,
+  providerId: 'gemini-cli' | 'antigravity',
+  field: OAuthClientField
+): string {
   const fromPrimary = String(process.env[primary] || '').trim();
   if (fromPrimary) return fromPrimary;
   const fromSecondary = String(process.env[secondary] || '').trim();
   if (fromSecondary) return fromSecondary;
+  const local = readLocalOAuthClients();
+  const fromLocal = String(local?.[providerId]?.[field] || '').trim();
+  if (fromLocal) return fromLocal;
   return fallback;
 }
 
-const GEMINI_CLI_GOOGLE_CLIENT_ID = readOAuthEnv(
+const DEFAULT_GEMINI_CLI_GOOGLE_CLIENT_ID = 'ROUTECODEX_GEMINI_CLI_GOOGLE_CLIENT_ID_NOT_SET';
+const DEFAULT_GEMINI_CLI_GOOGLE_CLIENT_SECRET = 'ROUTECODEX_GEMINI_CLI_GOOGLE_CLIENT_SECRET_NOT_SET';
+const DEFAULT_ANTIGRAVITY_GOOGLE_CLIENT_ID = 'ROUTECODEX_ANTIGRAVITY_GOOGLE_CLIENT_ID_NOT_SET';
+const DEFAULT_ANTIGRAVITY_GOOGLE_CLIENT_SECRET = 'ROUTECODEX_ANTIGRAVITY_GOOGLE_CLIENT_SECRET_NOT_SET';
+
+const GEMINI_CLI_GOOGLE_CLIENT_ID = readOAuthCredential(
   'ROUTECODEX_GEMINI_CLI_GOOGLE_CLIENT_ID',
   'RCC_GEMINI_CLI_GOOGLE_CLIENT_ID',
-  'ROUTECODEX_GEMINI_CLI_GOOGLE_CLIENT_ID_NOT_SET'
+  DEFAULT_GEMINI_CLI_GOOGLE_CLIENT_ID,
+  'gemini-cli',
+  'clientId'
 );
-const GEMINI_CLI_GOOGLE_CLIENT_SECRET = readOAuthEnv(
+const GEMINI_CLI_GOOGLE_CLIENT_SECRET = readOAuthCredential(
   'ROUTECODEX_GEMINI_CLI_GOOGLE_CLIENT_SECRET',
   'RCC_GEMINI_CLI_GOOGLE_CLIENT_SECRET',
-  'ROUTECODEX_GEMINI_CLI_GOOGLE_CLIENT_SECRET_NOT_SET'
+  DEFAULT_GEMINI_CLI_GOOGLE_CLIENT_SECRET,
+  'gemini-cli',
+  'clientSecret'
 );
-const ANTIGRAVITY_GOOGLE_CLIENT_ID = readOAuthEnv(
+const ANTIGRAVITY_GOOGLE_CLIENT_ID = readOAuthCredential(
   'ROUTECODEX_ANTIGRAVITY_GOOGLE_CLIENT_ID',
   'RCC_ANTIGRAVITY_GOOGLE_CLIENT_ID',
-  'ROUTECODEX_ANTIGRAVITY_GOOGLE_CLIENT_ID_NOT_SET'
+  DEFAULT_ANTIGRAVITY_GOOGLE_CLIENT_ID,
+  'antigravity',
+  'clientId'
 );
-const ANTIGRAVITY_GOOGLE_CLIENT_SECRET = readOAuthEnv(
+const ANTIGRAVITY_GOOGLE_CLIENT_SECRET = readOAuthCredential(
   'ROUTECODEX_ANTIGRAVITY_GOOGLE_CLIENT_SECRET',
   'RCC_ANTIGRAVITY_GOOGLE_CLIENT_SECRET',
-  'ROUTECODEX_ANTIGRAVITY_GOOGLE_CLIENT_SECRET_NOT_SET'
+  DEFAULT_ANTIGRAVITY_GOOGLE_CLIENT_SECRET,
+  'antigravity',
+  'clientSecret'
 );
 
 /**

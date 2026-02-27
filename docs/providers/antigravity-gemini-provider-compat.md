@@ -171,9 +171,9 @@ antigravity/<version> <os>/<arch>
 版本解析顺序（从高到低）：
 1. 显式 UA：`ROUTECODEX_ANTIGRAVITY_USER_AGENT` / `RCC_ANTIGRAVITY_USER_AGENT`（完全覆盖）
 2. 显式版本号：`ROUTECODEX_ANTIGRAVITY_UA_VERSION` / `RCC_ANTIGRAVITY_UA_VERSION`
-3. 远程拉取：`VERSION_URL`（可用 `ROUTECODEX_ANTIGRAVITY_UA_DISABLE_REMOTE=1` 禁用）
+3. 远程拉取：`VERSION_URL`，失败时回退 `CHANGELOG_URL`（可用 `ROUTECODEX_ANTIGRAVITY_UA_DISABLE_REMOTE=1` 禁用）
 4. 本地磁盘 cache：`~/.routecodex/state/antigravity-ua-version.json`
-5. 最后兜底：`LEGACY_PINNED_VERSION`（只保证“有值”，不保证不过期）
+5. 最后兜底：`KNOWN_STABLE_VERSION`（当前 `4.1.24`，对齐 Antigravity-Manager）
 
 ### 4.3 `<os>/<arch>` suffix 如何从指纹推断（并且为何禁 linux）
 

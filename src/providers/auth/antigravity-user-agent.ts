@@ -16,19 +16,17 @@ import { inferAntigravityUaSuffixFromFingerprint, loadAntigravityCamoufoxFingerp
 import { getAntigravityReauthRequiredRecord } from './antigravity-reauth-state.js';
 
 const VERSION_URL = 'https://antigravity-auto-updater-974169037036.us-central1.run.app';
+const CHANGELOG_URL = 'https://antigravity.google/changelog';
 const VERSION_REGEX = /\d+\.\d+\.\d+/;
 const REMOTE_TIMEOUT_MS = 3_000;
 
-// Legacy pinned version used before we introduced remote fetching.
-// Used only as a last resort when:
-// - operator didn't set ROUTECODEX_ANTIGRAVITY_USER_AGENT / ROUTECODEX_ANTIGRAVITY_UA_VERSION
-// - remote fetch fails (or disabled)
-// - local cache is missing/corrupt
-const LEGACY_PINNED_VERSION = '1.11.9';
+// Keep floor aligned with Antigravity-Manager KNOWN_STABLE_VERSION.
+// Remote/disk versions are allowed to go above this value.
+const KNOWN_STABLE_VERSION = '4.1.24';
 const DEFAULT_FINGERPRINT_SUFFIX = 'windows/amd64';
 const VERSION_CACHE_FILE = path.join(os.homedir(), '.routecodex', 'state', 'antigravity-ua-version.json');
 
-type AntigravityUaVersionSource = 'env' | 'remote' | 'disk' | 'legacy';
+type AntigravityUaVersionSource = 'env' | 'remote' | 'disk' | 'floor';
 
 let cachedVersion: { version: string; fetchedAt: number; source: AntigravityUaVersionSource } | null = null;
 let inflightVersion: Promise<string> | null = null;
@@ -66,10 +64,44 @@ export function formatAntigravityManagerUserAgent(opts: {
    */
   suffix?: string;
 }): string {
-  const version = String(opts.version || '').trim() || LEGACY_PINNED_VERSION;
+  const version = String(opts.version || '').trim() || KNOWN_STABLE_VERSION;
   const suffixRaw = String(opts.suffix || '').trim();
   const suffix = suffixRaw || DEFAULT_FINGERPRINT_SUFFIX;
   return `antigravity/${version} ${suffix}`;
+}
+
+function compareSemver(v1: string, v2: string): number {
+  const parse = (v: string): number[] =>
+    String(v || '')
+      .split('.')
+      .map((part) => Number(part))
+      .filter((n) => Number.isFinite(n));
+  const p1 = parse(v1);
+  const p2 = parse(v2);
+  const maxLen = Math.max(p1.length, p2.length);
+  for (let i = 0; i < maxLen; i += 1) {
+    const a = p1[i] ?? 0;
+    const b = p2[i] ?? 0;
+    if (a > b) return 1;
+    if (a < b) return -1;
+  }
+  return 0;
+}
+
+function normalizeVersionCandidate(version: string | undefined): string | undefined {
+  const value = String(version || '').trim();
+  if (!value || !VERSION_REGEX.test(value)) {
+    return undefined;
+  }
+  return value;
+}
+
+function applyStableFloor(version: string | undefined): string {
+  const candidate = normalizeVersionCandidate(version);
+  if (!candidate) {
+    return KNOWN_STABLE_VERSION;
+  }
+  return compareSemver(candidate, KNOWN_STABLE_VERSION) >= 0 ? candidate : KNOWN_STABLE_VERSION;
 }
 
 async function readCachedVersionFromDisk(): Promise<string | undefined> {
@@ -91,8 +123,8 @@ async function readCachedVersionFromDisk(): Promise<string | undefined> {
 }
 
 async function writeCachedVersionToDisk(version: string): Promise<void> {
-  const v = String(version || '').trim();
-  if (!v || !VERSION_REGEX.test(v)) {
+  const v = normalizeVersionCandidate(version);
+  if (!v) {
     return;
   }
   try {
@@ -117,17 +149,23 @@ async function fetchRemoteVersion(): Promise<string | undefined> {
     return undefined;
   }
 
-  const controller = new AbortController();
-  const t = setTimeout(() => controller.abort(), REMOTE_TIMEOUT_MS);
-  try {
-    const res = await fetch(VERSION_URL, { signal: controller.signal });
-    const text = await res.text();
-    return parseAntigravityVersionFromUpdater(text);
-  } catch {
-    return undefined;
-  } finally {
-    clearTimeout(t);
+  for (const url of [VERSION_URL, CHANGELOG_URL]) {
+    const controller = new AbortController();
+    const t = setTimeout(() => controller.abort(), REMOTE_TIMEOUT_MS);
+    try {
+      const res = await fetch(url, { signal: controller.signal });
+      const text = await res.text();
+      const parsed = parseAntigravityVersionFromUpdater(text);
+      if (parsed) {
+        return parsed;
+      }
+    } catch {
+      // try next endpoint
+    } finally {
+      clearTimeout(t);
+    }
   }
+  return undefined;
 }
 
 async function resolveAntigravityVersion(opts?: {
@@ -146,7 +184,7 @@ async function resolveAntigravityVersion(opts?: {
     process.env.RCC_ANTIGRAVITY_UA_VERSION ||
     ''
   ).trim();
-  const envVersion = envVersionRaw && VERSION_REGEX.test(envVersionRaw) ? envVersionRaw : '';
+  const envVersion = normalizeVersionCandidate(envVersionRaw);
 
   const ttlMs = typeof opts?.ttlMs === 'number' && opts.ttlMs > 0 ? opts.ttlMs : 30 * 60_000;
   const now = Date.now();
@@ -162,13 +200,26 @@ async function resolveAntigravityVersion(opts?: {
     // Yield once to let concurrent callers coalesce.
     await delay(0);
     if (envVersion) {
-      cachedVersion = { version: envVersion, fetchedAt: Date.now(), source: 'env' };
-      return envVersion;
+      const floored = applyStableFloor(envVersion);
+      cachedVersion = { version: floored, fetchedAt: Date.now(), source: 'env' };
+      return floored;
     }
 
-    const remoteVersion = await fetchRemoteVersion();
-    const diskVersion = remoteVersion ? undefined : await readCachedVersionFromDisk();
-    const resolvedVersion = remoteVersion || diskVersion || LEGACY_PINNED_VERSION;
+    const [remoteVersionRaw, diskVersionRaw] = await Promise.all([fetchRemoteVersion(), readCachedVersionFromDisk()]);
+    const remoteVersion = normalizeVersionCandidate(remoteVersionRaw);
+    const diskVersion = normalizeVersionCandidate(diskVersionRaw);
+
+    let resolvedVersion = KNOWN_STABLE_VERSION;
+    let source: AntigravityUaVersionSource = 'floor';
+    if (remoteVersion && compareSemver(remoteVersion, resolvedVersion) > 0) {
+      resolvedVersion = remoteVersion;
+      source = 'remote';
+    }
+    if (diskVersion && compareSemver(diskVersion, resolvedVersion) > 0) {
+      resolvedVersion = diskVersion;
+      source = 'disk';
+    }
+
     if (remoteVersion) {
       await writeCachedVersionToDisk(remoteVersion);
     }
@@ -176,7 +227,7 @@ async function resolveAntigravityVersion(opts?: {
     cachedVersion = {
       version: resolvedVersion,
       fetchedAt: Date.now(),
-      source: remoteVersion ? 'remote' : diskVersion ? 'disk' : 'legacy'
+      source
     };
     return resolvedVersion;
   })();
@@ -254,7 +305,7 @@ export async function preloadAntigravityAliasUserAgents(aliases: string[]): Prom
 export async function primeAntigravityUserAgentVersion(): Promise<void> {
   try {
     const version = await resolveAntigravityVersion({ forceRefresh: true });
-    const source = cachedVersion?.source || 'legacy';
+    const source = cachedVersion?.source || 'floor';
     console.log(`[antigravity:ua] version=${version} source=${source}`);
   } catch {
     // best-effort
@@ -307,6 +358,6 @@ export function getAntigravityUserAgentFallback(): string {
     process.env.RCC_ANTIGRAVITY_UA_VERSION ||
     ''
   ).trim();
-  const envVersion = envVersionRaw && VERSION_REGEX.test(envVersionRaw) ? envVersionRaw : '';
-  return formatAntigravityManagerUserAgent({ version: envVersion || LEGACY_PINNED_VERSION, suffix });
+  const envVersion = normalizeVersionCandidate(envVersionRaw);
+  return formatAntigravityManagerUserAgent({ version: applyStableFloor(envVersion), suffix });
 }

@@ -541,9 +541,9 @@ async function runOnceBlackbox(opts) {
     // Keep blackbox deterministic/hermetic: do not hit Antigravity auto-updater from CI.
     ROUTECODEX_ANTIGRAVITY_UA_DISABLE_REMOTE: '1',
     RCC_ANTIGRAVITY_UA_DISABLE_REMOTE: '1',
-    // Also pin UA version so we don't rely on hardcoded fallbacks in tests.
-    ROUTECODEX_ANTIGRAVITY_UA_VERSION: '1.11.9',
-    RCC_ANTIGRAVITY_UA_VERSION: '1.11.9',
+    // Also pin UA version so the blackbox run stays deterministic.
+    ROUTECODEX_ANTIGRAVITY_UA_VERSION: '4.1.24',
+    RCC_ANTIGRAVITY_UA_VERSION: '4.1.24',
     ...(antigravityApiBase
       ? {
           ROUTECODEX_ANTIGRAVITY_API_BASE: antigravityApiBase,
