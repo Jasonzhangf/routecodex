@@ -11,6 +11,35 @@ import { OAuthDeviceFlowStrategyFactory } from '../strategies/oauth-device-flow.
 import { OAuthAuthCodeFlowStrategyFactory } from '../strategies/oauth-auth-code-flow.js';
 import { OAuthHybridFlowStrategyFactory } from '../strategies/oauth-hybrid-flow.js';
 
+function readOAuthEnv(primary: string, secondary: string, fallback: string): string {
+  const fromPrimary = String(process.env[primary] || '').trim();
+  if (fromPrimary) return fromPrimary;
+  const fromSecondary = String(process.env[secondary] || '').trim();
+  if (fromSecondary) return fromSecondary;
+  return fallback;
+}
+
+const GEMINI_CLI_GOOGLE_CLIENT_ID = readOAuthEnv(
+  'ROUTECODEX_GEMINI_CLI_GOOGLE_CLIENT_ID',
+  'RCC_GEMINI_CLI_GOOGLE_CLIENT_ID',
+  'ROUTECODEX_GEMINI_CLI_GOOGLE_CLIENT_ID_NOT_SET'
+);
+const GEMINI_CLI_GOOGLE_CLIENT_SECRET = readOAuthEnv(
+  'ROUTECODEX_GEMINI_CLI_GOOGLE_CLIENT_SECRET',
+  'RCC_GEMINI_CLI_GOOGLE_CLIENT_SECRET',
+  'ROUTECODEX_GEMINI_CLI_GOOGLE_CLIENT_SECRET_NOT_SET'
+);
+const ANTIGRAVITY_GOOGLE_CLIENT_ID = readOAuthEnv(
+  'ROUTECODEX_ANTIGRAVITY_GOOGLE_CLIENT_ID',
+  'RCC_ANTIGRAVITY_GOOGLE_CLIENT_ID',
+  'ROUTECODEX_ANTIGRAVITY_GOOGLE_CLIENT_ID_NOT_SET'
+);
+const ANTIGRAVITY_GOOGLE_CLIENT_SECRET = readOAuthEnv(
+  'ROUTECODEX_ANTIGRAVITY_GOOGLE_CLIENT_SECRET',
+  'RCC_ANTIGRAVITY_GOOGLE_CLIENT_SECRET',
+  'ROUTECODEX_ANTIGRAVITY_GOOGLE_CLIENT_SECRET_NOT_SET'
+);
+
 /**
  * 注册默认的OAuth流程工厂
  */
@@ -163,9 +192,8 @@ function registerProviderOAuthConfigs(): void {
       deviceCodeUrl: 'https://oauth2.googleapis.com/device/code'
     },
     client: {
-      // 复用 CLIProxyAPI 中的公开客户端配置
-      clientId: 'ROUTECODEX_GEMINI_CLI_GOOGLE_CLIENT_ID_NOT_SET',
-      clientSecret: 'ROUTECODEX_GEMINI_CLI_GOOGLE_CLIENT_SECRET_NOT_SET',
+      clientId: GEMINI_CLI_GOOGLE_CLIENT_ID,
+      clientSecret: GEMINI_CLI_GOOGLE_CLIENT_SECRET,
       scopes: [
         'https://www.googleapis.com/auth/cloud-platform',
         'https://www.googleapis.com/auth/userinfo.email',
@@ -207,8 +235,8 @@ function registerProviderOAuthConfigs(): void {
       deviceCodeUrl: 'https://oauth2.googleapis.com/device/code'
     },
     client: {
-      clientId: 'ROUTECODEX_ANTIGRAVITY_GOOGLE_CLIENT_ID_NOT_SET',
-      clientSecret: 'ROUTECODEX_ANTIGRAVITY_GOOGLE_CLIENT_SECRET_NOT_SET',
+      clientId: ANTIGRAVITY_GOOGLE_CLIENT_ID,
+      clientSecret: ANTIGRAVITY_GOOGLE_CLIENT_SECRET,
       scopes: [
         'https://www.googleapis.com/auth/cloud-platform',
         'https://www.googleapis.com/auth/userinfo.email',
