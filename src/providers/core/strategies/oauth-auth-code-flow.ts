@@ -10,6 +10,7 @@ import fs from 'fs/promises';
 import fsSync from 'fs';
 import path from 'path';
 import { logOAuthDebug } from '../../auth/oauth-logger.js';
+import { formatOAuthErrorMessage } from '../../auth/oauth-error-message.js';
 import crypto from 'crypto';
 import { isPermanentOAuthRefreshErrorMessage } from './oauth-refresh-errors.js';
 
@@ -980,7 +981,7 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
 
       } catch (error) {
         lastError = error;
-        const msg = error instanceof Error ? error.message : String(error);
+        const msg = formatOAuthErrorMessage(error);
         console.warn(`Token refresh attempt ${attempt + 1} failed:`, msg);
         if (isPermanentOAuthRefreshErrorMessage(msg)) {
           abortedEarly = true;
@@ -989,7 +990,7 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
       }
     }
 
-    const lastMsg = lastError instanceof Error ? lastError.message : String(lastError);
+    const lastMsg = formatOAuthErrorMessage(lastError);
     if (abortedEarly) {
       throw new Error(`Token refresh failed (permanent): ${lastMsg}`);
     }

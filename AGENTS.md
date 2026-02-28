@@ -20,6 +20,12 @@ This document replaces the old “architecture novel” with a concise set of ru
 5. **Untracked-first review & dangerous-action gate** – When new/untracked files are detected, review them first as potential valid fixes. Do not delete/clean/checkout/reset these files by default. If they truly violate policy and require removal or rollback, ask the user before any destructive action.
 6. **Process-kill commands are prohibited** – Agent must not execute any process termination command, including `kill`, `pkill`, `killall`, `taskkill`, `launchctl kill`, or port-based mass termination patterns (e.g. `lsof ... | xargs kill`). Process stop/restart must use explicit project CLI control flow only, and never by direct signal commands.
 
+## 1.2 三层架构铁律（Block / App / UI）
+
+1. **Block 层 = 基础能力层（全局唯一真源）** – Block 只提供可复用基础能力，不承载业务编排或业务决策；同一能力只能有一个权威实现，禁止多处复制逻辑。
+2. **App 层 = 编排层** – App 只允许编排/组合 Blocks，不写业务细节实现，不在编排层“补一版逻辑”。
+3. **UI 层 = 呈现层** – UI 只负责展示状态与触发交互，不承载业务规则；UI 必须与业务逻辑解耦。
+
 ---
 
 ## 2. Module Responsibilities
@@ -256,5 +262,4 @@ bd --no-db list --status open --priority 1 --label-any urgent,critical --no-assi
 - 关键时刻强制落盘：结束会话/交接前跑一次 `bd sync`（把 debounce 窗口里的改动立刻刷到 JSONL）
 - 约定：git 只追踪 `.beads/issues.jsonl`/`.gitattributes`/`.beads/.gitignore`，不要提交 `.beads/beads.db` 之类本地文件
 - 如果用 git worktree：别开 daemon（`export BEADS_NO_DAEMON=1` 或每次加 `--no-daemon`），主要依赖 hooks + 需要时手动 `bd sync`
-
 

@@ -614,8 +614,9 @@ function ensureFingerprintEnv(profileId: string, provider?: string | null, alias
 
   const scriptPath = resolveGenFingerprintScriptPath();
   if (!scriptPath) {
-    logOAuthDebug('[OAuth] Camoufox: fingerprint generator script not found; falling back to default fingerprint');
-    return {};
+    logOAuthDebug('[OAuth] Camoufox: fingerprint generator script not found; creating minimal fingerprint env');
+    const osPolicy = computeOsPolicy(provider, alias);
+    return writeMinimalFingerprintEnv(profileId, osPolicy);
   }
 
   const osPolicy = computeOsPolicy(provider, alias);
@@ -1128,14 +1129,8 @@ export async function openAuthInCamoufox(options: CamoufoxLaunchOptions): Promis
     console.log(
       `[OAuth] Camoufox launcher spawn via camo-cli: profileId=${profileId} headless=${headless ? '1' : '0'}`
     );
-    const existingFingerprintEnv = loadFingerprintEnv(profileId);
-    if (!existingFingerprintEnv) {
-      logOAuthDebug(
-        `[OAuth] Camoufox fingerprint env missing profileId=${profileId}; pre-generate fingerprint before OAuth`
-      );
-      return false;
-    }
-    const fingerprintEnv = sanitizeCamouConfigForOAuth(options.provider, existingFingerprintEnv);
+    const fingerprintEnvRaw = ensureFingerprintEnv(profileId, options.provider, options.alias);
+    const fingerprintEnv = sanitizeCamouConfigForOAuth(options.provider, fingerprintEnvRaw);
     const localeEnv = resolveCamoufoxLocaleEnv();
     const sharedEnv = {
       ...process.env,

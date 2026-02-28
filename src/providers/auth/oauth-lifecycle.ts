@@ -20,6 +20,7 @@ import {
 } from './gemini-cli-userinfo-helper.js';
 import { parseTokenSequenceFromPath } from './token-scanner/index.js';
 import { logOAuthDebug } from './oauth-logger.js';
+import { formatOAuthErrorMessage } from './oauth-error-message.js';
 import { fetchAntigravityProjectId } from './antigravity-userinfo-helper.js';
 import { HTTP_PROTOCOLS, LOCAL_HOSTS } from '../../constants/index.js';
 import { withOAuthRepairEnv } from './oauth-repair-env.js';
@@ -238,7 +239,6 @@ async function runInteractiveRepairWithAutoFallback(args: {
 }): Promise<void> {
   const { providerType, auth, ensureValid, opts } = args;
   const autoModeAtStart = String(process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE || '').trim();
-  let needsHeadfulManual = false;
   try {
     await ensureValid(providerType, auth, opts);
     return;
@@ -247,20 +247,20 @@ async function runInteractiveRepairWithAutoFallback(args: {
       throw error;
     }
     const msg = error instanceof Error ? error.message : String(error || '');
-    needsHeadfulManual = isElementMissingAutomationFailure(msg);
+    const selectorFailure = isElementMissingAutomationFailure(msg);
+    let tokenFilePath = '';
+    try {
+      tokenFilePath = resolveTokenFilePath(auth as ExtendedOAuthAuth, providerType);
+    } catch {
+      tokenFilePath = '';
+    }
+    if (tokenFilePath) {
+      closeOAuthAuthResources(providerType, tokenFilePath);
+    }
     console.warn(
-      `[OAuth] Camoufox auto OAuth failed (${providerType}, autoMode=${autoModeAtStart}): ${msg}. Falling back to manual mode.`
+      `[OAuth] Camoufox auto OAuth failed (${providerType}, autoMode=${autoModeAtStart}): ${msg}. Falling back to headful manual mode once.`
     );
-    if (needsHeadfulManual) {
-      let tokenFilePath = '';
-      try {
-        tokenFilePath = resolveTokenFilePath(auth as ExtendedOAuthAuth, providerType);
-      } catch {
-        tokenFilePath = '';
-      }
-      if (tokenFilePath) {
-        closeOAuthAuthResources(providerType, tokenFilePath);
-      }
+    if (selectorFailure) {
       console.warn(
         `[OAuth] Camoufox auto selector step failed; switched to headful manual mode (provider=${providerType}${tokenFilePath ? ` tokenFile=${tokenFilePath}` : ''}).`
       );
@@ -274,9 +274,7 @@ async function runInteractiveRepairWithAutoFallback(args: {
   try {
     delete process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
     delete process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM;
-    if (needsHeadfulManual) {
-      process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = '1';
-    }
+    process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = '1';
     process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY = '1';
     await ensureValid(providerType, auth, opts);
   } finally {
@@ -728,7 +726,7 @@ async function maybeEnrichToken(
       }
       return mergeQwenTokenData(tokenData, userInfo) as unknown as UnknownObject;
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatOAuthErrorMessage(error);
       // If userInfo endpoint is unavailable (404), treat access_token as api_key to avoid repeated lookups.
       if (/\bHTTP\s+404\b/i.test(msg) || /\bnot\s+found\b/i.test(msg)) {
         logOAuthDebug('[OAuth] Qwen: userInfo endpoint unavailable (404); using access_token as api_key fallback');
@@ -749,7 +747,7 @@ async function maybeEnrichToken(
       logOAuthDebug(`[OAuth] iFlow: successfully fetched API Key for ${userInfo.email}`);
       return mergeIFlowTokenData(tokenData, userInfo) as unknown as UnknownObject;
     } catch (error) {
-      console.error(`[OAuth] iFlow: failed to fetch API Key - ${error instanceof Error ? error.message : String(error)}`);
+      console.error(`[OAuth] iFlow: failed to fetch API Key - ${formatOAuthErrorMessage(error)}`);
       return tokenData;
     }
   }
@@ -769,7 +767,7 @@ async function maybeEnrichToken(
       }
       return merged;
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatOAuthErrorMessage(error);
       console.error(`[OAuth] Antigravity: failed to fetch metadata - ${msg}`);
       const normalized = msg.toLowerCase();
       const isAuthError =
@@ -802,7 +800,7 @@ async function maybeEnrichToken(
       try {
         projects = await fetchGeminiCLIProjects(accessToken);
       } catch (projectsError) {
-        const msg = projectsError instanceof Error ? projectsError.message : String(projectsError);
+        const msg = formatOAuthErrorMessage(projectsError);
         console.error(`[OAuth] ${label}: failed to fetch Projects - ${msg}`);
         projects = [];
       }
@@ -823,7 +821,7 @@ async function maybeEnrichToken(
       }
       return merged;
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = formatOAuthErrorMessage(error);
       console.error(`[OAuth] ${label}: failed to fetch UserInfo - ${msg}`);
 
       // 将明确的 401/invalid token 视为凭证失效，由调用方决定是否触发重新授权。

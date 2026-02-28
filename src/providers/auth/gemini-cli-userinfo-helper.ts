@@ -4,6 +4,7 @@
  */
 
 import type { UnknownObject } from '../../modules/pipeline/types/common-types.js';
+import { formatOAuthErrorMessage } from './oauth-error-message.js';
 
 export interface GeminiCLIUserInfo {
   email?: string;
@@ -33,6 +34,86 @@ export interface GeminiCLITokenData extends UnknownObject {
   shared_credential?: boolean;
 }
 
+const USERINFO_RETRY_ATTEMPTS = 3;
+const USERINFO_RETRY_BASE_DELAY_MS = 500;
+const USERINFO_FETCH_TIMEOUT_MS = 15000;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isRetryableHttpStatus(status: number): boolean {
+  return status === 408 || status === 425 || status === 429 || status >= 500;
+}
+
+function isRetryableNetworkError(message: string): boolean {
+  const lower = message.toLowerCase();
+  return (
+    lower.includes('fetch failed') ||
+    lower.includes('aborted') ||
+    lower.includes('timeout') ||
+    lower.includes('timed out') ||
+    lower.includes('econnreset') ||
+    lower.includes('ecconnrefused') ||
+    lower.includes('enotfound') ||
+    lower.includes('eai_again') ||
+    lower.includes('ehostunreach')
+  );
+}
+
+async function requestGoogleJson(
+  endpoint: string,
+  accessToken: string,
+  label: 'fetchGeminiCLIUserInfo' | 'fetchGeminiCLIProjects'
+): Promise<unknown> {
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt < USERINFO_RETRY_ATTEMPTS; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), USERINFO_FETCH_TIMEOUT_MS);
+
+    try {
+      const response = await fetch(endpoint, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Accept: 'application/json'
+        },
+        signal: controller.signal
+      });
+
+      if (!response.ok) {
+        const text = await response.text().catch(() => 'unknown error');
+        if (attempt < USERINFO_RETRY_ATTEMPTS - 1 && isRetryableHttpStatus(response.status)) {
+          await delay(USERINFO_RETRY_BASE_DELAY_MS * (attempt + 1));
+          continue;
+        }
+        throw new Error(`${label}: HTTP ${response.status} ${response.statusText} - ${text}`);
+      }
+
+      const result = await response.json();
+      return result;
+    } catch (error) {
+      const msg = formatOAuthErrorMessage(error);
+      const retriable = attempt < USERINFO_RETRY_ATTEMPTS - 1 && isRetryableNetworkError(msg);
+      if (retriable) {
+        await delay(USERINFO_RETRY_BASE_DELAY_MS * (attempt + 1));
+        continue;
+      }
+
+      if (error instanceof Error && error.message.startsWith(`${label}:`)) {
+        throw error;
+      }
+      lastError = new Error(`${label}: request failed - ${msg}`);
+      break;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  throw lastError ?? new Error(`${label}: request failed - unknown error`);
+}
+
 /**
  * 使用 access_token 调用 Google UserInfo 接口
  * 等价于 CLIProxyAPI 的 fetchUserInfo
@@ -44,38 +125,19 @@ export async function fetchGeminiCLIUserInfo(accessToken: string): Promise<Gemin
 
   const endpoint = 'https://www.googleapis.com/oauth2/v2/userinfo';
 
-  try {
-    const response = await fetch(endpoint, {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Accept': 'application/json'
-      }
-    });
+  const result = await requestGoogleJson(endpoint, accessToken.trim(), 'fetchGeminiCLIUserInfo');
 
-    if (!response.ok) {
-      const text = await response.text().catch(() => 'unknown error');
-      throw new Error(`fetchGeminiCLIUserInfo: HTTP ${response.status} ${response.statusText} - ${text}`);
-    }
-
-    const result = await response.json();
-
-    if (!result) {
-      throw new Error('fetchGeminiCLIUserInfo: empty response');
-    }
-
-    return {
-      email: typeof result.email === 'string' ? result.email : undefined,
-      name: typeof result.name === 'string' ? result.name : undefined,
-      picture: typeof result.picture === 'string' ? result.picture : undefined,
-      verified_email: typeof result.verified_email === 'boolean' ? result.verified_email : undefined
-    };
-  } catch (error) {
-    if (error instanceof Error) {
-      throw error;
-    }
-    throw new Error(`fetchGeminiCLIUserInfo: request failed - ${String(error)}`);
+  if (!result || typeof result !== 'object') {
+    throw new Error('fetchGeminiCLIUserInfo: empty response');
   }
+
+  const user = result as Record<string, unknown>;
+  return {
+    email: typeof user.email === 'string' ? user.email : undefined,
+    name: typeof user.name === 'string' ? user.name : undefined,
+    picture: typeof user.picture === 'string' ? user.picture : undefined,
+    verified_email: typeof user.verified_email === 'boolean' ? user.verified_email : undefined
+  };
 }
 
 /**
@@ -89,49 +151,31 @@ export async function fetchGeminiCLIProjects(accessToken: string): Promise<Gemin
 
   const endpoint = 'https://cloudresourcemanager.googleapis.com/v1/projects';
 
-  try {
-    const response = await fetch(endpoint, {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Accept': 'application/json'
-      }
-    });
+  const result = await requestGoogleJson(endpoint, accessToken.trim(), 'fetchGeminiCLIProjects');
 
-    if (!response.ok) {
-      const text = await response.text().catch(() => 'unknown error');
-      throw new Error(`fetchGeminiCLIProjects: HTTP ${response.status} ${response.statusText} - ${text}`);
-    }
+  if (!result || typeof result !== 'object') {
+    // Treat non-object / empty responses as "no projects" rather than a hard error.
+    return [];
+  }
 
-    const result = await response.json();
+  const projectsField = (result as { projects?: UnknownObject }).projects;
 
-    if (!result || typeof result !== 'object') {
-      // Treat non-object / empty responses as "no projects" rather than a hard error.
-      return [];
-    }
+  if (!projectsField) {
+    // Some accounts legitimately return `{}` with HTTP 200 when there are no visible projects.
+    // In that case, we proceed with an empty list instead of failing OAuth.
+    return [];
+  }
 
-    const projectsField = (result as { projects?: UnknownObject }).projects;
+  if (!Array.isArray(projectsField)) {
+    throw new Error('fetchGeminiCLIProjects: invalid response format');
+  }
 
-    if (!projectsField) {
-      // Some accounts legitimately return `{}` with HTTP 200 when there are no visible projects.
-      // In that case, we proceed with an empty list instead of failing OAuth.
-      return [];
-    }
-
-    if (!Array.isArray(projectsField)) {
-      throw new Error('fetchGeminiCLIProjects: invalid response format');
-    }
-
-    return projectsField.map((project: UnknownObject) => ({
+  return projectsField
+    .map((project: UnknownObject) => ({
       projectId: String(project.projectId || ''),
       name: typeof project.name === 'string' ? project.name : undefined
-    })).filter((p: GeminiCLIProject) => p.projectId);
-  } catch (error) {
-    if (error instanceof Error) {
-      throw error;
-    }
-    throw new Error(`fetchGeminiCLIProjects: request failed - ${String(error)}`);
-  }
+    }))
+    .filter((p: GeminiCLIProject) => p.projectId);
 }
 
 /**

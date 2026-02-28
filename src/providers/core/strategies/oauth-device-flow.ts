@@ -10,6 +10,7 @@ import type { OAuthFlowConfig } from '../config/oauth-flows.js';
 import fs from 'fs/promises';
 import path from 'path';
 import { logOAuthDebug } from '../../auth/oauth-logger.js';
+import { formatOAuthErrorMessage } from '../../auth/oauth-error-message.js';
 import { isPermanentOAuthRefreshErrorMessage } from './oauth-refresh-errors.js';
 
 /**
@@ -424,7 +425,7 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
 
       } catch (error) {
         lastError = error;
-        const msg = error instanceof Error ? error.message : String(error);
+        const msg = formatOAuthErrorMessage(error);
         logOAuthDebug(`[OAuth] Token refresh attempt ${attempt + 1} failed: ${msg}`);
         if (isPermanentOAuthRefreshErrorMessage(msg)) {
           abortedEarly = true;
@@ -433,7 +434,7 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
       }
     }
 
-    const lastMsg = lastError instanceof Error ? lastError.message : String(lastError);
+    const lastMsg = formatOAuthErrorMessage(lastError);
     if (abortedEarly) {
       throw new Error(`Token refresh failed (permanent): ${lastMsg}`);
     }

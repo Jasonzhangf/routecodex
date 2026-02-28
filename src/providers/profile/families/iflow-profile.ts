@@ -1,4 +1,4 @@
-import { createHmac } from 'node:crypto';
+import { createHmac, randomUUID } from 'node:crypto';
 import type {
   ApplyRequestHeadersInput,
   BuildRequestBodyInput,
@@ -10,6 +10,14 @@ import type {
 } from '../profile-contracts.js';
 
 type UnknownRecord = Record<string, unknown>;
+
+type IflowSessionState = {
+  sessionId: string;
+  callCount: number;
+};
+
+const IFLOW_SESSION_ROTATION_INTERVAL = 200;
+const iflowSessionStateByScope = new Map<string, IflowSessionState>();
 
 function isRecord(value: unknown): value is UnknownRecord {
   return !!value && typeof value === 'object' && !Array.isArray(value);
@@ -121,8 +129,10 @@ function assignHeader(headers: Record<string, string>, target: string, value: st
     return;
   }
   const lowered = target.toLowerCase();
+  const normalizedTarget = normalizeHeaderKey(lowered);
   for (const key of Object.keys(headers)) {
-    if (key.toLowerCase() === lowered) {
+    const loweredKey = key.toLowerCase();
+    if (loweredKey === lowered || normalizeHeaderKey(loweredKey) === normalizedTarget) {
       headers[key] = value;
       return;
     }
@@ -234,6 +244,60 @@ function hasConfiguredOAuthClient(auth: ResolveOAuthTokenFileInput['auth']): boo
   return !!auth.clientId || !!auth.tokenUrl || !!auth.deviceCodeUrl;
 }
 
+function generateIflowCliSessionId(): string {
+  return `session-${randomUUID()}`;
+}
+
+function resolveIflowSessionScope(runtimeMetadata?: ApplyRequestHeadersInput['runtimeMetadata']): string {
+  const runtimeKey =
+    typeof runtimeMetadata?.runtimeKey === 'string' && runtimeMetadata.runtimeKey.trim()
+      ? runtimeMetadata.runtimeKey.trim()
+      : '';
+  const providerKey =
+    typeof runtimeMetadata?.providerKey === 'string' && runtimeMetadata.providerKey.trim()
+      ? runtimeMetadata.providerKey.trim()
+      : '';
+  const providerId =
+    typeof runtimeMetadata?.providerId === 'string' && runtimeMetadata.providerId.trim()
+      ? runtimeMetadata.providerId.trim()
+      : 'iflow';
+  return providerKey || runtimeKey || providerId;
+}
+
+function resolveManagedIflowSessionId(scopeKey: string): string {
+  const existing = iflowSessionStateByScope.get(scopeKey);
+  if (!existing) {
+    const state: IflowSessionState = {
+      sessionId: generateIflowCliSessionId(),
+      callCount: 1
+    };
+    iflowSessionStateByScope.set(scopeKey, state);
+    return state.sessionId;
+  }
+
+  if (existing.callCount >= IFLOW_SESSION_ROTATION_INTERVAL) {
+    const rotated: IflowSessionState = {
+      sessionId: generateIflowCliSessionId(),
+      callCount: 1
+    };
+    iflowSessionStateByScope.set(scopeKey, rotated);
+    return rotated.sessionId;
+  }
+
+  existing.callCount += 1;
+  return existing.sessionId;
+}
+
+function ensureRuntimeMetadataBag(input: ApplyRequestHeadersInput): UnknownRecord | undefined {
+  if (!input.runtimeMetadata) {
+    return undefined;
+  }
+  if (!input.runtimeMetadata.metadata || typeof input.runtimeMetadata.metadata !== 'object' || Array.isArray(input.runtimeMetadata.metadata)) {
+    input.runtimeMetadata.metadata = {};
+  }
+  return input.runtimeMetadata.metadata as UnknownRecord;
+}
+
 export const iflowFamilyProfile: ProviderFamilyProfile = {
   id: 'iflow/default',
   providerFamily: 'iflow',
@@ -309,36 +373,60 @@ export const iflowFamilyProfile: ProviderFamilyProfile = {
 
     const metadataSessionId = pickString(metadata?.sessionId, metadata?.session_id);
     const metadataConversationId = pickString(metadata?.conversationId, metadata?.conversation_id);
-    const resolvedSessionId =
+    const resolvedClientSessionId =
       pickString(
         findHeaderValue(headers, 'session-id'),
         findHeaderValue(headers, 'session_id'),
         metadataSessionId,
         metadataConversationId
       );
-    const resolvedConversationId =
+    const resolvedClientConversationId =
       pickString(
         findHeaderValue(headers, 'conversation-id'),
         findHeaderValue(headers, 'conversation_id'),
         metadataConversationId,
         metadataSessionId,
-        resolvedSessionId
+        resolvedClientSessionId
       );
+
+    const runtimeMetadataBag = ensureRuntimeMetadataBag(input);
+    const managedSessionId =
+      input.runtimeMetadata
+        ? resolveManagedIflowSessionId(resolveIflowSessionScope(input.runtimeMetadata))
+        : undefined;
+    const resolvedSessionId = managedSessionId ?? resolvedClientSessionId;
+    const resolvedConversationId = resolvedClientConversationId ?? resolvedSessionId;
+
+    if (runtimeMetadataBag && managedSessionId) {
+      runtimeMetadataBag.__iflowSessionRewriteActive = true;
+      runtimeMetadataBag.__iflowUpstreamSessionId = managedSessionId;
+      if (resolvedClientSessionId) {
+        runtimeMetadataBag.__iflowClientSessionId = resolvedClientSessionId;
+      } else {
+        delete runtimeMetadataBag.__iflowClientSessionId;
+      }
+      if (resolvedClientConversationId) {
+        runtimeMetadataBag.__iflowClientConversationId = resolvedClientConversationId;
+      } else {
+        delete runtimeMetadataBag.__iflowClientConversationId;
+      }
+    }
 
     if (resolvedSessionId) {
       assignHeader(headers, 'session_id', resolvedSessionId);
       assignHeader(headers, 'session-id', resolvedSessionId);
+      if (!headers['session-id']) {
+        headers['session-id'] = resolvedSessionId;
+      }
     }
     if (resolvedConversationId) {
       assignHeader(headers, 'conversation_id', resolvedConversationId);
       assignHeader(headers, 'conversation-id', resolvedConversationId);
+      if (!headers['conversation-id']) {
+        headers['conversation-id'] = resolvedConversationId;
+      }
     }
 
-    const resolvedOriginator =
-      pickString(findHeaderValue(headers, 'originator'), metadata?.clientOriginator, metadata?.originator);
-    if (resolvedOriginator) {
-      assignHeader(headers, 'originator', resolvedOriginator);
-    }
 
     const bearerApiKey = extractBearerApiKey(headers);
     if (!bearerApiKey) {

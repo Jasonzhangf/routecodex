@@ -586,6 +586,7 @@ export async function interactiveRefresh(selector: string, options: InteractiveR
   const prevCamoufoxAutoMode = process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
   const prevOAuthAutoConfirm = process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM;
   const prevCamoufoxOpenOnly = process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY;
+  const prevCamoufoxDevMode = process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
   const prevOAuthBrowser = process.env.ROUTECODEX_OAUTH_BROWSER;
   try {
     await ensureLocalTokenPortalEnv();
@@ -618,9 +619,12 @@ export async function interactiveRefresh(selector: string, options: InteractiveR
         const msg = error instanceof Error ? error.message : String(error);
         console.warn(
           chalk.yellow('!'),
-          `Camoufox auto OAuth failed (${providerType} ${label}, autoMode=${autoModeAtStart}): ${msg}. Falling back to manual mode.`
+          `Camoufox auto OAuth failed (${providerType} ${label}, autoMode=${autoModeAtStart}): ${msg}. Falling back to headful manual mode once.`
         );
         delete process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
+        delete process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM;
+        process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = '1';
+        process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY = '1';
         await runEnsure();
       } else {
         throw error;
@@ -650,6 +654,11 @@ export async function interactiveRefresh(selector: string, options: InteractiveR
       delete process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY;
     } else {
       process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY = prevCamoufoxOpenOnly;
+    }
+    if (prevCamoufoxDevMode === undefined) {
+      delete process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
+    } else {
+      process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = prevCamoufoxDevMode;
     }
     if (prevOAuthBrowser === undefined) {
       delete process.env.ROUTECODEX_OAUTH_BROWSER;

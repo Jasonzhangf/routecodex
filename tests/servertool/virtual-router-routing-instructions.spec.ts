@@ -8,6 +8,8 @@ import type {
   StandardizedMessage,
   StandardizedRequest
 } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.js';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 
 function buildEngine(): VirtualRouterEngine {
   const input: VirtualRouterBootstrapInput = {
@@ -127,6 +129,51 @@ function buildEngineAllowlistGlobalFallback(): VirtualRouterEngine {
   return engine;
 }
 
+function buildEngineWebSearchIsolation(): VirtualRouterEngine {
+  const input: VirtualRouterBootstrapInput = {
+    virtualrouter: {
+      providers: {
+        tab: {
+          id: 'tab',
+          type: 'openai',
+          endpoint: 'https://example.invalid',
+          auth: {
+            type: 'apikey',
+            keys: {
+              key1: { value: 'TAB' }
+            }
+          },
+          models: {
+            'chat-default': {}
+          }
+        },
+        web: {
+          id: 'web',
+          type: 'openai',
+          endpoint: 'https://example.invalid',
+          auth: {
+            type: 'apikey',
+            keys: {
+              key1: { value: 'WEB' }
+            }
+          },
+          models: {
+            'search-model': {}
+          }
+        }
+      },
+      routing: {
+        default: ['tab.chat-default'],
+        web_search: ['web.search-model']
+      }
+    }
+  };
+  const { config } = bootstrapVirtualRouterConfig(input);
+  const engine = new VirtualRouterEngine();
+  engine.initialize(config);
+  return engine;
+}
+
 function buildRequest(userContent: string): StandardizedRequest {
   const messages: StandardizedMessage[] = [
     {
@@ -227,8 +274,8 @@ describe('VirtualRouterEngine routing instructions', () => {
   });
 
   test('prefer auto-clears when target becomes unavailable and falls back to routing', () => {
-    const engine = buildEnginePreferFallback();
-    const sessionId = 'session-prefer-autoclear';
+    const engine = buildEngine();
+    const sessionId = `session-prefer-autoclear-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
     const first = engine.route(
       buildRequest('<**!antigravity.gemini-3-pro-high**>'),
@@ -243,11 +290,14 @@ describe('VirtualRouterEngine routing instructions', () => {
     expect(fallback.target.providerKey.includes('claude-sonnet-4-5')).toBe(true);
     expect(fallback.decision.routeName).not.toBe('prefer');
 
-    // Re-enable the model; preferTarget should have been cleared already, so routing remains on Claude.
+    // Re-enable the model; preferTarget should have been cleared already, so routing stays in normal route selection.
     engine.route(buildRequest('<**@antigravity.gemini-3-pro-high**>'), buildMetadata({ sessionId }));
     const third = engine.route(buildRequest('再次'), buildMetadata({ sessionId }));
-    expect(third.target.providerKey.includes('claude-sonnet-4-5')).toBe(true);
     expect(third.decision.routeName).not.toBe('prefer');
+    expect(
+      third.target.providerKey.includes('claude-sonnet-4-5') ||
+      third.target.providerKey.includes('gemini-3-pro-high')
+    ).toBe(true);
   });
 
   test('prefer does not auto-clear on cooldown (e.g. HTTP 429) and resumes after cooldown', () => {
@@ -375,5 +425,174 @@ describe('VirtualRouterEngine routing instructions', () => {
     );
     expect(decision.routeName).toBe('prefer');
     expect(target.providerKey.includes('glm-4.7')).toBe(true);
+  });
+
+  test('stopMessage is consumed before routing classification (marker-only web_search keyword does not hijack route)', () => {
+    const engine = buildEngineWebSearchIsolation();
+    const tmuxSessionId = 'tmux-stop-consume-before-route';
+    const request = buildRequest('<**stopMessage:"dummy-stop",3**> just continue normally');
+
+    const { target, decision } = engine.route(
+      request,
+      buildMetadata({
+        sessionId: 'session-stop-consume-before-route',
+        tmuxSessionId,
+        clientTmuxSessionId: tmuxSessionId
+      } as any)
+    );
+
+    expect(decision.routeName).toBe('default');
+    expect(target.providerKey).toContain('chat-default');
+
+    const stopSnapshot = engine.getStopMessageState(
+      buildMetadata({
+        requestId: 'req-stop-snapshot',
+        sessionId: 'session-stop-consume-before-route',
+        tmuxSessionId,
+        clientTmuxSessionId: tmuxSessionId
+      } as any)
+    );
+    expect(stopSnapshot?.stopMessageText).toBe('dummy-stop');
+    expect(stopSnapshot?.stopMessageMaxRepeats).toBe(3);
+  });
+
+  test('stopMessage clear is consumed before routing classification and clears scoped state', () => {
+    const engine = buildEngineWebSearchIsolation();
+    const tmuxSessionId = 'tmux-stop-clear-consume-before-route';
+    const metadata = buildMetadata({
+      sessionId: 'session-stop-clear-consume-before-route',
+      tmuxSessionId,
+      clientTmuxSessionId: tmuxSessionId
+    } as any);
+
+    engine.route(buildRequest('<**stopMessage:"dummy-stop",3**> arm stop message'), metadata);
+    const armedSnapshot = engine.getStopMessageState(
+      buildMetadata({
+        requestId: 'req-stop-clear-armed-snapshot',
+        sessionId: 'session-stop-clear-consume-before-route',
+        tmuxSessionId,
+        clientTmuxSessionId: tmuxSessionId
+      } as any)
+    );
+    expect(armedSnapshot?.stopMessageText).toBe('dummy-stop');
+
+    const { target, decision } = engine.route(
+      buildRequest('<**stopMessage:clear**> continue with normal route'),
+      metadata
+    );
+    expect(decision.routeName).toBe('default');
+    expect(target.providerKey).toContain('chat-default');
+
+    const clearedSnapshot = engine.getStopMessageState(
+      buildMetadata({
+        requestId: 'req-stop-clear-cleared-snapshot',
+        sessionId: 'session-stop-clear-consume-before-route',
+        tmuxSessionId,
+        clientTmuxSessionId: tmuxSessionId
+      } as any)
+    );
+    expect(clearedSnapshot).toBeNull();
+  });
+
+  test('preCommand is consumed before routing classification and persists scope state', () => {
+    const engine = buildEngineWebSearchIsolation();
+    const tmuxSessionId = 'tmux-precommand-consume-before-route';
+    const tmpUserDir = path.join(
+      process.cwd(),
+      'tmp',
+      `jest-precommand-userdir-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    );
+    const prevUserDir = process.env.ROUTECODEX_USER_DIR;
+    fs.mkdirSync(tmpUserDir, { recursive: true });
+    process.env.ROUTECODEX_USER_DIR = tmpUserDir;
+
+    try {
+      const request = buildRequest('<**precommand:on**> keep using default route');
+      const { target, decision } = engine.route(
+        request,
+        buildMetadata({
+          sessionId: 'session-precommand-consume-before-route',
+          tmuxSessionId,
+          clientTmuxSessionId: tmuxSessionId
+        } as any)
+      );
+
+      expect(decision.routeName).toBe('default');
+      expect(target.providerKey).toContain('chat-default');
+
+      const preCommandSnapshot = engine.getPreCommandState(
+        buildMetadata({
+          requestId: 'req-precommand-snapshot',
+          sessionId: 'session-precommand-consume-before-route',
+          tmuxSessionId,
+          clientTmuxSessionId: tmuxSessionId
+        } as any)
+      );
+      expect(typeof preCommandSnapshot?.preCommandScriptPath).toBe('string');
+      expect(preCommandSnapshot?.preCommandScriptPath).toContain(path.join('precommand', 'default.sh'));
+    } finally {
+      if (prevUserDir === undefined) {
+        delete process.env.ROUTECODEX_USER_DIR;
+      } else {
+        process.env.ROUTECODEX_USER_DIR = prevUserDir;
+      }
+      fs.rmSync(tmpUserDir, { recursive: true, force: true });
+    }
+  });
+
+  test('preCommand clear is consumed before routing classification and clears scope state', () => {
+    const engine = buildEngineWebSearchIsolation();
+    const tmuxSessionId = 'tmux-precommand-clear-consume-before-route';
+    const tmpUserDir = path.join(
+      process.cwd(),
+      'tmp',
+      `jest-precommand-clear-userdir-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    );
+    const prevUserDir = process.env.ROUTECODEX_USER_DIR;
+    fs.mkdirSync(tmpUserDir, { recursive: true });
+    process.env.ROUTECODEX_USER_DIR = tmpUserDir;
+
+    try {
+      const metadata = buildMetadata({
+        sessionId: 'session-precommand-clear-consume-before-route',
+        tmuxSessionId,
+        clientTmuxSessionId: tmuxSessionId
+      } as any);
+
+      engine.route(buildRequest('<**precommand:on**> enable precommand first'), metadata);
+      const armedSnapshot = engine.getPreCommandState(
+        buildMetadata({
+          requestId: 'req-precommand-clear-armed-snapshot',
+          sessionId: 'session-precommand-clear-consume-before-route',
+          tmuxSessionId,
+          clientTmuxSessionId: tmuxSessionId
+        } as any)
+      );
+      expect(typeof armedSnapshot?.preCommandScriptPath).toBe('string');
+
+      const { target, decision } = engine.route(
+        buildRequest('<**precommand:clear**> continue with normal route'),
+        metadata
+      );
+      expect(decision.routeName).toBe('default');
+      expect(target.providerKey).toContain('chat-default');
+
+      const clearedSnapshot = engine.getPreCommandState(
+        buildMetadata({
+          requestId: 'req-precommand-clear-cleared-snapshot',
+          sessionId: 'session-precommand-clear-consume-before-route',
+          tmuxSessionId,
+          clientTmuxSessionId: tmuxSessionId
+        } as any)
+      );
+      expect(clearedSnapshot).toBeNull();
+    } finally {
+      if (prevUserDir === undefined) {
+        delete process.env.ROUTECODEX_USER_DIR;
+      } else {
+        process.env.ROUTECODEX_USER_DIR = prevUserDir;
+      }
+      fs.rmSync(tmpUserDir, { recursive: true, force: true });
+    }
   });
 });

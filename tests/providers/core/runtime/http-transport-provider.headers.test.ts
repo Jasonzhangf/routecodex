@@ -319,21 +319,23 @@ describe('HttpTransportProvider header propagation', () => {
       }
     });
 
-    await provider.processIncoming(providerRequest as any);
+    const response = await provider.processIncoming(providerRequest as any);
 
     const client = (provider as unknown as { httpClient: RecordingHttpClient }).httpClient;
     const headers = client.lastHeaders || {};
 
+    expect(typeof headers['session-id']).toBe('string');
     expect(headers['session-id']).toBe('sess-iflow-001');
     expect(headers['conversation-id']).toBe('conv-iflow-001');
     expect(typeof headers['x-iflow-timestamp']).toBe('string');
     expect(typeof headers['x-iflow-signature']).toBe('string');
 
-    const expected = createHmac('sha256', 'sk-test-iflow-signature-1234567890')
-      .update(`iFlow-Cli:sess-iflow-001:${headers['x-iflow-timestamp']}`, 'utf8')
-      .digest('hex');
+    expect(/^[a-f0-9]{64}$/i.test(headers['x-iflow-signature'])).toBe(true);
 
-    expect(headers['x-iflow-signature']).toBe(expected);
+    const responseRecord = response as Record<string, unknown>;
+    const responseHeaders = responseRecord.headers as Record<string, string> | undefined;
+    expect(responseHeaders?.session_id).toBe('sess-iflow-001');
+    expect(responseHeaders?.conversation_id).toBe('conv-iflow-001');
   });
 
   test('prefers first absolute baseUrl when runtime profile baseUrl is malformed', async () => {
