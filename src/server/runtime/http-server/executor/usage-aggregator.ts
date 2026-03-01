@@ -151,8 +151,11 @@ export function normalizeUsage(value: unknown): UsageMetrics | undefined {
     readNumeric(usageRecord.total_tokens) ??
     readNumeric(usageRecord.totalTokens);
 
-  if (total === undefined && prompt !== undefined && completion !== undefined) {
-    total = prompt + completion;
+  if (prompt !== undefined && completion !== undefined) {
+    const expected = prompt + completion;
+    if (total === undefined || total < expected) {
+      total = expected;
+    }
   }
 
   if (prompt === undefined && completion === undefined && total === undefined) {

@@ -124,11 +124,20 @@ export function extractUsageTokensFromResponse(finalResponse: UnknownObject): {
     return value;
   };
 
-  const promptTokens =
+  const basePromptTokens =
     readNumber(usageNode.prompt_tokens) ??
     readNumber(usageNode.promptTokens) ??
     readNumber(usageNode.input_tokens) ??
     readNumber(usageNode.inputTokens);
+  const cacheReadTokens =
+    readNumber(usageNode.cache_read_input_tokens) ??
+    (usageNode.input_tokens_details && typeof usageNode.input_tokens_details === 'object'
+      ? readNumber((usageNode.input_tokens_details as Record<string, unknown>).cached_tokens)
+      : undefined);
+  const promptTokens =
+    basePromptTokens !== undefined || cacheReadTokens !== undefined
+      ? (basePromptTokens ?? 0) + (cacheReadTokens ?? 0)
+      : undefined;
 
   const completionTokens =
     readNumber(usageNode.completion_tokens) ??
@@ -140,7 +149,12 @@ export function extractUsageTokensFromResponse(finalResponse: UnknownObject): {
     readNumber(usageNode.total_tokens) ??
     readNumber(usageNode.totalTokens);
 
-  if (totalTokens === undefined && (promptTokens !== undefined || completionTokens !== undefined)) {
+  if (promptTokens !== undefined && completionTokens !== undefined) {
+    const expected = promptTokens + completionTokens;
+    if (totalTokens === undefined || totalTokens < expected) {
+      totalTokens = expected;
+    }
+  } else if (totalTokens === undefined && (promptTokens !== undefined || completionTokens !== undefined)) {
     totalTokens = (promptTokens ?? 0) + (completionTokens ?? 0);
   }
 

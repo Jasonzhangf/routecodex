@@ -81,6 +81,25 @@ describe('usage log text', () => {
     });
   });
 
+  it('recomputes total when cache tokens are excluded upstream', () => {
+    const usage = extractUsageFromResult({
+      body: {
+        usage: {
+          input_tokens: 77,
+          output_tokens: 38,
+          cache_read_input_tokens: 106944,
+          total_tokens: 115
+        }
+      }
+    });
+
+    expect(usage).toEqual({
+      prompt_tokens: 107021,
+      completion_tokens: 38,
+      total_tokens: 107059
+    });
+  });
+
   it('extracts usage from body.payload.response.usage', () => {
     const usage = extractUsageFromResult({
       body: {
