@@ -6,6 +6,7 @@
 
 import {
   describeRetryReason,
+  isPromptTooLongError,
   shouldRetryProviderError,
   waitBeforeRetry
 } from '../executor-provider.js';
@@ -13,6 +14,7 @@ import {
 // Re-export for backward compatibility
 export {
   describeRetryReason,
+  isPromptTooLongError,
   shouldRetryProviderError,
   waitBeforeRetry
 };

@@ -175,6 +175,82 @@ describe('HubRequestExecutor failover', () => {
     expect(result).toEqual(expect.objectContaining({ status: 200 }));
   });
 
+  test('forces longcontext routeHint on prompt-too-long retry', async () => {
+    const firstProviderKey = 'tabglm.key1.glm-5';
+    const secondProviderKey = 'tabglm.longcontext.glm-5';
+    const failingError = new Error(
+      "Request input tokens exceeds the model's maximum context length 202752"
+    );
+    (failingError as any).code = 'SSE_DECODE_ERROR';
+    (failingError as any).statusCode = 400;
+
+    const failingProcess = jest.fn(async () => {
+      throw failingError;
+    });
+    const failureHandle = buildHandle(firstProviderKey, failingProcess);
+    const successPayload = { status: 200, data: { id: 'ok' } };
+    const successProcess = jest.fn(async () => successPayload);
+    const successHandle = buildHandle(secondProviderKey, successProcess);
+
+    const handles = new Map<string, ProviderHandle>([
+      [firstProviderKey, failureHandle],
+      [secondProviderKey, successHandle]
+    ]);
+
+    const runtimeManager = {
+      resolveRuntimeKey: (providerKey: string) => providerKey,
+      getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey ? handles.get(runtimeKey) : undefined)
+    };
+
+    const routeHints: Array<string | undefined> = [];
+    const pipeline = {
+      execute: jest.fn(async (input: any) => {
+        routeHints.push(typeof input.metadata?.routeHint === 'string' ? input.metadata.routeHint : undefined);
+        const useLongcontext = input.metadata?.routeHint === 'longcontext';
+        const providerKey = useLongcontext ? secondProviderKey : firstProviderKey;
+        return {
+          requestId: input.id,
+          providerPayload: {},
+          target: {
+            providerKey,
+            providerType: 'gemini',
+            outboundProfile: 'gemini-chat',
+            runtimeKey: providerKey
+          },
+          routingDecision: { routeName: useLongcontext ? 'longcontext' : 'tools' },
+          metadata: {}
+        };
+      }),
+      updateVirtualRouterConfig: jest.fn()
+    };
+
+    const deps = {
+      runtimeManager,
+      getHubPipeline: () => pipeline,
+      getModuleDependencies: () => ({
+        errorHandlingCenter: {
+          handleError: jest.fn(async () => undefined)
+        }
+      }),
+      logStage: jest.fn(),
+      stats: new StatsManager()
+    };
+
+    const executor = createRequestExecutor(deps);
+    const result = await executor.execute({
+      requestId: 'req-context-overflow',
+      entryEndpoint: '/v1/responses',
+      body: {},
+      headers: {},
+      metadata: {}
+    });
+
+    expect(result).toEqual(expect.objectContaining({ status: 200 }));
+    expect(pipeline.execute).toHaveBeenCalledTimes(2);
+    expect(routeHints[0]).not.toBe('longcontext');
+    expect(routeHints[1]).toBe('longcontext');
+  });
+
   test('rotates antigravity alias on 403 OAuth reauth-required error', async () => {
     const firstProviderKey = 'antigravity.alias1.gemini-3-pro-high';
     const secondProviderKey = 'antigravity.alias2.gemini-3-pro-high';

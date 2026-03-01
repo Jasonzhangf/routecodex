@@ -22,6 +22,45 @@ jest.unstable_mockModule('../../../../../src/server/runtime/http-server/clock-cl
 jest.unstable_mockModule('../../../../../src/server/runtime/http-server/clock-client-registry.ts', mockClockRegistryModule);
 
 describe('provider-response-converter servertool regressions', () => {
+  it('maps SSE context-length overflow into CONTEXT_LENGTH_EXCEEDED', async () => {
+    jest.resetModules();
+    mockConvertProviderResponse.mockClear();
+    mockCreateSnapshotRecorder.mockClear();
+
+    const { convertProviderResponseIfNeeded } = await import(
+      '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
+    );
+
+    await expect(
+      convertProviderResponseIfNeeded(
+        {
+          entryEndpoint: '/v1/messages',
+          providerProtocol: 'anthropic-messages',
+          requestId: 'req_ctx_overflow',
+          wantsStream: true,
+          response: {
+            body: {
+              mode: 'sse',
+              error:
+                "Anthropic SSE error event [1210] API 调用参数有误。Request 222313 input tokens exceeds the model's maximum context length 202752"
+            }
+          } as any,
+          pipelineMetadata: {}
+        },
+        {
+          runtimeManager: {
+            resolveRuntimeKey: () => undefined,
+            getHandleByRuntimeKey: () => undefined
+          },
+          executeNested: async () => ({ body: { ok: true } } as any)
+        }
+      )
+    ).rejects.toMatchObject({
+      code: 'CONTEXT_LENGTH_EXCEEDED',
+      status: 400,
+      statusCode: 400
+    });
+  });
   it('disables servertool orchestration when serverToolsEnabled=false', async () => {
     jest.resetModules();
     mockConvertProviderResponse.mockClear();

@@ -46,6 +46,35 @@ const FOLLOWUP_SESSION_HEADER_KEYS = new Set([
   'xworkdir'
 ]);
 
+const CONTEXT_LENGTH_MESSAGE_HINTS = [
+  'context_length_exceeded',
+  'context length exceeded',
+  "model's maximum context length",
+  'maximum context length',
+  'max context length',
+  'input tokens exceeds',
+  'input tokens exceed',
+  '对话长度上限',
+  '达到对话长度上限'
+];
+
+function isContextLengthExceededError(
+  message: string,
+  upstreamCode?: string,
+  detailReason?: string
+): boolean {
+  const normalizedMessage = message.toLowerCase();
+  const normalizedUpstream = typeof upstreamCode === 'string' ? upstreamCode.trim().toLowerCase() : '';
+  const normalizedReason = typeof detailReason === 'string' ? detailReason.trim().toLowerCase() : '';
+  if (normalizedUpstream.includes('context_length_exceeded')) {
+    return true;
+  }
+  if (normalizedReason === 'context_length_exceeded') {
+    return true;
+  }
+  return CONTEXT_LENGTH_MESSAGE_HINTS.some((hint) => normalizedMessage.includes(hint));
+}
+
 function canonicalizeHeaderName(headerName: string): string {
   return headerName.toLowerCase().replace(/[^a-z0-9]/g, '');
 }
@@ -162,7 +191,17 @@ export async function convertProviderResponseIfNeeded(
         error.status = wrapperError.statusCode;
         error.statusCode = wrapperError.statusCode;
       }
-      if (isRateLimitLikeError(wrapperError.message, wrapperError.errorCode)) {
+      const isContextLengthExceeded = isContextLengthExceededError(wrapperError.message, wrapperError.errorCode);
+      if (isContextLengthExceeded) {
+        error.code = 'CONTEXT_LENGTH_EXCEEDED';
+        error.status = 400;
+        error.statusCode = 400;
+        error.retryable = false;
+        if (typeof error.upstreamCode !== 'string' || !error.upstreamCode.trim()) {
+          error.upstreamCode = wrapperError.errorCode || 'context_length_exceeded';
+        }
+      }
+      if (!isContextLengthExceeded && isRateLimitLikeError(wrapperError.message, wrapperError.errorCode)) {
         error.code = 'HTTP_429';
         error.status = 429;
         error.statusCode = 429;
@@ -556,6 +595,7 @@ export async function convertProviderResponseIfNeeded(
       typeof (detailRecord as Record<string, unknown> | undefined)?.reason === 'string'
         ? String((detailRecord as Record<string, unknown>).reason)
         : undefined;
+    const normalizedUpstreamCode = (upstreamCode || detailUpstreamCode || '').trim().toLowerCase();
     const isSseDecodeError =
       errCode === 'SSE_DECODE_ERROR' ||
       (errName === 'ProviderProtocolError' && message.toLowerCase().includes('sse'));
@@ -563,14 +603,12 @@ export async function convertProviderResponseIfNeeded(
       errCode === 'SERVERTOOL_FOLLOWUP_FAILED' ||
       errCode === 'SERVERTOOL_EMPTY_FOLLOWUP' ||
       (typeof errCode === 'string' && errCode.startsWith('SERVERTOOL_'));
-    const normalizedUpstreamCode = (upstreamCode || detailUpstreamCode || '').trim().toLowerCase();
     const normalizedMessage = message.toLowerCase();
-    const isContextLengthExceeded =
-      normalizedUpstreamCode.includes('context_length_exceeded') ||
-      normalizedMessage.includes('context_length_exceeded') ||
-      normalizedMessage.includes('达到对话长度上限') ||
-      normalizedMessage.includes('对话长度上限') ||
-      (detailReason || '').toLowerCase() === 'context_length_exceeded';
+    const isContextLengthExceeded = isContextLengthExceededError(
+      normalizedMessage,
+      upstreamCode || detailUpstreamCode,
+      detailReason
+    );
 
     if (isSseDecodeError || isServerToolFollowupError) {
       if (isSseDecodeError && isContextLengthExceeded) {

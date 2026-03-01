@@ -24,6 +24,7 @@ import {
 import {
   resolveMaxProviderAttempts,
   describeRetryReason,
+  isPromptTooLongError,
   shouldRetryProviderError,
   waitBeforeRetry
 } from './executor/retry-engine.js';
@@ -122,6 +123,7 @@ export class HubRequestExecutor implements RequestExecutor {
       let initialRoutePool: string[] | null = null;
       let antigravityRetrySignal: AntigravityRetrySignal | null = null;
       let poolCooldownWaitBudgetMs = 3 * 60 * 1000;
+      let forcedRouteHint: string | undefined;
 
       while (attempt < maxAttempts) {
         attempt += 1;
@@ -132,6 +134,9 @@ export class HubRequestExecutor implements RequestExecutor {
           input.body = cloned;
         }
         const metadataForAttempt = decorateMetadataForAttempt(initialMetadata, attempt, excludedProviderKeys);
+        if (forcedRouteHint) {
+          metadataForAttempt.routeHint = forcedRouteHint;
+        }
         const clientHeadersForAttempt =
           cloneClientHeaders(metadataForAttempt?.clientHeaders) || inboundClientHeaders;
         if (clientHeadersForAttempt) {
@@ -448,10 +453,14 @@ export class HubRequestExecutor implements RequestExecutor {
           }
           const isVerify = status === 403 && isGoogleAccountVerificationRequiredError(error);
           const isReauth = status === 403 && isAntigravityReauthRequired403(error);
+          const promptTooLong = isPromptTooLongError(error);
           const shouldRetry =
             attempt < maxAttempts &&
             (shouldRetryProviderError(error) ||
               (isAntigravityProviderKey(target.providerKey) && (isVerify || isReauth)));
+          if (promptTooLong && forcedRouteHint !== 'longcontext') {
+            forcedRouteHint = 'longcontext';
+          }
           if (!shouldRetry) {
             recordAttempt({ error: true });
             throw error;
@@ -489,7 +498,8 @@ export class HubRequestExecutor implements RequestExecutor {
             attempt,
             nextAttempt: attempt + 1,
             excluded: Array.from(excludedProviderKeys),
-            reason: describeRetryReason(error)
+            reason: describeRetryReason(error),
+            routeHint: forcedRouteHint
           });
           continue;
         }

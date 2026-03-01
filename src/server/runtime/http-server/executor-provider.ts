@@ -177,13 +177,17 @@ export async function waitBeforeRetry(error: unknown): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, delayMs));
 }
 
-function isPromptTooLongError(error: unknown): boolean {
+export function isPromptTooLongError(error: unknown): boolean {
   const status = extractErrorStatusCode(error);
   // Most upstreams return 400 for context overflow; keep this narrow to avoid retries on generic 400s.
   // Some error shims only expose the message (or nest status inside response.data.error.status),
   // so allow missing status when the message is a strong match.
   if (status !== undefined && status !== 400) {
     return false;
+  }
+  const explicitCode = (error as { code?: unknown }).code;
+  if (typeof explicitCode === 'string' && explicitCode.trim().toLowerCase() === 'context_length_exceeded') {
+    return true;
   }
   const messages: string[] = [];
   const rawMessage = (error as { message?: unknown }).message;
