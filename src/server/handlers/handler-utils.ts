@@ -90,16 +90,8 @@ export function nextRequestId(
 }
 
 export function logRequestStart(endpoint: string, requestId: string, meta?: RequestLogMeta): void {
-  if (!SHOULD_LOG_HTTP_EVENTS) {
-    return;
-  }
-  const resolvedId = formatRequestId(requestId);
-  const timestamp = formatTimestamp();
-  const metaSuffix =
-    meta && Object.keys(meta).length
-      ? ` meta=${JSON.stringify(meta)}`
-      : '';
-  console.log(`[http.request] ${timestamp} [${endpoint}] request ${resolvedId} started${metaSuffix}`);
+  // HTTP request start logs are intentionally suppressed to reduce noise.
+  return;
 }
 
 export function logRequestComplete(endpoint: string, requestId: string, status: number): void {
