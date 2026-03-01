@@ -691,4 +691,93 @@ describe('token-daemon interactiveRefresh', () => {
     }
   });
 
+  it('falls back from auto to one headful manual retry', async () => {
+    jest.resetModules();
+    const ensureValidOAuthToken = jest.fn(async () => {});
+
+    jest.unstable_mockModule('../../src/providers/auth/oauth-lifecycle.js', () => ({
+      ensureValidOAuthToken
+    }));
+    jest.unstable_mockModule('../../src/token-portal/local-token-portal.js', () => ({
+      ensureLocalTokenPortalEnv: async () => {},
+      shutdownLocalTokenPortalEnv: async () => {}
+    }));
+
+    const prevAutoMode = process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
+    const prevAutoConfirm = process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM;
+    const prevOpenOnly = process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY;
+    const prevDevMode = process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
+    process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE = 'qwen';
+    process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM = '1';
+    process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY = '0';
+    delete process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
+
+    const tokenDaemonModule = await import('../../src/token-daemon/index.js');
+    const tokenDaemon = await import('../../src/token-daemon/token-daemon.js');
+
+    jest.spyOn(tokenDaemon.TokenDaemon, 'findTokenBySelector').mockResolvedValue({
+      provider: 'qwen',
+      filePath: '/tmp/qwen-oauth-2-135.json',
+      sequence: 2,
+      alias: '135',
+      displayName: '135',
+      state: {
+        hasAccessToken: false,
+        hasRefreshToken: true,
+        hasApiKey: false,
+        expiresAt: null,
+        msUntilExpiry: -1,
+        status: 'invalid',
+        noRefresh: false
+      }
+    } as any);
+
+    const seenCalls: Array<{ autoMode: string; autoConfirm: string; openOnly: string; devMode: string }> = [];
+    ensureValidOAuthToken
+      .mockImplementationOnce(async () => {
+        seenCalls.push({
+          autoMode: String(process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE || ''),
+          autoConfirm: String(process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM || ''),
+          openOnly: String(process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY || ''),
+          devMode: String(process.env.ROUTECODEX_CAMOUFOX_DEV_MODE || '')
+        });
+        throw new Error('auto launch failed');
+      })
+      .mockImplementationOnce(async () => {
+        seenCalls.push({
+          autoMode: String(process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE || ''),
+          autoConfirm: String(process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM || ''),
+          openOnly: String(process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY || ''),
+          devMode: String(process.env.ROUTECODEX_CAMOUFOX_DEV_MODE || '')
+        });
+      });
+
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const log = jest.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      await tokenDaemonModule.interactiveRefresh('qwen-oauth-2-135.json', { force: true, mode: 'auto' });
+      expect(ensureValidOAuthToken).toHaveBeenCalledTimes(2);
+      expect(seenCalls[0]?.autoMode).toBe('qwen');
+      expect(seenCalls[1]?.autoMode).toBe('');
+      expect(seenCalls[1]?.autoConfirm).toBe('');
+      expect(seenCalls[1]?.openOnly).toBe('1');
+      expect(seenCalls[1]?.devMode).toBe('1');
+      expect(process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE).toBe('qwen');
+      expect(process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM).toBe('1');
+      expect(process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY).toBe('0');
+      expect(String(process.env.ROUTECODEX_CAMOUFOX_DEV_MODE || '')).toBe('');
+    } finally {
+      warn.mockRestore();
+      log.mockRestore();
+      if (prevAutoMode === undefined) delete process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
+      else process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE = prevAutoMode;
+      if (prevAutoConfirm === undefined) delete process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM;
+      else process.env.ROUTECODEX_OAUTH_AUTO_CONFIRM = prevAutoConfirm;
+      if (prevOpenOnly === undefined) delete process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY;
+      else process.env.ROUTECODEX_CAMOUFOX_OPEN_ONLY = prevOpenOnly;
+      if (prevDevMode === undefined) delete process.env.ROUTECODEX_CAMOUFOX_DEV_MODE;
+      else process.env.ROUTECODEX_CAMOUFOX_DEV_MODE = prevDevMode;
+    }
+  });
+
 });

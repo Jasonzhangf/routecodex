@@ -30,6 +30,11 @@ export function createCodexCommand(program: Command, ctx: CodexCommandContext): 
     },
     buildEnv: ({ env, baseUrl, configuredApiKey, cwd }) => {
       const openAiBase = normalizeOpenAiBaseUrl(baseUrl);
+      const resolvedApiKey = configuredApiKey
+        || (typeof env.OPENAI_API_KEY === 'string' && env.OPENAI_API_KEY.trim()
+          ? env.OPENAI_API_KEY.trim()
+          : null)
+        || 'rcc-proxy-key';
       return {
         ...env,
         PWD: cwd,
@@ -39,9 +44,7 @@ export function createCodexCommand(program: Command, ctx: CodexCommandContext): 
         OPENAI_BASE_URL: openAiBase,
         OPENAI_API_BASE: openAiBase,
         OPENAI_API_BASE_URL: openAiBase,
-        OPENAI_API_KEY: (typeof env.OPENAI_API_KEY === 'string' && env.OPENAI_API_KEY.trim())
-          ? env.OPENAI_API_KEY.trim()
-          : (configuredApiKey || 'rcc-proxy-key')
+        OPENAI_API_KEY: resolvedApiKey
       } as NodeJS.ProcessEnv;
     }
   });

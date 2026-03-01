@@ -27,7 +27,7 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
     .command('start')
     .description('Start the RouteCodex server')
     .option('-c, --config <config>', 'Configuration file path')
-    .option('-p, --port <port>', 'RouteCodex server port (dev package only; overrides env/config)')
+    .option('-p, --port <port>', 'RouteCodex server port (overrides env/config)')
     .option('--mode <mode>', 'Run mode (router|analysis|server). analysis => router + force snapshots', 'router')
     .option('--quota-routing <mode>', 'Quota routing admission control (on|off). off => do not remove providers from pool based on quota')
     .option('--log-level <level>', 'Log level (debug, info, warn, error)', 'info')
@@ -187,13 +187,19 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
             }
           }
         } else {
-          const port = (config?.httpserver?.port ?? config?.server?.port ?? config?.port);
-          if (!port || typeof port !== 'number' || port <= 0) {
-            spinner.fail('Invalid or missing port configuration');
-            ctx.logger.error('Please set a valid port (httpserver.port or top-level port) in your configuration');
-            ctx.exit(1);
+          const flagPort = typeof options.port === 'string' ? Number(options.port) : NaN;
+          if (!Number.isNaN(flagPort) && flagPort > 0) {
+            ctx.logger.info(`Using port ${flagPort} from --port flag [release package: rcc]`);
+            resolvedPort = flagPort;
+          } else {
+            const port = (config?.httpserver?.port ?? config?.server?.port ?? config?.port);
+            if (!port || typeof port !== 'number' || port <= 0) {
+              spinner.fail('Invalid or missing port configuration');
+              ctx.logger.error('Please set a valid port (httpserver.port or top-level port) in your configuration');
+              ctx.exit(1);
+            }
+            resolvedPort = port;
           }
-          resolvedPort = port;
         }
 
         await ctx.ensureGuardianDaemon?.();

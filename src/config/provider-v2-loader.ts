@@ -77,8 +77,29 @@ async function loadProviderConfigV2(entry: ProviderDirEntry): Promise<ProviderCo
   const providerIdRaw = (parsed as { providerId?: unknown }).providerId;
   const providerNode = (parsed as { provider?: unknown }).provider;
 
-  if (typeof providerIdRaw !== 'string' || !providerIdRaw.trim() || !providerNode || typeof providerNode !== 'object' || Array.isArray(providerNode)) {
+  if (!providerNode || typeof providerNode !== 'object' || Array.isArray(providerNode)) {
     return null;
+  }
+
+  const providerId = entry.id.trim();
+  if (!providerId) {
+    return null;
+  }
+  if (typeof providerIdRaw === 'string' && providerIdRaw.trim() && providerIdRaw.trim() !== providerId) {
+    throw new Error(
+      `[config] providerId mismatch: dir="${providerId}" file="${providerIdRaw.trim()}". Use the directory name as the single source of truth.`
+    );
+  }
+
+  const providerRecord = providerNode as UnknownRecord;
+  const providerNodeId = typeof providerRecord.id === 'string' ? providerRecord.id.trim() : '';
+  if (providerNodeId && providerNodeId !== providerId) {
+    throw new Error(
+      `[config] provider.id mismatch: dir="${providerId}" provider.id="${providerNodeId}". Use the directory name as the single source of truth.`
+    );
+  }
+  if (!providerNodeId) {
+    providerRecord.id = providerId;
   }
 
   const versionRaw = (parsed as { version?: unknown }).version;
@@ -87,8 +108,8 @@ async function loadProviderConfigV2(entry: ProviderDirEntry): Promise<ProviderCo
 
   return {
     version,
-    providerId: providerIdRaw.trim(),
-    provider: providerNode as UnknownRecord
+    providerId,
+    provider: providerRecord
   };
 }
 

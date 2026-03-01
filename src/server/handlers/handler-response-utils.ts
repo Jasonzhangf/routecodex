@@ -5,7 +5,7 @@ import type { PipelineExecutionResult } from './types.js';
 import { logPipelineStage } from '../utils/stage-logger.js';
 import { DEFAULT_TIMEOUTS } from '../../constants/index.js';
 import { stripInternalKeysDeep } from '../../utils/strip-internal-keys.js';
-import { writeServerSnapshot } from '../../utils/snapshot-writer.js';
+import { isSnapshotsEnabled, writeServerSnapshot } from '../../utils/snapshot-writer.js';
 import { resolveEffectiveRequestId } from '../utils/request-id-manager.js';
 
 const BLOCKED_HEADERS = new Set(['content-length', 'transfer-encoding', 'connection', 'content-encoding']);
@@ -62,7 +62,7 @@ export function sendPipelineResponse(
   const entryEndpoint = typeof options?.entryEndpoint === 'string' && options.entryEndpoint.trim()
     ? options.entryEndpoint.trim()
     : undefined;
-  const captureClientResponse = isAnalysisModeEnabled();
+  const captureClientResponse = shouldCaptureClientStreamSnapshots();
 
   if (forceSSE && !expectsStream) {
     logPipelineStage('response.sse.missing', requestLabel, { status });
@@ -349,9 +349,6 @@ function toNodeReadable(streamLike: unknown): Readable | null {
 }
 
 function shouldCaptureClientStreamSnapshots(): boolean {
-  if (!isAnalysisModeEnabled()) {
-    return false;
-  }
   const flag = String(process.env.ROUTECODEX_CAPTURE_STREAM_SNAPSHOTS || '').trim().toLowerCase();
   if (flag === '1' || flag === 'true') {
     return true;
@@ -359,7 +356,7 @@ function shouldCaptureClientStreamSnapshots(): boolean {
   if (flag === '0' || flag === 'false') {
     return false;
   }
-  return false;
+  return isSnapshotsEnabled();
 }
 
 function resolveClientStreamSnapshotMaxBytes(): number {

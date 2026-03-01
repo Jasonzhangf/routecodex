@@ -28,7 +28,7 @@ describe('webui integration flows (feature coverage)', () => {
     'quota.provider_reset',
     'quota.snapshot_refresh',
     'advanced.control_restart_all',
-    'advanced.control_quota_offline',
+    'advanced.control_quota_refresh',
     'advanced.clock_refresh',
     'auth.logout',
     'auth.login',
@@ -749,12 +749,9 @@ describe('webui integration flows (feature coverage)', () => {
     await waitFor(() => expect(screen.getByText(/servers\.restart done\./)).toBeTruthy());
     hit('advanced.control_restart_all');
 
-    fireEvent.change(within(controlPanel).getByPlaceholderText('providerKey'), {
-      target: { value: 'qwen.default.qwen-max' }
-    });
-    fireEvent.click(within(controlPanel).getByText('Offline'));
-    await waitFor(() => expect(screen.getByText(/quota\.disable done\./)).toBeTruthy());
-    hit('advanced.control_quota_offline');
+    fireEvent.click(within(controlPanel).getByText('Refresh Quota'));
+    await waitFor(() => expect(screen.getByText(/quota\.refresh done\./)).toBeTruthy());
+    hit('advanced.control_quota_refresh');
 
     // Ops / Clock
     fireEvent.click(screen.getByText('Clock'));

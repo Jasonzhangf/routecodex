@@ -12,10 +12,6 @@ function isRecord(value: unknown): value is UnknownRecord {
 
 function extractRoutingFromUserConfig(userConfig: UnknownRecord): VirtualRouterRoutingConfig {
   const vrNode = isRecord(userConfig.virtualrouter) ? (userConfig.virtualrouter as UnknownRecord) : {};
-  const vrRouting = isRecord(vrNode.routing) ? (vrNode.routing as VirtualRouterRoutingConfig) : undefined;
-  if (vrRouting) {
-    return vrRouting;
-  }
   const groupsNode = isRecord(vrNode.routingPolicyGroups) ? (vrNode.routingPolicyGroups as UnknownRecord) : undefined;
   if (groupsNode) {
     const groupEntries = Object.entries(groupsNode)
@@ -35,8 +31,7 @@ function extractRoutingFromUserConfig(userConfig: UnknownRecord): VirtualRouterR
       }
     }
   }
-  const rootRouting = isRecord(userConfig.routing) ? (userConfig.routing as VirtualRouterRoutingConfig) : undefined;
-  return rootRouting ? rootRouting : {};
+  throw new Error('[config] v2 config requires virtualrouter.routingPolicyGroups with routing for active policy group');
 }
 
 /**

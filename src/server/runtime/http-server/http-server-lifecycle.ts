@@ -27,6 +27,7 @@ export async function initializeHttpServer(server: any): Promise<void> {
     if (server.shouldStartManagerDaemon() && !server.managerDaemon) {
       const daemon = new ManagerDaemon({
         serverId: canonicalizeServerId(server.config.server.host, server.config.server.port),
+        configPath: server.config?.configPath,
         quotaRoutingEnabled: server.isQuotaRoutingEnabled()
       });
       daemon.registerModule(new TokenManagerModule());

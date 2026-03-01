@@ -157,17 +157,20 @@ export function readConfigApiKey(fsImpl: typeof fs, configPath: string): string 
 }
 
 /**
- * Normalize connect host (convert ::, ::1, localhost to 0.0.0.0)
+ * Normalize connect host.
+ *
+ * When the server binds to 0.0.0.0/::, clients must connect via a concrete
+ * address (typically 127.0.0.1 for local usage).
  */
 export function normalizeConnectHost(host: string): string {
-  const value = String(host || '').toLowerCase();
-  if (value === '0.0.0.0') {
-    return '0.0.0.0';
+  const value = String(host || '').trim().toLowerCase();
+  if (!value) {
+    return '127.0.0.1';
   }
-  if (value === '::' || value === '::1' || value === 'localhost') {
-    return '0.0.0.0';
+  if (value === '0.0.0.0' || value === '::' || value === '::1' || value === 'localhost') {
+    return '127.0.0.1';
   }
-  return host || '0.0.0.0';
+  return host;
 }
 
 /**

@@ -1,6 +1,7 @@
 export type RccRunMode = 'router' | 'analysis' | 'server';
 
 type StartCommandArgOptions = {
+  port?: string;
   logLevel?: string;
   ua?: string;
   quotaRouting?: unknown;
@@ -70,6 +71,9 @@ function appendFlag(args: string[], enabled: boolean, flag: string): void {
 
 export function buildStartCommandArgs(options: StartCommandArgOptions, configPath: string, runMode: RccRunMode): string[] {
   const args: string[] = ['start', '--config', configPath, '--mode', runMode];
+  if (typeof options.port === 'string' && options.port.trim()) {
+    args.push('--port', options.port.trim());
+  }
   if (typeof options.logLevel === 'string' && options.logLevel.trim()) {
     args.push('--log-level', options.logLevel.trim());
   }

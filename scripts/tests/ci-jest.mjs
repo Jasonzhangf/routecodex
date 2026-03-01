@@ -90,8 +90,16 @@ const cliTests = [
   'tests/cli/stop-command.spec.ts'
 ];
 
+const webuiTests = [
+  'tests/frontend/webui-app.utils.spec.ts',
+  'tests/frontend/webui-app.render.spec.tsx',
+  'tests/frontend/webui-app.integration.spec.tsx',
+  'tests/frontend/webui-app.pages.spec.tsx',
+  'tests/frontend/webui-app.edge.spec.tsx'
+];
+
 const wantsCoverage = process.argv.includes('--coverage') || process.env.ROUTECODEX_CI_COVERAGE === '1';
-const allTests = [...routingInstructionTests, ...cliTests];
+const allTests = [...routingInstructionTests, ...cliTests, ...webuiTests];
 
 const jestBin = path.join(process.cwd(), 'node_modules', 'jest', 'bin', 'jest.js');
 

@@ -62,7 +62,7 @@ describe('cli port command', () => {
     await program.parseAsync(['node', 'routecodex', 'port', 'doctor', '5520'], { from: 'node' });
 
     expect(err.join('\n')).toBe('');
-    expect(out.join('\n')).toContain('Port 5520 listeners:');
+    expect(out.join('\n')).toContain('Port 5520 managed RouteCodex servers:');
     expect(out.join('\n')).toContain('(none)');
   });
 });

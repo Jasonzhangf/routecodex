@@ -593,22 +593,19 @@ describe('webui edge coverage', () => {
     await waitFor(() => expect(screen.getByText('Control Plane')).toBeTruthy());
 
     const controlPanel = screen.getByText('Control Plane').closest('.panel') as HTMLElement;
+    expect(within(controlPanel).getByText(/Quota actions have moved to the Quota Pool page/i)).toBeTruthy();
+
+    onToast.mockClear();
     fireEvent.click(within(controlPanel).getByText('Refresh'));
+    await waitFor(() => expect(screen.getByText('Control snapshot refreshed.')).toBeTruthy());
+
+    onToast.mockClear();
     fireEvent.click(within(controlPanel).getByText('Refresh Quota'));
-
-    fireEvent.change(within(controlPanel).getByPlaceholderText('providerKey'), { target: { value: 'qwen.default.qwen-max' } });
-    const quotaActionRow = within(controlPanel).getByPlaceholderText('providerKey').closest('.row') as HTMLElement;
-    const actionSelects = quotaActionRow.querySelectorAll('select');
-    fireEvent.change(actionSelects[0], { target: { value: 'blacklist' } });
-    fireEvent.change(actionSelects[1], { target: { value: '15' } });
+    await waitFor(() => expect(hasToast('quota.refresh done.')).toBe(true));
 
     onToast.mockClear();
-    fireEvent.click(within(quotaActionRow).getByText('Recover'));
-    await waitFor(() => expect(hasToast('quota.recover done.')).toBe(true));
-
-    onToast.mockClear();
-    fireEvent.click(within(quotaActionRow).getByText('Reset'));
-    await waitFor(() => expect(hasToast('quota.reset done.')).toBe(true));
+    fireEvent.click(within(controlPanel).getByText('Restart All Servers'));
+    await waitFor(() => expect(hasToast('servers.restart done.')).toBe(true));
     controlView.unmount();
 
     const clockView = render(<ClockPage authenticated authEpoch={1} onToast={onToast} />);

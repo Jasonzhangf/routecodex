@@ -8,7 +8,7 @@ describe('extractSessionIdentifiersFromMetadata', () => {
       }
     });
     expect(identifiers.sessionId).toBe('sess-123');
-    expect(identifiers.conversationId).toBeUndefined();
+    expect(identifiers.conversationId).toBe("sess-123");
   });
 
   test('detects conversationId from condensed conversationid header', () => {

@@ -91,10 +91,10 @@ function resolveMaxAttempts(): number {
   const raw = String(
     process.env.ROUTECODEX_OAUTH_INTERACTIVE_MAX_ATTEMPTS ||
       process.env.RCC_OAUTH_INTERACTIVE_MAX_ATTEMPTS ||
-      '3'
+      '1'
   ).trim();
   const parsed = Number.parseInt(raw, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 3;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
 }
 
 export async function shouldSkipInteractiveOAuthRepair(args: {
@@ -126,11 +126,6 @@ export async function shouldSkipInteractiveOAuthRepair(args: {
     if (elapsed < cooldownMs) {
       return { skip: true, msLeft: Math.max(0, cooldownMs - elapsed), record };
     }
-    return { skip: false, record };
-  }
-  // Generic token-invalid errors should retry interactive flow until max attempts is reached.
-  // Do not apply long cooldown windows here, otherwise reauth may never be surfaced in practice.
-  if (args.reason === 'generic') {
     return { skip: false, record };
   }
   if (elapsed < cooldownMs) {

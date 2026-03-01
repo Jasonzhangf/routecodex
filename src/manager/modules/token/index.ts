@@ -10,10 +10,14 @@ export class TokenManagerModule implements ManagerModule {
   private daemon: TokenDaemon | null = null;
   private ownerId: string | null = null;
   private isLeader: boolean = false;
+  private configPath: string | null = null;
 
   async init(context: ManagerContext): Promise<void> {
     // 使用 serverId 构造稳定 ownerId，便于区分不同服务器实例。
     this.ownerId = `server:${context.serverId}`;
+    this.configPath = typeof context.configPath === 'string' && context.configPath.trim()
+      ? context.configPath.trim()
+      : null;
   }
 
   async start(): Promise<void> {
@@ -53,7 +57,8 @@ export class TokenManagerModule implements ManagerModule {
     const aheadMinutes = readPositiveNumberFromEnv('ROUTECODEX_TOKEN_REFRESH_AHEAD_MIN', 30);
     this.daemon = new TokenDaemon({
       intervalMs: intervalSec * 1000,
-      refreshAheadMinutes: aheadMinutes
+      refreshAheadMinutes: aheadMinutes,
+      configPath: this.configPath ?? undefined
     });
     this.isLeader = true;
     await this.daemon.start();

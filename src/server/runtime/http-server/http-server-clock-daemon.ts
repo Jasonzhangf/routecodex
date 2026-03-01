@@ -227,6 +227,10 @@ export function startClockDaemonInjectLoop(server: any): void {
   if (!shouldEnableClockDaemonInjectLoop()) {
     return;
   }
+  const rawClockConfig = resolveRawClockConfig(server);
+  if (!rawClockConfig) {
+    return;
+  }
 
   const rawTick = String(process.env.ROUTECODEX_CLOCK_DAEMON_INJECT_TICK_MS || process.env.RCC_CLOCK_DAEMON_INJECT_TICK_MS || '').trim();
   const parsedTick = rawTick ? Number.parseInt(rawTick, 10) : NaN;
@@ -247,6 +251,9 @@ export async function tickClockDaemonInjectLoop(server: any): Promise<void> {
   server.clockDaemonInjectTickInFlight = true;
   try {
     const rawClockConfig = resolveRawClockConfig(server);
+    if (!rawClockConfig) {
+      return;
+    }
     const resolvedClockConfig = await resolveClockConfigSnapshot(rawClockConfig);
     if (!resolvedClockConfig) {
       return;

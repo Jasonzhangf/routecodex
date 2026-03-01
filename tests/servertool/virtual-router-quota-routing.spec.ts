@@ -34,7 +34,8 @@ describe('virtual-router quotaView routing', () => {
       resolveRuntimeKeyByIndex: () => null
     };
     const healthManager = {
-      isAvailable: () => true
+      isAvailable: () => true,
+      getSnapshot: () => []
     };
     const contextAdvisor = {
       classify: (targets: string[]) => ({
@@ -337,7 +338,7 @@ describe('virtual-router quotaView routing', () => {
       resolveRuntimeKeyByAlias: () => null,
       resolveRuntimeKeyByIndex: () => null
     };
-    const healthManager = { isAvailable: () => true };
+    const healthManager = { isAvailable: () => true, getSnapshot: () => [] };
     const contextAdvisor = {
       classify: (targets: string[]) => ({
         safe: targets,

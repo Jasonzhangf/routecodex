@@ -174,7 +174,13 @@ async function main() {
   const { VirtualRouterEngine } = await import(engineUrl);
   const { bootstrapVirtualRouterConfig } = await import(bootstrapUrl);
 
-  const userConfig = readJson(configPath);
+  const loaderPath = path.join(process.cwd(), 'dist', 'config', 'routecodex-config-loader.js');
+  if (!fs.existsSync(loaderPath)) {
+    throw new Error('[virtual-router-dryrun] missing dist config loader. Run: npm run build:dev');
+  }
+  const { loadRouteCodexConfig } = await import(pathToFileURL(loaderPath).href);
+  const loaded = await loadRouteCodexConfig(configPath);
+  const userConfig = loaded?.userConfig ?? readJson(configPath);
   const vrInput = userConfig.virtualrouter || userConfig.virtualRouter || userConfig;
   const { config: vrConfig } = bootstrapVirtualRouterConfig(vrInput);
 

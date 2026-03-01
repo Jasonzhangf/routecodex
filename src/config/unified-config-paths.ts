@@ -54,6 +54,7 @@ const ENVIRONMENT_VARIABLES = [
  * Default configuration file preferences for directory scanning
  */
 const CONFIG_FILE_PREFERENCES = [
+  'config.v2.json',   // V2 canonical config (preferred when present)
   'default.json',      // Default/primary configuration
   'glm.json',          // GLM provider configuration
   'routecodex.json',   // Legacy format
@@ -200,8 +201,22 @@ export class UnifiedConfigPathResolver {
    */
   static scanConfigDirectory(directory: string, preferredName?: string): string | null {
     try {
+      const preferredSet = new Set(CONFIG_FILE_PREFERENCES.map(name => name.toLowerCase()));
       const entries = fs.readdirSync(directory)
         .filter(file => file.toLowerCase().endsWith('.json'))
+        .filter(file => {
+          const lower = file.toLowerCase();
+          if (preferredSet.has(lower)) {
+            return true;
+          }
+          if (lower === 'config.json' || lower === 'routecodex.json') {
+            return true;
+          }
+          if (lower.startsWith('config.') && lower.endsWith('.json')) {
+            return true;
+          }
+          return false;
+        })
         .map(file => ({
           name: file,
           mtime: fs.statSync(path.join(directory, file)).mtimeMs,
@@ -218,6 +233,13 @@ export class UnifiedConfigPathResolver {
         if (preferred) {
           return path.join(directory, preferred.name);
         }
+      }
+
+      // Prefer config.v2*.json when present (v2 canonical)
+      const v2Matches = entries.filter(entry => /^config\.v2(\..+)?\.json$/i.test(entry.name));
+      if (v2Matches.length) {
+        v2Matches.sort((a, b) => b.mtime - a.mtime);
+        return path.join(directory, v2Matches[0].name);
       }
 
       // Look for preferred configuration names
@@ -284,6 +306,7 @@ export class UnifiedConfigPathResolver {
     // 5. Default configuration directory (with scanning)
     const defaultConfigDir = this.getDefaultConfigDirectory();
     if (allowDirectoryScan) {
+      candidates.push(path.join(homedir(), '.routecodex'));
       candidates.push(defaultConfigDir);
     } else if (configName) {
       candidates.push(path.join(defaultConfigDir, configName));
@@ -293,6 +316,7 @@ export class UnifiedConfigPathResolver {
 
     return candidates;
   }
+
 
   /**
    * Expand home directory in path

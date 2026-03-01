@@ -207,7 +207,11 @@ describe('oauth command behavior', () => {
 
     await cmd.parseAsync(['node', 'oauth', 'gemini-auto', 'gemini-oauth-1-test.json'], { from: 'node' });
 
-    expect(interactiveRefresh).toHaveBeenCalledWith('gemini-oauth-1-test.json', { force: true, mode: 'auto' });
+    expect(interactiveRefresh).toHaveBeenCalledWith('gemini-oauth-1-test.json', {
+      force: true,
+      mode: 'auto',
+      noAutoFallback: true
+    });
     expect(autoModeAtCall).toBe('gemini');
     expect(autoConfirmAtCall).toBe('1');
   });
@@ -240,7 +244,11 @@ describe('oauth command behavior', () => {
 
     try {
       await cmd.parseAsync(['node', 'oauth', 'iflow-auto', 'iflow-oauth-1-186.json', '--headful'], { from: 'node' });
-      expect(interactiveRefresh).toHaveBeenCalledWith('iflow-oauth-1-186.json', { force: true, mode: 'auto' });
+      expect(interactiveRefresh).toHaveBeenCalledWith('iflow-oauth-1-186.json', {
+        force: true,
+        mode: 'auto',
+        noAutoFallback: true
+      });
       expect(devModeAtCall).toBe('1');
       expect(autoModeAtCall).toBe('iflow');
       expect(browserAtCall).toBe('camoufox');
@@ -296,7 +304,11 @@ describe('oauth command behavior', () => {
         ['node', 'routecodex', 'oauth', 'iflow-auto', 'iflow-oauth-1-186.json', '--headful'],
         { from: 'node' }
       );
-      expect(interactiveRefresh).toHaveBeenCalledWith('iflow-oauth-1-186.json', { force: true, mode: 'auto' });
+      expect(interactiveRefresh).toHaveBeenCalledWith('iflow-oauth-1-186.json', {
+        force: true,
+        mode: 'auto',
+        noAutoFallback: true
+      });
       expect(devModeAtCall).toBe('1');
     } finally {
       if (prevDevMode === undefined) {

@@ -38,6 +38,7 @@ import {
   tryReadConfigHostPort,
   resolveIntFromEnv
 } from './launcher/utils.js';
+import { resolveRouteCodexConfigPath } from '../../config/config-paths.js';
 
 // Re-export for backward compatibility
 export type {
@@ -166,7 +167,10 @@ function resolveServerConnection(
 ): ResolvedServerConnection {
   let configPath = typeof options.config === 'string' && options.config.trim() ? options.config.trim() : '';
   if (!configPath) {
-    configPath = pathImpl.join(ctx.homedir(), '.routecodex', 'config.json');
+    const resolved = resolveRouteCodexConfigPath();
+    configPath = resolved && resolved.trim()
+      ? resolved
+      : pathImpl.join(ctx.homedir(), '.routecodex', 'config.json');
   }
 
   let actualProtocol: 'http' | 'https' = 'http';

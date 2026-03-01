@@ -109,7 +109,7 @@ describe('Protocol HTTP providers (V2) - basic behavior', () => {
       { metadata: { iflowWebSearch: true, entryEndpoint: '' } },
       '/chat/completions'
     );
-    expect(fallbackEndpoint).toBe('/chat/retrieve');
+    expect(fallbackEndpoint).toBe('/chat/qaRetrieve');
 
     const messagesEntryEndpoint = provider.resolveRequestEndpoint(
       { metadata: { iflowWebSearch: true, entryEndpoint: '/v1/messages' } },

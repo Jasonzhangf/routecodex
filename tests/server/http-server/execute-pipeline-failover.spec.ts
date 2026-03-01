@@ -14,54 +14,78 @@ function createTestConfig(): ServerConfigV2 {
   };
 }
 
+function attachHubPipeline(server: any, execute: (input: any) => Promise<any>): jest.Mock {
+  const executeMock = jest.fn(execute);
+  server.hubPipeline = {
+    execute: executeMock,
+    updateVirtualRouterConfig: jest.fn()
+  };
+  return executeMock;
+}
+
+function attachProviderHandle(server: any, input: {
+  providerKey: string;
+  runtimeKey: string;
+  providerType: string;
+  providerFamily: string;
+  providerId: string;
+  providerProtocol: string;
+  processIncoming: (payload: unknown) => Promise<any>;
+}): void {
+  const providerHandles = new Map<string, any>((server.providerHandles as Map<string, any>) ?? []);
+  providerHandles.set(input.runtimeKey, {
+    providerType: input.providerType,
+    providerFamily: input.providerFamily,
+    providerId: input.providerId,
+    providerProtocol: input.providerProtocol,
+    instance: {
+      processIncoming: jest.fn(input.processIncoming),
+      initialize: jest.fn(),
+      cleanup: jest.fn()
+    }
+  });
+  server.providerHandles = providerHandles;
+
+  const providerKeyToRuntimeKey = new Map<string, string>((server.providerKeyToRuntimeKey as Map<string, string>) ?? []);
+  providerKeyToRuntimeKey.set(input.providerKey, input.runtimeKey);
+  server.providerKeyToRuntimeKey = providerKeyToRuntimeKey;
+}
+
 describe('RouteCodexHttpServer.executePipeline failover', () => {
   jest.setTimeout(30000);
 
-  it('injects startup-excluded provider keys into first hub iteration metadata', async () => {
+  it('does not inject startupExcludedProviderKeys into hub metadata in request-executor path', async () => {
     const server = new RouteCodexHttpServer(createTestConfig());
-    const excludedAtStartup = 'deepseek-web.2.deepseek-chat';
-    const providerB = 'deepseek-web.1.deepseek-chat';
+    const providerKey = 'deepseek-web.1.deepseek-chat';
+    const runtimeKey = 'runtime:B';
 
-    (server as any).hubPipeline = {};
-    (server as any).startupExcludedProviderKeys = new Set([excludedAtStartup]);
+    server.startupExcludedProviderKeys = new Set(['deepseek-web.2.deepseek-chat']);
 
-    const runHubPipeline = jest.fn().mockResolvedValueOnce({
-      requestId: 'req_startup_excluded',
+    const hubExecute = attachHubPipeline(server, async () => ({
       providerPayload: { model: 'deepseek-chat' },
       target: {
-        providerKey: providerB,
+        providerKey,
         providerType: 'openai',
         outboundProfile: 'openai-chat',
-        runtimeKey: 'runtime:B',
+        runtimeKey,
         processMode: 'chat'
       },
       routingDecision: { routeName: 'default' },
       processMode: 'chat',
       metadata: {}
-    });
-    (server as any).runHubPipeline = runHubPipeline;
+    }));
 
-    const providerHandles = new Map<string, any>();
-    providerHandles.set('runtime:B', {
+    attachProviderHandle(server, {
+      providerKey,
+      runtimeKey,
       providerType: 'openai',
       providerFamily: 'deepseek',
       providerId: 'deepseek-web',
       providerProtocol: 'openai-chat',
-      instance: {
-        processIncoming: jest.fn(async () => ({ status: 200, data: { ok: true } })),
-        initialize: jest.fn(),
-        cleanup: jest.fn()
-      }
+      processIncoming: async () => ({ status: 200, data: { ok: true } })
     });
-    (server as any).providerHandles = providerHandles;
 
-    const providerKeyToRuntimeKey = new Map<string, string>();
-    providerKeyToRuntimeKey.set(providerB, 'runtime:B');
-    (server as any).providerKeyToRuntimeKey = providerKeyToRuntimeKey;
-
-    (server as any).convertProviderResponseIfNeeded = jest.fn(async ({ response }: any) => response);
-
-    const result = await (server as any).executePipeline({
+    const result = await server['executePipeline']({
       requestId: 'req_startup_excluded',
       entryEndpoint: '/v1/responses',
       headers: {},
@@ -70,9 +94,9 @@ describe('RouteCodexHttpServer.executePipeline failover', () => {
     });
 
     expect(result.status).toBe(200);
-    expect(runHubPipeline).toHaveBeenCalledTimes(1);
-    const firstMetadata = runHubPipeline.mock.calls[0][1] as Record<string, unknown>;
-    expect(firstMetadata.excludedProviderKeys).toEqual([excludedAtStartup]);
+    expect(hubExecute).toHaveBeenCalledTimes(1);
+    const firstPipelineInput = hubExecute.mock.calls[0]?.[0] as Record<string, any>;
+    expect(firstPipelineInput?.metadata?.excludedProviderKeys).toBeUndefined();
   });
 
   it('re-enters hub pipeline once with excludedProviderKeys on retryable provider error', async () => {
@@ -81,11 +105,26 @@ describe('RouteCodexHttpServer.executePipeline failover', () => {
     const providerA = 'antigravity.aliasA.modelA';
     const providerB = 'tab.key1.gpt-5.2';
 
-    (server as any).hubPipeline = {};
-
-    const runHubPipeline = jest.fn()
-      .mockResolvedValueOnce({
-        requestId: 'req_test',
+    const hubExecute = attachHubPipeline(server, async (input: any) => {
+      const excluded = Array.isArray(input?.metadata?.excludedProviderKeys)
+        ? input.metadata.excludedProviderKeys
+        : [];
+      if (excluded.includes(providerA)) {
+        return {
+          providerPayload: { model: 'modelB' },
+          target: {
+            providerKey: providerB,
+            providerType: 'gemini',
+            outboundProfile: 'gemini-chat',
+            runtimeKey: 'runtime:B',
+            processMode: 'chat'
+          },
+          routingDecision: { routeName: 'coding' },
+          processMode: 'chat',
+          metadata: {}
+        };
+      }
+      return {
         providerPayload: { model: 'modelA' },
         target: {
           providerKey: providerA,
@@ -97,58 +136,31 @@ describe('RouteCodexHttpServer.executePipeline failover', () => {
         routingDecision: { routeName: 'coding' },
         processMode: 'chat',
         metadata: {}
-      })
-      .mockResolvedValueOnce({
-        requestId: 'req_test',
-        providerPayload: { model: 'modelB' },
-        target: {
-          providerKey: providerB,
-          providerType: 'gemini',
-          outboundProfile: 'gemini-chat',
-          runtimeKey: 'runtime:B',
-          processMode: 'chat'
-        },
-        routingDecision: { routeName: 'coding' },
-        processMode: 'chat',
-        metadata: {}
-      });
-    (server as any).runHubPipeline = runHubPipeline;
+      };
+    });
 
-    const providerHandles = new Map<string, any>();
-    providerHandles.set('runtime:A', {
+    attachProviderHandle(server, {
+      providerKey: providerA,
+      runtimeKey: 'runtime:A',
       providerType: 'gemini',
       providerFamily: 'gemini',
       providerId: 'antigravity',
       providerProtocol: 'gemini-chat',
-      instance: {
-        processIncoming: jest.fn(async () => {
-          throw Object.assign(new Error('HTTP 429'), { statusCode: 429 });
-        }),
-        initialize: jest.fn(),
-        cleanup: jest.fn()
+      processIncoming: async () => {
+        throw Object.assign(new Error('HTTP 429'), { statusCode: 429 });
       }
     });
-    providerHandles.set('runtime:B', {
+    attachProviderHandle(server, {
+      providerKey: providerB,
+      runtimeKey: 'runtime:B',
       providerType: 'gemini',
       providerFamily: 'gemini',
       providerId: 'tab',
       providerProtocol: 'gemini-chat',
-      instance: {
-        processIncoming: jest.fn(async () => ({ status: 200, data: { ok: true } })),
-        initialize: jest.fn(),
-        cleanup: jest.fn()
-      }
+      processIncoming: async () => ({ status: 200, data: { ok: true } })
     });
-    (server as any).providerHandles = providerHandles;
 
-    const providerKeyToRuntimeKey = new Map<string, string>();
-    providerKeyToRuntimeKey.set(providerA, 'runtime:A');
-    providerKeyToRuntimeKey.set(providerB, 'runtime:B');
-    (server as any).providerKeyToRuntimeKey = providerKeyToRuntimeKey;
-
-    (server as any).convertProviderResponseIfNeeded = jest.fn(async ({ response }: any) => response);
-
-    const result = await (server as any).executePipeline({
+    const result = await server['executePipeline']({
       requestId: 'req_test',
       entryEndpoint: '/v1/responses',
       headers: {},
@@ -157,24 +169,37 @@ describe('RouteCodexHttpServer.executePipeline failover', () => {
     });
 
     expect(result.status).toBe(200);
-    expect(runHubPipeline).toHaveBeenCalledTimes(2);
-    const secondMetadata = runHubPipeline.mock.calls[1][1] as Record<string, unknown>;
-    expect(secondMetadata.excludedProviderKeys).toEqual([providerA]);
-    expect(providerHandles.get('runtime:A')!.instance.processIncoming).toHaveBeenCalledTimes(1);
-    expect(providerHandles.get('runtime:B')!.instance.processIncoming).toHaveBeenCalledTimes(1);
+    expect(hubExecute).toHaveBeenCalledTimes(2);
+    const secondPipelineInput = hubExecute.mock.calls[1]?.[0] as Record<string, any>;
+    expect(secondPipelineInput?.metadata?.excludedProviderKeys).toEqual([providerA]);
   });
 
-  it('re-enters hub pipeline when converted response status is 429 without error envelope', async () => {
+  it('re-enters hub pipeline when upstream response status is 429', async () => {
     const server = new RouteCodexHttpServer(createTestConfig());
 
     const providerA = 'tab.key1.gpt-5.2';
     const providerB = 'tab.key2.gpt-5.2';
 
-    (server as any).hubPipeline = {};
-
-    const runHubPipeline = jest.fn()
-      .mockResolvedValueOnce({
-        requestId: 'req_conv_429',
+    const hubExecute = attachHubPipeline(server, async (input: any) => {
+      const excluded = Array.isArray(input?.metadata?.excludedProviderKeys)
+        ? input.metadata.excludedProviderKeys
+        : [];
+      if (excluded.includes(providerA)) {
+        return {
+          providerPayload: { model: 'gpt-5.2' },
+          target: {
+            providerKey: providerB,
+            providerType: 'responses',
+            outboundProfile: 'openai-responses',
+            runtimeKey: 'runtime:B',
+            processMode: 'standard'
+          },
+          routingDecision: { routeName: 'coding' },
+          processMode: 'standard',
+          metadata: {}
+        };
+      }
+      return {
         providerPayload: { model: 'gpt-5.2' },
         target: {
           providerKey: providerA,
@@ -186,59 +211,29 @@ describe('RouteCodexHttpServer.executePipeline failover', () => {
         routingDecision: { routeName: 'coding' },
         processMode: 'standard',
         metadata: {}
-      })
-      .mockResolvedValueOnce({
-        requestId: 'req_conv_429',
-        providerPayload: { model: 'gpt-5.2' },
-        target: {
-          providerKey: providerB,
-          providerType: 'responses',
-          outboundProfile: 'openai-responses',
-          runtimeKey: 'runtime:B',
-          processMode: 'standard'
-        },
-        routingDecision: { routeName: 'coding' },
-        processMode: 'standard',
-        metadata: {}
-      });
-    (server as any).runHubPipeline = runHubPipeline;
+      };
+    });
 
-    const providerHandles = new Map<string, any>();
-    providerHandles.set('runtime:A', {
+    attachProviderHandle(server, {
+      providerKey: providerA,
+      runtimeKey: 'runtime:A',
       providerType: 'responses',
       providerFamily: 'openai',
       providerId: 'tab',
       providerProtocol: 'openai-responses',
-      instance: {
-        processIncoming: jest.fn(async () => ({ status: 200, data: { id: 'raw_a' } })),
-        initialize: jest.fn(),
-        cleanup: jest.fn()
-      }
+      processIncoming: async () => ({ status: 429, data: { error: { message: 'rate limited' } } })
     });
-    providerHandles.set('runtime:B', {
+    attachProviderHandle(server, {
+      providerKey: providerB,
+      runtimeKey: 'runtime:B',
       providerType: 'responses',
       providerFamily: 'openai',
       providerId: 'tab',
       providerProtocol: 'openai-responses',
-      instance: {
-        processIncoming: jest.fn(async () => ({ status: 200, data: { id: 'raw_b' } })),
-        initialize: jest.fn(),
-        cleanup: jest.fn()
-      }
+      processIncoming: async () => ({ status: 200, data: { id: 'ok' } })
     });
-    (server as any).providerHandles = providerHandles;
 
-    const providerKeyToRuntimeKey = new Map<string, string>();
-    providerKeyToRuntimeKey.set(providerA, 'runtime:A');
-    providerKeyToRuntimeKey.set(providerB, 'runtime:B');
-    (server as any).providerKeyToRuntimeKey = providerKeyToRuntimeKey;
-
-    (server as any).convertProviderResponseIfNeeded = jest
-      .fn()
-      .mockResolvedValueOnce({ status: 429, body: { id: 'converted_429_without_error' } })
-      .mockResolvedValueOnce({ status: 200, body: { id: 'converted_ok' } });
-
-    const result = await (server as any).executePipeline({
+    const result = await server['executePipeline']({
       requestId: 'req_conv_429',
       entryEndpoint: '/v1/responses',
       headers: {},
@@ -247,22 +242,30 @@ describe('RouteCodexHttpServer.executePipeline failover', () => {
     });
 
     expect(result.status).toBe(200);
-    expect(runHubPipeline).toHaveBeenCalledTimes(2);
-    const secondMetadata = runHubPipeline.mock.calls[1][1] as Record<string, unknown>;
-    expect(secondMetadata.excludedProviderKeys).toEqual([providerA]);
-    expect(providerHandles.get('runtime:A')!.instance.processIncoming).toHaveBeenCalledTimes(1);
-    expect(providerHandles.get('runtime:B')!.instance.processIncoming).toHaveBeenCalledTimes(1);
+    expect(hubExecute).toHaveBeenCalledTimes(2);
+    const secondPipelineInput = hubExecute.mock.calls[1]?.[0] as Record<string, any>;
+    expect(secondPipelineInput?.metadata?.excludedProviderKeys).toEqual([providerA]);
   });
+
   it('returns first upstream error when retry-exhausted routing reports provider unavailable', async () => {
     const server = new RouteCodexHttpServer(createTestConfig());
 
     const providerA = 'iflow.1-186.kimi-k2.5';
+    const firstError = Object.assign(new Error('HTTP 429: quota exhausted'), {
+      statusCode: 429,
+      code: 'HTTP_429'
+    });
 
-    (server as any).hubPipeline = {};
-
-    const runHubPipeline = jest.fn()
-      .mockResolvedValueOnce({
-        requestId: 'req_pool_exhausted',
+    const hubExecute = attachHubPipeline(server, async (input: any) => {
+      const excluded = Array.isArray(input?.metadata?.excludedProviderKeys)
+        ? input.metadata.excludedProviderKeys
+        : [];
+      if (excluded.includes(providerA)) {
+        throw Object.assign(new Error('All providers unavailable for model iflow.kimi-k2.5'), {
+          code: 'PROVIDER_NOT_AVAILABLE'
+        });
+      }
+      return {
         providerPayload: { model: 'kimi-k2.5' },
         target: {
           providerKey: providerA,
@@ -274,42 +277,22 @@ describe('RouteCodexHttpServer.executePipeline failover', () => {
         routingDecision: { routeName: 'direct' },
         processMode: 'chat',
         metadata: {}
-      })
-      .mockRejectedValueOnce(
-        Object.assign(new Error('All providers unavailable for model iflow.kimi-k2.5'), {
-          code: 'PROVIDER_NOT_AVAILABLE'
-        })
-      );
-    (server as any).runHubPipeline = runHubPipeline;
-
-    const firstError = Object.assign(new Error('HTTP 429: quota exhausted'), {
-      statusCode: 429,
-      code: 'HTTP_429'
+      };
     });
 
-    const providerHandles = new Map<string, any>();
-    providerHandles.set('runtime:A', {
+    attachProviderHandle(server, {
+      providerKey: providerA,
+      runtimeKey: 'runtime:A',
       providerType: 'openai',
       providerFamily: 'iflow',
       providerId: 'iflow',
       providerProtocol: 'openai-chat',
-      instance: {
-        processIncoming: jest.fn(async () => {
-          throw firstError;
-        }),
-        initialize: jest.fn(),
-        cleanup: jest.fn()
+      processIncoming: async () => {
+        throw firstError;
       }
     });
-    (server as any).providerHandles = providerHandles;
 
-    const providerKeyToRuntimeKey = new Map<string, string>();
-    providerKeyToRuntimeKey.set(providerA, 'runtime:A');
-    (server as any).providerKeyToRuntimeKey = providerKeyToRuntimeKey;
-
-    (server as any).convertProviderResponseIfNeeded = jest.fn(async ({ response }: any) => response);
-
-    await expect((server as any).executePipeline({
+    await expect(server['executePipeline']({
       requestId: 'req_pool_exhausted',
       entryEndpoint: '/v1/chat/completions',
       headers: {},
@@ -321,20 +304,29 @@ describe('RouteCodexHttpServer.executePipeline failover', () => {
       code: 'HTTP_429'
     });
 
-    expect(runHubPipeline).toHaveBeenCalledTimes(2);
-    const secondMetadata = runHubPipeline.mock.calls[1][1] as Record<string, unknown>;
-    expect(secondMetadata.excludedProviderKeys).toEqual([providerA]);
+    expect(hubExecute).toHaveBeenCalledTimes(2);
+    const secondPipelineInput = hubExecute.mock.calls[1]?.[0] as Record<string, any>;
+    expect(secondPipelineInput?.metadata?.excludedProviderKeys).toEqual([providerA]);
   });
-  it('returns first upstream error when single-provider pool reroute reports provider unavailable', async () => {
+
+  it('keeps excludedProviderKeys empty for single-provider pool retries', async () => {
     const server = new RouteCodexHttpServer(createTestConfig());
 
     const providerA = 'glm.key1.glm-4.7';
+    const firstError = Object.assign(new Error('HTTP 429: quota exhausted'), {
+      statusCode: 429,
+      code: 'HTTP_429'
+    });
+    let pipelineCallCount = 0;
 
-    (server as any).hubPipeline = {};
-
-    const runHubPipeline = jest.fn()
-      .mockResolvedValueOnce({
-        requestId: 'req_single_pool_unavailable',
+    const hubExecute = attachHubPipeline(server, async () => {
+      pipelineCallCount += 1;
+      if (pipelineCallCount >= 2) {
+        throw Object.assign(new Error('All providers unavailable for model glm.glm-4.7'), {
+          code: 'PROVIDER_NOT_AVAILABLE'
+        });
+      }
+      return {
         providerPayload: { model: 'glm-4.7' },
         target: {
           providerKey: providerA,
@@ -346,42 +338,22 @@ describe('RouteCodexHttpServer.executePipeline failover', () => {
         routingDecision: { routeName: 'direct', pool: [providerA] },
         processMode: 'chat',
         metadata: {}
-      })
-      .mockRejectedValueOnce(
-        Object.assign(new Error('All providers unavailable for model glm.glm-4.7'), {
-          code: 'PROVIDER_NOT_AVAILABLE'
-        })
-      );
-    (server as any).runHubPipeline = runHubPipeline;
-
-    const firstError = Object.assign(new Error('HTTP 429: quota exhausted'), {
-      statusCode: 429,
-      code: 'HTTP_429'
+      };
     });
 
-    const providerHandles = new Map<string, any>();
-    providerHandles.set('runtime:A', {
+    attachProviderHandle(server, {
+      providerKey: providerA,
+      runtimeKey: 'runtime:A',
       providerType: 'openai',
       providerFamily: 'glm',
       providerId: 'glm',
       providerProtocol: 'openai-chat',
-      instance: {
-        processIncoming: jest.fn(async () => {
-          throw firstError;
-        }),
-        initialize: jest.fn(),
-        cleanup: jest.fn()
+      processIncoming: async () => {
+        throw firstError;
       }
     });
-    (server as any).providerHandles = providerHandles;
 
-    const providerKeyToRuntimeKey = new Map<string, string>();
-    providerKeyToRuntimeKey.set(providerA, 'runtime:A');
-    (server as any).providerKeyToRuntimeKey = providerKeyToRuntimeKey;
-
-    (server as any).convertProviderResponseIfNeeded = jest.fn(async ({ response }: any) => response);
-
-    await expect((server as any).executePipeline({
+    await expect(server['executePipeline']({
       requestId: 'req_single_pool_unavailable',
       entryEndpoint: '/v1/chat/completions',
       headers: {},
@@ -393,9 +365,8 @@ describe('RouteCodexHttpServer.executePipeline failover', () => {
       code: 'HTTP_429'
     });
 
-    expect(runHubPipeline).toHaveBeenCalledTimes(2);
-    const secondMetadata = runHubPipeline.mock.calls[1][1] as Record<string, unknown>;
-    expect(secondMetadata.excludedProviderKeys).toEqual([]);
+    expect(hubExecute).toHaveBeenCalledTimes(2);
+    const secondPipelineInput = hubExecute.mock.calls[1]?.[0] as Record<string, any>;
+    expect(secondPipelineInput?.metadata?.excludedProviderKeys).toBeUndefined();
   });
-
 });

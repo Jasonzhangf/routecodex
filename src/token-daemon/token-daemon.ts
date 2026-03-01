@@ -26,6 +26,7 @@ import { DEFAULT_TOKEN_DAEMON } from '../constants/index.js';
 export interface TokenDaemonOptions {
   intervalMs: number;
   refreshAheadMinutes: number;
+  configPath?: string;
 }
 
 const DEBUG_FLAG = String(process.env.ROUTECODEX_TOKEN_DAEMON_DEBUG || '').trim().toLowerCase();
@@ -42,7 +43,8 @@ const USER_TIMEOUT_PATTERNS = [
   'callback timed out',
   'oauth callback timeout'
 ];
-let camoufoxEnabledCache: boolean | null = null;
+const camoufoxEnabledCache = new Map<string, boolean>();
+const DEFAULT_CAMOUFOX_CACHE_KEY = '__default__';
 
 type CamoufoxOverrideOptions = {
   useCamoufox: boolean;
@@ -90,18 +92,21 @@ function resolveConfiguredProviders(userConfig: unknown): Set<OAuthProviderId> {
   return configured;
 }
 
-async function isCamoufoxOauthEnabled(): Promise<boolean> {
-  if (camoufoxEnabledCache !== null) {
-    return camoufoxEnabledCache;
+async function isCamoufoxOauthEnabled(configPath?: string): Promise<boolean> {
+  const cacheKey = configPath && configPath.trim() ? configPath.trim() : DEFAULT_CAMOUFOX_CACHE_KEY;
+  const cached = camoufoxEnabledCache.get(cacheKey);
+  if (cached !== undefined) {
+    return cached;
   }
   try {
-    const { userConfig } = await loadRouteCodexConfig();
+    const { userConfig } = await loadRouteCodexConfig(configPath);
     const cfg = userConfig as Record<string, unknown>;
     const raw = typeof cfg.oauthBrowser === 'string' ? cfg.oauthBrowser.trim().toLowerCase() : '';
-    camoufoxEnabledCache = raw === 'camoufox';
-    return camoufoxEnabledCache;
+    const enabled = raw === 'camoufox';
+    camoufoxEnabledCache.set(cacheKey, enabled);
+    return enabled;
   } catch {
-    camoufoxEnabledCache = false;
+    camoufoxEnabledCache.set(cacheKey, false);
     return false;
   }
 }
@@ -110,6 +115,7 @@ export class TokenDaemon {
   private readonly intervalMs: number;
   private readonly refreshAheadMinutes: number;
   private readonly historyStore: TokenHistoryStore;
+  private readonly configPath?: string;
   private timer: NodeJS.Timeout | null = null;
   private lastRefreshAttempt: Map<string, number> = new Map();
   private antigravityMetadataEnsureTimestamps: Map<string, number> = new Map();
@@ -138,6 +144,9 @@ export class TokenDaemon {
         ? options.refreshAheadMinutes
         : effectiveEnvRefreshAhead ?? DEFAULT_TOKEN_DAEMON.REFRESH_AHEAD_MINUTES;
     this.historyStore = new TokenHistoryStore();
+    this.configPath = options?.configPath && options.configPath.trim()
+      ? options.configPath.trim()
+      : undefined;
   }
 
   async start(): Promise<void> {
@@ -187,13 +196,13 @@ export class TokenDaemon {
     const snapshot = await collectTokenSnapshot();
     const now = snapshot.timestamp;
     const refreshAheadMs = this.refreshAheadMinutes * 60_000;
-    const camoufoxEnabled = await isCamoufoxOauthEnabled();
+    const camoufoxEnabled = await isCamoufoxOauthEnabled(this.configPath);
     const refreshUnconfigured =
       String(process.env.ROUTECODEX_TOKEN_DAEMON_REFRESH_UNCONFIGURED || '').trim() === '1';
     let configuredProviders: Set<OAuthProviderId> | null = null;
     if (!refreshUnconfigured) {
       try {
-        const { userConfig } = await loadRouteCodexConfig();
+        const { userConfig } = await loadRouteCodexConfig(this.configPath);
         configuredProviders = resolveConfiguredProviders(userConfig);
       } catch {
         configuredProviders = new Set();

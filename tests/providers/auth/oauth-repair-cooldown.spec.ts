@@ -40,7 +40,7 @@ describe('oauth-repair-cooldown', () => {
     else process.env.HOME = prevHome;
   });
 
-  test('generic reason stops at max attempts but reopens after cooldown and resets on success', async () => {
+  test('generic reason enters cooldown after one failed interactive attempt and resets on success', async () => {
     const prevHome = process.env.HOME;
     const prevMax = process.env.ROUTECODEX_OAUTH_INTERACTIVE_MAX_ATTEMPTS;
     const prevCooldown = process.env.ROUTECODEX_OAUTH_INTERACTIVE_COOLDOWN_MS;
@@ -48,7 +48,7 @@ describe('oauth-repair-cooldown', () => {
 
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-oauth-attempts-'));
     process.env.HOME = tmp;
-    process.env.ROUTECODEX_OAUTH_INTERACTIVE_MAX_ATTEMPTS = '3';
+    process.env.ROUTECODEX_OAUTH_INTERACTIVE_MAX_ATTEMPTS = '1';
     process.env.ROUTECODEX_OAUTH_INTERACTIVE_COOLDOWN_MS = '1000';
 
     const providerType = 'antigravity';
@@ -56,20 +56,11 @@ describe('oauth-repair-cooldown', () => {
 
     nowSpy.mockReturnValue(2_000_000);
     await markInteractiveOAuthRepairAttempt({ providerType, tokenFile, reason: 'generic' });
-    nowSpy.mockReturnValue(2_000_100);
-    await markInteractiveOAuthRepairAttempt({ providerType, tokenFile, reason: 'generic' });
 
-    nowSpy.mockReturnValue(2_000_200);
-    const gate2 = await shouldSkipInteractiveOAuthRepair({ providerType, tokenFile, reason: 'generic' });
-    expect(gate2.skip).toBe(false);
-    expect((gate2.record as any)?.attemptCount).toBe(2);
-
-    nowSpy.mockReturnValue(2_000_300);
-    await markInteractiveOAuthRepairAttempt({ providerType, tokenFile, reason: 'generic' });
     nowSpy.mockReturnValue(2_000_800);
-    const gate3 = await shouldSkipInteractiveOAuthRepair({ providerType, tokenFile, reason: 'generic' });
-    expect(gate3.skip).toBe(true);
-    expect((gate3.record as any)?.attemptCount).toBe(3);
+    const gate1 = await shouldSkipInteractiveOAuthRepair({ providerType, tokenFile, reason: 'generic' });
+    expect(gate1.skip).toBe(true);
+    expect((gate1.record as any)?.attemptCount).toBe(1);
 
     nowSpy.mockReturnValue(2_001_500);
     const gateAfterCooldown = await shouldSkipInteractiveOAuthRepair({ providerType, tokenFile, reason: 'generic' });

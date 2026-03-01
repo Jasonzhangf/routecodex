@@ -46,7 +46,7 @@ describe('openAuthInCamoufox portal flow', () => {
     const originalRetries = process.env.ROUTECODEX_CAMOUFOX_PORTAL_CLICK_RETRIES;
     const originalRetryDelay = process.env.ROUTECODEX_CAMOUFOX_PORTAL_CLICK_RETRY_DELAY_MS;
     process.env.HOME = '/tmp';
-    delete process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
+    process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE = 'iflow';
     process.env.ROUTECODEX_CAMOUFOX_PORTAL_CLICK_RETRIES = '2';
     process.env.ROUTECODEX_CAMOUFOX_PORTAL_CLICK_RETRY_DELAY_MS = '1';
 
@@ -217,6 +217,82 @@ describe('openAuthInCamoufox portal flow', () => {
         delete process.env.ROUTECODEX_CAMOUFOX_PORTAL_CLICK_RETRY_DELAY_MS;
       } else {
         process.env.ROUTECODEX_CAMOUFOX_PORTAL_CLICK_RETRY_DELAY_MS = originalRetryDelay;
+      }
+    }
+  });
+
+  it('auto-creates fingerprint env when missing instead of failing launch', async () => {
+    const originalHome = process.env.HOME;
+    const tmpHome = fs.mkdtempSync(path.join('/tmp', 'routecodex-camoufox-fp-missing-'));
+    process.env.HOME = tmpHome;
+
+    const spawnCalls: Array<{ args: string[]; env?: SpawnSyncEnv }> = [];
+    let listCalls = 0;
+    const spawnSyncMock = jest.fn((_: string, args?: ReadonlyArray<string>, options?: { env?: SpawnSyncEnv }) => {
+      const normalizedArgs = Array.isArray(args) ? [...args] : [];
+      spawnCalls.push({ args: normalizedArgs, env: options?.env });
+      if (normalizedArgs[0] === 'status') {
+        return {
+          status: 0,
+          stdout: JSON.stringify({ ok: true, session: { profileId: 'rc-qwen.135' } }),
+          stderr: ''
+        };
+      }
+      if (normalizedArgs[0] === 'list') {
+        listCalls += 1;
+        return {
+          status: 0,
+          stdout: JSON.stringify({
+            ok: true,
+            sessions: listCalls === 1 ? [] : [{ profileId: 'rc-qwen.135' }]
+          }),
+          stderr: ''
+        };
+      }
+      if (normalizedArgs[0] === 'start') {
+        return {
+          status: 0,
+          stdout: JSON.stringify({ ok: true, profileId: 'rc-qwen.135', sessionId: 'rc-qwen.135' }),
+          stderr: ''
+        };
+      }
+      return { status: 0, stdout: '', stderr: '' };
+    }) as SpawnSyncMock;
+
+    try {
+      const launcher = await loadLauncherWithSpawnSyncMock(spawnSyncMock);
+      const ok = await launcher.openAuthInCamoufox({
+        url: 'http://127.0.0.1:18080/token-auth/demo?oauthUrl=https%3A%2F%2Fchat.qwen.ai%2Fauthorize',
+        provider: 'qwen',
+        alias: '135'
+      });
+
+      expect(ok).toBe(true);
+      expect(
+        spawnCalls.some(
+          (entry) =>
+            entry.args[0] === 'profile' &&
+            entry.args[1] === 'create' &&
+            entry.args[2] === 'rc-qwen.135'
+        )
+      ).toBe(true);
+      expect(
+        spawnCalls.some(
+          (entry) =>
+            Boolean(entry.env?.CAMOU_CONFIG_1) &&
+            entry.env?.BROWSER_PROFILE_ID === 'rc-qwen.135'
+        )
+      ).toBe(true);
+    } finally {
+      if (originalHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = originalHome;
+      }
+      try {
+        fs.rmSync(tmpHome, { recursive: true, force: true });
+      } catch {
+        // ignore cleanup failures
       }
     }
   });
@@ -496,10 +572,14 @@ describe('openAuthInCamoufox portal flow', () => {
     const originalAutoMode = process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE;
     const originalSettleMs = process.env.ROUTECODEX_CAMOUFOX_GOOGLE_OAUTH_SETTLE_MS;
     const originalPollMs = process.env.ROUTECODEX_CAMOUFOX_GOOGLE_OAUTH_POLL_MS;
+    const originalSignInSettleMs = process.env.ROUTECODEX_CAMOUFOX_GOOGLE_SIGNIN_SETTLE_MS;
+    const originalSignInPollMs = process.env.ROUTECODEX_CAMOUFOX_GOOGLE_SIGNIN_POLL_MS;
     process.env.HOME = '/tmp';
-    process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE = 'gemini';
+    process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE = 'qwen';
     process.env.ROUTECODEX_CAMOUFOX_GOOGLE_OAUTH_SETTLE_MS = '10';
     process.env.ROUTECODEX_CAMOUFOX_GOOGLE_OAUTH_POLL_MS = '1';
+    process.env.ROUTECODEX_CAMOUFOX_GOOGLE_SIGNIN_SETTLE_MS = '10';
+    process.env.ROUTECODEX_CAMOUFOX_GOOGLE_SIGNIN_POLL_MS = '1';
 
     const spawnCalls: Array<{ args: string[]; env?: SpawnSyncEnv }> = [];
     let listPagesCalls = 0;
@@ -509,7 +589,7 @@ describe('openAuthInCamoufox portal flow', () => {
       if (normalizedArgs[0] === 'list') {
         return {
           status: 0,
-          stdout: JSON.stringify({ ok: true, sessions: [{ profileId: 'rc-gemini.geetasamodgeetasamoda' }] }),
+          stdout: JSON.stringify({ ok: true, sessions: [{ profileId: 'rc-qwen.geetasamodgeetasamoda' }] }),
           stderr: ''
         };
       }
@@ -518,8 +598,8 @@ describe('openAuthInCamoufox portal flow', () => {
           status: 0,
           stdout: JSON.stringify({
             ok: true,
-            profileId: 'rc-gemini.geetasamodgeetasamoda',
-            sessionId: 'rc-gemini.geetasamodgeetasamoda'
+            profileId: 'rc-qwen.geetasamodgeetasamoda',
+            sessionId: 'rc-qwen.geetasamodgeetasamoda'
           }),
           stderr: ''
         };
@@ -545,11 +625,11 @@ describe('openAuthInCamoufox portal flow', () => {
     }) as SpawnSyncMock;
 
     try {
-      writeFingerprintFixture('/tmp', 'rc-gemini.geetasamodgeetasamoda');
+      writeFingerprintFixture('/tmp', 'rc-qwen.geetasamodgeetasamoda');
       const launcher = await loadLauncherWithSpawnSyncMock(spawnSyncMock);
       const ok = await launcher.openAuthInCamoufox({
         url: 'http://127.0.0.1:18080/token-auth/demo?oauthUrl=https%3A%2F%2Faccounts.google.com%2Fo%2Foauth2%2Fv2%2Fauth',
-        provider: 'gemini-cli',
+        provider: 'qwen',
         alias: 'geetasamodgeetasamoda'
       });
 
@@ -583,6 +663,16 @@ describe('openAuthInCamoufox portal flow', () => {
         delete process.env.ROUTECODEX_CAMOUFOX_GOOGLE_OAUTH_POLL_MS;
       } else {
         process.env.ROUTECODEX_CAMOUFOX_GOOGLE_OAUTH_POLL_MS = originalPollMs;
+      }
+      if (originalSignInSettleMs === undefined) {
+        delete process.env.ROUTECODEX_CAMOUFOX_GOOGLE_SIGNIN_SETTLE_MS;
+      } else {
+        process.env.ROUTECODEX_CAMOUFOX_GOOGLE_SIGNIN_SETTLE_MS = originalSignInSettleMs;
+      }
+      if (originalSignInPollMs === undefined) {
+        delete process.env.ROUTECODEX_CAMOUFOX_GOOGLE_SIGNIN_POLL_MS;
+      } else {
+        process.env.ROUTECODEX_CAMOUFOX_GOOGLE_SIGNIN_POLL_MS = originalSignInPollMs;
       }
     }
   });
