@@ -146,10 +146,7 @@ function sanitizeV2ConfigSources(userConfig: UnknownRecord, configPath: string):
   }
 
   const httpserver = isRecord(userConfig.httpserver) ? (userConfig.httpserver as UnknownRecord) : undefined;
-  if (httpserver && Object.prototype.hasOwnProperty.call(httpserver, 'apikey')) {
-    delete httpserver.apikey;
-    removed.push('httpserver.apikey');
-  }
+  // httpserver.apikey remains supported in v2 for optional server auth.
 
   const vr = isRecord(userConfig.virtualrouter) ? (userConfig.virtualrouter as UnknownRecord) : undefined;
   if (vr) {
@@ -203,10 +200,10 @@ function validateV2ConfigSources(userConfig: UnknownRecord): void {
 
   const httpserver = isRecord(userConfig.httpserver) ? (userConfig.httpserver as UnknownRecord) : undefined;
   if (httpserver) {
-    const allowedHttp = new Set(['host', 'port']);
+    const allowedHttp = new Set(['host', 'port', 'apikey']);
     for (const key of Object.keys(httpserver)) {
       if (!allowedHttp.has(key)) {
-        errors.push(`v2 config disallows httpserver field "${key}" (only host/port allowed)`);
+        errors.push(`v2 config disallows httpserver field "${key}" (only host/port/apikey allowed)`);
       }
     }
   }

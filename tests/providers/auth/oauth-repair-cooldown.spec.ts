@@ -40,7 +40,7 @@ describe('oauth-repair-cooldown', () => {
     else process.env.HOME = prevHome;
   });
 
-  test('generic reason enters cooldown after one failed interactive attempt and resets on success', async () => {
+  test('generic reason never enters cooldown (still resets on success)', async () => {
     const prevHome = process.env.HOME;
     const prevMax = process.env.ROUTECODEX_OAUTH_INTERACTIVE_MAX_ATTEMPTS;
     const prevCooldown = process.env.ROUTECODEX_OAUTH_INTERACTIVE_COOLDOWN_MS;
@@ -59,12 +59,8 @@ describe('oauth-repair-cooldown', () => {
 
     nowSpy.mockReturnValue(2_000_800);
     const gate1 = await shouldSkipInteractiveOAuthRepair({ providerType, tokenFile, reason: 'generic' });
-    expect(gate1.skip).toBe(true);
+    expect(gate1.skip).toBe(false);
     expect((gate1.record as any)?.attemptCount).toBe(1);
-
-    nowSpy.mockReturnValue(2_001_500);
-    const gateAfterCooldown = await shouldSkipInteractiveOAuthRepair({ providerType, tokenFile, reason: 'generic' });
-    expect(gateAfterCooldown.skip).toBe(false);
 
     await markInteractiveOAuthRepairSuccess({ providerType, tokenFile });
     nowSpy.mockReturnValue(2_001_600);
