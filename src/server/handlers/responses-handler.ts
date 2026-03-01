@@ -14,6 +14,7 @@ import { applySystemPromptOverride } from '../../utils/system-prompt-loader.js';
 import { detectWarmupRequest } from '../utils/warmup-detector.js';
 import { recordWarmupSkipEvent } from '../utils/warmup-storm-tracker.js';
 import { trackClientConnectionState } from '../utils/client-connection-state.js';
+import { DEFAULT_TIMEOUTS } from '../../constants/index.js';
 
 interface ResponsesHandlerOptions {
   entryEndpoint?: string;
@@ -44,13 +45,14 @@ export async function handleResponses(
   const rawTimeout = String(
     process.env.ROUTECODEX_HTTP_RESPONSES_TIMEOUT_MS ||
       process.env.RCC_HTTP_RESPONSES_TIMEOUT_MS ||
-      '500000'
+      ''
   ).trim();
   const parsedTimeout = Number(rawTimeout);
+  const defaultTimeoutMs = DEFAULT_TIMEOUTS.HTTP_SSE_TOTAL_MS;
   const requestTimeoutMs =
     rawTimeout === ''
-      ? 500000
-      : (Number.isFinite(parsedTimeout) ? parsedTimeout : 500000);
+      ? defaultTimeoutMs
+      : (Number.isFinite(parsedTimeout) ? parsedTimeout : defaultTimeoutMs);
   let timedOut = false;
   let timeoutHandle: NodeJS.Timeout | undefined;
   const clearTimeoutHandle = () => {

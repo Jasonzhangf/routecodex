@@ -94,8 +94,8 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
       'Content-Type': 'application/json'
       // 版本标头由上游/配置控制，这里不硬编码 anthropic-version，避免与兼容端点冲突
     },
-    // 默认 Provider 请求超时时间：500s
-    timeout: 500000,
+    // 默认 Provider 请求超时时间：1000s（更长的长上下文/工具回合）
+    timeout: 1000000,
     maxRetries: 3
   },
   gemini: {

@@ -17,6 +17,7 @@ import {
 import { isVerboseErrorLoggingEnabled } from './env-config.js';
 import { extractSseWrapperError } from './sse-error-handler.js';
 import { isRateLimitLikeError } from './request-retry-helpers.js';
+import { extractUsageFromResult } from './usage-aggregator.js';
 
 const FOLLOWUP_SESSION_HEADER_KEYS = new Set([
   'sessionid',
@@ -523,9 +524,16 @@ export async function convertProviderResponseIfNeeded(
       clientInjectDispatch: serverToolsEnabled ? clientInjectDispatch : undefined
     });
     if (converted.__sse_responses) {
+      const usage = converted.body
+        ? extractUsageFromResult({ body: converted.body })
+        : undefined;
+      const body: Record<string, unknown> = { __sse_responses: converted.__sse_responses };
+      if (usage) {
+        body.usage = usage;
+      }
       return {
         ...options.response,
-        body: { __sse_responses: converted.__sse_responses }
+        body
       };
     }
     return {

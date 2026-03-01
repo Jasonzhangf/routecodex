@@ -67,6 +67,14 @@ function formatRequestId(value?: string): string {
   return resolveEffectiveRequestId(value);
 }
 
+function formatTimestamp(): string {
+  const now = new Date();
+  const hours = String(now.getHours()).padStart(2, '0');
+  const minutes = String(now.getMinutes()).padStart(2, '0');
+  const seconds = String(now.getSeconds()).padStart(2, '0');
+  return `${hours}:${minutes}:${seconds}`;
+}
+
 export function nextRequestIdentifiers(
   candidate?: unknown,
   meta?: { entryEndpoint?: string; providerId?: string; model?: string }
@@ -85,16 +93,22 @@ export function logRequestStart(endpoint: string, requestId: string, meta?: Requ
   if (!SHOULD_LOG_HTTP_EVENTS) {
     return;
   }
-  void endpoint;
-  void requestId;
-  void meta;
+  const resolvedId = formatRequestId(requestId);
+  const timestamp = formatTimestamp();
+  const metaSuffix =
+    meta && Object.keys(meta).length
+      ? ` meta=${JSON.stringify(meta)}`
+      : '';
+  console.log(`[http.request] ${timestamp} [${endpoint}] request ${resolvedId} started${metaSuffix}`);
 }
 
 export function logRequestComplete(endpoint: string, requestId: string, status: number): void {
   if (!SHOULD_LOG_HTTP_EVENTS) {
     return;
   }
-  console.log(`✅ [${endpoint}] request ${formatRequestId(requestId)} completed (status=${status})`);
+  const resolvedId = formatRequestId(requestId);
+  const timestamp = formatTimestamp();
+  console.log(`✅ [${endpoint}] ${timestamp} request ${resolvedId} completed (status=${status})`);
 }
 
 export function logRequestError(endpoint: string, requestId: string, error: unknown): void {
@@ -103,7 +117,8 @@ export function logRequestError(endpoint: string, requestId: string, error: unkn
   const rawMeta = extractRawErrorMeta(error);
   const summary = rawMeta?.rawErrorSnippet ?? formatted.text;
   const chalkError = typeof chalk?.redBright === 'function' ? chalk.redBright : (value: string) => value;
-  console.error(chalkError(`❌ [${endpoint}] request ${resolvedId} failed: ${summary}`));
+  const timestamp = formatTimestamp();
+  console.error(chalkError(`❌ [${endpoint}] ${timestamp} request ${resolvedId} failed: ${summary}`));
   if (rawMeta && shouldLogHttpErrorMeta()) {
     const payload = {
       requestId: resolvedId,
