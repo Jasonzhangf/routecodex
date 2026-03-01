@@ -786,6 +786,25 @@ function isQwenAuthorizeUrl(rawUrl: string): boolean {
   }
 }
 
+function isQwenLoginUrl(rawUrl: string): boolean {
+  if (!rawUrl || typeof rawUrl !== 'string') {
+    return false;
+  }
+  try {
+    const parsed = new URL(rawUrl);
+    if (!/(?:^|\.)chat\.qwen\.ai$/i.test(parsed.hostname)) {
+      return false;
+    }
+    return parsed.pathname === '/auth' || parsed.pathname.startsWith('/auth/');
+  } catch {
+    return (
+      rawUrl.includes('chat.qwen.ai/auth?') ||
+      rawUrl.includes('chat.qwen.ai/auth/') ||
+      rawUrl.endsWith('chat.qwen.ai/auth')
+    );
+  }
+}
+
 function isGoogleAuthUrl(rawUrl: string): boolean {
   if (!rawUrl || typeof rawUrl !== 'string') {
     return false;
@@ -810,44 +829,63 @@ async function maybeAdvanceQwenAuthorization(options: {
     return true;
   }
   let activeUrl = getActiveCamoPageUrl(options.actionContext);
-  if (activeUrl && !isQwenAuthorizeUrl(activeUrl) && isTokenPortalUrl(activeUrl)) {
-    const settleTimeoutMs = parsePositiveInt(process.env.ROUTECODEX_CAMOUFOX_QWEN_OAUTH_SETTLE_MS, 8000);
-    const pollIntervalMs = parsePositiveInt(process.env.ROUTECODEX_CAMOUFOX_QWEN_OAUTH_POLL_MS, 250);
-    const deadline = Date.now() + settleTimeoutMs;
-    while (Date.now() <= deadline) {
-      const currentUrl = getActiveCamoPageUrl(options.actionContext);
-      if (currentUrl) {
-        activeUrl = currentUrl;
-        if (isQwenAuthorizeUrl(currentUrl) || isGoogleAuthUrl(currentUrl)) {
-          break;
-        }
-      }
-      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
-    }
-  }
-  if (!activeUrl || !isQwenAuthorizeUrl(activeUrl)) {
-    return true;
-  }
   const autoMode = String(process.env.ROUTECODEX_CAMOUFOX_AUTO_MODE || '').trim().toLowerCase();
   const autoModeEnabled = autoMode === 'qwen';
   if (!autoModeEnabled) {
     return true;
   }
-  const retryCount = parsePositiveInt(process.env.ROUTECODEX_CAMOUFOX_QWEN_CLICK_RETRIES, autoModeEnabled ? 6 : 2);
-  const retryDelayMs = parsePositiveInt(process.env.ROUTECODEX_CAMOUFOX_QWEN_CLICK_RETRY_DELAY_MS, 350);
+  const settleTimeoutMs = parsePositiveInt(process.env.ROUTECODEX_CAMOUFOX_QWEN_OAUTH_SETTLE_MS, 8000);
+  const pollIntervalMs = parsePositiveInt(process.env.ROUTECODEX_CAMOUFOX_QWEN_OAUTH_POLL_MS, 250);
+  const deadline = Date.now() + settleTimeoutMs;
+  while (Date.now() <= deadline) {
+    const currentUrl = getActiveCamoPageUrl(options.actionContext);
+    if (currentUrl) {
+      activeUrl = currentUrl;
+      if (isQwenAuthorizeUrl(currentUrl) || isGoogleAuthUrl(currentUrl) || isQwenLoginUrl(currentUrl)) {
+        break;
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+  }
+  if (!activeUrl) {
+    logOAuthDebug('[OAuth] camo-cli qwen oauth page not ready (no active url)');
+    return false;
+  }
+  if (isGoogleAuthUrl(activeUrl)) {
+    // Google auth handled in the next stage.
+    return true;
+  }
+  if (isQwenLoginUrl(activeUrl)) {
+    // Login screen requires user interaction; trigger fallback to headful/manual mode.
+    logOAuthDebug(`[OAuth] camo-cli qwen login page detected; falling back to manual: ${activeUrl}`);
+    return false;
+  }
+  if (!isQwenAuthorizeUrl(activeUrl)) {
+    logOAuthDebug(`[OAuth] camo-cli qwen oauth page not ready: ${activeUrl}`);
+    return false;
+  }
+  const readyDelayMs = parsePositiveInt(process.env.ROUTECODEX_CAMOUFOX_QWEN_CONFIRM_WAIT_MS, 1200);
+  if (readyDelayMs > 0) {
+    await new Promise((resolve) => setTimeout(resolve, readyDelayMs));
+  }
+  const retryCount = parsePositiveInt(process.env.ROUTECODEX_CAMOUFOX_QWEN_CLICK_RETRIES, autoModeEnabled ? 12 : 2);
+  const retryDelayMs = parsePositiveInt(process.env.ROUTECODEX_CAMOUFOX_QWEN_CLICK_RETRY_DELAY_MS, 500);
 
   // Try direct confirm first; if not present, fall back to Google entry button.
-  await clickCamoTarget(options.actionContext, CAMO_CLICK_TARGETS.qwenAuthorizeConfirm, {
+  const confirmClicked = await clickCamoTarget(options.actionContext, CAMO_CLICK_TARGETS.qwenAuthorizeConfirm, {
     retries: retryCount,
     retryDelayMs,
-    required: false
+    required: true
   });
-  await clickCamoTarget(options.actionContext, CAMO_CLICK_TARGETS.qwenGoogleContinue, {
+  if (confirmClicked) {
+    return true;
+  }
+  const googleClicked = await clickCamoTarget(options.actionContext, CAMO_CLICK_TARGETS.qwenGoogleContinue, {
     retries: retryCount,
     retryDelayMs,
-    required: false
+    required: true
   });
-  return true;
+  return googleClicked;
 }
 
 async function maybeAdvanceIflowAccountSelection(options: {

@@ -19,7 +19,10 @@ export const CAMO_CLICK_TARGETS: Record<string, CamoClickTarget> = {
     selectors: [
       '.qwen-confirm-btn',
       "button[class*='qwen-confirm-btn']",
-      'button.qwen-confirm-btn'
+      'button.qwen-confirm-btn',
+      'button.qwen-chat-btn',
+      "button[class*='qwen-chat-btn']",
+      '.authorize-actions button'
     ]
   },
   qwenGoogleContinue: {
@@ -265,8 +268,14 @@ function shouldRestartActiveSession(context: CamoActionContext): boolean {
   if (explicit) {
     return explicit === '1' || explicit === 'true' || explicit === 'yes' || explicit === 'on';
   }
+  const profileId = String(context.profileId || '').toLowerCase();
+  const isQwenProfile = profileId.startsWith('rc-qwen');
   const autoMode = String(context.env.ROUTECODEX_CAMOUFOX_AUTO_MODE || '').trim();
-  return autoMode.length > 0;
+  if (autoMode.length > 0) {
+    // Qwen auto mode should reuse the same profile session to preserve login cookies.
+    return !isQwenProfile;
+  }
+  return false;
 }
 
 export function startCamoSession(context: CamoActionContext, headless: boolean): boolean {
