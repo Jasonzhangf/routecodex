@@ -209,7 +209,10 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
     const device_code = mapValue(mapped, ['device_code', 'deviceCode', 'deviceCodeId']);
     const user_code = mapValue(mapped, ['user_code', 'userCode', 'user_code_text']);
     const verification_uri = mapValue(mapped, ['verification_uri', 'verification_url', 'verificationUri', 'verificationUrl']);
-    const verification_uri_complete = mapValue(mapped, ['verification_uri_complete', 'verification_url_complete', 'verificationUriComplete', 'verificationUrlComplete']);
+    const verification_uri_complete = mapValue(
+      mapped,
+      ['verification_uri_complete', 'verification_url_complete', 'verificationUriComplete', 'verificationUrlComplete']
+    );
     const expires_in = Number(mapValue(mapped, ['expires_in', 'expiresIn'])) || 600;
     const interval = Number(mapValue(mapped, ['interval'])) || 5;
 
@@ -232,11 +235,36 @@ export class OAuthDeviceFlowStrategy extends BaseOAuthFlowStrategy {
       console.log(verification_uri_complete);
     }
 
+    const resolvedUserCode = typeof user_code === 'string' ? user_code : undefined;
+    const resolvedVerificationUri = typeof verification_uri === 'string' ? verification_uri : undefined;
+    let resolvedVerificationUriComplete =
+      typeof verification_uri_complete === 'string' ? verification_uri_complete : undefined;
+
+    // Qwen requires user_code/client in the authorize URL; ensure we keep/construct it.
+    if (resolvedUserCode && resolvedVerificationUri) {
+      const deviceUrl = String(this.config.endpoints.deviceCodeUrl || '');
+      const isQwenDevice = deviceUrl.includes('chat.qwen.ai');
+      if (isQwenDevice) {
+        try {
+          const url = new URL(resolvedVerificationUriComplete || resolvedVerificationUri);
+          if (!url.searchParams.get('user_code')) {
+            url.searchParams.set('user_code', resolvedUserCode);
+          }
+          if (!url.searchParams.get('client')) {
+            url.searchParams.set('client', 'qwen-code');
+          }
+          resolvedVerificationUriComplete = url.toString();
+        } catch {
+          // Leave as-is when URL parsing fails.
+        }
+      }
+    }
+
     const result: DeviceCodeData = {
       device_code,
-      user_code: typeof user_code === 'string' ? user_code : undefined,
-      verification_uri: typeof verification_uri === 'string' ? verification_uri : undefined,
-      verification_uri_complete: typeof verification_uri_complete === 'string' ? verification_uri_complete : undefined,
+      user_code: resolvedUserCode,
+      verification_uri: resolvedVerificationUri,
+      verification_uri_complete: resolvedVerificationUriComplete,
       expires_in,
       interval,
       code_verifier: codeVerifier
