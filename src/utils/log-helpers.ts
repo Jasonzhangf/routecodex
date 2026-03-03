@@ -2,6 +2,7 @@ import { Buffer } from 'node:buffer';
 
 const DEFAULT_ERROR_LOG_LIMIT = 500;
 const RAW_CAPTURE_LIMIT = 1024;
+const MISSING_CODE_LOG_LIMIT = 100;
 
 function coerceToString(value: unknown): string | undefined {
   if (typeof value === 'string') {
@@ -92,6 +93,16 @@ export function formatErrorForConsole(
     }
   }
 
+  if (isMissingErrorCode(error)) {
+    const raw = extractRawErrorPayload(error);
+    if (raw) {
+      attachShortRawSnippet(error, raw, MISSING_CODE_LOG_LIMIT);
+      return { text: truncateForConsole(raw, MISSING_CODE_LOG_LIMIT) };
+    }
+    const message = error instanceof Error ? error.message : String(error ?? 'Unknown error');
+    return { text: truncateForConsole(message, MISSING_CODE_LOG_LIMIT) };
+  }
+
   const raw = extractRawErrorPayload(error);
   if (raw) {
     annotateErrorWithRaw(error, raw);
@@ -114,6 +125,44 @@ export function annotateErrorWithRaw(error: unknown, raw: string): void {
       bag.rawErrorSnippet = truncateForConsole(raw, RAW_CAPTURE_LIMIT);
     }
   }
+}
+
+function attachShortRawSnippet(error: unknown, raw: string, limit: number): void {
+  if (!error || typeof error !== 'object') {
+    return;
+  }
+  const bag = error as Record<string, unknown>;
+  const snippet = truncateForConsole(raw, limit);
+  bag.rawErrorSnippet = snippet;
+  if (!bag.rawError) {
+    bag.rawError = raw;
+  }
+}
+
+function isMissingErrorCode(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return true;
+  }
+  const bag = error as Record<string, unknown>;
+  const code = typeof bag.code === 'string' ? bag.code.trim() : '';
+  if (code) {
+    return false;
+  }
+  const details = bag.details && typeof bag.details === 'object' && !Array.isArray(bag.details)
+    ? (bag.details as Record<string, unknown>)
+    : null;
+  const upstreamCode = details && typeof details.upstreamCode === 'string' ? details.upstreamCode.trim() : '';
+  if (upstreamCode) {
+    return false;
+  }
+  const response = bag.response as Record<string, unknown> | undefined;
+  const data = response && typeof response === 'object' ? (response.data as Record<string, unknown> | undefined) : undefined;
+  const err = data && typeof data.error === 'object' && data.error ? (data.error as Record<string, unknown>) : undefined;
+  const responseCode = err && typeof err.code === 'string' ? err.code.trim() : '';
+  if (responseCode) {
+    return false;
+  }
+  return true;
 }
 
 export function attachRawPayload(error: unknown, payload: string): void {

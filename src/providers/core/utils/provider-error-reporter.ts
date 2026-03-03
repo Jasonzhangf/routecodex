@@ -261,6 +261,14 @@ function normalizeCode(error: ErrorWithMetadata, stage: string): string {
   if (typeof rawCode === 'string' && rawCode.trim()) {
     return rawCode.toUpperCase();
   }
+  const upstreamCode = extractUpstreamCode(error);
+  if (upstreamCode) {
+    return upstreamCode.toUpperCase();
+  }
+  const status = extractStatusForCode(error);
+  if (typeof status === 'number' && Number.isFinite(status)) {
+    return `HTTP_${Math.floor(status)}`;
+  }
   if (stage.startsWith('compat')) {
     return 'ERR_COMPATIBILITY';
   }
@@ -276,6 +284,51 @@ function extractStatus(record?: Record<string, unknown>): number | undefined {
   }
   const candidate = record.status;
   return typeof candidate === 'number' ? candidate : undefined;
+}
+
+function extractUpstreamCode(error: ErrorWithMetadata): string | undefined {
+  const details = error.details;
+  if (details && typeof details === 'object' && !Array.isArray(details)) {
+    const code = (details as Record<string, unknown>).upstreamCode;
+    if (typeof code === 'string' && code.trim()) {
+      return code.trim();
+    }
+  }
+  const response = error.response;
+  if (response && typeof response === 'object') {
+    const data = (response as { data?: unknown }).data;
+    if (data && typeof data === 'object') {
+      const err = (data as { error?: unknown }).error;
+      if (err && typeof err === 'object') {
+        const code = (err as { code?: unknown }).code;
+        if (typeof code === 'string' && code.trim()) {
+          return code.trim();
+        }
+      }
+    }
+  }
+  return undefined;
+}
+
+function extractStatusForCode(error: ErrorWithMetadata): number | undefined {
+  if (typeof error.status === 'number') {
+    return error.status;
+  }
+  if (typeof error.statusCode === 'number') {
+    return error.statusCode;
+  }
+  if (typeof error.response?.status === 'number') {
+    return error.response.status;
+  }
+  const detailsStatus = extractStatus(error.details);
+  if (typeof detailsStatus === 'number') {
+    return detailsStatus;
+  }
+  const match = typeof error.message === 'string' ? error.message.match(/HTTP\\s+(\\d{3})/) : null;
+  if (match) {
+    return Number(match[1]);
+  }
+  return undefined;
 }
 
 function extractRecord(value: unknown): Record<string, unknown> | undefined {

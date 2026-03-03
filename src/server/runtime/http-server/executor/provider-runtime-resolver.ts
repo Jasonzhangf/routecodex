@@ -44,8 +44,8 @@ export async function resolveProviderRuntimeOrThrow(options: {
           target
         },
         dependencies,
-        recoverable: false,
-        affectsHealth: true,
+        recoverable: true,
+        affectsHealth: false,
         details: {
           reason: 'runtime_not_initialized',
           providerKey: target.providerKey
@@ -56,7 +56,8 @@ export async function resolveProviderRuntimeOrThrow(options: {
     }
     throw Object.assign(new Error(`Runtime for provider ${target.providerKey} not initialized`), {
       code: 'ERR_RUNTIME_NOT_FOUND',
-      requestId
+      requestId,
+      retryable: true
     });
   }
 
@@ -84,8 +85,8 @@ export async function resolveProviderRuntimeOrThrow(options: {
           target
         },
         dependencies,
-        recoverable: false,
-        affectsHealth: true,
+        recoverable: true,
+        affectsHealth: false,
         details: {
           reason: 'runtime_handle_missing',
           providerKey: target.providerKey,
@@ -97,7 +98,8 @@ export async function resolveProviderRuntimeOrThrow(options: {
     }
     throw Object.assign(new Error(`Provider runtime ${runtimeKey} not found`), {
       code: 'ERR_PROVIDER_NOT_FOUND',
-      requestId
+      requestId,
+      retryable: true
     });
   }
 
