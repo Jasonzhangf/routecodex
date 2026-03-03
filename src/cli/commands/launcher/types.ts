@@ -102,7 +102,7 @@ export type ResolvedServerConnection = {
   configuredApiKey: string | null;
 };
 
-export type ClockClientService = {
+export type SessionClientService = {
   daemonId: string;
   tmuxSessionId: string;
   tmuxTarget?: string;

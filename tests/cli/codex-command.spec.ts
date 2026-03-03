@@ -1,4 +1,4 @@
-import { describe, expect, it } from '@jest/globals';
+import { describe, expect, it, jest } from '@jest/globals';
 import { Command } from 'commander';
 
 import { createCodexCommand } from '../../src/cli/commands/codex.js';
@@ -333,9 +333,10 @@ describe('cli codex command', () => {
     await program.parseAsync(['node', 'routecodex', 'codex', '--url', 'http://localhost:5520/proxy', '--cwd', explicitCwd], { from: 'node' });
 
     expect(spawnCalls).toHaveLength(1);
+    expect(spawnCalls[0].command).toBe('codex');
     expect(spawnCalls[0].options?.cwd).toBe(explicitCwd);
-    expect(spawnCalls[0].options?.env?.RCC_WORKDIR).toBe(explicitCwd);
-    expect(spawnCalls[0].options?.env?.ROUTECODEX_WORKDIR).toBe(explicitCwd);
+    expect(spawnCalls[0].options?.env?.RCC_WORKDIR).toBeUndefined();
+    expect(spawnCalls[0].options?.env?.ROUTECODEX_WORKDIR).toBeUndefined();
   });
 
   it('fails fast when explicit --cwd does not exist', async () => {
@@ -379,7 +380,7 @@ describe('cli codex command', () => {
     expect(errors.some((line) => line.includes('Invalid --cwd: path does not exist'))).toBe(true);
   });
 
-  it('launches codex and exports OpenAI proxy env vars', async () => {
+  it('launches codex without proxy env vars in tmux-only mode', async () => {
     const spawnCalls: Array<{ command: string; args: string[]; options: any }> = [];
     const program = new Command();
 
@@ -417,13 +418,14 @@ describe('cli codex command', () => {
     expect(spawnCalls).toHaveLength(1);
     expect(spawnCalls[0].command).toBe('codex');
     expect(spawnCalls[0].args).toEqual(['--model', 'gpt-5.2-codex', '--foo', 'bar']);
-    expect(spawnCalls[0].options?.env?.OPENAI_BASE_URL).toBe('http://0.0.0.0:5520/proxy/v1');
-    expect(spawnCalls[0].options?.env?.OPENAI_API_KEY).toBe('rcc-proxy-key');
+    expect(spawnCalls[0].options?.env?.OPENAI_BASE_URL).toBeUndefined();
+    expect(spawnCalls[0].options?.env?.OPENAI_API_KEY).toBeUndefined();
   });
 
 
-  it('uses ~/.routecodex/config.json port by default when --url is omitted', async () => {
+  it('does not probe server readiness in tmux-only mode when config exists', async () => {
     const spawnCalls: Array<{ command: string; args: string[]; options: any }> = [];
+    const fetchCalls: string[] = [];
     const program = new Command();
 
     createCodexCommand(program, {
@@ -439,10 +441,8 @@ describe('cli codex command', () => {
       homedir: () => '/home/test',
       sleep: async () => {},
       fetch: (async (url: string) => {
-        if (url.endsWith('/ready')) {
-          return { ok: true, status: 200, json: async () => ({ status: 'ready' }) } as any;
-        }
-        return { ok: true, status: 200, json: async () => ({ status: 'ok', ready: true }) } as any;
+        fetchCalls.push(String(url));
+        throw new Error('fetch should not be called in tmux-only mode');
       }) as any,
       spawnSyncImpl: () => ({ status: 1, stdout: '', stderr: 'tmux not found' }) as any,
       spawn: (command, args, options) => {
@@ -459,12 +459,12 @@ describe('cli codex command', () => {
 
     await program.parseAsync(['node', 'routecodex', 'codex'], { from: 'node' });
 
+    expect(fetchCalls).toHaveLength(0);
     expect(spawnCalls).toHaveLength(1);
     expect(spawnCalls[0].command).toBe('codex');
-    expect(spawnCalls[0].options?.env?.OPENAI_BASE_URL).toBe('http://0.0.0.0:7788/v1');
   });
 
-  it('treats server as ready when configured host 0.0.0.0 is unreachable but loopback is reachable', async () => {
+  it('does not probe server readiness in tmux-only mode even when --url is provided', async () => {
     const spawnCalls: Array<{ command: string; args: string[]; options: any }> = [];
     const probeUrls: string[] = [];
     const program = new Command();
@@ -483,13 +483,7 @@ describe('cli codex command', () => {
       sleep: async () => {},
       fetch: (async (url: string) => {
         probeUrls.push(String(url));
-        if (String(url).startsWith('http://0.0.0.0:5520/')) {
-          return { ok: false, status: 503, json: async () => ({}) } as any;
-        }
-        if (String(url) === 'http://127.0.0.1:5520/health') {
-          return { ok: true, status: 200, json: async () => ({ status: 'ok', ready: true }) } as any;
-        }
-        return { ok: false, status: 404, json: async () => ({}) } as any;
+        throw new Error('fetch should not be called in tmux-only mode');
       }) as any,
       spawnSyncImpl: () => ({ status: 1, stdout: '', stderr: 'tmux not found' }) as any,
       spawn: (command, args, options) => {
@@ -506,13 +500,14 @@ describe('cli codex command', () => {
 
     await program.parseAsync(['node', 'routecodex', 'codex'], { from: 'node' });
 
+    expect(probeUrls).toHaveLength(0);
     expect(spawnCalls).toHaveLength(1);
-    expect(probeUrls.some((url) => url.startsWith('http://0.0.0.0:5520/'))).toBe(true);
-    expect(probeUrls.some((url) => url.startsWith('http://127.0.0.1:5520/'))).toBe(true);
+    expect(spawnCalls[0].command).toBe('codex');
   });
 
-  it('lets --port override ~/.routecodex/config.json port when --url is omitted', async () => {
+  it('does not probe server readiness in tmux-only mode when --port is provided', async () => {
     const spawnCalls: Array<{ command: string; args: string[]; options: any }> = [];
+    const fetchCalls: string[] = [];
     const program = new Command();
 
     createCodexCommand(program, {
@@ -528,10 +523,8 @@ describe('cli codex command', () => {
       homedir: () => '/home/test',
       sleep: async () => {},
       fetch: (async (url: string) => {
-        if (url.endsWith('/ready')) {
-          return { ok: true, status: 200, json: async () => ({ status: 'ready' }) } as any;
-        }
-        return { ok: true, status: 200, json: async () => ({ status: 'ok', ready: true }) } as any;
+        fetchCalls.push(String(url));
+        throw new Error('fetch should not be called in tmux-only mode');
       }) as any,
       spawnSyncImpl: () => ({ status: 1, stdout: '', stderr: 'tmux not found' }) as any,
       spawn: (command, args, options) => {
@@ -548,12 +541,12 @@ describe('cli codex command', () => {
 
     await program.parseAsync(['node', 'routecodex', 'codex', '--port', '8899'], { from: 'node' });
 
+    expect(fetchCalls).toHaveLength(0);
     expect(spawnCalls).toHaveLength(1);
     expect(spawnCalls[0].command).toBe('codex');
-    expect(spawnCalls[0].options?.env?.OPENAI_BASE_URL).toBe('http://0.0.0.0:8899/v1');
   });
 
-  it('passes downstream -p profile args while still honoring launcher --port', async () => {
+  it('passes downstream -p profile args without proxy env in tmux-only mode', async () => {
     const spawnCalls: Array<{ command: string; args: string[]; options: any }> = [];
     const program = new Command();
 
@@ -596,12 +589,13 @@ describe('cli codex command', () => {
     expect(spawnCalls).toHaveLength(1);
     expect(spawnCalls[0].command).toBe('codex');
     expect(spawnCalls[0].args).toEqual(['dangerously-bypass-approvals-and-sandbox', '-p', 'rcm']);
-    expect(spawnCalls[0].options?.env?.OPENAI_BASE_URL).toBe('http://0.0.0.0:5520/v1');
+    expect(spawnCalls[0].options?.env?.OPENAI_BASE_URL).toBeUndefined();
   });
 
 
-  it('accepts explicit --url when /health is ready but /ready is missing', async () => {
+  it('does not probe server readiness in tmux-only mode when --url is explicit', async () => {
     const spawnCalls: Array<{ command: string; args: string[]; options: any }> = [];
+    const fetchCalls: string[] = [];
     const program = new Command();
 
     createCodexCommand(program, {
@@ -611,19 +605,14 @@ describe('cli codex command', () => {
       nodeBin: 'node',
       createSpinner: async () => createStubSpinner(),
       logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
-      env: { ROUTECODEX_CLOCK_RECLAIM_REQUIRED: '0' },
+      env: { ROUTECODEX_SESSION_RECLAIM_REQUIRED: '0' },
       rawArgv: ['codex', '--url', 'http://localhost:5520'],
       fsImpl: createStubFs(),
       homedir: () => '/home/test',
       sleep: async () => {},
       fetch: (async (url: string) => {
-        if (url.endsWith('/ready')) {
-          return { ok: false, status: 404, json: async () => ({}) } as any;
-        }
-        if (url.endsWith('/health')) {
-          return { ok: true, status: 200, json: async () => ({ status: 'ok', ready: true }) } as any;
-        }
-        return { ok: false, status: 404, json: async () => ({}) } as any;
+        fetchCalls.push(String(url));
+        throw new Error('fetch should not be called in tmux-only mode');
       }) as any,
       spawnSyncImpl: () => ({ status: 1, stdout: '', stderr: 'tmux not found' }) as any,
       spawn: (command, args, options) => {
@@ -640,11 +629,12 @@ describe('cli codex command', () => {
 
     await program.parseAsync(['node', 'routecodex', 'codex', '--url', 'http://localhost:5520'], { from: 'node' });
 
+    expect(fetchCalls).toHaveLength(0);
     expect(spawnCalls).toHaveLength(1);
     expect(spawnCalls[0].command).toBe('codex');
   });
 
-  it('disables advanced clock service when tmux is missing', async () => {
+  it('warns when tmux is missing in tmux-only mode', async () => {
     const warnings: string[] = [];
     const spawnCalls: Array<{ command: string; args: string[]; options: any }> = [];
     const program = new Command();
@@ -678,13 +668,15 @@ describe('cli codex command', () => {
     await program.parseAsync(['node', 'routecodex', 'codex', '--url', 'http://localhost:5520/proxy'], { from: 'node' });
 
     expect(spawnCalls).toHaveLength(1);
-    expect(spawnCalls[0].options?.env?.RCC_CLOCK_ADVANCED_ENABLED).toBe('0');
+    expect(spawnCalls[0].command).toBe('codex');
+    expect(spawnCalls[0].options?.env?.RCC_SESSION_ADVANCED_ENABLED).toBeUndefined();
     expect(warnings.some((line) => line.includes('tmux not found'))).toBe(true);
   });
 
-  it('continues launch when clock registration is unavailable without strict tmux-managed child context', async () => {
+  it('does not attempt session daemon registration in tmux-only mode', async () => {
     const spawnCalls: Array<{ command: string; args: string[]; options: any }> = [];
     const errors: string[] = [];
+    let registerCalls = 0;
     const program = new Command();
 
     createCodexCommand(program, {
@@ -695,7 +687,7 @@ describe('cli codex command', () => {
       createSpinner: async () => createStubSpinner(),
       logger: { info: () => {}, warning: () => {}, success: () => {}, error: (msg) => errors.push(msg) },
       env: {
-        ROUTECODEX_CLOCK_RECLAIM_REQUIRED: '1',
+        ROUTECODEX_SESSION_RECLAIM_REQUIRED: '1',
         TMUX: '/tmp/tmux,123,0'
       },
       rawArgv: ['codex', '--url', 'http://localhost:5520/proxy'],
@@ -703,10 +695,8 @@ describe('cli codex command', () => {
       homedir: () => '/home/test',
       sleep: async () => {},
       fetch: (async (url: string) => {
-        if (url.endsWith('/ready') || url.endsWith('/health')) {
-          return { ok: true, status: 200, json: async () => ({ status: 'ok', ready: true }) } as any;
-        }
-        if (url.includes('/daemon/clock-client/register')) {
+        if (url.includes('/daemon/session-client/register')) {
+          registerCalls += 1;
           return { ok: false, status: 503, json: async () => ({}) } as any;
         }
         return { ok: true, status: 200, json: async () => ({}) } as any;
@@ -717,6 +707,30 @@ describe('cli codex command', () => {
         }
         if (args[0] === '-V') {
           return { status: 0, stdout: 'tmux 3.4', stderr: '' } as any;
+        }
+        if (args[0] === 'has-session') {
+          return { status: 1, stdout: '', stderr: 'missing' } as any;
+        }
+        if (args[0] === 'has-session') {
+          return { status: 1, stdout: '', stderr: 'missing' } as any;
+        }
+        if (args[0] === 'has-session') {
+          return { status: 1, stdout: '', stderr: 'missing' } as any;
+        }
+        if (args[0] === 'has-session') {
+          return { status: 1, stdout: '', stderr: 'missing' } as any;
+        }
+        if (args[0] === 'has-session') {
+          return { status: 1, stdout: '', stderr: 'missing' } as any;
+        }
+        if (args[0] === 'has-session') {
+          return { status: 1, stdout: '', stderr: 'missing' } as any;
+        }
+        if (args[0] === 'has-session') {
+          return { status: 1, stdout: '', stderr: 'missing' } as any;
+        }
+        if (args[0] === 'has-session') {
+          return { status: 1, stdout: '', stderr: 'missing' } as any;
         }
         if (args[0] === 'display-message') {
           return { status: 0, stdout: 's-main:0.0\n', stderr: '' } as any;
@@ -741,10 +755,11 @@ describe('cli codex command', () => {
     await program.parseAsync(['node', 'routecodex', 'codex', '--url', 'http://localhost:5520/proxy'], { from: 'node' });
 
     expect(spawnCalls).toHaveLength(1);
-    expect(errors.some((line) => line.includes('clock client registration failed'))).toBe(false);
+    expect(registerCalls).toBe(0);
+    expect(errors.some((line) => line.includes('session client registration failed'))).toBe(false);
   });
 
-  it('re-registers clock client daemon after heartbeat reports missing daemon', async () => {
+  it('skips session daemon heartbeat in tmux-only mode', async () => {
     const spawnCalls: Array<{ command: string; args: string[]; options: any }> = [];
     let registerCalls = 0;
     let heartbeatCalls = 0;
@@ -764,14 +779,11 @@ describe('cli codex command', () => {
       cwd: () => '/home/test',
       sleep: async () => {},
       fetch: (async (url: string) => {
-        if (url.endsWith('/ready') || url.endsWith('/health')) {
-          return { ok: true, status: 200, json: async () => ({ status: 'ok', ready: true }) } as any;
-        }
-        if (url.includes('/daemon/clock-client/register')) {
+        if (url.includes('/daemon/session-client/register')) {
           registerCalls += 1;
           return { ok: true, status: 200, json: async () => ({ ok: true }) } as any;
         }
-        if (url.includes('/daemon/clock-client/heartbeat')) {
+        if (url.includes('/daemon/session-client/heartbeat')) {
           heartbeatCalls += 1;
           return { ok: false, status: 404, json: async () => ({ ok: false, error: 'not_found' }) } as any;
         }
@@ -807,8 +819,8 @@ describe('cli codex command', () => {
     await program.parseAsync(['node', 'routecodex', 'codex', '--url', 'http://localhost:5520/proxy'], { from: 'node' });
 
     expect(spawnCalls).toHaveLength(1);
-    expect(registerCalls).toBe(2);
-    expect(heartbeatCalls).toBeGreaterThanOrEqual(1);
+    expect(registerCalls).toBe(0);
+    expect(heartbeatCalls).toBe(0);
   });
 
   it('auto-manages tmux session when user is not already in tmux', async () => {
@@ -833,7 +845,7 @@ describe('cli codex command', () => {
         if (url.endsWith('/ready') || url.endsWith('/health')) {
           return { ok: true, status: 200, json: async () => ({ status: 'ok', ready: true }) } as any;
         }
-        if (url.includes('/daemon/clock-client/register')) {
+        if (url.includes('/daemon/session-client/register')) {
           return { ok: false, status: 503, json: async () => ({}) } as any;
         }
         return { ok: true, status: 200, json: async () => ({}) } as any;
@@ -845,6 +857,9 @@ describe('cli codex command', () => {
         }
         if (args[0] === '-V') {
           return { status: 0, stdout: 'tmux 3.4', stderr: '' } as any;
+        }
+        if (args[0] === 'has-session') {
+          return { status: 1, stdout: '', stderr: 'missing' } as any;
         }
         if (args[0] === 'new-session') {
           return { status: 0, stdout: '', stderr: '' } as any;
@@ -879,6 +894,81 @@ describe('cli codex command', () => {
     expect(warnings.some((line) => line.includes('not running inside tmux'))).toBe(false);
   });
 
+  it('generates unique rcc-tmux-HHMMSS session ids and retries on collision', async () => {
+    const spawnCalls: Array<{ command: string; args: string[]; options: any }> = [];
+    const tmuxCalls: Array<{ command: string; args: string[] }> = [];
+    const hasSessionTargets: string[] = [];
+    const program = new Command();
+    const dateSpy = jest.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
+
+    createCodexCommand(program, {
+      isDevPackage: false,
+      isWindows: false,
+      defaultDevPort: 5555,
+      nodeBin: 'node',
+      createSpinner: async () => createStubSpinner(),
+      logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
+      env: {},
+      rawArgv: ['codex', '--url', 'http://localhost:5520/proxy'],
+      fsImpl: createStubFs(),
+      homedir: () => '/home/test',
+      sleep: async () => {},
+      fetch: (async (url: string) => {
+        if (url.endsWith('/ready') || url.endsWith('/health')) {
+          return { ok: true, status: 200, json: async () => ({ status: 'ok', ready: true }) } as any;
+        }
+        if (url.includes('/daemon/session-client/register')) {
+          return { ok: false, status: 503, json: async () => ({}) } as any;
+        }
+        return { ok: true, status: 200, json: async () => ({}) } as any;
+      }) as any,
+      spawnSyncImpl: (command: string, args: string[]) => {
+        tmuxCalls.push({ command, args });
+        if (command !== 'tmux') {
+          return { status: 1, stdout: '', stderr: 'unknown command' } as any;
+        }
+        if (args[0] === '-V') {
+          return { status: 0, stdout: 'tmux 3.4', stderr: '' } as any;
+        }
+        if (args[0] === 'has-session') {
+          const target = String(args[args.length - 1] || '');
+          hasSessionTargets.push(target);
+          return { status: hasSessionTargets.length === 1 ? 0 : 1, stdout: '', stderr: '' } as any;
+        }
+        if (args[0] === 'new-session') {
+          return { status: 0, stdout: '', stderr: '' } as any;
+        }
+        if (args[0] === 'send-keys') {
+          return { status: 0, stdout: '', stderr: '' } as any;
+        }
+        return { status: 0, stdout: '', stderr: '' } as any;
+      },
+      spawn: (command, args, options) => {
+        spawnCalls.push({ command, args, options });
+        return { on: () => {}, kill: () => true } as any;
+      },
+      getModulesConfigPath: () => '/tmp/modules.json',
+      resolveServerEntryPath: () => '/tmp/index.js',
+      waitForever: async () => {},
+      exit: (code) => {
+        throw new Error(`exit:${code}`);
+      }
+    });
+
+    await program.parseAsync(['node', 'routecodex', 'codex', '--url', 'http://localhost:5520/proxy'], { from: 'node' });
+
+    const newSessionCall = tmuxCalls.find((call) => call.args[0] === 'new-session');
+    expect(newSessionCall).toBeDefined();
+    const sessionNameIndex = newSessionCall!.args.indexOf('-s') + 1;
+    const sessionName = sessionNameIndex > 0 ? String(newSessionCall!.args[sessionNameIndex]) : '';
+    expect(sessionName).toMatch(/^rcc-tmux-\d{6}$/);
+    expect(hasSessionTargets.length).toBeGreaterThanOrEqual(2);
+    expect(new Set(hasSessionTargets).size).toBeGreaterThanOrEqual(2);
+    expect(hasSessionTargets.every((entry) => /^rcc-tmux-\d{6}$/.test(entry))).toBe(true);
+
+    dateSpy.mockRestore();
+  });
+
   it('requests managed tmux session self-exit on codex close without kill-session', async () => {
     const tmuxCalls: Array<{ command: string; args: string[] }> = [];
     const spawnCalls: Array<{ command: string; args: string[]; options: any }> = [];
@@ -903,7 +993,7 @@ describe('cli codex command', () => {
         if (url.endsWith('/ready') || url.endsWith('/health')) {
           return { ok: true, status: 200, json: async () => ({ status: 'ok', ready: true }) } as any;
         }
-        if (url.includes('/daemon/clock-client/register')) {
+        if (url.includes('/daemon/session-client/register')) {
           return { ok: true, status: 200, json: async () => ({ ok: true }) } as any;
         }
         return { ok: true, status: 200, json: async () => ({ ok: true }) } as any;
@@ -915,6 +1005,9 @@ describe('cli codex command', () => {
         }
         if (args[0] === '-V') {
           return { status: 0, stdout: 'tmux 3.4', stderr: '' } as any;
+        }
+        if (args[0] === 'has-session') {
+          return { status: 1, stdout: '', stderr: 'missing' } as any;
         }
         if (args[0] === 'list-sessions') {
           return { status: 0, stdout: '', stderr: '' } as any;
@@ -967,7 +1060,7 @@ describe('cli codex command', () => {
     ).toBe(true);
   });
 
-  it('reuses orphan managed tmux session before creating a new one', async () => {
+  it('does not reuse orphan managed tmux session', async () => {
     const spawnCalls: Array<{ command: string; args: string[]; options: any }> = [];
     const tmuxCalls: Array<{ command: string; args: string[] }> = [];
     const infos: string[] = [];
@@ -990,7 +1083,7 @@ describe('cli codex command', () => {
         if (url.endsWith('/ready') || url.endsWith('/health')) {
           return { ok: true, status: 200, json: async () => ({ status: 'ok', ready: true }) } as any;
         }
-        if (url.includes('/daemon/clock-client/register')) {
+        if (url.includes('/daemon/session-client/register')) {
           return { ok: false, status: 503, json: async () => ({}) } as any;
         }
         return { ok: true, status: 200, json: async () => ({}) } as any;
@@ -1006,14 +1099,11 @@ describe('cli codex command', () => {
         if (args[0] === 'display-message') {
           return { status: 1, stdout: '', stderr: 'not in tmux' } as any;
         }
-        if (args[0] === 'list-sessions') {
-          return { status: 0, stdout: 'rcc_codex_orphan\t0\n', stderr: '' } as any;
-        }
-        if (args[0] === 'list-panes') {
-          return { status: 0, stdout: 'rcc_codex_orphan:0.0\tzsh\t/home/test/workspace-a\n', stderr: '' } as any;
+        if (args[0] === 'has-session') {
+          return { status: 1, stdout: '', stderr: 'missing' } as any;
         }
         if (args[0] === 'new-session') {
-          return { status: 1, stdout: '', stderr: 'should not create new session' } as any;
+          return { status: 0, stdout: '', stderr: '' } as any;
         }
         if (args[0] === 'send-keys') {
           return { status: 0, stdout: '', stderr: '' } as any;
@@ -1039,19 +1129,19 @@ describe('cli codex command', () => {
 
     expect(spawnCalls).toHaveLength(1);
     expect(spawnCalls[0].command).toBe('tmux');
-    expect(spawnCalls[0].args).toEqual(expect.arrayContaining(['attach-session', '-t', 'rcc_codex_orphan']));
-    expect(tmuxCalls.some((call) => call.args[0] === 'list-sessions')).toBe(true);
-    expect(tmuxCalls.some((call) => call.args[0] === 'list-panes')).toBe(true);
-    expect(tmuxCalls.some((call) => call.args[0] === 'new-session')).toBe(false);
-    const launchCall = findTmuxLaunchCall(tmuxCalls, 'rcc_codex_orphan:0.0');
+    expect(spawnCalls[0].args).toEqual(expect.arrayContaining(['attach-session']));
+    expect(tmuxCalls.some((call) => call.args[0] === 'list-sessions')).toBe(false);
+    expect(tmuxCalls.some((call) => call.args[0] === 'list-panes')).toBe(false);
+    expect(tmuxCalls.some((call) => call.args[0] === 'new-session')).toBe(true);
+    const launchCall = findTmuxLaunchCall(tmuxCalls);
     expect(launchCall).toBeDefined();
     const shellCommand = extractTmuxLaunchShellCommand(launchCall);
     expect(shellCommand).toContain("cd -- '/home/test/workspace-a'");
-    expect(shellCommand).not.toContain("tmux kill-session -t 'rcc_codex_orphan'");
-    expect(infos.some((line) => line.includes('reused existing managed tmux session'))).toBe(true);
+    expect(tmuxCalls.some((call) => call.args.some((arg) => String(arg).includes('rcc-tmux-')))).toBe(true);
+    expect(infos.some((line) => line.includes('reused existing managed tmux session'))).toBe(false);
   });
 
-  it('does not reuse orphan managed tmux session when pane cwd differs from current cwd', async () => {
+  it('creates new managed tmux session even when an orphan session exists', async () => {
     const spawnCalls: Array<{ command: string; args: string[]; options: any }> = [];
     const tmuxCalls: Array<{ command: string; args: string[] }> = [];
     const infos: string[] = [];
@@ -1074,7 +1164,7 @@ describe('cli codex command', () => {
         if (url.endsWith('/ready') || url.endsWith('/health')) {
           return { ok: true, status: 200, json: async () => ({ status: 'ok', ready: true }) } as any;
         }
-        if (url.includes('/daemon/clock-client/register')) {
+        if (url.includes('/daemon/session-client/register')) {
           return { ok: false, status: 503, json: async () => ({}) } as any;
         }
         return { ok: true, status: 200, json: async () => ({}) } as any;
@@ -1090,11 +1180,8 @@ describe('cli codex command', () => {
         if (args[0] === 'display-message') {
           return { status: 1, stdout: '', stderr: 'not in tmux' } as any;
         }
-        if (args[0] === 'list-sessions') {
-          return { status: 0, stdout: 'rcc_codex_orphan\t0\n', stderr: '' } as any;
-        }
-        if (args[0] === 'list-panes') {
-          return { status: 0, stdout: 'rcc_codex_orphan:0.0\tzsh\t/home/test/other-project\n', stderr: '' } as any;
+        if (args[0] === 'has-session') {
+          return { status: 1, stdout: '', stderr: 'missing' } as any;
         }
         if (args[0] === 'new-session') {
           return { status: 0, stdout: '', stderr: '' } as any;
@@ -1123,7 +1210,10 @@ describe('cli codex command', () => {
 
     expect(spawnCalls).toHaveLength(1);
     expect(tmuxCalls.some((call) => call.args[0] === 'new-session')).toBe(true);
-    expect(findTmuxLaunchCall(tmuxCalls, 'rcc_codex_orphan:0.0')).toBeUndefined();
+    expect(tmuxCalls.some((call) => call.args[0] === 'list-sessions')).toBe(false);
+    expect(tmuxCalls.some((call) => call.args[0] === 'list-panes')).toBe(false);
+    expect(tmuxCalls.some((call) => call.args[0] === 'new-session')).toBe(true);
+    expect(tmuxCalls.some((call) => call.args.some((arg) => String(arg).includes('rcc-tmux-')))).toBe(true);
     expect(infos.some((line) => line.includes('reused existing managed tmux session'))).toBe(false);
   });
 
@@ -1150,7 +1240,7 @@ describe('cli codex command', () => {
         if (url.endsWith('/ready') || url.endsWith('/health')) {
           return { ok: true, status: 200, json: async () => ({ status: 'ok', ready: true }) } as any;
         }
-        if (url.includes('/daemon/clock-client/register')) {
+        if (url.includes('/daemon/session-client/register')) {
           return { ok: false, status: 503, json: async () => ({}) } as any;
         }
         return { ok: true, status: 200, json: async () => ({}) } as any;
@@ -1166,11 +1256,8 @@ describe('cli codex command', () => {
         if (args[0] === 'display-message') {
           return { status: 1, stdout: '', stderr: 'not in tmux' } as any;
         }
-        if (args[0] === 'list-sessions') {
-          return { status: 0, stdout: 'rcc_claude_orphan\t0\n', stderr: '' } as any;
-        }
-        if (args[0] === 'list-panes') {
-          return { status: 0, stdout: 'rcc_claude_orphan:0.0\tzsh\t/home/test/workspace-codex\n', stderr: '' } as any;
+        if (args[0] === 'has-session') {
+          return { status: 1, stdout: '', stderr: 'missing' } as any;
         }
         if (args[0] === 'new-session') {
           return { status: 0, stdout: '', stderr: '' } as any;
@@ -1199,7 +1286,9 @@ describe('cli codex command', () => {
 
     expect(spawnCalls).toHaveLength(1);
     expect(tmuxCalls.some((call) => call.args[0] === 'new-session')).toBe(true);
-    expect(findTmuxLaunchCall(tmuxCalls, 'rcc_claude_orphan:0.0')).toBeUndefined();
+    expect(tmuxCalls.some((call) => call.args[0] === 'list-sessions')).toBe(false);
+    expect(tmuxCalls.some((call) => call.args[0] === 'list-panes')).toBe(false);
+    expect(tmuxCalls.some((call) => call.args.some((arg) => String(arg).includes('rcc-tmux-')))).toBe(true);
     expect(infos.some((line) => line.includes('reused existing managed tmux session'))).toBe(false);
   });
 
@@ -1225,7 +1314,7 @@ describe('cli codex command', () => {
         if (url.endsWith("/ready") || url.endsWith("/health")) {
           return { ok: true, status: 200, json: async () => ({ status: "ok", ready: true }) } as any;
         }
-        if (url.includes("/daemon/clock-client/register")) {
+        if (url.includes("/daemon/session-client/register")) {
           return { ok: false, status: 503, json: async () => ({}) } as any;
         }
         return { ok: true, status: 200, json: async () => ({}) } as any;
@@ -1241,11 +1330,8 @@ describe('cli codex command', () => {
         if (args[0] === "display-message") {
           return { status: 1, stdout: "", stderr: "not in tmux" } as any;
         }
-        if (args[0] === "list-sessions") {
-          return { status: 0, stdout: "rcc_codex_busy	0\n", stderr: "" } as any;
-        }
-        if (args[0] === "list-panes") {
-          return { status: 0, stdout: "rcc_codex_busy:0.0	node\n", stderr: "" } as any;
+        if (args[0] === "has-session") {
+          return { status: 1, stdout: "", stderr: "missing" } as any;
         }
         if (args[0] === "new-session") {
           return { status: 0, stdout: "", stderr: "" } as any;
@@ -1273,7 +1359,7 @@ describe('cli codex command', () => {
     expect(tmuxCalls.some((call) => call.args[0] === "new-session")).toBe(true);
   });
 
-  it('when already in tmux, only sticks to current pane if it is idle and cwd-matched; otherwise starts managed session', async () => {
+  it('when already in tmux, codex still starts a managed tmux session', async () => {
     const spawnCalls: Array<{ command: string; args: string[]; options: any }> = [];
     const tmuxCalls: Array<{ command: string; args: string[] }> = [];
     const program = new Command();
@@ -1295,7 +1381,7 @@ describe('cli codex command', () => {
         if (url.endsWith('/ready') || url.endsWith('/health')) {
           return { ok: true, status: 200, json: async () => ({ status: 'ok', ready: true }) } as any;
         }
-        if (url.includes('/daemon/clock-client/register')) {
+        if (url.includes('/daemon/session-client/register')) {
           return { ok: false, status: 503, json: async () => ({}) } as any;
         }
         return { ok: true, status: 200, json: async () => ({}) } as any;
@@ -1308,14 +1394,8 @@ describe('cli codex command', () => {
         if (args[0] === '-V') {
           return { status: 0, stdout: 'tmux 3.4', stderr: '' } as any;
         }
-        if (args[0] === 'display-message') {
-          return { status: 0, stdout: 's-main:0.0\n', stderr: '' } as any;
-        }
-        if (args[0] === 'list-panes' && args[2] === 's-main:0.0') {
-          return { status: 0, stdout: 'node\t/home/test/workspace-inside\n', stderr: '' } as any;
-        }
-        if (args[0] === 'list-sessions') {
-          return { status: 0, stdout: '', stderr: '' } as any;
+        if (args[0] === 'has-session') {
+          return { status: 1, stdout: '', stderr: 'missing' } as any;
         }
         if (args[0] === 'new-session') {
           return { status: 0, stdout: '', stderr: '' } as any;
@@ -1344,12 +1424,12 @@ describe('cli codex command', () => {
 
     expect(spawnCalls).toHaveLength(1);
     expect(spawnCalls[0].command).toBe('tmux');
-    expect(tmuxCalls.some((call) => call.args[0] === 'display-message')).toBe(true);
-    expect(tmuxCalls.some((call) => call.args[0] === 'list-panes' && call.args[2] === 's-main:0.0')).toBe(true);
+    expect(tmuxCalls.some((call) => call.args[0] === 'display-message')).toBe(false);
+    expect(tmuxCalls.some((call) => call.args[0] === 'list-panes')).toBe(false);
     expect(tmuxCalls.some((call) => call.args[0] === 'new-session')).toBe(true);
   });
 
-  it("uses daemon-suffixed proxy api key when advanced clock daemon is active", async () => {
+  it("injects tmux-scoped api keys in tmux-only mode", async () => {
     const spawnCalls: Array<{ command: string; args: string[]; options: any }> = [];
     const tmuxCalls: Array<{ command: string; args: string[] }> = [];
     const program = new Command();
@@ -1361,7 +1441,7 @@ describe('cli codex command', () => {
       nodeBin: "node",
       createSpinner: async () => createStubSpinner(),
       logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
-      env: {},
+      env: { ROUTECODEX_HTTP_APIKEY: 'sk-base-key' },
       rawArgv: ["codex", "--url", "http://localhost:5520/proxy"],
       fsImpl: createStubFs(),
       homedir: () => "/home/test",
@@ -1371,7 +1451,7 @@ describe('cli codex command', () => {
         if (url.endsWith("/ready") || url.endsWith("/health")) {
           return { ok: true, status: 200, json: async () => ({ status: "ok", ready: true }) } as any;
         }
-        if (url.includes("/daemon/clock-client/register")) {
+        if (url.includes("/daemon/session-client/register")) {
           return { ok: true, status: 200, json: async () => ({ ok: true }) } as any;
         }
         return { ok: true, status: 200, json: async () => ({}) } as any;
@@ -1383,6 +1463,9 @@ describe('cli codex command', () => {
         }
         if (args[0] === "-V") {
           return { status: 0, stdout: "tmux 3.4", stderr: "" } as any;
+        }
+        if (args[0] === "has-session") {
+          return { status: 1, stdout: "", stderr: "missing" } as any;
         }
         if (args[0] === "new-session") {
           return { status: 0, stdout: "", stderr: "" } as any;
@@ -1415,14 +1498,13 @@ describe('cli codex command', () => {
     expect(launchCall).toBeDefined();
     const shellCommand = extractTmuxLaunchShellCommand(launchCall);
     expect(shellCommand).toContain("cd -- '/home/test/workspace-clock'");
-    expect(shellCommand).toContain("OPENAI_API_KEY=rcc-proxy-key::rcc-clockd:");
-    expect(shellCommand).toContain("::rcc-tmux:rcc_codex_");
-    expect(shellCommand).toContain("RCC_CLOCK_CLIENT_DAEMON_ID=clockd_");
+    expect(shellCommand).toContain("ROUTECODEX_HTTP_APIKEY=sk-base-key::rcc-session:rcc-tmux-");
+    expect(shellCommand).toContain("OPENAI_API_KEY=sk-base-key::rcc-session:rcc-tmux-");
+    expect(shellCommand).toContain("ANTHROPIC_AUTH_TOKEN=sk-base-key::rcc-session:rcc-tmux-");
     expect(shellCommand).toContain("[routecodex][self-heal]");
     expect(shellCommand).toContain("__rcc_max=");
     expect(shellCommand).toContain("while true; do");
     expect(shellCommand).not.toContain("while true; do;");
-    expect(shellCommand).not.toContain("tmux kill-session -t 'rcc_codex_");
   });
 
   it('does not auto-start server when routecodex is unavailable', async () => {
@@ -1437,7 +1519,7 @@ describe('cli codex command', () => {
       nodeBin: 'node',
       createSpinner: async () => createStubSpinner(),
       logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
-      env: { ROUTECODEX_CLOCK_RECLAIM_REQUIRED: '0' },
+      env: { ROUTECODEX_SESSION_RECLAIM_REQUIRED: '0' },
       rawArgv: ['codex', '--', '--help'],
       fsImpl: createStubFs(),
       homedir: () => '/home/test',

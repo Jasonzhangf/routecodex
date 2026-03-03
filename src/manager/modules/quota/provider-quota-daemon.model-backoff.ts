@@ -46,22 +46,8 @@ function resolveModelKey(providerKey: string): string | null {
   if (!canonical) {
     return null;
   }
-  const parts = canonical.split('.').filter(Boolean);
-  if (parts.length < 3) {
-    return null;
-  }
-  const providerId = parts[0]!;
-  // NOTE: Upstream "MODEL_CAPACITY_EXHAUSTED" can be account/quota-style scoped for some providers
-  // (e.g. antigravity), where switching aliases can help. For those providers, model backoff should
-  // remain per-providerKey (which already includes the alias).
-  if (providerId === 'antigravity' || providerId === 'gemini-cli') {
-    return canonical;
-  }
-  const modelId = parts.slice(2).join('.');
-  if (!providerId || !modelId) {
-    return null;
-  }
-  return `${providerId}.${modelId}`;
+  // Always scope capacity backoff to the concrete providerKey to avoid cross-key coupling.
+  return canonical;
 }
 
 function readPositiveIntFromEnv(name: string): number | null {

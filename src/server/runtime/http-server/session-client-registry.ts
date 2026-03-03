@@ -11,16 +11,16 @@ import {
   resolveHeartbeatTtlMs,
   resolveManagedClientProcessState,
   resolveManagedTmuxSessionState
-} from './clock-client-registry-utils.js';
+} from './session-client-registry-utils.js';
 import { injectTmuxSessionText, isTmuxSessionAlive } from './tmux-session-probe.js';
 import type {
-  ClockCleanupResult,
-  ClockClientInjectArgs,
-  ClockClientInjectResult,
-  ClockClientRecord,
-  ClockConversationBindArgs,
-  ClockStaleCleanupResult
-} from './clock-client-registry-utils.js';
+  SessionCleanupResult,
+  SessionClientInjectArgs,
+  SessionClientInjectResult,
+  SessionClientRecord,
+  SessionConversationBindArgs,
+  SessionStaleCleanupResult
+} from './session-client-registry-utils.js';
 
 const CLIENT_TMUX_INJECT_DELAY_MS = 10_000;
 
@@ -51,8 +51,8 @@ async function waitClientTmuxInjectDelay(): Promise<void> {
   });
 }
 
-export class ClockClientRegistry {
-  private readonly records = new Map<string, ClockClientRecord>();
+export class SessionClientRegistry {
+  private readonly records = new Map<string, SessionClientRecord>();
   private readonly conversationToTmuxSession = new Map<string, string>();
   private bindingsLoaded = false;
   private bindingsStorePath: string | undefined;
@@ -74,7 +74,7 @@ export class ClockClientRegistry {
     if (!sessionDir) {
       return undefined;
     }
-    return path.join(sessionDir, 'clock-session-bindings.json');
+    return path.join(sessionDir, 'session-bindings.json');
   }
 
   private ensureConversationBindingsLoaded(): void {
@@ -115,7 +115,7 @@ export class ClockClientRegistry {
         if (tmuxSessionId && managedTmuxSession && !isTmuxSessionAlive(tmuxSessionId)) {
           continue;
         }
-        const record: ClockClientRecord = {
+        const record: SessionClientRecord = {
           daemonId,
           callbackUrl,
           ...(tmuxSessionId ? { tmuxSessionId, sessionId: tmuxSessionId } : {}),
@@ -195,7 +195,7 @@ export class ClockClientRegistry {
     managedClientProcess?: boolean;
     managedClientPid?: number;
     managedClientCommandHint?: string;
-  }): ClockClientRecord {
+  }): SessionClientRecord {
     this.ensureConversationBindingsLoaded();
     const now = Date.now();
     const resolvedTmuxSessionId = normalizeString(input.tmuxSessionId) ?? normalizeString(input.sessionId);
@@ -216,7 +216,7 @@ export class ClockClientRegistry {
     const managedClientPid = normalizePositiveInt(input.managedClientPid) ?? normalizePositiveInt(previous?.managedClientPid);
     const managedClientCommandHint = normalizeString(input.managedClientCommandHint) ?? normalizeString(previous?.managedClientCommandHint);
 
-    const record: ClockClientRecord = {
+    const record: SessionClientRecord = {
       daemonId: input.daemonId,
       callbackUrl: input.callbackUrl,
       ...(resolvedTmuxSessionId ? { tmuxSessionId: resolvedTmuxSessionId, sessionId: resolvedTmuxSessionId } : {}),
@@ -329,7 +329,7 @@ export class ClockClientRegistry {
     return removed;
   }
 
-  list(): ClockClientRecord[] {
+  list(): SessionClientRecord[] {
     return Array.from(this.records.values())
       .map((entry) => ({
         ...entry,
@@ -340,7 +340,7 @@ export class ClockClientRegistry {
       .sort((a, b) => b.lastHeartbeatAtMs - a.lastHeartbeatAtMs);
   }
 
-  findByDaemonId(daemonIdRaw: string): ClockClientRecord | undefined {
+  findByDaemonId(daemonIdRaw: string): SessionClientRecord | undefined {
     const daemonId = normalizeString(daemonIdRaw);
     if (!daemonId) {
       return undefined;
@@ -386,7 +386,7 @@ export class ClockClientRegistry {
     if (!scope) {
       return { ok: false, removed: false, daemonIds: [], tmuxSessionIds: [] };
     }
-    if (scope.startsWith('clockd.')) {
+    if (scope.startsWith('sessiond.')) {
       const unbound = this.unbindConversationSession(scope);
       return { ok: unbound.ok, removed: unbound.removed, daemonIds: unbound.daemonIds, tmuxSessionIds: [] };
     }
@@ -441,7 +441,7 @@ export class ClockClientRegistry {
       commandHint?: string;
       clientType?: string;
     }) => boolean;
-  }): ClockStaleCleanupResult {
+  }): SessionStaleCleanupResult {
     this.ensureConversationBindingsLoaded();
     const result = cleanupStaleHeartbeatsFromRegistry({
       records: this.records,
@@ -463,7 +463,7 @@ export class ClockClientRegistry {
       commandHint?: string;
       clientType?: string;
     }) => boolean;
-  }): ClockCleanupResult {
+  }): SessionCleanupResult {
     this.ensureConversationBindingsLoaded();
     const result = cleanupDeadTmuxSessionsFromRegistry({
       records: this.records,
@@ -476,7 +476,7 @@ export class ClockClientRegistry {
     return result;
   }
 
-  private isAlive(record: ClockClientRecord): boolean {
+  private isAlive(record: SessionClientRecord): boolean {
     return Date.now() - record.lastHeartbeatAtMs <= resolveHeartbeatTtlMs();
   }
 
@@ -485,7 +485,7 @@ export class ClockClientRegistry {
     daemonId?: string;
     clientType?: string;
     workdir?: string;
-  }): ClockClientRecord[] {
+  }): SessionClientRecord[] {
     let records = Array.from(this.records.values()).filter((entry) => this.isAlive(entry));
 
     const daemonId = normalizeString(filters?.daemonId);
@@ -522,7 +522,7 @@ export class ClockClientRegistry {
     return 'no_binding_candidate_for_workdir';
   }
 
-  bindConversationSession(args: ClockConversationBindArgs): { ok: boolean; reason?: string; daemonId?: string; tmuxSessionId?: string } {
+  bindConversationSession(args: SessionConversationBindArgs): { ok: boolean; reason?: string; daemonId?: string; tmuxSessionId?: string } {
     this.ensureConversationBindingsLoaded();
     const conversationSessionId = normalizeString(args.conversationSessionId);
     if (!conversationSessionId) {
@@ -537,14 +537,14 @@ export class ClockClientRegistry {
       tmuxSessionId?: string;
       daemonId?: string;
       clientType?: string;
-    }): ClockClientRecord[] => (
+    }): SessionClientRecord[] => (
       this.pickAliveCandidates({
         ...(filters ?? {}),
         ...(workdirHint ? { workdir: workdirHint } : {})
       })
     );
 
-    let candidate: ClockClientRecord | undefined;
+    let candidate: SessionClientRecord | undefined;
 
     if (daemonHint) {
       candidate = filteredCandidates({ daemonId: daemonHint })[0];
@@ -652,7 +652,7 @@ export class ClockClientRegistry {
     return undefined;
   }
 
-  private resolveInjectTmuxSessionId(args: ClockClientInjectArgs, workdirHint?: string): string | undefined {
+  private resolveInjectTmuxSessionId(args: SessionClientInjectArgs, workdirHint?: string): string | undefined {
     this.ensureConversationBindingsLoaded();
     const directTmuxSession = normalizeString(args.tmuxSessionId);
     if (directTmuxSession) {
@@ -680,7 +680,7 @@ export class ClockClientRegistry {
     return undefined;
   }
 
-  async inject(args: ClockClientInjectArgs): Promise<ClockClientInjectResult> {
+  async inject(args: SessionClientInjectArgs): Promise<SessionClientInjectResult> {
     const text = typeof args.text === 'string' ? args.text.trim() : '';
     if (!text) {
       return { ok: false, reason: 'empty_text' };
@@ -771,17 +771,19 @@ export class ClockClientRegistry {
   }
 }
 
-const singleton = new ClockClientRegistry();
+const singleton = new SessionClientRegistry();
 
-export function getClockClientRegistry(): ClockClientRegistry {
+export function getSessionClientRegistry(): SessionClientRegistry {
   return singleton;
 }
 
-export async function injectClockClientPromptWithResult(args: ClockClientInjectArgs): Promise<ClockClientInjectResult> {
+export async function injectSessionClientPromptWithResult(
+  args: SessionClientInjectArgs
+): Promise<SessionClientInjectResult> {
   return await singleton.inject(args);
 }
 
-export async function injectClockClientPrompt(args: ClockClientInjectArgs): Promise<void> {
+export async function injectSessionClientPrompt(args: SessionClientInjectArgs): Promise<void> {
   try {
     await singleton.inject(args);
   } catch {

@@ -2,13 +2,13 @@ import type { Application, Request, Response } from 'express';
 import express from 'express';
 import type { ServerConfigV2 } from './types.js';
 import {
-  extractClockClientDaemonIdFromApiKey,
-  extractClockClientTmuxSessionIdFromApiKey,
+  extractSessionClientDaemonIdFromApiKey,
+  extractSessionClientScopeIdFromApiKey,
   matchesExpectedClientApiKey
-} from '../../../utils/clock-client-token.js';
+} from '../../../utils/session-client-token.js';
 import {
-  shouldTraceClockScopeByContext
-} from '../../../utils/clock-scope-trace.js';
+  shouldTraceSessionScopeByContext
+} from '../../../utils/session-scope-trace.js';
 
 function isLocalhostRequest(req: Request): boolean {
   const ip = req.socket?.remoteAddress || '';
@@ -41,6 +41,13 @@ function resolveEnvSecretReference(value: string): { ok: true; value: string } |
   }
   const envMatch = trimmed.match(/^\$\{([A-Z0-9_]+)\}$/i);
   if (!envMatch) {
+    if (/^[A-Z][A-Z0-9_]+$/.test(trimmed)) {
+      const envValue = normalizeString(process.env[trimmed]);
+      if (!envValue) {
+        return { ok: false, missing: trimmed };
+      }
+      return { ok: true, value: envValue };
+    }
     return { ok: true, value: trimmed };
   }
   const envValue = normalizeString(process.env[envMatch[1]]);
@@ -76,7 +83,8 @@ function attachClientDaemonHint(req: Request, daemonId: string | undefined): voi
     const headers = req.headers as Record<string, unknown>;
     headers['x-routecodex-client-daemon-id'] = daemonId;
     headers['x-routecodex-clientd-id'] = daemonId;
-    headers['x-routecodex-clock-daemon-id'] = daemonId;
+    headers['x-routecodex-session-daemon-id'] = daemonId;
+    headers['x-rcc-session-daemon-id'] = daemonId;
     headers['x-routecodex-daemon-id'] = daemonId;
   } catch {
     // best-effort only
@@ -99,12 +107,12 @@ function attachClientTmuxHint(req: Request, tmuxSessionId: string | undefined): 
   }
 }
 
-function shouldTraceClockScope(req: Request): boolean {
+function shouldTraceSessionScope(req: Request): boolean {
   const path = typeof req.path === 'string' ? req.path : '';
   const userAgent = normalizeString(req.header('user-agent')).toLowerCase();
   const originator = normalizeString(req.header('originator')).toLowerCase();
   const hasCodexTurnMetadata = normalizeString(req.header('x-codex-turn-metadata')).length > 0;
-  return shouldTraceClockScopeByContext({
+  return shouldTraceSessionScopeByContext({
     endpointOrPath: path,
     userAgent,
     originator,
@@ -112,14 +120,14 @@ function shouldTraceClockScope(req: Request): boolean {
   });
 }
 
-function logClockScopeParse(args: {
+function logSessionScopeParse(args: {
   req: Request;
   requestId: string;
   hasApiKey: boolean;
   daemonId?: string;
   tmuxSessionId?: string;
 }): void {
-  if (!shouldTraceClockScope(args.req)) {
+  if (!shouldTraceSessionScope(args.req)) {
     return;
   }
   const path = typeof args.req.path === 'string' ? args.req.path : 'n/a';
@@ -127,7 +135,7 @@ function logClockScopeParse(args: {
   const originator = normalizeString(args.req.header('originator')) || 'n/a';
   const hasTurnMetadata = normalizeString(args.req.header('x-codex-turn-metadata')).length > 0;
   console.log(
-    `[clock-scope][parse] requestId=${args.requestId} path=${path} hasApiKey=${args.hasApiKey ? 'yes' : 'no'} ` +
+    `[session-scope][parse] requestId=${args.requestId} path=${path} hasApiKey=${args.hasApiKey ? 'yes' : 'no'} ` +
     `daemon=${args.daemonId || 'none'} tmux=${args.tmuxSessionId || 'none'} originator=${originator} ua=${userAgent}` +
     ` hasTurnMeta=${hasTurnMetadata ? 'yes' : 'no'}`
   );
@@ -146,13 +154,13 @@ export function registerApiKeyAuthMiddleware(app: Application, config: ServerCon
     if (provided) {
       // Always decode daemon/tmux hints when a client token is present, even when apikey auth is disabled.
       // This keeps stopMessage/client-injection scope available in dev/no-auth deployments.
-      parsedDaemonId = extractClockClientDaemonIdFromApiKey(provided);
-      parsedTmuxSessionId = extractClockClientTmuxSessionIdFromApiKey(provided);
+      parsedDaemonId = extractSessionClientDaemonIdFromApiKey(provided);
+      parsedTmuxSessionId = extractSessionClientScopeIdFromApiKey(provided);
       attachClientDaemonHint(req, parsedDaemonId);
       attachClientTmuxHint(req, parsedTmuxSessionId);
     }
     const requestId = normalizeString(req.header('x-request-id')) || 'n/a';
-    logClockScopeParse({
+    logSessionScopeParse({
       req,
       requestId,
       hasApiKey: Boolean(provided),

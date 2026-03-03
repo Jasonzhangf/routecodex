@@ -29,7 +29,7 @@ Both provide a **unified gateway for AI providers**, handling **routing + protoc
 - 不再复用旧会话，始终新建（`launcher-kernel.ts:842`）
 
 #### Server 侧 Cleanup 策略
-- Cleanup 端点仅做状态清理，**不终止客户端进程**（`clock-client-routes.ts:377`）
+- Cleanup 端点仅做状态清理，**不终止客户端进程**（`session-client-routes.ts:377`）
 - `allowManagedTermination` 已硬编码为 `false`，确保不会越界终止
 
 #### 启动脚本行为

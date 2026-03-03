@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { getClockClientRegistry } from '../../../../../src/server/runtime/http-server/clock-client-registry.js';
+import { getSessionClientRegistry } from '../../../../../src/server/runtime/http-server/session-client-registry.js';
 import {
   resolveStopMessageClientInjectReadiness,
   runClientInjectionFlowBeforeReenter
@@ -8,9 +8,9 @@ import {
 
 describe('client-injection-flow strict tmux isolation', () => {
   it('requires explicit tmux session even if daemon/session mapping exists', () => {
-    const registry = getClockClientRegistry();
-    const daemonId = `clockd_test_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-    const sessionScope = `clockd.${daemonId}`;
+    const registry = getSessionClientRegistry();
+    const daemonId = `sessiond_test_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    const sessionScope = `sessiond.${daemonId}`;
 
     registry.register({
       daemonId,

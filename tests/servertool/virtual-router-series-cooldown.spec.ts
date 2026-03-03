@@ -1,6 +1,7 @@
 import { RateLimitBackoffManager, RateLimitCooldownError } from '../../src/providers/core/runtime/rate-limit-manager.js';
 import { VirtualRouterEngine } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine.js';
 import { deserializeRoutingInstructionState } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/routing-instructions.js';
+import { saveRoutingInstructionStateSync } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/sticky-session-store.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -475,16 +476,29 @@ describe('Virtual router sticky fallback with excluded keys', () => {
         pathLength: 3
       }
     });
-    (engine as any).routingInstructionState.set('session:sticky-session', stickyState);
+    const sessionKey = 'session:sticky-session';
+    const prevSessionDir = process.env.ROUTECODEX_SESSION_DIR;
+    const sessionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-session-'));
+    process.env.ROUTECODEX_SESSION_DIR = sessionDir;
+    try {
+      saveRoutingInstructionStateSync(sessionKey, stickyState);
 
-    const first = engine.route(baseRequest, { ...baseMetadata });
-    expect(first.target.providerKey).toBe(providerA);
+      const first = engine.route(baseRequest, { ...baseMetadata });
+      expect(first.target.providerKey).toBe(providerA);
 
-    const second = engine.route(baseRequest, {
-      ...baseMetadata,
-      excludedProviderKeys: [providerA]
-    });
-    expect(second.target.providerKey).toBe(providerB);
+      const second = engine.route(baseRequest, {
+        ...baseMetadata,
+        excludedProviderKeys: [providerA]
+      });
+      expect(second.target.providerKey).toBe(providerB);
+    } finally {
+      if (prevSessionDir === undefined) {
+        delete process.env.ROUTECODEX_SESSION_DIR;
+      } else {
+        process.env.ROUTECODEX_SESSION_DIR = prevSessionDir;
+      }
+      fs.rmSync(sessionDir, { recursive: true, force: true });
+    }
   });
 });
 

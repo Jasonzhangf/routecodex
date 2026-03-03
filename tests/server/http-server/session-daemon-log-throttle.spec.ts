@@ -1,10 +1,10 @@
 import {
-  shouldLogClockDaemonCleanupAudit,
-  shouldClearClockTasksForInjectSkip,
-  shouldLogClockDaemonInjectSkip
-} from '../../../src/server/runtime/http-server/clock-daemon-log-throttle.js';
+  shouldLogSessionDaemonCleanupAudit,
+  shouldClearSessionTasksForInjectSkip,
+  shouldLogSessionDaemonInjectSkip
+} from '../../../src/server/runtime/http-server/session-daemon-log-throttle.js';
 
-describe('clock daemon inject skip log throttle', () => {
+describe('session daemon inject skip log throttle', () => {
   test('deduplicates repeated benign skips by session+reason with long cooldown', () => {
     const cache = new Map<string, number>();
     const input = {
@@ -14,10 +14,10 @@ describe('clock daemon inject skip log throttle', () => {
     };
     const now = 1_000;
 
-    expect(shouldLogClockDaemonInjectSkip({ cache, input, nowMs: now })).toBe(true);
-    expect(shouldLogClockDaemonInjectSkip({ cache, input, nowMs: now + 5_000 })).toBe(false);
-    expect(shouldLogClockDaemonInjectSkip({ cache, input, nowMs: now + 9 * 60_000 })).toBe(false);
-    expect(shouldLogClockDaemonInjectSkip({ cache, input, nowMs: now + 10 * 60_000 + 1 })).toBe(true);
+    expect(shouldLogSessionDaemonInjectSkip({ cache, input, nowMs: now })).toBe(true);
+    expect(shouldLogSessionDaemonInjectSkip({ cache, input, nowMs: now + 5_000 })).toBe(false);
+    expect(shouldLogSessionDaemonInjectSkip({ cache, input, nowMs: now + 9 * 60_000 })).toBe(false);
+    expect(shouldLogSessionDaemonInjectSkip({ cache, input, nowMs: now + 10 * 60_000 + 1 })).toBe(true);
   });
 
   test('keeps different sessions/reasons independent', () => {
@@ -25,7 +25,7 @@ describe('clock daemon inject skip log throttle', () => {
     const now = 2_000;
 
     expect(
-      shouldLogClockDaemonInjectSkip({
+      shouldLogSessionDaemonInjectSkip({
         cache,
         input: { sessionId: 'sess_a', injectReason: 'no_matching_tmux_session_daemon', bindReason: 'no_binding_candidate' },
         nowMs: now
@@ -33,7 +33,7 @@ describe('clock daemon inject skip log throttle', () => {
     ).toBe(true);
 
     expect(
-      shouldLogClockDaemonInjectSkip({
+      shouldLogSessionDaemonInjectSkip({
         cache,
         input: { sessionId: 'sess_b', injectReason: 'no_matching_tmux_session_daemon', bindReason: 'no_binding_candidate' },
         nowMs: now + 100
@@ -41,7 +41,7 @@ describe('clock daemon inject skip log throttle', () => {
     ).toBe(true);
 
     expect(
-      shouldLogClockDaemonInjectSkip({
+      shouldLogSessionDaemonInjectSkip({
         cache,
         input: { sessionId: 'sess_a', injectReason: 'inject_failed', bindReason: 'bind_ok' },
         nowMs: now + 200
@@ -49,16 +49,16 @@ describe('clock daemon inject skip log throttle', () => {
     ).toBe(true);
   });
 
-  test('marks no-matching-tmux + no-binding as orphan clock session to clear', () => {
+  test('marks no-matching-tmux + no-binding as orphan session to clear', () => {
     expect(
-      shouldClearClockTasksForInjectSkip({
+      shouldClearSessionTasksForInjectSkip({
         sessionId: 'sess_orphan',
         injectReason: 'no_matching_tmux_session_daemon',
         bindReason: 'no_binding_candidate'
       })
     ).toBe(true);
     expect(
-      shouldClearClockTasksForInjectSkip({
+      shouldClearSessionTasksForInjectSkip({
         sessionId: 'sess_ok',
         injectReason: 'inject_failed',
         bindReason: 'bind_ok'
@@ -70,38 +70,38 @@ describe('clock daemon inject skip log throttle', () => {
     const cache = new Map<string, number>();
     const input = {
       managedTerminationEnabled: false,
-      staleRemovedDaemonIds: ['clockd_a'],
+      staleRemovedDaemonIds: ['sessiond_a'],
       staleRemovedTmuxSessionIds: [],
-      deadRemovedDaemonIds: ['clockd_b'],
+      deadRemovedDaemonIds: ['sessiond_b'],
       deadRemovedTmuxSessionIds: ['rcc_dead_1'],
       failedKillTmuxSessionIds: [],
       failedKillManagedClientPids: []
     };
 
-    expect(shouldLogClockDaemonCleanupAudit({ cache, input, nowMs: 1000 })).toBe(true);
-    expect(shouldLogClockDaemonCleanupAudit({ cache, input, nowMs: 1000 + 5_000 })).toBe(false);
-    expect(shouldLogClockDaemonCleanupAudit({ cache, input, nowMs: 1000 + 10 * 60_000 + 1 })).toBe(true);
+    expect(shouldLogSessionDaemonCleanupAudit({ cache, input, nowMs: 1000 })).toBe(true);
+    expect(shouldLogSessionDaemonCleanupAudit({ cache, input, nowMs: 1000 + 5_000 })).toBe(false);
+    expect(shouldLogSessionDaemonCleanupAudit({ cache, input, nowMs: 1000 + 10 * 60_000 + 1 })).toBe(true);
   });
 
   test('cleanup audit cache key is order-insensitive for ids', () => {
     const cache = new Map<string, number>();
     const base = {
       managedTerminationEnabled: true,
-      staleRemovedDaemonIds: ['clockd_a', 'clockd_b'],
+      staleRemovedDaemonIds: ['sessiond_a', 'sessiond_b'],
       staleRemovedTmuxSessionIds: ['rcc_1'],
-      deadRemovedDaemonIds: ['clockd_c'],
+      deadRemovedDaemonIds: ['sessiond_c'],
       deadRemovedTmuxSessionIds: ['rcc_2', 'rcc_3'],
       failedKillTmuxSessionIds: ['rcc_9'],
       failedKillManagedClientPids: [12345]
     };
 
-    expect(shouldLogClockDaemonCleanupAudit({ cache, input: base, nowMs: 2000 })).toBe(true);
+    expect(shouldLogSessionDaemonCleanupAudit({ cache, input: base, nowMs: 2000 })).toBe(true);
     expect(
-      shouldLogClockDaemonCleanupAudit({
+      shouldLogSessionDaemonCleanupAudit({
         cache,
         input: {
           ...base,
-          staleRemovedDaemonIds: ['clockd_b', 'clockd_a'],
+          staleRemovedDaemonIds: ['sessiond_b', 'sessiond_a'],
           deadRemovedTmuxSessionIds: ['rcc_3', 'rcc_2']
         },
         nowMs: 2000 + 100

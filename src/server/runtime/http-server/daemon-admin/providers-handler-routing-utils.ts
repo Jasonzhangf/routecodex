@@ -14,7 +14,7 @@ const ROUTING_POLICY_OPTIONAL_KEYS = [
   'contextRouting',
   'webSearch',
   'execCommandGuard',
-  'clock'
+  'session'
 ] as const;
 
 type RoutingPolicyOptionalKey = (typeof ROUTING_POLICY_OPTIONAL_KEYS)[number];
@@ -36,7 +36,7 @@ export interface RoutingPolicyGroup {
   contextRouting?: Record<string, unknown>;
   webSearch?: Record<string, unknown>;
   execCommandGuard?: Record<string, unknown>;
-  clock?: Record<string, unknown>;
+  session?: Record<string, unknown>;
 }
 
 export interface RoutingGroupsSnapshot {
@@ -97,8 +97,8 @@ function getRoutingPolicyOptionalValue(
       return input.webSearch;
     case 'execCommandGuard':
       return input.execCommandGuard;
-    case 'clock':
-      return input.clock;
+    case 'session':
+      return input.session;
     default:
       return undefined;
   }
@@ -128,8 +128,8 @@ function setRoutingPolicyOptionalValue(
     case 'execCommandGuard':
       target.execCommandGuard = value;
       return;
-    case 'clock':
-      target.clock = value;
+    case 'session':
+      target.session = value;
       return;
   }
 }

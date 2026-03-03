@@ -1,8 +1,8 @@
 import {
-  getClockClientRegistry,
-  injectClockClientPromptWithResult
-} from '../clock-client-registry.js';
-import { bindClockConversationSession } from './request-retry-helpers.js';
+  getSessionClientRegistry,
+  injectSessionClientPromptWithResult
+} from '../session-client-registry.js';
+import { bindSessionConversationSession } from './request-retry-helpers.js';
 
 export type StopMessageClientInjectReadiness = {
   ready: boolean;
@@ -108,6 +108,18 @@ function resolveInjectConversationSessionId(metadata: Record<string, unknown>): 
   if (tmuxSessionId) {
     return `tmux:${tmuxSessionId}`;
   }
+  const sessionId =
+    normalizeInjectToken(metadata.sessionId) ||
+    normalizeInjectToken(metadata.session_id);
+  if (sessionId) {
+    return `session:${sessionId}`;
+  }
+  const conversationId =
+    normalizeInjectToken(metadata.conversationId) ||
+    normalizeInjectToken(metadata.conversation_id);
+  if (conversationId) {
+    return `conversation:${conversationId}`;
+  }
   return undefined;
 }
 
@@ -183,7 +195,7 @@ async function injectClientPromptStrict(args: {
   failureUpstreamCode?: string;
   failureStatus?: number;
 }): Promise<void> {
-  const result = await injectClockClientPromptWithResult({
+  const result = await injectSessionClientPromptWithResult({
     tmuxSessionId: args.tmuxSessionId,
     ...(args.tmuxTarget ? { tmuxTarget: args.tmuxTarget } : {}),
     ...(args.clientType ? { clientType: args.clientType } : {}),
@@ -201,7 +213,7 @@ async function injectClientPromptStrict(args: {
   const normalizedSessionScope = typeof args.sessionScope === 'string' ? args.sessionScope.trim() : '';
   if (normalizedSessionScope && shouldUnbindConversationSessionOnInjectFailure(reason)) {
     try {
-      getClockClientRegistry().unbindSessionScope(normalizedSessionScope);
+      getSessionClientRegistry().unbindSessionScope(normalizedSessionScope);
     } catch {
       // best-effort cleanup only
     }
@@ -236,8 +248,8 @@ function buildInjectTargetFromMetadata(args: {
         ? args.metadata.client_tmux_target
         : (typeof args.metadata.tmuxTarget === 'string' ? args.metadata.tmuxTarget : undefined));
   const clientType =
-    typeof args.metadata.clockClientType === 'string'
-      ? args.metadata.clockClientType
+    typeof args.metadata.sessionClientType === 'string'
+      ? args.metadata.sessionClientType
       : (typeof args.metadata.clientType === 'string' ? args.metadata.clientType : undefined);
   return {
     ...(tmuxSessionId ? { tmuxSessionId } : {}),
@@ -311,10 +323,10 @@ export function resolveStopMessageClientInjectReadiness(
   const daemonId =
     normalizeInjectToken(metadata.clientDaemonId) ||
     normalizeInjectToken(metadata.client_daemon_id) ||
-    normalizeInjectToken(metadata.clockDaemonId) ||
-    normalizeInjectToken(metadata.clockClientDaemonId);
+    normalizeInjectToken(metadata.sessionDaemonId) ||
+    normalizeInjectToken(metadata.sessionClientDaemonId);
   const workdir = resolveInjectWorkdir(metadata);
-  const clientType = normalizeInjectToken(metadata.clockClientType) || normalizeInjectToken(metadata.clientType);
+  const clientType = normalizeInjectToken(metadata.sessionClientType) || normalizeInjectToken(metadata.clientType);
 
   if (tmuxSessionId) {
     return { ready: true, reason: 'tmux_direct', tmuxSessionId, ...(sessionScope ? { sessionScope } : {}) };
@@ -351,7 +363,7 @@ export async function runClientInjectionFlowBeforeReenter(args: {
   });
 
   const signals = extractUserAndToolSignals(args.requestBody);
-  bindClockConversationSession(args.nestedMetadata);
+  bindSessionConversationSession(args.nestedMetadata);
 
   const resolveStrictTarget = (source: string): StrictClientInjectTarget =>
     resolveStrictClientInjectTarget({

@@ -297,7 +297,7 @@ function installPageFetchMock() {
       });
     }
 
-    if (path === '/daemon/clock/tasks' && method === 'GET') {
+    if (path === '/daemon/session/tasks' && method === 'GET') {
       return json({
         sessions: [
           {

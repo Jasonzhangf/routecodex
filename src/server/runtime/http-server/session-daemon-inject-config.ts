@@ -1,4 +1,4 @@
-export function toExactMatchClockConfig(input: unknown): unknown {
+export function toExactMatchSessionConfig(input: unknown): unknown {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
     return input;
   }
@@ -8,4 +8,3 @@ export function toExactMatchClockConfig(input: unknown): unknown {
     dueWindowMs: 0
   };
 }
-

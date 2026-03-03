@@ -523,7 +523,7 @@ describe('webui edge coverage', () => {
         return responseJson({ ok: true, action: body.action || 'unknown' });
       }
 
-      if (path === '/daemon/clock/tasks' && method === 'GET') {
+      if (path === '/daemon/session/tasks' && method === 'GET') {
         clockCalls += 1;
         if (clockCalls === 1) {
           return responseJson({

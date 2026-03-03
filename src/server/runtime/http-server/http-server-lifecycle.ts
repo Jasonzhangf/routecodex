@@ -178,7 +178,7 @@ export async function startHttpServer(server: any): Promise<void> {
 }
 
 export async function stopHttpServer(server: any): Promise<void> {
-  server.stopClockDaemonInjectLoop();
+  server.stopSessionDaemonInjectLoop();
   try {
     await shutdownCamoufoxLaunchers();
   } catch {

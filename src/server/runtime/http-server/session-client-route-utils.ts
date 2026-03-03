@@ -1,4 +1,4 @@
-type ClockRecurrenceInput = {
+type SessionRecurrenceInput = {
   kind: 'daily' | 'weekly' | 'interval';
   maxRuns: number;
   everyMinutes?: number;
@@ -28,10 +28,10 @@ export function parseBoolean(input: unknown): boolean | undefined {
   return undefined;
 }
 
-export function isClockManagedTerminationEnabled(): boolean {
+export function isSessionManagedTerminationEnabled(): boolean {
   const raw = String(
-    process.env.ROUTECODEX_CLOCK_REAPER_TERMINATE_MANAGED
-      ?? process.env.RCC_CLOCK_REAPER_TERMINATE_MANAGED
+    process.env.ROUTECODEX_SESSION_REAPER_TERMINATE_MANAGED
+      ?? process.env.RCC_SESSION_REAPER_TERMINATE_MANAGED
       ?? ''
   ).trim().toLowerCase();
   if (!raw) {
@@ -87,7 +87,7 @@ function parseRecurrenceKind(raw: unknown): 'daily' | 'weekly' | 'interval' | un
   return undefined;
 }
 
-function parseRecurrenceInput(input: unknown, fallbackRecord?: Record<string, unknown>): { recurrence?: ClockRecurrenceInput; error?: string } {
+function parseRecurrenceInput(input: unknown, fallbackRecord?: Record<string, unknown>): { recurrence?: SessionRecurrenceInput; error?: string } {
   if (input === undefined || input === null || input === false) {
     return {};
   }

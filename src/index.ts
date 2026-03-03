@@ -130,7 +130,7 @@ function colorizeRuntimeLogLine(line: string): string {
     }
     return wrapAnsi(line, ANSI_YELLOW);
   }
-  if (line.includes('[clock-scope][metadata]') || line.includes('[clock-scope][parse]')) {
+  if (line.includes('[session-scope][metadata]') || line.includes('[session-scope][parse]')) {
     return wrapAnsi(line, ANSI_YELLOW);
   }
   if (line.includes('[stop_scope][rebind]')) {

@@ -7,7 +7,13 @@ import path from 'node:path';
 
 const DEFAULT_BASE_URL = process.env.ROUTECODEX_BASE || 'http://127.0.0.1:5555';
 const DEFAULT_API_KEY = process.env.ROUTECODEX_API_KEY || 'routecodex-test';
-const HEADER_DENYLIST = new Set(['authorization', 'content-length', 'host']);
+const HEADER_DENYLIST = new Set([
+  'authorization',
+  'content-length',
+  'host',
+  'accept',
+  'content-type'
+]);
 
 function usage() {
   console.log(`Usage:
@@ -70,6 +76,7 @@ function extractSampleHeaders(doc) {
     return {};
   }
   const headers = {};
+  const seen = new Set();
   for (const [key, value] of Object.entries(raw)) {
     if (typeof value !== 'string' || !value.trim()) {
       continue;
@@ -78,9 +85,36 @@ function extractSampleHeaders(doc) {
     if (HEADER_DENYLIST.has(lowered)) {
       continue;
     }
-    headers[key] = value;
+    if (seen.has(lowered)) {
+      continue;
+    }
+    headers[lowered] = value;
+    seen.add(lowered);
   }
   return headers;
+}
+
+function redactAuthorization(value) {
+  if (typeof value !== 'string' || !value.trim()) return value;
+  const marker = '::rcc-session:';
+  const idx = value.indexOf(marker);
+  if (idx >= 0) {
+    return `***${value.slice(idx)}`;
+  }
+  return '***';
+}
+
+function extractTmuxSessionIdFromKey(value) {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  const marker = '::rcc-session:';
+  const idx = value.lastIndexOf(marker);
+  if (idx < 0) return null;
+  const start = idx + marker.length;
+  if (start >= value.length) return null;
+  const nextIdx = value.indexOf('::rcc-sessiond:', start);
+  const end = nextIdx >= 0 ? nextIdx : value.length;
+  const token = value.slice(start, end).trim();
+  return token || null;
 }
 
 async function readSse(response) {
@@ -126,10 +160,15 @@ async function main() {
     ...sampleHeaders,
     'Content-Type': 'application/json',
     'Accept': wantsSse ? 'text/event-stream' : 'application/json',
-    'Authorization': `Bearer ${opts.key}`,
-    'OpenAI-Beta': sampleHeaders['OpenAI-Beta'] || 'responses-2024-12-17',
-    'X-Route-Hint': sampleHeaders['X-Route-Hint'] || sampleHeaders['x-route-hint'] || 'default'
+    // Use x-routecodex-api-key to avoid Authorization header sanitization in some clients.
+    'x-routecodex-api-key': opts.key,
+    'OpenAI-Beta': sampleHeaders['openai-beta'] || 'responses-2024-12-17',
+    'X-Route-Hint': sampleHeaders['x-route-hint'] || 'default'
   };
+  const inferredTmux = extractTmuxSessionIdFromKey(opts.key);
+  if (inferredTmux && !sampleHeaders['x-routecodex-client-tmux-session-id']) {
+    headers['x-routecodex-client-tmux-session-id'] = inferredTmux;
+  }
 
   console.log(`[replay-codex-sample] ${endpoint} → ${targetUrl} (requestId=${requestId})`);
 
@@ -147,7 +186,14 @@ async function main() {
     statusText: res.statusText,
     headers: Object.fromEntries(res.headers.entries())
   };
-  fs.writeFileSync(path.join(runDir, 'request.json'), JSON.stringify({ endpoint, body: requestBody }, null, 2));
+  const debugHeaders = { ...headers };
+  if (typeof debugHeaders['x-routecodex-api-key'] === 'string') {
+    debugHeaders['x-routecodex-api-key'] = redactAuthorization(debugHeaders['x-routecodex-api-key']);
+  }
+  fs.writeFileSync(
+    path.join(runDir, 'request.json'),
+    JSON.stringify({ endpoint, body: requestBody, headers: debugHeaders }, null, 2)
+  );
   fs.writeFileSync(path.join(runDir, 'response.meta.json'), JSON.stringify(meta, null, 2));
 
   if (!res.ok) {

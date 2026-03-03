@@ -6,20 +6,20 @@ const mockBridgeModule = () => ({
   convertProviderResponse: mockConvertProviderResponse,
   createSnapshotRecorder: mockCreateSnapshotRecorder
 });
-const mockInjectClockClientPromptWithResult = jest.fn(async () => ({ ok: true }));
+const mockInjectSessionClientPromptWithResult = jest.fn(async () => ({ ok: true }));
 const mockUnbindSessionScope = jest.fn();
-const mockGetClockClientRegistry = jest.fn(() => ({
+const mockGetSessionClientRegistry = jest.fn(() => ({
   unbindSessionScope: mockUnbindSessionScope
 }));
-const mockClockRegistryModule = () => ({
-  injectClockClientPromptWithResult: mockInjectClockClientPromptWithResult,
-  getClockClientRegistry: mockGetClockClientRegistry
+const mockSessionRegistryModule = () => ({
+  injectSessionClientPromptWithResult: mockInjectSessionClientPromptWithResult,
+  getSessionClientRegistry: mockGetSessionClientRegistry
 });
 
 jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge.js', mockBridgeModule);
 jest.unstable_mockModule('../../../../../src/modules/llmswitch/bridge.ts', mockBridgeModule);
-jest.unstable_mockModule('../../../../../src/server/runtime/http-server/clock-client-registry.js', mockClockRegistryModule);
-jest.unstable_mockModule('../../../../../src/server/runtime/http-server/clock-client-registry.ts', mockClockRegistryModule);
+jest.unstable_mockModule('../../../../../src/server/runtime/http-server/session-client-registry.js', mockSessionRegistryModule);
+jest.unstable_mockModule('../../../../../src/server/runtime/http-server/session-client-registry.ts', mockSessionRegistryModule);
 
 describe('provider-response-converter servertool regressions', () => {
   it('maps SSE context-length overflow into CONTEXT_LENGTH_EXCEEDED', async () => {
@@ -264,7 +264,7 @@ describe('provider-response-converter servertool regressions', () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
     mockCreateSnapshotRecorder.mockClear();
-    mockInjectClockClientPromptWithResult.mockClear();
+    mockInjectSessionClientPromptWithResult.mockClear();
 
     const executeNested = jest.fn(async () => ({ body: { ok: true } }));
     mockConvertProviderResponse.mockImplementation(async ({ clientInjectDispatch }) => {
@@ -309,7 +309,7 @@ describe('provider-response-converter servertool regressions', () => {
 
     expect((converted as any).body).toEqual({ mode: 'client_inject_only' });
     expect(executeNested).not.toHaveBeenCalled();
-    expect(mockInjectClockClientPromptWithResult).toHaveBeenCalledWith(
+    expect(mockInjectSessionClientPromptWithResult).toHaveBeenCalledWith(
       expect.objectContaining({
         tmuxSessionId: 'rcc_client_inject_1',
         text: '继续执行'
@@ -370,12 +370,12 @@ describe('provider-response-converter servertool regressions', () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
     mockCreateSnapshotRecorder.mockClear();
-    mockInjectClockClientPromptWithResult.mockReset();
-    mockInjectClockClientPromptWithResult.mockResolvedValue({
+    mockInjectSessionClientPromptWithResult.mockReset();
+    mockInjectSessionClientPromptWithResult.mockResolvedValue({
       ok: false,
       reason: 'no_matching_tmux_session_daemon'
     });
-    mockGetClockClientRegistry.mockClear();
+    mockGetSessionClientRegistry.mockClear();
     mockUnbindSessionScope.mockReset();
 
     mockConvertProviderResponse.mockImplementation(async ({ clientInjectDispatch }) => {
@@ -385,7 +385,7 @@ describe('provider-response-converter servertool regressions', () => {
         body: { messages: [{ role: 'assistant', content: 'ack' }] },
         metadata: {
           __rt: { serverToolFollowup: true },
-          clockDaemonId: 'daemon_stale',
+          sessionDaemonId: 'daemon_stale',
           tmuxSessionId: 'tmux_sess_stale',
           clientInjectOnly: true,
           clientInjectText: '继续执行',
@@ -421,13 +421,13 @@ describe('provider-response-converter servertool regressions', () => {
       body: { id: 'upstream_body' }
     });
 
-    expect(mockInjectClockClientPromptWithResult).toHaveBeenCalledTimes(1);
-    expect(mockInjectClockClientPromptWithResult).toHaveBeenCalledWith(
+    expect(mockInjectSessionClientPromptWithResult).toHaveBeenCalledTimes(1);
+    expect(mockInjectSessionClientPromptWithResult).toHaveBeenCalledWith(
       expect.objectContaining({
         tmuxSessionId: 'tmux_sess_stale'
       })
     );
-    expect(mockGetClockClientRegistry).toHaveBeenCalled();
+    expect(mockGetSessionClientRegistry).toHaveBeenCalled();
     expect(mockUnbindSessionScope).toHaveBeenCalledWith('tmux:tmux_sess_stale');
   });
 
@@ -435,8 +435,8 @@ describe('provider-response-converter servertool regressions', () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
     mockCreateSnapshotRecorder.mockClear();
-    mockInjectClockClientPromptWithResult.mockReset();
-    mockGetClockClientRegistry.mockClear();
+    mockInjectSessionClientPromptWithResult.mockReset();
+    mockGetSessionClientRegistry.mockClear();
     mockUnbindSessionScope.mockReset();
 
     const executeNested = jest.fn(async () => ({ body: { ok: true } }));
@@ -447,7 +447,7 @@ describe('provider-response-converter servertool regressions', () => {
         body: null as any,
         metadata: {
           __rt: { serverToolFollowup: true },
-          clockDaemonId: 'daemon_unbound',
+          sessionDaemonId: 'daemon_unbound',
           clientInjectOnly: true,
           clientInjectText: '继续执行',
           clientInjectSource: 'servertool.stop_message'
@@ -482,7 +482,7 @@ describe('provider-response-converter servertool regressions', () => {
       body: { id: 'upstream_body' }
     });
 
-    expect(mockInjectClockClientPromptWithResult).not.toHaveBeenCalled();
+    expect(mockInjectSessionClientPromptWithResult).not.toHaveBeenCalled();
     expect(executeNested).not.toHaveBeenCalled();
     expect(mockUnbindSessionScope).not.toHaveBeenCalled();
   });
@@ -491,8 +491,8 @@ describe('provider-response-converter servertool regressions', () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
     mockCreateSnapshotRecorder.mockClear();
-    mockInjectClockClientPromptWithResult.mockReset();
-    mockGetClockClientRegistry.mockClear();
+    mockInjectSessionClientPromptWithResult.mockReset();
+    mockGetSessionClientRegistry.mockClear();
     mockUnbindSessionScope.mockReset();
 
     const executeNested = jest.fn(async () => ({ body: { ok: true } }));
@@ -538,31 +538,31 @@ describe('provider-response-converter servertool regressions', () => {
       body: { id: 'upstream_body' }
     });
 
-    expect(mockInjectClockClientPromptWithResult).not.toHaveBeenCalled();
+    expect(mockInjectSessionClientPromptWithResult).not.toHaveBeenCalled();
     expect(executeNested).not.toHaveBeenCalled();
     expect(mockUnbindSessionScope).not.toHaveBeenCalled();
   });
 
-  it('uses clock daemon binding key for strict client injection target', async () => {
+  it('uses session daemon binding key for strict client injection target', async () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
     mockCreateSnapshotRecorder.mockClear();
-    mockInjectClockClientPromptWithResult.mockReset();
-    mockInjectClockClientPromptWithResult.mockResolvedValue({ ok: true });
-    mockGetClockClientRegistry.mockClear();
+    mockInjectSessionClientPromptWithResult.mockReset();
+    mockInjectSessionClientPromptWithResult.mockResolvedValue({ ok: true });
+    mockGetSessionClientRegistry.mockClear();
     mockUnbindSessionScope.mockReset();
 
     const executeNested = jest.fn(async () => ({ body: { ok: true } }));
     mockConvertProviderResponse.mockImplementation(async ({ clientInjectDispatch }) => {
       await clientInjectDispatch({
         entryEndpoint: '/v1/messages',
-        requestId: 'followup_req_clockd_binding',
+        requestId: 'followup_req_sessiond_binding',
         body: { messages: [{ role: 'assistant', content: 'ack' }] },
         metadata: {
           __rt: { serverToolFollowup: true },
           sessionId: 'sess_original',
           conversationId: 'conv_original',
-          clockDaemonId: 'daemon_138',
+          sessionDaemonId: 'daemon_138',
           tmuxSessionId: 'tmux_daemon_138',
           clientInjectOnly: true,
           clientInjectText: '继续执行',
@@ -580,7 +580,7 @@ describe('provider-response-converter servertool regressions', () => {
       {
         entryEndpoint: '/v1/messages',
         providerProtocol: 'anthropic-messages',
-        requestId: 'req_clockd_binding_1',
+        requestId: 'req_sessiond_binding_1',
         wantsStream: false,
         response: { body: { id: 'upstream_body' } } as any,
         pipelineMetadata: {}
@@ -594,8 +594,8 @@ describe('provider-response-converter servertool regressions', () => {
       }
     );
 
-    expect(mockInjectClockClientPromptWithResult).toHaveBeenCalledTimes(1);
-    expect(mockInjectClockClientPromptWithResult).toHaveBeenCalledWith(
+    expect(mockInjectSessionClientPromptWithResult).toHaveBeenCalledTimes(1);
+    expect(mockInjectSessionClientPromptWithResult).toHaveBeenCalledWith(
       expect.objectContaining({
         tmuxSessionId: 'tmux_daemon_138',
         text: '继续执行'
@@ -608,9 +608,9 @@ describe('provider-response-converter servertool regressions', () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
     mockCreateSnapshotRecorder.mockClear();
-    mockInjectClockClientPromptWithResult.mockReset();
-    mockInjectClockClientPromptWithResult.mockResolvedValue({ ok: true });
-    mockGetClockClientRegistry.mockClear();
+    mockInjectSessionClientPromptWithResult.mockReset();
+    mockInjectSessionClientPromptWithResult.mockResolvedValue({ ok: true });
+    mockGetSessionClientRegistry.mockClear();
     mockUnbindSessionScope.mockReset();
 
     const executeNested = jest.fn(async () => ({ body: { ok: true } }));
@@ -623,7 +623,7 @@ describe('provider-response-converter servertool regressions', () => {
         },
         metadata: {
           __rt: { serverToolFollowup: true },
-          clockDaemonId: 'daemon_continue_1',
+          sessionDaemonId: 'daemon_continue_1',
           tmuxSessionId: 'tmux_continue_1',
           clientInjectOnly: true,
           clientInjectText: '继续执行',
@@ -655,15 +655,15 @@ describe('provider-response-converter servertool regressions', () => {
       }
     );
 
-    expect(mockInjectClockClientPromptWithResult).toHaveBeenCalledTimes(1);
-    expect(mockInjectClockClientPromptWithResult).toHaveBeenCalledWith(
+    expect(mockInjectSessionClientPromptWithResult).toHaveBeenCalledTimes(1);
+    expect(mockInjectSessionClientPromptWithResult).toHaveBeenCalledWith(
       expect.objectContaining({
         tmuxSessionId: 'tmux_continue_1',
         text: '继续执行',
         source: 'servertool.continue_execution'
       })
     );
-    const injectArgs = mockInjectClockClientPromptWithResult.mock.calls[0]?.[0] as Record<string, unknown>;
+    const injectArgs = mockInjectSessionClientPromptWithResult.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(injectArgs.sessionId).toBeUndefined();
     expect(executeNested).not.toHaveBeenCalled();
   });
@@ -672,9 +672,9 @@ describe('provider-response-converter servertool regressions', () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
     mockCreateSnapshotRecorder.mockClear();
-    mockInjectClockClientPromptWithResult.mockReset();
-    mockInjectClockClientPromptWithResult.mockResolvedValue({ ok: true });
-    mockGetClockClientRegistry.mockClear();
+    mockInjectSessionClientPromptWithResult.mockReset();
+    mockInjectSessionClientPromptWithResult.mockResolvedValue({ ok: true });
+    mockGetSessionClientRegistry.mockClear();
     mockUnbindSessionScope.mockReset();
 
     const executeNested = jest.fn(async () => ({ body: { ok: true } }));
@@ -688,7 +688,7 @@ describe('provider-response-converter servertool regressions', () => {
         },
         metadata: {
           __rt: { serverToolFollowup: true },
-          clockDaemonId: 'daemon_clock_1',
+          sessionDaemonId: 'daemon_session_1',
           tmuxSessionId: 'tmux_clock_1',
           clientInjectOnly: true,
           clientInjectText: clockDirective,
@@ -720,15 +720,15 @@ describe('provider-response-converter servertool regressions', () => {
       }
     );
 
-    expect(mockInjectClockClientPromptWithResult).toHaveBeenCalledTimes(1);
-    expect(mockInjectClockClientPromptWithResult).toHaveBeenCalledWith(
+    expect(mockInjectSessionClientPromptWithResult).toHaveBeenCalledTimes(1);
+    expect(mockInjectSessionClientPromptWithResult).toHaveBeenCalledWith(
       expect.objectContaining({
         tmuxSessionId: 'tmux_clock_1',
         text: clockDirective,
         source: 'servertool.clock'
       })
     );
-    const injectArgs = mockInjectClockClientPromptWithResult.mock.calls[0]?.[0] as Record<string, unknown>;
+    const injectArgs = mockInjectSessionClientPromptWithResult.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(injectArgs.sessionId).toBeUndefined();
     expect(executeNested).not.toHaveBeenCalled();
   });
@@ -737,9 +737,9 @@ describe('provider-response-converter servertool regressions', () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();
     mockCreateSnapshotRecorder.mockClear();
-    mockInjectClockClientPromptWithResult.mockReset();
-    mockInjectClockClientPromptWithResult.mockResolvedValue({ ok: true });
-    mockGetClockClientRegistry.mockClear();
+    mockInjectSessionClientPromptWithResult.mockReset();
+    mockInjectSessionClientPromptWithResult.mockResolvedValue({ ok: true });
+    mockGetSessionClientRegistry.mockClear();
     mockUnbindSessionScope.mockReset();
 
     const executeNested = jest.fn(async () => ({ body: { ok: true } }));
@@ -782,8 +782,8 @@ describe('provider-response-converter servertool regressions', () => {
       }
     );
 
-    expect(mockInjectClockClientPromptWithResult).toHaveBeenCalledTimes(1);
-    const injectArgs = mockInjectClockClientPromptWithResult.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(mockInjectSessionClientPromptWithResult).toHaveBeenCalledTimes(1);
+    const injectArgs = mockInjectSessionClientPromptWithResult.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(injectArgs.tmuxSessionId).toBe('tmux_explicit_1');
     expect(injectArgs.sessionId).toBeUndefined();
     expect(executeNested).not.toHaveBeenCalled();

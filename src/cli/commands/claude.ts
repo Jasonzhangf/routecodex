@@ -30,7 +30,7 @@ export function createClaudeCommand(program: Command, ctx: ClaudeCommandContext)
     },
     buildEnv: ({ env, baseUrl, configuredApiKey, cwd }) => {
       // Always prefer the proxy key injected by launcher-kernel (OPENAI_API_KEY),
-      // because it may carry the clock daemon suffix for per-session binding.
+      // because it may carry the session daemon suffix for per-session binding.
       const proxyApiKey = (typeof env.OPENAI_API_KEY === 'string' && env.OPENAI_API_KEY.trim())
         ? env.OPENAI_API_KEY.trim()
         : (configuredApiKey || 'rcc-proxy-key');
@@ -42,14 +42,10 @@ export function createClaudeCommand(program: Command, ctx: ClaudeCommandContext)
         CLAUDE_WORKDIR: cwd,
         ANTHROPIC_BASE_URL: baseUrl,
         ANTHROPIC_API_URL: baseUrl,
-        ANTHROPIC_API_KEY: proxyApiKey
+        ANTHROPIC_API_KEY: proxyApiKey,
+        ANTHROPIC_AUTH_TOKEN: proxyApiKey
       } as NodeJS.ProcessEnv;
 
-      try {
-        delete (claudeEnv as Record<string, unknown>).ANTHROPIC_AUTH_TOKEN;
-      } catch {
-        // ignore
-      }
       try {
         delete (claudeEnv as Record<string, unknown>).ANTHROPIC_TOKEN;
       } catch {

@@ -3,7 +3,7 @@ import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import express from 'express';
 
-import { encodeClockClientApiKey } from '../../../src/utils/clock-client-token.js';
+import { encodeSessionClientApiKey } from '../../../src/utils/session-client-token.js';
 
 type MiddlewareMod = typeof import('../../../src/server/runtime/http-server/middleware.js');
 
@@ -15,8 +15,8 @@ async function startAppWithApiKey(apikey: string): Promise<{ baseUrl: string; cl
 
   app.get('/hello', (req, res) => {
     const daemonIdHeader =
-      typeof req.headers['x-routecodex-clock-daemon-id'] === 'string'
-        ? req.headers['x-routecodex-clock-daemon-id']
+      typeof req.headers['x-routecodex-session-daemon-id'] === 'string'
+        ? req.headers['x-routecodex-session-daemon-id']
         : undefined;
     const tmuxSessionIdHeader =
       typeof req.headers['x-routecodex-client-tmux-session-id'] === 'string'
@@ -71,11 +71,11 @@ describe('httpserver apikey env reference', () => {
     process.env.TEST_HTTP_APIKEY = 'dummy-http-apikey';
     const { baseUrl, close } = await startAppWithApiKey('${TEST_HTTP_APIKEY}');
     try {
-      const encoded = encodeClockClientApiKey('dummy-http-apikey', 'clockd_bind_1');
+      const encoded = encodeSessionClientApiKey('dummy-http-apikey', 'sessiond_bind_1');
       const ok = await fetch(`${baseUrl}/hello`, { headers: { authorization: `Bearer ${encoded}` } });
       expect(ok.status).toBe(200);
       const body = await ok.json();
-      expect(body?.daemonIdHeader).toBe('clockd_bind_1');
+      expect(body?.daemonIdHeader).toBe('sessiond_bind_1');
       expect(body?.tmuxSessionIdHeader).toBeNull();
     } finally {
       await close();
@@ -87,11 +87,11 @@ describe('httpserver apikey env reference', () => {
     process.env.TEST_HTTP_APIKEY = 'dummy-http-apikey';
     const { baseUrl, close } = await startAppWithApiKey('${TEST_HTTP_APIKEY}');
     try {
-      const encoded = encodeClockClientApiKey('dummy-http-apikey', 'clockd_bind_2', 'rcc_codex_test_2');
+      const encoded = encodeSessionClientApiKey('dummy-http-apikey', 'sessiond_bind_2', 'rcc_codex_test_2');
       const ok = await fetch(`${baseUrl}/hello`, { headers: { authorization: `Bearer ${encoded}` } });
       expect(ok.status).toBe(200);
       const body = await ok.json();
-      expect(body?.daemonIdHeader).toBe('clockd_bind_2');
+      expect(body?.daemonIdHeader).toBe('sessiond_bind_2');
       expect(body?.tmuxSessionIdHeader).toBe('rcc_codex_test_2');
     } finally {
       await close();

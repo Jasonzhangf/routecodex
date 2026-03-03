@@ -104,5 +104,5 @@ export async function setupRuntime(server: any, userConfig: UnknownObject): Prom
   server.hubPipelineEngineShadow = null;
 
   await server.initializeProviderRuntimes(bootstrapArtifacts);
-  server.startClockDaemonInjectLoop();
+  server.startSessionDaemonInjectLoop();
 }

@@ -9,19 +9,19 @@ import {
   scheduleClockTasksSnapshot,
   updateClockTaskSnapshot
 } from '../../../modules/llmswitch/bridge.js';
-import { getClockClientRegistry } from './clock-client-registry.js';
-import { normalizeWorkdir } from './clock-client-registry-utils.js';
+import { getSessionClientRegistry } from './session-client-registry.js';
+import { normalizeWorkdir } from './session-client-registry-utils.js';
 import { isLocalRequest } from './daemon-admin-routes.js';
 import { isTmuxSessionAlive } from './tmux-session-probe.js';
 import {
-  isClockManagedTerminationEnabled,
+  isSessionManagedTerminationEnabled,
   normalizeTaskCreateItems,
   normalizeTaskPatch,
   parseBoolean,
   parsePositiveInt,
   parseString
-} from './clock-client-route-utils.js';
-import { migrateStopMessageTmuxScope } from './stopmessage-scope-rebind.js';
+} from './session-client-route-utils.js';
+import { clearStopMessageTmuxScope, migrateStopMessageTmuxScope } from './stopmessage-scope-rebind.js';
 
 function rejectNonLocal(req: Request, res: Response): boolean {
   if (isLocalRequest(req)) {
@@ -31,10 +31,10 @@ function rejectNonLocal(req: Request, res: Response): boolean {
   return true;
 }
 
-export function registerClockClientRoutes(app: Application): void {
-  const registry = getClockClientRegistry();
+export function registerSessionClientRoutes(app: Application): void {
+  const registry = getSessionClientRegistry();
 
-  app.post('/daemon/clock-client/register', (req: Request, res: Response) => {
+  app.post('/daemon/session-client/register', (req: Request, res: Response) => {
     if (rejectNonLocal(req, res)) {
       return;
     }
@@ -96,7 +96,7 @@ export function registerClockClientRoutes(app: Application): void {
       const rebindResult = migrateStopMessageTmuxScope({
         oldTmuxSessionId,
         newTmuxSessionId: effectiveTmuxSessionId,
-        reason: 'clock_client_register'
+        reason: 'session_client_register'
       });
       if (rebindResult.migrated) {
         console.log(
@@ -108,7 +108,7 @@ export function registerClockClientRoutes(app: Application): void {
     res.status(200).json({ ok: true, record: rec });
   });
 
-  app.post('/daemon/clock-client/heartbeat', (req: Request, res: Response) => {
+  app.post('/daemon/session-client/heartbeat', (req: Request, res: Response) => {
     if (rejectNonLocal(req, res)) {
       return;
     }
@@ -141,7 +141,7 @@ export function registerClockClientRoutes(app: Application): void {
     const rebindResult = migrateStopMessageTmuxScope({
       oldTmuxSessionId: previousTmuxSessionId,
       newTmuxSessionId: updatedTmuxSessionId,
-      reason: 'clock_client_heartbeat'
+      reason: 'session_client_heartbeat'
     });
     if (rebindResult.migrated) {
       console.log(
@@ -151,7 +151,7 @@ export function registerClockClientRoutes(app: Application): void {
     res.status(200).json({ ok: true });
   });
 
-  app.post('/daemon/clock-client/unregister', (req: Request, res: Response) => {
+  app.post('/daemon/session-client/unregister', (req: Request, res: Response) => {
     if (rejectNonLocal(req, res)) {
       return;
     }
@@ -165,14 +165,14 @@ export function registerClockClientRoutes(app: Application): void {
     res.status(200).json({ ok });
   });
 
-  app.get('/daemon/clock-client/list', (req: Request, res: Response) => {
+  app.get('/daemon/session-client/list', (req: Request, res: Response) => {
     if (rejectNonLocal(req, res)) {
       return;
     }
     res.status(200).json({ ok: true, records: registry.list() });
   });
 
-  app.post('/daemon/clock-client/inject', async (req: Request, res: Response) => {
+  app.post('/daemon/session-client/inject', async (req: Request, res: Response) => {
     if (rejectNonLocal(req, res)) {
       return;
     }
@@ -215,13 +215,13 @@ export function registerClockClientRoutes(app: Application): void {
     res.status(200).json({ ok: true, daemonId: result.daemonId });
   });
 
-  app.get('/daemon/clock/tasks', async (req: Request, res: Response) => {
+  app.get('/daemon/session/tasks', async (req: Request, res: Response) => {
     if (rejectNonLocal(req, res)) {
       return;
     }
-    const clockConfig = await resolveClockConfigSnapshot(undefined);
-    if (!clockConfig) {
-      res.status(500).json({ ok: false, reason: 'clock_config_unavailable' });
+    const sessionConfig = await resolveClockConfigSnapshot(undefined);
+    if (!sessionConfig) {
+      res.status(500).json({ ok: false, reason: 'session_config_unavailable' });
       return;
     }
 
@@ -230,7 +230,7 @@ export function registerClockClientRoutes(app: Application): void {
 
     const sessions = [] as Array<{ sessionId: string; taskCount: number; tasks: unknown[] }>;
     for (const sessionId of sessionIds) {
-      const tasks = await listClockTasksSnapshot({ sessionId, config: clockConfig });
+      const tasks = await listClockTasksSnapshot({ sessionId, config: sessionConfig });
       sessions.push({ sessionId, taskCount: tasks.length, tasks });
     }
 
@@ -241,7 +241,7 @@ export function registerClockClientRoutes(app: Application): void {
     });
   });
 
-  app.post('/daemon/clock/tasks', async (req: Request, res: Response) => {
+  app.post('/daemon/session/tasks', async (req: Request, res: Response) => {
     if (rejectNonLocal(req, res)) {
       return;
     }
@@ -257,22 +257,22 @@ export function registerClockClientRoutes(app: Application): void {
       return;
     }
 
-    const clockConfig = await resolveClockConfigSnapshot(undefined);
-    if (!clockConfig) {
-      res.status(500).json({ ok: false, reason: 'clock_config_unavailable' });
+    const sessionConfig = await resolveClockConfigSnapshot(undefined);
+    if (!sessionConfig) {
+      res.status(500).json({ ok: false, reason: 'session_config_unavailable' });
       return;
     }
 
     const scheduled = await scheduleClockTasksSnapshot({
       sessionId,
       items: normalized.items,
-      config: clockConfig
+      config: sessionConfig
     });
 
     res.status(200).json({ ok: true, sessionId, scheduledCount: scheduled.length, scheduled });
   });
 
-  app.patch('/daemon/clock/tasks', async (req: Request, res: Response) => {
+  app.patch('/daemon/session/tasks', async (req: Request, res: Response) => {
     if (rejectNonLocal(req, res)) {
       return;
     }
@@ -290,9 +290,9 @@ export function registerClockClientRoutes(app: Application): void {
       return;
     }
 
-    const clockConfig = await resolveClockConfigSnapshot(undefined);
-    if (!clockConfig) {
-      res.status(500).json({ ok: false, reason: 'clock_config_unavailable' });
+    const sessionConfig = await resolveClockConfigSnapshot(undefined);
+    if (!sessionConfig) {
+      res.status(500).json({ ok: false, reason: 'session_config_unavailable' });
       return;
     }
 
@@ -300,7 +300,7 @@ export function registerClockClientRoutes(app: Application): void {
       sessionId,
       taskId,
       patch: normalizedPatch.patch,
-      config: clockConfig
+      config: sessionConfig
     });
 
     if (!updated) {
@@ -311,7 +311,7 @@ export function registerClockClientRoutes(app: Application): void {
     res.status(200).json({ ok: true, sessionId, taskId, updated });
   });
 
-  app.delete('/daemon/clock/tasks', async (req: Request, res: Response) => {
+  app.delete('/daemon/session/tasks', async (req: Request, res: Response) => {
     if (rejectNonLocal(req, res)) {
       return;
     }
@@ -322,24 +322,24 @@ export function registerClockClientRoutes(app: Application): void {
       return;
     }
 
-    const clockConfig = await resolveClockConfigSnapshot(undefined);
-    if (!clockConfig) {
-      res.status(500).json({ ok: false, reason: 'clock_config_unavailable' });
+    const sessionConfig = await resolveClockConfigSnapshot(undefined);
+    if (!sessionConfig) {
+      res.status(500).json({ ok: false, reason: 'session_config_unavailable' });
       return;
     }
 
     const taskId = parseString(body.taskId);
     if (taskId) {
-      const removed = await cancelClockTaskSnapshot({ sessionId, taskId, config: clockConfig });
+      const removed = await cancelClockTaskSnapshot({ sessionId, taskId, config: sessionConfig });
       res.status(200).json({ ok: true, sessionId, taskId, removed });
       return;
     }
 
-    const removedCount = await clearClockTasksSnapshot({ sessionId, config: clockConfig });
+    const removedCount = await clearClockTasksSnapshot({ sessionId, config: sessionConfig });
     res.status(200).json({ ok: true, sessionId, removedCount });
   });
 
-  app.post('/daemon/clock/cleanup', async (req: Request, res: Response) => {
+  app.post('/daemon/session/cleanup', async (req: Request, res: Response) => {
     if (rejectNonLocal(req, res)) {
       return;
     }
@@ -347,9 +347,9 @@ export function registerClockClientRoutes(app: Application): void {
     const body = req.body && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : {};
     const mode = parseString(body.mode) || 'dead_tmux';
 
-    const clockConfig = await resolveClockConfigSnapshot(undefined);
-    if (!clockConfig) {
-      res.status(500).json({ ok: false, reason: 'clock_config_unavailable' });
+    const sessionConfig = await resolveClockConfigSnapshot(undefined);
+    if (!sessionConfig) {
+      res.status(500).json({ ok: false, reason: 'session_config_unavailable' });
       return;
     }
 
@@ -359,21 +359,27 @@ export function registerClockClientRoutes(app: Application): void {
         res.status(400).json({ ok: false, reason: 'sessionScope is required for mode=unbind' });
         return;
       }
-      const unbound = sessionScope.startsWith('clockd.') || sessionScope.startsWith('tmux:')
+      const unbound = sessionScope.startsWith('sessiond.') || sessionScope.startsWith('tmux:')
         ? registry.unbindSessionScope(sessionScope)
         : registry.unbindConversationSession(sessionScope);
       const clearTasks = parseBoolean(body.clearTasks) === true;
       let cleared = 0;
       if (clearTasks) {
-        cleared = await clearClockTasksSnapshot({ sessionId: sessionScope, config: clockConfig });
+        cleared = await clearClockTasksSnapshot({ sessionId: sessionScope, config: sessionConfig });
       }
-      res.status(200).json({ ok: true, mode, sessionScope, unbound, cleared });
+      const clearedStopMessage = sessionScope.startsWith('tmux:')
+        ? clearStopMessageTmuxScope({
+          tmuxSessionId: sessionScope.slice('tmux:'.length),
+          reason: 'session_unbind'
+        })
+        : undefined;
+      res.status(200).json({ ok: true, mode, sessionScope, unbound, cleared, clearedStopMessage });
       return;
     }
 
     const modeSafe = mode.toLowerCase();
     const requestedTerminateManaged =
-      parseBoolean(body.terminateManaged) ?? isClockManagedTerminationEnabled();
+      parseBoolean(body.terminateManaged) ?? isSessionManagedTerminationEnabled();
     const allowManagedTermination = false;
     const cleanup = modeSafe === 'stale_heartbeat'
       ? registry.cleanupStaleHeartbeats({
@@ -382,15 +388,26 @@ export function registerClockClientRoutes(app: Application): void {
       : registry.cleanupDeadTmuxSessions({
         isTmuxSessionAlive
       });
-    const cleanupClockSessionIds = Array.from(new Set<string>([
+    const cleanupSessionIds = Array.from(new Set<string>([
       ...cleanup.removedConversationSessionIds,
       ...cleanup.removedTmuxSessionIds
     ]));
 
     let clearedTaskSessions = 0;
-    for (const cleanupSessionId of cleanupClockSessionIds) {
-      await clearClockTasksSnapshot({ sessionId: cleanupSessionId, config: clockConfig });
+    for (const cleanupSessionId of cleanupSessionIds) {
+      await clearClockTasksSnapshot({ sessionId: cleanupSessionId, config: sessionConfig });
       clearedTaskSessions += 1;
+    }
+    let clearedStopMessageScopes = 0;
+    const removedTmuxIds = Array.from(new Set(cleanup.removedTmuxSessionIds));
+    for (const tmuxSessionId of removedTmuxIds) {
+      const cleared = clearStopMessageTmuxScope({
+        tmuxSessionId,
+        reason: modeSafe === 'stale_heartbeat' ? 'session_cleanup_stale' : 'session_cleanup_dead_tmux'
+      });
+      if (cleared.cleared) {
+        clearedStopMessageScopes += 1;
+      }
     }
 
     res.status(200).json({
@@ -399,7 +416,8 @@ export function registerClockClientRoutes(app: Application): void {
       terminateManaged: allowManagedTermination,
       terminateManagedRequested: requestedTerminateManaged,
       cleanup,
-      clearedTaskSessions
+      clearedTaskSessions,
+      clearedStopMessageScopes
     });
   });
 }

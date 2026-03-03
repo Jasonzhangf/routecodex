@@ -106,6 +106,18 @@ function hasActiveStopMessage(state: MutableRoutingState | null): boolean {
   );
 }
 
+function hasAnyStopMessageState(state: MutableRoutingState | null): boolean {
+  if (!state) {
+    return false;
+  }
+  return Boolean(
+    hasActiveStopMessage(state) ||
+      readToken(state.stopMessageSource) ||
+      isFiniteNumber(state.stopMessageUpdatedAt) ||
+      isFiniteNumber(state.stopMessageLastUsedAt)
+  );
+}
+
 function applyStopMessage(source: MutableRoutingState, target: MutableRoutingState): void {
   target.stopMessageSource = source.stopMessageSource;
   target.stopMessageText = source.stopMessageText;
@@ -224,4 +236,27 @@ export function migrateStopMessageTmuxScope(args: {
     oldScope,
     newScope
   };
+}
+
+export function clearStopMessageTmuxScope(args: {
+  tmuxSessionId?: string;
+  reason?: string;
+}): { cleared: boolean; reason: string; scope?: string } {
+  const tmuxSessionId = readToken(args.tmuxSessionId);
+  if (!tmuxSessionId) {
+    return { cleared: false, reason: 'missing_tmux' };
+  }
+  const scope = `tmux:${tmuxSessionId}`;
+  const state = normalizeRoutingState(loadRoutingInstructionStateSync(scope));
+  if (!hasAnyStopMessageState(state)) {
+    return { cleared: false, reason: 'stopmessage_missing', scope };
+  }
+  const nextState = state as MutableRoutingState;
+  clearStopMessage(nextState);
+  if (isRoutingStateEffectivelyEmpty(nextState)) {
+    saveRoutingInstructionStateSync(scope, null);
+  } else {
+    saveRoutingInstructionStateSync(scope, nextState as unknown as Record<string, unknown>);
+  }
+  return { cleared: true, reason: readToken(args.reason) || 'tmux_clear', scope };
 }

@@ -31,9 +31,9 @@ const FOLLOWUP_SESSION_HEADER_KEYS = new Set([
   'xroutecodexclientdaemonid',
   'xroutecodexclientdid',
   'xrccclientdaemonid',
-  'xroutecodexclockdaemonid',
+  'xroutecodexsessiondaemonid',
   'xroutecodexdaemonid',
-  'xrccclockdaemonid',
+  'xrccsessiondaemonid',
   'xroutecodexclienttmuxsessionid',
   'xrccclienttmuxsessionid',
   'xroutecodextmuxsessionid',
@@ -131,7 +131,7 @@ function extractPreservedDaemonOrInjectToken(
   }
   for (const [headerName, headerValue] of Object.entries(headers)) {
     const normalizedName = canonicalizeHeaderName(headerName);
-    if (field === 'daemon' && (normalizedName.endsWith('clockdaemonid') || normalizedName.endsWith('daemonid'))) {
+    if (field === 'daemon' && (normalizedName.endsWith('sessiondaemonid') || normalizedName.endsWith('daemonid'))) {
       return headerValue;
     }
     if (field === 'tmux' && normalizedName.endsWith('tmuxsessionid')) {
@@ -391,17 +391,17 @@ export async function convertProviderResponseIfNeeded(
                 out.conversationId = conversationId;
               }
             }
-            if (typeof out.clockDaemonId !== 'string' || !out.clockDaemonId.trim()) {
+            if (typeof out.sessionDaemonId !== 'string' || !out.sessionDaemonId.trim()) {
               const daemonId =
                 (typeof out.clientDaemonId === 'string' && out.clientDaemonId.trim())
                   ? out.clientDaemonId
                   : extractPreservedDaemonOrInjectToken(preservedClientHeaders, 'daemon');
               if (daemonId) {
                 out.clientDaemonId = daemonId;
-                out.clockDaemonId = daemonId;
+                out.sessionDaemonId = daemonId;
               }
             } else if (typeof out.clientDaemonId !== 'string' || !out.clientDaemonId.trim()) {
-              out.clientDaemonId = out.clockDaemonId;
+              out.clientDaemonId = out.sessionDaemonId;
             }
             if (typeof out.clientTmuxSessionId !== 'string' || !out.clientTmuxSessionId.trim()) {
               const tmuxSessionId = extractPreservedDaemonOrInjectToken(preservedClientHeaders, 'tmux');
@@ -494,17 +494,17 @@ export async function convertProviderResponseIfNeeded(
                 out.conversationId = conversationId;
             }
           }
-            if (typeof out.clockDaemonId !== 'string' || !out.clockDaemonId.trim()) {
+            if (typeof out.sessionDaemonId !== 'string' || !out.sessionDaemonId.trim()) {
             const daemonId =
                 (typeof out.clientDaemonId === 'string' && out.clientDaemonId.trim())
                   ? out.clientDaemonId
                 : extractPreservedDaemonOrInjectToken(preservedClientHeaders, 'daemon');
             if (daemonId) {
                 out.clientDaemonId = daemonId;
-                out.clockDaemonId = daemonId;
+                out.sessionDaemonId = daemonId;
             }
             } else if (typeof out.clientDaemonId !== 'string' || !out.clientDaemonId.trim()) {
-              out.clientDaemonId = out.clockDaemonId;
+              out.clientDaemonId = out.sessionDaemonId;
           }
             if (typeof out.clientTmuxSessionId !== 'string' || !out.clientTmuxSessionId.trim()) {
             const tmuxSessionId = extractPreservedDaemonOrInjectToken(preservedClientHeaders, 'tmux');

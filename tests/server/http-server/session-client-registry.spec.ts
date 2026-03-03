@@ -1,13 +1,13 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { ClockClientRegistry } from '../../../src/server/runtime/http-server/clock-client-registry.js';
+import { SessionClientRegistry } from '../../../src/server/runtime/http-server/session-client-registry.js';
 
-describe('ClockClientRegistry cleanup', () => {
+describe('SessionClientRegistry cleanup', () => {
   it('stale heartbeat cleanup removes record but never kills tmux session', () => {
-    const registry = new ClockClientRegistry();
+    const registry = new SessionClientRegistry();
     registry.register({
-      daemonId: 'clockd_managed_1',
+      daemonId: 'sessiond_managed_1',
       callbackUrl: 'http://127.0.0.1:65530/inject',
       tmuxSessionId: 'rcc_codex_1',
       managedTmuxSession: true
@@ -23,7 +23,7 @@ describe('ClockClientRegistry cleanup', () => {
       }
     });
 
-    expect(cleanup.removedDaemonIds).toEqual(['clockd_managed_1']);
+    expect(cleanup.removedDaemonIds).toEqual(['sessiond_managed_1']);
     expect(cleanup.killedTmuxSessionIds).toEqual([]);
     expect(cleanup.failedKillTmuxSessionIds).toEqual([]);
     expect(cleanup.skippedKillTmuxSessionIds).toEqual(['rcc_codex_1']);
@@ -31,9 +31,9 @@ describe('ClockClientRegistry cleanup', () => {
   });
 
   it('does not kill stale tmux session when not explicitly managed', () => {
-    const registry = new ClockClientRegistry();
+    const registry = new SessionClientRegistry();
     registry.register({
-      daemonId: 'clockd_unmanaged_1',
+      daemonId: 'sessiond_unmanaged_1',
       callbackUrl: 'http://127.0.0.1:65531/inject',
       tmuxSessionId: 'rcc_user_custom_1'
     });
@@ -48,23 +48,23 @@ describe('ClockClientRegistry cleanup', () => {
       }
     });
 
-    expect(cleanup.removedDaemonIds).toEqual(['clockd_unmanaged_1']);
+    expect(cleanup.removedDaemonIds).toEqual(['sessiond_unmanaged_1']);
     expect(cleanup.killedTmuxSessionIds).toEqual([]);
     expect(cleanup.skippedKillTmuxSessionIds).toEqual(['rcc_user_custom_1']);
     expect(killed).toEqual([]);
   });
 
   it('does not kill shared tmux session when another daemon is alive', () => {
-    const registry = new ClockClientRegistry();
+    const registry = new SessionClientRegistry();
 
     registry.register({
-      daemonId: 'clockd_stale_shared',
+      daemonId: 'sessiond_stale_shared',
       callbackUrl: 'http://127.0.0.1:65532/inject',
       tmuxSessionId: 'rcc_shared_tmux',
       managedTmuxSession: true
     });
     registry.register({
-      daemonId: 'clockd_live_shared',
+      daemonId: 'sessiond_live_shared',
       callbackUrl: 'http://127.0.0.1:65533/inject',
       tmuxSessionId: 'rcc_shared_tmux',
       managedTmuxSession: true
@@ -74,8 +74,8 @@ describe('ClockClientRegistry cleanup', () => {
       records: Map<string, { lastHeartbeatAtMs: number }>;
     };
 
-    const staleRecord = registryInternal.records.get('clockd_stale_shared');
-    const liveRecord = registryInternal.records.get('clockd_live_shared');
+    const staleRecord = registryInternal.records.get('sessiond_stale_shared');
+    const liveRecord = registryInternal.records.get('sessiond_live_shared');
     expect(staleRecord).toBeDefined();
     expect(liveRecord).toBeDefined();
     if (staleRecord) {
@@ -95,40 +95,40 @@ describe('ClockClientRegistry cleanup', () => {
       }
     });
 
-    expect(cleanup.removedDaemonIds).toEqual(['clockd_stale_shared']);
+    expect(cleanup.removedDaemonIds).toEqual(['sessiond_stale_shared']);
     expect(cleanup.killedTmuxSessionIds).toEqual([]);
     expect(cleanup.skippedKillTmuxSessionIds).toEqual(['rcc_shared_tmux']);
     expect(killed).toEqual([]);
 
     const remaining = registry.list().map((item) => item.daemonId);
-    expect(remaining).toContain('clockd_live_shared');
-    expect(remaining).not.toContain('clockd_stale_shared');
+    expect(remaining).toContain('sessiond_live_shared');
+    expect(remaining).not.toContain('sessiond_stale_shared');
   });
 
   it('keeps conversation->tmux mapping when only one of shared tmux daemon records is stale', async () => {
-    const registry = new ClockClientRegistry();
+    const registry = new SessionClientRegistry();
     registry.register({
-      daemonId: 'clockd_stale_shared_mapping',
+      daemonId: 'sessiond_stale_shared_mapping',
       callbackUrl: 'http://127.0.0.1:65532/inject',
       tmuxSessionId: 'rcc_shared_tmux_mapping',
       managedTmuxSession: true
     });
     registry.register({
-      daemonId: 'clockd_live_shared_mapping',
+      daemonId: 'sessiond_live_shared_mapping',
       callbackUrl: 'http://127.0.0.1:65533/inject',
       tmuxSessionId: 'rcc_shared_tmux_mapping',
       managedTmuxSession: true
     });
     registry.bindConversationSession({
       conversationSessionId: 'conv_shared_mapping',
-      daemonId: 'clockd_live_shared_mapping'
+      daemonId: 'sessiond_live_shared_mapping'
     });
 
     const registryInternal = registry as unknown as {
       records: Map<string, { lastHeartbeatAtMs: number }>;
     };
-    const staleRecord = registryInternal.records.get('clockd_stale_shared_mapping');
-    const liveRecord = registryInternal.records.get('clockd_live_shared_mapping');
+    const staleRecord = registryInternal.records.get('sessiond_stale_shared_mapping');
+    const liveRecord = registryInternal.records.get('sessiond_live_shared_mapping');
     expect(staleRecord).toBeDefined();
     expect(liveRecord).toBeDefined();
     if (staleRecord) {
@@ -142,7 +142,7 @@ describe('ClockClientRegistry cleanup', () => {
       nowMs: Date.now() + 500,
       staleAfterMs: 1_000
     });
-    expect(cleanup.removedDaemonIds).toEqual(['clockd_stale_shared_mapping']);
+    expect(cleanup.removedDaemonIds).toEqual(['sessiond_stale_shared_mapping']);
 
     const originalFetch = global.fetch;
     const hits: string[] = [];
@@ -160,7 +160,7 @@ describe('ClockClientRegistry cleanup', () => {
         text: 'shared tmux mapping still alive'
       });
       expect(injected.ok).toBe(true);
-      expect(injected.daemonId).toBe('clockd_live_shared_mapping');
+      expect(injected.daemonId).toBe('sessiond_live_shared_mapping');
       expect(hits).toEqual(['http://127.0.0.1:65533/inject']);
     } finally {
       global.fetch = originalFetch;
@@ -168,9 +168,9 @@ describe('ClockClientRegistry cleanup', () => {
   });
 
   it('stale heartbeat cleanup removes record but never kills managed child pid', () => {
-    const registry = new ClockClientRegistry();
+    const registry = new SessionClientRegistry();
     registry.register({
-      daemonId: 'clockd_managed_child_1',
+      daemonId: 'sessiond_managed_child_1',
       callbackUrl: 'http://127.0.0.1:65540/inject',
       managedClientProcess: true,
       managedClientPid: 43210,
@@ -188,7 +188,7 @@ describe('ClockClientRegistry cleanup', () => {
       }
     });
 
-    expect(cleanup.removedDaemonIds).toEqual(['clockd_managed_child_1']);
+    expect(cleanup.removedDaemonIds).toEqual(['sessiond_managed_child_1']);
     expect(cleanup.killedManagedClientPids).toEqual([]);
     expect(cleanup.failedKillManagedClientPids).toEqual([]);
     expect(cleanup.skippedKillManagedClientPids).toEqual([43210]);
@@ -196,9 +196,9 @@ describe('ClockClientRegistry cleanup', () => {
   });
 
   it('skips unmanaged child pid during stale cleanup', () => {
-    const registry = new ClockClientRegistry();
+    const registry = new SessionClientRegistry();
     registry.register({
-      daemonId: 'clockd_unmanaged_child_1',
+      daemonId: 'sessiond_unmanaged_child_1',
       callbackUrl: 'http://127.0.0.1:65541/inject',
       managedClientPid: 54321,
       managedClientCommandHint: 'codex',
@@ -215,16 +215,16 @@ describe('ClockClientRegistry cleanup', () => {
       }
     });
 
-    expect(cleanup.removedDaemonIds).toEqual(['clockd_unmanaged_child_1']);
+    expect(cleanup.removedDaemonIds).toEqual(['sessiond_unmanaged_child_1']);
     expect(cleanup.killedManagedClientPids).toEqual([]);
     expect(cleanup.skippedKillManagedClientPids).toEqual([54321]);
     expect(killedPids).toEqual([]);
   });
 
   it('dead tmux cleanup attempts terminate for managed sessions and child process', () => {
-    const registry = new ClockClientRegistry();
+    const registry = new SessionClientRegistry();
     registry.register({
-      daemonId: 'clockd_dead_managed',
+      daemonId: 'sessiond_dead_managed',
       callbackUrl: 'http://127.0.0.1:65534/inject',
       tmuxSessionId: 'rcc_dead_managed',
       managedTmuxSession: true,
@@ -248,7 +248,7 @@ describe('ClockClientRegistry cleanup', () => {
       }
     });
 
-    expect(cleanup.removedDaemonIds).toEqual(['clockd_dead_managed']);
+    expect(cleanup.removedDaemonIds).toEqual(['sessiond_dead_managed']);
     expect(cleanup.killedTmuxSessionIds).toEqual(['rcc_dead_managed']);
     expect(cleanup.killedManagedClientPids).toEqual([24680]);
     expect(cleanup.failedKillTmuxSessionIds).toEqual([]);
@@ -260,9 +260,9 @@ describe('ClockClientRegistry cleanup', () => {
   });
 
   it('dead tmux cleanup removes mapped conversation sessions even when record list drifts', () => {
-    const registry = new ClockClientRegistry();
+    const registry = new SessionClientRegistry();
     registry.register({
-      daemonId: 'clockd_dead_mapping',
+      daemonId: 'sessiond_dead_mapping',
       callbackUrl: 'http://127.0.0.1:65538/inject',
       tmuxSessionId: 'rcc_dead_mapping',
       managedTmuxSession: true
@@ -277,7 +277,7 @@ describe('ClockClientRegistry cleanup', () => {
     const internal = registry as unknown as {
       records: Map<string, { conversationSessionIds?: string[] }>;
     };
-    const record = internal.records.get('clockd_dead_mapping');
+    const record = internal.records.get('sessiond_dead_mapping');
     expect(record).toBeDefined();
     if (record) {
       record.conversationSessionIds = [];
@@ -288,7 +288,7 @@ describe('ClockClientRegistry cleanup', () => {
       terminateManagedTmuxSession: () => true
     });
 
-    expect(cleanup.removedDaemonIds).toEqual(['clockd_dead_mapping']);
+    expect(cleanup.removedDaemonIds).toEqual(['sessiond_dead_mapping']);
     expect(cleanup.removedTmuxSessionIds).toEqual(['rcc_dead_mapping']);
     expect(cleanup.removedConversationSessionIds).toContain('conv_dead_mapping');
 
@@ -298,9 +298,9 @@ describe('ClockClientRegistry cleanup', () => {
   });
 
   it('stale cleanup ignores terminate failures and still removes managed record', () => {
-    const registry = new ClockClientRegistry();
+    const registry = new SessionClientRegistry();
     registry.register({
-      daemonId: 'clockd_stale_managed_fail',
+      daemonId: 'sessiond_stale_managed_fail',
       callbackUrl: 'http://127.0.0.1:65536/inject',
       tmuxSessionId: 'rcc_stale_managed_fail',
       managedTmuxSession: true,
@@ -317,20 +317,20 @@ describe('ClockClientRegistry cleanup', () => {
       terminateManagedClientProcess: () => false
     });
 
-    expect(cleanup.removedDaemonIds).toEqual(['clockd_stale_managed_fail']);
+    expect(cleanup.removedDaemonIds).toEqual(['sessiond_stale_managed_fail']);
     expect(cleanup.removedTmuxSessionIds).toEqual(['rcc_stale_managed_fail']);
     expect(cleanup.failedKillTmuxSessionIds).toEqual([]);
     expect(cleanup.failedKillManagedClientPids).toEqual([]);
     expect(cleanup.skippedKillTmuxSessionIds).toEqual(['rcc_stale_managed_fail']);
     expect(cleanup.skippedKillManagedClientPids).toEqual([55667]);
     const alive = registry.list().map((item) => item.daemonId);
-    expect(alive).not.toContain('clockd_stale_managed_fail');
+    expect(alive).not.toContain('sessiond_stale_managed_fail');
   });
 
   it('keeps dead tmux managed record when terminate fails', () => {
-    const registry = new ClockClientRegistry();
+    const registry = new SessionClientRegistry();
     registry.register({
-      daemonId: 'clockd_dead_managed_fail',
+      daemonId: 'sessiond_dead_managed_fail',
       callbackUrl: 'http://127.0.0.1:65537/inject',
       tmuxSessionId: 'rcc_dead_managed_fail',
       managedTmuxSession: true,
@@ -351,13 +351,13 @@ describe('ClockClientRegistry cleanup', () => {
     expect(cleanup.failedKillTmuxSessionIds).toEqual(['rcc_dead_managed_fail']);
     expect(cleanup.failedKillManagedClientPids).toEqual([66778]);
     const alive = registry.list().map((item) => item.daemonId);
-    expect(alive).toContain('clockd_dead_managed_fail');
+    expect(alive).toContain('sessiond_dead_managed_fail');
   });
 
   it('dead tmux cleanup skips terminate for unmanaged sessions', () => {
-    const registry = new ClockClientRegistry();
+    const registry = new SessionClientRegistry();
     registry.register({
-      daemonId: 'clockd_dead_unmanaged',
+      daemonId: 'sessiond_dead_unmanaged',
       callbackUrl: 'http://127.0.0.1:65535/inject',
       tmuxSessionId: 'rcc_dead_unmanaged'
     });
@@ -371,18 +371,18 @@ describe('ClockClientRegistry cleanup', () => {
       }
     });
 
-    expect(cleanup.removedDaemonIds).toEqual(['clockd_dead_unmanaged']);
+    expect(cleanup.removedDaemonIds).toEqual(['sessiond_dead_unmanaged']);
     expect(cleanup.killedTmuxSessionIds).toEqual([]);
     expect(cleanup.skippedKillTmuxSessionIds).toEqual(['rcc_dead_unmanaged']);
     expect(killed).toEqual([]);
   });
 
   it('dead tmux cleanup does not terminate managed process without managed tmux session', () => {
-    const registry = new ClockClientRegistry();
+    const registry = new SessionClientRegistry();
     registry.register({
-      daemonId: 'clockd_proc_only',
+      daemonId: 'sessiond_proc_only',
       callbackUrl: 'http://127.0.0.1:65559/inject',
-      sessionId: 'clockd_proc_only',
+      sessionId: 'sessiond_proc_only',
       managedClientProcess: true,
       managedClientPid: 77889,
       managedClientCommandHint: 'codex',
@@ -402,20 +402,20 @@ describe('ClockClientRegistry cleanup', () => {
     expect(cleanup.killedManagedClientPids).toEqual([]);
     expect(cleanup.skippedKillManagedClientPids).toEqual([77889]);
     expect(killedPids).toEqual([]);
-    expect(registry.list().map((item) => item.daemonId)).toContain('clockd_proc_only');
+    expect(registry.list().map((item) => item.daemonId)).toContain('sessiond_proc_only');
   });
 
   it('dead tmux cleanup still removes unmanaged tmux records when process-only managed clients exist', () => {
-    const registry = new ClockClientRegistry();
+    const registry = new SessionClientRegistry();
     registry.register({
-      daemonId: 'clockd_dead_unmanaged_cov',
+      daemonId: 'sessiond_dead_unmanaged_cov',
       callbackUrl: 'http://127.0.0.1:65560/inject',
       tmuxSessionId: 'rcc_dead_unmanaged_cov'
     });
     registry.register({
-      daemonId: 'clockd_proc_only_cov',
+      daemonId: 'sessiond_proc_only_cov',
       callbackUrl: 'http://127.0.0.1:65561/inject',
-      sessionId: 'clockd_proc_only_cov',
+      sessionId: 'sessiond_proc_only_cov',
       managedClientProcess: true,
       managedClientPid: 88990,
       managedClientCommandHint: 'claude',
@@ -431,26 +431,26 @@ describe('ClockClientRegistry cleanup', () => {
       }
     });
 
-    expect(cleanup.removedDaemonIds).toContain('clockd_dead_unmanaged_cov');
-    expect(cleanup.removedDaemonIds).not.toContain('clockd_proc_only_cov');
+    expect(cleanup.removedDaemonIds).toContain('sessiond_dead_unmanaged_cov');
+    expect(cleanup.removedDaemonIds).not.toContain('sessiond_proc_only_cov');
     expect(cleanup.removedTmuxSessionIds).toContain('rcc_dead_unmanaged_cov');
     expect(cleanup.skippedKillManagedClientPids).toContain(88990);
     expect(cleanup.killedManagedClientPids).toEqual([]);
     expect(killedPids).toEqual([]);
-    expect(registry.list().map((item) => item.daemonId)).toContain('clockd_proc_only_cov');
+    expect(registry.list().map((item) => item.daemonId)).toContain('sessiond_proc_only_cov');
   });
 
   it('bindConversationSession enforces workdir-scoped candidate selection', () => {
-    const registry = new ClockClientRegistry();
+    const registry = new SessionClientRegistry();
     registry.register({
-      daemonId: 'clockd_workdir_a',
+      daemonId: 'sessiond_workdir_a',
       callbackUrl: 'http://127.0.0.1:65550/inject',
       tmuxSessionId: 'rcc_workdir_a',
       clientType: 'codex',
       workdir: '/tmp/routecodex-workdir-a'
     });
     registry.register({
-      daemonId: 'clockd_workdir_b',
+      daemonId: 'sessiond_workdir_b',
       callbackUrl: 'http://127.0.0.1:65551/inject',
       tmuxSessionId: 'rcc_workdir_b',
       clientType: 'codex',
@@ -463,7 +463,7 @@ describe('ClockClientRegistry cleanup', () => {
       workdir: '/tmp/routecodex-workdir-a'
     });
     expect(bindA.ok).toBe(true);
-    expect(bindA.daemonId).toBe('clockd_workdir_a');
+    expect(bindA.daemonId).toBe('sessiond_workdir_a');
 
     const bindAChild = registry.bindConversationSession({
       conversationSessionId: 'conv_workdir_a_child',
@@ -471,7 +471,7 @@ describe('ClockClientRegistry cleanup', () => {
       workdir: '/tmp/routecodex-workdir-a/subdir/nested'
     });
     expect(bindAChild.ok).toBe(true);
-    expect(bindAChild.daemonId).toBe('clockd_workdir_a');
+    expect(bindAChild.daemonId).toBe('sessiond_workdir_a');
 
     const bindMissing = registry.bindConversationSession({
       conversationSessionId: 'conv_workdir_missing',
@@ -483,9 +483,9 @@ describe('ClockClientRegistry cleanup', () => {
   });
 
   it('bindConversationSession accepts ancestor workdir when only one daemon matches path tree', () => {
-    const registry = new ClockClientRegistry();
+    const registry = new SessionClientRegistry();
     registry.register({
-      daemonId: 'clockd_workdir_single',
+      daemonId: 'sessiond_workdir_single',
       callbackUrl: 'http://127.0.0.1:65581/inject',
       tmuxSessionId: 'rcc_workdir_single',
       clientType: 'codex',
@@ -499,19 +499,19 @@ describe('ClockClientRegistry cleanup', () => {
     });
 
     expect(bindByAncestor.ok).toBe(true);
-    expect(bindByAncestor.daemonId).toBe('clockd_workdir_single');
+    expect(bindByAncestor.daemonId).toBe('sessiond_workdir_single');
   });
 
   it('inject enforces workdir when tmux session is shared', async () => {
-    const registry = new ClockClientRegistry();
+    const registry = new SessionClientRegistry();
     registry.register({
-      daemonId: 'clockd_shared_tmux_a',
+      daemonId: 'sessiond_shared_tmux_a',
       callbackUrl: 'http://127.0.0.1:65552/inject',
       tmuxSessionId: 'rcc_shared_tmux_workdir',
       workdir: '/tmp/routecodex-shared-workdir-a'
     });
     registry.register({
-      daemonId: 'clockd_shared_tmux_b',
+      daemonId: 'sessiond_shared_tmux_b',
       callbackUrl: 'http://127.0.0.1:65553/inject',
       tmuxSessionId: 'rcc_shared_tmux_workdir',
       workdir: '/tmp/routecodex-shared-workdir-b'
@@ -535,7 +535,7 @@ describe('ClockClientRegistry cleanup', () => {
         text: 'hello-a'
       });
       expect(injectA.ok).toBe(true);
-      expect(injectA.daemonId).toBe('clockd_shared_tmux_a');
+      expect(injectA.daemonId).toBe('sessiond_shared_tmux_a');
 
       const injectAChild = await registry.inject({
         tmuxSessionId: 'rcc_shared_tmux_workdir',
@@ -543,7 +543,7 @@ describe('ClockClientRegistry cleanup', () => {
         text: 'hello-a-child'
       });
       expect(injectAChild.ok).toBe(true);
-      expect(injectAChild.daemonId).toBe('clockd_shared_tmux_a');
+      expect(injectAChild.daemonId).toBe('sessiond_shared_tmux_a');
 
       const injectB = await registry.inject({
         tmuxSessionId: 'rcc_shared_tmux_workdir',
@@ -551,7 +551,7 @@ describe('ClockClientRegistry cleanup', () => {
         text: 'hello-b'
       });
       expect(injectB.ok).toBe(true);
-      expect(injectB.daemonId).toBe('clockd_shared_tmux_b');
+      expect(injectB.daemonId).toBe('sessiond_shared_tmux_b');
 
       const mismatch = await registry.inject({
         tmuxSessionId: 'rcc_shared_tmux_workdir',
@@ -572,14 +572,14 @@ describe('ClockClientRegistry cleanup', () => {
 
   it('persists conversation->tmux bindings across registry instances', async () => {
     const originalSessionDir = process.env.ROUTECODEX_SESSION_DIR;
-    const tempSessionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-clock-bindings-'));
+    const tempSessionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-session-bindings-'));
     process.env.ROUTECODEX_SESSION_DIR = tempSessionDir;
 
-    const daemonId = 'clockd_persist_bindings';
+    const daemonId = 'sessiond_persist_bindings';
     const tmuxSessionId = 'rcc_persist_bindings';
     const callbackUrl = 'http://127.0.0.1:65559/inject';
     try {
-      const registryA = new ClockClientRegistry();
+      const registryA = new SessionClientRegistry();
       registryA.register({
         daemonId,
         callbackUrl,
@@ -591,7 +591,7 @@ describe('ClockClientRegistry cleanup', () => {
       expect(bound.ok).toBe(true);
       expect(bound.tmuxSessionId).toBe(tmuxSessionId);
 
-      const registryB = new ClockClientRegistry();
+      const registryB = new SessionClientRegistry();
       registryB.register({
         daemonId,
         callbackUrl,
@@ -625,16 +625,16 @@ describe('ClockClientRegistry cleanup', () => {
   });
 
   it('resolveBoundWorkdir prefers daemon startup workdir for bound conversation', () => {
-    const registry = new ClockClientRegistry();
+    const registry = new SessionClientRegistry();
     registry.register({
-      daemonId: 'clockd_bound_workdir',
+      daemonId: 'sessiond_bound_workdir',
       callbackUrl: 'http://127.0.0.1:65591/inject',
       tmuxSessionId: 'rcc_bound_workdir',
       workdir: '/tmp/routecodex-bound-workdir/root'
     });
     const bind = registry.bindConversationSession({
       conversationSessionId: 'conv_bound_workdir',
-      daemonId: 'clockd_bound_workdir'
+      daemonId: 'sessiond_bound_workdir'
     });
     expect(bind.ok).toBe(true);
 
@@ -643,15 +643,15 @@ describe('ClockClientRegistry cleanup', () => {
   });
 
   it('resolveBoundWorkdir returns undefined when multiple alive daemons under same tmux disagree', () => {
-    const registry = new ClockClientRegistry();
+    const registry = new SessionClientRegistry();
     registry.register({
-      daemonId: 'clockd_bound_conflict_a',
+      daemonId: 'sessiond_bound_conflict_a',
       callbackUrl: 'http://127.0.0.1:65592/inject',
       tmuxSessionId: 'rcc_bound_conflict',
       workdir: '/tmp/routecodex-bound-conflict/a'
     });
     registry.register({
-      daemonId: 'clockd_bound_conflict_b',
+      daemonId: 'sessiond_bound_conflict_b',
       callbackUrl: 'http://127.0.0.1:65593/inject',
       tmuxSessionId: 'rcc_bound_conflict',
       workdir: '/tmp/routecodex-bound-conflict/b'
@@ -667,54 +667,54 @@ describe('ClockClientRegistry cleanup', () => {
   });
 
   it('unbindSessionScope removes daemon-scoped conversation mapping', () => {
-    const registry = new ClockClientRegistry();
+    const registry = new SessionClientRegistry();
     registry.register({
-      daemonId: 'clockd_scope_unbind',
+      daemonId: 'sessiond_scope_unbind',
       callbackUrl: 'http://127.0.0.1:65594/inject',
       tmuxSessionId: 'rcc_scope_unbind'
     });
     const bind = registry.bindConversationSession({
-      conversationSessionId: 'clockd.clockd_scope_unbind',
-      daemonId: 'clockd_scope_unbind'
+      conversationSessionId: 'sessiond.sessiond_scope_unbind',
+      daemonId: 'sessiond_scope_unbind'
     });
     expect(bind.ok).toBe(true);
 
-    const result = registry.unbindSessionScope('clockd.clockd_scope_unbind');
+    const result = registry.unbindSessionScope('sessiond.sessiond_scope_unbind');
     expect(result.ok).toBe(true);
     expect(result.removed).toBe(true);
-    expect(result.daemonIds).toEqual(['clockd_scope_unbind']);
+    expect(result.daemonIds).toEqual(['sessiond_scope_unbind']);
   });
 
   it('unbindSessionScope removes all mappings for tmux scope', () => {
-    const registry = new ClockClientRegistry();
+    const registry = new SessionClientRegistry();
     registry.register({
-      daemonId: 'clockd_tmux_scope_a',
+      daemonId: 'sessiond_tmux_scope_a',
       callbackUrl: 'http://127.0.0.1:65595/inject',
       tmuxSessionId: 'rcc_scope_tmux_a'
     });
     registry.register({
-      daemonId: 'clockd_tmux_scope_b',
+      daemonId: 'sessiond_tmux_scope_b',
       callbackUrl: 'http://127.0.0.1:65596/inject',
       tmuxSessionId: 'rcc_scope_tmux_a'
     });
     expect(
       registry.bindConversationSession({
-        conversationSessionId: 'clockd.clockd_tmux_scope_a',
-        daemonId: 'clockd_tmux_scope_a'
+        conversationSessionId: 'sessiond.sessiond_tmux_scope_a',
+        daemonId: 'sessiond_tmux_scope_a'
       }).ok
     ).toBe(true);
     expect(
       registry.bindConversationSession({
-        conversationSessionId: 'clockd.clockd_tmux_scope_b',
-        daemonId: 'clockd_tmux_scope_b'
+        conversationSessionId: 'sessiond.sessiond_tmux_scope_b',
+        daemonId: 'sessiond_tmux_scope_b'
       }).ok
     ).toBe(true);
 
     const result = registry.unbindSessionScope('tmux:rcc_scope_tmux_a');
     expect(result.ok).toBe(true);
     expect(result.removed).toBe(true);
-    expect(result.daemonIds.sort()).toEqual(['clockd_tmux_scope_a', 'clockd_tmux_scope_b']);
-    expect(registry.resolveBoundTmuxSession('clockd.clockd_tmux_scope_a')).toBeUndefined();
-    expect(registry.resolveBoundTmuxSession('clockd.clockd_tmux_scope_b')).toBeUndefined();
+    expect(result.daemonIds.sort()).toEqual(['sessiond_tmux_scope_a', 'sessiond_tmux_scope_b']);
+    expect(registry.resolveBoundTmuxSession('sessiond.sessiond_tmux_scope_a')).toBeUndefined();
+    expect(registry.resolveBoundTmuxSession('sessiond.sessiond_tmux_scope_b')).toBeUndefined();
   });
 });

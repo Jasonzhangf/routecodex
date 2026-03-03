@@ -33,8 +33,8 @@ import { registerCodeCommand } from './cli/register/code-command.js';
 import { registerClaudeCommand } from './cli/register/claude-command.js';
 import { registerCodexCommand } from './cli/register/codex-command.js';
 import { registerCamoufoxCommand } from './cli/register/camoufox-command.js';
-import { registerTmuxInjectCommand } from './cli/register/tmux-inject-command.js';
-import { registerClockAdminCommand } from './cli/register/clock-admin-command.js';
+import { registerSessionInjectCommand } from './cli/register/session-inject-command.js';
+import { registerSessionAdminCommand } from './cli/register/session-admin-command.js';
 import { registerGuardianDaemonCommand } from './cli/register/guardian-daemon-command.js';
 import { listManagedServerZombieChildrenByPort } from './utils/managed-server-pids.js';
 import {
@@ -319,7 +319,7 @@ registerClaudeCommand(program, launcherContext);
 registerCodexCommand(program, launcherContext);
 
 // External tmux injection command
-registerTmuxInjectCommand(program, {
+registerSessionInjectCommand(program, {
   isDevPackage: IS_DEV_PACKAGE,
   defaultDevPort: DEFAULT_DEV_PORT,
   logger,
@@ -330,7 +330,7 @@ registerTmuxInjectCommand(program, {
   exit: (code) => process.exit(code)
 });
 
-registerClockAdminCommand(program, {
+registerSessionAdminCommand(program, {
   isDevPackage: IS_DEV_PACKAGE,
   defaultDevPort: DEFAULT_DEV_PORT,
   logger,

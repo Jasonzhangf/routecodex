@@ -46,7 +46,7 @@ import { StatsManager } from './stats-manager.js';
 import { resolveHubShadowCompareConfig } from './hub-shadow-compare.js';
 import { resolveLlmsEngineShadowConfig } from '../../../utils/llms-engine-shadow.js';
 import { createRequestExecutor, type RequestExecutor } from './request-executor.js';
-import { startClockReaper, stopClockReaper } from './clock-client-reaper.js';
+import { startSessionReaper, stopSessionReaper } from './session-client-reaper.js';
 import {
   resolveVirtualRouterInput,
   getModuleDependencies,
@@ -75,12 +75,12 @@ import {
   initializeRouteErrorHub
 } from './http-server-bootstrap.js';
 import {
-  shouldEnableClockDaemonInjectLoop,
-  resolveRawClockConfig,
-  stopClockDaemonInjectLoop,
-  startClockDaemonInjectLoop,
-  tickClockDaemonInjectLoop
-} from './http-server-clock-daemon.js';
+  shouldEnableSessionDaemonInjectLoop,
+  resolveRawSessionConfig,
+  stopSessionDaemonInjectLoop,
+  startSessionDaemonInjectLoop,
+  tickSessionDaemonInjectLoop
+} from './http-server-session-daemon.js';
 import { setupRuntime } from './http-server-runtime-setup.js';
 import {
   initializeProviderRuntimes,
@@ -149,12 +149,12 @@ export class RouteCodexHttpServer {
   private hubPolicyMode: string | null = null;
   private hubPipelineEngineShadow: HubPipeline | null = null;
   private hubPipelineConfigForShadow: Record<string, unknown> | null = null;
-  private clockDaemonInjectTimer: NodeJS.Timeout | null = null;
-  private clockDaemonInjectTickInFlight = false;
-  private lastClockDaemonInjectErrorAtMs = 0;
-  private readonly clockDaemonInjectSkipLogByKey: Map<string, number> = new Map();
-  private readonly clockDaemonCleanupLogByKey: Map<string, number> = new Map();
-  private lastClockDaemonCleanupAtMs = 0;
+  private sessionDaemonInjectTimer: NodeJS.Timeout | null = null;
+  private sessionDaemonInjectTickInFlight = false;
+  private lastSessionDaemonInjectErrorAtMs = 0;
+  private readonly sessionDaemonInjectSkipLogByKey: Map<string, number> = new Map();
+  private readonly sessionDaemonCleanupLogByKey: Map<string, number> = new Map();
+  private lastSessionDaemonCleanupAtMs = 0;
   private readonly requestExecutor: RequestExecutor;
 
   constructor(config: ServerConfigV2) {
@@ -304,24 +304,24 @@ export class RouteCodexHttpServer {
     return shouldStartManagerDaemon(this);
   }
 
-  private shouldEnableClockDaemonInjectLoop(): boolean {
-    return shouldEnableClockDaemonInjectLoop();
+  private shouldEnableSessionDaemonInjectLoop(): boolean {
+    return shouldEnableSessionDaemonInjectLoop();
   }
 
-  private resolveRawClockConfig(): unknown {
-    return resolveRawClockConfig(this);
+  private resolveRawSessionConfig(): unknown {
+    return resolveRawSessionConfig(this);
   }
 
-  private stopClockDaemonInjectLoop(): void {
-    stopClockDaemonInjectLoop(this);
+  private stopSessionDaemonInjectLoop(): void {
+    stopSessionDaemonInjectLoop(this);
   }
 
-  private startClockDaemonInjectLoop(): void {
-    startClockDaemonInjectLoop(this);
+  private startSessionDaemonInjectLoop(): void {
+    startSessionDaemonInjectLoop(this);
   }
 
-  private async tickClockDaemonInjectLoop(): Promise<void> {
-    await tickClockDaemonInjectLoop(this);
+  private async tickSessionDaemonInjectLoop(): Promise<void> {
+    await tickSessionDaemonInjectLoop(this);
   }
 
   public async initialize(): Promise<void> {
@@ -334,12 +334,12 @@ export class RouteCodexHttpServer {
 
   public async start(): Promise<void> {
     await startHttpServer(this);
-    // Start the clock reaper after server is running
-    startClockReaper();
+    // Start the session reaper after server is running
+    startSessionReaper();
   }
 
   public async stop(): Promise<void> {
-    stopClockReaper();
+    stopSessionReaper();
     await stopHttpServer(this);
   }
 

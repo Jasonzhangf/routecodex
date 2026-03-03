@@ -2,13 +2,13 @@ import { describe, expect, it } from '@jest/globals';
 import { EventEmitter } from 'node:events';
 
 import { buildRequestMetadata } from '../../../src/server/runtime/http-server/executor-metadata.js';
-import { getClockClientRegistry } from '../../../src/server/runtime/http-server/clock-client-registry.js';
+import { getSessionClientRegistry } from '../../../src/server/runtime/http-server/session-client-registry.js';
 import { trackClientConnectionState } from '../../../src/server/utils/client-connection-state.js';
-import { encodeClockClientApiKey } from '../../../src/utils/clock-client-token.js';
+import { encodeSessionClientApiKey } from '../../../src/utils/session-client-token.js';
 
-describe('executor metadata clock daemon extraction', () => {
-  it('extracts clockDaemonId from apikey bearer suffix', () => {
-    const apiKey = encodeClockClientApiKey('sk-base', 'clockd_meta_1');
+describe('executor metadata session daemon extraction', () => {
+  it('extracts sessionDaemonId from apikey bearer suffix', () => {
+    const apiKey = encodeSessionClientApiKey('sk-base', 'sessiond_meta_1');
     const metadata = buildRequestMetadata({
       entryEndpoint: '/v1/chat/completions',
       method: 'POST',
@@ -22,15 +22,15 @@ describe('executor metadata clock daemon extraction', () => {
       metadata: { sessionId: 'conv_meta_1' }
     } as any);
 
-    expect(metadata.clientDaemonId).toBe('clockd_meta_1');
-    expect(metadata.clockDaemonId).toBe('clockd_meta_1');
+    expect(metadata.clientDaemonId).toBe('sessiond_meta_1');
+    expect(metadata.sessionDaemonId).toBe('sessiond_meta_1');
     expect(metadata.sessionId).toBe('conv_meta_1');
     expect(metadata.clientInjectReady).toBe(false);
     expect(metadata.clientInjectReason).toBe('tmux_session_missing');
   });
 
   it('extracts tmuxSessionId directly from apikey bearer suffix without daemon registry lookup', () => {
-    const apiKey = encodeClockClientApiKey('sk-base', 'clockd_meta_1', 'tmux_meta_direct_1');
+    const apiKey = encodeSessionClientApiKey('sk-base', 'sessiond_meta_1', 'tmux_meta_direct_1');
     const metadata = buildRequestMetadata({
       entryEndpoint: '/v1/chat/completions',
       method: 'POST',
@@ -43,8 +43,8 @@ describe('executor metadata clock daemon extraction', () => {
       metadata: { sessionId: 'conv_meta_1b' }
     } as any);
 
-    expect(metadata.clientDaemonId).toBe('clockd_meta_1');
-    expect(metadata.clockDaemonId).toBe('clockd_meta_1');
+    expect(metadata.clientDaemonId).toBe('sessiond_meta_1');
+    expect(metadata.sessionDaemonId).toBe('sessiond_meta_1');
     expect(metadata.clientTmuxSessionId).toBe('tmux_meta_direct_1');
     expect(metadata.tmuxSessionId).toBe('tmux_meta_direct_1');
     expect(metadata.clientInjectReady).toBe(true);
@@ -57,16 +57,16 @@ describe('executor metadata clock daemon extraction', () => {
       method: 'POST',
       requestId: 'req-meta-2',
       headers: {
-        'x-routecodex-client-daemon-id': 'clockd_header_1',
-        authorization: `Bearer ${encodeClockClientApiKey('sk-base', 'clockd_other')}`
+        'x-routecodex-client-daemon-id': 'sessiond_header_1',
+        authorization: `Bearer ${encodeSessionClientApiKey('sk-base', 'sessiond_other')}`
       },
       query: {},
       body: { messages: [] },
       metadata: { sessionId: 'conv_meta_2' }
     } as any);
 
-    expect(metadata.clientDaemonId).toBe('clockd_header_1');
-    expect(metadata.clockDaemonId).toBe('clockd_header_1');
+    expect(metadata.clientDaemonId).toBe('sessiond_header_1');
+    expect(metadata.sessionDaemonId).toBe('sessiond_header_1');
   });
 
   it('extracts session identifiers from request body metadata when input.metadata is empty', () => {
@@ -75,7 +75,7 @@ describe('executor metadata clock daemon extraction', () => {
       method: 'POST',
       requestId: 'req-meta-3',
       headers: {
-        'x-routecodex-clock-daemon-id': 'clockd_header_2'
+        'x-routecodex-session-daemon-id': 'sessiond_header_2'
       },
       query: {},
       body: {
@@ -88,15 +88,15 @@ describe('executor metadata clock daemon extraction', () => {
       metadata: {}
     } as any);
 
-    expect(metadata.clientDaemonId).toBe('clockd_header_2');
-    expect(metadata.clockDaemonId).toBe('clockd_header_2');
+    expect(metadata.clientDaemonId).toBe('sessiond_header_2');
+    expect(metadata.sessionDaemonId).toBe('sessiond_header_2');
     expect(metadata.sessionId).toBe('conv_from_body_meta');
     expect(metadata.conversationId).toBe('conv_from_body_meta');
   });
 
-  it('resolves workdir from clock daemon registry when request metadata omits it', () => {
-    const daemonId = 'clockd_meta_workdir_1';
-    const registry = getClockClientRegistry();
+  it('resolves workdir from session daemon registry without inferring tmux scope', () => {
+    const daemonId = 'sessiond_meta_workdir_1';
+    const registry = getSessionClientRegistry();
     registry.register({
       daemonId,
       callbackUrl: 'http://127.0.0.1:65560/inject',
@@ -109,7 +109,7 @@ describe('executor metadata clock daemon extraction', () => {
       method: 'POST',
       requestId: 'req-meta-4',
       headers: {
-        authorization: `Bearer ${encodeClockClientApiKey('sk-base', daemonId)}`
+        authorization: `Bearer ${encodeSessionClientApiKey('sk-base', daemonId)}`
       },
       query: {},
       body: { messages: [] },
@@ -117,19 +117,50 @@ describe('executor metadata clock daemon extraction', () => {
     } as any);
 
     expect(metadata.clientDaemonId).toBe(daemonId);
-    expect(metadata.clockDaemonId).toBe(daemonId);
+    expect(metadata.sessionDaemonId).toBe(daemonId);
     expect(metadata.clientWorkdir).toBe('/tmp/routecodex-meta-workdir-1');
     expect(metadata.workdir).toBe('/tmp/routecodex-meta-workdir-1');
-    expect(metadata.clientTmuxSessionId).toBe('tmux_meta_workdir_1');
-    expect(metadata.tmuxSessionId).toBe('tmux_meta_workdir_1');
-    expect(metadata.clientInjectReady).toBe(true);
-    expect(metadata.clientInjectReason).toBe('tmux_session_ready');
+    expect(metadata.clientTmuxSessionId).toBeUndefined();
+    expect(metadata.tmuxSessionId).toBeUndefined();
+    expect(metadata.clientInjectReady).toBe(false);
+    expect(metadata.clientInjectReason).toBe('tmux_session_missing');
+    registry.unregister(daemonId);
+  });
+
+  it('does not bind tmux session from daemon registry when request lacks tmux scope', () => {
+    const daemonId = 'sessiond_meta_no_tmux_1';
+    const registry = getSessionClientRegistry();
+    registry.register({
+      daemonId,
+      callbackUrl: 'http://127.0.0.1:65562/inject',
+      tmuxSessionId: 'tmux_registry_should_not_bind',
+      workdir: '/tmp/routecodex-meta-workdir-2'
+    });
+
+    const metadata = buildRequestMetadata({
+      entryEndpoint: '/v1/chat/completions',
+      method: 'POST',
+      requestId: 'req-meta-4b',
+      headers: {
+        authorization: `Bearer ${encodeSessionClientApiKey('sk-base', daemonId)}`
+      },
+      query: {},
+      body: { messages: [] },
+      metadata: { sessionId: 'conv_meta_4b' }
+    } as any);
+
+    expect(metadata.clientDaemonId).toBe(daemonId);
+    expect(metadata.sessionDaemonId).toBe(daemonId);
+    expect(metadata.clientTmuxSessionId).toBeUndefined();
+    expect(metadata.tmuxSessionId).toBeUndefined();
+    expect(metadata.clientInjectReady).toBe(false);
+    expect(metadata.clientInjectReason).toBe('tmux_session_missing');
     registry.unregister(daemonId);
   });
 
   it('prefers explicit tmuxSessionId from request metadata over daemon registry value', () => {
-    const daemonId = 'clockd_meta_tmux_prefer_1';
-    const registry = getClockClientRegistry();
+    const daemonId = 'sessiond_meta_tmux_prefer_1';
+    const registry = getSessionClientRegistry();
     registry.register({
       daemonId,
       callbackUrl: 'http://127.0.0.1:65561/inject',
@@ -141,7 +172,7 @@ describe('executor metadata clock daemon extraction', () => {
       method: 'POST',
       requestId: 'req-meta-5',
       headers: {
-        authorization: `Bearer ${encodeClockClientApiKey('sk-base', daemonId)}`
+        authorization: `Bearer ${encodeSessionClientApiKey('sk-base', daemonId)}`
       },
       query: {},
       body: { messages: [] },
@@ -149,7 +180,7 @@ describe('executor metadata clock daemon extraction', () => {
     } as any);
 
     expect(metadata.clientDaemonId).toBe(daemonId);
-    expect(metadata.clockDaemonId).toBe(daemonId);
+    expect(metadata.sessionDaemonId).toBe(daemonId);
     expect(metadata.clientTmuxSessionId).toBe('tmux_meta_explicit_1');
     expect(metadata.tmuxSessionId).toBe('tmux_meta_explicit_1');
     expect(metadata.clientInjectReady).toBe(true);
@@ -228,11 +259,11 @@ describe('executor metadata clock daemon extraction', () => {
   });
 
   it('binds tmux scope by session/workdir when request has no direct tmux metadata', () => {
-    const daemonId = 'clockd_bind_workdir_1';
+    const daemonId = 'sessiond_bind_workdir_1';
     const tmuxSessionId = 'rcc_bind_tmux_1';
     const conversationSessionId = 'conv_bind_workdir_1';
     const workdir = '/tmp/routecodex-bind-workdir-1';
-    const registry = getClockClientRegistry();
+    const registry = getSessionClientRegistry();
     registry.register({
       daemonId,
       callbackUrl: 'http://127.0.0.1:65563/inject',
@@ -284,19 +315,19 @@ describe('executor metadata clock daemon extraction', () => {
     expect(metadata.clientInjectReady).toBe(true);
     expect(metadata.clientInjectReason).toBe('tmux_session_ready');
     expect(metadata.clientDaemonId).toBe(daemonId);
-    expect(metadata.clockDaemonId).toBe(daemonId);
+    expect(metadata.sessionDaemonId).toBe(daemonId);
     expect(registry.resolveBoundTmuxSession(conversationSessionId)).toBe(tmuxSessionId);
 
     registry.unbindConversationSession(conversationSessionId);
     registry.unregister(daemonId);
   });
 
-  it('does not resolve tmux/workdir from conversation binding when request carries sessionId only', () => {
-    const daemonId = 'clockd_meta_binding_1';
+  it('resolves tmux scope from conversation binding when request carries sessionId only', () => {
+    const daemonId = 'sessiond_meta_binding_1';
     const tmuxSessionId = 'tmux_meta_binding_1';
     const workdir = '/tmp/routecodex-meta-binding-1';
     const conversationSessionId = 'conv_meta_binding_1';
-    const registry = getClockClientRegistry();
+    const registry = getSessionClientRegistry();
 
     registry.register({
       daemonId,
@@ -322,12 +353,15 @@ describe('executor metadata clock daemon extraction', () => {
     } as any);
 
     expect(metadata.sessionId).toBe(conversationSessionId);
-    expect(metadata.clientTmuxSessionId).toBeUndefined();
-    expect(metadata.tmuxSessionId).toBeUndefined();
+    expect(metadata.clientTmuxSessionId).toBe(tmuxSessionId);
+    expect(metadata.tmuxSessionId).toBe(tmuxSessionId);
     expect(metadata.clientWorkdir).toBeUndefined();
     expect(metadata.workdir).toBeUndefined();
-    expect(metadata.clientInjectReady).toBe(false);
-    expect(metadata.clientInjectReason).toBe('tmux_session_missing');
+    expect(metadata.clientInjectReady).toBe(true);
+    expect(metadata.clientInjectReason).toBe('tmux_session_ready');
+    expect(metadata.stopMessageClientInjectSessionScope).toBe(`tmux:${tmuxSessionId}`);
+    expect(metadata.clientDaemonId).toBe(daemonId);
+    expect(metadata.sessionDaemonId).toBe(daemonId);
 
     registry.unbindConversationSession(conversationSessionId);
     registry.unregister(daemonId);

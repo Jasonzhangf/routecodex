@@ -1,11 +1,11 @@
-import { getClockClientRegistry } from './clock-client-registry.js';
+import { getSessionClientRegistry } from './session-client-registry.js';
 import { isTmuxSessionAlive } from './tmux-session-probe.js';
 import { logProcessLifecycle } from '../../../utils/process-lifecycle-logger.js';
 
 const DEFAULT_REAPER_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 const DEFAULT_GRACE_PERIOD_MS = 30 * 1000; // 30 seconds grace before killing
 
-export interface ClockReaperConfig {
+export interface SessionReaperConfig {
   intervalMs?: number;
   gracePeriodMs?: number;
   enableManagedTermination?: boolean;
@@ -13,8 +13,8 @@ export interface ClockReaperConfig {
 
 function readReaperIntervalFromEnv(): number {
   const raw = String(
-    process.env.ROUTECODEX_CLOCK_REAPER_INTERVAL_MS
-      ?? process.env.RCC_CLOCK_REAPER_INTERVAL_MS
+    process.env.ROUTECODEX_SESSION_REAPER_INTERVAL_MS
+      ?? process.env.RCC_SESSION_REAPER_INTERVAL_MS
       ?? ''
   ).trim();
   const parsed = Number(raw);
@@ -26,8 +26,8 @@ function readReaperIntervalFromEnv(): number {
 
 function readGracePeriodFromEnv(): number {
   const raw = String(
-    process.env.ROUTECODEX_CLOCK_REAPER_GRACE_MS
-      ?? process.env.RCC_CLOCK_REAPER_GRACE_MS
+    process.env.ROUTECODEX_SESSION_REAPER_GRACE_MS
+      ?? process.env.RCC_SESSION_REAPER_GRACE_MS
       ?? ''
   ).trim();
   const parsed = Number(raw);
@@ -39,8 +39,8 @@ function readGracePeriodFromEnv(): number {
 
 function shouldLogStaleOnlyCleanup(): boolean {
   const raw = String(
-    process.env.ROUTECODEX_CLOCK_REAPER_LOG_STALE_ONLY
-      ?? process.env.RCC_CLOCK_REAPER_LOG_STALE_ONLY
+    process.env.ROUTECODEX_SESSION_REAPER_LOG_STALE_ONLY
+      ?? process.env.RCC_SESSION_REAPER_LOG_STALE_ONLY
       ?? ''
   ).trim().toLowerCase();
   if (!raw) {
@@ -55,14 +55,14 @@ function shouldLogStaleOnlyCleanup(): boolean {
   return false;
 }
 
-export class ClockReaper {
+export class SessionReaper {
   private timer: NodeJS.Timeout | null = null;
   private readonly intervalMs: number;
   private readonly gracePeriodMs: number;
   private readonly enableManagedTermination: boolean;
   private readonly logStaleOnlyCleanup: boolean;
 
-  constructor(config?: ClockReaperConfig) {
+  constructor(config?: SessionReaperConfig) {
     this.intervalMs = config?.intervalMs ?? readReaperIntervalFromEnv();
     this.gracePeriodMs = config?.gracePeriodMs ?? readGracePeriodFromEnv();
     this.enableManagedTermination = false;
@@ -76,8 +76,8 @@ export class ClockReaper {
     this.timer = setInterval(() => {
       void this.runCleanup().catch((err) => {
         logProcessLifecycle({
-          event: 'clock_reaper_error',
-          source: 'clock-client-reaper',
+          event: 'session_reaper_error',
+          source: 'session-client-reaper',
           details: { error: err instanceof Error ? err.message : String(err) }
         });
       });
@@ -89,8 +89,8 @@ export class ClockReaper {
     }
 
     logProcessLifecycle({
-      event: 'clock_reaper_started',
-      source: 'clock-client-reaper',
+      event: 'session_reaper_started',
+      source: 'session-client-reaper',
       details: {
         intervalMs: this.intervalMs,
         gracePeriodMs: this.gracePeriodMs,
@@ -107,15 +107,15 @@ export class ClockReaper {
       clearInterval(this.timer);
       this.timer = null;
       logProcessLifecycle({
-        event: 'clock_reaper_stopped',
-        source: 'clock-client-reaper',
+        event: 'session_reaper_stopped',
+        source: 'session-client-reaper',
         details: {}
       });
     }
   }
 
   async runCleanup(): Promise<void> {
-    const registry = getClockClientRegistry();
+    const registry = getSessionClientRegistry();
     const now = Date.now();
 
     // 先清理僵死 tmux 会话
@@ -150,8 +150,8 @@ export class ClockReaper {
         return;
       }
       logProcessLifecycle({
-        event: 'clock_reaper_cleanup',
-        source: 'clock-client-reaper',
+        event: 'session_reaper_cleanup',
+        source: 'session-client-reaper',
         details: {
           result: hasStaleOnlyCleanup ? 'stale_only_cleanup' : 'cleanup_performed',
           deadTmuxRemoved: deadTmuxResult.removedTmuxSessionIds.length,
@@ -178,21 +178,21 @@ export class ClockReaper {
 }
 
 // 单例
-let globalReaper: ClockReaper | null = null;
+let globalReaper: SessionReaper | null = null;
 
-export function getClockReaper(config?: ClockReaperConfig): ClockReaper {
+export function getSessionReaper(config?: SessionReaperConfig): SessionReaper {
   if (!globalReaper) {
-    globalReaper = new ClockReaper(config);
+    globalReaper = new SessionReaper(config);
   }
   return globalReaper;
 }
 
-export function startClockReaper(config?: ClockReaperConfig): void {
-  const reaper = getClockReaper(config);
+export function startSessionReaper(config?: SessionReaperConfig): void {
+  const reaper = getSessionReaper(config);
   reaper.start();
 }
 
-export function stopClockReaper(): void {
+export function stopSessionReaper(): void {
   if (globalReaper) {
     globalReaper.stop();
     globalReaper = null;

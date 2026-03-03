@@ -6,8 +6,8 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import type { AddressInfo } from 'node:net';
 
-import { getClockClientRegistry } from '../../../src/server/runtime/http-server/clock-client-registry.js';
-import { registerClockClientRoutes } from '../../../src/server/runtime/http-server/clock-client-routes.js';
+import { getSessionClientRegistry } from '../../../src/server/runtime/http-server/session-client-registry.js';
+import { registerSessionClientRoutes } from '../../../src/server/runtime/http-server/session-client-routes.js';
 
 function localFetch(baseUrl: string, path: string, body?: unknown): Promise<{ status: number; payload: any }> {
   return (async () => {
@@ -50,13 +50,13 @@ function localFetchByMethod(
   })();
 }
 
-describe('clock-client routes', () => {
+describe('session-client routes', () => {
   jest.setTimeout(20000);
 
   it('supports register/list/heartbeat/unregister over localhost', async () => {
     const app = express();
     app.use(express.json({ limit: '256kb' }));
-    registerClockClientRoutes(app);
+    registerSessionClientRoutes(app);
 
     const server = http.createServer(app);
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -64,10 +64,10 @@ describe('clock-client routes', () => {
     const baseUrl = `http://127.0.0.1:${addr.port}`;
 
     try {
-      const daemonId = 'clockd_test_1';
+      const daemonId = 'sessiond_test_1';
       const callbackUrl = 'http://127.0.0.1:65531/inject';
 
-      const reg = await localFetch(baseUrl, '/daemon/clock-client/register', {
+      const reg = await localFetch(baseUrl, '/daemon/session-client/register', {
         daemonId,
         callbackUrl,
         sessionId: 's_test_1',
@@ -77,18 +77,18 @@ describe('clock-client routes', () => {
       expect(reg.status).toBe(200);
       expect(reg.payload?.ok).toBe(true);
 
-      const listRes = await fetch(`${baseUrl}/daemon/clock-client/list`);
+      const listRes = await fetch(`${baseUrl}/daemon/session-client/list`);
       expect(listRes.status).toBe(200);
       const listJson = await listRes.json();
       expect(listJson?.ok).toBe(true);
       expect(Array.isArray(listJson?.records)).toBe(true);
       expect(listJson.records.some((entry: any) => entry?.daemonId === daemonId)).toBe(true);
 
-      const hb = await localFetch(baseUrl, '/daemon/clock-client/heartbeat', { daemonId });
+      const hb = await localFetch(baseUrl, '/daemon/session-client/heartbeat', { daemonId });
       expect(hb.status).toBe(200);
       expect(hb.payload?.ok).toBe(true);
 
-      const unreg = await localFetch(baseUrl, '/daemon/clock-client/unregister', { daemonId });
+      const unreg = await localFetch(baseUrl, '/daemon/session-client/unregister', { daemonId });
       expect(unreg.status).toBe(200);
       expect(unreg.payload?.ok).toBe(true);
     } finally {
@@ -99,7 +99,7 @@ describe('clock-client routes', () => {
   it('inject supports conversation session mapping bound to tmux session', async () => {
     const app = express();
     app.use(express.json({ limit: '256kb' }));
-    registerClockClientRoutes(app);
+    registerSessionClientRoutes(app);
 
     const server = http.createServer(app);
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -121,8 +121,8 @@ describe('clock-client routes', () => {
     const callbackUrl = `http://127.0.0.1:${callbackAddr.port}/inject`;
 
     try {
-      const reg = await localFetch(baseUrl, '/daemon/clock-client/register', {
-        daemonId: 'clockd_mapping',
+      const reg = await localFetch(baseUrl, '/daemon/session-client/register', {
+        daemonId: 'sessiond_mapping',
         callbackUrl,
         tmuxSessionId: 'tmux_mapping_1',
         conversationSessionId: 'conv_mapping_1',
@@ -130,16 +130,16 @@ describe('clock-client routes', () => {
       });
       expect(reg.status).toBe(200);
 
-      const mappedInject = await localFetch(baseUrl, '/daemon/clock-client/inject', {
+      const mappedInject = await localFetch(baseUrl, '/daemon/session-client/inject', {
         text: 'hello-conversation-session',
         sessionId: 'conv_mapping_1'
       });
       expect(mappedInject.status).toBe(200);
       expect(mappedInject.payload?.ok).toBe(true);
-      expect(mappedInject.payload?.daemonId).toBe('clockd_mapping');
+      expect(mappedInject.payload?.daemonId).toBe('sessiond_mapping');
       expect(injectHits).toBe(1);
 
-      await localFetch(baseUrl, '/daemon/clock-client/unregister', { daemonId: 'clockd_mapping' });
+      await localFetch(baseUrl, '/daemon/session-client/unregister', { daemonId: 'sessiond_mapping' });
     } finally {
       await new Promise<void>((resolve) => callbackServer.close(() => resolve()));
       await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -149,7 +149,7 @@ describe('clock-client routes', () => {
   it('binds conversation by daemonId hint and injects to matched tmux only', async () => {
     const app = express();
     app.use(express.json({ limit: '256kb' }));
-    registerClockClientRoutes(app);
+    registerSessionClientRoutes(app);
 
     const server = http.createServer(app);
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -182,11 +182,11 @@ describe('clock-client routes', () => {
     const callbackAddr1 = callbackServer1.address() as AddressInfo;
     const callbackAddr2 = callbackServer2.address() as AddressInfo;
 
-    const daemonId1 = 'clockd_bind_hint_s1';
-    const daemonId2 = 'clockd_bind_hint_s2';
+    const daemonId1 = 'sessiond_bind_hint_s1';
+    const daemonId2 = 'sessiond_bind_hint_s2';
 
     try {
-      const reg1 = await localFetch(baseUrl, '/daemon/clock-client/register', {
+      const reg1 = await localFetch(baseUrl, '/daemon/session-client/register', {
         daemonId: daemonId1,
         callbackUrl: `http://127.0.0.1:${callbackAddr1.port}/inject`,
         tmuxSessionId: 'tmux_bind_1',
@@ -194,7 +194,7 @@ describe('clock-client routes', () => {
       });
       expect(reg1.status).toBe(200);
 
-      const reg2 = await localFetch(baseUrl, '/daemon/clock-client/register', {
+      const reg2 = await localFetch(baseUrl, '/daemon/session-client/register', {
         daemonId: daemonId2,
         callbackUrl: `http://127.0.0.1:${callbackAddr2.port}/inject`,
         tmuxSessionId: 'tmux_bind_2',
@@ -202,7 +202,7 @@ describe('clock-client routes', () => {
       });
       expect(reg2.status).toBe(200);
 
-      const bindResult = getClockClientRegistry().bindConversationSession({
+      const bindResult = getSessionClientRegistry().bindConversationSession({
         conversationSessionId: 'conv_bind_hint_1',
         daemonId: daemonId2,
         clientType: 'codex'
@@ -211,7 +211,7 @@ describe('clock-client routes', () => {
       expect(bindResult.daemonId).toBe(daemonId2);
       expect(bindResult.tmuxSessionId).toBe('tmux_bind_2');
 
-      const injected = await localFetch(baseUrl, '/daemon/clock-client/inject', {
+      const injected = await localFetch(baseUrl, '/daemon/session-client/inject', {
         text: 'hello-bind-hint',
         sessionId: 'conv_bind_hint_1'
       });
@@ -221,8 +221,8 @@ describe('clock-client routes', () => {
       expect(injectHitSession1).toBe(0);
       expect(injectHitSession2).toBe(1);
     } finally {
-      await localFetch(baseUrl, '/daemon/clock-client/unregister', { daemonId: daemonId1 });
-      await localFetch(baseUrl, '/daemon/clock-client/unregister', { daemonId: daemonId2 });
+      await localFetch(baseUrl, '/daemon/session-client/unregister', { daemonId: daemonId1 });
+      await localFetch(baseUrl, '/daemon/session-client/unregister', { daemonId: daemonId2 });
       await new Promise<void>((resolve) => callbackServer1.close(() => resolve()));
       await new Promise<void>((resolve) => callbackServer2.close(() => resolve()));
       await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -232,7 +232,7 @@ describe('clock-client routes', () => {
   it('inject enforces strict session matching', async () => {
     const app = express();
     app.use(express.json({ limit: '256kb' }));
-    registerClockClientRoutes(app);
+    registerSessionClientRoutes(app);
 
     const server = http.createServer(app);
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -267,11 +267,11 @@ describe('clock-client routes', () => {
     const callbackUrl1 = `http://127.0.0.1:${callbackAddr1.port}/inject`;
     const callbackUrl2 = `http://127.0.0.1:${callbackAddr2.port}/inject`;
 
-    const daemonId1 = 'clockd_strict_s1';
-    const daemonId2 = 'clockd_strict_s2';
+    const daemonId1 = 'sessiond_strict_s1';
+    const daemonId2 = 'sessiond_strict_s2';
 
     try {
-      const reg1 = await localFetch(baseUrl, '/daemon/clock-client/register', {
+      const reg1 = await localFetch(baseUrl, '/daemon/session-client/register', {
         daemonId: daemonId1,
         callbackUrl: callbackUrl1,
         sessionId: 's_clock_1',
@@ -279,7 +279,7 @@ describe('clock-client routes', () => {
       });
       expect(reg1.status).toBe(200);
 
-      const reg2 = await localFetch(baseUrl, '/daemon/clock-client/register', {
+      const reg2 = await localFetch(baseUrl, '/daemon/session-client/register', {
         daemonId: daemonId2,
         callbackUrl: callbackUrl2,
         sessionId: 's_clock_2',
@@ -287,20 +287,20 @@ describe('clock-client routes', () => {
       });
       expect(reg2.status).toBe(200);
 
-      const missingSession = await localFetch(baseUrl, '/daemon/clock-client/inject', {
+      const missingSession = await localFetch(baseUrl, '/daemon/session-client/inject', {
         text: 'hello-without-session'
       });
       expect(missingSession.status).toBe(400);
       expect(missingSession.payload?.error?.message).toBe('tmuxSessionId is required');
 
-      const unmatched = await localFetch(baseUrl, '/daemon/clock-client/inject', {
+      const unmatched = await localFetch(baseUrl, '/daemon/session-client/inject', {
         text: 'hello-unmatched',
         sessionId: 's_not_found'
       });
       expect(unmatched.status).toBe(503);
       expect(unmatched.payload?.reason).toBe('no_matching_tmux_session_daemon');
 
-      const matched = await localFetch(baseUrl, '/daemon/clock-client/inject', {
+      const matched = await localFetch(baseUrl, '/daemon/session-client/inject', {
         text: 'hello-session-1',
         sessionId: 's_clock_1'
       });
@@ -310,8 +310,8 @@ describe('clock-client routes', () => {
       expect(injectHitSession1).toBe(1);
       expect(injectHitSession2).toBe(0);
 
-      await localFetch(baseUrl, '/daemon/clock-client/unregister', { daemonId: daemonId1 });
-      await localFetch(baseUrl, '/daemon/clock-client/unregister', { daemonId: daemonId2 });
+      await localFetch(baseUrl, '/daemon/session-client/unregister', { daemonId: daemonId1 });
+      await localFetch(baseUrl, '/daemon/session-client/unregister', { daemonId: daemonId2 });
     } finally {
       await new Promise<void>((resolve) => callbackServer1.close(() => resolve()));
       await new Promise<void>((resolve) => callbackServer2.close(() => resolve()));
@@ -322,7 +322,7 @@ describe('clock-client routes', () => {
   it('conversation session injection does not cross tmux sessions across workdirs', async () => {
     const app = express();
     app.use(express.json({ limit: '256kb' }));
-    registerClockClientRoutes(app);
+    registerSessionClientRoutes(app);
 
     const server = http.createServer(app);
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -353,15 +353,15 @@ describe('clock-client routes', () => {
     const callbackAddrA = callbackServerA.address() as AddressInfo;
     const callbackAddrB = callbackServerB.address() as AddressInfo;
 
-    const daemonIdA = 'clockd_conv_isolation_a';
-    const daemonIdB = 'clockd_conv_isolation_b';
+    const daemonIdA = 'sessiond_conv_isolation_a';
+    const daemonIdB = 'sessiond_conv_isolation_b';
     const tmuxSessionIdA = 'rcc_conv_isolation_a';
     const tmuxSessionIdB = 'rcc_conv_isolation_b';
     const workdirA = '/tmp/routecodex-conv-isolation-a';
     const workdirB = '/tmp/routecodex-conv-isolation-b';
 
     try {
-      const regA = await localFetch(baseUrl, '/daemon/clock-client/register', {
+      const regA = await localFetch(baseUrl, '/daemon/session-client/register', {
         daemonId: daemonIdA,
         callbackUrl: `http://127.0.0.1:${callbackAddrA.port}/inject`,
         tmuxSessionId: tmuxSessionIdA,
@@ -370,7 +370,7 @@ describe('clock-client routes', () => {
       });
       expect(regA.status).toBe(200);
 
-      const regB = await localFetch(baseUrl, '/daemon/clock-client/register', {
+      const regB = await localFetch(baseUrl, '/daemon/session-client/register', {
         daemonId: daemonIdB,
         callbackUrl: `http://127.0.0.1:${callbackAddrB.port}/inject`,
         tmuxSessionId: tmuxSessionIdB,
@@ -379,7 +379,7 @@ describe('clock-client routes', () => {
       });
       expect(regB.status).toBe(200);
 
-      const bind = getClockClientRegistry().bindConversationSession({
+      const bind = getSessionClientRegistry().bindConversationSession({
         conversationSessionId: 'conv_isolation_a',
         clientType: 'unit-test',
         workdir: workdirA
@@ -387,7 +387,7 @@ describe('clock-client routes', () => {
       expect(bind.ok).toBe(true);
       expect(bind.daemonId).toBe(daemonIdA);
 
-      const injectA = await localFetch(baseUrl, '/daemon/clock-client/inject', {
+      const injectA = await localFetch(baseUrl, '/daemon/session-client/inject', {
         text: 'conv-a',
         sessionId: 'conv_isolation_a',
         workdir: workdirA
@@ -397,7 +397,7 @@ describe('clock-client routes', () => {
       expect(injectHitA).toBe(1);
       expect(injectHitB).toBe(0);
 
-      const injectWrongWorkdir = await localFetch(baseUrl, '/daemon/clock-client/inject', {
+      const injectWrongWorkdir = await localFetch(baseUrl, '/daemon/session-client/inject', {
         text: 'conv-a-wrong-workdir',
         sessionId: 'conv_isolation_a',
         workdir: workdirB
@@ -407,8 +407,8 @@ describe('clock-client routes', () => {
       expect(injectHitA).toBe(1);
       expect(injectHitB).toBe(0);
     } finally {
-      await localFetch(baseUrl, '/daemon/clock-client/unregister', { daemonId: daemonIdA });
-      await localFetch(baseUrl, '/daemon/clock-client/unregister', { daemonId: daemonIdB });
+      await localFetch(baseUrl, '/daemon/session-client/unregister', { daemonId: daemonIdA });
+      await localFetch(baseUrl, '/daemon/session-client/unregister', { daemonId: daemonIdB });
       await new Promise<void>((resolve) => callbackServerA.close(() => resolve()));
       await new Promise<void>((resolve) => callbackServerB.close(() => resolve()));
       await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -418,7 +418,7 @@ describe('clock-client routes', () => {
   it('inject enforces workdir when tmux session id is shared', async () => {
     const app = express();
     app.use(express.json({ limit: '256kb' }));
-    registerClockClientRoutes(app);
+    registerSessionClientRoutes(app);
 
     const server = http.createServer(app);
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -451,42 +451,42 @@ describe('clock-client routes', () => {
 
     try {
       const sharedTmuxSessionId = 'rcc_shared_workdir_route';
-      const regA = await localFetch(baseUrl, '/daemon/clock-client/register', {
-        daemonId: 'clockd_route_workdir_a',
+      const regA = await localFetch(baseUrl, '/daemon/session-client/register', {
+        daemonId: 'sessiond_route_workdir_a',
         callbackUrl: `http://127.0.0.1:${callbackAddrA.port}/inject`,
         tmuxSessionId: sharedTmuxSessionId,
         workdir: '/tmp/routecodex-route-workdir-a'
       });
       expect(regA.status).toBe(200);
-      const regB = await localFetch(baseUrl, '/daemon/clock-client/register', {
-        daemonId: 'clockd_route_workdir_b',
+      const regB = await localFetch(baseUrl, '/daemon/session-client/register', {
+        daemonId: 'sessiond_route_workdir_b',
         callbackUrl: `http://127.0.0.1:${callbackAddrB.port}/inject`,
         tmuxSessionId: sharedTmuxSessionId,
         workdir: '/tmp/routecodex-route-workdir-b'
       });
       expect(regB.status).toBe(200);
 
-      const injectA = await localFetch(baseUrl, '/daemon/clock-client/inject', {
+      const injectA = await localFetch(baseUrl, '/daemon/session-client/inject', {
         text: 'hello-a',
         tmuxSessionId: sharedTmuxSessionId,
         workdir: '/tmp/routecodex-route-workdir-a'
       });
       expect(injectA.status).toBe(200);
-      expect(injectA.payload?.daemonId).toBe('clockd_route_workdir_a');
+      expect(injectA.payload?.daemonId).toBe('sessiond_route_workdir_a');
       expect(injectHitA).toBe(1);
       expect(injectHitB).toBe(0);
 
-      const injectB = await localFetch(baseUrl, '/daemon/clock-client/inject', {
+      const injectB = await localFetch(baseUrl, '/daemon/session-client/inject', {
         text: 'hello-b',
         tmuxSessionId: sharedTmuxSessionId,
         workdir: '/tmp/routecodex-route-workdir-b'
       });
       expect(injectB.status).toBe(200);
-      expect(injectB.payload?.daemonId).toBe('clockd_route_workdir_b');
+      expect(injectB.payload?.daemonId).toBe('sessiond_route_workdir_b');
       expect(injectHitA).toBe(1);
       expect(injectHitB).toBe(1);
 
-      const injectMismatch = await localFetch(baseUrl, '/daemon/clock-client/inject', {
+      const injectMismatch = await localFetch(baseUrl, '/daemon/session-client/inject', {
         text: 'hello-c',
         tmuxSessionId: sharedTmuxSessionId,
         workdir: '/tmp/routecodex-route-workdir-missing'
@@ -500,12 +500,12 @@ describe('clock-client routes', () => {
     }
   });
 
-  it('supports clock task list + CRUD + recurrence fields', async () => {
+  it('supports session task list + CRUD + recurrence fields', async () => {
     const app = express();
     app.use(express.json({ limit: '256kb' }));
-    registerClockClientRoutes(app);
+    registerSessionClientRoutes(app);
 
-    const tmpSessionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-clock-routes-'));
+    const tmpSessionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-session-routes-'));
     const prevSessionDir = process.env.ROUTECODEX_SESSION_DIR;
     process.env.ROUTECODEX_SESSION_DIR = tmpSessionDir;
 
@@ -516,7 +516,7 @@ describe('clock-client routes', () => {
 
     try {
       const dueAt = new Date(Date.now() + 60_000).toISOString();
-      const created = await localFetchByMethod(baseUrl, 'POST', '/daemon/clock/tasks', {
+      const created = await localFetchByMethod(baseUrl, 'POST', '/daemon/session/tasks', {
         sessionId: 'conv_clock_crud_1',
         dueAt,
         task: 'run-crud',
@@ -526,7 +526,7 @@ describe('clock-client routes', () => {
       expect(created.payload?.ok).toBe(true);
       expect(created.payload?.scheduledCount).toBe(1);
 
-      const listed = await localFetchByMethod(baseUrl, 'GET', '/daemon/clock/tasks?sessionId=conv_clock_crud_1');
+      const listed = await localFetchByMethod(baseUrl, 'GET', '/daemon/session/tasks?sessionId=conv_clock_crud_1');
       expect(listed.status).toBe(200);
       expect(listed.payload?.ok).toBe(true);
       expect(Array.isArray(listed.payload?.sessions)).toBe(true);
@@ -535,7 +535,7 @@ describe('clock-client routes', () => {
       expect(typeof taskId).toBe('string');
       expect(listed.payload.sessions[0]?.tasks?.[0]?.recurrence?.kind).toBe('interval');
 
-      const patched = await localFetchByMethod(baseUrl, 'PATCH', '/daemon/clock/tasks', {
+      const patched = await localFetchByMethod(baseUrl, 'PATCH', '/daemon/session/tasks', {
         sessionId: 'conv_clock_crud_1',
         taskId,
         patch: { task: 'run-crud-updated' }
@@ -543,7 +543,7 @@ describe('clock-client routes', () => {
       expect(patched.status).toBe(200);
       expect(patched.payload?.ok).toBe(true);
 
-      const deleted = await localFetchByMethod(baseUrl, 'DELETE', '/daemon/clock/tasks', {
+      const deleted = await localFetchByMethod(baseUrl, 'DELETE', '/daemon/session/tasks', {
         sessionId: 'conv_clock_crud_1',
         taskId
       });
@@ -551,7 +551,7 @@ describe('clock-client routes', () => {
       expect(deleted.payload?.ok).toBe(true);
       expect(deleted.payload?.removed).toBe(true);
 
-      const listedAfterDelete = await localFetchByMethod(baseUrl, 'GET', '/daemon/clock/tasks?sessionId=conv_clock_crud_1');
+      const listedAfterDelete = await localFetchByMethod(baseUrl, 'GET', '/daemon/session/tasks?sessionId=conv_clock_crud_1');
       expect(listedAfterDelete.status).toBe(200);
       expect(listedAfterDelete.payload?.sessions?.[0]?.taskCount).toBe(0);
     } finally {
@@ -565,12 +565,12 @@ describe('clock-client routes', () => {
     }
   });
 
-  it('clock cleanup clears task sessions for removed tmux session ids', async () => {
+  it('session cleanup clears task sessions for removed tmux session ids', async () => {
     const app = express();
     app.use(express.json({ limit: '256kb' }));
-    registerClockClientRoutes(app);
+    registerSessionClientRoutes(app);
 
-    const tmpSessionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-clock-cleanup-'));
+    const tmpSessionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-session-cleanup-'));
     const prevSessionDir = process.env.ROUTECODEX_SESSION_DIR;
     process.env.ROUTECODEX_SESSION_DIR = tmpSessionDir;
 
@@ -581,15 +581,15 @@ describe('clock-client routes', () => {
 
     const tmuxSessionId = `rcc_cleanup_dead_${Date.now()}`;
     try {
-      const reg = await localFetch(baseUrl, '/daemon/clock-client/register', {
-        daemonId: 'clockd_cleanup_dead_1',
+      const reg = await localFetch(baseUrl, '/daemon/session-client/register', {
+        daemonId: 'sessiond_cleanup_dead_1',
         callbackUrl: 'http://127.0.0.1:65530/inject',
         tmuxSessionId
       });
       expect(reg.status).toBe(200);
       expect(reg.payload?.ok).toBe(true);
 
-      const cleanup = await localFetch(baseUrl, '/daemon/clock/cleanup', {
+      const cleanup = await localFetch(baseUrl, '/daemon/session/cleanup', {
         mode: 'dead_tmux'
       });
       expect(cleanup.status).toBe(200);
@@ -607,10 +607,10 @@ describe('clock-client routes', () => {
     }
   });
 
-  it('clock cleanup does not terminate managed tmux sessions by default', async () => {
+  it('session cleanup does not terminate managed tmux sessions by default', async () => {
     const app = express();
     app.use(express.json({ limit: '256kb' }));
-    registerClockClientRoutes(app);
+    registerSessionClientRoutes(app);
 
     const server = http.createServer(app);
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -619,8 +619,8 @@ describe('clock-client routes', () => {
 
     const tmuxSessionId = `rcc_cleanup_managed_${Date.now()}`;
     try {
-      const reg = await localFetch(baseUrl, '/daemon/clock-client/register', {
-        daemonId: 'clockd_cleanup_managed_1',
+      const reg = await localFetch(baseUrl, '/daemon/session-client/register', {
+        daemonId: 'sessiond_cleanup_managed_1',
         callbackUrl: 'http://127.0.0.1:65531/inject',
         tmuxSessionId,
         managedTmuxSession: true
@@ -628,7 +628,7 @@ describe('clock-client routes', () => {
       expect(reg.status).toBe(200);
       expect(reg.payload?.ok).toBe(true);
 
-      const cleanup = await localFetch(baseUrl, '/daemon/clock/cleanup', {
+      const cleanup = await localFetch(baseUrl, '/daemon/session/cleanup', {
         mode: 'dead_tmux'
       });
       expect(cleanup.status).toBe(200);

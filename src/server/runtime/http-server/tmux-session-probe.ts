@@ -40,7 +40,7 @@ function logTmuxKillEvent(input: {
   const sessionName = normalizeTmuxSessionTarget(input.tmuxSessionId);
   logProcessLifecycle({
     event: 'kill_attempt',
-    source: 'http.clock-managed-tmux-reaper',
+    source: 'http.session-managed-tmux-reaper',
     details: {
       tmuxSessionId: sessionName || null,
       signal: 'TMUX_KILL_SESSION',

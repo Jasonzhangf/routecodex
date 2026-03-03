@@ -1,4 +1,4 @@
-# Clock Client Daemon + Private Clock Marker Design (routecodex-119)
+# Session Client Daemon + Private Clock Marker Design (routecodex-119)
 
 ## 1. Background
 
@@ -49,13 +49,13 @@ We need a controlled path where:
 5. **Daemon auth model**
    - Localhost-only access guard for daemon control endpoints.
 
-6. **Clock inject session binding**
+6. **Session inject session binding**
    - Daemon routing key is `tmuxSessionId` (tmux session domain), not conversation `sessionId`.
    - Conversation `sessionId` is bound separately to a tmux session in server registry (mapping domain separation).
-   - Launcher appends daemon identity suffix to proxied api key (`::rcc-clockd:<daemonId>`).
-   - HTTP auth middleware extracts daemon suffix and attaches `x-routecodex-clock-daemon-id` request hint.
+   - Launcher appends daemon identity suffix to proxied api key (`::rcc-sessiond:<daemonId>`).
+   - HTTP auth middleware extracts daemon suffix and attaches `x-routecodex-session-daemon-id` request hint.
    - Executor metadata binds `conversationSessionId -> daemonId/tmuxSessionId` deterministically before due injection tick.
-   - `/daemon/clock-client/inject` remains strict and never falls back to unrelated alive daemons.
+   - `/daemon/session-client/inject` remains strict and never falls back to unrelated alive daemons.
 
 ## 4. Architecture
 
@@ -64,7 +64,7 @@ We need a controlled path where:
 - **Launcher (`rcc codex/claude`)**
   - Detects tmux capability.
   - Starts/attaches client daemon if available.
-- **Clock Client Daemon**
+- **Session Client Daemon**
   - Maintains registration + heartbeat with server.
   - Executes `tmux send-keys` for injection + Enter.
   - Self-terminates when parent/client exits.
@@ -116,19 +116,19 @@ please remind me
 
 ## 6. Server Daemon Control Endpoints (localhost only)
 
-- `POST /daemon/clock-client/register`
-- `POST /daemon/clock-client/heartbeat`
-- `POST /daemon/clock-client/inject`
-- `POST /daemon/clock-client/unregister`
+- `POST /daemon/session-client/register`
+- `POST /daemon/session-client/heartbeat`
+- `POST /daemon/session-client/inject`
+- `POST /daemon/session-client/unregister`
 
 Payload fields include session/client type/tmux target/request id/injection text as needed.
 
 ### 6.1 External injection CLI
 
-- Command: `routecodex tmux-inject` / `rcc tmux-inject`
+- Command: `routecodex session-inject` / `rcc session-inject`
 - Common usage:
-  - `rcc tmux-inject --port 5520 --list`
-  - `rcc tmux-inject --port 5520 --text "hello" --tmux-session-id <tmuxSessionId>`
+  - `rcc session-inject --port 5520 --list`
+  - `rcc session-inject --port 5520 --text "hello" --tmux-session-id <tmuxSessionId>`
 - Target resolution rules:
   - Prefer explicit `--tmux-session-id` (or legacy `--session-id` alias);
   - else resolve via `--daemon-id`;
@@ -169,7 +169,7 @@ To ensure due tasks are actually delivered to the client input surface (not only
 - Source of truth: `clock/*.json` under server-scoped `ROUTECODEX_SESSION_DIR`.
 - Runtime config parsing: delegated to llmswitch-core `resolveClockConfig` bridge API.
 - Due reservation: delegated to llmswitch-core `reserveDueTasksForRequest` bridge API.
-- Delivery path: host `ClockClientRegistry.inject({ sessionId, ... })`, where `sessionId` can be conversation ID and is resolved to mapped `tmuxSessionId`.
+- Delivery path: host `SessionClientRegistry.inject({ sessionId, ... })`, where `sessionId` can be conversation ID and is resolved to mapped `tmuxSessionId`.
 - Commit rule: call `commitClockReservation` only after successful daemon injection.
 
 ### 10.1 Lifecycle
@@ -195,10 +195,10 @@ Fix:
 - `sharedmodule/llmswitch-core`: `npm run build` ✅
 - RouteCodex targeted suite (via `npm run jest:run -- --runTestsByPath ...`) ✅
   - `tests/servertool/servertool-clock.spec.ts` (includes new provider pin regression)
-  - `tests/server/http-server/clock-client-routes.spec.ts`
+  - `tests/server/http-server/session-client-routes.spec.ts`
   - `tests/server/http-server/hub-policy-injection.spec.ts`
   - `tests/server/http-server/quota-view-injection.spec.ts`
-  - `tests/cli/tmux-inject-command.spec.ts`
+  - `tests/cli/session-inject-command.spec.ts`
   - `tests/cli/codex-command.spec.ts`
   - `tests/cli/claude-command.spec.ts`
 - `npm run build:dev` ✅
@@ -212,11 +212,11 @@ Using a temporary server on port `5630` + mock callback daemon:
 2. Schedule one due task for `conv_clock_live` in task-store.
 3. Observe callback payload auto-arrival from server loop:
 
-- `source: "clock.daemon.inject"`
+- `source: "session.daemon.inject"`
 - `tmuxSessionId: "rcc_test_tmux"`
 - text includes `[Clock Reminder]` and scheduled task details.
 
-4. `/daemon/clock-client/list` shows `lastInjectAtMs` updated.
+4. `/daemon/session-client/list` shows `lastInjectAtMs` updated.
 
 ## 13. Submit-key reliability hardening (routecodex-128)
 
@@ -234,13 +234,13 @@ Fix applied in launcher daemon path:
 
 Validation:
 
-- `npm run jest:run -- --runInBand --runTestsByPath tests/cli/codex-command.spec.ts tests/cli/claude-command.spec.ts tests/cli/tmux-inject-command.spec.ts` ✅
-- `npm run jest:run -- --runInBand --runTestsByPath tests/server/http-server/clock-client-routes.spec.ts tests/server/http-server/executor-metadata.spec.ts tests/server/http-server/httpserver-apikey-env-resolution.spec.ts tests/utils/clock-client-token.spec.ts` ✅
+- `npm run jest:run -- --runInBand --runTestsByPath tests/cli/codex-command.spec.ts tests/cli/claude-command.spec.ts tests/cli/session-inject-command.spec.ts` ✅
+- `npm run jest:run -- --runInBand --runTestsByPath tests/server/http-server/session-client-routes.spec.ts tests/server/http-server/executor-metadata.spec.ts tests/server/http-server/httpserver-apikey-env-resolution.spec.ts tests/utils/session-client-token.spec.ts` ✅
 - `npx tsc --noEmit` ✅
 
 ## 14. Precise trigger mode (routecodex-129)
 
-Clock daemon delivery now runs in exact due-time mode by default:
+Session daemon delivery now runs in exact due-time mode by default:
 
 - host daemon inject loop rewrites effective clock config to `dueWindowMs=0` before reservation;
 - this prevents early-fire behavior from legacy wide due windows in request-driven paths;
@@ -305,21 +305,21 @@ Cleanup behavior:
 
 Added management endpoints:
 
-- `GET /daemon/clock/tasks` (list)
-- `POST /daemon/clock/tasks` (create)
-- `PATCH /daemon/clock/tasks` (update)
-- `DELETE /daemon/clock/tasks` (delete one / clear session)
-- `POST /daemon/clock/cleanup` (`mode=dead_tmux|unbind`)
+- `GET /daemon/session/tasks` (list)
+- `POST /daemon/session/tasks` (create)
+- `PATCH /daemon/session/tasks` (update)
+- `DELETE /daemon/session/tasks` (delete one / clear session)
+- `POST /daemon/session/cleanup` (`mode=dead_tmux|unbind`)
 
 CLI management command:
 
-- `rcc clock-admin --list`
-- `rcc clock-admin --create --session-id <sid> --due-at <iso> --task <text> --recurrence interval --every-minutes 5 --max-runs 10`
-- `rcc clock-admin --update --session-id <sid> --task-id <tid> --due-at <iso> --task "..."`
-- `rcc clock-admin --delete --session-id <sid> --task-id <tid>`
-- `rcc clock-admin --clear --session-id <sid>`
-- `rcc clock-admin --cleanup-dead-tmux`
-- `rcc clock-admin --unbind-session <conversationSessionId> [--clear-tasks]`
+- `rcc session-admin --list`
+- `rcc session-admin --create --session-id <sid> --due-at <iso> --task <text> --recurrence interval --every-minutes 5 --max-runs 10`
+- `rcc session-admin --update --session-id <sid> --task-id <tid> --due-at <iso> --task "..."`
+- `rcc session-admin --delete --session-id <sid> --task-id <tid>`
+- `rcc session-admin --clear --session-id <sid>`
+- `rcc session-admin --cleanup-dead-tmux`
+- `rcc session-admin --unbind-session <conversationSessionId> [--clear-tasks]`
 
 WebUI management entry:
 
@@ -332,7 +332,7 @@ Clock tool now supports `action=update` (with `taskId` + `items[0]`) so models c
 
 ### 15.6 Trigger precision and reminder guidance
 
-Clock daemon inject loop uses exact due matching (`dueWindowMs=0`) to avoid early delivery.
+Session daemon inject loop uses exact due matching (`dueWindowMs=0`) to avoid early delivery.
 Reminder payload includes guidance text:
 
 - `MANDATORY: if waiting is needed, use the clock tool to schedule wake-up (clock.schedule) now; do not only promise to wait.`

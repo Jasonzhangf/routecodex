@@ -1,6 +1,6 @@
-import { extractWorkdirHintFromReservationTasks } from '../../../src/server/runtime/http-server/http-server-clock-daemon.js';
+import { extractWorkdirHintFromReservationTasks } from '../../../src/server/runtime/http-server/http-server-session-daemon.js';
 
-describe('http-server clock daemon workdir hint extraction', () => {
+describe('http-server session daemon workdir hint extraction', () => {
   it('extracts a unique workdir from reservation tasks', () => {
     const tasks: unknown[] = [
       {

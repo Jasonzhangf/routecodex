@@ -11,7 +11,7 @@ type LoggerLike = {
   error: (msg: string) => void;
 };
 
-export type TmuxInjectCommandContext = {
+export type SessionInjectCommandContext = {
   isDevPackage: boolean;
   defaultDevPort: number;
   logger: LoggerLike;
@@ -22,7 +22,7 @@ export type TmuxInjectCommandContext = {
   exit: (code: number) => never;
 };
 
-type TmuxInjectCommandOptions = {
+type SessionInjectCommandOptions = {
   port?: string;
   host?: string;
   url?: string;
@@ -37,7 +37,7 @@ type TmuxInjectCommandOptions = {
   requestId?: string;
 };
 
-type ClockClientRecord = {
+type SessionClientRecord = {
   daemonId?: string;
   tmuxSessionId?: string;
   sessionId?: string;
@@ -84,7 +84,7 @@ function readPortHostFromConfig(loaded: LoadedRouteCodexConfig | null): { host: 
   return { host, port };
 }
 
-async function resolveBaseUrl(ctx: TmuxInjectCommandContext, options: TmuxInjectCommandOptions): Promise<string> {
+async function resolveBaseUrl(ctx: SessionInjectCommandContext, options: SessionInjectCommandOptions): Promise<string> {
   if (typeof options.url === 'string' && options.url.trim()) {
     return normalizeBaseUrl(options.url);
   }
@@ -118,19 +118,19 @@ async function resolveBaseUrl(ctx: TmuxInjectCommandContext, options: TmuxInject
   return `http://${host}:${Math.floor(port)}`;
 }
 
-async function fetchDaemonList(ctx: TmuxInjectCommandContext, baseUrl: string): Promise<ClockClientRecord[]> {
-  const url = `${baseUrl}/daemon/clock-client/list`;
+async function fetchDaemonList(ctx: SessionInjectCommandContext, baseUrl: string): Promise<SessionClientRecord[]> {
+  const url = `${baseUrl}/daemon/session-client/list`;
   const response = await ctx.fetch(url, { method: 'GET' });
   if (!response.ok) {
     const text = await response.text().catch(() => String(response.status));
-    throw new Error(`Failed to list clock daemons (${response.status}): ${text}`);
+    throw new Error(`Failed to list session daemons (${response.status}): ${text}`);
   }
   const data = (await response.json().catch(() => null)) as { records?: unknown } | null;
   const records = Array.isArray(data?.records) ? data?.records : [];
-  return records.filter((item) => item && typeof item === 'object') as ClockClientRecord[];
+  return records.filter((item) => item && typeof item === 'object') as SessionClientRecord[];
 }
 
-function resolveTargetTmuxSessionId(records: ClockClientRecord[], options: TmuxInjectCommandOptions): string {
+function resolveTargetTmuxSessionId(records: SessionClientRecord[], options: SessionInjectCommandOptions): string {
   const explicitTmuxSession = typeof options.tmuxSessionId === 'string' ? options.tmuxSessionId.trim() : '';
   if (explicitTmuxSession) {
     return explicitTmuxSession;
@@ -170,7 +170,7 @@ function resolveTargetTmuxSessionId(records: ClockClientRecord[], options: TmuxI
   }
 
   if (!withSession.length) {
-    throw new Error('No available clock daemon tmux session. Start rcc codex/claude first.');
+    throw new Error('No available session daemon tmux session. Start rcc codex/claude first.');
   }
 
   throw new Error('Multiple daemon tmux sessions found; specify --tmux-session-id/--session-id or --daemon-id (use --list).');
@@ -187,16 +187,16 @@ function formatTime(ms?: number): string {
   }
 }
 
-function printList(ctx: TmuxInjectCommandContext, records: ClockClientRecord[], asJson: boolean): void {
+function printList(ctx: SessionInjectCommandContext, records: SessionClientRecord[], asJson: boolean): void {
   if (asJson) {
     ctx.log(JSON.stringify({ ok: true, records }, null, 2));
     return;
   }
   if (!records.length) {
-    ctx.logger.info('No clock-client daemons registered.');
+    ctx.logger.info('No session-client daemons registered.');
     return;
   }
-  ctx.logger.info(`Found ${records.length} clock-client daemon(s):`);
+  ctx.logger.info(`Found ${records.length} session-client daemon(s):`);
   for (const rec of records) {
     const daemonId = String(rec.daemonId || '-');
     const tmuxSessionId = String(rec.tmuxSessionId || rec.sessionId || '-');
@@ -206,10 +206,10 @@ function printList(ctx: TmuxInjectCommandContext, records: ClockClientRecord[], 
   }
 }
 
-export function createTmuxInjectCommand(program: Command, ctx: TmuxInjectCommandContext): void {
+export function createSessionInjectCommand(program: Command, ctx: SessionInjectCommandContext): void {
   program
-    .command('tmux-inject')
-    .description('Inject text into tmux-backed codex/claude session via RouteCodex clock daemon')
+    .command('session-inject')
+    .description('Inject text into tmux-backed codex/claude session via RouteCodex session daemon')
     .option('--port <port>', 'RouteCodex server port')
     .option('--host <host>', 'RouteCodex server host')
     .option('--url <url>', 'RouteCodex base URL, e.g. http://127.0.0.1:5520')
@@ -218,11 +218,11 @@ export function createTmuxInjectCommand(program: Command, ctx: TmuxInjectCommand
     .option('--session-id <sessionId>', 'Alias of --tmux-session-id (deprecated)')
     .option('--daemon-id <daemonId>', 'Target daemonId (tmux session auto-resolved)')
     .option('--text <text>', 'Text to inject into target tmux pane and press Enter')
-    .option('--source <source>', 'Injection source tag', 'cli.tmux-inject')
+    .option('--source <source>', 'Injection source tag', 'cli.session-inject')
     .option('--request-id <requestId>', 'Optional request id for tracing')
     .option('--list', 'List available daemon targets only')
     .option('--json', 'Print result/list in JSON')
-    .action(async (options: TmuxInjectCommandOptions) => {
+    .action(async (options: SessionInjectCommandOptions) => {
       try {
         const waitHint = 'Hint: if waiting is needed, only call tools that are available in your current runtime.';
         const baseUrl = await resolveBaseUrl(ctx, options);
@@ -243,13 +243,13 @@ export function createTmuxInjectCommand(program: Command, ctx: TmuxInjectCommand
           text,
           tmuxSessionId,
           sessionId: tmuxSessionId,
-          source: typeof options.source === 'string' && options.source.trim() ? options.source.trim() : 'cli.tmux-inject'
+          source: typeof options.source === 'string' && options.source.trim() ? options.source.trim() : 'cli.session-inject'
         };
         if (typeof options.requestId === 'string' && options.requestId.trim()) {
           payload.requestId = options.requestId.trim();
         }
 
-        const injectUrl = `${baseUrl}/daemon/clock-client/inject`;
+        const injectUrl = `${baseUrl}/daemon/session-client/inject`;
         const response = await ctx.fetch(injectUrl, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },

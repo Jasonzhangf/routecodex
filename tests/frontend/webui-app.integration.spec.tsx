@@ -560,7 +560,7 @@ describe('webui integration flows (feature coverage)', () => {
         return json({ ok: true, action: body.action || 'unknown' });
       }
 
-      if (path === '/daemon/clock/tasks' && method === 'GET') {
+      if (path === '/daemon/session/tasks' && method === 'GET') {
         if (fault.clockFetchFail) {
           return json({ error: { message: 'clock fetch failed' } }, 500);
         }

@@ -126,4 +126,56 @@ describe('stopmessage scope rebind', () => {
     expect(oldState?.preCommandScriptPath).toBe('/tmp/script.sh');
     expect(newState).toBeUndefined();
   });
+
+  it('clears stopMessage state for tmux scope', async () => {
+    jest.resetModules();
+    mockStore.clear();
+    const { clearStopMessageTmuxScope } = await import(
+      '../../../src/server/runtime/http-server/stopmessage-scope-rebind.js'
+    );
+
+    const scope = 'tmux:rcc_clear_1';
+    mockStore.set(
+      scope,
+      createRoutingState({
+        stopMessageText: '清理测试',
+        stopMessageMaxRepeats: 3,
+        stopMessageUsed: 1,
+        stopMessageStageMode: 'on',
+        stopMessageUpdatedAt: 999
+      })
+    );
+
+    const result = clearStopMessageTmuxScope({ tmuxSessionId: 'rcc_clear_1', reason: 'test_clear' });
+    expect(result.cleared).toBe(true);
+    expect(result.scope).toBe(scope);
+
+    const state = mockStore.get(scope) as Record<string, unknown> | undefined;
+    expect(state?.stopMessageText).toBeUndefined();
+    expect(state?.stopMessageMaxRepeats).toBeUndefined();
+    expect(state?.stopMessageUsed).toBeUndefined();
+  });
+
+  it('skips clearing when tmux scope has no stopMessage state', async () => {
+    jest.resetModules();
+    mockStore.clear();
+    const { clearStopMessageTmuxScope } = await import(
+      '../../../src/server/runtime/http-server/stopmessage-scope-rebind.js'
+    );
+
+    const scope = 'tmux:rcc_clear_2';
+    mockStore.set(
+      scope,
+      createRoutingState({
+        preCommandScriptPath: '/tmp/script.sh'
+      })
+    );
+
+    const result = clearStopMessageTmuxScope({ tmuxSessionId: 'rcc_clear_2', reason: 'test_skip' });
+    expect(result.cleared).toBe(false);
+    expect(result.reason).toBe('stopmessage_missing');
+
+    const state = mockStore.get(scope) as Record<string, unknown> | undefined;
+    expect(state?.preCommandScriptPath).toBe('/tmp/script.sh');
+  });
 });

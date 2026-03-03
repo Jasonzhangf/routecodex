@@ -91,4 +91,3 @@ NTP 状态持久化路径（落在运行时 session 根目录下）：
 
 1. **主动工具调用**：MCP/模型调用 `clock(action="get")` 或 `clock(action="schedule")`
 2. **被动注入**：每次请求都会看到 `Time Tag`；到点的提醒会被注入为 `role=user` 的提示文本（建议进行工具调用）
-

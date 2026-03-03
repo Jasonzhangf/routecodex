@@ -34,7 +34,7 @@ describe('managed-process-probe lifecycle logging', () => {
     try {
       const probe = await import('../../../src/server/runtime/http-server/managed-process-probe.js');
       const ok = probe.terminateManagedClientProcess({
-        daemonId: 'clockd_success',
+        daemonId: 'sessiond_success',
         pid: 43210,
         commandHint: 'codex',
         clientType: 'codex'
@@ -44,14 +44,14 @@ describe('managed-process-probe lifecycle logging', () => {
       expect(logProcessLifecycle).toHaveBeenCalledWith(
         expect.objectContaining({
           event: 'kill_attempt',
-          source: 'http.clock-managed-client-reaper',
+          source: 'http.session-managed-client-reaper',
           details: expect.objectContaining({ targetPid: 43210, signal: 'SIGTERM', result: 'attempt' })
         })
       );
       expect(logProcessLifecycle).toHaveBeenCalledWith(
         expect.objectContaining({
           event: 'kill_attempt',
-          source: 'http.clock-managed-client-reaper',
+          source: 'http.session-managed-client-reaper',
           details: expect.objectContaining({ targetPid: 43210, signal: 'SIGTERM', result: 'success', reason: 'signaled' })
         })
       );
@@ -98,7 +98,7 @@ describe('managed-process-probe lifecycle logging', () => {
     try {
       const probe = await import('../../../src/server/runtime/http-server/managed-process-probe.js');
       const ok = probe.terminateManagedClientProcess({
-        daemonId: 'clockd_escalate',
+        daemonId: 'sessiond_escalate',
         pid: 65432,
         commandHint: 'claude',
         clientType: 'claude'
@@ -147,7 +147,7 @@ describe('managed-process-probe lifecycle logging', () => {
     try {
       const probe = await import('../../../src/server/runtime/http-server/managed-process-probe.js');
       const ok = probe.terminateManagedClientProcess({
-        daemonId: 'clockd_skip',
+        daemonId: 'sessiond_skip',
         pid: 54321,
         commandHint: 'codex',
         clientType: 'codex'
@@ -157,7 +157,7 @@ describe('managed-process-probe lifecycle logging', () => {
       expect(logProcessLifecycle).toHaveBeenCalledWith(
         expect.objectContaining({
           event: 'kill_attempt',
-          source: 'http.clock-managed-client-reaper',
+          source: 'http.session-managed-client-reaper',
           details: expect.objectContaining({ targetPid: 54321, result: 'skipped', reason: 'command_mismatch' })
         })
       );

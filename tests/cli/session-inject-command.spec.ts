@@ -1,15 +1,15 @@
 import { describe, expect, it } from '@jest/globals';
 import { Command } from 'commander';
 
-import { createTmuxInjectCommand } from '../../src/cli/commands/tmux-inject.js';
+import { createSessionInjectCommand } from '../../src/cli/commands/session-inject.js';
 
-describe('cli tmux-inject command', () => {
+describe('cli session-inject command', () => {
   it('lists daemon records in json mode', async () => {
     const printed: string[] = [];
     const info: string[] = [];
 
     const program = new Command();
-    createTmuxInjectCommand(program, {
+    createSessionInjectCommand(program, {
       isDevPackage: true,
       defaultDevPort: 5555,
       logger: {
@@ -26,7 +26,7 @@ describe('cli tmux-inject command', () => {
           providerProfiles: {} as any
         }) as any,
       fetch: (async (url: string) => {
-        if (url.endsWith('/daemon/clock-client/list')) {
+        if (url.endsWith('/daemon/session-client/list')) {
           return {
             ok: true,
             status: 200,
@@ -34,7 +34,7 @@ describe('cli tmux-inject command', () => {
               ok: true,
               records: [
                 {
-                  daemonId: 'clockd_1',
+                  daemonId: 'sessiond_1',
                   sessionId: 's_1',
                   tmuxTarget: 'rcc_codex_1:0.0',
                   lastHeartbeatAtMs: 1770772000000
@@ -51,12 +51,12 @@ describe('cli tmux-inject command', () => {
       }
     });
 
-    await program.parseAsync(['node', 'routecodex', 'tmux-inject', '--list', '--json'], { from: 'node' });
+    await program.parseAsync(['node', 'routecodex', 'session-inject', '--list', '--json'], { from: 'node' });
 
     expect(info).toHaveLength(0);
     const payload = JSON.parse(printed.join('\n'));
     expect(Array.isArray(payload.records)).toBe(true);
-    expect(payload.records[0].daemonId).toBe('clockd_1');
+    expect(payload.records[0].daemonId).toBe('sessiond_1');
   });
 
   it('auto-selects single daemon session for injection', async () => {
@@ -65,7 +65,7 @@ describe('cli tmux-inject command', () => {
     const postedBodies: any[] = [];
 
     const program = new Command();
-    createTmuxInjectCommand(program, {
+    createSessionInjectCommand(program, {
       isDevPackage: true,
       defaultDevPort: 5555,
       logger: {
@@ -82,22 +82,22 @@ describe('cli tmux-inject command', () => {
           providerProfiles: {} as any
         }) as any,
       fetch: (async (url: string, init?: RequestInit) => {
-        if (url.endsWith('/daemon/clock-client/list')) {
+        if (url.endsWith('/daemon/session-client/list')) {
           return {
             ok: true,
             status: 200,
             json: async () => ({
               ok: true,
-              records: [{ daemonId: 'clockd_only', sessionId: 'session_only', tmuxTarget: 'rcc_codex:0.0' }]
+              records: [{ daemonId: 'sessiond_only', sessionId: 'session_only', tmuxTarget: 'rcc_codex:0.0' }]
             })
           } as any;
         }
-        if (url.endsWith('/daemon/clock-client/inject')) {
+        if (url.endsWith('/daemon/session-client/inject')) {
           postedBodies.push(JSON.parse(String(init?.body || '{}')));
           return {
             ok: true,
             status: 200,
-            json: async () => ({ ok: true, daemonId: 'clockd_only' })
+            json: async () => ({ ok: true, daemonId: 'sessiond_only' })
           } as any;
         }
         throw new Error(`unexpected url: ${url}`);
@@ -108,7 +108,7 @@ describe('cli tmux-inject command', () => {
       }
     });
 
-    await program.parseAsync(['node', 'routecodex', 'tmux-inject', '--text', 'hello-from-cli'], { from: 'node' });
+    await program.parseAsync(['node', 'routecodex', 'session-inject', '--text', 'hello-from-cli'], { from: 'node' });
 
     expect(postedBodies).toHaveLength(1);
     expect(postedBodies[0].tmuxSessionId).toBe('session_only');
@@ -122,7 +122,7 @@ describe('cli tmux-inject command', () => {
     const errors: string[] = [];
 
     const program = new Command();
-    createTmuxInjectCommand(program, {
+    createSessionInjectCommand(program, {
       isDevPackage: true,
       defaultDevPort: 5555,
       logger: {
@@ -139,15 +139,15 @@ describe('cli tmux-inject command', () => {
           providerProfiles: {} as any
         }) as any,
       fetch: (async (url: string) => {
-        if (url.endsWith('/daemon/clock-client/list')) {
+        if (url.endsWith('/daemon/session-client/list')) {
           return {
             ok: true,
             status: 200,
             json: async () => ({
               ok: true,
               records: [
-                { daemonId: 'clockd_1', sessionId: 'session_1' },
-                { daemonId: 'clockd_2', sessionId: 'session_2' }
+                { daemonId: 'sessiond_1', sessionId: 'session_1' },
+                { daemonId: 'sessiond_2', sessionId: 'session_2' }
               ]
             })
           } as any;
@@ -161,7 +161,7 @@ describe('cli tmux-inject command', () => {
     });
 
     await expect(
-      program.parseAsync(['node', 'routecodex', 'tmux-inject', '--text', 'hello-without-target'], { from: 'node' })
+      program.parseAsync(['node', 'routecodex', 'session-inject', '--text', 'hello-without-target'], { from: 'node' })
     ).rejects.toThrow('exit:1');
 
     expect(errors.join('\n')).toContain('Multiple daemon tmux sessions found');

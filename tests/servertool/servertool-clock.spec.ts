@@ -17,8 +17,10 @@ import {
   commitClockReservation,
   reserveDueTasksForRequest
 } from '../../sharedmodule/llmswitch-core/src/servertool/clock/task-store.js';
+import { resolveClockStateFile } from '../../sharedmodule/llmswitch-core/src/servertool/clock/paths.js';
 
 const SESSION_DIR = path.join(process.cwd(), 'tmp', 'jest-clock-sessions');
+const toClockSessionScope = (sessionId: string): string => `tmux:${sessionId}`;
 
 function resetSessionDir(): void {
   fs.rmSync(SESSION_DIR, { recursive: true, force: true });
@@ -35,17 +37,28 @@ function buildRequest(messages: StandardizedRequest['messages']): StandardizedRe
   };
 }
 
-function readClockStateFile(sessionId: string): any {
-  const file = path.join(SESSION_DIR, 'clock', `${sessionId}.json`);
+function readClockStateFile(sessionScope: string): any {
+  const file = resolveClockStateFile(SESSION_DIR, sessionScope);
+  if (!file) {
+    throw new Error(`invalid clock session scope: ${sessionScope}`);
+  }
   const raw = fs.readFileSync(file, 'utf8');
   return JSON.parse(raw);
+}
+
+function resolveClockStatePath(sessionScope: string): string {
+  const file = resolveClockStateFile(SESSION_DIR, sessionScope);
+  if (!file) {
+    throw new Error(`invalid clock session scope: ${sessionScope}`);
+  }
+  return file;
 }
 
 describe('servertool:clock', () => {
   beforeAll(() => {
     process.env.ROUTECODEX_SESSION_DIR = SESSION_DIR;
     // Keep tests deterministic and offline.
-    process.env.ROUTECODEX_CLOCK_NTP = '0';
+    process.env.ROUTECODEX_SESSION_NTP = '0';
   });
 
   beforeEach(() => {
@@ -71,14 +84,14 @@ describe('servertool:clock', () => {
     expect((processed.metadata as any)?.serverToolRequired).toBeUndefined();
   });
 
-  test('injects clock tool schema by default when sessionId exists', async () => {
+  test('injects clock tool schema by default when tmux session exists', async () => {
     const request = buildRequest([{ role: 'user', content: 'hi' }]);
     const result = await runReqProcessStage1ToolGovernance({
       request,
       rawPayload: {},
       metadata: {
         originalEndpoint: '/v1/chat/completions',
-        sessionId: 's-clock-default-1'
+        tmuxSessionId: 's-clock-default-1'
       },
       entryEndpoint: '/v1/chat/completions',
       requestId: 'req-clock-default-inject'
@@ -99,7 +112,7 @@ describe('servertool:clock', () => {
       metadata: {
         originalEndpoint: '/v1/chat/completions',
         __rt: { clock: { enabled: true } },
-        sessionId: 's-clock-1'
+        tmuxSessionId: 's-clock-1'
       },
       entryEndpoint: '/v1/chat/completions',
       requestId: 'req-clock-inject'
@@ -118,8 +131,9 @@ describe('servertool:clock', () => {
       throw new Error('clockConfig should not be null');
     }
     const sessionId = 's-clock-clear';
-    await scheduleClockTasks(sessionId, [{ dueAtMs: Date.now() - 1, task: 'old' }], clockConfig);
-    const stateFile = path.join(SESSION_DIR, 'clock', `${sessionId}.json`);
+    const sessionScope = toClockSessionScope(sessionId);
+    await scheduleClockTasks(sessionScope, [{ dueAtMs: Date.now() - 1, task: 'old' }], clockConfig);
+    const stateFile = resolveClockStatePath(sessionScope);
     expect(fs.existsSync(stateFile)).toBe(true);
 
     // Directive in older user message: should NOT clear (latest user message wins).
@@ -131,7 +145,7 @@ describe('servertool:clock', () => {
     await runReqProcessStage1ToolGovernance({
       request: request1,
       rawPayload: {},
-      metadata: { originalEndpoint: '/v1/chat/completions', __rt: { clock: { enabled: true } }, sessionId },
+      metadata: { originalEndpoint: '/v1/chat/completions', __rt: { clock: { enabled: true } }, tmuxSessionId: sessionId },
       entryEndpoint: '/v1/chat/completions',
       requestId: 'req-clock-clear-1'
     });
@@ -145,7 +159,7 @@ describe('servertool:clock', () => {
     const result2 = await runReqProcessStage1ToolGovernance({
       request: request2,
       rawPayload: {},
-      metadata: { originalEndpoint: '/v1/chat/completions', __rt: { clock: { enabled: true } }, sessionId },
+      metadata: { originalEndpoint: '/v1/chat/completions', __rt: { clock: { enabled: true } }, tmuxSessionId: sessionId },
       entryEndpoint: '/v1/chat/completions',
       requestId: 'req-clock-clear-2'
     });
@@ -159,13 +173,14 @@ describe('servertool:clock', () => {
 
   test('end-to-end: schedule via tool_call → next request injects due reminder → commit marks delivered', async () => {
     const sessionId = 's-clock-e2e';
+    const sessionScope = toClockSessionScope(sessionId);
     const nowIso = new Date(Date.now() - 500).toISOString();
 
     const adapterContext: AdapterContext = {
       requestId: 'req-clock-toolcall-1',
       entryEndpoint: '/v1/chat/completions',
       providerProtocol: 'openai-chat',
-      sessionId,
+      tmuxSessionId: sessionId,
       __rt: { clock: { enabled: true, tickMs: 0 } },
       capturedChatRequest: {
         model: 'gpt-test',
@@ -213,9 +228,9 @@ describe('servertool:clock', () => {
     expect(scheduleResponse.execution?.flowId).toBe('clock_flow');
     expect(scheduleResponse.execution?.followup).toBeDefined();
 
-    const clockStatePath = path.join(SESSION_DIR, 'clock', `${sessionId}.json`);
+    const clockStatePath = resolveClockStatePath(sessionScope);
     expect(fs.existsSync(clockStatePath)).toBe(true);
-    const stateBefore = readClockStateFile(sessionId);
+    const stateBefore = readClockStateFile(sessionScope);
     expect(Array.isArray(stateBefore.tasks)).toBe(true);
     expect(stateBefore.tasks).toHaveLength(1);
     expect(stateBefore.tasks[0].setBy).toBe('agent');
@@ -227,7 +242,7 @@ describe('servertool:clock', () => {
     const processed = await runReqProcessStage1ToolGovernance({
       request,
       rawPayload: {},
-      metadata: { originalEndpoint: '/v1/chat/completions', __rt: { clock: { enabled: true, tickMs: 0 } }, sessionId },
+      metadata: { originalEndpoint: '/v1/chat/completions', __rt: { clock: { enabled: true, tickMs: 0 } }, tmuxSessionId: sessionId },
       entryEndpoint: '/v1/chat/completions',
       requestId: reqId
     });
@@ -246,7 +261,7 @@ describe('servertool:clock', () => {
 
     const reservation = processedRequest.metadata?.__clockReservation;
     expect(reservation?.reservationId).toBe(`${reqId}:clock`);
-    expect(reservation?.sessionId).toBe(sessionId);
+    expect(reservation?.sessionId).toBe(sessionScope);
     expect(Array.isArray(reservation?.taskIds) ? reservation.taskIds : []).toHaveLength(1);
 
     const clockConfig = normalizeClockConfig({ enabled: true, tickMs: 0 });
@@ -255,7 +270,7 @@ describe('servertool:clock', () => {
     }
     await commitClockReservation(reservation, clockConfig);
 
-    const stateAfter = await loadClockSessionState(sessionId, clockConfig);
+    const stateAfter = await loadClockSessionState(sessionScope, clockConfig);
     expect(stateAfter.tasks).toHaveLength(1);
     expect(typeof stateAfter.tasks[0].deliveredAtMs).toBe('number');
     expect(stateAfter.tasks[0].deliveryCount).toBe(1);
@@ -312,7 +327,6 @@ describe('servertool:clock', () => {
           requestId,
           entryEndpoint: '/v1/chat/completions',
           providerProtocol: 'openai-chat',
-          sessionId: sharedSessionId,
           tmuxSessionId,
           clientTmuxSessionId: tmuxSessionId,
           __rt: { clock: { enabled: true, tickMs: 0 } },
@@ -327,18 +341,18 @@ describe('servertool:clock', () => {
       });
     };
 
-    await runClockTool('req-clock-scope-da', 'clockd_A', 'schedule', 'task-da');
-    await runClockTool('req-clock-scope-db', 'clockd_B', 'schedule', 'task-db');
+    await runClockTool('req-clock-scope-da', 'sessiond_A', 'schedule', 'task-da');
+    await runClockTool('req-clock-scope-db', 'sessiond_B', 'schedule', 'task-db');
 
-    const stateA = await loadClockSessionState('tmux:clockd_A', clockConfig);
-    const stateB = await loadClockSessionState('tmux:clockd_B', clockConfig);
+    const stateA = await loadClockSessionState('tmux:sessiond_A', clockConfig);
+    const stateB = await loadClockSessionState('tmux:sessiond_B', clockConfig);
     expect(stateA.tasks.map((item: any) => item.task)).toContain('task-da');
     expect(stateA.tasks.map((item: any) => item.task)).not.toContain('task-db');
     expect(stateB.tasks.map((item: any) => item.task)).toContain('task-db');
     expect(stateB.tasks.map((item: any) => item.task)).not.toContain('task-da');
 
-    const listA = await runClockTool('req-clock-scope-da-list', 'clockd_A', 'list');
-    const listB = await runClockTool('req-clock-scope-db-list', 'clockd_B', 'list');
+    const listA = await runClockTool('req-clock-scope-da-list', 'sessiond_A', 'list');
+    const listB = await runClockTool('req-clock-scope-db-list', 'sessiond_B', 'list');
     const listPayloadA = JSON.parse(
       String(((listA.finalChatResponse as any)?.tool_outputs?.[0] as any)?.content || '{}')
     ) as { items?: Array<{ task?: string }> };
@@ -354,37 +368,39 @@ describe('servertool:clock', () => {
 
   test('overdue one-shot tasks are auto-removed after overdue window', async () => {
     const sessionId = 's-clock-overdue-auto-remove';
+    const sessionScope = toClockSessionScope(sessionId);
     const clockConfig = normalizeClockConfig({ enabled: true, tickMs: 0, dueWindowMs: 0, retentionMs: 20 * 60_000 });
     if (!clockConfig) {
       throw new Error('clockConfig should not be null');
     }
 
     await scheduleClockTasks(
-      sessionId,
+      sessionScope,
       [{ dueAtMs: Date.now() - 90_000, task: 'stale-overdue-task' }],
       clockConfig
     );
-    const staleState = await loadClockSessionState(sessionId, clockConfig);
+    const staleState = await loadClockSessionState(sessionScope, clockConfig);
     expect(staleState.tasks).toHaveLength(0);
 
     await scheduleClockTasks(
-      sessionId,
+      sessionScope,
       [{ dueAtMs: Date.now() - 20_000, task: 'recent-due-task' }],
       clockConfig
     );
-    const recentState = await loadClockSessionState(sessionId, clockConfig);
+    const recentState = await loadClockSessionState(sessionScope, clockConfig);
     expect(recentState.tasks.some((task) => task.task === 'recent-due-task')).toBe(true);
   });
 
   test('clock_hold_flow followup keeps original providerKey pinned', async () => {
     const sessionId = 's-clock-hold-provider-pin';
+    const sessionScope = toClockSessionScope(sessionId);
     const clockConfig = normalizeClockConfig({ enabled: true, tickMs: 0, dueWindowMs: 60_000, holdNonStreaming: true });
     if (!clockConfig) {
       throw new Error('clockConfig should not be null');
     }
 
     await scheduleClockTasks(
-      sessionId,
+      sessionScope,
       [{ dueAtMs: Date.now() - 1000, task: 'provider pin check' }],
       clockConfig
     );
@@ -408,7 +424,7 @@ describe('servertool:clock', () => {
       entryEndpoint: '/v1/chat/completions',
       providerProtocol: 'openai-chat',
       providerKey,
-      sessionId,
+      tmuxSessionId: sessionId,
       stream: true,
       __rt: { clock: { enabled: true, tickMs: 0, dueWindowMs: 60_000, holdNonStreaming: true } },
       capturedChatRequest: {
@@ -498,15 +514,16 @@ describe('servertool:clock', () => {
 
   test('injects standard tool list when due reminders are injected', async () => {
     const sessionId = 's-clock-tools-complete';
+    const sessionScope = toClockSessionScope(sessionId);
     const clockConfig = normalizeClockConfig({ enabled: true, tickMs: 0 });
     if (!clockConfig) throw new Error('clockConfig should not be null');
-    await scheduleClockTasks(sessionId, [{ dueAtMs: Date.now() - 1, task: 'due' }], clockConfig);
+    await scheduleClockTasks(sessionScope, [{ dueAtMs: Date.now() - 1, task: 'due' }], clockConfig);
 
     const request = buildRequest([{ role: 'user', content: 'next' }]);
     const result = await runReqProcessStage1ToolGovernance({
       request,
       rawPayload: {},
-      metadata: { originalEndpoint: '/v1/chat/completions', __rt: { clock: { enabled: true, tickMs: 0 } }, sessionId },
+      metadata: { originalEndpoint: '/v1/chat/completions', __rt: { clock: { enabled: true, tickMs: 0 } }, tmuxSessionId: sessionId },
       entryEndpoint: '/v1/chat/completions',
       requestId: 'req-clock-tools-complete'
     });
@@ -536,9 +553,10 @@ describe('servertool:clock', () => {
 
   test('clock_auto triggers followup in current request when already in due window', async () => {
     const sessionId = 's-clock-hold-in-window';
+    const sessionScope = toClockSessionScope(sessionId);
     const clockConfig = normalizeClockConfig({ enabled: true, tickMs: 0, dueWindowMs: 60_000 });
     if (!clockConfig) throw new Error('clockConfig should not be null');
-    await scheduleClockTasks(sessionId, [{ dueAtMs: Date.now() + 30_000, task: 'due-now-window' }], clockConfig);
+    await scheduleClockTasks(sessionScope, [{ dueAtMs: Date.now() + 30_000, task: 'due-now-window' }], clockConfig);
 
     const result = await runServerSideToolEngine({
       chatResponse: {
@@ -553,7 +571,7 @@ describe('servertool:clock', () => {
         requestId: 'req-clock-hold-window',
         entryEndpoint: '/v1/chat/completions',
         providerProtocol: 'openai-chat',
-        sessionId,
+        tmuxSessionId: sessionId,
         stream: true,
         capturedChatRequest: { model: 'gpt-test', messages: [{ role: 'user', content: 'hi' }] },
         __rt: { clock: { enabled: true, tickMs: 0, dueWindowMs: 60_000 } }
@@ -569,9 +587,10 @@ describe('servertool:clock', () => {
 
   test('clock_auto can hold non-streaming by default when in due window', async () => {
     const sessionId = 's-clock-hold-in-window-json';
+    const sessionScope = toClockSessionScope(sessionId);
     const clockConfig = normalizeClockConfig({ enabled: true, tickMs: 0, dueWindowMs: 60_000 });
     if (!clockConfig) throw new Error('clockConfig should not be null');
-    await scheduleClockTasks(sessionId, [{ dueAtMs: Date.now() + 30_000, task: 'due-now-window-json' }], clockConfig);
+    await scheduleClockTasks(sessionScope, [{ dueAtMs: Date.now() + 30_000, task: 'due-now-window-json' }], clockConfig);
 
     const result = await runServerSideToolEngine({
       chatResponse: {
@@ -586,7 +605,7 @@ describe('servertool:clock', () => {
         requestId: 'req-clock-hold-window-json',
         entryEndpoint: '/v1/chat/completions',
         providerProtocol: 'openai-chat',
-        sessionId,
+        tmuxSessionId: sessionId,
         stream: false,
         capturedChatRequest: { model: 'gpt-test', messages: [{ role: 'user', content: 'hi' }] },
         __rt: { clock: { enabled: true, tickMs: 0, dueWindowMs: 60_000 } }
@@ -602,9 +621,10 @@ describe('servertool:clock', () => {
 
   test('clock_auto holds until due window for stop response when stop_message_auto does not trigger', async () => {
     const sessionId = 's-clock-hold-wait-window';
+    const sessionScope = toClockSessionScope(sessionId);
     const clockConfig = normalizeClockConfig({ enabled: true, tickMs: 0, dueWindowMs: 0, holdMaxMs: 2_000 });
     if (!clockConfig) throw new Error('clockConfig should not be null');
-    await scheduleClockTasks(sessionId, [{ dueAtMs: Date.now() + 500, task: 'wait-until-window' }], clockConfig);
+    await scheduleClockTasks(sessionScope, [{ dueAtMs: Date.now() + 500, task: 'wait-until-window' }], clockConfig);
 
     const startedAt = Date.now();
     const result = await runServerSideToolEngine({
@@ -620,7 +640,7 @@ describe('servertool:clock', () => {
         requestId: 'req-clock-hold-wait-window',
         entryEndpoint: '/v1/chat/completions',
         providerProtocol: 'openai-chat',
-        sessionId,
+        tmuxSessionId: sessionId,
         stream: false,
         capturedChatRequest: { model: 'gpt-test', messages: [{ role: 'user', content: 'hi' }] },
         __rt: { clock: { enabled: true, tickMs: 0, dueWindowMs: 0, holdMaxMs: 2_000 } }
@@ -638,9 +658,10 @@ describe('servertool:clock', () => {
 
   test('clock reminders can inject on servertool followup when explicitly enabled', async () => {
     const sessionId = 's-clock-followup-reminder';
+    const sessionScope = toClockSessionScope(sessionId);
     const clockConfig = normalizeClockConfig({ enabled: true, tickMs: 0, dueWindowMs: 60_000 });
     if (!clockConfig) throw new Error('clockConfig should not be null');
-    await scheduleClockTasks(sessionId, [{ dueAtMs: Date.now() - 200, task: 'followup-inject' }], clockConfig);
+    await scheduleClockTasks(sessionScope, [{ dueAtMs: Date.now() - 200, task: 'followup-inject' }], clockConfig);
 
     const baseRequest = {
       model: 'gpt-test',
@@ -657,7 +678,7 @@ describe('servertool:clock', () => {
       rawPayload: {},
       metadata: {
         providerProtocol: 'openai-chat',
-        sessionId,
+        tmuxSessionId: sessionId,
         clock: { enabled: true, tickMs: 0, dueWindowMs: 60_000 },
         requestId: 'req_clock_followup_inject',
         __rt: {
@@ -680,11 +701,12 @@ describe('servertool:clock', () => {
 
   test('unit: schedule/update/list/cancel/clear via clock handler outputs', async () => {
     const sessionId = 's-clock-handler';
+    const sessionScope = toClockSessionScope(sessionId);
     const adapterContext: AdapterContext = {
       requestId: 'req-clock-handler-1',
       entryEndpoint: '/v1/chat/completions',
       providerProtocol: 'openai-chat',
-      sessionId,
+      tmuxSessionId: sessionId,
       __rt: { clock: { enabled: true, tickMs: 0 } },
       capturedChatRequest: {
         model: 'gpt-test',
@@ -859,7 +881,7 @@ describe('servertool:clock', () => {
     expect(typeof clearPayload.removedCount).toBe('number');
 
     // Session file should be gone after clear.
-    expect(fs.existsSync(path.join(SESSION_DIR, 'clock', `${sessionId}.json`))).toBe(false);
+    expect(fs.existsSync(resolveClockStatePath(sessionScope))).toBe(false);
   });
 
   test('unit: clock.get returns time snapshot', async () => {
@@ -911,7 +933,7 @@ describe('servertool:clock', () => {
       requestId: 'req-clock-disabled-handler',
       entryEndpoint: '/v1/chat/completions',
       providerProtocol: 'openai-chat',
-      sessionId,
+      tmuxSessionId: sessionId,
       __rt: { clock: { enabled: false } }
     } as any;
 
@@ -951,6 +973,7 @@ describe('servertool:clock', () => {
 
   test('parses <**clock:{time,message}**> marker and schedules task with tool-call style messages', async () => {
     const sessionId = 's-clock-marker-schedule';
+    const sessionScope = toClockSessionScope(sessionId);
     const dueAtIso = new Date(Date.now() + 120_000).toISOString();
     const request = buildRequest([
       {
@@ -966,7 +989,7 @@ describe('servertool:clock', () => {
       rawPayload: {},
       metadata: {
         providerProtocol: 'openai-chat',
-        sessionId,
+        tmuxSessionId: sessionId,
         clock: { enabled: true, tickMs: 0 }
       }
     });
@@ -994,7 +1017,7 @@ describe('servertool:clock', () => {
     expect(firstToolCallArgs.items?.[0]?.recurrence?.kind).toBe('daily');
     expect(firstToolCallArgs.items?.[0]?.recurrence?.maxRuns).toBe(2);
 
-    const state = await loadClockSessionState(sessionId, normalizeClockConfig({ enabled: true, tickMs: 0 })!);
+    const state = await loadClockSessionState(sessionScope, normalizeClockConfig({ enabled: true, tickMs: 0 })!);
     expect(Array.isArray(state.tasks)).toBe(true);
     expect(state.tasks.some((task) => task.task === 'marker-task')).toBe(true);
     const markerTask = state.tasks.find((task) => task.task === 'marker-task');
@@ -1005,7 +1028,7 @@ describe('servertool:clock', () => {
 
   test('clock marker scheduling prefers tmux-scoped clock session when tmuxSessionId exists', async () => {
     const sharedSessionId = 's-clock-marker-shared';
-    const tmuxSessionId = 'clockd_marker_A';
+    const tmuxSessionId = 'sessiond_marker_A';
     const dueAtIso = new Date(Date.now() + 120_000).toISOString();
     const request = buildRequest([
       {
@@ -1061,7 +1084,7 @@ describe('servertool:clock', () => {
       rawPayload: {},
       metadata: {
         providerProtocol: 'openai-chat',
-        sessionId,
+        tmuxSessionId: sessionId,
         clock: { enabled: true, tickMs: 0 }
       }
     });
@@ -1081,7 +1104,7 @@ describe('servertool:clock', () => {
     );
     expect(assistantWithClockTool).toBeUndefined();
 
-    const state = await loadClockSessionState(sessionId, normalizeClockConfig({ enabled: true, tickMs: 0 })!);
+    const state = await loadClockSessionState(toClockSessionScope(sessionId), normalizeClockConfig({ enabled: true, tickMs: 0 })!);
     expect(Array.isArray(state.tasks)).toBe(true);
     expect(state.tasks).toHaveLength(0);
   });
@@ -1092,7 +1115,7 @@ describe('servertool:clock', () => {
       requestId: 'req-clock-recur-1',
       entryEndpoint: '/v1/chat/completions',
       providerProtocol: 'openai-chat',
-      sessionId,
+      tmuxSessionId: sessionId,
       __rt: { clock: { enabled: true, tickMs: 0 } },
       capturedChatRequest: {
         model: 'gpt-test',
@@ -1149,13 +1172,14 @@ describe('servertool:clock', () => {
 
   test('recurring tasks are persisted and re-scheduled until maxRuns', async () => {
     const sessionId = `s-clock-recurring-commit-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const sessionScope = toClockSessionScope(sessionId);
     const clockConfig = normalizeClockConfig({ enabled: true, tickMs: 0, dueWindowMs: 0 });
     if (!clockConfig) {
       throw new Error('clockConfig should not be null');
     }
 
     await scheduleClockTasks(
-      sessionId,
+      sessionScope,
       [
         {
           dueAtMs: Date.now() - 100,
@@ -1168,33 +1192,33 @@ describe('servertool:clock', () => {
 
     const reserved1 = await reserveDueTasksForRequest({
       reservationId: 'resv-1',
-      sessionId,
+      sessionId: sessionScope,
       config: clockConfig,
       requestId: 'req-resv-1'
     });
     expect(reserved1.reservation).toBeTruthy();
     await commitClockReservation(reserved1.reservation as any, clockConfig);
 
-    const afterFirst = await loadClockSessionState(sessionId, clockConfig);
+    const afterFirst = await loadClockSessionState(sessionScope, clockConfig);
     expect(afterFirst.tasks).toHaveLength(1);
     expect(afterFirst.tasks[0].deliveryCount).toBe(1);
     expect(afterFirst.tasks[0].deliveredAtMs).toBeUndefined();
 
     const reserved2 = await reserveDueTasksForRequest({
       reservationId: 'resv-2',
-      sessionId,
+      sessionId: sessionScope,
       config: clockConfig,
       requestId: 'req-resv-2'
     });
     const guard = reserved2.reservation || {
       reservationId: 'resv-2-fallback',
-      sessionId,
+      sessionId: sessionScope,
       taskIds: [afterFirst.tasks[0].taskId],
       reservedAtMs: Date.now()
     };
     await commitClockReservation(guard as any, clockConfig);
 
-    const stateFile = path.join(SESSION_DIR, 'clock', `${sessionId}.json`);
+    const stateFile = resolveClockStatePath(sessionScope);
     expect(fs.existsSync(stateFile)).toBe(false);
   });
 
@@ -1203,7 +1227,7 @@ describe('servertool:clock', () => {
       requestId: 'req-clock-missing-id',
       entryEndpoint: '/v1/chat/completions',
       providerProtocol: 'openai-chat',
-      sessionId: 's-clock-missing-id',
+      tmuxSessionId: 's-clock-missing-id',
       __rt: { clock: { enabled: true, tickMs: 0 } }
     } as any;
 

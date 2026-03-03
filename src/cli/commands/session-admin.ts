@@ -11,7 +11,7 @@ type LoggerLike = {
   error: (msg: string) => void;
 };
 
-export type ClockAdminCommandContext = {
+export type SessionAdminCommandContext = {
   isDevPackage: boolean;
   defaultDevPort: number;
   logger: LoggerLike;
@@ -22,7 +22,7 @@ export type ClockAdminCommandContext = {
   exit: (code: number) => never;
 };
 
-type ClockAdminCommandOptions = {
+type SessionAdminCommandOptions = {
   port?: string;
   host?: string;
   url?: string;
@@ -81,7 +81,7 @@ function readPortHostFromConfig(loaded: LoadedRouteCodexConfig | null): { host: 
   return { host, port };
 }
 
-async function resolveBaseUrl(ctx: ClockAdminCommandContext, options: ClockAdminCommandOptions): Promise<string> {
+async function resolveBaseUrl(ctx: SessionAdminCommandContext, options: SessionAdminCommandOptions): Promise<string> {
   if (typeof options.url === 'string' && options.url.trim()) {
     return normalizeBaseUrl(options.url);
   }
@@ -125,7 +125,7 @@ function parseInteger(value: unknown): number | undefined {
   return Math.floor(parsed);
 }
 
-async function callJson(ctx: ClockAdminCommandContext, url: string, method: string, body?: Record<string, unknown>): Promise<{ ok: boolean; status: number; data: any }> {
+async function callJson(ctx: SessionAdminCommandContext, url: string, method: string, body?: Record<string, unknown>): Promise<{ ok: boolean; status: number; data: any }> {
   const response = await ctx.fetch(url, {
     method,
     headers: { 'content-type': 'application/json' },
@@ -141,31 +141,31 @@ async function callJson(ctx: ClockAdminCommandContext, url: string, method: stri
   return { ok: response.ok, status: response.status, data };
 }
 
-export function createClockAdminCommand(program: Command, ctx: ClockAdminCommandContext): void {
+export function createSessionAdminCommand(program: Command, ctx: SessionAdminCommandContext): void {
   program
-    .command('clock-admin')
-    .description('Manage clock schedules and tmux/session bindings (list + CRUD + cleanup)')
+    .command('session-admin')
+    .description('Manage session schedules and tmux/session bindings (list + CRUD + cleanup)')
     .option('--port <port>', 'RouteCodex server port')
     .option('--host <host>', 'RouteCodex server host')
     .option('--url <url>', 'RouteCodex base URL')
     .option('-c, --config <config>', 'RouteCodex configuration file path')
-    .option('--session-id <sessionId>', 'Conversation/session id for clock task CRUD')
+    .option('--session-id <sessionId>', 'Conversation/session id for session task CRUD')
     .option('--task-id <taskId>', 'Task id for update/delete')
     .option('--due-at <dueAt>', 'ISO8601 due time for create/update')
     .option('--task <task>', 'Task text for create/update')
     .option('--recurrence <kind>', 'Recurrence kind: daily|weekly|interval')
     .option('--every-minutes <minutes>', 'everyMinutes for interval recurrence')
     .option('--max-runs <count>', 'maxRuns for recurrence')
-    .option('--list', 'List clock sessions/tasks', false)
-    .option('--create', 'Create clock task', false)
-    .option('--update', 'Update clock task', false)
-    .option('--delete', 'Delete one clock task', false)
+    .option('--list', 'List session schedules/tasks', false)
+    .option('--create', 'Create session task', false)
+    .option('--update', 'Update session task', false)
+    .option('--delete', 'Delete one session task', false)
     .option('--clear', 'Clear all tasks in a session', false)
     .option('--cleanup-dead-tmux', 'Cleanup daemons whose tmux session is gone', false)
     .option('--unbind-session <conversationSessionId>', 'Unbind conversation session mapping manually')
-    .option('--clear-tasks', 'With --unbind-session, clear its clock tasks too', false)
+    .option('--clear-tasks', 'With --unbind-session, clear its session tasks too', false)
     .option('--json', 'Print JSON output', false)
-    .action(async (options: ClockAdminCommandOptions) => {
+    .action(async (options: SessionAdminCommandOptions) => {
       try {
         const baseUrl = await resolveBaseUrl(ctx, options);
         const outputJson = Boolean(options.json);
@@ -179,7 +179,7 @@ export function createClockAdminCommand(program: Command, ctx: ClockAdminCommand
         };
 
         if (options.cleanupDeadTmux) {
-          const result = await callJson(ctx, `${baseUrl}/daemon/clock/cleanup`, 'POST', { mode: 'dead_tmux' });
+          const result = await callJson(ctx, `${baseUrl}/daemon/session/cleanup`, 'POST', { mode: 'dead_tmux' });
           if (!result.ok) {
             throw new Error(`cleanup-dead-tmux failed (${result.status})`);
           }
@@ -188,7 +188,7 @@ export function createClockAdminCommand(program: Command, ctx: ClockAdminCommand
         }
 
         if (typeof options.unbindSession === 'string' && options.unbindSession.trim()) {
-          const result = await callJson(ctx, `${baseUrl}/daemon/clock/cleanup`, 'POST', {
+          const result = await callJson(ctx, `${baseUrl}/daemon/session/cleanup`, 'POST', {
             mode: 'unbind',
             conversationSessionId: options.unbindSession.trim(),
             clearTasks: Boolean(options.clearTasks)
@@ -216,7 +216,7 @@ export function createClockAdminCommand(program: Command, ctx: ClockAdminCommand
               ...(parseInteger(options.everyMinutes) ? { everyMinutes: parseInteger(options.everyMinutes) } : {})
             };
           }
-          const result = await callJson(ctx, `${baseUrl}/daemon/clock/tasks`, 'POST', payload);
+          const result = await callJson(ctx, `${baseUrl}/daemon/session/tasks`, 'POST', payload);
           if (!result.ok) {
             throw new Error(`create failed (${result.status})`);
           }
@@ -245,7 +245,7 @@ export function createClockAdminCommand(program: Command, ctx: ClockAdminCommand
               ...(parseInteger(options.everyMinutes) ? { everyMinutes: parseInteger(options.everyMinutes) } : {})
             };
           }
-          const result = await callJson(ctx, `${baseUrl}/daemon/clock/tasks`, 'PATCH', { sessionId, taskId, patch });
+          const result = await callJson(ctx, `${baseUrl}/daemon/session/tasks`, 'PATCH', { sessionId, taskId, patch });
           if (!result.ok) {
             throw new Error(`update failed (${result.status})`);
           }
@@ -262,7 +262,7 @@ export function createClockAdminCommand(program: Command, ctx: ClockAdminCommand
           if (options.delete && !taskId) {
             throw new Error('--delete requires --task-id (or use --clear)');
           }
-          const result = await callJson(ctx, `${baseUrl}/daemon/clock/tasks`, 'DELETE', {
+          const result = await callJson(ctx, `${baseUrl}/daemon/session/tasks`, 'DELETE', {
             sessionId,
             ...(taskId ? { taskId } : {})
           });
@@ -275,8 +275,8 @@ export function createClockAdminCommand(program: Command, ctx: ClockAdminCommand
 
         const sessionId = typeof options.sessionId === 'string' && options.sessionId.trim() ? options.sessionId.trim() : undefined;
         const listUrl = sessionId
-          ? `${baseUrl}/daemon/clock/tasks?sessionId=${encodeURIComponent(sessionId)}`
-          : `${baseUrl}/daemon/clock/tasks`;
+          ? `${baseUrl}/daemon/session/tasks?sessionId=${encodeURIComponent(sessionId)}`
+          : `${baseUrl}/daemon/session/tasks`;
         const response = await ctx.fetch(listUrl);
         const data = await response.json().catch(() => ({}));
         if (!response.ok) {

@@ -15,7 +15,7 @@ const ROUTING_POLICY_OPTIONAL_KEYS = [
   'contextRouting',
   'webSearch',
   'execCommandGuard',
-  'clock'
+  'session'
 ] as const;
 
 let stickyConfigPath: string | null = null;
@@ -133,7 +133,7 @@ function isRecord(value: unknown): value is UnknownRecord {
 function sanitizeV2ConfigSources(userConfig: UnknownRecord, configPath: string): void {
   const removed: string[] = [];
   const allowedTopLevel = new Set(['version', 'httpserver', 'virtualrouter', 'virtualrouterMode']);
-  const legacyTopLevel = new Set(['oauthBrowser', 'loadBalancing', 'classifier', 'providers', 'routing', 'quota', 'clock']);
+  const legacyTopLevel = new Set(['oauthBrowser', 'loadBalancing', 'classifier', 'providers', 'routing', 'quota', 'session']);
 
   for (const key of Object.keys(userConfig)) {
     if (allowedTopLevel.has(key)) {
@@ -160,7 +160,7 @@ function sanitizeV2ConfigSources(userConfig: UnknownRecord, configPath: string):
         removed.push(`virtualrouter.${key}`);
         continue;
       }
-      if (key === 'routing' || key === 'providers' || key === 'quota' || key === 'clock') {
+      if (key === 'routing' || key === 'providers' || key === 'quota' || key === 'session') {
         delete vr[key];
         removed.push(`virtualrouter.${key}`);
         continue;

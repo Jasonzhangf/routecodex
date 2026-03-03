@@ -1,10 +1,10 @@
-export type ClockDaemonInjectSkipLogInput = {
+export type SessionDaemonInjectSkipLogInput = {
   sessionId?: string;
   injectReason?: string;
   bindReason?: string;
 };
 
-export type ClockDaemonCleanupAuditLogInput = {
+export type SessionDaemonCleanupAuditLogInput = {
   managedTerminationEnabled: boolean;
   staleRemovedDaemonIds?: string[];
   staleRemovedTmuxSessionIds?: string[];
@@ -26,14 +26,14 @@ function normalizeToken(value: unknown): string {
   return value.trim().toLowerCase();
 }
 
-function resolveCooldownMs(input: ClockDaemonInjectSkipLogInput): number {
-  if (shouldClearClockTasksForInjectSkip(input)) {
+function resolveCooldownMs(input: SessionDaemonInjectSkipLogInput): number {
+  if (shouldClearSessionTasksForInjectSkip(input)) {
     return BENIGN_SKIP_LOG_COOLDOWN_MS;
   }
   return DEFAULT_SKIP_LOG_COOLDOWN_MS;
 }
 
-function buildCacheKey(input: ClockDaemonInjectSkipLogInput): string {
+function buildCacheKey(input: SessionDaemonInjectSkipLogInput): string {
   const sessionId = normalizeToken(input.sessionId) || 'unknown_session';
   const injectReason = normalizeToken(input.injectReason) || 'unknown_inject_reason';
   const bindReason = normalizeToken(input.bindReason) || 'unknown_bind_reason';
@@ -54,7 +54,7 @@ function normalizeIdList(values: unknown[] | undefined): string {
   return normalized.join(',');
 }
 
-function buildCleanupAuditCacheKey(input: ClockDaemonCleanupAuditLogInput): string {
+function buildCleanupAuditCacheKey(input: SessionDaemonCleanupAuditLogInput): string {
   const managedTerminationEnabled = input.managedTerminationEnabled ? '1' : '0';
   const staleRemovedDaemonIds = normalizeIdList(input.staleRemovedDaemonIds);
   const staleRemovedTmuxSessionIds = normalizeIdList(input.staleRemovedTmuxSessionIds);
@@ -88,9 +88,9 @@ function trimCache(cache: Map<string, number>, maxEntries: number): void {
   }
 }
 
-export function shouldLogClockDaemonInjectSkip(args: {
+export function shouldLogSessionDaemonInjectSkip(args: {
   cache: Map<string, number>;
-  input: ClockDaemonInjectSkipLogInput;
+  input: SessionDaemonInjectSkipLogInput;
   nowMs?: number;
   maxEntries?: number;
 }): boolean {
@@ -110,9 +110,9 @@ export function shouldLogClockDaemonInjectSkip(args: {
   return true;
 }
 
-export function shouldLogClockDaemonCleanupAudit(args: {
+export function shouldLogSessionDaemonCleanupAudit(args: {
   cache: Map<string, number>;
-  input: ClockDaemonCleanupAuditLogInput;
+  input: SessionDaemonCleanupAuditLogInput;
   nowMs?: number;
   maxEntries?: number;
   cooldownMs?: number;
@@ -136,7 +136,7 @@ export function shouldLogClockDaemonCleanupAudit(args: {
   return true;
 }
 
-export function shouldClearClockTasksForInjectSkip(input: ClockDaemonInjectSkipLogInput): boolean {
+export function shouldClearSessionTasksForInjectSkip(input: SessionDaemonInjectSkipLogInput): boolean {
   const injectReason = normalizeToken(input.injectReason);
   const bindReason = normalizeToken(input.bindReason);
   return injectReason === 'no_matching_tmux_session_daemon' && bindReason === 'no_binding_candidate';

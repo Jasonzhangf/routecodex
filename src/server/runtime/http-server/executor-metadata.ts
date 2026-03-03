@@ -1,12 +1,13 @@
 import type { PipelineExecutionInput } from '../../handlers/types.js';
 import { asRecord } from './provider-utils.js';
 import { extractSessionIdentifiersFromMetadata } from '../../../modules/llmswitch/bridge.js';
-import { extractClockClientDaemonIdFromApiKey } from '../../../utils/clock-client-token.js';
+import { extractSessionClientDaemonIdFromApiKey } from '../../../utils/session-client-token.js';
 import {
-  shouldTraceClockScopeByContext
-} from '../../../utils/clock-scope-trace.js';
-import { getClockClientRegistry } from './clock-client-registry.js';
-import { resolveTmuxSessionIdAndSource } from './clock-scope-resolution.js';
+  shouldTraceSessionScopeByContext
+} from '../../../utils/session-scope-trace.js';
+import { getSessionClientRegistry } from './session-client-registry.js';
+import { resolveTmuxSessionIdAndSource } from './session-scope-resolution.js';
+import { isTmuxSessionAlive } from './tmux-session-probe.js';
 
 export function cloneClientHeaders(source: unknown): Record<string, string> | undefined {
   if (!source || typeof source !== 'object') {
@@ -44,7 +45,7 @@ export function resolveClientRequestId(metadata: Record<string, unknown>, fallba
   return clientRequestId || fallback;
 }
 
-function extractClockDaemonId(
+function extractSessionDaemonId(
   userMeta: Record<string, unknown>,
   headers: Record<string, unknown> | undefined
 ): string | undefined {
@@ -53,29 +54,23 @@ function extractClockDaemonId(
       ? userMeta.clientDaemonId.trim()
       : ((typeof userMeta.client_daemon_id === 'string' && userMeta.client_daemon_id.trim())
         ? userMeta.client_daemon_id.trim()
-        : ((typeof userMeta.clockDaemonId === 'string' && userMeta.clockDaemonId.trim())
-          ? userMeta.clockDaemonId.trim()
-          : ((typeof userMeta.clockClientDaemonId === 'string' && userMeta.clockClientDaemonId.trim())
-            ? userMeta.clockClientDaemonId.trim()
+        : ((typeof userMeta.sessionDaemonId === 'string' && userMeta.sessionDaemonId.trim())
+          ? userMeta.sessionDaemonId.trim()
+          : ((typeof userMeta.sessionClientDaemonId === 'string' && userMeta.sessionClientDaemonId.trim())
+            ? userMeta.sessionClientDaemonId.trim()
             : undefined)));
   if (fromMeta) {
     return fromMeta;
   }
 
-  const fromLegacyMeta =
-    (typeof userMeta.clockDaemonId === 'string' && userMeta.clockDaemonId.trim())
-      ? userMeta.clockDaemonId.trim()
-      : ((typeof userMeta.clockClientDaemonId === 'string' && userMeta.clockClientDaemonId.trim())
-        ? userMeta.clockClientDaemonId.trim()
-        : undefined);
-  if (fromLegacyMeta) {
-    return fromLegacyMeta;
-  }
-
   const fromExplicitHeader =
     extractHeaderValue(headers, 'x-routecodex-client-daemon-id')
     || extractHeaderValue(headers, 'x-routecodex-clientd-id')
-    || extractHeaderValue(headers, 'x-routecodex-clock-daemon-id')
+    || extractHeaderValue(headers, 'x-routecodex-session-daemon-id')
+    || extractHeaderValue(headers, 'x-routecodex-sessiond-id')
+    || extractHeaderValue(headers, 'x-rcc-session-daemon-id')
+    || extractHeaderValue(headers, 'x-rcc-sessiond-id')
+    || extractHeaderValue(headers, 'x-rcc-daemon-id')
     || extractHeaderValue(headers, 'x-routecodex-daemon-id');
   if (fromExplicitHeader) {
     return fromExplicitHeader;
@@ -87,7 +82,7 @@ function extractClockDaemonId(
     || extractHeaderValue(headers, 'x-routecodex-apikey')
     || extractHeaderValue(headers, 'api-key')
     || extractHeaderValue(headers, 'apikey');
-  const fromApiKey = extractClockClientDaemonIdFromApiKey(fromApiKeyHeader);
+  const fromApiKey = extractSessionClientDaemonIdFromApiKey(fromApiKeyHeader);
   if (fromApiKey) {
     return fromApiKey;
   }
@@ -95,7 +90,7 @@ function extractClockDaemonId(
   const authorization = extractHeaderValue(headers, 'authorization');
   if (authorization) {
     const match = authorization.match(/^(?:Bearer|ApiKey)\s+(.+)$/i);
-    const fromAuth = extractClockClientDaemonIdFromApiKey(match ? String(match[1]) : authorization);
+    const fromAuth = extractSessionClientDaemonIdFromApiKey(match ? String(match[1]) : authorization);
     if (fromAuth) {
       return fromAuth;
     }
@@ -302,9 +297,9 @@ function normalizeToken(value: unknown): string | undefined {
   return trimmed || undefined;
 }
 
-function inferClockClientType(metadata: Record<string, unknown>): string | undefined {
+function inferSessionClientType(metadata: Record<string, unknown>): string | undefined {
   const direct =
-    normalizeToken(metadata.clockClientType)
+    normalizeToken(metadata.sessionClientType)
     || normalizeToken(metadata.clientType);
   if (direct) {
     return direct;
@@ -320,12 +315,12 @@ function inferClockClientType(metadata: Record<string, unknown>): string | undef
   return undefined;
 }
 
-function resolveWorkdirFromClockDaemon(daemonId: string | undefined): string | undefined {
+function resolveWorkdirFromSessionDaemon(daemonId: string | undefined): string | undefined {
   if (!daemonId) {
     return undefined;
   }
   try {
-    const record = getClockClientRegistry().findByDaemonId(daemonId);
+    const record = getSessionClientRegistry().findByDaemonId(daemonId);
     const workdir = typeof record?.workdir === 'string' ? record.workdir.trim() : '';
     return workdir || undefined;
   } catch {
@@ -333,12 +328,12 @@ function resolveWorkdirFromClockDaemon(daemonId: string | undefined): string | u
   }
 }
 
-function resolveTmuxSessionIdFromClockDaemon(daemonId: string | undefined): string | undefined {
+function resolveTmuxSessionIdFromSessionDaemon(daemonId: string | undefined): string | undefined {
   if (!daemonId) {
     return undefined;
   }
   try {
-    const record = getClockClientRegistry().findByDaemonId(daemonId);
+    const record = getSessionClientRegistry().findByDaemonId(daemonId);
     const tmuxSessionId = typeof record?.tmuxSessionId === 'string' ? record.tmuxSessionId.trim() : '';
     if (tmuxSessionId) {
       return tmuxSessionId;
@@ -350,12 +345,12 @@ function resolveTmuxSessionIdFromClockDaemon(daemonId: string | undefined): stri
   }
 }
 
-function resolveTmuxTargetFromClockDaemon(daemonId: string | undefined): string | undefined {
+function resolveTmuxTargetFromSessionDaemon(daemonId: string | undefined): string | undefined {
   if (!daemonId) {
     return undefined;
   }
   try {
-    const record = getClockClientRegistry().findByDaemonId(daemonId);
+    const record = getSessionClientRegistry().findByDaemonId(daemonId);
     const tmuxTarget = typeof record?.tmuxTarget === 'string' ? record.tmuxTarget.trim() : '';
     return tmuxTarget || undefined;
   } catch {
@@ -363,7 +358,7 @@ function resolveTmuxTargetFromClockDaemon(daemonId: string | undefined): string 
   }
 }
 
-function shouldTraceClockScopeMetadata(args: {
+function shouldTraceSessionScopeMetadata(args: {
   entryEndpoint: string;
   userAgent?: string;
   originator?: string;
@@ -371,7 +366,7 @@ function shouldTraceClockScopeMetadata(args: {
 }): boolean {
   const hasTurnMeta = typeof args.clientHeaders?.['x-codex-turn-metadata'] === 'string'
     && args.clientHeaders['x-codex-turn-metadata'].trim().length > 0;
-  return shouldTraceClockScopeByContext({
+  return shouldTraceSessionScopeByContext({
     endpointOrPath: args.entryEndpoint || '',
     userAgent: args.userAgent,
     originator: args.originator,
@@ -379,20 +374,20 @@ function shouldTraceClockScopeMetadata(args: {
   });
 }
 
-function logClockScopeMetadata(args: {
+function logSessionScopeMetadata(args: {
   requestId?: string;
   entryEndpoint: string;
   userAgent?: string;
   originator?: string;
-  resolvedClockDaemonId?: string;
+  resolvedSessionDaemonId?: string;
   resolvedTmuxSessionId?: string;
   resolvedWorkdir?: string;
   clientInjectReady: boolean;
   tmuxSource?: string;
 }): void {
   console.log(
-    `[clock-scope][metadata] requestId=${args.requestId || 'n/a'} endpoint=${args.entryEndpoint || 'n/a'} ` +
-    `daemon=${args.resolvedClockDaemonId || 'none'} tmux=${args.resolvedTmuxSessionId || 'none'} ` +
+    `[session-scope][metadata] requestId=${args.requestId || 'n/a'} endpoint=${args.entryEndpoint || 'n/a'} ` +
+    `daemon=${args.resolvedSessionDaemonId || 'none'} tmux=${args.resolvedTmuxSessionId || 'none'} ` +
     `ready=${args.clientInjectReady ? 'yes' : 'no'} workdir=${args.resolvedWorkdir || 'none'} ` +
     `originator=${args.originator || 'n/a'} ua=${args.userAgent || 'n/a'} ` +
     `tmuxSource=${args.tmuxSource || 'none'}`
@@ -420,8 +415,8 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
       : inboundOriginator;
   const routeHint = extractRouteHint(input) ?? userMeta.routeHint;
   const processMode = (userMeta.processMode as string) || 'chat';
-  let resolvedClockDaemonId = extractClockDaemonId(userMeta, headers);
-  const inferredClientType = inferClockClientType(userMeta);
+  let resolvedSessionDaemonId = extractSessionDaemonId(userMeta, headers);
+  const inferredClientType = inferSessionClientType(userMeta);
   const resolvedTmuxTarget =
     normalizeToken(userMeta.clientTmuxTarget)
     || normalizeToken(userMeta.client_tmux_target)
@@ -429,23 +424,35 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
     || normalizeToken(bodyMeta.clientTmuxTarget)
     || normalizeToken(bodyMeta.client_tmux_target)
     || normalizeToken(bodyMeta.tmuxTarget)
-    || resolveTmuxTargetFromClockDaemon(resolvedClockDaemonId);
+    || resolveTmuxTargetFromSessionDaemon(resolvedSessionDaemonId);
   const resolvedWorkdir =
     extractWorkdir(userMeta, bodyMeta, headers, normalizedClientHeaders)
-    || resolveWorkdirFromClockDaemon(resolvedClockDaemonId);
+    || resolveWorkdirFromSessionDaemon(resolvedSessionDaemonId);
   const tmuxResolution = resolveTmuxSessionIdAndSource({
     userMeta,
     bodyMeta,
     headers: headers ?? undefined,
     clientHeaders: normalizedClientHeaders,
-    daemonId: resolvedClockDaemonId,
-    resolveTmuxSessionIdFromDaemon: resolveTmuxSessionIdFromClockDaemon
+    daemonId: resolvedSessionDaemonId,
+    resolveTmuxSessionIdFromDaemon: resolveTmuxSessionIdFromSessionDaemon
   });
   let resolvedTmuxSessionId = tmuxResolution.tmuxSessionId;
   let tmuxSource = tmuxResolution.source;
   let clientInjectReady = Boolean(resolvedTmuxSessionId);
   let clientInjectReason = clientInjectReady ? 'tmux_session_ready' : 'tmux_session_missing';
   let stopMessageClientInjectSessionScope = resolvedTmuxSessionId ? `tmux:${resolvedTmuxSessionId}` : undefined;
+  if (resolvedTmuxSessionId && !isTmuxSessionAlive(resolvedTmuxSessionId)) {
+    try {
+      getSessionClientRegistry().unbindSessionScope(`tmux:${resolvedTmuxSessionId}`);
+    } catch {
+      // best-effort cleanup only
+    }
+    resolvedTmuxSessionId = undefined;
+    tmuxSource = 'none';
+    clientInjectReady = false;
+    clientInjectReason = 'tmux_session_missing';
+    stopMessageClientInjectSessionScope = undefined;
+  }
   const metadata: Record<string, unknown> = {
     ...userMeta,
     entryEndpoint: input.entryEndpoint,
@@ -456,11 +463,11 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
     stream: userMeta.stream === true,
     ...(resolvedUserAgent ? { userAgent: resolvedUserAgent } : {}),
     ...(resolvedOriginator ? { clientOriginator: resolvedOriginator } : {}),
-    ...(resolvedClockDaemonId
+    ...(resolvedSessionDaemonId
       ? {
-          clientDaemonId: resolvedClockDaemonId,
-          clockDaemonId: resolvedClockDaemonId,
-          clockClientDaemonId: resolvedClockDaemonId
+          clientDaemonId: resolvedSessionDaemonId,
+          sessionDaemonId: resolvedSessionDaemonId,
+          sessionClientDaemonId: resolvedSessionDaemonId
         }
       : {}),
     ...(resolvedWorkdir
@@ -483,7 +490,7 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
       : {}),
     ...(inferredClientType
       ? {
-          clockClientType: inferredClientType,
+          sessionClientType: inferredClientType,
           clientType: inferredClientType
         }
       : {}),
@@ -532,50 +539,18 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
     }
   }
 
-  if (!resolvedTmuxSessionId) {
-    const conversationSessionId =
-      normalizeToken(metadata.sessionId)
-      || normalizeToken(metadata.conversationId);
-    if (conversationSessionId && resolvedWorkdir) {
-      const bindResult = getClockClientRegistry().bindConversationSession({
-        conversationSessionId,
-        ...(resolvedClockDaemonId ? { daemonId: resolvedClockDaemonId } : {}),
-        workdir: resolvedWorkdir,
-        ...(inferredClientType ? { clientType: inferredClientType } : {})
-      });
-      if (bindResult.ok && bindResult.tmuxSessionId) {
-        resolvedTmuxSessionId = bindResult.tmuxSessionId;
-        tmuxSource = 'registry_by_binding';
-        clientInjectReady = true;
-        clientInjectReason = 'tmux_session_ready';
-        stopMessageClientInjectSessionScope = `tmux:${resolvedTmuxSessionId}`;
-        metadata.clientTmuxSessionId = resolvedTmuxSessionId;
-        metadata.tmuxSessionId = resolvedTmuxSessionId;
-        metadata.stopMessageClientInjectSessionScope = stopMessageClientInjectSessionScope;
-        metadata.clientInjectReady = true;
-        metadata.clientInjectReason = 'tmux_session_ready';
-        if (!resolvedClockDaemonId && bindResult.daemonId) {
-          resolvedClockDaemonId = bindResult.daemonId;
-          metadata.clientDaemonId = bindResult.daemonId;
-          metadata.clockDaemonId = bindResult.daemonId;
-          metadata.clockClientDaemonId = bindResult.daemonId;
-        }
-      }
-    }
-  }
-
-  if (shouldTraceClockScopeMetadata({
+  if (shouldTraceSessionScopeMetadata({
     entryEndpoint: input.entryEndpoint,
     userAgent: resolvedUserAgent,
     originator: resolvedOriginator,
     clientHeaders: normalizedClientHeaders
   })) {
-    logClockScopeMetadata({
+    logSessionScopeMetadata({
       requestId: input.requestId,
       entryEndpoint: input.entryEndpoint,
       userAgent: resolvedUserAgent,
       originator: resolvedOriginator,
-      resolvedClockDaemonId,
+      resolvedSessionDaemonId,
       resolvedTmuxSessionId,
       resolvedWorkdir,
       clientInjectReady,

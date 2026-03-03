@@ -8,11 +8,11 @@ import type { Command } from 'commander';
 
 import { LOCAL_HOSTS } from '../../constants/index.js';
 import {
-  encodeClockClientApiKey,
-  extractClockClientDaemonIdFromApiKey,
-  extractClockClientTmuxSessionIdFromApiKey
-} from '../../utils/clock-client-token.js';
-import { isClockScopeTraceEnabled, isClockScopeTraceVerbose } from '../../utils/clock-scope-trace.js';
+  encodeSessionClientApiKey,
+  extractSessionClientDaemonIdFromApiKey,
+  extractSessionClientScopeIdFromApiKey
+} from '../../utils/session-client-token.js';
+import { isSessionScopeTraceEnabled, isSessionScopeTraceVerbose } from '../../utils/session-scope-trace.js';
 import { logProcessLifecycle } from '../../utils/process-lifecycle-logger.js';
 
 // Import from new launcher submodules
@@ -23,7 +23,7 @@ import type {
   LauncherCommandOptions,
   LauncherSpec,
   ResolvedServerConnection,
-  ClockClientService,
+  SessionClientService,
   ManagedTmuxSession,
   TmuxSelfHealPolicy
 } from './launcher/types.js';
@@ -48,7 +48,7 @@ export type {
   LauncherCommandOptions,
   LauncherSpec,
   ResolvedServerConnection,
-  ClockClientService,
+  SessionClientService,
   ManagedTmuxSession,
   TmuxSelfHealPolicy
 } from './launcher/types.js';
@@ -216,10 +216,9 @@ function resolveServerConnection(
 
   const configuredApiKey =
     (typeof options.apikey === 'string' && options.apikey.trim() ? options.apikey.trim() : null) ??
-    (typeof ctx.env.ROUTECODEX_APIKEY === 'string' && ctx.env.ROUTECODEX_APIKEY.trim()
-      ? ctx.env.ROUTECODEX_APIKEY.trim()
+    (typeof ctx.env.ROUTECODEX_HTTP_APIKEY === 'string' && ctx.env.ROUTECODEX_HTTP_APIKEY.trim()
+      ? ctx.env.ROUTECODEX_HTTP_APIKEY.trim()
       : null) ??
-    (typeof ctx.env.RCC_APIKEY === 'string' && ctx.env.RCC_APIKEY.trim() ? ctx.env.RCC_APIKEY.trim() : null) ??
     readConfigApiKey(fsImpl, configPath);
 
   const connectHost = normalizeConnectHost(actualHost);
@@ -741,76 +740,23 @@ function normalizePathForComparison(candidate: string): string {
   }
 }
 
-function findReusableManagedTmuxSession(
-  spawnSyncImpl: typeof spawnSync,
-  cwd: string,
-  commandName: string
-): { sessionName: string; tmuxTarget: string } | null {
-  const expectedCwd = normalizePathForComparison(cwd);
-  const expectedSessionPrefix = `rcc_${normalizeSessionToken(commandName)}_`;
+function formatHmms(value: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(value.getHours())}${pad(value.getMinutes())}${pad(value.getSeconds())}`;
+}
+
+function tmuxSessionExists(spawnSyncImpl: typeof spawnSync, sessionName: string): boolean {
   try {
-    const listResult = spawnSyncImpl('tmux', ['list-sessions', '-F', '#S	#{session_attached}'], { encoding: 'utf8' });
-    if (listResult.status !== 0) {
-      return null;
-    }
-
-    const lines = String(listResult.stdout || '')
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean);
-
-    for (const line of lines) {
-      const [sessionName, attachedFlag] = line.split('	');
-      const normalizedName = String(sessionName || '').trim();
-      if (!normalizedName.startsWith(expectedSessionPrefix)) {
-        continue;
-      }
-      if (String(attachedFlag || '').trim() === '1') {
-        continue;
-      }
-
-      const panesResult = spawnSyncImpl(
-        'tmux',
-        [
-          'list-panes',
-          '-t',
-          normalizedName,
-          '-F',
-          '#{session_name}:#{window_index}.#{pane_index}	#{pane_current_command}	#{pane_current_path}'
-        ],
-        { encoding: 'utf8' }
-      );
-      if (panesResult.status !== 0) {
-        continue;
-      }
-
-      const panes = String(panesResult.stdout || '')
-        .split(/\r?\n/)
-        .map((paneLine) => paneLine.trim())
-        .filter(Boolean);
-
-      for (const pane of panes) {
-        const [target, command, panePath] = pane.split('	');
-        const tmuxTarget = String(target || '').trim();
-        const currentCommand = String(command || '').trim().toLowerCase();
-        const normalizedPanePath = normalizePathForComparison(String(panePath || '').trim());
-        if (!tmuxTarget) {
-          continue;
-        }
-        if (!isReusableIdlePaneCommand(currentCommand)) {
-          continue;
-        }
-        if (!normalizedPanePath || normalizedPanePath !== expectedCwd) {
-          continue;
-        }
-        return { sessionName: normalizedName, tmuxTarget };
-      }
-    }
-
-    return null;
+    const result = spawnSyncImpl('tmux', ['has-session', '-t', sessionName], { encoding: 'utf8' });
+    return result.status === 0;
   } catch {
-    return null;
+    return false;
   }
+}
+
+function buildManagedTmuxSessionName(nowMs: number, attempt: number): string {
+  const stamp = formatHmms(new Date(nowMs + attempt * 1000));
+  return `rcc-tmux-${stamp}`;
 }
 
 function requestManagedTmuxSessionExit(
@@ -846,33 +792,36 @@ function requestManagedTmuxSessionExit(
 function createManagedTmuxSession(args: {
   spawnSyncImpl: typeof spawnSync;
   cwd: string;
-  commandName: string;
 }): ManagedTmuxSession | null {
-  const { spawnSyncImpl, cwd, commandName } = args;
+  const { spawnSyncImpl, cwd } = args;
 
-  const sessionName = (() => {
-    const token = normalizeSessionToken(commandName);
-    return `rcc_${token}_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
-  })();
-
-  try {
-    const result = spawnSyncImpl('tmux', ['new-session', '-d', '-s', sessionName, '-c', cwd], { encoding: 'utf8' });
-    if (result.status !== 0) {
-      return null;
+  const baseNow = Date.now();
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const sessionName = buildManagedTmuxSessionName(baseNow, attempt);
+    if (tmuxSessionExists(spawnSyncImpl, sessionName)) {
+      continue;
     }
-  } catch {
-    return null;
+    try {
+      const result = spawnSyncImpl('tmux', ['new-session', '-d', '-s', sessionName, '-c', cwd], { encoding: 'utf8' });
+      if (result.status !== 0) {
+        continue;
+      }
+    } catch {
+      continue;
+    }
+
+    const tmuxTarget = `${sessionName}:0.0`;
+    return {
+      sessionName,
+      tmuxTarget,
+      reused: false,
+      stop: () => {
+        requestManagedTmuxSessionExit(spawnSyncImpl, sessionName);
+      }
+    };
   }
 
-  const tmuxTarget = `${sessionName}:0.0`;
-  return {
-    sessionName,
-    tmuxTarget,
-    reused: false,
-    stop: () => {
-      requestManagedTmuxSessionExit(spawnSyncImpl, sessionName);
-    }
-  };
+  return null;
 }
 
 function launchCommandInTmuxPane(args: {
@@ -992,7 +941,7 @@ function normalizeTmuxInjectedText(raw: string): string {
     .trim();
 }
 
-async function startClockClientService(args: {
+async function startSessionClientService(args: {
   ctx: LauncherCommandContext;
   resolved: ResolvedServerConnection;
   workdir: string;
@@ -1005,7 +954,7 @@ async function startClockClientService(args: {
     managedClientPid?: number | null;
     managedClientCommandHint?: string;
   };
-}): Promise<ClockClientService | null> {
+}): Promise<SessionClientService | null> {
   const {
     ctx,
     resolved,
@@ -1019,16 +968,16 @@ async function startClockClientService(args: {
 
   const daemonId = (() => {
     try {
-      return `clockd_${crypto.randomUUID()}`;
+      return `sessiond_${crypto.randomUUID()}`;
     } catch {
-      return `clockd_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+      return `sessiond_${Date.now()}_${Math.random().toString(16).slice(2)}`;
     }
   })();
 
   const normalizedTmuxTarget = String(tmuxTarget || '').trim();
   if (!normalizedTmuxTarget) {
     // No tmux target means no reliable stdin injection path.
-    // Do not register a clock-client daemon with a synthetic session id.
+    // Do not register a session-client daemon with a synthetic session id.
     return null;
   }
   const tmuxSessionId = (() => {
@@ -1083,7 +1032,7 @@ async function startClockClientService(args: {
       server?.listen(0, '127.0.0.1', () => {
         const address = server?.address();
         if (!address || typeof address === 'string') {
-          reject(new Error('failed to resolve clock daemon callback address'));
+          reject(new Error('failed to resolve session daemon callback address'));
           return;
         }
         resolve(address.port);
@@ -1104,7 +1053,7 @@ async function startClockClientService(args: {
 
   const controlUrl = `${resolved.protocol}://127.0.0.1:${resolved.port}${resolved.basePath}`;
   const controlRequestTimeoutMs = resolveIntFromEnv(
-    ctx.env.ROUTECODEX_CLOCK_CLIENT_CONTROL_TIMEOUT_MS ?? ctx.env.RCC_CLOCK_CLIENT_CONTROL_TIMEOUT_MS,
+    ctx.env.ROUTECODEX_SESSION_CLIENT_CONTROL_TIMEOUT_MS ?? ctx.env.RCC_SESSION_CLIENT_CONTROL_TIMEOUT_MS,
     1500,
     200,
     30_000
@@ -1162,7 +1111,7 @@ async function startClockClientService(args: {
   };
 
   const reRegisterBackoffMs = resolveIntFromEnv(
-    ctx.env.ROUTECODEX_CLOCK_CLIENT_REREGISTER_BACKOFF_MS ?? ctx.env.RCC_CLOCK_CLIENT_REREGISTER_BACKOFF_MS,
+    ctx.env.ROUTECODEX_SESSION_CLIENT_REREGISTER_BACKOFF_MS ?? ctx.env.RCC_SESSION_CLIENT_REREGISTER_BACKOFF_MS,
     1500,
     200,
     60_000
@@ -1176,7 +1125,7 @@ async function startClockClientService(args: {
     }
     registerInFlight = (async () => {
       lastRegisterAttemptAtMs = Date.now();
-      const result = await post('/daemon/clock-client/register', {
+      const result = await post('/daemon/session-client/register', {
         daemonId,
         tmuxSessionId,
         sessionId: tmuxSessionId,
@@ -1197,7 +1146,7 @@ async function startClockClientService(args: {
   };
 
   const syncHeartbeat = async (): Promise<boolean> => {
-    const heartbeat = await post('/daemon/clock-client/heartbeat', {
+    const heartbeat = await post('/daemon/session-client/heartbeat', {
       daemonId,
       tmuxSessionId,
       sessionId: tmuxSessionId,
@@ -1248,7 +1197,7 @@ async function startClockClientService(args: {
     syncHeartbeat,
     stop: async () => {
       clearInterval(heartbeat);
-      await post('/daemon/clock-client/unregister', { daemonId });
+      await post('/daemon/session-client/unregister', { daemonId });
       if (!server) {
         return;
       }
@@ -1353,24 +1302,34 @@ export function createLauncherCommand(program: Command, ctx: LauncherCommandCont
     const spinner = await ctx.createSpinner(`Preparing ${spec.displayName} with RouteCodex...`);
 
     try {
-      const resolved = resolveServerConnection(ctx, fsImpl, pathImpl, options);
-      await ctx.ensureGuardianDaemon?.();
-      const ensureResult = await ensureServerReady(
-        ctx,
-        fsImpl,
-        pathImpl,
-        spinner,
-        options,
-        resolved,
-        spec.allowAutoStartServer === true
-      );
-      if (!ensureResult.ready) {
-        spinner.info('RouteCodex server is not running; launcher will continue and wait for your next requests.');
+      const tmuxOnly = spec.commandName === 'codex';
+      const resolved = tmuxOnly ? undefined : resolveServerConnection(ctx, fsImpl, pathImpl, options);
+      const requireResolved = (): ResolvedServerConnection => {
+        if (!resolved) {
+          throw new Error('RouteCodex server connection is not available for this launcher');
+        }
+        return resolved;
+      };
+      let ensureResult: { ready: boolean; started?: boolean; logPath?: string } | null = null;
+      if (!tmuxOnly) {
+        const server = requireResolved();
+        await ctx.ensureGuardianDaemon?.();
+        ensureResult = await ensureServerReady(
+          ctx,
+          fsImpl,
+          pathImpl,
+          spinner,
+          options,
+          server,
+          spec.allowAutoStartServer === true
+        );
+        if (!ensureResult.ready) {
+          spinner.info('RouteCodex server is not running; launcher will continue and wait for your next requests.');
+        }
       }
 
       spinner.text = `Launching ${spec.displayName}...`;
 
-      const baseUrl = `${resolved.protocol}://${resolved.connectHost}${resolved.portPart}${resolved.basePath}`;
       const currentCwd = resolveWorkingDirectory(ctx, fsImpl, pathImpl, options.cwd);
 
       const spawnSyncImpl = ctx.spawnSyncImpl ?? spawnSync;
@@ -1438,27 +1397,22 @@ export function createLauncherCommand(program: Command, ctx: LauncherCommandCont
       let managedTmuxSession: ManagedTmuxSession | null = null;
       const tmuxEnabled = isTmuxAvailable(spawnSyncImpl);
       if (!tmuxEnabled) {
-        ctx.logger.warning('[clock-advanced] tmux not found; advanced clock client service disabled (launcher will continue).');
+        ctx.logger.warning('[session-advanced] tmux not found; advanced session client service disabled (launcher will continue).');
       }
-      let tmuxTarget = tmuxEnabled ? resolveCurrentTmuxTarget(ctx.env, spawnSyncImpl) : null;
-      if (tmuxTarget && !isReusableTmuxPaneTarget(spawnSyncImpl, tmuxTarget, currentCwd)) {
-        tmuxTarget = null;
+      let tmuxTarget: string | null = null;
+      if (tmuxEnabled && !tmuxOnly) {
+        tmuxTarget = resolveCurrentTmuxTarget(ctx.env, spawnSyncImpl);
       }
-      if (tmuxEnabled && !tmuxTarget) {
+      if (tmuxEnabled && (tmuxOnly || !tmuxTarget)) {
         managedTmuxSession = createManagedTmuxSession({
           spawnSyncImpl,
-          cwd: currentCwd,
-          commandName: spec.commandName
+          cwd: currentCwd
         });
         if (managedTmuxSession) {
           tmuxTarget = managedTmuxSession.tmuxTarget;
-          if (managedTmuxSession.reused) {
-            ctx.logger.info('[clock-advanced] reused existing managed tmux session and rebound launcher automatically.');
-          } else {
-            ctx.logger.info('[clock-advanced] started managed tmux session automatically; no manual tmux setup needed.');
-          }
+          ctx.logger.info('[session-advanced] started managed tmux session automatically; no manual tmux setup needed.');
         } else {
-          ctx.logger.warning('[clock-advanced] failed to start managed tmux session; launcher continues without advanced mode.');
+          ctx.logger.warning('[session-advanced] failed to start managed tmux session; launcher continues without advanced mode.');
         }
       }
 
@@ -1467,84 +1421,97 @@ export function createLauncherCommand(program: Command, ctx: LauncherCommandCont
       const managedClientCommandHint = managedClientProcessEnabled ? resolvedBinary : undefined;
 
       const reclaimRequiredRaw = String(
-        ctx.env.ROUTECODEX_CLOCK_RECLAIM_REQUIRED
-          ?? ctx.env.RCC_CLOCK_RECLAIM_REQUIRED
+        ctx.env.ROUTECODEX_SESSION_RECLAIM_REQUIRED
+          ?? ctx.env.RCC_SESSION_RECLAIM_REQUIRED
           ?? '1'
       )
         .trim()
         .toLowerCase();
       const reclaimRequired = reclaimRequiredRaw !== '0' && reclaimRequiredRaw !== 'false' && reclaimRequiredRaw !== 'no';
 
-      const clockClientService = await startClockClientService({
-        ctx,
-        resolved,
-        workdir: currentCwd,
-        tmuxTarget,
-        spawnSyncImpl,
-        clientType: spec.commandName,
-        managedTmuxSession: Boolean(managedTmuxSession),
-        getManagedProcessState: () => ({
-          managedClientProcess: managedClientProcessEnabled,
-          managedClientPid,
-          managedClientCommandHint
-        })
-      });
-      if (managedClientProcessEnabled && reclaimRequired && tmuxTarget && !clockClientService) {
-        throw new Error('clock client registration failed for managed child process; aborting launch to avoid orphan process');
-      }
-      if (tmuxTarget && !clockClientService) {
-        ctx.logger.warning('[clock-advanced] failed to start clock client daemon service; launcher continues without advanced mode.');
-      }
-
-      const clockAdvancedEnabled = Boolean(clockClientService && tmuxTarget);
-      const inferredTmuxSessionId =
-        clockClientService?.tmuxSessionId ||
-        inferTmuxSessionIdFromTarget(tmuxTarget) ||
-        undefined;
-      const inferredDaemonId =
-        clockClientService?.daemonId ||
-        (inferredTmuxSessionId ? `clockd_unbound_${process.pid}` : undefined);
-      const clockClientApiKey =
-        inferredTmuxSessionId && inferredDaemonId
-          ? encodeClockClientApiKey(
-            resolved.configuredApiKey || 'rcc-proxy-key',
-            inferredDaemonId,
-            inferredTmuxSessionId
-          )
-          : (resolved.configuredApiKey || 'rcc-proxy-key');
-      if (isClockScopeTraceEnabled()) {
-        try {
-          const parsedDaemonId = extractClockClientDaemonIdFromApiKey(clockClientApiKey) || 'none';
-          const parsedTmuxSessionId = extractClockClientTmuxSessionIdFromApiKey(clockClientApiKey) || 'none';
-          const verbose = isClockScopeTraceVerbose();
-          ctx.logger.info(
-            `[clock-scope][launch] command=${spec.commandName} advanced=${clockAdvancedEnabled ? 'on' : 'off'} ` +
-            `daemon=${parsedDaemonId} tmux=${parsedTmuxSessionId} tmuxTarget=${tmuxTarget || 'none'}` +
-            (verbose ? ` managedTmux=${managedTmuxSession ? 'yes' : 'no'} serverStarted=${ensureResult.started ? 'yes' : 'no'}` : '')
-          );
-        } catch {
-          // best-effort diagnostics only
-        }
-      }
-      await ctx.registerGuardianProcess?.({
-        source: spec.commandName,
-        pid: process.pid,
-        ppid: process.ppid,
-        port: resolved.port,
-        tmuxSessionId: clockClientService?.tmuxSessionId || inferTmuxSessionIdFromTarget(tmuxTarget) || undefined,
-        tmuxTarget: tmuxTarget || undefined,
-        metadata: {
-          workingDirectory: currentCwd,
-          binary: resolvedBinary,
+      let sessionClientService: SessionClientService | null = null;
+      let sessionAdvancedEnabled = false;
+      let inferredTmuxSessionId: string | undefined;
+      let inferredDaemonId: string | undefined;
+      let sessionClientApiKey: string | undefined;
+      let tmuxOnlySessionId: string | undefined;
+      if (!tmuxOnly) {
+        const server = requireResolved();
+        sessionClientService = await startSessionClientService({
+          ctx,
+          resolved: server,
+          workdir: currentCwd,
+          tmuxTarget,
+          spawnSyncImpl,
+          clientType: spec.commandName,
           managedTmuxSession: Boolean(managedTmuxSession),
-          autoStartedServer: ensureResult.started === true
+          getManagedProcessState: () => ({
+            managedClientProcess: managedClientProcessEnabled,
+            managedClientPid,
+            managedClientCommandHint
+          })
+        });
+        if (managedClientProcessEnabled && reclaimRequired && tmuxTarget && !sessionClientService) {
+          throw new Error('session client registration failed for managed child process; aborting launch to avoid orphan process');
         }
-      });
+        if (tmuxTarget && !sessionClientService) {
+          ctx.logger.warning('[session-advanced] failed to start session client daemon service; launcher continues without advanced mode.');
+        }
+
+        sessionAdvancedEnabled = Boolean(sessionClientService && tmuxTarget);
+        inferredTmuxSessionId =
+          sessionClientService?.tmuxSessionId ||
+          inferTmuxSessionIdFromTarget(tmuxTarget) ||
+          undefined;
+        inferredDaemonId =
+          sessionClientService?.daemonId ||
+          (inferredTmuxSessionId ? `sessiond_unbound_${process.pid}` : undefined);
+        sessionClientApiKey =
+          inferredTmuxSessionId && inferredDaemonId
+            ? encodeSessionClientApiKey(
+              server.configuredApiKey || 'rcc-proxy-key',
+              inferredDaemonId,
+              inferredTmuxSessionId
+            )
+            : (server.configuredApiKey || 'rcc-proxy-key');
+        if (isSessionScopeTraceEnabled()) {
+          try {
+            const parsedDaemonId = extractSessionClientDaemonIdFromApiKey(sessionClientApiKey) || 'none';
+            const parsedTmuxSessionId = extractSessionClientScopeIdFromApiKey(sessionClientApiKey) || 'none';
+            const verbose = isSessionScopeTraceVerbose();
+            ctx.logger.info(
+              `[session-scope][launch] command=${spec.commandName} advanced=${sessionAdvancedEnabled ? 'on' : 'off'} ` +
+              `daemon=${parsedDaemonId} tmux=${parsedTmuxSessionId} tmuxTarget=${tmuxTarget || 'none'}` +
+              (verbose ? ` managedTmux=${managedTmuxSession ? 'yes' : 'no'} serverStarted=${ensureResult?.started ? 'yes' : 'no'}` : '')
+            );
+          } catch {
+            // best-effort diagnostics only
+          }
+        }
+        await ctx.registerGuardianProcess?.({
+          source: spec.commandName,
+          pid: process.pid,
+          ppid: process.ppid,
+          port: server.port,
+          tmuxSessionId: sessionClientService?.tmuxSessionId || inferTmuxSessionIdFromTarget(tmuxTarget) || undefined,
+          tmuxTarget: tmuxTarget || undefined,
+          metadata: {
+            workingDirectory: currentCwd,
+            binary: resolvedBinary,
+            managedTmuxSession: Boolean(managedTmuxSession),
+            autoStartedServer: ensureResult?.started === true
+          }
+        });
+      }
       const applyLifecycleOrThrow = async (args: {
         action: string;
         signal?: string;
         targetPid?: number | null;
       }): Promise<void> => {
+        if (tmuxOnly || !resolved) {
+          return;
+        }
+        const server = requireResolved();
         const accepted = await ctx.reportGuardianLifecycle?.({
           action: args.action,
           source: `cli.launcher.${spec.commandName}`,
@@ -1552,8 +1519,8 @@ export function createLauncherCommand(program: Command, ctx: LauncherCommandCont
           targetPid: args.targetPid && args.targetPid > 0 ? args.targetPid : undefined,
           signal: args.signal,
           metadata: {
-            port: resolved.port,
-            serverUrl: resolved.serverUrl
+            port: server.port,
+            serverUrl: server.serverUrl
           }
         });
         if (ctx.reportGuardianLifecycle && accepted !== true) {
@@ -1561,32 +1528,56 @@ export function createLauncherCommand(program: Command, ctx: LauncherCommandCont
         }
       };
 
-      const toolEnv = spec.buildEnv({
-        env: {
-          ...ctx.env,
-          PWD: currentCwd,
-          RCC_WORKDIR: currentCwd,
-          ROUTECODEX_WORKDIR: currentCwd,
-          OPENAI_BASE_URL: normalizeOpenAiBaseUrl(baseUrl),
-          OPENAI_API_BASE: normalizeOpenAiBaseUrl(baseUrl),
-          OPENAI_API_BASE_URL: normalizeOpenAiBaseUrl(baseUrl),
-          OPENAI_API_KEY: clockClientApiKey,
-          RCC_CLOCK_ADVANCED_ENABLED: clockAdvancedEnabled ? '1' : '0',
-          ...(inferredTmuxSessionId
-            ? {
-              RCC_CLOCK_CLIENT_SESSION_ID: inferredTmuxSessionId,
-              RCC_CLOCK_CLIENT_TMUX_SESSION_ID: inferredTmuxSessionId
+      if (tmuxOnly) {
+        const tmuxSessionId = inferTmuxSessionIdFromTarget(tmuxTarget) || '';
+        tmuxOnlySessionId = tmuxSessionId || undefined;
+      }
+
+      const toolEnv = (() => {
+        if (tmuxOnly) {
+          const env = { ...ctx.env };
+          if (tmuxOnlySessionId) {
+            const baseKey =
+              (typeof env.ROUTECODEX_HTTP_APIKEY === 'string' && env.ROUTECODEX_HTTP_APIKEY.trim())
+              || '';
+            if (!baseKey) {
+              ctx.logger.warning('[session-scope] ROUTECODEX_HTTP_APIKEY is empty; tmux scope not injected.');
+              return env;
             }
-            : {})
-          ,
-          ...(inferredDaemonId
-            ? { RCC_CLOCK_CLIENT_DAEMON_ID: inferredDaemonId }
-            : {})
-        } as NodeJS.ProcessEnv,
-        baseUrl,
-        configuredApiKey: resolved.configuredApiKey,
-        cwd: currentCwd
-      });
+            const scopedKey = encodeSessionClientApiKey(baseKey, '', tmuxOnlySessionId);
+            env.ROUTECODEX_HTTP_APIKEY = scopedKey;
+            env.OPENAI_API_KEY = scopedKey;
+            env.ANTHROPIC_AUTH_TOKEN = scopedKey;
+          }
+          return env;
+        }
+        const server = requireResolved();
+        return spec.buildEnv({
+          env: {
+            ...ctx.env,
+            PWD: currentCwd,
+            RCC_WORKDIR: currentCwd,
+            ROUTECODEX_WORKDIR: currentCwd,
+            OPENAI_BASE_URL: normalizeOpenAiBaseUrl(`${server.protocol}://${server.connectHost}${server.portPart}${server.basePath}`),
+            OPENAI_API_BASE: normalizeOpenAiBaseUrl(`${server.protocol}://${server.connectHost}${server.portPart}${server.basePath}`),
+            OPENAI_API_BASE_URL: normalizeOpenAiBaseUrl(`${server.protocol}://${server.connectHost}${server.portPart}${server.basePath}`),
+            OPENAI_API_KEY: sessionClientApiKey,
+            RCC_SESSION_ADVANCED_ENABLED: sessionAdvancedEnabled ? '1' : '0',
+            ...(inferredTmuxSessionId
+              ? {
+                RCC_SESSION_CLIENT_SESSION_ID: inferredTmuxSessionId,
+                RCC_SESSION_CLIENT_TMUX_SESSION_ID: inferredTmuxSessionId
+              }
+              : {}),
+            ...(inferredDaemonId
+              ? { RCC_SESSION_CLIENT_DAEMON_ID: inferredDaemonId }
+              : {})
+          } as NodeJS.ProcessEnv,
+          baseUrl: `${server.protocol}://${server.connectHost}${server.portPart}${server.basePath}`,
+          configuredApiKey: server.configuredApiKey,
+          cwd: currentCwd
+        });
+      })();
 
       const shouldUseShell =
         ctx.isWindows &&
@@ -1630,15 +1621,18 @@ export function createLauncherCommand(program: Command, ctx: LauncherCommandCont
       managedClientPid = typeof toolProcess.pid === 'number' && Number.isFinite(toolProcess.pid)
         ? Math.floor(toolProcess.pid)
         : null;
-      if (clockClientService && managedClientProcessEnabled && managedClientPid) {
-        void clockClientService.syncHeartbeat();
+      if (sessionClientService && managedClientProcessEnabled && managedClientPid) {
+        void sessionClientService.syncHeartbeat();
       }
 
       spinner.succeed(`${spec.displayName} launched with RouteCodex proxy`);
       if (!managedTmuxSession) {
-        ctx.logger.info(`Using RouteCodex server at: ${baseUrl}`);
+        if (!tmuxOnly) {
+          const server = requireResolved();
+          ctx.logger.info(`Using RouteCodex server at: ${server.protocol}://${server.connectHost}${server.portPart}${server.basePath}`);
+        }
         ctx.logger.info(`${spec.displayName} binary: ${resolvedBinary}`);
-        if (ensureResult.started && ensureResult.logPath) {
+        if (!tmuxOnly && ensureResult?.started && ensureResult.logPath) {
           ctx.logger.info(`RouteCodex auto-start logs: ${ensureResult.logPath}`);
         }
         ctx.logger.info(`Working directory for ${spec.displayName}: ${currentCwd}`);
@@ -1671,7 +1665,7 @@ export function createLauncherCommand(program: Command, ctx: LauncherCommandCont
         logClientExitSummary();
 
         try {
-          await clockClientService?.stop();
+          await sessionClientService?.stop();
         } catch {
           // ignore
         }

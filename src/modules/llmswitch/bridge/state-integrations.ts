@@ -208,7 +208,7 @@ async function getClockTaskStoreModuleSafe(): Promise<ClockTaskStoreModule | nul
   if (!hasLoggedClockTaskStoreLoadFailure) {
     hasLoggedClockTaskStoreLoadFailure = true;
     console.warn(
-      '[llmswitch-bridge] clock task-store module unavailable; clock daemon inject/tasks are temporarily disabled.'
+      '[llmswitch-bridge] clock task-store module unavailable; session daemon inject/tasks are temporarily disabled.'
     );
   }
 

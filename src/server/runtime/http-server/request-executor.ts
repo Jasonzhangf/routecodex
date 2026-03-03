@@ -38,7 +38,7 @@ import {
 } from './executor/usage-aggregator.js';
 import {
   type AntigravityRetrySignal,
-  bindClockConversationSession,
+  bindSessionConversationSession,
   extractRetryErrorSignature,
   extractStatusCodeFromError,
   injectAntigravityRetrySignal,
@@ -101,7 +101,7 @@ export class HubRequestExecutor implements RequestExecutor {
     try {
       const hubPipeline = ensureHubPipeline(this.deps.getHubPipeline);
       const initialMetadata = buildRequestMetadata(input);
-      bindClockConversationSession(initialMetadata);
+      bindSessionConversationSession(initialMetadata);
       const inboundClientHeaders = cloneClientHeaders(initialMetadata?.clientHeaders);
       const providerRequestId = input.requestId;
       const clientRequestId = resolveClientRequestId(initialMetadata, providerRequestId);

@@ -1,4 +1,4 @@
-import { getClockClientRegistry } from '../clock-client-registry.js';
+import { getSessionClientRegistry } from '../session-client-registry.js';
 
 const DEFAULT_ANTIGRAVITY_MAX_PROVIDER_ATTEMPTS = 20;
 
@@ -203,7 +203,7 @@ function normalizeSessionToken(value: unknown): string | undefined {
   return trimmed || undefined;
 }
 
-function resolveClockConversationSessionId(metadata: Record<string, unknown>): string | undefined {
+function resolveSessionConversationSessionId(metadata: Record<string, unknown>): string | undefined {
   const tmuxSessionId = normalizeSessionToken(metadata.clientTmuxSessionId)
     ?? normalizeSessionToken(metadata.client_tmux_session_id)
     ?? normalizeSessionToken(metadata.tmuxSessionId)
@@ -214,8 +214,8 @@ function resolveClockConversationSessionId(metadata: Record<string, unknown>): s
   return undefined;
 }
 
-function inferClockClientTypeFromMetadata(metadata: Record<string, unknown>): string | undefined {
-  const direct = normalizeSessionToken(metadata.clockClientType) ?? normalizeSessionToken(metadata.clientType);
+function inferSessionClientTypeFromMetadata(metadata: Record<string, unknown>): string | undefined {
+  const direct = normalizeSessionToken(metadata.sessionClientType) ?? normalizeSessionToken(metadata.clientType);
   if (direct) {
     return direct;
   }
@@ -230,8 +230,8 @@ function inferClockClientTypeFromMetadata(metadata: Record<string, unknown>): st
   return undefined;
 }
 
-export function bindClockConversationSession(metadata: Record<string, unknown>): void {
-  const conversationSessionId = resolveClockConversationSessionId(metadata);
+export function bindSessionConversationSession(metadata: Record<string, unknown>): void {
+  const conversationSessionId = resolveSessionConversationSessionId(metadata);
   if (!conversationSessionId) {
     return;
   }
@@ -239,7 +239,7 @@ export function bindClockConversationSession(metadata: Record<string, unknown>):
   const tmuxSessionId = normalizeSessionToken(metadata.clientTmuxSessionId)
     ?? normalizeSessionToken(metadata.client_tmux_session_id)
     ?? normalizeSessionToken(metadata.tmuxSessionId);
-  const clientType = inferClockClientTypeFromMetadata(metadata);
+  const clientType = inferSessionClientTypeFromMetadata(metadata);
   const workdir = normalizeSessionToken(metadata.clientWorkdir)
     ?? normalizeSessionToken(metadata.client_workdir)
     ?? normalizeSessionToken(metadata.workdir)
@@ -258,7 +258,7 @@ export function bindClockConversationSession(metadata: Record<string, unknown>):
       ...(clientType ? { clientType } : {}),
       ...(workdir ? { workdir } : {})
     };
-    getClockClientRegistry().bindConversationSession(bindInput);
+    getSessionClientRegistry().bindConversationSession(bindInput);
   } catch {
     // best-effort only
   }

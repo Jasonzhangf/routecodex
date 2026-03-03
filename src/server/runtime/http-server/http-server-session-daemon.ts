@@ -9,17 +9,17 @@ import {
   listClockTasksSnapshot,
   saveRoutingInstructionStateSync
 } from '../../../modules/llmswitch/bridge.js';
-import { getClockClientRegistry } from './clock-client-registry.js';
-import { toExactMatchClockConfig } from './clock-daemon-inject-config.js';
+import { getSessionClientRegistry } from './session-client-registry.js';
+import { toExactMatchSessionConfig } from './session-daemon-inject-config.js';
 import {
-  shouldClearClockTasksForInjectSkip,
-  shouldLogClockDaemonCleanupAudit,
-  shouldLogClockDaemonInjectSkip
-} from './clock-daemon-log-throttle.js';
+  shouldClearSessionTasksForInjectSkip,
+  shouldLogSessionDaemonCleanupAudit,
+  shouldLogSessionDaemonInjectSkip
+} from './session-daemon-log-throttle.js';
 import { isTmuxSessionAlive } from './tmux-session-probe.js';
 
-const CLOCK_DAEMON_SESSION_PREFIX = 'clockd.';
-const CLOCK_CLEANUP_AUDIT_SAMPLE_LIMIT = 3;
+const SESSION_DAEMON_SESSION_PREFIX = 'sessiond.';
+const SESSION_CLEANUP_AUDIT_SAMPLE_LIMIT = 3;
 
 function readString(value: unknown): string | undefined {
   if (typeof value !== 'string') {
@@ -109,9 +109,9 @@ function resolveBoolFromEnv(value: string | undefined, fallback: boolean): boole
   return fallback;
 }
 
-function shouldEnableClockCleanupAuditLog(): boolean {
+function shouldEnableSessionCleanupAuditLog(): boolean {
   return resolveBoolFromEnv(
-    process.env.ROUTECODEX_CLOCK_DAEMON_CLEANUP_AUDIT_LOG ?? process.env.RCC_CLOCK_DAEMON_CLEANUP_AUDIT_LOG,
+    process.env.ROUTECODEX_SESSION_DAEMON_CLEANUP_AUDIT_LOG ?? process.env.RCC_SESSION_DAEMON_CLEANUP_AUDIT_LOG,
     false
   );
 }
@@ -125,7 +125,7 @@ function summarizeStringList(values: string[]): { count: number; sample: string[
     .filter((entry): entry is string => Boolean(entry));
   return {
     count: normalized.length,
-    sample: normalized.slice(0, CLOCK_CLEANUP_AUDIT_SAMPLE_LIMIT)
+    sample: normalized.slice(0, SESSION_CLEANUP_AUDIT_SAMPLE_LIMIT)
   };
 }
 
@@ -136,7 +136,7 @@ function summarizeNumberList(values: number[]): { count: number; sample: number[
   const normalized = values.filter((entry) => Number.isFinite(entry)).map((entry) => Math.floor(entry));
   return {
     count: normalized.length,
-    sample: normalized.slice(0, CLOCK_CLEANUP_AUDIT_SAMPLE_LIMIT)
+    sample: normalized.slice(0, SESSION_CLEANUP_AUDIT_SAMPLE_LIMIT)
   };
 }
 
@@ -152,13 +152,13 @@ function clearScopedRoutingStateByScope(scope: string | undefined): void {
   }
 }
 
-function clearScopedRoutingStateForClockCleanup(args: {
+function clearScopedRoutingStateForSessionCleanup(args: {
   removedDaemonIds: string[];
   removedTmuxSessionIds: string[];
   extraScopes?: string[];
 }): void {
   for (const daemonId of args.removedDaemonIds) {
-    clearScopedRoutingStateByScope(`clockd.${daemonId}`);
+    clearScopedRoutingStateByScope(`sessiond.${daemonId}`);
   }
   for (const tmuxSessionId of args.removedTmuxSessionIds) {
     clearScopedRoutingStateByScope(`tmux:${tmuxSessionId}`);
@@ -168,8 +168,8 @@ function clearScopedRoutingStateForClockCleanup(args: {
   }
 }
 
-export function shouldEnableClockDaemonInjectLoop(): boolean {
-  const raw = String(process.env.ROUTECODEX_CLOCK_DAEMON_INJECT_ENABLE || process.env.RCC_CLOCK_DAEMON_INJECT_ENABLE || '')
+export function shouldEnableSessionDaemonInjectLoop(): boolean {
+  const raw = String(process.env.ROUTECODEX_SESSION_DAEMON_INJECT_ENABLE || process.env.RCC_SESSION_DAEMON_INJECT_ENABLE || '')
     .trim()
     .toLowerCase();
   if (raw === '0' || raw === 'false' || raw === 'off' || raw === 'no') {
@@ -184,23 +184,23 @@ export function shouldEnableClockDaemonInjectLoop(): boolean {
   return true;
 }
 
-function extractClockDaemonIdFromSessionScope(sessionId: string): string | undefined {
+function extractSessionDaemonIdFromSessionScope(sessionId: string): string | undefined {
   const normalized = String(sessionId || '').trim();
-  if (!normalized.startsWith(CLOCK_DAEMON_SESSION_PREFIX)) {
+  if (!normalized.startsWith(SESSION_DAEMON_SESSION_PREFIX)) {
     return undefined;
   }
-  const daemonId = normalized.slice(CLOCK_DAEMON_SESSION_PREFIX.length).trim();
+  const daemonId = normalized.slice(SESSION_DAEMON_SESSION_PREFIX.length).trim();
   return daemonId || undefined;
 }
 
-export function resolveRawClockConfig(server: any): unknown {
+export function resolveRawSessionConfig(server: any): unknown {
   const user = server.userConfig && typeof server.userConfig === 'object' ? (server.userConfig as Record<string, unknown>) : {};
   const vr = user.virtualrouter && typeof user.virtualrouter === 'object' ? (user.virtualrouter as Record<string, unknown>) : null;
-  if (vr && Object.prototype.hasOwnProperty.call(vr, 'clock')) {
-    return vr.clock;
+  if (vr && Object.prototype.hasOwnProperty.call(vr, 'session')) {
+    return vr.session;
   }
-  if (Object.prototype.hasOwnProperty.call(user, 'clock')) {
-    return (user as Record<string, unknown>).clock;
+  if (Object.prototype.hasOwnProperty.call(user, 'session')) {
+    return (user as Record<string, unknown>).session;
   }
 
   const artCfg =
@@ -209,65 +209,65 @@ export function resolveRawClockConfig(server: any): unknown {
     typeof server.currentRouterArtifacts.config === 'object'
       ? (server.currentRouterArtifacts.config as Record<string, unknown>)
       : null;
-  if (artCfg && Object.prototype.hasOwnProperty.call(artCfg, 'clock')) {
-    return artCfg.clock;
+  if (artCfg && Object.prototype.hasOwnProperty.call(artCfg, 'session')) {
+    return artCfg.session;
   }
   return undefined;
 }
 
-export function stopClockDaemonInjectLoop(server: any): void {
-  if (server.clockDaemonInjectTimer) {
-    clearInterval(server.clockDaemonInjectTimer);
-    server.clockDaemonInjectTimer = null;
+export function stopSessionDaemonInjectLoop(server: any): void {
+  if (server.sessionDaemonInjectTimer) {
+    clearInterval(server.sessionDaemonInjectTimer);
+    server.sessionDaemonInjectTimer = null;
   }
 }
 
-export function startClockDaemonInjectLoop(server: any): void {
-  stopClockDaemonInjectLoop(server);
-  if (!shouldEnableClockDaemonInjectLoop()) {
+export function startSessionDaemonInjectLoop(server: any): void {
+  stopSessionDaemonInjectLoop(server);
+  if (!shouldEnableSessionDaemonInjectLoop()) {
     return;
   }
-  const rawClockConfig = resolveRawClockConfig(server);
-  if (!rawClockConfig) {
+  const rawSessionConfig = resolveRawSessionConfig(server);
+  if (!rawSessionConfig) {
     return;
   }
 
-  const rawTick = String(process.env.ROUTECODEX_CLOCK_DAEMON_INJECT_TICK_MS || process.env.RCC_CLOCK_DAEMON_INJECT_TICK_MS || '').trim();
+  const rawTick = String(process.env.ROUTECODEX_SESSION_DAEMON_INJECT_TICK_MS || process.env.RCC_SESSION_DAEMON_INJECT_TICK_MS || '').trim();
   const parsedTick = rawTick ? Number.parseInt(rawTick, 10) : NaN;
   const tickMs = Number.isFinite(parsedTick) && parsedTick >= 200 ? Math.floor(parsedTick) : 1500;
 
-  server.clockDaemonInjectTimer = setInterval(() => {
-    void tickClockDaemonInjectLoop(server);
+  server.sessionDaemonInjectTimer = setInterval(() => {
+    void tickSessionDaemonInjectLoop(server);
   }, tickMs);
-  server.clockDaemonInjectTimer.unref?.();
+  server.sessionDaemonInjectTimer.unref?.();
 
-  void tickClockDaemonInjectLoop(server);
+  void tickSessionDaemonInjectLoop(server);
 }
 
-export async function tickClockDaemonInjectLoop(server: any): Promise<void> {
-  if (server.clockDaemonInjectTickInFlight) {
+export async function tickSessionDaemonInjectLoop(server: any): Promise<void> {
+  if (server.sessionDaemonInjectTickInFlight) {
     return;
   }
-  server.clockDaemonInjectTickInFlight = true;
+  server.sessionDaemonInjectTickInFlight = true;
   try {
-    const rawClockConfig = resolveRawClockConfig(server);
-    if (!rawClockConfig) {
+    const rawSessionConfig = resolveRawSessionConfig(server);
+    if (!rawSessionConfig) {
       return;
     }
-    const resolvedClockConfig = await resolveClockConfigSnapshot(rawClockConfig);
+    const resolvedClockConfig = await resolveClockConfigSnapshot(rawSessionConfig);
     if (!resolvedClockConfig) {
       return;
     }
-    const clockConfig = toExactMatchClockConfig(resolvedClockConfig);
+    const sessionConfig = toExactMatchSessionConfig(resolvedClockConfig);
 
     const sessionDir = readSessionDirFromEnv(process.env.ROUTECODEX_SESSION_DIR) || '';
-    const clockDir = sessionDir ? path.join(sessionDir, 'clock') : '';
-    const entries = clockDir ? await fs.readdir(clockDir, { withFileTypes: true }).catch(() => [] as Dirent[]) : ([] as Dirent[]);
+    const sessionTaskDir = sessionDir ? path.join(sessionDir, 'clock') : '';
+    const entries = sessionTaskDir ? await fs.readdir(sessionTaskDir, { withFileTypes: true }).catch(() => [] as Dirent[]) : ([] as Dirent[]);
 
-    const registry = getClockClientRegistry();
+    const registry = getSessionClientRegistry();
     const now = Date.now();
-    const cleanupRequestId = `clock_cleanup_${now}_${Math.random().toString(16).slice(2, 8)}`;
-    const enableCleanupAuditLog = shouldEnableClockCleanupAuditLog();
+    const cleanupRequestId = `session_cleanup_${now}_${Math.random().toString(16).slice(2, 8)}`;
+    const enableCleanupAuditLog = shouldEnableSessionCleanupAuditLog();
 
     const deadTmuxCleanup = registry.cleanupDeadTmuxSessions({
       isTmuxSessionAlive
@@ -282,8 +282,8 @@ export async function tickClockDaemonInjectLoop(server: any): Promise<void> {
     const removedTmuxSessionIds = Array.from(
       new Set<string>([...staleCleanup.removedTmuxSessionIds, ...deadTmuxCleanup.removedTmuxSessionIds])
     );
-    const cleanupClockSessionIds = Array.from(new Set<string>([...removedConversationSessionIds, ...removedTmuxSessionIds]));
-    clearScopedRoutingStateForClockCleanup({
+    const cleanupSessionIds = Array.from(new Set<string>([...removedConversationSessionIds, ...removedTmuxSessionIds]));
+    clearScopedRoutingStateForSessionCleanup({
       removedDaemonIds: Array.from(new Set<string>([
         ...staleCleanup.removedDaemonIds,
         ...deadTmuxCleanup.removedDaemonIds
@@ -292,11 +292,11 @@ export async function tickClockDaemonInjectLoop(server: any): Promise<void> {
       extraScopes: removedConversationSessionIds
     });
 
-    if (cleanupClockSessionIds.length > 0) {
-      for (const cleanupSessionId of cleanupClockSessionIds) {
+    if (cleanupSessionIds.length > 0) {
+      for (const cleanupSessionId of cleanupSessionIds) {
         await clearClockTasksSnapshot({
           sessionId: cleanupSessionId,
-          config: clockConfig
+          config: sessionConfig
         });
       }
     }
@@ -305,9 +305,9 @@ export async function tickClockDaemonInjectLoop(server: any): Promise<void> {
     if (
       hasCleanupActions
       && enableCleanupAuditLog
-      && Date.now() - server.lastClockDaemonCleanupAtMs > 2000
-      && shouldLogClockDaemonCleanupAudit({
-        cache: server.clockDaemonCleanupLogByKey,
+      && Date.now() - server.lastSessionDaemonCleanupAtMs > 2000
+      && shouldLogSessionDaemonCleanupAudit({
+        cache: server.sessionDaemonCleanupLogByKey,
         input: {
           managedTerminationEnabled: false,
           staleRemovedDaemonIds: staleCleanup.removedDaemonIds,
@@ -322,8 +322,8 @@ export async function tickClockDaemonInjectLoop(server: any): Promise<void> {
         }
       })
     ) {
-      server.lastClockDaemonCleanupAtMs = Date.now();
-      console.log('[RouteCodexHttpServer] clock daemon cleanup audit:', {
+      server.lastSessionDaemonCleanupAtMs = Date.now();
+      console.log('[RouteCodexHttpServer] session daemon cleanup audit:', {
         requestId: cleanupRequestId,
         managedTerminationEnabled: false,
         staleHeartbeat: {
@@ -369,11 +369,11 @@ export async function tickClockDaemonInjectLoop(server: any): Promise<void> {
         continue;
       }
 
-      const reservationId = 'clockd_inject_' + now + '_' + Math.random().toString(16).slice(2, 8);
+      const reservationId = 'sessiond_inject_' + now + '_' + Math.random().toString(16).slice(2, 8);
       const reserved = await reserveClockDueTasks({
         reservationId,
         sessionId,
-        config: clockConfig,
+        config: sessionConfig,
         requestId: reservationId
       });
 
@@ -381,14 +381,14 @@ export async function tickClockDaemonInjectLoop(server: any): Promise<void> {
         continue;
       }
 
-      const daemonId = extractClockDaemonIdFromSessionScope(sessionId);
+      const daemonId = extractSessionDaemonIdFromSessionScope(sessionId);
       const persistedTmuxSessionId = registry.resolveBoundTmuxSession(sessionId);
       const daemonWorkdirHint = daemonId ? readString(registry.findByDaemonId(daemonId)?.workdir) : undefined;
       const boundWorkdirHint = registry.resolveBoundWorkdir(sessionId);
       let taskWorkdirHint: string | undefined;
       const reservationTaskIds = extractReservationTaskIds(reserved.reservation);
       if (reservationTaskIds.size > 0) {
-        const tasks = await listClockTasksSnapshot({ sessionId, config: clockConfig });
+        const tasks = await listClockTasksSnapshot({ sessionId, config: sessionConfig });
         taskWorkdirHint = extractWorkdirHintFromReservationTasks(tasks, reservationTaskIds);
       }
       const workdirHint = daemonWorkdirHint ?? boundWorkdirHint ?? taskWorkdirHint;
@@ -401,7 +401,7 @@ export async function tickClockDaemonInjectLoop(server: any): Promise<void> {
       const tmuxSessionId = bind.tmuxSessionId || persistedTmuxSessionId;
 
       const text = [
-        '[Clock Reminder]: scheduled tasks are due.',
+        '[Session Reminder]: scheduled tasks are due.',
         reserved.injectText.trim(),
         'Only call tools that are actually available in your current runtime.'
       ].join('\n');
@@ -412,11 +412,11 @@ export async function tickClockDaemonInjectLoop(server: any): Promise<void> {
         ...(workdirHint ? { workdir: workdirHint } : {}),
         text,
         requestId: reservationId,
-        source: 'clock.daemon.inject'
+        source: 'session.daemon.inject'
       });
 
       if (!injected.ok) {
-        const shouldClearOrphanTasks = shouldClearClockTasksForInjectSkip({
+        const shouldClearOrphanTasks = shouldClearSessionTasksForInjectSkip({
           sessionId,
           injectReason: injected.reason,
           bindReason: bind.reason
@@ -424,15 +424,15 @@ export async function tickClockDaemonInjectLoop(server: any): Promise<void> {
         let clearedClockTasks = 0;
         if (shouldClearOrphanTasks) {
           registry.unbindSessionScope(sessionId);
-          clearedClockTasks = await clearClockTasksSnapshot({ sessionId, config: clockConfig });
+          clearedClockTasks = await clearClockTasksSnapshot({ sessionId, config: sessionConfig });
           clearScopedRoutingStateByScope(sessionId);
           if (tmuxSessionId) {
             clearScopedRoutingStateByScope(`tmux:${tmuxSessionId}`);
           }
         }
         if (
-          shouldLogClockDaemonInjectSkip({
-            cache: server.clockDaemonInjectSkipLogByKey,
+          shouldLogSessionDaemonInjectSkip({
+            cache: server.sessionDaemonInjectSkipLogByKey,
             input: {
               sessionId,
               injectReason: injected.reason,
@@ -440,7 +440,7 @@ export async function tickClockDaemonInjectLoop(server: any): Promise<void> {
             }
           })
         ) {
-          console.warn('[RouteCodexHttpServer] clock daemon inject skipped:', {
+          console.warn('[RouteCodexHttpServer] session daemon inject skipped:', {
             sessionId,
             injectReason: injected.reason,
             bindOk: bind.ok,
@@ -454,16 +454,16 @@ export async function tickClockDaemonInjectLoop(server: any): Promise<void> {
 
       await commitClockDueReservation({
         reservation: reserved.reservation,
-        config: clockConfig
+        config: sessionConfig
       });
     }
   } catch (error) {
     const now = Date.now();
-    if (now - server.lastClockDaemonInjectErrorAtMs > 5000) {
-      server.lastClockDaemonInjectErrorAtMs = now;
-      console.warn('[RouteCodexHttpServer] clock daemon inject loop tick failed:', error);
+    if (now - server.lastSessionDaemonInjectErrorAtMs > 5000) {
+      server.lastSessionDaemonInjectErrorAtMs = now;
+      console.warn('[RouteCodexHttpServer] session daemon inject loop tick failed:', error);
     }
   } finally {
-    server.clockDaemonInjectTickInFlight = false;
+    server.sessionDaemonInjectTickInFlight = false;
   }
 }

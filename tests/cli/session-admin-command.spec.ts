@@ -1,14 +1,14 @@
 import { describe, expect, it } from '@jest/globals';
 import { Command } from 'commander';
 
-import { createClockAdminCommand } from '../../src/cli/commands/clock-admin.js';
+import { createSessionAdminCommand } from '../../src/cli/commands/session-admin.js';
 
-describe('cli clock-admin command', () => {
-  it('lists clock tasks by default', async () => {
+describe('cli session-admin command', () => {
+  it('lists session tasks by default', async () => {
     const printed: string[] = [];
 
     const program = new Command();
-    createClockAdminCommand(program, {
+    createSessionAdminCommand(program, {
       isDevPackage: true,
       defaultDevPort: 5555,
       logger: {
@@ -25,7 +25,7 @@ describe('cli clock-admin command', () => {
           providerProfiles: {} as any
         }) as any,
       fetch: (async (url: string) => {
-        if (url.endsWith('/daemon/clock/tasks')) {
+        if (url.endsWith('/daemon/session/tasks')) {
           return {
             ok: true,
             status: 200,
@@ -40,19 +40,19 @@ describe('cli clock-admin command', () => {
       }
     });
 
-    await program.parseAsync(['node', 'routecodex', 'clock-admin', '--json'], { from: 'node' });
+    await program.parseAsync(['node', 'routecodex', 'session-admin', '--json'], { from: 'node' });
 
     const payload = JSON.parse(printed.join('\n'));
     expect(payload.ok).toBe(true);
     expect(Array.isArray(payload.sessions)).toBe(true);
   });
 
-  it('creates recurring clock task', async () => {
+  it('creates recurring session task', async () => {
     const printed: string[] = [];
     const postedBodies: Array<Record<string, unknown>> = [];
 
     const program = new Command();
-    createClockAdminCommand(program, {
+    createSessionAdminCommand(program, {
       isDevPackage: true,
       defaultDevPort: 5555,
       logger: {
@@ -69,7 +69,7 @@ describe('cli clock-admin command', () => {
           providerProfiles: {} as any
         }) as any,
       fetch: (async (url: string, init?: RequestInit) => {
-        if (url.endsWith('/daemon/clock/tasks') && init?.method === 'POST') {
+        if (url.endsWith('/daemon/session/tasks') && init?.method === 'POST') {
           postedBodies.push(JSON.parse(String(init.body || '{}')));
           return {
             ok: true,
@@ -87,7 +87,7 @@ describe('cli clock-admin command', () => {
 
     await program.parseAsync(
       [
-        'node', 'routecodex', 'clock-admin',
+        'node', 'routecodex', 'session-admin',
         '--create',
         '--session-id', 'conv_1',
         '--due-at', '2026-02-11T10:00:00Z',

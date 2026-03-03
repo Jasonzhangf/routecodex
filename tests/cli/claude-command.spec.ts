@@ -305,7 +305,7 @@ describe('cli claude command', () => {
       nodeBin: 'node',
       createSpinner: async () => createStubSpinner(),
       logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
-      env: { ROUTECODEX_CLOCK_RECLAIM_REQUIRED: '0' },
+      env: { ROUTECODEX_SESSION_RECLAIM_REQUIRED: '0' },
       rawArgv: ['claude', '--', '--help'],
       fsImpl: createStubFs(),
       homedir: () => '/home/test',
@@ -365,7 +365,7 @@ describe('cli claude command', () => {
         if (url.endsWith('/ready') || url.endsWith('/health')) {
           return { ok: true, status: 200, json: async () => ({ status: 'ok', ready: true }) } as any;
         }
-        if (url.includes('/daemon/clock-client/register')) {
+        if (url.includes('/daemon/session-client/register')) {
           try {
             const parsed = JSON.parse(String((init as RequestInit | undefined)?.body ?? '{}')) as Record<string, unknown>;
             if (typeof parsed.daemonId === 'string' && parsed.daemonId.trim()) {
@@ -419,8 +419,8 @@ describe('cli claude command', () => {
     expect(shellCommand).toContain("'-u' 'ANTHROPIC_AUTH_TOKEN'");
     expect(shellCommand).toContain("'-u' 'ANTHROPIC_TOKEN'");
     expect(shellCommand).toContain('ANTHROPIC_API_KEY=');
-    expect(shellCommand).toContain('::rcc-clockd:');
-    expect(shellCommand).toContain('::rcc-tmux:rcc_claude_');
+    expect(shellCommand).toContain('::rcc-sessiond:');
+    expect(shellCommand).toContain('::rcc-session:rcc_claude_');
     if (registeredDaemonId) {
       expect(shellCommand).toContain(registeredDaemonId);
     }

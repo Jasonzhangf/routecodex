@@ -13,16 +13,7 @@ export function canonicalizeProviderKey(providerKey: string): string {
   if (!key) {
     return '';
   }
-  // Historical bug: some builds encoded OAuth token sequence into runtime alias,
-  // producing provider keys like "antigravity.1-foo.<modelId>" alongside "antigravity.foo.<modelId>".
-  // Sequence is NOT part of the semantic alias; canonicalize to the non-prefixed form.
-  const match = key.match(/^antigravity\.(\d+)-([^.]+)\.(.+)$/i);
-  if (!match) {
-    return key;
-  }
-  const alias = match[2];
-  const rest = match[3];
-  return `antigravity.${alias}.${rest}`;
+  return key;
 }
 
 export function mergeQuotaStates(providerKey: string, states: QuotaState[]): QuotaState {

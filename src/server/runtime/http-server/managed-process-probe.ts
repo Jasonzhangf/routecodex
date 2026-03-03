@@ -81,7 +81,7 @@ function logManagedClientKillEvent(input: {
   const command = normalizeString(input.command);
   logProcessLifecycle({
     event: 'kill_attempt',
-    source: 'http.clock-managed-client-reaper',
+    source: 'http.session-managed-client-reaper',
     details: {
       daemonId: normalizeString(input.daemonId) || null,
       targetPid: input.pid,

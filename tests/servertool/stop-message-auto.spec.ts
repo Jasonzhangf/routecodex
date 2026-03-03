@@ -2370,7 +2370,7 @@ describe('stop_message_auto servertool', () => {
     expect(fs.existsSync(resolveStopStatePath(sessionId))).toBe(false);
   });
 
-  test.skip('injects loop-break warning after 5 identical stopMessage request/response rounds', async () => {
+  test('injects loop-break warning after 5 identical stopMessage request/response rounds', async () => {
     const sessionId = 'stopmessage-spec-session-loop-warn';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
@@ -2452,7 +2452,7 @@ describe('stop_message_auto servertool', () => {
     ).toBe(true);
   });
 
-  test.skip('returns fetch failed after 10 identical stopMessage request/response rounds', async () => {
+  test('returns fetch failed after 10 identical stopMessage request/response rounds', async () => {
     const sessionId = 'stopmessage-spec-session-loop-fail';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
@@ -2544,7 +2544,7 @@ describe('stop_message_auto servertool', () => {
     expect(followupCalled).toBe(false);
   });
 
-  test.skip('returns fetch failed when stopMessage flow elapsed time exceeds 900 seconds', async () => {
+  test('returns fetch failed when stopMessage flow elapsed time exceeds 900 seconds', async () => {
     const sessionId = 'stopmessage-spec-session-stage-timeout';
     const state: RoutingInstructionState = {
       forcedTarget: undefined,
@@ -3055,7 +3055,7 @@ describe('stop_message_auto servertool', () => {
     }
   });
 
-  test.skip('keeps plain stopMessage followup across repeated rounds', async () => {
+  test('keeps plain stopMessage followup across repeated rounds', async () => {
     const tempUserDir = fs.mkdtempSync(path.join(process.cwd(), 'tmp', 'stopmessage-stage-loop-userdir-'));
     const prevUserDir = process.env.ROUTECODEX_USER_DIR;
     const prevStageMode = process.env.ROUTECODEX_STOPMESSAGE_STAGE_MODE;

@@ -1,6 +1,6 @@
 import path from 'node:path';
 
-export type ClockClientRecord = {
+export type SessionClientRecord = {
   daemonId: string;
   tmuxSessionId?: string;
   sessionId?: string;
@@ -19,7 +19,7 @@ export type ClockClientRecord = {
   lastError?: string;
 };
 
-export type ClockClientInjectArgs = {
+export type SessionClientInjectArgs = {
   tmuxSessionId?: string;
   tmuxTarget?: string;
   sessionId?: string;
@@ -31,13 +31,13 @@ export type ClockClientInjectArgs = {
   source?: string;
 };
 
-export type ClockClientInjectResult = {
+export type SessionClientInjectResult = {
   ok: boolean;
   daemonId?: string;
   reason?: string;
 };
 
-export type ClockConversationBindArgs = {
+export type SessionConversationBindArgs = {
   conversationSessionId: string;
   tmuxSessionId?: string;
   daemonId?: string;
@@ -45,7 +45,7 @@ export type ClockConversationBindArgs = {
   workdir?: string;
 };
 
-export type ClockCleanupResult = {
+export type SessionCleanupResult = {
   removedDaemonIds: string[];
   removedTmuxSessionIds: string[];
   removedConversationSessionIds: string[];
@@ -57,7 +57,7 @@ export type ClockCleanupResult = {
   skippedKillManagedClientPids: number[];
 };
 
-export type ClockStaleCleanupResult = ClockCleanupResult & {
+export type SessionStaleCleanupResult = SessionCleanupResult & {
   staleAfterMs: number;
 };
 
@@ -122,8 +122,8 @@ export function isWorkdirCompatible(recordWorkdirRaw: unknown, hintWorkdirRaw: u
 
 export function resolveHeartbeatTtlMs(): number {
   const raw = String(
-    process.env.ROUTECODEX_CLOCK_CLIENT_HEARTBEAT_TTL_MS
-      || process.env.RCC_CLOCK_CLIENT_HEARTBEAT_TTL_MS
+    process.env.ROUTECODEX_SESSION_CLIENT_HEARTBEAT_TTL_MS
+      || process.env.RCC_SESSION_CLIENT_HEARTBEAT_TTL_MS
       || ''
   ).trim();
   const parsed = raw ? Number.parseInt(raw, 10) : NaN;
@@ -192,7 +192,7 @@ export function removeConversationMappingsByTmuxSession(
 }
 
 function hasOtherDaemonForTmuxSession(args: {
-  records: Map<string, ClockClientRecord>;
+  records: Map<string, SessionClientRecord>;
   daemonId: string;
   tmuxSessionId: string;
 }): boolean {
@@ -213,13 +213,13 @@ function hasOtherDaemonForTmuxSession(args: {
 }
 
 export function cleanupStaleHeartbeatsFromRegistry(args: {
-  records: Map<string, ClockClientRecord>;
+  records: Map<string, SessionClientRecord>;
   conversationToTmuxSession: Map<string, string>;
   nowMs?: number;
   staleAfterMs?: number;
   terminateManagedTmuxSession?: (tmuxSessionId: string) => boolean;
   terminateManagedClientProcess?: (processInfo: ManagedProcessInfo) => boolean;
-}): ClockStaleCleanupResult {
+}): SessionStaleCleanupResult {
   const nowMs = Number.isFinite(args.nowMs as number) ? Math.floor(args.nowMs as number) : Date.now();
   const staleAfterMs = Number.isFinite(args.staleAfterMs as number)
     ? Math.max(1, Math.floor(args.staleAfterMs as number))
@@ -297,12 +297,12 @@ export function cleanupStaleHeartbeatsFromRegistry(args: {
 }
 
 export function cleanupDeadTmuxSessionsFromRegistry(args: {
-  records: Map<string, ClockClientRecord>;
+  records: Map<string, SessionClientRecord>;
   conversationToTmuxSession: Map<string, string>;
   isTmuxSessionAlive: (tmuxSessionId: string) => boolean;
   terminateManagedTmuxSession?: (tmuxSessionId: string) => boolean;
   terminateManagedClientProcess?: (processInfo: ManagedProcessInfo) => boolean;
-}): ClockCleanupResult {
+}): SessionCleanupResult {
   const removedDaemonIds: string[] = [];
   const removedTmuxSessionIds: string[] = [];
   const removedConversationSessionIdsSet = new Set<string>();

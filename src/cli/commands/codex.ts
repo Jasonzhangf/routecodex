@@ -29,12 +29,11 @@ export function createCodexCommand(program: Command, ctx: CodexCommandContext): 
       return args;
     },
     buildEnv: ({ env, baseUrl, configuredApiKey, cwd }) => {
+      // Prefer launcher-injected proxy key (may carry session daemon/scope suffix for session binding).
+      const proxyApiKey = (typeof env.OPENAI_API_KEY === 'string' && env.OPENAI_API_KEY.trim())
+        ? env.OPENAI_API_KEY.trim()
+        : (configuredApiKey || 'rcc-proxy-key');
       const openAiBase = normalizeOpenAiBaseUrl(baseUrl);
-      const resolvedApiKey = configuredApiKey
-        || (typeof env.OPENAI_API_KEY === 'string' && env.OPENAI_API_KEY.trim()
-          ? env.OPENAI_API_KEY.trim()
-          : null)
-        || 'rcc-proxy-key';
       return {
         ...env,
         PWD: cwd,
@@ -44,7 +43,7 @@ export function createCodexCommand(program: Command, ctx: CodexCommandContext): 
         OPENAI_BASE_URL: openAiBase,
         OPENAI_API_BASE: openAiBase,
         OPENAI_API_BASE_URL: openAiBase,
-        OPENAI_API_KEY: resolvedApiKey
+        OPENAI_API_KEY: proxyApiKey
       } as NodeJS.ProcessEnv;
     }
   });

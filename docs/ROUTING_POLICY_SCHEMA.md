@@ -38,7 +38,7 @@ Canonical snapshot shape:
       "enabled": true,
       "policyFile": "~/.routecodex/policy/exec-command-guard.v1.json"
     },
-    "clock": {}
+    "session": {}
   }
 }
 ```

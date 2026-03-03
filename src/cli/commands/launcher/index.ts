@@ -11,7 +11,7 @@ export type {
   LauncherCommandOptions,
   LauncherSpec,
   ResolvedServerConnection,
-  ClockClientService,
+  SessionClientService,
   ManagedTmuxSession,
   TmuxSelfHealPolicy,
   EnvDiff

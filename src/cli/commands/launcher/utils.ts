@@ -150,7 +150,14 @@ export function readConfigApiKey(fsImpl: typeof fs, configPath: string): string 
     const cfg = JSON.parse(txt);
     const direct = cfg?.httpserver?.apikey ?? cfg?.modules?.httpserver?.config?.apikey ?? cfg?.server?.apikey;
     const value = typeof direct === 'string' ? direct.trim() : '';
-    return value ? value : null;
+    if (!value) {
+      return null;
+    }
+    if (value === 'ROUTECODEX_HTTP_APIKEY' || value === '${ROUTECODEX_HTTP_APIKEY}') {
+      const envValue = process.env.ROUTECODEX_HTTP_APIKEY;
+      return envValue && envValue.trim() ? envValue.trim() : null;
+    }
+    return value;
   } catch {
     return null;
   }

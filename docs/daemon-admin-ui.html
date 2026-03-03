@@ -945,8 +945,8 @@
             </div>
 
             <div class="card" style="box-shadow: none;">
-              <p class="section-title">Clock daemon bindings</p>
-              <p class="section-sub">tmux daemon registry and heartbeat state used by clock injection.</p>
+              <p class="section-title">Session daemon bindings</p>
+              <p class="section-sub">session daemon registry and heartbeat state used by clock injection.</p>
               <div class="table-wrap">
                 <table class="table">
                   <thead>
@@ -2309,7 +2309,7 @@
         const overviewEl = $("clockOverviewText");
         if (!overviewEl) return;
         try {
-          const res = await fetch("/daemon/clock/tasks");
+          const res = await fetch("/daemon/session/tasks");
           if (!res || !res.ok) throw new Error(res ? String(res.status) : "request_failed");
           const data = await res.json().catch(() => ({}));
           const sessions = data && Array.isArray(data.sessions) ? data.sessions : [];
@@ -2722,7 +2722,7 @@
 
         if (daemonBody) {
           if (!records.length) {
-            daemonBody.appendChild(createInfoRow(7, "No clock daemon bindings."));
+            daemonBody.appendChild(createInfoRow(7, "No session daemon bindings."));
           } else {
             for (const rec of records) {
               const tr = document.createElement("tr");
@@ -2762,8 +2762,8 @@
         try {
           const filter = textOf($("clockSessionFilterInput") && $("clockSessionFilterInput").value).trim();
           const path = filter
-            ? "/daemon/clock/tasks?sessionId=" + encodeURIComponent(filter)
-            : "/daemon/clock/tasks";
+            ? "/daemon/session/tasks?sessionId=" + encodeURIComponent(filter)
+            : "/daemon/session/tasks";
           const data = await apiFetch(path);
           UI.clockSnapshot = data && typeof data === "object" ? data : {};
           UI.clockSnapshotUpdatedAt = Date.now();

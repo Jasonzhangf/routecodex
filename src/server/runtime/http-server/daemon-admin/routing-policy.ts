@@ -20,7 +20,7 @@ export type RoutingPolicySnapshotV1 = {
     contextRouting?: unknown;
     webSearch?: unknown;
     execCommandGuard?: unknown;
-    clock?: unknown;
+    session?: unknown;
   };
 };
 
@@ -55,7 +55,7 @@ export function canonicalizePolicyFromRawConfig(rawConfig: UnknownRecord): Routi
   const contextRouting = activePolicy.contextRouting;
   const webSearch = activePolicy.webSearch;
   const execCommandGuard = activePolicy.execCommandGuard;
-  const clock = activePolicy.clock;
+  const session = activePolicy.session;
 
   const vr: RoutingPolicySnapshotV1['virtualrouter'] = {
     routing,
@@ -65,7 +65,7 @@ export function canonicalizePolicyFromRawConfig(rawConfig: UnknownRecord): Routi
     ...(contextRouting !== undefined ? { contextRouting } : {}),
     ...(webSearch !== undefined ? { webSearch } : {}),
     ...(execCommandGuard !== undefined ? { execCommandGuard } : {}),
-    ...(clock !== undefined ? { clock } : {})
+    ...(session !== undefined ? { session } : {})
   };
 
   return { schemaVersion: 1, virtualrouter: vr };
@@ -115,7 +115,7 @@ export async function writePolicyToConfigPath(options: {
   const contextRouting = policyVr.contextRouting;
   const webSearch = policyVr.webSearch;
   const execCommandGuard = policyVr.execCommandGuard;
-  const clock = policyVr.clock;
+  const session = policyVr.session;
 
   const canonical: RoutingPolicySnapshotV1 = {
     schemaVersion: 1,
@@ -127,7 +127,7 @@ export async function writePolicyToConfigPath(options: {
       ...(contextRouting !== undefined ? { contextRouting } : {}),
       ...(webSearch !== undefined ? { webSearch } : {}),
       ...(execCommandGuard !== undefined ? { execCommandGuard } : {}),
-      ...(clock !== undefined ? { clock } : {})
+      ...(session !== undefined ? { session } : {})
     }
   };
   const raw = await fs.readFile(options.configPath, 'utf8');

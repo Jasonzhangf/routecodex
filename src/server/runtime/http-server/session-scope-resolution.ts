@@ -1,6 +1,6 @@
-import { extractClockClientTmuxSessionIdFromApiKey } from '../../../utils/clock-client-token.js';
+import { extractSessionClientScopeIdFromApiKey } from '../../../utils/session-client-token.js';
 
-type ClockScopeResolutionArgs = {
+type SessionScopeResolutionArgs = {
   userMeta: Record<string, unknown>;
   bodyMeta: Record<string, unknown>;
   headers?: Record<string, unknown>;
@@ -91,8 +91,8 @@ function extractTmuxSessionIdFromTurnMetadata(rawValue: string | undefined): str
         || normalizeTmuxToken(record.rcc_tmux_session_id)
         || normalizeTmuxToken(record.clientTmuxSessionId)
         || normalizeTmuxToken(record.client_tmux_session_id)
-        || normalizeTmuxToken(record.rccClockClientTmuxSessionId)
-        || normalizeTmuxToken(record.rcc_clock_client_tmux_session_id);
+        || normalizeTmuxToken(record.rccSessionClientTmuxSessionId)
+        || normalizeTmuxToken(record.rcc_session_client_tmux_session_id);
       if (directTmux) {
         return directTmux;
       }
@@ -108,8 +108,8 @@ function extractTmuxSessionIdFromTurnMetadata(rawValue: string | undefined): str
         const normalizedKey = key.trim().toLowerCase();
         if (
           normalizedKey.includes('tmux')
-          || normalizedKey === 'rcc_clock_client_tmux_session_id'
-          || normalizedKey === 'rccclockclienttmuxsessionid'
+          || normalizedKey === 'rcc_session_client_tmux_session_id'
+          || normalizedKey === 'rccsessionclienttmuxsessionid'
         ) {
           const token = normalizeTmuxToken(value);
           if (token) {
@@ -169,7 +169,7 @@ function extractTmuxSessionIdFromTurnMetadata(rawValue: string | undefined): str
         || normalizeTmuxToken(params.get('rcc_tmux_session_id'))
         || normalizeTmuxToken(params.get('clientTmuxSessionId'))
         || normalizeTmuxToken(params.get('client_tmux_session_id'))
-        || normalizeTmuxToken(params.get('rcc_clock_client_tmux_session_id'));
+        || normalizeTmuxToken(params.get('rcc_session_client_tmux_session_id'));
       if (fromParams) {
         return fromParams;
       }
@@ -206,14 +206,14 @@ function readTmuxFromHeaderSource(source: Record<string, unknown> | undefined): 
     || extractHeaderValue(source, 'x-routecodex-apikey')
     || extractHeaderValue(source, 'api-key')
     || extractHeaderValue(source, 'apikey');
-  const fromApiKey = extractClockClientTmuxSessionIdFromApiKey(fromApiKeyHeader);
+  const fromApiKey = extractSessionClientScopeIdFromApiKey(fromApiKeyHeader);
   if (fromApiKey) {
     return fromApiKey;
   }
   const authorization = extractHeaderValue(source, 'authorization');
   if (authorization) {
     const match = authorization.match(/^(?:Bearer|ApiKey)\s+(.+)$/i);
-    const fromAuth = extractClockClientTmuxSessionIdFromApiKey(match ? String(match[1]) : authorization);
+    const fromAuth = extractSessionClientScopeIdFromApiKey(match ? String(match[1]) : authorization);
     if (fromAuth) {
       return fromAuth;
     }
@@ -221,7 +221,13 @@ function readTmuxFromHeaderSource(source: Record<string, unknown> | undefined): 
   return undefined;
 }
 
-export function resolveTmuxSessionIdAndSource(args: ClockScopeResolutionArgs): TmuxSessionResolution {
+export function resolveTmuxSessionIdAndSource(args: SessionScopeResolutionArgs): TmuxSessionResolution {
+  const tmuxFromHeaders = readTmuxFromHeaderSource(args.headers)
+    || readTmuxFromHeaderSource(args.clientHeaders as unknown as Record<string, unknown> | undefined);
+  if (tmuxFromHeaders) {
+    return { tmuxSessionId: tmuxFromHeaders, source: 'headers_or_api_key' };
+  }
+
   const tmuxFromMeta = readToken(args.userMeta.tmuxSessionId) || readToken(args.userMeta.tmux_session_id);
   if (tmuxFromMeta) {
     return { tmuxSessionId: tmuxFromMeta, source: 'metadata' };
@@ -230,17 +236,6 @@ export function resolveTmuxSessionIdAndSource(args: ClockScopeResolutionArgs): T
   const tmuxFromBody = readToken(args.bodyMeta.tmuxSessionId) || readToken(args.bodyMeta.tmux_session_id);
   if (tmuxFromBody) {
     return { tmuxSessionId: tmuxFromBody, source: 'body_metadata' };
-  }
-
-  const tmuxFromHeaders = readTmuxFromHeaderSource(args.headers)
-    || readTmuxFromHeaderSource(args.clientHeaders as unknown as Record<string, unknown> | undefined);
-  if (tmuxFromHeaders) {
-    return { tmuxSessionId: tmuxFromHeaders, source: 'headers_or_api_key' };
-  }
-
-  const tmuxFromDaemon = args.resolveTmuxSessionIdFromDaemon?.(args.daemonId);
-  if (tmuxFromDaemon) {
-    return { tmuxSessionId: tmuxFromDaemon, source: 'registry_by_daemon' };
   }
 
   return { source: 'none' };

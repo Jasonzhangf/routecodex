@@ -1,5 +1,5 @@
-const CLOCK_DAEMON_KEY_DELIMITER = '::rcc-clockd:';
-const CLOCK_TMUX_KEY_DELIMITER = '::rcc-tmux:';
+const SESSION_DAEMON_KEY_DELIMITER = '::rcc-sessiond:';
+const SESSION_SCOPE_KEY_DELIMITER = '::rcc-session:';
 
 function normalizeToken(value: unknown): string {
   if (typeof value !== 'string') {
@@ -36,34 +36,34 @@ function extractSuffixValue(apiKey: string, marker: string): string | undefined 
     return undefined;
   }
   const start = markerIndex + marker.length;
-  const nextDaemon = apiKey.indexOf(CLOCK_DAEMON_KEY_DELIMITER, start);
-  const nextTmux = apiKey.indexOf(CLOCK_TMUX_KEY_DELIMITER, start);
-  const candidates = [nextDaemon, nextTmux].filter((entry) => entry >= 0);
+  const nextDaemon = apiKey.indexOf(SESSION_DAEMON_KEY_DELIMITER, start);
+  const nextScope = apiKey.indexOf(SESSION_SCOPE_KEY_DELIMITER, start);
+  const candidates = [nextDaemon, nextScope].filter((entry) => entry >= 0);
   const end = candidates.length > 0 ? Math.min(...candidates) : apiKey.length;
   const value = apiKey.slice(start, end);
   return value || undefined;
 }
 
-export function encodeClockClientApiKey(baseApiKey: string, daemonId: string, tmuxSessionId?: string): string {
+export function encodeSessionClientApiKey(baseApiKey: string, daemonId: string, sessionScopeId?: string): string {
   const base = normalizeToken(baseApiKey) || 'rcc-proxy-key';
   const normalizedDaemonId = normalizeDaemonId(daemonId);
-  const normalizedTmuxSessionId = normalizeTmuxSessionId(tmuxSessionId);
+  const normalizedScopeId = normalizeTmuxSessionId(sessionScopeId);
   let encoded = base;
   if (normalizedDaemonId) {
-    encoded = `${encoded}${CLOCK_DAEMON_KEY_DELIMITER}${normalizedDaemonId}`;
+    encoded = `${encoded}${SESSION_DAEMON_KEY_DELIMITER}${normalizedDaemonId}`;
   }
-  if (normalizedTmuxSessionId) {
-    encoded = `${encoded}${CLOCK_TMUX_KEY_DELIMITER}${normalizedTmuxSessionId}`;
+  if (normalizedScopeId) {
+    encoded = `${encoded}${SESSION_SCOPE_KEY_DELIMITER}${normalizedScopeId}`;
   }
   return encoded;
 }
 
-export function extractClockClientDaemonIdFromApiKey(value: unknown): string | undefined {
+export function extractSessionClientDaemonIdFromApiKey(value: unknown): string | undefined {
   const apiKey = normalizeToken(value);
   if (!apiKey) {
     return undefined;
   }
-  const suffix = extractSuffixValue(apiKey, CLOCK_DAEMON_KEY_DELIMITER);
+  const suffix = extractSuffixValue(apiKey, SESSION_DAEMON_KEY_DELIMITER);
   if (!suffix) {
     return undefined;
   }
@@ -71,17 +71,17 @@ export function extractClockClientDaemonIdFromApiKey(value: unknown): string | u
   return daemonId || undefined;
 }
 
-export function extractClockClientTmuxSessionIdFromApiKey(value: unknown): string | undefined {
+export function extractSessionClientScopeIdFromApiKey(value: unknown): string | undefined {
   const apiKey = normalizeToken(value);
   if (!apiKey) {
     return undefined;
   }
-  const suffix = extractSuffixValue(apiKey, CLOCK_TMUX_KEY_DELIMITER);
+  const suffix = extractSuffixValue(apiKey, SESSION_SCOPE_KEY_DELIMITER);
   if (!suffix) {
     return undefined;
   }
-  const tmuxSessionId = normalizeTmuxSessionId(suffix);
-  return tmuxSessionId || undefined;
+  const scopeId = normalizeTmuxSessionId(suffix);
+  return scopeId || undefined;
 }
 
 export function matchesExpectedClientApiKey(providedApiKey: string, expectedApiKey: string): boolean {
@@ -93,13 +93,8 @@ export function matchesExpectedClientApiKey(providedApiKey: string, expectedApiK
   if (provided === expected) {
     return true;
   }
-  if (!provided.startsWith(expected)) {
-    return false;
-  }
-  const daemonId = extractClockClientDaemonIdFromApiKey(provided);
-  if (daemonId) {
+  if (provided.startsWith(expected)) {
     return true;
   }
-  const tmuxSessionId = extractClockClientTmuxSessionIdFromApiKey(provided);
-  return Boolean(tmuxSessionId);
+  return false;
 }

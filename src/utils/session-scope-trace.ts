@@ -1,12 +1,12 @@
-type ClockScopeTraceMode = 'off' | 'auto' | 'on' | 'verbose';
+type SessionScopeTraceMode = 'off' | 'auto' | 'on' | 'verbose';
 
 function readTraceModeRaw(): string {
-  return String(process.env.ROUTECODEX_CLOCK_SCOPE_TRACE ?? process.env.RCC_CLOCK_SCOPE_TRACE ?? '')
+  return String(process.env.ROUTECODEX_SESSION_SCOPE_TRACE ?? process.env.RCC_SESSION_SCOPE_TRACE ?? '')
     .trim()
     .toLowerCase();
 }
 
-export function resolveClockScopeTraceMode(): ClockScopeTraceMode {
+export function resolveSessionScopeTraceMode(): SessionScopeTraceMode {
   const raw = readTraceModeRaw();
   if (!raw || raw === 'auto' || raw === 'default') {
     return 'auto';
@@ -23,22 +23,22 @@ export function resolveClockScopeTraceMode(): ClockScopeTraceMode {
   return 'auto';
 }
 
-export function isClockScopeTraceEnabled(): boolean {
-  const mode = resolveClockScopeTraceMode();
+export function isSessionScopeTraceEnabled(): boolean {
+  const mode = resolveSessionScopeTraceMode();
   return mode === 'on' || mode === 'verbose';
 }
 
-export function isClockScopeTraceVerbose(): boolean {
-  return resolveClockScopeTraceMode() === 'verbose';
+export function isSessionScopeTraceVerbose(): boolean {
+  return resolveSessionScopeTraceMode() === 'verbose';
 }
 
-export function shouldTraceClockScopeByContext(args: {
+export function shouldTraceSessionScopeByContext(args: {
   endpointOrPath: string;
   userAgent?: string;
   originator?: string;
   hasTurnMetadata?: boolean;
 }): boolean {
-  const mode = resolveClockScopeTraceMode();
+  const mode = resolveSessionScopeTraceMode();
   if (mode === 'off') {
     return false;
   }

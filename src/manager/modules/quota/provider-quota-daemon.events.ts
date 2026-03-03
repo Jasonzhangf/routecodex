@@ -18,12 +18,10 @@ import {
 } from './provider-quota-daemon.cooldown.js';
 import { isModelCapacityExhausted429, ProviderModelBackoffTracker } from './provider-quota-daemon.model-backoff.js';
 import {
-  extractAntigravityAlias,
   extractProviderKey,
   isIflowAkBlocked434,
   isAntigravityReauthRequired403,
   isFatalForQuota,
-  listAntigravityProviderKeysByAlias,
   parseAntigravityGoogleAccountVerification
 } from './provider-quota-daemon.error-helpers.js';
 
@@ -146,37 +144,33 @@ export async function handleProviderQuotaErrorEvent(
   }
 
   // Antigravity: Google account risk verification required ("signin/continue").
-  // This is NOT "token expired" (reauth) and not quota. It requires human interaction in browser,
-  // so we remove all models under the same runtime alias from pool and surface a UI hint.
+  // This is NOT "token expired" (reauth) and not quota. It requires human interaction in browser.
+  // Scope: current providerKey only (no alias fan-out).
   if (providerKey.toLowerCase().startsWith('antigravity.')) {
     const verification = parseAntigravityGoogleAccountVerification(event);
     if (verification) {
-      const alias = extractAntigravityAlias(providerKey);
-      const keys = alias ? listAntigravityProviderKeysByAlias(ctx, alias) : [providerKey];
-      for (const key of keys) {
-        const prevState =
-          ctx.quotaStates.get(key) ?? createInitialQuotaState(key, ctx.staticConfigs.get(key), nowMs);
-        const nextState: QuotaState = {
-          ...prevState,
-          inPool: false,
-          reason: 'authVerify',
-          authIssue: {
-            kind: 'google_account_verification',
-            url: verification.url,
-            message: verification.message
-          },
-          cooldownUntil: null,
-          blacklistUntil: null,
-          lastErrorSeries: 'EFATAL',
-          lastErrorCode: typeof event.code === 'string' && event.code.trim() ? event.code.trim() : 'HTTP_403',
-          lastErrorAtMs: nowMs,
-          consecutiveErrorCount:
-            typeof prevState.consecutiveErrorCount === 'number' && prevState.consecutiveErrorCount > 0
-              ? prevState.consecutiveErrorCount + 1
-              : 1
-        };
-        ctx.quotaStates.set(key, nextState);
-      }
+      const prevState =
+        ctx.quotaStates.get(providerKey) ?? createInitialQuotaState(providerKey, ctx.staticConfigs.get(providerKey), nowMs);
+      const nextState: QuotaState = {
+        ...prevState,
+        inPool: false,
+        reason: 'authVerify',
+        authIssue: {
+          kind: 'google_account_verification',
+          url: verification.url,
+          message: verification.message
+        },
+        cooldownUntil: null,
+        blacklistUntil: null,
+        lastErrorSeries: 'EFATAL',
+        lastErrorCode: typeof event.code === 'string' && event.code.trim() ? event.code.trim() : 'HTTP_403',
+        lastErrorAtMs: nowMs,
+        consecutiveErrorCount:
+          typeof prevState.consecutiveErrorCount === 'number' && prevState.consecutiveErrorCount > 0
+            ? prevState.consecutiveErrorCount + 1
+            : 1
+      };
+      ctx.quotaStates.set(providerKey, nextState);
       ctx.schedulePersist(nowMs);
 
       const tsIso = new Date(nowMs).toISOString();
@@ -201,33 +195,28 @@ export async function handleProviderQuotaErrorEvent(
     }
 
     // Antigravity: OAuth missing/expired (reauth required).
-    // Policy: cool down the entire alias for 30 minutes so routing can immediately switch to another alias,
-    // while preventing repeated 403 hammering on the same broken token.
+    // Scope: current providerKey only (no alias fan-out).
     if (typeof event.status === 'number' && event.status === 403 && isAntigravityReauthRequired403(event)) {
-      const alias = extractAntigravityAlias(providerKey);
-      const keys = alias ? listAntigravityProviderKeysByAlias(ctx, alias) : [providerKey];
       const cooldownUntil = nowMs + 30 * 60_000;
 
-      for (const key of keys) {
-        const prevState =
-          ctx.quotaStates.get(key) ?? createInitialQuotaState(key, ctx.staticConfigs.get(key), nowMs);
-        const nextState: QuotaState = {
-          ...prevState,
-          inPool: false,
-          reason: 'cooldown',
-          authIssue: null,
-          cooldownUntil,
-          blacklistUntil: null,
-          lastErrorSeries: 'EFATAL',
-          lastErrorCode: typeof event.code === 'string' && event.code.trim() ? event.code.trim() : 'HTTP_403',
-          lastErrorAtMs: nowMs,
-          consecutiveErrorCount:
-            typeof prevState.consecutiveErrorCount === 'number' && prevState.consecutiveErrorCount > 0
-              ? prevState.consecutiveErrorCount + 1
-              : 1
-        };
-        ctx.quotaStates.set(key, nextState);
-      }
+      const prevState =
+        ctx.quotaStates.get(providerKey) ?? createInitialQuotaState(providerKey, ctx.staticConfigs.get(providerKey), nowMs);
+      const nextState: QuotaState = {
+        ...prevState,
+        inPool: false,
+        reason: 'cooldown',
+        authIssue: null,
+        cooldownUntil,
+        blacklistUntil: null,
+        lastErrorSeries: 'EFATAL',
+        lastErrorCode: typeof event.code === 'string' && event.code.trim() ? event.code.trim() : 'HTTP_403',
+        lastErrorAtMs: nowMs,
+        consecutiveErrorCount:
+          typeof prevState.consecutiveErrorCount === 'number' && prevState.consecutiveErrorCount > 0
+            ? prevState.consecutiveErrorCount + 1
+            : 1
+      };
+      ctx.quotaStates.set(providerKey, nextState);
       ctx.schedulePersist(nowMs);
 
       const tsIso = new Date(nowMs).toISOString();

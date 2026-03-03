@@ -9,7 +9,7 @@ import { mapErrorToHttp } from '../../utils/http-error-mapper.js';
 import { renderTokenPortalPage } from '../../../token-portal/render.js';
 import { loadTokenPortalFingerprintSummary } from '../../../token-portal/fingerprint-summary.js';
 import { registerDaemonAdminRoutes, rejectNonLocalOrUnauthorizedAdmin } from './daemon-admin-routes.js';
-import { registerClockClientRoutes } from './clock-client-routes.js';
+import { registerSessionClientRoutes } from './session-client-routes.js';
 import type { HistoricalPeriodsSnapshot, HistoricalStatsSnapshot, StatsSnapshot } from './stats-manager.js';
 import { buildInfo } from '../../../build-info.js';
 import { logProcessLifecycleSync } from '../../../utils/process-lifecycle-logger.js';
@@ -209,8 +209,8 @@ export function registerHttpRoutes(options: RouteOptions): void {
     getServerHost: () => String(config.server.host || '')
   });
 
-  // Local-only clock client daemon endpoints (register/heartbeat/inject/unregister)
-  registerClockClientRoutes(app);
+  // Local-only session client daemon endpoints (register/heartbeat/inject/unregister)
+  registerSessionClientRoutes(app);
 
   // OAuth Portal route is registered early in constructor, so we skip it here
   // to avoid duplicate route registration

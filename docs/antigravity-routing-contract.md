@@ -20,7 +20,7 @@ for the "standard" execution path; any alternative behavior is considered legacy
    cascade into cross-account verification (403 verify) events. Retrying within the same request should be conservative.
 
 3) **Alias rotation happens across requests, not within a single request**  
-   Multi-alias load balancing remains `sticky-queue` for Antigravity, but it is applied **across requests** (via cooldown/health),
+   Multi-alias load balancing remains `sticky-queue` for Antigravity, but it is applied **across requests** (via per-providerKey cooldown/health),
    not by hammering all aliases inside one request's retry loop.
 
 ## Where this is implemented
@@ -32,6 +32,6 @@ for the "standard" execution path; any alternative behavior is considered legacy
   - `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/alias-selection.ts`
   - `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/tier-selection.ts`
   - `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/tier-selection-select.ts`
-- **Capacity-style 429 cooldown (alias-level for Antigravity / gemini-cli)**:
+- **Capacity-style 429 cooldown (per-providerKey, no alias fan-out)**:
   - `src/manager/modules/quota/provider-quota-daemon.model-backoff.ts`
   - `src/manager/modules/quota/provider-quota-daemon.events.ts`
