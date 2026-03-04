@@ -92,7 +92,7 @@
 - 样本：`configsamples/provider/deepseek/config.v1.json`
 - 建议配置：`type: "openai"` + `compatibilityProfile: "chat:deepseek-web"`
 - 认证字段：`auth.type: "deepseek-account"`，并通过 `auth.entries[*].tokenFile` 提供账号 token 文件（支持多账号轮转）
-- 可选参数：`deepseek.strictToolRequired`、`deepseek.textToolFallback`、`deepseek.powTimeoutMs`、`deepseek.powMaxAttempts`、`deepseek.sessionReuseTtlMs`
+- 可选参数：`deepseek.strictToolRequired`、`deepseek.toolProtocol`、`deepseek.powTimeoutMs`、`deepseek.powMaxAttempts`、`deepseek.sessionReuseTtlMs`
 - 说明：Provider 层负责账号登录/会话/PoW/传输；工具调用标准化由 llmswitch-core compat 完成
 
 ### Kimi（API Key）

@@ -118,6 +118,7 @@ export async function syncAntigravityTokensFromDisk(options: {
 
 export async function refreshAllAntigravityQuotas(options: {
   tokens: Map<string, AntigravityTokenRegistration>;
+  allowedAliases?: Set<string>;
   syncTokensFromDisk: () => Promise<void>;
   updateAntigravityQuota: (alias: string, quota: AntigravityQuotaSnapshot) => void;
 }): Promise<{ attempted: number; successCount: number; failureCount: number }> {
@@ -125,10 +126,14 @@ export async function refreshAllAntigravityQuotas(options: {
   if (options.tokens.size === 0) {
     return { attempted: 0, successCount: 0, failureCount: 0 };
   }
+  const allowedAliases = options.allowedAliases ?? null;
   let attempted = 0;
   let successCount = 0;
   let failureCount = 0;
   for (const { alias, tokenFile, apiBase } of options.tokens.values()) {
+    if (allowedAliases && !allowedAliases.has(alias)) {
+      continue;
+    }
     try {
       const accessToken = await loadAntigravityAccessToken(tokenFile);
       if (!accessToken) {

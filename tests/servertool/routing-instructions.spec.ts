@@ -243,6 +243,16 @@ describe('Routing instruction parsing and application', () => {
     expect(inst.stopMessageAiMode).toBe('on');
   });
 
+  test('parses stopMessage ai:on tail after quoted text when separated by colon', () => {
+    const instructions = parseRoutingInstructions(buildMessages('<**stopMessage:"继续":ai:on,10**>'));
+    expect(instructions).toHaveLength(1);
+    const inst = instructions[0] as any;
+    expect(inst.type).toBe('stopMessageSet');
+    expect(inst.stopMessageText).toBe('继续');
+    expect(inst.stopMessageMaxRepeats).toBe(10);
+    expect(inst.stopMessageAiMode).toBe('on');
+  });
+
   test('lowercase stopmessage marker is ignored (case-sensitive parser)', () => {
     const instructions = parseRoutingInstructions(buildMessages('<**stopmessage:on,10**>继续执行'));
     expect(instructions).toHaveLength(0);

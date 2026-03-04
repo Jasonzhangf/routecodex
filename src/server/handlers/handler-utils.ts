@@ -8,14 +8,11 @@ import type { RouteErrorPayload } from '../../error-handling/route-error-hub.js'
 import { reportRouteError } from '../../error-handling/route-error-hub.js';
 // import { runtimeFlags } from '../../runtime/runtime-flags.js';
 import { formatErrorForConsole } from '../../utils/log-helpers.js';
-import { writeServerSnapshot } from '../../utils/snapshot-writer.js';
+import { isSnapshotsEnabled, writeServerSnapshot } from '../../utils/snapshot-writer.js';
 import {
   generateRequestIdentifiers,
   resolveEffectiveRequestId
 } from '../utils/request-id-manager.js';
-import {
-  isAnalysisModeEnabled
-} from './handler-response-utils.js';
 export { hasSsePayload, sendPipelineResponse, type SsePayloadShape } from './handler-response-utils.js';
 
 const CLIENT_HEADER_DENYLIST = new Set([
@@ -196,7 +193,7 @@ export async function respondWithPipelineError(
     } catch {
       // ignore end errors
     }
-    if (isAnalysisModeEnabled()) {
+    if (isSnapshotsEnabled()) {
       void writeServerSnapshot({
         phase: 'client-response.error',
         requestId: effectiveRequestId,
@@ -206,7 +203,7 @@ export async function respondWithPipelineError(
     }
     return;
   }
-  if (isAnalysisModeEnabled()) {
+  if (isSnapshotsEnabled()) {
     void writeServerSnapshot({
       phase: 'client-response.error',
       requestId: effectiveRequestId,

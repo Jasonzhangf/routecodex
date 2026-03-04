@@ -79,5 +79,12 @@ export {
   resolveBaseDir
 } from './bridge/routing-integrations.js';
 
+export {
+  mapChatToolsToBridgeJson,
+  buildAnthropicResponseFromChatJson,
+  injectMcpToolsForChatJson,
+  injectMcpToolsForResponsesJson
+} from './bridge/native-exports.js';
+
 // Keep local aliases so external callers can reference the same symbol names.
 export type { ProviderErrorEvent as BridgeProviderErrorEvent, ProviderSuccessEvent as BridgeProviderSuccessEvent };

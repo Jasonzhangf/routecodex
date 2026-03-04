@@ -379,51 +379,6 @@ export async function convertProviderResponseIfNeeded(
           const preservedClientHeaders = extractFollowupSessionHeaders(out.clientHeaders);
           if (preservedClientHeaders) {
             out.clientHeaders = preservedClientHeaders;
-            if (typeof out.sessionId !== 'string' || !out.sessionId.trim()) {
-              const sessionId = extractPreservedSessionToken(preservedClientHeaders, 'session');
-              if (sessionId) {
-                out.sessionId = sessionId;
-              }
-            }
-            if (typeof out.conversationId !== 'string' || !out.conversationId.trim()) {
-              const conversationId = extractPreservedSessionToken(preservedClientHeaders, 'conversation');
-              if (conversationId) {
-                out.conversationId = conversationId;
-              }
-            }
-            if (typeof out.sessionDaemonId !== 'string' || !out.sessionDaemonId.trim()) {
-              const daemonId =
-                (typeof out.clientDaemonId === 'string' && out.clientDaemonId.trim())
-                  ? out.clientDaemonId
-                  : extractPreservedDaemonOrInjectToken(preservedClientHeaders, 'daemon');
-              if (daemonId) {
-                out.clientDaemonId = daemonId;
-                out.sessionDaemonId = daemonId;
-              }
-            } else if (typeof out.clientDaemonId !== 'string' || !out.clientDaemonId.trim()) {
-              out.clientDaemonId = out.sessionDaemonId;
-            }
-            if (typeof out.clientTmuxSessionId !== 'string' || !out.clientTmuxSessionId.trim()) {
-              const tmuxSessionId = extractPreservedDaemonOrInjectToken(preservedClientHeaders, 'tmux');
-              if (tmuxSessionId) {
-                out.clientTmuxSessionId = tmuxSessionId;
-                out.tmuxSessionId = tmuxSessionId;
-              }
-            } else if (typeof out.tmuxSessionId !== 'string' || !out.tmuxSessionId.trim()) {
-              out.tmuxSessionId = out.clientTmuxSessionId;
-            }
-            if (typeof out.clientWorkdir !== 'string' || !out.clientWorkdir.trim()) {
-              const workdir =
-                (typeof out.workdir === 'string' && out.workdir.trim())
-                  ? out.workdir
-                  : extractPreservedDaemonOrInjectToken(preservedClientHeaders, 'workdir');
-              if (workdir) {
-                out.clientWorkdir = workdir;
-                out.workdir = workdir;
-              }
-            } else if (typeof out.workdir !== 'string' || !out.workdir.trim()) {
-              out.workdir = out.clientWorkdir;
-            }
           } else {
             delete out.clientHeaders;
           }
@@ -479,58 +434,13 @@ export async function convertProviderResponseIfNeeded(
       }
 
       if (asRecord((out as any).__rt)?.serverToolFollowup === true) {
-          const preservedClientHeaders = extractFollowupSessionHeaders(out.clientHeaders);
+        const preservedClientHeaders = extractFollowupSessionHeaders(out.clientHeaders);
         if (preservedClientHeaders) {
-            out.clientHeaders = preservedClientHeaders;
-            if (typeof out.sessionId !== 'string' || !out.sessionId.trim()) {
-            const sessionId = extractPreservedSessionToken(preservedClientHeaders, 'session');
-            if (sessionId) {
-                out.sessionId = sessionId;
-            }
-          }
-            if (typeof out.conversationId !== 'string' || !out.conversationId.trim()) {
-            const conversationId = extractPreservedSessionToken(preservedClientHeaders, 'conversation');
-            if (conversationId) {
-                out.conversationId = conversationId;
-            }
-          }
-            if (typeof out.sessionDaemonId !== 'string' || !out.sessionDaemonId.trim()) {
-            const daemonId =
-                (typeof out.clientDaemonId === 'string' && out.clientDaemonId.trim())
-                  ? out.clientDaemonId
-                : extractPreservedDaemonOrInjectToken(preservedClientHeaders, 'daemon');
-            if (daemonId) {
-                out.clientDaemonId = daemonId;
-                out.sessionDaemonId = daemonId;
-            }
-            } else if (typeof out.clientDaemonId !== 'string' || !out.clientDaemonId.trim()) {
-              out.clientDaemonId = out.sessionDaemonId;
-          }
-            if (typeof out.clientTmuxSessionId !== 'string' || !out.clientTmuxSessionId.trim()) {
-            const tmuxSessionId = extractPreservedDaemonOrInjectToken(preservedClientHeaders, 'tmux');
-            if (tmuxSessionId) {
-                out.clientTmuxSessionId = tmuxSessionId;
-                out.tmuxSessionId = tmuxSessionId;
-            }
-            } else if (typeof out.tmuxSessionId !== 'string' || !out.tmuxSessionId.trim()) {
-              out.tmuxSessionId = out.clientTmuxSessionId;
-          }
-            if (typeof out.clientWorkdir !== 'string' || !out.clientWorkdir.trim()) {
-            const workdir =
-                (typeof out.workdir === 'string' && out.workdir.trim())
-                  ? out.workdir
-                : extractPreservedDaemonOrInjectToken(preservedClientHeaders, 'workdir');
-            if (workdir) {
-                out.clientWorkdir = workdir;
-                out.workdir = workdir;
-            }
-            } else if (typeof out.workdir !== 'string' || !out.workdir.trim()) {
-              out.workdir = out.clientWorkdir;
-          }
+          out.clientHeaders = preservedClientHeaders;
         } else {
-            delete out.clientHeaders;
+          delete out.clientHeaders;
         }
-          delete out.clientRequestId;
+        delete out.clientRequestId;
       }
         return out;
       })();

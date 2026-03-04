@@ -76,7 +76,7 @@ describe('provider-profile-loader', () => {
           },
           deepseek: {
             strictToolRequired: true,
-            textToolFallback: false,
+            toolProtocol: 'text',
             powTimeoutMs: 9000,
             powMaxAttempts: 3,
             sessionReuseTtlMs: 120000
@@ -91,7 +91,7 @@ describe('provider-profile-loader', () => {
     expect(profile.compatibilityProfile).toBe('chat:deepseek-web');
     expect(profile.metadata?.deepseek).toEqual({
       strictToolRequired: true,
-      textToolFallback: false,
+      toolProtocol: 'text',
       powTimeoutMs: 9000,
       powMaxAttempts: 3,
       sessionReuseTtlMs: 120000

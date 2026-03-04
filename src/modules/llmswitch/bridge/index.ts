@@ -62,3 +62,10 @@ export {
   getHubPipelineCtorForImpl,
   resolveBaseDir
 } from './routing-integrations.js';
+
+export {
+  mapChatToolsToBridgeJson,
+  buildAnthropicResponseFromChatJson,
+  injectMcpToolsForChatJson,
+  injectMcpToolsForResponsesJson
+} from './native-exports.js';

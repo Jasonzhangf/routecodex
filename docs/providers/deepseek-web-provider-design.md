@@ -84,7 +84,7 @@
         },
         "deepseek": {
           "strictToolRequired": true,
-          "textToolFallback": true,
+          "toolProtocol": "text",
           "powTimeoutMs": 15000,
           "sessionReuseTtlMs": 1800000
         }
@@ -106,8 +106,8 @@
    - 上游已返回结构化工具调用
    - compat 做字段映射、id 补齐、参数 JSON 合法性校验
 2. `text_tool_calls`
-   - 上游仅返回文本工具意图
-   - compat 解析并生成标准 `tool_calls`
+   - 上游以文本协议返回 JSON `tool_calls`
+   - 仅在 `toolProtocol: "text"` 显式开启时解析为标准 `tool_calls`
 3. `no_tool_calls`
    - 无法识别工具调用
 

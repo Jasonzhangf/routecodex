@@ -59,22 +59,5 @@ export async function executePipelineViaLegacyOverride(
           pipelineMetadata: pipelineResult?.metadata
         })
       : normalized;
-
-  const metadata = (input.metadata as Record<string, unknown>) ?? {};
-  const sessionId = typeof metadata.sessionId === 'string' && metadata.sessionId.trim() ? metadata.sessionId.trim() : undefined;
-  let conversationId =
-    typeof metadata.conversationId === 'string' && metadata.conversationId.trim() ? metadata.conversationId.trim() : undefined;
-  if (!conversationId && sessionId) {
-    conversationId = sessionId;
-  }
-  if (sessionId || conversationId) {
-    converted.headers = converted.headers ?? {};
-    if (sessionId && !converted.headers.session_id) {
-      converted.headers.session_id = sessionId;
-    }
-    if (conversationId && !converted.headers.conversation_id) {
-      converted.headers.conversation_id = conversationId;
-    }
-  }
   return converted;
 }

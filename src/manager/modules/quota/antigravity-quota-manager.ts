@@ -387,6 +387,16 @@ export class QuotaManagerModule implements ManagerModule {
     }
     return this.isAntigravityModelProtected(parsed.alias, parsed.modelId);
   }
+  private resolveRegisteredAntigravityAliases(): Set<string> {
+    const allowed = new Set<string>();
+    for (const providerKey of this.registeredProviderKeys) {
+      const alias = extractAntigravityAlias(providerKey);
+      if (alias) {
+        allowed.add(alias);
+      }
+    }
+    return allowed;
+  }
   private reconcileProtectedStatesForRegisteredProviders(): void {
     reconcileProtectedStates({
       coreQuotaManager: this.coreQuotaManager,
@@ -411,6 +421,7 @@ export class QuotaManagerModule implements ManagerModule {
   private async refreshAllAntigravityQuotas(): Promise<{ attempted: number; successCount: number; failureCount: number }> {
     return await refreshAllAntigravityQuotas({
       tokens: this.antigravityTokens,
+      allowedAliases: this.resolveRegisteredAntigravityAliases(),
       syncTokensFromDisk: async () => {
         await this.syncAntigravityTokensFromDisk();
       },

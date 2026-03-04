@@ -131,6 +131,7 @@ describe('QuotaManagerModule refresh behavior', () => {
     );
 
     await mod.init({ serverId: 'test' } as any);
+    mod.registerProviderStaticConfig('antigravity.a1.claude-sonnet-4-5', { authType: 'oauth' });
 
     const setTimeoutSpy = jest.spyOn(globalThis, 'setTimeout');
     try {
@@ -162,11 +163,26 @@ describe('QuotaManagerModule refresh behavior', () => {
     const { QuotaManagerModule } = await import('../../../src/manager/modules/quota/index.js');
     const mod = new QuotaManagerModule();
     await mod.init({ serverId: 'test' } as any);
+    mod.registerProviderStaticConfig('antigravity.a1.claude-sonnet-4-5', { authType: 'oauth' });
     fetchAntigravityQuotaSnapshot.mockClear();
 
     try {
       await mod.start();
       expect(fetchAntigravityQuotaSnapshot).toHaveBeenCalledTimes(1);
+    } finally {
+      await mod.stop();
+    }
+  });
+
+  it('skips antigravity refresh when no registered providers', async () => {
+    const { QuotaManagerModule } = await import('../../../src/manager/modules/quota/index.js');
+    const mod = new QuotaManagerModule();
+    await mod.init({ serverId: 'test' } as any);
+    fetchAntigravityQuotaSnapshot.mockClear();
+
+    try {
+      await mod.refreshNow();
+      expect(fetchAntigravityQuotaSnapshot).toHaveBeenCalledTimes(0);
     } finally {
       await mod.stop();
     }

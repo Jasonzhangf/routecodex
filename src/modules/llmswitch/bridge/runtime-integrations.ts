@@ -22,7 +22,7 @@ export async function writeSnapshotViaHooks(channelOrOptions: string | AnyRecord
   }
   const writer = hooksModule?.writeSnapshotViaHooks;
   if (typeof writer !== 'function') {
-    return;
+    throw new Error('[llmswitch-bridge] writeSnapshotViaHooks not available');
   }
 
   let options: AnyRecord | undefined;

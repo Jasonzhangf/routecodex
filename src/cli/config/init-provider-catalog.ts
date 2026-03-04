@@ -73,7 +73,7 @@ export function getInitProviderCatalog(): InitProviderTemplate[] {
         },
         deepseek: {
           strictToolRequired: true,
-          textToolFallback: true,
+          toolProtocol: 'text',
           powTimeoutMs: 15000,
           powMaxAttempts: 2,
           sessionReuseTtlMs: 1800000

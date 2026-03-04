@@ -99,68 +99,6 @@ function extractSessionDaemonId(
   return undefined;
 }
 
-function extractSessionTokenFromBodyMeta(meta: Record<string, unknown>): { sessionId?: string; conversationId?: string } {
-  const pick = (...keys: string[]): string | undefined => {
-    for (const key of keys) {
-      const value = meta[key];
-      if (typeof value === 'string' && value.trim()) {
-        return value.trim();
-      }
-    }
-    return undefined;
-  };
-
-  const explicitSessionId = pick('sessionId', 'session_id');
-  const explicitConversationId = pick('conversationId', 'conversation_id');
-  const userId = pick('user_id');
-  const userIdSessionMatch = userId ? userId.match(/(?:^|[_-])session[_-]([a-z0-9-]{8,})/i) : null;
-  const derivedSessionId = userIdSessionMatch?.[1]?.trim();
-
-  const sessionId = explicitSessionId || derivedSessionId;
-  const conversationId = explicitConversationId || sessionId;
-  return {
-    ...(sessionId ? { sessionId } : {}),
-    ...(conversationId ? { conversationId } : {})
-  };
-}
-
-function extractSessionTokenFromHeaderSources(
-  headers: Record<string, unknown> | undefined,
-  clientHeaders?: Record<string, string>
-): { sessionId?: string; conversationId?: string } {
-  const sources: Array<Record<string, unknown> | undefined> = [
-    headers,
-    clientHeaders as unknown as Record<string, unknown> | undefined
-  ];
-  let sessionId: string | undefined;
-  let conversationId: string | undefined;
-  for (const source of sources) {
-    if (!source) {
-      continue;
-    }
-    if (!sessionId) {
-      sessionId =
-        extractHeaderValue(source, 'session_id')
-        || extractHeaderValue(source, 'session-id')
-        || extractHeaderValue(source, 'x-session-id')
-        || extractHeaderValue(source, 'anthropic-session-id')
-        || undefined;
-    }
-    if (!conversationId) {
-      conversationId =
-        extractHeaderValue(source, 'conversation_id')
-        || extractHeaderValue(source, 'conversation-id')
-        || extractHeaderValue(source, 'x-conversation-id')
-        || extractHeaderValue(source, 'anthropic-conversation-id')
-        || extractHeaderValue(source, 'openai-conversation-id')
-        || undefined;
-    }
-  }
-  return {
-    ...(sessionId ? { sessionId } : {}),
-    ...(conversationId ? { conversationId } : {})
-  };
-}
 
 function extractWorkdir(
   userMeta: Record<string, unknown>,
@@ -515,28 +453,6 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
   }
   if (sessionIdentifiers.conversationId) {
     metadata.conversationId = sessionIdentifiers.conversationId;
-  }
-  if (!metadata.sessionId || !metadata.conversationId) {
-    const fallback = extractSessionTokenFromBodyMeta(bodyMeta);
-    if (!metadata.sessionId && fallback.sessionId) {
-      metadata.sessionId = fallback.sessionId;
-    }
-    if (!metadata.conversationId && fallback.conversationId) {
-      metadata.conversationId = fallback.conversationId;
-    }
-  }
-
-  if (!metadata.sessionId || !metadata.conversationId) {
-    const fromHeaders = extractSessionTokenFromHeaderSources(headers, normalizedClientHeaders);
-    if (!metadata.sessionId && fromHeaders.sessionId) {
-      metadata.sessionId = fromHeaders.sessionId;
-    }
-    if (!metadata.conversationId && fromHeaders.conversationId) {
-      metadata.conversationId = fromHeaders.conversationId;
-    }
-    if (!metadata.conversationId && metadata.sessionId) {
-      metadata.conversationId = String(metadata.sessionId);
-    }
   }
 
   if (shouldTraceSessionScopeMetadata({

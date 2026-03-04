@@ -81,6 +81,9 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
           // Analysis mode should be able to capture streaming payloads even in release builds.
           // Keep this opt-in via --mode analysis (or explicit env override).
           ctx.env.ROUTECODEX_CAPTURE_STREAM_SNAPSHOTS = ctx.env.ROUTECODEX_CAPTURE_STREAM_SNAPSHOTS || '1';
+          // Ensure upstream error payloads are logged when snapshots are enabled.
+          ctx.env.ROUTECODEX_HTTP_ERROR_META_LOG = ctx.env.ROUTECODEX_HTTP_ERROR_META_LOG || '1';
+          ctx.env.RCC_HTTP_ERROR_META_LOG = ctx.env.RCC_HTTP_ERROR_META_LOG || '1';
         } else if (options.snapOff) {
           ctx.env.ROUTECODEX_SNAPSHOT = '0';
           ctx.env.ROUTECODEX_HUB_SNAPSHOTS = ctx.env.ROUTECODEX_HUB_SNAPSHOTS || '0';

@@ -80,6 +80,49 @@ function shouldLogClientExitSummary(commandName: string): boolean {
   return normalized === 'codex' || normalized === 'claude' || normalized === 'routecodex';
 }
 
+function resolveLauncherConfigPath(
+  ctx: LauncherCommandContext,
+  fsImpl: typeof fs,
+  pathImpl: typeof path,
+  options: LauncherCommandOptions
+): string {
+  let configPath = typeof options.config === 'string' && options.config.trim() ? options.config.trim() : '';
+  if (!configPath) {
+    const resolved = resolveRouteCodexConfigPath();
+    configPath = resolved && resolved.trim()
+      ? resolved
+      : pathImpl.join(ctx.homedir(), '.routecodex', 'config.json');
+  }
+  return configPath;
+}
+
+function resolveLauncherApiKey(
+  ctx: LauncherCommandContext,
+  fsImpl: typeof fs,
+  configPath: string,
+  options: LauncherCommandOptions
+): string | null {
+  const fromOption = typeof options.apikey === 'string' && options.apikey.trim()
+    ? options.apikey.trim()
+    : null;
+  if (fromOption) {
+    return fromOption;
+  }
+  const fromRouteEnv = typeof ctx.env.ROUTECODEX_HTTP_APIKEY === 'string' && ctx.env.ROUTECODEX_HTTP_APIKEY.trim()
+    ? ctx.env.ROUTECODEX_HTTP_APIKEY.trim()
+    : null;
+  if (fromRouteEnv) {
+    return fromRouteEnv;
+  }
+  const fromRccEnv = typeof ctx.env.RCC_HTTP_APIKEY === 'string' && ctx.env.RCC_HTTP_APIKEY.trim()
+    ? ctx.env.RCC_HTTP_APIKEY.trim()
+    : null;
+  if (fromRccEnv) {
+    return fromRccEnv;
+  }
+  return readConfigApiKey(fsImpl, configPath);
+}
+
 function readProcessPpidAndCommand(pid: number): { ppid: number | null; command: string } {
   if (process.platform === 'win32') {
     return { ppid: null, command: '' };
@@ -163,15 +206,12 @@ function resolveServerConnection(
   ctx: LauncherCommandContext,
   fsImpl: typeof fs,
   pathImpl: typeof path,
-  options: LauncherCommandOptions
+  options: LauncherCommandOptions,
+  configPathOverride?: string
 ): ResolvedServerConnection {
-  let configPath = typeof options.config === 'string' && options.config.trim() ? options.config.trim() : '';
-  if (!configPath) {
-    const resolved = resolveRouteCodexConfigPath();
-    configPath = resolved && resolved.trim()
-      ? resolved
-      : pathImpl.join(ctx.homedir(), '.routecodex', 'config.json');
-  }
+  const configPath = configPathOverride && configPathOverride.trim()
+    ? configPathOverride.trim()
+    : resolveLauncherConfigPath(ctx, fsImpl, pathImpl, options);
 
   let actualProtocol: 'http' | 'https' = 'http';
   let actualPort = toIntegerPort(options.port);
@@ -214,12 +254,7 @@ function resolveServerConnection(
     throw new Error('Invalid or missing port configuration for RouteCodex server');
   }
 
-  const configuredApiKey =
-    (typeof options.apikey === 'string' && options.apikey.trim() ? options.apikey.trim() : null) ??
-    (typeof ctx.env.ROUTECODEX_HTTP_APIKEY === 'string' && ctx.env.ROUTECODEX_HTTP_APIKEY.trim()
-      ? ctx.env.ROUTECODEX_HTTP_APIKEY.trim()
-      : null) ??
-    readConfigApiKey(fsImpl, configPath);
+  const configuredApiKey = resolveLauncherApiKey(ctx, fsImpl, configPath, options);
 
   const connectHost = normalizeConnectHost(actualHost);
   const portPart = actualPort ? `:${actualPort}` : '';
@@ -1303,7 +1338,8 @@ export function createLauncherCommand(program: Command, ctx: LauncherCommandCont
 
     try {
       const tmuxOnly = spec.commandName === 'codex';
-      const resolved = tmuxOnly ? undefined : resolveServerConnection(ctx, fsImpl, pathImpl, options);
+      const configPath = resolveLauncherConfigPath(ctx, fsImpl, pathImpl, options);
+      const resolved = tmuxOnly ? undefined : resolveServerConnection(ctx, fsImpl, pathImpl, options, configPath);
       const requireResolved = (): ResolvedServerConnection => {
         if (!resolved) {
           throw new Error('RouteCodex server connection is not available for this launcher');
@@ -1537,12 +1573,11 @@ export function createLauncherCommand(program: Command, ctx: LauncherCommandCont
         if (tmuxOnly) {
           const env = { ...ctx.env };
           if (tmuxOnlySessionId) {
-            const baseKey =
-              (typeof env.ROUTECODEX_HTTP_APIKEY === 'string' && env.ROUTECODEX_HTTP_APIKEY.trim())
-              || '';
+            const baseKey = resolveLauncherApiKey(ctx, fsImpl, configPath, options);
             if (!baseKey) {
-              ctx.logger.warning('[session-scope] ROUTECODEX_HTTP_APIKEY is empty; tmux scope not injected.');
-              return env;
+              throw new Error(
+                'Missing apikey for tmux scope. Set --apikey or ROUTECODEX_HTTP_APIKEY/RCC_HTTP_APIKEY or httpserver.apikey in config.'
+              );
             }
             const scopedKey = encodeSessionClientApiKey(baseKey, '', tmuxOnlySessionId);
             env.ROUTECODEX_HTTP_APIKEY = scopedKey;

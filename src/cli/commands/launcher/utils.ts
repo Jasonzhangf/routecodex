@@ -157,6 +157,10 @@ export function readConfigApiKey(fsImpl: typeof fs, configPath: string): string 
       const envValue = process.env.ROUTECODEX_HTTP_APIKEY;
       return envValue && envValue.trim() ? envValue.trim() : null;
     }
+    if (value === 'RCC_HTTP_APIKEY' || value === '${RCC_HTTP_APIKEY}') {
+      const envValue = process.env.RCC_HTTP_APIKEY;
+      return envValue && envValue.trim() ? envValue.trim() : null;
+    }
     return value;
   } catch {
     return null;

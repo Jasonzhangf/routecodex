@@ -300,10 +300,25 @@ function extractDeepSeekMetadata(raw: unknown): DeepSeekMetadata | undefined {
     }
     return undefined;
   };
+  const toToolProtocol = (value: unknown): 'native' | 'text' | undefined => {
+    if (typeof value !== 'string') {
+      return undefined;
+    }
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'native' || normalized === 'text') {
+      return normalized as 'native' | 'text';
+    }
+    return undefined;
+  };
+
+  const legacyFallback = toBool(node.textToolFallback);
+  const toolProtocol =
+    toToolProtocol(node.toolProtocol) ??
+    (legacyFallback !== undefined ? (legacyFallback ? 'text' : 'native') : undefined);
 
   const normalized = {
     strictToolRequired: toBool(node.strictToolRequired),
-    textToolFallback: toBool(node.textToolFallback),
+    toolProtocol,
     powTimeoutMs: pickNumber(node.powTimeoutMs),
     powMaxAttempts: pickNumber(node.powMaxAttempts),
     sessionReuseTtlMs: pickNumber(node.sessionReuseTtlMs)

@@ -20,6 +20,7 @@ import {
   ensureCamoufoxFingerprintForToken
 } from '../providers/core/config/camoufox-launcher.js';
 import { loadRouteCodexConfig } from '../config/routecodex-config-loader.js';
+import { buildVirtualRouterInputFromUserConfig } from '../config/virtual-router-types.js';
 import { ensureAntigravityTokenProjectMetadata } from '../providers/auth/antigravity-userinfo-helper.js';
 import { DEFAULT_TOKEN_DAEMON } from '../constants/index.js';
 
@@ -54,9 +55,34 @@ type CamoufoxOverrideOptions = {
 
 function resolveConfiguredProviders(userConfig: unknown): Set<OAuthProviderId> {
   const configured = new Set<OAuthProviderId>();
-  const cfg = (userConfig ?? {}) as any;
-  const vr = (cfg.virtualrouter ?? cfg.virtualRouter ?? cfg.router ?? cfg) as any;
-  const providers = vr?.providers;
+  const input = buildVirtualRouterInputFromUserConfig((userConfig ?? {}) as Record<string, unknown>);
+  const routing = input.routing ?? {};
+  const providers = input.providers ?? {};
+
+  const activeProviderKeys = new Set<string>();
+  if (routing && typeof routing === 'object') {
+    for (const pools of Object.values(routing)) {
+      if (!Array.isArray(pools)) {
+        continue;
+      }
+      for (const pool of pools) {
+        const targets = (pool as { targets?: unknown }).targets;
+        if (!Array.isArray(targets)) {
+          continue;
+        }
+        for (const target of targets) {
+          if (typeof target === 'string' && target.trim()) {
+            activeProviderKeys.add(target.trim());
+          }
+        }
+      }
+    }
+  }
+
+  if (activeProviderKeys.size === 0) {
+    return configured;
+  }
+
   const addIfSupported = (idRaw: unknown, enabledRaw: unknown, providerNode?: unknown): void => {
     const id = typeof idRaw === 'string' ? idRaw.trim().toLowerCase() : '';
     if (!id) {
@@ -77,18 +103,15 @@ function resolveConfiguredProviders(userConfig: unknown): Set<OAuthProviderId> {
       configured.add('deepseek-account');
     }
   };
-  if (Array.isArray(providers)) {
-    for (const p of providers) {
-      addIfSupported(p?.id, p?.enabled, p);
+
+  for (const [providerKey, value] of Object.entries(providers)) {
+    if (!activeProviderKeys.has(providerKey)) {
+      continue;
     }
-    return configured;
+    const v = value as any;
+    addIfSupported(v?.id ?? providerKey, v?.enabled, v);
   }
-  if (providers && typeof providers === 'object') {
-    for (const [key, value] of Object.entries(providers)) {
-      const v = value as any;
-      addIfSupported(v?.id ?? key, v?.enabled, v);
-    }
-  }
+
   return configured;
 }
 

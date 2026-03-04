@@ -2,7 +2,7 @@ export const DEEPSEEK_PROVIDER_FAMILY = 'deepseek';
 export const DEEPSEEK_COMPATIBILITY_PROFILE = 'chat:deepseek-web';
 
 export type DeepSeekToolCallState = 'native_tool_calls' | 'text_tool_calls' | 'no_tool_calls';
-export type DeepSeekToolCallSource = 'native' | 'fallback' | 'none';
+export type DeepSeekToolCallSource = 'native' | 'text' | 'none';
 
 export const DEEPSEEK_ERROR_CODES = Object.freeze({
   AUTH_MISSING: 'DEEPSEEK_AUTH_MISSING',
@@ -18,7 +18,7 @@ export type DeepSeekErrorCode = (typeof DEEPSEEK_ERROR_CODES)[keyof typeof DEEPS
 
 export interface DeepSeekProviderRuntimeOptions {
   strictToolRequired: boolean;
-  textToolFallback: boolean;
+  toolProtocol: 'native' | 'text';
   powTimeoutMs: number;
   powMaxAttempts: number;
   sessionReuseTtlMs: number;
@@ -26,7 +26,7 @@ export interface DeepSeekProviderRuntimeOptions {
 
 const DEFAULT_DEEPSEEK_OPTIONS: DeepSeekProviderRuntimeOptions = {
   strictToolRequired: true,
-  textToolFallback: true,
+  toolProtocol: 'native',
   powTimeoutMs: 15000,
   powMaxAttempts: 2,
   sessionReuseTtlMs: 30 * 60 * 1000
@@ -55,6 +55,22 @@ function readBoolean(input: unknown, fallback: boolean): boolean {
   return fallback;
 }
 
+function readOptionalBoolean(input: unknown): boolean | undefined {
+  if (typeof input === 'boolean') {
+    return input;
+  }
+  if (typeof input === 'string') {
+    const normalized = input.trim().toLowerCase();
+    if (normalized === 'true' || normalized === '1' || normalized === 'yes' || normalized === 'on') {
+      return true;
+    }
+    if (normalized === 'false' || normalized === '0' || normalized === 'no' || normalized === 'off') {
+      return false;
+    }
+  }
+  return undefined;
+}
+
 function readInteger(input: unknown, fallback: number, min: number, max: number): number {
   const parsed = typeof input === 'number' ? input : typeof input === 'string' ? Number.parseInt(input, 10) : NaN;
   if (!Number.isFinite(parsed)) {
@@ -80,11 +96,26 @@ function getToken(value: unknown): string {
   return typeof value === 'string' ? value.trim().toLowerCase() : '';
 }
 
+function readToolProtocol(input: unknown): DeepSeekProviderRuntimeOptions['toolProtocol'] | undefined {
+  if (typeof input !== 'string') {
+    return undefined;
+  }
+  const normalized = input.trim().toLowerCase();
+  if (normalized === 'text' || normalized === 'native') {
+    return normalized as DeepSeekProviderRuntimeOptions['toolProtocol'];
+  }
+  return undefined;
+}
+
 export function normalizeDeepSeekProviderRuntimeOptions(input: unknown): DeepSeekProviderRuntimeOptions {
   const node = asRecord(input) ?? {};
+  const legacyFallback = readOptionalBoolean(node.textToolFallback);
+  const toolProtocol =
+    readToolProtocol(node.toolProtocol) ??
+    (legacyFallback !== undefined ? (legacyFallback ? 'text' : 'native') : undefined);
   return {
     strictToolRequired: readBoolean(node.strictToolRequired, DEFAULT_DEEPSEEK_OPTIONS.strictToolRequired),
-    textToolFallback: readBoolean(node.textToolFallback, DEFAULT_DEEPSEEK_OPTIONS.textToolFallback),
+    toolProtocol: toolProtocol ?? DEFAULT_DEEPSEEK_OPTIONS.toolProtocol,
     powTimeoutMs: readInteger(node.powTimeoutMs, DEFAULT_DEEPSEEK_OPTIONS.powTimeoutMs, 1000, 120000),
     powMaxAttempts: readInteger(node.powMaxAttempts, DEFAULT_DEEPSEEK_OPTIONS.powMaxAttempts, 1, 10),
     sessionReuseTtlMs: readInteger(node.sessionReuseTtlMs, DEFAULT_DEEPSEEK_OPTIONS.sessionReuseTtlMs, 1000, 24 * 60 * 60 * 1000)
