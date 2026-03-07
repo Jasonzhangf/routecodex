@@ -10,6 +10,7 @@
  */
 
 import { BaseProvider } from './base-provider.js';
+import { runNonBlockingCredentialValidation } from './provider-startup-tasks.js';
 import type { HttpClient } from '../utils/http-client.js';
 import type { IAuthProvider } from '../../auth/auth-interface.js';
 import type { OpenAIStandardConfig } from '../api/provider-config.js';
@@ -47,6 +48,8 @@ import {
   resolveProviderWantsUpstreamSse
 } from './provider-request-shaping-utils.js';
 import type { ProviderFamilyProfile } from '../../profile/profile-contracts.js';
+import { VercelAiSdkAnthropicTransport } from './vercel-ai-sdk/anthropic-sdk-transport.js';
+import { VercelAiSdkOpenAiTransport } from './vercel-ai-sdk/openai-sdk-transport.js';
 
 // Transport submodules
 import {
@@ -77,6 +80,8 @@ export class HttpTransportProvider extends BaseProvider {
   protected httpClient!: HttpClient;
   protected serviceProfile: ServiceProfile;
   protected protocolClient: ProtocolClient;
+  private readonly vercelAiSdkAnthropicTransport?: VercelAiSdkAnthropicTransport;
+  private readonly vercelAiSdkOpenAiTransport?: VercelAiSdkOpenAiTransport;
   private requestExecutor!: HttpRequestExecutor;
   private injectedConfig: UnknownObject | null = null;
 
@@ -89,6 +94,17 @@ export class HttpTransportProvider extends BaseProvider {
     super(config, dependencies);
     this.type = moduleType;
     this.protocolClient = protocolClient ?? new OpenAIChatProtocolClient();
+
+    const transportBackend = this.resolveTransportBackend();
+    if (transportBackend === 'vercel-ai-sdk') {
+      if (this.providerType === 'anthropic') {
+        this.vercelAiSdkAnthropicTransport = new VercelAiSdkAnthropicTransport();
+      } else if (this.providerType === 'openai') {
+        this.vercelAiSdkOpenAiTransport = new VercelAiSdkOpenAiTransport();
+      } else {
+        throw new Error(`[provider-runtime-error] transportBackend=vercel-ai-sdk is not implemented for providerType=${this.providerType}`);
+      }
+    }
 
     // 获取服务配置档案
     this.serviceProfile = this.getServiceProfile();
@@ -117,11 +133,9 @@ export class HttpTransportProvider extends BaseProvider {
         // Token 管理迁移后，OAuth 初始化交由 TokenManager/TokenDaemon 负责，
         // 这里不再在服务器启动阶段主动跑 ensureValidOAuthToken，避免多余日志和上游调用。
         if (authMode !== 'oauth') {
-          try {
-            await this.authProvider.validateCredentials();
-          } catch {
-            // ignore validation errors on startup
-          }
+          runNonBlockingCredentialValidation(async () => {
+            await this.authProvider?.validateCredentials();
+          });
         }
       }
 
@@ -207,6 +221,7 @@ export class HttpTransportProvider extends BaseProvider {
       buildHttpRequestBody: this.buildHttpRequestBody.bind(this),
       prepareSseRequestBody: this.prepareSseRequestBody.bind(this),
       wrapUpstreamSseResponse: this.wrapUpstreamSseResponse.bind(this),
+      executePreparedRequest: this.resolvePreparedRequestExecutor(),
       resolveBusinessResponseError: this.resolveProfileBusinessResponseError.bind(this),
       normalizeHttpError: this.normalizeHttpError.bind(this),
       authProvider: this.authProvider,
@@ -215,6 +230,28 @@ export class HttpTransportProvider extends BaseProvider {
       config: this.config,
       httpClient: this.httpClient
     });
+  }
+
+  private resolveTransportBackend(): string {
+    const extensions =
+      this.config?.config?.extensions && typeof this.config.config.extensions === 'object'
+        ? (this.config.config.extensions as Record<string, unknown>)
+        : undefined;
+    const raw = typeof extensions?.transportBackend === 'string' ? extensions.transportBackend.trim().toLowerCase() : '';
+    return raw || 'native-http';
+  }
+
+  private resolvePreparedRequestExecutor() {
+    if (this.resolveTransportBackend() !== 'vercel-ai-sdk') {
+      return undefined;
+    }
+    if (this.vercelAiSdkAnthropicTransport) {
+      return this.vercelAiSdkAnthropicTransport.executePreparedRequest.bind(this.vercelAiSdkAnthropicTransport);
+    }
+    if (this.vercelAiSdkOpenAiTransport) {
+      return this.vercelAiSdkOpenAiTransport.executePreparedRequest.bind(this.vercelAiSdkOpenAiTransport);
+    }
+    return undefined;
   }
 
   protected async preprocessRequest(request: UnknownObject): Promise<UnknownObject> {

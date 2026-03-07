@@ -10,6 +10,9 @@ import { readBlacklist, writeBlacklist } from '../tools/provider-update/blacklis
 import { probeContextForModel } from '../tools/provider-update/probe-context.js';
 import type { ProviderInputConfig } from '../tools/provider-update/types.js';
 import { API_ENDPOINTS } from '../constants/index.js';
+import { runVercelAiProviderDoctor } from '../provider-sdk/vercel-ai-doctor.js';
+import { buildProviderFromTemplate, getProviderTemplates, pickProviderTemplate } from '../provider-sdk/provider-add-template.js';
+import { buildRoutingHintsConfigFragment, inspectProviderConfig } from '../provider-sdk/provider-inspect.js';
 import { loadProviderConfigsV2, type ProviderConfigV2 } from '../config/provider-v2-loader.js';
 import type { UnknownRecord } from '../config/virtual-router-types.js';
 
@@ -190,201 +193,6 @@ function normalizeModelsNode(node: unknown): Record<string, UnknownRecord> {
     return {};
   }
   return node as Record<string, UnknownRecord>;
-}
-
-type ProviderTemplateId =
-  | 'glm'
-  | 'qwen'
-  | 'iflow'
-  | 'kimi'
-  | 'modelscope'
-  | 'gemini-cli'
-  | 'antigravity'
-  | 'gemini'
-  | 'openai'
-  | 'anthropic'
-  | 'responses'
-  | 'custom';
-
-interface ProviderTemplate {
-  id: ProviderTemplateId;
-  label: string;
-  providerTypeHint: string;
-  defaultBaseUrl?: string;
-  defaultModel?: string;
-  seedModels?: string[];
-  defaultCompat?: string;
-  defaultAuthType?: string;
-}
-
-const PROVIDER_TEMPLATES: ProviderTemplate[] = [
-  {
-    id: 'glm',
-    label: 'GLM (Zhipu coding)',
-    providerTypeHint: 'glm',
-    defaultBaseUrl: 'https://open.bigmodel.cn/api/coding/paas/v4',
-    defaultModel: 'glm-4.7',
-    defaultCompat: 'chat:glm',
-    defaultAuthType: 'apikey'
-  },
-  {
-    id: 'qwen',
-    label: 'Qwen Code (portal.qwen.ai)',
-    providerTypeHint: 'qwen',
-    defaultBaseUrl: 'https://portal.qwen.ai/v1',
-    defaultModel: 'qwen3-coder-plus',
-    seedModels: ['qwen3-coder-plus', 'qwen3.5-plus', 'qwen3-vl-plus'],
-    defaultCompat: 'chat:qwen',
-    defaultAuthType: 'qwen-oauth'
-  },
-  {
-    id: 'iflow',
-    label: 'iFlow aggregator',
-    providerTypeHint: 'iflow',
-    defaultBaseUrl: 'https://apis.iflow.cn/v1',
-    defaultModel: 'kimi-k2',
-    seedModels: ['qwen3-vl-plus'],
-    defaultCompat: 'chat:iflow',
-    defaultAuthType: 'iflow-oauth'
-  },
-  {
-    id: 'kimi',
-    label: 'Kimi Coding',
-    providerTypeHint: 'openai',
-    defaultBaseUrl: 'https://api.kimi.com/coding/v1',
-    defaultModel: 'kimi-for-coding',
-    defaultAuthType: 'apikey'
-  },
-  {
-    id: 'modelscope',
-    label: 'ModelScope (OpenAI-compatible)',
-    providerTypeHint: 'openai',
-    defaultBaseUrl: 'https://api-inference.modelscope.cn/v1',
-    defaultModel: 'Qwen/Qwen3-Coder-480B-A35B-Instruct',
-    defaultAuthType: 'apikey'
-  },
-  {
-    id: 'gemini-cli',
-    label: 'Gemini CLI (Cloud Code Assist)',
-    providerTypeHint: 'gemini-cli',
-    defaultBaseUrl: 'https://cloudcode-pa.googleapis.com',
-    defaultModel: 'gemini-2.5-flash-lite',
-    defaultAuthType: 'gemini-cli-oauth'
-  },
-  {
-    id: 'antigravity',
-    label: 'Antigravity (Gemini CLI dev)',
-    providerTypeHint: 'antigravity',
-    defaultBaseUrl: 'https://cloudcode-pa.googleapis.com',
-    defaultModel: 'gemini-2.5-flash-lite',
-    defaultAuthType: 'gemini-cli-oauth'
-  },
-  {
-    id: 'gemini',
-    label: 'Gemini HTTP API',
-    providerTypeHint: 'gemini',
-    defaultBaseUrl: 'https://generativelanguage.googleapis.com/v1beta',
-    defaultModel: 'models/gemini-2.0-flash',
-    defaultAuthType: 'apikey'
-  },
-  {
-    id: 'openai',
-    label: 'OpenAI Chat (api.openai.com)',
-    providerTypeHint: 'openai',
-    defaultBaseUrl: API_ENDPOINTS.OPENAI,
-    defaultModel: 'gpt-4.1',
-    defaultAuthType: 'apikey'
-  },
-  {
-    id: 'anthropic',
-    label: 'Anthropic Messages (api.anthropic.com)',
-    providerTypeHint: 'anthropic',
-    defaultBaseUrl: API_ENDPOINTS.ANTHROPIC,
-    defaultModel: 'claude-3.5-sonnet',
-    defaultAuthType: 'apikey'
-  },
-  {
-    id: 'responses',
-    label: 'Responses-style aggregator (ChatGPT/Codex compatible)',
-    providerTypeHint: 'responses',
-    defaultAuthType: 'apikey'
-  },
-  {
-    id: 'custom',
-    label: 'Custom provider (manual configuration)',
-    providerTypeHint: 'openai'
-  }
-];
-
-function pickTemplate(id?: string): ProviderTemplate {
-  const normalized = (id || '').trim().toLowerCase();
-  if (!normalized) {
-    return PROVIDER_TEMPLATES[0];
-  }
-  const found = PROVIDER_TEMPLATES.find((t) => t.id === normalized);
-  return found ?? PROVIDER_TEMPLATES[PROVIDER_TEMPLATES.length - 1];
-}
-
-function buildProviderFromTemplate(
-  providerId: string,
-  tpl: ProviderTemplate,
-  baseUrl: string,
-  authType: string,
-  apiKeyOrPlaceholder: string,
-  tokenFile: string,
-  primaryModelId: string
-): UnknownRecord {
-  const auth: UnknownRecord = { type: authType };
-  if (authType.toLowerCase().includes('apikey')) {
-    if (apiKeyOrPlaceholder.trim()) {
-      auth.apiKey = apiKeyOrPlaceholder.trim();
-    } else {
-      auth.apiKey = 'YOUR_API_KEY_HERE';
-    }
-  } else if (authType.toLowerCase().includes('oauth')) {
-    if (tokenFile.trim()) {
-      auth.tokenFile = tokenFile.trim();
-    }
-  }
-
-  const models: Record<string, UnknownRecord> = {};
-  const seedModels = Array.isArray(tpl.seedModels) ? tpl.seedModels : [];
-  for (const modelId of seedModels) {
-    const normalizedModelId = typeof modelId === 'string' ? modelId.trim() : '';
-    if (!normalizedModelId) {
-      continue;
-    }
-    models[normalizedModelId] = {
-      supportsStreaming: true
-    };
-  }
-  if (primaryModelId.trim()) {
-    models[primaryModelId.trim()] = {
-      supportsStreaming: true
-    };
-  }
-
-  const provider: UnknownRecord = {
-    id: providerId,
-    enabled: true,
-    type: tpl.providerTypeHint,
-    baseURL: baseUrl,
-    auth,
-    models
-  };
-
-  if (tpl.defaultCompat) {
-    (provider as { compatibilityProfile?: string }).compatibilityProfile = tpl.defaultCompat;
-  }
-
-  if (tpl.id === 'responses') {
-    (provider as UnknownRecord).responses = {
-      process: 'chat',
-      streaming: 'always'
-    };
-  }
-
-  return provider;
 }
 
 export function createProviderUpdateCommand(): Command {
@@ -735,6 +543,132 @@ export function createProviderUpdateCommand(): Command {
       console.log(`Probe results: ${JSON.stringify(results, null, 2)}`);
     });
 
+  const inspect = new Command('inspect')
+    .description('Show normalized provider metadata from config.v2.json plus catalog defaults')
+    .argument('<id>', 'Provider id to inspect (directory name under ~/.routecodex/provider)')
+    .option('--root <dir>', 'Override provider root directory')
+    .option('--json', 'Output raw JSON', false)
+    .option('--routing-hints', 'Include suggested routing/webSearch snippets', false)
+    .action(async (
+      id: string,
+      opts: { root?: string; json?: boolean; routingHints?: boolean }
+    ) => {
+      const providerId = (id || '').trim();
+      if (!providerId) {
+        console.error('Provider id is required');
+        process.exit(1);
+      }
+      const root = resolveProviderRoot(opts.root);
+      await ensureDir(root);
+      const configs = await loadProviderConfigsV2(root);
+      const cfg = configs[providerId];
+      if (!cfg) {
+        console.error(`No config.v2.json found for provider "${providerId}" under ${root}`);
+        process.exit(1);
+      }
+      const configPath = path.join(root, providerId, 'config.v2.json');
+      const inspection = inspectProviderConfig(cfg, { configPath, includeRoutingHints: Boolean(opts.routingHints) });
+      if (opts.json) {
+        console.log(JSON.stringify(inspection, null, 2));
+        return;
+      }
+      console.log(`Provider inspect: ${inspection.providerId}`);
+      console.log(`  path: ${configPath}`);
+      console.log(`  version: ${inspection.version}`);
+      console.log(`  type: ${inspection.providerType}`);
+      if (inspection.baseURL) {
+        console.log(`  baseURL: ${inspection.baseURL}`);
+      }
+      if (inspection.authType) {
+        console.log(`  auth: ${inspection.authType}`);
+      }
+      if (inspection.compatibilityProfile) {
+        console.log(`  compatibilityProfile: ${inspection.compatibilityProfile}`);
+      }
+      if (inspection.catalogId || inspection.catalogLabel) {
+        console.log(`  catalog: ${inspection.catalogId ?? '-'}${inspection.catalogLabel ? ` (${inspection.catalogLabel})` : ''}`);
+      }
+      console.log(`  defaultModel: ${inspection.defaultModel || '-'}`);
+      console.log(`  routeTarget.default: ${inspection.routeTargets.default}`);
+      if (inspection.routeTargets.webSearch) {
+        console.log(`  routeTarget.web_search: ${inspection.routeTargets.webSearch}`);
+      }
+      console.log(`  models (${inspection.modelCount}): ${inspection.models.join(', ') || '-'}`);
+      if (inspection.sdkBinding) {
+        console.log(`  sdkBinding: ${JSON.stringify(inspection.sdkBinding)}`);
+      }
+      if (inspection.capabilities && Object.keys(inspection.capabilities).length) {
+        console.log(`  capabilities: ${Object.keys(inspection.capabilities).join(', ')}`);
+      }
+      if (inspection.webSearch) {
+        console.log(`  webSearch: ${JSON.stringify(inspection.webSearch)}`);
+      }
+      if (inspection.routingHints) {
+        console.log('  routingHints:');
+        console.log(JSON.stringify(inspection.routingHints, null, 2));
+        console.log('  configFragment:');
+        console.log(JSON.stringify(buildRoutingHintsConfigFragment(inspection.routingHints), null, 2));
+      }
+    });
+
+  const doctor = new Command('doctor')
+    .description('Probe a provider v2 config via the Vercel AI SDK compatibility layer')
+    .argument('<id>', 'Provider id to probe (directory name under ~/.routecodex/provider)')
+    .option('--root <dir>', 'Override provider root directory')
+    .option('--model <id>', 'Override model id (defaults to provider.defaultModel or the first configured model)')
+    .option('--prompt <text>', 'Prompt to use for the text probe', 'Reply with exactly OK.')
+    .option('--json', 'Output raw JSON', false)
+    .action(async (
+      id: string,
+      opts: { root?: string; model?: string; prompt?: string; json?: boolean }
+    ) => {
+      const providerId = (id || '').trim();
+      if (!providerId) {
+        console.error('Provider id is required');
+        process.exit(1);
+      }
+      const root = resolveProviderRoot(opts.root);
+      await ensureDir(root);
+      const configs = await loadProviderConfigsV2(root);
+      const cfg = configs[providerId];
+      if (!cfg) {
+        console.error(`No config.v2.json found for provider "${providerId}" under ${root}`);
+        process.exit(1);
+      }
+      const providerNode = (cfg.provider ?? {}) as UnknownRecord;
+      const modelsNode = normalizeModelsNode((providerNode as { models?: unknown }).models);
+      const inferredModel = readString((providerNode as { defaultModel?: unknown }).defaultModel) || Object.keys(modelsNode)[0] || '';
+      const modelId = (opts.model || inferredModel).trim();
+      if (!modelId) {
+        console.error(`Provider "${providerId}" has no configured models; pass --model explicitly.`);
+        process.exit(1);
+      }
+      const result = await runVercelAiProviderDoctor({
+        providerId,
+        providerNode,
+        modelId,
+        prompt: opts.prompt
+      });
+      if (opts.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.log(`Provider doctor: ${providerId}`);
+        console.log(`  model: ${modelId}`);
+        console.log(`  binding: ${result.binding.family}${result.binding.supported ? '' : ' (runtime-only)'}`);
+        if (result.baseURL) {
+          console.log(`  baseURL: ${result.baseURL}`);
+        }
+        console.log(`  status: ${result.ok ? 'ok' : 'failed'}`);
+        console.log(`  message: ${result.message}`);
+        if (typeof result.text === 'string' && result.text.trim()) {
+          console.log(`  text: ${result.text.slice(0, 200)}`);
+        }
+      }
+      if (!result.ok) {
+        process.exit(1);
+      }
+    });
+
   // provider list
   const list = new Command('list')
     .description('List provider v2 configs under ~/.routecodex/provider')
@@ -808,11 +742,11 @@ export function createProviderUpdateCommand(): Command {
       }
 
       console.log('Available provider templates:');
-      for (const tpl of PROVIDER_TEMPLATES) {
+      for (const tpl of getProviderTemplates()) {
         console.log(`- ${tpl.id}: ${tpl.label}`);
       }
-      const templateIdRaw = await ask('Template id', 'glm');
-      const tpl = pickTemplate(templateIdRaw);
+      const templateIdRaw = await ask('Template id', 'openai');
+      const tpl = pickProviderTemplate(templateIdRaw);
 
       const baseUrlDefault = tpl.defaultBaseUrl ?? '';
       const baseUrl = await ask('Base URL', baseUrlDefault);
@@ -865,6 +799,11 @@ export function createProviderUpdateCommand(): Command {
 
       await fs.writeFile(v2Path, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
       console.log(`Provider "${providerId}" written to ${v2Path}`);
+      const inspection = inspectProviderConfig(payload, { configPath: v2Path, includeRoutingHints: true });
+      if (inspection.routingHints) {
+        console.log('Suggested config fragment for ~/.routecodex/config.json:');
+        console.log(JSON.stringify(buildRoutingHintsConfigFragment(inspection.routingHints), null, 2));
+      }
     });
 
   // provider change
@@ -997,6 +936,8 @@ export function createProviderUpdateCommand(): Command {
     });
 
   cmd.addCommand(update);
+  cmd.addCommand(inspect);
+  cmd.addCommand(doctor);
   cmd.addCommand(syncModels);
   cmd.addCommand(probeContext);
   cmd.addCommand(list);

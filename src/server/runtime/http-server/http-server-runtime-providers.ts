@@ -3,14 +3,11 @@ import type { ProviderHandle, ProviderProtocol, VirtualRouterArtifacts } from '.
 import { ProviderFactory } from '../../../providers/core/runtime/provider-factory.js';
 import { mapProviderProtocol, normalizeProviderType, resolveProviderIdentity } from './provider-utils.js';
 import {
-  preloadAntigravityAliasUserAgents,
-  primeAntigravityUserAgentVersion
-} from '../../../providers/auth/antigravity-user-agent.js';
-import {
-  getAntigravityWarmupBlacklistDurationMs,
-  isAntigravityWarmupEnabled,
-  warmupCheckAntigravityAlias
-} from '../../../providers/auth/antigravity-warmup.js';
+  buildAntigravityAliasMap,
+  collectAntigravityAliases,
+  startAntigravityPreload,
+  startAntigravityWarmup
+} from './antigravity-startup-tasks.js';
 
 type LegacyAuthFields = ProviderRuntimeProfile['auth'] & {
   token_file?: unknown;
@@ -68,24 +65,7 @@ export async function initializeProviderRuntimes(server: any, artifacts?: Virtua
   server.startupExcludedProviderKeys.clear();
 
   try {
-    const aliases: string[] = [];
-    for (const [providerKey, runtime] of Object.entries(runtimeMap)) {
-      const key = typeof providerKey === 'string' ? providerKey.trim() : '';
-      const rk =
-        runtime && typeof (runtime as any).runtimeKey === 'string' ? String((runtime as any).runtimeKey).trim() : '';
-      for (const candidate of [rk, key]) {
-        if (!candidate.toLowerCase().startsWith('antigravity.')) {
-          continue;
-        }
-        const parts = candidate.split('.');
-        if (parts.length >= 2 && parts[1] && parts[1].trim()) {
-          aliases.push(parts[1].trim());
-        }
-      }
-    }
-    if (aliases.length) {
-      await Promise.allSettled([primeAntigravityUserAgentVersion(), preloadAntigravityAliasUserAgents(aliases)]);
-    }
+    startAntigravityPreload(collectAntigravityAliases(runtimeMap as Record<string, unknown>));
   } catch {
     // best-effort
   }
@@ -100,66 +80,7 @@ export async function initializeProviderRuntimes(server: any, artifacts?: Virtua
       }
     | undefined;
 
-  if (isAntigravityWarmupEnabled()) {
-    try {
-      const providerKeysByAlias = new Map<string, string[]>();
-      for (const providerKey of Object.keys(runtimeMap)) {
-        const key = typeof providerKey === 'string' ? providerKey.trim() : '';
-        if (!key.toLowerCase().startsWith('antigravity.')) {
-          continue;
-        }
-        const parts = key.split('.');
-        if (parts.length < 3) {
-          continue;
-        }
-        const alias = parts[1]?.trim();
-        if (!alias) {
-          continue;
-        }
-        const list = providerKeysByAlias.get(alias) || [];
-        list.push(key);
-        providerKeysByAlias.set(alias, list);
-      }
-
-      if (providerKeysByAlias.size > 0) {
-        const canBlacklist = Boolean(quotaModule && typeof quotaModule.disableProvider === 'function');
-        const durationMs = getAntigravityWarmupBlacklistDurationMs();
-        let okCount = 0;
-        let failCount = 0;
-        for (const [alias, providerKeys] of providerKeysByAlias.entries()) {
-          const result = await warmupCheckAntigravityAlias(alias);
-          if (result.ok) {
-            okCount += 1;
-            console.log(
-              `[antigravity:warmup] ok alias=${alias} profile=${result.profileId} fp_os=${result.fingerprintOs} fp_arch=${result.fingerprintArch} ua_suffix=${result.actualSuffix} ua=${result.actualUserAgent}`
-            );
-            continue;
-          }
-          failCount += 1;
-          const expected = result.expectedSuffix ? ` expected=${result.expectedSuffix}` : '';
-          const actual = result.actualSuffix ? ` actual=${result.actualSuffix}` : '';
-          const hint =
-            result.reason === 'linux_not_allowed'
-              ? ` hint="run: routecodex camoufox-fp repair --provider antigravity --alias ${alias}"`
-              : result.reason === 'reauth_required'
-                ? ` hint="run: routecodex oauth antigravity-auto ${result.tokenFile || `antigravity-oauth-*-` + alias + `.json`}"` +
-                  `${result.fromSuffix ? ` from=${result.fromSuffix}` : ''}${result.toSuffix ? ` to=${result.toSuffix}` : ''}`
-                : '';
-          console.error(
-            `[antigravity:warmup] FAIL alias=${alias} profile=${result.profileId}${result.fingerprintOs ? ` fp_os=${result.fingerprintOs}` : ''}${result.fingerprintArch ? ` fp_arch=${result.fingerprintArch}` : ''} reason=${result.reason}${expected}${actual}${hint} providerKeys=${providerKeys.length}${canBlacklist ? '' : ' (quota module unavailable; cannot blacklist)'}`
-          );
-          if (canBlacklist) {
-            await Promise.allSettled(
-              providerKeys.map((providerKey) => quotaModule!.disableProvider!({ providerKey, mode: 'blacklist', durationMs }))
-            );
-          }
-        }
-        console.log(`[antigravity:warmup] summary ok=${okCount} fail=${failCount} total=${providerKeysByAlias.size}`);
-      }
-    } catch {
-      // best-effort
-    }
-  }
+  startAntigravityWarmup(buildAntigravityAliasMap(runtimeMap as Record<string, unknown>), quotaModule);
 
   const runtimeKeyAuthType = new Map<string, string | null>();
   const apikeyDailyResetTime = (() => {

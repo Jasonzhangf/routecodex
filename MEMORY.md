@@ -1,0 +1,144 @@
+# RouteCodex Memory
+
+## Web Search 相关
+
+- 2026-03-06: Web search execution is now split by config in `virtualrouter.webSearch.engines[*]` using `executionMode` (`direct` vs `servertool`) instead of hardcoded DeepSeek checks. Direct route search backends skip canonical servertool injection; servertool-only backends still inject `web_search`.
+- 2026-03-06: `websearch` and `web-search` must be normalized to canonical `web_search` before servertool handler lookup, otherwise identical search tool calls fragment across two names.
+- 2026-03-06: Direct route engines can declare `directActivation`, currently used for `route`-activated native search backends such as `deepseek-web` and `builtin` for models with native search capability.
+- 2026-03-06: Servertool injection now filters out direct engines, so canonical `web_search` function tools are only injected for true servertool backends.
+- 2026-03-06: The previous hardcoded DeepSeek bypass in Rust request governance was removed; bypass is now driven by engine config instead of provider-key string matching.
+- 2026-03-06: DeepSeek search aliases are no longer synthesized in bootstrap; provider model aliases now come from declarative `models.<name>.aliases` config.
+- 2026-03-06: Volcengine Coding Plan (ark-coding-plan) models support Anthropic-compatible web search:
+  - kimi-k2.5: supported with `web_search_20250305` built-in tool
+  - doubao-seed-2.0-code: supported with `web_search_20250305` built-in tool
+  - Endpoint: `POST https://ark.cn-beijing.volces.com/api/coding/v1/messages`
+  - Required headers: `x-api-key`, `anthropic-version: 2023-06-01`, `anthropic-beta: web-search-2025-03-05`
+- 2026-03-06: Mixed-tool testing succeeded for ark-coding-plan models: both `web_search_20250305` built-in and custom function tools can be used together without schema/runtime errors.
+- 2026-03-07: Provider init v2 and catalog now support catalog-driven `webSearch` bindings; `routecodex provider inspect <id> --routing-hints` generates `web_search` routing plus `policyOptions.webSearch` when provider catalog exposes a web-search binding.
+- 2026-03-07: `src/cli/commands/init/interactive.ts` now preserves non-core routes (for example `web_search`) when editing default/thinking/tools interactively.
+
+Tags: web-search, direct-route, servertool, deepseek-web, websearch-alias, ark-coding-plan, kimi-k2.5, doubao-seed-2.0-code, tool-mix, provider-init, v2-config, routing-hints
+
+## 重启与 Supervisor 相关
+
+- 2026-03-06: Managed restart uses the currently running supervisor to respawn a fresh child from the latest on-disk build output. The first adoption of a new restart protocol still requires the old supervisor itself to be restarted once.
+- 2026-03-06: `routecodex restart` targets the existing managed server; the supervised child process is respawned from the latest on-disk `dist/index.js` / CLI build artifacts.
+- 2026-03-06: Added `POST /daemon/restart-process`, by existing server receiving restart request and sending `SIGUSR2` to itself after response.
+- 2026-03-06: `routecodex restart` now prefers `restart-process` HTTP entry; only falls back to legacy signal in non-`ROUTECODEX_RESTART_HTTP_ONLY` mode.
+- 2026-03-06: `routecodex start` non-daemon parent injects `ROUTECODEX_MANAGED_BY_START=1` to child and recognizes child `exit code 75` as "managed restart request", parent pulls new child and continues supervision.
+- 2026-03-06: Server-side `restartSelf()` in `ROUTECODEX_MANAGED_BY_START=1` mode no longer spawns child itself, stops runtime and exits with `code=75` to hand restart control back to `routecodex start` parent.
+
+Tags: restart, supervisor, restart-process, sigusr2, managed-restart
+
+## 虚拟路由器与负载均衡相关
+
+- 2026-03-06: Virtual Router now supports pool-scoped `routing.<route>[].loadBalancing` with per-pool `strategy`/`weights`; pool config overrides global `loadBalancing`, and weights are always recomputed from the currently available targets inside that pool, so cooldown/unhealthy removal and later recovery both immediately rebalance the pool.
+- 2026-03-06: Virtual Router Rust hotpath now treats route-pool load balancing at the `provider.model` group level instead of raw runtime-key count. Equal pool weights no longer get amplified by multi-key providers, and `mode: priority` now stays inside the first available `provider.model` group before falling through to the next group.
+- 2026-03-06: `sharedmodule/llmswitch-core` `engine-legacy.ts` no longer performs its own TS route selection; `route()/getStopMessageState()/getPreCommandState()/getStatus()` now delegate to the native-first `engine.ts`, and the old TS legacy route chain files `engine-legacy/{routing,route-selection,route-finalize,route-state,route-state-allowlist}.ts` were removed.
+- 2026-03-06: Config now uses B shape for every routing pool: members declared by `loadBalancing.weights`, `targets` omitted, route semantics fields like `mode`, `force`, `backup`, and pool `priority` remain separate.
+- 2026-03-06: Added `VirtualRouterEngine.route()` regressions covering both equal-weight grouped balancing and strict priority-group fallback.
+
+Tags: virtual-router, rust-hotpath, load-balancing, provider-model, priority-routing, route-pool, engine-legacy, native-first, ts-removal
+
+## 构建与全局安装相关
+
+- 2026-03-06: `scripts/verify-install-e2e.mjs` now explicitly unsets `ROUTECODEX_BUILD_RESTART_ONLY` and `RCC_BUILD_RESTART_ONLY` when starting verification service to avoid inheriting restart-only and accidentally restarting user's managed service.
+- 2026-03-06: Port detection in `verify-install-e2e.mjs` upgraded to `host + 0.0.0.0` dual check; if requested port occupied, automatically falls back to next available port and prints notice.
+- 2026-03-06: `scripts/install-global.sh` in dev build restart-only scenario now calls `routecodex restart --port 5555` separately after health check completes, separating "refresh user's existing service" from "temporary install verification".
+- 2026-03-06: Install-global in `ROUTECODEX_BUILD_RESTART_ONLY=1` scenario uses `ROUTECODEX_RESTART_HTTP_ONLY=1 routecodex restart --port ...`; if old service doesn't support server-managed restart, explicitly skips auto-restart instead of accidentally killing existing service.
+- 2026-03-06: Sharedmodule llmswitch-core native loader must use real `import.meta.url` directly instead of `Function("return import.meta.url")` + `process.cwd()` fallback to correctly locate `rust-core/target/release/router_hotpath_napi.node` under symlinked dev installs.
+
+Tags: build, global-install, verify-install-e2e, port-detection, restart-only, native-loader, import-meta, llmswitch-core
+
+## 启动、预热与认证相关
+
+- 2026-03-07: Startup path was slowed by two synchronous behaviors during `initializeProviderRuntimes()` / provider `initialize()`: Antigravity preload + warmup were awaited during server runtime init, and non-OAuth providers awaited `authProvider.validateCredentials()` during startup.
+- 2026-03-07: Fixed provider auth startup path by extracting `src/providers/core/runtime/provider-startup-tasks.ts` and switching `HttpTransportProvider.onInitialize()` to schedule non-OAuth credential validation in the background via `runNonBlockingCredentialValidation(...)`.
+- 2026-03-07: Fixed Antigravity startup path by extracting `src/server/runtime/http-server/antigravity-startup-tasks.ts` and making both preload and warmup fire-and-forget; startup now continues while warmup can still log and blacklist failing aliases asynchronously.
+- 2026-03-07: `src/server/runtime/http-server/http-server-runtime-providers.ts` now only kicks off those tasks and continues runtime handle initialization instead of awaiting the warmup chain.
+- 2026-03-07: Added focused regression coverage: `tests/providers/core/runtime/http-transport-provider.startup-nonblocking.spec.ts` and `tests/server/http-server/runtime-provider-warmup.nonblocking.spec.ts`.
+
+Tags: startup, warmup, auth, nonblocking, antigravity, provider-init, build-verify
+
+## Provider 初始化与 SDK 相关
+
+- 2026-03-07: Reworked init/config generation to emit valid V2 single-source config with `virtualrouter.routingPolicyGroups.default.routing` instead of legacy `virtualrouter.routing`/`virtualrouter.webSearch`.
+- 2026-03-07: Added `src/cli/config/init-v2-builder.ts` as shared builder for weighted route pools and V2 config envelopes.
+- 2026-03-07: `src/cli/commands/init.ts` now creates minimal V2 config + provider directory layout on fresh no-arg init, rather than copying a V1 bundled config.
+- 2026-03-07: `src/cli/config/init-config.ts` now writes sibling `provider/<id>/config.v2.json` files so helper path matches real V2 provider/config split.
+- 2026-03-07: `src/cli/config/init-provider-catalog.ts` is now richer provider catalog with `sdkBinding`, `capabilities`, and catalog-driven `webSearch` bindings.
+- 2026-03-07: Added Vercel AI SDK-based provider doctor entrypoint at `src/provider-sdk/vercel-ai-doctor.ts` and wired into `routecodex provider doctor <id>`.
+- 2026-03-07: Added `routecodex provider inspect <id>` backed by `src/provider-sdk/provider-inspect.ts`, showing normalized config facts, catalog metadata, Vercel-AI doctor binding family, capabilities, web search binding, and suggested route targets from one place.
+- 2026-03-07: Doctor currently supports direct probing for OpenAI-compatible and Anthropic-compatible providers using resolved Bearer credentials; runtime-only providers such as iFlow/DeepSeek web account/Gemini CLI are reported as unsupported for direct SDK probing.
+- 2026-03-07: Added `--routing-hints` support to `routecodex provider inspect <id>`; generates weighted route pool snippets for `default`, `thinking`, `tools`, capability-driven snippets for `coding`, `longcontext`, `multimodal`, and `web_search` routing plus `policyOptions.webSearch` when provider catalog exposes web-search binding.
+- 2026-03-07: `src/commands/provider-update.ts` now passes `includeRoutingHints` through inspect and prints routing hints in both JSON and human-readable modes.
+
+Tags: provider-init, v2-config, routingPolicyGroups, vercel-ai-sdk, provider-doctor, init-command, provider-inspect, routing-hints, sdk-onboarding, weighted-routing
+
+## Rust 迁移相关
+
+- 2026-03-06: Refreshed BD epic `routecodex-267` based on remaining TS-only runtime modules under `sharedmodule/llmswitch-core/src/conversion/**`: compat/actions runtime transforms, codecs runtime layer, pipeline/codecs/v2 runtime layer, residual config/schema/hooks/meta runtime modules.
+- 2026-03-06: Migration strategy: collapse TS files to thin wrappers around existing native entrypoints where possible, add Rust true source where needed, keep type-only files as TS wrappers when no runtime logic exists.
+- 2026-03-06: Completed slices in `routecodex-267.5`:
+  - `claude-thinking-tools.ts`: thin wrapper around `applyClaudeThinkingToolSchemaCompatWithNative`
+  - `strip-orphan-function-calls-tag.ts`: thin wrapper around `stripOrphanFunctionCallsTagWithNative`
+  - `lmstudio-responses-fc-ids.ts`: narrowed to native-backed id helper composition, collapsed to `enforceLmstudioResponsesFcToolCallIdsWithNative`
+  - `response-normalize.ts`: switched to `normalizeResponsePayloadWithNative`
+  - `response-validate.ts`: switched to `validateResponsePayloadWithNative`
+  - `request-rules.ts`: switched to `applyRequestRulesWithNative`
+  - `response-blacklist.ts`: switched to `applyResponseBlacklistWithNative`
+  - `normalize-tool-call-ids.ts`: switched to `normalizeToolCallIdsWithNative`
+  - `reasoning-tool-parser.ts`: collapsed to native-only wrapper with explicit assertion, preserved `<id>...</id>` when extracting tool calls from reasoning markup
+  - `responses-tool-utils.ts`: moved `normalizeResponsesToolCallIds`/`resolveToolCallIdStyle`/`stripInternalToolingMetadata` onto new native wrappers
+  - `tool-call-id-manager.ts`: removed remaining TS-side ID generation/preserve fallback branching, unified onto native transformer state
+  - `streaming-text-extractor.ts`: moved extractor session state (`buffer`/`idCounter`/`idPrefix`) behind native state APIs
+  - `responses-response-utils.ts`: moved `buildChatResponseFromResponses` core construction path to native
+  - `output-content-normalizer.ts`: kept native-only implementation path with explicit module-level native availability assertion
+  - `chat-output-normalizer.ts`: added explicit native-availability assertion to align with shared wrapper pattern
+  - `responses-conversation-store.ts`: moved capture-time payload/input/tools preparation and resume-time tool output normalization into native
+  - `responses-openai-bridge.ts`: multiple slices - normalized bridge history seed, prepared responses request envelope, local image path preprocessing, all moved to native
+  - `anthropic-claude-code-system-prompt.ts`: collapsed to native thin wrapper around `runReqOutboundStage3CompatWithNative`
+  - `universal-shape-filter.ts`: collapsed to native thin wrapper over new native exports `applyUniversalShapeRequestFilterWithNative` and `applyUniversalShapeResponseFilterWithNative`
+  - `glm-tool-extraction.ts`: collapsed to native thin wrapper around `runRespInboundStage3CompatWithNative` for `chat:glm`
+  - `anthropic-claude-code-user-id.ts`: added as native thin wrapper over new export `applyAnthropicClaudeCodeUserIdWithNative`
+- 2026-03-06: Fixed `responses -> chat -> responses` exec-command tool-result roundtrip regression: in `responses` mode, `function_call` now prefers original `call_id` over item `id` when rebuilding chat `tool_calls`, and tool-role messages now serialize structured `content` back into `function_call_output.output` instead of flattening to text.
+- 2026-03-06: Native loader compatibility fix: replaced direct `import.meta.url` reference with guarded runtime resolution so plain Jest CJS parsing no longer crashes on `native-router-hotpath-loader.ts`.
+ rust-migration, llmswitch-core, conversion, compat-actions, lmstudio, tool-call-ids, native-wrapper, reasoning-tool-parser, responses-tool-utils, tool-call-id-manager, streaming-text-extractor, responses-response-utils, output-content-normalizer, chat-output-normalizer, responses-conversation-store, responses-openai-bridge, claude-code, universal-shape-filter, glm-tool-extraction, user-id, loader-compat, bd-task, routecodex-267.5
+- 2026-03-07: Startup failure `native resolveHubProtocolAllowlistsJson is required but unavailable` was caused by `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-router-hotpath-loader.ts` reading global `__filename` inside an ESM module. When llmswitch-core was imported from RouteCodex, `__filename` resolved to the host CJS entry (`dist/cli.js` or `[stdin]`) instead of the loader file, so native candidate probing searched the wrong repo paths. Fix: loader module URL is now sourced only from `import.meta.url`; do not use host-global `__filename`/`process.cwd()` to locate llms native bindings.
+
+Tags: rust-migration, llmswitch-core, native-loader, import-meta-url, esm-cjs-boundary, startup-blocker, routecodex-start
+
+Tags: rust-migration, llmswitch-core, conversion, compat-actions, lmstudio, tool-call-ids, native-wrapper, reasoning-tool-parser, responses-tool-utils, tool-call-id-manager, streaming-text-extractor, responses-response-utils, output-content-normalizer, chat-output-normalizer, responses-conversation-store, responses-openai-bridge, claude-code, universal-shape-filter, glm-tool-extraction, user-id, loader-compat, bd-task, routecodex-267.5
+
+## Anthropic SSE 与 Responses 相关
+
+- 2026-03-06: Anthropic SSE stream for kimi-k2.5 was truncated after valid `tool_use` block had streamed most `input_json_delta` chunks; `AnthropicSseToJsonConverter` did not salvage partial-but-usable state on `terminated`/upstream timeout errors.
+- 2026-03-06: Added terminated-salvage logic in `sharedmodule/llmswitch-core/src/sse/sse-to-json/anthropic-sse-to-json-converter.ts`: on `terminated`/upstream stream timeout messages, converter now calls `builder.getResult()` and returns partial Anthropic response when usable.
+- 2026-03-06: Improved `anthropic-response-builder` default stop reason inference so incomplete tool-call streams default to `stop_reason: "tool_use"` instead of `end_turn` when a `tool_use` block is present.
+- 2026-03-06: Previous seed usage loss was caused by Anthropic SSE builder replacing `message_start.usage` with `message_delta.usage`; after fix, usage is consumed correctly through RouteCodex 5555 chain and returned to client.
+- 2026-03-06: OpenAI Responses upstream returned HTTP 400 on CRS gpt-5.4 longcontext requests with error: `Invalid 'input[565].name': string too long. Expected a string with maximum length 128, but got a string with length 316 instead.`
+- 2026-03-06: Root causes: historical bridge input contained polluted `function_call.name` with long text-derived string; TS bridge side was passing JS function `sanitizeResponsesFunctionName` into `convertBridgeInputToChatMessages(...)` but native wrapper only honors string modes; chat_process fallback history was restoring `captured.input` back to raw preserved `input[]` bypassing normalized history; `normalize_responses_function_name(...)` sanitized characters but did not enforce OpenAI Responses max-name constraint.
+- 2026-03-06: Fix: added hard length guard in Rust so `normalize_responses_function_name(...)` returns `None` when sanitized name exceeds 128 chars; `convert_bridge_input_to_chat_messages(...)` already skips calls whose normalized function name resolves to `None`, so polluted overlong `function_call` is now dropped from outbound history.
+- 2026-03-06: GPT-5.4 reasoning findings: some provider responses contain reasoning items with only `encrypted_content` and no visible `summary_text`; RouteCodex preserves `encrypted_content` and `reasoning_tokens`, but no visible `summary_text` to show - this is upstream behavior, not a mapping bug.
+- 2026-03-06: Model remap invariant: for responses outbound remap, final `model` must stay aligned with VirtualRouter hit / provider response, not with original request model; temporary patch that made snapshot `model` source-wins was reverted.
+- 2026-03-06: HTTP logging update: `src/server/handlers/handler-utils.ts` now derives and prints `finish_reason` on request-complete logs; Chat payloads use `choices[0].finish_reason`; Anthropic payloads map `stop_reason` back to finish-reason equivalent; OpenAI Responses payloads derive `tool_calls` from `required_action`/function-call output and `stop` from `status=completed`.
+
+Tags: anthropic-sse, terminated, salvage, ark-coding-plan, kimi-k2.5, tool_use, sse_decode, seed, usage, routecodex-5555, openai-responses, overlong-function-name, input-name-400, crs, gpt-5.4, reasoning, model-remap, virtual-router, logging, finish-reason, request-complete, regression-test
+
+## Ark Coding Plan 相关
+
+- 2026-03-06: Volcengine Coding Plan base URL rules: Anthropic-compatible tools use `https://ark.cn-beijing.volces.com/api/coding`, OpenAI-compatible tools use `https://ark.cn-beijing.volces.com/api/coding/v3`; do not use `https://ark.cn-beijing.volces.com/api/v3` because it bypasses Coding Plan quota and incurs extra cost.
+- 2026-03-06: Local RouteCodex provider `ark-coding-plan` configured with: provider type `anthropic`, baseURL `https://ark.cn-beijing.volces.com/api/coding`, auth type `x-api-key`, compatibilityProfile `anthropic:claude-code`.
+- 2026-03-06: Models available: doubao-seed-2.0-code, doubao-seed-2.0-pro, doubao-seed-2.0-lite, doubao-seed-code, minimax-m2.5, glm-4.7, deepseek-v3.2, kimi-k2.5.
+- 2026-03-06: Context values set: Doubao/DeepSeek 256000, GLM-4.7 202752, MiniMax-M2.5 204800, Kimi-K2.5 262144.
+- 2026-03-06: Real probe succeeded against `POST /api/coding/v1/messages` with `x-api-key` and `anthropic-version`.
+
+Tags: ark-coding-plan, volcengine, anthropic, coding-plan, baseurl, provider-config, local-provider, routecodex-config
+
+## 其他
+
+- 2026-03-06: `apply_patch` must use workspace-relative paths only; absolute paths (leading '/' or drive letters) are rejected by sandbox and can yield Sandbox(Signal(9)) or "Failed to read file to update ... No such file or directory".
+- 2026-03-06: Updated guidance in sharedmodule to explicitly require relative paths and warn absolute paths will be rejected; added apply_patch error hint for Sandbox(Signal(9)) and missing-path errors in hub_semantic_mapper_chat.rs.
+- 2026-03-06: Updated `~/.codex/config.toml` so all `model_reasoning_effort` entries are `high`; last remaining non-high entry was `[model_providers.tab]` previously `medium`.
+
+Tags: apply-patch, sandbox, relative-paths, codex, config, reasoning, high, tab-provider
