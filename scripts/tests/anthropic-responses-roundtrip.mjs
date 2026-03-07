@@ -49,12 +49,39 @@ function bfsFindPayload(doc, predicate) {
   return null;
 }
 
+function listJsonFilesRecursive(dir) {
+  const out = [];
+  const stack = [dir];
+  while (stack.length) {
+    const current = stack.pop();
+    let entries = [];
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const ent of entries) {
+      const full = path.join(current, ent.name);
+      if (ent.isDirectory()) {
+        stack.push(full);
+        continue;
+      }
+      if (ent.isFile() && ent.name.toLowerCase().endsWith('.json')) {
+        out.push(full);
+      }
+    }
+  }
+  return out;
+}
+
 function loadCodexSample() {
   for (const entry of SEARCH_PATHS) {
     if (!fs.existsSync(entry.dir)) continue;
-    const files = fs.readdirSync(entry.dir).filter(f => f.toLowerCase().endsWith('.json')).sort();
-    for (const file of files) {
-      const full = path.join(entry.dir, file);
+    const files = listJsonFilesRecursive(entry.dir)
+      .map((file) => ({ file, mtime: (() => { try { return fs.statSync(file).mtimeMs; } catch { return 0; } })() }))
+      .sort((a, b) => b.mtime - a.mtime)
+      .map((f) => f.file);
+    for (const full of files) {
       try {
         const json = JSON.parse(fs.readFileSync(full, 'utf8'));
         const payload = bfsFindPayload(json, entry.format === 'responses' ? looksResponsesPayload : looksAnthropicPayload);
@@ -96,13 +123,55 @@ async function loadConverters() {
   };
 }
 
+function assertToolCallsWithoutIds(toolCalls, label) {
+  if (!Array.isArray(toolCalls) || toolCalls.length === 0) {
+    throw new Error(`[anthropic-roundtrip] ${label} expected tool_calls`);
+  }
+  for (const call of toolCalls) {
+    if (!call || typeof call !== 'object') continue;
+    if ('id' in call) {
+      throw new Error(`[anthropic-roundtrip] ${label} should not include id`);
+    }
+    if ('call_id' in call) {
+      throw new Error(`[anthropic-roundtrip] ${label} should not include call_id`);
+    }
+    if ('tool_call_id' in call) {
+      throw new Error(`[anthropic-roundtrip] ${label} should not include tool_call_id`);
+    }
+  }
+}
+
+function runIncludeToolCallIdsRegression(converters) {
+  const payload = {
+    id: 'msg_tool_use_regression',
+    type: 'message',
+    role: 'assistant',
+    model: 'glm-4.6',
+    created: 1700000000,
+    stop_reason: 'tool_use',
+    content: [
+      {
+        type: 'tool_use',
+        id: 'call_regression_shell',
+        name: 'Bash',
+        input: { command: 'ls' }
+      }
+    ]
+  };
+  const chat = converters.buildOpenAIChatFromAnthropicMessage(payload, { includeToolCallIds: false });
+  const toolCalls = chat?.choices?.[0]?.message?.tool_calls;
+  assertToolCallsWithoutIds(toolCalls, 'includeToolCallIds=false');
+  console.log('[anthropic-roundtrip] includeToolCallIds=false regression passed');
+}
+
 async function main() {
+  const converters = await loadConverters();
+  runIncludeToolCallIdsRegression(converters);
   const sample = loadCodexSample();
   if (!sample) {
     console.log('[anthropic-roundtrip] codex samples 未找到，跳过验证（可运行 npm run replay:codex-sample 捕获样本）');
     return;
   }
-  const converters = await loadConverters();
   console.log(`[anthropic-roundtrip] 使用样本 ${sample.file} (${sample.format})`);
 
   let baseResponsesPayload;
@@ -111,6 +180,8 @@ async function main() {
   } else {
     const chatFromAnthropic = converters.buildOpenAIChatFromAnthropicMessage(sample.payload);
     baseResponsesPayload = converters.buildResponsesPayloadFromChat(chatFromAnthropic);
+    const chatNoIds = converters.buildOpenAIChatFromAnthropicMessage(sample.payload, { includeToolCallIds: false });
+    assertToolCallsWithoutIds(chatNoIds?.choices?.[0]?.message?.tool_calls, 'sample includeToolCallIds=false');
   }
 
   const chatFromResponses = converters.buildChatResponseFromResponses(baseResponsesPayload);

@@ -9,6 +9,7 @@ import { registerStatsRoutes } from './daemon-admin/stats-handler.js';
 import { registerControlRoutes } from './daemon-admin/control-handler.js';
 import type { HistoricalPeriodsSnapshot, HistoricalStatsSnapshot, StatsSnapshot } from './stats-manager.js';
 import { isDaemonSessionAuthenticated } from './daemon-admin/auth-session.js';
+import { ensureDaemonLoginRecord } from './daemon-admin/auth-store.js';
 
 export interface DaemonAdminRouteOptions {
   app: Application;
@@ -121,7 +122,14 @@ export function rejectNonLocalOrUnauthorizedAdmin(
 export function registerDaemonAdminRoutes(options: DaemonAdminRouteOptions): void {
   const { app } = options;
   const bindHost = typeof options.getServerHost === 'function' ? options.getServerHost() : '';
-  setDaemonAdminAuthRequiredForApp(app, !isLoopbackBindHost(bindHost));
+  const authRequired = !isLoopbackBindHost(bindHost);
+  setDaemonAdminAuthRequiredForApp(app, authRequired);
+  if (authRequired) {
+    void ensureDaemonLoginRecord().catch((error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn('[daemon-admin] failed to ensure default login password', message);
+    });
+  }
 
   // Daemon admin password auth (setup/login/logout/status)
   registerDaemonAuthRoutes(app);

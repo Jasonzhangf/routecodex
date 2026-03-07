@@ -3,10 +3,11 @@ import path from 'node:path';
 import { homedir } from 'node:os';
 import type { Command } from 'commander';
 
-import { getInitProviderCatalog, type InitProviderTemplate } from '../config/init-provider-catalog.js';
+import { getBootstrapProviderTemplates } from '../config/bootstrap-provider-templates.js';
+import { buildCatalogWebSearchDefaults, type InitProviderTemplate } from '../config/init-provider-catalog.js';
 import { parseProvidersArg } from '../config/init-config.js';
+import { buildV2ConfigObject } from '../config/init-v2-builder.js';
 import { installBundledDocsBestEffort } from '../config/bundled-docs.js';
-import { installBundledDefaultConfigBestEffort } from '../config/bundled-default-config.js';
 import { ensureDefaultPrecommandScriptBestEffort } from '../config/precommand-default-script.js';
 import {
   asRecord,
@@ -41,70 +42,6 @@ import type { InitCommandContext, InitCommandOptions } from './init/shared.js';
 
 export type { InitCommandContext } from './init/shared.js';
 
-function buildWebSearchDefaults(
-  templates: InitProviderTemplate[]
-): { routeTargets: string[]; webSearch: Record<string, unknown> } | null {
-  const deepseekTemplate = templates.find((provider) => provider.id === 'deepseek-web');
-  const iflowTemplate = templates.find((provider) => provider.id === 'iflow');
-  const qwenTemplate = templates.find((provider) => provider.id === 'qwen');
-  if (!deepseekTemplate && !iflowTemplate && !qwenTemplate) {
-    return null;
-  }
-
-  const routeTargets: string[] = [];
-  const engines: Array<Record<string, unknown>> = [];
-  const search: Record<string, unknown> = {};
-
-  if (deepseekTemplate) {
-    const providerKey = `${deepseekTemplate.id}.deepseek-chat-search`;
-    routeTargets.push(providerKey);
-    engines.push({
-      id: 'deepseek:web_search',
-      providerKey,
-      description: 'DeepSeek native web_search backend',
-      default: true
-    });
-    search['deepseek:web_search'] = {
-      providerKey
-    };
-  }
-
-  if (iflowTemplate) {
-    routeTargets.push(`${iflowTemplate.id}.${iflowTemplate.defaultModel}`);
-    engines.push({
-      id: 'iflow:web_search',
-      providerKey: 'iflow',
-      description: 'iFlow web_search backend',
-      ...(deepseekTemplate ? {} : { default: true })
-    });
-    search['iflow:web_search'] = {
-      providerKey: 'iflow'
-    };
-  }
-
-  if (qwenTemplate) {
-    const providerKey = `${qwenTemplate.id}.${qwenTemplate.defaultModel}`;
-    routeTargets.push(providerKey);
-    engines.push({
-      id: 'qwen:web_search',
-      providerKey,
-      description: 'Qwen native web_search backend',
-      ...(!deepseekTemplate && !iflowTemplate ? { default: true } : {})
-    });
-    search['qwen:web_search'] = {
-      providerKey
-    };
-  }
-
-  return {
-    routeTargets,
-    webSearch: {
-      engines,
-      search
-    }
-  };
-}
-
 export function createInitCommand(program: Command, ctx: InitCommandContext): void {
   const fsImpl = (ctx.fsImpl ?? fs) as typeof fs;
   const pathImpl = ctx.pathImpl ?? path;
@@ -122,17 +59,17 @@ Examples:
   ${bin} init --camoufox
   ${bin} init --list-providers
   ${bin} init --list-current-providers
-  ${bin} init --providers openai,tab --default-provider tab
+  ${bin} init --providers openai,qwen --default-provider qwen
 `
     )
     .option('-c, --config <config>', 'Configuration file path')
     .option('-f, --force', 'Force overwrite existing configuration during fresh setup')
     .option('--camoufox', 'Force Camoufox environment preparation')
-    .option('--providers <ids>', 'Providers (comma-separated), e.g. openai,tab,glm')
+    .option('--providers <ids>', 'Providers (comma-separated), e.g. openai,qwen,iflow')
     .option('--default-provider <id>', 'Default provider id for routing.default')
     .option('--host <host>', 'Server host (httpserver.host)')
     .option('--port <port>', 'Server port (httpserver.port)')
-    .option('--list-providers', 'List built-in provider ids and exit')
+    .option('--list-providers', 'List guided protocol templates + managed-auth provider ids and exit')
     .option('--list-current-providers', 'List configured providers from ~/.routecodex/provider and exit')
     .action(async (options: InitCommandOptions) => {
       const spinner = await ctx.createSpinner('Initializing configuration...');
@@ -158,7 +95,7 @@ Examples:
       const autoCamoufoxPrep = !forceCamoufoxPrep;
       const providerRoot = getProviderRoot(pathImpl, home());
 
-      const catalog = getInitProviderCatalog();
+      const catalog = getBootstrapProviderTemplates();
       const catalogById = new Map(catalog.map((provider) => [provider.id, provider]));
       const supported = catalog.map((provider) => provider.id).join(', ');
 
@@ -212,32 +149,34 @@ Examples:
             options.port === undefined;
 
           if (shouldInstallBundledDefault) {
-            const installedDefault = installBundledDefaultConfigBestEffort({
-              fsImpl,
-              pathImpl,
-              targetConfigPath: configPath
-            });
-
-            if (installedDefault.ok) {
-              ensureDefaultPrecommandScript();
-              spinner.succeed(`Configuration initialized: ${configPath}`);
-              ctx.logger.info(`Default config copied: ${installedDefault.sourcePath}`);
-              maybePrepareCamoufoxEnvironment(ctx, ctx.logger, autoCamoufoxPrep);
-              const installedDocs = installBundledDocsBestEffort({ fsImpl, pathImpl });
-              if (installedDocs.ok) {
-                ctx.logger.info(`Docs installed: ${installedDocs.targetDir}`);
-              }
-              ctx.logger.info(`Next: run "${bin} init --config ${configPath} --force" to convert this v1 config to v2.`);
-              return;
-            }
-
-            if (installedDefault.reason !== 'missing_source') {
+            const defaultTemplate = catalog[0];
+            if (!defaultTemplate) {
               spinner.fail('Failed to initialize configuration');
-              ctx.logger.error(installedDefault.message);
+              ctx.logger.error('No bootstrap provider templates available for default initialization');
               return;
             }
-
-            ctx.logger.warning(`${installedDefault.message}; fallback to guided setup`);
+            ensureDir(fsImpl, pathImpl.dirname(configPath));
+            ensureDir(fsImpl, providerRoot);
+            writeProviderV2(fsImpl, pathImpl, providerRoot, defaultTemplate.id, asRecord(defaultTemplate.provider));
+            const defaultTarget = `${defaultTemplate.id}.${defaultTemplate.defaultModel}`;
+            const configPayload = buildV2ConfigObject({
+              host: '127.0.0.1',
+              port: 5555,
+              routing: buildRouting(defaultTarget)
+            });
+            writeJsonFile(fsImpl, configPath, configPayload);
+            ensureDefaultPrecommandScript();
+            spinner.succeed(`Configuration initialized: ${configPath}`);
+            ctx.logger.info(`Providers: ${defaultTemplate.id}`);
+            ctx.logger.info(`Default provider: ${defaultTemplate.id}`);
+            ctx.logger.info(`Provider root: ${providerRoot}`);
+            maybePrepareCamoufoxEnvironment(ctx, ctx.logger, autoCamoufoxPrep);
+            const installedDocs = installBundledDocsBestEffort({ fsImpl, pathImpl });
+            if (installedDocs.ok) {
+              ctx.logger.info(`Docs installed: ${installedDocs.targetDir}`);
+            }
+            ctx.logger.info('Created a minimal V2 config and provider directory layout. Standard protocols stay generic; managed-auth providers keep built-in runtime defaults.');
+            return;
           }
 
           let selectedTemplates: InitProviderTemplate[] = [];
@@ -296,7 +235,7 @@ Examples:
           const routing = promptBundle
             ? (safeSpinnerStop(), (await interactiveRoutingWizard(promptBundle.prompt, baseRouting, defaultTarget)) ?? baseRouting)
             : baseRouting;
-          const webSearchDefaults = buildWebSearchDefaults(selectedTemplates);
+          const webSearchDefaults = buildCatalogWebSearchDefaults(selectedTemplates);
           const routingWithWebSearch = { ...(routing as Record<string, unknown>) };
           if (webSearchDefaults) {
             const existingWebSearchRoute = routingWithWebSearch.web_search;
@@ -304,8 +243,11 @@ Examples:
               routingWithWebSearch.web_search = [
                 {
                   id: 'web_search-primary',
-                  mode: 'priority',
-                  targets: webSearchDefaults.routeTargets
+                  targets: webSearchDefaults.routeTargets,
+                  loadBalancing: {
+                    strategy: 'weighted',
+                    weights: Object.fromEntries(webSearchDefaults.routeTargets.map((target) => [target, 1]))
+                  }
                 }
               ];
             }
@@ -330,18 +272,12 @@ Examples:
             writeProviderV2(fsImpl, pathImpl, providerRoot, template.id, asRecord(template.provider));
           }
 
-          const configPayload = {
-            version: '2.0.0',
-            virtualrouterMode: 'v2',
-            httpserver: {
-              host,
-              port
-            },
-            virtualrouter: {
-              routing: routingWithWebSearch,
-              ...(webSearchDefaults ? { webSearch: webSearchDefaults.webSearch } : {})
-            }
-          };
+          const configPayload = buildV2ConfigObject({
+            host,
+            port,
+            routing: routingWithWebSearch,
+            policyOptions: webSearchDefaults ? { webSearch: webSearchDefaults.webSearch } : undefined
+          });
           writeJsonFile(fsImpl, configPath, configPayload);
           ensureDefaultPrecommandScript();
 
@@ -361,7 +297,7 @@ Examples:
           if (installed.ok) {
             ctx.logger.info(`Docs installed: ${installed.targetDir}`);
           }
-          ctx.logger.info('Next: edit auth credentials in provider/*.json, then run: rcc start');
+          ctx.logger.info('Next: edit provider baseURL/model/auth in provider/*.json as needed, then run: rcc start');
           return;
         }
 

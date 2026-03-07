@@ -4,6 +4,7 @@ import fsSync from 'fs';
 import path from 'path';
 import { homedir } from 'os';
 import { resolveRouteCodexConfigPath } from '../../config/config-paths.js';
+import { getBootstrapProviderTemplates, isManagedBootstrapTemplate } from '../../cli/config/bootstrap-provider-templates.js';
 import { loadRouteCodexConfig } from '../../config/routecodex-config-loader.js';
 import { ServerFactory } from '../../server-factory.js';
 import type { ServerInstance } from '../../server-factory.js';
@@ -92,7 +93,10 @@ export async function handleListProviderTemplates(req: Request, res: Response): 
       const parsed = JSON.parse(content);
       const userConfig: JsonObject = isRecord(parsed) ? parsed : {};
       const providersRoot = resolveProviders(userConfig);
-      configuredProviderIds = new Set<string>(Object.keys(providersRoot || {}));
+      configuredProviderIds = new Set<string>([
+        ...Object.keys(providersRoot || {}),
+        ...resolveReferencedProviderIds(userConfig)
+      ]);
     } catch {
       // 若读取失败，不阻止模板列表返回；仅视为无绑定信息
     }
@@ -112,24 +116,25 @@ export async function handleListProviderTemplates(req: Request, res: Response): 
       if (fsSync.existsSync(providerDir) && fsSync.statSync(providerDir).isDirectory()) {
         const entries = await fs.readdir(providerDir, { withFileTypes: true });
         for (const entry of entries) {
-          if (!entry.isFile()) {
+          if (!entry.isDirectory()) {
             continue;
           }
-          if (!entry.name.endsWith('.json')) {
+          const fullPath = path.join(providerDir, entry.name, 'config.v2.json');
+          if (!fsSync.existsSync(fullPath)) {
             continue;
           }
-          const fullPath = path.join(providerDir, entry.name);
           try {
             const content = await fs.readFile(fullPath, 'utf-8');
             const parsed = JSON.parse(content);
             if (!isRecord(parsed)) {
               continue;
             }
-            const fallbackId = path.basename(entry.name, '.json');
-            const id = readString(parsed.id) ?? readString(parsed.providerId) ?? fallbackId;
-            const type = readString(parsed.type) ?? readString(parsed.providerType);
-            const baseURL = readString(parsed.baseURL) ?? readString(parsed.baseUrl);
-            const authType = isRecord(parsed.auth) ? readString(parsed.auth.type) : undefined;
+            const providerNode = isRecord(parsed.provider) ? parsed.provider : parsed;
+            const fallbackId = entry.name;
+            const id = readString(parsed.providerId) ?? readString(providerNode.id) ?? fallbackId;
+            const type = readString(providerNode.type) ?? readString(providerNode.providerType);
+            const baseURL = readString(providerNode.baseURL) ?? readString(providerNode.baseUrl);
+            const authType = isRecord(providerNode.auth) ? readString(providerNode.auth.type) : undefined;
             const boundToConfig = Boolean(id && configuredProviderIds.has(id));
             standalone.push({
               id,
@@ -148,66 +153,23 @@ export async function handleListProviderTemplates(req: Request, res: Response): 
       // provider 目录不存在或不可读时，视为无独立 Provider
     }
 
-    // 3) 内置模板集合：仅提供最少字段，具体校验交由客户端完成
-    const templates = [
-      {
-        id: 'openai-standard',
-        label: 'OpenAI 标准模板',
-        type: 'openai',
-        description: 'OpenAI Chat 兼容 provider 模板（auth.type=apikey）',
+    // 3) 内置模板集合：标准 provider 只给协议级引导；OAuth/account provider 保留宿主管理模板
+    const templates = getBootstrapProviderTemplates().map((template) => {
+      const providerNode = isRecord(template.provider) ? template.provider : {};
+      const authNode = isRecord(providerNode.auth) ? providerNode.auth : undefined;
+      return {
+        id: template.id,
+        label: template.label,
+        type: readString(providerNode.type) ?? 'openai',
+        description: template.description,
+        setupMode: isManagedBootstrapTemplate(template.id) ? 'managed-auth' : 'guided',
         defaults: {
-          type: 'openai',
-          auth: { type: 'apikey' }
+          ...(readString(providerNode.type) ? { type: readString(providerNode.type) } : {}),
+          ...(readString(providerNode.compatibilityProfile) ? { compatibilityProfile: readString(providerNode.compatibilityProfile) } : {}),
+          ...(authNode ? { auth: authNode } : {})
         }
-      },
-      {
-        id: 'qwen-oauth',
-        label: 'Qwen OAuth 模板',
-        type: 'openai',
-        description: 'Qwen OAuth provider 模板（auth.type=oauth）',
-        defaults: {
-          type: 'openai',
-          auth: { type: 'oauth' }
-        }
-      },
-      {
-        id: 'iflow-oauth',
-        label: 'iFlow OAuth 模板',
-        type: 'iflow',
-        description: 'iFlow OAuth provider 模板（auth.type=iflow-oauth）',
-        defaults: {
-          type: 'iflow',
-          auth: { type: 'iflow-oauth' }
-        }
-      },
-      {
-        id: 'deepseek-web-account',
-        label: 'DeepSeek Web 账号模板',
-        type: 'openai',
-        description: 'DeepSeek Web provider 模板（auth.type=deepseek-account，compatibilityProfile=chat:deepseek-web）',
-        defaults: {
-          type: 'openai',
-          compatibilityProfile: 'chat:deepseek-web',
-          auth: {
-            type: 'deepseek-account',
-            entries: [
-              {
-                alias: '1',
-                type: 'deepseek-account',
-                tokenFile: '~/.routecodex/auth/deepseek-account-1.json'
-              }
-            ]
-          },
-          deepseek: {
-            strictToolRequired: true,
-            toolProtocol: 'text',
-            powTimeoutMs: 15000,
-            powMaxAttempts: 2,
-            sessionReuseTtlMs: 1800000
-          }
-        }
-      }
-    ];
+      };
+    });
 
     res.json({
       templates,
@@ -331,6 +293,55 @@ function resolveProviders(config: JsonObject): Record<string, unknown> {
     return (config as { providers: Record<string, unknown> }).providers;
   }
   return {};
+}
+
+function resolveReferencedProviderIds(config: JsonObject): string[] {
+  const providerIds = new Set<string>();
+  const pushTarget = (target: unknown) => {
+    if (typeof target !== 'string' || !target.trim()) {
+      return;
+    }
+    const providerId = target.trim().split('.', 1)[0];
+    if (providerId) {
+      providerIds.add(providerId);
+    }
+  };
+
+  const collectFromRoutingNode = (routingNode: unknown) => {
+    if (!isRecord(routingNode)) {
+      return;
+    }
+    for (const entries of Object.values(routingNode)) {
+      if (!Array.isArray(entries)) {
+        continue;
+      }
+      for (const entry of entries) {
+        if (typeof entry === 'string') {
+          pushTarget(entry);
+          continue;
+        }
+        if (!isRecord(entry) || !Array.isArray(entry.targets)) {
+          continue;
+        }
+        for (const target of entry.targets) {
+          pushTarget(target);
+        }
+      }
+    }
+  };
+
+  const virtualRouter = getVirtualRouter(config);
+  collectFromRoutingNode(virtualRouter?.routing);
+  const groups = isRecord(virtualRouter?.routingPolicyGroups) ? virtualRouter?.routingPolicyGroups : undefined;
+  if (groups) {
+    for (const group of Object.values(groups)) {
+      if (isRecord(group)) {
+        collectFromRoutingNode(group.routing);
+      }
+    }
+  }
+  collectFromRoutingNode((config as { routing?: unknown }).routing);
+  return [...providerIds];
 }
 
 function resolveRouting(config: JsonObject): Record<string, string[]> {

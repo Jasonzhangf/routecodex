@@ -212,8 +212,8 @@ export async function runV2MaintenanceMenu(args: {
     if (answer === '1') {
       const mode = (await prompt(
         `Add provider:\n` +
-        `  1) Add built-in provider\n` +
-        `  2) Add custom provider (select protocol)\n` +
+        `  1) Add managed-auth built-in provider\n` +
+        `  2) Add standard provider (guided protocol setup)\n` +
         `  b) Back\n> `
       )).trim();
 
@@ -227,7 +227,7 @@ export async function runV2MaintenanceMenu(args: {
           const exists = providerIds.includes(provider.id) ? ' [exists]' : ' [new]';
           return `  ${index + 1}) ${provider.id} - ${provider.label}${exists}`;
         });
-        const pick = (await prompt(`Choose built-in provider (b=back):\n${lines.join('\n')}\n> `)).trim();
+        const pick = (await prompt(`Choose managed-auth built-in provider (b=back):\n${lines.join('\n')}\n> `)).trim();
         if (isBackInput(pick)) {
           logger.info('Back to add-provider menu.');
           continue;
@@ -258,7 +258,7 @@ export async function runV2MaintenanceMenu(args: {
         }
 
         writeProviderV2(fsImpl, pathImpl, providerRoot, selected.id, asRecord(selected.provider));
-        logger.info(providerIds.includes(selected.id) ? `Updated built-in provider template: ${selected.id}` : `Added provider: ${selected.id}`);
+        logger.info(providerIds.includes(selected.id) ? `Updated managed-auth provider template: ${selected.id}` : `Added managed-auth provider: ${selected.id}`);
         continue;
       }
 
@@ -272,7 +272,7 @@ export async function runV2MaintenanceMenu(args: {
         continue;
       }
 
-      logger.info('Unknown add mode. Choose 1 (built-in), 2 (custom), or b (back).');
+      logger.info('Unknown add mode. Choose 1 (managed-auth built-in), 2 (guided standard provider), or b (back).');
       continue;
     }
 
@@ -347,7 +347,7 @@ export async function runV2MaintenanceMenu(args: {
           `Modify ${providerId}: enabled=${enabled}, baseURL=${baseUrl}\n` +
           `  1) Toggle enabled\n` +
           `  2) Set baseURL\n` +
-          `  3) Replace with catalog template\n` +
+          `  3) Replace with built-in managed-auth template\n` +
           `  4) Save provider\n` +
           `  b) Back without saving\n> `
         ))
@@ -376,7 +376,7 @@ export async function runV2MaintenanceMenu(args: {
         if (action === '3') {
           const template = catalogById.get(providerId);
           if (!template) {
-            logger.info(`No built-in template for provider ${providerId}`);
+            logger.info(`No managed-auth template for provider ${providerId}`);
             continue;
           }
           Object.assign(providerNode, asRecord(template.provider));

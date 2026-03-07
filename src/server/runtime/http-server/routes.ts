@@ -14,6 +14,7 @@ import type { HistoricalPeriodsSnapshot, HistoricalStatsSnapshot, StatsSnapshot 
 import { buildInfo } from '../../../build-info.js';
 import { logProcessLifecycleSync } from '../../../utils/process-lifecycle-logger.js';
 import { setShutdownCallerContext } from '../../../utils/shutdown-caller-context.js';
+import { loadProviderConfigsV2 } from '../../../config/provider-v2-loader.js';
 
 interface RouteOptions {
   app: Application;
@@ -71,6 +72,202 @@ export function registerOAuthPortalRoute(app: Application): void {
   });
 }
 
+
+
+type ModelListItem = {
+  id: string;
+  object: 'model';
+  owned_by: string;
+  [key: string]: unknown;
+};
+
+const DEFAULT_REASONING_LEVELS = [
+  { effort: 'low', description: 'Fast responses with lighter reasoning' },
+  { effort: 'medium', description: 'Balances speed and reasoning depth for everyday tasks' },
+  { effort: 'high', description: 'Greater reasoning depth for complex problems' },
+  { effort: 'xhigh', description: 'Extra high reasoning depth for complex problems' }
+] as const;
+
+const CODEX_RESPONSES_MODEL_PRESETS: Record<string, Record<string, unknown>> = {
+  'gpt-5.4': {
+    description: 'Latest frontier agentic coding model.',
+    prefer_websockets: false,
+    support_verbosity: true,
+    default_verbosity: 'low',
+    apply_patch_tool_type: 'freeform',
+    input_modalities: ['text', 'image'],
+    supports_image_detail_original: true,
+    truncation_policy: { mode: 'tokens', limit: 10000 },
+    supports_parallel_tool_calls: true,
+    reasoning_summary_format: 'experimental',
+    default_reasoning_summary: 'none',
+    default_reasoning_level: 'medium',
+    supported_reasoning_levels: DEFAULT_REASONING_LEVELS,
+    shell_type: 'shell_command',
+    visibility: 'list',
+    minimal_client_version: '0.98.0',
+    supported_in_api: true,
+    priority: 0
+  },
+  'gpt-5.3-codex': {
+    description: 'Agentic coding model.',
+    prefer_websockets: false,
+    support_verbosity: true,
+    default_verbosity: 'low',
+    apply_patch_tool_type: 'freeform',
+    input_modalities: ['text', 'image'],
+    supports_image_detail_original: true,
+    truncation_policy: { mode: 'tokens', limit: 10000 },
+    supports_parallel_tool_calls: true,
+    reasoning_summary_format: 'experimental',
+    default_reasoning_summary: 'none',
+    default_reasoning_level: 'medium',
+    supported_reasoning_levels: DEFAULT_REASONING_LEVELS,
+    shell_type: 'shell_command',
+    visibility: 'list',
+    supported_in_api: true,
+    priority: 0
+  },
+  'gpt-5.2-codex': {
+    description: 'Agentic coding model.',
+    prefer_websockets: false,
+    support_verbosity: false,
+    apply_patch_tool_type: 'freeform',
+    input_modalities: ['text', 'image'],
+    supports_image_detail_original: false,
+    truncation_policy: { mode: 'tokens', limit: 10000 },
+    supports_parallel_tool_calls: true,
+    default_reasoning_summary: 'auto',
+    default_reasoning_level: 'medium',
+    supported_reasoning_levels: DEFAULT_REASONING_LEVELS,
+    shell_type: 'shell_command',
+    visibility: 'list',
+    supported_in_api: true,
+    priority: 3
+  }
+};
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function readString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function readBoolean(value: unknown): boolean | undefined {
+  return typeof value === 'boolean' ? value : undefined;
+}
+
+function readNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function resolveContextWindow(providerNode: Record<string, unknown>, modelNode: Record<string, unknown>): number | undefined {
+  return readNumber(modelNode.maxContext)
+    ?? readNumber(modelNode.maxContextTokens)
+    ?? readNumber(modelNode.contextWindow)
+    ?? readNumber(providerNode.maxContextTokens);
+}
+
+function buildCodexModelMetadata(
+  providerId: string,
+  modelId: string,
+  aliasId: string,
+  providerNode: Record<string, unknown>,
+  modelNode: Record<string, unknown>
+): ModelListItem {
+  const preset = CODEX_RESPONSES_MODEL_PRESETS[modelId] ?? {};
+  const contextWindow = resolveContextWindow(providerNode, modelNode);
+  const supportsStreaming = readBoolean(modelNode.supportsStreaming);
+  const item: ModelListItem = {
+    id: aliasId,
+    object: 'model',
+    owned_by: providerId,
+    slug: aliasId,
+    display_name: aliasId,
+    supported_in_api: true,
+    visibility: 'list',
+    priority: 0,
+    input_modalities: ['text'],
+    supports_parallel_tool_calls: true,
+    prefer_websockets: false,
+    truncation_policy: { mode: 'tokens', limit: 10000 },
+    default_reasoning_summary: 'auto',
+    default_reasoning_level: 'medium',
+    supported_reasoning_levels: DEFAULT_REASONING_LEVELS,
+    shell_type: 'shell_command',
+    ...preset
+  };
+  if (contextWindow) {
+    item.context_window = contextWindow;
+  }
+  if (supportsStreaming !== undefined) {
+    item.supports_streaming = supportsStreaming;
+  }
+  const modelDescription = readString(modelNode.description);
+  if (modelDescription) {
+    item.description = modelDescription;
+  }
+  return item;
+}
+
+function collectArtifactModelAliases(artifacts: unknown): ModelListItem[] {
+  const vrConfig = isPlainRecord(artifacts) ? (artifacts.config as Record<string, unknown> | undefined) : undefined;
+  const providers = isPlainRecord(vrConfig) ? (vrConfig.providers as Record<string, unknown> | undefined) : undefined;
+  const items: ModelListItem[] = [];
+  if (!isPlainRecord(providers)) {
+    return items;
+  }
+  for (const [providerKey, profileRaw] of Object.entries(providers)) {
+    const profile = isPlainRecord(profileRaw) ? profileRaw : null;
+    const runtimeKey = readString(profile?.runtimeKey) ?? '';
+    const providerId =
+      runtimeKey && runtimeKey.includes('.')
+        ? runtimeKey.split('.')[0]
+        : providerKey.includes('.')
+          ? providerKey.split('.')[0]
+          : '';
+    const modelId = readString(profile?.modelId) ?? '';
+    if (!providerId || !modelId) {
+      continue;
+    }
+    items.push({ id: `${providerId}.${modelId}`, object: 'model', owned_by: providerId });
+  }
+  return items;
+}
+
+async function collectCodexModelItems(): Promise<ModelListItem[]> {
+  const providerConfigs = await loadProviderConfigsV2();
+  const items: ModelListItem[] = [];
+  for (const [providerId, cfg] of Object.entries(providerConfigs)) {
+    const providerNode = isPlainRecord(cfg.provider) ? cfg.provider : null;
+    if (!providerNode) {
+      continue;
+    }
+    if (readBoolean(providerNode.enabled) === false) {
+      continue;
+    }
+    if (readString(providerNode.type) !== 'responses') {
+      continue;
+    }
+    const modelsNode = isPlainRecord(providerNode.models) ? providerNode.models : null;
+    if (!modelsNode) {
+      continue;
+    }
+    for (const [modelId, modelRaw] of Object.entries(modelsNode)) {
+      const trimmedModelId = modelId.trim();
+      if (!trimmedModelId) {
+        continue;
+      }
+      const modelNode = isPlainRecord(modelRaw) ? modelRaw : {};
+      items.push(buildCodexModelMetadata(providerId, trimmedModelId, trimmedModelId, providerNode, modelNode));
+      items.push(buildCodexModelMetadata(providerId, trimmedModelId, `${providerId}.${trimmedModelId}`, providerNode, modelNode));
+    }
+  }
+  return items;
+}
+
 export function registerHttpRoutes(options: RouteOptions): void {
   const {
     app,
@@ -100,42 +297,40 @@ export function registerHttpRoutes(options: RouteOptions): void {
     res.status(200).json({ httpserver: { host: config.server.host, port: config.server.port }, merged: false });
   });
 
-  const listModels = (_req: Request, res: Response) => {
+  const listModels = async (req: Request, res: Response) => {
     try {
-      const artifacts = typeof getVirtualRouterArtifacts === 'function' ? getVirtualRouterArtifacts() : null;
-      const vrConfig = (artifacts as Record<string, unknown> | null)?.config as Record<string, unknown> | null;
-      const providers = vrConfig && typeof vrConfig === 'object' ? (vrConfig as Record<string, unknown>).providers : null;
-      const items: Array<{ id: string; object: 'model'; owned_by: string }> = [];
+      const items: ModelListItem[] = [];
       const seen = new Set<string>();
-      if (providers && typeof providers === 'object') {
-        for (const [providerKey, profileRaw] of Object.entries(providers as Record<string, unknown>)) {
-          const profile =
-            profileRaw && typeof profileRaw === 'object' && !Array.isArray(profileRaw)
-              ? (profileRaw as Record<string, unknown>)
-              : null;
-          const runtimeKey = typeof profile?.runtimeKey === 'string' ? String(profile.runtimeKey) : '';
-          const providerId =
-            runtimeKey && runtimeKey.includes('.')
-              ? runtimeKey.split('.')[0]
-              : typeof providerKey === 'string' && providerKey.includes('.')
-              ? providerKey.split('.')[0]
-              : '';
-          const modelId = typeof profile?.modelId === 'string' ? String(profile.modelId) : '';
-          if (!providerId || !modelId) {
-            continue;
-          }
-          const id = `${providerId}.${modelId}`;
-          if (seen.has(id)) {
-            continue;
-          }
-          seen.add(id);
-          items.push({ id, object: 'model', owned_by: providerId });
+      for (const item of await collectCodexModelItems()) {
+        if (seen.has(item.id)) {
+          continue;
         }
+        seen.add(item.id);
+        items.push(item);
+      }
+      const artifacts = typeof getVirtualRouterArtifacts === 'function' ? getVirtualRouterArtifacts() : null;
+      for (const item of collectArtifactModelAliases(artifacts)) {
+        if (seen.has(item.id)) {
+          continue;
+        }
+        seen.add(item.id);
+        items.push(item);
       }
       items.sort((a, b) => a.id.localeCompare(b.id));
+      const remoteIp = req.socket?.remoteAddress || '';
+      const userAgent = req.get('user-agent') || '';
+      const host = req.get('host') || '';
+      const forwardedFor = req.get('x-forwarded-for') || '';
+      const authPresent = Boolean(req.get('authorization') || req.get('x-api-key'));
+      console.log(
+        `[models] path=${req.path} count=${items.length} remoteIp=${remoteIp || 'n/a'} ` +
+        `host=${host || 'n/a'} auth=${authPresent ? 'yes' : 'no'} ` +
+        `xff=${forwardedFor || 'n/a'} ua=${userAgent || 'n/a'}`
+      );
       res.status(200).json({ object: 'list', data: items });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
+      console.log(`[models] path=${req.path} failed error=${message}`);
       res.status(500).json({ error: { message } });
     }
   };

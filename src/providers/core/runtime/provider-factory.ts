@@ -252,6 +252,9 @@ export class ProviderFactory {
     if (runtime.auth?.oauthProviderId) {
       extensions.oauthProviderId = runtime.auth.oauthProviderId;
     }
+    if (runtime.transportBackend) {
+      extensions.transportBackend = runtime.transportBackend;
+    }
     const deepseekOptions = readDeepSeekProviderRuntimeOptions({
       runtimeOptions: runtime.deepseek,
       extensions: (runtime as unknown as { extensions?: Record<string, unknown> }).extensions,

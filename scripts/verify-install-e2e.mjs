@@ -134,6 +134,8 @@ async function main() {
   const verifyConfigPath = customConfigPath || await writeVerifyConfig(mockServer.baseUrl, HOST, port);
   const env = {
     ...process.env,
+    ROUTECODEX_BUILD_RESTART_ONLY: '0',
+    RCC_BUILD_RESTART_ONLY: '0',
     ROUTECODEX_PORT: String(port),
     RCC_PORT: String(port),
     ROUTECODEX_HOST: HOST,
@@ -345,13 +347,16 @@ async function resolveVerifyPort(preferredPort, host) {
     const port = basePort + offset;
     // eslint-disable-next-line no-await-in-loop
     if (await canListenOnPort(port, host)) {
+      if (port !== basePort) {
+        console.warn(`[verify-install] requested port ${basePort} occupied, shifted verification to ${port}`);
+      }
       return port;
     }
   }
   throw new Error(`No available verification port in range ${basePort}-${basePort + PORT_SEARCH_LIMIT - 1}`);
 }
 
-async function canListenOnPort(port, host) {
+async function canListenOnAddress(port, host) {
   const probe = http.createServer();
   try {
     await new Promise((resolve, reject) => {
@@ -364,4 +369,15 @@ async function canListenOnPort(port, host) {
   } finally {
     await new Promise((resolve) => probe.close(() => resolve(undefined))).catch(() => {});
   }
+}
+
+async function canListenOnPort(port, host) {
+  const primary = await canListenOnAddress(port, host);
+  if (!primary) {
+    return false;
+  }
+  if (host === '0.0.0.0') {
+    return true;
+  }
+  return await canListenOnAddress(port, '0.0.0.0');
 }

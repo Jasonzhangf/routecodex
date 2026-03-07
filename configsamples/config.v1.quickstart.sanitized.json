@@ -623,7 +623,7 @@
         "models": {
           "glm-4.7": {
             "maxTokens": 128000,
-            "maxContext": 200000,
+            "maxContext": 202752,
             "supportsThinking": true,
             "supportsStreaming": true
           },
@@ -696,18 +696,30 @@
         },
         "models": {
           "tstars2.0": {},
-          "qwen3-coder-plus": {},
+          "qwen3-coder-plus": {
+            "maxContextTokens": 1000000
+          },
           "qwen3-coder": {},
+          "qwen3-coder-next": {
+            "maxContextTokens": 262144
+          },
           "qwen3-max": {},
+          "qwen3-max-2026-01-23": {
+            "maxContextTokens": 262144
+          },
           "qwen3-vl-plus": {},
           "qwen3-max-preview": {},
           "kimi-k2.5": {
-            "maxContextTokens": 256000
+            "maxContextTokens": 262144
           },
           "kimi-k2-0905": {},
           "glm-4.6": {},
-          "glm-4.7": {},
-          "glm-5": {},
+          "glm-4.7": {
+            "maxContextTokens": 202752
+          },
+          "glm-5": {
+            "maxContextTokens": 202752
+          },
           "backup": {},
           "kimi-k2-thinking": {},
           "deepseek-v3.2": {},
@@ -720,6 +732,9 @@
           "qwen3-235b": {},
           "minimax-m2": {},
           "minimax-m2.1": {},
+          "minimax-m2.5": {
+            "maxContextTokens": 204800
+          },
           "iFlow-ROME-30BA3B": {}
         },
         "aliases": {
@@ -878,7 +893,11 @@
         "models": {
           "qwen3-coder-plus": {
             "maxTokens": 64000,
-            "maxContext": 256000,
+            "maxContext": 1000000,
+            "supportsStreaming": true
+          },
+          "qwen3.5-plus": {
+            "maxContext": 1000000,
             "supportsStreaming": true
           },
           "qwen3-coder": {
@@ -918,13 +937,13 @@
         "models": {
           "glm-4.7": {
             "maxTokens": 128000,
-            "maxContext": 200000,
+            "maxContext": 202752,
             "supportsThinking": true,
             "supportsStreaming": true
           },
           "glm-5": {
             "maxTokens": 128000,
-            "maxContext": 200000,
+            "maxContext": 202752,
             "supportsThinking": true,
             "supportsStreaming": true
           },

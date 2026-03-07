@@ -280,6 +280,8 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
         ) ?? false;
         const childProcessEnv = {
           ...env,
+          ROUTECODEX_MANAGED_BY_START: '1',
+          RCC_MANAGED_BY_START: '1',
           ...(bindServerToParent
             ? {
               ROUTECODEX_EXPECT_PARENT_PID: String(process.pid),
@@ -447,8 +449,15 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
           spawnOptions = { stdio: 'inherit', env: childProcessEnv };
         }
 
-        const childProc = ctx.spawn(nodeBin, args, spawnOptions);
-        writePidFile(childProc.pid);
+        const restartExitCode = 75;
+        const restartRecoveryWaitMs = (() => {
+          const raw = String(ctx.env.ROUTECODEX_RESTART_WAIT_MS ?? ctx.env.RCC_RESTART_WAIT_MS ?? '').trim();
+          const parsed = Number(raw);
+          if (Number.isFinite(parsed) && parsed >= 5000) {
+            return Math.floor(parsed);
+          }
+          return 45000;
+        })();
 
         const closeServerLogStream = () => {
           if (!serverLogStream) {
@@ -486,8 +495,89 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
           });
         };
 
-        forwardToConsoleAndLog((childProc as unknown as { stdout?: NodeJS.ReadableStream | null }).stdout, process.stdout);
-        forwardToConsoleAndLog((childProc as unknown as { stderr?: NodeJS.ReadableStream | null }).stderr, process.stderr);
+        const isChildHealthy = async (): Promise<boolean> => {
+          try {
+            const res = await ctx.fetch(`${HTTP_PROTOCOLS.HTTP}${LOCAL_HOSTS.IPV4}:${resolvedPort}${API_PATHS.HEALTH}`).catch(() => null);
+            if (!res || !res.ok) {
+              return false;
+            }
+            const data = await (res as any).json?.().catch(() => null);
+            return Boolean(data && typeof data === 'object' && (data as any).server === 'routecodex');
+          } catch {
+            return false;
+          }
+        };
+
+        let activeChildProc = null as ReturnType<typeof ctx.spawn> | null;
+        let shuttingDown = false;
+        let restartInFlight = false;
+        let cleanupKeypress = () => {};
+
+        const attachChildExitHandler = (proc: ReturnType<typeof ctx.spawn>): void => {
+          proc.on('exit', (code, signal) => {
+            const codeLabel = typeof code === 'number' && Number.isFinite(code) ? String(code) : 'n/a';
+            const signalLabel = signal || 'none';
+            ctx.logger.info(`[client-exit] RouteCodex exited (code=${codeLabel}, signal=${signalLabel})`);
+            if (!shuttingDown && code === restartExitCode) {
+              if (restartInFlight) {
+                return;
+              }
+              restartInFlight = true;
+              ctx.logger.info(`[client-restart] RouteCodex requested managed restart on port ${resolvedPort}`);
+              void (async () => {
+                try {
+                  const exitPid = proc.pid ?? null;
+                  const deadline = Date.now() + restartRecoveryWaitMs;
+                  while (Date.now() < deadline) {
+                    const pids = ctx.findListeningPids(resolvedPort);
+                    if (!pids.length || (exitPid && pids.every((pid) => pid !== exitPid))) {
+                      break;
+                    }
+                    await ctx.sleep(150);
+                  }
+                  const nextChild = ctx.spawn(nodeBin, args, spawnOptions);
+                  activeChildProc = nextChild;
+                  writePidFile(nextChild.pid);
+                  forwardToConsoleAndLog((nextChild as unknown as { stdout?: NodeJS.ReadableStream | null }).stdout, process.stdout);
+                  forwardToConsoleAndLog((nextChild as unknown as { stderr?: NodeJS.ReadableStream | null }).stderr, process.stderr);
+                  attachChildExitHandler(nextChild);
+                  const healthyDeadline = Date.now() + restartRecoveryWaitMs;
+                  while (Date.now() < healthyDeadline) {
+                    if (await isChildHealthy()) {
+                      ctx.logger.info(`[client-restart] RouteCodex child restarted on port ${resolvedPort} (pid=${nextChild.pid ?? 'unknown'})`);
+                      restartInFlight = false;
+                      return;
+                    }
+                    await ctx.sleep(150);
+                  }
+                  throw new Error(`Timed out waiting for restarted child on port ${resolvedPort}`);
+                } catch (error) {
+                  closeServerLogStream();
+                  try { cleanupKeypress(); } catch { /* ignore */ }
+                  ctx.logger.error(error instanceof Error ? error.message : String(error));
+                  ctx.exit(1);
+                }
+              })();
+              return;
+            }
+            closeServerLogStream();
+            try { cleanupKeypress(); } catch { /* ignore */ }
+            if (signal) {ctx.exit(0);}
+            ctx.exit(code ?? 0);
+          });
+        };
+
+        const spawnChild = (): ReturnType<typeof ctx.spawn> => {
+          const proc = ctx.spawn(nodeBin, args, spawnOptions);
+          activeChildProc = proc;
+          writePidFile(proc.pid);
+          forwardToConsoleAndLog((proc as unknown as { stdout?: NodeJS.ReadableStream | null }).stdout, process.stdout);
+          forwardToConsoleAndLog((proc as unknown as { stderr?: NodeJS.ReadableStream | null }).stderr, process.stderr);
+          attachChildExitHandler(proc);
+          return proc;
+        };
+
+        spawnChild();
 
         spinner.succeed(`RouteCodex server starting on ${serverHost}:${resolvedPort}`);
         ctx.logger.info(`Configuration loaded from: ${configPath}`);
@@ -498,11 +588,15 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
         ctx.logger.info('Press Ctrl+C to stop the server');
 
         const shutdown = async (sig: NodeJS.Signals) => {
+          if (shuttingDown) {
+            return;
+          }
+          shuttingDown = true;
           try {
             await applyLifecycleOrThrow({
               action: 'server_shutdown_requested',
               signal: sig,
-              targetPid: childProc.pid ?? null
+              targetPid: activeChildProc?.pid ?? null
             });
             try {
               await ctx.fetch(`${HTTP_PROTOCOLS.HTTP}${LOCAL_HOSTS.IPV4}:${resolvedPort}${API_PATHS.SHUTDOWN}`, { method: 'POST' }).catch(() => {});
@@ -510,20 +604,22 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
               /* ignore */
             }
             try {
-              if (childProc.pid && childProc.pid === process.pid) {
+              const currentChildPid = activeChildProc?.pid;
+              if (currentChildPid && currentChildPid === process.pid) {
                 logProcessLifecycleSync({
                   event: 'self_termination',
                   source: 'cli.start.shutdown',
                   details: {
                     reason: 'self_kill_guard',
                     signal: sig,
-                    childPid: childProc.pid,
+                    childPid: currentChildPid,
                     parentPid: process.pid,
                     result: 'blocked'
                   }
                 });
+              } else {
+                activeChildProc?.kill(sig);
               }
-              childProc.kill(sig);
             } catch {
               /* ignore */
             }
@@ -536,7 +632,7 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
                 settled = true;
                 resolve(value);
               };
-              childProc.once('exit', () => complete(true));
+              activeChildProc?.once('exit', () => complete(true));
               setTimeout(() => complete(false), 3500);
             });
             logProcessLifecycleSync({
@@ -546,14 +642,14 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
                 reason: 'shutdown_sequence_completed',
                 signal: sig,
                 targetPort: resolvedPort,
-                childPid: childProc.pid ?? null,
+                childPid: activeChildProc?.pid ?? null,
                 childExited
               }
             });
             await applyLifecycleOrThrow({
               action: 'server_shutdown_complete',
               signal: sig,
-              targetPid: childProc.pid ?? null,
+              targetPid: activeChildProc?.pid ?? null,
               metadata: {
                 childExited
               }
@@ -578,17 +674,7 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
         onSignal('SIGINT', () => { void shutdown('SIGINT'); });
         onSignal('SIGTERM', () => { void shutdown('SIGTERM'); });
 
-        const cleanupKeypress = ctx.setupKeypress(() => { void shutdown('SIGINT'); });
-        childProc.on('exit', (code, signal) => {
-          closeServerLogStream();
-          try { cleanupKeypress(); } catch { /* ignore */ }
-          const codeLabel = typeof code === 'number' && Number.isFinite(code) ? String(code) : 'n/a';
-          const signalLabel = signal || 'none';
-          ctx.logger.info(`[client-exit] RouteCodex exited (code=${codeLabel}, signal=${signalLabel})`);
-          if (signal) {ctx.exit(0);}
-          ctx.exit(code ?? 0);
-        });
-
+        cleanupKeypress = ctx.setupKeypress(() => { void shutdown('SIGINT'); });
         await ctx.waitForever();
       } catch (error) {
         if (error instanceof Error && /^exit:\d+$/.test(error.message)) {

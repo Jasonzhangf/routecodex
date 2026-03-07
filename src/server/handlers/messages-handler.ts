@@ -4,6 +4,7 @@ import {
   nextRequestIdentifiers,
   respondWithPipelineError,
   sendPipelineResponse,
+  hasSsePayload,
   logRequestStart,
   logRequestComplete,
   logRequestError,
@@ -133,7 +134,9 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
         ...(mockSampleReqId ? { mockSampleReqId } : {})
       }
     });
-    logRequestComplete(entryEndpoint, requestId, result.status ?? 200);
+    if (!hasSsePayload(result.body)) {
+      logRequestComplete(entryEndpoint, requestId, result.status ?? 200, result.body);
+    }
     sendPipelineResponse(res, result, requestId, { forceSSE: wantsStream, entryEndpoint });
   } catch (error: unknown) {
     logRequestError(entryEndpoint, requestId, error);

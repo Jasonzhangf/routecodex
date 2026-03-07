@@ -18,6 +18,7 @@ import { isVerboseErrorLoggingEnabled } from './env-config.js';
 import { extractSseWrapperError } from './sse-error-handler.js';
 import { isRateLimitLikeError } from './request-retry-helpers.js';
 import { extractUsageFromResult } from './usage-aggregator.js';
+import { deriveFinishReason, STREAM_LOG_FINISH_REASON_KEY } from '../../../utils/finish-reason.js';
 
 const FOLLOWUP_SESSION_HEADER_KEYS = new Set([
   'sessionid',
@@ -476,9 +477,13 @@ export async function convertProviderResponseIfNeeded(
       const usage = converted.body
         ? extractUsageFromResult({ body: converted.body })
         : undefined;
+      const finishReason = deriveFinishReason(converted.body);
       const body: Record<string, unknown> = { __sse_responses: converted.__sse_responses };
       if (usage) {
         body.usage = usage;
+      }
+      if (finishReason) {
+        body[STREAM_LOG_FINISH_REASON_KEY] = finishReason;
       }
       return {
         ...options.response,

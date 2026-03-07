@@ -18,15 +18,31 @@
         },
         "models": {
           "tstars2.0": {},
-          "qwen3-coder-plus": {},
+          "qwen3-coder-plus": {
+            "maxContext": 1000000
+          },
           "qwen3-coder": {},
+          "qwen3-coder-next": {
+            "maxContext": 262144
+          },
           "qwen3-max": {},
+          "qwen3-max-2026-01-23": {
+            "maxContext": 262144
+          },
           "qwen3-vl-plus": {},
           "qwen3-max-preview": {},
           "kimi-k2-0905": {},
           "glm-4.6": {},
-          "glm-4.7": {},
+          "glm-4.7": {
+            "maxContext": 202752
+          },
+          "glm-5": {
+            "maxContext": 202752
+          },
           "kimi-k2": {},
+          "kimi-k2.5": {
+            "maxContext": 262144
+          },
           "deepseek-v3.2": {},
           "deepseek-v3.1": {},
           "deepseek-r1": {},
@@ -36,7 +52,10 @@
           "qwen3-235b-a22b-instruct": {},
           "qwen3-235b": {},
           "minimax-m2": {},
-          "minimax-m2.1": {}
+          "minimax-m2.1": {},
+          "minimax-m2.5": {
+            "maxContext": 204800
+          }
         },
         "compatibilityProfile": "chat:iflow"
       }

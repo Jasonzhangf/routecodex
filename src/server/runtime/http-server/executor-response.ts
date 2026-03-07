@@ -10,6 +10,7 @@ import {
   resolveStopMessageClientInjectReadiness,
   runClientInjectionFlowBeforeReenter
 } from './executor/client-injection-flow.js';
+import { deriveFinishReason, STREAM_LOG_FINISH_REASON_KEY } from '../../utils/finish-reason.js';
 
 export interface ConvertProviderResponseOptions {
   entryEndpoint?: string;
@@ -250,9 +251,14 @@ export async function convertProviderResponseIfNeeded(
     });
 
     if (converted.__sse_responses) {
+      const finishReason = deriveFinishReason(converted.body);
+      const wrapperBody: Record<string, unknown> = { __sse_responses: converted.__sse_responses };
+      if (finishReason) {
+        wrapperBody[STREAM_LOG_FINISH_REASON_KEY] = finishReason;
+      }
       return {
         ...options.response,
-        body: { __sse_responses: converted.__sse_responses }
+        body: wrapperBody
       };
     }
 

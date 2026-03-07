@@ -34,6 +34,28 @@ describe('provider-vercel-ai-doctor', () => {
     expect((called?.headers as Record<string, string>)['X-Test']).toBe('1');
   });
 
+  it('uses config-defined sdk binding for custom openai providers', async () => {
+    const result = await runVercelAiProviderDoctor(
+      {
+        providerId: 'custom-openai',
+        modelId: 'model-a',
+        providerNode: {
+          type: 'openai',
+          baseURL: 'https://api.example.com/v1',
+          sdkBinding: { family: 'openai-compatible', supported: true },
+          auth: { type: 'apikey', apiKey: 'sk-inline' }
+        }
+      },
+      {
+        executeProbe: async () => ({ text: 'OK-CUSTOM' })
+      }
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.binding.family).toBe('openai-compatible');
+    expect(result.text).toBe('OK-CUSTOM');
+  });
+
   it('marks runtime-only providers as unsupported for direct SDK probing', async () => {
     const result = await runVercelAiProviderDoctor({
       providerId: 'iflow',

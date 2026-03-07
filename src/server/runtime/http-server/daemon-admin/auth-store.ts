@@ -13,6 +13,8 @@ export type DaemonLoginRecordV1 = {
 
 export type DaemonLoginRecord = DaemonLoginRecordV1;
 
+export const DEFAULT_DAEMON_LOGIN_PASSWORD = 'webui';
+
 export function resolveDaemonLoginFilePath(): string {
   const override = typeof process.env.ROUTECODEX_LOGIN_FILE === 'string' ? process.env.ROUTECODEX_LOGIN_FILE.trim() : '';
   if (override) {
@@ -105,3 +107,20 @@ export async function verifyDaemonPassword(password: string, record: DaemonLogin
   }
 }
 
+export async function ensureDaemonLoginRecord(
+  defaultPassword: string = DEFAULT_DAEMON_LOGIN_PASSWORD
+): Promise<{ ok: true; record: DaemonLoginRecord; created: boolean } | { ok: false; error: Error }> {
+  const loaded = await readDaemonLoginRecord();
+  if (!loaded.ok) {
+    return { ok: false, error: loaded.error };
+  }
+  if (loaded.record) {
+    return { ok: true, record: loaded.record, created: false };
+  }
+  const normalized = typeof defaultPassword === 'string' ? defaultPassword.trim() : '';
+  if (!normalized) {
+    return { ok: false, error: new Error('default daemon password is empty') };
+  }
+  const record = await writeDaemonLoginRecord(normalized);
+  return { ok: true, record, created: true };
+}

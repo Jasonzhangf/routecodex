@@ -9,12 +9,15 @@ import type { DeepSeekProviderRuntimeOptions } from '../core/contracts/deepseek-
 
 export type ProviderProtocol = 'openai' | 'responses' | 'anthropic' | 'gemini' | 'gemini-cli';
 
+export type ProviderTransportBackend = 'native-http' | 'vercel-ai-sdk' | 'openai-sdk';
+
 export interface ProviderTransportConfig {
   baseUrl?: string;
   endpoint?: string;
   headers?: Record<string, string>;
   timeoutMs?: number;
   maxRetries?: number;
+  backend?: ProviderTransportBackend;
   /**
    * Optional override for OAuth browser activation per provider.
    * When set to 'camoufox', OAuth will prefer Camoufox launcher instead of the system default browser.

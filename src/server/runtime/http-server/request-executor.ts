@@ -124,9 +124,14 @@ export class HubRequestExecutor implements RequestExecutor {
       let antigravityRetrySignal: AntigravityRetrySignal | null = null;
       let poolCooldownWaitBudgetMs = 3 * 60 * 1000;
       let forcedRouteHint: string | undefined;
+      let contextOverflowRetries = 0;
+      const MAX_CONTEXT_OVERFLOW_RETRIES = 3;
 
       while (attempt < maxAttempts) {
         attempt += 1;
+        // Ensure each attempt starts from the base requestId so pipeline snapshots
+        // don't inherit a provider-specific id from a previous attempt.
+        input.requestId = providerRequestId;
         if (originalRequestSnapshot && typeof originalRequestSnapshot === 'object') {
           const cloned =
             cloneRequestPayload(originalRequestSnapshot) ??
@@ -454,13 +459,18 @@ export class HubRequestExecutor implements RequestExecutor {
           const isVerify = status === 403 && isGoogleAccountVerificationRequiredError(error);
           const isReauth = status === 403 && isAntigravityReauthRequired403(error);
           const promptTooLong = isPromptTooLongError(error);
+          if (promptTooLong) {
+            contextOverflowRetries += 1;
+            if (forcedRouteHint !== 'longcontext') {
+              forcedRouteHint = 'longcontext';
+            }
+          }
           const shouldRetry =
             attempt < maxAttempts &&
-            (shouldRetryProviderError(error) ||
-              (isAntigravityProviderKey(target.providerKey) && (isVerify || isReauth)));
-          if (promptTooLong && forcedRouteHint !== 'longcontext') {
-            forcedRouteHint = 'longcontext';
-          }
+            (promptTooLong
+              ? contextOverflowRetries < MAX_CONTEXT_OVERFLOW_RETRIES
+              : (shouldRetryProviderError(error) ||
+                  (isAntigravityProviderKey(target.providerKey) && (isVerify || isReauth))));
           if (!shouldRetry) {
             recordAttempt({ error: true });
             throw error;
@@ -469,10 +479,12 @@ export class HubRequestExecutor implements RequestExecutor {
           recordAttempt({ error: true });
           const singleProviderPool =
             Boolean(initialRoutePool && initialRoutePool.length === 1 && initialRoutePool[0] === target.providerKey);
-          if (singleProviderPool) {
+          if (promptTooLong && target.providerKey) {
+            excludedProviderKeys.add(target.providerKey);
+          } else if (singleProviderPool) {
             await waitBeforeRetry(error);
           }
-          if (!singleProviderPool && target.providerKey) {
+          if (!promptTooLong && !singleProviderPool && target.providerKey) {
             const is429 = status === 429;
             if (isAntigravityProviderKey(target.providerKey) && (isVerify || is429)) {
               // For Antigravity 403 verify / 429 states:
@@ -499,7 +511,8 @@ export class HubRequestExecutor implements RequestExecutor {
             nextAttempt: attempt + 1,
             excluded: Array.from(excludedProviderKeys),
             reason: describeRetryReason(error),
-            routeHint: forcedRouteHint
+            routeHint: forcedRouteHint,
+            ...(promptTooLong ? { contextOverflowRetries, maxContextOverflowRetries: MAX_CONTEXT_OVERFLOW_RETRIES } : {})
           });
           continue;
         }

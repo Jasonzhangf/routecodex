@@ -8,6 +8,7 @@ import type { RouteErrorPayload } from '../../error-handling/route-error-hub.js'
 import { reportRouteError } from '../../error-handling/route-error-hub.js';
 // import { runtimeFlags } from '../../runtime/runtime-flags.js';
 import { formatErrorForConsole } from '../../utils/log-helpers.js';
+import { deriveFinishReason } from '../utils/finish-reason.js';
 import { isSnapshotsEnabled, writeServerSnapshot } from '../../utils/snapshot-writer.js';
 import {
   generateRequestIdentifiers,
@@ -91,14 +92,17 @@ export function logRequestStart(endpoint: string, requestId: string, meta?: Requ
   return;
 }
 
-export function logRequestComplete(endpoint: string, requestId: string, status: number): void {
+export function logRequestComplete(endpoint: string, requestId: string, status: number, body?: unknown): void {
   if (!SHOULD_LOG_HTTP_EVENTS) {
     return;
   }
   const resolvedId = formatRequestId(requestId);
   const timestamp = formatTimestamp();
-  console.log(`✅ [${endpoint}] ${timestamp} request ${resolvedId} completed (status=${status})`);
+  const finishReason = deriveFinishReason(body);
+  const finishReasonLabel = finishReason ? `, finish_reason=${finishReason}` : '';
+  console.log(`✅ [${endpoint}] ${timestamp} request ${resolvedId} completed (status=${status}${finishReasonLabel})`);
 }
+
 
 export function logRequestError(endpoint: string, requestId: string, error: unknown): void {
   const resolvedId = formatRequestId(requestId);

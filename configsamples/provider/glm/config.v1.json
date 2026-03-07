@@ -26,7 +26,7 @@
           },
           "glm-4.7": {
             "maxTokens": 128000,
-            "maxContext": 200000,
+            "maxContext": 202752,
             "supportsThinking": true,
             "supportsStreaming": true
           },

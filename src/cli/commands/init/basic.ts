@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import type { InitProviderTemplate } from '../../config/init-provider-catalog.js';
+import { buildInitRouting, buildV2ConfigObject } from '../../config/init-v2-builder.js';
 import type {
   ConfigState,
   LoggerLike,
@@ -59,14 +60,11 @@ export function inferDefaultModel(providerNode: UnknownRecord): string {
 }
 
 export function buildRouting(defaultTarget: string, overrides?: Partial<Record<'default' | 'thinking' | 'tools', string>>): RoutingConfig {
-  const targetDefault = overrides?.default || defaultTarget;
-  const targetThinking = overrides?.thinking || targetDefault;
-  const targetTools = overrides?.tools || targetDefault;
-  return {
-    default: [{ id: 'primary', mode: 'priority', targets: [targetDefault] }],
-    thinking: [{ id: 'thinking-primary', mode: 'priority', targets: [targetThinking] }],
-    tools: [{ id: 'tools-primary', mode: 'priority', targets: [targetTools] }]
-  };
+  return buildInitRouting({
+    defaultTarget,
+    thinkingTarget: overrides?.thinking || overrides?.default || defaultTarget,
+    toolsTarget: overrides?.tools || overrides?.default || defaultTarget
+  });
 }
 
 export function readPrimaryTargetFromRoute(routeNode: unknown): string | null {
@@ -84,6 +82,24 @@ export function readRoutingFromConfig(config: UnknownRecord): RoutingConfig {
   const vrRouting = asRecord(virtualRouter.routing);
   if (Object.keys(vrRouting).length > 0) {
     return vrRouting;
+  }
+  const groups = asRecord(virtualRouter.routingPolicyGroups);
+  const activeId = typeof virtualRouter.activeRoutingPolicyGroup === 'string'
+    ? virtualRouter.activeRoutingPolicyGroup.trim()
+    : '';
+  const activeGroup = activeId && isRecord(groups[activeId]) ? asRecord(groups[activeId]) : undefined;
+  if (activeGroup) {
+    const activeRouting = asRecord(activeGroup.routing);
+    if (Object.keys(activeRouting).length > 0) {
+      return activeRouting;
+    }
+  }
+  const defaultGroup = isRecord(groups.default) ? asRecord(groups.default) : undefined;
+  if (defaultGroup) {
+    const defaultRouting = asRecord(defaultGroup.routing);
+    if (Object.keys(defaultRouting).length > 0) {
+      return defaultRouting;
+    }
   }
   const rootRouting = asRecord(config.routing);
   return rootRouting;
@@ -447,22 +463,10 @@ export function buildV2ConfigFromExisting(
   host: string,
   port: number
 ): UnknownRecord {
-  const next: UnknownRecord = {
-    ...existing,
-    version: '2.0.0',
-    virtualrouterMode: 'v2',
-    httpserver: {
-      ...asRecord(existing.httpserver),
-      host,
-      port
-    }
-  };
-
-  const virtualRouter = asRecord(existing.virtualrouter);
-  delete virtualRouter.providers;
-  virtualRouter.routing = routing;
-  next.virtualrouter = virtualRouter;
-  delete next.providers;
-  delete next.routing;
-  return next;
+  return buildV2ConfigObject({
+    existing,
+    host,
+    port,
+    routing
+  });
 }

@@ -5,7 +5,11 @@ import {
   type QuotaState,
   type StaticQuotaConfig
 } from '../../quota/provider-quota-center.js';
-import { loadProviderQuotaSnapshot, saveProviderQuotaSnapshot } from '../../quota/provider-quota-store.js';
+import {
+  loadProviderQuotaSnapshot,
+  saveProviderQuotaSnapshot,
+  sanitizeQuotaStateForSnapshot
+} from '../../quota/provider-quota-store.js';
 import { canonicalizeProviderKey, mergeQuotaStates } from './provider-key-normalization.js';
 
 function normalizeLoadedQuotaState(providerKey: string, state: QuotaState): QuotaState {
@@ -25,7 +29,7 @@ function normalizeLoadedQuotaState(providerKey: string, state: QuotaState): Quot
         ) || null
       : state.cooldownUntil;
   const blacklistUntil = state.reason === 'fatal' ? null : state.blacklistUntil;
-  return {
+  const normalized: QuotaState = {
     ...state,
     providerKey: key,
     authType,
@@ -33,6 +37,7 @@ function normalizeLoadedQuotaState(providerKey: string, state: QuotaState): Quot
     cooldownUntil,
     blacklistUntil
   };
+  return sanitizeQuotaStateForSnapshot(normalized);
 }
 
 export async function loadProviderQuotaStates(options: {

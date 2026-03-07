@@ -81,6 +81,11 @@ function resolveRestartWaitMs(ctx: RestartCommandContext): number {
   return 45000;
 }
 
+function isHttpOnlyRestartMode(ctx: RestartCommandContext): boolean {
+  const raw = String(ctx.env?.ROUTECODEX_RESTART_HTTP_ONLY ?? ctx.env?.RCC_RESTART_HTTP_ONLY ?? '').trim().toLowerCase();
+  return raw === '1' || raw === 'true';
+}
+
 function resolveConfigPortHostMaybe(
   ctx: RestartCommandContext,
   options: RestartCommandOptions,
@@ -192,6 +197,49 @@ async function isRouteCodexServer(ctx: RestartCommandContext, host: string, port
   } catch {
     return false;
   }
+}
+
+function normalizeHostForHttp(host: string): string {
+  const normalized = String(host || '').trim().toLowerCase();
+  if (!normalized || normalized === '0.0.0.0' || normalized === '::' || normalized === '::0') {
+    return LOCAL_HOSTS.IPV4;
+  }
+  return host;
+}
+
+async function requestProcessRestartViaHttp(
+  ctx: RestartCommandContext,
+  target: RestartTarget
+): Promise<'http' | 'signal'> {
+  const host = normalizeHostForHttp(target.host || LOCAL_HOSTS.LOCALHOST);
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => {
+      try { controller.abort(); } catch { /* ignore */ }
+    }, 2500);
+    const res = await ctx.fetch(`${HTTP_PROTOCOLS.HTTP}${host}:${target.port}/daemon/restart-process`, {
+      method: 'POST',
+      signal: controller.signal
+    }).catch(() => null);
+    clearTimeout(timeout);
+    if (res && (res.status === 200 || res.status === 202 || res.status === 204)) {
+      return 'http';
+    }
+    if (res && ![404, 405, 501].includes(res.status)) {
+      const body = await res.text().catch(() => '');
+      throw new Error(`restart endpoint rejected on ${host}:${target.port} (${res.status}): ${body}`);
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes('restart endpoint rejected')) {
+      throw error;
+    }
+  }
+  if (isHttpOnlyRestartMode(ctx)) {
+    throw new Error(`restart endpoint unavailable on ${host}:${target.port}; manual one-time restart required to adopt server-managed restart`);
+  }
+  requestInPlaceRestart(ctx, target);
+  return 'signal';
 }
 
 type RestartTarget = { host: string; port: number; oldPids: number[] };
@@ -373,7 +421,7 @@ export function createRestartCommand(program: Command, ctx: RestartCommandContex
           }
         });
 
-        spinner.text = 'Requesting in-place restart...';
+        spinner.text = 'Requesting server-managed restart...';
         for (const t of targets) {
           const approved = await ctx.reportGuardianLifecycle?.({
             action: 'restart_request',
@@ -387,7 +435,10 @@ export function createRestartCommand(program: Command, ctx: RestartCommandContex
           if (ctx.reportGuardianLifecycle && approved !== true) {
             throw new Error(`guardian lifecycle apply rejected for ${t.host}:${t.port}`);
           }
-          requestInPlaceRestart(ctx, t);
+          const transport = await requestProcessRestartViaHttp(ctx, t);
+          if (transport === 'signal') {
+            spinner.warn(`Restart endpoint unavailable on ${t.host}:${t.port}; used legacy signal transport.`);
+          }
         }
 
         spinner.text = 'Waiting for server to restart...';

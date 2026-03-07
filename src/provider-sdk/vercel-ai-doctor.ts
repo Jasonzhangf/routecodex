@@ -1,16 +1,23 @@
-import { generateText } from 'ai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createOpenAI } from '@ai-sdk/openai';
-
-import { getInitProviderCatalogEntry, type ProviderCatalogSdkBinding } from '../cli/config/init-provider-catalog.js';
+import { generateText } from 'ai';
 import { TokenFileAuthProvider } from '../providers/auth/tokenfile-auth.js';
 import type { UnknownRecord } from '../config/virtual-router-types.js';
+import {
+  readString,
+  resolveProviderRuntimeMetadata,
+  type ResolvedProviderRuntimeMetadata
+} from './provider-runtime-inference.js';
 
 export type ProviderDoctorResult = {
   ok: boolean;
   providerId: string;
   modelId: string;
-  binding: ProviderCatalogSdkBinding;
+  binding: {
+    family: 'openai-compatible' | 'anthropic-compatible' | 'custom-runtime';
+    supported: boolean;
+    notes?: string;
+  };
   baseURL?: string;
   message: string;
   text?: string;
@@ -26,7 +33,7 @@ export type ProviderDoctorInput = {
 
 export type ProviderDoctorDeps = {
   executeProbe?: (args: {
-    binding: ProviderCatalogSdkBinding;
+    binding: ProviderDoctorResult['binding'];
     apiKey: string;
     baseURL: string;
     modelId: string;
@@ -58,23 +65,12 @@ function resolveSecretValue(raw: unknown): string {
   return trimmed;
 }
 
-function resolveProviderBinding(providerId: string, providerNode: UnknownRecord): ProviderCatalogSdkBinding {
-  const catalogEntry = getInitProviderCatalogEntry(providerId);
-  if (catalogEntry?.sdkBinding) {
-    return catalogEntry.sdkBinding;
-  }
-  const providerType = normalizeString(providerNode.type).toLowerCase();
-  if (providerType === 'anthropic') {
-    return { family: 'anthropic-compatible', supported: true };
-  }
-  if (providerType === 'openai' || providerType === 'responses') {
-    return { family: 'openai-compatible', supported: true };
-  }
-  return {
-    family: 'custom-runtime',
-    supported: false,
-    notes: `Provider type "${providerType || providerId}" requires the existing RouteCodex runtime path.`
-  };
+function resolveProviderBinding(
+  providerId: string,
+  providerNode: UnknownRecord,
+  modelId: string
+): ResolvedProviderRuntimeMetadata['sdkBinding'] {
+  return resolveProviderRuntimeMetadata(providerId, providerNode, { defaultModel: modelId }).sdkBinding;
 }
 
 function extractBearerToken(headers: Record<string, string>): string {
@@ -97,7 +93,9 @@ async function resolveAuthHeaders(providerId: string, providerNode: UnknownRecor
     return oauthProvider.buildHeaders();
   }
 
-  const entries = Array.isArray(authNode.entries) ? authNode.entries.filter((entry) => isRecord(entry)) as UnknownRecord[] : [];
+  const entries = Array.isArray(authNode.entries)
+    ? authNode.entries.filter((entry) => isRecord(entry)) as UnknownRecord[]
+    : [];
   const firstEntry = entries[0] || {};
   const apiKey = resolveSecretValue(firstEntry.apiKey ?? authNode.apiKey ?? firstEntry.env ?? authNode.env);
   if (!apiKey) {
@@ -138,7 +136,11 @@ export async function runVercelAiProviderDoctor(
   const providerId = input.providerId.trim();
   const modelId = input.modelId.trim();
   const providerNode = input.providerNode;
-  const binding = resolveProviderBinding(providerId, providerNode);
+  const binding = resolveProviderBinding(providerId, providerNode, modelId) ?? {
+    family: 'custom-runtime',
+    supported: false,
+    notes: `Provider "${providerId}" does not expose a direct Vercel AI SDK binding.`
+  };
   const baseURL = normalizeString(providerNode.baseURL ?? providerNode.baseUrl);
 
   if (!binding.supported) {

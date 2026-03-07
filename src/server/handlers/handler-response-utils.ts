@@ -7,6 +7,8 @@ import { DEFAULT_TIMEOUTS } from '../../constants/index.js';
 import { stripInternalKeysDeep } from '../../utils/strip-internal-keys.js';
 import { isSnapshotsEnabled, writeServerSnapshot } from '../../utils/snapshot-writer.js';
 import { resolveEffectiveRequestId } from '../utils/request-id-manager.js';
+import { buildInfo } from '../../build-info.js';
+import { deriveFinishReason, STREAM_LOG_FINISH_REASON_KEY } from '../utils/finish-reason.js';
 
 const BLOCKED_HEADERS = new Set(['content-length', 'transfer-encoding', 'connection', 'content-encoding']);
 
@@ -27,6 +29,129 @@ type FlushableResponse = Response & {
 type PipeCapable = { pipe?: unknown };
 type WebReadable = { getReader?: () => unknown };
 type AsyncIterableLike = { [Symbol.asyncIterator]?: () => AsyncIterator<unknown> };
+
+type SseFinishReasonTracker = {
+  buffer: string;
+  finishReason?: string;
+};
+
+const SHOULD_LOG_HTTP_EVENTS = buildInfo.mode !== 'release'
+  || process.env.ROUTECODEX_HTTP_LOG_VERBOSE === '1';
+
+function formatTimestamp(): string {
+  const now = new Date();
+  const hours = String(now.getHours()).padStart(2, '0');
+  const minutes = String(now.getMinutes()).padStart(2, '0');
+  const seconds = String(now.getSeconds()).padStart(2, '0');
+  return `${hours}:${minutes}:${seconds}`;
+}
+
+function logStreamRequestComplete(
+  endpoint: string | undefined,
+  requestLabel: string,
+  status: number,
+  finishReason?: string
+): void {
+  if (!SHOULD_LOG_HTTP_EVENTS) {
+    return;
+  }
+  const targetEndpoint = endpoint && endpoint.trim() ? endpoint.trim() : '/unknown';
+  const finishReasonLabel = finishReason ? `, finish_reason=${finishReason}` : '';
+  console.log(`✅ [${targetEndpoint}] ${formatTimestamp()} request ${requestLabel} completed (status=${status}${finishReasonLabel})`);
+}
+
+function trackSseFinishReason(tracker: SseFinishReasonTracker, chunk: unknown): void {
+  const text = extractChunkText(chunk);
+  if (!text) {
+    return;
+  }
+  tracker.buffer += text;
+  while (true) {
+    const boundaryMatch = tracker.buffer.match(/\r?\n\r?\n/);
+    if (!boundaryMatch || boundaryMatch.index === undefined) {
+      break;
+    }
+    const boundaryLength = boundaryMatch[0].length;
+    const rawBlock = tracker.buffer.slice(0, boundaryMatch.index);
+    tracker.buffer = tracker.buffer.slice(boundaryMatch.index + boundaryLength);
+    const derived = deriveFinishReasonFromSseBlock(rawBlock, tracker.finishReason);
+    if (derived) {
+      tracker.finishReason = derived;
+    }
+  }
+}
+
+function deriveFinishReasonFromSseBlock(block: string, current?: string): string | undefined {
+  const trimmed = block.trim();
+  if (!trimmed) {
+    return current;
+  }
+  let eventName = '';
+  const dataLines: string[] = [];
+  for (const rawLine of trimmed.split(/\r?\n/)) {
+    const line = rawLine.trimEnd();
+    if (!line || line.startsWith(':')) {
+      continue;
+    }
+    if (line.startsWith('event:')) {
+      eventName = line.slice(6).trim().toLowerCase();
+      continue;
+    }
+    if (line.startsWith('data:')) {
+      dataLines.push(line.slice(5).trimStart());
+    }
+  }
+  const dataText = dataLines.join('\n').trim();
+  if (!dataText || dataText === '[DONE]') {
+    return current;
+  }
+  try {
+    const payload = JSON.parse(dataText) as unknown;
+    return deriveFinishReasonFromSsePayload(payload, eventName) ?? current;
+  } catch {
+    return current;
+  }
+}
+
+function deriveFinishReasonFromSsePayload(payload: unknown, eventName?: string): string | undefined {
+  const direct = deriveFinishReason(payload);
+  if (direct) {
+    return direct;
+  }
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return eventName === 'message_stop' ? 'stop' : undefined;
+  }
+  const record = payload as Record<string, unknown>;
+  const responseFinishReason = deriveFinishReason(record.response);
+  if (responseFinishReason) {
+    return responseFinishReason;
+  }
+  const deltaFinishReason = deriveFinishReason(record.delta);
+  if (deltaFinishReason) {
+    return deltaFinishReason;
+  }
+  const messageFinishReason = deriveFinishReason(record.message);
+  if (messageFinishReason) {
+    return messageFinishReason;
+  }
+  if (eventName === 'message_stop') {
+    return 'stop';
+  }
+  return undefined;
+}
+
+function extractChunkText(chunk: unknown): string | undefined {
+  if (typeof chunk === 'string') {
+    return chunk;
+  }
+  if (Buffer.isBuffer(chunk)) {
+    return chunk.toString('utf8');
+  }
+  if (chunk instanceof Uint8Array) {
+    return Buffer.from(chunk).toString('utf8');
+  }
+  return undefined;
+}
 
 function formatRequestId(value?: string): string {
   return resolveEffectiveRequestId(value);
@@ -119,6 +244,14 @@ export function sendPipelineResponse(
 
     let eventCount = 0;
     let ended = false;
+    let completedLogged = false;
+    const finishTracker: SseFinishReasonTracker = {
+      buffer: '',
+      finishReason:
+        body && typeof body === 'object' && typeof (body as Record<string, unknown>)[STREAM_LOG_FINISH_REASON_KEY] === 'string'
+          ? String((body as Record<string, unknown>)[STREAM_LOG_FINISH_REASON_KEY])
+          : undefined
+    };
     let idleTimer: NodeJS.Timeout | null = null;
     let totalTimer: NodeJS.Timeout | null = null;
     let keepaliveTimer: NodeJS.Timeout | null = null;
@@ -262,9 +395,18 @@ export function sendPipelineResponse(
         /* ignore end errors */
       }
     });
-    stream.on('data', () => {
+    stream.on('data', (chunk: unknown) => {
       eventCount++;
+      trackSseFinishReason(finishTracker, chunk);
       resetIdle();
+    });
+    stream.on('end', () => {
+      ended = true;
+      clearTimers();
+      if (!completedLogged) {
+        completedLogged = true;
+        logStreamRequestComplete(entryEndpoint, requestLabel, status, finishTracker.finishReason);
+      }
     });
     res.on('close', cleanup);
     res.on('finish', cleanup);

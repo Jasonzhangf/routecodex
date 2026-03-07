@@ -89,6 +89,7 @@ function sanitizeType(value?: string): string | undefined {
 
 function extractTransport(raw: UnknownRecord): ProviderTransportConfig {
   const headers = extractHeaders(raw.headers) ?? extractHeaders(raw.defaultHeaders);
+  const transportNode = isRecord(raw.transport) ? (raw.transport as UnknownRecord) : undefined;
   const oauthBrowserRaw = pickString((raw as UnknownRecord).oauthBrowser ?? (raw as UnknownRecord).oauth_browser);
   let oauthBrowser: ProviderTransportConfig['oauthBrowser'] | undefined;
   if (oauthBrowserRaw) {
@@ -99,13 +100,24 @@ function extractTransport(raw: UnknownRecord): ProviderTransportConfig {
       oauthBrowser = 'default';
     }
   }
+  const backendRaw = pickString(raw.transportBackend ?? transportNode?.backend);
+  const normalizedBackend = backendRaw?.trim().toLowerCase();
+  const backend =
+    normalizedBackend === 'vercel-ai-sdk'
+      ? 'vercel-ai-sdk'
+      : normalizedBackend === 'openai-sdk'
+        ? 'openai-sdk'
+        : normalizedBackend === 'native-http'
+          ? 'native-http'
+          : undefined;
   return {
     baseUrl: pickString(raw.baseUrl ?? raw.base_url),
     endpoint: pickString(raw.endpoint),
     timeoutMs: pickNumber(raw.timeout ?? raw.timeoutMs),
     maxRetries: pickNumber(raw.retryAttempts ?? raw.retry_attempts),
     headers,
-    oauthBrowser
+    oauthBrowser,
+    backend
   };
 }
 

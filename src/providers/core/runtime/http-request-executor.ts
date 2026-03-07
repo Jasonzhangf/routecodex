@@ -28,6 +28,8 @@ export type PreparedHttpRequest = {
   wantsSse: boolean;
 };
 
+export type PreparedRequestExecutor = (requestInfo: PreparedHttpRequest, context: ProviderContext, captureSse: boolean) => Promise<unknown>;
+
 export type HttpRequestExecutorDeps = {
   wantsUpstreamSse(request: UnknownObject, context: ProviderContext): boolean;
   getEffectiveEndpoint(): string;
@@ -42,6 +44,7 @@ export type HttpRequestExecutorDeps = {
   getEntryEndpointFromPayload(request: UnknownObject): string | undefined;
   getClientRequestIdFromContext(context: ProviderContext): string | undefined;
   wrapUpstreamSseResponse(stream: NodeJS.ReadableStream, context: ProviderContext): Promise<UnknownObject>;
+  executePreparedRequest?: PreparedRequestExecutor;
   getHttpRetryLimit(): number;
   shouldRetryHttpError(error: unknown, attempt: number, maxAttempts: number): boolean;
   delayBeforeHttpRetry(attempt: number): Promise<void>;
@@ -376,41 +379,48 @@ export class HttpRequestExecutor {
     context: ProviderContext,
     captureSse: boolean
   ): Promise<unknown> {
+    const response = this.deps.executePreparedRequest
+      ? await this.deps.executePreparedRequest(requestInfo, context, captureSse)
+      : requestInfo.wantsSse
+        ? await (async () => {
+            const upstreamStream = await this.httpClient.postStream(requestInfo.targetUrl, requestInfo.body, requestInfo.headers);
+            const streamForHost = captureSse
+              ? attachProviderSseSnapshotStream(upstreamStream, {
+                  requestId: context.requestId,
+                  headers: requestInfo.headers,
+                  url: requestInfo.targetUrl,
+                  entryEndpoint: requestInfo.entryEndpoint,
+                  clientRequestId: requestInfo.clientRequestId,
+                  providerKey: context.providerKey,
+                  providerId: context.providerId
+                })
+              : upstreamStream;
+            const wrapped = await this.deps.wrapUpstreamSseResponse(streamForHost, context);
+            if (!captureSse) {
+              try {
+                await writeProviderSnapshot({
+                  phase: 'provider-response',
+                  requestId: context.requestId,
+                  data: { mode: 'sse' },
+                  headers: requestInfo.headers,
+                  url: requestInfo.targetUrl,
+                  entryEndpoint: requestInfo.entryEndpoint,
+                  clientRequestId: requestInfo.clientRequestId,
+                  providerKey: context.providerKey,
+                  providerId: context.providerId
+                });
+              } catch {
+                /* ignore snapshot failures */
+              }
+            }
+            return wrapped;
+          })()
+        : await this.httpClient.post(requestInfo.targetUrl, requestInfo.body, requestInfo.headers);
+
     if (requestInfo.wantsSse) {
-      const upstreamStream = await this.httpClient.postStream(requestInfo.targetUrl, requestInfo.body, requestInfo.headers);
-      const streamForHost = captureSse
-        ? attachProviderSseSnapshotStream(upstreamStream, {
-          requestId: context.requestId,
-          headers: requestInfo.headers,
-          url: requestInfo.targetUrl,
-          entryEndpoint: requestInfo.entryEndpoint,
-          clientRequestId: requestInfo.clientRequestId,
-          providerKey: context.providerKey,
-          providerId: context.providerId
-        })
-        : upstreamStream;
-      const wrapped = await this.deps.wrapUpstreamSseResponse(streamForHost, context);
-      if (!captureSse) {
-        try {
-          await writeProviderSnapshot({
-            phase: 'provider-response',
-            requestId: context.requestId,
-            data: { mode: 'sse' },
-            headers: requestInfo.headers,
-            url: requestInfo.targetUrl,
-            entryEndpoint: requestInfo.entryEndpoint,
-            clientRequestId: requestInfo.clientRequestId,
-            providerKey: context.providerKey,
-            providerId: context.providerId
-          });
-        } catch {
-          /* ignore snapshot failures */
-        }
-      }
-      return wrapped;
+      return response;
     }
 
-    const response = await this.httpClient.post(requestInfo.targetUrl, requestInfo.body, requestInfo.headers);
     try {
       await writeProviderSnapshot({
         phase: 'provider-response',
@@ -431,8 +441,6 @@ export class HttpRequestExecutor {
       throw profileBusinessError;
     }
 
-    // iFlow 特例：部分 OAuth 失效错误通过 HTTP 200 + body.status=439 返回，
-    // 需要与 401/403 一样走统一的 OAuth 修复逻辑（handleUpstreamInvalidOAuthToken）。
     const providerId = (context as unknown as { providerId?: unknown; providerType?: unknown; providerFamily?: unknown })
       .providerId;
     const family = (context as unknown as { providerFamily?: unknown }).providerFamily;
@@ -455,14 +463,9 @@ export class HttpRequestExecutor {
               ? bag.message
               : '') || '';
         if (statusStr === '439' && /token has expired/i.test(msg)) {
-          // 抛出 Error 交给上层的 tryRecoverOAuthAndReplay + handleUpstreamInvalidOAuthToken
-          // 触发统一的 token 刷新 / Portal 授权流程。
           throw new Error(msg);
         }
 
-        // iFlow 也可能返回 HTTP 200 + 业务错误包（如 { error_code, msg }）。
-        // 这类响应不是 canonical provider payload，必须在 provider transport 层 fail-fast，
-        // 避免流到 Hub 响应转换阶段才报 MALFORMED_RESPONSE。
         const envelope = readIflowBusinessErrorEnvelope(data);
         if (envelope) {
           throw buildIflowBusinessEnvelopeError(envelope, data as Record<string, unknown>);

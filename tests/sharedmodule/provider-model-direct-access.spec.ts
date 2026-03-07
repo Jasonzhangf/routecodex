@@ -14,7 +14,7 @@ describe('provider.model direct access without routing', () => {
             endpoint: 'https://apis.iflow.cn/v1',
             auth: { type: 'apikey', apiKey: 'TEST_KEY' },
             models: {
-              'kimi-k2.5': { maxContextTokens: 256000 },
+              'kimi-k2.5': { maxContextTokens: 262144 },
               'glm-4.7': {}
             }
           }

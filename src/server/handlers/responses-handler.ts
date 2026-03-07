@@ -4,6 +4,7 @@ import {
   nextRequestIdentifiers,
   respondWithPipelineError,
   sendPipelineResponse,
+  hasSsePayload,
   logRequestStart,
   logRequestComplete,
   logRequestError,
@@ -245,7 +246,9 @@ export async function handleResponses(
       return;
     }
     const effectiveRequestId = pipelineInput.requestId;
-    logRequestComplete(entryEndpoint, effectiveRequestId, result.status ?? 200);
+    if (!hasSsePayload(result.body)) {
+      logRequestComplete(entryEndpoint, effectiveRequestId, result.status ?? 200, result.body);
+    }
     sendPipelineResponse(res, result, effectiveRequestId, { forceSSE: wantsStream, entryEndpoint });
   } catch (error: unknown) {
     clearTimeoutHandle();

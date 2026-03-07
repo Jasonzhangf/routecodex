@@ -53,6 +53,34 @@ describe('provider-quota-store snapshot', () => {
     expect(loaded?.providers[providerKey].priorityTier).toBe(42);
     expect(loaded?.providers[providerKey].providerKey).toBe(providerKey);
   });
+
+  it('drops cooldown persistence for HTTP 4xx/5xx error series', async () => {
+    const now = new Date('2026-01-15T10:10:00.000Z');
+    const state = createInitialQuotaState(providerKey, { priorityTier: 42 }, now.getTime());
+    const snapshot = {
+      [providerKey]: {
+        ...state,
+        inPool: false,
+        reason: 'cooldown',
+        cooldownUntil: now.getTime() + 30_000,
+        lastErrorSeries: 'EOTHER',
+        lastErrorCode: 'HTTP_400',
+        lastErrorAtMs: now.getTime(),
+        consecutiveErrorCount: 2
+      }
+    };
+
+    await saveProviderQuotaSnapshot(snapshot, now);
+    const loaded = await loadProviderQuotaSnapshot();
+    expect(loaded).not.toBeNull();
+    const reloaded = loaded?.providers[providerKey];
+    expect(reloaded?.reason).toBe('ok');
+    expect(reloaded?.inPool).toBe(true);
+    expect(reloaded?.cooldownUntil).toBeNull();
+    expect(reloaded?.lastErrorSeries).toBeNull();
+    expect(reloaded?.lastErrorCode).toBeNull();
+    expect(reloaded?.consecutiveErrorCount).toBe(0);
+  });
 });
 
 describe('provider-quota-store error event log', () => {

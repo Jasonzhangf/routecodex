@@ -142,3 +142,50 @@ Tags: ark-coding-plan, volcengine, anthropic, coding-plan, baseurl, provider-con
 - 2026-03-06: Updated `~/.codex/config.toml` so all `model_reasoning_effort` entries are `high`; last remaining non-high entry was `[model_providers.tab]` previously `medium`.
 
 Tags: apply-patch, sandbox, relative-paths, codex, config, reasoning, high, tab-provider
+
+## Provider 架构收敛
+
+- 2026-03-07: Provider V2 的真实单一真源已经是 `~/.routecodex/provider/<id>/config.v2.json`；`src/config/provider-v2-loader.ts` 只按目录扫描并加载这些 provider 文件，`src/config/virtual-router-builder.ts` 负责把这些 provider 与 `config.json` 里的 routing 组装成 Virtual Router 输入。
+- 2026-03-07: `config.json` 应只承载 server/global settings 与 routing policy groups；provider 定义不应再内嵌在主配置中。运行时 provider 的动态使用链路是：provider v2 file -> `buildProviderProfiles(...)` -> Virtual Router target runtime -> `applyProviderProfileOverrides(...)` -> ProviderFactory 按 protocol/moduleType 实例化。
+- 2026-03-07: 对于标准 provider（如 crs、tab、kimi、GLM/Kimi/OpenAI-compatible 等），不应依赖内置 provider 实现模板；用户只需提供 `config.v2.json`，系统根据 `type/baseURL/auth/models/compatibilityProfile/transportBackend` 动态接入即可。
+- 2026-03-07: 必须保留内置模板/内置辅助的只应是 OAuth/账号型 provider（如 qwen-oauth、iflow-oauth、gemini-cli-oauth、antigravity-oauth），因为这类 provider 需要 token-file lifecycle、browser launch、daemon refresh、header materialization 等宿主能力，不只是静态 HTTP 配置。
+- 2026-03-07: `compatibilityProfile` 仍然是标准 provider 的必要扩展点；即使 provider 本身不内置，也允许 compat 在请求/响应阶段注入 header、参数、字段映射与协议修正。传输层只做 auth + HTTP，不做 provider-specific semantic patch。
+- 2026-03-07: transport backend 也应配置驱动：`native-http` / `vercel-ai-sdk` / `openai-sdk` 由 provider config 声明，ProviderFactory/HttpTransportProvider 只按 runtime profile 选择，不再以 provider id 硬编码分支。
+- 2026-03-07: Init/catalog 的目标应从“内置 provider 列表”收敛为“provider 模板与 OAuth 向导”；标准 provider 可以由 `routecodex provider add/inspect/doctor` 生成最小模板，但运行期不应要求 catalog 中存在该 provider 才能使用。
+
+Tags: provider-architecture, provider-v2, config-driven, oauth, qwen, compat, dynamic-provider-loading, transport-backend, routing, config-json, provider-config-v2
+
+## Provider Tooling Config-First 收敛
+
+- 2026-03-07: Provider 运行时生效链路已经确认是配置驱动，不依赖 init catalog：`~/.routecodex/provider/<id>/config.v2.json` -> `src/config/provider-v2-loader.ts` -> `src/config/virtual-router-builder.ts` -> `src/config/routecodex-config-loader.ts` -> `applyProviderProfileOverrides()` -> `ProviderFactory`。
+- 2026-03-07: `provider inspect` 与 `provider doctor` 已改为 config-first。优先从 provider 自身配置推断 `sdkBinding`、`capabilities`、`webSearch`，catalog 仅作为补充元数据，不再是标准 provider 可用性的前提。
+- 2026-03-07: 新增 `src/provider-sdk/provider-runtime-inference.ts` 作为 provider tooling 的单一推断入口，避免在 inspect/doctor 中重复散落 provider 类型、auth 类型、webSearch 规则。
+- 2026-03-07: 标准 provider（如 `openai` / `responses` / `anthropic` 协议）现在可以只靠配置工作于 inspect/doctor；只有 OAuth / account / 非标准运行时 provider（如 `qwen-oauth`、`iflow-oauth`、`gemini-cli-oauth`、`antigravity-oauth`、`deepseek-account`）仍需要宿主 runtime 能力。
+- 2026-03-07: `transportBackend` 继续保持纯配置驱动，当前允许：`native-http`、`vercel-ai-sdk`、`openai-sdk`。不要把 transport 选择重新做成 provider 名称硬编码。
+
+Tags: provider-tooling, config-first, config-driven, provider-inspect, provider-doctor, transportBackend, sdkBinding, webSearch, capabilities, runtime-inference
+- 2026-03-07: Init/template 层已收敛为两类：
+  - guided standard protocols: `openai`, `responses`, `anthropic`, `gemini`
+  - managed-auth built-ins: `qwen`, `iflow`, `gemini-cli`, `antigravity`, `deepseek-web`
+  标准 provider 不再需要内置目录项；只有宿主必须管理的 OAuth/account/runtime provider 保留内置模板。
+- 2026-03-07: `src/cli/config/bootstrap-provider-templates.ts` 成为 init / config / provider-add / config-admin 共用的 bootstrap 模板入口；`init-provider-catalog.ts` 继续保留全量 metadata/catalog 职责，不再兼任所有模板入口。
+- 2026-03-07: Web UI provider templates API 现在扫描 `~/.routecodex/provider/<id>/config.v2.json` 目录结构，而不是错误地扫描根目录平铺 json；`boundToConfig` 同时参考 config 中显式 providers 和 routing target 引用。
+
+Tags: provider-bootstrap, init-template, managed-auth, oauth, account-runtime, config-admin, provider-directory, bootstrap-provider-templates
+
+## Provider / Compat 配置收敛
+
+- 2026-03-07: Provider 配置收敛方向确认：`transport`、`models.<model>.options`、`compat` 三层分离。`headers/baseUrl/auth/backend` 属于 transport；`vision/webSearch/contextWindow/reasoningEffort` 等能力声明属于 model options；字段修正、tool 处理、reasoning 映射等协议兼容逻辑属于 compat。
+- 2026-03-07: Compat 采用“双轨”模式：保留内置 `compat.profile`，同时增加 `compat.options` 动态配置，但动态配置只能调用内置支持的原子操作，不能变成任意脚本或黑盒 DSL。
+- 2026-03-07: 多模态与 web search 的能力声明要尽量前移到 provider model 配置，参考 opencode 的 `provider.<id>.models.<model>.options` 风格；Virtual Router 路由层只负责池子策略和显式覆盖。
+- 2026-03-07: 推进顺序固定为：1) 先扩 schema/loader/runtime 透传；2) 再做 bootstrap 自动从 model options 推导 `multimodal/search`；3) 最后逐步把 compat 原子操作外露并从硬编码迁移。
+- Tags: provider-schema, compat, dynamic-actions, multimodal, web-search, transport, model-options, architecture
+- 2026-03-07: 用户要求对当前 Provider/Compat 配置收敛任务采用“每一个进度都更新记忆”的方式推进；后续每完成一个阶段性步骤，都要同步更新 `MEMORY.md` 或对应 `memory/` 任务记忆，而不是只在结束时补记。
+- Tags: memory-discipline, progress-tracking, provider-schema, compat
+
+- 2026-03-07: `/v1/models` for Codex now preserves provider-prefixed aliases (for example `crs.gpt-5.4`) and adds bare model aliases (for example `gpt-5.4`) for enabled `responses` providers. Bare + prefixed aliases both carry Codex-required model metadata (`apply_patch_tool_type`, `shell_type`, `context_window`, reasoning fields, modalities, truncation policy). Upstream `crs` does not expose a usable `/models` catalog, so RouteCodex currently synthesizes this metadata from local provider config plus known Codex model presets.
+  Tags: models, codex, metadata, responses, crs, v1-models
+- 2026-03-07: For non-OAuth / non-ChatGPT Codex sessions, remote `/v1/models` refresh and `X-Models-Etag` are not sufficient because Codex `ModelsManager.refresh_available_models()` only fetches remote models when `auth_mode == Chatgpt`. The working config to restore `apply_patch` for `gpt-5.4` is: add `model_catalog_json = "/Users/fanzhang/.codex/model_catalog.routecodex.json"` to `~/.codex/config.toml`, keep `gpt-5.4`/`gpt-5.3-codex` in that catalog with `apply_patch_tool_type = "freeform"` plus correct shell/context metadata, then restart the Codex client.
+  Tags: codex, model_catalog_json, apply-patch, gpt-5.4, non-oauth, models-etag, config
+- 2026-03-07: Added explicit `/models` and `/v1/models` access logging in `src/server/runtime/http-server/routes.ts`; log format includes `path`, `count`, `remoteIp`, `host`, `auth`, `x-forwarded-for`, and `user-agent`. Use this to prove whether a client is actually traversing RouteCodex model discovery before debugging missing tool metadata. Existing older `rcc` builds (for example port `5520`) will not emit this log until rebuilt/repacked.
+  Tags: routecodex, v1-models, logging, codex, rcc, observability

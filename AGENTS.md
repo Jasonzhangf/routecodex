@@ -19,7 +19,8 @@ This document replaces the old “architecture novel” with a concise set of ru
 3. **Deception is professional misconduct** – Fabricating results, hiding errors, claiming work that wasn't done, or misrepresenting task status constitutes serious professional misconduct and violates the trust foundation of this working agreement.
 4. **No deletions without approval** – Never delete existing repo files without explicit user approval. If removal seems necessary, propose the change and wait for confirmation.
 5. **Untracked-first review & dangerous-action gate** – When new/untracked files are detected, review them first as potential valid fixes. Do not delete/clean/checkout/reset these files by default. If they truly violate policy and require removal or rollback, ask the user before any destructive action.
-6. **Process-kill commands are prohibited** – Agent must not execute any process termination command, including `kill`, `pkill`, `killall`, `taskkill`, `launchctl kill`, or port-based mass termination patterns (e.g. `lsof ... | xargs kill`). Process stop/restart must use explicit project CLI control flow only, and never by direct signal commands.
+6. **Uncertain changes require confirmation** – When an unexpected or uncertain change is detected, do not modify it; ask the user how to proceed.
+7. **Process-kill commands are prohibited** – Agent must not execute any process termination command, including `kill`, `pkill`, `killall`, `taskkill`, `launchctl kill`, or port-based mass termination patterns (e.g. `lsof ... | xargs kill`). Process stop/restart must use explicit project CLI control flow only, and never by direct signal commands.
 
 ## 1.2 三层架构铁律（Block / App / UI）
 
@@ -29,10 +30,18 @@ This document replaces the old “architecture novel” with a concise set of ru
 
 ## 1.3 Memsearch 使用原则
 
-1. 当任务完成或阶段性完成、有重要发现、或需要记录失败尝试时，使用 memsearch skill 进行记录。
-2. 当需要压缩记忆时，使用 memsearch skill 进行记录。
-3. 当有 debug 任务需要分析或有新任务要实现时，先使用 memsearch skill 做记忆搜索再执行。
+1. 当任务完成或阶段性完成、有重要发现、或需要记录失败尝试时，使用 memsearch flow skill 进行记录。
+2. 当需要压缩记忆时，使用 memsearch flow skill 进行记录。
+3. 当有 debug 任务需要分析或有新任务要实现时，先使用 memsearch flow skill 做记忆搜索再执行。
 4. 对用户反复要求的任务、习惯与命令，提炼规律并记录到 memsearch。
+5. 当用户提出“请记住 / 记住 / 保存记忆 / 记忆一下”等请求时，必须调用 memsearch flow skill  写入记忆。
+6. 当用户提出“查询记忆 / 查找记忆 / 搜索记忆 / 回忆”等请求时，先调用 memsearch flow skill 检索记忆，再进行代码搜索或实现操作。
+7. 对于项目约束、项目习惯、全项目通用信息、项目架构等长期共享记忆，统一记录在仓库根目录 `MEMORY.md`；对于每一条独立任务的过程性记忆，记录在 `./memory/` 目录。
+
+## 1.4 Rust 化原则
+
+1. Rust 化过程中必须函数化、模块化与自包含；拆分时遵循“先拆新文件、验证后再删旧逻辑”，避免巨型文件。
+7. 每次写入 memsearch 记忆时必须添加 `Tags:` 行，并包含清晰可检索的关键词标签。
 
 ---
 

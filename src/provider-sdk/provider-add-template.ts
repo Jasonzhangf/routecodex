@@ -1,4 +1,5 @@
-import { getInitProviderCatalog, type InitProviderTemplate } from '../cli/config/init-provider-catalog.js';
+import { getBootstrapProviderTemplates, isManagedBootstrapTemplate } from '../cli/config/bootstrap-provider-templates.js';
+import type { InitProviderTemplate } from '../cli/config/init-provider-catalog.js';
 import type { UnknownRecord } from '../config/virtual-router-types.js';
 
 function isRecord(value: unknown): value is UnknownRecord {
@@ -17,17 +18,15 @@ function normalizeModelsNode(node: unknown): Record<string, UnknownRecord> {
 }
 
 export type ProviderTemplateId =
-  | 'glm'
+  | 'openai'
+  | 'responses'
+  | 'anthropic'
+  | 'gemini'
   | 'qwen'
   | 'iflow'
-  | 'kimi'
-  | 'modelscope'
   | 'gemini-cli'
   | 'antigravity'
-  | 'gemini'
-  | 'openai'
-  | 'anthropic'
-  | 'responses'
+  | 'deepseek-web'
   | 'custom';
 
 export interface ProviderTemplate {
@@ -39,7 +38,7 @@ export interface ProviderTemplate {
   seedModels?: string[];
   defaultCompat?: string;
   defaultAuthType?: string;
-  source: 'catalog' | 'builtin';
+  source: 'bootstrap-generic' | 'bootstrap-managed' | 'builtin';
   providerTemplate?: UnknownRecord;
 }
 
@@ -63,13 +62,13 @@ function catalogEntryToProviderTemplate(entry: InitProviderTemplate): ProviderTe
     seedModels: modelIds.filter((modelId) => modelId !== entry.defaultModel),
     defaultCompat: readString((provider as { compatibilityProfile?: unknown }).compatibilityProfile),
     defaultAuthType: readString((provider as { auth?: unknown }).auth && (provider as { auth: UnknownRecord }).auth.type) ?? 'apikey',
-    source: 'catalog',
+    source: isManagedBootstrapTemplate(entry.id) ? 'bootstrap-managed' : 'bootstrap-generic',
     providerTemplate: JSON.parse(JSON.stringify(provider))
   };
 }
 
 export function getProviderTemplates(): ProviderTemplate[] {
-  return [...getInitProviderCatalog().map(catalogEntryToProviderTemplate), CUSTOM_PROVIDER_TEMPLATE];
+  return [...getBootstrapProviderTemplates().map(catalogEntryToProviderTemplate), CUSTOM_PROVIDER_TEMPLATE];
 }
 
 export function pickProviderTemplate(id?: string): ProviderTemplate {
@@ -110,10 +109,17 @@ export function buildProviderFromTemplate(
   };
   if (nextAuthType.toLowerCase().includes('apikey')) {
     auth.apiKey = apiKeyOrPlaceholder.trim() || readString(baseAuth.apiKey) || 'YOUR_API_KEY_HERE';
-  } else if (nextAuthType.toLowerCase().includes('oauth')) {
-    const resolvedTokenFile = tokenFile.trim() || readString(baseAuth.tokenFile);
+  } else if (nextAuthType.toLowerCase().includes('oauth') || nextAuthType.toLowerCase().includes('cookie') || nextAuthType.toLowerCase().includes('account')) {
+    const resolvedTokenFile = tokenFile.trim() || readString(baseAuth.tokenFile) || readString(baseAuth.cookieFile);
     if (resolvedTokenFile) {
-      auth.tokenFile = resolvedTokenFile;
+      if (nextAuthType.toLowerCase().includes('cookie')) {
+        auth.cookieFile = resolvedTokenFile;
+      } else if (nextAuthType.toLowerCase().includes('account') && Array.isArray(baseAuth.entries) && baseAuth.entries.length > 0) {
+        const [first, ...rest] = baseAuth.entries as UnknownRecord[];
+        auth.entries = [{ ...first, tokenFile: resolvedTokenFile }, ...rest];
+      } else {
+        auth.tokenFile = resolvedTokenFile;
+      }
     }
   }
   provider.auth = auth;

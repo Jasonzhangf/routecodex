@@ -44,7 +44,6 @@ describe('provider inspect', () => {
     expect(inspection.configPath).toBe('/tmp/provider/qwen/config.v2.json');
   });
 
-
   it('builds routing hints for capability-driven pools and web search policy wiring', () => {
     const inspection = inspectProviderConfig(
       {
@@ -126,7 +125,6 @@ describe('provider inspect', () => {
     });
   });
 
-
   it('builds a paste-ready config fragment from routing hints', () => {
     const inspection = inspectProviderConfig(
       {
@@ -171,24 +169,52 @@ describe('provider inspect', () => {
     });
   });
 
-  it('falls back to configured defaults for custom providers without catalog metadata', () => {
-    const inspection = inspectProviderConfig({
-      version: '2.0.0',
-      providerId: 'custom-local',
-      provider: {
-        id: 'custom-local',
-        type: 'openai',
-        defaultModel: 'my-model',
-        models: {
-          'my-model': { supportsStreaming: true }
+  it('uses provider config metadata first for custom standard providers', () => {
+    const inspection = inspectProviderConfig(
+      {
+        version: '2.0.0',
+        providerId: 'custom-openai',
+        provider: {
+          id: 'custom-openai',
+          type: 'openai',
+          defaultModel: 'my-model',
+          sdkBinding: { family: 'openai-compatible', supported: true },
+          capabilities: {
+            supportsTools: true,
+            supportsLongContext: true
+          },
+          webSearch: {
+            engineId: 'custom:web_search',
+            executionMode: 'direct',
+            modelId: 'search-model'
+          },
+          models: {
+            'my-model': { supportsStreaming: true },
+            'search-model': { supportsStreaming: true }
+          }
+        }
+      },
+      { includeRoutingHints: true }
+    );
+
+    expect(inspection.catalogId).toBeUndefined();
+    expect(inspection.sdkBinding).toMatchObject({ family: 'openai-compatible', supported: true });
+    expect(inspection.defaultModel).toBe('my-model');
+    expect(inspection.routeTargets.default).toBe('custom-openai.my-model');
+    expect(inspection.routeTargets.webSearch).toBe('custom-openai.search-model');
+    expect(inspection.webSearch).toMatchObject({
+      engineId: 'custom:web_search',
+      providerKey: 'custom-openai.search-model',
+      executionMode: 'direct'
+    });
+    expect(inspection.routingHints?.policyOptions).toMatchObject({
+      webSearch: {
+        search: {
+          'custom:web_search': {
+            providerKey: 'custom-openai.search-model'
+          }
         }
       }
     });
-
-    expect(inspection.catalogId).toBeUndefined();
-    expect(inspection.sdkBinding).toBeUndefined();
-    expect(inspection.defaultModel).toBe('my-model');
-    expect(inspection.routeTargets.default).toBe('custom-local.my-model');
-    expect(inspection.webSearch).toBeUndefined();
   });
 });

@@ -1,4 +1,4 @@
-import type { Application, Request, Response } from 'express';
+import type { Application, NextFunction, Request, Response } from 'express';
 import express from 'express';
 import type { ServerConfigV2 } from './types.js';
 import {
@@ -118,6 +118,22 @@ function shouldTraceSessionScope(req: Request): boolean {
     originator,
     hasTurnMetadata: hasCodexTurnMetadata
   });
+}
+
+function isRequestAbortedError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+  const err = error as { type?: unknown; code?: unknown; message?: unknown; name?: unknown };
+  const type = typeof err.type === 'string' ? err.type.toLowerCase() : '';
+  const code = typeof err.code === 'string' ? err.code.toUpperCase() : '';
+  const message = typeof err.message === 'string' ? err.message.toLowerCase() : '';
+  const name = typeof err.name === 'string' ? err.name : '';
+  return (
+    type === 'request.aborted'
+    || code === 'ECONNABORTED'
+    || (name === 'BadRequestError' && message.includes('request aborted'))
+  );
 }
 
 function logSessionScopeParse(args: {
@@ -247,10 +263,16 @@ export function registerDefaultMiddleware(app: Application): void {
   try {
     if (typeof express.json === 'function') {
       app.use(express.json({ limit: '10mb' }));
+      app.use((error: unknown, _req: Request, _res: Response, next: NextFunction) => {
+        if (isRequestAbortedError(error)) {
+          return;
+        }
+        next(error as Error);
+      });
       console.log('[RouteCodexHttpServer] Middleware: express.json enabled');
       return;
     }
-    app.use((_req, _res, next) => { next(); });
+    app.use((_req, _res, next: NextFunction) => { next(); });
     console.warn('[RouteCodexHttpServer] express.json not available; using no-op middleware');
   } catch (error) {
     console.warn('[RouteCodexHttpServer] Failed to enable express.json; request bodies may be empty', error);

@@ -11,6 +11,7 @@ import type { ProviderHooks } from '../config/provider-hooks.js';
 import type { TargetMetadata } from '../../../modules/pipeline/orchestrator/pipeline-context.js';
 import type { ProviderRuntimeMetadata } from '../runtime/provider-runtime-metadata.js';
 import type { DeepSeekProviderRuntimeOptions } from '../contracts/deepseek-provider-contract.js';
+import type { ProviderTransportBackend } from '../../profile/provider-profile.js';
 
 // Re-export ProviderHooks for external use
 export type { ProviderHooks } from '../config/provider-hooks.js';
@@ -144,6 +145,7 @@ export interface ProviderRuntimeProfile {
    * This is a host-side transport concern; may be injected from provider profiles.
    */
   maxRetries?: number;
+  transportBackend?: ProviderTransportBackend;
   auth: ProviderRuntimeAuth;
   compatibilityProfile?: string;
   outboundProfile?: string;

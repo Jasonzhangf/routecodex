@@ -18,6 +18,62 @@ export interface ProviderErrorEventRecord {
   details?: unknown;
 }
 
+function parseHttpStatusFromCode(value: unknown): number | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const raw = value.trim();
+  if (!raw) {
+    return null;
+  }
+  const match =
+    raw.match(/HTTP[_\-\s]?(\d{3})/i) ||
+    raw.match(/STATUS[_\-\s]?(\d{3})/i);
+  if (!match) {
+    return null;
+  }
+  const parsed = Number(match[1]);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function shouldDropCooldownPersistence(state: QuotaState): boolean {
+  if (!state || typeof state !== 'object') {
+    return false;
+  }
+  if (state.reason !== 'cooldown') {
+    return false;
+  }
+  if (state.lastErrorSeries === 'E5XX') {
+    return true;
+  }
+  if (state.lastErrorSeries === 'EOTHER') {
+    const status = parseHttpStatusFromCode(state.lastErrorCode);
+    if (typeof status === 'number' && status >= 400 && status < 600 && status !== 429) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function sanitizeQuotaStateForSnapshot(state: QuotaState): QuotaState {
+  if (!shouldDropCooldownPersistence(state)) {
+    return state;
+  }
+  return {
+    ...state,
+    inPool: true,
+    reason: 'ok',
+    cooldownUntil: null,
+    lastErrorSeries: null,
+    lastErrorCode: null,
+    lastErrorAtMs: null,
+    consecutiveErrorCount: 0,
+    authIssue: null
+  };
+}
+
+export { sanitizeQuotaStateForSnapshot };
+
 function resolveQuotaDir(): string {
   const override = String(process.env.ROUTECODEX_QUOTA_DIR || process.env.RCC_QUOTA_DIR || '').trim();
   if (override) {
@@ -59,10 +115,18 @@ export async function saveProviderQuotaSnapshot(
 ): Promise<void> {
   const dir = resolveQuotaDir();
   const filePath = resolveQuotaSnapshotPath();
+  const sanitizedProviders: Record<string, QuotaState> = {};
+  for (const [providerKey, state] of Object.entries(providers || {})) {
+    if (!state || typeof state !== 'object') {
+      continue;
+    }
+    sanitizedProviders[providerKey] = sanitizeQuotaStateForSnapshot(state);
+  }
+
   const payload: ProviderQuotaSnapshot = {
     version: 1,
     updatedAt: now.toISOString(),
-    providers
+    providers: sanitizedProviders
   };
 
   try {

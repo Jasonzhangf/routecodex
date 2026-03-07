@@ -1,7 +1,9 @@
 import path from 'node:path';
 import type * as fs from 'node:fs';
 
-import { getInitProviderCatalog, type InitProviderTemplate } from './init-provider-catalog.js';
+import { getBootstrapProviderTemplates } from './bootstrap-provider-templates.js';
+import { buildCatalogWebSearchDefaults, type InitProviderTemplate } from './init-provider-catalog.js';
+import { buildInitRouting, buildV2ConfigObject } from './init-v2-builder.js';
 
 export type InitConfigIo = {
   fsImpl: Pick<typeof fs, 'existsSync' | 'mkdirSync' | 'readFileSync' | 'writeFileSync'>;
@@ -60,123 +62,30 @@ function indexCatalog(catalog: InitProviderTemplate[]) {
   return byId;
 }
 
-function buildRouting(defaultProviderId: string, defaultModel: string) {
-  const target = `${defaultProviderId}.${defaultModel}`;
-  const pool = { id: 'primary', mode: 'priority', targets: [target] };
-  return {
-    default: [pool],
-    thinking: [{ ...pool, id: 'thinking-primary' }],
-    tools: [{ ...pool, id: 'tools-primary' }]
-  };
-}
-
-function buildDefaultWebSearchConfig(
-  providers: InitProviderTemplate[]
-): { webSearchRouteTargets: string[]; webSearchConfig: Record<string, unknown> } | null {
-  const deepseekProvider = providers.find((provider) => provider.id === 'deepseek-web');
-  const iflowProvider = providers.find((provider) => provider.id === 'iflow');
-  const qwenProvider = providers.find((provider) => provider.id === 'qwen');
-  if (!deepseekProvider && !iflowProvider && !qwenProvider) {
-    return null;
-  }
-
-  const webSearchRouteTargets: string[] = [];
-  const engines: Array<Record<string, unknown>> = [];
-  const search: Record<string, unknown> = {};
-
-  if (deepseekProvider) {
-    const providerKey = `${deepseekProvider.id}.deepseek-chat-search`;
-    webSearchRouteTargets.push(providerKey);
-    engines.push({
-      id: 'deepseek:web_search',
-      providerKey,
-      description: 'DeepSeek native web_search backend',
-      default: true
-    });
-    search['deepseek:web_search'] = {
-      providerKey
-    };
-  }
-
-  if (iflowProvider) {
-    const routeTarget = `${iflowProvider.id}.${iflowProvider.defaultModel}`;
-    webSearchRouteTargets.push(routeTarget);
-    engines.push({
-      id: 'iflow:web_search',
-      providerKey: 'iflow',
-      description: 'iFlow web_search backend',
-      ...(deepseekProvider ? {} : { default: true })
-    });
-    search['iflow:web_search'] = {
-      providerKey: 'iflow'
-    };
-  }
-
-  if (qwenProvider) {
-    const routeTarget = `${qwenProvider.id}.${qwenProvider.defaultModel}`;
-    webSearchRouteTargets.push(routeTarget);
-    engines.push({
-      id: 'qwen:web_search',
-      providerKey: routeTarget,
-      description: 'Qwen native web_search backend',
-      ...(!deepseekProvider && !iflowProvider ? { default: true } : {})
-    });
-    search['qwen:web_search'] = {
-      providerKey: routeTarget
-    };
-  }
-
-  return {
-    webSearchRouteTargets,
-    webSearchConfig: {
-      engines,
-      search
-    }
-  };
-}
-
 export function buildInitConfigObject(
   selection: { providers: InitProviderTemplate[]; defaultProviderId: string; host: string; port: number }
 ): Record<string, unknown> {
-  const providersNode: Record<string, unknown> = {};
-  for (const tpl of selection.providers) {
-    providersNode[tpl.id] = tpl.provider;
-  }
   const defaultProvider = selection.providers.find((p) => p.id === selection.defaultProviderId) ?? selection.providers[0];
   if (!defaultProvider) {
     throw new Error('No providers selected');
   }
-  const webSearchDefaults = buildDefaultWebSearchConfig(selection.providers);
-  const routing = buildRouting(
-    defaultProvider.id,
-    defaultProvider.defaultModel
-  ) as Record<string, unknown>;
-  if (webSearchDefaults) {
-    routing.web_search = [
-      {
-        id: 'web_search-primary',
-        mode: 'priority',
-        targets: webSearchDefaults.webSearchRouteTargets
-      }
-    ];
-  }
+  const defaultTarget = `${defaultProvider.id}.${defaultProvider.defaultModel}`;
+  const webSearchDefaults = buildCatalogWebSearchDefaults(selection.providers);
+  const routing = buildInitRouting({
+    defaultTarget,
+    webSearchTargets: webSearchDefaults?.routeTargets
+  });
 
-  const result: Record<string, unknown> = {
-    version: '1.0.0',
-    httpserver: { host: selection.host, port: selection.port },
-    virtualrouter: {
-      providers: providersNode,
-      routing
-    }
-  };
-  if (webSearchDefaults) {
-    result.webSearch = webSearchDefaults.webSearchConfig;
-  }
-  return result;
+  return buildV2ConfigObject({
+    host: selection.host,
+    port: selection.port,
+    routing,
+    policyOptions: webSearchDefaults ? { webSearch: webSearchDefaults.webSearch } : undefined
+  });
 }
 
 async function interactiveSelectProviders(prompt: InitConfigPrompt['prompt']): Promise<string[]> {
-  const catalog = getInitProviderCatalog();
+  const catalog = getBootstrapProviderTemplates();
   const lines = catalog.map((p, idx) => `  ${idx + 1}) ${p.id} - ${p.label} (${p.description})`);
   const answer = await prompt(
     `Select providers by number (comma-separated). Default=1\n${lines.join('\n')}\n> `
@@ -243,6 +152,31 @@ function computeBackupPath(fsImpl: InitConfigIo['fsImpl'], configPath: string): 
   return `${base}.${Date.now()}`;
 }
 
+function writeProviderV2Configs(
+  fsImpl: InitConfigIo['fsImpl'],
+  pathImpl: NonNullable<InitConfigIo['pathImpl']>,
+  configDir: string,
+  providers: InitProviderTemplate[]
+): void {
+  const providerRoot = pathImpl.join(configDir, 'provider');
+  if (!fsImpl.existsSync(providerRoot)) {
+    fsImpl.mkdirSync(providerRoot, { recursive: true });
+  }
+  for (const provider of providers) {
+    const providerDir = pathImpl.join(providerRoot, provider.id);
+    if (!fsImpl.existsSync(providerDir)) {
+      fsImpl.mkdirSync(providerDir, { recursive: true });
+    }
+    const providerConfigPath = pathImpl.join(providerDir, 'config.v2.json');
+    const payload = {
+      version: '2.0.0',
+      providerId: provider.id,
+      provider: provider.provider
+    };
+    fsImpl.writeFileSync(providerConfigPath, JSON.stringify(payload, null, 2), 'utf8');
+  }
+}
+
 export async function initializeConfigV1(
   io: InitConfigIo,
   opts: InitConfigOptions,
@@ -274,7 +208,7 @@ export async function initializeConfigV1(
     }
   }
 
-  const catalog = getInitProviderCatalog();
+  const catalog = getBootstrapProviderTemplates();
   const byId = indexCatalog(catalog);
 
   let providerIds = Array.isArray(opts.providers) && opts.providers.length ? opts.providers : undefined;
@@ -333,6 +267,7 @@ export async function initializeConfigV1(
   });
 
   try {
+    writeProviderV2Configs(fsImpl, pathImpl, configDir, selectedTemplates);
     fsImpl.writeFileSync(configPath, JSON.stringify(configObject, null, 2), 'utf8');
     return {
       ok: true,

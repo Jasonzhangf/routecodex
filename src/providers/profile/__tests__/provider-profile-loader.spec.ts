@@ -105,6 +105,26 @@ describe('provider-profile-loader', () => {
     }
   });
 
+  it('extracts transport backend from provider config', () => {
+    const config: Record<string, unknown> = {
+      providers: {
+        tabglm: {
+          type: 'anthropic',
+          baseUrl: 'https://api.tabcode.cc/claude/glm',
+          transportBackend: 'vercel-ai-sdk',
+          auth: {
+            type: 'x-api-key',
+            apiKey: '${TABGLM_API_KEY}'
+          }
+        }
+      }
+    };
+
+    const result = buildProviderProfiles(config);
+    expect(result.byId.tabglm.transport.backend).toBe('vercel-ai-sdk');
+  });
+
+
   it('throws when legacy compatibility fields are used', () => {
     const config: Record<string, unknown> = {
       providers: {

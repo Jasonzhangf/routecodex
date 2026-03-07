@@ -1,6 +1,11 @@
 import { describe, it, expect } from '@jest/globals';
 import type { AdapterContext, ChatEnvelope } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.js';
 import { ResponsesSemanticMapper } from '../../sharedmodule/llmswitch-core/src/conversion/hub/semantic-mappers/responses-mapper.js';
+import {
+  buildChatRequestFromResponses,
+  buildResponsesRequestFromChat,
+  captureResponsesContext
+} from '../../sharedmodule/llmswitch-core/src/conversion/responses/responses-openai-bridge.js';
 
 function createSubmitContext(overrides?: Partial<AdapterContext>): AdapterContext {
   return {
@@ -134,6 +139,101 @@ describe('ResponsesSemanticMapper submit tool outputs', () => {
     expect(outputs[0]).toMatchObject({
       tool_call_id: 'resume-1',
       output: 'fallback'
+    });
+  });
+
+  it('preserves structured exec_command tool results across Responses↔Chat roundtrip', () => {
+    const structuredResult = {
+      status: 'completed',
+      exit_code: 0,
+      stdout: 'total 8\n-rw-r--r--  focus.md\n-rw-r--r--  README.md',
+      result: {
+        cwd: '/Users/example/project',
+        lines: ['focus.md', 'README.md']
+      }
+    };
+
+    const chatPayload = {
+      model: 'glm-4.7',
+      stream: false,
+      messages: [
+        { role: 'system', content: 'You are Codex, a local coding agent.' },
+        { role: 'user', content: '列出 workspace 根目录文件' },
+        {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            {
+              id: 'call_demo_exec',
+              type: 'function',
+              function: {
+                name: 'exec_command',
+                arguments: JSON.stringify({ cmd: 'ls -la', workdir: '/Users/example/project' })
+              }
+            }
+          ]
+        },
+        {
+          role: 'tool',
+          tool_call_id: 'call_demo_exec',
+          content: JSON.stringify(structuredResult)
+        }
+      ],
+      tools: [
+        {
+          type: 'function',
+          function: {
+            name: 'exec_command',
+            description: 'Runs a shell command inside the workspace.',
+            parameters: {
+              type: 'object',
+              properties: {
+                cmd: { type: 'string' },
+                workdir: { type: 'string' }
+              },
+              required: ['cmd']
+            }
+          }
+        }
+      ]
+    };
+
+    const { request: responsesRequest, originalSystemMessages } = buildResponsesRequestFromChat(chatPayload, {});
+    const originalOutput = (responsesRequest as any).input.find((entry: any) => entry?.type === 'function_call_output');
+    expect(originalOutput.call_id).toBe('call_demo_exec');
+    expect(JSON.parse(originalOutput.output)).toEqual(structuredResult);
+
+    const responsesContext = captureResponsesContext(responsesRequest as Record<string, unknown>, {
+      route: { requestId: 'host-exec-command-roundtrip' }
+    });
+    if (Array.isArray(originalSystemMessages) && originalSystemMessages.length) {
+      (responsesContext as Record<string, unknown>).originalSystemMessages = originalSystemMessages;
+    }
+
+    const { request: chatRoundtrip } = buildChatRequestFromResponses(
+      responsesRequest as Record<string, unknown>,
+      responsesContext as any
+    );
+    const assistantToolCall = (chatRoundtrip as any).messages.find((entry: any) => entry?.role === 'assistant')?.tool_calls?.[0];
+    expect(assistantToolCall?.id).toBe('call_demo_exec');
+    const toolMessage = (chatRoundtrip as any).messages.find((entry: any) => entry?.role === 'tool');
+    expect(toolMessage?.tool_call_id).toBe('call_demo_exec');
+    expect(JSON.parse(toolMessage.content)).toEqual(structuredResult);
+
+    const { request: responsesRoundtrip } = buildResponsesRequestFromChat(
+      chatRoundtrip as Record<string, unknown>,
+      responsesContext as any
+    );
+    const roundtripOutput = (responsesRoundtrip as any).input.find((entry: any) => entry?.type === 'function_call_output');
+    expect(roundtripOutput.call_id).toBe('call_demo_exec');
+    expect(JSON.parse(roundtripOutput.output)).toEqual(structuredResult);
+    expect(JSON.parse(roundtripOutput.output)).toMatchObject({
+      status: 'completed',
+      exit_code: 0,
+      result: {
+        cwd: '/Users/example/project',
+        lines: ['focus.md', 'README.md']
+      }
     });
   });
 });

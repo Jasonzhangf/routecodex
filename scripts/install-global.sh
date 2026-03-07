@@ -205,7 +205,7 @@ verify_server_health() {
     local HEALTH_LOG="/tmp/routecodex-install-health-$(date +%s).log"
     echo ""
     echo "🩺 执行服务器健康&端到端检查 (chat + anthropic SSE)..."
-    if node scripts/verify-install-e2e.mjs >"$HEALTH_LOG" 2>&1; then
+    if env -u ROUTECODEX_BUILD_RESTART_ONLY -u RCC_BUILD_RESTART_ONLY node scripts/verify-install-e2e.mjs >"$HEALTH_LOG" 2>&1; then
         echo "✅ 全局 CLI 端到端检查通过"
         rm -f "$HEALTH_LOG" || true
         return
@@ -213,6 +213,23 @@ verify_server_health() {
     echo "❌ 端到端检查失败，请查看日志: $HEALTH_LOG"
     tail -n 200 "$HEALTH_LOG" 2>/dev/null || true
     exit 1
+}
+
+restart_managed_dev_server_if_requested() {
+    local restart_only="${ROUTECODEX_BUILD_RESTART_ONLY:-${RCC_BUILD_RESTART_ONLY:-0}}"
+    if [ "$restart_only" != "1" ] && [ "$restart_only" != "true" ]; then
+        return
+    fi
+
+    local restart_port="${ROUTECODEX_DEV_RESTART_PORT:-${RCC_DEV_RESTART_PORT:-5555}}"
+    echo ""
+    echo "🔄 尝试通过服务端 restart 入口刷新现有 RouteCodex 服务 (port=${restart_port})..."
+    if ROUTECODEX_RESTART_HTTP_ONLY=1 routecodex restart --port "$restart_port"; then
+        echo "✅ 受管服务已重启: ${restart_port}"
+        return
+    fi
+    echo "ℹ ${restart_port} 当前服务尚未具备 server-managed restart 能力；为避免误杀旧服务，本次跳过自动重启。"
+    echo "ℹ 请手动重启一次该端口服务，之后后续 build 将可自动刷新。"
 }
 
 # 清理旧安装
@@ -256,6 +273,7 @@ main() {
     link_global_llms_dev
     verify_install
     verify_server_health
+    restart_managed_dev_server_if_requested
     node scripts/cleanup-stale-server-pids.mjs --quiet || true
 
     echo ""

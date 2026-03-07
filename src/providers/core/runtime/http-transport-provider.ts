@@ -50,6 +50,7 @@ import {
 import type { ProviderFamilyProfile } from '../../profile/profile-contracts.js';
 import { VercelAiSdkAnthropicTransport } from './vercel-ai-sdk/anthropic-sdk-transport.js';
 import { VercelAiSdkOpenAiTransport } from './vercel-ai-sdk/openai-sdk-transport.js';
+import { OpenAiResponsesSdkTransport } from './openai-responses-sdk-transport.js';
 
 // Transport submodules
 import {
@@ -82,6 +83,7 @@ export class HttpTransportProvider extends BaseProvider {
   protected protocolClient: ProtocolClient;
   private readonly vercelAiSdkAnthropicTransport?: VercelAiSdkAnthropicTransport;
   private readonly vercelAiSdkOpenAiTransport?: VercelAiSdkOpenAiTransport;
+  private readonly openAiResponsesSdkTransport?: OpenAiResponsesSdkTransport;
   private requestExecutor!: HttpRequestExecutor;
   private injectedConfig: UnknownObject | null = null;
 
@@ -103,6 +105,12 @@ export class HttpTransportProvider extends BaseProvider {
         this.vercelAiSdkOpenAiTransport = new VercelAiSdkOpenAiTransport();
       } else {
         throw new Error(`[provider-runtime-error] transportBackend=vercel-ai-sdk is not implemented for providerType=${this.providerType}`);
+      }
+    } else if (transportBackend === 'openai-sdk') {
+      if (this.providerType === 'responses') {
+        this.openAiResponsesSdkTransport = new OpenAiResponsesSdkTransport();
+      } else {
+        throw new Error(`[provider-runtime-error] transportBackend=openai-sdk is not implemented for providerType=${this.providerType}`);
       }
     }
 
@@ -250,6 +258,9 @@ export class HttpTransportProvider extends BaseProvider {
     }
     if (this.vercelAiSdkOpenAiTransport) {
       return this.vercelAiSdkOpenAiTransport.executePreparedRequest.bind(this.vercelAiSdkOpenAiTransport);
+    }
+    if (this.openAiResponsesSdkTransport) {
+      return this.openAiResponsesSdkTransport.executePreparedRequest.bind(this.openAiResponsesSdkTransport);
     }
     return undefined;
   }

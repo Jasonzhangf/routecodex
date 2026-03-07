@@ -7,7 +7,7 @@ import { stdin as input, stdout as output } from 'node:process';
 import type { Command } from 'commander';
 
 import { initializeConfigV1, parseProvidersArg } from '../config/init-config.js';
-import { getInitProviderCatalog } from '../config/init-provider-catalog.js';
+import { getBootstrapProviderTemplates } from '../config/bootstrap-provider-templates.js';
 import { installBundledDocsBestEffort } from '../config/bundled-docs.js';
 
 type Spinner = {
@@ -77,13 +77,13 @@ Examples:
   ${bin} init
   ${bin} config show
   ${bin} config validate
-  ${bin} config init --providers openai,tab --default-provider tab
+  ${bin} config init --providers openai,qwen --default-provider qwen
 `
     )
     .argument('<action>', 'Action to perform (show, edit, validate, init)')
     .option('-c, --config <config>', 'Configuration file path')
-    .option('-t, --template <template>', 'Init template provider id (e.g., openai, tab, glm, qwen)')
-    .option('--providers <ids>', 'Init providers (comma-separated), e.g. openai,tab,glm')
+    .option('-t, --template <template>', 'Init template provider id (e.g., openai, responses, qwen, iflow)')
+    .option('--providers <ids>', 'Init providers (comma-separated), e.g. openai,qwen,iflow')
     .option('--default-provider <id>', 'Init default provider id for routing.default')
     .option('--host <host>', 'Init server host (httpserver.host)')
     .option('--port <port>', 'Init server port (httpserver.port)')
@@ -96,7 +96,7 @@ Examples:
           case 'init':
             {
               const spinner = await ctx.createSpinner('Initializing configuration...');
-              const catalog = getInitProviderCatalog();
+              const catalog = getBootstrapProviderTemplates();
               const supported = catalog.map((p) => p.id).join(', ');
               const providersFromArg =
                 parseProvidersArg(options.providers) ??

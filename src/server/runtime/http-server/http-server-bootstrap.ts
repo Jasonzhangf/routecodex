@@ -232,6 +232,9 @@ export function applyProviderProfileOverrides(server: any, runtime: ProviderRunt
   if (patched.maxRetries === undefined && typeof profile.transport.maxRetries === 'number') {
     patched.maxRetries = profile.transport.maxRetries;
   }
+  if (!patched.transportBackend && profile.transport.backend) {
+    patched.transportBackend = profile.transport.backend;
+  }
   if (!patched.compatibilityProfile && profile.compatibilityProfile) {
     patched.compatibilityProfile = profile.compatibilityProfile;
   }

@@ -4,6 +4,7 @@ import {
   nextRequestIdentifiers,
   respondWithPipelineError,
   sendPipelineResponse,
+  hasSsePayload,
   logRequestStart,
   logRequestComplete,
   logRequestError,
@@ -79,7 +80,9 @@ export async function handleChatCompletions(req: Request, res: Response, ctx: Ha
         ...(mockSampleReqId ? { mockSampleReqId } : {})
       }
     });
-    logRequestComplete(entryEndpoint, requestId, result.status ?? 200);
+    if (!hasSsePayload(result.body)) {
+      logRequestComplete(entryEndpoint, requestId, result.status ?? 200, result.body);
+    }
     sendPipelineResponse(res, result, requestId, { forceSSE: wantsSSE, entryEndpoint });
   } catch (error: unknown) {
     logRequestError(entryEndpoint, requestId, error);

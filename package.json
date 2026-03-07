@@ -1,12 +1,12 @@
 {
   "name": "routecodex",
-  "version": "0.90.105",
-  "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support",
+  "version": "0.90.186",
+  "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support (dev)",
   "type": "module",
   "main": "dist/index.js",
   "module": "dist/index.js",
   "bin": {
-    "routecodex": "./dist/cli.js"
+    "routecodex": "dist/cli.js"
   },
   "exports": {
     ".": {
@@ -20,13 +20,11 @@
     "scripts/",
     "rcc",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "docs/",
+    "configsamples/"
   ],
-  "bundledDependencies": [
-    "ajv",
-    "zod",
-    "@jsonstudio/llms"
-  ],
+  "bundledDependencies": [],
   "engines": {
     "node": ">=20 <26"
   },
@@ -158,11 +156,14 @@
     "fix:cli-permission": "node scripts/ensure-cli-executable.mjs"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.58",
+    "@ai-sdk/openai": "^3.0.41",
     "@anthropic-ai/sdk": "^0.65.0",
-    "@jsonstudio/llms": "0.6.3214",
+    "@jsonstudio/llms": "0.6.3539",
     "@lmstudio/sdk": "^1.5.0",
     "@radix-ui/react-switch": "^1.2.6",
     "@types/socket.io": "^3.0.1",
+    "ai": "^6.0.116",
     "ajv": "^8.17.1",
     "axios": "^1.12.2",
     "chalk": "^5.6.2",
@@ -229,9 +230,5 @@
     "typescript": "^5.9.3",
     "vite": "^7.1.12"
   },
-  "bundleDependencies": [
-    "ajv",
-    "zod",
-    "@jsonstudio/llms"
-  ]
+  "bundleDependencies": []
 }

@@ -264,9 +264,16 @@ export async function interactiveRoutingWizard(
     }
   }
 
-  return buildRouting(defaultTarget, {
+  const coreRouting = buildRouting(defaultTarget, {
     default: targets.default,
     thinking: targets.thinking,
     tools: targets.tools
   });
+  const preservedRoutes = Object.fromEntries(
+    Object.entries(existingRouting).filter(([key]) => !keys.includes(key as 'default' | 'thinking' | 'tools'))
+  );
+  return {
+    ...preservedRoutes,
+    ...coreRouting
+  };
 }

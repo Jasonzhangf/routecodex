@@ -1575,6 +1575,11 @@ function resolveRestartMode(): 'runtime' | 'process' {
   return raw === 'runtime' ? 'runtime' : 'process';
 }
 
+function isManagedByStartParent(): boolean {
+  const raw = String(process.env.ROUTECODEX_MANAGED_BY_START || process.env.RCC_MANAGED_BY_START || '').trim().toLowerCase();
+  return raw === '1' || raw === 'true';
+}
+
 async function restartSelf(app: RouteCodexApp, signal: NodeJS.Signals): Promise<void> {
   if (restartInProgress) {
     return;
@@ -1621,6 +1626,28 @@ async function restartSelf(app: RouteCodexApp, signal: NodeJS.Signals): Promise<
   }
 
   console.log('🔁 Falling back to process replacement restart mode.');
+
+  if (isManagedByStartParent()) {
+    logProcessLifecycle({
+      event: 'restart_delegate_parent_supervisor',
+      source: 'index.restartSelf',
+      details: {
+        signal,
+        exitCode: 75
+      }
+    });
+    console.log('🔁 Restart delegated to start parent supervisor.');
+    try {
+      await app.stop();
+    } catch (error) {
+      await reportCliError('SERVER_RESTART_STOP_FAILED', 'Failed to stop before restart', error, 'high').catch(() => {});
+      console.error('❌ Failed to stop before managed restart:', error);
+      restartInProgress = false;
+      return;
+    }
+    await flushProcessLifecycleLogQueue();
+    process.exit(75);
+  }
 
   const argv = process.argv.slice(1);
   const env = { ...process.env } as NodeJS.ProcessEnv;

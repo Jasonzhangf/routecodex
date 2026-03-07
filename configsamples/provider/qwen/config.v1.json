@@ -19,7 +19,11 @@
         "models": {
           "qwen3-coder-plus": {
             "maxTokens": 64000,
-            "maxContext": 256000,
+            "maxContext": 1000000,
+            "supportsStreaming": true
+          },
+          "qwen3.5-plus": {
+            "maxContext": 1000000,
             "supportsStreaming": true
           }
         }

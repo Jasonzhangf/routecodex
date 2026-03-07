@@ -18,7 +18,8 @@
         },
         "models": {
           "glm-4.7": {
-            "supportsStreaming": true
+            "supportsStreaming": true,
+            "maxContext": 202752
           }
         },
         "compatibilityProfile": "chat:claude-code"

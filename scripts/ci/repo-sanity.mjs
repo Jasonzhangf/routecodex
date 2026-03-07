@@ -27,7 +27,7 @@ function listRootEntries() {
 
 function isForbiddenRootFile(p) {
   const base = path.posix.basename(p);
-  const allow = new Set(['AGENTS.md', 'README.md', 'task.md']);
+  const allow = new Set(['AGENTS.md', 'README.md', 'MEMORY.md', 'task.md']);
   if (allow.has(base)) return false;
   if (/^test-.*\.(mjs|js|ts|py)$/i.test(base)) return true;
   if (/^debug-.*\.(mjs|js|ts)$/i.test(base)) return true;
@@ -74,11 +74,13 @@ function checkRootLayout() {
     '.gitignore',
     'AGENTS.md',
     'README.md',
+    'MEMORY.md',
     'config',
     'configsamples',
     'dist',
     'docs',
     'jest.config.js',
+    'memory',
     'node_modules',
     'package',
     'package-lock.json',

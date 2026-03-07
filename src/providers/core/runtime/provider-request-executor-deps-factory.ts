@@ -4,7 +4,7 @@ import type { ProviderContext } from '../api/provider-types.js';
 import type { HttpClient } from '../utils/http-client.js';
 import type { UnknownObject } from '../../../types/common-types.js';
 import { ProviderPayloadUtils } from './transport/provider-payload-utils.js';
-import type { HttpRequestExecutorDeps, PreparedHttpRequest } from './http-request-executor.js';
+import type { HttpRequestExecutorDeps, PreparedHttpRequest, PreparedRequestExecutor } from './http-request-executor.js';
 import type { ProviderErrorAugmented } from './provider-error-types.js';
 import {
   delayBeforeProviderHttpRetry,
@@ -25,6 +25,7 @@ type BuildProviderRequestExecutorDepsArgs = {
   buildHttpRequestBody(request: UnknownObject): UnknownObject;
   prepareSseRequestBody(body: UnknownObject, context: ProviderContext): void;
   wrapUpstreamSseResponse(stream: NodeJS.ReadableStream, context: ProviderContext): Promise<UnknownObject>;
+  executePreparedRequest?: PreparedRequestExecutor;
   resolveBusinessResponseError(response: unknown, context: ProviderContext): Error | undefined;
   normalizeHttpError(
     error: unknown,
@@ -54,6 +55,7 @@ export function buildProviderRequestExecutorDeps(args: BuildProviderRequestExecu
     getEntryEndpointFromPayload: (payload) => ProviderPayloadUtils.extractEntryEndpointFromPayload(payload),
     getClientRequestIdFromContext: (context) => ProviderPayloadUtils.getClientRequestIdFromContext(context),
     wrapUpstreamSseResponse: args.wrapUpstreamSseResponse,
+    executePreparedRequest: args.executePreparedRequest,
     getHttpRetryLimit: () => getProviderHttpRetryLimit(),
     shouldRetryHttpError: (error, attempt, maxAttempts) => shouldRetryProviderHttpError(error, attempt, maxAttempts),
     delayBeforeHttpRetry: (attempt) => delayBeforeProviderHttpRetry(attempt),

@@ -188,6 +188,15 @@ function buildProviderUpdateInputFromV2(providerId: string, provider: UnknownRec
   return { providerId, type, baseURL, baseUrl, auth };
 }
 
+function authTypeUsesCredentialFile(authTypeRaw: string): boolean {
+  const authType = authTypeRaw.trim().toLowerCase();
+  return authType.includes('oauth') || authType.includes('cookie') || authType.includes('account');
+}
+
+function readCredentialFileFromAuthNode(authNode: UnknownRecord): string {
+  return readString(authNode.tokenFile) || readString(authNode.cookieFile) || (Array.isArray(authNode.entries) && isRecord(authNode.entries[0]) ? readString((authNode.entries[0] as UnknownRecord).tokenFile) || '' : '') || '';
+}
+
 function normalizeModelsNode(node: unknown): Record<string, UnknownRecord> {
   if (!node || typeof node !== 'object' || Array.isArray(node)) {
     return {};
@@ -716,13 +725,13 @@ export function createProviderUpdateCommand(): Command {
 
   // provider add
   const add = new Command('add')
-    .description('Interactively create a new provider v2 config')
-    .option('-i, --id <id>', 'Provider id (e.g. glm, qwen, iflow, gemini-cli, antigravity, modelscope, kimi, openai)')
+    .description('Interactively create a new provider v2 config (guided standard protocols + managed-auth built-ins)')
+    .option('-i, --id <id>', 'Provider id (e.g. my-openai, qwen, iflow, gemini-cli, antigravity, deepseek-web)')
     .option('--root <dir>', 'Override provider root directory')
     .action(async (opts: { id?: string; root?: string }) => {
       let providerId = (opts.id || '').trim();
       if (!providerId) {
-        providerId = await ask('Provider id (e.g. glm, qwen, iflow, kimi, modelscope, gemini-cli, antigravity, openai)', 'glm');
+        providerId = await ask('Provider id (e.g. my-openai, qwen, iflow, gemini-cli, antigravity, deepseek-web)', 'glm');
       }
       if (!providerId.trim()) {
         console.error('Provider id is required');
@@ -741,7 +750,7 @@ export function createProviderUpdateCommand(): Command {
         }
       }
 
-      console.log('Available provider templates:');
+      console.log('Available provider templates (guided protocols + managed-auth built-ins):');
       for (const tpl of getProviderTemplates()) {
         console.log(`- ${tpl.id}: ${tpl.label}`);
       }
@@ -756,14 +765,14 @@ export function createProviderUpdateCommand(): Command {
       }
 
       const authTypeDefault = tpl.defaultAuthType ?? 'apikey';
-      const authType = await ask('Auth type (e.g. apikey, oauth, qwen-oauth, iflow-oauth, gemini-cli-oauth)', authTypeDefault);
+      const authType = await ask('Auth type (e.g. apikey, qwen-oauth, iflow-cookie, gemini-cli-oauth, antigravity-oauth, deepseek-account)', authTypeDefault);
 
       let apiKeyPlaceholder = '';
       let tokenFile = '';
       if (authType.toLowerCase().includes('apikey')) {
         apiKeyPlaceholder = await ask('API key (or placeholder, e.g. ${PROVIDER_API_KEY:-})', 'YOUR_API_KEY_HERE');
-      } else if (authType.toLowerCase().includes('oauth')) {
-        tokenFile = await ask('Token file path or alias (leave empty to use default)', '');
+      } else if (authTypeUsesCredentialFile(authType)) {
+        tokenFile = await ask('Token/cookie file path or alias (leave empty to use default)', '');
       }
 
       const modelDefault = tpl.defaultModel ?? '';
@@ -851,26 +860,34 @@ export function createProviderUpdateCommand(): Command {
         typeof authNode.type === 'string'
           ? authNode.type
           : 'apikey';
-      const authType = await ask('Auth type (e.g. apikey, oauth, qwen-oauth, iflow-oauth, gemini-cli-oauth)', currentAuthType);
+      const authType = await ask('Auth type (e.g. apikey, qwen-oauth, iflow-cookie, gemini-cli-oauth, antigravity-oauth, deepseek-account)', currentAuthType);
       authNode.type = authType;
 
       let apiKeyPlaceholder = typeof (authNode as { apiKey?: unknown }).apiKey === 'string'
         ? String((authNode as { apiKey?: unknown }).apiKey)
         : 'YOUR_API_KEY_HERE';
-      let tokenFile = typeof (authNode as { tokenFile?: unknown }).tokenFile === 'string'
-        ? String((authNode as { tokenFile?: unknown }).tokenFile)
-        : '';
+      let tokenFile = readCredentialFileFromAuthNode(authNode);
 
       if (authType.toLowerCase().includes('apikey')) {
         apiKeyPlaceholder = await ask('API key (or placeholder, e.g. ${PROVIDER_API_KEY:-})', apiKeyPlaceholder);
         (authNode as { apiKey?: string }).apiKey = apiKeyPlaceholder;
         delete (authNode as { tokenFile?: unknown }).tokenFile;
-      } else if (authType.toLowerCase().includes('oauth')) {
-        tokenFile = await ask('Token file path or alias (leave empty to use default)', tokenFile);
+      } else if (authTypeUsesCredentialFile(authType)) {
+        tokenFile = await ask('Token/cookie file path or alias (leave empty to use default)', tokenFile);
         if (tokenFile.trim()) {
-          (authNode as { tokenFile?: string }).tokenFile = tokenFile.trim();
+          if (authType.toLowerCase().includes('cookie')) {
+            (authNode as { cookieFile?: string }).cookieFile = tokenFile.trim();
+            delete (authNode as { tokenFile?: unknown }).tokenFile;
+          } else if (authType.toLowerCase().includes('account') && Array.isArray((authNode as { entries?: unknown }).entries) && isRecord((authNode as { entries?: unknown[] }).entries?.[0])) {
+            ((authNode as { entries: UnknownRecord[] }).entries[0]).tokenFile = tokenFile.trim();
+            delete (authNode as { tokenFile?: unknown }).tokenFile;
+          } else {
+            (authNode as { tokenFile?: string }).tokenFile = tokenFile.trim();
+            delete (authNode as { cookieFile?: unknown }).cookieFile;
+          }
         } else {
           delete (authNode as { tokenFile?: unknown }).tokenFile;
+          delete (authNode as { cookieFile?: unknown }).cookieFile;
         }
         delete (authNode as { apiKey?: unknown }).apiKey;
       }

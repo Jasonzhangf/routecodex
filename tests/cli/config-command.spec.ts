@@ -391,8 +391,8 @@ describe('cli init command', () => {
     const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
     expect(parsed?.virtualrouterMode).toBe('v2');
     expect(parsed?.virtualrouter?.routing?.default?.[0]?.targets?.[0]).toContain('openai.');
-    expect(parsed?.virtualrouter?.routing?.web_search).toBeUndefined();
-    expect(parsed?.virtualrouter?.webSearch).toBeUndefined();
+    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.routing?.web_search).toBeUndefined();
+    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch).toBeUndefined();
     const providerV2 = JSON.parse(writes.get('/tmp/.routecodex/provider/openai/config.v2.json') || '{}');
     expect(providerV2?.providerId).toBe('openai');
   });
@@ -435,10 +435,10 @@ describe('cli init command', () => {
     );
 
     const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
-    expect(parsed?.virtualrouter?.routing?.web_search?.[0]?.targets?.[0]).toContain('iflow.');
-    expect(parsed?.virtualrouter?.webSearch?.engines?.[0]?.id).toBe('iflow:web_search');
-    expect(parsed?.virtualrouter?.webSearch?.engines?.[0]?.providerKey).toBe('iflow');
-    expect(parsed?.virtualrouter?.webSearch?.search?.['iflow:web_search']?.providerKey).toBe('iflow');
+    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.routing?.web_search?.[0]?.targets?.[0]).toContain('iflow.');
+    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.engines?.[0]?.id).toBe('iflow:web_search');
+    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.engines?.[0]?.providerKey).toBe('iflow');
+    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.search?.['iflow:web_search']?.providerKey).toBe('iflow');
   });
 
   it('init (non-interactive) injects qwen as fallback engine when iflow and qwen are selected', async () => {
@@ -479,13 +479,13 @@ describe('cli init command', () => {
     );
 
     const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
-    expect(parsed?.virtualrouter?.routing?.web_search?.[0]?.targets).toEqual([
+    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.routing?.web_search?.[0]?.targets).toEqual([
       expect.stringContaining('iflow.'),
-      'qwen.qwen3-coder-plus'
+      'qwen.qwen3.5-plus'
     ]);
-    expect(parsed?.virtualrouter?.webSearch?.engines?.[0]?.id).toBe('iflow:web_search');
-    expect(parsed?.virtualrouter?.webSearch?.engines?.[1]?.id).toBe('qwen:web_search');
-    expect(parsed?.virtualrouter?.webSearch?.search?.['qwen:web_search']?.providerKey).toBe('qwen.qwen3-coder-plus');
+    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.engines?.[0]?.id).toBe('iflow:web_search');
+    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.engines?.[1]?.id).toBe('qwen:web_search');
+    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.search?.['qwen:web_search']?.providerKey).toBe('qwen.qwen3.5-plus');
   });
 
   it('init (non-interactive) injects deepseek webSearch defaults when deepseek-web is selected', async () => {
@@ -526,11 +526,11 @@ describe('cli init command', () => {
     );
 
     const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
-    expect(parsed?.virtualrouter?.routing?.web_search?.[0]?.targets?.[0]).toBe('deepseek-web.deepseek-chat-search');
-    expect(parsed?.virtualrouter?.webSearch?.engines?.[0]?.id).toBe('deepseek:web_search');
-    expect(parsed?.virtualrouter?.webSearch?.engines?.[0]?.providerKey).toBe('deepseek-web.deepseek-chat-search');
-    expect(parsed?.virtualrouter?.webSearch?.search?.['deepseek:web_search']?.providerKey).toBe(
-      'deepseek-web.deepseek-chat-search'
+    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.routing?.web_search?.[0]?.targets?.[0]).toBe('deepseek-web.deepseek-chat');
+    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.engines?.[0]?.id).toBe('deepseek:web_search');
+    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.engines?.[0]?.providerKey).toBe('deepseek-web.deepseek-chat');
+    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.search?.['deepseek:web_search']?.providerKey).toBe(
+      'deepseek-web.deepseek-chat'
     );
   });
 
@@ -572,17 +572,17 @@ describe('cli init command', () => {
     );
 
     const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
-    expect(parsed?.virtualrouter?.routing?.web_search?.[0]?.targets).toEqual([
-      'deepseek-web.deepseek-chat-search',
+    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.routing?.web_search?.[0]?.targets).toEqual([
+      'deepseek-web.deepseek-chat',
       expect.stringContaining('iflow.')
     ]);
-    expect(parsed?.virtualrouter?.webSearch?.engines?.[0]?.id).toBe('deepseek:web_search');
-    expect(parsed?.virtualrouter?.webSearch?.engines?.[0]?.default).toBe(true);
-    expect(parsed?.virtualrouter?.webSearch?.engines?.[1]?.id).toBe('iflow:web_search');
-    expect(parsed?.virtualrouter?.webSearch?.search?.['deepseek:web_search']?.providerKey).toBe(
-      'deepseek-web.deepseek-chat-search'
+    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.engines?.[0]?.id).toBe('deepseek:web_search');
+    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.engines?.[0]?.default).toBe(true);
+    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.engines?.[1]?.id).toBe('iflow:web_search');
+    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.search?.['deepseek:web_search']?.providerKey).toBe(
+      'deepseek-web.deepseek-chat'
     );
-    expect(parsed?.virtualrouter?.webSearch?.search?.['iflow:web_search']?.providerKey).toBe('iflow');
+    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch?.search?.['iflow:web_search']?.providerKey).toBe('iflow');
   });
 
   it('init prepares camoufox environment when selected provider requires oauth/deepseek fingerprint', async () => {
@@ -677,16 +677,10 @@ describe('cli init command', () => {
     expect(prepareCalls).toBe(1);
   });
 
-  it('init copies bundled default config when config is missing and no providers are specified', async () => {
+  it('init creates a minimal v2 config when config is missing and no providers are specified', async () => {
     const writes = new Map<string, string>();
     const infos: string[] = [];
     const warnings: string[] = [];
-    const sourcePath = '/pkg/dist/configsamples/config.v1.quickstart.sanitized.json';
-    const bundledContent = JSON.stringify({
-      version: '1.0.0',
-      virtualrouterMode: 'v1',
-      httpserver: { host: '127.0.0.1', port: 5555 }
-    });
     let promptCalls = 0;
 
     const program = new Command();
@@ -708,20 +702,8 @@ describe('cli init command', () => {
           text: ''
         }) as any,
       fsImpl: {
-        existsSync: (p: any) => {
-          const target = String(p);
-          if (target === '/tmp/config.json') {
-            return false;
-          }
-          return target.endsWith('/config.v1.quickstart.sanitized.json') || target === sourcePath;
-        },
-        readFileSync: (p: any) => {
-          const target = String(p);
-          if (target === sourcePath || target.endsWith('/config.v1.quickstart.sanitized.json')) {
-            return bundledContent;
-          }
-          return '';
-        },
+        existsSync: (p: any) => String(p) !== '/tmp/config.json' && writes.has(String(p)),
+        readFileSync: () => '',
         writeFileSync: (p: any, content: any) => {
           writes.set(String(p), String(content));
         },
@@ -737,8 +719,11 @@ describe('cli init command', () => {
 
     await program.parseAsync(['node', 'routecodex', 'init', '--config', '/tmp/config.json'], { from: 'node' });
 
-    expect(writes.get('/tmp/config.json')).toBe(bundledContent);
-    expect(infos.join('\n')).toContain('Default config copied');
+    const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
+    expect(parsed.virtualrouterMode).toBe('v2');
+    expect(parsed.virtualrouter.routingPolicyGroups.default.routing.default[0].targets[0]).toBe('openai.gpt-5.2');
+    expect(writes.get('/tmp/provider/openai/config.v2.json')).toContain('"providerId": "openai"');
+    expect(infos.join('\n')).toContain('Created a minimal V2 config');
     expect(warnings.length).toBe(0);
     expect(promptCalls).toBe(0);
   });
@@ -1810,9 +1795,9 @@ describe('init-config', () => {
     const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
     expect(parsed.httpserver.host).toBe('0.0.0.0');
     expect(parsed.httpserver.port).toBe(7777);
-    expect(parsed.virtualrouter.providers.openai).toBeTruthy();
-    expect(parsed.virtualrouter.providers.tab).toBeTruthy();
-    expect(parsed.virtualrouter.routing.default[0].targets[0]).toContain('tab.');
+    expect(writes.get('/tmp/provider/openai/config.v2.json')).toContain('\"providerId\": \"openai\"');
+    expect(writes.get('/tmp/provider/tab/config.v2.json')).toContain('\"providerId\": \"tab\"');
+    expect(parsed.virtualrouter.routingPolicyGroups.default.routing.default[0].targets[0]).toContain('tab.');
   });
 
   it('writes model-less iflow webSearch defaults when iflow is selected', async () => {
@@ -1832,10 +1817,10 @@ describe('init-config', () => {
 
     expect(result.ok).toBe(true);
     const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
-    expect(parsed.webSearch.engines[0].id).toBe('iflow:web_search');
-    expect(parsed.webSearch.engines[0].providerKey).toBe('iflow');
-    expect(parsed.webSearch.search['iflow:web_search'].providerKey).toBe('iflow');
-    expect(parsed.virtualrouter.routing.web_search[0].targets[0]).toContain('iflow.');
+    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.engines[0].id).toBe('iflow:web_search');
+    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.engines[0].providerKey).toBe('iflow');
+    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.search['iflow:web_search'].providerKey).toBe('iflow');
+    expect(parsed.virtualrouter.routingPolicyGroups.default.routing.web_search[0].targets[0]).toContain('iflow.');
   });
 
   it('writes qwen as fallback webSearch engine when iflow and qwen are selected', async () => {
@@ -1855,13 +1840,13 @@ describe('init-config', () => {
 
     expect(result.ok).toBe(true);
     const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
-    expect(parsed.webSearch.engines[0].id).toBe('iflow:web_search');
-    expect(parsed.webSearch.engines[1].id).toBe('qwen:web_search');
-    expect(parsed.webSearch.search['iflow:web_search'].providerKey).toBe('iflow');
-    expect(parsed.webSearch.search['qwen:web_search'].providerKey).toBe('qwen.qwen3-coder-plus');
-    expect(parsed.virtualrouter.routing.web_search[0].targets).toEqual([
+    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.engines[0].id).toBe('iflow:web_search');
+    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.engines[1].id).toBe('qwen:web_search');
+    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.search['iflow:web_search'].providerKey).toBe('iflow');
+    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.search['qwen:web_search'].providerKey).toBe('qwen.qwen3.5-plus');
+    expect(parsed.virtualrouter.routingPolicyGroups.default.routing.web_search[0].targets).toEqual([
       expect.stringContaining('iflow.'),
-      'qwen.qwen3-coder-plus'
+      'qwen.qwen3.5-plus'
     ]);
   });
 
@@ -1882,10 +1867,10 @@ describe('init-config', () => {
 
     expect(result.ok).toBe(true);
     const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
-    expect(parsed.webSearch.engines[0].id).toBe('deepseek:web_search');
-    expect(parsed.webSearch.engines[0].providerKey).toBe('deepseek-web.deepseek-chat-search');
-    expect(parsed.webSearch.search['deepseek:web_search'].providerKey).toBe('deepseek-web.deepseek-chat-search');
-    expect(parsed.virtualrouter.routing.web_search[0].targets[0]).toBe('deepseek-web.deepseek-chat-search');
+    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.engines[0].id).toBe('deepseek:web_search');
+    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.engines[0].providerKey).toBe('deepseek-web.deepseek-chat');
+    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.search['deepseek:web_search'].providerKey).toBe('deepseek-web.deepseek-chat');
+    expect(parsed.virtualrouter.routingPolicyGroups.default.routing.web_search[0].targets[0]).toBe('deepseek-web.deepseek-chat');
   });
 
   it('prioritizes deepseek then falls back to iflow when both are selected', async () => {
@@ -1905,13 +1890,13 @@ describe('init-config', () => {
 
     expect(result.ok).toBe(true);
     const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
-    expect(parsed.webSearch.engines[0].id).toBe('deepseek:web_search');
-    expect(parsed.webSearch.engines[0].default).toBe(true);
-    expect(parsed.webSearch.engines[1].id).toBe('iflow:web_search');
-    expect(parsed.webSearch.search['deepseek:web_search'].providerKey).toBe('deepseek-web.deepseek-chat-search');
-    expect(parsed.webSearch.search['iflow:web_search'].providerKey).toBe('iflow');
-    expect(parsed.virtualrouter.routing.web_search[0].targets).toEqual([
-      'deepseek-web.deepseek-chat-search',
+    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.engines[0].id).toBe('deepseek:web_search');
+    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.engines[0].default).toBe(true);
+    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.engines[1].id).toBe('iflow:web_search');
+    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.search['deepseek:web_search'].providerKey).toBe('deepseek-web.deepseek-chat');
+    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch.search['iflow:web_search'].providerKey).toBe('iflow');
+    expect(parsed.virtualrouter.routingPolicyGroups.default.routing.web_search[0].targets).toEqual([
+      'deepseek-web.deepseek-chat',
       expect.stringContaining('iflow.')
     ]);
   });
@@ -1933,8 +1918,8 @@ describe('init-config', () => {
 
     expect(result.ok).toBe(true);
     const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
-    expect(parsed.webSearch).toBeUndefined();
-    expect(parsed.virtualrouter.routing.web_search).toBeUndefined();
+    expect(parsed.virtualrouter.routingPolicyGroups.default.webSearch).toBeUndefined();
+    expect(parsed.virtualrouter.routingPolicyGroups.default.routing.web_search).toBeUndefined();
   });
 
   it('buildInitConfigObject throws when providers list is empty', () => {
@@ -1967,7 +1952,7 @@ describe('init-config', () => {
     const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
     expect(parsed.httpserver.host).toBe('127.0.0.1');
     expect(parsed.httpserver.port).toBe(5555);
-    expect(parsed.virtualrouter.providers.openai).toBeTruthy();
+    expect(writes.get('/tmp/provider/openai/config.v2.json')).toContain('\"providerId\": \"openai\"');
   });
 
   it('returns write_failed when writeFileSync throws', async () => {

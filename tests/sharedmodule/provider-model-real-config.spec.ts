@@ -12,7 +12,7 @@ describe('provider.model with real config structure', () => {
             enabled: true,
             type: 'iflow',
             baseURL: 'https://apis.iflow.cn/v1',
-            maxContextTokens: 256000,
+            maxContextTokens: 262144,
             compatibilityProfile: 'chat:iflow',
             auth: {
               type: 'iflow-oauth',
@@ -30,7 +30,7 @@ describe('provider.model with real config structure', () => {
               ]
             },
             models: {
-              'kimi-k2.5': { maxContextTokens: 256000 },
+              'kimi-k2.5': { maxContextTokens: 262144 },
               'glm-4.7': {}
             }
           }
@@ -69,7 +69,7 @@ describe('provider.model with real config structure', () => {
             enabled: false,
             type: 'iflow',
             baseURL: 'https://apis.iflow.cn/v1',
-            maxContextTokens: 256000,
+            maxContextTokens: 262144,
             compatibilityProfile: 'chat:iflow',
             auth: {
               type: 'apikey',
@@ -111,7 +111,7 @@ describe('provider.model with real config structure', () => {
             enabled: true,
             type: 'iflow',
             baseURL: 'https://apis.iflow.cn/v1',
-            maxContextTokens: 256000,
+            maxContextTokens: 262144,
             compatibilityProfile: 'chat:iflow',
             auth: {
               type: 'apikey',

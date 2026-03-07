@@ -12,14 +12,14 @@ describe('provider.model debug: why PROVIDER_NOT_AVAILABLE', () => {
             enabled: true,
             type: 'iflow',
             baseURL: 'https://apis.iflow.cn/v1',
-            maxContextTokens: 256000,
+            maxContextTokens: 262144,
             compatibilityProfile: 'chat:iflow',
             auth: {
               type: 'apikey',
               apiKey: 'TEST_KEY'
             },
             models: {
-              'kimi-k2.5': { maxContextTokens: 256000 },
+              'kimi-k2.5': { maxContextTokens: 262144 },
               'glm-4.7': {}
             }
           }
