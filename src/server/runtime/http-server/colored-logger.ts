@@ -7,7 +7,7 @@ import { createRequire } from 'module';
 const localRequire = createRequire(import.meta.url);
 
 export function createServerColoredLogger(): unknown {
-  const isDev = String(process.env.BUILD_MODE || process.env.RCC_BUILD_MODE || 'release').toLowerCase() === 'dev';
+  const isDev = true;
 
   try {
     // In test environment (jest), we cannot use localRequire to load ESM modules

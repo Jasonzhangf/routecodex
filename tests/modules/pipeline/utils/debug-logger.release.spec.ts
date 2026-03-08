@@ -27,7 +27,7 @@ describe('PipelineDebugLogger release console behavior', () => {
     return mod.PipelineDebugLogger;
   }
 
-  it('suppresses pipeline/provider console logs in release by default', async () => {
+  it('prints pipeline/provider console logs in release by default', async () => {
     delete process.env.ROUTECODEX_PIPELINE_LOG_VERBOSE;
     const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
@@ -40,13 +40,13 @@ describe('PipelineDebugLogger release console behavior', () => {
     logger.logProviderRequest('provider:key1', 'request-start', { id: 'req-1' });
     logger.logModule('provider.send', 'completed', { status: 200 });
 
-    expect(logSpy).not.toHaveBeenCalled();
+    expect(logSpy).toHaveBeenCalled();
     expect(warnSpy).not.toHaveBeenCalled();
     expect(errorSpy).not.toHaveBeenCalled();
   });
 
-  it('enables release pipeline/provider console logs via env override', async () => {
-    process.env.ROUTECODEX_PIPELINE_LOG_VERBOSE = '1';
+  it('allows release pipeline/provider console logs to be disabled via env override', async () => {
+    process.env.ROUTECODEX_PIPELINE_LOG_VERBOSE = '0';
     const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
 
     const PipelineDebugLogger = await importLoggerWithMode('release');
@@ -54,6 +54,6 @@ describe('PipelineDebugLogger release console behavior', () => {
 
     logger.logVirtualRouterHit('default', 'provider.key1', 'model-a');
 
-    expect(logSpy).toHaveBeenCalled();
+    expect(logSpy).not.toHaveBeenCalled();
   });
 });

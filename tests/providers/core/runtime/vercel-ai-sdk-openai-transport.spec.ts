@@ -113,7 +113,7 @@ describe('buildOpenAiSdkChatCallOptions', () => {
     });
     expect(options.providerOptions).toEqual({
       openai: {
-        systemMessageMode: 'developer',
+        systemMessageMode: 'system',
         reasoningEffort: 'high',
         forceReasoning: true,
         parallelToolCalls: true,

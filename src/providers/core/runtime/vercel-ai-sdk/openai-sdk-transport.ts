@@ -272,7 +272,6 @@ function convertAssistantContent(content: unknown, toolCalls: unknown): unknown[
 
 function convertPrompt(rawBody: UnknownRecord): LanguageModelV3Prompt {
   const prompt: LanguageModelV3Prompt = [];
-  let hasDeveloperRole = false;
 
   for (const message of asArray(rawBody.messages)) {
     const bag = asRecord(message);
@@ -290,9 +289,6 @@ function convertPrompt(rawBody: UnknownRecord): LanguageModelV3Prompt {
           role: 'system',
           content: textParts.join('\n')
         });
-      }
-      if (role === 'developer') {
-        hasDeveloperRole = true;
       }
       continue;
     }
@@ -330,10 +326,6 @@ function convertPrompt(rawBody: UnknownRecord): LanguageModelV3Prompt {
         ]
       } as LanguageModelV3Message);
     }
-  }
-
-  if (hasDeveloperRole) {
-    (prompt as unknown as { __routecodexHasDeveloperRole?: boolean }).__routecodexHasDeveloperRole = true;
   }
   return prompt;
 }
@@ -396,13 +388,9 @@ export function buildOpenAiSdkChatCallOptions(
   requestHeaders: Record<string, string>
 ): LanguageModelV3CallOptions {
   const prompt = convertPrompt(body);
-  const openaiProviderOptions: OpenAiProviderOptions = {};
-  const promptBag = prompt as unknown as { __routecodexHasDeveloperRole?: boolean };
-
-  if (promptBag.__routecodexHasDeveloperRole) {
-    openaiProviderOptions.systemMessageMode = 'developer';
-    delete promptBag.__routecodexHasDeveloperRole;
-  }
+  const openaiProviderOptions: OpenAiProviderOptions = {
+    systemMessageMode: 'system'
+  };
 
   const reasoningEffort =
     pickString(body.reasoning_effort ?? body.reasoningEffort) ??

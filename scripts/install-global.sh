@@ -224,12 +224,12 @@ restart_managed_dev_server_if_requested() {
     local restart_port="${ROUTECODEX_DEV_RESTART_PORT:-${RCC_DEV_RESTART_PORT:-5555}}"
     echo ""
     echo "🔄 尝试通过服务端 restart 入口刷新现有 RouteCodex 服务 (port=${restart_port})..."
-    if ROUTECODEX_RESTART_HTTP_ONLY=1 routecodex restart --port "$restart_port"; then
+    if routecodex restart --port "$restart_port"; then
         echo "✅ 受管服务已重启: ${restart_port}"
         return
     fi
-    echo "ℹ ${restart_port} 当前服务尚未具备 server-managed restart 能力；为避免误杀旧服务，本次跳过自动重启。"
-    echo "ℹ 请手动重启一次该端口服务，之后后续 build 将可自动刷新。"
+    echo "⚠ ${restart_port} 自动重启未完成；全局安装已完成，但运行中的服务可能尚未刷新到最新构建。"
+    echo "ℹ 请根据上方 routecodex restart 日志继续处理；当前 CLI 已支持 HTTP restart 与 legacy signal restart。"
 }
 
 # 清理旧安装

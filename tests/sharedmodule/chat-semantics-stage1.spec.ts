@@ -1,7 +1,11 @@
-import { describe, it, expect, beforeEach, jest } from '@jest/globals';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, jest } from '@jest/globals';
 import type { AdapterContext, ChatEnvelope } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.js';
 import { chatEnvelopeToStandardized, standardizedToChatEnvelope } from '../../sharedmodule/llmswitch-core/src/conversion/hub/standardized-bridge.js';
 import type { StandardizedRequest } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.js';
+import { saveRoutingInstructionStateSync } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/sticky-session-store.js';
 
 const mockRunChatRequestToolFilters = jest.fn(async (payload: any) => payload);
 const mockGovernRequest = jest.fn((request: any) => ({
@@ -77,9 +81,26 @@ function buildChatEnvelope(): ChatEnvelope {
 }
 
 describe('Chat semantics stage 1 bridge', () => {
+  const previousUserDir = process.env.ROUTECODEX_USER_DIR;
+  const tmpUserDir = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-chat-semantics-stage1-'));
+
+  beforeAll(() => {
+    process.env.ROUTECODEX_USER_DIR = tmpUserDir;
+  });
+
+  afterAll(() => {
+    if (previousUserDir === undefined) {
+      delete process.env.ROUTECODEX_USER_DIR;
+    } else {
+      process.env.ROUTECODEX_USER_DIR = previousUserDir;
+    }
+    fs.rmSync(tmpUserDir, { recursive: true, force: true });
+  });
+
   beforeEach(() => {
     mockRunChatRequestToolFilters.mockClear();
     mockGovernRequest.mockClear();
+    saveRoutingInstructionStateSync('session:session-stopmessage-mode-only', null);
   });
 
   it('preserves semantics through chat↔standardized bridge with isolated clones', () => {
@@ -333,6 +354,15 @@ describe('Chat semantics stage 1 bridge', () => {
       adapterContext,
       endpoint: '/v1/chat/completions',
       requestId: 'req-continue-stop-active'
+    });
+
+    saveRoutingInstructionStateSync('session:session-stopmessage-mode-only', {
+      allowedProviders: new Set(),
+      disabledProviders: new Set(),
+      disabledKeys: new Map(),
+      disabledModels: new Map(),
+      stopMessageStageMode: 'on',
+      stopMessageMaxRepeats: 10
     });
 
     const result = await runProcessWithRequest(standardized, {

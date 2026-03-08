@@ -183,9 +183,37 @@ Tags: provider-bootstrap, init-template, managed-auth, oauth, account-runtime, c
 - 2026-03-07: 用户要求对当前 Provider/Compat 配置收敛任务采用“每一个进度都更新记忆”的方式推进；后续每完成一个阶段性步骤，都要同步更新 `MEMORY.md` 或对应 `memory/` 任务记忆，而不是只在结束时补记。
 - Tags: memory-discipline, progress-tracking, provider-schema, compat
 
+## 语义单一真源收敛
+
+- 2026-03-08: `chat_process` 的收敛原则确认：同一个业务语义只能有一个可变真源，其他表示必须是只读派生，不允许多条路径并行修补。
+- 2026-03-08: 首轮确认的重复语义清单：
+  - `messages` vs `semantics.responses.context.input`
+  - `metadata.responsesResume` vs `semantics.responses.resume` vs `RouterMetadataInput.responsesResume`
+  - `metadata.capturedChatRequest` vs `adapterContext.capturedChatRequest` vs `__rt.capturedChatRequest` vs `originalRequest`
+  - router 内部 stop/pre-command 状态 vs `__rt.stopMessageState` / `__rt.preCommandState`
+  - `normalized.processMode` / request metadata / `StandardizedRequest.processMode` / `RouterMetadataInput.processMode`
+  - `routeHint` 在 normalized metadata / request metadata / router metadata 的重复承载
+  - `applyPatchToolMode` 在 env / runtime metadata / request metadata / tool execution context 的重复承载
+  - `tool_choice` / `parallel_tool_calls` 在 chat parameters / responses context / metadata extra fields / compat 的重复合并
+  - `hasImageAttachment` 在消息内容推导与 metadata flag 的重复缓存
+- 2026-03-08: 真实线上 `view_image -> 下一轮请求 -> doubao-seed-2.0-pro 400` 的根因不是历史 user image，而是历史 `view_image` tool output 中仍保留 inline base64。
+- 2026-03-08: 已验证的修复方向是“canonical messages 为唯一真源”：先在 `chat_process` 入口清理历史 user media 与历史 visual tool outputs，再由 canonical messages 派生 responses / anthropic 等 provider 出站形状；同时不要再把 `responsesContext` legacy 快照重新注入 provider payload metadata。
+- 2026-03-08: `continue_execution`/`stopMessage` 的单一真源继续收敛：native `req_process stage1 tool governance` 不再自行读取 `runtime_metadata.stopMessageState`，而是由 TS 在进入 native 前基于 sticky-store 计算 `hasActiveStopMessageForContinueExecution` 并显式传入；这避免了 native/TS 双方各自读取不同 stopMessage 视图。
+- 2026-03-08: `capturedChatRequest/originalRequest` 收敛继续推进：`stop-message-auto/runtime-utils` 已停止从 `originalRequest` 兜底读取 tmux session / workdir 这类 servertool 运行上下文，避免 legacy request 副本继续给 stop-message / bd 注入路径打洞。
+- 2026-03-08: `processMode/routeHint` 收敛继续推进：servertool followup/replay 不再写 `metadata.routeHint = ""` 这类 legacy 清路由字段；当前只通过 `__rt.preserveRouteHint = false` 和 `__rt.disableStickyRoutes = true` 控制 followup 路由重置。
+- 2026-03-08: `routecodex-270.9` 已验证 AI SDK OpenAI transport 的真实出站仍可能把 system prompt 序列化成 `messages.role=developer`；仅删除旧显式设置不够，必须在 `src/providers/core/runtime/vercel-ai-sdk/openai-sdk-transport.ts` 强制 `providerOptions.openai.systemMessageMode = "system"`，这样 `ark-coding-plan` 这类只接受 `system|assistant|user|tool` 的兼容提供商才不会返回 400。
+
+Tags: semantic-unification, single-source-of-truth, chat-process, responses-context, responses-resume, capturedChatRequest, stopMessageState, preCommandState, processMode, routeHint, applyPatchToolMode, hasImageAttachment, view_image, history-media
+
 - 2026-03-07: `/v1/models` for Codex now preserves provider-prefixed aliases (for example `crs.gpt-5.4`) and adds bare model aliases (for example `gpt-5.4`) for enabled `responses` providers. Bare + prefixed aliases both carry Codex-required model metadata (`apply_patch_tool_type`, `shell_type`, `context_window`, reasoning fields, modalities, truncation policy). Upstream `crs` does not expose a usable `/models` catalog, so RouteCodex currently synthesizes this metadata from local provider config plus known Codex model presets.
   Tags: models, codex, metadata, responses, crs, v1-models
 - 2026-03-07: For non-OAuth / non-ChatGPT Codex sessions, remote `/v1/models` refresh and `X-Models-Etag` are not sufficient because Codex `ModelsManager.refresh_available_models()` only fetches remote models when `auth_mode == Chatgpt`. The working config to restore `apply_patch` for `gpt-5.4` is: add `model_catalog_json = "/Users/fanzhang/.codex/model_catalog.routecodex.json"` to `~/.codex/config.toml`, keep `gpt-5.4`/`gpt-5.3-codex` in that catalog with `apply_patch_tool_type = "freeform"` plus correct shell/context metadata, then restart the Codex client.
   Tags: codex, model_catalog_json, apply-patch, gpt-5.4, non-oauth, models-etag, config
 - 2026-03-07: Added explicit `/models` and `/v1/models` access logging in `src/server/runtime/http-server/routes.ts`; log format includes `path`, `count`, `remoteIp`, `host`, `auth`, `x-forwarded-for`, and `user-agent`. Use this to prove whether a client is actually traversing RouteCodex model discovery before debugging missing tool metadata. Existing older `rcc` builds (for example port `5520`) will not emit this log until rebuilt/repacked.
   Tags: routecodex, v1-models, logging, codex, rcc, observability
+- 2026-03-08: 当前 Codex 上下文百分比与 RouteCodex `usage` 不是同一口径：`~/.routecodex/logs/server-5555.log` 中 CRS 长上下文请求真实 `request` token 已到 `576k+`，而 Codex 状态栏仍可能显示约 `75% left`。已确认本地 catalog 活跃窗口源是 `~/.codex/model_catalog.routecodex.json` 中 `gpt-5.4.context_window = 900000`；同时已把 `~/.codex/config.toml` 中各 `gpt-5.4` profile 的 `model_context_window` / `model_auto_compact_token_limit` 改到 `256000`，但若客户端仍显示偏高剩余比例，说明 Codex meter 没有统计 RouteCodex 实际转发的整段历史工具输出。
+  Tags: codex, context-window, usage, routecodex-5555, gpt-5.4, longcontext
+- 2026-03-08: `scripts/install-global.sh` 的 5555 自动重启提示已更新：不再把失败默认表述为“当前服务尚未具备 server-managed restart 能力 / 需要手动重启一次”。当前 CLI 已支持 HTTP restart + legacy signal restart；并且本机 `routecodex restart --port 5555`、`npm run build:dev` 内的自动刷新都已实测成功。
+  Tags: routecodex, install-global, managed-restart, restart, 5555
+- 2026-03-08: `virtual-router-hit` 彩色日志的真实生效路径不在 RouteCodex `src/modules/pipeline/utils/colored-logger.ts` / `debug-logger.ts`，而在 `sharedmodule/llmswitch-core/src/router/virtual-router/engine.ts` 与 `engine-logging.ts`。之前“改了没效果”不是色表本身问题，而是改到了未参与真实路由命中日志输出的宿主包装层。当前 live 路径已改为按 `sessionId/tmuxSessionId/conversationId` 派生稳定颜色，并输出 `sid=...`；`routecodex restart --port 5555` 与 `tests/sharedmodule/virtual-router-hit-log.spec.ts` 已验证通过。
+  Tags: virtual-router-hit, logging, session-color, sid, llmswitch-core, 5555

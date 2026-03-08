@@ -1,10 +1,10 @@
-import type { LogData } from '../../../types/common-types.js';
-import { buildInfo } from '../../../build-info.js';
-import { ColoredLogger } from './colored-logger.js';
+import type { LogData } from "../../../types/common-types.js";
+import { buildInfo } from "../../../build-info.js";
+import { ColoredLogger } from "./colored-logger.js";
 
 export type DebugLogEntry = {
   timestamp: number;
-  level: 'debug' | 'info' | 'warn' | 'error';
+  level: "debug" | "info" | "warn" | "error";
   pipelineId?: string;
   category?: string;
   message?: string;
@@ -28,51 +28,54 @@ type LoggerOptions = {
 
 const DEFAULT_OPTIONS: Required<LoggerOptions> = {
   maxEntries: 500,
-  enableConsoleLogging: false
+  enableConsoleLogging: false,
 };
 
-function resolveBoolFromEnv(value: string | undefined, fallback: boolean): boolean {
+function resolveBoolFromEnv(
+  value: string | undefined,
+  fallback: boolean,
+): boolean {
   if (!value) {
     return fallback;
   }
   const normalized = value.trim().toLowerCase();
-  if (['1', 'true', 'yes', 'on'].includes(normalized)) {
+  if (["1", "true", "yes", "on"].includes(normalized)) {
     return true;
   }
-  if (['0', 'false', 'no', 'off'].includes(normalized)) {
+  if (["0", "false", "no", "off"].includes(normalized)) {
     return false;
   }
   return fallback;
 }
 
 function isPipelineConsoleLoggingEnabled(): boolean {
-  const releaseOverride = resolveBoolFromEnv(
-    process.env.ROUTECODEX_PIPELINE_LOG_VERBOSE ?? process.env.RCC_PIPELINE_LOG_VERBOSE,
-    false
+  return resolveBoolFromEnv(
+    process.env.ROUTECODEX_PIPELINE_LOG_VERBOSE ??
+      process.env.RCC_PIPELINE_LOG_VERBOSE,
+    true,
   );
-  return buildInfo.mode !== 'release' || releaseOverride;
 }
 
 function isProviderDetailConsoleLoggingEnabled(): boolean {
   return resolveBoolFromEnv(
-    process.env.ROUTECODEX_PROVIDER_LOG_VERBOSE
-      ?? process.env.RCC_PROVIDER_LOG_VERBOSE,
-    false
+    process.env.ROUTECODEX_PROVIDER_LOG_VERBOSE ??
+      process.env.RCC_PROVIDER_LOG_VERBOSE,
+    false,
   );
 }
 
 function isErrorLikeAction(action: string): boolean {
   const normalized = action.trim().toLowerCase();
-  return normalized.includes('error') || normalized.includes('fail');
+  return normalized.includes("error") || normalized.includes("fail");
 }
 
 function isProviderModule(module: string): boolean {
   const normalized = module.trim().toLowerCase();
   return (
-    normalized === 'provider'
-    || normalized.startsWith('provider:')
-    || normalized.startsWith('provider.')
-    || normalized.startsWith('provider-')
+    normalized === "provider" ||
+    normalized.startsWith("provider:") ||
+    normalized.startsWith("provider.") ||
+    normalized.startsWith("provider-")
   );
 }
 
@@ -87,19 +90,28 @@ export class PipelineDebugLogger {
   private colored?: ColoredLogger;
 
   constructor(_config?: unknown, options?: LoggerOptions) {
-    const isDev = buildInfo.mode !== 'release';
+    const isDev = true;
     const consoleLoggingEnabled = isPipelineConsoleLoggingEnabled();
-    this.colored = consoleLoggingEnabled ? new ColoredLogger({ isDev }) : undefined;
-    this.providerDetailConsoleLoggingEnabled = isProviderDetailConsoleLoggingEnabled();
+    this.colored = consoleLoggingEnabled
+      ? new ColoredLogger({ isDev })
+      : undefined;
+    this.providerDetailConsoleLoggingEnabled =
+      isProviderDetailConsoleLoggingEnabled();
     this.options = {
       maxEntries: options?.maxEntries ?? DEFAULT_OPTIONS.maxEntries,
-      enableConsoleLogging: (options?.enableConsoleLogging ?? DEFAULT_OPTIONS.enableConsoleLogging) && consoleLoggingEnabled
+      enableConsoleLogging:
+        (options?.enableConsoleLogging ??
+          DEFAULT_OPTIONS.enableConsoleLogging) &&
+        consoleLoggingEnabled,
     };
   }
 
   logModule(module: string, action: string, data?: LogData): void {
     if (this.colored) {
-      if (!this.providerDetailConsoleLoggingEnabled && isProviderModule(module)) {
+      if (
+        !this.providerDetailConsoleLoggingEnabled &&
+        isProviderModule(module)
+      ) {
         return;
       }
       this.colored.logModule(module, action, data);
@@ -107,41 +119,53 @@ export class PipelineDebugLogger {
     }
     this.record({
       timestamp: Date.now(),
-      level: 'info',
+      level: "info",
       pipelineId: module,
       category: action,
-      data
+      data,
     });
   }
 
   logError(error: unknown, context?: LogData): void {
-    if (this.colored) { this.colored.logProviderRequest('', 'request-error', { error, context }); return; }
+    if (this.colored) {
+      this.colored.logProviderRequest("", "request-error", { error, context });
+      return;
+    }
     this.record({
       timestamp: Date.now(),
-      level: 'error',
-      message: error instanceof Error ? error.message : String(error ?? 'Unknown error'),
-      data: context
+      level: "error",
+      message:
+        error instanceof Error
+          ? error.message
+          : String(error ?? "Unknown error"),
+      data: context,
     });
   }
 
   logDebug(message: string, data?: LogData): void {
-    this.record({ timestamp: Date.now(), level: 'debug', message, data });
+    this.record({ timestamp: Date.now(), level: "debug", message, data });
   }
 
   logPipeline(pipelineId: string, action: string, data?: LogData): void {
-    if (this.colored) { this.colored.logModule(pipelineId, action, data); return; }
+    if (this.colored) {
+      this.colored.logModule(pipelineId, action, data);
+      return;
+    }
     this.appendScoped(this.pipelineLogs, pipelineId, {
       timestamp: Date.now(),
-      level: 'info',
+      level: "info",
       pipelineId,
       category: action,
-      data
+      data,
     });
   }
 
   logRequest(requestId: string, action: string, data?: LogData): void {
     if (this.colored) {
-      if (!this.providerDetailConsoleLoggingEnabled && !isErrorLikeAction(action)) {
+      if (
+        !this.providerDetailConsoleLoggingEnabled &&
+        !isErrorLikeAction(action)
+      ) {
         return;
       }
       this.colored.logProviderRequest(requestId, action as any, data);
@@ -149,23 +173,34 @@ export class PipelineDebugLogger {
     }
     this.appendScoped(this.requestLogs, requestId, {
       timestamp: Date.now(),
-      level: 'info',
+      level: "info",
       pipelineId: requestId,
       category: action,
-      data
+      data,
     });
   }
 
-  logVirtualRouterHit(routeName: string, providerKey: string, model?: string): void {
+  logVirtualRouterHit(
+    routeName: string,
+    providerKey: string,
+    model?: string,
+    sessionId?: string,
+  ): void {
     if (this.colored) {
-      this.colored.logVirtualRouterHit(routeName, providerKey, model);
+      this.colored.logVirtualRouterHit(
+        routeName,
+        providerKey,
+        model,
+        sessionId,
+      );
       return;
     }
+    const sessionPart = sessionId ? `[${sessionId}] ` : "";
     this.record({
       timestamp: Date.now(),
-      level: 'info',
-      category: 'virtual-router-hit',
-      message: `${routeName} -> ${providerKey}${model ? `.${  model}` : ''}`
+      level: "info",
+      category: "virtual-router-hit",
+      message: `${sessionPart}${routeName} -> ${providerKey}${model ? `.${model}` : ""}`,
     });
   }
 
@@ -173,32 +208,45 @@ export class PipelineDebugLogger {
     this.logRequest(requestId, action, data);
   }
 
-  logTransformation(requestId: string, action: string, before?: LogData, after?: LogData): void {
+  logTransformation(
+    requestId: string,
+    action: string,
+    before?: LogData,
+    after?: LogData,
+  ): void {
     this.transformations.push({
       timestamp: Date.now(),
-      level: 'info',
+      level: "info",
       pipelineId: requestId,
       category: action,
-      data: { before, after }
+      data: { before, after },
     });
     this.enforceLimit(this.transformations);
   }
 
-  logProviderRequest(requestId: string, action: string, request?: LogData, response?: LogData): void {
+  logProviderRequest(
+    requestId: string,
+    action: string,
+    request?: LogData,
+    response?: LogData,
+  ): void {
     if (this.colored) {
       if (!this.providerDetailConsoleLoggingEnabled) {
         return;
       }
-      this.colored.logProviderRequest(requestId, action as any, { request, response });
+      this.colored.logProviderRequest(requestId, action as any, {
+        request,
+        response,
+      });
       return;
     }
     this.providerLogs.push({
       timestamp: Date.now(),
-      level: 'info',
+      level: "info",
       pipelineId: requestId,
       category: action,
       request,
-      response
+      response,
     });
     this.enforceLimit(this.providerLogs);
   }
@@ -206,16 +254,24 @@ export class PipelineDebugLogger {
   getRequestLogs(requestId: string) {
     return {
       general: [...(this.requestLogs.get(requestId) ?? [])],
-      transformations: this.transformations.filter(entry => entry.pipelineId === requestId),
-      provider: this.providerLogs.filter(entry => entry.pipelineId === requestId)
+      transformations: this.transformations.filter(
+        (entry) => entry.pipelineId === requestId,
+      ),
+      provider: this.providerLogs.filter(
+        (entry) => entry.pipelineId === requestId,
+      ),
     };
   }
 
   getPipelineLogs(pipelineId: string) {
     return {
       general: [...(this.pipelineLogs.get(pipelineId) ?? [])],
-      transformations: this.transformations.filter(entry => entry.pipelineId === pipelineId),
-      provider: this.providerLogs.filter(entry => entry.pipelineId === pipelineId)
+      transformations: this.transformations.filter(
+        (entry) => entry.pipelineId === pipelineId,
+      ),
+      provider: this.providerLogs.filter(
+        (entry) => entry.pipelineId === pipelineId,
+      ),
     };
   }
 
@@ -239,10 +295,10 @@ export class PipelineDebugLogger {
     return {
       totalLogs: this.recentLogs.length,
       logsByLevel: summary,
-      logsByCategory: this.aggregateByField('category'),
-      logsByPipeline: this.aggregateByField('pipelineId'),
+      logsByCategory: this.aggregateByField("category"),
+      logsByPipeline: this.aggregateByField("pipelineId"),
       transformationCount: this.transformations.length,
-      providerRequestCount: this.providerLogs.length
+      providerRequestCount: this.providerLogs.length,
     };
   }
 
@@ -254,26 +310,51 @@ export class PipelineDebugLogger {
     this.recentLogs.length = 0;
   }
 
-  exportLogs(format: 'json' | 'csv' = 'json'): DebugLogEntry[] | string[] {
-    if (format === 'csv') {
-      return this.recentLogs.map(entry => `${entry.timestamp},${entry.level},${entry.category ?? ''},${entry.message ?? ''}`);
+  exportLogs(format: "json" | "csv" = "json"): DebugLogEntry[] | string[] {
+    if (format === "csv") {
+      return this.recentLogs.map(
+        (entry) =>
+          `${entry.timestamp},${entry.level},${entry.category ?? ""},${entry.message ?? ""}`,
+      );
     }
-    return this.recentLogs.map(entry => ({ ...entry }));
+    return this.recentLogs.map((entry) => ({ ...entry }));
   }
 
-  log(level: DebugLogEntry['level'], pipelineId: string, category: string, message: string, data?: LogData): void {
-    this.record({ timestamp: Date.now(), level, pipelineId, category, message, data });
+  log(
+    level: DebugLogEntry["level"],
+    pipelineId: string,
+    category: string,
+    message: string,
+    data?: LogData,
+  ): void {
+    this.record({
+      timestamp: Date.now(),
+      level,
+      pipelineId,
+      category,
+      message,
+      data,
+    });
   }
 
   private record(entry: DebugLogEntry): void {
     this.recentLogs.push(entry);
     this.enforceLimit(this.recentLogs);
     if (this.options.enableConsoleLogging) {
-      console.log('[PipelineDebugLogger]', entry.level.toUpperCase(), entry.category ?? entry.message ?? '', entry.data ?? '');
+      console.log(
+        "[PipelineDebugLogger]",
+        entry.level.toUpperCase(),
+        entry.category ?? entry.message ?? "",
+        entry.data ?? "",
+      );
     }
   }
 
-  private appendScoped(map: Map<string, DebugLogEntry[]>, key: string, entry: DebugLogEntry): void {
+  private appendScoped(
+    map: Map<string, DebugLogEntry[]>,
+    key: string,
+    entry: DebugLogEntry,
+  ): void {
     const bucket = map.get(key) ?? [];
     bucket.push(entry);
     this.enforceLimit(bucket);
@@ -290,7 +371,7 @@ export class PipelineDebugLogger {
   private aggregateByField(field: keyof DebugLogEntry): Record<string, number> {
     const result: Record<string, number> = {};
     for (const entry of this.recentLogs) {
-      const key = String(entry[field] ?? '');
+      const key = String(entry[field] ?? "");
       if (!key) {
         continue;
       }

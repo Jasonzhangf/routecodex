@@ -26,12 +26,16 @@ describe('provider.model direct access without routing', () => {
     };
 
     const config = bootstrapVirtualRouterConfig(input);
-    const engine = new VirtualRouterEngine(config);
+    const engine = new VirtualRouterEngine();
+    engine.initialize(config.config);
 
-    const result = await engine.route({
-      model: 'iflow.kimi-k2.5',
-      messages: [{ role: 'user', content: 'Hello' }]
-    });
+    const result = await engine.route(
+      {
+        model: 'iflow.kimi-k2.5',
+        messages: [{ role: 'user', content: 'Hello' }]
+      },
+      {}
+    );
 
     expect(result).toBeDefined();
     expect(result.target?.providerKey).toMatch(/iflow/);
@@ -59,12 +63,16 @@ describe('provider.model direct access without routing', () => {
     };
 
     const config = bootstrapVirtualRouterConfig(input);
-    const engine = new VirtualRouterEngine(config);
+    const engine = new VirtualRouterEngine();
+    engine.initialize(config.config);
 
-    await expect(engine.route({
-      model: 'iflow.kimi-k2.5',
-      messages: [{ role: 'user', content: 'Hello' }]
-    })).rejects.toThrow(/PROVIDER_NOT_AVAILABLE|All providers unavailable/);
+    expect(() => engine.route(
+      {
+        model: 'iflow.kimi-k2.5',
+        messages: [{ role: 'user', content: 'Hello' }]
+      },
+      {}
+    )).toThrow(/PROVIDER_NOT_AVAILABLE|All providers unavailable/);
   });
 
   it('should work when provider.model is also in routing targets', async () => {
@@ -89,12 +97,50 @@ describe('provider.model direct access without routing', () => {
     };
 
     const config = bootstrapVirtualRouterConfig(input);
-    const engine = new VirtualRouterEngine(config);
+    const engine = new VirtualRouterEngine();
+    engine.initialize(config.config);
 
-    const result = await engine.route({
-      model: 'iflow.kimi-k2.5',
-      messages: [{ role: 'user', content: 'Hello' }]
-    });
+    const result = await engine.route(
+      {
+        model: 'iflow.kimi-k2.5',
+        messages: [{ role: 'user', content: 'Hello' }]
+      },
+      {}
+    );
+
+    expect(result).toBeDefined();
+    expect(result.target?.providerKey).toMatch(/iflow/);
+  });
+
+  it('should work even when routing section is omitted', async () => {
+    const input: any = {
+      virtualrouter: {
+        providers: {
+          iflow: {
+            id: 'iflow',
+            type: 'iflow',
+            enabled: true,
+            endpoint: 'https://apis.iflow.cn/v1',
+            auth: { type: 'apikey', apiKey: 'TEST_KEY' },
+            models: {
+              'kimi-k2.5': {}
+            }
+          }
+        }
+      }
+    };
+
+    const config = bootstrapVirtualRouterConfig(input);
+    const engine = new VirtualRouterEngine();
+    engine.initialize(config.config);
+
+    const result = await engine.route(
+      {
+        model: 'iflow.kimi-k2.5',
+        messages: [{ role: 'user', content: 'Hello' }]
+      },
+      {}
+    );
 
     expect(result).toBeDefined();
     expect(result.target?.providerKey).toMatch(/iflow/);
