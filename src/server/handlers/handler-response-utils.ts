@@ -215,6 +215,7 @@ export function sendPipelineResponse(
         model: usageLogInfo.model,
         usage: usageLogInfo.usage as any,
         latencyMs: Date.now() - usageLogInfo.requestStartedAtMs,
+        timingRequestIds: usageLogInfo.timingRequestIds,
         sessionId: usageLogInfo.sessionId,
         conversationId: usageLogInfo.conversationId
       });

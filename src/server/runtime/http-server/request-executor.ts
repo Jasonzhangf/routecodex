@@ -545,6 +545,9 @@ export class HubRequestExecutor implements RequestExecutor {
               model: providerModel,
               usage: aggregatedUsage as Record<string, unknown> | undefined,
               requestStartedAtMs: requestStartedAt,
+              timingRequestIds: Array.from(
+                new Set([providerRequestId, input.requestId].filter((value): value is string => Boolean(value)))
+              ),
               sessionId: mergedMetadata.sessionId,
               conversationId: mergedMetadata.conversationId
             }

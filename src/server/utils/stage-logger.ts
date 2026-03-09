@@ -199,6 +199,7 @@ export function formatRequestTimingSummary(
   requestId: string,
   options?: {
     latencyMs?: number;
+    requestIds?: string[];
     terminal?: boolean;
   }
 ): string {
@@ -528,26 +529,43 @@ function readStoredScopeStageElapsedMs(requestId: string, scope: string): number
     ?? REQUEST_SCOPE_STAGE_ELAPSED.get(scopeStageKey(requestId, scope));
 }
 
+function readAggregatedScopeStageElapsedMs(requestIds: string[], scope: string): number | undefined {
+  const uniqueIds = Array.from(new Set(requestIds.filter(Boolean)));
+  let total = 0;
+  let found = false;
+  for (const requestId of uniqueIds) {
+    const value = readStoredScopeStageElapsedMs(requestId, scope);
+    if (value === undefined) {
+      continue;
+    }
+    total += value;
+    found = true;
+  }
+  return found ? total : undefined;
+}
+
 function formatReleaseUsageTimingSummary(
   requestId: string,
   options?: {
     latencyMs?: number;
+    requestIds?: string[];
     terminal?: boolean;
   }
 ): string {
+  const requestIds = Array.from(new Set([requestId, ...(options?.requestIds ?? [])].filter(Boolean)));
   const totalLatencyMs = typeof options?.latencyMs === 'number' && Number.isFinite(options.latencyMs)
     ? Math.max(0, options.latencyMs)
     : undefined;
-  const providerSendMs = readStoredScopeStageElapsedMs(requestId, 'provider.send') ?? 0;
-  const hubResponseMs = readStoredScopeStageElapsedMs(requestId, 'hub.response') ?? 0;
-  const responseMs = readStoredScopeStageElapsedMs(requestId, 'response') ?? 0;
+  const providerSendMs = readAggregatedScopeStageElapsedMs(requestIds, 'provider.send') ?? 0;
+  const hubResponseMs = readAggregatedScopeStageElapsedMs(requestIds, 'hub.response') ?? 0;
+  const responseMs = readAggregatedScopeStageElapsedMs(requestIds, 'response') ?? 0;
   const parts: string[] = [];
   if (totalLatencyMs !== undefined) {
     const requestInternalMs = Math.max(0, totalLatencyMs - providerSendMs - hubResponseMs - responseMs);
     parts.push(`request.internal=${formatDurationMs(requestInternalMs)}`);
   }
   for (const scope of ['hub', 'provider.send', 'hub.response', 'response']) {
-    const elapsedMs = readStoredScopeStageElapsedMs(requestId, scope);
+    const elapsedMs = readAggregatedScopeStageElapsedMs(requestIds, scope);
     if (elapsedMs === undefined) {
       continue;
     }

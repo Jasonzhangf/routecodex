@@ -135,7 +135,9 @@ export async function handleMessages(req: Request, res: Response, ctx: HandlerCo
       }
     });
     if (!hasSsePayload(result.body)) {
-      logRequestComplete(entryEndpoint, requestId, result.status ?? 200, result.body);
+      logRequestComplete(entryEndpoint, requestId, result.status ?? 200, result.body, {
+        preserveTimingForUsage: true
+      });
     }
     sendPipelineResponse(res, result, requestId, { forceSSE: wantsStream, entryEndpoint });
   } catch (error: unknown) {

@@ -12,6 +12,7 @@ export function logUsageSummary(
     model?: string;
     usage?: UsageMetrics;
     latencyMs: number;
+    timingRequestIds?: string[];
     sessionId?: unknown;
     conversationId?: unknown;
   },
@@ -34,6 +35,7 @@ export function logUsageSummary(
   });
   const timingSuffix = formatRequestTimingSummary(requestId, {
     latencyMs: info.latencyMs,
+    requestIds: info.timingRequestIds,
     terminal: options?.terminalTiming === true
   });
   const line = `[usage] request ${requestId} provider=${providerLabel} latency=${latency}ms (${usageText})${timingSuffix}`;

@@ -247,7 +247,9 @@ export async function handleResponses(
     }
     const effectiveRequestId = pipelineInput.requestId;
     if (!hasSsePayload(result.body)) {
-      logRequestComplete(entryEndpoint, effectiveRequestId, result.status ?? 200, result.body);
+      logRequestComplete(entryEndpoint, effectiveRequestId, result.status ?? 200, result.body, {
+        preserveTimingForUsage: true
+      });
     }
     sendPipelineResponse(res, result, effectiveRequestId, { forceSSE: wantsStream, entryEndpoint });
   } catch (error: unknown) {

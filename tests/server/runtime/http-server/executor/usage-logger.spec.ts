@@ -108,4 +108,82 @@ describe('usage logger timing summary', () => {
     expect(rendered).toContain('hub.response=40ms');
     expect(rendered).toContain('response=10ms');
   });
+
+  it('aggregates timing from multiple request ids in release usage summary', async () => {
+    process.env.ROUTECODEX_BUILD_MODE = 'release';
+    delete process.env.ROUTECODEX_STAGE_LOG;
+    delete process.env.ROUTECODEX_STAGE_TIMING;
+    delete process.env.ROUTECODEX_STAGE_TIMING_SUMMARY;
+
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const { logPipelineStage } = await import('../../../../../src/server/utils/stage-logger.js');
+    const { logUsageSummary } = await import('../../../../../src/server/runtime/http-server/executor/usage-logger.js');
+
+    logPipelineStage('hub.start', 'req_base', {});
+    logPipelineStage('hub.completed', 'req_base', { elapsedMs: 120 });
+    logPipelineStage('provider.send.start', 'req_final', {});
+    logPipelineStage('provider.send.completed', 'req_final', { elapsedMs: 700 });
+    logPipelineStage('hub.response.start', 'req_final', {});
+    logPipelineStage('hub.response.completed', 'req_final', { elapsedMs: 30 });
+    logPipelineStage('response.dispatch.start', 'req_final', { status: 200, stream: false });
+    logPipelineStage('response.completed', 'req_final', { elapsedMs: 5 });
+
+    logUsageSummary('req_final', {
+      providerKey: 'demo.key1',
+      model: 'demo-model',
+      latencyMs: 1000,
+      timingRequestIds: ['req_base', 'req_final'],
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }
+    });
+
+    const rendered = String(logSpy.mock.calls.at(-1)?.[0] ?? '');
+    expect(rendered).toContain('request.internal=265ms');
+    expect(rendered).toContain('hub=120ms');
+    expect(rendered).toContain('provider.send=700ms');
+    expect(rendered).toContain('hub.response=30ms');
+    expect(rendered).toContain('response=5ms');
+  });
+
+  it('keeps release timing available for usage after non-stream request complete log', async () => {
+    process.env.ROUTECODEX_BUILD_MODE = 'release';
+    process.env.ROUTECODEX_HTTP_LOG_VERBOSE = '1';
+    delete process.env.ROUTECODEX_STAGE_LOG;
+    delete process.env.ROUTECODEX_STAGE_TIMING;
+    delete process.env.ROUTECODEX_STAGE_TIMING_SUMMARY;
+
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const { logPipelineStage } = await import('../../../../../src/server/utils/stage-logger.js');
+    const { logRequestComplete } = await import('../../../../../src/server/handlers/handler-utils.js');
+    const { logUsageSummary } = await import('../../../../../src/server/runtime/http-server/executor/usage-logger.js');
+
+    logPipelineStage('hub.start', 'req_release_preserve', {});
+    logPipelineStage('hub.completed', 'req_release_preserve', { elapsedMs: 180 });
+    logPipelineStage('provider.send.start', 'req_release_preserve', {});
+    logPipelineStage('provider.send.completed', 'req_release_preserve', { elapsedMs: 700 });
+    logPipelineStage('hub.response.start', 'req_release_preserve', {});
+    logPipelineStage('hub.response.completed', 'req_release_preserve', { elapsedMs: 45 });
+    logPipelineStage('response.dispatch.start', 'req_release_preserve', { status: 200, stream: false });
+    logPipelineStage('response.completed', 'req_release_preserve', { elapsedMs: 15 });
+
+    logRequestComplete('/v1/responses', 'req_release_preserve', 200, {
+      status: 'requires_action',
+      required_action: { submit_tool_outputs: { tool_calls: [] } }
+    }, {
+      preserveTimingForUsage: true
+    });
+
+    logUsageSummary('req_release_preserve', {
+      providerKey: 'demo.key1',
+      model: 'demo-model',
+      latencyMs: 1000,
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }
+    });
+
+    const rendered = String(logSpy.mock.calls.at(-1)?.[0] ?? '');
+    expect(rendered).toContain('request.internal=240ms');
+    expect(rendered).toContain('hub=180ms');
+    expect(rendered).toContain('provider.send=700ms');
+    expect(rendered).toContain('hub.response=45ms');
+    expect(rendered).toContain('response=15ms');
+  });
 });

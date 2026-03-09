@@ -94,7 +94,13 @@ export function logRequestStart(endpoint: string, requestId: string, meta?: Requ
   return;
 }
 
-export function logRequestComplete(endpoint: string, requestId: string, status: number, body?: unknown): void {
+export function logRequestComplete(
+  endpoint: string,
+  requestId: string,
+  status: number,
+  body?: unknown,
+  options?: { preserveTimingForUsage?: boolean }
+): void {
   if (!SHOULD_LOG_HTTP_EVENTS) {
     return;
   }
@@ -102,7 +108,9 @@ export function logRequestComplete(endpoint: string, requestId: string, status: 
   const timestamp = formatTimestamp();
   const finishReason = deriveFinishReason(body);
   const finishReasonLabel = finishReason ? `, finish_reason=${finishReason}` : '';
-  const timingSuffix = formatRequestTimingSummary(resolvedId, { terminal: true });
+  const timingSuffix = options?.preserveTimingForUsage
+    ? ''
+    : formatRequestTimingSummary(resolvedId, { terminal: true });
   const line = `✅ [${endpoint}] ${timestamp} request ${resolvedId} completed (status=${status}${finishReasonLabel})${timingSuffix}`;
   console.log(colorizeRequestLog(line, resolvedId));
 }

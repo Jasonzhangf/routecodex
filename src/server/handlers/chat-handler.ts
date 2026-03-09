@@ -81,7 +81,9 @@ export async function handleChatCompletions(req: Request, res: Response, ctx: Ha
       }
     });
     if (!hasSsePayload(result.body)) {
-      logRequestComplete(entryEndpoint, requestId, result.status ?? 200, result.body);
+      logRequestComplete(entryEndpoint, requestId, result.status ?? 200, result.body, {
+        preserveTimingForUsage: true
+      });
     }
     sendPipelineResponse(res, result, requestId, { forceSSE: wantsSSE, entryEndpoint });
   } catch (error: unknown) {

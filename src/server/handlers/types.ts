@@ -20,6 +20,7 @@ export interface PipelineExecutionResult {
     model?: string;
     usage?: Record<string, unknown>;
     requestStartedAtMs: number;
+    timingRequestIds?: string[];
     sessionId?: unknown;
     conversationId?: unknown;
   };
