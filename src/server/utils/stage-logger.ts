@@ -131,7 +131,7 @@ export function logPipelineStage(stage: string, requestId: string, details?: Rec
   const level = detectStageLevel(stage);
   const normalizedStage = stage.trim().toLowerCase();
   const releaseSummaryStage = shouldLogReleaseSummaryStage(stage);
-  const releaseSummaryTrackedScope = shouldTrackReleaseSummaryScope(stage);
+  const releaseSummaryTrackedScope = shouldTrackTimingBreakdownScope(stage);
 
   if ((timingEnabled || timingSummaryEnabled || releaseSummaryTrackedScope) && !REQUEST_STAGE_TIMELINES.has(requestId)) {
     touchRequestStageTimeline(requestId);
@@ -204,10 +204,11 @@ export function formatRequestTimingSummary(
   }
 ): string {
   let label = '';
+  const breakdownLabel = formatReleaseUsageTimingSummary(requestId, options);
   if (resolveRuntimeBuildMode() === 'release') {
-    label = formatReleaseUsageTimingSummary(requestId, options);
+    label = breakdownLabel;
   } else if (isStageTimingSummaryEnabled()) {
-    label = peekRequestStageTimingLabel(requestId);
+    label = breakdownLabel || peekRequestStageTimingLabel(requestId);
   }
   if (options?.terminal) {
     clearRequestStageState(requestId);
@@ -429,8 +430,8 @@ function shouldLogReleaseSummaryStage(stage: string): boolean {
     || normalized === 'provider.send.completed';
 }
 
-function shouldTrackReleaseSummaryScope(stage: string): boolean {
-  if (resolveRuntimeBuildMode() !== 'release') {
+function shouldTrackTimingBreakdownScope(stage: string): boolean {
+  if (resolveRuntimeBuildMode() !== 'release' && !isStageTimingSummaryEnabled()) {
     return false;
   }
   const normalized = stage.trim().toLowerCase();
@@ -556,16 +557,26 @@ function formatReleaseUsageTimingSummary(
   const totalLatencyMs = typeof options?.latencyMs === 'number' && Number.isFinite(options.latencyMs)
     ? Math.max(0, options.latencyMs)
     : undefined;
-  const providerSendMs = readAggregatedScopeStageElapsedMs(requestIds, 'provider.send') ?? 0;
-  const hubResponseMs = readAggregatedScopeStageElapsedMs(requestIds, 'hub.response') ?? 0;
-  const responseMs = readAggregatedScopeStageElapsedMs(requestIds, 'response') ?? 0;
+  const scopeValues = new Map<string, number>();
+  for (const scope of ['hub', 'provider.send', 'hub.response', 'response']) {
+    const value = readAggregatedScopeStageElapsedMs(requestIds, scope);
+    if (value !== undefined) {
+      scopeValues.set(scope, value);
+    }
+  }
+  if (!scopeValues.size) {
+    return '';
+  }
+  const providerSendMs = scopeValues.get('provider.send') ?? 0;
+  const hubResponseMs = scopeValues.get('hub.response') ?? 0;
+  const responseMs = scopeValues.get('response') ?? 0;
   const parts: string[] = [];
   if (totalLatencyMs !== undefined) {
     const requestInternalMs = Math.max(0, totalLatencyMs - providerSendMs - hubResponseMs - responseMs);
     parts.push(`request.internal=${formatDurationMs(requestInternalMs)}`);
   }
   for (const scope of ['hub', 'provider.send', 'hub.response', 'response']) {
-    const elapsedMs = readAggregatedScopeStageElapsedMs(requestIds, scope);
+    const elapsedMs = scopeValues.get(scope);
     if (elapsedMs === undefined) {
       continue;
     }
