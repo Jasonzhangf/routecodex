@@ -4,6 +4,8 @@ type SessionRecurrenceInput = {
   everyMinutes?: number;
 };
 
+const TMUX_SCOPE_PREFIX = 'tmux:';
+
 export function parseString(input: unknown): string | undefined {
   if (typeof input !== 'string') {
     return undefined;
@@ -68,6 +70,17 @@ function parseIsoToMs(input: unknown): number | null {
     return null;
   }
   return Math.floor(parsed);
+}
+
+function normalizeClockSessionScope(input: unknown): string | undefined {
+  const value = parseString(input);
+  if (!value) {
+    return undefined;
+  }
+  if (value.startsWith(TMUX_SCOPE_PREFIX)) {
+    return value;
+  }
+  return `${TMUX_SCOPE_PREFIX}${value}`;
 }
 
 function parseRecurrenceKind(raw: unknown): 'daily' | 'weekly' | 'interval' | undefined {
@@ -156,6 +169,12 @@ export function normalizeTaskCreateItems(body: Record<string, unknown>): { items
     if (!task) {
       return { items: [], error: 'task must be non-empty string' };
     }
+    const urls = Array.isArray(record.urls)
+      ? record.urls.filter((entry) => typeof entry === 'string' && entry.trim()).map((entry) => String(entry).trim())
+      : undefined;
+    const paths = Array.isArray(record.paths)
+      ? record.paths.filter((entry) => typeof entry === 'string' && entry.trim()).map((entry) => String(entry).trim())
+      : undefined;
     const recurrenceParsed = parseRecurrenceInput(record.recurrence ?? record.repeat ?? record.cycle, record);
     if (recurrenceParsed.error) {
       return { items: [], error: recurrenceParsed.error };
@@ -163,11 +182,14 @@ export function normalizeTaskCreateItems(body: Record<string, unknown>): { items
     const payload: Record<string, unknown> = {
       dueAtMs,
       setBy: 'user',
+      prompt: task,
       task,
       ...(parseString(record.tool) ? { tool: parseString(record.tool) } : {}),
       ...(record.arguments && typeof record.arguments === 'object' && !Array.isArray(record.arguments)
         ? { arguments: record.arguments as Record<string, unknown> }
         : {}),
+      ...(urls && urls.length ? { urls } : {}),
+      ...(paths && paths.length ? { paths } : {}),
       ...(recurrenceParsed.recurrence ? { recurrence: recurrenceParsed.recurrence } : {})
     };
     items.push(payload);
@@ -195,6 +217,7 @@ export function normalizeTaskPatch(body: Record<string, unknown>): { patch: Reco
     if (!task) {
       return { patch: {}, error: 'patch.task must be non-empty string' };
     }
+    patch.prompt = task;
     patch.task = task;
   }
 
@@ -212,10 +235,28 @@ export function normalizeTaskPatch(body: Record<string, unknown>): { patch: Reco
     }
   }
 
-  if (Object.prototype.hasOwnProperty.call(patchRaw, 'notBeforeRequestId')) {
-    patch.notBeforeRequestId = patchRaw.notBeforeRequestId === null
-      ? null
-      : parseString(patchRaw.notBeforeRequestId) ?? null;
+  if (Object.prototype.hasOwnProperty.call(patchRaw, 'urls')) {
+    if (patchRaw.urls === null) {
+      patch.urls = null;
+    } else if (Array.isArray(patchRaw.urls)) {
+      patch.urls = patchRaw.urls
+        .filter((entry) => typeof entry === 'string' && entry.trim())
+        .map((entry) => String(entry).trim());
+    } else {
+      return { patch: {}, error: 'patch.urls must be string[] or null' };
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(patchRaw, 'paths')) {
+    if (patchRaw.paths === null) {
+      patch.paths = null;
+    } else if (Array.isArray(patchRaw.paths)) {
+      patch.paths = patchRaw.paths
+        .filter((entry) => typeof entry === 'string' && entry.trim())
+        .map((entry) => String(entry).trim());
+    } else {
+      return { patch: {}, error: 'patch.paths must be string[] or null' };
+    }
   }
 
   if (Object.prototype.hasOwnProperty.call(patchRaw, 'recurrence') || Object.prototype.hasOwnProperty.call(patchRaw, 'repeat')) {
@@ -238,4 +279,8 @@ export function normalizeTaskPatch(body: Record<string, unknown>): { patch: Reco
   }
 
   return { patch };
+}
+
+export function normalizeClockSessionIdInput(input: unknown): string | undefined {
+  return normalizeClockSessionScope(input);
 }

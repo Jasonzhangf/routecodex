@@ -134,6 +134,15 @@ export function getLlmsStatsSnapshot(): unknown | null {
 
 type ClockTaskStoreModule = {
   resolveClockConfig?: (input: unknown) => unknown | null;
+  setClockRuntimeHooks?: (hooks?: {
+    isTmuxSessionAlive?: (tmuxSessionId: string) => Promise<boolean> | boolean;
+    dispatchDueTask?: (request: {
+      sessionId: string;
+      tmuxSessionId: string;
+      task: unknown;
+      injectText: string;
+    }) => Promise<{ ok: boolean; cleanupSession?: boolean; reason?: string } | null> | { ok: boolean; cleanupSession?: boolean; reason?: string } | null;
+  }) => void | Promise<void>;
   reserveDueTasksForRequest?: (args: {
     reservationId: string;
     sessionId: string;
@@ -223,6 +232,28 @@ export async function resolveClockConfigSnapshot(input: unknown): Promise<unknow
     return fn(input) ?? null;
   } catch {
     return null;
+  }
+}
+
+export async function setClockRuntimeHooksSnapshot(hooks?: {
+  isTmuxSessionAlive?: (tmuxSessionId: string) => Promise<boolean> | boolean;
+  dispatchDueTask?: (request: {
+    sessionId: string;
+    tmuxSessionId: string;
+    task: unknown;
+    injectText: string;
+  }) => Promise<{ ok: boolean; cleanupSession?: boolean; reason?: string } | null> | { ok: boolean; cleanupSession?: boolean; reason?: string } | null;
+}): Promise<boolean> {
+  const mod = await getClockTaskStoreModuleSafe();
+  const fn = mod?.setClockRuntimeHooks;
+  if (typeof fn !== 'function') {
+    return false;
+  }
+  try {
+    await fn(hooks);
+    return true;
+  } catch {
+    return false;
   }
 }
 

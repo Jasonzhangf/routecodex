@@ -132,14 +132,14 @@ function resolveBoolFromEnv(value: string | undefined, fallback: boolean): boole
 function isStatsEnabledByDefault(): boolean {
   return resolveBoolFromEnv(
     process.env.ROUTECODEX_STATS_ENABLED ?? process.env.RCC_STATS_ENABLED,
-    buildInfo.mode !== 'release'
+    true
   );
 }
 
 function isStatsVerboseEnabled(enabled: boolean): boolean {
   return resolveBoolFromEnv(
     process.env.ROUTECODEX_STATS_VERBOSE ?? process.env.RCC_STATS_VERBOSE,
-    enabled && buildInfo.mode !== 'release'
+    enabled
   );
 }
 

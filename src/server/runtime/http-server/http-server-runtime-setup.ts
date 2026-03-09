@@ -3,6 +3,7 @@ import { asRecord } from './provider-utils.js';
 import { HealthManagerModule } from '../../../manager/modules/health/index.js';
 import { RoutingStateManagerModule } from '../../../manager/modules/routing/index.js';
 import { applyDefaultStageTimingMode, resolveRuntimeBuildMode } from './stage-timing-defaults.js';
+import { registerClockRuntimeHooks } from './clock-runtime-hooks.js';
 
 export async function setupRuntime(server: any, userConfig: UnknownObject): Promise<void> {
   applyDefaultStageTimingMode();
@@ -105,5 +106,6 @@ export async function setupRuntime(server: any, userConfig: UnknownObject): Prom
   server.hubPipelineEngineShadow = null;
 
   await server.initializeProviderRuntimes(bootstrapArtifacts);
+  await registerClockRuntimeHooks();
   server.startSessionDaemonInjectLoop();
 }

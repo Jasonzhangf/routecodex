@@ -42,7 +42,7 @@ describe('StatsManager release behavior', () => {
     return mod.StatsManager;
   }
 
-  it('does not record or persist stats in release by default', async () => {
+  it('records and persists stats in release by default', async () => {
     delete process.env.ROUTECODEX_STATS_ENABLED;
     delete process.env.ROUTECODEX_STATS_VERBOSE;
 
@@ -64,9 +64,9 @@ describe('StatsManager release behavior', () => {
     await stats.persistSnapshot(snapshot, { reason: 'unit-test' });
     await stats.logHistoricalSummary();
 
-    expect(snapshot.totals).toHaveLength(0);
-    await expect(fs.access(logPath)).rejects.toBeDefined();
-    expect(logSpy).not.toHaveBeenCalled();
+    expect(snapshot.totals).toHaveLength(1);
+    await expect(fs.access(logPath)).resolves.toBeUndefined();
+    expect(logSpy).toHaveBeenCalled();
 
     await fs.rm(tempDir, { recursive: true, force: true });
   });

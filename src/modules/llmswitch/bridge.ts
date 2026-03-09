@@ -63,6 +63,7 @@ export {
   getStatsCenterSafe,
   getLlmsStatsSnapshot,
   resolveClockConfigSnapshot,
+  setClockRuntimeHooksSnapshot,
   reserveClockDueTasks,
   commitClockDueReservation,
   listClockSessionIdsSnapshot,

@@ -18,6 +18,8 @@ import {
 } from './session-daemon-log-throttle.js';
 import { isTmuxSessionAlive } from './tmux-session-probe.js';
 
+const TMUX_SCOPE_PREFIX = 'tmux:';
+
 const SESSION_DAEMON_SESSION_PREFIX = 'sessiond.';
 const SESSION_CLEANUP_AUDIT_SAMPLE_LIMIT = 3;
 
@@ -57,6 +59,29 @@ function extractReservationTaskIds(reservation: unknown): Set<string> {
     }
   }
   return taskIds;
+}
+
+function toTmuxSessionScope(sessionId: string | undefined): string | undefined {
+  const normalized = readString(sessionId);
+  if (!normalized) {
+    return undefined;
+  }
+  if (normalized.startsWith(TMUX_SCOPE_PREFIX)) {
+    return normalized;
+  }
+  return `${TMUX_SCOPE_PREFIX}${normalized}`;
+}
+
+function extractTmuxSessionIdFromScope(sessionId: string | undefined): string | undefined {
+  const normalized = readString(sessionId);
+  if (!normalized) {
+    return undefined;
+  }
+  if (normalized.startsWith(TMUX_SCOPE_PREFIX)) {
+    const tmuxSessionId = normalized.slice(TMUX_SCOPE_PREFIX.length).trim();
+    return tmuxSessionId || undefined;
+  }
+  return normalized;
 }
 
 export function extractWorkdirHintFromReservationTasks(
@@ -196,11 +221,11 @@ function extractSessionDaemonIdFromSessionScope(sessionId: string): string | und
 export function resolveRawSessionConfig(server: any): unknown {
   const user = server.userConfig && typeof server.userConfig === 'object' ? (server.userConfig as Record<string, unknown>) : {};
   const vr = user.virtualrouter && typeof user.virtualrouter === 'object' ? (user.virtualrouter as Record<string, unknown>) : null;
-  if (vr && Object.prototype.hasOwnProperty.call(vr, 'session')) {
-    return vr.session;
+  if (vr && Object.prototype.hasOwnProperty.call(vr, 'clock')) {
+    return vr.clock;
   }
-  if (Object.prototype.hasOwnProperty.call(user, 'session')) {
-    return (user as Record<string, unknown>).session;
+  if (Object.prototype.hasOwnProperty.call(user, 'clock')) {
+    return (user as Record<string, unknown>).clock;
   }
 
   const artCfg =
@@ -209,8 +234,8 @@ export function resolveRawSessionConfig(server: any): unknown {
     typeof server.currentRouterArtifacts.config === 'object'
       ? (server.currentRouterArtifacts.config as Record<string, unknown>)
       : null;
-  if (artCfg && Object.prototype.hasOwnProperty.call(artCfg, 'session')) {
-    return artCfg.session;
+  if (artCfg && Object.prototype.hasOwnProperty.call(artCfg, 'clock')) {
+    return artCfg.clock;
   }
   return undefined;
 }
@@ -364,8 +389,18 @@ export async function tickSessionDaemonInjectLoop(server: any): Promise<void> {
       if (typeof entry.isFile === 'function' && !entry.isFile()) {
         continue;
       }
-      const sessionId = entry.name.slice(0, -'.json'.length).trim();
-      if (!sessionId) {
+      const fileSessionId = entry.name.slice(0, -'.json'.length).trim();
+      const sessionId = toTmuxSessionScope(fileSessionId);
+      const tmuxSessionId = extractTmuxSessionIdFromScope(sessionId);
+      if (!sessionId || !tmuxSessionId) {
+        continue;
+      }
+
+      if (isTmuxSessionAlive(tmuxSessionId) === false) {
+        registry.unbindSessionScope(sessionId);
+        await clearClockTasksSnapshot({ sessionId, config: sessionConfig });
+        clearScopedRoutingStateByScope(sessionId);
+        clearScopedRoutingStateByScope(`${TMUX_SCOPE_PREFIX}${tmuxSessionId}`);
         continue;
       }
 
@@ -381,8 +416,8 @@ export async function tickSessionDaemonInjectLoop(server: any): Promise<void> {
         continue;
       }
 
-      const daemonId = extractSessionDaemonIdFromSessionScope(sessionId);
       const persistedTmuxSessionId = registry.resolveBoundTmuxSession(sessionId);
+      const daemonId = extractSessionDaemonIdFromSessionScope(sessionId);
       const daemonWorkdirHint = daemonId ? readString(registry.findByDaemonId(daemonId)?.workdir) : undefined;
       const boundWorkdirHint = registry.resolveBoundWorkdir(sessionId);
       let taskWorkdirHint: string | undefined;
@@ -394,11 +429,11 @@ export async function tickSessionDaemonInjectLoop(server: any): Promise<void> {
       const workdirHint = daemonWorkdirHint ?? boundWorkdirHint ?? taskWorkdirHint;
       const bind = registry.bindConversationSession({
         conversationSessionId: sessionId,
-        ...(persistedTmuxSessionId ? { tmuxSessionId: persistedTmuxSessionId } : {}),
+        tmuxSessionId: persistedTmuxSessionId || tmuxSessionId,
         ...(daemonId ? { daemonId } : {}),
         ...(workdirHint ? { workdir: workdirHint } : {})
       });
-      const tmuxSessionId = bind.tmuxSessionId || persistedTmuxSessionId;
+      const effectiveTmuxSessionId = bind.tmuxSessionId || persistedTmuxSessionId || tmuxSessionId;
 
       const text = [
         '[Session Reminder]: scheduled tasks are due.',
@@ -408,7 +443,7 @@ export async function tickSessionDaemonInjectLoop(server: any): Promise<void> {
 
       const injected = await registry.inject({
         sessionId,
-        ...(tmuxSessionId ? { tmuxSessionId } : {}),
+        ...(effectiveTmuxSessionId ? { tmuxSessionId: effectiveTmuxSessionId } : {}),
         ...(workdirHint ? { workdir: workdirHint } : {}),
         text,
         requestId: reservationId,
@@ -426,8 +461,8 @@ export async function tickSessionDaemonInjectLoop(server: any): Promise<void> {
           registry.unbindSessionScope(sessionId);
           clearedClockTasks = await clearClockTasksSnapshot({ sessionId, config: sessionConfig });
           clearScopedRoutingStateByScope(sessionId);
-          if (tmuxSessionId) {
-            clearScopedRoutingStateByScope(`tmux:${tmuxSessionId}`);
+          if (effectiveTmuxSessionId) {
+            clearScopedRoutingStateByScope(`${TMUX_SCOPE_PREFIX}${effectiveTmuxSessionId}`);
           }
         }
         if (

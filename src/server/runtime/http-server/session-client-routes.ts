@@ -15,6 +15,7 @@ import { isLocalRequest } from './daemon-admin-routes.js';
 import { isTmuxSessionAlive } from './tmux-session-probe.js';
 import {
   isSessionManagedTerminationEnabled,
+  normalizeClockSessionIdInput,
   normalizeTaskCreateItems,
   normalizeTaskPatch,
   parseBoolean,
@@ -225,7 +226,7 @@ export function registerSessionClientRoutes(app: Application): void {
       return;
     }
 
-    const querySessionId = parseString(req.query.sessionId);
+    const querySessionId = normalizeClockSessionIdInput(req.query.sessionId);
     const sessionIds = querySessionId ? [querySessionId] : await listClockSessionIdsSnapshot();
 
     const sessions = [] as Array<{ sessionId: string; taskCount: number; tasks: unknown[] }>;
@@ -246,9 +247,9 @@ export function registerSessionClientRoutes(app: Application): void {
       return;
     }
     const body = req.body && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : {};
-    const sessionId = parseString(body.sessionId);
+    const sessionId = normalizeClockSessionIdInput(body.sessionId);
     if (!sessionId) {
-      res.status(400).json({ ok: false, reason: 'sessionId is required' });
+      res.status(400).json({ ok: false, reason: 'sessionId is required and must resolve to tmux scope' });
       return;
     }
     const normalized = normalizeTaskCreateItems(body);
@@ -277,10 +278,10 @@ export function registerSessionClientRoutes(app: Application): void {
       return;
     }
     const body = req.body && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : {};
-    const sessionId = parseString(body.sessionId);
+    const sessionId = normalizeClockSessionIdInput(body.sessionId);
     const taskId = parseString(body.taskId);
     if (!sessionId || !taskId) {
-      res.status(400).json({ ok: false, reason: 'sessionId and taskId are required' });
+      res.status(400).json({ ok: false, reason: 'sessionId and taskId are required; sessionId must resolve to tmux scope' });
       return;
     }
 
@@ -316,9 +317,9 @@ export function registerSessionClientRoutes(app: Application): void {
       return;
     }
     const body = req.body && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : {};
-    const sessionId = parseString(body.sessionId);
+    const sessionId = normalizeClockSessionIdInput(body.sessionId);
     if (!sessionId) {
-      res.status(400).json({ ok: false, reason: 'sessionId is required' });
+      res.status(400).json({ ok: false, reason: 'sessionId is required and must resolve to tmux scope' });
       return;
     }
 
@@ -359,21 +360,27 @@ export function registerSessionClientRoutes(app: Application): void {
         res.status(400).json({ ok: false, reason: 'sessionScope is required for mode=unbind' });
         return;
       }
-      const unbound = sessionScope.startsWith('sessiond.') || sessionScope.startsWith('tmux:')
-        ? registry.unbindSessionScope(sessionScope)
-        : registry.unbindConversationSession(sessionScope);
+      const normalizedSessionScope = sessionScope.startsWith('sessiond.') || sessionScope.startsWith('tmux:')
+        ? sessionScope
+        : normalizeClockSessionIdInput(sessionScope) ?? sessionScope;
+      const unbound = normalizedSessionScope.startsWith('sessiond.') || normalizedSessionScope.startsWith('tmux:')
+        ? registry.unbindSessionScope(normalizedSessionScope)
+        : registry.unbindConversationSession(normalizedSessionScope);
       const clearTasks = parseBoolean(body.clearTasks) === true;
       let cleared = 0;
       if (clearTasks) {
-        cleared = await clearClockTasksSnapshot({ sessionId: sessionScope, config: sessionConfig });
+        cleared = await clearClockTasksSnapshot({
+          sessionId: normalizeClockSessionIdInput(normalizedSessionScope) ?? normalizedSessionScope,
+          config: sessionConfig
+        });
       }
-      const clearedStopMessage = sessionScope.startsWith('tmux:')
+      const clearedStopMessage = normalizedSessionScope.startsWith('tmux:')
         ? clearStopMessageTmuxScope({
-          tmuxSessionId: sessionScope.slice('tmux:'.length),
+          tmuxSessionId: normalizedSessionScope.slice('tmux:'.length),
           reason: 'session_unbind'
         })
         : undefined;
-      res.status(200).json({ ok: true, mode, sessionScope, unbound, cleared, clearedStopMessage });
+      res.status(200).json({ ok: true, mode, sessionScope: normalizedSessionScope, unbound, cleared, clearedStopMessage });
       return;
     }
 
@@ -395,7 +402,8 @@ export function registerSessionClientRoutes(app: Application): void {
 
     let clearedTaskSessions = 0;
     for (const cleanupSessionId of cleanupSessionIds) {
-      await clearClockTasksSnapshot({ sessionId: cleanupSessionId, config: sessionConfig });
+      const normalizedCleanupSessionId = normalizeClockSessionIdInput(cleanupSessionId) ?? cleanupSessionId;
+      await clearClockTasksSnapshot({ sessionId: normalizedCleanupSessionId, config: sessionConfig });
       clearedTaskSessions += 1;
     }
     let clearedStopMessageScopes = 0;

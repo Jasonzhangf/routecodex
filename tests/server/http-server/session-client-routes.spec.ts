@@ -517,16 +517,19 @@ describe('session-client routes', () => {
     try {
       const dueAt = new Date(Date.now() + 60_000).toISOString();
       const created = await localFetchByMethod(baseUrl, 'POST', '/daemon/session/tasks', {
-        sessionId: 'conv_clock_crud_1',
+        sessionId: 'rcc_clock_crud_1',
         dueAt,
         task: 'run-crud',
-        recurrence: { kind: 'interval', everyMinutes: 5, maxRuns: 3 }
+        recurrence: { kind: 'interval', everyMinutes: 5, maxRuns: 3 },
+        urls: ['https://example.com/task'],
+        paths: ['/tmp/clock-task']
       });
       expect(created.status).toBe(200);
       expect(created.payload?.ok).toBe(true);
       expect(created.payload?.scheduledCount).toBe(1);
+      expect(created.payload?.sessionId).toBe('tmux:rcc_clock_crud_1');
 
-      const listed = await localFetchByMethod(baseUrl, 'GET', '/daemon/session/tasks?sessionId=conv_clock_crud_1');
+      const listed = await localFetchByMethod(baseUrl, 'GET', '/daemon/session/tasks?sessionId=rcc_clock_crud_1');
       expect(listed.status).toBe(200);
       expect(listed.payload?.ok).toBe(true);
       expect(Array.isArray(listed.payload?.sessions)).toBe(true);
@@ -534,24 +537,32 @@ describe('session-client routes', () => {
       const taskId = listed.payload.sessions[0]?.tasks?.[0]?.taskId;
       expect(typeof taskId).toBe('string');
       expect(listed.payload.sessions[0]?.tasks?.[0]?.recurrence?.kind).toBe('interval');
-
+      expect(listed.payload.sessions[0]?.sessionId).toBe('tmux:rcc_clock_crud_1');
+      expect(listed.payload.sessions[0]?.tasks?.[0]?.prompt).toBe('run-crud');
       const patched = await localFetchByMethod(baseUrl, 'PATCH', '/daemon/session/tasks', {
-        sessionId: 'conv_clock_crud_1',
+        sessionId: 'rcc_clock_crud_1',
         taskId,
-        patch: { task: 'run-crud-updated' }
+        patch: {
+          task: 'run-crud-updated',
+          urls: ['https://example.com/task-updated'],
+          paths: ['/tmp/clock-task-updated']
+        }
       });
       expect(patched.status).toBe(200);
       expect(patched.payload?.ok).toBe(true);
+      expect(patched.payload?.updated?.prompt).toBe('run-crud-updated');
+      expect(patched.payload?.updated?.urls).toEqual(['https://example.com/task-updated']);
+      expect(patched.payload?.updated?.paths).toEqual(['/tmp/clock-task-updated']);
 
       const deleted = await localFetchByMethod(baseUrl, 'DELETE', '/daemon/session/tasks', {
-        sessionId: 'conv_clock_crud_1',
+        sessionId: 'rcc_clock_crud_1',
         taskId
       });
       expect(deleted.status).toBe(200);
       expect(deleted.payload?.ok).toBe(true);
       expect(deleted.payload?.removed).toBe(true);
 
-      const listedAfterDelete = await localFetchByMethod(baseUrl, 'GET', '/daemon/session/tasks?sessionId=conv_clock_crud_1');
+      const listedAfterDelete = await localFetchByMethod(baseUrl, 'GET', '/daemon/session/tasks?sessionId=rcc_clock_crud_1');
       expect(listedAfterDelete.status).toBe(200);
       expect(listedAfterDelete.payload?.sessions?.[0]?.taskCount).toBe(0);
     } finally {
