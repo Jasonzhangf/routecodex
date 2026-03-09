@@ -205,7 +205,13 @@ export function formatRequestTimingSummary(
 ): string {
   let label = '';
   const breakdownLabel = formatReleaseUsageTimingSummary(requestId, options);
-  if (resolveRuntimeBuildMode() === 'release') {
+  if (
+    breakdownLabel
+    && typeof options?.latencyMs === 'number'
+    && Number.isFinite(options.latencyMs)
+  ) {
+    label = breakdownLabel;
+  } else if (resolveRuntimeBuildMode() === 'release') {
     label = breakdownLabel;
   } else if (isStageTimingSummaryEnabled()) {
     label = breakdownLabel || peekRequestStageTimingLabel(requestId);
@@ -431,9 +437,6 @@ function shouldLogReleaseSummaryStage(stage: string): boolean {
 }
 
 function shouldTrackTimingBreakdownScope(stage: string): boolean {
-  if (resolveRuntimeBuildMode() !== 'release' && !isStageTimingSummaryEnabled()) {
-    return false;
-  }
   const normalized = stage.trim().toLowerCase();
   return normalized === 'hub.start'
     || normalized === 'hub.completed'
