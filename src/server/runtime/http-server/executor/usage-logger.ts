@@ -14,9 +14,15 @@ export function logUsageSummary(
     latencyMs: number;
     sessionId?: unknown;
     conversationId?: unknown;
+  },
+  options?: {
+    terminalTiming?: boolean;
   }
 ): void {
   if (!isUsageLoggingEnabled()) {
+    if (options?.terminalTiming) {
+      formatRequestTimingSummary(requestId, { terminal: true });
+    }
     return;
   }
   const providerLabel = buildProviderLabel(info.providerKey, info.model) ?? '-';
@@ -26,7 +32,9 @@ export function logUsageSummary(
     sessionId: info.sessionId,
     conversationId: info.conversationId
   });
-  const timingSuffix = formatRequestTimingSummary(requestId);
+  const timingSuffix = formatRequestTimingSummary(requestId, {
+    terminal: options?.terminalTiming === true
+  });
   const line = `[usage] request ${requestId} provider=${providerLabel} latency=${latency}ms (${usageText})${timingSuffix}`;
   console.log(colorizeRequestLog(line, requestId, {
     sessionId: info.sessionId,

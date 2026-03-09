@@ -3,6 +3,7 @@ import type { ReadableStream as NodeReadableStream } from 'node:stream/web';
 import type { Response } from 'express';
 import type { PipelineExecutionResult } from './types.js';
 import { formatRequestTimingSummary, logPipelineStage } from '../utils/stage-logger.js';
+import { logUsageSummary } from '../runtime/http-server/executor/usage-logger.js';
 import { DEFAULT_TIMEOUTS } from '../../constants/index.js';
 import { stripInternalKeysDeep } from '../../utils/strip-internal-keys.js';
 import { isSnapshotsEnabled, writeServerSnapshot } from '../../utils/snapshot-writer.js';
@@ -58,7 +59,7 @@ function logStreamRequestComplete(
   }
   const targetEndpoint = endpoint && endpoint.trim() ? endpoint.trim() : '/unknown';
   const finishReasonLabel = finishReason ? `, finish_reason=${finishReason}` : '';
-  const timingSuffix = formatRequestTimingSummary(requestLabel, { terminal: true });
+  const timingSuffix = formatRequestTimingSummary(requestLabel);
   const line = `✅ [${targetEndpoint}] ${formatTimestamp()} request ${requestLabel} completed (status=${status}${finishReasonLabel})${timingSuffix}`;
   console.log(colorizeRequestLog(line, requestLabel));
 }
@@ -199,10 +200,31 @@ export function sendPipelineResponse(
       return;
     }
     responseCompletedLogged = true;
+    const elapsedMs = Date.now() - responseStartedAtMs;
     logPipelineStage('response.completed', requestLabel, {
-      elapsedMs: Date.now() - responseStartedAtMs,
+      elapsedMs,
       ...(details ?? {})
     });
+    const usageLogInfo = result.usageLogInfo;
+    if (usageLogInfo) {
+      logPipelineStage('request.usage_log.start', requestLabel, {
+        providerKey: usageLogInfo.providerKey
+      });
+      logUsageSummary(requestLabel, {
+        providerKey: usageLogInfo.providerKey,
+        model: usageLogInfo.model,
+        usage: usageLogInfo.usage as any,
+        latencyMs: Date.now() - usageLogInfo.requestStartedAtMs,
+        sessionId: usageLogInfo.sessionId,
+        conversationId: usageLogInfo.conversationId
+      });
+      logPipelineStage('request.usage_log.completed', requestLabel, {
+        providerKey: usageLogInfo.providerKey
+      });
+      formatRequestTimingSummary(requestLabel, { terminal: true });
+      return;
+    }
+    formatRequestTimingSummary(requestLabel, { terminal: true });
   };
 
   if (forceSSE && !expectsStream) {
@@ -263,6 +285,7 @@ export function sendPipelineResponse(
     let eventCount = 0;
     let ended = false;
     let completedLogged = false;
+    let cleanupLogged = false;
     const finishTracker: SseFinishReasonTracker = {
       buffer: '',
       finishReason:
@@ -381,6 +404,10 @@ export function sendPipelineResponse(
     }
 
     const cleanup = () => {
+      if (cleanupLogged) {
+        return;
+      }
+      cleanupLogged = true;
       clearTimers();
       try {
         stream.destroy?.();

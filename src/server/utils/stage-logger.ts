@@ -15,6 +15,7 @@ type RequestStageTimeline = {
 };
 const REQUEST_STAGE_TIMELINES = new Map<string, RequestStageTimeline>();
 const REQUEST_SCOPE_STAGE_STARTS = new Map<string, number>();
+const REQUEST_SCOPE_STAGE_ELAPSED = new Map<string, number>();
 
 const COLOR_RESET = '\x1b[0m';
 const COLOR_INFO = '\x1b[90m';
@@ -83,6 +84,17 @@ function computeStageTimingSummaryEnabled(): boolean {
   );
 }
 
+function resolveRuntimeBuildMode(): 'dev' | 'release' {
+  const raw = String(process.env.ROUTECODEX_BUILD_MODE ?? process.env.BUILD_MODE ?? '').trim().toLowerCase();
+  if (raw === 'release') {
+    return 'release';
+  }
+  if (raw === 'dev' || raw === 'development') {
+    return 'dev';
+  }
+  return buildInfo.mode === 'release' ? 'release' : 'dev';
+}
+
 function isStageVerboseEnabled(): boolean {
   if (cachedStageVerboseFlag === null) {
     cachedStageVerboseFlag = computeStageVerboseEnabled();
@@ -116,6 +128,7 @@ export function logPipelineStage(stage: string, requestId: string, details?: Rec
   const timingSummaryEnabled = isStageTimingSummaryEnabled();
   const { scope, action } = parseStage(stage);
   const level = detectStageLevel(stage);
+  const normalizedStage = stage.trim().toLowerCase();
   const releaseSummaryStage = shouldLogReleaseSummaryStage(stage);
   const releaseSummaryTrackedScope = shouldTrackReleaseSummaryScope(stage);
 
@@ -126,6 +139,9 @@ export function logPipelineStage(stage: string, requestId: string, details?: Rec
   if ((timingEnabled || releaseSummaryTrackedScope) && level === 'start') {
     touchRequestStageTimeline(requestId);
     markScopeStageStart(requestId, scope);
+    if (normalizedStage === 'response.dispatch.start') {
+      markScopeStageStart(requestId, 'response');
+    }
   }
 
   if (!isStageLoggingEnabled() && !releaseSummaryStage) {
@@ -135,6 +151,14 @@ export function logPipelineStage(stage: string, requestId: string, details?: Rec
   const verbose = isStageVerboseEnabled();
 
   const scopeElapsedMs = resolveScopeStageElapsedMs(requestId, scope, level);
+  if (
+    releaseSummaryTrackedScope
+    && (level === 'success' || level === 'error')
+    && typeof details?.elapsedMs === 'number'
+    && Number.isFinite(details.elapsedMs)
+  ) {
+    REQUEST_SCOPE_STAGE_ELAPSED.set(scopeStageKey(requestId, scope), Math.max(0, details.elapsedMs));
+  }
 
   if (!shouldLogStage(stage, scope, level, verbose, timingEnabled, releaseSummaryStage)) {
     return;
@@ -171,10 +195,12 @@ export function logPipelineStage(stage: string, requestId: string, details?: Rec
 }
 
 export function formatRequestTimingSummary(requestId: string, options?: { terminal?: boolean }): string {
-  if (!isStageTimingSummaryEnabled()) {
-    return '';
+  let label = '';
+  if (resolveRuntimeBuildMode() === 'release') {
+    label = formatReleaseUsageTimingSummary(requestId);
+  } else if (isStageTimingSummaryEnabled()) {
+    label = peekRequestStageTimingLabel(requestId);
   }
-  const label = peekRequestStageTimingLabel(requestId);
   if (options?.terminal) {
     clearRequestStageState(requestId);
   }
@@ -336,7 +362,9 @@ function resolveScopeStageElapsedMs(requestId: string, scope: string, level: Sta
     return undefined;
   }
   REQUEST_SCOPE_STAGE_STARTS.delete(key);
-  return Math.max(0, Date.now() - startedAtMs);
+  const elapsedMs = Math.max(0, Date.now() - startedAtMs);
+  REQUEST_SCOPE_STAGE_ELAPSED.set(key, elapsedMs);
+  return elapsedMs;
 }
 
 function formatReleaseSummaryTimingLabel(elapsedMs: number | undefined): string {
@@ -347,17 +375,18 @@ function formatReleaseSummaryTimingLabel(elapsedMs: number | undefined): string 
 }
 
 function shouldLogReleaseSummaryStage(stage: string): boolean {
-  if (buildInfo.mode !== 'release') {
+  if (resolveRuntimeBuildMode() !== 'release') {
     return false;
   }
   const normalized = stage.trim().toLowerCase();
   return normalized === 'hub.completed'
     || normalized === 'hub.response.completed'
+    || normalized === 'response.completed'
     || normalized === 'provider.send.completed';
 }
 
 function shouldTrackReleaseSummaryScope(stage: string): boolean {
-  if (buildInfo.mode !== 'release') {
+  if (resolveRuntimeBuildMode() !== 'release') {
     return false;
   }
   const normalized = stage.trim().toLowerCase();
@@ -365,6 +394,8 @@ function shouldTrackReleaseSummaryScope(stage: string): boolean {
     || normalized === 'hub.completed'
     || normalized === 'hub.response.start'
     || normalized === 'hub.response.completed'
+    || normalized === 'response.dispatch.start'
+    || normalized === 'response.completed'
     || normalized === 'provider.send.start'
     || normalized === 'provider.send.completed';
 }
@@ -374,6 +405,11 @@ function clearRequestStageState(requestId: string): void {
   for (const key of REQUEST_SCOPE_STAGE_STARTS.keys()) {
     if (key.startsWith(`${requestId}::`)) {
       REQUEST_SCOPE_STAGE_STARTS.delete(key);
+    }
+  }
+  for (const key of REQUEST_SCOPE_STAGE_ELAPSED.keys()) {
+    if (key.startsWith(`${requestId}::`)) {
+      REQUEST_SCOPE_STAGE_ELAPSED.delete(key);
     }
   }
 }
@@ -439,11 +475,26 @@ function peekRequestStageTimingLabel(requestId: string): string {
   return ` t+${formatDurationMs(totalMs)} Δ${formatDurationMs(deltaMs)}`;
 }
 
+function readStoredScopeStageElapsedMs(requestId: string, scope: string): number | undefined {
+  return REQUEST_SCOPE_STAGE_ELAPSED.get(scopeStageKey(requestId, scope));
+}
+
+function formatReleaseUsageTimingSummary(requestId: string): string {
+  const parts: string[] = [];
+  for (const scope of ['hub', 'provider.send', 'hub.response', 'response']) {
+    const elapsedMs = readStoredScopeStageElapsedMs(requestId, scope);
+    if (elapsedMs === undefined) {
+      continue;
+    }
+    parts.push(`${scope}=${formatDurationMs(elapsedMs)}`);
+  }
+  if (!parts.length) {
+    return '';
+  }
+  return ` timing={${parts.join(', ')}}`;
+}
+
 function isTerminalStage(stage: string): boolean {
-  const normalized = stage.trim().toLowerCase();
-  return normalized === 'response.json.completed'
-    || normalized === 'response.json.empty'
-    || normalized === 'response.sse.stream.end'
-    || normalized === 'response.sse.stream.error'
-    || normalized === 'response.sse.missing';
+  void stage;
+  return false;
 }

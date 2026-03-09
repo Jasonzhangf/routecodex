@@ -18,7 +18,6 @@ import { ensureHubPipeline, runHubPipeline } from './executor-pipeline.js';
 
 // Import from new executor submodules
 import {
-  isUsageLoggingEnabled,
   isVerboseErrorLoggingEnabled
 } from './executor/env-config.js';
 import {
@@ -64,7 +63,6 @@ import {
 } from './executor/request-executor-core-utils.js';
 import { resolveProviderRuntimeOrThrow } from './executor/provider-runtime-resolver.js';
 import { resolveProviderRequestContext } from './executor/provider-request-context.js';
-import { logUsageSummary } from './executor/usage-logger.js';
 import { isServerToolEnabled } from './servertool-admin-state.js';
 import { registerRequestLogContext } from '../../utils/request-log-color.js';
 export type RequestExecutorDeps = {
@@ -540,23 +538,17 @@ export class HubRequestExecutor implements RequestExecutor {
           });
 
           recordAttempt({ usage: aggregatedUsage, error: false });
-          this.logStage('request.usage_log.start', input.requestId, {
-            providerKey: target.providerKey,
-            attempt
-          });
-          logUsageSummary(input.requestId, {
-            providerKey: target.providerKey,
-            model: providerModel,
-            usage: aggregatedUsage,
-            latencyMs: Date.now() - requestStartedAt,
-            sessionId: mergedMetadata.sessionId,
-            conversationId: mergedMetadata.conversationId
-          });
-          this.logStage('request.usage_log.completed', input.requestId, {
-            providerKey: target.providerKey,
-            attempt
-          });
-          return converted;
+          return {
+            ...converted,
+            usageLogInfo: {
+              providerKey: target.providerKey,
+              model: providerModel,
+              usage: aggregatedUsage as Record<string, unknown> | undefined,
+              requestStartedAtMs: requestStartedAt,
+              sessionId: mergedMetadata.sessionId,
+              conversationId: mergedMetadata.conversationId
+            }
+          };
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error ?? 'Unknown error');
           this.logStage('provider.send.error', input.requestId, {

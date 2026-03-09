@@ -1,8 +1,6 @@
 import { PassThrough, Readable } from 'node:stream';
 import { afterAll, beforeEach, describe, expect, it, jest } from '@jest/globals';
 
-import { sendPipelineResponse } from '../../../src/server/handlers/handler-response-utils.js';
-
 class MockResponse extends PassThrough {
   public statusCode = 200;
   public headers = new Map<string, string>();
@@ -34,7 +32,9 @@ describe('sendPipelineResponse SSE completion logging', () => {
 
   beforeEach(() => {
     process.env.ROUTECODEX_HTTP_LOG_VERBOSE = '1';
+    process.env.ROUTECODEX_STAGE_TIMING = '1';
     logSpy.mockClear();
+    jest.resetModules();
   });
 
   afterAll(() => {
@@ -43,10 +43,20 @@ describe('sendPipelineResponse SSE completion logging', () => {
     } else {
       process.env.ROUTECODEX_HTTP_LOG_VERBOSE = originalVerbose;
     }
+    delete process.env.ROUTECODEX_STAGE_TIMING;
     logSpy.mockRestore();
   });
 
   it('logs finish_reason after streamed responses complete', async () => {
+    jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', () => ({
+      writeSnapshotViaHooks: async () => undefined
+    }));
+    jest.unstable_mockModule('../../../src/utils/snapshot-writer.js', () => ({
+      isSnapshotsEnabled: () => false,
+      writeServerSnapshot: async () => undefined
+    }));
+    const { sendPipelineResponse } = await import('../../../src/server/handlers/handler-response-utils.js');
+
     const nowSpy = jest.spyOn(Date, 'now');
     nowSpy
       .mockReturnValueOnce(1000)
@@ -83,5 +93,8 @@ describe('sendPipelineResponse SSE completion logging', () => {
 
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('finish_reason=tool_calls'));
     expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining('t+75ms'));
+    expect(logSpy.mock.calls.filter((call) => String(call?.[0] ?? '').includes('[response.sse.stream][req-stream-finish] end'))).toHaveLength(1);
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('[response][req-stream-finish] completed'));
+    expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining('[response][req-stream-finish] completed t+0ms'));
   });
 });

@@ -1,24 +1,8 @@
 import type { UnknownObject } from '../../../types/common-types.js';
 import { asRecord } from './provider-utils.js';
-import { buildInfo } from '../../../build-info.js';
 import { HealthManagerModule } from '../../../manager/modules/health/index.js';
 import { RoutingStateManagerModule } from '../../../manager/modules/routing/index.js';
-
-function applyDefaultStageTimingMode(): void {
-  if (buildInfo.mode === 'dev') {
-    if (!process.env.ROUTECODEX_STAGE_TIMING) {
-      process.env.ROUTECODEX_STAGE_TIMING = '1';
-    }
-    if (!process.env.ROUTECODEX_HUB_STAGE_TIMING_DETAIL) {
-      process.env.ROUTECODEX_HUB_STAGE_TIMING_DETAIL = '1';
-    }
-    return;
-  }
-
-  if (!process.env.ROUTECODEX_HUB_STAGE_TIMING_DETAIL) {
-    process.env.ROUTECODEX_HUB_STAGE_TIMING_DETAIL = '0';
-  }
-}
+import { applyDefaultStageTimingMode, resolveRuntimeBuildMode } from './stage-timing-defaults.js';
 
 export async function setupRuntime(server: any, userConfig: UnknownObject): Promise<void> {
   applyDefaultStageTimingMode();
@@ -57,7 +41,7 @@ export async function setupRuntime(server: any, userConfig: UnknownObject): Prom
       ? null
       : toolSurfaceModeRaw === 'observe' || toolSurfaceModeRaw === 'shadow' || toolSurfaceModeRaw === 'enforce'
         ? toolSurfaceModeRaw
-        : buildInfo.mode === 'dev'
+        : resolveRuntimeBuildMode() === 'dev'
           ? 'enforce'
           : null;
 
@@ -74,7 +58,7 @@ export async function setupRuntime(server: any, userConfig: UnknownObject): Prom
   }
 
   if (!process.env.ROUTECODEX_HUB_FOLLOWUP_MODE) {
-    if (buildInfo.mode === 'dev') {
+    if (resolveRuntimeBuildMode() === 'dev') {
       process.env.ROUTECODEX_HUB_FOLLOWUP_MODE = 'shadow';
     }
   }

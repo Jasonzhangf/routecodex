@@ -15,6 +15,14 @@ export interface PipelineExecutionResult {
   status?: number;
   headers?: Record<string, string>;
   body?: unknown;
+  usageLogInfo?: {
+    providerKey?: string;
+    model?: string;
+    usage?: Record<string, unknown>;
+    requestStartedAtMs: number;
+    sessionId?: unknown;
+    conversationId?: unknown;
+  };
 }
 
 export interface HandlerContext {

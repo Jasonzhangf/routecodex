@@ -1,7 +1,6 @@
 import fsp from 'fs/promises';
 import os from 'os';
 import path from 'path';
-import { writeSnapshotViaHooks } from '../modules/llmswitch/bridge.js';
 import { runtimeFlags } from '../runtime/runtime-flags.js';
 
 export type ServerSnapshotPhase =
@@ -19,6 +18,10 @@ export type ServerSnapshotPhase =
 type SnapshotGlobal = {
   rccSnapshotsEnabled?: boolean;
 };
+
+type SnapshotHookWriter = (scope: string, payload: Record<string, unknown>) => Promise<void>;
+
+let snapshotHookWriterPromise: Promise<SnapshotHookWriter | null> | null = null;
 
 export function isSnapshotsEnabled(): boolean {
   // 优先使用运行时全局覆盖（由服务器根据 virtualRouter config 注入）
@@ -84,6 +87,15 @@ async function writeUniqueFile(dir: string, baseName: string, contents: string):
   await fsp.writeFile(path.join(dir, fallback), contents, 'utf-8');
 }
 
+async function loadSnapshotHookWriter(): Promise<SnapshotHookWriter | null> {
+  if (!snapshotHookWriterPromise) {
+    snapshotHookWriterPromise = import('../modules/llmswitch/bridge.js')
+      .then((module) => (typeof module.writeSnapshotViaHooks === 'function' ? (module.writeSnapshotViaHooks as SnapshotHookWriter) : null))
+      .catch(() => null);
+  }
+  return snapshotHookWriterPromise;
+}
+
 export async function writeServerSnapshot(options: {
   phase: ServerSnapshotPhase;
   requestId: string;
@@ -101,7 +113,8 @@ export async function writeServerSnapshot(options: {
 
   // 1) 尝试通过 llmswitch-core hooks 写快照（供核心调试使用）
   try {
-    await writeSnapshotViaHooks('server', {
+    const writeSnapshotViaHooks = await loadSnapshotHookWriter();
+    await writeSnapshotViaHooks?.('server', {
       endpoint,
       stage: String(options.phase),
       requestId: options.requestId,
