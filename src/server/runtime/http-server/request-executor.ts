@@ -410,6 +410,13 @@ export class HubRequestExecutor implements RequestExecutor {
             serverToolsEnabled,
             attempt
           });
+          const hubResponseStartedAtMs = Date.now();
+          this.logStage('hub.response.start', input.requestId, {
+            providerKey: target.providerKey,
+            protocol: providerProtocol,
+            processMode: pipelineResult.processMode,
+            attempt
+          });
           const converted = await this.convertProviderResponseIfNeeded({
             entryEndpoint: input.entryEndpoint,
             providerProtocol,
@@ -426,6 +433,13 @@ export class HubRequestExecutor implements RequestExecutor {
           this.logStage('provider.response_convert.completed', input.requestId, {
             providerKey: target.providerKey,
             status: converted.status,
+            hasBody: converted.body !== undefined && converted.body !== null,
+            attempt
+          });
+          this.logStage('hub.response.completed', input.requestId, {
+            providerKey: target.providerKey,
+            status: converted.status,
+            elapsedMs: Date.now() - hubResponseStartedAtMs,
             hasBody: converted.body !== undefined && converted.body !== null,
             attempt
           });

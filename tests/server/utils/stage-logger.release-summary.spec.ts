@@ -37,10 +37,13 @@ describe('stage logger release summary mode', () => {
     logPipelineStage('hub.completed', 'req_release', { route: 'thinking', elapsedMs: 300 });
     logPipelineStage('provider.send.start', 'req_release', {});
     logPipelineStage('provider.send.completed', 'req_release', { status: 200, elapsedMs: 600 });
+    logPipelineStage('hub.response.start', 'req_release', {});
+    logPipelineStage('hub.response.completed', 'req_release', { status: 200, elapsedMs: 90 });
     logPipelineStage('response.json.completed', 'req_release', { status: 200 });
 
-    expect(logSpy).toHaveBeenCalledTimes(2);
+    expect(logSpy).toHaveBeenCalledTimes(3);
     expect(String(logSpy.mock.calls[0]?.[0] ?? '')).toContain('[hub][req_release] completed total=300ms');
     expect(String(logSpy.mock.calls[1]?.[0] ?? '')).toContain('[provider.send][req_release] completed total=600ms');
+    expect(String(logSpy.mock.calls[2]?.[0] ?? '')).toContain('[hub.response][req_release] completed total=90ms');
   });
 });

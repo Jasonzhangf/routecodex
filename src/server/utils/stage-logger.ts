@@ -351,7 +351,9 @@ function shouldLogReleaseSummaryStage(stage: string): boolean {
     return false;
   }
   const normalized = stage.trim().toLowerCase();
-  return normalized === 'hub.completed' || normalized === 'provider.send.completed';
+  return normalized === 'hub.completed'
+    || normalized === 'hub.response.completed'
+    || normalized === 'provider.send.completed';
 }
 
 function shouldTrackReleaseSummaryScope(stage: string): boolean {
@@ -361,6 +363,8 @@ function shouldTrackReleaseSummaryScope(stage: string): boolean {
   const normalized = stage.trim().toLowerCase();
   return normalized === 'hub.start'
     || normalized === 'hub.completed'
+    || normalized === 'hub.response.start'
+    || normalized === 'hub.response.completed'
     || normalized === 'provider.send.start'
     || normalized === 'provider.send.completed';
 }
