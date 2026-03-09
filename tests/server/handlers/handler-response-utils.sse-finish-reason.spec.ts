@@ -47,6 +47,13 @@ describe('sendPipelineResponse SSE completion logging', () => {
   });
 
   it('logs finish_reason after streamed responses complete', async () => {
+    const nowSpy = jest.spyOn(Date, 'now');
+    nowSpy
+      .mockReturnValueOnce(1000)
+      .mockReturnValueOnce(1010)
+      .mockReturnValueOnce(1075)
+      .mockReturnValueOnce(1080);
+
     const res = new MockResponse();
     const stream = Readable.from([
       'event: response.output_item.added\n',
@@ -75,5 +82,6 @@ describe('sendPipelineResponse SSE completion logging', () => {
     await finished;
 
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('finish_reason=tool_calls'));
+    expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining('t+75ms'));
   });
 });

@@ -2,13 +2,14 @@ import { Readable, PassThrough } from 'node:stream';
 import type { ReadableStream as NodeReadableStream } from 'node:stream/web';
 import type { Response } from 'express';
 import type { PipelineExecutionResult } from './types.js';
-import { logPipelineStage } from '../utils/stage-logger.js';
+import { formatRequestTimingSummary, logPipelineStage } from '../utils/stage-logger.js';
 import { DEFAULT_TIMEOUTS } from '../../constants/index.js';
 import { stripInternalKeysDeep } from '../../utils/strip-internal-keys.js';
 import { isSnapshotsEnabled, writeServerSnapshot } from '../../utils/snapshot-writer.js';
 import { resolveEffectiveRequestId } from '../utils/request-id-manager.js';
 import { buildInfo } from '../../build-info.js';
 import { deriveFinishReason, STREAM_LOG_FINISH_REASON_KEY } from '../utils/finish-reason.js';
+import { colorizeRequestLog } from '../utils/request-log-color.js';
 
 const BLOCKED_HEADERS = new Set(['content-length', 'transfer-encoding', 'connection', 'content-encoding']);
 
@@ -57,7 +58,9 @@ function logStreamRequestComplete(
   }
   const targetEndpoint = endpoint && endpoint.trim() ? endpoint.trim() : '/unknown';
   const finishReasonLabel = finishReason ? `, finish_reason=${finishReason}` : '';
-  console.log(`✅ [${targetEndpoint}] ${formatTimestamp()} request ${requestLabel} completed (status=${status}${finishReasonLabel})`);
+  const timingSuffix = formatRequestTimingSummary(requestLabel, { terminal: true });
+  const line = `✅ [${targetEndpoint}] ${formatTimestamp()} request ${requestLabel} completed (status=${status}${finishReasonLabel})${timingSuffix}`;
+  console.log(colorizeRequestLog(line, requestLabel));
 }
 
 function trackSseFinishReason(tracker: SseFinishReasonTracker, chunk: unknown): void {

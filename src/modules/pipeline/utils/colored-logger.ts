@@ -1,4 +1,5 @@
 import type { LogData } from "../../../types/common-types.js";
+import { resolveSessionAnsiColor } from "../../../utils/session-log-color.js";
 
 export type ColoredLogLevel = "debug" | "info" | "warn" | "error";
 
@@ -9,9 +10,6 @@ export interface ColoredLoggerOptions {
 export class ColoredLogger {
   private readonly isDev: boolean;
   private readonly colors: Record<ColoredLogLevel, (msg: string) => string>;
-  private readonly sessionColors: ((msg: string) => string)[];
-  private sessionColorIndex = 0;
-  private readonly sessionColorMap = new Map<string, (msg: string) => string>();
 
   constructor(opts: ColoredLoggerOptions) {
     this.isDev = opts.isDev;
@@ -21,17 +19,6 @@ export class ColoredLogger {
       warn: (msg) => `\x1b[33m${msg}\x1b[0m`, // yellow
       error: (msg) => `\x1b[31m${msg}\x1b[0m`, // red
     };
-    // Session color palette - distinct colors for different sessions
-    this.sessionColors = [
-      (msg) => `\x1b[31m${msg}\x1b[0m`, // red
-      (msg) => `\x1b[32m${msg}\x1b[0m`, // green
-      (msg) => `\x1b[33m${msg}\x1b[0m`, // yellow
-      (msg) => `\x1b[34m${msg}\x1b[0m`, // blue
-      (msg) => `\x1b[35m${msg}\x1b[0m`, // magenta
-      (msg) => `\x1b[36m${msg}\x1b[0m`, // cyan
-      (msg) => `\x1b[38;5;208m${msg}\x1b[0m`, // orange
-      (msg) => `\x1b[38;5;141m${msg}\x1b[0m`, // light purple
-    ];
   }
 
   private format(data?: LogData): string {
@@ -91,20 +78,10 @@ export class ColoredLogger {
   }
 
   private resolveSessionColor(sessionId?: string): (msg: string) => string {
-    if (!sessionId) {
-      // Default color for no session
-      return (msg) => `\x1b[90m${msg}\x1b[0m`; // gray
+    const color = resolveSessionAnsiColor(sessionId);
+    if (!color) {
+      return (msg) => `\x1b[90m${msg}\x1b[0m`;
     }
-    // Check if we already assigned a color to this session
-    const existingColor = this.sessionColorMap.get(sessionId);
-    if (existingColor) {
-      return existingColor;
-    }
-    // Assign a new color from the palette (round-robin)
-    const color =
-      this.sessionColors[this.sessionColorIndex % this.sessionColors.length];
-    this.sessionColorMap.set(sessionId, color);
-    this.sessionColorIndex++;
-    return color;
+    return (msg) => `${color}${msg}\x1b[0m`;
   }
 }

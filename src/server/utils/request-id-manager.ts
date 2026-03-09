@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { rebindRequestTimingTimeline } from './stage-logger.js';
 
 interface RequestIdMeta {
   entryEndpoint?: string;
@@ -159,6 +160,7 @@ function registerAlias(originalId: string, aliasId: string): void {
   if (!originalId || originalId === aliasId) {
     return;
   }
+  rebindRequestTimingTimeline(originalId, aliasId);
   REQUEST_ALIAS.set(originalId, {
     value: aliasId,
     expiresAtMs: Date.now() + COMPONENT_TTL_MS

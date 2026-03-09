@@ -4,7 +4,24 @@ import { buildInfo } from '../../../build-info.js';
 import { HealthManagerModule } from '../../../manager/modules/health/index.js';
 import { RoutingStateManagerModule } from '../../../manager/modules/routing/index.js';
 
+function applyDefaultStageTimingMode(): void {
+  if (buildInfo.mode === 'dev') {
+    if (!process.env.ROUTECODEX_STAGE_TIMING) {
+      process.env.ROUTECODEX_STAGE_TIMING = '1';
+    }
+    if (!process.env.ROUTECODEX_HUB_STAGE_TIMING_DETAIL) {
+      process.env.ROUTECODEX_HUB_STAGE_TIMING_DETAIL = '1';
+    }
+    return;
+  }
+
+  if (!process.env.ROUTECODEX_HUB_STAGE_TIMING_DETAIL) {
+    process.env.ROUTECODEX_HUB_STAGE_TIMING_DETAIL = '0';
+  }
+}
+
 export async function setupRuntime(server: any, userConfig: UnknownObject): Promise<void> {
+  applyDefaultStageTimingMode();
   server.userConfig = asRecord(userConfig);
   server.ensureProviderProfilesFromUserConfig();
   const routerInput = server.resolveVirtualRouterInput(server.userConfig);

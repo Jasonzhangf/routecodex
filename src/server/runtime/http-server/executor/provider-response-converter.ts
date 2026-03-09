@@ -19,6 +19,7 @@ import { extractSseWrapperError } from './sse-error-handler.js';
 import { isRateLimitLikeError } from './request-retry-helpers.js';
 import { extractUsageFromResult } from './usage-aggregator.js';
 import { deriveFinishReason, STREAM_LOG_FINISH_REASON_KEY } from '../../../utils/finish-reason.js';
+import { logPipelineStage } from '../../../utils/stage-logger.js';
 
 const FOLLOWUP_SESSION_HEADER_KEYS = new Set([
   'sessionid',
@@ -303,12 +304,20 @@ export async function convertProviderResponseIfNeeded(
     if (!serverToolsEnabled) {
       (adapterContext as Record<string, unknown>).serverToolsDisabled = true;
     }
+    logPipelineStage('convert.snapshot_recorder.start', options.requestId, {
+      entryEndpoint: options.entryEndpoint || entry,
+      providerProtocol: options.providerProtocol
+    });
     const stageRecorder = await bridgeCreateSnapshotRecorder(
       adapterContext,
       typeof (adapterContext as Record<string, unknown>).entryEndpoint === 'string'
         ? ((adapterContext as Record<string, unknown>).entryEndpoint as string)
         : options.entryEndpoint || entry
     );
+    logPipelineStage('convert.snapshot_recorder.completed', options.requestId, {
+      entryEndpoint: options.entryEndpoint || entry,
+      providerProtocol: options.providerProtocol
+    });
 
     const providerInvoker = async (invokeOptions: {
       providerKey: string;
@@ -320,6 +329,11 @@ export async function convertProviderResponseIfNeeded(
       requestId: string;
       routeHint?: string;
     }): Promise<{ providerResponse: Record<string, unknown> }> => {
+      logPipelineStage('convert.provider_invoke.start', invokeOptions.requestId, {
+        providerKey: invokeOptions.providerKey,
+        providerProtocol: invokeOptions.providerProtocol,
+        routeHint: invokeOptions.routeHint
+      });
       if (invokeOptions.routeHint) {
         const carrier = invokeOptions.payload as { metadata?: Record<string, unknown> };
         const existingMeta =
@@ -336,16 +350,37 @@ export async function convertProviderResponseIfNeeded(
       if (!runtimeKey) {
         throw new Error(`Runtime for provider ${invokeOptions.providerKey} not initialized`);
       }
+      logPipelineStage('convert.provider_invoke.runtime_resolved', invokeOptions.requestId, {
+        providerKey: invokeOptions.providerKey,
+        runtimeKey
+      });
       const handle = deps.runtimeManager.getHandleByRuntimeKey(runtimeKey);
       if (!handle) {
         throw new Error(`Provider runtime ${runtimeKey} not found`);
       }
+      logPipelineStage('convert.provider_invoke.send.start', invokeOptions.requestId, {
+        providerKey: invokeOptions.providerKey,
+        runtimeKey
+      });
       const providerResponse = await handle.instance.processIncoming(invokeOptions.payload);
+      logPipelineStage('convert.provider_invoke.send.completed', invokeOptions.requestId, {
+        providerKey: invokeOptions.providerKey,
+        runtimeKey
+      });
       const normalized = normalizeProviderResponse(providerResponse);
+      logPipelineStage('convert.provider_invoke.normalize.completed', invokeOptions.requestId, {
+        providerKey: invokeOptions.providerKey,
+        runtimeKey,
+        status: normalized.status
+      });
       const bodyPayload =
         normalized.body && typeof normalized.body === 'object'
           ? (normalized.body as Record<string, unknown>)
           : (normalized as unknown as Record<string, unknown>);
+      logPipelineStage('convert.provider_invoke.completed', invokeOptions.requestId, {
+        providerKey: invokeOptions.providerKey,
+        runtimeKey
+      });
       return { providerResponse: bodyPayload };
     };
 
@@ -355,6 +390,9 @@ export async function convertProviderResponseIfNeeded(
       body: Record<string, unknown>;
       metadata?: Record<string, unknown>;
     }): Promise<{ body?: Record<string, unknown>; __sse_responses?: unknown; format?: string }> => {
+      logPipelineStage('convert.reenter.start', reenterOpts.requestId, {
+        entryEndpoint: reenterOpts.entryEndpoint || options.entryEndpoint || entry
+      });
       const nestedEntry = reenterOpts.entryEndpoint || options.entryEndpoint || entry;
       const nestedExtra = asRecord(reenterOpts.metadata) ?? {};
 
@@ -401,6 +439,10 @@ export async function convertProviderResponseIfNeeded(
       };
 
       const nestedResult = await deps.executeNested(nestedInput);
+      logPipelineStage('convert.reenter.completed', reenterOpts.requestId, {
+        entryEndpoint: nestedEntry,
+        status: nestedResult.status
+      });
       const nestedBody =
         nestedResult.body && typeof nestedResult.body === 'object'
           ? (nestedResult.body as Record<string, unknown>)
@@ -414,6 +456,9 @@ export async function convertProviderResponseIfNeeded(
       body?: Record<string, unknown>;
       metadata?: Record<string, unknown>;
     }): Promise<{ ok: boolean; reason?: string }> => {
+      logPipelineStage('convert.client_inject.start', injectOpts.requestId, {
+        entryEndpoint: injectOpts.entryEndpoint || options.entryEndpoint || entry
+      });
       const nestedEntry = injectOpts.entryEndpoint || options.entryEndpoint || entry;
       const nestedExtra = asRecord(injectOpts.metadata) ?? {};
       const nestedMetadata: Record<string, unknown> = (() => {
@@ -456,11 +501,25 @@ export async function convertProviderResponseIfNeeded(
         requestId: injectOpts.requestId
       });
       if (injectResult.clientInjectOnlyHandled) {
+        logPipelineStage('convert.client_inject.completed', injectOpts.requestId, {
+          entryEndpoint: nestedEntry,
+          handled: true
+        });
         return { ok: true };
       }
+      logPipelineStage('convert.client_inject.completed', injectOpts.requestId, {
+        entryEndpoint: nestedEntry,
+        handled: false,
+        reason: 'client_inject_not_handled'
+      });
       return { ok: false, reason: 'client_inject_not_handled' };
     };
 
+    logPipelineStage('convert.bridge.start', options.requestId, {
+      entryEndpoint: options.entryEndpoint || entry,
+      providerProtocol: options.providerProtocol,
+      wantsStream: options.wantsStream
+    });
     const converted = await bridgeConvertProviderResponse({
       providerProtocol: options.providerProtocol,
       providerResponse: body as Record<string, unknown>,
@@ -473,11 +532,21 @@ export async function convertProviderResponseIfNeeded(
       reenterPipeline: serverToolsEnabled ? reenterPipeline : undefined,
       clientInjectDispatch: serverToolsEnabled ? clientInjectDispatch : undefined
     });
+    logPipelineStage('convert.bridge.completed', options.requestId, {
+      entryEndpoint: options.entryEndpoint || entry,
+      providerProtocol: options.providerProtocol,
+      hasSse: Boolean(converted.__sse_responses),
+      hasBody: converted.body !== undefined && converted.body !== null
+    });
     if (converted.__sse_responses) {
       const usage = converted.body
         ? extractUsageFromResult({ body: converted.body })
         : undefined;
       const finishReason = deriveFinishReason(converted.body);
+      logPipelineStage('convert.sse_wrapper_detected', options.requestId, {
+        hasUsage: Boolean(usage),
+        finishReason
+      });
       const body: Record<string, unknown> = { __sse_responses: converted.__sse_responses };
       if (usage) {
         body.usage = usage;
@@ -555,6 +624,12 @@ export async function convertProviderResponseIfNeeded(
           return options.response;
         }
       }
+      logPipelineStage('convert.bridge.error', options.requestId, {
+        code: errCode,
+        upstreamCode: upstreamCode || detailUpstreamCode,
+        reason: detailReason,
+        message
+      });
       if (isVerboseErrorLoggingEnabled()) {
         console.error(
           '[RequestExecutor] Fatal conversion error, bubbling as HTTP error',
@@ -564,6 +639,12 @@ export async function convertProviderResponseIfNeeded(
       throw error;
     }
 
+    logPipelineStage('convert.bridge.error', options.requestId, {
+      code: errCode,
+      upstreamCode: upstreamCode || detailUpstreamCode,
+      reason: detailReason,
+      message
+    });
     if (isVerboseErrorLoggingEnabled()) {
       console.error('[RequestExecutor] Failed to convert provider response via llmswitch-core', error);
     }

@@ -66,6 +66,7 @@ import { resolveProviderRuntimeOrThrow } from './executor/provider-runtime-resol
 import { resolveProviderRequestContext } from './executor/provider-request-context.js';
 import { logUsageSummary } from './executor/usage-logger.js';
 import { isServerToolEnabled } from './servertool-admin-state.js';
+import { registerRequestLogContext } from '../../utils/request-log-color.js';
 export type RequestExecutorDeps = {
   runtimeManager: {
     resolveRuntimeKey(providerKey?: string, fallback?: string): string | undefined;
@@ -102,6 +103,10 @@ export class HubRequestExecutor implements RequestExecutor {
       const hubPipeline = ensureHubPipeline(this.deps.getHubPipeline);
       const initialMetadata = buildRequestMetadata(input);
       bindSessionConversationSession(initialMetadata);
+      registerRequestLogContext(input.requestId, {
+        sessionId: initialMetadata.sessionId,
+        conversationId: initialMetadata.conversationId
+      });
       const inboundClientHeaders = cloneClientHeaders(initialMetadata?.clientHeaders);
       const providerRequestId = input.requestId;
       const clientRequestId = resolveClientRequestId(initialMetadata, providerRequestId);
@@ -111,7 +116,13 @@ export class HubRequestExecutor implements RequestExecutor {
         stream: initialMetadata.stream === true
       });
 
+      this.logStage('request.snapshot.start', providerRequestId, {
+        endpoint: input.entryEndpoint
+      });
       await writeInboundClientSnapshot({ input, initialMetadata, clientRequestId });
+      this.logStage('request.snapshot.completed', providerRequestId, {
+        endpoint: input.entryEndpoint
+      });
 
       const pipelineLabel = 'hub';
       let aggregatedUsage: UsageMetrics | undefined;
@@ -149,6 +160,7 @@ export class HubRequestExecutor implements RequestExecutor {
         }
         metadataForAttempt.clientRequestId = clientRequestId;
         injectAntigravityRetrySignal(metadataForAttempt, antigravityRetrySignal);
+        const hubStartedAtMs = Date.now();
         this.logStage(`${pipelineLabel}.start`, providerRequestId, {
           endpoint: input.entryEndpoint,
           stream: metadataForAttempt.stream,
@@ -184,6 +196,10 @@ export class HubRequestExecutor implements RequestExecutor {
         }
         const pipelineMetadata = pipelineResult.metadata ?? {};
         const mergedMetadata = mergeMetadataPreservingDefined(metadataForAttempt, pipelineMetadata);
+        registerRequestLogContext(input.requestId, {
+          sessionId: mergedMetadata.sessionId,
+          conversationId: mergedMetadata.conversationId
+        });
         const mergedClientHeaders =
           cloneClientHeaders(mergedMetadata?.clientHeaders) || clientHeadersForAttempt;
         if (mergedClientHeaders) {
@@ -193,6 +209,7 @@ export class HubRequestExecutor implements RequestExecutor {
         this.logStage(`${pipelineLabel}.completed`, providerRequestId, {
           route: pipelineResult.routingDecision?.routeName,
           target: pipelineResult.target?.providerKey,
+          elapsedMs: Date.now() - hubStartedAtMs,
           attempt
         });
         if (!initialRoutePool && Array.isArray(pipelineResult.routingDecision?.pool)) {
@@ -217,6 +234,11 @@ export class HubRequestExecutor implements RequestExecutor {
           delete mergedMetadata.compatibilityProfile;
         }
 
+        this.logStage('provider.runtime_resolve.start', providerRequestId, {
+          providerKey: target.providerKey,
+          route: pipelineResult.routingDecision?.routeName,
+          attempt
+        });
         const { runtimeKey, handle } = await resolveProviderRuntimeOrThrow({
           requestId: input.requestId,
           target: {
@@ -229,7 +251,19 @@ export class HubRequestExecutor implements RequestExecutor {
           runtimeManager: this.deps.runtimeManager,
           dependencies: this.deps.getModuleDependencies()
         });
+        this.logStage('provider.runtime_resolve.completed', providerRequestId, {
+          providerKey: target.providerKey,
+          runtimeKey,
+          providerType: handle.providerType,
+          providerFamily: handle.providerFamily,
+          attempt
+        });
 
+        this.logStage('provider.context_resolve.start', providerRequestId, {
+          providerKey: target.providerKey,
+          runtimeKey,
+          attempt
+        });
         const providerContext = resolveProviderRequestContext({
           providerRequestId,
           entryEndpoint: input.entryEndpoint,
@@ -242,9 +276,24 @@ export class HubRequestExecutor implements RequestExecutor {
           providerPayload,
           mergedMetadata
         });
+        const previousRequestId = input.requestId;
         if (providerContext.requestId !== input.requestId) {
           input.requestId = providerContext.requestId;
         }
+        this.logStage('provider.context_resolve.completed', input.requestId, {
+          providerKey: target.providerKey,
+          runtimeKey,
+          providerProtocol: providerContext.providerProtocol,
+          model: providerContext.providerModel,
+          requestIdChanged: previousRequestId !== input.requestId,
+          previousRequestId,
+          requestId: input.requestId,
+          attempt
+        });
+        registerRequestLogContext(providerContext.requestId, {
+          sessionId: mergedMetadata.sessionId,
+          conversationId: mergedMetadata.conversationId
+        });
         const { providerProtocol, providerModel, providerLabel } = providerContext;
         if (clientHeadersForAttempt) {
           ensureClientHeadersOnPayload(providerPayload, clientHeadersForAttempt);
@@ -266,6 +315,11 @@ export class HubRequestExecutor implements RequestExecutor {
           attempt
         });
 
+        this.logStage('provider.metadata_attach.start', input.requestId, {
+          providerKey: target.providerKey,
+          runtimeKey,
+          attempt
+        });
         attachProviderRuntimeMetadata(providerPayload, {
           requestId: input.requestId,
           providerId: handle.providerId,
@@ -280,7 +334,13 @@ export class HubRequestExecutor implements RequestExecutor {
           metadata: mergedMetadata,
           compatibilityProfile: target.compatibilityProfile
         });
+        this.logStage('provider.metadata_attach.completed', input.requestId, {
+          providerKey: target.providerKey,
+          runtimeKey,
+          attempt
+        });
 
+        const providerSendStartedAtMs = Date.now();
         this.logStage('provider.send.start', input.requestId, {
           providerKey: target.providerKey,
           runtimeKey,
@@ -298,6 +358,7 @@ export class HubRequestExecutor implements RequestExecutor {
           this.logStage('provider.send.completed', input.requestId, {
             providerKey: target.providerKey,
             status: responseStatus,
+            elapsedMs: Date.now() - providerSendStartedAtMs,
             providerType: handle.providerType,
             providerFamily: handle.providerFamily,
             model: providerModel,
@@ -305,13 +366,50 @@ export class HubRequestExecutor implements RequestExecutor {
             attempt
           });
           const wantsStreamBase = Boolean(input.metadata?.inboundStream ?? input.metadata?.stream);
+          this.logStage('provider.response_normalize.start', input.requestId, {
+            providerKey: target.providerKey,
+            attempt
+          });
           const normalized = normalizeProviderResponse(providerResponse);
+          this.logStage('provider.response_normalize.completed', input.requestId, {
+            providerKey: target.providerKey,
+            status: normalized.status,
+            attempt
+          });
+          this.logStage('provider.usage_extract.start', input.requestId, {
+            providerKey: target.providerKey,
+            source: 'provider_response',
+            attempt
+          });
           const usageFromProvider = extractUsageFromResult(normalized, mergedMetadata);
+          this.logStage('provider.usage_extract.completed', input.requestId, {
+            providerKey: target.providerKey,
+            source: 'provider_response',
+            hasUsage: Boolean(usageFromProvider),
+            attempt
+          });
+          this.logStage('provider.request_semantics.start', input.requestId, {
+            providerKey: target.providerKey,
+            attempt
+          });
           const requestSemantics = resolveRequestSemantics(
             pipelineResult.processedRequest as Record<string, unknown> | undefined,
             pipelineResult.standardizedRequest as Record<string, unknown> | undefined
           );
+          this.logStage('provider.request_semantics.completed', input.requestId, {
+            providerKey: target.providerKey,
+            hasSemantics: Boolean(requestSemantics && Object.keys(requestSemantics).length),
+            attempt
+          });
           const serverToolsEnabled = isServerToolEnabled();
+          this.logStage('provider.response_convert.start', input.requestId, {
+            providerKey: target.providerKey,
+            protocol: providerProtocol,
+            processMode: pipelineResult.processMode,
+            wantsStream: wantsStreamBase,
+            serverToolsEnabled,
+            attempt
+          });
           const converted = await this.convertProviderResponseIfNeeded({
             entryEndpoint: input.entryEndpoint,
             providerProtocol,
@@ -325,17 +423,28 @@ export class HubRequestExecutor implements RequestExecutor {
             response: normalized,
             pipelineMetadata: mergedMetadata
           });
+          this.logStage('provider.response_convert.completed', input.requestId, {
+            providerKey: target.providerKey,
+            status: converted.status,
+            hasBody: converted.body !== undefined && converted.body !== null,
+            attempt
+          });
           // Treat upstream 429 as provider failure across protocols to avoid
           // silently returning success and to let Virtual Router failover to other candidates.
           // Keep existing Gemini compatibility behavior for 400/4xx thoughtSignature-like failures.
           const convertedStatus = typeof converted.status === 'number' ? converted.status : undefined;
+          this.logStage('provider.response_status_check.start', input.requestId, {
+            providerKey: target.providerKey,
+            convertedStatus,
+            attempt
+          });
           const isGlobalRetryable429 = convertedStatus === 429;
           const isGeminiCompatFailure =
             typeof convertedStatus === 'number' &&
             convertedStatus >= 400 &&
             (isAntigravityProviderKey(target.providerKey) ||
               (typeof target.providerKey === 'string' && target.providerKey.startsWith('gemini-cli.'))) &&
-            providerProtocol === 'gemini-chat';
+              providerProtocol === 'gemini-chat';
 
           if (isGlobalRetryable429 || isGeminiCompatFailure) {
             const bodyForError = converted.body && typeof converted.body === 'object' ? (converted.body as Record<string, unknown>) : undefined;
@@ -380,8 +489,28 @@ export class HubRequestExecutor implements RequestExecutor {
             }
             throw errorToThrow;
           }
+          this.logStage('provider.response_status_check.completed', input.requestId, {
+            providerKey: target.providerKey,
+            convertedStatus,
+            attempt
+          });
+          this.logStage('provider.usage_extract.start', input.requestId, {
+            providerKey: target.providerKey,
+            source: 'converted_response',
+            attempt
+          });
           const usage = extractUsageFromResult(converted, mergedMetadata) ?? usageFromProvider;
+          this.logStage('provider.usage_extract.completed', input.requestId, {
+            providerKey: target.providerKey,
+            source: 'converted_response',
+            hasUsage: Boolean(usage),
+            attempt
+          });
           aggregatedUsage = mergeUsageMetrics(aggregatedUsage, usage);
+          this.logStage('provider.tool_usage_record.start', input.requestId, {
+            providerKey: target.providerKey,
+            attempt
+          });
           if (converted.body && typeof converted.body === 'object') {
             const body = converted.body as Record<string, unknown>;
             if (!('__sse_responses' in body)) {
@@ -391,13 +520,27 @@ export class HubRequestExecutor implements RequestExecutor {
               );
             }
           }
+          this.logStage('provider.tool_usage_record.completed', input.requestId, {
+            providerKey: target.providerKey,
+            attempt
+          });
 
           recordAttempt({ usage: aggregatedUsage, error: false });
+          this.logStage('request.usage_log.start', input.requestId, {
+            providerKey: target.providerKey,
+            attempt
+          });
           logUsageSummary(input.requestId, {
             providerKey: target.providerKey,
             model: providerModel,
             usage: aggregatedUsage,
-            latencyMs: Date.now() - requestStartedAt
+            latencyMs: Date.now() - requestStartedAt,
+            sessionId: mergedMetadata.sessionId,
+            conversationId: mergedMetadata.conversationId
+          });
+          this.logStage('request.usage_log.completed', input.requestId, {
+            providerKey: target.providerKey,
+            attempt
           });
           return converted;
         } catch (error) {

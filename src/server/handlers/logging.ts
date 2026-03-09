@@ -1,10 +1,7 @@
-import chalk from 'chalk';
 import { resolveEffectiveRequestId } from '../utils/request-id-manager.js';
+import { colorizeRequestLog } from '../utils/request-log-color.js';
 
 export type RequestLogMeta = Record<string, unknown> | undefined;
-
-const chalkSuccess = typeof chalk?.blueBright === 'function' ? chalk.blueBright : (value: string) => value;
-const chalkError = typeof chalk?.redBright === 'function' ? chalk.redBright : (value: string) => value;
 
 export function logRequestStart(endpoint: string, requestId: string, meta?: RequestLogMeta): void {
   void endpoint;
@@ -15,12 +12,13 @@ export function logRequestStart(endpoint: string, requestId: string, meta?: Requ
 export function logRequestComplete(endpoint: string, requestId: string, status: number, meta?: RequestLogMeta): void {
   const suffix = formatMeta(meta);
   const label = deriveRequestLabel(requestId, meta);
-  const text = `[${endpoint}] request ${label} completed (status=${status})${suffix}`;
+  const prefix = status >= 400 ? '❌' : '✅';
+  const text = `${prefix} [${endpoint}] request ${label} completed (status=${status})${suffix}`;
   if (status >= 400) {
-    console.error(chalkError(`❌ ${text}`));
+    console.error(colorizeRequestLog(text, label));
     return;
   }
-  console.log(chalkSuccess(`✅ ${text}`));
+  console.log(colorizeRequestLog(text, label));
 }
 
 export function logRequestError(endpoint: string, requestId: string, error: unknown, meta?: RequestLogMeta): void {
@@ -28,7 +26,7 @@ export function logRequestError(endpoint: string, requestId: string, error: unkn
   const message = error instanceof Error ? error.message : String(error ?? 'Unknown error');
   const suffix = formatMeta(meta);
   const text = `❌ [${endpoint}] request ${resolvedId} failed: ${message}${suffix}`;
-  console.error(chalkError(text));
+  console.error(colorizeRequestLog(text, resolvedId));
 }
 
 const HIDDEN_META_KEYS = new Set([

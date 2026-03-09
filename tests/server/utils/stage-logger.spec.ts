@@ -141,4 +141,29 @@ describe('stage logger verbosity filtering', () => {
 
     expect(logSpy).not.toHaveBeenCalled();
   });
+
+  it('prints request and response stage timing when timing debug is enabled', async () => {
+    process.env.NODE_ENV = 'development';
+    process.env.ROUTECODEX_STAGE_TIMING = '1';
+    delete process.env.ROUTECODEX_STAGE_LOG_VERBOSE;
+
+    const nowSpy = jest.spyOn(Date, 'now');
+    nowSpy
+      .mockReturnValueOnce(1000)
+      .mockReturnValueOnce(1000)
+      .mockReturnValueOnce(1030)
+      .mockReturnValueOnce(1095);
+
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const { logPipelineStage } = await importStageLogger();
+
+    logPipelineStage('request.start', 'req_timing', { endpoint: '/v1/responses' });
+    logPipelineStage('hub.completed', 'req_timing', { route: 'tools-primary' });
+    logPipelineStage('response.json.completed', 'req_timing', { status: 200 });
+
+    expect(logSpy).toHaveBeenCalledTimes(3);
+    for (const call of logSpy.mock.calls) {
+      expect(String(call?.[0] ?? '')).toMatch(/t\+\d+ms Δ\d+ms/);
+    }
+  });
 });

@@ -1,17 +1,8 @@
 import { resolveEffectiveRequestId } from './request-id-manager.js';
+import { resolveSessionAnsiColor } from '../../utils/session-log-color.js';
 
 const ANSI_RESET = '\x1b[0m';
 const ANSI_PATTERN = /\x1b\[[0-9;]*m/;
-const SESSION_COLOR_PALETTE = [
-  '\x1b[31m',
-  '\x1b[32m',
-  '\x1b[33m',
-  '\x1b[34m',
-  '\x1b[35m',
-  '\x1b[36m',
-  '\x1b[38;5;208m',
-  '\x1b[38;5;141m'
-] as const;
 const REQUEST_LOG_CONTEXT_TTL_MS = 30 * 60 * 1000;
 const REQUEST_LOG_CONTEXT_MAX = 4096;
 
@@ -30,7 +21,10 @@ function isConsoleColorEnabled(): boolean {
   if (forceColor === '0') {
     return false;
   }
-  return process.stdout?.isTTY === true;
+  if (forceColor.length > 0) {
+    return true;
+  }
+  return process.stdout?.isTTY === true || process.stderr?.isTTY === true;
 }
 
 function normalizeToken(value: unknown): string | undefined {
@@ -72,20 +66,8 @@ function pruneExpiredContext(nowMs: number): void {
   }
 }
 
-function hashColorKey(value: string): string {
-  let hash = 0;
-  for (let i = 0; i < value.length; i += 1) {
-    hash = ((hash * 31) + value.charCodeAt(i)) >>> 0;
-  }
-  return SESSION_COLOR_PALETTE[hash % SESSION_COLOR_PALETTE.length];
-}
-
 export function resolveSessionLogColor(sessionId?: string): string {
-  const normalized = normalizeToken(sessionId);
-  if (!normalized) {
-    return '\x1b[36m';
-  }
-  return hashColorKey(normalized);
+  return resolveSessionAnsiColor(sessionId) || '\x1b[36m';
 }
 
 export function registerRequestLogContext(
@@ -111,7 +93,7 @@ export function resolveRequestLogColorToken(
 ): string | undefined {
   const explicitSessionKey = resolveSessionKey(context);
   if (explicitSessionKey) {
-    return hashColorKey(explicitSessionKey);
+    return resolveSessionAnsiColor(explicitSessionKey);
   }
   const requestKey = normalizeRequestKey(requestId);
   if (!requestKey) {
@@ -119,12 +101,12 @@ export function resolveRequestLogColorToken(
   }
   const record = REQUEST_LOG_CONTEXT.get(requestKey);
   if (record && record.expiresAtMs > Date.now()) {
-    return hashColorKey(record.sessionKey);
+    return resolveSessionAnsiColor(record.sessionKey);
   }
   if (record) {
     REQUEST_LOG_CONTEXT.delete(requestKey);
   }
-  return hashColorKey(requestKey);
+  return resolveSessionAnsiColor(requestKey);
 }
 
 export function colorizeRequestLog(
@@ -141,4 +123,3 @@ export function colorizeRequestLog(
   }
   return `${color}${text}${ANSI_RESET}`;
 }
-

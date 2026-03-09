@@ -8,8 +8,10 @@ import type { RouteErrorPayload } from '../../error-handling/route-error-hub.js'
 import { reportRouteError } from '../../error-handling/route-error-hub.js';
 // import { runtimeFlags } from '../../runtime/runtime-flags.js';
 import { formatErrorForConsole } from '../../utils/log-helpers.js';
+import { colorizeRequestLog } from '../utils/request-log-color.js';
 import { deriveFinishReason } from '../utils/finish-reason.js';
 import { isSnapshotsEnabled, writeServerSnapshot } from '../../utils/snapshot-writer.js';
+import { formatRequestTimingSummary } from '../utils/stage-logger.js';
 import {
   generateRequestIdentifiers,
   resolveEffectiveRequestId
@@ -100,7 +102,9 @@ export function logRequestComplete(endpoint: string, requestId: string, status: 
   const timestamp = formatTimestamp();
   const finishReason = deriveFinishReason(body);
   const finishReasonLabel = finishReason ? `, finish_reason=${finishReason}` : '';
-  console.log(`✅ [${endpoint}] ${timestamp} request ${resolvedId} completed (status=${status}${finishReasonLabel})`);
+  const timingSuffix = formatRequestTimingSummary(resolvedId, { terminal: true });
+  const line = `✅ [${endpoint}] ${timestamp} request ${resolvedId} completed (status=${status}${finishReasonLabel})${timingSuffix}`;
+  console.log(colorizeRequestLog(line, resolvedId));
 }
 
 
@@ -109,9 +113,10 @@ export function logRequestError(endpoint: string, requestId: string, error: unkn
   const formatted = formatErrorForConsole(error);
   const rawMeta = extractRawErrorMeta(error);
   const summary = rawMeta?.rawErrorSnippet ?? formatted.text;
-  const chalkError = typeof chalk?.redBright === 'function' ? chalk.redBright : (value: string) => value;
   const timestamp = formatTimestamp();
-  console.error(chalkError(`❌ [${endpoint}] ${timestamp} request ${resolvedId} failed: ${summary}`));
+  const timingSuffix = formatRequestTimingSummary(resolvedId, { terminal: true });
+  const line = `❌ [${endpoint}] ${timestamp} request ${resolvedId} failed: ${summary}${timingSuffix}`;
+  console.error(colorizeRequestLog(line, resolvedId) || line);
   if (rawMeta && shouldLogHttpErrorMeta()) {
     const payload = {
       requestId: resolvedId,
@@ -119,7 +124,8 @@ export function logRequestError(endpoint: string, requestId: string, error: unkn
       rawError: rawMeta.rawError,
       rawErrorSnippet: rawMeta.rawErrorSnippet ?? summary
     };
-    console.error(chalkError(`[http.error.meta] ${JSON.stringify(payload)}`));
+    const metaLine = `[http.error.meta] ${JSON.stringify(payload)}`;
+    console.error(colorizeRequestLog(metaLine, resolvedId) || metaLine);
   }
 }
 
