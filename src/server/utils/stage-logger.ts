@@ -16,6 +16,7 @@ type RequestStageTimeline = {
 const REQUEST_STAGE_TIMELINES = new Map<string, RequestStageTimeline>();
 const REQUEST_SCOPE_STAGE_STARTS = new Map<string, number>();
 const REQUEST_SCOPE_STAGE_ELAPSED = new Map<string, number>();
+const REQUEST_SCOPE_STAGE_TOTAL_ELAPSED = new Map<string, number>();
 
 const COLOR_RESET = '\x1b[0m';
 const COLOR_INFO = '\x1b[90m';
@@ -150,15 +151,15 @@ export function logPipelineStage(stage: string, requestId: string, details?: Rec
 
   const verbose = isStageVerboseEnabled();
 
-  const scopeElapsedMs = resolveScopeStageElapsedMs(requestId, scope, level);
-  if (
+  const explicitElapsedMs = (
     releaseSummaryTrackedScope
     && (level === 'success' || level === 'error')
     && typeof details?.elapsedMs === 'number'
     && Number.isFinite(details.elapsedMs)
-  ) {
-    REQUEST_SCOPE_STAGE_ELAPSED.set(scopeStageKey(requestId, scope), Math.max(0, details.elapsedMs));
-  }
+  )
+    ? Math.max(0, details.elapsedMs)
+    : undefined;
+  const scopeElapsedMs = finalizeScopeStageElapsedMs(requestId, scope, level, explicitElapsedMs);
 
   if (!shouldLogStage(stage, scope, level, verbose, timingEnabled, releaseSummaryStage)) {
     return;
@@ -194,10 +195,16 @@ export function logPipelineStage(stage: string, requestId: string, details?: Rec
   }
 }
 
-export function formatRequestTimingSummary(requestId: string, options?: { terminal?: boolean }): string {
+export function formatRequestTimingSummary(
+  requestId: string,
+  options?: {
+    latencyMs?: number;
+    terminal?: boolean;
+  }
+): string {
   let label = '';
   if (resolveRuntimeBuildMode() === 'release') {
-    label = formatReleaseUsageTimingSummary(requestId);
+    label = formatReleaseUsageTimingSummary(requestId, options);
   } else if (isStageTimingSummaryEnabled()) {
     label = peekRequestStageTimingLabel(requestId);
   }
@@ -352,18 +359,24 @@ function markScopeStageStart(requestId: string, scope: string): void {
   REQUEST_SCOPE_STAGE_STARTS.set(scopeStageKey(requestId, scope), Date.now());
 }
 
-function resolveScopeStageElapsedMs(requestId: string, scope: string, level: StageLevel): number | undefined {
+function finalizeScopeStageElapsedMs(
+  requestId: string,
+  scope: string,
+  level: StageLevel,
+  explicitElapsedMs?: number
+): number | undefined {
   if (level !== 'success' && level !== 'error') {
     return undefined;
   }
   const key = scopeStageKey(requestId, scope);
   const startedAtMs = REQUEST_SCOPE_STAGE_STARTS.get(key);
-  if (startedAtMs === undefined) {
+  if (startedAtMs === undefined && explicitElapsedMs === undefined) {
     return undefined;
   }
   REQUEST_SCOPE_STAGE_STARTS.delete(key);
-  const elapsedMs = Math.max(0, Date.now() - startedAtMs);
+  const elapsedMs = explicitElapsedMs ?? Math.max(0, Date.now() - (startedAtMs ?? Date.now()));
   REQUEST_SCOPE_STAGE_ELAPSED.set(key, elapsedMs);
+  REQUEST_SCOPE_STAGE_TOTAL_ELAPSED.set(key, (REQUEST_SCOPE_STAGE_TOTAL_ELAPSED.get(key) ?? 0) + elapsedMs);
   return elapsedMs;
 }
 
@@ -410,6 +423,11 @@ function clearRequestStageState(requestId: string): void {
   for (const key of REQUEST_SCOPE_STAGE_ELAPSED.keys()) {
     if (key.startsWith(`${requestId}::`)) {
       REQUEST_SCOPE_STAGE_ELAPSED.delete(key);
+    }
+  }
+  for (const key of REQUEST_SCOPE_STAGE_TOTAL_ELAPSED.keys()) {
+    if (key.startsWith(`${requestId}::`)) {
+      REQUEST_SCOPE_STAGE_TOTAL_ELAPSED.delete(key);
     }
   }
 }
@@ -476,11 +494,28 @@ function peekRequestStageTimingLabel(requestId: string): string {
 }
 
 function readStoredScopeStageElapsedMs(requestId: string, scope: string): number | undefined {
-  return REQUEST_SCOPE_STAGE_ELAPSED.get(scopeStageKey(requestId, scope));
+  return REQUEST_SCOPE_STAGE_TOTAL_ELAPSED.get(scopeStageKey(requestId, scope))
+    ?? REQUEST_SCOPE_STAGE_ELAPSED.get(scopeStageKey(requestId, scope));
 }
 
-function formatReleaseUsageTimingSummary(requestId: string): string {
+function formatReleaseUsageTimingSummary(
+  requestId: string,
+  options?: {
+    latencyMs?: number;
+    terminal?: boolean;
+  }
+): string {
+  const totalLatencyMs = typeof options?.latencyMs === 'number' && Number.isFinite(options.latencyMs)
+    ? Math.max(0, options.latencyMs)
+    : undefined;
+  const providerSendMs = readStoredScopeStageElapsedMs(requestId, 'provider.send') ?? 0;
+  const hubResponseMs = readStoredScopeStageElapsedMs(requestId, 'hub.response') ?? 0;
+  const responseMs = readStoredScopeStageElapsedMs(requestId, 'response') ?? 0;
   const parts: string[] = [];
+  if (totalLatencyMs !== undefined) {
+    const requestInternalMs = Math.max(0, totalLatencyMs - providerSendMs - hubResponseMs - responseMs);
+    parts.push(`request.internal=${formatDurationMs(requestInternalMs)}`);
+  }
   for (const scope of ['hub', 'provider.send', 'hub.response', 'response']) {
     const elapsedMs = readStoredScopeStageElapsedMs(requestId, scope);
     if (elapsedMs === undefined) {

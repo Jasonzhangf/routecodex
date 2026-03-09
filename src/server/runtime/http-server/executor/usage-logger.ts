@@ -33,6 +33,7 @@ export function logUsageSummary(
     conversationId: info.conversationId
   });
   const timingSuffix = formatRequestTimingSummary(requestId, {
+    latencyMs: info.latencyMs,
     terminal: options?.terminalTiming === true
   });
   const line = `[usage] request ${requestId} provider=${providerLabel} latency=${latency}ms (${usageText})${timingSuffix}`;

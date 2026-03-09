@@ -5,7 +5,6 @@
  */
 
 import { resolveBoolFromEnv } from './utils.js';
-import { buildInfo } from '../../../../build-info.js';
 
 /**
  * Check if usage logging is enabled
@@ -13,7 +12,7 @@ import { buildInfo } from '../../../../build-info.js';
 export function isUsageLoggingEnabled(): boolean {
   return resolveBoolFromEnv(
     process.env.ROUTECODEX_USAGE_LOG ?? process.env.RCC_USAGE_LOG,
-    buildInfo.mode !== 'release'
+    true
   );
 }
 
