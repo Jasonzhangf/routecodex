@@ -38,4 +38,31 @@ describe('stage logger release summary mode', () => {
     expect(String(logSpy.mock.calls[2]?.[0] ?? '')).toContain('[hub.response][req_release] completed total=90ms');
     expect(String(logSpy.mock.calls[3]?.[0] ?? '')).toContain('[response][req_release] completed total=40ms');
   });
+
+  it('moves tracked scope timings when request id is rebound', async () => {
+    process.env.ROUTECODEX_BUILD_MODE = 'release';
+    delete process.env.ROUTECODEX_STAGE_LOG;
+    delete process.env.ROUTECODEX_STAGE_LOG_VERBOSE;
+    delete process.env.ROUTECODEX_STAGE_TIMING;
+    delete process.env.ROUTECODEX_STAGE_TIMING_SUMMARY;
+
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const { logPipelineStage, rebindRequestTimingTimeline, formatRequestTimingSummary } =
+      await import('../../../src/server/utils/stage-logger.js');
+
+    logPipelineStage('hub.start', 'req_base', {});
+    logPipelineStage('hub.completed', 'req_base', { elapsedMs: 300 });
+    rebindRequestTimingTimeline('req_base', 'req_provider');
+    logPipelineStage('provider.send.start', 'req_provider', {});
+    logPipelineStage('provider.send.completed', 'req_provider', { elapsedMs: 600 });
+    logPipelineStage('response.dispatch.start', 'req_provider', { status: 200, stream: false });
+    logPipelineStage('response.completed', 'req_provider', { elapsedMs: 25 });
+
+    const summary = formatRequestTimingSummary('req_provider', { latencyMs: 1000 });
+    expect(summary).toContain('hub=300ms');
+    expect(summary).toContain('provider.send=600ms');
+    expect(summary).toContain('response=25ms');
+    expect(summary).toContain('request.internal=375ms');
+    expect(logSpy).toHaveBeenCalled();
+  });
 });

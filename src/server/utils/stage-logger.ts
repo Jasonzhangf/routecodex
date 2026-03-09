@@ -219,18 +219,48 @@ export function rebindRequestTimingTimeline(fromRequestId: string, toRequestId: 
     return;
   }
   const fromTimeline = REQUEST_STAGE_TIMELINES.get(fromRequestId);
-  if (!fromTimeline) {
-    return;
+  if (fromTimeline) {
+    const existing = REQUEST_STAGE_TIMELINES.get(toRequestId);
+    if (!existing) {
+      REQUEST_STAGE_TIMELINES.set(toRequestId, { ...fromTimeline });
+      REQUEST_STAGE_TIMELINES.delete(fromRequestId);
+    } else {
+      existing.startedAtMs = Math.min(existing.startedAtMs, fromTimeline.startedAtMs);
+      existing.lastAtMs = Math.max(existing.lastAtMs, fromTimeline.lastAtMs);
+      REQUEST_STAGE_TIMELINES.delete(fromRequestId);
+    }
   }
-  const existing = REQUEST_STAGE_TIMELINES.get(toRequestId);
-  if (!existing) {
-    REQUEST_STAGE_TIMELINES.set(toRequestId, { ...fromTimeline });
-    REQUEST_STAGE_TIMELINES.delete(fromRequestId);
-    return;
+  rebindRequestScopeStageState(fromRequestId, toRequestId);
+}
+
+function rebindRequestScopeStageState(fromRequestId: string, toRequestId: string): void {
+  const prefix = `${fromRequestId}::`;
+  for (const [key, value] of Array.from(REQUEST_SCOPE_STAGE_STARTS.entries())) {
+    if (!key.startsWith(prefix)) {
+      continue;
+    }
+    const scope = key.slice(prefix.length);
+    REQUEST_SCOPE_STAGE_STARTS.delete(key);
+    REQUEST_SCOPE_STAGE_STARTS.set(scopeStageKey(toRequestId, scope), value);
   }
-  existing.startedAtMs = Math.min(existing.startedAtMs, fromTimeline.startedAtMs);
-  existing.lastAtMs = Math.max(existing.lastAtMs, fromTimeline.lastAtMs);
-  REQUEST_STAGE_TIMELINES.delete(fromRequestId);
+  for (const [key, value] of Array.from(REQUEST_SCOPE_STAGE_ELAPSED.entries())) {
+    if (!key.startsWith(prefix)) {
+      continue;
+    }
+    const scope = key.slice(prefix.length);
+    const nextKey = scopeStageKey(toRequestId, scope);
+    REQUEST_SCOPE_STAGE_ELAPSED.delete(key);
+    REQUEST_SCOPE_STAGE_ELAPSED.set(nextKey, (REQUEST_SCOPE_STAGE_ELAPSED.get(nextKey) ?? 0) + value);
+  }
+  for (const [key, value] of Array.from(REQUEST_SCOPE_STAGE_TOTAL_ELAPSED.entries())) {
+    if (!key.startsWith(prefix)) {
+      continue;
+    }
+    const scope = key.slice(prefix.length);
+    const nextKey = scopeStageKey(toRequestId, scope);
+    REQUEST_SCOPE_STAGE_TOTAL_ELAPSED.delete(key);
+    REQUEST_SCOPE_STAGE_TOTAL_ELAPSED.set(nextKey, (REQUEST_SCOPE_STAGE_TOTAL_ELAPSED.get(nextKey) ?? 0) + value);
+  }
 }
 
 function shouldLogStage(
