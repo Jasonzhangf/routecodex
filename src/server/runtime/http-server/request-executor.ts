@@ -131,7 +131,7 @@ export class HubRequestExecutor implements RequestExecutor {
       let lastError: unknown;
       let initialRoutePool: string[] | null = null;
       let antigravityRetrySignal: AntigravityRetrySignal | null = null;
-      let poolCooldownWaitBudgetMs = 3 * 60 * 1000;
+     let poolCooldownWaitBudgetMs = 60 * 1000;
       let forcedRouteHint: string | undefined;
       let contextOverflowRetries = 0;
       const MAX_CONTEXT_OVERFLOW_RETRIES = 3;
