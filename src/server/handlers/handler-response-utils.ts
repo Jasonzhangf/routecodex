@@ -191,9 +191,23 @@ export function sendPipelineResponse(
     ? options.entryEndpoint.trim()
     : undefined;
   const captureClientResponse = shouldCaptureClientStreamSnapshots();
+  const responseStartedAtMs = Date.now();
+  let responseCompletedLogged = false;
+
+  const logResponseCompleted = (details?: Record<string, unknown>) => {
+    if (responseCompletedLogged) {
+      return;
+    }
+    responseCompletedLogged = true;
+    logPipelineStage('response.completed', requestLabel, {
+      elapsedMs: Date.now() - responseStartedAtMs,
+      ...(details ?? {})
+    });
+  };
 
   if (forceSSE && !expectsStream) {
     logPipelineStage('response.sse.missing', requestLabel, { status });
+    logResponseCompleted({ status: 502, mode: 'sse', reason: 'missing_stream' });
     if (captureClientResponse) {
       void writeServerSnapshot({
         phase: 'client-response.error',
@@ -213,6 +227,7 @@ export function sendPipelineResponse(
     const stream = toNodeReadable(streamSource);
     if (!stream) {
       logPipelineStage('response.sse.missing', requestLabel, {});
+      logResponseCompleted({ status: 502, mode: 'sse', reason: 'missing_stream' });
       if (captureClientResponse) {
         void writeServerSnapshot({
           phase: 'client-response.error',
@@ -373,11 +388,13 @@ export function sendPipelineResponse(
         /* ignore cleanup errors */
       }
       logPipelineStage('response.sse.stream.end', requestLabel, { events: eventCount, status });
+      logResponseCompleted({ status, mode: 'sse', events: eventCount });
     };
     stream.on('error', (error: Error) => {
       ended = true;
       clearTimers();
       logPipelineStage('response.sse.stream.error', requestLabel, { message: error.message });
+      logResponseCompleted({ status: 500, mode: 'sse', reason: 'stream_error' });
       try {
         const payload = {
           type: 'error',
@@ -430,6 +447,7 @@ export function sendPipelineResponse(
     }
     res.status(status).end();
     logPipelineStage('response.json.completed', requestLabel, { status });
+    logResponseCompleted({ status, mode: 'json', empty: true });
     return;
   }
   logPipelineStage('response.json.write', requestLabel, { status });
@@ -446,6 +464,7 @@ export function sendPipelineResponse(
   }
   res.status(status).json(sanitized);
   logPipelineStage('response.json.completed', requestLabel, { status });
+  logResponseCompleted({ status, mode: 'json' });
 }
 
 function applyHeaders(res: Response, headers: Record<string, string> | undefined, omitContentType: boolean): void {
