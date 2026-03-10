@@ -1021,8 +1021,8 @@ function buildGeminiRequestFromChat(chat: ChatEnvelope, metadata: ChatEnvelope['
    const isFlashModel = mappedLower.includes('flash');
     const isFlash3Model = mappedLower.includes('gemini-3') && isFlashModel;
    const isImageModel = config.requestType === 'image_gen' || mappedLower.includes('image');
-    // Antigravity-Manager v4.1.28 alignment: gemini-3-flash / gemini-3.1-flash are thinking models
-    const isThinkingModel = !isImageModel && (mappedLower.includes('think') || mappedLower.includes('pro') || isFlash3Model);
+  // Antigravity-Manager v4.1.28 alignment: gemini-3-flash / gemini-3.1-flash are thinking models
+  const isThinkingModel = !isImageModel && (mappedLower.includes('think') || mappedLower.includes('pro') || isFlash3Model);
    if (isThinkingModel && (!requestPayload.generationConfig || !isJsonObject(requestPayload.generationConfig))) {
       requestPayload.generationConfig = {};
     }
