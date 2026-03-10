@@ -11,8 +11,12 @@ import {
 } from '../../../modules/llmswitch/bridge.js';
 import { getSessionClientRegistry } from './session-client-registry.js';
 import { normalizeWorkdir } from './session-client-registry-utils.js';
-import { isLocalRequest } from './daemon-admin-routes.js';
+import { isLocalRequest, isLoopbackBindHost } from './daemon-admin-routes.js';
 import { isTmuxSessionAlive } from './tmux-session-probe.js';
+import {
+  extractApiKeyFromRequest,
+  resolveEnvSecretReference
+} from './middleware.js';
 import {
   isSessionManagedTerminationEnabled,
   normalizeClockSessionIdInput,
@@ -23,20 +27,53 @@ import {
   parseString
 } from './session-client-route-utils.js';
 import { clearStopMessageTmuxScope, migrateStopMessageTmuxScope } from './stopmessage-scope-rebind.js';
+import { matchesExpectedClientApiKey } from '../../../utils/session-client-token.js';
 
-function rejectNonLocal(req: Request, res: Response): boolean {
+export interface SessionClientRouteOptions {
+  bindHost?: string;
+  expectedApiKey?: string;
+}
+
+function rejectUnauthorizedSessionClient(
+  req: Request,
+  res: Response,
+  options: { authRequired: boolean; expectedApiKey: string; configError?: string }
+): boolean {
   if (isLocalRequest(req)) {
     return false;
   }
-  res.status(403).json({ error: { message: 'forbidden', code: 'forbidden' } });
+  if (!options.authRequired) {
+    res.status(403).json({ error: { message: 'forbidden', code: 'forbidden' } });
+    return true;
+  }
+
+  if (options.configError) {
+    res.status(500).json({ error: { message: options.configError, code: 'config_error' } });
+    return true;
+  }
+
+  const provided = extractApiKeyFromRequest(req);
+  if (provided && matchesExpectedClientApiKey(provided, options.expectedApiKey)) {
+    return false;
+  }
+  res.status(401).json({ error: { message: 'unauthorized', code: 'unauthorized' } });
   return true;
 }
 
-export function registerSessionClientRoutes(app: Application): void {
+export function registerSessionClientRoutes(app: Application, options: SessionClientRouteOptions = {}): void {
   const registry = getSessionClientRegistry();
+  const authRequired = typeof options.bindHost === 'string' && options.bindHost.trim()
+    ? !isLoopbackBindHost(options.bindHost)
+    : false;
+  const resolvedApiKey = resolveEnvSecretReference(typeof options.expectedApiKey === 'string' ? options.expectedApiKey : '');
+  const sessionClientAuth = {
+    authRequired,
+    expectedApiKey: resolvedApiKey.ok ? resolvedApiKey.value : '',
+    ...(resolvedApiKey.ok ? {} : { configError: `httpserver.apikey env ${resolvedApiKey.missing} is not defined` })
+  };
 
   app.post('/daemon/session-client/register', (req: Request, res: Response) => {
-    if (rejectNonLocal(req, res)) {
+    if (rejectUnauthorizedSessionClient(req, res, sessionClientAuth)) {
       return;
     }
     const body = req.body && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : {};
@@ -110,7 +147,7 @@ export function registerSessionClientRoutes(app: Application): void {
   });
 
   app.post('/daemon/session-client/heartbeat', (req: Request, res: Response) => {
-    if (rejectNonLocal(req, res)) {
+    if (rejectUnauthorizedSessionClient(req, res, sessionClientAuth)) {
       return;
     }
     const body = req.body && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : {};
@@ -153,7 +190,7 @@ export function registerSessionClientRoutes(app: Application): void {
   });
 
   app.post('/daemon/session-client/unregister', (req: Request, res: Response) => {
-    if (rejectNonLocal(req, res)) {
+    if (rejectUnauthorizedSessionClient(req, res, sessionClientAuth)) {
       return;
     }
     const body = req.body && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : {};
@@ -167,14 +204,14 @@ export function registerSessionClientRoutes(app: Application): void {
   });
 
   app.get('/daemon/session-client/list', (req: Request, res: Response) => {
-    if (rejectNonLocal(req, res)) {
+    if (rejectUnauthorizedSessionClient(req, res, sessionClientAuth)) {
       return;
     }
     res.status(200).json({ ok: true, records: registry.list() });
   });
 
   app.post('/daemon/session-client/inject', async (req: Request, res: Response) => {
-    if (rejectNonLocal(req, res)) {
+    if (rejectUnauthorizedSessionClient(req, res, sessionClientAuth)) {
       return;
     }
     const body = req.body && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : {};
@@ -217,7 +254,7 @@ export function registerSessionClientRoutes(app: Application): void {
   });
 
   app.get('/daemon/session/tasks', async (req: Request, res: Response) => {
-    if (rejectNonLocal(req, res)) {
+    if (rejectUnauthorizedSessionClient(req, res, sessionClientAuth)) {
       return;
     }
     const sessionConfig = await resolveClockConfigSnapshot(undefined);
@@ -243,7 +280,7 @@ export function registerSessionClientRoutes(app: Application): void {
   });
 
   app.post('/daemon/session/tasks', async (req: Request, res: Response) => {
-    if (rejectNonLocal(req, res)) {
+    if (rejectUnauthorizedSessionClient(req, res, sessionClientAuth)) {
       return;
     }
     const body = req.body && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : {};
@@ -274,7 +311,7 @@ export function registerSessionClientRoutes(app: Application): void {
   });
 
   app.patch('/daemon/session/tasks', async (req: Request, res: Response) => {
-    if (rejectNonLocal(req, res)) {
+    if (rejectUnauthorizedSessionClient(req, res, sessionClientAuth)) {
       return;
     }
     const body = req.body && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : {};
@@ -313,7 +350,7 @@ export function registerSessionClientRoutes(app: Application): void {
   });
 
   app.delete('/daemon/session/tasks', async (req: Request, res: Response) => {
-    if (rejectNonLocal(req, res)) {
+    if (rejectUnauthorizedSessionClient(req, res, sessionClientAuth)) {
       return;
     }
     const body = req.body && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : {};
@@ -341,7 +378,7 @@ export function registerSessionClientRoutes(app: Application): void {
   });
 
   app.post('/daemon/session/cleanup', async (req: Request, res: Response) => {
-    if (rejectNonLocal(req, res)) {
+    if (rejectUnauthorizedSessionClient(req, res, sessionClientAuth)) {
       return;
     }
 

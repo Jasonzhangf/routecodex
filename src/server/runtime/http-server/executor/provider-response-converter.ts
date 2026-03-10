@@ -60,6 +60,29 @@ const CONTEXT_LENGTH_MESSAGE_HINTS = [
   '达到对话长度上限'
 ];
 
+const RETRYABLE_NETWORK_MESSAGE_HINTS = [
+  'internal network failure',
+  'network failure',
+  'network error',
+  'api connection error',
+  'service unavailable',
+  'temporarily unavailable',
+  'temporarily unreachable',
+  'connection reset',
+  'connection closed',
+  'timed out',
+  'timeout'
+];
+
+const RETRYABLE_NETWORK_CODE_HINTS = [
+  'internal_network_failure',
+  'network_error',
+  'api_connection_error',
+  'service_unavailable',
+  'request_timeout',
+  'timeout'
+];
+
 function isContextLengthExceededError(
   message: string,
   upstreamCode?: string,
@@ -75,6 +98,63 @@ function isContextLengthExceededError(
     return true;
   }
   return CONTEXT_LENGTH_MESSAGE_HINTS.some((hint) => normalizedMessage.includes(hint));
+}
+
+function isRetryableNetworkSseWrapperError(message: string, upstreamCode?: string, statusCode?: number): boolean {
+  if (typeof statusCode === 'number' && Number.isFinite(statusCode)) {
+    if (statusCode === 408 || statusCode === 425 || statusCode === 502 || statusCode === 503 || statusCode === 504) {
+      return true;
+    }
+  }
+  const normalizedMessage = String(message || '').trim().toLowerCase();
+  const normalizedUpstream = typeof upstreamCode === 'string' ? upstreamCode.trim().toLowerCase() : '';
+  if (normalizedUpstream && RETRYABLE_NETWORK_CODE_HINTS.some((hint) => normalizedUpstream.includes(hint))) {
+    return true;
+  }
+  return RETRYABLE_NETWORK_MESSAGE_HINTS.some((hint) => normalizedMessage.includes(hint));
+}
+
+function remapBridgeSseErrorToHttp(error: Record<string, unknown>, message: string): void {
+  const detailRecord = asRecord(error.details);
+  const upstreamCode =
+    typeof error.upstreamCode === 'string'
+      ? error.upstreamCode
+      : typeof detailRecord?.upstreamCode === 'string'
+        ? detailRecord.upstreamCode
+        : undefined;
+  const detailReason = typeof detailRecord?.reason === 'string' ? detailRecord.reason : undefined;
+  const statusCodeRaw =
+    typeof error.statusCode === 'number'
+      ? error.statusCode
+      : typeof error.status === 'number'
+        ? error.status
+        : typeof detailRecord?.statusCode === 'number'
+          ? detailRecord.statusCode
+          : undefined;
+  const isContextLengthExceeded = isContextLengthExceededError(message, upstreamCode, detailReason);
+  if (isContextLengthExceeded) {
+    (error as any).status = 400;
+    (error as any).statusCode = 400;
+    (error as any).retryable = false;
+    (error as any).code = 'CONTEXT_LENGTH_EXCEEDED';
+    if (typeof error.upstreamCode !== 'string' || !String(error.upstreamCode).trim()) {
+      (error as any).upstreamCode = upstreamCode || 'context_length_exceeded';
+    }
+    return;
+  }
+  if (isRateLimitLikeError(message, String(error.code || ''), upstreamCode)) {
+    (error as any).status = 429;
+    (error as any).statusCode = 429;
+    (error as any).retryable = true;
+    (error as any).code = 'HTTP_429';
+    return;
+  }
+  if (isRetryableNetworkSseWrapperError(message, upstreamCode, statusCodeRaw)) {
+    (error as any).status = 502;
+    (error as any).statusCode = 502;
+    (error as any).retryable = true;
+    (error as any).code = 'HTTP_502';
+  }
 }
 
 function canonicalizeHeaderName(headerName: string): string {
@@ -207,6 +287,14 @@ export async function convertProviderResponseIfNeeded(
         error.code = 'HTTP_429';
         error.status = 429;
         error.statusCode = 429;
+        error.retryable = true;
+      } else if (
+        !isContextLengthExceeded &&
+        isRetryableNetworkSseWrapperError(wrapperError.message, wrapperError.errorCode, wrapperError.statusCode)
+      ) {
+        error.code = 'HTTP_502';
+        error.status = 502;
+        error.statusCode = 502;
         error.retryable = true;
       } else if (wrapperError.retryable && error.statusCode === undefined) {
         error.status = 503;
@@ -418,6 +506,14 @@ export async function convertProviderResponseIfNeeded(
           const preservedClientHeaders = extractFollowupSessionHeaders(out.clientHeaders);
           if (preservedClientHeaders) {
             out.clientHeaders = preservedClientHeaders;
+            const sessionId = extractPreservedSessionToken(preservedClientHeaders, 'session');
+            const conversationId = extractPreservedSessionToken(preservedClientHeaders, 'conversation');
+            if (sessionId) {
+              out.sessionId = sessionId;
+            }
+            if (conversationId) {
+              out.conversationId = conversationId;
+            }
           } else {
             delete out.clientHeaders;
           }
@@ -582,6 +678,8 @@ export async function convertProviderResponseIfNeeded(
     const normalizedUpstreamCode = (upstreamCode || detailUpstreamCode || '').trim().toLowerCase();
     const isSseDecodeError =
       errCode === 'SSE_DECODE_ERROR' ||
+      errCode === 'HTTP_502' ||
+      errCode === 'HTTP_429' ||
       (errName === 'ProviderProtocolError' && message.toLowerCase().includes('sse'));
     const isServerToolFollowupError =
       errCode === 'SERVERTOOL_FOLLOWUP_FAILED' ||
@@ -595,26 +693,14 @@ export async function convertProviderResponseIfNeeded(
     );
 
     if (isSseDecodeError || isServerToolFollowupError) {
-      if (isSseDecodeError && isContextLengthExceeded) {
-        (errRecord as any).status = 400;
-        (errRecord as any).statusCode = 400;
-        (errRecord as any).retryable = false;
-        (errRecord as any).code = 'CONTEXT_LENGTH_EXCEEDED';
-        if (typeof errRecord.upstreamCode !== 'string' || !String(errRecord.upstreamCode).trim()) {
-          (errRecord as any).upstreamCode = upstreamCode || detailUpstreamCode || 'context_length_exceeded';
-        }
-      } else if (isSseDecodeError && isRateLimitLikeError(message, errCode, upstreamCode || detailUpstreamCode)) {
-        (errRecord as any).status = 429;
-        (errRecord as any).statusCode = 429;
-        (errRecord as any).retryable = true;
-        if (typeof errRecord.code !== 'string' || !String(errRecord.code).trim()) {
-          (errRecord as any).code = 'HTTP_429';
-        }
+      if (isSseDecodeError) {
+        remapBridgeSseErrorToHttp(errRecord, message);
       }
+      const normalizedCode = typeof errRecord.code === 'string' ? errRecord.code : errCode;
       if (isServerToolFollowupError) {
         console.error('[RequestExecutor] ServerTool followup failed', {
           requestId: options.requestId,
-          code: errCode,
+          code: normalizedCode,
           upstreamCode: upstreamCode || detailUpstreamCode,
           reason: detailReason,
           message
@@ -625,7 +711,7 @@ export async function convertProviderResponseIfNeeded(
         }
       }
       logPipelineStage('convert.bridge.error', options.requestId, {
-        code: errCode,
+        code: normalizedCode,
         upstreamCode: upstreamCode || detailUpstreamCode,
         reason: detailReason,
         message

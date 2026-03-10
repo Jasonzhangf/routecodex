@@ -12,6 +12,7 @@ import type { JsonObject } from '../../sharedmodule/llmswitch-core/src/conversio
 
 import {
   normalizeClockConfig,
+  markClockListObserved,
   scheduleClockTasks,
   loadClockSessionState,
   commitClockReservation,
@@ -187,6 +188,11 @@ describe('servertool:clock', () => {
         messages: [{ role: 'user', content: 'hi' }]
       }
     } as any;
+    const clockConfig = normalizeClockConfig({ enabled: true, tickMs: 0 });
+    if (!clockConfig) {
+      throw new Error('clockConfig should not be null');
+    }
+    await markClockListObserved(sessionScope, clockConfig);
 
     const toolCallId = 'call_clock_1';
     const scheduleResponse = await runServerSideToolEngine({
@@ -252,9 +258,15 @@ describe('servertool:clock', () => {
     // Due reminder is injected as a user message (time tag is appended after).
     const dueMsg = messages.findLast((m: any) => m?.role === 'user' && typeof m?.content === 'string' && m.content.includes('[Clock Reminder]'));
     expect(dueMsg).toBeDefined();
-    expect(typeof dueMsg?.content === 'string' ? dueMsg.content : '').toContain('[scheduled task:"do the thing"');
-    expect(typeof dueMsg?.content === 'string' ? dueMsg.content : '').toContain('setBy=agent');
-    expect(typeof dueMsg?.content === 'string' ? dueMsg.content : '').toContain('setAt=');
+    expect(typeof dueMsg?.content === 'string' ? dueMsg.content : '').toContain('[Clock Reminder]');
+    expect(typeof dueMsg?.content === 'string' ? dueMsg.content : '').toContain('任务: do the thing');
+    expect(typeof dueMsg?.content === 'string' ? dueMsg.content : '').toContain('触发时间:');
+    expect(typeof dueMsg?.content === 'string' ? dueMsg.content : '').toContain('设置人: agent');
+    expect(typeof dueMsg?.content === 'string' ? dueMsg.content : '').toContain('设置时间:');
+    expect(typeof dueMsg?.content === 'string' ? dueMsg.content : '').toContain('clock.md');
+    expect(typeof dueMsg?.content === 'string' ? dueMsg.content : '').toContain('## 背景');
+    expect(typeof dueMsg?.content === 'string' ? dueMsg.content : '').toContain('## 当前阻塞点');
+    expect(typeof dueMsg?.content === 'string' ? dueMsg.content : '').toContain('## 建议内容示例');
     const last = messages[messages.length - 1];
     expect(last?.role).toBe('user');
     expect(typeof last?.content === 'string' ? last.content : '').toContain('[Time/Date]:');
@@ -264,10 +276,6 @@ describe('servertool:clock', () => {
     expect(reservation?.sessionId).toBe(sessionScope);
     expect(Array.isArray(reservation?.taskIds) ? reservation.taskIds : []).toHaveLength(1);
 
-    const clockConfig = normalizeClockConfig({ enabled: true, tickMs: 0 });
-    if (!clockConfig) {
-      throw new Error('clockConfig should not be null');
-    }
     await commitClockReservation(reservation, clockConfig);
 
     const stateAfter = await loadClockSessionState(sessionScope, clockConfig);
@@ -341,6 +349,8 @@ describe('servertool:clock', () => {
       });
     };
 
+    await markClockListObserved('tmux:sessiond_A', clockConfig);
+    await markClockListObserved('tmux:sessiond_B', clockConfig);
     await runClockTool('req-clock-scope-da', 'sessiond_A', 'schedule', 'task-da');
     await runClockTool('req-clock-scope-db', 'sessiond_B', 'schedule', 'task-db');
 
@@ -694,7 +704,11 @@ describe('servertool:clock', () => {
       .map((item: any) => (typeof item?.content === 'string' ? item.content : ''))
       .join('\n');
     expect(merged).toContain('[Clock Reminder]: scheduled tasks are due.');
-    expect(merged).toContain('[scheduled task:');
+    expect(merged).toContain('[Clock Reminder]');
+    expect(merged).toContain('任务:');
+    expect(merged).toContain('clock.md');
+    expect(merged).toContain('## 背景');
+    expect(merged).toContain('## 建议内容示例');
     const toolNames = (Array.isArray(processed.tools) ? processed.tools : []).map((tool: any) => tool?.function?.name);
     expect(toolNames).toContain('clock');
   });
@@ -702,6 +716,11 @@ describe('servertool:clock', () => {
   test('unit: schedule/update/list/cancel/clear via clock handler outputs', async () => {
     const sessionId = 's-clock-handler';
     const sessionScope = toClockSessionScope(sessionId);
+    const clockConfig = normalizeClockConfig({ enabled: true, tickMs: 0 });
+    if (!clockConfig) {
+      throw new Error('clockConfig should not be null');
+    }
+    await markClockListObserved(sessionScope, clockConfig);
     const adapterContext: AdapterContext = {
       requestId: 'req-clock-handler-1',
       entryEndpoint: '/v1/chat/completions',
@@ -880,8 +899,9 @@ describe('servertool:clock', () => {
     expect(clearPayload.action).toBe('clear');
     expect(typeof clearPayload.removedCount).toBe('number');
 
-    // Session file should be gone after clear.
-    expect(fs.existsSync(resolveClockStatePath(sessionScope))).toBe(false);
+    const stateAfterClear = await loadClockSessionState(sessionScope, clockConfig);
+    expect(Array.isArray(stateAfterClear.tasks)).toBe(true);
+    expect(stateAfterClear.tasks).toHaveLength(0);
   });
 
   test('unit: clock.get returns time snapshot', async () => {
@@ -969,6 +989,56 @@ describe('servertool:clock', () => {
     const payload = JSON.parse((result.finalChatResponse as any).tool_outputs.slice(-1)[0].content);
     expect(payload.ok).toBe(false);
     expect(String(payload.message || '')).toContain('virtualrouter.clock.enabled=true');
+  });
+
+  test('unit: clock.schedule is rejected until clock.list has been called', async () => {
+    const sessionId = `s-clock-list-required-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const adapterContext: AdapterContext = {
+      requestId: 'req-clock-list-required-1',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      tmuxSessionId: sessionId,
+      __rt: { clock: { enabled: true, tickMs: 0 } },
+      capturedChatRequest: {
+        model: 'gpt-test',
+        messages: [{ role: 'user', content: 'set a reminder' }]
+      }
+    } as any;
+
+    const dueAt = new Date(Date.now() + 60_000).toISOString();
+    const result = await runServerSideToolEngine({
+      chatResponse: {
+        choices: [
+          {
+            message: {
+              role: 'assistant',
+              content: null,
+              tool_calls: [
+                {
+                  id: 'call_clock_schedule_without_list',
+                  type: 'function',
+                  function: {
+                    name: 'clock',
+                    arguments: JSON.stringify({ action: 'schedule', items: [{ dueAt, task: 't1' }] })
+                  }
+                }
+              ]
+            },
+            finish_reason: 'tool_calls'
+          }
+        ]
+      } as any,
+      adapterContext,
+      entryEndpoint: '/v1/chat/completions',
+      requestId: 'req-clock-list-required-1',
+      providerProtocol: 'openai-chat'
+    });
+
+    const payload = JSON.parse((result.finalChatResponse as any).tool_outputs.slice(-1)[0].content);
+    expect(payload.ok).toBe(false);
+    expect(payload.action).toBe('schedule');
+    expect(String(payload.message || '')).toContain('clock.list');
+    expect(String(payload.suggestion || '')).toContain('clock.update');
   });
 
   test('parses <**clock:{time,message}**> marker and schedules task with tool-call style messages', async () => {
@@ -1111,6 +1181,7 @@ describe('servertool:clock', () => {
 
   test('clock.schedule supports recurrence with maxRuns', async () => {
     const sessionId = `s-clock-recur-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const sessionScope = toClockSessionScope(sessionId);
     const adapterContext: AdapterContext = {
       requestId: 'req-clock-recur-1',
       entryEndpoint: '/v1/chat/completions',
@@ -1122,6 +1193,9 @@ describe('servertool:clock', () => {
         messages: [{ role: 'user', content: 'schedule recurring task' }]
       }
     } as any;
+    const clockConfig = normalizeClockConfig({ enabled: true, tickMs: 0 });
+    if (!clockConfig) throw new Error('clockConfig should not be null');
+    await markClockListObserved(sessionScope, clockConfig);
 
     const dueAt = new Date(Date.now() + 30_000).toISOString();
     const schedule = await runServerSideToolEngine({
@@ -1168,6 +1242,91 @@ describe('servertool:clock', () => {
     expect(Array.isArray(payload.scheduled)).toBe(true);
     expect(payload.scheduled[0]?.recurrence?.kind).toBe('interval');
     expect(payload.scheduled[0]?.recurrence?.maxRuns).toBe(3);
+  });
+
+  test('clock.schedule warns when another reminder is within 5 minutes', async () => {
+    const sessionId = `s-clock-nearby-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const sessionScope = toClockSessionScope(sessionId);
+    const adapterContext: AdapterContext = {
+      requestId: 'req-clock-nearby-1',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      tmuxSessionId: sessionId,
+      __rt: { clock: { enabled: true, tickMs: 0 } },
+      capturedChatRequest: {
+        model: 'gpt-test',
+        messages: [{ role: 'user', content: 'manage reminders' }]
+      }
+    } as any;
+    const clockConfig = normalizeClockConfig({ enabled: true, tickMs: 0 });
+    if (!clockConfig) throw new Error('clockConfig should not be null');
+
+    const dueAt1 = new Date(Date.now() + 10 * 60_000).toISOString();
+    const dueAt2 = new Date(Date.now() + 13 * 60_000).toISOString();
+
+    await markClockListObserved(sessionScope, clockConfig);
+    const firstSchedule = await runServerSideToolEngine({
+      chatResponse: {
+        choices: [
+          {
+            message: {
+              role: 'assistant',
+              content: null,
+              tool_calls: [
+                {
+                  id: 'call_clock_nearby_first',
+                  type: 'function',
+                  function: {
+                    name: 'clock',
+                    arguments: JSON.stringify({ action: 'schedule', items: [{ dueAt: dueAt1, task: 'first-reminder' }] })
+                  }
+                }
+              ]
+            },
+            finish_reason: 'tool_calls'
+          }
+        ]
+      } as JsonObject,
+      adapterContext,
+      requestId: 'req-clock-nearby-1',
+      entryEndpoint: '/v1/chat/completions'
+    });
+    const firstPayload = JSON.parse(String(((firstSchedule.finalChatResponse as any)?.tool_outputs || []).slice(-1)[0]?.content || '{}'));
+    expect(firstPayload.ok).toBe(true);
+
+    await markClockListObserved(sessionScope, clockConfig);
+    const secondSchedule = await runServerSideToolEngine({
+      chatResponse: {
+        choices: [
+          {
+            message: {
+              role: 'assistant',
+              content: null,
+              tool_calls: [
+                {
+                  id: 'call_clock_nearby_second',
+                  type: 'function',
+                  function: {
+                    name: 'clock',
+                    arguments: JSON.stringify({ action: 'schedule', items: [{ dueAt: dueAt2, task: 'second-reminder' }] })
+                  }
+                }
+              ]
+            },
+            finish_reason: 'tool_calls'
+          }
+        ]
+      } as JsonObject,
+      adapterContext,
+      requestId: 'req-clock-nearby-2',
+      entryEndpoint: '/v1/chat/completions'
+    });
+    const payload = JSON.parse(String(((secondSchedule.finalChatResponse as any)?.tool_outputs || []).slice(-1)[0]?.content || '{}'));
+    expect(payload.ok).toBe(true);
+    expect(String(payload.warning || '')).toContain('within 5 minutes');
+    expect(Array.isArray(payload.nearbyReminders)).toBe(true);
+    expect(payload.nearbyReminders[0]?.scheduled?.task).toBe('second-reminder');
+    expect((payload.nearbyReminders[0]?.nearby || []).some((item: any) => item?.task === 'first-reminder')).toBe(true);
   });
 
   test('recurring tasks are persisted and re-scheduled until maxRuns', async () => {

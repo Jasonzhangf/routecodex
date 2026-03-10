@@ -9,7 +9,7 @@ import { registerStatsRoutes } from './daemon-admin/stats-handler.js';
 import { registerControlRoutes } from './daemon-admin/control-handler.js';
 import type { HistoricalPeriodsSnapshot, HistoricalStatsSnapshot, StatsSnapshot } from './stats-manager.js';
 import { isDaemonSessionAuthenticated } from './daemon-admin/auth-session.js';
-import { ensureDaemonLoginRecord } from './daemon-admin/auth-store.js';
+import { resolveEnvSecretReference } from './middleware.js';
 
 export interface DaemonAdminRouteOptions {
   app: Application;
@@ -64,6 +64,7 @@ export function isLocalRequest(req: Request): boolean {
 }
 
 const DAEMON_ADMIN_AUTH_REQUIRED_LOCAL_KEY = '__routecodexDaemonAdminAuthRequired';
+const DAEMON_ADMIN_APIKEY_CONFIGURED_LOCAL_KEY = '__routecodexDaemonAdminApiKeyConfigured';
 
 function normalizeHost(value: unknown): string {
   if (typeof value !== 'string') {
@@ -72,7 +73,7 @@ function normalizeHost(value: unknown): string {
   return value.trim().toLowerCase();
 }
 
-function isLoopbackBindHost(hostRaw: unknown): boolean {
+export function isLoopbackBindHost(hostRaw: unknown): boolean {
   const host = normalizeHost(hostRaw);
   return host === '127.0.0.1' || host === 'localhost' || host === '::1' || host === '::ffff:127.0.0.1';
 }
@@ -91,6 +92,11 @@ export function isDaemonAdminAuthRequired(req: Request): boolean {
   }
   // Fail safe: require auth when policy is unavailable.
   return true;
+}
+
+export function isDaemonAdminApiKeyConfigured(req: Request): boolean {
+  const raw = (req.app?.locals as Record<string, unknown> | undefined)?.[DAEMON_ADMIN_APIKEY_CONFIGURED_LOCAL_KEY];
+  return typeof raw === 'boolean' ? raw : false;
 }
 
 export function isDaemonAdminAuthenticated(req: Request): boolean {
@@ -124,12 +130,10 @@ export function registerDaemonAdminRoutes(options: DaemonAdminRouteOptions): voi
   const bindHost = typeof options.getServerHost === 'function' ? options.getServerHost() : '';
   const authRequired = !isLoopbackBindHost(bindHost);
   setDaemonAdminAuthRequiredForApp(app, authRequired);
-  if (authRequired) {
-    void ensureDaemonLoginRecord().catch((error) => {
-      const message = error instanceof Error ? error.message : String(error);
-      console.warn('[daemon-admin] failed to ensure default login password', message);
-    });
-  }
+  const expectedApiKeyRaw = typeof options.getExpectedApiKey === 'function' ? options.getExpectedApiKey() : '';
+  const resolvedApiKey = resolveEnvSecretReference(typeof expectedApiKeyRaw === 'string' ? expectedApiKeyRaw : '');
+  (app.locals as Record<string, unknown>)[DAEMON_ADMIN_APIKEY_CONFIGURED_LOCAL_KEY] =
+    resolvedApiKey.ok && Boolean(resolvedApiKey.value);
 
   // Daemon admin password auth (setup/login/logout/status)
   registerDaemonAuthRoutes(app);

@@ -134,6 +134,7 @@ export function getLlmsStatsSnapshot(): unknown | null {
 
 type ClockTaskStoreModule = {
   resolveClockConfig?: (input: unknown) => unknown | null;
+  startClockDaemonIfNeeded?: (config: unknown) => Promise<void> | void;
   setClockRuntimeHooks?: (hooks?: {
     isTmuxSessionAlive?: (tmuxSessionId: string) => Promise<boolean> | boolean;
     dispatchDueTask?: (request: {
@@ -251,6 +252,20 @@ export async function setClockRuntimeHooksSnapshot(hooks?: {
   }
   try {
     await fn(hooks);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function startClockDaemonIfNeededSnapshot(config: unknown): Promise<boolean> {
+  const mod = await getClockTaskStoreModuleSafe();
+  const fn = mod?.startClockDaemonIfNeeded;
+  if (typeof fn !== 'function') {
+    return false;
+  }
+  try {
+    await fn(config);
     return true;
   } catch {
     return false;

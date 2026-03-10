@@ -27,6 +27,33 @@ function localFetch(baseUrl: string, path: string, body?: unknown): Promise<{ st
   })();
 }
 
+function fetchWithHeaders(
+  baseUrl: string,
+  method: 'GET' | 'POST',
+  routePath: string,
+  body?: unknown,
+  headers?: Record<string, string>
+): Promise<{ status: number; payload: any }> {
+  return (async () => {
+    const response = await fetch(`${baseUrl}${routePath}`, {
+      method,
+      headers: {
+        ...(body ? { 'content-type': 'application/json' } : {}),
+        ...(headers || {})
+      },
+      body: body ? JSON.stringify(body) : undefined
+    });
+    const text = await response.text();
+    let payload: any = null;
+    try {
+      payload = text ? JSON.parse(text) : null;
+    } catch {
+      payload = text;
+    }
+    return { status: response.status, payload };
+  })();
+}
+
 function localFetchByMethod(
   baseUrl: string,
   method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
@@ -92,6 +119,43 @@ describe('session-client routes', () => {
       expect(unreg.status).toBe(200);
       expect(unreg.payload?.ok).toBe(true);
     } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it('keeps localhost session-client routes simplified even on public bind', async () => {
+    process.env.TEST_SESSION_CLIENT_APIKEY = 'session-client-public-key';
+    const app = express();
+    app.use(express.json({ limit: '256kb' }));
+    registerSessionClientRoutes(app, {
+      bindHost: '0.0.0.0',
+      expectedApiKey: '${TEST_SESSION_CLIENT_APIKEY}'
+    });
+
+    const server = http.createServer(app);
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const addr = server.address() as AddressInfo;
+    const baseUrl = `http://127.0.0.1:${addr.port}`;
+
+    try {
+      const localList = await fetchWithHeaders(baseUrl, 'GET', '/daemon/session-client/list');
+      expect(localList.status).toBe(200);
+
+      const allowed = await fetchWithHeaders(
+        baseUrl,
+        'POST',
+        '/daemon/session-client/register',
+        {
+          daemonId: 'sessiond_public',
+          callbackUrl: 'http://127.0.0.1:65531/inject',
+          sessionId: 'tmux_public'
+        },
+        { 'x-api-key': 'session-client-public-key' }
+      );
+      expect(allowed.status).toBe(200);
+      expect(allowed.payload?.ok).toBe(true);
+    } finally {
+      delete process.env.TEST_SESSION_CLIENT_APIKEY;
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });

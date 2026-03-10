@@ -63,6 +63,7 @@ describe('cli session-inject command', () => {
     const success: string[] = [];
     const infos: string[] = [];
     const postedBodies: any[] = [];
+    const seenHeaders: Array<Record<string, string>> = [];
 
     const program = new Command();
     createSessionInjectCommand(program, {
@@ -78,11 +79,12 @@ describe('cli session-inject command', () => {
       loadConfig: async () =>
         ({
           configPath: '/tmp/config.json',
-          userConfig: { httpserver: { host: '127.0.0.1', port: 5520 } },
+          userConfig: { httpserver: { host: '127.0.0.1', port: 5520, apikey: '${ROUTECODEX_HTTP_APIKEY}' } },
           providerProfiles: {} as any
         }) as any,
       fetch: (async (url: string, init?: RequestInit) => {
         if (url.endsWith('/daemon/session-client/list')) {
+          seenHeaders.push((init?.headers || {}) as Record<string, string>);
           return {
             ok: true,
             status: 200,
@@ -93,6 +95,7 @@ describe('cli session-inject command', () => {
           } as any;
         }
         if (url.endsWith('/daemon/session-client/inject')) {
+          seenHeaders.push((init?.headers || {}) as Record<string, string>);
           postedBodies.push(JSON.parse(String(init?.body || '{}')));
           return {
             ok: true,
@@ -102,7 +105,7 @@ describe('cli session-inject command', () => {
         }
         throw new Error(`unexpected url: ${url}`);
       }) as any,
-      env: {},
+      env: { ROUTECODEX_HTTP_APIKEY: 'test-http-apikey' },
       exit: (code) => {
         throw new Error(`exit:${code}`);
       }
@@ -114,6 +117,8 @@ describe('cli session-inject command', () => {
     expect(postedBodies[0].tmuxSessionId).toBe('session_only');
     expect(postedBodies[0].sessionId).toBe('session_only');
     expect(postedBodies[0].text).toBe('hello-from-cli');
+    expect(seenHeaders[0]['x-api-key']).toBe('test-http-apikey');
+    expect(seenHeaders[1]['x-api-key']).toBe('test-http-apikey');
     expect(success.join('\n')).toContain('Injected text to tmux session session_only');
     expect(infos.join('\n')).toContain('only call tools that are available in your current runtime');
   });

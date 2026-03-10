@@ -104,6 +104,12 @@ const COOLDOWN_SCHEDULE_DEFAULT_MS = [
   31_000,
   61_000
 ] as const;
+const COOLDOWN_SCHEDULE_NETWORK_502_MS = [
+  3_000,
+  10_000,
+  60_000,
+  60_000
+] as const;
 const ERROR_CHAIN_WINDOW_MS = 10 * 60_000;
 
 const NETWORK_ERROR_CODES = [
@@ -178,12 +184,9 @@ export function normalizeErrorSeries(event: ErrorEventForQuota): ErrorSeries {
   if (status === 429 || rawCode.includes('429') || rawCode.includes('RATE') || rawCode.includes('QUOTA')) {
     return 'E429';
   }
-  if (status && status >= 500) {
-    return 'E5XX';
-  }
-
   const networkMessageHints = [
     'FETCH FAILED',
+    'INTERNAL NETWORK FAILURE',
     'NETWORK TIMEOUT',
     'SOCKET HANG UP',
     'CLIENT NETWORK SOCKET DISCONNECTED',
@@ -197,9 +200,14 @@ export function normalizeErrorSeries(event: ErrorEventForQuota): ErrorSeries {
     rawCode.includes('TIMEOUT') ||
     NETWORK_ERROR_CODES.some((code) => rawCode.includes(code)) ||
     msgUpper.includes('TIMEOUT') ||
+    msgUpper.includes('NETWORK FAILURE') ||
     networkMessageHints.some((hint) => msgUpper.includes(hint))
   ) {
     return 'ENET';
+  }
+
+  if (status && status >= 500) {
+    return 'E5XX';
   }
 
   if (
@@ -226,25 +234,26 @@ function normalizeErrorKey(event: ErrorEventForQuota): string {
   return 'ERR_UNKNOWN';
 }
 
-// UNUSED: Kept for backward compatibility during X7E migration
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function computeCooldownMsLegacy(_consecutive: number): number | null {
-  // This function is deprecated; cooldown logic now handled by core QuotaManager
-  return null;
-}
-
-function computeCooldownMsBySeries(series: ErrorSeries, consecutive: number): number | null {
-  if (consecutive <= 0) {
-    return null;
+function resolveCooldownScheduleForEvent(
+  event: ErrorEventForQuota,
+  series: ErrorSeries
+): readonly number[] {
+  if (series === 'E429') {
+    return COOLDOWN_SCHEDULE_429_MS;
   }
-  const schedule =
-    series === 'E429'
-      ? COOLDOWN_SCHEDULE_429_MS
-      : series === 'EFATAL'
-        ? COOLDOWN_SCHEDULE_FATAL_MS
-        : COOLDOWN_SCHEDULE_DEFAULT_MS;
-  const idx = Math.min(consecutive - 1, schedule.length - 1);
-  return schedule[idx] ?? null;
+  if (series === 'EFATAL') {
+    return COOLDOWN_SCHEDULE_FATAL_MS;
+  }
+  const status = typeof event.httpStatus === 'number' ? event.httpStatus : null;
+  const code = String(event.code || '').trim().toUpperCase();
+  const message = String(event.message || '').trim().toUpperCase();
+  if (
+    series === 'ENET' &&
+    (status === 502 || code.includes('HTTP_502') || message.includes('INTERNAL NETWORK FAILURE'))
+  ) {
+    return COOLDOWN_SCHEDULE_NETWORK_502_MS;
+  }
+  return COOLDOWN_SCHEDULE_DEFAULT_MS;
 }
 
 export function applyErrorEvent(
@@ -270,16 +279,17 @@ export function applyErrorEvent(
     nowMs - lastAt <= ERROR_CHAIN_WINDOW_MS;
   const sameErrorKey = withinChainWindow && state.lastErrorCode === errorKey;
   const rawNextCount = sameErrorKey ? state.consecutiveErrorCount + 1 : 1;
-  const schedule =
-    series === 'E429'
-      ? COOLDOWN_SCHEDULE_429_MS
-      : series === 'EFATAL'
-        ? COOLDOWN_SCHEDULE_FATAL_MS
-        : COOLDOWN_SCHEDULE_DEFAULT_MS;
+  const schedule = resolveCooldownScheduleForEvent(event, series);
   // Never wrap cooldown back to the first step within the same error-chain window.
   // Wrapping causes repeated short retries (hammering) and makes cooldowns appear to "loop".
   const nextCount = Math.min(rawNextCount, schedule.length);
-  const cooldownMs = computeCooldownMsBySeries(series, nextCount);
+  const cooldownMs = ((): number | null => {
+    if (nextCount <= 0) {
+      return null;
+    }
+    const idx = Math.min(nextCount - 1, schedule.length - 1);
+    return schedule[idx] ?? null;
+  })();
   const nextUntil = cooldownMs ? nowMs + cooldownMs : null;
   const existingUntil = typeof state.cooldownUntil === 'number' ? state.cooldownUntil : null;
   const cooldownUntil =

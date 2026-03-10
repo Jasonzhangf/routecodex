@@ -49,6 +49,47 @@ function resolveBoolFromEnv(value: string | undefined, fallback: boolean): boole
   return fallback;
 }
 
+function safeProcessCwd(fallback?: string): string {
+  try {
+    const cwd = process.cwd();
+    if (typeof cwd === 'string' && cwd.trim()) {
+      return cwd;
+    }
+  } catch {
+    // current working directory may disappear between launches
+  }
+  const fallbackValue = String(fallback || '').trim();
+  if (fallbackValue) {
+    return path.resolve(fallbackValue);
+  }
+  try {
+    const home = homedir();
+    if (typeof home === 'string' && home.trim()) {
+      return path.resolve(home);
+    }
+  } catch {
+    // ignore homedir lookup failure
+  }
+  return path.dirname(process.execPath);
+}
+
+function ensureProcessCwdAccessible(): void {
+  try {
+    process.cwd();
+    return;
+  } catch {
+    // fall through and rebind cwd
+  }
+  const fallbackDir = safeProcessCwd(path.dirname(process.argv[1] || process.execPath));
+  try {
+    process.chdir(fallbackDir);
+  } catch {
+    // keep original state if rebind fails; downstream callers still use safeProcessCwd
+  }
+}
+
+ensureProcessCwdAccessible();
+
 function resolveExpectedParentPid(): number | null {
   const raw = String(process.env.ROUTECODEX_EXPECT_PARENT_PID ?? process.env.RCC_EXPECT_PARENT_PID ?? '').trim();
   if (!raw) {
@@ -542,7 +583,7 @@ function resolveSignalCaller(signal: string): Record<string, unknown> {
       platform: process.platform,
       node: process.version,
       execPath: process.execPath,
-      cwd: process.cwd(),
+      cwd: safeProcessCwd(),
       uptimeSec: Math.floor(process.uptime()),
       argv: process.argv.slice(0, 10).map((entry) => truncateLogValue(String(entry), 240))
     },
@@ -602,7 +643,7 @@ function getDefaultModulesConfigPath(): string {
     scriptDir ? path.join(scriptDir, 'config', 'modules.json') : null,
     scriptDir ? path.join(scriptDir, '..', 'config', 'modules.json') : null,
     path.join(execDir, 'config', 'modules.json'),
-    path.join(process.cwd(), 'config', 'modules.json'),
+    path.join(safeProcessCwd(execDir), 'config', 'modules.json'),
     path.join(homedir(), '.routecodex', 'config', 'modules.json')
   ];
 
@@ -615,7 +656,7 @@ function getDefaultModulesConfigPath(): string {
     }
   }
 
-  return path.join(process.cwd(), 'config', 'modules.json');
+  return path.join(safeProcessCwd(execDir), 'config', 'modules.json');
 }
 
 function resolveAppBaseDir(): string {
@@ -627,7 +668,7 @@ function resolveAppBaseDir(): string {
     const __filename = fileURLToPath(import.meta.url);
     return path.resolve(path.dirname(__filename), '..');
   } catch {
-    return process.cwd();
+    return safeProcessCwd();
   }
 }
 
@@ -638,7 +679,7 @@ class RouteCodexApp {
   private httpServer: RouteCodexHttpServer | null = null;
   private modulesConfigPath: string;
   private _isRunning: boolean = false;
-  private configPath: string = path.join(process.cwd(), 'config', 'config.json');
+  private configPath: string = path.join(safeProcessCwd(), 'config', 'config.json');
   private readonly baseDir: string;
 
   constructor(modulesConfigPath?: string) {
@@ -1534,7 +1575,7 @@ function resolveRestartEntryScript(argv: string[]): string | null {
   if (raw.startsWith('-')) {
     return null;
   }
-  return path.isAbsolute(raw) ? raw : path.resolve(process.cwd(), raw);
+  return path.isAbsolute(raw) ? raw : path.resolve(safeProcessCwd(), raw);
 }
 
 function parseRestartEntryWaitMs(): number {

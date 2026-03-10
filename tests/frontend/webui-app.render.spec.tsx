@@ -11,14 +11,13 @@ import {
 } from '../../webui/src/App';
 
 describe('webui render smoke', () => {
-  it('renders top-level app shell with integrated navigation labels', () => {
+  it('renders top-level app with login gate by default', () => {
     const html = renderToString(<App />);
-    expect(html).toContain('Providers');
-    expect(html).toContain('Routing &amp; Capacity');
-    expect(html).toContain('Ops');
-    expect(html).toContain('Provider Catalog');
-    expect(html).toContain('OAuth &amp; Credentials');
-    expect(html).toContain('Refresh View (R)');
+    expect(html).toContain('RouteCodex WebUI V2');
+    expect(html).toContain('Admin Setup');
+    expect(html).not.toContain('Provider Catalog');
+    expect(html).not.toContain('Quota Pool');
+    expect(html).not.toContain('Refresh View (R)');
   });
 
   it('renders each major page panel title without crashing', () => {

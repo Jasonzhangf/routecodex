@@ -34,7 +34,7 @@ function normalizeString(value: unknown): string {
   return value.trim();
 }
 
-function resolveEnvSecretReference(value: string): { ok: true; value: string } | { ok: false; missing: string } {
+export function resolveEnvSecretReference(value: string): { ok: true; value: string } | { ok: false; missing: string } {
   const trimmed = normalizeString(value);
   if (!trimmed) {
     return { ok: true, value: '' };

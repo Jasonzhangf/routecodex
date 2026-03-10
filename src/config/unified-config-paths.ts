@@ -63,6 +63,26 @@ const CONFIG_FILE_PREFERENCES = [
   'qwen.json',         // Qwen provider configuration
 ];
 
+function safeProcessCwd(fallback?: string): string {
+  try {
+    const cwd = process.cwd();
+    if (typeof cwd === 'string' && cwd.trim()) {
+      return cwd;
+    }
+  } catch {
+    // current working directory may no longer exist
+  }
+  const fallbackValue = String(fallback || '').trim();
+  if (fallbackValue) {
+    return path.resolve(fallbackValue);
+  }
+  const home = homedir();
+  if (typeof home === 'string' && home.trim()) {
+    return path.resolve(home);
+  }
+  return path.dirname(process.execPath);
+}
+
 /**
  * Default configuration directory structure
  */
@@ -86,7 +106,7 @@ export class UnifiedConfigPathResolver {
       configName,
       strict = false,
       allowDirectoryScan = true,
-      baseDir = process.cwd()
+      baseDir = safeProcessCwd()
     } = options;
 
     const warnings: string[] = [];
@@ -383,7 +403,7 @@ export class UnifiedConfigPathResolver {
     const directories = [
       this.getDefaultConfigDirectory(),
       path.join(homedir(), '.routecodex'),
-      path.join(process.cwd(), 'config')
+      path.join(safeProcessCwd(), 'config')
     ];
 
     directories.forEach(dir => {

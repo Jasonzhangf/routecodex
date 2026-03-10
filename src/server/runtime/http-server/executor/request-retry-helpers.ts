@@ -154,6 +154,36 @@ export function isSseDecodeRateLimitError(error: unknown, status: number | undef
   return sseLike && isRateLimitLikeError(message, code, upstreamCode);
 }
 
+export function isSseDecodeRetryableNetworkError(error: unknown, status: number | undefined): boolean {
+  if (status !== 502 || !error || typeof error !== 'object') {
+    return false;
+  }
+  const record = error as Record<string, unknown>;
+  const message = typeof record.message === 'string' ? record.message.toLowerCase() : '';
+  const code = typeof record.code === 'string' ? record.code : '';
+  const upstreamCode = typeof record.upstreamCode === 'string' ? record.upstreamCode.toLowerCase() : '';
+  const name = typeof record.name === 'string' ? record.name.toLowerCase() : '';
+  const sseLike =
+    code === 'HTTP_502' ||
+    code === 'SSE_DECODE_ERROR' ||
+    name === 'providerprotocolerror' ||
+    message.includes('upstream sse error event') ||
+    message.includes('anthropic sse error event');
+  if (!sseLike) {
+    return false;
+  }
+  return (
+    upstreamCode.includes('internal_network_failure') ||
+    message.includes('internal network failure') ||
+    message.includes('network failure') ||
+    message.includes('network error') ||
+    message.includes('service unavailable') ||
+    message.includes('temporarily unavailable') ||
+    message.includes('connection reset') ||
+    message.includes('timeout')
+  );
+}
+
 export function extractRetryErrorSignature(err: unknown): string {
   if (!err || typeof err !== 'object') {
     return 'unknown';

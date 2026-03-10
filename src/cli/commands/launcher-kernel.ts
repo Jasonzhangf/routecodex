@@ -902,12 +902,10 @@ function launchCommandInTmuxPane(args: {
       `while true; do ${loopBody}; done`
     ].join('; ');
   })();
-  // Client lifecycle owns managed tmux lifecycle: once command exits, destroy session.
+  // Let the client finish rendering its own shutdown output before launcher cleanup
+  // asks the managed tmux session to exit from the outside.
   const shellCommand = [
     commandBody,
-    tmuxSessionName
-      ? `tmux kill-session -t ${shellQuote(tmuxSessionName)} >/dev/null 2>&1 || true`
-      : ':',
     'exit "$__rcc_exit"'
   ].join('; ');
   try {
@@ -1093,6 +1091,9 @@ async function startSessionClientService(args: {
     200,
     30_000
   );
+  const controlApiKey = resolved.configuredApiKey
+    ? encodeSessionClientApiKey(resolved.configuredApiKey, daemonId, tmuxSessionId)
+    : '';
 
   const normalizeManagedProcessPayload = (): Record<string, unknown> => {
     const state = typeof getManagedProcessState === 'function' ? getManagedProcessState() : undefined;
@@ -1131,7 +1132,10 @@ async function startSessionClientService(args: {
     try {
       const response = await ctx.fetch(`${controlUrl}${pathSuffix}`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: {
+          'content-type': 'application/json',
+          ...(controlApiKey ? { 'x-api-key': controlApiKey } : {})
+        },
         body: JSON.stringify(payload),
         ...(abortController ? { signal: abortController.signal } : {})
       });

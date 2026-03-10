@@ -44,6 +44,7 @@ import {
   isAntigravityProviderKey,
   isAntigravityReauthRequired403,
   isGoogleAccountVerificationRequiredError,
+  isSseDecodeRetryableNetworkError,
   isSseDecodeRateLimitError,
   resolveAntigravityMaxProviderAttempts,
   shouldRotateAntigravityAliasOnRetry
@@ -599,6 +600,38 @@ export class HubRequestExecutor implements RequestExecutor {
                 affectsHealth: true,
                 details: {
                   source: 'sse_decode_rate_limit',
+                  errorCode: typeof (error as any)?.code === 'string' ? String((error as any).code) : undefined,
+                  upstreamCode: typeof (error as any)?.upstreamCode === 'string' ? String((error as any).upstreamCode) : undefined,
+                  message: errorMessage
+                }
+              });
+            } catch {
+              // best-effort; never block retry/failover path
+            }
+          } else if (isSseDecodeRetryableNetworkError(error, status)) {
+            try {
+              const { emitProviderError } = await import('../../../providers/core/utils/provider-error-reporter.js');
+              emitProviderError({
+                error,
+                stage: 'provider.sse_decode',
+                runtime: {
+                  requestId: input.requestId,
+                  providerKey: target.providerKey,
+                  providerId: handle.providerId,
+                  providerType: handle.providerType,
+                  providerFamily: handle.providerFamily,
+                  providerProtocol,
+                  routeName: pipelineResult.routingDecision?.routeName,
+                  pipelineId: target.providerKey,
+                  target,
+                  runtimeKey
+                },
+                dependencies: this.deps.getModuleDependencies(),
+                statusCode: 502,
+                recoverable: true,
+                affectsHealth: true,
+                details: {
+                  source: 'sse_decode_network_error',
                   errorCode: typeof (error as any)?.code === 'string' ? String((error as any).code) : undefined,
                   upstreamCode: typeof (error as any)?.upstreamCode === 'string' ? String((error as any).upstreamCode) : undefined,
                   message: errorMessage

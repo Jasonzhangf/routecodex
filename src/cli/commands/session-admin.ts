@@ -45,6 +45,25 @@ type SessionAdminCommandOptions = {
   json?: boolean;
 };
 
+function normalizeString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function resolveConfigApiKeyValue(raw: unknown, env: NodeJS.ProcessEnv): string {
+  const trimmed = normalizeString(raw);
+  if (!trimmed) {
+    return '';
+  }
+  const envMatch = trimmed.match(/^\$\{([A-Z0-9_]+)\}$/i);
+  if (envMatch) {
+    return normalizeString(env[envMatch[1]]);
+  }
+  if (/^[A-Z][A-Z0-9_]+$/.test(trimmed)) {
+    return normalizeString(env[trimmed]);
+  }
+  return trimmed;
+}
+
 function normalizeBaseUrl(raw: string): string {
   const trimmed = String(raw || '').trim();
   if (!trimmed) {
@@ -79,6 +98,18 @@ function readPortHostFromConfig(loaded: LoadedRouteCodexConfig | null): { host: 
           : undefined;
   const port = normalizePort(cfg?.httpserver?.port ?? cfg?.server?.port ?? cfg?.port);
   return { host, port };
+}
+
+function resolveApiKeyFromConfig(ctx: SessionAdminCommandContext, loaded: LoadedRouteCodexConfig | null): string {
+  const fromEnv = normalizeString(ctx.env.ROUTECODEX_HTTP_APIKEY) || normalizeString(ctx.env.RCC_HTTP_APIKEY);
+  if (fromEnv) {
+    return fromEnv;
+  }
+  const cfg = (loaded?.userConfig || {}) as Record<string, any>;
+  return resolveConfigApiKeyValue(
+    cfg?.httpserver?.apikey ?? cfg?.modules?.httpserver?.config?.apikey ?? cfg?.server?.apikey,
+    ctx.env
+  );
 }
 
 async function resolveBaseUrl(ctx: SessionAdminCommandContext, options: SessionAdminCommandOptions): Promise<string> {
@@ -125,10 +156,19 @@ function parseInteger(value: unknown): number | undefined {
   return Math.floor(parsed);
 }
 
-async function callJson(ctx: SessionAdminCommandContext, url: string, method: string, body?: Record<string, unknown>): Promise<{ ok: boolean; status: number; data: any }> {
+async function callJson(
+  ctx: SessionAdminCommandContext,
+  url: string,
+  method: string,
+  body?: Record<string, unknown>,
+  apiKey?: string
+): Promise<{ ok: boolean; status: number; data: any }> {
   const response = await ctx.fetch(url, {
     method,
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      ...(apiKey ? { 'x-api-key': apiKey } : {})
+    },
     ...(body ? { body: JSON.stringify(body) } : {})
   });
   const text = await response.text().catch(() => '');
@@ -167,7 +207,14 @@ export function createSessionAdminCommand(program: Command, ctx: SessionAdminCom
     .option('--json', 'Print JSON output', false)
     .action(async (options: SessionAdminCommandOptions) => {
       try {
+        let loaded: LoadedRouteCodexConfig | null = null;
+        try {
+          loaded = await ctx.loadConfig(typeof options.config === 'string' ? options.config : undefined);
+        } catch {
+          loaded = null;
+        }
         const baseUrl = await resolveBaseUrl(ctx, options);
+        const apiKey = resolveApiKeyFromConfig(ctx, loaded);
         const outputJson = Boolean(options.json);
 
         const print = (payload: unknown): void => {
@@ -179,7 +226,7 @@ export function createSessionAdminCommand(program: Command, ctx: SessionAdminCom
         };
 
         if (options.cleanupDeadTmux) {
-          const result = await callJson(ctx, `${baseUrl}/daemon/session/cleanup`, 'POST', { mode: 'dead_tmux' });
+          const result = await callJson(ctx, `${baseUrl}/daemon/session/cleanup`, 'POST', { mode: 'dead_tmux' }, apiKey);
           if (!result.ok) {
             throw new Error(`cleanup-dead-tmux failed (${result.status})`);
           }
@@ -192,7 +239,7 @@ export function createSessionAdminCommand(program: Command, ctx: SessionAdminCom
             mode: 'unbind',
             conversationSessionId: options.unbindSession.trim(),
             clearTasks: Boolean(options.clearTasks)
-          });
+          }, apiKey);
           if (!result.ok) {
             throw new Error(`unbind-session failed (${result.status})`);
           }
@@ -216,7 +263,7 @@ export function createSessionAdminCommand(program: Command, ctx: SessionAdminCom
               ...(parseInteger(options.everyMinutes) ? { everyMinutes: parseInteger(options.everyMinutes) } : {})
             };
           }
-          const result = await callJson(ctx, `${baseUrl}/daemon/session/tasks`, 'POST', payload);
+          const result = await callJson(ctx, `${baseUrl}/daemon/session/tasks`, 'POST', payload, apiKey);
           if (!result.ok) {
             throw new Error(`create failed (${result.status})`);
           }
@@ -245,7 +292,7 @@ export function createSessionAdminCommand(program: Command, ctx: SessionAdminCom
               ...(parseInteger(options.everyMinutes) ? { everyMinutes: parseInteger(options.everyMinutes) } : {})
             };
           }
-          const result = await callJson(ctx, `${baseUrl}/daemon/session/tasks`, 'PATCH', { sessionId, taskId, patch });
+          const result = await callJson(ctx, `${baseUrl}/daemon/session/tasks`, 'PATCH', { sessionId, taskId, patch }, apiKey);
           if (!result.ok) {
             throw new Error(`update failed (${result.status})`);
           }
@@ -265,7 +312,7 @@ export function createSessionAdminCommand(program: Command, ctx: SessionAdminCom
           const result = await callJson(ctx, `${baseUrl}/daemon/session/tasks`, 'DELETE', {
             sessionId,
             ...(taskId ? { taskId } : {})
-          });
+          }, apiKey);
           if (!result.ok) {
             throw new Error(`delete/clear failed (${result.status})`);
           }
@@ -277,7 +324,9 @@ export function createSessionAdminCommand(program: Command, ctx: SessionAdminCom
         const listUrl = sessionId
           ? `${baseUrl}/daemon/session/tasks?sessionId=${encodeURIComponent(sessionId)}`
           : `${baseUrl}/daemon/session/tasks`;
-        const response = await ctx.fetch(listUrl);
+        const response = await ctx.fetch(listUrl, {
+          headers: apiKey ? { 'x-api-key': apiKey } : undefined
+        });
         const data = await response.json().catch(() => ({}));
         if (!response.ok) {
           throw new Error(`list failed (${response.status})`);

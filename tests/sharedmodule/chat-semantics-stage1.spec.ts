@@ -341,7 +341,8 @@ describe('Chat semantics stage 1 bridge', () => {
     const clockTool = (result.processedRequest?.tools ?? []).find(
       (tool) => tool.function?.name === 'clock'
     );
-    expect(clockTool?.function?.description ?? '').toContain('waiting longer than 2 minutes');
+    expect(clockTool?.function?.description ?? '').toContain('clock.list first');
+    expect(clockTool?.function?.description ?? '').toContain('clock.update');
     expect(clockTool?.function?.description ?? '').toContain('"action":"schedule"');
 
     const messages = result.processedRequest?.messages ?? [];

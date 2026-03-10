@@ -116,10 +116,15 @@ describe('webui edge coverage', () => {
     render(<App />);
 
     await waitFor(() => expect(screen.getByText('Setup')).toBeTruthy());
+    expect(screen.queryByText('Provider Catalog')).toBeNull();
+    expect(screen.queryByText('Routing & Capacity')).toBeNull();
+    expect(screen.queryByText('Refresh View (R)')).toBeNull();
 
     fireEvent.change(screen.getByLabelText('password'), { target: { value: 'setup-pass-123' } });
     fireEvent.click(screen.getByText('Setup'));
     await waitFor(() => expect(screen.getByText(/Password set and logged in\./)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('Provider Catalog')).toBeTruthy());
+    expect(screen.getByText('Refresh View (R)')).toBeTruthy();
 
     const apiPanel = screen.getByText('Server API Key').closest('.panel') as HTMLElement;
     fireEvent.change(within(apiPanel).getByPlaceholderText('x-api-key'), { target: { value: 'session-key' } });
@@ -523,7 +528,7 @@ describe('webui edge coverage', () => {
         return responseJson({ ok: true, action: body.action || 'unknown' });
       }
 
-      if (path === '/daemon/session/tasks' && method === 'GET') {
+      if (path === '/daemon/clock/tasks' && method === 'GET') {
         clockCalls += 1;
         if (clockCalls === 1) {
           return responseJson({

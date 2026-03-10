@@ -17,4 +17,3 @@ describe('AnthropicProtocolClient', () => {
     expect(body.metadata).toEqual({ user_id: 'test-user' });
   });
 });
-

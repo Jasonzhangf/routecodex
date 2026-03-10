@@ -94,10 +94,16 @@ export function isServerToolEnabled(): boolean {
 }
 
 export function setServerToolEnabled(enabled: boolean, updatedBy = 'daemon-admin'): ServerToolRuntimeState {
+  console.log(`[servertool] set enabled=${enabled} by ${updatedBy}`);
   runtimeState.enabled = enabled;
   runtimeState.updatedAtMs = Date.now();
   runtimeState.updatedBy = updatedBy;
   return getServerToolRuntimeState();
+}
+
+export function logServerToolFiring(message: string, sessionId?: string): void {
+  const sessionPart = sessionId ? `[${sessionId}] ` : '';
+  console.log(`[servertool] ${sessionPart}${message}`);
 }
 
 function resolveLogPath(): string {

@@ -50,6 +50,7 @@ describe('cli session-admin command', () => {
   it('creates recurring session task', async () => {
     const printed: string[] = [];
     const postedBodies: Array<Record<string, unknown>> = [];
+    const postedHeaders: Array<Record<string, string>> = [];
 
     const program = new Command();
     createSessionAdminCommand(program, {
@@ -65,11 +66,12 @@ describe('cli session-admin command', () => {
       loadConfig: async () =>
         ({
           configPath: '/tmp/config.json',
-          userConfig: { httpserver: { host: '127.0.0.1', port: 5520 } },
+          userConfig: { httpserver: { host: '127.0.0.1', port: 5520, apikey: '${ROUTECODEX_HTTP_APIKEY}' } },
           providerProfiles: {} as any
         }) as any,
       fetch: (async (url: string, init?: RequestInit) => {
         if (url.endsWith('/daemon/session/tasks') && init?.method === 'POST') {
+          postedHeaders.push((init.headers || {}) as Record<string, string>);
           postedBodies.push(JSON.parse(String(init.body || '{}')));
           return {
             ok: true,
@@ -79,7 +81,7 @@ describe('cli session-admin command', () => {
         }
         throw new Error(`unexpected url: ${url}`);
       }) as any,
-      env: {},
+      env: { ROUTECODEX_HTTP_APIKEY: 'test-http-apikey' },
       exit: (code) => {
         throw new Error(`exit:${code}`);
       }
@@ -105,6 +107,7 @@ describe('cli session-admin command', () => {
     expect((postedBodies[0].recurrence as any)?.kind).toBe('interval');
     expect((postedBodies[0].recurrence as any)?.everyMinutes).toBe(15);
     expect((postedBodies[0].recurrence as any)?.maxRuns).toBe(8);
+    expect(postedHeaders[0]['x-api-key']).toBe('test-http-apikey');
 
     const payload = JSON.parse(printed.join('\n'));
     expect(payload.ok).toBe(true);

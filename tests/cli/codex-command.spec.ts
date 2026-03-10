@@ -116,7 +116,9 @@ describe('cli codex command', () => {
       nodeBin: 'node',
       createSpinner: async () => createStubSpinner(),
       logger: { info: (msg) => infos.push(String(msg)), warning: () => {}, success: () => {}, error: () => {} },
-      env: {},
+      env: {
+        ROUTECODEX_HTTP_APIKEY: 'sk-test-key'
+      },
       rawArgv: ['codex', '--url', 'http://localhost:5520/proxy'],
       fsImpl: createStubFs(),
       homedir: () => '/home/test',
@@ -170,7 +172,9 @@ describe('cli codex command', () => {
       nodeBin: 'node',
       createSpinner: async () => createStubSpinner(),
       logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
-      env: {},
+      env: {
+        ROUTECODEX_HTTP_APIKEY: 'sk-test-key'
+      },
       rawArgv: ['codex', '--url', 'http://localhost:5520/proxy'],
       fsImpl: createStubFs(),
       homedir: () => '/home/test',
@@ -688,7 +692,8 @@ describe('cli codex command', () => {
       logger: { info: () => {}, warning: () => {}, success: () => {}, error: (msg) => errors.push(msg) },
       env: {
         ROUTECODEX_SESSION_RECLAIM_REQUIRED: '1',
-        TMUX: '/tmp/tmux,123,0'
+        TMUX: '/tmp/tmux,123,0',
+        ROUTECODEX_HTTP_APIKEY: 'sk-test-key'
       },
       rawArgv: ['codex', '--url', 'http://localhost:5520/proxy'],
       fsImpl: createStubFs(),
@@ -772,7 +777,10 @@ describe('cli codex command', () => {
       nodeBin: 'node',
       createSpinner: async () => createStubSpinner(),
       logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
-      env: { TMUX: '/tmp/tmux,123,0' },
+      env: {
+        TMUX: '/tmp/tmux,123,0',
+        ROUTECODEX_HTTP_APIKEY: 'sk-test-key'
+      },
       rawArgv: ['codex', '--url', 'http://localhost:5520/proxy'],
       fsImpl: createStubFs(),
       homedir: () => '/home/test',
@@ -836,7 +844,9 @@ describe('cli codex command', () => {
       nodeBin: 'node',
       createSpinner: async () => createStubSpinner(),
       logger: { info: () => {}, warning: (msg) => warnings.push(msg), success: () => {}, error: () => {} },
-      env: {},
+      env: {
+        ROUTECODEX_HTTP_APIKEY: 'sk-test-key'
+      },
       rawArgv: ['codex', '--url', 'http://localhost:5520/proxy'],
       fsImpl: createStubFs(),
       homedir: () => '/home/test',
@@ -908,7 +918,9 @@ describe('cli codex command', () => {
       nodeBin: 'node',
       createSpinner: async () => createStubSpinner(),
       logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
-      env: {},
+      env: {
+        ROUTECODEX_HTTP_APIKEY: 'sk-test-key'
+      },
       rawArgv: ['codex', '--url', 'http://localhost:5520/proxy'],
       fsImpl: createStubFs(),
       homedir: () => '/home/test',
@@ -983,7 +995,9 @@ describe('cli codex command', () => {
       nodeBin: 'node',
       createSpinner: async () => createStubSpinner(),
       logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
-      env: {},
+      env: {
+        ROUTECODEX_HTTP_APIKEY: 'sk-test-key'
+      },
       rawArgv: ['codex', '--url', 'http://localhost:5520/proxy'],
       fsImpl: createStubFs(),
       homedir: () => '/home/test',
@@ -1053,6 +1067,9 @@ describe('cli codex command', () => {
     expect(spawnCalls).toHaveLength(1);
     expect(spawnCalls[0].command).toBe('tmux');
     expect(tmuxCalls.some((call) => call.args[0] === 'kill-session')).toBe(false);
+    const launchCall = findTmuxLaunchCall(tmuxCalls);
+    expect(launchCall).toBeDefined();
+    expect(extractTmuxLaunchShellCommand(launchCall)).not.toContain('kill-session -t');
     expect(
       tmuxCalls.some(
         (call) => call.args[0] === 'send-keys' && call.args.includes('-l') && call.args.includes('exit')
@@ -1073,7 +1090,9 @@ describe('cli codex command', () => {
       nodeBin: 'node',
       createSpinner: async () => createStubSpinner(),
       logger: { info: (msg) => infos.push(msg), warning: () => {}, success: () => {}, error: () => {} },
-      env: {},
+      env: {
+        ROUTECODEX_HTTP_APIKEY: 'sk-test-key'
+      },
       rawArgv: ['codex', '--url', 'http://localhost:5520/proxy'],
       fsImpl: createStubFs(),
       homedir: () => '/home/test',
@@ -1154,7 +1173,9 @@ describe('cli codex command', () => {
       nodeBin: 'node',
       createSpinner: async () => createStubSpinner(),
       logger: { info: (msg) => infos.push(msg), warning: () => {}, success: () => {}, error: () => {} },
-      env: {},
+      env: {
+        ROUTECODEX_HTTP_APIKEY: 'sk-test-key'
+      },
       rawArgv: ['codex', '--url', 'http://localhost:5520/proxy'],
       fsImpl: createStubFs(),
       homedir: () => '/home/test',
@@ -1230,7 +1251,9 @@ describe('cli codex command', () => {
       nodeBin: 'node',
       createSpinner: async () => createStubSpinner(),
       logger: { info: (msg) => infos.push(msg), warning: () => {}, success: () => {}, error: () => {} },
-      env: {},
+      env: {
+        ROUTECODEX_HTTP_APIKEY: 'sk-test-key'
+      },
       rawArgv: ['codex', '--url', 'http://localhost:5520/proxy'],
       fsImpl: createStubFs(),
       homedir: () => '/home/test',
@@ -1305,7 +1328,9 @@ describe('cli codex command', () => {
       nodeBin: "node",
       createSpinner: async () => createStubSpinner(),
       logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
-      env: {},
+      env: {
+        ROUTECODEX_HTTP_APIKEY: 'sk-test-key'
+      },
       rawArgv: ["codex", "--url", "http://localhost:5520/proxy"],
       fsImpl: createStubFs(),
       homedir: () => "/home/test",
@@ -1371,7 +1396,10 @@ describe('cli codex command', () => {
       nodeBin: 'node',
       createSpinner: async () => createStubSpinner(),
       logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
-      env: { TMUX: '/tmp/tmux,123,0' },
+      env: {
+        TMUX: '/tmp/tmux,123,0',
+        ROUTECODEX_HTTP_APIKEY: 'sk-test-key'
+      },
       rawArgv: ['codex', '--url', 'http://localhost:5520/proxy'],
       fsImpl: createStubFs(),
       homedir: () => '/home/test',

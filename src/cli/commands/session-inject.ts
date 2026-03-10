@@ -48,6 +48,25 @@ type SessionClientRecord = {
   lastHeartbeatAtMs?: number;
 };
 
+function normalizeString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function resolveConfigApiKeyValue(raw: unknown, env: NodeJS.ProcessEnv): string {
+  const trimmed = normalizeString(raw);
+  if (!trimmed) {
+    return '';
+  }
+  const envMatch = trimmed.match(/^\$\{([A-Z0-9_]+)\}$/i);
+  if (envMatch) {
+    return normalizeString(env[envMatch[1]]);
+  }
+  if (/^[A-Z][A-Z0-9_]+$/.test(trimmed)) {
+    return normalizeString(env[trimmed]);
+  }
+  return trimmed;
+}
+
 function normalizeBaseUrl(raw: string): string {
   const trimmed = String(raw || '').trim();
   if (!trimmed) {
@@ -84,6 +103,18 @@ function readPortHostFromConfig(loaded: LoadedRouteCodexConfig | null): { host: 
   return { host, port };
 }
 
+function resolveApiKeyFromConfig(ctx: SessionInjectCommandContext, loaded: LoadedRouteCodexConfig | null): string {
+  const fromEnv = normalizeString(ctx.env.ROUTECODEX_HTTP_APIKEY) || normalizeString(ctx.env.RCC_HTTP_APIKEY);
+  if (fromEnv) {
+    return fromEnv;
+  }
+  const cfg = (loaded?.userConfig || {}) as Record<string, any>;
+  return resolveConfigApiKeyValue(
+    cfg?.httpserver?.apikey ?? cfg?.modules?.httpserver?.config?.apikey ?? cfg?.server?.apikey,
+    ctx.env
+  );
+}
+
 async function resolveBaseUrl(ctx: SessionInjectCommandContext, options: SessionInjectCommandOptions): Promise<string> {
   if (typeof options.url === 'string' && options.url.trim()) {
     return normalizeBaseUrl(options.url);
@@ -118,9 +149,12 @@ async function resolveBaseUrl(ctx: SessionInjectCommandContext, options: Session
   return `http://${host}:${Math.floor(port)}`;
 }
 
-async function fetchDaemonList(ctx: SessionInjectCommandContext, baseUrl: string): Promise<SessionClientRecord[]> {
+async function fetchDaemonList(ctx: SessionInjectCommandContext, baseUrl: string, apiKey?: string): Promise<SessionClientRecord[]> {
   const url = `${baseUrl}/daemon/session-client/list`;
-  const response = await ctx.fetch(url, { method: 'GET' });
+  const response = await ctx.fetch(url, {
+    method: 'GET',
+    headers: apiKey ? { 'x-api-key': apiKey } : undefined
+  });
   if (!response.ok) {
     const text = await response.text().catch(() => String(response.status));
     throw new Error(`Failed to list session daemons (${response.status}): ${text}`);
@@ -225,8 +259,15 @@ export function createSessionInjectCommand(program: Command, ctx: SessionInjectC
     .action(async (options: SessionInjectCommandOptions) => {
       try {
         const waitHint = 'Hint: if waiting is needed, only call tools that are available in your current runtime.';
+        let loaded: LoadedRouteCodexConfig | null = null;
+        try {
+          loaded = await ctx.loadConfig(typeof options.config === 'string' ? options.config : undefined);
+        } catch {
+          loaded = null;
+        }
         const baseUrl = await resolveBaseUrl(ctx, options);
-        const records = await fetchDaemonList(ctx, baseUrl);
+        const apiKey = resolveApiKeyFromConfig(ctx, loaded);
+        const records = await fetchDaemonList(ctx, baseUrl, apiKey);
 
         if (options.list) {
           printList(ctx, records, Boolean(options.json));
@@ -252,7 +293,10 @@ export function createSessionInjectCommand(program: Command, ctx: SessionInjectC
         const injectUrl = `${baseUrl}/daemon/session-client/inject`;
         const response = await ctx.fetch(injectUrl, {
           method: 'POST',
-          headers: { 'content-type': 'application/json' },
+          headers: {
+            'content-type': 'application/json',
+            ...(apiKey ? { 'x-api-key': apiKey } : {})
+          },
           body: JSON.stringify(payload)
         });
         const data = (await response.json().catch(() => null)) as Record<string, unknown> | null;

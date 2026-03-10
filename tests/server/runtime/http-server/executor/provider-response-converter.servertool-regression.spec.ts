@@ -61,6 +61,106 @@ describe('provider-response-converter servertool regressions', () => {
       statusCode: 400
     });
   });
+
+  it('maps retryable anthropic SSE network failures into HTTP_502', async () => {
+    jest.resetModules();
+    mockConvertProviderResponse.mockClear();
+    mockCreateSnapshotRecorder.mockClear();
+
+    const { convertProviderResponseIfNeeded } = await import(
+      '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
+    );
+
+    await expect(
+      convertProviderResponseIfNeeded(
+        {
+          entryEndpoint: '/v1/messages',
+          providerProtocol: 'anthropic-messages',
+          requestId: 'req_sse_network_failure',
+          wantsStream: true,
+          response: {
+            body: {
+              mode: 'sse',
+              error: {
+                type: 'error',
+                error: {
+                  type: 'api_error',
+                  message: 'Internal Network Failure'
+                }
+              }
+            }
+          } as any,
+          pipelineMetadata: {}
+        },
+        {
+          runtimeManager: {
+            resolveRuntimeKey: () => undefined,
+            getHandleByRuntimeKey: () => undefined
+          },
+          executeNested: async () => ({ body: { ok: true } } as any)
+        }
+      )
+    ).rejects.toMatchObject({
+      code: 'HTTP_502',
+      status: 502,
+      statusCode: 502,
+      retryable: true
+    });
+  });
+
+  it('remaps bridge SSE decode network failures into HTTP_502', async () => {
+    jest.resetModules();
+    mockConvertProviderResponse.mockClear();
+    mockCreateSnapshotRecorder.mockClear();
+    mockConvertProviderResponse.mockImplementationOnce(async () => {
+      const error = new Error(
+        '[chat_process.resp.stage1.sse_decode] Failed to decode SSE payload for protocol anthropic-messages: Anthropic SSE error event Internal Network Failure'
+      ) as Error & {
+        code?: string;
+        name?: string;
+        details?: Record<string, unknown>;
+      };
+      error.name = 'ProviderProtocolError';
+      error.code = 'SSE_DECODE_ERROR';
+      error.details = {
+        upstreamCode: 'ANTHROPIC_SSE_TO_JSON_FAILED'
+      };
+      throw error;
+    });
+
+    const { convertProviderResponseIfNeeded } = await import(
+      '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
+    );
+
+    await expect(
+      convertProviderResponseIfNeeded(
+        {
+          entryEndpoint: '/v1/messages',
+          providerProtocol: 'anthropic-messages',
+          requestId: 'req_bridge_sse_network_failure',
+          wantsStream: true,
+          response: {
+            body: {
+              id: 'mock'
+            }
+          } as any,
+          pipelineMetadata: {}
+        },
+        {
+          runtimeManager: {
+            resolveRuntimeKey: () => undefined,
+            getHandleByRuntimeKey: () => undefined
+          },
+          executeNested: async () => ({ body: { ok: true } } as any)
+        }
+      )
+    ).rejects.toMatchObject({
+      code: 'HTTP_502',
+      status: 502,
+      statusCode: 502,
+      retryable: true
+    });
+  });
   it('disables servertool orchestration when serverToolsEnabled=false', async () => {
     jest.resetModules();
     mockConvertProviderResponse.mockClear();

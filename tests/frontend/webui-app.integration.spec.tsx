@@ -560,7 +560,7 @@ describe('webui integration flows (feature coverage)', () => {
         return json({ ok: true, action: body.action || 'unknown' });
       }
 
-      if (path === '/daemon/session/tasks' && method === 'GET') {
+      if (path === '/daemon/clock/tasks' && method === 'GET') {
         if (fault.clockFetchFail) {
           return json({ error: { message: 'clock fetch failed' } }, 500);
         }
@@ -593,6 +593,25 @@ describe('webui integration flows (feature coverage)', () => {
 
       return json({ error: { message: `unhandled ${method} ${path}` } }, 500);
     }) as unknown as typeof fetch;
+  });
+
+  it('gates admin pages behind login when auth is required', async () => {
+    state.authenticated = false;
+    state.hasPassword = true;
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByText('Admin Login')).toBeTruthy());
+    expect(screen.getByText(/Admin authentication is required before opening any daemon management page\./)).toBeTruthy();
+    expect(screen.queryByText('Provider Catalog')).toBeNull();
+    expect(screen.queryByText('Routing & Capacity')).toBeNull();
+    expect(screen.queryByText('Refresh View (R)')).toBeNull();
+
+    fireEvent.change(screen.getByLabelText('password'), { target: { value: 'test-pass' } });
+    fireEvent.click(screen.getByText('Login'));
+
+    await waitFor(() => expect(screen.getByText('Provider Catalog')).toBeTruthy());
+    expect(screen.getByText('Refresh View (R)')).toBeTruthy();
   });
 
   it('covers major user flows across all tabs', async () => {

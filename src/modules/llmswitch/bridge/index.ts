@@ -47,6 +47,7 @@ export {
   getStatsCenterSafe,
   getLlmsStatsSnapshot,
   resolveClockConfigSnapshot,
+  startClockDaemonIfNeededSnapshot,
   setClockRuntimeHooksSnapshot,
   reserveClockDueTasks,
   commitClockDueReservation,

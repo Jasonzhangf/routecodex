@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { RouteCodexHttpServer } from '../../../src/server/runtime/http-server/index.js';
 import type { ServerConfigV2 } from '../../../src/server/runtime/http-server/types.js';
+import { writeDaemonLoginRecord } from '../../../src/server/runtime/http-server/daemon-admin/auth-store.js';
 
 // 基于最小配置启动一个内存内 HTTP server，并调用 daemon-admin 相关只读 API。
 
@@ -87,6 +88,9 @@ async function startTestServer(host = '127.0.0.1'): Promise<{
     for (const fn of restores.reverse()) fn();
   };
   const apikey = 'test-http-apikey';
+  if (host === '0.0.0.0') {
+    await writeDaemonLoginRecord('routecodex-test-password-123');
+  }
   const tmpConfig = createTestConfig(0, configPath, apikey, host);
   const server = new RouteCodexHttpServer(tmpConfig);
   // 使用私有方法启动监听，以便读取实际端口；这里复用 start() 逻辑。
@@ -154,10 +158,16 @@ async function setupDaemonAdminAuth(baseUrl: string): Promise<string> {
   if (setup.status === 200 && typeof setup.setCookie === 'string' && setup.setCookie) {
     return setup.setCookie;
   }
-  if (setup.status === 409) {
+  if (setup.status === 200) {
+    return '';
+  }
+  if (setup.status === 403 || setup.status === 409) {
     const login = await postJson(baseUrl, '/daemon/auth/login', { password });
     if (login.status === 200 && typeof login.setCookie === 'string' && login.setCookie) {
       return login.setCookie;
+    }
+    if (login.status === 200) {
+      return '';
     }
     throw new Error(`Login failed: ${login.status} ${JSON.stringify(login.body)}`);
   }

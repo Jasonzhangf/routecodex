@@ -1,7 +1,15 @@
 import type { Application, Request, Response } from 'express';
-import { isDaemonAdminAuthRequired, isLocalRequest } from '../daemon-admin-routes.js';
+import {
+  isDaemonAdminApiKeyConfigured,
+  isDaemonAdminAuthRequired,
+  isLocalRequest
+} from '../daemon-admin-routes.js';
 import { establishDaemonSession, isDaemonSessionAuthenticated, clearDaemonSessionFromRequest } from './auth-session.js';
-import { readDaemonLoginRecord, verifyDaemonPassword, writeDaemonLoginRecord } from './auth-store.js';
+import {
+  readDaemonLoginRecord,
+  verifyDaemonPassword,
+  writeDaemonLoginRecord
+} from './auth-store.js';
 
 function normalizePassword(value: unknown): string {
   if (typeof value !== 'string') {
@@ -18,11 +26,26 @@ export function registerDaemonAuthRoutes(app: Application): void {
       res.status(500).json({ error: { message: loaded.error.message, code: 'login_file_error' } });
       return;
     }
+    if (isLocalRequest(req)) {
+      res.status(200).json({
+        ok: true,
+        authRequired: false,
+        hasPassword: false,
+        authenticated: true,
+        mustChangePassword: false,
+        apiKeyConfigured: isDaemonAdminApiKeyConfigured(req),
+        isRemote: false,
+      });
+      return;
+    }
     res.status(200).json({
       ok: true,
       authRequired,
-      hasPassword: authRequired ? Boolean(loaded.record) : false,
-      authenticated: authRequired ? isDaemonSessionAuthenticated(req) : true
+      hasPassword: Boolean(loaded.record),
+      authenticated: authRequired ? isDaemonSessionAuthenticated(req) : true,
+      mustChangePassword: authRequired ? Boolean(loaded.record?.mustChangePassword) : false,
+      apiKeyConfigured: isDaemonAdminApiKeyConfigured(req),
+      isRemote: !isLocalRequest(req),
     });
   });
 
@@ -51,6 +74,10 @@ export function registerDaemonAuthRoutes(app: Application): void {
   });
 
   app.post('/daemon/auth/login', async (req: Request, res: Response) => {
+    if (isLocalRequest(req)) {
+      res.status(200).json({ ok: true });
+      return;
+    }
     const loaded = await readDaemonLoginRecord();
     if (!loaded.ok) {
       res.status(500).json({ error: { message: loaded.error.message, code: 'login_file_error' } });
@@ -67,15 +94,15 @@ export function registerDaemonAuthRoutes(app: Application): void {
       return;
     }
     establishDaemonSession(res);
-    res.status(200).json({ ok: true });
+    res.status(200).json({
+      ok: true,
+      mustChangePassword: loaded.record.mustChangePassword,
+    });
   });
 
   app.post('/daemon/auth/change', async (req: Request, res: Response) => {
-    if (!isLocalRequest(req)) {
-      res.status(403).json({ error: { message: 'forbidden', code: 'forbidden' } });
-      return;
-    }
-    if (!isDaemonSessionAuthenticated(req)) {
+    const authRequired = isDaemonAdminAuthRequired(req);
+    if (!isDaemonSessionAuthenticated(req) && !isLocalRequest(req)) {
       res.status(401).json({ error: { message: 'unauthorized', code: 'unauthorized' } });
       return;
     }
@@ -94,10 +121,12 @@ export function registerDaemonAuthRoutes(app: Application): void {
       res.status(400).json({ error: { message: 'newPassword must be 8..1024 characters', code: 'bad_request' } });
       return;
     }
-    const ok = await verifyDaemonPassword(oldPassword, loaded.record);
-    if (!ok) {
-      res.status(401).json({ error: { message: 'unauthorized', code: 'unauthorized' } });
-      return;
+    if (!isLocalRequest(req) && authRequired) {
+      const ok = await verifyDaemonPassword(oldPassword, loaded.record);
+      if (!ok) {
+        res.status(401).json({ error: { message: 'unauthorized', code: 'unauthorized' } });
+        return;
+      }
     }
     await writeDaemonLoginRecord(newPassword);
     establishDaemonSession(res);
@@ -107,5 +136,24 @@ export function registerDaemonAuthRoutes(app: Application): void {
   app.post('/daemon/auth/logout', async (req: Request, res: Response) => {
     clearDaemonSessionFromRequest(req, res);
     res.status(200).json({ ok: true });
+  });
+
+  // API key management
+  app.post('/daemon/auth/set-apikey', async (req: Request, res: Response) => {
+    res.status(410).json({
+      error: {
+        message: 'httpserver.apikey is config/env managed; use ROUTECODEX_HTTP_APIKEY/RCC_HTTP_APIKEY or config file',
+        code: 'disabled'
+      }
+    });
+  });
+
+  app.post('/daemon/auth/reset-password', async (req: Request, res: Response) => {
+    res.status(410).json({
+      error: {
+        message: 'password recovery via apiKey is disabled; use local bind setup or update the login file explicitly',
+        code: 'disabled'
+      }
+    });
   });
 }

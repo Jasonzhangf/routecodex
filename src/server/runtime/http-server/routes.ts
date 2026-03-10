@@ -404,8 +404,13 @@ export function registerHttpRoutes(options: RouteOptions): void {
     getServerHost: () => String(config.server.host || '')
   });
 
-  // Local-only session client daemon endpoints (register/heartbeat/inject/unregister)
-  registerSessionClientRoutes(app);
+  // Session client daemon endpoints:
+  // - loopback bind: localhost-only
+  // - public bind: require httpserver.apikey
+  registerSessionClientRoutes(app, {
+    bindHost: config.server.host,
+    expectedApiKey: config.server.apikey
+  });
 
   // OAuth Portal route is registered early in constructor, so we skip it here
   // to avoid duplicate route registration

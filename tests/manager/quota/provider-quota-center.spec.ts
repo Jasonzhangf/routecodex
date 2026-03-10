@@ -100,6 +100,38 @@ describe('provider-quota-center error handling', () => {
     expect(state.lastErrorSeries).toBe('ENET');
   });
 
+  it('cools down 502 internal network failures for one minute after the third hit', () => {
+    const baseNow = 4_800_000;
+    let state = createInitialQuotaState(providerKey, { authType: 'apikey' }, baseNow);
+
+    state = applyErrorEvent(
+      state,
+      { providerKey, code: 'HTTP_502', httpStatus: 502, message: 'Upstream SSE error event: Internal Network Failure' },
+      baseNow
+    );
+    expect(state.reason).toBe('cooldown');
+    expect(state.cooldownUntil).toBe(baseNow + 3_000);
+    expect(state.lastErrorSeries).toBe('ENET');
+
+    const secondNow = baseNow + 10_000;
+    state = applyErrorEvent(
+      state,
+      { providerKey, code: 'HTTP_502', httpStatus: 502, message: 'Upstream SSE error event: Internal Network Failure' },
+      secondNow
+    );
+    expect(state.cooldownUntil).toBe(secondNow + 10_000);
+    expect(state.lastErrorSeries).toBe('ENET');
+
+    const thirdNow = secondNow + 10_000;
+    state = applyErrorEvent(
+      state,
+      { providerKey, code: 'HTTP_502', httpStatus: 502, message: 'Upstream SSE error event: Internal Network Failure' },
+      thirdNow
+    );
+    expect(state.cooldownUntil).toBe(thirdNow + 60_000);
+    expect(state.lastErrorSeries).toBe('ENET');
+  });
+
   it('does not blacklist unknown errors; keeps escalating cooldown', () => {
     const baseNow = 5_000_000;
     let state = createInitialQuotaState(providerKey, { authType: 'apikey' }, baseNow);
