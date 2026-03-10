@@ -1,0 +1,88 @@
+{
+  "data": {
+    "body": {
+      "model": "glm-4.7",
+      "stream": false,
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are Codex, a local coding agent."
+        },
+        {
+          "role": "user",
+          "content": "列出 workspace 根目录文件"
+        },
+        {
+          "role": "assistant",
+          "content": null,
+          "tool_calls": [
+            {
+              "id": "call_demo_exec",
+              "type": "function",
+              "function": {
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"ls -la\",\"workdir\":\"/Users/example/project\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "call_demo_exec",
+          "content": "total 8\n-rw-r--r--  focus.md\n-rw-r--r--  README.md"
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "请简要描述这张图片的内容"
+            },
+            {
+              "type": "image_url",
+              "image_url": {
+                "url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB"
+              }
+            }
+          ]
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "exec_command",
+            "description": "Runs a shell command inside the workspace.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "cmd": {
+                  "type": "string"
+                },
+                "workdir": {
+                  "type": "string"
+                }
+              },
+              "required": ["cmd"]
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "write_stdin",
+            "description": "Writes incremental input to an existing PTY session.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "session_id": { "type": "number" },
+                "chars": { "type": "string" }
+              },
+              "required": ["session_id"]
+            }
+          }
+        }
+      ]
+    }
+  }
+}

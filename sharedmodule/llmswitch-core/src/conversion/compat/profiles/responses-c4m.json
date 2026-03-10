@@ -1,0 +1,45 @@
+{
+  "id": "responses:c4m",
+  "protocol": "openai-responses",
+  "request": {
+    "mappings": [
+      {
+        "action": "remove",
+        "path": "max_tokens"
+      },
+      {
+        "action": "remove",
+        "path": "maxTokens"
+      },
+      {
+        "action": "remove",
+        "path": "max_output_tokens"
+      },
+      {
+        "action": "remove",
+        "path": "maxOutputTokens"
+      },
+      {
+        "action": "inject_instruction",
+        "sourcePath": "instructions",
+        "targetPath": "input",
+        "role": "system",
+        "contentType": "input_text",
+        "stripHtml": true,
+        "maxLengthEnv": [
+          "ROUTECODEX_C4M_INSTRUCTIONS_MAX",
+          "RCC_C4M_INSTRUCTIONS_MAX",
+          "ROUTECODEX_COMPAT_INSTRUCTIONS_MAX"
+        ]
+      }
+    ]
+  },
+  "response": {
+    "filters": [
+      {
+        "action": "rate_limit_text",
+        "needle": "The Codex-For.ME service is available, but you have reached the request limit"
+      }
+    ]
+  }
+}

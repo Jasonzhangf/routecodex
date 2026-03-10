@@ -1,0 +1,31 @@
+# 流式响应验证规则
+name: "Streaming Response Validation"
+version: "1.0.0"
+description: "Validation rules for streaming responses and SSE events"
+rules:
+  - name: "streaming-event-sequence"
+    description: "Validate streaming event sequence"
+    enabled: true
+    severity: "warning"
+    ruleType: "custom"
+    implementation: "validateStreamingCapability"
+    parameters:
+      expectedEvents: ["response.created", "response.in_progress", "response.output_text.delta", "response.output_text.done", "response.completed", "response.done"]
+
+  - name: "tool-calls-validation"
+    description: "Validate tool calls in streaming responses"
+    enabled: true
+    severity: "error"
+    ruleType: "custom"
+    implementation: "validateToolCalls"
+    parameters:
+      expectedTools: ["get_current_time", "get_weather"]
+      validateArguments: true
+
+  - name: "chunk-sequence-check"
+    description: "Ensure chunk sequence numbers are contiguous"
+    enabled: true
+    severity: "warning"
+    ruleType: "sequence-check"
+    parameters:
+      expectedEvents: ["response.created", "response.in_progress", "response.output_text.delta"]

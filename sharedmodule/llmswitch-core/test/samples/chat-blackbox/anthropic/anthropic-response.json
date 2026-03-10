@@ -1,0 +1,59 @@
+{
+  "payload": {
+    "id": "msg_regression_tool",
+    "type": "message",
+    "role": "assistant",
+    "model": "glm-4.6",
+    "created": 1700000000,
+    "stop_reason": "tool_use",
+    "content": [
+      {
+        "type": "tool_use",
+        "id": "call_regression_shell",
+        "name": "Bash",
+        "input": {
+          "command": "ls"
+        }
+      }
+    ],
+    "usage": {
+      "input_tokens": 10,
+      "output_tokens": 5
+    }
+  },
+  "aliasMap": {
+    "shell_command": "Bash"
+  },
+  "expected": {
+    "id": "msg_regression_tool",
+    "object": "chat.completion",
+    "created": 1700000000,
+    "model": "glm-4.6",
+    "choices": [
+      {
+        "index": 0,
+        "finish_reason": "tool_calls",
+        "message": {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_regression_shell",
+              "type": "function",
+              "function": {
+                "name": "shell_command",
+                "arguments": "{\"command\":\"ls\"}"
+              },
+              "tool_call_id": "call_regression_shell",
+              "call_id": "call_regression_shell"
+            }
+          ]
+        }
+      }
+    ],
+    "usage": {
+      "input_tokens": 10,
+      "output_tokens": 5
+    }
+  }
+}

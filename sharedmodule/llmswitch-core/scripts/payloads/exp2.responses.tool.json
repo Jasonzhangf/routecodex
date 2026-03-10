@@ -1,0 +1,28 @@
+{
+  "model": "gpt-oss-20b-mlx",
+  "instructions": "You may call tools to list files. Return a tool call first.",
+  "input": [
+    { "type": "message", "message": { "role": "user", "content": [ { "type": "input_text", "text": "列出当前目录" } ] } }
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "shell",
+        "description": "Execute shell commands. Put all flags/paths into the argv array.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "command": { "type": "array", "items": { "type": "string" } },
+            "workdir": { "type": "string" },
+            "timeout_ms": { "type": "integer" }
+          },
+          "required": ["command"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "stream": true
+}
+

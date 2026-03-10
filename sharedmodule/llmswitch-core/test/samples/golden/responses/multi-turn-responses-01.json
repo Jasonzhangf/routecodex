@@ -1,0 +1,59 @@
+{
+  "sampleId": "multi-turn-responses-01",
+  "name": "多轮对话 - Responses协议",
+  "type": "request",
+  "protocol": "responses",
+  "category": "multi-turn",
+  "payload": {
+    "model": "gpt-4",
+    "input": [
+      {
+        "role": "user",
+        "content": "我想了解一下机器学习"
+      },
+      {
+        "role": "assistant",
+        "content": "机器学习是人工智能的一个重要分支，它使计算机能够从数据中学习并做出预测。机器学习主要分为监督学习、无监督学习和强化学习三大类。"
+      },
+      {
+        "role": "user",
+        "content": "能详细解释一下监督学习吗？"
+      },
+      {
+        "role": "assistant",
+        "content": "监督学习是机器学习中最常见的方法之一。在监督学习中，我们使用带标签的数据来训练模型，让模型学习输入和输出之间的映射关系。"
+      }
+    ],
+    "max_tokens": 1000,
+    "temperature": 0.7
+  },
+  "metadata": {
+    "description": "测试多轮对话上下文保持和消息顺序的正确性",
+    "testFocus": ["multi-turn", "conversation-context", "message-ordering"],
+    "expectedStreaming": false,
+    "expectedTools": [],
+    "validationRules": [
+      {
+        "type": "field-check",
+        "field": "input",
+        "rule": "non-empty"
+      },
+      {
+        "type": "custom",
+        "implementation": "validateConversationFlow",
+        "parameters": {
+          "minTurns": 4,
+          "maxTurns": 10,
+          "requiredRoles": ["user", "assistant"]
+        }
+      },
+      {
+        "type": "custom",
+        "implementation": "validateMessageOrder",
+        "parameters": {
+          "preserveChronology": true
+        }
+      }
+    ]
+  }
+}

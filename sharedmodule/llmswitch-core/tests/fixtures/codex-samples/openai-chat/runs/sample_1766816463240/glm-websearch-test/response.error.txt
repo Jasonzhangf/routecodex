@@ -1,0 +1,1 @@
+{"error":{"message":"Responses payload produced no chat messages","code":"HTTP_HANDLER_ERROR","request_id":"openai-responses-unknown-unknown-20251227T142103261-007"}}

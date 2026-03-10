@@ -1,0 +1,22 @@
+{
+  "id": "resp_fixture_responses",
+  "object": "response",
+  "created_at": 1234567890,
+  "model": "gpt-5.1",
+  "status": "completed",
+  "output": [
+    {
+      "id": "message_fixture",
+      "type": "message",
+      "status": "completed",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "这是 Responses 响应链测试文本。"
+        }
+      ]
+    }
+  ],
+  "output_text": "这是 Responses 响应链测试文本。"
+}

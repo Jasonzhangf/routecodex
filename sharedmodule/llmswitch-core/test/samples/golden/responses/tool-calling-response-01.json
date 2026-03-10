@@ -1,0 +1,101 @@
+{
+  "sampleId": "tool-calling-response-01",
+  "name": "工具调用响应 - Responses协议",
+  "type": "response",
+  "protocol": "responses",
+  "category": "tools",
+  "payload": {
+    "id": "resp_toolcall_123456789",
+    "object": "response",
+    "created_at": 1700000000,
+    "model": "gpt-4",
+    "status": "requires_action",
+    "output": [
+      {
+        "type": "message",
+        "id": "msg_toolcall_123456789",
+        "status": "completed",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "output_text",
+            "text": "我来为你获取当前时间和天气信息。"
+          }
+        ]
+      },
+      {
+        "type": "function_call",
+        "id": "call_time_123456",
+        "status": "completed",
+        "call_id": "call_time_123456",
+        "name": "get_current_time",
+        "arguments": "{}"
+      },
+      {
+        "type": "function_call",
+        "id": "call_weather_123456",
+        "status": "completed",
+        "call_id": "call_weather_123456",
+        "name": "get_weather",
+        "arguments": "{\"city\": \"北京\", \"units\": \"celsius\"}"
+      }
+    ],
+    "required_action": {
+      "type": "submit_tool_outputs",
+      "submit_tool_outputs": {
+        "tool_calls": [
+          {
+            "id": "call_time_123456",
+            "type": "function",
+            "function": {
+              "name": "get_current_time",
+              "arguments": "{}"
+            }
+          },
+          {
+            "id": "call_weather_123456",
+            "type": "function",
+            "function": {
+              "name": "get_weather",
+              "arguments": "{\"city\": \"北京\", \"units\": \"celsius\"}"
+            }
+          }
+        ]
+      }
+    },
+    "usage": {
+      "input_tokens": 25,
+      "output_tokens": 45,
+      "total_tokens": 70
+    }
+  },
+  "metadata": {
+    "description": "包含工具调用的标准Responses协议响应",
+    "testFocus": ["tool-calls-response", "function-arguments", "multiple-tools"],
+    "isStreaming": false,
+    "hasToolCalls": true,
+    "validationRules": [
+      {
+        "type": "field-check",
+        "field": "output",
+        "rule": "non-empty"
+      },
+      {
+        "type": "custom",
+        "implementation": "validateToolCalls",
+        "parameters": {
+          "expectedTools": ["get_current_time", "get_weather"],
+          "validateArguments": true
+        }
+      },
+      {
+        "type": "custom",
+        "implementation": "validateToolCallStructure",
+        "parameters": {
+          "requiredFields": ["id", "type", "function"],
+          "functionRequiredFields": ["name", "arguments"]
+        }
+      }
+    ]
+  }
+}

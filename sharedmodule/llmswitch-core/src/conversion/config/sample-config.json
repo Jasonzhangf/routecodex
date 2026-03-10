@@ -1,0 +1,324 @@
+{
+  "version": "1.0.0",
+  "description": "LLM Switch Conversion 配置文件",
+  "lastModified": "2024-11-13T00:00:00.000Z",
+  
+  "httpserver": {
+    "port": 5520,
+    "host": "0.0.0.0",
+    "timeout": 30000,
+    "cors": {
+      "enabled": true,
+      "origin": "*",
+      "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+    }
+  },
+  
+  "virtualrouter": {
+    "inputProtocol": "openai",
+    "outputProtocol": "openai",
+    "providers": {
+      "chat-provider-1": {
+        "id": "chat-provider-1",
+        "enabled": true,
+        "type": "openai",
+        "name": "Generic Chat Provider",
+        "description": "Example chat-completions provider",
+        "baseUrl": "https://api.example.com/chat",
+        "apiVersion": "v1",
+        "compatibility": {
+          "type": "openai",
+          "features": ["streaming", "function-calling"]
+        },
+        "models": {
+          "chat-model-a": {
+            "displayName": "Chat-Model-A",
+            "description": "Latest chat model with improved reasoning",
+            "supportsStreaming": true,
+            "maxTokens": 128000,
+            "contextWindow": 128000,
+            "capabilities": ["text", "code", "reasoning", "tool-use"],
+            "pricing": {
+              "input": "0.001",
+              "output": "0.002",
+              "currency": "CNY"
+            },
+            "compatibility": {
+              "type": "openai",
+              "moduleConfig": {
+                "policy": {
+                  "preflight": true
+                }
+              }
+            }
+          },
+          "chat-model-b": {
+            "displayName": "Chat-Model-B",
+            "description": "Lightweight chat model for faster responses",
+            "supportsStreaming": true,
+            "maxTokens": 8192,
+            "contextWindow": 8192,
+            "capabilities": ["text", "code", "basic-tool-use"],
+            "pricing": {
+              "input": "0.0005",
+              "output": "0.001",
+              "currency": "CNY"
+            },
+            "compatibility": {
+              "type": "openai",
+              "moduleConfig": {
+                "policy": {
+                  "preflight": false
+                }
+              }
+            }
+          },
+          "chat-model-c": {
+            "displayName": "Chat-Model-C",
+            "description": "Ultra-fast chat model for quick responses",
+            "supportsStreaming": false,
+            "maxTokens": 4096,
+            "contextWindow": 4096,
+            "capabilities": ["text", "code"],
+            "pricing": {
+              "input": "0.0002",
+              "output": "0.0004",
+              "currency": "CNY"
+            },
+            "compatibility": {
+              "type": "openai",
+              "moduleConfig": {
+                "policy": {
+                  "preflight": false
+                }
+              }
+            }
+          }
+        },
+        "apiKey": [
+          "your-api-key-here"
+        ],
+        "auth": {
+          "type": "apikey",
+          "apiKey": "your-api-key-here"
+        },
+        "rateLimit": {
+          "requestsPerMinute": 60,
+          "tokensPerMinute": 6000,
+          "concurrent": 5
+        },
+        "healthCheck": {
+          "enabled": true,
+          "endpoint": "/health",
+          "interval": 30000
+        }
+      },
+      
+      "openai": {
+        "id": "openai",
+        "enabled": false,
+        "type": "openai",
+        "name": "OpenAI Provider",
+        "description": "Official OpenAI provider",
+        "baseUrl": "https://api.openai.com/v1",
+        "apiVersion": "v1",
+        "models": {
+          "gpt-4": {
+            "displayName": "GPT-4",
+            "supportsStreaming": true,
+            "maxTokens": 8192,
+            "contextWindow": 8192
+          },
+          "gpt-4-turbo": {
+            "displayName": "GPT-4 Turbo",
+            "supportsStreaming": true,
+            "maxTokens": 4096,
+            "contextWindow": 4096
+          },
+          "gpt-3.5-turbo": {
+            "displayName": "GPT-3.5 Turbo",
+            "supportsStreaming": true,
+            "maxTokens": 4096,
+            "contextWindow": 16384
+          }
+        },
+        "apiKey": [],
+        "auth": {
+          "type": "apikey"
+        },
+        "rateLimit": {
+          "requestsPerMinute": 3500,
+          "tokensPerMinute": 90000,
+          "concurrent": 100
+        }
+      },
+      
+      "anthropic": {
+        "id": "anthropic",
+        "enabled": false,
+        "type": "anthropic",
+        "name": "Anthropic Claude Provider",
+        "description": "Anthropic Claude provider",
+        "baseUrl": "https://api.anthropic.com",
+        "apiVersion": "2023-06-01",
+        "models": {
+          "claude-3-sonnet": {
+            "displayName": "Claude 3 Sonnet",
+            "supportsStreaming": true,
+            "maxTokens": 200000,
+            "contextWindow": 200000
+          },
+          "claude-3-haiku": {
+            "displayName": "Claude 3 Haiku",
+            "supportsStreaming": false,
+            "maxTokens": 200000,
+            "contextWindow": 200000
+          }
+        },
+        "apiKey": [],
+        "auth": {
+          "type": "apikey"
+        },
+        "rateLimit": {
+          "requestsPerMinute": 1000,
+          "tokensPerMinute": 40000,
+          "concurrent": 5
+        }
+      }
+    },
+    
+    "routing": {
+      "default": ["chat-provider-1.chat-model-a"],
+      "coding": ["chat-provider-1.chat-model-a"],
+      "longcontext": ["chat-provider-1.chat-model-a"],
+      "thinking": ["chat-provider-1.chat-model-a", "chat-model-b"],
+      "fast": ["chat-model-c"],
+      "vision": [],
+      "search": [],
+      "background": [],
+      "fallback": ["chat-provider-1.chat-model-b"]
+    },
+    
+    "rules": {
+      "inputValidation": {
+        "enabled": true,
+        "strict": false,
+        "maxMessageLength": 100000,
+        "maxToolCount": 50
+      },
+      "outputValidation": {
+        "enabled": true,
+        "strict": false,
+        "maxResponseLength": 100000
+      },
+      "contentFiltering": {
+        "enabled": true,
+        "blockedWords": [],
+        "blockedPatterns": []
+      },
+      "rateLimiting": {
+        "enabled": true,
+        "perUser": {
+          "requestsPerMinute": 10,
+          "tokensPerMinute": 1000
+        },
+        "perProvider": {
+          "chat-provider-1": { "requestsPerMinute": 60, "tokensPerMinute": 6000 },
+          "openai": { "requestsPerMinute": 3500, "tokensPerMinute": 90000 },
+          "anthropic": { "requestsPerMinute": 1000, "tokensPerMinute": 40000 }
+        }
+      }
+    }
+  },
+  
+  "serverTools": {
+    "replace": {
+      "web_fetch": {
+        "enabled": true,
+        "timeout": 30000,
+        "maxResponseSize": 1000000,
+        "allowedDomains": ["*"],
+        "blockedDomains": []
+      }
+    },
+    "custom": {
+      "enabled": false,
+      "tools": []
+    },
+    "enabled": true
+  },
+  
+  "monitoring": {
+    "enabled": true,
+    "metrics": {
+      "requestCount": true,
+      "responseTime": true,
+      "errorRate": true,
+      "tokenUsage": true,
+      "providerPerformance": true
+    },
+    "logging": {
+      "level": "info",
+      "maxFileSize": "10MB",
+      "rotate": true,
+      "keepFiles": 7
+    },
+    "alerts": {
+      "errorRateThreshold": 0.05,
+      "responseTimeThreshold": 5000,
+      "tokenUsageThreshold": 10000
+    }
+  },
+  
+  "conversion": {
+    "defaultVersion": "v2",
+    "passthrough": {
+      "enabled": true,
+      "criteria": {
+        "sameProtocol": true,
+        "sameProvider": true,
+        "minimalProcessing": true
+      }
+    },
+    "optimization": {
+      "enabled": true,
+      "caching": {
+        "enabled": true,
+        "maxSize": "100MB",
+        "ttl": 300000
+      },
+      "batching": {
+        "enabled": true,
+        "maxBatchSize": 10,
+        "maxBatchWaitTime": 100
+      }
+    }
+  },
+  
+  "security": {
+    "apiKeyEncryption": {
+      "enabled": true,
+      "algorithm": "AES-256-GCM"
+    },
+    "requestValidation": {
+      "enabled": true,
+      "maxRequestSize": "10MB",
+      "allowedOrigins": ["*"],
+      "rateLimit": {
+        "enabled": true,
+        "requestsPerMinute": 1000,
+        "tokensPerMinute": 50000
+      }
+    },
+    "contentFiltering": {
+      "enabled": false,
+      "blockedContent": {
+        "profanity": false,
+        "personalData": false,
+        "malware": true,
+        "spam": true
+      },
+      "customFilters": []
+    }
+  }
+}

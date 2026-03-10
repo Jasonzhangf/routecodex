@@ -1,0 +1,20 @@
+{
+  "model": "claude-3-opus-20240229",
+  "system": "You are a friendly assistant that answers in concise Chinese.",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "请用一两句话介绍你自己。"
+        }
+      ]
+    }
+  ],
+  "metadata": {
+    "client_request_id": "fixture_anthropic_simple"
+  },
+  "stream": true,
+  "max_tokens": 256
+}

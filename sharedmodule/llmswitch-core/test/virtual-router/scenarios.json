@@ -1,0 +1,32 @@
+[
+  {
+    "id": "default-openai-chat-1",
+    "sample": "openai-chat/req_1764047387361_ui1u46mt_http-request.json",
+    "expectedRoute": "default",
+    "description": "标准聊天请求，写诗和列出文件混合。"
+  },
+  {
+    "id": "default-openai-chat-2",
+    "sample": "openai-chat/req_1764050354246_ahnlw2hv_http-request.json",
+    "expectedRoute": "default",
+    "description": "包含代码调试指令但仍以普通文本为主。"
+  },
+  {
+    "id": "default-responses",
+    "sample": "openai-responses/req_1763952210368_pcuuyph7_http-request.json",
+    "expectedRoute": "default",
+    "description": "Responses API 请求，主要是说明性文字。"
+  },
+  {
+    "id": "default-anthropic",
+    "sample": "anthropic-messages/req_1763986277763_79dbhjqd_http-request.json",
+    "expectedRoute": "default",
+    "description": "Anthropic 格式请求，用于验证其他协议解析。"
+  },
+  {
+    "id": "default-openai-chat-3",
+    "sample": "openai-chat/req_1764117213609_wegwvax0_http-request.json",
+    "expectedRoute": "default",
+    "description": "包含多轮列出文件和写诗指令。"
+  }
+]

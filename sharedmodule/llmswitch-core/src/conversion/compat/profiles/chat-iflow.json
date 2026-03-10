@@ -1,0 +1,353 @@
+{
+  "id": "chat:iflow",
+  "protocol": "openai-chat",
+  "request": {
+    "mappings": [
+      {
+        "action": "snapshot",
+        "phase": "compat-pre"
+      },
+      {
+        "action": "dto_unwrap"
+      },
+      {
+        "action": "remove",
+        "path": "metadata.toolCallIdStyle"
+      },
+      {
+        "action": "remove",
+        "path": "metadata.clientModelId"
+      },
+      {
+        "action": "remove",
+        "path": "metadata.providerHint"
+      },
+      {
+        "action": "shape_filter",
+        "target": "request",
+        "config": {
+          "request": {
+            "allowTopLevel": [
+              "model",
+              "messages",
+              "stream",
+              "thinking",
+              "do_sample",
+              "temperature",
+              "top_p",
+              "max_tokens",
+              "tools",
+              "tool_choice",
+              "stop",
+              "response_format",
+              "web_search"
+            ],
+            "messages": {
+              "allowedRoles": [
+                "system",
+                "user",
+                "assistant",
+                "tool"
+              ],
+              "assistantWithToolCallsContentNull": true,
+              "toolContentStringify": false
+            },
+            "messagesRules": [],
+            "tools": {
+              "normalize": false,
+              "forceToolChoiceAuto": true
+            },
+            "assistantToolCalls": {
+              "functionArgumentsType": "string"
+            }
+          },
+          "response": {
+            "allowTopLevel": [
+              "id",
+              "request_id",
+              "created",
+              "model",
+              "choices",
+              "usage",
+              "video_result",
+              "web_search",
+              "content_filter",
+              "required_action",
+              "output",
+              "output_text",
+              "status"
+            ],
+            "choices": {
+              "required": true,
+              "message": {
+                "allow": [
+                  "role",
+                  "content",
+                  "reasoning_content",
+                  "audio",
+                  "tool_calls"
+                ],
+                "roleDefault": "assistant",
+                "contentNullWhenToolCalls": true,
+                "tool_calls": {
+                  "function": {
+                    "nameRequired": true,
+                    "argumentsType": "string"
+                  }
+                }
+              },
+              "finish_reason": [
+                "stop",
+                "tool_calls",
+                "length",
+                "sensitive",
+                "network_error"
+              ]
+            },
+            "usage": {
+              "allow": [
+                "prompt_tokens",
+                "completion_tokens",
+                "prompt_tokens_details",
+                "total_tokens"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "action": "iflow_kimi_history_media_placeholder"
+      },
+      {
+        "action": "iflow_kimi_cli_defaults"
+      },
+      {
+        "action": "iflow_kimi_thinking_reasoning_fill"
+      },
+      {
+        "action": "field_map",
+        "direction": "incoming",
+        "config": [
+          {
+            "sourcePath": "usage.prompt_tokens",
+            "targetPath": "usage.input_tokens",
+            "type": "number"
+          },
+          {
+            "sourcePath": "usage.completion_tokens",
+            "targetPath": "usage.output_tokens",
+            "type": "number"
+          },
+          {
+            "sourcePath": "created",
+            "targetPath": "created_at",
+            "type": "number"
+          },
+          {
+            "sourcePath": "request_id",
+            "targetPath": "request_id",
+            "type": "string"
+          },
+          {
+            "sourcePath": "model",
+            "targetPath": "model",
+            "type": "string",
+            "transform": "normalizeModelName"
+          },
+          {
+            "sourcePath": "choices[*].message.tool_calls[*].function.arguments",
+            "targetPath": "choices[*].message.tool_calls[*].function.arguments",
+            "type": "string"
+          }
+        ]
+      },
+      {
+        "action": "tool_schema_sanitize",
+        "mode": "glm_shell"
+      },
+      {
+        "action": "iflow_tool_text_fallback",
+        "models": [
+          "minimax-m2.5"
+        ]
+      },
+      {
+        "action": "iflow_web_search_request"
+      },
+      {
+        "action": "snapshot",
+        "phase": "compat-post"
+      },
+      {
+        "action": "dto_rewrap"
+      }
+    ]
+  },
+  "response": {
+    "mappings": [
+      {
+        "action": "snapshot",
+        "phase": "compat-pre"
+      },
+      {
+        "action": "dto_unwrap"
+      },
+      {
+        "action": "iflow_response_body_unwrap"
+      },
+      {
+        "action": "strip_orphan_function_calls_tag"
+      },
+      {
+        "action": "shape_filter",
+        "target": "response",
+        "config": {
+          "request": {
+            "allowTopLevel": [
+              "model",
+              "messages",
+              "stream",
+              "thinking",
+              "do_sample",
+              "temperature",
+              "top_p",
+              "max_tokens",
+              "tools",
+              "tool_choice",
+              "stop",
+              "response_format"
+            ],
+            "messages": {
+              "allowedRoles": [
+                "system",
+                "user",
+                "assistant",
+                "tool"
+              ],
+              "assistantWithToolCallsContentNull": true,
+              "toolContentStringify": false
+            },
+            "messagesRules": [],
+            "tools": {
+              "normalize": false,
+              "forceToolChoiceAuto": true
+            },
+            "assistantToolCalls": {
+              "functionArgumentsType": "string"
+            }
+          },
+          "response": {
+            "allowTopLevel": [
+              "id",
+              "request_id",
+              "created",
+              "model",
+              "choices",
+              "usage",
+              "video_result",
+              "web_search",
+              "content_filter",
+              "required_action",
+              "output",
+              "output_text",
+              "status"
+            ],
+            "choices": {
+              "required": true,
+              "message": {
+                "allow": [
+                  "role",
+                  "content",
+                  "reasoning_content",
+                  "audio",
+                  "tool_calls"
+                ],
+                "roleDefault": "assistant",
+                "contentNullWhenToolCalls": true,
+                "tool_calls": {
+                  "function": {
+                    "nameRequired": true,
+                    "argumentsType": "string"
+                  }
+                }
+              },
+              "finish_reason": [
+                "stop",
+                "tool_calls",
+                "length",
+                "sensitive",
+                "network_error"
+              ]
+            },
+            "usage": {
+              "allow": [
+                "prompt_tokens",
+                "completion_tokens",
+                "prompt_tokens_details",
+                "total_tokens"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "action": "field_map",
+        "direction": "outgoing",
+        "config": [
+          {
+            "sourcePath": "usage.input_tokens",
+            "targetPath": "usage.prompt_tokens",
+            "type": "number"
+          },
+          {
+            "sourcePath": "usage.output_tokens",
+            "targetPath": "usage.completion_tokens",
+            "type": "number"
+          },
+          {
+            "sourcePath": "usage.total_input_tokens",
+            "targetPath": "usage.prompt_tokens",
+            "type": "number"
+          },
+          {
+            "sourcePath": "usage.total_output_tokens",
+            "targetPath": "usage.completion_tokens",
+            "type": "number"
+          },
+          {
+            "sourcePath": "created_at",
+            "targetPath": "created",
+            "type": "number"
+          },
+          {
+            "sourcePath": "request_id",
+            "targetPath": "request_id",
+            "type": "string"
+          },
+          {
+            "sourcePath": "choices[*].finish_reason",
+            "targetPath": "choices[*].finish_reason",
+            "type": "string",
+            "transform": "normalizeFinishReason"
+          },
+          {
+            "sourcePath": "choices[*].message.tool_calls[*].function.arguments",
+            "targetPath": "choices[*].message.tool_calls[*].function.arguments",
+            "type": "string"
+          }
+        ]
+      },
+      {
+        "action": "tool_schema_sanitize",
+        "mode": "glm_shell"
+      },
+      {
+        "action": "snapshot",
+        "phase": "compat-post"
+      },
+      {
+        "action": "dto_rewrap"
+      }
+    ]
+  }
+}

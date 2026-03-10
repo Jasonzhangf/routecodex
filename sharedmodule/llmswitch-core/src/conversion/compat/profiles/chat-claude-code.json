@@ -1,0 +1,18 @@
+{
+  "id": "chat:claude-code",
+  "protocol": "anthropic-messages",
+  "request": {
+    "mappings": [
+      { "action": "snapshot", "phase": "compat-pre" },
+      {
+        "action": "anthropic_claude_code_system_prompt",
+        "config": { "preserveExistingSystemAsUserMessage": true }
+      },
+      { "action": "snapshot", "phase": "compat-post" }
+    ]
+  },
+  "response": {
+    "mappings": []
+  }
+}
+

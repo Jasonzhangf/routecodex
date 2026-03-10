@@ -1,0 +1,69 @@
+{
+  "sampleId": "basic-responses-response-01",
+  "name": "基础对话响应 - Responses协议",
+  "type": "response",
+  "protocol": "responses",
+  "category": "basic",
+  "payload": {
+    "id": "resp_123456789",
+    "object": "response",
+    "created_at": 1700000000,
+    "model": "gpt-4",
+    "status": "completed",
+    "output": [
+      {
+        "type": "message",
+        "id": "msg_123456789",
+        "status": "completed",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "output_text",
+            "text": "你好！我是基于OpenAI技术构建的语言模型，使用Responses协议与你交流。\n\n我的主要能力包括：\n- 理解和生成自然语言文本\n- 回答问题、解释概念\n- 进行对话交流\n- 提供编程帮助\n- 分析和总结信息\n\n我能帮助你解答问题、提供建议、协助创作等各种任务。有什么我可以帮助你的吗？"
+          }
+        ]
+      }
+    ],
+    "usage": {
+      "input_tokens": 15,
+      "output_tokens": 85,
+      "total_tokens": 100
+    }
+  },
+  "metadata": {
+    "description": "基础对话的标准Responses协议响应",
+    "testFocus": ["basic-response", "output-structure", "usage-tracking"],
+    "isStreaming": false,
+    "hasToolCalls": false,
+    "validationRules": [
+      {
+        "type": "field-check",
+        "field": "id",
+        "rule": "required"
+      },
+      {
+        "type": "field-check",
+        "field": "object",
+        "rule": "required"
+      },
+      {
+        "type": "field-check",
+        "field": "output",
+        "rule": "non-empty"
+      },
+      {
+        "type": "field-check",
+        "field": "usage",
+        "rule": "required"
+      },
+      {
+        "type": "custom",
+        "implementation": "validateResponseStructure",
+        "parameters": {
+          "requiredFields": ["id", "object", "created_at", "status", "output"],
+          "outputMustContainMessage": true
+        }
+      }
+    ]
+  }
+}

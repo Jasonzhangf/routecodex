@@ -1,0 +1,32 @@
+{
+  "model": "gemini-1.5-pro",
+  "contents": [
+    {
+      "role": "user",
+      "parts": [
+        { "text": "列出 /project 下的文件" }
+      ]
+    }
+  ],
+  "tools": [
+    {
+      "functionDeclarations": [
+        {
+          "name": "exec_command",
+          "description": "Execute a shell command in the workspace.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "cmd": { "type": "string" }
+            },
+            "required": ["cmd"]
+          }
+        }
+      ]
+    }
+  ],
+  "generationConfig": {
+    "maxOutputTokens": 256,
+    "temperature": 0.2
+  }
+}

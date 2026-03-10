@@ -1,0 +1,558 @@
+{
+  "modules": [
+    {
+      "id": "virtual-router.hotpath.quota-buckets",
+      "preparedForShadow": true,
+      "paths": [
+        "src/router/virtual-router/engine-selection/native-router-hotpath-quota-buckets.ts",
+        "dist/router/virtual-router/engine-selection/native-router-hotpath-quota-buckets.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "virtual-router.tier-selection-integration",
+      "preparedForShadow": true,
+      "paths": [
+        "src/router/virtual-router/engine-selection/tier-selection-quota-integration.ts",
+        "dist/router/virtual-router/engine-selection/tier-selection-quota-integration.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "virtual-router.alias-selection-semantics",
+      "preparedForShadow": true,
+      "paths": [
+        "src/router/virtual-router/engine-selection/native-virtual-router-alias-selection-semantics.ts",
+        "dist/router/virtual-router/engine-selection/native-virtual-router-alias-selection-semantics.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "virtual-router.stop-message-parser",
+      "preparedForShadow": true,
+      "paths": [
+        "src/router/virtual-router/routing-stop-message-parser.ts",
+        "src/router/virtual-router/engine-selection/native-virtual-router-stop-message-semantics.ts",
+        "dist/router/virtual-router/routing-stop-message-parser.js",
+        "dist/router/virtual-router/engine-selection/native-virtual-router-stop-message-semantics.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "virtual-router.stop-message-state-codec",
+      "preparedForShadow": true,
+      "paths": [
+        "src/router/virtual-router/routing-stop-message-state-codec.ts",
+        "src/router/virtual-router/engine-selection/native-virtual-router-stop-message-state-semantics.ts",
+        "dist/router/virtual-router/routing-stop-message-state-codec.js",
+        "dist/router/virtual-router/engine-selection/native-virtual-router-stop-message-state-semantics.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "virtual-router.stop-message-actions",
+      "preparedForShadow": true,
+      "paths": [
+        "src/router/virtual-router/routing-stop-message-actions.ts",
+        "src/router/virtual-router/engine-selection/native-virtual-router-stop-message-actions-semantics.ts",
+        "dist/router/virtual-router/routing-stop-message-actions.js",
+        "dist/router/virtual-router/engine-selection/native-virtual-router-stop-message-actions-semantics.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "hub.resp-inbound.sse-stream-json-sniffer",
+      "preparedForShadow": true,
+      "paths": [
+        "src/conversion/hub/pipeline/stages/resp_inbound/resp_inbound_stage1_sse_decode/stream-json-sniffer.ts",
+        "dist/conversion/hub/pipeline/stages/resp_inbound/resp_inbound_stage1_sse_decode/stream-json-sniffer.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "hub.req-inbound.context-tool-output-snapshot",
+      "preparedForShadow": true,
+      "paths": [
+        "src/conversion/hub/pipeline/stages/req_inbound/req_inbound_stage3_context_capture/tool-output-snapshot.ts",
+        "src/conversion/hub/pipeline/stages/req_inbound/req_inbound_stage3_context_capture/tool-output-diagnostics.ts",
+        "dist/conversion/hub/pipeline/stages/req_inbound/req_inbound_stage3_context_capture/tool-output-snapshot.js",
+        "dist/conversion/hub/pipeline/stages/req_inbound/req_inbound_stage3_context_capture/tool-output-diagnostics.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "hub.chat-process.media-attachments",
+      "preparedForShadow": true,
+      "paths": [
+        "src/conversion/hub/process/chat-process-media.ts",
+        "dist/conversion/hub/process/chat-process-media.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "hub.chat-process.web-search-intent",
+      "preparedForShadow": true,
+      "paths": [
+        "src/conversion/hub/process/chat-process-web-search-intent.ts",
+        "dist/conversion/hub/process/chat-process-web-search-intent.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "hub.chat-process.web-search",
+      "preparedForShadow": true,
+      "paths": [
+        "src/conversion/hub/process/chat-process-web-search.ts",
+        "src/conversion/hub/process/chat-process-web-search-tool-schema.ts",
+        "dist/conversion/hub/process/chat-process-web-search.js",
+        "dist/conversion/hub/process/chat-process-web-search-tool-schema.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "hub.chat-process.anthropic-alias",
+      "preparedForShadow": true,
+      "paths": [
+        "src/conversion/hub/process/chat-process-anthropic-alias.ts",
+        "dist/conversion/hub/process/chat-process-anthropic-alias.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "hub.chat-process.governed-merge",
+      "preparedForShadow": true,
+      "paths": [
+        "src/conversion/hub/process/chat-process-governed-merge.ts",
+        "dist/conversion/hub/process/chat-process-governed-merge.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "hub.chat-process.governed-control-ops",
+      "preparedForShadow": true,
+      "paths": [
+        "src/conversion/hub/process/chat-process-governed-control-ops.ts",
+        "dist/conversion/hub/process/chat-process-governed-control-ops.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "hub.chat-process.servertool-orchestration",
+      "preparedForShadow": true,
+      "paths": [
+        "src/conversion/hub/process/chat-process-servertool-orchestration.ts",
+        "dist/conversion/hub/process/chat-process-servertool-orchestration.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "hub.chat-process.post-governed-normalization",
+      "preparedForShadow": true,
+      "paths": [
+        "src/conversion/hub/process/chat-process-post-governed-normalization.ts",
+        "dist/conversion/hub/process/chat-process-post-governed-normalization.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "hub.chat-process.governed-filter-call",
+      "preparedForShadow": true,
+      "paths": [
+        "src/conversion/hub/process/chat-process-governed-filter-call.ts",
+        "dist/conversion/hub/process/chat-process-governed-filter-call.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "hub.chat-process.governance-finalize",
+      "preparedForShadow": true,
+      "paths": [
+        "src/conversion/hub/process/chat-process-governance-finalize.ts",
+        "dist/conversion/hub/process/chat-process-governance-finalize.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "hub.chat-process.governance-context",
+      "preparedForShadow": true,
+      "paths": [
+        "src/conversion/hub/process/chat-process-governance-context.ts",
+        "dist/conversion/hub/process/chat-process-governance-context.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "hub.chat-process.governance-orchestration",
+      "preparedForShadow": true,
+      "paths": [
+        "src/conversion/hub/process/chat-process-governance-orchestration.ts",
+        "dist/conversion/hub/process/chat-process-governance-orchestration.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "hub.chat-process.node-result",
+      "preparedForShadow": true,
+      "paths": [
+        "src/conversion/hub/process/chat-process-node-result.ts",
+        "dist/conversion/hub/process/chat-process-node-result.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "hub.chat-process.tool-normalization",
+      "preparedForShadow": true,
+      "paths": [
+        "src/conversion/hub/process/chat-process-tool-normalization.ts",
+        "dist/conversion/hub/process/chat-process-tool-normalization.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "hub.chat-process.clock-directive-parser",
+      "preparedForShadow": true,
+      "paths": [
+        "src/conversion/hub/process/chat-process-clock-directive-parser.ts",
+        "src/router/virtual-router/engine-selection/native-chat-process-clock-directive-parser.ts",
+        "dist/conversion/hub/process/chat-process-clock-directive-parser.js",
+        "dist/router/virtual-router/engine-selection/native-chat-process-clock-directive-parser.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "hub.chat-process.clock-directives",
+      "preparedForShadow": true,
+      "paths": [
+        "src/conversion/hub/process/chat-process-clock-directives.ts",
+        "dist/conversion/hub/process/chat-process-clock-directives.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "hub.chat-process.clock-directives-fallback",
+      "preparedForShadow": true,
+      "paths": [
+        "src/conversion/hub/process/chat-process-clock-directives.ts",
+        "dist/conversion/hub/process/chat-process-clock-directives.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "hub.chat-process.clock-reminder-directives",
+      "preparedForShadow": true,
+      "paths": [
+        "src/conversion/hub/process/chat-process-clock-reminder-directives.ts",
+        "dist/conversion/hub/process/chat-process-clock-reminder-directives.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "hub.chat-process.clock-reminder-finalize",
+      "preparedForShadow": true,
+      "paths": [
+        "src/conversion/hub/process/chat-process-clock-reminder-finalize.ts",
+        "dist/conversion/hub/process/chat-process-clock-reminder-finalize.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "hub.chat-process.clock-reminder-messages",
+      "preparedForShadow": true,
+      "paths": [
+        "src/conversion/hub/process/chat-process-clock-reminder-messages.ts",
+        "dist/conversion/hub/process/chat-process-clock-reminder-messages.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "hub.chat-process.clock-reminder-orchestration",
+      "preparedForShadow": true,
+      "paths": [
+        "src/conversion/hub/process/chat-process-clock-reminder-orchestration.ts",
+        "dist/conversion/hub/process/chat-process-clock-reminder-orchestration.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "hub.chat-process.clock-reminder-time-tag",
+      "preparedForShadow": true,
+      "paths": [
+        "src/conversion/hub/process/chat-process-clock-reminder-time-tag.ts",
+        "dist/conversion/hub/process/chat-process-clock-reminder-time-tag.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "hub.chat-process.clock-tools",
+      "preparedForShadow": true,
+      "paths": [
+        "src/conversion/hub/process/chat-process-clock-tools.ts",
+        "src/conversion/hub/process/chat-process-clock-tool-schemas.ts",
+        "dist/conversion/hub/process/chat-process-clock-tools.js",
+        "dist/conversion/hub/process/chat-process-clock-tool-schemas.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "hub.chat-process.continue-execution",
+      "preparedForShadow": true,
+      "paths": [
+        "src/conversion/hub/process/chat-process-continue-execution.ts",
+        "dist/conversion/hub/process/chat-process-continue-execution.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "hub.chat-process.pending-tool-sync",
+      "preparedForShadow": true,
+      "paths": [
+        "src/conversion/hub/process/chat-process-pending-tool-sync.ts",
+        "dist/conversion/hub/process/chat-process-pending-tool-sync.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "hub.chat-process.entry-client-inject",
+      "preparedForShadow": true,
+      "paths": [
+        "src/conversion/hub/process/chat-process.ts",
+        "src/conversion/hub/process/client-inject-readiness.ts",
+        "dist/conversion/hub/process/chat-process.js",
+        "dist/conversion/hub/process/client-inject-readiness.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "hub.req-inbound.semantic-lift",
+      "preparedForShadow": true,
+      "paths": [
+        "src/conversion/hub/pipeline/stages/req_inbound/req_inbound_stage2_semantic_map/semantic-lift.ts",
+        "dist/conversion/hub/pipeline/stages/req_inbound/req_inbound_stage2_semantic_map/semantic-lift.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "hub.req-inbound.context-capture-orchestration",
+      "preparedForShadow": true,
+      "paths": [
+        "src/conversion/hub/pipeline/stages/req_inbound/req_inbound_stage3_context_capture/context-capture-orchestration.ts",
+        "dist/conversion/hub/pipeline/stages/req_inbound/req_inbound_stage3_context_capture/context-capture-orchestration.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "hub.req-inbound.responses-context-snapshot",
+      "preparedForShadow": true,
+      "paths": [
+        "src/conversion/hub/pipeline/stages/req_inbound/req_inbound_stage3_context_capture/responses-context-snapshot.ts",
+        "dist/conversion/hub/pipeline/stages/req_inbound/req_inbound_stage3_context_capture/responses-context-snapshot.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "hub.req-outbound.context-merge",
+      "preparedForShadow": true,
+      "paths": [
+        "src/conversion/hub/pipeline/stages/req_outbound/req_outbound_stage1_semantic_map/context-merge.ts",
+        "dist/conversion/hub/pipeline/stages/req_outbound/req_outbound_stage1_semantic_map/context-merge.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "hub.req-process.route-select",
+      "preparedForShadow": true,
+      "paths": [
+        "src/conversion/hub/pipeline/stages/req_process/req_process_stage2_route_select/index.ts",
+        "src/router/virtual-router/engine-selection/native-hub-pipeline-req-process-semantics.ts",
+        "dist/conversion/hub/pipeline/stages/req_process/req_process_stage2_route_select/index.js",
+        "dist/router/virtual-router/engine-selection/native-hub-pipeline-req-process-semantics.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "hub.resp-outbound.chat-process-semantics-bridge",
+      "preparedForShadow": true,
+      "paths": [
+        "src/conversion/hub/pipeline/stages/resp_outbound/resp_outbound_stage1_client_remap/chat-process-semantics-bridge.ts",
+        "dist/conversion/hub/pipeline/stages/resp_outbound/resp_outbound_stage1_client_remap/chat-process-semantics-bridge.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "hub.resp-outbound.client-remap-protocol-switch",
+      "preparedForShadow": true,
+      "paths": [
+        "src/conversion/hub/pipeline/stages/resp_outbound/resp_outbound_stage1_client_remap/client-remap-protocol-switch.ts",
+        "dist/conversion/hub/pipeline/stages/resp_outbound/resp_outbound_stage1_client_remap/client-remap-protocol-switch.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "virtual-router.tier-selection.antigravity-target-split",
+      "preparedForShadow": true,
+      "paths": [
+        "src/router/virtual-router/engine-selection/tier-selection-antigravity-target-split.ts",
+        "dist/router/virtual-router/engine-selection/tier-selection-antigravity-target-split.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "virtual-router.tier-selection.antigravity-session-lease",
+      "preparedForShadow": true,
+      "paths": [
+        "src/router/virtual-router/engine-selection/tier-selection-antigravity-session-lease.ts",
+        "dist/router/virtual-router/engine-selection/tier-selection-antigravity-session-lease.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "hub.req-inbound.format-parse",
+      "preparedForShadow": true,
+      "paths": [
+        "src/conversion/hub/pipeline/stages/req_inbound/req_inbound_stage1_format_parse/index.ts",
+        "dist/conversion/hub/pipeline/stages/req_inbound/req_inbound_stage1_format_parse/index.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "hub.req-outbound.format-build",
+      "preparedForShadow": true,
+      "paths": [
+        "src/conversion/hub/pipeline/stages/req_outbound/req_outbound_stage2_format_build/index.ts",
+        "dist/conversion/hub/pipeline/stages/req_outbound/req_outbound_stage2_format_build/index.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "hub.req-outbound.compat",
+      "preparedForShadow": true,
+      "paths": [
+        "src/conversion/hub/pipeline/stages/req_outbound/req_outbound_stage3_compat/index.ts",
+        "dist/conversion/hub/pipeline/stages/req_outbound/req_outbound_stage3_compat/index.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "hub.resp-inbound.format-parse",
+      "preparedForShadow": true,
+      "paths": [
+        "src/conversion/hub/pipeline/stages/resp_inbound/resp_inbound_stage2_format_parse/index.ts",
+        "dist/conversion/hub/pipeline/stages/resp_inbound/resp_inbound_stage2_format_parse/index.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "hub.resp-inbound.semantic-map",
+      "preparedForShadow": true,
+      "paths": [
+        "src/conversion/hub/pipeline/stages/resp_inbound/resp_inbound_stage3_semantic_map/index.ts",
+        "dist/conversion/hub/pipeline/stages/resp_inbound/resp_inbound_stage3_semantic_map/index.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "hub.resp-outbound.sse-stream",
+      "preparedForShadow": true,
+      "paths": [
+        "src/conversion/hub/pipeline/stages/resp_outbound/resp_outbound_stage2_sse_stream/index.ts",
+        "dist/conversion/hub/pipeline/stages/resp_outbound/resp_outbound_stage2_sse_stream/index.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "hub.native-batch.adapters-snapshot-governance",
+      "preparedForShadow": true,
+      "paths": [
+        "src/conversion/hub/format-adapters/chat-format-adapter.ts",
+        "src/conversion/hub/format-adapters/responses-format-adapter.ts",
+        "src/conversion/hub/format-adapters/anthropic-format-adapter.ts",
+        "src/conversion/hub/format-adapters/gemini-format-adapter.ts",
+        "src/conversion/hub/semantic-mappers/chat-mapper.ts",
+        "src/conversion/hub/semantic-mappers/responses-mapper.ts",
+        "src/conversion/hub/semantic-mappers/anthropic-mapper.ts",
+        "src/conversion/hub/semantic-mappers/gemini-mapper.ts",
+        "src/conversion/hub/snapshot-recorder.ts",
+        "src/conversion/shared/protocol-field-allowlists.ts",
+        "src/conversion/hub/tool-governance/engine.ts",
+        "src/conversion/hub/tool-governance/rules.ts",
+        "src/conversion/hub/pipeline/stages/utils.ts",
+        "dist/conversion/hub/format-adapters/chat-format-adapter.js",
+        "dist/conversion/hub/format-adapters/responses-format-adapter.js",
+        "dist/conversion/hub/format-adapters/anthropic-format-adapter.js",
+        "dist/conversion/hub/format-adapters/gemini-format-adapter.js",
+        "dist/conversion/hub/semantic-mappers/chat-mapper.js",
+        "dist/conversion/hub/semantic-mappers/responses-mapper.js",
+        "dist/conversion/hub/semantic-mappers/anthropic-mapper.js",
+        "dist/conversion/hub/semantic-mappers/gemini-mapper.js",
+        "dist/conversion/hub/snapshot-recorder.js",
+        "dist/conversion/shared/protocol-field-allowlists.js",
+        "dist/conversion/hub/tool-governance/engine.js",
+        "dist/conversion/hub/tool-governance/rules.js",
+        "dist/conversion/hub/pipeline/stages/utils.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "hub.shared.chat-request-filters",
+      "preparedForShadow": true,
+      "paths": [
+        "src/conversion/shared/chat-request-filters.ts",
+        "src/router/virtual-router/engine-selection/native-chat-request-filter-semantics.ts",
+        "dist/conversion/shared/chat-request-filters.js",
+        "dist/router/virtual-router/engine-selection/native-chat-request-filter-semantics.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    }
+  ]
+}

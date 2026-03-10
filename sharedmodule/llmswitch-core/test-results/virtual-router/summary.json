@@ -1,0 +1,12 @@
+{
+  "samplesRoot": "/Users/fanzhang/Documents/github/sharedmodule/llmswitch-core/tests/fixtures/codex-samples",
+  "configPath": "/Users/fanzhang/Documents/github/sharedmodule/llmswitch-core/test/virtual-router/virtual-router.config.json",
+  "stats": {
+    "totalSamples": 0,
+    "processed": 0,
+    "routes": {},
+    "providers": {},
+    "errors": [],
+    "scenarios": {}
+  }
+}

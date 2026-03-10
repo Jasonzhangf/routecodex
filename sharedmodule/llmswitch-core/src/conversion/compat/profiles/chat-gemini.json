@@ -1,0 +1,31 @@
+{
+  "id": "chat:gemini",
+  "protocol": "gemini-chat",
+  "request": {
+    "mappings": [
+      { "action": "snapshot", "phase": "compat-pre" },
+      { "action": "claude_thinking_tool_schema" },
+      {
+        "action": "gemini_web_search_request"
+      },
+      {
+        "action": "shallow_pick",
+        "allowTopLevel": [
+          "model",
+          "project",
+          "request",
+          "requestId",
+          "requestType",
+          "userAgent",
+          "contents",
+          "systemInstruction",
+          "tools",
+          "generationConfig",
+          "safetySettings",
+          "toolConfig"
+        ]
+      },
+      { "action": "snapshot", "phase": "compat-post" }
+    ]
+  }
+}

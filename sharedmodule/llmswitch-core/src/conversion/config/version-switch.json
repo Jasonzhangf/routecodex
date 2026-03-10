@@ -1,0 +1,150 @@
+{
+  "defaultVersion": "v2",
+  "envVarName": "LLMSWITCH_CONVERTER_VERSION",
+  "allowRuntimeSwitch": true,
+  "versionPriority": {
+    "v2": 1,
+    "v3": 2,
+    "auto": 0
+  },
+  "versionSettings": {
+    "v2": {
+      "description": "Legacy conversion-core implementation",
+      "stability": "stable",
+      "features": [
+        "proven_stability",
+        "comprehensive_coverage",
+        "extensive_testing"
+      ],
+      "performance": "baseline",
+      "recommendedFor": [
+        "production",
+        "legacy_compatibility",
+        "maximum_stability"
+      ]
+    },
+    "v3": {
+      "description": "New node-based pipeline architecture",
+      "stability": "beta",
+      "features": [
+        "intelligent_passthrough",
+        "node_based_processing",
+        "automatic_optimization",
+        "zero_config"
+      ],
+      "performance": "optimized",
+      "recommendedFor": [
+        "development",
+        "performance_critical",
+        "new_features"
+      ]
+    },
+    "auto": {
+      "description": "Automatically select best version based on request",
+      "stability": "dynamic",
+      "features": [
+        "smart_selection",
+        "performance_optimization",
+        "adaptive_behavior"
+      ],
+      "performance": "variable",
+      "recommendedFor": [
+        "testing",
+        "benchmarking",
+        "a_b_testing"
+      ]
+    }
+  },
+  "switchingRules": {
+    "autoSelection": {
+      "simpleRequests": {
+        "conditions": {
+          "messageCount": "<= 5",
+          "toolCount": 0,
+          "streaming": false
+        },
+        "preferredVersion": "v3",
+        "reason": "Simple requests benefit from v3 passthrough optimization"
+      },
+      "complexRequests": {
+        "conditions": {
+          "messageCount": "> 20",
+          "toolCount": "> 10",
+          "hasStreaming": true
+        },
+        "preferredVersion": "v2",
+        "reason": "Complex requests benefit from v2 stability"
+      },
+      "toolHeavyRequests": {
+        "conditions": {
+          "toolCount": "> 5",
+          "hasComplexTools": true
+        },
+        "preferredVersion": "v3",
+        "reason": "V3 has better tool processing architecture"
+      }
+    },
+    "fallbackRules": {
+      "v3FallbackToV2": {
+        "conditions": [
+          "conversion_error",
+          "timeout",
+          "unsupported_endpoint"
+        ],
+        "retryCount": 3
+      },
+      "v2FallbackToV3": {
+        "conditions": [
+          "performance_degradation",
+          "memory_pressure"
+        ],
+        "retryCount": 1
+      }
+    }
+  },
+  "monitoring": {
+    "enabled": true,
+    "metrics": [
+      "conversion_success_rate",
+      "average_latency",
+      "passthrough_rate",
+      "error_rate_by_version",
+      "performance_comparison"
+    ],
+    "alertThresholds": {
+      "errorRate": 0.05,
+      "latencyIncrease": 2.0,
+      "successRateDrop": 0.1
+    }
+  },
+  "hooks": {
+    "beforeSwitch": {
+      "logLevel": "info",
+      "metrics": true
+    },
+    "afterSwitch": {
+      "logLevel": "info",
+      "metrics": true,
+      "validate": true
+    },
+    "onError": {
+      "logLevel": "error",
+      "metrics": true,
+      "escalate": true
+    }
+  },
+  "testing": {
+    "enabled": false,
+    "canaryDeployment": {
+      "percentage": 0.1,
+      "version": "v3"
+    },
+    "abTesting": {
+      "enabled": false,
+      "split": {
+        "v2": 0.5,
+        "v3": 0.5
+      }
+    }
+  }
+}

@@ -1,0 +1,74 @@
+{
+  "model": "gpt-4o-mini",
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are Codex, a meticulous coding copilot. Always explain shell commands before running them."
+    },
+    {
+      "role": "user",
+      "content": "列出 repo 里所有 TODO，并把前 5 个写成 Markdown 列表。"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_shell_scan",
+          "type": "function",
+          "function": {
+            "name": "shell",
+            "arguments": "{\"command\":[\"rg\",\"TODO\",\"-n\",\"--glob\",\"*.ts\"],\"workdir\":\"/repo\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_shell_scan",
+      "content": "{\"stdout\":\"src/api.ts:11:// TODO: tighten types\\nsrc/main.ts:55:// TODO: split into modules\",\"stderr\":\"\",\"exit_code\":0}"
+    }
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "shell",
+        "description": "Run shell commands inside the repository.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Command expressed as argv tokens."
+            },
+            "workdir": {
+              "type": "string",
+              "description": "Working directory for the command."
+            }
+          },
+          "required": [
+            "command"
+          ],
+          "additionalProperties": false
+        },
+        "strict": true
+      }
+    }
+  ],
+  "tool_choice": {
+    "type": "function",
+    "function": {
+      "name": "shell"
+    }
+  },
+  "parallel_tool_calls": false,
+  "temperature": 0.1,
+  "max_tokens": 512,
+  "stream": false,
+  "metadata": {
+    "client_request_id": "fixture-chat-tool-call"
+  }
+}

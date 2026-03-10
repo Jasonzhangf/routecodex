@@ -1,0 +1,84 @@
+{
+  "model": "gpt-4.1-mini",
+  "instructions": "You are Codex. Always describe planned tool invocations before running them.",
+  "input": [
+    {
+      "type": "message",
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "找出 repo 中所有包含 FIXME 的 TypeScript 文件，并给出第一行内容。"
+        }
+      ]
+    },
+    {
+      "type": "function_call",
+      "id": "fc_find_fixme",
+      "name": "shell",
+      "arguments": "{\"command\":[\"rg\",\"-n\",\"FIXME\",\"--glob\",\"*.ts\"],\"workdir\":\"/repo\"}"
+    },
+    {
+      "type": "function_call_output",
+      "call_id": "fc_find_fixme",
+      "output": "{\"stdout\":\"src/state.ts:4:// FIXME: legacy state coupling\",\"stderr\":\"\",\"exit_code\":0}"
+    }
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "name": "shell",
+      "description": "Execute commands inside the repo.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "workdir": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "command"
+        ],
+        "additionalProperties": false
+      },
+      "strict": true
+    }
+  ],
+  "tool_choice": {
+    "type": "function",
+    "function": {
+      "name": "shell"
+    }
+  },
+  "parallel_tool_calls": false,
+  "response_format": {
+    "type": "json_schema",
+    "json_schema": {
+      "name": "todo_summary",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      }
+    }
+  },
+  "metadata": {
+    "client_request_id": "fixture-responses-tool-call"
+  },
+  "stream": true
+}

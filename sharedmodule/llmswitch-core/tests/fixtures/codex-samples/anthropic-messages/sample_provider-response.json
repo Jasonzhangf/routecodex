@@ -1,0 +1,18 @@
+{
+  "data": {
+    "body": {
+      "id": "msg_sample_001",
+      "type": "message",
+      "role": "assistant",
+      "model": "claude-3-5-sonnet-20241022",
+      "content": [
+        {
+          "type": "text",
+          "text": "这里是一个 Anthropic Messages 的最小响应样本，用于 SSE roundtrip golden。"
+        }
+      ],
+      "usage": { "input_tokens": 12, "output_tokens": 24 },
+      "stop_reason": "end_turn"
+    }
+  }
+}

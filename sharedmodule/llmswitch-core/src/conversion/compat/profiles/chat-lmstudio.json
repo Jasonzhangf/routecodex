@@ -1,0 +1,80 @@
+{
+  "id": "chat:lmstudio",
+  "protocol": "",
+  "request": {
+    "mappings": [
+      {
+        "action": "snapshot",
+        "phase": "compat-pre"
+      },
+      {
+        "action": "dto_unwrap"
+      },
+      {
+        "action": "lmstudio_responses_input_stringify"
+      },
+      {
+        "action": "normalize_tool_call_ids"
+      },
+      {
+        "action": "lmstudio_responses_fc_ids"
+      },
+      {
+        "action": "normalize_tool_choice",
+        "path": "tool_choice",
+        "objectReplacement": "required"
+      },
+      {
+        "action": "snapshot",
+        "phase": "compat-post"
+      },
+      {
+        "action": "dto_rewrap"
+      }
+    ]
+  },
+  "response": {
+    "mappings": [
+      {
+        "action": "snapshot",
+        "phase": "compat-pre"
+      },
+      {
+        "action": "dto_unwrap"
+      },
+      {
+        "action": "strip_orphan_function_calls_tag"
+      },
+      {
+        "action": "normalize_tool_call_ids"
+      },
+      {
+        "action": "set_default",
+        "path": "object",
+        "value": "chat.completion"
+      },
+      {
+        "action": "set_default",
+        "path": "id",
+        "valueSource": "chat_completion_id"
+      },
+      {
+        "action": "set_default",
+        "path": "created",
+        "valueSource": "timestamp_seconds"
+      },
+      {
+        "action": "set_default",
+        "path": "model",
+        "value": "unknown"
+      },
+      {
+        "action": "snapshot",
+        "phase": "compat-post"
+      },
+      {
+        "action": "dto_rewrap"
+      }
+    ]
+  }
+}

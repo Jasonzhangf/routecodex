@@ -1,0 +1,51 @@
+{
+  "sampleId": "streaming-responses-01",
+  "name": "流式响应 - Responses协议",
+  "type": "request",
+  "protocol": "responses",
+  "category": "streaming",
+  "payload": {
+    "model": "gpt-4",
+    "input": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "请写一首关于春天的诗，要求有画面感和韵律"
+          }
+        ]
+      }
+    ],
+    "max_output_tokens": 500,
+    "temperature": 0.8,
+    "stream": true,
+    "instructions": "请创作一首优美的春天诗歌，注意韵律和意象。"
+  },
+  "metadata": {
+    "description": "测试Responses协议流式响应功能",
+    "testFocus": ["streaming-response", "sse-events", "chunk-sequencing"],
+    "expectedStreaming": true,
+    "expectedTools": [],
+    "validationRules": [
+      {
+        "type": "field-check",
+        "field": "stream",
+        "rule": "required"
+      },
+      {
+        "type": "custom",
+        "implementation": "validateStreamingCapability",
+        "parameters": {
+          "expectedEvents": [
+            "response.created",
+            "response.in_progress",
+            "response.output_text.delta",
+            "response.output_text.done",
+            "response.done"
+          ]
+        }
+      }
+    ]
+  }
+}

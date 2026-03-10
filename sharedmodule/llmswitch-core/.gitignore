@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+coverage/
+*.tsbuildinfo
+
+# OS files
+.DS_Store
+
+# Archives / packages
+*.tgz
+*.zip
+
+# Logs and debug artifacts
+npm-debug.log*
+yarn-error.log*
+*.log
+../debug-logs/
+
+# Test outputs
+../test-results/
+../test-artifacts/
+
+# Env and local caches
+.env
+.env.*
+.cache/
+.npm-cache/
+/tmp/
+
+# Rust / local generated state
+rust-core/target/
+.beads/
+memory/
+test/node_modules/
+test/dist/

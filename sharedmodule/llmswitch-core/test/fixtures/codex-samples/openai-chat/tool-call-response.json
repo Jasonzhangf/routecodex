@@ -1,0 +1,26 @@
+{
+  "id": "chatcmpl-tool-sample",
+  "object": "chat.completion",
+  "created": 1737000000,
+  "model": "gpt-4o-mini",
+  "choices": [
+    {
+      "index": 0,
+      "finish_reason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": "以下为前 2 个 TODO：\\n\\n1. src/api.ts:11 — tighten types\\n2. src/main.ts:55 — split controller into modules"
+          }
+        ]
+      }
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 182,
+    "completion_tokens": 92,
+    "total_tokens": 274
+  }
+}

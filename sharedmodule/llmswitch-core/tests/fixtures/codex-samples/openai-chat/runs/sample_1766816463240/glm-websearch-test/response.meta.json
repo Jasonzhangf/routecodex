@@ -1,0 +1,16 @@
+{
+  "endpoint": "/v1/responses",
+  "targetUrl": "http://127.0.0.1:5555/v1/responses",
+  "wantsSse": false,
+  "status": 502,
+  "statusText": "Bad Gateway",
+  "headers": {
+    "connection": "keep-alive",
+    "content-length": "166",
+    "content-type": "application/json; charset=utf-8",
+    "date": "Sat, 27 Dec 2025 06:21:03 GMT",
+    "etag": "W/\"a6-jLY5RHPbUMmxp9hr0WfWP6XXnVc\"",
+    "keep-alive": "timeout=5",
+    "x-powered-by": "Express"
+  }
+}

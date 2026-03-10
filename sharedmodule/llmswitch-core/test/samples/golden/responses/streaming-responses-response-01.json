@@ -1,0 +1,58 @@
+{
+  "sampleId": "streaming-responses-response-01",
+  "name": "流式响应响应 - Responses协议",
+  "type": "response",
+  "protocol": "responses",
+  "category": "streaming",
+  "payload": {
+    "id": "resp_streaming_123456789",
+    "object": "response",
+    "created_at": 1700000000,
+    "model": "gpt-4",
+    "status": "completed",
+    "output": [
+      {
+        "type": "message",
+        "id": "msg_streaming_123456789",
+        "status": "completed",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "output_text",
+            "text": "春风轻抚过柳枝，\n嫩绿的新芽在枝头绽放。\n\n桃花含笑开满园，\n蝴蝶翩翩舞在花间。\n\n溪水潺潺唱新歌，\n燕子归来筑巢忙。\n\n青山如黛映蓝天，\n春意浓浓在人间。\n\n这首小诗描绘了春天的生机与美好，希望能带给你春日的愉悦。"
+          }
+        ]
+      }
+    ],
+    "usage": {
+      "input_tokens": 20,
+      "output_tokens": 150,
+      "total_tokens": 170
+    }
+  },
+  "metadata": {
+    "description": "流式响应的最终结果，包含完整的诗歌内容",
+    "testFocus": ["streaming-completion", "final-content", "usage-tracking"],
+    "isStreaming": true,
+    "hasToolCalls": false,
+    "validationRules": [
+      {
+        "type": "field-check",
+        "field": "output",
+        "rule": "non-empty"
+      },
+      {
+        "type": "custom",
+        "implementation": "validateStreamingCompletion",
+        "parameters": {
+          "expectedEventSequence": [
+            "response.created",
+            "response.output_text.delta",
+            "response.output_text.done",
+            "response.completed"
+          ]
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "data": {
+    "body": {
+      "id": "chatcmpl-demo-openai-chat",
+      "object": "chat.completion",
+      "created": 1766563200,
+      "model": "glm-4.7",
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "stop",
+          "message": {
+            "role": "assistant",
+            "content": "工作目录包含 focus.md 和 README.md。还有其他需要协助的吗？"
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 128,
+        "completion_tokens": 30,
+        "total_tokens": 158
+      }
+    }
+  }
+}

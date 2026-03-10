@@ -1,0 +1,23 @@
+{
+  "id": "chat:gemini-cli",
+  "protocol": "gemini-chat",
+  "request": {
+    "mappings": [
+      { "action": "snapshot", "phase": "compat-pre" },
+      { "action": "claude_thinking_tool_schema" },
+      {
+        "action": "shallow_pick",
+        "allowTopLevel": [
+          "model",
+          "project",
+          "request",
+          "requestId",
+          "requestType",
+          "userAgent",
+          "action"
+        ]
+      },
+      { "action": "snapshot", "phase": "compat-post" }
+    ]
+  }
+}

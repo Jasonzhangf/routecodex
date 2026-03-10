@@ -1,0 +1,22 @@
+{
+  "id": "chat:qwen",
+  "protocol": "openai-chat",
+  "request": {
+    "mappings": [
+      { "action": "snapshot", "phase": "compat-pre" },
+      { "action": "dto_unwrap" },
+      { "action": "qwen_request_transform" },
+      { "action": "snapshot", "phase": "compat-post" },
+      { "action": "dto_rewrap" }
+    ]
+  },
+  "response": {
+    "mappings": [
+      { "action": "snapshot", "phase": "compat-pre" },
+      { "action": "dto_unwrap" },
+      { "action": "qwen_response_transform" },
+      { "action": "snapshot", "phase": "compat-post" },
+      { "action": "dto_rewrap" }
+    ]
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "model": "gpt-4o-mini",
+  "instructions": "You are a helpful assistant that responds in Chinese.",
+  "input": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "你好，请简单介绍一下你有什么能力。"
+        }
+      ]
+    }
+  ],
+  "metadata": {
+    "client_request_id": "fixture_responses_simple"
+  },
+  "max_tokens": 256,
+  "temperature": 0.2,
+  "stream": true
+}

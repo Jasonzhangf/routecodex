@@ -1,0 +1,18 @@
+{
+  "request": [
+    {
+      "sourcePath": "messages[*].tool_calls[*].function.arguments",
+      "targetPath": "messages[*].tool_calls[*].function.arguments",
+      "type": "string",
+      "transform": "stringifyJson"
+    }
+  ],
+  "response": [
+    {
+      "sourcePath": "choices[*].message.tool_calls[*].function.arguments",
+      "targetPath": "choices[*].message.tool_calls[*].function.arguments",
+      "type": "string",
+      "transform": "stringifyJson"
+    }
+  ]
+}

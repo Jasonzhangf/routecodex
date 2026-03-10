@@ -1,0 +1,12 @@
+{
+  "id": "responses:output2choices-test",
+  "protocol": "openai-responses",
+  "response": {
+    "mappings": [
+      {
+        "action": "convert_responses_output_to_choices"
+      }
+    ]
+  }
+}
+

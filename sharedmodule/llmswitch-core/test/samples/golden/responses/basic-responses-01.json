@@ -1,0 +1,50 @@
+{
+  "sampleId": "basic-responses-01",
+  "name": "基础对话 - Responses协议",
+  "type": "request",
+  "protocol": "responses",
+  "category": "basic",
+  "payload": {
+    "model": "gpt-4",
+    "input": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "你好，请用Responses协议格式回复我，并介绍一下你的能力"
+          }
+        ]
+      }
+    ],
+    "max_output_tokens": 1000,
+    "temperature": 0.7,
+    "instructions": "请详细回答用户的问题，介绍你的功能和能力。"
+  },
+  "metadata": {
+    "description": "测试基础Responses协议对话的转换正确性",
+    "testFocus": ["basic-conversation", "protocol-conversion", "message-mapping"],
+    "expectedStreaming": false,
+    "expectedTools": [],
+    "validationRules": [
+      {
+        "type": "field-check",
+        "field": "input",
+        "rule": "non-empty"
+      },
+      {
+        "type": "field-check",
+        "field": "model",
+        "rule": "required"
+      },
+      {
+        "type": "custom",
+        "implementation": "validateMessageStructure",
+        "parameters": {
+          "minMessages": 1,
+          "maxMessages": 1
+        }
+      }
+    ]
+  }
+}

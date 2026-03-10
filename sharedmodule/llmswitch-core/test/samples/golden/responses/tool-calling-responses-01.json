@@ -1,0 +1,82 @@
+{
+  "sampleId": "tool-calling-responses-01",
+  "name": "工具调用 - Responses协议",
+  "type": "request",
+  "protocol": "responses",
+  "category": "tools",
+  "payload": {
+    "model": "gpt-4",
+    "input": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "请使用工具获取当前时间和天气信息"
+          }
+        ]
+      }
+    ],
+    "tools": [
+      {
+        "type": "function",
+        "name": "get_current_time",
+        "description": "获取当前时间",
+        "parameters": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        }
+      },
+      {
+        "type": "function",
+        "name": "get_weather",
+        "description": "获取天气信息",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "city": {
+              "type": "string",
+              "description": "城市名称"
+            },
+            "units": {
+              "type": "string",
+              "enum": ["celsius", "fahrenheit"],
+              "description": "温度单位"
+            }
+          },
+          "required": ["city"]
+        }
+      }
+    ],
+    "max_output_tokens": 1000,
+    "temperature": 0.7,
+    "parallel_tool_calls": true
+  },
+  "metadata": {
+    "description": "测试Responses协议工具调用功能的转换正确性",
+    "testFocus": ["tool-calling", "function-parameters", "tool-preservation"],
+    "expectedStreaming": false,
+    "expectedTools": ["get_current_time", "get_weather"],
+    "validationRules": [
+      {
+        "type": "field-check",
+        "field": "tools",
+        "rule": "non-empty"
+      },
+      {
+        "type": "custom",
+        "implementation": "validateToolDefinitions",
+        "parameters": {
+          "expectedTools": ["get_current_time", "get_weather"],
+          "validateParameters": true
+        }
+      },
+      {
+        "type": "field-check",
+        "field": "input",
+        "rule": "non-empty"
+      }
+    ]
+  }
+}

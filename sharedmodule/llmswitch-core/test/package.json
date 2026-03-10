@@ -1,0 +1,45 @@
+{
+  "name": "llmswitch-roundtrip-test",
+  "version": "1.0.0",
+  "description": "LLMSwitch Core Roundtrip Test Framework",
+  "main": "dist/cli/roundtrip-test-cli.js",
+  "bin": {
+    "roundtrip-test": "dist/cli/roundtrip-test-cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/cli/roundtrip-test-cli.js",
+    "dev": "tsx src/cli/roundtrip-test-cli.ts",
+    "test": "npm run build && npm run test:run",
+    "test:run": "node dist/cli/roundtrip-test-cli.js run",
+    "test:list": "node dist/cli/roundtrip-test-cli.js list",
+    "lint": "eslint src --ext .ts",
+    "lint:fix": "eslint src --ext .ts --fix",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "commander": "^11.0.0",
+    "js-yaml": "^4.1.0",
+    "chalk": "^4.1.2",
+    "ora": "^5.4.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/js-yaml": "^4.0.5",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "eslint": "^8.45.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.1.6"
+  },
+  "keywords": [
+    "llmswitch",
+    "roundtrip",
+    "testing",
+    "validation",
+    "openai",
+    "anthropic"
+  ],
+  "author": "LLMSwitch Team",
+  "license": "MIT"
+}

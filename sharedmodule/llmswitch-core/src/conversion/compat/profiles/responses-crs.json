@@ -1,0 +1,15 @@
+{
+  "id": "responses:crs",
+  "protocol": "openai-responses",
+  "request": {
+    "mappings": [
+      {
+        "action": "remove",
+        "path": "temperature"
+      }
+    ]
+  },
+  "response": {
+    "mappings": []
+  }
+}

@@ -1,0 +1,228 @@
+{
+  "routing": {
+    "default": [
+      {
+        "id": "default-primary",
+        "priority": 0,
+        "targets": [
+          "fc.gpt-5.1-codex-max",
+          "c4m.gpt-5.1-codex"
+        ]
+      }
+    ],
+    "coding": [
+      {
+        "id": "coding-primary",
+        "priority": 0,
+        "targets": [
+          "fc.gpt-5.1-codex-max",
+          "c4m.gpt-5.1-codex",
+          "glm.glm-4.6",
+          "kimi.kimi-for-coding",
+          "iflow.kimi-k2-thinking"
+        ]
+      }
+    ],
+    "longcontext": [
+      {
+        "id": "longcontext-primary",
+        "priority": 0,
+        "targets": [
+          "fc.gpt-5.1-codex-max",
+          "iflow.kimi-k2-thinking",
+          "c4m.gpt-5.1-codex"
+        ]
+      }
+    ],
+    "thinking": [
+      {
+        "id": "thinking-primary",
+        "priority": 0,
+        "targets": [
+          "fc.gpt-5.1-codex-max",
+          "glm.glm-4.6",
+          "kimi.kimi-for-coding",
+          "iflow.kimi-k2-thinking",
+          "c4m.gpt-5.1-codex"
+        ]
+      }
+    ],
+    "vision": [
+      {
+        "id": "vision-primary",
+        "priority": 0,
+        "targets": [
+          "iflow.qwen3-vl-plus"
+        ]
+      }
+    ],
+    "websearch": [
+      {
+        "id": "websearch-primary",
+        "priority": 0,
+        "targets": [
+          "fc.gpt-5.1-codex-max",
+          "qwen.qwen3-coder-plus",
+          "c4m.gpt-5.1-codex"
+        ]
+      }
+    ],
+    "background": [
+      {
+        "id": "background-primary",
+        "priority": 0,
+        "targets": [
+          "iflow.minimax-m2",
+          "glm.glm-4.6",
+          "qwen.qwen3-coder-plus"
+        ]
+      }
+    ],
+    "tools": [
+      {
+        "id": "tools-primary",
+        "priority": 0,
+        "targets": [
+          "glm.glm-4.6",
+          "qwen.qwen3-coder-plus",
+          "iflow.kimi-k2-thinking"
+        ]
+      }
+    ]
+  },
+  "providers": {
+    "fc.gpt-5.1-codex-max": {
+      "providerKey": "fc.gpt-5.1-codex-max",
+      "providerType": "openai",
+      "endpoint": "https://api.fake-openai.fc/v1/chat/completions",
+      "auth": {
+        "type": "apiKey",
+        "secretRef": "ROUTECODEX_PROVIDER_FC"
+      },
+      "outboundProfile": "openai-chat",
+      "compatibilityProfile": "compat:passthrough",
+      "defaultModel": "gpt-5.1-codex-max"
+    },
+    "c4m.gpt-5.1-codex": {
+      "providerKey": "c4m.gpt-5.1-codex",
+      "providerType": "openai",
+      "endpoint": "https://api.fake-openai.c4m/v1/chat/completions",
+      "auth": {
+        "type": "apiKey",
+        "secretRef": "ROUTECODEX_PROVIDER_C4M"
+      },
+      "outboundProfile": "openai-chat",
+      "compatibilityProfile": "compat:passthrough",
+      "defaultModel": "gpt-5.1-codex"
+    },
+    "glm.glm-4.6": {
+      "providerKey": "glm.glm-4.6",
+      "providerType": "openai",
+      "endpoint": "https://api.fake-glm/v1/chat/completions",
+      "auth": {
+        "type": "apiKey",
+        "secretRef": "ROUTECODEX_PROVIDER_GLM"
+      },
+      "outboundProfile": "openai-chat",
+      "compatibilityProfile": "chat:glm",
+      "defaultModel": "glm-4.6"
+    },
+    "kimi.kimi-for-coding": {
+      "providerKey": "kimi.kimi-for-coding",
+      "providerType": "openai",
+      "endpoint": "https://api.fake-kimi/v1/chat/completions",
+      "auth": {
+        "type": "apiKey",
+        "secretRef": "ROUTECODEX_PROVIDER_KIMI"
+      },
+      "outboundProfile": "openai-chat",
+      "compatibilityProfile": "compat:passthrough",
+      "defaultModel": "kimi-for-coding"
+    },
+    "iflow.kimi-k2-thinking": {
+      "providerKey": "iflow.kimi-k2-thinking",
+      "providerType": "openai",
+      "endpoint": "https://api.fake-iflow/v1/chat/completions",
+      "auth": {
+        "type": "apiKey",
+        "secretRef": "ROUTECODEX_PROVIDER_IFLOW"
+      },
+      "outboundProfile": "openai-chat",
+      "compatibilityProfile": "chat:iflow",
+      "defaultModel": "kimi-k2-thinking"
+    },
+    "iflow.qwen3-vl-plus": {
+      "providerKey": "iflow.qwen3-vl-plus",
+      "providerType": "openai",
+      "endpoint": "https://api.fake-iflow/v1/chat/completions",
+      "auth": {
+        "type": "apiKey",
+        "secretRef": "ROUTECODEX_PROVIDER_IFLOW_VL"
+      },
+      "outboundProfile": "openai-chat",
+      "compatibilityProfile": "chat:iflow",
+      "defaultModel": "qwen3-vl-plus"
+    },
+    "qwen.qwen3-coder-plus": {
+      "providerKey": "qwen.qwen3-coder-plus",
+      "providerType": "openai",
+      "endpoint": "https://api.fake-qwen/v1/chat/completions",
+      "auth": {
+        "type": "apiKey",
+        "secretRef": "ROUTECODEX_PROVIDER_QWEN"
+      },
+      "outboundProfile": "openai-chat",
+      "compatibilityProfile": "chat:qwen",
+      "defaultModel": "qwen3-coder-plus"
+    },
+    "iflow.minimax-m2": {
+      "providerKey": "iflow.minimax-m2",
+      "providerType": "openai",
+      "endpoint": "https://api.fake-iflow/v1/chat/completions",
+      "auth": {
+        "type": "apiKey",
+        "secretRef": "ROUTECODEX_PROVIDER_MINIMAX"
+      },
+      "outboundProfile": "openai-chat",
+      "compatibilityProfile": "chat:iflow",
+      "defaultModel": "minimax-m2"
+    }
+  },
+  "classifier": {
+    "longContextThresholdTokens": 6000,
+    "thinkingKeywords": [
+      "反思",
+      "逐步",
+      "chain of thought",
+      "让我们一步步",
+      "思考"
+    ],
+    "codingKeywords": [
+      "typescript",
+      "javascript",
+      "python",
+      "函数",
+      "代码",
+      "class"
+    ],
+    "backgroundKeywords": [
+      "后台",
+      "background",
+      "异步处理",
+      "长期任务"
+    ],
+    "visionKeywords": [
+      "图像",
+      "图片",
+      "vision",
+      "image_url"
+    ]
+  },
+  "loadBalancing": {
+    "strategy": "sticky"
+  },
+  "health": {
+    "failureThreshold": 3,
+    "cooldownMs": 30000
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "glueAllowlist": [
+    {
+      "pattern": "src/index.ts",
+      "reason": "barrel export only"
+    }
+  ]
+}

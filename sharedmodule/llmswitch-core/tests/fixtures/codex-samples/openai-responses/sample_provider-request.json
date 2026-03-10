@@ -1,0 +1,86 @@
+{
+  "data": {
+    "body": {
+      "model": "gpt-5.1-codex",
+      "tools": [
+        {
+          "type": "function",
+          "name": "exec_command",
+          "description": "Execute a workspace command.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "cmd": { "type": "string" },
+              "workdir": { "type": "string" }
+            },
+            "required": ["cmd"]
+          },
+          "function": {
+            "name": "exec_command",
+            "description": "Execute a workspace command.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "cmd": { "type": "string" },
+                "workdir": { "type": "string" }
+              },
+              "required": ["cmd"]
+            }
+          }
+        }
+      ],
+      "parallel_tool_calls": false,
+      "instructions": "You are Codex. Generate a plan and call tools when necessary.",
+      "input": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "input_image",
+              "image_url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB"
+            },
+            {
+              "type": "input_text",
+              "text": "读取 README.md 内容"
+            }
+          ]
+        },
+        {
+          "type": "function_call",
+          "id": "fc_readme",
+          "call_id": "fc_readme",
+          "name": "exec_command",
+          "arguments": "{\"cmd\":\"cat README.md\",\"workdir\":\"/Users/example/project\"}"
+        },
+        {
+          "type": "function_call_output",
+          "id": "fc_readme",
+          "call_id": "fc_readme",
+          "output": "[{\"type\":\"output_text\",\"text\":\"# Demo\\nThis is a sample project.\"}]"
+        }
+      ],
+      "store": false,
+      "metadata": {
+        "context": {
+          "requestId": "hub-equivalence-openai-responses",
+          "entryEndpoint": "/v1/responses",
+          "providerProtocol": "openai-responses"
+        },
+        "providerMetadata": {
+          "providerMetadata": {
+            "context": {
+              "requestId": "hub-equivalence-openai-responses",
+              "entryEndpoint": "/v1/responses",
+              "providerProtocol": "openai-responses"
+            },
+            "providerMetadata": {
+              "extraFields": {
+                "ua": "codex-cli/0.89"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

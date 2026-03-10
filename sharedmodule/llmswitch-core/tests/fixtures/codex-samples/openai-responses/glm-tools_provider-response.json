@@ -1,0 +1,31 @@
+{
+  "meta": {
+    "stage": "provider-response",
+    "entryEndpoint": "/v1/responses",
+    "clientRequestId": "openai-responses-glm.key1.glm-4.7-glm-4.7-fixture",
+    "note": "Sanitized glm-4.7 /v1/responses tool-call sample for compat + tool governance tests"
+  },
+  "body": {
+    "id": "glm-tools-response-001",
+    "object": "chat.completion",
+    "created": 1766567287,
+    "model": "glm-4.7",
+    "choices": [
+      {
+        "index": 0,
+        "finish_reason": "stop",
+        "message": {
+          "role": "assistant",
+          "content": "",
+          "reasoning_content": "exec_command<arg_key>cmd</arg_key><arg_value>node scripts/start-headful.mjs --profile weibo_fresh --url https://weibo.com</arg_value><arg_key>justification</arg_key><arg_value>启动系统进行高亮基础功能验证</arg_value><arg_key>login</arg_key><arg_value>false</arg_value><arg_key>max_output_tokens</arg_key><arg_value>6000</arg_value><arg_key>sandbox_permissions</arg_key><arg_value>use_default</arg_value><arg_key>shell</arg_key><arg_value></arg_value><arg_key>workdir</arg_key><arg_value></arg_value><arg_key>yield_time_ms</arg_key><arg_value>30000</arg_value></tool_call>"
+        }
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 176470,
+      "completion_tokens": 86,
+      "total_tokens": 176556
+    }
+  }
+}
+

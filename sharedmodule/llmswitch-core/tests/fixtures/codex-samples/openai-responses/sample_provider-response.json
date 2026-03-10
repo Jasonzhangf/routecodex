@@ -1,0 +1,47 @@
+{
+  "data": {
+    "body": {
+      "id": "resp-demo-001",
+      "object": "response",
+      "created_at": 1766563300,
+      "model": "gpt-5.1-codex",
+      "status": "completed",
+      "output": [
+        {
+          "id": "event_text",
+          "type": "message",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "已读取 README.md，下一步需要我总结内容还是继续编写计划？"
+            }
+          ]
+        },
+        {
+          "id": "event_tool",
+          "type": "tool_use",
+          "tool": "update_plan",
+          "call_id": "plan_1",
+          "name": "update_plan",
+          "input": {
+            "plan": [
+              { "step": "Inspect README", "status": "completed" },
+              { "step": "Draft summary", "status": "pending" }
+            ]
+          }
+        }
+      ],
+      "output_text": [
+        "已读取 README.md，下一步需要我总结内容还是继续编写计划？"
+      ],
+      "metadata": {
+        "requestId": "openai-responses-demo-request"
+      },
+      "usage": {
+        "prompt_tokens": 512,
+        "completion_tokens": 120,
+        "total_tokens": 632
+      }
+    }
+  }
+}

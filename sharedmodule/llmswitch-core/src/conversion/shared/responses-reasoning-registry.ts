@@ -1,0 +1,165 @@
+export interface ResponsesOutputTextMeta {
+  hasField: boolean;
+  value?: string;
+  raw?: string;
+}
+
+export interface ResponsesReasoningPayload {
+  summary?: Array<{ type: 'summary_text'; text: string }>;
+  content?: Array<{ type: 'reasoning_text' | 'text'; text: string }>;
+  encrypted_content?: string | null;
+}
+
+import { parseLenientJsonishWithNative } from '../../router/virtual-router/engine-selection/native-shared-conversion-semantics.js';
+
+interface ResponsesMetadataEntry {
+  reasoning?: ResponsesReasoningPayload;
+  outputText?: ResponsesOutputTextMeta;
+  payloadSnapshot?: Record<string, unknown>;
+  passthroughPayload?: Record<string, unknown>;
+}
+
+const registry = new Map<string, ResponsesMetadataEntry>();
+
+function ensureEntry(id: string): ResponsesMetadataEntry {
+  let entry = registry.get(id);
+  if (!entry) {
+    entry = {};
+    registry.set(id, entry);
+  }
+  return entry;
+}
+
+function pruneEntry(id: string): void {
+  const entry = registry.get(id);
+  if (!entry) return;
+  if (!entry.reasoning && !entry.outputText && !entry.payloadSnapshot && !entry.passthroughPayload) {
+    registry.delete(id);
+  }
+}
+
+function cloneSnapshot(snapshot: Record<string, unknown>): Record<string, unknown> | undefined {
+  try {
+    const structuredCloneImpl = (globalThis as { structuredClone?: <T>(input: T) => T }).structuredClone;
+    if (typeof structuredCloneImpl === 'function') {
+      return structuredCloneImpl(snapshot);
+    }
+  } catch {
+    /* ignore structuredClone failures */
+  }
+  try {
+    const serialized = JSON.stringify(snapshot);
+    const parsed = parseLenientJsonishWithNative(serialized);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function registerResponsesReasoning(id: unknown, reasoning: ResponsesReasoningPayload | undefined): void {
+  if (typeof id !== 'string') return;
+  if (!reasoning) return;
+  const summary = Array.isArray(reasoning.summary)
+    ? reasoning.summary
+      .map((item) => ({ type: 'summary_text' as const, text: String(item.text ?? '').trim() }))
+      .filter((item) => item.text.length > 0)
+    : undefined;
+  const content = Array.isArray(reasoning.content)
+    ? reasoning.content
+      .map((item) => ({
+        type: item.type === 'text' ? 'text' as const : 'reasoning_text' as const,
+        text: String(item.text ?? '').trim()
+      }))
+      .filter((item) => item.text.length > 0)
+    : undefined;
+  const hasSummary = Array.isArray(summary) && summary.length > 0;
+  const hasContent = Array.isArray(content) && content.length > 0;
+  const hasEncrypted = reasoning.encrypted_content !== undefined;
+  if (!hasSummary && !hasContent && !hasEncrypted) return;
+  const entry = ensureEntry(id);
+  entry.reasoning = {
+    summary: hasSummary ? summary : undefined,
+    content: hasContent ? content : undefined,
+    encrypted_content: reasoning.encrypted_content
+  };
+}
+
+export function consumeResponsesReasoning(id: unknown): ResponsesReasoningPayload | undefined {
+  if (typeof id !== 'string') return undefined;
+  const entry = registry.get(id);
+  if (!entry?.reasoning) return undefined;
+  const value: ResponsesReasoningPayload = {
+    summary: entry.reasoning.summary ? [...entry.reasoning.summary] : undefined,
+    content: entry.reasoning.content ? [...entry.reasoning.content] : undefined,
+    encrypted_content: entry.reasoning.encrypted_content
+  };
+  entry.reasoning = undefined;
+  pruneEntry(id);
+  return value;
+}
+
+export function registerResponsesOutputTextMeta(id: unknown, meta: ResponsesOutputTextMeta | undefined): void {
+  if (typeof id !== 'string') return;
+  if (!meta) return;
+  const entry = ensureEntry(id);
+  entry.outputText = {
+    hasField: Boolean(meta.hasField),
+    value: typeof meta.value === 'string' ? meta.value : undefined,
+    raw: typeof meta.raw === 'string' ? meta.raw : undefined
+  };
+}
+
+export function consumeResponsesOutputTextMeta(id: unknown): ResponsesOutputTextMeta | undefined {
+  if (typeof id !== 'string') return undefined;
+  const entry = registry.get(id);
+  if (!entry?.outputText) return undefined;
+  const value: ResponsesOutputTextMeta = {
+    hasField: Boolean(entry.outputText.hasField),
+    value: entry.outputText.value,
+    raw: entry.outputText.raw
+  };
+  entry.outputText = undefined;
+  pruneEntry(id);
+  return value;
+}
+
+export function registerResponsesPayloadSnapshot(id: unknown, snapshot: Record<string, unknown> | undefined): void {
+  if (typeof id !== 'string') return;
+  if (!snapshot || typeof snapshot !== 'object') return;
+  const clone = cloneSnapshot(snapshot);
+  if (!clone) return;
+  const entry = ensureEntry(id);
+  entry.payloadSnapshot = clone;
+}
+
+export function consumeResponsesPayloadSnapshot(id: unknown): Record<string, unknown> | undefined {
+  if (typeof id !== 'string') return undefined;
+  const entry = registry.get(id);
+  if (!entry?.payloadSnapshot) return undefined;
+  const clone = cloneSnapshot(entry.payloadSnapshot) ?? entry.payloadSnapshot;
+  entry.payloadSnapshot = undefined;
+  pruneEntry(id);
+  return clone;
+}
+
+export function registerResponsesPassthrough(id: unknown, payload: Record<string, unknown> | undefined): void {
+  if (typeof id !== 'string') return;
+  if (!payload || typeof payload !== 'object') return;
+  const clone = cloneSnapshot(payload);
+  if (!clone) return;
+  const entry = ensureEntry(id);
+  entry.passthroughPayload = clone;
+}
+
+export function consumeResponsesPassthrough(id: unknown): Record<string, unknown> | undefined {
+  if (typeof id !== 'string') return undefined;
+  const entry = registry.get(id);
+  if (!entry?.passthroughPayload) return undefined;
+  const clone = cloneSnapshot(entry.passthroughPayload) ?? entry.passthroughPayload;
+  entry.passthroughPayload = undefined;
+  pruneEntry(id);
+  return clone;
+}

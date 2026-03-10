@@ -1,0 +1,41 @@
+{
+  "model": "models/gemini-1.5-pro",
+  "systemInstruction": {
+    "role": "system",
+    "parts": [
+      { "text": "You are a CLI assistant." }
+    ]
+  },
+  "contents": [
+    {
+      "role": "user",
+      "parts": [
+        { "text": "List files under /tmp" }
+      ]
+    }
+  ],
+  "generationConfig": {
+    "temperature": 0.2,
+    "maxOutputTokens": 256
+  },
+  "tools": [
+    {
+      "functionDeclarations": [
+        {
+          "name": "list_files",
+          "description": "List files from directory.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "path": { "type": "string" }
+            },
+            "required": ["path"]
+          }
+        }
+      ]
+    }
+  ],
+  "metadata": {
+    "fixture": "gemini-equivalence"
+  }
+}

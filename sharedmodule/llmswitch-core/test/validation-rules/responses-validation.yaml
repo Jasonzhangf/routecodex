@@ -1,0 +1,42 @@
+# Responses协议验证规则
+name: "Responses Protocol Validation"
+version: "1.0.0"
+description: "Validation rules for OpenAI Responses API protocol"
+rules:
+  - name: "request-required-fields"
+    description: "Ensure required fields are present in request"
+    enabled: true
+    severity: "error"
+    ruleType: "field-check"
+    parameters:
+      field: "model"
+      rule: "required"
+
+  - name: "input-array-validation"
+    description: "Validate input is non-empty array"
+    enabled: true
+    severity: "error"
+    ruleType: "field-check"
+    parameters:
+      field: "input"
+      rule: "non-empty"
+
+  - name: "tool-validation"
+    description: "Validate tool definitions"
+    enabled: true
+    severity: "warning"
+    ruleType: "custom"
+    implementation: "validateToolDefinitions"
+    parameters:
+      expectedTools: ["get_current_time", "get_weather"]
+      validateParameters: true
+
+  - name: "tool-call-structure"
+    description: "Validate tool call structure in responses"
+    enabled: true
+    severity: "error"
+    ruleType: "custom"
+    implementation: "validateToolCallStructure"
+    parameters:
+      requiredFields: ["id", "type", "function"]
+      functionRequiredFields: ["name", "arguments"]
