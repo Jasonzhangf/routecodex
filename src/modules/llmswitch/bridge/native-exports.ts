@@ -19,8 +19,13 @@ type NativeHubPipelineRespSemantics = {
   ) => Record<string, unknown>;
 };
 
+type FollowupSanitizeModule = {
+  sanitizeFollowupText?: (raw: unknown) => string;
+};
+
 let cachedSharedSemantics: NativeSharedConversionSemantics | null | undefined;
 let cachedRespSemantics: NativeHubPipelineRespSemantics | null | undefined;
+let cachedFollowupSanitize: FollowupSanitizeModule | null | undefined;
 let nativeBindingsChecked: boolean | undefined;
 
 async function assertNativeBindings(): Promise<void> {
@@ -90,6 +95,24 @@ async function getRespSemantics(): Promise<NativeHubPipelineRespSemantics> {
   return cachedRespSemantics;
 }
 
+async function getFollowupSanitizeModule(): Promise<FollowupSanitizeModule> {
+  if (cachedFollowupSanitize !== undefined) {
+    if (!cachedFollowupSanitize) {
+      throw new Error('[llmswitch-bridge] followup-sanitize not available');
+    }
+    return cachedFollowupSanitize;
+  }
+  try {
+    cachedFollowupSanitize = await importCoreDist<FollowupSanitizeModule>('servertool/handlers/followup-sanitize');
+  } catch {
+    cachedFollowupSanitize = null;
+  }
+  if (!cachedFollowupSanitize) {
+    throw new Error('[llmswitch-bridge] followup-sanitize not available');
+  }
+  return cachedFollowupSanitize;
+}
+
 export async function mapChatToolsToBridgeJson(rawTools: unknown): Promise<AnyRecord[]> {
   await assertNativeBindings();
   const mod = await getSharedConversionSemantics();
@@ -137,4 +160,13 @@ export async function buildAnthropicResponseFromChatJson(
     throw new Error('[llmswitch-bridge] buildAnthropicResponseFromChatJson not available');
   }
   return fn(chatResponse, aliasMap) as AnyRecord;
+}
+
+export async function sanitizeFollowupText(raw: unknown): Promise<string> {
+  const mod = await getFollowupSanitizeModule();
+  const fn = mod.sanitizeFollowupText;
+  if (typeof fn !== 'function') {
+    throw new Error('[llmswitch-bridge] sanitizeFollowupText not available');
+  }
+  return fn(raw);
 }

@@ -3,6 +3,7 @@ import {
   injectSessionClientPromptWithResult
 } from '../session-client-registry.js';
 import { bindSessionConversationSession } from './request-retry-helpers.js';
+import { sanitizeFollowupText } from '../../../../modules/llmswitch/bridge.js';
 
 export type StopMessageClientInjectReadiness = {
   ready: boolean;
@@ -23,6 +24,11 @@ type ClientInjectionTarget = {
   workdir?: string;
   requestId?: string;
 };
+
+function shouldSanitizeClientInjectText(source: string): boolean {
+  const normalized = typeof source === 'string' ? source.trim().toLowerCase() : '';
+  return normalized !== 'servertool.clock';
+}
 
 function shouldUnbindConversationSessionOnInjectFailure(reasonRaw: unknown): boolean {
   const reason = typeof reasonRaw === 'string' ? reasonRaw.trim().toLowerCase() : '';
@@ -356,6 +362,10 @@ export async function runClientInjectionFlowBeforeReenter(args: {
     typeof args.nestedMetadata.clientInjectSource === 'string' && args.nestedMetadata.clientInjectSource.trim()
       ? args.nestedMetadata.clientInjectSource.trim()
       : 'servertool.client_inject';
+  const sanitizedClientInjectText =
+    clientInjectText && shouldSanitizeClientInjectText(clientInjectSource)
+      ? await sanitizeFollowupText(clientInjectText)
+      : clientInjectText;
 
   const injectTarget = buildInjectTargetFromMetadata({
     metadata: args.nestedMetadata,
@@ -390,7 +400,7 @@ export async function runClientInjectionFlowBeforeReenter(args: {
       ...(injectTarget.clientType ? { clientType: injectTarget.clientType } : {}),
       workdir: injectTarget.workdir,
       requestId: injectTarget.requestId,
-      text: clientInjectText || signals.userText || '继续执行',
+      text: sanitizedClientInjectText || signals.userText || '继续执行',
       source: clientInjectSource
     });
     return { clientInjectOnlyHandled: true };

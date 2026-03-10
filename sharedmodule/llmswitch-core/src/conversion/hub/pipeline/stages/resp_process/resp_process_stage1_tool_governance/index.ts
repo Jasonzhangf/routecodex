@@ -117,11 +117,10 @@ function harvestToolCallsFromText(payload: ChatCompletionLike): ChatCompletionLi
       (choice as any).message = normalized;
       changed = true;
 
-      // Update finish_reason if needed
       const finish = typeof (choice as any).finish_reason === 'string'
         ? String((choice as any).finish_reason).trim().toLowerCase()
         : '';
-      if (!finish || finish === 'stop') {
+      if (!finish || finish === 'stop' || finish === 'length') {
         (choice as any).finish_reason = 'tool_calls';
       }
     }

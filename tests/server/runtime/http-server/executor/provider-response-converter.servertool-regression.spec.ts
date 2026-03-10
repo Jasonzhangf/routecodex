@@ -4,7 +4,18 @@ const mockConvertProviderResponse = jest.fn(async () => ({ body: { id: 'mock' } 
 const mockCreateSnapshotRecorder = jest.fn(async () => ({ record: () => {} }));
 const mockBridgeModule = () => ({
   convertProviderResponse: mockConvertProviderResponse,
-  createSnapshotRecorder: mockCreateSnapshotRecorder
+  createSnapshotRecorder: mockCreateSnapshotRecorder,
+  sanitizeFollowupText: async (raw: unknown) => {
+    const text = typeof raw === 'string' ? raw : '';
+    return text
+      .replace(/<\*\*[\s\S]*?\*\*>/g, ' ')
+      .replace(/\[Time\/Date\]:.*?(?=(?:\\n|\n|$))/g, ' ')
+      .replace(/\[Image omitted\]/g, ' ')
+      .replace(/[ \t]+\n/g, '\n')
+      .replace(/\n[ \t]+/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
 });
 const mockInjectSessionClientPromptWithResult = jest.fn(async () => ({ ok: true }));
 const mockUnbindSessionScope = jest.fn();
@@ -415,6 +426,87 @@ describe('provider-response-converter servertool regressions', () => {
         text: '继续执行'
       })
     );
+  });
+
+  it('sanitizes polluted stop_message client inject text on host followup path', async () => {
+    jest.resetModules();
+    mockConvertProviderResponse.mockReset();
+    mockCreateSnapshotRecorder.mockClear();
+    mockInjectSessionClientPromptWithResult.mockReset();
+    mockInjectSessionClientPromptWithResult.mockResolvedValue({ ok: true });
+
+    const executeNested = jest.fn(async () => ({ body: { ok: true } }));
+    mockConvertProviderResponse.mockImplementation(async ({ clientInjectDispatch }) => {
+      const dispatchResult = await clientInjectDispatch({
+        entryEndpoint: '/v1/messages',
+        requestId: 'followup_req_stopmessage_sanitize_host',
+        body: {
+          messages: [
+            {
+              role: 'assistant',
+              content:
+                '<**stopMessage:"继续推进",3**>\n[Time/Date]: utc=`2026-03-10T11:24:09.352Z` local=`2026-03-10 19:24:09.352 +08:00` tz=`Asia/Shanghai` nowMs=`1773141849352` ntpOffsetMs=`40`\n[Image omitted]\n当前先继续实现。'
+            }
+          ]
+        },
+        metadata: {
+          __rt: { serverToolFollowup: true },
+          clientInjectOnly: true,
+          clientInjectSource: 'servertool.stop_message',
+          clientInjectText:
+            '<**stopMessage:"继续推进",3**>\n[Time/Date]: utc=`2026-03-10T11:24:09.352Z` local=`2026-03-10 19:24:09.352 +08:00` tz=`Asia/Shanghai` nowMs=`1773141849352` ntpOffsetMs=`40`\n[Image omitted]\n继续推进任务，并先补测试。',
+          stopMessageClientInjectSessionScope: 'tmux:rcc_client_inject_sanitize_1',
+          clientTmuxSessionId: 'rcc_client_inject_sanitize_1',
+          tmuxSessionId: 'rcc_client_inject_sanitize_1'
+        }
+      });
+      return { body: { mode: dispatchResult.ok ? 'client_inject_only' : 'failed' } };
+    });
+
+    const { convertProviderResponseIfNeeded } = await import(
+      '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
+    );
+
+    const converted = await convertProviderResponseIfNeeded(
+      {
+        entryEndpoint: '/v1/messages',
+        providerProtocol: 'anthropic-messages',
+        requestId: 'req_client_inject_sanitize_host',
+        wantsStream: false,
+        response: { body: { id: 'upstream_body' } } as any,
+        originalRequest: {
+          model: 'gpt-test',
+          messages: [
+            {
+              role: 'user',
+              content:
+                '<**stopMessage:"继续推进",3**>\n[Time/Date]: utc=`2026-03-10T11:24:09.352Z` local=`2026-03-10 19:24:09.352 +08:00` tz=`Asia/Shanghai` nowMs=`1773141849352` ntpOffsetMs=`40`\n[Image omitted]\n请继续推进任务'
+            }
+          ]
+        },
+        pipelineMetadata: {
+          tmuxSessionId: 'rcc_client_inject_sanitize_1',
+          clientTmuxSessionId: 'rcc_client_inject_sanitize_1'
+        }
+      },
+      {
+        runtimeManager: {
+          resolveRuntimeKey: () => undefined,
+          getHandleByRuntimeKey: () => undefined
+        },
+        executeNested
+      }
+    );
+
+    expect((converted as any).body).toEqual({ mode: 'client_inject_only' });
+    expect(executeNested).not.toHaveBeenCalled();
+    expect(mockInjectSessionClientPromptWithResult).toHaveBeenCalledTimes(1);
+    const injectArgs = mockInjectSessionClientPromptWithResult.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(injectArgs.tmuxSessionId).toBe('rcc_client_inject_sanitize_1');
+    expect(String(injectArgs.text || '')).toContain('继续推进任务，并先补测试。');
+    expect(String(injectArgs.text || '')).not.toContain('<**stopMessage');
+    expect(String(injectArgs.text || '')).not.toContain('[Time/Date]:');
+    expect(String(injectArgs.text || '')).not.toContain('[Image omitted]');
   });
 
   it('maps deepseek context-length SSE decode errors to explicit 400 error', async () => {

@@ -25,9 +25,22 @@ const REASONING_TEXT_MARKERS = [
   '```reflection'
 ];
 
+const REASONING_TRANSPORT_NOISE_LINE_RE = /^\[(?:Time\/Date)\]:.*$/gim;
+const REASONING_WRAPPER_OPEN_RE = /^\s*\[(?:思考|thinking)\]\s*/i;
+const REASONING_WRAPPER_CLOSE_RE = /\s*\[\/(?:思考|thinking)\]\s*$/i;
+
 function stringHasReasoningMarker(value: string): boolean {
   const lower = value.toLowerCase();
   return REASONING_TEXT_MARKERS.some((marker) => lower.includes(marker));
+}
+
+export function stripReasoningTransportNoise(value: string): string {
+  return String(value ?? '')
+    .replace(REASONING_TRANSPORT_NOISE_LINE_RE, '')
+    .replace(REASONING_WRAPPER_OPEN_RE, '')
+    .replace(REASONING_WRAPPER_CLOSE_RE, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 function valueMayContainReasoningMarkup(value: unknown): boolean {

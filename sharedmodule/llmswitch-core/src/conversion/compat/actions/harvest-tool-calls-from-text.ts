@@ -142,7 +142,7 @@ export function harvestToolCallsFromTextWithConfig(
       const hasToolCalls = Array.isArray((normalized as any).tool_calls) && (normalized as any).tool_calls.length > 0;
       if (hasToolCalls) {
         const finish = typeof (choice as any).finish_reason === 'string' ? String((choice as any).finish_reason).trim() : '';
-        if (!finish || finish === 'stop') {
+        if (!finish || finish === 'stop' || finish === 'length') {
           (choice as any).finish_reason = 'tool_calls';
         }
       }

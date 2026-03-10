@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import { readRuntimeMetadata } from '../../../conversion/runtime-metadata.js';
 import { extractTextFromMessageContent } from './blocked-report.js';
 import { appendServerToolProgressFileEvent } from '../../log/progress-file.js';
+import { sanitizeFollowupSnapshotText, sanitizeFollowupText } from '../followup-sanitize.js';
 
 export interface StopMessageAutoResponseSnapshot {
   providerProtocol?: string;
@@ -460,11 +461,15 @@ function sanitizeStopMessageAutoMessageOutput(raw: unknown, maxChars: number): s
   if (!cleaned) {
     return '';
   }
-  return cleaned.length > maxChars ? cleaned.slice(0, maxChars).trim() : cleaned;
+  const sanitized = sanitizeFollowupText(cleaned);
+  if (!sanitized) {
+    return '';
+  }
+  return sanitized.length > maxChars ? sanitized.slice(0, maxChars).trim() : sanitized;
 }
 
 function truncateStopMessageAutoMessagePrompt(value: string, maxChars: number): string {
-  const text = typeof value === 'string' ? value.trim() : '';
+  const text = sanitizeFollowupSnapshotText(value);
   if (!text) {
     return '';
   }
@@ -782,7 +787,7 @@ function extractStopMessageAssistantText(message: Record<string, unknown>): stri
       chunks.push(text);
     }
   }
-  return dedupeAndJoinTexts(chunks);
+  return sanitizeFollowupSnapshotText(dedupeAndJoinTexts(chunks));
 }
 
 function extractStopMessageReasoningText(message: Record<string, unknown>): string {
@@ -807,7 +812,7 @@ function extractStopMessageReasoningText(message: Record<string, unknown>): stri
     chunks.push(contentReasoning);
   }
 
-  return dedupeAndJoinTexts(chunks);
+  return sanitizeFollowupSnapshotText(dedupeAndJoinTexts(chunks));
 }
 
 function extractResponsesReasoningText(payload: Record<string, unknown>): string {
@@ -839,7 +844,7 @@ function extractResponsesReasoningText(payload: Record<string, unknown>): string
     }
   }
 
-  return dedupeAndJoinTexts(chunks);
+  return sanitizeFollowupSnapshotText(dedupeAndJoinTexts(chunks));
 }
 
 function extractStopMessageReasoningFromContent(content: unknown): string {
@@ -865,7 +870,7 @@ function extractStopMessageReasoningFromContent(content: unknown): string {
       chunks.push(text);
     }
   }
-  return dedupeAndJoinTexts(chunks);
+  return sanitizeFollowupSnapshotText(dedupeAndJoinTexts(chunks));
 }
 
 function extractUnknownText(value: unknown, depth = 0): string {
@@ -873,10 +878,10 @@ function extractUnknownText(value: unknown, depth = 0): string {
     return '';
   }
   if (typeof value === 'string') {
-    return value.trim();
+    return sanitizeFollowupSnapshotText(value);
   }
   if (typeof value === 'number' || typeof value === 'boolean') {
-    return String(value);
+    return sanitizeFollowupSnapshotText(String(value));
   }
   if (Array.isArray(value)) {
     const parts = value
@@ -932,7 +937,7 @@ function extractUnknownText(value: unknown, depth = 0): string {
     }
   }
 
-  return dedupeAndJoinTexts(parts);
+  return sanitizeFollowupSnapshotText(dedupeAndJoinTexts(parts));
 }
 
 function dedupeAndJoinTexts(parts: string[]): string {
@@ -943,7 +948,7 @@ function dedupeAndJoinTexts(parts: string[]): string {
         .filter((entry) => entry.length > 0)
     )
   );
-  return unique.join('\n').trim();
+  return sanitizeFollowupSnapshotText(unique.join('\n').trim());
 }
 
 function buildStopMessageResponseExcerpt(value: unknown): string {
@@ -953,9 +958,9 @@ function buildStopMessageResponseExcerpt(value: unknown): string {
       return '';
     }
     if (raw.length <= 3_000) {
-      return raw;
+      return sanitizeFollowupSnapshotText(raw);
     }
-    return `${raw.slice(0, 3_000)}...`;
+    return sanitizeFollowupSnapshotText(`${raw.slice(0, 3_000)}...`);
   } catch {
     return '';
   }

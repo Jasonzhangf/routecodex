@@ -69,10 +69,46 @@ tool:exec_command (tool:exec_command)
     const governed: any = result.governedPayload;
     const calls = Array.isArray(governed?.choices?.[0]?.message?.tool_calls) ? governed.choices[0].message.tool_calls : [];
     expect(calls.length).toBe(2);
-    expect(calls[0]?.function?.name).toBe('exec_command');
-    expect(calls[1]?.function?.name).toBe('exec_command');
-    expect(JSON.parse(String(calls[0]?.function?.arguments || '{}')).cmd).toBe('bd --no-db ready');
-    expect(JSON.parse(String(calls[1]?.function?.arguments || '{}')).cmd).toBe('bd --no-db list --status in_progress');
+    expect(calls[0]?.function?.name).toBe('shell_command');
+    expect(calls[1]?.function?.name).toBe('shell_command');
+    expect(JSON.parse(String(calls[0]?.function?.arguments || '{}')).command).toBe('bd --no-db ready');
+    expect(JSON.parse(String(calls[1]?.function?.arguments || '{}')).command).toBe('bd --no-db list --status in_progress');
     expect(governed?.choices?.[0]?.finish_reason).toBe('tool_calls');
+  });
+
+  it('harvests reasoning_content native tool call without [思考] wrapper and strips time tag noise', async () => {
+    const payload: any = {
+      id: 'chat_test_reasoning_native_tool',
+      object: 'chat.completion',
+      created: Math.floor(Date.now() / 1000),
+      model: 'glm-5',
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: 'assistant',
+            reasoning_content: [
+              '[Time/Date]: utc=`2026-03-10T12:19:19.410Z` local=`2026-03-10 20:19:19.410 +08:00` tz=`Asia/Shanghai` nowMs=`1773145159410` ntpOffsetMs=`33`',
+              'exec_command<arg_key>cmd</arg_key><arg_value>pwd</arg_value></tool_call>'
+            ].join('\n')
+          },
+          finish_reason: 'stop'
+        }
+      ]
+    };
+
+    const result = await runRespProcessStage1ToolGovernance({
+      payload,
+      entryEndpoint: '/v1/responses',
+      requestId: 'req_test_reasoning_native_tool',
+      clientProtocol: 'openai-responses'
+    });
+
+    const governed: any = result.governedPayload;
+    const choice = governed?.choices?.[0];
+    expect(choice?.message?.tool_calls).toHaveLength(1);
+    expect(choice?.message?.tool_calls?.[0]?.function?.name).toBe('exec_command');
+    expect(choice?.message?.reasoning_content).toBeUndefined();
+    expect(choice?.finish_reason).toBe('tool_calls');
   });
 });

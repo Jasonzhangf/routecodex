@@ -8,6 +8,7 @@ import {
   extractStopMessageAutoResponseSnapshot,
   renderStopMessageAutoFollowupViaAi
 } from './stop-message-auto/iflow-followup.js';
+import { sanitizeFollowupText } from './followup-sanitize.js';
 import {
   getCapturedRequest,
   resolveBdWorkingDirectoryForRecord,
@@ -125,7 +126,7 @@ const handler: ServerToolHandler = async (ctx: ServerToolHandlerContext): Promis
   const focus = pickText(args, ['focus']);
   const extraContext = pickText(args, ['context', 'evidence']);
   const fallbackContext = toFlatText(args);
-  const reviewGoal = explicitGoal || DEFAULT_REVIEW_GOAL;
+  const reviewGoal = sanitizeFollowupText(explicitGoal || DEFAULT_REVIEW_GOAL);
   const composedGoal = focus ? `${reviewGoal}\nfocus: ${focus}` : reviewGoal;
 
   const record = ctx.adapterContext as Record<string, unknown>;
@@ -166,7 +167,9 @@ const handler: ServerToolHandler = async (ctx: ServerToolHandlerContext): Promis
   ]
     .filter(Boolean)
     .join('\n');
-  const followupText = typeof aiFollowup === 'string' && aiFollowup.trim() ? aiFollowup.trim() : fallbackPrompt;
+  const followupText = sanitizeFollowupText(
+    typeof aiFollowup === 'string' && aiFollowup.trim() ? aiFollowup.trim() : fallbackPrompt
+  );
 
   return {
     flowId: FLOW_ID,

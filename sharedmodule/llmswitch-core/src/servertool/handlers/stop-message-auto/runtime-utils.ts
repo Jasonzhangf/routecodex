@@ -194,6 +194,11 @@ export function getCapturedRequest(adapterContext: unknown): JsonObject | null {
     return direct as JsonObject;
   }
 
+  const originalRequest = contextRecord.originalRequest;
+  if (originalRequest && typeof originalRequest === 'object' && !Array.isArray(originalRequest)) {
+    return originalRequest as JsonObject;
+  }
+
   return null;
 }
 

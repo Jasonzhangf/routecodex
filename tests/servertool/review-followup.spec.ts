@@ -140,4 +140,54 @@ describe('review servertool followup', () => {
     expect((capturedFollowupMeta as any)?.workdir).toBe('/tmp/review-args-cwd');
     expect((capturedFollowupMeta as any)?.cwd).toBe('/tmp/review-args-cwd');
   });
+
+  test('strips stopMessage markers, time tags, and image placeholders from review followup text', async () => {
+    process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_ENABLED = '0';
+
+    const adapterContext: AdapterContext = {
+      requestId: 'req-review-sanitize',
+      entryEndpoint: '/v1/messages',
+      providerProtocol: 'anthropic-messages',
+      providerKey: 'iflow.1-186.kimi-k2.5',
+      stream: false,
+      sessionId: 'session-review-sanitize',
+      metadata: {},
+      capturedChatRequest: {
+        model: 'kimi-k2.5',
+        messages: [
+          {
+            role: 'user',
+            content:
+              '<**stopMessage:"继续推进",3**>\n[Time/Date]: utc=`2026-03-10T11:23:29.255Z` local=`2026-03-10 19:23:29.255 +08:00` tz=`Asia/Shanghai` nowMs=`1773141809255` ntpOffsetMs=`40`\n[Image omitted]\n请继续实现并自查。'
+          }
+        ]
+      }
+    } as any;
+
+    let capturedFollowupMeta: Record<string, unknown> | null = null;
+    const orchestration = await runServerToolOrchestration({
+      chat: buildReviewToolCallPayload({
+        goal:
+          '<**stopMessage:"继续推进",3**>\n[Time/Date]: utc=`2026-03-10T11:23:29.255Z` local=`2026-03-10 19:23:29.255 +08:00` tz=`Asia/Shanghai` nowMs=`1773141809255` ntpOffsetMs=`40`\n[Image omitted]\n检查是否真正完成目标'
+      }),
+      adapterContext,
+      requestId: 'req-review-sanitize',
+      entryEndpoint: '/v1/messages',
+      providerProtocol: 'anthropic-messages',
+      clientInjectDispatch: async (opts: any) => {
+        capturedFollowupMeta =
+          opts?.metadata && typeof opts.metadata === 'object'
+            ? (opts.metadata as Record<string, unknown>)
+            : null;
+        return { ok: true } as any;
+      }
+    });
+
+    expect(orchestration.executed).toBe(true);
+    const injectText = String((capturedFollowupMeta as any)?.clientInjectText || '');
+    expect(injectText).toContain('代码 review');
+    expect(injectText).not.toContain('<**stopMessage');
+    expect(injectText).not.toContain('[Time/Date]:');
+    expect(injectText).not.toContain('[Image omitted]');
+  });
 });

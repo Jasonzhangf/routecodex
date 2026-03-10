@@ -18,6 +18,7 @@ import {
   resolveStopMessageAiDoneMarker,
   type StopMessageAiFollowupHistoryEntry
 } from './stop-message-auto/iflow-followup.js';
+import { sanitizeFollowupText } from './followup-sanitize.js';
 import {
   getCapturedRequest,
   hasCompactionFlag,
@@ -188,17 +189,17 @@ function appendStopMessageAiHistory(
 }
 
 function enforceStopMessageExecutionFollowupText(text: string, doneMarker: string): string {
-  const rawBase = typeof text === 'string' && text.trim() ? text.trim() : '';
+  const rawBase = sanitizeFollowupText(text);
   const marker = doneMarker && doneMarker.trim() ? doneMarker.trim() : '[STOPMESSAGE_DONE]';
   const escapedMarker = marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const markerLinePattern = new RegExp(`(^|\\n)\\s*${escapedMarker}\\s*(?=\\n|$)`, 'g');
   const strippedBase = rawBase.replace(markerLinePattern, '$1').replace(/\n{3,}/g, '\n\n').trim();
-  const base = strippedBase || '继续执行';
+  const base = sanitizeFollowupText(strippedBase) || '继续执行';
   let next = base;
   if (!next.includes(STOP_MESSAGE_EXECUTION_APPEND)) {
     next = `${next}\n\n${STOP_MESSAGE_EXECUTION_APPEND}`;
   }
-  return next.trim();
+  return sanitizeFollowupText(next);
 }
 
 const handler: ServerToolHandler = async (
@@ -502,7 +503,7 @@ const handler: ServerToolHandler = async (
         historyEntries: existingHistory
       });
       if (aiFollowupText) {
-        followupText = aiFollowupText.trim();
+        followupText = sanitizeFollowupText(aiFollowupText);
         debugLog('ai_followup_applied', {
           textLength: followupText.length
         } as JsonObject);
@@ -511,7 +512,7 @@ const handler: ServerToolHandler = async (
         debugLog('ai_followup_fallback_to_continue_execution');
       }
     } else {
-      followupText = fallbackCandidateFollowupText;
+      followupText = sanitizeFollowupText(fallbackCandidateFollowupText);
       debugLog('fixed_followup_applied', { textLength: followupText.length } as JsonObject);
     }
 
@@ -532,8 +533,8 @@ const handler: ServerToolHandler = async (
         clearStopMessageState(nextState, Date.now());
         persistStopMessageState(stickyKey, nextState);
       }
-      const approvedInjectText = typeof followupText === 'string' && followupText.trim()
-        ? followupText.trim()
+      const approvedInjectText = typeof followupText === 'string' && sanitizeFollowupText(followupText)
+        ? sanitizeFollowupText(followupText)
         : approvedMarker;
       debugLog('trigger_done_marker_approved', {
         stickyKey,
@@ -567,7 +568,7 @@ const handler: ServerToolHandler = async (
     if (aiMode === 'on') {
       followupText = enforceStopMessageExecutionFollowupText(followupText || '继续执行', doneMarker);
     } else {
-      followupText = (followupText || '继续执行').trim();
+      followupText = sanitizeFollowupText(followupText || '继续执行');
     }
     const nextHistory =
       aiMode === 'on'

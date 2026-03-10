@@ -85,7 +85,8 @@ export {
   mapChatToolsToBridgeJson,
   buildAnthropicResponseFromChatJson,
   injectMcpToolsForChatJson,
-  injectMcpToolsForResponsesJson
+  injectMcpToolsForResponsesJson,
+  sanitizeFollowupText
 } from './bridge/native-exports.js';
 
 // Keep local aliases so external callers can reference the same symbol names.

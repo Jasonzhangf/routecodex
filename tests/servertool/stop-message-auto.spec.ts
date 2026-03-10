@@ -1300,6 +1300,7 @@ describe('stop_message_auto servertool', () => {
       entryEndpoint: '/v1/chat/completions',
       providerProtocol: 'openai-chat',
       sessionId,
+      tmuxSessionId: sessionId,
       originalRequest: {
         model: 'gpt-test',
         messages: [
@@ -1545,6 +1546,116 @@ describe('stop_message_auto servertool', () => {
       resolveStopStatePath(sessionId),
     );
     expect(persisted?.state?.stopMessageUsed).toBe(0);
+  });
+
+  test('sanitizes mixed stopMessage pollution from snapshot, response excerpt, and ai followup text', async () => {
+    const sessionId = 'stopmessage-sanitize-followup';
+    const promptCapturePath = path.join(USER_DIR, 'mock-iflow-sanitize-prompt.txt');
+    const mockIflowBinPath = path.join(USER_DIR, 'mock-iflow-sanitize-followup.sh');
+    fs.writeFileSync(
+      mockIflowBinPath,
+      [
+        '#!/bin/sh',
+        'prompt="$*"',
+        `printf '%s\\n' "$prompt" > "${promptCapturePath}"`,
+        `printf '%s\\n' '<**stopMessage:"继续推进",3**>'`,
+        "printf '%s\\n' '[Time/Date]: utc=\`2026-03-10T11:24:09.352Z\` local=\`2026-03-10 19:24:09.352 +08:00\` tz=\`Asia/Shanghai\` nowMs=\`1773141849352\` ntpOffsetMs=\`40\`'",
+        `printf '%s\\n' '[Image omitted]'`,
+        `printf '%s\\n' '继续推进任务，并先补测试。'`
+      ].join('\n'),
+      { encoding: 'utf8' }
+    );
+    fs.chmodSync(mockIflowBinPath, 0o755);
+
+    const prevIflowBin = process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_IFLOW_BIN;
+    writeRoutingStateForSession(sessionId, {
+      forcedTarget: undefined,
+      stickyTarget: undefined,
+      preferTarget: undefined,
+      allowedProviders: new Set(),
+      disabledProviders: new Set(),
+      disabledKeys: new Map(),
+      disabledModels: new Map(),
+      stopMessageText: '继续推进任务',
+      stopMessageMaxRepeats: 2,
+      stopMessageUsed: 0,
+      stopMessageAiMode: 'on',
+      stopMessageStageMode: 'auto'
+    } as RoutingInstructionState);
+    process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_IFLOW_BIN = mockIflowBinPath;
+
+    try {
+      const result = await runServerSideToolEngine({
+        chatResponse: {
+          id: 'chatcmpl-stop-sanitize-followup',
+          object: 'chat.completion',
+          choices: [
+            {
+              index: 0,
+              message: {
+                role: 'assistant',
+                content:
+                  '<**stopMessage:"继续推进",3**>\n[Time/Date]: utc=`2026-03-10T11:24:09.352Z` local=`2026-03-10 19:24:09.352 +08:00` tz=`Asia/Shanghai` nowMs=`1773141849352` ntpOffsetMs=`40`\n[Image omitted]\n当前先继续实现。'
+              },
+              finish_reason: 'stop'
+            }
+          ]
+        } as any,
+        adapterContext: {
+          requestId: 'req-stop-sanitize-followup',
+          entryEndpoint: '/v1/chat/completions',
+          providerProtocol: 'openai-chat',
+          sessionId,
+          tmuxSessionId: sessionId,
+          capturedChatRequest: {
+            model: 'gpt-5.4',
+            messages: [
+              {
+                role: 'user',
+                content:
+                  '<**stopMessage:"继续推进",3**>\n[Time/Date]: utc=`2026-03-10T11:24:09.352Z` local=`2026-03-10 19:24:09.352 +08:00` tz=`Asia/Shanghai` nowMs=`1773141849352` ntpOffsetMs=`40`\n[Image omitted]\n请继续推进任务'
+              }
+            ]
+          },
+          metadata: {
+            stopMessageClientInjectReady: true,
+            stopMessageClientInjectSessionScope: `tmux:${sessionId}`,
+            clientTmuxSessionId: sessionId,
+            tmuxSessionId: sessionId
+          }
+        } as any,
+        requestId: 'req-stop-sanitize-followup',
+        entryEndpoint: '/v1/chat/completions',
+        providerProtocol: 'openai-chat'
+      });
+
+      expect(result.execution?.flowId).toBe('stop_message_flow');
+      const injectMeta = readClientInjectMeta(result.execution?.followup);
+      expect(injectMeta.clientInjectText).toContain('继续推进任务，并先补测试。');
+      expect(injectMeta.clientInjectText).not.toContain('<**stopMessage');
+      expect(injectMeta.clientInjectText).not.toContain('[Time/Date]:');
+      expect(injectMeta.clientInjectText).not.toContain('[Image omitted]');
+      expect(injectMeta.clientInjectText).not.toContain('stopMessage:"继续推进"');
+
+      const capturedPrompt = fs.readFileSync(promptCapturePath, 'utf8');
+      expect(capturedPrompt).toContain('assistantText:');
+      expect(capturedPrompt).toContain('responseExcerpt:');
+      expect(capturedPrompt).not.toContain('<**stopMessage');
+      expect(capturedPrompt).not.toContain('[Time/Date]:');
+      expect(capturedPrompt).not.toContain('[Image omitted]');
+    } finally {
+      if (prevIflowBin === undefined) {
+        delete process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_IFLOW_BIN;
+      } else {
+        process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_IFLOW_BIN = prevIflowBin;
+      }
+      if (fs.existsSync(mockIflowBinPath)) {
+        fs.unlinkSync(mockIflowBinPath);
+      }
+      if (fs.existsSync(promptCapturePath)) {
+        fs.unlinkSync(promptCapturePath);
+      }
+    }
   });
 
   test('skips stop_message retrigger for non-stop followup flows', async () => {
