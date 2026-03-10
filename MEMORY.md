@@ -1,5 +1,11 @@
 # RouteCodex Memory
 
+## Skills 与调试工作流
+
+- 2026-03-10: `~/.codex/skills/pipedebug/` 已按当前 RouteCodex V2 结构更新。默认调试主线改为：先看 `~/.routecodex/codex-samples/`，先判断问题属于 request path 还是 response path，再沿 `host bridge -> llmswitch-core Hub Pipeline -> Provider V2` 的真实边界定位。旧的“4 层流水线 / workflow-compatibility-provider README / routecodex-worktree/fix / ~/.claude/skills”表述已从 `SKILL.md` 与 references 中移除。
+
+Tags: pipedebug, skill, codex-samples, request-path, response-path, llmswitch-core, provider-v2, debug-workflow
+
 ## Web Search 相关
 
 - 2026-03-06: Web search execution is now split by config in `virtualrouter.webSearch.engines[*]` using `executionMode` (`direct` vs `servertool`) instead of hardcoded DeepSeek checks. Direct route search backends skip canonical servertool injection; servertool-only backends still inject `web_search`.
@@ -217,3 +223,34 @@ Tags: semantic-unification, single-source-of-truth, chat-process, responses-cont
   Tags: routecodex, install-global, managed-restart, restart, 5555
 - 2026-03-08: `virtual-router-hit` 彩色日志的真实生效路径不在 RouteCodex `src/modules/pipeline/utils/colored-logger.ts` / `debug-logger.ts`，而在 `sharedmodule/llmswitch-core/src/router/virtual-router/engine.ts` 与 `engine-logging.ts`。之前“改了没效果”不是色表本身问题，而是改到了未参与真实路由命中日志输出的宿主包装层。当前 live 路径已改为按 `sessionId/tmuxSessionId/conversationId` 派生稳定颜色，并输出 `sid=...`；`routecodex restart --port 5555` 与 `tests/sharedmodule/virtual-router-hit-log.spec.ts` 已验证通过。
   Tags: virtual-router-hit, logging, session-color, sid, llmswitch-core, 5555
+
+## Rust 化推进策略
+
+- 2026-03-10: Rust 化的主优先级高于文件瘦身。当前阶段不要把“模块 Rust 化”和“按行数拆文件”混在一起做；先完成模块所有权收口，再做文件整理。
+- 2026-03-10: 统一推进顺序固定为：1) 先做模块 Rust 化闭环；2) 确认 host/bridge 实际执行权切到 Rust；3) 收掉对应 TS 旧实现或降为薄壳，避免双真源；4) 最后再做文件拆分和尺寸治理。
+- 2026-03-10: 后续工作必须按“一个模块一个模块搞干净”推进，不接受跨多个模块同时半迁移半拆分的混合做法。模块完成标准包括：Rust 覆盖主语义、执行链路真实走 Rust、通过 parity/shadow/replay 验证、TS 侧完成收口。
+- 2026-03-10: 模块级固定顺序为：1) hub pipeline core；2) tool governance + route select；3) servertool / continue_execution / clock；4) virtual-router；5) compat / protocol codecs；6) shared semantics / normalizers；7) bridge actions / snapshot / hooks。后续任务拆分、评审和提交都以这组顺序为准。
+
+Tags: rust-migration, module-ownership, single-source-of-truth, bridge, cleanup-order, llmswitch-core
+
+## ServerTool Engine Rust 化进展
+
+- 2026-03-11: 从 servertool/engine.ts 抽取第一批纯函数到 Rust（commit 8988204）：
+  - `parse_timeout_ms_json` (TS:77-83)
+  - `has_non_empty_text_json` (TS:282-296)
+  - `is_empty_client_response_payload_json` (TS:298-361)
+  - `stable_stringify_json` (TS:1844-1856)
+  - `sanitize_loop_hash_value_json` (TS:1788-1819)
+  - `build_followup_request_id_json` (TS:1857-1871)
+  - `normalize_followup_request_id_json` (TS:1897-1912)
+  - `resolve_stop_message_snapshot_json` (TS:1481-1527)
+  - `coerce_followup_payload_stream_json` (TS:270-280)
+- 2026-03-11: servertool/engine.ts 中仍待 Rust 化的较大函数块：
+  - `runServerToolOrchestration` (432-1370) - 主编排循环，依赖异步调用
+  - `disableStopMessageAfterFailedFollowup` (1370-1400) - 依赖文件 I/O
+  - `decorateFinalChatWithServerToolContext` (1565-1616) - 可纯化
+  - `resolveRouteHint` (1617-1630) - 可纯化
+  - `buildServerToolLoopState` (1632-1690) - 可纯化
+  - `hashPayload` / `hashStopMessageRequestResponsePair` (1768-1787) - 可纯化，已部分实现
+
+Tags: rust-migration, servertool-engine, pure-functions, native-exports

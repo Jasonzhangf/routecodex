@@ -52,6 +52,7 @@ const RESPONSES_DROPPED_PARAMETER_KEYS: readonly string[] = [
   'store'
 ];
 
+const GEMINI_FLASH_DEFAULT_THINKING_BUDGET = 32768;
 // Ported from CLIProxyAPI v6.6.89 (antigravity auth constants)
 const ANTIGRAVITY_SYSTEM_INSTRUCTION = `You are Antigravity, a powerful agentic AI coding assistant designed by the Google DeepMind team working on Advanced Agentic Coding.
 You are pair programming with a USER to solve their coding task. The task may require creating a new codebase, modifying or debugging an existing codebase, or simply answering a question.
@@ -1015,29 +1016,37 @@ function buildGeminiRequestFromChat(chat: ChatEnvelope, metadata: ChatEnvelope['
     } else if (config.injectGoogleSearch) {
       injectGoogleSearchTool(requestPayload);
     }
-    deepCleanUndefined(requestPayload);
-    const mappedLower = String(requestPayload.model || '').toLowerCase();
-    const isFlashModel = mappedLower.includes('flash');
-    const isImageModel = config.requestType === 'image_gen' || mappedLower.includes('image');
-    const isThinkingModel = !isImageModel && (mappedLower.includes('think') || mappedLower.includes('pro'));
-    if (isThinkingModel && (!requestPayload.generationConfig || !isJsonObject(requestPayload.generationConfig))) {
+   deepCleanUndefined(requestPayload);
+   const mappedLower = String(requestPayload.model || '').toLowerCase();
+   const isFlashModel = mappedLower.includes('flash');
+    const isFlash3Model = mappedLower.includes('gemini-3') && isFlashModel;
+   const isImageModel = config.requestType === 'image_gen' || mappedLower.includes('image');
+    // Antigravity-Manager v4.1.28 alignment: gemini-3-flash / gemini-3.1-flash are thinking models
+    const isThinkingModel = !isImageModel && (mappedLower.includes('think') || mappedLower.includes('pro') || isFlash3Model);
+   if (isThinkingModel && (!requestPayload.generationConfig || !isJsonObject(requestPayload.generationConfig))) {
       requestPayload.generationConfig = {};
     }
     const generationConfig = requestPayload.generationConfig;
-    if (isFlashModel && isJsonObject(generationConfig)) {
-      // Antigravity-Manager alignment: Gemini Flash models reject overly-large thinking budgets.
-      // Clamp proactively to avoid 400 Bad Request when clients set an aggressive budget.
-      const MAX_FLASH_THINKING_BUDGET = 24576;
-      const gc = generationConfig as JsonObject;
-      const thinkingConfigRaw = (gc as { thinkingConfig?: JsonValue }).thinkingConfig as JsonValue;
-      const thinkingConfig = isJsonObject(thinkingConfigRaw) ? (thinkingConfigRaw as JsonObject) : undefined;
-      const budgetRaw = thinkingConfig && (thinkingConfig as { thinkingBudget?: unknown }).thinkingBudget;
-      const budget = typeof budgetRaw === 'number' && Number.isFinite(budgetRaw) ? budgetRaw : undefined;
-      if (thinkingConfig && budget !== undefined && budget > MAX_FLASH_THINKING_BUDGET) {
-        (thinkingConfig as { thinkingBudget?: number }).thinkingBudget = MAX_FLASH_THINKING_BUDGET;
-        (gc as { thinkingConfig?: JsonObject }).thinkingConfig = thinkingConfig;
+   if (isFlashModel && isJsonObject(generationConfig)) {
+     const gc = generationConfig as JsonObject;
+     const thinkingConfigRaw = (gc as { thinkingConfig?: JsonValue }).thinkingConfig as JsonValue;
+     const thinkingConfig = isJsonObject(thinkingConfigRaw) ? (thinkingConfigRaw as JsonObject) : undefined;
+      // Antigravity-Manager v4.1.28 alignment: gemini-3-flash / gemini-3.1-flash support thinking.
+      // Auto-inject default thinkingConfig when missing (Cherry Studio compatibility).
+      if (isFlash3Model && !thinkingConfig) {
+        (gc as { thinkingConfig?: JsonObject }).thinkingConfig = {
+          thinkingBudget: GEMINI_FLASH_DEFAULT_THINKING_BUDGET,
+          includeThoughts: true
+        };
       }
-    }
+
+     const budgetRaw = thinkingConfig && (thinkingConfig as { thinkingBudget?: unknown }).thinkingBudget;
+     const budget = typeof budgetRaw === 'number' && Number.isFinite(budgetRaw) ? budgetRaw : undefined;
+      if (thinkingConfig && budget !== undefined && budget > GEMINI_FLASH_DEFAULT_THINKING_BUDGET) {
+        (thinkingConfig as { thinkingBudget?: number }).thinkingBudget = GEMINI_FLASH_DEFAULT_THINKING_BUDGET;
+       (gc as { thinkingConfig?: JsonObject }).thinkingConfig = thinkingConfig;
+     }
+   }
     if (isThinkingModel && isJsonObject(generationConfig)) {
       const gc = generationConfig as JsonObject;
       const thinkingConfig = isJsonObject((gc as { thinkingConfig?: JsonValue }).thinkingConfig as JsonValue)
