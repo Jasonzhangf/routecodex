@@ -77,6 +77,9 @@ describe('runtime parse/exec errorsamples', () => {
     );
 
     (recorder as any).record('chat_process.resp.stage7.tool_governance', {
+      error: {
+        detail: 'apply_patch verification failed: invalid patch'
+      },
       governedPayload: {
         choices: [
           {
@@ -202,5 +205,99 @@ describe('runtime parse/exec errorsamples', () => {
     expect(json.errorType).toBe('shell_command_args_missing_command');
     expect(json.requestId).toBe('req_client_tool_shell_1');
     expect(json.stage).toBe('chat_process.req.stage2.semantic_map');
+  });
+
+  it('does not classify user-echoed followup failure text from message content as runtime error', async () => {
+    const recorder = await createSnapshotRecorder(
+      {
+        requestId: 'req_false_positive_followup',
+        providerId: 'mock',
+        providerProtocol: 'openai-responses'
+      },
+      '/v1/responses'
+    );
+
+    (recorder as any).record('chat_process.req.stage2.semantic_map', {
+      messages: [
+        {
+          role: 'user',
+          content:
+            '[runtime-error] requestId=rid group=exec-error stage=chat_process.resp.stage7.tool_governance errorType=followup_execution_failed detail=followup failed for flow'
+        }
+      ],
+      metadata: {
+        note: 'quoted logs only'
+      }
+    });
+
+    await new Promise((r) => setTimeout(r, 150));
+    const execDir = path.join(errorsDir, 'exec-error');
+    await expect(fs.readdir(execDir)).rejects.toThrow();
+  });
+
+  it('still classifies structured followup failure text from error fields as runtime error', async () => {
+    const recorder = await createSnapshotRecorder(
+      {
+        requestId: 'req_true_positive_followup',
+        providerId: 'mock',
+        providerProtocol: 'openai-responses'
+      },
+      '/v1/responses'
+    );
+
+    (recorder as any).record('chat_process.resp.stage7.tool_governance', {
+      error: {
+        detail: 'followup failed for flow review_flow'
+      },
+      message: 'servertool followup execution failed'
+    });
+
+    const execDir = path.join(errorsDir, 'exec-error');
+    const file = await waitForFile(execDir, (name) => name.startsWith('chat_process.resp.stage7.tool_governance-'));
+    const json = JSON.parse(await fs.readFile(file, 'utf8')) as any;
+    expect(json.kind).toBe('runtime_exec_error');
+    expect(json.errorType).toBe('followup_execution_failed');
+    expect(json.requestId).toBe('req_true_positive_followup');
+    expect(json.stage).toBe('chat_process.resp.stage7.tool_governance');
+  });
+
+  it('does not classify followup text echoed from tool call arguments as runtime error', async () => {
+    const recorder = await createSnapshotRecorder(
+      {
+        requestId: 'req_false_positive_tool_args',
+        providerId: 'mock',
+        providerProtocol: 'openai-responses'
+      },
+      '/v1/responses'
+    );
+
+    (recorder as any).record('chat_process.resp.stage7.tool_governance', {
+      governedPayload: {
+        choices: [
+          {
+            message: {
+              role: 'assistant',
+              content: null,
+              tool_calls: [
+                {
+                  id: 'call_1',
+                  type: 'function',
+                  function: {
+                    name: 'exec_command',
+                    arguments: JSON.stringify({
+                      cmd: 'echo followup failed for flow'
+                    })
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    });
+
+    await new Promise((r) => setTimeout(r, 150));
+    const execDir = path.join(errorsDir, 'exec-error');
+    await expect(fs.readdir(execDir)).rejects.toThrow();
   });
 });

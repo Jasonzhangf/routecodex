@@ -134,14 +134,25 @@ const ANSI_RED = '\x1b[31m';
 const ANSI_PATTERN = /\x1b\[[0-9;]*m/;
 
 function isConsoleColorEnabled(): boolean {
-  if (String(process.env.NO_COLOR || '').trim()) {
+  const routecodexForceColor = String(
+    process.env.ROUTECODEX_FORCE_LOG_COLOR
+      ?? process.env.RCC_FORCE_LOG_COLOR
+      ?? ''
+  ).trim().toLowerCase();
+  if (routecodexForceColor === '1' || routecodexForceColor === 'true' || routecodexForceColor === 'yes' || routecodexForceColor === 'on') {
+    return true;
+  }
+  if (routecodexForceColor === '0' || routecodexForceColor === 'false' || routecodexForceColor === 'no' || routecodexForceColor === 'off') {
     return false;
   }
   const forceColor = String(process.env.FORCE_COLOR || '').trim();
   if (forceColor === '0') {
     return false;
   }
-  return process.stdout?.isTTY === true;
+  if (forceColor.length > 0) {
+    return true;
+  }
+  return true;
 }
 
 function wrapAnsi(text: string, color: string): string {

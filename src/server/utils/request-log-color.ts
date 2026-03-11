@@ -14,7 +14,15 @@ type RequestLogContextRecord = {
 const REQUEST_LOG_CONTEXT = new Map<string, RequestLogContextRecord>();
 
 function isConsoleColorEnabled(): boolean {
-  if (String(process.env.NO_COLOR || '').trim()) {
+  const routecodexForceColor = String(
+    process.env.ROUTECODEX_FORCE_LOG_COLOR
+      ?? process.env.RCC_FORCE_LOG_COLOR
+      ?? ''
+  ).trim().toLowerCase();
+  if (routecodexForceColor === '1' || routecodexForceColor === 'true' || routecodexForceColor === 'yes' || routecodexForceColor === 'on') {
+    return true;
+  }
+  if (routecodexForceColor === '0' || routecodexForceColor === 'false' || routecodexForceColor === 'no' || routecodexForceColor === 'off') {
     return false;
   }
   const forceColor = String(process.env.FORCE_COLOR || '').trim();
@@ -24,7 +32,7 @@ function isConsoleColorEnabled(): boolean {
   if (forceColor.length > 0) {
     return true;
   }
-  return process.stdout?.isTTY === true || process.stderr?.isTTY === true;
+  return true;
 }
 
 function normalizeToken(value: unknown): string | undefined {
@@ -106,7 +114,7 @@ export function resolveRequestLogColorToken(
   if (record) {
     REQUEST_LOG_CONTEXT.delete(requestKey);
   }
-  return resolveSessionAnsiColor(requestKey);
+  return undefined;
 }
 
 export function colorizeRequestLog(

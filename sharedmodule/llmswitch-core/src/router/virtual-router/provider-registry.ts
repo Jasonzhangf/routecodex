@@ -1,5 +1,5 @@
 import { VirtualRouterError, VirtualRouterErrorCode } from './types.js';
-import type { ProviderProfile, TargetMetadata } from './types.js';
+import type { ProviderProfile, TargetMetadata, ModelCapability } from './types.js';
 
 export class ProviderRegistry {
   private readonly providers: Map<string, ProviderProfile> = new Map();
@@ -28,13 +28,33 @@ export class ProviderRegistry {
     return profile;
   }
 
-  has(providerKey: string): boolean {
-    return this.providers.has(providerKey);
+ has(providerKey: string): boolean {
+   return this.providers.has(providerKey);
+ }
+
+listKeys(): string[] {
+  return Array.from(this.providers.keys());
+}
+
+  getModelCapabilities(providerKey: string): Set<ModelCapability> {
+    const profile = this.providers.get(providerKey);
+    if (!profile) {
+      return new Set();
+    }
+    const modelId = profile.modelId ?? deriveModelId(providerKey);
+    if (!modelId) {
+      return new Set();
+    }
+    const capabilities = profile.modelCapabilities?.[modelId];
+    if (!capabilities || !Array.isArray(capabilities)) {
+      return new Set();
+    }
+    return new Set(capabilities.filter((c): c is ModelCapability => typeof c === 'string'));
   }
 
- listKeys(): string[] {
-   return Array.from(this.providers.keys());
- }
+  hasCapability(providerKey: string, capability: ModelCapability): boolean {
+    return this.getModelCapabilities(providerKey).has(capability);
+  }
 
   resolveRuntimeKeyByAlias(providerId: string, keyAlias: string): string | null {
     const pattern = new RegExp(`^${providerId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\.${keyAlias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\.|$)`);
@@ -125,7 +145,8 @@ export class ProviderRegistry {
       maxOutputTokens: profile.maxOutputTokens,
       maxContextTokens: profile.maxContextTokens,
       ...(profile.deepseek ? { deepseek: profile.deepseek } : {}),
-      ...(profile.serverToolsDisabled ? { serverToolsDisabled: true } : {})
+      ...(profile.serverToolsDisabled ? { serverToolsDisabled: true } : {}),
+      ...(profile.modelCapabilities ? { modelCapabilities: profile.modelCapabilities } : {})
     };
   }
 }

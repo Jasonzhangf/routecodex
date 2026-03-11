@@ -254,3 +254,41 @@ Tags: rust-migration, module-ownership, single-source-of-truth, bridge, cleanup-
   - `hashPayload` / `hashStopMessageRequestResponsePair` (1768-1787) - 可纯化，已部分实现
 
 Tags: rust-migration, servertool-engine, pure-functions, native-exports
+
+## Rust 静默失败修复 (2026-03-11)
+
+### 问题背景
+Rust 化后发现静默失败现象，主要集中在状态持久化和快照文件操作路径。
+
+### 修复范围
+
+**1. routing_state_store.rs** - 路由状态持久化关键路径
+- `load_routing_instruction_state`: 文件读取和 JSON 解析失败现在打印错误日志
+- `persist_routing_instruction_state`: 目录创建、序列化、文件写入失败现在打印错误日志
+- NotFound 错误静默处理（符合预期）
+
+**2. hub_snapshot_hooks.rs** - 快照文件操作
+- `cleanup_zero_byte_json_files`: 文件删除失败打印警告
+- `write_unique_errorsample_file`: 临时目录创建和文件重命名失败打印警告
+- `merge_dirs`: 目录创建、文件重命名、目录删除失败打印警告
+- `promote_pending_dir`: 目录创建失败打印警告并提前返回
+- `write_snapshot_file`: 目录创建失败返回错误（关键路径），元数据写入失败打印警告
+- `write_snapshot_via_hooks`: 快照写入失败打印警告
+
+### 修复原则
+1. 关键路径返回错误，非关键路径打印警告
+2. NotFound 类错误静默处理（符合预期行为）
+3. 保留 best-effort 清理操作
+
+### 标签
+Tags: rust, silent-failure, error-handling, routing-state, snapshot
+
+## Session 色链路对齐 (2026-03-11)
+
+- `virtual-router-hit` 与 host 侧 `[usage]` / `✅ completed` 的颜色目标必须统一为“按 sessionId 上色”，不能让 host 在拿不到 session 时退化成按 requestId 哈希生成伪 session 色。
+- `src/utils/session-log-color.ts` 是 host 侧 session 颜色单一真源；sharedmodule `src/router/virtual-router/engine-logging.ts` 需要保持同一套扩展 palette + hash 逻辑，否则会出现 sharedmodule/host 颜色错位。
+- `src/server/utils/request-log-color.ts` 现在只在显式或已注册的 `sessionId` / `conversationId` 可用时才给 host 请求日志上色；没有 session 映射时宁可保持默认色，也不要按 requestId 乱染色。
+- RouteCodex 运行时日志颜色不再被继承的全局 `NO_COLOR=1` 静默关闭；只有 `ROUTECODEX_FORCE_LOG_COLOR=0` / `RCC_FORCE_LOG_COLOR=0` 才应作为显式关闭开关。
+- 调试边界：如果 `virtual-router-hit` 有颜色而 host `usage/completed` 仍是白色，问题已经收缩到 host runtime 没有拿到/保留同一 session 标识，而不是颜色算法分叉。
+
+Tags: session-color, virtual-router-hit, usage-log, http-log, single-source-of-truth, host, sharedmodule, no-color

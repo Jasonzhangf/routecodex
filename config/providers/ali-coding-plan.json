@@ -1,0 +1,73 @@
+{
+  "id": "ali-coding-plan",
+  "displayName": "Ali Coding Plan",
+  "description": "Ali Coding Plan provider for Qwen, GLM, Kimi, and MiniMax models via Anthropic-compatible API",
+  "protocol": "anthropic",
+  "baseURL": "https://coding.dashscope.aliyuncs.com/apps/anthropic",
+  "authType": "apikey",
+  "authKey": "ALI_CODINGPLAN_KEY",
+  "models": [
+    {
+      "id": "qwen3.5-plus",
+      "displayName": "Qwen 3.5 Plus",
+      "description": "Qwen 3.5 Plus - Text generation, deep thinking, vision understanding",
+      "capabilities": ["text", "reasoning", "vision", "thinking"],
+      "maxTokens": 128000
+    },
+    {
+      "id": "qwen3-max-2026-01-23",
+      "displayName": "Qwen 3 Max",
+      "description": "Qwen 3 Max (2026-01-23) - Text generation, deep thinking",
+      "capabilities": ["text", "reasoning", "thinking"],
+      "maxTokens": 128000
+    },
+    {
+      "id": "qwen3-coder-next",
+      "displayName": "Qwen 3 Coder Next",
+      "description": "Qwen 3 Coder Next - Text generation",
+      "capabilities": ["text"],
+      "maxTokens": 128000
+    },
+    {
+      "id": "qwen3-coder-plus",
+      "displayName": "Qwen 3 Coder Plus",
+      "description": "Qwen 3 Coder Plus - Text generation",
+      "capabilities": ["text"],
+      "maxTokens": 128000
+    },
+    {
+      "id": "glm-5",
+      "displayName": "GLM 5",
+      "description": "GLM 5 - Text generation, deep thinking",
+      "capabilities": ["text", "reasoning", "thinking"],
+      "maxTokens": 128000
+    },
+    {
+      "id": "glm-4.7",
+      "displayName": "GLM 4.7",
+      "description": "GLM 4.7 - Text generation, deep thinking",
+      "capabilities": ["text", "reasoning", "thinking"],
+      "maxTokens": 128000
+    },
+    {
+      "id": "kimi-k2.5",
+      "displayName": "Kimi K2.5",
+      "description": "Kimi K2.5 - Text generation, deep thinking, vision understanding",
+      "capabilities": ["text", "reasoning", "vision", "thinking"],
+      "maxTokens": 128000
+    },
+    {
+      "id": "MiniMax-M2.5",
+      "displayName": "MiniMax M2.5",
+      "description": "MiniMax M2.5 - Text generation, deep thinking",
+      "capabilities": ["text", "reasoning", "thinking"],
+      "maxTokens": 128000
+    }
+  ],
+  "defaultModel": "qwen3.5-plus",
+  "timeout": 300000,
+  "retry": {
+    "maxRetries": 3,
+    "retryDelay": 1000
+  }
+}

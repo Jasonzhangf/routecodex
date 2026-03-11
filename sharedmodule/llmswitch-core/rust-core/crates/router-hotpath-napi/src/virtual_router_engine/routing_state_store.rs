@@ -13,11 +13,25 @@ pub(crate) fn load_routing_instruction_state(key: &str) -> Option<RoutingInstruc
         return None;
     }
     let filepath = resolve_session_filepath(key)?;
-    let raw = fs::read_to_string(filepath).ok()?;
+    let raw = match fs::read_to_string(&filepath) {
+        Ok(content) => content,
+        Err(e) => {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                eprintln!("[routing_state_store] Failed to read state file {:?}: {}", filepath, e);
+            }
+            return None;
+        }
+    };
     if raw.trim().is_empty() {
         return None;
     }
-    let parsed: Value = serde_json::from_str(&raw).ok()?;
+    let parsed: Value = match serde_json::from_str(&raw) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("[routing_state_store] Failed to parse JSON from {:?}: {}", filepath, e);
+            return None;
+        }
+    };
     let payload = match parsed {
         Value::Object(mut obj) => {
             if let Some(state) = obj.remove("state") {
@@ -44,7 +58,11 @@ pub(crate) fn persist_routing_instruction_state(
     };
     let should_clear = state.map(is_state_empty).unwrap_or(true);
     if should_clear {
-        let _ = fs::remove_file(filepath);
+        if let Err(e) = fs::remove_file(&filepath) {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                eprintln!("[routing_state_store] Failed to remove state file {:?}: {}", filepath, e);
+            }
+        }
         return;
     }
     let payload = match state {
@@ -60,10 +78,20 @@ pub(crate) fn persist_routing_instruction_state(
         None => Value::Null,
     };
     if let Some(dir) = filepath.parent() {
-        let _ = fs::create_dir_all(dir);
+        if let Err(e) = fs::create_dir_all(dir) {
+            eprintln!("[routing_state_store] Failed to create directory {:?}: {}", dir, e);
+            return;
+        }
     }
-    if let Ok(text) = serde_json::to_string(&payload) {
-        let _ = fs::write(filepath, text);
+    let text = match serde_json::to_string(&payload) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("[routing_state_store] Failed to serialize state for {:?}: {}", filepath, e);
+            return;
+        }
+    };
+    if let Err(e) = fs::write(&filepath, text) {
+        eprintln!("[routing_state_store] Failed to write state file {:?}: {}", filepath, e);
     }
 }
 

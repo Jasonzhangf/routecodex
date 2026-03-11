@@ -92,6 +92,8 @@ export interface DeepSeekCompatRuntimeOptions {
   toolProtocol?: 'native' | 'text';
 }
 
+export type ModelCapability = 'text' | 'reasoning' | 'vision' | 'thinking' | 'web_search';
+
 export interface ProviderProfile {
   providerKey: string;
   providerType: string;
@@ -115,6 +117,11 @@ export interface ProviderProfile {
    * use this provider as usual.
    */
   serverToolsDisabled?: boolean;
+  /**
+   * Model-level capabilities mapping: modelId -> list of capabilities.
+   * Used for capability-based routing (vision, thinking, web_search).
+   */
+  modelCapabilities?: Record<string, ModelCapability[]>;
 }
 
 export interface ProviderRuntimeProfile {
@@ -145,6 +152,11 @@ export interface ProviderRuntimeProfile {
    * request that declares serverToolRequired=true in routing metadata.
    */
   serverToolsDisabled?: boolean;
+  /**
+   * Model-level capabilities mapping: modelId -> list of capabilities.
+   * Inherited from provider configuration.
+   */
+  modelCapabilities?: Record<string, ModelCapability[]>;
 }
 
 export interface VirtualRouterClassifierConfig {

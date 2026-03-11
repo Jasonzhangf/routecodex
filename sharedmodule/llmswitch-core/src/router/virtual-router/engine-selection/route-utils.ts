@@ -1,5 +1,61 @@
-import { DEFAULT_ROUTE, ROUTE_PRIORITY, type RoutePoolTier, type RoutingFeatures } from '../types.js';
+import { DEFAULT_ROUTE, ROUTE_PRIORITY, type RoutePoolTier, type RoutingFeatures, type ModelCapability } from '../types.js';
 import type { ProviderRegistry } from '../provider-registry.js';
+
+export function routeSupportsCapability(
+  routeName: string,
+  capability: ModelCapability,
+  routing: Record<string, RoutePoolTier[]>,
+  providerRegistry: ProviderRegistry
+): boolean {
+  const pools = routing[routeName];
+  if (!Array.isArray(pools)) {
+    return false;
+  }
+  for (const pool of pools) {
+    if (!Array.isArray(pool.targets)) {
+      continue;
+    }
+    for (const providerKey of pool.targets) {
+      try {
+        if (providerRegistry.hasCapability(providerKey, capability)) {
+          return true;
+        }
+      } catch {
+        // ignore unknown providers when probing capabilities
+      }
+    }
+  }
+  return false;
+}
+
+export function filterRoutesByCapability(
+  routeNames: string[],
+  capability: ModelCapability,
+  routing: Record<string, RoutePoolTier[]>,
+  providerRegistry: ProviderRegistry
+): string[] {
+  return routeNames.filter((routeName) =>
+    routeSupportsCapability(routeName, capability, routing, providerRegistry)
+  );
+}
+
+export function reorderForCapability(
+  routeNames: string[],
+  capability: ModelCapability,
+  routing: Record<string, RoutePoolTier[]>,
+  providerRegistry: ProviderRegistry
+): string[] {
+  const unique = Array.from(new Set(routeNames.filter(Boolean)));
+  if (!unique.length) {
+    return unique;
+  }
+  const preferred = filterRoutesByCapability(unique, capability, routing, providerRegistry);
+  if (!preferred.length) {
+    return unique;
+  }
+  const remaining = unique.filter((routeName) => !preferred.includes(routeName));
+  return [...preferred, ...remaining];
+}
 
 export function sortByPriority(routeNames: string[]): string[] {
   return [...routeNames].sort((a, b) => routeWeight(a) - routeWeight(b));
@@ -96,6 +152,14 @@ export function buildRouteCandidates(
 
   let ordered = sortByPriority(baseList);
 
+  // Reorder by capability for thinking/web_search routes
+  if (baseList.includes('thinking')) {
+    ordered = reorderForCapability(ordered, 'thinking', routing, providerRegistry);
+  }
+  if (baseList.includes('web_search')) {
+    ordered = reorderForCapability(ordered, 'web_search', routing, providerRegistry);
+  }
+
   if (features.hasImageAttachment && !forceVision && hasMultimodalTargets) {
     ordered = reorderForInlineVision(ordered, routing, providerRegistry);
   }
@@ -187,8 +251,7 @@ function routeSupportsInlineVision(
     }
     for (const providerKey of pool.targets) {
       try {
-        const profile = providerRegistry.get(providerKey);
-        if (profile.providerType === 'responses' || profile.providerType === 'gemini') {
+        if (providerRegistry.hasCapability(providerKey, 'vision')) {
           return true;
         }
       } catch {

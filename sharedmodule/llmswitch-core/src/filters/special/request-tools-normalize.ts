@@ -64,17 +64,17 @@ export class RequestOpenAIToolsNormalizeFilter implements Filter<JsonObject> {
             const rawToolName = String(((dst as any).function as any).name || '');
             const isShell = isShellToolName(rawToolName);
             if (isShell) {
+              (dst as any).function.name = 'exec_command';
               (dst as any).function.parameters = {
                 type: 'object',
                 properties: {
-                  command: { oneOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }] },
+                  cmd: { type: 'string' },
                   workdir: { type: 'string' }
                 },
-                required: ['command'],
+                required: ['cmd'],
                 additionalProperties: false
               };
-              const label =
-                rawToolName && rawToolName.trim().length > 0 ? rawToolName.trim() : 'shell';
+              const label = rawToolName && rawToolName.trim().length > 0 ? rawToolName.trim() : 'exec_command';
               (dst as any).function.description = buildShellDescription(label, hasApplyPatchTool);
             }
           } catch { /* ignore */ }

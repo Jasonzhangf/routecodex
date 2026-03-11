@@ -192,7 +192,8 @@ function buildProviderRuntimeEntries(providers: Record<string, unknown>): Provid
           modelContextTokens: normalizedProvider.modelContextTokens,
           defaultContextTokens: normalizedProvider.defaultContextTokens,
           ...(normalizedProvider.deepseek ? { deepseek: normalizedProvider.deepseek } : {}),
-          ...(normalizedProvider.serverToolsDisabled ? { serverToolsDisabled: true } : {})
+          ...(normalizedProvider.serverToolsDisabled ? { serverToolsDisabled: true } : {}),
+          ...(normalizedProvider.modelCapabilities ? { modelCapabilities: normalizedProvider.modelCapabilities } : {})
         };
     }
   }

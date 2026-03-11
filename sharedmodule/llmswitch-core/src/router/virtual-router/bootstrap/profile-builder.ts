@@ -31,6 +31,7 @@ export function buildProviderProfiles(
         : runtime.streaming;
     const contextTokens = resolveContextTokens(runtime, parsed.modelId);
     const outputTokens = resolveOutputTokens(runtime, parsed.modelId);
+    const modelCapabilities = runtime.modelCapabilities;
 
     profiles[targetKey] = {
       providerKey: targetKey,
@@ -48,7 +49,8 @@ export function buildProviderProfiles(
       maxOutputTokens: outputTokens,
       maxContextTokens: contextTokens,
       ...(runtime.deepseek ? { deepseek: runtime.deepseek } : {}),
-      ...(runtime.serverToolsDisabled ? { serverToolsDisabled: true } : {})
+      ...(runtime.serverToolsDisabled ? { serverToolsDisabled: true } : {}),
+      ...(modelCapabilities ? { modelCapabilities } : {})
     };
     targetRuntime[targetKey] = {
       ...runtime,

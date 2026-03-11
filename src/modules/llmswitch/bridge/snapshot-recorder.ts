@@ -24,6 +24,13 @@ interface RuntimeErrorSignal {
   matchedText: string;
 }
 
+type SignalFieldPath = ReadonlyArray<string | number>;
+
+interface SignalTextCandidate {
+  path: SignalFieldPath;
+  value: string;
+}
+
 interface ToolExecutionFailureSignal {
   toolName: 'exec_command' | 'apply_patch' | 'shell_command';
   errorType: string;
@@ -166,13 +173,93 @@ function shouldInspectRuntimeError(stage: string, payload: AnyRecord): boolean {
   );
 }
 
-function stringifyForSignal(payload: AnyRecord): string {
-  try {
-    const text = JSON.stringify(payload);
-    return text.length > 120000 ? text.slice(0, 120000) : text;
-  } catch {
-    return '';
+function isLikelyContentPath(path: SignalFieldPath): boolean {
+  return path.some((segment) => {
+    if (typeof segment !== 'string') {
+      return false;
+    }
+    return (
+      segment === 'message' ||
+      segment === 'content' ||
+      segment === 'contents' ||
+      segment === 'text' ||
+      segment === 'messages' ||
+      segment === 'tool_calls' ||
+      segment === 'function' ||
+      segment === 'arguments' ||
+      segment === 'call_id' ||
+      segment === 'input' ||
+      segment === 'output' ||
+      segment === 'reasoning' ||
+      segment === 'summary' ||
+      segment === 'excerpt' ||
+      segment === 'observation'
+    );
+  });
+}
+
+function shouldSkipSignalPath(path: SignalFieldPath): boolean {
+  if (isLikelyContentPath(path)) {
+    return true;
   }
+  return path.some((segment) => typeof segment === 'string' && segment.startsWith('trace'));
+}
+
+function collectRuntimeSignalTexts(payload: unknown): SignalTextCandidate[] {
+  const candidates: SignalTextCandidate[] = [];
+  const queue: Array<{ value: unknown; path: SignalFieldPath }> = [{ value: payload, path: [] }];
+  const seen = new WeakSet<object>();
+  let steps = 0;
+
+  while (queue.length > 0 && steps < 1200) {
+    steps += 1;
+    const current = queue.shift();
+    if (!current) {
+      continue;
+    }
+    const { value, path } = current;
+    if (typeof value === 'string') {
+      if (!shouldSkipSignalPath(path)) {
+        candidates.push({ path, value });
+      }
+      continue;
+    }
+    if (!value || typeof value !== 'object') {
+      continue;
+    }
+    if (seen.has(value as object)) {
+      continue;
+    }
+    seen.add(value as object);
+
+    if (Array.isArray(value)) {
+      value.forEach((item, index) => {
+        queue.push({ value: item, path: [...path, index] });
+      });
+      continue;
+    }
+
+    for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+      if (
+        key === 'error' ||
+        key === 'message' ||
+        key === 'reason' ||
+        key === 'detail' ||
+        key === 'details' ||
+        key === 'statusText' ||
+        key === 'failure' ||
+        key === 'failureReason' ||
+        key.endsWith('Error') ||
+        key.endsWith('Reason') ||
+        key.endsWith('Message') ||
+        key.endsWith('Detail')
+      ) {
+        queue.push({ value: child, path: [...path, key] });
+      }
+    }
+  }
+
+  return candidates;
 }
 
 function classifyRuntimeErrorSignal(stage: string, payload: AnyRecord): RuntimeErrorSignal | null {
@@ -188,29 +275,32 @@ function classifyRuntimeErrorSignal(stage: string, payload: AnyRecord): RuntimeE
     }
   }
 
-  const raw = stringifyForSignal(payload);
-  if (!raw) {
+  const candidates = collectRuntimeSignalTexts(payload);
+  if (candidates.length <= 0) {
     return null;
   }
-  const lower = raw.toLowerCase();
 
-  for (const signal of EXEC_ERROR_SIGNALS) {
-    if (lower.includes(signal.needle)) {
-      return {
-        group: 'exec-error',
-        errorType: signal.errorType,
-        matchedText: signal.needle
-      };
+  for (const candidate of candidates) {
+    const lower = candidate.value.toLowerCase();
+
+    for (const signal of EXEC_ERROR_SIGNALS) {
+      if (lower.includes(signal.needle)) {
+        return {
+          group: 'exec-error',
+          errorType: signal.errorType,
+          matchedText: signal.needle
+        };
+      }
     }
-  }
 
-  for (const signal of PARSE_ERROR_SIGNALS) {
-    if (lower.includes(signal.needle)) {
-      return {
-        group: 'parse-error',
-        errorType: signal.errorType,
-        matchedText: signal.needle
-      };
+    for (const signal of PARSE_ERROR_SIGNALS) {
+      if (lower.includes(signal.needle)) {
+        return {
+          group: 'parse-error',
+          errorType: signal.errorType,
+          matchedText: signal.needle
+        };
+      }
     }
   }
 

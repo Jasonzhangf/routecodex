@@ -8,7 +8,8 @@ import {
   type ProviderAuthConfig,
   type ProviderRuntimeProfile,
   type DeepSeekCompatRuntimeOptions,
-  type ResponsesProviderConfig
+  type ResponsesProviderConfig,
+  type ModelCapability
 } from '../types.js';
 import {
   CLAUDE_CODE_DEFAULT_USER_AGENT,
@@ -44,6 +45,7 @@ export interface NormalizedProvider {
   defaultContextTokens?: number;
   deepseek?: DeepSeekCompatRuntimeOptions;
   serverToolsDisabled?: boolean;
+  modelCapabilities?: Record<string, ModelCapability[]>;
 }
 
 export interface ProviderRuntimeBuildResult {
@@ -103,6 +105,7 @@ export function normalizeProvider(providerId: string, raw: unknown): NormalizedP
     (provider.serverTools &&
       typeof provider.serverTools === 'object' &&
       (provider.serverTools as Record<string, unknown>).enabled === false);
+  const modelCapabilities = normalizeModelCapabilities(provider);
   return {
     providerId,
     providerType,
@@ -120,7 +123,8 @@ export function normalizeProvider(providerId: string, raw: unknown): NormalizedP
     modelContextTokens,
     defaultContextTokens,
     ...(deepseek ? { deepseek } : {}),
-    ...(serverToolsDisabled ? { serverToolsDisabled: true } : {})
+    ...(serverToolsDisabled ? { serverToolsDisabled: true } : {}),
+    ...(modelCapabilities ? { modelCapabilities } : {})
   };
 }
 
@@ -298,4 +302,36 @@ export function normalizeHeaders(input: unknown): Record<string, string> | undef
 
 function asRecord<T extends Record<string, unknown>>(value: unknown): T {
   return (value && typeof value === 'object' ? value : {}) as T;
+}
+
+function normalizeModelCapabilities(provider: Record<string, unknown>): Record<string, ModelCapability[]> | undefined {
+  const models = provider.models;
+  if (!Array.isArray(models)) {
+    return undefined;
+  }
+  const result: Record<string, ModelCapability[]> = {};
+  for (const model of models) {
+    if (!model || typeof model !== 'object') {
+      continue;
+    }
+    const modelObj = model as Record<string, unknown>;
+    const modelId = typeof modelObj.id === 'string' ? modelObj.id.trim() : undefined;
+    if (!modelId) {
+      continue;
+    }
+    const capabilities = modelObj.capabilities;
+    if (!Array.isArray(capabilities)) {
+      continue;
+    }
+    const validCapabilities: ModelCapability[] = [];
+    for (const cap of capabilities) {
+      if (typeof cap === 'string' && ['text', 'reasoning', 'vision', 'thinking', 'web_search'].includes(cap)) {
+        validCapabilities.push(cap as ModelCapability);
+      }
+    }
+    if (validCapabilities.length > 0) {
+      result[modelId] = validCapabilities;
+    }
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
 }

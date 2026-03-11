@@ -10,7 +10,7 @@ import { isSnapshotsEnabled, writeServerSnapshot } from '../../utils/snapshot-wr
 import { resolveEffectiveRequestId } from '../utils/request-id-manager.js';
 import { buildInfo } from '../../build-info.js';
 import { deriveFinishReason, STREAM_LOG_FINISH_REASON_KEY } from '../utils/finish-reason.js';
-import { colorizeRequestLog } from '../utils/request-log-color.js';
+import { colorizeRequestLog, registerRequestLogContext } from '../utils/request-log-color.js';
 
 const BLOCKED_HEADERS = new Set(['content-length', 'transfer-encoding', 'connection', 'content-encoding']);
 
@@ -52,7 +52,8 @@ function logStreamRequestComplete(
   endpoint: string | undefined,
   requestLabel: string,
   status: number,
-  finishReason?: string
+  finishReason?: string,
+  context?: { sessionId?: unknown; conversationId?: unknown }
 ): void {
   if (!SHOULD_LOG_HTTP_EVENTS) {
     return;
@@ -61,7 +62,7 @@ function logStreamRequestComplete(
   const finishReasonLabel = finishReason ? `, finish_reason=${finishReason}` : '';
   const timingSuffix = formatRequestTimingSummary(requestLabel);
   const line = `✅ [${targetEndpoint}] ${formatTimestamp()} request ${requestLabel} completed (status=${status}${finishReasonLabel})${timingSuffix}`;
-  console.log(colorizeRequestLog(line, requestLabel));
+  console.log(colorizeRequestLog(line, requestLabel, context));
 }
 
 function trackSseFinishReason(tracker: SseFinishReasonTracker, chunk: unknown): void {
@@ -191,6 +192,11 @@ export function sendPipelineResponse(
   const entryEndpoint = typeof options?.entryEndpoint === 'string' && options.entryEndpoint.trim()
     ? options.entryEndpoint.trim()
     : undefined;
+  const requestLogContext = {
+    sessionId: result.usageLogInfo?.sessionId,
+    conversationId: result.usageLogInfo?.conversationId
+  };
+  registerRequestLogContext(requestLabel, requestLogContext);
   const captureClientResponse = shouldCaptureClientStreamSnapshots();
   const responseStartedAtMs = Date.now();
   let responseCompletedLogged = false;
@@ -453,7 +459,7 @@ export function sendPipelineResponse(
       clearTimers();
       if (!completedLogged) {
         completedLogged = true;
-        logStreamRequestComplete(entryEndpoint, requestLabel, status, finishTracker.finishReason);
+        logStreamRequestComplete(entryEndpoint, requestLabel, status, finishTracker.finishReason, requestLogContext);
       }
     });
     res.on('close', cleanup);
