@@ -3,14 +3,11 @@ import type { FormatEnvelope } from "../../../../types/format-envelope.js";
 import type { JsonObject } from "../../../../types/json.js";
 import type { StageRecorder } from "../../../../format-adapters/index.js";
 import { recordStage } from "../../../stages/utils.js";
-import { sanitizeReqInboundFormatEnvelopeWithNative } from "../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-req-inbound-semantics.js";
-import { parseReqInboundFormatEnvelopeWithNative } from "../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-edge-stage-semantics.js";
 import {
-  normalizeReasoningInAnthropicPayload,
-  normalizeReasoningInChatPayload,
-  normalizeReasoningInGeminiPayload,
-  normalizeReasoningInResponsesPayload,
-} from "../../../../../shared/reasoning-normalizer.js";
+  normalizeReqInboundReasoningPayloadWithNative,
+  sanitizeReqInboundFormatEnvelopeWithNative,
+} from "../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-req-inbound-semantics.js";
+import { parseReqInboundFormatEnvelopeWithNative } from "../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-edge-stage-semantics.js";
 import { logHubStageTiming } from "../../../hub-stage-timing.js";
 
 export interface ReqInboundStage1FormatParseOptions {
@@ -36,31 +33,6 @@ function resolveProtocolToken(adapterContext: AdapterContext): string {
   return "openai-chat";
 }
 
-function applyReasoningNormalization(
-  rawRequest: JsonObject,
-  protocol: string,
-): void {
-  if (protocol === "openai-responses") {
-    normalizeReasoningInResponsesPayload(
-      rawRequest as unknown as Record<string, unknown>,
-      {
-        includeInput: true,
-        includeInstructions: true,
-      },
-    );
-    return;
-  }
-  if (protocol === "anthropic-messages") {
-    normalizeReasoningInAnthropicPayload(rawRequest);
-    return;
-  }
-  if (protocol === "gemini-chat") {
-    normalizeReasoningInGeminiPayload(rawRequest);
-    return;
-  }
-  normalizeReasoningInChatPayload(rawRequest as any);
-}
-
 export async function runReqInboundStage1FormatParse(
   options: ReqInboundStage1FormatParseOptions,
 ): Promise<FormatEnvelope<JsonObject>> {
@@ -73,7 +45,10 @@ export async function runReqInboundStage1FormatParse(
     { protocol },
   );
   const normalizeStart = Date.now();
-  applyReasoningNormalization(options.rawRequest, protocol);
+  const normalizedRequest = normalizeReqInboundReasoningPayloadWithNative({
+    payload: options.rawRequest as unknown as Record<string, unknown>,
+    protocol,
+  }) as JsonObject;
   logHubStageTiming(
     requestId,
     "req_inbound.stage1_reasoning_normalize",
@@ -84,7 +59,7 @@ export async function runReqInboundStage1FormatParse(
   logHubStageTiming(requestId, "req_inbound.stage1_native_parse", "start");
   const parseStart = Date.now();
   const envelopeRaw = parseReqInboundFormatEnvelopeWithNative({
-    rawRequest: options.rawRequest as unknown as Record<string, unknown>,
+    rawRequest: normalizedRequest as unknown as Record<string, unknown>,
     protocol,
   }) as unknown as FormatEnvelope<JsonObject>;
   logHubStageTiming(requestId, "req_inbound.stage1_native_parse", "completed", {

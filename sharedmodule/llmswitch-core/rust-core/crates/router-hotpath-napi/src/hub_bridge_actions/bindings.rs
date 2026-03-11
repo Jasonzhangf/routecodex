@@ -186,6 +186,70 @@ pub fn normalize_reasoning_in_anthropic_payload_json(input_json: String) -> Napi
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
+pub fn normalize_req_inbound_reasoning_payload_json(input_json: String) -> NapiResult<String> {
+    let mut value: Value =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let protocol = value
+        .as_object()
+        .and_then(|row| row.get("protocol"))
+        .and_then(Value::as_str)
+        .unwrap_or("openai-chat")
+        .trim()
+        .to_ascii_lowercase();
+    let mut fallback = Value::Null;
+    let payload = value
+        .as_object_mut()
+        .and_then(|row| row.get_mut("payload"))
+        .unwrap_or(&mut fallback);
+    if !payload.is_null() {
+        match protocol.as_str() {
+            "openai-responses" => {
+                let options = serde_json::json!({
+                    "includeInput": true,
+                    "includeInstructions": true
+                });
+                normalize_reasoning_in_responses_payload(payload, &options);
+            }
+            "anthropic-messages" => normalize_reasoning_in_anthropic_payload(payload),
+            "gemini-chat" => normalize_reasoning_in_gemini_payload(payload),
+            _ => normalize_reasoning_in_chat_payload(payload),
+        }
+    }
+    serde_json::to_string(payload).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+pub fn normalize_resp_inbound_reasoning_payload_json(input_json: String) -> NapiResult<String> {
+    let mut value: Value =
+        serde_json::from_str(&input_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let protocol = value
+        .as_object()
+        .and_then(|row| row.get("protocol"))
+        .and_then(Value::as_str)
+        .unwrap_or("openai-chat")
+        .trim()
+        .to_ascii_lowercase();
+    let mut fallback = Value::Null;
+    let payload = value
+        .as_object_mut()
+        .and_then(|row| row.get_mut("payload"))
+        .unwrap_or(&mut fallback);
+    if !payload.is_null() {
+        match protocol.as_str() {
+            "openai-responses" => {
+                let options = serde_json::json!({
+                    "includeOutput": true,
+                    "includeRequiredAction": true
+                });
+                normalize_reasoning_in_responses_payload(payload, &options);
+            }
+            "anthropic-messages" => normalize_reasoning_in_anthropic_payload(payload),
+            "gemini-chat" => normalize_reasoning_in_gemini_payload(payload),
+            _ => normalize_reasoning_in_chat_payload(payload),
+        }
+    }
+    serde_json::to_string(payload).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
 pub fn normalize_bridge_tool_call_ids_json(input_json: String) -> NapiResult<String> {
     if input_json.trim().is_empty() {
         return Err(napi::Error::from_reason("Input JSON is empty"));

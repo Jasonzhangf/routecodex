@@ -478,23 +478,26 @@ export function handleProviderFailureImpl(
   if (event.affectsHealth === false) {
     return;
   }
-  if (event.fatal) {
-    healthManager.tripProvider(event.providerKey, event.reason, event.cooldownOverrideMs);
-  } else if (event.reason === 'rate_limit' && event.statusCode === 429) {
-    // 对非致命的 429 错误：
-    // - 若 ProviderErrorEvent 已携带显式 cooldownOverrideMs（例如来自 quotaResetDelay），则直接使用；
-    // - 否则针对该 providerKey 启用阶梯退避策略（5min → 1h → 6h → 24h），
-    //   在冷却期内从路由池中移除该 alias，避免持续命中上游。
-    const providerKey = event.providerKey;
-    let ttl = event.cooldownOverrideMs;
-    if (!ttl || !Number.isFinite(ttl) || ttl <= 0) {
-      ttl = computeRateLimitCooldownMsForProvider(providerKey, Date.now());
-    }
-    healthManager.cooldownProvider(providerKey, event.reason, ttl);
-    markProviderCooldown(providerKey, ttl);
-  } else {
-    healthManager.recordFailure(event.providerKey, event.reason);
-  }
+ if (event.fatal) {
+   healthManager.tripProvider(event.providerKey, event.reason, event.cooldownOverrideMs);
+ } else if (event.reason === 'rate_limit' && event.statusCode === 429) {
+   // 对非致命的 429 错误：
+   // - 若 ProviderErrorEvent 已携带显式 cooldownOverrideMs（例如来自 quotaResetDelay），则直接使用；
+   // - 否则针对该 providerKey 启用阶梯退避策略（5min → 1h → 6h → 24h），
+   //   在冷却期内从路由池中移除该 alias，避免持续命中上游。
+   const providerKey = event.providerKey;
+   let ttl = event.cooldownOverrideMs;
+   if (!ttl || !Number.isFinite(ttl) || ttl <= 0) {
+     ttl = computeRateLimitCooldownMsForProvider(providerKey, Date.now());
+   }
+   healthManager.cooldownProvider(providerKey, event.reason, ttl);
+   markProviderCooldown(providerKey, ttl);
+ } else {
+    // 所有非致命错误都触发 cooldown，让虚拟路由切换到其他候选
+    const ttl = event.cooldownOverrideMs ?? healthConfig.cooldownMs ?? 60_000;
+    healthManager.cooldownProvider(event.providerKey, event.reason, ttl);
+    markProviderCooldown(event.providerKey, ttl);
+ }
 }
 
 export function mapProviderErrorImpl(
@@ -536,23 +539,24 @@ export function mapProviderErrorImpl(
   let reason = deriveReason(code, stage, statusCode);
   let cooldownOverrideMs: number | undefined;
 
-  if (statusCode === 401 || statusCode === 402 || statusCode === 403 || code.includes('AUTH') || isOAuthAuth406) {
-    fatal = true;
-    cooldownOverrideMs = Math.max(10 * 60_000, healthConfig.fatalCooldownMs ?? 10 * 60_000);
-    reason = 'auth';
-  } else if (statusCode === 429 && !recoverable) {
-    fatal = true;
-    cooldownOverrideMs = Math.max(10 * 60_000, healthConfig.fatalCooldownMs ?? 10 * 60_000);
-    reason = 'rate_limit';
-  } else if (statusCode && statusCode >= 500) {
-    fatal = true;
-    cooldownOverrideMs = Math.max(5 * 60_000, healthConfig.fatalCooldownMs ?? 5 * 60_000);
-    reason = 'upstream_error';
-  } else if (stage.includes('compat')) {
-    fatal = true;
-    cooldownOverrideMs = Math.max(10 * 60_000, healthConfig.fatalCooldownMs ?? 10 * 60_000);
-    reason = 'compatibility';
-  }
+ if (statusCode === 401 || statusCode === 402 || statusCode === 403 || code.includes('AUTH') || isOAuthAuth406) {
+   // auth 错误也先尝试切换 provider，而不是直接中断对话
+   fatal = false;
+    cooldownOverrideMs = Math.max(60_000, healthConfig.cooldownMs ?? 60_000);
+   reason = 'auth';
+ } else if (statusCode === 429 && !recoverable) {
+   fatal = false;
+   cooldownOverrideMs = Math.max(60_000, healthConfig.cooldownMs ?? 60_000);
+   reason = 'rate_limit';
+ } else if (statusCode && statusCode >= 500) {
+   fatal = false;
+    cooldownOverrideMs = Math.max(60_000, healthConfig.cooldownMs ?? 60_000);
+   reason = 'upstream_error';
+ } else if (stage.includes('compat')) {
+   fatal = false;
+    cooldownOverrideMs = Math.max(60_000, healthConfig.cooldownMs ?? 60_000);
+   reason = 'compatibility';
+ }
 
   return {
     providerKey,

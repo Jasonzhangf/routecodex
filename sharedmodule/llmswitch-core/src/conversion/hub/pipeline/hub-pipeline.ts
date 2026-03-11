@@ -1081,6 +1081,7 @@ export class HubPipeline {
           route: string,
           provider: string,
           model?: string,
+          sessionId?: string,
         ) => void;
       };
       if (
@@ -1093,6 +1094,9 @@ export class HubPipeline {
           routeName,
           providerKey,
           typeof modelId === "string" ? modelId : undefined,
+          typeof sessionIdentifiers.sessionId === "string"
+            ? sessionIdentifiers.sessionId
+            : undefined,
         );
       }
     } catch {
@@ -1750,6 +1754,7 @@ export class HubPipeline {
           route: string,
           provider: string,
           model?: string,
+          sessionId?: string,
         ) => void;
       };
       if (
@@ -1762,6 +1767,9 @@ export class HubPipeline {
           routeName,
           providerKey,
           typeof modelId === "string" ? modelId : undefined,
+          typeof sessionIdentifiers.sessionId === "string"
+            ? sessionIdentifiers.sessionId
+            : undefined,
         );
       }
     } catch {

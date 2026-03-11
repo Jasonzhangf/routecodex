@@ -11,6 +11,7 @@ mod tool_ids;
 pub(crate) mod utils;
 pub(crate) use bridge_input::convert_bridge_input_to_chat_messages;
 pub(crate) use history::build_bridge_history;
+pub(crate) use reasoning::normalize_reasoning_in_chat_payload;
 
 pub use bindings::{
     append_local_image_block_on_latest_user_input_json, apply_bridge_capture_tool_results_json,
@@ -22,6 +23,7 @@ pub use bindings::{
     ensure_bridge_output_fields_json, ensure_messages_array_json, extract_reasoning_segments_json,
     filter_bridge_input_for_upstream_json, map_reasoning_content_to_responses_output_json,
     normalize_bridge_history_seed_json, normalize_bridge_tool_call_ids_json,
+    normalize_req_inbound_reasoning_payload_json, normalize_resp_inbound_reasoning_payload_json,
     normalize_reasoning_in_anthropic_payload_json, normalize_reasoning_in_chat_payload_json,
     normalize_reasoning_in_gemini_payload_json, normalize_reasoning_in_openai_payload_json,
     normalize_reasoning_in_responses_payload_json, prepare_responses_request_envelope_json,

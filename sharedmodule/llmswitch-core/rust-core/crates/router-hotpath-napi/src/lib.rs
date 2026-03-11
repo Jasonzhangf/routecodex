@@ -710,6 +710,16 @@ pub fn normalize_reasoning_in_anthropic_payload_json(input_json: String) -> Napi
 }
 
 #[napi]
+pub fn normalize_req_inbound_reasoning_payload_json(input_json: String) -> NapiResult<String> {
+    hub_bridge_actions::normalize_req_inbound_reasoning_payload_json(input_json)
+}
+
+#[napi]
+pub fn normalize_resp_inbound_reasoning_payload_json(input_json: String) -> NapiResult<String> {
+    hub_bridge_actions::normalize_resp_inbound_reasoning_payload_json(input_json)
+}
+
+#[napi]
 pub fn ensure_bridge_output_fields_json(input_json: String) -> NapiResult<String> {
     hub_bridge_actions::ensure_bridge_output_fields_json(input_json)
 }
@@ -1126,4 +1136,3 @@ pub fn normalizeReasoningInOpenAIPayloadJson(input_json: String) -> NapiResult<S
 
 mod hub_req_inbound_unified_fastpath;
 use hub_req_inbound_unified_fastpath::process_unified_inbound_fast_json;
-

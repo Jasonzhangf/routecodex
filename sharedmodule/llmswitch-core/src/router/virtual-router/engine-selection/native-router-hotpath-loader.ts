@@ -123,6 +123,8 @@ const REQUIRED_NATIVE_EXPORTS = [
   "normalizeReasoningInResponsesPayloadJson",
   "normalizeReasoningInGeminiPayloadJson",
   "normalizeReasoningInAnthropicPayloadJson",
+  "normalizeReqInboundReasoningPayloadJson",
+  "normalizeRespInboundReasoningPayloadJson",
   "normalizeReasoningInOpenAIPayloadJson",
   "buildContinueExecutionOperationsJson",
   "buildDueReminderUserMessageJson",

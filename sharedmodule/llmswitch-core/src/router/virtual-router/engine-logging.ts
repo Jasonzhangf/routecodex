@@ -228,7 +228,7 @@ export function describeTargetProvider(
   return { providerLabel: aliasLabel, resolvedModel };
 }
 
-function resolveRouteColor(routeName: string): string {
+export function resolveRouteColor(routeName: string): string {
   const map: Record<string, string> = {
     multimodal: '\x1b[38;5;45m',
     tools: '\x1b[38;5;214m',
@@ -397,7 +397,6 @@ export function formatVirtualRouterHit(record: VirtualRouterHitRecord): string {
     const reset = '\x1b[0m';
     const timeColor = '\x1b[90m';
     const stickyColor = '\x1b[33m';
-    const routeColor = resolveSessionColor(record.sessionId);
     const stopColor = '\x1b[38;5;214m';
     const prefix = `${prefixColor}[virtual-router-hit]${reset}`;
     const timeLabel = `${timeColor}${timestamp}${reset}`;
@@ -408,6 +407,7 @@ export function formatVirtualRouterHit(record: VirtualRouterHitRecord): string {
     const requestLabel = requestId && !requestId.includes('unknown') ? ` req=${requestId}` : '';
     const sessionId = typeof record.sessionId === 'string' ? record.sessionId.trim() : '';
     const sessionLabel = sessionId ? ` sid=${sessionId}` : '';
+    const routeColor = (sessionId ? resolveSessionColor(sessionId) : undefined) || resolveRouteColor(record.routeName);
     const stickyText = formatStickyScope(record.stickyScope);
     const stickyLabel = stickyText ? ` ${stickyColor}[sticky:${stickyText}]${reset}` : '';
     const reasonLabel = record.hitReason ? ` reason=${record.hitReason}` : '';

@@ -30,23 +30,24 @@ async function main() {
     fatalCooldownMs: 10 * 60_000
   };
 
-  // mapProviderErrorImpl: auth errors => fatal auth
-  {
-    const ev = {
-      status: 401,
-      code: 'AUTH_FAILED',
-      stage: 'provider_send',
-      recoverable: false,
-      runtime: {
-        providerKey: 'p.key1.model',
-        providerFamily: 'iflow',
-        routeName: 'default'
-      }
-    };
-    const out = mapProviderErrorImpl(ev, healthConfig);
-    assert.ok(out && out.fatal === true);
-    assert.equal(out.reason, 'auth');
-  }
+ // mapProviderErrorImpl: auth errors => fatal auth
+ {
+   const ev = {
+     status: 401,
+     code: 'AUTH_FAILED',
+     stage: 'provider_send',
+     recoverable: false,
+     runtime: {
+       providerKey: 'p.key1.model',
+       providerFamily: 'iflow',
+       routeName: 'default'
+     }
+   };
+   const out = mapProviderErrorImpl(ev, healthConfig);
+    // 所有错误现在都先尝试切换 provider，fatal=false 触发 cooldown
+    assert.ok(out && out.fatal === false);
+   assert.equal(out.reason, 'auth');
+ }
 
   // handleProviderFailureImpl: 429 non-fatal uses backoff schedule + mark cooldown
   {

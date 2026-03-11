@@ -1570,7 +1570,43 @@ function decorateFinalChatWithServerToolContext(
     return chat;
   }
 
-  // 目前仅对 web_search flow 附加原文摘要，避免影响其它 ServerTool。
+  // Handle continue_execution_flow: append visible summary to client response
+  if (execution.flowId === 'continue_execution_flow') {
+    const ctx = execution.context as { continue_execution?: { visibleSummary?: unknown } };
+    const ce = ctx.continue_execution;
+    const visibleSummary =
+      ce && typeof ce.visibleSummary === 'string' && ce.visibleSummary.trim().length
+        ? ce.visibleSummary.trim()
+        : '';
+    if (!visibleSummary) {
+      return chat;
+    }
+
+    const cloned = JSON.parse(JSON.stringify(chat)) as JsonObject;
+    const choices = Array.isArray((cloned as any).choices) ? (cloned as any).choices : [];
+    if (!choices.length) {
+      return cloned;
+    }
+    const first = choices[0] && typeof choices[0] === 'object' ? (choices[0] as Record<string, unknown>) : null;
+    if (!first || !first.message || typeof first.message !== 'object') {
+      return cloned;
+    }
+    const message = first.message as { [key: string]: unknown };
+    const baseContent = typeof message.content === 'string' ? message.content : '';
+
+    // Prepend visible summary to the content
+    message.content =
+      baseContent && baseContent.trim().length
+        ? `${visibleSummary}\n\n${baseContent}`
+        : visibleSummary;
+
+    // Force finish_reason to 'stop' for continue_execution flow
+    first.finish_reason = 'stop';
+
+    return cloned;
+  }
+
+  // Handle web_search_flow: append original text summary
   if (execution.flowId !== 'web_search_flow') {
     return chat;
   }

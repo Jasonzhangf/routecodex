@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
 
+use crate::hub_bridge_actions::normalize_reasoning_in_chat_payload;
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FinalizeInput {
@@ -288,8 +290,27 @@ fn apply_reasoning_policy(payload: &mut Value, mode: Option<&str>) {
     }
 }
 
+fn should_normalize_reasoning(input: &FinalizeInput) -> bool {
+    let wants_non_keep_mode = input
+        .reasoning_mode
+        .as_deref()
+        .map(|mode| mode.trim().to_ascii_lowercase())
+        .map(|mode| !mode.is_empty() && mode != "keep")
+        .unwrap_or(false);
+    let wants_anthropic_reasoning = input
+        .endpoint
+        .as_deref()
+        .map(|endpoint| endpoint.to_ascii_lowercase().contains("/v1/messages"))
+        .unwrap_or(false);
+    wants_non_keep_mode || wants_anthropic_reasoning
+}
+
 pub fn finalize_chat_response(input: FinalizeInput) -> Value {
+    let should_normalize = should_normalize_reasoning(&input);
     let mut payload = input.payload;
+    if should_normalize {
+        normalize_reasoning_in_chat_payload(&mut payload);
+    }
     normalize_choices(&mut payload);
     normalize_messages(&mut payload);
     apply_reasoning_policy(&mut payload, input.reasoning_mode.as_deref());
@@ -394,5 +415,65 @@ mod tests {
         let result = finalize_chat_response(input);
         assert!(result["choices"][0]["message"]["reasoning_content"].is_null());
         assert_eq!(result["choices"][0]["message"]["content"], "hello");
+    }
+
+    #[test]
+    fn test_finalize_reasoning_keep_normalizes_internal_markup() {
+        let input = FinalizeInput {
+            payload: json!({
+              "choices": [{
+                "message": {
+                  "content": "visible <think>internal</think> answer"
+                }
+              }]
+            }),
+            stream: false,
+            reasoning_mode: Some("keep".to_string()),
+            endpoint: Some("/v1/chat/completions".to_string()),
+            request_id: None,
+        };
+        let result = finalize_chat_response(input);
+        assert_eq!(result["choices"][0]["message"]["content"], "visible  answer");
+        assert_eq!(result["choices"][0]["message"]["reasoning_content"], "internal");
+    }
+
+    #[test]
+    fn test_finalize_reasoning_drop_normalizes_before_policy() {
+        let input = FinalizeInput {
+            payload: json!({
+              "choices": [{
+                "message": {
+                  "content": "visible <think>internal</think> answer"
+                }
+              }]
+            }),
+            stream: false,
+            reasoning_mode: Some("drop".to_string()),
+            endpoint: Some("/v1/chat/completions".to_string()),
+            request_id: None,
+        };
+        let result = finalize_chat_response(input);
+        assert_eq!(result["choices"][0]["message"]["content"], "visible  answer");
+        assert!(result["choices"][0]["message"]["reasoning_content"].is_null());
+    }
+
+    #[test]
+    fn test_finalize_anthropic_endpoint_normalizes_even_when_keep() {
+        let input = FinalizeInput {
+            payload: json!({
+              "choices": [{
+                "message": {
+                  "content": "visible <reflection>internal</reflection> answer"
+                }
+              }]
+            }),
+            stream: false,
+            reasoning_mode: Some("keep".to_string()),
+            endpoint: Some("/v1/messages".to_string()),
+            request_id: None,
+        };
+        let result = finalize_chat_response(input);
+        assert_eq!(result["choices"][0]["message"]["content"], "visible  answer");
+        assert_eq!(result["choices"][0]["message"]["reasoning_content"], "internal");
     }
 }

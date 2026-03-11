@@ -6,9 +6,8 @@ import { defaultSseCodecRegistry, type SseProtocol } from '../../../../../../sse
 import { recordStage } from '../../../stages/utils.js';
 import { ProviderProtocolError } from '../../../../../provider-protocol-error.js';
 import {
-  extractContextLengthDiagnosticsWithNative,
+  buildRespInboundSseErrorDescriptorWithNative,
   extractSseWrapperErrorWithNative,
-  isContextLengthExceededSignalWithNative,
   parseJsonObjectCandidateWithNative
 } from '../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-resp-semantics.js';
 import { tryDecodeJsonBodyFromStream } from './stream-json-sniffer.js';
@@ -36,27 +35,6 @@ function resolveProviderType(protocol: ProviderProtocol): string | undefined {
   return undefined;
 }
 
-function readObjectFallback(value: unknown): Record<string, unknown> | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return undefined;
-  }
-  return value as Record<string, unknown>;
-}
-
-function isRetryableNetworkSseDecodeFailure(message: string, upstreamCode?: string): boolean {
-  const normalizedMessage = String(message || '').trim().toLowerCase();
-  const normalizedUpstreamCode = typeof upstreamCode === 'string' ? upstreamCode.trim().toLowerCase() : '';
-  return (
-    normalizedMessage.includes('internal network failure') ||
-    normalizedMessage.includes('network failure') ||
-    normalizedMessage.includes('network error') ||
-    normalizedMessage.includes('service unavailable') ||
-    normalizedMessage.includes('temporarily unavailable') ||
-    normalizedMessage.includes('timeout') ||
-    normalizedUpstreamCode.includes('anthropic_sse_to_json_failed')
-  );
-}
-
 export async function runRespInboundStage1SseDecode(
   options: RespInboundStage1SseDecodeOptions
 ): Promise<RespInboundStage1SseDecodeResult> {
@@ -79,26 +57,24 @@ export async function runRespInboundStage1SseDecode(
   // 某些 mock-provider / 捕获样本在 SSE 连接被异常终止时会携带 error 标记，
   // 即使仍保留 __sse_responses 流，也应视为上游异常并终止。
   if (wrapperError) {
+    const nativeError = buildRespInboundSseErrorDescriptorWithNative({
+      kind: 'wrapper_error',
+      providerProtocol: options.providerProtocol,
+      requestId: options.adapterContext.requestId,
+      wrapperError
+    });
     recordStage(options.stageRecorder, 'chat_process.resp.stage1.sse_decode', {
       streamDetected: Boolean(stream),
       decoded: false,
       protocol: options.providerProtocol,
-      reason: 'sse_wrapper_error',
-      error: wrapperError
+      ...nativeError.stageRecord
     });
-    throw new ProviderProtocolError(
-      `[chat_process.resp.stage1.sse_decode] Upstream SSE terminated: ${wrapperError}`,
-      {
-        code: 'SSE_DECODE_ERROR',
-        protocol: options.providerProtocol,
-        providerType: resolveProviderType(options.providerProtocol),
-        details: {
-          phase: 'chat_process.resp.stage1.sse_decode',
-          requestId: options.adapterContext.requestId,
-          message: wrapperError
-        }
-      }
-    );
+    throw new ProviderProtocolError(nativeError.errorMessage, {
+      code: nativeError.code,
+      protocol: nativeError.protocol,
+      providerType: nativeError.providerType,
+      details: nativeError.details
+    });
   }
 
   if (!stream) {
@@ -124,24 +100,23 @@ export async function runRespInboundStage1SseDecode(
   }
 
   if (!supportsSseProtocol(options.providerProtocol)) {
+    const nativeError = buildRespInboundSseErrorDescriptorWithNative({
+      kind: 'protocol_unsupported',
+      providerProtocol: options.providerProtocol,
+      requestId: options.adapterContext.requestId
+    });
     recordStage(options.stageRecorder, 'chat_process.resp.stage1.sse_decode', {
       streamDetected: true,
       decoded: false,
-      reason: 'protocol_unsupported',
-      protocol: options.providerProtocol
+      protocol: options.providerProtocol,
+      ...nativeError.stageRecord
     });
-    throw new ProviderProtocolError(
-      `[chat_process.resp.stage1.sse_decode] Protocol ${options.providerProtocol} does not support SSE decoding`,
-      {
-        code: 'SSE_DECODE_ERROR',
-        protocol: options.providerProtocol,
-        providerType: resolveProviderType(options.providerProtocol),
-        details: {
-          phase: 'chat_process.resp.stage1.sse_decode',
-          reason: 'protocol_unsupported'
-        }
-      }
-    );
+    throw new ProviderProtocolError(nativeError.errorMessage, {
+      code: nativeError.code,
+      protocol: nativeError.protocol,
+      providerType: nativeError.providerType,
+      details: nativeError.details
+    });
   }
 
   try {
@@ -160,41 +135,35 @@ export async function runRespInboundStage1SseDecode(
     const message = error instanceof Error ? error.message : String(error);
     const errRecord = error as Record<string, unknown>;
     const upstreamCode = typeof errRecord.code === 'string' ? errRecord.code : undefined;
-    const upstreamContext = readObjectFallback(errRecord.context);
-    const contextLengthExceeded = isContextLengthExceededSignalWithNative(upstreamCode, message, upstreamContext);
-    const retryableNetworkFailure =
-      !contextLengthExceeded &&
-      options.providerProtocol === 'anthropic-messages' &&
-      isRetryableNetworkSseDecodeFailure(message, upstreamCode);
-    const diagnostics = extractContextLengthDiagnosticsWithNative(options.adapterContext);
+    const upstreamContext =
+      errRecord.context && typeof errRecord.context === 'object' && !Array.isArray(errRecord.context)
+        ? (errRecord.context as Record<string, unknown>)
+        : undefined;
+    const nativeError = buildRespInboundSseErrorDescriptorWithNative({
+      kind: 'decode_failure',
+      providerProtocol: options.providerProtocol,
+      requestId: options.adapterContext.requestId,
+      message,
+      upstreamCode,
+      upstreamContext,
+      adapterContext: options.adapterContext
+    });
     recordStage(options.stageRecorder, 'chat_process.resp.stage1.sse_decode', {
       streamDetected: true,
       decoded: false,
       protocol: options.providerProtocol,
-      error: message,
-      ...(upstreamCode ? { upstreamCode } : {}),
-      ...(retryableNetworkFailure ? { statusCode: 502 } : {}),
-      ...(contextLengthExceeded ? { reason: 'context_length_exceeded' } : {}),
-      ...(Object.keys(diagnostics).length ? diagnostics : {})
+      ...nativeError.stageRecord
     });
-    throw new ProviderProtocolError(
-      `[chat_process.resp.stage1.sse_decode] Failed to decode SSE payload for protocol ${options.providerProtocol}: ${message}` +
-        (contextLengthExceeded ? ' (context too long; please compress conversation context and retry)' : ''),
-      {
-        code: retryableNetworkFailure ? 'HTTP_502' : 'SSE_DECODE_ERROR',
-        protocol: options.providerProtocol,
-        providerType: resolveProviderType(options.providerProtocol),
-        details: {
-          phase: 'chat_process.resp.stage1.sse_decode',
-          requestId: options.adapterContext.requestId,
-          message,
-          ...(retryableNetworkFailure ? { statusCode: 502, status: 502, retryable: true } : {}),
-          ...(upstreamCode ? { upstreamCode } : {}),
-          ...(contextLengthExceeded ? { reason: 'context_length_exceeded' } : {}),
-          ...(Object.keys(diagnostics).length ? diagnostics : {})
-        }
-      }
-    );
+    const providerError = new ProviderProtocolError(nativeError.errorMessage, {
+      code: nativeError.code,
+      protocol: nativeError.protocol,
+      providerType: nativeError.providerType,
+      details: nativeError.details
+    }) as ProviderProtocolError & { status?: number };
+    if (typeof nativeError.status === 'number') {
+      providerError.status = nativeError.status;
+    }
+    throw providerError;
   }
 }
 

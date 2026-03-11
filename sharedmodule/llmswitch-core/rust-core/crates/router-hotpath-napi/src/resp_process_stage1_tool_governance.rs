@@ -22,9 +22,60 @@ pub struct ToolGovernanceSummary {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct ToolGovernancePreparationSummary {
+    pub converted: bool,
+    pub shape_sanitized: bool,
+    pub harvested_tool_calls: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ToolGovernancePreparationOutput {
+    pub prepared_payload: Value,
+    pub summary: ToolGovernancePreparationSummary,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ToolGovernanceOutput {
     pub governed_payload: Value,
     pub summary: ToolGovernanceSummary,
+}
+
+fn is_canonical_chat_completion(payload: &Value) -> bool {
+    let Some(row) = payload.as_object() else {
+        return false;
+    };
+    let Some(choices) = row.get("choices").and_then(|v| v.as_array()) else {
+        return false;
+    };
+    let Some(first) = choices.first().and_then(|v| v.as_object()) else {
+        return false;
+    };
+    first
+        .get("message")
+        .and_then(|v| v.as_object())
+        .is_some()
+}
+
+fn coerce_to_canonical_chat_completion(payload: &Value) -> (Value, bool) {
+    if is_canonical_chat_completion(payload) {
+        return (payload.clone(), false);
+    }
+
+    let Ok(payload_json) = serde_json::to_string(payload) else {
+        return (payload.clone(), false);
+    };
+    let Ok(raw) = crate::shared_responses_response_utils::build_chat_response_from_responses_json(
+        payload_json,
+    ) else {
+        return (payload.clone(), false);
+    };
+    let Ok(coerced) = serde_json::from_str::<Value>(&raw) else {
+        return (payload.clone(), false);
+    };
+    if is_canonical_chat_completion(&coerced) {
+        return (coerced, true);
+    }
+    (payload.clone(), false)
 }
 
 fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
@@ -946,11 +997,32 @@ fn count_normalized_tool_calls(payload: &Value) -> i64 {
         .unwrap_or(0)
 }
 
+fn prepare_payload_for_governance(
+    payload: &Value,
+) -> Result<ToolGovernancePreparationOutput, String> {
+    let (mut prepared_payload, converted) = coerce_to_canonical_chat_completion(payload);
+
+    let before_strip = prepared_payload.clone();
+    strip_orphan_function_calls_tag(&mut prepared_payload);
+    let shape_sanitized = prepared_payload != before_strip;
+    let harvested_tool_calls = maybe_harvest_empty_tool_calls_from_json_content(&mut prepared_payload);
+
+    Ok(ToolGovernancePreparationOutput {
+        prepared_payload,
+        summary: ToolGovernancePreparationSummary {
+            converted,
+            shape_sanitized,
+            harvested_tool_calls,
+        },
+    })
+}
+
 pub fn govern_response(input: ToolGovernanceInput) -> Result<ToolGovernanceOutput, String> {
     let mut payload = input.payload.clone();
 
     strip_orphan_function_calls_tag(&mut payload);
     let harvested = maybe_harvest_empty_tool_calls_from_json_content(&mut payload);
+
     let apply_patch_repaired = normalize_apply_patch_tool_calls(&mut payload);
     let tool_calls_normalized = count_normalized_tool_calls(&payload);
 
@@ -978,9 +1050,45 @@ pub fn govern_response_json(input_json: String) -> napi::Result<String> {
         .map_err(|e| napi::Error::from_reason(format!("Failed to serialize output: {}", e)))
 }
 
+#[napi]
+pub fn prepare_resp_process_tool_governance_payload_json(
+    payload_json: String,
+) -> napi::Result<String> {
+    if payload_json.trim().is_empty() {
+        return Err(napi::Error::from_reason("Payload JSON is empty"));
+    }
+    let payload: Value = serde_json::from_str(&payload_json)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to parse payload JSON: {}", e)))?;
+    let output = prepare_payload_for_governance(&payload).map_err(napi::Error::from_reason)?;
+    serde_json::to_string(&output)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to serialize output: {}", e)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_prepare_payload_for_governance_coerces_responses_shape_and_harvests_text() {
+        let payload = serde_json::json!({
+            "object": "response",
+            "id": "resp_stage1_native",
+            "model": "gpt-test",
+            "status": "completed",
+            "output_text": "<function_calls>```bash\npwd\n```</function_calls>",
+            "output": []
+        });
+
+        let prepared = prepare_payload_for_governance(&payload).unwrap();
+        assert!(prepared.summary.converted);
+        assert!(prepared.summary.shape_sanitized);
+        assert_eq!(prepared.summary.harvested_tool_calls, 1);
+        assert_eq!(
+            prepared.prepared_payload["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
+            "exec_command"
+        );
+        assert_eq!(prepared.prepared_payload["choices"][0]["message"]["content"], "");
+    }
 
     #[test]
     fn test_govern_response_empty_payload() {

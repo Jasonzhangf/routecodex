@@ -45,7 +45,7 @@ export function applyRoutingInstructions(
 
   for (const instruction of instructions) {
     switch (instruction.type) {
-      case 'force':
+     case 'force':
         newState.forcedTarget = {
           provider: instruction.provider,
           keyAlias: instruction.keyAlias,
@@ -54,8 +54,15 @@ export function applyRoutingInstructions(
           pathLength: instruction.pathLength,
           processMode: instruction.processMode
         };
-        // 保留 stickyTarget，允许单次 force 覆盖但不清除持久 sticky
-        // newState.stickyTarget = undefined;
+        // force 指令同时设置 stickyTarget，确保后续请求继续使用该 provider
+        newState.stickyTarget = {
+          provider: instruction.provider,
+          keyAlias: instruction.keyAlias,
+          keyIndex: instruction.keyIndex,
+          model: instruction.model,
+          pathLength: instruction.pathLength,
+          processMode: instruction.processMode
+        };
         break;
       case 'sticky':
         newState.stickyTarget = {

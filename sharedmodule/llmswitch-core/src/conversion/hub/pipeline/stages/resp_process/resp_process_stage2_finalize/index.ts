@@ -5,7 +5,6 @@ import { buildProcessedRequestFromChatResponse } from '../../../../response/chat
 import type { ProcessedRequest } from '../../../../types/standardized.js';
 import { recordStage } from '../../../stages/utils.js';
 import { finalizeRespProcessChatResponseWithNative } from '../../../../../../router/virtual-router/engine-selection/native-chat-process-governance-semantics.js';
-import { normalizeReasoningInChatPayload } from '../../../../../shared/reasoning-normalizer.js';
 
 export interface RespProcessStage2FinalizeOptions {
   payload: JsonObject;
@@ -24,16 +23,6 @@ export interface RespProcessStage2FinalizeResult {
 export async function runRespProcessStage2Finalize(
   options: RespProcessStage2FinalizeOptions
 ): Promise<RespProcessStage2FinalizeResult> {
-  const endpoint = (options.entryEndpoint || '').toLowerCase();
-  const wantsAnthropicReasoning = endpoint.includes('/v1/messages');
-  const shouldNormalize = (options.reasoningMode && options.reasoningMode !== 'keep') || wantsAnthropicReasoning;
-  if (shouldNormalize) {
-    try {
-      normalizeReasoningInChatPayload(options.payload as any);
-    } catch {
-      // best-effort inline reasoning extraction
-    }
-  }
   const finalized = (await finalizeRespProcessChatResponseWithNative(
     {
       payload: options.payload,

@@ -29,6 +29,15 @@ export type NativeRespProcessToolGovernanceOutput = {
   };
 };
 
+export type NativeRespProcessToolGovernancePreparationOutput = {
+  preparedPayload: Record<string, unknown>;
+  summary: {
+    converted: boolean;
+    shapeSanitized: boolean;
+    harvestedToolCalls: number;
+  };
+};
+
 export type NativeRespProcessFinalizeInput = {
   payload: Record<string, unknown>;
   stream: boolean;
@@ -176,6 +185,54 @@ function parseRespProcessToolGovernancePayload(raw: string): NativeRespProcessTo
         applied,
         toolCallsNormalized: Math.floor(toolCallsNormalizedRaw),
         applyPatchRepaired: Math.floor(applyPatchRepairedRaw)
+      }
+    };
+  } catch {
+    return null;
+  }
+}
+
+function parseRespProcessToolGovernancePreparationPayload(
+  raw: string
+): NativeRespProcessToolGovernancePreparationOutput | null {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return null;
+    }
+    const row = parsed as Record<string, unknown>;
+    const preparedPayloadRaw =
+      row.prepared_payload && typeof row.prepared_payload === 'object' && !Array.isArray(row.prepared_payload)
+        ? (row.prepared_payload as Record<string, unknown>)
+        : row.preparedPayload && typeof row.preparedPayload === 'object' && !Array.isArray(row.preparedPayload)
+          ? (row.preparedPayload as Record<string, unknown>)
+          : null;
+    const summaryRaw =
+      row.summary && typeof row.summary === 'object' && !Array.isArray(row.summary)
+        ? (row.summary as Record<string, unknown>)
+        : null;
+    if (!preparedPayloadRaw || !summaryRaw) {
+      return null;
+    }
+
+    const converted = summaryRaw.converted === true;
+    const shapeSanitized = summaryRaw.shape_sanitized === true || summaryRaw.shapeSanitized === true;
+    const harvestedToolCallsRaw =
+      typeof summaryRaw.harvested_tool_calls === 'number'
+        ? summaryRaw.harvested_tool_calls
+        : typeof summaryRaw.harvestedToolCalls === 'number'
+          ? summaryRaw.harvestedToolCalls
+          : NaN;
+    if (!Number.isFinite(harvestedToolCallsRaw)) {
+      return null;
+    }
+
+    return {
+      preparedPayload: preparedPayloadRaw,
+      summary: {
+        converted,
+        shapeSanitized,
+        harvestedToolCalls: Math.floor(harvestedToolCallsRaw)
       }
     };
   } catch {
@@ -497,6 +554,36 @@ export function applyRespProcessToolGovernanceWithNative(
       return fail('empty result');
     }
     const parsed = parseRespProcessToolGovernancePayload(raw);
+    return parsed ?? fail('invalid payload');
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function prepareRespProcessToolGovernancePayloadWithNative(
+  payload: Record<string, unknown>
+): NativeRespProcessToolGovernancePreparationOutput {
+  const capability = 'prepareRespProcessToolGovernancePayloadJson';
+  const fail = (reason?: string): NativeRespProcessToolGovernancePreparationOutput =>
+    failNativeRequired<NativeRespProcessToolGovernancePreparationOutput>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const payloadJson = safeStringify(payload ?? {});
+  if (!payloadJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(payloadJson);
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    const parsed = parseRespProcessToolGovernancePreparationPayload(raw);
     return parsed ?? fail('invalid payload');
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');

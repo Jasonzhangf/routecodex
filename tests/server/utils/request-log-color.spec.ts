@@ -58,8 +58,8 @@ describe('request log color registry', () => {
     const token = resolveRequestLogColorToken('req-without-session');
     const line = colorizeRequestLog('[usage] request req-without-session', 'req-without-session');
 
-    expect(token).toBeUndefined();
-    expect(line).toBe('[usage] request req-without-session');
+    expect(token).toBe('\x1b[90m');
+    expect(line).toBe('\x1b[90m[usage] request req-without-session\x1b[0m');
   });
 
   it('uses explicit session context before request fallback', () => {

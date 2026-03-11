@@ -3,6 +3,7 @@ import { resolveSessionAnsiColor } from '../../utils/session-log-color.js';
 
 const ANSI_RESET = '\x1b[0m';
 const ANSI_PATTERN = /\x1b\[[0-9;]*m/;
+const ANSI_FALLBACK_LOG_COLOR = '\x1b[90m';
 const REQUEST_LOG_CONTEXT_TTL_MS = 30 * 60 * 1000;
 const REQUEST_LOG_CONTEXT_MAX = 4096;
 
@@ -114,7 +115,7 @@ export function resolveRequestLogColorToken(
   if (record) {
     REQUEST_LOG_CONTEXT.delete(requestKey);
   }
-  return undefined;
+  return ANSI_FALLBACK_LOG_COLOR;
 }
 
 export function colorizeRequestLog(

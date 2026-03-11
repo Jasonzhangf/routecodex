@@ -2,11 +2,16 @@ import type { FormatAdapter } from './index.js';
 import type { AdapterContext } from '../types/chat-envelope.js';
 import type { FormatEnvelope } from '../types/format-envelope.js';
 import type { JsonObject, JsonValue } from '../types/json.js';
-import { normalizeReasoningInResponsesPayload } from '../../shared/reasoning-normalizer.js';
 import {
   parseReqInboundFormatEnvelopeWithNative,
   parseRespInboundFormatEnvelopeWithNative
 } from '../../../router/virtual-router/engine-selection/native-hub-pipeline-edge-stage-semantics.js';
+import {
+  normalizeReqInboundReasoningPayloadWithNative
+} from '../../../router/virtual-router/engine-selection/native-hub-pipeline-req-inbound-semantics.js';
+import {
+  normalizeRespInboundReasoningPayloadWithNative
+} from '../../../router/virtual-router/engine-selection/native-hub-pipeline-resp-semantics.js';
 
 interface ResponsesFormatPayload extends JsonObject {
   input?: JsonValue[];
@@ -24,11 +29,10 @@ export class ResponsesFormatAdapter implements FormatAdapter {
       rawRequest: original as unknown as Record<string, unknown>,
       protocol: this.protocol
     });
-    const payload = parsed.payload as ResponsesFormatPayload;
-    normalizeReasoningInResponsesPayload(payload, {
-      includeInput: true,
-      includeInstructions: true
-    });
+    const payload = normalizeReqInboundReasoningPayloadWithNative({
+      payload: parsed.payload as Record<string, unknown>,
+      protocol: this.protocol
+    }) as ResponsesFormatPayload;
     return {
       protocol: this.protocol,
       direction: 'request',
@@ -45,11 +49,10 @@ export class ResponsesFormatAdapter implements FormatAdapter {
       payload: original as unknown as Record<string, unknown>,
       protocol: this.protocol
     });
-    const payload = parsed.payload as ResponsesFormatPayload;
-    normalizeReasoningInResponsesPayload(payload, {
-      includeOutput: true,
-      includeRequiredAction: true
-    });
+    const payload = normalizeRespInboundReasoningPayloadWithNative({
+      payload: parsed.payload as Record<string, unknown>,
+      protocol: this.protocol
+    }) as ResponsesFormatPayload;
     return {
       protocol: this.protocol,
       direction: 'response',

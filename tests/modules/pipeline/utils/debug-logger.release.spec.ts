@@ -45,6 +45,30 @@ describe('PipelineDebugLogger release console behavior', () => {
     expect(errorSpy).not.toHaveBeenCalled();
   });
 
+  it('passes session id through virtual-router-hit logger output', async () => {
+    delete process.env.ROUTECODEX_PIPELINE_LOG_VERBOSE;
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+
+    const PipelineDebugLogger = await importLoggerWithMode('release');
+    const logger = new PipelineDebugLogger({}, { enableConsoleLogging: true });
+
+    logger.logVirtualRouterHit('tools/tools-primary', 'provider.key1', 'model-a', 'session-123');
+
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('[session-123]'));
+  });
+
+  it('does not prepend undefined text when virtual-router-hit has no session id', async () => {
+    delete process.env.ROUTECODEX_PIPELINE_LOG_VERBOSE;
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+
+    const PipelineDebugLogger = await importLoggerWithMode('release');
+    const logger = new PipelineDebugLogger({}, { enableConsoleLogging: true });
+
+    logger.logVirtualRouterHit('coding/coding-primary', 'provider.key1', 'model-a');
+
+    expect(String(logSpy.mock.calls[0]?.[0] ?? '')).not.toContain('undefinedcoding');
+  });
+
   it('allows release pipeline/provider console logs to be disabled via env override', async () => {
     process.env.ROUTECODEX_PIPELINE_LOG_VERBOSE = '0';
     const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});

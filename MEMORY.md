@@ -292,3 +292,34 @@ Tags: rust, silent-failure, error-handling, routing-state, snapshot
 - 调试边界：如果 `virtual-router-hit` 有颜色而 host `usage/completed` 仍是白色，问题已经收缩到 host runtime 没有拿到/保留同一 session 标识，而不是颜色算法分叉。
 
 Tags: session-color, virtual-router-hit, usage-log, http-log, single-source-of-truth, host, sharedmodule, no-color
+
+## Codex Reasoning Display 排查 (2026-03-11 18:04:58 +08:00)
+
+### 结论
+- `~/.codex/config.toml` 中的 `model_reasoning_summary` 和 `model_verbosity` 确实会被 Codex 读取。
+- 优先级是 `config.toml/profile` 覆盖 `model_catalog.routecodex.json` 默认值。
+- `model_reasoning_summary = "detailed"` 不等于 UI 一定显示很多内容；它只是请求模型返回更详细 summary。
+- 如果界面仍然显示很少，常见原因是客户端没有打开 raw reasoning 展示，需额外设置 `show_raw_agent_reasoning = true`。
+- 当前 `gpt-5.4` 在 `~/.codex/model_catalog.routecodex.json` 中声明：
+  - `supports_reasoning_summaries = true`
+  - `default_reasoning_summary = "none"`
+  但该默认值会被 `config.toml` 覆盖，不是本次无变化的根因。
+
+### 代码证据
+- `codex-rs/core/src/config/mod.rs`
+  - 读取 `model_reasoning_summary` / `model_verbosity`
+  - profile 优先于全局：`config_profile.xxx.or(cfg.xxx)`
+- `codex-rs/core/src/codex.rs`
+  - session/per-turn 会继续携带 `model_reasoning_summary`
+  - 最终用 `config` 值，否则回退 `model_info.default_reasoning_summary`
+- `codex-rs/core/src/client.rs`
+  - 若模型支持 reasoning summaries，会把 summary 传给 Responses API
+- `codex-rs/core/src/config/mod.rs` + `codex-rs/core/src/codex.rs`
+  - raw reasoning 展示还受 `show_raw_agent_reasoning` 控制
+
+### 建议
+- 若用户反馈“重启后 reasoning 还是很少”，优先检查并建议：
+  - `show_raw_agent_reasoning = true`
+- 不要先怀疑 `model_reasoning_summary` 未读取，除非本地代码版本明显落后或配置路径未生效。
+
+Tags: codex, reasoning-summary, show-raw-agent-reasoning, config, model-catalog, display-debug

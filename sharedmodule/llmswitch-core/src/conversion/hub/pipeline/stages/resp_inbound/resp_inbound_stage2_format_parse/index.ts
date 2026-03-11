@@ -8,11 +8,8 @@ import {
   sanitizeFormatEnvelopeWithNative
 } from '../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-edge-stage-semantics.js';
 import {
-  normalizeReasoningInAnthropicPayload,
-  normalizeReasoningInChatPayload,
-  normalizeReasoningInGeminiPayload,
-  normalizeReasoningInResponsesPayload
-} from '../../../../../shared/reasoning-normalizer.js';
+  normalizeRespInboundReasoningPayloadWithNative
+} from '../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-resp-semantics.js';
 
 export interface RespInboundStage2FormatParseOptions {
   adapterContext: AdapterContext;
@@ -31,32 +28,16 @@ function resolveProtocolToken(adapterContext: AdapterContext): string {
   return 'openai-chat';
 }
 
-function applyReasoningNormalization(payload: JsonObject, protocol: string): void {
-  if (protocol === 'openai-responses') {
-    normalizeReasoningInResponsesPayload(payload as unknown as Record<string, unknown>, {
-      includeOutput: true,
-      includeRequiredAction: true
-    });
-    return;
-  }
-  if (protocol === 'anthropic-messages') {
-    normalizeReasoningInAnthropicPayload(payload);
-    return;
-  }
-  if (protocol === 'gemini-chat') {
-    normalizeReasoningInGeminiPayload(payload);
-    return;
-  }
-  normalizeReasoningInChatPayload(payload as any);
-}
-
 export async function runRespInboundStage2FormatParse(
   options: RespInboundStage2FormatParseOptions
 ): Promise<FormatEnvelope<JsonObject>> {
   const protocol = resolveProtocolToken(options.adapterContext);
-  applyReasoningNormalization(options.payload, protocol);
-  const envelopeRaw = parseRespInboundFormatEnvelopeWithNative({
+  const normalizedPayload = normalizeRespInboundReasoningPayloadWithNative({
     payload: options.payload as unknown as Record<string, unknown>,
+    protocol
+  }) as JsonObject;
+  const envelopeRaw = parseRespInboundFormatEnvelopeWithNative({
+    payload: normalizedPayload as unknown as Record<string, unknown>,
     protocol
   }) as unknown as FormatEnvelope<JsonObject>;
   const envelope = sanitizeFormatEnvelopeWithNative(envelopeRaw) as FormatEnvelope<JsonObject>;

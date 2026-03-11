@@ -81,6 +81,14 @@ function parseBoolean(raw: string): boolean | null {
   }
 }
 
+function parseUnknown(raw: string): unknown | null {
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch {
+    return null;
+  }
+}
+
 function parseStringOrUndefined(raw: string): string | undefined | null {
   try {
     const parsed = JSON.parse(raw) as unknown;
@@ -91,6 +99,11 @@ function parseStringOrUndefined(raw: string): string | undefined | null {
   } catch {
     return null;
   }
+}
+
+export interface NativeRespInboundReasoningNormalizeInput {
+  payload: Record<string, unknown>;
+  protocol: string;
 }
 
 function parseContextLengthDiagnostics(
@@ -112,6 +125,62 @@ function parseContextLengthDiagnostics(
       output.maxContextTokens = Math.floor(maxContext);
     }
     return output;
+  } catch {
+    return null;
+  }
+}
+
+function parseRespInboundSseErrorDescriptor(
+  raw: string
+): {
+  code: 'SSE_DECODE_ERROR' | 'HTTP_502';
+  protocol: string;
+  providerType?: string;
+  errorMessage: string;
+  details: Record<string, unknown>;
+  stageRecord: Record<string, unknown>;
+  status?: number;
+} | null {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return null;
+    }
+    const row = parsed as Record<string, unknown>;
+    const code = row.code;
+    const protocol = row.protocol;
+    const errorMessage = row.errorMessage;
+    const details = row.details;
+    const stageRecord = row.stageRecord;
+    const status = row.status;
+    const providerType = row.providerType;
+    if ((code !== 'SSE_DECODE_ERROR' && code !== 'HTTP_502') || typeof protocol !== 'string' || !protocol.trim()) {
+      return null;
+    }
+    if (typeof errorMessage !== 'string' || !errorMessage.trim()) {
+      return null;
+    }
+    if (!details || typeof details !== 'object' || Array.isArray(details)) {
+      return null;
+    }
+    if (!stageRecord || typeof stageRecord !== 'object' || Array.isArray(stageRecord)) {
+      return null;
+    }
+    if (providerType != null && typeof providerType !== 'string') {
+      return null;
+    }
+    if (status != null && (typeof status !== 'number' || !Number.isFinite(status))) {
+      return null;
+    }
+    return {
+      code,
+      protocol: protocol.trim(),
+      providerType: typeof providerType === 'string' && providerType.trim() ? providerType.trim() : undefined,
+      errorMessage,
+      details: details as Record<string, unknown>,
+      stageRecord: stageRecord as Record<string, unknown>,
+      status: typeof status === 'number' ? Math.floor(status) : undefined
+    };
   } catch {
     return null;
   }
@@ -390,6 +459,81 @@ export function isContextLengthExceededSignalWithNative(
     }
     const parsed = parseBoolean(raw);
     return parsed === null ? fail('invalid payload') : parsed;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function buildRespInboundSseErrorDescriptorWithNative(input: unknown): {
+  code: 'SSE_DECODE_ERROR' | 'HTTP_502';
+  protocol: string;
+  providerType?: string;
+  errorMessage: string;
+  details: Record<string, unknown>;
+  stageRecord: Record<string, unknown>;
+  status?: number;
+} {
+  const capability = 'buildRespInboundSseErrorDescriptorJson';
+  const fail = (reason?: string) => failNativeRequired<{
+    code: 'SSE_DECODE_ERROR' | 'HTTP_502';
+    protocol: string;
+    providerType?: string;
+    errorMessage: string;
+    details: Record<string, unknown>;
+    stageRecord: Record<string, unknown>;
+    status?: number;
+  }>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const inputJson = safeStringify(input ?? null);
+  if (!inputJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(inputJson);
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    const parsed = parseRespInboundSseErrorDescriptor(raw);
+    return parsed ?? fail('invalid payload');
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function normalizeRespInboundReasoningPayloadWithNative(
+  input: NativeRespInboundReasoningNormalizeInput
+): Record<string, unknown> {
+  const capability = 'normalizeRespInboundReasoningPayloadJson';
+  const fail = (reason?: string) => failNativeRequired<Record<string, unknown>>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const inputJson = safeStringify(input);
+  if (!inputJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(inputJson);
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    const parsed = parseUnknown(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return fail('invalid payload');
+    }
+    return parsed as Record<string, unknown>;
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
     return fail(reason);

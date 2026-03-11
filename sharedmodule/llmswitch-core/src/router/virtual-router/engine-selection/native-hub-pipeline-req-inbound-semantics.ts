@@ -34,6 +34,11 @@ export interface NativeReqInboundChatToStandardizedInput {
   requestId?: string;
 }
 
+export interface NativeReqInboundReasoningNormalizeInput {
+  payload: Record<string, unknown>;
+  protocol: string;
+}
+
 function readNativeFunction(name: string): ((...args: unknown[]) => unknown) | null {
   const binding = loadNativeRouterHotpathBindingForInternalUse() as Record<string, unknown> | null;
   const fn = binding?.[name];
@@ -60,6 +65,14 @@ function parseBoolean(raw: string): boolean | null {
   try {
     const parsed = JSON.parse(raw) as unknown;
     return typeof parsed === 'boolean' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseUnknown(raw: string): unknown | null {
+  try {
+    return JSON.parse(raw) as unknown;
   } catch {
     return null;
   }
@@ -158,6 +171,38 @@ export function sanitizeReqInboundFormatEnvelopeWithNative<T>(
   candidate: unknown
 ): T {
   return sanitizeFormatEnvelopeWithNative(candidate) as T;
+}
+
+export function normalizeReqInboundReasoningPayloadWithNative(
+  input: NativeReqInboundReasoningNormalizeInput
+): Record<string, unknown> {
+  const capability = 'normalizeReqInboundReasoningPayloadJson';
+  const fail = (reason?: string) => failNativeRequired<Record<string, unknown>>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const inputJson = safeStringify(input);
+  if (!inputJson) {
+    return fail('json stringify failed');
+  }
+  try {
+    const raw = fn(inputJson);
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    const parsed = parseUnknown(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return fail('invalid payload');
+    }
+    return parsed as Record<string, unknown>;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
 }
 
 export function mapReqInboundResumeToolOutputsDetailedWithNative(

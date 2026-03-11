@@ -26,7 +26,7 @@ import { resolveStopMessageScope } from './engine/routing-state/store.js';
 import { loadRoutingInstructionStateSync } from './sticky-session-store.js';
 import { mergeStopMessageFromPersisted } from './stop-message-state-sync.js';
 import type { RoutingInstructionState } from './routing-instructions.js';
-import { resolveSessionColor } from './engine-logging.js';
+import { resolveRouteColor, resolveSessionColor } from './engine-logging.js';
 
 export class VirtualRouterEngine {
   private readonly nativeProxy: NativeVirtualRouterEngineProxy;
@@ -399,7 +399,7 @@ function emitVirtualRouterHitLog(result: {
   const routeLabel = result.decision.poolId
     ? `${result.decision.routeName}/${result.decision.poolId}`
     : result.decision.routeName;
-  const routeColor = resolveSessionColor(options?.sessionId);
+  const routeColor = resolveSessionColor(options?.sessionId) || resolveRouteColor(result.decision.routeName);
   const providerKey = result.decision.providerKey || result.target.providerKey;
   const modelSuffix = result.target.modelId ? `.${result.target.modelId}` : '';
   const reason = result.decision.reasoning ? ` reason=${result.decision.reasoning}` : '';

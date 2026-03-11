@@ -2,11 +2,16 @@ import type { FormatAdapter } from './index.js';
 import type { AdapterContext } from '../types/chat-envelope.js';
 import type { FormatEnvelope } from '../types/format-envelope.js';
 import type { JsonObject } from '../types/json.js';
-import { normalizeReasoningInGeminiPayload } from '../../shared/reasoning-normalizer.js';
 import {
   parseReqInboundFormatEnvelopeWithNative,
   parseRespInboundFormatEnvelopeWithNative
 } from '../../../router/virtual-router/engine-selection/native-hub-pipeline-edge-stage-semantics.js';
+import {
+  normalizeReqInboundReasoningPayloadWithNative
+} from '../../../router/virtual-router/engine-selection/native-hub-pipeline-req-inbound-semantics.js';
+import {
+  normalizeRespInboundReasoningPayloadWithNative
+} from '../../../router/virtual-router/engine-selection/native-hub-pipeline-resp-semantics.js';
 
 interface GeminiFormatPayload extends JsonObject {
   contents?: JsonObject[];
@@ -21,8 +26,10 @@ export class GeminiFormatAdapter implements FormatAdapter {
       rawRequest: original as unknown as Record<string, unknown>,
       protocol: this.protocol
     });
-    const payload = parsed.payload as GeminiFormatPayload;
-    normalizeReasoningInGeminiPayload(payload);
+    const payload = normalizeReqInboundReasoningPayloadWithNative({
+      payload: parsed.payload as Record<string, unknown>,
+      protocol: this.protocol
+    }) as GeminiFormatPayload;
     return {
       protocol: this.protocol,
       direction: 'request',
@@ -39,8 +46,10 @@ export class GeminiFormatAdapter implements FormatAdapter {
       payload: original as unknown as Record<string, unknown>,
       protocol: this.protocol
     });
-    const payload = parsed.payload as GeminiFormatPayload;
-    normalizeReasoningInGeminiPayload(payload);
+    const payload = normalizeRespInboundReasoningPayloadWithNative({
+      payload: parsed.payload as Record<string, unknown>,
+      protocol: this.protocol
+    }) as GeminiFormatPayload;
     return {
       protocol: this.protocol,
       direction: 'response',
