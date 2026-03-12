@@ -566,6 +566,8 @@ export async function convertProviderResponse(
     'resp_process.stage2_finalize',
     () => runRespProcessStage2Finalize({
       payload: governanceResult.governedPayload,
+      originalPayload: effectiveChatResponse as JsonObject,
+      skipServerToolStrip: isFollowup,
       entryEndpoint: options.entryEndpoint,
       requestId: options.context.requestId,
       wantsStream,

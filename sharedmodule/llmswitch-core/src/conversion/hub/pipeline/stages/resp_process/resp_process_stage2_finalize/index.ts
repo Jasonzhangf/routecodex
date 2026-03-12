@@ -6,9 +6,12 @@ import type { ProcessedRequest } from '../../../../types/standardized.js';
 import { recordStage } from '../../../stages/utils.js';
 import { isHubStageTimingDetailEnabled, logHubStageTiming } from '../../../hub-stage-timing.js';
 import { finalizeRespProcessChatResponseWithNative } from '../../../../../../router/virtual-router/engine-selection/native-chat-process-governance-semantics.js';
+import { filterOutExecutedServerToolCalls } from '../../../../../../servertool/strip-servertool-calls.js';
 
 export interface RespProcessStage2FinalizeOptions {
   payload: JsonObject;
+  originalPayload?: JsonObject;
+  skipServerToolStrip?: boolean;
   entryEndpoint: string;
   requestId: string;
   wantsStream: boolean;
@@ -27,7 +30,7 @@ export async function runRespProcessStage2Finalize(
   const forceDetailLog = isHubStageTimingDetailEnabled();
   logHubStageTiming(options.requestId, 'resp_process.stage2_native_finalize', 'start');
   const nativeFinalizeStart = Date.now();
-  const finalized = (await finalizeRespProcessChatResponseWithNative(
+  let finalized = (await finalizeRespProcessChatResponseWithNative(
     {
       payload: options.payload,
       stream: options.wantsStream,
@@ -36,6 +39,12 @@ export async function runRespProcessStage2Finalize(
       requestId: options.requestId
     }
   )) as JsonObject;
+
+  // Strip executed servertool calls before returning to client (single source of truth).
+  const stripSource = options.originalPayload ?? options.payload;
+  if (!options.skipServerToolStrip && stripSource && typeof stripSource === 'object') {
+    finalized = filterOutExecutedServerToolCalls(finalized, stripSource as JsonObject);
+  }
   logHubStageTiming(options.requestId, 'resp_process.stage2_native_finalize', 'completed', {
     elapsedMs: Date.now() - nativeFinalizeStart,
     forceLog: forceDetailLog

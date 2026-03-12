@@ -116,6 +116,50 @@ function buildAutoHookQueues(hooks: AutoHookDescriptor[]): {
   return { optionalQueue, mandatoryQueue };
 }
 
+// Extract tool calls from messages array (for Responses API and tool_governance stage)
+function extractToolCallsFromMessagesArray(chatResponse: JsonObject): ToolCall[] {
+  const messages = getArray((chatResponse as any).messages);
+  const calls: ToolCall[] = [];
+  for (const msg of messages) {
+    const msgObj = asObject(msg);
+    if (!msgObj) continue;
+    const role = (msgObj as any).role;
+    if (role !== 'assistant') continue;
+    const toolCalls = getArray((msgObj as any).tool_calls);
+    for (const raw of toolCalls) {
+      const tc = asObject(raw);
+      if (!tc) continue;
+      const id = ensureToolCallId(tc as Record<string, unknown>);
+      const fn =
+        asObject((tc as Record<string, unknown>).function) ??
+        asObject((tc as Record<string, unknown>).functionCall) ??
+        asObject((tc as Record<string, unknown>).function_call);
+      const name = fn && typeof fn.name === 'string' && fn.name.trim() ? fn.name.trim() : '';
+      const rawArgs =
+        (fn ? (fn as Record<string, unknown>).arguments : undefined) ??
+        (fn ? (fn as Record<string, unknown>).args : undefined) ??
+        (fn ? (fn as Record<string, unknown>).input : undefined) ??
+        (tc as Record<string, unknown>).arguments ??
+        (tc as Record<string, unknown>).args ??
+        (tc as Record<string, unknown>).input;
+      let args = '';
+      if (typeof rawArgs === 'string') {
+        args = rawArgs;
+      } else if (rawArgs && typeof rawArgs === 'object') {
+        try {
+          args = JSON.stringify(rawArgs);
+        } catch {
+          args = '';
+        }
+      } else if (rawArgs !== undefined && rawArgs !== null) {
+        args = String(rawArgs);
+      }
+      calls.push({ id, name, arguments: args });
+    }
+  }
+  return calls;
+}
+
 function normalizeFilterTokenSet(values: string[] | undefined): Set<string> | null {
   if (!Array.isArray(values) || values.length === 0) {
     return null;
@@ -377,7 +421,12 @@ export async function runServerSideToolEngine(
     return { mode: 'passthrough', finalChatResponse: options.chatResponse };
   }
 
-  const toolCalls = extractToolCalls(base);
+  let toolCalls = extractToolCalls(base);
+
+  // Fallback: Responses API and tool_governance stage use messages array instead of choices
+  if (toolCalls.length === 0) {
+    toolCalls = extractToolCallsFromMessagesArray(base);
+  }
   if (isClientDisconnected(options.adapterContext) && toolCalls.length > 0) {
     // When client is already disconnected, skip executing explicit tool_call servertools.
     // Auto hooks (e.g. stop_message_auto) still need to run to keep session state consistent.
@@ -492,8 +541,7 @@ export async function runServerSideToolEngine(
           toolCall.name,
           JSON.stringify({ ok: false, tool: toolCall.name, message, retryable: true })
         );
-        executedToolCalls.push(toolCall);
-        executedIds.add(toolCall.id);
+        // Preserve failed tool_calls for the client; do not mark as executed.
         executedFlowIds.push(`${toolCall.name}_error`);
       }
     }
