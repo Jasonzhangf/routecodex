@@ -33,6 +33,10 @@ ChatResponse'（带 tool_outputs 或跟进答案）
 RespProcess / RespOutbound → 客户端协议 (Chat/Responses/Anthropic)
 ```
 
+补充：`continue_execution` 的 tool_call 对客户端必须透明。为避免客户端收到该工具调用（会被判定 unsupported），
+响应侧在 `resp_process_stage2_finalize` 统一剥离 `continue_execution` 的 tool_call，且将对应 choice 的
+`finish_reason` 从 `tool_calls` 修正为 `stop`。该处理是全协议唯一入口，不在 Host/Provider 层兜底。
+
 Host 侧只需提供：
 
 - `providerInvoker`：给定 providerKey + payload，调用 Provider runtime 并返回 JSON；

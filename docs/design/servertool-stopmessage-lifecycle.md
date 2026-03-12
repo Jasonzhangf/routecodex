@@ -45,6 +45,11 @@ Design goals:
 - Normal servertools (e.g. search/vision) may use `reenterPipeline`.
 - `stopMessage/clock/continue_execution` must use client injection dispatcher only.
 
+2. Continue-execution stripping:
+- `continue_execution` 的 tool_call 对客户端必须透明；响应侧在 chat process 的
+  `resp_process_stage2_finalize` 统一剥离该 tool_call，并将对应 choice 的
+  `finish_reason` 从 `tool_calls` 修正为 `stop`。
+
 2. No fallback:
 - No old session-based fallback compare.
 - No daemon-only fallback for stopMessage matching.
