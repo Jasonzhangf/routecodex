@@ -64,7 +64,7 @@ async function resolveTokenForCamoufox(opts: {
     return fromDaemon;
   }
 
-  // Allow passing an absolute/relative path outside ~/.routecodex/auth.
+  // Allow passing an absolute/relative path outside ~/.rcc/auth.
   const expanded = expandHome(pathImpl, homedir, trimmed);
   const filePath = pathImpl.isAbsolute(expanded) ? expanded : pathImpl.resolve(expanded);
   try {
@@ -99,7 +99,7 @@ export function createCamoufoxCommand(
     .description('Launch Camoufox using the fingerprint+profile derived from an OAuth token file (养号/verify)')
     .argument(
       '<authfile>',
-      'Token selector: file basename or full path (e.g. "antigravity-oauth-3-alias.json" or "~/.routecodex/auth/antigravity-oauth-3-alias.json")'
+      'Token selector: file basename or full path (e.g. "antigravity-oauth-3-alias.json" or "~/.rcc/auth/antigravity-oauth-3-alias.json")'
     )
     .option('--url <url>', 'Initial URL to open', 'https://accounts.google.com/')
     .action(async (authfile: string, options: { url?: string }) => {
@@ -146,4 +146,3 @@ export function createCamoufoxCommand(
       }
     });
 }
-

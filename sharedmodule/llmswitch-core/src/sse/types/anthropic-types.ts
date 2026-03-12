@@ -13,6 +13,12 @@ export interface AnthropicContentTextBlock {
 export interface AnthropicContentThinkingBlock {
   type: 'thinking';
   text: string;
+  signature?: string;
+}
+
+export interface AnthropicContentRedactedThinkingBlock {
+  type: 'redacted_thinking';
+  data: string;
 }
 
 export interface AnthropicContentToolUseBlock {
@@ -32,6 +38,7 @@ export interface AnthropicContentToolResultBlock {
 export type AnthropicContentBlock =
   | AnthropicContentTextBlock
   | AnthropicContentThinkingBlock
+  | AnthropicContentRedactedThinkingBlock
   | AnthropicContentToolUseBlock
   | AnthropicContentToolResultBlock;
 
@@ -55,6 +62,15 @@ export interface AnthropicEventStats {
   thinkingBlocks: number;
   textBlocks: number;
   errors: number;
+  chunkCount?: number;
+  byteCount?: number;
+  parserMs?: number;
+  builderMs?: number;
+  firstChunkAtMs?: number;
+  lastChunkAtMs?: number;
+  firstEventAtMs?: number;
+  lastEventAtMs?: number;
+  messageStopSeen?: boolean;
   startTime: number;
   endTime?: number;
 }
@@ -135,7 +151,8 @@ export interface AnthropicSseEventContentBlockStart extends AnthropicSseEventBas
     index: number;
     content_block:
       | { type: 'text'; text?: string }
-      | { type: 'thinking'; text?: string }
+      | { type: 'thinking'; text?: string; signature?: string }
+      | { type: 'redacted_thinking'; data?: string }
       | { type: 'tool_use'; id: string; name: string; input?: Record<string, unknown> }
       | { type: 'tool_result'; tool_use_id: string; content?: unknown; is_error?: boolean };
   };
@@ -147,7 +164,8 @@ export interface AnthropicSseEventContentBlockDelta extends AnthropicSseEventBas
     index: number;
     delta:
       | { type: 'text_delta'; text: string }
-      | { type: 'thinking_delta'; text: string }
+      | { type: 'thinking_delta'; text?: string; thinking?: string }
+      | { type: 'signature_delta'; signature: string }
       | { type: 'input_json_delta'; partial_json: string }
       | { type: 'output_json_delta'; partial_json: string };
   };

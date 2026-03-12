@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
+import { resolveRccCamoufoxFingerprintDir } from '../../config/user-data-paths.js';
 
 import { getCamoufoxProfileDir } from '../core/config/camoufox-launcher.js';
 
@@ -11,8 +11,7 @@ export type AntigravityCamoufoxFingerprint = {
 };
 
 function getFingerprintRoot(): string {
-  const home = process.env.HOME || os.homedir();
-  return path.join(home, '.routecodex', 'camoufox-fp');
+  return resolveRccCamoufoxFingerprintDir();
 }
 
 function getFingerprintPath(profileId: string): string {
@@ -112,4 +111,3 @@ export async function loadAntigravityCamoufoxFingerprint(alias: string): Promise
     navigatorOscpu: typeof navigatorOscpu === 'string' ? navigatorOscpu : undefined
   };
 }
-

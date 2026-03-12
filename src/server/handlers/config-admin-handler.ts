@@ -2,8 +2,8 @@ import type { Request, Response } from 'express';
 import fs from 'fs/promises';
 import fsSync from 'fs';
 import path from 'path';
-import { homedir } from 'os';
 import { resolveRouteCodexConfigPath } from '../../config/config-paths.js';
+import { resolveRccProviderDir } from '../../config/user-data-paths.js';
 import { getBootstrapProviderTemplates, isManagedBootstrapTemplate } from '../../cli/config/bootstrap-provider-templates.js';
 import { loadRouteCodexConfig } from '../../config/routecodex-config-loader.js';
 import { ServerFactory } from '../../server-factory.js';
@@ -17,7 +17,7 @@ type ReloadableServerInstance = ServerInstance & {
 /**
  * 与 index.ts 中逻辑对齐：解析用户配置文件路径。
  * 优先使用环境变量（RCC4_CONFIG_PATH / ROUTECODEX_CONFIG / ROUTECODEX_CONFIG_PATH），
- * 否则退回共享解析（~/.routecodex/config.json 或默认配置）。
+ * 否则退回共享解析（~/.rcc/config.json 或默认配置）。
  */
 function pickUserConfigPath(): string {
   const envPaths = [
@@ -40,7 +40,7 @@ function pickUserConfigPath(): string {
 
 /**
  * Provider 模板与独立 Provider 配置所在目录。
- * 默认：~/.routecodex/provider
+ * 默认：~/.rcc/provider
  * 可通过 ROUTECODEX_PROVIDER_DIR 覆盖。
  */
 function pickProviderDirectoryPath(): string {
@@ -48,7 +48,7 @@ function pickProviderDirectoryPath(): string {
   if (envPath) {
     return envPath;
   }
-  return path.join(homedir(), '.routecodex', 'provider');
+  return resolveRccProviderDir();
 }
 
 export async function handleGetUserConfig(req: Request, res: Response): Promise<void> {
@@ -80,7 +80,7 @@ export async function handleGetUserConfig(req: Request, res: Response): Promise<
  * 列出 Provider 模板与独立 Provider 配置。
  *
  * - 模板（templates）：目前提供少量内置模板，用于快速创建 provider 配置。
- * - 独立 Provider（standalone）：来自 ~/.routecodex/provider/*.json，
+ * - 独立 Provider（standalone）：来自 ~/.rcc/provider/*.json，
  *   并标记是否已在当前 user config 中被引用（boundToConfig）。
  */
 export async function handleListProviderTemplates(req: Request, res: Response): Promise<void> {
@@ -101,7 +101,7 @@ export async function handleListProviderTemplates(req: Request, res: Response): 
       // 若读取失败，不阻止模板列表返回；仅视为无绑定信息
     }
 
-    // 2) 独立 Provider 配置：~/.routecodex/provider/*.json
+    // 2) 独立 Provider 配置：~/.rcc/provider/*.json
     const providerDir = pickProviderDirectoryPath();
     const standalone: Array<{
       id: string;

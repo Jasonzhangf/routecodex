@@ -49,7 +49,7 @@ export function registerOAuthPortalRoute(app: Application): void {
     const provider = typeof req.query.provider === 'string' ? req.query.provider : 'unknown-provider';
     const alias = typeof req.query.alias === 'string' ? req.query.alias : 'default';
     const tokenFile =
-      typeof req.query.tokenFile === 'string' ? req.query.tokenFile : '~/.routecodex/auth/unknown-token.json';
+      typeof req.query.tokenFile === 'string' ? req.query.tokenFile : '~/.rcc/auth/unknown-token.json';
     const oauthUrl =
       typeof req.query.oauthUrl === 'string'
         ? req.query.oauthUrl
@@ -100,6 +100,7 @@ const CODEX_RESPONSES_MODEL_PRESETS: Record<string, Record<string, unknown>> = {
     truncation_policy: { mode: 'tokens', limit: 10000 },
     supports_parallel_tool_calls: true,
     reasoning_summary_format: 'experimental',
+    supports_reasoning_summaries: true,
     default_reasoning_summary: 'none',
     default_reasoning_level: 'medium',
     supported_reasoning_levels: DEFAULT_REASONING_LEVELS,
@@ -120,6 +121,7 @@ const CODEX_RESPONSES_MODEL_PRESETS: Record<string, Record<string, unknown>> = {
     truncation_policy: { mode: 'tokens', limit: 10000 },
     supports_parallel_tool_calls: true,
     reasoning_summary_format: 'experimental',
+    supports_reasoning_summaries: true,
     default_reasoning_summary: 'none',
     default_reasoning_level: 'medium',
     supported_reasoning_levels: DEFAULT_REASONING_LEVELS,

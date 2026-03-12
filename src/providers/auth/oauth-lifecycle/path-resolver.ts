@@ -7,6 +7,11 @@
 import fsSync from 'fs';
 import path from 'path';
 import os from 'os';
+import {
+  resolveRccAuthDir,
+  resolveRccAuthDirForRead,
+  resolveRccTokensDir
+} from '../../../config/user-data-paths.js';
 
 const GEMINI_CLI_PROVIDER_IDS = new Set(['gemini-cli', 'antigravity']);
 
@@ -19,20 +24,19 @@ export function expandHome(p: string): string {
 }
 
 export function defaultTokenFile(providerType: string): string {
-  const home = process.env.HOME || '';
   if (providerType === 'iflow') {
-    return path.join(home, '.routecodex', 'auth', 'iflow-oauth-1-default.json');
+    return path.join(resolveRccAuthDir(), 'iflow-oauth-1-default.json');
   }
   if (providerType === 'qwen') {
-    return path.join(home, '.routecodex', 'auth', 'qwen-oauth-1-default.json');
+    return path.join(resolveRccAuthDir(), 'qwen-oauth-1-default.json');
   }
   if (isGeminiCliFamily(providerType)) {
     const file = providerType.toLowerCase() === 'antigravity'
       ? 'antigravity-oauth.json'
       : 'gemini-oauth.json';
-    return path.join(home, '.routecodex', 'auth', file);
+    return path.join(resolveRccAuthDir(), file);
   }
-  return path.join(home, '.routecodex', 'tokens', `${providerType}-default.json`);
+  return path.join(resolveRccTokensDir(), `${providerType}-default.json`);
 }
 
 export function resolveIflowCredentialCandidates(): string[] {
@@ -67,8 +71,7 @@ export function resolveTokenFilePath(auth: ExtendedOAuthAuth, providerType: stri
   }
 
   const alias = raw;
-  const homeDir = process.env.HOME || os.homedir();
-  const authDir = path.join(homeDir, '.routecodex', 'auth');
+  const authDir = resolveRccAuthDirForRead();
   const pattern = new RegExp(`^${providerType}-oauth-(\\d+)(?:-(.+))?\\.json$`, 'i');
 
   const pt = providerType.toLowerCase();

@@ -1,7 +1,6 @@
 import { Command } from 'commander';
 import fs from 'fs/promises';
 import path from 'path';
-import { homedir } from 'os';
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import { TokenDaemon } from '../token-daemon/index.js';
@@ -16,12 +15,13 @@ import {
   tryAcquireTokenManagerLeader,
   releaseTokenManagerLeader
 } from '../token-daemon/leader-lock.js';
+import { resolveRccPath } from '../config/user-data-paths.js';
 import { logProcessLifecycle } from '../utils/process-lifecycle-logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const TOKEN_DAEMON_PID_FILE = path.join(homedir(), '.routecodex', 'token-daemon.pid');
+const TOKEN_DAEMON_PID_FILE = resolveRccPath('token-daemon.pid');
 const CLI_ENTRY = path.resolve(__dirname, '../cli.js');
 
 async function safeInteractiveRefresh(selector: string, options: { force?: boolean }): Promise<void> {

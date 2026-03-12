@@ -7,7 +7,7 @@ import os from 'os';
 import path from 'path';
 import { pathToFileURL } from 'url';
 
-const PROVIDER_DIR = path.join(os.homedir(), '.routecodex', 'provider');
+const PROVIDER_DIR = path.join(os.homedir(), '.rcc', 'provider');
 const RESP_SAMPLES_DIR = path.join(os.homedir(), '.routecodex', 'codex-samples', 'openai-responses');
 const RESP_OUT_DIR = path.join(os.homedir(), '.routecodex', 'logs', 'responses-sse');
 const ANTH_OUT_DIR = path.join(os.homedir(), '.routecodex', 'logs', 'anthropic-sse');

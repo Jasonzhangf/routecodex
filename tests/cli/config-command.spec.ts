@@ -205,10 +205,16 @@ describe('cli config command', () => {
           stop: () => {},
           text: ''
         }) as any,
-      pathImpl: {
-        join: (() => {
+      fsImpl: {
+        existsSync: () => true,
+        readFileSync: (() => {
           throw new Error('boom');
         }) as any,
+        writeFileSync: () => {},
+        mkdirSync: () => {}
+      } as any,
+      pathImpl: {
+        join: path.join,
         dirname: path.dirname,
         resolve: path.resolve
       } as any
@@ -257,7 +263,8 @@ describe('cli config command', () => {
 
     expect(writes.has('/tmp/config.json')).toBe(true);
     const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
-    expect(parsed?.virtualrouter?.providers?.openai).toBeTruthy();
+    expect(parsed?.virtualrouterMode).toBe('v2');
+    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.routing?.default?.[0]?.targets?.[0]).toContain('openai.');
   });
 
   it('edit spawns editor with config path', async () => {
@@ -345,7 +352,9 @@ describe('cli config command', () => {
       { from: 'node' }
     );
 
-    expect(JSON.parse(writes.get('/tmp/config.json') || '{}')?.virtualrouter?.providers?.openai).toBeTruthy();
+    const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
+    expect(parsed?.virtualrouterMode).toBe('v2');
+    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.routing?.default?.[0]?.targets?.[0]).toContain('openai.');
   });
 });
 
@@ -390,10 +399,10 @@ describe('cli init command', () => {
     expect(writes.has('/tmp/config.json')).toBe(true);
     const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
     expect(parsed?.virtualrouterMode).toBe('v2');
-    expect(parsed?.virtualrouter?.routing?.default?.[0]?.targets?.[0]).toContain('openai.');
+    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.routing?.default?.[0]?.targets?.[0]).toContain('openai.');
     expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.routing?.web_search).toBeUndefined();
     expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.webSearch).toBeUndefined();
-    const providerV2 = JSON.parse(writes.get('/tmp/.routecodex/provider/openai/config.v2.json') || '{}');
+    const providerV2 = JSON.parse(writes.get('/tmp/.rcc/provider/openai/config.v2.json') || '{}');
     expect(providerV2?.providerId).toBe('openai');
   });
 
@@ -721,8 +730,8 @@ describe('cli init command', () => {
 
     const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
     expect(parsed.virtualrouterMode).toBe('v2');
-    expect(parsed.virtualrouter.routingPolicyGroups.default.routing.default[0].targets[0]).toBe('openai.gpt-5.2');
-    expect(writes.get('/tmp/provider/openai/config.v2.json')).toContain('"providerId": "openai"');
+    expect(parsed.virtualrouter.routingPolicyGroups.default.routing.default[0].targets[0]).toContain('openai.');
+    expect(writes.get('/tmp/.rcc/provider/openai/config.v2.json')).toContain('"providerId": "openai"');
     expect(infos.join('\n')).toContain('Created a minimal V2 config');
     expect(warnings.length).toBe(0);
     expect(promptCalls).toBe(0);
@@ -763,7 +772,7 @@ describe('cli init command', () => {
     expect(parsed.httpserver.host).toBe('0.0.0.0');
     expect(parsed.httpserver.port).toBe(8888);
     expect(parsed.virtualrouterMode).toBe('v2');
-    const providerV2 = JSON.parse(writes.get('/tmp/.routecodex/provider/openai/config.v2.json') || '{}');
+    const providerV2 = JSON.parse(writes.get('/tmp/.rcc/provider/openai/config.v2.json') || '{}');
     expect(providerV2?.providerId).toBe('openai');
   });
 
@@ -828,9 +837,9 @@ describe('cli init command', () => {
         existsSync: (p: any) => {
           const target = String(p);
           return (
-            target === '/tmp/.routecodex/provider' ||
-            target === '/tmp/.routecodex/provider/openai/config.v2.json' ||
-            target === '/tmp/.routecodex/provider/glm/config.v2.json'
+            target === '/tmp/.rcc/provider' ||
+            target === '/tmp/.rcc/provider/openai/config.v2.json' ||
+            target === '/tmp/.rcc/provider/glm/config.v2.json'
           );
         },
         readdirSync: () => [
@@ -913,8 +922,8 @@ describe('cli init command', () => {
           const target = String(p);
           return (
             target === '/tmp/config.json' ||
-            target === '/tmp/.routecodex/provider' ||
-            target === '/tmp/.routecodex/provider/openai/config.v2.json'
+            target === '/tmp/.rcc/provider' ||
+            target === '/tmp/.rcc/provider/openai/config.v2.json'
           );
         },
         readdirSync: () => [{ name: 'openai', isDirectory: () => true }],
@@ -993,7 +1002,7 @@ describe('cli init command', () => {
       fsImpl: {
         existsSync: (p: any) => {
           const target = String(p);
-          return target === '/tmp/config.json' || target === '/tmp/.routecodex/provider';
+          return target === '/tmp/config.json' || target === '/tmp/.rcc/provider';
         },
         readdirSync: () => [],
         readFileSync: (p: any) => {
@@ -1020,7 +1029,7 @@ describe('cli init command', () => {
 
     await program.parseAsync(['node', 'routecodex', 'init', '--config', '/tmp/config.json'], { from: 'node' });
 
-    const customPath = '/tmp/.routecodex/provider/custom-gemini/config.v2.json';
+    const customPath = '/tmp/.rcc/provider/custom-gemini/config.v2.json';
     expect(writes.has(customPath)).toBe(true);
     const payload = JSON.parse(writes.get(customPath) || '{}');
     expect(payload.providerId).toBe('custom-gemini');
@@ -1068,7 +1077,7 @@ describe('cli init command', () => {
       fsImpl: {
         existsSync: (p: any) => {
           const target = String(p);
-          return target === '/tmp/config.json' || target === '/tmp/.routecodex/provider';
+          return target === '/tmp/config.json' || target === '/tmp/.rcc/provider';
         },
         readdirSync: () => [],
         readFileSync: (p: any) => {
@@ -1095,9 +1104,9 @@ describe('cli init command', () => {
 
     await program.parseAsync(['node', 'routecodex', 'init', '--config', '/tmp/config.json'], { from: 'node' });
 
-    expect(infos.join('\n')).toContain('Unknown add mode. Choose 1 (built-in), 2 (custom), or b (back).');
+    expect(infos.join('\n')).toContain('Unknown add mode. Choose 1 (managed-auth built-in), 2 (guided standard provider), or b (back).');
     expect(infos.join('\n')).toContain('Invalid protocol choice. Select 1/2/3/4.');
-    expect(writes.has('/tmp/.routecodex/provider/custom-openai/config.v2.json')).toBe(true);
+    expect(writes.has('/tmp/.rcc/provider/custom-openai/config.v2.json')).toBe(true);
   });
 
   it('v2 maintenance add built-in provider can overwrite existing provider and supports back', async () => {
@@ -1140,8 +1149,8 @@ describe('cli init command', () => {
           const target = String(p);
           return (
             target === '/tmp/config.json' ||
-            target === '/tmp/.routecodex/provider' ||
-            target === '/tmp/.routecodex/provider/openai/config.v2.json'
+            target === '/tmp/.rcc/provider' ||
+            target === '/tmp/.rcc/provider/openai/config.v2.json'
           );
         },
         readdirSync: () => [{ name: 'openai', isDirectory: () => true }],
@@ -1155,7 +1164,7 @@ describe('cli init command', () => {
               virtualrouter: { routing: { default: [{ id: 'primary', mode: 'priority', targets: ['openai.gpt-5.2'] }] } }
             });
           }
-          if (target === '/tmp/.routecodex/provider/openai/config.v2.json') {
+          if (target === '/tmp/.rcc/provider/openai/config.v2.json') {
             return JSON.stringify({
               version: '2.0.0',
               providerId: 'openai',
@@ -1176,11 +1185,11 @@ describe('cli init command', () => {
 
     await program.parseAsync(['node', 'routecodex', 'init', '--config', '/tmp/config.json'], { from: 'node' });
 
-    const openaiPath = '/tmp/.routecodex/provider/openai/config.v2.json';
+    const openaiPath = '/tmp/.rcc/provider/openai/config.v2.json';
     expect(writes.has(openaiPath)).toBe(true);
     const payload = JSON.parse(writes.get(openaiPath) || '{}');
-    expect(payload.provider?.baseURL).toBe('https://api.openai.com/v1');
-    expect(infos.join('\n')).toContain('Updated built-in provider template: openai');
+    expect(payload.provider?.baseURL).toBe('https://api.example.com/v1');
+    expect(infos.join('\n')).toContain('Updated managed-auth provider template: openai');
     expect(infos.join('\n')).toContain('Skipped existing provider: openai');
     expect(infos.join('\n')).toContain('Back to V2 menu.');
   });
@@ -1208,8 +1217,8 @@ describe('cli init command', () => {
           const target = String(p);
           return (
             target === '/tmp/config.json' ||
-            target === '/tmp/.routecodex/provider' ||
-            target === '/tmp/.routecodex/provider/openai/config.v2.json'
+            target === '/tmp/.rcc/provider' ||
+            target === '/tmp/.rcc/provider/openai/config.v2.json'
           );
         },
         readdirSync: () => [{ name: 'openai', isDirectory: () => true }],
@@ -1223,7 +1232,7 @@ describe('cli init command', () => {
               virtualrouter: { routing: { default: [{ id: 'primary', mode: 'priority', targets: ['openai.gpt-5.2'] }] } }
             });
           }
-          if (target === '/tmp/.routecodex/provider/openai/config.v2.json') {
+          if (target === '/tmp/.rcc/provider/openai/config.v2.json') {
             return JSON.stringify({
               version: '2.0.0',
               providerId: 'openai',
@@ -1272,8 +1281,8 @@ describe('cli init command', () => {
           const target = String(p);
           return (
             target === '/tmp/config.json' ||
-            target === '/tmp/.routecodex/provider' ||
-            target === '/tmp/.routecodex/provider/openai/config.v2.json'
+            target === '/tmp/.rcc/provider' ||
+            target === '/tmp/.rcc/provider/openai/config.v2.json'
           );
         },
         readdirSync: () => [{ name: 'openai', isDirectory: () => true }],
@@ -1287,7 +1296,7 @@ describe('cli init command', () => {
               virtualrouter: { routing: { default: [{ id: 'primary', mode: 'priority', targets: ['openai.gpt-5.2'] }] } }
             });
           }
-          if (target === '/tmp/.routecodex/provider/openai/config.v2.json') {
+          if (target === '/tmp/.rcc/provider/openai/config.v2.json') {
             return JSON.stringify({
               version: '2.0.0',
               providerId: 'openai',
@@ -1316,7 +1325,7 @@ describe('cli init command', () => {
 
     expect(infos.join('\n')).toContain('Back to modify-provider menu.');
     expect(infos.join('\n')).toContain('Back to V2 menu without saving provider: openai');
-    expect(writes.has('/tmp/.routecodex/provider/openai/config.v2.json')).toBe(false);
+    expect(writes.has('/tmp/.rcc/provider/openai/config.v2.json')).toBe(false);
   });
 
   it('v2 maintenance modify routing supports back/cancel without changes', async () => {
@@ -1340,7 +1349,7 @@ describe('cli init command', () => {
       fsImpl: {
         existsSync: (p: any) => {
           const target = String(p);
-          return target === '/tmp/config.json' || target === '/tmp/.routecodex/provider' || target === '/tmp/.routecodex/provider/openai/config.v2.json';
+          return target === '/tmp/config.json' || target === '/tmp/.rcc/provider' || target === '/tmp/.rcc/provider/openai/config.v2.json';
         },
         readdirSync: () => [{ name: 'openai', isDirectory: () => true }],
         readFileSync: (p: any) => {
@@ -1359,7 +1368,7 @@ describe('cli init command', () => {
               }
             });
           }
-          if (target === '/tmp/.routecodex/provider/openai/config.v2.json') {
+          if (target === '/tmp/.rcc/provider/openai/config.v2.json') {
             return JSON.stringify({ version: '2.0.0', providerId: 'openai', provider: { id: 'openai', enabled: true, type: 'openai', models: { 'gpt-5.2': {} } } });
           }
           return '';
@@ -1410,7 +1419,7 @@ describe('cli init command', () => {
 
     await program.parseAsync(['node', 'routecodex', 'init', '--config', '/tmp/config.json'], { from: 'node' });
 
-    expect(errors.join('\n')).toContain('Non-interactive init requires --providers');
+    expect(errors).toHaveLength(0);
   });
 
   it('prompts before migrating v1 config to v2 (does not auto-convert)', async () => {
@@ -1562,7 +1571,7 @@ describe('cli init command', () => {
           if (path === '/tmp/config.json') {
             return true;
           }
-          if (path === '/tmp/.routecodex/provider/openai/config.v2.json') {
+          if (path === '/tmp/.rcc/provider/openai/config.v2.json') {
             return true;
           }
           return false;
@@ -1581,7 +1590,7 @@ describe('cli init command', () => {
               }
             });
           }
-          if (path === '/tmp/.routecodex/provider/openai/config.v2.json') {
+          if (path === '/tmp/.rcc/provider/openai/config.v2.json') {
             return JSON.stringify({
               version: '2.0.0',
               providerId: 'openai',
@@ -1619,7 +1628,7 @@ describe('cli init command', () => {
     // Kept existing provider.v2, but should still rewrite main config to v2.
     const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
     expect(parsed.virtualrouterMode).toBe('v2');
-    expect(writes.has('/tmp/.routecodex/provider/openai/config.v2.json')).toBe(false);
+    expect(writes.has('/tmp/.rcc/provider/openai/config.v2.json')).toBe(false);
   });
 
   it('supports overwrite-all strategy during duplicate v1->v2 migration', async () => {
@@ -1641,7 +1650,7 @@ describe('cli init command', () => {
       fsImpl: {
         existsSync: (p: any) => {
           const target = String(p);
-          return target === '/tmp/config.json' || target === '/tmp/.routecodex/provider/openai/config.v2.json';
+          return target === '/tmp/config.json' || target === '/tmp/.rcc/provider/openai/config.v2.json';
         },
         readdirSync: () => [{ name: 'openai', isDirectory: () => true }],
         readFileSync: (p: any) => {
@@ -1663,7 +1672,7 @@ describe('cli init command', () => {
               }
             });
           }
-          if (target === '/tmp/.routecodex/provider/openai/config.v2.json') {
+          if (target === '/tmp/.rcc/provider/openai/config.v2.json') {
             return JSON.stringify({
               version: '2.0.0',
               providerId: 'openai',
@@ -1690,7 +1699,7 @@ describe('cli init command', () => {
 
     await program.parseAsync(['node', 'routecodex', 'init', '--config', '/tmp/config.json'], { from: 'node' });
 
-    const rewrittenProvider = JSON.parse(writes.get('/tmp/.routecodex/provider/openai/config.v2.json') || '{}');
+    const rewrittenProvider = JSON.parse(writes.get('/tmp/.rcc/provider/openai/config.v2.json') || '{}');
     expect(rewrittenProvider?.provider?.baseURL).toBe('https://new.example.com');
   });
 });
@@ -1783,7 +1792,8 @@ describe('init-config', () => {
           readFileSync: () => '',
           writeFileSync: (p: any, content: any) => writes.set(String(p), String(content))
         },
-        pathImpl: path as any
+        pathImpl: path as any,
+        getHomeDir: () => '/tmp'
       },
       { configPath: '/tmp/config.json', force: true },
       {
@@ -1795,9 +1805,9 @@ describe('init-config', () => {
     const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
     expect(parsed.httpserver.host).toBe('0.0.0.0');
     expect(parsed.httpserver.port).toBe(7777);
-    expect(writes.get('/tmp/provider/openai/config.v2.json')).toContain('\"providerId\": \"openai\"');
-    expect(writes.get('/tmp/provider/tab/config.v2.json')).toContain('\"providerId\": \"tab\"');
-    expect(parsed.virtualrouter.routingPolicyGroups.default.routing.default[0].targets[0]).toContain('tab.');
+    expect(writes.get('/tmp/.rcc/provider/openai/config.v2.json')).toContain('\"providerId\": \"openai\"');
+    expect(writes.get('/tmp/.rcc/provider/responses/config.v2.json')).toContain('\"providerId\": \"responses\"');
+    expect(parsed.virtualrouter.routingPolicyGroups.default.routing.default[0].targets[0]).toContain('responses.');
   });
 
   it('writes model-less iflow webSearch defaults when iflow is selected', async () => {
@@ -1941,7 +1951,8 @@ describe('init-config', () => {
           readFileSync: () => '',
           writeFileSync: (p: any, content: any) => writes.set(String(p), String(content))
         },
-        pathImpl: path as any
+        pathImpl: path as any,
+        getHomeDir: () => '/tmp'
       },
       { configPath: '/tmp/config.json', force: true },
       {
@@ -1952,7 +1963,7 @@ describe('init-config', () => {
     const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
     expect(parsed.httpserver.host).toBe('127.0.0.1');
     expect(parsed.httpserver.port).toBe(5555);
-    expect(writes.get('/tmp/provider/openai/config.v2.json')).toContain('\"providerId\": \"openai\"');
+    expect(writes.get('/tmp/.rcc/provider/openai/config.v2.json')).toContain('\"providerId\": \"openai\"');
   });
 
   it('returns write_failed when writeFileSync throws', async () => {
@@ -2033,7 +2044,7 @@ describe('bundled-docs', () => {
     const files = new Map<string, string>();
     const exists = new Set<string>();
     const docsSourceDir = '/pkg/docs';
-    const userDir = '/home/u/.routecodex';
+    const userDir = '/home/u/.rcc';
     const targetDir = `${userDir}/docs`;
 
     // Simulate all docs exist in source.
@@ -2107,7 +2118,7 @@ describe('bundled-default-config', () => {
 
     const result = installBundledDefaultConfigBestEffort({
       sourceConfigPath,
-      targetConfigPath: '/tmp/.routecodex/config.json',
+      targetConfigPath: '/tmp/.rcc/config.json',
       fsImpl: {
         existsSync: (p: any) => exists.has(String(p)),
         mkdirSync: (p: any) => {
@@ -2124,8 +2135,8 @@ describe('bundled-default-config', () => {
 
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.targetPath).toBe(path.resolve('/tmp/.routecodex/config.json'));
-      expect(files.get(path.resolve('/tmp/.routecodex/config.json'))).toBe('{"version":"1.0.0"}');
+      expect(result.targetPath).toBe(path.resolve('/tmp/.rcc/config.json'));
+      expect(files.get(path.resolve('/tmp/.rcc/config.json'))).toBe('{"version":"1.0.0"}');
     }
   });
 });

@@ -62,7 +62,50 @@ describe('stage logger release summary mode', () => {
     expect(summary).toContain('hub=300ms');
     expect(summary).toContain('provider.send=600ms');
     expect(summary).toContain('response=25ms');
-    expect(summary).toContain('request.internal=375ms');
+    expect(summary).toContain('request.internal=75ms');
     expect(logSpy).toHaveBeenCalled();
+  });
+
+  it('includes tracked host-side request scopes in release timing summary', async () => {
+    process.env.ROUTECODEX_BUILD_MODE = 'release';
+    delete process.env.ROUTECODEX_STAGE_LOG;
+    delete process.env.ROUTECODEX_STAGE_LOG_VERBOSE;
+    delete process.env.ROUTECODEX_STAGE_TIMING;
+    delete process.env.ROUTECODEX_STAGE_TIMING_SUMMARY;
+
+    const { logPipelineStage, formatRequestTimingSummary } =
+      await import('../../../src/server/utils/stage-logger.js');
+
+    logPipelineStage('request.snapshot.start', 'req_host_breakdown', {});
+    logPipelineStage('request.snapshot.completed', 'req_host_breakdown', { elapsedMs: 120 });
+    logPipelineStage('hub.start', 'req_host_breakdown', {});
+    logPipelineStage('hub.completed', 'req_host_breakdown', { elapsedMs: 310 });
+    logPipelineStage('provider.runtime_resolve.start', 'req_host_breakdown', {});
+    logPipelineStage('provider.runtime_resolve.completed', 'req_host_breakdown', { elapsedMs: 40 });
+    logPipelineStage('provider.context_resolve.start', 'req_host_breakdown', {});
+    logPipelineStage('provider.context_resolve.completed', 'req_host_breakdown', { elapsedMs: 25 });
+    logPipelineStage('provider.metadata_attach.start', 'req_host_breakdown', {});
+    logPipelineStage('provider.metadata_attach.completed', 'req_host_breakdown', { elapsedMs: 15 });
+    logPipelineStage('provider.send.start', 'req_host_breakdown', {});
+    logPipelineStage('provider.send.completed', 'req_host_breakdown', { elapsedMs: 700 });
+    logPipelineStage('provider.response_normalize.start', 'req_host_breakdown', {});
+    logPipelineStage('provider.response_normalize.completed', 'req_host_breakdown', { elapsedMs: 60 });
+    logPipelineStage('hub.response.start', 'req_host_breakdown', {});
+    logPipelineStage('hub.response.completed', 'req_host_breakdown', { elapsedMs: 90 });
+    logPipelineStage('response.dispatch.start', 'req_host_breakdown', {});
+    logPipelineStage('response.completed', 'req_host_breakdown', { elapsedMs: 20 });
+
+    const summary = formatRequestTimingSummary('req_host_breakdown', { latencyMs: 1500 });
+    expect(summary).toContain('request.snapshot=120ms');
+    expect(summary).toContain('hub=310ms');
+    expect(summary).toContain('provider.runtime_resolve=40ms');
+    expect(summary).toContain('provider.context_resolve=25ms');
+    expect(summary).toContain('provider.metadata_attach=15ms');
+    expect(summary).toContain('provider.send=700ms');
+    expect(summary).toContain('provider.response_normalize=60ms');
+    expect(summary).toContain('hub.response=90ms');
+    expect(summary).toContain('response=20ms');
+    expect(summary).toContain('host.internal=260ms');
+    expect(summary).toContain('request.internal=120ms');
   });
 });

@@ -9,7 +9,9 @@ describe('hub stage timing detail gate', () => {
     'ROUTECODEX_STAGE_TIMING_DETAIL',
     'RCC_STAGE_TIMING_DETAIL',
     'ROUTECODEX_HUB_STAGE_TIMING_DETAIL',
-    'RCC_HUB_STAGE_TIMING_DETAIL'
+    'RCC_HUB_STAGE_TIMING_DETAIL',
+    'ROUTECODEX_STAGE_TIMING_MIN_MS',
+    'RCC_STAGE_TIMING_MIN_MS'
   ] as const;
   const previousEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
 
@@ -57,6 +59,7 @@ describe('hub stage timing detail gate', () => {
   test('logs forced detail when stage timing and detail switch are both enabled', () => {
     process.env.ROUTECODEX_STAGE_TIMING = '1';
     process.env.ROUTECODEX_HUB_STAGE_TIMING_DETAIL = '1';
+    process.env.ROUTECODEX_STAGE_TIMING_MIN_MS = '0';
     const logSpy = jest.spyOn(console, 'log').mockImplementation(() => undefined);
 
     logHubStageTiming('req-force-on', 'req_inbound.responses.capture_context', 'completed', {
@@ -66,6 +69,19 @@ describe('hub stage timing detail gate', () => {
 
     expect(logSpy).toHaveBeenCalledTimes(1);
     expect(logSpy.mock.calls[0]?.[0]).toContain('[hub.detail][req-force-on]');
+  });
+
+  test('suppresses detail logs below the default 50ms threshold', () => {
+    process.env.ROUTECODEX_STAGE_TIMING = '1';
+    process.env.ROUTECODEX_HUB_STAGE_TIMING_DETAIL = '1';
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    logHubStageTiming('req-force-default-threshold', 'req_inbound.responses.capture_context', 'completed', {
+      elapsedMs: 49,
+      forceLog: true
+    });
+
+    expect(logSpy).not.toHaveBeenCalled();
   });
 
   test('logs slow stage when stage timing is enabled without detail switch', () => {

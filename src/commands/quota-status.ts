@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import fs from 'node:fs';
 import path from 'node:path';
-import { homedir } from 'node:os';
+import { resolveRccStateDirForRead } from '../config/user-data-paths.js';
 
 import type { QuotaRecord } from '../manager/modules/quota/index.js';
 
@@ -14,7 +14,7 @@ interface QuotaStateFile {
  * 为了兼容现有 CLI 选项，`serverId` 参数被忽略。
  */
 function resolveQuotaStatePath(_serverId?: string): string {
-  return path.join(homedir(), '.routecodex', 'state', 'quota', 'antigravity.json');
+  return path.join(resolveRccStateDirForRead(), 'quota', 'antigravity.json');
 }
 
 function loadQuotaSnapshot(filePath: string): QuotaStateFile | null {

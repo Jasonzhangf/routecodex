@@ -95,8 +95,8 @@ npm uninstall -g @jsonstudio/rcc
 ### 1) 初始化（推荐用 `rcc`）
 
 默认配置路径：
-- macOS / Linux：`~/.routecodex/config.json`
-- Windows：`%USERPROFILE%\\.routecodex\\config.json`
+- macOS / Linux：`~/.rcc/config.json`
+- Windows：`%USERPROFILE%\\.rcc\\config.json`
 
 默认初始化（会把内置脱敏 quickstart 配置复制到目标路径）：
 
@@ -132,15 +132,15 @@ rcc init --providers deepseek-web,tab,qwen --default-provider deepseek-web --cam
 rcc init --camoufox
 
 # Step 2: rcc init 已自动写入默认 quickstart；这里执行 v1 -> v2 转换
-rcc init --config ~/.routecodex/config.json --force
+rcc init --config ~/.rcc/config.json --force
 
 # Step 3: 配置密钥与 token 后启动
 rcc init --list-current-providers
-rcc start --config ~/.routecodex/config.json
+rcc start --config ~/.rcc/config.json
 ```
 
 Step 2 完成后，provider 会拆分到：
-- `~/.routecodex/provider/<providerId>/config.v2.json`
+- `~/.rcc/provider/<providerId>/config.v2.json`
 
 Step 3（配置密钥/token）的最小动作：
 - API Key 类：设置环境变量（如 `OPENAI_API_KEY` / `TAB_API_KEY` / `GLM_API_KEY`）
@@ -151,9 +151,9 @@ Windows PowerShell 对应写法：
 
 ```powershell
 rcc init --camoufox
-rcc init --config "$env:USERPROFILE\.routecodex\config.json" --force
+rcc init --config "$env:USERPROFILE\.rcc\config.json" --force
 rcc init --list-current-providers
-rcc start --config "$env:USERPROFILE\.routecodex\config.json"
+rcc start --config "$env:USERPROFILE\.rcc\config.json"
 ```
 
 ### 2) Camoufox 初始化（macOS / Windows）
@@ -257,7 +257,7 @@ API key 类 provider 的常用环境变量（按 init 模板）：
 
 最小检查原则：
 
-- `routing.vision` / `routing.web_search` 里的每个 `provider.model`，都必须在对应 `~/.routecodex/provider/<providerId>/config.v2.json` 的 `models` 里存在
+- `routing.vision` / `routing.web_search` 里的每个 `provider.model`，都必须在对应 `~/.rcc/provider/<providerId>/config.v2.json` 的 `models` 里存在
 - 上述 provider 的鉴权必须先配好（apikey/oauth/cookie/tokenFile），否则会在启动时被跳过初始化
 
 OAuth 认证命令（常用）：
@@ -289,7 +289,7 @@ DeepSeek 单文件凭据 + token（同一文件）示例：
 
 ```bash
 rcc init
-rcc start --config ~/.routecodex/config.json
+rcc start --config ~/.rcc/config.json
 ```
 
 此模板已经脱敏（API key、token、账号别名），保留了可直接复用的路由结构和 provider 组合。
@@ -300,19 +300,19 @@ rcc start --config ~/.routecodex/config.json
 
 ```bash
 rcc init
-rcc init --config ~/.routecodex/config.json --force
+rcc init --config ~/.rcc/config.json --force
 ```
 
 说明：
 - `rcc init` 会检测到这是 v1 配置并执行迁移。
 - `--force` 会跳过交互确认，适合脚本化/CI。
-- 迁移后会生成 `~/.routecodex/provider/<providerId>/config.v2.json`，并备份原始 v1 文件为 `config.json.bak*`。
+- 迁移后会生成 `~/.rcc/provider/<providerId>/config.v2.json`，并备份原始 v1 文件为 `config.json.bak*`。
 
 可选检查：
 
 ```bash
 rcc init --list-current-providers
-rcc start --config ~/.routecodex/config.json
+rcc start --config ~/.rcc/config.json
 ```
 
 ### 6) 调用 API（示例）

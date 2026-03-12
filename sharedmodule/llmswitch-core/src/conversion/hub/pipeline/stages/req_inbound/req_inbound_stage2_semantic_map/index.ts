@@ -18,7 +18,10 @@ import { recordStage } from "../../../stages/utils.js";
 import { liftReqInboundSemantics } from "./semantic-lift.js";
 import { validateChatEnvelopeWithNative } from "../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-edge-stage-semantics.js";
 import { chatEnvelopeToStandardizedWithNative } from "../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-req-inbound-semantics.js";
-import { logHubStageTiming } from "../../../hub-stage-timing.js";
+import {
+  isHubStageTimingDetailEnabled,
+  logHubStageTiming,
+} from "../../../hub-stage-timing.js";
 
 export interface ReqInboundStage2SemanticMapOptions {
   adapterContext: AdapterContext;
@@ -44,6 +47,7 @@ export async function runReqInboundStage2SemanticMap(
   options: ReqInboundStage2SemanticMapOptions,
 ): Promise<ReqInboundStage2SemanticMapResult> {
   const requestId = options.adapterContext.requestId || "unknown";
+  const forceDetailLog = isHubStageTimingDetailEnabled();
   logHubStageTiming(
     requestId,
     "req_inbound.stage2_semantic_mapper_toChat",
@@ -75,19 +79,45 @@ export async function runReqInboundStage2SemanticMap(
         : undefined;
     return contextNode ? jsonClone(contextNode) : undefined;
   })();
+  logHubStageTiming(
+    requestId,
+    "req_inbound.stage2_operation_table_inbound",
+    "start",
+  );
+  const operationTableStart = Date.now();
   applyHubOperationTableInbound({
     formatEnvelope: options.formatEnvelope,
     chatEnvelope,
     adapterContext: options.adapterContext,
   });
+  logHubStageTiming(
+    requestId,
+    "req_inbound.stage2_operation_table_inbound",
+    "completed",
+    {
+      elapsedMs: Date.now() - operationTableStart,
+      forceLog: forceDetailLog,
+    },
+  );
   // Semantic Gate (request): before entering chat_process, lift any mappable protocol semantics
   // into ChatEnvelope.semantics. Do not persist these in metadata.
+  logHubStageTiming(requestId, "req_inbound.stage2_semantic_lift", "start");
+  const semanticLiftStart = Date.now();
   liftReqInboundSemantics({
     chatEnvelope,
     formatEnvelope: options.formatEnvelope,
     adapterContext: options.adapterContext,
     responsesResume: options.responsesResume,
   });
+  logHubStageTiming(
+    requestId,
+    "req_inbound.stage2_semantic_lift",
+    "completed",
+    {
+      elapsedMs: Date.now() - semanticLiftStart,
+      forceLog: forceDetailLog,
+    },
+  );
   if (preservedResponsesContext) {
     const currentSemantics = chatEnvelope.semantics;
     if (!currentSemantics || typeof currentSemantics !== "object") {
@@ -110,10 +140,25 @@ export async function runReqInboundStage2SemanticMap(
       }
     }
   }
+  logHubStageTiming(
+    requestId,
+    "req_inbound.stage2_validate_chat_envelope",
+    "start",
+  );
+  const validateStart = Date.now();
   validateChatEnvelopeWithNative(chatEnvelope, {
     stage: "req_inbound",
     direction: "request",
   });
+  logHubStageTiming(
+    requestId,
+    "req_inbound.stage2_validate_chat_envelope",
+    "completed",
+    {
+      elapsedMs: Date.now() - validateStart,
+      forceLog: forceDetailLog,
+    },
+  );
   recordStage(
     options.stageRecorder,
     "chat_process.req.stage2.semantic_map",

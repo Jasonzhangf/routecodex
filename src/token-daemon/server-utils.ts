@@ -1,7 +1,7 @@
 import path from 'path';
-import { homedir } from 'os';
 const fetch = globalThis.fetch;
 import { loadRouteCodexConfig } from '../config/routecodex-config-loader.js';
+import { resolveRccConfigFile } from '../config/user-data-paths.js';
 import type {
   ProviderProfileCollection,
 } from '../providers/profile/provider-profile.js';
@@ -105,10 +105,9 @@ async function resolveUserConfigPath(): Promise<string> {
     if (envPath && envPath.trim()) {
       return path.resolve(envPath.trim());
     }
-    const defaultPath = path.join(homedir(), '.routecodex', 'config.json');
-    return defaultPath;
+    return resolveRccConfigFile();
   } catch {
-    return path.join(homedir(), '.routecodex', 'config.json');
+    return resolveRccConfigFile();
   }
 }
 

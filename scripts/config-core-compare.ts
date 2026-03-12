@@ -23,7 +23,7 @@ function main() {
   const corePacPath = './config/pipeline_assembler.core.json';
   const generatedPipelinePath =
     process.argv[2] ||
-    path.join(os.homedir(), '.routecodex', 'config', 'generated', 'pipeline-config.generated.json');
+    path.join(os.homedir(), '.rcc', 'config', 'generated', 'pipeline-config.generated.json');
   if (!fs.existsSync(corePacPath)) {
     console.error('[compare] core assembler not found:', corePacPath);
     process.exit(2);

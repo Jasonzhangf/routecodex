@@ -360,7 +360,7 @@ async function scenarioRealConfig(configPath) {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) {
-    console.log('Usage: node scripts/tests/virtual-router-health.mjs [--out summary.json] [--config ~/.routecodex/config.json]');
+    console.log('Usage: node scripts/tests/virtual-router-health.mjs [--out summary.json] [--config ~/.rcc/config.json]');
     return;
   }
 

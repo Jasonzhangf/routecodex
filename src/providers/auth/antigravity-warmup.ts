@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import os from 'node:os';
+import { resolveRccAuthDirForRead } from '../../config/user-data-paths.js';
 
 import { inferAntigravityUaSuffixFromFingerprint, loadAntigravityCamoufoxFingerprint } from './antigravity-fingerprint.js';
 import { resolveAntigravityUserAgent } from './antigravity-user-agent.js';
@@ -64,8 +64,7 @@ async function guessAntigravityTokenFile(alias: string): Promise<string | undefi
   if (!normalized) {
     return undefined;
   }
-  const home = (process.env.HOME || '').trim() || os.homedir();
-  const dir = path.join(home, '.routecodex', 'auth');
+  const dir = resolveRccAuthDirForRead();
   let entries: string[];
   try {
     entries = await fs.readdir(dir);

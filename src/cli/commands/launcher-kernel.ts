@@ -7,6 +7,7 @@ import type { ChildProcess, SpawnOptions } from 'node:child_process';
 import type { Command } from 'commander';
 
 import { LOCAL_HOSTS } from '../../constants/index.js';
+import { resolveRccConfigFileForRead, resolveRccLogsDir, resolveRccUserDir } from '../../config/user-data-paths.js';
 import {
   encodeSessionClientApiKey,
   extractSessionClientDaemonIdFromApiKey,
@@ -80,6 +81,18 @@ function shouldLogClientExitSummary(commandName: string): boolean {
   return normalized === 'codex' || normalized === 'claude' || normalized === 'routecodex';
 }
 
+function resolveExitGracePeriodMs(env: NodeJS.ProcessEnv): number {
+  const raw =
+    env.ROUTECODEX_CLIENT_EXIT_GRACE_PERIOD_MS
+    ?? env.RCC_CLIENT_EXIT_GRACE_PERIOD_MS
+    ?? '';
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return 0;
+  }
+  return Math.floor(parsed);
+}
+
 function resolveLauncherConfigPath(
   ctx: LauncherCommandContext,
   fsImpl: typeof fs,
@@ -91,7 +104,7 @@ function resolveLauncherConfigPath(
     const resolved = resolveRouteCodexConfigPath();
     configPath = resolved && resolved.trim()
       ? resolved
-      : pathImpl.join(ctx.homedir(), '.routecodex', 'config.json');
+      : resolveRccConfigFileForRead(ctx.homedir());
   }
   return configPath;
 }
@@ -406,7 +419,7 @@ function rotateLogFile(fsImpl: typeof fs, filePath: string, maxBytes = 8 * 1024 
 }
 
 function ensureServerLogPath(ctx: LauncherCommandContext, fsImpl: typeof fs, pathImpl: typeof path, port: number): string {
-  const logsDir = pathImpl.join(ctx.homedir(), '.routecodex', 'logs');
+  const logsDir = resolveRccLogsDir();
   fsImpl.mkdirSync(logsDir, { recursive: true });
   const logPath = pathImpl.join(logsDir, `server-${port}.log`);
   rotateLogFile(fsImpl, logPath);
@@ -1834,7 +1847,17 @@ export function createLauncherCommand(program: Command, ctx: LauncherCommandCont
           observedToolExitSignal = signal ?? null;
         }
         logClientExitSummary();
-        void finalizeToolTermination();
+        // Add grace period before exiting to allow child process output to flush
+        // This is important for tools like codex that print session IDs on exit
+        const gracePeriodMs = resolveExitGracePeriodMs(ctx.env);
+        if (gracePeriodMs > 0) {
+          ctx.logger.info(`[client-exit] Waiting ${gracePeriodMs}ms for output to flush...`);
+          setTimeout(() => {
+            void finalizeToolTermination();
+          }, gracePeriodMs);
+        } else {
+          void finalizeToolTermination();
+        }
       });
 
       await ctx.waitForever();

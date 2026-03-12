@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Run Claude CLI listdir prompt per provider config file, without modifying config.json.
-# Discovers configs under ~/.routecodex/config matching common provider names.
+# Discovers configs under ~/.rcc/config matching common provider names.
 
 set -euo pipefail
 
 PROMPT=${PROMPT:-"列出本地文件目录（只输出名称列表）"}
-CONF_DIR="$HOME/.routecodex/config"
+CONF_DIR="$HOME/.rcc/config"
 
 if [ ! -d "$CONF_DIR" ]; then
   echo "Config dir not found: $CONF_DIR" >&2
@@ -56,8 +56,8 @@ if [ "$#" -gt 0 ]; then
 else
   FILES=( $(discover_configs) )
   if [ ${#FILES[@]} -eq 0 ]; then
-    echo "No provider-specific configs found under $CONF_DIR; running default ~/.routecodex/config.json"
-    run_one "$HOME/.routecodex/config.json"
+    echo "No provider-specific configs found under $CONF_DIR; running default ~/.rcc/config.json"
+    run_one "$HOME/.rcc/config.json"
   else
     for f in "${FILES[@]}"; do
       run_one "$CONF_DIR/$f"

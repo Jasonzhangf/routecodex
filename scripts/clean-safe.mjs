@@ -39,7 +39,7 @@ function resolveConfigPath() {
   if (explicit) {
     return path.resolve(explicit);
   }
-  return path.join(os.homedir(), '.routecodex', 'config.json');
+  return path.join(os.homedir(), '.rcc', 'config.json');
 }
 
 function isPidAlive(pid) {

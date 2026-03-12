@@ -53,8 +53,19 @@ Tags: virtual-router, rust-hotpath, load-balancing, provider-model, priority-rou
 - 2026-03-06: `scripts/install-global.sh` in dev build restart-only scenario now calls `routecodex restart --port 5555` separately after health check completes, separating "refresh user's existing service" from "temporary install verification".
 - 2026-03-06: Install-global in `ROUTECODEX_BUILD_RESTART_ONLY=1` scenario uses `ROUTECODEX_RESTART_HTTP_ONLY=1 routecodex restart --port ...`; if old service doesn't support server-managed restart, explicitly skips auto-restart instead of accidentally killing existing service.
 - 2026-03-06: Sharedmodule llmswitch-core native loader must use real `import.meta.url` directly instead of `Function("return import.meta.url")` + `process.cwd()` fallback to correctly locate `rust-core/target/release/router_hotpath_napi.node` under symlinked dev installs.
+- 2026-03-12: 当仓库内存在 `sharedmodule/llmswitch-core` 时，`BUILD_MODE=dev` 和 `BUILD_MODE=release` 都以本地 sharedmodule 为 llms 真源；只有本地 sharedmodule 缺失时，release 才回退到 npm-installed `@jsonstudio/llms`。`rcc` 打包/发布脚本也必须优先读取本地 `sharedmodule/llmswitch-core/package.json` 的版本，把该版本写入 tarball 的 `@jsonstudio/llms` 依赖，而不是直接沿用根仓库 `package.json` 的依赖声明。
 
-Tags: build, global-install, verify-install-e2e, port-detection, restart-only, native-loader, import-meta, llmswitch-core
+Tags: build, global-install, verify-install-e2e, port-detection, restart-only, native-loader, import-meta, llmswitch-core, release, rcc, packaging, local-source-of-truth
+
+## 用户目录迁移相关
+
+- 2026-03-12: `~/.routecodex -> ~/.rcc` 的迁移边界已按用户要求收窄，只迁移用户自维护配置：`config.json`、`config/`、`provider/`。不要迁移任何运行期/生成物，包括 `auth/`、`tokens/`、`logs/`、`sessions/`、`pid`、`hooks` 等。
+- 2026-03-12: `provider/` 迁移也要继续遵守“只搬配置、不搬生成物”的边界；像 `provider/*/samples/**` 这种嵌套在 provider 目录中的 mock/sample/archive 数据同样视为生成物，必须排除，不要整段原样复制。
+- 2026-03-12: `src/config/user-data-paths.ts` 已成为用户目录布局的单一真源。默认写入根为 `~/.rcc`，读取允许回退到 legacy `~/.routecodex`，并优先尊重 `HOME` 与 `RCC_HOME` / `ROUTECODEX_USER_DIR` / `ROUTECODEX_HOME`。
+- 2026-03-12: 新增显式迁移命令 `routecodex migrate-user-config`，仅针对 `config.json/config/provider` 生成 dry-run/apply 计划；默认不自动搬家，不做静默迁移，冲突文件默认保留，只有 `--overwrite` 才覆盖。
+- 2026-03-12: 配置迁移回归已验证通过：新增 `tests/config/user-config-migration.spec.ts`、`tests/commands/migrate-user-config.spec.ts`，并补跑 `user-data-paths/provider-v2-loader/config/start/stop/restart/env/deepseek-http` 相关回归，全绿。
+
+Tags: rcc, routecodex-home, migration, user-config, provider, config-json, explicit-migration, no-runtime-migration
 
 ## 启动、预热与认证相关
 
@@ -323,3 +334,116 @@ Tags: session-color, virtual-router-hit, usage-log, http-log, single-source-of-t
 - 不要先怀疑 `model_reasoning_summary` 未读取，除非本地代码版本明显落后或配置路径未生效。
 
 Tags: codex, reasoning-summary, show-raw-agent-reasoning, config, model-catalog, display-debug
+
+## 用户目录迁移决策 (2026-03-12)
+
+- 用户目录后续统一迁到 `~/.rcc`，`~/.routecodex` 仅作为迁移期 legacy 回读来源，不再作为新的默认写入根目录。
+- 迁移顺序先做“根目录真源”收口，再按域分批迁写入；本轮不做全量目录重构，也不做一次性大爆炸迁移。
+- 迁移范围要排除已经废弃不用的路径与逻辑，避免把历史包袱原样搬到 `~/.rcc`。
+- `hooks` 目录与相关能力不纳入新的目录架构规划，后续不作为迁移目标。
+- 实施原则：Host、sharedmodule、native 不能各自拼 `~/.routecodex` / `~/.rcc`；用户目录根路径必须有统一解析真源，并优先通过环境或公共路径模块向下游传播。
+- 当前 `bd --no-db` 受 `.beads/issues.jsonl` 第 332 行超长记录阻塞，现象是 `bufio.Scanner: token too long`；在修复该 issue 数据前无法正常 `search/create/claim`。
+
+Tags: rcc-home, routecodex-home, migration, user-data, legacy-read, deprecated-paths, hooks, bd-blocked
+
+## ~/.rcc 迁移 Batch 1 落地 (2026-03-12)
+
+- `src/config/user-data-paths.ts` 已成为 Host 侧用户目录根路径单一真源：
+  - 默认根目录是 `~/.rcc`
+  - 兼容环境变量：`RCC_HOME` / `ROUTECODEX_USER_DIR` / `ROUTECODEX_HOME`
+  - 读路径允许回退到 legacy `~/.routecodex`
+- `src/cli.ts` 与 `src/index.ts` 会在进程启动时调用 `ensureRccUserDirEnvironment()`，确保下游仍读旧环境名的模块也会落到 `~/.rcc`。
+- Batch 1 已迁移的 Host 活跃路径主要覆盖：
+  - `auth` / `tokens`
+  - `quota` / `state`
+  - `sessions`
+  - `logs`
+  - `codex-samples`
+  - `errorsamples`
+  - `statics`
+  - `login`
+  - `token-daemon.pid`、`server-<port>.pid`、`daemon-stop-<port>.json`、runtime lifecycle 状态文件
+- 一个关键修复点：统一路径真源必须优先尊重 `process.env.HOME`，不能只依赖 `os.homedir()`，否则测试沙盒和临时 home 场景会错误落到真实用户目录。
+- Batch 1 的定向验证已经通过：
+  - `tests/config/user-data-paths.spec.ts`
+  - `tests/config/provider-v2-loader.spec.ts`
+  - `tests/server/http-server/session-dir.spec.ts`
+  - `tests/providers/auth/oauth-lifecycle/path-resolver.unit.test.ts`
+  - `tests/providers/auth/tokenfile-auth.qwen-alias.spec.ts`
+  - `tests/token-daemon/history-store.auto-suspend-immediate.spec.ts`
+  - `tests/providers/auth/oauth-auth.bootstrap-tokenfile.spec.ts`
+- 全量 `tsc --noEmit` 仍有仓库内既有错误，集中在：
+  - `src/cli/commands/claude.ts`
+  - `src/cli/commands/codex.ts`
+  - `src/cli/commands/launcher-kernel.ts`
+  这些不属于本轮 `~/.rcc` 迁移引入的问题。
+- 后续继续做 Batch 2 时，优先处理剩余 host/admin/config 层仍直接拼接 `~/.routecodex` 的实现，再进入 sharedmodule/native。
+
+Tags: rcc-home, batch1, migration, user-data, host-runtime, tests, home-env, legacy-read
+
+## ~/.rcc 迁移 Batch 2 落地 (2026-03-12)
+
+- Batch 2 已完成 host/admin/config 余下活跃路径收口，重点包括：
+  - `src/cli/config/init-config.ts` 不再按 `configPath` 同级写 `provider/`，统一改为写入 `~/.rcc/provider`
+  - `src/cli/commands/launcher-kernel.ts` 的默认配置读取与 server log 写入切到 `~/.rcc`
+  - `src/providers/auth/deepseek-account-auth.ts` 的默认 token 路径切到 `~/.rcc/auth`
+- 这轮顺手统一了面向用户的 CLI 文案与模板示例路径，包括：
+  - `init` / `provider-update` / `port` / `camoufox` 等帮助文本
+  - `init-provider-catalog.ts` 里的示例 `tokenFile` / `cookieFile`
+- Batch 2 明确保留未迁移项：
+  - `hooks` 相关路径继续不动，遵循“hooks 不迁移”
+  - 纯注释、legacy 兼容说明、测试用 legacy 文本不作为本轮迁移目标
+- 一个额外落地点：`deepseek-account-auth` 不能只依赖 `os.homedir()`；默认 token 路径与 `~` 展开都要兼容 `process.env.HOME`，否则测试沙盒和临时 home 会误落真实用户目录。
+- Batch 2 的定向验证已经通过：
+  - `tests/cli/config-command.spec.ts`
+  - `tests/cli/env-command.spec.ts`
+  - `tests/cli/port-command.spec.ts`
+  - `tests/cli/start-command.spec.ts`
+  - `tests/cli/stop-command.spec.ts`
+  - `tests/cli/restart-command.spec.ts`
+  - `tests/cli/clean-command.spec.ts`
+  - `tests/cli/guardian-client.spec.ts`
+  - `tests/providers/auth/deepseek-account-auth.unit.test.ts`
+  - `tests/providers/core/runtime/deepseek-http-provider.unit.test.ts`
+- 2026-03-12 当天 `bd --no-db` 已恢复可用，`routecodex-271.2` 已关闭；后续若继续迁移，只需围绕剩余注释/示例清理或 sharedmodule/native 侧新批次单独开子任务。
+
+Tags: rcc-home, batch2, migration, user-data, config-init, launcher-kernel, deepseek-auth, home-env, tests, bd
+
+## ~/.rcc 迁移 Batch 3 进行中：目录布局真源收敛 (2026-03-12)
+
+- `src/config/user-data-paths.ts` 已从“根目录 helper 集合”提升为“目录布局 registry”：
+  - 新增 `RCC_SUBDIRS`
+  - 新增 `resolveRccSubdir(...)` / `resolveRccSubdirForRead(...)`
+  - 新增专用 helper：`resolveRccConfigFile`、`resolveRccProviderDir`、`resolveRccGuardianDir`、`resolveRccPrecommandDir`、`resolveRccCamoufoxFingerprintDir`、`resolveRccCamoufoxProfilesDir` 等
+- Batch 3 当前目标不是继续替换 `~/.routecodex -> ~/.rcc` 字符串，而是收敛“谁负责定义子目录布局”。后续代码应优先依赖这些 helper，不再手拼 `join(resolveRccUserDir(), '<subdir>')`。
+- 已完成的第一批高频入口收口：
+  - `config/start/stop/restart/env/init/launcher-kernel` 的默认 `config.json` / `sessions` / `logs` 路径
+  - `provider-update`、`provider-v2-loader`、`config-admin-handler`、`daemon-admin/providers-handler-routing-utils` 的 provider root
+  - `guardian`、`precommand`、`antigravity quota persistence`、`camoufox fingerprint` 相关目录
+- Batch 3 当前验证通过：
+  - `tests/config/user-data-paths.spec.ts`
+  - `tests/config/provider-v2-loader.spec.ts`
+  - `tests/cli/env-command.spec.ts`
+  - `tests/cli/start-command.spec.ts`
+  - `tests/cli/stop-command.spec.ts`
+  - `tests/cli/restart-command.spec.ts`
+  - `tests/cli/clean-command.spec.ts`
+  - `tests/cli/config-command.spec.ts`
+  - `tests/cli/guardian-client.spec.ts`
+  - `tests/providers/auth/deepseek-account-auth.unit.test.ts`
+  - `tests/providers/core/runtime/deepseek-http-provider.unit.test.ts`
+- 当前 `tsc --noEmit` 仍停在 `src/cli/commands/launcher-kernel.ts` 的既有错误 `resolveExitGracePeriodMs` 未定义；本轮 Batch 3 没有新增其它路径相关 TS 错误。
+- 截至本轮第二批收口后，`src/` 内残留的 `.routecodex` 命中基本只剩：
+  - legacy 兼容常量与兼容注释（例如 `LEGACY_DIR_NAME = '.routecodex'`）
+  - quota 命令里的“legacy compatible”用户文案
+  - `token-storage` 的 legacy 搜索注释
+  - `hooks` 里的 `codex-samples` 路径（按要求不迁移）
+  - provider profile loader 的测试文本
+  说明活跃源码路径已经基本完成从“手拼目录”到“布局 helper”收敛。
+- Batch 3 运行时验证补充：
+  - `src/manager/modules/quota/antigravity-quota-persistence.ts` 已确认采用“读可回退 legacy、写只落 `.rcc`”语义；`tests/manager/quota/antigravity-quota-persistence.spec.ts` 与 `tests/manager/quota/quota-manager-refresh.spec.ts` 已回归通过。
+  - 重建 `dist` 到 `0.90.328` 后，真实 smoke 已验证 `~/.rcc/state/quota/antigravity.json` 会生成并更新，而 `~/.routecodex/state/quota/antigravity.json` 不再被新进程回写。
+  - 迁移收尾阶段看到的 `~/.routecodex/guardian/guardian-state.json` 更新不是源码双写，而是旧 guardian daemon 残留；已通过内置 guardian stop flow 退掉 legacy guardian，现仅保留 `~/.rcc/guardian/guardian-state.json` 对应的新 guardian。
+  - 文档/脚本层面的 `config/provider` 默认路径也已收口到 `~/.rcc`：针对 `README/src/README/src/config/README` 与活跃脚本（provider-v2-smoke、verify-sse-loop、responses-sse-*、virtual-router-*、verify-e2e-*、run-bg/run-fg、install-release、config-core-compare、verify-health 等）完成替换；重新扫描后，活跃默认值中 `'.routecodex/config*'` 与 `'.routecodex/provider*'` 命中已为 0。
+
+Tags: rcc-home, batch3, layout-registry, user-data, single-source-of-truth, config-file, provider-root, camoufox, guardian, precommand

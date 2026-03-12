@@ -10,7 +10,7 @@ import OpenAI from 'openai';
 const BASEDIR = process.cwd();
 const CODEx_DIR = path.join(os.homedir(), '.routecodex', 'codex-samples', 'openai-chat');
 const RESP_SAMPLE_DIR = path.join(os.homedir(), '.routecodex', 'codex-samples', 'openai-responses');
-const PROVIDER_DIR = path.join(os.homedir(), '.routecodex', 'provider');
+const PROVIDER_DIR = path.join(os.homedir(), '.rcc', 'provider');
 const OUT_DIR = path.join(os.homedir(), '.routecodex', 'logs', 'responses-sse');
 
 function ensureDir(p) { fs.mkdirSync(p, { recursive: true }); }

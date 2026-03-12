@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import os from 'node:os';
 import { resolveRouteCodexConfigPath } from './config-paths.js';
+import { resolveRccConfigFile } from './user-data-paths.js';
 import { buildProviderProfiles } from '../providers/profile/provider-profile-loader.js';
 import type { ProviderProfileCollection } from '../providers/profile/provider-profile.js';
 import { buildVirtualRouterInputV2 } from './virtual-router-builder.js';
@@ -123,7 +123,7 @@ async function resolveConfigPath(explicit?: string): Promise<string> {
   if (resolved) {
     return resolved;
   }
-  return path.join(os.homedir(), '.routecodex', 'config.json');
+  return resolveRccConfigFile();
 }
 
 function isRecord(value: unknown): value is UnknownRecord {

@@ -118,7 +118,7 @@ describe('DeepSeekAccountAuthProvider', () => {
     process.env.HOME = tmpHome;
     jest.spyOn(os, 'homedir').mockReturnValue(tmpHome);
 
-    const authDir = path.join(tmpHome, '.routecodex', 'auth');
+    const authDir = path.join(tmpHome, '.rcc', 'auth');
     const tokenFile = path.join(authDir, 'deepseek-account-3-13823250570.json');
     await fs.mkdir(authDir, { recursive: true });
     await fs.writeFile(
@@ -127,7 +127,7 @@ describe('DeepSeekAccountAuthProvider', () => {
       'utf8'
     );
 
-    const fpDir = path.join(tmpHome, '.routecodex', 'camoufox-fp');
+    const fpDir = path.join(tmpHome, '.rcc', 'camoufox-fp');
     await fs.mkdir(fpDir, { recursive: true });
     await fs.writeFile(
       path.join(fpDir, 'rc-deepseek.3-13823250570.json'),
@@ -196,7 +196,7 @@ describe('DeepSeekAccountAuthProvider', () => {
     process.env.HOME = tmpHome;
     jest.spyOn(os, 'homedir').mockReturnValue(tmpHome);
 
-    const authDir = path.join(tmpHome, '.routecodex', 'auth');
+    const authDir = path.join(tmpHome, '.rcc', 'auth');
     const tokenFile = path.join(authDir, 'deepseek-account-3-13823250570.json');
     await fs.mkdir(authDir, { recursive: true });
     await fs.writeFile(
@@ -291,9 +291,10 @@ describe('DeepSeekAccountAuthProvider', () => {
   it('loads token from default alias path when tokenFile is omitted', async () => {
     const tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-deepseek-home-'));
     tempDirs.push(tmpHome);
+    process.env.HOME = tmpHome;
     jest.spyOn(os, 'homedir').mockReturnValue(tmpHome);
 
-    const tokenFile = path.join(tmpHome, '.routecodex', 'auth', 'deepseek-account-alias-1.json');
+    const tokenFile = path.join(tmpHome, '.rcc', 'auth', 'deepseek-account-alias-1.json');
     await fs.mkdir(path.dirname(tokenFile), { recursive: true });
     await fs.writeFile(tokenFile, JSON.stringify({ access_token: 'alias-token' }, null, 2) + '\n', 'utf8');
 

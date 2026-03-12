@@ -30,6 +30,26 @@ function createStubFs() {
   } as any;
 }
 
+function createMockChildProcess() {
+  let exitHandler: ((code: number | null, signal: NodeJS.Signals | null) => void) | null = null;
+  let closeHandler: ((code: number | null, signal: NodeJS.Signals | null) => void) | null = null;
+
+  return {
+    pid: 9527,
+    on: jest.fn((event: string, cb: (...args: any[]) => void) => {
+      if (event === 'exit') exitHandler = cb as any;
+      if (event === 'close') closeHandler = cb as any;
+    }),
+    kill: jest.fn(() => true),
+    _triggerExit: (code: number | null, signal: NodeJS.Signals | null) => {
+      exitHandler?.(code, signal);
+    },
+    _triggerClose: (code: number | null, signal: NodeJS.Signals | null) => {
+      closeHandler?.(code, signal);
+    }
+  } as any;
+}
+
 function createDirectoryFs(existingDirs: string[]) {
   const normalized = new Set(existingDirs.map((entry) => entry.replace(/[\\/]+$/, '')));
   return {
@@ -51,7 +71,7 @@ function createDirectoryFs(existingDirs: string[]) {
 
 
 function createConfigFs(port: number, apiKey = 'sk-config-key', host = '0.0.0.0') {
-  const configPath = '/home/test/.routecodex/config.json';
+  const configPath = '/home/test/.rcc/config.json';
   const config = JSON.stringify({ httpserver: { port, apikey: apiKey, host } });
   return {
     existsSync: (target: string) => String(target) === configPath,
@@ -102,6 +122,169 @@ function extractTmuxLaunchShellCommand(call: { command: string; args: string[] }
 }
 
 describe('cli codex command', () => {
+  describe('launcher grace period', () => {
+    it('waits for grace period before exiting after close event', async () => {
+      const infos: string[] = [];
+      const exitCodes: number[] = [];
+      const program = new Command();
+      const childProcess = createMockChildProcess();
+      const setTimeoutCalls: number[] = [];
+      const originalSetTimeout = global.setTimeout;
+
+      // Mock setTimeout to track delays
+      jest.spyOn(global, 'setTimeout').mockImplementation(((fn: () => void, delay: number) => {
+        setTimeoutCalls.push(delay);
+        if (typeof fn === 'function') {
+          // Execute immediately for test
+          fn();
+        }
+        return 0 as any;
+      }) as any);
+
+      createCodexCommand(program, {
+        isDevPackage: false,
+        isWindows: false,
+        defaultDevPort: 5555,
+        nodeBin: 'node',
+        createSpinner: async () => createStubSpinner(),
+        logger: { info: (msg) => infos.push(String(msg)), warning: () => {}, success: () => {}, error: () => {} },
+        env: { ROUTECODEX_HTTP_APIKEY: 'sk-test-key' },
+        rawArgv: ['codex', '--url', 'http://localhost:5520/proxy'],
+        fsImpl: createStubFs(),
+        homedir: () => '/home/test',
+        cwd: () => '/home/test',
+        sleep: async () => {},
+        fetch: (async () => ({ ok: true, json: async () => ({ status: 'ready', ok: true }) })) as any,
+        spawnSyncImpl: () => ({ status: 1, stdout: '', stderr: 'tmux not found' }) as any,
+        spawn: () => childProcess,
+        getModulesConfigPath: () => '/tmp/modules.json',
+        resolveServerEntryPath: () => '/tmp/index.js',
+        waitForever: async () => {
+          childProcess._triggerExit(0, null);
+          childProcess._triggerClose(0, null);
+          await new Promise((resolve) => originalSetTimeout(resolve, 10));
+        },
+        exit: (code) => {
+          exitCodes.push(Number(code));
+          return undefined as never;
+        }
+      });
+
+      await program.parseAsync(['node', 'routecodex', 'codex', '--url', 'http://localhost:5520/proxy'], { from: 'node' });
+
+      // Verify grace period was scheduled (default 2000ms)
+      expect(setTimeoutCalls.some(d => d === 2000)).toBe(true);
+      expect(infos.some((line) => line.includes('[client-exit] Waiting 2000ms for output to flush'))).toBe(true);
+      expect(exitCodes).toContain(0);
+
+      jest.restoreAllMocks();
+    });
+
+    it('respects ROUTECODEX_LAUNCHER_EXIT_GRACE_PERIOD_MS env variable', async () => {
+      const infos: string[] = [];
+      const program = new Command();
+      const childProcess = createMockChildProcess();
+      const setTimeoutCalls: number[] = [];
+      const originalSetTimeout = global.setTimeout;
+
+      jest.spyOn(global, 'setTimeout').mockImplementation(((fn: () => void, delay: number) => {
+        setTimeoutCalls.push(delay);
+        if (typeof fn === 'function') fn();
+        return 0 as any;
+      }) as any);
+
+      createCodexCommand(program, {
+        isDevPackage: false,
+        isWindows: false,
+        defaultDevPort: 5555,
+        nodeBin: 'node',
+        createSpinner: async () => createStubSpinner(),
+        logger: { info: (msg) => infos.push(String(msg)), warning: () => {}, success: () => {}, error: () => {} },
+        env: {
+          ROUTECODEX_HTTP_APIKEY: 'sk-test-key',
+          ROUTECODEX_LAUNCHER_EXIT_GRACE_PERIOD_MS: '5000'
+        },
+        rawArgv: ['codex', '--url', 'http://localhost:5520/proxy'],
+        fsImpl: createStubFs(),
+        homedir: () => '/home/test',
+        cwd: () => '/home/test',
+        sleep: async () => {},
+        fetch: (async () => ({ ok: true, json: async () => ({ status: 'ready', ok: true }) })) as any,
+        spawnSyncImpl: () => ({ status: 1, stdout: '', stderr: 'tmux not found' }) as any,
+        spawn: () => childProcess,
+        getModulesConfigPath: () => '/tmp/modules.json',
+        resolveServerEntryPath: () => '/tmp/index.js',
+        waitForever: async () => {
+          childProcess._triggerExit(0, null);
+          childProcess._triggerClose(0, null);
+          await new Promise((resolve) => originalSetTimeout(resolve, 10));
+        },
+        exit: () => undefined as never
+      });
+
+      await program.parseAsync(['node', 'routecodex', 'codex', '--url', 'http://localhost:5520/proxy'], { from: 'node' });
+
+      expect(setTimeoutCalls.some(d => d === 5000)).toBe(true);
+      expect(infos.some((line) => line.includes('Waiting 5000ms'))).toBe(true);
+
+      jest.restoreAllMocks();
+    });
+
+    it('exits immediately when grace period is set to 0', async () => {
+      const infos: string[] = [];
+      const exitCodes: number[] = [];
+      const program = new Command();
+      const childProcess = createMockChildProcess();
+      const setTimeoutCalls: number[] = [];
+
+      jest.spyOn(global, 'setTimeout').mockImplementation(((fn: () => void, delay: number) => {
+        setTimeoutCalls.push(delay);
+        return 0 as any;
+      }) as any);
+
+      createCodexCommand(program, {
+        isDevPackage: false,
+        isWindows: false,
+        defaultDevPort: 5555,
+        nodeBin: 'node',
+        createSpinner: async () => createStubSpinner(),
+        logger: { info: (msg) => infos.push(String(msg)), warning: () => {}, success: () => {}, error: () => {} },
+        env: {
+          ROUTECODEX_HTTP_APIKEY: 'sk-test-key',
+          ROUTECODEX_LAUNCHER_EXIT_GRACE_PERIOD_MS: '0'
+        },
+        rawArgv: ['codex', '--url', 'http://localhost:5520/proxy'],
+        fsImpl: createStubFs(),
+        homedir: () => '/home/test',
+        cwd: () => '/home/test',
+        sleep: async () => {},
+        fetch: (async () => ({ ok: true, json: async () => ({ status: 'ready', ok: true }) })) as any,
+        spawnSyncImpl: () => ({ status: 1, stdout: '', stderr: 'tmux not found' }) as any,
+        spawn: () => childProcess,
+        getModulesConfigPath: () => '/tmp/modules.json',
+        resolveServerEntryPath: () => '/tmp/index.js',
+        waitForever: async () => {
+          childProcess._triggerExit(0, null);
+          childProcess._triggerClose(0, null);
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        },
+        exit: (code) => {
+          exitCodes.push(Number(code));
+          return undefined as never;
+        }
+      });
+
+      await program.parseAsync(['node', 'routecodex', 'codex', '--url', 'http://localhost:5520/proxy'], { from: 'node' });
+
+      // No setTimeout should be called when grace period is 0
+      expect(setTimeoutCalls.length).toBe(0);
+      expect(infos.some((line) => line.includes('Waiting'))).toBe(false);
+      expect(exitCodes).toContain(0);
+
+      jest.restoreAllMocks();
+    });
+  });
+
   it('prints codex exit summary after child close', async () => {
     const infos: string[] = [];
     const exitCodes: number[] = [];

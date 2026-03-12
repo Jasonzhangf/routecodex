@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
+import { resolveRccPath } from '../../config/user-data-paths.js';
 
 export type OAuthRepairCooldownReason = 'google_verify' | 'generic';
 
@@ -19,8 +19,7 @@ type CooldownStateFile = {
 };
 
 function getStateFilePath(): string {
-  const home = (process.env.HOME || '').trim() || os.homedir();
-  return path.join(home, '.routecodex', 'state', 'oauth-repair-cooldown.json');
+  return resolveRccPath('state', 'oauth-repair-cooldown.json');
 }
 
 function normalizeProviderType(providerType: string): string {

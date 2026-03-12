@@ -9,8 +9,8 @@
  */
 import { setTimeout as delay } from 'node:timers/promises';
 import fs from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
+import { resolveRccPath } from '../../config/user-data-paths.js';
 
 import { inferAntigravityUaSuffixFromFingerprint, loadAntigravityCamoufoxFingerprint } from './antigravity-fingerprint.js';
 import { getAntigravityReauthRequiredRecord } from './antigravity-reauth-state.js';
@@ -24,7 +24,7 @@ const REMOTE_TIMEOUT_MS = 3_000;
 // Remote/disk versions are allowed to go above this value.
 const KNOWN_STABLE_VERSION = '4.1.24';
 const DEFAULT_FINGERPRINT_SUFFIX = 'windows/amd64';
-const VERSION_CACHE_FILE = path.join(os.homedir(), '.routecodex', 'state', 'antigravity-ua-version.json');
+const VERSION_CACHE_FILE = resolveRccPath('state', 'antigravity-ua-version.json');
 
 type AntigravityUaVersionSource = 'env' | 'remote' | 'disk' | 'floor';
 

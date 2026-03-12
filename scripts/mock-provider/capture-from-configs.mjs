@@ -10,7 +10,7 @@ import { spawn } from 'node:child_process';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, '../..');
 const HOME = os.homedir();
-const PROVIDER_ROOT = path.join(HOME, '.routecodex', 'provider');
+const PROVIDER_ROOT = path.join(HOME, '.rcc', 'provider');
 const GOLDEN_ROOT = path.join(HOME, '.routecodex', 'golden_samples');
 const CUSTOM_SAMPLE_ROOT = path.join(GOLDEN_ROOT, 'new');
 const MOCK_SAMPLES_ROOT = path.join(PROJECT_ROOT, 'samples', 'mock-provider');

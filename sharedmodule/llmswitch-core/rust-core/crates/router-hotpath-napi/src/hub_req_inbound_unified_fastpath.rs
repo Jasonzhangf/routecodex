@@ -86,14 +86,14 @@ fn parse_format_envelope_fast(raw_request: Value, protocol: &str) -> Result<Valu
         return Err("Request payload must be an object".to_string());
     }
     validate_payload_size_fast(&raw_request)?;
-    
+
     let normalized_protocol = normalize_protocol_token_fast(protocol, &raw_request);
-    
+
     let model = raw_request
         .get("model")
         .and_then(|v| v.as_str())
         .unwrap_or("");
-    
+
     let envelope = serde_json::json!({
         "format": normalized_protocol,
         "version": "v1",
@@ -107,7 +107,7 @@ fn parse_format_envelope_fast(raw_request: Value, protocol: &str) -> Result<Valu
             })
         }
     });
-    
+
     Ok(envelope)
 }
 
@@ -115,21 +115,24 @@ fn map_to_chat_envelope_fast(format_envelope: &Value) -> Result<Value, String> {
     let payload = format_envelope
         .get("payload")
         .ok_or("Missing payload in format envelope")?;
-    
+
     let model = payload
         .get("model")
         .and_then(|v| v.as_str())
         .unwrap_or("unknown")
         .to_string();
-    
+
     let messages = payload
         .get("messages")
         .cloned()
         .unwrap_or(serde_json::json!([]));
-    
+
     let tools = payload.get("tools").cloned();
-    let parameters = payload.get("parameters").cloned().unwrap_or(serde_json::json!({}));
-    
+    let parameters = payload
+        .get("parameters")
+        .cloned()
+        .unwrap_or(serde_json::json!({}));
+
     let chat_envelope = serde_json::json!({
         "model": model,
         "messages": messages,
@@ -138,37 +141,43 @@ fn map_to_chat_envelope_fast(format_envelope: &Value) -> Result<Value, String> {
         "metadata": format_envelope.get("metadata").cloned().unwrap_or(Value::Null),
         "semantics": Value::Null
     });
-    
+
     Ok(chat_envelope)
 }
 
-fn chat_envelope_to_standardized_fast(chat_envelope: &Value, adapter_context: &Value) -> Result<Value, String> {
+fn chat_envelope_to_standardized_fast(
+    chat_envelope: &Value,
+    adapter_context: &Value,
+) -> Result<Value, String> {
     let model = chat_envelope
         .get("model")
         .and_then(|v| v.as_str())
         .unwrap_or("unknown")
         .to_string();
-    
+
     let messages = chat_envelope
         .get("messages")
         .cloned()
         .unwrap_or(serde_json::json!([]));
-    
+
     let tools = chat_envelope.get("tools").cloned();
-    let parameters = chat_envelope.get("parameters").cloned().unwrap_or(serde_json::json!({}));
+    let parameters = chat_envelope
+        .get("parameters")
+        .cloned()
+        .unwrap_or(serde_json::json!({}));
     let metadata = chat_envelope.get("metadata").cloned();
     let semantics = chat_envelope.get("semantics").cloned();
-    
+
     let request_id = adapter_context
         .get("requestId")
         .and_then(|v| v.as_str())
         .unwrap_or("unknown");
-    
+
     let entry_endpoint = adapter_context
         .get("entryEndpoint")
         .and_then(|v| v.as_str())
         .unwrap_or("/v1/chat/completions");
-    
+
     let standardized = serde_json::json!({
         "model": model,
         "messages": messages,
@@ -181,32 +190,35 @@ fn chat_envelope_to_standardized_fast(chat_envelope: &Value, adapter_context: &V
         },
         "semantics": semantics,
     });
-    
+
     Ok(standardized)
 }
 
-pub fn process_unified_inbound_fast(input: UnifiedInboundInput) -> Result<UnifiedInboundOutput, String> {
+pub fn process_unified_inbound_fast(
+    input: UnifiedInboundInput,
+) -> Result<UnifiedInboundOutput, String> {
     let total_start = Instant::now();
-    
+
     let mut raw_request = input.raw_request;
     let protocol = input.protocol;
     let adapter_context = input.adapter_context;
-    
+
     let stage1_start = Instant::now();
     normalize_reasoning_in_payload_fast(&mut raw_request);
     let format_envelope = parse_format_envelope_fast(raw_request, &protocol)?;
     let stage1_ms = stage1_start.elapsed().as_millis() as u64;
-    
+
     let stage2_map_start = Instant::now();
     let chat_envelope = map_to_chat_envelope_fast(&format_envelope)?;
     let stage2_map_ms = stage2_map_start.elapsed().as_millis() as u64;
-    
+
     let stage2_std_start = Instant::now();
-    let standardized_request = chat_envelope_to_standardized_fast(&chat_envelope, &adapter_context)?;
+    let standardized_request =
+        chat_envelope_to_standardized_fast(&chat_envelope, &adapter_context)?;
     let stage2_std_ms = stage2_std_start.elapsed().as_millis() as u64;
-    
+
     let total_ms = total_start.elapsed().as_millis() as u64;
-    
+
     Ok(UnifiedInboundOutput {
         format_envelope,
         standardized_request,

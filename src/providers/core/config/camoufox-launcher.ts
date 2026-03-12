@@ -4,6 +4,10 @@ import fsAsync from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
+import {
+  resolveRccCamoufoxFingerprintDir,
+  resolveRccCamoufoxProfilesDir
+} from '../../../config/user-data-paths.js';
 import { logOAuthDebug } from '../../auth/oauth-logger.js';
 import {
   CAMO_CLICK_TARGETS,
@@ -321,8 +325,7 @@ function buildProfileId(provider?: string | null, alias?: string | null): string
 }
 
 function getProfileRoot(): string {
-  const home = process.env.HOME || os.homedir();
-  return path.join(home, '.routecodex', 'camoufox-profiles');
+  return resolveRccCamoufoxProfilesDir();
 }
 
 export function getCamoufoxProfileDir(provider?: string | null, alias?: string | null): string {
@@ -342,8 +345,7 @@ export function ensureCamoufoxProfileDir(provider?: string | null, alias?: strin
 }
 
 function getFingerprintRoot(): string {
-  const home = process.env.HOME || os.homedir();
-  return path.join(home, '.routecodex', 'camoufox-fp');
+  return resolveRccCamoufoxFingerprintDir();
 }
 
 function getFingerprintPath(profileId: string): string {

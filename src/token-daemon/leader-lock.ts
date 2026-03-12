@@ -1,6 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { homedir } from 'os';
+import { resolveRccPath } from '../config/user-data-paths.js';
 
 export interface TokenManagerLeaderInfo {
   ownerId: string;
@@ -8,7 +8,7 @@ export interface TokenManagerLeaderInfo {
   startedAt: number;
 }
 
-const STATE_DIR = path.join(homedir(), '.routecodex', 'state', 'token-manager');
+const STATE_DIR = resolveRccPath('state', 'token-manager');
 const LEADER_FILE = path.join(STATE_DIR, 'leader.json');
 
 export function getTokenManagerLeaderFilePath(): string {
@@ -89,4 +89,3 @@ async function isPidAlive(pid: number): Promise<boolean> {
     return false;
   }
 }
-

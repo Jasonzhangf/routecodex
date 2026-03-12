@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 import { buildInfo } from '../build-info.js';
+import { resolveRccPath } from '../config/user-data-paths.js';
 import { resolveLlmswitchCoreVersion } from './runtime-versions.js';
 
 export type LlmsEngineShadowConfig = {
@@ -69,7 +69,7 @@ export function resolveLlmsEngineShadowConfig(): LlmsEngineShadowConfig {
   const dir =
     (process.env.ROUTECODEX_LLMS_SHADOW_DIR && process.env.ROUTECODEX_LLMS_SHADOW_DIR.trim())
       ? process.env.ROUTECODEX_LLMS_SHADOW_DIR.trim()
-      : path.join(os.homedir(), '.routecodex', 'llms-shadow');
+      : resolveRccPath('llms-shadow');
   return { enabled, sampleRate, shadowPrefixes, dir };
 }
 

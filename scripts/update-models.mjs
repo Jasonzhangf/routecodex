@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Update provider models from /v1/models endpoint and write into the user's
- * RouteCodex config (defaults to ~/.routecodex/config.json).
+ * RouteCodex config (defaults to ~/.rcc/config.json).
  *
  * Usage:
  *   node scripts/update-models.mjs --provider qwen-provider [--write] [--config path]
@@ -27,7 +27,7 @@ function expandHome(p){ return p && p.startsWith('~/')? p.replace(/^~\//, `${pro
 
 function resolveConfigPath(explicit){
   const envPath = process.env.ROUTECODEX_CONFIG_PATH || process.env.ROUTECODEX_CONFIG;
-  const fallback = path.join(process.env.HOME || '', '.routecodex', 'config.json');
+  const fallback = path.join(process.env.HOME || '', '.rcc', 'config.json');
   const candidate = expandHome(explicit || envPath || fallback);
   if (!candidate) {
     throw new Error('Unable to resolve configuration path');

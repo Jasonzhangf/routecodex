@@ -17,7 +17,7 @@ const replayLog = process.env.RCC_RESP_REPLAY_LOG || getArg('--replay');
 const port = Number(getArg('--port') || DEFAULT_PORT);
 const host = getArg('--host') || DEFAULT_HOST;
 
-const PROVIDER_ROOT = path.join(os.homedir(), '.routecodex', 'provider');
+const PROVIDER_ROOT = path.join(os.homedir(), '.rcc', 'provider');
 const CAPTURE_ROOT = path.join(os.homedir(), '.routecodex', 'codex-samples', 'openai-responses', 'sse-proxy');
 
 function getArg(flag) {

@@ -21,7 +21,8 @@ interface BuilderState {
   usage?: AnthropicMessageResponse['usage'];
   currentBlock?:
     | { kind: 'text'; buffer: string; index: number }
-    | { kind: 'thinking'; buffer: string; index: number }
+    | { kind: 'thinking'; buffer: string; signature?: string; index: number }
+    | { kind: 'redacted_thinking'; data: string; index: number }
     | { kind: 'tool_use'; id: string; name: string; buffer: string; index: number }
     | { kind: 'tool_result'; tool_use_id: string; content?: unknown; is_error?: boolean; index: number };
   completed: boolean;
@@ -88,8 +89,21 @@ export function createAnthropicResponseBuilder(options?: BuilderOptions) {
         state.content.push({ type: 'text', text: decision.appendToContent });
       }
       if (decision.channel) {
-        state.content.push({ type: 'thinking', text: decision.channel });
+        state.content.push({
+          type: 'thinking',
+          text: decision.channel,
+          ...(typeof block.signature === 'string' && block.signature.trim().length
+            ? { signature: block.signature.trim() }
+            : {})
+        });
       }
+      if (typeof block.signature === 'string' && block.signature.trim().length) {
+        state.content.push({ type: 'redacted_thinking', data: block.signature.trim() });
+      }
+    } else if (block.kind === 'thinking' && typeof block.signature === 'string' && block.signature.trim().length) {
+      state.content.push({ type: 'redacted_thinking', data: block.signature.trim() });
+    } else if (block.kind === 'redacted_thinking' && block.data.trim().length) {
+      state.content.push({ type: 'redacted_thinking', data: block.data.trim() });
     } else if (block.kind === 'tool_use') {
       let input: Record<string, unknown> = {};
       try {
@@ -134,7 +148,18 @@ export function createAnthropicResponseBuilder(options?: BuilderOptions) {
           if (payload.type === 'text') {
             state.currentBlock = { kind: 'text', buffer: '', index };
           } else if (payload.type === 'thinking') {
-            state.currentBlock = { kind: 'thinking', buffer: '', index };
+            state.currentBlock = {
+              kind: 'thinking',
+              buffer: '',
+              index,
+              signature: typeof payload.signature === 'string' ? payload.signature : undefined
+            };
+          } else if (payload.type === 'redacted_thinking') {
+            state.currentBlock = {
+              kind: 'redacted_thinking',
+              data: typeof payload.data === 'string' ? payload.data : '',
+              index
+            };
           } else if (payload.type === 'tool_use') {
             state.currentBlock = {
               kind: 'tool_use',
@@ -158,10 +183,28 @@ export function createAnthropicResponseBuilder(options?: BuilderOptions) {
           if (!state.currentBlock) break;
           const delta = (event.data as any)?.delta;
           if (!delta) break;
-          if ((state.currentBlock.kind === 'text' || state.currentBlock.kind === 'thinking') && typeof delta.text === 'string') {
+          if (state.currentBlock.kind === 'text' && typeof delta.text === 'string') {
             state.currentBlock.buffer += delta.text;
+          } else if (state.currentBlock.kind === 'thinking') {
+            if (typeof delta.text === 'string') {
+              state.currentBlock.buffer += delta.text;
+            }
+            if (typeof delta.thinking === 'string') {
+              state.currentBlock.buffer += delta.thinking;
+            }
+            if (typeof delta.signature === 'string' && delta.signature.trim().length) {
+              state.currentBlock.signature = delta.signature;
+            }
           } else if (state.currentBlock.kind === 'tool_use' && typeof delta.partial_json === 'string') {
             state.currentBlock.buffer += delta.partial_json;
+          } else if (state.currentBlock.kind === 'redacted_thinking') {
+            if (typeof delta.signature === 'string' && delta.signature.trim().length) {
+              state.currentBlock.data += delta.signature;
+            } else if (typeof delta.thinking === 'string' && delta.thinking.trim().length) {
+              state.currentBlock.data += delta.thinking;
+            } else if (typeof delta.text === 'string' && delta.text.trim().length) {
+              state.currentBlock.data += delta.text;
+            }
           }
           break;
         }

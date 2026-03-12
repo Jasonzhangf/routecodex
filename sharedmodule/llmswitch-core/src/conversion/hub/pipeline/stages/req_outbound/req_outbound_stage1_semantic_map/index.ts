@@ -38,6 +38,13 @@ export async function runReqOutboundStage1SemanticMap(
 ): Promise<ReqOutboundStage1SemanticMapResult> {
   const requestId = options.adapterContext.requestId || 'unknown';
   const forceDetailLog = isHubStageTimingDetailEnabled();
+  const providerProtocol = options.adapterContext.providerProtocol;
+  const mapperName =
+    options.semanticMapper &&
+    typeof options.semanticMapper === 'object' &&
+    (options.semanticMapper as { constructor?: { name?: string } }).constructor?.name
+      ? String((options.semanticMapper as { constructor?: { name?: string } }).constructor?.name)
+      : 'unknown';
   logHubStageTiming(requestId, 'req_outbound.stage1_native_to_chat_envelope', 'start');
   const toChatStart = Date.now();
   const chatEnvelope = standardizedToChatEnvelopeWithNative({
@@ -95,7 +102,9 @@ export async function runReqOutboundStage1SemanticMap(
   )) as FormatEnvelope<JsonObject>;
   logHubStageTiming(requestId, 'req_outbound.stage1_mapper_from_chat', 'completed', {
     elapsedMs: Date.now() - fromChatStart,
-    forceLog: forceDetailLog
+    forceLog: forceDetailLog,
+    providerProtocol,
+    mapperName
   });
   logHubStageTiming(requestId, 'req_outbound.stage1_operation_table_post_map', 'start');
   const postMapStart = Date.now();

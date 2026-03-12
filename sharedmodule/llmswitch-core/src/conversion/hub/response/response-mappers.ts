@@ -19,19 +19,43 @@ export interface ResponseMapper {
 }
 
 function injectResponsesReasoningExtension(payload: JsonObject): void {
-  if ((payload as any).__responses_reasoning) {
-    return;
-  }
   const choices = Array.isArray((payload as any).choices) ? (payload as any).choices : [];
   const primary = choices[0] && typeof choices[0] === 'object' ? (choices[0] as Record<string, unknown>) : undefined;
   const message = primary && typeof (primary as any).message === 'object' ? (primary as any).message as Record<string, unknown> : undefined;
   if (!message) return;
+  const extension = (payload as any).__responses_reasoning;
+  if (extension && typeof extension === 'object' && !Array.isArray(extension)) {
+    const extContent = Array.isArray((extension as any).content)
+      ? (extension as any).content
+        .map((entry: unknown) => {
+          if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null;
+          const node = entry as Record<string, unknown>;
+          const text = typeof node.text === 'string' ? node.text.trim() : '';
+          if (!text.length) return null;
+          return { type: 'reasoning_text', text };
+        })
+        .filter((entry: unknown): entry is { type: 'reasoning_text'; text: string } => Boolean(entry))
+      : undefined;
+    const extEncrypted = typeof (extension as any).encrypted_content === 'string'
+      ? String((extension as any).encrypted_content).trim()
+      : '';
+    if ((Array.isArray(extContent) && extContent.length) || extEncrypted.length) {
+      (message as any).reasoning = {
+        ...(Array.isArray(extContent) && extContent.length ? { content: extContent } : {}),
+        ...(extEncrypted.length ? { encrypted_content: extEncrypted } : {})
+      };
+      if (!((message as any).reasoning_content && String((message as any).reasoning_content).trim().length) && Array.isArray(extContent) && extContent.length) {
+        (message as any).reasoning_content = extContent.map((entry) => entry.text).join('\n');
+      }
+      return;
+    }
+  }
   const reasoningText =
     typeof (message as any).reasoning_content === 'string' && (message as any).reasoning_content.trim().length
       ? String((message as any).reasoning_content).trim()
       : undefined;
   if (!reasoningText) return;
-  (payload as any).__responses_reasoning = {
+  (message as any).reasoning = {
     content: [{ type: 'reasoning_text', text: reasoningText }]
   };
 }

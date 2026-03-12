@@ -60,7 +60,7 @@ describe('usage logger timing summary', () => {
     });
 
     const rendered = String(logSpy.mock.calls.at(-1)?.[0] ?? '');
-    expect(rendered).toContain('request.internal=240ms');
+    expect(rendered).toContain('request.internal=100ms');
     expect(rendered).toContain('hub=140ms');
     expect(rendered).toContain('provider.send=800ms');
     expect(rendered).toContain('hub.response=40ms');
@@ -97,7 +97,7 @@ describe('usage logger timing summary', () => {
     expect(rendered).toContain('[usage] request req_release_usage');
     expect(rendered).toContain('latency=1025.0ms');
     expect(rendered).toContain('timing={');
-    expect(rendered).toContain('request.internal=300ms');
+    expect(rendered).toContain('request.internal=0ms');
     expect(rendered).toContain('hub=');
     expect(rendered).toContain('provider.send=');
     expect(rendered).toContain('hub.response=');
@@ -135,7 +135,7 @@ describe('usage logger timing summary', () => {
     });
 
     const rendered = String(logSpy.mock.calls.at(-1)?.[0] ?? '');
-    expect(rendered).toContain('request.internal=250ms');
+    expect(rendered).toContain('request.internal=100ms');
     expect(rendered).toContain('hub=150ms');
     expect(rendered).toContain('provider.send=700ms');
     expect(rendered).toContain('hub.response=40ms');
@@ -170,7 +170,7 @@ describe('usage logger timing summary', () => {
     });
 
     const rendered = String(logSpy.mock.calls.at(-1)?.[0] ?? '');
-    expect(rendered).toContain('request.internal=265ms');
+    expect(rendered).toContain('request.internal=145ms');
     expect(rendered).toContain('hub=120ms');
     expect(rendered).toContain('provider.send=700ms');
     expect(rendered).toContain('hub.response=30ms');
@@ -213,10 +213,56 @@ describe('usage logger timing summary', () => {
     });
 
     const rendered = String(logSpy.mock.calls.at(-1)?.[0] ?? '');
-    expect(rendered).toContain('request.internal=240ms');
+    expect(rendered).toContain('request.internal=60ms');
     expect(rendered).toContain('hub=180ms');
     expect(rendered).toContain('provider.send=700ms');
     expect(rendered).toContain('hub.response=45ms');
     expect(rendered).toContain('response=15ms');
+  });
+
+  it('includes host.internal in release timing summary when host-side scopes exist', async () => {
+    process.env.ROUTECODEX_BUILD_MODE = 'release';
+    delete process.env.ROUTECODEX_STAGE_LOG;
+    delete process.env.ROUTECODEX_STAGE_TIMING;
+    delete process.env.ROUTECODEX_STAGE_TIMING_SUMMARY;
+
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const { logPipelineStage } = await import('../../../../../src/server/utils/stage-logger.js');
+    const { logUsageSummary } = await import('../../../../../src/server/runtime/http-server/executor/usage-logger.js');
+
+    logPipelineStage('request.snapshot.start', 'req_release_host_internal', {});
+    logPipelineStage('request.snapshot.completed', 'req_release_host_internal', { elapsedMs: 120 });
+    logPipelineStage('hub.start', 'req_release_host_internal', {});
+    logPipelineStage('hub.completed', 'req_release_host_internal', { elapsedMs: 310 });
+    logPipelineStage('provider.runtime_resolve.start', 'req_release_host_internal', {});
+    logPipelineStage('provider.runtime_resolve.completed', 'req_release_host_internal', { elapsedMs: 40 });
+    logPipelineStage('provider.context_resolve.start', 'req_release_host_internal', {});
+    logPipelineStage('provider.context_resolve.completed', 'req_release_host_internal', { elapsedMs: 25 });
+    logPipelineStage('provider.metadata_attach.start', 'req_release_host_internal', {});
+    logPipelineStage('provider.metadata_attach.completed', 'req_release_host_internal', { elapsedMs: 15 });
+    logPipelineStage('provider.send.start', 'req_release_host_internal', {});
+    logPipelineStage('provider.send.completed', 'req_release_host_internal', { elapsedMs: 700 });
+    logPipelineStage('provider.response_normalize.start', 'req_release_host_internal', {});
+    logPipelineStage('provider.response_normalize.completed', 'req_release_host_internal', { elapsedMs: 60 });
+    logPipelineStage('hub.response.start', 'req_release_host_internal', {});
+    logPipelineStage('hub.response.completed', 'req_release_host_internal', { elapsedMs: 90 });
+    logPipelineStage('response.dispatch.start', 'req_release_host_internal', { status: 200, stream: false });
+    logPipelineStage('response.completed', 'req_release_host_internal', { elapsedMs: 20 });
+
+    logUsageSummary('req_release_host_internal', {
+      providerKey: 'demo.key1',
+      model: 'demo-model',
+      latencyMs: 1500,
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }
+    });
+
+    const rendered = String(logSpy.mock.calls.at(-1)?.[0] ?? '');
+    expect(rendered).toContain('request.internal=120ms');
+    expect(rendered).toContain('host.internal=260ms');
+    expect(rendered).toContain('request.snapshot=120ms');
+    expect(rendered).toContain('provider.runtime_resolve=40ms');
+    expect(rendered).toContain('provider.context_resolve=25ms');
+    expect(rendered).toContain('provider.metadata_attach=15ms');
+    expect(rendered).toContain('provider.response_normalize=60ms');
   });
 });

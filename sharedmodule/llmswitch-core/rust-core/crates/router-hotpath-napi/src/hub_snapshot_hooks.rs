@@ -298,7 +298,10 @@ fn cleanup_zero_byte_json_files(dir: &Path) {
             if meta.is_file() && meta.len() == 0 {
                 if let Err(e) = fs::remove_file(&path) {
                     if e.kind() != std::io::ErrorKind::NotFound {
-                        eprintln!("[hub_snapshot_hooks] Failed to remove zero-byte file {:?}: {}", path, e);
+                        eprintln!(
+                            "[hub_snapshot_hooks] Failed to remove zero-byte file {:?}: {}",
+                            path, e
+                        );
                     }
                 }
             }
@@ -322,7 +325,10 @@ fn write_unique_errorsample_file(
         .unwrap_or("json");
     let tmp_dir = dir.join("_tmp");
     if let Err(e) = fs::create_dir_all(&tmp_dir) {
-        eprintln!("[hub_snapshot_hooks] Failed to create tmp directory {:?}: {}", tmp_dir, e);
+        eprintln!(
+            "[hub_snapshot_hooks] Failed to create tmp directory {:?}: {}",
+            tmp_dir, e
+        );
     }
     for _ in 0..32 {
         let suffix = format!(
@@ -340,7 +346,10 @@ fn write_unique_errorsample_file(
         if let Ok(mut f) = OpenOptions::new().write(true).create_new(true).open(&tmp) {
             f.write_all(contents.as_bytes())?;
             if let Err(e) = fs::rename(&tmp, &dest) {
-                eprintln!("[hub_snapshot_hooks] Failed to rename tmp file to {:?}: {}", dest, e);
+                eprintln!(
+                    "[hub_snapshot_hooks] Failed to rename tmp file to {:?}: {}",
+                    dest, e
+                );
                 let _ = fs::remove_file(&tmp);
             }
             return Ok(());
@@ -412,7 +421,10 @@ fn write_unique_file(dir: &Path, base_name: &str, contents: &str) -> Result<(), 
 
 fn merge_dirs(src: &Path, dest: &Path) {
     if let Err(e) = fs::create_dir_all(dest) {
-        eprintln!("[hub_snapshot_hooks] Failed to create directory {:?}: {}", dest, e);
+        eprintln!(
+            "[hub_snapshot_hooks] Failed to create directory {:?}: {}",
+            dest, e
+        );
         return;
     }
     let entries = match fs::read_dir(src) {
@@ -448,12 +460,18 @@ fn merge_dirs(src: &Path, dest: &Path) {
             };
             let alt = dest.join(format!("{}_{}{}", stem, suffix, ext_suffix));
             if let Err(e) = fs::rename(&from, &alt) {
-                    eprintln!("[hub_snapshot_hooks] Failed to rename file {:?} to {:?}: {}", from, alt, e);
-                }
+                eprintln!(
+                    "[hub_snapshot_hooks] Failed to rename file {:?} to {:?}: {}",
+                    from, alt, e
+                );
+            }
         }
     }
     if let Err(e) = fs::remove_dir(src) {
-        eprintln!("[hub_snapshot_hooks] Failed to remove directory {:?}: {}", src, e);
+        eprintln!(
+            "[hub_snapshot_hooks] Failed to remove directory {:?}: {}",
+            src, e
+        );
     }
 }
 
@@ -473,7 +491,10 @@ fn promote_pending_dir(root: &Path, folder: &str, group_request_token: &str, pro
         return;
     }
     if let Err(e) = fs::create_dir_all(dest.parent().unwrap_or(root)) {
-        eprintln!("[hub_snapshot_hooks] Failed to create directory for {:?}: {}", dest, e);
+        eprintln!(
+            "[hub_snapshot_hooks] Failed to create directory for {:?}: {}",
+            dest, e
+        );
         return;
     }
     if let Err(_) = fs::rename(&pending, &dest) {
@@ -532,7 +553,10 @@ fn write_snapshot_file(
         .join(provider_token)
         .join(group_request_token);
     if let Err(e) = fs::create_dir_all(&dir) {
-        eprintln!("[hub_snapshot_hooks] Failed to create directory {:?}: {}", dir, e);
+        eprintln!(
+            "[hub_snapshot_hooks] Failed to create directory {:?}: {}",
+            dir, e
+        );
     }
     let meta_path = dir.join("__runtime.json");
     if !meta_path.exists() {
@@ -547,8 +571,11 @@ fn write_snapshot_file(
         });
         if let Ok(payload_str) = serde_json::to_string_pretty(&payload) {
             if let Err(e) = fs::write(&meta_path, payload_str) {
-                    eprintln!("[hub_snapshot_hooks] Failed to write runtime metadata {:?}: {}", meta_path, e);
-                }
+                eprintln!(
+                    "[hub_snapshot_hooks] Failed to write runtime metadata {:?}: {}",
+                    meta_path, e
+                );
+            }
         }
     }
 
@@ -567,7 +594,10 @@ fn write_snapshot_via_hooks(options: SnapshotHookOptions) {
     let mut normal = options.clone();
     normal.stage = stage.clone();
     if let Err(e) = write_snapshot_file(&normal, None) {
-        eprintln!("[hub_snapshot_hooks] Failed to write snapshot for stage {}: {}", normal.stage, e);
+        eprintln!(
+            "[hub_snapshot_hooks] Failed to write snapshot for stage {}: {}",
+            normal.stage, e
+        );
     }
 
     if is_hub_policy_stage(stage.as_str())
@@ -576,7 +606,10 @@ fn write_snapshot_via_hooks(options: SnapshotHookOptions) {
         let base = resolve_snapshot_root();
         let policy_root = base.join("__policy_violations__");
         if let Err(e) = write_snapshot_file(&normal, Some(policy_root.as_path())) {
-            eprintln!("[hub_snapshot_hooks] Failed to write policy violation snapshot for stage {}: {}", normal.stage, e);
+            eprintln!(
+                "[hub_snapshot_hooks] Failed to write policy violation snapshot for stage {}: {}",
+                normal.stage, e
+            );
         }
     }
 
@@ -584,8 +617,11 @@ fn write_snapshot_via_hooks(options: SnapshotHookOptions) {
         let root = resolve_errorsamples_root();
         let dir = root.join(safe_errorsample_name("tool-surface"));
         if let Err(e) = fs::create_dir_all(&dir) {
-        eprintln!("[hub_snapshot_hooks] Failed to create directory {:?}: {}", dir, e);
-    }
+            eprintln!(
+                "[hub_snapshot_hooks] Failed to create directory {:?}: {}",
+                dir, e
+            );
+        }
         cleanup_zero_byte_json_files(&dir);
         let payload = serde_json::json!({
           "kind": "hub_toolsurface_diff",
@@ -609,7 +645,10 @@ fn write_snapshot_via_hooks(options: SnapshotHookOptions) {
                 format!("{}.json", safe_errorsample_name(stage.as_str())).as_str(),
                 payload_str.as_str(),
             ) {
-                eprintln!("[hub_snapshot_hooks] Failed to write error sample for stage {}: {}", stage, e);
+                eprintln!(
+                    "[hub_snapshot_hooks] Failed to write error sample for stage {}: {}",
+                    stage, e
+                );
             }
         }
     }

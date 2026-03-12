@@ -3,9 +3,9 @@
 /**
  * Virtual Router v1/v2 shadow comparison against real user config.
  *
- * - 读取当前用户配置（~/.routecodex/config.json 或 env 指定路径）；
+ * - 读取当前用户配置（~/.rcc/config.json 或 env 指定路径）；
  * - 使用 buildVirtualRouterInputFromUserConfig 生成 v1 视图；
- * - 使用 buildVirtualRouterInputV2 生成 v2 视图（从 ~/.routecodex/provider 加载 provider v2）；
+ * - 使用 buildVirtualRouterInputV2 生成 v2 视图（从 ~/.rcc/provider 加载 provider v2）；
  * - 对比 providers / routing 结构并打印差异摘要。
  *
  * 依赖前提：dist/ 已通过 `npm run build` 或等价 tsc 编译生成。
@@ -22,7 +22,7 @@ async function resolveConfigPath() {
   if (explicit && explicit.trim()) {
     return path.resolve(explicit.trim());
   }
-  return path.join(os.homedir(), '.routecodex', 'config.json');
+  return path.join(os.homedir(), '.rcc', 'config.json');
 }
 
 async function loadUserConfig() {

@@ -17,7 +17,10 @@ pub(crate) fn load_routing_instruction_state(key: &str) -> Option<RoutingInstruc
         Ok(content) => content,
         Err(e) => {
             if e.kind() != std::io::ErrorKind::NotFound {
-                eprintln!("[routing_state_store] Failed to read state file {:?}: {}", filepath, e);
+                eprintln!(
+                    "[routing_state_store] Failed to read state file {:?}: {}",
+                    filepath, e
+                );
             }
             return None;
         }
@@ -28,7 +31,10 @@ pub(crate) fn load_routing_instruction_state(key: &str) -> Option<RoutingInstruc
     let parsed: Value = match serde_json::from_str(&raw) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("[routing_state_store] Failed to parse JSON from {:?}: {}", filepath, e);
+            eprintln!(
+                "[routing_state_store] Failed to parse JSON from {:?}: {}",
+                filepath, e
+            );
             return None;
         }
     };
@@ -60,7 +66,10 @@ pub(crate) fn persist_routing_instruction_state(
     if should_clear {
         if let Err(e) = fs::remove_file(&filepath) {
             if e.kind() != std::io::ErrorKind::NotFound {
-                eprintln!("[routing_state_store] Failed to remove state file {:?}: {}", filepath, e);
+                eprintln!(
+                    "[routing_state_store] Failed to remove state file {:?}: {}",
+                    filepath, e
+                );
             }
         }
         return;
@@ -79,19 +88,28 @@ pub(crate) fn persist_routing_instruction_state(
     };
     if let Some(dir) = filepath.parent() {
         if let Err(e) = fs::create_dir_all(dir) {
-            eprintln!("[routing_state_store] Failed to create directory {:?}: {}", dir, e);
+            eprintln!(
+                "[routing_state_store] Failed to create directory {:?}: {}",
+                dir, e
+            );
             return;
         }
     }
     let text = match serde_json::to_string(&payload) {
         Ok(t) => t,
         Err(e) => {
-            eprintln!("[routing_state_store] Failed to serialize state for {:?}: {}", filepath, e);
+            eprintln!(
+                "[routing_state_store] Failed to serialize state for {:?}: {}",
+                filepath, e
+            );
             return;
         }
     };
     if let Err(e) = fs::write(&filepath, text) {
-        eprintln!("[routing_state_store] Failed to write state file {:?}: {}", filepath, e);
+        eprintln!(
+            "[routing_state_store] Failed to write state file {:?}: {}",
+            filepath, e
+        );
     }
 }
 

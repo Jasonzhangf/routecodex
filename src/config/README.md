@@ -26,5 +26,5 @@ User Config → Config Paths → routecodex-config-loader → bootstrapVirtualRo
 
 ## CLI Usage
 ```bash
-routecodex validate --config ~/.routecodex/config.json
+routecodex validate --config ~/.rcc/config.json
 ```

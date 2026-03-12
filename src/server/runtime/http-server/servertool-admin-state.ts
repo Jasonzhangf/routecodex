@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { homedir } from 'node:os';
+import { resolveRccLogsDir } from '../../../config/user-data-paths.js';
 
 export type ServerToolRuntimeState = {
   enabled: boolean;
@@ -54,7 +54,7 @@ type ProgressLogEvent = {
 
 const truthy = new Set(['1', 'true', 'yes', 'on']);
 const falsy = new Set(['0', 'false', 'no', 'off']);
-const DEFAULT_LOG_PATH = path.join(homedir(), '.routecodex', 'logs', 'servertool-events.jsonl');
+const DEFAULT_LOG_PATH = path.join(resolveRccLogsDir(), 'servertool-events.jsonl');
 const DEFAULT_MAX_TAIL_BYTES = 2 * 1024 * 1024;
 const DEFAULT_MAX_LINES = 3000;
 const DEFAULT_RECENT_EVENTS = 120;

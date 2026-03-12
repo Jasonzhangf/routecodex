@@ -2,6 +2,9 @@ use napi::bindgen_prelude::Result as NapiResult;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+use crate::hub_reasoning_tool_normalizer::{
+    build_message_reasoning_value, normalize_message_reasoning_ssot, project_message_reasoning_text,
+};
 use crate::hub_resp_outbound_client_semantics::build_anthropic_response_from_chat_value;
 use crate::resp_process_stage1_tool_governance::{govern_response, ToolGovernanceInput};
 use crate::shared_chat_output_normalizer::normalize_chat_message_content;
@@ -219,8 +222,16 @@ fn convert_anthropic_messages(
                 Value::String(normalized.content_text.unwrap_or(text)),
             );
             if let Some(reasoning) = normalized.reasoning_text.filter(|v| !v.trim().is_empty()) {
-                message.insert("reasoning_content".to_string(), Value::String(reasoning));
+                if let Some(reasoning_payload) =
+                    build_message_reasoning_value(&[], &[reasoning], None)
+                {
+                    if let Some(text) = project_message_reasoning_text(&reasoning_payload) {
+                        message.insert("reasoning_content".to_string(), Value::String(text));
+                    }
+                    message.insert("reasoning".to_string(), reasoning_payload);
+                }
             }
+            normalize_message_reasoning_ssot(&mut message);
             out.push(Value::Object(message));
             continue;
         };
@@ -315,12 +326,15 @@ fn convert_anthropic_messages(
             if let Some(reasoning) = normalized.reasoning_text.filter(|v| !v.trim().is_empty()) {
                 merged_reasoning.push(reasoning);
             }
-            if !merged_reasoning.is_empty() {
-                message.insert(
-                    "reasoning_content".to_string(),
-                    Value::String(merged_reasoning.join("\n")),
-                );
+            if let Some(reasoning_payload) =
+                build_message_reasoning_value(&[], &merged_reasoning, None)
+            {
+                if let Some(text) = project_message_reasoning_text(&reasoning_payload) {
+                    message.insert("reasoning_content".to_string(), Value::String(text));
+                }
+                message.insert("reasoning".to_string(), reasoning_payload);
             }
+            normalize_message_reasoning_ssot(&mut message);
             out.push(Value::Object(message));
         }
 

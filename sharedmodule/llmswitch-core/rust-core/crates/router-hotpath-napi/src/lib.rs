@@ -15,7 +15,6 @@ use chat_clock_schedule_directive_candidate::parse_clock_schedule_directive_cand
 mod chat_clock_schedule_directive_text_parts;
 use chat_clock_schedule_directive_text_parts::extract_clock_schedule_directive_text_parts;
 mod anthropic_openai_codec;
-mod gemini_openai_codec;
 mod chat_anthropic_tool_alias;
 mod chat_clock_reminder_directives;
 mod chat_clock_reminder_orchestration_semantics;
@@ -33,6 +32,7 @@ mod chat_process_media_semantics;
 mod chat_servertool_orchestration;
 mod chat_tool_normalization;
 mod chat_web_search_tool_schema;
+mod gemini_openai_codec;
 mod hub_bridge_actions;
 mod hub_bridge_policies;
 mod hub_chat_envelope_validator;
@@ -820,13 +820,22 @@ fn serialize_routing_instruction_for_napi(
             out.insert("stopMessageText".to_string(), Value::String(value.clone()));
         }
         if let Some(value) = stop.max_repeats {
-            out.insert("stopMessageMaxRepeats".to_string(), Value::Number(value.into()));
+            out.insert(
+                "stopMessageMaxRepeats".to_string(),
+                Value::Number(value.into()),
+            );
         }
         if let Some(value) = &stop.ai_mode {
-            out.insert("stopMessageAiMode".to_string(), Value::String(value.clone()));
+            out.insert(
+                "stopMessageAiMode".to_string(),
+                Value::String(value.clone()),
+            );
         }
         if let Some(value) = &stop.source {
-            out.insert("stopMessageSource".to_string(), Value::String(value.clone()));
+            out.insert(
+                "stopMessageSource".to_string(),
+                Value::String(value.clone()),
+            );
         }
         if stop.from_historical {
             out.insert("fromHistoricalUserMessage".to_string(), Value::Bool(true));
@@ -834,7 +843,10 @@ fn serialize_routing_instruction_for_napi(
     }
     if let Some(pre) = &instruction.pre_command {
         if let Some(value) = &pre.script_path {
-            out.insert("preCommandScriptPath".to_string(), Value::String(value.clone()));
+            out.insert(
+                "preCommandScriptPath".to_string(),
+                Value::String(value.clone()),
+            );
         }
     }
     Value::Object(out)
@@ -842,12 +854,15 @@ fn serialize_routing_instruction_for_napi(
 
 #[napi]
 pub fn parse_routing_instructions_json(messages_json: String) -> NapiResult<String> {
-    let messages: Vec<Value> =
-        serde_json::from_str(&messages_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let messages: Vec<Value> = serde_json::from_str(&messages_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let parsed =
         virtual_router_engine::instructions::parse_routing_instructions_from_messages(&messages)
             .map_err(|e| napi::Error::from_reason(e))?;
-    let output: Vec<Value> = parsed.iter().map(serialize_routing_instruction_for_napi).collect();
+    let output: Vec<Value> = parsed
+        .iter()
+        .map(serialize_routing_instruction_for_napi)
+        .collect();
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
@@ -897,7 +912,9 @@ pub fn clean_routing_instruction_markers_json(request_json: String) -> NapiResul
 }
 
 #[napi]
-pub fn clean_malformed_routing_instruction_markers_json(request_json: String) -> NapiResult<String> {
+pub fn clean_malformed_routing_instruction_markers_json(
+    request_json: String,
+) -> NapiResult<String> {
     let mut request: Value =
         serde_json::from_str(&request_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
     virtual_router_engine::instructions::clean_malformed_routing_instruction_markers(&mut request);

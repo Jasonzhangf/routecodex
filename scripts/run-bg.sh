@@ -44,7 +44,7 @@ detect_port() {
   local p="${TARGET_PORT:-}"
   if [[ -n "$p" ]]; then echo "$p"; return; fi
   if [[ -n "${ROUTECODEX_PORT:-}" ]]; then echo "${ROUTECODEX_PORT}"; return; fi
-  local cfg="$HOME/.routecodex/config.json"
+  local cfg="$HOME/.rcc/config.json"
   if command -v jq >/dev/null 2>&1 && [[ -f "$cfg" ]]; then
     p=$(jq -r '.port // empty' "$cfg" 2>/dev/null || true)
     if [[ -n "$p" && "$p" =~ ^[0-9]+$ ]]; then echo "$p"; return; fi

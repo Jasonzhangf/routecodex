@@ -6,10 +6,10 @@ import path from 'path';
 
 function readJson(p){ try { return JSON.parse(fs.readFileSync(p,'utf-8')); } catch { return null; } }
 function loadUserConfig(){
-  const explicit = process.env.ROUTECODEX_CONFIG_PATH;
+  const explicit = process.env.ROUTECODEX_CONFIG_PATH || process.env.RCC_CONFIG_PATH || process.env.ROUTECODEX_CONFIG || process.env.RCC_CONFIG;
   const candidate = explicit && explicit.trim()
     ? path.resolve(explicit.trim())
-    : path.join(os.homedir(), '.routecodex', 'config.json');
+    : path.join(os.homedir(), '.rcc', 'config.json');
   return readJson(candidate);
 }
 
@@ -18,7 +18,7 @@ const providers = cfg?.virtualrouter?.providers || {};
 const entries = Object.entries(providers);
 const glmEntry = entries.find(([id]) => id.includes('glm')) || entries[0];
 if (!glmEntry) {
-  console.error('no provider definition found in ~/.routecodex/config.json');
+  console.error('no provider definition found in ~/.rcc/config.json');
   process.exit(2);
 }
 const [providerId, providerConfig] = glmEntry;

@@ -91,6 +91,30 @@ fn apply_target_metadata(
             "routeName".to_string(),
             Value::String(route_name_value.to_string()),
         );
+
+        // Preserve original reasoning_effort before override (for response-side restoration)
+        if let Some(existing_effort) = metadata_obj
+            .get("reasoning_effort")
+            .and_then(|v| v.as_str())
+        {
+            let trimmed = existing_effort.trim();
+            if !trimmed.is_empty() {
+                metadata_obj.insert(
+                    "originalReasoningEffort".to_string(),
+                    Value::String(trimmed.to_string()),
+                );
+            }
+        }
+
+        // Adjust reasoning effort based on route: coding/thinking -> high, others -> medium
+        let reasoning_effort = match route_name_value.to_lowercase().as_str() {
+            "coding" | "thinking" => "high",
+            _ => "medium",
+        };
+        metadata_obj.insert(
+            "reasoning_effort".to_string(),
+            Value::String(reasoning_effort.to_string()),
+        );
     }
     metadata_obj.insert("target".to_string(), target.clone());
     if let Some(provider_key) = target_obj.get("providerKey").cloned() {

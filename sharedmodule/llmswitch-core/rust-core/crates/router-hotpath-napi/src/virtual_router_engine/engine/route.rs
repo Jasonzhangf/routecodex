@@ -7,13 +7,15 @@ use crate::virtual_router_engine::classifier::ClassificationResult;
 use crate::virtual_router_engine::error::format_virtual_router_error;
 use crate::virtual_router_engine::features::build_routing_features;
 use crate::virtual_router_engine::instructions::{
-    apply_routing_instructions, build_metadata_instructions, clean_malformed_routing_instruction_markers, clean_routing_instruction_markers,
+    apply_routing_instructions, build_metadata_instructions,
+    clean_malformed_routing_instruction_markers, clean_routing_instruction_markers,
     ensure_stop_message_mode_max_repeats, has_client_inject_fields,
     has_routing_instruction_marker_in_messages,
     has_routing_instruction_marker_in_responses_context, parse_routing_instructions_from_request,
     pre_command_state_snapshot, stop_message_state_snapshot, strip_client_inject_fields,
     strip_stop_message_fields, RoutingInstruction, RoutingInstructionState,
 };
+use crate::virtual_router_engine::provider_registry::ProviderRegistry;
 use crate::virtual_router_engine::routing::{
     alias_prefix_from_alias_key, build_antigravity_alias_key, extract_excluded_provider_keys,
     filter_candidates_by_state, parse_direct_provider_model,
@@ -21,11 +23,9 @@ use crate::virtual_router_engine::routing::{
     resolve_stop_message_scope, should_avoid_antigravity_after_repeated_error,
     should_bind_antigravity_session, should_fallback_direct_model_for_media,
 };
-use crate::virtual_router_engine::provider_registry::ProviderRegistry;
 use crate::virtual_router_engine::routing_state_store::{
     load_routing_instruction_state, persist_routing_instruction_state,
 };
-
 
 fn extract_key_alias_from_provider_key(provider_key: &str) -> Option<String> {
     let trimmed = provider_key.trim();
@@ -51,7 +51,10 @@ fn normalize_instruction_target_against_registry(
     let Some(model) = target.model.clone() else {
         return target.clone();
     };
-    if registry.resolve_runtime_key_by_model(&provider, &model).is_some() {
+    if registry
+        .resolve_runtime_key_by_model(&provider, &model)
+        .is_some()
+    {
         return target.clone();
     }
     for provider_key in registry.list_provider_keys(&provider) {
@@ -84,7 +87,9 @@ fn normalize_parsed_instructions_against_registry(
         .into_iter()
         .map(|mut inst| {
             if let Some(target) = inst.target.as_ref() {
-                inst.target = Some(normalize_instruction_target_against_registry(target, registry));
+                inst.target = Some(normalize_instruction_target_against_registry(
+                    target, registry,
+                ));
             }
             inst
         })
@@ -99,7 +104,10 @@ fn resolve_route_hint(metadata: &Value) -> Option<String> {
         .filter(|v| !v.is_empty())
 }
 
-fn summarize_marker_instructions(instructions: &[RoutingInstruction], marker_seen: bool) -> Option<String> {
+fn summarize_marker_instructions(
+    instructions: &[RoutingInstruction],
+    marker_seen: bool,
+) -> Option<String> {
     if !marker_seen {
         return None;
     }
@@ -193,11 +201,10 @@ impl VirtualRouterEngineCore {
             routing_state.prefer_target = None;
         }
 
-        let mut parsed_instructions =
-            normalize_parsed_instructions_against_registry(
-                parse_routing_instructions_from_request(&request_working)?,
-                &self.provider_registry,
-            );
+        let mut parsed_instructions = normalize_parsed_instructions_against_registry(
+            parse_routing_instructions_from_request(&request_working)?,
+            &self.provider_registry,
+        );
         if crate::virtual_router_engine::routing::is_server_tool_followup_request(metadata)
             && !parsed_instructions.is_empty()
         {

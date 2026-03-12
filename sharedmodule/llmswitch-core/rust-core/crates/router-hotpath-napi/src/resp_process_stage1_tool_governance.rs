@@ -50,10 +50,7 @@ fn is_canonical_chat_completion(payload: &Value) -> bool {
     let Some(first) = choices.first().and_then(|v| v.as_object()) else {
         return false;
     };
-    first
-        .get("message")
-        .and_then(|v| v.as_object())
-        .is_some()
+    first.get("message").and_then(|v| v.as_object()).is_some()
 }
 
 fn coerce_to_canonical_chat_completion(payload: &Value) -> (Value, bool) {
@@ -1005,7 +1002,8 @@ fn prepare_payload_for_governance(
     let before_strip = prepared_payload.clone();
     strip_orphan_function_calls_tag(&mut prepared_payload);
     let shape_sanitized = prepared_payload != before_strip;
-    let harvested_tool_calls = maybe_harvest_empty_tool_calls_from_json_content(&mut prepared_payload);
+    let harvested_tool_calls =
+        maybe_harvest_empty_tool_calls_from_json_content(&mut prepared_payload);
 
     Ok(ToolGovernancePreparationOutput {
         prepared_payload,
@@ -1087,7 +1085,10 @@ mod tests {
             prepared.prepared_payload["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
             "exec_command"
         );
-        assert_eq!(prepared.prepared_payload["choices"][0]["message"]["content"], "");
+        assert_eq!(
+            prepared.prepared_payload["choices"][0]["message"]["content"],
+            ""
+        );
     }
 
     #[test]

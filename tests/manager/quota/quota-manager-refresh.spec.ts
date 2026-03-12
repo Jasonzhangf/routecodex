@@ -2,6 +2,7 @@ import { jest } from '@jest/globals';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { resolveRccQuotaDir, resolveRccStateDir } from '../../../src/config/user-data-paths.js';
 
 const fetchAntigravityQuotaSnapshot = jest.fn(async () => ({
   fetchedAt: Date.now(),
@@ -87,7 +88,7 @@ describe('QuotaManagerModule refresh behavior', () => {
   beforeEach(async () => {
     tempHome = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-quota-home-'));
     process.env.HOME = tempHome;
-    process.env.ROUTECODEX_QUOTA_DIR = path.join(tempHome, '.routecodex', 'quota');
+    process.env.ROUTECODEX_QUOTA_DIR = path.join(tempHome, '.rcc', 'quota');
     process.env.RCC_QUOTA_DIR = process.env.ROUTECODEX_QUOTA_DIR;
     clearAntigravitySessionAliasPins.mockClear();
     hydratedStoreSnapshots.length = 0;
@@ -189,7 +190,7 @@ describe('QuotaManagerModule refresh behavior', () => {
   });
 
   it('hydrates persisted cooldown/blacklist entries from quota-manager snapshot on init', async () => {
-    const quotaDir = path.join(tempHome as string, '.routecodex', 'quota');
+    const quotaDir = resolveRccQuotaDir(tempHome as string);
     await fs.mkdir(quotaDir, { recursive: true });
     await fs.writeFile(
       path.join(quotaDir, 'quota-manager.json'),
@@ -273,10 +274,10 @@ describe('QuotaManagerModule refresh behavior', () => {
     const { QuotaManagerModule } = await import('../../../src/manager/modules/quota/index.js');
     const mod = new QuotaManagerModule();
 
-    const snapPath = path.join(tempHome as string, '.routecodex', 'state', 'quota', 'antigravity.json');
-    await fs.mkdir(path.dirname(snapPath), { recursive: true });
+    const legacySnapPath = path.join(tempHome as string, '.routecodex', 'state', 'quota', 'antigravity.json');
+    await fs.mkdir(path.dirname(legacySnapPath), { recursive: true });
     await fs.writeFile(
-      snapPath,
+      legacySnapPath,
       JSON.stringify(
         {
           'antigravity://a1/claude-sonnet-4-5': { remainingFraction: 1, fetchedAt: Date.now() }
@@ -294,8 +295,9 @@ describe('QuotaManagerModule refresh behavior', () => {
       const keys = Object.keys(snapRaw);
       expect(keys.some((k) => k.startsWith('antigravity://a1/'))).toBe(false);
 
-      // Persisted file should also be cleaned.
-      const onDisk = JSON.parse(await fs.readFile(snapPath, 'utf8')) as Record<string, unknown>;
+      // Legacy snapshot can seed startup, but all writes must land on the new .rcc path.
+      const persistedSnapPath = path.join(resolveRccStateDir(tempHome as string), 'quota', 'antigravity.json');
+      const onDisk = JSON.parse(await fs.readFile(persistedSnapPath, 'utf8')) as Record<string, unknown>;
       expect(Object.keys(onDisk).some((k) => k.startsWith('antigravity://a1/'))).toBe(false);
     } finally {
       await mod.stop();
@@ -315,7 +317,7 @@ describe('QuotaManagerModule refresh behavior', () => {
   });
 
   it('clears antigravity session bindings when quota store persistence fails on save', async () => {
-    const quotaDir = path.join(tempHome as string, '.routecodex', 'quota');
+    const quotaDir = resolveRccQuotaDir(tempHome as string);
     await fs.mkdir(quotaDir, { recursive: true });
     await fs.mkdir(path.join(quotaDir, 'quota-manager.json'), { recursive: true });
     await fs.writeFile(

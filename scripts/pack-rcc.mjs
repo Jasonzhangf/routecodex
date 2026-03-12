@@ -10,6 +10,7 @@ const PROJECT_ROOT = path.resolve(__dirname, '..');
 const pkgPath = path.join(PROJECT_ROOT, 'package.json');
 const PACK_SCRIPT = path.join(PROJECT_ROOT, 'scripts', 'pack-mode.mjs');
 const llmsPath = path.join(PROJECT_ROOT, 'node_modules', '@jsonstudio', 'llms');
+const localLlmsPkgPath = path.join(PROJECT_ROOT, 'sharedmodule', 'llmswitch-core', 'package.json');
 
 function parseArgs(argv) {
   const out = {};
@@ -48,7 +49,11 @@ function exists(p) {
 try {
   const args = parseArgs(process.argv);
   const llmsTgz = String(args.llmsTgz || process.env.RCC_LLMS_TGZ || '').trim();
-  const llmsVersion = String(args.llmsVersion || process.env.RCC_LLMS_VERSION || '').trim();
+  const llmsVersion = String(
+    args.llmsVersion ||
+    process.env.RCC_LLMS_VERSION ||
+    (exists(localLlmsPkgPath) ? JSON.parse(fs.readFileSync(localLlmsPkgPath, 'utf-8')).version : '')
+  ).trim();
 
   const hadDevLink = isSymlink(llmsPath);
 
@@ -64,13 +69,13 @@ try {
     run('npm', ['install', '--no-audit', '--no-fund', '--no-save', llmsTgz], { cwd: PROJECT_ROOT });
   }
 
-  // 1) release 模式构建 dist（依赖 npm 上的 @jsonstudio/llms）
+  // 1) release 模式构建 dist。若存在本地 sharedmodule/llmswitch-core，则 release 也以其为唯一真源。
   run('npm', ['run', 'build:min'], {
     cwd: PROJECT_ROOT,
     env: { ...process.env, BUILD_MODE: 'release', ...(llmsVersion ? { RCC_LLMS_VERSION: llmsVersion } : {}) }
   });
 
-  // 2) 通过 pack-mode 生成 rcc tarball（内部会临时切换 package.json.name/bin 并确保 llms 为 release 包）
+  // 2) 通过 pack-mode 生成 rcc tarball（内部会临时切换 package.json.name/bin，并同步 llms 版本声明）
   run(
     process.execPath,
     [PACK_SCRIPT, '--name', '@jsonstudio/rcc', '--bin', 'rcc'],
@@ -88,7 +93,7 @@ try {
 
   console.log(`[pack-rcc] ✅ tarball ready: ${tarballPath}`);
 
-  // 3) pack 结束后恢复 dev 模式（routecodex 约定始终为 dev CLI；rcc 打包时才切 release）。
+  // 3) pack 结束后恢复 dev 模式。
   if (hadDevLink) {
     run('npm', ['run', 'llmswitch:ensure'], {
       cwd: PROJECT_ROOT,

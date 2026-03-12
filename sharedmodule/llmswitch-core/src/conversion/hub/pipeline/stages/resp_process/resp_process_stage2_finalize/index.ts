@@ -4,6 +4,7 @@ import type { ChatReasoningMode } from '../../../../../shared/openai-finalizer.j
 import { buildProcessedRequestFromChatResponse } from '../../../../response/chat-response-utils.js';
 import type { ProcessedRequest } from '../../../../types/standardized.js';
 import { recordStage } from '../../../stages/utils.js';
+import { isHubStageTimingDetailEnabled, logHubStageTiming } from '../../../hub-stage-timing.js';
 import { finalizeRespProcessChatResponseWithNative } from '../../../../../../router/virtual-router/engine-selection/native-chat-process-governance-semantics.js';
 
 export interface RespProcessStage2FinalizeOptions {
@@ -23,6 +24,9 @@ export interface RespProcessStage2FinalizeResult {
 export async function runRespProcessStage2Finalize(
   options: RespProcessStage2FinalizeOptions
 ): Promise<RespProcessStage2FinalizeResult> {
+  const forceDetailLog = isHubStageTimingDetailEnabled();
+  logHubStageTiming(options.requestId, 'resp_process.stage2_native_finalize', 'start');
+  const nativeFinalizeStart = Date.now();
   const finalized = (await finalizeRespProcessChatResponseWithNative(
     {
       payload: options.payload,
@@ -32,8 +36,18 @@ export async function runRespProcessStage2Finalize(
       requestId: options.requestId
     }
   )) as JsonObject;
+  logHubStageTiming(options.requestId, 'resp_process.stage2_native_finalize', 'completed', {
+    elapsedMs: Date.now() - nativeFinalizeStart,
+    forceLog: forceDetailLog
+  });
+  logHubStageTiming(options.requestId, 'resp_process.stage2_build_processed_request', 'start');
+  const buildProcessedRequestStart = Date.now();
   const processedRequest = buildProcessedRequestFromChatResponse(finalized, {
     stream: options.wantsStream
+  });
+  logHubStageTiming(options.requestId, 'resp_process.stage2_build_processed_request', 'completed', {
+    elapsedMs: Date.now() - buildProcessedRequestStart,
+    forceLog: forceDetailLog
   });
   recordStage(options.stageRecorder, 'chat_process.resp.stage8.finalize', {
     model: finalized.model,

@@ -13,6 +13,7 @@ import { spawn, spawnSync, type SpawnOptions } from 'child_process';
 import { fileURLToPath } from 'url';
 import { DEFAULT_CONFIG } from './constants/index.js';
 import { buildInfo } from './build-info.js';
+import { ensureRccUserDirEnvironment, resolveRccPath } from './config/user-data-paths.js';
 import { ensureLocalTokenPortalEnv } from './token-portal/local-token-portal.js';
 import {
   ensurePortAvailableImpl,
@@ -61,6 +62,7 @@ async function ensureCoreOrFail(): Promise<void> {
 
 // Top-level guard（Fail Fast，无兜底）
 await ensureCoreOrFail();
+ensureRccUserDirEnvironment();
 
 // CLI program setup
 const program = new Command();
@@ -101,7 +103,7 @@ const pkgName: string = (() => {
 const IS_DEV_PACKAGE = pkgName === 'routecodex';
 const IS_WINDOWS = process.platform === 'win32';
 const DEFAULT_DEV_PORT = 5555;
-const TOKEN_DAEMON_PID_FILE = path.join(homedir(), '.routecodex', 'token-daemon.pid');
+const TOKEN_DAEMON_PID_FILE = resolveRccPath('token-daemon.pid');
 
 async function ensureGlobalGuardian(): Promise<void> {
   await ensureGuardianDaemon({
@@ -162,7 +164,7 @@ Docs (in this repo):
   docs/CODEX_AND_CLAUDE_CODE.md
 
 Note:
-  "${pkgName === 'rcc' ? 'rcc' : 'routecodex'} init" also copies these docs into ~/.routecodex/docs
+  "${pkgName === 'rcc' ? 'rcc' : 'routecodex'} init" also copies these docs into ~/.rcc/docs
 `
 );
 
@@ -278,6 +280,12 @@ try {
 try {
   const { createValidateCommand } = await import('./commands/validate.js');
   program.addCommand(createValidateCommand());
+} catch { /* optional */ }
+
+// User config migration command - explicitly move config.json/config/provider from legacy ~/.routecodex to ~/.rcc
+try {
+  const { createUserConfigMigrateCommand } = await import('./commands/migrate-user-config.js');
+  program.addCommand(createUserConfigMigrateCommand());
 } catch { /* optional */ }
 
 // Deprecated `code` command (guides users to `claude`)

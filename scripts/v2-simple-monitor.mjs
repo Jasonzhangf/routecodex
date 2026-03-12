@@ -149,7 +149,7 @@ const debugLogsCount = fs.existsSync(debugLogsDir)
 
 if (debugLogsCount > 0) {
   console.log('✅ 流水线系统活跃');
-  console.log('💡 建议使用: routecodex start --config ~/.routecodex/config.json （默认监听 5555 端口）');
+  console.log('💡 建议使用: routecodex start --config ~/.rcc/config.json （默认监听 5555 端口）');
 } else {
   console.log('⚠️  流水线系统可能未启动');
   console.log('💡 建议检查 5555 端口上的 RouteCodex 服务是否已启动（routecodex start）');

@@ -1,15 +1,17 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { resolveRccPath } from '../config/user-data-paths.js';
 
 function resolveErrorsamplesRoot(): string {
   const envOverride =
     process.env.ROUTECODEX_ERRORSAMPLES_DIR ||
+    process.env.RCC_ERRORSAMPLES_DIR ||
     process.env.ROUTECODEX_ERROR_SAMPLES_DIR;
   if (envOverride && String(envOverride).trim()) {
     return path.resolve(String(envOverride).trim());
   }
-  return path.join(os.homedir(), '.routecodex', 'errorsamples');
+  return resolveRccPath('errorsamples');
 }
 
 function safeName(name: string): string {
@@ -36,4 +38,3 @@ export async function writeErrorsampleJson(options: {
   await fs.writeFile(file, JSON.stringify(options.payload, null, 2), 'utf8');
   return file;
 }
-

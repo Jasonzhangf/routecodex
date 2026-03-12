@@ -25,6 +25,7 @@ const pkgPath = path.join(projectRoot, 'package.json');
 const backupPath = pkgPath + '.bak.pack';
 const ensureScriptPath = path.join(projectRoot, 'scripts', 'ensure-llmswitch-mode.mjs');
 const llmsPath = path.join(projectRoot, 'node_modules', '@jsonstudio', 'llms');
+const localLlmsPkgPath = path.join(projectRoot, 'sharedmodule', 'llmswitch-core', 'package.json');
 
 function runEnsureMode(mode) {
   const env = { ...process.env, BUILD_MODE: mode };
@@ -39,6 +40,15 @@ function isSymlink(p) {
     return fs.lstatSync(p).isSymbolicLink();
   } catch {
     return false;
+  }
+}
+
+function readLocalLlmsVersion() {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(localLlmsPkgPath, 'utf-8'));
+    return String(pkg.version || '').trim();
+  } catch {
+    return '';
   }
 }
 
@@ -70,7 +80,10 @@ try {
     mutated.bundledDependencies = [];
     mutated.bundleDependencies = [];
     const llmsOverride = String(process.env.RCC_LLMS_VERSION || process.env.ROUTECODEX_PACK_LLMS_VERSION || '').trim();
-    const llmsVersion = (isRcc && llmsOverride) ? llmsOverride : (original.dependencies?.['@jsonstudio/llms'] || '^0.6.230');
+    const localLlmsVersion = readLocalLlmsVersion();
+    const llmsVersion = (isRcc && llmsOverride)
+      ? llmsOverride
+      : (localLlmsVersion || original.dependencies?.['@jsonstudio/llms'] || '^0.6.230');
     if (isRcc && llmsOverride) {
       console.log(`[pack-mode] using RCC_LLMS_VERSION override: @jsonstudio/llms=${llmsVersion}`);
     }

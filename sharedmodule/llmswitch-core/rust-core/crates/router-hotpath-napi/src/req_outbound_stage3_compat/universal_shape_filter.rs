@@ -104,11 +104,9 @@ fn normalize_tool_content(value: Option<&Value>) -> String {
     }
 }
 
-
 fn contains_serialized_history_image(text: &str) -> bool {
     let normalized = text.trim();
-    normalized.contains("data:image/")
-        || normalized.contains("\"image_url\":\"data:image")
+    normalized.contains("data:image/") || normalized.contains("\"image_url\":\"data:image")
 }
 
 fn sanitize_historical_user_content(role: &str, content: &Value) -> Value {
@@ -140,7 +138,9 @@ fn sanitize_historical_user_content(role: &str, content: &Value) -> Value {
                     let mut next = obj.clone();
                     next.insert(
                         "content".to_string(),
-                        Value::String("[historical image content omitted after prior send]".to_string()),
+                        Value::String(
+                            "[historical image content omitted after prior send]".to_string(),
+                        ),
                     );
                     Value::Object(next)
                 })

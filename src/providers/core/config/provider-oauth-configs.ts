@@ -4,9 +4,9 @@
  * 基于iflow和qwen的实际配置，提供预定义的OAuth流程配置
  */
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { LOCAL_HOSTS, HTTP_PROTOCOLS, DEFAULT_CONFIG, API_PATHS } from "../../../constants/index.js";
+import { resolveRccAuthDirForRead } from '../../../config/user-data-paths.js';
 import { OAuthFlowConfigManager, OAuthFlowType, OAuthActivationType, type OAuthFlowConfig } from './oauth-flows.js';
 import type { ProviderProfileCollection } from '../../profile/provider-profile.js';
 import type { ProviderProfile } from '../../profile/provider-profile.js';
@@ -17,7 +17,7 @@ import { OAuthHybridFlowStrategyFactory } from '../strategies/oauth-hybrid-flow.
 type OAuthClientField = 'clientId' | 'clientSecret';
 type LocalOAuthClientConfig = Record<string, Partial<Record<OAuthClientField, string>>>;
 
-const LOCAL_OAUTH_CLIENTS_FILE = path.join(os.homedir(), '.routecodex', 'auth', 'oauth-clients.local.json');
+const LOCAL_OAUTH_CLIENTS_FILE = path.join(resolveRccAuthDirForRead(), 'oauth-clients.local.json');
 
 let localOAuthClientsCache: LocalOAuthClientConfig | null | undefined;
 

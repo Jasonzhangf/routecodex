@@ -88,7 +88,13 @@ function ensureReleasePackage() {
   console.log('[llmswitch:ensure] release package ok: using npm-installed @jsonstudio/llms');
 }
 
-if (mode === 'dev') {
+if (exists(sharedCoreDir)) {
+  const banner = mode === 'dev'
+    ? '[llmswitch:ensure] BUILD_MODE=dev: prefer local sharedmodule/llmswitch-core'
+    : '[llmswitch:ensure] BUILD_MODE=release but local sharedmodule/llmswitch-core exists; prefer local core';
+  console.log(banner);
+  ensureDevLink();
+} else if (mode === 'dev') {
   ensureDevLink();
 } else {
   ensureReleasePackage();

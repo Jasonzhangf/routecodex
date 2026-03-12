@@ -41,7 +41,7 @@ async function sleep(ms) { await new Promise(r => setTimeout(r, ms)); }
 async function getPortFromConfig() {
   try {
     const envPath = process.env.ROUTECODEX_CONFIG_PATH || process.env.ROUTECODEX_CONFIG || '';
-    const candidate = envPath || path.join(os.homedir(), '.routecodex', 'config.json');
+    const candidate = envPath || path.join(os.homedir(), '.rcc', 'config.json');
     if (fsSync.existsSync(candidate)) {
       const cfg = await readJson(candidate);
       const p = (cfg && cfg.httpserver && typeof cfg.httpserver.port === 'number') ? cfg.httpserver.port : cfg.port;
@@ -227,4 +227,3 @@ async function main() {
 }
 
 main().catch(err => { console.error(err); process.exit(1); });
-

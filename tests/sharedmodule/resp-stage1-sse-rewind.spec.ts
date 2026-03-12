@@ -20,6 +20,29 @@ function createOpenAiChunk(delta: Record<string, unknown>, finishReason: string 
 }
 
 describe('resp_inbound stage1 SSE stream rewind', () => {
+  it('does not record a stage snapshot when the response is plain JSON and not a stream', async () => {
+    const records: Array<{ stage: string; payload: object }> = [];
+
+    const result = await runRespInboundStage1SseDecode({
+      providerProtocol: 'openai-chat',
+      payload: {
+        id: 'chatcmpl-json-direct',
+        object: 'chat.completion',
+        choices: []
+      } as any,
+      adapterContext: { requestId: 'rewind-stage1-json-direct' } as any,
+      wantsStream: false,
+      stageRecorder: {
+        record(stage, payload) {
+          records.push({ stage, payload });
+        }
+      }
+    });
+
+    expect(result.decodedFromSse).toBe(false);
+    expect(records).toEqual([]);
+  });
+
   it('keeps SSE payload intact when JSON pre-detection fails to parse', async () => {
     const ssePayload = [
       `data: ${createOpenAiChunk({ role: 'assistant', content: 'tool_calls:' }, null)}\n\n`,

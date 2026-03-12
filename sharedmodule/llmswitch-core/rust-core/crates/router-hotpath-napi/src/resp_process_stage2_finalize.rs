@@ -433,8 +433,14 @@ mod tests {
             request_id: None,
         };
         let result = finalize_chat_response(input);
-        assert_eq!(result["choices"][0]["message"]["content"], "visible  answer");
-        assert_eq!(result["choices"][0]["message"]["reasoning_content"], "internal");
+        assert_eq!(
+            result["choices"][0]["message"]["content"],
+            "visible  answer"
+        );
+        assert_eq!(
+            result["choices"][0]["message"]["reasoning_content"],
+            "internal"
+        );
     }
 
     #[test]
@@ -453,7 +459,10 @@ mod tests {
             request_id: None,
         };
         let result = finalize_chat_response(input);
-        assert_eq!(result["choices"][0]["message"]["content"], "visible  answer");
+        assert_eq!(
+            result["choices"][0]["message"]["content"],
+            "visible  answer"
+        );
         assert!(result["choices"][0]["message"]["reasoning_content"].is_null());
     }
 
@@ -473,7 +482,13 @@ mod tests {
             request_id: None,
         };
         let result = finalize_chat_response(input);
-        assert_eq!(result["choices"][0]["message"]["content"], "visible  answer");
-        assert_eq!(result["choices"][0]["message"]["reasoning_content"], "internal");
+        assert_eq!(
+            result["choices"][0]["message"]["content"],
+            "visible  answer"
+        );
+        assert_eq!(
+            result["choices"][0]["message"]["reasoning_content"],
+            "internal"
+        );
     }
 }

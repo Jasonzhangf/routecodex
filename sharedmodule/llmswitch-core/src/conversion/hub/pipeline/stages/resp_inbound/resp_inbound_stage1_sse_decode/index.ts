@@ -4,6 +4,7 @@ import type { JsonObject } from '../../../../types/json.js';
 import type { StageRecorder } from '../../../../format-adapters/index.js';
 import { defaultSseCodecRegistry, type SseProtocol } from '../../../../../../sse/index.js';
 import { recordStage } from '../../../stages/utils.js';
+import { isHubStageTimingDetailEnabled, logHubStageTiming } from '../../../hub-stage-timing.js';
 import { ProviderProtocolError } from '../../../../../provider-protocol-error.js';
 import {
   buildRespInboundSseErrorDescriptorWithNative,
@@ -27,6 +28,46 @@ export interface RespInboundStage1SseDecodeResult {
   decodedFromSse: boolean;
 }
 
+function recordStage1SseDecode(
+  stageRecorder: StageRecorder | undefined,
+  payload: Record<string, unknown>
+): void {
+  // Keep stage1.sse_decode as a stable timeline checkpoint for both stream and non-stream responses.
+  recordStage(stageRecorder, 'chat_process.resp.stage1.sse_decode', payload);
+}
+
+function extractDecodeStats(payload: JsonObject): Record<string, unknown> | undefined {
+  const stats =
+    payload && typeof payload === 'object'
+      ? ((payload as Record<string, unknown>).__rccDecodeStats as Record<string, unknown> | undefined)
+      : undefined;
+  if (!stats || typeof stats !== 'object' || Array.isArray(stats)) {
+    return undefined;
+  }
+  const out: Record<string, unknown> = {};
+  for (const key of [
+    'chunkCount',
+    'byteCount',
+    'totalEvents',
+    'contentBlocks',
+    'toolUseBlocks',
+    'thinkingBlocks',
+    'textBlocks',
+    'errors',
+    'streamMs',
+    'eventSpanMs',
+    'parserMs',
+    'builderMs',
+    'messageStopSeen'
+  ]) {
+    const value = stats[key];
+    if (value !== undefined) {
+      out[key] = value;
+    }
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
 function resolveProviderType(protocol: ProviderProtocol): string | undefined {
   if (protocol === 'openai-chat') return 'openai';
   if (protocol === 'openai-responses') return 'responses';
@@ -38,12 +79,24 @@ function resolveProviderType(protocol: ProviderProtocol): string | undefined {
 export async function runRespInboundStage1SseDecode(
   options: RespInboundStage1SseDecodeOptions
 ): Promise<RespInboundStage1SseDecodeResult> {
+  const requestId = options.adapterContext.requestId || 'unknown';
+  const forceDetailLog = isHubStageTimingDetailEnabled();
   // Transport compatibility: some HTTP clients return JSON bodies as plain strings when the upstream
   // mislabels `Content-Type`. Best-effort parse JSON text early so downstream format adapters and
   // semantic mappers always see canonical objects.
+  logHubStageTiming(requestId, 'resp_inbound.stage1_text_json_probe', 'start', {
+    providerProtocol: options.providerProtocol
+  });
+  const textProbeStart = Date.now();
   const maybeJsonText = tryDecodeJsonBodyFromText(options.payload as unknown);
+  logHubStageTiming(requestId, 'resp_inbound.stage1_text_json_probe', 'completed', {
+    elapsedMs: Date.now() - textProbeStart,
+    providerProtocol: options.providerProtocol,
+    matched: Boolean(maybeJsonText),
+    forceLog: forceDetailLog
+  });
   if (maybeJsonText) {
-    recordStage(options.stageRecorder, 'chat_process.resp.stage1.sse_decode', {
+    recordStage1SseDecode(options.stageRecorder, {
       streamDetected: false,
       decoded: false,
       protocol: options.providerProtocol,
@@ -52,8 +105,16 @@ export async function runRespInboundStage1SseDecode(
     return { payload: maybeJsonText, decodedFromSse: false };
   }
 
+  logHubStageTiming(requestId, 'resp_inbound.stage1_wrapper_inspect', 'start');
+  const wrapperInspectStart = Date.now();
   const wrapperError = extractSseWrapperErrorWithNative(options.payload as Record<string, unknown> | undefined);
   const stream = extractSseStream(options.payload);
+  logHubStageTiming(requestId, 'resp_inbound.stage1_wrapper_inspect', 'completed', {
+    elapsedMs: Date.now() - wrapperInspectStart,
+    hasWrapperError: Boolean(wrapperError),
+    hasStream: Boolean(stream),
+    forceLog: forceDetailLog
+  });
   // 某些 mock-provider / 捕获样本在 SSE 连接被异常终止时会携带 error 标记，
   // 即使仍保留 __sse_responses 流，也应视为上游异常并终止。
   if (wrapperError) {
@@ -63,7 +124,7 @@ export async function runRespInboundStage1SseDecode(
       requestId: options.adapterContext.requestId,
       wrapperError
     });
-    recordStage(options.stageRecorder, 'chat_process.resp.stage1.sse_decode', {
+    recordStage1SseDecode(options.stageRecorder, {
       streamDetected: Boolean(stream),
       decoded: false,
       protocol: options.providerProtocol,
@@ -78,8 +139,7 @@ export async function runRespInboundStage1SseDecode(
   }
 
   if (!stream) {
-
-    recordStage(options.stageRecorder, 'chat_process.resp.stage1.sse_decode', {
+    recordStage1SseDecode(options.stageRecorder, {
       streamDetected: false
     });
     return { payload: options.payload, decodedFromSse: false };
@@ -88,9 +148,16 @@ export async function runRespInboundStage1SseDecode(
   // Compatibility: when an upstream is asked for streaming but responds with a single JSON body
   // (common for mock servers and some OpenAI-compatible implementations), the provider wrapper may
   // still surface a Readable via `__sse_stream`. In that case we should treat it as JSON, not SSE.
+  logHubStageTiming(requestId, 'resp_inbound.stage1_stream_json_probe', 'start');
+  const streamProbeStart = Date.now();
   const maybeJson = await tryDecodeJsonBodyFromStream(stream);
+  logHubStageTiming(requestId, 'resp_inbound.stage1_stream_json_probe', 'completed', {
+    elapsedMs: Date.now() - streamProbeStart,
+    matched: Boolean(maybeJson),
+    forceLog: forceDetailLog
+  });
   if (maybeJson) {
-    recordStage(options.stageRecorder, 'chat_process.resp.stage1.sse_decode', {
+    recordStage1SseDecode(options.stageRecorder, {
       streamDetected: true,
       decoded: false,
       protocol: options.providerProtocol,
@@ -105,7 +172,7 @@ export async function runRespInboundStage1SseDecode(
       providerProtocol: options.providerProtocol,
       requestId: options.adapterContext.requestId
     });
-    recordStage(options.stageRecorder, 'chat_process.resp.stage1.sse_decode', {
+    recordStage1SseDecode(options.stageRecorder, {
       streamDetected: true,
       decoded: false,
       protocol: options.providerProtocol,
@@ -121,17 +188,32 @@ export async function runRespInboundStage1SseDecode(
 
   try {
     const codec = defaultSseCodecRegistry.get(options.providerProtocol as SseProtocol);
+    logHubStageTiming(requestId, 'resp_inbound.stage1_codec_decode', 'start', {
+      providerProtocol: options.providerProtocol
+    });
+    const codecDecodeStart = Date.now();
     const decoded = (await codec.convertSseToJson(stream, {
       requestId: options.adapterContext.requestId,
       model: (options.adapterContext as Record<string, unknown>).modelId as string | undefined
     })) as JsonObject;
-    recordStage(options.stageRecorder, 'chat_process.resp.stage1.sse_decode', {
+    const decodeStats = extractDecodeStats(decoded);
+    logHubStageTiming(requestId, 'resp_inbound.stage1_codec_decode', 'completed', {
+      elapsedMs: Date.now() - codecDecodeStart,
+      providerProtocol: options.providerProtocol,
+      forceLog: forceDetailLog,
+      ...(decodeStats ?? {})
+    });
+    recordStage1SseDecode(options.stageRecorder, {
       streamDetected: true,
       decoded: true,
       protocol: options.providerProtocol
     });
     return { payload: decoded, decodedFromSse: true };
   } catch (error) {
+    logHubStageTiming(requestId, 'resp_inbound.stage1_codec_decode', 'error', {
+      message: error instanceof Error ? error.message : String(error ?? 'unknown'),
+      providerProtocol: options.providerProtocol
+    });
     const message = error instanceof Error ? error.message : String(error);
     const errRecord = error as Record<string, unknown>;
     const upstreamCode = typeof errRecord.code === 'string' ? errRecord.code : undefined;
@@ -148,7 +230,7 @@ export async function runRespInboundStage1SseDecode(
       upstreamContext,
       adapterContext: options.adapterContext
     });
-    recordStage(options.stageRecorder, 'chat_process.resp.stage1.sse_decode', {
+    recordStage1SseDecode(options.stageRecorder, {
       streamDetected: true,
       decoded: false,
       protocol: options.providerProtocol,

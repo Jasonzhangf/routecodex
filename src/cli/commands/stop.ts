@@ -3,6 +3,7 @@ import path from 'node:path';
 import { homedir } from 'node:os';
 import type { Command } from 'commander';
 import { LOCAL_HOSTS } from '../../constants/index.js';
+import { resolveRccConfigFile, resolveRccUserDir } from '../../config/user-data-paths.js';
 import { logProcessLifecycleSync } from '../../utils/process-lifecycle-logger.js';
 import { writeDaemonStopIntent } from '../../utils/daemon-stop-intent.js';
 import type { GuardianLifecycleEvent, GuardianStopResult } from '../guardian/types.js';
@@ -74,7 +75,7 @@ function resolveStopPort(ctx: StopCommandContext, spinner: Spinner): number {
   const fsImpl = ctx.fsImpl ?? fs;
   const pathImpl = ctx.pathImpl ?? path;
   const home = ctx.getHomeDir ?? (() => homedir());
-  const configPath = pathImpl.join(home(), '.routecodex', 'config.json');
+  const configPath = resolveRccConfigFile(home());
 
   if (!fsImpl.existsSync(configPath)) {
     spinner.fail(`Configuration file not found: ${configPath}`);
@@ -272,7 +273,7 @@ export function createStopCommand(program: Command, ctx: StopCommandContext): vo
           const home = ctx.getHomeDir ?? (() => homedir());
           writeDaemonStopIntent(resolvedPort, {
             source: 'cli.stop',
-            routeCodexHomeDir: pathImpl.join(home(), '.routecodex'),
+            routeCodexHomeDir: resolveRccUserDir(home()),
             pid: process.pid
           });
         } catch {

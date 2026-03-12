@@ -1,7 +1,7 @@
-import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import type { QuotaState } from './provider-quota-center.js';
+import { resolveRccQuotaDir, resolveRccQuotaDirForRead } from '../../config/user-data-paths.js';
 
 export interface ProviderQuotaSnapshot {
   version: number;
@@ -79,8 +79,7 @@ function resolveQuotaDir(): string {
   if (override) {
     return path.isAbsolute(override) ? override : path.resolve(process.cwd(), override);
   }
-  const home = os.homedir();
-  return path.join(home, '.routecodex', 'quota');
+  return resolveRccQuotaDir();
 }
 
 function resolveQuotaSnapshotPath(): string {
@@ -91,8 +90,17 @@ function resolveErrorLogPath(): string {
   return path.join(resolveQuotaDir(), 'provider-errors.ndjson');
 }
 
+function resolveQuotaSnapshotReadPath(): string {
+  const override = String(process.env.ROUTECODEX_QUOTA_DIR || process.env.RCC_QUOTA_DIR || '').trim();
+  if (override) {
+    const base = path.isAbsolute(override) ? override : path.resolve(process.cwd(), override);
+    return path.join(base, 'provider-quota.json');
+  }
+  return path.join(resolveRccQuotaDirForRead(), 'provider-quota.json');
+}
+
 export async function loadProviderQuotaSnapshot(): Promise<ProviderQuotaSnapshot | null> {
-  const filePath = resolveQuotaSnapshotPath();
+  const filePath = resolveQuotaSnapshotReadPath();
   try {
     const raw = await fs.readFile(filePath, 'utf8');
     const trimmed = raw.trim();

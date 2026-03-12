@@ -904,8 +904,17 @@ fn test_req_profile_chat_glm_history_image_trim_drops_old_inline_images() {
         explicit_profile: None,
     };
     let result = run_req_outbound_stage3_compat(input).unwrap();
-    assert_eq!(result.payload["messages"][0]["content"].as_array().unwrap().len(), 1);
-    assert_eq!(result.payload["messages"][2]["content"][1]["image_url"]["url"], "data:image/png;base64,BBB");
+    assert_eq!(
+        result.payload["messages"][0]["content"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        result.payload["messages"][2]["content"][1]["image_url"]["url"],
+        "data:image/png;base64,BBB"
+    );
 }
 
 #[test]
@@ -952,9 +961,18 @@ fn test_req_profile_chat_glm_vision_prompt_rewrites_latest_image_turn() {
     let result = run_req_outbound_stage3_compat(input).unwrap();
     assert_eq!(result.payload["messages"].as_array().unwrap().len(), 2);
     assert_eq!(result.payload["messages"][0]["role"], "system");
-    assert!(result.payload["messages"][0]["content"].as_str().unwrap().contains("截图理解子系统"));
-    assert_eq!(result.payload["messages"][1]["content"][0]["text"], "please inspect this");
-    assert_eq!(result.payload["messages"][1]["content"][1]["image_url"]["url"], "https://example.com/shot.png");
+    assert!(result.payload["messages"][0]["content"]
+        .as_str()
+        .unwrap()
+        .contains("截图理解子系统"));
+    assert_eq!(
+        result.payload["messages"][1]["content"][0]["text"],
+        "please inspect this"
+    );
+    assert_eq!(
+        result.payload["messages"][1]["content"][1]["image_url"]["url"],
+        "https://example.com/shot.png"
+    );
     assert_eq!(result.payload["max_tokens"], 4096);
 }
 

@@ -3,6 +3,7 @@ import fsSync from 'fs';
 import fsAsync from 'fs/promises';
 import os from 'os';
 import path from 'path';
+import { resolveRccLogsDir } from '../config/user-data-paths.js';
 
 type JsonScalar = string | number | boolean | null;
 type JsonLike = JsonScalar | JsonLike[] | { [key: string]: JsonLike };
@@ -22,7 +23,7 @@ interface ProcessLifecycleRecord {
   details?: JsonLike;
 }
 
-const DEFAULT_LOG_DIR = path.join(os.homedir(), '.routecodex', 'logs');
+const DEFAULT_LOG_DIR = resolveRccLogsDir();
 const DEFAULT_LOG_PATH = path.join(DEFAULT_LOG_DIR, 'process-lifecycle.jsonl');
 const DEFAULT_MAX_PENDING_WRITES = 2000;
 

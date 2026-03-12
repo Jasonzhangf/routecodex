@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { homedir } from 'node:os';
 import { spawnSync as nodeSpawnSync } from 'node:child_process';
+import { resolveRccUserDir } from '../config/user-data-paths.js';
 
 type SpawnSyncLike = typeof nodeSpawnSync;
 
@@ -13,7 +13,7 @@ export type ManagedZombieProcess = {
 };
 
 export function resolveManagedServerPidFiles(port: number, routeCodexHomeDir?: string): string[] {
-  const home = routeCodexHomeDir || path.join(homedir(), '.routecodex');
+  const home = routeCodexHomeDir || resolveRccUserDir();
   return [
     path.join(home, `server-${port}.pid`)
   ];

@@ -1,7 +1,6 @@
 import fs from 'node:fs';
 import fsPromises from 'node:fs/promises';
 import path from 'node:path';
-import { homedir } from 'node:os';
 
 import type { Application, Request, Response } from 'express';
 import type { DaemonAdminRouteOptions } from '../daemon-admin-routes.js';
@@ -23,6 +22,7 @@ import {
   readServerToolStatsSnapshot,
   setServerToolEnabled
 } from '../servertool-admin-state.js';
+import { resolveRccPath, resolveRccSessionsDir } from '../../../../config/user-data-paths.js';
 
 type ControlServerInfo = {
   host: string;
@@ -61,7 +61,7 @@ type ControlSnapshot = {
 };
 
 function getSessionCandidatePorts(): number[] {
-  const base = path.join(homedir(), '.routecodex', 'sessions');
+  const base = resolveRccSessionsDir();
   try {
     if (!fs.existsSync(base)) {
       return [];
@@ -298,7 +298,7 @@ export function registerControlRoutes(app: Application, options: DaemonAdminRout
 
     let antigravityAliasLeases: unknown = null;
     try {
-      const leasePath = path.join(homedir(), '.routecodex', 'state', 'antigravity-alias-leases.json');
+      const leasePath = resolveRccPath('state', 'antigravity-alias-leases.json');
       if (fs.existsSync(leasePath)) {
         const raw = fs.readFileSync(leasePath, 'utf8');
         antigravityAliasLeases = raw && raw.trim() ? JSON.parse(raw) : null;

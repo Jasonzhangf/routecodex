@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import type { Command } from 'commander';
 
 import { API_PATHS, HTTP_PROTOCOLS, LOCAL_HOSTS } from '../../constants/index.js';
+import { resolveRccConfigFile, resolveRccSessionsDir, resolveRccUserDir } from '../../config/user-data-paths.js';
 import type { GuardianLifecycleEvent, GuardianRegistration } from '../guardian/types.js';
 
 type Spinner = {
@@ -95,7 +96,7 @@ function resolveConfigPortHostMaybe(
   const fsImpl = ctx.fsImpl ?? fs;
   const pathImpl = ctx.pathImpl ?? path;
   const home = ctx.getHomeDir ?? (() => homedir());
-  const configPath = options.config || pathImpl.join(home(), '.routecodex', 'config.json');
+  const configPath = options.config || resolveRccConfigFile(home());
 
   if (!fsImpl.existsSync(configPath)) {
     if (opts?.strict) {
@@ -141,7 +142,7 @@ function getSessionCandidatePorts(ctx: RestartCommandContext): number[] {
       : fs;
   const pathImpl = ctx.pathImpl ?? path;
   const home = ctx.getHomeDir ?? (() => homedir());
-  const base = pathImpl.join(home(), '.routecodex', 'sessions');
+  const base = resolveRccSessionsDir(home());
   try {
     if (!fsImpl.existsSync(base)) {
       return [];

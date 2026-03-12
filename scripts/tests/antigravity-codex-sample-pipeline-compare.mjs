@@ -180,7 +180,7 @@ async function main() {
   const samplePath = args.sample || args._[0];
   if (!samplePath) throw new Error('Missing --sample <file.json>');
 
-  const configPath = args.config || path.join(os.homedir(), '.routecodex', 'config.json');
+  const configPath = args.config || path.join(os.homedir(), '.rcc', 'config.json');
   const outDir = args.out || path.join(process.cwd(), 'test-results', 'antigravity-pipeline-compare');
   fs.mkdirSync(outDir, { recursive: true });
 

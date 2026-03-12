@@ -21,10 +21,10 @@
  * 示例：
  *
  *   node scripts/anthropic-four-config-e2e.mjs \\
- *     --codec-config ~/.routecodex/provider/glm-anthropic/config.json \\
- *     --passthrough-config ~/.routecodex/provider/glm-anthropic/config.passthrough.json \\
- *     --req-chat-resp-pass-config ~/.routecodex/provider/glm-anthropic/config.req-chat_resp-pass.json \\
- *     --req-pass-resp-chat-config ~/.routecodex/provider/glm-anthropic/config.req-pass_resp-chat.json \\
+ *     --codec-config ~/.rcc/provider/glm-anthropic/config.json \\
+ *     --passthrough-config ~/.rcc/provider/glm-anthropic/config.passthrough.json \\
+ *     --req-chat-resp-pass-config ~/.rcc/provider/glm-anthropic/config.req-chat_resp-pass.json \\
+ *     --req-pass-resp-chat-config ~/.rcc/provider/glm-anthropic/config.req-pass_resp-chat.json \\
  *     --payload-file ~/.routecodex/codex-samples/anthropic-messages/req_XXXX_server-pre-process.json
  *
  * 说明：
@@ -226,7 +226,7 @@ async function main() {
   ].filter(t => t.cfg);
 
   if (!targets.length) {
-    console.error('至少需要指定一个配置，例如 --codec-config ~/.routecodex/provider/glm-anthropic/config.json');
+    console.error('至少需要指定一个配置，例如 --codec-config ~/.rcc/provider/glm-anthropic/config.json');
     process.exit(2);
   }
 

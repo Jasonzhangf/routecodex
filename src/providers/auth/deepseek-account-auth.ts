@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import type { ApiKeyAuth } from '../core/api/provider-config.js';
+import { resolveRccAuthDir } from '../../config/user-data-paths.js';
 import {
   DEEPSEEK_ERROR_CODES,
   type DeepSeekErrorCode
@@ -10,7 +11,6 @@ import {
 import { ensureDeepSeekAccountToken, type EnsureDeepSeekTokenReason } from './deepseek-account-token-acquirer.js';
 import type { AuthStatus, IAuthProvider } from './auth-interface.js';
 
-const DEFAULT_TOKEN_DIR = '.routecodex/auth';
 const DEFAULT_TOKEN_FILE_PREFIX = 'deepseek-account';
 const TOKEN_FILE_RELOAD_INTERVAL_MS = 1_000;
 
@@ -52,7 +52,8 @@ function expandHome(inputPath: string): string {
   if (!inputPath.startsWith('~')) {
     return inputPath;
   }
-  return path.join(os.homedir(), inputPath.slice(1));
+  const homeDir = String(process.env.HOME || '').trim() || os.homedir();
+  return path.join(homeDir, inputPath.slice(1));
 }
 
 function sanitizeFileSegment(value: string): string {
@@ -254,7 +255,7 @@ export class DeepSeekAccountAuthProvider implements IAuthProvider {
 
     const alias = this.resolveConfigValue(this.config.accountAlias, 'accountAlias') || 'default';
     const fileName = DEFAULT_TOKEN_FILE_PREFIX + '-' + sanitizeFileSegment(alias) + '.json';
-    return path.join(os.homedir(), DEFAULT_TOKEN_DIR, fileName);
+    return path.join(resolveRccAuthDir(), fileName);
   }
 
   private resolveAccountAlias(): string {

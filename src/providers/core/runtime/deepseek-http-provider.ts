@@ -9,6 +9,7 @@ import type { ModuleDependencies } from '../../../modules/pipeline/interfaces/pi
 import type { UnknownObject } from '../../../types/common-types.js';
 import type { ApiKeyAuth, OpenAIStandardConfig } from '../api/provider-config.js';
 import type { ProviderContext } from '../api/provider-types.js';
+import { resolveRccCamoufoxFingerprintDir } from '../../../config/user-data-paths.js';
 import {
   DEEPSEEK_ERROR_CODES,
   normalizeDeepSeekProviderRuntimeOptions
@@ -304,7 +305,7 @@ export class DeepSeekHttpProvider extends HttpTransportProvider {
       return null;
     }
 
-    const filePath = path.join((process.env.HOME || os.homedir()), '.routecodex', 'camoufox-fp', `${profileId}.json`);
+    const filePath = path.join(resolveRccCamoufoxFingerprintDir(), `${profileId}.json`);
     try {
       const raw = await fs.readFile(filePath, 'utf8');
       const payload = raw.trim() ? JSON.parse(raw) : null;

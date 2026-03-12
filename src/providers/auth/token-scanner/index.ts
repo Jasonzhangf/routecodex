@@ -7,7 +7,7 @@
 
 import fs from 'fs/promises';
 import path from 'path';
-import { homedir } from 'os';
+import { resolveRccAuthDirForRead } from '../../../config/user-data-paths.js';
 
 export interface TokenFileMatch {
   filePath: string;
@@ -21,8 +21,7 @@ function resolveAuthDir(): string {
   if (override) {
     return path.isAbsolute(override) ? override : path.resolve(override);
   }
-  const home = String(process.env.HOME || '').trim() || homedir();
-  return path.join(home, '.routecodex', 'auth');
+  return resolveRccAuthDirForRead();
 }
 
 /**

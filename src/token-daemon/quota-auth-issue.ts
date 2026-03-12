@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
+import { resolveRccQuotaDirForRead } from '../config/user-data-paths.js';
 
 type QuotaManagerRecord = Record<string, unknown> & {
   providers?: Record<string, unknown>;
@@ -22,9 +22,7 @@ export type GoogleAccountVerificationIssue = {
 const GOOGLE_VERIFY_FALLBACK_URL = 'https://support.google.com/accounts?p=al_alert';
 
 function resolveQuotaDirPath(): string {
-  const envHome = String(process.env.ROUTECODEX_HOME || process.env.HOME || '').trim();
-  const home = envHome || os.homedir();
-  return path.join(home, '.routecodex', 'quota');
+  return resolveRccQuotaDirForRead();
 }
 
 function resolveQuotaManagerPath(): string {

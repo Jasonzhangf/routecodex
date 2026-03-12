@@ -7,6 +7,7 @@ import { stdin as input, stdout as output } from 'node:process';
 import type { Command } from 'commander';
 
 import { initializeConfigV1, parseProvidersArg } from '../config/init-config.js';
+import { resolveRccConfigFile } from '../../config/user-data-paths.js';
 import { getBootstrapProviderTemplates } from '../config/bootstrap-provider-templates.js';
 import { installBundledDocsBestEffort } from '../config/bundled-docs.js';
 
@@ -90,7 +91,7 @@ Examples:
     .option('-f, --force', 'Force overwrite existing configuration')
     .action(async (action: string, options: { config?: string; template?: string; providers?: string; defaultProvider?: string; host?: string; port?: string; force?: boolean }) => {
       try {
-        const configPath = options.config || pathImpl.join(home(), '.routecodex', 'config.json');
+        const configPath = options.config || resolveRccConfigFile(home());
 
         switch (action) {
           case 'init':

@@ -92,13 +92,8 @@ if (!fs.existsSync(proj)) {
   process.exit(0);
 }
 
-// 标准流程：release 构建必须依赖 npm 包（@jsonstudio/llms），禁止编译本地 sharedmodule。
-if (buildMode !== 'dev') {
-  console.log('[build-core] BUILD_MODE=release: skip local llmswitch-core build (use npm @jsonstudio/llms)');
-  process.exit(0);
-}
-
-// Allow skip via env or if dist already present
+// 有本地 sharedmodule/llmswitch-core 时，无论 dev/release 都以本地源码为唯一构建真源。
+// 仅当 sharedmodule 缺失时，release 才允许退回 npm 包。
 if (skip === '1' || skip === 'true' || skip === 'yes') {
   console.log('[build-core] skip requested by env (ROUTECODEX_SKIP_CORE_BUILD/SKIP_CORE_BUILD)');
   process.exit(0);

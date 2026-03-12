@@ -71,6 +71,189 @@ fn flatten_reasoning(value: &Value, depth: usize) -> String {
     }
 }
 
+fn collect_typed_reasoning_entries(value: Option<&Value>, expected_type: &str) -> Vec<String> {
+    let Some(value) = value else {
+        return Vec::new();
+    };
+    let Some(entries) = value.as_array() else {
+        return Vec::new();
+    };
+
+    entries
+        .iter()
+        .filter_map(|entry| {
+            let row = entry.as_object()?;
+            let kind = row
+                .get("type")
+                .and_then(Value::as_str)
+                .unwrap_or(expected_type)
+                .trim()
+                .to_ascii_lowercase();
+            if kind != expected_type {
+                return None;
+            }
+            row.get("text")
+                .and_then(Value::as_str)
+                .map(|text| text.trim().to_string())
+                .filter(|text| !text.is_empty())
+        })
+        .collect()
+}
+
+fn read_trimmed_reasoning_string(value: Option<&Value>) -> Option<String> {
+    value
+        .and_then(Value::as_str)
+        .map(|text| text.trim().to_string())
+        .filter(|text| !text.is_empty())
+}
+
+pub(crate) fn build_message_reasoning_value(
+    summary_segments: &[String],
+    content_segments: &[String],
+    encrypted_content: Option<&str>,
+) -> Option<Value> {
+    let summary: Vec<Value> = summary_segments
+        .iter()
+        .filter_map(|text| {
+            let trimmed = text.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(serde_json::json!({
+                    "type": "summary_text",
+                    "text": trimmed,
+                }))
+            }
+        })
+        .collect();
+    let content: Vec<Value> = content_segments
+        .iter()
+        .filter_map(|text| {
+            let trimmed = text.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(serde_json::json!({
+                    "type": "reasoning_text",
+                    "text": trimmed,
+                }))
+            }
+        })
+        .collect();
+    let encrypted = encrypted_content
+        .map(|text| text.trim().to_string())
+        .filter(|text| !text.is_empty());
+
+    if summary.is_empty() && content.is_empty() && encrypted.is_none() {
+        return None;
+    }
+
+    let mut reasoning = Map::new();
+    if !summary.is_empty() {
+        reasoning.insert("summary".to_string(), Value::Array(summary));
+    }
+    if !content.is_empty() {
+        reasoning.insert("content".to_string(), Value::Array(content));
+    }
+    if let Some(encrypted_content) = encrypted {
+        reasoning.insert(
+            "encrypted_content".to_string(),
+            Value::String(encrypted_content),
+        );
+    }
+    Some(Value::Object(reasoning))
+}
+
+fn collect_message_reasoning_state(
+    message: &Map<String, Value>,
+) -> (Vec<String>, Vec<String>, Option<String>) {
+    if let Some(reasoning) = message.get("reasoning") {
+        if let Some(reasoning_row) = reasoning.as_object() {
+            let summary =
+                collect_typed_reasoning_entries(reasoning_row.get("summary"), "summary_text");
+            let content =
+                collect_typed_reasoning_entries(reasoning_row.get("content"), "reasoning_text");
+            let encrypted = read_trimmed_reasoning_string(reasoning_row.get("encrypted_content"));
+            if !summary.is_empty() || !content.is_empty() || encrypted.is_some() {
+                return (summary, content, encrypted);
+            }
+        }
+
+        let text = flatten_reasoning(reasoning, 0).trim().to_string();
+        if !text.is_empty() {
+            return (Vec::new(), vec![text], None);
+        }
+    }
+
+    let reasoning_content = message
+        .get("reasoning_content")
+        .map(|value| flatten_reasoning(value, 0).trim().to_string())
+        .filter(|text| !text.is_empty())
+        .into_iter()
+        .collect::<Vec<String>>();
+    (Vec::new(), reasoning_content, None)
+}
+
+pub(crate) fn collect_reasoning_content_segments(value: Option<&Value>) -> Vec<String> {
+    let Some(reasoning) = value else {
+        return Vec::new();
+    };
+    if let Some(reasoning_row) = reasoning.as_object() {
+        let content =
+            collect_typed_reasoning_entries(reasoning_row.get("content"), "reasoning_text");
+        if !content.is_empty() {
+            return content;
+        }
+    }
+    let text = flatten_reasoning(reasoning, 0).trim().to_string();
+    if text.is_empty() {
+        return Vec::new();
+    }
+    vec![text]
+}
+
+pub(crate) fn collect_reasoning_summary_segments(value: Option<&Value>) -> Vec<String> {
+    let Some(reasoning) = value else {
+        return Vec::new();
+    };
+    let Some(reasoning_row) = reasoning.as_object() else {
+        return Vec::new();
+    };
+    collect_typed_reasoning_entries(reasoning_row.get("summary"), "summary_text")
+}
+
+pub(crate) fn project_message_reasoning_text(value: &Value) -> Option<String> {
+    let content = collect_reasoning_content_segments(Some(value));
+    if !content.is_empty() {
+        return Some(content.join("\n"));
+    }
+
+    let summary = collect_reasoning_summary_segments(Some(value));
+    if !summary.is_empty() {
+        return Some(summary.join("\n"));
+    }
+
+    None
+}
+
+pub(crate) fn normalize_message_reasoning_ssot(message: &mut Map<String, Value>) {
+    let (summary, content, encrypted) = collect_message_reasoning_state(message);
+    let Some(reasoning) = build_message_reasoning_value(&summary, &content, encrypted.as_deref())
+    else {
+        message.remove("reasoning");
+        message.remove("reasoning_content");
+        return;
+    };
+
+    let projection = project_message_reasoning_text(&reasoning);
+    message.insert("reasoning".to_string(), reasoning);
+    if let Some(text) = projection {
+        message.insert("reasoning_content".to_string(), Value::String(text));
+    } else {
+        message.remove("reasoning_content");
+    }
+}
+
 fn collect_reasoning_fragments(message: &Map<String, Value>) -> Vec<String> {
     let mut fragments: Vec<String> = Vec::new();
     if let Some(reasoning_content) = message.get("reasoning_content") {
@@ -90,23 +273,24 @@ fn collect_reasoning_fragments(message: &Map<String, Value>) -> Vec<String> {
 
 fn write_reasoning_content(message: &mut Map<String, Value>, text: &str) {
     let trimmed = text.trim().to_string();
-    if !trimmed.is_empty() {
-        message.insert(
-            "reasoning_content".to_string(),
-            Value::String(trimmed.clone()),
-        );
+    let (summary, _content, encrypted) = collect_message_reasoning_state(message);
+    let content = if trimmed.is_empty() {
+        Vec::new()
     } else {
-        message.remove("reasoning_content");
-    }
-
-    if let Some(reasoning) = message.get("reasoning") {
-        if reasoning.is_string() {
-            if !trimmed.is_empty() {
-                message.insert("reasoning".to_string(), Value::String(trimmed));
-            } else {
-                message.remove("reasoning");
-            }
+        vec![trimmed]
+    };
+    if let Some(reasoning) = build_message_reasoning_value(&summary, &content, encrypted.as_deref())
+    {
+        let projection = project_message_reasoning_text(&reasoning);
+        message.insert("reasoning".to_string(), reasoning);
+        if let Some(text) = projection {
+            message.insert("reasoning_content".to_string(), Value::String(text));
+        } else {
+            message.remove("reasoning_content");
         }
+    } else {
+        message.remove("reasoning");
+        message.remove("reasoning_content");
     }
 }
 
@@ -1310,15 +1494,7 @@ pub(crate) fn normalize_message_reasoning_tools_record(
 ) -> (usize, Option<String>) {
     let fragments = collect_reasoning_fragments(message_obj);
     if fragments.is_empty() {
-        let existing = message_obj
-            .get("reasoning_content")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .trim()
-            .to_string();
-        if existing.is_empty() {
-            message_obj.remove("reasoning_content");
-        }
+        normalize_message_reasoning_ssot(message_obj);
         return (0, None);
     }
 
@@ -1800,6 +1976,33 @@ mod tests {
         assert_eq!(
             row.get("content").and_then(Value::as_str),
             Some("[思考]\nanalysis\n[/思考]")
+        );
+        assert_eq!(
+            row["reasoning"]["content"][0]["text"],
+            Value::String("analysis".to_string())
+        );
+    }
+
+    #[test]
+    fn normalize_message_reasoning_ssot_promotes_structured_reasoning() {
+        let mut message = json!({
+            "reasoning_content": "Need cwd"
+        });
+        let row = message.as_object_mut().unwrap();
+
+        normalize_message_reasoning_ssot(row);
+
+        assert_eq!(
+            row["reasoning"]["content"][0]["type"],
+            Value::String("reasoning_text".to_string())
+        );
+        assert_eq!(
+            row["reasoning"]["content"][0]["text"],
+            Value::String("Need cwd".to_string())
+        );
+        assert_eq!(
+            row.get("reasoning_content"),
+            Some(&Value::String("Need cwd".to_string()))
         );
     }
 

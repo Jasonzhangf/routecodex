@@ -1,9 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { homedir } from 'node:os';
 import type { ManagerContext, ManagerModule } from '../../types.js';
 import type { ProviderErrorEvent } from '../../../modules/llmswitch/bridge.js';
 import { JsonlFileStore } from '../../storage/file-store.js';
+import { resolveRccPath } from '../../../config/user-data-paths.js';
 
 type VirtualRouterHealthSnapshot = unknown;
 
@@ -86,13 +86,7 @@ export class HealthManagerModule implements ManagerModule {
   }
 
   private resolveStateDir(): string {
-    const base = path.join(
-      homedir(),
-      '.routecodex',
-      'state',
-      'router',
-      this.serverId || 'default'
-    );
+    const base = resolveRccPath('state', 'router', this.serverId || 'default');
     try {
       fs.mkdirSync(base, { recursive: true });
     } catch {

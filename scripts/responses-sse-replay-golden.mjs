@@ -1,138 +1,279 @@
 #!/usr/bin/env node
-// Replay a Responses golden provider-request sample to a live provider and aggregate SSE → JSON → Chat.
-// Usage:
-//   RCC_RESP_PROV=<providerId> node scripts/responses-sse-replay-golden.mjs
+// Server-side replay for codex-samples /v1/responses requests.
+// This script intentionally replays through RouteCodex HTTP server instead of calling provider URLs directly.
+//
 // Env:
-//   RCC_RESP_PROV: fc|c4m|fai (default fc)
-//   RCC_RESP_PICK: substring to pick a specific sample file
+//   RCC_REPLAY_BASE   server base URL (default http://127.0.0.1:5555)
+//   RCC_REPLAY_KEY    x-routecodex-api-key (default routecodex-test)
+//   RCC_RESP_PROVIDER provider directory filter (optional)
+//   RCC_RESP_PICK     request-id/path substring filter (optional)
+//   RCC_RESP_REQ      exact request directory name, e.g. req_1773310208018_9b3ec605 (optional)
+//
+// Output:
+//   ~/.routecodex/logs/responses-sse/server-replay_<timestamp>.{request,response,sse,json,chat}.*
 
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
-import { pathToFileURL } from 'url';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 
-const PROVIDER_DIR = path.join(os.homedir(), '.routecodex', 'provider');
-const SAMPLES_DIR = path.join(os.homedir(), '.routecodex', 'codex-samples', 'openai-responses');
+const DEFAULT_BASE = process.env.RCC_REPLAY_BASE || 'http://127.0.0.1:5555';
+const DEFAULT_KEY =
+  process.env.RCC_REPLAY_KEY ||
+  process.env.ROUTECODEX_HTTP_APIKEY ||
+  process.env.ROUTECODEX_API_KEY ||
+  'routecodex-test';
+const FILTER_PROVIDER = (process.env.RCC_RESP_PROVIDER || '').trim();
+const FILTER_PICK = (process.env.RCC_RESP_PICK || '').trim();
+const FILTER_REQ = (process.env.RCC_RESP_REQ || '').trim();
+const SAMPLES_ROOT = path.join(os.homedir(), '.routecodex', 'codex-samples', 'openai-responses');
 const OUT_DIR = path.join(os.homedir(), '.routecodex', 'logs', 'responses-sse');
 
-function ensureDir(p) { fs.mkdirSync(p, { recursive: true }); }
-function nowStamp() { return new Date().toISOString().replace(/[:.]/g, '-'); }
+function nowStamp() {
+  return new Date().toISOString().replace(/[:.]/g, '-');
+}
 
-function findProviderConfig(providerId) {
-  const dir = path.join(PROVIDER_DIR, providerId);
-  const candidates = ['config.v1.json', 'config.json'];
-  for (const name of candidates) {
-    const p = path.join(dir, name);
-    if (fs.existsSync(p)) {
-      return JSON.parse(fs.readFileSync(p, 'utf-8'));
+function ensureDir(p) {
+  fs.mkdirSync(p, { recursive: true });
+}
+
+function readJson(p) {
+  return JSON.parse(fs.readFileSync(p, 'utf-8'));
+}
+
+async function healthCheck(baseUrl) {
+  try {
+    const res = await fetch(`${baseUrl.replace(/\/$/, '')}/health`, { method: 'GET' });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+function findClientRequestFiles(root) {
+  const result = [];
+  if (!fs.existsSync(root)) {
+    return result;
+  }
+  const providerDirs = fs.readdirSync(root, { withFileTypes: true }).filter((d) => d.isDirectory());
+  for (const providerDir of providerDirs) {
+    if (FILTER_PROVIDER && !providerDir.name.includes(FILTER_PROVIDER)) {
+      continue;
+    }
+    const providerPath = path.join(root, providerDir.name);
+    const reqDirs = fs.readdirSync(providerPath, { withFileTypes: true }).filter((d) => d.isDirectory());
+    for (const reqDir of reqDirs) {
+      if (FILTER_REQ && reqDir.name !== FILTER_REQ) {
+        continue;
+      }
+      if (FILTER_PICK && !reqDir.name.includes(FILTER_PICK) && !providerDir.name.includes(FILTER_PICK)) {
+        continue;
+      }
+      const clientReq = path.join(providerPath, reqDir.name, 'client-request.json');
+      if (!fs.existsSync(clientReq)) {
+        continue;
+      }
+      const stat = fs.statSync(clientReq);
+      result.push({
+        provider: providerDir.name,
+        requestId: reqDir.name,
+        file: clientReq,
+        mtimeMs: stat.mtimeMs
+      });
     }
   }
-  throw new Error(`No provider config for ${providerId}`);
+  result.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  return result;
 }
 
-function extractProviderEntry(doc, providerId) {
-  const pipelines = doc?.pipeline_assembler?.config?.pipelines || [];
-  for (const p of pipelines) {
-    const prov = p?.modules?.provider;
-    if (!prov?.config) continue;
-    const pid = prov.config.providerId || path.basename(path.dirname(p?.__file || ''));
-    if (pid === providerId) return prov.config;
+function extractRequestBody(doc) {
+  if (doc && typeof doc === 'object') {
+    if (doc.body && typeof doc.body === 'object' && !Array.isArray(doc.body)) {
+      if (doc.body.body && typeof doc.body.body === 'object' && !Array.isArray(doc.body.body)) {
+        return doc.body.body;
+      }
+      return doc.body;
+    }
+    if (doc.data && typeof doc.data === 'object' && !Array.isArray(doc.data)) {
+      const data = doc.data;
+      if (data.body && typeof data.body === 'object' && !Array.isArray(data.body)) {
+        if (data.body.body && typeof data.body.body === 'object' && !Array.isArray(data.body.body)) {
+          return data.body.body;
+        }
+        return data.body;
+      }
+    }
   }
-  // fallback v1
-  const providers = doc?.virtualrouter?.providers || {};
-  return Object.values(providers)[0] || null;
+  return undefined;
 }
 
-function listGoldenRequests() {
-  if (!fs.existsSync(SAMPLES_DIR)) return [];
-  return fs.readdirSync(SAMPLES_DIR).filter(n => n.endsWith('_provider-request.json'));
+function extractEntryEndpoint(doc) {
+  const endpoint = doc?.meta?.entryEndpoint;
+  if (typeof endpoint === 'string' && endpoint.trim().length) {
+    return endpoint.trim();
+  }
+  return '/v1/responses';
 }
 
-function pickGoldenForBaseUrl(files, baseUrl, pickHint) {
-  const want = String(baseUrl || '').replace(/\/$/, '');
-  const host = want.split('://')[1] || want; // naive
-  let matches = files.filter(f => {
-    try {
-      const obj = JSON.parse(fs.readFileSync(path.join(SAMPLES_DIR, f), 'utf-8'));
-      const url = obj?.data?.url || obj?.url || '';
-      return typeof url === 'string' && url.includes(host);
-    } catch { return false; }
-  });
-  if (pickHint) matches = matches.filter(f => f.includes(pickHint));
-  if (!matches.length) matches = files; // fallback to any
-  // prefer ones containing input[] and tools
-matches.sort((a, b) => {
-  const aa = fs.readFileSync(path.join(SAMPLES_DIR, a), "utf-8");
-  const bb = fs.readFileSync(path.join(SAMPLES_DIR, b), "utf-8");
-  const sa = (aa.includes("\"input\"") ? 10 : 0) + (aa.includes("\"tools\"") ? 2 : 0) + (aa.includes("function_call_arguments") ? 1 : 0);
-  const sb = (bb.includes("\"input\"") ? 10 : 0) + (bb.includes("\"tools\"") ? 2 : 0) + (bb.includes("function_call_arguments") ? 1 : 0);
-  return sb - sa;
-});
-  return matches[0] || null;
+function extractStreamFlag(doc, body) {
+  if (typeof body?.stream === 'boolean') {
+    return body.stream;
+  }
+  if (typeof doc?.meta?.stream === 'boolean') {
+    return doc.meta.stream;
+  }
+  return true;
+}
+
+async function readSseFrames(stream) {
+  const reader = stream?.getReader?.();
+  if (!reader) {
+    return [];
+  }
+  const decoder = new TextDecoder();
+  let buffer = '';
+  const frames = [];
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) {
+      break;
+    }
+    buffer += decoder.decode(value, { stream: true });
+    let idx = buffer.indexOf('\n\n');
+    while (idx >= 0) {
+      const frame = buffer.slice(0, idx).trim();
+      buffer = buffer.slice(idx + 2);
+      if (frame.length) {
+        frames.push(frame);
+      }
+      idx = buffer.indexOf('\n\n');
+    }
+  }
+  buffer += decoder.decode(new Uint8Array(), { stream: false });
+  if (buffer.trim().length) {
+    frames.push(buffer.trim());
+  }
+  return frames;
+}
+
+async function convertSseFramesToJson(frames, requestId, model) {
+  try {
+    const convPath = pathToFileURL(path.join(process.cwd(), 'sharedmodule/llmswitch-core/dist/sse/sse-to-json/index.js')).href;
+    const bridgePath = pathToFileURL(path.join(process.cwd(), 'sharedmodule/llmswitch-core/dist/conversion/responses/responses-openai-bridge.js')).href;
+    const { ResponsesSseToJsonConverter } = await import(convPath);
+    const { buildChatResponseFromResponses } = await import(bridgePath);
+    const converter = new ResponsesSseToJsonConverter();
+    async function* toChunks() {
+      for (const frame of frames) {
+        yield `${frame}\n\n`;
+      }
+    }
+    const json = await converter.convertSseToJson(toChunks(), {
+      requestId,
+      model: typeof model === 'string' && model.length ? model : 'unknown'
+    });
+    const chat = buildChatResponseFromResponses(json);
+    return { json, chat };
+  } catch {
+    return { json: null, chat: null };
+  }
 }
 
 async function main() {
-  const providerId = process.env.RCC_RESP_PROV || 'fc';
-  const pickHint = process.env.RCC_RESP_PICK || '';
-  const cfgDoc = findProviderConfig(providerId);
-  const prov = extractProviderEntry(cfgDoc, providerId);
-  if (!prov) throw new Error('provider entry missing');
-  const baseUrl = String(prov.baseUrl || prov.baseURL || '').replace(/\/$/, '');
-  const endpoint = String(prov.endpoint || '/responses');
-  const apiKey = prov.auth?.apiKey || cfgDoc?.keyVault?.[providerId]?.key1?.value;
-  if (!apiKey) throw new Error('no apikey');
+  const baseUrl = DEFAULT_BASE.replace(/\/$/, '');
+  const healthy = await healthCheck(baseUrl);
+  if (!healthy) {
+    throw new Error(`routecodex server not healthy: ${baseUrl}/health`);
+  }
 
-  const files = listGoldenRequests();
-  if (!files.length) throw new Error('no responses golden requests');
-  const chosen = pickGoldenForBaseUrl(files, baseUrl, pickHint);
-  if (!chosen) throw new Error('no suitable golden request');
-  const sample = JSON.parse(fs.readFileSync(path.join(SAMPLES_DIR, chosen), 'utf-8'));
-  const body = sample?.data?.body || sample?.body || sample?.data || sample;
-  if (!body || typeof body !== 'object') throw new Error('invalid golden body');
-  // Override model if provider specifies one
-  const model = prov.model || prov.modelId || prov.defaultModel || body.model;
-  body.model = model;
-  body.stream = true;
+  const candidates = findClientRequestFiles(SAMPLES_ROOT);
+  if (!candidates.length) {
+    throw new Error(`no client-request samples found under ${SAMPLES_ROOT}`);
+  }
+  const picked = candidates[0];
+  const sample = readJson(picked.file);
+  const body = extractRequestBody(sample);
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    throw new Error(`invalid sample request body: ${picked.file}`);
+  }
 
-  const httpPath = pathToFileURL(path.join(process.cwd(), 'dist/providers/core/utils/http-client.js')).href;
-  const { HttpClient } = await import(httpPath);
-  const convPath = pathToFileURL(path.join(process.cwd(), 'sharedmodule/llmswitch-core/dist/sse/sse-to-json/index.js')).href;
-  const bridgePath = pathToFileURL(path.join(process.cwd(), 'sharedmodule/llmswitch-core/dist/conversion/responses/responses-openai-bridge.js')).href;
-  const { ResponsesSseToJsonConverter } = await import(convPath);
-  const { buildChatResponseFromResponses } = await import(bridgePath);
+  const endpoint = extractEntryEndpoint(sample);
+  const wantsStream = extractStreamFlag(sample, body);
+  const requestBody = { ...body, stream: wantsStream };
+  const targetUrl = `${baseUrl}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
+
+  ensureDir(OUT_DIR);
+  const runBase = path.join(OUT_DIR, `server-replay_${nowStamp()}`);
+  const requestOut = `${runBase}.request.json`;
+  const metaOut = `${runBase}.response.meta.json`;
+  const sseOut = `${runBase}.response.sse.log`;
+  const sseNdjsonOut = `${runBase}.response.sse.ndjson`;
+  const jsonOut = `${runBase}.response.json`;
+  const chatOut = `${runBase}.chat.json`;
 
   const headers = {
     'Content-Type': 'application/json',
+    'Accept': wantsStream ? 'text/event-stream' : 'application/json',
     'OpenAI-Beta': 'responses-2024-12-17',
-    'Authorization': `Bearer ${apiKey}`
+    'x-routecodex-api-key': DEFAULT_KEY
   };
 
-  ensureDir(OUT_DIR);
-  const base = path.join(OUT_DIR, `${providerId}_replay_${nowStamp()}`);
-  const sseLog = `${base}.sse.log`;
-  const jsonOut = `${base}.json`;
-  const chatOut = `${base}.chat.json`;
-  fs.writeFileSync(`${base}.request.json`, JSON.stringify({ url: baseUrl+endpoint, headers, body }, null, 2));
+  fs.writeFileSync(requestOut, JSON.stringify({
+    targetUrl,
+    endpoint,
+    sample: picked,
+    headers: { ...headers, 'x-routecodex-api-key': '***' },
+    body: requestBody
+  }, null, 2));
 
-  const client = new HttpClient({ baseUrl, timeout: 300000 });
-  const stream = await client.postStream(endpoint, body, { ...headers, Accept: 'text/event-stream' });
-  const conv = new ResponsesSseToJsonConverter();
-  const json = await conv.convertSseToJson(stream, {
-    requestId: path.basename(base),
-    model: String(body.model||'unknown'),
-    onEvent: (evt) => {
-      try {
-        fs.appendFileSync(sseLog, `event: ${evt.type}\n`);
-        fs.appendFileSync(sseLog, `data: ${JSON.stringify(evt.data)}\n\n`);
-      } catch {}
-    }
+  const res = await fetch(targetUrl, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(requestBody)
   });
-  fs.writeFileSync(jsonOut, JSON.stringify(json, null, 2));
-  const chat = buildChatResponseFromResponses(json);
-  fs.writeFileSync(chatOut, JSON.stringify(chat, null, 2));
-  const tc = chat?.choices?.[0]?.message?.tool_calls || [];
-  const ok = Array.isArray(tc) && tc.length > 0;
-  console.log('[responses-sse-replay-golden] provider=%s sample=%s tool_calls=%s out=%s', providerId, chosen, ok ? tc.length : 0, chatOut);
+  fs.writeFileSync(metaOut, JSON.stringify({
+    status: res.status,
+    statusText: res.statusText,
+    headers: Object.fromEntries(res.headers.entries())
+  }, null, 2));
+  if (!res.ok) {
+    const text = await res.text();
+    fs.writeFileSync(`${runBase}.response.error.txt`, text, 'utf-8');
+    throw new Error(`HTTP ${res.status}: ${text.slice(0, 500)}`);
+  }
+
+  if (!wantsStream) {
+    const json = await res.json();
+    fs.writeFileSync(jsonOut, JSON.stringify(json, null, 2));
+    console.log('[responses-sse-replay-golden] mode=json sample=%s out=%s', picked.file, jsonOut);
+    return;
+  }
+
+  const frames = await readSseFrames(res.body);
+  fs.writeFileSync(sseOut, frames.map((frame) => `${frame}\n\n`).join(''), 'utf-8');
+  fs.writeFileSync(sseNdjsonOut, frames.join('\n'), 'utf-8');
+  const converted = await convertSseFramesToJson(
+    frames,
+    picked.requestId,
+    typeof (requestBody).model === 'string' ? (requestBody).model : undefined
+  );
+  if (converted.json) {
+    fs.writeFileSync(jsonOut, JSON.stringify(converted.json, null, 2));
+  }
+  if (converted.chat) {
+    fs.writeFileSync(chatOut, JSON.stringify(converted.chat, null, 2));
+  }
+  console.log(
+    '[responses-sse-replay-golden] mode=sse sample=%s frames=%d sse=%s json=%s chat=%s',
+    picked.file,
+    frames.length,
+    sseOut,
+    converted.json ? jsonOut : '(skip)',
+    converted.chat ? chatOut : '(skip)'
+  );
 }
 
-main().catch(e => { console.error(e); process.exit(1); });
+main().catch((err) => {
+  console.error('[responses-sse-replay-golden] failed:', err?.message || String(err));
+  process.exit(1);
+});

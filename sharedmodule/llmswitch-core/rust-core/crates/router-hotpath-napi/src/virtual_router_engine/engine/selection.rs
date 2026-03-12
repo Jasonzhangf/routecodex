@@ -38,7 +38,9 @@ impl VirtualRouterEngineCore {
 
         if let Some(target) = &routing_state.forced_target {
             if let Some(forced_key) = resolve_instruction_target(target, &self.provider_registry) {
-                if !excluded_keys.contains(&forced_key) && self.is_provider_available(env, &forced_key) {
+                if !excluded_keys.contains(&forced_key)
+                    && self.is_provider_available(env, &forced_key)
+                {
                     return Ok(SelectionResult::new(
                         forced_key.clone(),
                         requested_route.to_string(),
@@ -51,7 +53,9 @@ impl VirtualRouterEngineCore {
 
         if let Some(target) = &routing_state.sticky_target {
             if let Some(sticky_key) = resolve_instruction_target(target, &self.provider_registry) {
-                if !excluded_keys.contains(&sticky_key) && self.is_provider_available(env, &sticky_key) {
+                if !excluded_keys.contains(&sticky_key)
+                    && self.is_provider_available(env, &sticky_key)
+                {
                     return Ok(SelectionResult::new(
                         sticky_key.clone(),
                         requested_route.to_string(),
@@ -64,7 +68,9 @@ impl VirtualRouterEngineCore {
 
         if let Some(target) = &routing_state.prefer_target {
             if let Some(prefer_key) = resolve_instruction_target(target, &self.provider_registry) {
-                if !excluded_keys.contains(&prefer_key) && self.is_provider_available(env, &prefer_key) {
+                if !excluded_keys.contains(&prefer_key)
+                    && self.is_provider_available(env, &prefer_key)
+                {
                     return Ok(SelectionResult::new(
                         prefer_key.clone(),
                         "prefer".to_string(),

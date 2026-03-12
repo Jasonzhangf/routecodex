@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { resolveRccUserDir } from '../../config/user-data-paths.js';
 
 export const ROUTECODEX_BUNDLED_DOC_FILES = [
   'INSTALLATION_AND_QUICKSTART.md',
@@ -17,11 +17,7 @@ export type BundledDocsInstallResult =
   | { ok: false; reason: 'missing_source' | 'install_failed'; message: string };
 
 function resolveUserDir(): string {
-  const override = String(process.env.ROUTECODEX_USER_DIR || '').trim();
-  if (override) {
-    return override;
-  }
-  return path.join(os.homedir(), '.routecodex');
+  return resolveRccUserDir();
 }
 
 function resolvePackageRootFromHere(): string {

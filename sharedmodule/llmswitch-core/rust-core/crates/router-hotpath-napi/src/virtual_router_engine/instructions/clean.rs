@@ -24,10 +24,8 @@ fn strip_malformed_marker_like_segments(text: &str) -> String {
         let valid_close = remaining.find("**>");
         if let Some(close_idx) = valid_close {
             let inner = &remaining[3..close_idx];
-            let is_malformed_star_only = inner.trim().is_empty()
-                || inner
-                    .chars()
-                    .all(|ch| ch == '*' || ch.is_whitespace());
+            let is_malformed_star_only =
+                inner.trim().is_empty() || inner.chars().all(|ch| ch == '*' || ch.is_whitespace());
             if is_malformed_star_only {
                 cursor += close_idx + 3;
                 continue;
@@ -311,7 +309,9 @@ mod tests {
         });
         clean_routing_instruction_markers(&mut request);
         assert_eq!(
-            request["messages"][0]["content"].as_str().unwrap_or_default(),
+            request["messages"][0]["content"]
+                .as_str()
+                .unwrap_or_default(),
             "continue"
         );
     }

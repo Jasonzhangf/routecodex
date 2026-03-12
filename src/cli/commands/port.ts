@@ -67,7 +67,7 @@ export function createPortCommand(program: Command, ctx: PortCommandContext): vo
         }
 
         if (!Number.isFinite(port) || port <= 0) {
-          spinner.fail('Missing port. Provide an explicit port or set it in ~/.routecodex/config.json');
+          spinner.fail('Missing port. Provide an explicit port or set it in ~/.rcc/config.json');
           ctx.exit(1);
         }
 

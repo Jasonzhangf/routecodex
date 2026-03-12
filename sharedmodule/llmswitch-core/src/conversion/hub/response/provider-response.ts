@@ -44,6 +44,7 @@ import {
 import {
   runRespOutboundStage2SseStream
 } from '../pipeline/stages/resp_outbound/resp_outbound_stage2_sse_stream/index.js';
+import { measureHubStage } from '../pipeline/hub-stage-timing.js';
 import { recordResponsesResponse } from '../../shared/responses-conversation-store.js';
 import { ProviderProtocolError } from '../../provider-protocol-error.js';
 import { readRuntimeMetadata } from '../../runtime-metadata.js';
@@ -378,6 +379,7 @@ function resolveChatReasoningMode(entryEndpoint: string): ChatReasoningMode {
 export async function convertProviderResponse(
   options: ProviderResponseConversionOptions
 ): Promise<ProviderResponseConversionResult> {
+  const requestId = options.context.requestId || 'unknown';
   const isFollowup = isServerToolFollowup(options.context);
   // ServerTool followups are internal hops. They must return canonical OpenAI-chat-like payloads
   // to re-enter the hub chat process deterministically (tools harvesting, governance, etc.).
@@ -395,29 +397,60 @@ export async function convertProviderResponse(
     throw new Error(`Unknown provider protocol: ${options.providerProtocol}`);
   }
 
-  const inboundStage1 = await runRespInboundStage1SseDecode({
-    providerProtocol: options.providerProtocol,
-    payload: options.providerResponse,
-    adapterContext: options.context,
-    wantsStream,
-    stageRecorder: options.stageRecorder
-  });
+  const inboundStage1 = await measureHubStage(
+    requestId,
+    'resp_inbound.stage1_sse_decode',
+    () => runRespInboundStage1SseDecode({
+      providerProtocol: options.providerProtocol,
+      payload: options.providerResponse,
+      adapterContext: options.context,
+      wantsStream,
+      stageRecorder: options.stageRecorder
+    }),
+    {
+      mapCompletedDetails: (value) => ({
+        decodedFromSse: value.decodedFromSse,
+        wantsStream,
+        providerProtocol: options.providerProtocol
+      })
+    }
+  );
 
   // Hard order guarantee: provider -> compat -> inbound(parse/map) -> chat_process -> outbound -> client.
   // Transport-level SSE decode stays before compat to materialize a JSON provider payload.
-  const compatPayload = runRespInboundStageCompatResponse({
-    payload: inboundStage1.payload,
-    adapterContext: options.context,
-    stageRecorder: options.stageRecorder
-  });
+  const compatPayload = await measureHubStage(
+    requestId,
+    'resp_inbound.stage1_compat',
+    () => runRespInboundStageCompatResponse({
+      payload: inboundStage1.payload,
+      adapterContext: options.context,
+      stageRecorder: options.stageRecorder
+    }),
+    {
+      mapCompletedDetails: () => ({
+        providerProtocol: options.providerProtocol
+      })
+    }
+  );
   stripInternalPolicyDebugFields(compatPayload as JsonObject);
 
   const mapper = plan.createMapper();
-  const formatEnvelope = await runRespInboundStage2FormatParse({
-    adapterContext: options.context,
-    payload: compatPayload,
-    stageRecorder: options.stageRecorder
-  });
+  const formatEnvelope = await measureHubStage(
+    requestId,
+    'resp_inbound.stage2_format_parse',
+    () => runRespInboundStage2FormatParse({
+      adapterContext: options.context,
+      payload: compatPayload,
+      stageRecorder: options.stageRecorder
+    }),
+    {
+      mapCompletedDetails: (value) => ({
+        protocol: value.protocol,
+        direction: value.direction,
+        providerProtocol: options.providerProtocol
+      })
+    }
+  );
 
   // Phase 2 (shadow): response tool surface mismatch detection (provider inbound).
   // Only records diffs; does not rewrite payload.
@@ -454,29 +487,50 @@ export async function convertProviderResponse(
     // never break response conversion
   }
 
-  const chatResponse = await runRespInboundStage3SemanticMap({
-    adapterContext: options.context,
-    formatEnvelope,
-    mapper,
-    requestSemantics: options.requestSemantics,
-    stageRecorder: options.stageRecorder
-  });
+  const chatResponse = await measureHubStage(
+    requestId,
+    'resp_inbound.stage3_semantic_map',
+    () => runRespInboundStage3SemanticMap({
+      adapterContext: options.context,
+      formatEnvelope,
+      mapper,
+      requestSemantics: options.requestSemantics,
+      stageRecorder: options.stageRecorder
+    }),
+    {
+      mapCompletedDetails: (value) => ({
+        hasChoices: Array.isArray((value as any)?.choices),
+        providerProtocol: options.providerProtocol
+      })
+    }
+  );
   // 记录语义映射后的 ChatCompletion，便于回放 server-side 工具流程。
   recordStage(options.stageRecorder, 'chat_process.resp.stage4.semantic_map_to_chat.chat', chatResponse);
 
   // 检查是否需要进行 ServerTool 编排
   // 使用新的 ChatEnvelope 级别的 servertool 实现
-  const orchestration = await runRespProcessStage3ServerToolOrchestration({
-    payload: chatResponse as ChatCompletionLike,
-    adapterContext: options.context,
-    requestId: options.context.requestId,
-    entryEndpoint: options.entryEndpoint,
-    providerProtocol: options.providerProtocol,
-    stageRecorder: options.stageRecorder,
-    providerInvoker: options.providerInvoker,
-    reenterPipeline: options.reenterPipeline,
-    clientInjectDispatch: options.clientInjectDispatch
-  });
+  const orchestration = await measureHubStage(
+    requestId,
+    'resp_process.stage3_servertool_orchestration',
+    () => runRespProcessStage3ServerToolOrchestration({
+      payload: chatResponse as ChatCompletionLike,
+      adapterContext: options.context,
+      requestId: options.context.requestId,
+      entryEndpoint: options.entryEndpoint,
+      providerProtocol: options.providerProtocol,
+      stageRecorder: options.stageRecorder,
+      providerInvoker: options.providerInvoker,
+      reenterPipeline: options.reenterPipeline,
+      clientInjectDispatch: options.clientInjectDispatch
+    }),
+    {
+      mapCompletedDetails: (value) => ({
+        executed: value.executed,
+        flowId: value.flowId,
+        skipReason: value.skipReason
+      })
+    }
+  );
   let effectiveChatResponse: ChatCompletionLike = orchestration.payload;
 
   // Hard gate: response-side chat_process requires an OpenAI-chat-like surface (choices[].message).
@@ -489,32 +543,62 @@ export async function convertProviderResponse(
   });
 
   // 如果没有执行 servertool，继续原来的处理流程
-  const governanceResult = await runRespProcessStage1ToolGovernance({
-    payload: effectiveChatResponse as JsonObject,
-    entryEndpoint: options.entryEndpoint,
-    requestId: options.context.requestId,
-    clientProtocol,
-    stageRecorder: options.stageRecorder
-  });
+  const governanceResult = await measureHubStage(
+    requestId,
+    'resp_process.stage1_tool_governance',
+    () => runRespProcessStage1ToolGovernance({
+      payload: effectiveChatResponse as JsonObject,
+      entryEndpoint: options.entryEndpoint,
+      requestId: options.context.requestId,
+      clientProtocol,
+      stageRecorder: options.stageRecorder
+    }),
+    {
+      mapCompletedDetails: (value) => ({
+        clientProtocol,
+        hasPayload: Boolean(value.governedPayload)
+      })
+    }
+  );
 
-  const finalizeResult = await runRespProcessStage2Finalize({
-    payload: governanceResult.governedPayload,
-    entryEndpoint: options.entryEndpoint,
-    requestId: options.context.requestId,
-    wantsStream,
-    reasoningMode: resolveChatReasoningMode(options.entryEndpoint),
-    stageRecorder: options.stageRecorder
-  });
+  const finalizeResult = await measureHubStage(
+    requestId,
+    'resp_process.stage2_finalize',
+    () => runRespProcessStage2Finalize({
+      payload: governanceResult.governedPayload,
+      entryEndpoint: options.entryEndpoint,
+      requestId: options.context.requestId,
+      wantsStream,
+      reasoningMode: resolveChatReasoningMode(options.entryEndpoint),
+      stageRecorder: options.stageRecorder
+    }),
+    {
+      mapCompletedDetails: (value) => ({
+        wantsStream,
+        hasProcessedRequest: Boolean(value.processedRequest),
+        model: typeof value.finalizedPayload?.model === 'string' ? value.finalizedPayload.model : undefined
+      })
+    }
+  );
   applyModelOverride(finalizeResult.finalizedPayload, displayModel);
 
-  const clientPayload = runRespOutboundStage1ClientRemap({
-    payload: finalizeResult.finalizedPayload,
-    clientProtocol,
-    requestId: clientFacingRequestId,
-    adapterContext: options.context,
-    requestSemantics: options.requestSemantics,
-    stageRecorder: options.stageRecorder
-  });
+  const clientPayload = await measureHubStage(
+    requestId,
+    'resp_outbound.stage1_client_remap',
+    () => runRespOutboundStage1ClientRemap({
+      payload: finalizeResult.finalizedPayload,
+      clientProtocol,
+      requestId: clientFacingRequestId,
+      adapterContext: options.context,
+      requestSemantics: options.requestSemantics,
+      stageRecorder: options.stageRecorder
+    }),
+    {
+      mapCompletedDetails: () => ({
+        clientProtocol
+      })
+    }
+  );
   applyModelOverride(clientPayload, displayModel);
   stripInternalPolicyDebugFields(clientPayload as JsonObject);
   if (clientProtocol === 'openai-responses') {
@@ -562,13 +646,24 @@ export async function convertProviderResponse(
     // never break response conversion
   }
 
-  const outbound = await runRespOutboundStage2SseStream({
-    clientPayload,
-    clientProtocol,
-    requestId: clientFacingRequestId,
-    wantsStream,
-    stageRecorder: options.stageRecorder
-  });
+  const outbound = await measureHubStage(
+    requestId,
+    'resp_outbound.stage2_sse_stream',
+    () => runRespOutboundStage2SseStream({
+      clientPayload,
+      clientProtocol,
+      requestId: clientFacingRequestId,
+      wantsStream,
+      stageRecorder: options.stageRecorder
+    }),
+    {
+      mapCompletedDetails: (value) => ({
+        wantsStream,
+        hasStream: Boolean(value.stream),
+        hasBody: Boolean(value.body)
+      })
+    }
+  );
 
   // Commit scheduled-task delivery only after a successful client payload/stream is prepared.
   await maybeCommitClockReservationFromContext(options.context);

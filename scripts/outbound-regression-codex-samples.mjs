@@ -12,7 +12,7 @@ import { ProviderFactory } from '../dist/providers/core/runtime/provider-factory
 const CODEx_DIR = path.join(os.homedir(), '.routecodex', 'codex-samples', 'openai-chat');
 const RESPONSES_SAMPLE_DIR = path.join(os.homedir(), '.routecodex', 'codex-samples', 'openai-responses');
 const TARGET_TOOL_NAME = (process.env.RCC_REG_TOOL_NAME || 'add').toLowerCase();
-const PROVIDER_DIR = path.join(os.homedir(), '.routecodex', 'provider');
+const PROVIDER_DIR = path.join(os.homedir(), '.rcc', 'provider');
 const MAX_PER_PROVIDER_PER_MIN = parseInt(process.env.RCC_NET_RATE_MAX_PER_MINUTE || '3', 10);
 const RATE_DISABLED = (process.env.RCC_NET_RATE_DISABLED || '0') === '1';
 const TARGET_PROTOCOLS = new Set(

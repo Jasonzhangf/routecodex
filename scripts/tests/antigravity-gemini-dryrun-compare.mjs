@@ -85,7 +85,7 @@ async function main() {
   const baselinePath = args.baseline || args._[1];
   if (!baselinePath) throw new Error('Missing --baseline <provider-request.json>');
 
-  const configPath = args.config || path.join(os.homedir(), '.routecodex', 'config.json');
+  const configPath = args.config || path.join(os.homedir(), '.rcc', 'config.json');
   const outDir = args.out || path.join(process.cwd(), 'test-results', 'antigravity-gemini-dryrun');
   fs.mkdirSync(outDir, { recursive: true });
 

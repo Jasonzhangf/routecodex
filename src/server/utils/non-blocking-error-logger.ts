@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import fsSync from 'fs';
 import os from 'os';
 import path from 'path';
+import { resolveRccLogsDir } from '../../config/user-data-paths.js';
 
 export interface NonBlockingErrorMeta {
   component: string;
@@ -12,7 +13,7 @@ export interface NonBlockingErrorMeta {
   [key: string]: unknown;
 }
 
-const DEFAULT_LOG_DIR = path.join(os.homedir(), '.routecodex', 'logs');
+const DEFAULT_LOG_DIR = resolveRccLogsDir();
 const DEFAULT_LOG_PATH = path.join(DEFAULT_LOG_DIR, 'non-blocking-errors.log');
 
 function resolveLogPath(): string {

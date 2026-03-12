@@ -24,7 +24,7 @@ const VERIFY_BASE = process.env.ROUTECODEX_VERIFY_BASE_URL || `http://127.0.0.1:
 const VERIFY_CONFIG =
   process.env.ROUTECODEX_VERIFY_CONFIG ||
   process.env.ROUTECODEX_CONFIG_PATH ||
-  `${process.env.HOME || ''}/.routecodex/config.json`;
+  `${process.env.HOME || ''}/.rcc/config.json`;
 
 const DEFAULT_SAMPLE = path.join(
   os.homedir(),

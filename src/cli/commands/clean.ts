@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { homedir } from 'node:os';
 import type { Command } from 'commander';
+import { resolveRccUserDir } from '../../config/user-data-paths.js';
 
 type LoggerLike = {
   info: (msg: string) => void;
@@ -37,14 +38,14 @@ export function createCleanCommand(program: Command, ctx: CleanCommandContext): 
         return;
       }
 
-      const home = getHomeDir();
       const targets: Array<{ path: string; label: string }> = [];
+      const userDir = resolveRccUserDir(getHomeDir());
       if (what === 'captures' || what === 'all') {
-        targets.push({ path: joinPath(home, '.routecodex', 'codex-samples'), label: 'captures' });
+        targets.push({ path: joinPath(userDir, 'codex-samples'), label: 'captures' });
       }
       if (what === 'logs' || what === 'all') {
         targets.push({ path: joinPath(getCwd(), 'debug-logs'), label: 'debug-logs' });
-        targets.push({ path: joinPath(home, '.routecodex', 'logs'), label: 'user-logs' });
+        targets.push({ path: joinPath(userDir, 'logs'), label: 'user-logs' });
       }
 
       let removedAny = false;
@@ -72,4 +73,3 @@ export function createCleanCommand(program: Command, ctx: CleanCommandContext): 
       }
     });
 }
-

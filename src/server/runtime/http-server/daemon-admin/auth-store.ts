@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
+import { resolveRccPath } from '../../../../config/user-data-paths.js';
 
 export type DaemonLoginRecordV1 = {
   version: 1;
@@ -19,7 +19,7 @@ export function resolveDaemonLoginFilePath(): string {
   if (override) {
     return override;
   }
-  return path.join(os.homedir(), '.routecodex', 'login');
+  return resolveRccPath('login');
 }
 
 export async function readDaemonLoginRecord(): Promise<

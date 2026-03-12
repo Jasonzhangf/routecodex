@@ -55,23 +55,23 @@ describe('path-resolver', () => {
 
   describe('defaultTokenFile', () => {
     it('returns iflow default path', () => {
-      expect(defaultTokenFile('iflow')).toBe('/home/testuser/.routecodex/auth/iflow-oauth-1-default.json');
+      expect(defaultTokenFile('iflow')).toBe('/home/testuser/.rcc/auth/iflow-oauth-1-default.json');
     });
 
     it('returns qwen default path', () => {
-      expect(defaultTokenFile('qwen')).toBe('/home/testuser/.routecodex/auth/qwen-oauth-1-default.json');
+      expect(defaultTokenFile('qwen')).toBe('/home/testuser/.rcc/auth/qwen-oauth-1-default.json');
     });
 
     it('returns gemini-cli default path', () => {
-      expect(defaultTokenFile('gemini-cli')).toBe('/home/testuser/.routecodex/auth/gemini-oauth.json');
+      expect(defaultTokenFile('gemini-cli')).toBe('/home/testuser/.rcc/auth/gemini-oauth.json');
     });
 
     it('returns antigravity default path', () => {
-      expect(defaultTokenFile('antigravity')).toBe('/home/testuser/.routecodex/auth/antigravity-oauth.json');
+      expect(defaultTokenFile('antigravity')).toBe('/home/testuser/.rcc/auth/antigravity-oauth.json');
     });
 
     it('returns generic default path for unknown providers', () => {
-      expect(defaultTokenFile('unknown')).toBe('/home/testuser/.routecodex/tokens/unknown-default.json');
+      expect(defaultTokenFile('unknown')).toBe('/home/testuser/.rcc/tokens/unknown-default.json');
     });
   });
 

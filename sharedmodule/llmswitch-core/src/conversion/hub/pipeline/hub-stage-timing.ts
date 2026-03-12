@@ -3,7 +3,7 @@ const falsy = new Set(['0', 'false', 'no', 'off']);
 const REQUEST_TIMELINES = new Map<string, { startedAtMs: number; lastAtMs: number }>();
 const REQUEST_TIMELINE_TTL_MS = 30 * 60 * 1000;
 const REQUEST_TIMELINE_MAX = 4096;
-const DEFAULT_HUB_STAGE_LOG_MIN_MS = 25;
+const DEFAULT_HUB_STAGE_LOG_MIN_MS = 50;
 
 function resolveBool(raw: string | undefined, fallback: boolean): boolean {
   if (raw === undefined) {
@@ -152,32 +152,60 @@ export function logHubStageTiming(
   if (phase === 'start') {
     touchTiming(requestId);
   }
+  
+  // Skip start phases in non-verbose mode (they don't have elapsedMs anyway)
   if (phase === 'start' && !isHubStageTimingVerboseEnabled()) {
     return;
   }
+  
   const timing = advanceTiming(requestId);
+  const thresholdMs = resolveHubStageTimingMinMs();
+  
+  // Only gate non-error phases
   if (phase !== 'error') {
     const forceLog = details?.forceLog === true;
+    
+    // forceLog with detail mode: check elapsedMs if available, otherwise allow
     if (forceLog && isHubStageTimingDetailEnabled()) {
+      const elapsedMs =
+        typeof details?.elapsedMs === 'number'
+          ? details.elapsedMs
+          : typeof details?.nativeMs === 'number'
+            ? details.nativeMs
+            : undefined;
+      // Even forceLog respects elapsedMs threshold if provided
+      if (elapsedMs !== undefined && elapsedMs < thresholdMs) {
+        return;
+      }
       const detailSuffix = renderDetails(details);
       const line = `[hub.detail][${requestId}] ${stage}.${phase}${timing.label}${detailSuffix}`;
       console.log(line);
       return;
     }
-    const thresholdMs = resolveHubStageTimingMinMs();
+    
+    // For completed phases: use elapsedMs if available (actual stage duration)
+    // This is the PRIMARY gating mechanism for completed stages
     const elapsedMs =
       typeof details?.elapsedMs === 'number'
         ? details.elapsedMs
         : typeof details?.nativeMs === 'number'
           ? details.nativeMs
           : undefined;
-    if (elapsedMs !== undefined && elapsedMs < thresholdMs) {
-      return;
-    }
-    if (timing.deltaMs < thresholdMs) {
-      return;
+    
+    if (elapsedMs !== undefined) {
+      // Has elapsedMs: gate by elapsedMs (stage's actual duration)
+      if (elapsedMs < thresholdMs) {
+        return;
+      }
+    } else {
+      // No elapsedMs: gate by deltaMs (time since last log)
+      // This handles start phases and any completed phases without elapsedMs
+      if (timing.deltaMs < thresholdMs) {
+        return;
+      }
     }
   }
+  
   const detailSuffix = renderDetails(details);
   const line = `[hub.detail][${requestId}] ${stage}.${phase}${timing.label}${detailSuffix}`;
   if (phase === 'error') {

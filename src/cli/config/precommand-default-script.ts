@@ -1,6 +1,6 @@
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
+import { resolveRccPrecommandDir, resolveRccUserDir } from '../../config/user-data-paths.js';
 
 const DEFAULT_PRECOMMAND_SCRIPT = 'default.sh';
 const DEFAULT_PRECOMMAND_SCRIPT_CONTENT = [
@@ -22,12 +22,7 @@ export type EnsureDefaultPrecommandScriptResult = {
 };
 
 export function resolveRoutecodexUserDir(homeDir?: string): string {
-  const override = String(process.env.ROUTECODEX_USER_DIR || '').trim();
-  if (override) {
-    return override;
-  }
-  const resolvedHome = typeof homeDir === 'string' && homeDir.trim() ? homeDir.trim() : os.homedir();
-  return path.join(resolvedHome, '.routecodex');
+  return resolveRccUserDir(homeDir);
 }
 
 export function ensureDefaultPrecommandScriptBestEffort(options?: {
@@ -37,8 +32,7 @@ export function ensureDefaultPrecommandScriptBestEffort(options?: {
 }): EnsureDefaultPrecommandScriptResult {
   const fsImpl = options?.fsImpl ?? fs;
   const pathImpl = options?.pathImpl ?? path;
-  const userDir = resolveRoutecodexUserDir(options?.homeDir);
-  const precommandDir = pathImpl.join(userDir, 'precommand');
+  const precommandDir = resolveRccPrecommandDir(options?.homeDir);
   const scriptPath = pathImpl.join(precommandDir, DEFAULT_PRECOMMAND_SCRIPT);
 
   try {

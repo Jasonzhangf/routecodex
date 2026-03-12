@@ -36,7 +36,7 @@ function extractRoutingFromUserConfig(userConfig: UnknownRecord): VirtualRouterR
 
 /**
  * Build a VirtualRouterInput in "v2" mode by combining:
- * - Provider v2 configs loaded from ~/.routecodex/provider (or a custom root)
+ * - Provider v2 configs loaded from ~/.rcc/provider (or a custom root)
  * - Routing configuration from the user config (virtualrouter.routing 或旧式 routing 字段)
  *
  * 当前函数仅用于迁移与测试，尚未接入 HTTP server 运行路径。

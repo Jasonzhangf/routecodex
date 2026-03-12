@@ -118,7 +118,7 @@ const CATALOG: InitProviderTemplate[] = [
           {
             alias: '1',
             type: 'deepseek-account',
-            tokenFile: '~/.routecodex/auth/deepseek-account-1.json'
+            tokenFile: '~/.rcc/auth/deepseek-account-1.json'
           }
         ]
       },
@@ -302,7 +302,7 @@ const CATALOG: InitProviderTemplate[] = [
       compatibilityProfile: 'chat:iflow',
       auth: {
         type: 'iflow-cookie',
-        cookieFile: '~/.routecodex/auth/iflow-work.cookie'
+        cookieFile: '~/.rcc/auth/iflow-work.cookie'
       },
       models: {
         'qwen3-coder-plus': { supportsStreaming: true, maxContext: 1000000 },
@@ -356,7 +356,7 @@ const CATALOG: InitProviderTemplate[] = [
           {
             alias: 'YOUR_ALIAS_HERE',
             type: 'gemini-cli-oauth',
-            tokenFile: '~/.routecodex/auth/gemini-oauth-1-YOUR_ALIAS_HERE.json'
+            tokenFile: '~/.rcc/auth/gemini-oauth-1-YOUR_ALIAS_HERE.json'
           }
         ]
       },
@@ -391,7 +391,7 @@ const CATALOG: InitProviderTemplate[] = [
           {
             alias: 'YOUR_ALIAS_HERE',
             type: 'antigravity-oauth',
-            tokenFile: '~/.routecodex/auth/antigravity-oauth-1-YOUR_ALIAS_HERE.json'
+            tokenFile: '~/.rcc/auth/antigravity-oauth-1-YOUR_ALIAS_HERE.json'
           }
         ]
       },

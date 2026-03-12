@@ -1,8 +1,7 @@
 import { Command } from 'commander';
 import fs from 'fs';
-import path from 'path';
-import { homedir } from 'os';
 const fetch = globalThis.fetch;
+import { resolveRccPathForRead } from '../config/user-data-paths.js';
 
 async function sleep(ms: number): Promise<void> { return new Promise(r => setTimeout(r, ms)); }
 
@@ -222,7 +221,7 @@ export function createValidateCommand(): Command {
       let started = false;
       let exitCode = 0;
       try {
-        const cfg = opts.config || path.join(homedir(), '.routecodex', 'config.json');
+        const cfg = opts.config || resolveRccPathForRead('config.json');
         const verbose = !!opts.verbose;
         const { base, started: didStart, stop } = await ensureServer(cfg, verbose);
         if (didStart) {

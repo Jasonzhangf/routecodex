@@ -119,8 +119,7 @@ fn apply_target_metadata(
     normalized_metadata.insert(
         "processMode".to_string(),
         Value::String(
-            read_trimmed_string(target_map, "processMode")
-                .unwrap_or_else(|| "chat".to_string()),
+            read_trimmed_string(target_map, "processMode").unwrap_or_else(|| "chat".to_string()),
         ),
     );
 
@@ -222,8 +221,7 @@ fn apply_target_to_subject(
     metadata_map.insert(
         "processMode".to_string(),
         Value::String(
-            read_trimmed_string(target_map, "processMode")
-                .unwrap_or_else(|| "chat".to_string()),
+            read_trimmed_string(target_map, "processMode").unwrap_or_else(|| "chat".to_string()),
         ),
     );
 

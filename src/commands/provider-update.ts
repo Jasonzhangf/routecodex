@@ -1,7 +1,6 @@
 import { Command } from 'commander';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import os from 'node:os';
 import readline from 'node:readline';
 
 import { updateProviderModels } from '../tools/provider-update/index.js';
@@ -14,6 +13,7 @@ import { runVercelAiProviderDoctor } from '../provider-sdk/vercel-ai-doctor.js';
 import { buildProviderFromTemplate, getProviderTemplates, pickProviderTemplate } from '../provider-sdk/provider-add-template.js';
 import { buildRoutingHintsConfigFragment, inspectProviderConfig } from '../provider-sdk/provider-inspect.js';
 import { loadProviderConfigsV2, type ProviderConfigV2 } from '../config/provider-v2-loader.js';
+import { resolveRccProviderDir } from '../config/user-data-paths.js';
 import type { UnknownRecord } from '../config/virtual-router-types.js';
 
 function resolveProviderRoot(customRoot?: string): string {
@@ -21,7 +21,7 @@ function resolveProviderRoot(customRoot?: string): string {
   if (trimmed) {
     return path.resolve(trimmed);
   }
-  return path.join(os.homedir(), '.routecodex', 'provider');
+  return resolveRccProviderDir();
 }
 
 async function ensureDir(p: string): Promise<void> {
@@ -213,7 +213,7 @@ export function createProviderUpdateCommand(): Command {
     .requiredOption('-c, --config <file>', 'Provider input config JSON (contains providerId/type/baseUrl/auth)')
     .option('-p, --provider <id>', 'Override providerId (else read from --config)')
     .option('--write', 'Write files instead of dry-run', false)
-    .option('--output-dir <dir>', 'Output directory for provider config and lists (default: ~/.routecodex/provider/<id>)')
+    .option('--output-dir <dir>', 'Output directory for provider config and lists (default: ~/.rcc/provider/<id>)')
     .option('--blacklist-add <items>', 'Add comma-separated model ids to blacklist')
     .option('--blacklist-remove <items>', 'Remove comma-separated model ids from blacklist')
     .option('--blacklist-file <file>', 'Explicit blacklist.json path (overrides output-dir default)')
@@ -253,7 +253,7 @@ export function createProviderUpdateCommand(): Command {
 
   const syncModels = new Command('sync-models')
     .description('Sync upstream model list into an existing provider config.v2.json')
-    .argument('<id>', 'Provider id to update (directory name under ~/.routecodex/provider)')
+    .argument('<id>', 'Provider id to update (directory name under ~/.rcc/provider)')
     .option('--root <dir>', 'Override provider root directory')
     .option('--write', 'Write updated config.v2.json (default: dry-run)', false)
     .option('--use-cache', 'Use cached models-latest.json on upstream failure', false)
@@ -388,7 +388,7 @@ export function createProviderUpdateCommand(): Command {
 
   const probeContext = new Command('probe-context')
     .description('Probe context limits for each model (via /v1/responses) and optionally write maxContextTokens into config.v2.json')
-    .argument('<id>', 'Provider id to probe (directory name under ~/.routecodex/provider)')
+    .argument('<id>', 'Provider id to probe (directory name under ~/.rcc/provider)')
     .option('--root <dir>', 'Override provider root directory')
     .option('--endpoint <url>', 'RouteCodex /v1/responses endpoint (default: $ROUTECODEX_BASE/v1/responses)')
     .option('--key <token>', 'RouteCodex inbound API key (default: $ROUTECODEX_API_KEY or routecodex-test)')
@@ -554,7 +554,7 @@ export function createProviderUpdateCommand(): Command {
 
   const inspect = new Command('inspect')
     .description('Show normalized provider metadata from config.v2.json plus catalog defaults')
-    .argument('<id>', 'Provider id to inspect (directory name under ~/.routecodex/provider)')
+    .argument('<id>', 'Provider id to inspect (directory name under ~/.rcc/provider)')
     .option('--root <dir>', 'Override provider root directory')
     .option('--json', 'Output raw JSON', false)
     .option('--routing-hints', 'Include suggested routing/webSearch snippets', false)
@@ -622,7 +622,7 @@ export function createProviderUpdateCommand(): Command {
 
   const doctor = new Command('doctor')
     .description('Probe a provider v2 config via the Vercel AI SDK compatibility layer')
-    .argument('<id>', 'Provider id to probe (directory name under ~/.routecodex/provider)')
+    .argument('<id>', 'Provider id to probe (directory name under ~/.rcc/provider)')
     .option('--root <dir>', 'Override provider root directory')
     .option('--model <id>', 'Override model id (defaults to provider.defaultModel or the first configured model)')
     .option('--prompt <text>', 'Prompt to use for the text probe', 'Reply with exactly OK.')
@@ -680,7 +680,7 @@ export function createProviderUpdateCommand(): Command {
 
   // provider list
   const list = new Command('list')
-    .description('List provider v2 configs under ~/.routecodex/provider')
+    .description('List provider v2 configs under ~/.rcc/provider')
     .option('--root <dir>', 'Override provider root directory')
     .option('--json', 'Output raw JSON', false)
     .action(async (opts: { root?: string; json?: boolean }) => {
@@ -810,7 +810,7 @@ export function createProviderUpdateCommand(): Command {
       console.log(`Provider "${providerId}" written to ${v2Path}`);
       const inspection = inspectProviderConfig(payload, { configPath: v2Path, includeRoutingHints: true });
       if (inspection.routingHints) {
-        console.log('Suggested config fragment for ~/.routecodex/config.json:');
+        console.log('Suggested config fragment for ~/.rcc/config.json:');
         console.log(JSON.stringify(buildRoutingHintsConfigFragment(inspection.routingHints), null, 2));
       }
     });

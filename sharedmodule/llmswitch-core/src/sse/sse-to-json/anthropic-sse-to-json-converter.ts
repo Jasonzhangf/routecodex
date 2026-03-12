@@ -54,13 +54,16 @@ export class AnthropicSseToJsonConverter {
     });
 
     try {
-      for await (const result of parser.parseStreamAsync(this.chunkStrings(sseStream))) {
+      for await (const result of parser.parseStreamAsync(this.chunkStrings(sseStream, context))) {
         if (!result.success || !result.event) {
           if (this.config.strictMode) {
             throw new Error(result.error || 'Failed to parse Anthropic SSE event');
           }
           continue;
         }
+
+        context.eventStats.firstEventAtMs ??= Date.now();
+        context.eventStats.lastEventAtMs = Date.now();
 
         const upstreamError = this.extractAnthropicErrorEventMessage(result.event);
         if (upstreamError) {
@@ -70,16 +73,21 @@ export class AnthropicSseToJsonConverter {
         if ((result.event as AnthropicSseEvent).protocol !== 'anthropic-messages') {
           continue;
         }
+        const builderStartedAt = Date.now();
         builder.processEvent(result.event as AnthropicSseEvent);
+        context.eventStats.builderMs = (context.eventStats.builderMs ?? 0) + Math.max(0, Date.now() - builderStartedAt);
         this.updateStats(context, result.event as AnthropicSseEvent);
       }
 
+      const resultStartedAt = Date.now();
       const outcome = builder.getResult();
+      context.eventStats.builderMs = (context.eventStats.builderMs ?? 0) + Math.max(0, Date.now() - resultStartedAt);
       if (!outcome.success || !outcome.response) {
         throw outcome.error || new Error('Anthropic SSE conversion incomplete');
       }
       context.isCompleted = true;
       context.eventStats.endTime = Date.now();
+      this.attachDecodeStats(outcome.response, context);
       return outcome.response;
     } catch (error) {
       context.eventStats.errors = (context.eventStats.errors ?? 0) + 1;
@@ -129,15 +137,31 @@ export class AnthropicSseToJsonConverter {
         thinkingBlocks: 0,
         textBlocks: 0,
         errors: 0,
+        chunkCount: 0,
+        byteCount: 0,
+        parserMs: 0,
+        builderMs: 0,
+        messageStopSeen: false,
         startTime: Date.now()
       },
       isCompleted: false
     };
   }
 
-  private async *chunkStrings(stream: AsyncIterable<string | Buffer>): AsyncGenerator<string> {
+  private async *chunkStrings(
+    stream: AsyncIterable<string | Buffer>,
+    context: SseToAnthropicJsonContext
+  ): AsyncGenerator<string> {
     for await (const chunk of stream) {
-      yield typeof chunk === 'string' ? chunk : chunk.toString();
+      const now = Date.now();
+      const text = typeof chunk === 'string' ? chunk : chunk.toString();
+      context.eventStats.chunkCount = (context.eventStats.chunkCount ?? 0) + 1;
+      context.eventStats.byteCount = (context.eventStats.byteCount ?? 0) + Buffer.byteLength(text);
+      context.eventStats.firstChunkAtMs ??= now;
+      context.eventStats.lastChunkAtMs = now;
+      const parserStartedAt = Date.now();
+      yield text;
+      context.eventStats.parserMs = (context.eventStats.parserMs ?? 0) + Math.max(0, Date.now() - parserStartedAt);
     }
   }
 
@@ -147,9 +171,31 @@ export class AnthropicSseToJsonConverter {
       context.eventStats.contentBlocks += 1;
       const blockType = (event.data as any)?.content_block?.type;
       if (blockType === 'tool_use') context.eventStats.toolUseBlocks += 1;
-      if (blockType === 'thinking') context.eventStats.thinkingBlocks += 1;
+      if (blockType === 'thinking' || blockType === 'redacted_thinking') context.eventStats.thinkingBlocks += 1;
       if (blockType === 'text') context.eventStats.textBlocks += 1;
     }
+    if (event.type === 'message_stop') {
+      context.eventStats.messageStopSeen = true;
+    }
+  }
+
+  private attachDecodeStats(response: AnthropicMessageResponse, context: SseToAnthropicJsonContext): void {
+    Object.defineProperty(response, '__rccDecodeStats', {
+      value: {
+        ...context.eventStats,
+        streamMs:
+          context.eventStats.firstChunkAtMs !== undefined && context.eventStats.lastChunkAtMs !== undefined
+            ? Math.max(0, context.eventStats.lastChunkAtMs - context.eventStats.firstChunkAtMs)
+            : undefined,
+        eventSpanMs:
+          context.eventStats.firstEventAtMs !== undefined && context.eventStats.lastEventAtMs !== undefined
+            ? Math.max(0, context.eventStats.lastEventAtMs - context.eventStats.firstEventAtMs)
+            : undefined
+      },
+      configurable: true,
+      enumerable: false,
+      writable: false
+    });
   }
 
   private extractAnthropicErrorEventMessage(event: unknown): string | null {

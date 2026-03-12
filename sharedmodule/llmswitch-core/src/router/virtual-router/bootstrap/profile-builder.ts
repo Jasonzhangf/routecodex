@@ -25,10 +25,13 @@ export function buildProviderProfiles(
         VirtualRouterErrorCode.CONFIG_ERROR
       );
     }
+    const modelStreamingPref = runtime.modelStreaming?.[parsed.modelId];
     const streamingPref =
-      runtime.modelStreaming?.[parsed.modelId] !== undefined
-        ? runtime.modelStreaming?.[parsed.modelId]
-        : runtime.streaming;
+      runtime.streaming === 'always' || runtime.streaming === 'never'
+        ? runtime.streaming
+        : modelStreamingPref !== undefined
+          ? modelStreamingPref
+          : runtime.streaming;
     const contextTokens = resolveContextTokens(runtime, parsed.modelId);
     const outputTokens = resolveOutputTokens(runtime, parsed.modelId);
     const modelCapabilities = runtime.modelCapabilities;

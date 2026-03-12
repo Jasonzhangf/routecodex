@@ -18,11 +18,11 @@ async function main() {
   const legacyVendorDir = path.join(root, 'vendor', 'rcc-llmswitch-core');
   const scopedVendorDir = path.join(root, 'vendor', '@jsonstudio', 'llms');
 
-  // In release mode we rely on npm-installed `@jsonstudio/llms`, so the local sharedmodule dist
-  // is optional and must not block CI (where sharedmodule often doesn't exist).
-  // In dev mode, `node_modules/@jsonstudio/llms` is typically symlinked to sharedmodule/llmswitch-core,
-  // so we keep a hard requirement for the dist output.
-  if (mode === 'dev' && !await exists(sharedDist)) {
+  const hasLocalSharedDist = await exists(sharedDist);
+
+  // 当本地 sharedmodule/llmswitch-core 存在时，dev/release 都以它为唯一真源。
+  // 仅在 release 且本地 sharedmodule 缺失时，才允许退回 npm-installed @jsonstudio/llms。
+  if (!hasLocalSharedDist && mode === 'dev') {
     console.error('[vendor-core] ERROR: 未找到 sharedmodule/llmswitch-core/dist (BUILD_MODE=dev)');
     console.error('[vendor-core] 请先进入 sharedmodule/llmswitch-core 并运行 `npm run build`。');
     process.exit(2);
@@ -37,10 +37,15 @@ async function main() {
     console.log('[vendor-core] removed legacy vendor/@jsonstudio/llms directory');
   }
 
-  if (mode === 'dev') {
+  if (hasLocalSharedDist) {
+    const banner = mode === 'dev'
+      ? '[vendor-core] BUILD_MODE=dev: direct-use local sharedmodule/llmswitch-core/dist (no vendor copy).'
+      : '[vendor-core] BUILD_MODE=release with local sharedmodule/llmswitch-core/dist: direct-use local core (no vendor copy).';
+    console.log(banner);
+  } else if (mode === 'dev') {
     console.log('[vendor-core] sharedmodule/llmswitch-core/dist 将被直接引用，已停止生成 vendor 副本。');
   } else {
-    console.log('[vendor-core] BUILD_MODE=release: using npm-installed @jsonstudio/llms (no vendor copy).');
+    console.log('[vendor-core] BUILD_MODE=release without local sharedmodule: using npm-installed @jsonstudio/llms (no vendor copy).');
   }
 }
 

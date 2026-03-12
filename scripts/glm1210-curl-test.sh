@@ -14,7 +14,7 @@ if [[ ! -f "$RAW_FILE" ]]; then
   exit 2
 fi
 
-CONFIG_PATH="${ROUTECODEX_CONFIG_PATH:-${ROUTECODEX_CONFIG:-$HOME/.routecodex/config.json}}"
+CONFIG_PATH="${ROUTECODEX_CONFIG_PATH:-${ROUTECODEX_CONFIG:-$HOME/.rcc/config.json}}"
 CONFIG_PATH="${CONFIG_PATH/#\~\//$HOME/}"
 if [[ ! -f "$CONFIG_PATH" ]]; then
   echo "Config not found: $CONFIG_PATH" >&2

@@ -15,6 +15,7 @@ import { encodeMetadataPassthrough, extractMetadataPassthrough } from '../../../
 import { mapBridgeToolsToChat, mapChatToolsToBridge } from '../../../shared/tool-mapping.js';
 import { prepareGeminiToolsForBridge, buildGeminiToolsFromBridge } from '../../../shared/gemini-tool-utils.js';
 import { ensureProtocolState, getProtocolState } from '../../../protocol-state.js';
+import { isHubStageTimingDetailEnabled, logHubStageTiming } from '../../pipeline/hub-stage-timing.js';
 import { sanitizeReasoningTaggedText } from '../../../shared/reasoning-utils.js';
 import type { BridgeToolDefinition } from '../../../types/bridge-message-types.js';
 import { applyClaudeThinkingToolSchemaCompatWithNative } from '../../../../router/virtual-router/engine-selection/native-hub-pipeline-req-outbound-semantics.js';
@@ -1583,7 +1584,15 @@ export class GeminiSemanticMapper implements SemanticMapper {
   }
 
   async fromChat(chat: ChatEnvelope, ctx: AdapterContext): Promise<FormatEnvelope> {
+    const requestId = typeof ctx.requestId === 'string' && ctx.requestId.trim().length ? ctx.requestId : 'unknown';
+    const forceDetailLog = isHubStageTimingDetailEnabled();
+    logHubStageTiming(requestId, 'req_outbound.gemini.build_request', 'start');
+    const startedAt = Date.now();
     const envelopePayload = buildGeminiRequestFromChat(chat, chat.metadata) as GeminiPayload;
+    logHubStageTiming(requestId, 'req_outbound.gemini.build_request', 'completed', {
+      elapsedMs: Date.now() - startedAt,
+      forceLog: forceDetailLog
+    });
     return {
       protocol: 'gemini-chat',
       direction: 'response',

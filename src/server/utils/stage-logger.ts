@@ -6,6 +6,7 @@ let cachedStageLoggingFlag: boolean | null = null;
 let cachedStageVerboseFlag: boolean | null = null;
 let cachedStageTimingFlag: boolean | null = null;
 let cachedStageTimingSummaryFlag: boolean | null = null;
+const DEFAULT_STAGE_TIMING_MIN_MS = 50;
 
 const REQUEST_STAGE_TIMELINE_TTL_MS = 30 * 60 * 1000;
 const REQUEST_STAGE_TIMELINE_MAX = 4096;
@@ -17,6 +18,24 @@ const REQUEST_STAGE_TIMELINES = new Map<string, RequestStageTimeline>();
 const REQUEST_SCOPE_STAGE_STARTS = new Map<string, number>();
 const REQUEST_SCOPE_STAGE_ELAPSED = new Map<string, number>();
 const REQUEST_SCOPE_STAGE_TOTAL_ELAPSED = new Map<string, number>();
+const RELEASE_SUMMARY_BREAKDOWN_SCOPES = [
+  'request.snapshot',
+  'hub',
+  'provider.runtime_resolve',
+  'provider.context_resolve',
+  'provider.metadata_attach',
+  'provider.send',
+  'provider.response_normalize',
+  'hub.response',
+  'response'
+] as const;
+const RELEASE_SUMMARY_HOST_INTERNAL_SCOPES = [
+  'request.snapshot',
+  'provider.runtime_resolve',
+  'provider.context_resolve',
+  'provider.metadata_attach',
+  'provider.response_normalize'
+] as const;
 
 const COLOR_RESET = '\x1b[0m';
 const COLOR_INFO = '\x1b[90m';
@@ -85,6 +104,19 @@ function computeStageTimingSummaryEnabled(): boolean {
   );
 }
 
+function resolveStageTimingMinMs(): number {
+  const raw =
+    process.env.ROUTECODEX_STAGE_TIMING_MIN_MS
+    ?? process.env.RCC_STAGE_TIMING_MIN_MS
+    ?? process.env.ROUTECODEX_DEBUG_STAGE_TIMING_MIN_MS
+    ?? process.env.RCC_DEBUG_STAGE_TIMING_MIN_MS;
+  const parsed = Number(raw);
+  if (Number.isFinite(parsed) && parsed >= 0) {
+    return parsed;
+  }
+  return DEFAULT_STAGE_TIMING_MIN_MS;
+}
+
 function resolveRuntimeBuildMode(): 'dev' | 'release' {
   const raw = String(process.env.ROUTECODEX_BUILD_MODE ?? process.env.BUILD_MODE ?? '').trim().toLowerCase();
   if (raw === 'release') {
@@ -127,6 +159,7 @@ export function isStageLoggingEnabled(): boolean {
 export function logPipelineStage(stage: string, requestId: string, details?: Record<string, unknown>): void {
   const timingEnabled = isStageTimingEnabled();
   const timingSummaryEnabled = isStageTimingSummaryEnabled();
+  const stageTimingMinMs = resolveStageTimingMinMs();
   const { scope, action } = parseStage(stage);
   const level = detectStageLevel(stage);
   const normalizedStage = stage.trim().toLowerCase();
@@ -160,6 +193,7 @@ export function logPipelineStage(stage: string, requestId: string, details?: Rec
     ? Math.max(0, details.elapsedMs)
     : undefined;
   const scopeElapsedMs = finalizeScopeStageElapsedMs(requestId, scope, level, explicitElapsedMs);
+  const effectiveElapsedMs = explicitElapsedMs ?? scopeElapsedMs;
 
   if (!shouldLogStage(stage, scope, level, verbose, timingEnabled, releaseSummaryStage)) {
     return;
@@ -178,7 +212,10 @@ export function logPipelineStage(stage: string, requestId: string, details?: Rec
     : undefined;
 
   const timingLabel = timingEnabled
-    ? advanceRequestStageTimingLabel(requestId)
+    ? advanceRequestStageTimingLabel(requestId, {
+      thresholdMs: stageTimingMinMs,
+      force: level !== 'error' && effectiveElapsedMs !== undefined && effectiveElapsedMs >= stageTimingMinMs
+    })
     : releaseSummaryStage
       ? formatReleaseSummaryTimingLabel(
         (typeof details?.elapsedMs === 'number' ? details.elapsedMs : undefined)
@@ -189,6 +226,17 @@ export function logPipelineStage(stage: string, requestId: string, details?: Rec
   const suffix = detailPayload && Object.keys(detailPayload).length ? ` ${JSON.stringify(detailPayload)}` : '';
   const label = `[${scope}][${requestId}] ${action}${timingLabel}`;
   const providerTag = providerLabel ? ` ${colorizeProviderLabel(level, providerLabel)}` : '';
+  if (
+    timingEnabled
+    && level !== 'error'
+    && effectiveElapsedMs !== undefined
+    && effectiveElapsedMs < stageTimingMinMs
+  ) {
+    return;
+  }
+  if (timingEnabled && level !== 'error' && !timingLabel) {
+    return;
+  }
   console.log(`${colorize(level, label)}${providerTag}${suffix}`);
   if (isTerminalStage(stage) && !timingSummaryEnabled) {
     clearRequestStageState(requestId);
@@ -438,10 +486,20 @@ function shouldLogReleaseSummaryStage(stage: string): boolean {
 
 function shouldTrackTimingBreakdownScope(stage: string): boolean {
   const normalized = stage.trim().toLowerCase();
-  return normalized === 'hub.start'
+  return normalized === 'request.snapshot.start'
+    || normalized === 'request.snapshot.completed'
+    || normalized === 'hub.start'
     || normalized === 'hub.completed'
+    || normalized === 'provider.runtime_resolve.start'
+    || normalized === 'provider.runtime_resolve.completed'
+    || normalized === 'provider.context_resolve.start'
+    || normalized === 'provider.context_resolve.completed'
+    || normalized === 'provider.metadata_attach.start'
+    || normalized === 'provider.metadata_attach.completed'
     || normalized === 'hub.response.start'
     || normalized === 'hub.response.completed'
+    || normalized === 'provider.response_normalize.start'
+    || normalized === 'provider.response_normalize.completed'
     || normalized === 'response.dispatch.start'
     || normalized === 'response.completed'
     || normalized === 'provider.send.start'
@@ -499,7 +557,13 @@ function peekRequestStageTimingStats(requestId: string): { totalMs: number; delt
   };
 }
 
-function advanceRequestStageTimingLabel(requestId: string): string {
+function advanceRequestStageTimingLabel(
+  requestId: string,
+  options?: {
+    thresholdMs?: number;
+    force?: boolean;
+  }
+): string {
   const nowMs = Date.now();
   pruneRequestStageTimelines(nowMs);
   const existing = REQUEST_STAGE_TIMELINES.get(requestId);
@@ -513,6 +577,10 @@ function advanceRequestStageTimingLabel(requestId: string): string {
   const totalMs = nowMs - existing.startedAtMs;
   const deltaMs = nowMs - existing.lastAtMs;
   existing.lastAtMs = nowMs;
+  const thresholdMs = options?.thresholdMs ?? DEFAULT_STAGE_TIMING_MIN_MS;
+  if (!options?.force && deltaMs < thresholdMs) {
+    return '';
+  }
   return ` t+${formatDurationMs(totalMs)} Δ${formatDurationMs(deltaMs)}`;
 }
 
@@ -561,7 +629,7 @@ function formatReleaseUsageTimingSummary(
     ? Math.max(0, options.latencyMs)
     : undefined;
   const scopeValues = new Map<string, number>();
-  for (const scope of ['hub', 'provider.send', 'hub.response', 'response']) {
+  for (const scope of RELEASE_SUMMARY_BREAKDOWN_SCOPES) {
     const value = readAggregatedScopeStageElapsedMs(requestIds, scope);
     if (value !== undefined) {
       scopeValues.set(scope, value);
@@ -570,15 +638,19 @@ function formatReleaseUsageTimingSummary(
   if (!scopeValues.size) {
     return '';
   }
-  const providerSendMs = scopeValues.get('provider.send') ?? 0;
-  const hubResponseMs = scopeValues.get('hub.response') ?? 0;
-  const responseMs = scopeValues.get('response') ?? 0;
+  const trackedLatencyMs = Array.from(scopeValues.values()).reduce((sum, value) => sum + value, 0);
+  const hostInternalMs = RELEASE_SUMMARY_HOST_INTERNAL_SCOPES.reduce((sum, scope) => {
+    return sum + (scopeValues.get(scope) ?? 0);
+  }, 0);
   const parts: string[] = [];
   if (totalLatencyMs !== undefined) {
-    const requestInternalMs = Math.max(0, totalLatencyMs - providerSendMs - hubResponseMs - responseMs);
+    const requestInternalMs = Math.max(0, totalLatencyMs - trackedLatencyMs);
     parts.push(`request.internal=${formatDurationMs(requestInternalMs)}`);
   }
-  for (const scope of ['hub', 'provider.send', 'hub.response', 'response']) {
+  if (hostInternalMs > 0) {
+    parts.push(`host.internal=${formatDurationMs(hostInternalMs)}`);
+  }
+  for (const scope of RELEASE_SUMMARY_BREAKDOWN_SCOPES) {
     const elapsedMs = scopeValues.get(scope);
     if (elapsedMs === undefined) {
       continue;

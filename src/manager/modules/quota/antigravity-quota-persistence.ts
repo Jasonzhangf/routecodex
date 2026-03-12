@@ -1,6 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import fsAsync from 'node:fs/promises';
+import {
+  resolveLegacyRouteCodexUserDir,
+  resolveRccQuotaDir,
+  resolveRccStateDir
+} from '../../../config/user-data-paths.js';
 
 import type { QuotaStoreSnapshot } from '../../../modules/llmswitch/bridge.js';
 import { loadProviderQuotaSnapshot } from '../../quota/provider-quota-store.js';
@@ -19,7 +24,7 @@ export type QuotaRecordLike = {
 };
 
 export function resolveQuotaManagerDir(resolveHomeDir: () => string): string {
-  const base = path.join(resolveHomeDir(), '.routecodex', 'quota');
+  const base = resolveRccQuotaDir(resolveHomeDir());
   try {
     fs.mkdirSync(base, { recursive: true });
   } catch {
@@ -28,18 +33,30 @@ export function resolveQuotaManagerDir(resolveHomeDir: () => string): string {
   return base;
 }
 
-export function resolveQuotaStatePath(resolveHomeDir: () => string): string {
-  const baseDir = path.join(resolveHomeDir(), '.routecodex', 'state', 'quota');
+export function resolveQuotaStateWritePath(resolveHomeDir: () => string): string {
+  const primaryBaseDir = path.join(resolveRccStateDir(resolveHomeDir()), 'quota');
   try {
-    fs.mkdirSync(baseDir, { recursive: true });
+    fs.mkdirSync(primaryBaseDir, { recursive: true });
   } catch {
     // best effort
   }
-  return path.join(baseDir, 'antigravity.json');
+  return path.join(primaryBaseDir, 'antigravity.json');
+}
+
+export function resolveQuotaStateReadPath(resolveHomeDir: () => string): string {
+  const primaryPath = resolveQuotaStateWritePath(resolveHomeDir);
+  if (fs.existsSync(primaryPath)) {
+    return primaryPath;
+  }
+  const legacyPath = path.join(resolveLegacyRouteCodexUserDir(resolveHomeDir()), 'state', 'quota', 'antigravity.json');
+  if (fs.existsSync(legacyPath)) {
+    return legacyPath;
+  }
+  return primaryPath;
 }
 
 export function loadAntigravitySnapshotFromDisk(resolveHomeDir: () => string): Record<string, QuotaRecordLike> {
-  const filePath = resolveQuotaStatePath(resolveHomeDir);
+  const filePath = resolveQuotaStateReadPath(resolveHomeDir);
   try {
     if (!fs.existsSync(filePath)) {
       return {};
@@ -79,7 +96,7 @@ export async function saveAntigravitySnapshotToDisk(
   resolveHomeDir: () => string,
   snapshot: Record<string, QuotaRecordLike>
 ): Promise<void> {
-  const filePath = resolveQuotaStatePath(resolveHomeDir);
+  const filePath = resolveQuotaStateWritePath(resolveHomeDir);
   try {
     await fsAsync.writeFile(filePath, `${JSON.stringify(snapshot, null, 2)}\n`, 'utf8');
   } catch {

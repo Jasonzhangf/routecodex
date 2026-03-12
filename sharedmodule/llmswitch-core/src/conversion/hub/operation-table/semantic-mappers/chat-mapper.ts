@@ -10,6 +10,7 @@ import type {
 import type { FormatEnvelope } from '../../types/format-envelope.js';
 import { ensureProtocolState } from '../../../protocol-state.js';
 import { isJsonObject, jsonClone, type JsonObject, type JsonValue } from '../../types/json.js';
+import { isHubStageTimingDetailEnabled, logHubStageTiming } from '../../pipeline/hub-stage-timing.js';
 import {
   mapOpenaiChatFromChatWithNative,
   mapOpenaiChatToChatWithNative
@@ -397,9 +398,18 @@ export class ChatSemanticMapper implements SemanticMapper {
   }
 
   async fromChat(chat: ChatEnvelope, ctx: AdapterContext): Promise<FormatEnvelope> {
-    return mapOpenaiChatFromChatWithNative(
+    const requestId = typeof ctx.requestId === 'string' && ctx.requestId.trim().length ? ctx.requestId : 'unknown';
+    const forceDetailLog = isHubStageTimingDetailEnabled();
+    logHubStageTiming(requestId, 'req_outbound.chat.build_request', 'start');
+    const startedAt = Date.now();
+    const result = mapOpenaiChatFromChatWithNative(
       chat as unknown as Record<string, unknown>,
       ctx as unknown as Record<string, unknown>
     ) as unknown as FormatEnvelope;
+    logHubStageTiming(requestId, 'req_outbound.chat.build_request', 'completed', {
+      elapsedMs: Date.now() - startedAt,
+      forceLog: forceDetailLog
+    });
+    return result;
   }
 }

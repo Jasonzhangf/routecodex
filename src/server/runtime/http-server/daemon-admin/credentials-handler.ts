@@ -1,9 +1,9 @@
 import path from 'node:path';
 import type { Application, Request, Response } from 'express';
 import fs from 'node:fs/promises';
-import os from 'node:os';
 import type { DaemonAdminRouteOptions } from '../daemon-admin-routes.js';
 import { rejectNonLocalOrUnauthorizedAdmin } from '../daemon-admin-routes.js';
+import { resolveRccPathForRead } from '../../../../config/user-data-paths.js';
 import { readTokenFile, evaluateTokenState, resolveAuthDir } from '../../../../token-daemon/token-utils.js';
 import { ensureValidOAuthToken } from '../../../../providers/auth/oauth-lifecycle.js';
 import { withOAuthRepairEnv } from '../../../../providers/auth/oauth-repair-env.js';
@@ -240,7 +240,7 @@ export function registerCredentialRoutes(app: Application, options: DaemonAdminR
       // Best effort: allow UI-configured browser selection without requiring restart.
       const browserHint = String(process.env.ROUTECODEX_OAUTH_BROWSER || '').trim();
       if (!browserHint) {
-        const configPath = path.join(os.homedir(), '.routecodex', 'config.json');
+        const configPath = resolveRccPathForRead('config.json');
         try {
           const raw = await fs.readFile(configPath, 'utf8');
           const parsed = raw.trim() ? JSON.parse(raw) : {};

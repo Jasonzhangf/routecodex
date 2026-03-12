@@ -74,6 +74,7 @@ import {
   clearTokenFile,
   readRawTokenFile
 } from './oauth-lifecycle/token-io.js';
+import { resolveRccAuthDir } from '../../config/user-data-paths.js';
 
 type InteractiveOAuthLockRecord = {
   pid: number;
@@ -90,8 +91,8 @@ type IflowAutoFailureRecord = {
   lastError?: string;
 };
 
-const OAUTH_INTERACTIVE_LOCK_FILE = path.join(os.homedir(), '.routecodex', 'auth', '.oauth-interactive.lock.json');
-const IFLOW_AUTO_FAILURE_FILE = path.join(os.homedir(), '.routecodex', 'auth', '.iflow-auto-failures.json');
+const OAUTH_INTERACTIVE_LOCK_FILE = path.join(resolveRccAuthDir(), '.oauth-interactive.lock.json');
+const IFLOW_AUTO_FAILURE_FILE = path.join(resolveRccAuthDir(), '.iflow-auto-failures.json');
 const OAUTH_THROTTLE_WINDOW_MS = 60_000;
 const IFLOW_REFRESH_FAILURE_BACKOFF_MS = 5 * 60_000;
 
@@ -1710,8 +1711,7 @@ export function shouldTriggerInteractiveOAuthRepair(providerType: string, upstre
 
 async function inferIflowClientCredsFromLog(): Promise<{ clientId?: string; clientSecret?: string } | null> {
   try {
-    const home = process.env.HOME || '';
-    const file = path.join(home, '.routecodex', 'auth', 'iflow-oauth.log');
+    const file = path.join(resolveRccAuthDir(), 'iflow-oauth.log');
     const txt = await fs.readFile(file, 'utf-8').catch(() => '');
     if (!txt) {
       return null;

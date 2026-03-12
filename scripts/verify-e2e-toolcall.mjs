@@ -16,11 +16,11 @@ const VERIFY_BASE = process.env.ROUTECODEX_VERIFY_BASE_URL || `http://127.0.0.1:
 const EXPLICIT_VERIFY_CONFIG = String(
   process.env.ROUTECODEX_VERIFY_CONFIG || process.env.ROUTECODEX_CONFIG_PATH || ''
 ).trim();
-const DEFAULT_USER_CONFIG = `${process.env.HOME || ''}/.routecodex/config.json`;
+const DEFAULT_USER_CONFIG = `${process.env.HOME || ''}/.rcc/config.json`;
 const USE_USER_CONFIG = String(process.env.ROUTECODEX_VERIFY_USE_USER_CONFIG || '').trim() === '1';
 const GEMINI_CLI_CONFIG =
   process.env.ROUTECODEX_VERIFY_GEMINI_CLI_CONFIG ||
-  `${process.env.HOME || ''}/.routecodex/provider/gemini-cli/config.v1.json`;
+  `${process.env.HOME || ''}/.rcc/provider/gemini-cli/config.v1.json`;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_AGENTS_PATH = path.resolve(__dirname, '..', 'AGENTS.md');

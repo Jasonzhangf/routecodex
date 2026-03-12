@@ -258,7 +258,10 @@ fn build_resp_inbound_sse_error_descriptor(
                 details.insert("retryable".to_string(), Value::Bool(true));
             }
             if !upstream_code.is_empty() {
-                details.insert("upstreamCode".to_string(), Value::String(upstream_code.clone()));
+                details.insert(
+                    "upstreamCode".to_string(),
+                    Value::String(upstream_code.clone()),
+                );
             }
             if context_length_exceeded {
                 details.insert(
@@ -371,9 +374,18 @@ mod tests {
         assert_eq!(descriptor.code, "SSE_DECODE_ERROR");
         assert_eq!(descriptor.protocol, "openai-chat");
         assert_eq!(descriptor.provider_type.as_deref(), Some("openai"));
-        assert_eq!(descriptor.details.get("requestId"), Some(&Value::String("req-1".to_string())));
-        assert_eq!(descriptor.details.get("message"), Some(&Value::String("stream closed".to_string())));
-        assert_eq!(descriptor.stage_record.get("reason"), Some(&Value::String("sse_wrapper_error".to_string())));
+        assert_eq!(
+            descriptor.details.get("requestId"),
+            Some(&Value::String("req-1".to_string()))
+        );
+        assert_eq!(
+            descriptor.details.get("message"),
+            Some(&Value::String("stream closed".to_string()))
+        );
+        assert_eq!(
+            descriptor.stage_record.get("reason"),
+            Some(&Value::String("sse_wrapper_error".to_string()))
+        );
     }
 
     #[test]
@@ -393,11 +405,26 @@ mod tests {
 
         assert_eq!(descriptor.code, "HTTP_502");
         assert_eq!(descriptor.status, Some(502));
-        assert_eq!(descriptor.details.get("retryable"), Some(&Value::Bool(true)));
-        assert_eq!(descriptor.details.get("statusCode"), Some(&Value::from(502)));
-        assert_eq!(descriptor.stage_record.get("statusCode"), Some(&Value::from(502)));
-        assert_eq!(descriptor.stage_record.get("estimatedPromptTokens"), Some(&Value::from(1234)));
-        assert_eq!(descriptor.stage_record.get("maxContextTokens"), Some(&Value::from(4096)));
+        assert_eq!(
+            descriptor.details.get("retryable"),
+            Some(&Value::Bool(true))
+        );
+        assert_eq!(
+            descriptor.details.get("statusCode"),
+            Some(&Value::from(502))
+        );
+        assert_eq!(
+            descriptor.stage_record.get("statusCode"),
+            Some(&Value::from(502))
+        );
+        assert_eq!(
+            descriptor.stage_record.get("estimatedPromptTokens"),
+            Some(&Value::from(1234))
+        );
+        assert_eq!(
+            descriptor.stage_record.get("maxContextTokens"),
+            Some(&Value::from(4096))
+        );
     }
 
     #[test]
@@ -424,12 +451,24 @@ mod tests {
 
         assert_eq!(descriptor.code, "SSE_DECODE_ERROR");
         assert_eq!(descriptor.status, None);
-        assert_eq!(descriptor.details.get("reason"), Some(&Value::String("context_length_exceeded".to_string())));
+        assert_eq!(
+            descriptor.details.get("reason"),
+            Some(&Value::String("context_length_exceeded".to_string()))
+        );
         assert!(descriptor
             .error_message
             .contains("context too long; please compress conversation context and retry"));
-        assert_eq!(descriptor.stage_record.get("reason"), Some(&Value::String("context_length_exceeded".to_string())));
-        assert_eq!(descriptor.stage_record.get("estimatedPromptTokens"), Some(&Value::from(8192)));
-        assert_eq!(descriptor.stage_record.get("maxContextTokens"), Some(&Value::from(4096)));
+        assert_eq!(
+            descriptor.stage_record.get("reason"),
+            Some(&Value::String("context_length_exceeded".to_string()))
+        );
+        assert_eq!(
+            descriptor.stage_record.get("estimatedPromptTokens"),
+            Some(&Value::from(8192))
+        );
+        assert_eq!(
+            descriptor.stage_record.get("maxContextTokens"),
+            Some(&Value::from(4096))
+        );
     }
 }

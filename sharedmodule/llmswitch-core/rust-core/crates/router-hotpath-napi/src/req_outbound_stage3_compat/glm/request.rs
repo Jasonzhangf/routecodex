@@ -105,7 +105,10 @@ fn apply_glm_image_content_transform(root: &mut Map<String, Value>) {
         let Some(message_obj) = message.as_object_mut() else {
             continue;
         };
-        let Some(content) = message_obj.get_mut("content").and_then(|v| v.as_array_mut()) else {
+        let Some(content) = message_obj
+            .get_mut("content")
+            .and_then(|v| v.as_array_mut())
+        else {
             continue;
         };
 

@@ -42,7 +42,7 @@ function resolveSecretValue(value) {
 }
 
 function loadProviderEntry(providerId) {
-  const providerRoot = path.join(os.homedir(), '.routecodex', 'provider', providerId);
+  const providerRoot = path.join(os.homedir(), '.rcc', 'provider', providerId);
   for (const name of PROVIDER_CONFIG_FILES) {
     const full = path.join(providerRoot, name);
     if (!fs.existsSync(full)) continue;

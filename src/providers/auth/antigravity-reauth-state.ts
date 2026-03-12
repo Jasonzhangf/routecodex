@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
+import { resolveRccPath } from '../../config/user-data-paths.js';
 
 export type AntigravityReauthRequiredRecord = {
   provider: 'antigravity' | 'gemini-cli';
@@ -13,8 +13,7 @@ export type AntigravityReauthRequiredRecord = {
 };
 
 function getStateFilePath(): string {
-  const home = (process.env.HOME || '').trim() || os.homedir();
-  return path.join(home, '.routecodex', 'state', 'antigravity-reauth-required.json');
+  return resolveRccPath('state', 'antigravity-reauth-required.json');
 }
 
 function normalizeAlias(alias: string): string {

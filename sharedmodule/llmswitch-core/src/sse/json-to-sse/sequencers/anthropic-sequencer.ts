@@ -120,6 +120,17 @@ export function createAnthropicSequencer(config?: Partial<AnthropicSequencerConf
             yield createEvent('content_block_stop', { index });
             index += 1;
           }
+        } else if (block.type === 'redacted_thinking') {
+          const data = typeof block.data === 'string' ? block.data : '';
+          if (!data.trim().length) {
+            continue;
+          }
+          yield createEvent('content_block_start', {
+            index,
+            content_block: { type: 'redacted_thinking', data }
+          });
+          yield createEvent('content_block_stop', { index });
+          index += 1;
         } else if (block.type === 'tool_use') {
           const id = block.id || `call_${requestId}_${index}`;
           yield createEvent('content_block_start', {

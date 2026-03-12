@@ -4,6 +4,7 @@ import { homedir, tmpdir } from 'node:os';
 import type { Command } from 'commander';
 
 import { API_PATHS, HTTP_PROTOCOLS, LOCAL_HOSTS } from '../../constants/index.js';
+import { resolveRccConfigFile, resolveRccUserDir } from '../../config/user-data-paths.js';
 import { logProcessLifecycleSync } from '../../utils/process-lifecycle-logger.js';
 import { ensureDefaultPrecommandScriptBestEffort } from '../config/precommand-default-script.js';
 import {
@@ -105,7 +106,7 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
           // CLI flags still take precedence when provided.
           configPath =
             (ctx.env.ROUTECODEX_CONFIG_PATH || ctx.env.ROUTECODEX_CONFIG || '').trim() ||
-            pathImpl.join(home(), '.routecodex', 'config.json');
+            resolveRccConfigFile(home());
         }
 
         // Ensure provided config path is a file (not a directory)
@@ -120,7 +121,7 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
         // Check if config exists; do NOT create defaults
         if (!fsImpl.existsSync(configPath)) {
           spinner.fail(`Configuration file not found: ${configPath}`);
-          ctx.logger.error('Please create a RouteCodex user config first (e.g., ~/.routecodex/config.json).');
+          ctx.logger.error('Please create a RouteCodex user config first (e.g., ~/.rcc/config.json).');
           ctx.logger.error('Or initialize via CLI:');
           ctx.logger.error('  rcc init');
           ctx.logger.error('  rcc config init');
@@ -291,7 +292,7 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
         } as NodeJS.ProcessEnv;
 
         const args: string[] = [serverEntry, modulesConfigPath];
-        const routeCodexHome = pathImpl.join(home(), '.routecodex');
+        const routeCodexHome = resolveRccUserDir(home());
         const defaultPrecommand = ensureDefaultPrecommandScriptBestEffort({
           fsImpl,
           pathImpl,

@@ -1,6 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { homedir } from 'os';
+import { resolveRccAuthDir } from '../config/user-data-paths.js';
 import chalk from 'chalk';
 import { ensureValidOAuthToken } from '../providers/auth/oauth-lifecycle.js';
 import {
@@ -910,21 +911,20 @@ async function maybeMarkTokenFileNoRefresh(filePath: string): Promise<void> {
 }
 
 function defaultTokenFilePath(provider: OAuthProviderId): string {
-  const home = homedir();
   if (provider === 'iflow') {
-    return path.join(home, '.routecodex', 'auth', 'iflow-oauth-1-default.json');
+    return path.join(resolveRccAuthDir(), 'iflow-oauth-1-default.json');
   }
   if (provider === 'qwen') {
-    return path.join(home, '.routecodex', 'auth', 'qwen-oauth-1-default.json');
+    return path.join(resolveRccAuthDir(), 'qwen-oauth-1-default.json');
   }
   if (GEMINI_PROVIDER_IDS.has(provider)) {
     const file = provider === 'antigravity' ? 'antigravity-oauth.json' : 'gemini-oauth.json';
-    return path.join(home, '.routecodex', 'auth', file);
+    return path.join(resolveRccAuthDir(), file);
   }
   if (provider === 'deepseek-account') {
-    return path.join(home, '.routecodex', 'auth', 'deepseek-account-default.json');
+    return path.join(resolveRccAuthDir(), 'deepseek-account-default.json');
   }
-  return path.join(home, '.routecodex', 'auth', `${provider}-oauth-1-default.json`);
+  return path.join(resolveRccAuthDir(), `${provider}-oauth-1-default.json`);
 }
 
 function createSyntheticTokenDescriptor(provider: OAuthProviderId): TokenDescriptor {

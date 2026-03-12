@@ -6,7 +6,7 @@ import os from 'os';
 import path from 'path';
 import { pathToFileURL } from 'url';
 
-const PROVIDER_DIR = path.join(os.homedir(), '.routecodex', 'provider');
+const PROVIDER_DIR = path.join(os.homedir(), '.rcc', 'provider');
 const OUT_DIR = path.join(os.homedir(), '.routecodex', 'logs', 'anthropic-sse');
 
 function ensureDir(p) { fs.mkdirSync(p, { recursive: true }); }

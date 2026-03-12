@@ -21,7 +21,7 @@ function usage(err) {
 }
 
 const args = process.argv.slice(2);
-const configPath = args[0] || path.join(process.env.HOME || '~', '.routecodex', 'provider', 'c4m', 'config.v1.json');
+const configPath = args[0] || path.join(process.env.HOME || '~', '.rcc', 'provider', 'c4m', 'config.v1.json');
 if (!fs.existsSync(configPath)) usage(`Config file not found: ${configPath}`);
 const providerTarget = args[1] || 'c4m.gpt-5.1';
 const [providerId, modelId = 'gpt-5.1'] = providerTarget.split('.');

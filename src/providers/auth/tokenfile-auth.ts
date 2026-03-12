@@ -13,6 +13,7 @@ import path from 'path';
 import type { IAuthProvider, AuthStatus } from './auth-interface.js';
 import type { OAuthAuth } from '../core/api/provider-config.js';
 import type { UnknownObject } from '../../modules/pipeline/types/common-types.js';
+import { resolveRccAuthDirForRead, resolveRccTokensDirForRead } from '../../config/user-data-paths.js';
 
 type TokenPayload = UnknownObject & {
   access_token?: string;
@@ -34,8 +35,7 @@ function resolveAuthDir(): string {
   if (override) {
     return path.isAbsolute(override) ? override : path.resolve(override);
   }
-  const home = String(process.env.HOME || '').trim();
-  return path.join(home, '.routecodex', 'auth');
+  return resolveRccAuthDirForRead();
 }
 
 const TOKEN_FILE_PATTERN = /^(.+)-oauth-(\d+)(?:-(.+))?\.json$/i;
@@ -237,7 +237,7 @@ export class TokenFileAuthProvider implements IAuthProvider {
     const tf = typeof this.config.tokenFile === 'string' ? this.config.tokenFile.trim() : '';
     if (tf) {
       const providerId = this.getConfiguredProviderId();
-      // Alias (no path separators / no .json suffix): resolve to ~/.routecodex/auth/<provider>-oauth-<seq>-<alias>.json
+      // Alias (no path separators / no .json suffix): resolve under the canonical auth dir.
       if (!tf.includes('/') && !tf.includes('\\') && !tf.endsWith('.json')) {
         if (providerId) {
           // Qwen: pin tokenFile="default" to a stable file name when present, to avoid "I reauthed but server reads another seq".
@@ -298,8 +298,7 @@ export class TokenFileAuthProvider implements IAuthProvider {
 
     // Qwen: default to RouteCodex auth dir tokens (daemon-admin / oauth-lifecycle output)
     if (providerId === 'qwen') {
-      const home = process.env.HOME || '';
-      const legacySingle = path.join(home, '.routecodex', 'auth', 'qwen-oauth.json');
+      const legacySingle = path.join(resolveRccAuthDirForRead(), 'qwen-oauth.json');
       try {
         if (fs.existsSync(legacySingle)) {
           return legacySingle;
@@ -310,7 +309,7 @@ export class TokenFileAuthProvider implements IAuthProvider {
         return latest;
       }
       // Old fallback: RouteCodex tokens dir (legacy external tooling)
-      const rc = path.join(home, '.routecodex', 'tokens', 'qwen-default.json');
+      const rc = path.join(resolveRccTokensDirForRead(), 'qwen-default.json');
       try {
         if (fs.existsSync(rc)) {
           return rc;

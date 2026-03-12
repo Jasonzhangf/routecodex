@@ -1,5 +1,5 @@
 import path from 'path';
-import os from 'os';
+import { resolveRccPath } from '../../config/user-data-paths.js';
 
 const DEFAULT_FILENAME = 'pipeline-config.generated.json';
 const DEFAULT_VR_FILENAME = 'virtual-router-config.generated.json';
@@ -37,11 +37,11 @@ export function getKeyVaultFilename(portLabel?: string): string {
 }
 
 export function getGeneratedConfigDir(): string {
-  return path.join(os.homedir(), '.routecodex', 'config', 'generated');
+  return resolveRccPath('config', 'generated');
 }
 
 // 新路径规范：仅消费由 config-core 生成的标准位置
-// ~/.routecodex/config/generated/pipeline-config.<port>.generated.json
+// ~/.rcc/config/generated/pipeline-config.<port>.generated.json
 export function resolvePipelineConfigCandidates(_baseDir: string, override?: string): string[] {
   const overridePath = override && override.trim() ? path.resolve(override.trim()) : undefined;
   const envPathRaw =

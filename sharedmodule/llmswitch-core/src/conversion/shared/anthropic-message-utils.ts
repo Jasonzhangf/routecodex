@@ -615,7 +615,7 @@ export function buildAnthropicFromOpenAIChat(oa: unknown, options?: BuildAnthrop
     }
   }
   const extensionReasoning = (body as any)?.__responses_reasoning as
-    | { content?: Array<{ text: string }>; summary?: Array<{ text: string }> }
+    | { content?: Array<{ text: string }>; summary?: Array<{ text: string }>; encrypted_content?: string | null }
     | undefined;
   const extensionContent = Array.isArray(extensionReasoning?.content)
     ? extensionReasoning?.content?.map((entry) => String(entry.text ?? '')).filter((text) => text.trim().length > 0)
@@ -623,6 +623,10 @@ export function buildAnthropicFromOpenAIChat(oa: unknown, options?: BuildAnthrop
   const extensionSummary = Array.isArray(extensionReasoning?.summary)
     ? extensionReasoning?.summary?.map((entry) => String(entry.text ?? '')).filter((text) => text.trim().length > 0)
     : [];
+  const extensionEncrypted =
+    typeof extensionReasoning?.encrypted_content === 'string' && extensionReasoning.encrypted_content.trim().length
+      ? extensionReasoning.encrypted_content.trim()
+      : undefined;
   const extensionText =
     extensionContent.length > 0
       ? extensionContent.join('\n')
@@ -636,6 +640,9 @@ export function buildAnthropicFromOpenAIChat(oa: unknown, options?: BuildAnthrop
         : undefined);
   if (reasoningField && reasoningField.trim().length) {
     blocks.push({ type: 'thinking', text: reasoningField.trim() });
+  }
+  if (extensionEncrypted) {
+    blocks.push({ type: 'redacted_thinking', data: extensionEncrypted });
   }
   const toolCalls = Array.isArray((msg as Unknown)?.tool_calls) ? ((msg as Unknown).tool_calls as unknown[]) : [];
   const toolNameResolver = createAnthropicToolNameResolver(

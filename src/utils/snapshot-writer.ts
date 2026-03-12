@@ -1,6 +1,7 @@
 import fsp from 'fs/promises';
 import os from 'os';
 import path from 'path';
+import { resolveRccSnapshotsDir } from '../config/user-data-paths.js';
 import { runtimeFlags } from '../runtime/runtime-flags.js';
 
 export type ServerSnapshotPhase =
@@ -41,7 +42,7 @@ function resolveSnapshotRoot(): string {
   if (override) {
     return path.isAbsolute(override) ? override : path.resolve(override);
   }
-  return path.join(os.homedir(), '.routecodex', 'codex-samples');
+  return resolveRccSnapshotsDir();
 }
 
 function mapEndpointToFolder(entryEndpoint?: string): string {

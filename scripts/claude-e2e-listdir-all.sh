@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-CONF="${ROUTECODEX_CONFIG_PATH:-${ROUTECODEX_CONFIG:-$HOME/.routecodex/config.json}}"
+CONF="${ROUTECODEX_CONFIG_PATH:-${ROUTECODEX_CONFIG:-$HOME/.rcc/config.json}}"
 CONF="${CONF/#\~\//$HOME/}"
 export CONF
 if [ ! -f "$CONF" ]; then

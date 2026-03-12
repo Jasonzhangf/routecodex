@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import fsAsync from 'node:fs/promises';
 import path from 'node:path';
-import { homedir } from 'node:os';
+import { resolveRccUserDir } from '../config/user-data-paths.js';
 
 type StopIntentRecord = {
   port: number;
@@ -13,7 +13,7 @@ type StopIntentRecord = {
 const DEFAULT_MAX_AGE_MS = 60_000;
 
 function resolveHomeDir(routeCodexHomeDir?: string): string {
-  return routeCodexHomeDir || path.join(homedir(), '.routecodex');
+  return routeCodexHomeDir || resolveRccUserDir();
 }
 
 export function resolveDaemonStopIntentPath(port: number, routeCodexHomeDir?: string): string {

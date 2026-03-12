@@ -4,6 +4,7 @@ import path from 'path';
 import { PassThrough } from 'node:stream';
 import { writeSnapshotViaHooks } from '../../../modules/llmswitch/bridge.js';
 import { buildInfo } from '../../../build-info.js';
+import { resolveRccSnapshotsDir } from '../../../config/user-data-paths.js';
 import { runtimeFlags } from '../../../runtime/runtime-flags.js';
 import { writeErrorsampleJson } from '../../../utils/errorsamples.js';
 import {
@@ -36,7 +37,7 @@ function resolveSnapshotBase(): string {
   if (override) {
     return path.isAbsolute(override) ? override : path.resolve(override);
   }
-  return path.join(os.homedir(), '.routecodex', 'codex-samples');
+  return resolveRccSnapshotsDir();
 }
 
 async function ensureDir(dir: string): Promise<void> {

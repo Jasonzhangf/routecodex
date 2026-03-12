@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { homedir } from 'node:os';
+import { resolveRccGuardianDir } from '../../config/user-data-paths.js';
 
 export type GuardianPaths = {
   rootDir: string;
@@ -9,8 +9,7 @@ export type GuardianPaths = {
 };
 
 export function resolveGuardianPaths(homeDir?: string): GuardianPaths {
-  const resolvedHome = typeof homeDir === 'string' && homeDir.trim() ? homeDir.trim() : homedir();
-  const rootDir = path.join(resolvedHome, '.routecodex', 'guardian');
+  const rootDir = resolveRccGuardianDir(homeDir);
   return {
     rootDir,
     stateFile: path.join(rootDir, 'guardian-state.json'),

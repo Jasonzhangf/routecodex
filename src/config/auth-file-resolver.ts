@@ -5,14 +5,14 @@
 
 import fs from 'fs/promises';
 import path from 'path';
-import { homedir } from 'os';
+import { resolveRccAuthDirForRead } from './user-data-paths.js';
 
 export class AuthFileResolver {
   private authDir: string;
   private keyCache: Map<string, string> = new Map();
 
   constructor(authDir?: string) {
-    this.authDir = authDir || path.join(homedir(), '.routecodex', 'auth');
+    this.authDir = authDir || resolveRccAuthDirForRead();
   }
 
   /**

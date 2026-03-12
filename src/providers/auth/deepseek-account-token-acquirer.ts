@@ -8,6 +8,7 @@ import {
   DEEPSEEK_ERROR_CODES,
   type DeepSeekErrorCode
 } from '../core/contracts/deepseek-provider-contract.js';
+import { resolveRccAuthDir, resolveRccCamoufoxFingerprintDir } from '../../config/user-data-paths.js';
 import { ensureCamoufoxFingerprintForToken, getCamoufoxProfileDir } from '../core/config/camoufox-launcher.js';
 
 type DeepSeekAuthError = Error & {
@@ -45,7 +46,7 @@ export type EnsureDeepSeekAccountTokenResult = {
   source: 'token-file' | 'helper-command' | 'http-login';
 };
 
-const DEFAULT_AUTH_DIR = path.join(os.homedir(), '.routecodex', 'auth');
+const DEFAULT_AUTH_DIR = resolveRccAuthDir();
 const DEFAULT_DEEPSEEK_LOGIN_URL = 'https://chat.deepseek.com/api/v0/users/login';
 const DEFAULT_DEEPSEEK_USER_AGENT = 'DeepSeek/1.0.13 Android/35';
 const DEFAULT_CAMOUFOX_PROVIDER = 'deepseek';
@@ -278,7 +279,7 @@ async function loadCamoufoxFingerprint(providerFamily: string, alias: string): P
   if (!profileId) {
     return null;
   }
-  const filePath = path.join((process.env.HOME || os.homedir()), '.routecodex', 'camoufox-fp', `${profileId}.json`);
+  const filePath = path.join(resolveRccCamoufoxFingerprintDir(), `${profileId}.json`);
   try {
     const raw = await fs.readFile(filePath, 'utf8');
     const payload = raw.trim() ? JSON.parse(raw) : null;

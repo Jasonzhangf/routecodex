@@ -6,7 +6,7 @@
  *   node scripts/virtual-router-dryrun.mjs --sampleDir <~/.routecodex/codex-samples/.../req_...> [options]
  *
  * Options:
- *   --config <path>                 RouteCodex user config (default: ~/.routecodex/config.json)
+ *   --config <path>                 RouteCodex user config (default: ~/.rcc/config.json)
  *   --serverId <host:port>          Router state serverId (default: 0.0.0.0:5520)
  *   --repeat <n>                    Repeat route() N times (default: 8)
  *   --mode <base|actual|both>       Run modes (default: both)
@@ -154,7 +154,7 @@ async function main() {
     process.exit(1);
   }
 
-  const configPath = args.config || path.join(os.homedir(), '.routecodex', 'config.json');
+  const configPath = args.config || path.join(os.homedir(), '.rcc', 'config.json');
   const serverId = args.serverId || '0.0.0.0:5520';
   const repeat = Math.max(1, Number.parseInt(String(args.repeat || '8'), 10) || 8);
   const mode = String(args.mode || 'both').trim().toLowerCase();

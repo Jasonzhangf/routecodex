@@ -12,6 +12,30 @@ async function createTempDir(prefix: string): Promise<string> {
 }
 
 describe('ProviderConfig v2 loader', () => {
+  const originalEnv = {
+    RCC_HOME: process.env.RCC_HOME,
+    ROUTECODEX_USER_DIR: process.env.ROUTECODEX_USER_DIR,
+    ROUTECODEX_HOME: process.env.ROUTECODEX_HOME
+  };
+
+  afterEach(() => {
+    if (typeof originalEnv.RCC_HOME === 'string') {
+      process.env.RCC_HOME = originalEnv.RCC_HOME;
+    } else {
+      delete process.env.RCC_HOME;
+    }
+    if (typeof originalEnv.ROUTECODEX_USER_DIR === 'string') {
+      process.env.ROUTECODEX_USER_DIR = originalEnv.ROUTECODEX_USER_DIR;
+    } else {
+      delete process.env.ROUTECODEX_USER_DIR;
+    }
+    if (typeof originalEnv.ROUTECODEX_HOME === 'string') {
+      process.env.ROUTECODEX_HOME = originalEnv.ROUTECODEX_HOME;
+    } else {
+      delete process.env.ROUTECODEX_HOME;
+    }
+  });
+
   it('skips provider directories without config.v2.json', async () => {
     const root = await createTempDir('provider-v2-');
     const providerDir = path.join(root, 'foo');
@@ -92,13 +116,17 @@ describe('buildVirtualRouterInputV2', () => {
 
     const userConfig: UnknownRecord = {
       virtualrouter: {
-        routing: {
-          default: [
-            {
-              id: 'primary',
-              targets: ['demo.mock-1']
+        routingPolicyGroups: {
+          default: {
+            routing: {
+              default: [
+                {
+                  id: 'primary',
+                  targets: ['demo.mock-1']
+                }
+              ]
             }
-          ]
+          }
         }
       }
     };

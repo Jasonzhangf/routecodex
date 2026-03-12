@@ -1,6 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { homedir } from 'os';
+import { resolveRccAuthDirForRead } from '../config/user-data-paths.js';
 import type { TokenFileMatch } from '../providers/auth/token-scanner/index.js';
 import {
   type OAuthProviderId,
@@ -17,7 +18,7 @@ export function resolveAuthDir(): string {
     return path.isAbsolute(override) ? override : path.resolve(override);
   }
   const home = String(process.env.HOME || '').trim() || homedir();
-  return path.join(home, '.routecodex', 'auth');
+  return resolveRccAuthDirForRead() || path.join(home, '.rcc', 'auth');
 }
 
 export const DEFAULT_AUTH_DIR = resolveAuthDir();

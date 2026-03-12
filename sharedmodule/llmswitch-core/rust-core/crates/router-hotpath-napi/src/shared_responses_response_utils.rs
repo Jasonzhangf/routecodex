@@ -2,7 +2,10 @@ use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
 use serde_json::{Map, Value};
 
-use crate::hub_reasoning_tool_normalizer::sanitize_reasoning_tagged_text;
+use crate::hub_reasoning_tool_normalizer::{
+    build_message_reasoning_value, normalize_message_reasoning_ssot,
+    project_message_reasoning_text, sanitize_reasoning_tagged_text,
+};
 use crate::hub_resp_outbound_client_semantics::normalize_responses_function_name;
 use crate::shared_output_content_normalizer::extract_output_segments;
 
@@ -290,54 +293,6 @@ fn collect_reasoning_segments_impl(
     )
 }
 
-fn build_reasoning_payload_impl(
-    summary_segments: &[String],
-    content_segments: &[String],
-    encrypted_content: Option<&str>,
-) -> Option<Value> {
-    let summary: Vec<Value> = summary_segments
-        .iter()
-        .filter_map(|text| {
-            let trimmed = text.trim();
-            if trimmed.is_empty() {
-                None
-            } else {
-                Some(serde_json::json!({"type":"summary_text","text":trimmed}))
-            }
-        })
-        .collect();
-    let content: Vec<Value> = content_segments
-        .iter()
-        .filter_map(|text| {
-            let trimmed = text.trim();
-            if trimmed.is_empty() {
-                None
-            } else {
-                Some(serde_json::json!({"type":"reasoning_text","text":trimmed}))
-            }
-        })
-        .collect();
-
-    if summary.is_empty() && content.is_empty() && encrypted_content.is_none() {
-        return None;
-    }
-
-    let mut out = Map::new();
-    if !summary.is_empty() {
-        out.insert("summary".to_string(), Value::Array(summary));
-    }
-    if !content.is_empty() {
-        out.insert("content".to_string(), Value::Array(content));
-    }
-    if let Some(encrypted) = encrypted_content {
-        out.insert(
-            "encrypted_content".to_string(),
-            Value::String(encrypted.to_string()),
-        );
-    }
-    Some(Value::Object(out))
-}
-
 fn build_chat_response_from_responses_impl(payload: &Value) -> Value {
     let Some(response) = unwrap_responses_response_impl(payload) else {
         return payload.clone();
@@ -385,12 +340,26 @@ fn build_chat_response_from_responses_impl(payload: &Value) -> Value {
     } else {
         summary_reasoning_segments.clone()
     };
-    if !reasoning_segments.is_empty() {
+    if let Some(reasoning_payload) = build_message_reasoning_value(
+        summary_reasoning_segments.as_slice(),
+        if !raw_reasoning_segments.is_empty() {
+            raw_reasoning_segments.as_slice()
+        } else {
+            extracted.reasoning_parts.as_slice()
+        },
+        encrypted_reasoning.as_deref(),
+    ) {
+        if let Some(text) = project_message_reasoning_text(&reasoning_payload) {
+            message.insert("reasoning_content".to_string(), Value::String(text));
+        }
+        message.insert("reasoning".to_string(), reasoning_payload);
+    } else if !reasoning_segments.is_empty() {
         message.insert(
             "reasoning_content".to_string(),
             Value::String(reasoning_segments.join("\n")),
         );
     }
+    normalize_message_reasoning_ssot(&mut message);
 
     let finish_reason = resolve_finish_reason_impl(&response, tool_calls.as_slice());
     let mut choice = Map::new();
@@ -410,18 +379,6 @@ fn build_chat_response_from_responses_impl(payload: &Value) -> Value {
         "choices".to_string(),
         Value::Array(vec![Value::Object(choice)]),
     );
-
-    if let Some(reasoning_payload) = build_reasoning_payload_impl(
-        summary_reasoning_segments.as_slice(),
-        if !raw_reasoning_segments.is_empty() {
-            raw_reasoning_segments.as_slice()
-        } else {
-            extracted.reasoning_parts.as_slice()
-        },
-        encrypted_reasoning.as_deref(),
-    ) {
-        chat.insert("__responses_reasoning".to_string(), reasoning_payload);
-    }
 
     chat.insert(
         "__responses_output_text_meta".to_string(),
@@ -594,7 +551,14 @@ mod tests {
             "exec_command"
         );
         assert_eq!(output["choices"][0]["message"]["reasoning_content"], "plan");
-        assert_eq!(output["__responses_reasoning"]["encrypted_content"], "enc");
+        assert_eq!(
+            output["choices"][0]["message"]["reasoning"]["summary"][0]["text"],
+            "sum"
+        );
+        assert_eq!(
+            output["choices"][0]["message"]["reasoning"]["encrypted_content"],
+            "enc"
+        );
         assert_eq!(output["__responses_output_text_meta"]["hasField"], true);
         assert!(output.get("__responses_payload_snapshot").is_some());
     }

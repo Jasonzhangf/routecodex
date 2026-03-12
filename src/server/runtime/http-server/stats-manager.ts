@@ -3,6 +3,7 @@ import fsSync from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { buildInfo } from '../../../build-info.js';
+import { resolveRccLogsDir } from '../../../config/user-data-paths.js';
 import {
   buildHistoricalProviderRow,
   buildSessionProviderRow,
@@ -107,7 +108,7 @@ export type StatsPersistOptions = {
   reason?: string;
 };
 
-const DEFAULT_STATS_LOG_PATH = path.join(os.homedir(), '.routecodex', 'logs', 'provider-stats.jsonl');
+const DEFAULT_STATS_LOG_PATH = path.join(resolveRccLogsDir(), 'provider-stats.jsonl');
 const DEFAULT_HISTORY_MAX_TAIL_BYTES = 8 * 1024 * 1024;
 const DEFAULT_HISTORY_MAX_LINES = 20000;
 const DEFAULT_PERSIST_INTERVAL_MS = 30000;

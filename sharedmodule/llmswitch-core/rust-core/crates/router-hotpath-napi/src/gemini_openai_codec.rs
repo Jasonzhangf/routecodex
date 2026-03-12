@@ -3,6 +3,11 @@ use napi_derive::napi;
 use serde_json::{Map, Value};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::hub_reasoning_tool_normalizer::{
+    build_message_reasoning_value, collect_reasoning_content_segments,
+    collect_reasoning_summary_segments, normalize_message_reasoning_ssot,
+    project_message_reasoning_text,
+};
 use crate::hub_req_inbound_context_capture::map_bridge_tools_to_chat;
 use crate::shared_chat_output_normalizer::normalize_chat_message_content;
 
@@ -143,7 +148,10 @@ fn coerce_thought_signature(value: Option<&Value>) -> Option<String> {
 
 fn extract_thought_signature_from_tool_call(value: &Value) -> Option<String> {
     let row = value.as_object()?;
-    if let Some(sig) = coerce_thought_signature(row.get("thought_signature").or_else(|| row.get("thoughtSignature"))) {
+    if let Some(sig) = coerce_thought_signature(
+        row.get("thought_signature")
+            .or_else(|| row.get("thoughtSignature")),
+    ) {
         return Some(sig);
     }
     let extra = row
@@ -154,7 +162,11 @@ fn extract_thought_signature_from_tool_call(value: &Value) -> Option<String> {
         .get("google")
         .or_else(|| extra.get("Google"))
         .and_then(Value::as_object)?;
-    coerce_thought_signature(google.get("thought_signature").or_else(|| google.get("thoughtSignature")))
+    coerce_thought_signature(
+        google
+            .get("thought_signature")
+            .or_else(|| google.get("thoughtSignature")),
+    )
 }
 
 fn alias_gemini_tool_name(name: String) -> String {
@@ -186,7 +198,10 @@ fn parse_function_call_args(value: Option<&Value>) -> Value {
     }
 }
 
-fn merge_gemini_metadata(metadata: Option<&Value>, safety_settings: Option<&Value>) -> Option<Value> {
+fn merge_gemini_metadata(
+    metadata: Option<&Value>,
+    safety_settings: Option<&Value>,
+) -> Option<Value> {
     if metadata.is_none() && safety_settings.is_none() {
         return None;
     }
@@ -277,7 +292,8 @@ fn run_bridge_pipeline_message(
             "rawResponse": raw_response
         }
     });
-    let Ok(raw) = crate::hub_bridge_actions::run_bridge_action_pipeline_json(input.to_string()) else {
+    let Ok(raw) = crate::hub_bridge_actions::run_bridge_action_pipeline_json(input.to_string())
+    else {
         return message;
     };
     let Ok(parsed) = serde_json::from_str::<Value>(&raw) else {
@@ -378,7 +394,9 @@ fn build_openai_chat_from_gemini_request_value(payload: &Value) -> Value {
                 }));
                 continue;
             }
-            if let Some(function_response) = part_row.get("functionResponse").and_then(Value::as_object) {
+            if let Some(function_response) =
+                part_row.get("functionResponse").and_then(Value::as_object)
+            {
                 let call_id = read_trimmed_string(function_response.get("id"));
                 let content = stringify_tool_result_response(
                     function_response.get("response").unwrap_or(&Value::Null),
@@ -401,7 +419,11 @@ fn build_openai_chat_from_gemini_request_value(payload: &Value) -> Value {
             normalize_chat_message_content(&Value::String(combined_text.clone()))
         };
         let mut reasoning_chunks: Vec<String> = Vec::new();
-        if let Some(reasoning) = normalized.reasoning_text.clone().filter(|text| !text.trim().is_empty()) {
+        if let Some(reasoning) = normalized
+            .reasoning_text
+            .clone()
+            .filter(|text| !text.trim().is_empty())
+        {
             reasoning_chunks.push(reasoning);
         }
         let has_text = normalized
@@ -490,7 +512,8 @@ fn build_openai_chat_from_gemini_request_value(payload: &Value) -> Value {
         }
     }
 
-    if let Some(metadata) = merge_gemini_metadata(body.get("metadata"), body.get("safetySettings")) {
+    if let Some(metadata) = merge_gemini_metadata(body.get("metadata"), body.get("safetySettings"))
+    {
         request.insert("metadata".to_string(), metadata);
     }
 
@@ -617,9 +640,11 @@ fn build_openai_chat_from_gemini_response_value(payload: &Value) -> Value {
             tool_calls.push(Value::Object(tool_call));
             continue;
         }
-        if let Some(function_response) = part_row.get("functionResponse").and_then(Value::as_object) {
+        if let Some(function_response) = part_row.get("functionResponse").and_then(Value::as_object)
+        {
             let call_id = read_trimmed_string(function_response.get("id"));
-            let name = read_trimmed_string(function_response.get("name")).map(alias_gemini_tool_name);
+            let name =
+                read_trimmed_string(function_response.get("name")).map(alias_gemini_tool_name);
             let content_str = stringify_tool_result_response(
                 function_response.get("response").unwrap_or(&Value::Null),
             );
@@ -628,7 +653,10 @@ fn build_openai_chat_from_gemini_response_value(payload: &Value) -> Value {
                 if call_id.is_some() || name.is_some() {
                     let mut entry = Map::new();
                     if let Some(call_id_value) = call_id.clone() {
-                        entry.insert("tool_call_id".to_string(), Value::String(call_id_value.clone()));
+                        entry.insert(
+                            "tool_call_id".to_string(),
+                            Value::String(call_id_value.clone()),
+                        );
                         entry.insert("id".to_string(), Value::String(call_id_value));
                     }
                     entry.insert("content".to_string(), Value::String(content_str));
@@ -649,7 +677,10 @@ fn build_openai_chat_from_gemini_response_value(payload: &Value) -> Value {
             }
             continue;
         }
-        if let Some(code_result) = part_row.get("codeExecutionResult").and_then(Value::as_object) {
+        if let Some(code_result) = part_row
+            .get("codeExecutionResult")
+            .and_then(Value::as_object)
+        {
             let outcome = read_trimmed_string(code_result.get("outcome")).unwrap_or_default();
             let output = read_trimmed_string(code_result.get("output")).unwrap_or_default();
             if !output.is_empty() {
@@ -708,7 +739,11 @@ fn build_openai_chat_from_gemini_response_value(payload: &Value) -> Value {
     } else {
         normalize_chat_message_content(&Value::String(combined_text.clone()))
     };
-    if let Some(reasoning) = normalized.reasoning_text.clone().filter(|text| !text.trim().is_empty()) {
+    if let Some(reasoning) = normalized
+        .reasoning_text
+        .clone()
+        .filter(|text| !text.trim().is_empty())
+    {
         reasoning_parts.push(reasoning);
     }
     let base_content = normalized.content_text.unwrap_or(combined_text);
@@ -724,18 +759,19 @@ fn build_openai_chat_from_gemini_response_value(payload: &Value) -> Value {
     let mut chat_message = Map::new();
     chat_message.insert("role".to_string(), Value::String(role));
     chat_message.insert("content".to_string(), Value::String(final_content));
-    if !reasoning_parts.is_empty() {
-        chat_message.insert(
-            "reasoning_content".to_string(),
-            Value::String(reasoning_parts.join("\n")),
-        );
+    if let Some(reasoning_payload) = build_message_reasoning_value(&[], &reasoning_parts, None) {
+        if let Some(text) = project_message_reasoning_text(&reasoning_payload) {
+            chat_message.insert("reasoning_content".to_string(), Value::String(text));
+        }
+        chat_message.insert("reasoning".to_string(), reasoning_payload);
     }
     if !tool_calls.is_empty() {
         chat_message.insert("tool_calls".to_string(), Value::Array(tool_calls));
     }
+    normalize_message_reasoning_ssot(&mut chat_message);
 
-    let response_id = read_trimmed_string(body.get("id"))
-        .unwrap_or_else(|| fallback_response_id("chatcmpl"));
+    let response_id =
+        read_trimmed_string(body.get("id")).unwrap_or_else(|| fallback_response_id("chatcmpl"));
     let piped_message = run_bridge_pipeline_message(
         "response_inbound",
         "gemini-chat",
@@ -746,7 +782,10 @@ fn build_openai_chat_from_gemini_response_value(payload: &Value) -> Value {
 
     let mut chat_response = Map::new();
     chat_response.insert("id".to_string(), Value::String(response_id));
-    chat_response.insert("object".to_string(), Value::String("chat.completion".to_string()));
+    chat_response.insert(
+        "object".to_string(),
+        Value::String("chat.completion".to_string()),
+    );
     chat_response.insert(
         "model".to_string(),
         body.get("model")
@@ -769,17 +808,6 @@ fn build_openai_chat_from_gemini_response_value(payload: &Value) -> Value {
     }
     if !tool_outputs.is_empty() {
         chat_response.insert("tool_outputs".to_string(), Value::Array(tool_outputs));
-    }
-    if !reasoning_parts.is_empty() {
-        chat_response.insert(
-            "__responses_reasoning".to_string(),
-            serde_json::json!({
-                "content": reasoning_parts
-                    .iter()
-                    .map(|text| serde_json::json!({ "type": "reasoning_text", "text": text }))
-                    .collect::<Vec<Value>>()
-            }),
-        );
     }
     Value::Object(chat_response)
 }
@@ -816,8 +844,8 @@ fn build_gemini_from_openai_chat_value(chat_response: &Value) -> Value {
         _ => "STOP".to_string(),
     };
 
-    let response_id = read_trimmed_string(body.get("id"))
-        .unwrap_or_else(|| fallback_response_id("chatcmpl"));
+    let response_id =
+        read_trimmed_string(body.get("id")).unwrap_or_else(|| fallback_response_id("chatcmpl"));
     let normalized_message = run_bridge_pipeline_message(
         "response_outbound",
         "gemini-chat",
@@ -825,7 +853,8 @@ fn build_gemini_from_openai_chat_value(chat_response: &Value) -> Value {
         message.clone(),
         None,
     );
-    let msg_row = normalized_message.as_object().cloned().unwrap_or_default();
+    let mut msg_row = normalized_message.as_object().cloned().unwrap_or_default();
+    normalize_message_reasoning_ssot(&mut msg_row);
     let base_role = map_chat_role_to_gemini(msg_row.get("role"));
 
     let mut parts: Vec<Value> = Vec::new();
@@ -834,37 +863,22 @@ fn build_gemini_from_openai_chat_value(chat_response: &Value) -> Value {
         parts.push(serde_json::json!({ "text": content_text }));
     }
 
-    let preserved_reasoning = body
-        .get("__responses_reasoning")
-        .and_then(Value::as_object)
-        .cloned()
-        .unwrap_or_default();
-    let preserved_content = preserved_reasoning
-        .get("content")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default()
-        .iter()
-        .filter_map(|entry| entry.as_object())
-        .filter_map(|entry| read_trimmed_string(entry.get("text")))
+    let reasoning_content = collect_reasoning_content_segments(msg_row.get("reasoning"))
+        .into_iter()
         .collect::<Vec<String>>();
-    let preserved_summary = preserved_reasoning
-        .get("summary")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default()
-        .iter()
-        .filter_map(|entry| entry.as_object())
-        .filter_map(|entry| read_trimmed_string(entry.get("text")))
+    let reasoning_summary = collect_reasoning_summary_segments(msg_row.get("reasoning"))
+        .into_iter()
         .collect::<Vec<String>>();
-    let reasoning_text = if !preserved_content.is_empty() {
-        Some(preserved_content.join("\n"))
-    } else if !preserved_summary.is_empty() {
-        Some(preserved_summary.join("\n"))
+    let reasoning_parts = if !reasoning_content.is_empty() {
+        reasoning_content
+    } else if !reasoning_summary.is_empty() {
+        reasoning_summary
     } else {
         read_trimmed_string(msg_row.get("reasoning_content"))
+            .into_iter()
+            .collect::<Vec<String>>()
     };
-    if let Some(reasoning) = reasoning_text {
+    for reasoning in reasoning_parts {
         parts.push(serde_json::json!({ "reasoning": reasoning }));
     }
 
@@ -909,14 +923,20 @@ fn build_gemini_from_openai_chat_value(chat_response: &Value) -> Value {
     });
 
     let mut usage_metadata = Map::new();
-    if let Some(prompt_tokens) = usage.get("prompt_tokens").or_else(|| usage.get("input_tokens")) {
+    if let Some(prompt_tokens) = usage
+        .get("prompt_tokens")
+        .or_else(|| usage.get("input_tokens"))
+    {
         usage_metadata.insert("promptTokenCount".to_string(), prompt_tokens.clone());
     }
     if let Some(completion_tokens) = usage
         .get("completion_tokens")
         .or_else(|| usage.get("output_tokens"))
     {
-        usage_metadata.insert("candidatesTokenCount".to_string(), completion_tokens.clone());
+        usage_metadata.insert(
+            "candidatesTokenCount".to_string(),
+            completion_tokens.clone(),
+        );
     }
     if let Some(total_tokens) = usage.get("total_tokens") {
         usage_metadata.insert("totalTokenCount".to_string(), total_tokens.clone());
@@ -1029,7 +1049,10 @@ mod tests {
 
         let value: Value = serde_json::from_str(&raw).unwrap();
         assert_eq!(value["model"], "gemini-2.5-pro");
-        assert_eq!(value["messages"][0], json!({ "role": "system", "content": "System prompt" }));
+        assert_eq!(
+            value["messages"][0],
+            json!({ "role": "system", "content": "System prompt" })
+        );
         assert_eq!(value["messages"][1]["tool_calls"][0]["id"], "call_req");
         assert_eq!(value["messages"][2]["role"], "tool");
         assert_eq!(value["messages"][2]["content"], "{\"cwd\":\"/tmp\"}");
@@ -1039,7 +1062,10 @@ mod tests {
         assert_eq!(value["top_p"], json!(0.8));
         assert_eq!(value["stop"], json!(["DONE"]));
         assert_eq!(value["metadata"]["trace"], "abc");
-        assert_eq!(value["metadata"]["vendor"]["gemini"]["safetySettings"][0]["category"], "HARM_CATEGORY_HATE_SPEECH");
+        assert_eq!(
+            value["metadata"]["vendor"]["gemini"]["safetySettings"][0]["category"],
+            "HARM_CATEGORY_HATE_SPEECH"
+        );
     }
 
     #[test]
@@ -1089,11 +1115,20 @@ mod tests {
         assert_eq!(value["id"], "gem_resp_1");
         assert_eq!(value["choices"][0]["finish_reason"], "tool_calls");
         assert_eq!(value["choices"][0]["message"]["role"], "assistant");
-        assert_eq!(value["choices"][0]["message"]["tool_calls"][0]["function"]["name"], "web_search");
-        assert_eq!(value["choices"][0]["message"]["tool_calls"][0]["thought_signature"], "sig_1");
+        assert_eq!(
+            value["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
+            "web_search"
+        );
+        assert_eq!(
+            value["choices"][0]["message"]["tool_calls"][0]["thought_signature"],
+            "sig_1"
+        );
         assert_eq!(value["tool_outputs"][0]["name"], "web_search");
         assert_eq!(value["usage"]["prompt_tokens"], 10);
-        assert_eq!(value["__responses_reasoning"]["content"][0]["text"], "Need shell output");
+        assert_eq!(
+            value["choices"][0]["message"]["reasoning"]["content"][0]["text"],
+            "Need shell output"
+        );
     }
 
     #[test]
@@ -1108,7 +1143,10 @@ mod tests {
                         "message": {
                             "role": "assistant",
                             "content": "Run tool",
-                            "reasoning_content": "Need cwd",
+                            "reasoning": {
+                                "summary": [{ "type": "summary_text", "text": "Need cwd summary" }],
+                                "content": [{ "type": "reasoning_text", "text": "Need cwd" }]
+                            },
                             "tool_calls": [
                                 {
                                     "id": "call_out",
@@ -1140,11 +1178,26 @@ mod tests {
         assert_eq!(value["id"], "chatcmpl_1");
         assert_eq!(value["candidates"][0]["finishReason"], "STOP");
         assert_eq!(value["candidates"][0]["content"]["role"], "model");
-        assert_eq!(value["candidates"][0]["content"]["parts"][0]["text"], "Run tool");
-        assert_eq!(value["candidates"][0]["content"]["parts"][1]["reasoning"], "Need cwd");
-        assert_eq!(value["candidates"][0]["content"]["parts"][2]["functionCall"]["name"], "exec_command");
-        assert_eq!(value["candidates"][0]["content"]["parts"][2]["functionCall"]["args"], json!({ "cmd": "pwd" }));
-        assert_eq!(value["candidates"][0]["content"]["parts"][2]["thoughtSignature"], "sig_out");
+        assert_eq!(
+            value["candidates"][0]["content"]["parts"][0]["text"],
+            "Run tool"
+        );
+        assert_eq!(
+            value["candidates"][0]["content"]["parts"][1]["reasoning"],
+            "Need cwd"
+        );
+        assert_eq!(
+            value["candidates"][0]["content"]["parts"][2]["functionCall"]["name"],
+            "exec_command"
+        );
+        assert_eq!(
+            value["candidates"][0]["content"]["parts"][2]["functionCall"]["args"],
+            json!({ "cmd": "pwd" })
+        );
+        assert_eq!(
+            value["candidates"][0]["content"]["parts"][2]["thoughtSignature"],
+            "sig_out"
+        );
         assert_eq!(value["usageMetadata"]["promptTokenCount"], 12);
         assert_eq!(value["usageMetadata"]["candidatesTokenCount"], 7);
         assert_eq!(value["usageMetadata"]["totalTokenCount"], 19);

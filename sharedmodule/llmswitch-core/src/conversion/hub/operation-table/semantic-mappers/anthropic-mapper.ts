@@ -2,6 +2,7 @@ import type { SemanticMapper } from '../../format-adapters/index.js';
 import type { AdapterContext, ChatEnvelope, ChatSemantics, MissingField } from '../../types/chat-envelope.js';
 import type { FormatEnvelope } from '../../types/format-envelope.js';
 import { isJsonObject, jsonClone, type JsonObject, type JsonValue } from '../../types/json.js';
+import { isHubStageTimingDetailEnabled, logHubStageTiming } from '../../pipeline/hub-stage-timing.js';
 import { buildOpenAIChatFromAnthropic, buildAnthropicRequestFromOpenAIChat } from '../../../codecs/anthropic-openai-codec.js';
 import { encodeMetadataPassthrough, extractMetadataPassthrough } from '../../../metadata-passthrough.js';
 import { buildAnthropicToolAliasMapWithNative } from '../../../../router/virtual-router/engine-selection/native-chat-process-governance-semantics.js';
@@ -419,6 +420,10 @@ export class AnthropicSemanticMapper implements SemanticMapper {
   }
 
   async fromChat(chat: ChatEnvelope, ctx: AdapterContext): Promise<FormatEnvelope> {
+    const requestId = typeof ctx.requestId === 'string' && ctx.requestId.trim().length ? ctx.requestId : 'unknown';
+    const forceDetailLog = isHubStageTimingDetailEnabled();
+    logHubStageTiming(requestId, 'req_outbound.anthropic.build_request', 'start');
+    const startedAt = Date.now();
     const model = chat.parameters?.model;
     if (typeof model !== 'string' || !model.trim()) {
       throw new Error('ChatEnvelope.parameters.model is required for anthropic-messages outbound conversion');
@@ -529,10 +534,22 @@ export class AnthropicSemanticMapper implements SemanticMapper {
     } catch {
       // ignore
     }
+    logHubStageTiming(requestId, 'req_outbound.anthropic.codec_build', 'start');
+    const codecBuildStart = Date.now();
     const payloadSource = buildAnthropicRequestFromOpenAIChat(baseRequest);
+    logHubStageTiming(requestId, 'req_outbound.anthropic.codec_build', 'completed', {
+      elapsedMs: Date.now() - codecBuildStart,
+      forceLog: forceDetailLog
+    });
+    logHubStageTiming(requestId, 'req_outbound.anthropic.payload_clone', 'start');
+    const payloadCloneStart = Date.now();
     const payload = sanitizeAnthropicPayload(JSON.parse(JSON.stringify(payloadSource)) as JsonObject);
     sanitizeAnthropicPayload(payload);
-    return {
+    logHubStageTiming(requestId, 'req_outbound.anthropic.payload_clone', 'completed', {
+      elapsedMs: Date.now() - payloadCloneStart,
+      forceLog: forceDetailLog
+    });
+    const result: FormatEnvelope = {
       protocol: 'anthropic-messages',
       direction: 'response',
       payload,
@@ -540,5 +557,10 @@ export class AnthropicSemanticMapper implements SemanticMapper {
         context: ctx
       }
     };
+    logHubStageTiming(requestId, 'req_outbound.anthropic.build_request', 'completed', {
+      elapsedMs: Date.now() - startedAt,
+      forceLog: forceDetailLog
+    });
+    return result;
   }
 }

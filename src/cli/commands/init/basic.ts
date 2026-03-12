@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { resolveRccProviderDir } from '../../../config/user-data-paths.js';
 
 import type { InitProviderTemplate } from '../../config/init-provider-catalog.js';
 import { buildInitRouting, buildV2ConfigObject } from '../../config/init-v2-builder.js';
@@ -43,7 +44,7 @@ export function normalizePort(input: string | number | undefined): number | unde
 }
 
 export function getProviderRoot(pathImpl: typeof path, homeDir: string): string {
-  return pathImpl.join(homeDir, '.routecodex', 'provider');
+  return resolveRccProviderDir(homeDir);
 }
 
 export function getProviderV2Path(pathImpl: typeof path, providerRoot: string, providerId: string): string {

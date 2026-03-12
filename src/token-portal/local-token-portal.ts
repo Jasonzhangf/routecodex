@@ -91,7 +91,7 @@ class LocalTokenPortalServer {
 
     const provider = url.searchParams.get('provider') || 'unknown-provider';
     const alias = url.searchParams.get('alias') || 'default';
-    const tokenFile = url.searchParams.get('tokenFile') || '~/.routecodex/auth/unknown-token.json';
+    const tokenFile = url.searchParams.get('tokenFile') || '~/.rcc/auth/unknown-token.json';
     const oauthUrl =
       url.searchParams.get('oauthUrl') || 'https://accounts.google.com/o/oauth2/v2/auth';
     const sessionId = url.searchParams.get('sessionId') || 'local-session';

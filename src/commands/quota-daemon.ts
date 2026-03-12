@@ -2,11 +2,11 @@ import { Command } from 'commander';
 import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
 import path from 'node:path';
-import { homedir } from 'node:os';
 
 import { applyErrorEvent, createInitialQuotaState, tickQuotaStateTime, type QuotaState } from '../manager/quota/provider-quota-center.js';
 import { loadProviderQuotaSnapshot, saveProviderQuotaSnapshot } from '../manager/quota/provider-quota-store.js';
 import { x7eGate } from '../server/runtime/http-server/daemon-admin/routecodex-x7e-gate.js';
+import { resolveRccQuotaDirForRead } from '../config/user-data-paths.js';
 
 type ReplayRecord = {
   ts?: string;
@@ -16,7 +16,7 @@ type ReplayRecord = {
 };
 
 function resolveDefaultErrorLogPath(): string {
-  return path.join(homedir(), '.routecodex', 'quota', 'provider-errors.ndjson');
+  return path.join(resolveRccQuotaDirForRead(), 'provider-errors.ndjson');
 }
 
 export function createQuotaDaemonCommand(): Command {
@@ -25,7 +25,7 @@ export function createQuotaDaemonCommand(): Command {
   cmd
     .description('Run provider quota daemon maintenance / replay once (offline; no server required)')
     .option('--once', 'Run a single maintenance tick and exit', false)
-    .option('--replay-errors [file]', 'Replay provider-errors.ndjson into provider-quota.json (default: ~/.routecodex/quota/provider-errors.ndjson)')
+    .option('--replay-errors [file]', 'Replay provider-errors.ndjson into provider-quota.json (default: ~/.rcc/quota/provider-errors.ndjson; legacy ~/.routecodex compatible)')
     .option('--dry-run', 'Do not write provider-quota.json', false)
     .option('--json', 'Print resulting snapshot JSON to stdout', false)
     .action(async (opts: { once?: boolean; replayErrors?: string | boolean; dryRun?: boolean; json?: boolean }) => {

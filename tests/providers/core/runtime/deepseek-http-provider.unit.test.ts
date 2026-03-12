@@ -375,11 +375,11 @@ describe('DeepSeekHttpProvider', () => {
     process.env.ROUTECODEX_DEEPSEEK_CAMOUFOX_AUTO_GENERATE = '0';
     process.env.ROUTECODEX_DEEPSEEK_CAMOUFOX_PROVIDER = 'deepseek';
 
-    const tokenDir = path.join(tempHome, '.routecodex', 'auth');
+    const tokenDir = path.join(tempHome, '.rcc', 'auth');
     await fs.mkdir(tokenDir, { recursive: true });
     await fs.writeFile(path.join(tokenDir, 'deepseek-account-1.json'), JSON.stringify({ access_token: 'cf-token' }, null, 2) + '\n', 'utf8');
 
-    const fpDir = path.join(tempHome, '.routecodex', 'camoufox-fp');
+    const fpDir = path.join(tempHome, '.rcc', 'camoufox-fp');
     await fs.mkdir(fpDir, { recursive: true });
     await fs.writeFile(
       path.join(fpDir, 'rc-deepseek.1.json'),

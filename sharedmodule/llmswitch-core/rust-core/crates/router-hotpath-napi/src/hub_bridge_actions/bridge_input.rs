@@ -89,7 +89,10 @@ fn push_chat_message_without_reparse(
     }
     let mut message = Map::new();
     message.insert("role".to_string(), Value::String(role.to_string()));
-    message.insert("content".to_string(), Value::String(raw_content.to_string()));
+    message.insert(
+        "content".to_string(),
+        Value::String(raw_content.to_string()),
+    );
     if !combined.is_empty() {
         message.insert(
             "reasoning_content".to_string(),

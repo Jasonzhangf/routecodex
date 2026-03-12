@@ -4,6 +4,7 @@ import fsSync from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { resolveRouteCodexConfigPath } from '../../../../config/config-paths.js';
+import { resolveRccProviderDir, resolveRccUserDir } from '../../../../config/user-data-paths.js';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -290,7 +291,7 @@ export function pickProviderRootDir(): string {
   if (envPath && envPath.trim()) {
     return path.resolve(envPath.trim());
   }
-  return path.join(pickHomeDir(), '.routecodex', 'provider');
+  return resolveRccProviderDir(pickHomeDir());
 }
 
 function pickHomeDir(): string {
@@ -583,7 +584,7 @@ export function resolveAllowedAdminFilePath(inputPath: string | undefined): stri
   if (resolved === active) {
     return resolved;
   }
-  const routecodexHome = path.join(pickHomeDir(), '.routecodex');
+  const routecodexHome = resolveRccUserDir(pickHomeDir());
   const providerRoot = pickProviderRootDir();
   if (isPathWithinDir(resolved, routecodexHome) || isPathWithinDir(resolved, providerRoot)) {
     return resolved;
@@ -595,7 +596,7 @@ export function resolveAllowedAdminFilePath(inputPath: string | undefined): stri
 
 export async function listRoutingSources(): Promise<RoutingSourceSummary[]> {
   const activePath = pickUserConfigPath();
-  const routecodexHome = path.join(pickHomeDir(), '.routecodex');
+  const routecodexHome = resolveRccUserDir(pickHomeDir());
   const providerRoot = pickProviderRootDir();
 
   const candidates: Array<{ kind: RoutingSourceSummary['kind']; label: string; path: string }> = [];
@@ -621,7 +622,7 @@ export async function listRoutingSources(): Promise<RoutingSourceSummary[]> {
     // ignore
   }
 
-  // Imported configs under ~/.routecodex/config and ~/.routecodex/config/multi
+  // Imported configs under ~/.rcc/config and ~/.rcc/config/multi
   for (const dir of [path.join(routecodexHome, 'config'), path.join(routecodexHome, 'config', 'multi')]) {
     try {
       const entries = await fs.readdir(dir, { withFileTypes: true });

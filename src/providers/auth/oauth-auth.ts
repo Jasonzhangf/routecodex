@@ -7,6 +7,7 @@
 import type { IAuthProvider, AuthStatus, IOAuthClient, TokenStorage } from './auth-interface.js';
 import fs from 'fs/promises';
 import path from 'path';
+import { resolveRccTokensDir } from '../../config/user-data-paths.js';
 import type { OAuthAuth } from '../core/api/provider-config.js';
 import type { UnknownObject } from '../../modules/pipeline/types/common-types.js';
 import { logOAuthDebug } from './oauth-logger.js';
@@ -302,9 +303,7 @@ class BaseOAuthClient implements IOAuthClient {
     if (tf && tf.trim()) {
       this.tokenFilePath = tf.replace(/^~\//, `${process.env.HOME || ''}/`);
     } else {
-      // default path: ~/.routecodex/tokens/<providerType>-default.json
-      const home = process.env.HOME || '';
-      this.tokenFilePath = path.join(home, '.routecodex', 'tokens', `${this.providerType}-default.json`);
+      this.tokenFilePath = path.join(resolveRccTokensDir(), `${this.providerType}-default.json`);
       // write back to config for downstream users if needed
       this.config.tokenFile = this.tokenFilePath;
     }

@@ -34,16 +34,7 @@ function stringHasReasoningMarker(value: string): boolean {
   return REASONING_TEXT_MARKERS.some((marker) => lower.includes(marker));
 }
 
-export function stripReasoningTransportNoise(value: string): string {
-  return String(value ?? '')
-    .replace(REASONING_TRANSPORT_NOISE_LINE_RE, '')
-    .replace(REASONING_WRAPPER_OPEN_RE, '')
-    .replace(REASONING_WRAPPER_CLOSE_RE, '')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-}
-
-function valueMayContainReasoningMarkup(value: unknown): boolean {
+export function valueMayContainReasoningMarkup(value: unknown): boolean {
   if (typeof value === 'string') {
     return stringHasReasoningMarker(value);
   }
@@ -113,6 +104,7 @@ export function normalizeReasoningInResponsesPayload(
     Object.assign(payload, normalized as Record<string, unknown>);
   }
 }
+
 export function normalizeReasoningInGeminiPayload(payload: JsonObject | null | undefined): void {
   assertReasoningNormalizerNativeAvailable();
   if (!payload) return;
@@ -138,4 +130,13 @@ export function normalizeReasoningInOpenAIPayload(payload: JsonObject | null | u
   if (normalized && typeof normalized === 'object') {
     Object.assign(payload, normalized as Record<string, unknown>);
   }
+}
+
+export function stripReasoningTransportNoise(text: string): string {
+  return String(text ?? '')
+    .replace(REASONING_TRANSPORT_NOISE_LINE_RE, '')
+    .replace(REASONING_WRAPPER_OPEN_RE, '')
+    .replace(REASONING_WRAPPER_CLOSE_RE, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }

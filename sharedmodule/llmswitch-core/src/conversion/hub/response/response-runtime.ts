@@ -32,6 +32,99 @@ function flattenAnthropicContent(content: unknown): string {
   return '';
 }
 
+interface MessageReasoningPayload {
+  summary?: Array<{ type: 'summary_text'; text: string }>;
+  content?: Array<{ type: 'reasoning_text'; text: string }>;
+  encrypted_content?: string;
+}
+
+function normalizeMessageReasoningPayload(source: unknown): MessageReasoningPayload | undefined {
+  if (!source || typeof source !== 'object' || Array.isArray(source)) {
+    return undefined;
+  }
+  const row = source as Record<string, unknown>;
+  const summary = Array.isArray(row.summary)
+    ? row.summary
+      .map((entry) => {
+        if (typeof entry === 'string') {
+          const text = entry.trim();
+          return text.length ? ({ type: 'summary_text' as const, text }) : null;
+        }
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+          return null;
+        }
+        const text = typeof (entry as Record<string, unknown>).text === 'string'
+          ? String((entry as Record<string, unknown>).text).trim()
+          : '';
+        if (!text.length) {
+          return null;
+        }
+        return { type: 'summary_text' as const, text };
+      })
+      .filter((entry): entry is { type: 'summary_text'; text: string } => entry !== null)
+    : undefined;
+  const content = Array.isArray(row.content)
+    ? row.content
+      .map((entry) => {
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+          return null;
+        }
+        const node = entry as Record<string, unknown>;
+        const text = typeof node.text === 'string' ? String(node.text).trim() : '';
+        if (!text.length) {
+          return null;
+        }
+        const type = typeof node.type === 'string' ? node.type.trim().toLowerCase() : '';
+        if (type && type !== 'reasoning_text' && type !== 'text') {
+          return null;
+        }
+        return { type: 'reasoning_text' as const, text };
+      })
+      .filter((entry): entry is { type: 'reasoning_text'; text: string } => entry !== null)
+    : undefined;
+  const encrypted_content = typeof row.encrypted_content === 'string'
+    ? row.encrypted_content.trim()
+    : '';
+  const hasSummary = Array.isArray(summary) && summary.length > 0;
+  const hasContent = Array.isArray(content) && content.length > 0;
+  const hasEncrypted = encrypted_content.length > 0;
+  if (!hasSummary && !hasContent && !hasEncrypted) {
+    return undefined;
+  }
+  return {
+    summary: hasSummary ? summary : undefined,
+    content: hasContent ? content : undefined,
+    encrypted_content: hasEncrypted ? encrypted_content : undefined
+  };
+}
+
+function projectReasoningText(payload: MessageReasoningPayload): string | undefined {
+  const content = Array.isArray(payload.content)
+    ? payload.content.map((entry) => entry.text.trim()).filter((text) => text.length > 0)
+    : [];
+  if (content.length) {
+    return content.join('\n');
+  }
+  const summary = Array.isArray(payload.summary)
+    ? payload.summary.map((entry) => entry.text.trim()).filter((text) => text.length > 0)
+    : [];
+  return summary.length ? summary.join('\n') : undefined;
+}
+
+function applyReasoningPayloadToMessage(
+  message: Record<string, unknown>,
+  reasoning: MessageReasoningPayload | undefined
+): void {
+  if (!reasoning) {
+    return;
+  }
+  (message as any).reasoning = reasoning;
+  const projected = projectReasoningText(reasoning);
+  if (projected && projected.trim().length) {
+    (message as any).reasoning_content = projected;
+  }
+}
+
 interface AnthropicResponseOptions {
   aliasMap?: ToolAliasMap;
   includeToolCallIds?: boolean;
@@ -158,6 +251,8 @@ export function buildOpenAIChatFromAnthropicMessage(payload: JsonObject, options
   const aliasCollector: Record<string, string> = {};
   const inferredToolCalls: Array<Record<string, unknown>> = [];
   const reasoningParts: string[] = [];
+  let reasoningSignature: string | undefined;
+  let reasoningRedactedEncryptedContent: string | undefined;
   const resolveToolName = createToolNameResolver(options);
 
   if (typeof (payload as any)?.reasoning_content === 'string' && (payload as any).reasoning_content.trim().length) {
@@ -216,6 +311,21 @@ export function buildOpenAIChatFromAnthropicMessage(payload: JsonObject, options
         if (Array.isArray(inferred) && inferred.length) {
           inferredToolCalls.push(...inferred);
         }
+      }
+      const signature = typeof (part as Record<string, unknown>).signature === 'string'
+        ? String((part as Record<string, unknown>).signature).trim()
+        : '';
+      if (signature.length && !reasoningSignature) {
+        reasoningSignature = signature;
+      }
+    } else if (kind === 'redacted_thinking') {
+      const encrypted = typeof (part as Record<string, unknown>).data === 'string'
+        ? String((part as Record<string, unknown>).data).trim()
+        : (typeof (part as Record<string, unknown>).encrypted_content === 'string'
+          ? String((part as Record<string, unknown>).encrypted_content).trim()
+          : '');
+      if (encrypted.length && !reasoningRedactedEncryptedContent) {
+        reasoningRedactedEncryptedContent = encrypted;
       }
     }
   }
@@ -278,12 +388,16 @@ export function buildOpenAIChatFromAnthropicMessage(payload: JsonObject, options
     role: typeof payload.role === 'string' ? payload.role : 'assistant',
     content: textParts.join('\n')
   };
+  const localReasoning = normalizeMessageReasoningPayload({
+    content: reasoningParts.length
+      ? reasoningParts.map((text) => ({ type: 'reasoning_text' as const, text }))
+      : undefined,
+    encrypted_content: reasoningRedactedEncryptedContent ?? reasoningSignature
+  });
   if (canonicalToolCalls.length) {
     (message as any).tool_calls = canonicalToolCalls;
   }
-  if (reasoningParts.length) {
-    (message as any).reasoning_content = reasoningParts.join('\n');
-  }
+  applyReasoningPayloadToMessage(message, localReasoning);
   try {
     const bridgePolicy = resolveBridgePolicy({ protocol: 'anthropic-messages' });
     const actions = resolvePolicyActions(bridgePolicy, 'response_inbound');
@@ -324,16 +438,11 @@ export function buildOpenAIChatFromAnthropicMessage(payload: JsonObject, options
       ? payload['usage']
       : undefined
   } as JsonObject;
-  const localReasoning = reasoningParts.length
-    ? {
-      content: reasoningParts.map((text) => ({ type: 'reasoning_text' as const, text }))
-    }
-    : undefined;
-  const preserved = consumeResponsesReasoning(chatResponse.id);
-  if (preserved) {
-    (chatResponse as any).__responses_reasoning = preserved;
-  } else if (localReasoning) {
-    (chatResponse as any).__responses_reasoning = localReasoning;
+  const preserved = normalizeMessageReasoningPayload(consumeResponsesReasoning(chatResponse.id));
+  const effectiveReasoning = preserved ?? localReasoning;
+  if (effectiveReasoning) {
+    (chatResponse as any).__responses_reasoning = effectiveReasoning;
+    applyReasoningPayloadToMessage(message, effectiveReasoning);
   }
   const preservedOutputMeta = consumeResponsesOutputTextMeta(chatResponse.id);
   if (preservedOutputMeta) {
@@ -476,11 +585,25 @@ function sanitizeContentBlock(block: Record<string, unknown>): JsonObject | null
     const text = typeof block.text === 'string'
       ? block.text
       : flattenAnthropicContent(block.content);
-    if (!text || !String(text).trim().length) return null;
-    return {
-      type: type === 'reasoning' ? 'reasoning' : 'thinking',
-      text: String(text)
-    } as JsonObject;
+    const signature = typeof block.signature === 'string' ? block.signature.trim() : '';
+    if (text && String(text).trim().length) {
+      return {
+        type: type === 'reasoning' ? 'reasoning' : 'thinking',
+        text: String(text),
+        ...(signature.length ? { signature } : {})
+      } as JsonObject;
+    }
+    if (signature.length) {
+      return { type: 'redacted_thinking', data: signature } as JsonObject;
+    }
+    return null;
+  }
+  if (type === 'redacted_thinking') {
+    const data = typeof block.data === 'string'
+      ? block.data.trim()
+      : (typeof block.encrypted_content === 'string' ? block.encrypted_content.trim() : '');
+    if (!data.length) return null;
+    return { type: 'redacted_thinking', data } as JsonObject;
   }
   if (type === 'tool_use') {
     const id = typeof block.id === 'string' && block.id.trim() ? block.id : `call_${Math.random().toString(36).slice(2, 8)}`;

@@ -1,17 +1,16 @@
 import { Command } from 'commander';
 import path from 'path';
 import fs from 'fs';
-import os from 'os';
 import chalk from 'chalk';
 import { TokenDaemon } from '../token-daemon/index.js';
 import { buildTokenKey } from '../token-daemon/token-types.js';
+import { resolveRccCamoufoxFingerprintDir } from '../config/user-data-paths.js';
 import { ensureCamoufoxFingerprintForToken, getCamoufoxOsPolicy, getCamoufoxProfileDir } from '../providers/core/config/camoufox-launcher.js';
 import { inferAntigravityUaSuffixFromFingerprint, loadAntigravityCamoufoxFingerprint } from '../providers/auth/antigravity-fingerprint.js';
 import { markAntigravityReauthRequired } from '../providers/auth/antigravity-reauth-state.js';
 
 function getFingerprintRoot(): string {
-  const home = process.env.HOME || os.homedir();
-  return path.join(home, '.routecodex', 'camoufox-fp');
+  return resolveRccCamoufoxFingerprintDir();
 }
 
 function getFingerprintPath(profileId: string): string {

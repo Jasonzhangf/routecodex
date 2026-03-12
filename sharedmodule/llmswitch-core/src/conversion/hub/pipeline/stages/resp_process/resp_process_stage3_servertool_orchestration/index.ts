@@ -6,6 +6,7 @@ import type { ProviderInvoker } from '../../../../../../servertool/types.js';
 import { runServerToolOrchestration } from '../../../../../../servertool/engine.js';
 import { detectProviderResponseShapeWithNative } from '../../../../../../router/virtual-router/engine-selection/native-chat-process-servertool-orchestration-semantics.js';
 import { recordStage } from '../../../stages/utils.js';
+import { isHubStageTimingDetailEnabled, logHubStageTiming } from '../../../hub-stage-timing.js';
 
 type ProviderProtocol = 'openai-chat' | 'openai-responses' | 'anthropic-messages' | 'gemini-chat';
 
@@ -44,6 +45,7 @@ export interface RespProcessStage3ServerToolOrchestrationResult {
 export async function runRespProcessStage3ServerToolOrchestration(
   options: RespProcessStage3ServerToolOrchestrationOptions
 ): Promise<RespProcessStage3ServerToolOrchestrationResult> {
+  const forceDetailLog = isHubStageTimingDetailEnabled();
   const hasServerToolSupport =
     Boolean(options.providerInvoker) || Boolean(options.reenterPipeline) || Boolean(options.clientInjectDispatch);
   const inputShape = detectProviderResponseShapeWithNative(options.payload);
@@ -60,6 +62,8 @@ export async function runRespProcessStage3ServerToolOrchestration(
     };
   }
 
+  logHubStageTiming(options.requestId, 'resp_process.stage3_orchestration_engine', 'start');
+  const orchestrationStart = Date.now();
   const orchestration = await runServerToolOrchestration({
     chat: options.payload as JsonObject,
     adapterContext: options.adapterContext,
@@ -70,6 +74,12 @@ export async function runRespProcessStage3ServerToolOrchestration(
     providerInvoker: options.providerInvoker,
     reenterPipeline: options.reenterPipeline,
     clientInjectDispatch: options.clientInjectDispatch
+  });
+  logHubStageTiming(options.requestId, 'resp_process.stage3_orchestration_engine', 'completed', {
+    elapsedMs: Date.now() - orchestrationStart,
+    executed: orchestration.executed,
+    flowId: orchestration.flowId,
+    forceLog: forceDetailLog
   });
 
   if (orchestration.executed) {

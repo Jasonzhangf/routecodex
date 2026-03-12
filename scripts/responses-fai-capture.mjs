@@ -7,7 +7,7 @@ import path from 'path';
 import { pathToFileURL } from 'url';
 
 const PROVIDER_ID = process.env.RCC_RESP_PROV || 'fai';
-const PROVIDER_DIR = path.join(os.homedir(), '.routecodex', 'provider');
+const PROVIDER_DIR = path.join(os.homedir(), '.rcc', 'provider');
 const OUT_DIR = path.join(os.homedir(), '.routecodex', 'golden_samples', 'provider_golden_samples', 'responses', PROVIDER_ID);
 
 function ensureDir(p) { fs.mkdirSync(p, { recursive: true }); }

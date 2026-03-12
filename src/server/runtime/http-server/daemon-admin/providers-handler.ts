@@ -1,8 +1,8 @@
 import type { Application, Request, Response } from 'express';
 import fs from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 import type { DaemonAdminRouteOptions } from '../daemon-admin-routes.js';
+import { resolveRccAuthDirForRead } from '../../../../config/user-data-paths.js';
 import { rejectNonLocalOrUnauthorizedAdmin } from '../daemon-admin-routes.js';
 import type { VirtualRouterArtifacts, ProviderProtocol } from '../types.js';
 import { loadProviderConfigsV2 } from '../../../../config/provider-v2-loader.js';
@@ -146,7 +146,7 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
     }
   });
 
-  // Config V2 Provider 视图：基于 ~/.routecodex/provider/*/config.v2.json 的声明性配置。
+  // Config V2 Provider 视图：基于 ~/.rcc/provider/*/config.v2.json 的声明性配置。
   app.get('/config/providers/v2', async (req: Request, res: Response) => {
     if (reject(req, res)) {return;}
     try {
@@ -643,7 +643,7 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
         path: configPath,
         oauthBrowser: oauthBrowser && oauthBrowser.trim() ? oauthBrowser.trim() : null,
         providerDir: pickProviderRootDir(),
-        authDir: path.join(os.homedir(), '.routecodex', 'auth')
+        authDir: resolveRccAuthDirForRead()
       });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);

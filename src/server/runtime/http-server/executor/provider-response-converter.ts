@@ -396,6 +396,7 @@ export async function convertProviderResponseIfNeeded(
       entryEndpoint: options.entryEndpoint || entry,
       providerProtocol: options.providerProtocol
     });
+    const snapshotRecorderStartMs = Date.now();
     const stageRecorder = await bridgeCreateSnapshotRecorder(
       adapterContext,
       typeof (adapterContext as Record<string, unknown>).entryEndpoint === 'string'
@@ -404,7 +405,8 @@ export async function convertProviderResponseIfNeeded(
     );
     logPipelineStage('convert.snapshot_recorder.completed', options.requestId, {
       entryEndpoint: options.entryEndpoint || entry,
-      providerProtocol: options.providerProtocol
+      providerProtocol: options.providerProtocol,
+      elapsedMs: Date.now() - snapshotRecorderStartMs
     });
 
     const providerInvoker = async (invokeOptions: {
@@ -417,6 +419,7 @@ export async function convertProviderResponseIfNeeded(
       requestId: string;
       routeHint?: string;
     }): Promise<{ providerResponse: Record<string, unknown> }> => {
+      const providerInvokeStartMs = Date.now();
       logPipelineStage('convert.provider_invoke.start', invokeOptions.requestId, {
         providerKey: invokeOptions.providerKey,
         providerProtocol: invokeOptions.providerProtocol,
@@ -450,16 +453,20 @@ export async function convertProviderResponseIfNeeded(
         providerKey: invokeOptions.providerKey,
         runtimeKey
       });
+      const providerSendStartMs = Date.now();
       const providerResponse = await handle.instance.processIncoming(invokeOptions.payload);
       logPipelineStage('convert.provider_invoke.send.completed', invokeOptions.requestId, {
         providerKey: invokeOptions.providerKey,
-        runtimeKey
+        runtimeKey,
+        elapsedMs: Date.now() - providerSendStartMs
       });
+      const normalizeStartMs = Date.now();
       const normalized = normalizeProviderResponse(providerResponse);
       logPipelineStage('convert.provider_invoke.normalize.completed', invokeOptions.requestId, {
         providerKey: invokeOptions.providerKey,
         runtimeKey,
-        status: normalized.status
+        status: normalized.status,
+        elapsedMs: Date.now() - normalizeStartMs
       });
       const bodyPayload =
         normalized.body && typeof normalized.body === 'object'
@@ -467,7 +474,8 @@ export async function convertProviderResponseIfNeeded(
           : (normalized as unknown as Record<string, unknown>);
       logPipelineStage('convert.provider_invoke.completed', invokeOptions.requestId, {
         providerKey: invokeOptions.providerKey,
-        runtimeKey
+        runtimeKey,
+        elapsedMs: Date.now() - providerInvokeStartMs
       });
       return { providerResponse: bodyPayload };
     };
@@ -478,6 +486,7 @@ export async function convertProviderResponseIfNeeded(
       body: Record<string, unknown>;
       metadata?: Record<string, unknown>;
     }): Promise<{ body?: Record<string, unknown>; __sse_responses?: unknown; format?: string }> => {
+      const reenterStartMs = Date.now();
       logPipelineStage('convert.reenter.start', reenterOpts.requestId, {
         entryEndpoint: reenterOpts.entryEndpoint || options.entryEndpoint || entry
       });
@@ -537,7 +546,8 @@ export async function convertProviderResponseIfNeeded(
       const nestedResult = await deps.executeNested(nestedInput);
       logPipelineStage('convert.reenter.completed', reenterOpts.requestId, {
         entryEndpoint: nestedEntry,
-        status: nestedResult.status
+        status: nestedResult.status,
+        elapsedMs: Date.now() - reenterStartMs
       });
       const nestedBody =
         nestedResult.body && typeof nestedResult.body === 'object'
@@ -552,6 +562,7 @@ export async function convertProviderResponseIfNeeded(
       body?: Record<string, unknown>;
       metadata?: Record<string, unknown>;
     }): Promise<{ ok: boolean; reason?: string }> => {
+      const clientInjectStartMs = Date.now();
       logPipelineStage('convert.client_inject.start', injectOpts.requestId, {
         entryEndpoint: injectOpts.entryEndpoint || options.entryEndpoint || entry
       });
@@ -599,14 +610,16 @@ export async function convertProviderResponseIfNeeded(
       if (injectResult.clientInjectOnlyHandled) {
         logPipelineStage('convert.client_inject.completed', injectOpts.requestId, {
           entryEndpoint: nestedEntry,
-          handled: true
+          handled: true,
+          elapsedMs: Date.now() - clientInjectStartMs
         });
         return { ok: true };
       }
       logPipelineStage('convert.client_inject.completed', injectOpts.requestId, {
         entryEndpoint: nestedEntry,
         handled: false,
-        reason: 'client_inject_not_handled'
+        reason: 'client_inject_not_handled',
+        elapsedMs: Date.now() - clientInjectStartMs
       });
       return { ok: false, reason: 'client_inject_not_handled' };
     };
@@ -616,6 +629,7 @@ export async function convertProviderResponseIfNeeded(
       providerProtocol: options.providerProtocol,
       wantsStream: options.wantsStream
     });
+    const bridgeStartMs = Date.now();
     const converted = await bridgeConvertProviderResponse({
       providerProtocol: options.providerProtocol,
       providerResponse: body as Record<string, unknown>,
@@ -632,7 +646,8 @@ export async function convertProviderResponseIfNeeded(
       entryEndpoint: options.entryEndpoint || entry,
       providerProtocol: options.providerProtocol,
       hasSse: Boolean(converted.__sse_responses),
-      hasBody: converted.body !== undefined && converted.body !== null
+      hasBody: converted.body !== undefined && converted.body !== null,
+      elapsedMs: Date.now() - bridgeStartMs
     });
     if (converted.__sse_responses) {
       const usage = converted.body

@@ -1,7 +1,7 @@
 import fsSync from 'node:fs';
 import fsAsync from 'node:fs/promises';
 import path from 'node:path';
-import { homedir } from 'node:os';
+import { resolveRccUserDir } from '../config/user-data-paths.js';
 
 export type RuntimeExitMarker = {
   kind: string;
@@ -31,7 +31,7 @@ function normalizePort(port: number): number {
 }
 
 export function resolveRuntimeLifecyclePath(port: number, routeCodexHomeDir?: string): string {
-  const home = routeCodexHomeDir || path.join(homedir(), '.routecodex');
+  const home = routeCodexHomeDir || resolveRccUserDir();
   return path.join(home, 'state', 'runtime-lifecycle', `server-${normalizePort(port)}.json`);
 }
 

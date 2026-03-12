@@ -29,6 +29,7 @@ import {
 } from './utils/runtime-exit-forensics.js';
 import { resolveRouteCodexConfigPath } from './config/config-paths.js';
 import { loadRouteCodexConfig } from './config/routecodex-config-loader.js';
+import { ensureRccUserDirEnvironment, resolveRccPath, resolveRccPathForRead } from './config/user-data-paths.js';
 import type { RouteCodexHttpServer } from './server/runtime/http-server.js';
 
 type NodeGlobalWithRequire = typeof globalThis & { require?: NodeJS.Require };
@@ -89,6 +90,7 @@ function ensureProcessCwdAccessible(): void {
 }
 
 ensureProcessCwdAccessible();
+ensureRccUserDirEnvironment();
 
 function resolveExpectedParentPid(): number | null {
   const raw = String(process.env.ROUTECODEX_EXPECT_PARENT_PID ?? process.env.RCC_EXPECT_PARENT_PID ?? '').trim();
@@ -655,7 +657,7 @@ function getDefaultModulesConfigPath(): string {
     scriptDir ? path.join(scriptDir, '..', 'config', 'modules.json') : null,
     path.join(execDir, 'config', 'modules.json'),
     path.join(safeProcessCwd(execDir), 'config', 'modules.json'),
-    path.join(homedir(), '.routecodex', 'config', 'modules.json')
+    resolveRccPathForRead('config', 'modules.json')
   ];
 
   for (const configPath of possiblePaths) {
@@ -745,7 +747,7 @@ class RouteCodexApp {
       try {
         const { warmupAntigravitySessionSignatureModule, configureAntigravitySessionSignaturePersistence } =
           await import('./modules/llmswitch/bridge.js');
-        const stateDir = path.join(homedir(), '.routecodex', 'state');
+        const stateDir = resolveRccPath('state');
         try {
           fsSync.mkdirSync(stateDir, { recursive: true });
         } catch {
@@ -888,7 +890,7 @@ class RouteCodexApp {
       // 异步写入 PID 文件，不阻塞启动流程
       void (async () => {
         try {
-          const routeCodexHome = path.join(homedir(), '.routecodex');
+          const routeCodexHome = resolveRccPath();
           await fs.mkdir(routeCodexHome, { recursive: true });
           await fs.writeFile(path.join(routeCodexHome, `server-${bindPort}.pid`), String(process.pid), 'utf8');
         } catch {
@@ -1136,7 +1138,7 @@ class RouteCodexApp {
         }
       }
 
-      // 使用共享解析逻辑解析用户配置路径（支持 ~/.routecodex/config 目录）
+      // 使用共享解析逻辑解析用户配置路径（支持 ~/.rcc/config 目录）
       try {
         const sharedPath = resolveRouteCodexConfigPath();
         if (sharedPath && fsSync.existsSync(sharedPath)) {
@@ -1155,7 +1157,7 @@ class RouteCodexApp {
       }
 
       // 最后检查默认配置文件
-      const defaultConfigPath = path.join(homedir(), '.routecodex', 'config.json');
+      const defaultConfigPath = resolveRccPathForRead('config.json');
       if (fsSync.existsSync(defaultConfigPath)) {
         const defaultStats = fsSync.statSync(defaultConfigPath);
         if (!defaultStats.isFile()) {

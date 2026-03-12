@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import type { Command } from 'commander';
 
 import { LOCAL_HOSTS } from '../../constants/index.js';
+import { resolveRccConfigFile } from '../../config/user-data-paths.js';
 import { normalizeConnectHost, normalizePort } from '../utils/normalize.js';
 import { safeReadJson } from '../utils/safe-read-json.js';
 
@@ -64,7 +65,7 @@ export function createEnvCommand(program: Command, ctx: EnvCommandContext): void
     .option('--json', 'Output JSON instead of shell exports')
     .action(async (options: EnvCommandOptions) => {
       try {
-        const configPath = options.config ? options.config : path.join(homedir(), '.routecodex', 'config.json');
+        const configPath = options.config ? options.config : resolveRccConfigFile();
 
         let host = options.host;
         let port = normalizePort(options.port);
@@ -102,4 +103,3 @@ export function createEnvCommand(program: Command, ctx: EnvCommandContext): void
       }
     });
 }
-

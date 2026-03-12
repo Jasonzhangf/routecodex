@@ -4,6 +4,10 @@ use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::hub_reasoning_tool_normalizer::{
+    build_message_reasoning_value, collect_reasoning_content_segments,
+    collect_reasoning_summary_segments, normalize_message_reasoning_ssot,
+};
 use crate::shared_responses_tool_utils::strip_internal_tooling_metadata_impl;
 
 fn normalize_alias_map(candidate: &Value) -> Option<Map<String, Value>> {
@@ -651,9 +655,12 @@ fn build_anthropic_response_from_chat_core(
         .and_then(|v| v.as_array())
         .and_then(|choices| choices.first())
         .and_then(|choice| choice.as_object());
-    let message = choice
+    let mut message = choice
         .and_then(|choice| choice.get("message"))
         .and_then(|v| v.as_object());
+    let mut normalized_message = message.cloned().unwrap_or_default();
+    normalize_message_reasoning_ssot(&mut normalized_message);
+    message = Some(&normalized_message);
 
     let text = message
         .and_then(|message| message.get("content"))
@@ -666,19 +673,19 @@ fn build_anthropic_response_from_chat_core(
         .unwrap_or_default();
     let mut content_blocks: Vec<Value> = Vec::new();
 
-    let reasoning_raw = message
-        .and_then(|message| message.get("reasoning_content"))
-        .or_else(|| message.and_then(|message| message.get("reasoning")));
-    let reasoning_text = reasoning_raw
-        .map(|value| {
-            if let Some(raw) = value.as_str() {
-                raw.trim().to_string()
-            } else {
-                flatten_anthropic_content(value).trim().to_string()
-            }
-        })
-        .unwrap_or_default();
-    if !reasoning_text.is_empty() {
+    let reasoning_blocks =
+        collect_reasoning_content_segments(message.and_then(|message| message.get("reasoning")));
+    let fallback_reasoning_blocks = if reasoning_blocks.is_empty() {
+        collect_reasoning_summary_segments(message.and_then(|message| message.get("reasoning")))
+    } else {
+        Vec::new()
+    };
+    let reasoning_texts = if !reasoning_blocks.is_empty() {
+        reasoning_blocks
+    } else {
+        fallback_reasoning_blocks
+    };
+    for reasoning_text in reasoning_texts {
         content_blocks.push(Value::Object(Map::from_iter([
             ("type".to_string(), Value::String("thinking".to_string())),
             ("text".to_string(), Value::String(reasoning_text)),
@@ -1673,6 +1680,22 @@ fn context_bool(context: &Value, key: &str) -> bool {
 }
 
 fn apply_context_passthrough(out: &mut Map<String, Value>, context: &Value) {
+    // Restore original reasoning_effort from metadata if it was overridden during routing
+    if let Some(metadata_obj) = context_value(context, "metadata").and_then(|v| v.as_object()) {
+        if let Some(original_effort) = metadata_obj
+            .get("originalReasoningEffort")
+            .and_then(|v| v.as_str())
+        {
+            let trimmed = original_effort.trim();
+            if !trimmed.is_empty() {
+                out.insert(
+                    "reasoning_effort".to_string(),
+                    Value::String(trimmed.to_string()),
+                );
+            }
+        }
+    }
+
     for (context_key, output_key) in [
         ("metadata", "metadata"),
         ("parallelToolCalls", "parallel_tool_calls"),
@@ -1809,12 +1832,17 @@ fn build_responses_payload_from_chat_core(
         .get("message")
         .and_then(|v| v.as_object())
         .ok_or_else(|| "responses outbound remap missing assistant message".to_string())?;
+    let mut normalized_message = message.clone();
+    normalize_message_reasoning_ssot(&mut normalized_message);
+    let message = &normalized_message;
 
     let role = read_object_string(message, "role").unwrap_or_else(|| "assistant".to_string());
     let content_parts =
         normalize_output_text_content(message.get("content").unwrap_or(&Value::Null));
-    let reasoning_text = read_object_string(message, "reasoning_content")
-        .or_else(|| read_object_string(message, "reasoning"));
+    let reasoning_payload = message.get("reasoning").cloned().or_else(|| {
+        read_object_string(message, "reasoning_content")
+            .and_then(|text| build_message_reasoning_value(&[], &[text], None))
+    });
 
     let tool_calls = message
         .get("tool_calls")
@@ -1823,7 +1851,7 @@ fn build_responses_payload_from_chat_core(
         .unwrap_or_default();
     let has_tool_calls = !tool_calls.is_empty();
     let should_emit_message =
-        !content_parts.is_empty() || reasoning_text.is_some() || !has_tool_calls;
+        !content_parts.is_empty() || reasoning_payload.is_some() || !has_tool_calls;
 
     let response_id = read_object_string(response_row, "id")
         .unwrap_or_else(|| format!("resp-{}", now_unix_millis()));
@@ -1833,29 +1861,28 @@ fn build_responses_payload_from_chat_core(
         .unwrap_or_else(|| request_id_hint.unwrap_or("responses_outbound").to_string());
 
     let mut output_items: Vec<Value> = Vec::new();
-    if let Some(reasoning_text) = reasoning_text {
-        output_items.push(Value::Object(Map::from_iter([
-            (
-                "id".to_string(),
-                Value::String(format!(
-                    "reasoning_{}_{}",
-                    request_seed,
-                    output_items.len() + 1
-                )),
-            ),
-            ("type".to_string(), Value::String("reasoning".to_string())),
-            ("status".to_string(), Value::String("completed".to_string())),
-            (
-                "summary".to_string(),
-                Value::Array(vec![Value::Object(Map::from_iter([
-                    (
-                        "type".to_string(),
-                        Value::String("summary_text".to_string()),
-                    ),
-                    ("text".to_string(), Value::String(reasoning_text)),
-                ]))]),
-            ),
-        ])));
+    if let Some(reasoning_payload) = reasoning_payload.as_ref().and_then(Value::as_object) {
+        let mut reasoning_item = Map::new();
+        reasoning_item.insert(
+            "id".to_string(),
+            Value::String(format!(
+                "reasoning_{}_{}",
+                request_seed,
+                output_items.len() + 1
+            )),
+        );
+        reasoning_item.insert("type".to_string(), Value::String("reasoning".to_string()));
+        reasoning_item.insert("status".to_string(), Value::String("completed".to_string()));
+        if let Some(summary) = reasoning_payload.get("summary") {
+            reasoning_item.insert("summary".to_string(), summary.clone());
+        }
+        if let Some(content) = reasoning_payload.get("content") {
+            reasoning_item.insert("content".to_string(), content.clone());
+        }
+        if let Some(encrypted_content) = reasoning_payload.get("encrypted_content") {
+            reasoning_item.insert("encrypted_content".to_string(), encrypted_content.clone());
+        }
+        output_items.push(Value::Object(reasoning_item));
     }
 
     let mut message_output_index: Option<usize> = None;
@@ -2352,6 +2379,63 @@ mod tests {
         assert_eq!(
             output["output"][0]["encrypted_content"],
             Value::String("encrypted".to_string())
+        );
+    }
+
+    #[test]
+    fn build_responses_payload_from_chat_preserves_structured_message_reasoning() {
+        let payload = serde_json::json!({
+            "id": "resp_reasoning",
+            "model": "gpt-5.2",
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "done",
+                        "reasoning": {
+                            "summary": [{ "type": "summary_text", "text": "summary-1" }],
+                            "content": [
+                                { "type": "reasoning_text", "text": "raw-1" },
+                                { "type": "reasoning_text", "text": "raw-2" }
+                            ],
+                            "encrypted_content": "enc-1"
+                        }
+                    }
+                }
+            ]
+        });
+
+        let output = build_responses_payload_from_chat_core(
+            &payload,
+            Some("req_reasoning"),
+            &serde_json::json!({ "toolsRaw": [] }),
+        )
+        .expect("build responses payload");
+
+        let reasoning_item = output["output"]
+            .as_array()
+            .and_then(|items| {
+                items
+                    .iter()
+                    .find(|item| item["type"] == Value::String("reasoning".to_string()))
+            })
+            .cloned()
+            .expect("reasoning output item");
+        assert_eq!(
+            reasoning_item["summary"][0]["text"],
+            Value::String("summary-1".to_string())
+        );
+        assert_eq!(
+            reasoning_item["content"][0]["text"],
+            Value::String("raw-1".to_string())
+        );
+        assert_eq!(
+            reasoning_item["content"][1]["text"],
+            Value::String("raw-2".to_string())
+        );
+        assert_eq!(
+            reasoning_item["encrypted_content"],
+            Value::String("enc-1".to_string())
         );
     }
 }

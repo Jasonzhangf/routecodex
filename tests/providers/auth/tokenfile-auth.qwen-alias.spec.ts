@@ -17,7 +17,7 @@ describe('TokenFileAuthProvider (qwen) resolves tokenFile alias and auth dir fal
     process.env.HOME = tmpHome;
     delete process.env.ROUTECODEX_AUTH_DIR;
 
-    const tokenFile = path.join(tmpHome, '.routecodex', 'auth', 'qwen-oauth-1-default.json');
+    const tokenFile = path.join(tmpHome, '.rcc', 'auth', 'qwen-oauth-1-default.json');
     writeJson(tokenFile, {
       access_token: 'access-token-primary',
       api_key: 'sk-qwen-should-not-win',
@@ -49,8 +49,8 @@ describe('TokenFileAuthProvider (qwen) resolves tokenFile alias and auth dir fal
     delete process.env.ROUTECODEX_AUTH_DIR;
 
     // both exist, but "default" should prefer the pinned seq=1 file
-    const token1 = path.join(tmpHome, '.routecodex', 'auth', 'qwen-oauth-1-default.json');
-    const token2 = path.join(tmpHome, '.routecodex', 'auth', 'qwen-oauth-2-default.json');
+    const token1 = path.join(tmpHome, '.rcc', 'auth', 'qwen-oauth-1-default.json');
+    const token2 = path.join(tmpHome, '.rcc', 'auth', 'qwen-oauth-2-default.json');
     writeJson(token1, { access_token: 'access-1', expires_at: Date.now() + 60 * 60 * 1000 });
     writeJson(token2, { access_token: 'access-2', expires_at: Date.now() + 60 * 60 * 1000 });
 
@@ -71,14 +71,14 @@ describe('TokenFileAuthProvider (qwen) resolves tokenFile alias and auth dir fal
     }
   });
 
-  test('tokenFile="default" resolves ~/.routecodex/auth/qwen-oauth-<seq>-default.json', async () => {
+  test('tokenFile="default" resolves ~/.rcc/auth/qwen-oauth-<seq>-default.json', async () => {
     const prevHome = process.env.HOME;
     const prevAuthDir = process.env.ROUTECODEX_AUTH_DIR;
     const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-tokenfile-qwen-'));
     process.env.HOME = tmpHome;
     delete process.env.ROUTECODEX_AUTH_DIR;
 
-    const tokenFile = path.join(tmpHome, '.routecodex', 'auth', 'qwen-oauth-2-default.json');
+    const tokenFile = path.join(tmpHome, '.rcc', 'auth', 'qwen-oauth-2-default.json');
     writeJson(tokenFile, {
       access_token: 'access-test',
       expires_at: Date.now() + 60 * 60 * 1000
@@ -113,7 +113,7 @@ describe('TokenFileAuthProvider (qwen) resolves tokenFile alias and auth dir fal
     await provider.initialize();
     expect(provider.getStatus().isValid).toBe(false);
 
-    const tokenFile = path.join(tmpHome, '.routecodex', 'auth', 'qwen-oauth-1-default.json');
+    const tokenFile = path.join(tmpHome, '.rcc', 'auth', 'qwen-oauth-1-default.json');
     writeJson(tokenFile, {
       access_token: 'access-late',
       expires_at: Date.now() + 60 * 60 * 1000

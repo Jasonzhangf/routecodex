@@ -1,13 +1,16 @@
 import path from 'node:path';
 import type * as fs from 'node:fs';
+import { homedir } from 'node:os';
 
 import { getBootstrapProviderTemplates } from './bootstrap-provider-templates.js';
 import { buildCatalogWebSearchDefaults, type InitProviderTemplate } from './init-provider-catalog.js';
 import { buildInitRouting, buildV2ConfigObject } from './init-v2-builder.js';
+import { resolveRccProviderDir } from '../../config/user-data-paths.js';
 
 export type InitConfigIo = {
   fsImpl: Pick<typeof fs, 'existsSync' | 'mkdirSync' | 'readFileSync' | 'writeFileSync'>;
   pathImpl?: Pick<typeof path, 'join' | 'dirname' | 'resolve'>;
+  getHomeDir?: () => string;
 };
 
 export type InitConfigPrompt = {
@@ -155,10 +158,10 @@ function computeBackupPath(fsImpl: InitConfigIo['fsImpl'], configPath: string): 
 function writeProviderV2Configs(
   fsImpl: InitConfigIo['fsImpl'],
   pathImpl: NonNullable<InitConfigIo['pathImpl']>,
-  configDir: string,
+  homeDir: string,
   providers: InitProviderTemplate[]
 ): void {
-  const providerRoot = pathImpl.join(configDir, 'provider');
+  const providerRoot = resolveRccProviderDir(homeDir);
   if (!fsImpl.existsSync(providerRoot)) {
     fsImpl.mkdirSync(providerRoot, { recursive: true });
   }
@@ -184,6 +187,7 @@ export async function initializeConfigV1(
 ): Promise<InitConfigResult> {
   const fsImpl = io.fsImpl;
   const pathImpl = io.pathImpl ?? path;
+  const homeDir = io.getHomeDir ? io.getHomeDir() : homedir();
 
   const configPath = pathImpl.resolve(opts.configPath);
   const configDir = pathImpl.dirname(configPath);
@@ -267,7 +271,7 @@ export async function initializeConfigV1(
   });
 
   try {
-    writeProviderV2Configs(fsImpl, pathImpl, configDir, selectedTemplates);
+    writeProviderV2Configs(fsImpl, pathImpl, homeDir, selectedTemplates);
     fsImpl.writeFileSync(configPath, JSON.stringify(configObject, null, 2), 'utf8');
     return {
       ok: true,

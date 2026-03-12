@@ -1,6 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { homedir } from 'os';
+import { resolveRccPath } from '../config/user-data-paths.js';
 import { buildTokenKey, type TokenDescriptor } from './token-types.js';
 
 export type RefreshOutcome = 'success' | 'failure';
@@ -73,7 +74,7 @@ function resolveHomeDir(): string {
 }
 
 export function resolveTokenHistoryDirectory(): string {
-  return path.join(resolveHomeDir(), '.routecodex', 'statics');
+  return resolveRccPath('statics');
 }
 
 export function resolveTokenHistoryFilePath(): string {

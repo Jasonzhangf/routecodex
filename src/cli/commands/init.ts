@@ -7,6 +7,7 @@ import { getBootstrapProviderTemplates } from '../config/bootstrap-provider-temp
 import { buildCatalogWebSearchDefaults, type InitProviderTemplate } from '../config/init-provider-catalog.js';
 import { parseProvidersArg } from '../config/init-config.js';
 import { buildV2ConfigObject } from '../config/init-v2-builder.js';
+import { resolveRccConfigFile } from '../../config/user-data-paths.js';
 import { installBundledDocsBestEffort } from '../config/bundled-docs.js';
 import { ensureDefaultPrecommandScriptBestEffort } from '../config/precommand-default-script.js';
 import {
@@ -50,7 +51,7 @@ export function createInitCommand(program: Command, ctx: InitCommandContext): vo
 
   program
     .command('init')
-    .description('Initialize ~/.routecodex/config.json (V2 guided setup and maintenance)')
+    .description('Initialize ~/.rcc/config.json (V2 guided setup and maintenance)')
     .addHelpText(
       'after',
       `
@@ -70,7 +71,7 @@ Examples:
     .option('--host <host>', 'Server host (httpserver.host)')
     .option('--port <port>', 'Server port (httpserver.port)')
     .option('--list-providers', 'List guided protocol templates + managed-auth provider ids and exit')
-    .option('--list-current-providers', 'List configured providers from ~/.routecodex/provider and exit')
+    .option('--list-current-providers', 'List configured providers from ~/.rcc/provider and exit')
     .action(async (options: InitCommandOptions) => {
       const spinner = await ctx.createSpinner('Initializing configuration...');
 
@@ -90,7 +91,7 @@ Examples:
         }
       };
 
-      const configPath = options.config || pathImpl.join(home(), '.routecodex', 'config.json');
+      const configPath = options.config || resolveRccConfigFile(home());
       const forceCamoufoxPrep = Boolean(options.camoufox);
       const autoCamoufoxPrep = !forceCamoufoxPrep;
       const providerRoot = getProviderRoot(pathImpl, home());

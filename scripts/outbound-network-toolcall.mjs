@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // One-click outbound network toolcall tests against openai-compatible providers.
-// Reads provider configs under ~/.routecodex/provider/*/config*.json
+// Reads provider configs under ~/.rcc/provider/*/config*.json
 // Sends a function-calling prompt and reports whether a functionCall/tool_calls is returned.
 
 import fs from 'fs';
@@ -8,7 +8,7 @@ import path from 'path';
 import os from 'os';
 import { ProviderFactory } from '../dist/providers/core/runtime/provider-factory.js';
 
-const root = path.join(os.homedir(), '.routecodex', 'provider');
+const root = path.join(os.homedir(), '.rcc', 'provider');
 const MAX_PROVIDERS = parseInt(process.env.RCC_NET_MAX_PROVIDERS || '5', 10);
 // Per-provider rate limit: default 3 req/min (can override by RCC_NET_RATE_MAX_PER_MINUTE)
 const RATE_MAX_PER_MIN = parseInt(process.env.RCC_NET_RATE_MAX_PER_MINUTE || '3', 10);
