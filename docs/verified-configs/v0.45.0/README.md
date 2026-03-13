@@ -47,7 +47,7 @@
 ## 配置文件
 
 ### 1. 用户配置文件
-`~/.routecodex/config/lmstudio-5521-gpt-oss-20b-mlx.json`
+`~/.rcc/config/lmstudio-5521-gpt-oss-20b-mlx.json`
 - 端口: 5521
 - 主机: 0.0.0.0
 - 虚拟路由器配置正确
@@ -84,7 +84,7 @@
 
 ### 配置文件
 #### 3. Qwen 用户配置文件
-`~/.routecodex/config/qwen-5522-qwen3-coder-plus.json`
+`~/.rcc/config/qwen-5522-qwen3-coder-plus.json`
 - 端口: 5522
 - OAuth 认证配置
 - 4个模型配置完整
@@ -101,12 +101,12 @@
 
 #### LM Studio 配置
 ```bash
-npx ts-node src/cli.ts start --config ~/.routecodex/config/lmstudio-5521-gpt-oss-20b-mlx.json --port 5521
+npx ts-node src/cli.ts start --config ~/.rcc/config/lmstudio-5521-gpt-oss-20b-mlx.json --port 5521
 ```
 
 #### Qwen Provider 配置
 ```bash
-npx ts-node src/cli.ts start --config ~/.routecodex/config/qwen-5522-qwen3-coder-plus.json --port 5522
+npx ts-node src/cli.ts start --config ~/.rcc/config/qwen-5522-qwen3-coder-plus.json --port 5522
 ```
 
 ### 测试端点
@@ -198,7 +198,7 @@ RouteCodex 的 4 层管道架构设计完全正确：
 
 ### 配置文件
 #### 3. Qwen 用户配置文件
-`~/.routecodex/config/qwen-5522-qwen3-coder-plus.json`
+`~/.rcc/config/qwen-5522-qwen3-coder-plus.json`
 - 端口: 5522
 - OAuth 认证配置
 - 4个模型配置完整

@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { UnknownRecord } from './virtual-router-types.js';
-import { resolveLegacyRouteCodexPath, resolveRccProviderDir } from './user-data-paths.js';
+import { resolveRccProviderDir } from './user-data-paths.js';
 
 export interface ProviderConfigV2 {
   version: string;
@@ -34,17 +34,8 @@ async function ensureProviderRoot(rootDir?: string): Promise<string> {
     return base;
   }
   const primary = resolveRccProviderDir();
-  const legacy = resolveLegacyRouteCodexPath('provider');
-  if (await pathExists(primary)) {
-    await fs.mkdir(primary, { recursive: true });
-    return primary;
-  }
-  if (await pathExists(legacy)) {
-    return legacy;
-  }
-  const base = primary;
-  await fs.mkdir(base, { recursive: true });
-  return base;
+  await fs.mkdir(primary, { recursive: true });
+  return primary;
 }
 
 async function listProviderDirs(rootDir: string): Promise<ProviderDirEntry[]> {

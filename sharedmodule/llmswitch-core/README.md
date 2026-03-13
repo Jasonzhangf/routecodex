@@ -252,7 +252,7 @@ Chat → Gemini（请求与响应）：
 - 前半段把 SSE 合成为非流 JSON；后半段统一处理，再需要时用本包 streaming 模块合成 Responses SSE。
 
 ## 快照与排错
-- 快照目录：`~/.routecodex/codex-samples/<endpoint>/`
+- 快照目录：`~/.rcc/codex-samples/<endpoint>/`
   - `*_http-request.json` / `*_http-request.parsed.json`
   - `*_pipeline.llmswitch.request.post.json`（进入后半段前的 Chat 形状）
   - `*_pipeline.provider.request.pre.json`（上游请求体，顶层仅 Chat 字段）

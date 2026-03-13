@@ -3,9 +3,9 @@
 本节记录当前已经验证 **可以和 `https://www.fakercode.top/v1/responses` 正常通信** 的典型请求形状，方便后续实现 Responses provider 和 llmswitch-core 路由时参考。
 
 > 最新直通黄金样本：  
-> - `~/.routecodex/codex-samples/openai-responses/req_req-v2-1763955655135-2z91vfddh_request_1_validation_pre.json`（llmswitch 输入）  
-> - `~/.routecodex/codex-samples/openai-responses/req_1763955655139_mhw2j6ao_http-request.json`（/v1/responses 入口）  
-> - `~/.routecodex/codex-samples/openai-responses/req_1763955655143_24f5h9qsj_provider-request.json`（Responses Provider 直通）  
+> - `~/.rcc/codex-samples/openai-responses/req_req-v2-1763955655135-2z91vfddh_request_1_validation_pre.json`（llmswitch 输入）  
+> - `~/.rcc/codex-samples/openai-responses/req_1763955655139_mhw2j6ao_http-request.json`（/v1/responses 入口）  
+> - `~/.rcc/codex-samples/openai-responses/req_1763955655143_24f5h9qsj_provider-request.json`（Responses Provider 直通）  
 > 同一时间窗的前序样本（`req_1763955649860_832l5215_http-request.json`、`req_1763955649865_drd7xwttl_provider-request.json` 等）记录了相同请求在路由/Provider 侧的视角，可一起对照，`data` 或 `data.originalData` 即为发送给 FC 的最终载荷。
 
 ### 1. 已验证成功的请求形状（摘要）
@@ -100,7 +100,7 @@
 - **metadata 可以保留 RouteCodex 自己的统计字段**，对上游兼容无明显影响。  
 - **stream=true + SSE**：该请求在 FC 上下游是以 Responses SSE 事件流的形式返回（`response.created` / `response.output_text.delta` / `response.completed` 等事件）。
 - **工具结果配对只依赖 `call_id`**：OpenAI Responses 规范要求 `function_call` 与 `function_call_output` 仅通过同一 `call_id` 关联，并不会额外携带 `tool_call_id`。RouteCodex 在转换为 Chat 形状时会把 `call_id` 临时映射为 Chat 所需的 `tool_call_id`，但在发给上游或回传客户端前必须把结构还原为“只有 `call_id` 的官方形状”，否则像 c4m / Fai 这类严格实现会直接报 `Unknown parameter: input[].tool_call_id`。
-- **强制开启 streaming：在用户 Provider 配置（例如 `~/.routecodex/provider/fc/config.v1.json`）的 Responses 提供者下添加 `"responses": { "process": "passthrough", "streaming": "always" }`，这样 `ResponsesHttpProvider` 会通过 `responses.streaming` 判定为 `always`，即使入口是 Anthropic/Messages 也会对上游（如 Fai/c4m）以 SSE 模式发送请求。**
+- **强制开启 streaming：在用户 Provider 配置（例如 `~/.rcc/provider/fc/config.v1.json`）的 Responses 提供者下添加 `"responses": { "process": "passthrough", "streaming": "always" }`，这样 `ResponsesHttpProvider` 会通过 `responses.streaming` 判定为 `always`，即使入口是 Anthropic/Messages 也会对上游（如 Fai/c4m）以 SSE 模式发送请求。**
 
 ### 2. 失败的简化请求形状（对比）
 
@@ -122,7 +122,7 @@
 ```bash
 FC_API_KEY=... FC_MODEL=gpt-5.1 \
 node scripts/fc-responses-from-snapshot.mjs \
-  ~/.routecodex/codex-samples/openai-responses/req_req-v2-1763955655135-2z91vfddh_request_1_validation_pre.json
+  ~/.rcc/codex-samples/openai-responses/req_req-v2-1763955655135-2z91vfddh_request_1_validation_pre.json
 ```
 
 在成功场景下，SDK 报告的事件分布如下（节选）：

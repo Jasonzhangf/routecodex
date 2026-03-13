@@ -41,7 +41,7 @@
         ],
         "enableConsole": true,
         "enableFile": true,
-        "filePath": "~/.routecodex/logs/debug-center.log",
+        "filePath": "~/.rcc/logs/debug-center.log",
         "maxFileSize": "10MB",
         "maxFiles": 5,
         "enableRotation": true
@@ -64,7 +64,7 @@
           "level": "info",
           "enableConsole": true,
           "enableFile": true,
-          "filePath": "~/.routecodex/logs/server/http-server.log",
+          "filePath": "~/.rcc/logs/server/http-server.log",
           "categories": [
             "server",
             "api",
@@ -1199,7 +1199,7 @@
     "version": "2.0.0",
     "engine": "routecodex-config-engine",
     "timestamp": 1760317417276,
-    "configPath": "/Users/fanzhang/.routecodex/config/lmstudio-5521-gpt-oss-20b-mlx.json"
+    "configPath": "/Users/fanzhang/.rcc/config/lmstudio-5521-gpt-oss-20b-mlx.json"
   },
   "engineVersion": "legacy"
 }

@@ -118,7 +118,7 @@ const provider = new ChatHttpProvider(iflowConfig, dependencies);
 await provider.initialize(); // → 打开浏览器 → 授权 → 获取 API Key
 
 // 3. 后续使用直接读取本地 token 文件
-// ~/.routecodex/auth/iflow-oauth.json 包含：
+// ~/.rcc/auth/iflow-oauth.json 包含：
 // {
 //   "access_token": "...",
 //   "refresh_token": "...",

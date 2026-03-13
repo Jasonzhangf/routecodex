@@ -2,8 +2,8 @@ use serde_json::Value;
 
 use super::super::features::RoutingFeatures;
 use super::super::provider_registry::ProviderRegistry;
-use super::config::route_has_targets;
 use super::config::RoutingPools;
+use super::config::default_pool_supports_capability;
 
 pub(crate) fn parse_direct_provider_model(
     model_value: Option<&Value>,
@@ -50,6 +50,7 @@ pub(crate) fn should_fallback_direct_model_for_media(
     model_id: &str,
     features: &RoutingFeatures,
     routing: &RoutingPools,
+    provider_registry: &ProviderRegistry,
 ) -> bool {
     if !features.has_image_attachment {
         return false;
@@ -66,5 +67,5 @@ pub(crate) fn should_fallback_direct_model_for_media(
     if !(features.has_video_attachment && features.has_local_video_attachment) {
         return false;
     }
-    route_has_targets(routing, "vision")
+    default_pool_supports_capability(routing, provider_registry, "vision")
 }

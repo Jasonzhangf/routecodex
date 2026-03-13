@@ -12,6 +12,7 @@ import { captureApplyPatchRegression } from '../../tools/patch-regression-captur
 import { normalizeExecCommandArgs } from '../../tools/exec-command/normalize.js';
 import { readRuntimeMetadata } from '../runtime-metadata.js';
 import { normalizeChatResponseReasoningToolsWithNative } from '../../router/virtual-router/engine-selection/native-hub-bridge-action-semantics.js';
+import { resolveRccPath } from '../../runtime/user-data-paths.js';
 
 type Unknown = Record<string, unknown>;
 function isObject(v: unknown): v is Unknown { return !!v && typeof v === 'object' && !Array.isArray(v); }
@@ -272,7 +273,7 @@ export interface ToolGovernanceOptions {
     enabled?: boolean;
     endpoint?: string; // e.g. '/v1/chat/completions' | '/v1/responses' | '/v1/messages' or shorthand 'chat'|'responses'|'messages'
     requestId?: string; // prefer upstream-request id for grouping
-    baseDir?: string;   // default: ~/.routecodex/codex-samples
+    baseDir?: string;   // default: ~/.rcc/codex-samples
   };
 }
 
@@ -284,11 +285,9 @@ function tryWriteSnapshot(options: ToolGovernanceOptions | undefined, stage: str
     if (!isVerbose) return;
     const snap = options?.snapshot;
     if (!snap || snap.enabled === false) return;
-    const os = require('os');
     const fs = require('fs');
     const path = require('path');
-    const home = os.homedir?.() || process.env.HOME || '';
-    const base = snap.baseDir || path.join(home, '.routecodex', 'codex-samples');
+    const base = snap.baseDir || resolveRccPath('codex-samples');
     const ep = String(snap.endpoint || 'chat').toLowerCase();
     const group = ep.includes('responses') ? 'openai-responses' : ep.includes('messages') ? 'anthropic-messages' : 'openai-chat';
     const rid = String(snap.requestId || `req_${Date.now()}_${Math.random().toString(36).slice(2,8)}`);

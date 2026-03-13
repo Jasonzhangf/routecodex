@@ -2,7 +2,6 @@ import fs from 'fs';
 import path from 'path';
 import { homedir } from 'os';
 import {
-  resolveLegacyRouteCodexUserDir,
   resolveRccConfigDir,
   resolveRccUserDir
 } from './user-data-paths.js';
@@ -92,8 +91,7 @@ function safeProcessCwd(fallback?: string): string {
  * Default configuration directory structure
  */
 // const DEFAULT_CONFIG_DIRECTORIES = [
-//   path.join(homedir(), '.rcc', 'config'),         // Primary config directory
-//   path.join(homedir(), '.routecodex'),            // Legacy directory
+//   path.join(homedir(), '.rcc', 'config'),           // Primary config directory
 //   path.join(process.cwd(), 'config'),               // Current directory config
 //   process.cwd(),                                    // Current directory
 // ];
@@ -221,10 +219,6 @@ export class UnifiedConfigPathResolver {
     return resolveRccConfigDir();
   }
 
-  static getLegacyConfigDirectory(): string {
-    return path.join(resolveLegacyRouteCodexUserDir(), 'config');
-  }
-
   /**
    * Scan a directory for configuration files
    */
@@ -326,34 +320,23 @@ export class UnifiedConfigPathResolver {
     // 4. Home directory configurations
     if (configName) {
       const primaryHome = resolveRccUserDir();
-      const legacyHome = resolveLegacyRouteCodexUserDir();
       candidates.push(path.join(primaryHome, configName));
       candidates.push(path.join(primaryHome, 'config', configName));
-      candidates.push(path.join(legacyHome, configName));
-      candidates.push(path.join(legacyHome, 'config', configName));
     } else {
       const primaryHome = resolveRccUserDir();
-      const legacyHome = resolveLegacyRouteCodexUserDir();
       candidates.push(path.join(primaryHome, 'config.json'));
       candidates.push(path.join(primaryHome, 'routecodex.json'));
-      candidates.push(path.join(legacyHome, 'config.json'));
-      candidates.push(path.join(legacyHome, 'routecodex.json'));
     }
 
     // 5. Default configuration directory (with scanning)
     const defaultConfigDir = this.getDefaultConfigDirectory();
-    const legacyConfigDir = this.getLegacyConfigDirectory();
     if (allowDirectoryScan) {
       candidates.push(resolveRccUserDir());
       candidates.push(defaultConfigDir);
-      candidates.push(resolveLegacyRouteCodexUserDir());
-      candidates.push(legacyConfigDir);
     } else if (configName) {
       candidates.push(path.join(defaultConfigDir, configName));
-      candidates.push(path.join(legacyConfigDir, configName));
     } else {
       candidates.push(path.join(defaultConfigDir, 'default.json'));
-      candidates.push(path.join(legacyConfigDir, 'default.json'));
     }
 
     return candidates;
@@ -425,8 +408,6 @@ export class UnifiedConfigPathResolver {
     const directories = [
       this.getDefaultConfigDirectory(),
       resolveRccUserDir(),
-      this.getLegacyConfigDirectory(),
-      resolveLegacyRouteCodexUserDir(),
       path.join(safeProcessCwd(), 'config')
     ];
 

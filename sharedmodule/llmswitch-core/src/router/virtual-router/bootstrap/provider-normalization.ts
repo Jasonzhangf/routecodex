@@ -306,32 +306,39 @@ function asRecord<T extends Record<string, unknown>>(value: unknown): T {
 
 function normalizeModelCapabilities(provider: Record<string, unknown>): Record<string, ModelCapability[]> | undefined {
   const models = provider.models;
-  if (!Array.isArray(models)) {
-    return undefined;
-  }
   const result: Record<string, ModelCapability[]> = {};
-  for (const model of models) {
-    if (!model || typeof model !== 'object') {
-      continue;
-    }
-    const modelObj = model as Record<string, unknown>;
-    const modelId = typeof modelObj.id === 'string' ? modelObj.id.trim() : undefined;
-    if (!modelId) {
-      continue;
-    }
-    const capabilities = modelObj.capabilities;
-    if (!Array.isArray(capabilities)) {
-      continue;
-    }
-    const validCapabilities: ModelCapability[] = [];
+
+  const pushCapabilities = (modelId: string, capabilities: unknown) => {
+    if (!modelId) return;
+    if (!Array.isArray(capabilities)) return;
+    const valid: ModelCapability[] = [];
     for (const cap of capabilities) {
       if (typeof cap === 'string' && ['text', 'reasoning', 'vision', 'thinking', 'web_search'].includes(cap)) {
-        validCapabilities.push(cap as ModelCapability);
+        valid.push(cap as ModelCapability);
       }
     }
-    if (validCapabilities.length > 0) {
-      result[modelId] = validCapabilities;
+    if (valid.length > 0) {
+      result[modelId] = valid;
+    }
+  };
+
+  if (Array.isArray(models)) {
+    for (const model of models) {
+      if (!model || typeof model !== 'object') {
+        continue;
+      }
+      const modelObj = model as Record<string, unknown>;
+      const modelId = typeof modelObj.id === 'string' ? modelObj.id.trim() : '';
+      pushCapabilities(modelId, modelObj.capabilities);
+    }
+  } else if (models && typeof models === 'object') {
+    const modelsNode = models as Record<string, unknown>;
+    for (const [modelName, modelConfigRaw] of Object.entries(modelsNode)) {
+      const modelId = typeof modelName === 'string' ? modelName.trim() : '';
+      const modelConfig = typeof modelConfigRaw === 'object' && modelConfigRaw ? (modelConfigRaw as Record<string, unknown>) : {};
+      pushCapabilities(modelId, modelConfig.capabilities);
     }
   }
+
   return Object.keys(result).length > 0 ? result : undefined;
 }

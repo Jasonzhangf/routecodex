@@ -720,8 +720,8 @@
           <div class="title">
             <h1>RouteCodex Daemon Admin</h1>
             <p>
-              Writes to <span class="mono">~/.routecodex/config.json</span>. This UI requires an admin password:
-              first visit will ask you to set one (stored at <span class="mono">~/.routecodex/login</span>), then you login with it.
+              Writes to <span class="mono">~/.rcc/config.json</span>. This UI requires an admin password:
+              first visit will ask you to set one (stored at <span class="mono">~/.rcc/login</span>), then you login with it.
             </p>
           </div>
           <div class="statusline">
@@ -1039,7 +1039,7 @@
                   <input
                     id="apikeyValueInput"
                     type="password"
-                    placeholder="will be written to ~/.routecodex/auth/*.key"
+                    placeholder="will be written to ~/.rcc/auth/*.key"
                     style="flex: 1; min-width: 260px;"
                   />
                 </div>
@@ -1074,7 +1074,7 @@
                   <input
                     id="cookieFileInput"
                     type="text"
-                    placeholder="~/.routecodex/auth/iflow-work.cookie"
+                    placeholder="~/.rcc/auth/iflow-work.cookie"
                     style="flex: 1; min-width: 280px;"
                   />
                 </div>
@@ -1171,7 +1171,7 @@
             <div class="card" style="box-shadow:none;">
               <p class="section-title">Stats (historical)</p>
               <p class="section-sub">
-                Aggregated from <span class="mono">~/.routecodex/logs/provider-stats.jsonl</span> (best-effort).
+                Aggregated from <span class="mono">~/.rcc/logs/provider-stats.jsonl</span> (best-effort).
               </p>
               <div class="notice mono" id="statsHistoricalTotalsBox" style="white-space: pre-wrap;"></div>
               <div class="table-wrap" style="margin-top: 10px;">
@@ -1233,7 +1233,7 @@
               <p class="section-title">Token usage (session + historical)</p>
               <p class="section-sub">
                 Session stats reset on server restart. Historical totals are aggregated from
-                <span class="mono">~/.routecodex/logs/provider-stats.jsonl</span> (best-effort).
+                <span class="mono">~/.rcc/logs/provider-stats.jsonl</span> (best-effort).
               </p>
               <div class="row" style="margin-bottom: 10px;">
                 <button id="refreshTokensBtn" class="primary">Refresh</button>
@@ -1263,7 +1263,7 @@
             <div class="card" style="box-shadow:none;">
               <p class="section-title">Auth Inventory</p>
               <p class="section-sub">
-                Token files + API key authfiles in <span class="mono">~/.routecodex/auth</span>.
+                Token files + API key authfiles in <span class="mono">~/.rcc/auth</span>.
               </p>
               <div class="row" style="margin-bottom: 10px;">
                 <button id="refreshCredentialsBtn" class="primary">Refresh</button>
@@ -2292,7 +2292,7 @@
             type: "iflow",
             baseURL: "https://apis.iflow.cn/v1",
             compatibilityProfile: "chat:iflow",
-            auth: { type: "iflow-cookie", cookieFile: "~/.routecodex/auth/iflow-work.cookie" },
+            auth: { type: "iflow-cookie", cookieFile: "~/.rcc/auth/iflow-work.cookie" },
             models: {}
           };
         }
@@ -3216,7 +3216,7 @@
         if (authMode === "cookie") {
           base.auth = {
             type: "iflow-cookie",
-            cookieFile: ($("cookieFileInput").value || "").trim() || "~/.routecodex/auth/iflow.cookie"
+            cookieFile: ($("cookieFileInput").value || "").trim() || "~/.rcc/auth/iflow.cookie"
           };
         }
         if (authMode === "oauth") {

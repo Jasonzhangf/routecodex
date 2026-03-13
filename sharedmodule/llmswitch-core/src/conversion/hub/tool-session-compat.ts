@@ -1,6 +1,5 @@
 import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import type { ChatEnvelope, ChatMessage } from './types/chat-envelope.js';
@@ -11,6 +10,9 @@ import {
   normalizeToolSessionMessagesWithNative,
   updateToolSessionHistoryWithNative
 } from '../../router/virtual-router/engine-selection/native-hub-pipeline-req-outbound-semantics.js';
+import {
+  resolveRccPath
+} from '../../runtime/user-data-paths.js';
 
 type ToolHistoryStatus = 'ok' | 'error' | 'unknown';
 
@@ -27,7 +29,7 @@ export interface ToolSessionHistory {
   updatedAt: string;
 }
 
-const TOOL_HISTORY_ROOT = path.join(os.homedir(), '.routecodex', 'tool-history');
+const TOOL_HISTORY_ROOT = resolveRccPath('tool-history');
 
 function sanitizeSessionId(raw: string): string {
   const trimmed = raw.trim();
@@ -39,7 +41,8 @@ function sanitizeSessionId(raw: string): string {
 
 async function loadSessionHistory(sessionId: string): Promise<ToolSessionHistory | null> {
   try {
-    const file = path.join(TOOL_HISTORY_ROOT, `${sanitizeSessionId(sessionId)}.json`);
+    const fileName = `${sanitizeSessionId(sessionId)}.json`;
+    const file = path.join(TOOL_HISTORY_ROOT, fileName);
     if (!fsSync.existsSync(file)) {
       return null;
     }

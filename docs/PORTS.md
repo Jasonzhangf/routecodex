@@ -2,7 +2,7 @@
 
 ## 配置文件
 
-推荐在 `~/.routecodex/config.json` 里配置：
+推荐在 `~/.rcc/config.json` 里配置：
 
 ```jsonc
 {

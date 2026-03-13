@@ -10,6 +10,7 @@ export interface ResponsesMessageNormalizationOptions {
   requestId?: string;
   outputIndex?: number;
   extraReasoning?: string | string[];
+  suppressReasoningFromContent?: boolean;
 }
 
 export interface ResponsesMessageNormalizationResult {
@@ -29,7 +30,8 @@ export function normalizeResponsesMessageItem(
     typeof item.id === 'string' && item.id.trim().length
       ? item.id.trim()
       : `${fallbackRequestId}-message-${fallbackIndex}`;
-  const { normalizedParts, reasoningChunks } = normalizeMessageContentParts(item.content);
+  const { normalizedParts, reasoningChunks: extractedReasoning } = normalizeMessageContentParts(item.content);
+  const reasoningChunks = options.suppressReasoningFromContent ? [] : extractedReasoning;
   const additionalReasoning = options.extraReasoning;
   if (additionalReasoning) {
     const extras = Array.isArray(additionalReasoning) ? additionalReasoning : [additionalReasoning];

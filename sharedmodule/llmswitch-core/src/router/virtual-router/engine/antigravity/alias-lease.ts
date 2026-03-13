@@ -1,8 +1,11 @@
 import type { RouterMetadataInput, VirtualRouterConfig } from '../../types.js';
 import type { ProviderRegistry } from '../../provider-registry.js';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
+import {
+  resolveRccPath,
+  resolveRccPathForRead
+} from '../../../../runtime/user-data-paths.js';
 
 export type AntigravityAliasLeaseStore = Map<string, { sessionKey: string; lastSeenAt: number }>;
 export type AntigravitySessionAliasStore = Map<string, string>;
@@ -55,7 +58,7 @@ function extractRuntimeKey(providerKey: string): string | null {
   return `${providerId}.${alias}`;
 }
 
-function resolveAntigravityAliasLeasePersistPath(): string | null {
+function resolveAntigravityAliasLeasePersistWritePath(): string | null {
   try {
     const enabledRaw = process.env.ROUTECODEX_ANTIGRAVITY_ALIAS_LEASE_PERSIST;
     const enabled =
@@ -64,9 +67,20 @@ function resolveAntigravityAliasLeasePersistPath(): string | null {
     if (!enabled) {
       return null;
     }
-    const home = os.homedir();
-    if (!home) return null;
-    return path.join(home, '.routecodex', 'state', 'antigravity-alias-leases.json');
+    return resolveRccPath('state', 'antigravity-alias-leases.json');
+  } catch {
+    return null;
+  }
+}
+
+function resolveAntigravityAliasLeasePersistReadPath(): string | null {
+  try {
+    const writePath = resolveAntigravityAliasLeasePersistWritePath();
+    if (!writePath) {
+      return null;
+    }
+    const resolved = resolveRccPathForRead('state', 'antigravity-alias-leases.json');
+    return fs.existsSync(resolved) ? resolved : writePath;
   } catch {
     return null;
   }
@@ -78,7 +92,7 @@ export function hydrateAntigravityAliasLeaseStoreIfNeeded(options: {
   persistence: AntigravityLeasePersistenceState;
   aliasReuseCooldownMs: number;
 }): void {
-  const filePath = resolveAntigravityAliasLeasePersistPath();
+  const filePath = resolveAntigravityAliasLeasePersistReadPath();
   if (!filePath) {
     return;
   }
@@ -155,7 +169,7 @@ function flushAntigravityAliasLeaseStoreSync(options: {
   persistence: AntigravityLeasePersistenceState;
   aliasReuseCooldownMs: number;
 }): void {
-  const filePath = resolveAntigravityAliasLeasePersistPath();
+  const filePath = resolveAntigravityAliasLeasePersistWritePath();
   if (!filePath) {
     return;
   }

@@ -1,17 +1,17 @@
 # Codex Samples 回放
 
-`scripts/replay-codex-sample.mjs` 允许我们将 `~/.routecodex/codex-samples/**/*_client-request.json` 等样本重新发送到本地 RouteCodex，确保工具调用、SSE chunk 和最终 JSON 都被完整记录。
+`scripts/replay-codex-sample.mjs` 允许我们将 `~/.rcc/codex-samples/**/*_client-request.json` 等样本重新发送到本地 RouteCodex，确保工具调用、SSE chunk 和最终 JSON 都被完整记录。
 
 ## 使用步骤
 
 1. 启动 RouteCodex 主包（默认 `http://127.0.0.1:5555`）。
 2. 准备好想要回放的样本文件，例如：
-   `~/.routecodex/codex-samples/openai-responses/req_req-v2-1764415000213-z1sxtbhuo_client-request.json`
+   `~/.rcc/codex-samples/openai-responses/req_req-v2-1764415000213-z1sxtbhuo_client-request.json`
 3. 执行：
 
 ```bash
 npm run replay:codex-sample -- \
-  --sample ~/.routecodex/codex-samples/openai-responses/req_req-v2-1764415000213-z1sxtbhuo_client-request.json \
+  --sample ~/.rcc/codex-samples/openai-responses/req_req-v2-1764415000213-z1sxtbhuo_client-request.json \
   --label first-run
 ```
 

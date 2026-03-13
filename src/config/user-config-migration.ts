@@ -5,7 +5,7 @@ import path from 'node:path';
 import { resolveLegacyRouteCodexUserDir, resolveRccUserDir } from './user-data-paths.js';
 
 type MigrationEntry = {
-  id: 'config_file' | 'config_dir' | 'provider_dir';
+  id: 'config_file' | 'config_dir' | 'provider_dir' | 'auth_dir';
   kind: 'file' | 'dir';
   legacyRelativePath: string;
   targetRelativePath: string;
@@ -31,6 +31,12 @@ const USER_CONFIG_MIGRATION_ENTRIES: readonly MigrationEntry[] = [
     legacyRelativePath: 'provider',
     targetRelativePath: 'provider',
     skipRelativeSegments: ['samples']
+  },
+  {
+    id: 'auth_dir',
+    kind: 'dir',
+    legacyRelativePath: 'auth',
+    targetRelativePath: 'auth'
   }
 ] as const;
 

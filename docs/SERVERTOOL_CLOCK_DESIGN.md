@@ -214,7 +214,7 @@ type ClockSessionState = {
 
 ### 6.1 启动扫描
 
-daemon 启动时扫描 `~/.routecodex/sessions/<serverId>/clock/`：
+daemon 启动时扫描 `~/.rcc/sessions/<serverId>/clock/`：
 
 - 对每个 task：
   - 若 `nowMs > dueAtMs + retentionMs`：删除

@@ -3,7 +3,7 @@
 ## 目标与约束
 
 - 将现有「virtualrouter 内联 providers + routing」改为：
-  - Provider 配置：按 provider 维度拆分到 `~/.routecodex/provider/<id>/config.v2.json`。
+  - Provider 配置：按 provider 维度拆分到 `~/.rcc/provider/<id>/config.v2.json`。
   - Routing 配置：保留在主配置（或单独 routing 文件）中，仅描述 route → pool → providerKey 关系。
 - v2 配置通过 `version: "2.0.0"` 与 v1 完全区分，不影响已有 v1 配置（`config.v1.json` / `config.json.virtualrouter.providers`）。
 - 正式运行路径**不做 v1/v2 兼容合并**：v2 模式只读 provider v2 配置；v1 配置仅供迁移脚本和回溯分析使用。
@@ -15,12 +15,12 @@
 
 1. 顶层 Provider 目录
 
-- 路径：`~/.routecodex/provider`
+- 路径：`~/.rcc/provider`
 - 启动行为：
   - 若目录不存在：启动时自动创建。
   - 若存在：每个子目录代表一个 provider 实例（`<providerId>` 或 `<providerId>-<profile>`）。
 
-2. 单个 Provider 目录结构（示例：`~/.routecodex/provider/antigravity`）
+2. 单个 Provider 目录结构（示例：`~/.rcc/provider/antigravity`）
 
 - 静态配置（v2）：
   - 文件：`config.v2.json`
@@ -35,7 +35,7 @@
       "auth": {
         "mode": "oauth",
         "oauthProviderId": "antigravity",
-        "tokenFile": "~/.routecodex/auth/antigravity-oauth-1-geetasamodgeetasamoda.json"
+        "tokenFile": "~/.rcc/auth/antigravity-oauth-1-geetasamodgeetasamoda.json"
       },
       "models": [
         {
@@ -91,7 +91,7 @@
 2. VirtualRouterInput 组合逻辑（v2 模式）
 
 - 启动时步骤：
-  1. 扫描 `~/.routecodex/provider`：
+  1. 扫描 `~/.rcc/provider`：
      - 如不存在则创建空目录。
      - 对每个子目录：若存在 `config.v2.json`：解析为 `ProviderConfigV2`；否则跳过（无隐式迁移）。
   2. 从 `config.json` / routing 文件读取 routing 配置。
@@ -130,7 +130,7 @@
 - 预览：
   - 在终端打印拟写入的 `config.v2.json`，高亮关键字段。
 - 确认：
-  - 用户确认后写入/覆盖 `~/.routecodex/provider/<id>/config.v2.json`。
+  - 用户确认后写入/覆盖 `~/.rcc/provider/<id>/config.v2.json`。
 
 3. list/delete 行为
 
@@ -139,7 +139,7 @@
 - delete：
   - 询问确认后：
     - 仅删除 `config.v2.json`（保留 runtime-state 调试），或
-    - 删除整个 `~/.routecodex/provider/<id>` 目录（可作为高级选项，默认不做）。
+    - 删除整个 `~/.rcc/provider/<id>` 目录（可作为高级选项，默认不做）。
 
 ---
 
@@ -152,7 +152,7 @@
    - 定义 `config.v2.json` 的 TypeScript 接口与基础校验逻辑。
 
 2. 阶段 2：Provider v2 loader（只读，不接入 runtime）
-   - 实现扫描 `~/.routecodex/provider` 的 ProviderConfigV2 loader（**只读取显式 `config.v2.json`**，不做自动迁移）。
+   - 实现扫描 `~/.rcc/provider` 的 ProviderConfigV2 loader（**只读取显式 `config.v2.json`**，不做自动迁移）。
    - 编写单元测试：确保 loader 对合法 v2 配置的读取行为稳定、可预期；迁移逻辑由单独脚本负责。
 
 3. 阶段 3：Routing loader 与 VirtualRouterInput 组合器

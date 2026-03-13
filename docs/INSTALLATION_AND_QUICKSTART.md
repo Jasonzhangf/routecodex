@@ -16,7 +16,7 @@ npm uninstall -g @jsonstudio/rcc
 
 ## 2) 初始化配置（自动生成）
 
-默认会写入：`~/.routecodex/config.json`
+默认会写入：`~/.rcc/config.json`
 
 交互式（推荐）：
 
@@ -24,7 +24,7 @@ npm uninstall -g @jsonstudio/rcc
 rcc init
 ```
 
-初始化成功后，`rcc init` 会把内置文档复制到：`~/.routecodex/docs`
+初始化成功后，`rcc init` 会把内置文档复制到：`~/.rcc/docs`
 
 非交互式（CI/脚本）：
 

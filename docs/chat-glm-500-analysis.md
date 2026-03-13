@@ -2,7 +2,7 @@
 
 ## 背景
 - 现象：Chat 通路上游 GLM 返回 500（Operation failed）。
-- 最新失败样本目录：`~/.routecodex/codex-samples/openai-chat`
+- 最新失败样本目录：`~/.rcc/codex-samples/openai-chat`
   - 例：`req_1761955101841_2d71u9w6x_provider-request.json`
 
 ## 症状与证据
@@ -50,7 +50,7 @@
    ```
 2. 使用失败样本 `*_raw-request.json` 复现
    ```bash
-   jq -r '.body' ~/.routecodex/codex-samples/openai-chat/<失败样本>_raw-request.json > /tmp/rc_req_body.json
+   jq -r '.body' ~/.rcc/codex-samples/openai-chat/<失败样本>_raw-request.json > /tmp/rc_req_body.json
    curl -s -o /tmp/rc_resp.json -w "%{http_code}" \
      -H 'Content-Type: application/json' \
      --data @/tmp/rc_req_body.json \

@@ -80,7 +80,7 @@
 
 ## 配置情况
 
-- 用户 `~/.routecodex/config.json`（或 `ROUTECODEX_CONFIG_PATH` 指定的文件）由 `bootstrapVirtualRouterConfig` 直接解析，得到 `virtualRouter` + `targetRuntime`，HTTP 服务按该结果构造 Hub Pipeline 与 Provider。
+- 用户 `~/.rcc/config.json`（或 `ROUTECODEX_CONFIG_PATH` 指定的文件）由 `bootstrapVirtualRouterConfig` 直接解析，得到 `virtualRouter` + `targetRuntime`，HTTP 服务按该结果构造 Hub Pipeline 与 Provider。
 - OpenAI Router 中的 `targetUrl` 由构造参数/默认值直接决定，并非来自 `modules.json`：
   - `src/server/protocol-handler.ts:89`
 

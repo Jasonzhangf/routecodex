@@ -1,4 +1,3 @@
-import fs from 'node:fs';
 import path from 'node:path';
 import { homedir } from 'node:os';
 
@@ -47,14 +46,6 @@ function expandHome(value: string, homeDir?: string): string {
   return path.join(resolveHomeDir(homeDir), value.slice(2));
 }
 
-function pathExists(target: string): boolean {
-  try {
-    return fs.existsSync(target);
-  } catch {
-    return false;
-  }
-}
-
 export function resolveRccUserDir(homeDir?: string): string {
   for (const key of USER_DIR_ENV_KEYS) {
     const raw = String(process.env[key] || '').trim();
@@ -70,15 +61,7 @@ export function resolveLegacyRouteCodexUserDir(homeDir?: string): string {
 }
 
 export function resolveRccUserDirForRead(homeDir?: string): string {
-  const primary = resolveRccUserDir(homeDir);
-  if (pathExists(primary)) {
-    return primary;
-  }
-  const legacy = resolveLegacyRouteCodexUserDir(homeDir);
-  if (pathExists(legacy)) {
-    return legacy;
-  }
-  return primary;
+  return resolveRccUserDir(homeDir);
 }
 
 export function resolveRccPath(...segments: string[]): string {
@@ -90,15 +73,7 @@ export function resolveLegacyRouteCodexPath(...segments: string[]): string {
 }
 
 export function resolveRccPathForRead(...segments: string[]): string {
-  const primary = resolveRccPath(...segments);
-  if (pathExists(primary)) {
-    return primary;
-  }
-  const legacy = resolveLegacyRouteCodexPath(...segments);
-  if (pathExists(legacy)) {
-    return legacy;
-  }
-  return primary;
+  return resolveRccPath(...segments);
 }
 
 export function resolveRccSubdir(key: RccSubdirKey, homeDir?: string): string {
@@ -106,15 +81,7 @@ export function resolveRccSubdir(key: RccSubdirKey, homeDir?: string): string {
 }
 
 export function resolveRccSubdirForRead(key: RccSubdirKey, homeDir?: string): string {
-  const primary = resolveRccSubdir(key, homeDir);
-  if (pathExists(primary)) {
-    return primary;
-  }
-  const legacy = path.join(resolveLegacyRouteCodexUserDir(homeDir), RCC_SUBDIRS[key]);
-  if (pathExists(legacy)) {
-    return legacy;
-  }
-  return primary;
+  return resolveRccSubdir(key, homeDir);
 }
 
 export function resolveRccAuthDir(homeDir?: string): string {
@@ -230,15 +197,7 @@ export function resolveRccConfigFile(homeDir?: string): string {
 }
 
 export function resolveRccConfigFileForRead(homeDir?: string): string {
-  const primary = resolveRccConfigFile(homeDir);
-  if (pathExists(primary)) {
-    return primary;
-  }
-  const legacy = path.join(resolveLegacyRouteCodexUserDir(homeDir), 'config.json');
-  if (pathExists(legacy)) {
-    return legacy;
-  }
-  return primary;
+  return resolveRccConfigFile(homeDir);
 }
 
 export function ensureRccUserDirEnvironment(homeDir?: string): string {

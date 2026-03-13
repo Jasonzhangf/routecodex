@@ -10,6 +10,7 @@ pub(crate) struct ProviderProfile {
     pub compatibility_profile: Option<String>,
     pub runtime_key: Option<String>,
     pub model_id: Option<String>,
+    pub model_capabilities: Option<HashMap<String, Vec<String>>>,
     pub process_mode: Option<String>,
     pub responses_config: Option<Value>,
     pub streaming: Option<Value>,
@@ -47,6 +48,26 @@ impl ProviderRegistry {
             .into_iter()
             .filter(|key| key.starts_with(&prefix))
             .collect()
+    }
+
+    pub(crate) fn has_capability(&self, provider_key: &str, capability: &str) -> bool {
+        let Some(profile) = self.providers.get(provider_key) else {
+            return false;
+        };
+        let model_id = profile
+            .model_id
+            .clone()
+            .unwrap_or_else(|| derive_model_id(&profile.provider_key));
+        if model_id.is_empty() {
+            return false;
+        }
+        let Some(model_capabilities) = profile.model_capabilities.as_ref() else {
+            return false;
+        };
+        let Some(capabilities) = model_capabilities.get(&model_id) else {
+            return false;
+        };
+        capabilities.iter().any(|item| item == capability)
     }
 
     pub(crate) fn resolve_runtime_key_by_index(
@@ -198,6 +219,7 @@ impl ProviderRegistry {
             .map(|v| v.to_string());
         let responses_config = map.get("responsesConfig").cloned();
         let streaming = map.get("streaming").cloned();
+        let model_capabilities = normalize_model_capabilities(map.get("modelCapabilities"));
         let max_context_tokens = map.get("maxContextTokens").and_then(|v| v.as_i64());
         let server_tools_disabled = map
             .get("serverToolsDisabled")
@@ -212,6 +234,7 @@ impl ProviderRegistry {
             compatibility_profile,
             runtime_key,
             model_id,
+            model_capabilities,
             process_mode,
             responses_config,
             streaming,
@@ -239,4 +262,36 @@ pub(crate) fn derive_model_id(provider_key: &str) -> String {
         return remainder.trim().to_string();
     }
     "".to_string()
+}
+
+fn normalize_model_capabilities(
+    value: Option<&Value>,
+) -> Option<HashMap<String, Vec<String>>> {
+    let Some(map) = value.and_then(|v| v.as_object()) else {
+        return None;
+    };
+    let mut out: HashMap<String, Vec<String>> = HashMap::new();
+    for (model_id, caps_value) in map {
+        let normalized_model = model_id.trim();
+        if normalized_model.is_empty() {
+            continue;
+        }
+        let caps = caps_value
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .filter(|s| !s.trim().is_empty())
+                    .collect::<Vec<String>>()
+            })
+            .unwrap_or_default();
+        if !caps.is_empty() {
+            out.insert(normalized_model.to_string(), caps);
+        }
+    }
+    if out.is_empty() {
+        None
+    } else {
+        Some(out)
+    }
 }

@@ -228,6 +228,10 @@ export function* buildResponseStartEvents(
   context: ResponsesEventGeneratorContext,
   config: ResponsesEventGeneratorConfig = DEFAULT_RESPONSES_EVENT_GENERATOR_CONFIG
 ): Generator<ResponsesSseEvent> {
+  const basePayload = createResponsePayload(response, { status: 'in_progress' });
+  if (Object.prototype.hasOwnProperty.call(basePayload, 'output')) {
+    basePayload.output = [];
+  }
   // 第一个事件：response.created
   const createdEvent = createBaseEvent(context, config);
   yield {
@@ -236,7 +240,7 @@ export function* buildResponseStartEvents(
     protocol: createdEvent.protocol,
     direction: createdEvent.direction,
     data: {
-      response: createResponsePayload(response, { status: 'in_progress' })
+      response: basePayload
     },
     sequenceNumber: createdEvent.sequenceNumber
   };
@@ -249,7 +253,7 @@ export function* buildResponseStartEvents(
     protocol: inProgressEvent.protocol,
     direction: inProgressEvent.direction,
     data: {
-      response: createResponsePayload(response, { status: 'in_progress' })
+      response: basePayload
     },
     sequenceNumber: inProgressEvent.sequenceNumber
   };
@@ -582,6 +586,7 @@ export function* buildReasoningDeltas(
   config: ResponsesEventGeneratorConfig = DEFAULT_RESPONSES_EVENT_GENERATOR_CONFIG
 ): Generator<ResponsesSseEvent> {
   const contents = Array.isArray(reasoning.content) ? reasoning.content : [];
+  let contentIndex = 0;
   for (const content of contents) {
     if (content.type === 'reasoning_text') {
       if (!content.text) continue;
@@ -595,6 +600,7 @@ export function* buildReasoningDeltas(
         data: {
           output_index: context.outputIndexCounter,
           item_id: reasoning.id,
+          content_index: contentIndex,
           delta: content.text
         },
         sequenceNumber: baseEvent.sequenceNumber
@@ -610,6 +616,7 @@ export function* buildReasoningDeltas(
         data: {
           output_index: context.outputIndexCounter,
           item_id: reasoning.id,
+          content_index: contentIndex,
           signature: content.signature
         },
         sequenceNumber: baseEvent.sequenceNumber
@@ -625,11 +632,13 @@ export function* buildReasoningDeltas(
         data: {
           output_index: context.outputIndexCounter,
           item_id: reasoning.id,
+          content_index: contentIndex,
           image_url: content.image_url
         },
         sequenceNumber: baseEvent.sequenceNumber
       };
     }
+    contentIndex += 1;
   }
 }
 

@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
+import { resolveRccPathForRead } from '../../runtime/user-data-paths.js';
 
 export interface OAuthTokenFileMatch {
   filePath: string;
@@ -19,14 +19,14 @@ function resolveAuthDir(authDir?: string): string {
   if (envDir) {
     return envDir;
   }
-  return path.join(os.homedir(), '.routecodex', 'auth');
+  return resolveRccPathForRead('auth');
 }
 
 /**
- * 扫描本地 RouteCodex auth 目录中的 OAuth token 文件。
+ * 扫描本地 auth 目录中的 OAuth token 文件。
  *
  * 约定:
- * - 目录: ~/.routecodex/auth
+ * - 目录: ~/.rcc/auth
  * - 文件名: <provider>-oauth-<sequence>[-<alias>].json
  *
  * 仅在 Node 环境下使用；如果环境不满足，返回空列表。
@@ -75,7 +75,7 @@ export function scanOAuthTokenFiles(oauthProviderId: string, authDir?: string): 
  * 扫描 DeepSeek account token 文件。
  *
  * 约定:
- * - 目录: ~/.routecodex/auth
+ * - 目录: ~/.rcc/auth
  * - 文件名: deepseek-account-<alias>.json
  *   例如: deepseek-account-1.json, deepseek-account-2-work.json
  */

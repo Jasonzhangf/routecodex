@@ -67,7 +67,7 @@ virtualRouter 期望（关键片段）
 - 工具链：`required_action.submit_tool_outputs` 原样透传，不文本化。
 
 落盘与回放
-- 目录：`~/.routecodex/codex-samples/responses-replay`。
+- 目录：`~/.rcc/codex-samples/responses-replay`。
 - 文件：`raw-request_req_*.json`、`provider-out-generic_*.json`、`sse-events-<RID>.log`。
 - 脚本（新增）：
   - `scripts/verify-responses-passthrough.mjs`：对比 raw-request 与 provider-out 正文字段一致（headers/trace 差异允许）。

@@ -24,10 +24,10 @@
 #### 使用方法
 ```bash
 # 启动 LM Studio 配置 (端口 5521)
-npx ts-node src/cli.ts start --config ~/.routecodex/config/lmstudio-5521-gpt-oss-20b-mlx.json --port 5521
+npx ts-node src/cli.ts start --config ~/.rcc/config/lmstudio-5521-gpt-oss-20b-mlx.json --port 5521
 
 # 启动 Qwen Provider 配置 (端口 5522)
-npx ts-node src/cli.ts start --config ~/.routecodex/config/qwen-5522-qwen3-coder-plus.json --port 5522
+npx ts-node src/cli.ts start --config ~/.rcc/config/qwen-5522-qwen3-coder-plus.json --port 5522
 ```
 
 ## 目录结构

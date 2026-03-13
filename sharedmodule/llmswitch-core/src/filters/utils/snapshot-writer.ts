@@ -1,7 +1,7 @@
-import os from 'node:os';
 import path from 'node:path';
 import * as fsp from 'node:fs/promises';
 import type { FilterStage } from '../types.js';
+import { resolveRccPath } from '../../runtime/user-data-paths.js';
 
 function mapEndpointToFolder(ep?: string): string {
   const e = String(ep || '').trim().toLowerCase();
@@ -73,7 +73,7 @@ export async function writeFilterSnapshot(options: {
     const baseOverride = process?.env?.RCC_SNAPSHOT_DIR;
     const base = baseOverride && baseOverride.trim()
       ? baseOverride.trim()
-      : path.join(os.homedir(), '.routecodex', 'codex-samples');
+      : resolveRccPath('codex-samples');
     const folder = mapEndpointToFolder(options.endpoint);
     const provider = sanitizeToken(options.profile || '', '__pending__');
     const dir = path.join(base, folder, provider, rid);

@@ -31,7 +31,7 @@ export function createUserConfigMigrateCommand(ctx?: UserConfigMigrateCommandCon
 
   const command = new Command('migrate-user-config');
   command
-    .description('Plan/apply migration of user-owned config artifacts from ~/.routecodex to ~/.rcc')
+    .description('Plan/apply migration of user-owned config artifacts (config/provider/auth) from ~/.routecodex to ~/.rcc')
     .option('--apply', 'Apply the migration plan and copy files into ~/.rcc')
     .option('--overwrite', 'Overwrite conflicting destination files in ~/.rcc')
     .option('--json', 'Output machine-readable JSON')
@@ -55,7 +55,7 @@ export function createUserConfigMigrateCommand(ctx?: UserConfigMigrateCommandCon
 
         printPlan(log, plan);
         if (!options.apply) {
-          log('Dry-run only. Re-run with --apply to copy config.json/config/provider into ~/.rcc.');
+          log('Dry-run only. Re-run with --apply to copy config.json/config/provider/auth into ~/.rcc.');
           return;
         }
 

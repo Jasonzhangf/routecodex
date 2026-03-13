@@ -1,18 +1,25 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import type { CompatProfileConfig } from './compat-types.js';
 import { normalizeProviderProtocolTokenWithNative } from '../../../../router/virtual-router/engine-selection/native-hub-pipeline-req-inbound-semantics.js';
+import {
+  resolveRccPath
+} from '../../../../runtime/user-data-paths.js';
 
 const builtinDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   '../../../compat/profiles'
 );
 
-const USER_COMPAT_DIR =
-  (process.env.ROUTECODEX_COMPAT_DIR && process.env.ROUTECODEX_COMPAT_DIR.trim()) ||
-  path.join(os.homedir(), '.routecodex', 'compat');
+const USER_COMPAT_DIR_OVERRIDE = process.env.ROUTECODEX_COMPAT_DIR && process.env.ROUTECODEX_COMPAT_DIR.trim();
+
+function resolveUserCompatDirs(): string[] {
+  if (USER_COMPAT_DIR_OVERRIDE) {
+    return [USER_COMPAT_DIR_OVERRIDE];
+  }
+  return [resolveRccPath('compat')];
+}
 
 let profileMap: Map<string, CompatProfileConfig> | null = null;
 
@@ -77,9 +84,11 @@ function buildProfileMap(): Map<string, CompatProfileConfig> {
   for (const [key, value] of builtinProfiles.entries()) {
     merged.set(key, value);
   }
-  const userProfiles = normalizeProfiles(loadProfilesFromDir(USER_COMPAT_DIR));
-  for (const [key, value] of userProfiles.entries()) {
-    merged.set(key, value);
+  for (const dir of resolveUserCompatDirs()) {
+    const userProfiles = normalizeProfiles(loadProfilesFromDir(dir));
+    for (const [key, value] of userProfiles.entries()) {
+      merged.set(key, value);
+    }
   }
   return merged;
 }

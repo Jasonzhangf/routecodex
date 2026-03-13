@@ -4,7 +4,7 @@
 
 ### 1.1 配置层次结构
 ```
-用户配置层 (~/.routecodex/config.json)
+用户配置层 (~/.rcc/config.json)
     ↓
 系统模块默认 (./config/modules.json)
     ↓
@@ -26,7 +26,7 @@ VirtualRouterArtifacts (virtualRouter + targetRuntime)
 
 ## 2. 配置文件结构
 
-### 2.1 用户配置文件 (~/.routecodex/config.json)
+### 2.1 用户配置文件 (~/.rcc/config.json)
 
 ```json
 {
@@ -191,7 +191,7 @@ interface RouteTarget {
 #### 3.1.2 AuthFile解析
 ```typescript
 // AuthFile格式: "authfile-{filename}"
-// 密钥文件位置: ~/.routecodex/auth/{filename}
+// 密钥文件位置: ~/.rcc/auth/{filename}
 interface AuthFileResolver {
   resolveAuthKey(keyId: string): string;
 }
@@ -327,7 +327,7 @@ class ConfigManagerModule {
 
 #### 5.1.1 密钥文件位置
 ```
-~/.routecodex/auth/
+~/.rcc/auth/
 ├── openai-main
 ├── openai-backup
 └── anthropic-main
@@ -335,10 +335,10 @@ class ConfigManagerModule {
 
 #### 5.1.2 密钥文件格式
 ```bash
-# ~/.routecodex/auth/openai-main
+# ~/.rcc/auth/openai-main
 sk-your-actual-openai-key-here
 
-# ~/.routecodex/auth/anthropic-main
+# ~/.rcc/auth/anthropic-main
 sk-ant-your-actual-anthropic-key-here
 ```
 
@@ -346,7 +346,7 @@ sk-ant-your-actual-anthropic-key-here
 
 #### 5.2.1 文件权限
 ```bash
-chmod 600 ~/.routecodex/auth/*
+chmod 600 ~/.rcc/auth/*
 ```
 
 #### 5.2.2 密钥缓存

@@ -8,7 +8,7 @@
 
 ### Token 存放位置
 
-默认目录：`~/.routecodex/auth/`
+默认目录：`~/.rcc/auth/`
 
 常见命名：
 - `qwen-oauth-<seq>-<alias>.json`
@@ -21,7 +21,7 @@
 1) **显式路径**（通用，最稳）：
 
 ```jsonc
-"auth": { "type": "qwen-oauth", "tokenFile": "~/.routecodex/auth/qwen-oauth-1-default.json" }
+"auth": { "type": "qwen-oauth", "tokenFile": "~/.rcc/auth/qwen-oauth-1-default.json" }
 ```
 
 2) **alias（仅文件名，不含路径）**：
@@ -32,8 +32,8 @@
 
 当前推荐 Qwen 用 alias：`default`。
 
-- 如果存在 `~/.routecodex/auth/qwen-oauth-1-default.json`，会优先使用它（固定文件名，避免“我刚 reauth 但 server 读的是另一个 seq”的坑）
-- 否则会回退到 `~/.routecodex/auth/qwen-oauth-*-default.json` 中 seq 最新的那份
+- 如果存在 `~/.rcc/auth/qwen-oauth-1-default.json`，会优先使用它（固定文件名，避免“我刚 reauth 但 server 读的是另一个 seq”的坑）
+- 否则会回退到 `~/.rcc/auth/qwen-oauth-*-default.json` 中 seq 最新的那份
 
 ## 2) 认证（授权登录）
 
@@ -78,7 +78,7 @@ CLI `oauth <selector>` 若发现 quota-manager 已将该 alias 标记为 `verify
 - 若你希望不提示直接打开：设置 `ROUTECODEX_OAUTH_AUTO_OPEN_VERIFY=1`（或 `RCC_OAUTH_AUTO_OPEN_VERIFY=1`），或在命令上加 `--headful`
 - 若你只想打印 URL：回答 `n`
 
-> 注：quota-manager 状态文件默认读取 `${ROUTECODEX_HOME:-$HOME}/.routecodex/quota/quota-manager.json`（便于测试/沙盒环境重定向）。
+> 注：quota-manager 状态文件默认读取 `${ROUTECODEX_HOME:-$HOME}/.rcc/quota/quota-manager.json`（便于测试/沙盒环境重定向）。
 
 Portal 健康检查（`/health`）默认会等待 **300s**（网络慢时避免过早 timeout），可用环境变量调整：
 
@@ -157,7 +157,7 @@ ${bin} oauth validate all
 
 2) **`auth.type` 与 `tokenFile` 是否对得上**
    - Qwen：`"type": "qwen-oauth"` + `tokenFile: "default"`（或写全路径）
-   - 认证生成的文件是否真的在 `~/.routecodex/auth/` 下
+   - 认证生成的文件是否真的在 `~/.rcc/auth/` 下
 
 3) **token 文件内容是否具备可用字段**
    - 至少需要 `access_token`（部分 provider 还会有 `api_key`）

@@ -101,7 +101,30 @@ fn apply_target_metadata(
     original_model: Option<String>,
 ) {
     if let Some(route) = route_name.filter(|v| !v.trim().is_empty()) {
-        normalized_metadata.insert("routeName".to_string(), Value::String(route));
+        let route_trimmed = route.trim().to_string();
+        normalized_metadata.insert("routeName".to_string(), Value::String(route_trimmed.clone()));
+
+        if let Some(existing_effort) = normalized_metadata
+            .get("reasoning_effort")
+            .and_then(|v| v.as_str())
+        {
+            let trimmed = existing_effort.trim();
+            if !trimmed.is_empty() {
+                normalized_metadata.insert(
+                    "originalReasoningEffort".to_string(),
+                    Value::String(trimmed.to_string()),
+                );
+            }
+        }
+
+        let reasoning_effort = match route_trimmed.to_lowercase().as_str() {
+            "coding" | "thinking" => "high",
+            _ => "medium",
+        };
+        normalized_metadata.insert(
+            "reasoning_effort".to_string(),
+            Value::String(reasoning_effort.to_string()),
+        );
     }
 
     if let Some(provider_key) = read_trimmed_string(target_map, "providerKey") {
@@ -334,6 +357,7 @@ mod tests {
         );
         assert_eq!(result.normalized_metadata["assignedModelId"], "gpt-5.2");
         assert_eq!(result.normalized_metadata["toolCallIdStyle"], "fc");
+        assert_eq!(result.normalized_metadata["reasoning_effort"], "high");
     }
 
     #[test]

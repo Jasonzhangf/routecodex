@@ -207,25 +207,50 @@ function collectProviderModels(
 ): { declared: boolean; models: string[] } {
   const rawModelsNode = (providerRaw as any).models;
   const modelsDeclared = rawModelsNode !== undefined;
-  const modelsNode = asRecord(rawModelsNode);
   const collected = new Set<string>();
 
-  for (const [modelName, modelConfigRaw] of Object.entries(modelsNode)) {
-    const normalizedModelName = typeof modelName === 'string' ? modelName.trim() : '';
-    if (normalizedModelName) {
-      collected.add(normalizedModelName);
-    }
-    const modelConfig = asRecord(modelConfigRaw);
-    const aliasesNode = Array.isArray((modelConfig as { aliases?: unknown }).aliases)
-      ? ((modelConfig as { aliases: unknown[] }).aliases as unknown[])
-      : [];
-    for (const alias of aliasesNode) {
-      if (typeof alias !== 'string') {
+  if (Array.isArray(rawModelsNode)) {
+    for (const model of rawModelsNode) {
+      if (!model || typeof model !== 'object') {
         continue;
       }
-      const normalizedAlias = alias.trim();
-      if (normalizedAlias) {
-        collected.add(normalizedAlias);
+      const modelObj = model as Record<string, unknown>;
+      const modelId = typeof modelObj.id === 'string' ? modelObj.id.trim() : '';
+      if (modelId) {
+        collected.add(modelId);
+      }
+      const aliasesNode = Array.isArray((modelObj as { aliases?: unknown }).aliases)
+        ? ((modelObj as { aliases: unknown[] }).aliases as unknown[])
+        : [];
+      for (const alias of aliasesNode) {
+        if (typeof alias !== 'string') {
+          continue;
+        }
+        const normalizedAlias = alias.trim();
+        if (normalizedAlias) {
+          collected.add(normalizedAlias);
+        }
+      }
+    }
+  } else {
+    const modelsNode = asRecord(rawModelsNode);
+    for (const [modelName, modelConfigRaw] of Object.entries(modelsNode)) {
+      const normalizedModelName = typeof modelName === 'string' ? modelName.trim() : '';
+      if (normalizedModelName) {
+        collected.add(normalizedModelName);
+      }
+      const modelConfig = asRecord(modelConfigRaw);
+      const aliasesNode = Array.isArray((modelConfig as { aliases?: unknown }).aliases)
+        ? ((modelConfig as { aliases: unknown[] }).aliases as unknown[])
+        : [];
+      for (const alias of aliasesNode) {
+        if (typeof alias !== 'string') {
+          continue;
+        }
+        const normalizedAlias = alias.trim();
+        if (normalizedAlias) {
+          collected.add(normalizedAlias);
+        }
       }
     }
   }

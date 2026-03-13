@@ -145,7 +145,7 @@ Step 2 完成后，provider 会拆分到：
 Step 3（配置密钥/token）的最小动作：
 - API Key 类：设置环境变量（如 `OPENAI_API_KEY` / `TAB_API_KEY` / `GLM_API_KEY`）
 - OAuth 类：执行 `rcc oauth qwen-auto qwen`、`rcc oauth gemini-auto gemini-cli`、`rcc oauth antigravity-auto antigravity`
-- DeepSeek：在 `~/.routecodex/auth/deepseek-account-1.json` 写入 `mobile/password`，启动后自动回填 `access_token`
+- DeepSeek：在 `~/.rcc/auth/deepseek-account-1.json` 写入 `mobile/password`，启动后自动回填 `access_token`
 
 Windows PowerShell 对应写法：
 
@@ -226,14 +226,14 @@ API key 类 provider 的常用环境变量（按 init 模板）：
 |------|------|------|
 | `openai` | `apikey` | 设置 `OPENAI_API_KEY` |
 | `tab` | `apikey` (responses) | 设置 `TAB_API_KEY` |
-| `deepseek-web` | `deepseek-account` (`tokenFile` entries) | 准备 `~/.routecodex/auth/deepseek-account-*.json` |
+| `deepseek-web` | `deepseek-account` (`tokenFile` entries) | 准备 `~/.rcc/auth/deepseek-account-*.json` |
 | `glm` | `apikey` | 设置 `GLM_API_KEY` |
 | `glm-anthropic` | `apikey` (`/v1/messages`) | 设置 `GLM_API_KEY` |
 | `kimi` | `apikey` | 设置 `KIMI_API_KEY` |
 | `modelscope` | `apikey` | 设置 `MODELSCOPE_API_KEY` |
 | `lmstudio` | `apikey` (本地) | 通常可留空或填本地网关 key |
 | `qwen` | `qwen-oauth` (`tokenFile=default`) | 先跑 OAuth 生成 token |
-| `iflow` | `iflow-cookie` | 准备 `~/.routecodex/auth/iflow-work.cookie` |
+| `iflow` | `iflow-cookie` | 准备 `~/.rcc/auth/iflow-work.cookie` |
 | `mimo` | `apikey` | 设置 `MIMO_API_KEY` |
 | `gemini-cli` | `gemini-cli-oauth` (`entries[].tokenFile`) | 先跑 OAuth 生成 token |
 | `antigravity` | `antigravity-oauth` (`entries[].tokenFile`) | 先跑 OAuth 生成 token |
@@ -278,7 +278,7 @@ DeepSeek 单文件凭据 + token（同一文件）示例：
 }
 ```
 
-放在 `~/.routecodex/auth/deepseek-account-1.json` 后，启动时会自动登录并回填 `access_token`。
+放在 `~/.rcc/auth/deepseek-account-1.json` 后，启动时会自动登录并回填 `access_token`。
 
 ### 5) 脱敏快速配置（来自当前线上配置）
 

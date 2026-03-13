@@ -172,14 +172,14 @@ antigravity/<version> <os>/<arch>
 1. 显式 UA：`ROUTECODEX_ANTIGRAVITY_USER_AGENT` / `RCC_ANTIGRAVITY_USER_AGENT`（完全覆盖）
 2. 显式版本号：`ROUTECODEX_ANTIGRAVITY_UA_VERSION` / `RCC_ANTIGRAVITY_UA_VERSION`
 3. 远程拉取：`VERSION_URL`，失败时回退 `CHANGELOG_URL`（可用 `ROUTECODEX_ANTIGRAVITY_UA_DISABLE_REMOTE=1` 禁用）
-4. 本地磁盘 cache：`~/.routecodex/state/antigravity-ua-version.json`
+4. 本地磁盘 cache：`~/.rcc/state/antigravity-ua-version.json`
 5. 最后兜底：`KNOWN_STABLE_VERSION`（当前 `4.1.24`，对齐 Antigravity-Manager）
 
 ### 4.3 `<os>/<arch>` suffix 如何从指纹推断（并且为何禁 linux）
 
 实现位置：`src/providers/auth/antigravity-fingerprint.ts`
 
-- 指纹文件：`~/.routecodex/camoufox-fp/<profileId>.json`
+- 指纹文件：`~/.rcc/camoufox-fp/<profileId>.json`
 - 从 `CAMOU_CONFIG_1` 的 `navigator.*` 字段推断：
   - `windows|macos|linux`
   - `amd64|aarch64`
@@ -191,7 +191,7 @@ RouteCodex 约束：
 
 实现位置：`src/providers/core/config/camoufox-launcher.ts`
 
-- 每个 alias 都对应一个稳定 profileId（目录在 `~/.routecodex/camoufox-profiles/`）。
+- 每个 alias 都对应一个稳定 profileId（目录在 `~/.rcc/camoufox-profiles/`）。
 - `gemini-cli` 与 `antigravity` 共享同一“指纹家族（gemini）”，因此同 alias 在两者之间共享 profileId（避免一个账号跑出两套指纹）。
 - OS policy：对 `(providerFamily, alias)` 做稳定 hash，把不同 alias 分布到 `windows/macos`，并**严格禁止 linux**。
 

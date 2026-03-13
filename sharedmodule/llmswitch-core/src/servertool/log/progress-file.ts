@@ -1,6 +1,6 @@
-import * as os from 'node:os';
 import * as path from 'node:path';
 import { promises as fs } from 'node:fs';
+import { resolveRccPath } from '../../runtime/user-data-paths.js';
 
 export type ServerToolProgressFileEvent = {
   requestId: string;
@@ -16,7 +16,7 @@ export type ServerToolProgressFileEvent = {
 
 const truthy = new Set(['1', 'true', 'yes', 'on']);
 const falsy = new Set(['0', 'false', 'no', 'off']);
-const DEFAULT_LOG_PATH = path.join(os.homedir(), '.routecodex', 'logs', 'servertool-events.jsonl');
+const DEFAULT_LOG_PATH = path.join(resolveRccPath(), 'logs', 'servertool-events.jsonl');
 
 let cachedEnabled: boolean | null = null;
 let cachedLogPath: string | null = null;
@@ -113,4 +113,3 @@ export function resetServerToolProgressFileLoggerForTests(): void {
 export async function flushServerToolProgressFileLoggerForTests(): Promise<void> {
   await writeQueue;
 }
-

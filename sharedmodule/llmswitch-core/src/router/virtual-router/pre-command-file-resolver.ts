@@ -1,6 +1,8 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import os from 'node:os';
+import {
+  resolveRccUserDir
+} from '../../runtime/user-data-paths.js';
 
 const DEFAULT_PRECOMMAND_SCRIPT = 'default.sh';
 const DEFAULT_PRECOMMAND_SCRIPT_CONTENT = [
@@ -11,20 +13,8 @@ const DEFAULT_PRECOMMAND_SCRIPT_CONTENT = [
   ''
 ].join('\n');
 
-function resolveRoutecodexUserDir(): string {
-  const override = process.env.ROUTECODEX_USER_DIR;
-  if (override && override.trim()) {
-    return override.trim();
-  }
-  const home = os.homedir();
-  if (!home) {
-    throw new Error('precommand: cannot resolve homedir');
-  }
-  return path.join(home, '.routecodex');
-}
-
 function resolvePreCommandBaseDir(): string {
-  return path.resolve(resolveRoutecodexUserDir(), 'precommand');
+  return path.resolve(resolveRccUserDir(), 'precommand');
 }
 
 function normalizeRelativePath(raw: string): string {
@@ -38,7 +28,7 @@ function normalizeRelativePath(raw: string): string {
 function normalizePreCommandRelativePath(raw: string, fromFileScheme: boolean): string {
   const normalized = normalizeRelativePath(raw);
   if (normalized === 'precommand') {
-    throw new Error('precommand: expected script file under ~/.routecodex/precommand');
+    throw new Error('precommand: expected script file under ~/.rcc/precommand');
   }
   if (normalized.startsWith('precommand/')) {
     return normalized.slice('precommand/'.length);
@@ -65,14 +55,15 @@ export function resolvePreCommandScriptPath(raw: string): string {
     throw new Error('precommand file://: missing relative path');
   }
   if (relRaw.startsWith('/') || relRaw.startsWith('\\') || /^[a-zA-Z]:[\\/]/.test(relRaw)) {
-    throw new Error('precommand: only supports paths relative to ~/.routecodex/precommand');
+    throw new Error('precommand: only supports paths relative to ~/.rcc/precommand');
   }
 
   const relToPreCommand = normalizePreCommandRelativePath(relRaw, fromFileScheme);
-  const base = resolvePreCommandBaseDir();
-  const abs = path.resolve(base, relToPreCommand);
-  if (abs !== base && !abs.startsWith(`${base}${path.sep}`)) {
-    throw new Error('precommand: path escapes ~/.routecodex/precommand');
+  const selectedBase = resolvePreCommandBaseDir();
+  const abs = path.resolve(selectedBase, relToPreCommand);
+
+  if (abs !== selectedBase && !abs.startsWith(`${selectedBase}${path.sep}`)) {
+    throw new Error('precommand: path escapes ~/.rcc/precommand');
   }
 
   let stat: fs.Stats;
@@ -80,7 +71,7 @@ export function resolvePreCommandScriptPath(raw: string): string {
     stat = fs.statSync(abs);
   } catch (err: any) {
     if (shouldAutoCreateDefaultScript(relToPreCommand, err)) {
-      tryCreateDefaultPreCommandScript(base, abs);
+      tryCreateDefaultPreCommandScript(selectedBase, abs);
       try {
         stat = fs.statSync(abs);
       } catch (retryErr: any) {

@@ -231,6 +231,13 @@ async function main() {
   results.push(await run('matrix:virtual-router-direct-model', 'scripts/tests/virtual-router-direct-model.mjs'));
   // 1e.2) route classifier: local search tools must not be misrouted to web_search
   results.push(await run('matrix:web-search-vs-search-route', 'scripts/tests/web-search-vs-search-route.mjs'));
+  // 1e.3) capability-based routing must use default pool (vision/web_search)
+  results.push(
+    await run(
+      'matrix:virtual-router-capability-default-pool',
+      'scripts/tests/virtual-router-capability-default-pool.mjs'
+    )
+  );
   // 1f) servertool followup timeout (must not hang)
   results.push(await run('matrix:virtual-router-media-kimi-route', 'scripts/tests/virtual-router-media-kimi-route.mjs'));
   results.push(await run('matrix:vision-kimi-bypass', 'scripts/tests/vision-kimi-bypass.mjs'));

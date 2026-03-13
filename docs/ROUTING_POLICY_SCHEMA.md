@@ -36,7 +36,7 @@ Canonical snapshot shape:
     "webSearch": {},
     "execCommandGuard": {
       "enabled": true,
-      "policyFile": "~/.routecodex/policy/exec-command-guard.v1.json"
+      "policyFile": "~/.rcc/policy/exec-command-guard.v1.json"
     },
     "session": {}
   }

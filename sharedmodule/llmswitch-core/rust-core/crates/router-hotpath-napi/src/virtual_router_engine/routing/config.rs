@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 use super::super::features::RoutingFeatures;
 use super::super::load_balancer::LoadBalancingPolicy;
+use super::super::provider_registry::ProviderRegistry;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -77,19 +78,13 @@ pub(crate) fn build_route_queue(
     routing: &RoutingPools,
 ) -> Vec<String> {
     let mut queue: Vec<String> = Vec::new();
-    let has_local_video = features.has_video_attachment
-        && features.has_local_video_attachment
-        && features.has_image_attachment;
-    if has_local_video && route_has_targets(routing, "vision") {
-        queue.push("vision".to_string());
-    } else {
-        if !requested_route.trim().is_empty() {
-            queue.push(requested_route.to_string());
-        }
-        for route in candidates {
-            if !queue.contains(route) {
-                queue.push(route.clone());
-            }
+    let _ = (features, routing);
+    if !requested_route.trim().is_empty() {
+        queue.push(requested_route.to_string());
+    }
+    for route in candidates {
+        if !queue.contains(route) {
+            queue.push(route.clone());
         }
     }
     if !queue.contains(&super::super::classifier::DEFAULT_ROUTE.to_string()) {
@@ -141,4 +136,39 @@ pub(crate) fn build_route_candidates(
         }
     }
     available
+}
+
+pub(crate) fn filter_pools_by_capability(
+    pools: &[RoutePoolTier],
+    provider_registry: &ProviderRegistry,
+    capability: &str,
+) -> Vec<RoutePoolTier> {
+    let mut out = Vec::new();
+    for pool in pools {
+        if pool.targets.is_empty() {
+            continue;
+        }
+        let targets: Vec<String> = pool
+            .targets
+            .iter()
+            .filter(|key| provider_registry.has_capability(key, capability))
+            .cloned()
+            .collect();
+        if targets.is_empty() {
+            continue;
+        }
+        let mut next = pool.clone();
+        next.targets = targets;
+        out.push(next);
+    }
+    out
+}
+
+pub(crate) fn default_pool_supports_capability(
+    routing: &RoutingPools,
+    provider_registry: &ProviderRegistry,
+    capability: &str,
+) -> bool {
+    let pools = routing.get(super::super::classifier::DEFAULT_ROUTE);
+    !filter_pools_by_capability(&pools, provider_registry, capability).is_empty()
 }

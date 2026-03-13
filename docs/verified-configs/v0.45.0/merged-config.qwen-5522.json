@@ -41,7 +41,7 @@
         ],
         "enableConsole": true,
         "enableFile": true,
-        "filePath": "~/.routecodex/logs/debug-center.log",
+        "filePath": "~/.rcc/logs/debug-center.log",
         "maxFileSize": "10MB",
         "maxFiles": 5,
         "enableRotation": true
@@ -64,7 +64,7 @@
           "level": "info",
           "enableConsole": true,
           "enableFile": true,
-          "filePath": "~/.routecodex/logs/server/http-server.log",
+          "filePath": "~/.rcc/logs/server/http-server.log",
           "categories": [
             "server",
             "api",
@@ -1553,7 +1553,7 @@
     "version": "2.0.0",
     "engine": "routecodex-config-engine",
     "timestamp": 1760321473341,
-    "configPath": "/Users/fanzhang/.routecodex/config/qwen-5522-qwen3-coder-plus.json"
+    "configPath": "/Users/fanzhang/.rcc/config/qwen-5522-qwen3-coder-plus.json"
   },
   "engineVersion": "legacy"
 }

@@ -16,7 +16,7 @@
 - `<**precommand:clear**>`：清除当前 precommand 状态
 - `<**precommand**>` / `<**precommand:on**>`：加载默认脚本（默认 `default.sh`，可用 `ROUTECODEX_PRECOMMAND_DEFAULT_SCRIPT` 覆盖）
 
-脚本必须位于 `~/.routecodex/precommand` 下（支持 `ROUTECODEX_USER_DIR` 覆盖根目录）。
+脚本必须位于 `~/.rcc/precommand` 下（支持 `ROUTECODEX_USER_DIR` 覆盖根目录）。
 
 运行时会把 hook event JSON 通过 stdin 和环境变量 `ROUTECODEX_PRE_COMMAND_HOOK_EVENT` 传给脚本：
 
@@ -25,7 +25,7 @@
 
 ## Config file (fallback)
 
-当未激活 runtime precommand 时，回退读取：`~/.routecodex/hooks/pre-command-hooks.json`
+当未激活 runtime precommand 时，回退读取：`~/.rcc/hooks/pre-command-hooks.json`
 
 可覆盖：
 
@@ -50,7 +50,7 @@
       "id": "audit-pre-command",
       "tool": ["exec_command", "shell"],
       "priority": 20,
-      "shell": "cat >> ~/.routecodex/logs/pre-command-audit.jsonl"
+      "shell": "cat >> ~/.rcc/logs/pre-command-audit.jsonl"
     }
   ]
 }
@@ -61,7 +61,7 @@
 可直接用 `jq` 向 hooks 文件追加注册项：
 
 ```bash
-HOOK_FILE="${ROUTECODEX_PRE_COMMAND_HOOKS_FILE:-$HOME/.routecodex/hooks/pre-command-hooks.json}"
+HOOK_FILE="${ROUTECODEX_PRE_COMMAND_HOOKS_FILE:-$HOME/.rcc/hooks/pre-command-hooks.json}"
 mkdir -p "$(dirname "$HOOK_FILE")"
 [ -f "$HOOK_FILE" ] || printf '{"enabled":true,"hooks":[]}' > "$HOOK_FILE"
 

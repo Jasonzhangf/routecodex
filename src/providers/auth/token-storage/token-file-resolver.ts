@@ -71,7 +71,8 @@ export function resolveTokenFilePath(
     return resolved;
   }
 
-  // Pure alias: search under ~/.routecodex/auth for <provider>-oauth-*-<alias>.json (sync version)
+  // Pure alias: search under ~/.rcc/auth (with legacy-read compatibility) for
+  // <provider>-oauth-*-<alias>.json (sync version).
   const alias = raw;
   const homeDir = process.env.HOME || os.homedir();
   const authDir = resolveRccAuthDirForRead();

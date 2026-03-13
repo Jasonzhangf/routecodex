@@ -258,9 +258,8 @@ export function canonicalizeRuntimeProvider(runtime: ProviderRuntimeProfile): Pr
 }
 
 export function logStage(server: any, stage: string, requestId: string, details?: Record<string, unknown>): void {
-  if (!server.stageLoggingEnabled) {
-    return;
-  }
+  // Always forward stage events so release timing summary can aggregate
+  // internal scopes even when verbose stage logging is disabled.
   logPipelineStage(stage, requestId, details);
 }
 

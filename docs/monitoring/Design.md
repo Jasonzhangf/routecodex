@@ -19,7 +19,7 @@ This document describes a passive monitoring and replay system for RouteCodex.
 - ReplayExecutor (future): replay `response.json` or `stream-events.jsonl`
 
 ## Storage Layout
-Root: `~/.routecodex/monitor/sessions/<YYYYMMDD>/<protocol>/<reqId>/`
+Root: `~/.rcc/monitor/sessions/<YYYYMMDD>/<protocol>/<reqId>/`
 
 - `meta.json`             — meta + routing snapshot + redaction flags
 - `request.json`          — original input (protocol‑native)
@@ -45,7 +45,7 @@ Root: `~/.routecodex/monitor/sessions/<YYYYMMDD>/<protocol>/<reqId>/`
 
 ```bash
 npm run build
-node scripts/virtualrouter-dry-run-matrix.mjs --config ~/.routecodex/config/verified_0.46.32/multi-provider.json
+node scripts/virtualrouter-dry-run-matrix.mjs --config ~/.rcc/config/verified_0.46.32/multi-provider.json
 ```
 
 ## Integration Plan (Phased)

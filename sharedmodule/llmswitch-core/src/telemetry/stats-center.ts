@@ -1,6 +1,6 @@
-import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs/promises';
+import { resolveRccPath } from '../runtime/user-data-paths.js';
 
 export interface VirtualRouterHitEvent {
   requestId: string;
@@ -154,7 +154,7 @@ class DefaultStatsCenter implements StatsCenter {
     } else if (typeof persistPath === 'string' && persistPath.trim().length) {
       this.persistPath = persistPath.trim();
     } else {
-      const base = path.join(os.homedir(), '.routecodex', 'stats');
+      const base = resolveRccPath('stats');
       this.persistPath = path.join(base, 'stats.json');
     }
   }

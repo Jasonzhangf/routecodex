@@ -8,7 +8,7 @@
 
 ## 0) 你需要知道的文件/目录/入口
 
-### 关键目录（默认都在 `~/.routecodex/`）
+### 关键目录（默认都在 `~/.rcc/`）
 
 - OAuth token：`auth/antigravity-oauth-*.json`
 - Camoufox profile：`camoufox-profiles/rc-gemini.<alias>/...`
@@ -54,7 +54,7 @@ RouteCodex 的版本号来源（从高到低）：
 1. `ROUTECODEX_ANTIGRAVITY_USER_AGENT` / `RCC_ANTIGRAVITY_USER_AGENT`（完全覆盖）
 2. `ROUTECODEX_ANTIGRAVITY_UA_VERSION` / `RCC_ANTIGRAVITY_UA_VERSION`
 3. 远程拉取（可通过 `ROUTECODEX_ANTIGRAVITY_UA_DISABLE_REMOTE=1` 禁用）
-4. `~/.routecodex/state/antigravity-ua-version.json`
+4. `~/.rcc/state/antigravity-ua-version.json`
 5. 兜底版本（仅保证“有值”，不保证不过期）
 
 ### 修复步骤
@@ -64,7 +64,7 @@ RouteCodex 的版本号来源（从高到低）：
    - `routecodex oauth antigravity-auto <token-selector-or-path>`
    - 或批量：`routecodex oauth reauth-required`
 3. 如果 Google 提示需要二次验证（账户风控页），用对应 alias 的 profile 打开浏览器完成验证（“养号/解封”）：
-   - `rcc camoufox ~/.routecodex/auth/antigravity-oauth-<alias>.json --url '<verify_url>'`
+   - `rcc camoufox ~/.rcc/auth/antigravity-oauth-<alias>.json --url '<verify_url>'`
 
 > 关键点：必须用 **同一个 alias 的 Camoufox profile** 打开验证页，否则容易造成“验证通过但指纹漂移 → 继续 403”。
 
@@ -105,7 +105,7 @@ RouteCodex 的版本号来源（从高到低）：
 - `chat:gemini` 不会跑 `gemini_cli_request_wrap`（因此不会做历史 `thoughtSignature` 注入）
 - Antigravity 必须用 `chat:gemini-cli`（Cloud Code Assist wrapper 对齐 + signature 注入）
 
-修复点：确保你的用户配置中（`~/.routecodex/config.json`）：
+修复点：确保你的用户配置中（`~/.rcc/config.json`）：
 
 ```jsonc
 {
@@ -143,7 +143,7 @@ RouteCodex 的版本号来源（从高到低）：
 > 这个验证不依赖“你是否真的有 quota”；只要 upstream 在某次响应里下发过 signature，后续注入就应当可见。
 
 ### 如何确认 compat profile 真的生效
-用 `--snap` 或 dev 默认快照（`~/.routecodex/codex-samples/...`）检查 pipeline stage8：
+用 `--snap` 或 dev 默认快照（`~/.rcc/codex-samples/...`）检查 pipeline stage8：
 - `chat_process.req.stage8.outbound.compat.json` 里必须出现 `chat:gemini-cli`
 - 如果你看到的是 `chat:gemini`，说明 profile 仍然配错（很容易复发“第一次 OK，第二次 429”）
 

@@ -1,6 +1,6 @@
 # 内置 Provider 配置说明（virtualrouter.providers）
 
-> 本文只描述“用户配置层”的 provider 写法（`~/.routecodex/config.json`）。运行时会被 llmswitch-core 规范化为 Provider V2 Profile 并交给 Provider V2 传输层执行。
+> 本文只描述“用户配置层”的 provider 写法（`~/.rcc/config.json`）。运行时会被 llmswitch-core 规范化为 Provider V2 Profile 并交给 Provider V2 传输层执行。
 
 ## 通用字段
 
@@ -37,7 +37,7 @@
 ### 3) Cookie（cookieFile）
 
 ```jsonc
-"auth": { "type": "iflow-cookie", "cookieFile": "~/.routecodex/auth/iflow-work.cookie" }
+"auth": { "type": "iflow-cookie", "cookieFile": "~/.rcc/auth/iflow-work.cookie" }
 ```
 
 ## 各内置 Provider 的参考样本

@@ -1,7 +1,7 @@
 # ModelScope 独立验证记录
 
 - 日期: 2025-09-26
-- 配置文件: `~/.routecodex/config/modelscope.json`
+- 配置文件: `~/.rcc/config/modelscope.json`
 - 监听端口: 5507（示例环境）
 
 ## 验证范围
@@ -54,6 +54,6 @@ curl -i -sS -H 'Content-Type: application/json' \
 ## 日志与追踪
 
 - 运行日志：`server-modelscope.log`
-- DebugCenter：`~/.routecodex/logs/debug-center.log`
+- DebugCenter：`~/.rcc/logs/debug-center.log`
 - 关联方式：使用响应头 `x-request-id` 在日志中检索对应请求链路
 

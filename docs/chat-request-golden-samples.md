@@ -1,10 +1,10 @@
 ### OpenAI Chat Golden Request Samples
 
-存放位置：`~/.routecodex/golden_samples/openai_requests/<slug>/`
+存放位置：`~/.rcc/golden_samples/openai_requests/<slug>/`
 
 > **提示**：
 > - 自 0.87.21 起，chat 入口的 provider 专属样本统一存放在
->   `~/.routecodex/golden_samples/new/<entryType>/<providerId>/`（例如 `new/openai-chat/glm`）。
+>   `~/.rcc/golden_samples/new/<entryType>/<providerId>/`（例如 `new/openai-chat/glm`）。
 >   目录内包含 `request.sample.json`（直接从阶段快照复制的 `body`）以及 `meta.json`
 >   （指向原始 `*_stage2_format_build.json` 路径）。`scripts/tools/capture-provider-goldens.mjs`
 >   会优先读取这些“真实快照”，无需再回放 `samples/chat-blackbox/**/request-basic.json`。
@@ -29,14 +29,14 @@
 curl -s http://127.0.0.1:5555/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -H 'Authorization: Bearer test' \
-  --data @~/.routecodex/golden_samples/openai_requests/chat-toolcall-20251209T225016004-002/request_payload.json
+  --data @~/.rcc/golden_samples/openai_requests/chat-toolcall-20251209T225016004-002/request_payload.json
 ```
 
 该样本会沿 V2 骨架走 chat 入口 → hub → glm provider，可直接用来对比 legacy/chat-provider 行为。
 
 #### 如何扩展
 
-1. 在 `~/.routecodex/golden_samples/openai-chat/req_*_req_inbound_stage1_format_parse.json` 中找到需要的请求负载。
+1. 在 `~/.rcc/golden_samples/openai-chat/req_*_req_inbound_stage1_format_parse.json` 中找到需要的请求负载。
 2. 将 `body.payload` 拷贝为新的 `request_payload.json`；注明 slug、描述后写入 `meta.json`。
 3. 更新本文件表格，描述该样本的用途、对应阶段文件。若需要刷新所有 provider 的黄金请求，可运行
    `node scripts/tools/capture-provider-goldens.mjs --update-golden`，脚本将自动覆盖 `provider_golden_samples/` 下对应入口的请求副本。

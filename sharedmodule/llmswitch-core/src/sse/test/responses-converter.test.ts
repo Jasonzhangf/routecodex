@@ -79,6 +79,91 @@ describe('Responses协议转换器测试', () => {
       expect(completedEvent!.data.response.id).toBe(response.id);
     });
 
+    it('reasoning_text.delta 应该包含 content_index', async () => {
+      const response: ResponsesResponse = {
+        id: 'resp_reasoning_index',
+        object: 'response',
+        created: Date.now(),
+        status: 'completed',
+        model: 'gpt-4o-mini',
+        usage: {
+          prompt_tokens: 6,
+          completion_tokens: 3,
+          total_tokens: 9
+        },
+        output: [{
+          type: 'reasoning',
+          id: 'reasoning_idx_1',
+          summary: [],
+          content: [{
+            type: 'reasoning_text',
+            text: 'Step 1'
+          }]
+        }]
+      };
+
+      const options: ResponsesJsonToSseOptions = {
+        requestId: 'test-req-reasoning-index',
+        chunkSize: 4,
+        enableHeartbeat: false,
+        includeReasoning: true
+      };
+
+      const sseStream = await jsonToSseConverter.convertResponseToJsonToSse(response, options);
+      const events = await collectSseEvents(sseStream);
+
+      const reasoningEvent = events.find(e => e.type === 'response.reasoning_text.delta');
+      expect(reasoningEvent).toBeDefined();
+      expect(reasoningEvent!.data.content_index).toBe(0);
+    });
+
+    it('response.created/in_progress 不应携带完整 output（避免重复展示）', async () => {
+      const response: ResponsesResponse = {
+        id: 'resp_start_no_output',
+        object: 'response',
+        created: Date.now(),
+        status: 'completed',
+        model: 'gpt-4o-mini',
+        usage: {
+          prompt_tokens: 4,
+          completion_tokens: 2,
+          total_tokens: 6
+        },
+        output: [{
+          type: 'reasoning',
+          id: 'reasoning_start_1',
+          summary: [],
+          content: [{
+            type: 'reasoning_text',
+            text: 'Reasoning content'
+          }]
+        }, {
+          type: 'message',
+          id: 'msg_start_1',
+          role: 'assistant',
+          content: [{
+            type: 'output_text',
+            text: 'Answer'
+          }]
+        }]
+      };
+
+      const sseStream = await jsonToSseConverter.convertResponseToJsonToSse(response, {
+        requestId: 'test-req-start-empty-output',
+        chunkSize: 4,
+        enableHeartbeat: false,
+        includeReasoning: true
+      });
+      const events = await collectSseEvents(sseStream);
+
+      const createdEvent = events.find(e => e.type === 'response.created');
+      const inProgressEvent = events.find(e => e.type === 'response.in_progress');
+      expect(createdEvent).toBeDefined();
+      expect(inProgressEvent).toBeDefined();
+      expect((createdEvent!.data.response.output || []).length).toBe(0);
+      expect((inProgressEvent!.data.response.output || []).length).toBe(0);
+    });
+
     it('应该转换带有工具调用的响应', async () => {
       const response: ResponsesResponse = {
         id: 'resp_456',
@@ -475,6 +560,122 @@ describe('Responses协议转换器测试', () => {
 
       expect(response.id).toBe('resp_reasoning_1');
       expect(response.status).toBe('completed');
+    });
+
+    it('显式reasoning存在时不应从消息内容再拆分reasoning', async () => {
+      const events: ResponsesSseEvent[] = [
+        {
+          type: 'response.created',
+          timestamp: new Date().toISOString(),
+          data: {
+            response: {
+              id: 'resp_reasoning_dup',
+              object: 'response',
+              created: Date.now(),
+              status: 'in_progress',
+              model: 'gpt-4o-mini'
+            }
+          }
+        },
+        {
+          type: 'response.output_item.added',
+          timestamp: new Date().toISOString(),
+          data: {
+            item: {
+              index: 0,
+              type: 'reasoning',
+              id: 'reasoning_dup_1'
+            }
+          }
+        },
+        {
+          type: 'response.reasoning_summary_text.delta',
+          timestamp: new Date().toISOString(),
+          data: {
+            item_id: 'reasoning_dup_1',
+            output_index: 0,
+            summary_index: 0,
+            delta: 'Summary '
+          }
+        },
+        {
+          type: 'response.reasoning_summary_text.done',
+          timestamp: new Date().toISOString(),
+          data: {
+            item_id: 'reasoning_dup_1',
+            output_index: 0,
+            summary_index: 0,
+            text: 'Summary text'
+          }
+        },
+        {
+          type: 'response.output_item.added',
+          timestamp: new Date().toISOString(),
+          data: {
+            item: {
+              index: 1,
+              type: 'message',
+              id: 'msg_dup_1',
+              role: 'assistant'
+            }
+          }
+        },
+        {
+          type: 'response.content_part.added',
+          timestamp: new Date().toISOString(),
+          data: {
+            item_id: 'msg_dup_1',
+            output_index: 1,
+            content_index: 0,
+            part: {
+              type: 'output_text',
+              text: '<think>secret</think>Visible'
+            }
+          }
+        },
+        {
+          type: 'response.content_part.done',
+          timestamp: new Date().toISOString(),
+          data: {
+            item_id: 'msg_dup_1',
+            output_index: 1,
+            content_index: 0,
+            part: {
+              type: 'output_text',
+              text: '<think>secret</think>Visible'
+            }
+          }
+        },
+        {
+          type: 'response.completed',
+          timestamp: new Date().toISOString(),
+          data: {
+            response: {
+              id: 'resp_reasoning_dup',
+              status: 'completed',
+              usage: {
+                prompt_tokens: 4,
+                completion_tokens: 2,
+                total_tokens: 6
+              }
+            }
+          }
+        }
+      ];
+
+      const sseStream = createSseStream(events);
+      const options: SseToResponsesJsonOptions = {
+        enableValidation: true
+      };
+
+      const response = await sseToJsonConverter.convertSseToJson(sseStream, options);
+
+      const reasoningItems = response.output.filter(item => item.type === 'reasoning');
+      expect(reasoningItems).toHaveLength(1);
+
+      const message = response.output.find(item => item.type === 'message') as any;
+      expect(message).toBeDefined();
+      expect(message.content?.[0]?.text).toBe('Visible');
     });
 
     it('应该保留reasoning的encrypted_content', async () => {

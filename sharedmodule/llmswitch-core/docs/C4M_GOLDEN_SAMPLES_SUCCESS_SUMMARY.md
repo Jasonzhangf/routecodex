@@ -103,7 +103,7 @@ response.completed/response.done: 响应完成
 
 ### 保存位置
 ```
-~/.routecodex/golden_samples/responses/2025-11-23T05-12-59-157Z/
+~/.rcc/golden_samples/responses/2025-11-23T05-12-59-157Z/
 ├── golden-samples.json          # 完整的黄金样本数据
 ├── sample-1-*.json              # 单个测试的详细数据
 └── (其他分析文件)

@@ -38,13 +38,13 @@ RouteCodex 支持在用户消息中写入“指令标记”，用于影响 Virtu
 
 ### stopMessage 文件引用（file://）
 
-支持从 `~/.routecodex` 下读取相对路径文件内容作为 stopMessage：
+支持从 `~/.rcc` 下读取相对路径文件内容作为 stopMessage：
 
 ```text
 <**stopMessage:<file://stopMessage/message1.md>**>
 ```
 
-含义：读取 `~/.routecodex/stopMessage/message1.md` 的内容，并把文件内容作为 stopMessage 文本（会按 mtime/size 做缓存）。
+含义：读取 `~/.rcc/stopMessage/message1.md` 的内容，并把文件内容作为 stopMessage 文本（会按 mtime/size 做缓存）。
 
 ## 3) clock（定时任务）
 

@@ -39,7 +39,7 @@
    ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │  3. Provider 配置生成 (writeProviderV2)                        │
-│     位置: ~/.routecodex/provider/{providerId}/config.v2.json  │
+│     位置: ~/.rcc/provider/{providerId}/config.v2.json  │
 │                                                                   │
 │  配置结构:                                                       │
 │  {                                                               │
@@ -59,7 +59,7 @@
    ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │  4. 主配置生成 (buildV2ConfigObject)                            │
-│     位置: ~/.routecodex/config.json                              │
+│     位置: ~/.rcc/config.json                              │
 │                                                                   │
 │  配置结构:                                                       │
 │  {                                                               │
@@ -119,7 +119,7 @@ routecodex init --providers openai,qwen --default-provider qwen --force
 1. **创建 Provider 配置目录**:
 
 ```bash
-mkdir -p ~/.routecodex/provider/myprovider
+mkdir -p ~/.rcc/provider/myprovider
 ```
 
 2. **创建 config.v2.json**:
@@ -198,7 +198,7 @@ routecodex provider doctor myprovider
    - Provider 鉴权类型对照表
 
 2. **Provider 目录结构** (README.md 第 142-144 行):
-   - `~/.routecodex/provider/<providerId>/config.v2.json`
+   - `~/.rcc/provider/<providerId>/config.v2.json`
 
 3. **Provider 类型文档**:
    - `docs/PROVIDER_TYPES.md` - Provider 类型说明
@@ -264,7 +264,7 @@ routecodex provider validate myprovider
 
 #### A. Provider Catalog 扩展
 
-- [ ] 支持自定义 catalog 扩展 (`~/.routecodex/provider-catalog.json`)
+- [ ] 支持自定义 catalog 扩展 (`~/.rcc/provider-catalog.json`)
 - [ ] 支持从远程 URL 加载 catalog
 - [ ] catalog 版本管理和更新检查
 

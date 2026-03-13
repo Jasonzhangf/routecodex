@@ -1,12 +1,14 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import os from 'node:os';
 import type { RoutingInstructionState } from './routing-instructions.js';
 import {
   serializeRoutingInstructionState,
   deserializeRoutingInstructionState
 } from './routing-instructions.js';
 import { providerErrorCenter } from './error-center.js';
+import {
+  resolveRccPath
+} from '../../runtime/user-data-paths.js';
 
 interface PersistedRoutingState {
   version: number;
@@ -29,29 +31,9 @@ function isPersistentKey(key: string | undefined): key is string {
     || key.startsWith('tmux:');
 }
 
-function resolveRoutecodexUserDir(): string | null {
-  try {
-    const override = String(process.env.ROUTECODEX_USER_DIR || '').trim();
-    if (override) {
-      return path.resolve(override);
-    }
-    const home = os.homedir();
-    if (!home) {
-      return null;
-    }
-    return path.join(home, '.routecodex');
-  } catch {
-    return null;
-  }
-}
-
 function resolveDefaultSessionDir(): string | null {
   try {
-    const userDir = resolveRoutecodexUserDir();
-    if (!userDir) {
-      return null;
-    }
-    return path.join(userDir, 'sessions');
+    return resolveRccPath('sessions');
   } catch {
     return null;
   }
@@ -64,29 +46,6 @@ function resolveSessionDir(): string | null {
       return path.resolve(override.trim());
     }
     return resolveDefaultSessionDir();
-  } catch {
-    return null;
-  }
-}
-
-function resolveSessionFallbackDir(primaryDir: string): string | null {
-  try {
-    const defaultDir = resolveDefaultSessionDir();
-    if (!defaultDir) {
-      return null;
-    }
-    const normalizedPrimary = path.resolve(primaryDir);
-    const normalizedDefault = path.resolve(defaultDir);
-    if (normalizedPrimary === normalizedDefault) {
-      return null;
-    }
-    if (
-      normalizedPrimary.startsWith(`${normalizedDefault}${path.sep}`) ||
-      normalizedPrimary === normalizedDefault
-    ) {
-      return normalizedDefault;
-    }
-    return null;
   } catch {
     return null;
   }
@@ -117,13 +76,6 @@ function resolveSessionFilepaths(key: string | undefined): string[] {
   }
 
   return [path.join(dir, filename)];
-}
-
-function resolveSessionLoadFilepaths(key: string | undefined): string[] {
-  if (!isPersistentKey(key)) {
-    return [];
-  }
-  return resolveSessionFilepaths(key);
 }
 
 function readPersistedStateFromFile(filepath: string): RoutingInstructionState | null {
@@ -173,22 +125,16 @@ export function loadRoutingInstructionStateSync(key: string | undefined): Routin
     throw error;
   }
 
-  const filepaths = resolveSessionLoadFilepaths(key);
+  const filepaths = resolveSessionFilepaths(key);
   if (filepaths.length === 0) {
     const error = new StickySessionKeyMissingError(key, 'Unable to resolve session file path for sticky key; failing fast per no-fallback policy');
     throw error;
   }
 
-  const writeTargets = resolveSessionFilepaths(key);
-
   for (const filepath of filepaths) {
     const loaded = readPersistedStateFromFile(filepath);
     if (!loaded) {
       continue;
-    }
-
-    if (writeTargets.length > 0 && !writeTargets.includes(filepath)) {
-      saveRoutingInstructionStateSync(key, loaded);
     }
 
     return loaded;

@@ -2,11 +2,11 @@
 
 ## 概述
 
-后台守护进程，监控 `~/.routecodex/auth/` 目录下的 Token 文件，自动管理 Token 刷新和重新认证。
+后台守护进程，监控 `~/.rcc/auth/` 目录下的 Token 文件，自动管理 Token 刷新和重新认证。
 
 ## 核心职责
 
-1. **监控 Token 文件** - 监控 `~/.routecodex/auth/*.json` 变化
+1. **监控 Token 文件** - 监控 `~/.rcc/auth/*.json` 变化
 2. **检测过期** - 读取 `expires_at` 判断是否即将过期/已过期
 3. **自动刷新** - OAuth Token 提前30分钟自动刷新
 4. **触发认证（显式）** - 后台默认不弹窗；需要交互式修复时由用户运行 `rcc oauth --force <selector>` 或 `rcc oauth <provider>-auto <selector>`
@@ -14,7 +14,7 @@
 ## 目录结构
 
 ```
-~/.routecodex/auth/
+~/.rcc/auth/
 ├── iflow-oauth-1-work.json           # 账号: work@example.com
 ├── iflow-oauth-2-personal.json       # 账号: my@gmail.com
 ├── qwen-oauth-1-default.json         # 账号: dev@company.com
@@ -176,7 +176,7 @@ routecodex token-daemon stop
 ```
 🌙 Token Refresh Daemon 运行中
 PID: 12345
-📁 监控目录: ~/.routecodex/auth/
+📁 监控目录: ~/.rcc/auth/
 
 | 文件名              | 显示名称               | 状态   | 过期时间       | 剩余   |
 |---------------------|------------------------|--------|----------------|--------|
@@ -204,7 +204,7 @@ PID: 12345
          ▼                    ▼
 ┌──────────────────┐  ┌─────────────────────────────────┐
 │ 配置文件Watcher   │  │ 认证页面 (外部浏览器)             │
-│ ~/.routecodex/auth│  │ + 本地回调服务器 (localhost)     │
+│ ~/.rcc/auth│  │ + 本地回调服务器 (localhost)     │
 └──────────────────┘  └─────────────────────────────────┘
 ```
 
@@ -233,7 +233,7 @@ PID: 12345
 
 | 决策点 | 选择 | 理由 |
 |--------|------|------|
-| 监控目录 | `~/.routecodex/auth/` | 现有结构，保持兼容 |
+| 监控目录 | `~/.rcc/auth/` | 现有结构，保持兼容 |
 | 进程间通信 | Unix Domain Socket | 本机通信，安全 |
 | 配置文件监听 | chokidar | 跨平台，事件驱动 |
 | 浏览器 | 外部浏览器 | Google 禁止自动化登录 |
@@ -261,7 +261,7 @@ PID: 12345
 
 ## 待确认问题
 
-1. [x] 监控目录: `~/.routecodex/auth/`
+1. [x] 监控目录: `~/.rcc/auth/`
 2. [x] 提前刷新时间: 30分钟
 3. [x] 认证方式: 外部浏览器
 4. [x] 回调方式: 本地 HTTP 服务器

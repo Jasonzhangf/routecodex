@@ -16,28 +16,28 @@ The `alias` part is optional and ignored by the system - it's just for your refe
 
 ## Automatic Discovery
 
-The system automatically scans `~/.routecodex/auth/` for token files matching the pattern and creates multiple provider instances. No manual configuration needed.
+The system automatically scans `~/.rcc/auth/` for token files matching the pattern and creates multiple provider instances. No manual configuration needed.
 
 ## Authentication Commands
 
 ### Authenticate specific token:
 ```bash
 # Token 1
-IFLOW_TOKEN_FILE="$HOME/.routecodex/auth/iflow-oauth-1-primary.json" node scripts/auth-iflow-token-direct.mjs
+IFLOW_TOKEN_FILE="$HOME/.rcc/auth/iflow-oauth-1-primary.json" node scripts/auth-iflow-token-direct.mjs
 
 # Token 2
-IFLOW_TOKEN_FILE="$HOME/.routecodex/auth/iflow-oauth-2-backup.json" node scripts/auth-iflow-token-direct.mjs
+IFLOW_TOKEN_FILE="$HOME/.rcc/auth/iflow-oauth-2-backup.json" node scripts/auth-iflow-token-direct.mjs
 ```
 
 ### Manual authentication (if device flow fails):
 ```bash
-IFLOW_TOKEN_FILE="$HOME/.routecodex/auth/iflow-oauth-1-primary.json" node scripts/auth-iflow-manual.mjs
+IFLOW_TOKEN_FILE="$HOME/.rcc/auth/iflow-oauth-1-primary.json" node scripts/auth-iflow-manual.mjs
 ```
 
 ### Delete and re-authenticate:
 ```bash
-rm ~/.routecodex/auth/iflow-oauth-1-primary.json
-IFLOW_TOKEN_FILE="$HOME/.routecodex/auth/iflow-oauth-1-primary.json" node scripts/auth-iflow-token-direct.mjs
+rm ~/.rcc/auth/iflow-oauth-1-primary.json
+IFLOW_TOKEN_FILE="$HOME/.rcc/auth/iflow-oauth-1-primary.json" node scripts/auth-iflow-token-direct.mjs
 ```
 
 ## How It Works

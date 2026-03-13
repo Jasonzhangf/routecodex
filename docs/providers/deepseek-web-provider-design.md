@@ -78,7 +78,7 @@
             {
               "alias": "1",
               "type": "deepseek-account",
-              "tokenFile": "~/.routecodex/auth/deepseek-account-1.json"
+              "tokenFile": "~/.rcc/auth/deepseek-account-1.json"
             }
           ]
         },

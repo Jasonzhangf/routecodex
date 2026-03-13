@@ -169,7 +169,7 @@ export class HookSystemIntegration {
         healthCheckInterval: 30000,
         snapshotEnabled: this.config.snapshotEnabled,
         snapshotConfig: {
-          basePath: '~/.routecodex/codex-samples',
+          basePath: '~/.rcc/codex-samples',
           format: 'structured',
           compression: 'gzip',
           sampling: {

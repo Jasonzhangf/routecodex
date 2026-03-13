@@ -25,7 +25,7 @@ export function createQuotaDaemonCommand(): Command {
   cmd
     .description('Run provider quota daemon maintenance / replay once (offline; no server required)')
     .option('--once', 'Run a single maintenance tick and exit', false)
-    .option('--replay-errors [file]', 'Replay provider-errors.ndjson into provider-quota.json (default: ~/.rcc/quota/provider-errors.ndjson; legacy ~/.routecodex compatible)')
+    .option('--replay-errors [file]', 'Replay provider-errors.ndjson into provider-quota.json (default: ~/.rcc/quota/provider-errors.ndjson)')
     .option('--dry-run', 'Do not write provider-quota.json', false)
     .option('--json', 'Print resulting snapshot JSON to stdout', false)
     .action(async (opts: { once?: boolean; replayErrors?: string | boolean; dryRun?: boolean; json?: boolean }) => {

@@ -69,6 +69,7 @@ export class ResponsesResponseBuilder {
   private lastSequenceNumber: number = -1;
   private config: ResponseBuilderConfig;
   private error?: Error;
+  private hasExplicitReasoning: boolean = false;
 
   constructor(config?: Partial<ResponseBuilderConfig>) {
     this.config = { ...DEFAULT_RESPONSE_BUILDER_CONFIG, ...config };
@@ -291,6 +292,10 @@ export class ResponsesResponseBuilder {
 
     if (this.outputItemBuilders.size >= this.config.maxOutputItems) {
       throw new Error('Maximum output items exceeded');
+    }
+
+    if (data.type === 'reasoning') {
+      this.hasExplicitReasoning = true;
     }
 
     const outputItemState: OutputItemState = {
@@ -1040,7 +1045,8 @@ export class ResponsesResponseBuilder {
       },
       {
         requestId: state.id || 'message',
-        outputIndex: 0
+        outputIndex: 0,
+        suppressReasoningFromContent: this.hasExplicitReasoning
       }
     );
   }

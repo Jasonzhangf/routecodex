@@ -102,7 +102,7 @@ const provider = new ChatHttpProvider(iflowConfig, dependencies);
 await provider.initialize(); // → 打开浏览器 → 授权 → 获取 API Key
 
 // 3. 后续使用直接读取本地 token 文件
-// ~/.routecodex/auth/iflow-oauth.json 包含：
+// ~/.rcc/auth/iflow-oauth.json 包含：
 // {
 //   "access_token": "...",
 //   "refresh_token": "...",
@@ -140,7 +140,7 @@ const response = await provider.processIncoming({
 
 ```bash
 # 测试 OAuth 流程
-node -e "const { TokenFileAuthProvider } = require('./dist/providers/auth/tokenfile-auth.js'); const provider = new TokenFileAuthProvider({type: 'oauth', tokenFile: '~/.routecodex/auth/iflow-oauth.json'}); provider.initialize().then(() => console.log('✅ iFlow OAuth working:', provider.getStatus()));"
+node -e "const { TokenFileAuthProvider } = require('./dist/providers/auth/tokenfile-auth.js'); const provider = new TokenFileAuthProvider({type: 'oauth', tokenFile: '~/.rcc/auth/iflow-oauth.json'}); provider.initialize().then(() => console.log('✅ iFlow OAuth working:', provider.getStatus()));"
 
 # 测试 API Key 提取
 node -e "const { fetchIFlowUserInfo } = require('./dist/providers/auth/iflow-userinfo-helper.js'); fetchIFlowUserInfo('test_token').catch(e => console.log('✅ Error handling working:', e.message));"

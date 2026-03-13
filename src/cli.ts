@@ -282,7 +282,7 @@ try {
   program.addCommand(createValidateCommand());
 } catch { /* optional */ }
 
-// User config migration command - explicitly move config.json/config/provider from legacy ~/.routecodex to ~/.rcc
+// User config migration command - explicitly move config.json/config/provider/auth from legacy ~/.routecodex to ~/.rcc
 try {
   const { createUserConfigMigrateCommand } = await import('./commands/migrate-user-config.js');
   program.addCommand(createUserConfigMigrateCommand());

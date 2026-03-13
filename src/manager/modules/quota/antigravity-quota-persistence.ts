@@ -2,13 +2,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import fsAsync from 'node:fs/promises';
 import {
-  resolveLegacyRouteCodexUserDir,
   resolveRccQuotaDir,
   resolveRccStateDir
 } from '../../../config/user-data-paths.js';
 
 import type { QuotaStoreSnapshot } from '../../../modules/llmswitch/bridge.js';
-import { loadProviderQuotaSnapshot } from '../../quota/provider-quota-store.js';
 
 export type QuotaStorePersistenceStatus =
   | 'unknown'
@@ -44,15 +42,7 @@ export function resolveQuotaStateWritePath(resolveHomeDir: () => string): string
 }
 
 export function resolveQuotaStateReadPath(resolveHomeDir: () => string): string {
-  const primaryPath = resolveQuotaStateWritePath(resolveHomeDir);
-  if (fs.existsSync(primaryPath)) {
-    return primaryPath;
-  }
-  const legacyPath = path.join(resolveLegacyRouteCodexUserDir(resolveHomeDir()), 'state', 'quota', 'antigravity.json');
-  if (fs.existsSync(legacyPath)) {
-    return legacyPath;
-  }
-  return primaryPath;
+  return resolveQuotaStateWritePath(resolveHomeDir);
 }
 
 export function loadAntigravitySnapshotFromDisk(resolveHomeDir: () => string): Record<string, QuotaRecordLike> {
@@ -131,20 +121,6 @@ export function createQuotaStore(options: {
         }
       } catch {
         primaryLoadFailed = primaryExists;
-      }
-
-      try {
-        const legacy = await loadProviderQuotaSnapshot();
-        if (legacy && legacy.providers && typeof legacy.providers === 'object') {
-          const nowMs = Date.now();
-          options.onStatus('loaded');
-          return {
-            savedAtMs: Number.isFinite(Date.parse(legacy.updatedAt)) ? Date.parse(legacy.updatedAt) : nowMs,
-            providers: legacy.providers as any
-          };
-        }
-      } catch {
-        // ignore
       }
       options.onStatus(primaryLoadFailed ? 'load_error' : 'missing');
       return null;

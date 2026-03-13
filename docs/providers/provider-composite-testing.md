@@ -77,8 +77,8 @@ test('protocol mismatch fails fast', async () => {
 ```
 npm run build
 node scripts/pipeline-dry-run.mjs \
-  --config ~/.routecodex/config.json \
-  --samples ~/.routecodex/codex-samples \
+  --config ~/.rcc/config.json \
+  --samples ~/.rcc/codex-samples \
   --out demo-results/pipeline-dryrun
 ```
 

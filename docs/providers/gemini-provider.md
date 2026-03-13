@@ -42,7 +42,7 @@
 
 ```bash
 node dist/tools/provider-update/index.js \
-  --config /Users/you/.routecodex/provider/gemini/config.json \
+  --config /Users/you/.rcc/provider/gemini/config.json \
   --write --probe-keys --verbose
 ```
 

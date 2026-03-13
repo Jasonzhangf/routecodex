@@ -4,7 +4,7 @@
 
 ## 1. 文件结构
 
-- 根目录：`~/.routecodex/quota/`
+- 根目录：`~/.rcc/quota/`
   - `provider-quota.json`：当前生效的 quota 快照（virtual-router 只读）。
   - `provider-errors.ndjson`：错误事件流水（daemon 可选使用，用于恢复 / 调试）。
 
@@ -134,7 +134,7 @@
 ### Phase 4：virtual-router 接线（可通过 feature flag 控制）
 
 - 在 virtual-router 构建 provider 池时：
-  - 可选读取 `~/.routecodex/quota/provider-quota.json`：
+  - 可选读取 `~/.rcc/quota/provider-quota.json`：
     - 过滤 `inPool !== true` 或 `cooldownUntil/blacklistUntil > now` 的 provider。
     - 按 `priorityTier` 做 tier 调度。
 - 初期通过环境变量开启（例如 `ROUTECODEX_QUOTA_ENABLED=1`），待稳定后再作为默认路径。

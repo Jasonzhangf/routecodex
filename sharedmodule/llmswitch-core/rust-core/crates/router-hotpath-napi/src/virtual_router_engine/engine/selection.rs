@@ -8,7 +8,7 @@ use super::tier_load_balancing::{
 };
 use super::types::SelectionResult;
 use super::VirtualRouterEngineCore;
-use crate::virtual_router_engine::classifier::ClassificationResult;
+use crate::virtual_router_engine::classifier::{ClassificationResult, DEFAULT_ROUTE};
 use crate::virtual_router_engine::error::format_virtual_router_error;
 use crate::virtual_router_engine::features::RoutingFeatures;
 use crate::virtual_router_engine::health_weighted::{
@@ -17,8 +17,9 @@ use crate::virtual_router_engine::health_weighted::{
 use crate::virtual_router_engine::instructions::RoutingInstructionState;
 use crate::virtual_router_engine::quota::{call_quota_view, QuotaViewEntry};
 use crate::virtual_router_engine::routing::{
-    build_antigravity_alias_key, build_route_queue, extract_excluded_provider_keys,
-    extract_runtime_now_ms, filter_candidates_by_state, resolve_instruction_target,
+    build_antigravity_alias_key, build_route_queue, default_pool_supports_capability,
+    extract_excluded_provider_keys, extract_runtime_now_ms, filter_candidates_by_state,
+    filter_pools_by_capability, resolve_instruction_target,
     should_avoid_antigravity_after_repeated_error, should_bind_antigravity_session,
 };
 use crate::virtual_router_engine::time_utils::now_ms;
@@ -29,7 +30,7 @@ impl VirtualRouterEngineCore {
         requested_route: &str,
         metadata: &Value,
         classification: &ClassificationResult,
-        _features: &RoutingFeatures,
+        features: &RoutingFeatures,
         routing_state: &RoutingInstructionState,
         bound_alias_prefix: Option<&str>,
         env: Env,
@@ -84,7 +85,7 @@ impl VirtualRouterEngineCore {
         let route_queue = build_route_queue(
             requested_route,
             &classification.candidates,
-            _features,
+            features,
             &self.routing,
         );
         let sticky_key = crate::virtual_router_engine::routing::resolve_sticky_key(metadata);
@@ -93,9 +94,36 @@ impl VirtualRouterEngineCore {
         let now_for_weights = extract_runtime_now_ms(metadata).unwrap_or_else(now_ms);
         let health_cfg =
             resolve_health_weighted_config(self.load_balancer.policy().health_weighted.as_ref());
+        let requires_vision = features.has_image_attachment
+            && default_pool_supports_capability(&self.routing, &self.provider_registry, "vision");
+        let requires_web_search = (self.web_search_force
+            || features.has_web_search_tool_declared
+            || features.has_web_tool
+            || features
+                .last_assistant_tool_category
+                .as_deref()
+                .map(|cat| cat.eq_ignore_ascii_case("websearch"))
+                .unwrap_or(false)
+            || classification.route_name == "web_search")
+            && default_pool_supports_capability(
+                &self.routing,
+                &self.provider_registry,
+                "web_search",
+            );
+        let capability_filter_active = requires_vision || requires_web_search;
 
         for route_name in route_queue {
-            let pools = self.routing.get(&route_name);
+            let mut pools = if capability_filter_active {
+                self.routing.get(DEFAULT_ROUTE)
+            } else {
+                self.routing.get(&route_name)
+            };
+            if requires_vision {
+                pools = filter_pools_by_capability(&pools, &self.provider_registry, "vision");
+            }
+            if requires_web_search {
+                pools = filter_pools_by_capability(&pools, &self.provider_registry, "web_search");
+            }
             for pool in pools {
                 if pool.targets.is_empty() {
                     continue;

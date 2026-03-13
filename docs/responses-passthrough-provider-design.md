@@ -6,7 +6,7 @@
 
 - 目标
   - 在 `/v1/responses` 下提供“真实 SSE 透传”能力：输入 Responses 请求，输出同规范 Responses 事件流。
-  - 使用配置驱动：`~/.routecodex/config.json` 中新增一个 `type: "responses-standard"` 的 provider；模型设为 `gpt-5.1`；将其设置为默认路由（`routing.default`）。
+  - 使用配置驱动：`~/.rcc/config.json` 中新增一个 `type: "responses-standard"` 的 provider；模型设为 `gpt-5.1`；将其设置为默认路由（`routing.default`）。
   - 与黑盒客户端无耦合：不需要客户端改代码即可稳定收到事件与字节。
   - 强可观测：保留请求/响应快照；增加服务端原始 SSE 字节 tee 日志。
 
@@ -75,7 +75,7 @@
 
 ## 4. 配置与选择
 
-- Provider 配置（示例，已按照你的要求生成到 `~/.routecodex/config.responses.json`）：
+- Provider 配置（示例，已按照你的要求生成到 `~/.rcc/config.responses.json`）：
   - `type`: `"responses-standard"`
   - `baseUrl`: `"https://www.fakercode.top/v1"`
   - `auth.type`: `"apikey"`
@@ -104,7 +104,7 @@
      - submit 路径新增对 `llmswitch-core` 的 `resumeResponsesConversation()` 调用，server 侧仅负责读取 `response_id` / `tool_outputs` 并交给核心缓存生成完整 payload，成功后再进 Hub Pipeline，失败返回 400（表示响应已过期或丢失）。
 
 4) 配置示例（你已要求，已生成在用户目录）：
-   - `~/.routecodex/config.responses.json`（不改仓库内默认 config）。
+   - `~/.rcc/config.responses.json`（不改仓库内默认 config）。
 
 ## 6. 测试与验收
 
@@ -114,8 +114,8 @@
   - 工具回路：收到 `required_action` 后，黑盒 `submit_tool_outputs`，再验证下一轮直到 `done`。
 
 - 服务端可观测：
-  - 原始 SSE 字节：`~/.routecodex/logs/sse/<reqId>_server.sse.log`
-  - 快照：`~/.routecodex/codex-samples/openai-responses/` 下的 `provider-request.json` / `provider-response.json` / `provider-error.json` 与 `*_sse_pre/post.json`
+  - 原始 SSE 字节：`~/.rcc/logs/sse/<reqId>_server.sse.log`
+  - 快照：`~/.rcc/codex-samples/openai-responses/` 下的 `provider-request.json` / `provider-response.json` / `provider-error.json` 与 `*_sse_pre/post.json`
 
 - 代理排查建议：
   - Nginx：`proxy_buffering off;` `proxy_http_version 1.1;` `proxy_set_header Connection '';` `chunked_transfer_encoding on;`；
@@ -144,7 +144,7 @@
 
 - 命令：`npm run verify:sse-loop`
   - 统一触发 Responses、Chat（LMStudio）和 Anthropic（GLM-Anthropic）的官方 SDK → RouteCodex 对比。
-  - 需要提前在 `~/.routecodex/provider/<providerId>/` 配置相应上游；RouteCodex 本地实例需已启动（默认 `http://127.0.0.1:5555/v1`）。
+  - 需要提前在 `~/.rcc/provider/<providerId>/` 配置相应上游；RouteCodex 本地实例需已启动（默认 `http://127.0.0.1:5555/v1`）。
 - 环境变量：
   - `RCC_LOOP_RESP_PROVIDER` / `RCC_LOOP_RESP_MODEL`
   - `RCC_LOOP_CHAT_MODEL`
@@ -157,7 +157,7 @@
 
 附：配置示例（已生成在用户目录）
 
-- `~/.routecodex/config.responses.json`（节选）
+- `~/.rcc/config.responses.json`（节选）
 
 ```
 {

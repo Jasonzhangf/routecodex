@@ -1,6 +1,8 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import os from 'node:os';
+import {
+  resolveRccUserDir
+} from '../../runtime/user-data-paths.js';
 
 type CacheEntry = {
   mtimeMs: number;
@@ -10,16 +12,8 @@ type CacheEntry = {
 
 const cache = new Map<string, CacheEntry>();
 
-function resolveRoutecodexUserDir(): string {
-  const override = process.env.ROUTECODEX_USER_DIR;
-  if (override && override.trim()) {
-    return override.trim();
-  }
-  const home = os.homedir();
-  if (!home) {
-    throw new Error('stopMessage file://: cannot resolve homedir');
-  }
-  return path.join(home, '.routecodex');
+function resolveStopMessageBaseDir(): string {
+  return path.resolve(resolveRccUserDir());
 }
 
 function resolveStopMessageFilePath(raw: string): string | null {
@@ -39,7 +33,7 @@ function resolveStopMessageFilePath(raw: string): string | null {
     throw new Error('stopMessage file://: missing relative path');
   }
   if (relRaw.startsWith('/') || relRaw.startsWith('\\') || /^[a-zA-Z]:[\\/]/.test(relRaw)) {
-    throw new Error('stopMessage file://: only supports paths relative to ~/.routecodex');
+    throw new Error('stopMessage file://: only supports paths relative to ~/.rcc');
   }
 
   const normalizedRel = path.posix.normalize(relRaw.replace(/\\/g, '/'));
@@ -47,10 +41,10 @@ function resolveStopMessageFilePath(raw: string): string | null {
     throw new Error('stopMessage file://: invalid relative path');
   }
 
-  const base = path.resolve(resolveRoutecodexUserDir());
-  const abs = path.resolve(base, normalizedRel);
-  if (abs !== base && !abs.startsWith(`${base}${path.sep}`)) {
-    throw new Error('stopMessage file://: path escapes ~/.routecodex');
+  const baseDir = resolveStopMessageBaseDir();
+  const abs = path.resolve(baseDir, normalizedRel);
+  if (abs !== baseDir && !abs.startsWith(`${baseDir}${path.sep}`)) {
+    throw new Error('stopMessage file://: path escapes ~/.rcc');
   }
   return abs;
 }

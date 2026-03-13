@@ -355,6 +355,7 @@ impl VirtualRouterEngineCore {
                     &model_id,
                     &features,
                     &self.routing,
+                    &self.provider_registry,
                 ) {
                     let candidate_keys = self.provider_registry.list_provider_keys(&provider_id);
                     let mut eligible: Vec<String> = Vec::new();

@@ -6,12 +6,12 @@
 
 ## Samples
 
-- thinking: /Users/fanzhang/.routecodex/codex-samples/openai-chat/req_1762999988376_zyns5xw9n_provider-request.json
-- longContext: /Users/fanzhang/.routecodex/codex-samples/openai-chat/req_1763000100195_09q89vvi2_provider-request.json
-- tools: /Users/fanzhang/.routecodex/codex-samples/openai-chat/req_1763002108961_i6ia6jndk_provider-request.json
-- webSearch: /Users/fanzhang/.routecodex/codex-samples/openai-chat/req_1763002108961_k3ysf83dl_provider-request.json
-- coding: /Users/fanzhang/.routecodex/codex-samples/openai-chat/req_1763002110308_iyj8j09zq_provider-request.json
-- default: /Users/fanzhang/.routecodex/codex-samples/openai-chat/req_1763014458732_3yfsckrin_provider-request.json
+- thinking: /Users/fanzhang/.rcc/codex-samples/openai-chat/req_1762999988376_zyns5xw9n_provider-request.json
+- longContext: /Users/fanzhang/.rcc/codex-samples/openai-chat/req_1763000100195_09q89vvi2_provider-request.json
+- tools: /Users/fanzhang/.rcc/codex-samples/openai-chat/req_1763002108961_i6ia6jndk_provider-request.json
+- webSearch: /Users/fanzhang/.rcc/codex-samples/openai-chat/req_1763002108961_k3ysf83dl_provider-request.json
+- coding: /Users/fanzhang/.rcc/codex-samples/openai-chat/req_1763002110308_iyj8j09zq_provider-request.json
+- default: /Users/fanzhang/.rcc/codex-samples/openai-chat/req_1763014458732_3yfsckrin_provider-request.json
 
 ## Errors
 

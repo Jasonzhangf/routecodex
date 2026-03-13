@@ -28,7 +28,7 @@ model_provider = "tcm"
 model = "gpt-5.2"
 ```
 
-如果你在 `~/.routecodex/config.json` 中设置了服务端访问密钥（`httpserver.apikey`），则需要在环境变量里提供同样的值：
+如果你在 `~/.rcc/config.json` 中设置了服务端访问密钥（`httpserver.apikey`），则需要在环境变量里提供同样的值：
 
 ```bash
 export ROUTECODEX_APIKEY="your-server-apikey"

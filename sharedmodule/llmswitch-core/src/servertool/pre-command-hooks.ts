@@ -1,9 +1,9 @@
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import type { ServerToolAutoHookTraceEvent } from './types.js';
 import { isPreCommandScriptPathAllowed } from '../router/virtual-router/pre-command-file-resolver.js';
+import { resolveRccPath } from '../runtime/user-data-paths.js';
 
 interface PreCommandHookRule {
   id: string;
@@ -39,8 +39,7 @@ export interface PreCommandHookRunResult {
 }
 
 const DEFAULT_PRE_COMMAND_HOOKS_FILE = path.join(
-  os.homedir(),
-  '.routecodex',
+  resolveRccPath(),
   'hooks',
   'pre-command-hooks.json'
 );

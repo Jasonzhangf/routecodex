@@ -10,7 +10,7 @@ tabglm 的 Anthropic 入口会对请求做“官方客户端”校验；当 `sys
 
 ## 启用方式（推荐：只改 config）
 
-在 `~/.routecodex/config.json`（或你的自定义 config）里为 tabglm provider 开启 compat profile（必须显式配置，禁止推断）：
+在 `~/.rcc/config.json`（或你的自定义 config）里为 tabglm provider 开启 compat profile（必须显式配置，禁止推断）：
 
 - 推荐：`virtualrouter.providers.tabglm.compatibilityProfile = "anthropic:claude-code"`
 - 也支持：`virtualrouter.providers.tabglm.compatibilityProfile = "chat:claude-code"`
