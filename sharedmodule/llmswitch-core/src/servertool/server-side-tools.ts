@@ -541,7 +541,9 @@ export async function runServerSideToolEngine(
           toolCall.name,
           JSON.stringify({ ok: false, tool: toolCall.name, message, retryable: true })
         );
-        // Preserve failed tool_calls for the client; do not mark as executed.
+        // Treat failed servertool calls as executed so we can emit followup with error tool_outputs.
+        executedToolCalls.push(toolCall);
+        executedIds.add(toolCall.id);
         executedFlowIds.push(`${toolCall.name}_error`);
       }
     }

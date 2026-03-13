@@ -272,6 +272,9 @@ async function main() {
     await run('matrix:servertool-client-inject-strict-failure', 'scripts/tests/servertool-client-inject-strict-failure.mjs')
   );
   results.push(
+    await run('matrix:servertool-handler-error-followup', 'scripts/tests/servertool-handler-error-followup.mjs')
+  );
+  results.push(
     await run(
       'matrix:native-chat-process-governance-semantics',
       'scripts/tests/coverage-native-chat-process-governance-semantics.mjs'

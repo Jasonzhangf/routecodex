@@ -725,6 +725,81 @@ describe('Responses协议转换器测试', () => {
       expect(message.content?.[0]?.text).toBe('Visible');
     });
 
+    it('reasoning_text.delta 重复 content_index 时应合并为单段文本', async () => {
+      const events: ResponsesSseEvent[] = [
+        {
+          type: 'response.created',
+          timestamp: new Date().toISOString(),
+          data: {
+            response: {
+              id: 'resp_reasoning_merge',
+              object: 'response',
+              created: Date.now(),
+              status: 'in_progress',
+              model: 'gpt-4o-mini'
+            }
+          }
+        },
+        {
+          type: 'response.output_item.added',
+          timestamp: new Date().toISOString(),
+          data: {
+            item_id: 'reason_merge_1',
+            item: {
+              index: 0,
+              type: 'reasoning',
+              id: 'reason_merge_1',
+              summary: []
+            }
+          }
+        },
+        {
+          type: 'response.reasoning_text.delta',
+          timestamp: new Date().toISOString(),
+          data: {
+            item_id: 'reason_merge_1',
+            content_index: 0,
+            delta: 'Planning to update '
+          }
+        },
+        {
+          type: 'response.reasoning_text.delta',
+          timestamp: new Date().toISOString(),
+          data: {
+            item_id: 'reason_merge_1',
+            content_index: 0,
+            delta: 'Planning to update the command list.'
+          }
+        },
+        {
+          type: 'response.completed',
+          timestamp: new Date().toISOString(),
+          data: {
+            response: {
+              id: 'resp_reasoning_merge',
+              status: 'completed',
+              usage: {
+                prompt_tokens: 6,
+                completion_tokens: 3,
+                total_tokens: 9
+              }
+            }
+          }
+        }
+      ];
+
+      const sseStream = createSseStream(events);
+      const options: SseToResponsesJsonOptions = {
+        enableValidation: true
+      };
+
+      const response = await sseToJsonConverter.convertSseToJson(sseStream, options);
+      const reasoning = (response.output || []).find((item) => item.type === 'reasoning') as any;
+      expect(reasoning).toBeDefined();
+      expect(reasoning.content).toHaveLength(1);
+      expect(reasoning.content[0].text).toBe('Planning to update the command list.');
+    });
+
     it('应该保留reasoning的encrypted_content', async () => {
       const events: ResponsesSseEvent[] = [
         {

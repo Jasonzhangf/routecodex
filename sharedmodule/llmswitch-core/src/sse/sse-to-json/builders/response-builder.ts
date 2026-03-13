@@ -37,6 +37,7 @@ export interface OutputItemState {
   contentParts: any[];
   currentContentIndex: number;
   accumulatedContent: any[];
+  currentReasoningIndex: number;
   summaryByIndex: Map<number, string>;
   currentSummaryIndex: number;
   hasContentPartAdded: boolean;
@@ -305,6 +306,7 @@ export class ResponsesResponseBuilder {
       contentParts: data.content_index !== undefined ? [] : [],
       currentContentIndex: 0,
       accumulatedContent: [],
+      currentReasoningIndex: 0,
       summaryByIndex: new Map<number, string>(),
       currentSummaryIndex: 0,
       hasContentPartAdded: false,
@@ -691,7 +693,45 @@ export class ResponsesResponseBuilder {
       throw new Error(`Output item not found: ${data.item_id}`);
     }
 
-    outputItemState.accumulatedContent.push(data.delta);
+    const delta = data.delta && typeof data.delta === 'object'
+      ? data.delta
+      : { type: 'reasoning_text', text: String(data.delta ?? '') };
+    const rawIndex = typeof data.content_index === 'number' ? data.content_index : outputItemState.currentReasoningIndex;
+    const contentIndex = Number.isFinite(rawIndex) ? rawIndex : outputItemState.currentReasoningIndex;
+    outputItemState.currentReasoningIndex = contentIndex;
+
+    if (typeof contentIndex === 'number' && Number.isFinite(contentIndex)) {
+      const existing = outputItemState.accumulatedContent[contentIndex];
+      if (delta.type === 'reasoning_text') {
+        const nextText = typeof delta.text === 'string' ? delta.text : '';
+        if (existing && typeof existing === 'object' && (existing as any).type === 'reasoning_text') {
+          const prevText = typeof (existing as any).text === 'string' ? (existing as any).text : '';
+          if (nextText.startsWith(prevText)) {
+            outputItemState.accumulatedContent[contentIndex] = { ...existing, text: nextText };
+          } else if (prevText.startsWith(nextText)) {
+            outputItemState.accumulatedContent[contentIndex] = existing;
+          } else {
+            outputItemState.accumulatedContent[contentIndex] = { ...existing, text: `${prevText}${nextText}` };
+          }
+        } else {
+          outputItemState.accumulatedContent[contentIndex] = { type: 'reasoning_text', text: nextText };
+        }
+      } else if (delta.type === 'reasoning_signature') {
+        outputItemState.accumulatedContent[contentIndex] = {
+          type: 'reasoning_signature',
+          signature: delta.signature
+        };
+      } else if (delta.type === 'reasoning_image') {
+        outputItemState.accumulatedContent[contentIndex] = {
+          type: 'reasoning_image',
+          image_url: delta.image_url
+        };
+      } else {
+        outputItemState.accumulatedContent[contentIndex] = delta;
+      }
+    } else {
+      outputItemState.accumulatedContent.push(delta);
+    }
     outputItemState.lastEventTime = event.timestamp;
   }
 
@@ -790,6 +830,7 @@ export class ResponsesResponseBuilder {
       type: 'reasoning.delta',
       data: {
         item_id: data.item_id,
+        content_index: data.content_index,
         delta: {
           type: event.type === 'response.reasoning_signature.delta'
             ? 'reasoning_signature'

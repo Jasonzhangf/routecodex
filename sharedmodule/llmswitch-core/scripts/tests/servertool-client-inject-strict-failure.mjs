@@ -29,7 +29,10 @@ function buildToolCallChat() {
               type: 'function',
               function: {
                 name: 'continue_execution',
-                arguments: JSON.stringify({ reason: 'progress_update' })
+                arguments: JSON.stringify({
+                  summary: '正在进行构建验证',
+                  reason: 'progress_update'
+                })
               }
             }
           ]

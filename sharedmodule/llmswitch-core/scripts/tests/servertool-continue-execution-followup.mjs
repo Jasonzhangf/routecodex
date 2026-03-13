@@ -29,7 +29,10 @@ function buildToolCallChat() {
               type: 'function',
               function: {
                 name: 'continue_execution',
-                arguments: JSON.stringify({ reason: 'I was about to summarize progress' })
+                arguments: JSON.stringify({
+                  summary: '完成了 A，正在处理 B',
+                  reason: 'I was about to summarize progress'
+                })
               }
             }
           ]
@@ -131,7 +134,7 @@ async function main() {
   assert(!Object.prototype.hasOwnProperty.call(metadata, 'routeHint'), 'followup should not carry metadata.routeHint legacy field');
   assert(runtime.serverToolFollowup === true, 'followup metadata should mark serverToolFollowup=true');
   assert(metadata.clientInjectOnly === true, 'continue_execution followup should use clientInjectOnly mode');
-  assert(metadata.clientInjectText === '继续执行', 'continue_execution followup should inject fixed continue text');
+  assert(metadata.clientInjectText === '完成了 A，正在处理 B', 'continue_execution followup should inject summary text');
 
   console.log('✅ servertool continue_execution followup regression passed');
 }
