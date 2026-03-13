@@ -38,6 +38,30 @@ interface MessageReasoningPayload {
   encrypted_content?: string;
 }
 
+function collapseReasoningSegments(segments: string[]): string[] {
+  const cleaned = segments.map((text) => text.trim()).filter((text) => text.length > 0);
+  const merged: string[] = [];
+  for (const entry of cleaned) {
+    if (merged.length === 0) {
+      merged.push(entry);
+      continue;
+    }
+    const last = merged[merged.length - 1];
+    if (entry === last) {
+      continue;
+    }
+    if (entry.startsWith(last)) {
+      merged[merged.length - 1] = entry;
+      continue;
+    }
+    if (last.startsWith(entry)) {
+      continue;
+    }
+    merged.push(entry);
+  }
+  return merged;
+}
+
 function normalizeMessageReasoningPayload(source: unknown): MessageReasoningPayload | undefined {
   if (!source || typeof source !== 'object' || Array.isArray(source)) {
     return undefined;
@@ -82,33 +106,41 @@ function normalizeMessageReasoningPayload(source: unknown): MessageReasoningPayl
       })
       .filter((entry): entry is { type: 'reasoning_text'; text: string } => entry !== null)
     : undefined;
+  const mergedSummary =
+    Array.isArray(summary) && summary.length
+      ? collapseReasoningSegments(summary.map((entry) => entry.text)).map((text) => ({ type: 'summary_text' as const, text }))
+      : undefined;
+  const mergedContent =
+    Array.isArray(content) && content.length
+      ? collapseReasoningSegments(content.map((entry) => entry.text)).map((text) => ({ type: 'reasoning_text' as const, text }))
+      : undefined;
   const encrypted_content = typeof row.encrypted_content === 'string'
     ? row.encrypted_content.trim()
     : '';
-  const hasSummary = Array.isArray(summary) && summary.length > 0;
-  const hasContent = Array.isArray(content) && content.length > 0;
+  const hasSummary = Array.isArray(mergedSummary) && mergedSummary.length > 0;
+  const hasContent = Array.isArray(mergedContent) && mergedContent.length > 0;
   const hasEncrypted = encrypted_content.length > 0;
   if (!hasSummary && !hasContent && !hasEncrypted) {
     return undefined;
   }
   return {
-    summary: hasSummary ? summary : undefined,
-    content: hasContent ? content : undefined,
+    summary: hasSummary ? mergedSummary : undefined,
+    content: hasContent ? mergedContent : undefined,
     encrypted_content: hasEncrypted ? encrypted_content : undefined
   };
 }
 
 function projectReasoningText(payload: MessageReasoningPayload): string | undefined {
-  const content = Array.isArray(payload.content)
-    ? payload.content.map((entry) => entry.text.trim()).filter((text) => text.length > 0)
+  const contentSegments = Array.isArray(payload.content)
+    ? collapseReasoningSegments(payload.content.map((entry) => entry.text))
     : [];
-  if (content.length) {
-    return content.join('\n');
+  if (contentSegments.length) {
+    return contentSegments.join('\n');
   }
-  const summary = Array.isArray(payload.summary)
-    ? payload.summary.map((entry) => entry.text.trim()).filter((text) => text.length > 0)
+  const summarySegments = Array.isArray(payload.summary)
+    ? collapseReasoningSegments(payload.summary.map((entry) => entry.text))
     : [];
-  return summary.length ? summary.join('\n') : undefined;
+  return summarySegments.length ? summarySegments.join('\n') : undefined;
 }
 
 function applyReasoningPayloadToMessage(

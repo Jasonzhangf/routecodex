@@ -21,6 +21,30 @@ interface ResponsesMetadataEntry {
 
 const registry = new Map<string, ResponsesMetadataEntry>();
 
+function collapseReasoningSegments(segments: string[]): string[] {
+  const cleaned = segments.map((text) => text.trim()).filter((text) => text.length > 0);
+  const merged: string[] = [];
+  for (const entry of cleaned) {
+    if (merged.length === 0) {
+      merged.push(entry);
+      continue;
+    }
+    const last = merged[merged.length - 1];
+    if (entry === last) {
+      continue;
+    }
+    if (entry.startsWith(last)) {
+      merged[merged.length - 1] = entry;
+      continue;
+    }
+    if (last.startsWith(entry)) {
+      continue;
+    }
+    merged.push(entry);
+  }
+  return merged;
+}
+
 function ensureEntry(id: string): ResponsesMetadataEntry {
   let entry = registry.get(id);
   if (!entry) {
@@ -62,27 +86,33 @@ function cloneSnapshot(snapshot: Record<string, unknown>): Record<string, unknow
 export function registerResponsesReasoning(id: unknown, reasoning: ResponsesReasoningPayload | undefined): void {
   if (typeof id !== 'string') return;
   if (!reasoning) return;
-  const summary = Array.isArray(reasoning.summary)
+  const summaryRaw = Array.isArray(reasoning.summary)
     ? reasoning.summary
-      .map((item) => ({ type: 'summary_text' as const, text: String(item.text ?? '').trim() }))
-      .filter((item) => item.text.length > 0)
+      .map((item) => String(item.text ?? '').trim())
+      .filter((text) => text.length > 0)
+    : [];
+  const summaryCollapsed = summaryRaw.length
+    ? collapseReasoningSegments(summaryRaw).map((text) => ({ type: 'summary_text' as const, text }))
     : undefined;
-  const content = Array.isArray(reasoning.content)
+  const contentRaw = Array.isArray(reasoning.content)
     ? reasoning.content
-      .map((item) => ({
-        type: item.type === 'text' ? 'text' as const : 'reasoning_text' as const,
-        text: String(item.text ?? '').trim()
-      }))
-      .filter((item) => item.text.length > 0)
+      .map((item) => String(item.text ?? '').trim())
+      .filter((text) => text.length > 0)
+    : [];
+  const contentCollapsed = contentRaw.length
+    ? collapseReasoningSegments(contentRaw).map((text) => ({
+      type: 'reasoning_text' as const,
+      text
+    }))
     : undefined;
-  const hasSummary = Array.isArray(summary) && summary.length > 0;
-  const hasContent = Array.isArray(content) && content.length > 0;
+  const hasSummary = Array.isArray(summaryCollapsed) && summaryCollapsed.length > 0;
+  const hasContent = Array.isArray(contentCollapsed) && contentCollapsed.length > 0;
   const hasEncrypted = reasoning.encrypted_content !== undefined;
   if (!hasSummary && !hasContent && !hasEncrypted) return;
   const entry = ensureEntry(id);
   entry.reasoning = {
-    summary: hasSummary ? summary : undefined,
-    content: hasContent ? content : undefined,
+    summary: hasSummary ? summaryCollapsed : undefined,
+    content: hasContent ? contentCollapsed : undefined,
     encrypted_content: reasoning.encrypted_content
   };
 }
