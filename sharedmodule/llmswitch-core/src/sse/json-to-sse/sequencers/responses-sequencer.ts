@@ -62,13 +62,17 @@ function normalizeResponseOutput(
   requestId: string
 ): ResponsesOutputItem[] {
   if (!Array.isArray(output)) return [];
+  const hasExplicitReasoning = output.some(
+    (item) => item && typeof item === 'object' && (item as ResponsesOutputItem).type === 'reasoning'
+  );
   const normalized: ResponsesOutputItem[] = [];
   output.forEach((item, index) => {
     if (item && typeof item === 'object' && (item as ResponsesOutputItem).type === 'message') {
       normalized.push(
         ...expandResponsesMessageItem(item as ResponsesMessageItem, {
           requestId,
-          outputIndex: index
+          outputIndex: index,
+          suppressReasoningFromContent: hasExplicitReasoning
         })
       );
     } else {

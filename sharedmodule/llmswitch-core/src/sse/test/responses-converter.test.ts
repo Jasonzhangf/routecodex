@@ -164,6 +164,53 @@ describe('Responses协议转换器测试', () => {
       expect((inProgressEvent!.data.response.output || []).length).toBe(0);
     });
 
+    it('显式 reasoning 输出存在时，不应再次从 message 内容提取重复 reasoning', async () => {
+      const response: ResponsesResponse = {
+        id: 'resp_reasoning_dedup',
+        object: 'response',
+        created: Date.now(),
+        status: 'completed',
+        model: 'gpt-4o-mini',
+        usage: {
+          prompt_tokens: 3,
+          completion_tokens: 3,
+          total_tokens: 6
+        },
+        output: [{
+          type: 'reasoning',
+          id: 'reasoning_dedup_1',
+          summary: [],
+          content: [{
+            type: 'reasoning_text',
+            text: 'Step A'
+          }]
+        }, {
+          type: 'message',
+          id: 'msg_dedup_1',
+          role: 'assistant',
+          content: [{
+            type: 'reasoning_text',
+            text: 'Step A'
+          }, {
+            type: 'output_text',
+            text: 'Done'
+          }]
+        }]
+      };
+
+      const sseStream = await jsonToSseConverter.convertResponseToJsonToSse(response, {
+        requestId: 'test-req-reasoning-dedup',
+        chunkSize: 8,
+        enableHeartbeat: false,
+        includeReasoning: true
+      });
+      const events = await collectSseEvents(sseStream);
+
+      const reasoningDeltas = events.filter(e => e.type === 'response.reasoning_text.delta');
+      expect(reasoningDeltas.length).toBe(1);
+      expect(reasoningDeltas[0].data.delta).toContain('Step A');
+    });
+
     it('应该转换带有工具调用的响应', async () => {
       const response: ResponsesResponse = {
         id: 'resp_456',
