@@ -54,7 +54,7 @@ async function main() {
       clockDaemonId: 'daemon_clock_1',
       tmuxSessionId: 'tmux_clock_1',
       clientType: 'codex',
-      workdir: '/tmp/clock-workdir'
+      cwd: '/tmp/clock-workdir'
     },
     processMode: 'chat',
     direction: 'request',
@@ -65,7 +65,7 @@ async function main() {
   assert.equal(adapterContext.clockDaemonId, 'daemon_clock_1');
   assert.equal(adapterContext.tmuxSessionId, 'tmux_clock_1');
   assert.equal(adapterContext.clientType, 'codex');
-  assert.equal(adapterContext.workdir, '/tmp/clock-workdir');
+  assert.equal(adapterContext.cwd, '/tmp/clock-workdir');
   assert.equal(resolveClockSessionScope(adapterContext, adapterContext.__rt ?? null), 'tmux:tmux_clock_1');
 
   const adapterContextSnakeCase = unsafePipeline.buildAdapterContext({
@@ -76,7 +76,7 @@ async function main() {
     payload: { model: 'kimi-k2.5', input: [{ role: 'user', content: 'hi' }] },
     metadata: {
       sessionId: 'session_clock_2',
-      clock_client_daemon_id: 'daemon_clock_2'
+      clockDaemonId: 'daemon_clock_2'
     },
     processMode: 'chat',
     direction: 'request',
@@ -84,7 +84,7 @@ async function main() {
     stream: false
   });
 
-  assert.equal(adapterContextSnakeCase.clock_client_daemon_id, 'daemon_clock_2');
+  assert.equal(adapterContextSnakeCase.clockDaemonId, 'daemon_clock_2');
   assert.equal(
     resolveClockSessionScope(adapterContextSnakeCase, adapterContextSnakeCase.__rt ?? null),
     'session_clock_2'

@@ -12,6 +12,7 @@ import type {
   ContextCaptureOptions,
   ReqInboundStage3ContextCaptureOptions
 } from './context-capture-orchestration.js';
+import { writeCacheEntryForRequest } from './cache-write.js';
 
 export type {
   ContextCaptureHandler,
@@ -42,5 +43,9 @@ export function captureResponsesContextSnapshot(options: ContextCaptureOptions):
 
 function captureChatContextSnapshot(options: ContextCaptureOptions): Record<string, unknown> {
   const protocol = normalizeProviderProtocolTokenWithNative(options.adapterContext.providerProtocol);
+
+  // 写入请求到 CACHE.md（最后一条 user message）
+  writeCacheEntryForRequest(options);
+
   return buildToolOutputSnapshot(options.rawRequest, protocol);
 }

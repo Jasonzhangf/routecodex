@@ -64,3 +64,18 @@ src/utils/daemon-stop-intent.ts
 
 # Local memsearch notes
 memory/
+!sharedmodule/llmswitch-core/src/servertool/handlers/memory/
+
+# Local development files
+CACHE.md
+botpy.log
+clock.md
+models/
+/*.backup
+/*.backup2
+/*.backup3
+**/*.backup
+**/*.backup2
+**/*.backup3
+sharedmodule/llmswitch-core/CACHE.md
+vendor/llmswitch-core/

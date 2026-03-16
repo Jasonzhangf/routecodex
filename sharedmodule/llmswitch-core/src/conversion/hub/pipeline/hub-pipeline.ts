@@ -2208,6 +2208,20 @@ export class HubPipeline {
       (adapterContext as Record<string, unknown>).__rt =
         rtCarrier as unknown as JsonValue;
     }
+    if (typeof target?.anthropicThinking === "string" && target.anthropicThinking.trim()) {
+      (adapterContext as Record<string, unknown>).anthropicThinking =
+        target.anthropicThinking.trim().toLowerCase();
+    }
+    if (target?.anthropicThinkingConfig && typeof target.anthropicThinkingConfig === "object" && !Array.isArray(target.anthropicThinkingConfig)) {
+      (adapterContext as Record<string, unknown>).anthropicThinkingConfig = jsonClone(
+        target.anthropicThinkingConfig as any,
+      );
+    }
+    if (target?.anthropicThinkingBudgets && typeof target.anthropicThinkingBudgets === "object" && !Array.isArray(target.anthropicThinkingBudgets)) {
+      (adapterContext as Record<string, unknown>).anthropicThinkingBudgets = jsonClone(
+        target.anthropicThinkingBudgets as any,
+      );
+    }
     const runtime = (metadata as Record<string, unknown>).runtime;
     if (runtime && typeof runtime === "object" && !Array.isArray(runtime)) {
       (adapterContext as Record<string, unknown>).runtime = jsonClone(
@@ -2290,20 +2304,11 @@ export class HubPipeline {
     }
     propagateAdapterContextMetadataFields(adapterContext, metadata, [
       "clockDaemonId",
-      "clockClientDaemonId",
-      "clock_daemon_id",
-      "clock_client_daemon_id",
       "tmuxSessionId",
-      "tmux_session_id",
       "clientType",
       "clockClientType",
       "clientInjectReady",
-      "clientInjectReason",
-      "client_inject_ready",
-      "client_inject_reason",
-      "workdir",
       "cwd",
-      "workingDirectory",
     ]);
     const clientConnectionState = (metadata as Record<string, unknown>)
       .clientConnectionState;

@@ -18,7 +18,9 @@ import { executeWebSearchBackendPlan } from './handlers/web-search.js';
 import { executeVisionBackendPlan } from './handlers/vision.js';
 import './handlers/iflow-model-error-retry.js';
 import './handlers/antigravity-thought-signature-bootstrap.js';
+import './handlers/memory/cache-auto.js';
 import './handlers/stop-message-auto.js';
+import './handlers/reasoning-only-continue.js';
 import './handlers/clock.js';
 import './handlers/clock-auto.js';
 import './handlers/exec-command-guard.js';
@@ -544,7 +546,10 @@ export async function runServerSideToolEngine(
         // Treat failed servertool calls as executed so we can emit followup with error tool_outputs.
         executedToolCalls.push(toolCall);
         executedIds.add(toolCall.id);
-        executedFlowIds.push(`${toolCall.name}_error`);
+        // continue_execution: use normal flowId since handler becomes no-op instead of throwing
+        // Other tools keep the _error suffix to indicate failure state
+        const fallbackFlowId = toolCall.name === 'continue_execution' ? 'continue_execution_flow' : `${toolCall.name}_error`;
+        executedFlowIds.push(fallbackFlowId);
       }
     }
   }

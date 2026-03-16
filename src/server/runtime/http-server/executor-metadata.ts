@@ -411,7 +411,8 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
     ...(resolvedWorkdir
       ? {
           clientWorkdir: resolvedWorkdir,
-          workdir: resolvedWorkdir
+          workdir: resolvedWorkdir,
+          cwd: resolvedWorkdir
         }
       : {}),
     ...(resolvedTmuxSessionId
