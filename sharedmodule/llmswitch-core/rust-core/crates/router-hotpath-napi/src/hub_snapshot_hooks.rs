@@ -39,6 +39,26 @@ fn resolve_home_dir() -> PathBuf {
     PathBuf::from(".")
 }
 
+fn expand_home(value: &str, home_dir: &Path) -> PathBuf {
+    if let Some(stripped) = value.strip_prefix("~/") {
+        return home_dir.join(stripped);
+    }
+    PathBuf::from(value)
+}
+
+fn resolve_user_dir() -> PathBuf {
+    let home_dir = resolve_home_dir();
+    for key in ["RCC_HOME", "ROUTECODEX_USER_DIR", "ROUTECODEX_HOME"] {
+        if let Ok(v) = env::var(key) {
+            let trimmed = v.trim();
+            if !trimmed.is_empty() {
+                return expand_home(trimmed, &home_dir);
+            }
+        }
+    }
+    home_dir.join(".rcc")
+}
+
 fn resolve_snapshot_root() -> PathBuf {
     if let Ok(v) = env::var("RCC_SNAPSHOT_DIR") {
         if !v.trim().is_empty() {
@@ -50,7 +70,7 @@ fn resolve_snapshot_root() -> PathBuf {
             return PathBuf::from(v.trim());
         }
     }
-    resolve_home_dir().join(".routecodex").join("codex-samples")
+    resolve_user_dir().join("codex-samples")
 }
 
 fn resolve_errorsamples_root() -> PathBuf {
@@ -64,7 +84,7 @@ fn resolve_errorsamples_root() -> PathBuf {
             return PathBuf::from(v.trim());
         }
     }
-    resolve_home_dir().join(".routecodex").join("errorsamples")
+    resolve_user_dir().join("errorsamples")
 }
 
 fn safe_errorsample_name(name: &str) -> String {

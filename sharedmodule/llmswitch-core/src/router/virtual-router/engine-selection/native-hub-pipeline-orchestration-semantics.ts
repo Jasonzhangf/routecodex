@@ -529,6 +529,11 @@ export function extractAdapterContextMetadataFieldsWithNative(
     return parsed ?? fail('invalid payload');
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    // Fallback: use pure JS to pick fields from metadata
+    const fallback = extractAdapterContextMetadataFieldsJs(metadata, keys);
+    if (Object.keys(fallback).length > 0) {
+      return fallback;
+    }
     return fail(reason);
   }
 }
@@ -820,4 +825,31 @@ export function attachPassthroughProviderInputAuditWithNative(
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
     return fail(reason);
   }
+}
+
+/**
+ * Pure JS fallback for extracting metadata fields
+ * Used when native function is disabled or fails
+ */
+function extractAdapterContextMetadataFieldsJs(
+  metadata: Record<string, unknown>,
+  keys: string[]
+): Record<string, unknown> {
+  if (!metadata || typeof metadata !== 'object') {
+    return {};
+  }
+  if (!Array.isArray(keys) || keys.length === 0) {
+    return {};
+  }
+  const result: Record<string, unknown> = {};
+  for (const key of keys) {
+    if (typeof key !== 'string' || !key) {
+      continue;
+    }
+    const value = metadata[key];
+    if (value !== undefined && value !== null) {
+      result[key] = value;
+    }
+  }
+  return result;
 }
