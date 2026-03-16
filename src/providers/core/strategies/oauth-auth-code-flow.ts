@@ -189,7 +189,11 @@ export class OAuthAuthCodeFlowStrategy extends BaseOAuthFlowStrategy {
       // 3.1 启动本地回调服务（固定 localhost:8080，路径 /oauth2callback）
       const serverResult = await this.startCallbackServer(authCodeData.state, authCodeData.codeVerifier);
       // Avoid unhandled rejection when callback promise settles after early activate failure.
-      void serverResult.callbackPromise.catch(() => {});
+      void serverResult.callbackPromise.catch((error) => {
+        logOAuthDebug(
+          `[OAuth] callbackPromise settled with error after early path: ${error instanceof Error ? error.message : String(error)}`
+        );
+      });
 
       // 3.2 更新授权URL中的重定向参数（与本地回调服务一致），再打开浏览器
       try {

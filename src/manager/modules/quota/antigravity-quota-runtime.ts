@@ -19,6 +19,11 @@ type CoreQuotaManagerLike = {
   onProviderSuccess?: (ev: ProviderSuccessEvent) => void;
 };
 
+function logQuotaRuntimeNonBlockingError(operation: string, error: unknown): void {
+  const reason = error instanceof Error ? error.message : String(error);
+  console.warn(`[quota-runtime] ${operation} failed (non-blocking): ${reason}`);
+}
+
 export function handleQuotaPersistenceIssue(options: {
   reason: string;
   lastReason: string | null;
@@ -41,8 +46,8 @@ export function handleQuotaPersistenceIssue(options: {
       typeof out?.clearedByAlias === 'number' && Number.isFinite(out.clearedByAlias)
         ? Math.max(0, Math.floor(out.clearedByAlias))
         : 0;
-  } catch {
-    // best-effort only
+  } catch (error) {
+    logQuotaRuntimeNonBlockingError('handleQuotaPersistenceIssue.clearSessionAliasPins', error);
   }
   const quotaPath = options.quotaStorePath || '(unknown)';
   console.warn(
@@ -65,7 +70,8 @@ export async function subscribeToProviderCenters(options: {
   let errorCenter: { subscribe?: (handler: (ev: ProviderErrorEvent) => void) => () => void } | null = null;
   try {
     errorCenter = (await options.bridge.getProviderErrorCenter()) as any;
-  } catch {
+  } catch (error) {
+    logQuotaRuntimeNonBlockingError('subscribeToProviderCenters.getProviderErrorCenter', error);
     errorCenter = null;
   }
   if (errorCenter && typeof errorCenter.subscribe === 'function' && typeof mgr.onProviderError === 'function') {
@@ -73,11 +79,12 @@ export async function subscribeToProviderCenters(options: {
       providerErrorUnsub = errorCenter.subscribe((ev: ProviderErrorEvent) => {
         try {
           mgr.onProviderError?.(ev);
-        } catch {
-          // ignore
+        } catch (error) {
+          logQuotaRuntimeNonBlockingError('subscribeToProviderCenters.onProviderError', error);
         }
       });
-    } catch {
+    } catch (error) {
+      logQuotaRuntimeNonBlockingError('subscribeToProviderCenters.errorCenterSubscribe', error);
       providerErrorUnsub = null;
     }
   }
@@ -86,7 +93,8 @@ export async function subscribeToProviderCenters(options: {
   let successCenter: { subscribe?: (handler: (ev: ProviderSuccessEvent) => void) => () => void } | null = null;
   try {
     successCenter = (await options.bridge.getProviderSuccessCenter()) as any;
-  } catch {
+  } catch (error) {
+    logQuotaRuntimeNonBlockingError('subscribeToProviderCenters.getProviderSuccessCenter', error);
     successCenter = null;
   }
   if (successCenter && typeof successCenter.subscribe === 'function' && typeof mgr.onProviderSuccess === 'function') {
@@ -94,11 +102,12 @@ export async function subscribeToProviderCenters(options: {
       providerSuccessUnsub = successCenter.subscribe((ev: ProviderSuccessEvent) => {
         try {
           mgr.onProviderSuccess?.(ev);
-        } catch {
-          // ignore
+        } catch (error) {
+          logQuotaRuntimeNonBlockingError('subscribeToProviderCenters.onProviderSuccess', error);
         }
       });
-    } catch {
+    } catch (error) {
+      logQuotaRuntimeNonBlockingError('subscribeToProviderCenters.successCenterSubscribe', error);
       providerSuccessUnsub = null;
     }
   }
@@ -135,7 +144,8 @@ export function scheduleNextRefresh(options: {
           options.onRefreshFailuresChange(0);
         }
       })
-      .catch(() => {
+      .catch((error) => {
+        logQuotaRuntimeNonBlockingError('scheduleNextRefresh.refreshAllAntigravityQuotas', error);
         const nextFailures = options.getRefreshFailures() + 1;
         options.onRefreshFailuresChange(nextFailures);
         if (nextFailures >= 3) {

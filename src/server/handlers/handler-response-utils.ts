@@ -40,6 +40,11 @@ type SseFinishReasonTracker = {
 const SHOULD_LOG_HTTP_EVENTS = buildInfo.mode !== 'release'
   || process.env.ROUTECODEX_HTTP_LOG_VERBOSE === '1';
 
+function logResponseNonBlockingError(operation: string, error: unknown): void {
+  const reason = error instanceof Error ? error.message : String(error);
+  console.warn(`[handler-response] ${operation} failed (non-blocking): ${reason}`);
+}
+
 function formatTimestamp(): string {
   const now = new Date();
   const hours = String(now.getHours()).padStart(2, '0');
@@ -243,7 +248,9 @@ export function sendPipelineResponse(
         requestId: requestLabel,
         entryEndpoint,
         data: { status: 502, error: { message: 'SSE stream missing from pipeline result', code: 'sse_bridge_error' } }
-      }).catch(() => {});
+      }).catch((error) => {
+        logResponseNonBlockingError(`writeServerSnapshot:sse_missing:${requestLabel}`, error);
+      });
     }
     res.status(502).json({ error: { message: 'SSE stream missing from pipeline result', code: 'sse_bridge_error' } });
     return;
@@ -263,7 +270,9 @@ export function sendPipelineResponse(
           requestId: requestLabel,
           entryEndpoint,
           data: { status: 502, error: { message: 'SSE stream missing from pipeline result', code: 'sse_bridge_error' } }
-        }).catch(() => {});
+        }).catch((error) => {
+          logResponseNonBlockingError(`writeServerSnapshot:sse_missing_stream:${requestLabel}`, error);
+        });
       }
       res.status(502).json({ error: { message: 'SSE stream missing from pipeline result', code: 'sse_bridge_error' } });
       return;
@@ -477,7 +486,9 @@ export function sendPipelineResponse(
         requestId: requestLabel,
         entryEndpoint,
         data: { status, headers: result.headers, body: null }
-      }).catch(() => {});
+      }).catch((error) => {
+        logResponseNonBlockingError(`writeServerSnapshot:json_empty:${requestLabel}`, error);
+      });
     }
     res.status(status).end();
     logPipelineStage('response.json.completed', requestLabel, { status });
@@ -494,7 +505,9 @@ export function sendPipelineResponse(
       requestId: requestLabel,
       entryEndpoint,
       data: { status, headers: result.headers, body: sanitized }
-    }).catch(() => {});
+    }).catch((error) => {
+      logResponseNonBlockingError(`writeServerSnapshot:json_payload:${requestLabel}`, error);
+    });
   }
   res.status(status).json(sanitized);
   logPipelineStage('response.json.completed', requestLabel, { status });
@@ -624,8 +637,8 @@ function maybeAttachClientSseSnapshotStream(
     flushed = true;
     try {
       stream.unpipe(capture);
-    } catch {
-      /* ignore */
+    } catch (error) {
+      logResponseNonBlockingError(`stream.unpipe:${options.requestId}`, error);
     }
     capture.removeAllListeners();
     const raw = chunks.length ? Buffer.concat(chunks).toString('utf8') : '';
@@ -645,7 +658,9 @@ function maybeAttachClientSseSnapshotStream(
       requestId: options.requestId,
       entryEndpoint: options.entryEndpoint,
       data: payload
-    }).catch(() => {});
+    }).catch((error) => {
+      logResponseNonBlockingError(`writeServerSnapshot:sse_payload:${options.requestId}`, error);
+    });
   };
 
   capture.on('data', (chunk: unknown) => {

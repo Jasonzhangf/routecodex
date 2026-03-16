@@ -7,6 +7,14 @@
 
 Tags: pipedebug, skill, codex-samples, request-path, response-path, llmswitch-core, provider-v2, debug-workflow, heartbeat, tmux, ssot, heartbeat-until, heartbeat-marker, delivery-md, review-flow, no-fallback, client-reactivation
 
+- 2026-03-16: 已建立全局 `~/.codex/AGENTS.md` 作为唯一全局 agent 说明真源；内容包括：全局编码规则（单文件 <= 500 行、公共函数库 + 模块化 + 应用层编排、模块唯一真源、UI 只消费应用层数据）、debug 规则（先查记忆/历史、避免重复错误、解决或失败后记忆落盘、明确目标主动实现、危险操作谨慎、最小改动、从正确层根因修复）、以及 `CACHE.md` / `HEARTBEAT.md` / `DELIVERY.md` / clock / bd / lsp 的全局使用说明。并明确 `~/.codex/AGENTS.md` 为唯一全局文件，不再使用 `~/.codex/agents.md`。
+
+Tags: global-agents, codex-home, agents-md, cache-md, heartbeat-md, delivery-md, clock, bd, lsp, coding-rules, debug-rules, ssot
+
+- 2026-03-16: 全局规则已加强：对任何**完成时间未知的异步等待任务**（尤其后台 terminal / daemon / 长时测试 / 构建 / 发布 / 轮询）都应设计 `clock` reminder，而不是只靠记忆回头检查。该约束已写入 `~/.codex/AGENTS.md` 与 `docs/CLOCK.md`；推荐模式是“启动后台任务后立刻设一个短 reminder，回来检查日志/退出码/产物，若未完成再续设下一次 reminder”。
+
+Tags: clock, async-wait, background-terminal, reminder, agents-md, clock-md, workflow, recovery
+
 ## Web Search 相关
 
 - 2026-03-06: Web search execution is now split by config in `virtualrouter.webSearch.engines[*]` using `executionMode` (`direct` vs `servertool`) instead of hardcoded DeepSeek checks. Direct route search backends skip canonical servertool injection; servertool-only backends still inject `web_search`.
@@ -555,7 +563,11 @@ Tags: reasoning, anthropic, output_config, thinking, responses, sse, codex-ui, s
 - 2026-03-16: 运维/CLI 面也已补齐：
   - HTTP routes：`/daemon/heartbeat/list`、`/daemon/heartbeat`（status/on/off/trigger）。
   - CLI：新增 `routecodex heartbeat` / `rcc heartbeat` 子命令。
-  - startup cleanup：`session-storage-cleanup.ts` 会清理 `~/.rcc/sessions/.../heartbeat/*.json` 中失效 tmux 状态。
+  - startup cleanup：`session-storage-cleanup.ts` 以 `~/.rcc/sessions/heartbeat/*.json` 为 tmux-global heartbeat 真源；如果 `ROUTECODEX_SESSION_DIR` 是 `~/.rcc/sessions/<host_port>` 这类端口桶，heartbeat 状态也必须提升到父级 sessions root，而不是继续按端口分桶。
+  - 清理风险复核：当前 stale-heartbeat / startup cleanup 不会直接杀 tmux；真实风险是如果 dead/stale 判断误判，会移除 heartbeat state、registry record、conversation binding、tmux-tools-state 这类元数据，导致“状态失忆”，而不是 tmux 进程被误杀。
+  - 回归补强：`tests/servertool/servertool-heartbeat.spec.ts` 新增两条样本——(1) 端口桶 `ROUTECODEX_SESSION_DIR` 下 heartbeat 必须写入父级 `sessions/heartbeat/*.json`；(2) 历史 per-port heartbeat 文件在读取时自动迁移到 tmux-global store，并删除 legacy 文件。这样可以防止 heartbeat 因 server port 变化而“丢状态”。
+  - 2026-03-16 进一步收紧 cleanup：`cleanupStaleHeartbeatsFromRegistry()` 与 startup `sanitizeSessionBindingsDir()` 现在都遵守同一规则——**stale daemon != dead tmux**。如果 tmux 仍存活，只删除 stale daemon record，不再把 `removedTmuxSessionIds`、conversation mapping、tmux tool-state 一并清掉；只有 tmux probe 确认 dead 时，才清理 tmux scope 元数据。新增回归：`tests/server/http-server/session-client-registry.spec.ts`、`tests/server/http-server/session-storage-cleanup.spec.ts`。
+  - Host 侧 tmux-scope cleanup 判定已抽到单一真源 `src/server/runtime/http-server/tmux-scope-cleanup-policy.ts`，并接入 `session-storage-cleanup`、`session-client-registry-utils`、`clock-runtime-hooks`、`executor-metadata`、`executor/client-injection-flow`。规则统一为：**只有 confirmed dead tmux 才允许清 tmux scope metadata**；stale heartbeat、workdir mismatch、inject failed、send failed 在 tmux 仍活时都不能再触发 scope 清理。
 - 2026-03-16: 回归覆盖新增：
   - `tests/servertool/servertool-heartbeat.spec.ts`
   - `tests/servertool/review-followup.spec.ts` 新增 heartbeat handoff review 不变式
@@ -587,3 +599,49 @@ Tags: heartbeat, tmux, request-activity-tracker, heartbeat-runtime-hooks, heartb
 - 2026-03-16: Clock 提醒的当前正确策略更新为：到期任务不是逐条同时刷屏，而是先按 due task 排序，以最早到期任务为锚点，把 **5 分钟窗口内** 的任务合并成一个 `[Clock Reminder]` 批次发送；超过 5 分钟的任务留到下一批。该聚合逻辑已下沉到 `sharedmodule/llmswitch-core/src/servertool/clock/tasks.ts`，由 request-path `reserveDueTasksForRequest(...)` 与 daemon 注入共用，避免双真源。
 
 Tags: heartbeat, clock, servertool, llmswitch-core, ssot, tmux-injection, duplicate-injection, startup-tick, merge-window, clock-reminder, request-path, daemon
+
+- 2026-03-16: 已新增全局 skill `~/.codex/skills/clock/`，用于 RouteCodex `clock` 的标准使用方式。skill 真源强调：对任何完成时间未知的异步等待任务（尤其后台 terminal / daemon / 构建 / 测试 / 发布）都应立即设计 clock reminder，而不是只靠记忆；并提供 reminder 文案模式、clock vs heartbeat 的区分、以及回调后必须检查真实证据再继续/续设 reminder 的工作流。
+
+Tags: clock-skill, codex-skills, async-wait, background-terminal, reminder, heartbeat-vs-clock, workflow
+
+## Tmux 渲染与 Codex Reasoning 显示（2026-03-16）
+
+- 2026-03-16: 已通过对照确认 `codex --profile ...`（非 tmux）正常、`routecodex codex`（managed tmux）出现 reasoning 区域白底反显；因此根因定位到 **tmux/终端渲染层**，不是 provider reasoning 映射链路，也不是 apikey 认证分支。
+- 2026-03-16: `routecodex codex` 现已固化 managed tmux 渲染兜底：默认开启 `ROUTECODEX_CODEX_TMUX_TUNE_RENDERING=1`、`ROUTECODEX_CODEX_TMUX_DISABLE_ITALIC=1`、`ROUTECODEX_CODEX_TMUX_DISABLE_STANDOUT=1`（含 `RCC_` 同义变量），用于降低 dim/italic/standout 在 tmux 中触发反显白底的概率，同时保持现有 tmux injection 与 scoped apikey 机制不变。
+- 2026-03-16: 保留环境变量可回退（设置为 `0`），便于后续做终端兼容 A/B。
+
+Tags: tmux, codex, reasoning, reverse-video, standout, italic, tune-rendering, launcher, scoped-apikey, stability
+
+## 静默失败治理（2026-03-16）
+
+- 2026-03-16: 本次针对“高优先级静默失败”做了最小根因修复：保留 non-blocking 语义，但不再吞掉异常。
+  - Session Reaper 启动首次 cleanup 失败：从静默改为 `logProcessLifecycle(event=session_reaper_error, phase=initial_cleanup)`。
+  - Snapshot 链路（host bridge/provider snapshot）：`writeErrorsample` / `writeSnapshotViaHooks` / fallback 写盘失败从静默改为带 operation 上下文的 `console.warn`。
+  - Quota 链路（adapter + antigravity manager/runtime + llmswitch-core quota-manager）：`hydrate/persist/subscribe/refresh` 等吞异常点改为显式 warn，避免“配额状态未落盘/未订阅但无感知”。
+  - Tool filter hooks（llmswitch-core）：单个 hook 同步异常、异步 rejection、外层 apply 失败均记录 warning，仍保持 passthrough，不阻断请求主链路。
+- 2026-03-16: 验证结果：
+  - `sharedmodule/llmswitch-core/` 执行 `npm run build` 通过（含 matrix/postbuild）。
+  - 仓库根目录执行 `npm run build:dev` 通过（含 install:global 与健康检查）。
+- 经验：对 best-effort 分支应采用“non-blocking but observable”模式：不影响主流程，但必须留下可检索信号（operation + error message）。
+
+Tags: silent-failure, non-blocking, observability, quota, snapshot, session-reaper, tool-filter-hooks, fail-fast
+- 2026-03-16 (补充): 第二批补强覆盖 HTTP handler 错误响应路径：
+  - `src/server/handlers/handler-response-utils.ts`：client-response snapshot 写入/stream unpipe 的吞异常改为 operation 级 warning。
+  - `src/server/handlers/handler-utils.ts`：`reportRouteError` 失败、SSE error 写入/结束失败、error snapshot 写入失败不再静默。
+  - `src/server/runtime/http-server/daemon-admin/status-handler.ts`：provider-quota reset fallback 的 `persistNow/refreshNow` 吞异常改为 warning。
+- 2026-03-16 (继续补强): 清理了剩余一批 `.catch(() => {})` 静默点（index restart path / oauth lifecycle / oauth auth-code flow / validate / CLI start）。策略统一为：不改变 non-blocking 行为，但增加上下文日志；同时把 `index.ts` 中对 `reportCliError(...).catch(() => {})` 的冗余吞错改为直接 `await reportCliError(...)`，并在 `reportCliError` 内部记录 hub 上报失败原因。
+- 2026-03-16 (验证补充): `npm run build:dev` 被 `verify:repo-sanity` 阻断（仓库存在未跟踪文件 `src/server/runtime/http-server/tmux-scope-cleanup-policy.ts`、`tests/server/http-server/tmux-scope-cleanup-policy.spec.ts`，与本次改动无关）；改用 `npx tsc -p tsconfig.json --noEmit` 完成类型验证并通过。
+
+Tags: silent-failure, non-blocking, cli-restart, oauth, validate-command, start-command, observability
+- 2026-03-16 (验证最终): 后续 `verify:repo-sanity` 已恢复通过，随后完整 `npm run build:dev` 再次通过（含 install:global + health check + restart 5555）。
+
+Tags: silent-failure, verification, build-dev, repo-sanity
+- 2026-03-16 (继续推进): 新增收敛了一批 high-risk 静默失败点：
+  - `src/utils/snapshot-writer.ts`：hook 加载失败、hook 写入失败、本地写盘失败、mkdir 失败均改为 non-blocking warning（server-snapshot）。
+  - `src/providers/auth/oauth-auth.ts`：token 持久化失败不再静默，改为 OAuth debug 日志。
+  - `src/providers/auth/tokenfile-auth.ts`：qwen token 路径探测/回退路径扫描的吞异常改为 OAuth debug 日志，避免 token 源探测失效无信号。
+  - `src/server-lifecycle/port-utils.ts`：端口快速探测关键 catch 分支改为 lifecycle 事件 `port_utils_non_blocking_error`，保留流程不阻断。
+  - `src/commands/validate.ts`：server 启停阶段 SIGTERM/SIGKILL 失败与 cleanup 失败改为 warning（verbose 或显式 cleanup 场景），不再静默。
+- 2026-03-16 (验证): `npx tsc -p tsconfig.json --noEmit` 通过；`npm run verify:repo-sanity` 通过；`npm run build:dev` 通过（含 install:global + health check + restart 5555）。
+
+Tags: silent-failure, snapshot-writer, tokenfile-auth, oauth-auth, port-utils, validate, non-blocking, observability

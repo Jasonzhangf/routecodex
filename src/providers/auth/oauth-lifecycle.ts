@@ -547,7 +547,11 @@ async function ensureGeminiCLIServicesEnabled(accessToken: string, projectId: st
         }
       } else {
         // drain body
-        await checkResp.text().catch(() => {});
+        await checkResp.text().catch((error) => {
+          logOAuthDebug(
+            `[OAuth] Gemini CLI: failed to drain service check body for ${service} on ${projectId} - ${error instanceof Error ? error.message : String(error)}`
+          );
+        });
       }
     } catch (error) {
       logOAuthDebug(
@@ -566,7 +570,12 @@ async function ensureGeminiCLIServicesEnabled(accessToken: string, projectId: st
         headers,
         body: '{}'
       });
-      bodyText = await enableResp.text().catch(() => '');
+      bodyText = await enableResp.text().catch((error) => {
+        logOAuthDebug(
+          `[OAuth] Gemini CLI: failed to read enable response body for ${service} on ${projectId} - ${error instanceof Error ? error.message : String(error)}`
+        );
+        return '';
+      });
     } catch (error) {
       throw new Error(
         `Gemini CLI: failed to enable ${service} for project ${projectId} - ${error instanceof Error ? error.message : String(error)}`
@@ -1199,8 +1208,10 @@ async function runInteractiveAuthorizationFlow(
 
   const label = `${providerType}:${tokenFilePath}`;
   const queued = interactiveTail.current
-    .catch(() => {
-      // ignore previous rejection so queue continues
+    .catch((error) => {
+      logOAuthDebug(
+        `[OAuth] interactive queue recovered from previous rejection for ${label}: ${error instanceof Error ? error.message : String(error)}`
+      );
     })
     .then(async () => {
       logOAuthDebug(`[OAuth] interactive queue enter ${label}`);
@@ -1579,7 +1590,11 @@ export async function handleUpstreamInvalidOAuthToken(
             providerType,
             auth: auth as ExtendedOAuthAuth,
             url
-          }).catch(() => {});
+          }).catch((error) => {
+            logOAuthDebug(
+              `[OAuth] failed to open Google account verification in Camoufox (provider=${providerType}) - ${error instanceof Error ? error.message : String(error)}`
+            );
+          });
         }
         return false;
       }
@@ -1598,8 +1613,10 @@ export async function handleUpstreamInvalidOAuthToken(
             tokenFile: tokenFilePath
           });
           return true;
-        } catch {
-          // ignore silent refresh errors; fall through to background interactive flow
+        } catch (error) {
+          logOAuthDebug(
+            `[OAuth] silent refresh failed; falling back to background interactive repair (provider=${providerType}) - ${error instanceof Error ? error.message : String(error)}`
+          );
         }
       }
       const interactiveOpts: EnsureOpts = {
@@ -1616,8 +1633,10 @@ export async function handleUpstreamInvalidOAuthToken(
           ensureValid,
           opts: interactiveOpts
         });
-      }).catch(() => {
-        // background repair failure must never block requests
+      }).catch((error) => {
+        logOAuthDebug(
+          `[OAuth] background interactive repair failed (provider=${providerType}) - ${error instanceof Error ? error.message : String(error)}`
+        );
       });
       return false;
     }
@@ -1642,7 +1661,10 @@ export async function handleUpstreamInvalidOAuthToken(
       tokenFile: tokenFilePath
     });
     return true;
-  } catch {
+  } catch (error) {
+    logOAuthDebug(
+      `[OAuth] interactive repair flow failed (provider=${providerType}) - ${error instanceof Error ? error.message : String(error)}`
+    );
     return false;
   }
 }
@@ -1712,7 +1734,12 @@ export function shouldTriggerInteractiveOAuthRepair(providerType: string, upstre
 async function inferIflowClientCredsFromLog(): Promise<{ clientId?: string; clientSecret?: string } | null> {
   try {
     const file = path.join(resolveRccAuthDir(), 'iflow-oauth.log');
-    const txt = await fs.readFile(file, 'utf-8').catch(() => '');
+    const txt = await fs.readFile(file, 'utf-8').catch((error) => {
+      logOAuthDebug(
+        `[OAuth] failed to read iflow oauth log for client creds inference (non-blocking) file=${file}: ${error instanceof Error ? error.message : String(error)}`
+      );
+      return '';
+    });
     if (!txt) {
       return null;
     }
@@ -1739,7 +1766,10 @@ async function inferIflowClientCredsFromLog(): Promise<{ clientId?: string; clie
       }
     }
     return null;
-  } catch {
+  } catch (error) {
+    logOAuthDebug(
+      `[OAuth] inferIflowClientCredsFromLog failed (non-blocking): ${error instanceof Error ? error.message : String(error)}`
+    );
     return null;
   }
 }

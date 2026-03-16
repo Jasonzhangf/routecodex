@@ -106,7 +106,12 @@ function writeBridgeErrorsample(args: {
       ...(args.extras ?? {}),
       observation: args.observation
     }
-  }).catch(() => {});
+  }).catch((error) => {
+    const reason = error instanceof Error ? error.message : String(error);
+    console.warn(
+      `[snapshot-recorder] writeBridgeErrorsample failed group=${args.group} kind=${args.kind} stage=${args.stage}: ${reason}`
+    );
+  });
 }
 
 function logClientToolError(args: {

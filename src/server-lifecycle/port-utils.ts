@@ -11,6 +11,28 @@ import { HTTP_PROTOCOLS, LOCAL_HOSTS, API_PATHS } from '../constants/index.js';
 import { listManagedServerPidsByPort } from '../utils/managed-server-pids.js';
 import { resolveSignalCaller } from '../sharedmodule/process-snapshot.js';
 
+const PORT_UTILS_ERROR_LOG_THROTTLE_MS = 5_000;
+const portUtilsLastErrorLogAt = new Map<string, number>();
+
+function logPortUtilsNonBlockingError(operation: string, error: unknown, details?: Record<string, unknown>): void {
+  const now = Date.now();
+  const last = portUtilsLastErrorLogAt.get(operation) ?? 0;
+  if (now - last < PORT_UTILS_ERROR_LOG_THROTTLE_MS) {
+    return;
+  }
+  portUtilsLastErrorLogAt.set(operation, now);
+  const reason = error instanceof Error ? error.message : String(error);
+  logProcessLifecycle({
+    event: 'port_utils_non_blocking_error',
+    source: 'server-lifecycle/port-utils',
+    details: {
+      operation,
+      reason,
+      ...(details || {})
+    }
+  });
+}
+
 async function canBind(port: number): Promise<boolean> {
   return await new Promise<boolean>(resolve => {
     try {
@@ -19,7 +41,10 @@ async function canBind(port: number): Promise<boolean> {
       s.listen({ host: '0.0.0.0', port }, () => {
         s.close(() => resolve(true));
       });
-    } catch { resolve(false); }
+    } catch (error) {
+      logPortUtilsNonBlockingError('canBind', error, { port });
+      resolve(false);
+    }
   });
 }
 
@@ -37,15 +62,22 @@ async function isServerHealthyQuick(port: number): Promise<boolean> {
     const res = await fetch(`${HTTP_PROTOCOLS.HTTP}${LOCAL_HOSTS.IPV4}:${port}/health`, {
       method: 'GET',
       signal: controller.signal
-    }).catch(() => null);
+    }).catch((error) => {
+      logPortUtilsNonBlockingError('isServerHealthyQuick.fetch', error, { port });
+      return null;
+    });
     clearTimeout(timeout);
     if (!res || !res.ok) {
       return false;
     }
-    const data = await res.json().catch(() => null);
+    const data = await res.json().catch((error) => {
+      logPortUtilsNonBlockingError('isServerHealthyQuick.parseJson', error, { port });
+      return null;
+    });
     const status = typeof data?.status === 'string' ? data.status.toLowerCase() : '';
     return !!data && (status === 'healthy' || status === 'ready' || status === 'ok' || data?.ready === true || data?.pipelineReady === true);
-  } catch {
+  } catch (error) {
+    logPortUtilsNonBlockingError('isServerHealthyQuick', error, { port });
     return false;
   }
 }
@@ -59,7 +91,10 @@ async function attemptHttpShutdown(port: number): Promise<boolean> {
     const res = await fetch(`${HTTP_PROTOCOLS.HTTP}${LOCAL_HOSTS.IPV4}:${port}${API_PATHS.SHUTDOWN}`, {
       method: 'POST',
       signal: controller.signal
-    }).catch(() => null);
+    }).catch((error) => {
+      logPortUtilsNonBlockingError('attemptHttpShutdown.fetch', error, { port });
+      return null;
+    });
     clearTimeout(timeout);
     const ok = !!(res && res.ok);
     logProcessLifecycle({
@@ -164,8 +199,8 @@ async function ensurePortAvailable(
       await new Promise(r => probe.close(() => r(null)));
       return 'available'; // free
     }
-  } catch {
-    // fallthrough
+  } catch (error) {
+    logPortUtilsNonBlockingError('ensurePortAvailable.quickProbe', error, { port });
   }
 
   if (restartInPlaceOnly) {

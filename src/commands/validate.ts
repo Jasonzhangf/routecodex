@@ -22,7 +22,13 @@ async function waitReady(base: string, timeoutMs: number): Promise<boolean> {
 }
 
 function readJson(file: string): any | null {
-  try { if (fs.existsSync(file)) return JSON.parse(fs.readFileSync(file, 'utf-8')); } catch { /* ignore */ }
+  try {
+    if (fs.existsSync(file)) {
+      return JSON.parse(fs.readFileSync(file, 'utf-8'));
+    }
+  } catch (error) {
+    console.warn(`[validate] failed to read JSON (non-blocking) file=${file}: ${error instanceof Error ? error.message : String(error)}`);
+  }
   return null;
 }
 
@@ -56,13 +62,21 @@ async function ensureServer(configPath: string, verbose = false): Promise<{ base
       if (child.exitCode === null) {
         child.kill('SIGTERM');
       }
-    } catch {
-      // ignore
+    } catch (error) {
+      if (verbose) {
+        console.warn(`[validate] failed to send SIGTERM (non-blocking): ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
     await new Promise<void>((resolve) => {
       if (child.exitCode !== null) return resolve();
       const timer = setTimeout(() => {
-        try { if (child.exitCode === null) child.kill('SIGKILL'); } catch { /* ignore */ }
+        try {
+          if (child.exitCode === null) child.kill('SIGKILL');
+        } catch (error) {
+          if (verbose) {
+            console.warn(`[validate] failed to send SIGKILL (non-blocking): ${error instanceof Error ? error.message : String(error)}`);
+          }
+        }
         resolve();
       }, 2000);
       child.once('exit', () => {
@@ -74,21 +88,35 @@ async function ensureServer(configPath: string, verbose = false): Promise<{ base
   }
   const stop = async (): Promise<void> => {
     try {
-      await fetch(`${base}/shutdown`, { method: 'POST' } as any).catch(() => {});
-    } catch {
-      // ignore
+      await fetch(`${base}/shutdown`, { method: 'POST' } as any).catch((error) => {
+        if (verbose) {
+          console.warn(`[validate] shutdown request failed (non-blocking): ${error instanceof Error ? error.message : String(error)}`);
+        }
+      });
+    } catch (error) {
+      if (verbose) {
+        console.warn(`[validate] shutdown request threw (non-blocking): ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
     try {
       if (child.exitCode === null) {
         child.kill('SIGTERM');
       }
-    } catch {
-      // ignore
+    } catch (error) {
+      if (verbose) {
+        console.warn(`[validate] stop(): failed to send SIGTERM (non-blocking): ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
     await new Promise<void>((resolve) => {
       if (child.exitCode !== null) return resolve();
       const timer = setTimeout(() => {
-        try { if (child.exitCode === null) child.kill('SIGKILL'); } catch { /* ignore */ }
+        try {
+          if (child.exitCode === null) child.kill('SIGKILL');
+        } catch (error) {
+          if (verbose) {
+            console.warn(`[validate] stop(): failed to send SIGKILL (non-blocking): ${error instanceof Error ? error.message : String(error)}`);
+          }
+        }
         resolve();
       }, 3500);
       child.once('exit', () => {
@@ -316,8 +344,8 @@ export function createValidateCommand(): Command {
         if (started) {
           try {
             await stopServer();
-          } catch {
-            // ignore cleanup failures
+          } catch (error) {
+            console.warn(`[validate] cleanup failed (non-blocking): ${error instanceof Error ? error.message : String(error)}`);
           }
         }
         if (exitCode !== 0) {

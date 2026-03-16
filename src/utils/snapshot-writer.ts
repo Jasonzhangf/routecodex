@@ -24,6 +24,11 @@ type SnapshotHookWriter = (scope: string, payload: Record<string, unknown>) => P
 
 let snapshotHookWriterPromise: Promise<SnapshotHookWriter | null> | null = null;
 
+function logServerSnapshotNonBlockingError(operation: string, error: unknown): void {
+  const reason = error instanceof Error ? error.message : String(error);
+  console.warn(`[server-snapshot] ${operation} failed (non-blocking): ${reason}`);
+}
+
 export function isSnapshotsEnabled(): boolean {
   // 优先使用运行时全局覆盖（由服务器根据 virtualRouter config 注入）
   try {
@@ -57,7 +62,11 @@ function mapEndpointToFolder(entryEndpoint?: string): string {
 }
 
 async function ensureDir(dir: string): Promise<void> {
-  try { await fsp.mkdir(dir, { recursive: true }); } catch { /* ignore */ }
+  try {
+    await fsp.mkdir(dir, { recursive: true });
+  } catch (error) {
+    logServerSnapshotNonBlockingError(`ensureDir:${dir}`, error);
+  }
 }
 
 function toErrorCode(error: unknown): string | undefined {
@@ -92,7 +101,10 @@ async function loadSnapshotHookWriter(): Promise<SnapshotHookWriter | null> {
   if (!snapshotHookWriterPromise) {
     snapshotHookWriterPromise = import('../modules/llmswitch/bridge.js')
       .then((module) => (typeof module.writeSnapshotViaHooks === 'function' ? (module.writeSnapshotViaHooks as SnapshotHookWriter) : null))
-      .catch(() => null);
+      .catch((error) => {
+        logServerSnapshotNonBlockingError('loadSnapshotHookWriter', error);
+        return null;
+      });
   }
   return snapshotHookWriterPromise;
 }
@@ -124,8 +136,9 @@ export async function writeServerSnapshot(options: {
       data: options.data,
       verbosity: 'verbose'
     });
-  } catch {
-    // ignore hook errors; always fall through to local file snapshot
+  } catch (error) {
+    logServerSnapshotNonBlockingError(`writeSnapshotViaHooks:${options.phase}`, error);
+    // always fall through to local file snapshot
   }
 
   // 2) 本地文件快照（永远写，非阻塞），便于 RouteCodex 侧对比 server/provider/pipeline
@@ -150,7 +163,7 @@ export async function writeServerSnapshot(options: {
       data: options.data
     };
     await writeUniqueFile(dir, file, JSON.stringify(payload, null, 2));
-  } catch {
-    /* ignore fs errors */
+  } catch (error) {
+    logServerSnapshotNonBlockingError(`writeLocalSnapshot:${options.phase}`, error);
   }
 }

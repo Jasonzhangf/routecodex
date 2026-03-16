@@ -46,6 +46,11 @@ export interface QuotaRecord {
 
 const ANTIGRAVITY_PROTECTED_REASON = 'protected';
 
+function logQuotaManagerNonBlockingError(operation: string, error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error);
+  console.warn(`[quota-manager] ${operation} failed (non-blocking): ${message}`);
+}
+
 export class QuotaManagerModule implements ManagerModule {
   readonly id = 'quota';
   private snapshot: Record<string, QuotaRecord> = {};
@@ -74,8 +79,8 @@ export class QuotaManagerModule implements ManagerModule {
     this.quotaRoutingEnabled = context.quotaRoutingEnabled !== false;
     try {
       await this.syncAntigravityTokensFromDisk();
-    } catch {
-      // best-effort; never block server init
+    } catch (error) {
+      logQuotaManagerNonBlockingError('init.syncAntigravityTokensFromDisk', error);
     }
     if (!this.quotaRoutingEnabled) {
       this.coreQuotaManager = null;
@@ -99,7 +104,9 @@ export class QuotaManagerModule implements ManagerModule {
     this.coreQuotaManager = (await llmsBridge.createCoreQuotaManager({ store })) as any;
     assertCoreQuotaManagerApis(this.coreQuotaManager as any);
     if (this.coreQuotaManager && typeof this.coreQuotaManager.hydrateFromStore === 'function') {
-      await this.coreQuotaManager.hydrateFromStore().catch(() => {});
+      await this.coreQuotaManager.hydrateFromStore().catch((error) => {
+        logQuotaManagerNonBlockingError('init.hydrateFromStore', error);
+      });
     }
     if (this.quotaStorePersistenceStatus === 'missing' || this.quotaStorePersistenceStatus === 'load_error') {
       this.handleSessionUnbindForQuotaPersistenceIssue(`quota_store_${this.quotaStorePersistenceStatus}`);
@@ -121,8 +128,8 @@ export class QuotaManagerModule implements ManagerModule {
         });
       }
       this.reconcileProtectedStatesForRegisteredProviders();
-    } catch {
-      // ignore snapshot apply failures
+    } catch (error) {
+      logQuotaManagerNonBlockingError('init.applySnapshotToCore', error);
     }
   }
   start(): Promise<void> | void {
@@ -131,8 +138,8 @@ export class QuotaManagerModule implements ManagerModule {
     }
     try {
       void this.subscribeToProviderCenters();
-    } catch {
-      // ignore subscription failures
+    } catch (error) {
+      logQuotaManagerNonBlockingError('start.subscribeToProviderCenters', error);
     }
     const refreshPromise = this.refreshAllAntigravityQuotas()
       .then((result) => {
@@ -142,11 +149,11 @@ export class QuotaManagerModule implements ManagerModule {
           this.refreshFailures = 0;
         }
       })
-      .catch(() => {
-        // ignore startup refresh failures
+      .catch((error) => {
+        logQuotaManagerNonBlockingError('start.refreshAllAntigravityQuotas', error);
       });
-    void this.scheduleNextRefresh().catch(() => {
-      // ignore scheduling failures
+    void this.scheduleNextRefresh().catch((error) => {
+      logQuotaManagerNonBlockingError('start.scheduleNextRefresh', error);
     });
     if (process.env.JEST_WORKER_ID || process.env.NODE_ENV === 'test') {
       return refreshPromise;
@@ -161,16 +168,16 @@ export class QuotaManagerModule implements ManagerModule {
     if (this.providerErrorUnsub) {
       try {
         this.providerErrorUnsub();
-      } catch {
-        // ignore
+      } catch (error) {
+        logQuotaManagerNonBlockingError('stop.providerErrorUnsub', error);
       }
       this.providerErrorUnsub = null;
     }
     if (this.providerSuccessUnsub) {
       try {
         this.providerSuccessUnsub();
-      } catch {
-        // ignore
+      } catch (error) {
+        logQuotaManagerNonBlockingError('stop.providerSuccessUnsub', error);
       }
       this.providerSuccessUnsub = null;
     }
@@ -178,11 +185,11 @@ export class QuotaManagerModule implements ManagerModule {
       if (this.coreQuotaManager && typeof this.coreQuotaManager.persistNow === 'function') {
         await this.coreQuotaManager.persistNow();
       }
-    } catch {
-      // ignore persistence failures
+    } catch (error) {
+      logQuotaManagerNonBlockingError('stop.persistNow', error);
     }
-    void this.saveSnapshotToDisk().catch(() => {
-      // best-effort; ignore persistence errors
+    void this.saveSnapshotToDisk().catch((error) => {
+      logQuotaManagerNonBlockingError('stop.saveSnapshotToDisk', error);
     });
   }
   async refreshNow(): Promise<{ refreshedAt: number; tokenCount: number; recordCount: number }> {
@@ -193,13 +200,13 @@ export class QuotaManagerModule implements ManagerModule {
         this.refreshFailures = 0;
         this.refreshDisabled = false;
       }
-    } catch {
-      // ignore refresh failures
+    } catch (error) {
+      logQuotaManagerNonBlockingError('refreshNow.refreshAllAntigravityQuotas', error);
     }
     try {
       void this.scheduleNextRefresh();
-    } catch {
-      // ignore scheduling failures
+    } catch (error) {
+      logQuotaManagerNonBlockingError('refreshNow.scheduleNextRefresh', error);
     }
     return {
       refreshedAt,
@@ -231,8 +238,8 @@ export class QuotaManagerModule implements ManagerModule {
         }
         this.reconcileProtectedStatesForRegisteredProviders();
       })
-      .catch(() => {
-        // best-effort only
+      .catch((error) => {
+        logQuotaManagerNonBlockingError(`registerAntigravityToken.readProtectedModels:${cleanAlias}`, error);
       });
   }
   updateAntigravityQuota(alias: string, quota: AntigravityQuotaSnapshot): void {
@@ -263,8 +270,8 @@ export class QuotaManagerModule implements ManagerModule {
       });
     }
     this.snapshot = next;
-    void this.saveSnapshotToDisk().catch(() => {
-      // best-effort; ignore persistence errors
+    void this.saveSnapshotToDisk().catch((error) => {
+      logQuotaManagerNonBlockingError('updateAntigravityQuota.saveSnapshotToDisk', error);
     });
   }
   hasQuotaForAntigravity(providerKey: string, modelId?: string): boolean {
@@ -299,7 +306,8 @@ export class QuotaManagerModule implements ManagerModule {
     }
     try {
       return mgr.getQuotaView();
-    } catch {
+    } catch (error) {
+      logQuotaManagerNonBlockingError('getQuotaView', error);
       return () => null;
     }
   }
@@ -342,8 +350,8 @@ export class QuotaManagerModule implements ManagerModule {
     try {
       this.coreQuotaManager?.registerProviderStaticConfig?.(key, cfg);
       this.reconcileProtectedStatesForRegisteredProviders();
-    } catch {
-      // ignore
+    } catch (error) {
+      logQuotaManagerNonBlockingError(`registerProviderStaticConfig:${key}`, error);
     }
   }
   async disableProvider(options: {
@@ -356,7 +364,9 @@ export class QuotaManagerModule implements ManagerModule {
       throw new Error('core quota manager not available');
     }
     (mgr as any).disableProvider({ ...options });
-    await mgr.persistNow?.().catch(() => {});
+    await mgr.persistNow?.().catch((error) => {
+      logQuotaManagerNonBlockingError(`disableProvider.persistNow:${options.providerKey}`, error);
+    });
     return { ok: true };
   }
   async recoverProvider(providerKey: string): Promise<unknown> {
@@ -365,7 +375,9 @@ export class QuotaManagerModule implements ManagerModule {
       throw new Error('core quota manager not available');
     }
     (mgr as any).recoverProvider(providerKey);
-    await mgr.persistNow?.().catch(() => {});
+    await mgr.persistNow?.().catch((error) => {
+      logQuotaManagerNonBlockingError(`recoverProvider.persistNow:${providerKey}`, error);
+    });
     return { ok: true };
   }
   async resetProvider(providerKey: string): Promise<unknown> {
@@ -374,7 +386,9 @@ export class QuotaManagerModule implements ManagerModule {
       throw new Error('core quota manager not available');
     }
     (mgr as any).resetProvider(providerKey);
-    await mgr.persistNow?.().catch(() => {});
+    await mgr.persistNow?.().catch((error) => {
+      logQuotaManagerNonBlockingError(`resetProvider.persistNow:${providerKey}`, error);
+    });
     return { ok: true };
   }
   private isAntigravityModelProtected(alias: string, modelId: string): boolean {
@@ -459,8 +473,8 @@ export class QuotaManagerModule implements ManagerModule {
         this.refreshDisabled = nextDisabled;
       },
       onReschedule: () => {
-        void this.scheduleNextRefresh().catch(() => {
-          // ignore reschedule failure
+        void this.scheduleNextRefresh().catch((error) => {
+          logQuotaManagerNonBlockingError('scheduleNextRefresh.onReschedule', error);
         });
       }
     });
@@ -476,8 +490,8 @@ export class QuotaManagerModule implements ManagerModule {
     this.antigravityProtectedModels = result.protectedModels;
     this.snapshot = result.snapshot as Record<string, QuotaRecord>;
     if (result.snapshotChanged) {
-      void this.saveSnapshotToDisk().catch(() => {
-        // best-effort; ignore persistence errors
+      void this.saveSnapshotToDisk().catch((error) => {
+        logQuotaManagerNonBlockingError('syncAntigravityTokensFromDisk.saveSnapshotToDisk', error);
       });
     }
     this.reconcileProtectedStatesForRegisteredProviders();

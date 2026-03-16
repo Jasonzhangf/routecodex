@@ -21,6 +21,11 @@ const ANTIGRAVITY_THOUGHT_SIGNATURE_MISSING_COOLDOWN_MS = readEnvDurationMs(
   5 * 60_000
 );
 
+function logQuotaManagerWarning(operation: string, error: unknown): void {
+  const reason = error instanceof Error ? error.message : String(error);
+  console.warn(`[llmswitch-core/quota-manager] ${operation} failed (non-blocking): ${reason}`);
+}
+
 function parseProviderKey(ev: { providerKey?: unknown } | null | undefined): string {
   const key = safeTrim(ev?.providerKey);
   return key;
@@ -200,7 +205,10 @@ export class QuotaManager {
     if (!this.store) {
       return;
     }
-    const snapshot = await this.store.load().catch(() => null);
+    const snapshot = await this.store.load().catch((error) => {
+      logQuotaManagerWarning('hydrateFromStore.load', error);
+      return null;
+    });
     if (!snapshot || !snapshot.providers || typeof snapshot.providers !== 'object') {
       return;
     }

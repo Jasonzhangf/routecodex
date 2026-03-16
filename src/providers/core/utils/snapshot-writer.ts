@@ -43,8 +43,9 @@ function resolveSnapshotBase(): string {
 async function ensureDir(dir: string): Promise<void> {
   try {
     await fsp.mkdir(dir, { recursive: true });
-  } catch {
-    // ignore mkdir errors (non-blocking snapshot)
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    console.warn(`[provider-snapshot] ensureDir failed (non-blocking) dir=${dir}: ${reason}`);
   }
 }
 
@@ -130,6 +131,11 @@ function toErrorCode(error: unknown): string | undefined {
   return typeof code === 'string' && code.trim() ? code : undefined;
 }
 
+function logSnapshotNonBlockingError(operation: string, error: unknown): void {
+  const reason = error instanceof Error ? error.message : String(error);
+  console.warn(`[provider-snapshot] ${operation} failed (non-blocking): ${reason}`);
+}
+
 async function writeUniqueFile(dir: string, baseName: string, contents: string): Promise<void> {
   const parsed = path.parse(baseName);
   const ext = parsed.ext || '.json';
@@ -162,14 +168,15 @@ async function persistProviderSnapshot(input: ProviderSnapshotPersistInput): Pro
       verbosity: 'verbose'
     });
     return;
-  } catch {
+  } catch (error) {
+    logSnapshotNonBlockingError(`writeSnapshotViaHooks:${input.stage}`, error);
     try {
       const dir = path.join(resolveSnapshotBase(), input.folder, input.providerToken || '__pending__', input.groupRequestId);
       await ensureDir(dir);
       const safeStage = input.stage.replace(/[^\w.-]/g, '_') || 'snapshot';
       await writeUniqueFile(dir, safeStage + '.json', JSON.stringify(input.payload, null, 2));
-    } catch {
-      // non-blocking fallback failure
+    } catch (fallbackError) {
+      logSnapshotNonBlockingError(`fallbackWrite:${input.stage}`, fallbackError);
     }
   }
 }
@@ -222,7 +229,9 @@ function writeProviderErrorsample(snapshot: ProviderSnapshotPersistInput): void 
       },
       observation: snapshot.payload
     }
-  }).catch(() => {});
+  }).catch((error) => {
+    logSnapshotNonBlockingError(`writeProviderErrorsample:${snapshot.stage}`, error);
+  });
 }
 
 export async function writeProviderSnapshot(options: ProviderSnapshotWriteOptions): Promise<void> {
@@ -339,8 +348,8 @@ export function attachProviderSseSnapshotStream(
     flushed = true;
     try {
       stream.unpipe(capture);
-    } catch {
-      /* ignore unpipe failures */
+    } catch (unpipeError) {
+      logSnapshotNonBlockingError(`stream.unpipe:${options.requestId}`, unpipeError);
     }
     capture.removeAllListeners();
     const raw = chunks.length ? Buffer.concat(chunks).toString('utf8') : '';
@@ -368,8 +377,8 @@ export function attachProviderSseSnapshotStream(
       clientRequestId: options.clientRequestId,
       providerKey: options.providerKey,
       providerId: options.providerId
-    }).catch(() => {
-      /* ignore snapshot errors */
+    }).catch((snapshotError) => {
+      logSnapshotNonBlockingError(`writeProviderSnapshot(sse):${options.requestId}`, snapshotError);
     });
   };
 
@@ -433,14 +442,15 @@ export async function writeProviderRetrySnapshot(options: {
       verbosity: 'verbose'
     });
     return;
-  } catch {
+  } catch (error) {
+    logSnapshotNonBlockingError(`writeSnapshotViaHooks(retry):${stage}`, error);
     try {
       const dir = path.join(resolveSnapshotBase(), folder, providerToken || '__pending__', groupRequestId);
       await ensureDir(dir);
       const safeStage = stage.replace(/[^\w.-]/g, '_') || 'snapshot';
       await writeUniqueFile(dir, `${safeStage}.json`, JSON.stringify(payload, null, 2));
-    } catch {
-      // non-blocking fallback failure
+    } catch (fallbackError) {
+      logSnapshotNonBlockingError(`fallbackWrite(retry):${stage}`, fallbackError);
     }
   }
 }
@@ -472,8 +482,8 @@ export async function writeRepairFeedbackSnapshot(options: {
       feedback: options.feedback
     };
     await writeUniqueFile(dir, 'repair-feedback.json', JSON.stringify(payload, null, 2));
-  } catch {
-    // non-blocking
+  } catch (error) {
+    logSnapshotNonBlockingError('writeRepairFeedbackSnapshot', error);
   }
 }
 
@@ -529,12 +539,13 @@ export async function writeClientSnapshot(options: {
         verbosity: 'verbose'
       });
       return;
-    } catch {
+    } catch (error) {
+      logSnapshotNonBlockingError(`writeSnapshotViaHooks(client):${requestId}`, error);
       const dir = path.join(resolveSnapshotBase(), folder, providerToken || '__pending__', groupRequestId);
       await ensureDir(dir);
       await writeUniqueFile(dir, `${stage}.json`, JSON.stringify(payload, null, 2));
     }
-  } catch {
-    // non-blocking
+  } catch (error) {
+    logSnapshotNonBlockingError('writeClientSnapshot', error);
   }
 }

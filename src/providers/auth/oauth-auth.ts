@@ -341,7 +341,11 @@ class BaseOAuthClient implements IOAuthClient {
         await fs.writeFile(this.tokenFilePath, JSON.stringify(token, null, 2), 'utf-8');
         logOAuthDebug(`[OAuth] Token saved to: ${this.tokenFilePath}`);
       }
-    } catch { /* ignore persistence errors */ }
+    } catch (error) {
+      logOAuthDebug(
+        `[OAuth] failed to persist token (non-blocking) path=${this.tokenFilePath || 'unknown'}: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
   }
 
   getToken(): TokenStorage | null {
@@ -382,8 +386,10 @@ class BaseOAuthClient implements IOAuthClient {
           await fs.writeFile(this.tokenFilePath, '{}\n', 'utf-8');
         }
       }
-    } catch {
-      // best-effort bootstrap; keep existing auth flow behavior when file creation fails
+    } catch (error) {
+      logOAuthDebug(
+        `[OAuth] ensureTokenFileExists failed (non-blocking) path=${this.tokenFilePath}: ${error instanceof Error ? error.message : String(error)}`
+      );
     }
   }
   updateTokenStorage(storage: TokenStorage, tokenData: unknown): void {

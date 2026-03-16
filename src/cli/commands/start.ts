@@ -600,9 +600,15 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
               targetPid: activeChildProc?.pid ?? null
             });
             try {
-              await ctx.fetch(`${HTTP_PROTOCOLS.HTTP}${LOCAL_HOSTS.IPV4}:${resolvedPort}${API_PATHS.SHUTDOWN}`, { method: 'POST' }).catch(() => {});
-            } catch {
-              /* ignore */
+              await ctx.fetch(`${HTTP_PROTOCOLS.HTTP}${LOCAL_HOSTS.IPV4}:${resolvedPort}${API_PATHS.SHUTDOWN}`, { method: 'POST' }).catch((error) => {
+                ctx.logger.warning(
+                  `[start] shutdown request failed (non-blocking) port=${resolvedPort}: ${error instanceof Error ? error.message : String(error)}`
+                );
+              });
+            } catch (error) {
+              ctx.logger.warning(
+                `[start] shutdown request threw (non-blocking) port=${resolvedPort}: ${error instanceof Error ? error.message : String(error)}`
+              );
             }
             try {
               const currentChildPid = activeChildProc?.pid;

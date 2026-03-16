@@ -10,6 +10,11 @@ interface ModuleStatusView {
   details?: Record<string, unknown>;
 }
 
+function logDaemonStatusNonBlockingError(operation: string, error: unknown): void {
+  const reason = error instanceof Error ? error.message : String(error);
+  console.warn(`[daemon-status] ${operation} failed (non-blocking): ${reason}`);
+}
+
 export function registerStatusRoutes(app: Application, options: DaemonAdminRouteOptions): void {
   app.get('/daemon/status', (req: Request, res: Response) => {
     if (rejectNonLocalOrUnauthorizedAdmin(req, res)) {return;}
@@ -196,8 +201,13 @@ export function registerStatusRoutes(app: Application, options: DaemonAdminRoute
             for (const providerKey of providerKeys) {
               await Promise.resolve((quotaMod as any).resetProvider(providerKey));
             }
-            await (quotaMod as any).persistNow?.().catch(() => {});
-            const quotaRefresh = await (quotaMod as any).refreshNow?.().catch(() => null);
+            await (quotaMod as any).persistNow?.().catch((error: unknown) => {
+              logDaemonStatusNonBlockingError('provider-quota.reset.persistNow', error);
+            });
+            const quotaRefresh = await (quotaMod as any).refreshNow?.().catch((error: unknown) => {
+              logDaemonStatusNonBlockingError('provider-quota.reset.refreshNow', error);
+              return null;
+            });
             res.status(200).json({
               ok: true,
               id,

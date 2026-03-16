@@ -99,7 +99,13 @@ export class SessionReaper {
     });
 
     // 立即执行一次清理
-    void this.runCleanup().catch(() => {});
+    void this.runCleanup().catch((err) => {
+      logProcessLifecycle({
+        event: 'session_reaper_error',
+        source: 'session-client-reaper',
+        details: { error: err instanceof Error ? err.message : String(err), phase: 'initial_cleanup' }
+      });
+    });
   }
 
   stop(): void {
@@ -126,7 +132,8 @@ export class SessionReaper {
     // 再清理心跳过期的客户端（但不终止进程，仅移除记录）
     const staleResult = registry.cleanupStaleHeartbeats({
       nowMs: now,
-      staleAfterMs: this.gracePeriodMs
+      staleAfterMs: this.gracePeriodMs,
+      isTmuxSessionAlive
     });
 
     const totalRemovedSessions =

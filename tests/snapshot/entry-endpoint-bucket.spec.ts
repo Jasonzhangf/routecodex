@@ -2,9 +2,7 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { writeProviderSnapshot } from '../../src/providers/core/utils/snapshot-writer.ts';
-import { setRuntimeFlag } from '../../src/runtime/runtime-flags.ts';
-import { writeSnapshotViaHooks } from '../../src/modules/llmswitch/bridge.ts';
+import { jest } from '@jest/globals';
 
 describe('codex-samples snapshot bucket uses entry endpoint', () => {
   const prevSnapshotDir = process.env.ROUTECODEX_SNAPSHOT_DIR;
@@ -15,7 +13,7 @@ describe('codex-samples snapshot bucket uses entry endpoint', () => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rcc-snapshot-entry-'));
     process.env.ROUTECODEX_SNAPSHOT_DIR = tempDir;
     process.env.RCC_SNAPSHOT_DIR = tempDir;
-    setRuntimeFlag('snapshotsEnabled', true);
+    jest.resetModules();
   });
 
   afterEach(async () => {
@@ -32,7 +30,23 @@ describe('codex-samples snapshot bucket uses entry endpoint', () => {
     await fsp.rm(tempDir, { recursive: true, force: true });
   });
 
+  async function loadSnapshotWriterWithBridgeFailure() {
+    const mockBridgeModule = () => ({
+      writeSnapshotViaHooks: jest.fn(async () => {
+        throw new Error('[llmswitch-bridge] writeSnapshotViaHooks not available');
+      })
+    });
+    jest.unstable_mockModule('../../src/modules/llmswitch/bridge.js', mockBridgeModule);
+    jest.unstable_mockModule('../../src/modules/llmswitch/bridge.ts', mockBridgeModule);
+
+    const runtimeFlagsModule = await import('../../src/runtime/runtime-flags.ts');
+    runtimeFlagsModule.setRuntimeFlag('snapshotsEnabled', true);
+    return await import('../../src/providers/core/utils/snapshot-writer.ts');
+  }
+
   test('host provider snapshot buckets by entry endpoint, not upstream url', async () => {
+    const { writeProviderSnapshot } = await loadSnapshotWriterWithBridgeFailure();
+
     const groupRequestId = 'req_snapshot_bucket_messages_1';
     const providerKey = 'iflow.1-186.minimax-m2.5';
     await writeProviderSnapshot({
@@ -52,14 +66,16 @@ describe('codex-samples snapshot bucket uses entry endpoint', () => {
     expect(fs.existsSync(chatDir)).toBe(false);
   });
 
-  test('hub snapshot hook ignores nested endpoint fields and keeps entry bucket', async () => {
+  test('fallback snapshot bucket ignores nested endpoint fields and keeps entry bucket', async () => {
+    const { writeProviderSnapshot } = await loadSnapshotWriterWithBridgeFailure();
+
     const groupRequestId = 'req_snapshot_bucket_messages_2';
     const providerKey = 'iflow.2-173.minimax-m2.5';
-    await writeSnapshotViaHooks({
-      endpoint: '/v1/messages',
-      stage: 'entry-endpoint-bucket-check',
+    await writeProviderSnapshot({
+      phase: 'provider-request',
       requestId: groupRequestId,
-      groupRequestId,
+      clientRequestId: groupRequestId,
+      entryEndpoint: '/v1/messages',
       providerKey,
       data: {
         endpoint: 'https://apis.iflow.cn/v1/chat/completions',
@@ -68,8 +84,7 @@ describe('codex-samples snapshot bucket uses entry endpoint', () => {
             endpoint: '/v1/chat/completions'
           }
         }
-      },
-      verbosity: 'verbose'
+      }
     });
 
     const messagesDir = path.join(tempDir, 'anthropic-messages', providerKey, groupRequestId);

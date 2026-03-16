@@ -14,6 +14,11 @@ import type { ProviderErrorEvent, ProviderSuccessEvent } from '../../../modules/
 import type { QuotaState, StaticQuotaConfig } from '../../quota/provider-quota-center.js';
 import { x7eGate } from '../../../server/runtime/http-server/daemon-admin/routecodex-x7e-gate.js';
 
+function logQuotaAdapterNonBlockingError(operation: string, error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error);
+  console.warn(`[quota-adapter] ${operation} failed (non-blocking): ${message}`);
+}
+
 export interface QuotaViewEntry {
   providerKey: string;
   inPool: boolean;
@@ -100,7 +105,9 @@ export function createQuotaManagerAdapter(options: {
 
   async function init(): Promise<void> {
     if (hasCore && core?.hydrateFromStore) {
-      await core.hydrateFromStore().catch(() => {});
+      await core.hydrateFromStore().catch((error) => {
+        logQuotaAdapterNonBlockingError('hydrateFromStore', error);
+      });
     }
   }
 
@@ -111,7 +118,9 @@ export function createQuotaManagerAdapter(options: {
 
   async function stop(): Promise<void> {
     if (hasCore && core?.persistNow) {
-      await core.persistNow().catch(() => {});
+      await core.persistNow().catch((error) => {
+        logQuotaAdapterNonBlockingError('persistNow(stop)', error);
+      });
     }
   }
 
@@ -151,7 +160,9 @@ export function createQuotaManagerAdapter(options: {
     if (hasCore && core?.disableProvider) {
       core.disableProvider({ providerKey, mode, durationMs, reason: mode === 'blacklist' ? 'operator' : 'auto' });
       if (core.persistNow) {
-        await core.persistNow().catch(() => {});
+        await core.persistNow().catch((error) => {
+          logQuotaAdapterNonBlockingError(`persistNow(disableProvider:${providerKey})`, error);
+        });
       }
       return { ok: true, providerKey, mode, source: 'core' };
     }
@@ -171,7 +182,9 @@ export function createQuotaManagerAdapter(options: {
     if (hasCore && core?.recoverProvider) {
       core.recoverProvider(providerKey);
       if (core.persistNow) {
-        await core.persistNow().catch(() => {});
+        await core.persistNow().catch((error) => {
+          logQuotaAdapterNonBlockingError(`persistNow(recoverProvider:${providerKey})`, error);
+        });
       }
       return { ok: true, providerKey, source: 'core' };
     }
@@ -191,7 +204,9 @@ export function createQuotaManagerAdapter(options: {
     if (hasCore && core?.resetProvider) {
       core.resetProvider(providerKey);
       if (core.persistNow) {
-        await core.persistNow().catch(() => {});
+        await core.persistNow().catch((error) => {
+          logQuotaAdapterNonBlockingError(`persistNow(resetProvider:${providerKey})`, error);
+        });
       }
       return { ok: true, providerKey, source: 'core' };
     }
@@ -242,7 +257,9 @@ export function createQuotaManagerAdapter(options: {
         core.disableProvider({ providerKey, mode: 'cooldown', durationMs: 60_000, reason: depletedReason });
       }
       if (core?.persistNow) {
-        await core.persistNow().catch(() => {});
+        await core.persistNow().catch((error) => {
+          logQuotaAdapterNonBlockingError(`persistNow(setQuota:${providerKey})`, error);
+        });
       }
       return { ok: true, providerKey, quota, inPool, reason: inPool ? 'ok' : depletedReason, source: 'core' };
     }
@@ -269,8 +286,8 @@ export function createQuotaManagerAdapter(options: {
     if (hasCore && core?.registerProviderStaticConfig) {
       try {
         core.registerProviderStaticConfig(providerKey, config);
-      } catch {
-        // ignore
+      } catch (error) {
+        logQuotaAdapterNonBlockingError(`registerProviderStaticConfig:${providerKey}`, error);
       }
       return;
     }
@@ -288,8 +305,8 @@ export function createQuotaManagerAdapter(options: {
     if (hasCore && core?.onProviderError) {
       try {
         core.onProviderError(event);
-      } catch {
-        // ignore
+      } catch (error) {
+        logQuotaAdapterNonBlockingError('onProviderError', error);
       }
       return;
     }
@@ -307,8 +324,8 @@ export function createQuotaManagerAdapter(options: {
     if (hasCore && core?.onProviderSuccess) {
       try {
         core.onProviderSuccess(event);
-      } catch {
-        // ignore
+      } catch (error) {
+        logQuotaAdapterNonBlockingError('onProviderSuccess', error);
       }
       return;
     }

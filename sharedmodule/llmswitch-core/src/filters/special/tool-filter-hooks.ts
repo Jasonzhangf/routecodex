@@ -15,6 +15,11 @@ function clone<T>(v: T): T {
   return JSON.parse(JSON.stringify(v)) as T;
 }
 
+function logToolFilterHookWarning(operation: string, error: unknown): void {
+  const reason = error instanceof Error ? error.message : String(error);
+  console.warn(`[tool-filter-hooks] ${operation} failed (non-blocking): ${reason}`);
+}
+
 interface ToolFilterConfigCategoryPolicy {
   mode?: 'allow' | 'block' | 'require_content';
   requireContentTypes?: string[];
@@ -419,10 +424,12 @@ export class ToolFilterHookFilter implements Filter<JsonObject> {
           const res = hook(hookCtx);
           if (res && typeof (res as any).then === 'function') {
             // eslint-disable-next-line @typescript-eslint/no-floating-promises
-            (res as Promise<void>).catch(() => {});
+            (res as Promise<void>).catch((error) => {
+              logToolFilterHookWarning('requestHook(async)', error);
+            });
           }
-        } catch {
-          // ignore single hook failure
+        } catch (error) {
+          logToolFilterHookWarning('requestHook(sync)', error);
         }
       }
 
@@ -446,7 +453,8 @@ export class ToolFilterHookFilter implements Filter<JsonObject> {
           ? { toolFilterDecisions: clone(decisions) }
           : undefined,
       };
-    } catch {
+    } catch (error) {
+      logToolFilterHookWarning('apply', error);
       return { ok: true, data: input };
     }
   }

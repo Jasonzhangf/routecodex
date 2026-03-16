@@ -312,8 +312,9 @@ async function reportCliError(
       details,
       originalError: error
     });
-  } catch {
-    /* ignore hub failures */
+  } catch (reportError) {
+    const reason = reportError instanceof Error ? reportError.message : String(reportError);
+    console.warn(`[routecodex:index] reportCliError failed (non-blocking) code=${code}: ${reason}`);
   }
 }
 
@@ -384,8 +385,13 @@ process.on('exit', (code) => {
         ? { message: reason.message }
         : {}),
       recordedAt: new Date().toISOString()
-    }).catch(() => {
-      // ignore cleanup errors
+    }).catch((error) => {
+      const reason = error instanceof Error ? error.message : String(error);
+      logProcessLifecycle({
+        event: 'runtime_lifecycle_mark_exit_failed',
+        source: 'index.process.on.exit',
+        details: { reason, lifecyclePath: currentRuntimeLifecyclePath }
+      });
     });
   }
 
@@ -1009,8 +1015,13 @@ class RouteCodexApp {
         if (ok) {
           setCurrentRuntimeLifecyclePath(lifecyclePath);
         }
-      }).catch(() => {
-        // forensics path is best-effort and must never block startup
+      }).catch((error) => {
+        const reason = error instanceof Error ? error.message : String(error);
+        logProcessLifecycle({
+          event: 'runtime_lifecycle_write_failed',
+          source: 'index.RouteCodexApp.loadConfig',
+          details: { reason, lifecyclePath }
+        });
       });
     } catch {
       // forensics path is best-effort and must never block startup
@@ -1672,7 +1683,7 @@ async function restartSelf(app: RouteCodexApp, signal: NodeJS.Signals): Promise<
         error,
         'high',
         { signal, mode: 'runtime' }
-      ).catch(() => {});
+      );
       console.error('❌ Runtime reload failed:', error);
       restartInProgress = false;
       return;
@@ -1694,7 +1705,7 @@ async function restartSelf(app: RouteCodexApp, signal: NodeJS.Signals): Promise<
     try {
       await app.stop();
     } catch (error) {
-      await reportCliError('SERVER_RESTART_STOP_FAILED', 'Failed to stop before restart', error, 'high').catch(() => {});
+      await reportCliError('SERVER_RESTART_STOP_FAILED', 'Failed to stop before restart', error, 'high');
       console.error('❌ Failed to stop before managed restart:', error);
       restartInProgress = false;
       return;
@@ -1731,7 +1742,7 @@ async function restartSelf(app: RouteCodexApp, signal: NodeJS.Signals): Promise<
         waitedMs: entryCheck.waitedMs,
         entryPath: entryCheck.entryPath
       }
-    ).catch(() => {});
+    );
     console.error(
       `❌ Restart aborted: entry script is missing (${entryCheck.entryPath || 'unknown'}) after waiting ${entryCheck.waitedMs}ms.`
     );
@@ -1744,7 +1755,7 @@ async function restartSelf(app: RouteCodexApp, signal: NodeJS.Signals): Promise<
     await app.stop();
   } catch (error) {
     // Best-effort: even if stop fails, attempt to spawn a replacement to recover.
-    await reportCliError('SERVER_RESTART_STOP_FAILED', 'Failed to stop before restart', error, 'high').catch(() => {});
+    await reportCliError('SERVER_RESTART_STOP_FAILED', 'Failed to stop before restart', error, 'high');
   }
 
   try {
@@ -1756,7 +1767,7 @@ async function restartSelf(app: RouteCodexApp, signal: NodeJS.Signals): Promise<
     });
     console.log(`[routecodex:restart] spawned pid=${child.pid ?? 'unknown'}`);
   } catch (error) {
-    await reportCliError('SERVER_RESTART_SPAWN_FAILED', 'Failed to spawn restarted server', error, 'critical').catch(() => {});
+    await reportCliError('SERVER_RESTART_SPAWN_FAILED', 'Failed to spawn restarted server', error, 'critical');
     console.error('❌ Failed to spawn restarted server:', error);
     await flushProcessLifecycleLogQueue();
     process.exit(1);
@@ -1827,7 +1838,15 @@ async function main(): Promise<void> {
     recordShutdownReason({ kind: 'uncaughtException', message });
     void reportCliError('UNCAUGHT_EXCEPTION', 'Uncaught Exception', error, 'critical');
     console.error('❌ Uncaught Exception:', error);
-    gracefulShutdown(app).catch(() => process.exit(1));
+    gracefulShutdown(app).catch((shutdownError) => {
+      const reason = shutdownError instanceof Error ? shutdownError.message : String(shutdownError);
+      logProcessLifecycle({
+        event: 'graceful_shutdown_failed',
+        source: 'index.main',
+        details: { reason }
+      });
+      process.exit(1);
+    });
   });
 
   // Handle unhandled promise rejections (log only; do not shutdown)

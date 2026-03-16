@@ -16,7 +16,7 @@ type SnapshotHooksModule = {
 export async function writeSnapshotViaHooks(channelOrOptions: string | AnyRecord, payload?: AnyRecord): Promise<void> {
   let hooksModule: SnapshotHooksModule | null = null;
   try {
-    hooksModule = await importCoreDist<SnapshotHooksModule>('conversion/shared/snapshot-hooks');
+    hooksModule = await importCoreDist<SnapshotHooksModule>('conversion/snapshot-utils');
   } catch {
     hooksModule = null;
   }

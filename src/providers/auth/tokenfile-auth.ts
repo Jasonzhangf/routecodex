@@ -14,6 +14,7 @@ import type { IAuthProvider, AuthStatus } from './auth-interface.js';
 import type { OAuthAuth } from '../core/api/provider-config.js';
 import type { UnknownObject } from '../../modules/pipeline/types/common-types.js';
 import { resolveRccAuthDirForRead, resolveRccTokensDirForRead } from '../../config/user-data-paths.js';
+import { logOAuthDebug } from './oauth-logger.js';
 
 type TokenPayload = UnknownObject & {
   access_token?: string;
@@ -78,7 +79,10 @@ function pickLatestTokenFile(opts: { providerPrefix: string; alias?: string }): 
       }
     }
     return best?.file ?? null;
-  } catch {
+  } catch (error) {
+    logOAuthDebug(
+      `[tokenfile-auth] failed to scan auth dir for latest token (non-blocking) dir=${authDir}: ${error instanceof Error ? error.message : String(error)}`
+    );
     return null;
   }
 }
@@ -204,7 +208,10 @@ export class TokenFileAuthProvider implements IAuthProvider {
       const parsed = this.readJson(candidatePath);
       const apiKey = this.extractApiKey(parsed);
       return apiKey ? candidatePath : null;
-    } catch {
+    } catch (error) {
+      logOAuthDebug(
+        `[tokenfile-auth] pickTokenFileIfItContainsApiKey failed (non-blocking) path=${candidatePath}: ${error instanceof Error ? error.message : String(error)}`
+      );
       return null;
     }
   }
@@ -226,8 +233,10 @@ export class TokenFileAuthProvider implements IAuthProvider {
         fs.mkdirSync(path.dirname(filePath), { recursive: true });
         fs.writeFileSync(filePath, '{}\n', 'utf8');
       }
-    } catch {
-      // best-effort bootstrap: keep original flow if file creation fails
+    } catch (error) {
+      logOAuthDebug(
+        `[tokenfile-auth] ensureTokenFileExists failed (non-blocking) path=${filePath}: ${error instanceof Error ? error.message : String(error)}`
+      );
     }
     return filePath;
   }
@@ -247,8 +256,10 @@ export class TokenFileAuthProvider implements IAuthProvider {
               if (fs.existsSync(pinned)) {
                 return pinned;
               }
-            } catch {
-              // ignore
+            } catch (error) {
+              logOAuthDebug(
+                `[tokenfile-auth] qwen pinned token check failed (non-blocking) path=${pinned}: ${error instanceof Error ? error.message : String(error)}`
+              );
             }
           }
           const match = pickLatestTokenFile({ providerPrefix: providerId, alias: tf });
@@ -272,8 +283,10 @@ export class TokenFileAuthProvider implements IAuthProvider {
               return fallback;
             }
           }
-        } catch {
-          // ignore
+        } catch (error) {
+          logOAuthDebug(
+            `[tokenfile-auth] qwen fallback scan failed (non-blocking) path=${resolved}: ${error instanceof Error ? error.message : String(error)}`
+          );
         }
       }
       return this.ensureTokenFileExists(resolved);
@@ -303,7 +316,11 @@ export class TokenFileAuthProvider implements IAuthProvider {
         if (fs.existsSync(legacySingle)) {
           return legacySingle;
         }
-      } catch { /* ignore */ }
+      } catch (error) {
+        logOAuthDebug(
+          `[tokenfile-auth] qwen legacy single-file probe failed (non-blocking) path=${legacySingle}: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
       const latest = pickLatestTokenFile({ providerPrefix: 'qwen' });
       if (latest) {
         return latest;
@@ -314,7 +331,11 @@ export class TokenFileAuthProvider implements IAuthProvider {
         if (fs.existsSync(rc)) {
           return rc;
         }
-      } catch { /* ignore */ }
+      } catch (error) {
+        logOAuthDebug(
+          `[tokenfile-auth] qwen legacy tokens-dir probe failed (non-blocking) path=${rc}: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
     }
 
     // CLIProxyAPI directory (legacy external tooling)
@@ -325,7 +346,11 @@ export class TokenFileAuthProvider implements IAuthProvider {
       if (list.length > 0) {
         return path.join(dir, list.sort()[0]);
       }
-    } catch { /* ignore */ }
+    } catch (error) {
+      logOAuthDebug(
+        `[tokenfile-auth] cli-proxy-api scan failed (non-blocking) path=${dir}: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
     return null;
   }
 
@@ -336,7 +361,10 @@ export class TokenFileAuthProvider implements IAuthProvider {
     try {
       const parsed = JSON.parse(fs.readFileSync(p, 'utf-8')) as unknown;
       return isTokenPayload(parsed) ? parsed : null;
-    } catch {
+    } catch (error) {
+      logOAuthDebug(
+        `[tokenfile-auth] readJson failed (non-blocking) path=${p}: ${error instanceof Error ? error.message : String(error)}`
+      );
       return null;
     }
   }

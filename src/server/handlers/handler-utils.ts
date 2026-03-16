@@ -39,6 +39,11 @@ type RequestLogMeta = Record<string, unknown> | undefined;
 const SHOULD_LOG_HTTP_EVENTS = buildInfo.mode !== 'release'
   || process.env.ROUTECODEX_HTTP_LOG_VERBOSE === '1';
 
+function logHandlerNonBlockingError(operation: string, error: unknown): void {
+  const reason = error instanceof Error ? error.message : String(error);
+  console.warn(`[handler-utils] ${operation} failed (non-blocking): ${reason}`);
+}
+
 function resolveBoolFromEnv(value: string | undefined, fallback: boolean): boolean {
   if (!value) {
     return fallback;
@@ -185,8 +190,8 @@ export async function respondWithPipelineError(
     if (http) {
       mapped = http;
     }
-  } catch {
-    /* ignore hub failures */
+  } catch (error) {
+    logHandlerNonBlockingError(`reportRouteError:${effectiveRequestId}`, error);
   }
   if (effectiveRequestId && mapped.body?.error && !mapped.body.error.request_id) {
     mapped.body.error.request_id = effectiveRequestId;
@@ -203,13 +208,13 @@ export async function respondWithPipelineError(
     res.setHeader('Connection', 'keep-alive');
     try {
       res.write(`event: error\ndata: ${JSON.stringify(payload)}\n\n`);
-    } catch {
-      // ignore stream write errors
+    } catch (error) {
+      logHandlerNonBlockingError(`sseErrorWrite:${effectiveRequestId}`, error);
     }
     try {
       res.end();
-    } catch {
-      // ignore end errors
+    } catch (error) {
+      logHandlerNonBlockingError(`sseErrorEnd:${effectiveRequestId}`, error);
     }
     if (isSnapshotsEnabled()) {
       void writeServerSnapshot({
@@ -217,7 +222,9 @@ export async function respondWithPipelineError(
         requestId: effectiveRequestId,
         entryEndpoint,
         data: { mode: 'sse', status: mapped.status, payload }
-      }).catch(() => {});
+      }).catch((error) => {
+        logHandlerNonBlockingError(`writeServerSnapshot:sse_error:${effectiveRequestId}`, error);
+      });
     }
     return;
   }
@@ -227,7 +234,9 @@ export async function respondWithPipelineError(
       requestId: effectiveRequestId,
       entryEndpoint,
       data: { mode: 'json', status: mapped.status, body: mapped.body }
-    }).catch(() => {});
+    }).catch((error) => {
+      logHandlerNonBlockingError(`writeServerSnapshot:json_error:${effectiveRequestId}`, error);
+    });
   }
   res.status(mapped.status).json(mapped.body);
 }
