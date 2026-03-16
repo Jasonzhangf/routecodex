@@ -21,6 +21,7 @@ import {
 } from './chat-process-clock-reminder-finalize.js';
 import { resolveClockReminderTimeTagLine } from './chat-process-clock-reminder-time-tag.js';
 import { extractClockReminderDirectives } from './chat-process-clock-reminder-directives.js';
+import { applyHeartbeatDirectives } from './chat-process-heartbeat-directives.js';
 import { isClientInjectReady } from './client-inject-readiness.js';
 import { resolveClockReminderFlowPlanWithNative } from '../../../router/virtual-router/engine-selection/native-chat-process-clock-reminders-semantics.js';
 
@@ -37,8 +38,9 @@ export async function maybeInjectClockRemindersAndApplyDirectives(
   metadata: Record<string, unknown>,
   requestId: string
 ): Promise<StandardizedRequest> {
+  const requestAfterHeartbeat = await applyHeartbeatDirectives(request, metadata);
   if (!isClientInjectReady(metadata)) {
-    return request;
+    return requestAfterHeartbeat;
   }
   const rt = readRuntimeMetadata(metadata);
   const flowPlan = resolveClockReminderFlowPlanWithNative(rt as Record<string, unknown>);
@@ -57,8 +59,8 @@ export async function maybeInjectClockRemindersAndApplyDirectives(
     // best-effort
   }
 
-  const sessionId = resolveSessionIdForClock(metadata, request);
-  const messages = Array.isArray(request.messages) ? request.messages : [];
+  const sessionId = resolveSessionIdForClock(metadata, requestAfterHeartbeat);
+  const messages = Array.isArray(requestAfterHeartbeat.messages) ? requestAfterHeartbeat.messages : [];
   // 1) Apply <**clock:clear**> and <**clock:{...}**> marker extraction (latest user message only).
   const { hadClear, clockScheduleDirectives, baseMessages } = extractClockReminderDirectives(messages);
 
@@ -95,7 +97,7 @@ export async function maybeInjectClockRemindersAndApplyDirectives(
   const dueUserMessage = buildDueReminderUserMessage(reservation, dueInjectText);
 
   // 4) When we have due tasks, ensure a standard tool set is present (best-effort).
-  let nextRequest: StandardizedRequest = request;
+  let nextRequest: StandardizedRequest = requestAfterHeartbeat;
   if (dueUserMessage) {
     const ensureToolsOps: HubOperation[] = buildClockStandardToolsOperations();
     nextRequest = applyHubOperations(nextRequest, ensureToolsOps);

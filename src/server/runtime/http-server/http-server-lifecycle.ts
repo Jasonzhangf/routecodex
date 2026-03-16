@@ -17,6 +17,7 @@ import { loadRouteCodexConfig } from '../../../config/routecodex-config-loader.j
 import type { ProviderProfileCollection } from '../../../providers/profile/provider-profile.js';
 import type { ServerStatusV2 } from './types.js';
 import { clearClockRuntimeHooks } from './clock-runtime-hooks.js';
+import { clearHeartbeatRuntimeHooks } from './heartbeat-runtime-hooks.js';
 
 export async function initializeHttpServer(server: any): Promise<void> {
   try {
@@ -181,6 +182,7 @@ export async function startHttpServer(server: any): Promise<void> {
 export async function stopHttpServer(server: any): Promise<void> {
   server.stopSessionDaemonInjectLoop();
   await clearClockRuntimeHooks();
+  await clearHeartbeatRuntimeHooks();
   try {
     await shutdownCamoufoxLaunchers();
   } catch {

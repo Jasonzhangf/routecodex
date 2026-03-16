@@ -1,17 +1,22 @@
 import type { Application, Request, Response } from 'express';
 
 import {
+  buildHeartbeatInjectTextSnapshot,
   cancelClockTaskSnapshot,
   clearClockTasksSnapshot,
+  listHeartbeatStatesSnapshot,
   listClockSessionIdsSnapshot,
   listClockTasksSnapshot,
+  loadHeartbeatStateSnapshot,
   resolveClockConfigSnapshot,
   scheduleClockTasksSnapshot,
+  setHeartbeatEnabledSnapshot,
   updateClockTaskSnapshot
 } from '../../../modules/llmswitch/bridge.js';
 import { getSessionClientRegistry } from './session-client-registry.js';
 import { normalizeWorkdir } from './session-client-registry-utils.js';
 import { isLocalRequest, isLoopbackBindHost } from './daemon-admin-routes.js';
+import { triggerHeartbeatNow } from './heartbeat-runtime-hooks.js';
 import { isTmuxSessionAlive } from './tmux-session-probe.js';
 import {
   extractApiKeyFromRequest,
@@ -210,6 +215,30 @@ export function registerSessionClientRoutes(app: Application, options: SessionCl
     res.status(200).json({ ok: true, records: registry.list() });
   });
 
+  app.get('/daemon/heartbeat/list', async (req: Request, res: Response) => {
+    if (rejectUnauthorizedSessionClient(req, res, sessionClientAuth)) {
+      return;
+    }
+    const states = await listHeartbeatStatesSnapshot();
+    res.status(200).json({ ok: true, states });
+  });
+
+  app.get('/daemon/heartbeat', async (req: Request, res: Response) => {
+    if (rejectUnauthorizedSessionClient(req, res, sessionClientAuth)) {
+      return;
+    }
+    const tmuxSessionId =
+      parseString(req.query.tmuxSessionId) ||
+      parseString(req.query.sessionId) ||
+      parseString(req.query.daemonId && registry.findByDaemonId(String(req.query.daemonId))?.tmuxSessionId);
+    if (!tmuxSessionId) {
+      res.status(400).json({ ok: false, reason: 'tmuxSessionId is required' });
+      return;
+    }
+    const state = await loadHeartbeatStateSnapshot(tmuxSessionId);
+    res.status(200).json({ ok: true, tmuxSessionId, state });
+  });
+
   app.post('/daemon/session-client/inject', async (req: Request, res: Response) => {
     if (rejectUnauthorizedSessionClient(req, res, sessionClientAuth)) {
       return;
@@ -251,6 +280,63 @@ export function registerSessionClientRoutes(app: Application, options: SessionCl
       return;
     }
     res.status(200).json({ ok: true, daemonId: result.daemonId });
+  });
+
+  app.post('/daemon/heartbeat', async (req: Request, res: Response) => {
+    if (rejectUnauthorizedSessionClient(req, res, sessionClientAuth)) {
+      return;
+    }
+    const body = req.body && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : {};
+    const action = parseString(body.action)?.toLowerCase();
+    const daemonId = parseString(body.daemonId);
+    const tmuxSessionId =
+      parseString(body.tmuxSessionId) ||
+      parseString(body.sessionId) ||
+      (daemonId ? parseString(registry.findByDaemonId(daemonId)?.tmuxSessionId) : undefined);
+    if (!tmuxSessionId) {
+      res.status(400).json({ ok: false, reason: 'tmuxSessionId is required' });
+      return;
+    }
+
+    if (action === 'on' || action === 'off') {
+      const state = await setHeartbeatEnabledSnapshot({
+        tmuxSessionId,
+        enabled: action === 'on'
+      });
+      if (action === 'on') {
+        const injectText = (await buildHeartbeatInjectTextSnapshot()) || '[Heartbeat]\n请读取 HEARTBEAT.md，更新 DELIVERY.md，并调用 review。';
+        const result = await triggerHeartbeatNow({
+          tmuxSessionId,
+          injectText,
+          requestActivityTracker: {
+            countActiveRequestsForTmuxSession: (sessionId: string) =>
+              Number((req.app?.locals?.routecodexServer as any)?.requestActivityTracker?.countActiveRequestsForTmuxSession?.(sessionId) || 0)
+          }
+        });
+        res.status(200).json({ ok: true, tmuxSessionId, state, trigger: result });
+        return;
+      }
+      res.status(200).json({ ok: true, tmuxSessionId, state });
+      return;
+    }
+
+    if (action === 'trigger') {
+      const dryRun = parseBoolean(body.dryRun) === true;
+      const injectText = (await buildHeartbeatInjectTextSnapshot()) || '[Heartbeat]\n请读取 HEARTBEAT.md，更新 DELIVERY.md，并调用 review。';
+      const result = await triggerHeartbeatNow({
+        tmuxSessionId,
+        injectText,
+        requestActivityTracker: {
+          countActiveRequestsForTmuxSession: (sessionId: string) =>
+            Number((req.app?.locals?.routecodexServer as any)?.requestActivityTracker?.countActiveRequestsForTmuxSession?.(sessionId) || 0)
+        },
+        ...(dryRun ? { dryRun } : {})
+      });
+      res.status(200).json({ ok: true, tmuxSessionId, result });
+      return;
+    }
+
+    res.status(400).json({ ok: false, reason: 'action must be on|off|trigger' });
   });
 
   app.get('/daemon/session/tasks', async (req: Request, res: Response) => {

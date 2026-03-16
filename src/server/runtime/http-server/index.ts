@@ -48,6 +48,7 @@ import { StatsManager } from './stats-manager.js';
 import { resolveHubShadowCompareConfig } from './hub-shadow-compare.js';
 import { resolveLlmsEngineShadowConfig } from '../../../utils/llms-engine-shadow.js';
 import { createRequestExecutor, type RequestExecutor } from './request-executor.js';
+import { RequestActivityTracker } from './request-activity-tracker.js';
 import { startSessionReaper, stopSessionReaper } from './session-client-reaper.js';
 import {
   resolveVirtualRouterInput,
@@ -157,11 +158,13 @@ export class RouteCodexHttpServer {
   private readonly sessionDaemonInjectSkipLogByKey: Map<string, number> = new Map();
   private readonly sessionDaemonCleanupLogByKey: Map<string, number> = new Map();
   private lastSessionDaemonCleanupAtMs = 0;
+  private readonly requestActivityTracker = new RequestActivityTracker();
   private readonly requestExecutor: RequestExecutor;
 
   constructor(config: ServerConfigV2) {
     this.config = config;
     this.app = express();
+    (this.app.locals as Record<string, unknown>).routecodexServer = this;
     this.errorHandling = new QuietErrorHandlingCenter();
     this.stageLoggingEnabled = isStageLoggingEnabled();
     this.repoRoot = resolveRepoRoot(import.meta.url);
@@ -208,7 +211,14 @@ export class RouteCodexHttpServer {
       logStage: (stage: string, requestId: string, details?: Record<string, unknown>) => {
         this.logStage(stage, requestId, details);
       },
-      stats: this.stats
+      stats: this.stats,
+      onRequestStart: ({ requestId, metadata }) => {
+        this.requestActivityTracker.start(requestId, metadata);
+      },
+      onRequestEnd: async ({ requestId }) => {
+        this.requestActivityTracker.end(requestId);
+        await this.tickSessionDaemonInjectLoop();
+      }
     });
 
     registerApiKeyAuthMiddleware(this.app, this.config);

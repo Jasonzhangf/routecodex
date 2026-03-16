@@ -6,12 +6,17 @@ import type { AddressInfo } from 'node:net';
 const clearStopMessageTmuxScope = jest.fn(() => ({ cleared: true, reason: 'test', scope: 'tmux:rcc_dead' }));
 
 const mockBridgeModule = () => ({
+  buildHeartbeatInjectTextSnapshot: jest.fn(async () => '[Heartbeat]'),
   cancelClockTaskSnapshot: jest.fn(async () => false),
   clearClockTasksSnapshot: jest.fn(async () => 0),
+  listHeartbeatStatesSnapshot: jest.fn(async () => []),
   listClockSessionIdsSnapshot: jest.fn(async () => []),
   listClockTasksSnapshot: jest.fn(async () => []),
+  loadHeartbeatStateSnapshot: jest.fn(async () => null),
   resolveClockConfigSnapshot: jest.fn(async () => ({ ok: true })),
   scheduleClockTasksSnapshot: jest.fn(async () => ({ ok: true })),
+  setHeartbeatRuntimeHooksSnapshot: jest.fn(async () => true),
+  setHeartbeatEnabledSnapshot: jest.fn(async () => ({ enabled: true })),
   updateClockTaskSnapshot: jest.fn(async () => ({ ok: true }))
 });
 
@@ -22,7 +27,8 @@ const mockStopMessageModule = () => ({
 
 const mockTmuxProbeModule = () => ({
   injectTmuxSessionText: jest.fn(async () => ({ ok: true })),
-  isTmuxSessionAlive: jest.fn((tmuxSessionId: string) => tmuxSessionId !== 'rcc_dead')
+  isTmuxSessionAlive: jest.fn((tmuxSessionId: string) => tmuxSessionId !== 'rcc_dead'),
+  resolveTmuxSessionWorkingDirectory: jest.fn(() => '/tmp/mock-heartbeat')
 });
 
 jest.unstable_mockModule('../../../src/modules/llmswitch/bridge.js', mockBridgeModule);

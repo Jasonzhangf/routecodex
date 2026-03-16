@@ -123,6 +123,40 @@ describe('session-client routes', () => {
     }
   });
 
+  it('supports heartbeat admin list and dry-run trigger endpoints', async () => {
+    const app = express();
+    app.use(express.json({ limit: '256kb' }));
+    (app.locals as Record<string, unknown>).routecodexServer = {
+      requestActivityTracker: {
+        countActiveRequestsForTmuxSession: () => 0
+      }
+    };
+    registerSessionClientRoutes(app);
+
+    const server = http.createServer(app);
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const addr = server.address() as AddressInfo;
+    const baseUrl = `http://127.0.0.1:${addr.port}`;
+
+    try {
+      const list = await fetchWithHeaders(baseUrl, 'GET', '/daemon/heartbeat/list');
+      expect(list.status).toBe(200);
+      expect(list.payload?.ok).toBe(true);
+      expect(Array.isArray(list.payload?.states)).toBe(true);
+
+      const trigger = await localFetch(baseUrl, '/daemon/heartbeat', {
+        action: 'trigger',
+        tmuxSessionId: '__hb_missing_test__',
+        dryRun: true
+      });
+      expect(trigger.status).toBe(200);
+      expect(trigger.payload?.ok).toBe(true);
+      expect(trigger.payload?.result?.reason).toBe('tmux_session_not_found');
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it('keeps localhost session-client routes simplified even on public bind', async () => {
     process.env.TEST_SESSION_CLIENT_APIKEY = 'session-client-public-key';
     const app = express();

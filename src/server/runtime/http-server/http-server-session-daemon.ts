@@ -1,6 +1,9 @@
 import {
   resolveClockConfigSnapshot,
-  startClockDaemonIfNeededSnapshot
+  resolveHeartbeatConfigSnapshot,
+  runHeartbeatDaemonTickSnapshot,
+  startClockDaemonIfNeededSnapshot,
+  startHeartbeatDaemonIfNeededSnapshot
 } from '../../../modules/llmswitch/bridge.js';
 import { toExactMatchSessionConfig } from './session-daemon-inject-config.js';
 
@@ -86,6 +89,28 @@ export function resolveRawSessionConfig(server: any): unknown {
   return undefined;
 }
 
+export function resolveRawHeartbeatConfig(server: any): unknown {
+  const user = server.userConfig && typeof server.userConfig === 'object' ? (server.userConfig as Record<string, unknown>) : {};
+  const vr = user.virtualrouter && typeof user.virtualrouter === 'object' ? (user.virtualrouter as Record<string, unknown>) : null;
+  if (vr && Object.prototype.hasOwnProperty.call(vr, 'heartbeat')) {
+    return vr.heartbeat;
+  }
+  if (Object.prototype.hasOwnProperty.call(user, 'heartbeat')) {
+    return (user as Record<string, unknown>).heartbeat;
+  }
+
+  const artCfg =
+    server.currentRouterArtifacts &&
+    server.currentRouterArtifacts.config &&
+    typeof server.currentRouterArtifacts.config === 'object'
+      ? (server.currentRouterArtifacts.config as Record<string, unknown>)
+      : null;
+  if (artCfg && Object.prototype.hasOwnProperty.call(artCfg, 'heartbeat')) {
+    return artCfg.heartbeat;
+  }
+  return undefined;
+}
+
 export function stopSessionDaemonInjectLoop(server: any): void {
   if (server.sessionDaemonInjectTimer) {
     clearInterval(server.sessionDaemonInjectTimer);
@@ -108,15 +133,16 @@ export async function tickSessionDaemonInjectLoop(server: any): Promise<void> {
   server.sessionDaemonInjectTickInFlight = true;
   try {
     const rawSessionConfig = resolveRawSessionConfig(server);
-    if (!rawSessionConfig) {
-      return;
-    }
     const resolvedClockConfig = await resolveClockConfigSnapshot(rawSessionConfig);
-    if (!resolvedClockConfig) {
-      return;
+    if (resolvedClockConfig) {
+      const sessionConfig = toExactMatchSessionConfig(resolvedClockConfig);
+      await startClockDaemonIfNeededSnapshot(sessionConfig);
     }
-    const sessionConfig = toExactMatchSessionConfig(resolvedClockConfig);
-    await startClockDaemonIfNeededSnapshot(sessionConfig);
+
+    const rawHeartbeatConfig = resolveRawHeartbeatConfig(server);
+    const resolvedHeartbeatConfig = await resolveHeartbeatConfigSnapshot(rawHeartbeatConfig);
+    await startHeartbeatDaemonIfNeededSnapshot(resolvedHeartbeatConfig || rawHeartbeatConfig || undefined);
+    await runHeartbeatDaemonTickSnapshot();
   } catch (error) {
     const now = Date.now();
     if (now - server.lastSessionDaemonInjectErrorAtMs > 5000) {

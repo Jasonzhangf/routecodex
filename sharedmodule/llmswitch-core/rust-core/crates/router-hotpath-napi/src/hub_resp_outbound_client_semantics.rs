@@ -1603,6 +1603,85 @@ fn is_summary_text_array(value: &Value) -> bool {
     true
 }
 
+fn is_codex_reasoning_summary_display_compatible(text: &str) -> bool {
+    let trimmed = text.trim_start();
+    if !trimmed.starts_with("**") {
+        return false;
+    }
+    let after_open = &trimmed[2..];
+    let Some(close) = after_open.find("**") else {
+        return false;
+    };
+    if close == 0 {
+        return false;
+    }
+    after_open[(close + 2)..]
+        .chars()
+        .any(|ch| !ch.is_whitespace())
+}
+
+fn normalize_reasoning_summary_for_codex_display(summary_value: &mut Value) {
+    let Some(summary_items) = summary_value.as_array_mut() else {
+        return;
+    };
+    if summary_items.is_empty() {
+        return;
+    }
+
+    let mut has_display_compatible_summary = false;
+    for entry in summary_items.iter() {
+        let Some(row) = entry.as_object() else {
+            continue;
+        };
+        let kind = row
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase();
+        if kind != "summary_text" {
+            continue;
+        }
+        let Some(text) = row.get("text").and_then(Value::as_str) else {
+            continue;
+        };
+        if is_codex_reasoning_summary_display_compatible(text) {
+            has_display_compatible_summary = true;
+            break;
+        }
+    }
+    if has_display_compatible_summary {
+        return;
+    }
+
+    for entry in summary_items.iter_mut() {
+        let Some(row) = entry.as_object_mut() else {
+            continue;
+        };
+        let kind = row
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase();
+        if kind != "summary_text" {
+            continue;
+        }
+        let Some(text) = row.get("text").and_then(Value::as_str) else {
+            continue;
+        };
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        row.insert(
+            "text".to_string(),
+            Value::String(format!("**Thinking** {}", trimmed)),
+        );
+        break;
+    }
+}
+
 fn merge_responses_output_items(base: &[Value], source: &[Value]) -> Vec<Value> {
     let mut source_by_id: HashMap<String, Value> = HashMap::new();
     for entry in source {
@@ -1873,11 +1952,53 @@ fn build_responses_payload_from_chat_core(
         );
         reasoning_item.insert("type".to_string(), Value::String("reasoning".to_string()));
         reasoning_item.insert("status".to_string(), Value::String("completed".to_string()));
-        if let Some(summary) = reasoning_payload.get("summary") {
-            reasoning_item.insert("summary".to_string(), summary.clone());
+        let has_explicit_summary = reasoning_payload
+            .get("summary")
+            .and_then(Value::as_array)
+            .map(|items| !items.is_empty())
+            .unwrap_or(false);
+        let summary_value = reasoning_payload.get("summary").cloned().or_else(|| {
+            reasoning_payload
+                .get("content")
+                .and_then(Value::as_array)
+                .map(|content_items| {
+                    content_items
+                        .iter()
+                        .filter_map(|entry| {
+                            let row = entry.as_object()?;
+                            let kind = row
+                                .get("type")
+                                .and_then(Value::as_str)
+                                .unwrap_or("")
+                                .trim()
+                                .to_ascii_lowercase();
+                            if kind != "reasoning_text" && kind != "text" {
+                                return None;
+                            }
+                            let text = row
+                                .get("text")
+                                .and_then(Value::as_str)
+                                .map(|value| value.trim().to_string())
+                                .filter(|value| !value.is_empty())?;
+                            Some(Value::Object(Map::from_iter([
+                                ("type".to_string(), Value::String("summary_text".to_string())),
+                                ("text".to_string(), Value::String(text)),
+                            ])))
+                        })
+                        .collect::<Vec<Value>>()
+                })
+                .filter(|summary_entries| !summary_entries.is_empty())
+                .map(Value::Array)
+        });
+        if let Some(mut summary) = summary_value {
+            normalize_reasoning_summary_for_codex_display(&mut summary);
+            reasoning_item.insert("summary".to_string(), summary);
         }
-        if let Some(content) = reasoning_payload.get("content") {
-            reasoning_item.insert("content".to_string(), content.clone());
+        let summary_was_backfilled = !has_explicit_summary && reasoning_item.contains_key("summary");
+        if has_explicit_summary || !summary_was_backfilled {
+            if let Some(content) = reasoning_payload.get("content") {
+                reasoning_item.insert("content".to_string(), content.clone());
+            }
         }
         if let Some(encrypted_content) = reasoning_payload.get("encrypted_content") {
             reasoning_item.insert("encrypted_content".to_string(), encrypted_content.clone());
@@ -2423,7 +2544,7 @@ mod tests {
             .expect("reasoning output item");
         assert_eq!(
             reasoning_item["summary"][0]["text"],
-            Value::String("summary-1".to_string())
+            Value::String("**Thinking** summary-1".to_string())
         );
         assert_eq!(
             reasoning_item["content"][0]["text"],
@@ -2436,6 +2557,139 @@ mod tests {
         assert_eq!(
             reasoning_item["encrypted_content"],
             Value::String("enc-1".to_string())
+        );
+    }
+
+    #[test]
+    fn build_responses_payload_from_chat_backfills_reasoning_summary_from_content() {
+        let payload = serde_json::json!({
+            "id": "resp_reasoning_backfill",
+            "model": "gpt-5.2",
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "done",
+                        "reasoning": {
+                            "content": [
+                                { "type": "reasoning_text", "text": "raw-only-1" },
+                                { "type": "reasoning_text", "text": "raw-only-2" }
+                            ]
+                        }
+                    }
+                }
+            ]
+        });
+
+        let output = build_responses_payload_from_chat_core(
+            &payload,
+            Some("req_reasoning_backfill"),
+            &serde_json::json!({ "toolsRaw": [] }),
+        )
+        .expect("build responses payload");
+
+        let reasoning_item = output["output"]
+            .as_array()
+            .and_then(|items| {
+                items
+                    .iter()
+                    .find(|item| item["type"] == Value::String("reasoning".to_string()))
+            })
+            .cloned()
+            .expect("reasoning output item");
+        assert_eq!(
+            reasoning_item["summary"][0]["text"],
+            Value::String("**Thinking** raw-only-1".to_string())
+        );
+        assert_eq!(
+            reasoning_item["summary"][1]["text"],
+            Value::String("raw-only-2".to_string())
+        );
+        assert!(reasoning_item.get("content").is_none());
+    }
+
+    #[test]
+    fn build_responses_payload_from_chat_keeps_display_compatible_reasoning_summary() {
+        let payload = serde_json::json!({
+            "id": "resp_reasoning_header",
+            "model": "gpt-5.2",
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "done",
+                        "reasoning": {
+                            "summary": [{ "type": "summary_text", "text": "**Plan**\n\ncheck files" }]
+                        }
+                    }
+                }
+            ]
+        });
+
+        let output = build_responses_payload_from_chat_core(
+            &payload,
+            Some("req_reasoning_header"),
+            &serde_json::json!({ "toolsRaw": [] }),
+        )
+        .expect("build responses payload");
+
+        let reasoning_item = output["output"]
+            .as_array()
+            .and_then(|items| {
+                items
+                    .iter()
+                    .find(|item| item["type"] == Value::String("reasoning".to_string()))
+            })
+            .cloned()
+            .expect("reasoning output item");
+        assert_eq!(
+            reasoning_item["summary"][0]["text"],
+            Value::String("**Plan**\n\ncheck files".to_string())
+        );
+    }
+
+    #[test]
+    fn build_responses_payload_from_chat_normalizes_mid_body_bold_reasoning_summary() {
+        let payload = serde_json::json!({
+            "id": "resp_reasoning_mid_bold",
+            "model": "gpt-5.2",
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "done",
+                        "reasoning": {
+                            "summary": [
+                                {
+                                    "type": "summary_text",
+                                    "text": "先看现状。\\n\\n1. **重点** 先修复"
+                                }
+                            ]
+                        }
+                    }
+                }
+            ]
+        });
+
+        let output = build_responses_payload_from_chat_core(
+            &payload,
+            Some("req_reasoning_mid_bold"),
+            &serde_json::json!({ "toolsRaw": [] }),
+        )
+        .expect("build responses payload");
+
+        let reasoning_item = output["output"]
+            .as_array()
+            .and_then(|items| {
+                items
+                    .iter()
+                    .find(|item| item["type"] == Value::String("reasoning".to_string()))
+            })
+            .cloned()
+            .expect("reasoning output item");
+        assert_eq!(
+            reasoning_item["summary"][0]["text"],
+            Value::String("**Thinking** 先看现状。\n\n1. **重点** 先修复".to_string())
         );
     }
 }

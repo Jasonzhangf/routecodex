@@ -190,4 +190,47 @@ describe('review servertool followup', () => {
     expect(injectText).not.toContain('[Time/Date]:');
     expect(injectText).not.toContain('[Image omitted]');
   });
+
+  test('heartbeat handoff wording still preserves review flow as client-inject-only', async () => {
+    process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_ENABLED = '0';
+
+    const adapterContext: AdapterContext = {
+      requestId: 'req-review-heartbeat',
+      entryEndpoint: '/v1/messages',
+      providerProtocol: 'anthropic-messages',
+      providerKey: 'iflow.1-186.kimi-k2.5',
+      stream: false,
+      sessionId: 'session-review-heartbeat',
+      metadata: {
+        workdir: '/tmp/review-heartbeat'
+      },
+      capturedChatRequest: {
+        model: 'kimi-k2.5',
+        messages: [{ role: 'user', content: '读取 HEARTBEAT.md，更新 DELIVERY.md，然后调用 review。' }]
+      }
+    } as any;
+
+    let capturedFollowupMeta: Record<string, unknown> | null = null;
+    const orchestration = await runServerToolOrchestration({
+      chat: buildReviewToolCallPayload({
+        goal: '读取 HEARTBEAT.md 并检查 DELIVERY.md 是否完整'
+      }),
+      adapterContext,
+      requestId: 'req-review-heartbeat',
+      entryEndpoint: '/v1/messages',
+      providerProtocol: 'anthropic-messages',
+      clientInjectDispatch: async (opts: any) => {
+        capturedFollowupMeta =
+          opts?.metadata && typeof opts.metadata === 'object'
+            ? (opts.metadata as Record<string, unknown>)
+            : null;
+        return { ok: true } as any;
+      }
+    });
+
+    expect(orchestration.executed).toBe(true);
+    expect(orchestration.flowId).toBe('review_flow');
+    expect((capturedFollowupMeta as any)?.clientInjectOnly).toBe(true);
+    expect((capturedFollowupMeta as any)?.clientInjectSource).toBe('servertool.review');
+  });
 });

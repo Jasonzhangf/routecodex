@@ -72,4 +72,31 @@ describe('response-runtime anthropic hidden reasoning', () => {
     expect(reasoningItem?.encrypted_content).toBe('enc_payload');
     expect(reasoningItem?.content?.[0]?.text).toBe('plan next action');
   });
+
+  it('fails fast when upstream returns model_context_window_exceeded with empty output', () => {
+    expect(() => {
+      buildOpenAIChatFromAnthropicMessage({
+        id: 'msg_context_overflow',
+        type: 'message',
+        role: 'assistant',
+        model: 'glm-4.7',
+        stop_reason: 'model_context_window_exceeded',
+        content: []
+      } as any);
+    }).toThrow(/model_context_window_exceeded/i);
+  });
+
+  it('maps context overflow stop reason to length when output text exists', () => {
+    const chat = buildOpenAIChatFromAnthropicMessage({
+      id: 'msg_context_overflow_with_text',
+      type: 'message',
+      role: 'assistant',
+      model: 'glm-4.7',
+      stop_reason: 'context_window_exceeded',
+      content: [{ type: 'text', text: 'partial output' }]
+    } as any);
+
+    expect((chat as any).choices?.[0]?.finish_reason).toBe('length');
+    expect((chat as any).choices?.[0]?.message?.content).toBe('partial output');
+  });
 });

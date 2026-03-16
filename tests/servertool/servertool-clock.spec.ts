@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { jest } from '@jest/globals';
 
 import { runReqProcessStage1ToolGovernance } from '../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/req_process/req_process_stage1_tool_governance/index.js';
 import type { StandardizedRequest } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.js';
@@ -16,7 +17,12 @@ import {
   scheduleClockTasks,
   loadClockSessionState,
   commitClockReservation,
-  reserveDueTasksForRequest
+  reserveDueTasksForRequest,
+  setClockRuntimeHooks,
+  resetClockRuntimeHooksForTests,
+  startClockDaemonIfNeeded,
+  stopClockDaemonForTests,
+  runClockDaemonTickForTests
 } from '../../sharedmodule/llmswitch-core/src/servertool/clock/task-store.js';
 import { resolveClockStateFile } from '../../sharedmodule/llmswitch-core/src/servertool/clock/paths.js';
 
@@ -64,6 +70,12 @@ describe('servertool:clock', () => {
 
   beforeEach(() => {
     resetSessionDir();
+    resetClockRuntimeHooksForTests();
+  });
+
+  afterAll(async () => {
+    resetClockRuntimeHooksForTests();
+    await stopClockDaemonForTests();
   });
 
   test('injects clock tool schema even when sessionId is absent', async () => {
@@ -282,6 +294,104 @@ describe('servertool:clock', () => {
     expect(stateAfter.tasks).toHaveLength(1);
     expect(typeof stateAfter.tasks[0].deliveredAtMs).toBe('number');
     expect(stateAfter.tasks[0].deliveryCount).toBe(1);
+  });
+
+  test('startup tick followed by immediate manual tick does not double-dispatch same due task', async () => {
+    const sessionId = 's-clock-no-duplicate-on-start';
+    const sessionScope = toClockSessionScope(sessionId);
+    const clockConfig = normalizeClockConfig({ enabled: true, tickMs: 900000 });
+    if (!clockConfig) {
+      throw new Error('clockConfig should not be null');
+    }
+
+    await scheduleClockTasks(
+      sessionScope,
+      [{ dueAtMs: Date.now() - 1000, task: 'single due reminder' }],
+      clockConfig
+    );
+
+    const dispatchDueTask = jest.fn(async () => ({ ok: true }));
+    setClockRuntimeHooks({
+      isTmuxSessionAlive: () => true,
+      dispatchDueTask
+    });
+
+    await startClockDaemonIfNeeded(clockConfig);
+    await runClockDaemonTickForTests();
+
+    expect(dispatchDueTask).toHaveBeenCalledTimes(1);
+  });
+
+  test('reserveDueTasksForRequest merges due tasks within 5 minutes into one reminder batch', async () => {
+    const sessionId = `s-clock-merge-window-${Date.now()}`;
+    const sessionScope = toClockSessionScope(sessionId);
+    const clockConfig = normalizeClockConfig({ enabled: true, tickMs: 0, dueWindowMs: 10 * 60_000 });
+    if (!clockConfig) {
+      throw new Error('clockConfig should not be null');
+    }
+
+    const now = Date.now();
+    await scheduleClockTasks(
+      sessionScope,
+      [
+        { dueAtMs: now - 1_000, task: 'merge-a' },
+        { dueAtMs: now + 4 * 60_000, task: 'merge-b' }
+      ],
+      clockConfig
+    );
+
+    const reserved = await reserveDueTasksForRequest({
+      reservationId: 'resv-merge-5m',
+      sessionId: sessionScope,
+      config: clockConfig,
+      requestId: 'req-resv-merge-5m'
+    });
+
+    expect(Array.isArray(reserved.reservation?.taskIds) ? reserved.reservation?.taskIds : []).toHaveLength(2);
+    const injectText = String(reserved.injectText || '');
+    expect(injectText).toContain('[Clock Reminder]');
+    expect(injectText).toContain('本轮有 2 个到期任务');
+    expect(injectText).toContain('merge-a');
+    expect(injectText).toContain('merge-b');
+  });
+
+  test('reserveDueTasksForRequest leaves tasks beyond 5 minutes for the next batch', async () => {
+    const sessionId = `s-clock-separate-window-${Date.now()}`;
+    const sessionScope = toClockSessionScope(sessionId);
+    const clockConfig = normalizeClockConfig({ enabled: true, tickMs: 0, dueWindowMs: 10 * 60_000 });
+    if (!clockConfig) {
+      throw new Error('clockConfig should not be null');
+    }
+
+    const now = Date.now();
+    await scheduleClockTasks(
+      sessionScope,
+      [
+        { dueAtMs: now - 1_000, task: 'batch-first' },
+        { dueAtMs: now + 6 * 60_000, task: 'batch-second' }
+      ],
+      clockConfig
+    );
+
+    const reserved1 = await reserveDueTasksForRequest({
+      reservationId: 'resv-separate-1',
+      sessionId: sessionScope,
+      config: clockConfig,
+      requestId: 'req-separate-1'
+    });
+    expect(Array.isArray(reserved1.reservation?.taskIds) ? reserved1.reservation?.taskIds : []).toHaveLength(1);
+    expect(String(reserved1.injectText || '')).toContain('batch-first');
+    expect(String(reserved1.injectText || '')).not.toContain('batch-second');
+    await commitClockReservation(reserved1.reservation as any, clockConfig);
+
+    const reserved2 = await reserveDueTasksForRequest({
+      reservationId: 'resv-separate-2',
+      sessionId: sessionScope,
+      config: clockConfig,
+      requestId: 'req-separate-2'
+    });
+    expect(Array.isArray(reserved2.reservation?.taskIds) ? reserved2.reservation?.taskIds : []).toHaveLength(1);
+    expect(String(reserved2.injectText || '')).toContain('batch-second');
   });
 
   test('tmux-scoped clock session isolates tasks when sessionId is shared', async () => {

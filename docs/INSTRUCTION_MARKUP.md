@@ -56,7 +56,34 @@ RouteCodex 支持在用户消息中写入“指令标记”，用于影响 Virtu
 
 > clock servertool 的详细行为与持久化说明见 `docs/SERVERTOOL_CLOCK_DESIGN.md`。
 
-## 4) provider 路由指令
+## 4) heartbeat（tmux 客户端巡检唤醒）
+
+Heartbeat 仅绑定到 tmux session，并且只接受 on/off：
+
+```text
+<**hb:on**>
+<**hb:off**>
+```
+
+语义：
+
+- `hb:on`：立即开启 heartbeat；后续由服务端按 15 分钟周期尝试唤醒对应 tmux 客户端。
+- `hb:off`：关闭该 tmux session 的 heartbeat。
+- 只处理**最新一条 user 消息**中的 heartbeat 指令；历史消息中的 heartbeat 标记不会重复生效。
+- 结束时间不从指令输入，而是从目标工作目录下 `HEARTBEAT.md` 头部标签读取：
+
+```text
+Heartbeat-Until: 2026-03-16T23:00:00+08:00
+```
+
+- 若未写 `Heartbeat-Until`，表示无截止时间。
+- Heartbeat 仅在以下两个条件同时满足时才会真正注入：
+  - 当前 tmux 绑定范围内没有活动中的请求
+  - 客户端已断开或心跳过期
+
+> Heartbeat 的 tmux/持久化/注入设计见 `docs/session-client-daemon-design.md`。
+
+## 5) provider 路由指令
 
 ### 允许列表（whitelist）
 
@@ -86,4 +113,3 @@ RouteCodex 支持在用户消息中写入“指令标记”，用于影响 Virtu
 ```text
 <**!tab.gpt-5.2**>
 ```
-

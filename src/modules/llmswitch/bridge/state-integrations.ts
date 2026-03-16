@@ -159,6 +159,24 @@ type ClockTaskStoreModule = {
   clearClockTasks?: (sessionId: string, config: unknown) => Promise<number>;
 };
 
+type HeartbeatTaskStoreModule = {
+  buildHeartbeatInjectText?: () => string;
+  resolveHeartbeatConfig?: (input: unknown) => unknown | null;
+  startHeartbeatDaemonIfNeeded?: (config: unknown) => Promise<void> | void;
+  setHeartbeatRuntimeHooks?: (hooks?: {
+    isTmuxSessionAlive?: (tmuxSessionId: string) => Promise<boolean> | boolean;
+    dispatchHeartbeat?: (request: {
+      tmuxSessionId: string;
+      state: unknown;
+      injectText: string;
+    }) => Promise<{ ok: boolean; skipped?: boolean; disable?: boolean; reason?: string } | null> | { ok: boolean; skipped?: boolean; disable?: boolean; reason?: string } | null;
+  }) => void | Promise<void>;
+  loadHeartbeatState?: (tmuxSessionId: string) => Promise<unknown>;
+  listHeartbeatStates?: () => Promise<unknown[]>;
+  setHeartbeatEnabled?: (tmuxSessionId: string, enabled: boolean) => Promise<unknown>;
+  runHeartbeatDaemonTickForTests?: () => Promise<void>;
+};
+
 type ClockTaskStoreLegacyTasksModule = Pick<ClockTaskStoreModule,
   | 'reserveDueTasksForRequest'
   | 'commitClockReservation'
@@ -175,6 +193,9 @@ type ClockTaskStoreLegacyConfigModule = Pick<ClockTaskStoreModule, 'resolveClock
 let cachedClockTaskStoreModule: ClockTaskStoreModule | null | undefined = undefined;
 let clockTaskStoreLastLoadAttemptAtMs = 0;
 let hasLoggedClockTaskStoreLoadFailure = false;
+let cachedHeartbeatTaskStoreModule: HeartbeatTaskStoreModule | null | undefined = undefined;
+let heartbeatTaskStoreLastLoadAttemptAtMs = 0;
+let hasLoggedHeartbeatTaskStoreLoadFailure = false;
 
 const CLOCK_TASK_STORE_RETRY_INTERVAL_MS = 30_000;
 
@@ -222,6 +243,45 @@ async function getClockTaskStoreModuleSafe(): Promise<ClockTaskStoreModule | nul
     );
   }
 
+  return null;
+}
+
+async function tryLoadHeartbeatTaskStoreModule(): Promise<HeartbeatTaskStoreModule | null> {
+  try {
+    return await importCoreDist<HeartbeatTaskStoreModule>('servertool/heartbeat/task-store');
+  } catch {
+    return null;
+  }
+}
+
+async function getHeartbeatTaskStoreModuleSafe(): Promise<HeartbeatTaskStoreModule | null> {
+  if (cachedHeartbeatTaskStoreModule) {
+    return cachedHeartbeatTaskStoreModule;
+  }
+
+  const now = Date.now();
+  if (
+    cachedHeartbeatTaskStoreModule === null &&
+    now - heartbeatTaskStoreLastLoadAttemptAtMs < CLOCK_TASK_STORE_RETRY_INTERVAL_MS
+  ) {
+    return null;
+  }
+
+  heartbeatTaskStoreLastLoadAttemptAtMs = now;
+  const loaded = await tryLoadHeartbeatTaskStoreModule();
+  if (loaded) {
+    cachedHeartbeatTaskStoreModule = loaded;
+    hasLoggedHeartbeatTaskStoreLoadFailure = false;
+    return loaded;
+  }
+
+  cachedHeartbeatTaskStoreModule = null;
+  if (!hasLoggedHeartbeatTaskStoreLoadFailure) {
+    hasLoggedHeartbeatTaskStoreLoadFailure = true;
+    console.warn(
+      '[llmswitch-bridge] heartbeat task-store module unavailable; heartbeat daemon features are temporarily disabled.'
+    );
+  }
   return null;
 }
 
@@ -381,5 +441,114 @@ export async function clearClockTasksSnapshot(args: { sessionId: string; config:
     return Number.isFinite(Number(removed)) ? Math.max(0, Math.floor(Number(removed))) : 0;
   } catch {
     return 0;
+  }
+}
+
+export async function resolveHeartbeatConfigSnapshot(input: unknown): Promise<unknown | null> {
+  const mod = await getHeartbeatTaskStoreModuleSafe();
+  const fn = mod?.resolveHeartbeatConfig;
+  if (typeof fn !== 'function') return null;
+  try {
+    return fn(input) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function buildHeartbeatInjectTextSnapshot(): Promise<string | null> {
+  const mod = await getHeartbeatTaskStoreModuleSafe();
+  const fn = mod?.buildHeartbeatInjectText;
+  if (typeof fn !== 'function') return null;
+  try {
+    const text = fn();
+    return typeof text === 'string' && text.trim() ? text : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function setHeartbeatRuntimeHooksSnapshot(hooks?: {
+  isTmuxSessionAlive?: (tmuxSessionId: string) => Promise<boolean> | boolean;
+  dispatchHeartbeat?: (request: {
+    tmuxSessionId: string;
+    state: unknown;
+    injectText: string;
+  }) => Promise<{ ok: boolean; skipped?: boolean; disable?: boolean; reason?: string } | null> | { ok: boolean; skipped?: boolean; disable?: boolean; reason?: string } | null;
+}): Promise<boolean> {
+  const mod = await getHeartbeatTaskStoreModuleSafe();
+  const fn = mod?.setHeartbeatRuntimeHooks;
+  if (typeof fn !== 'function') {
+    return false;
+  }
+  try {
+    await fn(hooks);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function startHeartbeatDaemonIfNeededSnapshot(config: unknown): Promise<boolean> {
+  const mod = await getHeartbeatTaskStoreModuleSafe();
+  const fn = mod?.startHeartbeatDaemonIfNeeded;
+  if (typeof fn !== 'function') {
+    return false;
+  }
+  try {
+    await fn(config);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function loadHeartbeatStateSnapshot(tmuxSessionId: string): Promise<unknown | null> {
+  const mod = await getHeartbeatTaskStoreModuleSafe();
+  const fn = mod?.loadHeartbeatState;
+  if (typeof fn !== 'function') return null;
+  try {
+    return await fn(tmuxSessionId);
+  } catch {
+    return null;
+  }
+}
+
+export async function listHeartbeatStatesSnapshot(): Promise<unknown[]> {
+  const mod = await getHeartbeatTaskStoreModuleSafe();
+  const fn = mod?.listHeartbeatStates;
+  if (typeof fn !== 'function') return [];
+  try {
+    const out = await fn();
+    return Array.isArray(out) ? out : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function setHeartbeatEnabledSnapshot(args: {
+  tmuxSessionId: string;
+  enabled: boolean;
+}): Promise<unknown | null> {
+  const mod = await getHeartbeatTaskStoreModuleSafe();
+  const fn = mod?.setHeartbeatEnabled;
+  if (typeof fn !== 'function') return null;
+  try {
+    return await fn(args.tmuxSessionId, args.enabled);
+  } catch {
+    return null;
+  }
+}
+
+export async function runHeartbeatDaemonTickSnapshot(): Promise<boolean> {
+  const mod = await getHeartbeatTaskStoreModuleSafe();
+  const fn = mod?.runHeartbeatDaemonTickForTests;
+  if (typeof fn !== 'function') {
+    return false;
+  }
+  try {
+    await fn();
+    return true;
+  } catch {
+    return false;
   }
 }

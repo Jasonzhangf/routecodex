@@ -671,6 +671,15 @@ export class SessionClientRegistry {
     return undefined;
   }
 
+  hasAliveTmuxSession(tmuxSessionIdRaw: string): boolean {
+    this.ensureConversationBindingsLoaded();
+    const tmuxSessionId = normalizeString(tmuxSessionIdRaw);
+    if (!tmuxSessionId) {
+      return false;
+    }
+    return this.pickAliveCandidates({ tmuxSessionId }).length > 0;
+  }
+
   private resolveInjectTmuxSessionId(args: SessionClientInjectArgs, workdirHint?: string): string | undefined {
     this.ensureConversationBindingsLoaded();
     const directTmuxSession = normalizeString(args.tmuxSessionId);

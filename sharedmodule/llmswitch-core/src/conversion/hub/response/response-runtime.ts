@@ -15,6 +15,7 @@ import {
   consumeResponsesPassthrough,
   registerResponsesPassthrough
 } from '../../shared/responses-reasoning-registry.js';
+import { ProviderProtocolError } from '../../provider-protocol-error.js';
 
 type ToolAliasMap = Record<string, string>;
 
@@ -362,12 +363,32 @@ export function buildOpenAIChatFromAnthropicMessage(payload: JsonObject, options
     }
   }
 
+  const normalizeStopReason = (reason: string | undefined): string => {
+    if (typeof reason !== 'string') return '';
+    return reason.trim().toLowerCase();
+  };
+
+  const isContextOverflowStopReason = (reason: string | undefined): boolean => {
+    const normalized = normalizeStopReason(reason);
+    return normalized === 'model_context_window_exceeded'
+      || normalized === 'context_window_exceeded'
+      || normalized === 'context_length_exceeded';
+  };
+
   const mapFinishReason = (reason: string | undefined): string => {
-    switch (reason) {
+    const normalized = normalizeStopReason(reason);
+    switch (normalized) {
       case 'tool_use': return 'tool_calls';
       case 'max_tokens': return 'length';
-      case 'stop_sequence': return 'stop';
-      default: return 'stop';
+      case 'stop_sequence':
+      case 'end_turn':
+        return 'stop';
+      case 'model_context_window_exceeded':
+      case 'context_window_exceeded':
+      case 'context_length_exceeded':
+        return 'length';
+      default:
+        return normalized || 'stop';
     }
   };
 
@@ -452,6 +473,24 @@ export function buildOpenAIChatFromAnthropicMessage(payload: JsonObject, options
   }
 
   const stopReason = typeof payload['stop_reason'] === 'string' ? payload['stop_reason'] : undefined;
+  const hasVisibleAssistantOutput = textParts.some((text) => text.trim().length > 0)
+    || reasoningParts.some((text) => text.trim().length > 0)
+    || canonicalToolCalls.length > 0;
+  if (isContextOverflowStopReason(stopReason) && !hasVisibleAssistantOutput) {
+    throw new ProviderProtocolError(
+      `Anthropic upstream returned stop_reason=${String(stopReason)} with empty assistant output`,
+      {
+        code: 'MALFORMED_RESPONSE',
+        protocol: 'anthropic-messages',
+        providerType: 'anthropic',
+        category: 'EXTERNAL_ERROR',
+        details: {
+          stop_reason: stopReason,
+          response_id: typeof payload.id === 'string' ? payload.id : undefined
+        }
+      }
+    );
+  }
   const finishReason = canonicalToolCalls.length ? 'tool_calls' : mapFinishReason(stopReason);
 
   const chatResponse = {

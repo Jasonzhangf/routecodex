@@ -4,13 +4,17 @@ import path from "node:path";
 import type {
   ClockConfigSnapshot,
   ClockSessionState,
-  ClockTask,
 } from "./types.js";
 import { readSessionDirEnv, resolveClockDir } from "./paths.js";
 import { cleanExpiredTasks, coerceState, nowMs } from "./state.js";
 import { readJsonFile, writeJsonFileAtomic } from "./io.js";
 import { startClockNtpSyncIfNeeded } from "./ntp.js";
-import { selectDueUndeliveredTasks, commitClockReservation, formatClockReminderText } from "./tasks.js";
+import {
+  selectDueUndeliveredTasks,
+  selectClockReminderDeliveryBatch,
+  commitClockReservation,
+  formatClockReminderBatchText
+} from "./tasks.js";
 
 let daemonStarted = false;
 let daemonTimer: NodeJS.Timeout | undefined;
@@ -70,10 +74,6 @@ function resolveStateTmuxSessionId(raw: unknown, sessionId: string): string | un
   return undefined;
 }
 
-function buildInjectText(task: ClockTask): string {
-  return formatClockReminderText(task);
-}
-
 export async function startClockDaemonIfNeeded(
   config: ClockConfigSnapshot,
 ): Promise<void> {
@@ -126,34 +126,34 @@ export async function startClockDaemonIfNeeded(
             effective,
             at,
           );
+          const deliveryBatch = selectClockReminderDeliveryBatch(dueTasks);
           if (
-            dueTasks.length > 0 &&
+            deliveryBatch.length > 0 &&
             runtimeHooks?.dispatchDueTask &&
             tmuxSessionId
           ) {
-            for (const task of dueTasks) {
-              const injectText = buildInjectText(task);
-              try {
-                const result = await Promise.resolve(
-                  runtimeHooks.dispatchDueTask({
-                    sessionId,
-                    tmuxSessionId,
-                    task,
-                    injectText,
-                  }),
-                );
-                if (result?.ok) {
-                  const reservation = {
-                    reservationId: `daemon:${task.taskId}:${at}`,
-                    sessionId,
-                    taskIds: [task.taskId],
-                    reservedAtMs: at,
-                  };
-                  await commitClockReservation(reservation, effective);
-                }
-              } catch {
-                // best-effort dispatch
+            const firstTask = deliveryBatch[0];
+            const injectText = formatClockReminderBatchText(deliveryBatch);
+            try {
+              const result = await Promise.resolve(
+                runtimeHooks.dispatchDueTask({
+                  sessionId,
+                  tmuxSessionId,
+                  task: firstTask,
+                  injectText,
+                }),
+              );
+              if (result?.ok) {
+                const reservation = {
+                  reservationId: `daemon:${firstTask.taskId}:${at}`,
+                  sessionId,
+                  taskIds: deliveryBatch.map((task) => task.taskId),
+                  reservedAtMs: at,
+                };
+                await commitClockReservation(reservation, effective);
               }
+            } catch {
+              // best-effort dispatch
             }
           }
 
@@ -179,8 +179,9 @@ export async function startClockDaemonIfNeeded(
     }
   };
 
-  // Startup scan (best-effort).
-  void tickOnce();
+  // Startup scan (best-effort), but await it so callers do not immediately
+  // race a second tick against the same due-task snapshot.
+  await tickOnce();
 
   if (config.tickMs > 0) {
     daemonTimer = setInterval(() => {
@@ -230,26 +231,26 @@ export async function runClockDaemonTickForTests(): Promise<void> {
     }
 
     const dueTasks = selectDueUndeliveredTasks(state.tasks, effective, at);
-    if (dueTasks.length > 0 && runtimeHooks?.dispatchDueTask && tmuxSessionId) {
-      for (const task of dueTasks) {
-        const injectText = buildInjectText(task);
-        const result = await Promise.resolve(
-          runtimeHooks.dispatchDueTask({
-            sessionId,
-            tmuxSessionId,
-            task,
-            injectText,
-          }),
-        );
-        if (result?.ok) {
-          const reservation = {
-            reservationId: `daemon:${task.taskId}:${at}`,
-            sessionId,
-            taskIds: [task.taskId],
-            reservedAtMs: at,
-          };
-          await commitClockReservation(reservation, effective);
-        }
+    const deliveryBatch = selectClockReminderDeliveryBatch(dueTasks);
+    if (deliveryBatch.length > 0 && runtimeHooks?.dispatchDueTask && tmuxSessionId) {
+      const firstTask = deliveryBatch[0];
+      const injectText = formatClockReminderBatchText(deliveryBatch);
+      const result = await Promise.resolve(
+        runtimeHooks.dispatchDueTask({
+          sessionId,
+          tmuxSessionId,
+          task: firstTask,
+          injectText,
+        }),
+      );
+      if (result?.ok) {
+        const reservation = {
+          reservationId: `daemon:${firstTask.taskId}:${at}`,
+          sessionId,
+          taskIds: deliveryBatch.map((task) => task.taskId),
+          reservedAtMs: at,
+        };
+        await commitClockReservation(reservation, effective);
       }
     }
   }

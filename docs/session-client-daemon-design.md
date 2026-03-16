@@ -289,6 +289,72 @@ Examples:
 
 Validation rule: if recurrence is present but invalid/missing required fields, marker scheduling is skipped (marker text remains unchanged).
 
+## 16. Heartbeat (tmux client re-activation)
+
+Heartbeat is a specialized tmux-only wake-up loop, separate from normal clock tasks.
+
+### 16.1 Contract
+
+- Marker protocol:
+  - `<**hb:on**>`
+  - `<**hb:off**>`
+- Binding scope: **tmux session only**
+- Enable semantics: `hb:on` takes effect immediately; no start time input is supported.
+- End time source: target workdir `HEARTBEAT.md` header tag
+
+```text
+Heartbeat-Until: 2026-03-16T23:00:00+08:00
+```
+
+- If `Heartbeat-Until` is absent, heartbeat has no deadline.
+- If tmux scope is unavailable when parsing `hb:on/off`, directive is stripped from the latest user message but no state is written.
+
+### 16.2 Delivery loop
+
+- Persistence root: `$ROUTECODEX_SESSION_DIR/heartbeat/*.json`
+- Daemon tick: every **15 minutes**
+- Each due heartbeat attempts tmux injection only when both are true:
+  1. no active in-flight request is bound to that tmux scope
+  2. session-client daemon is disconnected / heartbeat stale
+
+- If either condition is false:
+  - skip this tick
+  - record skip reason
+  - never fail the main system path
+
+### 16.3 Injected fixed prompt
+
+Heartbeat injection is tmux-only and uses one fixed prompt generated from the heartbeat module:
+
+1. read `HEARTBEAT.md` in the current workdir
+2. inspect whether previous delivery is complete and whether more fixes are needed
+3. update `DELIVERY.md`
+4. call `review`
+5. continue execution instead of stop-only reporting
+
+### 16.4 Workdir and cleanup rules
+
+- Workdir truth source for heartbeat is the **current tmux pane path**.
+- If tmux workdir cannot be resolved, heartbeat skips without fallback to server cwd.
+- If tmux session is dead, persisted heartbeat state is removed during startup cleanup / runtime scan.
+- If `Heartbeat-Until` is expired, heartbeat state is auto-disabled.
+
+### 16.5 Failure policy
+
+- Heartbeat failure is **non-fatal**:
+  - record state / log
+  - do not fail request handling
+  - do not affect provider correctness or servertool followup correctness
+
+### 16.6 Review invariants
+
+- Heartbeat must not auto-chain server-side review flows.
+- It only injects prompt text telling the model to call `review`.
+- Existing `review_flow` semantics remain unchanged:
+  - `clientInjectOnly: true`
+  - same flow id / followup contract
+  - no hidden service-side review reenter
+
 ### 15.3 Cleanup policy (tmux vs conversation session)
 
 Two session domains are intentionally separated:

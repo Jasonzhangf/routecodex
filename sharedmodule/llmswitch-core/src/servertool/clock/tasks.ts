@@ -20,6 +20,7 @@ import { readJsonFile, writeJsonFileAtomic } from './io.js';
 import { loadClockSessionState } from './session-store.js';
 
 const TMUX_SCOPE_PREFIX = 'tmux:';
+const CLOCK_REMINDER_MERGE_WINDOW_MS = 5 * 60_000;
 
 function safeJson(value: unknown): string {
   try {
@@ -115,6 +116,86 @@ export function formatClockReminderText(task: Pick<
         : `${recurrence.kind} ${runCount}/${recurrence.maxRuns}`;
     lines.push(`重复: ${recurrenceSummary}`);
   }
+  return lines.join('\n');
+}
+
+function appendClockTaskDetails(
+  lines: string[],
+  task: Pick<
+    ClockTask,
+    'task' | 'dueAtMs' | 'createdAtMs' | 'setBy' | 'tool' | 'arguments' | 'urls' | 'paths' | 'deliveryCount' | 'recurrence'
+  >,
+  prefix = ''
+): void {
+  lines.push(`${prefix}任务: ${String(task.task || '').trim() || '未命名任务'}`);
+  lines.push(`${prefix}触发时间: ${formatLocalClockTimestamp(task.dueAtMs)}`);
+  lines.push(`${prefix}设置人: ${task.setBy === 'agent' ? 'agent' : 'user'}`);
+  lines.push(`${prefix}设置时间: ${formatLocalClockTimestamp(task.createdAtMs)}`);
+  if (task.tool) {
+    lines.push(`${prefix}建议工具: ${task.tool}`);
+  }
+  const argsText = task.arguments ? safeJson(task.arguments) : '';
+  if (isNonEmptyJsonObjectString(argsText)) {
+    lines.push(`${prefix}参数: ${argsText}`);
+  }
+  if (Array.isArray(task.urls) && task.urls.length) {
+    lines.push(`${prefix}链接: ${task.urls.join(', ')}`);
+  }
+  if (Array.isArray(task.paths) && task.paths.length) {
+    lines.push(`${prefix}路径: ${task.paths.join(', ')}`);
+  }
+  const recurrence = normalizeRecurrence(task.recurrence);
+  if (recurrence) {
+    const runCount = Math.max(0, Number(task.deliveryCount) || 0);
+    const recurrenceSummary =
+      recurrence.kind === 'interval'
+        ? `interval(${recurrence.everyMinutes}m) ${runCount}/${recurrence.maxRuns}`
+        : `${recurrence.kind} ${runCount}/${recurrence.maxRuns}`;
+    lines.push(`${prefix}重复: ${recurrenceSummary}`);
+  }
+}
+
+export function selectClockReminderDeliveryBatch(tasks: ClockTask[]): ClockTask[] {
+  if (!Array.isArray(tasks) || tasks.length < 1) {
+    return [];
+  }
+  const sorted = tasks
+    .filter((task) => task && typeof task === 'object' && Number.isFinite(task.dueAtMs))
+    .slice()
+    .sort((a, b) => a.dueAtMs - b.dueAtMs);
+  if (sorted.length < 2) {
+    return sorted;
+  }
+  const firstDueAtMs = sorted[0].dueAtMs;
+  return sorted.filter((task) => task.dueAtMs - firstDueAtMs <= CLOCK_REMINDER_MERGE_WINDOW_MS);
+}
+
+export function formatClockReminderBatchText(tasks: ClockTask[]): string {
+  const batch = selectClockReminderDeliveryBatch(tasks);
+  if (batch.length < 1) {
+    return '';
+  }
+  if (batch.length === 1) {
+    return formatClockReminderText(batch[0]);
+  }
+
+  const first = batch[0];
+  const last = batch[batch.length - 1];
+  const lines = [
+    '[Clock Reminder]',
+    `本轮有 ${batch.length} 个到期任务（触发时间间隔在 5 分钟内，已合并发送）。`,
+    `最早触发时间: ${formatLocalClockTimestamp(first.dueAtMs)}`,
+    `最晚触发时间: ${formatLocalClockTimestamp(last.dueAtMs)}`,
+    '复杂任务: 先查看并更新当前工作目录下的 clock.md',
+    buildClockMdTemplateHint()
+  ];
+
+  batch.forEach((task, index) => {
+    lines.push(``);
+    lines.push(`${index + 1}.`);
+    appendClockTaskDetails(lines, task, '   ');
+  });
+
   return lines.join('\n');
 }
 
@@ -626,16 +707,15 @@ export async function reserveDueTasksForRequest(args: {
   if (!due.length) {
     return { reservation: null };
   }
-  const taskIds = due.map((t) => t.taskId);
+  const deliveryBatch = selectClockReminderDeliveryBatch(due);
+  const taskIds = deliveryBatch.map((t) => t.taskId);
   const reservation: ClockReservation = {
     reservationId: args.reservationId,
     sessionId: args.sessionId,
     taskIds,
     reservedAtMs: at
   };
-  const injectText = due
-    .map((t) => formatClockReminderText(t))
-    .join('\n');
+  const injectText = formatClockReminderBatchText(deliveryBatch);
   return { reservation, injectText };
 }
 

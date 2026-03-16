@@ -4,6 +4,7 @@ import { HealthManagerModule } from '../../../manager/modules/health/index.js';
 import { RoutingStateManagerModule } from '../../../manager/modules/routing/index.js';
 import { applyDefaultStageTimingMode, resolveRuntimeBuildMode } from './stage-timing-defaults.js';
 import { registerClockRuntimeHooks } from './clock-runtime-hooks.js';
+import { registerHeartbeatRuntimeHooks } from './heartbeat-runtime-hooks.js';
 
 export async function setupRuntime(server: any, userConfig: UnknownObject): Promise<void> {
   applyDefaultStageTimingMode();
@@ -107,5 +108,6 @@ export async function setupRuntime(server: any, userConfig: UnknownObject): Prom
 
   await server.initializeProviderRuntimes(bootstrapArtifacts);
   await registerClockRuntimeHooks();
+  await registerHeartbeatRuntimeHooks(server);
   server.startSessionDaemonInjectLoop();
 }

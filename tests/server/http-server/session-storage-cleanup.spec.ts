@@ -19,6 +19,10 @@ describe('session storage startup cleanup', () => {
     fs.writeFileSync(path.join(baseDir, 'conversation-old.json'), '{"version":1}', 'utf8');
     fs.writeFileSync(path.join(baseDir, 'tmux-dead-tmux.json'), '{"version":1}', 'utf8');
     fs.writeFileSync(path.join(baseDir, 'tmux-live-tmux.json'), '{"version":1}', 'utf8');
+    const heartbeatDir = path.join(baseDir, 'heartbeat');
+    fs.mkdirSync(heartbeatDir, { recursive: true });
+    fs.writeFileSync(path.join(heartbeatDir, 'dead-tmux.json'), '{"version":1}', 'utf8');
+    fs.writeFileSync(path.join(heartbeatDir, 'live-tmux.json'), '{"version":1}', 'utf8');
 
     const keepDir = path.join(baseDir, '127.0.0.1_5520');
     fs.mkdirSync(keepDir, { recursive: true });
@@ -105,6 +109,7 @@ describe('session storage startup cleanup', () => {
 
     expect(summary.removedLegacyScopeFiles).toBe(2);
     expect(summary.removedDeadTmuxStateFiles).toBe(1);
+    expect(summary.removedHeartbeatStateFiles).toBe(1);
     expect(summary.removedRegistryRecords).toBe(4);
     expect(summary.removedRegistryMappings).toBe(2);
     expect(summary.removedToolStateEntries).toBe(2);
@@ -113,6 +118,8 @@ describe('session storage startup cleanup', () => {
     expect(fs.existsSync(path.join(baseDir, 'conversation-old.json'))).toBe(false);
     expect(fs.existsSync(path.join(baseDir, 'tmux-dead-tmux.json'))).toBe(false);
     expect(fs.existsSync(path.join(baseDir, 'tmux-live-tmux.json'))).toBe(true);
+    expect(fs.existsSync(path.join(heartbeatDir, 'dead-tmux.json'))).toBe(false);
+    expect(fs.existsSync(path.join(heartbeatDir, 'live-tmux.json'))).toBe(true);
 
     const keptBindings = JSON.parse(fs.readFileSync(path.join(keepDir, 'session-bindings.json'), 'utf8'));
     expect(keptBindings.records).toHaveLength(1);

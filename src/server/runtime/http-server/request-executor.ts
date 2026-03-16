@@ -75,6 +75,8 @@ export type RequestExecutorDeps = {
   getModuleDependencies(): ModuleDependencies;
   logStage(stage: string, requestId: string, details?: Record<string, unknown>): void;
   stats: StatsManager;
+  onRequestStart?: (args: { requestId: string; metadata: Record<string, unknown> }) => void | Promise<void>;
+  onRequestEnd?: (args: { requestId: string }) => void | Promise<void>;
 };
 
 export interface RequestExecutor {
@@ -91,6 +93,7 @@ export class HubRequestExecutor implements RequestExecutor {
   async execute(input: PipelineExecutionInput): Promise<PipelineExecutionResult> {
     // Stats must remain stable across provider retries and requestId enhancements.
     const statsRequestId = input.requestId;
+    const executorRequestId = input.requestId;
     this.deps.stats.recordRequestStart(statsRequestId);
     const requestStartedAt = Date.now();
     let recordedAnyAttempt = false;
@@ -101,43 +104,45 @@ export class HubRequestExecutor implements RequestExecutor {
     try {
       const hubPipeline = ensureHubPipeline(this.deps.getHubPipeline);
       const initialMetadata = buildRequestMetadata(input);
-      bindSessionConversationSession(initialMetadata);
-      registerRequestLogContext(input.requestId, {
-        sessionId: initialMetadata.sessionId,
-        conversationId: initialMetadata.conversationId
-      });
-      const inboundClientHeaders = cloneClientHeaders(initialMetadata?.clientHeaders);
-      const providerRequestId = input.requestId;
-      const clientRequestId = resolveClientRequestId(initialMetadata, providerRequestId);
+      await this.deps.onRequestStart?.({ requestId: executorRequestId, metadata: initialMetadata });
+      try {
+        bindSessionConversationSession(initialMetadata);
+        registerRequestLogContext(input.requestId, {
+          sessionId: initialMetadata.sessionId,
+          conversationId: initialMetadata.conversationId
+        });
+        const inboundClientHeaders = cloneClientHeaders(initialMetadata?.clientHeaders);
+        const providerRequestId = input.requestId;
+        const clientRequestId = resolveClientRequestId(initialMetadata, providerRequestId);
 
-      this.logStage('request.received', providerRequestId, {
-        endpoint: input.entryEndpoint,
-        stream: initialMetadata.stream === true
-      });
+        this.logStage('request.received', providerRequestId, {
+          endpoint: input.entryEndpoint,
+          stream: initialMetadata.stream === true
+        });
 
-      this.logStage('request.snapshot.start', providerRequestId, {
-        endpoint: input.entryEndpoint
-      });
-      await writeInboundClientSnapshot({ input, initialMetadata, clientRequestId });
-      this.logStage('request.snapshot.completed', providerRequestId, {
-        endpoint: input.entryEndpoint
-      });
+        this.logStage('request.snapshot.start', providerRequestId, {
+          endpoint: input.entryEndpoint
+        });
+        await writeInboundClientSnapshot({ input, initialMetadata, clientRequestId });
+        this.logStage('request.snapshot.completed', providerRequestId, {
+          endpoint: input.entryEndpoint
+        });
 
-      const pipelineLabel = 'hub';
-      let aggregatedUsage: UsageMetrics | undefined;
-      const excludedProviderKeys = new Set<string>();
-      let maxAttempts = resolveMaxProviderAttempts();
-      const originalRequestSnapshot = cloneRequestPayload(input.body);
-      let attempt = 0;
-      let lastError: unknown;
-      let initialRoutePool: string[] | null = null;
-      let antigravityRetrySignal: AntigravityRetrySignal | null = null;
-     let poolCooldownWaitBudgetMs = 60 * 1000;
-      let forcedRouteHint: string | undefined;
-      let contextOverflowRetries = 0;
-      const MAX_CONTEXT_OVERFLOW_RETRIES = 3;
+        const pipelineLabel = 'hub';
+        let aggregatedUsage: UsageMetrics | undefined;
+        const excludedProviderKeys = new Set<string>();
+        let maxAttempts = resolveMaxProviderAttempts();
+        const originalRequestSnapshot = cloneRequestPayload(input.body);
+        let attempt = 0;
+        let lastError: unknown;
+        let initialRoutePool: string[] | null = null;
+        let antigravityRetrySignal: AntigravityRetrySignal | null = null;
+       let poolCooldownWaitBudgetMs = 60 * 1000;
+        let forcedRouteHint: string | undefined;
+        let contextOverflowRetries = 0;
+        const MAX_CONTEXT_OVERFLOW_RETRIES = 3;
 
-      while (attempt < maxAttempts) {
+        while (attempt < maxAttempts) {
         attempt += 1;
         // Ensure each attempt starts from the base requestId so pipeline snapshots
         // don't inherit a provider-specific id from a previous attempt.
@@ -701,9 +706,12 @@ export class HubRequestExecutor implements RequestExecutor {
           });
           continue;
         }
-      }
+        }
 
-      throw lastError ?? new Error('Provider execution failed without response');
+        throw lastError ?? new Error('Provider execution failed without response');
+      } finally {
+        await this.deps.onRequestEnd?.({ requestId: executorRequestId });
+      }
     } catch (error: unknown) {
       // If we failed before selecting a provider (no bindProvider/recordAttempt),
       // at least record one error sample for this request.

@@ -10,6 +10,7 @@ import {
 type CleanupSummary = {
   removedLegacyScopeFiles: number;
   removedDeadTmuxStateFiles: number;
+  removedHeartbeatStateFiles: number;
   prunedRegistryDirs: number;
   removedRegistryDirs: number;
   removedRegistryRecords: number;
@@ -68,7 +69,10 @@ function sanitizeSessionBindingsDir(args: {
   nowMs: number;
   staleAfterMs: number;
   isTmuxSessionAlive: (tmuxSessionId: string) => boolean;
-}): Omit<CleanupSummary, 'removedLegacyScopeFiles' | 'removedDeadTmuxStateFiles'> {
+}): Omit<
+  CleanupSummary,
+  'removedLegacyScopeFiles' | 'removedDeadTmuxStateFiles' | 'removedHeartbeatStateFiles'
+> {
   const bindingsFile = path.join(args.dirpath, 'session-bindings.json');
   const toolStateFile = path.join(args.dirpath, 'tmux-tools-state.json');
   const bindingsDoc = parseJsonFile(bindingsFile);
@@ -204,6 +208,7 @@ export function cleanupSessionStorageOnStartup(options?: {
   const summary: CleanupSummary = {
     removedLegacyScopeFiles: 0,
     removedDeadTmuxStateFiles: 0,
+    removedHeartbeatStateFiles: 0,
     prunedRegistryDirs: 0,
     removedRegistryDirs: 0,
     removedRegistryRecords: 0,
@@ -243,6 +248,27 @@ export function cleanupSessionStorageOnStartup(options?: {
       }
 
       if (!entry.isDirectory()) {
+        continue;
+      }
+      if (entry.name === 'heartbeat') {
+        for (const heartbeatEntry of fs.readdirSync(fullpath, { withFileTypes: true })) {
+          if (!heartbeatEntry.isFile() || !heartbeatEntry.name.endsWith('.json')) {
+            continue;
+          }
+          const tmuxSessionId = normalizeString(heartbeatEntry.name.replace(/\.json$/i, ''));
+          let alive = Boolean(tmuxSessionId);
+          if (tmuxSessionId) {
+            try {
+              alive = isTmuxSessionAlive(tmuxSessionId);
+            } catch {
+              alive = true;
+            }
+          }
+          if (!alive && removeFileIfExists(path.join(fullpath, heartbeatEntry.name))) {
+            summary.removedHeartbeatStateFiles += 1;
+          }
+        }
+        removeDirIfEmpty(fullpath);
         continue;
       }
       const dirSummary = sanitizeSessionBindingsDir({

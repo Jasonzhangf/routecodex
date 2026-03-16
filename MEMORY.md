@@ -3,8 +3,9 @@
 ## Skills 与调试工作流
 
 - 2026-03-10: `~/.codex/skills/pipedebug/` 已按当前 RouteCodex V2 结构更新。默认调试主线改为：先看 `~/.routecodex/codex-samples/`，先判断问题属于 request path 还是 response path，再沿 `host bridge -> llmswitch-core Hub Pipeline -> Provider V2` 的真实边界定位。旧的“4 层流水线 / workflow-compatibility-provider README / routecodex-worktree/fix / ~/.claude/skills”表述已从 `SKILL.md` 与 references 中移除。
+- 2026-03-16: Heartbeat 现定义为 tmux-client re-activation feature，唯一协议是 `<**hb:on**>` / `<**hb:off**>`，并且只绑定 `tmuxSessionId`。`hb:on` 立即生效，不支持输入 startAt；结束时间唯一来自目标工作目录 `HEARTBEAT.md` 头部 `Heartbeat-Until:` 标签。heartbeat 只在“无 in-flight request + 客户端已断开/心跳过期”时才允许注入；失败只能记日志/状态，不能影响主链路正确性，也不能 fallback 到 server cwd。注入文案必须要求读取 `HEARTBEAT.md`、检查上次交付、更新 `DELIVERY.md`、再调用 `review`，且 review 只能由模型通过现有 `review_flow` 主动调用，服务端不得自动串联。
 
-Tags: pipedebug, skill, codex-samples, request-path, response-path, llmswitch-core, provider-v2, debug-workflow
+Tags: pipedebug, skill, codex-samples, request-path, response-path, llmswitch-core, provider-v2, debug-workflow, heartbeat, tmux, ssot, heartbeat-until, heartbeat-marker, delivery-md, review-flow, no-fallback, client-reactivation
 
 ## Web Search 相关
 
@@ -513,3 +514,76 @@ Tags: llmswitch-core, startup-failure, half-deleted-code, continue_execution, se
 - 2026-03-16: Anthropics/Responses reasoning 映射调试原则继续确认：先检查出站请求形状是否符合协议要求，再看入站 SSE / chat-process / responses 回填；如果请求都没带 thinking/reasoning 字段，检查响应没有意义。
 
 Tags: cache-md, tmux-cwd, request-cache, adapterContext.cwd, openai-responses, responsesContext, dedupe, cache-meta, reasoning-mapping, ssot
+
+## Reasoning 标签缺失排查（Anthropic → Responses → Codex）
+
+- 2026-03-16: 对 `~/.rcc/codex-samples` 进行了 openai-responses 全链路核查，确认 **Anthropic reasoning 配置已生效**：
+  - Provider 配置源：`~/.rcc/provider/ali-coding-plan/config.v2.json` 的 model-level `thinking: "high"`。
+  - 路由选路快照：`chat_process.req.stage5.route_select.json` 的 `target.anthropicThinking = "high"` 且 `target.anthropicThinkingConfig.effort = "high"`。
+  - 实际上游请求：`provider-request.json` 出现 `thinking` 与 `output_config`（如 `thinking.type="adaptive"` + `output_config.effort`）。
+- 2026-03-16: 已确认 chat process 扩展字段链路存在：`chat_process.resp.stage4.semantic_map_to_chat.json` 中 `__responses_reasoning` 与 `choices[0].message.reasoning` 都可见（多数是 `content`）。
+- 2026-03-16: Codex UI 不显示 thinking 标签的核心兼容性问题定位为 **Responses reasoning item 缺少 `summary`**：
+  - Codex `ResponseItem::Reasoning` 结构中 `summary` 为必需字段（`~/code/codex/codex-rs/protocol/src/models.rs`）。
+  - Codex SSE 解析对 `response.output_item.added/done` 使用整项反序列化，失败时丢弃该 item（`~/code/codex/codex-rs/codex-api/src/sse/responses.rs`）。
+- 2026-03-16: 在 RouteCodex Rust 侧新增回填：当 reasoning 仅有 `content` 无 `summary` 时，自动将 `content` 中 `reasoning_text/text` 转为 `summary_text`。
+  - 修改文件：`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics.rs`。
+  - 新增测试：`build_responses_payload_from_chat_backfills_reasoning_summary_from_content`。
+- 2026-03-16: `~/.rcc` 样本验证显示修复生效：
+  - 全量历史 `stage10` reasoning：`1208` 条，`with_summary=190`。
+  - `14:35` 前：`1082` 条，`with_summary=69`。
+  - `14:36` 后：`122` 条，`with_summary=122`（无缺失）。
+  - 典型对比：
+    - 旧样本 `req_1773640079317_ed4612ce`：reasoning 仅 `content`。
+    - 新样本 `req_1773643623915_0c422b9f`：reasoning 同时有 `summary` + `content`。
+
+Tags: reasoning, anthropic, output_config, thinking, responses, sse, codex-ui, summary-backfill, chat-process, __responses_reasoning, sample-replay
+
+## Heartbeat 实施落地（tmux-only）
+
+- 2026-03-16: heartbeat 已按 tmux-only 方案落地到主代码路径：
+  - request path：`chat-process-heartbeat-directives.ts` 只解析最新 user 消息中的 `<**hb:on**>` / `<**hb:off**>`，剥离 marker，并仅在拿到 `tmuxSessionId` 时落盘状态。
+  - persistence / daemon：`sharedmodule/llmswitch-core/src/servertool/heartbeat/` 负责状态文件、固定注入文案、15 分钟 tick 与运行态 hook。
+  - host runtime：新增 `request-activity-tracker.ts` 与 `heartbeat-runtime-hooks.ts`，heartbeat 触发前必须满足：
+    1. tmux 仍存活；
+    2. 该 tmux 无 in-flight request；
+    3. session-client registry 判定客户端已断开/心跳过期；
+    4. tmux 当前目录可解析；
+    5. 当前目录存在 `HEARTBEAT.md`；
+    6. 若 `Heartbeat-Until:` 过期则自动 disable。
+  - workdir 真源已固定为 `resolveTmuxSessionWorkingDirectory(tmuxSessionId)`，不允许 fallback 到 server cwd 或 registry workdir。
+  - heartbeat 注入失败只记录状态/skip/error，不影响主链路。
+- 2026-03-16: 运维/CLI 面也已补齐：
+  - HTTP routes：`/daemon/heartbeat/list`、`/daemon/heartbeat`（status/on/off/trigger）。
+  - CLI：新增 `routecodex heartbeat` / `rcc heartbeat` 子命令。
+  - startup cleanup：`session-storage-cleanup.ts` 会清理 `~/.rcc/sessions/.../heartbeat/*.json` 中失效 tmux 状态。
+- 2026-03-16: 回归覆盖新增：
+  - `tests/servertool/servertool-heartbeat.spec.ts`
+  - `tests/servertool/review-followup.spec.ts` 新增 heartbeat handoff review 不变式
+  - `tests/server/http-server/http-server-session-daemon.bootstrap.spec.ts`
+  - `tests/server/http-server/session-storage-cleanup.spec.ts`
+  - `tests/server/http-server/session-client-routes.stopmessage-cleanup.spec.ts`
+  - 后续补充：
+    - `tests/cli/heartbeat-command.spec.ts`
+    - `tests/server/http-server/session-client-routes.spec.ts` 新增 heartbeat admin list/trigger dry-run
+- 2026-03-16: 真实链路 dry-run 已确认：
+  - `routecodex heartbeat list --port 5555 --json` 返回 `{"ok":true,"states":[]}`
+  - `routecodex heartbeat trigger --port 5555 --tmux-session-id __hb_missing__ --dry-run --json` 返回 `tmux_session_not_found`
+  - 说明 dev 端口 5555 的新 heartbeat route 已生效；若默认 CLI 命中 5520 返回 404，通常是老 release 服务尚未刷新，不是新代码路径缺失。
+- 2026-03-16: clock “定时到了没触发、下次几个一起触发” 的根因定位到 **Host daemon bootstrap 与 llmswitch 默认配置不一致**：
+  - request path：`resolveClockConfig(undefined)` 会默认启用 clock；
+  - host 旧逻辑：只有 host config 显式存在 `clock` 节点才启动 clock daemon；
+  - 后果：如果用户没写 `clock` 配置，`clock` tool 仍能 schedule，但后台定时 daemon 根本没启动，只会在后续请求里把多个 overdue task 一起补出来。
+- 2026-03-16: 已修复 `http-server-session-daemon.ts`，改为即使 host config 缺失 `clock` 也调用 `resolveClockConfigSnapshot(undefined)`，按 llmswitch 默认配置启动 daemon；并新增回归：
+  - `tests/server/http-server/http-server-session-daemon.bootstrap.spec.ts` 覆盖“无 host clock 配置也会启动 daemon”。
+- 2026-03-16: 修复后再次通过 dev 运行态 dry-run：
+  - `routecodex heartbeat list --port 5555 --json`
+  - `routecodex heartbeat trigger --port 5555 --tmux-session-id __clock_fix_probe__ --dry-run --json`
+  - 均命中新服务路径，说明 build/install/restart 后的服务已加载最新 heartbeat/daemon 代码。
+
+Tags: heartbeat, tmux, request-activity-tracker, heartbeat-runtime-hooks, heartbeat-marker, heartbeat-until, delivery-md, review-flow, session-cleanup, cli
+
+
+- 2026-03-16: Heartbeat / clock 注入真源已收敛到 llmswitch-core servertool 层。heartbeat 启动链路曾因 `startHeartbeatDaemonIfNeeded()` 使用 `void tickOnce()`，再叠加 host bootstrap 立即 `runHeartbeatDaemonTickSnapshot()`，导致同一 heartbeat 注入可能双发；修复为 startup tick 改成 `await tickOnce()`，并加回归覆盖“startup tick + immediate tick only once”。
+- 2026-03-16: Clock 提醒的当前正确策略更新为：到期任务不是逐条同时刷屏，而是先按 due task 排序，以最早到期任务为锚点，把 **5 分钟窗口内** 的任务合并成一个 `[Clock Reminder]` 批次发送；超过 5 分钟的任务留到下一批。该聚合逻辑已下沉到 `sharedmodule/llmswitch-core/src/servertool/clock/tasks.ts`，由 request-path `reserveDueTasksForRequest(...)` 与 daemon 注入共用，避免双真源。
+
+Tags: heartbeat, clock, servertool, llmswitch-core, ssot, tmux-injection, duplicate-injection, startup-tick, merge-window, clock-reminder, request-path, daemon
