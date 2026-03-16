@@ -5,6 +5,7 @@ import { runStandardChatRequestFilters } from '../../../index.js';
 import {
   buildChatRequestFromResponses,
   buildResponsesPayloadFromChat,
+  collectResponsesRequestParameters,
   captureResponsesContext,
   type ResponsesRequestContext
 } from '../../../responses/responses-openai-bridge.js';
@@ -170,16 +171,19 @@ export class ResponsesOpenAIPipelineCodec implements ConversionCodec {
       defaultEntryEndpoint: DEFAULT_RESPONSES_ENDPOINT,
       overrideProtocol: RESPONSES_PROTOCOL
     });
+    const requestParameters =
+      collectResponsesRequestParameters(built.request as Record<string, unknown>, {
+        streamHint:
+          typeof (built.request as Record<string, unknown>).stream === 'boolean'
+            ? ((built.request as Record<string, unknown>).stream as boolean)
+            : undefined
+      }) ?? {};
     const chatEnvelope = standardizedToChatEnvelopeWithNative({
       request: {
         model: (built.request as Record<string, unknown>).model,
         messages: (built.request as Record<string, unknown>).messages,
         tools: (built.request as Record<string, unknown>).tools ?? [],
-        parameters: {
-          ...(typeof (built.request as Record<string, unknown>).model === 'string'
-            ? { model: (built.request as Record<string, unknown>).model }
-            : {})
-        },
+        parameters: requestParameters,
         metadata: {}
       } as unknown as JsonObject,
       adapterContext: adapterContext as unknown as Record<string, unknown>
@@ -203,6 +207,16 @@ export class ResponsesOpenAIPipelineCodec implements ConversionCodec {
       endpoint: context.endpoint ?? DEFAULT_RESPONSES_ENDPOINT
     };
     const filtered = await runStandardChatRequestFilters(openaiPayload, profile, filterContext);
+    if (Object.keys(requestParameters).length) {
+      (filtered as Record<string, unknown>).parameters = {
+        ...requestParameters,
+        ...(((filtered as Record<string, unknown>).parameters &&
+          typeof (filtered as Record<string, unknown>).parameters === 'object' &&
+          !Array.isArray((filtered as Record<string, unknown>).parameters))
+          ? ((filtered as Record<string, unknown>).parameters as Record<string, unknown>)
+          : {})
+      };
+    }
     sanitizeResponsesMessages(filtered as JsonObject);
     return filtered;
   }

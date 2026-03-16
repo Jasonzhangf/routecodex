@@ -52,12 +52,18 @@ function normalizeReason(parsed: Record<string, unknown>): string {
   return candidate.trim();
 }
 
-function requireVisibleSummary(parsed: Record<string, unknown>): string {
+function resolveSummary(parsed: Record<string, unknown>): { visibleSummary: string; clientInjectText: string } {
   const candidate = typeof parsed.summary === 'string' ? parsed.summary.trim() : '';
-  if (!candidate) {
-    throw new Error('continue_execution requires non-empty "summary" in tool arguments');
+  if (candidate) {
+    return {
+      visibleSummary: candidate,
+      clientInjectText: candidate
+    };
   }
-  return candidate;
+  return {
+    visibleSummary: '',
+    clientInjectText: '继续执行'
+  };
 }
 
 const handler: ServerToolHandler = async (ctx: ServerToolHandlerContext): Promise<ServerToolHandlerPlan | null> => {
@@ -68,8 +74,7 @@ const handler: ServerToolHandler = async (ctx: ServerToolHandlerContext): Promis
 
   const parsed = parseToolArguments(toolCall);
   const reason = normalizeReason(parsed);
-  const visibleSummary = requireVisibleSummary(parsed);
-  const clientInjectText = visibleSummary;
+  const { visibleSummary, clientInjectText } = resolveSummary(parsed);
 
   return {
     flowId: FLOW_ID,

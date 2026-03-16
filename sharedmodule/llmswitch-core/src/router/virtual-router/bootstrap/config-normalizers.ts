@@ -3,14 +3,16 @@ import type { VirtualRouterClockConfig, VirtualRouterConfig, VirtualRouterContex
 
 export function normalizeExecCommandGuard(input: unknown): VirtualRouterConfig['execCommandGuard'] | undefined {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
-    return undefined;
+    // Default to enabled when not configured
+    return { enabled: true };
   }
   const record = input as Record<string, unknown>;
   const enabledRaw = record.enabled;
+  // Explicit false disables the guard; default is true
   const enabled =
-    enabledRaw === true ||
-    (typeof enabledRaw === 'string' && enabledRaw.trim().toLowerCase() === 'true') ||
-    (typeof enabledRaw === 'number' && enabledRaw === 1);
+    enabledRaw !== false &&
+    !(typeof enabledRaw === 'string' && enabledRaw.trim().toLowerCase() === 'false') &&
+    !(typeof enabledRaw === 'number' && enabledRaw === 0);
   if (!enabled) {
     return undefined;
   }

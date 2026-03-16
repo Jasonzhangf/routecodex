@@ -8,16 +8,10 @@ import type { VirtualRouterArtifacts, ProviderProtocol } from '../types.js';
 import { loadProviderConfigsV2 } from '../../../../config/provider-v2-loader.js';
 import type { ProviderConfigV2 } from '../../../../config/provider-v2-loader.js';
 import {
-  applyProviderDeleteV1,
-  applyProviderUpsertV1,
   extractCredentialsRef,
   extractDefaultModels,
-  extractProvidersV1,
   scrubProviderConfig,
-  scrubProviderConfigV1,
-  summarizeProviderV1,
-  validateAndNormalizeProviderConfig,
-  validateAndNormalizeProviderConfigV1
+  validateAndNormalizeProviderConfig
 } from './providers-handler-utils.js';
 import {
   activateRoutingGroupAtLocation,
@@ -119,27 +113,6 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
         activePath: pickUserConfigPath(),
         sources
       });
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-      res.status(500).json({ error: { message } });
-    }
-  });
-
-  // Config V1 Provider Pool：基于 user config (virtualrouter.providers) 的声明性配置。
-  // 注意：该接口只落盘，不做热更新；调用方需重启 routecodex 以应用更改。
-  app.get('/config/providers', async (req: Request, res: Response) => {
-    if (reject(req, res)) {return;}
-    try {
-      const configPath = pickUserConfigPath();
-      const raw = await fs.readFile(configPath, 'utf8');
-      const parsed = raw.trim() ? JSON.parse(raw) : {};
-      const providers = extractProvidersV1(parsed);
-      const items = Object.entries(providers).map(([id, provider]) => ({
-        id,
-        ...summarizeProviderV1(provider)
-      }));
-      items.sort((a, b) => a.id.localeCompare(b.id));
-      res.status(200).json({ ok: true, path: configPath, providers: items });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       res.status(500).json({ error: { message } });
@@ -284,89 +257,6 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
         res.status(404).json({ error: { message: 'provider config not found', code: 'not_found' } });
         return;
       }
-      const message = error instanceof Error ? error.message : String(error);
-      res.status(500).json({ error: { message } });
-    }
-  });
-
-  // Config V1 Provider Pool (by provider id).
-  // NOTE: put this after `/config/providers/v2/*` so `/config/providers/v2` is not shadowed.
-  app.get('/config/providers/:id', async (req: Request, res: Response) => {
-    if (reject(req, res)) {return;}
-    const id = String(req.params.id || '').trim();
-    if (!id) {
-      res.status(400).json({ error: { message: 'id is required', code: 'bad_request' } });
-      return;
-    }
-    try {
-      const configPath = pickUserConfigPath();
-      const raw = await fs.readFile(configPath, 'utf8');
-      const parsed = raw.trim() ? JSON.parse(raw) : {};
-      const providers = extractProvidersV1(parsed);
-      const provider = providers[id];
-      if (!provider) {
-        res.status(404).json({ error: { message: 'provider not found', code: 'not_found' } });
-        return;
-      }
-      res.status(200).json({
-        ok: true,
-        id,
-        provider: scrubProviderConfigV1(provider)
-      });
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-      res.status(500).json({ error: { message } });
-    }
-  });
-
-  app.put('/config/providers/:id', async (req: Request, res: Response) => {
-    if (reject(req, res)) {return;}
-    const id = String(req.params.id || '').trim();
-    if (!id) {
-      res.status(400).json({ error: { message: 'id is required', code: 'bad_request' } });
-      return;
-    }
-    const body = req.body as Record<string, unknown>;
-    const providerNode = body?.provider;
-    if (!providerNode || typeof providerNode !== 'object' || Array.isArray(providerNode)) {
-      res.status(400).json({ error: { message: 'provider must be an object', code: 'bad_request' } });
-      return;
-    }
-    const normalized = validateAndNormalizeProviderConfigV1(id, providerNode as Record<string, unknown>);
-    if (!normalized.ok) {
-      res.status(400).json({ error: { message: normalized.message, code: 'bad_request' } });
-      return;
-    }
-    try {
-      const configPath = pickUserConfigPath();
-      const raw = await fs.readFile(configPath, 'utf8');
-      const parsed = raw.trim() ? JSON.parse(raw) : {};
-      const next = applyProviderUpsertV1(parsed, id, normalized.provider);
-      await backupFile(configPath);
-      await fs.writeFile(configPath, JSON.stringify(next, null, 2), 'utf8');
-      res.status(200).json({ ok: true, id, path: configPath });
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-      res.status(500).json({ error: { message } });
-    }
-  });
-
-  app.delete('/config/providers/:id', async (req: Request, res: Response) => {
-    if (reject(req, res)) {return;}
-    const id = String(req.params.id || '').trim();
-    if (!id) {
-      res.status(400).json({ error: { message: 'id is required', code: 'bad_request' } });
-      return;
-    }
-    try {
-      const configPath = pickUserConfigPath();
-      const raw = await fs.readFile(configPath, 'utf8');
-      const parsed = raw.trim() ? JSON.parse(raw) : {};
-      const next = applyProviderDeleteV1(parsed, id);
-      await backupFile(configPath);
-      await fs.writeFile(configPath, JSON.stringify(next, null, 2), 'utf8');
-      res.status(200).json({ ok: true, id, path: configPath });
-    } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       res.status(500).json({ error: { message } });
     }

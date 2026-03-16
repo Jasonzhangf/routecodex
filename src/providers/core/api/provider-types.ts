@@ -115,6 +115,16 @@ export interface ProviderRuntimeAuth {
   accountAlias?: string;
 }
 
+export type AnthropicThinkingEffort = 'low' | 'medium' | 'high' | 'max';
+
+export interface AnthropicThinkingConfig {
+  mode?: 'disabled' | 'enabled' | 'adaptive';
+  budgetTokens?: number;
+  effort?: AnthropicThinkingEffort;
+}
+
+export type AnthropicThinkingBudgetMap = Partial<Record<AnthropicThinkingEffort, number>>;
+
 export interface ProviderRuntimeProfile {
   runtimeKey: string;
   providerId: string;
@@ -154,6 +164,15 @@ export interface ProviderRuntimeProfile {
   modelStreaming?: Record<string, 'auto' | 'always' | 'never'>;
   modelContextTokens?: Record<string, number>;
   defaultContextTokens?: number;
+  modelAnthropicThinkingConfig?: Record<string, AnthropicThinkingConfig>;
+  defaultAnthropicThinkingConfig?: AnthropicThinkingConfig;
+  modelAnthropicThinking?: Record<string, string>;
+  defaultAnthropicThinking?: string;
+  modelAnthropicThinkingBudgets?: Record<string, AnthropicThinkingBudgetMap>;
+  defaultAnthropicThinkingBudgets?: AnthropicThinkingBudgetMap;
+  anthropicThinkingBudgets?: AnthropicThinkingBudgetMap;
+  anthropicThinkingConfig?: AnthropicThinkingConfig;
+  anthropicThinking?: string;
   maxContextTokens?: number;
   responsesConfig?: {
     toolCallIdStyle?: string;

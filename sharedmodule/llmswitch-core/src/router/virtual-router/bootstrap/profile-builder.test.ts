@@ -60,4 +60,23 @@ describe('buildProviderProfiles streaming precedence', () => {
     expect(profiles[targetKey]?.streaming).toBe('never');
     expect(targetRuntime[targetKey]?.streaming).toBe('never');
   });
+
+  it('propagates model-level anthropic thinking config from runtime to selected target', () => {
+    const { profiles, targetRuntime } = buildProviderProfiles(
+      new Set([targetKey]),
+      {
+        'ali-coding-plan.key1': {
+          ...baseRuntime,
+          modelAnthropicThinkingConfig: {
+            'glm-5': { mode: 'adaptive', effort: 'high' }
+          }
+        }
+      }
+    );
+
+    expect(profiles[targetKey]?.anthropicThinkingConfig).toEqual({ mode: 'adaptive', effort: 'high' });
+    expect(targetRuntime[targetKey]?.anthropicThinkingConfig).toEqual({ mode: 'adaptive', effort: 'high' });
+    expect(profiles[targetKey]?.anthropicThinking).toBe('high');
+    expect(targetRuntime[targetKey]?.anthropicThinking).toBe('high');
+  });
 });

@@ -43,7 +43,8 @@ function buildToolCallChat() {
 async function main() {
   const { runServerToolOrchestration } = await import(path.resolve(repoRoot, 'dist/servertool/engine.js'));
 
-  let reenterArgs = null;
+  let clientInjectArgs = null;
+  let reenterCalled = false;
   const result = await runServerToolOrchestration({
     chat: buildToolCallChat(),
     adapterContext: {
@@ -63,42 +64,29 @@ async function main() {
     requestId: 'req_servertool_error_1',
     entryEndpoint: '/v1/responses',
     providerProtocol: 'openai-responses',
+    clientInjectDispatch: async (args) => {
+      clientInjectArgs = args;
+      return { ok: true };
+    },
     reenterPipeline: async (args) => {
-      reenterArgs = args;
+      reenterCalled = true;
       return { body: { choices: [] } };
     }
   });
 
-  assert(result.executed === true, 'expected servertool error to trigger tool_flow');
-  assert(reenterArgs && typeof reenterArgs === 'object', 'expected followup args for failed servertool');
+  assert(result.executed === true, 'expected continue_execution to be handled');
+  assert(result.flowId === 'continue_execution_flow', `unexpected flowId: ${String(result.flowId)}`);
+  assert(reenterCalled === false, 'continue_execution without summary should not reenter');
+  assert(clientInjectArgs && typeof clientInjectArgs === 'object', 'expected client inject followup args');
+  const metadata =
+    clientInjectArgs.metadata && typeof clientInjectArgs.metadata === 'object'
+      ? clientInjectArgs.metadata
+      : {};
+  assert(metadata.clientInjectOnly === true, 'expected clientInjectOnly=true');
+  assert(metadata.clientInjectText === '继续执行', `unexpected clientInjectText: ${String(metadata.clientInjectText)}`);
+  assert(metadata.visibleSummary === '', `unexpected visibleSummary: ${String(metadata.visibleSummary)}`);
 
-  const followupBody = reenterArgs.body;
-  assert(followupBody && typeof followupBody === 'object', 'expected followup body');
-  const messages = Array.isArray(followupBody.messages) ? followupBody.messages : [];
-  const toolMessage = messages.find(
-    (msg) =>
-      msg &&
-      typeof msg === 'object' &&
-      msg.role === 'tool' &&
-      typeof msg.content === 'string' &&
-      msg.content.includes('continue_execution requires non-empty')
-  );
-  assert(toolMessage, 'expected error tool message in followup');
-  let errorText = toolMessage.content;
-  try {
-    const parsed = JSON.parse(toolMessage.content);
-    if (parsed && typeof parsed === 'object' && typeof parsed.message === 'string') {
-      errorText = parsed.message;
-    }
-  } catch {
-    // keep raw content
-  }
-  assert(
-    errorText.includes('continue_execution requires non-empty "summary"'),
-    'expected error message in followup tool message'
-  );
-
-  console.log('✅ servertool handler error followup regression passed');
+  console.log('✅ servertool continue_execution missing-summary regression passed');
 }
 
 main().catch((err) => {

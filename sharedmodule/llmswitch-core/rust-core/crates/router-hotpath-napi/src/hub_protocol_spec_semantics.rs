@@ -309,6 +309,8 @@ fn build_default_allowlists() -> HubProtocolAllowlistsOutput {
             "top_k".to_string(),
             "max_tokens".to_string(),
             "max_output_tokens".to_string(),
+            "thinking".to_string(),
+            "output_config".to_string(),
             "metadata".to_string(),
             "stream".to_string(),
             "tool_choice".to_string(),

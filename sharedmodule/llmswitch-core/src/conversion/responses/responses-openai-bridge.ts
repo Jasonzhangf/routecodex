@@ -112,6 +112,31 @@ const RESPONSES_TOOL_PASSTHROUGH_KEYS = [
   'seed'
 ] as const;
 
+export const RESPONSES_REQUEST_PARAMETER_KEYS = [
+  'model',
+  'temperature',
+  'top_p',
+  'top_k',
+  'prompt_cache_key',
+  'reasoning',
+  'max_tokens',
+  'max_output_tokens',
+  'response_format',
+  'tool_choice',
+  'parallel_tool_calls',
+  'service_tier',
+  'truncation',
+  'include',
+  'store',
+  'text',
+  'user',
+  'logit_bias',
+  'seed',
+  'stop',
+  'stop_sequences',
+  'modalities'
+] as const;
+
 function pickObjectFields(
   value: Record<string, unknown> | undefined,
   keys: readonly string[]
@@ -126,6 +151,22 @@ function pickObjectFields(
     }
   }
   return Object.keys(picked).length ? picked : undefined;
+}
+
+export function collectResponsesRequestParameters(
+  payload: Record<string, unknown> | undefined,
+  options?: {
+    streamHint?: boolean | undefined;
+  }
+): Record<string, unknown> | undefined {
+  if (!payload) {
+    return undefined;
+  }
+  let params = pickObjectFields(payload, RESPONSES_REQUEST_PARAMETER_KEYS);
+  if (options?.streamHint !== undefined) {
+    (params ??= {}).stream = options.streamHint;
+  }
+  return params && Object.keys(params).length ? params : undefined;
 }
 
 function buildSlimResponsesBridgeContext(
@@ -321,19 +362,21 @@ export function buildChatRequestFromResponses(payload: Record<string, unknown>, 
 
   // 如果只有 system 消息且无 user/assistant/tool，后续桥接 action 会从 instructions 注入兜底 user 消息
 
-  const result: Record<string, unknown> = { model: (payload as any).model, messages };
-  if (typeof (payload as any).stream === 'boolean') {
-    (result as any).stream = (payload as any).stream;
+  const parameterSource: Record<string, unknown> = { ...(payload as Record<string, unknown>) };
+  if (typeof parameterSource.max_tokens === 'number' && parameterSource.max_output_tokens === undefined) {
+    parameterSource.max_output_tokens = parameterSource.max_tokens;
   }
-  for (const key of ['top_p','tool_choice','parallel_tool_calls','user','logit_bias','seed','response_format'] as const) {
-    if ((payload as any)[key] !== undefined) (result as any)[key] = (payload as any)[key];
+  const bridgeParameters = collectResponsesRequestParameters(parameterSource, {
+    streamHint: typeof (payload as any).stream === 'boolean' ? (payload as any).stream : undefined
+  });
+  if (bridgeParameters) {
+    delete bridgeParameters.store;
   }
-  if (typeof (payload as any).max_tokens === 'number' && (payload as any).max_output_tokens === undefined) {
-    (payload as any).max_output_tokens = (payload as any).max_tokens;
-  }
-  if ((payload as any).max_output_tokens !== undefined) {
-    (result as any).max_output_tokens = (payload as any).max_output_tokens;
-  }
+  const result: Record<string, unknown> = {
+    model: (payload as any).model,
+    messages,
+    ...(bridgeParameters ?? {})
+  };
   if (Array.isArray(toolsNormalized) && toolsNormalized.length) (result as any).tools = toolsNormalized;
   return { request: result, toolsNormalized };
 }

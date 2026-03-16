@@ -447,3 +447,69 @@ Tags: rcc-home, batch2, migration, user-data, config-init, launcher-kernel, deep
   - 文档/脚本层面的 `config/provider` 默认路径也已收口到 `~/.rcc`：针对 `README/src/README/src/config/README` 与活跃脚本（provider-v2-smoke、verify-sse-loop、responses-sse-*、virtual-router-*、verify-e2e-*、run-bg/run-fg、install-release、config-core-compare、verify-health 等）完成替换；重新扫描后，活跃默认值中 `'.routecodex/config*'` 与 `'.routecodex/provider*'` 命中已为 0。
 
 Tags: rcc-home, batch3, layout-registry, user-data, single-source-of-truth, config-file, provider-root, camoufox, guardian, precommand
+
+## execCommandGuard 默认启用 (2026-03-15)
+
+- `sharedmodule/llmswitch-core/src/router/virtual-router/bootstrap/config-normalizers.ts` 已修改为默认启用 `execCommandGuard`：
+  - 未配置 `execCommandGuard` 时，自动返回 `{ enabled: true }`
+  - 只有明确设置 `enabled: false` 才会禁用
+- 内置拦截规则（硬编码，无需 policy 文件）：
+  - `git reset --hard`：破坏性操作，建议用 `git reset --mixed` 或 `git restore`
+  - `git checkout`（非单文件）：只允许 `git checkout -- <file>` 单文件恢复
+- 可选：通过 `policyFile` 指定 JSON 规则文件，添加自定义拦截规则
+- 配置示例（禁用）：
+  ```json
+  {
+    "virtualrouter": {
+      "execCommandGuard": {
+        "enabled": false
+      }
+    }
+  }
+  ```
+- 类型文档已更新：`VirtualRouterExecCommandGuardConfig` 注释说明默认启用行为
+- 相关测试全部通过：`tool-governor-exec-command-guard.spec.ts`、`tool-registry-tools.spec.ts`、`exec-command-guard.spec.ts`
+
+Tags: execCommandGuard, git-reset, destructive-command, default-enabled, security, llmswitch-core, config-normalizers
+
+## llmswitch-core 启动失败与 sessions 生命周期修复（2026-03-15）
+
+- 本轮真实启动失败不是 provider / runtime 问题，而是 `sharedmodule/llmswitch-core` 处于“半删状态”：
+  - `dist` 引用了不存在的 `tools/apply-patch/execution-capturer.js`
+  - `src` 中存在“import 被删或注释，但调用仍保留”的失配（如 `tool-registry.ts` 与 regression capturer 相关）
+- 正确修法不是打 stub 洞，也不是跳过构建，而是恢复 source/dist 一致性：
+  - 删除无真实 source 的死引用
+  - 补回 `apply-patch` / `exec-command` regression capturer 的真实 source 文件
+  - 恢复 `tool-registry` 中被注释掉的 import
+- 修复后已用同形回放验证：
+  - `sharedmodule/llmswitch-core npm run build` + matrix ✅
+  - `hub-pipeline` 真实 import ✅
+  - root `npm run build:dev` ✅，并成功完成全局安装与受管服务重启
+- `continue_execution` 的当前唯一真意：
+  - 缺少 `summary` 时不再进入 `continue_execution_error`
+  - 统一继续走 `continue_execution_flow`
+  - `clientInjectText` 默认回退为 `继续执行`
+  - `visibleSummary` 保持空字符串
+  - 已用 matrix 样本 `servertool-handler-error-followup.mjs` 回放确认
+- `~/.rcc/sessions` 的唯一真意进一步落地：
+  - `sessions` 目录只保留 tmux / registry 生命周期管理所需内容
+  - session/conversation 路由态不再在这里扩散
+  - 启动时执行 cleanup，清理遗留 scope 文件、dead tmux state、无效 registry 映射
+  - 真实重启后 `~/.rcc/sessions` 顶层从此前 141 项收敛到 3 项，已证明清理生效
+- `scripts/install-verify.mjs` 需要兼容真实用户环境：
+  - 必须支持 v2 `routingPolicyGroups` 解析默认模型
+  - 验证端口被占用时不能直接失败，应切换临时端口
+  - CLI launcher 走临时端口时必须透传 `ROUTECODEX_PORT/RCC_PORT`
+  - 当前剩余问题在 `rcc start --exclusive` 后的健康检查链路，后续继续查 CLI 启动骨架
+
+Tags: llmswitch-core, startup-failure, half-deleted-code, continue_execution, sessions, startup-cleanup, release-verify, routingPolicyGroups, cli-launcher
+
+## 2026-03-16 CACHE.md / tmux cwd / reasoning 映射收敛
+
+- 2026-03-16: CACHE.md 请求侧写入的唯一真源收敛到 `sharedmodule/llmswitch-core/src/servertool/handlers/memory/cache-writer.ts`。请求写入只能使用 `adapterContext.cwd`（来自客户端 tmux cwd），禁止回退到 server cwd / process.cwd / 环境变量；拿不到 tmux cwd 就跳过写入，不能污染错误目录。
+- 2026-03-16: `openai-responses` 请求路径中，`req_inbound.stage3_context_capture` 如果直接复用 `responsesContext`，仍然必须执行请求侧 CACHE 写入；否则会出现 assistant 记录存在、但 user 请求缺失的断裂对话。
+- 2026-03-16: CACHE.md 请求去重规则确认：不能只看 `role=user`，因为同一轮请求会因重试/多 provider/多次进入 request path 而重复命中；当前规则是“仅当上一条可见对话也是 User 且正文完全相同”时跳过写入。若中间已有 assistant 回复，则相同 user 文本允许再次记录。
+- 2026-03-16: CACHE.md 的可见格式必须保持顶级只有 `### User` / `### Assistant` 标签，正文紧跟其后；`requestId/sessionId/model/provider/finishReason` 等元数据下沉到正文后的 `<!-- cache-meta -->` 注释块，避免污染模型读取到的顶级对话内容。
+- 2026-03-16: Anthropics/Responses reasoning 映射调试原则继续确认：先检查出站请求形状是否符合协议要求，再看入站 SSE / chat-process / responses 回填；如果请求都没带 thinking/reasoning 字段，检查响应没有意义。
+
+Tags: cache-md, tmux-cwd, request-cache, adapterContext.cwd, openai-responses, responsesContext, dedupe, cache-meta, reasoning-mapping, ssot

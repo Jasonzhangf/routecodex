@@ -8,7 +8,7 @@ import type { ContextCaptureOptions } from './context-capture-orchestration.js';
 import {
   writeCacheEntry,
   resolveWorkingDirectoryFromAdapterContextOrFallback,
-  extractLastUserMessageText
+  extractUserTextFromRequest
 } from '../../../../../../servertool/handlers/memory/cache-writer.js';
 
 /**
@@ -30,13 +30,9 @@ export function writeCacheEntryForRequest(options: ContextCaptureOptions): void 
       return;
     }
 
-    // 2. 提取最后一条 user message
+    // 2. 提取用户文本（兼容 chat / responses）
     const rawRequest = options.rawRequest;
-    const messages = Array.isArray((rawRequest as any).messages)
-      ? (rawRequest as any).messages
-      : [];
-
-    const content = extractLastUserMessageText(messages);
+    const content = extractUserTextFromRequest(rawRequest as any);
     if (!content) {
       console.error(
         `[req_inbound.cache] skip: no user message for requestId=${options.adapterContext.requestId}`

@@ -37,6 +37,14 @@ static THINK_TAG_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)</?think>").expect("valid think tag regex"));
 static REFLECTION_TAG_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)</?reflection>").expect("valid reflection tag regex"));
+static CN_THINK_OPEN_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?is)\[\s*思考\s*\]").expect("valid cn think open regex"));
+static CN_THINK_CLOSE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?is)\[\s*/\s*思考\s*\]").expect("valid cn think close regex"));
+static CN_THINK_BLOCK_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?is)\[\s*思考\s*\](.*?)\[\s*/\s*思考\s*\]").expect("valid cn think block regex"));
+static CN_THINK_TAG_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?is)\[\s*/?\s*思考\s*\]").expect("valid cn think tag regex"));
 static BLANK_LINES_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\n{3,}").expect("valid blank lines regex"));
 
@@ -48,6 +56,8 @@ fn maybe_contains_reasoning_markup(source: &str) -> bool {
         || lower.contains("</reflection")
         || lower.contains("```think")
         || lower.contains("```reflection")
+        || lower.contains("[思考]")
+        || lower.contains("[/思考]")
 }
 
 pub(crate) fn extract_reasoning_segments(
@@ -60,16 +70,19 @@ pub(crate) fn extract_reasoning_segments(
 
     let has_explicit_open = THINK_OPEN_RE.is_match(source)
         || REFLECTION_OPEN_RE.is_match(source)
-        || FENCED_OPEN_RE.is_match(source);
+        || FENCED_OPEN_RE.is_match(source)
+        || CN_THINK_OPEN_RE.is_match(source);
     let has_explicit_close =
-        THINK_CLOSE_RE.is_match(source) || REFLECTION_CLOSE_RE.is_match(source);
+        THINK_CLOSE_RE.is_match(source) || REFLECTION_CLOSE_RE.is_match(source) || CN_THINK_CLOSE_RE.is_match(source);
 
     let mut working = source.to_string();
     working = THINK_BLOCK_RE.replace_all(&working, "").to_string();
     working = REFLECTION_BLOCK_RE.replace_all(&working, "").to_string();
     working = FENCED_BLOCK_RE.replace_all(&working, "").to_string();
+    working = CN_THINK_BLOCK_RE.replace_all(&working, "").to_string();
     working = THINK_TAG_RE.replace_all(&working, "").to_string();
     working = REFLECTION_TAG_RE.replace_all(&working, "").to_string();
+    working = CN_THINK_TAG_RE.replace_all(&working, "").to_string();
     working = BLANK_LINES_RE.replace_all(&working, "\n\n").to_string();
 
     // second pass to collect inner segments with mutable borrow (keeps behavior aligned with TS)
@@ -84,6 +97,15 @@ pub(crate) fn extract_reasoning_segments(
             }
         }
         for caps in REFLECTION_BLOCK_RE.captures_iter(source) {
+            let inner = caps
+                .get(1)
+                .map(|m| m.as_str().trim().to_string())
+                .unwrap_or_default();
+            if !inner.is_empty() {
+                collector.push(inner);
+            }
+        }
+        for caps in CN_THINK_BLOCK_RE.captures_iter(source) {
             let inner = caps
                 .get(1)
                 .map(|m| m.as_str().trim().to_string())

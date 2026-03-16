@@ -84,6 +84,29 @@ export function isTmuxSessionAlive(tmuxSessionId: string): boolean {
   }
 }
 
+export function resolveTmuxSessionWorkingDirectory(tmuxSessionId: string): string | undefined {
+  const target = normalizeTmuxSessionTarget(tmuxSessionId);
+  if (!target) {
+    return undefined;
+  }
+  if (!isTmuxAvailable()) {
+    return undefined;
+  }
+  try {
+    const result = spawnSync('tmux', ['display-message', '-p', '-t', target, '#{pane_current_path}'], { encoding: 'utf8' });
+    if (result.status !== 0) {
+      return undefined;
+    }
+    const candidate = String(result.stdout || '').trim();
+    if (!candidate || !candidate.startsWith('/')) {
+      return undefined;
+    }
+    return candidate;
+  } catch {
+    return undefined;
+  }
+}
+
 export function killManagedTmuxSession(tmuxSessionId: string): boolean {
   const target = normalizeTmuxSessionTarget(tmuxSessionId);
   if (!target) {

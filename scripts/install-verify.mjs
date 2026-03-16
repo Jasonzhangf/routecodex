@@ -29,6 +29,7 @@ const state = {
 };
 let shuttingDown = false;
 let responsesSseParser = null;
+let requestAuthHeaderValue = 'Bearer install-verify';
 
 const manualSamples = {
   responses: path.join(repoRoot, 'scripts', 'verification', 'samples', 'openai-responses-list-local-files.json'),
@@ -38,6 +39,25 @@ const manualSamples = {
 
 function clonePayload(payload) {
   return JSON.parse(JSON.stringify(payload));
+}
+
+function normalizeString(value) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function resolveConfigSecret(value) {
+  const trimmed = normalizeString(value);
+  if (!trimmed) {
+    return '';
+  }
+  const envMatch = trimmed.match(/^\$\{([A-Z0-9_]+)\}$/i);
+  if (envMatch) {
+    return normalizeString(process.env[envMatch[1]]);
+  }
+  if (/^[A-Z][A-Z0-9_]+$/.test(trimmed)) {
+    return normalizeString(process.env[trimmed]) || trimmed;
+  }
+  return trimmed;
 }
 
 function loadManualSample(kind) {
@@ -426,12 +446,72 @@ function resolveHost(host) {
 }
 
 function resolveModel(config) {
+  const extractModelFromTarget = (target) => {
+    if (typeof target !== 'string') return '';
+    const normalized = target.trim();
+    if (!normalized) return '';
+    if (!normalized.includes('.')) return normalized;
+    const [, ...rest] = normalized.split('.');
+    const modelPart = rest.join('.');
+    return modelPart ? modelPart.split('__')[0] : '';
+  };
+
+  const resolveModelFromRouteEntry = (entry) => {
+    if (!entry) return '';
+    if (typeof entry === 'string') {
+      return extractModelFromTarget(entry);
+    }
+    if (typeof entry !== 'object') {
+      return '';
+    }
+    const directTarget =
+      (typeof entry.routeTarget === 'string' && entry.routeTarget) ||
+      (typeof entry.providerKey === 'string' && entry.providerKey) ||
+      (typeof entry.target === 'string' && entry.target);
+    const directModel = extractModelFromTarget(directTarget);
+    if (directModel) {
+      return directModel;
+    }
+    const weights = entry?.loadBalancing?.weights;
+    if (weights && typeof weights === 'object') {
+      for (const key of Object.keys(weights)) {
+        const weightedModel = extractModelFromTarget(key);
+        if (weightedModel) {
+          return weightedModel;
+        }
+      }
+    }
+    const targets = Array.isArray(entry?.targets) ? entry.targets : [];
+    for (const target of targets) {
+      const targetModel = resolveModelFromRouteEntry(target);
+      if (targetModel) {
+        return targetModel;
+      }
+    }
+    return '';
+  };
+
   try {
     const firstRoute = config?.virtualrouter?.routing?.default?.[0];
-    if (typeof firstRoute === 'string' && firstRoute.includes('.')) {
-      const [, ...rest] = firstRoute.split('.');
-      const modelPart = rest.join('.');
-      if (modelPart) return modelPart.split('__')[0];
+    const legacyModel = resolveModelFromRouteEntry(firstRoute);
+    if (legacyModel) {
+      return legacyModel;
+    }
+  } catch { /* ignore */ }
+  try {
+    const groups = config?.virtualrouter?.routingPolicyGroups;
+    const activeGroupId =
+      typeof config?.virtualrouter?.activeRoutingPolicyGroup === 'string' &&
+      config.virtualrouter.activeRoutingPolicyGroup.trim().length
+        ? config.virtualrouter.activeRoutingPolicyGroup.trim()
+        : '';
+    const group =
+      (activeGroupId && groups && typeof groups === 'object' ? groups[activeGroupId] : undefined) ||
+      (groups && typeof groups === 'object' ? groups[Object.keys(groups)[0]] : undefined);
+    const firstRoute = group?.routing?.default?.[0];
+    const v2Model = resolveModelFromRouteEntry(firstRoute);
+    if (v2Model) {
+      return v2Model;
     }
   } catch { /* ignore */ }
   try {
@@ -455,6 +535,17 @@ function detectPortPids(port) {
     if (error?.status === 1) return [];
     return [];
   }
+}
+
+function findAvailablePort(startPort) {
+  const base = Number.isInteger(startPort) && startPort > 0 ? startPort : 5520;
+  for (let offset = 0; offset < 64; offset += 1) {
+    const candidate = base + offset;
+    if (detectPortPids(candidate).length === 0) {
+      return candidate;
+    }
+  }
+  throw new Error(`无法找到可用验证端口（起始端口=${base}）`);
 }
 
 async function waitForHealth(baseUrl, timeoutMs) {
@@ -612,7 +703,7 @@ async function postJson(url, body, timeoutMs, extraHeaders = {}) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: 'Bearer install-verify',
+        Authorization: requestAuthHeaderValue,
         ...extraHeaders
       },
       body: JSON.stringify(body),
@@ -638,7 +729,7 @@ async function postSseRequest(url, body, timeoutMs, extraHeaders = {}) {
       headers: {
         'Content-Type': 'application/json',
         Accept: 'text/event-stream',
-        Authorization: 'Bearer install-verify',
+        Authorization: requestAuthHeaderValue,
         ...extraHeaders
       },
       body: JSON.stringify(body),
@@ -900,13 +991,21 @@ async function main() {
   console.log(`🧪 使用配置: ${configPath}`);
 
   const config = readJson(configPath);
-  const port = Number(config?.httpserver?.port ?? config?.server?.port ?? 5520);
+  const configuredApiKey = resolveConfigSecret(
+    config?.server?.apikey ?? config?.httpserver?.apikey ?? config?.apikey
+  );
+  requestAuthHeaderValue = configuredApiKey ? `Bearer ${configuredApiKey}` : 'Bearer install-verify';
+  const configuredPortRaw =
+    process.env.ROUTECODEX_INSTALL_VERIFY_PORT ||
+    process.env.RCC_INSTALL_VERIFY_PORT ||
+    config?.httpserver?.port ||
+    config?.server?.port ||
+    5520;
+  const configuredPort = Number(configuredPortRaw);
+  let port = Number.isInteger(configuredPort) && configuredPort > 0 ? configuredPort : 5520;
   const host = resolveHost(config?.httpserver?.host ?? config?.server?.host ?? '127.0.0.1');
-  const baseUrl = `http://${host}:${port}`;
-  state.baseUrl = baseUrl;
 
   const model = resolveModel(config);
-  console.log(`🔁 模型: ${model}, 端口: ${port}`);
   const buildRestartOnly = (() => {
     const raw = String(process.env.ROUTECODEX_BUILD_RESTART_ONLY ?? process.env.RCC_BUILD_RESTART_ONLY ?? '').trim().toLowerCase();
     return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
@@ -915,8 +1014,13 @@ async function main() {
   const listeners = detectPortPids(port);
   const reuseExistingServer = buildRestartOnly && listeners.length > 0;
   if (listeners.length && !reuseExistingServer) {
-    throw new Error(`端口 ${port} 已被使用 (PID: ${listeners.join(', ')}). 请先停止正在运行的 RouteCodex 实例再重试。`);
+    const originalPort = port;
+    port = findAvailablePort(port + 1);
+    console.log(`⚠️ 端口 ${originalPort} 已被占用 (PID: ${listeners.join(', ')})，改用临时验证端口 ${port}`);
   }
+  const baseUrl = `http://${host}:${port}`;
+  state.baseUrl = baseUrl;
+  console.log(`🔁 模型: ${model}, 端口: ${port}`);
   if (reuseExistingServer) {
     console.log(`ℹ build-restart-only: 检测到已运行服务 (PID: ${listeners.join(', ')})，复用现有实例进行验证。`);
   }
@@ -930,9 +1034,11 @@ async function main() {
   let cwd = repoRoot;
   if (launcher === 'cli') {
     command = cliBinary || 'routecodex';
-    commandArgs = ['start', '--config', configPath, '--exclusive'];
+    commandArgs = ['start', '--config', configPath, '--port', String(port), '--exclusive'];
     cwd = process.cwd();
     env.ROUTECODEX_CONFIG = configPath;
+    env.ROUTECODEX_PORT = String(port);
+    env.RCC_PORT = String(port);
   } else {
     command = process.execPath;
     commandArgs = [path.join(repoRoot, 'dist', 'index.js')];

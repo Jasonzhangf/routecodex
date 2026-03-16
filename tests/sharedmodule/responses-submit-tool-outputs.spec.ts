@@ -47,6 +47,38 @@ function createChatEnvelope(ctx: AdapterContext, seed?: Partial<ChatEnvelope>): 
 }
 
 describe('ResponsesSemanticMapper submit tool outputs', () => {
+  it('preserves responses reasoning fields when building chat request from responses payload', () => {
+    const payload = {
+      model: 'gpt-5.4',
+      reasoning: { effort: 'high', summary: 'detailed' },
+      include: ['reasoning.encrypted_content'],
+      text: { verbosity: 'high' },
+      prompt_cache_key: '019cdff4-1bd5-7b70-97fd-32e04f9d702d',
+      stream: true,
+      input: [
+        {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: 'hello' }]
+        }
+      ]
+    };
+
+    const context = captureResponsesContext(payload as Record<string, unknown>, {
+      route: { requestId: 'req-responses-build-chat-parameters' }
+    });
+    const { request } = buildChatRequestFromResponses(payload as Record<string, unknown>, context);
+
+    expect(request).toMatchObject({
+      model: 'gpt-5.4',
+      reasoning: { effort: 'high', summary: 'detailed' },
+      include: ['reasoning.encrypted_content'],
+      text: { verbosity: 'high' },
+      prompt_cache_key: '019cdff4-1bd5-7b70-97fd-32e04f9d702d',
+      stream: true
+    });
+  });
+
   it('captures responses context into semantics and metadata on inbound', async () => {
     const mapper = new ResponsesSemanticMapper();
     const ctx = createSubmitContext();

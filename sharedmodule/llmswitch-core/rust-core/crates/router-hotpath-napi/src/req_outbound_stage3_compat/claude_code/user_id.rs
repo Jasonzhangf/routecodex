@@ -232,6 +232,7 @@ pub(crate) fn apply_anthropic_claude_code_user_id_json(
             captured_chat_request: None,
             deepseek: None,
             claude_code: None,
+            anthropic_thinking: None,
             estimated_input_tokens: None,
             model_id: None,
             client_model_id: None,

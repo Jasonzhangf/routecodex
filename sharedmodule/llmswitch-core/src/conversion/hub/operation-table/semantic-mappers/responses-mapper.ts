@@ -14,6 +14,7 @@ import {
   captureResponsesContext,
   buildChatRequestFromResponses,
   buildResponsesRequestFromChat,
+  collectResponsesRequestParameters,
   type ResponsesRequestContext
 } from '../../../responses/responses-openai-bridge.js';
 import { logHubStageTiming } from '../../pipeline/hub-stage-timing.js';
@@ -44,30 +45,6 @@ interface ResponsesSubmitPayload extends JsonObject {
   model?: string;
   metadata?: JsonObject;
 }
-
-const RESPONSES_PARAMETER_KEYS: readonly string[] = [
-  'model',
-  'temperature',
-  'top_p',
-  'top_k',
-  'prompt_cache_key',
-  'reasoning',
-  'max_tokens',
-  'max_output_tokens',
-  'response_format',
-  'tool_choice',
-  'parallel_tool_calls',
-  'service_tier',
-  'truncation',
-  'include',
-  'store',
-  'user',
-  'logit_bias',
-  'seed',
-  'stop',
-  'stop_sequences',
-  'modalities'
-];
 
 const RESPONSES_SUBMIT_ENDPOINT = '/v1/responses.submit_tool_outputs';
 
@@ -121,16 +98,7 @@ function deriveResumeToolOutputsFromResume(resume: Record<string, unknown>): Cha
 }
 
 function collectParameters(payload: ResponsesPayload, streamHint: boolean | undefined): JsonObject | undefined {
-  const params: JsonObject = {};
-  for (const key of RESPONSES_PARAMETER_KEYS) {
-    if (payload[key] !== undefined) {
-      params[key] = payload[key] as JsonValue;
-    }
-  }
-  if (streamHint !== undefined) {
-    params.stream = streamHint;
-  }
-  return Object.keys(params).length ? params : undefined;
+  return (collectResponsesRequestParameters(payload, { streamHint }) as JsonObject | undefined) ?? undefined;
 }
 
 function normalizeTools(rawTools: JsonValue[] | undefined, missing: MissingField[]): ChatToolDefinition[] | undefined {

@@ -9,7 +9,6 @@ import { shouldRunHubChatProcessWithNative } from '../../../router/virtual-route
 import type { HubProcessNodeResult } from './chat-process-node-result.js';
 
 export type { HubProcessNodeResult } from './chat-process-node-result.js';
-
 export interface HubChatProcessOptions {
   request: StandardizedRequest;
   requestId: string;
@@ -25,6 +24,7 @@ export interface HubChatProcessResult {
 
 export async function runHubChatProcess(options: HubChatProcessOptions): Promise<HubChatProcessResult> {
   const startTime = Date.now();
+
   try {
     const shouldRunGovernance = shouldRunHubChatProcessWithNative(
       options.requestId,

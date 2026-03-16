@@ -23,6 +23,8 @@ pub struct AdapterContext {
     #[serde(default)]
     pub claude_code: Option<Value>,
     #[serde(default)]
+    pub anthropic_thinking: Option<String>,
+    #[serde(default)]
     pub estimated_input_tokens: Option<f64>,
     #[serde(default)]
     pub model_id: Option<String>,
@@ -346,6 +348,7 @@ pub fn prepare_antigravity_signature_for_gemini_request_json(
             captured_chat_request: None,
             deepseek: None,
             claude_code: None,
+            anthropic_thinking: None,
             estimated_input_tokens: None,
             model_id: None,
             client_model_id: None,

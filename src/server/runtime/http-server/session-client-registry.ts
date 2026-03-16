@@ -357,6 +357,25 @@ export class SessionClientRegistry {
     };
   }
 
+  findByTmuxSessionId(tmuxSessionIdRaw: string): SessionClientRecord | undefined {
+    const tmuxSessionId = normalizeString(tmuxSessionIdRaw);
+    if (!tmuxSessionId) {
+      return undefined;
+    }
+    for (const record of this.records.values()) {
+      const candidate = normalizeString(record.tmuxSessionId) ?? normalizeString(record.sessionId);
+      if (candidate && candidate === tmuxSessionId) {
+        return {
+          ...record,
+          ...(Array.isArray(record.conversationSessionIds)
+            ? { conversationSessionIds: [...record.conversationSessionIds] }
+            : {})
+        };
+      }
+    }
+    return undefined;
+  }
+
   unbindConversationSession(conversationSessionIdRaw: string): { ok: boolean; removed: boolean; daemonIds: string[] } {
     this.ensureConversationBindingsLoaded();
     const conversationSessionId = normalizeString(conversationSessionIdRaw);

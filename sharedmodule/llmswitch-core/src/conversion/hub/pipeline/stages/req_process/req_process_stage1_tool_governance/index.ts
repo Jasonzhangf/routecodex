@@ -2,7 +2,6 @@ import type { StageRecorder } from '../../../../format-adapters/index.js';
 import type { ProcessedRequest, StandardizedRequest } from '../../../../types/standardized.js';
 import type { HubProcessNodeResult } from '../../../../process/chat-process.js';
 import { recordStage } from '../../../stages/utils.js';
-import { captureApplyPatchExecutionFailuresFromProcessedRequest } from '../../../../../../tools/apply-patch/execution-capturer.js';
 import { applyReqProcessToolGovernanceWithNative } from '../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-req-process-semantics.js';
 import { maybeInjectClockRemindersAndApplyDirectives } from '../../../../process/chat-process-clock-reminders.js';
 import { resolveHasActiveStopMessageForContinueExecution } from '../../../../process/chat-process-continue-execution.js';
@@ -86,9 +85,6 @@ export async function runReqProcessStage1ToolGovernance(
   }
 
   recordStage(options.stageRecorder, 'chat_process.req.stage4.tool_governance', processedRequest);
-  // Best-effort: capture apply_patch execution failures reported by tool role messages.
-  // This is for errorsamples collection only and must not affect runtime behavior.
-  captureApplyPatchExecutionFailuresFromProcessedRequest(processedRequest);
 
   return {
     processedRequest,

@@ -17,6 +17,9 @@ pub(crate) struct ProviderProfile {
     pub max_context_tokens: Option<i64>,
     pub server_tools_disabled: bool,
     pub deepseek: Option<Value>,
+    pub anthropic_thinking_config: Option<Value>,
+    pub anthropic_thinking: Option<String>,
+    pub anthropic_thinking_budgets: Option<Value>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -164,6 +167,21 @@ impl ProviderRegistry {
         if let Some(deepseek) = profile.deepseek.clone() {
             target.insert("deepseek".to_string(), deepseek);
         }
+        if let Some(config) = profile.anthropic_thinking_config.clone() {
+            if !config.is_null() {
+                target.insert("anthropicThinkingConfig".to_string(), config);
+            }
+        }
+        if let Some(thinking) = profile.anthropic_thinking.clone() {
+            if !thinking.trim().is_empty() {
+                target.insert("anthropicThinking".to_string(), Value::String(thinking));
+            }
+        }
+        if let Some(budgets) = profile.anthropic_thinking_budgets.clone() {
+            if !budgets.is_null() {
+                target.insert("anthropicThinkingBudgets".to_string(), budgets);
+            }
+        }
         Some(Value::Object(target))
     }
 
@@ -226,6 +244,14 @@ impl ProviderRegistry {
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
         let deepseek = map.get("deepseek").cloned();
+        let anthropic_thinking_config = map.get("anthropicThinkingConfig").cloned().filter(|v| !v.is_null());
+        let anthropic_thinking = map
+            .get("anthropicThinking")
+            .and_then(|v| v.as_str())
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty());
+        let anthropic_thinking_budgets =
+            map.get("anthropicThinkingBudgets").cloned().filter(|v| !v.is_null());
         Some(ProviderProfile {
             provider_key,
             provider_type,
@@ -241,6 +267,9 @@ impl ProviderRegistry {
             max_context_tokens,
             server_tools_disabled,
             deepseek,
+            anthropic_thinking_config,
+            anthropic_thinking,
+            anthropic_thinking_budgets,
         })
     }
 }

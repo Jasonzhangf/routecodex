@@ -92,6 +92,16 @@ export interface DeepSeekCompatRuntimeOptions {
   toolProtocol?: 'native' | 'text';
 }
 
+export type AnthropicThinkingEffort = 'low' | 'medium' | 'high' | 'max';
+
+export interface AnthropicThinkingConfig {
+  mode?: 'disabled' | 'enabled' | 'adaptive';
+  budgetTokens?: number;
+  effort?: AnthropicThinkingEffort;
+}
+
+export type AnthropicThinkingBudgetMap = Partial<Record<AnthropicThinkingEffort, number>>;
+
 export type ModelCapability = 'text' | 'reasoning' | 'vision' | 'thinking' | 'web_search';
 
 export interface ProviderProfile {
@@ -109,6 +119,9 @@ export interface ProviderProfile {
   streaming?: StreamingPreference;
   maxOutputTokens?: number;
   maxContextTokens?: number;
+  anthropicThinkingConfig?: AnthropicThinkingConfig;
+  anthropicThinking?: string;
+  anthropicThinkingBudgets?: AnthropicThinkingBudgetMap;
   deepseek?: DeepSeekCompatRuntimeOptions;
   /**
    * When true, this provider must be skipped for any request that
@@ -144,6 +157,14 @@ export interface ProviderRuntimeProfile {
   defaultOutputTokens?: number;
   modelContextTokens?: Record<string, number>;
   defaultContextTokens?: number;
+  modelAnthropicThinkingConfig?: Record<string, AnthropicThinkingConfig>;
+  defaultAnthropicThinkingConfig?: AnthropicThinkingConfig;
+  modelAnthropicThinking?: Record<string, string>;
+  defaultAnthropicThinking?: string;
+  modelAnthropicThinkingBudgets?: Record<string, AnthropicThinkingBudgetMap>;
+  defaultAnthropicThinkingBudgets?: AnthropicThinkingBudgetMap;
+  anthropicThinkingBudgets?: AnthropicThinkingBudgetMap;
+  anthropicThinkingConfig?: AnthropicThinkingConfig;
   maxContextTokens?: number;
   deepseek?: DeepSeekCompatRuntimeOptions;
   /**
@@ -333,8 +354,11 @@ export interface VirtualRouterExecCommandGuardConfig {
   enabled: boolean;
   /**
    * Optional JSON policy file path for additional deny rules.
-   * When enabled=true but policyFile is missing/empty/unreadable,
-   * llmswitch-core will still apply baseline "must-deny" rules.
+   * When policyFile is missing/empty/unreadable,
+   * llmswitch-core will still apply baseline "must-deny" rules (git reset --hard, etc).
+   *
+   * Default behavior: execCommandGuard is enabled by default.
+   * To disable, set `enabled: false` explicitly in config.
    */
   policyFile?: string;
 }
@@ -542,6 +566,9 @@ export interface TargetMetadata {
   streaming?: StreamingPreference;
   maxOutputTokens?: number;
   maxContextTokens?: number;
+  anthropicThinkingConfig?: AnthropicThinkingConfig;
+  anthropicThinking?: string;
+  anthropicThinkingBudgets?: AnthropicThinkingBudgetMap;
   deepseek?: DeepSeekCompatRuntimeOptions;
   /**
    * Route-level flags propagated from the virtual router.

@@ -9,7 +9,9 @@ import {
   type ProviderRuntimeProfile,
   type DeepSeekCompatRuntimeOptions,
   type ResponsesProviderConfig,
-  type ModelCapability
+  type ModelCapability,
+  type AnthropicThinkingConfig,
+  type AnthropicThinkingBudgetMap
 } from '../types.js';
 import {
   CLAUDE_CODE_DEFAULT_USER_AGENT,
@@ -43,6 +45,12 @@ export interface NormalizedProvider {
   defaultOutputTokens?: number;
   modelContextTokens?: Record<string, number>;
   defaultContextTokens?: number;
+  modelAnthropicThinkingConfig?: Record<string, AnthropicThinkingConfig>;
+  defaultAnthropicThinkingConfig?: AnthropicThinkingConfig;
+  modelAnthropicThinking?: Record<string, string>;
+  defaultAnthropicThinking?: string;
+  modelAnthropicThinkingBudgets?: Record<string, AnthropicThinkingBudgetMap>;
+  defaultAnthropicThinkingBudgets?: AnthropicThinkingBudgetMap;
   deepseek?: DeepSeekCompatRuntimeOptions;
   serverToolsDisabled?: boolean;
   modelCapabilities?: Record<string, ModelCapability[]>;
@@ -94,6 +102,14 @@ export function normalizeProvider(providerId: string, raw: unknown): NormalizedP
   const modelStreaming = normalizeModelStreaming(provider);
   const { modelContextTokens, defaultContextTokens } = normalizeModelContextTokens(provider);
   const { modelOutputTokens, defaultOutputTokens: explicitDefaultOutputTokens } = normalizeModelOutputTokens(provider);
+  const {
+    modelAnthropicThinkingConfig,
+    defaultAnthropicThinkingConfig,
+    modelAnthropicThinking,
+    defaultAnthropicThinking,
+    modelAnthropicThinkingBudgets,
+    defaultAnthropicThinkingBudgets
+  } = normalizeAnthropicThinking(provider, providerType);
   const defaultOutputTokens =
     explicitDefaultOutputTokens ??
     (processMode === 'passthrough' ? undefined : DEFAULT_PROVIDER_MAX_OUTPUT_TOKENS);
@@ -122,6 +138,12 @@ export function normalizeProvider(providerId: string, raw: unknown): NormalizedP
     defaultOutputTokens,
     modelContextTokens,
     defaultContextTokens,
+    modelAnthropicThinkingConfig,
+    defaultAnthropicThinkingConfig,
+    modelAnthropicThinking,
+    defaultAnthropicThinking,
+    modelAnthropicThinkingBudgets,
+    defaultAnthropicThinkingBudgets,
     ...(deepseek ? { deepseek } : {}),
     ...(serverToolsDisabled ? { serverToolsDisabled: true } : {}),
     ...(modelCapabilities ? { modelCapabilities } : {})
@@ -341,4 +363,277 @@ function normalizeModelCapabilities(provider: Record<string, unknown>): Record<s
   }
 
   return Object.keys(result).length > 0 ? result : undefined;
+}
+
+function normalizeAnthropicThinking(
+  provider: Record<string, unknown>,
+  providerType: string
+): {
+  modelAnthropicThinkingConfig?: Record<string, AnthropicThinkingConfig>;
+  defaultAnthropicThinkingConfig?: AnthropicThinkingConfig;
+  modelAnthropicThinking?: Record<string, string>;
+  defaultAnthropicThinking?: string;
+  modelAnthropicThinkingBudgets?: Record<string, AnthropicThinkingBudgetMap>;
+  defaultAnthropicThinkingBudgets?: AnthropicThinkingBudgetMap;
+} {
+  if (providerType.trim().toLowerCase() !== 'anthropic') {
+    return {};
+  }
+  const configNode = asRecord<Record<string, unknown>>(provider.config);
+  const defaultsNode = asRecord<Record<string, unknown>>(configNode.userConfigDefaults);
+  const modelAnthropicThinkingConfig: Record<string, AnthropicThinkingConfig> = {};
+  const modelAnthropicThinking: Record<string, string> = {};
+  const modelAnthropicThinkingBudgets: Record<string, AnthropicThinkingBudgetMap> = {};
+
+  const addModelThinking = (modelId: string, modelRaw: unknown): void => {
+    const normalizedModelId = typeof modelId === 'string' ? modelId.trim() : '';
+    if (!normalizedModelId || !modelRaw || typeof modelRaw !== 'object') {
+      return;
+    }
+    const configuredConfig = readAnthropicThinkingConfig(modelRaw as Record<string, unknown>);
+    if (configuredConfig) {
+      modelAnthropicThinkingConfig[normalizedModelId] = configuredConfig;
+    }
+    const configuredBudgets = readAnthropicThinkingBudgets(modelRaw as Record<string, unknown>);
+    if (configuredBudgets) {
+      modelAnthropicThinkingBudgets[normalizedModelId] = configuredBudgets;
+    }
+    const configured = readAnthropicThinkingLevel(modelRaw as Record<string, unknown>);
+    if (configured) {
+      modelAnthropicThinking[normalizedModelId] = configured;
+    }
+  };
+
+  const modelsNode = provider.models;
+  if (Array.isArray(modelsNode)) {
+    for (const modelRaw of modelsNode) {
+      if (!modelRaw || typeof modelRaw !== 'object') {
+        continue;
+      }
+      const modelRecord = modelRaw as Record<string, unknown>;
+      const modelId = typeof modelRecord.id === 'string' ? modelRecord.id : '';
+      addModelThinking(modelId, modelRecord);
+    }
+  } else {
+    for (const [modelId, modelRaw] of Object.entries(asRecord<Record<string, unknown>>(modelsNode))) {
+      addModelThinking(modelId, modelRaw);
+    }
+  }
+  const defaultAnthropicThinkingConfig =
+    readAnthropicThinkingConfig(provider) ??
+    readAnthropicThinkingConfig(configNode) ??
+    readAnthropicThinkingConfig(defaultsNode);
+  const defaultAnthropicThinking =
+    readAnthropicThinkingLevel(provider) ??
+    readAnthropicThinkingLevel(configNode) ??
+    readAnthropicThinkingLevel(defaultsNode);
+  const defaultAnthropicThinkingBudgets =
+    readAnthropicThinkingBudgets(provider) ??
+    readAnthropicThinkingBudgets(configNode) ??
+    readAnthropicThinkingBudgets(defaultsNode);
+  return {
+    ...(Object.keys(modelAnthropicThinkingConfig).length ? { modelAnthropicThinkingConfig } : {}),
+    ...(defaultAnthropicThinkingConfig ? { defaultAnthropicThinkingConfig } : {}),
+    ...(Object.keys(modelAnthropicThinking).length ? { modelAnthropicThinking } : {}),
+    ...(defaultAnthropicThinking ? { defaultAnthropicThinking } : {}),
+    ...(Object.keys(modelAnthropicThinkingBudgets).length ? { modelAnthropicThinkingBudgets } : {}),
+    ...(defaultAnthropicThinkingBudgets ? { defaultAnthropicThinkingBudgets } : {})
+  };
+}
+
+function normalizeAnthropicThinkingMode(value: unknown): AnthropicThinkingConfig['mode'] | undefined {
+  if (typeof value === 'boolean') {
+    return value ? 'enabled' : 'disabled';
+  }
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) {
+    return undefined;
+  }
+  if (['off', 'none', 'disabled', 'false'].includes(normalized)) {
+    return 'disabled';
+  }
+  if (normalized === 'enabled' || normalized === 'adaptive') {
+    return normalized;
+  }
+  return undefined;
+}
+
+function normalizeAnthropicThinkingEffort(
+  value: unknown
+): AnthropicThinkingConfig['effort'] | undefined {
+  if (typeof value === 'boolean') {
+    return value ? 'medium' : undefined;
+  }
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) {
+    return undefined;
+  }
+  if (normalized === 'minimal') {
+    return 'low';
+  }
+  if (normalized === 'low' || normalized === 'medium' || normalized === 'high' || normalized === 'max') {
+    return normalized;
+  }
+  return undefined;
+}
+
+function normalizeAnthropicThinkingBudget(value: unknown): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return undefined;
+  }
+  const budget = Math.floor(value);
+  if (budget <= 0) {
+    return undefined;
+  }
+  return Math.max(1024, budget);
+}
+
+function normalizeAnthropicThinkingBudgetMap(value: unknown): AnthropicThinkingBudgetMap | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const out: AnthropicThinkingBudgetMap = {};
+  for (const [key, raw] of Object.entries(record)) {
+    const effort = normalizeAnthropicThinkingEffort(key);
+    if (!effort) {
+      continue;
+    }
+    const budget = normalizeAnthropicThinkingBudget(raw);
+    if (budget !== undefined) {
+      out[effort] = budget;
+    }
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+function readAnthropicThinkingBudgets(record?: Record<string, unknown>): AnthropicThinkingBudgetMap | undefined {
+  if (!record) {
+    return undefined;
+  }
+  const candidates = [
+    record.anthropicThinkingBudgets,
+    record.anthropic_thinking_budgets,
+    record.thinkingBudgets,
+    record.thinking_budgets,
+    record.reasoningBudgets
+  ];
+  for (const candidate of candidates) {
+    const normalized = normalizeAnthropicThinkingBudgetMap(candidate);
+    if (normalized) {
+      return normalized;
+    }
+  }
+  return undefined;
+}
+
+function normalizeAnthropicThinkingConfigValue(value: unknown): AnthropicThinkingConfig | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (typeof value === 'boolean') {
+    return value ? { mode: 'enabled', effort: 'medium' } : { mode: 'disabled' };
+  }
+  if (typeof value === 'string') {
+    const mode = normalizeAnthropicThinkingMode(value);
+    const effort = normalizeAnthropicThinkingEffort(value);
+    if (mode || effort) {
+      return {
+        ...(mode ? { mode } : {}),
+        ...(effort ? { effort } : {})
+      };
+    }
+    return undefined;
+  }
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const node = value as Record<string, unknown>;
+  const mode =
+    normalizeAnthropicThinkingMode(node.mode) ??
+    normalizeAnthropicThinkingMode(node.type) ??
+    normalizeAnthropicThinkingMode(node.enabled);
+  const effort =
+    normalizeAnthropicThinkingEffort(node.effort) ??
+    normalizeAnthropicThinkingEffort(node.level);
+  const budgetTokens =
+    normalizeAnthropicThinkingBudget(node.budgetTokens) ??
+    normalizeAnthropicThinkingBudget(node.budget_tokens) ??
+    normalizeAnthropicThinkingBudget(node.budget);
+  if (!mode && !effort && budgetTokens === undefined) {
+    return undefined;
+  }
+  return {
+    ...(mode ? { mode } : {}),
+    ...(effort ? { effort } : {}),
+    ...(budgetTokens !== undefined ? { budgetTokens } : {})
+  };
+}
+
+function readAnthropicThinkingConfig(record?: Record<string, unknown>): AnthropicThinkingConfig | undefined {
+  if (!record) {
+    return undefined;
+  }
+  const directCandidates = [
+    record.anthropicThinkingConfig,
+    record.anthropic_thinking_config,
+    record.anthropicThinking,
+    record.anthropic_thinking,
+    record.reasoning,
+    record.thinking
+  ];
+  for (const candidate of directCandidates) {
+    const normalized = normalizeAnthropicThinkingConfigValue(candidate);
+    if (normalized) {
+      return normalized;
+    }
+  }
+  const outputConfig = asRecord<Record<string, unknown>>(record.output_config ?? record.outputConfig);
+  const normalizedOutput = normalizeAnthropicThinkingConfigValue({
+    effort: outputConfig.effort
+  });
+  if (normalizedOutput) {
+    return normalizedOutput;
+  }
+  return undefined;
+}
+
+function readAnthropicThinkingLevel(record?: Record<string, unknown>): string | undefined {
+  const config = readAnthropicThinkingConfig(record);
+  if (!config) {
+    return undefined;
+  }
+  if (config.effort) {
+    return config.effort;
+  }
+  if (config.mode) {
+    return config.mode;
+  }
+  return undefined;
+}
+
+function normalizeAnthropicThinkingLevel(value: unknown): string | undefined {
+  if (typeof value === 'boolean') {
+    return value ? 'medium' : 'disabled';
+  }
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) {
+    return undefined;
+  }
+  if (['off', 'none', 'disabled', 'false'].includes(normalized)) {
+    return 'disabled';
+  }
+  if (['minimal', 'low', 'medium', 'high'].includes(normalized)) {
+    return normalized;
+  }
+  return undefined;
 }

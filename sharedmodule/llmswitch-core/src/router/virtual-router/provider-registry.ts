@@ -122,6 +122,9 @@ listKeys(): string[] {
       streaming: profile.streaming,
       maxOutputTokens: profile.maxOutputTokens,
       maxContextTokens: profile.maxContextTokens,
+      ...(profile.anthropicThinkingConfig ? { anthropicThinkingConfig: profile.anthropicThinkingConfig } : {}),
+      ...(profile.anthropicThinking ? { anthropicThinking: profile.anthropicThinking } : {}),
+      ...(profile.anthropicThinkingBudgets ? { anthropicThinkingBudgets: profile.anthropicThinkingBudgets } : {}),
       ...(profile.deepseek ? { deepseek: profile.deepseek } : {})
     };
   }
@@ -144,6 +147,9 @@ listKeys(): string[] {
       streaming: profile.streaming,
       maxOutputTokens: profile.maxOutputTokens,
       maxContextTokens: profile.maxContextTokens,
+      ...(profile.anthropicThinkingConfig ? { anthropicThinkingConfig: profile.anthropicThinkingConfig } : {}),
+      ...(profile.anthropicThinking ? { anthropicThinking: profile.anthropicThinking } : {}),
+      ...(profile.anthropicThinkingBudgets ? { anthropicThinkingBudgets: profile.anthropicThinkingBudgets } : {}),
       ...(profile.deepseek ? { deepseek: profile.deepseek } : {}),
       ...(profile.serverToolsDisabled ? { serverToolsDisabled: true } : {}),
       ...(profile.modelCapabilities ? { modelCapabilities: profile.modelCapabilities } : {})

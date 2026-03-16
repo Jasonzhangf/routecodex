@@ -19,6 +19,7 @@
       "displayName": "Qwen 3 Max",
       "description": "Qwen 3 Max (2026-01-23) - Text generation, deep thinking",
       "capabilities": ["text", "reasoning", "thinking"],
+      "thinking": "high",
       "maxTokens": 128000
     },
     {
@@ -40,6 +41,7 @@
       "displayName": "GLM 5",
       "description": "GLM 5 - Text generation, deep thinking",
       "capabilities": ["text", "reasoning", "thinking"],
+      "thinking": "high",
       "maxTokens": 128000
     },
     {
@@ -47,6 +49,7 @@
       "displayName": "GLM 4.7",
       "description": "GLM 4.7 - Text generation, deep thinking",
       "capabilities": ["text", "reasoning", "thinking"],
+      "thinking": "high",
       "maxTokens": 128000
     },
     {
@@ -54,6 +57,7 @@
       "displayName": "Kimi K2.5",
       "description": "Kimi K2.5 - Text generation, deep thinking, vision understanding",
       "capabilities": ["text", "reasoning", "vision", "thinking"],
+      "thinking": "high",
       "maxTokens": 128000
     },
     {
@@ -61,6 +65,7 @@
       "displayName": "MiniMax M2.5",
       "description": "MiniMax M2.5 - Text generation, deep thinking",
       "capabilities": ["text", "reasoning", "thinking"],
+      "thinking": "high",
       "maxTokens": 128000
     }
   ],

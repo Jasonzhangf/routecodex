@@ -7,7 +7,7 @@ import {
 } from '../../../utils/session-scope-trace.js';
 import { getSessionClientRegistry } from './session-client-registry.js';
 import { resolveTmuxSessionIdAndSource } from './session-scope-resolution.js';
-import { isTmuxSessionAlive } from './tmux-session-probe.js';
+import { isTmuxSessionAlive, resolveTmuxSessionWorkingDirectory } from './tmux-session-probe.js';
 
 export function cloneClientHeaders(source: unknown): Record<string, string> | undefined {
   if (!source || typeof source !== 'object') {
@@ -266,6 +266,22 @@ function resolveWorkdirFromSessionDaemon(daemonId: string | undefined): string |
   }
 }
 
+function resolveWorkdirFromTmuxSessionId(tmuxSessionId: string | undefined): string | undefined {
+  if (!tmuxSessionId) {
+    return undefined;
+  }
+  try {
+    const record = getSessionClientRegistry().findByTmuxSessionId(tmuxSessionId);
+    const workdir = typeof record?.workdir === 'string' ? record.workdir.trim() : '';
+    if (workdir) {
+      return workdir;
+    }
+    return resolveTmuxSessionWorkingDirectory(tmuxSessionId);
+  } catch {
+    return undefined;
+  }
+}
+
 function resolveTmuxSessionIdFromSessionDaemon(daemonId: string | undefined): string | undefined {
   if (!daemonId) {
     return undefined;
@@ -363,9 +379,6 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
     || normalizeToken(bodyMeta.client_tmux_target)
     || normalizeToken(bodyMeta.tmuxTarget)
     || resolveTmuxTargetFromSessionDaemon(resolvedSessionDaemonId);
-  const resolvedWorkdir =
-    extractWorkdir(userMeta, bodyMeta, headers, normalizedClientHeaders)
-    || resolveWorkdirFromSessionDaemon(resolvedSessionDaemonId);
   const tmuxResolution = resolveTmuxSessionIdAndSource({
     userMeta,
     bodyMeta,
@@ -374,6 +387,10 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
     daemonId: resolvedSessionDaemonId,
     resolveTmuxSessionIdFromDaemon: resolveTmuxSessionIdFromSessionDaemon
   });
+  const resolvedWorkdir =
+    extractWorkdir(userMeta, bodyMeta, headers, normalizedClientHeaders)
+    || resolveWorkdirFromTmuxSessionId(tmuxResolution.tmuxSessionId)
+    || resolveWorkdirFromSessionDaemon(resolvedSessionDaemonId);
   let resolvedTmuxSessionId = tmuxResolution.tmuxSessionId;
   let tmuxSource = tmuxResolution.source;
   let clientInjectReady = Boolean(resolvedTmuxSessionId);

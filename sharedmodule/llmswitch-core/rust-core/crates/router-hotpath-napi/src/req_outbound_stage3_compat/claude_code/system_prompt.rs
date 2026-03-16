@@ -140,7 +140,24 @@ fn should_inject_thinking(value: Option<&Value>) -> bool {
     }
 }
 
-fn resolve_effort(model: Option<&Value>) -> &'static str {
+fn normalize_effort(value: &str) -> Option<&'static str> {
+    let normalized = value.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "minimal" | "low" => Some("low"),
+        "medium" => Some("medium"),
+        "high" | "max" => Some("high"),
+        _ => None,
+    }
+}
+
+fn resolve_effort(adapter_context: &AdapterContext, model: Option<&Value>) -> &'static str {
+    if let Some(configured) = adapter_context
+        .anthropic_thinking
+        .as_deref()
+        .and_then(normalize_effort)
+    {
+        return configured;
+    }
     let model_id = read_trimmed_str(model)
         .unwrap_or_default()
         .to_ascii_lowercase();
@@ -157,8 +174,8 @@ fn ensure_adaptive_thinking(root: &mut Map<String, Value>) {
     }
 }
 
-fn ensure_output_effort(root: &mut Map<String, Value>) {
-    let effort = resolve_effort(root.get("model"));
+fn ensure_output_effort(root: &mut Map<String, Value>, adapter_context: &AdapterContext) {
+    let effort = resolve_effort(adapter_context, root.get("model"));
     match root.get_mut("output_config") {
         Some(Value::Object(map)) => {
             let has_effort = map
@@ -253,7 +270,7 @@ pub(crate) fn apply_anthropic_claude_code_system_prompt_compat(
     );
 
     ensure_adaptive_thinking(root);
-    ensure_output_effort(root);
+    ensure_output_effort(root, adapter_context);
 
     if existing_blocks.is_empty() || !preserve_existing {
         return;

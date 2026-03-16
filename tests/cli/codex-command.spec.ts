@@ -90,6 +90,31 @@ function createConfigFs(port: number, apiKey = 'sk-config-key', host = '0.0.0.0'
   } as any;
 }
 
+function createCodexProfileFs(profile = 'rcm') {
+  const routeCodexConfigPath = '/home/test/.rcc/config.json';
+  const codexConfigPath = '/home/test/.codex/config.toml';
+  const routeCodexConfig = JSON.stringify({ httpserver: { port: 5520, apikey: 'sk-config-key', host: '127.0.0.1' } });
+  const codexConfig = `[model_providers.${profile}]\nbase_url = "http://127.0.0.1:5520/v1"\n\n[profiles.${profile}]\nmodel_provider = "${profile}"\n`;
+  return {
+    existsSync: (target: string) => String(target) === routeCodexConfigPath || String(target) === codexConfigPath,
+    readFileSync: (target: string) => {
+      if (String(target) === routeCodexConfigPath) {
+        return routeCodexConfig;
+      }
+      if (String(target) === codexConfigPath) {
+        return codexConfig;
+      }
+      throw new Error(`unexpected readFileSync:${target}`);
+    },
+    statSync: () => ({ isFile: () => true, size: 1 } as any),
+    mkdirSync: () => {},
+    openSync: () => 1,
+    closeSync: () => {},
+    renameSync: () => {},
+    unlinkSync: () => {}
+  } as any;
+}
+
 function findTmuxLaunchCall(
   tmuxCalls: Array<{ command: string; args: string[] }>,
   target?: string
@@ -607,6 +632,46 @@ describe('cli codex command', () => {
     expect(spawnCalls[0].args).toEqual(['--model', 'gpt-5.2-codex', '--foo', 'bar']);
     expect(spawnCalls[0].options?.env?.OPENAI_BASE_URL).toBeUndefined();
     expect(spawnCalls[0].options?.env?.OPENAI_API_KEY).toBeUndefined();
+  });
+
+  it('auto-applies RouteCodex codex profile when ~/.codex/config.toml contains rcm', async () => {
+    const spawnCalls: Array<{ command: string; args: string[]; options: any }> = [];
+    const program = new Command();
+
+    createCodexCommand(program, {
+      isDevPackage: false,
+      isWindows: false,
+      defaultDevPort: 5555,
+      nodeBin: 'node',
+      createSpinner: async () => createStubSpinner(),
+      logger: { info: () => {}, warning: () => {}, success: () => {}, error: () => {} },
+      env: {},
+      rawArgv: ['codex', '--model', 'gpt-5.2-codex'],
+      fsImpl: createCodexProfileFs('rcm'),
+      homedir: () => '/home/test',
+      sleep: async () => {},
+      fetch: (async () => ({ ok: true, json: async () => ({ status: 'ready' }) })) as any,
+      spawnSyncImpl: () => ({ status: 1, stdout: '', stderr: 'tmux not found' }) as any,
+      spawn: (command, args, options) => {
+        spawnCalls.push({ command, args, options });
+        return { on: () => {}, kill: () => true } as any;
+      },
+      getModulesConfigPath: () => '/tmp/modules.json',
+      resolveServerEntryPath: () => '/tmp/index.js',
+      waitForever: async () => {},
+      exit: (code) => {
+        throw new Error(`exit:${code}`);
+      }
+    });
+
+    await program.parseAsync(
+      ['node', 'routecodex', 'codex', '--model', 'gpt-5.2-codex'],
+      { from: 'node' }
+    );
+
+    expect(spawnCalls).toHaveLength(1);
+    expect(spawnCalls[0].command).toBe('codex');
+    expect(spawnCalls[0].args).toEqual(['--model', 'gpt-5.2-codex', '--profile', 'rcm']);
   });
 
 
@@ -1710,6 +1775,7 @@ describe('cli codex command', () => {
     const shellCommand = extractTmuxLaunchShellCommand(launchCall);
     expect(shellCommand).toContain("cd -- '/home/test/workspace-clock'");
     expect(shellCommand).toContain("ROUTECODEX_HTTP_APIKEY=sk-base-key::rcc-session:rcc-tmux-");
+    expect(shellCommand).toContain("RCC_HTTP_APIKEY=sk-base-key::rcc-session:rcc-tmux-");
     expect(shellCommand).toContain("OPENAI_API_KEY=sk-base-key::rcc-session:rcc-tmux-");
     expect(shellCommand).toContain("ANTHROPIC_AUTH_TOKEN=sk-base-key::rcc-session:rcc-tmux-");
     expect(shellCommand).toContain("[routecodex][self-heal]");

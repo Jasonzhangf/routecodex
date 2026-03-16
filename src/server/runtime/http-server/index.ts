@@ -41,6 +41,8 @@ import { createServerColoredLogger } from './colored-logger.js';
 import { QuietErrorHandlingCenter } from '../../../error-handling/quiet-error-handling-center.js';
 import { ManagerDaemon } from '../../../manager/index.js';
 import { ensureServerScopedSessionDir } from './session-dir.js';
+import { cleanupSessionStorageOnStartup } from './session-storage-cleanup.js';
+import { isTmuxSessionAlive } from './tmux-session-probe.js';
 import { canonicalizeServerId } from './server-id.js';
 import { StatsManager } from './stats-manager.js';
 import { resolveHubShadowCompareConfig } from './hub-shadow-compare.js';
@@ -164,6 +166,15 @@ export class RouteCodexHttpServer {
     this.stageLoggingEnabled = isStageLoggingEnabled();
     this.repoRoot = resolveRepoRoot(import.meta.url);
     ensureServerScopedSessionDir(canonicalizeServerId(this.config.server.host, this.config.server.port));
+    const sessionCleanup = cleanupSessionStorageOnStartup({ isTmuxSessionAlive });
+    if (
+      sessionCleanup.removedLegacyScopeFiles > 0 ||
+      sessionCleanup.removedDeadTmuxStateFiles > 0 ||
+      sessionCleanup.prunedRegistryDirs > 0 ||
+      sessionCleanup.removedRegistryDirs > 0
+    ) {
+      console.log('[session-storage-cleanup] startup cleanup', sessionCleanup);
+    }
 
     try {
       this.pipelineLogger = new PipelineDebugLoggerImpl({ colored: this.coloredLogger }, { enableConsoleLogging: true });

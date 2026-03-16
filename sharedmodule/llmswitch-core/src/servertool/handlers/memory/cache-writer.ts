@@ -42,6 +42,11 @@ export type CacheWriteResult =
   | { ok: true; path: string }
   | { ok: false; reason: string };
 
+interface ParsedCacheEntry {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
 /**
  * 从 metadata 解析工作目录
  */
@@ -122,11 +127,132 @@ function extractMessageText(msg: JsonObject): string {
 }
 
 /**
+ * 从 OpenAI Responses input 提取用户文本
+ */
+function extractUserTextFromResponsesInput(input: unknown): string {
+  if (typeof input === 'string') {
+    return input.trim();
+  }
+  if (!input) {
+    return '';
+  }
+  if (Array.isArray(input)) {
+    for (let i = input.length - 1; i >= 0; i -= 1) {
+      const text = extractUserTextFromResponsesInputItem(input[i]);
+      if (text) {
+        return text;
+      }
+    }
+    return '';
+  }
+  if (typeof input === 'object') {
+    return extractUserTextFromResponsesInputItem(input);
+  }
+  return '';
+}
+
+function extractUserTextFromResponsesInputItem(item: unknown): string {
+  if (!item || typeof item !== 'object' || Array.isArray(item)) {
+    return '';
+  }
+  const row = item as Record<string, unknown>;
+  const type = typeof row.type === 'string' ? row.type.trim().toLowerCase() : '';
+  const role = typeof row.role === 'string' ? row.role.trim().toLowerCase() : '';
+  if (type === 'message') {
+    if (role && role !== 'user') {
+      return '';
+    }
+    return extractMessageTextFromResponsesContent(row.content);
+  }
+  if (role && role !== 'user') {
+    return '';
+  }
+  return extractMessageTextFromResponsesContent(row.content ?? row);
+}
+
+function extractMessageTextFromResponsesContent(content: unknown): string {
+  if (typeof content === 'string') {
+    return content.trim();
+  }
+  if (!Array.isArray(content)) {
+    return '';
+  }
+  const texts: string[] = [];
+  for (const part of content) {
+    if (typeof part === 'string') {
+      texts.push(part);
+      continue;
+    }
+    if (!part || typeof part !== 'object' || Array.isArray(part)) {
+      continue;
+    }
+    const entry = part as Record<string, unknown>;
+    const type = typeof entry.type === 'string' ? entry.type.trim().toLowerCase() : '';
+    if (type === 'input_text' || type === 'text') {
+      const text = entry.text;
+      if (typeof text === 'string' && text.trim()) {
+        texts.push(text.trim());
+      }
+    }
+  }
+  return texts.join('\n').trim();
+}
+
+/**
+ * 从 rawRequest 提取用户文本（兼容 chat / responses）
+ */
+export function extractUserTextFromRequest(rawRequest: JsonObject): string {
+  if (!rawRequest || typeof rawRequest !== 'object' || Array.isArray(rawRequest)) {
+    return '';
+  }
+  const row = rawRequest as Record<string, unknown>;
+  const messages = Array.isArray(row.messages) ? (row.messages as JsonObject[]) : undefined;
+  if (messages && messages.length) {
+    return extractLastUserMessageText(messages);
+  }
+  if (typeof row.prompt === 'string') {
+    return row.prompt.trim();
+  }
+  if (row.input) {
+    return extractUserTextFromResponsesInput(row.input);
+  }
+  return '';
+}
+
+/**
  * 从 response 提取 assistant 文本
  */
 export function extractAssistantTextFromResponse(response: JsonObject): string {
+  // 优先支持 chat-completions 结构
   const choices = (response as { choices?: unknown }).choices;
   if (!Array.isArray(choices) || choices.length === 0) {
+    // 尝试从 responses 结构提取
+    const outputs = (response as { output?: unknown }).output;
+    if (!Array.isArray(outputs) || outputs.length === 0) {
+      return '';
+    }
+    // responses: output[].content[].text
+    for (const item of outputs) {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) {
+        continue;
+      }
+      const content = (item as { content?: unknown }).content;
+      if (Array.isArray(content)) {
+        const texts: string[] = [];
+        for (const part of content) {
+          if (!part || typeof part !== 'object' || Array.isArray(part)) {
+            continue;
+          }
+          const text = (part as { text?: unknown }).text;
+          if (typeof text === 'string' && text.trim()) {
+            texts.push(text.trim());
+          }
+        }
+        if (texts.length) {
+          return texts.join('\n').trim();
+        }
+      }
+    }
     return '';
   }
   const first = choices[0];
@@ -180,17 +306,8 @@ function buildCacheEntry(options: CacheWriteOptions): string {
   });
 
   const lines: string[] = [];
-  lines.push(`- [${dateStr} ${timeOnly}] role=${options.role}`);
-
-  if (options.metadata?.model) {
-    lines.push(`  model: ${options.metadata.model}`);
-  }
-  if (options.metadata?.providerProtocol) {
-    lines.push(`  provider: ${options.metadata.providerProtocol}`);
-  }
-  if (options.metadata?.finishReason) {
-    lines.push(`  finishReason: ${options.metadata.finishReason}`);
-  }
+  const roleLabel = options.role === 'user' ? 'User' : 'Assistant';
+  lines.push(`### ${roleLabel} · ${dateStr} ${timeOnly}`);
 
   // 内容缩略（避免过长）
   const maxContentLength = 2000;
@@ -199,10 +316,24 @@ function buildCacheEntry(options: CacheWriteOptions): string {
     content = content.slice(0, maxContentLength) + '... [truncated]';
   }
 
-  // 缩进内容
-  const indentedContent = content.split('\n').map(line => `  ${line}`).join('\n');
-  lines.push(`  content: |`);
-  lines.push(indentedContent);
+  lines.push('');
+  lines.push(content);
+  lines.push('');
+  lines.push('<!-- cache-meta');
+  lines.push(`requestId: ${options.requestId}`);
+  if (options.sessionId) {
+    lines.push(`sessionId: ${options.sessionId}`);
+  }
+  if (options.metadata?.model) {
+    lines.push(`model: ${options.metadata.model}`);
+  }
+  if (options.metadata?.providerProtocol) {
+    lines.push(`provider: ${options.metadata.providerProtocol}`);
+  }
+  if (options.metadata?.finishReason) {
+    lines.push(`finishReason: ${options.metadata.finishReason}`);
+  }
+  lines.push('-->');
 
   return lines.join('\n');
 }
@@ -216,6 +347,67 @@ function ensureDir(dir: string): void {
   } catch {
     // 忽略 mkdir 失败
   }
+}
+
+function normalizeCacheContentForDedup(value: string): string {
+  return String(value || '')
+    .replace(/\r\n?/g, '\n')
+    .trim();
+}
+
+function extractLastCacheEntry(existingContent: string): ParsedCacheEntry | undefined {
+  const source = String(existingContent || '');
+  if (!source.trim()) {
+    return undefined;
+  }
+
+  const marker = '\n### ';
+  const lastMarkerIndex = source.lastIndexOf(marker);
+  const block =
+    lastMarkerIndex >= 0
+      ? source.slice(lastMarkerIndex + 1).trim()
+      : source.trimStart().startsWith('### ')
+        ? source.trim()
+        : '';
+  if (!block) {
+    return undefined;
+  }
+
+  const lines = block.split('\n');
+  const header = String(lines[0] || '').trim();
+  const role =
+    header.startsWith('### User')
+      ? 'user'
+      : header.startsWith('### Assistant')
+        ? 'assistant'
+        : undefined;
+  if (!role) {
+    return undefined;
+  }
+
+  const blankLineIndex = lines.findIndex((line, index) => index > 0 && !String(line).trim());
+  let content =
+    blankLineIndex >= 0
+      ? lines.slice(blankLineIndex + 1).join('\n').trim()
+      : '';
+  const metaCommentIndex = content.indexOf('\n<!-- cache-meta');
+  if (metaCommentIndex >= 0) {
+    content = content.slice(0, metaCommentIndex).trimEnd();
+  } else if (content.startsWith('<!-- cache-meta')) {
+    content = '';
+  }
+  return {
+    role,
+    content
+  };
+}
+
+function shouldSkipDuplicateRequestWrite(existingContent: string, nextContent: string): boolean {
+  const lastEntry = extractLastCacheEntry(existingContent);
+  if (!lastEntry || lastEntry.role !== 'user') {
+    return false;
+  }
+  return normalizeCacheContentForDedup(lastEntry.content) === normalizeCacheContentForDedup(nextContent);
 }
 
 /**
@@ -250,6 +442,12 @@ export function writeCacheEntry(options: CacheWriteOptions): CacheWriteResult {
       // 文件不存在，正常
     }
 
+    if (options.type === 'request' && options.role === 'user') {
+      if (shouldSkipDuplicateRequestWrite(existingContent, options.content)) {
+        return { ok: true, path: cachePath };
+      }
+    }
+
     // 5. 确保头部存在
     let finalContent = existingContent;
     if (!existingContent.includes('# Conversation Cache')) {
@@ -277,11 +475,6 @@ export function writeCacheEntry(options: CacheWriteOptions): CacheWriteResult {
  * 从 adapterContext 解析工作目录，失败时回退到 process.cwd()
  * CLI/TTY 模式直接使用 process.cwd()，不需要 metadata 注入
  */
-export function resolveWorkingDirectoryFromAdapterContextOrFallback(adapterContext: Record<string, unknown>): string {
-  const fromContext = resolveWorkingDirectoryFromAdapterContext(adapterContext);
-  if (fromContext) {
-    return fromContext;
-  }
-  // CLI/TTY 模式：直接使用 process.cwd()
-  return process.cwd();
+export function resolveWorkingDirectoryFromAdapterContextOrFallback(adapterContext: Record<string, unknown>): string | undefined {
+  return resolveWorkingDirectoryFromAdapterContext(adapterContext);
 }

@@ -92,6 +92,49 @@ const directRouteRouterConfig: VirtualRouterConfig = {
   }
 };
 
+const anthropicThinkingRouterConfig: VirtualRouterConfig = {
+  routing: {
+    default: [
+      {
+        id: 'primary',
+        priority: 100,
+        targets: ['ali-coding-plan.key1.glm-5']
+      }
+    ]
+  },
+  providers: {
+    'ali-coding-plan.key1.glm-5': {
+      providerKey: 'ali-coding-plan.key1.glm-5',
+      providerType: 'anthropic',
+      endpoint: 'https://example.test/anthropic',
+      auth: {
+        type: 'apiKey',
+        value: 'test-key'
+      },
+      outboundProfile: 'anthropic-messages',
+      compatibilityProfile: 'anthropic:claude-code',
+      modelId: 'glm-5',
+      processMode: 'chat',
+      anthropicThinking: 'medium'
+    }
+  },
+  classifier: {
+    longContextThresholdTokens: 60000,
+    thinkingKeywords: [],
+    codingKeywords: [],
+    backgroundKeywords: [],
+    visionKeywords: []
+  },
+  loadBalancing: {
+    strategy: 'round-robin'
+  },
+  health: {
+    failureThreshold: 3,
+    cooldownMs: 30_000,
+    fatalCooldownMs: 300_000
+  }
+};
+
 describe('HubPipeline orchestration', () => {
   const pipeline = new HubPipeline({ virtualRouter: routerConfig });
 
@@ -162,5 +205,25 @@ describe('HubPipeline orchestration', () => {
       (tool) => tool?.type === 'function' && tool.function?.name === 'web_search'
     );
     expect(webSearchTools.length).toBe(0);
+  });
+
+  test('propagates target anthropicThinking into outbound anthropic payload', async () => {
+    const anthropicPipeline = new HubPipeline({ virtualRouter: anthropicThinkingRouterConfig });
+    const result = await anthropicPipeline.execute({
+      endpoint: '/v1/chat/completions',
+      payload: {
+        model: 'glm-5',
+        messages: [{ role: 'user', content: 'hello' }],
+        stream: false
+      }
+    });
+
+    expect(result.routingDecision?.providerKey).toBe('ali-coding-plan.key1.glm-5');
+    expect((result.providerPayload as Record<string, unknown>).thinking).toEqual({
+      type: 'adaptive'
+    });
+    expect((result.providerPayload as Record<string, unknown>).output_config).toEqual({
+      effort: 'high'
+    });
   });
 });

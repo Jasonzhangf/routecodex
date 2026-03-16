@@ -50,6 +50,7 @@ import {
   runChatContextCapture,
   captureResponsesContextSnapshot,
 } from "./stages/req_inbound/req_inbound_stage3_context_capture/index.js";
+import { writeCacheEntryForRequest } from "./stages/req_inbound/req_inbound_stage3_context_capture/cache-write.js";
 import { normalizeReqInboundToolCallIdStyleWithNative } from "../../../router/virtual-router/engine-selection/native-hub-pipeline-req-inbound-semantics.js";
 import {
   createResponsesContextCapture,
@@ -814,6 +815,12 @@ export class HubPipeline {
       "req_inbound.stage3_context_capture",
       () => {
         if (inboundStage2.responsesContext) {
+          // responses 语义上下文已在 stage2 捕获，但请求侧 CACHE.md 仍需写入
+          // 仅做请求写入，不重复 captureContext 逻辑
+          writeCacheEntryForRequest({
+            rawRequest,
+            adapterContext: inboundAdapterContext,
+          });
           return inboundStage2.responsesContext as Record<string, unknown>;
         }
         return hooks.captureContext({

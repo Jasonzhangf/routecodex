@@ -151,6 +151,7 @@ pub(crate) fn apply_gemini_web_search_request_compat_json(
             captured_chat_request: None,
             deepseek: None,
             claude_code: None,
+            anthropic_thinking: None,
             estimated_input_tokens: None,
             model_id: None,
             client_model_id: None,

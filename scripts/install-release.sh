@@ -94,7 +94,7 @@ verify_server_request() {
   elif command -v timeout >/dev/null 2>&1; then
     TIMEOUT_BIN="timeout"
   fi
-  local VERIFY_CMD=(node scripts/install-verify.mjs --launcher cli --cli-binary rcc --config "$VERIFY_CONFIG")
+  local VERIFY_CMD=(node scripts/install-verify.mjs --launcher cli --cli-binary rcc --mode responses --config "$VERIFY_CONFIG")
   echo ""
   echo "🧪 验证 release 安装的端到端工具链路..."
   if [ ! -f "$VERIFY_CONFIG" ]; then

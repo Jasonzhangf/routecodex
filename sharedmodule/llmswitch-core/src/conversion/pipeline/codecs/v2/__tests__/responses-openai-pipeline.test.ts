@@ -15,6 +15,10 @@ describe('responses-openai-pipeline native shell', () => {
     const result = await codec.convertRequest(
       {
         model: 'gpt-4.1',
+        reasoning: { effort: 'high', summary: 'detailed' },
+        include: ['reasoning.encrypted_content'],
+        text: { verbosity: 'high' },
+        prompt_cache_key: 'cache-key-1',
         input: [
           {
             type: 'message',
@@ -44,6 +48,13 @@ describe('responses-openai-pipeline native shell', () => {
 
     expect((result as any).model).toBe('gpt-4.1');
     expect((result as any).messages[0]).toMatchObject({ role: 'user', content: 'run pwd' });
+    expect((result as any).parameters).toMatchObject({
+      model: 'gpt-4.1',
+      reasoning: { effort: 'high', summary: 'detailed' },
+      include: ['reasoning.encrypted_content'],
+      text: { verbosity: 'high' },
+      prompt_cache_key: 'cache-key-1'
+    });
     expect((result as any).tools[0]).toMatchObject({
       type: 'function',
       function: { name: 'exec_command' }

@@ -61,7 +61,7 @@ describe('Anthropic hub pipeline', () => {
     expect(inbound.messages[0].role).toBe('system');
     expect(inbound.messages[1].role).toBe('user');
     expect(inbound.parameters?.model).toBe('claude-3-sonnet');
-    expect(inbound.metadata.systemInstructions).toEqual(['You are a CLI assistant.']);
+    expect((inbound.semantics as any)?.system?.textBlocks).toEqual(['You are a CLI assistant.']);
     expect((inbound.metadata.providerMetadata as any).variant).toBe('cli');
     expect((inbound.metadata.extraFields as any).custom_flag).toBe(true);
     expect(recorder.stages.map(s => s.stage)).toEqual(['format_parse', 'semantic_map_to_chat']);
@@ -146,7 +146,7 @@ describe('Anthropic hub pipeline', () => {
       plan: inboundPlan,
       stageRecorder: recorder
     });
-    expect(inbound.tools?.map((tool) => tool.function.name)).toEqual(['shell_command', 'task']);
+    expect(inbound.tools?.map((tool) => tool.function.name)).toEqual(['bash', 'task']);
     const outboundPayload = await runOutboundPipeline({
       chat: inbound,
       context: ctx,
@@ -157,14 +157,15 @@ describe('Anthropic hub pipeline', () => {
     expect(outboundTools.map((tool: any) => tool.name)).toEqual(['Bash', 'Task']);
   });
 
-  test('defaults ark-coding-plan outbound requests to high thinking', async () => {
+  test('defaults outbound requests using configured anthropicThinking level', async () => {
     const recorder = new MemoryRecorder();
     const inbound = await runInboundPipeline({
       rawRequest: anthropicRequest,
       context: {
         ...ctx,
-        providerId: 'ark-coding-plan',
-        providerKey: 'ark-coding-plan.kimi-k2.5'
+        providerId: 'ali-coding-plan',
+        providerKey: 'ali-coding-plan.key1.glm-5',
+        anthropicThinking: 'high'
       } as AdapterContext,
       plan: inboundPlan,
       stageRecorder: recorder
@@ -174,8 +175,9 @@ describe('Anthropic hub pipeline', () => {
       chat: inbound,
       context: {
         ...ctx,
-        providerId: 'ark-coding-plan',
-        providerKey: 'ark-coding-plan.kimi-k2.5'
+        providerId: 'ali-coding-plan',
+        providerKey: 'ali-coding-plan.key1.glm-5',
+        anthropicThinking: 'high'
       } as AdapterContext,
       plan: outboundPlan,
       stageRecorder: recorder
@@ -184,14 +186,15 @@ describe('Anthropic hub pipeline', () => {
     expect(outboundPayload.thinking).toEqual({ type: 'enabled', budget_tokens: 8192 });
   });
 
-  test('preserves explicit reasoning disable for ark-coding-plan', async () => {
+  test('preserves explicit reasoning disable over configured anthropicThinking', async () => {
     const recorder = new MemoryRecorder();
     const inbound = await runInboundPipeline({
       rawRequest: anthropicRequest,
       context: {
         ...ctx,
-        providerId: 'ark-coding-plan',
-        providerKey: 'ark-coding-plan.doubao-seed-2.0-code'
+        providerId: 'ali-coding-plan',
+        providerKey: 'ali-coding-plan.key1.qwen3-max-2026-01-23',
+        anthropicThinking: 'high'
       } as AdapterContext,
       plan: inboundPlan,
       stageRecorder: recorder
@@ -206,13 +209,43 @@ describe('Anthropic hub pipeline', () => {
       chat: inbound,
       context: {
         ...ctx,
-        providerId: 'ark-coding-plan',
-        providerKey: 'ark-coding-plan.doubao-seed-2.0-code'
+        providerId: 'ali-coding-plan',
+        providerKey: 'ali-coding-plan.key1.qwen3-max-2026-01-23',
+        anthropicThinking: 'high'
       } as AdapterContext,
       plan: outboundPlan,
       stageRecorder: recorder
     });
 
     expect(outboundPayload.thinking).toEqual({ type: 'disabled' });
+  });
+
+  test('maps low configured anthropicThinking to low budget', async () => {
+    const recorder = new MemoryRecorder();
+    const inbound = await runInboundPipeline({
+      rawRequest: anthropicRequest,
+      context: {
+        ...ctx,
+        providerId: 'tabglm',
+        providerKey: 'tabglm.key1.glm-4.7',
+        anthropicThinking: 'low'
+      } as AdapterContext,
+      plan: inboundPlan,
+      stageRecorder: recorder
+    });
+
+    const outboundPayload = await runOutboundPipeline({
+      chat: inbound,
+      context: {
+        ...ctx,
+        providerId: 'tabglm',
+        providerKey: 'tabglm.key1.glm-4.7',
+        anthropicThinking: 'low'
+      } as AdapterContext,
+      plan: outboundPlan,
+      stageRecorder: recorder
+    });
+
+    expect(outboundPayload.thinking).toEqual({ type: 'enabled', budget_tokens: 1024 });
   });
 });

@@ -22,8 +22,18 @@ interface AnthropicPayload extends JsonObject {
   stream?: boolean;
   tool_choice?: JsonValue;
   thinking?: JsonValue;
+  output_config?: JsonValue;
   system?: JsonValue;
 }
+
+interface AnthropicThinkingConfig {
+  mode?: 'disabled' | 'enabled' | 'adaptive';
+  budgetTokens?: number;
+  effort?: 'low' | 'medium' | 'high' | 'max';
+}
+
+type AnthropicThinkingEffort = 'low' | 'medium' | 'high' | 'max';
+type AnthropicThinkingBudgetMap = Partial<Record<AnthropicThinkingEffort, number>>;
 
 const ANTHROPIC_PARAMETER_KEYS: readonly (keyof AnthropicPayload | 'stop')[] = [
   'model',
@@ -35,7 +45,8 @@ const ANTHROPIC_PARAMETER_KEYS: readonly (keyof AnthropicPayload | 'stop')[] = [
   'metadata',
   'stream',
   'tool_choice',
-  'thinking'
+  'thinking',
+  'output_config'
 ];
 
 const ANTHROPIC_TOP_LEVEL_FIELDS = new Set<string>([
@@ -52,7 +63,8 @@ const ANTHROPIC_TOP_LEVEL_FIELDS = new Set<string>([
   'metadata',
   'stream',
   'tool_choice',
-  'thinking'
+  'thinking',
+  'output_config'
 ]);
 
 const PASSTHROUGH_METADATA_PREFIX = 'rcc_passthrough_';
@@ -131,101 +143,254 @@ function collectParameters(payload: AnthropicPayload): JsonObject | undefined {
   return Object.keys(params).length ? params : undefined;
 }
 
-function mapReasoningEffortToAnthropicBudget(effort: string): number {
-  const normalized = effort.trim().toLowerCase();
-  if (normalized === 'minimal' || normalized === 'low') return 1024;
-  if (normalized === 'medium') return 4096;
-  if (normalized === 'high') return 8192;
-  return 4096;
+function normalizeAnthropicThinkingBudget(value: number): number {
+  const budget = Math.max(0, Math.floor(value));
+  if (budget <= 0) {
+    return 0;
+  }
+  return Math.max(1024, budget);
 }
 
-function buildAnthropicThinkingFromReasoning(reasoning: unknown): JsonObject | undefined {
-  if (reasoning === undefined || reasoning === null) {
+function normalizeAnthropicThinkingMode(value: unknown): AnthropicThinkingConfig['mode'] | undefined {
+  if (typeof value === 'boolean') {
+    return value ? 'enabled' : 'disabled';
+  }
+  if (typeof value !== 'string') {
     return undefined;
   }
-  if (typeof reasoning === 'boolean') {
-    if (!reasoning) {
-      return { type: 'disabled' };
-    }
-    return { type: 'enabled', budget_tokens: 4096 };
+  const normalized = value.trim().toLowerCase();
+  if (!normalized.length) {
+    return undefined;
   }
-  if (typeof reasoning === 'string') {
-    const normalized = reasoning.trim().toLowerCase();
-    if (!normalized.length) {
+  if (['off', 'none', 'disabled', 'false'].includes(normalized)) {
+    return 'disabled';
+  }
+  if (normalized === 'enabled' || normalized === 'adaptive') {
+    return normalized;
+  }
+  return undefined;
+}
+
+function normalizeAnthropicEffort(value: unknown): AnthropicThinkingConfig['effort'] | undefined {
+  if (typeof value === 'boolean') {
+    return value ? 'medium' : undefined;
+  }
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (!normalized.length) {
+    return undefined;
+  }
+  if (normalized === 'minimal') {
+    return 'low';
+  }
+  if (normalized === 'low' || normalized === 'medium' || normalized === 'high' || normalized === 'max') {
+    return normalized;
+  }
+  return undefined;
+}
+
+function normalizeAnthropicThinkingConfigFromUnknown(
+  value: unknown,
+  options?: { effortDefaultsToAdaptive?: boolean }
+): AnthropicThinkingConfig | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (typeof value === 'boolean') {
+    return value ? { mode: 'enabled', budgetTokens: 1024 } : { mode: 'disabled' };
+  }
+  if (typeof value === 'string') {
+    const mode = normalizeAnthropicThinkingMode(value);
+    const effort = normalizeAnthropicEffort(value);
+    if (!mode && !effort) {
       return undefined;
     }
-    if (normalized === 'off' || normalized === 'none' || normalized === 'disabled' || normalized === 'false') {
-      return { type: 'disabled' };
-    }
     return {
-      type: 'enabled',
-      budget_tokens: mapReasoningEffortToAnthropicBudget(normalized)
+      ...(mode ? { mode } : {}),
+      ...(!mode && effort && options?.effortDefaultsToAdaptive ? { mode: 'adaptive' as const } : {}),
+      ...(effort ? { effort } : {})
     };
   }
-  if (typeof reasoning === 'number' && Number.isFinite(reasoning)) {
-    const budget = Math.max(0, Math.floor(reasoning));
-    return budget <= 0
-      ? ({ type: 'disabled' } as JsonObject)
-      : ({ type: 'enabled', budget_tokens: budget } as JsonObject);
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const budget = normalizeAnthropicThinkingBudget(value);
+    return budget > 0 ? { mode: 'enabled', budgetTokens: budget } : { mode: 'disabled' };
   }
-  if (!isJsonObject(reasoning as JsonValue)) {
+  if (!isJsonObject(value as JsonValue)) {
     return undefined;
   }
-  const node = reasoning as Record<string, unknown>;
-  const enabledRaw = node.enabled;
-  if (enabledRaw === false) {
+  const node = value as Record<string, unknown>;
+  const mode =
+    normalizeAnthropicThinkingMode(node.mode) ??
+    normalizeAnthropicThinkingMode(node.type) ??
+    normalizeAnthropicThinkingMode(node.enabled);
+  const effort =
+    normalizeAnthropicEffort(node.effort) ??
+    normalizeAnthropicEffort(node.level);
+  const budgetTokens =
+    typeof node.budgetTokens === 'number'
+      ? normalizeAnthropicThinkingBudget(node.budgetTokens)
+      : typeof node.budget_tokens === 'number'
+        ? normalizeAnthropicThinkingBudget(node.budget_tokens)
+        : typeof node.budget === 'number'
+          ? normalizeAnthropicThinkingBudget(node.budget)
+          : typeof node.max_tokens === 'number'
+            ? normalizeAnthropicThinkingBudget(node.max_tokens)
+            : undefined;
+  if (!mode && !effort && budgetTokens === undefined) {
+    return undefined;
+  }
+  return {
+    ...(mode ? { mode } : {}),
+    ...(!mode && effort && options?.effortDefaultsToAdaptive ? { mode: 'adaptive' as const } : {}),
+    ...(budgetTokens !== undefined ? { budgetTokens } : {}),
+    ...(effort ? { effort } : {})
+  };
+}
+
+function mergeAnthropicThinkingConfig(
+  base: AnthropicThinkingConfig | undefined,
+  override: AnthropicThinkingConfig | undefined
+): AnthropicThinkingConfig | undefined {
+  if (!base && !override) {
+    return undefined;
+  }
+  return {
+    ...(base ?? {}),
+    ...(override ?? {})
+  };
+}
+
+function normalizeAnthropicBudgetValue(value: unknown): number | undefined {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return undefined;
+    const parsed = Number(trimmed);
+    if (Number.isFinite(parsed)) {
+      return normalizeAnthropicThinkingBudget(parsed);
+    }
+    return undefined;
+  }
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return undefined;
+  }
+  return normalizeAnthropicThinkingBudget(value);
+}
+
+function normalizeAnthropicThinkingBudgetMap(value: unknown): AnthropicThinkingBudgetMap | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const out: AnthropicThinkingBudgetMap = {};
+  for (const [key, raw] of Object.entries(record)) {
+    const effort = normalizeAnthropicEffort(key) as AnthropicThinkingEffort | undefined;
+    if (!effort) {
+      continue;
+    }
+    const budget = normalizeAnthropicBudgetValue(raw);
+    if (budget !== undefined) {
+      out[effort] = budget;
+    }
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+function resolveConfiguredAnthropicThinkingBudgets(ctx: AdapterContext | undefined): AnthropicThinkingBudgetMap | undefined {
+  if (!ctx || typeof ctx !== 'object') {
+    return undefined;
+  }
+  const raw = (ctx as Record<string, unknown>).anthropicThinkingBudgets;
+  return normalizeAnthropicThinkingBudgetMap(raw);
+}
+
+function applyEffortBudget(
+  config: AnthropicThinkingConfig | undefined,
+  budgets: AnthropicThinkingBudgetMap | undefined
+): AnthropicThinkingConfig | undefined {
+  if (!config || !budgets) {
+    return config;
+  }
+  if (config.mode === 'disabled' || config.budgetTokens !== undefined) {
+    return config;
+  }
+  const effort = config.effort;
+  if (!effort) {
+    return config;
+  }
+  const budget = budgets[effort];
+  if (budget === undefined) {
+    return config;
+  }
+  const next: AnthropicThinkingConfig = { ...config, budgetTokens: budget };
+  if (!next.mode || next.mode === 'adaptive') {
+    next.mode = 'enabled';
+  }
+  return next;
+}
+
+function buildAnthropicThinkingFromConfig(config: AnthropicThinkingConfig | undefined): JsonObject | undefined {
+  if (!config) {
+    return undefined;
+  }
+  const mode = config.mode;
+  if (mode === 'disabled') {
     return { type: 'disabled' };
   }
-  const effortRaw =
-    typeof node.effort === 'string'
-      ? node.effort
-      : typeof node.level === 'string'
-        ? node.level
-        : undefined;
-  const budgetRaw =
-    typeof node.budget_tokens === 'number'
-      ? node.budget_tokens
-      : typeof node.budget === 'number'
-        ? node.budget
-        : typeof node.max_tokens === 'number'
-          ? node.max_tokens
-          : undefined;
-  if (typeof budgetRaw === 'number' && Number.isFinite(budgetRaw)) {
-    const budget = Math.max(0, Math.floor(budgetRaw));
-    return budget <= 0
-      ? ({ type: 'disabled' } as JsonObject)
-      : ({ type: 'enabled', budget_tokens: budget } as JsonObject);
+  if (mode === 'adaptive') {
+    return { type: 'adaptive' };
   }
-  if (typeof effortRaw === 'string' && effortRaw.trim().length) {
-    const normalized = effortRaw.trim().toLowerCase();
-    if (normalized === 'off' || normalized === 'none' || normalized === 'disabled') {
-      return { type: 'disabled' };
-    }
+  if (mode === 'enabled') {
     return {
       type: 'enabled',
-      budget_tokens: mapReasoningEffortToAnthropicBudget(normalized)
+      budget_tokens: normalizeAnthropicThinkingBudget(config.budgetTokens ?? 1024)
     };
   }
-  if (enabledRaw === true) {
-    return { type: 'enabled', budget_tokens: 4096 };
+  if (config.budgetTokens !== undefined) {
+    return {
+      type: 'enabled',
+      budget_tokens: normalizeAnthropicThinkingBudget(config.budgetTokens)
+    };
   }
-  return { type: 'enabled', budget_tokens: 4096 };
+  return undefined;
 }
 
-function normalizeContextToken(value: unknown): string {
-  return typeof value === 'string' ? value.trim().toLowerCase() : '';
+function mergeAnthropicOutputConfig(
+  existing: JsonValue | undefined,
+  effort: 'low' | 'medium' | 'high' | 'max' | undefined
+): JsonObject | undefined {
+  const base = isJsonObject(existing) ? (jsonClone(existing) as JsonObject) : {};
+  if (effort) {
+    base.effort = effort;
+  }
+  return Object.keys(base).length ? base : undefined;
 }
 
-function isArkCodingPlanContext(ctx: AdapterContext | undefined): boolean {
+function resolveConfiguredAnthropicThinkingConfig(ctx: AdapterContext | undefined): AnthropicThinkingConfig | undefined {
   if (!ctx || typeof ctx !== 'object') {
-    return false;
+    return undefined;
+  }
+  const config = normalizeAnthropicThinkingConfigFromUnknown(
+    (ctx as Record<string, unknown>).anthropicThinkingConfig
+  );
+  if (config) {
+    return config;
   }
   const candidates = [
-    normalizeContextToken(ctx.providerId),
-    normalizeContextToken((ctx as Record<string, unknown>).providerKey),
-    normalizeContextToken((ctx as Record<string, unknown>).runtimeKey)
+    (ctx as Record<string, unknown>).anthropicThinking,
+    (ctx as Record<string, unknown>).reasoningEffort,
+    (ctx as Record<string, unknown>).reasoning_effort
   ];
-  return candidates.some((candidate) => candidate === 'ark-coding-plan' || candidate.startsWith('ark-coding-plan.'));
+  for (const candidate of candidates) {
+    const legacy = normalizeAnthropicThinkingConfigFromUnknown(candidate, {
+      effortDefaultsToAdaptive: true
+    });
+    if (legacy) {
+      return legacy;
+    }
+  }
+  return undefined;
 }
 
 function cloneAnthropicSystemBlocks(value: JsonValue | undefined): JsonValue[] | undefined {
@@ -476,26 +641,37 @@ export class AnthropicSemanticMapper implements SemanticMapper {
     if (baseRequest.max_output_tokens && !baseRequest.max_tokens) {
       baseRequest.max_tokens = baseRequest.max_output_tokens;
     }
-    const rawReasoning = trimmedParameters?.reasoning;
-    const mappedThinking = buildAnthropicThinkingFromReasoning(rawReasoning);
+    const configuredAnthropicThinking = resolveConfiguredAnthropicThinkingConfig(ctx);
+    const configuredAnthropicBudgets = resolveConfiguredAnthropicThinkingBudgets(ctx);
+    const requestAnthropicThinking =
+      normalizeAnthropicThinkingConfigFromUnknown(trimmedParameters?.thinkingConfig) ??
+      normalizeAnthropicThinkingConfigFromUnknown(trimmedParameters?.reasoning, {
+        effortDefaultsToAdaptive: true
+      });
+    const mergedAnthropicThinking = mergeAnthropicThinkingConfig(
+      configuredAnthropicThinking,
+      requestAnthropicThinking
+    );
+    const effectiveAnthropicThinking = applyEffortBudget(mergedAnthropicThinking, configuredAnthropicBudgets);
+    const mappedThinking = buildAnthropicThinkingFromConfig(effectiveAnthropicThinking);
     if (mappedThinking && baseRequest.thinking === undefined) {
       baseRequest.thinking = mappedThinking;
     }
-    if (
-      baseRequest.thinking === undefined &&
-      rawReasoning === undefined &&
-      isArkCodingPlanContext(ctx)
-    ) {
-      baseRequest.thinking = {
-        type: 'enabled',
-        budget_tokens: mapReasoningEffortToAnthropicBudget('high')
-      };
+    const mergedOutputConfig = mergeAnthropicOutputConfig(
+      baseRequest.output_config as JsonValue | undefined,
+      effectiveAnthropicThinking?.effort
+    );
+    if (mergedOutputConfig) {
+      baseRequest.output_config = mergedOutputConfig;
     }
     if (responsesOrigin && trimmedParameters && Object.prototype.hasOwnProperty.call(trimmedParameters, 'reasoning')) {
       appendLossyFieldAudit(chat, {
         field: 'reasoning',
         targetProtocol: 'anthropic-messages',
-        reason: 'normalized_to_anthropic_thinking_budget'
+        reason:
+          effectiveAnthropicThinking?.effort
+            ? 'normalized_to_anthropic_thinking_and_effort'
+            : 'normalized_to_anthropic_thinking'
       });
     }
     // 出站阶段不再直接透传其它协议的 providerMetadata，避免跨协议打洞；
@@ -544,6 +720,12 @@ export class AnthropicSemanticMapper implements SemanticMapper {
     logHubStageTiming(requestId, 'req_outbound.anthropic.payload_clone', 'start');
     const payloadCloneStart = Date.now();
     const payload = sanitizeAnthropicPayload(JSON.parse(JSON.stringify(payloadSource)) as JsonObject);
+    if (baseRequest.thinking !== undefined) {
+      payload.thinking = jsonClone(baseRequest.thinking as JsonValue) as JsonValue;
+    }
+    if (baseRequest.output_config !== undefined) {
+      payload.output_config = jsonClone(baseRequest.output_config as JsonValue) as JsonValue;
+    }
     sanitizeAnthropicPayload(payload);
     logHubStageTiming(requestId, 'req_outbound.anthropic.payload_clone', 'completed', {
       elapsedMs: Date.now() - payloadCloneStart,

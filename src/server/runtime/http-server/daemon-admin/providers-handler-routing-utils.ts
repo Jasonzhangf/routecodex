@@ -640,32 +640,6 @@ export async function listRoutingSources(): Promise<RoutingSourceSummary[]> {
     }
   }
 
-  // Provider directory v1 configs often carry their own virtualrouter.routing for standalone operation.
-  try {
-    const dirs = await fs.readdir(providerRoot, { withFileTypes: true });
-    for (const ent of dirs) {
-      if (!ent.isDirectory()) continue;
-      const providerId = ent.name;
-      const providerDir = path.join(providerRoot, providerId);
-      let files: string[] = [];
-      try {
-        files = (await fs.readdir(providerDir, { withFileTypes: true }))
-          .filter((f) => f.isFile())
-          .map((f) => f.name);
-      } catch {
-        files = [];
-      }
-      for (const name of files) {
-        const lower = name.toLowerCase();
-        if (!lower.endsWith('.json')) continue;
-        if (!lower.includes('.v1.json') && lower !== 'config.codex.json') continue;
-        candidates.push({ kind: 'provider', label: `provider/${providerId}/${name}`, path: path.join(providerDir, name) });
-      }
-    }
-  } catch {
-    // ignore
-  }
-
   const out: RoutingSourceSummary[] = [];
   const seen = new Set<string>();
 

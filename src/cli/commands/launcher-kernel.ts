@@ -85,10 +85,10 @@ function resolveExitGracePeriodMs(env: NodeJS.ProcessEnv): number {
   const raw =
     env.ROUTECODEX_CLIENT_EXIT_GRACE_PERIOD_MS
     ?? env.RCC_CLIENT_EXIT_GRACE_PERIOD_MS
-    ?? '';
+    ?? '5000';
   const parsed = Number(raw);
   if (!Number.isFinite(parsed) || parsed <= 0) {
-    return 0;
+    return 5000;  // Default to 5s grace period for tools like codex that print session IDs on exit
   }
   return Math.floor(parsed);
 }
@@ -1598,6 +1598,7 @@ export function createLauncherCommand(program: Command, ctx: LauncherCommandCont
             }
             const scopedKey = encodeSessionClientApiKey(baseKey, '', tmuxOnlySessionId);
             env.ROUTECODEX_HTTP_APIKEY = scopedKey;
+            env.RCC_HTTP_APIKEY = scopedKey;
             env.OPENAI_API_KEY = scopedKey;
             env.ANTHROPIC_AUTH_TOKEN = scopedKey;
           }

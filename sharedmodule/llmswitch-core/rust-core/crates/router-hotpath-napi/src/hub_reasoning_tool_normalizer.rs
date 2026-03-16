@@ -256,14 +256,15 @@ pub(crate) fn normalize_message_reasoning_ssot(message: &mut Map<String, Value>)
 
 fn collect_reasoning_fragments(message: &Map<String, Value>) -> Vec<String> {
     let mut fragments: Vec<String> = Vec::new();
-    if let Some(reasoning_content) = message.get("reasoning_content") {
-        let text = flatten_reasoning(reasoning_content, 0);
+    if let Some(reasoning) = message.get("reasoning") {
+        let text = flatten_reasoning(reasoning, 0);
         if !text.is_empty() {
             fragments.push(text);
         }
+        return fragments;
     }
-    if let Some(reasoning) = message.get("reasoning") {
-        let text = flatten_reasoning(reasoning, 0);
+    if let Some(reasoning_content) = message.get("reasoning_content") {
+        let text = flatten_reasoning(reasoning_content, 0);
         if !text.is_empty() {
             fragments.push(text);
         }
@@ -301,9 +302,11 @@ fn strip_reasoning_tags(text: &str) -> String {
     let think_pattern = Regex::new(r"(?i)</?think[^>]*>").expect("valid think pattern");
     let reflection_pattern =
         Regex::new(r"(?i)</?reflection[^>]*>").expect("valid reflection pattern");
+    let cn_think_tag = Regex::new(r"(?is)\[/?\s*思考\s*\]").expect("valid cn think tag pattern");
     let without_think = think_pattern.replace_all(text, "");
     let without_reflection = reflection_pattern.replace_all(&without_think, "");
-    without_reflection.trim().to_string()
+    let without_cn_think = cn_think_tag.replace_all(&without_reflection, "");
+    without_cn_think.trim().to_string()
 }
 
 pub(crate) fn sanitize_reasoning_tagged_text(text: &str) -> String {
@@ -317,13 +320,15 @@ pub(crate) fn sanitize_reasoning_tagged_text(text: &str) -> String {
         .expect("valid reflection block pattern");
     let open_close =
         Regex::new(r"(?is)</?(?:think|reflection)>").expect("valid open/close pattern");
+    let cn_think_tag = Regex::new(r"(?is)\[/?\s*思考\s*\]").expect("valid cn think tag pattern");
     let multiple_breaks = Regex::new(r"\n{3,}").expect("valid line break pattern");
 
     let without_fenced = fenced.replace_all(text, "");
     let without_think = think.replace_all(&without_fenced, "");
     let without_reflection = reflection.replace_all(&without_think, "");
     let without_open_close = open_close.replace_all(&without_reflection, "");
-    let without_tags = without_open_close;
+    let without_cn_think = cn_think_tag.replace_all(&without_open_close, "");
+    let without_tags = without_cn_think;
     multiple_breaks
         .replace_all(&without_tags, "\n\n")
         .trim()
@@ -1521,7 +1526,9 @@ pub(crate) fn normalize_message_reasoning_tools_record(
         .unwrap_or("")
         .trim()
         .to_string();
-    if raw_content.is_empty() && !trimmed.is_empty() {
+    let prefix = id_prefix.trim().to_ascii_lowercase();
+    let allow_reasoning_tag_lift = !prefix.starts_with("responses_response_output");
+    if raw_content.is_empty() && !trimmed.is_empty() && allow_reasoning_tag_lift {
         let has_thinking_tags = trimmed.contains("[思考]") && trimmed.contains("[/思考]");
         let next_content = if has_thinking_tags {
             trimmed.clone()
@@ -1981,6 +1988,20 @@ mod tests {
             row["reasoning"]["content"][0]["text"],
             Value::String("analysis".to_string())
         );
+    }
+
+    #[test]
+    fn normalize_message_skips_reasoning_lift_for_responses_output() {
+        let mut message = json!({
+            "role": "assistant",
+            "reasoning_content": "analysis",
+            "content": ""
+        });
+        let row = message.as_object_mut().unwrap();
+        let (_added, cleaned) =
+            normalize_message_reasoning_tools_record(row, "responses_response_output");
+        assert_eq!(cleaned.unwrap_or_default(), "analysis");
+        assert_eq!(row.get("content").and_then(Value::as_str), Some(""));
     }
 
     #[test]

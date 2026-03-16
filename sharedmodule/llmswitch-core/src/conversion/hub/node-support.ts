@@ -153,7 +153,16 @@ function deriveAdapterContext(context: HubNodeContext, fallbackProtocol: string)
     routeId: metadata.routeName as string | undefined,
     profileId: metadata.pipelineId as string | undefined,
     streamingHint,
-    toolCallIdStyle
+    toolCallIdStyle,
+    ...(target?.anthropicThinkingConfig && typeof target.anthropicThinkingConfig === 'object'
+      ? { anthropicThinkingConfig: target.anthropicThinkingConfig as unknown as JsonObject }
+      : {}),
+    ...(typeof target?.anthropicThinking === 'string' && target.anthropicThinking.trim()
+      ? { anthropicThinking: target.anthropicThinking.trim().toLowerCase() }
+      : {}),
+    ...(target?.anthropicThinkingBudgets && typeof target.anthropicThinkingBudgets === 'object' && !Array.isArray(target.anthropicThinkingBudgets)
+      ? { anthropicThinkingBudgets: target.anthropicThinkingBudgets as unknown as JsonObject }
+      : {})
   };
 }
 

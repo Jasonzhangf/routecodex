@@ -38,6 +38,8 @@ export function runChatContextCapture(
 }
 
 export function captureResponsesContextSnapshot(options: ContextCaptureOptions): ResponsesRequestContext {
+  // 写入请求到 CACHE.md（responses input）
+  writeCacheEntryForRequest(options);
   return captureResponsesContextSnapshotModule(options as ResponsesContextCaptureOptions);
 }
 

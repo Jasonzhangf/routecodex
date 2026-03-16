@@ -191,6 +191,12 @@ function buildProviderRuntimeEntries(providers: Record<string, unknown>): Provid
           defaultOutputTokens: normalizedProvider.defaultOutputTokens,
           modelContextTokens: normalizedProvider.modelContextTokens,
           defaultContextTokens: normalizedProvider.defaultContextTokens,
+          modelAnthropicThinkingConfig: normalizedProvider.modelAnthropicThinkingConfig,
+          defaultAnthropicThinkingConfig: normalizedProvider.defaultAnthropicThinkingConfig,
+          modelAnthropicThinking: normalizedProvider.modelAnthropicThinking,
+          defaultAnthropicThinking: normalizedProvider.defaultAnthropicThinking,
+          modelAnthropicThinkingBudgets: normalizedProvider.modelAnthropicThinkingBudgets,
+          defaultAnthropicThinkingBudgets: normalizedProvider.defaultAnthropicThinkingBudgets,
           ...(normalizedProvider.deepseek ? { deepseek: normalizedProvider.deepseek } : {}),
           ...(normalizedProvider.serverToolsDisabled ? { serverToolsDisabled: true } : {}),
           ...(normalizedProvider.modelCapabilities ? { modelCapabilities: normalizedProvider.modelCapabilities } : {})

@@ -53,6 +53,24 @@ describe('anthropic-claude-code-system-prompt native wrapper', () => {
     expect((result as any).output_config).toEqual({ effort: 'high' });
   });
 
+  test('honors adapter-context anthropicThinking effort override', () => {
+    const result = applyAnthropicClaudeCodeSystemPromptCompat(
+      {
+        model: 'glm-4.7',
+        messages: [{ role: 'user', content: 'hello' }]
+      } as any,
+      undefined,
+      {
+        compatibilityProfile: 'chat:claude-code',
+        providerProtocol: 'anthropic-messages',
+        anthropicThinking: 'low'
+      } as any
+    );
+
+    expect((result as any).thinking).toEqual({ type: 'adaptive' });
+    expect((result as any).output_config).toEqual({ effort: 'low' });
+  });
+
   test('preserves existing Claude Code-shaped user_id', () => {
     const existingUserId =
       'user_' + 'a'.repeat(64) + '_account__session_123e4567-e89b-42d3-a456-426614174000';

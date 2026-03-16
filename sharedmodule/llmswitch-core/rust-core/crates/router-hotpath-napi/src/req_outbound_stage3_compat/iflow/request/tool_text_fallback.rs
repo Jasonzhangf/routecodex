@@ -300,6 +300,7 @@ pub(crate) fn apply_iflow_tool_text_fallback_json(
             captured_chat_request: None,
             deepseek: None,
             claude_code: None,
+            anthropic_thinking: None,
             estimated_input_tokens: None,
             model_id: None,
             client_model_id: None,

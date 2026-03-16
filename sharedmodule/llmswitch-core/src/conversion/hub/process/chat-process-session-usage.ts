@@ -29,14 +29,28 @@ function createEmptyRoutingInstructionState(): RoutingInstructionState {
 }
 
 function resolveSessionUsageScope(record: Record<string, unknown> | undefined): string | undefined {
+  const explicitScope =
+    typeof record?.stopMessageClientInjectSessionScope === 'string'
+      ? record.stopMessageClientInjectSessionScope.trim()
+      : '';
+  if (explicitScope.startsWith('tmux:')) {
+    return explicitScope;
+  }
+  const tmuxSessionId =
+    typeof record?.clientTmuxSessionId === 'string'
+      ? record.clientTmuxSessionId.trim()
+      : (typeof record?.tmuxSessionId === 'string' ? record.tmuxSessionId.trim() : '');
+  if (tmuxSessionId) {
+    return `tmux:${tmuxSessionId}`;
+  }
   const sessionId = typeof record?.sessionId === 'string' ? record.sessionId.trim() : '';
   if (sessionId) {
-    return `session:${sessionId}`;
+    return undefined;
   }
   const conversationId =
     typeof record?.conversationId === 'string' ? record.conversationId.trim() : '';
   if (conversationId) {
-    return `conversation:${conversationId}`;
+    return undefined;
   }
   return undefined;
 }

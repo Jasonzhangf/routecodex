@@ -1,10 +1,42 @@
 import type { Command } from 'commander';
+import fs from 'node:fs';
+import path from 'node:path';
 
 import { createLauncherCommand, type LauncherCommandContext, normalizeOpenAiBaseUrl } from './launcher-kernel.js';
 
 export type CodexCommandContext = LauncherCommandContext;
 
+function readDefaultRouteCodexCodexProfile(ctx: CodexCommandContext): string | null {
+  const explicit =
+    (typeof ctx.env.ROUTECODEX_CODEX_PROFILE === 'string' && ctx.env.ROUTECODEX_CODEX_PROFILE.trim())
+      ? ctx.env.ROUTECODEX_CODEX_PROFILE.trim()
+      : ((typeof ctx.env.RCC_CODEX_PROFILE === 'string' && ctx.env.RCC_CODEX_PROFILE.trim())
+        ? ctx.env.RCC_CODEX_PROFILE.trim()
+        : '');
+  if (explicit) {
+    return explicit;
+  }
+
+  const fsImpl = ctx.fsImpl ?? fs;
+  const pathImpl = ctx.pathImpl ?? path;
+  const configPath = pathImpl.join(ctx.homedir(), '.codex', 'config.toml');
+  try {
+    if (!fsImpl.existsSync(configPath)) {
+      return null;
+    }
+    const content = fsImpl.readFileSync(configPath, 'utf8');
+    if (/\[profiles\.rcm\]/m.test(content) && /\[model_providers\.rcm\]/m.test(content)) {
+      return 'rcm';
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
 export function createCodexCommand(program: Command, ctx: CodexCommandContext): void {
+  const defaultRouteCodexProfile = readDefaultRouteCodexCodexProfile(ctx);
   createLauncherCommand(program, ctx, {
     commandName: 'codex',
     displayName: 'Codex',
@@ -23,8 +55,12 @@ export function createCodexCommand(program: Command, ctx: CodexCommandContext): 
       if (typeof options.model === 'string' && options.model.trim()) {
         args.push('--model', options.model.trim());
       }
-      if (typeof options.profile === 'string' && options.profile.trim()) {
-        args.push('--profile', options.profile.trim());
+      const resolvedProfile =
+        (typeof options.profile === 'string' && options.profile.trim())
+          ? options.profile.trim()
+          : defaultRouteCodexProfile;
+      if (resolvedProfile) {
+        args.push('--profile', resolvedProfile);
       }
       return args;
     },

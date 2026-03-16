@@ -56,6 +56,9 @@ export interface NativeReqOutboundCompatAdapterContextInput {
   capturedChatRequest?: JsonObject;
   deepseek?: Record<string, unknown>;
   claudeCode?: Record<string, unknown>;
+  anthropicThinkingConfig?: Record<string, unknown>;
+  anthropicThinking?: string;
+  anthropicThinkingBudgets?: Record<string, unknown>;
   estimatedInputTokens?: number;
   modelId?: string;
   clientModelId?: string;

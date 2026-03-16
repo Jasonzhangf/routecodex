@@ -31,21 +31,23 @@ function isPersistentKey(key: string | undefined): key is string {
     || key.startsWith('tmux:');
 }
 
-function resolveDefaultSessionDir(): string | null {
+function resolveDefaultSessionDir(scope: 'tmux' | 'routing'): string | null {
   try {
-    return resolveRccPath('sessions');
+    return scope === 'tmux'
+      ? resolveRccPath('sessions')
+      : resolveRccPath('state', 'routing');
   } catch {
     return null;
   }
 }
 
-function resolveSessionDir(): string | null {
+function resolveSessionDir(scope: 'tmux' | 'routing'): string | null {
   try {
     const override = process.env.ROUTECODEX_SESSION_DIR;
-    if (override && override.trim()) {
+    if (scope === 'tmux' && override && override.trim()) {
       return path.resolve(override.trim());
     }
-    return resolveDefaultSessionDir();
+    return resolveDefaultSessionDir(scope);
   } catch {
     return null;
   }
@@ -69,7 +71,8 @@ function resolveSessionFilepaths(key: string | undefined): string[] {
   if (!isPersistentKey(key)) {
     return [];
   }
-  const dir = resolveSessionDir();
+  const scope = key.startsWith('tmux:') ? 'tmux' : 'routing';
+  const dir = resolveSessionDir(scope);
   const filename = keyToFilename(key);
   if (!dir || !filename) {
     return [];
