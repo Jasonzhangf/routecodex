@@ -513,7 +513,8 @@ export function registerSessionClientRoutes(app: Application, options: SessionCl
     const allowManagedTermination = false;
     const cleanup = modeSafe === 'stale_heartbeat'
       ? registry.cleanupStaleHeartbeats({
-        staleAfterMs: Number.isFinite(Number(body.staleAfterMs)) ? Number(body.staleAfterMs) : undefined
+        staleAfterMs: Number.isFinite(Number(body.staleAfterMs)) ? Number(body.staleAfterMs) : undefined,
+        isTmuxSessionAlive
       })
       : registry.cleanupDeadTmuxSessions({
         isTmuxSessionAlive

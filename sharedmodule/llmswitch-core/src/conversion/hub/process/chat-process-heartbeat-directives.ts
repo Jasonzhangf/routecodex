@@ -1,15 +1,32 @@
-import type { ChatMessageContentPart } from '../types/chat-envelope.js';
-import type { StandardizedMessage, StandardizedRequest } from '../types/standardized.js';
+import type { StandardizedRequest } from '../types/standardized.js';
 import {
   setHeartbeatEnabled,
   startHeartbeatDaemonIfNeeded
 } from '../../../servertool/heartbeat/task-store.js';
 import { findLastUserMessageIndex } from './chat-process-clock-reminder-messages.js';
+import { stripMarkerSyntaxFromContent } from '../../shared/marker-lifecycle.js';
 
-const HEARTBEAT_ON_MARKER = /<\*\*hb:on\*\*>/gi;
-const HEARTBEAT_OFF_MARKER = /<\*\*hb:off\*\*>/gi;
+type HeartbeatDirective =
+  | { action: 'on' }
+  | { action: 'off' }
+  | { action: 'on'; intervalMs: number };
 
-type HeartbeatDirectiveAction = 'on' | 'off';
+function logHeartbeatDirectiveNonBlockingError(
+  operation: string,
+  error: unknown,
+  details?: Record<string, unknown>
+): void {
+  const reason = error instanceof Error ? error.message : String(error);
+  const detailPairs = Object.entries(details || {})
+    .map(([key, value]) => `${key}=${String(value)}`)
+    .join(' ');
+  const suffix = detailPairs ? ` ${suffixSanitize(detailPairs)}` : '';
+  console.warn(`[heartbeat-directives] ${operation} failed (non-blocking): ${reason}${suffix}`);
+}
+
+function suffixSanitize(value: string): string {
+  return value.replace(/\s+/g, ' ').trim();
+}
 
 function readTmuxSessionId(
   primary?: Record<string, unknown> | null,
@@ -39,72 +56,73 @@ function readTmuxSessionId(
   return undefined;
 }
 
-function stripHeartbeatMarkersFromText(raw: string): {
-  text: string;
-  actions: HeartbeatDirectiveAction[];
-} {
-  const actions: HeartbeatDirectiveAction[] = [];
-  const text = raw
-    .replace(HEARTBEAT_ON_MARKER, () => {
-      actions.push('on');
-      return '';
-    })
-    .replace(HEARTBEAT_OFF_MARKER, () => {
-      actions.push('off');
-      return '';
-    })
-    .replace(/[ \t]+\n/g, '\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-  return { text, actions };
-}
-
-function stripHeartbeatMarkersFromContent(
-  content: StandardizedMessage['content']
-): {
-  content: StandardizedMessage['content'];
-  actions: HeartbeatDirectiveAction[];
-} {
-  if (typeof content === 'string') {
-    const stripped = stripHeartbeatMarkersFromText(content);
-    return {
-      content: stripped.text,
-      actions: stripped.actions
-    };
+function parseHeartbeatDirectiveBody(raw: string): HeartbeatDirective | undefined {
+  const body = String(raw || '').trim().toLowerCase();
+  if (!body) {
+    return undefined;
   }
-  if (!Array.isArray(content)) {
-    return { content, actions: [] };
+  if (body === 'on') {
+    return { action: 'on' };
   }
-  const actions: HeartbeatDirectiveAction[] = [];
-  const nextParts = content.map((part) => {
-    if (!part || typeof part !== 'object') {
-      return part;
-    }
-    const typedPart = part as ChatMessageContentPart;
-    if (typedPart.type !== 'text' || typeof typedPart.text !== 'string') {
-      return part;
-    }
-    const stripped = stripHeartbeatMarkersFromText(typedPart.text);
-    actions.push(...stripped.actions);
-    return { ...typedPart, text: stripped.text };
-  });
-  return { content: nextParts, actions };
+  if (body === 'off') {
+    return { action: 'off' };
+  }
+  const intervalMatch = body.match(/^(\d+)\s*([smhd])$/i);
+  if (!intervalMatch) {
+    return undefined;
+  }
+  const amount = Number.parseInt(String(intervalMatch[1] || '').trim(), 10);
+  const unit = String(intervalMatch[2] || '').trim().toLowerCase();
+  const multiplier = unit === 's'
+    ? 1_000
+    : unit === 'm'
+      ? 60_000
+      : unit === 'h'
+        ? 60 * 60_000
+        : unit === 'd'
+          ? 24 * 60 * 60_000
+          : 0;
+  if (!Number.isFinite(amount) || amount < 1 || multiplier < 1) {
+    return undefined;
+  }
+  return { action: 'on', intervalMs: amount * multiplier };
 }
 
 async function persistHeartbeatDirective(
   tmuxSessionId: string | undefined,
-  action: HeartbeatDirectiveAction | undefined
+  directive: HeartbeatDirective | undefined
 ): Promise<void> {
-  if (!tmuxSessionId || !action) {
+  if (!tmuxSessionId || !directive) {
     return;
   }
-  await setHeartbeatEnabled(tmuxSessionId, action === 'on');
-  if (action === 'on') {
+  const intervalMs = 'intervalMs' in directive ? directive.intervalMs : undefined;
+  try {
+    if (directive.action === 'off') {
+      await setHeartbeatEnabled(tmuxSessionId, false, { clearIntervalOverride: true });
+      return;
+    }
+    await setHeartbeatEnabled(
+      tmuxSessionId,
+      true,
+      typeof intervalMs === 'number'
+        ? { intervalMs }
+        : { clearIntervalOverride: true }
+    );
     try {
       await startHeartbeatDaemonIfNeeded(undefined);
-    } catch {
-      // best-effort only
+    } catch (error) {
+      logHeartbeatDirectiveNonBlockingError('startHeartbeatDaemonIfNeeded', error, {
+        tmuxSessionId,
+        action: directive.action,
+        ...(typeof intervalMs === 'number' ? { intervalMs } : {})
+      });
     }
+  } catch (error) {
+    logHeartbeatDirectiveNonBlockingError('setHeartbeatEnabled', error, {
+      tmuxSessionId,
+      action: directive.action,
+      ...(typeof intervalMs === 'number' ? { intervalMs } : {})
+    });
   }
 }
 
@@ -123,8 +141,19 @@ export async function applyHeartbeatDirectives(
     return request;
   }
 
-  const stripped = stripHeartbeatMarkersFromContent(targetMessage.content);
-  if (stripped.actions.length < 1) {
+  const stripped = stripMarkerSyntaxFromContent<HeartbeatDirective>(targetMessage.content, {
+    parse: (body) => {
+      const normalized = String(body || '').trim();
+      if (!/^hb:/i.test(normalized)) {
+        return undefined;
+      }
+      return parseHeartbeatDirectiveBody(normalized.slice(3));
+    }
+  });
+  const directives = stripped.markers
+    .map((marker) => marker.parsed)
+    .filter((directive): directive is HeartbeatDirective => Boolean(directive));
+  if (directives.length < 1 && stripped.content === targetMessage.content) {
     return request;
   }
 
@@ -134,14 +163,14 @@ export async function applyHeartbeatDirectives(
     content: stripped.content
   };
 
-  const lastAction = stripped.actions[stripped.actions.length - 1];
+  const lastDirective = directives[directives.length - 1];
   const tmuxSessionId = readTmuxSessionId(
     metadata,
     request.metadata && typeof request.metadata === 'object' && !Array.isArray(request.metadata)
       ? (request.metadata as Record<string, unknown>)
       : null
   );
-  await persistHeartbeatDirective(tmuxSessionId, lastAction);
+  await persistHeartbeatDirective(tmuxSessionId, lastDirective);
 
   return {
     ...request,

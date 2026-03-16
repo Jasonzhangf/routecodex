@@ -6,7 +6,9 @@ use std::path::{Path, PathBuf};
 use super::instructions::{InstructionTarget, RoutingInstructionState};
 
 const ROUTECODEX_SESSION_DIR_ENV: &str = "ROUTECODEX_SESSION_DIR";
+const RCC_HOME_ENV: &str = "RCC_HOME";
 const ROUTECODEX_USER_DIR_ENV: &str = "ROUTECODEX_USER_DIR";
+const ROUTECODEX_HOME_ENV: &str = "ROUTECODEX_HOME";
 
 pub(crate) fn load_routing_instruction_state(key: &str) -> Option<RoutingInstructionState> {
     if !is_persistent_key(key) {
@@ -117,22 +119,37 @@ fn is_persistent_key(key: &str) -> bool {
     key.starts_with("session:") || key.starts_with("conversation:") || key.starts_with("tmux:")
 }
 
-fn resolve_routecodex_user_dir() -> Option<PathBuf> {
-    if let Ok(value) = env::var(ROUTECODEX_USER_DIR_ENV) {
-        let trimmed = value.trim();
-        if !trimmed.is_empty() {
-            return Some(PathBuf::from(trimmed));
-        }
+fn expand_home(value: &str, home_dir: &Path) -> PathBuf {
+    if let Some(stripped) = value.strip_prefix("~/") {
+        return home_dir.join(stripped);
     }
+    PathBuf::from(value)
+}
+
+fn resolve_rcc_user_dir() -> Option<PathBuf> {
     let home = env::var("HOME")
         .ok()
         .or_else(|| env::var("USERPROFILE").ok())
         .unwrap_or_default();
-    let trimmed = home.trim();
-    if trimmed.is_empty() {
+    let home_trimmed = home.trim();
+    if home_trimmed.is_empty() {
         return None;
     }
-    Some(PathBuf::from(trimmed).join(".routecodex"))
+    let home_dir = PathBuf::from(home_trimmed);
+    let legacy_dir = home_dir.join(".routecodex");
+    for key in [RCC_HOME_ENV, ROUTECODEX_USER_DIR_ENV, ROUTECODEX_HOME_ENV] {
+        if let Ok(value) = env::var(key) {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                let candidate = expand_home(trimmed, &home_dir);
+                if candidate == legacy_dir {
+                    continue;
+                }
+                return Some(candidate);
+            }
+        }
+    }
+    Some(home_dir.join(".rcc"))
 }
 
 fn resolve_session_dir() -> Option<PathBuf> {
@@ -142,7 +159,7 @@ fn resolve_session_dir() -> Option<PathBuf> {
             return Some(PathBuf::from(trimmed));
         }
     }
-    resolve_routecodex_user_dir().map(|base| base.join("sessions"))
+    resolve_rcc_user_dir().map(|base| base.join("sessions"))
 }
 
 fn key_to_filename(key: &str) -> Option<String> {

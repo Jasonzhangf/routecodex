@@ -4,6 +4,7 @@ import { applyReqProcessToolGovernanceWithNative } from '../../../router/virtual
 import { maybeInjectClockRemindersAndApplyDirectives } from './chat-process-clock-reminders.js';
 import { finalizeGovernedRequest } from './chat-process-governance-finalize.js';
 import { resolveHasActiveStopMessageForContinueExecution } from './chat-process-continue-execution.js';
+import { sanitizeChatProcessRequest } from './chat-process-request-sanitizer.js';
 
 export interface GovernanceContext {
   entryEndpoint: string;
@@ -61,11 +62,11 @@ export async function applyRequestToolGovernance(
     context.requestId
   );
   if (!governanceEngine) {
-    return requestAfterInject;
+    return sanitizeChatProcessRequest(requestAfterInject);
   }
-  return finalizeGovernedRequest({
+  return sanitizeChatProcessRequest(finalizeGovernedRequest({
     request: requestAfterInject,
     providerProtocol: resolveProviderProtocol(context),
     governanceEngine
-  });
+  }));
 }

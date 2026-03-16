@@ -46,12 +46,12 @@ export async function maybeInjectClockRemindersAndApplyDirectives(
   const flowPlan = resolveClockReminderFlowPlanWithNative(rt as Record<string, unknown>);
   // Do not inject reminders or apply clock directives during internal servertool followup hops.
   if (flowPlan.skipForServerToolFollowup) {
-    return request;
+    return requestAfterHeartbeat;
   }
   const rawConfig = (rt as any)?.clock as VirtualRouterClockConfig | undefined;
   const clockConfig = resolveClockConfig(rawConfig);
   if (!clockConfig) {
-    return request;
+    return requestAfterHeartbeat;
   }
   try {
     await startClockDaemonIfNeeded(clockConfig);

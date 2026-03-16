@@ -1,6 +1,7 @@
 import type { HeartbeatConfigSnapshot } from "./types.js";
 
 const DEFAULT_HEARTBEAT_TICK_MS = 15 * 60_000;
+const MAX_HEARTBEAT_SCAN_MS = 60_000;
 
 function normalizePositiveInt(value: unknown): number | undefined {
   const parsed = Number(value);
@@ -28,4 +29,9 @@ export function normalizeHeartbeatConfig(input?: unknown): HeartbeatConfigSnapsh
 
 export function resolveHeartbeatConfig(input?: unknown): HeartbeatConfigSnapshot {
   return normalizeHeartbeatConfig(input);
+}
+
+export function resolveHeartbeatScanMs(input?: unknown): number {
+  const tickMs = normalizeHeartbeatConfig(input).tickMs;
+  return Math.max(5_000, Math.min(tickMs, MAX_HEARTBEAT_SCAN_MS));
 }

@@ -453,6 +453,7 @@ export class SessionClientRegistry {
   cleanupStaleHeartbeats(args?: {
     nowMs?: number;
     staleAfterMs?: number;
+    isTmuxSessionAlive?: (tmuxSessionId: string) => boolean;
     terminateManagedTmuxSession?: (tmuxSessionId: string) => boolean;
     terminateManagedClientProcess?: (processInfo: {
       daemonId: string;

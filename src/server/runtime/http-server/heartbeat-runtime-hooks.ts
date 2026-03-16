@@ -82,7 +82,7 @@ export async function dispatchSingleHeartbeat(args: {
   try {
     heartbeatContext = await readHeartbeatContext(workdir);
   } catch {
-    return { ok: false, skipped: true, reason: 'heartbeat_file_missing', workdir };
+    return { ok: false, disable: true, reason: 'heartbeat_file_missing', workdir };
   }
 
   const nowMs = Date.now();

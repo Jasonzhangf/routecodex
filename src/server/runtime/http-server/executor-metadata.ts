@@ -7,6 +7,7 @@ import {
 } from '../../../utils/session-scope-trace.js';
 import { getSessionClientRegistry } from './session-client-registry.js';
 import { resolveTmuxSessionIdAndSource } from './session-scope-resolution.js';
+import { evaluateTmuxScopeCleanup } from './tmux-scope-cleanup-policy.js';
 import { isTmuxSessionAlive, resolveTmuxSessionWorkingDirectory } from './tmux-session-probe.js';
 
 export function cloneClientHeaders(source: unknown): Record<string, string> | undefined {
@@ -396,7 +397,12 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
   let clientInjectReady = Boolean(resolvedTmuxSessionId);
   let clientInjectReason = clientInjectReady ? 'tmux_session_ready' : 'tmux_session_missing';
   let stopMessageClientInjectSessionScope = resolvedTmuxSessionId ? `tmux:${resolvedTmuxSessionId}` : undefined;
-  if (resolvedTmuxSessionId && !isTmuxSessionAlive(resolvedTmuxSessionId)) {
+  if (resolvedTmuxSessionId && evaluateTmuxScopeCleanup({
+    mode: 'request_guard',
+    tmuxSessionId: resolvedTmuxSessionId,
+    reason: 'request_guard',
+    isTmuxSessionAlive
+  }).cleanupTmuxScope) {
     try {
       getSessionClientRegistry().unbindSessionScope(`tmux:${resolvedTmuxSessionId}`);
     } catch {

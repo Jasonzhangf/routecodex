@@ -587,6 +587,13 @@ Tags: reasoning, anthropic, output_config, thinking, responses, sse, codex-ui, s
   - 后果：如果用户没写 `clock` 配置，`clock` tool 仍能 schedule，但后台定时 daemon 根本没启动，只会在后续请求里把多个 overdue task 一起补出来。
 - 2026-03-16: 已修复 `http-server-session-daemon.ts`，改为即使 host config 缺失 `clock` 也调用 `resolveClockConfigSnapshot(undefined)`，按 llmswitch 默认配置启动 daemon；并新增回归：
   - `tests/server/http-server/http-server-session-daemon.bootstrap.spec.ts` 覆盖“无 host clock 配置也会启动 daemon”。
+- 2026-03-16: Heartbeat marker 语法已扩展并明确覆盖语义：`<**hb:15m**>` / `<**hb:30s**>` / `<**hb:2h**>` / `<**hb:1d**>` 都表示**开启 heartbeat 并写入该 tmux state 的 interval override**；同一条最新 user 消息里按出现顺序解析，**最后一个 directive 生效**。`<**hb:on**>` 会开启 heartbeat 并**清除旧 interval override**，回到全局默认 interval；`<**hb:off**>` 会关闭 heartbeat 并清除 override。daemon 触发判定也改为 `state.intervalMs ?? config.tickMs`，扫描 cadence 则保持短周期（最多 60s）以避免默认 15m tick 吃掉更短 override。回归已补到 `tests/servertool/servertool-heartbeat.spec.ts`，覆盖 override 生效、`hb:on` 清除 override，以及 state interval 优先于全局 tick。
+- 2026-03-16: Heartbeat request marker 现在先做**无条件剥离**再做语义解析：任何形如 `<**hb:...**>` 的完整 marker，甚至未闭合的 `<**hb:broken`，都不会继续带入下游 request/context。只有合法 body（`on` / `off` / `\d+[smhd]`）才会落成 directive；非法 body 只剥离、不生效。回归：`tests/servertool/servertool-heartbeat.spec.ts` 新增 invalid/unterminated marker strip case。
+- 2026-03-16: 规则进一步收敛为**所有 `<**...**>` / `<**...` marker 语法都必须在 chat request path 统一剥离**，不能依赖各子模块各自清理。新增统一真源 `chat-process-generic-marker-strip.ts`，挂到 `chat-process-clock-reminders.ts` 的统一出口；因此无论是 heartbeat / clock / unknown marker / invalid marker / unterminated marker，只要还残留在 request messages 里，最终都会在出站前被去掉，不允许污染 provider 请求。回归：`tests/servertool/servertool-heartbeat.spec.ts` 新增 generic marker strip case。
+- 2026-03-16: provider snapshot hook 的“非阻塞但可观测”真源已修正：`src/modules/llmswitch/bridge/runtime-integrations.ts` 真实可用模块应为 `conversion/snapshot-utils`，不是不存在的 `conversion/shared/snapshot-hooks`。这修复了运行时 `[provider-snapshot] writeSnapshotViaHooks not available` 的错误导入根因，并保留“失败不阻塞主流程、但必须 `console.warn` 暴露”的原则。回归：`tests/modules/llmswitch/bridge/runtime-integrations.snapshot.spec.ts`、`tests/snapshot/entry-endpoint-bucket.spec.ts`。
+
+Tags: heartbeat, hb-marker, interval-override, hb-on, hb-off, tmux, daemon-scan, ssot, snapshot-hooks, provider-snapshot, non-blocking, observable
+
 - 2026-03-16: 修复后再次通过 dev 运行态 dry-run：
   - `routecodex heartbeat list --port 5555 --json`
   - `routecodex heartbeat trigger --port 5555 --tmux-session-id __clock_fix_probe__ --dry-run --json`
@@ -645,3 +652,35 @@ Tags: silent-failure, verification, build-dev, repo-sanity
 - 2026-03-16 (验证): `npx tsc -p tsconfig.json --noEmit` 通过；`npm run verify:repo-sanity` 通过；`npm run build:dev` 通过（含 install:global + health check + restart 5555）。
 
 Tags: silent-failure, snapshot-writer, tokenfile-auth, oauth-auth, port-utils, validate, non-blocking, observability
+- 2026-03-16 (继续推进): 修复 `sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-heartbeat-directives.ts` 的断链问题并补齐可观测性：
+  - 修正 `directives/actions` 类型与返回形状不一致、被破坏的正则文本替换语句，恢复编译。
+  - 新增 heartbeat 指令持久化非阻断日志：`setHeartbeatEnabled`/`startHeartbeatDaemonIfNeeded` 失败改为带 tmuxSessionId/action/intervalMs 的 warning（仍不阻断主请求）。
+  - `src/providers/auth/oauth-lifecycle.ts` 新增统一 `logOAuthLifecycleNonBlockingError(...)`，把 camoufox verify open、interactive lock 读写/回收、iflow auto-failure state 读写、Gemini service 响应 JSON 解析等吞异常点改为上下文 debug/warn。
+- 2026-03-16 (验证): `npx tsc -p tsconfig.json --noEmit` 通过；`npm run verify:repo-sanity` 通过；`npm run build:dev` 通过；`npx jest tests/servertool/servertool-heartbeat.spec.ts --runInBand` 11/11 通过。
+
+Tags: silent-failure, heartbeat-directives, oauth-lifecycle, non-blocking, observability, build-dev, heartbeat-spec
+
+## Marker 生命周期收敛（2026-03-16）
+
+- 2026-03-16: marker 语法剥离与生命周期入口进一步收敛到唯一真源 `sharedmodule/llmswitch-core/src/conversion/shared/marker-lifecycle.ts`。
+  - 统一负责：
+    - 扫描任意 `<**...**>` 完整 marker；
+    - 扫描未闭合 `<**...` 到行尾；
+    - 剥离消息正文中的 marker 语法；
+    - 清理 `request.messages` 与 `semantics.responses.context.input` 两条请求链路。
+  - 规则明确为：**不论 marker 是否合法，语法都必须被剥离，绝不允许污染 provider request。**
+- 2026-03-16: `chat-process-heartbeat-directives.ts` 已改为复用统一 marker 模块做最新 user 消息剥离，只在 `hb:on` / `hb:off` / `hb:<number>[smhd]` 时产生命令语义；非法 heartbeat marker 仅剥离、不生效。
+- 2026-03-16: `router/virtual-router/stop-message-markers.ts` 已改为复用统一 marker 模块：
+  - marker 检测不再自己维护正则；
+  - stopMessage 清理直接走统一 in-place cleaner；
+  - ANSI 日志颜色字面量改回 `\\x1b` 转义，避免文件中混入裸 escape 字符。
+- 2026-03-16: `req_process_stage2_route_select` 也改为走统一 marker cleaner，避免 route select 后仍依赖另一套 native-only marker 清理逻辑，保证 request path 的 marker 剥离真源唯一。
+- 2026-03-16: 兼容层 `routing-stop-message-parser.ts` 现在仅作为统一模块 re-export，旧入口不再承载独立实现。
+- 2026-03-16: 回归验证：
+  - `npm run jest:run -- --runInBand --runTestsByPath tests/servertool/stopmessage-marker-module.spec.ts tests/servertool/chat-request-marker-strip.spec.ts tests/servertool/servertool-heartbeat.spec.ts`
+  - `npx tsc -p sharedmodule/llmswitch-core/tsconfig.json --noEmit`
+  - `cd sharedmodule/llmswitch-core && npm run build`
+  - `npm run build:dev`
+  - 其中首次 `build:dev` 被 `verify:repo-sanity` 阻断，根因是新建 marker 文件/测试尚未 git add；补 `git add` 后再次构建通过。
+
+Tags: marker, stopmessage, heartbeat, clock, request-sanitizer, route-select, ssot, syntax-strip, lifecycle, build-dev

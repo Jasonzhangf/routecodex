@@ -18,6 +18,12 @@ export interface ProviderErrorEventRecord {
   details?: unknown;
 }
 
+function logProviderQuotaStoreNonBlockingError(operation: string, error: unknown, details?: Record<string, unknown>): void {
+  const reason = error instanceof Error ? error.message : String(error);
+  const suffix = details ? ` details=${JSON.stringify(details)}` : '';
+  console.warn(`[provider-quota-store] ${operation} failed (non-blocking): ${reason}${suffix}`);
+}
+
 function parseHttpStatusFromCode(value: unknown): number | null {
   if (typeof value !== 'string') {
     return null;
@@ -112,7 +118,8 @@ export async function loadProviderQuotaSnapshot(): Promise<ProviderQuotaSnapshot
       return null;
     }
     return parsed;
-  } catch {
+  } catch (error) {
+    logProviderQuotaStoreNonBlockingError('loadProviderQuotaSnapshot', error, { filePath });
     return null;
   }
 }
@@ -139,8 +146,8 @@ export async function saveProviderQuotaSnapshot(
 
   try {
     await fs.mkdir(dir, { recursive: true });
-  } catch {
-    // best-effort
+  } catch (error) {
+    logProviderQuotaStoreNonBlockingError('saveProviderQuotaSnapshot.mkdir', error, { dir });
   }
 
   const tmpPath = `${filePath}.tmp`;
@@ -148,12 +155,12 @@ export async function saveProviderQuotaSnapshot(
   try {
     await fs.writeFile(tmpPath, text, 'utf8');
     await fs.rename(tmpPath, filePath);
-  } catch {
-    // 写入失败不应影响主流程
+  } catch (error) {
+    logProviderQuotaStoreNonBlockingError('saveProviderQuotaSnapshot.write', error, { filePath });
     try {
       await fs.unlink(tmpPath);
-    } catch {
-      // ignore
+    } catch (cleanupError) {
+      logProviderQuotaStoreNonBlockingError('saveProviderQuotaSnapshot.cleanupTmp', cleanupError, { tmpPath });
     }
   }
 }
@@ -163,8 +170,8 @@ export async function appendProviderErrorEvent(event: ProviderErrorEventRecord):
   const filePath = resolveErrorLogPath();
   try {
     await fs.mkdir(dir, { recursive: true });
-  } catch {
-    // best-effort
+  } catch (error) {
+    logProviderQuotaStoreNonBlockingError('appendProviderErrorEvent.mkdir', error, { dir });
   }
   const envelope = {
     ts: event.ts,
@@ -177,7 +184,7 @@ export async function appendProviderErrorEvent(event: ProviderErrorEventRecord):
   const line = `${JSON.stringify(envelope)}\n`;
   try {
     await fs.appendFile(filePath, line, 'utf8');
-  } catch {
-    // 追加失败不影响主流程
+  } catch (error) {
+    logProviderQuotaStoreNonBlockingError('appendProviderErrorEvent.append', error, { filePath });
   }
 }

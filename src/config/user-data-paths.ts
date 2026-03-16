@@ -46,10 +46,19 @@ function expandHome(value: string, homeDir?: string): string {
   return path.join(resolveHomeDir(homeDir), value.slice(2));
 }
 
+function isLegacyUserDirPath(value: string, homeDir?: string): boolean {
+  const normalized = path.resolve(expandHome(value, homeDir));
+  const legacy = resolveLegacyRouteCodexUserDir(homeDir);
+  return normalized === legacy;
+}
+
 export function resolveRccUserDir(homeDir?: string): string {
   for (const key of USER_DIR_ENV_KEYS) {
     const raw = String(process.env[key] || '').trim();
     if (raw) {
+      if (isLegacyUserDirPath(raw, homeDir)) {
+        continue;
+      }
       return path.resolve(expandHome(raw, homeDir));
     }
   }
@@ -202,13 +211,16 @@ export function resolveRccConfigFileForRead(homeDir?: string): string {
 
 export function ensureRccUserDirEnvironment(homeDir?: string): string {
   const userDir = resolveRccUserDir(homeDir);
-  if (!String(process.env.RCC_HOME || '').trim()) {
+  const rccHome = String(process.env.RCC_HOME || '').trim();
+  if (!rccHome || isLegacyUserDirPath(rccHome, homeDir)) {
     process.env.RCC_HOME = userDir;
   }
-  if (!String(process.env.ROUTECODEX_USER_DIR || '').trim()) {
+  const routeUserDir = String(process.env.ROUTECODEX_USER_DIR || '').trim();
+  if (!routeUserDir || isLegacyUserDirPath(routeUserDir, homeDir)) {
     process.env.ROUTECODEX_USER_DIR = userDir;
   }
-  if (!String(process.env.ROUTECODEX_HOME || '').trim()) {
+  const routeHome = String(process.env.ROUTECODEX_HOME || '').trim();
+  if (!routeHome || isLegacyUserDirPath(routeHome, homeDir)) {
     process.env.ROUTECODEX_HOME = userDir;
   }
   return userDir;

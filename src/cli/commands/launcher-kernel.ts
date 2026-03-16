@@ -81,6 +81,23 @@ function shouldLogClientExitSummary(commandName: string): boolean {
   return normalized === 'codex' || normalized === 'claude' || normalized === 'routecodex';
 }
 
+function resolveCodexTmuxRenderEnv(env: NodeJS.ProcessEnv): { term?: string; colorTerm?: string } {
+  const termRaw = String(
+    env.ROUTECODEX_CODEX_TMUX_TERM
+      ?? env.RCC_CODEX_TMUX_TERM
+      ?? 'tmux-256color'
+  ).trim();
+  const colorTermRaw = String(
+    env.ROUTECODEX_CODEX_TMUX_COLORTERM
+      ?? env.RCC_CODEX_TMUX_COLORTERM
+      ?? 'truecolor'
+  ).trim();
+  return {
+    term: termRaw || undefined,
+    colorTerm: colorTermRaw || undefined
+  };
+}
+
 function resolveExitGracePeriodMs(env: NodeJS.ProcessEnv): number {
   const raw =
     env.ROUTECODEX_CLIENT_EXIT_GRACE_PERIOD_MS
@@ -840,8 +857,11 @@ function requestManagedTmuxSessionExit(
 function createManagedTmuxSession(args: {
   spawnSyncImpl: typeof spawnSync;
   cwd: string;
+  disableItalic?: boolean;
+  disableStandout?: boolean;
+  tuneRendering?: boolean;
 }): ManagedTmuxSession | null {
-  const { spawnSyncImpl, cwd } = args;
+  const { spawnSyncImpl, cwd, disableItalic, disableStandout, tuneRendering } = args;
 
   const baseNow = Date.now();
   for (let attempt = 0; attempt < 6; attempt += 1) {
@@ -859,6 +879,49 @@ function createManagedTmuxSession(args: {
     }
 
     const tmuxTarget = `${sessionName}:0.0`;
+    if (tuneRendering) {
+      try {
+        spawnSyncImpl('tmux', ['set-option', '-t', sessionName, '-g', 'default-terminal', 'tmux-256color'], {
+          encoding: 'utf8'
+        });
+      } catch {
+        // best-effort only
+      }
+      try {
+        spawnSyncImpl('tmux', ['set-option', '-t', sessionName, '-ga', 'terminal-features', ',*:RGB'], {
+          encoding: 'utf8'
+        });
+      } catch {
+        // best-effort only
+      }
+    }
+    if (disableItalic) {
+      try {
+        // Some terminal/tmux combinations render italic text as reverse video.
+        // Disable italic capability for managed sessions to keep Codex reasoning
+        // summaries readable (Codex styles reasoning as dim+italic).
+        spawnSyncImpl(
+          'tmux',
+          ['set-option', '-t', sessionName, '-ga', 'terminal-overrides', ',*:sitm@:ritm@'],
+          { encoding: 'utf8' }
+        );
+      } catch {
+        // best-effort only
+      }
+    }
+    if (disableStandout) {
+      try {
+        // Some tmux/terminal stacks map standout/reverse styles to bright background blocks.
+        // Disable standout-related capabilities for managed codex sessions when requested.
+        spawnSyncImpl(
+          'tmux',
+          ['set-option', '-t', sessionName, '-ga', 'terminal-overrides', ',*:smso@:rmso@:rev@'],
+          { encoding: 'utf8' }
+        );
+      } catch {
+        // best-effort only
+      }
+    }
     return {
       sessionName,
       tmuxTarget,
@@ -1457,9 +1520,30 @@ export function createLauncherCommand(program: Command, ctx: LauncherCommandCont
         tmuxTarget = resolveCurrentTmuxTarget(ctx.env, spawnSyncImpl);
       }
       if (tmuxEnabled && (tmuxOnly || !tmuxTarget)) {
+        const disableTmuxItalic = tmuxOnly
+          && resolveBoolFromEnv(
+            ctx.env.ROUTECODEX_CODEX_TMUX_DISABLE_ITALIC
+              ?? ctx.env.RCC_CODEX_TMUX_DISABLE_ITALIC,
+            true
+          );
+        const disableTmuxStandout = tmuxOnly
+          && resolveBoolFromEnv(
+            ctx.env.ROUTECODEX_CODEX_TMUX_DISABLE_STANDOUT
+              ?? ctx.env.RCC_CODEX_TMUX_DISABLE_STANDOUT,
+            true
+          );
+        const tuneTmuxRendering = tmuxOnly
+          && resolveBoolFromEnv(
+            ctx.env.ROUTECODEX_CODEX_TMUX_TUNE_RENDERING
+              ?? ctx.env.RCC_CODEX_TMUX_TUNE_RENDERING,
+            true
+          );
         managedTmuxSession = createManagedTmuxSession({
           spawnSyncImpl,
-          cwd: currentCwd
+          cwd: currentCwd,
+          disableItalic: disableTmuxItalic,
+          disableStandout: disableTmuxStandout,
+          tuneRendering: tuneTmuxRendering
         });
         if (managedTmuxSession) {
           tmuxTarget = managedTmuxSession.tmuxTarget;
@@ -1589,6 +1673,13 @@ export function createLauncherCommand(program: Command, ctx: LauncherCommandCont
       const toolEnv = (() => {
         if (tmuxOnly) {
           const env = { ...ctx.env };
+          const renderEnv = resolveCodexTmuxRenderEnv(ctx.env);
+          if (renderEnv.term) {
+            env.TERM = renderEnv.term;
+          }
+          if (renderEnv.colorTerm) {
+            env.COLORTERM = renderEnv.colorTerm;
+          }
           if (tmuxOnlySessionId) {
             const baseKey = resolveLauncherApiKey(ctx, fsImpl, configPath, options);
             if (!baseKey) {

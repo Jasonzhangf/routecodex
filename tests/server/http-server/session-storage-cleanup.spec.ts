@@ -132,4 +132,60 @@ describe('session storage startup cleanup', () => {
 
     expect(fs.existsSync(removeDir)).toBe(false);
   });
+
+  test('preserves mappings and tmux tool state for live tmux even when daemon heartbeat is stale', () => {
+    const keepDir = path.join(baseDir, '127.0.0.1_5520');
+    fs.mkdirSync(keepDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(keepDir, 'session-bindings.json'),
+      JSON.stringify({
+        updatedAtMs: 200,
+        records: [
+          {
+            daemonId: 'daemon-stale-live',
+            callbackUrl: 'http://127.0.0.1:9999/inject',
+            tmuxSessionId: 'live-tmux',
+            lastHeartbeatAtMs: 10
+          }
+        ],
+        conversationToTmuxSession: {
+          'conv-live': 'live-tmux'
+        }
+      }, null, 2),
+      'utf8'
+    );
+    fs.writeFileSync(
+      path.join(keepDir, 'tmux-tools-state.json'),
+      JSON.stringify({
+        version: 1,
+        updatedAtMs: 200,
+        heartbeats: {
+          'live-tmux': { enabled: true, updatedAtMs: 199 }
+        },
+        injections: {
+          'live-tmux': { lastInjectAtMs: 198 }
+        }
+      }, null, 2),
+      'utf8'
+    );
+
+    const summary = cleanupSessionStorageOnStartup({
+      baseDir,
+      nowMs: 200,
+      staleAfterMs: 50,
+      isTmuxSessionAlive: (tmuxSessionId) => tmuxSessionId === 'live-tmux'
+    });
+
+    expect(summary.removedRegistryRecords).toBe(1);
+    expect(summary.removedRegistryMappings).toBe(0);
+    expect(summary.removedToolStateEntries).toBe(0);
+
+    const keptBindings = JSON.parse(fs.readFileSync(path.join(keepDir, 'session-bindings.json'), 'utf8'));
+    expect(keptBindings.records).toEqual([]);
+    expect(keptBindings.conversationToTmuxSession).toEqual({ 'conv-live': 'live-tmux' });
+
+    const keptToolState = JSON.parse(fs.readFileSync(path.join(keepDir, 'tmux-tools-state.json'), 'utf8'));
+    expect(Object.keys(keptToolState.heartbeats)).toEqual(['live-tmux']);
+    expect(Object.keys(keptToolState.injections)).toEqual(['live-tmux']);
+  });
 });

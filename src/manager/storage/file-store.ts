@@ -20,6 +20,12 @@ type JsonlEnvelope<TSnapshot, TEvent> =
   | { kind: 'snapshot'; timestamp: number; snapshot: TSnapshot }
   | { kind: 'event'; timestamp: number; event: TEvent };
 
+function logJsonlFileStoreNonBlockingError(operation: string, error: unknown, details?: Record<string, unknown>): void {
+  const reason = error instanceof Error ? error.message : String(error);
+  const suffix = details ? ` details=${JSON.stringify(details)}` : '';
+  console.warn(`[jsonl-file-store] ${operation} failed (non-blocking): ${reason}${suffix}`);
+}
+
 export class JsonlFileStore<TSnapshot, TEvent = unknown>
   implements StateStore<TSnapshot, TEvent>
 {
@@ -47,12 +53,13 @@ export class JsonlFileStore<TSnapshot, TEvent = unknown>
           if (parsed && parsed.kind === 'snapshot' && parsed.snapshot !== undefined) {
             return parsed.snapshot;
           }
-        } catch {
-          // ignore parse errors for individual lines
+        } catch (error) {
+          logJsonlFileStoreNonBlockingError('load.parseLine', error, { filePath: this.filePath, line: idx });
         }
       }
       return null;
-    } catch {
+    } catch (error) {
+      logJsonlFileStoreNonBlockingError('load.readFile', error, { filePath: this.filePath });
       return null;
     }
   }
@@ -93,8 +100,8 @@ export class JsonlFileStore<TSnapshot, TEvent = unknown>
           if (parsed && typeof parsed.timestamp === 'number') {
             envelopes.push(parsed);
           }
-        } catch {
-          // 忽略单行解析错误
+        } catch (error) {
+          logJsonlFileStoreNonBlockingError('compact.parseLine', error, { filePath: this.filePath });
         }
       }
       if (!envelopes.length) {
@@ -128,8 +135,8 @@ export class JsonlFileStore<TSnapshot, TEvent = unknown>
       await fs.mkdir(dir, { recursive: true });
       const payload = `${next.map((entry) => JSON.stringify(entry)).join('\n')  }\n`;
       await fs.writeFile(this.filePath, payload, 'utf8');
-    } catch {
-      // 压缩失败不影响主流程
+    } catch (error) {
+      logJsonlFileStoreNonBlockingError('compact', error, { filePath: this.filePath });
     }
   }
 
@@ -139,8 +146,8 @@ export class JsonlFileStore<TSnapshot, TEvent = unknown>
       await fs.mkdir(dir, { recursive: true });
       const line = `${JSON.stringify(payload)}\n`;
       await fs.appendFile(this.filePath, line, 'utf8');
-    } catch {
-      // 持久化失败不应影响主流程；吞掉错误。
+    } catch (error) {
+      logJsonlFileStoreNonBlockingError('appendLine', error, { filePath: this.filePath });
     }
   }
 }

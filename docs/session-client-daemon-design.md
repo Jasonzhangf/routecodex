@@ -311,7 +311,9 @@ Heartbeat-Until: 2026-03-16T23:00:00+08:00
 
 ### 16.2 Delivery loop
 
-- Persistence root: `$ROUTECODEX_SESSION_DIR/heartbeat/*.json`
+- Persistence root: `<sessions-root>/heartbeat/*.json`
+  - If `ROUTECODEX_SESSION_DIR` points to a port-scoped bucket like `~/.rcc/sessions/127.0.0.1_5520`, heartbeat state must still resolve to the parent sessions root (`~/.rcc/sessions/heartbeat/*.json`).
+  - This keeps heartbeat persistence bound to the **tmux session domain**, not to one server port bucket.
 - Daemon tick: every **15 minutes**
 - Each due heartbeat attempts tmux injection only when both are true:
   1. no active in-flight request is bound to that tmux scope
@@ -338,6 +340,30 @@ Heartbeat injection is tmux-only and uses one fixed prompt generated from the he
 - If tmux workdir cannot be resolved, heartbeat skips without fallback to server cwd.
 - If tmux session is dead, persisted heartbeat state is removed during startup cleanup / runtime scan.
 - If `Heartbeat-Until` is expired, heartbeat state is auto-disabled.
+- Current cleanup risk review:
+  - startup/reaper cleanup may remove **heartbeat state / registry records / conversation bindings / tool-state metadata** when a tmux session is judged dead or stale;
+  - current runtime path does **not** directly kill tmux sessions during stale-heartbeat cleanup;
+  - therefore the main risk today is **metadata false-positive cleanup** (functional amnesia), not tmux process termination.
+
+### 16.4.1 Cleanup entrypoint matrix (single source of truth)
+
+| Entrypoint | Trigger | Removes daemon record | Removes tmux-scoped mappings / stop-message / task metadata | Kills tmux |
+|---|---|---:|---:|---:|
+| `cleanupSessionStorageOnStartup()` | server start | Yes, for dead or stale records | Yes, **only** for tmux judged dead; stale-but-alive tmux now keeps mappings/tool-state | No |
+| `SessionReaper.cleanupDeadTmuxSessions()` | periodic reaper | Yes, when tmux probe says dead | Yes | Not in current runtime wiring |
+| `SessionReaper.cleanupStaleHeartbeats()` | periodic reaper | Yes, stale daemon record only | **No** for tmux that is still alive; stale-but-live tmux scope is preserved | No |
+| `POST /daemon/session/cleanup mode=dead_tmux` | admin/manual | Yes | Yes | No (`allowManagedTermination=false`) |
+| `POST /daemon/session/cleanup mode=stale_heartbeat` | admin/manual | Yes, stale daemon record only | **No** for tmux that is still alive | No |
+| `clock-runtime-hooks` cleanup | tmux inject path confirms dead/missing tmux | N/A | Yes, clears routing/stop-message scope for dead tmux | No |
+| `executor-metadata` / `client-injection-flow` unbind | request-time dead tmux / inject failure cleanup | N/A | Yes, scoped unbind only | No |
+| `heartbeat/session-store.removeHeartbeatState()` | heartbeat daemon confirms dead tmux or legacy migration cleanup | N/A | heartbeat state only | No |
+
+Rules:
+
+- **Dead tmux** can clear tmux-scoped metadata.
+- **Stale daemon heartbeat alone** must only remove daemon registration, and must not clear the still-alive tmux scope.
+- Any path that wants to terminate tmux must be explicitly wired and separately reviewed; current runtime path does not do this.
+- Host-side cleanup判定唯一真源：`src/server/runtime/http-server/tmux-scope-cleanup-policy.ts`
 
 ### 16.5 Failure policy
 

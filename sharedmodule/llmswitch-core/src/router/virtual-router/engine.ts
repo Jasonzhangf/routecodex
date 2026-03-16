@@ -16,17 +16,18 @@ import type {
 } from './types.js';
 import { VirtualRouterError, VirtualRouterErrorCode } from './types.js';
 import { createVirtualRouterEngineProxy, type NativeVirtualRouterEngineProxy } from './engine-selection/native-virtual-router-engine-proxy.js';
-import {
-  cleanRoutingInstructionMarkersWithNative,
-  parseRoutingInstructionKindsWithNative
-} from './engine-selection/native-virtual-router-routing-instructions-semantics.js';
-import { extractMessageText, getLatestUserMessage } from './message-utils.js';
 import { ProviderRegistry } from './provider-registry.js';
-import { resolveStopMessageScope } from './engine/routing-state/store.js';
 import { loadRoutingInstructionStateSync } from './sticky-session-store.js';
 import { mergeStopMessageFromPersisted } from './stop-message-state-sync.js';
+import { resolveStopMessageScope } from './engine/routing-state/store.js';
 import type { RoutingInstructionState } from './routing-instructions.js';
 import { resolveRouteColor, resolveSessionColor } from './engine-logging.js';
+import {
+  buildStopMessageMarkerParseLog,
+  cleanStopMessageMarkersInPlace,
+  emitStopMessageMarkerParseLog,
+  formatStopMessageStatusLabel
+} from './stop-message-markers.js';
 
 export class VirtualRouterEngine {
   private readonly nativeProxy: NativeVirtualRouterEngineProxy;
@@ -97,7 +98,7 @@ export class VirtualRouterEngine {
     request: StandardizedRequest | ProcessedRequest,
     metadata: RouterMetadataInput
   ): { target: TargetMetadata; decision: RoutingDecision; diagnostics: RoutingDiagnostics } {
-    const parseLog = buildRoutingInstructionParseLog(request, metadata);
+    const parseLog = buildStopMessageMarkerParseLog(request, metadata);
     const nativeMetadata = injectRuntimeNowMs(metadata);
     let raw: unknown;
     try {
@@ -116,10 +117,10 @@ export class VirtualRouterEngine {
       decision: RoutingDecision;
       diagnostics: RoutingDiagnostics;
     };
-    emitRoutingInstructionParseLog(parseLog);
+    emitStopMessageMarkerParseLog(parseLog);
     // Keep legacy observable behavior for callers/tests that inspect the request object
     // after route(): instruction markers are stripped from forwarded payload structures.
-    cleanRoutingInstructionMarkersInPlace(request as unknown as Record<string, unknown>);
+    cleanStopMessageMarkersInPlace(request as unknown as Record<string, unknown>);
     const stopScope = parseLog?.stopScope || resolveStopMessageScope(metadata);
     const stopState = stopScope ? this.getStopMessageState(metadata) : null;
     const forceStopStatusLabel = Boolean(
@@ -306,79 +307,6 @@ function injectRuntimeNowMs(metadata: RouterMetadataInput): RouterMetadataInput 
   return { ...metadata, __rt: { nowMs } } as RouterMetadataInput;
 }
 
-type RoutingInstructionParseLog = {
-  requestId: string;
-  markerDetected: boolean;
-  preview: string;
-  stopMessageTypes: string[];
-  scopedTypes: string[];
-  stopScope?: string;
-};
-
-function buildRoutingInstructionParseLog(
-  request: StandardizedRequest | ProcessedRequest,
-  metadata: RouterMetadataInput
-): RoutingInstructionParseLog | null {
-  const messages = Array.isArray((request as { messages?: unknown }).messages)
-    ? (((request as { messages?: unknown[] }).messages ?? []) as StandardizedMessage[])
-    : [];
-  if (!messages.length) {
-    return null;
-  }
-  const latest = getLatestUserMessage(messages);
-  const latestText = latest ? extractMessageText(latest).trim() : '';
-  const latestHasMarker = /<\*\*[\s\S]*?\*\*>/.test(latestText);
-  const hasStopKeyword = /stopmessage/i.test(latestText);
-  if (!hasStopKeyword && !latestHasMarker) {
-    return null;
-  }
-  const parsedKinds = parseRoutingInstructionKindsWithNative(request as unknown as Record<string, unknown>);
-  const stopMessageTypes = parsedKinds.filter(
-    (type) => type === 'stopMessageSet' || type === 'stopMessageMode' || type === 'stopMessageClear'
-  );
-  const scopedTypes = parsedKinds.filter(
-    (type) =>
-      type === 'stopMessageSet' ||
-      type === 'stopMessageMode' ||
-      type === 'stopMessageClear' ||
-      type === 'preCommandSet' ||
-      type === 'preCommandClear'
-  );
-  if (!hasStopKeyword && stopMessageTypes.length === 0 && scopedTypes.length === 0) {
-    return null;
-  }
-  return {
-    requestId: metadata.requestId || 'n/a',
-    markerDetected: latestHasMarker,
-    preview: latestText.replace(/\s+/g, ' ').slice(0, 120),
-    stopMessageTypes,
-    scopedTypes,
-    stopScope: resolveStopMessageScope(metadata)
-  };
-}
-
-function emitRoutingInstructionParseLog(log: RoutingInstructionParseLog | null): void {
-  if (!log) {
-    return;
-  }
-  const reset = '\x1b[0m';
-  const tagColor = '\x1b[38;5;39m';
-  const scopeColor = '\x1b[38;5;220m';
-  console.log(
-    `${tagColor}[virtual-router][stop_message_parse]${reset} requestId=${log.requestId} marker=${log.markerDetected ? 'detected' : 'missing'} parsed=${log.stopMessageTypes.join(',') || 'none'} preview=${log.preview}`
-  );
-  if (log.scopedTypes.length > 0) {
-    if (log.stopScope) {
-      console.log(
-        `${scopeColor}[virtual-router][stop_scope]${reset} requestId=${log.requestId} stage=apply scope=${log.stopScope} instructions=${log.scopedTypes.join(',')}`
-      );
-    } else {
-      console.log(
-        `${scopeColor}[virtual-router][stop_scope]${reset} requestId=${log.requestId} stage=drop reason=missing_tmux_scope instructions=${log.scopedTypes.join(',')}`
-      );
-    }
-  }
-}
 
 function emitVirtualRouterHitLog(result: {
   target: TargetMetadata;
@@ -432,64 +360,4 @@ function resolveVirtualRouterLogSessionId(metadata: RouterMetadataInput): string
     }
   }
   return undefined;
-}
-
-function formatStopMessageStatusLabel(
-  snapshot: StopMessageStateSnapshot | null,
-  scope: string | undefined,
-  forceShow: boolean
-): string {
-  const scopeLabel = scope && scope.trim() ? scope.trim() : 'none';
-
-  if (!snapshot) {
-    if (!forceShow) {
-      return '';
-    }
-    return `[stopMessage:scope=${scopeLabel} active=no state=cleared]`;
-  }
-
-  const text = typeof snapshot.stopMessageText === 'string' ? snapshot.stopMessageText.trim() : '';
-  const safeText = text ? (text.length > 24 ? `${text.slice(0, 21)}...` : text) : '(mode-only)';
-  const mode = (snapshot.stopMessageStageMode || 'unset').toString().toLowerCase();
-  const maxRepeats =
-    typeof snapshot.stopMessageMaxRepeats === 'number' && Number.isFinite(snapshot.stopMessageMaxRepeats)
-      ? Math.max(0, Math.floor(snapshot.stopMessageMaxRepeats))
-      : 0;
-  const used =
-    typeof snapshot.stopMessageUsed === 'number' && Number.isFinite(snapshot.stopMessageUsed)
-      ? Math.max(0, Math.floor(snapshot.stopMessageUsed))
-      : 0;
-  const remaining = maxRepeats > 0 ? Math.max(0, maxRepeats - used) : -1;
-  const active = mode !== 'off' && Boolean(text) && maxRepeats > 0;
-  const rounds = maxRepeats > 0 ? `${used}/${maxRepeats}` : `${used}/-`;
-  const left = remaining >= 0 ? String(remaining) : 'n/a';
-
-  return `[stopMessage:scope=${scopeLabel} text="${safeText}" mode=${mode} round=${rounds} left=${left} active=${active ? 'yes' : 'no'}]`;
-}
-
-function cleanRoutingInstructionMarkersInPlace(request: Record<string, unknown>): void {
-  const cleaned = cleanRoutingInstructionMarkersWithNative(request);
-  if (Array.isArray((cleaned as { messages?: unknown }).messages)) {
-    request.messages = (cleaned as { messages: unknown }).messages as unknown;
-  }
-  const cleanedSemantics = (cleaned as { semantics?: unknown }).semantics;
-  if (cleanedSemantics && typeof cleanedSemantics === 'object' && !Array.isArray(cleanedSemantics)) {
-    const cleanedResponses = (cleanedSemantics as { responses?: unknown }).responses;
-    if (cleanedResponses && typeof cleanedResponses === 'object' && !Array.isArray(cleanedResponses)) {
-      const cleanedContext = (cleanedResponses as { context?: unknown }).context;
-      if (cleanedContext !== undefined) {
-        const semantics =
-          request.semantics && typeof request.semantics === 'object' && !Array.isArray(request.semantics)
-            ? (request.semantics as Record<string, unknown>)
-            : {};
-        const responses =
-          semantics.responses && typeof semantics.responses === 'object' && !Array.isArray(semantics.responses)
-            ? (semantics.responses as Record<string, unknown>)
-            : {};
-        responses.context = cleanedContext;
-        semantics.responses = responses;
-        request.semantics = semantics;
-      }
-    }
-  }
 }

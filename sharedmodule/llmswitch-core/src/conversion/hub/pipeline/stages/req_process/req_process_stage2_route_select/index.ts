@@ -9,7 +9,7 @@ import type {
 import { VirtualRouterEngine } from '../../../../../../router/virtual-router/engine.js';
 import { recordStage } from '../../../stages/utils.js';
 import { applyReqProcessRouteSelectionWithNative } from '../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-req-process-semantics.js';
-import { cleanRoutingInstructionMarkersWithNative } from '../../../../../../router/virtual-router/engine-selection/native-virtual-router-routing-instructions-semantics.js';
+import { cleanMarkerSyntaxInPlace } from '../../../../../shared/marker-lifecycle.js';
 
 export interface ReqProcessStage2RouteSelectOptions {
   routerEngine: VirtualRouterEngine;
@@ -48,8 +48,8 @@ export function runReqProcessStage2RouteSelect(
       originalModel: previousModel
     }
   );
-  const cleanedRequest = cleanRoutingInstructionMarkersWithNative(nativeApplied.request);
-  replaceRecordInPlace(options.request as unknown as Record<string, unknown>, cleanedRequest);
+  cleanMarkerSyntaxInPlace(nativeApplied.request as Record<string, unknown>);
+  replaceRecordInPlace(options.request as unknown as Record<string, unknown>, nativeApplied.request as Record<string, unknown>);
   replaceRecordInPlace(options.normalizedMetadata, nativeApplied.normalizedMetadata);
   recordStage(options.stageRecorder, 'chat_process.req.stage5.route_select', {
     target: result.target,

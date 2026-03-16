@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { evaluateTmuxScopeCleanup } from './tmux-scope-cleanup-policy.js';
 
 export type SessionClientRecord = {
   daemonId: string;
@@ -217,6 +218,7 @@ export function cleanupStaleHeartbeatsFromRegistry(args: {
   conversationToTmuxSession: Map<string, string>;
   nowMs?: number;
   staleAfterMs?: number;
+  isTmuxSessionAlive?: (tmuxSessionId: string) => boolean;
   terminateManagedTmuxSession?: (tmuxSessionId: string) => boolean;
   terminateManagedClientProcess?: (processInfo: ManagedProcessInfo) => boolean;
 }): SessionStaleCleanupResult {
@@ -241,6 +243,13 @@ export function cleanupStaleHeartbeatsFromRegistry(args: {
     }
 
     const tmuxSessionId = normalizeString(record.tmuxSessionId) ?? normalizeString(record.sessionId);
+    const cleanupDecision = evaluateTmuxScopeCleanup({
+      mode: 'stale_record',
+      tmuxSessionId,
+      reason: 'stale_heartbeat',
+      isTmuxSessionAlive: args.isTmuxSessionAlive,
+    });
+    const tmuxAlive = cleanupDecision.liveness === 'alive';
     const hasSharedTmuxPeer = tmuxSessionId
       ? hasOtherDaemonForTmuxSession({ records: args.records, daemonId, tmuxSessionId })
       : false;
@@ -256,7 +265,7 @@ export function cleanupStaleHeartbeatsFromRegistry(args: {
     }
 
     removedDaemonIds.push(daemonId);
-    if (tmuxSessionId) {
+    if (tmuxSessionId && cleanupDecision.cleanupTmuxScope) {
       removedTmuxSessionIds.push(tmuxSessionId);
     }
 
@@ -264,7 +273,7 @@ export function cleanupStaleHeartbeatsFromRegistry(args: {
       ? record.conversationSessionIds.filter((item) => normalizeString(item))
       : [];
 
-    if (!hasSharedTmuxPeer) {
+    if (!hasSharedTmuxPeer && cleanupDecision.cleanupTmuxScope) {
       for (const conversationSessionId of conversationSessionIds) {
         const mapped = args.conversationToTmuxSession.get(conversationSessionId);
         if (mapped && (!tmuxSessionId || mapped === tmuxSessionId)) {

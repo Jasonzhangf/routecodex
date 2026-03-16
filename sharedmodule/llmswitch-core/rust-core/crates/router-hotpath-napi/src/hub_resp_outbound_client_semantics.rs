@@ -1620,6 +1620,127 @@ fn is_codex_reasoning_summary_display_compatible(text: &str) -> bool {
         .any(|ch| !ch.is_whitespace())
 }
 
+fn collapse_whitespace_to_single_spaces(raw: &str) -> String {
+    let mut output = String::new();
+    let mut last_was_space = false;
+    for ch in raw.chars() {
+        if ch.is_whitespace() {
+            if !last_was_space {
+                output.push(' ');
+                last_was_space = true;
+            }
+            continue;
+        }
+        output.push(ch);
+        last_was_space = false;
+    }
+    output.trim().to_string()
+}
+
+fn strip_reasoning_markdown_line_prefix(raw: &str) -> String {
+    let mut current = raw.trim_start();
+    loop {
+        let before = current;
+        if let Some(rest) = current.strip_prefix('>') {
+            current = rest.trim_start();
+            continue;
+        }
+        if let Some(rest) = current.strip_prefix("- ") {
+            current = rest.trim_start();
+            continue;
+        }
+        if let Some(rest) = current.strip_prefix("* ") {
+            current = rest.trim_start();
+            continue;
+        }
+        if let Some(rest) = current.strip_prefix("+ ") {
+            current = rest.trim_start();
+            continue;
+        }
+
+        let bytes = current.as_bytes();
+        let mut cursor = 0usize;
+        while cursor < bytes.len() && bytes[cursor].is_ascii_digit() {
+            cursor += 1;
+        }
+        if cursor > 0 && cursor + 1 < bytes.len() {
+            let marker = bytes[cursor];
+            let space = bytes[cursor + 1];
+            if (marker == b'.' || marker == b')') && space.is_ascii_whitespace() {
+                current = current[(cursor + 1)..].trim_start();
+                continue;
+            }
+        }
+
+        if before == current {
+            break;
+        }
+    }
+
+    current.trim().to_string()
+}
+
+fn compact_reasoning_summary_body(raw: &str) -> String {
+    let mut chunks: Vec<String> = Vec::new();
+    for line in raw.replace("\r\n", "\n").replace('\r', "\n").lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if trimmed.starts_with("```") {
+            continue;
+        }
+        let normalized = strip_reasoning_markdown_line_prefix(trimmed);
+        if normalized.is_empty() {
+            continue;
+        }
+        chunks.push(normalized);
+    }
+    collapse_whitespace_to_single_spaces(chunks.join(" ").as_str())
+}
+
+fn normalize_reasoning_summary_text_for_codex(text: &str, ensure_header: bool) -> Option<String> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let (header, body_raw) = if trimmed.starts_with("**") {
+        let after_open = &trimmed[2..];
+        if let Some(close) = after_open.find("**") {
+            if close > 0 {
+                let header_end = 2 + close + 2;
+                (
+                    trimmed[..header_end].trim().to_string(),
+                    trimmed[header_end..].to_string(),
+                )
+            } else {
+                (String::new(), trimmed.to_string())
+            }
+        } else {
+            (String::new(), trimmed.to_string())
+        }
+    } else {
+        (String::new(), trimmed.to_string())
+    };
+
+    let body = compact_reasoning_summary_body(body_raw.as_str());
+    if !header.is_empty() {
+        if body.is_empty() {
+            return Some(header);
+        }
+        return Some(format!("{} {}", header, body).trim().to_string());
+    }
+
+    if body.is_empty() {
+        return None;
+    }
+    if ensure_header {
+        return Some(format!("**Thinking** {}", body));
+    }
+    Some(body)
+}
+
 fn normalize_reasoning_summary_for_codex_display(summary_value: &mut Value) {
     let Some(summary_items) = summary_value.as_array_mut() else {
         return;
@@ -1628,32 +1749,7 @@ fn normalize_reasoning_summary_for_codex_display(summary_value: &mut Value) {
         return;
     }
 
-    let mut has_display_compatible_summary = false;
-    for entry in summary_items.iter() {
-        let Some(row) = entry.as_object() else {
-            continue;
-        };
-        let kind = row
-            .get("type")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .trim()
-            .to_ascii_lowercase();
-        if kind != "summary_text" {
-            continue;
-        }
-        let Some(text) = row.get("text").and_then(Value::as_str) else {
-            continue;
-        };
-        if is_codex_reasoning_summary_display_compatible(text) {
-            has_display_compatible_summary = true;
-            break;
-        }
-    }
-    if has_display_compatible_summary {
-        return;
-    }
-
+    let mut summary_text_index: usize = 0;
     for entry in summary_items.iter_mut() {
         let Some(row) = entry.as_object_mut() else {
             continue;
@@ -1670,15 +1766,16 @@ fn normalize_reasoning_summary_for_codex_display(summary_value: &mut Value) {
         let Some(text) = row.get("text").and_then(Value::as_str) else {
             continue;
         };
-        let trimmed = text.trim();
-        if trimmed.is_empty() {
+        let ensure_header = summary_text_index == 0;
+        summary_text_index += 1;
+        let Some(normalized_text) = normalize_reasoning_summary_text_for_codex(text, ensure_header)
+        else {
+            continue;
+        };
+        if ensure_header && !is_codex_reasoning_summary_display_compatible(normalized_text.as_str()) {
             continue;
         }
-        row.insert(
-            "text".to_string(),
-            Value::String(format!("**Thinking** {}", trimmed)),
-        );
-        break;
+        row.insert("text".to_string(), Value::String(normalized_text));
     }
 }
 

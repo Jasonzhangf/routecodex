@@ -48,11 +48,16 @@ fn expand_home(value: &str, home_dir: &Path) -> PathBuf {
 
 fn resolve_user_dir() -> PathBuf {
     let home_dir = resolve_home_dir();
+    let legacy_dir = home_dir.join(".routecodex");
     for key in ["RCC_HOME", "ROUTECODEX_USER_DIR", "ROUTECODEX_HOME"] {
         if let Ok(v) = env::var(key) {
             let trimmed = v.trim();
             if !trimmed.is_empty() {
-                return expand_home(trimmed, &home_dir);
+                let candidate = expand_home(trimmed, &home_dir);
+                if candidate == legacy_dir {
+                    continue;
+                }
+                return candidate;
             }
         }
     }

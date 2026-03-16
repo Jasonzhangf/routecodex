@@ -5,6 +5,7 @@ import { recordStage } from '../../../stages/utils.js';
 import { applyReqProcessToolGovernanceWithNative } from '../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-req-process-semantics.js';
 import { maybeInjectClockRemindersAndApplyDirectives } from '../../../../process/chat-process-clock-reminders.js';
 import { resolveHasActiveStopMessageForContinueExecution } from '../../../../process/chat-process-continue-execution.js';
+import { sanitizeChatProcessRequest } from '../../../../process/chat-process-request-sanitizer.js';
 
 export interface ReqProcessStage1ToolGovernanceOptions {
   request: StandardizedRequest;
@@ -70,6 +71,7 @@ export async function runReqProcessStage1ToolGovernance(
     options.metadata,
     options.requestId
   ) as ProcessedRequest;
+  processedRequest = sanitizeChatProcessRequest(processedRequest as unknown as StandardizedRequest) as ProcessedRequest;
 
   const nodeResultMetadata =
     nodeResult.metadata && typeof nodeResult.metadata === 'object'

@@ -110,6 +110,25 @@ type OAuthStrategy = {
 
 const TOKEN_REFRESH_SKEW_MS = 60_000;
 
+function logOAuthLifecycleNonBlockingError(
+  operation: string,
+  error: unknown,
+  details?: Record<string, unknown>,
+  options?: { warn?: boolean }
+): void {
+  const reason = error instanceof Error ? error.message : String(error);
+  const detailPairs = Object.entries(details || {})
+    .map(([key, value]) => `${key}=${String(value)}`)
+    .join(' ');
+  const suffix = detailPairs ? ` ${detailPairs}` : '';
+  const message = `[OAuth] ${operation} failed (non-blocking): ${reason}${suffix}`;
+  if (options?.warn) {
+    console.warn(message);
+    return;
+  }
+  logOAuthDebug(message);
+}
+
 async function openGoogleAccountVerificationInCamoufox(args: {
   providerType: string;
   auth: ExtendedOAuthAuth;
@@ -136,8 +155,13 @@ async function openGoogleAccountVerificationInCamoufox(args: {
     if (ok) {
       console.warn(`[OAuth] Google account verification opened in Camoufox (provider=${providerType} alias=${alias}).`);
     }
-  } catch {
-    // best-effort; never block requests
+  } catch (error) {
+    logOAuthLifecycleNonBlockingError(
+      'openGoogleAccountVerificationInCamoufox',
+      error,
+      { providerType, alias, url },
+      { warn: true }
+    );
   } finally {
     if (prevBrowser === undefined) {
       delete process.env.ROUTECODEX_OAUTH_BROWSER;
@@ -252,7 +276,12 @@ async function runInteractiveRepairWithAutoFallback(args: {
     let tokenFilePath = '';
     try {
       tokenFilePath = resolveTokenFilePath(auth as ExtendedOAuthAuth, providerType);
-    } catch {
+    } catch (error) {
+      logOAuthLifecycleNonBlockingError(
+        'runInteractiveRepairWithAutoFallback.resolveTokenFilePath',
+        error,
+        { providerType }
+      );
       tokenFilePath = '';
     }
     if (tokenFilePath) {
@@ -455,8 +484,8 @@ function logTokenSnapshot(providerType: string, token: StoredOAuthToken | null, 
     if (providerType === 'iflow') {
       logOAuthDebug(`[OAuth] iflow endpoints: deviceCodeUrl=${String(endpoints.deviceCodeUrl)} tokenUrl=${String(endpoints.tokenUrl)}`);
     }
-  } catch {
-    // ignore logging failures
+  } catch (error) {
+    logOAuthLifecycleNonBlockingError('logTokenSnapshot', error, { providerType });
   }
 }
 
@@ -542,8 +571,12 @@ async function ensureGeminiCLIServicesEnabled(accessToken: string, projectId: st
           if (data.state === 'ENABLED') {
             continue;
           }
-        } catch {
-          // ignore parse errors; fall through to enable
+        } catch (error) {
+          logOAuthLifecycleNonBlockingError(
+            'ensureGeminiCLIServicesEnabled.parseCheckResponse',
+            error,
+            { service, projectId }
+          );
         }
       } else {
         // drain body
@@ -588,8 +621,12 @@ async function ensureGeminiCLIServicesEnabled(accessToken: string, projectId: st
       if (parsed?.error?.message) {
         errMessage = parsed.error.message;
       }
-    } catch {
-      // ignore parse errors
+    } catch (error) {
+      logOAuthLifecycleNonBlockingError(
+        'ensureGeminiCLIServicesEnabled.parseEnableResponse',
+        error,
+        { service, projectId }
+      );
     }
 
     if (enableResp && (enableResp.ok || enableResp.status === 201)) {
@@ -884,8 +921,8 @@ function logOAuthSetup(
         } redirect=${String(client.redirectUri || '(default)')}`
       );
     }
-  } catch {
-    // ignore log errors
+  } catch (error) {
+    logOAuthLifecycleNonBlockingError('logEnsureContext', error, { providerType, tokenFilePath });
   }
 }
 
@@ -973,7 +1010,10 @@ function readInteractiveOAuthLock(): InteractiveOAuthLockRecord | null {
       startedAt: typeof node.startedAt === 'number' ? node.startedAt : Date.now(),
       callbackPort: typeof node.callbackPort === 'number' ? node.callbackPort : undefined
     };
-  } catch {
+  } catch (error) {
+    logOAuthLifecycleNonBlockingError('readInteractiveOAuthLock', error, {
+      lockFile: OAUTH_INTERACTIVE_LOCK_FILE
+    });
     return null;
   }
 }
@@ -1012,7 +1052,12 @@ async function forceReclaimInteractiveOAuthLock(lock: InteractiveOAuthLockRecord
       `[OAuth] interactive lock reclaimed pid=${lock.pid} token=${lock.tokenFile} provider=${lock.providerType}`
     );
     return true;
-  } catch {
+  } catch (error) {
+    logOAuthLifecycleNonBlockingError('forceReclaimInteractiveOAuthLock', error, {
+      pid: lock.pid,
+      providerType: lock.providerType,
+      tokenFile: lock.tokenFile
+    });
     return false;
   }
 }
@@ -1052,8 +1097,12 @@ async function acquireInteractiveOAuthLock(providerType: string, tokenFilePath: 
           if (lock && lock.pid === process.pid && path.resolve(lock.tokenFile) === current.tokenFile) {
             fsSync.unlinkSync(OAUTH_INTERACTIVE_LOCK_FILE);
           }
-        } catch {
-          // ignore release errors
+        } catch (error) {
+          logOAuthLifecycleNonBlockingError('acquireInteractiveOAuthLock.release', error, {
+            lockFile: OAUTH_INTERACTIVE_LOCK_FILE,
+            providerType,
+            tokenFile: current.tokenFile
+          });
         } finally {
           if (process.env.ROUTECODEX_OAUTH_INTERACTIVE_LOCK_FILE === OAUTH_INTERACTIVE_LOCK_FILE) {
             delete process.env.ROUTECODEX_OAUTH_INTERACTIVE_LOCK_FILE;
@@ -1069,16 +1118,25 @@ async function acquireInteractiveOAuthLock(providerType: string, tokenFilePath: 
       if (!existing) {
         try {
           await fs.unlink(OAUTH_INTERACTIVE_LOCK_FILE);
-        } catch {
-          // ignore
+        } catch (error) {
+          logOAuthLifecycleNonBlockingError('acquireInteractiveOAuthLock.removeStaleEmptyLock', error, {
+            lockFile: OAUTH_INTERACTIVE_LOCK_FILE,
+            providerType,
+            tokenFile: current.tokenFile
+          });
         }
         continue;
       }
       if (!isProcessAlive(existing.pid)) {
         try {
           await fs.unlink(OAUTH_INTERACTIVE_LOCK_FILE);
-        } catch {
-          // ignore
+        } catch (error) {
+          logOAuthLifecycleNonBlockingError('acquireInteractiveOAuthLock.removeDeadProcessLock', error, {
+            lockFile: OAUTH_INTERACTIVE_LOCK_FILE,
+            stalePid: existing.pid,
+            providerType: existing.providerType,
+            tokenFile: existing.tokenFile
+          });
         }
         continue;
       }
@@ -1117,7 +1175,10 @@ function readIflowAutoFailureState(): Record<string, IflowAutoFailureRecord> {
       return {};
     }
     return parsed as Record<string, IflowAutoFailureRecord>;
-  } catch {
+  } catch (error) {
+    logOAuthLifecycleNonBlockingError('readIflowAutoFailureState', error, {
+      file: IFLOW_AUTO_FAILURE_FILE
+    });
     return {};
   }
 }
@@ -1126,8 +1187,13 @@ function writeIflowAutoFailureState(state: Record<string, IflowAutoFailureRecord
   try {
     fsSync.mkdirSync(path.dirname(IFLOW_AUTO_FAILURE_FILE), { recursive: true });
     fsSync.writeFileSync(IFLOW_AUTO_FAILURE_FILE, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
-  } catch {
-    // ignore persistence failures
+  } catch (error) {
+    logOAuthLifecycleNonBlockingError(
+      'writeIflowAutoFailureState',
+      error,
+      { file: IFLOW_AUTO_FAILURE_FILE },
+      { warn: true }
+    );
   }
 }
 

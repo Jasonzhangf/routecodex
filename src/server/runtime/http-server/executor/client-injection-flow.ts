@@ -4,6 +4,8 @@ import {
 } from '../session-client-registry.js';
 import { bindSessionConversationSession } from './request-retry-helpers.js';
 import { sanitizeFollowupText } from '../../../../modules/llmswitch/bridge.js';
+import { evaluateTmuxScopeCleanup } from '../tmux-scope-cleanup-policy.js';
+import { isTmuxSessionAlive } from '../tmux-session-probe.js';
 
 export type StopMessageClientInjectReadiness = {
   ready: boolean;
@@ -28,16 +30,6 @@ type ClientInjectionTarget = {
 function shouldSanitizeClientInjectText(source: string): boolean {
   const normalized = typeof source === 'string' ? source.trim().toLowerCase() : '';
   return normalized !== 'servertool.clock';
-}
-
-function shouldUnbindConversationSessionOnInjectFailure(reasonRaw: unknown): boolean {
-  const reason = typeof reasonRaw === 'string' ? reasonRaw.trim().toLowerCase() : '';
-  return (
-    reason === 'tmux_session_required' ||
-    reason === 'no_matching_tmux_session_daemon' ||
-    reason === 'workdir_mismatch' ||
-    reason === 'inject_failed'
-  );
 }
 
 function createClientInjectFailureError(args: {
@@ -217,7 +209,13 @@ async function injectClientPromptStrict(args: {
 
   const reason = typeof result.reason === 'string' ? result.reason : 'inject_failed';
   const normalizedSessionScope = typeof args.sessionScope === 'string' ? args.sessionScope.trim() : '';
-  if (normalizedSessionScope && shouldUnbindConversationSessionOnInjectFailure(reason)) {
+  const shouldCleanupScope = evaluateTmuxScopeCleanup({
+    mode: 'runtime_failure',
+    tmuxSessionId: args.tmuxSessionId,
+    reason,
+    isTmuxSessionAlive
+  }).cleanupTmuxScope;
+  if (normalizedSessionScope && shouldCleanupScope) {
     try {
       getSessionClientRegistry().unbindSessionScope(normalizedSessionScope);
     } catch {

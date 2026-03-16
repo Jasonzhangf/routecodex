@@ -4,6 +4,7 @@ export type HeartbeatState = {
   enabled: boolean;
   updatedAtMs: number;
   triggerCount: number;
+  intervalMs?: number;
   lastTriggeredAtMs?: number;
   lastSkippedAtMs?: number;
   lastSkippedReason?: string;

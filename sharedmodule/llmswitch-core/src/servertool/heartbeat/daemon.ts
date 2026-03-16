@@ -4,7 +4,10 @@ import path from "node:path";
 import { ensureDir, readSessionDirEnv } from "../clock/paths.js";
 import { readJsonFile } from "../clock/io.js";
 import { nowMs } from "../clock/state.js";
-import { normalizeHeartbeatConfig } from "./config.js";
+import {
+  normalizeHeartbeatConfig,
+  resolveHeartbeatScanMs,
+} from "./config.js";
 import { resolveHeartbeatDir } from "./paths.js";
 import {
   coerceHeartbeatState,
@@ -40,6 +43,30 @@ function readString(value: unknown): string | undefined {
   return trimmed || undefined;
 }
 
+function effectiveIntervalMs(
+  state: HeartbeatState,
+  config: HeartbeatConfigSnapshot,
+): number {
+  return typeof state.intervalMs === "number" && Number.isFinite(state.intervalMs) && state.intervalMs > 0
+    ? Math.floor(state.intervalMs)
+    : config.tickMs;
+}
+
+function scheduleHeartbeatTimer(): void {
+  if (daemonTimer) {
+    clearInterval(daemonTimer);
+    daemonTimer = undefined;
+  }
+  if (!daemonStarted || !daemonConfig || daemonConfig.tickMs < 1) {
+    return;
+  }
+  const scanMs = resolveHeartbeatScanMs(daemonConfig);
+  daemonTimer = setInterval(() => {
+    void tickOnce();
+  }, scanMs);
+  daemonTimer.unref?.();
+}
+
 export function buildHeartbeatInjectText(): string {
   return [
     "[Heartbeat]",
@@ -64,7 +91,7 @@ function shouldTriggerHeartbeat(
   ) {
     return true;
   }
-  return at - state.lastTriggeredAtMs >= config.tickMs;
+  return at - state.lastTriggeredAtMs >= effectiveIntervalMs(state, config);
 }
 
 async function processHeartbeatStateFile(
@@ -177,6 +204,7 @@ export async function startHeartbeatDaemonIfNeeded(
 ): Promise<void> {
   daemonConfig = normalizeHeartbeatConfig(config);
   if (daemonStarted) {
+    scheduleHeartbeatTimer();
     await tickOnce();
     return;
   }
@@ -186,12 +214,7 @@ export async function startHeartbeatDaemonIfNeeded(
   }
   daemonStarted = true;
   await tickOnce();
-  if ((daemonConfig?.tickMs || 0) > 0) {
-    daemonTimer = setInterval(() => {
-      void tickOnce();
-    }, daemonConfig!.tickMs);
-    daemonTimer.unref?.();
-  }
+  scheduleHeartbeatTimer();
 }
 
 export async function stopHeartbeatDaemonForTests(): Promise<void> {

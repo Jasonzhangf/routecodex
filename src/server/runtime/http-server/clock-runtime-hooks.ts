@@ -4,6 +4,7 @@ import {
 } from '../../../modules/llmswitch/bridge.js';
 import { getSessionClientRegistry, injectSessionClientPromptWithResult } from './session-client-registry.js';
 import { clearStopMessageTmuxScope } from './stopmessage-scope-rebind.js';
+import { evaluateTmuxScopeCleanup } from './tmux-scope-cleanup-policy.js';
 import { isTmuxSessionAlive } from './tmux-session-probe.js';
 
 function readString(value: unknown): string | undefined {
@@ -42,18 +43,12 @@ function clearClockRuntimeScopeArtifacts(tmuxSessionId: string): void {
 }
 
 function shouldCleanupClockSession(reasonRaw: unknown, tmuxSessionId: string): boolean {
-  const reason = String(reasonRaw || '').trim().toLowerCase();
-  if (!reason) {
-    return isTmuxSessionAlive(tmuxSessionId) === false;
-  }
-  if (
-    reason === 'tmux_session_required' ||
-    reason === 'tmux_session_not_found' ||
-    reason.startsWith('tmux_send_failed')
-  ) {
-    return true;
-  }
-  return isTmuxSessionAlive(tmuxSessionId) === false;
+  return evaluateTmuxScopeCleanup({
+    mode: 'runtime_failure',
+    tmuxSessionId,
+    reason: reasonRaw,
+    isTmuxSessionAlive
+  }).cleanupTmuxScope;
 }
 
 export async function registerClockRuntimeHooks(): Promise<void> {

@@ -5,13 +5,14 @@ use std::path::{Path, PathBuf};
 
 use super::types::{DEFAULT_PRECOMMAND_SCRIPT, DEFAULT_PRECOMMAND_SCRIPT_CONTENT};
 
-fn resolve_routecodex_user_dir() -> Result<PathBuf, String> {
-    if let Ok(value) = env::var("ROUTECODEX_USER_DIR") {
-        let trimmed = value.trim().to_string();
-        if !trimmed.is_empty() {
-            return Ok(PathBuf::from(trimmed));
-        }
+fn expand_home(value: &str, home_dir: &Path) -> PathBuf {
+    if let Some(stripped) = value.strip_prefix("~/") {
+        return home_dir.join(stripped);
     }
+    PathBuf::from(value)
+}
+
+fn resolve_rcc_user_dir() -> Result<PathBuf, String> {
     let home = env::var("HOME")
         .ok()
         .or_else(|| env::var("USERPROFILE").ok())
@@ -20,11 +21,26 @@ fn resolve_routecodex_user_dir() -> Result<PathBuf, String> {
     if trimmed.is_empty() {
         return Err("precommand: cannot resolve homedir".to_string());
     }
-    Ok(PathBuf::from(trimmed).join(".routecodex"))
+    let home_dir = PathBuf::from(trimmed);
+    let legacy_dir = home_dir.join(".routecodex");
+    for key in ["RCC_HOME", "ROUTECODEX_USER_DIR", "ROUTECODEX_HOME"] {
+        if let Ok(value) = env::var(key) {
+            let raw = value.trim();
+            if raw.is_empty() {
+                continue;
+            }
+            let candidate = expand_home(raw, &home_dir);
+            if candidate == legacy_dir {
+                continue;
+            }
+            return Ok(candidate);
+        }
+    }
+    Ok(home_dir.join(".rcc"))
 }
 
 fn resolve_precommand_base_dir() -> Result<PathBuf, String> {
-    resolve_routecodex_user_dir().map(|base| base.join("precommand"))
+    resolve_rcc_user_dir().map(|base| base.join("precommand"))
 }
 
 fn normalize_relative_path(raw: &str) -> Result<String, String> {
@@ -57,7 +73,7 @@ fn normalize_relative_path(raw: &str) -> Result<String, String> {
 fn normalize_precommand_relative_path(raw: &str, from_file_scheme: bool) -> Result<String, String> {
     let normalized = normalize_relative_path(raw)?;
     if normalized == "precommand" {
-        return Err("precommand: expected script file under ~/.routecodex/precommand".to_string());
+        return Err("precommand: expected script file under ~/.rcc/precommand".to_string());
     }
     if normalized.starts_with("precommand/") {
         return Ok(normalized["precommand/".len()..].to_string());
@@ -100,7 +116,7 @@ pub(super) fn resolve_precommand_script_path(raw: &str) -> Result<String, String
         || Regex::new(r"^[a-zA-Z]:[\\/]").unwrap().is_match(&rel_raw)
     {
         return Err(
-            "precommand: only supports paths relative to ~/.routecodex/precommand".to_string(),
+            "precommand: only supports paths relative to ~/.rcc/precommand".to_string(),
         );
     }
     let rel_to_precommand = normalize_precommand_relative_path(&rel_raw, from_file_scheme)?;
@@ -109,7 +125,7 @@ pub(super) fn resolve_precommand_script_path(raw: &str) -> Result<String, String
     let abs = abs.canonicalize().unwrap_or_else(|_| abs.clone());
     let base_norm = base.canonicalize().unwrap_or_else(|_| base.clone());
     if abs != base_norm && !abs.starts_with(&base_norm) {
-        return Err("precommand: path escapes ~/.routecodex/precommand".to_string());
+        return Err("precommand: path escapes ~/.rcc/precommand".to_string());
     }
     let stat = fs::metadata(&abs);
     let stat = match stat {
@@ -168,18 +184,18 @@ pub(super) fn resolve_stop_message_text(raw: &str) -> Result<String, String> {
         || Regex::new(r"^[a-zA-Z]:[\\/]").unwrap().is_match(&rel_raw)
     {
         return Err(
-            "stopMessage file://: only supports paths relative to ~/.routecodex".to_string(),
+            "stopMessage file://: only supports paths relative to ~/.rcc".to_string(),
         );
     }
     let normalized_rel = normalize_relative_path(&rel_raw)
         .map_err(|_| "stopMessage file://: invalid relative path".to_string())?;
-    let base = resolve_routecodex_user_dir()
+    let base = resolve_rcc_user_dir()
         .map_err(|err| err.replace("precommand", "stopMessage file://"))?;
     let abs = base.join(Path::new(&normalized_rel));
     let abs = abs.canonicalize().unwrap_or_else(|_| abs.clone());
     let base_norm = base.canonicalize().unwrap_or_else(|_| base.clone());
     if abs != base_norm && !abs.starts_with(&base_norm) {
-        return Err("stopMessage file://: path escapes ~/.routecodex".to_string());
+        return Err("stopMessage file://: path escapes ~/.rcc".to_string());
     }
     let stat = fs::metadata(&abs).map_err(|err| {
         format!(

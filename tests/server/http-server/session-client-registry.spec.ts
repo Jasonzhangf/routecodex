@@ -318,13 +318,66 @@ describe('SessionClientRegistry cleanup', () => {
     });
 
     expect(cleanup.removedDaemonIds).toEqual(['sessiond_stale_managed_fail']);
-    expect(cleanup.removedTmuxSessionIds).toEqual(['rcc_stale_managed_fail']);
+    expect(cleanup.removedTmuxSessionIds).toEqual([]);
     expect(cleanup.failedKillTmuxSessionIds).toEqual([]);
     expect(cleanup.failedKillManagedClientPids).toEqual([]);
     expect(cleanup.skippedKillTmuxSessionIds).toEqual(['rcc_stale_managed_fail']);
     expect(cleanup.skippedKillManagedClientPids).toEqual([55667]);
     const alive = registry.list().map((item) => item.daemonId);
     expect(alive).not.toContain('sessiond_stale_managed_fail');
+  });
+
+  it('stale cleanup preserves conversation mapping for tmux sessions that are still alive', async () => {
+    const originalSessionDir = process.env.ROUTECODEX_SESSION_DIR;
+    const tempSessionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-stale-alive-'));
+    process.env.ROUTECODEX_SESSION_DIR = tempSessionDir;
+
+    try {
+      const registry = new SessionClientRegistry();
+      registry.register({
+        daemonId: 'sessiond_stale_alive_mapping',
+        callbackUrl: 'http://127.0.0.1:65570/inject',
+        tmuxSessionId: 'rcc_stale_alive_mapping'
+      });
+      const bind = registry.bindConversationSession({
+        conversationSessionId: 'conv_stale_alive_mapping',
+        daemonId: 'sessiond_stale_alive_mapping'
+      });
+      expect(bind.ok).toBe(true);
+
+      const internal = registry as unknown as {
+        records: Map<string, { lastHeartbeatAtMs: number }>;
+      };
+      const staleRecord = internal.records.get('sessiond_stale_alive_mapping');
+      expect(staleRecord).toBeDefined();
+      if (staleRecord) {
+        staleRecord.lastHeartbeatAtMs = 0;
+      }
+
+      const cleanup = registry.cleanupStaleHeartbeats({
+        nowMs: Date.now() + 60_000,
+        staleAfterMs: 1,
+        isTmuxSessionAlive: () => true
+      });
+
+      expect(cleanup.removedDaemonIds).toEqual(['sessiond_stale_alive_mapping']);
+      expect(cleanup.removedTmuxSessionIds).toEqual([]);
+      expect(cleanup.removedConversationSessionIds).toEqual([]);
+
+      const bindingsPath = path.join(tempSessionDir, 'session-bindings.json');
+      const persisted = JSON.parse(fs.readFileSync(bindingsPath, 'utf8'));
+      expect(persisted.records).toEqual([]);
+      expect(persisted.conversationToTmuxSession).toEqual({
+        conv_stale_alive_mapping: 'rcc_stale_alive_mapping'
+      });
+    } finally {
+      if (originalSessionDir === undefined) {
+        delete process.env.ROUTECODEX_SESSION_DIR;
+      } else {
+        process.env.ROUTECODEX_SESSION_DIR = originalSessionDir;
+      }
+      fs.rmSync(tempSessionDir, { recursive: true, force: true });
+    }
   });
 
   it('keeps dead tmux managed record when terminate fails', () => {

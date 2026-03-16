@@ -10,6 +10,7 @@ import { maybeInjectClockRemindersAndApplyDirectives } from './chat-process-cloc
 import type { StandardizedRequest } from '../types/standardized.js';
 import { readRuntimeMetadata } from '../../runtime-metadata.js';
 import { tryPlanChatServerToolBundleWithNative } from '../../../router/virtual-router/engine-selection/native-chat-process-servertool-orchestration-semantics.js';
+import { sanitizeChatProcessRequest } from './chat-process-request-sanitizer.js';
 
 interface ServerToolOrchestrationOptions {
   request: StandardizedRequest;
@@ -48,5 +49,7 @@ export async function applyServerToolOrchestration(
     request,
     buildReviewOperations(options.metadata)
   );
-  return maybeInjectClockRemindersAndApplyDirectives(request, options.metadata, options.requestId);
+  return sanitizeChatProcessRequest(
+    await maybeInjectClockRemindersAndApplyDirectives(request, options.metadata, options.requestId)
+  );
 }

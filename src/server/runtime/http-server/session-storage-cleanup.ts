@@ -6,6 +6,7 @@ import {
   normalizeString,
   resolveHeartbeatTtlMs
 } from './session-client-registry-utils.js';
+import { evaluateTmuxScopeCleanup } from './tmux-scope-cleanup-policy.js';
 
 type CleanupSummary = {
   removedLegacyScopeFiles: number;
@@ -95,22 +96,22 @@ function sanitizeSessionBindingsDir(args: {
       removedRegistryRecords += 1;
       continue;
     }
+    const cleanupDecision = evaluateTmuxScopeCleanup({
+      mode: 'stale_record',
+      tmuxSessionId,
+      reason: 'startup_cleanup',
+      isTmuxSessionAlive: args.isTmuxSessionAlive
+    });
+    if (cleanupDecision.cleanupTmuxScope) {
+      removedRegistryRecords += 1;
+      continue;
+    }
+    liveTmuxIds.add(tmuxSessionId);
     if (args.nowMs - lastHeartbeatAtMs > args.staleAfterMs) {
       removedRegistryRecords += 1;
       continue;
     }
-    let alive = true;
-    try {
-      alive = args.isTmuxSessionAlive(tmuxSessionId);
-    } catch {
-      alive = true;
-    }
-    if (!alive) {
-      removedRegistryRecords += 1;
-      continue;
-    }
     keptRecords.push(raw);
-    liveTmuxIds.add(tmuxSessionId);
   }
 
   const rawMappings = isRecord(bindingsDoc?.conversationToTmuxSession)

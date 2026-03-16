@@ -21,12 +21,22 @@ export type QuotaRecordLike = {
   fetchedAt: number;
 };
 
+function logAntigravityQuotaPersistenceNonBlockingError(
+  operation: string,
+  error: unknown,
+  details?: Record<string, unknown>
+): void {
+  const reason = error instanceof Error ? error.message : String(error);
+  const suffix = details ? ` details=${JSON.stringify(details)}` : '';
+  console.warn(`[antigravity-quota-persistence] ${operation} failed (non-blocking): ${reason}${suffix}`);
+}
+
 export function resolveQuotaManagerDir(resolveHomeDir: () => string): string {
   const base = resolveRccQuotaDir(resolveHomeDir());
   try {
     fs.mkdirSync(base, { recursive: true });
-  } catch {
-    // ignore
+  } catch (error) {
+    logAntigravityQuotaPersistenceNonBlockingError('resolveQuotaManagerDir.mkdir', error, { base });
   }
   return base;
 }
@@ -35,8 +45,8 @@ export function resolveQuotaStateWritePath(resolveHomeDir: () => string): string
   const primaryBaseDir = path.join(resolveRccStateDir(resolveHomeDir()), 'quota');
   try {
     fs.mkdirSync(primaryBaseDir, { recursive: true });
-  } catch {
-    // best effort
+  } catch (error) {
+    logAntigravityQuotaPersistenceNonBlockingError('resolveQuotaStateWritePath.mkdir', error, { primaryBaseDir });
   }
   return path.join(primaryBaseDir, 'antigravity.json');
 }
@@ -77,7 +87,8 @@ export function loadAntigravitySnapshotFromDisk(resolveHomeDir: () => string): R
       result[key] = { remainingFraction, resetAt, fetchedAt };
     }
     return result;
-  } catch {
+  } catch (error) {
+    logAntigravityQuotaPersistenceNonBlockingError('loadAntigravitySnapshotFromDisk', error, { filePath });
     return {};
   }
 }
@@ -89,8 +100,8 @@ export async function saveAntigravitySnapshotToDisk(
   const filePath = resolveQuotaStateWritePath(resolveHomeDir);
   try {
     await fsAsync.writeFile(filePath, `${JSON.stringify(snapshot, null, 2)}\n`, 'utf8');
-  } catch {
-    // best effort
+  } catch (error) {
+    logAntigravityQuotaPersistenceNonBlockingError('saveAntigravitySnapshotToDisk', error, { filePath });
   }
 }
 
@@ -109,7 +120,8 @@ export function createQuotaStore(options: {
       let primaryExists = false;
       try {
         primaryExists = fs.existsSync(filePath);
-      } catch {
+      } catch (error) {
+        logAntigravityQuotaPersistenceNonBlockingError('createQuotaStore.load.existsSync', error, { filePath });
         primaryExists = false;
       }
       try {
@@ -119,7 +131,8 @@ export function createQuotaStore(options: {
           options.onStatus('loaded');
           return parsed;
         }
-      } catch {
+      } catch (error) {
+        logAntigravityQuotaPersistenceNonBlockingError('createQuotaStore.load.readFile', error, { filePath });
         primaryLoadFailed = primaryExists;
       }
       options.onStatus(primaryLoadFailed ? 'load_error' : 'missing');
@@ -128,8 +141,8 @@ export function createQuotaStore(options: {
     save: async (snapshot: QuotaStoreSnapshot) => {
       try {
         await fsAsync.mkdir(dir, { recursive: true });
-      } catch {
-        // ignore
+      } catch (error) {
+        logAntigravityQuotaPersistenceNonBlockingError('createQuotaStore.save.mkdir', error, { dir });
       }
       const tmp = `${filePath}.tmp`;
       const text = `${JSON.stringify(snapshot, null, 2)}\n`;
@@ -137,13 +150,14 @@ export function createQuotaStore(options: {
         await fsAsync.writeFile(tmp, text, 'utf8');
         await fsAsync.rename(tmp, filePath);
         options.onStatus('loaded');
-      } catch {
+      } catch (error) {
+        logAntigravityQuotaPersistenceNonBlockingError('createQuotaStore.save.write', error, { filePath, tmp });
         options.onStatus('save_error');
         options.onSessionUnbindIssue('quota_store_save_error');
         try {
           await fsAsync.unlink(tmp);
-        } catch {
-          // ignore
+        } catch (cleanupError) {
+          logAntigravityQuotaPersistenceNonBlockingError('createQuotaStore.save.cleanupTmp', cleanupError, { tmp });
         }
       }
     }
