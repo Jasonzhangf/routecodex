@@ -143,6 +143,7 @@ describe('apply_patch validator (shape fixes)', () => {
     const res = validateToolCall('apply_patch', snippet);
     expect(res.ok).toBe(false);
     expect(res.reason).toBe('missing_changes');
+    expect(res.message).toBe('结构完整但无内容');
   });
 
   test('converts star-header unified diff into apply_patch format', () => {

@@ -375,10 +375,36 @@ export function resolveWorkingDirectory(
     if (fsImpl.existsSync(resolved)) {
       return resolved;
     }
+    if (requested) {
+      return resolved;
+    }
   } catch {
-    return getCwd();
+    // fall through to fallback candidates
   }
-  return getCwd();
+  try {
+    return pathImpl.resolve(getCwd());
+  } catch {
+    const fallbackCandidates = [
+      typeof process.env.PWD === 'string' ? process.env.PWD : '',
+      typeof process.env.HOME === 'string' ? process.env.HOME : ''
+    ]
+      .map((entry) => String(entry || '').trim())
+      .filter(Boolean);
+
+    for (const candidate of fallbackCandidates) {
+      try {
+        const resolved = pathImpl.resolve(candidate);
+        const stats = fsImpl.statSync(resolved);
+        if (stats && typeof stats.isDirectory === 'function' && stats.isDirectory()) {
+          return resolved;
+        }
+      } catch {
+        // try next fallback
+      }
+    }
+
+    throw new Error('Failed to resolve working directory (uv_cwd). Please rerun with --cwd <dir>.');
+  }
 }
 
 /**

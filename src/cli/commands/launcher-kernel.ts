@@ -613,10 +613,39 @@ function resolveWorkingDirectory(ctx: LauncherCommandContext, fsImpl: typeof fs,
     }
     return resolved;
   }
+
   try {
     return pathImpl.resolve(getCwd());
   } catch {
-    return getCwd();
+    // Fallback for cases like: EPERM: operation not permitted, uv_cwd
+    // (current shell directory deleted/inaccessible).
+    const fallbackCandidates = [
+      typeof ctx.env.PWD === 'string' ? ctx.env.PWD : '',
+      (() => {
+        try {
+          return ctx.homedir();
+        } catch {
+          return '';
+        }
+      })(),
+      typeof process.env.HOME === 'string' ? process.env.HOME : ''
+    ]
+      .map((entry) => String(entry || '').trim())
+      .filter(Boolean);
+
+    for (const candidate of fallbackCandidates) {
+      try {
+        const resolved = pathImpl.resolve(candidate);
+        const stats = fsImpl.statSync(resolved);
+        if (stats && typeof stats.isDirectory === 'function' && stats.isDirectory()) {
+          return resolved;
+        }
+      } catch {
+        // try next fallback
+      }
+    }
+
+    throw new Error('Failed to resolve working directory (uv_cwd). Please rerun with --cwd <dir>.');
   }
 }
 
