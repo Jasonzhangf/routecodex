@@ -66,6 +66,7 @@ import { resolveProviderRuntimeOrThrow } from './executor/provider-runtime-resol
 import { resolveProviderRequestContext } from './executor/provider-request-context.js';
 import { isServerToolEnabled } from './servertool-admin-state.js';
 import { registerRequestLogContext } from '../../utils/request-log-color.js';
+import { STREAM_LOG_FINISH_REASON_KEY } from '../../utils/finish-reason.js';
 export type RequestExecutorDeps = {
   runtimeManager: {
     resolveRuntimeKey(providerKey?: string, fallback?: string): string | undefined;
@@ -434,6 +435,14 @@ export class HubRequestExecutor implements RequestExecutor {
             response: normalized,
             pipelineMetadata: mergedMetadata
           });
+          const convertedBodyRecord =
+            converted.body && typeof converted.body === 'object'
+              ? (converted.body as Record<string, unknown>)
+              : undefined;
+          const finishReason =
+            convertedBodyRecord && typeof convertedBodyRecord[STREAM_LOG_FINISH_REASON_KEY] === 'string'
+              ? String(convertedBodyRecord[STREAM_LOG_FINISH_REASON_KEY])
+              : undefined;
           this.logStage('provider.response_convert.completed', input.requestId, {
             providerKey: target.providerKey,
             status: converted.status,
@@ -445,6 +454,7 @@ export class HubRequestExecutor implements RequestExecutor {
             status: converted.status,
             elapsedMs: Date.now() - hubResponseStartedAtMs,
             hasBody: converted.body !== undefined && converted.body !== null,
+            ...(finishReason ? { finishReason } : {}),
             attempt
           });
           // Treat upstream 429 as provider failure across protocols to avoid

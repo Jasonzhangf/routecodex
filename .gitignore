@@ -71,6 +71,7 @@ CACHE.md
 botpy.log
 clock.md
 models/
+/.drudge/
 /*.backup
 /*.backup2
 /*.backup3

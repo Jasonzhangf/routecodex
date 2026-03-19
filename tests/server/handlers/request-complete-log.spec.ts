@@ -30,6 +30,7 @@ describe('logRequestComplete', () => {
     });
 
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('finish_reason=stop'));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('\x1b[97mfinish_reason=stop\x1b[0m'));
   });
 
   it('maps anthropic stop_reason into finish_reason', () => {
@@ -38,6 +39,7 @@ describe('logRequestComplete', () => {
     });
 
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('finish_reason=tool_calls'));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('\x1b[97mfinish_reason=tool_calls\x1b[0m'));
   });
 
   it('derives tool_calls for responses required_action payloads', () => {

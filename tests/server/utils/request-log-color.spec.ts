@@ -108,6 +108,19 @@ describe('request log color registry', () => {
     expect(line.startsWith(String(resolveSessionAnsiColor('session-response-colored')))).toBe(true);
   });
 
+  it('keeps outer request color when the line already contains embedded ansi highlight', () => {
+    const sessionId = 'session-highlighted-finish';
+    const outerColor = resolveSessionAnsiColor(sessionId);
+    const line = colorizeRequestLog(
+      '✅ [/v1/responses] request req-highlight completed (status=200, \x1b[97mfinish_reason=tool_calls\x1b[0m)',
+      'req-highlight',
+      { sessionId }
+    );
+
+    expect(line.startsWith(String(outerColor))).toBe(true);
+    expect(line).toContain('\x1b[97mfinish_reason=tool_calls\x1b[0m');
+  });
+
   it('does not inject ansi color when console is not tty and force color is unset', () => {
     registerRequestLogContext('req-color-4', { sessionId: 'session-plain' });
     const line = colorizeRequestLog('[usage] request req-color-4', 'req-color-4');

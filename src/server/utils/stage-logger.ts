@@ -42,6 +42,7 @@ const COLOR_INFO = '\x1b[90m';
 const COLOR_START = '\x1b[36m';
 const COLOR_SUCCESS = '\x1b[32m';
 const COLOR_ERROR = '\x1b[31m';
+const COLOR_WHITE = '\x1b[97m';
 type StageLevel = 'info' | 'start' | 'success' | 'error';
 
 function resolveBoolFromEnv(value: string | undefined, fallback: boolean): boolean {
@@ -201,14 +202,25 @@ export function logPipelineStage(stage: string, requestId: string, details?: Rec
 
   const showDetail = !releaseSummaryStage && (verbose || level === 'error');
   const providerLabel = showDetail && typeof details?.providerLabel === 'string' ? details?.providerLabel : undefined;
+  const finishReason = readStageFinishReason(details);
   const detailPayload = showDetail
     ? (providerLabel
       ? (() => {
           const clone = { ...details } as Record<string, unknown>;
           delete clone.providerLabel;
+          delete clone.finishReason;
+          delete clone.finish_reason;
           return clone;
         })()
-      : details)
+      : (() => {
+          if (!details) {
+            return undefined;
+          }
+          const clone = { ...details } as Record<string, unknown>;
+          delete clone.finishReason;
+          delete clone.finish_reason;
+          return clone;
+        })())
     : undefined;
 
   const timingLabel = timingEnabled
@@ -225,6 +237,9 @@ export function logPipelineStage(stage: string, requestId: string, details?: Rec
       : '';
   const suffix = detailPayload && Object.keys(detailPayload).length ? ` ${JSON.stringify(detailPayload)}` : '';
   const label = `[${scope}][${requestId}] ${action}${timingLabel}`;
+  const finishReasonTag = shouldShowHighlightedFinishReason(scope, action, finishReason)
+    ? ` ${COLOR_WHITE}finish_reason=${finishReason}${COLOR_RESET}`
+    : '';
   const providerTag = providerLabel ? ` ${colorizeProviderLabel(level, providerLabel)}` : '';
   if (
     timingEnabled
@@ -237,7 +252,7 @@ export function logPipelineStage(stage: string, requestId: string, details?: Rec
   if (timingEnabled && level !== 'error' && !timingLabel) {
     return;
   }
-  console.log(`${colorize(level, label)}${providerTag}${suffix}`);
+  console.log(`${colorize(level, label)}${finishReasonTag}${providerTag}${suffix}`);
   if (isTerminalStage(stage) && !timingSummaryEnabled) {
     clearRequestStageState(requestId);
   }
@@ -417,6 +432,24 @@ function colorize(level: StageLevel, text: string): string {
 function colorizeProviderLabel(level: StageLevel, label: string): string {
   const color = level === 'error' ? COLOR_ERROR : COLOR_SUCCESS;
   return `${color}[${label}]${COLOR_RESET}`;
+}
+
+function readStageFinishReason(details?: Record<string, unknown>): string | undefined {
+  const direct = typeof details?.finishReason === 'string' ? details.finishReason.trim() : '';
+  if (direct) {
+    return direct;
+  }
+  const snake = typeof details?.finish_reason === 'string' ? details.finish_reason.trim() : '';
+  return snake || undefined;
+}
+
+function shouldShowHighlightedFinishReason(scope: string, action: string, finishReason?: string): boolean {
+  if (!finishReason) {
+    return false;
+  }
+  const normalizedScope = scope.trim().toLowerCase();
+  const normalizedAction = action.trim().toLowerCase();
+  return (normalizedScope === 'response' || normalizedScope === 'hub.response') && normalizedAction === 'completed';
 }
 
 function pruneRequestStageTimelines(nowMs: number): void {

@@ -10,7 +10,12 @@ import { isSnapshotsEnabled, writeServerSnapshot } from '../../utils/snapshot-wr
 import { resolveEffectiveRequestId } from '../utils/request-id-manager.js';
 import { buildInfo } from '../../build-info.js';
 import { deriveFinishReason, STREAM_LOG_FINISH_REASON_KEY } from '../utils/finish-reason.js';
-import { colorizeRequestLog, registerRequestLogContext } from '../utils/request-log-color.js';
+import {
+  colorizeRequestLog,
+  formatHighlightedFinishReasonLabel,
+  registerRequestLogContext
+} from '../utils/request-log-color.js';
+import { getSessionExecutionStateTracker } from '../runtime/http-server/session-execution-state.js';
 
 const BLOCKED_HEADERS = new Set(['content-length', 'transfer-encoding', 'connection', 'content-encoding']);
 
@@ -35,6 +40,12 @@ type AsyncIterableLike = { [Symbol.asyncIterator]?: () => AsyncIterator<unknown>
 type SseFinishReasonTracker = {
   buffer: string;
   finishReason?: string;
+  seenCompletedEvent: boolean;
+  seenDoneEvent: boolean;
+  seenDoneMarker: boolean;
+  seenRequiredActionEvent: boolean;
+  seenTerminalEvent: boolean;
+  lastEventName?: string;
 };
 
 const SHOULD_LOG_HTTP_EVENTS = buildInfo.mode !== 'release'
@@ -43,6 +54,17 @@ const SHOULD_LOG_HTTP_EVENTS = buildInfo.mode !== 'release'
 function logResponseNonBlockingError(operation: string, error: unknown): void {
   const reason = error instanceof Error ? error.message : String(error);
   console.warn(`[handler-response] ${operation} failed (non-blocking): ${reason}`);
+}
+
+function logSseClientCloseDiagnosis(
+  requestLabel: string,
+  details: Record<string, unknown>
+): void {
+  try {
+    console.warn(`[handler-response] response.sse.client_close request=${requestLabel} ${JSON.stringify(details)}`);
+  } catch {
+    console.warn(`[handler-response] response.sse.client_close request=${requestLabel}`);
+  }
 }
 
 function formatTimestamp(): string {
@@ -64,7 +86,7 @@ function logStreamRequestComplete(
     return;
   }
   const targetEndpoint = endpoint && endpoint.trim() ? endpoint.trim() : '/unknown';
-  const finishReasonLabel = finishReason ? `, finish_reason=${finishReason}` : '';
+  const finishReasonLabel = formatHighlightedFinishReasonLabel(finishReason);
   const timingSuffix = formatRequestTimingSummary(requestLabel);
   const line = `✅ [${targetEndpoint}] ${formatTimestamp()} request ${requestLabel} completed (status=${status}${finishReasonLabel})${timingSuffix}`;
   console.log(colorizeRequestLog(line, requestLabel, context));
@@ -84,10 +106,60 @@ function trackSseFinishReason(tracker: SseFinishReasonTracker, chunk: unknown): 
     const boundaryLength = boundaryMatch[0].length;
     const rawBlock = tracker.buffer.slice(0, boundaryMatch.index);
     tracker.buffer = tracker.buffer.slice(boundaryMatch.index + boundaryLength);
+    trackSseTerminalState(tracker, rawBlock);
     const derived = deriveFinishReasonFromSseBlock(rawBlock, tracker.finishReason);
     if (derived) {
       tracker.finishReason = derived;
     }
+  }
+}
+
+function trackSseTerminalState(tracker: SseFinishReasonTracker, block: string): void {
+  const trimmed = block.trim();
+  if (!trimmed) {
+    return;
+  }
+  let eventName = '';
+  const dataLines: string[] = [];
+  for (const rawLine of trimmed.split(/\r?\n/)) {
+    const line = rawLine.trimEnd();
+    if (!line || line.startsWith(':')) {
+      continue;
+    }
+    if (line.startsWith('event:')) {
+      eventName = line.slice(6).trim().toLowerCase();
+      continue;
+    }
+    if (line.startsWith('data:')) {
+      dataLines.push(line.slice(5).trimStart());
+    }
+  }
+  tracker.lastEventName = eventName || tracker.lastEventName;
+  const dataText = dataLines.join('\n').trim();
+  if (dataText === '[DONE]') {
+    tracker.seenDoneMarker = true;
+    tracker.seenTerminalEvent = true;
+  }
+  if (!eventName) {
+    return;
+  }
+  if (eventName === 'response.completed') {
+    tracker.seenCompletedEvent = true;
+    tracker.seenTerminalEvent = true;
+    return;
+  }
+  if (eventName === 'response.done' || eventName === 'message_stop') {
+    tracker.seenDoneEvent = true;
+    tracker.seenTerminalEvent = true;
+    return;
+  }
+  if (eventName === 'response.required_action') {
+    tracker.seenRequiredActionEvent = true;
+    tracker.seenTerminalEvent = true;
+    return;
+  }
+  if (eventName === 'response.failed' || eventName === 'response.incomplete' || eventName === 'error') {
+    tracker.seenTerminalEvent = true;
   }
 }
 
@@ -297,17 +369,24 @@ export function sendPipelineResponse(
       flushable.flush();
     }
     logPipelineStage('response.sse.stream.start', requestLabel, { status });
+    getSessionExecutionStateTracker().recordSseStreamStart(requestLabel);
 
     let eventCount = 0;
     let ended = false;
     let completedLogged = false;
     let cleanupLogged = false;
+    let streamEnded = false;
     const finishTracker: SseFinishReasonTracker = {
       buffer: '',
       finishReason:
         body && typeof body === 'object' && typeof (body as Record<string, unknown>)[STREAM_LOG_FINISH_REASON_KEY] === 'string'
           ? String((body as Record<string, unknown>)[STREAM_LOG_FINISH_REASON_KEY])
-          : undefined
+          : undefined,
+      seenCompletedEvent: false,
+      seenDoneEvent: false,
+      seenDoneMarker: false,
+      seenRequiredActionEvent: false,
+      seenTerminalEvent: false
     };
     let idleTimer: NodeJS.Timeout | null = null;
     let totalTimer: NodeJS.Timeout | null = null;
@@ -419,7 +498,7 @@ export function sendPipelineResponse(
       keepaliveTimer.unref?.();
     }
 
-    const cleanup = () => {
+    const cleanup = (trigger: 'close' | 'finish') => {
       if (cleanupLogged) {
         return;
       }
@@ -430,14 +509,53 @@ export function sendPipelineResponse(
       } catch {
         /* ignore cleanup errors */
       }
-      logPipelineStage('response.sse.stream.end', requestLabel, { events: eventCount, status });
-      logResponseCompleted({ status, mode: 'sse', events: eventCount });
+      const closeBeforeStreamEnd = trigger === 'close' && !streamEnded;
+      const details = {
+        events: eventCount,
+        status,
+        trigger,
+        streamEnded,
+        sawTerminalEvent: finishTracker.seenTerminalEvent,
+        sawCompletedEvent: finishTracker.seenCompletedEvent,
+        sawDoneEvent: finishTracker.seenDoneEvent,
+        sawDoneMarker: finishTracker.seenDoneMarker,
+        sawRequiredActionEvent: finishTracker.seenRequiredActionEvent,
+        finishReason: finishTracker.finishReason,
+        lastEventName: finishTracker.lastEventName
+      };
+      if (closeBeforeStreamEnd) {
+        logSseClientCloseDiagnosis(requestLabel, {
+          ...details,
+          closeBeforeStreamEnd
+        });
+        logPipelineStage('response.sse.client_close', requestLabel, {
+          ...details,
+          closeBeforeStreamEnd
+        });
+      }
+      logPipelineStage('response.sse.stream.end', requestLabel, details);
+      logResponseCompleted({
+        status,
+        mode: 'sse',
+        events: eventCount,
+        ...(finishTracker.finishReason ? { finishReason: finishTracker.finishReason } : {})
+      });
     };
     stream.on('error', (error: Error) => {
       ended = true;
       clearTimers();
+      getSessionExecutionStateTracker().recordSseClientClose(requestLabel, {
+        finishReason: finishTracker.finishReason,
+        terminal: finishTracker.seenTerminalEvent,
+        closeBeforeStreamEnd: !streamEnded
+      });
       logPipelineStage('response.sse.stream.error', requestLabel, { message: error.message });
-      logResponseCompleted({ status: 500, mode: 'sse', reason: 'stream_error' });
+      logResponseCompleted({
+        status: 500,
+        mode: 'sse',
+        reason: 'stream_error',
+        ...(finishTracker.finishReason ? { finishReason: finishTracker.finishReason } : {})
+      });
       try {
         const payload = {
           type: 'error',
@@ -465,14 +583,28 @@ export function sendPipelineResponse(
     });
     stream.on('end', () => {
       ended = true;
+      streamEnded = true;
       clearTimers();
+      getSessionExecutionStateTracker().recordSseStreamEnd(requestLabel, {
+        finishReason: finishTracker.finishReason,
+        terminal: finishTracker.seenTerminalEvent
+      });
       if (!completedLogged) {
         completedLogged = true;
         logStreamRequestComplete(entryEndpoint, requestLabel, status, finishTracker.finishReason, requestLogContext);
       }
     });
-    res.on('close', cleanup);
-    res.on('finish', cleanup);
+    res.on('close', () => {
+      if (!streamEnded) {
+        getSessionExecutionStateTracker().recordSseClientClose(requestLabel, {
+          finishReason: finishTracker.finishReason,
+          terminal: finishTracker.seenTerminalEvent,
+          closeBeforeStreamEnd: true
+        });
+      }
+      cleanup('close');
+    });
+    res.on('finish', () => cleanup('finish'));
     outboundStream.pipe(res);
     return;
   }
@@ -499,6 +631,8 @@ export function sendPipelineResponse(
   // E1 boundary rule: internal env variables use "__*" and must never reach client payloads.
   // Preserve the SSE carrier key (it is handled above and never JSON-encoded).
   const sanitized = stripInternalKeysDeep(body, { preserveKeys: new Set(['__sse_responses']) });
+  const jsonFinishReason = deriveFinishReason(body);
+  getSessionExecutionStateTracker().recordJsonResponseComplete(requestLabel, jsonFinishReason);
   if (captureClientResponse) {
     void writeServerSnapshot({
       phase: 'client-response',
@@ -511,7 +645,11 @@ export function sendPipelineResponse(
   }
   res.status(status).json(sanitized);
   logPipelineStage('response.json.completed', requestLabel, { status });
-  logResponseCompleted({ status, mode: 'json' });
+  logResponseCompleted({
+    status,
+    mode: 'json',
+    ...(jsonFinishReason ? { finishReason: jsonFinishReason } : {})
+  });
 }
 
 function applyHeaders(res: Response, headers: Record<string, string> | undefined, omitContentType: boolean): void {

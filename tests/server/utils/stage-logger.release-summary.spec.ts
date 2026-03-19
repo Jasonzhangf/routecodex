@@ -28,15 +28,27 @@ describe('stage logger release summary mode', () => {
     logPipelineStage('provider.send.start', 'req_release', {});
     logPipelineStage('provider.send.completed', 'req_release', { status: 200, elapsedMs: 600 });
     logPipelineStage('hub.response.start', 'req_release', {});
-    logPipelineStage('hub.response.completed', 'req_release', { status: 200, elapsedMs: 90 });
+    logPipelineStage('hub.response.completed', 'req_release', {
+      status: 200,
+      elapsedMs: 90,
+      finishReason: 'tool_calls'
+    });
     logPipelineStage('response.dispatch.start', 'req_release', { status: 200, stream: false });
-    logPipelineStage('response.completed', 'req_release', { status: 200, elapsedMs: 40 });
+    logPipelineStage('response.completed', 'req_release', {
+      status: 200,
+      elapsedMs: 40,
+      finishReason: 'tool_calls'
+    });
 
     expect(logSpy).toHaveBeenCalledTimes(4);
     expect(String(logSpy.mock.calls[0]?.[0] ?? '')).toContain('[hub][req_release] completed total=300ms');
     expect(String(logSpy.mock.calls[1]?.[0] ?? '')).toContain('[provider.send][req_release] completed total=600ms');
     expect(String(logSpy.mock.calls[2]?.[0] ?? '')).toContain('[hub.response][req_release] completed total=90ms');
+    expect(String(logSpy.mock.calls[2]?.[0] ?? '')).toContain('finish_reason=tool_calls');
+    expect(String(logSpy.mock.calls[2]?.[0] ?? '')).toContain('\x1b[97mfinish_reason=tool_calls\x1b[0m');
     expect(String(logSpy.mock.calls[3]?.[0] ?? '')).toContain('[response][req_release] completed total=40ms');
+    expect(String(logSpy.mock.calls[3]?.[0] ?? '')).toContain('finish_reason=tool_calls');
+    expect(String(logSpy.mock.calls[3]?.[0] ?? '')).toContain('\x1b[97mfinish_reason=tool_calls\x1b[0m');
   });
 
   it('moves tracked scope timings when request id is rebound', async () => {

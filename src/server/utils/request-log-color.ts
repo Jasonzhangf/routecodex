@@ -2,6 +2,7 @@ import { resolveEffectiveRequestId } from './request-id-manager.js';
 import { resolveSessionAnsiColor } from '../../utils/session-log-color.js';
 
 const ANSI_RESET = '\x1b[0m';
+const ANSI_WHITE = '\x1b[97m';
 const ANSI_PATTERN = /\x1b\[[0-9;]*m/;
 const ANSI_FALLBACK_LOG_COLOR = '\x1b[90m';
 const REQUEST_LOG_CONTEXT_TTL_MS = 30 * 60 * 1000;
@@ -123,12 +124,23 @@ export function colorizeRequestLog(
   requestId?: string,
   context?: { sessionId?: unknown; conversationId?: unknown }
 ): string {
-  if (!text || !isConsoleColorEnabled() || ANSI_PATTERN.test(text)) {
+  if (!text || !isConsoleColorEnabled()) {
     return text;
   }
   const color = resolveRequestLogColorToken(requestId, context);
   if (!color) {
     return text;
   }
+  if (text.startsWith(color) && text.endsWith(ANSI_RESET)) {
+    return text;
+  }
   return `${color}${text}${ANSI_RESET}`;
+}
+
+export function formatHighlightedFinishReasonLabel(finishReason?: string): string {
+  const normalized = typeof finishReason === 'string' ? finishReason.trim() : '';
+  if (!normalized) {
+    return '';
+  }
+  return `, ${ANSI_WHITE}finish_reason=${normalized}${ANSI_RESET}`;
 }
