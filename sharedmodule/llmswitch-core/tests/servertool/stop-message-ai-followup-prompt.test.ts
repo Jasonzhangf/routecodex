@@ -50,12 +50,16 @@ describe('stop_message_auto ai followup prompt', () => {
     expect(prompt).toContain('通过标准以“总体目标是否达成”为主；当主目标证据充分时，允许次要项暂未验证，并给出后续补测建议。');
     expect(prompt).toContain('若主模型声称“无法完成/被阻塞”，你必须要求其提供阻塞证据，并判断是否存在可继续推进的最小可执行动作。');
     expect(prompt).toContain('必要时必须要求其打开并检查已改代码（明确到文件），再给出具体修改建议，不允许停留在抽象层面。');
+    expect(prompt).toContain(
+      '必须先根据本次请求逐条核验（目标/范围/约束）后再给建议：至少引用一个代码证据（文件路径+关键实现点），若涉及行为变更还要引用测试/命令证据或明确说明未执行原因。'
+    );
+    expect(prompt).toContain('禁止“先给建议、后补证据”；核验结论必须先于建议给出，且每条建议都要可追溯到对应证据。');
     expect(prompt).toContain('只有在消息内容或历史记录里存在明确证据时，才允许判断“偏离目标”；否则按同轨推进，不要泛化指责偏离。');
     expect(prompt).toContain('若判定偏离，必须在指令里点明证据来源（来自消息内容或历史记录）并给出回轨的最小动作；若无证据，直接给下一步动作。');
     expect(prompt).toContain('禁止连续安排纯只读/纯汇报命令（如 cargo llvm-cov report、cat/head/tail/rg/git status）');
     expect(prompt).toContain('覆盖率类命令只能作为写动作后的验证步骤，不能作为本轮唯一或首要动作。');
     expect(prompt).toContain('workingDirectory: /repo/project');
-    expect(prompt).toContain('当总体目标完成时，在回复末尾输出完成标记 [STOPMESSAGE_DONE]');
+    expect(prompt).toContain('当关键路径证据充分且确认已完成总体目标时，允许只输出 [STOPMESSAGE_APPROVED] 作为完成信号');
   });
 
   test('falls back to base stop message as short-term goal when candidate is empty', () => {

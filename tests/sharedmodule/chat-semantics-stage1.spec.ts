@@ -315,7 +315,7 @@ describe('Chat semantics stage 1 bridge', () => {
     expect(hasWebSearchTool).toBe(true);
   });
 
-  it('injects continue_execution tool and directive when stopMessage is not active', async () => {
+  it('does not inject continue_execution tool when stopMessage is not active', async () => {
     const chat = buildChatEnvelope();
     const standardized = chatEnvelopeToStandardized(chat, {
       adapterContext,
@@ -327,11 +327,7 @@ describe('Chat semantics stage 1 bridge', () => {
     const hasContinueTool = (result.processedRequest?.tools ?? []).some(
       (tool) => tool.function?.name === 'continue_execution'
     );
-    expect(hasContinueTool).toBe(true);
-    const continueTool = (result.processedRequest?.tools ?? []).find(
-      (tool) => tool.function?.name === 'continue_execution'
-    );
-    expect(continueTool?.function?.description ?? '').toContain('progress reporting without interrupting execution');
+    expect(hasContinueTool).toBe(false);
     const reviewTool = (result.processedRequest?.tools ?? []).find(
       (tool) => tool.function?.name === 'review'
     );

@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { logProcessLifecycle } from '../../../utils/process-lifecycle-logger.js';
 
 let tmuxAvailableCache: boolean | null = null;
-const MANAGED_TMUX_SESSION_PREFIX = 'rcc_';
+const MANAGED_TMUX_SESSION_PREFIXES = ['rcc-', 'rcc_'] as const;
 
 function normalizeTmuxSessionTarget(tmuxSessionId: string): string {
   const target = String(tmuxSessionId || '').trim();
@@ -65,7 +65,7 @@ function isTmuxAvailable(): boolean {
 
 export function isManagedClockTmuxSession(tmuxSessionId: string): boolean {
   const sessionName = normalizeTmuxSessionTarget(tmuxSessionId);
-  return sessionName.startsWith(MANAGED_TMUX_SESSION_PREFIX);
+  return MANAGED_TMUX_SESSION_PREFIXES.some((prefix) => sessionName.startsWith(prefix));
 }
 
 export function isTmuxSessionAlive(tmuxSessionId: string): boolean {
@@ -157,6 +157,101 @@ function normalizeTmuxInjectedText(raw: string): string {
     .filter((line) => line.length > 0)
     .join(' ')
     .trim();
+}
+
+function stripAnsi(raw: string): string {
+  return String(raw || '').replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
+}
+
+function isReusableIdlePaneCommand(command: string): boolean {
+  const normalized = String(command || '').trim().toLowerCase();
+  if (!normalized) {
+    return true;
+  }
+  return normalized === 'zsh'
+    || normalized === 'bash'
+    || normalized === 'sh'
+    || normalized === 'fish'
+    || normalized === 'nu';
+}
+
+function isAgentPaneCommand(command: string): boolean {
+  const normalized = String(command || '').trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+  return normalized === 'codex'
+    || normalized === 'claude'
+    || normalized === 'routecodex'
+    || normalized === 'node';
+}
+
+function captureLooksIdleForAgent(command: string, capturedTail: string): boolean {
+  const normalizedCommand = String(command || '').trim().toLowerCase();
+  const lines = String(capturedTail || '')
+    .split(/\r?\n/)
+    .map((line) => stripAnsi(line).trimEnd())
+    .filter((line) => line.trim().length > 0)
+    .slice(-12);
+  if (lines.length < 1) {
+    return false;
+  }
+  if (lines.some((line) => /^[\s]*[›❯]\s+\S/.test(line))) {
+    return true;
+  }
+  if ((normalizedCommand === 'claude' || normalizedCommand === 'node') && lines.some((line) => /^[\s]*>\s+\S/.test(line))) {
+    return true;
+  }
+  return false;
+}
+
+export function isTmuxSessionIdleForInject(tmuxSessionId: string): boolean | undefined {
+  const resolvedTarget = resolveTmuxInjectionTarget(tmuxSessionId);
+  if (!resolvedTarget.sessionName || !resolvedTarget.target) {
+    return undefined;
+  }
+  if (!isTmuxAvailable()) {
+    return undefined;
+  }
+  if (!isTmuxSessionAlive(resolvedTarget.sessionName)) {
+    return undefined;
+  }
+  try {
+    const paneResult = spawnSync(
+      'tmux',
+      ['list-panes', '-t', resolvedTarget.target, '-F', '#{pane_current_command}\t#{pane_in_mode}'],
+      { encoding: 'utf8' }
+    );
+    if (paneResult.status !== 0) {
+      return undefined;
+    }
+    const firstLine = String(paneResult.stdout || '')
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find(Boolean);
+    if (!firstLine) {
+      return undefined;
+    }
+    const [paneCommandRaw, paneInModeRaw] = firstLine.split('\t');
+    const paneCommand = String(paneCommandRaw || '').trim();
+    const paneInMode = String(paneInModeRaw || '').trim() === '1';
+    if (paneInMode) {
+      return false;
+    }
+    if (isReusableIdlePaneCommand(paneCommand)) {
+      return true;
+    }
+    if (!isAgentPaneCommand(paneCommand)) {
+      return false;
+    }
+    const capture = spawnSync('tmux', ['capture-pane', '-p', '-t', resolvedTarget.target, '-S', '-80'], { encoding: 'utf8' });
+    if (capture.status !== 0) {
+      return undefined;
+    }
+    return captureLooksIdleForAgent(paneCommand, String(capture.stdout || ''));
+  } catch {
+    return undefined;
+  }
 }
 
 function sendTmuxSubmitKey(

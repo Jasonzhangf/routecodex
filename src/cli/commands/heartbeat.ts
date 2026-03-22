@@ -1,7 +1,10 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
 import type { Command } from 'commander';
 
 import { LOCAL_HOSTS } from '../../constants/index.js';
 import type { LoadedRouteCodexConfig } from '../../config/routecodex-config-loader.js';
+import { resolveRccUserDir } from '../../config/user-data-paths.js';
 import { normalizeConnectHost, normalizePort } from '../utils/normalize.js';
 
 type LoggerLike = {
@@ -32,6 +35,7 @@ type HeartbeatCommandOptions = {
   daemonId?: string;
   json?: boolean;
   dryRun?: boolean;
+  limit?: string;
 };
 
 function normalizeString(value: unknown): string {
@@ -109,6 +113,8 @@ async function resolveBaseUrl(ctx: HeartbeatCommandContext, options: HeartbeatCo
 
   const configPick = readPortHostFromConfig(loaded);
   const host = normalizeConnectHost(options.host || configPick.host || LOCAL_HOSTS.LOCALHOST, LOCAL_HOSTS.IPV4);
+  const explicitPortFromFlag = normalizePort(options.port);
+  const hasExplicitPort = Number.isFinite(explicitPortFromFlag) && explicitPortFromFlag > 0;
   let port = normalizePort(options.port);
   if (!Number.isFinite(port) || port <= 0) {
     port = configPick.port;
@@ -119,10 +125,138 @@ async function resolveBaseUrl(ctx: HeartbeatCommandContext, options: HeartbeatCo
   if ((!Number.isFinite(port) || port <= 0) && ctx.isDevPackage) {
     port = ctx.defaultDevPort;
   }
+  if (
+    !hasExplicitPort &&
+    Number.isFinite(port) &&
+    port > 0 &&
+    !(await probeServerHealth(ctx, host, port))
+  ) {
+    const discovered = await resolveDiscoveredActiveServerPort(ctx, host, new Set<number>([port]));
+    if (typeof discovered === 'number' && Number.isFinite(discovered) && discovered > 0) {
+      ctx.logger.warning(
+        `Configured heartbeat endpoint ${host}:${port} is unavailable; switched to active server ${host}:${discovered}.`
+      );
+      port = discovered;
+    }
+  }
+  if (!Number.isFinite(port) || port <= 0) {
+    const discovered = await resolveDiscoveredActiveServerPort(ctx, host);
+    if (typeof discovered === 'number' && Number.isFinite(discovered) && discovered > 0) {
+      port = discovered;
+      ctx.logger.info(`Auto-discovered active RouteCodex server on ${host}:${port} (heartbeat is tmux-scoped).`);
+    }
+  }
   if (!Number.isFinite(port) || port <= 0) {
     throw new Error('Missing server port. Use --port / --url, env, or config file.');
   }
   return `http://${host}:${Math.floor(port)}`;
+}
+
+function normalizePositiveInt(value: unknown): number | undefined {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return undefined;
+  }
+  const floored = Math.floor(parsed);
+  return floored > 0 ? floored : undefined;
+}
+
+async function probeServerHealth(
+  ctx: HeartbeatCommandContext,
+  host: string,
+  port: number
+): Promise<boolean> {
+  if (!Number.isFinite(port) || port <= 0) {
+    return false;
+  }
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      try {
+        controller.abort();
+      } catch {
+        // ignore
+      }
+    }, 800);
+    const response = await ctx.fetch(`http://${host}:${port}/health`, {
+      method: 'GET',
+      signal: controller.signal
+    });
+    clearTimeout(timer);
+    if (!response.ok) {
+      return false;
+    }
+    const payload = await response.json().catch(() => null);
+    const status = typeof payload?.status === 'string' ? payload.status.toLowerCase() : '';
+    return Boolean(
+      payload &&
+      (status === 'healthy' || status === 'ready' || status === 'ok' || payload?.ready === true || payload?.pipelineReady === true)
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function collectCandidatePortsFromUserDir(userDir: string): Promise<number[]> {
+  const out = new Set<number>();
+  try {
+    const entries = await fs.readdir(userDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isFile()) {
+        continue;
+      }
+      const match = entry.name.match(/^server-(\d+)\.pid$/);
+      if (!match || !match[1]) {
+        continue;
+      }
+      const parsed = normalizePositiveInt(match[1]);
+      if (parsed) {
+        out.add(parsed);
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  try {
+    const lifecycleDir = path.join(userDir, 'state', 'runtime-lifecycle');
+    const entries = await fs.readdir(lifecycleDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isFile()) {
+        continue;
+      }
+      const match = entry.name.match(/^server-(\d+)\.json$/);
+      if (!match || !match[1]) {
+        continue;
+      }
+      const parsed = normalizePositiveInt(match[1]);
+      if (parsed) {
+        out.add(parsed);
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  return Array.from(out);
+}
+
+async function resolveDiscoveredActiveServerPort(
+  ctx: HeartbeatCommandContext,
+  host: string,
+  excludePorts?: Set<number>
+): Promise<number | undefined> {
+  const userDir = resolveRccUserDir();
+  const candidates = await collectCandidatePortsFromUserDir(userDir);
+  for (const port of candidates) {
+    if (excludePorts?.has(port)) {
+      continue;
+    }
+    if (await probeServerHealth(ctx, host, port)) {
+      return port;
+    }
+  }
+  return undefined;
 }
 
 async function callJson(
@@ -240,6 +374,30 @@ export function createHeartbeatCommand(program: Command, ctx: HeartbeatCommandCo
       ...buildTarget(options),
       ...(options.dryRun ? { dryRun: true } : {})
     });
+    print(options, payload);
+  });
+
+  base(
+    command
+      .command('history')
+      .description('Show heartbeat execution history for a tmux session')
+      .option('--limit <limit>', 'Max number of records (default: 100)')
+  ).action(async (options: HeartbeatCommandOptions) => {
+    const loaded = await ctx.loadConfig(typeof options.config === 'string' ? options.config : undefined).catch(() => null);
+    const baseUrl = await resolveBaseUrl(ctx, options);
+    const apiKey = resolveApiKeyFromConfig(ctx, loaded);
+    const params = new URLSearchParams();
+    const target = buildTarget(options);
+    for (const [key, value] of Object.entries(target)) {
+      if (typeof value === 'string' && value.trim()) {
+        params.set(key, value);
+      }
+    }
+    const limit = normalizePositiveInt(options.limit);
+    if (limit) {
+      params.set('limit', String(limit));
+    }
+    const payload = await callJson(ctx, `${baseUrl}/daemon/heartbeat/history?${params.toString()}`, 'GET', apiKey);
     print(options, payload);
   });
 }

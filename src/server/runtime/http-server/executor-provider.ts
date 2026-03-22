@@ -92,7 +92,7 @@ export function shouldRetryProviderError(error: unknown): boolean {
     return true;
   }
   const status = extractErrorStatusCode(error);
-  if (status === 429 || status === 408 || status === 425) {
+  if (status === 401 || status === 429 || status === 413 || status === 408 || status === 425) {
     return true;
   }
   if (typeof status === 'number' && status >= 500) {

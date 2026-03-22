@@ -47,6 +47,35 @@ function pickBoolean(value: unknown): boolean | undefined {
   return typeof value === 'boolean' ? value : undefined;
 }
 
+function isOpenCodeZenProvider(context: ProviderContext): boolean {
+  const providerId = pickString(context.providerId)?.toLowerCase();
+  if (!providerId) {
+    return false;
+  }
+  return providerId === 'opencode-zen' || providerId === 'opencode-zen-free' || providerId.startsWith('opencode-zen-');
+}
+
+function hasEnableThinkingFlag(body: UnknownRecord): boolean {
+  if (body.enable_thinking !== undefined || body.enableThinking !== undefined) {
+    return true;
+  }
+  const chatTemplateArgs = asRecord(body.chat_template_args ?? body.chatTemplateArgs);
+  return chatTemplateArgs.enable_thinking !== undefined || chatTemplateArgs.enableThinking !== undefined;
+}
+
+export function applyOpenCodeZenThinkingDefaults(body: UnknownRecord, context: ProviderContext): UnknownRecord {
+  if (!isOpenCodeZenProvider(context)) {
+    return body;
+  }
+  if (hasEnableThinkingFlag(body)) {
+    return body;
+  }
+  return {
+    ...body,
+    enable_thinking: true
+  };
+}
+
 function toTextPart(text: string): LanguageModelV3TextPart {
   return { type: 'text', text };
 }
@@ -559,9 +588,9 @@ function buildInvalidJsonError(responseText: string): Error & {
 export class VercelAiSdkOpenAiTransport {
   async executePreparedRequest(
     requestInfo: PreparedHttpRequest,
-    _context: ProviderContext
+    context: ProviderContext
   ): Promise<unknown> {
-    const rawBody = asRecord(requestInfo.body);
+    const rawBody = applyOpenCodeZenThinkingDefaults(asRecord(requestInfo.body), context);
     const modelId = pickString(rawBody.model);
     if (!modelId) {
       throw new Error('provider-runtime-error: missing model from openai sdk transport');

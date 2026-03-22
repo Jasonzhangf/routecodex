@@ -2,6 +2,8 @@ use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
 use serde_json::{Map, Value};
 
+const SERVERTOOL_WEB_SEARCH_TOOL_NAME: &str = "websearch";
+
 fn read_engine_id(entry: &Value) -> Option<String> {
     let obj = entry.as_object()?;
     let id = obj.get("id")?.as_str()?.trim().to_string();
@@ -108,7 +110,10 @@ fn build_web_search_tool_append_operations(engines: &Value) -> Option<Value> {
     parameters.insert("additionalProperties".to_string(), Value::Bool(false));
 
     let mut function = Map::new();
-    function.insert("name".to_string(), Value::String("web_search".to_string()));
+    function.insert(
+        "name".to_string(),
+        Value::String(SERVERTOOL_WEB_SEARCH_TOOL_NAME.to_string()),
+    );
     function.insert(
     "description".to_string(),
     Value::String(
@@ -139,7 +144,7 @@ fn build_web_search_tool_append_operations(engines: &Value) -> Option<Value> {
     );
     append_op.insert(
         "toolName".to_string(),
-        Value::String("web_search".to_string()),
+        Value::String(SERVERTOOL_WEB_SEARCH_TOOL_NAME.to_string()),
     );
     append_op.insert("tool".to_string(), Value::Object(tool));
 
@@ -156,4 +161,29 @@ pub fn build_web_search_tool_append_operations_json(engines_json: String) -> Nap
     let output =
         build_web_search_tool_append_operations(&engines).unwrap_or(Value::Array(Vec::new()));
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_web_search_tool_append_operations;
+    use serde_json::json;
+
+    #[test]
+    fn builds_servertool_web_search_with_websearch_name() {
+        let ops = build_web_search_tool_append_operations(&json!([
+            {
+                "id": "provider-search",
+                "providerKey": "demo.key1.model",
+                "executionMode": "servertool"
+            }
+        ]))
+        .expect("operations");
+
+        let array = ops.as_array().expect("array");
+        assert_eq!(array.len(), 2);
+        assert_eq!(array[1]["op"], "append_tool_if_missing");
+        assert_eq!(array[1]["toolName"], "websearch");
+        assert_eq!(array[1]["tool"]["function"]["name"], "websearch");
+        assert_eq!(array[0]["fields"]["webSearchEnabled"], true);
+    }
 }

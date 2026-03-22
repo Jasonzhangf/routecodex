@@ -1,5 +1,6 @@
 import { failNativeRequired } from './native-router-hotpath-policy.js';
 import { loadNativeRouterHotpathBindingForInternalUse } from './native-router-hotpath.js';
+import { resolveRccUserDir } from '../../../runtime/user-data-paths.js';
 
 function readNativeFunction(name: string): ((...args: unknown[]) => unknown) | null {
   const binding = loadNativeRouterHotpathBindingForInternalUse() as Record<string, unknown> | null;
@@ -52,6 +53,12 @@ function parseRecordArrayPayload(raw: string): Array<Record<string, unknown>> | 
   }
 }
 
+function buildRoutingInstructionParseOptionsJson(): string | undefined {
+  return safeStringify({
+    rccUserDir: resolveRccUserDir()
+  });
+}
+
 export function parseRoutingInstructionKindsWithNative(request: unknown): string[] {
   const capability = 'parseRoutingInstructionKindsJson';
   const fail = (reason?: string) => failNativeRequired<string[]>(capability, reason);
@@ -63,8 +70,12 @@ export function parseRoutingInstructionKindsWithNative(request: unknown): string
   if (!requestJson) {
     return fail('json stringify failed');
   }
+  const optionsJson = buildRoutingInstructionParseOptionsJson();
+  if (!optionsJson) {
+    return fail('json stringify failed');
+  }
   try {
-    const result = fn(requestJson);
+    const result = fn(requestJson, optionsJson);
     if (typeof result !== 'string' || !result) {
       return fail('empty result');
     }
@@ -89,8 +100,12 @@ export function parseRoutingInstructionsWithNative(
   if (!messagesJson) {
     return fail('json stringify failed');
   }
+  const optionsJson = buildRoutingInstructionParseOptionsJson();
+  if (!optionsJson) {
+    return fail('json stringify failed');
+  }
   try {
-    const result = fn(messagesJson);
+    const result = fn(messagesJson, optionsJson);
     if (typeof result !== 'string' || !result) {
       return fail('empty result');
     }

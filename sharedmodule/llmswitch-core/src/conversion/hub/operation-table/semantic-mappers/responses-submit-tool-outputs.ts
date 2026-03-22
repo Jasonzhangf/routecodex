@@ -29,7 +29,7 @@ export function isSubmitToolOutputsEndpoint(ctx: AdapterContext): boolean {
   return entry === RESPONSES_SUBMIT_ENDPOINT;
 }
 
-function deriveResumeToolOutputsFromResume(resume: Record<string, unknown>): ChatToolOutput[] | undefined {
+export function deriveResumeToolOutputsFromResume(resume: Record<string, unknown>): ChatToolOutput[] | undefined {
   if (!resume || typeof resume !== 'object') {
     return undefined;
   }
@@ -44,7 +44,7 @@ function deriveResumeToolOutputsFromResume(resume: Record<string, unknown>): Cha
   return outputs.length ? outputs : undefined;
 }
 
-function readResponsesResumeFromSemantics(chat: ChatEnvelope): JsonObject | undefined {
+export function readResponsesResumeFromSemantics(chat: ChatEnvelope): JsonObject | undefined {
   if (!chat?.semantics || typeof chat.semantics !== 'object') {
     return undefined;
   }
@@ -111,7 +111,7 @@ function coerceOutputText(value: unknown): string {
   }
 }
 
-function extractCapturedToolOutputs(
+export function extractCapturedToolOutputs(
   responsesContext?: ResponsesRequestContext
 ): ResponsesToolOutputEntry[] {
   if (!responsesContext || typeof responsesContext !== 'object') {

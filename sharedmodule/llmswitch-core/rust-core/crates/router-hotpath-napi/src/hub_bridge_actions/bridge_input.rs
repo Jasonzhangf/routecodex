@@ -79,7 +79,7 @@ fn push_chat_message_without_reparse(
         return;
     };
     let trimmed = raw_content.trim();
-    let mut combined: Vec<String> = reasoning_segments
+    let combined: Vec<String> = reasoning_segments
         .unwrap_or_default()
         .into_iter()
         .filter(|entry| !entry.trim().is_empty())

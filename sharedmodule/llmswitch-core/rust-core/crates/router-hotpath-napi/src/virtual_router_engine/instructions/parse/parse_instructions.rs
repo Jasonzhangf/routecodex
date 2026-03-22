@@ -128,6 +128,10 @@ fn parse_pre_command_instruction(instruction: &str) -> Result<Option<RoutingInst
     }))
 }
 
+fn is_numeric_only_identifier(value: &str) -> bool {
+    Regex::new(r"^\d+$").unwrap().is_match(value.trim())
+}
+
 fn resolve_precommand_default_script() -> Result<String, String> {
     if let Ok(value) = env::var("ROUTECODEX_PRECOMMAND_DEFAULT_SCRIPT") {
         let trimmed = value.trim().to_string();
@@ -319,7 +323,19 @@ pub(super) fn parse_single_instruction(
                 pre_command: None,
             }));
         }
-    } else if is_valid_identifier(instruction) {
+        if let Some(provider) = parsed.provider.clone() {
+            if is_numeric_only_identifier(&provider) {
+                return Ok(None);
+            }
+            return Ok(Some(RoutingInstruction {
+                kind: "allow".to_string(),
+                target: None,
+                provider: Some(provider),
+                stop_message: None,
+                pre_command: None,
+            }));
+        }
+    } else if is_valid_identifier(instruction) && !is_numeric_only_identifier(instruction) {
         return Ok(Some(RoutingInstruction {
             kind: "allow".to_string(),
             target: None,

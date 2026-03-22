@@ -1,7 +1,7 @@
 use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
 use serde::Serialize;
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -360,6 +360,7 @@ pub fn build_resp_inbound_sse_error_descriptor_json(input_json: String) -> NapiR
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn builds_wrapper_error_descriptor() {

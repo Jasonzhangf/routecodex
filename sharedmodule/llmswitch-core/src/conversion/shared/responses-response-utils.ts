@@ -1,70 +1,14 @@
-import { extractOutputSegments } from './output-content-normalizer.js';
 import { createBridgeActionState, runBridgeActionPipeline } from '../bridge-actions.js';
 import { resolveBridgePolicy, resolvePolicyActions } from '../bridge-policies.js';
 import {
   registerResponsesPayloadSnapshot,
-  registerResponsesPassthrough,
-  type ResponsesReasoningPayload
+  registerResponsesPassthrough
 } from './responses-reasoning-registry.js';
 import {
   buildChatResponseFromResponsesWithNative,
   collectToolCallsFromResponsesWithNative,
-  normalizeFunctionCallIdWithNative,
-  resolveFinishReasonWithNative,
-  sanitizeReasoningTaggedTextWithNative
+  resolveFinishReasonWithNative
 } from '../../router/virtual-router/engine-selection/native-shared-conversion-semantics.js';
-import { sanitizeResponsesFunctionNameWithNative } from '../../router/virtual-router/engine-selection/native-hub-pipeline-resp-semantics.js';
-
-type UnknownRecord = Record<string, unknown>;
-
-function selectCallId(entry: any): string | undefined {
-  const candidates = [
-    (entry as any)?.call_id,
-    (entry as any)?.tool_call_id,
-    (entry as any)?.tool_use_id,
-    (entry as any)?.id
-  ];
-  for (const candidate of candidates) {
-    if (typeof candidate === 'string' && candidate.trim().length > 0) {
-      return candidate.trim();
-    }
-  }
-  return undefined;
-}
-
-function normalizeToolCall(entry: any, fallbackPrefix: string): Record<string, unknown> | null {
-  if (!entry || typeof entry !== 'object') return null;
-  const fn = (entry as any).function || {};
-  const rawName = sanitizeResponsesFunctionNameWithNative(fn.name ?? (entry as any).name);
-  if (!rawName) return null;
-  const argsRaw = fn.arguments ?? (entry as any).arguments ?? {};
-  const argsStr =
-    typeof argsRaw === 'string'
-      ? argsRaw
-      : (() => {
-          try {
-            return JSON.stringify(argsRaw ?? {});
-          } catch {
-            return '{}';
-          }
-        })();
-  const callIdRaw = selectCallId(entry);
-  const callId =
-    typeof callIdRaw === 'string' && callIdRaw.length
-      ? callIdRaw
-      : normalizeFunctionCallIdWithNative({
-          callId: callIdRaw,
-          fallback: `${fallbackPrefix}_${Math.random().toString(36).slice(2, 10)}`
-        });
-  return {
-    id: callId,
-    type: 'function',
-    function: {
-      name: rawName,
-      arguments: argsStr
-    }
-  };
-}
 
 export function collectToolCallsFromResponses(response: Record<string, unknown>): Array<Record<string, unknown>> {
   return collectToolCallsFromResponsesWithNative(response);
@@ -105,80 +49,6 @@ function unwrapResponsesResponse(payload: Record<string, unknown>): Record<strin
     break;
   }
   return undefined;
-}
-
-function collectRawReasoningSegments(response: Record<string, unknown>): string[] {
-  const segments: string[] = [];
-  const outputItems = Array.isArray((response as any).output) ? (response as any).output : [];
-  for (const item of outputItems) {
-    if (!item || typeof item !== 'object') continue;
-    const type = typeof (item as any).type === 'string' ? String((item as any).type).toLowerCase() : '';
-    if (type !== 'reasoning') continue;
-    const content = Array.isArray((item as any).content) ? (item as any).content : [];
-    for (const part of content) {
-      if (part && typeof part === 'object' && typeof (part as any).text === 'string') {
-        segments.push((part as any).text as string);
-      }
-    }
-  }
-  return segments;
-}
-
-function collectReasoningSummarySegments(response: Record<string, unknown>): string[] {
-  const segments: string[] = [];
-  const outputItems = Array.isArray((response as any).output) ? (response as any).output : [];
-  for (const item of outputItems) {
-    if (!item || typeof item !== 'object') continue;
-    const type = typeof (item as any).type === 'string' ? String((item as any).type).toLowerCase() : '';
-    if (type !== 'reasoning') continue;
-    const summary = Array.isArray((item as any).summary) ? (item as any).summary : [];
-    for (const entry of summary) {
-      if (typeof entry === 'string') {
-        segments.push(entry);
-        continue;
-      }
-      if (entry && typeof entry === 'object' && typeof (entry as any).text === 'string') {
-        segments.push((entry as any).text);
-      }
-    }
-  }
-  return segments;
-}
-
-function collectReasoningEncryptedContent(response: Record<string, unknown>): string | undefined {
-  const outputItems = Array.isArray((response as any).output) ? (response as any).output : [];
-  for (const item of outputItems) {
-    if (!item || typeof item !== 'object') continue;
-    const type = typeof (item as any).type === 'string' ? String((item as any).type).toLowerCase() : '';
-    if (type !== 'reasoning') continue;
-    const encrypted = (item as any).encrypted_content;
-    if (typeof encrypted === 'string' && encrypted.trim().length) {
-      return encrypted;
-    }
-  }
-  return undefined;
-}
-
-function buildReasoningPayload(options: {
-  summarySegments: string[];
-  contentSegments: string[];
-  encryptedContent?: string;
-}): ResponsesReasoningPayload | undefined {
-  const { summarySegments, contentSegments, encryptedContent } = options;
-  const summary = summarySegments.length
-    ? summarySegments.map((text) => ({ type: 'summary_text' as const, text }))
-    : undefined;
-  const content = contentSegments.length
-    ? contentSegments.map((text) => ({ type: 'reasoning_text' as const, text }))
-    : undefined;
-  if (!summary && !content && encryptedContent === undefined) {
-    return undefined;
-  }
-  return {
-    summary,
-    content,
-    encrypted_content: encryptedContent
-  };
 }
 
 function registerPassthroughSnapshot(payload: Record<string, unknown>): void {
@@ -243,11 +113,11 @@ export function buildChatResponseFromResponses(payload: unknown): Record<string,
           rawResponse: response as Record<string, unknown>
         });
         runBridgeActionPipeline({
-        stage: 'response_inbound',
-        actions: policyActions,
-        protocol: bridgePolicy?.protocol ?? 'openai-responses',
-        moduleType: bridgePolicy?.moduleType ?? 'openai-responses',
-        requestId: typeof response?.id === 'string' ? response.id : undefined,
+          stage: 'response_inbound',
+          actions: policyActions,
+          protocol: bridgePolicy?.protocol ?? 'openai-responses',
+          moduleType: bridgePolicy?.moduleType ?? 'openai-responses',
+          requestId: typeof response?.id === 'string' ? response.id : undefined,
           state: actionState
         });
       }

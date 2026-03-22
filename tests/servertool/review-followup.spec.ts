@@ -1,4 +1,7 @@
 import { afterAll, describe, expect, test } from '@jest/globals';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 import { runServerToolOrchestration } from '../../sharedmodule/llmswitch-core/src/servertool/engine.js';
 import type { AdapterContext } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/chat-envelope.js';
@@ -97,8 +100,173 @@ describe('review servertool followup', () => {
     expect((capturedFollowupMeta as any)?.cwd).toBe('/tmp/review-workdir');
     expect(typeof (capturedFollowupMeta as any)?.clientInjectText).toBe('string');
     expect(String((capturedFollowupMeta as any)?.clientInjectText || '')).toContain('代码 review');
+    expect(String((capturedFollowupMeta as any)?.clientInjectText || '')).toContain(
+      '必须先根据本次请求逐条核验代码'
+    );
     expect((capturedFollowupMeta as any)?.clientInjectSource).toBe('servertool.review');
     expect((capturedFollowupMeta as any)?.__shadowCompareForcedProviderKey).toBe('iflow.1-186.kimi-k2.5');
+  });
+
+  test('can disable review ai followup via ROUTECODEX_REVIEW_AI_FOLLOWUP_ENABLED=0', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'review-ai-gate-'));
+    const markerPath = path.join(tmpDir, 'called.marker');
+    const fakeBinPath = path.join(tmpDir, 'fake-codex.sh');
+    fs.writeFileSync(
+      fakeBinPath,
+      ['#!/usr/bin/env bash', `echo called > "${markerPath}"`, 'echo "fake-ai-followup"', 'exit 0', ''].join('\n'),
+      { encoding: 'utf8' }
+    );
+    fs.chmodSync(fakeBinPath, 0o755);
+
+    const prevStopEnabled = process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_ENABLED;
+    const prevBackend = process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_BACKEND;
+    const prevCodexBin = process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN;
+    const prevReviewEnabled = process.env.ROUTECODEX_REVIEW_AI_FOLLOWUP_ENABLED;
+    process.env.ROUTECODEX_REVIEW_AI_FOLLOWUP_ENABLED = '0';
+    process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_ENABLED = '1';
+    process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_BACKEND = 'codex';
+    process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN = fakeBinPath;
+    try {
+      const adapterContext: AdapterContext = {
+        requestId: 'req-review-no-ai-default',
+        entryEndpoint: '/v1/messages',
+        providerProtocol: 'anthropic-messages',
+        providerKey: 'iflow.1-186.kimi-k2.5',
+        stream: false,
+        sessionId: 'session-review-no-ai-default',
+        metadata: {
+          workdir: '/tmp/review-workdir'
+        },
+        capturedChatRequest: {
+          model: 'kimi-k2.5',
+          messages: [{ role: 'user', content: '请继续实现并自查。' }]
+        }
+      } as any;
+
+      let capturedFollowupMeta: Record<string, unknown> | null = null;
+      const orchestration = await runServerToolOrchestration({
+        chat: buildReviewToolCallPayload(),
+        adapterContext,
+        requestId: 'req-review-no-ai-default',
+        entryEndpoint: '/v1/messages',
+        providerProtocol: 'anthropic-messages',
+        clientInjectDispatch: async (opts: any) => {
+          capturedFollowupMeta =
+            opts?.metadata && typeof opts.metadata === 'object'
+              ? (opts.metadata as Record<string, unknown>)
+              : null;
+          return { ok: true } as any;
+        }
+      });
+
+      expect(orchestration.executed).toBe(true);
+      expect(orchestration.flowId).toBe('review_flow');
+      expect(fs.existsSync(markerPath)).toBe(false);
+      expect(String((capturedFollowupMeta as any)?.clientInjectText || '')).toContain('严格代码 review');
+      expect(String((capturedFollowupMeta as any)?.clientInjectText || '')).toContain(
+        '必须先根据本次请求逐条核验代码'
+      );
+    } finally {
+      if (prevStopEnabled === undefined) delete process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_ENABLED;
+      else process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_ENABLED = prevStopEnabled;
+      if (prevBackend === undefined) delete process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_BACKEND;
+      else process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_BACKEND = prevBackend;
+      if (prevCodexBin === undefined) delete process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN;
+      else process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN = prevCodexBin;
+      if (prevReviewEnabled === undefined) delete process.env.ROUTECODEX_REVIEW_AI_FOLLOWUP_ENABLED;
+      else process.env.ROUTECODEX_REVIEW_AI_FOLLOWUP_ENABLED = prevReviewEnabled;
+      try {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      } catch {
+        // best effort cleanup
+      }
+    }
+  });
+
+  test('invokes ai followup command for review flow when enabled', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'review-ai-on-'));
+    const markerPath = path.join(tmpDir, 'called.marker');
+    const fakeBinPath = path.join(tmpDir, 'fake-codex.sh');
+    fs.writeFileSync(
+      fakeBinPath,
+      [
+        '#!/usr/bin/env bash',
+        `echo called > "${markerPath}"`,
+        'sleep 0.2',
+        'echo "下一步：先补一个最小回归测试再继续实现。"',
+        'exit 0',
+        ''
+      ].join('\n'),
+      { encoding: 'utf8' }
+    );
+    fs.chmodSync(fakeBinPath, 0o755);
+
+    const prevStopEnabled = process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_ENABLED;
+    const prevBackend = process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_BACKEND;
+    const prevCodexBin = process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN;
+    const prevReviewEnabled = process.env.ROUTECODEX_REVIEW_AI_FOLLOWUP_ENABLED;
+    process.env.ROUTECODEX_REVIEW_AI_FOLLOWUP_ENABLED = '1';
+    process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_ENABLED = '1';
+    process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_BACKEND = 'codex';
+    process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN = fakeBinPath;
+    try {
+      const adapterContext: AdapterContext = {
+        requestId: 'req-review-ai-enabled',
+        entryEndpoint: '/v1/messages',
+        providerProtocol: 'anthropic-messages',
+        providerKey: 'iflow.1-186.kimi-k2.5',
+        stream: false,
+        sessionId: 'session-review-ai-enabled',
+        metadata: {
+          workdir: tmpDir
+        },
+        capturedChatRequest: {
+          model: 'kimi-k2.5',
+          messages: [{ role: 'user', content: '请继续实现并自查。' }]
+        }
+      } as any;
+
+      let capturedFollowupMeta: Record<string, unknown> | null = null;
+      let timerTicked = false;
+      const timer = setTimeout(() => {
+        timerTicked = true;
+      }, 30);
+      const orchestration = await runServerToolOrchestration({
+        chat: buildReviewToolCallPayload(),
+        adapterContext,
+        requestId: 'req-review-ai-enabled',
+        entryEndpoint: '/v1/messages',
+        providerProtocol: 'anthropic-messages',
+        clientInjectDispatch: async (opts: any) => {
+          capturedFollowupMeta =
+            opts?.metadata && typeof opts.metadata === 'object'
+              ? (opts.metadata as Record<string, unknown>)
+              : null;
+          return { ok: true } as any;
+        }
+      });
+      clearTimeout(timer);
+
+      expect(orchestration.executed).toBe(true);
+      expect(orchestration.flowId).toBe('review_flow');
+      expect(timerTicked).toBe(true);
+      expect(fs.existsSync(markerPath)).toBe(true);
+      expect(String((capturedFollowupMeta as any)?.clientInjectText || '')).toContain('下一步：先补一个最小回归测试再继续实现');
+    } finally {
+      if (prevStopEnabled === undefined) delete process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_ENABLED;
+      else process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_ENABLED = prevStopEnabled;
+      if (prevBackend === undefined) delete process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_BACKEND;
+      else process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_BACKEND = prevBackend;
+      if (prevCodexBin === undefined) delete process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN;
+      else process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN = prevCodexBin;
+      if (prevReviewEnabled === undefined) delete process.env.ROUTECODEX_REVIEW_AI_FOLLOWUP_ENABLED;
+      else process.env.ROUTECODEX_REVIEW_AI_FOLLOWUP_ENABLED = prevReviewEnabled;
+      try {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      } catch {
+        // best effort cleanup
+      }
+    }
   });
 
   test('prefers cwd passed in review tool arguments', async () => {

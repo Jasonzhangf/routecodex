@@ -60,7 +60,39 @@ impl VirtualRouterEngineCore {
             return;
         }
         self.handle_provider_failure(event);
+        if self.apply_antigravity_auth_verify_blacklist(event) {
+            return;
+        }
         self.apply_series_cooldown(event);
+    }
+
+    fn apply_antigravity_auth_verify_blacklist(&mut self, event: &Value) -> bool {
+        let Some(runtime_key) = resolve_antigravity_runtime_key(event) else {
+            return false;
+        };
+        if !is_google_account_verification_required(event) {
+            return false;
+        }
+        let prefix = format!("{}.", runtime_key);
+        let provider_keys = self
+            .provider_registry
+            .list_provider_keys("antigravity")
+            .into_iter()
+            .filter(|key| key.starts_with(&prefix))
+            .collect::<Vec<_>>();
+        if provider_keys.is_empty() {
+            return false;
+        }
+        let now = now_ms();
+        for key in provider_keys {
+            self.health_manager.trip_provider(
+                &key,
+                Some("auth_verify".to_string()),
+                Some(ANTIGRAVITY_AUTH_VERIFY_BAN_MS),
+                now,
+            );
+        }
+        true
     }
 
     fn apply_series_cooldown(&mut self, event: &Value) {
@@ -110,6 +142,82 @@ impl VirtualRouterEngineCore {
     }
 }
 
+fn is_google_account_verification_required(event: &Value) -> bool {
+    let mut sources: Vec<String> = Vec::new();
+    if let Some(message) = event.get("message").and_then(|v| v.as_str()) {
+        if !message.trim().is_empty() {
+            sources.push(message.to_string());
+        }
+    }
+    if let Some(details) = event.get("details").and_then(|v| v.as_object()) {
+        if let Some(upstream) = details.get("upstreamMessage").and_then(|v| v.as_str()) {
+            if !upstream.trim().is_empty() {
+                sources.push(upstream.to_string());
+            }
+        }
+        if let Some(meta) = details.get("meta").and_then(|v| v.as_object()) {
+            if let Some(meta_upstream) = meta.get("upstreamMessage").and_then(|v| v.as_str()) {
+                if !meta_upstream.trim().is_empty() {
+                    sources.push(meta_upstream.to_string());
+                }
+            }
+            if let Some(meta_message) = meta.get("message").and_then(|v| v.as_str()) {
+                if !meta_message.trim().is_empty() {
+                    sources.push(meta_message.to_string());
+                }
+            }
+        }
+    }
+    if sources.is_empty() {
+        return false;
+    }
+    let lowered = sources.join(" | ").to_lowercase();
+    lowered.contains("verify your account")
+        || lowered.contains("validation_required")
+        || lowered.contains("validation required")
+        || lowered.contains("validation_url")
+        || lowered.contains("validation url")
+        || lowered.contains("accounts.google.com/signin/continue")
+        || lowered.contains("support.google.com/accounts?p=al_alert")
+}
+
+fn resolve_antigravity_runtime_key(event: &Value) -> Option<String> {
+    let runtime = event.get("runtime").and_then(|v| v.as_object())?;
+    if let Some(target_runtime_key) = runtime
+        .get("target")
+        .and_then(|v| v.as_object())
+        .and_then(|target| target.get("runtimeKey"))
+        .and_then(|v| v.as_str())
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+    {
+        return Some(target_runtime_key);
+    }
+    let provider_key = runtime
+        .get("providerKey")
+        .and_then(|v| v.as_str())
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .or_else(|| {
+            runtime
+                .get("target")
+                .and_then(|v| v.as_object())
+                .and_then(|target| target.get("providerKey"))
+                .and_then(|v| v.as_str())
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+        })?;
+    let parts = provider_key
+        .split('.')
+        .map(str::trim)
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>();
+    if parts.len() < 2 {
+        return None;
+    }
+    Some(format!("{}.{}", parts[0], parts[1]))
+}
+
 fn extract_series_cooldown_detail(event: &Value) -> Option<SeriesCooldownDetail> {
     let details = event.get("details")?.as_object()?;
     let raw = details.get("virtualRouterSeriesCooldown")?.as_object()?;
@@ -157,3 +265,5 @@ fn resolve_model_series(model_id: &str) -> String {
     }
     "default".to_string()
 }
+
+const ANTIGRAVITY_AUTH_VERIFY_BAN_MS: i64 = 24 * 60 * 60_000;

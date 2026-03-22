@@ -481,7 +481,12 @@ fn normalize_reasoning_chat_message_container(container: &mut Map<String, Value>
     {
         container.insert("content".to_string(), Value::String(reasoning));
     } else if let Some(role_value) = role.as_deref() {
-        if role_value != "system" && role_value != "tool" {
+        let has_tool_calls = container
+            .get("tool_calls")
+            .and_then(Value::as_array)
+            .map(|rows| !rows.is_empty())
+            .unwrap_or(false);
+        if role_value != "system" && role_value != "tool" && !has_tool_calls {
             container.insert("content".to_string(), Value::String(String::new()));
         }
     }

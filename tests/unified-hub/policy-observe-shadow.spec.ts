@@ -108,8 +108,8 @@ async function runOnce(args: {
 function normalizeDynamicClockHints<T>(value: T): T {
   if (typeof value === 'string') {
     return value
-      .replace(/\[Time\/Date\]: utc=`[^`]+` local=`[^`]+` tz=`[^`]+` nowMs=`[^`]+` ntpOffsetMs=`[^`]+`/g, '[Time/Date]: <normalized>')
-      .replace(/\[Clock\]: utc=`[^`]+` local=`[^`]+` tz=`[^`]+` nowMs=`[^`]+` ntpOffsetMs=`[^`]+`/g, '[Clock]: <normalized>') as T;
+      .replace(/\[Time\/Date\]: (?:timeRef=`now` )?utc=`[^`]+` local=`[^`]+` tz=`[^`]+` nowMs=`[^`]+` ntpOffsetMs=`[^`]+`/g, '[Time/Date]: <normalized>')
+      .replace(/\[Clock\]: (?:timeRef=`now` )?utc=`[^`]+` local=`[^`]+` tz=`[^`]+` nowMs=`[^`]+` ntpOffsetMs=`[^`]+`/g, '[Clock]: <normalized>') as T;
   }
   if (Array.isArray(value)) {
     return value.map((entry) => normalizeDynamicClockHints(entry)) as T;

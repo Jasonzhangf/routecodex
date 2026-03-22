@@ -135,7 +135,7 @@ const CLOCK_STANDARD_TOOLS: StandardizedTool[] = [
     type: 'function',
     function: {
       name: 'apply_patch',
-      description: 'Apply a patch to repository files.',
+      description: 'Apply a patch to repository files using FREEFORM patch text only. Use either internal "*** Begin Patch" grammar or raw GNU unified diff, but never mix both in one payload.',
       parameters: {
         type: 'object',
         properties: {

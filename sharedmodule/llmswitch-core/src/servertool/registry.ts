@@ -30,6 +30,17 @@ const AUTO_SERVER_TOOL_HANDLERS: ServerToolHandlerEntry[] = [];
 const DEFAULT_AUTO_HOOK_PRIORITY = 100;
 let autoHookRegistrationOrder = 0;
 
+function normalizeServerToolName(value: unknown): string {
+  const key = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  if (!key) {
+    return '';
+  }
+  if (key === 'websearch' || key === 'web-search') {
+    return 'web_search';
+  }
+  return key;
+}
+
 function normalizeAutoHookPhase(value: unknown): AutoHookPhase {
   const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
   if (normalized === 'pre' || normalized === 'before') {
@@ -74,7 +85,7 @@ export function registerServerToolHandler(
   }
 ): void {
   if (!name || typeof name !== 'string' || typeof handler !== 'function') return;
-  const key = name.trim().toLowerCase();
+  const key = normalizeServerToolName(name);
   if (!key) return;
   const trigger: TriggerMode = options?.trigger ?? 'tool_call';
   const entry: ServerToolHandlerEntry = { name: key, trigger, handler };
@@ -95,7 +106,7 @@ export function registerServerToolHandler(
 
 export function getServerToolHandler(name: string): ServerToolHandlerEntry | undefined {
   if (!name || typeof name !== 'string') return undefined;
-  const key = name.trim().toLowerCase();
+  const key = normalizeServerToolName(name);
   if (!key) return undefined;
   return SERVER_TOOL_HANDLERS[key];
 }

@@ -5,7 +5,20 @@ fn provider_protocol_matches(protocol: Option<&String>, expected: &str) -> bool 
     false
 }
 
-fn lmstudio_stringify_input_enabled() -> bool {
+fn read_rt_bool(adapter_context: &AdapterContext, key: &str) -> Option<bool> {
+    adapter_context
+        .rt
+        .as_ref()
+        .and_then(|value| value.as_object())
+        .and_then(|row| row.get(key))
+        .and_then(|value| value.as_bool())
+}
+
+fn lmstudio_stringify_input_enabled(adapter_context: &AdapterContext) -> bool {
+    if let Some(override_value) = read_rt_bool(adapter_context, "lmstudioStringifyInputEnabled")
+    {
+        return override_value;
+    }
     matches!(
         std::env::var("LLMSWITCH_LMSTUDIO_STRINGIFY_INPUT").ok().as_deref(),
         Some("1")

@@ -1,7 +1,11 @@
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import type { ProviderRuntimeProfile } from '../../../providers/core/api/provider-types.js';
 import type { ProviderHandle, ProviderProtocol, VirtualRouterArtifacts } from './types.js';
 import { ProviderFactory } from '../../../providers/core/runtime/provider-factory.js';
 import { mapProviderProtocol, normalizeProviderType, resolveProviderIdentity } from './provider-utils.js';
+import { resolveLegacyRouteCodexUserDir, resolveRccAuthDirForRead } from '../../../config/user-data-paths.js';
 import {
   buildAntigravityAliasMap,
   collectAntigravityAliases,
@@ -23,6 +27,81 @@ type LegacyAuthFields = ProviderRuntimeProfile['auth'] & {
   accountAlias?: unknown;
   account_alias?: unknown;
 };
+
+function resolveHomeDir(): string {
+  const envHome = String(process.env.HOME || '').trim();
+  if (envHome) {
+    return path.resolve(envHome);
+  }
+  return path.resolve(os.homedir());
+}
+
+function expandUserPath(rawPath: string): string {
+  if (rawPath.startsWith('~/')) {
+    return path.join(resolveHomeDir(), rawPath.slice(2));
+  }
+  return rawPath;
+}
+
+function normalizePath(rawPath: string): string {
+  return path.resolve(expandUserPath(rawPath));
+}
+
+function isPathWithinDir(targetPath: string, dirPath: string): boolean {
+  if (targetPath === dirPath) {
+    return true;
+  }
+  return targetPath.startsWith(`${dirPath}${path.sep}`);
+}
+
+async function hasUsableDeepSeekTokenAtPath(tokenFilePath: string): Promise<boolean> {
+  try {
+    const raw = await fs.readFile(tokenFilePath, 'utf8');
+    const trimmed = raw.trim();
+    if (!trimmed) {
+      return false;
+    }
+    try {
+      const parsed = JSON.parse(raw);
+      if (typeof parsed === 'string') {
+        return parsed.trim().length > 0;
+      }
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        const record = parsed as Record<string, unknown>;
+        const token = record.access_token ?? record.token;
+        return typeof token === 'string' && token.trim().length > 0;
+      }
+      return false;
+    } catch {
+      return !trimmed.startsWith('{') && !trimmed.startsWith('[');
+    }
+  } catch {
+    return false;
+  }
+}
+
+async function normalizeDeepSeekLegacyTokenFilePath(rawTokenFilePath: string): Promise<string> {
+  const normalizedInputPath = normalizePath(rawTokenFilePath);
+  const legacyAuthDir = path.resolve(path.join(resolveLegacyRouteCodexUserDir(), 'auth'));
+  if (!isPathWithinDir(normalizedInputPath, legacyAuthDir)) {
+    return rawTokenFilePath;
+  }
+
+  const candidatePath = path.resolve(path.join(resolveRccAuthDirForRead(), path.basename(normalizedInputPath)));
+  if (candidatePath === normalizedInputPath) {
+    return rawTokenFilePath;
+  }
+
+  const [legacyUsable, candidateUsable] = await Promise.all([
+    hasUsableDeepSeekTokenAtPath(normalizedInputPath),
+    hasUsableDeepSeekTokenAtPath(candidatePath)
+  ]);
+
+  if (!legacyUsable && candidateUsable) {
+    return candidatePath;
+  }
+  return rawTokenFilePath;
+}
 
 function resolveOAuthProviderIdFromType(rawType?: string): string | undefined {
   if (typeof rawType !== 'string') {
@@ -145,6 +224,13 @@ export async function initializeProviderRuntimes(server: any, artifacts?: Virtua
 
         const handle = await server.createProviderHandle(runtimeKey, patchedRuntime);
         server.providerHandles.set(runtimeKey, handle);
+        const runtimeKeyParts = runtimeKey.split('.');
+        if (runtimeKeyParts.length >= 3) {
+          const aliasScopedRuntimeKey = `${runtimeKeyParts[0]}.${runtimeKeyParts[1]}`;
+          if (!server.providerHandles.has(aliasScopedRuntimeKey)) {
+            server.providerHandles.set(aliasScopedRuntimeKey, handle);
+          }
+        }
         server.providerRuntimeInitErrors.delete(runtimeKey);
       } catch (error) {
         const credentialMissing = isCredentialMissingInitError(error);
@@ -206,6 +292,13 @@ export async function initializeProviderRuntimes(server: any, artifacts?: Virtua
 
     if (server.providerHandles.has(runtimeKey)) {
       server.providerKeyToRuntimeKey.set(providerKey, runtimeKey);
+      const providerKeyParts = providerKey.split('.');
+      if (providerKeyParts.length >= 3) {
+        const aliasScopedKey = `${providerKeyParts[0]}.${providerKeyParts[1]}`;
+        if (!server.providerKeyToRuntimeKey.has(aliasScopedKey)) {
+          server.providerKeyToRuntimeKey.set(aliasScopedKey, runtimeKey);
+        }
+      }
     }
   }
 }
@@ -297,7 +390,10 @@ export async function resolveRuntimeAuth(server: any, runtime: ProviderRuntimePr
       return { ...auth, type: 'apikey', rawType: auth.rawType ?? 'iflow-cookie' };
     }
     if (rawType === 'deepseek-account') {
-      const tokenFile = pickString(authRecord.tokenFile, authRecord.token_file);
+      const tokenFileRaw = pickString(authRecord.tokenFile, authRecord.token_file);
+      const tokenFile = tokenFileRaw
+        ? await normalizeDeepSeekLegacyTokenFilePath(tokenFileRaw)
+        : undefined;
       const accountAlias = pickString(authRecord.accountAlias, authRecord.account_alias, runtime.keyAlias);
       return {
         type: 'apikey',

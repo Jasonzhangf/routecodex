@@ -131,7 +131,8 @@ export async function listHeartbeatHistory(args: {
   } catch {
     return [];
   }
-  const events: HeartbeatHistoryEvent[] = [];
+  const indexedEvents: Array<{ event: HeartbeatHistoryEvent; lineIndex: number }> = [];
+  let lineIndex = 0;
   for (const line of String(raw || "").split(/\r?\n/)) {
     if (!line.trim()) {
       continue;
@@ -140,16 +141,23 @@ export async function listHeartbeatHistory(args: {
       const parsed = JSON.parse(line);
       const event = coerceHistoryEvent(parsed, tmuxSessionId);
       if (event) {
-        events.push(event);
+        indexedEvents.push({ event, lineIndex });
       }
     } catch {
       // ignore malformed line
     }
+    lineIndex += 1;
   }
-  if (events.length < 1) {
+  if (indexedEvents.length < 1) {
     return [];
   }
-  events.sort((a, b) => b.atMs - a.atMs);
-  return events.slice(0, normalizeLimit(args.limit));
+  indexedEvents.sort((a, b) => {
+    if (b.event.atMs !== a.event.atMs) {
+      return b.event.atMs - a.event.atMs;
+    }
+    return b.lineIndex - a.lineIndex;
+  });
+  return indexedEvents
+    .slice(0, normalizeLimit(args.limit))
+    .map(({ event }) => event);
 }
-

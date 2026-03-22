@@ -30,6 +30,9 @@ function buildApplyPatchGuidanceText(): { marker: string; text: string } {
     '✅ Supported patch text formats:',
     '  A) Internal patch format: "*** Begin Patch" / "*** End Patch" + "*** Update/Add/Delete File"',
     '  B) GNU unified diff: "diff --git", "---/+++", "@@" hunks, /dev/null for new files',
+    '  - Choose ONE format per patch. Do NOT mix "*** Begin Patch" blocks with "diff --git" / "---/+++" headers in the same payload.',
+    '  - If you use internal patch format, the FIRST line must literally be "*** Begin Patch" (no prose, no code fence, no leading blank line).',
+    '  - If you use GNU unified diff, send raw diff text directly; do NOT wrap it inside "*** Begin Patch".',
     '',
     '✅ Create vs update:',
     '  - "*** Update File" MUST target an existing file (no implicit create).',
@@ -38,8 +41,20 @@ function buildApplyPatchGuidanceText(): { marker: string; text: string } {
     '✅ Common pitfalls:',
     '  - In "*** Add File", EVERY content line must start with "+".',
     '  - In "*** Update File" hunks, EVERY line must start with one of: " " (context), "-" (remove), "+" (add), or "@@" (hunk header).',
+    '  - NEVER guess file names/paths. Use the exact path from latest file read/list result.',
+    '  - NEVER send empty "*** Add File" blocks. Empty file creation is forbidden unless explicitly requested.',
+    '  - "*** Update File" MUST include at least one "@@" hunk. Without hunk headers, the patch will be rejected.',
+    '  - Raw markdown/frontmatter lines (e.g. "---", "title: ...") cannot appear directly after "*** Update File:"; wrap them in @@ hunks with proper prefixes.',
+    '  - Keep real newlines/tabs; CRLF/LF and "\\t" separators are accepted, but do not collapse lines into one line.',
     '',
-    '✅ Minimal examples (patch text):',
+    '✅ High-success preflight for "*** Update File":',
+    '  - First inspect current file lines (including blank lines) with: `nl -ba <file>` (or `sed -n`).',
+    '  - Build hunks from the LATEST file content you just read (do not rely on stale line numbers).',
+    '  - If you see "Failed to find expected lines", re-read file and retry with smaller/unique context.',
+    '  - If you see context-mismatch errors, do NOT keep guessing `@@` syntax or GNU line-number ranges; re-read the file first, then regenerate the patch from real current content.',
+    '  - If multiple edits are far apart, split them into multiple smaller apply_patch calls only AFTER re-reading the latest file content.',
+    '',
+    '✅ High-success templates (patch text):',
     '',
     '1) Create a new file',
     '```patch',
@@ -59,6 +74,17 @@ function buildApplyPatchGuidanceText(): { marker: string; text: string } {
     '-Line 2',
     '+Modified Line 2',
     ' Line 3',
+    '*** End Patch',
+    '```',
+    '',
+    '2b) Append lines below an anchor line (copy anchor from `nl -ba` output)',
+    '```patch',
+    '*** Begin Patch',
+    '*** Update File: path/to/existing.txt',
+    '@@',
+    ' Anchor line from current file',
+    '+New line 1',
+    '+New line 2',
     '*** End Patch',
     '```',
     '',
@@ -284,8 +310,14 @@ export function buildSystemToolGuidance(): string {
   lines.push(bullet('File writes are FORBIDDEN via shell (no redirection, no here-doc, no sed -i, no ed -s, no tee). Use apply_patch ONLY. / 通过 shell 写文件一律禁止（不得使用重定向、heredoc、sed -i、ed -s、tee）；必须使用 apply_patch。'));
   lines.push(bullet('NEVER wrap apply_patch inside exec_command/shell. Direct apply_patch tool call only. / 严禁在 exec_command/shell 中嵌套 apply_patch，必须直接调用 apply_patch。'));
   lines.push(bullet('apply_patch: Before writing, always read the target file first and compute changes against the latest content using appropriate tools. / apply_patch 在写入前必须先通过合适的工具读取目标文件最新内容，并基于该内容生成变更。'));
-  lines.push(bullet('apply_patch: Send patch text only. Supported formats: "*** Begin Patch" OR GNU unified diff. "*** Update File" never implicitly creates files—use "*** Add File:" (or /dev/null diff). / apply_patch：仅发送补丁文本，支持 "*** Begin Patch" 或 GNU diff；"*** Update File" 不会隐式创建文件。'));
-  lines.push(bullet('apply_patch: For a given file, prefer one contiguous change block per call; if you need to touch non-adjacent regions, split them into multiple apply_patch calls. / apply_patch 修改同一文件时尽量只提交一段连续补丁，多个不相邻位置请拆成多次调用。'));
+  lines.push(bullet('apply_patch: For "*** Update File", run `nl -ba <file>` first (keeps blank lines numbered), then build hunks from the latest content; if "Failed to find expected lines" occurs, re-read and retry with smaller unique context. / apply_patch 在 "*** Update File" 前先 `nl -ba <file>`（空行也编号），按最新内容生成 hunk；若出现 "Failed to find expected lines"，先重读文件再用更小且唯一的上下文重试。'));
+  lines.push(bullet('apply_patch: If you see "Failed to find expected lines" or "Failed to find context", do NOT keep guessing `@@` hunk syntax or GNU line-number ranges. Re-read the target file first, then rebuild the patch from the latest real content. / apply_patch：如果出现 "Failed to find expected lines" 或 "Failed to find context"，不要继续猜 `@@` hunk 语法或 GNU 行号范围；第一步必须先重读目标文件，再基于最新真实内容重建补丁。'));
+  lines.push(bullet('apply_patch: Send patch text only. Supported formats: (A) internal "*** Begin Patch" grammar OR (B) raw GNU unified diff. NEVER mix them in one payload; if you start with "*** Begin Patch", do not include "--- a/..." or "+++ b/..." inside that block. / apply_patch：仅发送补丁文本，只能二选一：A. internal "*** Begin Patch" 语法；B. 原始 GNU unified diff；严禁混用。若已使用 "*** Begin Patch"，块内不要再写 "--- a/..." 或 "+++ b/...".'));
+  lines.push(bullet('apply_patch: Never guess file names/paths; use exact file paths from latest reads. Empty Add File blocks are forbidden; Update File without "@@" hunk is rejected. / apply_patch：禁止猜测文件名/路径；必须使用最新读取到的精确路径。禁止空 Add File；没有 "@@" hunk 的 Update File 会被拒绝。'));
+  lines.push(bullet('apply_patch: Minimal valid internal templates: Add File = "*** Begin Patch\\n*** Add File: path\\n+line\\n*** End Patch"; Update File = "*** Begin Patch\\n*** Update File: path\\n@@\\n-old\\n+new\\n*** End Patch". / apply_patch 最小合法模板：Add File 与 Update File 必须按上述模板发送。'));
+  lines.push(bullet('apply_patch: Do not emit conflict markers (`=======`, `>>>>>>>`, `<<<<<<<`) or raw markdown/frontmatter as an Update File body. Update File requires at least one "@@" hunk with context or +/- lines. / apply_patch：禁止输出冲突标记或把原始 markdown/frontmatter 直接塞进 Update File；Update File 至少要有一个 "@@" hunk。'));
+  lines.push(bullet('apply_patch: Preserve real newline/tab structure. CRLF/LF and tab separators are tolerated, but patch must remain line-structured text. / apply_patch：保留真实换行与制表符结构；兼容 CRLF/LF 与 tab 分隔，但补丁必须保持逐行结构。'));
+  lines.push(bullet('apply_patch: For a given file, prefer one contiguous change block per call; if you need to touch non-adjacent regions, split them into multiple apply_patch calls after re-reading the latest file content. / apply_patch 修改同一文件时尽量只提交一段连续补丁，多个不相邻位置请在重读最新文件后拆成多次调用。'));
   lines.push(bullet('update_plan: Keep exactly one step in_progress; others pending/completed. / 仅一个 in_progress 步骤。'));
   lines.push(bullet('view_image: Path must be an image file (.png .jpg .jpeg .gif .webp .bmp .svg). / 仅图片路径。'));
   lines.push(bullet('Do NOT use view_image for text files (.md/.ts/.js/.json). Use shell: {"command":["cat","<path>"]}. / 文本文件请用 shell: cat。'));

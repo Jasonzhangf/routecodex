@@ -11,7 +11,7 @@ import {
 import { normalizeChatRequest } from '../index.js';
 import { loadFieldMapConfig } from '../../filters/utils/fieldmap-loader.js';
 import { createSnapshotWriter } from '../snapshot-utils.js';
-import { buildGovernedFilterPayloadWithNativeFallback } from '../../router/virtual-router/engine-selection/native-chat-request-filter-semantics.js';
+import { buildGovernedFilterPayloadWithNative } from '../../router/virtual-router/engine-selection/native-chat-request-filter-semantics.js';
 
 const ALLOW_ARCHIVE_IMPORTS =
   process.env.LLMSWITCH_ALLOW_ARCHIVE_IMPORTS === '1' ||
@@ -123,7 +123,7 @@ export async function runStandardChatRequestFilters(
   }
 
   // Native-first: use Rust payload semantics as canonical request shape for the filter-finalize stage.
-  const nativeGovernedPayload = buildGovernedFilterPayloadWithNativeFallback(staged);
+  const nativeGovernedPayload = buildGovernedFilterPayloadWithNative(staged);
   if (skipAutoToolInjection && nativeGovernedPayload && typeof nativeGovernedPayload === 'object') {
     if (!Array.isArray((nativeGovernedPayload as any).tools)) {
       (nativeGovernedPayload as Record<string, unknown>).tools = [];

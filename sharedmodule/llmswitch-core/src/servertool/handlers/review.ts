@@ -5,8 +5,8 @@ import { registerServerToolHandler } from '../registry.js';
 import { cloneJson } from '../server-side-tools.js';
 import { extractCapturedChatSeed } from './followup-request-builder.js';
 import {
-  extractStopMessageAutoResponseSnapshot,
-  renderStopMessageAutoFollowupViaAi
+  renderStopMessageAutoFollowupViaAiAsync,
+  extractStopMessageAutoResponseSnapshot
 } from './stop-message-auto/iflow-followup.js';
 import { sanitizeFollowupText } from './followup-sanitize.js';
 import {
@@ -19,6 +19,20 @@ const FLOW_ID = 'review_flow';
 const TOOL_NAME = 'review';
 const DEFAULT_REVIEW_GOAL =
   '请作为 reviewer 基于当前代码与测试证据进行审查，指出未完成项并给出最小下一步可执行动作。';
+
+function isReviewAiFollowupEnabled(): boolean {
+  const raw = String(
+    process.env.ROUTECODEX_REVIEW_AI_FOLLOWUP_ENABLED ??
+      process.env.RCC_REVIEW_AI_FOLLOWUP_ENABLED ??
+      ''
+  )
+    .trim()
+    .toLowerCase();
+  if (!raw) {
+    return true;
+  }
+  return !(raw === '0' || raw === 'false' || raw === 'no' || raw === 'off');
+}
 
 function parseToolArguments(toolCall: ToolCall): Record<string, unknown> {
   if (!toolCall.arguments || typeof toolCall.arguments !== 'string') {
@@ -136,37 +150,45 @@ const handler: ServerToolHandler = async (ctx: ServerToolHandlerContext): Promis
   const seed = captured ? extractCapturedChatSeed(captured) : null;
   const workingDirectory = resolveReviewWorkingDirectory(args, record, runtimeMetadata);
 
-  const aiFollowup = renderStopMessageAutoFollowupViaAi({
-    baseStopMessageText: composedGoal,
-    candidateFollowupText: composedGoal,
-    responseSnapshot: autoResponseSnapshot,
-    requestId: ctx.requestId,
-    sessionId: typeof record.sessionId === 'string' ? record.sessionId.trim() : undefined,
-    providerKey: resolveStopMessageFollowupProviderKey({
-      record: {
-        providerKey: record.providerKey,
-        providerId: record.providerId,
-        metadata: record.metadata
-      },
-      runtimeMetadata
-    }),
-    model: typeof seed?.model === 'string' ? seed.model : undefined,
-    workingDirectory,
-    usedRepeats: 0,
-    maxRepeats: 1,
-    completionClaimed: false,
-    isFirstPrompt: true
-  });
-
   const fallbackPrompt = [
     '请先做严格代码 review（证据驱动），不要相信“已完成”口头声明。',
     `短期目标：${composedGoal}`,
     extraContext || fallbackContext ? `补充上下文：${extraContext || fallbackContext}` : '',
+    '必须先根据本次请求逐条核验代码：明确要核验的目标/范围 -> 打开对应文件并检查实际实现 -> 必要时运行相关测试/构建命令。',
     '要求：逐条给出“声明项 -> 证据（文件路径/测试名/命令输出）-> 是否完成”；缺证据按未完成处理。',
+    '输出建议前必须先给“核验结论”，并明确引用触发该结论的代码/日志证据；禁止先给泛化建议再补证据。',
     '然后给出最小下一步写动作（改代码/补测试），并继续执行，不要直接 stop。'
   ]
     .filter(Boolean)
     .join('\n');
+  let aiFollowup: string | null = null;
+  if (isReviewAiFollowupEnabled()) {
+    try {
+      aiFollowup = await renderStopMessageAutoFollowupViaAiAsync({
+        baseStopMessageText: composedGoal,
+        candidateFollowupText: composedGoal,
+        responseSnapshot: autoResponseSnapshot,
+        requestId: ctx.requestId,
+        sessionId: typeof record.sessionId === 'string' ? record.sessionId.trim() : undefined,
+        providerKey: resolveStopMessageFollowupProviderKey({
+          record: {
+            providerKey: record.providerKey,
+            providerId: record.providerId,
+            metadata: record.metadata
+          },
+          runtimeMetadata
+        }),
+        model: typeof seed?.model === 'string' ? seed.model : undefined,
+        workingDirectory,
+        usedRepeats: 0,
+        maxRepeats: 1,
+        completionClaimed: false,
+        isFirstPrompt: true
+      });
+    } catch {
+      aiFollowup = null;
+    }
+  }
   const followupText = sanitizeFollowupText(
     typeof aiFollowup === 'string' && aiFollowup.trim() ? aiFollowup.trim() : fallbackPrompt
   );

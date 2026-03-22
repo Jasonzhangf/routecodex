@@ -131,6 +131,44 @@ fn resolve_alias_map_from_resp_semantics(semantics: &Value) -> Option<Map<String
     normalize_alias_map(&Value::Object(derived_alias))
 }
 
+fn resolve_alias_map_from_sources(
+    adapter_context: &Value,
+    chat_envelope: &Value,
+) -> Option<Map<String, Value>> {
+    let adapter_row = adapter_context.as_object();
+    if let Some(from_context) = adapter_row
+        .and_then(|row| row.get("anthropicToolNameMap"))
+        .and_then(normalize_alias_map)
+    {
+        return Some(from_context);
+    }
+
+    let chat_row = chat_envelope.as_object();
+    let metadata = chat_row
+        .and_then(|row| row.get("metadata"))
+        .and_then(|node| node.as_object());
+    if let Some(direct) = metadata
+        .and_then(|row| row.get("anthropicToolNameMap"))
+        .and_then(normalize_alias_map)
+    {
+        return Some(direct);
+    }
+    if let Some(from_context_node) = metadata
+        .and_then(|row| row.get("context"))
+        .and_then(|node| node.as_object())
+        .and_then(|row| row.get("anthropicToolNameMap"))
+        .and_then(normalize_alias_map)
+    {
+        return Some(from_context_node);
+    }
+
+    let semantics = chat_row
+        .and_then(|row| row.get("semantics"))
+        .cloned()
+        .unwrap_or(Value::Null);
+    resolve_alias_map_from_resp_semantics(&semantics)
+}
+
 fn resolve_client_tools_raw_from_resp_semantics(semantics: &Value) -> Option<Vec<Value>> {
     let tools_record = read_tools_record_from_semantics(semantics)?;
     let raw_tools = tools_record.get("clientToolsRaw")?;
@@ -218,6 +256,126 @@ fn resolve_sse_stream_mode(wants_stream: bool, client_protocol: &str) -> bool {
         client_protocol.trim(),
         "openai-chat" | "openai-responses" | "anthropic-messages"
     )
+}
+
+fn resolve_truthy_flag(raw: &Value) -> bool {
+    if raw.as_bool().unwrap_or(false) {
+        return true;
+    }
+    let value = raw
+        .as_str()
+        .map(|v| v.trim().to_ascii_lowercase())
+        .unwrap_or_default();
+    matches!(value.as_str(), "1" | "true")
+}
+
+fn resolve_non_empty_string(raw: Option<&Value>) -> Option<String> {
+    raw.and_then(|value| {
+        value
+            .as_str()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+    })
+}
+
+fn resolve_display_model_from_context(context: &Value) -> Option<String> {
+    let row = context.as_object()?;
+    for key in ["originalModelId", "clientModelId", "modelId"] {
+        if let Some(value) = resolve_non_empty_string(row.get(key)) {
+            return Some(value);
+        }
+    }
+    None
+}
+
+fn resolve_client_facing_request_id_from_context(context: &Value) -> Option<String> {
+    let row = context.as_object()?;
+    for key in ["clientRequestId", "groupRequestId", "requestId"] {
+        if let Some(value) = resolve_non_empty_string(row.get(key)) {
+            return Some(value);
+        }
+    }
+    None
+}
+
+fn resolve_tool_surface_shadow_enabled(raw_mode: &Value) -> bool {
+    let value = raw_mode
+        .as_str()
+        .map(|v| v.trim().to_ascii_lowercase())
+        .unwrap_or_default();
+    if value.is_empty() {
+        return false;
+    }
+    if matches!(value.as_str(), "off" | "0" | "false") {
+        return false;
+    }
+    matches!(value.as_str(), "observe" | "shadow" | "enforce")
+}
+
+fn resolve_client_protocol_for_response_entry(
+    entry_endpoint: Option<&str>,
+    is_followup: bool,
+) -> String {
+    if is_followup {
+        return "openai-chat".to_string();
+    }
+    let lowered = entry_endpoint
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    if lowered.contains("/v1/responses") {
+        return "openai-responses".to_string();
+    }
+    if lowered.contains("/v1/messages") {
+        return "anthropic-messages".to_string();
+    }
+    "openai-chat".to_string()
+}
+
+fn resolve_clock_reservation_from_context(context: &Value) -> Option<Value> {
+    let context_row = context.as_object()?;
+    let raw = context_row.get("__clockReservation")?.as_object()?;
+
+    let reservation_id = raw
+        .get("reservationId")
+        .and_then(|v| v.as_str())
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())?;
+    let session_id = raw
+        .get("sessionId")
+        .and_then(|v| v.as_str())
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())?;
+
+    let task_ids = raw
+        .get("taskIds")
+        .and_then(|v| v.as_array())
+        .map(|rows| {
+            rows.iter()
+                .filter_map(|entry| entry.as_str())
+                .map(|entry| entry.trim().to_string())
+                .filter(|entry| !entry.is_empty())
+                .map(Value::String)
+                .collect::<Vec<Value>>()
+        })
+        .unwrap_or_default();
+    if task_ids.is_empty() {
+        return None;
+    }
+
+    let reserved_at_ms = raw
+        .get("reservedAtMs")
+        .and_then(|value| value.as_f64())
+        .filter(|value| value.is_finite())
+        .map(|value| value.floor() as i64)
+        .unwrap_or_else(|| now_unix_millis() as i64);
+
+    Some(Value::Object(Map::from_iter([
+        ("reservationId".to_string(), Value::String(reservation_id)),
+        ("sessionId".to_string(), Value::String(session_id)),
+        ("taskIds".to_string(), Value::Array(task_ids)),
+        ("reservedAtMs".to_string(), Value::from(reserved_at_ms)),
+    ])))
 }
 
 fn now_unix_millis() -> u128 {
@@ -639,6 +797,219 @@ fn sanitize_anthropic_message(message: &Value) -> Value {
         sanitized.insert("usage".to_string(), normalize_anthropic_usage_object(usage));
     }
     Value::Object(sanitized)
+}
+
+fn normalize_anthropic_stop_reason_token(raw: Option<&str>) -> String {
+    raw.unwrap_or("").trim().to_ascii_lowercase()
+}
+
+fn is_context_overflow_stop_reason(normalized_stop_reason: &str) -> bool {
+    matches!(
+        normalized_stop_reason,
+        "model_context_window_exceeded" | "context_window_exceeded" | "context_length_exceeded"
+    )
+}
+
+fn map_anthropic_stop_reason_to_finish_reason(raw: Option<&str>) -> String {
+    let normalized = normalize_anthropic_stop_reason_token(raw);
+    match normalized.as_str() {
+        "tool_use" => "tool_calls".to_string(),
+        "max_tokens" => "length".to_string(),
+        "stop_sequence" | "end_turn" => "stop".to_string(),
+        "model_context_window_exceeded" | "context_window_exceeded"
+        | "context_length_exceeded" => "length".to_string(),
+        _ => {
+            if normalized.is_empty() {
+                "stop".to_string()
+            } else {
+                normalized
+            }
+        }
+    }
+}
+
+fn resolve_anthropic_stop_reason(raw: Option<&str>) -> Value {
+    let normalized = normalize_anthropic_stop_reason_token(raw);
+    Value::Object(Map::from_iter([
+        (
+            "normalized".to_string(),
+            Value::String(normalized.clone()),
+        ),
+        (
+            "finishReason".to_string(),
+            Value::String(map_anthropic_stop_reason_to_finish_reason(raw)),
+        ),
+        (
+            "isContextOverflow".to_string(),
+            Value::Bool(is_context_overflow_stop_reason(normalized.as_str())),
+        ),
+    ]))
+}
+
+fn resolve_anthropic_chat_completion_outcome(
+    raw_stop_reason: Option<&str>,
+    tool_call_count: usize,
+    has_visible_assistant_output: bool,
+) -> Value {
+    let resolution = resolve_anthropic_stop_reason(raw_stop_reason);
+    let normalized = resolution
+        .as_object()
+        .and_then(|row| row.get("normalized"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let finish_reason_from_stop = resolution
+        .as_object()
+        .and_then(|row| row.get("finishReason"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("stop")
+        .to_string();
+    let is_context_overflow = resolution
+        .as_object()
+        .and_then(|row| row.get("isContextOverflow"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let finish_reason = if tool_call_count > 0 {
+        "tool_calls".to_string()
+    } else {
+        finish_reason_from_stop
+    };
+    let should_fail_empty_context_overflow = is_context_overflow && !has_visible_assistant_output;
+
+    Value::Object(Map::from_iter([
+        ("normalized".to_string(), Value::String(normalized)),
+        ("finishReason".to_string(), Value::String(finish_reason)),
+        (
+            "isContextOverflow".to_string(),
+            Value::Bool(is_context_overflow),
+        ),
+        (
+            "shouldFailEmptyContextOverflow".to_string(),
+            Value::Bool(should_fail_empty_context_overflow),
+        ),
+    ]))
+}
+
+fn build_provider_tool_summary(tool_call_count: usize, tool_names: Vec<String>) -> Value {
+    let mut out = Map::new();
+    out.insert(
+        "toolCallCount".to_string(),
+        Value::from(tool_call_count as u64),
+    );
+    if !tool_names.is_empty() {
+        out.insert(
+            "toolNames".to_string(),
+            Value::Array(tool_names.into_iter().map(Value::String).collect()),
+        );
+    }
+    Value::Object(out)
+}
+
+fn summarize_tool_calls_from_provider_response(payload: &Value) -> Value {
+    let row = match payload.as_object() {
+        Some(v) => v,
+        None => return Value::Object(Map::new()),
+    };
+
+    // openai-chat
+    if let Some(choices) = row.get("choices").and_then(|v| v.as_array()) {
+        let tool_calls = choices
+            .first()
+            .and_then(|choice| choice.as_object())
+            .and_then(|choice_obj| choice_obj.get("message"))
+            .and_then(|msg| msg.as_object())
+            .and_then(|msg_obj| msg_obj.get("tool_calls"))
+            .and_then(|tc| tc.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let tool_names: Vec<String> = tool_calls
+            .iter()
+            .filter_map(|entry| {
+                entry
+                    .as_object()
+                    .and_then(|entry_obj| entry_obj.get("function"))
+                    .and_then(|fn_node| fn_node.as_object())
+                    .and_then(|fn_obj| fn_obj.get("name"))
+                    .and_then(|name| name.as_str())
+                    .map(|name| name.trim().to_string())
+                    .filter(|name| !name.is_empty())
+            })
+            .take(10)
+            .collect();
+        return build_provider_tool_summary(tool_calls.len(), tool_names);
+    }
+
+    // openai-responses
+    if let Some(output_items) = row.get("output").and_then(|v| v.as_array()) {
+        let function_calls: Vec<&Value> = output_items
+            .iter()
+            .filter(|item| {
+                item.as_object()
+                    .and_then(|obj| obj.get("type"))
+                    .and_then(|v| v.as_str())
+                    .map(|t| t.trim().eq_ignore_ascii_case("function_call"))
+                    .unwrap_or(false)
+            })
+            .collect();
+        let tool_names: Vec<String> = function_calls
+            .iter()
+            .filter_map(|item| {
+                item.as_object()
+                    .and_then(|obj| obj.get("name"))
+                    .and_then(|name| name.as_str())
+                    .map(|name| name.trim().to_string())
+                    .filter(|name| !name.is_empty())
+            })
+            .take(10)
+            .collect();
+        return build_provider_tool_summary(function_calls.len(), tool_names);
+    }
+
+    // anthropic-messages
+    if let Some(content_blocks) = row.get("content").and_then(|v| v.as_array()) {
+        let tool_use_blocks: Vec<&Value> = content_blocks
+            .iter()
+            .filter(|item| {
+                item.as_object()
+                    .and_then(|obj| obj.get("type"))
+                    .and_then(|v| v.as_str())
+                    .map(|t| t.trim().eq_ignore_ascii_case("tool_use"))
+                    .unwrap_or(false)
+            })
+            .collect();
+        let tool_names: Vec<String> = tool_use_blocks
+            .iter()
+            .filter_map(|item| {
+                item.as_object()
+                    .and_then(|obj| obj.get("name"))
+                    .and_then(|name| name.as_str())
+                    .map(|name| name.trim().to_string())
+                    .filter(|name| !name.is_empty())
+            })
+            .take(10)
+            .collect();
+        return build_provider_tool_summary(tool_use_blocks.len(), tool_names);
+    }
+
+    Value::Object(Map::new())
+}
+
+fn infer_provider_type_from_protocol(protocol_raw: Option<&str>) -> Option<String> {
+    let normalized = protocol_raw
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    if normalized.is_empty() {
+        return None;
+    }
+    match normalized.as_str() {
+        "openai-chat" => Some("openai".to_string()),
+        "openai-responses" => Some("responses".to_string()),
+        "anthropic-messages" => Some("anthropic".to_string()),
+        "gemini-chat" => Some("gemini".to_string()),
+        _ => None,
+    }
 }
 
 fn build_anthropic_response_from_chat_core(
@@ -1681,22 +2052,30 @@ fn strip_reasoning_markdown_line_prefix(raw: &str) -> String {
 }
 
 fn compact_reasoning_summary_body(raw: &str) -> String {
-    let mut chunks: Vec<String> = Vec::new();
-    for line in raw.replace("\r\n", "\n").replace('\r', "\n").lines() {
+    let normalized = raw
+        .replace("\\r\\n", "\n")
+        .replace("\\n", "\n")
+        .replace("\\r", "\n")
+        .replace("\r\n", "\n")
+        .replace('\r', "\n");
+    let mut lines: Vec<String> = Vec::new();
+    let mut last_blank = false;
+    for line in normalized.lines() {
         let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
         if trimmed.starts_with("```") {
             continue;
         }
-        let normalized = strip_reasoning_markdown_line_prefix(trimmed);
-        if normalized.is_empty() {
+        if trimmed.is_empty() {
+            if !last_blank && !lines.is_empty() {
+                lines.push(String::new());
+            }
+            last_blank = true;
             continue;
         }
-        chunks.push(normalized);
+        lines.push(trimmed.to_string());
+        last_blank = false;
     }
-    collapse_whitespace_to_single_spaces(chunks.join(" ").as_str())
+    lines.join("\n").trim().to_string()
 }
 
 fn normalize_reasoning_summary_text_for_codex(text: &str, ensure_header: bool) -> Option<String> {
@@ -1724,10 +2103,22 @@ fn normalize_reasoning_summary_text_for_codex(text: &str, ensure_header: bool) -
         (String::new(), trimmed.to_string())
     };
 
-    let body = compact_reasoning_summary_body(body_raw.as_str());
+    let normalized_body_source = body_raw
+        .replace("\\r\\n", "\n")
+        .replace("\\n", "\n")
+        .replace("\\r", "\n")
+        .replace("\r\n", "\n")
+        .replace('\r', "\n");
+    let body = compact_reasoning_summary_body(normalized_body_source.as_str());
     if !header.is_empty() {
         if body.is_empty() {
             return Some(header);
+        }
+        let wants_paragraph_gap = normalized_body_source.starts_with('\n')
+            || normalized_body_source.starts_with("\n\n")
+            || normalized_body_source.contains("\n\n");
+        if wants_paragraph_gap {
+            return Some(format!("{}\n\n{}", header, body.trim()).trim().to_string());
         }
         return Some(format!("{} {}", header, body).trim().to_string());
     }
@@ -1736,6 +2127,9 @@ fn normalize_reasoning_summary_text_for_codex(text: &str, ensure_header: bool) -
         return None;
     }
     if ensure_header {
+        if body.contains('\n') {
+            return Some(format!("**Thinking** {}", body));
+        }
         return Some(format!("**Thinking** {}", body));
     }
     Some(body)
@@ -2287,6 +2681,19 @@ pub fn resolve_alias_map_from_resp_semantics_json(semantics_json: String) -> Nap
 }
 
 #[napi]
+pub fn resolve_alias_map_from_sources_json(
+    adapter_context_json: String,
+    chat_envelope_json: String,
+) -> NapiResult<String> {
+    let adapter_context: Value = serde_json::from_str(&adapter_context_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let chat_envelope: Value = serde_json::from_str(&chat_envelope_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = resolve_alias_map_from_sources(&adapter_context, &chat_envelope);
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi]
 pub fn resolve_client_tools_raw_from_resp_semantics_json(
     semantics_json: String,
 ) -> NapiResult<String> {
@@ -2323,6 +2730,102 @@ pub fn sanitize_chat_completion_like_json(candidate_json: String) -> NapiResult<
     let candidate: Value = serde_json::from_str(&candidate_json)
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let output = sanitize_chat_completion_like(&candidate);
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi]
+pub fn resolve_anthropic_stop_reason_json(stop_reason_json: String) -> NapiResult<String> {
+    let stop_reason: Value = serde_json::from_str(&stop_reason_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = resolve_anthropic_stop_reason(stop_reason.as_str());
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi]
+pub fn resolve_anthropic_chat_completion_outcome_json(
+    stop_reason_json: String,
+    tool_call_count: u32,
+    has_visible_assistant_output: bool,
+) -> NapiResult<String> {
+    let stop_reason: Value = serde_json::from_str(&stop_reason_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = resolve_anthropic_chat_completion_outcome(
+        stop_reason.as_str(),
+        tool_call_count as usize,
+        has_visible_assistant_output,
+    );
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi]
+pub fn summarize_tool_calls_from_provider_response_json(payload_json: String) -> NapiResult<String> {
+    let payload: Value = serde_json::from_str(&payload_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = summarize_tool_calls_from_provider_response(&payload);
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi]
+pub fn resolve_provider_type_from_protocol_json(protocol_json: String) -> NapiResult<String> {
+    let protocol: Value = serde_json::from_str(&protocol_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = infer_provider_type_from_protocol(protocol.as_str());
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi]
+pub fn resolve_provider_response_context_helpers_json(
+    context_json: String,
+    server_tool_followup_raw_json: String,
+    entry_endpoint_json: String,
+    tool_surface_mode_raw_json: String,
+) -> NapiResult<String> {
+    let context: Value = serde_json::from_str(&context_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let server_tool_followup_raw: Value = serde_json::from_str(&server_tool_followup_raw_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let entry_endpoint_raw: Value = serde_json::from_str(&entry_endpoint_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let tool_surface_mode_raw: Value = serde_json::from_str(&tool_surface_mode_raw_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let is_server_tool_followup = resolve_truthy_flag(&server_tool_followup_raw);
+
+    let mut output = Map::new();
+    output.insert(
+        "isServerToolFollowup".to_string(),
+        Value::Bool(is_server_tool_followup),
+    );
+    output.insert(
+        "clientProtocol".to_string(),
+        Value::String(resolve_client_protocol_for_response_entry(
+            entry_endpoint_raw.as_str(),
+            is_server_tool_followup,
+        )),
+    );
+    output.insert(
+        "toolSurfaceShadowEnabled".to_string(),
+        Value::Bool(resolve_tool_surface_shadow_enabled(&tool_surface_mode_raw)),
+    );
+    if let Some(display_model) = resolve_display_model_from_context(&context) {
+        output.insert("displayModel".to_string(), Value::String(display_model));
+    }
+    if let Some(client_facing_request_id) = resolve_client_facing_request_id_from_context(&context)
+    {
+        output.insert(
+            "clientFacingRequestId".to_string(),
+            Value::String(client_facing_request_id),
+        );
+    }
+
+    serde_json::to_string(&Value::Object(output))
+        .map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi]
+pub fn resolve_clock_reservation_from_context_json(context_json: String) -> NapiResult<String> {
+    let context: Value = serde_json::from_str(&context_json)
+        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = resolve_clock_reservation_from_context(&context).unwrap_or(Value::Null);
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
@@ -2468,6 +2971,139 @@ mod tests {
             function_items[1]["status"],
             Value::String("in_progress".to_string())
         );
+    }
+
+    #[test]
+    fn resolve_anthropic_stop_reason_maps_context_overflow_to_length() {
+        let output = resolve_anthropic_stop_reason(Some("model_context_window_exceeded"));
+        assert_eq!(output["finishReason"], "length");
+        assert_eq!(output["isContextOverflow"], true);
+    }
+
+    #[test]
+    fn resolve_anthropic_stop_reason_maps_tool_use_and_default() {
+        let tool_use = resolve_anthropic_stop_reason(Some("tool_use"));
+        assert_eq!(tool_use["finishReason"], "tool_calls");
+        assert_eq!(tool_use["isContextOverflow"], false);
+
+        let unknown = resolve_anthropic_stop_reason(Some("weird_stop"));
+        assert_eq!(unknown["finishReason"], "weird_stop");
+        assert_eq!(unknown["normalized"], "weird_stop");
+
+        let empty = resolve_anthropic_stop_reason(None);
+        assert_eq!(empty["finishReason"], "stop");
+    }
+
+    #[test]
+    fn resolve_anthropic_chat_completion_outcome_prefers_tool_calls_and_sets_overflow_gate() {
+        let with_tool_calls = resolve_anthropic_chat_completion_outcome(
+            Some("model_context_window_exceeded"),
+            2,
+            false,
+        );
+        assert_eq!(
+            with_tool_calls["finishReason"],
+            Value::String("tool_calls".to_string())
+        );
+        assert_eq!(
+            with_tool_calls["isContextOverflow"],
+            Value::Bool(true)
+        );
+        assert_eq!(
+            with_tool_calls["shouldFailEmptyContextOverflow"],
+            Value::Bool(true)
+        );
+
+        let without_tool_calls = resolve_anthropic_chat_completion_outcome(
+            Some("model_context_window_exceeded"),
+            0,
+            true,
+        );
+        assert_eq!(
+            without_tool_calls["finishReason"],
+            Value::String("length".to_string())
+        );
+        assert_eq!(
+            without_tool_calls["shouldFailEmptyContextOverflow"],
+            Value::Bool(false)
+        );
+    }
+
+    #[test]
+    fn summarize_tool_calls_from_provider_response_supports_chat_responses_and_anthropic() {
+        let openai_chat = serde_json::json!({
+            "choices": [
+                {
+                    "message": {
+                        "tool_calls": [
+                            { "function": { "name": "exec_command" } },
+                            { "function": { "name": "apply_patch" } }
+                        ]
+                    }
+                }
+            ]
+        });
+        let chat_summary = summarize_tool_calls_from_provider_response(&openai_chat);
+        assert_eq!(chat_summary["toolCallCount"], Value::from(2));
+        assert_eq!(
+            chat_summary["toolNames"],
+            Value::Array(vec![
+                Value::String("exec_command".to_string()),
+                Value::String("apply_patch".to_string())
+            ])
+        );
+
+        let responses_payload = serde_json::json!({
+            "output": [
+                { "type": "function_call", "name": "exec_command" },
+                { "type": "message", "content": [] },
+                { "type": "function_call", "name": "apply_patch" }
+            ]
+        });
+        let responses_summary = summarize_tool_calls_from_provider_response(&responses_payload);
+        assert_eq!(responses_summary["toolCallCount"], Value::from(2));
+        assert_eq!(
+            responses_summary["toolNames"],
+            Value::Array(vec![
+                Value::String("exec_command".to_string()),
+                Value::String("apply_patch".to_string())
+            ])
+        );
+
+        let anthropic_payload = serde_json::json!({
+            "content": [
+                { "type": "tool_use", "name": "shell_command" },
+                { "type": "text", "text": "done" }
+            ]
+        });
+        let anthropic_summary = summarize_tool_calls_from_provider_response(&anthropic_payload);
+        assert_eq!(anthropic_summary["toolCallCount"], Value::from(1));
+        assert_eq!(
+            anthropic_summary["toolNames"],
+            Value::Array(vec![Value::String("shell_command".to_string())])
+        );
+    }
+
+    #[test]
+    fn infer_provider_type_from_protocol_maps_known_protocols() {
+        assert_eq!(
+            infer_provider_type_from_protocol(Some("openai-chat")),
+            Some("openai".to_string())
+        );
+        assert_eq!(
+            infer_provider_type_from_protocol(Some("openai-responses")),
+            Some("responses".to_string())
+        );
+        assert_eq!(
+            infer_provider_type_from_protocol(Some("anthropic-messages")),
+            Some("anthropic".to_string())
+        );
+        assert_eq!(
+            infer_provider_type_from_protocol(Some("gemini-chat")),
+            Some("gemini".to_string())
+        );
+        assert_eq!(infer_provider_type_from_protocol(Some("unknown")), None);
+        assert_eq!(infer_provider_type_from_protocol(None), None);
     }
 
     #[test]
@@ -2787,6 +3423,206 @@ mod tests {
         assert_eq!(
             reasoning_item["summary"][0]["text"],
             Value::String("**Thinking** 先看现状。\n\n1. **重点** 先修复".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_alias_map_from_sources_prefers_adapter_context_then_metadata() {
+        let from_context = resolve_alias_map_from_sources(
+            &serde_json::json!({
+                "anthropicToolNameMap": {
+                    "exec_command": "ExecCommand"
+                }
+            }),
+            &serde_json::json!({
+                "metadata": {
+                    "anthropicToolNameMap": {
+                        "exec_command": "MetaCommand"
+                    }
+                },
+                "semantics": {
+                    "tools": {
+                        "toolNameAliasMap": {
+                            "exec_command": "SemCommand"
+                        }
+                    }
+                }
+            }),
+        )
+        .expect("alias map");
+        assert_eq!(
+            from_context.get("exec_command").and_then(|v| v.as_str()),
+            Some("ExecCommand")
+        );
+
+        let from_metadata = resolve_alias_map_from_sources(
+            &serde_json::json!({}),
+            &serde_json::json!({
+                "metadata": {
+                    "context": {
+                        "anthropicToolNameMap": {
+                            "apply_patch": "ApplyPatch"
+                        }
+                    }
+                }
+            }),
+        )
+        .expect("alias map from metadata context");
+        assert_eq!(
+            from_metadata.get("apply_patch").and_then(|v| v.as_str()),
+            Some("ApplyPatch")
+        );
+    }
+
+    #[test]
+    fn resolve_alias_map_from_sources_falls_back_to_semantics() {
+        let output = resolve_alias_map_from_sources(
+            &serde_json::json!({}),
+            &serde_json::json!({
+                "semantics": {
+                    "tools": {
+                        "toolNameAliasMap": {
+                            "exec_command": "ExecCommand"
+                        }
+                    }
+                }
+            }),
+        )
+        .expect("alias map from semantics");
+        assert_eq!(
+            output.get("exec_command").and_then(|v| v.as_str()),
+            Some("ExecCommand")
+        );
+    }
+
+    #[test]
+    fn resolve_provider_response_context_helpers_prefers_display_and_request_id_candidates() {
+        let context = serde_json::json!({
+            "requestId": "req_base",
+            "groupRequestId": "req_group",
+            "clientRequestId": "req_client",
+            "modelId": "glm-4.7",
+            "clientModelId": "glm-client",
+            "originalModelId": "glm-original"
+        });
+        assert_eq!(
+            resolve_display_model_from_context(&context),
+            Some("glm-original".to_string())
+        );
+        assert_eq!(
+            resolve_client_facing_request_id_from_context(&context),
+            Some("req_client".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_provider_response_context_helpers_parses_followup_and_tool_surface_mode() {
+        assert!(resolve_truthy_flag(&Value::String("true".to_string())));
+        assert!(resolve_truthy_flag(&Value::String("1".to_string())));
+        assert!(!resolve_truthy_flag(&Value::String("false".to_string())));
+
+        assert!(resolve_tool_surface_shadow_enabled(&Value::String(
+            "shadow".to_string()
+        )));
+        assert!(resolve_tool_surface_shadow_enabled(&Value::String(
+            "enforce".to_string()
+        )));
+        assert!(!resolve_tool_surface_shadow_enabled(&Value::String(
+            "off".to_string()
+        )));
+        assert!(!resolve_tool_surface_shadow_enabled(&Value::String(
+            "".to_string()
+        )));
+
+        assert_eq!(
+            resolve_client_protocol_for_response_entry(Some("/v1/responses"), false),
+            "openai-responses"
+        );
+        assert_eq!(
+            resolve_client_protocol_for_response_entry(Some("/v1/messages"), false),
+            "anthropic-messages"
+        );
+        assert_eq!(
+            resolve_client_protocol_for_response_entry(Some("/v1/chat/completions"), false),
+            "openai-chat"
+        );
+        assert_eq!(
+            resolve_client_protocol_for_response_entry(Some("/v1/responses"), true),
+            "openai-chat"
+        );
+    }
+
+    #[test]
+    fn resolve_clock_reservation_from_context_normalizes_valid_payload() {
+        let output = resolve_clock_reservation_from_context(&serde_json::json!({
+            "__clockReservation": {
+                "reservationId": "  res-1  ",
+                "sessionId": "  sess-1  ",
+                "taskIds": ["  task-a  ", "", 1, "task-b"],
+                "reservedAtMs": 1234.9
+            }
+        }))
+        .expect("clock reservation");
+        assert_eq!(
+            output.get("reservationId").and_then(|v| v.as_str()),
+            Some("res-1")
+        );
+        assert_eq!(
+            output.get("sessionId").and_then(|v| v.as_str()),
+            Some("sess-1")
+        );
+        assert_eq!(
+            output.get("taskIds").and_then(|v| v.as_array()).cloned(),
+            Some(vec![
+                Value::String("task-a".to_string()),
+                Value::String("task-b".to_string())
+            ])
+        );
+        assert_eq!(
+            output.get("reservedAtMs").and_then(|v| v.as_i64()),
+            Some(1234)
+        );
+    }
+
+    #[test]
+    fn resolve_clock_reservation_from_context_uses_now_when_reserved_at_invalid() {
+        let start = now_unix_millis() as i64;
+        let output = resolve_clock_reservation_from_context(&serde_json::json!({
+            "__clockReservation": {
+                "reservationId": "res-2",
+                "sessionId": "sess-2",
+                "taskIds": ["task-a"],
+                "reservedAtMs": "invalid"
+            }
+        }))
+        .expect("clock reservation");
+        let resolved = output
+            .get("reservedAtMs")
+            .and_then(|v| v.as_i64())
+            .expect("reservedAtMs");
+        assert!(resolved >= start);
+    }
+
+    #[test]
+    fn resolve_clock_reservation_from_context_returns_none_when_required_fields_missing() {
+        assert!(
+            resolve_clock_reservation_from_context(&serde_json::json!({
+                "__clockReservation": {
+                    "reservationId": "res-1",
+                    "taskIds": ["task-a"]
+                }
+            }))
+            .is_none()
+        );
+        assert!(
+            resolve_clock_reservation_from_context(&serde_json::json!({
+                "__clockReservation": {
+                    "reservationId": "res-1",
+                    "sessionId": "sess-1",
+                    "taskIds": []
+                }
+            }))
+            .is_none()
         );
     }
 }

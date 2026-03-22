@@ -355,9 +355,12 @@ pub(crate) fn normalize_bridge_history_seed(seed: &Value) -> Option<BuildBridgeH
 }
 
 fn normalize_tool_key(value: Option<&Value>) -> Option<String> {
-    let text = value?.as_str()?.trim().to_ascii_lowercase();
+    let mut text = value?.as_str()?.trim().to_ascii_lowercase();
     if text.is_empty() {
         return None;
+    }
+    if text == "websearch" || text == "web-search" {
+        text = "web_search".to_string();
     }
     Some(text)
 }
@@ -416,6 +419,11 @@ pub(crate) fn resolve_responses_bridge_tools(
         .as_ref()
         .map(|tools| tools.iter().any(is_builtin_web_search_tool))
         .unwrap_or(false);
+    let original_has_non_builtin_tools = input
+        .original_tools
+        .as_ref()
+        .map(|tools| tools.iter().any(|tool| !is_builtin_web_search_tool(tool)))
+        .unwrap_or(false);
 
     let mut register = |tool: &Value| {
         if !tool.is_object() {
@@ -431,6 +439,12 @@ pub(crate) fn resolve_responses_bridge_tools(
         merged_tools.push(tool.clone());
     };
 
+    let chat_declares_server_side_web_search = input
+        .chat_tools
+        .as_ref()
+        .map(|tools| tools.iter().any(is_server_side_web_search_function))
+        .unwrap_or(false);
+
     if let Some(chat_tools) = input.chat_tools.as_ref() {
         for tool in chat_tools {
             if has_server_side_web_search && is_server_side_web_search_function(tool) {
@@ -440,17 +454,19 @@ pub(crate) fn resolve_responses_bridge_tools(
         }
     }
 
-    if let Some(original_tools) = input.original_tools.as_ref() {
-        for tool in original_tools {
-            if !is_builtin_web_search_tool(tool) {
-                continue;
+    if !has_server_side_web_search || !original_has_non_builtin_tools {
+        if let Some(original_tools) = input.original_tools.as_ref() {
+            for tool in original_tools {
+                if !is_builtin_web_search_tool(tool) {
+                    continue;
+                }
+                register(tool);
             }
-            register(tool);
         }
     }
 
     let should_inject_builtin_web_search = has_server_side_web_search
-        && inferred_server_side_web_search
+        && chat_declares_server_side_web_search
         && !original_has_builtin_web_search;
 
     if should_inject_builtin_web_search && !merged_tools.iter().any(is_builtin_web_search_tool) {

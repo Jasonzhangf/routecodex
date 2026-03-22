@@ -178,7 +178,7 @@ type ClockSessionState = {
 
 1) Time tag（每次请求）：
    - 在 messages 末尾追加一条新的 `role:user`，内容为 markdown time tag（inline code）：
-     - `[Time/Date]: utc=\`...\` local=\`...\` tz=\`...\` nowMs=\`...\` ntpOffsetMs=\`...\``
+     - `[Time/Date]: timeRef=\`now\` utc=\`...\` local=\`...\` tz=\`...\` nowMs=\`...\` ntpOffsetMs=\`...\``
    - 设计意图：避免引入额外 tool-call 语义，减少模型把“时间注入”当作必须响应/执行的工具回合，从而分散注意力或打断会话结构。
 
 2) Alarm due reminders（仅当本次有到期任务）：

@@ -300,6 +300,31 @@ function resolveTmuxSessionIdFromSessionDaemon(daemonId: string | undefined): st
   }
 }
 
+function resolveTmuxSessionIdFromConversationBinding(scopeId: string): string | undefined {
+  const token = normalizeToken(scopeId);
+  if (!token) {
+    return undefined;
+  }
+  try {
+    return getSessionClientRegistry().resolveBoundTmuxSession(token);
+  } catch {
+    return undefined;
+  }
+}
+
+function resolveSessionDaemonIdFromTmuxSession(tmuxSessionId: string | undefined): string | undefined {
+  const token = normalizeToken(tmuxSessionId);
+  if (!token) {
+    return undefined;
+  }
+  try {
+    const record = getSessionClientRegistry().findByTmuxSessionId(token);
+    return typeof record?.daemonId === 'string' && record.daemonId.trim() ? record.daemonId.trim() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function resolveTmuxTargetFromSessionDaemon(daemonId: string | undefined): string | undefined {
   if (!daemonId) {
     return undefined;
@@ -386,8 +411,13 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
     headers: headers ?? undefined,
     clientHeaders: normalizedClientHeaders,
     daemonId: resolvedSessionDaemonId,
-    resolveTmuxSessionIdFromDaemon: resolveTmuxSessionIdFromSessionDaemon
+    resolveTmuxSessionIdFromDaemon: resolveTmuxSessionIdFromSessionDaemon,
+    resolveTmuxSessionIdFromBinding: resolveTmuxSessionIdFromConversationBinding,
+    isTmuxSessionAlive
   });
+  if (!resolvedSessionDaemonId && tmuxResolution.tmuxSessionId) {
+    resolvedSessionDaemonId = resolveSessionDaemonIdFromTmuxSession(tmuxResolution.tmuxSessionId);
+  }
   const resolvedWorkdir =
     extractWorkdir(userMeta, bodyMeta, headers, normalizedClientHeaders)
     || resolveWorkdirFromTmuxSessionId(tmuxResolution.tmuxSessionId)

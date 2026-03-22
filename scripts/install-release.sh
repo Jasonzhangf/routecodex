@@ -14,6 +14,18 @@ fi
 VERSION=$(node -p "require('./package.json').version" 2>/dev/null || echo "0.0.0")
 echo "📦 当前源码版本: routecodex@${VERSION}"
 
+if command -v tmux >/dev/null 2>&1; then
+  echo "✅ tmux: $(tmux -V 2>/dev/null || echo tmux)"
+else
+  echo "❌ tmux 未安装"
+  echo "💡 RouteCodex/RCC 的 tmux 会话管理 / 注入 / heartbeat 依赖 tmux"
+  echo "💡 请先安装 tmux 后再执行 release 安装，例如："
+  echo "   macOS(Homebrew): brew install tmux"
+  echo "   Ubuntu/Debian: apt-get install -y tmux"
+  echo "   CentOS/RHEL: yum install -y tmux"
+  exit 1
+fi
+
 echo "🔨 构建源码..."
 # release 包：显式使用 BUILD_MODE=release 以便在编译期区分 dev/release
 BUILD_MODE=release npm run build
@@ -75,10 +87,14 @@ npm uninstall -g @jsonstudio/rcc >/dev/null 2>&1 || true
 echo "🌍 全局安装 @jsonstudio/rcc (release)..."
 npm install -g "${RCC_TARBALL}" --no-audit --no-fund
 
+echo "🔗 固定全局 rcc 的 @jsonstudio/llms 到本地 sharedmodule/llmswitch-core..."
+node scripts/link-global-llms-local.mjs --package @jsonstudio/rcc --require-target
+
 echo "🔍 验证 rcc 安装..."
 if command -v rcc >/dev/null 2>&1; then
   echo "✅ @jsonstudio/rcc 已全局安装：$(command -v rcc)"
   rcc --version || true
+  node -e "const fs=require('fs');const path=require('path');const cp=require('child_process');const root=cp.execSync('npm root -g').toString().trim();const llmsPath=path.join(root,'@jsonstudio','rcc','node_modules','@jsonstudio','llms');const pkgPath=path.join(llmsPath,'package.json');const link=fs.existsSync(llmsPath)&&fs.lstatSync(llmsPath).isSymbolicLink();const target=link?fs.readlinkSync(llmsPath):'(not-symlink)';const version=fs.existsSync(pkgPath)?JSON.parse(fs.readFileSync(pkgPath,'utf8')).version:'unknown';console.log('🔎 全局 rcc @jsonstudio/llms:',version,'link=',link,'target=',target);"
 else
   echo "❌ 未找到 rcc 命令，请检查 npm 全局安装路径"
   exit 1

@@ -239,48 +239,85 @@ export class HubRequestExecutor implements RequestExecutor {
           delete mergedMetadata.compatibilityProfile;
         }
 
-        this.logStage('provider.runtime_resolve.start', providerRequestId, {
-          providerKey: target.providerKey,
-          route: pipelineResult.routingDecision?.routeName,
-          attempt
-        });
-        const { runtimeKey, handle } = await resolveProviderRuntimeOrThrow({
-          requestId: input.requestId,
-          target: {
+        let runtimeKey: string;
+        let handle: ProviderHandle;
+        let providerContext: ReturnType<typeof resolveProviderRequestContext>;
+        try {
+          this.logStage('provider.runtime_resolve.start', providerRequestId, {
             providerKey: target.providerKey,
-            outboundProfile: String((target as any).outboundProfile || ''),
-            providerType: String((target as any).providerType || '')
-          },
-          routeName: pipelineResult.routingDecision?.routeName,
-          runtimeKeyHint: target.runtimeKey,
-          runtimeManager: this.deps.runtimeManager,
-          dependencies: this.deps.getModuleDependencies()
-        });
-        this.logStage('provider.runtime_resolve.completed', providerRequestId, {
-          providerKey: target.providerKey,
-          runtimeKey,
-          providerType: handle.providerType,
-          providerFamily: handle.providerFamily,
-          attempt
-        });
+            route: pipelineResult.routingDecision?.routeName,
+            attempt
+          });
+          const resolved = await resolveProviderRuntimeOrThrow({
+            requestId: input.requestId,
+            target: {
+              providerKey: target.providerKey,
+              outboundProfile: String((target as any).outboundProfile || ''),
+              providerType: String((target as any).providerType || '')
+            },
+            routeName: pipelineResult.routingDecision?.routeName,
+            runtimeKeyHint: target.runtimeKey,
+            runtimeManager: this.deps.runtimeManager,
+            dependencies: this.deps.getModuleDependencies()
+          });
+          runtimeKey = resolved.runtimeKey;
+          handle = resolved.handle;
+          this.logStage('provider.runtime_resolve.completed', providerRequestId, {
+            providerKey: target.providerKey,
+            runtimeKey,
+            providerType: handle.providerType,
+            providerFamily: handle.providerFamily,
+            attempt
+          });
 
-        this.logStage('provider.context_resolve.start', providerRequestId, {
-          providerKey: target.providerKey,
-          runtimeKey,
-          attempt
-        });
-        const providerContext = resolveProviderRequestContext({
-          providerRequestId,
-          entryEndpoint: input.entryEndpoint,
-          target: {
+          this.logStage('provider.context_resolve.start', providerRequestId, {
             providerKey: target.providerKey,
-            outboundProfile: target.outboundProfile as ProviderProtocol
-          },
-          handle,
-          runtimeKey,
-          providerPayload,
-          mergedMetadata
-        });
+            runtimeKey,
+            attempt
+          });
+          providerContext = resolveProviderRequestContext({
+            providerRequestId,
+            entryEndpoint: input.entryEndpoint,
+            target: {
+              providerKey: target.providerKey,
+              outboundProfile: target.outboundProfile as ProviderProtocol
+            },
+            handle,
+            runtimeKey,
+            providerPayload,
+            mergedMetadata
+          });
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error ?? 'Unknown error');
+          this.logStage('provider.runtime_resolve.error', providerRequestId, {
+            providerKey: target.providerKey,
+            message: errorMessage,
+            attempt
+          });
+          lastError = error;
+          const shouldRetry = attempt < maxAttempts && shouldRetryProviderError(error);
+          if (!shouldRetry) {
+            recordAttempt({ error: true });
+            throw error;
+          }
+          recordAttempt({ error: true });
+          const singleProviderPool =
+            Boolean(initialRoutePool && initialRoutePool.length === 1 && initialRoutePool[0] === target.providerKey);
+          if (singleProviderPool) {
+            await waitBeforeRetry(error);
+          } else if (target.providerKey) {
+            excludedProviderKeys.add(target.providerKey);
+          }
+          this.logStage('provider.retry', input.requestId, {
+            providerKey: target.providerKey,
+            attempt,
+            nextAttempt: attempt + 1,
+            excluded: Array.from(excludedProviderKeys),
+            reason: describeRetryReason(error),
+            routeHint: forcedRouteHint
+          });
+          continue;
+        }
         const previousRequestId = input.requestId;
         if (providerContext.requestId !== input.requestId) {
           input.requestId = providerContext.requestId;
@@ -435,6 +472,13 @@ export class HubRequestExecutor implements RequestExecutor {
             response: normalized,
             pipelineMetadata: mergedMetadata
           });
+          const clientInjectWaitMsRaw = converted.timingBreakdown?.hubResponseExcludedMs;
+          const clientInjectWaitMs =
+            typeof clientInjectWaitMsRaw === 'number' && Number.isFinite(clientInjectWaitMsRaw)
+              ? Math.max(0, Math.floor(clientInjectWaitMsRaw))
+              : 0;
+          const hubResponseElapsedMsRaw = Date.now() - hubResponseStartedAtMs;
+          const hubResponseElapsedMs = Math.max(0, hubResponseElapsedMsRaw - clientInjectWaitMs);
           const convertedBodyRecord =
             converted.body && typeof converted.body === 'object'
               ? (converted.body as Record<string, unknown>)
@@ -449,16 +493,28 @@ export class HubRequestExecutor implements RequestExecutor {
             hasBody: converted.body !== undefined && converted.body !== null,
             attempt
           });
+          if (clientInjectWaitMs > 0) {
+            this.logStage('client.inject_wait.start', input.requestId, {
+              providerKey: target.providerKey,
+              attempt
+            });
+            this.logStage('client.inject_wait.completed', input.requestId, {
+              providerKey: target.providerKey,
+              elapsedMs: clientInjectWaitMs,
+              attempt
+            });
+          }
           this.logStage('hub.response.completed', input.requestId, {
             providerKey: target.providerKey,
             status: converted.status,
-            elapsedMs: Date.now() - hubResponseStartedAtMs,
+            elapsedMs: hubResponseElapsedMs,
+            ...(clientInjectWaitMs > 0 ? { excludedClientInjectWaitMs: clientInjectWaitMs } : {}),
             hasBody: converted.body !== undefined && converted.body !== null,
             ...(finishReason ? { finishReason } : {}),
             attempt
           });
-          // Treat upstream 429 as provider failure across protocols to avoid
-          // silently returning success and to let Virtual Router failover to other candidates.
+          // Treat upstream auth/rate-limit failures as provider failure across protocols to avoid
+          // leaking provider-local errors to clients while route pool still has candidates.
           // Keep existing Gemini compatibility behavior for 400/4xx thoughtSignature-like failures.
           const convertedStatus = typeof converted.status === 'number' ? converted.status : undefined;
           this.logStage('provider.response_status_check.start', input.requestId, {
@@ -466,7 +522,13 @@ export class HubRequestExecutor implements RequestExecutor {
             convertedStatus,
             attempt
           });
-          const isGlobalRetryable429 = convertedStatus === 429;
+          const isGlobalRetryableStatus =
+            typeof convertedStatus === 'number' &&
+            (convertedStatus === 401 ||
+              convertedStatus === 429 ||
+              convertedStatus === 408 ||
+              convertedStatus === 425 ||
+              convertedStatus >= 500);
           const isGeminiCompatFailure =
             typeof convertedStatus === 'number' &&
             convertedStatus >= 400 &&
@@ -474,7 +536,7 @@ export class HubRequestExecutor implements RequestExecutor {
               (typeof target.providerKey === 'string' && target.providerKey.startsWith('gemini-cli.'))) &&
               providerProtocol === 'gemini-chat';
 
-          if (isGlobalRetryable429 || isGeminiCompatFailure) {
+          if (isGlobalRetryableStatus || isGeminiCompatFailure) {
             const bodyForError = converted.body && typeof converted.body === 'object' ? (converted.body as Record<string, unknown>) : undefined;
             const errMsg =
               bodyForError && bodyForError.error && typeof bodyForError.error === 'object'
@@ -504,7 +566,12 @@ export class HubRequestExecutor implements RequestExecutor {
                 },
                 dependencies: this.deps.getModuleDependencies(),
                 statusCode,
-                recoverable: statusCode === 429,
+                recoverable:
+                  statusCode === 401 ||
+                  statusCode === 429 ||
+                  statusCode === 408 ||
+                  statusCode === 425 ||
+                  statusCode >= 500,
                 affectsHealth: true,
                 details: {
                   source: 'converted_response_status',

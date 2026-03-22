@@ -1141,6 +1141,104 @@ mod tests {
     }
 
     #[test]
+    fn test_servertool_orchestration_skips_direct_web_search_tool_injection() {
+        let input = ToolGovernanceInput {
+            request: serde_json::json!({
+              "model": "gpt-4o-mini",
+              "messages": [{"role": "user", "content": "search latest routecodex news"}],
+              "parameters": {
+                "stream": true
+              }
+            }),
+            raw_payload: serde_json::json!({}),
+            metadata: serde_json::json!({
+              "tmuxSessionId": "s-1",
+              "__rt": {
+                "clock": { "enabled": true },
+                "webSearch": {
+                  "engines": [
+                    {
+                      "id": "native-search",
+                      "providerKey": "demo.key1.model",
+                      "executionMode": "direct",
+                      "directActivation": "route"
+                    }
+                  ]
+                }
+              }
+            }),
+            entry_endpoint: "/v1/chat/completions".to_string(),
+            request_id: "req_tools_direct_search".to_string(),
+            has_active_stop_message_for_continue_execution: None,
+        };
+
+        let result = apply_req_process_tool_governance(input).unwrap();
+        let tools = result
+            .processed_request
+            .as_object()
+            .and_then(|row| row.get("tools"))
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let mut names: HashSet<String> = HashSet::new();
+        for tool in tools {
+            if let Some(v) = resolve_tool_name(&tool) {
+                names.insert(v);
+            }
+        }
+        assert!(!names.contains("websearch"));
+        assert!(names.contains("clock"));
+        assert!(names.contains("continue_execution"));
+    }
+
+    #[test]
+    fn test_servertool_orchestration_injects_websearch_for_servertool_engines() {
+        let input = ToolGovernanceInput {
+            request: serde_json::json!({
+              "model": "gpt-4o-mini",
+              "messages": [{"role": "user", "content": "please search the web for latest routecodex updates"}],
+              "parameters": {
+                "stream": true
+              }
+            }),
+            raw_payload: serde_json::json!({}),
+            metadata: serde_json::json!({
+              "tmuxSessionId": "s-1",
+              "__rt": {
+                "webSearch": {
+                  "engines": [
+                    {
+                      "id": "servertool-search",
+                      "providerKey": "demo.key1.model",
+                      "executionMode": "servertool"
+                    }
+                  ]
+                }
+              }
+            }),
+            entry_endpoint: "/v1/chat/completions".to_string(),
+            request_id: "req_tools_servertool_search".to_string(),
+            has_active_stop_message_for_continue_execution: None,
+        };
+
+        let result = apply_req_process_tool_governance(input).unwrap();
+        let tools = result
+            .processed_request
+            .as_object()
+            .and_then(|row| row.get("tools"))
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let mut names: HashSet<String> = HashSet::new();
+        for tool in tools {
+            if let Some(v) = resolve_tool_name(&tool) {
+                names.insert(v);
+            }
+        }
+        assert!(names.contains("websearch"));
+    }
+
+    #[test]
     fn test_servertool_orchestration_uses_explicit_stop_message_flag_instead_of_runtime_metadata() {
         let input = ToolGovernanceInput {
             request: serde_json::json!({

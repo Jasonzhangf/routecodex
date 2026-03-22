@@ -36,6 +36,7 @@ export type LauncherCommandContext = {
   logger: LoggerLike;
   env: NodeJS.ProcessEnv;
   rawArgv: string[];
+  isInteractiveTerminal?: () => boolean;
   fsImpl?: typeof fs;
   pathImpl?: typeof path;
   homedir: () => string;

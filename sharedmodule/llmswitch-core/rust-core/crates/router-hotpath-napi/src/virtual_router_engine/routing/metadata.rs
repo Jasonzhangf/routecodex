@@ -65,7 +65,10 @@ pub(crate) fn resolve_stop_message_scope(metadata: &Value) -> Option<String> {
         read_metadata_token(metadata, "stopMessageClientInjectScope")
     };
     if !explicit.is_empty() {
-        if explicit.starts_with("tmux:") {
+        if explicit.starts_with("tmux:")
+            || explicit.starts_with("session:")
+            || explicit.starts_with("conversation:")
+        {
             return Some(explicit);
         }
     }
@@ -88,7 +91,7 @@ pub(crate) fn resolve_stop_message_scope(metadata: &Value) -> Option<String> {
     if !tmux_session.is_empty() {
         return Some(format!("tmux:{}", tmux_session));
     }
-    None
+    resolve_session_scope(metadata)
 }
 
 pub(crate) fn is_server_tool_followup_request(metadata: &Value) -> bool {

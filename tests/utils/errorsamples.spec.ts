@@ -19,6 +19,8 @@ const ENV_KEYS = [
   'RCC_ERRORSAMPLE_CLIENT_TOOL_MAX_FILES',
   'ROUTECODEX_ERRORSAMPLE_CLIENT_TOOL_MAX_BYTES',
   'RCC_ERRORSAMPLE_CLIENT_TOOL_MAX_BYTES',
+  'ROUTECODEX_ERRORSAMPLE_CLIENT_TOOL_MAX_SAMPLE_BYTES',
+  'RCC_ERRORSAMPLE_CLIENT_TOOL_MAX_SAMPLE_BYTES',
   'ROUTECODEX_ERRORSAMPLE_PRUNE_INTERVAL_MS',
   'RCC_ERRORSAMPLE_PRUNE_INTERVAL_MS'
 ] as const;
@@ -38,6 +40,7 @@ describe('errorsample writer safeguards', () => {
     try {
       process.env.RCC_ERRORSAMPLES_DIR = tmp;
       process.env.ROUTECODEX_ERRORSAMPLE_MAX_BYTES = '1024';
+      process.env.ROUTECODEX_ERRORSAMPLE_CLIENT_TOOL_MAX_SAMPLE_BYTES = '1024';
       process.env.ROUTECODEX_ERRORSAMPLE_PRUNE_INTERVAL_MS = '0';
 
       const file = await writeErrorsampleJson({
@@ -100,4 +103,3 @@ describe('errorsample writer safeguards', () => {
     }
   });
 });
-

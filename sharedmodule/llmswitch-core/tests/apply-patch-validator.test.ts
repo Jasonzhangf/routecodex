@@ -1,6 +1,8 @@
 import { describe, expect, test } from '@jest/globals';
 
 import { validateToolCall } from '../src/tools/tool-registry.js';
+import os from 'node:os';
+import path from 'node:path';
 
 describe('apply_patch validator (shape fixes)', () => {
   test('accepts raw patch text and wraps into JSON patch/input', () => {
@@ -132,6 +134,44 @@ describe('apply_patch validator (shape fixes)', () => {
     expect(delNormalized.patch).toContain('*** End Patch');
   });
 
+  test('converts unified diff (GNU patch) rename-only into move-only apply_patch format', () => {
+    const renameDiff = [
+      'diff --git a/oldname.txt b/newname.txt',
+      'similarity index 100%',
+      'rename from oldname.txt',
+      'rename to newname.txt',
+      ''
+    ].join('\n');
+
+    const res = validateToolCall('apply_patch', renameDiff);
+    expect(res.ok).toBe(true);
+    const normalized = JSON.parse(res.normalizedArgs as string);
+    expect(normalized.patch).toContain('*** Begin Patch');
+    expect(normalized.patch).toContain('*** Update File: oldname.txt');
+    expect(normalized.patch).toContain('*** Move to: newname.txt');
+    expect(normalized.patch).toContain('*** End Patch');
+  });
+
+  test('normalizes malformed unified markers (++++ / @@@@) from errorsamples', () => {
+    const malformedAddDiff = [
+      '*** Begin Patch',
+      '--- /dev/null',
+      '++++ DELIVERY.md',
+      '@@@@',
+      '+## delivery',
+      '+- item',
+      '*** End Patch'
+    ].join('\n');
+
+    const res = validateToolCall('apply_patch', JSON.stringify({ input: malformedAddDiff }));
+    expect(res.ok).toBe(true);
+    const normalized = JSON.parse(res.normalizedArgs as string);
+    expect(normalized.patch).toContain('*** Begin Patch');
+    expect(normalized.patch).toContain('*** Add File: DELIVERY.md');
+    expect(normalized.patch).toContain('+## delivery');
+    expect(normalized.patch).toContain('*** End Patch');
+  });
+
   test('rejects code snippets that merely mention patch markers', () => {
     const snippet = [
       '    fn test_normalize_tool_args_variants() {',
@@ -178,6 +218,24 @@ describe('apply_patch validator (shape fixes)', () => {
     expect(normalized.patch).toContain('*** End Patch');
   });
 
+  test('normalizes Begin Patch payload that only has legacy --- a/file header', () => {
+    const patch = [
+      '*** Begin Patch',
+      '--- a/apps/mobile-app/src/services/mobileWebdavSync.ts',
+      '@@ -1 +1 @@',
+      '-old',
+      '+new',
+      '*** End Patch'
+    ].join('\n');
+
+    const res = validateToolCall('apply_patch', patch);
+    expect(res.ok).toBe(true);
+    const normalized = JSON.parse(res.normalizedArgs as string);
+    expect(normalized.patch).toContain('*** Update File: apps/mobile-app/src/services/mobileWebdavSync.ts');
+    expect(normalized.patch).not.toContain('--- a/apps/mobile-app/src/services/mobileWebdavSync.ts');
+    expect(normalized.patch).toContain('@@ -1 +1 @@');
+  });
+
   test('normalizes create file header with trailing stars and missing line prefixes', () => {
     const patch = [
       '*** Create File: /tmp/analyze_cov.py ***',
@@ -208,6 +266,24 @@ describe('apply_patch validator (shape fixes)', () => {
     const normalized = JSON.parse(res.normalizedArgs as string);
     expect(normalized.patch).toContain('*** Add File: src/quoted.ts');
     expect(normalized.patch).not.toContain('*** Add File: "src/quoted.ts"');
+  });
+
+  test('normalizes home path aliases in apply_patch file headers', () => {
+    const patch = [
+      '*** Begin Patch',
+      '*** Update File: /Volumes/extension/code/finger/~/.codex/config.toml',
+      '@@',
+      '-old = true',
+      '+old = false',
+      '*** End Patch'
+    ].join('\n');
+
+    const res = validateToolCall('apply_patch', patch);
+    expect(res.ok).toBe(true);
+    const normalized = JSON.parse(res.normalizedArgs as string);
+    const expected = path.join(os.homedir(), '.codex', 'config.toml');
+    expect(normalized.patch).toContain(`*** Update File: ${expected}`);
+    expect(normalized.patch).not.toContain('/~/');
   });
 
   test('normalizes single-line begin-patch create-file header into add-file patch', () => {

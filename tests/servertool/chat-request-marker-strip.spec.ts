@@ -33,4 +33,20 @@ describe('chat request marker strip', () => {
     expect(userContent).not.toContain('<**');
     expect(assistantContent).not.toContain('<**');
   });
+
+  test('keeps routing markers (sm) for route stage consumption', async () => {
+    const result = await runReqProcessStage1ToolGovernance({
+      request: buildRequest([
+        { role: 'user', content: '<**sm:30**>继续执行当前任务' }
+      ]),
+      rawPayload: {},
+      metadata: { originalEndpoint: '/v1/chat/completions', sessionId: 'marker-keep-sm-30' },
+      entryEndpoint: '/v1/chat/completions',
+      requestId: 'req-marker-keep-sm-30'
+    });
+    const processed = result.processedRequest as StandardizedRequest;
+    const userContent = typeof processed.messages[0]?.content === 'string' ? processed.messages[0].content : '';
+
+    expect(userContent).toContain('<**sm:30**>');
+  });
 });

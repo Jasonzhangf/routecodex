@@ -290,27 +290,9 @@ fn apply_reasoning_policy(payload: &mut Value, mode: Option<&str>) {
     }
 }
 
-fn should_normalize_reasoning(input: &FinalizeInput) -> bool {
-    let wants_non_keep_mode = input
-        .reasoning_mode
-        .as_deref()
-        .map(|mode| mode.trim().to_ascii_lowercase())
-        .map(|mode| !mode.is_empty() && mode != "keep")
-        .unwrap_or(false);
-    let wants_anthropic_reasoning = input
-        .endpoint
-        .as_deref()
-        .map(|endpoint| endpoint.to_ascii_lowercase().contains("/v1/messages"))
-        .unwrap_or(false);
-    wants_non_keep_mode || wants_anthropic_reasoning
-}
-
 pub fn finalize_chat_response(input: FinalizeInput) -> Value {
-    let should_normalize = should_normalize_reasoning(&input);
     let mut payload = input.payload;
-    if should_normalize {
-        normalize_reasoning_in_chat_payload(&mut payload);
-    }
+    normalize_reasoning_in_chat_payload(&mut payload);
     normalize_choices(&mut payload);
     normalize_messages(&mut payload);
     apply_reasoning_policy(&mut payload, input.reasoning_mode.as_deref());

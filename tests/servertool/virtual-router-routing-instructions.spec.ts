@@ -9,6 +9,7 @@ import type {
   StandardizedRequest
 } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.js';
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 
 function buildEngine(): VirtualRouterEngine {
@@ -220,6 +221,27 @@ const SUPPORTS_PREFER_PROCESSMODE_SUFFIX = supportsPreferPassthroughSuffix();
 const testIf = (condition: boolean) => (condition ? test : test.skip);
 
 describe('VirtualRouterEngine routing instructions', () => {
+  let previousSessionDir: string | undefined;
+  let tempSessionDir: string | null = null;
+
+  beforeEach(() => {
+    previousSessionDir = process.env.ROUTECODEX_SESSION_DIR;
+    tempSessionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-vr-routing-session-'));
+    process.env.ROUTECODEX_SESSION_DIR = tempSessionDir;
+  });
+
+  afterEach(() => {
+    if (previousSessionDir === undefined) {
+      delete process.env.ROUTECODEX_SESSION_DIR;
+    } else {
+      process.env.ROUTECODEX_SESSION_DIR = previousSessionDir;
+    }
+    if (tempSessionDir) {
+      fs.rmSync(tempSessionDir, { recursive: true, force: true });
+      tempSessionDir = null;
+    }
+  });
+
   test('prefer instructions honor provider.model syntax', () => {
     const engine = buildEngine();
     const request = buildRequest('<**!antigravity.gemini-3-pro-high**>');
@@ -366,12 +388,15 @@ describe('VirtualRouterEngine routing instructions', () => {
 
     engine.route(buildRequest(`<**#antigravity[${firstAlias}]**>`), buildMetadata({ sessionId }));
     const followUp = engine.route(buildRequest('继续'), buildMetadata({ sessionId }));
+    const claudeKeys = ((engine.providerRegistry as any).listProviderKeys('antigravity') as string[]).filter((key) =>
+      key.includes('claude-sonnet-4-5')
+    );
+    const remainingKeys = claudeKeys.filter((key) => !key.includes(`.${firstAlias}.`));
+
+    expect(remainingKeys.length).toBeGreaterThan(0);
     expect(followUp.target.providerKey.includes('claude-sonnet-4-5')).toBe(true);
-    if (firstAlias === 'sonnetkey') {
-      expect(followUp.target.providerKey.includes('sonnetbackup')).toBe(true);
-    } else {
-      expect(followUp.target.providerKey.includes('sonnetkey')).toBe(true);
-    }
+    expect(remainingKeys).toContain(followUp.target.providerKey);
+    expect(followUp.target.providerKey).not.toBe(first.target.providerKey);
   });
 
   test('prefer provider.model rotates between aliases without additional instructions', () => {

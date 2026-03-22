@@ -34,14 +34,13 @@ pub(crate) fn parse_routing_instructions_from_messages(
     if messages.is_empty() {
         return Ok(Vec::new());
     }
-    let latest_user = messages
-        .iter()
-        .rev()
-        .find(|message| message.get("role").and_then(|v| v.as_str()).unwrap_or("") == "user");
-    let latest = match latest_user {
+    let latest = match messages.last() {
         Some(value) => value,
         None => return Ok(Vec::new()),
     };
+    if latest.get("role").and_then(|v| v.as_str()).unwrap_or("") != "user" {
+        return Ok(Vec::new());
+    }
     let content = extract_message_text(latest);
     if content.trim().is_empty() {
         return Ok(Vec::new());
@@ -173,14 +172,13 @@ pub(crate) fn parse_routing_instructions_from_request(
 
 pub(crate) fn has_routing_instruction_marker_in_messages(messages: &[Value]) -> bool {
     let marker_re = Regex::new(r"<\*\*[\s\S]*?\*\*>").unwrap();
-    let latest_user = messages
-        .iter()
-        .rev()
-        .find(|message| message.get("role").and_then(|v| v.as_str()).unwrap_or("") == "user");
-    let latest = match latest_user {
+    let latest = match messages.last() {
         Some(value) => value,
         None => return false,
     };
+    if latest.get("role").and_then(|v| v.as_str()).unwrap_or("") != "user" {
+        return false;
+    }
     let content = extract_message_text(latest);
     if content.is_empty() {
         return false;

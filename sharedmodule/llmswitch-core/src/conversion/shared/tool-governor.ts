@@ -6,12 +6,22 @@
 
 import { augmentOpenAITools } from '../../guidance/index.js';
 import { validateToolCall } from '../../tools/tool-registry.js';
-import type { ToolValidationOptions } from '../../tools/tool-registry.js';
 import { repairFindMeta } from './tooling.js';
 import { captureApplyPatchRegression } from '../../tools/patch-regression-capturer.js';
 import { normalizeExecCommandArgs } from '../../tools/exec-command/normalize.js';
-import { readRuntimeMetadata } from '../runtime-metadata.js';
+import {
+  buildBlockedApplyPatchArgs,
+  buildBlockedExecCommandArgs,
+  injectNestedApplyPatchPolicyNotice,
+  repairCommandNameAsExecToolCall,
+  resolveExecCommandGuardValidationOptions,
+  rewriteExecCommandApplyPatchCall
+} from './tool-governor-guards.js';
 import { normalizeChatResponseReasoningToolsWithNative } from '../../router/virtual-router/engine-selection/native-hub-bridge-action-semantics.js';
+import {
+  parseLenientJsonishWithNative as parseLenient,
+  repairArgumentsToStringWithNative as repairArgumentsToString
+} from '../../router/virtual-router/engine-selection/native-shared-conversion-semantics.js';
 import { resolveRccPath } from '../../runtime/user-data-paths.js';
 
 type Unknown = Record<string, unknown>;
@@ -19,253 +29,6 @@ function isObject(v: unknown): v is Unknown { return !!v && typeof v === 'object
 // Note: tool schema strict augmentation removed per alignment
 
 function enforceChatBudget<T>(chat: T, _modelId: string): T { return chat; }
-
-function resolveExecCommandGuardValidationOptions(payload: Unknown): ToolValidationOptions | undefined {
-  const carrier =
-    isObject((payload as any).metadata)
-      ? ((payload as any).metadata as Record<string, unknown>)
-      : (payload as Record<string, unknown>);
-  const rt = readRuntimeMetadata(carrier);
-  if (!rt || typeof rt !== 'object') {
-    return undefined;
-  }
-  const guardRaw = (rt as Record<string, unknown>).execCommandGuard;
-  if (!guardRaw || typeof guardRaw !== 'object' || Array.isArray(guardRaw)) {
-    return undefined;
-  }
-  const guard = guardRaw as Record<string, unknown>;
-  const enabled = guard.enabled === true;
-  if (!enabled) {
-    return undefined;
-  }
-  const policyFile =
-    typeof guard.policyFile === 'string' && guard.policyFile.trim().length
-      ? guard.policyFile.trim()
-      : undefined;
-  return {
-    execCommandGuard: {
-      enabled: true,
-      ...(policyFile ? { policyFile } : {})
-    }
-  };
-}
-
-function isTruthyEnv(value: unknown): boolean {
-  const v = typeof value === 'string' ? value.trim().toLowerCase() : '';
-  return v === '1' || v === 'true' || v === 'yes' || v === 'on';
-}
-
-function isApplyPatchPayloadCandidate(value: unknown): value is string {
-  if (typeof value !== 'string') return false;
-  const text = value.trim();
-  if (!text) return false;
-  return (
-    text.startsWith('*** Begin Patch') ||
-    text.startsWith('*** Update File:') ||
-    text.startsWith('*** Add File:') ||
-    text.startsWith('*** Delete File:') ||
-    text.startsWith('--- a/') ||
-    text.startsWith('--- ')
-  );
-}
-
-function extractApplyPatchPayloadFromExecArgs(rawArgs: unknown): string | null {
-  const argsStr = repairArgumentsToString(rawArgs);
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(argsStr);
-  } catch {
-    parsed = parseLenient(argsStr);
-  }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    return null;
-  }
-
-  const obj = parsed as Record<string, unknown>;
-  const commandValue = obj.command ?? obj.cmd;
-  if (Array.isArray(commandValue)) {
-    const tokens = commandValue.map((entry) => (typeof entry === 'string' ? entry : String(entry ?? '')));
-    if (!tokens.length) return null;
-    const commandToken = tokens[0]?.trim().toLowerCase() || '';
-    const isApplyPatchCommand =
-      commandToken === 'apply_patch' || commandToken.endsWith('/apply_patch') || commandToken.endsWith('\\apply_patch');
-    if (!isApplyPatchCommand) {
-      return null;
-    }
-    const patchText = tokens.slice(1).join('\n').trim();
-    return isApplyPatchPayloadCandidate(patchText) ? patchText : null;
-  }
-
-  if (typeof commandValue === 'string') {
-    const raw = commandValue.trim();
-    if (!raw) return null;
-    if (!raw.toLowerCase().startsWith('apply_patch')) return null;
-    const patchText = raw.slice('apply_patch'.length).trim();
-    return isApplyPatchPayloadCandidate(patchText) ? patchText : null;
-  }
-
-  return null;
-}
-
-function rewriteExecCommandApplyPatchCall(fn: Record<string, unknown> | undefined): boolean {
-  if (!fn) return false;
-  const currentName = typeof fn.name === 'string' ? String(fn.name).trim().toLowerCase() : '';
-  if (currentName !== 'exec_command') return false;
-
-  const patch = extractApplyPatchPayloadFromExecArgs((fn as any).arguments);
-  if (!patch) return false;
-
-  (fn as any).name = 'apply_patch';
-  (fn as any).arguments = JSON.stringify({ patch, input: '' });
-  return true;
-}
-
-const NESTED_APPLY_PATCH_POLICY_MARKER = '[Codex NestedApplyPatch Policy]';
-
-function buildNestedApplyPatchPolicyNotice(rewriteCount: number): string {
-  const count = Number.isFinite(rewriteCount) && rewriteCount > 0 ? Math.floor(rewriteCount) : 0;
-  return [
-    NESTED_APPLY_PATCH_POLICY_MARKER,
-    'Forbidden usage detected: apply_patch must NEVER be called via exec_command or shell (detected=' + count + ').',
-    'The call was auto-rewritten to apply_patch for compatibility this turn.',
-    'Next action rule: call apply_patch directly; do not nest apply_patch inside exec_command/shell.',
-    '禁止通过 exec_command/shell 嵌套调用 apply_patch；本轮已自动改写，后续必须直接调用 apply_patch。'
-  ].join('\n');
-}
-
-function injectNestedApplyPatchPolicyNotice(messages: any[], rewriteCount: number): void {
-  if (!Array.isArray(messages) || rewriteCount <= 0) {
-    return;
-  }
-  const exists = messages.some((entry) => {
-    if (!entry || typeof entry !== 'object') return false;
-    if ((entry as any).role !== 'system') return false;
-    const content = typeof (entry as any).content === 'string' ? String((entry as any).content) : '';
-    return content.includes(NESTED_APPLY_PATCH_POLICY_MARKER);
-  });
-  if (exists) {
-    return;
-  }
-  messages.push({
-    role: 'system',
-    content: buildNestedApplyPatchPolicyNotice(rewriteCount)
-  });
-}
-
-function shellSingleQuote(text: string): string {
-  return `'${String(text || '').replace(/'/g, `'\\''`)}'`;
-}
-
-function buildExecCommandGuardScript(reason?: string, message?: string): string {
-  const fallback = 'blocked by exec_command guard policy.';
-  const detail =
-    reason === 'forbidden_git_reset_hard'
-      ? 'blocked by exec_command guard: git reset --hard is forbidden. Use git reset --mixed REF or git restore --source REF -- FILE.'
-      : reason === 'forbidden_git_checkout_scope'
-        ? 'blocked by exec_command guard: git checkout is allowed only for a single file. Use git checkout -- FILE or git checkout REF -- FILE.'
-        : reason === 'forbidden_exec_command_policy'
-          ? `policy 不允许: ${(message || '').trim() || 'command blocked by policy'}`
-        : message && message.trim()
-          ? `blocked by exec_command guard: ${message.trim()}`
-          : fallback;
-  const compact = detail.replace(/\s+/g, ' ').trim() || fallback;
-  return `bash -lc "printf '%s\\n' ${shellSingleQuote(compact)} >&2; exit 2"`;
-}
-
-function buildBlockedExecCommandArgs(rawArgs: unknown, reason?: string, message?: string): string {
-  let parsed: any = {};
-  try {
-    const repaired = repairArgumentsToString(rawArgs);
-    try {
-      parsed = JSON.parse(repaired);
-    } catch {
-      parsed = parseLenient(repaired);
-    }
-  } catch {
-    parsed = {};
-  }
-  const out: Record<string, unknown> = {};
-  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-    const workdir =
-      typeof parsed.workdir === 'string'
-        ? parsed.workdir
-        : typeof parsed.cwd === 'string'
-          ? parsed.cwd
-          : undefined;
-    if (workdir && workdir.trim().length > 0) {
-      out.workdir = workdir.trim();
-    }
-  }
-  out.cmd = buildExecCommandGuardScript(reason, message);
-  try {
-    return JSON.stringify(out);
-  } catch {
-    return JSON.stringify({
-      cmd: `bash -lc 'printf "%s\\n" "blocked by exec_command guard policy." >&2; exit 2'`
-    });
-  }
-}
-
-const EXEC_COMMAND_NAME_AS_COMMAND_PATTERN =
-  /^(?:rg|wc|cat|ls|find|grep|git|sed|head|tail|awk|bash|sh|zsh|node|npm|pnpm|yarn|bd|echo|cp|mv|rm|mkdir|python|python3|perl|ruby)\b/i;
-
-function repairCommandNameAsExecToolCall(
-  fn: Record<string, unknown> | undefined,
-  validationOptions?: ToolValidationOptions
-): boolean {
-  try {
-    if (!fn) return false;
-    const rawName = typeof fn.name === 'string' ? String(fn.name).trim() : '';
-    if (!rawName) return false;
-    const lowered = rawName.toLowerCase();
-    if (lowered === 'exec_command' || lowered === 'shell_command' || lowered === 'shell' || lowered === 'bash') {
-      return false;
-    }
-    // Malformed shape seen in the wild: command string is put into function.name.
-    if (!EXEC_COMMAND_NAME_AS_COMMAND_PATTERN.test(rawName)) {
-      return false;
-    }
-
-    const repaired = repairArgumentsToString((fn as any).arguments);
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(repaired);
-    } catch {
-      parsed = parseLenient(repaired);
-    }
-    const argsObj = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? ({ ...(parsed as Record<string, unknown>) } as Record<string, unknown>)
-      : ({} as Record<string, unknown>);
-
-    const existingCmd =
-      typeof argsObj.cmd === 'string' && String(argsObj.cmd).trim().length
-        ? String(argsObj.cmd).trim()
-        : typeof argsObj.command === 'string' && String(argsObj.command).trim().length
-          ? String(argsObj.command).trim()
-          : '';
-    const cmd = existingCmd || rawName;
-    argsObj.cmd = cmd;
-    argsObj.command = cmd;
-    if (typeof argsObj.cwd === 'string' && (!argsObj.workdir || typeof argsObj.workdir !== 'string')) {
-      argsObj.workdir = String(argsObj.cwd);
-    }
-
-    const validation = validateToolCall('exec_command', JSON.stringify(argsObj), validationOptions);
-    if (validation.ok && typeof validation.normalizedArgs === 'string') {
-      (fn as any).arguments = validation.normalizedArgs;
-    } else {
-      const fallback: Record<string, unknown> = { cmd, command: cmd };
-      if (typeof argsObj.workdir === 'string' && String(argsObj.workdir).trim().length > 0) {
-        fallback.workdir = String(argsObj.workdir).trim();
-      }
-      (fn as any).arguments = JSON.stringify(fallback);
-    }
-    (fn as any).name = 'exec_command';
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 export interface ToolGovernanceOptions {
   injectGuidance?: boolean; // deprecated: system guidance injection removed
@@ -364,10 +127,6 @@ export function processChatRequestTools(request: Unknown, opts?: ToolGovernanceO
  * Process OpenAI Chat response (choices[0].message) with unified 标准 governance.
  * - Canonicalize structured tool_calls; ensure finish_reason and content=null policy
  */
-import {
-  parseLenientJsonishWithNative as parseLenient,
-  repairArgumentsToStringWithNative as repairArgumentsToString
-} from '../../router/virtual-router/engine-selection/native-shared-conversion-semantics.js';
 
 export function normalizeApplyPatchToolCallsOnResponse(chat: Unknown): Unknown {
   try {
@@ -391,6 +150,7 @@ export function normalizeApplyPatchToolCallsOnResponse(chat: Unknown): Unknown {
           if (validation && validation.ok && typeof validation.normalizedArgs === 'string') {
             (fn as any).arguments = validation.normalizedArgs;
           } else if (validation && !validation.ok) {
+            (fn as any).arguments = buildBlockedApplyPatchArgs(rawArgs, validation.reason, validation.message);
             try {
               const reason = validation.reason ?? 'unknown';
               captureApplyPatchRegression({
@@ -472,6 +232,7 @@ function normalizeSpecialToolCallsOnRequest(request: Unknown): Unknown {
             if (validation && validation.ok && typeof validation.normalizedArgs === 'string') {
               (fn as any).arguments = validation.normalizedArgs;
             } else if (validation && !validation.ok) {
+              (fn as any).arguments = buildBlockedApplyPatchArgs(rawArgs, validation.reason, validation.message);
               try {
                 const reason = validation.reason ?? 'unknown';
                 captureApplyPatchRegression({

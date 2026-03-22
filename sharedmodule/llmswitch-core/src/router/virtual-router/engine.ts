@@ -22,6 +22,7 @@ import { mergeStopMessageFromPersisted } from './stop-message-state-sync.js';
 import { resolveStopMessageScope } from './engine/routing-state/store.js';
 import type { RoutingInstructionState } from './routing-instructions.js';
 import { resolveRouteColor, resolveSessionColor } from './engine-logging.js';
+import { resolveRccUserDir } from '../../runtime/user-data-paths.js';
 import {
   buildStopMessageMarkerParseLog,
   cleanStopMessageMarkersInPlace,
@@ -301,10 +302,22 @@ function isVirtualRouterErrorLike(
 function injectRuntimeNowMs(metadata: RouterMetadataInput): RouterMetadataInput {
   const nowMs = Date.now();
   const rt = (metadata as { __rt?: unknown }).__rt;
-  if (rt && typeof rt === 'object' && !Array.isArray(rt)) {
-    return { ...metadata, __rt: { ...(rt as Record<string, unknown>), nowMs } } as RouterMetadataInput;
+  const sessionDir = String(process.env.ROUTECODEX_SESSION_DIR || '').trim();
+  const runtimeOverrides: Record<string, unknown> = { nowMs };
+  if (sessionDir) {
+    runtimeOverrides.sessionDir = sessionDir;
   }
-  return { ...metadata, __rt: { nowMs } } as RouterMetadataInput;
+  const rccUserDir = resolveRccUserDir();
+  if (rccUserDir) {
+    runtimeOverrides.rccUserDir = rccUserDir;
+  }
+  if (rt && typeof rt === 'object' && !Array.isArray(rt)) {
+    return {
+      ...metadata,
+      __rt: { ...(rt as Record<string, unknown>), ...runtimeOverrides }
+    } as RouterMetadataInput;
+  }
+  return { ...metadata, __rt: runtimeOverrides } as RouterMetadataInput;
 }
 
 

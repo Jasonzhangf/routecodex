@@ -156,6 +156,9 @@ function extractToolCallsFromMessagesArray(chatResponse: JsonObject): ToolCall[]
       } else if (rawArgs !== undefined && rawArgs !== null) {
         args = String(rawArgs);
       }
+      if (shouldSkipMalformedHistoricalToolCall(name, args)) {
+        continue;
+      }
       calls.push({ id, name, arguments: args });
     }
   }
@@ -201,6 +204,32 @@ function normalizeServerToolCallName(name: string): string {
     return 'web_search';
   }
   return normalized;
+}
+
+function looksLikeToolExecutionTranscript(raw: string): boolean {
+  const text = String(raw || '').trim();
+  if (!text) {
+    return false;
+  }
+  const lower = text.toLowerCase();
+  if (lower.startsWith('chunk id:')) {
+    return true;
+  }
+  if (lower.includes('wall time:') && lower.includes('process exited with code')) {
+    return true;
+  }
+  if (lower.includes('original token count:') && lower.includes('process exited with code')) {
+    return true;
+  }
+  return false;
+}
+
+function shouldSkipMalformedHistoricalToolCall(name: string, args: string): boolean {
+  const normalized = normalizeServerToolCallName(name);
+  if (normalized !== 'exec_command' && normalized !== 'apply_patch' && normalized !== 'shell_command') {
+    return false;
+  }
+  return looksLikeToolExecutionTranscript(args);
 }
 
 function readText(value: unknown): string {
@@ -299,6 +328,9 @@ function extractToolCallsFromMessage(message: JsonObject): { raw: JsonObject; pa
       args = String(rawArgs);
     }
     if (!name) continue;
+    if (shouldSkipMalformedHistoricalToolCall(name, args)) {
+      continue;
+    }
     out.push({ raw: tc as JsonObject, parsed: { id, name, arguments: args } });
   }
   return out;
@@ -462,6 +494,13 @@ export async function runServerSideToolEngine(
   const attemptedToolCallsByMessage: { parsed: ToolCall; raw: JsonObject }[] = [];
   const runtimeMetadata = readRuntimeMetadata(options.adapterContext as unknown as Record<string, unknown>);
   const runtimePreCommandState = (() => {
+    const directRuntime = asObject((options.adapterContext as Record<string, unknown> | undefined)?.__rt);
+    const runtimeState =
+      asObject(directRuntime?.preCommandState) ??
+      asObject((runtimeMetadata as Record<string, unknown> | undefined)?.preCommandState);
+    if (runtimeState) {
+      return runtimeState;
+    }
     const stickyKey = resolveStickyKeyFromAdapterContext(
       options.adapterContext as unknown as Record<string, unknown>
     );
@@ -824,6 +863,9 @@ export function extractToolCalls(chatResponse: JsonObject): ToolCall[] {
         args = String(rawArgs);
       }
       if (!name) continue;
+      if (shouldSkipMalformedHistoricalToolCall(name, args)) {
+        continue;
+      }
       calls.push({ id, name, arguments: args });
     }
   }

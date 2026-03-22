@@ -49,6 +49,7 @@ import { resolveHubShadowCompareConfig } from './hub-shadow-compare.js';
 import { resolveLlmsEngineShadowConfig } from '../../../utils/llms-engine-shadow.js';
 import { createRequestExecutor, type RequestExecutor } from './request-executor.js';
 import { RequestActivityTracker } from './request-activity-tracker.js';
+import { getSessionExecutionStateTracker } from './session-execution-state.js';
 import { startSessionReaper, stopSessionReaper } from './session-client-reaper.js';
 import {
   resolveVirtualRouterInput,
@@ -173,6 +174,8 @@ export class RouteCodexHttpServer {
     if (
       sessionCleanup.removedLegacyScopeFiles > 0 ||
       sessionCleanup.removedDeadTmuxStateFiles > 0 ||
+      sessionCleanup.removedHeartbeatStateFiles > 0 ||
+      sessionCleanup.removedClockStateFiles > 0 ||
       sessionCleanup.prunedRegistryDirs > 0 ||
       sessionCleanup.removedRegistryDirs > 0
     ) {
@@ -203,7 +206,20 @@ export class RouteCodexHttpServer {
           if (!runtimeKey) {
             return undefined;
           }
-          return this.providerHandles.get(runtimeKey);
+          const direct = this.providerHandles.get(runtimeKey);
+          if (direct) {
+            return direct;
+          }
+          const runtimeKeyParts = runtimeKey.split('.');
+          if (runtimeKeyParts.length === 2) {
+            const aliasScopedPrefix = `${runtimeKeyParts[0]}.${runtimeKeyParts[1]}.`;
+            for (const [candidateKey, handle] of this.providerHandles.entries()) {
+              if (candidateKey.startsWith(aliasScopedPrefix)) {
+                return handle;
+              }
+            }
+          }
+          return undefined;
         }
       },
       getHubPipeline: () => this.hubPipeline,
@@ -214,6 +230,7 @@ export class RouteCodexHttpServer {
       stats: this.stats,
       onRequestStart: ({ requestId, metadata }) => {
         this.requestActivityTracker.start(requestId, metadata);
+        getSessionExecutionStateTracker().recordRequestStart(requestId, metadata);
       },
       onRequestEnd: async ({ requestId }) => {
         this.requestActivityTracker.end(requestId);

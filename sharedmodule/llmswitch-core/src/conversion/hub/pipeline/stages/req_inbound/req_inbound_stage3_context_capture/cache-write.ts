@@ -8,7 +8,8 @@ import type { ContextCaptureOptions } from './context-capture-orchestration.js';
 import {
   writeCacheEntry,
   resolveWorkingDirectoryFromAdapterContextOrFallback,
-  extractUserTextFromRequest
+  extractUserTextFromRequest,
+  shouldLogNoWorkingDirectorySkip
 } from '../../../../../../servertool/handlers/memory/cache-writer.js';
 
 /**
@@ -24,9 +25,11 @@ export function writeCacheEntryForRequest(options: ContextCaptureOptions): void 
     );
 
     if (!workingDirectory) {
-      console.error(
-        `[req_inbound.cache] skip: no workingDirectory for requestId=${options.adapterContext.requestId}`
-      );
+      if (shouldLogNoWorkingDirectorySkip(options.adapterContext as Record<string, unknown>)) {
+        console.error(
+          `[req_inbound.cache] skip: no workingDirectory for requestId=${options.adapterContext.requestId}`
+        );
+      }
       return;
     }
 

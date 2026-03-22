@@ -452,6 +452,7 @@ describe('stop_message_auto servertool', () => {
       expect(injectMeta.clientInjectText).toContain(EXECUTION_APPEND_TEXT);
       const capturedPrompt = fs.readFileSync(promptCapturePath, 'utf8');
       expect(capturedPrompt).toContain('先做代码 review（最多一句），再给指令：必须结合 workingDirectory 下当前实现/测试/构建状态给出建议；不能只做抽象建议。');
+      expect(capturedPrompt).toContain('必须先根据本次请求逐条核验（目标/范围/约束）后再给建议');
       expect(capturedPrompt).toContain('只有在消息内容或历史记录里存在明确证据时，才允许判断“偏离目标”；否则按同轨推进，不要泛化指责偏离。');
       expect(capturedPrompt).toContain('禁止连续安排纯只读/纯汇报命令（如 cargo llvm-cov report、cat/head/tail/rg/git status）');
       expect(capturedPrompt).toContain('禁止把 review 责任交回主模型');
@@ -676,6 +677,7 @@ describe('stop_message_auto servertool', () => {
       expect(capturedPrompt).toContain('reasoningText:');
       expect(capturedPrompt).toContain('这里是推理输出');
       expect(capturedPrompt).toContain('先做代码 review（最多一句），再给指令：必须结合 workingDirectory 下当前实现/测试/构建状态给出建议；不能只做抽象建议。');
+      expect(capturedPrompt).toContain('必须先根据本次请求逐条核验（目标/范围/约束）后再给建议');
       expect(capturedPrompt).toContain('只有在消息内容或历史记录里存在明确证据时，才允许判断“偏离目标”；否则按同轨推进，不要泛化指责偏离。');
       expect(capturedPrompt).toContain('覆盖率类命令只能作为写动作后的验证步骤，不能作为本轮唯一或首要动作。');
       expect(capturedPrompt).toContain('禁止把 review 责任交回主模型');
@@ -1421,14 +1423,14 @@ describe('stop_message_auto servertool', () => {
     expect(key).toBe('tmux:tmux-stop-1');
   });
 
-  test('stopMessage sticky key stays undefined without inject scope', () => {
+  test('stopMessage sticky key falls back to session scope without inject scope', () => {
     const key = resolveStickyKey({
       providerProtocol: 'openai-responses',
       requestId: 'req-responses-stopmessage',
       sessionId: 'session-should-win'
     });
 
-    expect(key).toBeUndefined();
+    expect(key).toBe('session:session-should-win');
   });
 
   test('openai-responses does not trigger stop_message when session stage mode is off', async () => {

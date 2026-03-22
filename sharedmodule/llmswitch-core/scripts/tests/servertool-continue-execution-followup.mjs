@@ -71,8 +71,8 @@ async function main() {
   const toolNames = (Array.isArray(processedRequest.tools) ? processedRequest.tools : [])
     .map((tool) => tool?.function?.name)
     .filter((name) => typeof name === 'string');
-  assert(toolNames.includes('continue_execution'), 'continue_execution tool should be injected in chat process');
-  assert(processedRequest.metadata?.continueExecutionEnabled === true, 'continueExecutionEnabled metadata should be set');
+  assert(!toolNames.includes('continue_execution'), 'continue_execution tool should not be injected in chat process');
+  assert(processedRequest.metadata?.continueExecutionEnabled !== true, 'continueExecutionEnabled metadata should not be forced');
   let followupArgs = null;
   let reenterCalled = false;
   const result = await runServerToolOrchestration({
@@ -126,7 +126,7 @@ async function main() {
   const followupToolNames = (Array.isArray(followupBody.tools) ? followupBody.tools : [])
     .map((tool) => tool?.function?.name)
     .filter((name) => typeof name === 'string');
-  assert(followupToolNames.includes('continue_execution'), 'followup should keep continue_execution tool in tool list');
+  assert(!followupToolNames.includes('continue_execution'), 'followup should not inject continue_execution into tool list');
 
   const metadata = followupArgs.metadata && typeof followupArgs.metadata === 'object' ? followupArgs.metadata : {};
   const runtime = metadata.__rt && typeof metadata.__rt === 'object' ? metadata.__rt : metadata;
@@ -136,7 +136,7 @@ async function main() {
   assert(metadata.clientInjectOnly === true, 'continue_execution followup should use clientInjectOnly mode');
   assert(metadata.clientInjectText === '完成了 A，正在处理 B', 'continue_execution followup should inject summary text');
 
-  console.log('✅ servertool continue_execution followup regression passed');
+  console.log('✅ servertool continue_execution followup regression passed (no continue_execution tool injection)');
 }
 
 main().catch((err) => {

@@ -40,6 +40,9 @@ export function synthesizeToolOutputsFromMessages(messages: ChatMessage[] | unde
       ? ((message as JsonObject).tool_calls as ChatToolCall[])
       : [];
     for (const call of toolCalls) {
+      if (!call || typeof call !== 'object') {
+        continue;
+      }
       const callId = typeof call.id === 'string' ? call.id : undefined;
       if (!callId) {
         continue;

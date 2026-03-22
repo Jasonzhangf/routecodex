@@ -18,7 +18,7 @@ use crate::virtual_router_engine::instructions::{
 use crate::virtual_router_engine::provider_registry::ProviderRegistry;
 use crate::virtual_router_engine::routing::{
     alias_prefix_from_alias_key, build_antigravity_alias_key, extract_excluded_provider_keys,
-    filter_candidates_by_state, parse_direct_provider_model,
+    filter_candidates_by_state, parse_direct_provider_model, resolve_instruction_target,
     resolve_instruction_process_mode_for_selection, resolve_session_scope, resolve_sticky_key,
     resolve_stop_message_scope, should_avoid_antigravity_after_repeated_error,
     should_bind_antigravity_session, should_fallback_direct_model_for_media,
@@ -151,7 +151,34 @@ fn append_reasoning_tag(reasoning: &str, tag: Option<String>) -> String {
     format!("{}|{}", reasoning, tag)
 }
 
+fn has_only_routing_state_mutation_instructions(instructions: &[RoutingInstruction]) -> bool {
+    !instructions.is_empty()
+        && instructions.iter().all(|inst| {
+            matches!(inst.kind.as_str(), "allow" | "disable" | "enable" | "clear")
+        })
+}
+
 impl VirtualRouterEngineCore {
+    fn should_auto_clear_prefer_target(
+        &mut self,
+        env: Env,
+        state: &RoutingInstructionState,
+    ) -> bool {
+        let Some(target) = state.prefer_target.as_ref() else {
+            return false;
+        };
+        let Some(resolved) = resolve_instruction_target(target, &self.provider_registry) else {
+            return true;
+        };
+        let filtered = filter_candidates_by_state(&resolved.keys, state, &self.provider_registry);
+        if filtered.is_empty() {
+            return true;
+        }
+        filtered
+            .iter()
+            .all(|provider_key| !self.is_provider_available(env, provider_key))
+    }
+
     fn load_routing_state_for_scope(&mut self, key: &str) -> RoutingInstructionState {
         if let Some(existing) = self.routing_instruction_state.get(key) {
             return existing.clone();
@@ -278,8 +305,23 @@ impl VirtualRouterEngineCore {
                 core_instructions.push(inst);
             }
         }
+        let routing_instruction_mutation_only =
+            has_only_routing_state_mutation_instructions(&core_instructions)
+                && features.user_text_sample.trim().is_empty();
+        let mut metadata_for_selection = features.metadata.clone();
+        if routing_instruction_mutation_only {
+            if let Some(map) = metadata_for_selection.as_object_mut() {
+                map.insert(
+                    "routingInstructionMutationOnly".to_string(),
+                    Value::Bool(true),
+                );
+            }
+        }
         if !core_instructions.is_empty() {
             apply_routing_instructions(&core_instructions, &mut routing_state)?;
+        }
+        if self.should_auto_clear_prefer_target(env, &routing_state) {
+            routing_state.prefer_target = None;
         }
         let persisted_state = if stop_message_scope.is_some() {
             strip_client_inject_fields(&routing_state)
@@ -454,7 +496,7 @@ impl VirtualRouterEngineCore {
                     let requested_route = classification.route_name.clone();
                     let selection = self.select_provider(
                         &requested_route,
-                        &features.metadata,
+                        &metadata_for_selection,
                         &classification,
                         &features,
                         &routing_state_for_selection,
@@ -479,7 +521,7 @@ impl VirtualRouterEngineCore {
                 let requested_route = classification.route_name.clone();
                 let selection = self.select_provider(
                     &requested_route,
-                    &features.metadata,
+                    &metadata_for_selection,
                     &classification,
                     &features,
                     &routing_state_for_selection,

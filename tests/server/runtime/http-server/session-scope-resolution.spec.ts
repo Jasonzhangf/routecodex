@@ -60,4 +60,21 @@ describe('session-scope-resolution', () => {
       source: 'registry_by_binding'
     });
   });
+
+  it('uses api-key session scope as binding candidate when no session header exists', () => {
+    const result = resolveTmuxSessionIdAndSource({
+      userMeta: {},
+      bodyMeta: {},
+      headers: {
+        'x-routecodex-api-key': 'sk-test::rcc-session:conv_from_apikey'
+      },
+      isTmuxSessionAlive: (tmuxSessionId) => tmuxSessionId !== 'conv_from_apikey',
+      resolveTmuxSessionIdFromBinding: (scope) => (scope === 'conv_from_apikey' ? 'tmux_from_binding' : undefined)
+    });
+
+    expect(result).toEqual({
+      tmuxSessionId: 'tmux_from_binding',
+      source: 'registry_by_binding'
+    });
+  });
 });

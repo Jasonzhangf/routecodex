@@ -7,6 +7,7 @@ mod types;
 pub(crate) use clean::{
     clean_malformed_routing_instruction_markers, clean_routing_instruction_markers,
 };
+pub(crate) use path::with_rcc_user_dir_override;
 pub(crate) use parse::{
     has_routing_instruction_marker_in_messages,
     has_routing_instruction_marker_in_responses_context, parse_routing_instructions_from_messages,

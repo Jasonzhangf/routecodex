@@ -1,7 +1,10 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { cleanupSessionStorageOnStartup } from '../../../src/server/runtime/http-server/session-storage-cleanup.js';
+import {
+  cleanupSessionStorageOnShutdown,
+  cleanupSessionStorageOnStartup
+} from '../../../src/server/runtime/http-server/session-storage-cleanup.js';
 
 describe('session storage startup cleanup', () => {
   let baseDir = '';
@@ -187,5 +190,36 @@ describe('session storage startup cleanup', () => {
     const keptToolState = JSON.parse(fs.readFileSync(path.join(keepDir, 'tmux-tools-state.json'), 'utf8'));
     expect(Object.keys(keptToolState.heartbeats)).toEqual(['live-tmux']);
     expect(Object.keys(keptToolState.injections)).toEqual(['live-tmux']);
+  });
+
+  test('cleans clock state files for dead tmux sessions on startup and shutdown', () => {
+    const rootClockDir = path.join(baseDir, 'clock');
+    const nestedClockDir = path.join(baseDir, '127.0.0.1_5520', 'clock');
+    fs.mkdirSync(rootClockDir, { recursive: true });
+    fs.mkdirSync(nestedClockDir, { recursive: true });
+    fs.writeFileSync(path.join(rootClockDir, 'tmux:dead-tmux.json'), '{"tmuxSessionId":"dead-tmux"}', 'utf8');
+    fs.writeFileSync(path.join(rootClockDir, 'tmux:live-tmux.json'), '{"tmuxSessionId":"live-tmux"}', 'utf8');
+    fs.writeFileSync(path.join(nestedClockDir, 'tmux:dead-tmux.json'), '{"tmuxSessionId":"dead-tmux"}', 'utf8');
+    fs.writeFileSync(path.join(nestedClockDir, 'tmux:live-tmux.json'), '{"tmuxSessionId":"live-tmux"}', 'utf8');
+    fs.writeFileSync(path.join(rootClockDir, 'ntp-state.json'), '{"offsetMs":0}', 'utf8');
+
+    const startupSummary = cleanupSessionStorageOnStartup({
+      baseDir,
+      isTmuxSessionAlive: (tmuxSessionId) => tmuxSessionId === 'live-tmux'
+    });
+    expect(startupSummary.removedClockStateFiles).toBe(2);
+    expect(fs.existsSync(path.join(rootClockDir, 'tmux:dead-tmux.json'))).toBe(false);
+    expect(fs.existsSync(path.join(nestedClockDir, 'tmux:dead-tmux.json'))).toBe(false);
+    expect(fs.existsSync(path.join(rootClockDir, 'tmux:live-tmux.json'))).toBe(true);
+    expect(fs.existsSync(path.join(nestedClockDir, 'tmux:live-tmux.json'))).toBe(true);
+    expect(fs.existsSync(path.join(rootClockDir, 'ntp-state.json'))).toBe(true);
+
+    fs.writeFileSync(path.join(rootClockDir, 'tmux:dead-tmux-2.json'), '{"tmuxSessionId":"dead-tmux"}', 'utf8');
+    const shutdownSummary = cleanupSessionStorageOnShutdown({
+      baseDir,
+      isTmuxSessionAlive: (tmuxSessionId) => tmuxSessionId === 'live-tmux'
+    });
+    expect(shutdownSummary.removedClockStateFiles).toBe(1);
+    expect(fs.existsSync(path.join(rootClockDir, 'tmux:dead-tmux-2.json'))).toBe(false);
   });
 });

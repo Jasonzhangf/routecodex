@@ -824,7 +824,7 @@ fn decode_json_escapes(raw: &str) -> String {
 fn extract_possibly_broken_quoted_value(text: &str, keys: &[&str]) -> Option<String> {
     for key in keys {
         let re = Regex::new(format!(r#"\"{}\"\s*:\s*\""#, regex::escape(key)).as_str()).unwrap();
-        let mut search_index = 0;
+        let search_index = 0;
         while let Some(mat) = re.find(&text[search_index..]) {
             let start = search_index + mat.end();
             let bytes: Vec<char> = text.chars().collect();
@@ -948,7 +948,7 @@ fn extract_json_tool_calls_from_text_impl(
 
     let mut out: Vec<ToolCallLite> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
-    let mut push_entry =
+    let push_entry =
         |out: &mut Vec<ToolCallLite>, seen: &mut HashSet<String>, raw_entry: &Value| {
             if let Some(normalized) = normalize_json_tool_call_entry(raw_entry, options) {
                 let key = format!("{}:{}", normalized.name, normalized.args);

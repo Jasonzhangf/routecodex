@@ -1229,6 +1229,8 @@ describe('cli codex command', () => {
     expect(spawnCalls).toHaveLength(1);
     expect(spawnCalls[0].command).toBe('tmux');
     expect(spawnCalls[0].args).toEqual(expect.arrayContaining(['attach-session']));
+    expect(spawnCalls[0].options?.env?.TMUX).toBeUndefined();
+    expect(spawnCalls[0].options?.env?.TMUX_PANE).toBeUndefined();
     expect(tmuxCalls.some((call) => call.args[0] === 'new-session')).toBe(true);
     expect(tmuxCalls.some((call) => call.args[0] === 'respawn-pane' || call.args[0] === 'send-keys')).toBe(true);
     expect(warnings.some((line) => line.includes('not running inside tmux'))).toBe(false);
@@ -1365,10 +1367,10 @@ describe('cli codex command', () => {
     expect(newSessionCall).toBeDefined();
     const sessionNameIndex = newSessionCall!.args.indexOf('-s') + 1;
     const sessionName = sessionNameIndex > 0 ? String(newSessionCall!.args[sessionNameIndex]) : '';
-    expect(sessionName).toBe('workspace-clock-2');
+    expect(sessionName).toBe('rcc-workspace-clock-2');
     expect(hasSessionTargets.length).toBeGreaterThanOrEqual(2);
     expect(new Set(hasSessionTargets).size).toBeGreaterThanOrEqual(2);
-    expect(hasSessionTargets).toEqual(expect.arrayContaining(['workspace-clock', 'workspace-clock-2']));
+    expect(hasSessionTargets).toEqual(expect.arrayContaining(['rcc-workspace-clock', 'rcc-workspace-clock-2']));
   });
 
   it('requests managed tmux session self-exit on codex close without kill-session', async () => {
@@ -1916,10 +1918,10 @@ describe('cli codex command', () => {
     expect(launchCall).toBeDefined();
     const shellCommand = extractTmuxLaunchShellCommand(launchCall);
     expect(shellCommand).toContain("cd -- '/home/test/workspace-clock'");
-    expect(shellCommand).toContain("ROUTECODEX_HTTP_APIKEY=sk-base-key::rcc-session:workspace-clock");
-    expect(shellCommand).toContain("RCC_HTTP_APIKEY=sk-base-key::rcc-session:workspace-clock");
-    expect(shellCommand).toContain("OPENAI_API_KEY=sk-base-key::rcc-session:workspace-clock");
-    expect(shellCommand).toContain("ANTHROPIC_AUTH_TOKEN=sk-base-key::rcc-session:workspace-clock");
+    expect(shellCommand).toContain("ROUTECODEX_HTTP_APIKEY=sk-base-key::rcc-session:rcc-workspace-clock");
+    expect(shellCommand).toContain("RCC_HTTP_APIKEY=sk-base-key::rcc-session:rcc-workspace-clock");
+    expect(shellCommand).toContain("OPENAI_API_KEY=sk-base-key::rcc-session:rcc-workspace-clock");
+    expect(shellCommand).toContain("ANTHROPIC_AUTH_TOKEN=sk-base-key::rcc-session:rcc-workspace-clock");
     expect(shellCommand).toContain("[routecodex][self-heal]");
     expect(shellCommand).toContain("__rcc_max=");
     expect(shellCommand).toContain("while true; do");

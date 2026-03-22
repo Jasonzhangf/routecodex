@@ -4,7 +4,7 @@ import path from 'path';
 import { PassThrough } from 'node:stream';
 import { writeSnapshotViaHooks } from '../../../modules/llmswitch/bridge.js';
 import { buildInfo } from '../../../build-info.js';
-import { resolveRccSnapshotsDir } from '../../../config/user-data-paths.js';
+import { resolveRccSnapshotsDirFromEnv } from '../../../config/user-data-paths.js';
 import { runtimeFlags } from '../../../runtime/runtime-flags.js';
 import { writeErrorsampleJson } from '../../../utils/errorsamples.js';
 import {
@@ -33,11 +33,7 @@ type ProviderSnapshotWriteOptions = {
 };
 
 function resolveSnapshotBase(): string {
-  const override = String(process.env.ROUTECODEX_SNAPSHOT_DIR || process.env.RCC_SNAPSHOT_DIR || '').trim();
-  if (override) {
-    return path.isAbsolute(override) ? override : path.resolve(override);
-  }
-  return resolveRccSnapshotsDir();
+  return resolveRccSnapshotsDirFromEnv();
 }
 
 async function ensureDir(dir: string): Promise<void> {
@@ -211,8 +207,8 @@ function isErrorPhase(phase: string): boolean {
   return String(phase || '').trim().toLowerCase().includes('error');
 }
 
-function writeProviderErrorsample(snapshot: ProviderSnapshotPersistInput): void {
-  void writeErrorsampleJson({
+async function writeProviderErrorsample(snapshot: ProviderSnapshotPersistInput): Promise<void> {
+  await writeErrorsampleJson({
     group: 'provider-error',
     kind: snapshot.stage,
     payload: {
@@ -229,8 +225,6 @@ function writeProviderErrorsample(snapshot: ProviderSnapshotPersistInput): void 
       },
       observation: snapshot.payload
     }
-  }).catch((error) => {
-    logSnapshotNonBlockingError(`writeProviderErrorsample:${snapshot.stage}`, error);
   });
 }
 
@@ -239,7 +233,11 @@ export async function writeProviderSnapshot(options: ProviderSnapshotWriteOption
 
   if (!runtimeFlags.snapshotsEnabled) {
     if (isErrorPhase(snapshot.stage)) {
-      writeProviderErrorsample(snapshot);
+      try {
+        await writeProviderErrorsample(snapshot);
+      } catch (error) {
+        logSnapshotNonBlockingError(`writeProviderErrorsample:${snapshot.stage}`, error);
+      }
     }
     return;
   }

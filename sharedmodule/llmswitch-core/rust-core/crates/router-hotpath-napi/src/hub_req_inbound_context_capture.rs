@@ -1,7 +1,3 @@
-use crate::hub_bridge_actions::{
-    build_bridge_history, convert_bridge_input_to_chat_messages, BridgeInputToChatInput,
-    BuildBridgeHistoryInput,
-};
 use crate::hub_req_inbound_tool_output_snapshot::collect_tool_outputs;
 use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
@@ -282,13 +278,83 @@ fn normalize_responses_input_items(raw_request: &Map<String, Value>) -> Option<V
             if items.is_empty() {
                 return None;
             }
-            // Keep inbound context capture cheap: store the original Responses input history
-            // and let the semantic-mapping bridge convert it once later.
-            //
-            // The previous normalize -> chat -> rebuild-bridge cycle duplicated the most
-            // expensive large-history traversal inside stage2 `toChat`, which is exactly
-            // the path we are trying to optimize.
-            Some(items.clone())
+            let allowed_tool_names = raw_request
+                .get("tools")
+                .and_then(Value::as_array)
+                .map(|tools| {
+                    tools.iter()
+                        .filter_map(|tool| {
+                            let row = tool.as_object()?;
+                            read_trimmed_string(
+                                row.get("function")
+                                    .and_then(Value::as_object)
+                                    .and_then(|function| function.get("name"))
+                                    .or_else(|| row.get("name")),
+                            )
+                            .map(|value| value.to_ascii_lowercase())
+                        })
+                        .collect::<std::collections::HashSet<String>>()
+                })
+                .unwrap_or_default();
+
+            let mut normalized: Vec<Value> = Vec::with_capacity(items.len());
+            let mut valid_call_ids = std::collections::HashSet::new();
+
+            for entry in items {
+                let Some(row) = entry.as_object() else {
+                    normalized.push(entry.clone());
+                    continue;
+                };
+                let ty = read_trimmed_string(row.get("type"))
+                    .unwrap_or_default()
+                    .to_ascii_lowercase();
+
+                if matches!(ty.as_str(), "function_call" | "tool_call") {
+                    let name = read_trimmed_string(row.get("name"))
+                        .map(|value| value.trim().to_string())
+                        .filter(|value| !value.is_empty());
+                    let Some(name) = name else {
+                        continue;
+                    };
+                    let lowered_name = name.to_ascii_lowercase();
+                    let name_allowed = allowed_tool_names.is_empty()
+                        || allowed_tool_names.contains(lowered_name.as_str());
+                    if name.len() > 128 || !name_allowed {
+                        continue;
+                    }
+
+                    let call_id = read_trimmed_string(row.get("call_id"))
+                        .or_else(|| read_trimmed_string(row.get("tool_call_id")))
+                        .or_else(|| read_trimmed_string(row.get("id")));
+                    if let Some(value) = call_id {
+                        valid_call_ids.insert(value);
+                    }
+                    normalized.push(entry.clone());
+                    continue;
+                }
+
+                if matches!(
+                    ty.as_str(),
+                    "function_call_output" | "tool_result" | "tool_message"
+                ) {
+                    let call_id = read_trimmed_string(row.get("call_id"))
+                        .or_else(|| read_trimmed_string(row.get("tool_call_id")))
+                        .or_else(|| read_trimmed_string(row.get("tool_use_id")))
+                        .or_else(|| read_trimmed_string(row.get("id")));
+                    let Some(call_id) = call_id else {
+                        continue;
+                    };
+                    if !valid_call_ids.contains(call_id.as_str()) {
+                        continue;
+                    }
+                    normalized.push(entry.clone());
+                    continue;
+                }
+
+                normalized.push(entry.clone());
+            }
+
+            Some(filter_orphan_responses_tool_outputs(normalized))
         }
         Value::String(text) => {
             if text.trim().is_empty() {

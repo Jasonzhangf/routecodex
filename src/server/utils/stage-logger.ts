@@ -26,6 +26,7 @@ const RELEASE_SUMMARY_BREAKDOWN_SCOPES = [
   'provider.metadata_attach',
   'provider.send',
   'provider.response_normalize',
+  'client.inject_wait',
   'hub.response',
   'response'
 ] as const;
@@ -536,7 +537,9 @@ function shouldTrackTimingBreakdownScope(stage: string): boolean {
     || normalized === 'response.dispatch.start'
     || normalized === 'response.completed'
     || normalized === 'provider.send.start'
-    || normalized === 'provider.send.completed';
+    || normalized === 'provider.send.completed'
+    || normalized === 'client.inject_wait.start'
+    || normalized === 'client.inject_wait.completed';
 }
 
 function clearRequestStageState(requestId: string): void {

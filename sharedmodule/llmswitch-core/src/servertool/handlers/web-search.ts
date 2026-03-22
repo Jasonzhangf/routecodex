@@ -45,6 +45,19 @@ interface WebSearchBackendResult {
 }
 
 const FLOW_ID = 'web_search_flow';
+const LEGACY_TOOL_NAME = 'web_search';
+const SERVERTOOL_TOOL_NAME = 'websearch';
+
+function resolveWebSearchToolName(raw: unknown): string {
+  const normalized = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+  if (normalized === 'websearch' || normalized === 'web-search') {
+    return SERVERTOOL_TOOL_NAME;
+  }
+  if (normalized === LEGACY_TOOL_NAME) {
+    return LEGACY_TOOL_NAME;
+  }
+  return SERVERTOOL_TOOL_NAME;
+}
 
 const handler: ServerToolHandler = async (ctx: ServerToolHandlerContext): Promise<ServerToolHandlerPlan | null> => {
   const toolCall = ctx.toolCall;
@@ -99,9 +112,11 @@ const handler: ServerToolHandler = async (ctx: ServerToolHandlerContext): Promis
       if (!chosen || !chosen.id || !chosen.providerKey) {
         return null;
       }
+      const toolName = resolveWebSearchToolName(toolCall.name);
       const patched = injectWebSearchToolResult(
         ctx.base,
         toolCall,
+        toolName,
         { id: chosen.id, providerKey: chosen.providerKey },
         query,
         backendResult.result
@@ -125,7 +140,7 @@ const handler: ServerToolHandler = async (ctx: ServerToolHandlerContext): Promis
                   ops: [
                     { op: 'append_assistant_message' },
                     { op: 'append_tool_messages_from_tool_outputs' },
-                    { op: 'drop_tool_by_name', name: 'web_search' }
+                    { op: 'drop_tool_by_name', name: toolName }
                   ]
                 }
               }
@@ -295,7 +310,7 @@ function resolveEnvServerSideToolsEnabled(): boolean {
     (process.env.ROUTECODEX_SERVER_SIDE_TOOLS || process.env.RCC_SERVER_SIDE_TOOLS || '').trim().toLowerCase();
   if (!raw) return false;
   if (raw === '1' || raw === 'true' || raw === 'yes') return true;
-  if (raw === 'web_search') return true;
+  if (raw === 'web_search' || raw === 'websearch') return true;
   return false;
 }
 
@@ -905,6 +920,7 @@ async function executeQwenWebSearchViaProvider(args: {
 function injectWebSearchToolResult(
   base: JsonObject,
   toolCall: ToolCall,
+  toolName: string,
   engine: WebSearchEngineConfig,
   query: string,
   backendResult: WebSearchBackendResult
@@ -925,7 +941,7 @@ function injectWebSearchToolResult(
     ...existingOutputs,
     {
       tool_call_id: toolCall.id,
-      name: 'web_search',
+      name: toolName,
       content: JSON.stringify({
         engine: engine.id,
         query,
@@ -965,7 +981,7 @@ function buildToolMessages(chatResponse: JsonObject): JsonObject[] {
     if (!toolCallId) continue;
     const name = typeof (entry as { name?: unknown }).name === 'string'
       ? ((entry as { name: string }).name as string)
-      : 'web_search';
+      : SERVERTOOL_TOOL_NAME;
     const rawContent = (entry as { content?: unknown }).content;
     let contentText: string;
     if (typeof rawContent === 'string') {

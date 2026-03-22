@@ -50,7 +50,10 @@ const FOLLOWUP_SESSION_HEADER_KEYS = new Set([
 
 const CONTEXT_LENGTH_MESSAGE_HINTS = [
   'context_length_exceeded',
+  'context_window_exceeded',
+  'model_context_window_exceeded',
   'context length exceeded',
+  'context window exceeded',
   "model's maximum context length",
   'maximum context length',
   'max context length',
@@ -91,10 +94,18 @@ function isContextLengthExceededError(
   const normalizedMessage = message.toLowerCase();
   const normalizedUpstream = typeof upstreamCode === 'string' ? upstreamCode.trim().toLowerCase() : '';
   const normalizedReason = typeof detailReason === 'string' ? detailReason.trim().toLowerCase() : '';
-  if (normalizedUpstream.includes('context_length_exceeded')) {
+  if (
+    normalizedUpstream.includes('context_length_exceeded') ||
+    normalizedUpstream.includes('context_window_exceeded') ||
+    normalizedUpstream.includes('model_context_window_exceeded')
+  ) {
     return true;
   }
-  if (normalizedReason === 'context_length_exceeded') {
+  if (
+    normalizedReason === 'context_length_exceeded' ||
+    normalizedReason === 'context_window_exceeded' ||
+    normalizedReason === 'model_context_window_exceeded'
+  ) {
     return true;
   }
   return CONTEXT_LENGTH_MESSAGE_HINTS.some((hint) => normalizedMessage.includes(hint));
@@ -316,6 +327,29 @@ export async function convertProviderResponseIfNeeded(
   if (!body || typeof body !== 'object') {
     return options.response;
   }
+  let clientInjectWaitMs = 0;
+  const attachTimingBreakdown = (result: PipelineExecutionResult): PipelineExecutionResult => {
+    if (!(clientInjectWaitMs > 0)) {
+      return result;
+    }
+    const existing = result.timingBreakdown;
+    const nextClientInjectWaitMs = Math.max(
+      0,
+      Math.floor((existing?.clientInjectWaitMs ?? 0) + clientInjectWaitMs)
+    );
+    const nextHubResponseExcludedMs = Math.max(
+      0,
+      Math.floor((existing?.hubResponseExcludedMs ?? 0) + clientInjectWaitMs)
+    );
+    return {
+      ...result,
+      timingBreakdown: {
+        ...existing,
+        clientInjectWaitMs: nextClientInjectWaitMs,
+        hubResponseExcludedMs: nextHubResponseExcludedMs
+      }
+    };
+  };
   try {
     const metadataBag = asRecord(options.pipelineMetadata);
     const originalModelId = extractClientModelId(metadataBag, options.originalRequest);
@@ -562,6 +596,7 @@ export async function convertProviderResponseIfNeeded(
       body?: Record<string, unknown>;
       metadata?: Record<string, unknown>;
     }): Promise<{ ok: boolean; reason?: string }> => {
+      const clientInjectAttemptStartedAt = Date.now();
       const clientInjectStartMs = Date.now();
       logPipelineStage('convert.client_inject.start', injectOpts.requestId, {
         entryEndpoint: injectOpts.entryEndpoint || options.entryEndpoint || entry
@@ -607,6 +642,7 @@ export async function convertProviderResponseIfNeeded(
         requestBody,
         requestId: injectOpts.requestId
       });
+      clientInjectWaitMs += Math.max(0, Date.now() - clientInjectAttemptStartedAt);
       if (injectResult.clientInjectOnlyHandled) {
         logPipelineStage('convert.client_inject.completed', injectOpts.requestId, {
           entryEndpoint: nestedEntry,
@@ -665,15 +701,15 @@ export async function convertProviderResponseIfNeeded(
       if (finishReason) {
         body[STREAM_LOG_FINISH_REASON_KEY] = finishReason;
       }
-      return {
+      return attachTimingBreakdown({
         ...options.response,
         body
-      };
+      });
     }
-    return {
+    return attachTimingBreakdown({
       ...options.response,
       body: converted.body ?? body
-    };
+    });
   } catch (error) {
     const err = error as Error | unknown;
     const message = err instanceof Error ? err.message : String(err ?? 'Unknown error');
@@ -707,8 +743,8 @@ export async function convertProviderResponseIfNeeded(
       detailReason
     );
 
-    if (isSseDecodeError || isServerToolFollowupError) {
-      if (isSseDecodeError) {
+    if (isSseDecodeError || isServerToolFollowupError || isContextLengthExceeded) {
+      if (isSseDecodeError || isContextLengthExceeded) {
         remapBridgeSseErrorToHttp(errRecord, message);
       }
       const normalizedCode = typeof errRecord.code === 'string' ? errRecord.code : errCode;

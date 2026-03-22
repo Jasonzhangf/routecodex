@@ -1,5 +1,6 @@
 import type { PipelineExecutionInput } from '../../handlers/types.js';
 import type { HubPipeline } from './types.js';
+import { createSnapshotRecorder as bridgeCreateSnapshotRecorder } from '../../../modules/llmswitch/bridge.js';
 import { asRecord } from './provider-utils.js';
 
 export type HubPipelineResult = {
@@ -40,6 +41,27 @@ export async function runHubPipeline(
   input: PipelineExecutionInput,
   metadata: Record<string, unknown>
 ): Promise<HubPipelineResult> {
+  let stageRecorder: unknown;
+  try {
+    const providerProtocol =
+      typeof metadata.providerProtocol === 'string' && metadata.providerProtocol.trim()
+        ? metadata.providerProtocol.trim()
+        : input.entryEndpoint.includes('/v1/responses')
+          ? 'openai-responses'
+          : input.entryEndpoint.includes('/v1/messages')
+            ? 'anthropic-messages'
+            : 'openai-chat';
+    stageRecorder = await bridgeCreateSnapshotRecorder(
+      {
+        requestId: input.requestId,
+        providerProtocol
+      },
+      input.entryEndpoint
+    );
+  } catch {
+    stageRecorder = undefined;
+  }
+
   const payload = asRecord(input.body);
   const pipelineInput: PipelineExecutionInput & {
     payload: Record<string, unknown>;
@@ -49,7 +71,13 @@ export async function runHubPipeline(
     ...input,
     id: input.requestId,
     endpoint: input.entryEndpoint,
-    metadata,
+    metadata:
+      stageRecorder && typeof stageRecorder === 'object'
+        ? {
+            ...metadata,
+            __hubStageRecorder: stageRecorder
+          }
+        : metadata,
     payload
   };
   const result = await hubPipeline.execute(pipelineInput);

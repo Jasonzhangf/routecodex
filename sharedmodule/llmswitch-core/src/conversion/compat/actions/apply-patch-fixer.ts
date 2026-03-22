@@ -1,29 +1,23 @@
 import { BridgeAction, registerBridgeAction } from '../../bridge-actions.js';
-import { ensureMessagesArray } from '../../bridge-message-utils.js';
-import { validateToolCall } from '../../../tools/tool-registry.js';
+import { fixApplyPatchToolCallsWithNative } from '../../../router/virtual-router/engine-selection/native-compat-action-semantics.js';
 
 const fixApplyPatchAction: BridgeAction = (ctx) => {
-  const messages = ensureMessagesArray(ctx.state);
-  for (const message of messages) {
-    if (message.role !== 'assistant') continue;
-    if (!Array.isArray(message.tool_calls)) continue;
-
-    for (const toolCall of message.tool_calls) {
-      if (toolCall.type !== 'function') continue;
-      const fn = toolCall.function;
-      if (!fn || fn.name !== 'apply_patch') continue;
-
-      const rawArgs = fn.arguments;
-      if (typeof rawArgs !== 'string') continue;
-
-      const validation = validateToolCall('apply_patch', rawArgs);
-      if (validation?.ok && typeof validation.normalizedArgs === 'string') {
-        if (validation.normalizedArgs !== rawArgs) {
-          fn.arguments = validation.normalizedArgs;
-          (toolCall as any)._fixed_apply_patch = true;
-        }
-      }
-    }
+  const state = ctx.state as unknown as {
+    messages?: Array<Record<string, unknown>>;
+    input?: Array<Record<string, unknown>>;
+  };
+  const messages = Array.isArray(state.messages) ? state.messages : [];
+  if (!Array.isArray(state.messages)) {
+    state.messages = messages;
+  }
+  const input = Array.isArray(state.input) ? state.input : undefined;
+  const fixed = fixApplyPatchToolCallsWithNative({
+    messages,
+    ...(input ? { input } : {})
+  });
+  state.messages = fixed.messages;
+  if (Array.isArray(fixed.input)) {
+    state.input = fixed.input;
   }
 };
 

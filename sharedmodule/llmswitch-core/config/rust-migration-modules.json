@@ -553,6 +553,126 @@
       ],
       "lineThreshold": 95,
       "branchThreshold": 95
+    },
+    {
+      "id": "hub.shared.protocol-field-allowlists",
+      "preparedForShadow": true,
+      "paths": [
+        "src/conversion/protocol-field-allowlists.ts",
+        "src/conversion/hub/policy/protocol-spec.ts",
+        "dist/conversion/protocol-field-allowlists.js",
+        "dist/conversion/hub/policy/protocol-spec.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "hub.tool-governance.engine-rules",
+      "preparedForShadow": true,
+      "paths": [
+        "src/conversion/hub/tool-governance/engine.ts",
+        "src/conversion/hub/tool-governance/rules.ts",
+        "dist/conversion/hub/tool-governance/engine.js",
+        "dist/conversion/hub/tool-governance/rules.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "hub.snapshot-hooks-utils-recorder",
+      "preparedForShadow": true,
+      "paths": [
+        "src/conversion/snapshot-utils.ts",
+        "src/conversion/hub/snapshot-recorder.ts",
+        "dist/conversion/snapshot-utils.js",
+        "dist/conversion/hub/snapshot-recorder.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "hub.semantic-mappers.operation-table-family",
+      "preparedForShadow": true,
+      "paths": [
+        "src/conversion/hub/operation-table/semantic-mappers/responses-mapper.ts",
+        "src/conversion/hub/operation-table/semantic-mappers/responses-submit-tool-outputs.ts",
+        "src/conversion/hub/operation-table/semantic-mappers/anthropic-mapper.ts",
+        "src/conversion/hub/operation-table/semantic-mappers/anthropic-thinking-config.ts",
+        "src/conversion/hub/operation-table/semantic-mappers/anthropic-semantics-audit.ts",
+        "src/conversion/hub/operation-table/semantic-mappers/gemini-mapper.ts",
+        "src/conversion/hub/operation-table/semantic-mappers/gemini-antigravity-request.ts",
+        "src/conversion/hub/operation-table/semantic-mappers/gemini-system-semantics.ts",
+        "src/conversion/hub/operation-table/semantic-mappers/gemini-thinking-config.ts",
+        "src/conversion/hub/operation-table/semantic-mappers/gemini-tool-output.ts",
+        "src/conversion/hub/operation-table/semantic-mappers/gemini-mapping-audit.ts",
+        "src/conversion/hub/operation-table/semantic-mappers/gemini-chat-request-helpers.ts",
+        "src/conversion/hub/operation-table/semantic-mappers/gemini-semantics-state.ts",
+        "dist/conversion/hub/operation-table/semantic-mappers/responses-mapper.js",
+        "dist/conversion/hub/operation-table/semantic-mappers/responses-submit-tool-outputs.js",
+        "dist/conversion/hub/operation-table/semantic-mappers/anthropic-mapper.js",
+        "dist/conversion/hub/operation-table/semantic-mappers/anthropic-thinking-config.js",
+        "dist/conversion/hub/operation-table/semantic-mappers/anthropic-semantics-audit.js",
+        "dist/conversion/hub/operation-table/semantic-mappers/gemini-mapper.js",
+        "dist/conversion/hub/operation-table/semantic-mappers/gemini-antigravity-request.js",
+        "dist/conversion/hub/operation-table/semantic-mappers/gemini-system-semantics.js",
+        "dist/conversion/hub/operation-table/semantic-mappers/gemini-thinking-config.js",
+        "dist/conversion/hub/operation-table/semantic-mappers/gemini-tool-output.js",
+        "dist/conversion/hub/operation-table/semantic-mappers/gemini-mapping-audit.js",
+        "dist/conversion/hub/operation-table/semantic-mappers/gemini-chat-request-helpers.js",
+        "dist/conversion/hub/operation-table/semantic-mappers/gemini-semantics-state.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "hub.semantic-mappers.responses-operation-table",
+      "preparedForShadow": true,
+      "paths": [
+        "src/conversion/hub/operation-table/semantic-mappers/responses-mapper.ts",
+        "src/conversion/hub/operation-table/semantic-mappers/responses-submit-tool-outputs.ts",
+        "dist/conversion/hub/operation-table/semantic-mappers/responses-mapper.js",
+        "dist/conversion/hub/operation-table/semantic-mappers/responses-submit-tool-outputs.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "hub.semantic-mappers.anthropic-operation-table",
+      "preparedForShadow": true,
+      "paths": [
+        "src/conversion/hub/operation-table/semantic-mappers/anthropic-mapper.ts",
+        "src/conversion/hub/operation-table/semantic-mappers/anthropic-thinking-config.ts",
+        "src/conversion/hub/operation-table/semantic-mappers/anthropic-semantics-audit.ts",
+        "dist/conversion/hub/operation-table/semantic-mappers/anthropic-mapper.js",
+        "dist/conversion/hub/operation-table/semantic-mappers/anthropic-thinking-config.js",
+        "dist/conversion/hub/operation-table/semantic-mappers/anthropic-semantics-audit.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
+    },
+    {
+      "id": "hub.semantic-mappers.gemini-operation-table",
+      "preparedForShadow": true,
+      "paths": [
+        "src/conversion/hub/operation-table/semantic-mappers/gemini-mapper.ts",
+        "src/conversion/hub/operation-table/semantic-mappers/gemini-antigravity-request.ts",
+        "src/conversion/hub/operation-table/semantic-mappers/gemini-system-semantics.ts",
+        "src/conversion/hub/operation-table/semantic-mappers/gemini-thinking-config.ts",
+        "src/conversion/hub/operation-table/semantic-mappers/gemini-tool-output.ts",
+        "src/conversion/hub/operation-table/semantic-mappers/gemini-mapping-audit.ts",
+        "src/conversion/hub/operation-table/semantic-mappers/gemini-chat-request-helpers.ts",
+        "src/conversion/hub/operation-table/semantic-mappers/gemini-semantics-state.ts",
+        "dist/conversion/hub/operation-table/semantic-mappers/gemini-mapper.js",
+        "dist/conversion/hub/operation-table/semantic-mappers/gemini-antigravity-request.js",
+        "dist/conversion/hub/operation-table/semantic-mappers/gemini-system-semantics.js",
+        "dist/conversion/hub/operation-table/semantic-mappers/gemini-thinking-config.js",
+        "dist/conversion/hub/operation-table/semantic-mappers/gemini-tool-output.js",
+        "dist/conversion/hub/operation-table/semantic-mappers/gemini-mapping-audit.js",
+        "dist/conversion/hub/operation-table/semantic-mappers/gemini-chat-request-helpers.js",
+        "dist/conversion/hub/operation-table/semantic-mappers/gemini-semantics-state.js"
+      ],
+      "lineThreshold": 95,
+      "branchThreshold": 95
     }
   ]
 }

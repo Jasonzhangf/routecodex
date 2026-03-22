@@ -1,4 +1,4 @@
-export const DEFAULT_DELIVERY_HISTORY_LIMIT = 3;
+export const DEFAULT_DELIVERY_HISTORY_LIMIT = 10;
 
 function normalizeText(input: string): string {
   return String(input || "").replace(/\r\n/g, "\n");

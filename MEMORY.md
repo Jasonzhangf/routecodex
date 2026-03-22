@@ -2,8 +2,183 @@
 
 ## Skills 与调试工作流
 
+- 2026-03-22: apply_patch 兼容修复第二轮收口（routecodex-273）：根因是 `compat_fix_apply_patch::fix_apply_patch_tool_calls_json` 在 payload 缺少 `messages` 时会提前返回，导致 `input.function_call` 路径根本未修复；同时 add-file 归一化对行末统一 `trim_end` 会放大空行/尾空白语义偏差。修复策略：仅在 Rust 真源改造——(1) messages/input 双路径独立处理，不再依赖 messages 存在；(2) arguments 支持 string/object/array wrapper 语义提取后统一归一；(3) add-file 归一化保留空行（`\n+\n`）与原始内容，不再对非 header 内容做 `trim_end`。验证闭环：replay original-shape + control、Jest apply-patch 三件套、Rust compat/blankline 单测、sharedmodule build:ci、根仓 build:dev、install:release 全部通过。  
+
+Tags: apply-patch, compatibility, input-function-call, blank-line, wrapper-shape, rust-core, no-ts-feature, routecodex-273, replay, build-dev, install-release
+
+- 2026-03-22: 修复 apply_patch 兼容性回归（避免多次重试）：在 Rust `compat_fix_apply_patch` 与 `resp_process_stage1_tool_governance` 中补齐两类参数形态——(1) `apply_patch *** Begin Patch...` 命令前缀；(2) 包裹对象 `{\"ok\":true,\"result\":{\"command\":\"apply_patch ...\"}}`。新增 `trim_to_patch_window`（从首个 patch marker 截取并裁掉尾随噪声）与 `command/cmd/script + nested result/payload/data/tool_input/arguments` 递归提取，统一产出 `{patch,input}`。回归验证：Rust `cargo test -p router-hotpath-napi apply_patch`（21 通过）；Jest `apply-patch-fixer.test.ts` + `apply-patch-errorsamples-regression.spec.ts`（全绿）；errorsamples triage 后 `verify-codex-error-samples` 变为无 shape regression。  
+
+Tags: apply-patch, compatibility, semantic-map, command-wrapper, nested-result-command, no-retry-loop, errorsamples, rust-core, tool-governance
+
+- 2026-03-21: 用户明确要求“不要中断汇报后停住”，执行层新增 drudge 周期续跑：`rust-continue-10m`（`*/10 * * * *`）用于在报告/切片后自动拉起下一轮推进。可复用结论：当任务是长链 Rust 化并且用户要求连续推进时，必须用 alarm 固化“报告后自动继续”，避免人工记忆导致停顿。
+
+Tags: execution-rhythm, drudge-alarm, continuous-execution, rust-migration, user-preference, no-stop
+
+- 2026-03-21: `routecodex-3.11.7` 完成 HubPipeline residual helper 收口：chat-process entry 删除 `coerceStandardizedRequestFromPayload` TS 转发壳并改为 direct-native `coerceStandardizedRequestFromPayloadWithNative(...)`，同时移除已无引用的 `hub-pipeline-orchestration-helpers.ts`。可复用结论：当 helper 仅负责 native 参数转发且调用点唯一时，应直接在调用点使用 native 能力并删除孤儿 helper 文件，避免“薄壳+孤儿”长期残留。验证链：`sharedmodule npm run build`（matrix 全绿）+ 根仓 `npm run build:min` + `npm run install:global` + `npm run jest:run -- --runTestsByPath tests/servertool/review-followup.spec.ts`（routecodex 0.90.633 / llms 0.6.4282）。
+
+Tags: rust-migration, routecodex-3.11.7, hub-pipeline, residual-helper, direct-native, orphan-helper-removal, thin-shell-cleanup, build-matrix, install-global, review-followup
+
+- 2026-03-21: `routecodex-3.11.7` 继续 HubPipeline orchestration thin-shell 收口，删除 `prepareOutboundRoutingExecution` 并把 outbound 执行编排内联到 `hub-pipeline-route-and-outbound.ts`。可复用结论：当 helper 仅有单调用点且包含“可读的顺序编排逻辑”时，优先删壳并就地保留 guard/异常文案，可减少抽象层同时不损失可维护性。验证链：`sharedmodule npm run build`（matrix 全绿）+ 根仓 `npm run build:min` + `npm run install:global` + `npm run jest:run -- --runTestsByPath tests/servertool/review-followup.spec.ts`（routecodex 0.90.632 / llms 0.6.4278）。
+
+Tags: rust-migration, routecodex-3.11.7, hub-pipeline, orchestration, thin-shell, outbound-execution, inline-orchestration, passthrough-guard, build-matrix, install-global, review-followup
+
+- 2026-03-21: `routecodex-3.11.7` 继续 HubPipeline orchestration thin-shell 收口，删除 `emitVirtualRouterHitLog` 转发壳并将日志调用内联到 route/outbound 调用点。可复用结论：对“单调用点日志转发 helper”应优先内联并保留 try/catch 隔离，避免 helper 层成为无意义抽象且降低调用链跳转成本。验证链：`sharedmodule npm run build`（matrix 全绿）+ 根仓 `npm run build:min` + `npm run install:global` + `npm run jest:run -- --runTestsByPath tests/servertool/review-followup.spec.ts`（routecodex 0.90.631 / llms 0.6.4276）。
+
+Tags: rust-migration, routecodex-3.11.7, hub-pipeline, orchestration, thin-shell, virtual-router-hit-log, inline-logging, try-catch-guard, build-matrix, install-global, review-followup
+
+- 2026-03-21: `routecodex-3.11.7` 继续 HubPipeline orchestration thin-shell 收口，移除 `buildHubPipelineResultMetadata` TS 转发壳，`hub-pipeline-route-and-outbound.ts` 改为 direct-native `buildHubPipelineResultMetadataWithNative`。可复用结论：对“单一调用点的纯转发包装”应直接删壳并在调用点保留必要字段归一（如 policy mode 默认值），避免 helper 层继续成为语义漂移入口。验证链：`sharedmodule npm run build`（matrix 全绿）+ 根仓 `npm run build:min` + `npm run install:global` + `npm run jest:run -- --runTestsByPath tests/servertool/review-followup.spec.ts`（routecodex 0.90.630 / llms 0.6.4274）。
+
+Tags: rust-migration, routecodex-3.11.7, hub-pipeline, orchestration, thin-shell, direct-native, result-metadata, policy-mode-normalization, build-matrix, install-global, review-followup
+
+- 2026-03-21: `routecodex-3.11.7` 继续 HubPipeline orchestration thin-shell 收口，完成 route/outbound metadata+snapshot 四个编排 helper 清理：删除 `syncSessionIdentifiersToMetadata` / `buildRouterMetadataInputFromContext` / `buildCapturedChatRequestSnapshot` / `applyHasImageAttachmentFlag`，调用点统一改为 direct-native（对应 `WithNative` 四项）。可复用结论：对于“native 结果需要保留调用方对象引用”的路径，不应保留额外 TS 转发层，应在调用点执行最小原地回写（metadata）与 clone 输入（snapshot）后直连 native，既保语义又减少编排漂移面。验证链：`sharedmodule npm run build`（matrix 全绿）+ 根仓 `npm run build:min` + `npm run install:global` + `npm run jest:run -- --runTestsByPath tests/servertool/review-followup.spec.ts`（routecodex 0.90.629 / llms 0.6.4272）。
+
+Tags: rust-migration, routecodex-3.11.7, hub-pipeline, orchestration, thin-shell, direct-native, metadata, captured-chat-request, in-place-rewrite, clone-semantics, build-matrix, install-global, review-followup
+
+- 2026-03-21: `routecodex-3.11.7` 继续 HubPipeline residual helper native 化，完成 adapter-context `clientDisconnected` 判定下沉：新增 Rust NAPI `resolve_adapter_context_client_connection_state_json`，统一按 `clientConnectionState.disconnected` + `clientDisconnected(true/"true")` 覆盖规则输出标准化信号；TS 新增 `resolveAdapterContextClientConnectionStateWithNative`，`hub-pipeline-adapter-context.ts` 改为 direct-native 读取 `clientDisconnected`，同时保留 `clientConnectionState` 原对象透传语义。可复用结论：对“状态判定 + 覆盖优先级”这类纯语义分支，优先下沉 native 输出稳定信号，再由 TS 仅做赋值编排，可减少入口文件分支散落并避免后续规则漂移。验证链：`cargo test -p router-hotpath-napi resolve_adapter_context_client_connection_state` + `sharedmodule npm run build`（matrix 全绿）+ 根仓 `npm run build:min` + `npm run install:global` + `npm run jest:run -- --runTestsByPath tests/servertool/review-followup.spec.ts`（routecodex 0.90.619 / llms 0.6.4250）。
+
+Tags: rust-migration, routecodex-3.11.7, hub-pipeline, adapter-context, client-disconnected, native-primary, shape-signal, precedence-rules, direct-native, required-export-gate, build-matrix, install-global, review-followup
+
+- 2026-03-21: `routecodex-3.11.9` 继续 provider-response native-primary 收口，完成 clock reservation context 归一化 native 化：新增 Rust NAPI `resolve_clock_reservation_from_context_json`，将 `context.__clockReservation` 的字段校验与标准化（`reservationId/sessionId/taskIds/reservedAtMs`）下沉到 native 真源；TS 新增 `resolveClockReservationFromContextWithNative`，`maybeCommitClockReservationFromContext` 改为 direct-native 读取 reservation 后再 commit。可复用结论：对于“异步提交前的 payload 形状校验”逻辑，优先以 native 输出稳定对象或 null，再由 TS 编排执行副作用，能同时保证 fail-fast 和语义不漂移（本例保留 `reservedAtMs` 非法时回落当前时间）。验证链：`cargo test -p router-hotpath-napi resolve_clock_reservation_from_context` + `sharedmodule npm run build`（matrix 全绿）+ 根仓 `npm run build:min` + `npm run install:global` + `npm run jest:run -- --runTestsByPath tests/servertool/review-followup.spec.ts`（routecodex 0.90.618 / llms 0.6.4248）。
+
+Tags: rust-migration, routecodex-3.11.9, provider-response, clock-reservation, native-primary, shape-normalization, direct-native, required-export-gate, review-followup, build-matrix, install-global
+
+- 2026-03-20: `routecodex-3.11.7` 继续 HubPipeline residual helper native 化，完成 `req_inbound` nodeResult 组装下沉：新增 Rust NAPI `build_req_inbound_node_result_json` / `build_req_inbound_skipped_node_json`，并新增 TS wrapper `buildReqInboundNodeResultWithNative` / `buildReqInboundSkippedNodeWithNative`；`hub-pipeline-execute-request-stage-inbound.ts` 与 `hub-pipeline-execute-chat-process-entry.ts` 改为统一调用 `appendReqInboundNodeResult` / `appendReqInboundSkippedNode`，移除两处手拼 `req_inbound` 节点结构。可复用结论：对“同一 stage 节点在多入口重复组装”的路径，应抽到 native builder + TS 编排 helper，保证节点 shape 与默认字段（如 skipped reason/dataProcessed）全路径一致。验证链：`cargo test -p router-hotpath-napi req_inbound_node_result` + `cargo test -p router-hotpath-napi req_inbound_skipped_node` + `sharedmodule npm run build`（matrix 全绿）+ 根仓 `npm run build:min` + `npm run install:global`（routecodex 0.90.617 / llms 0.6.4246）。
+
+Tags: rust-migration, routecodex-3.11.7, hub-pipeline, req-inbound-node-result, skipped-node, native-primary, thin-shell, stage-shape-consistency, required-export-gate, build-matrix, install-global
+
+- 2026-03-20: `routecodex-3.11.7` 继续 HubPipeline residual helper native 化，完成 chat-process governance nodeResult 组装下沉：新增 Rust NAPI `build_tool_governance_node_result_json` / `build_passthrough_governance_skipped_node_json`，并新增 TS wrapper `buildToolGovernanceNodeResultWithNative` / `buildPassthroughGovernanceSkippedNodeWithNative`；`hub-pipeline-chat-process-governance-utils.ts` 的 `appendToolGovernanceNodeResult` / `appendPassthroughGovernanceSkippedNode` 改为 direct-native。可复用结论：对“双入口共用且形状固定”的 pipeline nodeResult 组装，应优先下沉 native 真源并在 TS 仅保留 push 编排，避免 chat-entry/request-stage 任一路径后续出现字段漂移。同时补齐上一切片 `merge_clock_reservation_into_metadata_json` 的验证闭环。验证链：`cargo test -p router-hotpath-napi tool_governance_node_result` + `cargo test -p router-hotpath-napi passthrough_governance_skipped_node` + `sharedmodule npm run build`（matrix 全绿）+ 根仓 `npm run build:min` + `npm run install:global`（routecodex 0.90.616 / llms 0.6.4244）。
+
+Tags: rust-migration, routecodex-3.11.7, hub-pipeline, governance-node-result, passthrough-skip-node, native-primary, thin-shell, required-export-gate, clock-reservation, build-matrix, install-global
+
+- 2026-03-20: `routecodex-3.11.7` 继续 HubPipeline residual helper native 化：新增 Rust NAPI `coerce_standardized_request_from_payload_json`，把 chat-process entry 的标准化请求组装（`model/messages/tools/parameters/metadata/semantics/rawPayload`）下沉到 native 真源；TS 新增 `coerceStandardizedRequestFromPayloadWithNative`，`hub-pipeline-request-normalization-utils.ts` 改为 direct-native 薄壳。补齐单测覆盖 metadata 覆盖顺序、`semantics.tools` 兜底与 `rawPayload.parameters` 非空保留规则，并加入 native required export gate。验证链：`cargo test -p router-hotpath-napi coerce_standardized_request_from_payload` + `sharedmodule npm run build`（matrix 全绿）+ 根仓 `npm run build:min` + `npm run install:global`（routecodex 0.90.614 / llms 0.6.4238）。
+
+Tags: rust-migration, routecodex-3.11.7, hub-pipeline, request-normalization, chat-process-entry, coerce-standardized-request, native-primary, thin-shell, required-export-gate, build-matrix, install-global
+
+- 2026-03-20: `routecodex-3.11.9` 在 provider-response context helper native 聚合后继续做薄壳收口：删除 `provider-response-helpers.ts` 中 5 个未使用导出（`resolveIsServerToolFollowup` / `resolveClientProtocolForResponse` / `resolveToolSurfaceShadowEnabledFromEnv` / `resolveDisplayModel` / `resolveClientFacingRequestId`），并移除冗余 `resolveHubClientProtocolWithNative` 依赖。可复用结论：当 native 聚合入口已成为唯一真源时，应立即清理同域“别名/转发”导出，避免后续调用点重新分叉语义。验证链：`sharedmodule npm run build`（matrix 全绿）+ 根仓 `npm run build:min` + `npm run install:global`（routecodex 0.90.613 / llms 0.6.4236）。
+
+Tags: rust-migration, routecodex-3.11.9, provider-response, thin-shell-cleanup, dead-export-removal, native-primary, ssot, build-matrix, install-global
+
+- 2026-03-20: `routecodex-3.11.9` 继续 provider-response native-primary 收口：新增 Rust NAPI `resolve_provider_response_context_helpers_json`，统一输出 `isServerToolFollowup / toolSurfaceShadowEnabled / displayModel / clientFacingRequestId`；TS 新增 `resolveProviderResponseContextHelpersWithNative` + `resolveProviderResponseContextSignals`，`provider-response.ts` 改为单次聚合读取 context helper，减少重复分支并保持原优先级语义。并将新能力加入 native required exports gate。验证链：`cargo test -p router-hotpath-napi resolve_provider_response_context_helpers` + `sharedmodule npm run build`（matrix 全绿）+ 根仓 `npm run build:min` + `npm run install:global`（routecodex 0.90.611 / llms 0.6.4230）。
+
+Tags: rust-migration, routecodex-3.11.9, provider-response, context-helpers, followup, tool-surface-shadow, display-model, request-id, native-primary, required-export-gate, build-matrix, install-global
+
+- 2026-03-20: `routecodex-3.11.7` 继续 HubPipeline orchestration residual helper 收口：新增 Rust `apply_has_image_attachment_flag(_json)` 与 `sync_session_identifiers_to_metadata(_json)`，并将 TS `applyHasImageAttachmentFlag` / `syncSessionIdentifiersToMetadata` 收敛为 native thin adapter；为保持调用语义不变，adapter 采用“native 生成新 metadata 后原地回写”的方式，确保对象引用不变（避免调用点丢失同一 metadata 引用链）。同轮把上述能力与前序 metadata builder 能力一起纳入 native required exports gate，避免旧 binding 漏导出导致运行时才失败。验证链：`cargo test -p router-hotpath-napi test_apply_has_image_attachment_flag` + `cargo test -p router-hotpath-napi test_sync_session_identifiers_to_metadata` + `sharedmodule npm run build`（matrix 全绿）+ 根仓 `npm run build:min` + `npm run install:global`（routecodex 0.90.606 / llms 0.6.4224）。
+
+Tags: rust-migration, routecodex-3.11.7, hub-pipeline, metadata, hasImageAttachment, sessionId, conversationId, native-primary, thin-shell, in-place-rewrite, native-export-gate, build-matrix, install-global
+
+- 2026-03-20: `routecodex-3.11.7` 继续 HubPipeline route-select 收口：新增 Rust 能力 `build_router_metadata_input_json`（TS `buildRouterMetadataInputWithNative`），把 `RouterMetadataInput` 组装整体下沉到 native，一次性汇总基础路由字段 + stop-message metadata + runtime flags（`disableStickyRoutes`）+ estimated tokens gate（`includeEstimatedInputTokens`）+ session/responsesResume/serverToolRequired。`buildRouterMetadataInputFromContext` 收敛为 thin adapter，不再在 TS 层手拼 metadata 细节。验证链：`cargo test -p router-hotpath-napi test_build_router_metadata_input` + `cargo test -p router-hotpath-napi test_resolve_router_metadata_runtime_flags` + `sharedmodule npm run build`（matrix 全绿）+ 根仓 `npm run build:min` + `npm run install:global`（routecodex 0.90.601 / llms 0.6.4213）。
+
+Tags: rust-migration, routecodex-3.11.7, hub-pipeline, router-metadata-input, native-primary, stop-message-metadata, disableStickyRoutes, estimatedInputTokens, thin-shell, build-matrix, install-global
+
+- 2026-03-20: `routecodex-3.11.7` 继续 HubPipeline 编排 native 收口：新增 Rust NAPI 能力 `resolve_router_metadata_runtime_flags_json`（TS 侧 `resolveRouterMetadataRuntimeFlagsWithNative`），将 route-select metadata 中 `disableStickyRoutes` 与 `estimatedInputTokens` 的读取从 TS helper 下沉到 native 真源；`buildRouterMetadataInputFromContext` 直接复用 native flags + stop-message metadata 合成 `RouterMetadataInput`，语义不变。补齐 Rust 单测覆盖提取/忽略分支。验证链：`sharedmodule npm run build`（matrix 全绿）+ 根仓 `npm run build:min` + `npm run install:global`（routecodex 0.90.600 / llms 0.6.4210，全局 e2e 通过）。
+
+Tags: rust-migration, routecodex-3.11.7, hub-pipeline, route-select, router-metadata, native-primary, disableStickyRoutes, estimatedInputTokens, build-matrix, install-global
+
+- 2026-03-20: `routecodex-3.11.7` 一次性完成 HubPipeline route/outbound 编排统一：新增 `hub-pipeline-route-and-outbound.ts`，让 request-stage 与 chat-entry 共用 route select + outbound payload + metadata 汇总链路，并叠加此前 request-utils/governance-utils 共用模块，显著压缩主编排文件。可复用结论：当两条主路径共享“路由决策后到 provider payload 出站前”的流程时，优先提炼单一 orchestrator helper，再让入口文件回归“阶段串联壳”。验证链：semantic-mapper coverage + `sharedmodule npm run build`（matrix 全绿）+ 根仓 `npm run build:min` + `npm run install:global`（0.90.599，全局 e2e 通过）。
+
+Tags: rust-migration, routecodex-3.11.7, hub-pipeline, route-outbound-orchestration, thin-shell, dedup, request-stage, chat-entry, build-matrix, install-global
+
+- 2026-03-20: `routecodex-3.11.7` 在 request 共享工具基础上继续提炼 governance 共享模块，新增 `hub-pipeline-chat-process-governance-utils.ts`，统一 clock reservation 透传、tool-governance nodeResult 映射、passthrough skip node 与 passthrough audit annotate；inbound/chat-entry 两条路径复用后减少重复治理分支。可复用结论：对于“相同错误对象映射 + 相同 skipped 分支”的双路径编排，应优先抽成 governance utils，避免一侧修复另一侧遗忘。验证链：`sharedmodule npm run build`（matrix 全绿）+ 根仓 `npm run build:min` + `npm run install:global`（0.90.598，全局 e2e 通过）。
+
+Tags: rust-migration, routecodex-3.11.7, hub-pipeline, governance-utils, node-result-mapping, passthrough-skip, dedup, build-matrix, install-global
+
+- 2026-03-20: `routecodex-3.11.7` 继续 HubPipeline chat-process 编排收口：新增 `hub-pipeline-chat-process-request-utils.ts`，统一 inbound/chat-entry 共享 request 处理逻辑（message sanitize、applyPatch mode 透传、processMode/passthrough 判定、input token 估算、responsesResume/附件/serverTool 标志提取），并在两条主路径复用。可复用结论：当两条入口链路共享“前置规范化 + 后置统计/标志”逻辑时，应提炼到 pipeline 共享模块，避免一次修复后另一条路径遗漏。验证链：semantic-mapper coverage + `sharedmodule npm run build`（matrix 全绿）+ 根仓 `npm run build:min` + `npm run install:global`（0.90.597，全局 e2e 通过）。
+
+Tags: rust-migration, routecodex-3.11.7, hub-pipeline, chat-process, shared-utils, dedup, request-normalization, build-matrix, install-global
+
+- 2026-03-20: `routecodex-3.11.7` 继续 HubPipeline 编排 helper 收口：将 request-normalization 纯逻辑再拆分为 `hub-pipeline-payload-materialization.ts`（SSE payload materialization）与 `hub-pipeline-max-tokens-policy.ts`（max token policy），并新增 `hub-pipeline-protocol-types.ts` 作为协议类型真源；`hub-pipeline-request-normalization-utils.ts` 收敛为标准化壳 + re-export。可复用结论：对于“标准化入口 + 多段纯函数”文件，优先抽离可测试纯逻辑模块，保留入口壳负责组合，避免工具函数反复堆叠回入口。验证链：semantic-mapper coverage + `sharedmodule npm run build`（matrix 全绿）+ 根仓 `npm run build:min` + `npm run install:global`（0.90.596，全局 e2e 通过）。
+
+Tags: rust-migration, routecodex-3.11.7, hub-pipeline, request-normalization, payload-materialization, max-tokens-policy, protocol-types, thin-shell, build-matrix, install-global
+
+- 2026-03-20: `routecodex-3.11.10` 继续 semantic-mapper 模块化：完成 Responses mapper 双向拆分，新增 `responses-mapper-config.ts` / `responses-mapper-helpers.ts` / `responses-mapper-to-chat.ts` / `responses-mapper-from-chat.ts`，`responses-mapper.ts` 收敛为 26 行薄壳并保持 helper 对外导出兼容。可复用结论：当 mapper 同时承担 endpoint 分支（如 submit_tool_outputs）与双向协议映射时，应把 endpoint 逻辑与 helper 拆到独立模块，主入口仅保留编排壳与兼容导出。验证链：semantic-mapper coverage + `sharedmodule npm run build`（matrix 全绿）+ 根仓 `npm run build:min` + `npm run install:global`（0.90.595，全局 e2e 通过）。
+
+Tags: rust-migration, routecodex-3.11.10, semantic-mapper, responses-mapper, inbound-outbound-split, helper-extraction, thin-shell, build-matrix, install-global
+
+- 2026-03-20: `routecodex-3.11.7` HubPipeline 编排薄壳继续收口：删除 `hub-pipeline.ts` 内两处私有转发方法（`executeRequestStagePipeline` / `executeChatProcessEntryPipeline`），`execute()` 直接调用文件级 orchestrator，保持 stage timing 与错误路径语义不变。可复用结论：类内“只转发不增语义”的私有方法应优先清理，避免入口编排层重复命名和无意义栈层。验证链：`sharedmodule npm run build`（matrix 全绿）+ `coverage-hub-semantic-mappers.mjs` + 根仓 `npm run build:min` + `npm run install:global`（0.90.594，全局 e2e 通过）。
+
+Tags: rust-migration, routecodex-3.11.7, hub-pipeline, thin-shell, orchestration-cleanup, direct-orchestrator, build-matrix, install-global
+
+- 2026-03-20: `routecodex-3.11.10` 继续 semantic-mapper 模块化：完成 Anthropic mapper 双向拆分，新增 `anthropic-mapper-config.ts` / `anthropic-mapper-to-chat.ts` / `anthropic-mapper-from-chat.ts`，`anthropic-mapper.ts` 收敛为 35 行薄壳并保留 stage timing 与 `sanitizeAnthropicPayload` 导出兼容。可复用结论：当 mapper 同时承载入站解码与出站编码时，应按 inbound/outbound 拆分并抽离共享 config，主入口只保留协议编排与观测，避免 protocol 细节持续回流。验证链：`sharedmodule npm run build`（matrix 全绿）+ 根仓 `npm run build:min` + `npm run install:global`（0.90.593，全局 e2e 通过）。
+
+Tags: rust-migration, routecodex-3.11.10, semantic-mapper, anthropic-mapper, inbound-outbound-split, config-extraction, thin-shell, build-matrix, install-global
+
+- 2026-03-20: `routecodex-3.11.10` 继续 semantic-mapper 模块化：新增 `gemini-mapper-from-chat.ts`，将 `buildGeminiRequestFromChat` 从 `gemini-mapper.ts` 主文件整体外提；`GeminiSemanticMapper` 现在由 `toChat`（`gemini-mapper-to-chat.ts`）+ `fromChat`（`gemini-mapper-from-chat.ts`）双模块编排，主文件降至 39 行并保持同名导出。可复用结论：当单个 mapper 同时承载 inbound/outbound 两条重路径时，应按方向拆分并让主文件只保留编排入口，避免“一个 mapper 文件即协议实现全集”的持续膨胀。验证链：`sharedmodule npm run build`（matrix 全绿）+ 根仓 `npm run build:min` + `npm run install:global`（0.90.592，全局 e2e 通过）。
+
+Tags: rust-migration, routecodex-3.11.10, semantic-mapper, gemini-mapper, fromChat, toChat, module-split, thin-shell, build-matrix, install-global
+
+- 2026-03-20: `routecodex-3.11.10` 继续 semantic-mapper 模块化：新增 `gemini-mapper-to-chat.ts`，将 `GeminiSemanticMapper.toChat` 的 inbound 编排整体外提为 `buildGeminiChatEnvelopeFromGeminiPayload`，保留原 missing/system/passthrough/providerMetadata/explicitEmptyTools 语义；`gemini-mapper.ts` 481→391。可复用结论：当 mapper 同时承担 inbound/outbound 两条长路径时，优先按方向拆分模块（toChat/fromChat），让主文件只保留入口编排与协议核心路径。验证链：`sharedmodule npm run build`（matrix 全绿）+ 根仓 `npm run build:min` + `npm run install:global`（0.90.590，全局 e2e 通过）。
+
+Tags: rust-migration, routecodex-3.11.10, semantic-mapper, gemini-mapper, toChat, module-split, thin-shell, build-matrix, install-global
+
+- 2026-03-20: `routecodex-3.11.10` 继续 semantic-mapper 模块化：新增 `chat-mapper-fastpath.ts`，将 OpenAI chat fast-map 与 `apply_patch` 错误 hint 增强逻辑从 `chat-mapper.ts` 外提，主 mapper 文件收敛为编排壳并保持原导出；`chat-mapper.ts` 行数 442→48。可复用结论：对于“协议快路径 + 兜底 native mapper”的组合，应把快路径纯语义收敛到独立模块，主 mapper 只保留入口编排与 fallback 选择，避免后续扩展时把协议细节重新堆回入口文件。验证链：`sharedmodule npm run build`（matrix 全绿）+ 根仓 `npm run build:min` + `npm run install:global`（0.90.589，e2e 通过）。
+
+Tags: rust-migration, routecodex-3.11.10, semantic-mapper, chat-mapper, fastpath, apply-patch-hint, thin-shell, file-split, build-matrix, install-global
+
+- 2026-03-20: `routecodex-3.11.9` 继续 response-runtime 收口：新增 `response-runtime-anthropic-policy.ts`，将 Anthropic response inbound/outbound 两段 bridge-policy 模板（policy resolve + actionState + pipeline run + ignore failure）统一外提；`response-runtime-anthropic.ts` 删除重复 try/catch 分支并改为 direct helper 调用，行数 302→270。验证链：`sharedmodule npm run build`（matrix 全绿）+ 根仓 `npm run build:min` + `npm run install:global`（0.90.588，全局 e2e check 通过）。
+
+Tags: rust-migration, routecodex-3.11.9, response-runtime, anthropic, bridge-policy, orchestration, thin-shell, file-split, build-matrix, install-global
+
+- 2026-03-20: 继续推进 3.11.7 HubPipeline 核心编排拆分：新增 `syncSessionIdentifiersToMetadata` / `buildRouterMetadataInputFromContext` / `emitVirtualRouterHitLog` / `resolveStageRecorderForPipeline`，并在 request-stage 与 chat-process-entry 两条主链复用，去除重复 routing metadata / recorder / log / session sync 片段，`hub-pipeline.ts` 行数 2329→2264。验证链：`sharedmodule npm run build`（matrix 全绿）+ 根仓 `npm run build:min`。
+
+Tags: rust-migration, routecodex-3.11.7, hub-pipeline, thin-shell, orchestration-split, routing-metadata, stage-recorder, build-matrix
+
+- 2026-03-20: 继续 Rust 化收口 3.11.9：`provider-response.ts` 将通用辅助逻辑外提到 `provider-response-helpers.ts`（followup/clientProtocol/tool-surface-env/display-model/request-id/canonical-coercion/clock-reservation commit），主文件降到 484 行（<500），保持“主流程编排 + helper 下沉”模式。验证链：`sharedmodule npm run build`（matrix 全绿）+ 根仓 `npm run build:min`。
+
+Tags: rust-migration, routecodex-3.11.9, provider-response, file-split, thin-shell, helper-extraction, build-matrix
+
+- 2026-03-20: 继续执行“不要小步停顿”的批量收口策略：`hub-pipeline.ts` 在保持语义不变前提下完成核心编排去重，新增 `prepareRuntimeMetadataForServertools` / `buildCapturedChatRequestSnapshot` / `applyHasImageAttachmentFlag` 三个文件级 helper，统一 `executeRequestStagePipeline` 与 `executeChatProcessEntryPipeline` 的重复片段；同时 `chat-process-servertool-orchestration` 去除 bundle 依赖中的 continueExecution 路径，改为 direct `planChatWebSearchOperationsWithNative` + `planChatClockOperationsWithNative`。验证链：定向回归 + `sharedmodule npm run build`（matrix 全绿）+ 根仓 `npm run build:min`。
+
+Tags: rust-migration, hub-pipeline, thin-shell, dedup, orchestration, continue-execution, native-planning, build-matrix
+
+- 2026-03-20: 按用户要求“移除 continue_execution 工具注入”后，补齐了主路径三处真源，避免只改一层导致回流注入：1) `chat-process-servertool-orchestration` 不再应用 continue_execution operations；2) `followup-request-builder` 标准工具列表移除 continue_execution；3) `req_process_stage1_tool_governance` 与 `chat-process-governance-orchestration` 强制 `hasActiveStopMessageForContinueExecution=true`，确保 native governance 不再自动追加该工具。保留能力仅限“模型显式调用 continue_execution 时可被 servertool handler 处理”，不再自动注入。验证链：定向 continue-injection 回归 + `sharedmodule npm run build`（matrix 全绿）+ 根仓 `npm run build:min`。
+
+Tags: routecodex, continue-execution, injection-removal, hub-pipeline, req-process-stage1, followup-tools, servertool, build-matrix
+
+- 2026-03-20: 3.11.9 response-runtime 继续收口：删除顶层 helper `projectReasoningText` 与 `applyReasoningPayloadToMessage`，改为 `buildOpenAIChatFromAnthropicMessage` 内局部 `applyReasoningPayload` 实现，保持 reasoning 投影语义不变。该切片后 `response-runtime.ts` 行数降到 492，且顶层 helper 收敛为 4 个。验证链：`sharedmodule/llmswitch-core npm run build`（matrix 全绿）+ 根仓 `npm run build:dev`（install:global + restart）+ `/health` 版本 `0.90.556`。
+
+Tags: rust-migration, routecodex-3.11.9, response-runtime, thin-shell, reasoning, helper-reduction, file-size, build-dev
+
+- 2026-03-20: 3.11.9 response-runtime 收口中完成一轮死代码清理：删除未使用 helper `sanitizeAnthropicToolUseId` 与 `coerceNonNegativeNumber`，语义不变。该切片让 `response-runtime.ts` 从 523 行降至 495 行，重新满足“单文件 <500”约束。验证链：`sharedmodule/llmswitch-core npm run build`（matrix 全绿）+ 根仓 `npm run build:dev`（install:global + restart）+ `/health` 版本 `0.90.555`。
+
+Tags: rust-migration, routecodex-3.11.9, response-runtime, dead-code-cleanup, thin-shell, file-size, build-dev
+
+- 2026-03-20: 3.11.9 provider-response 完成“顶层 helper 清零”：删除最后一个 `stripInternalPolicyDebugFields` helper，改为 `convertProviderResponse` 内 direct native blacklist（`applyResponseBlacklistWithNative` + `INTERNAL_POLICY_DEBUG_BLACKLIST_PATHS` 常量）。当前 `provider-response.ts` 无顶层 function helper。验证链：`sharedmodule/llmswitch-core npm run build`（matrix 全绿）+ 根仓 `npm run build:dev`（install:global + restart）+ `/health` 版本 `0.90.554`。
+
+Tags: rust-migration, routecodex-3.11.9, provider-response, thin-shell, native-primary, response-blacklist, build-dev
+
+- 2026-03-20: 3.11.9 provider-response 继续薄壳收口：删除 `coerceClockReservation` / `isCanonicalChatCompletion` / `applyModelOverride` 三个 TS helper，分别在 `maybeCommitClockReservationFromContext`、`coerceClientPayloadToCanonicalChatCompletionOrThrow`、`convertProviderResponse` 内联实现（语义不变）。当前 `provider-response.ts` 顶层 helper 仅剩 `stripInternalPolicyDebugFields`。验证链：`sharedmodule/llmswitch-core npm run build`（matrix 全绿）+ 根仓 `npm run build:dev`（install:global + restart）+ `/health` 版本 `0.90.553`。
+
+Tags: rust-migration, routecodex-3.11.9, provider-response, thin-shell, clock-reservation, canonical-chat-check, model-override, native-primary, build-dev
+
+- 2026-03-19: 3.11.9 provider-response 薄壳继续收口：删除 `extractDisplayModel` 与 `extractClientFacingRequestId` 两个 TS helper，`convertProviderResponse` 内联候选扫描逻辑（保持原优先级与语义）。验证链：`sharedmodule/llmswitch-core npm run build`（matrix 全绿）+ 根仓 `npm run build:dev`（install:global + restart）+ `/health` 版本 `0.90.552`。
+
+Tags: rust-migration, routecodex-3.11.9, provider-response, thin-shell, display-model, client-request-id, native-primary, build-dev
+
+- 2026-03-19: 3.11.9 provider-response 薄壳继续收口：删除 `isServerToolFollowup` / `resolveClientProtocol` / `isToolSurfaceShadowEnabled` 三个 TS helper，`convertProviderResponse` 改为函数体内 direct-native/inline（runtime metadata followup 判定、`resolveHubClientProtocolWithNative` 直接判定 clientProtocol、tool-surface shadow mode 一次性计算）。验证链：`sharedmodule/llmswitch-core npm run build`（matrix 全绿）+ 根仓 `npm run build:dev`（install:global + restart）+ `/health` 版本 `0.90.551`。
+
+Tags: rust-migration, routecodex-3.11.9, provider-response, thin-shell, native-primary, client-protocol, followup, tool-surface, build-dev
+
+- 2026-03-19: 3.11.7 HubPipeline 再收口两项：删除 `liftResponsesResumeIntoSemantics` 与 `syncResponsesContextFromCanonicalMessages` 两个 TS helper，调用点直接使用 `liftResponsesResumeIntoSemanticsWithNative` / `syncResponsesContextFromCanonicalMessagesWithNative`；保留 `metaBase` metadata 原地替换语义。当前 `hub-pipeline.ts` 已无顶层 function helper。验证链：`sharedmodule/llmswitch-core npm run build`（matrix 全绿）+ 根仓 `npm run build:dev`（install:global + restart）+ `/health` 版本 `0.90.550`。
+
+Tags: rust-migration, routecodex-3.11.7, hub-pipeline, thin-shell, responses-resume-lift, canonical-context-sync, native-primary, build-dev
+
+- 2026-03-19: 3.11.7 HubPipeline 继续薄壳化：删除 `applyChatProcessEntryMediaCleanup` 与 `maybeApplyDirectBuiltinWebSearchTool` 两个 TS helper；调用点改为 inline direct-native（media-cleanup 链路内联 + `applyDirectBuiltinWebSearchToolWithNative` 直调），仅去中转不改语义。验证链：`sharedmodule/llmswitch-core npm run build`（matrix 全绿）+ 根仓 `npm run build:dev`（install:global + restart）+ `/health` 版本 `0.90.549`。
+
+Tags: rust-migration, routecodex-3.11.7, hub-pipeline, thin-shell, media-cleanup, direct-web-search, native-primary, build-dev
+
+- 2026-03-19: 3.11.7 HubPipeline 再收口 endpoint/protocol 薄壳：删除 `normalizeEndpoint` 与 `resolveProviderProtocol`，调用点直接使用 `normalizeHubEndpointWithNative` / `resolveHubProviderProtocolWithNative`，并在 `normalizeRequest` 内保留原 caller-facing providerProtocol 错误提示。验证链：`sharedmodule/llmswitch-core npm run build`（matrix 全绿）+ 根仓 `npm run build:dev`（install:global + restart）+ `/health` 版本 `0.90.548`。
+
+Tags: rust-migration, routecodex-3.11.7, hub-pipeline, thin-shell, endpoint-normalize, provider-protocol, native-primary, build-dev
+
+- 2026-03-19: 3.11.7 HubPipeline 薄壳继续收口：删除 `readResponsesResumeFromMetadata` / `readResponsesResumeFromRequestSemantics` / `buildPassthroughAudit` / `annotatePassthroughGovernanceSkip` / `attachPassthroughProviderInputAudit` 五个 TS helper，调用点全部切换到 native wrappers（含 passthroughAudit 原地变更语义保留）。验证链：`sharedmodule/llmswitch-core npm run build`（matrix 全绿）+ 根仓 `npm run build:dev`（install:global + restart）+ `/health` 版本 `0.90.547`。
+
+Tags: rust-migration, routecodex-3.11.7, hub-pipeline, thin-shell, native-primary, responses-resume, passthrough-audit, build-dev
+
+
+
 - 2026-03-10: `~/.codex/skills/pipedebug/` 已按当前 RouteCodex V2 结构更新。默认调试主线改为：先看 `~/.routecodex/codex-samples/`，先判断问题属于 request path 还是 response path，再沿 `host bridge -> llmswitch-core Hub Pipeline -> Provider V2` 的真实边界定位。旧的“4 层流水线 / workflow-compatibility-provider README / routecodex-worktree/fix / ~/.claude/skills”表述已从 `SKILL.md` 与 references 中移除。
 - 2026-03-16: Heartbeat 现定义为 tmux-client re-activation feature，唯一协议是 `<**hb:on**>` / `<**hb:off**>`，并且只绑定 `tmuxSessionId`。`hb:on` 立即生效，不支持输入 startAt；结束时间唯一来自目标工作目录 `HEARTBEAT.md` 头部 `Heartbeat-Until:` 标签。heartbeat 只在“无 in-flight request + 客户端已断开/心跳过期”时才允许注入；失败只能记日志/状态，不能影响主链路正确性，也不能 fallback 到 server cwd。注入文案必须要求读取 `HEARTBEAT.md`、检查上次交付、更新 `DELIVERY.md`、再调用 `review`，且 review 只能由模型通过现有 `review_flow` 主动调用，服务端不得自动串联。
+- 2026-03-17: 修复 review/continue 回注入断裂的 request-path 根因：当请求只携带 `session scope`（如 API key `::rcc-session:*`）且没有显式 tmux header 时，`session-scope-resolution` 之前不会把该 scope 纳入 binding 候选，导致 `clientInjectReady=false` 并触发 `tmux_session_missing`。现已补齐 `api-key -> session scope -> registry_by_binding` 回查路径，并保持 tmux 存活校验；新增 `session-scope-resolution` 与 `executor-metadata` 回归用例覆盖该场景。
 
 Tags: pipedebug, skill, codex-samples, request-path, response-path, llmswitch-core, provider-v2, debug-workflow, heartbeat, tmux, ssot, heartbeat-until, heartbeat-marker, delivery-md, review-flow, no-fallback, client-reactivation
 
@@ -103,6 +278,81 @@ Tags: provider-init, v2-config, routingPolicyGroups, vercel-ai-sdk, provider-doc
 
 ## Rust 迁移相关
 
+- 2026-03-20: 继续 3.11.7，新增 servertool runtime metadata 组装 native 真源：Rust `prepare_runtime_metadata_for_servertools(_json)` + TS `prepareRuntimeMetadataForServertoolsWithNative(...)`，并将 `prepareRuntimeMetadataForServertools(...)` 收敛为 thin adapter。该改动与同轮 `capturedChatRequest` / `req_outbound nodeResult` native 化构成同一批 HubPipeline 编排纯组装 helper 下沉，语义不变。验证通过：`cargo test -p router-hotpath-napi test_prepare_runtime_metadata_for_servertools`、`test_build_captured_chat_request_snapshot`、`sharedmodule npm run build`（含 matrix）、根仓 `npm run build:min`、`npm run install:global`。
+
+Tags: rust-migration, hub-pipeline, servertool-runtime-metadata, captured-chat-request, req-outbound, native-primary, orchestration-helper, thin-shell, build-matrix, install-global
+
+- 2026-03-20: 继续 3.11.7，新增 capturedChatRequest 快照组装 native 真源：Rust `build_captured_chat_request_snapshot(_json)` + TS `buildCapturedChatRequestSnapshotWithNative(...)`，并让 `buildCapturedChatRequestSnapshot(...)` 收敛为 thin adapter。该改动与同轮 `req_outbound` nodeResult native 化形成一组“编排纯组装 helper 下沉”收口，保持语义不变。验证通过：`cargo test -p router-hotpath-napi test_build_captured_chat_request_snapshot`、`test_build_req_outbound_node_result`、`sharedmodule npm run build`（含 matrix）、根仓 `npm run build:min`、`npm run install:global`。
+
+Tags: rust-migration, hub-pipeline, captured-chat-request, req-outbound, native-primary, orchestration-helper, thin-shell, build-matrix, install-global
+
+- 2026-03-20: 继续 3.11.7，将 HubPipeline `req_outbound` nodeResult 组装切到 native 真源：Rust 新增 `build_req_outbound_node_result(_json)`，TS 新增 `buildReqOutboundNodeResultWithNative(...)` 并让 `appendReqOutboundNodeResult(...)` 收敛为 thin adapter。该改动保持语义不变（node id/metadata 字段一致），仅迁移编排纯组装逻辑到 native。验证通过：`cargo test -p router-hotpath-napi test_build_req_outbound_node_result`、`test_build_router_metadata_input`、`test_build_hub_pipeline_result_metadata`、`sharedmodule npm run build`（含 matrix）、根仓 `npm run build:min`、`npm run install:global`。
+
+Tags: rust-migration, hub-pipeline, req-outbound, node-result, native-primary, orchestration-helper, thin-shell, build-matrix, install-global
+
+- 2026-03-20: 继续 3.11.10（semantic-mapper orchestration 收口）：新增 `gemini-mapper-config.ts`，把 Gemini mapper 内的 responses dropped 参数审计与 passthrough 常量外提（`recordGeminiResponsesDroppedParameters`、`GEMINI_PASSTHROUGH_*`），`gemini-mapper.ts` 行数 501→481（<500）。语义保持不变，仅做编排模块化与薄壳收口。验证通过：`sharedmodule/llmswitch-core npm run build`（matrix 全绿）+ 根仓 `npm run build:min`。
+
+Tags: rust-migration, semantic-mapper, gemini-mapper, orchestration-modularization, thin-shell, policy-surface, build-matrix
+
+- 2026-03-20: HubPipeline chat-process entry 编排去重：`hub-pipeline-execute-chat-process-entry.ts` 改为复用 `buildRequestStageProviderPayload(...)` 统一 req_outbound payload/policy/tool-surface 处理链，移除重复分支实现，文件行数 483→359。该改动保持语义不变并减少主编排重复。验证通过：`sharedmodule/llmswitch-core npm run build`（matrix 全绿）+ 根仓 `npm run build:min`。
+
+Tags: rust-migration, hub-pipeline, chat-process-entry, orchestration-dedup, provider-payload-helper, thin-shell, build-matrix
+
+- 2026-03-20: 继续 3.11.11，清理 chat-request-filter 的 fallback 命名噪音：`buildGovernedFilterPayloadWithNativeFallback` 重命名为 `buildGovernedFilterPayloadWithNative`，并同步 `chat-request-filters.ts`、legacy archive 与 `coverage-chat-request-filters.mjs` 调用点。该改动不改变语义，仅消除“名称暗示 fallback”与当前 native-required/fail-fast 实际行为的不一致。验证通过：`sharedmodule/llmswitch-core npm run build`（matrix 全绿）+ 根仓 `npm run build:min`。
+
+Tags: rust-migration, native-default-gate, fallback-naming-cleanup, chat-request-filter, fail-fast, single-source-of-truth
+
+- 2026-03-20: 继续 3.11.11 做 native-default gate/fallback 收口：`native-hub-pipeline-orchestration-semantics.ts` 的 `extractAdapterContextMetadataFieldsWithNative(...)` 删除 JS fallback 分支（`extractAdapterContextMetadataFieldsJs`），native 异常统一 fail-fast，消除“双实现兜底”路径，保持 HubPipeline orchestration 语义单一真源。验证通过：`sharedmodule/llmswitch-core npm run build`（matrix 全绿）+ 根仓 `npm run build:min`。
+
+Tags: rust-migration, native-default-gate, fallback-cleanup, fail-fast, hub-pipeline, orchestration-semantics, single-source-of-truth
+
+- 2026-03-20: HubPipeline request-stage 编排完成三段化拆分：新增 `hub-pipeline-execute-request-stage-inbound.ts`（inbound + process-stage1 + workingRequest 预处理）与 `hub-pipeline-execute-request-stage-provider-payload.ts`（outbound payload build + compat + policy/tool-surface），`hub-pipeline-execute-request-stage.ts` 收敛为 179 行 orchestrator；连同 `hub-pipeline.ts`（372 行）形成 HubPipeline 薄壳主路径，核心文件均 <500。验证通过：`sharedmodule/llmswitch-core npm run build`（matrix 全绿）+ 根仓 `npm run build:min`。
+
+Tags: rust-migration, hub-pipeline, request-stage, orchestration-split, thin-shell, module-boundary, build-matrix
+
+- 2026-03-19: HubPipeline 的 SSE + alias-map helper 继续收口到 Rust 真源：`router-hotpath-napi/hub_pipeline.rs` 新增 `extract_model_hint_from_metadata(_json)` 与 `resolve_sse_protocol_with_fallback(_json)`；`hub_resp_outbound_client_semantics.rs` 新增 `resolve_alias_map_from_sources(_json)`；TS 侧新增 `extractModelHintFromMetadataWithNative`、`resolveSseProtocolWithFallbackWithNative`、`resolveAliasMapFromSourcesWithNative`，并让 `hub-pipeline.ts` 的 `extractModelHint()` / `resolveSseProtocol()` / `resolveAliasMapFromSources()` 都只做 direct native wrapper；`native-router-hotpath-loader.ts` 的 `REQUIRED_NATIVE_EXPORTS` 补齐 `extractModelHintFromMetadataJson`、`resolveSseProtocolWithFallbackJson`、`resolveAliasMapFromSourcesJson`。同轮补做 thin-shell 清理：删除未使用的 `resolveSseProtocolFromMetadata()`、`readAliasMapFromSemantics()`，并把 `resolveProviderProtocol()`/`extractHubPolicyOverride()`/`extractHubShadowCompareConfig()` 收敛为 direct native wrapper（保留 caller-facing error shape）。验证通过：`cargo test -p router-hotpath-napi extract_model_hint_from_metadata -- --nocapture`（3/3）、`cargo test -p router-hotpath-napi resolve_sse_protocol_with_fallback -- --nocapture`（2/2）、`cargo test -p router-hotpath-napi resolve_alias_map_from_sources -- --nocapture`（2/2）、`sharedmodule npm run build`（含 matrix）、根仓 `npm run build:dev` + `:5555/health`。
+
+Tags: rust-migration, hub-pipeline, sse, model-hint, protocol-fallback, alias-map, native-wrapper, router-hotpath-napi, required-native-exports, build-dev
+
+- 2026-03-19: Hub pipeline 的 Responses resume 读取语义已切到 Rust 真源：`router-hotpath-napi` 新增 `read_responses_resume_from_metadata(_json)` 与 `read_responses_resume_from_request_semantics(_json)`，TS 侧 `hub-pipeline.ts` 的 `readResponsesResumeFromMetadata/RequestSemantics` 改为调用 native wrapper；并把 `readResponsesResumeFromMetadataJson`、`readResponsesResumeFromRequestSemanticsJson` 加入 `native-router-hotpath-loader.ts` 的 `REQUIRED_NATIVE_EXPORTS`。验证通过：`cargo test -p router-hotpath-napi read_responses_resume -- --nocapture`（4/4），`sharedmodule/llmswitch-core npm run build`（含 matrix/postbuild 全绿）。
+
+Tags: rust-migration, hub-pipeline, responses-resume, native-wrapper, router-hotpath-napi, required-native-exports
+
+- 2026-03-19: Hub pipeline 的 `applyPatchToolMode` 环境变量解析已切到 Rust 真源：`router-hotpath-napi` 新增 `resolve_apply_patch_tool_mode_from_env_json` 导出，TS `native-hub-pipeline-orchestration-semantics.ts` 新增 `resolveApplyPatchToolModeFromEnvWithNative`，`hub-pipeline.ts` 的 `resolveApplyPatchToolModeFromEnv()` 改为调用 native wrapper；同时把 `resolveApplyPatchToolModeFromEnvJson` 加入 `native-router-hotpath-loader.ts` 的 `REQUIRED_NATIVE_EXPORTS`。验证通过：`cargo test -p router-hotpath-napi resolve_apply_patch_tool_mode_from_tools -- --nocapture`，`sharedmodule/llmswitch-core npm run build`（matrix 全绿），根仓 `npm run build:dev`（含 install:global + e2e + 5555 restart）通过。
+
+Tags: rust-migration, hub-pipeline, apply-patch, env-semantics, native-wrapper, required-native-exports, build-dev
+
+- 2026-03-17: `virtual-router-routing-instructions.spec.ts` 与 `session-client-routes.spec.ts` 若使用固定 `sessionId` / tmux scope，必须为每个 test case 隔离 `ROUTECODEX_SESSION_DIR`。Rust `routing_state_store` 会持久化 `session:/conversation:/tmux:` scope；若测试复用本地默认 session dir，上一次 run 的 prefer/disable/allow 状态会被下一次 run 重新加载，表现成“路由选择回归”或“heartbeat/task 路由 500”的假阳性。最小正确修复是测试侧 per-test 临时 session dir，而不是改生产持久化语义。
+
+Tags: rust-migration, virtual-router, routing-instructions, routing-state-store, session-dir, ROUTECODEX_SESSION_DIR, jest, test-isolation, heartbeat, session-client-routes
+
+- 2026-03-17: Heartbeat 继续推进 P0 子任务 `routecodex-3.11.4`（snapshot hooks/utils/recorder）并完成收口：
+  - 新增专项覆盖脚本 `sharedmodule/llmswitch-core/scripts/tests/coverage-hub-snapshot-hooks-utils-recorder.mjs`，覆盖 `snapshot-utils` + `snapshot-recorder` 主路径，并补充 `native-snapshot-hooks` 异常/边界断言（invalid payload、empty result、missing function、stringify failure、throw）。
+  - 新增 npm scripts：`test:coverage:hub-snapshot-hooks-utils-recorder` 与 `verify:shadow-gate:hub-snapshot-hooks-utils-recorder`。
+  - 新增 rust-migration manifest 模块 `hub.snapshot-hooks-utils-recorder`（95/95 gate）。
+  - 验证：`verify:shadow-gate:hub-snapshot-hooks-utils-recorder` 通过（module lines 100 / branches 96.67）；`coverage-hub-native-batch` 通过；`coverage-bridge-protocol-blackbox` 24/24 通过；根仓 `npm run build:dev`（含 install:global + e2e + restart）通过。
+  - BD：`routecodex-3.11.4` 已关闭，`routecodex-3.11` 更新为子任务完成 4/6。
+
+Tags: rust-migration, routecodex-3.11.4, snapshot-utils, snapshot-recorder, snapshot-hooks, shadow-gate, heartbeat
+
+- 2026-03-17: Heartbeat 继续推进 P0 子任务 `routecodex-3.11.2`（tool-governance engine+rules）并完成收口：
+  - 新增专项覆盖脚本 `sharedmodule/llmswitch-core/scripts/tests/coverage-hub-tool-governance.mjs`，使用多场景 native mock 覆盖 rules 映射与 engine 分支（成功路径、no-rules、max-length 错误映射、非 max-length 错误透传）。
+  - 新增 npm scripts：`test:coverage:hub-tool-governance` 与 `verify:shadow-gate:hub-tool-governance`。
+  - 新增 rust-migration manifest 模块 `hub.tool-governance.engine-rules`（95/95 gate）。
+  - 验证：`verify:shadow-gate:hub-tool-governance` 通过（module lines 100 / branches 97.06）；`tool-governance-native-compare` 通过；`coverage-bridge-protocol-blackbox` 24/24 通过；根仓 `npm run build:dev`（含 install:global + e2e + restart）通过。
+  - BD：`routecodex-3.11.2` 已关闭，`routecodex-3.11` 更新为子任务完成 3/6。
+
+Tags: rust-migration, routecodex-3.11.2, tool-governance, shadow-gate, coverage, native-primary, heartbeat
+
+- 2026-03-16: P0 主线子任务 `routecodex-3.11.5`（protocol-field-allowlists rust source-of-truth）完成收口：
+  - 新增专用黑盒/覆盖脚本 `sharedmodule/llmswitch-core/scripts/tests/coverage-hub-protocol-field-allowlists.mjs`，逐项比对 TS 导出 allowlists 与 native `resolveHubProtocolAllowlistsWithNative`，并验证 `resolveHubProtocolSpec` / `HUB_PROTOCOL_SPECS` 与 native `resolveHubProtocolSpecWithNative` 的逐协议 parity。
+  - 新增 npm scripts：`test:coverage:hub-protocol-field-allowlists` 与 `verify:shadow-gate:hub-protocol-field-allowlists`。
+  - 新增 rust-migration manifest 模块 `hub.shared.protocol-field-allowlists`（95/95 gate，src+dist 双路径）。
+  - 验证结果：`verify:shadow-gate:hub-protocol-field-allowlists` lines/branches 均 100%，并自动 promote `preparedForShadow=true`；`coverage-bridge-protocol-blackbox` 24/24（100.0%）。
+  - BD：`routecodex-3.11.5` 已更新并强制关闭（依赖阻塞下使用 `--force`，原因是依赖链未及时清理但验收已满足）。
+
+Tags: rust-migration, routecodex-3.11.5, protocol-field-allowlists, protocol-spec, shadow-gate, blackbox, coverage-100, native-primary
+
 - 2026-03-06: Refreshed BD epic `routecodex-267` based on remaining TS-only runtime modules under `sharedmodule/llmswitch-core/src/conversion/**`: compat/actions runtime transforms, codecs runtime layer, pipeline/codecs/v2 runtime layer, residual config/schema/hooks/meta runtime modules.
 - 2026-03-06: Migration strategy: collapse TS files to thin wrappers around existing native entrypoints where possible, add Rust true source where needed, keep type-only files as TS wrappers when no runtime logic exists.
 - 2026-03-06: Completed slices in `routecodex-267.5`:
@@ -148,8 +398,11 @@ Tags: rust-migration, llmswitch-core, conversion, compat-actions, lmstudio, tool
 - 2026-03-06: GPT-5.4 reasoning findings: some provider responses contain reasoning items with only `encrypted_content` and no visible `summary_text`; RouteCodex preserves `encrypted_content` and `reasoning_tokens`, but no visible `summary_text` to show - this is upstream behavior, not a mapping bug.
 - 2026-03-06: Model remap invariant: for responses outbound remap, final `model` must stay aligned with VirtualRouter hit / provider response, not with original request model; temporary patch that made snapshot `model` source-wins was reverted.
 - 2026-03-06: HTTP logging update: `src/server/handlers/handler-utils.ts` now derives and prints `finish_reason` on request-complete logs; Chat payloads use `choices[0].finish_reason`; Anthropic payloads map `stop_reason` back to finish-reason equivalent; OpenAI Responses payloads derive `tool_calls` from `required_action`/function-call output and `stop` from `status=completed`.
+- 2026-03-18: `/v1/responses` 客户端“提示消失/像断连”有一类根因不在 SSE 传输层，而在 host bridge 错误传播：当 Anthropic-compatible upstream 返回 `stop_reason=model_context_window_exceeded` 且 assistant output 为空时，llmswitch-core 会抛 `MALFORMED_RESPONSE`，但若 host `provider-response-converter` 只识别 `context_length_exceeded` 而未覆盖 `context_window_exceeded` / `model_context_window_exceeded`，catch 分支会只记 `convert.bridge.error` 然后回退 `return options.response`，SSE 客户端就可能看起来像静默断流。最小正确修复是在 `src/server/runtime/http-server/executor/provider-response-converter.ts` 把这两个 stop reason 也并入 context overflow 并冒泡成明确 400 / SSE error event。
+- 2026-03-18: `/v1/responses` 巨大工具历史若主要膨胀在 `semantics.responses.context.input[]`（大量 `function_call_output` / reasoning / tool history），Virtual Router 若只按 canonical `messages` 估算 token，会把真实 200k 级请求低估到几十 k，导致本该走 `longcontext` 的请求先落到 `tools/tabglm`。最小正确修复是在 `sharedmodule/llmswitch-core/src/router/virtual-router/token-counter.ts` 与 Rust `virtual_router_engine/features.rs` 同步把 `responses.context.input[]` 纳入 token estimate，并保持 media payload 忽略逻辑。
+- 2026-03-19: `/v1/responses` 出现 `200 + finish_reason=stop + assistant 为空` 时，默认先按 **request-path / 请求形状不合法** 排查（先看 request shape，再看 response path）。禁止通过“裁剪历史/压缩上下文”做语义修复；应优先做形状修复（tool-session 顺序修正、缺失 tool output 占位补齐、id 风格规范化），并通过失败样本 replay + control replay 验证“上下文未丢失”。
 
-Tags: anthropic-sse, terminated, salvage, ark-coding-plan, kimi-k2.5, tool_use, sse_decode, seed, usage, routecodex-5555, openai-responses, overlong-function-name, input-name-400, crs, gpt-5.4, reasoning, model-remap, virtual-router, logging, finish-reason, request-complete, regression-test
+Tags: anthropic-sse, terminated, salvage, ark-coding-plan, kimi-k2.5, tool_use, sse_decode, seed, usage, routecodex-5555, openai-responses, overlong-function-name, input-name-400, crs, gpt-5.4, reasoning, model-remap, virtual-router, logging, finish-reason, request-complete, regression-test, request-shape, empty-response, shape-repair, no-semantic-trim
 
 ## Ark Coding Plan 相关
 
@@ -166,8 +419,11 @@ Tags: ark-coding-plan, volcengine, anthropic, coding-plan, baseurl, provider-con
 - 2026-03-06: `apply_patch` must use workspace-relative paths only; absolute paths (leading '/' or drive letters) are rejected by sandbox and can yield Sandbox(Signal(9)) or "Failed to read file to update ... No such file or directory".
 - 2026-03-06: Updated guidance in sharedmodule to explicitly require relative paths and warn absolute paths will be rejected; added apply_patch error hint for Sandbox(Signal(9)) and missing-path errors in hub_semantic_mapper_chat.rs.
 - 2026-03-06: Updated `~/.codex/config.toml` so all `model_reasoning_effort` entries are `high`; last remaining non-high entry was `[model_providers.tab]` previously `medium`.
-
 Tags: apply-patch, sandbox, relative-paths, codex, config, reasoning, high, tab-provider
+
+- 2026-03-18: `apply-patch` 的 GNU unified diff 兼容里，rename-only diff 必须允许“只有 move、没有 @@ hunk”的结构。若 `extract-patch` 仍把 `*** Update File` 强制要求成必须有 hunk，或 `normalizeApplyPatchText()` 在 Update File 区块里把 `*** Move to:` 误缩进成普通正文，就会把合法 rename-only patch 误判成 `unsupported_patch_format`，直接阻断 `sharedmodule/llmswitch-core npm run build` 的 postbuild matrix。最小正确修复是：validator/extractor 接受 move-only update section，normalize 期间保留原样的 `*** Move to:`.
+
+Tags: apply-patch, gnu-diff, rename-only, move-to, normalize, extract-patch, llmswitch-core, matrix, unsupported-patch-format
 
 ## Provider 架构收敛
 
@@ -684,3 +940,324 @@ Tags: silent-failure, heartbeat-directives, oauth-lifecycle, non-blocking, obser
   - 其中首次 `build:dev` 被 `verify:repo-sanity` 阻断，根因是新建 marker 文件/测试尚未 git add；补 `git add` 后再次构建通过。
 
 Tags: marker, stopmessage, heartbeat, clock, request-sanitizer, route-select, ssot, syntax-strip, lifecycle, build-dev
+
+## Codex managed tmux attach 的非 TTY 失败收敛（2026-03-17）
+
+- 2026-03-17：`rcc codex ... resume` 在非交互终端（`stdin/stdout` 非 TTY）下会进入 managed tmux 分支并执行 `tmux attach-session`，导致报错 `open terminal failed: not a terminal`，退出码 1，错误信息不够直观。
+- 根因：launcher 在 `spec.commandName === 'codex'` 时总会尝试 managed tmux attach，但之前没有对“当前是否可交互 TTY”做显式守卫。
+- 修复：在 launcher context 增加 `isInteractiveTerminal` 真源（CLI 侧绑定 `process.stdin.isTTY && process.stdout.isTTY`），并在 managed tmux attach 前 fail-fast：
+  - 非 TTY 时先停止刚创建的 managed tmux session（避免残留），
+  - 抛出明确错误：`Codex managed tmux mode requires an interactive terminal (TTY)...`，
+  - 不再走到 `tmux attach-session` 的低可读报错路径。
+- 验证：
+  - `npx tsc -p tsconfig.json --noEmit` 通过。
+  - `npm run jest:run -- --runTestsByPath tests/cli/codex-command.spec.ts -t "fails fast with a clear error when managed tmux attach has no interactive TTY"` 通过。
+  - 本地 `./rcc codex --dangerously-bypass-approvals-and-sandbox -p rcm resume`（非 TTY）复现后已变为 fail-fast 明确报错。
+
+Tags: codex, tmux, launcher, tty, fail-fast, managed-session, cli
+
+- 2026-03-18: Heartbeat/Virtual Router 联合巡检时确认两个可复用结论：
+  1. `sharedmodule/llmswitch-core/src/servertool/heartbeat/history-store.ts` 读取 history 时不能只按 `atMs` 倒序；在 Jest/同毫秒写入场景下，`set_enabled` 与 `daemon.tick` 事件会同时间戳，若缺少“追加顺序”二级排序，最新事件会被旧事件覆盖到列表后面，导致巡检/断言误读。最小正确修复是读取时保留行序，并在 `atMs` 相同情况下按追加顺序倒序。
+  2. `virtual-router-routing-instructions.spec.ts` 中 provider.model 的 alias retry 断言不能把可用 alias 写死成两项；`antigravity.<model>` 会按当前 provider registry 展开出全部同模型 key，测试应从 registry 动态计算剩余 alias，而不是假设只有 `sonnetkey/sonnetbackup`。
+Tags: heartbeat, history-store, ordering, same-timestamp, jest, virtual-router, routing-instructions, alias-rotation, test-robustness, routecodex-3.11.6
+
+- 2026-03-18: `servertool/pre-command-hooks` 相关巡检补充两条长期结论：
+  1. `runServerSideToolEngine()` 在执行 pre-command hooks 时，runtime precommand 真源应优先读取 `adapterContext.__rt.preCommandState`，再回退到 `readRuntimeMetadata(...).preCommandState` 与 sticky-store；否则某些 servertool/test 注入路径下，runtime precommand 会被错误降级成 config fallback。
+  2. 任何依赖 `resolveRccUserDir()` 的测试（包括 precommand 脚本白名单）如果要切换临时 user dir，不能只改 `ROUTECODEX_USER_DIR`；若环境里已有 `RCC_HOME`，它会优先级更高。最小正确修复是测试侧同步设置 `RCC_HOME` / `ROUTECODEX_HOME` / `ROUTECODEX_USER_DIR`，而不是放宽生产路径校验。
+Tags: precommand, servertool, runtime-metadata, __rt, adapterContext, user-data-paths, RCC_HOME, ROUTECODEX_HOME, routecodex-3.11.6, test-isolation
+
+- 2026-03-18: `routecodex-3.11.6` 的 native tmux/session-scope parity 再补一条长期结论：`ROUTECODEX_SESSION_DIR` 不能只停留在 JS sticky-store。若 Virtual Router native `route()/getStopMessageState()/getPreCommandState()` 仍靠进程环境隐式读取 session dir，测试与某些 runtime 下会出现“TS 写到 override 目录、Rust 读写到 ~/.rcc/sessions”的分裂。最小正确修复是在 TS `engine.ts` 把 `sessionDir + rccUserDir` 显式注入 `metadata.__rt`，Rust `napi_proxy.rs` 再用 `with_session_dir_override(...) + with_rcc_user_dir_override(...)` 包裹 native 真源调用，`routing_state_store.rs` 优先读取 thread-local session-dir override。
+
+Tags: routecodex-3.11.6, virtual-router, stopmessage, precommand, tmux-scope, session-dir, ROUTECODEX_SESSION_DIR, metadata.__rt, napi-proxy, routing-state-store, native-parity
+
+- 2026-03-18: 推进 `routecodex-3.11.1` 时，先补了 `sharedmodule/llmswitch-core/scripts/tests/semantic-mapper-public-replay.mjs` 作为四个 public semantic mapper 入口（chat / responses / anthropic / gemini）的统一代表性回放脚手架，对应命令是 `cd sharedmodule/llmswitch-core && npm run test:semantic-mapper-public-replay`。这轮回放确认：chat public mapper 已基本是 native-first，但 `responses / anthropic / gemini` 的 public wrapper 下面，核心 TS 语义仍主要留在 `src/conversion/hub/operation-table/semantic-mappers/*.ts`，因此 3.11.1 不能因为 wrapper 很薄就误判完成；下一步必须继续切 operation-table core，而不是只做 wrapper coverage。
+
+Tags: routecodex-3.11.1, semantic-mappers, public-replay, native-first, operation-table, chat, responses, anthropic, gemini, rust-migration
+
+- 2026-03-18: 继续推进 `routecodex-3.11.1` 时，新增 `sharedmodule/llmswitch-core/scripts/tests/semantic-mapper-core-replay.mjs`，专门直连 `dist/conversion/hub/operation-table/semantic-mappers/{responses,anthropic,gemini}-mapper.js` 做 core replay，而不是只测 public wrapper。这个脚手架目前覆盖三类可复用证据：
+  1. `openai-responses` fixture request 的 `toChat/fromChat` 往返，确认 system/tool/tool_output/semantics.responses/context snapshot 仍走 core 真源；
+  2. `anthropic-messages` fixture request 的 `toChat/fromChat` 往返，确认 tool_use/tool_result 与 max_tokens/model 仍由 core mapper 输出；
+  3. `gemini` core outbound 的 provider-specific 语义（普通 roundtrip、`antigravity` 默认注入、`gemini-cli` tool declarations）可以在不经过 public wrapper 的情况下独立验证。
+- 对应命令：`cd sharedmodule/llmswitch-core && npm run test:semantic-mapper-core-replay`，并与 `npm run test:semantic-mapper-public-replay` 组合使用：前者盯 operation-table core，后者盯 public 入口，避免 3.11.1 再次把“wrapper 很薄”误判成“core 已 native-primary”。
+
+Tags: routecodex-3.11.1, semantic-mappers, core-replay, operation-table, responses, anthropic, gemini, antigravity, gemini-cli, rust-migration
+
+- 2026-03-18: Heartbeat 两个真实缺口要一起看：
+  1. server 侧 `dispatchSingleHeartbeat()` 原先只检查 `requestActivityTracker`（server in-flight request）和 `registry.hasAliveTmuxSession()`（高级 session client 仍连着），**没有**检查 tmux pane 本身是否还在 active 执行；因此当 session daemon 已断开、但 tmux pane 里的 Codex/Claude 仍在工作时，heartbeat 仍可能直接 `send-keys` 打扰正在执行的任务。最小修复是在 `src/server/runtime/http-server/tmux-session-probe.ts` 增加 pane readiness probe：shell pane 直接视为空闲；agent pane（codex/claude/routecodex/node）则用 `capture-pane` 尾部 prompt 特征判断是否 idle；若判定 active，则 heartbeat 返回 `tmux_session_active` 并 skip。
+  2. `sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-heartbeat-directives.ts` 之前只从 camelCase 字段读取 tmux session（`tmuxSessionId/clientTmuxSessionId`），真实请求里若只带 snake_case（`client_tmux_session_id` / `tmux_session_id` / `stop_message_client_inject_session_scope`），`<**hb:15m**>` 虽然被解析了，但不会把 interval 覆盖到 heartbeat state。最小修复是扩展 directive 的 tmuxSessionId 提取字段集合；回归要验证同一 tmux 下 `<**hb:15m**>` 后再发 `<**hb:30s**>`，state.intervalMs 确实从 15m 覆盖成 30s。
+- 验证命令：`node --experimental-vm-modules ./node_modules/jest/bin/jest.js --runInBand --runTestsByPath tests/server/http-server/tmux-session-probe.spec.ts tests/server/runtime/http-server/heartbeat-runtime-hooks.spec.ts tests/servertool/servertool-heartbeat.spec.ts` 与 `npx tsc --noEmit`。
+
+Tags: heartbeat, tmux, active-session, send-keys, inject-readiness, capture-pane, hb-marker, interval-override, snake-case, client_tmux_session_id, routecodex
+
+- 2026-03-18: Heartbeat 后续设计已补文档：`docs/design/heartbeat-session-execution-state.md`。摘要：heartbeat 是否跳过，后续应由 **tmux-scoped execution-state tracker** 判定，而不是把 daemon alive 当成 busy；状态机主干为 `IDLE / WAITING_RESPONSE / STREAMING_OPEN / POST_RESPONSE_GRACE / STALED / UNKNOWN`，决策顺序优先看 **SSE 是否仍打开**，其次看最近 request/response 时间线与 `finish_reason`，状态不足时才回退到 tmux pane heuristic。详细状态定义、转移和落地点见该设计文档。
+
+Tags: heartbeat, tmux, execution-state, sse, finish-reason, state-machine, design-doc, routecodex
+
+- 2026-03-18: Heartbeat skip 已开始从“弱信号拼接”转向 **tmux-scoped execution-state 真源**：新增 `src/server/runtime/http-server/session-execution-state.ts`，由 request start、JSON response complete、SSE stream start/end、SSE client close 这些运行时事件持续写状态；heartbeat 决策改为先读 execution-state snapshot，再回退到 tmux pane heuristic。关键长期结论：`requestActivityTracker` 只能表示 executor 生命周期内的 inflight request，**不能**表示 SSE 仍在执行；`registry.hasAliveTmuxSession()` 只能表示 client 在线，**不能**表示 pane busy。已通过 `tests/server/runtime/http-server/session-execution-state.spec.ts`、`tests/server/runtime/http-server/heartbeat-runtime-hooks.spec.ts`、`tests/server/http-server/tmux-session-probe.spec.ts`、`tests/servertool/servertool-heartbeat.spec.ts` 与 `npx tsc --noEmit` 验证，并完成 `npm run build:dev` / 全局安装 / 5555 服务刷新。
+
+Tags: heartbeat, execution-state, sse, tmux, request-activity-tracker, daemon-alive, busy-idle, session-state, routecodex
+
+- 2026-03-18: apply_patch 近期高频错误主要不是执行器本身随机失效，而是**工具引导与模型心智不够收敛**：当前最近 200 条 `~/.rcc/errorsamples/client-tool-error/chat_process.req.stage2.semantic_map.apply_patch-*.json` 中，几乎全部都是 `apply_patch_verification_failed`，主模式集中在三类：1) 把 GNU diff 头（`--- a/...` / `+++ b/...`）混进 `*** Begin Patch` 块，触发 `invalid hunk header`；2) 输出冲突标记 `=======`，触发“Expected update hunk to start with @@”错误；3) 继续使用 `@@ -51,7 +51,9 @@` 这类 GNU 行号上下文，导致 `Failed to find context`。已确认一个明确误导源在 `src/config/system-prompts/codex-cli.txt`：原文允许“apply_patch 不好用就探索其他办法”，容易把模型推向 Node/Python 改写；另一个误导点是 guidance 虽写“支持 Begin Patch 或 GNU diff”，但未明确强调**不能混用**，也缺少最小合法模板。已修正文案于 `src/config/system-prompts/codex-cli.txt`、`sharedmodule/llmswitch-core/src/guidance/index.ts`、`sharedmodule/llmswitch-core/src/guidance/CCR_TOOL_GUIDE.md`、`sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-clock-tool-schemas.ts`，新增“不混用 + 最小模板 + 禁止冲突标记/裸 frontmatter 作为 Update File body”的说明；`npx tsc --noEmit` 与 `cd sharedmodule/llmswitch-core && npx tsc -p tsconfig.json --noEmit` 已通过。
+
+Tags: apply_patch, tool-guidance, errorsamples, unsupported_patch_format, invalid-hunk-header, failed-to-find-context, conflict-markers, guidance-fix, routecodex
+
+- 2026-03-18: 基于 `~/.rcc/errorsamples/client-tool-error/chat_process.req.stage2.semantic_map.apply_patch-*.json` 的近期主模式，host `snapshot-recorder` 现已把 `apply_patch verification failed` 细分为稳定子类型：`apply_patch_conflict_markers_or_merge_chunks`、`apply_patch_gnu_line_number_context_not_found`、`apply_patch_mixed_gnu_diff_inside_begin_patch`、`apply_patch_expected_lines_not_found`，不再全部落成泛化的 `apply_patch_verification_failed`。同时 llmswitch-core `maybeAugmentApplyPatchErrorContent()` 现在会对上述四类失败追加定向 retry hint（冲突标记、混用语法、猜测 GNU 行号、expected lines not found），帮助模型下一跳按正确方式重读文件和缩小上下文，而不是继续盲试。已验证：`tests/unified-hub/runtime-error-errorsample-write.spec.ts`、`tests/sharedmodule/apply-patch-error-hints.spec.ts`、根仓 `npx tsc --noEmit`、`sharedmodule/llmswitch-core npx tsc -p tsconfig.json --noEmit` 全通过。
+
+Tags: apply_patch, errorsamples, subtype-classification, retry-hints, snapshot-recorder, chat-mapper, llmswitch-core, routecodex
+
+- 2026-03-18: 推进 `routecodex-3.11.1` 时，对 `sharedmodule/llmswitch-core/src/conversion/hub/operation-table/semantic-mappers/gemini-mapper.ts` 做了第一刀真实拆解：把 Antigravity / Gemini request-shaping 逻辑（系统指令常量、默认 safety settings、flash 默认 thinking budget、networking/image request config、googleSearch 注入/裁剪、deepCleanUndefined）抽到新文件 `gemini-antigravity-request.ts`。拆解后 `gemini-mapper.ts` 体量从 `1605` 行降到 `1343` 行，`semantic-mapper-core-replay` 与 `semantic-mapper-public-replay` 仍保持通过。长期结论：3.11.1 的正确推进方式是先按高内聚语义块持续拆 `gemini-mapper.ts`，再继续把 operation-table core 往 native-primary 收敛，不能因为 replay 通过或 wrapper 变薄就误判任务完成。
+
+Tags: routecodex-3.11.1, gemini-mapper, semantic-mapper, antigravity, request-shaping, module-split, core-replay, public-replay, native-primary, rust-migration
+
+- 2026-03-18: 继续推进 `routecodex-3.11.1` 时，对 `gemini-mapper.ts` 做了第二刀拆分：把 systemInstruction 相关语义抽到 `gemini-system-semantics.ts`，包括 `ensureSystemSemantics`、`readSystemTextBlocksFromSemantics`、`collectSystemSegments`、`applyGeminiRequestSystemInstruction`。拆分后 `gemini-mapper.ts` 进一步从 `1343` 降到 `1258` 行，且 `npx tsc --noEmit`、`sharedmodule/llmswitch-core npx tsc -p tsconfig.json --noEmit`、`semantic-mapper-core-replay`、`semantic-mapper-public-replay` 均保持通过。可复用结论：`gemini-mapper.ts` 适合按高内聚语义块持续拆成 request-shaping / system semantics / thinking / tool output / audit 等模块，每拆一刀都必须同时跑 core + public replay，防止只在 wrapper 层看绿误判为 3.11.1 已完成。
+
+Tags: routecodex-3.11.1, gemini-mapper, semantic-mapper, system-semantics, module-split, core-replay, public-replay, native-primary, rust-migration
+
+- 2026-03-18: 继续推进 `routecodex-3.11.1` 时，对 `gemini-mapper.ts` 做了第三刀拆分：把 generation/thinking config 相关逻辑抽到 `gemini-thinking-config.ts`，包括 `buildGenerationConfigFromParameters` 与 `applyAntigravityThinkingConfig`。拆分后 `gemini-mapper.ts` 从 `1258` 进一步降到 `1080` 行，且 `sharedmodule/llmswitch-core npx tsc -p tsconfig.json --noEmit`、`npx tsc --noEmit`、`semantic-mapper-core-replay`、`semantic-mapper-public-replay` 均继续通过。可复用结论：`gemini-mapper.ts` 的安全拆分路径是按 request-shaping -> system semantics -> thinking config -> tool output/audit 这类高内聚语义块逐刀下沉，每一刀后都要同时跑 core/public replay，避免只看局部编译成功就误判 semantic parity 无漂移。
+
+Tags: routecodex-3.11.1, gemini-mapper, semantic-mapper, thinking-config, module-split, core-replay, public-replay, native-primary, rust-migration
+
+- 2026-03-18: 继续推进 `routecodex-3.11.1` 时，对 `gemini-mapper.ts` 做了第四刀拆分：把 tool output / function response 协议逻辑抽到 `gemini-tool-output.ts`，把 dropped/lossy mapping audit 记录抽到 `gemini-mapping-audit.ts`。拆分后 `gemini-mapper.ts` 从 `1080` 进一步降到 `882` 行，且 `sharedmodule/llmswitch-core npx tsc -p tsconfig.json --noEmit`、`npx tsc --noEmit`、`semantic-mapper-core-replay`、`semantic-mapper-public-replay` 均继续通过。可复用结论：在 semantic mapper 巨型文件上，优先拆高内聚协议块（request-shaping / system semantics / thinking / tool output / audit）是可持续路径；每一刀都应在 sharedmodule 侧配套 core + public replay 做行为守护，避免把“更易读”误判成“语义仍完全一致”。
+
+Tags: routecodex-3.11.1, gemini-mapper, semantic-mapper, tool-output, mapping-audit, module-split, core-replay, public-replay, native-primary, rust-migration
+
+- 2026-03-18: `routecodex-3.11.1` 的 Gemini semantic-mapper 继续拆 residual helper：新增 `gemini-chat-request-helpers.ts` 与 `gemini-semantics-state.ts`，把 schema alignment / request content / protocol helper / semantics-state 从 `gemini-mapper.ts` 抽出，并清掉未再使用的本地 dead helper。结果：`gemini-mapper.ts` 从 882 行降到 499 行；验证保持 `sharedmodule tsc + root tsc + semantic-mapper core/public replay` 全通过。当前结论仍是 `routecodex-3.11.1` 只能继续保持 in_progress；Gemini 主文件已过第一轮体量收口，但整个 semantic-mapper family 尚未达到 native-primary 完成态。
+
+Tags: rust-migration, routecodex-3.11.1, semantic-mapper, gemini-mapper, modularization, replay, tsc, heartbeat
+
+- 2026-03-18: `routecodex-3.11.1` 继续拆 `anthropic-mapper.ts`：新增 `anthropic-thinking-config.ts` 与 `anthropic-semantics-audit.ts`，把 Anthropic thinking config 正规化/预算/输出配置合并，以及 tools semantics / system clone / responses-origin / mapping audit helper 抽出主文件。结果：`anthropic-mapper.ts` 从 748 行降到 385 行；验证保持 `sharedmodule tsc + root tsc + semantic-mapper core/public replay` 全通过。可复用结论：对 semantic-mapper 巨型文件，优先按 thinking-config 与 semantics/audit 这类高内聚协议块拆分，可以在不改 host/provider 语义边界的前提下快速压缩主文件并保持 replay 稳定。
+
+Tags: rust-migration, routecodex-3.11.1, anthropic-mapper, semantic-mapper, thinking-config, mapping-audit, module-split, replay, tsc, heartbeat
+
+- 2026-03-18: `routecodex-3.11.1` 继续拆 `responses-mapper.ts`：新增 `responses-submit-tool-outputs.ts`，把 submit-tool-outputs endpoint 的 response_id 解析、resume tool output 恢复、captured tool result 收集、payload 组装从主文件抽出。结果：`responses-mapper.ts` 从 558 行降到 319 行；验证保持 `sharedmodule tsc + root tsc + semantic-mapper core/public replay` 全通过。可复用结论：Responses mapper 适合优先把 submit-tool-outputs 这种与 create-request 主路径职责不同的次级协议分支独立成 helper，能显著降低主编排文件复杂度且不改变 public mapper 行为。
+
+Tags: rust-migration, routecodex-3.11.1, responses-mapper, semantic-mapper, submit-tool-outputs, module-split, replay, tsc, heartbeat
+
+- 2026-03-18: 在 `routecodex-3.11.1` 的 semantic-mapper closeout 阶段，单个 family aggregate gate 已被证实过粗：本轮把 `sharedmodule/llmswitch-core/scripts/tests/coverage-hub-semantic-mappers.mjs` 扩展为支持 `SEMANTIC_MAPPER_TARGET=responses|anthropic|gemini|family`，并新增 package scripts `test:coverage:hub-semantic-mappers-{responses,anthropic,gemini}` 与对应 `verify:shadow-gate:*`，同时在 `sharedmodule/llmswitch-core/config/rust-migration-modules.json` 新增 `hub.semantic-mappers.{responses,anthropic,gemini}-operation-table` 三个 module entry。这轮还补了 responses/anthropic/gemini 三条 mapper 的 direct main-path coverage，使 family aggregate 从 77.97/65.47 提升到 88.34/74.85；当前 per-mapper baseline 分别为 responses 84.08/68.78、anthropic 92.35/80.84、gemini 87.94/73.51。可复用结论：semantic-mapper family 不应再只靠一个 aggregate gate 判断 closeout，应该按 mapper 分治收口；另一个实践结论是这些 coverage scripts 目前内置 build:ci，不适合并行跑，否则会被 clean-dist 互相踩。
+
+Tags: routecodex-3.11.1, semantic-mappers, coverage, shadow-gate, responses, anthropic, gemini, rust-migration, heartbeat
+
+- 2026-03-18: semantic-mapper closeout 继续优先推进 anthropic：在 `sharedmodule/llmswitch-core/scripts/tests/coverage-hub-semantic-mappers.mjs` 中补了 anthropic helper 的多种边界输入（thinking config normalize / budget map / output config / existing semantics / invalid tools node / null metadata / empty system blocks），并补了 anthropic mapper 主路径的反向分支（default entryEndpoint fallback、bad-shape metadata + providerMetadata restore、stop -> stop_sequences、显式已有 thinking/output_config 保留、parameters.messages/tools 跳过、system/providerExtras getter 抛错时 fail-soft）。结果：`test:coverage:hub-semantic-mappers-anthropic` 从 92.35/80.84 提升到 96.25/89.58，family aggregate 也从 88.34/74.85 提升到 89.31/77.68。可复用结论：anthropic 这条线已经证明“先补 helper，再补 mapper 本体反向分支”是有效路径；当前最大剩余缺口已集中到 `anthropic-mapper` 主体 branch，而不再是 helper 覆盖。
+
+Tags: routecodex-3.11.1, semantic-mappers, anthropic, coverage, branch-coverage, shadow-gate, rust-migration, heartbeat
+
+- 2026-03-18: semantic-mapper closeout 继续聚焦 anthropic：在 `sharedmodule/llmswitch-core/scripts/tests/coverage-hub-semantic-mappers.mjs` 中新增了两个关键 inbound case——一个命中 `extractMetadataPassthrough()` 的真实 passthrough 形状（`rcc_passthrough_tool_choice: '"auto"'`），一个命中 `mergeParameters(undefined)` 与空 `parameters` 删除路径；同时补了 budget-map 对象值忽略、`applyEffortBudget({})` 原样返回、非对象 truthy ctx、primitive metadata 建根、`message.content` 为普通对象等残余 helper 分支。结果：`test:coverage:hub-semantic-mappers-anthropic` 从 96.25/89.58 进一步提升到 98.75/93.58。当前结论：anthropic 已非常接近 95/95 gate，剩余主要卡在 `anthropic-mapper` 的 `sanitizeAnthropicPayload()` 删除未知 key 分支，以及 `anthropic-thinking-config` 的少量尾部分支。
+
+Tags: routecodex-3.11.1, semantic-mappers, anthropic, coverage, branch-coverage, passthrough, shadow-gate, rust-migration, heartbeat
+
+- 2026-03-18: `routecodex-3.11.1` semantic-mappers closeout 中，per-mapper anthropic 线已正式通过 shadow gate：`verify:shadow-gate:hub-semantic-mappers-anthropic` PASS，summary 为 lines 100 / branches 95.68，并自动 promote `hub.semantic-mappers.anthropic-operation-table` -> `preparedForShadow=true`。本轮为补 stubborn branch，新增 direct sanitize 覆盖与 thinking-config 的 boolean/object-invalid/invalid-budget-string case；下一步应转去补 `responses`，不要继续在 anthropic 上做非必要打磨。
+
+Tags: rust-migration, routecodex-3.11.1, semantic-mappers, anthropic, shadow-gate, coverage, preparedForShadow
+
+- 2026-03-18: `routecodex-3.11.1` 在 anthropic 过 gate 后已切到 `responses` closeout。先补了 `responses-submit-tool-outputs` 的 fail-soft / fallback / dedupe / missing-tool-outputs 分支，以及 `responses-mapper` 的 submit endpoint 主路径与 bad-shape semantics context 回退；`test:coverage:hub-semantic-mappers-responses` 从 84.08/68.78 提升到 89.24/77.77。当前建议继续优先打 `responses-mapper` 主路径，不要过早切回 gemini。
+
+Tags: rust-migration, routecodex-3.11.1, semantic-mappers, responses, coverage, submit-tool-outputs, shadow-gate, heartbeat
+
+- 2026-03-18: 用户再次明确工作偏好：当任务进入异步等待/后台构建/长时验证/未知完成时间阶段时，必须使用 clock 做定时唤醒回查；除危险、破坏性或高度不确定操作外，大多数情况下不需要停下来询问用户，应该直接执行并持续推进主线。
+
+Tags: user-preference, clock, async-wait, proactive-execution, no-unnecessary-questions
+
+- 2026-03-18: 已新增全局 skill `~/.codex/skills/clock-follow-up/`，用于 RouteCodex 异步等待后的定时回查执行流。该 skill 与已有 `clock` 的分工为：`clock` 偏通用“何时应该设提醒”，`clock-follow-up` 偏执行型“提醒文案怎么写、醒来后如何按 complete/still-running/failed 三态继续执行、如何避免 reminder spam、如何区分 heartbeat 与 clock”。后续遇到 build/test/server/log/replay/provider 等未知完成时间任务时，优先用该 skill 约束 follow-up 行为。
+
+Tags: skill, clock, clock-follow-up, async-wait, reminder, wakeup-state-machine, heartbeat-boundary
+
+- 2026-03-18: `routecodex-3.11.1` semantic-mappers closeout 继续推进，responses 线已正式通过 shadow gate：`test:coverage:hub-semantic-mappers-responses` 提升到 lines 100 / branches 96.06，`verify:shadow-gate:hub-semantic-mappers-responses` PASS，并自动 promote `hub.semantic-mappers.responses-operation-table` -> `preparedForShadow=true`。本轮做法是：先用 public path 补主路径/submit-tool-outputs 分支，再把少量 helper 提升为命名导出做最小可测化，避免用非法 payload 硬撞 coverage。下一步应切去补 `gemini`，而不是继续打磨已过 gate 的 responses。
+
+Tags: rust-migration, routecodex-3.11.1, semantic-mappers, responses, shadow-gate, coverage, preparedForShadow
+
+- 2026-03-18: Heartbeat 定时精度排查已补上 **cron-shadow 对照诊断**，真源在 `sharedmodule/llmswitch-core/src/servertool/heartbeat/schedule-diagnostics.ts`。现在 heartbeat daemon 每次进入 due dispatch 判定时，都会把 `observedAtMs / daemonScanMs / effectiveIntervalMs / anchorAtMs / dueAtMs / dueInMs / latenessMs` 与 `cronShadow`（可映射时给出如 `*/10 * * * *` / `0 */2 * * *` 的 cron 表达式、上一/下一边界、边界偏移）落到 `state.lastScheduleDiagnostic` 和 history `details.scheduleDiagnostic`。长期结论：heartbeat 的“定时不准”不能只看触发时间，至少要同时区分 1) daemon scan 粒度带来的 lateness；2) due 后被 skip、随后按 scan 重试造成的累积 lateness；3) interval 本身不能稳定映射到 cron（如 sub-minute）时的不可比场景。验证：`sharedmodule/llmswitch-core npm run build:ci`、`node --experimental-vm-modules ./node_modules/jest/bin/jest.js --runInBand --runTestsByPath tests/servertool/servertool-heartbeat-cron-shadow.spec.ts tests/servertool/servertool-heartbeat.spec.ts`、`./node_modules/.bin/tsc -p tsconfig.json --noEmit` 全通过；`npm run build:dev` 受 repo-sanity 的顶层 `.drudge` 阻塞，非本轮改动引起。
+
+Tags: heartbeat, cron-shadow, timer-precision, daemon-scan, lateness, schedule-diagnostic, history, state, routecodex
+
+- 2026-03-19: 用户新增明确执行偏好：**所有等待都需要 drudge alarm 超时唤醒**。后续凡是进入等待态（构建、重启、后台任务、异步验证、长时巡检、定时回查），默认优先使用 drudge alarm 作为超时唤醒机制，而不是只依赖 clock/心跳/记忆回头看；clock 仍可用于业务提醒，但等待控制的超时真源改为 drudge alarm。
+
+Tags: user-preference, drudge, alarm, timeout, async-wait, waiting, workflow
+
+- 2026-03-19: `/Volumes/extension/.rcc/errorsamples` 巡检表明当前空间问题几乎全由 `client-tool-error` 引起：清理前总量 131MB / 1367 files，其中 `client-tool-error` 约 128MB，主要是 `chat_process.req.stage2.semantic_map.exec_command`（462 条，几乎全是 `exec_command_non_zero_exit`）和 `...apply_patch`（150 条，主为 mixed GNU diff / expected lines not found / conflict markers）。这些样本大多是低价值重复噪音，而非新的 host 根因。已收紧真源：`src/utils/errorsamples.ts` 现在对 `client-tool-error` 默认使用更小预算（24KB/sample, 120 files, 12MB/group）；`src/modules/llmswitch/bridge/snapshot-recorder.ts` 现在对 client-tool 样本只写精简 trace/observation，并新增默认 30 分钟的跨 request 去重窗口（按 endpoint + stage + toolName + errorType）。已有目录已按用户要求清空到 0B。
+
+Tags: errorsamples, client-tool-error, snapshot-recorder, dedup-window, compact-trace, apply_patch, exec_command, disk-usage, routecodex
+
+- 2026-03-19: 执行 `npm run build:dev` 后检查 `/Volumes/extension/.rcc/errorsamples`，发现目录仍迅速恢复到 129MB / 624 files，且最新样本仍是 `maxBytes=262144` 的旧形态。继续核查后确认：当时 5555 监听进程并不是本次刚装的 `routecodex`，而是旧的全局 `@jsonstudio/rcc`（其 `dist/utils/errorsamples.js` 仍保留旧预算，如 `client-tool-error` 800 files / 128MB，样本单文件仍走 256KB 默认截断）。补做 `npm run install:release` 并 `rcc restart --port 5555` 后，5555 进程已切到本地仓库 `dist/index.js`，全局 rcc 预算也已更新为 `client-tool-error` 24KB / 120 files / 12MB；随后清空 `/Volumes/extension/.rcc/errorsamples`，当前为 0B / 0 files。可复用结论：只跑 `build:dev` / `install:global` 不能证明 live 5555 server 已换到新 errorsamples writer；必须同时确认**实际监听进程路径**与**全局 rcc 包版本/阈值**，否则会被旧受管 rcc 进程的历史写盘误导。
+
+Tags: errorsamples, build-install, release-install, rcc, routecodex, live-server, port-5555, sample-budget, routecodex
+
+- 2026-03-19: `apply_patch` 新一轮 errorsamples 复盘后确认，当前高频 mixed GNU diff 问题里还有一类**被 validator 放行、但仍会在客户端 apply_patch 校验阶段失败**的漏网形状：模型把 `diff --git` / `index` / `similarity index` / `rename from` / `rename to` 等 Git metadata 混进 `*** Update File:` 区块时，旧逻辑只会跳过 `---/+++`，却把其余 metadata 当成普通正文前缀成 `' '`，从而生成“看起来合法、实际 client 端会炸”的 patch。最小正确修复已落在 `sharedmodule/llmswitch-core/src/tools/apply-patch/patch-text/normalize.ts`：Update File 区块内现在会跳过上述 Git metadata，并把 `rename to ...` 归一成 `*** Move to: ...`；同时保留此前“+/- 后续裸行继承前缀”的兼容修复。验证：`tests/sharedmodule/apply-patch-validator.spec.ts`、`tests/unified-hub/runtime-error-errorsample-write.spec.ts`、`tests/utils/errorsamples.spec.ts` 通过，`sharedmodule/llmswitch-core npm run build` 全 matrix 通过，根仓 `npm run build:dev` / `install:global` / 5555 restart 通过，live 版本更新到 `routecodex 0.90.506` / `@jsonstudio/llms 0.6.4036`。
+
+Tags: apply_patch, errorsamples, git-metadata, diff-git, rename-to, move-to, normalize, validator-gap, live-deploy, routecodex
+
+- 2026-03-19: 再次巡检当前 errorsamples 后确认，`~/.rcc/errorsamples` 与 `/Volumes/extension/.rcc/errorsamples` 现在是**同一份样本目录**（samefile），当前仅剩 8 个小样本；其中真正独立类型主要是 1) provider 外部错误（tabglm 429 并发限流、crs 502 upstream gateway）和 2) client-tool 误用（`apply_patch_verification_failed` 首行不是 `*** Begin Patch`、`apply_patch_mixed_gnu_diff_inside_begin_patch`、`apply_patch_expected_lines_not_found`、`exec_command_non_zero_exit/failed`）。这说明当前磁盘噪音已收敛，残留 `apply_patch` 问题更偏**模型遵循/提示词问题**而不是 errorsamples writer 或 host 新根因。已把“internal patch 第一行必须是 `*** Begin Patch`、Begin Patch 与 GNU diff 不能混用、命中 expected-lines/context 先重读文件再重建 patch”的规则同步强化到 `src/config/system-prompts/codex-cli.txt` 与 `sharedmodule/llmswitch-core/src/guidance/index.ts`；针对该 guidance 的回归测试 `tests/sharedmodule/tool-guidance-exec-command.spec.ts` 已通过。
+
+Tags: errorsamples, apply_patch, guidance, prompt, samefile, provider-429, provider-502, exec_command, routecodex
+
+- 2026-03-19: semantic-mapper gemini 收口补测时命中一个可复用稳定性问题：历史 `assistant.tool_calls` 数组可能含 `null` / 非对象条目，原逻辑在 `collectAssistantToolCallIds()` 与 `synthesizeToolOutputsFromMessages()` 直接读取 `id` 会抛 TypeError。修复方式是最小正确层 guard（先判定 `call && typeof call === 'object'` 再读字段），并通过 `test:coverage:hub-semantic-mappers-gemini` + `verify:shadow-gate:hub-semantic-mappers-gemini` + family gate 复验，最终 `hub.semantic-mappers.gemini-operation-table` 与 family 都 promoted 为 `preparedForShadow=true`。可复用结论：对历史消息回放路径，tool_calls 必须按“不可信数组元素”处理，任何 id 提取都要先做对象形状校验。
+
+Tags: routecodex-3.11.1, gemini-mapper, tool_calls, null-guard, malformed-history, semantic-mappers, shadow-gate, rust-migration
+
+- 2026-03-19: 继续推进 `routecodex-267.5`，完成 `lmstudio_responses_input_stringify` 的 native 化收口：
+  - TS action `lmstudio-responses-input-stringify.ts` 改为 native thin wrapper（调用 `applyLmstudioResponsesInputStringifyWithNative`）；
+  - Rust 新增专用导出 `applyLmstudioResponsesInputStringifyJson`（`req_outbound_stage3_compat/lmstudio/request.rs` + `req_outbound_stage3_compat.rs` + `lib.rs`）；
+  - 为避免 test/runtime 场景中 env 可见性差异，在 adapter context 的 `__rt` 增加 `lmstudioStringifyInputEnabled` 覆盖开关；Rust `core_utils.rs` 读取该开关优先于环境变量；
+  - 兼容语义保持不变：仅在 `LLMSWITCH_LMSTUDIO_STRINGIFY_INPUT=1` / `ROUTECODEX_LMSTUDIO_STRINGIFY_INPUT=1` 且 `providerProtocol=openai-responses` 时生效。
+  - 验证通过：`sharedmodule npm run build:ci`、lmstudio/field-mapping/harvest 三个 action 测试、`verify:shadow-gate:hub-req-outbound-compat`（100/100）、根仓 `npm run build:dev`、`/health`=0.90.514。
+
+Tags: rust-migration, routecodex-267.5, lmstudio, responses-input-stringify, native-wrapper, req-outbound-compat, shadow-gate
+
+- 2026-03-19: `routecodex-267.5` 继续收口，完成 `field-mapping.ts` native 化：
+  - 新增 Rust 模块 `compat_field_mapping.rs`，实现 `apply_field_mappings_json(payload_json, mappings_json)`；
+  - `lib.rs` 导出 `applyFieldMappingsJson`，TS `native-compat-action-semantics.ts` 新增 `applyFieldMappingsWithNative(...)`；
+  - `conversion/compat/actions/field-mapping.ts` 由本地 180+ 行映射逻辑收敛为 native thin wrapper，保留原 type/interface 入口。
+  - 回归验证：field-mapping/harvest/lmstudio 三组 compat action 测试全通过（9/9），`verify:shadow-gate:hub-req-outbound-compat` 100/100，根仓 build:dev + global install + 5555 health 通过（0.90.515）。
+
+Tags: rust-migration, routecodex-267.5, field-mapping, native-wrapper, compat-actions, req-outbound-compat, build-dev
+
+- 2026-03-19: `routecodex-267.5` 继续推进 `harvest-tool-calls-from-text.ts`：已改为 native thin wrapper（`harvestToolCallsFromTextJson`），新增 Rust 模块 `compat_harvest_tool_calls_from_text.rs` 并接入 loader required exports。关键兼容点：对 `reasoning_content` 先做 transport-noise 清理，再对 `exec_command<arg_key>... </tool_call>` 这类 bare 前缀形状补 `<tool_call>` 开标签后再收割 tool_calls，保持“形状修复、不改语义上下文”。验证：`sharedmodule npm run build:ci` 通过，`jest src/conversion/compat/actions/__tests__/harvest-tool-calls-from-text.test.ts --runInBand` 5/5 通过，根仓 `npm run build:dev`（含 install:global + 5555 restart）通过，live 版本 `routecodex 0.90.517` / `@jsonstudio/llms 0.6.4042`。
+
+Tags: rust-migration, routecodex-267.5, harvest-tool-calls-from-text, native-wrapper, reasoning-content, shape-repair, no-semantic-trim, compat-actions, build-dev
+
+- 2026-03-19: `routecodex-267.5` 继续 Rust 化 `compat/actions`，完成 `tool-schema.ts` 收口：新增 Rust 模块 `compat_tool_schema.rs` 与导出 `sanitizeToolSchemaGlmShellJson`，TS `tool-schema.ts` 改为 native thin wrapper（`sanitizeToolSchemaGlmShellWithNative`），保持 `glm_shell` 语义（移除 `function.strict`、规范 shell `command` 参数 schema、补 `required.command`、默认 `type=object` 与 `additionalProperties=false`）。新增回归 `src/conversion/compat/actions/__tests__/tool-schema.test.ts`（3/3），并与 `field-mapping`、`harvest-tool-calls-from-text` 一起回归（合计 10/10）。验证：`sharedmodule npm run build:ci` 通过，根仓 `npm run build:dev`（含 install:global、5555 restart）通过，live 版本更新到 `routecodex 0.90.518` / `@jsonstudio/llms 0.6.4042`。
+
+Tags: rust-migration, routecodex-267.5, tool-schema, glm-shell, native-wrapper, compat-actions, no-semantic-trim, build-dev, global-install
+
+- 2026-03-19: `routecodex-267.5` 继续收口 `compat/actions`，完成 `apply-patch-fixer.ts` native 化：新增 Rust 模块 `compat_fix_apply_patch.rs` 与导出 `fixApplyPatchToolCallsJson`，TS action `apply-patch-fixer.ts` 改为 native thin wrapper（`fixApplyPatchToolCallsWithNative`）。新逻辑保持“仅形状修复、不裁剪语义上下文”：只处理 assistant/function/apply_patch 且 `arguments` 为 string 的条目；支持单行 `*** Begin Patch *** Add/Update/Delete File` 展开与 Add File 正文补 `+`；输出统一为 `{\"patch\":...,\"input\":...}`；对仍含 `diff --git/index/rename` 元数据的 payload 保守跳过，避免把潜在非法 patch 强改后放大风险。新增回归：`src/conversion/compat/actions/__tests__/apply-patch-fixer.test.ts`（2/2）+ Rust 模块单测（2/2）；并联合 `tool-schema/field-mapping/harvest` compat action 回归（12/12）。验证：`sharedmodule npm run build:ci`、`npx jest ...compat/actions/__tests__... --runInBand`、`tests/responses/responses-openai-bridge.spec.ts -t shape-repairs...`、根仓 `npm run build:dev`（含 install:global + 5555 restart）全部通过，live 版本 `routecodex 0.90.519`。
+
+Tags: rust-migration, routecodex-267.5, apply-patch-fixer, apply_patch, native-wrapper, shape-repair, no-semantic-trim, compat-actions, build-dev, live-deploy
+
+- 2026-03-19: Rust 化推进中顺手修复一个隐性断点：`sharedmodule/llmswitch-core/src/conversion/compat/actions/index.ts` 残留了不存在的 `./apply-patch-format-fixer.js` import，平时因入口路径未触发不明显，但在 action 索引加载场景会直接 module-not-found。已移除该幽灵 import，保持 `apply-patch-fixer` 单一真源；同时清理 `compat_fix_apply_patch.rs` 未使用导入。验证：`sharedmodule npm run build:ci`、4 个 compat action 回归（apply-patch-fixer/tool-schema/field-mapping/harvest）12/12、根仓 `npm run build:dev`（含 install:global + 5555 restart）通过，live 版本 `routecodex 0.90.520`。
+
+Tags: rust-migration, compat-actions, apply-patch-fixer, module-not-found, dead-import, build-dev, live-deploy
+
+- 2026-03-19: `routecodex-3.11.7` 首轮推进完成“HubPipeline normalize 编排元信息 native 前移”：Rust `run_hub_pipeline` 不再只回填 `providerProtocol`，而是统一产出 `entryEndpoint/providerProtocol/processMode/direction/stage/stream/routeHint`，并在同一层完成 stopMessage tmux 会话别名归一（`clientTmuxSessionId/client_tmux_session_id/tmuxSessionId/tmux_session_id`）与 `runtime.applyPatchToolMode` 推导（env 优先，再从 tools 形状识别）。TS `hub-pipeline.ts` 的 `normalizeRequest` 改为把完整 metadata 送入 native，并以 native 返回字段作为 `NormalizedRequest` 权威值，减少 TS 侧编排决策重复。关键约束保持不变：不裁剪上下文、不改请求语义，仅做形状与编排规范化。验证通过：`cargo test ... hub_pipeline`（49 passed，含新增 3 个用例）+ `sharedmodule npm run build:ci` + 根仓 `npm run build:dev`（install:global + 5555 restart）。
+
+Tags: rust-migration, routecodex-3.11.7, hub-pipeline, orchestration, native-primary, normalize-request, stop-message, apply-patch-tool-mode, no-semantic-trim
+
+- 2026-03-19: `routecodex-3.11.9` phase-1 已落地：将 Anthropic 响应侧 stop_reason 决策从 TS 下沉到 Rust（`hub_resp_outbound_client_semantics.rs` 新增 `resolveAnthropicStopReasonJson`），统一输出 `normalized / finishReason / isContextOverflow`，`response-runtime.ts` 改为消费 native 结果来做 context-overflow fail-fast 与 finish_reason 映射。可复用结论：响应侧 finish/status 归一属于高频 shape 语义，应放入 native 真源，TS 仅保留 transport 适配层。另一个测试层经验：responses reasoning 在 payload 中可能以 `content[].text` 或 `summary[].text` 表达同一语义，断言应基于“语义文本存在”而不是绑定单一字段形状，避免误报回归。
+
+Tags: rust-migration, routecodex-3.11.9, response-runtime, provider-response, anthropic, stop-reason, finish-reason, native-primary, shape-semantics, tests
+
+- 2026-03-19: `routecodex-3.11.9` 同轮补充收口：`provider-response.ts` 的 client protocol 解析从本地 endpoint 字符串判断迁移到 `resolveHubClientProtocolWithNative`，确保 request/response 两侧协议判定使用同一 native 真源，避免未来 `/v1/*` 入口规则漂移时两处逻辑分叉。
+
+Tags: rust-migration, routecodex-3.11.9, provider-response, protocol-resolution, native-source-of-truth, hub-pipeline
+
+- 2026-03-19: `routecodex-3.11.9` phase-2 继续收口 response 路径：把 `provider-response.ts` 里剩余两块高频语义分支前移 native 真源——(1) tool-surface shadow 诊断用的工具调用摘要（openai-chat / openai-responses / anthropic 三协议），(2) `ProviderProtocolError.details.providerType` 判定。实现为 Rust `hub_resp_outbound_client_semantics.rs` 新增 `summarizeToolCallsFromProviderResponseJson` + `resolveProviderTypeFromProtocolJson`，TS wrapper 新增 `summarizeToolCallsFromProviderResponseWithNative(...)` + `resolveProviderTypeFromProtocolWithNative(...)`，并在 `provider-response.ts` 删除本地 `summarizeToolCallsFromProviderResponse`/`inferProviderTypeFromProtocol` 分支。验证链通过：两个 Rust 单测 + response-runtime anthropic-hidden-reasoning jest + responses-openai-bridge shape-repairs + sharedmodule build:ci + root build:dev/install:global/restart + `/health` 0.90.524。另一个可复用经验：根仓某些旧测试入口仍受 `import.meta` 与 CJS transform 冲突影响（如 provider-response-single-entry-intercept），失败时应先判定为测试基建问题，不要误归因到本轮 response 语义变更。
+
+Tags: rust-migration, routecodex-3.11.9, provider-response, response-runtime, tool-surface-shadow, provider-type, native-primary, no-semantic-trim, build-dev, test-infra
+
+- 2026-03-19: `routecodex-3.11.9` 在 phase-2 后继续做了一轮 response thin-shell 收口：清理 `response-runtime.ts` 与 `provider-response.ts` 中已经不再参与主路径的 TS 旧分支（Anthropic alias/sanitize/tool-result 旧链路与 provider-response 的本地 helper）。这类“native 已接管后仍残留 TS helper”的代码不会立即坏，但会长期增加语义漂移与误修风险；在 Rust 化推进中应及时删除死分支而不是长期并存。验证通过：response-runtime anthropic hidden reasoning + anthropic text tool markup + stopmessage anthropic stop_sequence + sharedmodule build:ci + root build:dev/install/restart，live `/health` = 0.90.525。
+
+Tags: rust-migration, routecodex-3.11.9, response-runtime, provider-response, thin-shell, dead-code-cleanup, native-primary, no-semantic-trim
+
+- 2026-03-19: `routecodex-3.11.9` phase-3 新切片把 `provider-response.ts` 的 internal debug marker 清理从 TS 本地 delete 分支迁移到 native action（`applyResponseBlacklistWithNative`）。这类“字段黑名单清理”属于通用 response compat 语义，不应在 hub response runtime 再写一份本地删除逻辑；正确做法是 TS 只给出 policy paths，实际清理由 native 真源执行。验证通过：response-runtime anthropic tests + stopmessage anthropic stop_sequence + sharedmodule build:ci + root build:dev/install/restart，live `/health`=0.90.526。另：根仓 provider-response-converter.finish-reason 测试失败仍是既有 Jest ESM/CJS transform 基建问题，需单独处理。
+
+Tags: rust-migration, routecodex-3.11.9, provider-response, applyResponseBlacklist, native-compat-action, response-shape, thin-shell, no-semantic-trim, test-infra
+
+- 2026-03-19: `routecodex-3.11.9` 继续把 Anthropic completion outcome 决策前移 native：新增 `resolveAnthropicChatCompletionOutcomeJson`（Rust）与 `resolveAnthropicChatCompletionOutcomeWithNative`（TS wrapper），统一输出 `normalized/finishReason/isContextOverflow/shouldFailEmptyContextOverflow`。`response-runtime.ts` 不再本地推断 finish_reason/overflow-empty fail gate，而是直接消费 native outcome。可复用结论：当 stop_reason 派生出的多个判定（finish_reason + fail-fast gate）存在联动时，应该作为单一 native outcome 一次性产出，避免 TS 侧分散条件分叉导致语义漂移。验证链通过：cargo filter test + response-runtime/anthropic tests + stopmessage anthropic + sharedmodule build:ci + root build:dev/install/restart，live `/health`=0.90.527。
+
+Tags: rust-migration, routecodex-3.11.9, anthropic, completion-outcome, finish-reason, fail-fast, native-primary, response-runtime, no-semantic-trim
+
+- 2026-03-19: `routecodex-3.11.7` 继续收口 HubPipeline 编排残余 helper：已将 `maybeApplyDirectBuiltinWebSearchTool` 的核心语义（anthropic + search route gate、runtime `webSearch.engines` direct+builtin 匹配、`maxUses` 归一、canonical web_search tool 替换/插入）前移到 Rust `hub_pipeline.rs`，新增 NAPI `applyDirectBuiltinWebSearchToolJson` 与 TS wrapper `applyDirectBuiltinWebSearchToolWithNative`；`hub-pipeline.ts` 现为 thin wrapper，不再保留整段本地 TS 编排分支。可复用结论：这类“路由命中后对 provider payload 的工具编排注入”应收敛到 native 单一真源，避免同一策略在 TS/Rust 双份实现长期漂移。验证通过：`cargo test ... apply_direct_builtin_web_search_tool` + `sharedmodule npm run build`（含 matrix）+ 根仓 `npm run build:dev/install:global/restart` + `/health`=0.90.530。
+
+Tags: rust-migration, routecodex-3.11.7, hub-pipeline, web-search, direct-builtin, native-primary, tool-injection, thin-shell, no-semantic-trim
+
+- 2026-03-19: `routecodex-3.11.7` 再收口一段 HubPipeline 编排 helper：`liftResponsesResumeIntoSemantics` 已前移 native 真源。Rust `hub_pipeline.rs` 新增 `lift_responses_resume_into_semantics`（NAPI `liftResponsesResumeIntoSemanticsJson`），统一处理 “从 metadata 注入 `semantics.responses.resume`（仅当缺失时）+ 清理 metadata.responsesResume” 的双侧编排；TS `hub-pipeline.ts` 仅保留 thin wrapper 并原地同步 metadata，避免 request/metadata 联动逻辑分散在 TS。可复用结论：对同一语义同时改写 request 与 metadata 的 helper，必须在 native 一次性输出结果，避免 TS 多处分支造成字段状态不一致。验证通过：`cargo test ... lift_responses_resume_into_semantics` + `sharedmodule npm run build`（matrix）+ 根仓 `npm run build:dev/install:global/restart` + `/health`=0.90.531。
+
+Tags: rust-migration, routecodex-3.11.7, hub-pipeline, responses-resume, semantic-lift, metadata-cleanup, native-primary, thin-shell, no-semantic-trim
+
+- 2026-03-19: `routecodex-3.11.7` 继续收口 HubPipeline helper：`syncResponsesContextFromCanonicalMessages` 已切 native。Rust `hub_pipeline.rs` 新增 `sync_responses_context_from_canonical_messages`（NAPI `syncResponsesContextFromCanonicalMessagesJson`），当 `semantics.responses.context` 存在时，统一在 native 基于 canonical `messages/tools` 重建 `input` 与 `originalSystemMessages` 并回填 context；TS helper 改为 thin wrapper。可复用结论：凡是“桥接历史重建 + context 回填”的编排逻辑应在 native 真源集中，避免 TS 侧重复桥接构建导致上下文字段漂移。验证通过：`cargo test ... sync_responses_context_from_canonical_messages` + `sharedmodule npm run build`（matrix）+ 根仓 `npm run build:dev/install:global/restart` + `/health`=0.90.532。
+
+Tags: rust-migration, routecodex-3.11.7, hub-pipeline, responses-context, bridge-history, canonical-messages, native-primary, thin-shell, no-semantic-trim
+
+- 2026-03-19: `routecodex-3.11.7` 再次推进 HubPipeline thin-shell：移除 `resolveSseProtocol` / `extractModelHint` / `resolveOutboundStreamIntent` / `applyOutboundStreamPreference` / `resolveActiveProcessMode` / `assertNoMappableSemanticsInMetadata` 六个 TS helper，并改为调用点 direct native wrapper（`resolveSseProtocolWithFallbackWithNative`、`extractModelHintFromMetadataWithNative`、`resolveOutboundStreamIntentWithNative`、`applyOutboundStreamPreferenceWithNative`、`resolveActiveProcessModeWithNative`、`findMappableSemanticsKeysWithNative`）。关键结论：对“一次调用即转发 native”的 TS helper 应优先删除，保持 hub-pipeline 只做编排而不保留重复语义壳。验证通过：`sharedmodule npm run build`（matrix）+ 根仓 `npm run build:dev/install:global/restart` + `/health`=0.90.545。
+
+Tags: rust-migration, routecodex-3.11.7, hub-pipeline, thin-shell, direct-native, sse-protocol, model-hint, semantic-gate, outbound-stream, active-process-mode
+
+- 2026-03-20: `routecodex-3.11.9` 再做一轮 response thin-shell 收口：`response-runtime.ts` 删除最后两个顶层 reasoning helper（`collapseReasoningSegments` / `normalizeMessageReasoningPayload`），改为 `buildOpenAIChatFromAnthropicMessage` 局部闭包，确保“只改形状组织、不改语义结果”。该切片完成后 `response-runtime.ts` 顶层 `function` helper 清零，文件行数 491（<500），并通过 `sharedmodule npm run build`（含 matrix）+ 根仓 `npm run build:dev/install:global` + `/health` 0.90.557。可复用结论：当 helper 仅服务单一调用点且无跨模块复用价值时，优先局部闭包化以消除顶层漂移面；真正跨协议/跨路径语义再下沉 native 真源。
+
+Tags: rust-migration, routecodex-3.11.9, response-runtime, thin-shell, top-level-helper-zero, reasoning-normalization, no-semantic-trim, build-dev
+
+- 2026-03-20: `routecodex-3.11.9` 在 response-runtime 顶层 helper 清零后，继续清理死状态 `aliasCollector`（tool_use 分支只写入从未读取）。这是零语义改动的薄壳收口：删除无效 state 写入可降低后续误判“alias map 生效来源”的调试噪声。验证通过 `sharedmodule npm run build`（含 matrix）+ 根仓 `npm run build:dev/install:global` + `/health` 0.90.558。
+
+Tags: rust-migration, routecodex-3.11.9, response-runtime, dead-state-cleanup, aliasCollector, thin-shell, no-semantic-trim, build-dev
+
+- 2026-03-20: `routecodex-3.11.9` 收口补刀：在 response-runtime 清理 dead state 后，继续删掉未使用类型导入 `JsonValue`，保证文件仅保留真实依赖。该类“类型级 dead code”不会改变运行语义，但能降低后续 Rust 化时的认知噪声与误判依赖。验证通过 `sharedmodule npm run build`（含 matrix）+ 根仓 `npm run build:dev/install:global` + `/health` 0.90.559。
+
+Tags: rust-migration, routecodex-3.11.9, response-runtime, dead-code-cleanup, unused-import, thin-shell, no-semantic-trim, build-dev
+
+- 2026-03-20: `routecodex-3.11.9` 继续 response thin-shell 收口：`provider-response.ts` 删除两个顶层 async helper（`maybeCommitClockReservationFromContext` / `coerceClientPayloadToCanonicalChatCompletionOrThrow`），改为 `convertProviderResponse` 局部闭包。语义保持不变：canonical coercion 失败仍抛 `MALFORMED_RESPONSE`，`providerType` 仍由 native 协议判定，clock reservation 仍在 outbound 成功路径后 best-effort 提交。验证通过 `sharedmodule npm run build`（含 matrix）+ 根仓 `npm run build:dev/install:global` + `/health` 0.90.560。
+
+Tags: rust-migration, routecodex-3.11.9, provider-response, thin-shell, local-closure, canonical-coercion, clock-reservation, no-semantic-trim, build-dev
+
+- 2026-03-20: `routecodex-3.11.7` 小切片继续收口 HubPipeline：删除私有薄壳 helper `asJsonObject(...)`，并在两个调用点内联同等 object 断言（错误消息保持一致），属于“减少编排层壳函数、保留行为”的零语义改动。验证通过 `sharedmodule npm run build`（含 matrix）+ 根仓 `npm run build:dev/install:global` + `/health` 0.90.561。
+
+Tags: rust-migration, routecodex-3.11.7, hub-pipeline, thin-shell, private-helper-cleanup, no-semantic-trim, build-dev
+
+- 2026-03-20: `routecodex-3.11.7` 继续 HubPipeline 私有 helper 收口：删除 `convertProcessNodeResult(...)`，并在两个 tool-governance nodeResult 入栈点内联同等映射（保持 `error.code/message/details` 形状不变）。这类“单用途 result 映射 helper”适合就地内联，能减少编排层壳函数而不改变行为。验证通过 `sharedmodule npm run build`（含 matrix）+ 根仓 `npm run build:dev/install:global` + `/health` 0.90.562。
+
+Tags: rust-migration, routecodex-3.11.7, hub-pipeline, thin-shell, private-helper-cleanup, node-result-mapping, no-semantic-trim, build-dev
+
+- 2026-03-20: `routecodex-3.11.7` 再收口 HubPipeline 私有 helper：删除 `unwrapReadable(...)`，并在 `normalizeRequest/materializePayload` 两处内联同等 Readable 提取逻辑。该切片属于“薄壳内联、不改行为”类型，目的在于压缩 orchestration 层 helper 面积。验证通过 `sharedmodule npm run build`（含 matrix）+ 根仓 `npm run build:dev/install:global` + `/health` 0.90.563。
+
+Tags: rust-migration, routecodex-3.11.7, hub-pipeline, thin-shell, private-helper-cleanup, readable-extract, no-semantic-trim, build-dev
+- 2026-03-20: `hub.response` 的 10s 尖峰并非 SSE decode 主因，而是 `continue_execution` 走 `clientInjectOnly` 时包含了 tmux 注入前置等待。根因链路：`session-client-registry.ts` 默认 `CLIENT_TMUX_INJECT_DELAY_MS=10000`，该等待发生在 `inject()` 内，并被整体计入 `hub.response` 计时。修复：新增 `client.inject_wait` 独立计时项并从 `hub.response` 中剔除，日志会显示 `client.inject_wait≈10s` + `hub.response` 回落到真实转换耗时。实现点：`provider-response-converter.ts` 回传 `timingBreakdown.hubResponseExcludedMs`，`request-executor.ts` 记录 `client.inject_wait` scope 且用净值写 `hub.response.completed`，`stage-logger.ts` 把 `client.inject_wait` 纳入 release usage timing breakdown。Tags: timing, hub.response, client-inject, continue-execution, stage-logger
+- 2026-03-20: Rustify 3.11.7 薄壳继续收口：`hub-pipeline.ts` 删除私有 method `resolveProtocolHooks(...)`，改为文件级 `REQUEST_STAGE_HOOKS` 静态映射并在 `execute`/`executeChatProcessEntryPipeline`/两处 outbound protocol switch 调用点 direct 读取，协议行为保持不变。验证通过：`sharedmodule npm run build`（含 matrix）+ 根仓 `npm run build:dev`（install:global + 5555 restart）+ `/health`=`0.90.566`。Tags: rustify, hub-pipeline, thin-shell, protocol-hooks
+- 2026-03-20: 按“批量清薄壳”策略继续 3.11.7：`hub-pipeline.ts` 一次性移除 4 个 class 私有 method（`coerceStandardizedRequestFromPayload`、`applyMaxTokensPolicy`、`materializePayload`、`convertSsePayload`），改为文件级函数真源并完成调用点切换；class 私有 method 现仅剩 3 个核心编排方法。验证通过：sharedmodule build+matrix、root build:dev/install:global/restart、`/health`=0.90.567。Tags: rustify, hub-pipeline, thin-shell, batch-cleanup
+- 2026-03-20: `routecodex-3.11.7` 持续按“一次性清薄壳”推进 HubPipeline 文件级拆分：新增 `hub-pipeline-orchestration-helpers.ts`、`hub-pipeline-adapter-context.ts`、`hub-pipeline-request-normalization-utils.ts`，将 runtime/router metadata、stage recorder/outbound execution、adapter context 构建、payload 归一化与 `max_tokens` policy 从 `hub-pipeline.ts` 主文件外提。可复用结论：对“纯编排 helper + 单向数据变换”优先外提成文件级真源，并通过依赖注入（如 buildAdapterContext/applyMaxTokens callback）保持语义不变。结果：`hub-pipeline.ts` 2306→1625，验证通过 sharedmodule `npm run build`（matrix）+ root `npm run build:min`。
+
+Tags: rust-migration, routecodex-3.11.7, hub-pipeline, thin-shell, file-split, orchestration-helpers, adapter-context, payload-normalization, no-semantic-trim
+- 2026-03-20: `routecodex-3.11.7` 再做一轮 HubPipeline 主文件解耦：将 `normalizeHubPipelineRequest(...)` 从 `hub-pipeline.ts` 整体外提到 `hub-pipeline-normalize-request.ts`，并导出 `ProviderProtocol/NormalizedRequest/HubShadowCompareRequestConfig` 供外提模块复用。可复用结论：当某个函数已经是“单段编排流程 + 无需访问 class state”时，应整体外提为独立模块，而不是继续在主文件内拆细碎 helper；这样能更快压缩主文件并保持行为等价。验证通过：sharedmodule `npm run build`（matrix）+ root `npm run build:min`；`hub-pipeline.ts` 1625→1430。
+
+Tags: rust-migration, routecodex-3.11.7, hub-pipeline, normalize-request, thin-shell, module-extraction, no-semantic-trim
+- 2026-03-20: `routecodex-3.11.7` 再拆一层：把 `REQUEST_STAGE_HOOKS` 静态注册表与 `RequestStageHooks` 类型外提为 `hub-pipeline-stage-hooks.ts`，主文件只消费 registry，不再直接维护 protocol->adapter/mapper/context-capture 的装配细节。可复用结论：对“纯静态装配表”优先独立成 registry 模块，可显著降低主编排文件的 import 面和认知噪声。验证通过：sharedmodule `npm run build`（matrix）+ root `npm run build:min`；`hub-pipeline.ts` 1430→1377。
+
+Tags: rust-migration, routecodex-3.11.7, hub-pipeline, stage-hooks, registry-extraction, thin-shell, no-semantic-trim
+
+- 2026-03-20: `routecodex-3.11.10` 继续按“一次做完一块”推进 tool-surface 编排收口：将 `tool-surface-engine.ts`（650 行）拆分为 `tool-surface-diff.ts`（schema/history diff 真源）与 `tool-surface-convert.ts`（tool format detect/convert + candidate 构建 + expectedHistoryCarrier），主文件仅保留 sampling + stage record + enforce orchestration，行数降至 217（<500）。语义保持不变：observe/shadow/enforce 的 diff 记录、history carrier 纠偏、tool definitions 纠偏逻辑完全保留。验证通过 `sharedmodule npm run build`（matrix 全绿）+ 根仓 `npm run build:min`。
+
+Tags: rust-migration, routecodex-3.11.10, tool-surface, orchestration, file-split, thin-shell, no-semantic-trim, build-min
+
+- 2026-03-20: `routecodex-3.11.11` 继续做 fallback 噪音清理，完成 SSE native API 命名收口：`resolveSseProtocolWithFallbackWithNative` 重命名为 `resolveSseProtocolWithNative`，并同步 HubPipeline request normalization 调用点。该改动仅限命名层，不改 capability（仍为 `resolveSseProtocolWithFallbackJson`）与行为语义，目标是减少“native-required 语义已成立但名称仍携带 fallback 误导”的认知噪声。验证通过 `sharedmodule npm run build`（matrix 全绿）+ 根仓 `npm run build:min`。
+
+Tags: rust-migration, routecodex-3.11.11, fallback-cleanup, naming-cleanup, sse-protocol, native-required, build-min
+
+- 2026-03-20: `routecodex-3.11.9` 继续 provider-response 收口，新增 `provider-response-observation.ts` 作为 response 观测真源，统一封装 (1) tool-surface shadow mismatch 记录（provider_inbound/client_outbound），(2) policy observe 记录。`provider-response.ts` 删除重复 try/catch 观测分支并改为复用 helper，行数 484→451；行为保持不变（仅编排去重、无语义改写）。验证通过 `sharedmodule npm run build`（matrix 全绿）+ 根仓 `npm run build:min`。
+
+Tags: rust-migration, routecodex-3.11.9, provider-response, observation, tool-surface-shadow, policy-observe, file-split, no-semantic-trim, build-min
+
+- 2026-03-20: `routecodex-3.11.9` 继续 response thin-shell 收口：将 `response-runtime.ts` 拆分为 re-export 入口薄壳（5 行）与 `response-runtime-anthropic.ts`（486 行）语义实现文件，保持现有对外 import 路径不变（`response-runtime.js` 仍是统一入口）。该切片属于文件级模块化，不改运行语义，仅降低入口文件复杂度并为后续 response 语义继续拆分预留边界。验证通过 `sharedmodule npm run build`（matrix 全绿）+ 根仓 `npm run build:min`。
+
+Tags: rust-migration, routecodex-3.11.9, response-runtime, file-split, thin-shell, re-export, no-semantic-trim, build-min
+
+- 2026-03-20: `routecodex-3.11.11` 继续 fallback 命名收口，完成 SSE native capability 级别统一：`resolveSseProtocolWithFallbackJson` 改为 `resolveSseProtocolJson`（Rust NAPI 导出 + native loader required exports + TS semantics capability 常量同步）。结论：在 native-required 路径里，保留 fallback 字样会长期误导定位；应同时清理“函数名 + capability 名 + loader 导出名”三处，避免后续出现“接口名已改但 capability 仍旧”的半收口状态。验证通过 `sharedmodule npm run build`（matrix 全绿）+ 根仓 `npm run build:min`。
+
+Tags: rust-migration, routecodex-3.11.11, fallback-cleanup, capability-rename, sse-protocol, native-loader, no-semantic-trim, build-min
+
+- 2026-03-20: `routecodex-3.11.11` 在完成 SSE capability 重命名后继续做“内部命名闭环”：Rust `hub_pipeline.rs` 将 `resolve_sse_protocol_with_fallback` 收口为 `resolve_sse_protocol`，并同步对应单测命名/调用。结论：fallback 命名清理要做全链路（TS wrapper + capability + loader + Rust 内部函数 + tests），否则后续排查会出现“外层已改、内层仍旧”的术语漂移。验证通过 `sharedmodule npm run build`（matrix 全绿）+ 根仓 `npm run build:min`。
+
+Tags: rust-migration, routecodex-3.11.11, fallback-cleanup, rust-internal-rename, sse-protocol, no-semantic-trim, build-min
+
+- 2026-03-21: `routecodex-3.11.7` 继续收口 HubPipeline adapter-context 语义，新增 native 真源 `resolve_adapter_context_metadata_signals_json`（TS wrapper: `resolveAdapterContextMetadataSignalsWithNative`），将 `clientRequestId/groupRequestId/modelId/estimatedInputTokens/sessionId/conversationId` 的提取与归一从 `hub-pipeline-adapter-context.ts` 下沉到 Rust；TS 调用点改为 direct-native，保留 runtime/capturedChatRequest/clientConnectionState 透传语义不变。`estimatedInputTokens` 维持原行为：按 `estimatedInputTokens → estimated_tokens → estimatedTokens` 取值，Number-like 归一后 `round + max(1)`，仅在 `>0` 时输出。验证通过：targeted cargo test + llmswitch build(matrix) + root build:min + install:global + review-followup 测试。
+
+Tags: rust-migration, routecodex-3.11.7, hub-pipeline, adapter-context, metadata-signals, native-primary, no-semantic-trim, build-min, install-global
+
+- 2026-03-21: `routecodex-3.11.7` adapter-context 路径继续收口 object carriers：新增 native 真源 `resolve_adapter_context_object_carriers_json`（TS wrapper: `resolveAdapterContextObjectCarriersWithNative`），将 `runtime` 与 `capturedChatRequest` 的对象判定/提取从 `hub-pipeline-adapter-context.ts` 下沉到 Rust；TS 侧改为 direct-native 读取并透传，减少本地重复 shape 分支。语义保持：仅当字段为对象时输出，数组/标量保持忽略。
+
+Tags: rust-migration, routecodex-3.11.7, hub-pipeline, adapter-context, object-carriers, native-primary, no-semantic-trim, build-min, install-global
+
+- 2026-03-21: `routecodex-3.11.7` adapter-context object carriers 再收口一刀：在 `resolve_adapter_context_object_carriers_json` 中新增 `clientConnectionState` object carrier，并将 `hub-pipeline-adapter-context.ts` 的本地对象判定分支删除，统一走 direct-native carrier 读取。可复用结论：adapter-context 下“metadata 对象载荷透传”应合并在同一 native helper 里（runtime / capturedChatRequest / clientConnectionState），避免 TS 端散落多个 object-shape 分支。
+
+Tags: rust-migration, routecodex-3.11.7, hub-pipeline, adapter-context, object-carriers, clientConnectionState, native-primary, no-semantic-trim
+
+- 2026-03-21: `routecodex-3.11.7` adapter-context object carriers 再收口：`resolve_adapter_context_object_carriers` 现在在同一 native 输出里合并 `clientDisconnected` 信号（复用 `resolve_adapter_context_client_connection_state`），并把 `hub-pipeline-adapter-context.ts` 的重复 native 调用去掉，改为直接消费 object carriers 的 `clientDisconnected`。这样 adapter-context 的 object/connection 信号都走单次 direct-native 读取，减少并行 helper 漂移风险且保持原语义（state flag + metadata 显式 true 覆盖）不变。验证链：cargo test（object_carriers + client_connection_state）+ sharedmodule build(matrix) + root build:min + install:global + review-followup 回归。
+
+Tags: rust-migration, routecodex-3.11.7, hub-pipeline, adapter-context, object-carriers, clientDisconnected, native-primary, thin-shell, no-semantic-trim, review-followup
+
+- 2026-03-21: `routecodex-3.11.7` adapter-context 继续做“单入口真源”收口：在 object carriers 已承载 `clientDisconnected` 后，移除了专用 NAPI/TS wrapper 表面（`resolve_adapter_context_client_connection_state_json` 与 `resolveAdapterContextClientConnectionStateWithNative`），并从 loader required exports 删除对应 capability。可复用结论：当同一语义已经被更高层聚合输出覆盖时，应及时删除并行 capability，避免后续调用点重复 native round-trip 与接口漂移；内部语义函数可保留供聚合 helper 复用。验证链：cargo test（object_carriers + client_connection_state）+ sharedmodule build(matrix) + root build:min + install:global + review-followup。
+
+Tags: rust-migration, routecodex-3.11.7, hub-pipeline, adapter-context, clientDisconnected, capability-cleanup, native-loader, thin-shell, single-source-of-truth
+
+- 2026-03-21: `routecodex-3.11.7` 继续收口 HubPipeline orchestration thin-shell：删除 `hub-pipeline-orchestration-helpers.ts` 的三段 nodeResult 转发壳（`appendReqInboundNodeResult` / `appendReqInboundSkippedNode` / `appendReqOutboundNodeResult`），并在 request-stage/chat-entry/route-outbound 三处调用点改为 direct-native node builder。可复用结论：当 helper 只做“参数转发 + push nodeResults”且已存在 native builder 真源时，应优先删除中间壳，避免编排层残留无语义价值的转发函数。验证链通过：sharedmodule build(matrix) + root build:min + install:global + review-followup。
+
+Tags: rust-migration, routecodex-3.11.7, hub-pipeline, thin-shell, node-result, direct-native, orchestration, no-semantic-trim
+
+- 2026-03-22: opencode-zen 401/429 排查确认“可用性差异”核心在请求头对齐，而非 OAuth。Zen 鉴权继续使用 API Key（`Authorization: Bearer <key>`）；参考 `aiapi` 的 Zen 实现与本地 opencode 二进制行为，补齐 Zen 路径 `x-opencode-project/session/request/client` 头透传与 metadata 派生，并在 Zen 路径显式移除 `originator/session_id/conversation_id` 旧头，避免与 opencode 头部语义冲突。验证链：`tests/providers/core/runtime/http-transport-provider.headers.test.ts` 新增/通过（9/9）；`npm run build:dev` + `npm run install:release` 成功；`routecodex --version`/`rcc --version`=0.90.698；5520 `/v1/responses` 对 `mimo-v2-pro-free` 与 `minimax-m2.5-free` 返回 200（不再是 401）。
+
+Tags: opencode-zen, auth-header-alignment, x-opencode-headers, bearer-apikey, no-oauth, provider-runtime, release-build

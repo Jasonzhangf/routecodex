@@ -1,8 +1,61 @@
 import {
+  applyOpenCodeZenThinkingDefaults,
   buildOpenAiSdkChatCallOptions,
   mergePreservedOpenAiRequestFields,
   VercelAiSdkOpenAiTransport
 } from '../../../../src/providers/core/runtime/vercel-ai-sdk/openai-sdk-transport.js';
+
+describe('applyOpenCodeZenThinkingDefaults', () => {
+  it('injects enable_thinking=true by default for opencode-zen provider requests', () => {
+    expect(
+      applyOpenCodeZenThinkingDefaults(
+        {
+          model: 'nemotron-3-super-free',
+          messages: [{ role: 'user', content: 'hello' }]
+        },
+        {
+          providerId: 'opencode-zen-free'
+        } as any
+      )
+    ).toMatchObject({
+      model: 'nemotron-3-super-free',
+      messages: [{ role: 'user', content: 'hello' }],
+      enable_thinking: true
+    });
+  });
+
+  it('does not override caller-provided thinking flags', () => {
+    expect(
+      applyOpenCodeZenThinkingDefaults(
+        {
+          model: 'nemotron-3-super-free',
+          messages: [{ role: 'user', content: 'hello' }],
+          enable_thinking: false
+        },
+        {
+          providerId: 'opencode-zen-free'
+        } as any
+      )
+    ).toMatchObject({
+      enable_thinking: false
+    });
+
+    expect(
+      applyOpenCodeZenThinkingDefaults(
+        {
+          model: 'nemotron-3-super-free',
+          messages: [{ role: 'user', content: 'hello' }],
+          chat_template_args: { enable_thinking: false }
+        },
+        {
+          providerId: 'opencode-zen-free'
+        } as any
+      )
+    ).toMatchObject({
+      chat_template_args: { enable_thinking: false }
+    });
+  });
+});
 
 describe('buildOpenAiSdkChatCallOptions', () => {
   it('maps openai chat payload into AI SDK call options and preserves reasoning/tool config', () => {

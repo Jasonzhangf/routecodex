@@ -18,6 +18,30 @@ type OAuthAuthExtended = OAuthAuth & { oauthProviderId?: string };
 
 export type RuntimeFactoryAuthConfig = ApiKeyAuthExtended | OAuthAuthExtended;
 
+function isOpenCodeZenProviderId(providerId?: string): boolean {
+  const normalized = typeof providerId === 'string' ? providerId.trim().toLowerCase() : '';
+  return (
+    normalized === 'opencode-zen'
+    || normalized === 'opencode-zen-free'
+    || normalized.startsWith('opencode-zen-')
+  );
+}
+
+function isOpenCodeZenPlaceholderApiKey(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  return normalized === 'free-access-token' || normalized === 'placeholder';
+}
+
+function resolveOpenCodeZenApiKey(rawValue: unknown): { apiKey: string; rawType?: string } {
+  const value = isNonEmptyString(rawValue) ? rawValue.trim() : '';
+  const normalized = value.toLowerCase();
+  if (!value || normalized === 'public' || isOpenCodeZenPlaceholderApiKey(value)) {
+    // Match OpenCode CLI no-key path: use public key for Zen free routes.
+    return { apiKey: 'public', rawType: 'opencode-zen-public' };
+  }
+  return { apiKey: value };
+}
+
 export function mapRuntimeResponsesConfig(
   source: unknown,
   streamingPref?: 'auto' | 'always' | 'never'
@@ -80,8 +104,12 @@ export function mapRuntimeAuthToConfig(
   runtime?: ProviderRuntimeProfile
 ): RuntimeFactoryAuthConfig {
   if (auth.type === 'apikey') {
+    const isOpenCodeZen = isOpenCodeZenProviderId(runtime?.providerId);
     const rawType = isNonEmptyString(auth.rawType) ? auth.rawType.trim().toLowerCase() : undefined;
-    if (rawType !== 'deepseek-account' && !isNonEmptyString(auth.value)) {
+    const openCodeZenResolved = isOpenCodeZen ? resolveOpenCodeZenApiKey(auth.value) : null;
+    const resolvedApiKey = openCodeZenResolved ? openCodeZenResolved.apiKey : (isNonEmptyString(auth.value) ? auth.value.trim() : '');
+
+    if (rawType !== 'deepseek-account' && !resolvedApiKey) {
       const baseUrl =
         runtime && typeof (runtime as any).baseUrl === 'string'
           ? String((runtime as any).baseUrl).trim()
@@ -95,8 +123,8 @@ export function mapRuntimeAuthToConfig(
     }
     const apiKeyAuth: ApiKeyAuthExtended = {
       type: 'apikey',
-      apiKey: rawType === 'deepseek-account' ? '' : (isNonEmptyString(auth.value) ? auth.value.trim() : ''),
-      rawType: rawType || auth.rawType,
+      apiKey: rawType === 'deepseek-account' ? '' : resolvedApiKey,
+      rawType: openCodeZenResolved?.rawType ?? (rawType || auth.rawType),
       accountAlias: auth.accountAlias,
       tokenFile: auth.tokenFile
     };

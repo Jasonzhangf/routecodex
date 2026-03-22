@@ -21,7 +21,17 @@ export async function resolveProviderRuntimeOrThrow(options: {
   dependencies: ModuleDependencies;
 }): Promise<{ runtimeKey: string; handle: ProviderHandle }> {
   const { requestId, target, routeName, runtimeKeyHint, runtimeManager, dependencies } = options;
-  const runtimeKey = runtimeKeyHint || runtimeManager.resolveRuntimeKey(target.providerKey);
+  let runtimeKey = runtimeManager.resolveRuntimeKey(target.providerKey);
+  if (!runtimeKey && typeof target.providerKey === 'string') {
+    const providerKeyParts = target.providerKey.split('.');
+    if (providerKeyParts.length >= 3) {
+      const aliasScopedKey = `${providerKeyParts[0]}.${providerKeyParts[1]}`;
+      runtimeKey = runtimeManager.resolveRuntimeKey(aliasScopedKey);
+    }
+  }
+  if (!runtimeKey) {
+    runtimeKey = runtimeKeyHint;
+  }
   if (!runtimeKey) {
     const runtimeMissingError = Object.assign(new Error(`Runtime for provider ${target.providerKey} not initialized`), {
       code: 'ERR_RUNTIME_NOT_FOUND',

@@ -184,6 +184,95 @@ describe('servertool:clock', () => {
     expect(fs.existsSync(stateFile)).toBe(false);
   });
 
+  test('clock.update clears Clock-Stop-When marker from clock.md on reactivation', async () => {
+    const sessionId = 's-clock-clear-stop-marker';
+    const sessionScope = toClockSessionScope(sessionId);
+    const clockConfig = normalizeClockConfig({ enabled: true, tickMs: 0 });
+    if (!clockConfig) {
+      throw new Error('clockConfig should not be null');
+    }
+    const scheduled = await scheduleClockTasks(
+      sessionScope,
+      [{ dueAtMs: Date.now() + 120_000, task: 'existing task' }],
+      clockConfig
+    );
+    const existingTaskId = scheduled[0]?.taskId;
+    if (!existingTaskId) {
+      throw new Error('expected existing clock task');
+    }
+
+    const workdir = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-clock-reactivation-'));
+    const clockMdPath = path.join(workdir, 'clock.md');
+    fs.writeFileSync(
+      clockMdPath,
+      [
+        '# Clock',
+        'Clock-Stop-When: no-open-tasks',
+        '',
+        '- [x] finished task',
+        ''
+      ].join('\n'),
+      'utf8'
+    );
+
+    const adapterContext: AdapterContext = {
+      requestId: 'req-clock-update-clear-stop-marker',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      tmuxSessionId: sessionId,
+      cwd: workdir,
+      __rt: { clock: { enabled: true, tickMs: 0 } },
+      capturedChatRequest: {
+        model: 'gpt-test',
+        messages: [{ role: 'user', content: 'please reactivate clock' }]
+      }
+    } as any;
+
+    const toolCallId = 'call_clock_update_clear_stop_marker';
+    const dueAt = new Date(Date.now() + 60_000).toISOString();
+    const updateResponse = await runServerSideToolEngine({
+      chatResponse: {
+        id: 'chatcmpl-clock-update-clear-stop-marker',
+        object: 'chat.completion',
+        model: 'gpt-test',
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: 'assistant',
+              content: null,
+              tool_calls: [
+                {
+                  id: toolCallId,
+                  type: 'function',
+                  function: {
+                    name: 'clock',
+                    arguments: JSON.stringify({
+                      action: 'update',
+                      taskId: existingTaskId,
+                      items: [{ dueAt, task: 'reactivated task' }]
+                    })
+                  }
+                }
+              ]
+            },
+            finish_reason: 'tool_calls'
+          }
+        ]
+      } as any,
+      adapterContext,
+      entryEndpoint: '/v1/chat/completions',
+      requestId: 'req-clock-update-clear-stop-marker',
+      providerProtocol: 'openai-chat'
+    });
+
+    expect(updateResponse.mode).toBe('tool_flow');
+    const nextClockMd = fs.readFileSync(clockMdPath, 'utf8');
+    expect(nextClockMd).not.toContain('Clock-Stop-When:');
+
+    fs.rmSync(workdir, { recursive: true, force: true });
+  });
+
   test('end-to-end: schedule via tool_call → next request injects due reminder → commit marks delivered', async () => {
     const sessionId = 's-clock-e2e';
     const sessionScope = toClockSessionScope(sessionId);

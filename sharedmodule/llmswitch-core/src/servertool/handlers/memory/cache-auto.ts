@@ -15,7 +15,8 @@ import {
   writeCacheEntry,
   resolveWorkingDirectoryFromAdapterContextOrFallback,
   extractAssistantTextFromResponse,
-  extractFinishReason
+  extractFinishReason,
+  shouldLogNoWorkingDirectorySkip
 } from './cache-writer.js';
 
 const FLOW_ID = 'memory_cache_auto';
@@ -24,24 +25,27 @@ const handler: ServerToolHandler = async (
   ctx: ServerToolHandlerContext
 ): Promise<ServerToolHandlerPlan | null> => {
   try {
-    // 1. 解析工作目录
+    // 1. 先检查 response 是否有 finish_reason = 'stop'
+    // 非 stop 直接跳过，避免在 tool_calls 等场景产生无意义的 no-workingDirectory 噪音日志。
+    const chatResponse = ctx.base;
+    const finishReason = extractFinishReason(chatResponse);
+
+    if (!finishReason || finishReason.toLowerCase() !== 'stop') {
+      // 不是 stop，跳过（不写 CACHE）
+      return null;
+    }
+
+    // 2. 解析工作目录（仅 stop 分支需要）
     const workingDirectory = resolveWorkingDirectoryFromAdapterContextOrFallback(
       ctx.adapterContext as Record<string, unknown>
     );
 
     if (!workingDirectory) {
-      console.error(
-        `[memory_cache_auto] skip: no workingDirectory for requestId=${ctx.requestId}`
-      );
-      return null;
-    }
-
-    // 2. 检查 response 是否有 finish_reason = 'stop'
-    const chatResponse = ctx.base;
-    const finishReason = extractFinishReason(chatResponse);
-
-    if (!finishReason || finishReason.toLowerCase() !== 'stop') {
-      // 不是 stop，跳过
+      if (shouldLogNoWorkingDirectorySkip(ctx.adapterContext as Record<string, unknown>)) {
+        console.error(
+          `[memory_cache_auto] skip: no workingDirectory for requestId=${ctx.requestId}`
+        );
+      }
       return null;
     }
 

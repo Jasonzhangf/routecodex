@@ -2,7 +2,8 @@ use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
 use serde::Serialize;
 
-const DEFAULT_STOP_MESSAGE_MAX_REPEATS: i64 = 10;
+const SM_UNBOUNDED_MAX_REPEATS: i64 = 2_147_483_647;
+const SM_DEFAULT_TEXT: &str = "继续执行";
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -13,9 +14,13 @@ struct StopMessageInstructionParseOutput {
     ai_mode: Option<String>,
 }
 
-fn starts_with_stop_message(instruction: &str) -> Option<usize> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StopMessagePrefix {
+    Sm,
+}
+
+fn starts_with_command_prefix(instruction: &str, prefix: &str) -> Option<usize> {
     let text = instruction;
-    let prefix = "stopmessage";
     let head = text.get(..prefix.len())?;
     if !head.eq_ignore_ascii_case(prefix) {
         return None;
@@ -33,6 +38,13 @@ fn starts_with_stop_message(instruction: &str) -> Option<usize> {
         return None;
     }
     Some(idx + 1)
+}
+
+fn starts_with_stop_message(instruction: &str) -> Option<(usize, StopMessagePrefix)> {
+    if let Some(idx) = starts_with_command_prefix(instruction, "sm") {
+        return Some((idx, StopMessagePrefix::Sm));
+    }
+    None
 }
 
 fn parse_js_int_prefix(token: &str) -> Option<i64> {
@@ -108,15 +120,22 @@ fn is_reserved_control_token(value: &str) -> bool {
     if lower.is_empty() {
         return false;
     }
+    if lower.starts_with("on/") || lower.starts_with("off/") || lower.starts_with("clear/") {
+        return true;
+    }
     if lower == "clear" || lower == "on" || lower == "off" {
         return true;
     }
     parse_ai_mode_token(&lower).is_some()
 }
 
-fn parse_stop_message_tail(tokens: &[String]) -> (i64, Option<String>) {
-    let mut max_repeats = DEFAULT_STOP_MESSAGE_MAX_REPEATS;
-    let mut ai_mode: Option<String> = None;
+fn parse_stop_message_tail_with_defaults(
+    tokens: &[String],
+    default_max_repeats: i64,
+    default_ai_mode: Option<&str>,
+) -> (i64, Option<String>) {
+    let mut max_repeats = default_max_repeats;
+    let mut ai_mode: Option<String> = default_ai_mode.map(|value| value.to_string());
     for token in tokens {
         if let Some(mode) = parse_ai_mode_token(token) {
             ai_mode = Some(mode);
@@ -178,15 +197,77 @@ fn parse_quoted_text(cursor: &str) -> Option<(String, Vec<String>)> {
     Some((raw_text.replace("\\\"", "\""), tail_tokens))
 }
 
+fn parse_positive_int_strict(token: &str) -> Option<i64> {
+    let trimmed = token.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if !trimmed.chars().all(|ch| ch.is_ascii_digit()) {
+        return None;
+    }
+    let parsed = trimmed.parse::<i64>().ok()?;
+    if parsed > 0 {
+        return Some(parsed);
+    }
+    None
+}
+
+fn parse_sm_mode_expression(body: &str) -> Option<(bool, Option<i64>)> {
+    let normalized = body.trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        return None;
+    }
+    if normalized == "clear" || normalized == "off" {
+        return Some((false, None));
+    }
+    if normalized == "on" {
+        return Some((true, None));
+    }
+    if let Some(count) = parse_positive_int_strict(&normalized) {
+        return Some((true, Some(count)));
+    }
+    if normalized.contains('/') {
+        let parts: Vec<&str> = normalized
+            .split('/')
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty())
+            .collect();
+        if parts.len() == 2 && parts[0] == "on" {
+            if let Some(count) = parse_positive_int_strict(parts[1]) {
+                return Some((true, Some(count)));
+            }
+        }
+    }
+    None
+}
+
+fn make_set_output(
+    text: String,
+    max_repeats: i64,
+    ai_mode: Option<String>,
+) -> Option<StopMessageInstructionParseOutput> {
+    if text.trim().is_empty() || max_repeats <= 0 {
+        return None;
+    }
+    Some(StopMessageInstructionParseOutput {
+        kind: "set".to_string(),
+        text: Some(text),
+        max_repeats: Some(max_repeats),
+        ai_mode,
+    })
+}
+
 fn parse_stop_message_instruction(
     instruction: String,
 ) -> Option<StopMessageInstructionParseOutput> {
-    let body_index = starts_with_stop_message(&instruction)?;
+    let (body_index, prefix) = starts_with_stop_message(&instruction)?;
     let body = instruction[body_index..].trim();
     if body.is_empty() {
         return None;
     }
-    if body.eq_ignore_ascii_case("clear") {
+    if body.eq_ignore_ascii_case("clear")
+        || (prefix == StopMessagePrefix::Sm && body.eq_ignore_ascii_case("off"))
+    {
         return Some(StopMessageInstructionParseOutput {
             kind: "clear".to_string(),
             text: None,
@@ -194,10 +275,23 @@ fn parse_stop_message_instruction(
             ai_mode: None,
         });
     }
-    if is_reserved_control_token(body) {
-        return None;
+    if prefix == StopMessagePrefix::Sm {
+        if let Some((enabled, count)) = parse_sm_mode_expression(body) {
+            if !enabled {
+                return Some(StopMessageInstructionParseOutput {
+                    kind: "clear".to_string(),
+                    text: None,
+                    max_repeats: None,
+                    ai_mode: None,
+                });
+            }
+            return make_set_output(
+                SM_DEFAULT_TEXT.to_string(),
+                count.unwrap_or(SM_UNBOUNDED_MAX_REPEATS),
+                Some("on".to_string()),
+            );
+        }
     }
-
     let (text, tail_tokens) = if body.starts_with('"') {
         parse_quoted_text(body)?
     } else {
@@ -220,13 +314,9 @@ fn parse_stop_message_instruction(
         return None;
     }
 
-    let (max_repeats, ai_mode) = parse_stop_message_tail(&tail_tokens);
-    Some(StopMessageInstructionParseOutput {
-        kind: "set".to_string(),
-        text: Some(text),
-        max_repeats: Some(max_repeats),
-        ai_mode,
-    })
+    let (max_repeats, ai_mode) =
+        parse_stop_message_tail_with_defaults(&tail_tokens, SM_UNBOUNDED_MAX_REPEATS, Some("on"));
+    make_set_output(text, max_repeats, ai_mode)
 }
 
 #[napi]

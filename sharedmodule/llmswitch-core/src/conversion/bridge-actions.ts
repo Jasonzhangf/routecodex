@@ -18,6 +18,7 @@ export interface BridgeActionDescriptor {
 
 export interface BridgeActionState {
   messages: Array<UnknownRecord>;
+  input?: Array<UnknownRecord>;
   requiredAction?: UnknownRecord;
   capturedToolResults?: Array<{ tool_call_id?: string; call_id?: string; output?: unknown; name?: string }>;
   rawRequest?: UnknownRecord;
@@ -46,6 +47,7 @@ export function createBridgeActionState(seed?: Partial<BridgeActionState>): Brid
   const state: BridgeActionState = {
     messages: Array.isArray(seed?.messages) ? (seed.messages as Array<UnknownRecord>) : []
   };
+  if (Array.isArray(seed?.input)) state.input = seed.input as Array<UnknownRecord>;
   if (seed?.requiredAction) state.requiredAction = seed.requiredAction;
   if (seed?.capturedToolResults) state.capturedToolResults = seed.capturedToolResults;
   if (seed?.rawRequest) state.rawRequest = seed.rawRequest;
@@ -84,6 +86,7 @@ export function runBridgeActionPipeline(options: {
     const next = output as NativeBridgeActionState;
     const patch: BridgeActionState = {
       messages: Array.isArray(next.messages) ? (next.messages as Array<UnknownRecord>) : state.messages,
+      ...(Array.isArray(next.input) ? { input: next.input as Array<UnknownRecord> } : {}),
       ...(next.requiredAction && typeof next.requiredAction === 'object' && !Array.isArray(next.requiredAction)
         ? { requiredAction: next.requiredAction as UnknownRecord }
         : {}),

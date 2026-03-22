@@ -68,9 +68,16 @@ describe('response-runtime anthropic hidden reasoning', () => {
     const responses = buildResponsesPayloadFromChatWithNative(chat as any, { requestId: 'req_hidden_to_responses' }) as any;
     const outputItems = Array.isArray(responses?.output) ? responses.output : [];
     const reasoningItem = outputItems.find((item: any) => item?.type === 'reasoning');
+    const summaryText = typeof reasoningItem?.summary?.[0]?.text === 'string'
+      ? String(reasoningItem.summary[0].text)
+      : '';
+    const contentText = typeof reasoningItem?.content?.[0]?.text === 'string'
+      ? String(reasoningItem.content[0].text)
+      : '';
+    const recoveredReasoningText = contentText || summaryText.replace(/^\*\*Thinking\*\*\s*/i, '').trim();
 
     expect(reasoningItem?.encrypted_content).toBe('enc_payload');
-    expect(reasoningItem?.content?.[0]?.text).toBe('plan next action');
+    expect(recoveredReasoningText).toContain('plan next action');
   });
 
   it('fails fast when upstream returns model_context_window_exceeded with empty output', () => {

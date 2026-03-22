@@ -6,9 +6,11 @@ import type { AddressInfo } from 'node:net';
 const clearStopMessageTmuxScope = jest.fn(() => ({ cleared: true, reason: 'test', scope: 'tmux:rcc_dead' }));
 
 const mockBridgeModule = () => ({
+  appendHeartbeatHistoryEventSnapshot: jest.fn(async () => true),
   buildHeartbeatInjectTextSnapshot: jest.fn(async () => '[Heartbeat]'),
   cancelClockTaskSnapshot: jest.fn(async () => false),
   clearClockTasksSnapshot: jest.fn(async () => 0),
+  listHeartbeatHistorySnapshot: jest.fn(async () => []),
   listHeartbeatStatesSnapshot: jest.fn(async () => []),
   listClockSessionIdsSnapshot: jest.fn(async () => []),
   listClockTasksSnapshot: jest.fn(async () => []),

@@ -22,6 +22,22 @@ describe('executor-provider retry policy', () => {
     expect(shouldRetryProviderError(nonRetriable)).toBe(false);
   });
 
+  it('treats HTTP 413 payload-too-large as retryable for provider failover', () => {
+    const payloadTooLarge = Object.assign(
+      new Error('HTTP 413: {"error":{"message":"Exceeded limit on max bytes to request body : 6291456"}}'),
+      { statusCode: 413, retryable: false }
+    );
+    expect(shouldRetryProviderError(payloadTooLarge)).toBe(true);
+  });
+
+  it('treats HTTP 401 unauthorized as retryable for provider failover', () => {
+    const unauthorized = Object.assign(new Error('HTTP 401: Unauthorized'), {
+      statusCode: 401,
+      retryable: false
+    });
+    expect(shouldRetryProviderError(unauthorized)).toBe(true);
+  });
+
   it('treats iflow business 514 model error as retryable', () => {
     const error = Object.assign(new Error('HTTP 400: iFlow business error (514): model error'), {
       statusCode: 400,

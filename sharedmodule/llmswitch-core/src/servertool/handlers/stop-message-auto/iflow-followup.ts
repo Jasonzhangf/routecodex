@@ -6,6 +6,18 @@ import { readRuntimeMetadata } from '../../../conversion/runtime-metadata.js';
 import { extractTextFromMessageContent } from './blocked-report.js';
 import { appendServerToolProgressFileEvent } from '../../log/progress-file.js';
 import { sanitizeFollowupSnapshotText, sanitizeFollowupText } from '../followup-sanitize.js';
+import {
+  resolveStopMessageAiApprovedMarker as resolveStopMessageAiApprovedMarkerFromConfig,
+  resolveStopMessageAiDoneMarker as resolveStopMessageAiDoneMarkerFromConfig,
+  resolveStopMessageAiFollowupBackend as resolveStopMessageAiFollowupBackendFromConfig,
+  resolveStopMessageAiFollowupCommand as resolveStopMessageAiFollowupCommandFromConfig,
+  resolveStopMessageAiFollowupEnabled as resolveStopMessageAiFollowupEnabledFromConfig,
+  resolveStopMessageAiFollowupOutputMaxChars as resolveStopMessageAiFollowupOutputMaxCharsFromConfig,
+  resolveStopMessageAiFollowupTimeoutMs as resolveStopMessageAiFollowupTimeoutMsFromConfig,
+  resolveStopMessageAiRequireEvidence,
+  resolveStopMessageAiRequireNextTaskAfterDone,
+  resolveStopMessageAiTraceEnabled as resolveStopMessageAiTraceEnabledFromConfig
+} from './config.js';
 
 export interface StopMessageAutoResponseSnapshot {
   providerProtocol?: string;
@@ -51,6 +63,145 @@ type StopMessageAiFollowupArgs = {
   isFirstPrompt?: boolean;
   historyEntries?: StopMessageAiFollowupHistoryEntry[];
 };
+
+type StopMessageAutoMessageAsyncResult = {
+  status: number;
+  stdout: string;
+  stderr: string;
+  error?: string;
+};
+
+function runStopMessageAutoMessageCommandAsync(options: {
+  command: string;
+  args: string[];
+  timeoutMs: number;
+  maxBuffer: number;
+  cwd?: string;
+}): Promise<StopMessageAutoMessageAsyncResult> {
+  return new Promise((resolve) => {
+    let settled = false;
+    let stdout = '';
+    let stderr = '';
+    let timedOut = false;
+    let bufferExceeded = false;
+    let timer: NodeJS.Timeout | undefined;
+
+    const finalize = (result: StopMessageAutoMessageAsyncResult) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      if (timer) {
+        clearTimeout(timer);
+        timer = undefined;
+      }
+      resolve(result);
+    };
+
+    const appendChunk = (stream: 'stdout' | 'stderr', chunk: unknown) => {
+      const raw = typeof chunk === 'string' ? chunk : Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk ?? '');
+      if (!raw) {
+        return;
+      }
+      if (stream === 'stdout') {
+        stdout += raw;
+      } else {
+        stderr += raw;
+      }
+      if (stdout.length + stderr.length > options.maxBuffer) {
+        bufferExceeded = true;
+      }
+    };
+
+    let child: childProcess.ChildProcessWithoutNullStreams;
+    try {
+      child = childProcess.spawn(options.command, options.args, {
+        ...(options.cwd ? { cwd: options.cwd } : {})
+      });
+    } catch (error) {
+      finalize({
+        status: -1,
+        stdout,
+        stderr,
+        error: error instanceof Error ? error.message : String(error ?? 'spawn_failed')
+      });
+      return;
+    }
+
+    const safeTerminate = () => {
+      try {
+        if (!child.killed) {
+          child.kill('SIGTERM');
+        }
+      } catch {
+        // best-effort only
+      }
+      setTimeout(() => {
+        try {
+          if (!child.killed) {
+            child.kill('SIGKILL');
+          }
+        } catch {
+          // best-effort only
+        }
+      }, 120).unref?.();
+    };
+
+    if (options.timeoutMs > 0) {
+      timer = setTimeout(() => {
+        timedOut = true;
+        safeTerminate();
+      }, options.timeoutMs);
+      timer.unref?.();
+    }
+
+    child.stdout?.on('data', (chunk) => {
+      appendChunk('stdout', chunk);
+      if (bufferExceeded) {
+        safeTerminate();
+      }
+    });
+    child.stderr?.on('data', (chunk) => {
+      appendChunk('stderr', chunk);
+      if (bufferExceeded) {
+        safeTerminate();
+      }
+    });
+    child.on('error', (error) => {
+      finalize({
+        status: -1,
+        stdout,
+        stderr,
+        error: error instanceof Error ? error.message : String(error ?? 'spawn_error')
+      });
+    });
+    child.on('close', (code) => {
+      if (timedOut) {
+        finalize({
+          status: typeof code === 'number' ? code : -1,
+          stdout,
+          stderr,
+          error: 'timeout'
+        });
+        return;
+      }
+      if (bufferExceeded) {
+        finalize({
+          status: typeof code === 'number' ? code : -1,
+          stdout,
+          stderr,
+          error: 'max_buffer_exceeded'
+        });
+        return;
+      }
+      finalize({
+        status: typeof code === 'number' ? code : -1,
+        stdout,
+        stderr
+      });
+    });
+  });
+}
 
 export function renderStopMessageAutoFollowupViaAi(args: StopMessageAiFollowupArgs): string | null {
   if (!isStopMessageAutoMessageEnabled()) {
@@ -98,6 +249,107 @@ export function renderStopMessageAutoFollowupViaAi(args: StopMessageAiFollowupAr
           ...(workingDirectory ? { cwd: workingDirectory } : {})
         }
       );
+
+      if (result.error || result.status !== 0) {
+        const responseSummary = summarizeStopMessageAutoMessageLog(
+          sanitizeStopMessageAutoMessageOutput(result.stderr || result.stdout, STOP_MESSAGE_AUTOMESSAGE_OUTPUT_MAX_CHARS),
+          STOP_MESSAGE_AUTOMESSAGE_LOG_SUMMARY_MAX_CHARS
+        );
+        logStopMessageAutoMessageIflow({
+          requestId: args.requestId,
+          stage: 'response',
+          status: result.status ?? -1,
+          requestSummary,
+          responseSummary,
+          error: result.error ? String(result.error) : 'non_zero_exit'
+        });
+        continue;
+      }
+
+      const backendOutput =
+        backend === 'codex'
+          ? sanitizeStopMessageAutoMessageOutput(readStopMessageAutoMessageCodexOutput(invocation.outputFilePath), maxOutputChars)
+          : '';
+      const stdout = backendOutput || sanitizeStopMessageAutoMessageOutput(result.stdout, maxOutputChars);
+      if (stdout) {
+        logStopMessageAutoMessageIflow({
+          requestId: args.requestId,
+          stage: 'response',
+          status: result.status ?? 0,
+          requestSummary,
+          responseSummary: summarizeStopMessageAutoMessageLog(stdout, STOP_MESSAGE_AUTOMESSAGE_LOG_SUMMARY_MAX_CHARS)
+        });
+        return stdout;
+      }
+      const stderr = sanitizeStopMessageAutoMessageOutput(result.stderr, maxOutputChars);
+      logStopMessageAutoMessageIflow({
+        requestId: args.requestId,
+        stage: 'response',
+        status: result.status ?? 0,
+        requestSummary,
+        responseSummary: summarizeStopMessageAutoMessageLog(stderr, STOP_MESSAGE_AUTOMESSAGE_LOG_SUMMARY_MAX_CHARS)
+      });
+      if (stderr) {
+        return stderr;
+      }
+    } catch (error) {
+      logStopMessageAutoMessageIflow({
+        requestId: args.requestId,
+        stage: 'response',
+        status: -1,
+        requestSummary,
+        error: error instanceof Error ? error.message : String(error ?? 'unknown_error')
+      });
+    } finally {
+      invocation.cleanup();
+    }
+  }
+  return null;
+}
+
+export async function renderStopMessageAutoFollowupViaAiAsync(args: StopMessageAiFollowupArgs): Promise<string | null> {
+  if (!isStopMessageAutoMessageEnabled()) {
+    return null;
+  }
+  const backendOrder = resolveStopMessageAutoMessageBackendOrder();
+  const maxOutputChars = resolveStopMessageAutoMessageIflowOutputMaxChars();
+  const workingDirectory = resolveStopMessageAutoMessageWorkingDirectory(args.workingDirectory);
+  for (const backend of backendOrder) {
+    const command = resolveStopMessageAutoMessageCommand(backend);
+    if (!command) {
+      continue;
+    }
+    const prompt = buildStopMessageAutoMessageIflowPrompt(args, backend);
+    if (!prompt) {
+      continue;
+    }
+    const invocation = createStopMessageAutoMessageInvocation(backend, prompt);
+    const timeoutMs = resolveStopMessageAutoMessageTimeoutMs(backend);
+    const requestSummary = summarizeStopMessageAutoMessageLog(
+      [
+        `base=${args.baseStopMessageText || ''}`,
+        `candidate=${args.candidateFollowupText || ''}`,
+        `assistant=${args.responseSnapshot.assistantText || ''}`,
+        `reasoning=${args.responseSnapshot.reasoningText || ''}`,
+        `completionClaimed=${args.completionClaimed === true ? 'yes' : 'no'}`,
+        `backend=${backend}`,
+        `cwd=${workingDirectory || 'n/a'}`
+      ].join(' | '),
+      STOP_MESSAGE_AUTOMESSAGE_LOG_SUMMARY_MAX_CHARS
+    );
+    logStopMessageAutoMessageIflow({
+      requestId: args.requestId,
+      stage: 'request',
+      requestSummary
+    });
+    try {
+      const result = await runStopMessageAutoMessageCommandAsync({
+        command,
+        args: invocation.args,
+        timeoutMs,
+        maxBuffer: 1024 * 1024,
+        ...(workingDirectory ? { cwd: workingDirectory } : {})
+      });
 
       if (result.error || result.status !== 0) {
         const responseSummary = summarizeStopMessageAutoMessageLog(
@@ -286,6 +538,10 @@ export function hasToolLikeOutput(value: unknown): boolean {
 }
 
 function isStopMessageAutoMessageEnabled(): boolean {
+  const fromConfig = resolveStopMessageAiFollowupEnabledFromConfig();
+  if (typeof fromConfig === 'boolean') {
+    return fromConfig;
+  }
   const raw = String(
     process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_ENABLED ??
       process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_ENABLED ??
@@ -312,6 +568,10 @@ function resolveStopMessageAutoMessageBackendOrder(): StopMessageAutoMessageBack
 }
 
 function resolveStopMessageAutoMessageBackend(): StopMessageAutoMessageBackend {
+  const fromConfig = resolveStopMessageAiFollowupBackendFromConfig();
+  if (fromConfig === 'iflow' || fromConfig === 'codex') {
+    return fromConfig;
+  }
   const raw = String(
     process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_BACKEND ??
       process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_BACKEND ??
@@ -332,6 +592,10 @@ function resolveStopMessageAutoMessageBackend(): StopMessageAutoMessageBackend {
 }
 
 function resolveStopMessageAutoMessageCommand(backend: StopMessageAutoMessageBackend): string {
+  const fromConfig = resolveStopMessageAiFollowupCommandFromConfig(backend);
+  if (fromConfig && fromConfig.trim()) {
+    return fromConfig.trim();
+  }
   if (backend === 'codex') {
     const codexRaw = String(
       process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN ??
@@ -353,16 +617,19 @@ function resolveStopMessageAutoMessageWorkingDirectory(value: unknown): string |
 }
 
 function resolveStopMessageAutoMessageTimeoutMs(backend: StopMessageAutoMessageBackend): number {
+  const timeoutFromConfig = resolveStopMessageAiFollowupTimeoutMsFromConfig();
   const raw = String(
     process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_TIMEOUT_MS ??
       process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_TIMEOUT_MS ??
       ''
   ).trim();
   const parsed = Number(raw);
-  const explicitTimeout =
-    Number.isFinite(parsed) && parsed > 0
-      ? Math.max(200, Math.min(STOP_MESSAGE_AUTOMESSAGE_IFLOW_TIMEOUT_MAX_MS, Math.floor(parsed)))
+  const explicitTimeoutRaw = Number.isFinite(parsed) && parsed > 0
+    ? Math.floor(parsed)
+    : Number.isFinite(timeoutFromConfig) && Number(timeoutFromConfig) > 0
+      ? Math.floor(Number(timeoutFromConfig))
       : STOP_MESSAGE_AUTOMESSAGE_IFLOW_TIMEOUT_MS;
+  const explicitTimeout = Math.max(200, Math.min(STOP_MESSAGE_AUTOMESSAGE_IFLOW_TIMEOUT_MAX_MS, explicitTimeoutRaw));
   let resolvedTimeout = explicitTimeout;
 
   const explicitCommand =
@@ -436,16 +703,19 @@ function readStopMessageAutoMessageCodexOutput(outputFilePath: string | undefine
 }
 
 function resolveStopMessageAutoMessageIflowOutputMaxChars(): number {
+  const outputMaxCharsFromConfig = resolveStopMessageAiFollowupOutputMaxCharsFromConfig();
   const raw = String(
     process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_OUTPUT_MAX_CHARS ??
       process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_OUTPUT_MAX_CHARS ??
       ''
   ).trim();
   const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    return STOP_MESSAGE_AUTOMESSAGE_OUTPUT_MAX_CHARS;
-  }
-  return Math.max(128, Math.min(8_000, Math.floor(parsed)));
+  const resolved = Number.isFinite(parsed) && parsed > 0
+    ? Math.floor(parsed)
+    : Number.isFinite(outputMaxCharsFromConfig) && Number(outputMaxCharsFromConfig) > 0
+      ? Math.floor(Number(outputMaxCharsFromConfig))
+      : STOP_MESSAGE_AUTOMESSAGE_OUTPUT_MAX_CHARS;
+  return Math.max(128, Math.min(8_000, resolved));
 }
 
 function sanitizeStopMessageAutoMessageOutput(raw: unknown, maxChars: number): string {
@@ -509,6 +779,8 @@ function buildStopMessageAutoMessageIflowPrompt(args: {
   const completionClaimed = args.completionClaimed === true;
   const isFirstPrompt = Boolean(args.isFirstPrompt);
   const historyBlock = renderStopMessageAiHistoryEntries(args.historyEntries);
+  const requireEvidence = resolveStopMessageAiRequireEvidence();
+  const requireNextTaskAfterDone = resolveStopMessageAiRequireNextTaskAfterDone();
   const lines: string[] = [
     isFirstPrompt
       ? '你是 RouteCodex 的 ai-followup 生成器（首次引导）。'
@@ -519,11 +791,16 @@ function buildStopMessageAutoMessageIflowPrompt(args: {
     '1) 只输出一段可直接注入的用户消息文本；不要解释、不要 JSON、不要代码块。',
     '1.1) 输出目标固定为：根据当前状态调整后的下一步 followup 消息文本。',
     '2) 模型反馈=消息内容（assistantText/reasoningText/responseExcerpt）；你的指令必须基于这些实际内容，不得凭空编造状态。',
+    ...(requireEvidence
+      ? ['2.1) 默认要求主模型给出可核验的证据（文件/命令/日志/测试），你只允许基于证据判断下一步。']
+      : []),
     '3) 先做代码 review（最多一句），再给指令：必须结合 workingDirectory 下当前实现/测试/构建状态给出建议；不能只做抽象建议。',
     '3.1) 主模型若声明“完成了某项”，优先核验与 overallGoal 直接相关的关键项；非关键分支/小目标可记录为后续补充验证，不必阻塞推进。',
     '3.2) 通过标准以“总体目标是否达成”为主；当主目标证据充分时，允许次要项暂未验证，并给出后续补测建议。',
     '3.3) 若主模型声称“无法完成/被阻塞”，你必须要求其提供阻塞证据，并判断是否存在可继续推进的最小可执行动作。',
     '3.4) 必要时必须要求其打开并检查已改代码（明确到文件），再给出具体修改建议，不允许停留在抽象层面。',
+    '3.5) 必须先根据本次请求逐条核验（目标/范围/约束）后再给建议：至少引用一个代码证据（文件路径+关键实现点），若涉及行为变更还要引用测试/命令证据或明确说明未执行原因。',
+    '3.6) 禁止“先给建议、后补证据”；核验结论必须先于建议给出，且每条建议都要可追溯到对应证据。',
     '4) 必须包含至少一个可执行动作（具体文件、命令、检查点或验证目标），并尽量最小化下一步范围；优先“写动作”（改代码/补测试）。',
     '5) 禁止输出空泛短答：如“继续”“继续执行”“好的”“收到”“ok”。',
     '6) 禁止把回复做成纯状态汇总；默认是推进执行，直到阶段目标或总体目标完成。',
@@ -535,7 +812,10 @@ function buildStopMessageAutoMessageIflowPrompt(args: {
     completionClaimed
       ? '12) 参考信号：主模型本轮声称“已完成”，但你必须独立核验，不能直接采信。'
       : '12) 主模型未显式声称完成；你仍可基于证据独立判断是否达成总体目标。',
-    `13) 当关键路径证据充分且确认已完成总体目标时，允许只输出 ${approvedMarker} 作为唯一内容；若仅剩非关键小项未验证，也可判定通过并建议后续补齐。`,
+    `13) 当关键路径证据充分且确认已完成总体目标时，允许只输出 ${approvedMarker} 作为完成信号；若仅剩非关键小项未验证，也可判定通过并建议后续补齐。`,
+    ...(requireNextTaskAfterDone
+      ? ['13.1) 一旦确认当前任务完成，必须要求主模型明确“下一步任务”并继续执行，不允许停在完成口播。']
+      : []),
     `14) 若证据不足或主目标未达成，严禁输出 ${approvedMarker}。`,
     '',
     '本轮注入上下文（必须参考）：',
@@ -640,6 +920,10 @@ export function resolveStopMessageAiDoneMarker(value?: string): string {
   if (explicit) {
     return explicit;
   }
+  const fromConfig = resolveStopMessageAiDoneMarkerFromConfig();
+  if (fromConfig && fromConfig.trim()) {
+    return fromConfig.trim();
+  }
   const envValue = String(process.env.ROUTECODEX_STOPMESSAGE_AI_DONE_MARKER || '').trim();
   if (envValue) {
     return envValue;
@@ -652,6 +936,10 @@ export function resolveStopMessageAiApprovedMarker(value?: string): string {
   if (explicit) {
     return explicit;
   }
+  const fromConfig = resolveStopMessageAiApprovedMarkerFromConfig();
+  if (fromConfig && fromConfig.trim()) {
+    return fromConfig.trim();
+  }
   const envValue = String(process.env.ROUTECODEX_STOPMESSAGE_AI_APPROVED_MARKER || '').trim();
   if (envValue) {
     return envValue;
@@ -660,6 +948,10 @@ export function resolveStopMessageAiApprovedMarker(value?: string): string {
 }
 
 function isStopMessageAutoMessageIflowTraceEnabled(): boolean {
+  const fromConfig = resolveStopMessageAiTraceEnabledFromConfig();
+  if (typeof fromConfig === 'boolean') {
+    return fromConfig;
+  }
   const raw = String(
     process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_TRACE ??
       process.env.ROUTECODEX_STOPMESSAGE_IFLOW_TRACE ??

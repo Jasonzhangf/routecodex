@@ -1,9 +1,13 @@
 import type { Application, Request, Response } from 'express';
+import fs from 'node:fs/promises';
+import path from 'node:path';
 
 import {
+  appendHeartbeatHistoryEventSnapshot,
   buildHeartbeatInjectTextSnapshot,
   cancelClockTaskSnapshot,
   clearClockTasksSnapshot,
+  listHeartbeatHistorySnapshot,
   listHeartbeatStatesSnapshot,
   listClockSessionIdsSnapshot,
   listClockTasksSnapshot,
@@ -17,7 +21,10 @@ import { getSessionClientRegistry } from './session-client-registry.js';
 import { normalizeWorkdir } from './session-client-registry-utils.js';
 import { isLocalRequest, isLoopbackBindHost } from './daemon-admin-routes.js';
 import { triggerHeartbeatNow } from './heartbeat-runtime-hooks.js';
-import { isTmuxSessionAlive } from './tmux-session-probe.js';
+import {
+  isTmuxSessionAlive,
+  resolveTmuxSessionWorkingDirectory
+} from './tmux-session-probe.js';
 import {
   extractApiKeyFromRequest,
   resolveEnvSecretReference
@@ -33,6 +40,43 @@ import {
 } from './session-client-route-utils.js';
 import { clearStopMessageTmuxScope, migrateStopMessageTmuxScope } from './stopmessage-scope-rebind.js';
 import { matchesExpectedClientApiKey } from '../../../utils/session-client-token.js';
+
+function stripHeartbeatStopMarkerFromText(raw: string): { updated: string; changed: boolean } {
+  const lines = String(raw || '').split(/\r?\n/);
+  let changed = false;
+  const kept: string[] = [];
+  for (const line of lines) {
+    if (/^\s*Heartbeat-Stop-When:\s*.+$/i.test(line)) {
+      changed = true;
+      continue;
+    }
+    kept.push(line);
+  }
+  return { updated: kept.join('\n'), changed };
+}
+
+async function clearHeartbeatStopMarkerForWorkdir(workdir: string | undefined): Promise<void> {
+  const normalized = typeof workdir === 'string' ? workdir.trim() : '';
+  if (!normalized) {
+    return;
+  }
+  const heartbeatPath = path.join(normalized, 'HEARTBEAT.md');
+  let raw = '';
+  try {
+    raw = await fs.readFile(heartbeatPath, 'utf8');
+  } catch (error) {
+    const code = (error as { code?: unknown })?.code;
+    if (code === 'ENOENT') {
+      return;
+    }
+    throw error;
+  }
+  const stripped = stripHeartbeatStopMarkerFromText(raw);
+  if (!stripped.changed) {
+    return;
+  }
+  await fs.writeFile(heartbeatPath, stripped.updated, 'utf8');
+}
 
 export interface SessionClientRouteOptions {
   bindHost?: string;
@@ -239,6 +283,23 @@ export function registerSessionClientRoutes(app: Application, options: SessionCl
     res.status(200).json({ ok: true, tmuxSessionId, state });
   });
 
+  app.get('/daemon/heartbeat/history', async (req: Request, res: Response) => {
+    if (rejectUnauthorizedSessionClient(req, res, sessionClientAuth)) {
+      return;
+    }
+    const tmuxSessionId =
+      parseString(req.query.tmuxSessionId) ||
+      parseString(req.query.sessionId) ||
+      parseString(req.query.daemonId && registry.findByDaemonId(String(req.query.daemonId))?.tmuxSessionId);
+    if (!tmuxSessionId) {
+      res.status(400).json({ ok: false, reason: 'tmuxSessionId is required' });
+      return;
+    }
+    const limit = parsePositiveInt(req.query.limit) || 100;
+    const events = await listHeartbeatHistorySnapshot({ tmuxSessionId, limit });
+    res.status(200).json({ ok: true, tmuxSessionId, events });
+  });
+
   app.post('/daemon/session-client/inject', async (req: Request, res: Response) => {
     if (rejectUnauthorizedSessionClient(req, res, sessionClientAuth)) {
       return;
@@ -301,10 +362,21 @@ export function registerSessionClientRoutes(app: Application, options: SessionCl
     if (action === 'on' || action === 'off') {
       const state = await setHeartbeatEnabledSnapshot({
         tmuxSessionId,
-        enabled: action === 'on'
+        enabled: action === 'on',
+        source: 'api',
+        ...(action === 'off' ? { reason: 'disabled_by_api' } : {})
       });
       if (action === 'on') {
-        const injectText = (await buildHeartbeatInjectTextSnapshot()) || '[Heartbeat]\n请读取 HEARTBEAT.md，更新 DELIVERY.md，并调用 review。';
+        const bodyWorkdir = normalizeWorkdir(
+          parseString(body.workdir) || parseString(body.cwd) || parseString(body.workingDirectory)
+        );
+        const daemonWorkdir = daemonId ? normalizeWorkdir(parseString(registry.findByDaemonId(daemonId)?.workdir)) : undefined;
+        const tmuxWorkdir = resolveTmuxSessionWorkingDirectory(tmuxSessionId);
+        const workdir = bodyWorkdir || daemonWorkdir || tmuxWorkdir;
+        await clearHeartbeatStopMarkerForWorkdir(workdir).catch(() => {});
+        const injectText =
+          (await buildHeartbeatInjectTextSnapshot()) ||
+          '[Heartbeat]\n请先判断你当前是否仍在执行上一次已开始的任务。\n如果当前任务仍在执行中，请忽略本次提醒，不要打断当前工作。\n如果当前任务已经空闲或已中断，请读取 HEARTBEAT.md，更新 DELIVERY.md（最多只保留最近十次交付记录，不要无限追加成巨型文件），并调用 drudge.review。';
         const result = await triggerHeartbeatNow({
           tmuxSessionId,
           injectText,
@@ -312,6 +384,14 @@ export function registerSessionClientRoutes(app: Application, options: SessionCl
             countActiveRequestsForTmuxSession: (sessionId: string) =>
               Number((req.app?.locals?.routecodexServer as any)?.requestActivityTracker?.countActiveRequestsForTmuxSession?.(sessionId) || 0)
           }
+        });
+        await appendHeartbeatHistoryEventSnapshot({
+          tmuxSessionId,
+          source: 'api',
+          action: 'trigger',
+          outcome: result?.ok ? 'triggered' : result?.disable ? 'disabled' : result?.skipped ? 'skipped' : 'failed',
+          ...(parseString((result as Record<string, unknown> | null)?.reason) ? { reason: parseString((result as Record<string, unknown> | null)?.reason) } : {}),
+          details: { dryRun: false, action: 'on' }
         });
         res.status(200).json({ ok: true, tmuxSessionId, state, trigger: result });
         return;
@@ -322,7 +402,9 @@ export function registerSessionClientRoutes(app: Application, options: SessionCl
 
     if (action === 'trigger') {
       const dryRun = parseBoolean(body.dryRun) === true;
-      const injectText = (await buildHeartbeatInjectTextSnapshot()) || '[Heartbeat]\n请读取 HEARTBEAT.md，更新 DELIVERY.md，并调用 review。';
+      const injectText =
+        (await buildHeartbeatInjectTextSnapshot()) ||
+        '[Heartbeat]\n请先判断你当前是否仍在执行上一次已开始的任务。\n如果当前任务仍在执行中，请忽略本次提醒，不要打断当前工作。\n如果当前任务已经空闲或已中断，请读取 HEARTBEAT.md，更新 DELIVERY.md（最多只保留最近十次交付记录，不要无限追加成巨型文件），并调用 drudge.review。';
       const result = await triggerHeartbeatNow({
         tmuxSessionId,
         injectText,
@@ -331,6 +413,14 @@ export function registerSessionClientRoutes(app: Application, options: SessionCl
             Number((req.app?.locals?.routecodexServer as any)?.requestActivityTracker?.countActiveRequestsForTmuxSession?.(sessionId) || 0)
         },
         ...(dryRun ? { dryRun } : {})
+      });
+      await appendHeartbeatHistoryEventSnapshot({
+        tmuxSessionId,
+        source: 'api',
+        action: 'trigger',
+        outcome: result?.ok ? 'triggered' : result?.disable ? 'disabled' : result?.skipped ? 'skipped' : 'failed',
+        ...(parseString((result as Record<string, unknown> | null)?.reason) ? { reason: parseString((result as Record<string, unknown> | null)?.reason) } : {}),
+        details: { dryRun }
       });
       res.status(200).json({ ok: true, tmuxSessionId, result });
       return;

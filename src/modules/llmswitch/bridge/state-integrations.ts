@@ -173,7 +173,27 @@ type HeartbeatTaskStoreModule = {
   }) => void | Promise<void>;
   loadHeartbeatState?: (tmuxSessionId: string) => Promise<unknown>;
   listHeartbeatStates?: () => Promise<unknown[]>;
-  setHeartbeatEnabled?: (tmuxSessionId: string, enabled: boolean) => Promise<unknown>;
+  setHeartbeatEnabled?: (
+    tmuxSessionId: string,
+    enabled: boolean,
+    options?: {
+      intervalMs?: number;
+      clearIntervalOverride?: boolean;
+      source?: string;
+      reason?: string;
+      details?: Record<string, unknown>;
+    }
+  ) => Promise<unknown>;
+  listHeartbeatHistory?: (args: { tmuxSessionId: string; limit?: number }) => Promise<unknown[]>;
+  appendHeartbeatHistoryEvent?: (input: {
+    tmuxSessionId: string;
+    source: string;
+    action: string;
+    outcome: string;
+    reason?: string;
+    details?: Record<string, unknown>;
+    atMs?: number;
+  }) => Promise<boolean>;
   runHeartbeatDaemonTickForTests?: () => Promise<void>;
 };
 
@@ -528,14 +548,63 @@ export async function listHeartbeatStatesSnapshot(): Promise<unknown[]> {
 export async function setHeartbeatEnabledSnapshot(args: {
   tmuxSessionId: string;
   enabled: boolean;
+  source?: string;
+  reason?: string;
+  intervalMs?: number;
+  clearIntervalOverride?: boolean;
+  details?: Record<string, unknown>;
 }): Promise<unknown | null> {
   const mod = await getHeartbeatTaskStoreModuleSafe();
   const fn = mod?.setHeartbeatEnabled;
   if (typeof fn !== 'function') return null;
   try {
-    return await fn(args.tmuxSessionId, args.enabled);
+    return await fn(args.tmuxSessionId, args.enabled, {
+      ...(typeof args.intervalMs === 'number' ? { intervalMs: args.intervalMs } : {}),
+      ...(args.clearIntervalOverride ? { clearIntervalOverride: true } : {}),
+      ...(typeof args.source === 'string' && args.source.trim() ? { source: args.source.trim() } : {}),
+      ...(typeof args.reason === 'string' && args.reason.trim() ? { reason: args.reason.trim() } : {}),
+      ...(args.details && typeof args.details === 'object' ? { details: args.details } : {})
+    });
   } catch {
     return null;
+  }
+}
+
+export async function listHeartbeatHistorySnapshot(args: {
+  tmuxSessionId: string;
+  limit?: number;
+}): Promise<unknown[]> {
+  const mod = await getHeartbeatTaskStoreModuleSafe();
+  const fn = mod?.listHeartbeatHistory;
+  if (typeof fn !== 'function') {
+    return [];
+  }
+  try {
+    const out = await fn(args);
+    return Array.isArray(out) ? out : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function appendHeartbeatHistoryEventSnapshot(input: {
+  tmuxSessionId: string;
+  source: string;
+  action: string;
+  outcome: string;
+  reason?: string;
+  details?: Record<string, unknown>;
+  atMs?: number;
+}): Promise<boolean> {
+  const mod = await getHeartbeatTaskStoreModuleSafe();
+  const fn = mod?.appendHeartbeatHistoryEvent;
+  if (typeof fn !== 'function') {
+    return false;
+  }
+  try {
+    return Boolean(await fn(input));
+  } catch {
+    return false;
   }
 }
 

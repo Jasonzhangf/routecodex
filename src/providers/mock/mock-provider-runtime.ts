@@ -618,7 +618,7 @@ function parseRequestIdParts(
     return null;
   }
   const match = requestId.match(
-    /^(openai-responses|openai-chat|anthropic-messages|gemini-chat)-(.+)-(\d{8}T\d{9})-(\d{3})(:.*)?$/
+    /^(openai-responses|openai-chat|anthropic-messages|gemini-chat)-(.+)-(\d{8}T\d{9})-(\d+(?:-\d+)?)(:.*)?$/
   );
   if (!match) {
     return null;

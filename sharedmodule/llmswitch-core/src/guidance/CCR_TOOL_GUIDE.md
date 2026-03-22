@@ -26,7 +26,10 @@
   - 明确要求使用 `assistant.tool_calls[].function.{name,arguments}` 调用工具，不在纯文本中嵌入工具调用。
   - `function.arguments` 必须是单个 JSON 字符串。
   - shell 工具：参数全部放入 `command` 数组，不得造新键；禁止通过 shell 写文件（重定向、heredoc、sed -i、ed -s、tee 等），写文件一律用 `apply_patch`。
-  - apply_patch：仅发送补丁文本；支持 internal "*** Begin Patch" 或 GNU unified diff。注意 "*** Update File" 不会隐式创建文件；创建文件请用 "*** Add File:"（或 /dev/null diff）。修改同一文件时尽量只提交一段连续补丁，多个不相邻位置请拆成多次调用。
+  - apply_patch：仅发送补丁文本；只允许二选一：internal "*** Begin Patch" 或原始 GNU unified diff，**严禁混用**。若已使用 "*** Begin Patch"，块内不要再写 `--- a/...` / `+++ b/...`。注意 "*** Update File" 不会隐式创建文件；创建文件请用 "*** Add File:"（或 /dev/null diff）。修改同一文件时尽量只提交一段连续补丁，多个不相邻位置请拆成多次调用。
+  - apply_patch（效率规则）：在 "*** Update File" 前先用 `nl -ba <file>`（空行也编号）读取当前文件，再基于最新内容写 hunk；若报 `Failed to find expected lines`，立即重读文件并改用更小、更唯一的上下文重试。
+  - apply_patch（失败恢复规则）：若报 `Failed to find expected lines` 或 `Failed to find context`，不要继续猜 `@@` hunk 语法，也不要猜 GNU 行号范围；第一步必须重新读取目标文件最新内容，再基于真实当前内容重建 patch。
+  - apply_patch（模板要求）：在工具引导中提供可直接复制的模板（创建文件、单行替换、锚点追加、删除文件），降低首次失败率；尤其强调 `*** Update File` 后必须有 `@@` hunk，不能直接粘贴 frontmatter/正文，也不能带冲突标记 `=======` / `>>>>>>>` / `<<<<<<<`。
   - update_plan：始终保持“仅一个 in_progress 步骤”。
   - view_image：仅用于图片文件路径；禁止用来读取文本文件。
   - 不叙述“准备调用工具/工具调用已生成”等提示，直接生成 `tool_calls`。

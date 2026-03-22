@@ -28,5 +28,5 @@ pub(crate) use metadata::{
 #[allow(unused_imports)]
 pub(crate) use selection::{
     filter_candidates_by_state, resolve_instruction_process_mode_for_selection,
-    resolve_instruction_target,
+    resolve_instruction_target, InstructionTargetMatchMode,
 };

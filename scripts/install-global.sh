@@ -45,6 +45,21 @@ check_node() {
     echo "✅ Node.js: $(node -v)"
 }
 
+check_tmux() {
+    if command -v tmux &> /dev/null; then
+        echo "✅ tmux: $(tmux -V 2>/dev/null || echo tmux)"
+        return
+    fi
+
+    echo "❌ tmux 未安装"
+    echo "💡 RouteCodex 的 tmux 会话管理 / 注入 / heartbeat 依赖 tmux"
+    echo "💡 请先安装 tmux 后再执行全局安装，例如："
+    echo "   macOS(Homebrew): brew install tmux"
+    echo "   Ubuntu/Debian: apt-get install -y tmux"
+    echo "   CentOS/RHEL: yum install -y tmux"
+    exit 1
+}
+
 # 构建项目
 build_project() {
     echo "🔨 构建项目..."
@@ -140,46 +155,7 @@ global_install() {
 
 link_global_llms_dev() {
     echo "🔗 链接全局 @jsonstudio/llms 到本地 sharedmodule (dev 模式)..."
-
-    local npm_prefix
-    local global_node_modules
-    npm_prefix=$(npm config get prefix)
-    global_node_modules=$(npm root -g 2>/dev/null || true)
-    if [ -z "${global_node_modules:-}" ]; then
-        global_node_modules="$npm_prefix/lib/node_modules"
-    fi
-
-    local global_routecodex
-    local local_llms
-    local global_llms_parent
-    local global_llms_link
-
-    global_routecodex="$global_node_modules/routecodex"
-    local_llms="$PWD/sharedmodule/llmswitch-core"
-    global_llms_parent="$global_routecodex/node_modules/@jsonstudio"
-    global_llms_link="$global_llms_parent/llms"
-
-    if [ ! -d "$global_routecodex" ]; then
-        echo "❌ 未找到全局 routecodex 安装目录: $global_routecodex"
-        exit 1
-    fi
-    if [ ! -d "$local_llms" ] || [ ! -f "$local_llms/package.json" ]; then
-        echo "❌ 未找到本地 llmswitch-core: $local_llms"
-        exit 1
-    fi
-    if [ ! -d "$local_llms/dist" ]; then
-        echo "❌ 本地 llmswitch-core 尚未构建 (缺少 dist/): $local_llms"
-        echo "💡 请先在 sharedmodule/llmswitch-core 执行 npm run build"
-        exit 1
-    fi
-
-    mkdir -p "$global_llms_parent"
-    rm -rf "$global_llms_link"
-    ln -s "$local_llms" "$global_llms_link"
-
-    local resolved_target
-    resolved_target=$(readlink "$global_llms_link" || true)
-    echo "✅ 全局 llms 已链接: $global_llms_link -> $resolved_target"
+    node scripts/link-global-llms-local.mjs --package routecodex --require-target
 }
 
 # 验证安装
@@ -266,6 +242,7 @@ cleanup_old_install() {
 # 主函数
 main() {
     check_node
+    check_tmux
     cleanup_old_install
     node scripts/cleanup-stale-server-pids.mjs --quiet || true
     build_project

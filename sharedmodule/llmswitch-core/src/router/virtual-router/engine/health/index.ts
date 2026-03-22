@@ -544,6 +544,12 @@ export function mapProviderErrorImpl(
    fatal = false;
     cooldownOverrideMs = Math.max(60_000, healthConfig.cooldownMs ?? 60_000);
    reason = 'auth';
+ } else if (statusCode === 413) {
+   // Deterministic payload-size rejection for this provider/model.
+   // Keep it recoverable so request executor can fail over to other candidates.
+   fatal = false;
+   cooldownOverrideMs = Math.max(120_000, healthConfig.cooldownMs ?? 60_000);
+   reason = 'payload_too_large';
  } else if (statusCode === 429 && !recoverable) {
    fatal = false;
    cooldownOverrideMs = Math.max(60_000, healthConfig.cooldownMs ?? 60_000);

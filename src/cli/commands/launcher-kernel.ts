@@ -834,9 +834,23 @@ function normalizePathForComparison(candidate: string): string {
   }
 }
 
-function formatHmms(value: Date): string {
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${pad(value.getHours())}${pad(value.getMinutes())}${pad(value.getSeconds())}`;
+function resolveManagedTmuxSessionBaseName(cwd: string): string {
+  const rawCwd = String(cwd || '').trim();
+  let baseCandidate = '';
+  try {
+    const resolved = path.resolve(rawCwd || '.').replace(/[\\/]+$/, '');
+    baseCandidate = path.basename(resolved);
+  } catch {
+    baseCandidate = rawCwd;
+  }
+  const normalizedBase = normalizeSessionToken(baseCandidate)
+    .replace(/_/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    || 'workspace';
+  const maxBaseLen = 40;
+  const clippedBase = normalizedBase.slice(0, maxBaseLen) || 'workspace';
+  return `rcc-${clippedBase}`;
 }
 
 function tmuxSessionExists(spawnSyncImpl: typeof spawnSync, sessionName: string): boolean {
@@ -848,9 +862,15 @@ function tmuxSessionExists(spawnSyncImpl: typeof spawnSync, sessionName: string)
   }
 }
 
-function buildManagedTmuxSessionName(nowMs: number, attempt: number): string {
-  const stamp = formatHmms(new Date(nowMs + attempt * 1000));
-  return `rcc-tmux-${stamp}`;
+function buildManagedTmuxSessionName(cwd: string, _nowMs: number, attempt: number): string {
+  const base = resolveManagedTmuxSessionBaseName(cwd);
+  if (attempt <= 0) {
+    return base;
+  }
+  const suffix = `-${attempt + 1}`;
+  const maxLen = 64;
+  const clippedBase = base.slice(0, Math.max(1, maxLen - suffix.length));
+  return `${clippedBase}${suffix}`;
 }
 
 function requestManagedTmuxSessionExit(
@@ -894,7 +914,7 @@ function createManagedTmuxSession(args: {
 
   const baseNow = Date.now();
   for (let attempt = 0; attempt < 6; attempt += 1) {
-    const sessionName = buildManagedTmuxSessionName(baseNow, attempt);
+    const sessionName = buildManagedTmuxSessionName(cwd, baseNow, attempt);
     if (tmuxSessionExists(spawnSyncImpl, sessionName)) {
       continue;
     }
@@ -1776,9 +1796,12 @@ export function createLauncherCommand(program: Command, ctx: LauncherCommandCont
             managedTmuxSession = null;
             throw new Error(`Failed to send ${spec.displayName} command to managed tmux session`);
           }
+          const attachEnv = { ...ctx.env };
+          delete attachEnv.TMUX;
+          delete attachEnv.TMUX_PANE;
           return ctx.spawn('tmux', ['attach-session', '-t', managedTmuxSession.sessionName], {
             stdio: 'inherit',
-            env: ctx.env,
+            env: attachEnv,
             cwd: currentCwd
           });
         }

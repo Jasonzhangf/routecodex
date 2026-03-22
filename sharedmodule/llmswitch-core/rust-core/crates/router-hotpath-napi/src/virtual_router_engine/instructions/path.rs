@@ -1,9 +1,52 @@
 use regex::Regex;
+use std::cell::RefCell;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::types::{DEFAULT_PRECOMMAND_SCRIPT, DEFAULT_PRECOMMAND_SCRIPT_CONTENT};
+
+thread_local! {
+    static RCC_USER_DIR_OVERRIDE: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+}
+
+struct RccUserDirOverrideGuard {
+    previous: Option<PathBuf>,
+}
+
+impl Drop for RccUserDirOverrideGuard {
+    fn drop(&mut self) {
+        RCC_USER_DIR_OVERRIDE.with(|slot| {
+            *slot.borrow_mut() = self.previous.take();
+        });
+    }
+}
+
+fn normalize_override_user_dir(raw: Option<&str>) -> Option<PathBuf> {
+    let trimmed = raw?.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(PathBuf::from(trimmed))
+}
+
+fn read_override_user_dir() -> Option<PathBuf> {
+    RCC_USER_DIR_OVERRIDE.with(|slot| slot.borrow().clone())
+}
+
+pub(crate) fn with_rcc_user_dir_override<T>(
+    raw: Option<&str>,
+    callback: impl FnOnce() -> T,
+) -> T {
+    let next = normalize_override_user_dir(raw);
+    let previous = RCC_USER_DIR_OVERRIDE.with(|slot| {
+        let previous = slot.borrow().clone();
+        *slot.borrow_mut() = next;
+        previous
+    });
+    let _guard = RccUserDirOverrideGuard { previous };
+    callback()
+}
 
 fn expand_home(value: &str, home_dir: &Path) -> PathBuf {
     if let Some(stripped) = value.strip_prefix("~/") {
@@ -13,6 +56,9 @@ fn expand_home(value: &str, home_dir: &Path) -> PathBuf {
 }
 
 fn resolve_rcc_user_dir() -> Result<PathBuf, String> {
+    if let Some(explicit) = read_override_user_dir() {
+        return Ok(explicit);
+    }
     let home = env::var("HOME")
         .ok()
         .or_else(|| env::var("USERPROFILE").ok())
@@ -122,9 +168,7 @@ pub(super) fn resolve_precommand_script_path(raw: &str) -> Result<String, String
     let rel_to_precommand = normalize_precommand_relative_path(&rel_raw, from_file_scheme)?;
     let base = resolve_precommand_base_dir()?;
     let abs = base.join(Path::new(&rel_to_precommand));
-    let abs = abs.canonicalize().unwrap_or_else(|_| abs.clone());
-    let base_norm = base.canonicalize().unwrap_or_else(|_| base.clone());
-    if abs != base_norm && !abs.starts_with(&base_norm) {
+    if abs != base && !abs.starts_with(&base) {
         return Err("precommand: path escapes ~/.rcc/precommand".to_string());
     }
     let stat = fs::metadata(&abs);
@@ -134,7 +178,7 @@ pub(super) fn resolve_precommand_script_path(raw: &str) -> Result<String, String
             if err.kind() == std::io::ErrorKind::NotFound
                 && rel_to_precommand == DEFAULT_PRECOMMAND_SCRIPT
             {
-                try_create_default_precommand_script(&base_norm, &abs);
+                try_create_default_precommand_script(&base, &abs);
                 fs::metadata(&abs).map_err(|retry_err| {
                     format!("precommand: cannot stat {}: {}", abs.display(), retry_err)
                 })?
@@ -192,9 +236,7 @@ pub(super) fn resolve_stop_message_text(raw: &str) -> Result<String, String> {
     let base = resolve_rcc_user_dir()
         .map_err(|err| err.replace("precommand", "stopMessage file://"))?;
     let abs = base.join(Path::new(&normalized_rel));
-    let abs = abs.canonicalize().unwrap_or_else(|_| abs.clone());
-    let base_norm = base.canonicalize().unwrap_or_else(|_| base.clone());
-    if abs != base_norm && !abs.starts_with(&base_norm) {
+    if abs != base && !abs.starts_with(&base) {
         return Err("stopMessage file://: path escapes ~/.rcc".to_string());
     }
     let stat = fs::metadata(&abs).map_err(|err| {

@@ -20,9 +20,29 @@ export function resolveStickyKey(
   },
   runtimeMetadata?: unknown
 ): string | undefined {
+  const providerProtocol = toNonEmptyText(record.providerProtocol).toLowerCase();
+  if (providerProtocol === 'openai-responses') {
+    const previousRequestId = resolveResponsesPreviousRequestId(record, runtimeMetadata);
+    if (previousRequestId) {
+      return previousRequestId;
+    }
+  }
   const injectScope = resolveStopMessageInjectScope(record, runtimeMetadata);
   if (injectScope) {
     return injectScope;
+  }
+
+  const sessionId = readSessionScopeValue(record, runtimeMetadata, 'sessionId');
+  if (sessionId) {
+    return `session:${sessionId}`;
+  }
+  const conversationId = readSessionScopeValue(record, runtimeMetadata, 'conversationId');
+  if (conversationId) {
+    return `conversation:${conversationId}`;
+  }
+  const requestId = readSessionScopeValue(record, runtimeMetadata, 'requestId');
+  if (requestId) {
+    return requestId;
   }
   return undefined;
 }
@@ -97,7 +117,14 @@ function resolveStopMessageInjectScope(
 ): string | undefined {
   const runtime = asRecord(runtimeMetadata);
   const runtimeInjectScope = toNonEmptyText(runtime?.stopMessageClientInjectSessionScope);
-  if (runtimeInjectScope && runtimeInjectScope.startsWith('tmux:')) {
+  if (
+    runtimeInjectScope &&
+    (
+      runtimeInjectScope.startsWith('tmux:')
+      || runtimeInjectScope.startsWith('session:')
+      || runtimeInjectScope.startsWith('conversation:')
+    )
+  ) {
     return runtimeInjectScope;
   }
 
@@ -109,7 +136,47 @@ function resolveStopMessageInjectScope(
   if (tmuxSessionId) {
     return `tmux:${tmuxSessionId}`;
   }
+  const sessionId = readSessionScopeValue(record, runtimeMetadata, 'sessionId');
+  if (sessionId) {
+    return `session:${sessionId}`;
+  }
+  const conversationId = readSessionScopeValue(record, runtimeMetadata, 'conversationId');
+  if (conversationId) {
+    return `conversation:${conversationId}`;
+  }
   return undefined;
+}
+
+function resolveResponsesPreviousRequestId(
+  record: {
+    responsesResume?: unknown;
+    metadata?: unknown;
+  },
+  runtimeMetadata?: unknown
+): string {
+  const direct = readPreviousRequestId(record.responsesResume);
+  if (direct) {
+    return direct;
+  }
+  const metadata = asRecord(record.metadata);
+  const fromMetadata = readPreviousRequestId(metadata?.responsesResume);
+  if (fromMetadata) {
+    return fromMetadata;
+  }
+  const runtime = asRecord(runtimeMetadata);
+  const fromRuntime = readPreviousRequestId(runtime?.responsesResume);
+  if (fromRuntime) {
+    return fromRuntime;
+  }
+  return '';
+}
+
+function readPreviousRequestId(value: unknown): string {
+  const row = asRecord(value);
+  if (!row) {
+    return '';
+  }
+  return toNonEmptyText(row.previousRequestId);
 }
 
 export function resolveBdWorkingDirectoryForRecord(

@@ -69,6 +69,8 @@ function formatLocalClockTimestamp(ms: number): string {
 function buildClockMdTemplateHint(): string {
   return [
     'clock.md 模板:',
+    '可选自动停止：在顶部加 `Clock-Stop-When: no-open-tasks`；当无未完成任务时系统会自动停用当前会话 clock。',
+    '重新 schedule/update 激活后，系统会自动清理该停止标记。',
     '## 背景',
     '## 当前阻塞点',
     '## 下次提醒要做的第一步',
@@ -273,6 +275,11 @@ function computeNextRecurringDueAtMs(currentDueAtMs: number, recurrence: ClockTa
   const stepMs = resolveRecurringStepMs(recurrence);
   if (!stepMs || stepMs <= 0) {
     return null;
+  }
+  if (recurrence.kind === 'interval') {
+    const anchor = Math.max(Math.floor(currentDueAtMs), Math.floor(atMs));
+    const next = anchor + stepMs;
+    return Number.isFinite(next) ? Math.floor(next) : null;
   }
   let next = Math.floor(currentDueAtMs) + stepMs;
   const ceiling = Math.max(atMs, Math.floor(currentDueAtMs)) + stepMs * 100_000;

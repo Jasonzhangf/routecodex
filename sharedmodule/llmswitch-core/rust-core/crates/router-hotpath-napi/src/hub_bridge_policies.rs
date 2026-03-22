@@ -182,6 +182,7 @@ fn responses_policy() -> Value {
           action("messages.ensure-system-instruction"),
           reasoning_action("responses_reasoning"),
           normalize_tool_call_action("responses_tool_call"),
+          action("compat.fix-apply-patch"),
           action("tools.ensure-placeholders"),
           action_with_options("metadata.extra-fields", json!({
             "allowedKeys": string_array(OPENAI_RESPONSES_ALLOWED_FIELDS)
@@ -199,6 +200,7 @@ fn responses_policy() -> Value {
           action("messages.normalize-history"),
           action("tools.capture-results"),
           normalize_tool_call_action("responses_tool_call"),
+          action("compat.fix-apply-patch"),
           action("tools.ensure-placeholders"),
           action_with_options("messages.ensure-output-fields", json!({
             "toolFallback": "Tool call completed (no output)."
@@ -223,6 +225,7 @@ fn responses_policy() -> Value {
           action("reasoning.attach-output"),
           reasoning_action("responses_reasoning"),
           normalize_tool_call_action("responses_tool_call"),
+          action("compat.fix-apply-patch"),
           action_with_options("metadata.extra-fields", json!({
             "allowedKeys": string_array(OPENAI_RESPONSES_ALLOWED_FIELDS)
           }))
@@ -230,6 +233,7 @@ fn responses_policy() -> Value {
         "outbound": [
           reasoning_action("responses_reasoning"),
           normalize_tool_call_action("responses_tool_call"),
+          action("compat.fix-apply-patch"),
           action_with_options("metadata.extra-fields", json!({
             "allowedKeys": string_array(OPENAI_RESPONSES_ALLOWED_FIELDS)
           }))

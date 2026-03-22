@@ -29,7 +29,7 @@ Design goals:
 1. Client starts via `routecodex codex` / `routecodex claude` inside tmux.
 2. Client request carries tmux metadata (`tmuxSessionId` family fields / headers).
 3. Server resolves tmux session and marks `clientInjectReady=true`.
-4. User sends `<**stopMessage,...**>` instruction.
+4. User sends `<**sm:...**>` instruction.
 5. Chat-process parser saves instruction state under `tmux:<sessionId>`.
 6. Model response reaches response orchestration.
 7. StopMessage matcher runs in chat-process servertool stage.

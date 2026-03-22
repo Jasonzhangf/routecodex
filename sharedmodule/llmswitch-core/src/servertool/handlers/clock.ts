@@ -1,3 +1,6 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
+
 import type { JsonObject, JsonValue } from '../../conversion/hub/types/json.js';
 import type { ServerToolHandler, ServerToolHandlerContext, ServerToolHandlerPlan, ToolCall } from '../types.js';
 import { registerServerToolHandler } from '../registry.js';
@@ -26,6 +29,7 @@ import { getClockTimeSnapshot } from '../clock/ntp.js';
 import { nowMs } from '../clock/state.js';
 import { logClock } from '../clock/log.js';
 import { resolveClockSessionScope } from '../clock/session-scope.js';
+import { resolveWorkingDirectoryFromAdapterContextOrFallback } from './memory/cache-writer.js';
 
 const FLOW_ID = 'clock_flow';
 const CLOCK_LIST_REQUIRED_MESSAGE =
@@ -142,6 +146,43 @@ function asPlainObject(value: unknown): Record<string, unknown> | null {
     return value as Record<string, unknown>;
   }
   return null;
+}
+
+function stripClockStopMarkerFromText(raw: string): { updated: string; changed: boolean } {
+  const lines = String(raw || '').split(/\r?\n/);
+  let changed = false;
+  const kept: string[] = [];
+  for (const line of lines) {
+    if (/^\s*Clock-Stop-When:\s*.+$/i.test(line)) {
+      changed = true;
+      continue;
+    }
+    kept.push(line);
+  }
+  return { updated: kept.join('\n'), changed };
+}
+
+async function clearClockStopMarkerForReactivation(adapterContext: Record<string, unknown>): Promise<void> {
+  const workdir = resolveWorkingDirectoryFromAdapterContextOrFallback(adapterContext);
+  if (!workdir) {
+    return;
+  }
+  const clockMdPath = path.join(workdir, 'clock.md');
+  let raw = '';
+  try {
+    raw = await fs.readFile(clockMdPath, 'utf8');
+  } catch (error) {
+    const code = (error as { code?: unknown })?.code;
+    if (code === 'ENOENT') {
+      return;
+    }
+    throw error;
+  }
+  const stripped = stripClockStopMarkerFromText(raw);
+  if (!stripped.changed) {
+    return;
+  }
+  await fs.writeFile(clockMdPath, stripped.updated, 'utf8');
 }
 
 function normalizeAction(value: unknown): 'get' | 'schedule' | 'update' | 'list' | 'cancel' | 'clear' {
@@ -514,6 +555,7 @@ const handler: ServerToolHandler = async (ctx: ServerToolHandlerContext): Promis
       logClock('update_miss', { sessionId, taskId });
       return respond({ ok: false, action, message: 'clock.update failed: task not found or patch invalid' });
     }
+    await clearClockStopMarkerForReactivation(ctx.adapterContext as unknown as Record<string, unknown>).catch(() => {});
     logClock('update', { sessionId, taskId });
     return respond({ ok: true, action, updated: mapTaskForTool(updated) });
   }
@@ -545,6 +587,7 @@ const handler: ServerToolHandler = async (ctx: ServerToolHandlerContext): Promis
     return item;
   });
   const scheduled = await scheduleClockTasks(sessionId, guardedItems, clockConfig);
+  await clearClockStopMarkerForReactivation(ctx.adapterContext as unknown as Record<string, unknown>).catch(() => {});
   logClock('schedule', { sessionId, count: scheduled.length });
   const allTasks = await listClockTasks(sessionId, clockConfig);
   const nearbyWarnings = buildNearbyReminderWarnings(scheduled, allTasks);

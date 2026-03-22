@@ -25,6 +25,8 @@
 
 👉 **Rust 逐步替换门禁与 Shadow 条件**：参见 `docs/rust-migration-gates.md`。
 
+👉 **当前运行时真源（Hub Pipeline / Virtual Router）**：位于 `rust-core/crates/router-hotpath-napi/`；TS 层仅保留 thin-shell 编排与桥接。已废弃 TS 旧实现统一归档到 `archive`/`*.legacy.ts`，避免误改主路径。
+
 ## 总览
 
 ```

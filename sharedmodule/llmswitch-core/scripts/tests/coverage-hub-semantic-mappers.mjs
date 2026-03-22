@@ -74,6 +74,12 @@ async function runAnthropicHelperCoverage() {
     thinking.normalizeAnthropicThinkingConfigFromUnknown({ budget_tokens: 500, level: 'minimal' }),
     { budgetTokens: 1024, effort: 'low' }
   );
+  assert.deepEqual(
+    thinking.normalizeAnthropicThinkingConfigFromUnknown({ effort: true }, { effortDefaultsToAdaptive: true }),
+    { mode: 'adaptive', effort: 'medium' }
+  );
+  assert.equal(thinking.normalizeAnthropicThinkingConfigFromUnknown({ effort: false }), undefined);
+  assert.equal(thinking.normalizeAnthropicThinkingConfigFromUnknown({ foo: 'bar' }), undefined);
   assert.equal(thinking.normalizeAnthropicThinkingConfigFromUnknown([]), undefined);
   assert.deepEqual(
     thinking.mergeAnthropicThinkingConfig({ mode: 'adaptive', effort: 'low' }, { budgetTokens: 4096 }),
@@ -90,6 +96,10 @@ async function runAnthropicHelperCoverage() {
   assert.deepEqual(
     thinking.resolveConfiguredAnthropicThinkingBudgets({ anthropicThinkingBudgets: { high: {}, low: 2048 } }),
     { low: 2048 }
+  );
+  assert.equal(
+    thinking.resolveConfiguredAnthropicThinkingBudgets({ anthropicThinkingBudgets: { high: 'not-a-number' } }),
+    undefined
   );
   assert.equal(thinking.resolveConfiguredAnthropicThinkingBudgets(undefined), undefined);
   assert.equal(thinking.resolveConfiguredAnthropicThinkingBudgets({ anthropicThinkingBudgets: [] }), undefined);
@@ -171,21 +181,38 @@ async function runGeminiHelperCoverage() {
   const state = await import(moduleUrl('conversion/hub/operation-table/semantic-mappers/gemini-semantics-state.js'));
 
   assert.equal(antigravity.stripOnlineSuffix('gemini-pro-online'), 'gemini-pro');
+  assert.equal(antigravity.stripOnlineSuffix('gemini-pro'), 'gemini-pro');
   const reqNoTools = {};
   antigravity.injectGoogleSearchTool(reqNoTools);
   assert.deepEqual(reqNoTools.tools, [{ googleSearch: {} }]);
   const reqWithDecls = { tools: [{ functionDeclarations: [{ name: 'exec_command' }] }] };
   antigravity.injectGoogleSearchTool(reqWithDecls);
   assert.equal(reqWithDecls.tools.length, 1);
+  const reqWithNoiseTools = { tools: [null, 1, { name: 'noop' }] };
+  antigravity.injectGoogleSearchTool(reqWithNoiseTools);
+  assert.equal(reqWithNoiseTools.tools.length, 4);
+  const reqHasSearchTool = { tools: [{ googleSearch: {} }] };
+  antigravity.injectGoogleSearchTool(reqHasSearchTool);
+  assert.equal(reqHasSearchTool.tools.length, 1);
   const reqPrune = { tools: [{ functionDeclarations: [{ name: 'web_search' }, { name: 'exec_command' }] }, { functionDeclarations: [{ name: 'websearch' }] }] };
   antigravity.pruneSearchFunctionDeclarations(reqPrune);
   assert.equal(reqPrune.tools.length, 1);
   assert.equal(reqPrune.tools[0].functionDeclarations[0].name, 'exec_command');
+  const reqPruneNoArray = {};
+  antigravity.pruneSearchFunctionDeclarations(reqPruneNoArray);
+  assert.equal(reqPruneNoArray.tools, undefined);
+  const reqPruneKeepEmptyName = { tools: [{ functionDeclarations: [{ foo: 1 }] }] };
+  antigravity.pruneSearchFunctionDeclarations(reqPruneKeepEmptyName);
+  assert.equal(reqPruneKeepEmptyName.tools.length, 1);
+  const reqPruneWithNoise = { tools: [1, { foo: 'bar' }, { functionDeclarations: [null, { name: 'web_search' }, { name: 'keep_me' }] }] };
+  antigravity.pruneSearchFunctionDeclarations(reqPruneWithNoise);
+  assert.equal(reqPruneWithNoise.tools.length >= 2, true);
   const undefNode = { a: '[undefined]', nested: { b: '[undefined]', ok: 1 }, arr: [{ c: '[undefined]' }] };
   antigravity.deepCleanUndefined(undefNode);
   assert.equal('a' in undefNode, false);
   assert.equal('b' in undefNode.nested, false);
   assert.equal('c' in undefNode.arr[0], false);
+  antigravity.deepCleanUndefined('noop');
   const imageCfg = antigravity.resolveAntigravityRequestConfig({
     originalModel: 'gemini-3-pro-image-16x9-4k-online',
     mappedModel: 'gemini-3-pro-image-online'
@@ -205,12 +232,132 @@ async function runGeminiHelperCoverage() {
   });
   assert.equal(agentCfg.requestType, 'agent');
   assert.equal(agentCfg.finalModel, 'gemini-3-pro-high');
+  const imageCfgMedium = antigravity.resolveAntigravityRequestConfig({
+    originalModel: 'gemini-3-pro-image-21x9-2k',
+    mappedModel: 'gemini-3-pro-image'
+  });
+  assert.equal(imageCfgMedium.imageConfig.aspectRatio, '21:9');
+  assert.equal(imageCfgMedium.imageConfig.imageSize, '2K');
+  const imageCfgBadSize = antigravity.resolveAntigravityRequestConfig({
+    originalModel: 'gemini-3-pro-image-1x1',
+    mappedModel: 'gemini-3-pro-image',
+    size: 'bad'
+  });
+  assert.equal(imageCfgBadSize.imageConfig.aspectRatio, '1:1');
+  const imageCfgHd = antigravity.resolveAntigravityRequestConfig({
+    originalModel: 'gemini-3-pro-image',
+    mappedModel: 'gemini-3-pro-image',
+    size: '1024x1024',
+    quality: 'hd'
+  });
+  assert.equal(imageCfgHd.imageConfig.imageSize, '4K');
+  const imageCfgMediumQ = antigravity.resolveAntigravityRequestConfig({
+    originalModel: 'gemini-3-pro-image',
+    mappedModel: 'gemini-3-pro-image',
+    size: '1024x1024',
+    quality: 'medium'
+  });
+  assert.equal(imageCfgMediumQ.imageConfig.imageSize, '2K');
+  const imageCfgTall = antigravity.resolveAntigravityRequestConfig({
+    originalModel: 'gemini-3-pro-image',
+    mappedModel: 'gemini-3-pro-image',
+    size: '1024x1792'
+  });
+  assert.equal(imageCfgTall.imageConfig.aspectRatio, '9:16');
+  const imageCfgUltraWide = antigravity.resolveAntigravityRequestConfig({
+    originalModel: 'gemini-3-pro-image',
+    mappedModel: 'gemini-3-pro-image',
+    size: '2100x900'
+  });
+  assert.equal(imageCfgUltraWide.imageConfig.aspectRatio, '21:9');
+  const imageCfgPortrait = antigravity.resolveAntigravityRequestConfig({
+    originalModel: 'gemini-3-pro-image',
+    mappedModel: 'gemini-3-pro-image',
+    size: '768x1024'
+  });
+  assert.equal(imageCfgPortrait.imageConfig.aspectRatio, '3:4');
+  const imageCfgLandscape43 = antigravity.resolveAntigravityRequestConfig({
+    originalModel: 'gemini-3-pro-image',
+    mappedModel: 'gemini-3-pro-image',
+    size: '1024x768'
+  });
+  assert.equal(imageCfgLandscape43.imageConfig.aspectRatio, '4:3');
+  const imageCfgModelTag43 = antigravity.resolveAntigravityRequestConfig({
+    originalModel: 'gemini-3-pro-image-4x3',
+    mappedModel: 'gemini-3-pro-image'
+  });
+  assert.equal(imageCfgModelTag43.imageConfig.aspectRatio, '4:3');
+  const imageCfgModelTag916 = antigravity.resolveAntigravityRequestConfig({
+    originalModel: 'gemini-3-pro-image-9x16',
+    mappedModel: 'gemini-3-pro-image'
+  });
+  assert.equal(imageCfgModelTag916.imageConfig.aspectRatio, '9:16');
+  const imageCfgModelTag34 = antigravity.resolveAntigravityRequestConfig({
+    originalModel: 'gemini-3-pro-image-3x4',
+    mappedModel: 'gemini-3-pro-image'
+  });
+  assert.equal(imageCfgModelTag34.imageConfig.aspectRatio, '3:4');
+  const imageCfgModelTag11 = antigravity.resolveAntigravityRequestConfig({
+    originalModel: 'gemini-3-pro-image-1-1',
+    mappedModel: 'gemini-3-pro-image'
+  });
+  assert.equal(imageCfgModelTag11.imageConfig.aspectRatio, '1:1');
+  const imageCfgZeroWidth = antigravity.resolveAntigravityRequestConfig({
+    originalModel: 'gemini-3-pro-image',
+    mappedModel: 'gemini-3-pro-image',
+    size: '0x100'
+  });
+  assert.equal(imageCfgZeroWidth.imageConfig.aspectRatio, '1:1');
+  const webByBuiltinSearch = antigravity.resolveAntigravityRequestConfig({
+    originalModel: 'gemini-3-pro',
+    mappedModel: 'gemini-3-pro',
+    tools: [{ googleSearchRetrieval: {} }]
+  });
+  assert.equal(webByBuiltinSearch.requestType, 'web_search');
+  const webByType = antigravity.resolveAntigravityRequestConfig({
+    originalModel: 'gemini-3-pro',
+    mappedModel: 'gemini-3-pro',
+    tools: [{ type: 'web_search' }]
+  });
+  assert.equal(webByType.requestType, 'web_search');
+  const webByFnDecl = antigravity.resolveAntigravityRequestConfig({
+    originalModel: 'gemini-3-pro',
+    mappedModel: 'gemini-3-pro',
+    tools: [{ functionDeclarations: [{ name: 'websearch' }] }]
+  });
+  assert.equal(webByFnDecl.requestType, 'web_search');
+  const webByFnName = antigravity.resolveAntigravityRequestConfig({
+    originalModel: 'gemini-3-pro',
+    mappedModel: 'gemini-3-pro',
+    tools: [{ function: { name: 'google_search' } }]
+  });
+  assert.equal(webByFnName.requestType, 'web_search');
+  const agentByEmptyToolName = antigravity.resolveAntigravityRequestConfig({
+    originalModel: 'gemini-3-pro',
+    mappedModel: 'gemini-3-pro',
+    tools: [{ name: '   ' }]
+  });
+  assert.equal(agentByEmptyToolName.requestType, 'agent');
+  const imagePreviewAlias = antigravity.resolveAntigravityRequestConfig({
+    originalModel: 'gemini-3-pro-image-preview',
+    mappedModel: 'gemini-3-pro-image-preview'
+  });
+  assert.equal(imagePreviewAlias.finalModel, 'gemini-3-pro-image');
+  const flashPreviewAlias = antigravity.resolveAntigravityRequestConfig({
+    originalModel: 'gemini-3-flash-preview',
+    mappedModel: 'gemini-3-flash-preview'
+  });
+  assert.equal(flashPreviewAlias.finalModel, 'gemini-3-flash');
 
   const gemChat = {};
   assert.equal(typeof systemSem.ensureSystemSemantics(gemChat), 'object');
+  assert.equal(typeof systemSem.ensureSystemSemantics({ semantics: 'bad' }), 'object');
   gemChat.semantics.system.textBlocks = ['a', '', 1, 'b'];
   assert.deepEqual(systemSem.readSystemTextBlocksFromSemantics(gemChat), ['a', 'b']);
+  assert.equal(systemSem.readSystemTextBlocksFromSemantics({ semantics: { system: { textBlocks: 'bad' } } }), undefined);
   assert.deepEqual(systemSem.collectSystemSegments({ parts: [{ text: 'sys1' }, { parts: [{ text: 'sys2' }] }] }), ['sys1\nsys2']);
+  assert.deepEqual(systemSem.collectSystemSegments(['a', ['b'], { text: 'c' }]), ['a\nb\nc']);
+  assert.deepEqual(systemSem.collectSystemSegments({ foo: 'bar' }), []);
   const req1 = {};
   systemSem.applyGeminiRequestSystemInstruction({ request: req1, isAntigravityProvider: false, semanticsSystemInstruction: { parts: [{ text: 'x' }] } });
   assert.equal(req1.systemInstruction.parts[0].text, 'x');
@@ -220,6 +367,9 @@ async function runGeminiHelperCoverage() {
   const req3 = {};
   systemSem.applyGeminiRequestSystemInstruction({ request: req3, isAntigravityProvider: false, systemTextBlocksFromSemantics: ['a', 'b'] });
   assert.equal(req3.systemInstruction.parts.length, 2);
+  const req3NoOp = {};
+  systemSem.applyGeminiRequestSystemInstruction({ request: req3NoOp, isAntigravityProvider: false, systemTextBlocksFromSemantics: ['   ', '', 1] });
+  assert.equal(req3NoOp.systemInstruction, undefined);
   const req4 = {};
   systemSem.applyGeminiRequestSystemInstruction({ request: req4, isAntigravityProvider: true, semanticsSystemInstruction: 'extra', protocolStateSystemInstruction: 'extra', systemTextBlocksFromSemantics: ['extra', 'more'] });
   assert.match(req4.systemInstruction.parts[0].text, /Antigravity/);
@@ -227,14 +377,27 @@ async function runGeminiHelperCoverage() {
   const req5 = {};
   systemSem.applyGeminiRequestSystemInstruction({ request: req5, isAntigravityProvider: true });
   assert.match(req5.systemInstruction.parts[0].text, /Antigravity/);
+  const req6 = {};
+  systemSem.applyGeminiRequestSystemInstruction({ request: req6, isAntigravityProvider: true, systemTextBlocksFromSemantics: ['   ', '', 1] });
+  assert.match(req6.systemInstruction.parts[0].text, /Antigravity/);
 
   assert.equal(thinking.buildGenerationConfigFromParameters({ temperature: 0.1 }).temperature, 0.1);
   assert.equal(thinking.buildGenerationConfigFromParameters({ max_tokens: 88 }).maxOutputTokens, 88);
   assert.deepEqual(thinking.buildGenerationConfigFromParameters({ reasoning: false }).thinkingConfig, { includeThoughts: false, thinkingBudget: 0 });
   assert.equal(thinking.buildGenerationConfigFromParameters({ reasoning: 'high' }).thinkingConfig.thinkingBudget, 8192);
+  assert.deepEqual(thinking.buildGenerationConfigFromParameters({ reasoning: 'off' }).thinkingConfig, { includeThoughts: false, thinkingBudget: 0 });
+  assert.equal(thinking.buildGenerationConfigFromParameters({ reasoning: 'weird' }).thinkingConfig.includeThoughts, true);
   assert.equal(thinking.buildGenerationConfigFromParameters({ reasoning: 2048 }).thinkingConfig.thinkingBudget, 2048);
+  assert.deepEqual(thinking.buildGenerationConfigFromParameters({ reasoning: 0 }).thinkingConfig, { includeThoughts: false, thinkingBudget: 0 });
   assert.deepEqual(thinking.buildGenerationConfigFromParameters({ reasoning: { enabled: false } }).thinkingConfig, { includeThoughts: false, thinkingBudget: 0 });
   assert.equal(thinking.buildGenerationConfigFromParameters({ reasoning: { budget_tokens: 1234 } }).thinkingConfig.thinkingBudget, 1234);
+  assert.deepEqual(thinking.buildGenerationConfigFromParameters({ reasoning: { budget_tokens: 0 } }).thinkingConfig, { includeThoughts: false, thinkingBudget: 0 });
+  assert.deepEqual(thinking.buildGenerationConfigFromParameters({ reasoning: { effort: 'disabled' } }).thinkingConfig, { includeThoughts: false, thinkingBudget: 0 });
+  assert.equal(thinking.buildGenerationConfigFromParameters({ reasoning: { effort: 'medium' } }).thinkingConfig.thinkingBudget, 4096);
+  assert.equal(thinking.buildGenerationConfigFromParameters({ reasoning: { level: 'high' } }).thinkingConfig.thinkingBudget, 8192);
+  assert.equal(thinking.buildGenerationConfigFromParameters({ reasoning: { budget: 256 } }).thinkingConfig.thinkingBudget, 256);
+  assert.equal(thinking.buildGenerationConfigFromParameters({ reasoning: { max_tokens: 512 } }).thinkingConfig.thinkingBudget, 512);
+  assert.equal(thinking.buildGenerationConfigFromParameters({ reasoning: { enabled: true } }).thinkingConfig.includeThoughts, true);
   const flashReq = { generationConfig: { thinkingConfig: { thinkingBudget: 999999 } } };
   thinking.applyAntigravityThinkingConfig(flashReq, 'gemini-3-flash');
   assert.equal(flashReq.generationConfig.thinkingConfig.thinkingBudget, antigravity.GEMINI_FLASH_DEFAULT_THINKING_BUDGET);
@@ -251,6 +414,19 @@ async function runGeminiHelperCoverage() {
   const imageReq = { requestType: 'image_gen' };
   thinking.applyAntigravityThinkingConfig(imageReq, 'gemini-image');
   assert.equal(imageReq.generationConfig, undefined);
+  const proReq = {};
+  thinking.applyAntigravityThinkingConfig(proReq, 'gemini-pro');
+  assert.equal(proReq.generationConfig.thinkingConfig.thinkingBudget, 1024);
+  const disabledBudgetReq = { generationConfig: { thinkingConfig: { thinkingBudget: 0 } } };
+  thinking.applyAntigravityThinkingConfig(disabledBudgetReq, 'gemini-pro');
+  assert.equal(disabledBudgetReq.generationConfig.thinkingConfig.thinkingBudget, 0);
+  assert.equal(disabledBudgetReq.generationConfig.thinkingConfig.includeThoughts, undefined);
+  const flashNonObjReq = { generationConfig: { thinkingConfig: 'bad' } };
+  thinking.applyAntigravityThinkingConfig(flashNonObjReq, 'gemini-3-flash');
+  assert.equal(flashNonObjReq.generationConfig.thinkingConfig.includeThoughts, true);
+  const claudeSnakeCaseToolReq = { generationConfig: {}, contents: [{ parts: [{ function_call: { name: 'x' } }] }] };
+  thinking.applyAntigravityThinkingConfig(claudeSnakeCaseToolReq, 'claude-sonnet-thinking');
+  assert.equal(claudeSnakeCaseToolReq.generationConfig.thinkingConfig, undefined);
 
   const defs = chatHelpers.buildToolSchemaKeyMap([
     { function: { name: 'exec_command', parameters: { properties: { cmd: {}, workdir: {} } } } },
@@ -258,19 +434,42 @@ async function runGeminiHelperCoverage() {
     { name: 'ignored', parameters: null }
   ]);
   assert.equal(defs.get('exec_command').has('cmd'), true);
+  const defsFallback = chatHelpers.buildToolSchemaKeyMap([{ name: 'fallback_tool', parameters: { properties: { x: {} } } }]);
+  assert.equal(defsFallback.get('fallback_tool').has('x'), true);
+  const defsFallbackFromInvalidFnName = chatHelpers.buildToolSchemaKeyMap([
+    { name: 'fallback_from_name', function: { name: 1 }, parameters: { properties: { y: {} } } }
+  ]);
+  assert.equal(defsFallbackFromInvalidFnName.get('fallback_from_name').has('y'), true);
+  assert.equal(chatHelpers.buildToolSchemaKeyMap([{ function: { name: 'noprops', parameters: { type: 'object' } } }]).size, 0);
+  assert.equal(chatHelpers.buildToolSchemaKeyMap([{ function: { name: 'emptyprops', parameters: { properties: {} } } }]).size, 0);
+  assert.equal(chatHelpers.buildToolSchemaKeyMap([{ function: { name: ' ', parameters: { properties: { x: {} } } } }]).size, 0);
   assert.deepEqual(chatHelpers.alignToolCallArgsToSchema({ toolName: 'exec_command', args: { command: 'ls', noise: 1 }, schemaKeys: defs }), { cmd: 'ls' });
+  assert.deepEqual(chatHelpers.alignToolCallArgsToSchema({ toolName: 'exec_command', args: { cmd: 'ls' }, schemaKeys: new Map([['exec_command', new Set(['command'])]]) }), { command: 'ls' });
   assert.deepEqual(chatHelpers.alignToolCallArgsToSchema({ toolName: 'write_stdin', args: { text: 'hi' }, schemaKeys: new Map([['write_stdin', new Set(['chars'])]]) }), { chars: 'hi' });
+  assert.deepEqual(chatHelpers.alignToolCallArgsToSchema({ toolName: 'write_stdin', args: { chars: 'hi' }, schemaKeys: new Map([['write_stdin', new Set(['text'])]]) }), { text: 'hi' });
   assert.deepEqual(chatHelpers.alignToolCallArgsToSchema({ toolName: 'apply_patch', args: { input: 'patch-body' }, schemaKeys: defs }), { instructions: 'patch-body', patch: 'patch-body' });
+  assert.deepEqual(chatHelpers.alignToolCallArgsToSchema({ toolName: 'apply_patch', args: { patch: 'patch-body' }, schemaKeys: defs }), { instructions: 'patch-body', patch: 'patch-body' });
+  assert.deepEqual(
+    chatHelpers.alignToolCallArgsToSchema({ toolName: 'apply_patch', args: { input: '   ' }, schemaKeys: defs }),
+    {}
+  );
+  assert.deepEqual(chatHelpers.alignToolCallArgsToSchema({ toolName: '', args: { x: 1 }, schemaKeys: defs }), { x: 1 });
+  assert.deepEqual(chatHelpers.alignToolCallArgsToSchema({ toolName: 1, args: { x: 1 }, schemaKeys: defs }), { x: 1 });
+  assert.deepEqual(chatHelpers.alignToolCallArgsToSchema({ toolName: 'custom_tool', args: { x: 1 }, schemaKeys: new Map([['custom_tool', new Set(['x'])]]) }), { x: 1 });
   assert.equal(chatHelpers.mapChatRoleToGemini('assistant'), 'model');
   assert.equal(chatHelpers.mapToolNameForGemini('web_search_20250305'), 'websearch');
+  assert.equal(chatHelpers.mapToolNameForGemini('   '), undefined);
   assert.deepEqual([...chatHelpers.collectAssistantToolCallIds([{ role: 'assistant', tool_calls: [{ id: 'a', function: { name: 'x' } }] }, { role: 'assistant', tool_calls: [{ id: 'a', function: { name: 'x' } }, { id: 'b', function: { name: 'y' } }] }])].sort(), ['a', 'b']);
+  assert.equal(chatHelpers.collectAssistantToolCallIds([{ role: 'assistant', tool_calls: 'bad-shape' }, { role: 'assistant', tool_calls: [{ id: 1 }] }]).size, 0);
   assert.equal(chatHelpers.isResponsesOrigin({ semantics: { responses: {} } }), true);
+  assert.equal(chatHelpers.isResponsesOrigin({ metadata: { context: { providerProtocol: 'openai-responses' } } }), true);
   assert.equal(chatHelpers.isResponsesOrigin({ metadata: { context: { entryEndpoint: '/v1/responses' } } }), true);
   assert.equal(chatHelpers.isResponsesOrigin({ metadata: { context: { entryEndpoint: '/v1/chat/completions' } } }), false);
   const gemParams = chatHelpers.collectParameters({ model: 'gemini-pro', generationConfig: { temperature: 0.2, topK: 40 }, toolConfig: { functionCallingConfig: {} }, metadata: { __rcc_stream: 1 } });
   assert.equal(gemParams.model, 'gemini-pro');
   assert.equal(gemParams.top_k, 40);
   assert.equal(gemParams.stream, true);
+  assert.equal(chatHelpers.collectParameters({ metadata: {} }), undefined);
   const parts = [];
   const circular = { type: 'other' };
   circular.self = circular;
@@ -282,6 +481,40 @@ async function runGeminiHelperCoverage() {
   assert.equal(parts.some((p) => p.inlineData?.data === 'abc'), true);
   assert.equal(parts.some((p) => p.text === 'https://x/y.png'), true);
   assert.equal(parts.some((p) => p.text === '[image]'), true);
+  const parts2 = [];
+  chatHelpers.appendChatContentToGeminiParts({ role: 'user', content: { text: 'ignored-object' } }, parts2, {});
+  assert.equal(parts2.length, 0);
+  const parts3 = [];
+  chatHelpers.appendChatContentToGeminiParts({ role: 'user', content: [{ type: 'image_url', image_url: { url: 'https://example.com/z.png' } }, { type: 'image', data: 'abc' }, { type: 'other', foo: 1 }] }, parts3, {});
+  assert.equal(parts3.some((p) => p.text === 'https://example.com/z.png'), true);
+  assert.equal(parts3.some((p) => p.text === 'abc'), true);
+  assert.equal(parts3.some((p) => typeof p.text === 'string' && p.text.includes('foo')), true);
+  const partsUri = [];
+  chatHelpers.appendChatContentToGeminiParts({ role: 'user', content: [{ type: 'image', uri: 'https://example.com/from-uri.png' }] }, partsUri, {});
+  assert.equal(partsUri.some((p) => p.text === 'https://example.com/from-uri.png'), true);
+  const partsNullish = [];
+  chatHelpers.appendChatContentToGeminiParts({ role: 'user', content: [null, undefined, '', { type: 'image', url: '   ' }] }, partsNullish, {});
+  assert.equal(partsNullish.some((p) => p.text === '[image]'), true);
+  const partsDataUrlEdge = [];
+  chatHelpers.appendChatContentToGeminiParts(
+    {
+      role: 'user',
+      content: [
+        { type: 'image', image_url: 'data:;base64,abc' },
+        { type: 'image', image_url: 'data:image/png;base64,   ' },
+        { type: 'text' },
+        0
+      ]
+    },
+    partsDataUrlEdge,
+    {}
+  );
+  assert.equal(partsDataUrlEdge.some((p) => p.inlineData?.data === 'abc'), true);
+  assert.equal(partsDataUrlEdge.some((p) => typeof p.text === 'string' && p.text.startsWith('data:image/png;base64')), true);
+  const parts4 = [];
+  chatHelpers.appendChatContentToGeminiParts({ role: 'user', content: [{ type: 'text', content: 'from-content' }, { type: 'text', text: 'from-text' }] }, parts4, {});
+  assert.equal(parts4.some((p) => p.text === 'from-content'), true);
+  assert.equal(parts4.some((p) => p.text === 'from-text'), true);
 
   const missing = [];
   const outputs = toolOutput.normalizeToolOutputs([
@@ -290,19 +523,49 @@ async function runGeminiHelperCoverage() {
   ], missing);
   assert.equal(outputs.length, 1);
   assert.equal(missing.length, 1);
+  assert.deepEqual(toolOutput.synthesizeToolOutputsFromMessages(undefined), []);
+  assert.deepEqual(toolOutput.synthesizeToolOutputsFromMessages([{ role: 'assistant', content: 'no-tool-calls' }]), []);
   assert.equal(toolOutput.synthesizeToolOutputsFromMessages([{ role: 'assistant', tool_calls: [{ id: 'x', function: { name: 'fn' } }, { id: 'x', function: { name: 'fn' } }] }]).length, 1);
+  assert.equal(toolOutput.synthesizeToolOutputsFromMessages([{ role: 'assistant', tool_calls: [{ function: { name: 'fn' } }] }]).length, 0);
   const circ2 = {}; circ2.self = circ2;
   assert.match(toolOutput.normalizeToolContent(circ2), /\[object Object\]|self/);
   assert.equal(toolOutput.convertToolMessageToOutput({ id: 'x', content: 'ok' }, new Set(['y'])), null);
   assert.equal(toolOutput.convertToolMessageToOutput({ id: 'x', content: 'ok' }, new Set(['x'])).tool_call_id, 'x');
+  assert.equal(toolOutput.convertToolMessageToOutput({ tool_call_id: 'tc-x', content: 'ok' }, new Set(['tc-x'])).tool_call_id, 'tc-x');
+  assert.equal(toolOutput.convertToolMessageToOutput({ content: 'ok' }, new Set(['x'])), null);
   assert.equal(toolOutput.sanitizeAntigravityToolCallId('  bad id!*  '), 'bad_id');
   assert.equal(toolOutput.sanitizeAntigravityToolCallId('clean_id'), 'clean_id');
+  assert.equal(toolOutput.sanitizeAntigravityToolCallId('   '), '');
+  assert.equal(toolOutput.sanitizeAntigravityToolCallId('!!!').startsWith('call_'), true);
+  assert.equal(toolOutput.sanitizeAntigravityToolCallId(123), '');
   const cloned = toolOutput.cloneAsJsonValue({ big: 1n, nested: [1, 'x'] });
   assert.equal(cloned.big, '1');
+  assert.equal(toolOutput.cloneAsJsonValue(5), 5);
+  assert.deepEqual(toolOutput.cloneAsJsonValue([1, { x: 2 }]), [1, { x: 2 }]);
+  const originalJsonStringify = JSON.stringify;
+  JSON.stringify = () => { throw new Error('forced stringify error'); };
+  try {
+    assert.equal(toolOutput.cloneAsJsonValue(7), 7);
+    assert.deepEqual(toolOutput.cloneAsJsonValue([1, { x: 2 }]), [1, { x: 2 }]);
+  } finally {
+    JSON.stringify = originalJsonStringify;
+  }
+  const originalJsonStringifyForNormalize = JSON.stringify;
+  JSON.stringify = () => { throw new Error('forced normalizeToolContent error'); };
+  try {
+    assert.equal(toolOutput.normalizeToolContent({ force: 'throw' }), '[object Object]');
+  } finally {
+    JSON.stringify = originalJsonStringifyForNormalize;
+  }
   const fr1 = toolOutput.buildFunctionResponseEntry({ tool_call_id: 'bad id!*', content: '[1,2]', name: 'toolA' }, { includeCallId: true });
   assert.equal(fr1.parts[0].functionResponse.id, 'bad_id');
   const fr2 = toolOutput.buildFunctionResponseEntry({ tool_call_id: 't2', content: 'not-json', name: 'toolB' });
   assert.equal(fr2.parts[0].functionResponse.response.result, 'not-json');
+  const fr3 = toolOutput.buildFunctionResponseEntry({ tool_call_id: 't3', content: '{"ok":true}', name: 'toolC' });
+  assert.equal(fr3.parts[0].functionResponse.response.ok, true);
+  const fr4 = toolOutput.buildFunctionResponseEntry({ tool_call_id: 't4', content: undefined, name: '' });
+  assert.equal(fr4.parts[0].functionResponse.name, 'tool');
+  assert.equal(fr4.parts[0].functionResponse.response.result, null);
 
   const auditChat = { metadata: {} };
   audit.appendDroppedFieldAudit(auditChat, { field: 'x', targetProtocol: 'gemini-chat', reason: 'drop' });
@@ -313,10 +576,14 @@ async function runGeminiHelperCoverage() {
 
   const gemStateChat = {};
   assert.equal(typeof state.ensureGeminiSemanticsNode(gemStateChat), 'object');
+  assert.equal(typeof state.ensureGeminiSemanticsNode({ semantics: { gemini: { ok: true } } }), 'object');
+  state.markGeminiExplicitEmptyTools({});
+  state.markGeminiExplicitEmptyTools({ semantics: { tools: { existing: true } } });
   state.markGeminiExplicitEmptyTools(gemStateChat);
   assert.equal(state.hasExplicitEmptyToolsSemantics(gemStateChat), true);
   assert.equal(state.readGeminiSemantics(gemStateChat) !== undefined, true);
   assert.equal(state.readGeminiSemantics({}), undefined);
+  assert.equal(state.hasExplicitEmptyToolsSemantics({ semantics: { tools: 'bad' } }), false);
 }
 
 async function runResponsesSubmitCoverage() {
@@ -324,6 +591,21 @@ async function runResponsesSubmitCoverage() {
 
   assert.equal(submit.isSubmitToolOutputsEndpoint({ entryEndpoint: '/v1/responses.submit_tool_outputs' }), true);
   assert.equal(submit.isSubmitToolOutputsEndpoint({ entryEndpoint: '/v1/responses' }), false);
+  assert.equal(submit.isSubmitToolOutputsEndpoint(undefined), false);
+  assert.equal(submit.isSubmitToolOutputsEndpoint({ entryEndpoint: 1 }), false);
+  assert.equal(submit.deriveResumeToolOutputsFromResume('bad'), undefined);
+  assert.equal(submit.readResponsesResumeFromSemantics(undefined), undefined);
+  assert.equal(submit.readResponsesResumeFromSemantics({ semantics: { responses: 'bad' } }), undefined);
+  assert.equal(submit.readResponsesResumeFromSemantics({ semantics: { responses: { resume: 'bad' } } }), undefined);
+  assert.deepEqual(submit.readResponsesResumeFromSemantics({ semantics: { responses: { resume: { ok: 1 } } } }), { ok: 1 });
+  assert.deepEqual(submit.extractCapturedToolOutputs(undefined), []);
+  assert.deepEqual(submit.extractCapturedToolOutputs({ __captured_tool_results: [] }), []);
+  const extractedCaptured = submit.extractCapturedToolOutputs({
+    __captured_tool_results: [null, { output: 'missing-id' }, { tool_call_id: 'tc-1', output: 'ok' }, { call_id: 'cid-1', output: { ok: true }, name: 'named' }]
+  });
+  assert.equal(extractedCaptured.length, 2);
+  assert.equal(extractedCaptured[0].tool_call_id, 'tc-1');
+  assert.equal(extractedCaptured[1].tool_call_id, 'cid-1');
 
   const payload1 = submit.buildSubmitToolOutputsPayload(
     {
@@ -366,14 +648,111 @@ async function runResponsesSubmitCoverage() {
   assert.equal(payload3.tool_outputs[0].tool_call_id, 'resume-1');
   assert.equal(payload3.tool_outputs[0].output, 'fallback');
 
+  const throwingResponses = {};
+  Object.defineProperty(throwingResponses, 'resume', {
+    get() {
+      throw new Error('resume-read-failed');
+    }
+  });
+  const payload4 = submit.buildSubmitToolOutputsPayload(
+    {
+      messages: [{ role: 'user', content: 'hi' }],
+      parameters: {},
+      toolOutputs: [{ content: { ok: true } }, { content: 'dup', tool_call_id: 'submit_tool_1' }],
+      semantics: { responses: throwingResponses }
+    },
+    { entryEndpoint: '/v1/responses.submit_tool_outputs' },
+    { previous_response_id: 'resp-catch' }
+  );
+  assert.equal(payload4.response_id, 'resp-catch');
+  assert.equal(payload4.tool_outputs.length, 1);
+  assert.equal(payload4.tool_outputs[0].tool_call_id, 'submit_tool_1');
+  assert.equal(payload4.model, undefined);
+
+  const payload5 = submit.buildSubmitToolOutputsPayload(
+    {
+      messages: [{ role: 'user', content: 'hi' }],
+      parameters: {},
+      semantics: {
+        responses: {
+          resume: {
+            restoredFromResponseId: 'resp-invalid-context',
+            toolOutputsDetailed: [{ callId: 'resume-invalid-1', outputText: 'resume-fallback' }]
+          }
+        }
+      }
+    },
+    { entryEndpoint: '/v1/responses.submit_tool_outputs' },
+    'bad-context'
+  );
+  assert.equal(payload5.response_id, 'resp-invalid-context');
+  assert.equal(payload5.tool_outputs[0].tool_call_id, 'resume-invalid-1');
+
+  const payload6 = submit.buildSubmitToolOutputsPayload(
+    {
+      messages: [{ role: 'user', content: 'hi' }],
+      parameters: {}
+    },
+    { entryEndpoint: '/v1/responses.submit_tool_outputs' },
+    {
+      previous_response_id: 'resp-snapshot',
+      __captured_tool_results: [null, { output: 'missing-id' }, { call_id: 'snap-1', output: 'ok', name: 'cap' }]
+    }
+  );
+  assert.equal(payload6.response_id, 'resp-snapshot');
+  assert.equal(payload6.tool_outputs.length, 1);
+  assert.equal(payload6.tool_outputs[0].tool_call_id, 'snap-1');
+
+  const payload7 = submit.buildSubmitToolOutputsPayload(
+    {
+      messages: [{ role: 'user', content: 'hi' }],
+      parameters: {},
+      toolOutputs: [{ tool_call_id: 'null-1', content: null }],
+      semantics: { responses: 'bad-node' }
+    },
+    { entryEndpoint: '/v1/responses.submit_tool_outputs' },
+    { previous_response_id: 'resp-null-output' }
+  );
+  assert.equal(payload7.response_id, 'resp-null-output');
+  assert.equal(payload7.tool_outputs[0].output, '');
+
+  const circularOutput = {};
+  circularOutput.self = circularOutput;
+  const payload8 = submit.buildSubmitToolOutputsPayload(
+    {
+      messages: [{ role: 'user', content: 'hi' }],
+      parameters: {},
+      toolOutputs: [{ tool_call_id: 'circ-1', content: circularOutput }]
+    },
+    { entryEndpoint: '/v1/responses.submit_tool_outputs' },
+    { previous_response_id: 'resp-circular-output' }
+  );
+  assert.equal(payload8.response_id, 'resp-circular-output');
+  assert.match(payload8.tool_outputs[0].output, /\[object Object\]/);
+
   assert.throws(
     () => submit.buildSubmitToolOutputsPayload({ messages: [], parameters: {}, semantics: { responses: { context: {} } } }, { entryEndpoint: '/v1/responses.submit_tool_outputs' }, {}),
     /response_id/
   );
+  assert.throws(
+    () => submit.buildSubmitToolOutputsPayload(
+      { messages: [], parameters: {}, semantics: { responses: { resume: { restoredFromResponseId: 'resp-empty' } } } },
+      { entryEndpoint: '/v1/responses.submit_tool_outputs' },
+      {}
+    ),
+    /at least one tool output entry/
+  );
 }
 
 async function runResponsesMainCoverage() {
-  const { ResponsesSemanticMapper } = await import(moduleUrl('conversion/hub/operation-table/semantic-mappers/responses-mapper.js'));
+  const {
+    ResponsesSemanticMapper,
+    attachResponsesSemantics,
+    mapToolOutputs,
+    normalizeMessages,
+    normalizeTools,
+    serializeSystemContent
+  } = await import(moduleUrl('conversion/hub/operation-table/semantic-mappers/responses-mapper.js'));
   const mapper = new ResponsesSemanticMapper();
   const ctx = {
     requestId: 'semantic-coverage-responses',
@@ -388,7 +767,7 @@ async function runResponsesMainCoverage() {
       payload: {
         model: 'gpt-4o-mini',
         input: 'oops',
-        tool_outputs: [123, { output: 'missing-id' }, { id: 'tool-1', output: { ok: true }, name: 'apply_patch' }],
+        tool_outputs: [123, { output: 'missing-id' }, { id: 'tool-1', output: { ok: true }, name: 'apply_patch' }, { id: 'tool-2', output: 'plain-text' }],
         tools: [123],
         metadata: { source: 'coverage' },
         stream: true
@@ -398,10 +777,28 @@ async function runResponsesMainCoverage() {
   );
   assert.equal(inbound.messages.length, 1);
   assert.equal(inbound.messages[0].content, 'oops');
-  assert.equal(inbound.toolOutputs?.length, 1);
+  assert.equal(inbound.toolOutputs?.length, 2);
   assert.equal(inbound.toolOutputs?.[0]?.tool_call_id, 'tool-1');
   assert.equal(inbound.metadata?.missingFields?.length, 2);
   assert.equal(typeof inbound.semantics?.responses, 'object');
+
+  const inboundUnknownRequestId = await mapper.toChat(
+    {
+      protocol: 'openai-responses',
+      direction: 'request',
+      payload: {
+        model: 'gpt-4o-mini',
+        input: [{ role: 'user', content: [{ type: 'input_text', text: 'fallback' }] }]
+      }
+    },
+    {
+      providerProtocol: 'openai-responses',
+      entryEndpoint: '/v1/responses',
+      requestId: '   '
+    }
+  );
+  assert.equal(Array.isArray(inboundUnknownRequestId.messages), true);
+  assert.equal(inboundUnknownRequestId.messages.length > 0, true);
 
   const outbound = await mapper.fromChat(
     {
@@ -427,6 +824,105 @@ async function runResponsesMainCoverage() {
   assert.equal(outbound.payload.metadata.fromSemantics, 1);
   assert.equal(outbound.payload.metadata.fromEnvelope, 1);
 
+  const outboundSemanticsOnly = await mapper.fromChat(
+    {
+      messages: [{ role: 'user', content: 'only-semantics' }],
+      parameters: { model: 'gpt-4o-mini' },
+      metadata: 'bad-shape',
+      semantics: {
+        responses: {
+          context: {
+            metadata: { semanticsOnly: 1 }
+          }
+        }
+      }
+    },
+    ctx
+  );
+  assert.equal(outboundSemanticsOnly.payload.metadata.semanticsOnly, 1);
+
+  const attachedExisting = { keep: true };
+  assert.equal(attachResponsesSemantics(attachedExisting, undefined, undefined), attachedExisting);
+  assert.deepEqual(
+    attachResponsesSemantics({ responses: { context: { a: 1 } } }, undefined, { restoredFromResponseId: 'resp-r' }),
+    {
+      responses: {
+        context: { a: 1 },
+        resume: { restoredFromResponseId: 'resp-r' }
+      }
+    }
+  );
+  const helperMissing = [];
+  assert.deepEqual(normalizeMessages(undefined, helperMissing), []);
+  assert.equal(helperMissing[0].reason, 'absent');
+  const helperInvalidType = [];
+  assert.deepEqual(normalizeMessages('bad', helperInvalidType), []);
+  assert.equal(helperInvalidType[0].reason, 'invalid_type');
+  const helperInvalidEntry = [];
+  assert.equal(normalizeMessages([{ role: 'user', content: 'ok' }, 5], helperInvalidEntry).length, 1);
+  assert.equal(helperInvalidEntry[0].reason, 'invalid_entry');
+  const helperInvalidTools = [];
+  assert.equal(normalizeTools([123, 'bad'], helperInvalidTools), undefined);
+  assert.equal(helperInvalidTools.length, 2);
+  const circularMapOutput = {};
+  circularMapOutput.self = circularMapOutput;
+  const mappedOutputs = mapToolOutputs(
+    [{ id: 'circ-map-1', output: circularMapOutput }, { id: 'text-map-1', output: 'plain-text' }],
+    []
+  );
+  assert.match(mappedOutputs[0].content, /\[object Object\]/);
+  assert.equal(mappedOutputs[1].content, 'plain-text');
+  assert.equal(serializeSystemContent(undefined), undefined);
+  assert.equal(serializeSystemContent({ role: 'system', content: null }), undefined);
+  assert.equal(serializeSystemContent({ role: 'system', content: { nested: true } }), '{"nested":true}');
+  const circularSystem = {};
+  circularSystem.self = circularSystem;
+  assert.match(serializeSystemContent({ role: 'system', content: circularSystem }), /\[object Object\]/);
+
+  const submitOutbound = await mapper.fromChat(
+    {
+      messages: [{ role: 'user', content: 'submit' }],
+      parameters: { model: 'gpt-4o-mini' },
+      toolOutputs: [{ content: { ok: true } }],
+      metadata: { context: ctx, submitEnvelope: 1 },
+      semantics: {
+        responses: {
+          context: 'bad-shape',
+          resume: { restoredFromResponseId: 'resp-submit' }
+        }
+      }
+    },
+    {
+      ...ctx,
+      entryEndpoint: '/v1/responses.submit_tool_outputs'
+    }
+  );
+  assert.equal(submitOutbound.meta.submitToolOutputs, true);
+  assert.equal(submitOutbound.payload.response_id, 'resp-submit');
+  assert.equal(submitOutbound.payload.tool_outputs[0].tool_call_id, 'submit_tool_1');
+
+  const outboundExistingSystems = await mapper.fromChat(
+    {
+      messages: [{ role: 'user', content: 'u2' }],
+      parameters: { model: 'gpt-4o-mini' },
+      semantics: {
+        responses: {
+          context: {
+            originalSystemMessages: ['preserved-system'],
+            metadata: { kept: true }
+          }
+        }
+      }
+    },
+    {
+      providerProtocol: 'openai-responses',
+      entryEndpoint: '/v1/responses',
+      requestId: '   '
+    }
+  );
+  assert.equal(outboundExistingSystems.payload.instructions, undefined);
+  assert.equal(outboundExistingSystems.payload.metadata.kept, true);
+
   await assert.rejects(
     () =>
       mapper.fromChat(
@@ -441,7 +937,10 @@ async function runResponsesMainCoverage() {
 }
 
 async function runAnthropicMainCoverage() {
-  const { AnthropicSemanticMapper } = await import(moduleUrl('conversion/hub/operation-table/semantic-mappers/anthropic-mapper.js'));
+  const {
+    AnthropicSemanticMapper,
+    sanitizeAnthropicPayload
+  } = await import(moduleUrl('conversion/hub/operation-table/semantic-mappers/anthropic-mapper.js'));
   const mapper = new AnthropicSemanticMapper();
   const ctx = {
     requestId: 'semantic-coverage-anthropic',
@@ -633,6 +1132,19 @@ async function runAnthropicMainCoverage() {
   assert.equal(outboundGuarded.payload.thinking.type, 'enabled');
   assert.equal(outboundGuarded.payload.output_config.format, 'json');
 
+  const sanitized = sanitizeAnthropicPayload({
+    model: 'claude-sanitize',
+    messages: [],
+    metadata: { ok: true },
+    __anthropicMirror: { shouldDrop: true },
+    unknown_field: 1
+  });
+  assert.equal(sanitized.model, 'claude-sanitize');
+  assert.equal(Array.isArray(sanitized.messages), true);
+  assert.equal(sanitized.metadata.ok, true);
+  assert.equal('__anthropicMirror' in sanitized, false);
+  assert.equal('unknown_field' in sanitized, false);
+
   await assert.rejects(
     () =>
       mapper.fromChat(
@@ -647,7 +1159,10 @@ async function runAnthropicMainCoverage() {
 }
 
 async function runGeminiMainCoverage() {
-  const { GeminiSemanticMapper } = await import(moduleUrl('conversion/hub/operation-table/semantic-mappers/gemini-mapper.js'));
+  const {
+    GeminiSemanticMapper,
+    buildGeminiRequestFromChat
+  } = await import(moduleUrl('conversion/hub/operation-table/semantic-mappers/gemini-mapper.js'));
   const mapper = new GeminiSemanticMapper();
   const ctx = {
     requestId: 'semantic-coverage-gemini',
@@ -681,6 +1196,22 @@ async function runGeminiMainCoverage() {
   assert.equal(inbound.metadata?.providerMetadata?.foo, 'bar');
   assert.equal(inbound.semantics?.gemini?.toolConfig?.functionCallingConfig?.mode, 'AUTO');
   assert.equal(inbound.semantics?.tools?.explicitEmpty, true);
+  const inboundMissing = await mapper.toChat(
+    {
+      protocol: 'gemini-chat',
+      direction: 'request',
+      payload: {
+        metadata: {
+          rcc_passthrough_tool_choice: '"none"',
+          __rcc_raw_system: { legacy: true }
+        }
+      }
+    },
+    {}
+  );
+  assert.equal(Array.isArray(inboundMissing.metadata?.missingFields), true);
+  assert.equal(inboundMissing.metadata?.providerMetadata?.__rcc_raw_system, undefined);
+  assert.equal(inboundMissing.parameters?.tool_choice, 'none');
 
   const antigravity = await mapper.fromChat(
     {
@@ -755,6 +1286,245 @@ async function runGeminiMainCoverage() {
   assert.equal(cli.payload.contents[0].parts[0].text, '[tool:toolx] oops');
   assert.equal(cli.payload.contents[1].parts[0].text, 'done');
   assert.equal(cli.payload.metadata, undefined);
+  const unknownReqId = await mapper.fromChat(
+    {
+      messages: [{ role: 'user', content: 'unknown-request-id' }],
+      parameters: { model: 'models/gemini-pro' }
+    },
+    {}
+  );
+  assert.equal(unknownReqId.payload.model, 'models/gemini-pro');
+
+  const builtMain = buildGeminiRequestFromChat(
+    {
+      messages: [
+        {
+          role: 'assistant',
+          content: 'done',
+          tool_calls: [{ id: 'call-1', function: { name: 'exec_command', arguments: '[1,2]' } }]
+        },
+        { role: 'user', content: 'hello' }
+      ],
+      tools: [
+        {
+          type: 'function',
+          function: {
+            name: 'exec_command',
+            description: 'run command',
+            parameters: {
+              type: 'object',
+              properties: {
+                cmd: { type: 'string' }
+              },
+              required: ['cmd']
+            }
+          }
+        }
+      ],
+      parameters: {
+        model: 'models/gemini-pro',
+        reasoning: 'medium',
+        prompt_cache_key: 'pc',
+        response_format: { type: 'json_object' },
+        parallel_tool_calls: true,
+        service_tier: 'auto',
+        truncation: 'auto',
+        include: ['reasoning'],
+        store: true,
+        stream: false,
+        tool_choice: 'auto'
+      },
+      semantics: {
+        responses: {},
+        gemini: {
+          generationConfig: { topK: 33 },
+          safetySettings: [{ category: 'X', threshold: 'Y' }],
+          toolConfig: { functionCallingConfig: { mode: 'ANY' } },
+          providerMetadata: { sem: 'yes' }
+        },
+        tools: { explicitEmpty: true }
+      },
+      metadata: {
+        context: ctx
+      }
+    },
+    { context: ctx }
+  );
+  assert.equal(builtMain.tools[0].functionDeclarations[0].name, 'exec_command');
+  assert.deepEqual(builtMain.contents[0].parts[1].functionCall.args, { value: [1, 2] });
+  assert.equal(builtMain.contents[2].parts[0].functionResponse.name, 'exec_command');
+  assert.equal(builtMain.generationConfig.topK, 33);
+  assert.equal(builtMain.generationConfig.thinkingConfig.thinkingBudget, 4096);
+  assert.equal(builtMain.safetySettings[0].category, 'X');
+  assert.equal(builtMain.toolConfig.functionCallingConfig.mode, 'ANY');
+  assert.equal(builtMain.metadata.sem, 'yes');
+  assert.equal(builtMain.metadata.__rcc_stream, false);
+  assert.equal(builtMain.metadata.__rcc_tools_field_present, undefined);
+  assert.equal(typeof builtMain.metadata.rcc_passthrough_tool_choice, 'string');
+
+  const builtMainAuditChat = {
+    metadata: {},
+    parameters: {
+      prompt_cache_key: 'pc',
+      response_format: { type: 'json_object' },
+      parallel_tool_calls: true,
+      service_tier: 'auto',
+      truncation: 'auto',
+      include: ['reasoning'],
+      store: true,
+      reasoning: 'medium'
+    }
+  };
+  buildGeminiRequestFromChat(
+    {
+      messages: [{ role: 'user', content: 'audit' }],
+      parameters: { model: 'models/gemini-pro', ...builtMainAuditChat.parameters },
+      semantics: { responses: {} },
+      metadata: builtMainAuditChat.metadata
+    },
+    builtMainAuditChat.metadata
+  );
+  assert.equal(builtMainAuditChat.metadata.mappingAudit.dropped.length, 7);
+  assert.equal(builtMainAuditChat.metadata.mappingAudit.lossy.length, 1);
+
+  const builtMetadataFallback = buildGeminiRequestFromChat(
+    {
+      messages: [{ role: 'user', content: 'meta-fallback' }],
+      parameters: {
+        model: 'models/gemini-pro',
+        tool_config: { functionCallingConfig: { mode: 'NONE' } }
+      },
+      semantics: {
+        gemini: {
+          toolConfig: { functionCallingConfig: { mode: 'AUTO' } }
+        }
+      },
+      metadata: {
+        context: ctx,
+        providerMetadata: { fromContext: 1 }
+      }
+    },
+    {
+      context: ctx,
+      providerMetadata: { fromContext: 1 }
+    }
+  );
+  assert.equal(builtMetadataFallback.toolConfig.functionCallingConfig.mode, 'NONE');
+  assert.equal(builtMetadataFallback.metadata.fromContext, 1);
+
+  const builtExplicitEmpty = buildGeminiRequestFromChat(
+    {
+      messages: [{ role: 'user', content: 'empty-tools' }],
+      tools: [],
+      parameters: { model: 'models/gemini-pro', stream: true },
+      semantics: { tools: { explicitEmpty: true } },
+      metadata: { context: ctx }
+    },
+    { context: ctx }
+  );
+  assert.equal(builtExplicitEmpty.metadata.__rcc_tools_field_present, '1');
+  assert.equal(builtExplicitEmpty.metadata.__rcc_stream, true);
+
+  const builtAnthropicEntry = buildGeminiRequestFromChat(
+    {
+      messages: [{ role: 'user', content: 'blocked' }],
+      parameters: { model: 'models/gemini-pro' },
+      semantics: {
+        gemini: {
+          providerMetadata: { blocked: true },
+          toolConfig: { functionCallingConfig: { mode: 'NONE' } }
+        }
+      },
+      metadata: {
+        context: { ...ctx, entryEndpoint: '/v1/messages' },
+        providerMetadata: { alsoBlocked: true }
+      }
+    },
+    {
+      context: { ...ctx, entryEndpoint: '/v1/messages' },
+      providerMetadata: { alsoBlocked: true }
+    }
+  );
+  assert.equal(builtAnthropicEntry.metadata, undefined);
+  assert.equal(builtAnthropicEntry.toolConfig.functionCallingConfig.mode, 'NONE');
+
+  const builtAliasAndFallback = buildGeminiRequestFromChat(
+    {
+      messages: [
+        {
+          role: 'assistant',
+          content: 'tool call invalid json args',
+          tool_calls: [{ id: 'tc-1', function: { name: 'web_search_20250305', arguments: '{bad-json' } }]
+        },
+        { role: 'tool', tool_call_id: 'tc-1', name: 'web_search_20250305', content: 'first-response' }
+      ],
+      tools: [
+        {
+          type: 'function',
+          name: 'web_search_20250305',
+          function: {
+            name: 'web_search_20250305',
+            parameters: { type: 'object', properties: { query: { type: 'string' } } }
+          }
+        }
+      ],
+      toolOutputs: [{ tool_call_id: 'tc-1', name: 'web_search_20250305', content: 'duplicate-response-should-skip' }],
+      parameters: { model: 'models/gemini-pro' },
+      metadata: { context: ctx }
+    },
+    { context: ctx }
+  );
+  assert.equal(builtAliasAndFallback.tools[0].functionDeclarations[0].name, 'websearch');
+  assert.equal(builtAliasAndFallback.contents[0].parts[1].functionCall.name, 'websearch');
+  assert.equal(builtAliasAndFallback.contents[0].parts[1].functionCall.args._raw, '{bad-json');
+  assert.equal(
+    builtAliasAndFallback.contents.filter((entry) => entry.parts?.[0]?.functionResponse?.name === 'websearch').length,
+    1
+  );
+
+  const builtEdgeBranches = buildGeminiRequestFromChat(
+    {
+      messages: [
+        null,
+        { role: 'tool', name: 123, content: 'tool-output-with-default-name' },
+        {
+          role: 'assistant',
+          content: 'assistant-edge',
+          tool_calls: [
+            null,
+            { id: '', function: {} },
+            { id: 'tc-edge', function: { name: 'exec_command', arguments: { cmd: 'pwd' } } }
+          ]
+        },
+        { role: 'user', content: 'user-edge' }
+      ],
+      tools: [
+        null,
+        {
+          type: 'function',
+          function: {
+            name: 'web_search_20250305',
+            parameters: { type: 'object', properties: { query: { type: 'string' } } }
+          }
+        }
+      ],
+      parameters: 'bad-shape',
+      semantics: {
+        gemini: {
+          providerMetadata: { antigravitySessionId: 'keep-session' }
+        }
+      },
+      metadata: {
+        context: { ...ctx, providerId: 'antigravity.any' }
+      }
+    },
+    {
+      context: { ...ctx, providerId: 'antigravity.any' }
+    }
+  );
+  assert.equal(typeof builtEdgeBranches.model === 'string' && builtEdgeBranches.model.includes('gemini'), true);
+  assert.equal(builtEdgeBranches.metadata.antigravitySessionId, 'keep-session');
+  assert.equal(Array.isArray(builtEdgeBranches.contents) && builtEdgeBranches.contents.length > 0, true);
 }
 
 async function main() {

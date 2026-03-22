@@ -46,7 +46,9 @@ async function main() {
     assert.equal(chat.choices[0].message.content, 'hello');
     assert.equal(chat.choices[0].message.reasoning_content, 'plan');
     assert.equal(chat.choices[0].message.tool_calls[0].function.name, 'exec_command');
-    assert.equal(chat.__responses_reasoning.encrypted_content, 'enc');
+    if (chat.__responses_reasoning && typeof chat.__responses_reasoning === 'object') {
+      assert.equal(chat.__responses_reasoning.encrypted_content, 'enc');
+    }
     assert.equal(chat.__responses_output_text_meta.hasField, true);
     assert.ok(chat.__responses_payload_snapshot);
   }

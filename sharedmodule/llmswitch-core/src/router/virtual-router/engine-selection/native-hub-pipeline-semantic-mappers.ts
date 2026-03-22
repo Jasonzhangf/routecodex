@@ -30,11 +30,10 @@ function parseRecord(raw: string): Record<string, unknown> | null {
   }
 }
 
-export function mapOpenaiChatToChatWithNative(
-  payload: Record<string, unknown> | null | undefined,
-  adapterContext: Record<string, unknown> | null | undefined
+function invokeRecordCapability(
+  capability: string,
+  args: unknown[]
 ): Record<string, unknown> {
-  const capability = 'mapOpenaiChatToChatJson';
   const fail = (reason?: string) => failNativeRequired<Record<string, unknown>>(capability, reason);
   if (isNativeDisabledByEnv()) {
     return fail('native disabled');
@@ -43,13 +42,16 @@ export function mapOpenaiChatToChatWithNative(
   if (!fn) {
     return fail();
   }
-  const payloadJson = safeStringify(payload ?? {});
-  const contextJson = safeStringify(adapterContext ?? {});
-  if (!payloadJson || !contextJson) {
-    return fail('json stringify failed');
+  const encodedArgs: string[] = [];
+  for (const arg of args) {
+    const encoded = safeStringify(arg);
+    if (!encoded) {
+      return fail('json stringify failed');
+    }
+    encodedArgs.push(encoded);
   }
   try {
-    const raw = fn(payloadJson, contextJson);
+    const raw = fn(...encodedArgs);
     if (typeof raw !== 'string' || !raw) {
       return fail('empty result');
     }
@@ -61,12 +63,12 @@ export function mapOpenaiChatToChatWithNative(
   }
 }
 
-export function mapOpenaiChatFromChatWithNative(
-  chatEnvelope: Record<string, unknown> | null | undefined,
-  adapterContext: Record<string, unknown> | null | undefined
-): Record<string, unknown> {
-  const capability = 'mapOpenaiChatFromChatJson';
-  const fail = (reason?: string) => failNativeRequired<Record<string, unknown>>(capability, reason);
+function invokeStringCapability(
+  capability: string,
+  args: unknown[],
+  fallbackArgReason = 'invalid payload'
+): string {
+  const fail = (reason?: string) => failNativeRequired<string>(capability, reason);
   if (isNativeDisabledByEnv()) {
     return fail('native disabled');
   }
@@ -74,20 +76,38 @@ export function mapOpenaiChatFromChatWithNative(
   if (!fn) {
     return fail();
   }
-  const chatJson = safeStringify(chatEnvelope ?? {});
-  const contextJson = safeStringify(adapterContext ?? {});
-  if (!chatJson || !contextJson) {
-    return fail('json stringify failed');
-  }
   try {
-    const raw = fn(chatJson, contextJson);
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
+    const raw = fn(...args);
+    if (typeof raw !== 'string') {
+      return fail(fallbackArgReason);
     }
-    const parsed = parseRecord(raw);
-    return parsed ?? fail('invalid payload');
+    return raw;
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
     return fail(reason);
   }
+}
+
+export function mapOpenaiChatToChatWithNative(
+  payload: Record<string, unknown> | null | undefined,
+  adapterContext: Record<string, unknown> | null | undefined
+): Record<string, unknown> {
+  return invokeRecordCapability('mapOpenaiChatToChatJson', [payload ?? {}, adapterContext ?? {}]);
+}
+
+export function mapOpenaiChatFromChatWithNative(
+  chatEnvelope: Record<string, unknown> | null | undefined,
+  adapterContext: Record<string, unknown> | null | undefined
+): Record<string, unknown> {
+  return invokeRecordCapability('mapOpenaiChatFromChatJson', [chatEnvelope ?? {}, adapterContext ?? {}]);
+}
+
+export function augmentApplyPatchErrorContentWithNative(
+  content: string,
+  toolName?: string
+): string {
+  return invokeStringCapability('augmentApplyPatchErrorContentJson', [
+    content ?? '',
+    typeof toolName === 'string' ? toolName : ''
+  ]);
 }

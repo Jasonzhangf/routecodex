@@ -113,6 +113,50 @@ impl RouteLoadBalancer {
         }
     }
 
+    pub(crate) fn select_round_robin_with_skips(
+        &mut self,
+        route_name: &str,
+        candidates: &[String],
+        availability_check: impl Fn(&str) -> bool,
+    ) -> Option<String> {
+        if candidates.is_empty() {
+            return None;
+        }
+        let state = self.get_state_mut(route_name);
+        let total = candidates.len();
+        for offset in 0..total {
+            let idx = (state.pointer + offset) % total;
+            let candidate = candidates.get(idx)?;
+            if !availability_check(candidate) {
+                continue;
+            }
+            state.pointer = (idx + 1) % total;
+            return Some(candidate.clone());
+        }
+        None
+    }
+
+    pub(crate) fn peek_round_robin_with_skips(
+        &mut self,
+        route_name: &str,
+        candidates: &[String],
+        availability_check: impl Fn(&str) -> bool,
+    ) -> Option<String> {
+        if candidates.is_empty() {
+            return None;
+        }
+        let state = self.get_state_mut(route_name);
+        let total = candidates.len();
+        for offset in 0..total {
+            let idx = (state.pointer + offset) % total;
+            let candidate = candidates.get(idx)?;
+            if availability_check(candidate) {
+                return Some(candidate.clone());
+            }
+        }
+        None
+    }
+
     pub(crate) fn select_grouped(
         &mut self,
         route_name: &str,

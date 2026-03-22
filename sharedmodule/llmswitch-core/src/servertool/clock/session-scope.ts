@@ -35,18 +35,70 @@ function readSessionId(record: Record<string, unknown> | null | undefined): stri
   return readToken(record.sessionId) || readToken(record.session_id) || readToken(record.conversationId) || readToken(record.conversation_id);
 }
 
+function readConversationId(record: Record<string, unknown> | null | undefined): string | null {
+  if (!record || typeof record !== 'object') {
+    return null;
+  }
+  return readToken(record.conversationId) || readToken(record.conversation_id);
+}
+
+function readExplicitScope(record: Record<string, unknown> | null | undefined): string | null {
+  if (!record || typeof record !== 'object') {
+    return null;
+  }
+  const explicit =
+    readToken(record.stopMessageClientInjectSessionScope) ||
+    readToken(record.stopMessageClientInjectScope) ||
+    readToken(record.stop_message_client_inject_session_scope) ||
+    readToken(record.stop_message_client_inject_scope);
+  if (!explicit) {
+    return null;
+  }
+  return /^(tmux|session|conversation):/i.test(explicit) ? explicit : null;
+}
+
+function pushUnique(scopes: string[], value: string | null | undefined): void {
+  const normalized = typeof value === 'string' ? value.trim() : '';
+  if (!normalized || scopes.includes(normalized)) {
+    return;
+  }
+  scopes.push(normalized);
+}
+
+export function resolveClockSessionScopeAliases(
+  primary?: Record<string, unknown> | null,
+  fallback?: Record<string, unknown> | null
+): string[] {
+  const scopes: string[] = [];
+  pushUnique(scopes, readExplicitScope(primary));
+  pushUnique(scopes, readExplicitScope(fallback));
+
+  const native = resolveClockSessionScopeWithNative(primary, fallback);
+  pushUnique(scopes, native && native.trim() ? native : null);
+
+  const tmuxSessionId = readTmuxSessionId(primary) || readTmuxSessionId(fallback);
+  if (tmuxSessionId) {
+    pushUnique(scopes, `tmux:${tmuxSessionId}`);
+  }
+
+  const sessionId = readSessionId(primary) || readSessionId(fallback);
+  if (sessionId) {
+    pushUnique(scopes, sessionId);
+    pushUnique(scopes, `session:${sessionId}`);
+  }
+
+  const conversationId = readConversationId(primary) || readConversationId(fallback);
+  if (conversationId) {
+    pushUnique(scopes, conversationId);
+    pushUnique(scopes, `conversation:${conversationId}`);
+  }
+
+  return scopes;
+}
+
 export function resolveClockSessionScope(
   primary?: Record<string, unknown> | null,
   fallback?: Record<string, unknown> | null
 ): string | null {
-  const native = resolveClockSessionScopeWithNative(primary, fallback);
-  if (native && native.trim()) {
-    return native;
-  }
-  const tmuxSessionId = readTmuxSessionId(primary) || readTmuxSessionId(fallback);
-  if (tmuxSessionId) {
-    return `tmux:${tmuxSessionId}`;
-  }
-  const sessionId = readSessionId(primary) || readSessionId(fallback);
-  return sessionId || null;
+  return resolveClockSessionScopeAliases(primary, fallback)[0] ?? null;
 }

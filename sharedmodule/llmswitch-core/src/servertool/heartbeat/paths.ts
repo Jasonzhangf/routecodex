@@ -31,6 +31,10 @@ export function resolveHeartbeatDir(sessionDir: string): string {
   return path.join(resolveHeartbeatStoreBaseDir(sessionDir), "heartbeat");
 }
 
+export function resolveHeartbeatHistoryDir(sessionDir: string): string {
+  return path.join(resolveHeartbeatStoreBaseDir(sessionDir), "heartbeat-history");
+}
+
 export function resolveLegacyHeartbeatDir(sessionDir: string): string | null {
   const normalized = path.resolve(String(sessionDir || "").trim());
   if (!normalized) {
@@ -51,11 +55,32 @@ export function resolveHeartbeatStateFileInDir(
   return path.join(dirpath, `${safe}.json`);
 }
 
+export function resolveHeartbeatHistoryFileInDir(
+  dirpath: string,
+  tmuxSessionId: string,
+): string | null {
+  const safe = sanitizeSegment(tmuxSessionId);
+  if (!safe) {
+    return null;
+  }
+  return path.join(dirpath, `${safe}.jsonl`);
+}
+
 export function resolveHeartbeatStateFile(
   sessionDir: string,
   tmuxSessionId: string,
 ): string | null {
   return resolveHeartbeatStateFileInDir(resolveHeartbeatDir(sessionDir), tmuxSessionId);
+}
+
+export function resolveHeartbeatHistoryFile(
+  sessionDir: string,
+  tmuxSessionId: string,
+): string | null {
+  return resolveHeartbeatHistoryFileInDir(
+    resolveHeartbeatHistoryDir(sessionDir),
+    tmuxSessionId,
+  );
 }
 
 export { readSessionDirEnv };

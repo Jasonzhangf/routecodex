@@ -234,4 +234,25 @@ describe('ApiKeyAuthProvider with rotator', () => {
 
     expect(provider.getRotator()).toBeNull();
   });
+
+  it('opencode zen public key 模式应允许短 key', async () => {
+    const provider = new ApiKeyAuthProvider({
+      type: 'apikey',
+      apiKey: 'public',
+      rawType: 'opencode-zen-public'
+    });
+
+    await expect(provider.initialize()).resolves.toBeUndefined();
+    expect(provider.buildHeaders().Authorization).toBe('Bearer public');
+    await expect(provider.validateCredentials()).resolves.toBe(true);
+  });
+
+  it('非 opencode zen 模式应拒绝过短 key', async () => {
+    const provider = new ApiKeyAuthProvider({
+      type: 'apikey',
+      apiKey: 'public'
+    });
+
+    await expect(provider.initialize()).rejects.toThrow('Invalid API key: too short');
+  });
 });

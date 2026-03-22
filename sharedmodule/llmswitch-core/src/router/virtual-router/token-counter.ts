@@ -32,15 +32,10 @@ export function countRequestTokens(request: StandardizedRequest): number {
   for (const message of request.messages || []) {
     total += countMessageTokens(message, encoder);
   }
-  if (Array.isArray(request.tools)) {
-    for (const tool of request.tools as StandardizedTool[]) {
-      total += encodeText(JSON.stringify(tool ?? {}), encoder);
-    }
-  }
-  if (request.parameters) {
-    total += encodeText(JSON.stringify(request.parameters), encoder);
-  }
-  return total;
+  const requestExtras = countRequestExtrasTokens(request, encoder);
+  total += requestExtras;
+  const responsesContextTokens = countResponsesContextTokens(request, encoder);
+  return Math.max(total, responsesContextTokens + requestExtras);
 }
 
 function countMessageTokens(message: StandardizedMessage, encoder: Tiktoken): number {
@@ -143,6 +138,83 @@ function encodeContent(content: StandardizedMessage['content'], encoder: Tiktoke
     return encodeText(JSON.stringify(content), encoder);
   }
   return encodeText(String(content), encoder);
+}
+
+function countRequestExtrasTokens(request: StandardizedRequest, encoder: Tiktoken): number {
+  let total = 0;
+  if (Array.isArray(request.tools)) {
+    for (const tool of request.tools as StandardizedTool[]) {
+      total += encodeText(JSON.stringify(tool ?? {}), encoder);
+    }
+  }
+  if (request.parameters) {
+    total += encodeText(JSON.stringify(request.parameters), encoder);
+  }
+  return total;
+}
+
+function countResponsesContextTokens(request: StandardizedRequest, encoder: Tiktoken): number {
+  const input = readResponsesContextInput(request);
+  if (!input) {
+    return 0;
+  }
+  let total = 0;
+  for (const item of input) {
+    total += encodeStructuredValue(item, encoder);
+  }
+  return total;
+}
+
+function readResponsesContextInput(request: StandardizedRequest): unknown[] | null {
+  const semantics = request.semantics as Record<string, unknown> | undefined;
+  const responses = asRecord(semantics?.responses);
+  const context = asRecord(responses?.context);
+  return Array.isArray(context?.input) ? (context!.input as unknown[]) : null;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function encodeStructuredValue(value: unknown, encoder: Tiktoken): number {
+  if (value === null || value === undefined) {
+    return 0;
+  }
+  if (typeof value === 'string') {
+    return encodeText(value, encoder);
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return encodeText(String(value), encoder);
+  }
+  if (Array.isArray(value)) {
+    let total = 0;
+    for (const entry of value) {
+      total += encodeStructuredValue(entry, encoder);
+    }
+    return total;
+  }
+  if (typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    if (detectMediaKind(record)) {
+      return encodeMediaStub(record, encoder);
+    }
+    let total = 0;
+    for (const [key, entry] of Object.entries(record)) {
+      total += encodeText(key, encoder);
+      total += encodeStructuredValue(entry, encoder);
+    }
+    return total;
+  }
+  return encodeText(String(value), encoder);
+}
+
+function encodeMediaStub(record: Record<string, unknown>, encoder: Tiktoken): number {
+  const typeValue = typeof record.type === 'string' && record.type.trim()
+    ? record.type.trim()
+    : 'media';
+  return encodeText(typeValue, encoder) + encodeText('[omitted_media]', encoder);
 }
 
 function encodeText(value: unknown, encoder: Tiktoken): number {

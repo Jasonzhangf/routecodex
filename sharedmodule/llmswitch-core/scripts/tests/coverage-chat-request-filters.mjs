@@ -364,9 +364,9 @@ async function main() {
     }
 
     {
-      const { buildGovernedFilterPayloadWithNativeFallback } = await importNativeSemanticsFresh('native-chat-request-filter-semantics');
+      const { buildGovernedFilterPayloadWithNative } = await importNativeSemanticsFresh('native-chat-request-filter-semantics');
 
-      const parsed = buildGovernedFilterPayloadWithNativeFallback({
+      const parsed = buildGovernedFilterPayloadWithNative({
         model: 'gpt-direct',
         messages: [{ role: 'user', content: 'hi' }],
         stream: true,
@@ -378,7 +378,7 @@ async function main() {
       const circular = {};
       circular.self = circular;
       assert.throws(
-        () => buildGovernedFilterPayloadWithNativeFallback(circular),
+        () => buildGovernedFilterPayloadWithNative(circular),
         /json stringify failed/i
       );
     }
@@ -393,9 +393,9 @@ async function main() {
         ].join('\n'),
         async (modulePath) => {
           setEnvVar('ROUTECODEX_LLMS_ROUTER_NATIVE_PATH', modulePath);
-          const { buildGovernedFilterPayloadWithNativeFallback } = await importNativeSemanticsFresh('native-chat-request-filter-semantics-empty-result');
+          const { buildGovernedFilterPayloadWithNative } = await importNativeSemanticsFresh('native-chat-request-filter-semantics-empty-result');
           assert.throws(
-            () => buildGovernedFilterPayloadWithNativeFallback({ model: 'x', messages: [] }),
+            () => buildGovernedFilterPayloadWithNative({ model: 'x', messages: [] }),
             /empty result/i
           );
         }
@@ -412,9 +412,9 @@ async function main() {
         ].join('\n'),
         async (modulePath) => {
           setEnvVar('ROUTECODEX_LLMS_ROUTER_NATIVE_PATH', modulePath);
-          const { buildGovernedFilterPayloadWithNativeFallback } = await importNativeSemanticsFresh('native-chat-request-filter-semantics-invalid-array');
+          const { buildGovernedFilterPayloadWithNative } = await importNativeSemanticsFresh('native-chat-request-filter-semantics-invalid-array');
           assert.throws(
-            () => buildGovernedFilterPayloadWithNativeFallback({ model: 'x', messages: [] }),
+            () => buildGovernedFilterPayloadWithNative({ model: 'x', messages: [] }),
             /invalid payload/i
           );
         }
@@ -431,9 +431,9 @@ async function main() {
         ].join('\n'),
         async (modulePath) => {
           setEnvVar('ROUTECODEX_LLMS_ROUTER_NATIVE_PATH', modulePath);
-          const { buildGovernedFilterPayloadWithNativeFallback } = await importNativeSemanticsFresh('native-chat-request-filter-semantics-invalid-json');
+          const { buildGovernedFilterPayloadWithNative } = await importNativeSemanticsFresh('native-chat-request-filter-semantics-invalid-json');
           assert.throws(
-            () => buildGovernedFilterPayloadWithNativeFallback({ model: 'x', messages: [] }),
+            () => buildGovernedFilterPayloadWithNative({ model: 'x', messages: [] }),
             /invalid payload/i
           );
         }
@@ -450,9 +450,9 @@ async function main() {
         ].join('\n'),
         async (modulePath) => {
           setEnvVar('ROUTECODEX_LLMS_ROUTER_NATIVE_PATH', modulePath);
-          const { buildGovernedFilterPayloadWithNativeFallback } = await importNativeSemanticsFresh('native-chat-request-filter-semantics-throw');
+          const { buildGovernedFilterPayloadWithNative } = await importNativeSemanticsFresh('native-chat-request-filter-semantics-throw');
           assert.throws(
-            () => buildGovernedFilterPayloadWithNativeFallback({ model: 'x', messages: [] }),
+            () => buildGovernedFilterPayloadWithNative({ model: 'x', messages: [] }),
             /mock-throw/i
           );
         }
@@ -469,9 +469,9 @@ async function main() {
         ].join('\n'),
         async (modulePath) => {
           setEnvVar('ROUTECODEX_LLMS_ROUTER_NATIVE_PATH', modulePath);
-          const { buildGovernedFilterPayloadWithNativeFallback } = await importNativeSemanticsFresh('native-chat-request-filter-semantics-throw-undefined');
+          const { buildGovernedFilterPayloadWithNative } = await importNativeSemanticsFresh('native-chat-request-filter-semantics-throw-undefined');
           assert.throws(
-            () => buildGovernedFilterPayloadWithNativeFallback({ model: 'x', messages: [] }),
+            () => buildGovernedFilterPayloadWithNative({ model: 'x', messages: [] }),
             /unknown/i
           );
         }

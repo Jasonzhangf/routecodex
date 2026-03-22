@@ -1,4 +1,7 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import { resolveRccStateDir } from '../../config/user-data-paths.js';
 import { rebindRequestTimingTimeline } from './stage-logger.js';
 
 interface RequestIdMeta {
@@ -25,18 +28,28 @@ type TimedValue<T> = {
   expiresAtMs: number;
 };
 
-// const CLIENT_SEQ_MAP = new Map<string, number>();
-const PROVIDER_SEQ_MAP = new Map<string, number>();
+type RequestCounterState = {
+  version: 1;
+  totalCount: number;
+  windowCount: number;
+  windowKey: string;
+  updatedAt: string;
+};
+
 const REQUEST_COMPONENTS = new Map<string, TimedValue<RequestIdComponents>>();
 const REQUEST_ALIAS = new Map<string, TimedValue<string>>();
 const COMPONENT_TTL_MS = 5 * 60 * 1000;
 const COMPONENT_SWEEP_INTERVAL_MS = 30 * 1000;
-const PROVIDER_SEQ_MAX_KEYS = resolvePositiveIntFromEnv(
-  process.env.ROUTECODEX_REQUEST_ID_SEQ_MAX_KEYS,
-  process.env.RCC_REQUEST_ID_SEQ_MAX_KEYS,
-  2048
-);
+const REQUEST_COUNTER_STATE_FILE = resolveRequestCounterStateFilePath();
 let cleanupTimer: NodeJS.Timeout | null = null;
+let requestCounterStateLoaded = false;
+let requestCounterState: RequestCounterState = {
+  version: 1,
+  totalCount: 0,
+  windowCount: 0,
+  windowKey: resolveNoonWindowKey(),
+  updatedAt: new Date(0).toISOString()
+};
 
 export function generateRequestIdentifiers(candidate?: unknown, meta?: RequestIdMeta): RequestIdentifiers {
   const clientRequestId = normalizeClientRequestId(candidate);
@@ -59,8 +72,7 @@ function buildProviderRequestId(meta?: RequestIdMeta): string {
   const providerId = sanitizeToken(meta?.providerId);
   const model = sanitizeToken(meta?.model);
   const ts = buildTimestamp();
-  const seqKey = `${entry}-${providerId}-${model}`;
-  const seq = nextSequence(seqKey, PROVIDER_SEQ_MAP);
+  const seq = nextPersistentSequence();
   const requestId = `${entry}-${providerId}-${model}-${ts}-${seq}`;
   storeRequestComponents(requestId, { entry, providerId, model, timestamp: ts, sequence: seq });
   return requestId;
@@ -140,12 +152,14 @@ function buildTimestamp(): string {
   return `${yyyy}${mm}${dd}T${hh}${mi}${ss}${ms}`;
 }
 
-function nextSequence(key: string, map: Map<string, number>): string {
-  const current = map.get(key) || 0;
-  const next = current + 1;
-  map.set(key, next);
-  pruneOldestEntries(map, PROVIDER_SEQ_MAX_KEYS);
-  return String(next).padStart(3, '0');
+function nextPersistentSequence(now: Date = new Date()): string {
+  ensureRequestCounterStateLoaded();
+  rolloverDailyWindowIfNeeded(now);
+  requestCounterState.totalCount += 1;
+  requestCounterState.windowCount += 1;
+  requestCounterState.updatedAt = now.toISOString();
+  persistRequestCounterState();
+  return `${requestCounterState.totalCount}-${requestCounterState.windowCount}`;
 }
 
 function storeRequestComponents(id: string, components: RequestIdComponents): void {
@@ -182,27 +196,92 @@ function splitRequestId(requestId: string): { baseId: string; suffix: string } {
   };
 }
 
-function resolvePositiveIntFromEnv(primary: string | undefined, secondary: string | undefined, fallback: number): number {
-  const values = [primary, secondary];
-  for (const candidate of values) {
-    const parsed = Number(String(candidate || '').trim());
-    if (Number.isFinite(parsed) && parsed >= 1) {
-      return Math.floor(parsed);
-    }
+function resolveRequestCounterStateFilePath(): string {
+  const override = String(
+    process.env.ROUTECODEX_REQUEST_ID_COUNTER_FILE ||
+      process.env.RCC_REQUEST_ID_COUNTER_FILE ||
+      ''
+  ).trim();
+  if (override) {
+    return path.isAbsolute(override) ? override : path.resolve(process.cwd(), override);
   }
-  return fallback;
+  if (String(process.env.NODE_ENV || '').trim().toLowerCase() === 'test') {
+    return path.join(process.cwd(), 'tmp', 'jest-request-id-counter.json');
+  }
+  return path.join(resolveRccStateDir(), 'request-id-counter.json');
 }
 
-function pruneOldestEntries<T>(map: Map<string, T>, maxSize: number): void {
-  if (!Number.isFinite(maxSize) || maxSize < 1) {
+function resolveNoonWindowKey(now: Date = new Date()): string {
+  const local = new Date(now.getTime());
+  if (local.getHours() < 12) {
+    local.setDate(local.getDate() - 1);
+  }
+  const yyyy = local.getFullYear();
+  const mm = String(local.getMonth() + 1).padStart(2, '0');
+  const dd = String(local.getDate()).padStart(2, '0');
+  return `${yyyy}${mm}${dd}`;
+}
+
+function toSafeNonNegativeInt(value: unknown, fallback = 0): number {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) {
+    return fallback;
+  }
+  return Math.floor(n);
+}
+
+function ensureRequestCounterStateLoaded(): void {
+  if (requestCounterStateLoaded) {
     return;
   }
-  while (map.size > maxSize) {
-    const oldestKey = map.keys().next().value as string | undefined;
-    if (!oldestKey) {
-      break;
+  requestCounterStateLoaded = true;
+  try {
+    const raw = fs.readFileSync(REQUEST_COUNTER_STATE_FILE, 'utf8').trim();
+    if (!raw) {
+      return;
     }
-    map.delete(oldestKey);
+    const parsed = JSON.parse(raw) as Partial<RequestCounterState> | null;
+    if (!parsed || typeof parsed !== 'object') {
+      return;
+    }
+    requestCounterState = {
+      version: 1,
+      totalCount: toSafeNonNegativeInt(parsed.totalCount, 0),
+      windowCount: toSafeNonNegativeInt(parsed.windowCount, 0),
+      windowKey:
+        typeof parsed.windowKey === 'string' && parsed.windowKey.trim()
+          ? parsed.windowKey.trim()
+          : resolveNoonWindowKey(),
+      updatedAt:
+        typeof parsed.updatedAt === 'string' && parsed.updatedAt.trim()
+          ? parsed.updatedAt
+          : new Date(0).toISOString()
+    };
+  } catch {
+    // non-blocking: fall back to fresh in-memory counters
+  }
+  rolloverDailyWindowIfNeeded(new Date());
+}
+
+function rolloverDailyWindowIfNeeded(now: Date): void {
+  const currentKey = resolveNoonWindowKey(now);
+  if (requestCounterState.windowKey === currentKey) {
+    return;
+  }
+  requestCounterState.windowKey = currentKey;
+  requestCounterState.windowCount = 0;
+}
+
+function persistRequestCounterState(): void {
+  try {
+    const dir = path.dirname(REQUEST_COUNTER_STATE_FILE);
+    fs.mkdirSync(dir, { recursive: true });
+    const tmpFile = `${REQUEST_COUNTER_STATE_FILE}.${process.pid}.tmp`;
+    const text = `${JSON.stringify(requestCounterState, null, 2)}\n`;
+    fs.writeFileSync(tmpFile, text, 'utf8');
+    fs.renameSync(tmpFile, REQUEST_COUNTER_STATE_FILE);
+  } catch {
+    // non-blocking: request id generation must not fail due to persistence errors
   }
 }
 
@@ -272,9 +351,32 @@ export function __unsafeSweepRequestIdCaches(nowMs = Date.now()): void {
 }
 
 export function __unsafeRequestIdCacheSize(): { components: number; aliases: number; seqKeys: number } {
+  ensureRequestCounterStateLoaded();
   return {
     components: REQUEST_COMPONENTS.size,
     aliases: REQUEST_ALIAS.size,
-    seqKeys: PROVIDER_SEQ_MAP.size
+    // Backward compatible field name: now indicates whether persistent counter state is initialized.
+    seqKeys: requestCounterStateLoaded ? 1 : 0
   };
+}
+
+export function __unsafeResetRequestIdCounterForTests(
+  next?: Partial<Pick<RequestCounterState, 'totalCount' | 'windowCount' | 'windowKey'>>
+): void {
+  requestCounterStateLoaded = true;
+  requestCounterState = {
+    version: 1,
+    totalCount: toSafeNonNegativeInt(next?.totalCount, 0),
+    windowCount: toSafeNonNegativeInt(next?.windowCount, 0),
+    windowKey:
+      typeof next?.windowKey === 'string' && next.windowKey.trim()
+        ? next.windowKey.trim()
+        : resolveNoonWindowKey(),
+    updatedAt: new Date().toISOString()
+  };
+  try {
+    fs.rmSync(REQUEST_COUNTER_STATE_FILE, { force: true });
+  } catch {
+    // non-blocking
+  }
 }

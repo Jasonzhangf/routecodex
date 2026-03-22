@@ -106,4 +106,56 @@ describe('ProviderFactory no fallback', () => {
     expect(provider?.config?.config?.auth?.tokenFile).toBe('~/.routecodex/auth/deepseek-account-1.json');
     expect(provider?.config?.config?.auth?.accountAlias).toBe('1');
   });
+
+  test('opencode zen-free placeholder key should normalize to public key mode', () => {
+    const runtime: any = {
+      runtimeKey: 'opencode-zen-free.key1',
+      providerId: 'opencode-zen-free',
+      providerType: 'openai',
+      endpoint: 'https://opencode.ai/zen/v1',
+      auth: {
+        type: 'apikey',
+        value: 'free-access-token'
+      }
+    };
+
+    const provider = ProviderFactory.createProviderFromRuntime(runtime, { logger: {} as any } as any) as any;
+    expect(provider?.config?.config?.auth?.type).toBe('apikey');
+    expect(provider?.config?.config?.auth?.apiKey).toBe('public');
+    expect(provider?.config?.config?.auth?.rawType).toBe('opencode-zen-public');
+  });
+
+  test('opencode zen-free missing key should normalize to public key mode', () => {
+    const runtime: any = {
+      runtimeKey: 'opencode-zen-free.key1',
+      providerId: 'opencode-zen-free',
+      providerType: 'openai',
+      endpoint: 'https://opencode.ai/zen/v1',
+      auth: {
+        type: 'apikey',
+        value: ''
+      }
+    };
+
+    const provider = ProviderFactory.createProviderFromRuntime(runtime, { logger: {} as any } as any) as any;
+    expect(provider?.config?.config?.auth?.apiKey).toBe('public');
+    expect(provider?.config?.config?.auth?.rawType).toBe('opencode-zen-public');
+  });
+
+  test('opencode zen-free explicit public key should preserve public key mode', () => {
+    const runtime: any = {
+      runtimeKey: 'opencode-zen-free.key1',
+      providerId: 'opencode-zen-free',
+      providerType: 'openai',
+      endpoint: 'https://opencode.ai/zen/v1',
+      auth: {
+        type: 'apikey',
+        value: 'public'
+      }
+    };
+
+    const provider = ProviderFactory.createProviderFromRuntime(runtime, { logger: {} as any } as any) as any;
+    expect(provider?.config?.config?.auth?.apiKey).toBe('public');
+    expect(provider?.config?.config?.auth?.rawType).toBe('opencode-zen-public');
+  });
 });

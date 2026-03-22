@@ -12,7 +12,12 @@ import {
   resolveLegacyHeartbeatDir,
   resolveHeartbeatStoreBaseDir,
 } from "./paths.js";
-import type { HeartbeatState } from "./types.js";
+import type {
+  HeartbeatCronShadowDiagnostic,
+  HeartbeatScheduleDiagnostic,
+  HeartbeatState,
+} from "./types.js";
+import { appendHeartbeatHistoryEvent } from "./history-store.js";
 
 function readString(value: unknown): string | undefined {
   if (typeof value !== "string") {
@@ -29,6 +34,100 @@ function normalizePositiveInt(value: unknown): number | undefined {
   }
   const floored = Math.floor(parsed);
   return floored > 0 ? floored : undefined;
+}
+
+function normalizeNonNegativeInt(value: unknown): number | undefined {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return undefined;
+  }
+  const floored = Math.floor(parsed);
+  return floored >= 0 ? floored : undefined;
+}
+
+function coerceCronShadowDiagnostic(
+  raw: unknown,
+): HeartbeatCronShadowDiagnostic | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return undefined;
+  }
+  const row = raw as Record<string, unknown>;
+  if (row.supported === true) {
+    const expression = readString(row.expression);
+    const timezone = readString(row.timezone);
+    const previousBoundaryAtMs = normalizeNonNegativeInt(row.previousBoundaryAtMs);
+    const nextBoundaryAtMs = normalizeNonNegativeInt(row.nextBoundaryAtMs);
+    const offsetFromPreviousBoundaryMs = normalizeNonNegativeInt(
+      row.offsetFromPreviousBoundaryMs,
+    );
+    if (
+      !expression ||
+      !timezone ||
+      typeof previousBoundaryAtMs !== "number" ||
+      typeof nextBoundaryAtMs !== "number" ||
+      typeof offsetFromPreviousBoundaryMs !== "number"
+    ) {
+      return undefined;
+    }
+    return {
+      supported: true,
+      expression,
+      timezone,
+      previousBoundaryAtMs,
+      nextBoundaryAtMs,
+      offsetFromPreviousBoundaryMs,
+    };
+  }
+  if (row.supported === false) {
+    const reason = readString(row.reason);
+    return reason ? { supported: false, reason } : undefined;
+  }
+  return undefined;
+}
+
+function coerceScheduleDiagnostic(
+  raw: unknown,
+): HeartbeatScheduleDiagnostic | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return undefined;
+  }
+  const row = raw as Record<string, unknown>;
+  const phase = readString(row.phase);
+  const observedAtMs = normalizePositiveInt(row.observedAtMs);
+  const daemonScanMs = normalizePositiveInt(row.daemonScanMs);
+  const effectiveIntervalMs = normalizePositiveInt(row.effectiveIntervalMs);
+  const cronShadow = coerceCronShadowDiagnostic(row.cronShadow);
+  if (
+    !phase ||
+    (phase !== "triggered" &&
+      phase !== "skipped" &&
+      phase !== "failed" &&
+      phase !== "disabled") ||
+    typeof observedAtMs !== "number" ||
+    typeof daemonScanMs !== "number" ||
+    typeof effectiveIntervalMs !== "number" ||
+    !cronShadow
+  ) {
+    return undefined;
+  }
+  const anchorAtMs = normalizePositiveInt(row.anchorAtMs);
+  const dueAtMs = normalizePositiveInt(row.dueAtMs);
+  const dueInMsRaw = Number(row.dueInMs);
+  const latenessMsRaw = Number(row.latenessMs);
+  return {
+    phase,
+    observedAtMs,
+    daemonScanMs,
+    effectiveIntervalMs,
+    ...(typeof anchorAtMs === "number" ? { anchorAtMs } : {}),
+    ...(typeof dueAtMs === "number" ? { dueAtMs } : {}),
+    ...(Number.isFinite(dueInMsRaw) ? { dueInMs: Math.floor(dueInMsRaw) } : {}),
+    ...(Number.isFinite(latenessMsRaw)
+      ? { latenessMs: Math.floor(latenessMsRaw) }
+      : {}),
+    ...(readString(row.reason) ? { reason: readString(row.reason) } : {}),
+    cronShadow,
+  };
 }
 
 async function pathExists(filePath: string): Promise<boolean> {
@@ -101,6 +200,7 @@ export function coerceHeartbeatState(
       : {};
   const tmuxSessionId = readString(row.tmuxSessionId) || fallbackTmuxSessionId;
   const triggerCountRaw = Number(row.triggerCount);
+  const scheduleDiagnostic = coerceScheduleDiagnostic(row.lastScheduleDiagnostic);
   return {
     version: 1,
     tmuxSessionId,
@@ -128,6 +228,7 @@ export function coerceHeartbeatState(
       ? { lastSkippedReason: readString(row.lastSkippedReason) }
       : {}),
     ...(readString(row.lastError) ? { lastError: readString(row.lastError) } : {}),
+    ...(scheduleDiagnostic ? { lastScheduleDiagnostic: scheduleDiagnostic } : {}),
   };
 }
 
@@ -187,11 +288,18 @@ export async function saveHeartbeatState(state: HeartbeatState): Promise<void> {
 export async function setHeartbeatEnabled(
   tmuxSessionId: string,
   enabled: boolean,
-  options?: { intervalMs?: number; clearIntervalOverride?: boolean },
+  options?: {
+    intervalMs?: number;
+    clearIntervalOverride?: boolean;
+    source?: string;
+    reason?: string;
+    details?: Record<string, unknown>;
+  },
 ): Promise<HeartbeatState> {
   const state = await loadHeartbeatState(tmuxSessionId);
   const intervalMs = normalizePositiveInt(options?.intervalMs);
   const clearIntervalOverride = options?.clearIntervalOverride === true;
+  const disabledReason = readString(options?.reason) || "disabled_by_directive";
   const next: HeartbeatState = {
     ...state,
     enabled,
@@ -208,9 +316,17 @@ export async function setHeartbeatEnabled(
           lastSkippedReason: undefined,
           lastError: undefined,
         }
-      : { intervalMs: undefined, lastSkippedReason: "disabled_by_directive" }),
+      : { intervalMs: undefined, lastSkippedReason: disabledReason, lastError: disabledReason }),
   };
   await saveHeartbeatState(next);
+  await appendHeartbeatHistoryEvent({
+    tmuxSessionId: next.tmuxSessionId,
+    source: readString(options?.source) || "state.set",
+    action: "set_enabled",
+    outcome: enabled ? "enabled" : "disabled",
+    ...(enabled ? {} : { reason: disabledReason }),
+    ...(options?.details ? { details: options.details } : {}),
+  });
   return next;
 }
 

@@ -28,7 +28,14 @@ function isPersistentScopeKey(key: string | undefined): key is string {
 export function resolveStopMessageScope(metadata: RouterMetadataInput): string | undefined {
   const explicitScope = readToken((metadata as any)?.stopMessageClientInjectSessionScope)
     || readToken((metadata as any)?.stopMessageClientInjectScope);
-  if (explicitScope && explicitScope.startsWith('tmux:')) {
+  if (
+    explicitScope &&
+    (
+      explicitScope.startsWith('tmux:')
+      || explicitScope.startsWith('session:')
+      || explicitScope.startsWith('conversation:')
+    )
+  ) {
     return explicitScope;
   }
 
@@ -38,6 +45,14 @@ export function resolveStopMessageScope(metadata: RouterMetadataInput): string |
     || readToken((metadata as any)?.tmux_session_id);
   if (tmuxSessionId) {
     return `tmux:${tmuxSessionId}`;
+  }
+  const sessionId = readToken((metadata as any)?.sessionId);
+  if (sessionId) {
+    return `session:${sessionId}`;
+  }
+  const conversationId = readToken((metadata as any)?.conversationId);
+  if (conversationId) {
+    return `conversation:${conversationId}`;
   }
   return undefined;
 }

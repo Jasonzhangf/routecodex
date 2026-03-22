@@ -21,6 +21,8 @@ export type QuotaRecordLike = {
   fetchedAt: number;
 };
 
+const quotaWriteChains = new Map<string, Promise<void>>();
+
 function logAntigravityQuotaPersistenceNonBlockingError(
   operation: string,
   error: unknown,
@@ -29,6 +31,19 @@ function logAntigravityQuotaPersistenceNonBlockingError(
   const reason = error instanceof Error ? error.message : String(error);
   const suffix = details ? ` details=${JSON.stringify(details)}` : '';
   console.warn(`[antigravity-quota-persistence] ${operation} failed (non-blocking): ${reason}${suffix}`);
+}
+
+function enqueueSerializedWrite(filePath: string, task: () => Promise<void>): Promise<void> {
+  const previous = quotaWriteChains.get(filePath) ?? Promise.resolve();
+  const current = previous
+    .catch(() => undefined)
+    .then(task);
+  quotaWriteChains.set(filePath, current);
+  return current.finally(() => {
+    if (quotaWriteChains.get(filePath) === current) {
+      quotaWriteChains.delete(filePath);
+    }
+  });
 }
 
 export function resolveQuotaManagerDir(resolveHomeDir: () => string): string {
@@ -144,21 +159,17 @@ export function createQuotaStore(options: {
       } catch (error) {
         logAntigravityQuotaPersistenceNonBlockingError('createQuotaStore.save.mkdir', error, { dir });
       }
-      const tmp = `${filePath}.tmp`;
       const text = `${JSON.stringify(snapshot, null, 2)}\n`;
       try {
-        await fsAsync.writeFile(tmp, text, 'utf8');
-        await fsAsync.rename(tmp, filePath);
+        await enqueueSerializedWrite(filePath, async () => {
+          await fsAsync.mkdir(dir, { recursive: true });
+          await fsAsync.writeFile(filePath, text, 'utf8');
+        });
         options.onStatus('loaded');
       } catch (error) {
-        logAntigravityQuotaPersistenceNonBlockingError('createQuotaStore.save.write', error, { filePath, tmp });
+        logAntigravityQuotaPersistenceNonBlockingError('createQuotaStore.save.write', error, { filePath });
         options.onStatus('save_error');
         options.onSessionUnbindIssue('quota_store_save_error');
-        try {
-          await fsAsync.unlink(tmp);
-        } catch (cleanupError) {
-          logAntigravityQuotaPersistenceNonBlockingError('createQuotaStore.save.cleanupTmp', cleanupError, { tmp });
-        }
       }
     }
   };

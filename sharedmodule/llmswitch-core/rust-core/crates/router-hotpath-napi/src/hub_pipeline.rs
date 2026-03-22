@@ -3,6 +3,8 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::Map;
 use serde_json::Value;
+use std::env;
+use crate::hub_bridge_actions::{build_bridge_history, BuildBridgeHistoryInput};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -201,6 +203,37 @@ fn resolve_sse_protocol_from_metadata(metadata: &Value) -> Option<String> {
     None
 }
 
+fn resolve_sse_protocol(metadata: &Value, provider_protocol: &str) -> String {
+    if let Some(protocol) = resolve_sse_protocol_from_metadata(metadata) {
+        return protocol;
+    }
+    let fallback = provider_protocol.trim();
+    if fallback.is_empty() {
+        return "openai-chat".to_string();
+    }
+    fallback.to_string()
+}
+
+fn extract_model_hint_from_metadata(metadata: &Value) -> Option<String> {
+    let row = metadata.as_object()?;
+    if let Some(model) = row.get("model").and_then(|v| v.as_str()) {
+        let model = model.trim();
+        if !model.is_empty() {
+            return Some(model.to_string());
+        }
+    }
+    let provider = row.get("provider").and_then(|v| v.as_object())?;
+    for key in ["model", "modelId", "defaultModel"] {
+        if let Some(candidate) = provider.get(key).and_then(|v| v.as_str()) {
+            let candidate = candidate.trim();
+            if !candidate.is_empty() {
+                return Some(candidate.to_string());
+            }
+        }
+    }
+    None
+}
+
 fn read_trimmed_string_token(metadata: &Map<String, Value>, keys: &[&str]) -> Option<String> {
     for key in keys {
         let raw = match metadata.get(*key).and_then(|v| v.as_str()) {
@@ -259,6 +292,743 @@ fn resolve_stop_message_router_metadata(metadata: &Value) -> Value {
     Value::Object(out)
 }
 
+fn resolve_router_metadata_runtime_flags(metadata: &Value) -> Value {
+    let mut out = Map::<String, Value>::new();
+    let metadata_obj = match metadata.as_object() {
+        Some(v) => v,
+        None => return Value::Object(out),
+    };
+
+    let disable_sticky_routes = metadata_obj
+        .get("__rt")
+        .and_then(|v| v.as_object())
+        .and_then(|row| row.get("disableStickyRoutes"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    if disable_sticky_routes {
+        out.insert("disableStickyRoutes".to_string(), Value::Bool(true));
+    }
+
+    if let Some(raw_estimated_tokens) = metadata_obj
+        .get("estimatedInputTokens")
+        .and_then(|v| v.as_f64())
+    {
+        if raw_estimated_tokens.is_finite() {
+            if let Some(number) = serde_json::Number::from_f64(raw_estimated_tokens) {
+                out.insert("estimatedInputTokens".to_string(), Value::Number(number));
+            }
+        }
+    }
+
+    Value::Object(out)
+}
+
+fn build_router_metadata_input(input: &Value) -> Result<Value, String> {
+    let row = input
+        .as_object()
+        .ok_or_else(|| "router metadata input must be object".to_string())?;
+    let request_id = row
+        .get("requestId")
+        .and_then(|v| v.as_str())
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .ok_or_else(|| "requestId is required".to_string())?;
+    let entry_endpoint = row
+        .get("entryEndpoint")
+        .and_then(|v| v.as_str())
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| "/v1/chat/completions".to_string());
+    let process_mode = row
+        .get("processMode")
+        .and_then(|v| v.as_str())
+        .map(|v| v.trim().to_ascii_lowercase())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| "chat".to_string());
+    let direction = row
+        .get("direction")
+        .and_then(|v| v.as_str())
+        .map(|v| v.trim().to_ascii_lowercase())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| "request".to_string());
+    let provider_protocol = row
+        .get("providerProtocol")
+        .and_then(|v| v.as_str())
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| "openai-chat".to_string());
+    let stream = row.get("stream").and_then(|v| v.as_bool()).unwrap_or(false);
+    let metadata_node = row.get("metadata").unwrap_or(&Value::Null);
+    let stop_message_metadata = resolve_stop_message_router_metadata(metadata_node);
+    let runtime_flags = resolve_router_metadata_runtime_flags(metadata_node);
+    let include_estimated_input_tokens = row
+        .get("includeEstimatedInputTokens")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let mut out = Map::<String, Value>::new();
+    out.insert("requestId".to_string(), Value::String(request_id));
+    out.insert("entryEndpoint".to_string(), Value::String(entry_endpoint));
+    out.insert("processMode".to_string(), Value::String(process_mode));
+    out.insert("stream".to_string(), Value::Bool(stream));
+    out.insert("direction".to_string(), Value::String(direction));
+    out.insert(
+        "providerProtocol".to_string(),
+        Value::String(provider_protocol),
+    );
+
+    if let Some(route_hint) = row
+        .get("routeHint")
+        .and_then(|v| v.as_str())
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+    {
+        out.insert("routeHint".to_string(), Value::String(route_hint));
+    }
+    if let Some(stage) = row
+        .get("stage")
+        .and_then(|v| v.as_str())
+        .map(|v| v.trim().to_ascii_lowercase())
+        .filter(|v| v == "inbound" || v == "outbound")
+    {
+        out.insert("stage".to_string(), Value::String(stage));
+    }
+    if let Some(session_id) = row
+        .get("sessionId")
+        .and_then(|v| v.as_str())
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+    {
+        out.insert("sessionId".to_string(), Value::String(session_id));
+    }
+    if let Some(conversation_id) = row
+        .get("conversationId")
+        .and_then(|v| v.as_str())
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+    {
+        out.insert("conversationId".to_string(), Value::String(conversation_id));
+    }
+    if row
+        .get("serverToolRequired")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+    {
+        out.insert("serverToolRequired".to_string(), Value::Bool(true));
+    }
+    if let Some(responses_resume) = row.get("responsesResume") {
+        if !responses_resume.is_null() {
+            out.insert("responsesResume".to_string(), responses_resume.clone());
+        }
+    }
+
+    if let Some(stop_obj) = stop_message_metadata.as_object() {
+        for (key, value) in stop_obj {
+            out.insert(key.clone(), value.clone());
+        }
+    }
+    if let Some(runtime_flags_obj) = runtime_flags.as_object() {
+        if runtime_flags_obj
+            .get("disableStickyRoutes")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
+            out.insert("disableStickyRoutes".to_string(), Value::Bool(true));
+        }
+        if include_estimated_input_tokens {
+            if let Some(value) = runtime_flags_obj.get("estimatedInputTokens") {
+                out.insert("estimatedInputTokens".to_string(), value.clone());
+            }
+        }
+    }
+
+    Ok(Value::Object(out))
+}
+
+fn normalize_hub_policy_mode(raw: Option<&str>) -> String {
+    let token = raw.unwrap_or("").trim().to_ascii_lowercase();
+    match token.as_str() {
+        "observe" | "enforce" => token,
+        _ => "off".to_string(),
+    }
+}
+
+fn build_hub_pipeline_result_metadata(input: &Value) -> Result<Value, String> {
+    let row = input
+        .as_object()
+        .ok_or_else(|| "hub pipeline result metadata input must be object".to_string())?;
+    let normalized = row
+        .get("normalized")
+        .and_then(|v| v.as_object())
+        .ok_or_else(|| "normalized is required".to_string())?;
+    let mut out = normalized
+        .get("metadata")
+        .and_then(|v| v.as_object())
+        .cloned()
+        .unwrap_or_default();
+
+    let captured_chat_request = row
+        .get("capturedChatRequest")
+        .cloned()
+        .unwrap_or_else(|| Value::Object(Map::new()));
+    out.insert("capturedChatRequest".to_string(), captured_chat_request);
+
+    let entry_endpoint = normalized
+        .get("entryEndpoint")
+        .and_then(|v| v.as_str())
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| "/v1/chat/completions".to_string());
+    out.insert("entryEndpoint".to_string(), Value::String(entry_endpoint));
+
+    let provider_protocol = row
+        .get("outboundProtocol")
+        .and_then(|v| v.as_str())
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| "openai-chat".to_string());
+    out.insert(
+        "providerProtocol".to_string(),
+        Value::String(provider_protocol.clone()),
+    );
+
+    out.insert(
+        "stream".to_string(),
+        Value::Bool(
+            normalized
+                .get("stream")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
+        ),
+    );
+
+    let process_mode = normalized
+        .get("processMode")
+        .and_then(|v| v.as_str())
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| "chat".to_string());
+    out.insert("processMode".to_string(), Value::String(process_mode));
+
+    if let Some(passthrough_audit) = row.get("passthroughAudit") {
+        if passthrough_audit.is_object() {
+            out.insert("passthroughAudit".to_string(), passthrough_audit.clone());
+        }
+    }
+
+    if let Some(route_hint) = normalized
+        .get("routeHint")
+        .and_then(|v| v.as_str())
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+    {
+        out.insert("routeHint".to_string(), Value::String(route_hint));
+    }
+
+    if let Some(target) = row.get("target") {
+        if !target.is_null() {
+            out.insert("target".to_string(), target.clone());
+        }
+    }
+
+    if let Some(outbound_stream) = row.get("outboundStream").and_then(|v| v.as_bool()) {
+        out.insert("providerStream".to_string(), Value::Bool(outbound_stream));
+    }
+
+    if let Some(shadow_baseline_payload) = row.get("shadowBaselineProviderPayload") {
+        if shadow_baseline_payload.is_object() {
+            let baseline_mode = normalize_hub_policy_mode(
+                row.get("shadowCompareBaselineMode")
+                    .and_then(|v| v.as_str()),
+            );
+            let candidate_mode = normalize_hub_policy_mode(
+                row.get("effectivePolicy")
+                    .and_then(|v| v.as_object())
+                    .and_then(|policy| policy.get("mode"))
+                    .and_then(|v| v.as_str()),
+            );
+            let mut shadow = Map::<String, Value>::new();
+            shadow.insert("baselineMode".to_string(), Value::String(baseline_mode));
+            shadow.insert("candidateMode".to_string(), Value::String(candidate_mode));
+            shadow.insert(
+                "providerProtocol".to_string(),
+                Value::String(provider_protocol),
+            );
+            shadow.insert(
+                "baselineProviderPayload".to_string(),
+                shadow_baseline_payload.clone(),
+            );
+            out.insert("hubShadowCompare".to_string(), Value::Object(shadow));
+        }
+    }
+
+    Ok(Value::Object(out))
+}
+
+fn read_i64_from_input(row: &Map<String, Value>, key: &str) -> Option<i64> {
+    row.get(key).and_then(|value| match value {
+        Value::Number(num) => {
+            if let Some(v) = num.as_i64() {
+                return Some(v);
+            }
+            num.as_f64().and_then(|raw| {
+                if raw.is_finite() {
+                    Some(raw.trunc() as i64)
+                } else {
+                    None
+                }
+            })
+        }
+        _ => None,
+    })
+}
+
+fn build_req_outbound_node_result(input: &Value) -> Result<Value, String> {
+    let row = input
+        .as_object()
+        .ok_or_else(|| "req outbound node result input must be object".to_string())?;
+
+    let outbound_start = read_i64_from_input(row, "outboundStart")
+        .ok_or_else(|| "outboundStart is required".to_string())?;
+    let outbound_end = read_i64_from_input(row, "outboundEnd")
+        .ok_or_else(|| "outboundEnd is required".to_string())?;
+    let messages = read_i64_from_input(row, "messages").unwrap_or(0);
+    let tools = read_i64_from_input(row, "tools").unwrap_or(0);
+
+    let mut data_processed = Map::<String, Value>::new();
+    data_processed.insert(
+        "messages".to_string(),
+        Value::Number(serde_json::Number::from(messages)),
+    );
+    data_processed.insert(
+        "tools".to_string(),
+        Value::Number(serde_json::Number::from(tools)),
+    );
+
+    let mut metadata = Map::<String, Value>::new();
+    metadata.insert(
+        "node".to_string(),
+        Value::String("req_outbound".to_string()),
+    );
+    metadata.insert(
+        "executionTime".to_string(),
+        Value::Number(serde_json::Number::from(outbound_end - outbound_start)),
+    );
+    metadata.insert(
+        "startTime".to_string(),
+        Value::Number(serde_json::Number::from(outbound_start)),
+    );
+    metadata.insert(
+        "endTime".to_string(),
+        Value::Number(serde_json::Number::from(outbound_end)),
+    );
+    metadata.insert("dataProcessed".to_string(), Value::Object(data_processed));
+
+    let mut out = Map::<String, Value>::new();
+    out.insert("id".to_string(), Value::String("req_outbound".to_string()));
+    out.insert("success".to_string(), Value::Bool(true));
+    out.insert("metadata".to_string(), Value::Object(metadata));
+
+    Ok(Value::Object(out))
+}
+
+fn build_req_inbound_node_result(input: &Value) -> Result<Value, String> {
+    let row = input
+        .as_object()
+        .ok_or_else(|| "req inbound node result input must be object".to_string())?;
+
+    let inbound_start = read_i64_from_input(row, "inboundStart")
+        .ok_or_else(|| "inboundStart is required".to_string())?;
+    let inbound_end = read_i64_from_input(row, "inboundEnd")
+        .ok_or_else(|| "inboundEnd is required".to_string())?;
+    let messages = read_i64_from_input(row, "messages").unwrap_or(0);
+    let tools = read_i64_from_input(row, "tools").unwrap_or(0);
+
+    let mut data_processed = Map::<String, Value>::new();
+    data_processed.insert(
+        "messages".to_string(),
+        Value::Number(serde_json::Number::from(messages)),
+    );
+    data_processed.insert(
+        "tools".to_string(),
+        Value::Number(serde_json::Number::from(tools)),
+    );
+
+    let mut metadata = Map::<String, Value>::new();
+    metadata.insert(
+        "node".to_string(),
+        Value::String("req_inbound".to_string()),
+    );
+    metadata.insert(
+        "executionTime".to_string(),
+        Value::Number(serde_json::Number::from(inbound_end - inbound_start)),
+    );
+    metadata.insert(
+        "startTime".to_string(),
+        Value::Number(serde_json::Number::from(inbound_start)),
+    );
+    metadata.insert(
+        "endTime".to_string(),
+        Value::Number(serde_json::Number::from(inbound_end)),
+    );
+    metadata.insert("dataProcessed".to_string(), Value::Object(data_processed));
+
+    let mut out = Map::<String, Value>::new();
+    out.insert("id".to_string(), Value::String("req_inbound".to_string()));
+    out.insert("success".to_string(), Value::Bool(true));
+    out.insert("metadata".to_string(), Value::Object(metadata));
+    Ok(Value::Object(out))
+}
+
+fn build_req_inbound_skipped_node(input: &Value) -> Result<Value, String> {
+    let row = input
+        .as_object()
+        .ok_or_else(|| "req inbound skipped node input must be object".to_string())?;
+    let reason = row
+        .get("reason")
+        .and_then(|v| v.as_str())
+        .map(|v| v.trim())
+        .filter(|v| !v.is_empty())
+        .unwrap_or("stage=outbound")
+        .to_string();
+
+    let mut metadata = Map::<String, Value>::new();
+    metadata.insert(
+        "node".to_string(),
+        Value::String("req_inbound".to_string()),
+    );
+    metadata.insert("skipped".to_string(), Value::Bool(true));
+    metadata.insert("reason".to_string(), Value::String(reason));
+    metadata.insert("dataProcessed".to_string(), Value::Object(Map::new()));
+
+    let mut out = Map::<String, Value>::new();
+    out.insert("id".to_string(), Value::String("req_inbound".to_string()));
+    out.insert("success".to_string(), Value::Bool(true));
+    out.insert("metadata".to_string(), Value::Object(metadata));
+    Ok(Value::Object(out))
+}
+
+fn build_captured_chat_request_snapshot(input: &Value) -> Result<Value, String> {
+    let row = input
+        .as_object()
+        .ok_or_else(|| "captured chat request snapshot input must be object".to_string())?;
+
+    let mut out = Map::<String, Value>::new();
+    out.insert(
+        "model".to_string(),
+        row.get("model").cloned().unwrap_or(Value::Null),
+    );
+    out.insert(
+        "messages".to_string(),
+        row.get("messages").cloned().unwrap_or(Value::Null),
+    );
+    if let Some(tools) = row.get("tools") {
+        out.insert("tools".to_string(), tools.clone());
+    } else {
+        out.insert("tools".to_string(), Value::Null);
+    }
+    if let Some(parameters) = row.get("parameters") {
+        out.insert("parameters".to_string(), parameters.clone());
+    } else {
+        out.insert("parameters".to_string(), Value::Null);
+    }
+    Ok(Value::Object(out))
+}
+
+fn coerce_standardized_request_from_payload(input: &Value) -> Result<Value, String> {
+    let row = input
+        .as_object()
+        .ok_or_else(|| "coerce standardized request input must be object".to_string())?;
+    let payload = row
+        .get("payload")
+        .and_then(|v| v.as_object())
+        .ok_or_else(|| "payload must be object".to_string())?;
+    let normalized = row
+        .get("normalized")
+        .and_then(|v| v.as_object())
+        .ok_or_else(|| "normalized must be object".to_string())?;
+
+    let model = payload
+        .get("model")
+        .and_then(|v| v.as_str())
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .ok_or_else(|| "[HubPipeline] outbound stage requires payload.model".to_string())?;
+    let messages = payload
+        .get("messages")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .ok_or_else(|| "[HubPipeline] outbound stage requires payload.messages[]".to_string())?;
+    let tools = payload.get("tools").and_then(|v| v.as_array()).cloned();
+    let parameters = payload
+        .get("parameters")
+        .and_then(|v| v.as_object())
+        .cloned()
+        .unwrap_or_default();
+    let semantics_from_payload = payload.get("semantics").and_then(|v| v.as_object()).cloned();
+    let metadata_from_payload = payload.get("metadata").and_then(|v| v.as_object()).cloned();
+
+    let mut metadata = Map::<String, Value>::new();
+    metadata.insert(
+        "originalEndpoint".to_string(),
+        Value::String(
+            normalized
+                .get("entryEndpoint")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+        ),
+    );
+    if let Some(source_metadata) = metadata_from_payload {
+        for (key, value) in source_metadata {
+            metadata.insert(key, value);
+        }
+    }
+    metadata.insert(
+        "requestId".to_string(),
+        Value::String(
+            normalized
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+        ),
+    );
+    metadata.insert(
+        "stream".to_string(),
+        Value::Bool(
+            normalized
+                .get("stream")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
+        ),
+    );
+    metadata.insert(
+        "processMode".to_string(),
+        Value::String(
+            normalized
+                .get("processMode")
+                .and_then(|v| v.as_str())
+                .unwrap_or("chat")
+                .to_string(),
+        ),
+    );
+    if let Some(route_hint) = normalized.get("routeHint").and_then(|v| v.as_str()) {
+        if !route_hint.is_empty() {
+            metadata.insert("routeHint".to_string(), Value::String(route_hint.to_string()));
+        }
+    }
+
+    let mut semantics = semantics_from_payload.unwrap_or_default();
+    let tools_node = semantics
+        .entry("tools".to_string())
+        .or_insert_with(|| Value::Object(Map::new()));
+    if !tools_node.is_object() {
+        *tools_node = Value::Object(Map::new());
+    }
+    if let Some(tools_array) = tools.as_ref() {
+        if !tools_array.is_empty() {
+            if let Some(tools_map) = tools_node.as_object_mut() {
+                if !tools_map.contains_key("clientToolsRaw") {
+                    tools_map.insert(
+                        "clientToolsRaw".to_string(),
+                        Value::Array(tools_array.clone()),
+                    );
+                }
+            }
+        }
+    }
+
+    let mut standardized_request = Map::<String, Value>::new();
+    standardized_request.insert("model".to_string(), Value::String(model.clone()));
+    standardized_request.insert("messages".to_string(), Value::Array(messages.clone()));
+    if let Some(tools_array) = tools.as_ref() {
+        standardized_request.insert("tools".to_string(), Value::Array(tools_array.clone()));
+    }
+    standardized_request.insert("parameters".to_string(), Value::Object(parameters.clone()));
+    standardized_request.insert("metadata".to_string(), Value::Object(metadata));
+    standardized_request.insert("semantics".to_string(), Value::Object(semantics));
+
+    let mut raw_payload = Map::<String, Value>::new();
+    raw_payload.insert("model".to_string(), Value::String(model));
+    raw_payload.insert("messages".to_string(), Value::Array(messages));
+    if let Some(tools_array) = tools {
+        raw_payload.insert("tools".to_string(), Value::Array(tools_array));
+    }
+    if !parameters.is_empty() {
+        raw_payload.insert("parameters".to_string(), Value::Object(parameters));
+    }
+
+    let mut output = Map::<String, Value>::new();
+    output.insert(
+        "standardizedRequest".to_string(),
+        Value::Object(standardized_request),
+    );
+    output.insert("rawPayload".to_string(), Value::Object(raw_payload));
+    Ok(Value::Object(output))
+}
+
+fn prepare_runtime_metadata_for_servertools(input: &Value) -> Result<Value, String> {
+    let row = input
+        .as_object()
+        .ok_or_else(|| "servertools runtime metadata input must be object".to_string())?;
+    let mut meta_base = value_as_object_or_empty(row.get("metadata").unwrap_or(&Value::Null));
+
+    let rt_entry = meta_base
+        .entry("__rt".to_string())
+        .or_insert_with(|| Value::Object(Map::new()));
+    if !rt_entry.is_object() {
+        *rt_entry = Value::Object(Map::new());
+    }
+    let rt_base = rt_entry
+        .as_object_mut()
+        .expect("__rt should be object after normalization");
+
+    let attach_if_object = |rt: &mut Map<String, Value>,
+                            input_key: &str,
+                            rt_key: &str,
+                            input_row: &Map<String, Value>| {
+        if let Some(raw) = input_row.get(input_key) {
+            if raw.is_object() {
+                rt.insert(rt_key.to_string(), raw.clone());
+            }
+        }
+    };
+
+    attach_if_object(rt_base, "webSearchConfig", "webSearch", row);
+    attach_if_object(rt_base, "execCommandGuard", "execCommandGuard", row);
+    attach_if_object(rt_base, "clockConfig", "clock", row);
+
+    Ok(Value::Object(meta_base))
+}
+
+fn apply_has_image_attachment_flag(input: &Value) -> Result<Value, String> {
+    let row = input
+        .as_object()
+        .ok_or_else(|| "has-image-attachment metadata input must be object".to_string())?;
+    let mut metadata = value_as_object_or_empty(row.get("metadata").unwrap_or(&Value::Null));
+    let has_image_attachment = row
+        .get("hasImageAttachment")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    if has_image_attachment {
+        metadata.insert("hasImageAttachment".to_string(), Value::Bool(true));
+    } else {
+        metadata.remove("hasImageAttachment");
+    }
+
+    Ok(Value::Object(metadata))
+}
+
+fn sync_session_identifiers_to_metadata(input: &Value) -> Result<Value, String> {
+    let row = input
+        .as_object()
+        .ok_or_else(|| "session identifier metadata input must be object".to_string())?;
+    let mut metadata = value_as_object_or_empty(row.get("metadata").unwrap_or(&Value::Null));
+
+    let normalize_id = |value: Option<&Value>| -> Option<String> {
+        value
+            .and_then(|v| v.as_str())
+            .map(|raw| raw.trim())
+            .filter(|raw| !raw.is_empty())
+            .map(|raw| raw.to_string())
+    };
+
+    if let Some(session_id) = normalize_id(row.get("sessionId")) {
+        metadata.insert("sessionId".to_string(), Value::String(session_id));
+    }
+
+    if let Some(conversation_id) = normalize_id(row.get("conversationId")) {
+        metadata.insert("conversationId".to_string(), Value::String(conversation_id));
+    }
+
+    Ok(Value::Object(metadata))
+}
+
+fn merge_clock_reservation_into_metadata(input: &Value) -> Result<Value, String> {
+    let row = input
+        .as_object()
+        .ok_or_else(|| "clock reservation metadata input must be object".to_string())?;
+    let mut metadata = value_as_object_or_empty(row.get("metadata").unwrap_or(&Value::Null));
+    let reservation = row
+        .get("processedRequest")
+        .and_then(|v| v.as_object())
+        .and_then(|req| req.get("metadata"))
+        .and_then(|v| v.as_object())
+        .and_then(|meta| meta.get("__clockReservation"));
+    if let Some(Value::Object(obj)) = reservation {
+        metadata.insert(
+            "__clockReservation".to_string(),
+            Value::Object(obj.clone()),
+        );
+    }
+    Ok(Value::Object(metadata))
+}
+
+fn build_tool_governance_node_result(input: &Value) -> Result<Value, String> {
+    let row = input
+        .as_object()
+        .ok_or_else(|| "tool governance node result input must be object".to_string())?;
+
+    let success = row.get("success").and_then(|v| v.as_bool()).unwrap_or(false);
+    let metadata = row
+        .get("metadata")
+        .and_then(|v| v.as_object())
+        .cloned()
+        .unwrap_or_default();
+
+    let mut out = Map::<String, Value>::new();
+    out.insert(
+        "id".to_string(),
+        Value::String("chat_process.req.stage4.tool_governance".to_string()),
+    );
+    out.insert("success".to_string(), Value::Bool(success));
+    out.insert("metadata".to_string(), Value::Object(metadata));
+
+    if let Some(error_obj) = row.get("error").and_then(|v| v.as_object()) {
+        let mut normalized_error = Map::<String, Value>::new();
+        let code = match error_obj.get("code") {
+            Some(value) if !value.is_null() => value.clone(),
+            _ => Value::String("hub_chat_process_error".to_string()),
+        };
+        normalized_error.insert("code".to_string(), code);
+
+        if let Some(message) = error_obj.get("message") {
+            normalized_error.insert("message".to_string(), message.clone());
+        }
+        if let Some(details) = error_obj.get("details") {
+            normalized_error.insert("details".to_string(), details.clone());
+        }
+
+        out.insert("error".to_string(), Value::Object(normalized_error));
+    }
+
+    Ok(Value::Object(out))
+}
+
+fn build_passthrough_governance_skipped_node() -> Value {
+    let mut metadata = Map::<String, Value>::new();
+    metadata.insert(
+        "node".to_string(),
+        Value::String("chat_process.req.stage4.tool_governance".to_string()),
+    );
+    metadata.insert("skipped".to_string(), Value::Bool(true));
+    metadata.insert(
+        "reason".to_string(),
+        Value::String("process_mode_passthrough_parse_record_only".to_string()),
+    );
+
+    let mut out = Map::<String, Value>::new();
+    out.insert(
+        "id".to_string(),
+        Value::String("chat_process.req.stage4.tool_governance".to_string()),
+    );
+    out.insert("success".to_string(), Value::Bool(true));
+    out.insert("metadata".to_string(), Value::Object(metadata));
+    Value::Object(out)
+}
+
 fn extract_adapter_context_metadata_fields(metadata: &Value, keys: &Value) -> Value {
     let metadata_obj = match metadata.as_object() {
         Some(v) => v,
@@ -293,6 +1063,136 @@ fn extract_adapter_context_metadata_fields(metadata: &Value, keys: &Value) -> Va
             }
             _ => {}
         }
+    }
+    Value::Object(out)
+}
+
+fn resolve_adapter_context_client_connection_state(metadata: &Value) -> Value {
+    let metadata_obj = match metadata.as_object() {
+        Some(v) => v,
+        None => return Value::Object(Map::new()),
+    };
+
+    let disconnected_from_state = metadata_obj
+        .get("clientConnectionState")
+        .and_then(|v| v.as_object())
+        .and_then(|row| row.get("disconnected"))
+        .and_then(|v| v.as_bool());
+
+    let explicit_true = match metadata_obj.get("clientDisconnected") {
+        Some(Value::Bool(true)) => true,
+        Some(Value::String(raw)) if raw.trim().eq_ignore_ascii_case("true") => true,
+        _ => false,
+    };
+
+    let resolved = if explicit_true {
+        Some(true)
+    } else {
+        disconnected_from_state
+    };
+
+    let mut out = Map::<String, Value>::new();
+    if let Some(disconnected) = resolved {
+        out.insert("clientDisconnected".to_string(), Value::Bool(disconnected));
+    }
+    Value::Object(out)
+}
+
+fn resolve_adapter_context_metadata_signals(metadata: &Value) -> Value {
+    let metadata_obj = match metadata.as_object() {
+        Some(v) => v,
+        None => return Value::Object(Map::new()),
+    };
+
+    let mut out = Map::<String, Value>::new();
+    let maybe_assign_trimmed_non_empty =
+        |source_key: &str, target_key: &str, bucket: &mut Map<String, Value>| {
+            let Some(raw_value) = metadata_obj.get(source_key).and_then(|v| v.as_str()) else {
+                return;
+            };
+            let trimmed = raw_value.trim();
+            if trimmed.is_empty() {
+                return;
+            }
+            bucket.insert(target_key.to_string(), Value::String(trimmed.to_string()));
+        };
+
+    maybe_assign_trimmed_non_empty("clientRequestId", "clientRequestId", &mut out);
+    maybe_assign_trimmed_non_empty("groupRequestId", "groupRequestId", &mut out);
+    maybe_assign_trimmed_non_empty("sessionId", "sessionId", &mut out);
+    maybe_assign_trimmed_non_empty("conversationId", "conversationId", &mut out);
+
+    if let Some(original_model_id) = metadata_obj.get("originalModelId").and_then(|v| v.as_str()) {
+        out.insert(
+            "originalModelId".to_string(),
+            Value::String(original_model_id.to_string()),
+        );
+    }
+    if let Some(client_model_id) = metadata_obj.get("clientModelId").and_then(|v| v.as_str()) {
+        out.insert(
+            "clientModelId".to_string(),
+            Value::String(client_model_id.to_string()),
+        );
+    }
+    if let Some(assigned_model_id) = metadata_obj.get("assignedModelId").and_then(|v| v.as_str()) {
+        out.insert("modelId".to_string(), Value::String(assigned_model_id.to_string()));
+    }
+
+    let estimated_input_tokens_raw = metadata_obj
+        .get("estimatedInputTokens")
+        .filter(|v| !v.is_null())
+        .or_else(|| metadata_obj.get("estimated_tokens").filter(|v| !v.is_null()))
+        .or_else(|| metadata_obj.get("estimatedTokens").filter(|v| !v.is_null()));
+    if let Some(raw_estimated_tokens) = parse_js_number_like(estimated_input_tokens_raw) {
+        if raw_estimated_tokens.is_finite() && raw_estimated_tokens > 0.0 {
+            if let Some(number) =
+                serde_json::Number::from_f64(raw_estimated_tokens.round().max(1.0))
+            {
+                out.insert("estimatedInputTokens".to_string(), Value::Number(number));
+            }
+        }
+    }
+
+    Value::Object(out)
+}
+
+fn resolve_adapter_context_object_carriers(metadata: &Value) -> Value {
+    let metadata_obj = match metadata.as_object() {
+        Some(v) => v,
+        None => return Value::Object(Map::new()),
+    };
+
+    let mut out = Map::<String, Value>::new();
+    if let Some(runtime) = metadata_obj.get("runtime").and_then(|v| v.as_object()) {
+        out.insert("runtime".to_string(), Value::Object(runtime.clone()));
+    }
+    if let Some(captured_chat_request) = metadata_obj
+        .get("capturedChatRequest")
+        .and_then(|v| v.as_object())
+    {
+        out.insert(
+            "capturedChatRequest".to_string(),
+            Value::Object(captured_chat_request.clone()),
+        );
+    }
+    if let Some(client_connection_state) = metadata_obj
+        .get("clientConnectionState")
+        .and_then(|v| v.as_object())
+    {
+        out.insert(
+            "clientConnectionState".to_string(),
+            Value::Object(client_connection_state.clone()),
+        );
+    }
+    if let Some(client_disconnected) = resolve_adapter_context_client_connection_state(metadata)
+        .as_object()
+        .and_then(|row| row.get("clientDisconnected"))
+        .and_then(|v| v.as_bool())
+    {
+        out.insert(
+            "clientDisconnected".to_string(),
+            Value::Bool(client_disconnected),
+        );
     }
     Value::Object(out)
 }
@@ -343,12 +1243,37 @@ fn resolve_hub_shadow_compare_config(metadata: &Value) -> Option<Value> {
 }
 
 fn normalize_apply_patch_tool_mode_token(raw: Option<&str>) -> Option<String> {
-    let token = raw.unwrap_or("").trim().to_ascii_lowercase();
-    match token.as_str() {
-        "freeform" => Some("freeform".to_string()),
-        "schema" | "json_schema" => Some("schema".to_string()),
-        _ => None,
+  let token = raw.unwrap_or("").trim().to_ascii_lowercase();
+  match token.as_str() {
+      "freeform" => Some("freeform".to_string()),
+      "schema" | "json_schema" => Some("schema".to_string()),
+      _ => None,
+  }
+}
+
+fn is_truthy_env_value(raw: &str) -> bool {
+    matches!(
+        raw.trim().to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes" | "on"
+    )
+}
+
+fn resolve_apply_patch_tool_mode_from_env() -> Option<String> {
+    let mode = env::var("RCC_APPLY_PATCH_TOOL_MODE")
+        .ok()
+        .or_else(|| env::var("ROUTECODEX_APPLY_PATCH_TOOL_MODE").ok())
+        .and_then(|raw| normalize_apply_patch_tool_mode_token(Some(raw.as_str())));
+    if mode.is_some() {
+        return mode;
     }
+    let freeform = env::var("RCC_APPLY_PATCH_FREEFORM")
+        .ok()
+        .or_else(|| env::var("ROUTECODEX_APPLY_PATCH_FREEFORM").ok())
+        .unwrap_or_default();
+    if is_truthy_env_value(freeform.as_str()) {
+        return Some("freeform".to_string());
+    }
+    None
 }
 
 fn resolve_apply_patch_tool_mode_from_tools(tools_raw: &Value) -> Option<String> {
@@ -391,6 +1316,293 @@ fn resolve_apply_patch_tool_mode_from_tools(tools_raw: &Value) -> Option<String>
         return Some(format.unwrap_or_else(|| "schema".to_string()));
     }
     None
+}
+
+fn read_responses_resume_from_metadata(metadata: &Value) -> Option<Value> {
+    let metadata_obj = metadata.as_object()?;
+    let resume = metadata_obj.get("responsesResume")?;
+    if !resume.is_object() {
+        return None;
+    }
+    Some(resume.clone())
+}
+
+fn read_responses_resume_from_request_semantics(request: &Value) -> Option<Value> {
+    let request_obj = request.as_object()?;
+    let semantics_obj = request_obj.get("semantics")?.as_object()?;
+    let responses_obj = semantics_obj.get("responses")?.as_object()?;
+    let resume = responses_obj.get("resume")?;
+    if !resume.is_object() {
+        return None;
+    }
+    Some(resume.clone())
+}
+
+fn is_search_route_id(route_id: &Value) -> bool {
+    let normalized = route_id
+        .as_str()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    normalized.starts_with("web_search") || normalized.starts_with("search")
+}
+
+fn is_canonical_web_search_tool_definition(tool: &Value) -> bool {
+    let Some(row) = tool.as_object() else {
+        return false;
+    };
+    let raw_type = row
+        .get("type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    if raw_type == "web_search_20250305" || raw_type == "web_search" {
+        return true;
+    }
+    let function_name = row
+        .get("function")
+        .and_then(|v| v.as_object())
+        .and_then(|fn_node| fn_node.get("name"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let fallback_name = row.get("name").and_then(|v| v.as_str()).unwrap_or("");
+    let normalized = if function_name.trim().is_empty() {
+        fallback_name.trim().to_ascii_lowercase()
+    } else {
+        function_name.trim().to_ascii_lowercase()
+    };
+    matches!(normalized.as_str(), "web_search" | "websearch" | "web-search")
+}
+
+fn parse_js_number_like(value: Option<&Value>) -> Option<f64> {
+    match value {
+        Some(Value::Number(num)) => num.as_f64(),
+        Some(Value::String(raw)) => raw.trim().parse::<f64>().ok(),
+        Some(Value::Bool(flag)) => Some(if *flag { 1.0 } else { 0.0 }),
+        Some(Value::Null) => Some(0.0),
+        _ => None,
+    }
+}
+
+fn find_direct_builtin_web_search_engine<'a>(
+    runtime_metadata: &'a Map<String, Value>,
+    model_id: &str,
+) -> Option<&'a Map<String, Value>> {
+    let web_search = runtime_metadata.get("webSearch")?.as_object()?;
+    let engines = web_search.get("engines")?.as_array()?;
+    let suffix = format!(".{}", model_id);
+    for entry in engines {
+        let row = match entry.as_object() {
+            Some(v) => v,
+            None => continue,
+        };
+        let execution_mode = row
+            .get("executionMode")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase();
+        if execution_mode != "direct" {
+            continue;
+        }
+        let direct_activation = row
+            .get("directActivation")
+            .and_then(|v| v.as_str())
+            .unwrap_or("route")
+            .trim()
+            .to_ascii_lowercase();
+        if direct_activation != "builtin" {
+            continue;
+        }
+        let configured_model_id = row
+            .get("modelId")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim();
+        if !configured_model_id.is_empty() {
+            if configured_model_id == model_id {
+                return Some(row);
+            }
+            continue;
+        }
+        let provider_key = row
+            .get("providerKey")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim();
+        if provider_key.ends_with(suffix.as_str()) {
+            return Some(row);
+        }
+    }
+    None
+}
+
+fn build_builtin_web_search_tool(max_uses: i64) -> Value {
+    let mut builtin_tool = Map::<String, Value>::new();
+    builtin_tool.insert(
+        "type".to_string(),
+        Value::String("web_search_20250305".to_string()),
+    );
+    builtin_tool.insert("name".to_string(), Value::String("web_search".to_string()));
+    builtin_tool.insert(
+        "max_uses".to_string(),
+        Value::Number(serde_json::Number::from(max_uses)),
+    );
+    Value::Object(builtin_tool)
+}
+
+fn apply_direct_builtin_web_search_tool(
+  provider_payload: &Value,
+  provider_protocol: &str,
+  route_id: &Value,
+  runtime_metadata: &Value,
+) -> Value {
+    let mut payload = value_as_object_or_empty(provider_payload);
+    if provider_protocol.trim() != "anthropic-messages" {
+        return Value::Object(payload);
+    }
+    if !is_search_route_id(route_id) {
+        return Value::Object(payload);
+    }
+    let model_id = payload
+        .get("model")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
+    if model_id.is_empty() {
+        return Value::Object(payload);
+    }
+    let runtime_metadata_obj = match runtime_metadata.as_object() {
+        Some(v) => v,
+        None => return Value::Object(payload),
+    };
+    let matched_engine = match find_direct_builtin_web_search_engine(runtime_metadata_obj, model_id) {
+        Some(v) => v,
+        None => return Value::Object(payload),
+    };
+
+    let raw_max_uses = parse_js_number_like(matched_engine.get("maxUses"));
+    let max_uses = match raw_max_uses {
+        Some(value) if value.is_finite() && value > 0.0 => value.floor() as i64,
+        _ => 2,
+    };
+    let builtin_tool = build_builtin_web_search_tool(max_uses);
+
+    let tools = payload
+        .get("tools")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let mut replaced = false;
+    let mut next_tools = Vec::<Value>::new();
+    for tool in tools {
+        if !replaced && is_canonical_web_search_tool_definition(&tool) {
+            next_tools.push(builtin_tool.clone());
+            replaced = true;
+            continue;
+        }
+        if is_canonical_web_search_tool_definition(&tool) {
+            continue;
+        }
+        next_tools.push(tool);
+    }
+    if !replaced {
+        next_tools.insert(0, builtin_tool);
+    }
+    payload.insert("tools".to_string(), Value::Array(next_tools));
+    Value::Object(payload)
+}
+
+fn lift_responses_resume_into_semantics(request: &Value, metadata: &Value) -> Value {
+    let mut output = Map::<String, Value>::new();
+    let mut next_metadata = value_as_object_or_empty(metadata);
+    let resume = read_responses_resume_from_metadata(metadata);
+
+    if resume.is_none() {
+        output.insert("request".to_string(), request.clone());
+        output.insert("metadata".to_string(), Value::Object(next_metadata));
+        return Value::Object(output);
+    }
+
+    let mut next_request = value_as_object_or_empty(request);
+    let semantics = next_request
+        .entry("semantics".to_string())
+        .or_insert_with(|| Value::Object(Map::new()));
+    if !semantics.is_object() {
+        *semantics = Value::Object(Map::new());
+    }
+    let semantics_obj = semantics
+        .as_object_mut()
+        .expect("semantics should be object after normalization");
+    let responses = semantics_obj
+        .entry("responses".to_string())
+        .or_insert_with(|| Value::Object(Map::new()));
+    if !responses.is_object() {
+        *responses = Value::Object(Map::new());
+    }
+    let responses_obj = responses
+        .as_object_mut()
+        .expect("responses should be object after normalization");
+    if !responses_obj.contains_key("resume") {
+        if let Some(resume_value) = resume {
+            responses_obj.insert("resume".to_string(), resume_value);
+        }
+    }
+
+    next_metadata.remove("responsesResume");
+    output.insert("request".to_string(), Value::Object(next_request));
+    output.insert("metadata".to_string(), Value::Object(next_metadata));
+    Value::Object(output)
+}
+
+fn sync_responses_context_from_canonical_messages(request: &Value) -> Value {
+    let mut next_request = value_as_object_or_empty(request);
+    let messages = next_request
+        .get("messages")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let tools = next_request
+        .get("tools")
+        .and_then(|v| v.as_array())
+        .cloned();
+    let semantics = match next_request.get_mut("semantics") {
+        Some(v) if v.is_object() => v,
+        _ => return Value::Object(next_request),
+    };
+    let semantics_obj = match semantics.as_object_mut() {
+        Some(v) => v,
+        None => return Value::Object(next_request),
+    };
+    let responses = match semantics_obj.get_mut("responses") {
+        Some(v) if v.is_object() => v,
+        _ => return Value::Object(next_request),
+    };
+    let responses_obj = match responses.as_object_mut() {
+        Some(v) => v,
+        None => return Value::Object(next_request),
+    };
+    let context = match responses_obj.get_mut("context") {
+        Some(v) if v.is_object() => v,
+        _ => return Value::Object(next_request),
+    };
+    let context_obj = match context.as_object_mut() {
+        Some(v) => v,
+        None => return Value::Object(next_request),
+    };
+
+    let bridge = build_bridge_history(BuildBridgeHistoryInput { messages, tools });
+    let bridge_input = serde_json::to_value(bridge.input).unwrap_or_else(|_| Value::Array(vec![]));
+    let original_system_messages = serde_json::to_value(bridge.original_system_messages)
+        .unwrap_or_else(|_| Value::Array(vec![]));
+
+    context_obj.insert("input".to_string(), bridge_input);
+    context_obj.insert(
+        "originalSystemMessages".to_string(),
+        original_system_messages,
+    );
+    Value::Object(next_request)
 }
 
 fn is_passthrough_canonical_chat_key(key: &str) -> bool {
@@ -843,40 +2055,123 @@ fn find_mappable_semantics_keys(metadata: &Value) -> Vec<String> {
 }
 
 pub fn run_hub_pipeline(input: HubPipelineInput) -> Result<HubPipelineOutput, String> {
-    // Main pipeline orchestration
     let request_id = input.request_id.clone();
-
-    // Validate and normalize endpoint
-    let _endpoint = normalize_endpoint(&input.endpoint);
-    let _entry_endpoint = normalize_endpoint(&input.entry_endpoint);
-
-    // Resolve provider protocol
+    let endpoint = normalize_endpoint(&input.endpoint);
+    let entry_endpoint = normalize_endpoint(&input.entry_endpoint);
     let provider_protocol = resolve_provider_protocol(&input.provider_protocol)
         .map_err(|e| format!("Protocol resolution failed: {}", e))?;
-
-    // Basic payload validation
     if !input.payload.is_object() && !input.payload.is_array() {
         return Err("Payload must be a JSON object or array".to_string());
     }
+    let payload = input.payload.clone();
 
-    // Create success output with processed metadata
-    let mut output_metadata = input.metadata.clone();
-    if let Some(obj) = output_metadata.as_object_mut() {
-        obj.insert(
-            "providerProtocol".to_string(),
-            Value::String(provider_protocol),
-        );
-        obj.insert(
-            "processedAt".to_string(),
-            Value::String(chrono::Utc::now().to_rfc3339()),
-        );
+    let mut output_metadata = input.metadata.as_object().cloned().unwrap_or_default();
+    output_metadata.insert("endpoint".to_string(), Value::String(endpoint));
+    output_metadata.insert(
+        "entryEndpoint".to_string(),
+        Value::String(entry_endpoint.clone()),
+    );
+    output_metadata.insert(
+        "providerProtocol".to_string(),
+        Value::String(provider_protocol.clone()),
+    );
+
+    let mut stream = input.stream;
+    if !stream {
+        stream = output_metadata
+            .get("stream")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
     }
+    if !stream {
+        stream = payload
+            .as_object()
+            .and_then(|row| row.get("stream"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+    }
+    output_metadata.insert("stream".to_string(), Value::Bool(stream));
+
+    let base_process_mode = if input.process_mode.eq_ignore_ascii_case("passthrough") {
+        "passthrough".to_string()
+    } else {
+        "chat".to_string()
+    };
+    let active_process_mode = payload
+        .as_object()
+        .and_then(|row| row.get("messages"))
+        .map(|messages| resolve_active_process_mode(base_process_mode.as_str(), messages))
+        .unwrap_or(base_process_mode);
+    output_metadata.insert(
+        "processMode".to_string(),
+        Value::String(active_process_mode),
+    );
+
+    let direction = if input.direction.eq_ignore_ascii_case("response") {
+        "response".to_string()
+    } else {
+        "request".to_string()
+    };
+    output_metadata.insert("direction".to_string(), Value::String(direction));
+
+    let stage = if input.stage.eq_ignore_ascii_case("outbound") {
+        "outbound".to_string()
+    } else {
+        "inbound".to_string()
+    };
+    output_metadata.insert("stage".to_string(), Value::String(stage));
+
+    let route_hint = output_metadata
+        .get("routeHint")
+        .and_then(|v| v.as_str())
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty());
+    if let Some(hint) = route_hint {
+        output_metadata.insert("routeHint".to_string(), Value::String(hint));
+    } else {
+        output_metadata.remove("routeHint");
+    }
+
+    let stop_message_router_metadata =
+        resolve_stop_message_router_metadata(&Value::Object(output_metadata.clone()));
+    if let Some(row) = stop_message_router_metadata.as_object() {
+        for (key, value) in row {
+            output_metadata.insert(key.clone(), value.clone());
+        }
+    }
+
+    let apply_patch_tool_mode = resolve_apply_patch_tool_mode_from_env().or_else(|| {
+        payload
+            .as_object()
+            .and_then(|row| row.get("tools"))
+            .and_then(resolve_apply_patch_tool_mode_from_tools)
+    });
+    if let Some(mode) = apply_patch_tool_mode {
+        if !output_metadata
+            .get("runtime")
+            .and_then(|v| v.as_object())
+            .is_some()
+        {
+            output_metadata.insert("runtime".to_string(), Value::Object(Map::new()));
+        }
+        if let Some(runtime) = output_metadata
+            .get_mut("runtime")
+            .and_then(|v| v.as_object_mut())
+        {
+            runtime.insert("applyPatchToolMode".to_string(), Value::String(mode));
+        }
+    }
+
+    output_metadata.insert(
+        "processedAt".to_string(),
+        Value::String(chrono::Utc::now().to_rfc3339()),
+    );
 
     Ok(HubPipelineOutput {
         request_id,
         success: true,
-        payload: Some(input.payload),
-        metadata: Some(output_metadata),
+        payload: Some(payload),
+        metadata: Some(Value::Object(output_metadata)),
         error: None,
     })
 }
@@ -1006,6 +2301,27 @@ pub fn resolve_sse_protocol_from_metadata_json(metadata_json: String) -> napi::R
 }
 
 #[napi_derive::napi]
+pub fn resolve_sse_protocol_json(
+    metadata_json: String,
+    provider_protocol: String,
+) -> napi::Result<String> {
+    let metadata: Value = serde_json::from_str(&metadata_json)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to parse metadata JSON: {}", e)))?;
+    let output = resolve_sse_protocol(&metadata, provider_protocol.as_str());
+    serde_json::to_string(&output)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to serialize sse protocol: {}", e)))
+}
+
+#[napi_derive::napi]
+pub fn extract_model_hint_from_metadata_json(metadata_json: String) -> napi::Result<String> {
+    let metadata: Value = serde_json::from_str(&metadata_json)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to parse metadata JSON: {}", e)))?;
+    let output = extract_model_hint_from_metadata(&metadata);
+    serde_json::to_string(&output)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to serialize model hint: {}", e)))
+}
+
+#[napi_derive::napi]
 pub fn resolve_stop_message_router_metadata_json(metadata_json: String) -> napi::Result<String> {
     let metadata: Value = serde_json::from_str(&metadata_json)
         .map_err(|e| napi::Error::from_reason(format!("Failed to parse metadata JSON: {}", e)))?;
@@ -1013,6 +2329,244 @@ pub fn resolve_stop_message_router_metadata_json(metadata_json: String) -> napi:
     serde_json::to_string(&output).map_err(|e| {
         napi::Error::from_reason(format!(
             "Failed to serialize stop-message router metadata: {}",
+            e
+        ))
+    })
+}
+
+#[napi_derive::napi]
+pub fn resolve_router_metadata_runtime_flags_json(
+    metadata_json: String,
+) -> napi::Result<String> {
+    let metadata: Value = serde_json::from_str(&metadata_json)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to parse metadata JSON: {}", e)))?;
+    let output = resolve_router_metadata_runtime_flags(&metadata);
+    serde_json::to_string(&output).map_err(|e| {
+        napi::Error::from_reason(format!(
+            "Failed to serialize router metadata runtime flags: {}",
+            e
+        ))
+    })
+}
+
+#[napi_derive::napi]
+pub fn build_router_metadata_input_json(input_json: String) -> napi::Result<String> {
+    let input: Value = serde_json::from_str(&input_json)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to parse input JSON: {}", e)))?;
+    let output = build_router_metadata_input(&input)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to build router metadata input: {}", e)))?;
+    serde_json::to_string(&output).map_err(|e| {
+        napi::Error::from_reason(format!(
+            "Failed to serialize router metadata input: {}",
+            e
+        ))
+    })
+}
+
+#[napi_derive::napi]
+pub fn build_hub_pipeline_result_metadata_json(input_json: String) -> napi::Result<String> {
+    let input: Value = serde_json::from_str(&input_json)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to parse input JSON: {}", e)))?;
+    let output = build_hub_pipeline_result_metadata(&input).map_err(|e| {
+        napi::Error::from_reason(format!(
+            "Failed to build hub pipeline result metadata: {}",
+            e
+        ))
+    })?;
+    serde_json::to_string(&output).map_err(|e| {
+        napi::Error::from_reason(format!(
+            "Failed to serialize hub pipeline result metadata: {}",
+            e
+        ))
+    })
+}
+
+#[napi_derive::napi]
+pub fn build_req_outbound_node_result_json(input_json: String) -> napi::Result<String> {
+    let input: Value = serde_json::from_str(&input_json)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to parse input JSON: {}", e)))?;
+    let output = build_req_outbound_node_result(&input).map_err(|e| {
+        napi::Error::from_reason(format!(
+            "Failed to build req outbound node result: {}",
+            e
+        ))
+    })?;
+    serde_json::to_string(&output).map_err(|e| {
+        napi::Error::from_reason(format!(
+            "Failed to serialize req outbound node result: {}",
+            e
+        ))
+    })
+}
+
+#[napi_derive::napi]
+pub fn build_req_inbound_node_result_json(input_json: String) -> napi::Result<String> {
+    let input: Value = serde_json::from_str(&input_json)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to parse input JSON: {}", e)))?;
+    let output = build_req_inbound_node_result(&input).map_err(|e| {
+        napi::Error::from_reason(format!(
+            "Failed to build req inbound node result: {}",
+            e
+        ))
+    })?;
+    serde_json::to_string(&output).map_err(|e| {
+        napi::Error::from_reason(format!(
+            "Failed to serialize req inbound node result: {}",
+            e
+        ))
+    })
+}
+
+#[napi_derive::napi]
+pub fn build_req_inbound_skipped_node_json(input_json: String) -> napi::Result<String> {
+    let input: Value = serde_json::from_str(&input_json)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to parse input JSON: {}", e)))?;
+    let output = build_req_inbound_skipped_node(&input).map_err(|e| {
+        napi::Error::from_reason(format!(
+            "Failed to build req inbound skipped node: {}",
+            e
+        ))
+    })?;
+    serde_json::to_string(&output).map_err(|e| {
+        napi::Error::from_reason(format!(
+            "Failed to serialize req inbound skipped node: {}",
+            e
+        ))
+    })
+}
+
+#[napi_derive::napi]
+pub fn build_captured_chat_request_snapshot_json(input_json: String) -> napi::Result<String> {
+    let input: Value = serde_json::from_str(&input_json)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to parse input JSON: {}", e)))?;
+    let output = build_captured_chat_request_snapshot(&input).map_err(|e| {
+        napi::Error::from_reason(format!(
+            "Failed to build captured chat request snapshot: {}",
+            e
+        ))
+    })?;
+    serde_json::to_string(&output).map_err(|e| {
+        napi::Error::from_reason(format!(
+            "Failed to serialize captured chat request snapshot: {}",
+            e
+        ))
+    })
+}
+
+#[napi_derive::napi]
+pub fn coerce_standardized_request_from_payload_json(input_json: String) -> napi::Result<String> {
+    let input: Value = serde_json::from_str(&input_json)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to parse input JSON: {}", e)))?;
+    let output = coerce_standardized_request_from_payload(&input).map_err(|e| {
+        napi::Error::from_reason(format!(
+            "Failed to coerce standardized request from payload: {}",
+            e
+        ))
+    })?;
+    serde_json::to_string(&output).map_err(|e| {
+        napi::Error::from_reason(format!(
+            "Failed to serialize standardized request coercion output: {}",
+            e
+        ))
+    })
+}
+
+#[napi_derive::napi]
+pub fn prepare_runtime_metadata_for_servertools_json(input_json: String) -> napi::Result<String> {
+    let input: Value = serde_json::from_str(&input_json)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to parse input JSON: {}", e)))?;
+    let output = prepare_runtime_metadata_for_servertools(&input).map_err(|e| {
+        napi::Error::from_reason(format!(
+            "Failed to prepare runtime metadata for servertools: {}",
+            e
+        ))
+    })?;
+    serde_json::to_string(&output).map_err(|e| {
+        napi::Error::from_reason(format!(
+            "Failed to serialize runtime metadata for servertools: {}",
+            e
+        ))
+    })
+}
+
+#[napi_derive::napi]
+pub fn apply_has_image_attachment_flag_json(input_json: String) -> napi::Result<String> {
+    let input: Value = serde_json::from_str(&input_json)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to parse input JSON: {}", e)))?;
+    let output = apply_has_image_attachment_flag(&input).map_err(|e| {
+        napi::Error::from_reason(format!(
+            "Failed to apply has-image-attachment metadata flag: {}",
+            e
+        ))
+    })?;
+    serde_json::to_string(&output).map_err(|e| {
+        napi::Error::from_reason(format!(
+            "Failed to serialize has-image-attachment metadata result: {}",
+            e
+        ))
+    })
+}
+
+#[napi_derive::napi]
+pub fn sync_session_identifiers_to_metadata_json(input_json: String) -> napi::Result<String> {
+    let input: Value = serde_json::from_str(&input_json)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to parse input JSON: {}", e)))?;
+    let output = sync_session_identifiers_to_metadata(&input).map_err(|e| {
+        napi::Error::from_reason(format!(
+            "Failed to sync session identifiers to metadata: {}",
+            e
+        ))
+    })?;
+    serde_json::to_string(&output).map_err(|e| {
+        napi::Error::from_reason(format!(
+            "Failed to serialize synced session identifier metadata: {}",
+            e
+        ))
+    })
+}
+
+#[napi_derive::napi]
+pub fn merge_clock_reservation_into_metadata_json(input_json: String) -> napi::Result<String> {
+    let input: Value = serde_json::from_str(&input_json)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to parse input JSON: {}", e)))?;
+    let output = merge_clock_reservation_into_metadata(&input).map_err(|e| {
+        napi::Error::from_reason(format!(
+            "Failed to merge clock reservation into metadata: {}",
+            e
+        ))
+    })?;
+    serde_json::to_string(&output).map_err(|e| {
+        napi::Error::from_reason(format!(
+            "Failed to serialize merged clock reservation metadata: {}",
+            e
+        ))
+    })
+}
+
+#[napi_derive::napi]
+pub fn build_tool_governance_node_result_json(input_json: String) -> napi::Result<String> {
+    let input: Value = serde_json::from_str(&input_json)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to parse input JSON: {}", e)))?;
+    let output = build_tool_governance_node_result(&input).map_err(|e| {
+        napi::Error::from_reason(format!(
+            "Failed to build tool governance node result: {}",
+            e
+        ))
+    })?;
+    serde_json::to_string(&output).map_err(|e| {
+        napi::Error::from_reason(format!(
+            "Failed to serialize tool governance node result: {}",
+            e
+        ))
+    })
+}
+
+#[napi_derive::napi]
+pub fn build_passthrough_governance_skipped_node_json() -> napi::Result<String> {
+    let output = build_passthrough_governance_skipped_node();
+    serde_json::to_string(&output).map_err(|e| {
+        napi::Error::from_reason(format!(
+            "Failed to serialize passthrough governance skipped node: {}",
             e
         ))
     })
@@ -1031,6 +2585,36 @@ pub fn extract_adapter_context_metadata_fields_json(
     serde_json::to_string(&output).map_err(|e| {
         napi::Error::from_reason(format!(
             "Failed to serialize adapter context metadata fields: {}",
+            e
+        ))
+    })
+}
+
+#[napi_derive::napi]
+pub fn resolve_adapter_context_metadata_signals_json(
+    metadata_json: String,
+) -> napi::Result<String> {
+    let metadata: Value = serde_json::from_str(&metadata_json)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to parse metadata JSON: {}", e)))?;
+    let output = resolve_adapter_context_metadata_signals(&metadata);
+    serde_json::to_string(&output).map_err(|e| {
+        napi::Error::from_reason(format!(
+            "Failed to serialize adapter context metadata signals: {}",
+            e
+        ))
+    })
+}
+
+#[napi_derive::napi]
+pub fn resolve_adapter_context_object_carriers_json(
+    metadata_json: String,
+) -> napi::Result<String> {
+    let metadata: Value = serde_json::from_str(&metadata_json)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to parse metadata JSON: {}", e)))?;
+    let output = resolve_adapter_context_object_carriers(&metadata);
+    serde_json::to_string(&output).map_err(|e| {
+        napi::Error::from_reason(format!(
+            "Failed to serialize adapter context object carriers: {}",
             e
         ))
     })
@@ -1060,6 +2644,17 @@ pub fn resolve_hub_shadow_compare_config_json(metadata_json: String) -> napi::Re
 }
 
 #[napi_derive::napi]
+pub fn resolve_apply_patch_tool_mode_from_env_json() -> napi::Result<String> {
+    let output = resolve_apply_patch_tool_mode_from_env();
+    serde_json::to_string(&output).map_err(|e| {
+        napi::Error::from_reason(format!(
+            "Failed to serialize apply patch tool mode from env: {}",
+            e
+        ))
+    })
+}
+
+#[napi_derive::napi]
 pub fn resolve_apply_patch_tool_mode_from_tools_json(tools_json: String) -> napi::Result<String> {
     let tools_raw: Value = serde_json::from_str(&tools_json)
         .map_err(|e| napi::Error::from_reason(format!("Failed to parse tools JSON: {}", e)))?;
@@ -1067,6 +2662,118 @@ pub fn resolve_apply_patch_tool_mode_from_tools_json(tools_json: String) -> napi
     serde_json::to_string(&output).map_err(|e| {
         napi::Error::from_reason(format!(
             "Failed to serialize apply patch tool mode from tools: {}",
+            e
+        ))
+    })
+}
+
+#[napi_derive::napi]
+pub fn is_search_route_id_json(route_id_json: String) -> napi::Result<String> {
+    let route_id: Value = serde_json::from_str(&route_id_json)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to parse routeId JSON: {}", e)))?;
+    let output = is_search_route_id(&route_id);
+    serde_json::to_string(&output)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to serialize search route id: {}", e)))
+}
+
+#[napi_derive::napi]
+pub fn is_canonical_web_search_tool_definition_json(tool_json: String) -> napi::Result<String> {
+    let tool: Value = serde_json::from_str(&tool_json)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to parse tool JSON: {}", e)))?;
+    let output = is_canonical_web_search_tool_definition(&tool);
+    serde_json::to_string(&output).map_err(|e| {
+        napi::Error::from_reason(format!(
+            "Failed to serialize canonical web search tool definition: {}",
+            e
+        ))
+    })
+}
+
+#[napi_derive::napi]
+pub fn apply_direct_builtin_web_search_tool_json(
+  provider_payload_json: String,
+  provider_protocol: String,
+  route_id_json: String,
+  runtime_metadata_json: String,
+) -> napi::Result<String> {
+    let provider_payload: Value = serde_json::from_str(&provider_payload_json).map_err(|e| {
+        napi::Error::from_reason(format!("Failed to parse provider payload JSON: {}", e))
+    })?;
+    let route_id: Value = serde_json::from_str(&route_id_json)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to parse route id JSON: {}", e)))?;
+    let runtime_metadata: Value = serde_json::from_str(&runtime_metadata_json).map_err(|e| {
+        napi::Error::from_reason(format!("Failed to parse runtime metadata JSON: {}", e))
+    })?;
+    let output = apply_direct_builtin_web_search_tool(
+        &provider_payload,
+        provider_protocol.trim(),
+        &route_id,
+        &runtime_metadata,
+    );
+    serde_json::to_string(&output).map_err(|e| {
+        napi::Error::from_reason(format!(
+            "Failed to serialize direct builtin web search tool payload: {}",
+            e
+        ))
+    })
+}
+
+#[napi_derive::napi]
+pub fn lift_responses_resume_into_semantics_json(
+    request_json: String,
+    metadata_json: String,
+) -> napi::Result<String> {
+    let request: Value = serde_json::from_str(&request_json)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to parse request JSON: {}", e)))?;
+    let metadata: Value = serde_json::from_str(&metadata_json)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to parse metadata JSON: {}", e)))?;
+    let output = lift_responses_resume_into_semantics(&request, &metadata);
+    serde_json::to_string(&output).map_err(|e| {
+        napi::Error::from_reason(format!(
+            "Failed to serialize lifted responses resume semantics: {}",
+            e
+        ))
+    })
+}
+
+#[napi_derive::napi]
+pub fn sync_responses_context_from_canonical_messages_json(
+    request_json: String,
+) -> napi::Result<String> {
+    let request: Value = serde_json::from_str(&request_json)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to parse request JSON: {}", e)))?;
+    let output = sync_responses_context_from_canonical_messages(&request);
+    serde_json::to_string(&output).map_err(|e| {
+        napi::Error::from_reason(format!(
+            "Failed to serialize synced responses context request: {}",
+            e
+        ))
+    })
+}
+
+#[napi_derive::napi]
+pub fn read_responses_resume_from_metadata_json(metadata_json: String) -> napi::Result<String> {
+    let metadata: Value = serde_json::from_str(&metadata_json)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to parse metadata JSON: {}", e)))?;
+    let output = read_responses_resume_from_metadata(&metadata).unwrap_or(Value::Null);
+    serde_json::to_string(&output).map_err(|e| {
+        napi::Error::from_reason(format!(
+            "Failed to serialize responses resume from metadata: {}",
+            e
+        ))
+    })
+}
+
+#[napi_derive::napi]
+pub fn read_responses_resume_from_request_semantics_json(
+    request_json: String,
+) -> napi::Result<String> {
+    let request: Value = serde_json::from_str(&request_json)
+        .map_err(|e| napi::Error::from_reason(format!("Failed to parse request JSON: {}", e)))?;
+    let output = read_responses_resume_from_request_semantics(&request).unwrap_or(Value::Null);
+    serde_json::to_string(&output).map_err(|e| {
+        napi::Error::from_reason(format!(
+            "Failed to serialize responses resume from request semantics: {}",
             e
         ))
     })
@@ -1277,6 +2984,131 @@ mod tests {
     }
 
     #[test]
+    fn test_run_hub_pipeline_sets_orchestration_metadata_fields() {
+        let input = HubPipelineInput {
+            request_id: "req_orchestration".to_string(),
+            endpoint: "v1/chat/completions".to_string(),
+            entry_endpoint: "/v1/chat/completions".to_string(),
+            provider_protocol: "chat".to_string(),
+            payload: json!({
+                "model": "gpt-4",
+                "messages": [{
+                    "role": "user",
+                    "content": "<**sticky:tabglm.key1.glm-5:passthrough**>"
+                }],
+                "stream": true
+            }),
+            metadata: json!({
+                "routeHint": "  tools  "
+            }),
+            stream: false,
+            process_mode: "chat".to_string(),
+            direction: "request".to_string(),
+            stage: "inbound".to_string(),
+        };
+
+        let result = run_hub_pipeline(input).expect("hub pipeline");
+        let metadata = result
+            .metadata
+            .and_then(|v| v.as_object().cloned())
+            .expect("metadata object");
+
+        assert_eq!(
+            metadata.get("entryEndpoint").and_then(|v| v.as_str()),
+            Some("/v1/chat/completions")
+        );
+        assert_eq!(
+            metadata.get("providerProtocol").and_then(|v| v.as_str()),
+            Some("openai-chat")
+        );
+        assert_eq!(
+            metadata.get("processMode").and_then(|v| v.as_str()),
+            Some("passthrough")
+        );
+        assert_eq!(
+            metadata.get("direction").and_then(|v| v.as_str()),
+            Some("request")
+        );
+        assert_eq!(
+            metadata.get("stage").and_then(|v| v.as_str()),
+            Some("inbound")
+        );
+        assert_eq!(metadata.get("stream").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(
+            metadata.get("routeHint").and_then(|v| v.as_str()),
+            Some("tools")
+        );
+    }
+
+    #[test]
+    fn test_run_hub_pipeline_extracts_apply_patch_mode_from_tools() {
+        let input = HubPipelineInput {
+            request_id: "req_apply_patch".to_string(),
+            endpoint: "/v1/chat/completions".to_string(),
+            entry_endpoint: "/v1/chat/completions".to_string(),
+            provider_protocol: "openai-chat".to_string(),
+            payload: json!({
+                "model": "gpt-4",
+                "messages": [{"role": "user", "content": "hi"}],
+                "tools": [{
+                    "type": "function",
+                    "function": {
+                        "name": "apply_patch",
+                        "format": "freeform"
+                    }
+                }]
+            }),
+            metadata: json!({}),
+            stream: false,
+            process_mode: "chat".to_string(),
+            direction: "request".to_string(),
+            stage: "inbound".to_string(),
+        };
+        let result = run_hub_pipeline(input).expect("hub pipeline");
+        let metadata = result.metadata.expect("metadata value");
+        assert_eq!(
+            metadata
+                .get("runtime")
+                .and_then(|v| v.get("applyPatchToolMode"))
+                .and_then(|v| v.as_str()),
+            Some("freeform")
+        );
+    }
+
+    #[test]
+    fn test_run_hub_pipeline_merges_stop_message_tmux_aliases() {
+        let input = HubPipelineInput {
+            request_id: "req_stop_msg".to_string(),
+            endpoint: "/v1/chat/completions".to_string(),
+            entry_endpoint: "/v1/chat/completions".to_string(),
+            provider_protocol: "openai-chat".to_string(),
+            payload: json!({
+                "model": "gpt-4",
+                "messages": [{"role": "user", "content": "hello"}]
+            }),
+            metadata: json!({
+                "client_tmux_session_id": "tmux-session-123"
+            }),
+            stream: false,
+            process_mode: "chat".to_string(),
+            direction: "request".to_string(),
+            stage: "inbound".to_string(),
+        };
+        let result = run_hub_pipeline(input).expect("hub pipeline");
+        let metadata = result.metadata.expect("metadata value");
+        assert_eq!(
+            metadata
+                .get("clientTmuxSessionId")
+                .and_then(|v| v.as_str()),
+            Some("tmux-session-123")
+        );
+        assert_eq!(
+            metadata.get("tmuxSessionId").and_then(|v| v.as_str()),
+            Some("tmux-session-123")
+        );
+    }
+
+    #[test]
     fn test_protocol_resolution_aliases() {
         let test_cases = vec![
             ("openai", "openai-chat"),
@@ -1317,6 +3149,57 @@ mod tests {
             resolve_hub_client_protocol("/v1/chat/completions"),
             "openai-chat"
         );
+    }
+
+    #[test]
+    fn test_extract_model_hint_from_metadata_prefers_top_level_model() {
+        let metadata = json!({
+            "model": "  gpt-4.1  ",
+            "provider": {
+                "model": "provider-model"
+            }
+        });
+        let output = extract_model_hint_from_metadata(&metadata);
+        assert_eq!(output.as_deref(), Some("gpt-4.1"));
+    }
+
+    #[test]
+    fn test_extract_model_hint_from_metadata_falls_back_to_provider_keys() {
+        let metadata = json!({
+            "provider": {
+                "modelId": "  claude-3-7-sonnet  "
+            }
+        });
+        let output = extract_model_hint_from_metadata(&metadata);
+        assert_eq!(output.as_deref(), Some("claude-3-7-sonnet"));
+    }
+
+    #[test]
+    fn test_extract_model_hint_from_metadata_ignores_blank_values() {
+        let metadata = json!({
+            "model": "   ",
+            "provider": {
+                "defaultModel": "   "
+            }
+        });
+        let output = extract_model_hint_from_metadata(&metadata);
+        assert!(output.is_none());
+    }
+
+    #[test]
+    fn test_resolve_sse_protocol_prefers_explicit_metadata() {
+        let metadata = json!({
+            "sseProtocol": "anthropic"
+        });
+        let output = resolve_sse_protocol(&metadata, "openai-responses");
+        assert_eq!(output, "anthropic-messages");
+    }
+
+    #[test]
+    fn test_resolve_sse_protocol_uses_provider_protocol() {
+        let metadata = json!({});
+        let output = resolve_sse_protocol(&metadata, "openai-responses");
+        assert_eq!(output, "openai-responses");
     }
 
     #[test]
@@ -1503,6 +3386,808 @@ mod tests {
     }
 
     #[test]
+    fn test_resolve_router_metadata_runtime_flags_extracts_values() {
+        let metadata = json!({
+            "__rt": {
+                "disableStickyRoutes": true
+            },
+            "estimatedInputTokens": 1234
+        });
+        let output = resolve_router_metadata_runtime_flags(&metadata);
+        let row = output.as_object().expect("object output");
+        assert_eq!(
+            row.get("disableStickyRoutes").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            row.get("estimatedInputTokens").and_then(|v| v.as_f64()),
+            Some(1234.0)
+        );
+    }
+
+    #[test]
+    fn test_resolve_router_metadata_runtime_flags_ignores_false_or_non_numeric() {
+        let metadata = json!({
+            "__rt": {
+                "disableStickyRoutes": false
+            },
+            "estimatedInputTokens": "1234"
+        });
+        let output = resolve_router_metadata_runtime_flags(&metadata);
+        let row = output.as_object().expect("object output");
+        assert!(!row.contains_key("disableStickyRoutes"));
+        assert!(!row.contains_key("estimatedInputTokens"));
+    }
+
+    #[test]
+    fn test_build_router_metadata_input_extracts_runtime_flags_and_stop_message_fields() {
+        let input = json!({
+            "requestId": "req-1",
+            "entryEndpoint": "/v1/responses",
+            "processMode": "passthrough",
+            "stream": true,
+            "direction": "request",
+            "providerProtocol": "openai-responses",
+            "routeHint": "tools",
+            "stage": "inbound",
+            "responsesResume": { "response_id": "resp_123" },
+            "serverToolRequired": true,
+            "sessionId": "sess-1",
+            "conversationId": "conv-1",
+            "includeEstimatedInputTokens": true,
+            "metadata": {
+                "__rt": { "disableStickyRoutes": true },
+                "estimatedInputTokens": 88,
+                "stopMessageClientInjectScope": " tmux:abc "
+            }
+        });
+        let output = build_router_metadata_input(&input).expect("router metadata input");
+        let row = output.as_object().expect("output object");
+        assert_eq!(row.get("requestId").and_then(|v| v.as_str()), Some("req-1"));
+        assert_eq!(
+            row.get("providerProtocol").and_then(|v| v.as_str()),
+            Some("openai-responses")
+        );
+        assert_eq!(
+            row.get("responsesResume")
+                .and_then(|v| v.as_object())
+                .and_then(|obj| obj.get("response_id"))
+                .and_then(|v| v.as_str()),
+            Some("resp_123")
+        );
+        assert_eq!(
+            row.get("stopMessageClientInjectScope")
+                .and_then(|v| v.as_str()),
+            Some("tmux:abc")
+        );
+        assert_eq!(
+            row.get("disableStickyRoutes").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            row.get("estimatedInputTokens").and_then(|v| v.as_f64()),
+            Some(88.0)
+        );
+    }
+
+    #[test]
+    fn test_build_router_metadata_input_hides_estimated_tokens_when_not_requested() {
+        let input = json!({
+            "requestId": "req-2",
+            "metadata": {
+                "__rt": { "disableStickyRoutes": true },
+                "estimatedInputTokens": 123
+            }
+        });
+        let output = build_router_metadata_input(&input).expect("router metadata input");
+        let row = output.as_object().expect("output object");
+        assert_eq!(
+            row.get("disableStickyRoutes").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        assert!(!row.contains_key("estimatedInputTokens"));
+    }
+
+    #[test]
+    fn test_build_hub_pipeline_result_metadata_applies_shadow_compare() {
+        let input = json!({
+            "normalized": {
+                "metadata": { "existing": true },
+                "entryEndpoint": "/v1/responses",
+                "stream": true,
+                "processMode": "passthrough",
+                "routeHint": "tools"
+            },
+            "outboundProtocol": "anthropic-messages",
+            "target": { "providerKey": "tab.key1.glm-5" },
+            "outboundStream": false,
+            "capturedChatRequest": { "model": "glm-5" },
+            "passthroughAudit": { "mode": "passthrough" },
+            "shadowCompareBaselineMode": "observe",
+            "effectivePolicy": { "mode": "enforce" },
+            "shadowBaselineProviderPayload": { "messages": [] }
+        });
+        let output =
+            build_hub_pipeline_result_metadata(&input).expect("hub pipeline result metadata");
+        let row = output.as_object().expect("output object");
+        assert_eq!(row.get("existing").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(
+            row.get("providerProtocol").and_then(|v| v.as_str()),
+            Some("anthropic-messages")
+        );
+        assert_eq!(row.get("providerStream").and_then(|v| v.as_bool()), Some(false));
+        assert_eq!(
+            row.get("passthroughAudit")
+                .and_then(|v| v.as_object())
+                .and_then(|obj| obj.get("mode"))
+                .and_then(|v| v.as_str()),
+            Some("passthrough")
+        );
+        assert_eq!(
+            row.get("hubShadowCompare")
+                .and_then(|v| v.as_object())
+                .and_then(|obj| obj.get("baselineMode"))
+                .and_then(|v| v.as_str()),
+            Some("observe")
+        );
+        assert_eq!(
+            row.get("hubShadowCompare")
+                .and_then(|v| v.as_object())
+                .and_then(|obj| obj.get("candidateMode"))
+                .and_then(|v| v.as_str()),
+            Some("enforce")
+        );
+    }
+
+    #[test]
+    fn test_build_hub_pipeline_result_metadata_defaults_candidate_mode_off() {
+        let input = json!({
+            "normalized": {
+                "metadata": {},
+                "entryEndpoint": "/v1/chat/completions",
+                "stream": false,
+                "processMode": "chat"
+            },
+            "outboundProtocol": "openai-chat",
+            "capturedChatRequest": { "messages": [] },
+            "shadowCompareBaselineMode": "bad-mode",
+            "effectivePolicy": { "mode": "bad-mode" },
+            "shadowBaselineProviderPayload": { "x": 1 }
+        });
+        let output =
+            build_hub_pipeline_result_metadata(&input).expect("hub pipeline result metadata");
+        let row = output.as_object().expect("output object");
+        assert_eq!(
+            row.get("hubShadowCompare")
+                .and_then(|v| v.as_object())
+                .and_then(|obj| obj.get("baselineMode"))
+                .and_then(|v| v.as_str()),
+            Some("off")
+        );
+        assert_eq!(
+            row.get("hubShadowCompare")
+                .and_then(|v| v.as_object())
+                .and_then(|obj| obj.get("candidateMode"))
+                .and_then(|v| v.as_str()),
+            Some("off")
+        );
+    }
+
+    #[test]
+    fn test_build_req_outbound_node_result_builds_expected_shape() {
+        let input = json!({
+            "outboundStart": 1000,
+            "outboundEnd": 1255,
+            "messages": 7,
+            "tools": 2
+        });
+        let output = build_req_outbound_node_result(&input).expect("req outbound node result");
+        let row = output.as_object().expect("output object");
+        assert_eq!(row.get("id").and_then(|v| v.as_str()), Some("req_outbound"));
+        assert_eq!(row.get("success").and_then(|v| v.as_bool()), Some(true));
+        let metadata = row
+            .get("metadata")
+            .and_then(|v| v.as_object())
+            .expect("metadata object");
+        assert_eq!(metadata.get("node").and_then(|v| v.as_str()), Some("req_outbound"));
+        assert_eq!(
+            metadata.get("executionTime").and_then(|v| v.as_i64()),
+            Some(255)
+        );
+        assert_eq!(metadata.get("startTime").and_then(|v| v.as_i64()), Some(1000));
+        assert_eq!(metadata.get("endTime").and_then(|v| v.as_i64()), Some(1255));
+        assert_eq!(
+            metadata
+                .get("dataProcessed")
+                .and_then(|v| v.as_object())
+                .and_then(|obj| obj.get("messages"))
+                .and_then(|v| v.as_i64()),
+            Some(7)
+        );
+        assert_eq!(
+            metadata
+                .get("dataProcessed")
+                .and_then(|v| v.as_object())
+                .and_then(|obj| obj.get("tools"))
+                .and_then(|v| v.as_i64()),
+            Some(2)
+        );
+    }
+
+    #[test]
+    fn test_build_req_outbound_node_result_defaults_counts_to_zero() {
+        let input = json!({
+            "outboundStart": 10,
+            "outboundEnd": 12
+        });
+        let output = build_req_outbound_node_result(&input).expect("req outbound node result");
+        let metadata = output
+            .as_object()
+            .and_then(|v| v.get("metadata"))
+            .and_then(|v| v.as_object())
+            .expect("metadata object");
+        assert_eq!(
+            metadata
+                .get("dataProcessed")
+                .and_then(|v| v.as_object())
+                .and_then(|obj| obj.get("messages"))
+                .and_then(|v| v.as_i64()),
+            Some(0)
+        );
+        assert_eq!(
+            metadata
+                .get("dataProcessed")
+                .and_then(|v| v.as_object())
+                .and_then(|obj| obj.get("tools"))
+                .and_then(|v| v.as_i64()),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn test_build_req_inbound_node_result_builds_expected_shape() {
+        let input = json!({
+            "inboundStart": 100,
+            "inboundEnd": 180,
+            "messages": 3,
+            "tools": 1
+        });
+        let output = build_req_inbound_node_result(&input).expect("req inbound node result");
+        let row = output.as_object().expect("output object");
+        assert_eq!(row.get("id").and_then(|v| v.as_str()), Some("req_inbound"));
+        assert_eq!(row.get("success").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(
+            row.get("metadata")
+                .and_then(|v| v.as_object())
+                .and_then(|v| v.get("executionTime"))
+                .and_then(|v| v.as_i64()),
+            Some(80)
+        );
+        assert_eq!(
+            row.get("metadata")
+                .and_then(|v| v.as_object())
+                .and_then(|v| v.get("dataProcessed"))
+                .and_then(|v| v.as_object())
+                .and_then(|v| v.get("messages"))
+                .and_then(|v| v.as_i64()),
+            Some(3)
+        );
+        assert_eq!(
+            row.get("metadata")
+                .and_then(|v| v.as_object())
+                .and_then(|v| v.get("dataProcessed"))
+                .and_then(|v| v.as_object())
+                .and_then(|v| v.get("tools"))
+                .and_then(|v| v.as_i64()),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn test_build_req_inbound_skipped_node_defaults_reason() {
+        let input = json!({});
+        let output = build_req_inbound_skipped_node(&input).expect("req inbound skipped node");
+        let row = output.as_object().expect("output object");
+        assert_eq!(row.get("id").and_then(|v| v.as_str()), Some("req_inbound"));
+        assert_eq!(row.get("success").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(
+            row.get("metadata")
+                .and_then(|v| v.as_object())
+                .and_then(|v| v.get("skipped"))
+                .and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            row.get("metadata")
+                .and_then(|v| v.as_object())
+                .and_then(|v| v.get("reason"))
+                .and_then(|v| v.as_str()),
+            Some("stage=outbound")
+        );
+        assert_eq!(
+            row.get("metadata")
+                .and_then(|v| v.as_object())
+                .and_then(|v| v.get("dataProcessed"))
+                .and_then(|v| v.as_object())
+                .map(|v| v.len()),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn test_build_captured_chat_request_snapshot_preserves_shape() {
+        let input = json!({
+            "model": "glm-5",
+            "messages": [{ "role": "user", "content": "hi" }],
+            "tools": [{ "type": "function", "function": { "name": "x" } }],
+            "parameters": { "temperature": 0.2 }
+        });
+        let output =
+            build_captured_chat_request_snapshot(&input).expect("captured chat request snapshot");
+        let row = output.as_object().expect("output object");
+        assert_eq!(row.get("model").and_then(|v| v.as_str()), Some("glm-5"));
+        assert_eq!(
+            row.get("messages")
+                .and_then(|v| v.as_array())
+                .map(|v| v.len()),
+            Some(1)
+        );
+        assert_eq!(
+            row.get("tools").and_then(|v| v.as_array()).map(|v| v.len()),
+            Some(1)
+        );
+        assert_eq!(
+            row.get("parameters")
+                .and_then(|v| v.as_object())
+                .and_then(|v| v.get("temperature"))
+                .and_then(|v| v.as_f64()),
+            Some(0.2)
+        );
+    }
+
+    #[test]
+    fn test_build_captured_chat_request_snapshot_fills_nulls_for_missing_optional_fields() {
+        let input = json!({
+            "model": "glm-5",
+            "messages": []
+        });
+        let output =
+            build_captured_chat_request_snapshot(&input).expect("captured chat request snapshot");
+        let row = output.as_object().expect("output object");
+        assert!(row.get("tools").is_some_and(Value::is_null));
+        assert!(row.get("parameters").is_some_and(Value::is_null));
+    }
+
+    #[test]
+    fn test_coerce_standardized_request_from_payload_builds_expected_shape() {
+        let input = json!({
+            "payload": {
+                "model": "  glm-5  ",
+                "messages": [{ "role": "user", "content": "hi" }],
+                "tools": [{ "type": "function", "function": { "name": "apply_patch" } }],
+                "parameters": { "temperature": 0.2 },
+                "metadata": { "requestId": "stale-id", "x": 1 },
+                "semantics": { "tools": { "existing": true } }
+            },
+            "normalized": {
+                "id": "req-123",
+                "entryEndpoint": "/v1/responses",
+                "stream": true,
+                "processMode": "passthrough",
+                "routeHint": "tools"
+            }
+        });
+        let output = coerce_standardized_request_from_payload(&input)
+            .expect("coerce standardized request output");
+        let row = output.as_object().expect("output object");
+        let standardized = row
+            .get("standardizedRequest")
+            .and_then(|v| v.as_object())
+            .expect("standardizedRequest object");
+        let raw_payload = row
+            .get("rawPayload")
+            .and_then(|v| v.as_object())
+            .expect("rawPayload object");
+
+        assert_eq!(
+            standardized.get("model").and_then(|v| v.as_str()),
+            Some("glm-5")
+        );
+        assert_eq!(
+            standardized
+                .get("metadata")
+                .and_then(|v| v.as_object())
+                .and_then(|v| v.get("requestId"))
+                .and_then(|v| v.as_str()),
+            Some("req-123")
+        );
+        assert_eq!(
+            standardized
+                .get("metadata")
+                .and_then(|v| v.as_object())
+                .and_then(|v| v.get("originalEndpoint"))
+                .and_then(|v| v.as_str()),
+            Some("/v1/responses")
+        );
+        assert_eq!(
+            standardized
+                .get("metadata")
+                .and_then(|v| v.as_object())
+                .and_then(|v| v.get("routeHint"))
+                .and_then(|v| v.as_str()),
+            Some("tools")
+        );
+        assert_eq!(
+            standardized
+                .get("semantics")
+                .and_then(|v| v.as_object())
+                .and_then(|v| v.get("tools"))
+                .and_then(|v| v.as_object())
+                .and_then(|v| v.get("existing"))
+                .and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            standardized
+                .get("semantics")
+                .and_then(|v| v.as_object())
+                .and_then(|v| v.get("tools"))
+                .and_then(|v| v.as_object())
+                .and_then(|v| v.get("clientToolsRaw"))
+                .and_then(|v| v.as_array())
+                .map(|v| v.len()),
+            Some(1)
+        );
+        assert_eq!(
+            raw_payload
+                .get("parameters")
+                .and_then(|v| v.as_object())
+                .and_then(|v| v.get("temperature"))
+                .and_then(|v| v.as_f64()),
+            Some(0.2)
+        );
+    }
+
+    #[test]
+    fn test_coerce_standardized_request_from_payload_defaults_semantics_tools_and_raw_parameters() {
+        let input = json!({
+            "payload": {
+                "model": "glm-5",
+                "messages": [],
+                "parameters": [],
+                "semantics": { "tools": "invalid" }
+            },
+            "normalized": {
+                "id": "req-2",
+                "entryEndpoint": "/v1/chat/completions",
+                "stream": false,
+                "processMode": "chat"
+            }
+        });
+        let output = coerce_standardized_request_from_payload(&input)
+            .expect("coerce standardized request output");
+        let row = output.as_object().expect("output object");
+        let standardized = row
+            .get("standardizedRequest")
+            .and_then(|v| v.as_object())
+            .expect("standardizedRequest object");
+        let raw_payload = row
+            .get("rawPayload")
+            .and_then(|v| v.as_object())
+            .expect("rawPayload object");
+
+        assert_eq!(
+            standardized
+                .get("parameters")
+                .and_then(|v| v.as_object())
+                .map(|v| v.len()),
+            Some(0)
+        );
+        assert_eq!(
+            standardized
+                .get("semantics")
+                .and_then(|v| v.as_object())
+                .and_then(|v| v.get("tools"))
+                .and_then(|v| v.as_object())
+                .map(|v| v.len()),
+            Some(0)
+        );
+        assert!(!raw_payload.contains_key("parameters"));
+    }
+
+    #[test]
+    fn test_prepare_runtime_metadata_for_servertools_injects_runtime_configs() {
+        let input = json!({
+            "metadata": {
+                "requestId": "req-1",
+                "__rt": { "existing": true }
+            },
+            "webSearchConfig": { "enabled": true },
+            "execCommandGuard": { "mode": "strict" },
+            "clockConfig": { "tickMs": 60000 }
+        });
+        let output = prepare_runtime_metadata_for_servertools(&input)
+            .expect("prepare runtime metadata for servertools");
+        let row = output.as_object().expect("output object");
+        assert_eq!(row.get("requestId").and_then(|v| v.as_str()), Some("req-1"));
+        let rt = row
+            .get("__rt")
+            .and_then(|v| v.as_object())
+            .expect("__rt object");
+        assert_eq!(rt.get("existing").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(
+            rt.get("webSearch")
+                .and_then(|v| v.as_object())
+                .and_then(|v| v.get("enabled"))
+                .and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            rt.get("execCommandGuard")
+                .and_then(|v| v.as_object())
+                .and_then(|v| v.get("mode"))
+                .and_then(|v| v.as_str()),
+            Some("strict")
+        );
+        assert_eq!(
+            rt.get("clock")
+                .and_then(|v| v.as_object())
+                .and_then(|v| v.get("tickMs"))
+                .and_then(|v| v.as_i64()),
+            Some(60000)
+        );
+    }
+
+    #[test]
+    fn test_prepare_runtime_metadata_for_servertools_normalizes_missing_or_invalid_rt() {
+        let input = json!({
+            "metadata": {
+                "foo": "bar",
+                "__rt": "invalid"
+            },
+            "webSearchConfig": null,
+            "clockConfig": 1
+        });
+        let output = prepare_runtime_metadata_for_servertools(&input)
+            .expect("prepare runtime metadata for servertools");
+        let row = output.as_object().expect("output object");
+        assert_eq!(row.get("foo").and_then(|v| v.as_str()), Some("bar"));
+        let rt = row
+            .get("__rt")
+            .and_then(|v| v.as_object())
+            .expect("__rt object");
+        assert!(!rt.contains_key("webSearch"));
+        assert!(!rt.contains_key("clock"));
+    }
+
+    #[test]
+    fn test_apply_has_image_attachment_flag_adds_and_removes_flag() {
+        let add_input = json!({
+            "metadata": { "requestId": "req-1" },
+            "hasImageAttachment": true
+        });
+        let add_output = apply_has_image_attachment_flag(&add_input)
+            .expect("apply has-image-attachment flag");
+        let add_row = add_output.as_object().expect("object output");
+        assert_eq!(
+            add_row.get("hasImageAttachment").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+
+        let remove_input = json!({
+            "metadata": {
+                "requestId": "req-1",
+                "hasImageAttachment": true
+            },
+            "hasImageAttachment": false
+        });
+        let remove_output = apply_has_image_attachment_flag(&remove_input)
+            .expect("apply has-image-attachment flag");
+        let remove_row = remove_output.as_object().expect("object output");
+        assert!(!remove_row.contains_key("hasImageAttachment"));
+        assert_eq!(
+            remove_row.get("requestId").and_then(|v| v.as_str()),
+            Some("req-1")
+        );
+    }
+
+    #[test]
+    fn test_apply_has_image_attachment_flag_normalizes_invalid_metadata() {
+        let input = json!({
+            "metadata": "invalid",
+            "hasImageAttachment": true
+        });
+        let output = apply_has_image_attachment_flag(&input)
+            .expect("apply has-image-attachment flag");
+        let row = output.as_object().expect("object output");
+        assert_eq!(
+            row.get("hasImageAttachment").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn test_sync_session_identifiers_to_metadata_injects_trimmed_values() {
+        let input = json!({
+            "metadata": { "existing": true },
+            "sessionId": "  session-1  ",
+            "conversationId": " conv-1 "
+        });
+        let output = sync_session_identifiers_to_metadata(&input)
+            .expect("sync session identifiers to metadata");
+        let row = output.as_object().expect("object output");
+        assert_eq!(row.get("existing").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(row.get("sessionId").and_then(|v| v.as_str()), Some("session-1"));
+        assert_eq!(
+            row.get("conversationId").and_then(|v| v.as_str()),
+            Some("conv-1")
+        );
+    }
+
+    #[test]
+    fn test_sync_session_identifiers_to_metadata_ignores_blank_or_missing_values() {
+        let input = json!({
+            "metadata": {
+                "sessionId": "existing-session",
+                "conversationId": "existing-conv"
+            },
+            "sessionId": "   ",
+            "conversationId": null
+        });
+        let output = sync_session_identifiers_to_metadata(&input)
+            .expect("sync session identifiers to metadata");
+        let row = output.as_object().expect("object output");
+        assert_eq!(
+            row.get("sessionId").and_then(|v| v.as_str()),
+            Some("existing-session")
+        );
+        assert_eq!(
+            row.get("conversationId").and_then(|v| v.as_str()),
+            Some("existing-conv")
+        );
+    }
+
+    #[test]
+    fn test_merge_clock_reservation_into_metadata_merges_object_reservation() {
+        let input = json!({
+            "metadata": { "existing": true },
+            "processedRequest": {
+                "metadata": {
+                    "__clockReservation": {
+                        "reservationId": "r1",
+                        "taskIds": ["a", "b"]
+                    }
+                }
+            }
+        });
+        let output = merge_clock_reservation_into_metadata(&input)
+            .expect("merge clock reservation into metadata");
+        let row = output.as_object().expect("output object");
+        assert_eq!(row.get("existing").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(
+            row.get("__clockReservation")
+                .and_then(|v| v.as_object())
+                .and_then(|v| v.get("reservationId"))
+                .and_then(|v| v.as_str()),
+            Some("r1")
+        );
+    }
+
+    #[test]
+    fn test_merge_clock_reservation_into_metadata_ignores_non_object_reservation() {
+        let input = json!({
+            "metadata": { "existing": true },
+            "processedRequest": {
+                "metadata": {
+                    "__clockReservation": "invalid"
+                }
+            }
+        });
+        let output = merge_clock_reservation_into_metadata(&input)
+            .expect("merge clock reservation into metadata");
+        let row = output.as_object().expect("output object");
+        assert_eq!(row.get("existing").and_then(|v| v.as_bool()), Some(true));
+        assert!(!row.contains_key("__clockReservation"));
+    }
+
+    #[test]
+    fn test_build_tool_governance_node_result_builds_expected_shape() {
+        let input = json!({
+            "success": true,
+            "metadata": {
+                "node": "chat_process.req.stage4.tool_governance",
+                "foo": "bar"
+            },
+            "error": {
+                "message": "bad request",
+                "details": { "x": 1 }
+            }
+        });
+        let output =
+            build_tool_governance_node_result(&input).expect("build tool governance node result");
+        let row = output.as_object().expect("output object");
+        assert_eq!(
+            row.get("id").and_then(|v| v.as_str()),
+            Some("chat_process.req.stage4.tool_governance")
+        );
+        assert_eq!(row.get("success").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(
+            row.get("metadata")
+                .and_then(|v| v.as_object())
+                .and_then(|v| v.get("foo"))
+                .and_then(|v| v.as_str()),
+            Some("bar")
+        );
+        assert_eq!(
+            row.get("error")
+                .and_then(|v| v.as_object())
+                .and_then(|v| v.get("code"))
+                .and_then(|v| v.as_str()),
+            Some("hub_chat_process_error")
+        );
+        assert_eq!(
+            row.get("error")
+                .and_then(|v| v.as_object())
+                .and_then(|v| v.get("message"))
+                .and_then(|v| v.as_str()),
+            Some("bad request")
+        );
+        assert_eq!(
+            row.get("error")
+                .and_then(|v| v.as_object())
+                .and_then(|v| v.get("details"))
+                .and_then(|v| v.as_object())
+                .and_then(|v| v.get("x"))
+                .and_then(|v| v.as_i64()),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn test_build_tool_governance_node_result_coerces_invalid_metadata_to_object() {
+        let input = json!({
+            "success": false,
+            "metadata": "invalid"
+        });
+        let output =
+            build_tool_governance_node_result(&input).expect("build tool governance node result");
+        let row = output.as_object().expect("output object");
+        assert_eq!(row.get("success").and_then(|v| v.as_bool()), Some(false));
+        assert_eq!(
+            row.get("metadata")
+                .and_then(|v| v.as_object())
+                .map(|v| v.len()),
+            Some(0)
+        );
+        assert!(!row.contains_key("error"));
+    }
+
+    #[test]
+    fn test_build_passthrough_governance_skipped_node_shape() {
+        let output = build_passthrough_governance_skipped_node();
+        let row = output.as_object().expect("output object");
+        assert_eq!(
+            row.get("id").and_then(|v| v.as_str()),
+            Some("chat_process.req.stage4.tool_governance")
+        );
+        assert_eq!(row.get("success").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(
+            row.get("metadata")
+                .and_then(|v| v.as_object())
+                .and_then(|v| v.get("skipped"))
+                .and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            row.get("metadata")
+                .and_then(|v| v.as_object())
+                .and_then(|v| v.get("reason"))
+                .and_then(|v| v.as_str()),
+            Some("process_mode_passthrough_parse_record_only")
+        );
+    }
+
+    #[test]
     fn test_extract_adapter_context_metadata_fields_trims_strings_and_keeps_booleans() {
         let metadata = json!({
             "clockDaemonId": "  daemon-1 ",
@@ -1529,6 +4214,171 @@ mod tests {
         );
         assert!(!row.contains_key("workdir"));
         assert!(!row.contains_key("missing"));
+    }
+
+    #[test]
+    fn test_resolve_adapter_context_metadata_signals_extracts_expected_fields() {
+        let metadata = json!({
+            "clientRequestId": " req-1 ",
+            "groupRequestId": " group-1 ",
+            "originalModelId": "",
+            "clientModelId": "client-model",
+            "assignedModelId": "assigned-model",
+            "estimated_tokens": " 12.6 ",
+            "sessionId": " sid-1 ",
+            "conversationId": " cid-1 ",
+            "ignored": true
+        });
+        let output = resolve_adapter_context_metadata_signals(&metadata);
+        let row = output.as_object().expect("object output");
+        assert_eq!(row.get("clientRequestId").and_then(|v| v.as_str()), Some("req-1"));
+        assert_eq!(row.get("groupRequestId").and_then(|v| v.as_str()), Some("group-1"));
+        assert_eq!(row.get("originalModelId").and_then(|v| v.as_str()), Some(""));
+        assert_eq!(
+            row.get("clientModelId").and_then(|v| v.as_str()),
+            Some("client-model")
+        );
+        assert_eq!(
+            row.get("modelId").and_then(|v| v.as_str()),
+            Some("assigned-model")
+        );
+        assert_eq!(
+            row.get("estimatedInputTokens").and_then(|v| v.as_f64()),
+            Some(13.0)
+        );
+        assert_eq!(row.get("sessionId").and_then(|v| v.as_str()), Some("sid-1"));
+        assert_eq!(
+            row.get("conversationId").and_then(|v| v.as_str()),
+            Some("cid-1")
+        );
+        assert!(!row.contains_key("ignored"));
+    }
+
+    #[test]
+    fn test_resolve_adapter_context_metadata_signals_omits_invalid_entries() {
+        let metadata = json!({
+            "clientRequestId": "   ",
+            "groupRequestId": 123,
+            "estimatedInputTokens": 0,
+            "sessionId": "\t",
+            "conversationId": null,
+            "assignedModelId": ["bad"]
+        });
+        let output = resolve_adapter_context_metadata_signals(&metadata);
+        let row = output.as_object().expect("object output");
+        assert!(!row.contains_key("clientRequestId"));
+        assert!(!row.contains_key("groupRequestId"));
+        assert!(!row.contains_key("estimatedInputTokens"));
+        assert!(!row.contains_key("sessionId"));
+        assert!(!row.contains_key("conversationId"));
+        assert!(!row.contains_key("modelId"));
+    }
+
+    #[test]
+    fn test_resolve_adapter_context_object_carriers_keeps_object_values() {
+        let metadata = json!({
+            "runtime": {
+                "clock": { "enabled": true }
+            },
+            "capturedChatRequest": {
+                "model": "gpt-5",
+                "messages": []
+            },
+            "clientConnectionState": {
+                "disconnected": false
+            }
+        });
+        let output = resolve_adapter_context_object_carriers(&metadata);
+        let row = output.as_object().expect("object output");
+        assert!(row.get("runtime").and_then(|v| v.as_object()).is_some());
+        assert!(
+            row.get("capturedChatRequest")
+                .and_then(|v| v.as_object())
+                .is_some()
+        );
+        assert!(
+            row.get("clientConnectionState")
+                .and_then(|v| v.as_object())
+                .is_some()
+        );
+        assert_eq!(
+            row.get("clientDisconnected").and_then(|v| v.as_bool()),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn test_resolve_adapter_context_object_carriers_omits_non_objects() {
+        let metadata = json!({
+            "runtime": [],
+            "capturedChatRequest": "bad",
+            "clientConnectionState": true
+        });
+        let output = resolve_adapter_context_object_carriers(&metadata);
+        let row = output.as_object().expect("object output");
+        assert!(!row.contains_key("runtime"));
+        assert!(!row.contains_key("capturedChatRequest"));
+        assert!(!row.contains_key("clientConnectionState"));
+    }
+
+    #[test]
+    fn test_resolve_adapter_context_object_carriers_merges_client_disconnected_signal() {
+        let metadata = json!({
+            "clientConnectionState": {
+                "disconnected": false
+            },
+            "clientDisconnected": " true "
+        });
+        let output = resolve_adapter_context_object_carriers(&metadata);
+        let row = output.as_object().expect("object output");
+        assert_eq!(
+            row.get("clientDisconnected").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn test_resolve_adapter_context_client_connection_state_prefers_explicit_true() {
+        let metadata = json!({
+            "clientConnectionState": {
+                "disconnected": false
+            },
+            "clientDisconnected": " true "
+        });
+        let output = resolve_adapter_context_client_connection_state(&metadata);
+        let row = output.as_object().expect("object output");
+        assert_eq!(
+            row.get("clientDisconnected").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn test_resolve_adapter_context_client_connection_state_reads_state_flag() {
+        let metadata = json!({
+            "clientConnectionState": {
+                "disconnected": false
+            }
+        });
+        let output = resolve_adapter_context_client_connection_state(&metadata);
+        let row = output.as_object().expect("object output");
+        assert_eq!(
+            row.get("clientDisconnected").and_then(|v| v.as_bool()),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn test_resolve_adapter_context_client_connection_state_omits_when_unavailable() {
+        let metadata = json!({
+            "clientConnectionState": {
+                "disconnected": "unknown"
+            },
+            "clientDisconnected": false
+        });
+        let output = resolve_adapter_context_client_connection_state(&metadata);
+        let row = output.as_object().expect("object output");
+        assert!(!row.contains_key("clientDisconnected"));
     }
 
     #[test]
@@ -1616,6 +4466,388 @@ mod tests {
         ]);
         let mode = resolve_apply_patch_tool_mode_from_tools(&tools);
         assert!(mode.is_none());
+    }
+
+    #[test]
+    fn test_is_search_route_id_true_for_web_search_prefix() {
+        let route_id = json!(" web_search_tools ");
+        assert!(is_search_route_id(&route_id));
+    }
+
+    #[test]
+    fn test_is_search_route_id_false_for_non_search_route() {
+        let route_id = json!("default");
+        assert!(!is_search_route_id(&route_id));
+    }
+
+    #[test]
+    fn test_is_canonical_web_search_tool_definition_true_for_builtin_type() {
+        let tool = json!({
+            "type": "web_search_20250305",
+            "name": "web_search"
+        });
+        assert!(is_canonical_web_search_tool_definition(&tool));
+    }
+
+    #[test]
+    fn test_is_canonical_web_search_tool_definition_true_for_function_alias() {
+        let tool = json!({
+            "type": "function",
+            "function": { "name": "web-search" }
+        });
+        assert!(is_canonical_web_search_tool_definition(&tool));
+    }
+
+    #[test]
+    fn test_is_canonical_web_search_tool_definition_false_for_non_search_tool() {
+        let tool = json!({
+            "type": "function",
+            "function": { "name": "exec_command" }
+        });
+        assert!(!is_canonical_web_search_tool_definition(&tool));
+    }
+
+    #[test]
+    fn test_apply_direct_builtin_web_search_tool_replaces_canonical_entry() {
+        let provider_payload = json!({
+            "model": "claude-3-7-sonnet",
+            "tools": [
+                {
+                    "type": "function",
+                    "function": { "name": "web_search" }
+                },
+                {
+                    "type": "function",
+                    "function": { "name": "exec_command" }
+                }
+            ]
+        });
+        let runtime_metadata = json!({
+            "webSearch": {
+                "engines": [
+                    {
+                        "executionMode": "direct",
+                        "directActivation": "builtin",
+                        "modelId": "claude-3-7-sonnet",
+                        "maxUses": "3"
+                    }
+                ]
+            }
+        });
+        let output = apply_direct_builtin_web_search_tool(
+            &provider_payload,
+            "anthropic-messages",
+            &json!("web_search.default"),
+            &runtime_metadata,
+        );
+        let tools = output
+            .get("tools")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(tools.len(), 2);
+        assert_eq!(
+            tools
+                .first()
+                .and_then(|v| v.get("type"))
+                .and_then(|v| v.as_str()),
+            Some("web_search_20250305")
+        );
+        assert_eq!(
+            tools
+                .first()
+                .and_then(|v| v.get("max_uses"))
+                .and_then(|v| v.as_i64()),
+            Some(3)
+        );
+        assert_eq!(
+            tools
+                .get(1)
+                .and_then(|v| v.get("function"))
+                .and_then(|v| v.get("name"))
+                .and_then(|v| v.as_str()),
+            Some("exec_command")
+        );
+    }
+
+    #[test]
+    fn test_apply_direct_builtin_web_search_tool_inserts_when_missing() {
+        let provider_payload = json!({
+            "model": "claude-3-7-sonnet",
+            "tools": [
+                {
+                    "type": "function",
+                    "function": { "name": "exec_command" }
+                }
+            ]
+        });
+        let runtime_metadata = json!({
+            "webSearch": {
+                "engines": [
+                    {
+                        "executionMode": "direct",
+                        "directActivation": "builtin",
+                        "providerKey": "tabglm.key1.claude-3-7-sonnet"
+                    }
+                ]
+            }
+        });
+        let output = apply_direct_builtin_web_search_tool(
+            &provider_payload,
+            "anthropic-messages",
+            &json!("search.route"),
+            &runtime_metadata,
+        );
+        let tools = output
+            .get("tools")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(tools.len(), 2);
+        assert_eq!(
+            tools
+                .first()
+                .and_then(|v| v.get("type"))
+                .and_then(|v| v.as_str()),
+            Some("web_search_20250305")
+        );
+        assert_eq!(
+            tools
+                .first()
+                .and_then(|v| v.get("max_uses"))
+                .and_then(|v| v.as_i64()),
+            Some(2)
+        );
+    }
+
+    #[test]
+    fn test_apply_direct_builtin_web_search_tool_noop_for_non_matching_engine() {
+        let provider_payload = json!({
+            "model": "claude-3-7-sonnet",
+            "tools": [
+                {
+                    "type": "function",
+                    "function": { "name": "exec_command" }
+                }
+            ]
+        });
+        let runtime_metadata = json!({
+            "webSearch": {
+                "engines": [
+                    {
+                        "executionMode": "proxy",
+                        "directActivation": "builtin",
+                        "modelId": "claude-3-7-sonnet"
+                    }
+                ]
+            }
+        });
+        let output = apply_direct_builtin_web_search_tool(
+            &provider_payload,
+            "anthropic-messages",
+            &json!("web_search.default"),
+            &runtime_metadata,
+        );
+        assert_eq!(output, provider_payload);
+    }
+
+    #[test]
+    fn test_lift_responses_resume_into_semantics_injects_when_missing_and_clears_metadata() {
+        let request = json!({
+            "messages": [],
+            "semantics": {}
+        });
+        let metadata = json!({
+            "responsesResume": {
+                "response_id": "resp_1"
+            },
+            "other": true
+        });
+        let output = lift_responses_resume_into_semantics(&request, &metadata);
+        assert_eq!(
+            output
+                .get("request")
+                .and_then(|v| v.get("semantics"))
+                .and_then(|v| v.get("responses"))
+                .and_then(|v| v.get("resume"))
+                .and_then(|v| v.get("response_id"))
+                .and_then(|v| v.as_str()),
+            Some("resp_1")
+        );
+        assert_eq!(
+            output
+                .get("metadata")
+                .and_then(|v| v.get("responsesResume"))
+                .is_some(),
+            false
+        );
+        assert_eq!(
+            output
+                .get("metadata")
+                .and_then(|v| v.get("other"))
+                .and_then(|v| v.as_bool()),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn test_lift_responses_resume_into_semantics_preserves_existing_resume() {
+        let request = json!({
+            "messages": [],
+            "semantics": {
+                "responses": {
+                    "resume": {
+                        "response_id": "existing"
+                    }
+                }
+            }
+        });
+        let metadata = json!({
+            "responsesResume": {
+                "response_id": "new"
+            }
+        });
+        let output = lift_responses_resume_into_semantics(&request, &metadata);
+        assert_eq!(
+            output
+                .get("request")
+                .and_then(|v| v.get("semantics"))
+                .and_then(|v| v.get("responses"))
+                .and_then(|v| v.get("resume"))
+                .and_then(|v| v.get("response_id"))
+                .and_then(|v| v.as_str()),
+            Some("existing")
+        );
+        assert_eq!(
+            output
+                .get("metadata")
+                .and_then(|v| v.get("responsesResume"))
+                .is_some(),
+            false
+        );
+    }
+
+    #[test]
+    fn test_sync_responses_context_from_canonical_messages_updates_context_fields() {
+        let request = json!({
+            "messages": [
+                { "role": "system", "content": "system keep" },
+                { "role": "user", "content": "hello" }
+            ],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": { "name": "exec_command", "parameters": { "type": "object" } }
+                }
+            ],
+            "semantics": {
+                "responses": {
+                    "context": {
+                        "existing": true
+                    }
+                }
+            }
+        });
+        let output = sync_responses_context_from_canonical_messages(&request);
+        assert_eq!(
+            output
+                .get("semantics")
+                .and_then(|v| v.get("responses"))
+                .and_then(|v| v.get("context"))
+                .and_then(|v| v.get("existing"))
+                .and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            output
+                .get("semantics")
+                .and_then(|v| v.get("responses"))
+                .and_then(|v| v.get("context"))
+                .and_then(|v| v.get("input"))
+                .and_then(|v| v.as_array())
+                .is_some(),
+            true
+        );
+        assert_eq!(
+            output
+                .get("semantics")
+                .and_then(|v| v.get("responses"))
+                .and_then(|v| v.get("context"))
+                .and_then(|v| v.get("originalSystemMessages"))
+                .and_then(|v| v.as_array())
+                .is_some(),
+            true
+        );
+    }
+
+    #[test]
+    fn test_sync_responses_context_from_canonical_messages_no_context_noop() {
+        let request = json!({
+            "messages": [{ "role": "user", "content": "hello" }],
+            "semantics": {
+                "responses": {}
+            }
+        });
+        let output = sync_responses_context_from_canonical_messages(&request);
+        assert_eq!(output, request);
+    }
+
+    #[test]
+    fn test_read_responses_resume_from_metadata_returns_object() {
+        let metadata = json!({
+            "responsesResume": {
+                "response_id": "resp_123",
+                "tool_outputs": [{"tool_call_id": "call_1", "output": "ok"}]
+            }
+        });
+        let output = read_responses_resume_from_metadata(&metadata).expect("resume object");
+        assert_eq!(
+            output.get("response_id").and_then(|v| v.as_str()),
+            Some("resp_123")
+        );
+    }
+
+    #[test]
+    fn test_read_responses_resume_from_metadata_ignores_non_object() {
+        let metadata = json!({
+            "responsesResume": "resp_123"
+        });
+        let output = read_responses_resume_from_metadata(&metadata);
+        assert!(output.is_none());
+    }
+
+    #[test]
+    fn test_read_responses_resume_from_request_semantics_returns_object() {
+        let request = json!({
+            "messages": [],
+            "semantics": {
+                "responses": {
+                    "resume": {
+                        "response_id": "resp_456"
+                    }
+                }
+            }
+        });
+        let output =
+            read_responses_resume_from_request_semantics(&request).expect("resume object");
+        assert_eq!(
+            output.get("response_id").and_then(|v| v.as_str()),
+            Some("resp_456")
+        );
+    }
+
+    #[test]
+    fn test_read_responses_resume_from_request_semantics_missing_returns_none() {
+        let request = json!({
+            "messages": [],
+            "semantics": {
+                "responses": {
+                    "resume": null
+                }
+            }
+        });
+        let output = read_responses_resume_from_request_semantics(&request);
+        assert!(output.is_none());
     }
 
     #[test]

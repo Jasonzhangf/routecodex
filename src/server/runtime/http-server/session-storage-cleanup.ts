@@ -12,6 +12,7 @@ type CleanupSummary = {
   removedLegacyScopeFiles: number;
   removedDeadTmuxStateFiles: number;
   removedHeartbeatStateFiles: number;
+  removedClockStateFiles: number;
   prunedRegistryDirs: number;
   removedRegistryDirs: number;
   removedRegistryRecords: number;
@@ -65,6 +66,65 @@ function removeDirIfEmpty(dirpath: string): boolean {
   }
 }
 
+function readClockStateTmuxSessionId(filePath: string, fallbackName: string): string | null {
+  const payload = parseJsonFile(filePath);
+  if (payload) {
+    const tmuxSessionId = normalizeString(payload.tmuxSessionId);
+    if (tmuxSessionId) {
+      return tmuxSessionId;
+    }
+    const sessionId = normalizeString(payload.sessionId);
+    if (sessionId?.startsWith('tmux:')) {
+      const rawTmux = normalizeString(sessionId.slice('tmux:'.length));
+      if (rawTmux) {
+        return rawTmux;
+      }
+    }
+  }
+  const fallback = normalizeString(fallbackName.replace(/\.json$/i, ''));
+  if (fallback?.startsWith('tmux:')) {
+    const rawTmux = normalizeString(fallback.slice('tmux:'.length));
+    if (rawTmux) {
+      return rawTmux;
+    }
+  }
+  return null;
+}
+
+function sanitizeClockStateDir(args: {
+  dirpath: string;
+  isTmuxSessionAlive: (tmuxSessionId: string) => boolean;
+}): number {
+  let removedClockStateFiles = 0;
+  let entries: fs.Dirent[] = [];
+  try {
+    entries = fs.readdirSync(args.dirpath, { withFileTypes: true });
+  } catch {
+    return removedClockStateFiles;
+  }
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith('.json') || entry.name === 'ntp-state.json') {
+      continue;
+    }
+    const filePath = path.join(args.dirpath, entry.name);
+    const tmuxSessionId = readClockStateTmuxSessionId(filePath, entry.name);
+    if (!tmuxSessionId) {
+      continue;
+    }
+    let alive = true;
+    try {
+      alive = args.isTmuxSessionAlive(tmuxSessionId);
+    } catch {
+      alive = true;
+    }
+    if (!alive && removeFileIfExists(filePath)) {
+      removedClockStateFiles += 1;
+    }
+  }
+  removeDirIfEmpty(args.dirpath);
+  return removedClockStateFiles;
+}
+
 function sanitizeSessionBindingsDir(args: {
   dirpath: string;
   nowMs: number;
@@ -72,7 +132,7 @@ function sanitizeSessionBindingsDir(args: {
   isTmuxSessionAlive: (tmuxSessionId: string) => boolean;
 }): Omit<
   CleanupSummary,
-  'removedLegacyScopeFiles' | 'removedDeadTmuxStateFiles' | 'removedHeartbeatStateFiles'
+  'removedLegacyScopeFiles' | 'removedDeadTmuxStateFiles' | 'removedHeartbeatStateFiles' | 'removedClockStateFiles'
 > {
   const bindingsFile = path.join(args.dirpath, 'session-bindings.json');
   const toolStateFile = path.join(args.dirpath, 'tmux-tools-state.json');
@@ -210,6 +270,7 @@ export function cleanupSessionStorageOnStartup(options?: {
     removedLegacyScopeFiles: 0,
     removedDeadTmuxStateFiles: 0,
     removedHeartbeatStateFiles: 0,
+    removedClockStateFiles: 0,
     prunedRegistryDirs: 0,
     removedRegistryDirs: 0,
     removedRegistryRecords: 0,
@@ -272,6 +333,21 @@ export function cleanupSessionStorageOnStartup(options?: {
         removeDirIfEmpty(fullpath);
         continue;
       }
+      if (entry.name === 'clock') {
+        summary.removedClockStateFiles += sanitizeClockStateDir({
+          dirpath: fullpath,
+          isTmuxSessionAlive
+        });
+        continue;
+      }
+
+      const nestedClockDir = path.join(fullpath, 'clock');
+      if (fs.existsSync(nestedClockDir)) {
+        summary.removedClockStateFiles += sanitizeClockStateDir({
+          dirpath: nestedClockDir,
+          isTmuxSessionAlive
+        });
+      }
       const dirSummary = sanitizeSessionBindingsDir({
         dirpath: fullpath,
         nowMs,
@@ -289,4 +365,8 @@ export function cleanupSessionStorageOnStartup(options?: {
   }
 
   return summary;
+}
+
+export function cleanupSessionStorageOnShutdown(options?: Parameters<typeof cleanupSessionStorageOnStartup>[0]): CleanupSummary {
+  return cleanupSessionStorageOnStartup(options);
 }

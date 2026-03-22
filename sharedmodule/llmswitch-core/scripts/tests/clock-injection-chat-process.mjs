@@ -90,6 +90,30 @@ async function main() {
   const afterClear = await listClockTasks(sessionId, clockConfig);
   assert(afterClear.length === 0, 'expected tasks cleared by <**clock:clear**>');
 
+  const aliasedSessionScope = 'session:alias_scope_1';
+  await scheduleClockTasks(
+    aliasedSessionScope,
+    [{ dueAtMs: now + 30_000, task: 'inject-aliased-clear', tool: 'exec_command', arguments: { cmd: 'pwd' } }],
+    clockConfig
+  );
+  const beforeAliasedClear = await listClockTasks(aliasedSessionScope, clockConfig);
+  assert(beforeAliasedClear.length === 1, 'expected aliased reminder before clear');
+
+  await runHubChatProcess({
+    request: clearRequest,
+    requestId: 'req_clock_clear_alias',
+    entryEndpoint: '/v1/chat/completions',
+    rawPayload: {},
+    metadata: {
+      providerProtocol: 'openai-chat',
+      sessionId: 'alias_scope_1',
+      clock: clockConfig,
+      requestId: 'req_clock_clear_alias'
+    }
+  });
+  const afterAliasedClear = await listClockTasks(aliasedSessionScope, clockConfig);
+  assert(afterAliasedClear.length === 0, 'expected aliased session reminders cleared by <**clock:clear**>');
+
   await stopClockDaemonForTests();
   await fs.rm(tmpRoot, { recursive: true, force: true });
   console.log('✅ clock-injection-chat-process ok');
@@ -99,4 +123,3 @@ main().catch((err) => {
   console.error('❌ clock-injection-chat-process failed', err);
   process.exit(1);
 });
-

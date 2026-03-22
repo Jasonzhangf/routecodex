@@ -1,4 +1,5 @@
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { jest } from '@jest/globals';
 
@@ -6,7 +7,10 @@ import { runReqProcessStage1ToolGovernance } from '../../sharedmodule/llmswitch-
 import type { StandardizedRequest } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.js';
 import {
   buildHeartbeatInjectText,
+  DEFAULT_DELIVERY_HISTORY_LIMIT,
   loadHeartbeatState,
+  listHeartbeatHistory,
+  pruneDeliveryLogText,
   saveHeartbeatState,
   resetHeartbeatRuntimeHooksForTests,
   runHeartbeatDaemonTickForTests,
@@ -80,6 +84,35 @@ describe('servertool:heartbeat', () => {
     const lastUser = processed.messages.findLast((item) => item.role === 'user');
     expect(typeof lastUser?.content === 'string' ? lastUser.content : '').not.toContain('hb:on');
     expect((await loadHeartbeatState(tmuxSessionId)).enabled).toBe(true);
+  });
+
+  test('<**hb:on**> reactivation clears Heartbeat-Stop-When marker from HEARTBEAT.md', async () => {
+    const tmuxSessionId = 'hb-clear-stop-marker';
+    const workdir = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-hb-reactivation-'));
+    const heartbeatPath = path.join(workdir, 'HEARTBEAT.md');
+    fs.writeFileSync(
+      heartbeatPath,
+      [
+        '# Heartbeat',
+        'Heartbeat-Stop-When: no-open-tasks',
+        '',
+        '- [x] done',
+        ''
+      ].join('\n'),
+      'utf8'
+    );
+
+    await runReqProcessStage1ToolGovernance({
+      request: buildRequest([{ role: 'user', content: '<**hb:on**>' }]),
+      rawPayload: {},
+      metadata: { originalEndpoint: '/v1/chat/completions', tmuxSessionId, cwd: workdir },
+      entryEndpoint: '/v1/chat/completions',
+      requestId: 'req-hb-clear-stop-marker'
+    });
+
+    const nextHeartbeatText = fs.readFileSync(heartbeatPath, 'utf8');
+    expect(nextHeartbeatText).not.toContain('Heartbeat-Stop-When:');
+    fs.rmSync(workdir, { recursive: true, force: true });
   });
 
   test('<**hb:off**> disables persisted heartbeat state', async () => {
@@ -169,6 +202,28 @@ describe('servertool:heartbeat', () => {
     const state = await loadHeartbeatState(tmuxSessionId);
     expect(state.enabled).toBe(true);
     expect(state.intervalMs).toBeUndefined();
+  });
+
+  test('new hb interval marker overrides prior interval when tmux metadata is only available in snake_case fields', async () => {
+    const tmuxSessionId = 'hb-snake-case-override';
+
+    await runReqProcessStage1ToolGovernance({
+      request: buildRequest([{ role: 'user', content: '<**hb:15m**>' }]),
+      rawPayload: {},
+      metadata: { originalEndpoint: '/v1/chat/completions', client_tmux_session_id: tmuxSessionId },
+      entryEndpoint: '/v1/chat/completions',
+      requestId: 'req-hb-snake-15m'
+    });
+    expect((await loadHeartbeatState(tmuxSessionId)).intervalMs).toBe(15 * 60_000);
+
+    await runReqProcessStage1ToolGovernance({
+      request: buildRequest([{ role: 'user', content: '<**hb:30s**>' }]),
+      rawPayload: {},
+      metadata: { originalEndpoint: '/v1/chat/completions', client_tmux_session_id: tmuxSessionId },
+      entryEndpoint: '/v1/chat/completions',
+      requestId: 'req-hb-snake-30s'
+    });
+    expect((await loadHeartbeatState(tmuxSessionId)).intervalMs).toBe(30_000);
   });
 
   test('heartbeat interval override uses state interval instead of global daemon tick', async () => {
@@ -268,6 +323,48 @@ describe('servertool:heartbeat', () => {
     expect(typeof state.lastTriggeredAtMs).toBe('number');
   });
 
+  test('heartbeat inject text instructs DELIVERY.md to keep only the latest ten runs', () => {
+    const text = buildHeartbeatInjectText();
+    expect(text).toContain('DELIVERY.md');
+    expect(text).toContain('最多只保留最近十次交付记录');
+    expect(text).toContain('不要无限追加成巨型文件');
+    expect(text).toContain('Heartbeat-Stop-When: no-open-tasks');
+    expect(text).toContain('系统会自动停用');
+    expect(text).toContain('如果当前任务仍在执行中，请忽略本次提醒');
+    expect(text).toContain('如果当前任务已经空闲或已中断');
+  });
+
+  test('pruneDeliveryLogText keeps only the latest ten run sections', () => {
+    const lines = ['# Delivery Log', ''];
+    for (let index = 1; index <= 12; index += 1) {
+      lines.push(`## Run ${index}`, `body-${index}`, '');
+    }
+    const input = lines.join('\n');
+
+    const output = pruneDeliveryLogText(input);
+    expect(output).toContain('# Delivery Log');
+    expect(output).not.toMatch(/^## Run 1$/m);
+    expect(output).not.toMatch(/^## Run 2$/m);
+    for (let index = 3; index <= 12; index += 1) {
+      expect(output).toMatch(new RegExp(`^## Run ${index}$`, 'm'));
+    }
+  });
+
+  test('pruneDeliveryLogText defaults to latest ten runs when limit is invalid', () => {
+    const lines = ['# Delivery Log', ''];
+    for (let index = 1; index <= 11; index += 1) {
+      lines.push(`## Run ${index}`, `body-${index}`, '');
+    }
+    const input = lines.join('\n');
+
+    const output = pruneDeliveryLogText(input, { keepRecentRuns: 0 });
+    expect(DEFAULT_DELIVERY_HISTORY_LIMIT).toBe(10);
+    expect(output).not.toMatch(/^## Run 1$/m);
+    for (let index = 2; index <= 11; index += 1) {
+      expect(output).toMatch(new RegExp(`^## Run ${index}$`, 'm'));
+    }
+  });
+
   test('daemon tick records skip reason and disables expired sessions', async () => {
     const tmuxSessionId = 'hb-expired';
     await runReqProcessStage1ToolGovernance({
@@ -308,6 +405,39 @@ describe('servertool:heartbeat', () => {
     const state = await loadHeartbeatState(tmuxSessionId);
     expect(state.enabled).toBe(false);
     expect(state.lastError).toBe('heartbeat_file_missing');
+  });
+
+  test('daemon tick keeps disabled state + history when tmux session disappears', async () => {
+    const tmuxSessionId = 'hb-gone-session';
+    await runReqProcessStage1ToolGovernance({
+      request: buildRequest([{ role: 'user', content: '<**hb:on**>' }]),
+      rawPayload: {},
+      metadata: { originalEndpoint: '/v1/chat/completions', tmuxSessionId },
+      entryEndpoint: '/v1/chat/completions',
+      requestId: 'req-hb-gone-session'
+    });
+
+    setHeartbeatRuntimeHooks({
+      isTmuxSessionAlive: () => false
+    });
+    await runHeartbeatDaemonTickForTests();
+
+    const state = await loadHeartbeatState(tmuxSessionId);
+    expect(state.enabled).toBe(false);
+    expect(state.lastError).toBe('tmux_session_not_found');
+    expect(state.lastSkippedReason).toBe('tmux_session_not_found');
+
+    const events = await listHeartbeatHistory({ tmuxSessionId, limit: 5 });
+    expect(events.length).toBeGreaterThan(0);
+    expect(events[0]).toEqual(
+      expect.objectContaining({
+        tmuxSessionId,
+        source: 'daemon.tick',
+        action: 'availability',
+        outcome: 'disabled',
+        reason: 'tmux_session_not_found'
+      })
+    );
   });
 
   test('startup tick followed by immediate manual tick does not double-dispatch same heartbeat', async () => {

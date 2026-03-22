@@ -18,10 +18,25 @@ export interface ProviderErrorEventRecord {
   details?: unknown;
 }
 
+const providerQuotaWriteChains = new Map<string, Promise<void>>();
+
 function logProviderQuotaStoreNonBlockingError(operation: string, error: unknown, details?: Record<string, unknown>): void {
   const reason = error instanceof Error ? error.message : String(error);
   const suffix = details ? ` details=${JSON.stringify(details)}` : '';
   console.warn(`[provider-quota-store] ${operation} failed (non-blocking): ${reason}${suffix}`);
+}
+
+function enqueueSerializedQuotaWrite(filePath: string, task: () => Promise<void>): Promise<void> {
+  const previous = providerQuotaWriteChains.get(filePath) ?? Promise.resolve();
+  const current = previous
+    .catch(() => undefined)
+    .then(task);
+  providerQuotaWriteChains.set(filePath, current);
+  return current.finally(() => {
+    if (providerQuotaWriteChains.get(filePath) === current) {
+      providerQuotaWriteChains.delete(filePath);
+    }
+  });
 }
 
 function parseHttpStatusFromCode(value: unknown): number | null {
@@ -150,18 +165,14 @@ export async function saveProviderQuotaSnapshot(
     logProviderQuotaStoreNonBlockingError('saveProviderQuotaSnapshot.mkdir', error, { dir });
   }
 
-  const tmpPath = `${filePath}.tmp`;
   const text = `${JSON.stringify(payload, null, 2)}\n`;
   try {
-    await fs.writeFile(tmpPath, text, 'utf8');
-    await fs.rename(tmpPath, filePath);
+    await enqueueSerializedQuotaWrite(filePath, async () => {
+      await fs.mkdir(dir, { recursive: true });
+      await fs.writeFile(filePath, text, 'utf8');
+    });
   } catch (error) {
     logProviderQuotaStoreNonBlockingError('saveProviderQuotaSnapshot.write', error, { filePath });
-    try {
-      await fs.unlink(tmpPath);
-    } catch (cleanupError) {
-      logProviderQuotaStoreNonBlockingError('saveProviderQuotaSnapshot.cleanupTmp', cleanupError, { tmpPath });
-    }
   }
 }
 

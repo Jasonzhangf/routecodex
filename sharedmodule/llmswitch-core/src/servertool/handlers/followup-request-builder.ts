@@ -360,24 +360,9 @@ function buildStandardFollowupTools(): JsonObject[] {
     {
       type: 'function',
       function: {
-        name: 'continue_execution',
-        description: 'No-op control tool for progress reporting without interrupting execution. Mandatory rule: if you are giving a progress-only update or are about to stop/end_turn, you MUST call continue_execution first with a non-empty summary (example: {"summary":"完成了 X，正在进行 Y","reason":"progress_update"}). Required sequence: (1) call continue_execution with summary, (2) provide a brief progress summary (<=5 lines), (3) immediately continue real actions. Do NOT emit finish_reason=stop/end_turn for progress-only updates. Only stop when the overall goal is complete. Use clock.schedule for any blocking wait so execution can continue non-blockingly; if waiting 3 minutes or longer is needed, schedule it immediately and set multiple reminders when helpful. For complex reminders, write the current context into clock.md before waiting and read clock.md first when the reminder fires. Required clock.md template: ## 背景 / ## 当前阻塞点 / ## 下次提醒要做的第一步 / ## 不能忘的检查项.',
-        parameters: {
-          type: 'object',
-          properties: {
-            summary: { type: 'string' },
-            reason: { type: 'string' }
-          },
-          required: ['summary'],
-          additionalProperties: false
-        }
-      }
-    },
-    {
-      type: 'function',
-      function: {
         name: 'review',
-        description: 'Independent reviewer handoff. Use when you need an external evidence-based code review before claiming completion. The review result will be injected back to client as next-step guidance. Do not stop immediately after this tool.',
+        description:
+          'Independent reviewer handoff. Reviewer must first verify code against the current request (target files + relevant tests/commands + evidence), then provide actionable suggestions. Do not stop immediately after this tool.',
         parameters: {
           type: 'object',
           properties: {

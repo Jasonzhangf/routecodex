@@ -33,6 +33,12 @@ export class ApiKeyAuthProvider implements IAuthProvider {
     };
   }
 
+  private isOpenCodeZenPublicKeyMode(): boolean {
+    const rawType = typeof this.config.rawType === 'string' ? this.config.rawType.trim().toLowerCase() : '';
+    const apiKey = typeof this.config.apiKey === 'string' ? this.config.apiKey.trim() : '';
+    return rawType === 'opencode-zen-public' && apiKey === 'public';
+  }
+
   /**
    * 初始化认证
    */
@@ -55,7 +61,7 @@ export class ApiKeyAuthProvider implements IAuthProvider {
       }
 
       // 验证API Key基本格式
-      if (this.config.apiKey.length < 10) {
+      if (this.config.apiKey.length < 10 && !this.isOpenCodeZenPublicKeyMode()) {
         throw new Error('Invalid API key: too short');
       }
 
@@ -110,7 +116,7 @@ export class ApiKeyAuthProvider implements IAuthProvider {
         return true;
       }
       // 基本验证：检查API key是否仍然有效
-      const isValid = this.config.apiKey.length >= 10;
+      const isValid = this.config.apiKey.length >= 10 || this.isOpenCodeZenPublicKeyMode();
 
       this.updateStatus(true, isValid, isValid ? 'Credentials validated' : 'Invalid credentials');
       return isValid;

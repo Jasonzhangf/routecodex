@@ -1,8 +1,8 @@
 import {
   failNativeRequired,
   isNativeDisabledByEnv,
-} from "./native-router-hotpath-policy.js";
-import { loadNativeRouterHotpathBindingForInternalUse } from "./native-router-hotpath.js";
+} from './native-router-hotpath-policy.js';
+import { loadNativeRouterHotpathBindingForInternalUse } from './native-router-hotpath.js';
 
 function readNativeFunction(
   name: string,
@@ -12,7 +12,7 @@ function readNativeFunction(
     unknown
   > | null;
   const fn = binding?.[name];
-  return typeof fn === "function"
+  return typeof fn === 'function'
     ? (fn as (...args: unknown[]) => unknown)
     : null;
 }
@@ -28,7 +28,7 @@ function safeStringify(value: unknown): string | undefined {
 function parseRecord(raw: string): Record<string, unknown> | null {
   try {
     const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
       return null;
     }
     return parsed as Record<string, unknown>;
@@ -37,234 +37,177 @@ function parseRecord(raw: string): Record<string, unknown> | null {
   }
 }
 
+function invokeRecordCapability(
+  capability: string,
+  args: unknown[],
+): Record<string, unknown> {
+  const fail = (reason?: string) =>
+    failNativeRequired<Record<string, unknown>>(capability, reason);
+  if (isNativeDisabledByEnv()) return fail('native disabled');
+  const fn = readNativeFunction(capability);
+  if (!fn) return fail();
+  const encodedArgs: string[] = [];
+  for (const arg of args) {
+    const encoded = safeStringify(arg);
+    if (!encoded) return fail('json stringify failed');
+    encodedArgs.push(encoded);
+  }
+  try {
+    const raw = fn(...encodedArgs);
+    if (typeof raw !== 'string' || !raw) return fail('empty result');
+    const parsed = parseRecord(raw);
+    return parsed ?? fail('invalid payload');
+  } catch (error) {
+    const reason =
+      error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+function invokeVoidCapability(capability: string, args: unknown[]): void {
+  const fail = (reason?: string) => failNativeRequired<void>(capability, reason);
+  if (isNativeDisabledByEnv()) return fail('native disabled');
+  const fn = readNativeFunction(capability);
+  if (!fn) return fail();
+  const encodedArgs: string[] = [];
+  for (const arg of args) {
+    const encoded = safeStringify(arg);
+    if (!encoded) return fail('json stringify failed');
+    encodedArgs.push(encoded);
+  }
+  try {
+    fn(...encodedArgs);
+  } catch (error) {
+    const reason =
+      error instanceof Error ? error.message : String(error ?? 'unknown');
+    throw new Error(reason);
+  }
+}
+
 export function normalizeResponsePayloadWithNative(
   payload: Record<string, unknown>,
   config?: Record<string, unknown>,
 ): Record<string, unknown> {
-  const capability = "normalizeResponsePayloadJson";
-  const fail = (reason?: string) =>
-    failNativeRequired<Record<string, unknown>>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail("native disabled");
-  }
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    return fail();
-  }
-  const payloadJson = safeStringify(payload);
-  const configJson = config ? safeStringify(config) : "{}";
-  if (!payloadJson || !configJson) {
-    return fail("json stringify failed");
-  }
-  try {
-    const raw = fn(payloadJson, configJson);
-    if (typeof raw !== "string" || !raw) {
-      return fail("empty result");
-    }
-    const parsed = parseRecord(raw);
-    return parsed ?? fail("invalid payload");
-  } catch (error) {
-    const reason =
-      error instanceof Error ? error.message : String(error ?? "unknown");
-    return fail(reason);
-  }
+  return invokeRecordCapability('normalizeResponsePayloadJson', [
+    payload,
+    config ?? {},
+  ]);
 }
 
 export function validateResponsePayloadWithNative(
   payload: Record<string, unknown>,
 ): void {
-  const capability = "validateResponsePayloadJson";
-  const fail = (reason?: string) =>
-    failNativeRequired<void>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail("native disabled");
-  }
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    return fail();
-  }
-  const payloadJson = safeStringify(payload);
-  if (!payloadJson) {
-    return fail("json stringify failed");
-  }
-  try {
-    fn(payloadJson);
-  } catch (error) {
-    const reason =
-      error instanceof Error ? error.message : String(error ?? "unknown");
-    throw new Error(reason);
-  }
+  invokeVoidCapability('validateResponsePayloadJson', [payload]);
 }
 
 export function applyRequestRulesWithNative(
   payload: Record<string, unknown>,
   config?: Record<string, unknown>,
 ): Record<string, unknown> {
-  const capability = "applyRequestRulesJson";
-  const fail = (reason?: string) =>
-    failNativeRequired<Record<string, unknown>>(capability, reason);
-  if (isNativeDisabledByEnv()) return fail("native disabled");
-  const fn = readNativeFunction(capability);
-  if (!fn) return fail();
-  const payloadJson = safeStringify(payload);
-  const configJson = config ? safeStringify(config) : "{}";
-  if (!payloadJson || !configJson) return fail("json stringify failed");
-  try {
-    const raw = fn(payloadJson, configJson);
-    if (typeof raw !== "string" || !raw) return fail("empty result");
-    const parsed = parseRecord(raw);
-    return parsed ?? fail("invalid payload");
-  } catch (error) {
-    const reason =
-      error instanceof Error ? error.message : String(error ?? "unknown");
-    return fail(reason);
-  }
+  return invokeRecordCapability('applyRequestRulesJson', [payload, config ?? {}]);
+}
+
+export function applyFieldMappingsWithNative(
+  payload: Record<string, unknown>,
+  mappings: unknown[],
+): Record<string, unknown> {
+  return invokeRecordCapability('applyFieldMappingsJson', [
+    payload,
+    Array.isArray(mappings) ? mappings : [],
+  ]);
+}
+
+export function sanitizeToolSchemaGlmShellWithNative(
+  payload: Record<string, unknown>,
+): Record<string, unknown> {
+  return invokeRecordCapability('sanitizeToolSchemaGlmShellJson', [payload]);
+}
+
+export function fixApplyPatchToolCallsWithNative(
+  payload: {
+    messages?: Array<Record<string, unknown>>;
+    input?: Array<Record<string, unknown>>;
+  },
+): {
+  messages: Array<Record<string, unknown>>;
+  input?: Array<Record<string, unknown>>;
+} {
+  const parsed = invokeRecordCapability('fixApplyPatchToolCallsJson', [
+    {
+      messages: Array.isArray(payload?.messages) ? payload.messages : [],
+      ...(Array.isArray(payload?.input) ? { input: payload.input } : {})
+    },
+  ]);
+  const messages = Array.isArray(parsed.messages)
+    ? parsed.messages.filter(
+        (entry): entry is Record<string, unknown> =>
+          !!entry && typeof entry === 'object' && !Array.isArray(entry),
+      )
+    : [];
+  const input = Array.isArray(parsed.input)
+    ? parsed.input.filter(
+        (entry): entry is Record<string, unknown> =>
+          !!entry && typeof entry === 'object' && !Array.isArray(entry),
+      )
+    : undefined;
+  return {
+    messages,
+    ...(input ? { input } : {})
+  };
 }
 
 export function applyResponseBlacklistWithNative(
   payload: Record<string, unknown>,
   config?: Record<string, unknown>,
 ): Record<string, unknown> {
-  const capability = "applyResponseBlacklistJson";
-  const fail = (reason?: string) =>
-    failNativeRequired<Record<string, unknown>>(capability, reason);
-  if (isNativeDisabledByEnv()) return fail("native disabled");
-  const fn = readNativeFunction(capability);
-  if (!fn) return fail();
-  const payloadJson = safeStringify(payload);
-  const configJson = config ? safeStringify(config) : "{}";
-  if (!payloadJson || !configJson) return fail("json stringify failed");
-  try {
-    const raw = fn(payloadJson, configJson);
-    if (typeof raw !== "string" || !raw) return fail("empty result");
-    const parsed = parseRecord(raw);
-    return parsed ?? fail("invalid payload");
-  } catch (error) {
-    const reason =
-      error instanceof Error ? error.message : String(error ?? "unknown");
-    return fail(reason);
-  }
+  return invokeRecordCapability('applyResponseBlacklistJson', [
+    payload,
+    config ?? {},
+  ]);
 }
 
 export function normalizeToolCallIdsWithNative(
   payload: Record<string, unknown>,
 ): Record<string, unknown> {
-  const capability = "normalizeToolCallIdsJson";
-  const fail = (reason?: string) =>
-    failNativeRequired<Record<string, unknown>>(capability, reason);
-  if (isNativeDisabledByEnv()) return fail("native disabled");
-  const fn = readNativeFunction(capability);
-  if (!fn) return fail();
-  const payloadJson = safeStringify(payload);
-  if (!payloadJson) return fail("json stringify failed");
-  try {
-    const raw = fn(payloadJson);
-    if (typeof raw !== "string" || !raw) return fail("empty result");
-    const parsed = parseRecord(raw);
-    return parsed ?? fail("invalid payload");
-  } catch (error) {
-    const reason =
-      error instanceof Error ? error.message : String(error ?? "unknown");
-    return fail(reason);
-  }
+  return invokeRecordCapability('normalizeToolCallIdsJson', [payload]);
 }
 
 export function enforceLmstudioResponsesFcToolCallIdsWithNative(
   payload: Record<string, unknown>,
 ): Record<string, unknown> {
-  const capability = "enforceLmstudioResponsesFcToolCallIdsJson";
-  const fail = (reason?: string) =>
-    failNativeRequired<Record<string, unknown>>(capability, reason);
-  if (isNativeDisabledByEnv()) return fail("native disabled");
-  const fn = readNativeFunction(capability);
-  if (!fn) return fail();
-  const payloadJson = safeStringify(payload);
-  if (!payloadJson) return fail("json stringify failed");
-  try {
-    const raw = fn(payloadJson);
-    if (typeof raw !== "string" || !raw) return fail("empty result");
-    const parsed = parseRecord(raw);
-    return parsed ?? fail("invalid payload");
-  } catch (error) {
-    const reason =
-      error instanceof Error ? error.message : String(error ?? "unknown");
-    return fail(reason);
-  }
+  return invokeRecordCapability('enforceLmstudioResponsesFcToolCallIdsJson', [
+    payload,
+  ]);
 }
 
 export function applyAnthropicClaudeCodeUserIdWithNative(
   payload: Record<string, unknown>,
   adapterContext?: Record<string, unknown>,
 ): Record<string, unknown> {
-  const capability = "applyAnthropicClaudeCodeUserIdJson";
-  const fail = (reason?: string) =>
-    failNativeRequired<Record<string, unknown>>(capability, reason);
-  if (isNativeDisabledByEnv()) return fail("native disabled");
-  const fn = readNativeFunction(capability);
-  if (!fn) return fail();
-  const payloadJson = safeStringify(payload);
-  const contextJson = adapterContext ? safeStringify(adapterContext) : "{}";
-  if (!payloadJson || !contextJson) return fail("json stringify failed");
-  try {
-    const raw = fn(payloadJson, contextJson);
-    if (typeof raw !== "string" || !raw) return fail("empty result");
-    const parsed = parseRecord(raw);
-    return parsed ?? fail("invalid payload");
-  } catch (error) {
-    const reason =
-      error instanceof Error ? error.message : String(error ?? "unknown");
-    return fail(reason);
-  }
+  return invokeRecordCapability('applyAnthropicClaudeCodeUserIdJson', [
+    payload,
+    adapterContext ?? {},
+  ]);
 }
 
 export function applyGeminiWebSearchRequestCompatWithNative(
   payload: Record<string, unknown>,
   adapterContext?: Record<string, unknown>,
 ): Record<string, unknown> {
-  const capability = "applyGeminiWebSearchRequestCompatJson";
-  const fail = (reason?: string) =>
-    failNativeRequired<Record<string, unknown>>(capability, reason);
-  if (isNativeDisabledByEnv()) return fail("native disabled");
-  const fn = readNativeFunction(capability);
-  if (!fn) return fail();
-  const payloadJson = safeStringify(payload);
-  const contextJson = adapterContext ? safeStringify(adapterContext) : "{}";
-  if (!payloadJson || !contextJson) return fail("json stringify failed");
-  try {
-    const raw = fn(payloadJson, contextJson);
-    if (typeof raw !== "string" || !raw) return fail("empty result");
-    const parsed = parseRecord(raw);
-    return parsed ?? fail("invalid payload");
-  } catch (error) {
-    const reason =
-      error instanceof Error ? error.message : String(error ?? "unknown");
-    return fail(reason);
-  }
+  return invokeRecordCapability('applyGeminiWebSearchRequestCompatJson', [
+    payload,
+    adapterContext ?? {},
+  ]);
 }
 
 export function prepareAntigravityThoughtSignatureForGeminiRequestWithNative(
   payload: Record<string, unknown>,
   adapterContext?: Record<string, unknown>,
 ): Record<string, unknown> {
-  const capability = "prepareAntigravityThoughtSignatureForGeminiRequestJson";
-  const fail = (reason?: string) =>
-    failNativeRequired<Record<string, unknown>>(capability, reason);
-  if (isNativeDisabledByEnv()) return fail("native disabled");
-  const fn = readNativeFunction(capability);
-  if (!fn) return fail();
-  const payloadJson = safeStringify(payload);
-  const contextJson = adapterContext ? safeStringify(adapterContext) : "{}";
-  if (!payloadJson || !contextJson) return fail("json stringify failed");
-  try {
-    const raw = fn(payloadJson, contextJson);
-    if (typeof raw !== "string" || !raw) return fail("empty result");
-    const parsed = parseRecord(raw);
-    return parsed ?? fail("invalid payload");
-  } catch (error) {
-    const reason =
-      error instanceof Error ? error.message : String(error ?? "unknown");
-    return fail(reason);
-  }
+  return invokeRecordCapability(
+    'prepareAntigravityThoughtSignatureForGeminiRequestJson',
+    [payload, adapterContext ?? {}],
+  );
 }
 
 export function applyIflowToolTextFallbackWithNative(
@@ -272,77 +215,51 @@ export function applyIflowToolTextFallbackWithNative(
   adapterContext?: Record<string, unknown>,
   models?: string[],
 ): Record<string, unknown> {
-  const capability = "applyIflowToolTextFallbackJson";
-  const fail = (reason?: string) =>
-    failNativeRequired<Record<string, unknown>>(capability, reason);
-  if (isNativeDisabledByEnv()) return fail("native disabled");
-  const fn = readNativeFunction(capability);
-  if (!fn) return fail();
-  const payloadJson = safeStringify(payload);
-  const contextJson = adapterContext ? safeStringify(adapterContext) : "{}";
-  const modelsJson = safeStringify(Array.isArray(models) ? models : []);
-  if (!payloadJson || !contextJson || !modelsJson)
-    return fail("json stringify failed");
-  try {
-    const raw = fn(payloadJson, contextJson, modelsJson);
-    if (typeof raw !== "string" || !raw) return fail("empty result");
-    const parsed = parseRecord(raw);
-    return parsed ?? fail("invalid payload");
-  } catch (error) {
-    const reason =
-      error instanceof Error ? error.message : String(error ?? "unknown");
-    return fail(reason);
-  }
+  return invokeRecordCapability('applyIflowToolTextFallbackJson', [
+    payload,
+    adapterContext ?? {},
+    Array.isArray(models) ? models : [],
+  ]);
+}
+
+export function applyLmstudioResponsesInputStringifyWithNative(
+  payload: Record<string, unknown>,
+  adapterContext?: Record<string, unknown>,
+): Record<string, unknown> {
+  return invokeRecordCapability('applyLmstudioResponsesInputStringifyJson', [
+    payload,
+    adapterContext ?? {},
+  ]);
 }
 
 export function applyToolTextRequestGuidanceWithNative(
   payload: Record<string, unknown>,
   config?: Record<string, unknown>,
 ): Record<string, unknown> {
-  const capability = "applyToolTextRequestGuidanceJson";
-  const fail = (reason?: string) =>
-    failNativeRequired<Record<string, unknown>>(capability, reason);
-  if (isNativeDisabledByEnv()) return fail("native disabled");
-  const fn = readNativeFunction(capability);
-  if (!fn) return fail();
-  const payloadJson = safeStringify(payload);
-  const configJson = config ? safeStringify(config) : "{}";
-  if (!payloadJson || !configJson) return fail("json stringify failed");
-  try {
-    const raw = fn(payloadJson, configJson);
-    if (typeof raw !== "string" || !raw) return fail("empty result");
-    const parsed = parseRecord(raw);
-    return parsed ?? fail("invalid payload");
-  } catch (error) {
-    const reason =
-      error instanceof Error ? error.message : String(error ?? "unknown");
-    return fail(reason);
-  }
+  return invokeRecordCapability('applyToolTextRequestGuidanceJson', [
+    payload,
+    config ?? {},
+  ]);
+}
+
+export function harvestToolCallsFromTextWithNative(
+  payload: Record<string, unknown>,
+  options?: Record<string, unknown>,
+): Record<string, unknown> {
+  return invokeRecordCapability('harvestToolCallsFromTextJson', [
+    payload,
+    options ?? {},
+  ]);
 }
 
 export function applyUniversalShapeRequestFilterWithNative(
   payload: Record<string, unknown>,
   config?: Record<string, unknown>,
 ): Record<string, unknown> {
-  const capability = "applyUniversalShapeRequestFilterJson";
-  const fail = (reason?: string) =>
-    failNativeRequired<Record<string, unknown>>(capability, reason);
-  if (isNativeDisabledByEnv()) return fail("native disabled");
-  const fn = readNativeFunction(capability);
-  if (!fn) return fail();
-  const payloadJson = safeStringify(payload);
-  const configJson = config ? safeStringify(config) : "{}";
-  if (!payloadJson || !configJson) return fail("json stringify failed");
-  try {
-    const raw = fn(payloadJson, configJson);
-    if (typeof raw !== "string" || !raw) return fail("empty result");
-    const parsed = parseRecord(raw);
-    return parsed ?? fail("invalid payload");
-  } catch (error) {
-    const reason =
-      error instanceof Error ? error.message : String(error ?? "unknown");
-    return fail(reason);
-  }
+  return invokeRecordCapability('applyUniversalShapeRequestFilterJson', [
+    payload,
+    config ?? {},
+  ]);
 }
 
 export function applyUniversalShapeResponseFilterWithNative(
@@ -350,250 +267,99 @@ export function applyUniversalShapeResponseFilterWithNative(
   config?: Record<string, unknown>,
   adapterContext?: Record<string, unknown>,
 ): Record<string, unknown> {
-  const capability = "applyUniversalShapeResponseFilterJson";
-  const fail = (reason?: string) =>
-    failNativeRequired<Record<string, unknown>>(capability, reason);
-  if (isNativeDisabledByEnv()) return fail("native disabled");
-  const fn = readNativeFunction(capability);
-  if (!fn) return fail();
-  const payloadJson = safeStringify(payload);
-  const configJson = config ? safeStringify(config) : "{}";
-  const contextJson = adapterContext ? safeStringify(adapterContext) : "{}";
-  if (!payloadJson || !configJson || !contextJson)
-    return fail("json stringify failed");
-  try {
-    const raw = fn(payloadJson, configJson, contextJson);
-    if (typeof raw !== "string" || !raw) return fail("empty result");
-    const parsed = parseRecord(raw);
-    return parsed ?? fail("invalid payload");
-  } catch (error) {
-    const reason =
-      error instanceof Error ? error.message : String(error ?? "unknown");
-    return fail(reason);
-  }
+  return invokeRecordCapability('applyUniversalShapeResponseFilterJson', [
+    payload,
+    config ?? {},
+    adapterContext ?? {},
+  ]);
 }
 
 export function buildOpenAIChatFromAnthropicWithNative(
   payload: Record<string, unknown>,
   options?: Record<string, unknown>,
 ): Record<string, unknown> {
-  const capability = "buildOpenaiChatFromAnthropicJson";
-  const fail = (reason?: string) =>
-    failNativeRequired<Record<string, unknown>>(capability, reason);
-  if (isNativeDisabledByEnv()) return fail("native disabled");
-  const fn = readNativeFunction(capability);
-  if (!fn) return fail();
-  const payloadJson = safeStringify(payload);
-  const optionsJson = options ? safeStringify(options) : "{}";
-  if (!payloadJson || !optionsJson) return fail("json stringify failed");
-  try {
-    const raw = fn(payloadJson, optionsJson);
-    if (typeof raw !== "string" || !raw) return fail("empty result");
-    const parsed = parseRecord(raw);
-    return parsed ?? fail("invalid payload");
-  } catch (error) {
-    const reason =
-      error instanceof Error ? error.message : String(error ?? "unknown");
-    return fail(reason);
-  }
+  return invokeRecordCapability('buildOpenaiChatFromAnthropicJson', [
+    payload,
+    options ?? {},
+  ]);
 }
 
 export function buildAnthropicFromOpenAIChatWithNative(
   payload: Record<string, unknown>,
   options?: Record<string, unknown>,
 ): Record<string, unknown> {
-  const capability = "buildAnthropicFromOpenaiChatJson";
-  const fail = (reason?: string) =>
-    failNativeRequired<Record<string, unknown>>(capability, reason);
-  if (isNativeDisabledByEnv()) return fail("native disabled");
-  const fn = readNativeFunction(capability);
-  if (!fn) return fail();
-  const payloadJson = safeStringify(payload);
-  const optionsJson = options ? safeStringify(options) : "{}";
-  if (!payloadJson || !optionsJson) return fail("json stringify failed");
-  try {
-    const raw = fn(payloadJson, optionsJson);
-    if (typeof raw !== "string" || !raw) return fail("empty result");
-    const parsed = parseRecord(raw);
-    return parsed ?? fail("invalid payload");
-  } catch (error) {
-    const reason =
-      error instanceof Error ? error.message : String(error ?? "unknown");
-    return fail(reason);
-  }
+  return invokeRecordCapability('buildAnthropicFromOpenaiChatJson', [
+    payload,
+    options ?? {},
+  ]);
 }
 
 export function runOpenAIRequestCodecWithNative(
   payload: Record<string, unknown>,
   options?: Record<string, unknown>,
 ): Record<string, unknown> {
-  const capability = "runOpenaiOpenaiRequestCodecJson";
-  const fail = (reason?: string) =>
-    failNativeRequired<Record<string, unknown>>(capability, reason);
-  if (isNativeDisabledByEnv()) return fail("native disabled");
-  const fn = readNativeFunction(capability);
-  if (!fn) return fail();
-  const payloadJson = safeStringify(payload);
-  const optionsJson = options ? safeStringify(options) : "{}";
-  if (!payloadJson || !optionsJson) return fail("json stringify failed");
-  try {
-    const raw = fn(payloadJson, optionsJson);
-    if (typeof raw !== "string" || !raw) return fail("empty result");
-    const parsed = parseRecord(raw);
-    return parsed ?? fail("invalid payload");
-  } catch (error) {
-    const reason =
-      error instanceof Error ? error.message : String(error ?? "unknown");
-    return fail(reason);
-  }
+  return invokeRecordCapability('runOpenaiOpenaiRequestCodecJson', [
+    payload,
+    options ?? {},
+  ]);
 }
 
 export function runOpenAIResponseCodecWithNative(
   payload: Record<string, unknown>,
   options?: Record<string, unknown>,
 ): Record<string, unknown> {
-  const capability = "runOpenaiOpenaiResponseCodecJson";
-  const fail = (reason?: string) =>
-    failNativeRequired<Record<string, unknown>>(capability, reason);
-  if (isNativeDisabledByEnv()) return fail("native disabled");
-  const fn = readNativeFunction(capability);
-  if (!fn) return fail();
-  const payloadJson = safeStringify(payload);
-  const optionsJson = options ? safeStringify(options) : "{}";
-  if (!payloadJson || !optionsJson) return fail("json stringify failed");
-  try {
-    const raw = fn(payloadJson, optionsJson);
-    if (typeof raw !== "string" || !raw) return fail("empty result");
-    const parsed = parseRecord(raw);
-    return parsed ?? fail("invalid payload");
-  } catch (error) {
-    const reason =
-      error instanceof Error ? error.message : String(error ?? "unknown");
-    return fail(reason);
-  }
+  return invokeRecordCapability('runOpenaiOpenaiResponseCodecJson', [
+    payload,
+    options ?? {},
+  ]);
 }
 
 export function runResponsesOpenAIRequestCodecWithNative(
   payload: Record<string, unknown>,
   options?: Record<string, unknown>,
 ): Record<string, unknown> {
-  const capability = "runResponsesOpenaiRequestCodecJson";
-  const fail = (reason?: string) =>
-    failNativeRequired<Record<string, unknown>>(capability, reason);
-  if (isNativeDisabledByEnv()) return fail("native disabled");
-  const fn = readNativeFunction(capability);
-  if (!fn) return fail();
-  const payloadJson = safeStringify(payload);
-  const optionsJson = options ? safeStringify(options) : "{}";
-  if (!payloadJson || !optionsJson) return fail("json stringify failed");
-  try {
-    const raw = fn(payloadJson, optionsJson);
-    if (typeof raw !== "string" || !raw) return fail("empty result");
-    const parsed = parseRecord(raw);
-    return parsed ?? fail("invalid payload");
-  } catch (error) {
-    const reason =
-      error instanceof Error ? error.message : String(error ?? "unknown");
-    return fail(reason);
-  }
+  return invokeRecordCapability('runResponsesOpenaiRequestCodecJson', [
+    payload,
+    options ?? {},
+  ]);
 }
 
 export function runResponsesOpenAIResponseCodecWithNative(
   payload: Record<string, unknown>,
   context: Record<string, unknown>,
 ): Record<string, unknown> {
-  const capability = "runResponsesOpenaiResponseCodecJson";
-  const fail = (reason?: string) =>
-    failNativeRequired<Record<string, unknown>>(capability, reason);
-  if (isNativeDisabledByEnv()) return fail("native disabled");
-  const fn = readNativeFunction(capability);
-  if (!fn) return fail();
-  const payloadJson = safeStringify(payload);
-  const contextJson = safeStringify(context);
-  if (!payloadJson || !contextJson) return fail("json stringify failed");
-  try {
-    const raw = fn(payloadJson, contextJson);
-    if (typeof raw !== "string" || !raw) return fail("empty result");
-    const parsed = parseRecord(raw);
-    return parsed ?? fail("invalid payload");
-  } catch (error) {
-    const reason =
-      error instanceof Error ? error.message : String(error ?? "unknown");
-    return fail(reason);
-  }
+  return invokeRecordCapability('runResponsesOpenaiResponseCodecJson', [
+    payload,
+    context,
+  ]);
 }
 
 export function runGeminiOpenAIRequestCodecWithNative(
   payload: Record<string, unknown>,
   options?: Record<string, unknown>,
 ): Record<string, unknown> {
-  const capability = "runGeminiOpenaiRequestCodecJson";
-  const fail = (reason?: string) =>
-    failNativeRequired<Record<string, unknown>>(capability, reason);
-  if (isNativeDisabledByEnv()) return fail("native disabled");
-  const fn = readNativeFunction(capability);
-  if (!fn) return fail();
-  const payloadJson = safeStringify(payload);
-  const optionsJson = options ? safeStringify(options) : "{}";
-  if (!payloadJson || !optionsJson) return fail("json stringify failed");
-  try {
-    const raw = fn(payloadJson, optionsJson);
-    if (typeof raw !== "string" || !raw) return fail("empty result");
-    const parsed = parseRecord(raw);
-    return parsed ?? fail("invalid payload");
-  } catch (error) {
-    const reason =
-      error instanceof Error ? error.message : String(error ?? "unknown");
-    return fail(reason);
-  }
+  return invokeRecordCapability('runGeminiOpenaiRequestCodecJson', [
+    payload,
+    options ?? {},
+  ]);
 }
 
 export function runGeminiOpenAIResponseCodecWithNative(
   payload: Record<string, unknown>,
   options?: Record<string, unknown>,
 ): Record<string, unknown> {
-  const capability = "runGeminiOpenaiResponseCodecJson";
-  const fail = (reason?: string) =>
-    failNativeRequired<Record<string, unknown>>(capability, reason);
-  if (isNativeDisabledByEnv()) return fail("native disabled");
-  const fn = readNativeFunction(capability);
-  if (!fn) return fail();
-  const payloadJson = safeStringify(payload);
-  const optionsJson = options ? safeStringify(options) : "{}";
-  if (!payloadJson || !optionsJson) return fail("json stringify failed");
-  try {
-    const raw = fn(payloadJson, optionsJson);
-    if (typeof raw !== "string" || !raw) return fail("empty result");
-    const parsed = parseRecord(raw);
-    return parsed ?? fail("invalid payload");
-  } catch (error) {
-    const reason =
-      error instanceof Error ? error.message : String(error ?? "unknown");
-    return fail(reason);
-  }
+  return invokeRecordCapability('runGeminiOpenaiResponseCodecJson', [
+    payload,
+    options ?? {},
+  ]);
 }
 
 export function runGeminiFromOpenAIChatCodecWithNative(
   payload: Record<string, unknown>,
   options?: Record<string, unknown>,
 ): Record<string, unknown> {
-  const capability = "runGeminiFromOpenaiChatCodecJson";
-  const fail = (reason?: string) =>
-    failNativeRequired<Record<string, unknown>>(capability, reason);
-  if (isNativeDisabledByEnv()) return fail("native disabled");
-  const fn = readNativeFunction(capability);
-  if (!fn) return fail();
-  const payloadJson = safeStringify(payload);
-  const optionsJson = options ? safeStringify(options) : "{}";
-  if (!payloadJson || !optionsJson) return fail("json stringify failed");
-  try {
-    const raw = fn(payloadJson, optionsJson);
-    if (typeof raw !== "string" || !raw) return fail("empty result");
-    const parsed = parseRecord(raw);
-    return parsed ?? fail("invalid payload");
-  } catch (error) {
-    const reason =
-      error instanceof Error ? error.message : String(error ?? "unknown");
-    return fail(reason);
-  }
+  return invokeRecordCapability('runGeminiFromOpenaiChatCodecJson', [
+    payload,
+    options ?? {},
+  ]);
 }

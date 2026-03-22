@@ -1,6 +1,18 @@
 use super::super::instructions::{InstructionTarget, RoutingInstructionState};
 use super::super::provider_registry::{derive_model_id, ProviderRegistry};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum InstructionTargetMatchMode {
+    Exact,
+    Filter,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ResolvedInstructionTarget {
+    pub mode: InstructionTargetMatchMode,
+    pub keys: Vec<String>,
+}
+
 pub(crate) fn filter_candidates_by_state(
     candidates: &[String],
     state: &RoutingInstructionState,
@@ -48,37 +60,103 @@ pub(crate) fn filter_candidates_by_state(
 pub(crate) fn resolve_instruction_target(
     target: &InstructionTarget,
     registry: &ProviderRegistry,
-) -> Option<String> {
+) -> Option<ResolvedInstructionTarget> {
     let provider = target.provider.clone()?;
-    if let Some(key_alias) = target.key_alias.clone() {
-        if let Some(model) = target.model.clone() {
-            let prefix = format!("{}.{}.", provider, key_alias);
-            for key in registry.list_provider_keys(&provider) {
-                if key.starts_with(&prefix) {
-                    if let Some(profile) = registry.get(&key) {
-                        if profile.model_id.as_deref() == Some(&model) {
-                            return Some(key);
-                        }
-                    }
-                }
-            }
-            return None;
-        }
-        let prefix = format!("{}.{}.", provider, key_alias);
-        for key in registry.list_provider_keys(&provider) {
-            if key.starts_with(&prefix) {
-                return Some(key);
-            }
-        }
+    let provider_keys = registry.list_provider_keys(&provider);
+    if provider_keys.is_empty() {
         return None;
     }
+
+    let alias = target
+        .key_alias
+        .as_deref()
+        .map(|value| value.trim().to_string())
+        .unwrap_or_default();
+    let alias_explicit = !alias.is_empty() && target.path_length == Some(3);
+
+    if alias_explicit {
+        let prefix = format!("{}.{}.", provider, alias);
+        let alias_keys: Vec<String> = provider_keys
+            .iter()
+            .filter(|key| key.starts_with(&prefix))
+            .cloned()
+            .collect();
+        if !alias_keys.is_empty() {
+            if let Some(model) = target.model.clone() {
+                let matching: Vec<String> = alias_keys
+                    .iter()
+                    .filter(|key| {
+                        registry
+                            .get(key)
+                            .and_then(|profile| profile.model_id.clone())
+                            .as_deref()
+                            == Some(model.as_str())
+                    })
+                    .cloned()
+                    .collect();
+                if !matching.is_empty() {
+                    return Some(ResolvedInstructionTarget {
+                        mode: if matching.len() == 1 {
+                            InstructionTargetMatchMode::Exact
+                        } else {
+                            InstructionTargetMatchMode::Filter
+                        },
+                        keys: matching,
+                    });
+                }
+            }
+            return Some(ResolvedInstructionTarget {
+                mode: InstructionTargetMatchMode::Filter,
+                keys: alias_keys,
+            });
+        }
+    }
+
     if let Some(key_index) = target.key_index {
-        return registry.resolve_runtime_key_by_index(&provider, key_index);
+        if let Some(runtime_key) = registry.resolve_runtime_key_by_index(&provider, key_index) {
+            return Some(ResolvedInstructionTarget {
+                mode: InstructionTargetMatchMode::Exact,
+                keys: vec![runtime_key],
+            });
+        }
     }
+
     if let Some(model) = target.model.clone() {
-        return registry.resolve_runtime_key_by_model(&provider, &model);
+        let matching: Vec<String> = provider_keys
+            .iter()
+            .filter(|key| {
+                registry
+                    .get(key)
+                    .and_then(|profile| profile.model_id.clone())
+                    .as_deref()
+                    == Some(model.as_str())
+            })
+            .cloned()
+            .collect();
+        if !matching.is_empty() {
+            return Some(ResolvedInstructionTarget {
+                mode: InstructionTargetMatchMode::Filter,
+                keys: matching,
+            });
+        }
     }
-    registry.list_provider_keys(&provider).into_iter().next()
+
+    if !alias.is_empty() && !alias_explicit {
+        let prefix = format!("{}.{}.", provider, alias);
+        for key in &provider_keys {
+            if key.starts_with(&prefix) {
+                return Some(ResolvedInstructionTarget {
+                    mode: InstructionTargetMatchMode::Exact,
+                    keys: vec![key.clone()],
+                });
+            }
+        }
+    }
+
+    Some(ResolvedInstructionTarget {
+        mode: InstructionTargetMatchMode::Filter,
+        keys: provider_keys,
+    })
 }
 
 fn instruction_target_matches_provider_key(

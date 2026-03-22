@@ -55,6 +55,8 @@ function extractExecCommandArgs(chatResponse: JsonObject): Record<string, unknow
 
 describe('servertool pre-command hooks', () => {
   const originalHooksFile = process.env.ROUTECODEX_PRE_COMMAND_HOOKS_FILE;
+  const originalRccHome = process.env.RCC_HOME;
+  const originalRoutecodexHome = process.env.ROUTECODEX_HOME;
   const originalUserDir = process.env.ROUTECODEX_USER_DIR;
 
   beforeEach(() => {
@@ -68,6 +70,16 @@ describe('servertool pre-command hooks', () => {
       delete process.env.ROUTECODEX_PRE_COMMAND_HOOKS_FILE;
     } else {
       process.env.ROUTECODEX_PRE_COMMAND_HOOKS_FILE = originalHooksFile;
+    }
+    if (originalRccHome === undefined) {
+      delete process.env.RCC_HOME;
+    } else {
+      process.env.RCC_HOME = originalRccHome;
+    }
+    if (originalRoutecodexHome === undefined) {
+      delete process.env.ROUTECODEX_HOME;
+    } else {
+      process.env.ROUTECODEX_HOME = originalRoutecodexHome;
     }
     if (originalUserDir === undefined) {
       delete process.env.ROUTECODEX_USER_DIR;
@@ -282,6 +294,8 @@ describe('servertool pre-command hooks', () => {
       )
     );
     process.env.ROUTECODEX_PRE_COMMAND_HOOKS_FILE = hookFile;
+    process.env.RCC_HOME = routecodexDir;
+    process.env.ROUTECODEX_HOME = routecodexDir;
     process.env.ROUTECODEX_USER_DIR = routecodexDir;
     resetPreCommandHooksCacheForTests();
 

@@ -86,7 +86,7 @@ export function normalizeClockSessionMeta(raw: unknown): ClockSessionMeta {
 
 export function buildEmptyState(sessionId: string): ClockSessionState {
   const t = nowMs();
-  return { version: 1, sessionId, tasks: [], updatedAtMs: t, meta: buildDefaultClockSessionMeta() };
+  return { version: 1, sessionId, tasks: [], updatedAtMs: t, meta: buildDefaultClockSessionMeta(), disabled: false };
 }
 
 export function coerceState(raw: unknown, sessionId: string): ClockSessionState {
@@ -154,10 +154,29 @@ export function coerceState(raw: unknown, sessionId: string): ClockSessionState 
     typeof record.tmuxSessionId === 'string' && record.tmuxSessionId.trim()
       ? record.tmuxSessionId.trim()
       : undefined;
+  const disabled = record.disabled === true;
+  const disabledReason =
+    typeof record.disabledReason === 'string' && record.disabledReason.trim()
+      ? record.disabledReason.trim()
+      : undefined;
+  const disabledAtMs =
+    typeof record.disabledAtMs === 'number' && Number.isFinite(record.disabledAtMs)
+      ? Math.floor(record.disabledAtMs)
+      : undefined;
   const updatedAtMs =
     typeof record.updatedAtMs === 'number' && Number.isFinite(record.updatedAtMs) ? Math.floor(record.updatedAtMs) : nowMs();
   const meta = normalizeClockSessionMeta(record.meta);
-  return { version: 1, sessionId, ...(tmuxSessionId ? { tmuxSessionId } : {}), tasks, updatedAtMs, meta };
+  return {
+    version: 1,
+    sessionId,
+    ...(tmuxSessionId ? { tmuxSessionId } : {}),
+    ...(disabled ? { disabled: true } : {}),
+    ...(disabledReason ? { disabledReason } : {}),
+    ...(disabledAtMs !== undefined ? { disabledAtMs } : {}),
+    tasks,
+    updatedAtMs,
+    meta
+  };
 }
 
 export function cleanExpiredTasks(tasks: ClockTask[], config: ClockConfigSnapshot, atMs: number): ClockTask[] {

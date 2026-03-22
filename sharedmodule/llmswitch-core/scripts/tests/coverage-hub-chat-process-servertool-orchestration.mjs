@@ -39,8 +39,8 @@ async function main() {
       metadata: {},
       requestId: 'req-1'
     });
-    assert.equal(countToolByName(out.tools, 'continue_execution'), 1);
-    assert.equal(out.metadata.continueExecutionEnabled, true);
+    assert.equal(countToolByName(out.tools, 'continue_execution'), 0);
+    assert.equal(out.metadata?.continueExecutionEnabled, undefined);
   }
 
   {

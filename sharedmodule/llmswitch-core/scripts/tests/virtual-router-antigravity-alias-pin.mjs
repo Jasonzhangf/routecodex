@@ -41,12 +41,7 @@ async function main() {
     const engine = new VirtualRouterEngine();
     engine.initialize(buildConfig());
 
-    engine.handleProviderFailure({
-      providerKey: KEY_A1,
-      fatal: true,
-      affectsHealth: true,
-      reason: 'test:make_alias1_unhealthy'
-    });
+    engine.markProviderCooldown(KEY_A1, 120_000);
 
     const result = engine.route(buildRequest(), buildMetadata('failover'));
     assert.equal(result.decision.providerKey, KEY_A2, '[antigravity] should fail over to next alias when unhealthy');
@@ -54,21 +49,33 @@ async function main() {
 
   {
     // 3) Recovery attempt (excludedProviderKeys present) rotates the alias to the tail,
-    //    and the next normal request stays sticky to the new head alias.
+    //    and after a successful response commit, the next normal request stays sticky to the new head alias.
     const engine = new VirtualRouterEngine();
     engine.initialize(buildConfig());
 
-    const first = engine.route(buildRequest(), buildMetadata('recovery_1', { excludedProviderKeys: [KEY_A1] }));
+    const first = engine.route(
+      buildRequest(),
+      buildMetadata('recovery_1', { sessionId: 'sess-recovery', excludedProviderKeys: [KEY_A1] })
+    );
     assert.equal(first.decision.providerKey, KEY_A2, '[antigravity] excluded providerKey should route to next alias');
+    engine.handleProviderSuccess({
+      runtime: {
+        providerKey: KEY_A2,
+        requestId: 'req_antigravity_recovery_1'
+      }
+    });
 
-    const follow = engine.route(buildRequest(), buildMetadata('recovery_2'));
+    const follow = engine.route(buildRequest(), buildMetadata('recovery_2', { sessionId: 'sess-recovery' }));
     assert.equal(
       follow.decision.providerKey,
       KEY_A2,
-      '[antigravity] after exclusion, routing should remain sticky to the next alias until it fails'
+      '[antigravity] after exclusion + success commit, routing should remain sticky to the next alias until it fails'
     );
 
-    const rotateBack = engine.route(buildRequest(), buildMetadata('recovery_3', { excludedProviderKeys: [KEY_A2] }));
+    const rotateBack = engine.route(
+      buildRequest(),
+      buildMetadata('recovery_3', { sessionId: 'sess-recovery', excludedProviderKeys: [KEY_A2] })
+    );
     assert.equal(rotateBack.decision.providerKey, KEY_A1, '[antigravity] second exclusion should rotate back to alias1');
   }
 
@@ -109,6 +116,7 @@ function buildConfig(options = {}) {
 }
 
 function buildProviderProfile(providerKey) {
+  const isAntigravity = providerKey.startsWith('antigravity.');
   return {
     providerKey,
     providerType: 'openai',
@@ -116,7 +124,7 @@ function buildProviderProfile(providerKey) {
     auth: { type: 'apiKey', secretRef: `${providerKey}_KEY` },
     outboundProfile: 'openai-chat',
     compatibilityProfile: 'compat:passthrough',
-    modelId: providerKey.split('.').pop(),
+    modelId: isAntigravity ? 'gemini-2.5-pro' : providerKey.split('.').pop(),
     processMode: 'chat',
     streaming: 'auto',
     maxContextTokens: 128000

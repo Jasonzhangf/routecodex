@@ -1,99 +1,38 @@
 import type { JsonObject } from '../../hub/types/json.js';
 import type { AdapterContext } from '../../hub/types/chat-envelope.js';
+import { buildNativeReqOutboundCompatAdapterContext } from '../../hub/pipeline/compat/native-adapter-context.js';
+import { applyLmstudioResponsesInputStringifyWithNative } from '../../../router/virtual-router/engine-selection/native-compat-action-semantics.js';
 
-type UnknownRecord = Record<string, unknown>;
+const PROFILE = 'chat:lmstudio';
+const DEFAULT_PROVIDER_PROTOCOL = 'openai-responses';
+const DEFAULT_ENTRY_ENDPOINT = '/v1/responses';
 
-function isRecord(value: unknown): value is UnknownRecord {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
+function buildLmstudioCompatContext(
+  adapterContext?: AdapterContext,
+  options?: { stringifyEnabled?: boolean }
+): Record<string, unknown> {
+  const nativeContext = buildNativeReqOutboundCompatAdapterContext(adapterContext);
+  const rtNode =
+    nativeContext.__rt && typeof nativeContext.__rt === 'object' && !Array.isArray(nativeContext.__rt)
+      ? { ...(nativeContext.__rt as Record<string, unknown>) }
+      : {};
+  if (options?.stringifyEnabled) {
+    rtNode.lmstudioStringifyInputEnabled = true;
+  }
 
-function extractTextParts(content: unknown): string[] {
-  const out: string[] = [];
-  if (typeof content === 'string' && content.trim().length) {
-    out.push(content.trim());
-    return out;
-  }
-  if (!Array.isArray(content)) {
-    return out;
-  }
-  for (const part of content) {
-    if (!isRecord(part)) continue;
-    const type = typeof part.type === 'string' ? String(part.type).trim().toLowerCase() : '';
-    const text =
-      typeof part.text === 'string'
-        ? part.text
-        : typeof (part as UnknownRecord).content === 'string'
-          ? String((part as UnknownRecord).content)
-          : undefined;
-    if (typeof text === 'string' && text.trim().length) {
-      out.push(text.trim());
-      continue;
-    }
-    // OpenAI Responses content parts often use { type: 'input_text'|'output_text', text: '...' }.
-    if ((type === 'input_text' || type === 'output_text') && typeof (part as UnknownRecord).text === 'string') {
-      const t = String((part as UnknownRecord).text).trim();
-      if (t.length) out.push(t);
-    }
-  }
-  return out;
-}
-
-function stringifyInputItems(input: unknown): string | null {
-  if (!Array.isArray(input)) return null;
-  const chunks: string[] = [];
-  for (const item of input) {
-    if (!isRecord(item)) continue;
-    const type = typeof item.type === 'string' ? String(item.type).trim().toLowerCase() : '';
-    const roleCandidate = typeof item.role === 'string' ? String(item.role).trim() : '';
-    const messageNode = isRecord((item as UnknownRecord).message) ? ((item as UnknownRecord).message as UnknownRecord) : undefined;
-    const nestedRoleCandidate =
-      messageNode && typeof messageNode.role === 'string' ? String(messageNode.role).trim() : '';
-    // OpenAI Responses supports message-like items without an explicit `type` field:
-    // { role: 'user'|'assistant'|'system', content: [...] }
-    if (type === 'message' || (!type && (roleCandidate || nestedRoleCandidate))) {
-      const role =
-        roleCandidate ||
-        nestedRoleCandidate ||
-        'user';
-      const contentNode = item.content !== undefined ? item.content : messageNode?.content;
-      const parts = extractTextParts(contentNode);
-      if (parts.length) {
-        chunks.push(`${role}: ${parts.join('\n')}`);
-      }
-      continue;
-    }
-    if (type === 'function_call') {
-      const name = typeof item.name === 'string' ? String(item.name).trim() : 'tool';
-      const args =
-        typeof item.arguments === 'string'
-          ? String(item.arguments)
-          : (() => {
-              try {
-                return JSON.stringify(item.arguments ?? null);
-              } catch {
-                return String(item.arguments ?? '');
-              }
-            })();
-      chunks.push(`assistant tool_call ${name}: ${args}`);
-      continue;
-    }
-    if (type === 'function_call_output') {
-      const output =
-        typeof item.output === 'string'
-          ? String(item.output)
-          : (() => {
-              try {
-                return JSON.stringify(item.output ?? null);
-              } catch {
-                return String(item.output ?? '');
-              }
-            })();
-      chunks.push(`tool_output: ${output}`);
-      continue;
-    }
-  }
-  if (!chunks.length) return '';
-  return chunks.join('\n\n');
+  return {
+    ...nativeContext,
+    ...(Object.keys(rtNode).length ? { __rt: rtNode } : {}),
+    compatibilityProfile: PROFILE,
+    providerProtocol:
+      nativeContext.providerProtocol ??
+      adapterContext?.providerProtocol ??
+      DEFAULT_PROVIDER_PROTOCOL,
+    entryEndpoint:
+      nativeContext.entryEndpoint ??
+      adapterContext?.entryEndpoint ??
+      DEFAULT_ENTRY_ENDPOINT
+  };
 }
 
 /**
@@ -108,25 +47,21 @@ function stringifyInputItems(input: unknown): string | null {
  * This is applied via compat profile `chat:lmstudio` and only when `providerProtocol === 'openai-responses'`.
  */
 export function stringifyLmstudioResponsesInput(payload: JsonObject, adapterContext?: AdapterContext): JsonObject {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return payload;
+  }
+  if (!adapterContext) {
+    return payload;
+  }
   const enabled =
     process.env.LLMSWITCH_LMSTUDIO_STRINGIFY_INPUT === '1' ||
     process.env.ROUTECODEX_LMSTUDIO_STRINGIFY_INPUT === '1';
   if (!enabled) {
     return payload;
   }
-  if (!adapterContext || adapterContext.providerProtocol !== 'openai-responses') {
-    return payload;
-  }
-  const record = payload as unknown as UnknownRecord;
-  const input = record.input;
-  if (!Array.isArray(input)) {
-    return payload;
-  }
-  const flattened = stringifyInputItems(input);
-  if (flattened === null) {
-    return payload;
-  }
-  const instructions = typeof record.instructions === 'string' ? record.instructions.trim() : '';
-  record.input = instructions.length ? `${instructions}\n\n${flattened}`.trim() : flattened;
-  return payload;
+
+  return applyLmstudioResponsesInputStringifyWithNative(
+    payload as unknown as Record<string, unknown>,
+    buildLmstudioCompatContext(adapterContext, { stringifyEnabled: true })
+  ) as unknown as JsonObject;
 }

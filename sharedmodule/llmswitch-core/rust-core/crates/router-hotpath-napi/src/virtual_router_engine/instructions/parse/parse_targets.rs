@@ -24,32 +24,18 @@ fn normalize_instruction_leading(content: &str) -> String {
 
 fn normalize_stop_message_command_prefix(content: &str) -> String {
     let normalized = normalize_instruction_leading(content);
-    let re = Regex::new(r#"^(?:"|')?stopMessage(?:"|')?\s*([:,])"#).unwrap();
-    re.replace(&normalized, "stopMessage$1").to_string()
-}
-
-fn normalize_quoted_stop_message_shorthand(content: &str) -> Option<String> {
-    let normalized = normalize_instruction_leading(content);
-    let mut chars = normalized.chars();
-    let first = chars.next()?;
-    if first != '"' && first != '\'' {
-        return None;
-    }
-    let mut escaped = false;
-    for ch in chars {
-        if escaped {
-            escaped = false;
-            continue;
-        }
-        if ch == '\\' {
-            escaped = true;
-            continue;
-        }
-        if ch == first {
-            return Some(format!("stopMessage:{}", normalized));
-        }
-    }
-    None
+    let re = Regex::new(r#"(?i)^(?:"|')?sm(?:"|')?\s*([:,])"#).unwrap();
+    let captures = match re.captures(&normalized) {
+        Some(value) => value,
+        None => return normalized,
+    };
+    let matched = match captures.get(0) {
+        Some(value) => value,
+        None => return normalized,
+    };
+    let separator = captures.get(1).map(|m| m.as_str()).unwrap_or(":");
+    let tail = normalized[matched.end()..].trim_start();
+    format!("sm{}{}", separator, tail)
 }
 
 fn split_instruction_targets(content: &str) -> Vec<String> {
@@ -74,14 +60,14 @@ fn recover_split_stop_message_instruction(tokens: &[String]) -> Option<String> {
         return None;
     }
     let head = normalize_split_stop_message_head_token(&tokens[0]);
-    if !head.eq_ignore_ascii_case("stopmessage") {
+    if !head.eq_ignore_ascii_case("sm") {
         return None;
     }
     let tail = tokens[1..].join(",").trim().to_string();
     if tail.is_empty() {
         return None;
     }
-    Some(format!("stopMessage:{}", tail))
+    Some(format!("sm:{}", tail))
 }
 
 pub(super) fn expand_instruction_segments(instruction: &str) -> Vec<String> {
@@ -90,16 +76,13 @@ pub(super) fn expand_instruction_segments(instruction: &str) -> Vec<String> {
         return Vec::new();
     }
     let normalized_leading = normalize_instruction_leading(trimmed);
-    let stop_re = Regex::new(r#"^(?:"|')?stopMessage(?:"|')?\s*[:,]"#).unwrap();
+    let stop_re = Regex::new(r#"(?i)^(?:"|')?sm(?:"|')?\s*[:,]"#).unwrap();
     if stop_re.is_match(&normalized_leading) {
         return vec![normalize_stop_message_command_prefix(&normalized_leading)];
     }
     let pre_re = Regex::new(r"^precommand(?:\s*:|$)").unwrap();
     if pre_re.is_match(&normalized_leading) {
         return vec![normalized_leading];
-    }
-    if let Some(quoted) = normalize_quoted_stop_message_shorthand(&normalized_leading) {
-        return vec![normalize_stop_message_command_prefix(&quoted)];
     }
     let prefix = trimmed.chars().next().unwrap_or_default();
     if prefix == '!' || prefix == '#' || prefix == '@' {
@@ -134,8 +117,11 @@ pub(super) fn split_target_and_process_mode(raw_target: &str) -> (String, Option
         if idx > 0 && idx < trimmed.len() - 1 {
             let target = trimmed[..idx].trim().to_string();
             let mode = trimmed[idx + 1..].trim().to_ascii_lowercase();
-            if !target.is_empty() && (mode == "passthrough" || mode == "chat") {
-                return (target, Some(mode));
+            if !target.is_empty() {
+                if mode == "passthrough" || mode == "chat" {
+                    return (target, Some(mode));
+                }
+                return (target, None);
             }
         }
     }

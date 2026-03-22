@@ -7,9 +7,13 @@ export async function executePipelineViaLegacyOverride(
 ): Promise<PipelineExecutionResult> {
   const pipelineResult = await runHubPipelineFn(input, (input.metadata as Record<string, unknown>) ?? {});
   const target = pipelineResult?.target as { providerKey?: string; runtimeKey?: string; processMode?: string } | undefined;
+  const providerKey = typeof target?.providerKey === 'string' ? target.providerKey : undefined;
+  const providerKeyParts = providerKey ? providerKey.split('.') : [];
+  const aliasScopedProviderKey = providerKeyParts.length >= 3 ? `${providerKeyParts[0]}.${providerKeyParts[1]}` : undefined;
   const runtimeKey =
-    (typeof target?.runtimeKey === 'string' && target.runtimeKey.trim()) ||
-    (typeof target?.providerKey === 'string' ? server.providerKeyToRuntimeKey.get(target.providerKey) : undefined);
+    (providerKey ? server.providerKeyToRuntimeKey.get(providerKey) : undefined) ||
+    (aliasScopedProviderKey ? server.providerKeyToRuntimeKey.get(aliasScopedProviderKey) : undefined) ||
+    (typeof target?.runtimeKey === 'string' && target.runtimeKey.trim());
   if (!runtimeKey) {
     throw new Error(`Runtime for provider ${target?.providerKey || 'unknown'} not initialized`);
   }

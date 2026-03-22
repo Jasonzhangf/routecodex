@@ -11,14 +11,15 @@ import {
 import { resolveHeartbeatDir } from "./paths.js";
 import {
   coerceHeartbeatState,
-  removeHeartbeatState,
   saveHeartbeatState,
 } from "./session-store.js";
+import { buildHeartbeatScheduleDiagnostic } from "./schedule-diagnostics.js";
 import type {
   HeartbeatConfigSnapshot,
   HeartbeatDispatchResult,
   HeartbeatState,
 } from "./types.js";
+import { appendHeartbeatHistoryEvent } from "./history-store.js";
 
 let daemonStarted = false;
 let daemonTimer: NodeJS.Timeout | undefined;
@@ -70,9 +71,13 @@ function scheduleHeartbeatTimer(): void {
 export function buildHeartbeatInjectText(): string {
   return [
     "[Heartbeat]",
-    "请读取当前目录的 HEARTBEAT.md 进行任务巡检。",
+    "请先判断你当前是否仍在执行上一次已开始的任务。",
+    "如果当前任务仍在执行中，请忽略本次提醒，不要打断当前工作。",
+    "如果当前任务已经空闲或已中断，请读取当前目录的 HEARTBEAT.md 进行任务巡检。",
+    "你必须在 HEARTBEAT.md 顶部维护心跳停止条件（例如：Heartbeat-Stop-When: no-open-tasks）。",
+    "当 HEARTBEAT.md 已无未完成任务，或已不具备可执行任务时，系统会自动停用该 tmux 会话 heartbeat。",
     "先检查上一次交付是否完整、是否还需要继续修复。",
-    "完成后更新 DELIVERY.md，然后调用 review。",
+    "完成后更新 DELIVERY.md（最多只保留最近十次交付记录，不要无限追加成巨型文件），然后调用 drudge.review。",
     "不要只做汇报；如果仍有未完成项，请直接继续执行。",
   ].join("\n");
 }
@@ -103,7 +108,13 @@ async function processHeartbeatStateFile(
   const state = coerceHeartbeatState(raw, fallbackTmuxSessionId);
   const tmuxSessionId = readString(state.tmuxSessionId);
   if (!tmuxSessionId) {
-    await removeHeartbeatState(fallbackTmuxSessionId);
+    await appendHeartbeatHistoryEvent({
+      tmuxSessionId: fallbackTmuxSessionId,
+      source: "daemon.tick",
+      action: "state_invalid",
+      outcome: "failed",
+      reason: "tmux_session_id_missing",
+    });
     return;
   }
 
@@ -111,7 +122,22 @@ async function processHeartbeatStateFile(
   if (isAlive) {
     const alive = await Promise.resolve(isAlive(tmuxSessionId));
     if (!alive) {
-      await removeHeartbeatState(tmuxSessionId);
+      const next: HeartbeatState = {
+        ...state,
+        enabled: false,
+        updatedAtMs: at,
+        lastSkippedAtMs: at,
+        lastSkippedReason: "tmux_session_not_found",
+        lastError: "tmux_session_not_found",
+      };
+      await saveHeartbeatState(next);
+      await appendHeartbeatHistoryEvent({
+        tmuxSessionId,
+        source: "daemon.tick",
+        action: "availability",
+        outcome: "disabled",
+        reason: "tmux_session_not_found",
+      });
       return;
     }
   }
@@ -133,9 +159,23 @@ async function processHeartbeatStateFile(
     }),
   );
   const reason = readString(result?.reason);
+  const scheduleDiagnosticBase = buildHeartbeatScheduleDiagnostic({
+    state,
+    config: effective,
+    atMs: at,
+    phase: result?.disable
+      ? "disabled"
+      : result?.ok
+        ? "triggered"
+        : result?.skipped
+          ? "skipped"
+          : "failed",
+    ...(reason ? { reason } : {}),
+  });
   const next: HeartbeatState = {
     ...state,
     updatedAtMs: at,
+    lastScheduleDiagnostic: scheduleDiagnosticBase,
   };
 
   if (result?.disable) {
@@ -145,6 +185,14 @@ async function processHeartbeatStateFile(
       next.lastError = reason;
     }
     await saveHeartbeatState(next);
+    await appendHeartbeatHistoryEvent({
+      tmuxSessionId,
+      source: "daemon.tick",
+      action: "trigger",
+      outcome: "disabled",
+      ...(reason ? { reason } : {}),
+      details: { scheduleDiagnostic: scheduleDiagnosticBase },
+    });
     return;
   }
 
@@ -155,6 +203,13 @@ async function processHeartbeatStateFile(
     next.lastSkippedAtMs = undefined;
     next.lastSkippedReason = undefined;
     await saveHeartbeatState(next);
+    await appendHeartbeatHistoryEvent({
+      tmuxSessionId,
+      source: "daemon.tick",
+      action: "trigger",
+      outcome: "triggered",
+      details: { scheduleDiagnostic: scheduleDiagnosticBase },
+    });
     return;
   }
 
@@ -163,11 +218,27 @@ async function processHeartbeatStateFile(
     next.lastSkippedReason = reason || "skipped";
     next.lastError = undefined;
     await saveHeartbeatState(next);
+    await appendHeartbeatHistoryEvent({
+      tmuxSessionId,
+      source: "daemon.tick",
+      action: "trigger",
+      outcome: "skipped",
+      reason: reason || "skipped",
+      details: { scheduleDiagnostic: scheduleDiagnosticBase },
+    });
     return;
   }
 
   next.lastError = reason || "dispatch_failed";
   await saveHeartbeatState(next);
+  await appendHeartbeatHistoryEvent({
+    tmuxSessionId,
+    source: "daemon.tick",
+    action: "trigger",
+    outcome: "failed",
+    reason: reason || "dispatch_failed",
+    details: { scheduleDiagnostic: scheduleDiagnosticBase },
+  });
 }
 
 async function tickOnce(): Promise<void> {

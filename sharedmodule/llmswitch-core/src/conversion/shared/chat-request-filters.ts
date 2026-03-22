@@ -1,7 +1,7 @@
 import type { ConversionContext, ConversionProfile } from '../types.js';
 import { normalizeChatRequest } from './openai-message-normalize.js';
 import { createSnapshotWriter } from '../snapshot-utils.js';
-import { buildGovernedFilterPayloadWithNativeFallback } from '../../router/virtual-router/engine-selection/native-chat-request-filter-semantics.js';
+import { buildGovernedFilterPayloadWithNative } from '../../router/virtual-router/engine-selection/native-chat-request-filter-semantics.js';
 import { pruneChatRequestPayloadWithNative } from '../../router/virtual-router/engine-selection/native-hub-pipeline-req-inbound-semantics.js';
 
 /**
@@ -53,7 +53,7 @@ export async function runStandardChatRequestFilters(
     entryEndpointLower.includes('/v1/messages');
   const skipAutoToolInjection = isAnthropicProfile && originalToolCount === 0;
 
-  const nativeGovernedPayload = buildGovernedFilterPayloadWithNativeFallback(chatRequest);
+  const nativeGovernedPayload = buildGovernedFilterPayloadWithNative(chatRequest);
   if (skipAutoToolInjection && nativeGovernedPayload && typeof nativeGovernedPayload === 'object') {
     if (!Array.isArray((nativeGovernedPayload as any).tools)) {
       (nativeGovernedPayload as Record<string, unknown>).tools = [];

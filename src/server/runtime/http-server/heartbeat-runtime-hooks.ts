@@ -6,7 +6,13 @@ import {
   setHeartbeatRuntimeHooksSnapshot
 } from '../../../modules/llmswitch/bridge.js';
 import { getSessionClientRegistry, injectSessionClientPromptWithResult } from './session-client-registry.js';
-import { isTmuxSessionAlive, resolveTmuxSessionWorkingDirectory } from './tmux-session-probe.js';
+import { appendTmuxInjectionHistoryEvent } from './tmux-injection-history.js';
+import {
+  isTmuxSessionAlive,
+  isTmuxSessionIdleForInject,
+  resolveTmuxSessionWorkingDirectory
+} from './tmux-session-probe.js';
+import { getSessionExecutionStateTracker } from './session-execution-state.js';
 
 function readString(value: unknown): string | undefined {
   if (typeof value !== 'string') {
@@ -25,15 +31,66 @@ function parseHeartbeatUntilFromText(text: string): number | undefined {
   return Number.isFinite(parsed) ? Math.floor(parsed) : undefined;
 }
 
+function parseHeartbeatStopWhenFromText(text: string): 'no-open-tasks' | 'never' | undefined {
+  const match = text.match(/^\s*Heartbeat-Stop-When:\s*(.+?)\s*$/im);
+  if (!match) {
+    return undefined;
+  }
+  const normalized = String(match[1] || '').trim().toLowerCase();
+  if (!normalized) {
+    return undefined;
+  }
+  if (normalized === 'no-open-tasks' || normalized === 'no_open_tasks') {
+    return 'no-open-tasks';
+  }
+  if (normalized === 'never' || normalized === 'off' || normalized === 'disabled') {
+    return 'never';
+  }
+  return undefined;
+}
+
+function countHeartbeatChecklistTasks(text: string): { open: number; closed: number } {
+  let open = 0;
+  let closed = 0;
+  let inCodeFence = false;
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = String(rawLine || '');
+    const trimmed = line.trim();
+    if (/^```/.test(trimmed)) {
+      inCodeFence = !inCodeFence;
+      continue;
+    }
+    if (inCodeFence) {
+      continue;
+    }
+    if (/^\s*[-*+]\s*\[\s\]\s+/.test(line)) {
+      open += 1;
+      continue;
+    }
+    if (/^\s*[-*+]\s*\[[xX]\]\s+/.test(line)) {
+      closed += 1;
+      continue;
+    }
+  }
+  return { open, closed };
+}
+
 async function readHeartbeatContext(workdir: string): Promise<{
   heartbeatFile: string;
   heartbeatUntilMs?: number;
+  heartbeatStopWhen?: 'no-open-tasks' | 'never';
+  checklistOpenCount: number;
+  checklistTotalCount: number;
 }> {
   const heartbeatFile = path.join(workdir, 'HEARTBEAT.md');
   const raw = await fs.readFile(heartbeatFile, 'utf8');
+  const checklist = countHeartbeatChecklistTasks(raw);
   return {
     heartbeatFile,
-    heartbeatUntilMs: parseHeartbeatUntilFromText(raw)
+    heartbeatUntilMs: parseHeartbeatUntilFromText(raw),
+    heartbeatStopWhen: parseHeartbeatStopWhenFromText(raw),
+    checklistOpenCount: checklist.open,
+    checklistTotalCount: checklist.open + checklist.closed
   };
 }
 
@@ -55,34 +112,74 @@ export async function dispatchSingleHeartbeat(args: {
   requestActivityTracker: { countActiveRequestsForTmuxSession(tmuxSessionId: string): number };
   dryRun?: boolean;
 }): Promise<Record<string, unknown>> {
+  const finalize = (outcome: 'triggered' | 'skipped' | 'failed' | 'disabled', payload: Record<string, unknown>): Record<string, unknown> => {
+    void appendTmuxInjectionHistoryEvent({
+      source: 'heartbeat',
+      outcome,
+      tmuxSessionId: readString(payload.tmuxSessionId) || readString(args.tmuxSessionId),
+      sessionId: readString(payload.tmuxSessionId) || readString(args.tmuxSessionId),
+      reason: readString(payload.reason),
+      requestId: readString(payload.requestId)
+    });
+    return payload;
+  };
+
   const tmuxSessionId = readString(args.tmuxSessionId);
   if (!tmuxSessionId) {
-    return { ok: false, skipped: true, reason: 'tmux_session_required' };
+    return finalize('failed', { ok: false, skipped: true, reason: 'tmux_session_required' });
   }
   if (!isTmuxSessionAlive(tmuxSessionId)) {
-    return { ok: false, disable: true, reason: 'tmux_session_not_found' };
+    return finalize('disabled', { ok: false, disable: true, reason: 'tmux_session_not_found', tmuxSessionId });
   }
 
   const activeRequests = args.requestActivityTracker.countActiveRequestsForTmuxSession(tmuxSessionId);
   if (activeRequests > 0) {
-    return { ok: false, skipped: true, reason: 'request_inflight', activeRequests };
+    return finalize('skipped', { ok: false, skipped: true, reason: 'request_inflight', activeRequests, tmuxSessionId });
+  }
+
+  const executionState = getSessionExecutionStateTracker().getStateSnapshot(tmuxSessionId);
+  if (executionState.shouldSkipHeartbeat) {
+    return finalize('skipped', {
+      ok: false,
+      skipped: true,
+      reason: 'session_execution_active',
+      state: executionState.state,
+      activityReason: executionState.reason,
+      tmuxSessionId
+    });
   }
 
   const registry = getSessionClientRegistry();
-  if (registry.hasAliveTmuxSession(tmuxSessionId)) {
-    return { ok: false, skipped: true, reason: 'client_connected' };
+  if (registry.hasAliveTmuxSession(tmuxSessionId) && executionState.state === 'UNKNOWN') {
+    return finalize('skipped', {
+      ok: false,
+      skipped: true,
+      reason: 'client_connected_unknown_state',
+      tmuxSessionId
+    });
+  }
+
+  const injectIdle = isTmuxSessionIdleForInject(tmuxSessionId);
+  if (injectIdle === false) {
+    return finalize('skipped', { ok: false, skipped: true, reason: 'tmux_session_active', tmuxSessionId });
   }
 
   const workdir = resolveTmuxSessionWorkingDirectory(tmuxSessionId);
   if (!workdir) {
-    return { ok: false, skipped: true, reason: 'tmux_workdir_missing' };
+    return finalize('skipped', { ok: false, skipped: true, reason: 'tmux_workdir_missing', tmuxSessionId });
   }
 
-  let heartbeatContext: { heartbeatFile: string; heartbeatUntilMs?: number };
+  let heartbeatContext: {
+    heartbeatFile: string;
+    heartbeatUntilMs?: number;
+    heartbeatStopWhen?: 'no-open-tasks' | 'never';
+    checklistOpenCount: number;
+    checklistTotalCount: number;
+  };
   try {
     heartbeatContext = await readHeartbeatContext(workdir);
   } catch {
-    return { ok: false, disable: true, reason: 'heartbeat_file_missing', workdir };
+    return finalize('disabled', { ok: false, disable: true, reason: 'heartbeat_file_missing', workdir, tmuxSessionId });
   }
 
   const nowMs = Date.now();
@@ -91,55 +188,85 @@ export async function dispatchSingleHeartbeat(args: {
     Number.isFinite(heartbeatContext.heartbeatUntilMs) &&
     heartbeatContext.heartbeatUntilMs <= nowMs
   ) {
-    return {
+    return finalize('disabled', {
       ok: false,
       disable: true,
       reason: 'heartbeat_until_expired',
       workdir,
-      heartbeatUntilMs: heartbeatContext.heartbeatUntilMs
-    };
+      heartbeatUntilMs: heartbeatContext.heartbeatUntilMs,
+      tmuxSessionId
+    });
+  }
+
+  if (heartbeatContext.heartbeatStopWhen === 'no-open-tasks') {
+    if (heartbeatContext.checklistTotalCount < 1) {
+      return finalize('disabled', {
+        ok: false,
+        disable: true,
+        reason: 'heartbeat_no_tasks',
+        workdir,
+        tmuxSessionId,
+        heartbeatFile: heartbeatContext.heartbeatFile
+      });
+    }
+    if (heartbeatContext.checklistOpenCount < 1) {
+      return finalize('disabled', {
+        ok: false,
+        disable: true,
+        reason: 'heartbeat_all_tasks_completed',
+        workdir,
+        tmuxSessionId,
+        heartbeatFile: heartbeatContext.heartbeatFile
+      });
+    }
   }
 
   if (args.dryRun) {
-    return {
+    return finalize('triggered', {
       ok: true,
       dryRun: true,
       workdir,
+      tmuxSessionId,
       heartbeatFile: heartbeatContext.heartbeatFile,
       ...(typeof heartbeatContext.heartbeatUntilMs === 'number'
         ? { heartbeatUntilMs: heartbeatContext.heartbeatUntilMs }
         : {})
-    };
+    });
   }
 
+  const heartbeatRequestId = `heartbeat:${tmuxSessionId}:${nowMs}`;
   const injectResult = await injectSessionClientPromptWithResult({
     tmuxSessionId,
     sessionId: tmuxSessionId,
     tmuxOnly: true,
     text: args.injectText,
     workdir,
-    requestId: `heartbeat:${tmuxSessionId}:${nowMs}`,
+    requestId: heartbeatRequestId,
     source: 'heartbeat_daemon'
   });
 
   if (injectResult.ok) {
-    return {
+    return finalize('triggered', {
       ok: true,
       workdir,
+      tmuxSessionId,
+      requestId: heartbeatRequestId,
       heartbeatFile: heartbeatContext.heartbeatFile,
       ...(typeof heartbeatContext.heartbeatUntilMs === 'number'
         ? { heartbeatUntilMs: heartbeatContext.heartbeatUntilMs }
         : {})
-    };
+    });
   }
 
   const reason = readString(injectResult.reason) || 'inject_failed';
-  return {
+  return finalize(shouldDisableForInjectFailure(reason) ? 'disabled' : 'failed', {
     ok: false,
     ...(shouldDisableForInjectFailure(reason) ? { disable: true } : {}),
     reason,
-    workdir
-  };
+    workdir,
+    tmuxSessionId,
+    requestId: heartbeatRequestId
+  });
 }
 
 export async function triggerHeartbeatNow(args: {

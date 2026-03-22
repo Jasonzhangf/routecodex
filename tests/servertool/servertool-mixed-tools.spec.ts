@@ -156,4 +156,5 @@ describe('servertool: mixed tool_calls (servertool + client tools)', () => {
     // Pending file consumed.
     expect(fs.existsSync(pendingPath)).toBe(false);
   });
+
 });

@@ -553,6 +553,164 @@ describe('HubRequestExecutor failover', () => {
     expect(result).toEqual(expect.objectContaining({ status: 200 }));
   });
 
+  test('fails over on converted HTTP 401 and returns next provider success', async () => {
+    const firstProviderKey = 'opencode-zen-free.key1.mimo-v2-pro-free';
+    const secondProviderKey = 'opencode-zen-free.key2.mimo-v2-pro-free';
+
+    const unauthorizedProcess = jest.fn(async () => ({
+      status: 401,
+      data: {
+        error: {
+          message: 'Upstream authentication failed'
+        }
+      }
+    }));
+    const successProcess = jest.fn(async () => ({ status: 200, data: { id: 'resp_ok' } }));
+
+    const handles = new Map<string, ProviderHandle>([
+      [firstProviderKey, buildHandle(firstProviderKey, unauthorizedProcess)],
+      [secondProviderKey, buildHandle(secondProviderKey, successProcess)]
+    ]);
+
+    const runtimeManager = {
+      resolveRuntimeKey: (providerKey: string) => providerKey,
+      getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey ? handles.get(runtimeKey) : undefined)
+    };
+
+    const pipeline = {
+      execute: jest.fn(async (input: any) => {
+        const disabled = new Set<string>(
+          Array.isArray(input.metadata?.excludedProviderKeys) ? input.metadata.excludedProviderKeys : []
+        );
+        const providerKey = disabled.has(firstProviderKey) ? secondProviderKey : firstProviderKey;
+        return {
+          requestId: input.id,
+          providerPayload: {},
+          target: {
+            providerKey,
+            providerType: 'openai',
+            outboundProfile: 'openai-chat',
+            runtimeKey: providerKey
+          },
+          routingDecision: { routeName: 'default' },
+          metadata: {}
+        };
+      }),
+      updateVirtualRouterConfig: jest.fn()
+    };
+
+    const logStage = jest.fn();
+    const deps = {
+      runtimeManager,
+      getHubPipeline: () => pipeline,
+      getModuleDependencies: () => ({
+        errorHandlingCenter: {
+          handleError: jest.fn(async () => undefined)
+        }
+      }),
+      logStage,
+      stats: new StatsManager()
+    };
+
+    const executor = createRequestExecutor(deps);
+    const result = await executor.execute({
+      requestId: 'req-401-failover',
+      entryEndpoint: '/v1/responses',
+      body: {},
+      headers: {},
+      metadata: {}
+    });
+
+    expect(result).toEqual(expect.objectContaining({ status: 200 }));
+    expect(pipeline.execute).toHaveBeenCalledTimes(2);
+    expect(unauthorizedProcess).toHaveBeenCalledTimes(1);
+    expect(successProcess).toHaveBeenCalledTimes(1);
+    expect(
+      logStage.mock.calls.some(
+        (call) =>
+          call[0] === 'provider.send.error' &&
+          call[1] === 'req-401-failover' &&
+          String(call[2]?.message || '').includes('Upstream authentication failed')
+      )
+    ).toBe(true);
+  });
+
+  test('surfaces HTTP 401 only after pool is exhausted', async () => {
+    const providerKey = 'opencode-zen-free.key1.mimo-v2-pro-free';
+    const previousAttempts = process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
+    process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = '1';
+
+    try {
+      const unauthorizedProcess = jest.fn(async () => ({
+        status: 401,
+        data: {
+          error: {
+            message: 'Upstream authentication failed'
+          }
+        }
+      }));
+
+      const handles = new Map<string, ProviderHandle>([
+        [providerKey, buildHandle(providerKey, unauthorizedProcess)]
+      ]);
+
+      const runtimeManager = {
+        resolveRuntimeKey: (key: string) => key,
+        getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey ? handles.get(runtimeKey) : undefined)
+      };
+
+      const pipeline = {
+        execute: jest.fn(async (input: any) => ({
+          requestId: input.id,
+          providerPayload: {},
+          target: {
+            providerKey,
+            providerType: 'openai',
+            outboundProfile: 'openai-chat',
+            runtimeKey: providerKey
+          },
+          routingDecision: { routeName: 'default', pool: [providerKey] },
+          metadata: {}
+        })),
+        updateVirtualRouterConfig: jest.fn()
+      };
+
+      const deps = {
+        runtimeManager,
+        getHubPipeline: () => pipeline,
+        getModuleDependencies: () => ({
+          errorHandlingCenter: {
+            handleError: jest.fn(async () => undefined)
+          }
+        }),
+        logStage: jest.fn(),
+        stats: new StatsManager()
+      };
+
+      const executor = createRequestExecutor(deps);
+      await expect(executor.execute({
+        requestId: 'req-401-exhausted',
+        entryEndpoint: '/v1/responses',
+        body: {},
+        headers: {},
+        metadata: {}
+      })).rejects.toMatchObject({
+        statusCode: 401,
+        status: 401,
+        message: 'Upstream authentication failed'
+      });
+
+      expect(pipeline.execute).toHaveBeenCalledTimes(1);
+      expect(unauthorizedProcess).toHaveBeenCalledTimes(1);
+    } finally {
+      if (previousAttempts === undefined) {
+        delete process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS;
+      } else {
+        process.env.ROUTECODEX_MAX_PROVIDER_ATTEMPTS = previousAttempts;
+      }
+    }
+  });
+
   test('surfaces readable SSE error message when upstream error event is non-retryable', async () => {
     const providerKey = 'deepseek-web.primary.deepseek-chat';
 

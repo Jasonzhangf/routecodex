@@ -76,12 +76,10 @@ describe('stopMessage is tmux-scoped', () => {
       fs.rmSync(path.join(SESSION_DIR, `tmux-${sessionId}.json`), { force: true });
     }
 
-    const [bootstrapMod, engineMod, stickyMod, servertoolMod] = await Promise.all([
-      import('../../sharedmodule/llmswitch-core/src/router/virtual-router/bootstrap.js'),
-      import('../../sharedmodule/llmswitch-core/src/router/virtual-router/engine.js'),
-      import('../../sharedmodule/llmswitch-core/src/router/virtual-router/sticky-session-store.js'),
-      import('../../sharedmodule/llmswitch-core/src/servertool/server-side-tools.js')
-    ]);
+    const bootstrapMod = await import('../../sharedmodule/llmswitch-core/src/router/virtual-router/bootstrap.js');
+    const engineMod = await import('../../sharedmodule/llmswitch-core/src/router/virtual-router/engine.js');
+    const stickyMod = await import('../../sharedmodule/llmswitch-core/src/router/virtual-router/sticky-session-store.js');
+    const servertoolMod = await import('../../sharedmodule/llmswitch-core/src/servertool/server-side-tools.js');
     bootstrapVirtualRouterConfig = bootstrapMod.bootstrapVirtualRouterConfig;
     VirtualRouterEngine = engineMod.VirtualRouterEngine;
     saveRoutingInstructionStateSync = stickyMod.saveRoutingInstructionStateSync;

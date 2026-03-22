@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.90.428",
+  "version": "0.90.736",
   "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support (dev)",
   "type": "module",
   "main": "dist/index.js",
@@ -104,6 +104,7 @@
     "llmswitch:ensure": "node scripts/ensure-llmswitch-mode.mjs",
     "llmswitch:link": "node scripts/link-llmswitch.mjs",
     "llmswitch:unlink": "node scripts/link-llmswitch.mjs unlink",
+    "llmswitch:link:global": "node scripts/link-global-llms-local.mjs --require-target",
     "dry-run:responses-provider": "node scripts/tests/responses-provider-dry-run.mjs",
     "start:verify:fg": "node scripts/start-verify.mjs --mode fg --timeout 90",
     "rc-config": "node scripts/rc-config.mjs",

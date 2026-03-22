@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -12,24 +14,12 @@ async function main() {
   const { VirtualRouterEngine } = engineModule;
 
   const sessionId = `test-${Date.now()}`;
-  const sessionKey = `session:${sessionId}`;
-
-  const stateMap = new Map();
-  const routingStateStore = {
-    loadSync: (key) => stateMap.get(key) ?? null,
-    saveAsync: (key, state) => {
-      if (!state) {
-        stateMap.delete(key);
-        return;
-      }
-      stateMap.set(key, state);
-    }
-  };
+  const sessionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vr-prefer-autoclear-'));
+  const sessionStatePath = path.join(sessionDir, `session-${sessionId}.json`);
 
   const preferredKey = 'antigravity.key1.claude-sonnet-4-5-thinking';
 
   const engine = new VirtualRouterEngine({
-    routingStateStore,
     quotaView: (providerKey) => {
       if (providerKey === preferredKey) {
         return { providerKey, inPool: false, reason: 'no_quota' };
@@ -91,13 +81,19 @@ async function main() {
     }
   });
 
-  stateMap.set(sessionKey, {
-    preferTarget: { provider: 'antigravity', model: 'claude-sonnet-4-5-thinking', pathLength: 2 },
-    allowedProviders: new Set(),
-    disabledProviders: new Set(),
-    disabledKeys: new Map(),
-    disabledModels: new Map()
-  });
+  fs.writeFileSync(
+    sessionStatePath,
+    JSON.stringify({
+      version: 1,
+      state: {
+        preferTarget: {
+          provider: 'antigravity',
+          model: 'claude-sonnet-4-5-thinking',
+          pathLength: 2
+        }
+      }
+    })
+  );
 
   const request = {
     model: 'unknown',
@@ -108,21 +104,33 @@ async function main() {
   const metadata = {
     requestId: 'req_test',
     sessionId,
+    sessionDir,
     routeHint: 'thinking',
     entryEndpoint: '/v1/chat/completions'
   };
 
-  const first = engine.route(request, metadata);
-  assert.equal(first.decision.routeName, 'thinking');
-  assert.equal(first.target.providerKey, 'antigravity.key1.gemini-3-pro-high');
+  try {
+    const first = engine.route(request, metadata);
+    assert.equal(first.decision.routeName, 'thinking');
+    assert.equal(first.target.providerKey, 'antigravity.key1.gemini-3-pro-high');
 
-  const storedAfter = stateMap.get(sessionKey);
-  if (storedAfter) {
+    if (!fs.existsSync(sessionStatePath)) {
+      console.log('[virtual-router] prefer auto-clear: OK');
+      return;
+    }
+    const persisted = JSON.parse(fs.readFileSync(sessionStatePath, 'utf8'));
+    const persistedState = persisted && typeof persisted === 'object' ? persisted.state ?? persisted : null;
     assert.equal(
-      storedAfter.preferTarget,
+      persistedState?.preferTarget,
       undefined,
       'preferTarget should auto-clear when preferred model is not eligible'
     );
+  } finally {
+    try {
+      fs.rmSync(sessionDir, { recursive: true, force: true });
+    } catch {
+      // best effort cleanup
+    }
   }
 
   console.log('[virtual-router] prefer auto-clear: OK');

@@ -3,7 +3,6 @@ import {
   isNativeDisabledByEnv
 } from './native-router-hotpath-policy.js';
 import { loadNativeRouterHotpathBindingForInternalUse } from './native-router-hotpath.js';
-
 export type NativeGovernanceContextPayload = {
   entryEndpoint: string;
   metadata: Record<string, unknown>;
@@ -12,14 +11,12 @@ export type NativeGovernanceContextPayload = {
   inboundStreamIntent: boolean;
   rawRequestBody?: Record<string, unknown>;
 };
-
 export type NativeRespProcessToolGovernanceInput = {
   payload: Record<string, unknown>;
   clientProtocol: string;
   entryEndpoint: string;
   requestId: string;
 };
-
 export type NativeRespProcessToolGovernanceOutput = {
   governedPayload: Record<string, unknown>;
   summary: {
@@ -28,7 +25,6 @@ export type NativeRespProcessToolGovernanceOutput = {
     applyPatchRepaired: number;
   };
 };
-
 export type NativeRespProcessToolGovernancePreparationOutput = {
   preparedPayload: Record<string, unknown>;
   summary: {
@@ -37,7 +33,6 @@ export type NativeRespProcessToolGovernancePreparationOutput = {
     harvestedToolCalls: number;
   };
 };
-
 export type NativeRespProcessFinalizeInput = {
   payload: Record<string, unknown>;
   stream: boolean;
@@ -45,7 +40,6 @@ export type NativeRespProcessFinalizeInput = {
   endpoint?: string;
   requestId?: string;
 };
-
 function parseAliasMapPayload(raw: string): Record<string, unknown> | undefined | null {
   try {
     const parsed = JSON.parse(raw) as unknown;
@@ -67,7 +61,6 @@ function parseAliasMapPayload(raw: string): Record<string, unknown> | undefined 
     return null;
   }
 }
-
 function parseGovernanceContextPayload(raw: string): NativeGovernanceContextPayload | null {
   try {
     const parsed = JSON.parse(raw) as unknown;
@@ -101,7 +94,6 @@ function parseGovernanceContextPayload(raw: string): NativeGovernanceContextPayl
     return null;
   }
 }
-
 function parseCastToolsPayload(raw: string): unknown | null {
   try {
     const parsed = JSON.parse(raw) as unknown;
@@ -116,7 +108,6 @@ function parseCastToolsPayload(raw: string): unknown | null {
     return null;
   }
 }
-
 function parseWebSearchOperationsPayload(raw: string): unknown[] | null {
   try {
     const parsed = JSON.parse(raw) as unknown;
@@ -128,7 +119,6 @@ function parseWebSearchOperationsPayload(raw: string): unknown[] | null {
     return null;
   }
 }
-
 function parseRecord(raw: string): Record<string, unknown> | null {
   try {
     const parsed = JSON.parse(raw) as unknown;
@@ -140,7 +130,6 @@ function parseRecord(raw: string): Record<string, unknown> | null {
     return null;
   }
 }
-
 function parseRespProcessToolGovernancePayload(raw: string): NativeRespProcessToolGovernanceOutput | null {
   try {
     const parsed = JSON.parse(raw) as unknown;
@@ -161,7 +150,6 @@ function parseRespProcessToolGovernancePayload(raw: string): NativeRespProcessTo
     if (!governedPayloadRaw || !summaryRaw) {
       return null;
     }
-
     const applied = summaryRaw.applied === true;
     const toolCallsNormalizedRaw =
       typeof summaryRaw.tool_calls_normalized === 'number'
@@ -178,7 +166,6 @@ function parseRespProcessToolGovernancePayload(raw: string): NativeRespProcessTo
     if (!Number.isFinite(toolCallsNormalizedRaw) || !Number.isFinite(applyPatchRepairedRaw)) {
       return null;
     }
-
     return {
       governedPayload: governedPayloadRaw,
       summary: {
@@ -191,7 +178,6 @@ function parseRespProcessToolGovernancePayload(raw: string): NativeRespProcessTo
     return null;
   }
 }
-
 function parseRespProcessToolGovernancePreparationPayload(
   raw: string
 ): NativeRespProcessToolGovernancePreparationOutput | null {
@@ -214,7 +200,6 @@ function parseRespProcessToolGovernancePreparationPayload(
     if (!preparedPayloadRaw || !summaryRaw) {
       return null;
     }
-
     const converted = summaryRaw.converted === true;
     const shapeSanitized = summaryRaw.shape_sanitized === true || summaryRaw.shapeSanitized === true;
     const harvestedToolCallsRaw =
@@ -226,7 +211,6 @@ function parseRespProcessToolGovernancePreparationPayload(
     if (!Number.isFinite(harvestedToolCallsRaw)) {
       return null;
     }
-
     return {
       preparedPayload: preparedPayloadRaw,
       summary: {
@@ -239,7 +223,6 @@ function parseRespProcessToolGovernancePreparationPayload(
     return null;
   }
 }
-
 function parseRespProcessFinalizePayload(raw: string): Record<string, unknown> | null {
   try {
     const parsed = JSON.parse(raw) as unknown;
@@ -258,13 +241,11 @@ function parseRespProcessFinalizePayload(raw: string): Record<string, unknown> |
     return null;
   }
 }
-
 function readNativeFunction(name: string): ((...args: unknown[]) => unknown) | null {
   const binding = loadNativeRouterHotpathBindingForInternalUse() as Record<string, unknown> | null;
   const fn = binding?.[name];
   return typeof fn === 'function' ? (fn as (...args: unknown[]) => unknown) : null;
 }
-
 function safeStringify(value: unknown): string | undefined {
   try {
     return JSON.stringify(value);
@@ -272,28 +253,47 @@ function safeStringify(value: unknown): string | undefined {
     return undefined;
   }
 }
-
+function encodeJsonArg(capability: string, value: unknown): string {
+  const fail = (reason?: string) => failNativeRequired<string>(capability, reason);
+  const encoded = safeStringify(value);
+  if (!encoded) {
+    return fail('json stringify failed');
+  }
+  return encoded;
+}
+function invokeNativeStringCapability(capability: string, args: unknown[]): string {
+  const fail = (reason?: string) => failNativeRequired<string>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  try {
+    const raw = fn(...args);
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    return raw;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+function invokeNativeStringCapabilityWithJsonArgs(capability: string, args: unknown[]): string {
+  return invokeNativeStringCapability(
+    capability,
+    args.map((arg) => encodeJsonArg(capability, arg))
+  );
+}
 export function buildAnthropicToolAliasMapWithNative(
   sourceTools: unknown
 ): Record<string, unknown> | undefined {
   const capability = 'buildAnthropicToolAliasMapJson';
   const fail = (reason?: string) => failNativeRequired<Record<string, unknown> | undefined>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction('buildAnthropicToolAliasMapJson');
-  if (!fn) {
-    return fail();
-  }
-  const sourceToolsJson = safeStringify(sourceTools ?? null);
-  if (!sourceToolsJson) {
-    return fail('json stringify failed');
-  }
   try {
-    const raw = fn(sourceToolsJson);
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
+    const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [sourceTools ?? null]);
     const parsed = parseAliasMapPayload(raw);
     return parsed === null ? fail('invalid payload') : parsed;
   } catch (error) {
@@ -301,7 +301,6 @@ export function buildAnthropicToolAliasMapWithNative(
     return fail(reason);
   }
 }
-
 export function resolveGovernanceContextWithNative(
   request: unknown,
   context: unknown
@@ -309,23 +308,8 @@ export function resolveGovernanceContextWithNative(
   const capability = 'resolveGovernanceContextJson';
   const fail = (reason?: string): NativeGovernanceContextPayload =>
     failNativeRequired<NativeGovernanceContextPayload>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction('resolveGovernanceContextJson');
-  if (!fn) {
-    return fail();
-  }
-  const requestJson = safeStringify(request ?? null);
-  const contextJson = safeStringify(context ?? null);
-  if (!requestJson || !contextJson) {
-    return fail('json stringify failed');
-  }
   try {
-    const raw = fn(requestJson, contextJson);
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
+    const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [request ?? null, context ?? null]);
     const parsed = parseGovernanceContextPayload(raw);
     return parsed ?? fail('invalid payload');
   } catch (error) {
@@ -333,28 +317,13 @@ export function resolveGovernanceContextWithNative(
     return fail(reason);
   }
 }
-
 export function castGovernedToolsWithNative(
   tools: unknown
 ): unknown {
   const capability = 'castGovernedToolsJson';
   const fail = (reason?: string): unknown => failNativeRequired<unknown>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction('castGovernedToolsJson');
-  if (!fn) {
-    return fail();
-  }
-  const toolsJson = safeStringify(tools ?? null);
-  if (!toolsJson) {
-    return fail('json stringify failed');
-  }
   try {
-    const raw = fn(toolsJson);
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
+    const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [tools ?? null]);
     const parsed = parseCastToolsPayload(raw);
     return parsed === null ? fail('invalid payload') : parsed;
   } catch (error) {
@@ -367,22 +336,8 @@ export function buildWebSearchToolAppendOperationsWithNative(
 ): unknown[] {
   const capability = 'buildWebSearchToolAppendOperationsJson';
   const fail = (reason?: string): unknown[] => failNativeRequired<unknown[]>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction('buildWebSearchToolAppendOperationsJson');
-  if (!fn) {
-    return fail();
-  }
-  const enginesJson = safeStringify(engines ?? null);
-  if (!enginesJson) {
-    return fail('json stringify failed');
-  }
   try {
-    const raw = fn(enginesJson);
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
+    const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [engines ?? null]);
     const parsed = parseWebSearchOperationsPayload(raw);
     return parsed ?? fail('invalid payload');
   } catch (error) {
@@ -398,23 +353,8 @@ export function applyGovernedControlOperationsWithNative(
   const capability = 'applyGovernedControlOperationsJson';
   const fail = (reason?: string): Record<string, unknown> =>
     failNativeRequired<Record<string, unknown>>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction('applyGovernedControlOperationsJson');
-  if (!fn) {
-    return fail();
-  }
-  const requestJson = safeStringify(request);
-  const governedJson = safeStringify(governed);
-  if (!requestJson || !governedJson) {
-    return fail('json stringify failed');
-  }
   try {
-    const raw = fn(requestJson, governedJson, inboundStreamIntent === true);
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
+    const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [request, governed, inboundStreamIntent === true]);
     const parsed = parseRecord(raw);
     return parsed ?? fail('invalid payload');
   } catch (error) {
@@ -422,7 +362,6 @@ export function applyGovernedControlOperationsWithNative(
     return fail(reason);
   }
 }
-
 export function applyGovernedMergeRequestWithNative(
   request: Record<string, unknown>,
   governed: Record<string, unknown>,
@@ -432,28 +371,13 @@ export function applyGovernedMergeRequestWithNative(
   const capability = 'applyGovernedMergeRequestJson';
   const fail = (reason?: string): Record<string, unknown> =>
     failNativeRequired<Record<string, unknown>>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction('applyGovernedMergeRequestJson');
-  if (!fn) {
-    return fail();
-  }
-  const requestJson = safeStringify(request);
-  const governedJson = safeStringify(governed);
-  if (!requestJson || !governedJson) {
-    return fail('json stringify failed');
-  }
   try {
-    const raw = fn(
-      requestJson,
-      governedJson,
+    const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [
+      request,
+      governed,
       inboundStreamIntent === true,
       Number.isFinite(governanceTimestampMs) ? governanceTimestampMs : Date.now()
-    );
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
+    ]);
     const parsed = parseRecord(raw);
     return parsed ?? fail('invalid payload');
   } catch (error) {
@@ -461,7 +385,6 @@ export function applyGovernedMergeRequestWithNative(
     return fail(reason);
   }
 }
-
 export function mergeGovernanceSummaryIntoMetadataWithNative(
   metadata: Record<string, unknown> | undefined,
   summary: Record<string, unknown>
@@ -469,23 +392,8 @@ export function mergeGovernanceSummaryIntoMetadataWithNative(
   const capability = 'mergeGovernanceSummaryIntoMetadataJson';
   const fail = (reason?: string): Record<string, unknown> =>
     failNativeRequired<Record<string, unknown>>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction('mergeGovernanceSummaryIntoMetadataJson');
-  if (!fn) {
-    return fail();
-  }
-  const metadataJson = safeStringify(metadata ?? {});
-  const summaryJson = safeStringify(summary ?? {});
-  if (!metadataJson || !summaryJson) {
-    return fail('json stringify failed');
-  }
   try {
-    const raw = fn(metadataJson, summaryJson);
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
+    const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [metadata ?? {}, summary ?? {}]);
     const parsed = parseRecord(raw);
     return parsed ?? fail('invalid payload');
   } catch (error) {
@@ -493,7 +401,6 @@ export function mergeGovernanceSummaryIntoMetadataWithNative(
     return fail(reason);
   }
 }
-
 export function finalizeGovernedRequestWithNative(
   request: Record<string, unknown>,
   summary: Record<string, unknown>
@@ -501,23 +408,8 @@ export function finalizeGovernedRequestWithNative(
   const capability = 'finalizeGovernedRequestJson';
   const fail = (reason?: string): Record<string, unknown> =>
     failNativeRequired<Record<string, unknown>>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction('finalizeGovernedRequestJson');
-  if (!fn) {
-    return fail();
-  }
-  const requestJson = safeStringify(request ?? {});
-  const summaryJson = safeStringify(summary ?? {});
-  if (!requestJson || !summaryJson) {
-    return fail('json stringify failed');
-  }
   try {
-    const raw = fn(requestJson, summaryJson);
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
+    const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [request ?? {}, summary ?? {}]);
     const parsed = parseRecord(raw);
     return parsed ?? fail('invalid payload');
   } catch (error) {
@@ -525,34 +417,19 @@ export function finalizeGovernedRequestWithNative(
     return fail(reason);
   }
 }
-
 export function applyRespProcessToolGovernanceWithNative(
   input: NativeRespProcessToolGovernanceInput
 ): NativeRespProcessToolGovernanceOutput {
   const capability = 'governResponseJson';
   const fail = (reason?: string): NativeRespProcessToolGovernanceOutput =>
     failNativeRequired<NativeRespProcessToolGovernanceOutput>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction('governResponseJson');
-  if (!fn) {
-    return fail();
-  }
-  const inputJson = safeStringify({
-    payload: input.payload,
-    client_protocol: input.clientProtocol,
-    entry_endpoint: input.entryEndpoint,
-    request_id: input.requestId
-  });
-  if (!inputJson) {
-    return fail('json stringify failed');
-  }
   try {
-    const raw = fn(inputJson);
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
+    const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [{
+      payload: input.payload,
+      client_protocol: input.clientProtocol,
+      entry_endpoint: input.entryEndpoint,
+      request_id: input.requestId
+    }]);
     const parsed = parseRespProcessToolGovernancePayload(raw);
     return parsed ?? fail('invalid payload');
   } catch (error) {
@@ -560,29 +437,14 @@ export function applyRespProcessToolGovernanceWithNative(
     return fail(reason);
   }
 }
-
 export function prepareRespProcessToolGovernancePayloadWithNative(
   payload: Record<string, unknown>
 ): NativeRespProcessToolGovernancePreparationOutput {
   const capability = 'prepareRespProcessToolGovernancePayloadJson';
   const fail = (reason?: string): NativeRespProcessToolGovernancePreparationOutput =>
     failNativeRequired<NativeRespProcessToolGovernancePreparationOutput>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    return fail();
-  }
-  const payloadJson = safeStringify(payload ?? {});
-  if (!payloadJson) {
-    return fail('json stringify failed');
-  }
   try {
-    const raw = fn(payloadJson);
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
+    const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [payload ?? {}]);
     const parsed = parseRespProcessToolGovernancePreparationPayload(raw);
     return parsed ?? fail('invalid payload');
   } catch (error) {
@@ -590,29 +452,14 @@ export function prepareRespProcessToolGovernancePayloadWithNative(
     return fail(reason);
   }
 }
-
 export function stripOrphanFunctionCallsTagWithNative(
   payload: Record<string, unknown>
 ): Record<string, unknown> {
   const capability = 'stripOrphanFunctionCallsTagJson';
   const fail = (reason?: string): Record<string, unknown> =>
     failNativeRequired<Record<string, unknown>>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    return fail();
-  }
-  const payloadJson = safeStringify(payload);
-  if (!payloadJson) {
-    return fail('json stringify failed');
-  }
   try {
-    const raw = fn(payloadJson);
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
+    const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [payload]);
     const parsed = parseRecord(raw);
     return parsed ?? fail('invalid payload');
   } catch (error) {
@@ -620,35 +467,20 @@ export function stripOrphanFunctionCallsTagWithNative(
     return fail(reason);
   }
 }
-
 export async function finalizeRespProcessChatResponseWithNative(
   input: NativeRespProcessFinalizeInput
 ): Promise<Record<string, unknown>> {
   const capability = 'finalizeChatResponseJson';
   const fail = async (reason?: string): Promise<Record<string, unknown>> =>
     failNativeRequired<Record<string, unknown>>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction('finalizeChatResponseJson');
-  if (!fn) {
-    return fail();
-  }
-  const inputJson = safeStringify({
-    payload: input.payload,
-    stream: input.stream === true,
-    reasoningMode: input.reasoningMode,
-    endpoint: input.endpoint,
-    requestId: input.requestId
-  });
-  if (!inputJson) {
-    return fail('json stringify failed');
-  }
   try {
-    const raw = fn(inputJson);
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
+    const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [{
+      payload: input.payload,
+      stream: input.stream === true,
+      reasoningMode: input.reasoningMode,
+      endpoint: input.endpoint,
+      requestId: input.requestId
+    }]);
     const parsed = parseRespProcessFinalizePayload(raw);
     return parsed ?? fail('invalid payload');
   } catch (error) {

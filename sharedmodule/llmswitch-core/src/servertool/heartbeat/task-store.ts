@@ -1,6 +1,7 @@
 export type {
   HeartbeatConfigSnapshot,
   HeartbeatDispatchResult,
+  HeartbeatHistoryEvent,
   HeartbeatState,
 } from "./types.js";
 
@@ -16,6 +17,16 @@ export {
   saveHeartbeatState,
   setHeartbeatEnabled,
 } from "./session-store.js";
+
+export {
+  appendHeartbeatHistoryEvent,
+  listHeartbeatHistory,
+} from "./history-store.js";
+
+export {
+  DEFAULT_DELIVERY_HISTORY_LIMIT,
+  pruneDeliveryLogText,
+} from "./delivery-log.js";
 
 export {
   buildHeartbeatInjectText,

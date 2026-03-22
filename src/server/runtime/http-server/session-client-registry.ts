@@ -13,6 +13,7 @@ import {
   resolveManagedTmuxSessionState
 } from './session-client-registry-utils.js';
 import { injectTmuxSessionText, isTmuxSessionAlive } from './tmux-session-probe.js';
+import { resolveTmuxInjectDelayMsFromRuntimeConfig } from './tmux-injection-runtime-config.js';
 import type {
   SessionCleanupResult,
   SessionClientInjectArgs,
@@ -25,6 +26,10 @@ import type {
 const CLIENT_TMUX_INJECT_DELAY_MS = 10_000;
 
 function resolveClientTmuxInjectDelayMs(): number {
+  const runtimeConfigDelay = resolveTmuxInjectDelayMsFromRuntimeConfig();
+  if (typeof runtimeConfigDelay === 'number' && Number.isFinite(runtimeConfigDelay) && runtimeConfigDelay >= 0) {
+    return runtimeConfigDelay;
+  }
   const raw =
     process.env.ROUTECODEX_CLIENT_INJECT_DELAY_MS ??
     process.env.RCC_CLIENT_INJECT_DELAY_MS;
@@ -152,7 +157,7 @@ export class SessionClientRegistry {
         if (!conversationSessionId || !tmuxSessionId) {
           continue;
         }
-        if (tmuxSessionId.startsWith('rcc_') && !isTmuxSessionAlive(tmuxSessionId)) {
+        if (/^rcc[-_]/.test(tmuxSessionId) && !isTmuxSessionAlive(tmuxSessionId)) {
           continue;
         }
         this.conversationToTmuxSession.set(conversationSessionId, tmuxSessionId);

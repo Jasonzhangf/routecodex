@@ -3,7 +3,6 @@ import type { ToolGovernanceLike } from './chat-process-governance-finalize.js';
 import { applyReqProcessToolGovernanceWithNative } from '../../../router/virtual-router/engine-selection/native-hub-pipeline-req-process-semantics.js';
 import { maybeInjectClockRemindersAndApplyDirectives } from './chat-process-clock-reminders.js';
 import { finalizeGovernedRequest } from './chat-process-governance-finalize.js';
-import { resolveHasActiveStopMessageForContinueExecution } from './chat-process-continue-execution.js';
 import { sanitizeChatProcessRequest } from './chat-process-request-sanitizer.js';
 
 export interface GovernanceContext {
@@ -52,8 +51,9 @@ export async function applyRequestToolGovernance(
     metadata: context.metadata,
     entryEndpoint: context.entryEndpoint,
     requestId: context.requestId,
-    hasActiveStopMessageForContinueExecution:
-      resolveHasActiveStopMessageForContinueExecution(context.metadata)
+    // continue_execution tool injection has been disabled globally.
+    // Force stop-message-active semantics here so native governance never injects it.
+    hasActiveStopMessageForContinueExecution: true
   });
   const governedRequest = parseGovernedRequest(nativeResult.processedRequest);
   const requestAfterInject = await maybeInjectClockRemindersAndApplyDirectives(

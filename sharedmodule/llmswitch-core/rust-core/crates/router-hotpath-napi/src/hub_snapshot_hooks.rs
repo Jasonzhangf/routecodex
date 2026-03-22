@@ -65,14 +65,18 @@ fn resolve_user_dir() -> PathBuf {
 }
 
 fn resolve_snapshot_root() -> PathBuf {
-    if let Ok(v) = env::var("RCC_SNAPSHOT_DIR") {
-        if !v.trim().is_empty() {
-            return PathBuf::from(v.trim());
-        }
-    }
-    if let Ok(v) = env::var("ROUTECODEX_SNAPSHOT_DIR") {
-        if !v.trim().is_empty() {
-            return PathBuf::from(v.trim());
+    let home_dir = resolve_home_dir();
+    let legacy_snapshot_dir = home_dir.join(".routecodex").join("codex-samples");
+    for key in ["RCC_SNAPSHOT_DIR", "ROUTECODEX_SNAPSHOT_DIR"] {
+        if let Ok(v) = env::var(key) {
+            let trimmed = v.trim();
+            if !trimmed.is_empty() {
+                let candidate = expand_home(trimmed, &home_dir);
+                if candidate == legacy_snapshot_dir {
+                    continue;
+                }
+                return candidate;
+            }
         }
     }
     resolve_user_dir().join("codex-samples")

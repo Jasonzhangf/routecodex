@@ -1,6 +1,7 @@
 use serde_json::{Map, Value};
 use std::env;
 use std::fs;
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 
 use super::instructions::{InstructionTarget, RoutingInstructionState};
@@ -9,6 +10,45 @@ const ROUTECODEX_SESSION_DIR_ENV: &str = "ROUTECODEX_SESSION_DIR";
 const RCC_HOME_ENV: &str = "RCC_HOME";
 const ROUTECODEX_USER_DIR_ENV: &str = "ROUTECODEX_USER_DIR";
 const ROUTECODEX_HOME_ENV: &str = "ROUTECODEX_HOME";
+
+thread_local! {
+    static SESSION_DIR_OVERRIDE: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+}
+
+struct SessionDirOverrideGuard {
+    previous: Option<PathBuf>,
+}
+
+impl Drop for SessionDirOverrideGuard {
+    fn drop(&mut self) {
+        SESSION_DIR_OVERRIDE.with(|slot| {
+            *slot.borrow_mut() = self.previous.take();
+        });
+    }
+}
+
+fn normalize_override_session_dir(raw: Option<&str>) -> Option<PathBuf> {
+    let trimmed = raw?.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(PathBuf::from(trimmed))
+}
+
+fn read_override_session_dir() -> Option<PathBuf> {
+    SESSION_DIR_OVERRIDE.with(|slot| slot.borrow().clone())
+}
+
+pub(crate) fn with_session_dir_override<T>(raw: Option<&str>, callback: impl FnOnce() -> T) -> T {
+    let next = normalize_override_session_dir(raw);
+    let previous = SESSION_DIR_OVERRIDE.with(|slot| {
+        let previous = slot.borrow().clone();
+        *slot.borrow_mut() = next;
+        previous
+    });
+    let _guard = SessionDirOverrideGuard { previous };
+    callback()
+}
 
 pub(crate) fn load_routing_instruction_state(key: &str) -> Option<RoutingInstructionState> {
     if !is_persistent_key(key) {
@@ -153,6 +193,9 @@ fn resolve_rcc_user_dir() -> Option<PathBuf> {
 }
 
 fn resolve_session_dir() -> Option<PathBuf> {
+    if let Some(explicit) = read_override_session_dir() {
+        return Some(explicit);
+    }
     if let Ok(value) = env::var(ROUTECODEX_SESSION_DIR_ENV) {
         let trimmed = value.trim();
         if !trimmed.is_empty() {

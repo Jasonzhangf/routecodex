@@ -18,6 +18,13 @@ import {
   resolveStopMessageAiDoneMarker,
   type StopMessageAiFollowupHistoryEntry
 } from './stop-message-auto/iflow-followup.js';
+import {
+  resolveStopMessageAiDoneNextTaskPrompt,
+  resolveStopMessageDebugEnabled,
+  resolveStopMessageDefaultEnabled,
+  resolveStopMessageDefaultMaxRepeats,
+  resolveStopMessageDefaultText
+} from './stop-message-auto/config.js';
 import { sanitizeFollowupText } from './followup-sanitize.js';
 import {
   getCapturedRequest,
@@ -45,14 +52,22 @@ import {
 
 export { extractBlockedReportFromMessagesForTests } from './stop-message-auto/blocked-report.js';
 
-const STOPMESSAGE_DEBUG = (process.env.ROUTECODEX_STOPMESSAGE_DEBUG || '').trim() === '1';
+const STOPMESSAGE_DEBUG = resolveStopMessageDebugEnabled() ?? (process.env.ROUTECODEX_STOPMESSAGE_DEBUG || '').trim() === '1';
 const STOPMESSAGE_IMPLICIT_GEMINI = false;
-const STOPMESSAGE_DEFAULT_ENABLED = false;
+const STOPMESSAGE_DEFAULT_ENABLED = resolveStopMessageDefaultEnabled() ?? false;
 const STOPMESSAGE_DEFAULT_TEXT = (() => {
+  const fromConfig = resolveStopMessageDefaultText();
+  if (typeof fromConfig === 'string' && fromConfig.trim().length > 0) {
+    return fromConfig.trim();
+  }
   const raw = process.env.ROUTECODEX_STOPMESSAGE_DEFAULT_TEXT;
   return typeof raw === 'string' && raw.trim().length > 0 ? raw.trim() : '继续执行';
 })();
 const STOPMESSAGE_DEFAULT_MAX_REPEATS = (() => {
+  const fromConfig = resolveStopMessageDefaultMaxRepeats();
+  if (Number.isFinite(fromConfig) && Number(fromConfig) > 0) {
+    return Math.floor(Number(fromConfig));
+  }
   const raw = process.env.ROUTECODEX_STOPMESSAGE_DEFAULT_MAX_REPEATS;
   const parsed = typeof raw === 'string' ? Number(raw.trim()) : Number.NaN;
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 1;
@@ -129,9 +144,9 @@ const STOP_MESSAGE_EXECUTION_DIRECTIVE = [
   '- 可为同一目标设置多次提醒，避免遗忘关键后续动作。',
   '- 对复杂等待任务，先把上下文、待办清单、下一步动作写入当前工作目录下的 clock.md；下次 clock 提醒触发时，优先读取 clock.md 再继续。',
   '- clock.md 必须按固定模板维护：## 背景 / ## 当前阻塞点 / ## 下次提醒要做的第一步 / ## 不能忘的检查项。',
-  '- 若仅需汇报任务进度，必须按顺序：先调用 CONTINUE execution（continue_execution，参数示例 {"reason":"progress_update"}），再做 <=5 行简短汇报，然后立即继续执行。',
+  '- 若仅需汇报任务进度，先做 <=5 行简短汇报，然后立即继续执行真实动作，不要停在进度口播。',
   '- 若遇阻塞，请按 JSON 输出结构化阻塞信息（type=blocked, summary, blocker, impact, next_action, evidence）。',
-  '- 如果即将返回 finish_reason=stop 或协议等价 end_turn，先调用 continue_execution 工具，不要直接结束会话。',
+  '- 如果即将返回 finish_reason=stop 或协议等价 end_turn，先确认总体目标是否已完成；未完成则继续执行，不要提前结束会话。',
   '- 仅当总体目标完成时，才允许停止。'
 ].join('\n');
 
@@ -533,9 +548,10 @@ const handler: ServerToolHandler = async (
         clearStopMessageState(nextState, Date.now());
         persistStopMessageState(stickyKey, nextState);
       }
+      const doneNextTaskPrompt = sanitizeFollowupText(resolveStopMessageAiDoneNextTaskPrompt());
       const approvedInjectText = typeof followupText === 'string' && sanitizeFollowupText(followupText)
-        ? sanitizeFollowupText(followupText)
-        : approvedMarker;
+        ? `${sanitizeFollowupText(followupText)}\n${doneNextTaskPrompt}`
+        : `${approvedMarker}\n${doneNextTaskPrompt}`;
       debugLog('trigger_done_marker_approved', {
         stickyKey,
         doneMarker,

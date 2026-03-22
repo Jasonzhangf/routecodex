@@ -19,6 +19,7 @@ import {
 let daemonStarted = false;
 let daemonTimer: NodeJS.Timeout | undefined;
 let daemonConfig: ClockConfigSnapshot | undefined;
+type ClockDaemonTickPhase = "startup" | "runtime" | "shutdown";
 
 type ClockRuntimeHooks = {
   isTmuxSessionAlive?: (tmuxSessionId: string) => boolean | Promise<boolean>;
@@ -74,167 +75,99 @@ function resolveStateTmuxSessionId(raw: unknown, sessionId: string): string | un
   return undefined;
 }
 
-export async function startClockDaemonIfNeeded(
-  config: ClockConfigSnapshot,
-): Promise<void> {
-  daemonConfig = config;
-  if (daemonStarted) {
-    return;
+function shouldDeleteClockStateFile(phase: ClockDaemonTickPhase): boolean {
+  return phase === "startup" || phase === "shutdown";
+}
+
+function shouldDisableClockStateForDispatchFailure(reasonRaw: unknown): boolean {
+  const reason = readString(reasonRaw)?.toLowerCase();
+  if (!reason) {
+    return false;
   }
-  const sessionDir = readSessionDirEnv();
-  if (!sessionDir) {
-    return;
-  }
-  daemonStarted = true;
-  // Best-effort NTP sync (do not block daemon startup).
-  void startClockNtpSyncIfNeeded(config);
+  return (
+    reason === "tmux_session_required" ||
+    reason === "tmux_session_not_found" ||
+    reason.startsWith("tmux_send_failed")
+  );
+}
 
-  const tickOnce = async () => {
-    const effective = daemonConfig;
-    if (!effective) return;
-    const base = readSessionDirEnv();
-    if (!base) return;
-    const dir = resolveClockDir(base);
-    try {
-      const entries = await fs.readdir(dir, { withFileTypes: true });
-      const at = nowMs();
-      for (const entry of entries) {
-        if (!entry.isFile()) continue;
-        if (!entry.name.endsWith(".json")) continue;
-        const filePath = path.join(dir, entry.name);
-        try {
-          const raw = await readJsonFile(filePath);
-          const sessionId = resolveStateSessionId(
-            raw,
-            entry.name.slice(0, -".json".length),
-          );
-          const state = coerceState(raw, sessionId);
-
-          const tmuxSessionId = resolveStateTmuxSessionId(raw, sessionId);
-
-          const isAlive = runtimeHooks?.isTmuxSessionAlive;
-          if (isAlive && tmuxSessionId) {
-            const alive = await Promise.resolve(isAlive(tmuxSessionId));
-            if (!alive) {
-              await fs.rm(filePath, { force: true });
-              continue;
-            }
-          }
-
-          const dueTasks = selectDueUndeliveredTasks(
-            state.tasks,
-            effective,
-            at,
-          );
-          const deliveryBatch = selectClockReminderDeliveryBatch(dueTasks);
-          if (
-            deliveryBatch.length > 0 &&
-            runtimeHooks?.dispatchDueTask &&
-            tmuxSessionId
-          ) {
-            const firstTask = deliveryBatch[0];
-            const injectText = formatClockReminderBatchText(deliveryBatch);
-            try {
-              const result = await Promise.resolve(
-                runtimeHooks.dispatchDueTask({
-                  sessionId,
-                  tmuxSessionId,
-                  task: firstTask,
-                  injectText,
-                }),
-              );
-              if (result?.ok) {
-                const reservation = {
-                  reservationId: `daemon:${firstTask.taskId}:${at}`,
-                  sessionId,
-                  taskIds: deliveryBatch.map((task) => task.taskId),
-                  reservedAtMs: at,
-                };
-                await commitClockReservation(reservation, effective);
-              }
-            } catch {
-              // best-effort dispatch
-            }
-          }
-
-          const cleaned = cleanExpiredTasks(state.tasks, effective, at);
-          if (!cleaned.length) {
-            await fs.rm(filePath, { force: true });
-            continue;
-          }
-          if (cleaned.length !== state.tasks.length) {
-            const next: ClockSessionState = {
-              ...state,
-              tasks: cleaned,
-              updatedAtMs: at,
-            };
-            await writeJsonFileAtomic(filePath, next);
-          }
-        } catch {
-          // best-effort: ignore per-file errors
-        }
-      }
-    } catch {
-      // best-effort: ignore global scan errors
-    }
+function applyClockDisableState(state: ClockSessionState, at: number, reason: string): ClockSessionState {
+  const normalizedReason = readString(reason) || "disabled";
+  return {
+    ...state,
+    disabled: true,
+    disabledReason: normalizedReason,
+    ...(typeof state.disabledAtMs === "number" && Number.isFinite(state.disabledAtMs)
+      ? {}
+      : { disabledAtMs: at }),
+    updatedAtMs: at,
   };
-
-  // Startup scan (best-effort), but await it so callers do not immediately
-  // race a second tick against the same due-task snapshot.
-  await tickOnce();
-
-  if (config.tickMs > 0) {
-    daemonTimer = setInterval(() => {
-      void tickOnce();
-    }, config.tickMs);
-    daemonTimer.unref?.();
-  }
 }
 
-export async function stopClockDaemonForTests(): Promise<void> {
-  if (daemonTimer) {
-    clearInterval(daemonTimer);
-    daemonTimer = undefined;
-  }
-  daemonStarted = false;
-  daemonConfig = undefined;
+function clearClockDisableState(state: ClockSessionState, at: number): ClockSessionState {
+  return {
+    ...state,
+    disabled: false,
+    disabledReason: undefined,
+    disabledAtMs: undefined,
+    updatedAtMs: at,
+  };
 }
 
-export async function runClockDaemonTickForTests(): Promise<void> {
-  const effective = daemonConfig;
-  if (!effective) return;
-  const base = readSessionDirEnv();
-  if (!base) return;
-  const dir = resolveClockDir(base);
-  const entries = await fs.readdir(dir, { withFileTypes: true });
-  const at = nowMs();
-  for (const entry of entries) {
-    if (!entry.isFile()) continue;
-    if (!entry.name.endsWith(".json")) continue;
-    const filePath = path.join(dir, entry.name);
-    const raw = await readJsonFile(filePath);
-    const sessionId = resolveStateSessionId(
-      raw,
-      entry.name.slice(0, -".json".length),
-    );
-    const state = coerceState(raw, sessionId);
+async function persistClockStateForPhase(
+  filePath: string,
+  state: ClockSessionState,
+  phase: ClockDaemonTickPhase,
+): Promise<void> {
+  if (state.tasks.length < 1 && shouldDeleteClockStateFile(phase)) {
+    await fs.rm(filePath, { force: true });
+    return;
+  }
+  await writeJsonFileAtomic(filePath, state);
+}
 
-    const tmuxSessionId = resolveStateTmuxSessionId(raw, sessionId);
-
-    const isAlive = runtimeHooks?.isTmuxSessionAlive;
-    if (isAlive && tmuxSessionId) {
-      const alive = await Promise.resolve(isAlive(tmuxSessionId));
-      if (!alive) {
+async function processClockStateFile(args: {
+  filePath: string;
+  entryName: string;
+  effective: ClockConfigSnapshot;
+  at: number;
+  phase: ClockDaemonTickPhase;
+}): Promise<void> {
+  const { filePath, entryName, effective, at, phase } = args;
+  const raw = await readJsonFile(filePath);
+  const sessionId = resolveStateSessionId(raw, entryName.slice(0, -".json".length));
+  let state = coerceState(raw, sessionId);
+  const tmuxSessionId = resolveStateTmuxSessionId(raw, sessionId);
+  const isAlive = runtimeHooks?.isTmuxSessionAlive;
+  if (isAlive && tmuxSessionId) {
+    const alive = await Promise.resolve(isAlive(tmuxSessionId));
+    if (!alive) {
+      if (shouldDeleteClockStateFile(phase)) {
         await fs.rm(filePath, { force: true });
-        continue;
+        return;
       }
+      const disabledState = applyClockDisableState(state, at, "tmux_session_not_found");
+      await writeJsonFileAtomic(filePath, disabledState);
+      return;
     }
+    if (state.disabled === true) {
+      state = clearClockDisableState(state, at);
+      await writeJsonFileAtomic(filePath, state);
+    }
+  } else if (state.disabled === true) {
+    return;
+  }
 
-    const dueTasks = selectDueUndeliveredTasks(state.tasks, effective, at);
-    const deliveryBatch = selectClockReminderDeliveryBatch(dueTasks);
-    if (deliveryBatch.length > 0 && runtimeHooks?.dispatchDueTask && tmuxSessionId) {
-      const firstTask = deliveryBatch[0];
-      const injectText = formatClockReminderBatchText(deliveryBatch);
+  const dueTasks = selectDueUndeliveredTasks(state.tasks, effective, at);
+  const deliveryBatch = selectClockReminderDeliveryBatch(dueTasks);
+  if (
+    deliveryBatch.length > 0 &&
+    runtimeHooks?.dispatchDueTask &&
+    tmuxSessionId
+  ) {
+    const firstTask = deliveryBatch[0];
+    const injectText = formatClockReminderBatchText(deliveryBatch);
+    try {
       const result = await Promise.resolve(
         runtimeHooks.dispatchDueTask({
           sessionId,
@@ -251,7 +184,104 @@ export async function runClockDaemonTickForTests(): Promise<void> {
           reservedAtMs: at,
         };
         await commitClockReservation(reservation, effective);
+      } else {
+        const failureReason = readString(result?.reason) || "dispatch_failed";
+        if (
+          result?.cleanupSession === true ||
+          shouldDisableClockStateForDispatchFailure(failureReason)
+        ) {
+          if (shouldDeleteClockStateFile(phase)) {
+            await fs.rm(filePath, { force: true });
+          } else {
+            const disabledState = applyClockDisableState(state, at, failureReason);
+            await writeJsonFileAtomic(filePath, disabledState);
+          }
+          return;
+        }
       }
+    } catch {
+      // best-effort dispatch
     }
   }
+
+  const cleaned = cleanExpiredTasks(state.tasks, effective, at);
+  if (cleaned.length !== state.tasks.length || cleaned.length < 1) {
+    const next: ClockSessionState = {
+      ...state,
+      tasks: cleaned,
+      updatedAtMs: at,
+    };
+    await persistClockStateForPhase(filePath, next, phase);
+  }
+}
+
+async function tickClockDaemon(phase: ClockDaemonTickPhase): Promise<void> {
+  const effective = daemonConfig;
+  if (!effective) return;
+  const base = readSessionDirEnv();
+  if (!base) return;
+  const dir = resolveClockDir(base);
+  try {
+    const entries = await fs.readdir(dir, { withFileTypes: true });
+    const at = nowMs();
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+      if (!entry.name.endsWith(".json")) continue;
+      const filePath = path.join(dir, entry.name);
+      try {
+        await processClockStateFile({
+          filePath,
+          entryName: entry.name,
+          effective,
+          at,
+          phase,
+        });
+      } catch {
+        // best-effort: ignore per-file errors
+      }
+    }
+  } catch {
+    // best-effort: ignore global scan errors
+  }
+}
+
+export async function startClockDaemonIfNeeded(
+  config: ClockConfigSnapshot,
+): Promise<void> {
+  daemonConfig = config;
+  if (daemonStarted) {
+    return;
+  }
+  const sessionDir = readSessionDirEnv();
+  if (!sessionDir) {
+    return;
+  }
+  daemonStarted = true;
+  // Best-effort NTP sync (do not block daemon startup).
+  void startClockNtpSyncIfNeeded(config);
+
+  // Startup scan (best-effort), but await it so callers do not immediately
+  // race a second tick against the same due-task snapshot.
+  await tickClockDaemon("startup");
+
+  if (config.tickMs > 0) {
+    daemonTimer = setInterval(() => {
+      void tickClockDaemon("runtime");
+    }, config.tickMs);
+    daemonTimer.unref?.();
+  }
+}
+
+export async function stopClockDaemonForTests(): Promise<void> {
+  if (daemonTimer) {
+    clearInterval(daemonTimer);
+    daemonTimer = undefined;
+  }
+  await tickClockDaemon("shutdown");
+  daemonStarted = false;
+  daemonConfig = undefined;
+}
+
+export async function runClockDaemonTickForTests(): Promise<void> {
+  await tickClockDaemon("runtime");
 }

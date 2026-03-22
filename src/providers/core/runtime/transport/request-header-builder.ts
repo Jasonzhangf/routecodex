@@ -25,6 +25,163 @@ export interface RequestHeaderBuildContext {
 }
 
 export class RequestHeaderBuilder {
+  private static pickRecordString(source: unknown, keys: string[]): string | undefined {
+    if (!source || typeof source !== 'object') {
+      return undefined;
+    }
+    const record = source as Record<string, unknown>;
+    for (const key of keys) {
+      const value = record[key];
+      if (typeof value !== 'string') {
+        continue;
+      }
+      const trimmed = value.trim();
+      if (trimmed) {
+        return trimmed;
+      }
+    }
+    return undefined;
+  }
+
+  private static findHeaderFromSources(
+    target: string,
+    ...sources: Array<Record<string, string> | undefined>
+  ): string | undefined {
+    for (const source of sources) {
+      if (!source) {
+        continue;
+      }
+      const value = HeaderUtils.findHeaderValue(source, target);
+      if (value) {
+        return value;
+      }
+    }
+    return undefined;
+  }
+
+  private static resolveOpenCodeZenProjectId(context: RequestHeaderBuildContext): string | undefined {
+    return (
+      RequestHeaderBuilder.findHeaderFromSources(
+        'x-opencode-project',
+        context.normalizedClientHeaders,
+        context.runtimeHeaders,
+        context.overrideHeaders,
+        context.serviceHeaders
+      ) ??
+      RequestHeaderBuilder.pickRecordString(context.inboundMetadata, ['projectId', 'project_id']) ??
+      RequestHeaderBuilder.pickRecordString(context.runtimeMetadata?.metadata, ['projectId', 'project_id'])
+    );
+  }
+
+  private static resolveOpenCodeZenSessionId(context: RequestHeaderBuildContext): string | undefined {
+    return (
+      RequestHeaderBuilder.findHeaderFromSources(
+        'x-opencode-session',
+        context.normalizedClientHeaders,
+        context.runtimeHeaders,
+        context.overrideHeaders,
+        context.serviceHeaders
+      ) ??
+      RequestHeaderBuilder.findHeaderFromSources('session_id', context.normalizedClientHeaders) ??
+      RequestHeaderBuilder.findHeaderFromSources('conversation_id', context.normalizedClientHeaders) ??
+      RequestHeaderBuilder.pickRecordString(context.inboundMetadata, [
+        'sessionId',
+        'session_id',
+        'conversationId',
+        'conversation_id'
+      ]) ??
+      RequestHeaderBuilder.pickRecordString(context.runtimeMetadata?.metadata, [
+        'sessionId',
+        'session_id',
+        'conversationId',
+        'conversation_id'
+      ])
+    );
+  }
+
+  private static resolveOpenCodeZenRequestId(context: RequestHeaderBuildContext): string | undefined {
+    return (
+      RequestHeaderBuilder.findHeaderFromSources(
+        'x-opencode-request',
+        context.normalizedClientHeaders,
+        context.runtimeHeaders,
+        context.overrideHeaders,
+        context.serviceHeaders
+      ) ??
+      RequestHeaderBuilder.pickRecordString(context.inboundMetadata, [
+        'requestId',
+        'request_id',
+        'clientRequestId',
+        'client_request_id',
+        'userId',
+        'user_id'
+      ]) ??
+      RequestHeaderBuilder.pickRecordString(context.runtimeMetadata?.metadata, [
+        'requestId',
+        'request_id',
+        'clientRequestId',
+        'client_request_id',
+        'userId',
+        'user_id'
+      ]) ??
+      (typeof context.runtimeMetadata?.requestId === 'string' ? context.runtimeMetadata.requestId.trim() : undefined)
+    );
+  }
+
+  private static resolveOpenCodeZenClient(context: RequestHeaderBuildContext): string | undefined {
+    return (
+      RequestHeaderBuilder.findHeaderFromSources(
+        'x-opencode-client',
+        context.normalizedClientHeaders,
+        context.runtimeHeaders,
+        context.overrideHeaders,
+        context.serviceHeaders
+      ) ??
+      RequestHeaderBuilder.pickRecordString(context.inboundMetadata, ['opencodeClient', 'opencode_client']) ??
+      RequestHeaderBuilder.pickRecordString(context.runtimeMetadata?.metadata, ['opencodeClient', 'opencode_client'])
+    );
+  }
+
+  private static applyOpenCodeZenRoutingHeaders(
+    finalHeaders: Record<string, string>,
+    context: RequestHeaderBuildContext
+  ): void {
+    const projectId = RequestHeaderBuilder.resolveOpenCodeZenProjectId(context);
+    if (projectId) {
+      HeaderUtils.assignHeader(finalHeaders, 'x-opencode-project', projectId);
+    }
+
+    const sessionId = RequestHeaderBuilder.resolveOpenCodeZenSessionId(context);
+    if (sessionId) {
+      HeaderUtils.assignHeader(finalHeaders, 'x-opencode-session', sessionId);
+    }
+
+    const requestId = RequestHeaderBuilder.resolveOpenCodeZenRequestId(context);
+    if (requestId) {
+      HeaderUtils.assignHeader(finalHeaders, 'x-opencode-request', requestId);
+    }
+
+    const client = RequestHeaderBuilder.resolveOpenCodeZenClient(context);
+    if (client) {
+      HeaderUtils.assignHeader(finalHeaders, 'x-opencode-client', client);
+    }
+  }
+
+  private static isOpenCodeZenRuntime(runtimeMetadata?: ProviderRuntimeMetadata): boolean {
+    const providerId =
+      typeof runtimeMetadata?.providerId === 'string' ? runtimeMetadata.providerId.trim().toLowerCase() : '';
+    if (providerId === 'opencode-zen' || providerId === 'opencode-zen-free' || providerId.startsWith('opencode-zen-')) {
+      return true;
+    }
+    const providerKey =
+      typeof runtimeMetadata?.providerKey === 'string' ? runtimeMetadata.providerKey.trim().toLowerCase() : '';
+    return (
+      providerKey === 'opencode-zen' ||
+      providerKey === 'opencode-zen-free' ||
+      providerKey.startsWith('opencode-zen-')
+    );
+  }
+
   static buildGeminiDefaultHeaders(
     baseHeaders: Record<string, string>,
     runtimeMetadata?: ProviderRuntimeMetadata
@@ -50,6 +207,7 @@ export class RequestHeaderBuilder {
       ...context.runtimeHeaders,
       ...context.authHeaders
     };
+    const isOpenCodeZen = RequestHeaderBuilder.isOpenCodeZenRuntime(context.runtimeMetadata);
 
     const clientAccept = context.normalizedClientHeaders
       ? HeaderUtils.findHeaderValue(context.normalizedClientHeaders, 'Accept')
@@ -72,12 +230,21 @@ export class RequestHeaderBuilder {
       defaultUserAgent: context.defaultUserAgent,
       runtimeMetadata: context.runtimeMetadata
     });
-    const resolvedUa = profileResolvedUa ?? (context.isIflow
-      ? (uaFromConfig ?? uaFromService ?? context.inboundUserAgent ?? context.defaultUserAgent)
-      : (uaFromConfig ?? context.inboundUserAgent ?? uaFromService ?? context.defaultUserAgent));
-    HeaderUtils.assignHeader(finalHeaders, 'User-Agent', resolvedUa);
+    if (isOpenCodeZen) {
+      const resolvedUa = profileResolvedUa ?? uaFromConfig ?? context.inboundUserAgent ?? uaFromService;
+      if (resolvedUa) {
+        HeaderUtils.assignHeader(finalHeaders, 'User-Agent', resolvedUa);
+      } else {
+        HeaderUtils.deleteHeader(finalHeaders, 'User-Agent');
+      }
+    } else {
+      const resolvedUa = context.isIflow
+        ? (profileResolvedUa ?? uaFromConfig ?? uaFromService ?? context.inboundUserAgent ?? context.defaultUserAgent)
+        : (profileResolvedUa ?? uaFromConfig ?? context.inboundUserAgent ?? uaFromService ?? context.defaultUserAgent);
+      HeaderUtils.assignHeader(finalHeaders, 'User-Agent', resolvedUa);
+    }
 
-    if (!context.isGeminiFamily) {
+    if (!context.isGeminiFamily && !isOpenCodeZen) {
       const originatorFromConfig = HeaderUtils.findHeaderValue(
         { ...context.overrideHeaders, ...context.runtimeHeaders },
         'originator'
@@ -89,7 +256,7 @@ export class RequestHeaderBuilder {
       }
     }
 
-    if (!context.isAntigravity && context.normalizedClientHeaders) {
+    if (!context.isAntigravity && !isOpenCodeZen && context.normalizedClientHeaders) {
       const conversationId = HeaderUtils.findHeaderValue(context.normalizedClientHeaders, 'conversation_id');
       if (conversationId) {
         HeaderUtils.assignHeader(finalHeaders, 'conversation_id', conversationId);
@@ -100,7 +267,7 @@ export class RequestHeaderBuilder {
       }
     }
 
-    if (!context.isAntigravity && context.inboundMetadata && typeof context.inboundMetadata === 'object') {
+    if (!context.isAntigravity && !isOpenCodeZen && context.inboundMetadata && typeof context.inboundMetadata === 'object') {
       const meta = context.inboundMetadata as Record<string, unknown>;
       const metaSessionId =
         typeof meta.sessionId === 'string' && meta.sessionId.trim() ? meta.sessionId.trim() : '';
@@ -116,13 +283,18 @@ export class RequestHeaderBuilder {
       }
     }
 
-    if (!context.isAntigravity && context.codexUaMode) {
+    if (!context.isAntigravity && !isOpenCodeZen && context.codexUaMode) {
       SessionHeaderUtils.ensureCodexSessionHeaders(finalHeaders, context.runtimeMetadata);
     }
 
-    if (context.isAntigravity) {
+    if (context.isAntigravity || isOpenCodeZen) {
       HeaderUtils.deleteHeader(finalHeaders, 'session_id');
       HeaderUtils.deleteHeader(finalHeaders, 'conversation_id');
+      HeaderUtils.deleteHeader(finalHeaders, 'originator');
+    }
+
+    if (isOpenCodeZen) {
+      RequestHeaderBuilder.applyOpenCodeZenRoutingHeaders(finalHeaders, context);
     }
 
     if (context.isIflow) {

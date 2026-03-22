@@ -32,8 +32,7 @@ import {
 import type {
   BuildChatRequestResult,
   BuildResponsesRequestResult,
-  ResponsesRequestContext,
-  Unknown
+  ResponsesRequestContext
 } from './responses-openai-bridge/types.js';
 export type {
   BuildChatRequestResult,
@@ -44,10 +43,19 @@ export type {
 // --- Utilities (ported strictly) ---
 import { resolveBridgePolicy, resolvePolicyActions } from '../bridge-policies.js';
 import { logHubStageTiming } from '../hub/pipeline/hub-stage-timing.js';
+import {
+  RESPONSES_TOOL_PASSTHROUGH_KEYS,
+  buildSlimBridgeDecisionMetadata,
+  buildSlimResponsesBridgeContext,
+  collectResponsesRequestParameters,
+  extractMetadataExtraFields,
+  pickObjectFields,
+  sanitizeCapturedResponsesInput,
+  stripToolControlFieldsFromContextMetadata,
+  stripToolControlFieldsFromParameterObject,
+  unwrapData
+} from './responses-openai-bridge/utils.js';
 
-function isObject(v: unknown): v is Unknown {
-  return !!v && typeof v === 'object' && !Array.isArray(v);
-}
 
 function readCapturedToolResults(context: ResponsesRequestContext): Array<Record<string, unknown>> | undefined {
   const raw = (context as Record<string, unknown>).__captured_tool_results;
@@ -99,156 +107,10 @@ function filterRedundantResponsesReasoningAction(
   });
 }
 
-const RESPONSES_TOOL_PASSTHROUGH_KEYS = [
-  'temperature',
-  'tool_choice',
-  'parallel_tool_calls',
-  'response_format',
-  'user',
-  'top_p',
-  'prompt_cache_key',
-  'reasoning',
-  'logit_bias',
-  'seed'
-] as const;
-
-export const RESPONSES_REQUEST_PARAMETER_KEYS = [
-  'model',
-  'temperature',
-  'top_p',
-  'top_k',
-  'prompt_cache_key',
-  'reasoning',
-  'max_tokens',
-  'max_output_tokens',
-  'response_format',
-  'tool_choice',
-  'parallel_tool_calls',
-  'service_tier',
-  'truncation',
-  'include',
-  'store',
-  'text',
-  'user',
-  'logit_bias',
-  'seed',
-  'stop',
-  'stop_sequences',
-  'modalities'
-] as const;
-
-function pickObjectFields(
-  value: Record<string, unknown> | undefined,
-  keys: readonly string[]
-): Record<string, unknown> | undefined {
-  if (!value) {
-    return undefined;
-  }
-  const picked: Record<string, unknown> = {};
-  for (const key of keys) {
-    if (value[key] !== undefined) {
-      picked[key] = value[key];
-    }
-  }
-  return Object.keys(picked).length ? picked : undefined;
-}
-
-export function collectResponsesRequestParameters(
-  payload: Record<string, unknown> | undefined,
-  options?: {
-    streamHint?: boolean | undefined;
-  }
-): Record<string, unknown> | undefined {
-  if (!payload) {
-    return undefined;
-  }
-  let params = pickObjectFields(payload, RESPONSES_REQUEST_PARAMETER_KEYS);
-  if (options?.streamHint !== undefined) {
-    (params ??= {}).stream = options.streamHint;
-  }
-  return params && Object.keys(params).length ? params : undefined;
-}
-
-function buildSlimResponsesBridgeContext(
-  context: ResponsesRequestContext | undefined
-): Record<string, unknown> | undefined {
-  if (!context || typeof context !== 'object') {
-    return undefined;
-  }
-  const slim: Record<string, unknown> = {};
-  if (Array.isArray(context.input) && context.input.length) {
-    slim.input = context.input;
-  }
-  if (Array.isArray(context.originalSystemMessages) && context.originalSystemMessages.length) {
-    slim.originalSystemMessages = context.originalSystemMessages;
-  }
-  if (typeof context.systemInstruction === 'string' && context.systemInstruction.trim().length) {
-    slim.systemInstruction = context.systemInstruction;
-  }
-  if (typeof context.toolCallIdStyle === 'string' && context.toolCallIdStyle.trim().length) {
-    slim.toolCallIdStyle = context.toolCallIdStyle;
-  }
-  if (context.metadata && typeof context.metadata === 'object' && !Array.isArray(context.metadata)) {
-    slim.metadata = context.metadata as Record<string, unknown>;
-  }
-  return Object.keys(slim).length ? slim : undefined;
-}
-
-function buildSlimBridgeDecisionMetadata(
-  metadata: Record<string, unknown> | undefined
-): Record<string, unknown> | undefined {
-  if (!metadata) {
-    return undefined;
-  }
-  return pickObjectFields(metadata, ['toolCallIdStyle', 'bridgeHistory']);
-}
-
-function sanitizeCapturedResponsesInput(
-  input: BridgeInputItem[] | undefined
-): BridgeInputItem[] | undefined {
-  if (!Array.isArray(input) || input.length === 0) {
-    return input;
-  }
-  const acceptedCallIds = new Set<string>();
-  const out: BridgeInputItem[] = [];
-  for (const entry of input) {
-    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
-      continue;
-    }
-    const type = typeof (entry as any).type === 'string' ? String((entry as any).type).trim().toLowerCase() : '';
-    if (type === 'function_call') {
-      const sanitizedName = sanitizeResponsesFunctionName((entry as any).name);
-      if (!sanitizedName) {
-        continue;
-      }
-      const next = jsonClone(entry as JsonValue) as BridgeInputItem;
-      (next as any).name = sanitizedName;
-      const callId = typeof (next as any).call_id === 'string' ? String((next as any).call_id).trim() : '';
-      if (callId) {
-        acceptedCallIds.add(callId);
-      }
-      out.push(next);
-      continue;
-    }
-    if (type === 'function_call_output') {
-      const callId = typeof (entry as any).call_id === 'string' ? String((entry as any).call_id).trim() : '';
-      if (!callId || !acceptedCallIds.has(callId)) {
-        continue;
-      }
-    }
-    out.push(jsonClone(entry as JsonValue) as BridgeInputItem);
-  }
-  return out;
-}
-
-// normalizeTools unified in ../args-mapping.ts
-
-// NOTE: 自修复提示已移除（统一标准：不做模糊兜底）。
-
-
-// --- Public bridge functions ---
-
-export function captureResponsesContext(payload: Record<string, unknown>, dto?: { route?: { requestId?: string } }): ResponsesRequestContext {
+export function captureResponsesContext(
+  payload: Record<string, unknown>,
+  dto?: { route?: { requestId?: string } }
+): ResponsesRequestContext {
   const preservedInput = Array.isArray(payload.input)
     ? (payload.input as BridgeInputItem[])
     : undefined;
@@ -283,18 +145,17 @@ export function captureResponsesContext(payload: Record<string, unknown>, dto?: 
   return captured;
 }
 
-export function buildChatRequestFromResponses(payload: Record<string, unknown>, context: ResponsesRequestContext): BuildChatRequestResult {
+export function buildChatRequestFromResponses(
+  payload: Record<string, unknown>,
+  context: ResponsesRequestContext
+): BuildChatRequestResult {
   const requestId =
     typeof context.requestId === 'string' && context.requestId.trim().length
       ? context.requestId
       : 'unknown';
-  // V3: 对 Responses 路径仅做“形状转换”，不做参数解析/修复。
-  // 将顶层 { type,name,description,parameters,strict } 归一为 OpenAI Chat tools 形状：
-  // { type:'function', function:{ name,description,parameters,strict? } }
   const toolsNormalized = Array.isArray(context.toolsNormalized) && context.toolsNormalized.length
     ? (context.toolsNormalized as unknown as ChatToolDefinition[])
     : (mapReqInboundBridgeToolsToChatWithNative((payload as any).tools) as unknown as ChatToolDefinition[]);
-  // 不在 Responses 路径进行 MCP 工具注入；统一由 Chat 后半段治理注入
 
   logHubStageTiming(requestId, 'req_inbound.responses.convert_input_to_messages', 'start');
   const convertStart = Date.now();
@@ -337,16 +198,14 @@ export function buildChatRequestFromResponses(payload: Record<string, unknown>, 
   }
   if (Array.isArray(context.originalSystemMessages) && context.originalSystemMessages.length) {
     const preservedSystems = context.originalSystemMessages
-      .map(text => ({ role: 'system' as const, content: text }))
-      .filter(message => typeof message.content === 'string');
+      .map((text) => ({ role: 'system' as const, content: text }))
+      .filter((message) => typeof message.content === 'string');
     if (preservedSystems.length) {
       const nonSystemMessages = messages.filter((msg: any) => String(msg?.role).toLowerCase() !== 'system');
       messages = [...preservedSystems, ...nonSystemMessages];
     }
   }
   messages = appendLocalImageBlockOnLatestUserInputWithNative({ messages }).messages;
-  // 不在 Responses 路径做工具治理；统一在 Chat 后半段处理
-  // No system tips for MCP on OpenAI Responses path (avoid leaking tool names)
   if (!messages.length) {
     throw new ProviderProtocolError('Responses payload produced no chat messages', {
       code: 'MALFORMED_REQUEST',
@@ -359,8 +218,6 @@ export function buildChatRequestFromResponses(payload: Record<string, unknown>, 
       }
     });
   }
-
-  // 如果只有 system 消息且无 user/assistant/tool，后续桥接 action 会从 instructions 注入兜底 user 消息
 
   const parameterSource: Record<string, unknown> = { ...(payload as Record<string, unknown>) };
   if (typeof parameterSource.max_tokens === 'number' && parameterSource.max_output_tokens === undefined) {
@@ -377,18 +234,13 @@ export function buildChatRequestFromResponses(payload: Record<string, unknown>, 
     messages,
     ...(bridgeParameters ?? {})
   };
-  if (Array.isArray(toolsNormalized) && toolsNormalized.length) (result as any).tools = toolsNormalized;
+  if (Array.isArray(toolsNormalized) && toolsNormalized.length) {
+    (result as any).tools = toolsNormalized;
+  }
   return { request: result, toolsNormalized };
 }
 
-/**
- * Chat 请求 → Responses 请求（非流），用于 V3 process=chat 且 providerWire=responses 的请求编码。
- *
- * 设计目标：
- *  - 保留 model / tools / tool_choice / parallel_tool_calls 等字段；
- *  - 将 system 消息折叠到 instructions；
- *  - 将 user/assistant/tool 消息编码为 input[] 中的 message 块，使得 mapResponsesInputToChat 能够还原为等价 Chat 请求。
- */
+
 function normalizeBridgeHistory(seed: unknown): BridgeInputBuildResult | undefined {
   if (!seed || typeof seed !== 'object' || Array.isArray(seed)) {
     return undefined;
@@ -504,6 +356,27 @@ export function buildResponsesRequestFromChat(payload: Record<string, unknown>, 
   const streamFromParameters = (chat as any)?.parameters && typeof ((chat as any).parameters as any)?.stream === 'boolean'
     ? (((chat as any).parameters as any).stream as boolean)
     : undefined;
+  const contextParameters =
+    ctx?.parameters && typeof ctx.parameters === 'object' && !Array.isArray(ctx.parameters)
+      ? ({ ...(ctx.parameters as Record<string, unknown>) } as Record<string, unknown>)
+      : undefined;
+  if (contextParameters) {
+    delete contextParameters.stream;
+  }
+  const contextToolChoice =
+    (ctx as any)?.toolChoice !== undefined ? (ctx as any).toolChoice : (ctx as any)?.tool_choice;
+  const contextParallelToolCalls =
+    typeof (ctx as any)?.parallelToolCalls === 'boolean'
+      ? (ctx as any).parallelToolCalls
+      : typeof (ctx as any)?.parallel_tool_calls === 'boolean'
+        ? (ctx as any).parallel_tool_calls
+        : undefined;
+  const contextResponseFormat =
+    (ctx as any)?.responseFormat !== undefined ? (ctx as any).responseFormat : (ctx as any)?.response_format;
+  const contextServiceTier =
+    (ctx as any)?.serviceTier !== undefined ? (ctx as any).serviceTier : (ctx as any)?.service_tier;
+  const contextTruncation =
+    (ctx as any)?.truncation !== undefined ? (ctx as any).truncation : (ctx as any)?.truncation_mode;
   const stripHostFields = shouldStripHostManagedFields(ctx);
   const preparedEnvelope = prepareResponsesRequestEnvelopeWithNative({
     request: out as Record<string, unknown>,
@@ -512,27 +385,27 @@ export function buildResponsesRequestFromChat(payload: Record<string, unknown>, 
     metadataSystemInstruction: envelopeMetadata?.systemInstruction,
     combinedSystemInstruction,
     reasoningInstructionSegments: (ctx as any)?.__rcc_reasoning_instructions_segments,
-    contextParameters: undefined,
+    contextParameters,
     chatParameters: chat.parameters,
     metadataParameters: stripToolControlFieldsFromParameterObject(
       metadataExtraFields?.parameters as JsonObject | undefined
     ),
-    contextStream: undefined,
+    contextStream: typeof (ctx as any)?.stream === 'boolean' ? ((ctx as any).stream as boolean) : undefined,
     metadataStream: undefined,
     chatStream: streamFromChat,
     chatParametersStream: streamFromParameters,
-    contextInclude: undefined,
+    contextInclude: Array.isArray((ctx as any)?.include) ? ((ctx as any).include as unknown[]) : undefined,
     metadataInclude: undefined,
-    contextStore: undefined,
+    contextStore: typeof (ctx as any)?.store === 'boolean' ? ((ctx as any).store as boolean) : undefined,
     metadataStore: undefined,
     stripHostFields,
-    contextToolChoice: undefined,
-    contextParallelToolCalls: undefined,
-    contextResponseFormat: undefined,
+    contextToolChoice,
+    contextParallelToolCalls,
+    contextResponseFormat,
     metadataResponseFormat: undefined,
-    contextServiceTier: undefined,
+    contextServiceTier,
     metadataServiceTier: undefined,
-    contextTruncation: undefined,
+    contextTruncation,
     metadataTruncation: undefined,
     contextMetadata: stripToolControlFieldsFromContextMetadata(ctx?.metadata),
     metadataMetadata: metadataExtraFields?.metadata
@@ -543,77 +416,6 @@ export function buildResponsesRequestFromChat(payload: Record<string, unknown>, 
   ensureBridgeInstructions(out);
 
   return { request: out, originalSystemMessages };
-}
-
-function extractMetadataExtraFields(metadata: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
-  if (!metadata) {
-    return undefined;
-  }
-  const extras = (metadata as Record<string, unknown>).extraFields;
-  if (extras && typeof extras === 'object' && !Array.isArray(extras)) {
-    return extras as Record<string, unknown>;
-  }
-  return undefined;
-}
-
-function stripToolControlFieldsFromContextMetadata(
-  metadata: JsonObject | undefined
-): JsonObject | undefined {
-  if (!metadata) {
-    return undefined;
-  }
-  const cloned = jsonClone(metadata) as JsonObject;
-  const extras = cloned.extraFields;
-  if (!extras || !isPlainObject(extras)) {
-    return cloned;
-  }
-  delete (extras as Record<string, unknown>).tool_choice;
-  delete (extras as Record<string, unknown>).parallel_tool_calls;
-  if (Object.keys(extras as Record<string, unknown>).length === 0) {
-    delete cloned.extraFields;
-  }
-  return cloned;
-}
-
-function stripToolControlFieldsFromParameterObject(
-  value: JsonObject | undefined
-): JsonObject | undefined {
-  if (!value) {
-    return undefined;
-  }
-  const cloned = jsonClone(value) as JsonObject;
-  delete cloned.tool_choice;
-  delete cloned.parallel_tool_calls;
-  return Object.keys(cloned).length ? cloned : undefined;
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
-}
-
-function unwrapData(value: Record<string, unknown>): Record<string, unknown> {
-  let current: any = value;
-  const seen = new Set<any>();
-  while (current && typeof current === 'object' && !Array.isArray(current) && !seen.has(current)) {
-    seen.add(current);
-    if ('choices' in current || 'message' in current) break;
-    if ('data' in current && typeof (current as any).data === 'object') { current = (current as any).data; continue; }
-    break;
-  }
-  return current as Record<string, unknown>;
-}
-
-function resolveSnapshotLookupKey(response: Record<string, unknown>, context?: ResponsesRequestContext): string | undefined {
-  if (typeof (response as any)?.request_id === 'string') {
-    return (response as any).request_id as string;
-  }
-  if (typeof context?.requestId === 'string') {
-    return context.requestId;
-  }
-  if (typeof (response as any)?.id === 'string') {
-    return (response as any).id as string;
-  }
-  return undefined;
 }
 
 function shouldStripHostManagedFields(context?: ResponsesRequestContext): boolean {
@@ -627,4 +429,5 @@ export {
 } from './responses-openai-bridge/response-payload.js';
 
 export { buildChatResponseFromResponses } from '../shared/responses-response-utils.js';
+export { collectResponsesRequestParameters } from './responses-openai-bridge/utils.js';
 // (imports moved to top)

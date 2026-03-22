@@ -354,4 +354,154 @@ describe('HttpTransportProvider header propagation', () => {
     const client = (provider as unknown as { httpClient: RecordingHttpClient }).httpClient;
     expect(client.lastEndpoint).toBe('https://example.invalid/openai/responses');
   });
+
+  test('opencode zen forwards opencode routing headers and removes codex session/originator headers', async () => {
+    const zenConfig = {
+      id: 'test-http-provider-opencode-zen',
+      type: 'openai-http-provider',
+      config: {
+        providerType: 'openai',
+        providerId: 'opencode-zen-free',
+        auth: { type: 'apikey', apiKey: 'public', rawType: 'opencode-zen-public' },
+        overrides: {
+          baseUrl: 'https://opencode.ai/zen/v1',
+          endpoint: '/chat/completions',
+          defaultModel: 'mimo-v2-pro-free'
+        }
+      }
+    } as unknown as typeof config;
+
+    const provider = new TestHttpTransportProvider(zenConfig, deps);
+    await provider.initialize();
+
+    const providerRequest = {
+      metadata: {
+        stream: false,
+        clientHeaders: {
+          accept: 'application/json',
+          session_id: 'sess-zen',
+          conversation_id: 'conv-zen',
+          'x-opencode-project': 'proj-zen',
+          'x-opencode-session': 'session-zen',
+          'x-opencode-request': 'user-zen',
+          'x-opencode-client': 'cli'
+        }
+      },
+      data: {
+        model: 'mimo-v2-pro-free',
+        messages: [{ role: 'user', content: 'hello' }]
+      }
+    };
+
+    attachProviderRuntimeMetadata(providerRequest as Record<string, unknown>, {
+      requestId: 'req-test-zen-headers',
+      providerId: 'opencode-zen-free',
+      providerKey: 'opencode-zen-free.key1.mimo-v2-pro-free',
+      providerType: 'openai',
+      providerProtocol: 'openai-chat',
+      routeName: 'thinking',
+      metadata: {
+        entryEndpoint: '/v1/chat/completions',
+        clientHeaders: {
+          accept: 'application/json',
+          session_id: 'sess-zen',
+          conversation_id: 'conv-zen',
+          'x-opencode-project': 'proj-zen',
+          'x-opencode-session': 'session-zen',
+          'x-opencode-request': 'user-zen',
+          'x-opencode-client': 'cli'
+        }
+      },
+      target: {
+        providerKey: 'opencode-zen-free.key1.mimo-v2-pro-free',
+        providerType: 'openai',
+        compatibilityProfile: undefined,
+        runtimeKey: 'opencode-zen-free.key1',
+        modelId: 'mimo-v2-pro-free'
+      }
+    });
+
+    const response = await provider.processIncoming(providerRequest as any);
+    expect(response).toBeTruthy();
+
+    const client = (provider as unknown as { httpClient: RecordingHttpClient }).httpClient;
+    const headers = client.lastHeaders || {};
+    expect(headers['Content-Type']).toBe('application/json');
+    expect(headers['Authorization']).toBe('Bearer public');
+    expect(headers['Accept']).toBe('application/json');
+    expect(headers['User-Agent']).toBeUndefined();
+    expect(headers['originator']).toBeUndefined();
+    expect(headers['session_id']).toBeUndefined();
+    expect(headers['conversation_id']).toBeUndefined();
+    expect(headers['x-opencode-project']).toBe('proj-zen');
+    expect(headers['x-opencode-session']).toBe('session-zen');
+    expect(headers['x-opencode-request']).toBe('user-zen');
+    expect(headers['x-opencode-client']).toBe('cli');
+  });
+
+  test('opencode zen derives x-opencode-session/request from metadata when client x-opencode headers are absent', async () => {
+    const zenConfig = {
+      id: 'test-http-provider-opencode-zen-metadata',
+      type: 'openai-http-provider',
+      config: {
+        providerType: 'openai',
+        providerId: 'opencode-zen-free',
+        auth: { type: 'apikey', apiKey: 'public', rawType: 'opencode-zen-public' },
+        overrides: {
+          baseUrl: 'https://opencode.ai/zen/v1',
+          endpoint: '/chat/completions',
+          defaultModel: 'mimo-v2-pro-free'
+        }
+      }
+    } as unknown as typeof config;
+
+    const provider = new TestHttpTransportProvider(zenConfig, deps);
+    await provider.initialize();
+
+    const providerRequest = {
+      metadata: {
+        stream: false,
+        clientHeaders: { accept: 'application/json' }
+      },
+      data: {
+        model: 'mimo-v2-pro-free',
+        messages: [{ role: 'user', content: 'hello' }]
+      }
+    };
+
+    attachProviderRuntimeMetadata(providerRequest as Record<string, unknown>, {
+      requestId: 'req-test-zen-metadata',
+      providerId: 'opencode-zen-free',
+      providerKey: 'opencode-zen-free.key1.mimo-v2-pro-free',
+      providerType: 'openai',
+      providerProtocol: 'openai-chat',
+      routeName: 'thinking',
+      metadata: {
+        entryEndpoint: '/v1/chat/completions',
+        projectId: 'proj-meta',
+        sessionId: 'sess-meta',
+        clientRequestId: 'client-req-meta',
+        opencodeClient: 'cli'
+      },
+      target: {
+        providerKey: 'opencode-zen-free.key1.mimo-v2-pro-free',
+        providerType: 'openai',
+        compatibilityProfile: undefined,
+        runtimeKey: 'opencode-zen-free.key1',
+        modelId: 'mimo-v2-pro-free'
+      }
+    });
+
+    const response = await provider.processIncoming(providerRequest as any);
+    expect(response).toBeTruthy();
+
+    const client = (provider as unknown as { httpClient: RecordingHttpClient }).httpClient;
+    const headers = client.lastHeaders || {};
+    expect(headers['x-opencode-project']).toBe('proj-meta');
+    expect(headers['x-opencode-session']).toBe('sess-meta');
+    expect(headers['x-opencode-request']).toBe('client-req-meta');
+    expect(headers['x-opencode-client']).toBe('cli');
+    expect(headers['session_id']).toBeUndefined();
+    expect(headers['conversation_id']).toBeUndefined();
+  });
 });

@@ -42,6 +42,40 @@ function safeStringify(value: unknown): string | undefined {
   }
 }
 
+function invokeNativeStringCapability(capability: string, args: unknown[]): string {
+  const fail = (reason?: string) => failNativeRequired<string>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  try {
+    const raw = fn(...args);
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    return raw;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+function invokeNativeStringCapabilityWithJsonArgs(capability: string, args: unknown[]): string {
+  const fail = (reason?: string) => failNativeRequired<string>(capability, reason);
+  const encodedArgs: string[] = [];
+  for (const arg of args) {
+    const encoded = safeStringify(arg);
+    if (!encoded) {
+      return fail('json stringify failed');
+    }
+    encodedArgs.push(encoded);
+  }
+  return invokeNativeStringCapability(capability, encodedArgs);
+}
+
 function parseActionDescriptor(candidate: unknown): NativeBridgeActionDescriptor | null {
   if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
     return null;
@@ -160,25 +194,11 @@ export function resolveBridgePolicyWithNative(options: {
 } | undefined): NativeBridgePolicy | undefined {
   const capability = 'resolveBridgePolicyJson';
   const fail = (reason?: string) => failNativeRequired<NativeBridgePolicy | undefined>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    return fail();
-  }
-  const payloadJson = safeStringify({
+  try {
+    const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [{
     protocol: options?.protocol,
     moduleType: options?.moduleType
-  });
-  if (!payloadJson) {
-    return fail('json stringify failed');
-  }
-  try {
-    const raw = fn(payloadJson);
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
+  }]);
     const parsed = parsePolicy(raw);
     return parsed === null ? fail('invalid payload') : parsed;
   } catch (error) {
@@ -194,22 +214,12 @@ export function resolveBridgePolicyActionsWithNative(
   const capability = 'resolveBridgePolicyActionsJson';
   const fail = (reason?: string) =>
     failNativeRequired<NativeBridgeActionDescriptor[] | undefined>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    return fail();
-  }
-  const policyJson = safeStringify(policy ?? null);
-  if (!policyJson) {
-    return fail('json stringify failed');
-  }
   try {
-    const raw = fn(policyJson, String(stage || ''));
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
+    const policyJson = safeStringify(policy ?? null);
+    if (!policyJson) {
+      return fail('json stringify failed');
     }
+    const raw = invokeNativeStringCapability(capability, [policyJson, String(stage || '')]);
     const parsed = parseActionDescriptors(raw);
     return parsed === null ? fail('invalid payload') : parsed;
   } catch (error) {
@@ -452,14 +462,8 @@ export function resolveHubProtocolSpecWithNative(input: {
 }): NativeProtocolSpec {
   const capability = 'resolveHubProtocolSpecJson';
   const fail = (reason?: string) => failNativeRequired<NativeProtocolSpec>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    return fail();
-  }
-  const payloadJson = safeStringify({
+  try {
+    const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [{
     protocol: input?.protocol,
     allowlists: {
       openaiChatAllowedFields: input?.allowlists?.openaiChatAllowedFields ?? [],
@@ -470,15 +474,7 @@ export function resolveHubProtocolSpecWithNative(input: {
       anthropicParametersWrapperAllowKeys: input?.allowlists?.anthropicParametersWrapperAllowKeys ?? [],
       geminiAllowedFields: input?.allowlists?.geminiAllowedFields ?? []
     }
-  });
-  if (!payloadJson) {
-    return fail('json stringify failed');
-  }
-  try {
-    const raw = fn(payloadJson);
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
+  }]);
     const parsed = parseProtocolSpec(raw);
     return parsed ?? fail('invalid payload');
   } catch (error) {
@@ -490,18 +486,8 @@ export function resolveHubProtocolSpecWithNative(input: {
 export function resolveHubProtocolAllowlistsWithNative(): NativeHubProtocolAllowlists {
   const capability = 'resolveHubProtocolAllowlistsJson';
   const fail = (reason?: string) => failNativeRequired<NativeHubProtocolAllowlists>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    return fail();
-  }
   try {
-    const raw = fn();
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
+    const raw = invokeNativeStringCapability(capability, []);
     const parsed = parseHubProtocolAllowlists(raw);
     return parsed ?? fail('invalid payload');
   } catch (error) {

@@ -14,6 +14,7 @@ fn test_resp_inbound_no_profile_passthrough() {
             captured_chat_request: None,
             deepseek: None,
             claude_code: None,
+            anthropic_thinking: None,
             estimated_input_tokens: None,
             model_id: None,
             client_model_id: None,
@@ -56,6 +57,7 @@ fn test_resp_profile_chat_lmstudio_native_applied() {
             captured_chat_request: None,
             deepseek: None,
             claude_code: None,
+            anthropic_thinking: None,
             estimated_input_tokens: None,
             model_id: None,
             client_model_id: None,
@@ -124,6 +126,7 @@ fn test_resp_profile_chat_lmstudio_harvests_responses_output_tool_tokens() {
             captured_chat_request: None,
             deepseek: None,
             claude_code: None,
+            anthropic_thinking: None,
             estimated_input_tokens: None,
             model_id: None,
             client_model_id: None,
@@ -161,6 +164,7 @@ fn test_resp_inbound_iflow_protocol_mismatch_native_noop() {
             captured_chat_request: None,
             deepseek: None,
             claude_code: None,
+            anthropic_thinking: None,
             estimated_input_tokens: None,
             model_id: None,
             client_model_id: None,
@@ -194,6 +198,7 @@ fn test_resp_profile_chat_claude_code_protocol_mismatch_native_noop() {
             captured_chat_request: None,
             deepseek: None,
             claude_code: None,
+            anthropic_thinking: None,
             estimated_input_tokens: None,
             model_id: None,
             client_model_id: None,
@@ -239,6 +244,7 @@ fn test_resp_profile_output2choices_native_applied() {
             captured_chat_request: None,
             deepseek: None,
             claude_code: None,
+            anthropic_thinking: None,
             estimated_input_tokens: None,
             model_id: None,
             client_model_id: None,
@@ -294,6 +300,7 @@ fn test_resp_profile_output2choices_converts_tool_calls() {
             captured_chat_request: None,
             deepseek: None,
             claude_code: None,
+            anthropic_thinking: None,
             estimated_input_tokens: None,
             model_id: None,
             client_model_id: None,
@@ -338,6 +345,7 @@ fn test_resp_profile_output2choices_protocol_mismatch_native_noop() {
             captured_chat_request: None,
             deepseek: None,
             claude_code: None,
+            anthropic_thinking: None,
             estimated_input_tokens: None,
             model_id: None,
             client_model_id: None,
@@ -374,6 +382,7 @@ fn test_resp_profile_responses_c4m_protocol_match_native_applied() {
             captured_chat_request: None,
             deepseek: None,
             claude_code: None,
+            anthropic_thinking: None,
             estimated_input_tokens: None,
             model_id: None,
             client_model_id: None,
@@ -411,6 +420,7 @@ fn test_resp_profile_responses_c4m_detects_rate_limit_text() {
             captured_chat_request: None,
             deepseek: None,
             claude_code: None,
+            anthropic_thinking: None,
             estimated_input_tokens: None,
             model_id: None,
             client_model_id: None,
@@ -476,6 +486,7 @@ fn test_resp_profile_chat_qwen_native_applied() {
             captured_chat_request: None,
             deepseek: None,
             claude_code: None,
+            anthropic_thinking: None,
             estimated_input_tokens: None,
             model_id: None,
             client_model_id: None,
@@ -532,6 +543,7 @@ fn test_resp_profile_chat_gemini_cli_native_applied() {
             captured_chat_request: None,
             deepseek: None,
             claude_code: None,
+            anthropic_thinking: None,
             estimated_input_tokens: None,
             model_id: None,
             client_model_id: None,
@@ -580,6 +592,7 @@ fn test_resp_profile_chat_iflow_unwraps_body_and_harvests_tool_calls() {
             captured_chat_request: None,
             deepseek: None,
             claude_code: None,
+            anthropic_thinking: None,
             estimated_input_tokens: None,
             model_id: None,
             client_model_id: None,
@@ -633,6 +646,7 @@ fn test_resp_profile_chat_deepseek_web_unwraps_envelope_and_harvests_tool_calls(
             captured_chat_request: None,
             deepseek: None,
             claude_code: None,
+            anthropic_thinking: None,
             estimated_input_tokens: None,
             model_id: None,
             client_model_id: None,
@@ -691,6 +705,7 @@ fn test_resp_profile_chat_deepseek_web_harvests_function_results_markup() {
             captured_chat_request: None,
             deepseek: None,
             claude_code: None,
+            anthropic_thinking: None,
             estimated_input_tokens: None,
             model_id: None,
             client_model_id: None,
@@ -720,6 +735,65 @@ fn test_resp_profile_chat_deepseek_web_harvests_function_results_markup() {
 }
 
 #[test]
+fn test_resp_profile_chat_deepseek_web_harvests_markdown_bullet_and_repairs_cmd_quotes() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "choices": [{
+                "index": 0,
+                "finish_reason": "stop",
+                "message": {
+                    "role": "assistant",
+                    "tool_calls": [],
+                    "content": "我先创建 epic，再把子任务挂进去。\n\n• {\"tool_calls\":[{\"input\":{\"cmd\":\"bd --no-db create \"Mailbox 统一消息与心跳优先级改造\" --type epic --description \"统一 mailbox 消息三段式格式，定义优先级\"\"},\"name\":\"exec_command\"}]}"
+                }
+            }]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:deepseek-web".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_deepseek_resp_shape_1".to_string()),
+            entry_endpoint: Some("/v1/chat/completions".to_string()),
+            route_id: None,
+            rt: None,
+            captured_chat_request: None,
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+
+    let result = run_resp_inbound_stage3_compat(input).unwrap();
+    assert!(result.native_applied);
+    assert_eq!(result.payload["choices"][0]["finish_reason"], "tool_calls");
+    assert_eq!(
+        result.payload["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
+        "exec_command"
+    );
+    let args = result.payload["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"]
+        .as_str()
+        .unwrap_or("{}");
+    let parsed: Value = serde_json::from_str(args).unwrap_or(Value::Null);
+    assert!(
+        parsed["cmd"]
+            .as_str()
+            .unwrap_or("")
+            .contains("Mailbox 统一消息与心跳优先级改造")
+    );
+}
+
+#[test]
 fn test_resp_profile_chat_deepseek_web_strips_commentary_markup() {
     let input = ReqOutboundCompatInput {
         payload: json!({
@@ -742,6 +816,7 @@ fn test_resp_profile_chat_deepseek_web_strips_commentary_markup() {
             captured_chat_request: None,
             deepseek: None,
             claude_code: None,
+            anthropic_thinking: None,
             estimated_input_tokens: None,
             model_id: None,
             client_model_id: None,
@@ -789,6 +864,7 @@ fn test_resp_profile_chat_deepseek_web_backfills_usage_from_estimate() {
             captured_chat_request: None,
             deepseek: None,
             claude_code: None,
+            anthropic_thinking: None,
             estimated_input_tokens: Some(42.0),
             model_id: Some("deepseek-chat".to_string()),
             client_model_id: None,
@@ -862,6 +938,7 @@ fn test_resp_profile_chat_deepseek_web_preserves_upstream_usage() {
             captured_chat_request: None,
             deepseek: None,
             claude_code: None,
+            anthropic_thinking: None,
             estimated_input_tokens: Some(999.0),
             model_id: Some("deepseek-chat".to_string()),
             client_model_id: None,
@@ -904,6 +981,7 @@ fn test_resp_profile_chat_deepseek_web_business_error_propagates() {
             captured_chat_request: None,
             deepseek: None,
             claude_code: None,
+            anthropic_thinking: None,
             estimated_input_tokens: None,
             model_id: None,
             client_model_id: None,
@@ -951,6 +1029,7 @@ fn test_resp_profile_chat_deepseek_web_required_tool_missing_returns_error() {
                 "textToolFallback": true
             })),
             claude_code: None,
+            anthropic_thinking: None,
             estimated_input_tokens: None,
             model_id: None,
             client_model_id: None,
@@ -994,6 +1073,7 @@ fn test_resp_profile_chat_glm_extracts_tool_calls_from_reasoning_markup() {
             captured_chat_request: None,
             deepseek: None,
             claude_code: None,
+            anthropic_thinking: None,
             estimated_input_tokens: None,
             model_id: None,
             client_model_id: None,
@@ -1046,6 +1126,7 @@ fn test_resp_profile_chat_glm_extracts_tool_calls_from_fenced_json() {
             captured_chat_request: None,
             deepseek: None,
             claude_code: None,
+            anthropic_thinking: None,
             estimated_input_tokens: None,
             model_id: None,
             client_model_id: None,
@@ -1093,6 +1174,7 @@ fn test_resp_profile_chat_glm_extracts_tool_calls_from_bracketed_block() {
             captured_chat_request: None,
             deepseek: None,
             claude_code: None,
+            anthropic_thinking: None,
             estimated_input_tokens: None,
             model_id: None,
             client_model_id: None,
@@ -1139,6 +1221,7 @@ fn test_resp_profile_chat_glm_extracts_tool_calls_from_inline_marker() {
             captured_chat_request: None,
             deepseek: None,
             claude_code: None,
+            anthropic_thinking: None,
             estimated_input_tokens: None,
             model_id: None,
             client_model_id: None,

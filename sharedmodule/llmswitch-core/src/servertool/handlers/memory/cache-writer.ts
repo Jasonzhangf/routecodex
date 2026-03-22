@@ -51,7 +51,7 @@ interface ParsedCacheEntry {
  * 从 metadata 解析工作目录
  */
 export function resolveWorkingDirectory(metadata: Record<string, unknown>): string | undefined {
-  const candidates = ['cwd'];
+  const candidates = ['cwd', 'workdir', 'workingDirectory', 'clientWorkdir'];
   for (const key of candidates) {
     const value = metadata[key];
     if (typeof value === 'string' && value.trim()) {
@@ -65,14 +65,87 @@ export function resolveWorkingDirectory(metadata: Record<string, unknown>): stri
  * 从 adapterContext 解析工作目录
  */
 export function resolveWorkingDirectoryFromAdapterContext(adapterContext: Record<string, unknown>): string | undefined {
-  const candidates = ['cwd'];
+  const candidates = ['cwd', 'workdir', 'workingDirectory', 'clientWorkdir'];
   for (const key of candidates) {
     const value = adapterContext[key];
     if (typeof value === 'string' && value.trim()) {
       return value.trim();
     }
   }
+  const rt = (adapterContext as { __rt?: unknown }).__rt;
+  if (rt && typeof rt === 'object' && !Array.isArray(rt)) {
+    for (const key of candidates) {
+      const value = (rt as Record<string, unknown>)[key];
+      if (typeof value === 'string' && value.trim()) {
+        return value.trim();
+      }
+    }
+  }
   return undefined;
+}
+
+function extractTextFromAssistantMessageContent(content: unknown): string {
+  if (typeof content === 'string') {
+    return content.trim();
+  }
+  if (content && typeof content === 'object' && !Array.isArray(content)) {
+    const row = content as Record<string, unknown>;
+    const directText = row.text;
+    if (typeof directText === 'string' && directText.trim()) {
+      return directText.trim();
+    }
+    if (directText && typeof directText === 'object' && !Array.isArray(directText)) {
+      const value = (directText as Record<string, unknown>).value;
+      if (typeof value === 'string' && value.trim()) {
+        return value.trim();
+      }
+    }
+    const directValue = row.value;
+    if (typeof directValue === 'string' && directValue.trim()) {
+      return directValue.trim();
+    }
+    if (typeof row.content === 'string' && row.content.trim()) {
+      return row.content.trim();
+    }
+    return '';
+  }
+  if (!Array.isArray(content)) {
+    return '';
+  }
+  const texts: string[] = [];
+  for (const part of content) {
+    if (typeof part === 'string') {
+      if (part.trim()) {
+        texts.push(part.trim());
+      }
+      continue;
+    }
+    if (!part || typeof part !== 'object' || Array.isArray(part)) {
+      continue;
+    }
+    const row = part as Record<string, unknown>;
+    const type = typeof row.type === 'string' ? row.type.trim().toLowerCase() : '';
+    const textField = row.text;
+    if (typeof textField === 'string' && textField.trim()) {
+      texts.push(textField.trim());
+      continue;
+    }
+    if (
+      textField &&
+      typeof textField === 'object' &&
+      !Array.isArray(textField)
+    ) {
+      const value = (textField as Record<string, unknown>).value;
+      if (typeof value === 'string' && value.trim()) {
+        texts.push(value.trim());
+        continue;
+      }
+    }
+    if ((type === 'text' || type === 'input_text' || type === 'output_text') && typeof row.content === 'string' && row.content.trim()) {
+      texts.push(row.content.trim());
+    }
+  }
+  return texts.join('\n').trim();
 }
 
 /**
@@ -236,21 +309,10 @@ export function extractAssistantTextFromResponse(response: JsonObject): string {
       if (!item || typeof item !== 'object' || Array.isArray(item)) {
         continue;
       }
-      const content = (item as { content?: unknown }).content;
-      if (Array.isArray(content)) {
-        const texts: string[] = [];
-        for (const part of content) {
-          if (!part || typeof part !== 'object' || Array.isArray(part)) {
-            continue;
-          }
-          const text = (part as { text?: unknown }).text;
-          if (typeof text === 'string' && text.trim()) {
-            texts.push(text.trim());
-          }
-        }
-        if (texts.length) {
-          return texts.join('\n').trim();
-        }
+      const content = (item as { content?: unknown; text?: unknown }).content ?? (item as { text?: unknown }).text;
+      const extracted = extractTextFromAssistantMessageContent(content);
+      if (extracted) {
+        return extracted;
       }
     }
     return '';
@@ -264,8 +326,13 @@ export function extractAssistantTextFromResponse(response: JsonObject): string {
     return '';
   }
   const content = (message as { content?: unknown }).content;
-  if (typeof content === 'string') {
-    return content.trim();
+  const extracted = extractTextFromAssistantMessageContent(content);
+  if (extracted) {
+    return extracted;
+  }
+  const refusal = (message as { refusal?: unknown }).refusal;
+  if (typeof refusal === 'string' && refusal.trim()) {
+    return refusal.trim();
   }
   return '';
 }
@@ -477,4 +544,95 @@ export function writeCacheEntry(options: CacheWriteOptions): CacheWriteResult {
  */
 export function resolveWorkingDirectoryFromAdapterContextOrFallback(adapterContext: Record<string, unknown>): string | undefined {
   return resolveWorkingDirectoryFromAdapterContext(adapterContext);
+}
+
+function readTrimmed(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+function readBoolean(value: unknown): boolean | undefined {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'true' || normalized === '1' || normalized === 'yes' || normalized === 'on') {
+      return true;
+    }
+    if (normalized === 'false' || normalized === '0' || normalized === 'no' || normalized === 'off') {
+      return false;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * 是否应该输出“no workingDirectory”告警日志
+ *
+ * 默认仅在“看起来是 tmux/session 注入链路请求”时打印，避免对普通 API 请求产生噪音。
+ * 可通过环境变量强制开启：ROUTECODEX_LOG_CACHE_NO_WORKDIR_SKIP=1 / RCC_LOG_CACHE_NO_WORKDIR_SKIP=1
+ */
+export function shouldLogNoWorkingDirectorySkip(adapterContext: Record<string, unknown>): boolean {
+  const forceRaw = String(
+    process.env.ROUTECODEX_LOG_CACHE_NO_WORKDIR_SKIP
+      ?? process.env.RCC_LOG_CACHE_NO_WORKDIR_SKIP
+      ?? ''
+  ).trim().toLowerCase();
+  if (forceRaw === '1' || forceRaw === 'true' || forceRaw === 'yes' || forceRaw === 'on') {
+    return true;
+  }
+
+  const candidates = [
+    'tmuxSessionId',
+    'clientTmuxSessionId',
+    'tmux_session_id',
+    'client_tmux_session_id',
+    'stopMessageClientInjectSessionScope'
+  ];
+  for (const key of candidates) {
+    const value = readTrimmed(adapterContext[key]);
+    if (!value) {
+      continue;
+    }
+    if (key === 'stopMessageClientInjectSessionScope') {
+      if (value.startsWith('tmux:')) {
+        return true;
+      }
+      continue;
+    }
+    return true;
+  }
+
+  const injectReady = readBoolean((adapterContext as { clientInjectReady?: unknown }).clientInjectReady);
+  if (injectReady === true) {
+    return true;
+  }
+
+  const rt = (adapterContext as { __rt?: unknown }).__rt;
+  if (rt && typeof rt === 'object' && !Array.isArray(rt)) {
+    const rtRecord = rt as Record<string, unknown>;
+    for (const key of candidates) {
+      const value = readTrimmed(rtRecord[key]);
+      if (!value) {
+        continue;
+      }
+      if (key === 'stopMessageClientInjectSessionScope') {
+        if (value.startsWith('tmux:')) {
+          return true;
+        }
+        continue;
+      }
+      return true;
+    }
+    const rtInjectReady = readBoolean((rtRecord as { clientInjectReady?: unknown }).clientInjectReady);
+    if (rtInjectReady === true) {
+      return true;
+    }
+  }
+
+  return false;
 }

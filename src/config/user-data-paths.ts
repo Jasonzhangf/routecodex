@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 const PRIMARY_DIR_NAME = '.rcc';
 const LEGACY_DIR_NAME = '.routecodex';
 const USER_DIR_ENV_KEYS = ['RCC_HOME', 'ROUTECODEX_USER_DIR', 'ROUTECODEX_HOME'] as const;
+const SNAPSHOT_DIR_ENV_KEYS = ['RCC_SNAPSHOT_DIR', 'ROUTECODEX_SNAPSHOT_DIR'] as const;
 export const RCC_SUBDIRS = {
   auth: 'auth',
   tokens: 'tokens',
@@ -49,6 +50,16 @@ function expandHome(value: string, homeDir?: string): string {
 function isLegacyUserDirPath(value: string, homeDir?: string): boolean {
   const normalized = path.resolve(expandHome(value, homeDir));
   const legacy = resolveLegacyRouteCodexUserDir(homeDir);
+  return normalized === legacy;
+}
+
+function resolveLegacySnapshotsDir(homeDir?: string): string {
+  return path.join(resolveLegacyRouteCodexUserDir(homeDir), RCC_SUBDIRS.snapshots);
+}
+
+function isLegacySnapshotsDirPath(value: string, homeDir?: string): boolean {
+  const normalized = path.resolve(expandHome(value, homeDir));
+  const legacy = resolveLegacySnapshotsDir(homeDir);
   return normalized === legacy;
 }
 
@@ -145,6 +156,20 @@ export function resolveRccSnapshotsDir(homeDir?: string): string {
   return resolveRccSubdir('snapshots', homeDir);
 }
 
+export function resolveRccSnapshotsDirFromEnv(homeDir?: string): string {
+  for (const key of SNAPSHOT_DIR_ENV_KEYS) {
+    const raw = String(process.env[key] || '').trim();
+    if (raw) {
+      const candidate = path.resolve(expandHome(raw, homeDir));
+      if (isLegacySnapshotsDirPath(candidate, homeDir)) {
+        continue;
+      }
+      return candidate;
+    }
+  }
+  return resolveRccSnapshotsDir(homeDir);
+}
+
 export function resolveRccSnapshotsDirForRead(homeDir?: string): string {
   return resolveRccSubdirForRead('snapshots', homeDir);
 }
@@ -211,6 +236,7 @@ export function resolveRccConfigFileForRead(homeDir?: string): string {
 
 export function ensureRccUserDirEnvironment(homeDir?: string): string {
   const userDir = resolveRccUserDir(homeDir);
+  const snapshotsDir = resolveRccSnapshotsDirFromEnv(homeDir);
   const rccHome = String(process.env.RCC_HOME || '').trim();
   if (!rccHome || isLegacyUserDirPath(rccHome, homeDir)) {
     process.env.RCC_HOME = userDir;
@@ -222,6 +248,12 @@ export function ensureRccUserDirEnvironment(homeDir?: string): string {
   const routeHome = String(process.env.ROUTECODEX_HOME || '').trim();
   if (!routeHome || isLegacyUserDirPath(routeHome, homeDir)) {
     process.env.ROUTECODEX_HOME = userDir;
+  }
+  for (const key of SNAPSHOT_DIR_ENV_KEYS) {
+    const raw = String(process.env[key] || '').trim();
+    if (!raw || isLegacySnapshotsDirPath(raw, homeDir)) {
+      process.env[key] = snapshotsDir;
+    }
   }
   return userDir;
 }

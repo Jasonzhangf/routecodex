@@ -6,6 +6,10 @@ import {
   startHeartbeatDaemonIfNeededSnapshot
 } from '../../../modules/llmswitch/bridge.js';
 import { toExactMatchSessionConfig } from './session-daemon-inject-config.js';
+import {
+  resolveClockDaemonConfigInput,
+  resolveHeartbeatDaemonConfigInput
+} from './tmux-injection-runtime-config.js';
 
 function readString(value: unknown): string | undefined {
   if (typeof value !== 'string') {
@@ -133,16 +137,22 @@ export async function tickSessionDaemonInjectLoop(server: any): Promise<void> {
   server.sessionDaemonInjectTickInFlight = true;
   try {
     const rawSessionConfig = resolveRawSessionConfig(server);
-    const resolvedClockConfig = await resolveClockConfigSnapshot(rawSessionConfig);
-    if (resolvedClockConfig) {
-      const sessionConfig = toExactMatchSessionConfig(resolvedClockConfig);
-      await startClockDaemonIfNeededSnapshot(sessionConfig);
+    const clockDaemonInput = resolveClockDaemonConfigInput(rawSessionConfig);
+    if (clockDaemonInput.enabled) {
+      const resolvedClockConfig = await resolveClockConfigSnapshot(clockDaemonInput.configInput);
+      if (resolvedClockConfig) {
+        const sessionConfig = toExactMatchSessionConfig(resolvedClockConfig);
+        await startClockDaemonIfNeededSnapshot(sessionConfig);
+      }
     }
 
     const rawHeartbeatConfig = resolveRawHeartbeatConfig(server);
-    const resolvedHeartbeatConfig = await resolveHeartbeatConfigSnapshot(rawHeartbeatConfig);
-    await startHeartbeatDaemonIfNeededSnapshot(resolvedHeartbeatConfig || rawHeartbeatConfig || undefined);
-    await runHeartbeatDaemonTickSnapshot();
+    const heartbeatDaemonInput = resolveHeartbeatDaemonConfigInput(rawHeartbeatConfig);
+    if (heartbeatDaemonInput.enabled) {
+      const resolvedHeartbeatConfig = await resolveHeartbeatConfigSnapshot(heartbeatDaemonInput.configInput);
+      await startHeartbeatDaemonIfNeededSnapshot(resolvedHeartbeatConfig || heartbeatDaemonInput.configInput || undefined);
+      await runHeartbeatDaemonTickSnapshot();
+    }
   } catch (error) {
     const now = Date.now();
     if (now - server.lastSessionDaemonInjectErrorAtMs > 5000) {

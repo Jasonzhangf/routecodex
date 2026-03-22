@@ -123,7 +123,7 @@ fn apply_lmstudio_responses_input_stringify(
     root: &mut Map<String, Value>,
     adapter_context: &AdapterContext,
 ) {
-    if !lmstudio_stringify_input_enabled() {
+    if !lmstudio_stringify_input_enabled(adapter_context) {
         return;
     }
     if !provider_protocol_matches(adapter_context.provider_protocol.as_ref(), "openai-responses") {

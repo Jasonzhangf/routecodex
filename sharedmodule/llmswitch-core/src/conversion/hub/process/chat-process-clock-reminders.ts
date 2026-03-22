@@ -1,15 +1,21 @@
 import type { VirtualRouterClockConfig } from '../../../router/virtual-router/types.js';
 import { readRuntimeMetadata } from '../../runtime-metadata.js';
 import {
-  clearClockSession,
   resolveClockConfig,
   startClockDaemonIfNeeded
 } from '../../../servertool/clock/task-store.js';
+import { clearClockTasks } from '../../../servertool/clock/tasks.js';
 import { logClock } from '../../../servertool/clock/log.js';
-import { resolveClockSessionScope } from '../../../servertool/clock/session-scope.js';
+import {
+  resolveClockSessionScope,
+  resolveClockSessionScopeAliases
+} from '../../../servertool/clock/session-scope.js';
 import { applyHubOperations, type HubOperation } from '../ops/operations.js';
 import type { StandardizedMessage, StandardizedRequest } from '../types/standardized.js';
 import { buildClockStandardToolsOperations } from './chat-process-clock-tools.js';
+import {
+  stripClockClearDirectiveFromContent
+} from './chat-process-clock-directives.js';
 import {
   reserveClockDueReminderForRequest,
   scheduleClockReminderDirectiveMessages
@@ -19,6 +25,7 @@ import {
   buildClockReminderMetadata,
   buildDueReminderUserMessage
 } from './chat-process-clock-reminder-finalize.js';
+import { findLastUserMessageIndex } from './chat-process-clock-reminder-messages.js';
 import { resolveClockReminderTimeTagLine } from './chat-process-clock-reminder-time-tag.js';
 import { extractClockReminderDirectives } from './chat-process-clock-reminder-directives.js';
 import { applyHeartbeatDirectives } from './chat-process-heartbeat-directives.js';
@@ -31,6 +38,21 @@ function resolveSessionIdForClock(metadata: Record<string, unknown>, request: St
       ? (request.metadata as Record<string, unknown>)
       : null;
   return resolveClockSessionScope(metadata, requestMetadata);
+}
+
+function resolveSessionScopesForClock(metadata: Record<string, unknown>, request: StandardizedRequest): string[] {
+  const requestMetadata =
+    request.metadata && typeof request.metadata === 'object' && !Array.isArray(request.metadata)
+      ? (request.metadata as Record<string, unknown>)
+      : null;
+  return resolveClockSessionScopeAliases(metadata, requestMetadata);
+}
+
+async function clearClockScopes(sessionScopes: string[], clockConfig: NonNullable<ReturnType<typeof resolveClockConfig>>): Promise<void> {
+  if (sessionScopes.length < 1) {
+    return;
+  }
+  await Promise.allSettled(sessionScopes.map((scope) => clearClockTasks(scope, clockConfig)));
 }
 
 export async function maybeInjectClockRemindersAndApplyDirectives(
@@ -60,15 +82,41 @@ export async function maybeInjectClockRemindersAndApplyDirectives(
   }
 
   const sessionId = resolveSessionIdForClock(metadata, requestAfterHeartbeat);
+  const sessionScopes = resolveSessionScopesForClock(metadata, requestAfterHeartbeat);
   const messages = Array.isArray(requestAfterHeartbeat.messages) ? requestAfterHeartbeat.messages : [];
+  const lastUserIndex = findLastUserMessageIndex(messages);
+  const manualClear = lastUserIndex >= 0 && messages[lastUserIndex]
+    ? stripClockClearDirectiveFromContent(messages[lastUserIndex].content)
+    : { hadClear: false, next: undefined };
+  if (manualClear.hadClear && sessionScopes.length) {
+    try {
+      await clearClockScopes(sessionScopes, clockConfig);
+      logClock('cleared', { sessionId, sessionScopes, source: 'manual_marker' });
+    } catch {
+      // best-effort: user directive should not crash request
+    }
+  }
   // 1) Apply <**clock:clear**> and <**clock:{...}**> marker extraction (latest user message only).
-  const { hadClear, clockScheduleDirectives, baseMessages } = extractClockReminderDirectives(messages);
+  const extracted = extractClockReminderDirectives(messages);
+  const hadClear = extracted.hadClear || manualClear.hadClear;
+  const clockScheduleDirectives = extracted.clockScheduleDirectives;
+  const baseMessages =
+    manualClear.hadClear && !extracted.hadClear && lastUserIndex >= 0 && messages[lastUserIndex]
+      ? messages.map((message, index) =>
+          index === lastUserIndex
+            ? {
+                ...message,
+                content: manualClear.next
+              }
+            : message
+        )
+      : extracted.baseMessages;
 
   if (hadClear) {
-    if (sessionId) {
+    if (extracted.hadClear && !manualClear.hadClear && sessionScopes.length) {
       try {
-        await clearClockSession(sessionId);
-        logClock('cleared', { sessionId });
+        await clearClockScopes(sessionScopes, clockConfig);
+        logClock('cleared', { sessionId, sessionScopes, source: 'native_extract' });
       } catch {
         // best-effort: user directive should not crash request
       }

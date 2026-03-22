@@ -46,7 +46,7 @@ async function main() {
   let tmpSessionDir;
   const originalAutoEnabled = process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_ENABLED;
   const originalAutoIflow = process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW;
-  const { HubPipeline } = await importModule('conversion/hub/pipeline/hub-pipeline.js');
+  const { HubPipeline, __unsafeBuildAdapterContextForTest } = await importModule('conversion/hub/pipeline/hub-pipeline.js');
   const { bootstrapVirtualRouterConfig } = await importModule('router/virtual-router/bootstrap.js');
   const { runServerToolOrchestration } = await importModule('servertool/engine.js');
   const { saveRoutingInstructionStateSync } = await importModule('router/virtual-router/sticky-session-store.js');
@@ -78,18 +78,23 @@ async function main() {
     ]
   };
 
-  const buildAdapterContext = hubPipeline.buildAdapterContext?.bind(hubPipeline);
-  assert.equal(typeof buildAdapterContext, 'function', 'HubPipeline.buildAdapterContext should be callable');
+  assert.equal(typeof __unsafeBuildAdapterContextForTest, 'function', '__unsafeBuildAdapterContextForTest should be callable');
 
-  const adapterContext = buildAdapterContext({
+  const adapterContext = __unsafeBuildAdapterContextForTest({
     id: 'req_stopmsg_context_capture',
+    endpoint: '/v1/responses',
     entryEndpoint: '/v1/responses',
     providerProtocol: 'openai-responses',
+    payload: {},
     metadata: {
       sessionId: 'stopmsg-captured-chat-seed',
       tmuxSessionId: 'tmux_stopmsg_captured_chat_seed',
       capturedChatRequest
-    }
+    },
+    processMode: 'chat',
+    direction: 'request',
+    stage: 'inbound',
+    stream: false
   });
 
   saveRoutingInstructionStateSync('tmux:tmux_stopmsg_captured_chat_seed', {

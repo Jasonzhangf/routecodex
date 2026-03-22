@@ -16,7 +16,7 @@ export {
   type LlmsImpl
 } from './module-loader.js';
 
-export { createSnapshotRecorder, type SnapshotRecorder } from './snapshot-recorder.js';
+export { createSnapshotRecorder, resetSnapshotRecorderErrorsampleStateForTests, type SnapshotRecorder } from './snapshot-recorder.js';
 export { convertProviderResponse } from './response-converter.js';
 export {
   warmupAntigravitySessionSignatureModule,
@@ -55,6 +55,8 @@ export {
   setHeartbeatRuntimeHooksSnapshot,
   loadHeartbeatStateSnapshot,
   listHeartbeatStatesSnapshot,
+  listHeartbeatHistorySnapshot,
+  appendHeartbeatHistoryEventSnapshot,
   setHeartbeatEnabledSnapshot,
   runHeartbeatDaemonTickSnapshot,
   reserveClockDueTasks,

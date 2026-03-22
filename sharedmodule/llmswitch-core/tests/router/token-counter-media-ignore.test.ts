@@ -118,4 +118,50 @@ describe('token counter media payload handling', () => {
     const actual = countRequestTokens(withLargeMetadata);
     expect(actual).toBeLessThanOrEqual(base + 8);
   });
+
+  test('does not count large media payload inside responses context input', () => {
+    const baseRequest = {
+      model: 'gpt-4o',
+      messages: [{ role: 'assistant', content: 'ok' }],
+      tools: [],
+      parameters: {},
+      semantics: {
+        responses: {
+          context: {
+            input: [
+              {
+                type: 'message',
+                role: 'user',
+                content: [{ type: 'input_text', text: 'Describe this image' }]
+              }
+            ]
+          }
+        }
+      }
+    } as any;
+
+    const withImageInResponsesContext = {
+      ...baseRequest,
+      semantics: {
+        responses: {
+          context: {
+            input: [
+              {
+                type: 'message',
+                role: 'user',
+                content: [
+                  { type: 'input_text', text: 'Describe this image' },
+                  { type: 'input_image', image_url: { url: `data:image/png;base64,${'Z'.repeat(200000)}` } }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    } as any;
+
+    const base = countRequestTokens(baseRequest);
+    const actual = countRequestTokens(withImageInResponsesContext);
+    expect(actual).toBeLessThanOrEqual(base + 16);
+  });
 });

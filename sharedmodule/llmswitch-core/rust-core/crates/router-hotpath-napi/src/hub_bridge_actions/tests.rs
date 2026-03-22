@@ -429,6 +429,9 @@ fn resolves_responses_bridge_tools_injects_builtin_web_search_for_server_side_to
         original_tools: Some(vec![]),
         chat_tools: Some(vec![json!({
             "type": "function",
+            "function": { "name": "web_search", "parameters": { "type": "object", "properties": {} } }
+        }), json!({
+            "type": "function",
             "function": { "name": "exec_command" }
         })]),
         has_server_side_web_search: Some(true),
@@ -440,6 +443,24 @@ fn resolves_responses_bridge_tools_injects_builtin_web_search_for_server_side_to
     assert!(merged
         .iter()
         .any(|tool| tool["function"]["name"] == "exec_command"));
+}
+
+#[test]
+fn resolves_responses_bridge_tools_does_not_inject_builtin_web_search_without_web_search_function() {
+    let output = resolve_responses_bridge_tools(ResolveResponsesBridgeToolsInput {
+        original_tools: Some(vec![]),
+        chat_tools: Some(vec![json!({
+            "type": "function",
+            "function": { "name": "exec_command" }
+        })]),
+        has_server_side_web_search: Some(true),
+        passthrough_keys: None,
+        request: None,
+    });
+    let merged = output.merged_tools.unwrap();
+    assert_eq!(merged.len(), 1);
+    assert_eq!(merged[0]["function"]["name"], "exec_command");
+    assert!(!merged.iter().any(|tool| tool["type"] == "web_search"));
 }
 
 #[test]

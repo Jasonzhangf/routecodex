@@ -5,6 +5,13 @@ use serde_json::Value;
 use std::sync::{Arc, Mutex};
 
 use super::engine::VirtualRouterEngineCore;
+use super::instructions::with_rcc_user_dir_override;
+use super::routing_state_store::with_session_dir_override;
+
+struct RuntimePathOverrides {
+    rcc_user_dir: Option<String>,
+    session_dir: Option<String>,
+}
 
 #[napi]
 pub struct VirtualRouterEngineProxy {
@@ -83,10 +90,14 @@ impl VirtualRouterEngineProxy {
             .map_err(|e| napi::Error::from_reason(e.to_string()))?;
         let metadata_value: Value = serde_json::from_str(&metadata_json)
             .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+        let overrides = resolve_runtime_path_overrides(&metadata_value);
         let mut core = self.core.lock().expect("core lock");
-        let result = core
-            .route(env, &request_value, &metadata_value)
-            .map_err(|e| napi::Error::from_reason(e))?;
+        let result = with_rcc_user_dir_override(overrides.rcc_user_dir.as_deref(), || {
+            with_session_dir_override(overrides.session_dir.as_deref(), || {
+                core.route(env, &request_value, &metadata_value)
+            })
+        })
+        .map_err(|e| napi::Error::from_reason(e))?;
         self.sync_antigravity_map(env, &core)?;
         serde_json::to_string(&result).map_err(|e| napi::Error::from_reason(e.to_string()))
     }
@@ -95,8 +106,13 @@ impl VirtualRouterEngineProxy {
     pub fn get_stop_message_state(&self, _env: Env, metadata_json: String) -> NapiResult<String> {
         let metadata_value: Value = serde_json::from_str(&metadata_json)
             .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+        let overrides = resolve_runtime_path_overrides(&metadata_value);
         let mut core = self.core.lock().expect("core lock");
-        let result = core.get_stop_message_state(&metadata_value);
+        let result = with_rcc_user_dir_override(overrides.rcc_user_dir.as_deref(), || {
+            with_session_dir_override(overrides.session_dir.as_deref(), || {
+                core.get_stop_message_state(&metadata_value)
+            })
+        });
         serde_json::to_string(&result).map_err(|e| napi::Error::from_reason(e.to_string()))
     }
 
@@ -104,8 +120,13 @@ impl VirtualRouterEngineProxy {
     pub fn get_pre_command_state(&self, _env: Env, metadata_json: String) -> NapiResult<String> {
         let metadata_value: Value = serde_json::from_str(&metadata_json)
             .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+        let overrides = resolve_runtime_path_overrides(&metadata_value);
         let mut core = self.core.lock().expect("core lock");
-        let result = core.get_pre_command_state(&metadata_value);
+        let result = with_rcc_user_dir_override(overrides.rcc_user_dir.as_deref(), || {
+            with_session_dir_override(overrides.session_dir.as_deref(), || {
+                core.get_pre_command_state(&metadata_value)
+            })
+        });
         serde_json::to_string(&result).map_err(|e| napi::Error::from_reason(e.to_string()))
     }
 
@@ -173,6 +194,36 @@ impl VirtualRouterEngineProxy {
         core.health_manager.record_success(&provider_key);
         Ok(())
     }
+}
+
+fn resolve_runtime_path_overrides(metadata: &Value) -> RuntimePathOverrides {
+    RuntimePathOverrides {
+        rcc_user_dir: read_runtime_string(metadata, &["rccUserDir", "rcc_user_dir"]),
+        session_dir: read_runtime_string(metadata, &["sessionDir", "session_dir"]),
+    }
+}
+
+fn read_runtime_string(metadata: &Value, keys: &[&str]) -> Option<String> {
+    let rt = metadata.get("__rt");
+    for key in keys {
+        if let Some(value) = rt
+            .and_then(|entry| entry.get(*key))
+            .and_then(|entry| entry.as_str())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            return Some(value.to_string());
+        }
+        if let Some(value) = metadata
+            .get(*key)
+            .and_then(|entry| entry.as_str())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            return Some(value.to_string());
+        }
+    }
+    None
 }
 
 fn is_js_null_or_undefined(value: &JsUnknown) -> bool {

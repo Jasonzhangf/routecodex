@@ -227,14 +227,92 @@ fn estimate_request_tokens(request: &Value, latest_user_text: &str) -> i64 {
             total_chars += extract_message_text(msg).len();
         }
     }
-    let approx_text_tokens = (total_chars as f64 / 4.0).ceil() as i64;
-    approx_text_tokens.max(0)
+    let message_estimate = (total_chars as f64 / 4.0).ceil() as i64;
+    let responses_estimate = estimate_responses_context_tokens(request);
+    message_estimate.max(responses_estimate).max(0)
+}
+
+fn estimate_responses_context_tokens(request: &Value) -> i64 {
+    let mut total_chars: usize = 0;
+    if let Some(input) = request
+        .get("semantics")
+        .and_then(|v| v.get("responses"))
+        .and_then(|v| v.get("context"))
+        .and_then(|v| v.get("input"))
+        .and_then(|v| v.as_array())
+    {
+        for entry in input {
+            total_chars += estimate_structured_chars(entry);
+        }
+    }
+    if let Some(tools) = request.get("tools") {
+        total_chars += estimate_structured_chars(tools);
+    }
+    if total_chars == 0 {
+        return 0;
+    }
+    (total_chars as f64 / 3.0).ceil() as i64
+}
+
+fn estimate_structured_chars(value: &Value) -> usize {
+    match value {
+        Value::Null => 0,
+        Value::Bool(v) => v.to_string().len(),
+        Value::Number(v) => v.to_string().len(),
+        Value::String(v) => v.len(),
+        Value::Array(values) => values.iter().map(estimate_structured_chars).sum(),
+        Value::Object(map) => {
+            if detect_media_kind(map).is_some() {
+                let type_len = map
+                    .get("type")
+                    .and_then(|v| v.as_str())
+                    .map(|v| v.len())
+                    .unwrap_or(5);
+                return type_len + "[omitted_media]".len();
+            }
+            map.iter()
+                .map(|(key, entry)| key.len() + estimate_structured_chars(entry))
+                .sum()
+        }
+    }
+}
+
+fn detect_media_kind(map: &serde_json::Map<String, Value>) -> Option<&'static str> {
+    let type_value = map
+        .get("type")
+        .and_then(|v| v.as_str())
+        .map(|v| v.trim().to_ascii_lowercase())
+        .unwrap_or_default();
+    if type_value.contains("video") {
+        return Some("video");
+    }
+    if type_value.contains("image") {
+        return Some("image");
+    }
+    if map.contains_key("video_url") {
+        return Some("video");
+    }
+    if map.contains_key("image_url") {
+        return Some("image");
+    }
+    let data_value = map
+        .get("data")
+        .and_then(|v| v.as_str())
+        .map(|v| v.trim().to_ascii_lowercase())
+        .unwrap_or_default();
+    if data_value.starts_with("data:video/") {
+        return Some("video");
+    }
+    if data_value.starts_with("data:image/") {
+        return Some("image");
+    }
+    None
 }
 
 #[cfg(test)]
 mod tests {
     use super::build_routing_features;
-    use serde_json::json;
+    use serde_json::{json, Value};
 
     #[test]
     fn estimate_tokens_accounts_for_large_payloads() {
@@ -254,6 +332,42 @@ mod tests {
         assert!(
             features.estimated_tokens >= 180_000,
             "expected large payload to exceed longcontext threshold, got {}",
+            features.estimated_tokens
+        );
+    }
+
+    #[test]
+    fn estimate_tokens_accounts_for_large_responses_context_without_metadata_hint() {
+        let large_output = "y".repeat(2_200);
+        let input: Vec<Value> = (0..280)
+            .map(|idx| {
+                json!({
+                    "type": "function_call_output",
+                    "call_id": format!("call_{idx}"),
+                    "output": large_output
+                })
+            })
+            .collect();
+        let request = json!({
+            "model": "glm-5",
+            "messages": [
+                { "role": "assistant", "content": "followup" }
+            ],
+            "tools": [
+                { "type": "function", "function": { "name": "exec_command", "parameters": { "type": "object" } } }
+            ],
+            "semantics": {
+                "responses": {
+                    "context": {
+                        "input": input
+                    }
+                }
+            }
+        });
+        let features = build_routing_features(&request, &json!({}));
+        assert!(
+            features.estimated_tokens >= 180_000,
+            "expected responses context payload to exceed longcontext threshold, got {}",
             features.estimated_tokens
         );
     }

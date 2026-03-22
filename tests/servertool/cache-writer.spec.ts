@@ -3,6 +3,8 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import {
   writeCacheEntry,
+  extractAssistantTextFromResponse,
+  resolveWorkingDirectoryFromAdapterContext,
 } from '../../sharedmodule/llmswitch-core/src/servertool/handlers/memory/cache-writer.js';
 
 describe('cache-writer request dedupe', () => {
@@ -124,5 +126,53 @@ describe('cache-writer request dedupe', () => {
     const cachePath = path.join(tempDir, 'CACHE.md');
     const content = fs.readFileSync(cachePath, 'utf8');
     expect(content).toMatch(/### Assistant · .*?\n\n已完成处理。\n\n<!-- cache-meta/s);
+  });
+});
+
+describe('cache-writer response/content extraction and workdir resolution', () => {
+  it('extracts assistant text from chat message content array', () => {
+    const content = extractAssistantTextFromResponse({
+      choices: [
+        {
+          message: {
+            role: 'assistant',
+            content: [
+              { type: 'text', text: '第一段' },
+              { type: 'output_text', text: { value: '第二段' } },
+            ],
+          },
+          finish_reason: 'stop',
+        },
+      ],
+    } as any);
+    expect(content).toBe('第一段\n第二段');
+  });
+
+  it('extracts assistant text from responses output content text.value shape', () => {
+    const content = extractAssistantTextFromResponse({
+      output: [
+        {
+          type: 'message',
+          role: 'assistant',
+          content: [
+            { type: 'output_text', text: { value: '响应正文' } },
+          ],
+        },
+      ],
+    } as any);
+    expect(content).toBe('响应正文');
+  });
+
+  it('resolves working directory from multiple adapter context keys', () => {
+    expect(
+      resolveWorkingDirectoryFromAdapterContext({
+        clientWorkdir: '/tmp/a',
+      } as any),
+    ).toBe('/tmp/a');
+    expect(
+      resolveWorkingDirectoryFromAdapterContext({
+        __rt: { workdir: '/tmp/b' },
+      } as any),
+    ).toBe('/tmp/b');
   });
 });

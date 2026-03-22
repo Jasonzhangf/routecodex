@@ -420,7 +420,7 @@ describe('cli claude command', () => {
     expect(shellCommand).toContain("'-u' 'ANTHROPIC_TOKEN'");
     expect(shellCommand).toContain('ANTHROPIC_API_KEY=');
     expect(shellCommand).toContain('::rcc-sessiond:');
-    expect(shellCommand).toContain('::rcc-session:rcc_claude_');
+    expect(shellCommand).toContain('::rcc-session:rcc-claude');
     if (registeredDaemonId) {
       expect(shellCommand).toContain(registeredDaemonId);
     }

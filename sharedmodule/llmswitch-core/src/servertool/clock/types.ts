@@ -37,6 +37,9 @@ export type ClockSessionState = {
   version: 1;
   sessionId: string;
   tmuxSessionId?: string;
+  disabled?: boolean;
+  disabledReason?: string;
+  disabledAtMs?: number;
   tasks: ClockTask[];
   updatedAtMs: number;
   meta?: ClockSessionMeta;

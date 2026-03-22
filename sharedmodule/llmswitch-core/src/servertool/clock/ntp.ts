@@ -72,7 +72,8 @@ export function formatLocalTime(ms: number): string {
 
 export function buildTimeTagLine(snapshot: ClockTimeSnapshot): string {
   // Markdown inline code blocks to reduce the chance of models "roleplaying" XML-like tags.
-  return `[Time/Date]: utc=\`${snapshot.utc}\` local=\`${snapshot.local}\` tz=\`${snapshot.timezone}\` nowMs=\`${snapshot.nowMs}\` ntpOffsetMs=\`${snapshot.ntp.offsetMs}\``;
+  // `timeRef=now` 明确声明这是“当前时刻”快照，避免模型将时间标签误读为待查询目标时间。
+  return `[Time/Date]: timeRef=\`now\` utc=\`${snapshot.utc}\` local=\`${snapshot.local}\` tz=\`${snapshot.timezone}\` nowMs=\`${snapshot.nowMs}\` ntpOffsetMs=\`${snapshot.ntp.offsetMs}\``;
 }
 
 export type ClockTimeSnapshot = {

@@ -8,13 +8,20 @@ describe('stop message scope resolution', () => {
     expect(scope).toBe('tmux:abc123');
   });
 
-  test('returns undefined when tmux scope is missing', () => {
+  test('falls back to session scope when tmux scope is missing', () => {
     const scope = resolveStopMessageScope({ sessionId: 'sess-001' } as any);
-    expect(scope).toBeUndefined();
+    expect(scope).toBe('session:sess-001');
   });
 
-  test('returns undefined when only conversation scope is provided', () => {
+  test('falls back to conversation scope when only conversation is provided', () => {
     const scope = resolveStopMessageScope({ conversationId: 'conv-001' } as any);
-    expect(scope).toBeUndefined();
+    expect(scope).toBe('conversation:conv-001');
+  });
+
+  test('accepts explicit session scope as-is', () => {
+    const scope = resolveStopMessageScope({
+      stopMessageClientInjectSessionScope: 'session:sess-explicit'
+    } as any);
+    expect(scope).toBe('session:sess-explicit');
   });
 });

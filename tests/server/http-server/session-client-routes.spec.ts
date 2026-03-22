@@ -79,6 +79,26 @@ function localFetchByMethod(
 
 describe('session-client routes', () => {
   jest.setTimeout(20000);
+  let previousSessionDir: string | undefined;
+  let tempSessionDir: string | null = null;
+
+  beforeEach(() => {
+    previousSessionDir = process.env.ROUTECODEX_SESSION_DIR;
+    tempSessionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-session-client-routes-'));
+    process.env.ROUTECODEX_SESSION_DIR = tempSessionDir;
+  });
+
+  afterEach(() => {
+    if (previousSessionDir === undefined) {
+      delete process.env.ROUTECODEX_SESSION_DIR;
+    } else {
+      process.env.ROUTECODEX_SESSION_DIR = previousSessionDir;
+    }
+    if (tempSessionDir) {
+      fs.rmSync(tempSessionDir, { recursive: true, force: true });
+      tempSessionDir = null;
+    }
+  });
 
   it('supports register/list/heartbeat/unregister over localhost', async () => {
     const app = express();
@@ -152,7 +172,63 @@ describe('session-client routes', () => {
       expect(trigger.status).toBe(200);
       expect(trigger.payload?.ok).toBe(true);
       expect(trigger.payload?.result?.reason).toBe('tmux_session_not_found');
+
+      const history = await fetchWithHeaders(
+        baseUrl,
+        'GET',
+        '/daemon/heartbeat/history?tmuxSessionId=__hb_missing_test__&limit=5'
+      );
+      expect(history.status).toBe(200);
+      expect(history.payload?.ok).toBe(true);
+      expect(Array.isArray(history.payload?.events)).toBe(true);
     } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it('heartbeat action=on clears Heartbeat-Stop-When marker from HEARTBEAT.md when workdir is provided', async () => {
+    const app = express();
+    app.use(express.json({ limit: '256kb' }));
+    (app.locals as Record<string, unknown>).routecodexServer = {
+      requestActivityTracker: {
+        countActiveRequestsForTmuxSession: () => 0
+      }
+    };
+    registerSessionClientRoutes(app);
+
+    const server = http.createServer(app);
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const addr = server.address() as AddressInfo;
+    const baseUrl = `http://127.0.0.1:${addr.port}`;
+
+    const workdir = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-heartbeat-api-on-'));
+    const heartbeatPath = path.join(workdir, 'HEARTBEAT.md');
+    fs.writeFileSync(
+      heartbeatPath,
+      [
+        '# Heartbeat',
+        'Heartbeat-Stop-When: no-open-tasks',
+        '',
+        '- [x] done',
+        ''
+      ].join('\n'),
+      'utf8'
+    );
+
+    try {
+      const on = await localFetch(baseUrl, '/daemon/heartbeat', {
+        action: 'on',
+        tmuxSessionId: '__hb_marker_clear_test__',
+        workdir
+      });
+      expect(on.status).toBe(200);
+      expect(on.payload?.ok).toBe(true);
+      expect(on.payload?.trigger?.reason).toBe('tmux_session_not_found');
+
+      const nextHeartbeat = fs.readFileSync(heartbeatPath, 'utf8');
+      expect(nextHeartbeat).not.toContain('Heartbeat-Stop-When:');
+    } finally {
+      fs.rmSync(workdir, { recursive: true, force: true });
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });

@@ -59,6 +59,25 @@ fn detect_provider_response_shape(payload: &Value) -> &'static str {
     "unknown"
 }
 
+fn is_canonical_chat_completion_payload(payload: &Value) -> bool {
+    let row = match payload.as_object() {
+        Some(v) => v,
+        None => return false,
+    };
+    let choices = match row.get("choices").and_then(|v| v.as_array()) {
+        Some(v) if !v.is_empty() => v,
+        _ => return false,
+    };
+    let first = match choices.first().and_then(|v| v.as_object()) {
+        Some(v) => v,
+        None => return false,
+    };
+    first
+        .get("message")
+        .and_then(|v| v.as_object())
+        .is_some()
+}
+
 fn build_review_operations(metadata: &Value) -> Value {
     let server_tool_followup = metadata
         .as_object()
@@ -631,6 +650,14 @@ pub fn detect_provider_response_shape_json(payload_json: String) -> NapiResult<S
 }
 
 #[napi]
+pub fn is_canonical_chat_completion_payload_json(payload_json: String) -> NapiResult<String> {
+    let payload: Value =
+        serde_json::from_str(&payload_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let output = is_canonical_chat_completion_payload(&payload);
+    serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[napi]
 pub fn build_review_operations_json(metadata_json: String) -> NapiResult<String> {
     let metadata: Value = serde_json::from_str(&metadata_json)
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
@@ -672,4 +699,42 @@ pub fn resolve_stop_message_session_scope_json(metadata_json: String) -> NapiRes
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let output = resolve_stop_message_session_scope(&metadata);
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_canonical_chat_completion_payload_true_when_first_choice_has_message_object() {
+        let payload = json!({
+            "id": "chatcmpl-1",
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": "hello"
+                    }
+                }
+            ]
+        });
+        assert!(is_canonical_chat_completion_payload(&payload));
+    }
+
+    #[test]
+    fn test_is_canonical_chat_completion_payload_false_for_non_canonical_shapes() {
+        let no_choices = json!({ "output": [] });
+        let empty_choices = json!({ "choices": [] });
+        let no_message = json!({
+            "choices": [
+                {
+                    "index": 0
+                }
+            ]
+        });
+        assert!(!is_canonical_chat_completion_payload(&no_choices));
+        assert!(!is_canonical_chat_completion_payload(&empty_choices));
+        assert!(!is_canonical_chat_completion_payload(&no_message));
+    }
 }

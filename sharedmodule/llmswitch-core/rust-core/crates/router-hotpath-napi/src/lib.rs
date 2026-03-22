@@ -32,6 +32,10 @@ mod chat_process_media_semantics;
 mod chat_servertool_orchestration;
 mod chat_tool_normalization;
 mod chat_web_search_tool_schema;
+mod compat_fix_apply_patch;
+mod compat_harvest_tool_calls_from_text;
+mod compat_field_mapping;
+mod compat_tool_schema;
 mod gemini_openai_codec;
 mod hub_bridge_actions;
 mod hub_bridge_policies;
@@ -141,6 +145,23 @@ struct PendingToolSyncOutput {
 #[serde(rename_all = "camelCase")]
 struct ContinueExecutionInjectionOutput {
     has_directive: bool,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RoutingInstructionParseOptions {
+    #[serde(default)]
+    rcc_user_dir: Option<String>,
+}
+
+fn parse_routing_instruction_parse_options(
+    options_json: Option<String>,
+) -> NapiResult<RoutingInstructionParseOptions> {
+    let raw = match options_json {
+        Some(value) if !value.trim().is_empty() => value,
+        _ => return Ok(RoutingInstructionParseOptions::default()),
+    };
+    serde_json::from_str(&raw).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 fn read_priority(entry: &QuotaBucketInputEntry) -> i64 {
     if let Some(raw) = entry.priority_tier {
@@ -853,12 +874,18 @@ fn serialize_routing_instruction_for_napi(
 }
 
 #[napi]
-pub fn parse_routing_instructions_json(messages_json: String) -> NapiResult<String> {
+pub fn parse_routing_instructions_json(
+    messages_json: String,
+    options_json: Option<String>,
+) -> NapiResult<String> {
     let messages: Vec<Value> = serde_json::from_str(&messages_json)
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let parsed =
-        virtual_router_engine::instructions::parse_routing_instructions_from_messages(&messages)
-            .map_err(|e| napi::Error::from_reason(e))?;
+    let options = parse_routing_instruction_parse_options(options_json)?;
+    let parsed = virtual_router_engine::instructions::with_rcc_user_dir_override(
+        options.rcc_user_dir.as_deref(),
+        || virtual_router_engine::instructions::parse_routing_instructions_from_messages(&messages),
+    )
+    .map_err(|e| napi::Error::from_reason(e))?;
     let output: Vec<Value> = parsed
         .iter()
         .map(serialize_routing_instruction_for_napi)
@@ -867,12 +894,18 @@ pub fn parse_routing_instructions_json(messages_json: String) -> NapiResult<Stri
 }
 
 #[napi]
-pub fn parse_routing_instruction_kinds_json(request_json: String) -> NapiResult<String> {
+pub fn parse_routing_instruction_kinds_json(
+    request_json: String,
+    options_json: Option<String>,
+) -> NapiResult<String> {
     let request: Value =
         serde_json::from_str(&request_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let parsed =
-        virtual_router_engine::instructions::parse_routing_instructions_from_request(&request)
-            .map_err(|e| napi::Error::from_reason(e))?;
+    let options = parse_routing_instruction_parse_options(options_json)?;
+    let parsed = virtual_router_engine::instructions::with_rcc_user_dir_override(
+        options.rcc_user_dir.as_deref(),
+        || virtual_router_engine::instructions::parse_routing_instructions_from_request(&request),
+    )
+    .map_err(|e| napi::Error::from_reason(e))?;
     let kinds: Vec<String> = parsed.into_iter().map(|entry| entry.kind).collect();
     serde_json::to_string(&kinds).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
@@ -1047,12 +1080,49 @@ pub fn apply_iflow_tool_text_fallback_json(
     )
 }
 
+#[napi(js_name = "applyLmstudioResponsesInputStringifyJson")]
+pub fn apply_lmstudio_responses_input_stringify_json_bridge(
+    payload_json: String,
+    adapter_context_json: Option<String>,
+) -> NapiResult<String> {
+    req_outbound_stage3_compat::apply_lmstudio_responses_input_stringify_json(
+        payload_json,
+        adapter_context_json,
+    )
+}
+
 #[napi(js_name = "applyToolTextRequestGuidanceJson")]
 pub fn apply_tool_text_request_guidance_json(
     payload_json: String,
     config_json: Option<String>,
 ) -> NapiResult<String> {
     req_outbound_stage3_compat::apply_tool_text_request_guidance_json(payload_json, config_json)
+}
+
+#[napi(js_name = "harvestToolCallsFromTextJson")]
+pub fn harvest_tool_calls_from_text_json_bridge(
+    payload_json: String,
+    options_json: Option<String>,
+) -> NapiResult<String> {
+    compat_harvest_tool_calls_from_text::harvest_tool_calls_from_text_json(payload_json, options_json)
+}
+
+#[napi(js_name = "applyFieldMappingsJson")]
+pub fn apply_field_mappings_json_bridge(
+    payload_json: String,
+    mappings_json: String,
+) -> NapiResult<String> {
+    compat_field_mapping::apply_field_mappings_json(payload_json, mappings_json)
+}
+
+#[napi(js_name = "fixApplyPatchToolCallsJson")]
+pub fn fix_apply_patch_tool_calls_json_bridge(payload_json: String) -> NapiResult<String> {
+    compat_fix_apply_patch::fix_apply_patch_tool_calls_json(payload_json)
+}
+
+#[napi(js_name = "sanitizeToolSchemaGlmShellJson")]
+pub fn sanitize_tool_schema_glm_shell_json_bridge(payload_json: String) -> NapiResult<String> {
+    compat_tool_schema::sanitize_tool_schema_glm_shell_json(payload_json)
 }
 
 #[napi(js_name = "applyUniversalShapeResponseFilterJson")]
@@ -1152,4 +1222,3 @@ pub fn normalizeReasoningInOpenAIPayloadJson(input_json: String) -> NapiResult<S
 }
 
 mod hub_req_inbound_unified_fastpath;
-use hub_req_inbound_unified_fastpath::process_unified_inbound_fast_json;

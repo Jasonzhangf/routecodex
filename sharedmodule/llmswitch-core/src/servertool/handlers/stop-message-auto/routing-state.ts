@@ -66,7 +66,7 @@ export function resolveStopMessageSnapshot(raw: unknown): {
   const record = raw as Record<string, unknown>;
   const text = typeof record.stopMessageText === 'string' ? record.stopMessageText.trim() : '';
   const stageMode = normalizeStopMessageStageMode(record.stopMessageStageMode);
-  const aiMode = normalizeStopMessageAiMode(record.stopMessageAiMode) || 'off';
+  const aiMode = normalizeStopMessageAiMode(record.stopMessageAiMode) || 'on';
   const maxRepeats = resolveStopMessageMaxRepeats(record.stopMessageMaxRepeats, stageMode);
   if (stageMode === 'off') {
     return null;
@@ -128,7 +128,7 @@ export function createStopMessageState(snapshot: {
     stopMessageUpdatedAt: snapshot.updatedAt,
     stopMessageLastUsedAt: snapshot.lastUsedAt,
     stopMessageStageMode: snapshot.stageMode,
-    stopMessageAiMode: snapshot.aiMode || 'off',
+    stopMessageAiMode: snapshot.aiMode || 'on',
     stopMessageAiSeedPrompt: snapshot.aiSeedPrompt,
     stopMessageAiHistory: Array.isArray(snapshot.aiHistory) ? snapshot.aiHistory : undefined
   };

@@ -29,6 +29,7 @@ export {
 // Existing bridge exports.
 export {
   createSnapshotRecorder,
+  resetSnapshotRecorderErrorsampleStateForTests,
   type SnapshotRecorder
 } from './bridge/snapshot-recorder.js';
 export { convertProviderResponse } from './bridge/response-converter.js';
@@ -71,6 +72,8 @@ export {
   setHeartbeatRuntimeHooksSnapshot,
   loadHeartbeatStateSnapshot,
   listHeartbeatStatesSnapshot,
+  listHeartbeatHistorySnapshot,
+  appendHeartbeatHistoryEventSnapshot,
   setHeartbeatEnabledSnapshot,
   runHeartbeatDaemonTickSnapshot,
   reserveClockDueTasks,

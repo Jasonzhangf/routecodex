@@ -35,11 +35,12 @@ NTP 状态持久化路径（落在运行时 session 根目录下）：
 当 `clock` 功能启用后，Hub Pipeline 会在每次请求的 messages 末尾追加一条 **`role=user`** 的时间标签（Time Tag），格式如下：
 
 ```
-[Time/Date]: utc=`2026-02-02T21:22:38.229Z` local=`2026-02-02 13:22:38.229 -08:00` tz=`America/Los_Angeles` nowMs=`1770038558229` ntpOffsetMs=`-12`
+[Time/Date]: timeRef=`now` utc=`2026-02-02T21:22:38.229Z` local=`2026-02-02 13:22:38.229 -08:00` tz=`America/Los_Angeles` nowMs=`1770038558229` ntpOffsetMs=`-12`
 ```
 
 字段含义：
 
+- `timeRef`：时间锚点，固定为 `now`（表示“当前时刻快照”）
 - `utc`：ISO8601 UTC 时间
 - `local`：本地时间字符串（含毫秒 + 时区偏移）
 - `tz`：服务端 `Intl.DateTimeFormat().resolvedOptions().timeZone`

@@ -310,10 +310,18 @@ function stickyProviderMatchesRequestCapabilities(
   }
 
   if (requestRequiresSearchRoute(requestedRoute, classification, features)) {
+    const explicitWebSearchRouteExists = routeHasTargets(routing.web_search);
     const supportsSearchRoute =
       routeTargetsIncludeProvider(routing, 'web_search', providerKey) ||
       routeTargetsIncludeProvider(routing, 'search', providerKey);
-    if (!supportsSearchRoute) {
+    if (supportsSearchRoute) {
+      return true;
+    }
+    const supportsDefaultWebSearchFallback =
+      !explicitWebSearchRouteExists &&
+      routeTargetsIncludeProvider(routing, DEFAULT_ROUTE, providerKey) &&
+      providerRegistry.hasCapability(providerKey, 'web_search');
+    if (!supportsDefaultWebSearchFallback) {
       return false;
     }
   }
@@ -492,13 +500,23 @@ function selectFromCandidates(
     typeof features.estimatedTokens === 'number' && Number.isFinite(features.estimatedTokens)
       ? Math.max(0, features.estimatedTokens)
       : 0;
+  const webSearchRouteRequested = isWebSearchRouteRequested(classification.routeName, classification);
+  const defaultWebSearchPools = filterPoolsByCapability(
+    deps.routing[DEFAULT_ROUTE],
+    'web_search',
+    deps.providerRegistry
+  );
+  const hasDefaultWebSearchFallback = routeHasTargets(defaultWebSearchPools);
 
   while (routeQueue.length) {
     const routeName = routeQueue.shift()!;
     if (visitedRoutes.has(routeName)) {
       continue;
     }
-    const routePools = deps.routing[routeName];
+    const routePools =
+      webSearchRouteRequested && routeName === DEFAULT_ROUTE && hasDefaultWebSearchFallback
+        ? defaultWebSearchPools
+        : deps.routing[routeName];
     if (!routeHasTargets(routePools)) {
       visitedRoutes.add(routeName);
       attempted.push(`${routeName}:empty`);
@@ -554,5 +572,40 @@ function selectFromCandidates(
     `All providers unavailable for route ${requestedRoute}`,
     VirtualRouterErrorCode.PROVIDER_NOT_AVAILABLE,
     details
+  );
+}
+
+function filterPoolsByCapability(
+  pools: RoutePoolTier[] | undefined,
+  capability: 'web_search',
+  providerRegistry: SelectionDeps['providerRegistry']
+): RoutePoolTier[] {
+  if (!Array.isArray(pools)) {
+    return [];
+  }
+  const filtered: RoutePoolTier[] = [];
+  for (const pool of pools) {
+    if (!Array.isArray(pool.targets) || pool.targets.length === 0) {
+      continue;
+    }
+    const targets = pool.targets.filter((providerKey) => providerRegistry.hasCapability(providerKey, capability));
+    if (!targets.length) {
+      continue;
+    }
+    filtered.push({
+      ...pool,
+      targets
+    });
+  }
+  return filtered;
+}
+
+function isWebSearchRouteRequested(
+  requestedRoute: string,
+  classification: ClassificationResult
+): boolean {
+  return (
+    normalizeRouteAlias(requestedRoute || DEFAULT_ROUTE) === 'web_search' ||
+    normalizeRouteAlias(classification.routeName || DEFAULT_ROUTE) === 'web_search'
   );
 }

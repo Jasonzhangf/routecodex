@@ -30,7 +30,7 @@ function parseOutputRecord(raw: string): Record<string, unknown> | null {
   }
 }
 
-export function buildGovernedFilterPayloadWithNativeFallback(
+export function buildGovernedFilterPayloadWithNative(
   request: unknown
 ): Record<string, unknown> {
   const capability = 'buildGovernedFilterPayloadJson';

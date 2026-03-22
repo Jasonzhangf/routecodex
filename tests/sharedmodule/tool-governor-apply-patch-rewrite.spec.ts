@@ -81,4 +81,74 @@ describe('tool governor apply_patch rewrite', () => {
     );
     expect(policyMessage).toBeTruthy();
   });
+
+  it('rewrites invalid apply_patch args into reason-encoded guard payload on request path', () => {
+    const badPatch = [
+      '*** Begin Patch',
+      '*** Update File: HEARTBEAT.md',
+      '---',
+      'title: "finger project heartbeat"',
+      '*** End Patch'
+    ].join('\n');
+    const request: any = {
+      messages: [
+        {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            {
+              id: 'call_bad_req',
+              type: 'function',
+              function: {
+                name: 'apply_patch',
+                arguments: JSON.stringify({ patch: badPatch })
+              }
+            }
+          ]
+        }
+      ]
+    };
+
+    const out: any = normalizeApplyPatchToolCallsOnRequest(request);
+    const fn = out.messages?.[0]?.tool_calls?.[0]?.function;
+    expect(fn?.name).toBe('apply_patch');
+    const args = JSON.parse(String(fn?.arguments || '{}')) as Record<string, unknown>;
+    const patchOrInput = String(args.patch || args.input || '');
+    expect(patchOrInput).toContain('__rcc_apply_patch_validation_error__/reason-unsupported-patch-format');
+  });
+
+  it('rewrites invalid apply_patch args into reason-encoded guard payload on response path', () => {
+    const badPatch = [
+      '*** Begin Patch',
+      '*** Add File: src/empty.txt',
+      '*** End Patch'
+    ].join('\n');
+    const response: any = {
+      choices: [
+        {
+          message: {
+            role: 'assistant',
+            content: null,
+            tool_calls: [
+              {
+                id: 'call_bad_resp',
+                type: 'function',
+                function: {
+                  name: 'apply_patch',
+                  arguments: JSON.stringify({ patch: badPatch })
+                }
+              }
+            ]
+          },
+          finish_reason: 'tool_calls'
+        }
+      ]
+    };
+
+    const out: any = normalizeApplyPatchToolCallsOnResponse(response);
+    const fn = out.choices?.[0]?.message?.tool_calls?.[0]?.function;
+    const args = JSON.parse(String(fn?.arguments || '{}')) as Record<string, unknown>;
+    const patchOrInput = String(args.patch || args.input || '');
+    expect(patchOrInput).toContain('__rcc_apply_patch_validation_error__/reason-empty-add-file-block');
+  });
 });

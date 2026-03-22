@@ -210,6 +210,52 @@ describe('apply_patch validator', () => {
     expect(String(parsed.patch)).toContain('+title: "new"');
   });
 
+  it('strips diff --git metadata when model mixes GNU diff into Update File blocks', () => {
+    const mixedWrappedPatch = [
+      '*** Begin Patch',
+      '*** Update File: src/a.ts',
+      'diff --git a/src/a.ts b/src/a.ts',
+      'index 1111111..2222222 100644',
+      '--- a/src/a.ts',
+      '+++ b/src/a.ts',
+      '@@ -1,1 +1,1 @@',
+      '-const a = 1;',
+      '+const a = 2;',
+      '*** End Patch'
+    ].join('\n');
+
+    const result = validateToolCall('apply_patch', JSON.stringify({ patch: mixedWrappedPatch }));
+    expect(result.ok).toBe(true);
+    const parsed = toArgsObject(result);
+    expect(String(parsed.patch)).toContain('*** Update File: src/a.ts');
+    expect(String(parsed.patch)).toContain('@@ -1,1 +1,1 @@');
+    expect(String(parsed.patch)).not.toContain('diff --git');
+    expect(String(parsed.patch)).not.toContain('index 1111111..2222222 100644');
+    expect(String(parsed.patch)).not.toContain('--- a/src/a.ts');
+    expect(String(parsed.patch)).not.toContain('+++ b/src/a.ts');
+  });
+
+  it('converts rename metadata inside Update File blocks into Move to', () => {
+    const renameWrappedPatch = [
+      '*** Begin Patch',
+      '*** Update File: src/old-name.ts',
+      'diff --git a/src/old-name.ts b/src/new-name.ts',
+      'similarity index 100%',
+      'rename from src/old-name.ts',
+      'rename to src/new-name.ts',
+      '*** End Patch'
+    ].join('\n');
+
+    const result = validateToolCall('apply_patch', JSON.stringify({ patch: renameWrappedPatch }));
+    expect(result.ok).toBe(true);
+    const parsed = toArgsObject(result);
+    expect(String(parsed.patch)).toContain('*** Update File: src/old-name.ts');
+    expect(String(parsed.patch)).toContain('*** Move to: src/new-name.ts');
+    expect(String(parsed.patch)).not.toContain('rename from');
+    expect(String(parsed.patch)).not.toContain('rename to');
+    expect(String(parsed.patch)).not.toContain('diff --git');
+  });
+
   it('rejects empty Add File blocks to avoid accidental empty file creation', () => {
     const emptyAdd = [
       '*** Begin Patch',

@@ -18,6 +18,8 @@ import type { ProviderProfileCollection } from '../../../providers/profile/provi
 import type { ServerStatusV2 } from './types.js';
 import { clearClockRuntimeHooks } from './clock-runtime-hooks.js';
 import { clearHeartbeatRuntimeHooks } from './heartbeat-runtime-hooks.js';
+import { cleanupSessionStorageOnShutdown } from './session-storage-cleanup.js';
+import { isTmuxSessionAlive } from './tmux-session-probe.js';
 
 export async function initializeHttpServer(server: any): Promise<void> {
   try {
@@ -245,6 +247,21 @@ export async function stopHttpServer(server: any): Promise<void> {
       }
 
       console.log('[RouteCodexHttpServer] Server stopped');
+      try {
+        const cleanup = cleanupSessionStorageOnShutdown({ isTmuxSessionAlive });
+        if (
+          cleanup.removedLegacyScopeFiles > 0 ||
+          cleanup.removedDeadTmuxStateFiles > 0 ||
+          cleanup.removedHeartbeatStateFiles > 0 ||
+          cleanup.removedClockStateFiles > 0 ||
+          cleanup.prunedRegistryDirs > 0 ||
+          cleanup.removedRegistryDirs > 0
+        ) {
+          console.log('[session-storage-cleanup] shutdown cleanup', cleanup);
+        }
+      } catch {
+        // best-effort cleanup only
+      }
       resolve();
     });
   });

@@ -4,7 +4,6 @@ import type { HubProcessNodeResult } from '../../../../process/chat-process.js';
 import { recordStage } from '../../../stages/utils.js';
 import { applyReqProcessToolGovernanceWithNative } from '../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-req-process-semantics.js';
 import { maybeInjectClockRemindersAndApplyDirectives } from '../../../../process/chat-process-clock-reminders.js';
-import { resolveHasActiveStopMessageForContinueExecution } from '../../../../process/chat-process-continue-execution.js';
 import { sanitizeChatProcessRequest } from '../../../../process/chat-process-request-sanitizer.js';
 
 export interface ReqProcessStage1ToolGovernanceOptions {
@@ -52,8 +51,9 @@ function parseNodeResult(value: unknown): HubProcessNodeResult {
 export async function runReqProcessStage1ToolGovernance(
   options: ReqProcessStage1ToolGovernanceOptions
 ): Promise<ReqProcessStage1ToolGovernanceResult> {
-  const hasActiveStopMessageForContinueExecution =
-    resolveHasActiveStopMessageForContinueExecution(options.metadata);
+  // continue_execution tool injection is disabled globally.
+  // Force stop-message-active semantics so native req_process governance never appends the tool.
+  const hasActiveStopMessageForContinueExecution = true;
   const nativeResult = applyReqProcessToolGovernanceWithNative({
     request: options.request as unknown as Record<string, unknown>,
     rawPayload: options.rawPayload,

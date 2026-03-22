@@ -305,6 +305,7 @@ const launcherContext = {
   logger,
   env: process.env,
   rawArgv: process.argv.slice(2),
+  isInteractiveTerminal: () => Boolean(process.stdin.isTTY && process.stdout.isTTY),
   homedir,
   cwd: () => process.cwd(),
   sleep,

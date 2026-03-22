@@ -34,15 +34,15 @@ function createVirtualRouterBootstrapInput() {
 }
 
 async function main() {
-  const { HubPipeline } = await import(path.join(projectRoot, 'dist', 'conversion', 'hub', 'pipeline', 'hub-pipeline.js'));
+  const { HubPipeline, __unsafeBuildAdapterContextForTest } = await import(path.join(projectRoot, 'dist', 'conversion', 'hub', 'pipeline', 'hub-pipeline.js'));
   const { bootstrapVirtualRouterConfig } = await import(path.join(projectRoot, 'dist', 'router', 'virtual-router', 'bootstrap.js'));
   const { resolveClockSessionScope } = await import(path.join(projectRoot, 'dist', 'servertool', 'clock', 'session-scope.js'));
 
   const { config: virtualRouter } = bootstrapVirtualRouterConfig(createVirtualRouterBootstrapInput());
   const hubPipeline = new HubPipeline({ virtualRouter });
-  const unsafePipeline = hubPipeline;
+  assert.equal(typeof __unsafeBuildAdapterContextForTest, 'function', '__unsafeBuildAdapterContextForTest should be callable');
 
-  const adapterContext = unsafePipeline.buildAdapterContext({
+  const adapterContext = __unsafeBuildAdapterContextForTest({
     id: 'req_clock_daemon_context',
     endpoint: '/v1/responses',
     entryEndpoint: '/v1/responses',
@@ -68,7 +68,7 @@ async function main() {
   assert.equal(adapterContext.cwd, '/tmp/clock-workdir');
   assert.equal(resolveClockSessionScope(adapterContext, adapterContext.__rt ?? null), 'tmux:tmux_clock_1');
 
-  const adapterContextSnakeCase = unsafePipeline.buildAdapterContext({
+  const adapterContextSnakeCase = __unsafeBuildAdapterContextForTest({
     id: 'req_clock_daemon_context_snake',
     endpoint: '/v1/responses',
     entryEndpoint: '/v1/responses',

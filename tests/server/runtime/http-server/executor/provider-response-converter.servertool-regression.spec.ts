@@ -558,6 +558,54 @@ describe('provider-response-converter servertool regressions', () => {
     });
   });
 
+  it('maps malformed anthropic model_context_window_exceeded bridge errors to explicit 400 error', async () => {
+    jest.resetModules();
+    mockConvertProviderResponse.mockReset();
+    mockCreateSnapshotRecorder.mockClear();
+
+    mockConvertProviderResponse.mockImplementation(async () => {
+      const err = Object.assign(
+        new Error('Anthropic upstream returned stop_reason=model_context_window_exceeded with empty assistant output'),
+        {
+          name: 'ProviderProtocolError',
+          code: 'MALFORMED_RESPONSE',
+          details: {
+            reason: 'model_context_window_exceeded'
+          }
+        }
+      );
+      throw err;
+    });
+
+    const { convertProviderResponseIfNeeded } = await import(
+      '../../../../../src/server/runtime/http-server/executor/provider-response-converter.js'
+    );
+
+    await expect(
+      convertProviderResponseIfNeeded(
+        {
+          entryEndpoint: '/v1/responses',
+          providerProtocol: 'openai-responses',
+          requestId: 'req_model_ctx_window_1',
+          wantsStream: true,
+          response: { body: { id: 'upstream_body' } } as any,
+          pipelineMetadata: {}
+        },
+        {
+          runtimeManager: {
+            resolveRuntimeKey: () => undefined,
+            getHandleByRuntimeKey: () => undefined
+          },
+          executeNested: async () => ({ body: { ok: true } } as any)
+        }
+      )
+    ).rejects.toMatchObject({
+      code: 'CONTEXT_LENGTH_EXCEEDED',
+      status: 400,
+      statusCode: 400
+    });
+  });
+
   it('fails followup when client inject cannot resolve tmux binding and unbinds stale session', async () => {
     jest.resetModules();
     mockConvertProviderResponse.mockReset();

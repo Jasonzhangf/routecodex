@@ -113,18 +113,40 @@ fn extract_qwen_parameters(request: &Map<String, Value>) -> Option<Value> {
     if let Some(debug) = request.get("debug").and_then(|v| v.as_bool()) {
         parameters.insert("debug".to_string(), Value::Bool(debug));
     }
-    let reasoning_enabled = match request.get("reasoning") {
-        None | Some(Value::Null) => true,
-        Some(Value::String(text)) => !text.trim().eq_ignore_ascii_case("low"),
-        Some(Value::Object(obj)) => obj
-            .get("effort")
-            .and_then(|v| v.as_str())
-            .map(|v| !v.trim().eq_ignore_ascii_case("low"))
-            .unwrap_or(true),
-        Some(_) => true,
-    };
-    if reasoning_enabled {
-        parameters.insert("reasoning".to_string(), Value::Bool(true));
+    match request.get("reasoning") {
+        None | Some(Value::Null) => {
+            parameters.insert("reasoning".to_string(), Value::Bool(true));
+        }
+        Some(Value::String(text)) => {
+            let trimmed = text.trim();
+            if !trimmed.eq_ignore_ascii_case("low") && !trimmed.is_empty() {
+                parameters.insert(
+                    "reasoning".to_string(),
+                    Value::Object(Map::from_iter([(
+                        "effort".to_string(),
+                        Value::String(trimmed.to_string()),
+                    )])),
+                );
+            }
+        }
+        Some(Value::Object(obj)) => {
+            let disabled = obj
+                .get("effort")
+                .and_then(|v| v.as_str())
+                .map(|v| v.trim().eq_ignore_ascii_case("low"))
+                .unwrap_or(false);
+            if !disabled {
+                parameters.insert("reasoning".to_string(), Value::Object(obj.clone()));
+            }
+        }
+        Some(Value::Bool(flag)) => {
+            if *flag {
+                parameters.insert("reasoning".to_string(), Value::Bool(true));
+            }
+        }
+        Some(other) => {
+            parameters.insert("reasoning".to_string(), other.clone());
+        }
     }
 
     if parameters.is_empty() {

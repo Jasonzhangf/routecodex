@@ -42,6 +42,43 @@ function safeStringify(value: unknown): string | undefined {
   }
 }
 
+function encodeJsonArg(capability: string, value: unknown): string {
+  const fail = (reason?: string) => failNativeRequired<string>(capability, reason);
+  const encoded = safeStringify(value);
+  if (!encoded) {
+    return fail('json stringify failed');
+  }
+  return encoded;
+}
+
+function invokeNativeStringCapability(capability: string, args: unknown[]): string {
+  const fail = (reason?: string) => failNativeRequired<string>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  try {
+    const raw = fn(...args);
+    if (typeof raw !== 'string' || !raw) {
+      return fail('empty result');
+    }
+    return raw;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+function invokeNativeStringCapabilityWithJsonArgs(capability: string, args: unknown[]): string {
+  return invokeNativeStringCapability(
+    capability,
+    args.map((arg) => encodeJsonArg(capability, arg))
+  );
+}
+
 function parseWebSearchPlan(raw: string): NativeChatWebSearchPlan | null {
   try {
     const parsed = JSON.parse(raw) as unknown;
@@ -126,7 +163,13 @@ function parseServerToolBundlePlan(raw: string): NativeChatServerToolBundlePlan 
   }
 }
 
-function parseProviderResponseShape(raw: string): 'openai-chat' | 'openai-responses' | 'anthropic-messages' | 'gemini-chat' | 'unknown' | null {
+function parseProviderResponseShape(raw: string):
+  | 'openai-chat'
+  | 'openai-responses'
+  | 'anthropic-messages'
+  | 'gemini-chat'
+  | 'unknown'
+  | null {
   try {
     const parsed = JSON.parse(raw) as unknown;
     if (typeof parsed !== 'string') {
@@ -153,11 +196,10 @@ function parseReviewOperations(raw: string): Record<string, unknown>[] | null {
     if (!Array.isArray(parsed)) {
       return null;
     }
-    const operations = parsed.filter(
+    return parsed.filter(
       (entry): entry is Record<string, unknown> =>
         Boolean(entry && typeof entry === 'object' && !Array.isArray(entry))
     );
-    return operations;
   } catch {
     return null;
   }
@@ -193,24 +235,23 @@ export function detectProviderResponseShapeWithNative(
       capability,
       reason
     );
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    return fail();
-  }
-  const payloadJson = safeStringify(payload ?? null);
-  if (!payloadJson) {
-    return fail('json stringify failed');
-  }
   try {
-    const raw = fn(payloadJson);
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
+    const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [payload ?? null]);
     const parsed = parseProviderResponseShape(raw);
     return parsed ?? fail('invalid payload');
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
+}
+
+export function isCanonicalChatCompletionPayloadWithNative(payload: unknown): boolean {
+  const capability = 'isCanonicalChatCompletionPayloadJson';
+  const fail = (reason?: string) => failNativeRequired<boolean>(capability, reason);
+  try {
+    const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [payload ?? null]);
+    const parsed = parseBoolean(raw);
+    return parsed === null ? fail('invalid payload') : parsed;
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
     return fail(reason);
@@ -220,22 +261,8 @@ export function detectProviderResponseShapeWithNative(
 export function isStopMessageStateActiveWithNative(raw: unknown): boolean {
   const capability = 'isStopMessageStateActiveJson';
   const fail = (reason?: string) => failNativeRequired<boolean>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    return fail();
-  }
-  const rawJson = safeStringify(raw ?? null);
-  if (!rawJson) {
-    return fail('json stringify failed');
-  }
   try {
-    const response = fn(rawJson);
-    if (typeof response !== 'string' || !response) {
-      return fail('empty result');
-    }
+    const response = invokeNativeStringCapabilityWithJsonArgs(capability, [raw ?? null]);
     const parsed = parseBoolean(response);
     return parsed === null ? fail('invalid payload') : parsed;
   } catch (error) {
@@ -249,22 +276,8 @@ export function resolveStopMessageSessionScopeWithNative(
 ): string | undefined {
   const capability = 'resolveStopMessageSessionScopeJson';
   const fail = (reason?: string) => failNativeRequired<string | undefined>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    return fail();
-  }
-  const metadataJson = safeStringify(metadata);
-  if (!metadataJson) {
-    return fail('json stringify failed');
-  }
   try {
-    const response = fn(metadataJson);
-    if (typeof response !== 'string' || !response) {
-      return fail('empty result');
-    }
+    const response = invokeNativeStringCapabilityWithJsonArgs(capability, [metadata]);
     const parsed = parseStringOrUndefined(response);
     return parsed === null ? fail('invalid payload') : parsed;
   } catch (error) {
@@ -279,23 +292,11 @@ export function resolveHasActiveStopMessageForContinueExecutionWithNative(
 ): boolean {
   const capability = 'resolveHasActiveStopMessageForContinueExecutionJson';
   const fail = (reason?: string) => failNativeRequired<boolean>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    return fail();
-  }
-  const runtimeStateJson = safeStringify(runtimeState ?? null);
-  const persistedStateJson = safeStringify(persistedState ?? null);
-  if (!runtimeStateJson || !persistedStateJson) {
-    return fail('json stringify failed');
-  }
   try {
-    const response = fn(runtimeStateJson, persistedStateJson);
-    if (typeof response !== 'string' || !response) {
-      return fail('empty result');
-    }
+    const response = invokeNativeStringCapabilityWithJsonArgs(capability, [
+      runtimeState ?? null,
+      persistedState ?? null
+    ]);
     const parsed = parseBoolean(response);
     return parsed === null ? fail('invalid payload') : parsed;
   } catch (error) {
@@ -309,22 +310,8 @@ export function buildReviewOperationsWithNative(
 ): Record<string, unknown>[] {
   const capability = 'buildReviewOperationsJson';
   const fail = (reason?: string) => failNativeRequired<Record<string, unknown>[]>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    return fail();
-  }
-  const metadataJson = safeStringify(metadata);
-  if (!metadataJson) {
-    return fail('json stringify failed');
-  }
   try {
-    const raw = fn(metadataJson);
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
+    const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [metadata]);
     const parsed = parseReviewOperations(raw);
     return parsed ?? fail('invalid payload');
   } catch (error) {
@@ -338,18 +325,8 @@ export function buildContinueExecutionOperationsWithNative(
 ): Record<string, unknown>[] {
   const capability = 'buildContinueExecutionOperationsJson';
   const fail = (reason?: string) => failNativeRequired<Record<string, unknown>[]>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    return fail();
-  }
   try {
-    const raw = fn(shouldInject === true);
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
+    const raw = invokeNativeStringCapability(capability, [shouldInject === true]);
     const parsed = parseReviewOperations(raw);
     return parsed ?? fail('invalid payload');
   } catch (error) {
@@ -364,23 +341,8 @@ export function planChatWebSearchOperationsWithNative(
 ): NativeChatWebSearchPlan {
   const capability = 'planChatWebSearchOperationsJson';
   const fail = (reason?: string) => failNativeRequired<NativeChatWebSearchPlan>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction('planChatWebSearchOperationsJson');
-  if (!fn) {
-    return fail();
-  }
-  const requestJson = safeStringify(request ?? null);
-  const runtimeMetadataJson = safeStringify(runtimeMetadata);
-  if (!requestJson || !runtimeMetadataJson) {
-    return fail('json stringify failed');
-  }
   try {
-    const raw = fn(requestJson, runtimeMetadataJson);
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
+    const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [request ?? null, runtimeMetadata]);
     const parsed = parseWebSearchPlan(raw);
     return parsed ?? fail('invalid payload');
   } catch (error) {
@@ -394,22 +356,8 @@ export function planChatClockOperationsWithNative(
 ): NativeChatClockPlan {
   const capability = 'planChatClockOperationsJson';
   const fail = (reason?: string) => failNativeRequired<NativeChatClockPlan>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction('planChatClockOperationsJson');
-  if (!fn) {
-    return fail();
-  }
-  const runtimeMetadataJson = safeStringify(runtimeMetadata);
-  if (!runtimeMetadataJson) {
-    return fail('json stringify failed');
-  }
   try {
-    const raw = fn(runtimeMetadataJson);
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
+    const raw = invokeNativeStringCapabilityWithJsonArgs(capability, [runtimeMetadata]);
     const parsed = parseClockPlan(raw);
     return parsed ?? fail('invalid payload');
   } catch (error) {
@@ -424,22 +372,9 @@ export function planContinueExecutionOperationsWithNative(
 ): NativeContinueExecutionPlan {
   const capability = 'planContinueExecutionOperationsJson';
   const fail = (reason?: string) => failNativeRequired<NativeContinueExecutionPlan>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction('planContinueExecutionOperationsJson');
-  if (!fn) {
-    return fail();
-  }
-  const runtimeMetadataJson = safeStringify(runtimeMetadata);
-  if (!runtimeMetadataJson) {
-    return fail('json stringify failed');
-  }
   try {
-    const raw = fn(runtimeMetadataJson, hasActiveStopMessage === true);
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
+    const runtimeMetadataJson = encodeJsonArg(capability, runtimeMetadata);
+    const raw = invokeNativeStringCapability(capability, [runtimeMetadataJson, hasActiveStopMessage === true]);
     const parsed = parseContinueExecutionPlan(raw);
     return parsed ?? fail('invalid payload');
   } catch (error) {
@@ -455,23 +390,14 @@ export function tryPlanChatServerToolBundleWithNative(
 ): NativeChatServerToolBundlePlan | null {
   const capability = 'planChatServertoolOrchestrationBundleJson';
   const fail = (reason?: string) => failNativeRequired<NativeChatServerToolBundlePlan | null>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction('planChatServertoolOrchestrationBundleJson');
-  if (!fn) {
-    return fail();
-  }
-  const requestJson = safeStringify(request ?? null);
-  const runtimeMetadataJson = safeStringify(runtimeMetadata);
-  if (!requestJson || !runtimeMetadataJson) {
-    return fail('json stringify failed');
-  }
   try {
-    const raw = fn(requestJson, runtimeMetadataJson, hasActiveStopMessage === true);
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
+    const requestJson = encodeJsonArg(capability, request ?? null);
+    const runtimeMetadataJson = encodeJsonArg(capability, runtimeMetadata);
+    const raw = invokeNativeStringCapability(capability, [
+      requestJson,
+      runtimeMetadataJson,
+      hasActiveStopMessage === true
+    ]);
     const parsed = parseServerToolBundlePlan(raw);
     return parsed ?? fail('invalid payload');
   } catch (error) {
@@ -487,22 +413,9 @@ export function injectContinueExecutionDirectiveWithNative(
 ): NativeContinueDirectiveInjection {
   const capability = 'injectContinueExecutionDirectiveJson';
   const fail = (reason?: string) => failNativeRequired<NativeContinueDirectiveInjection>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction('injectContinueExecutionDirectiveJson');
-  if (!fn) {
-    return fail();
-  }
-  const messagesJson = safeStringify(messages);
-  if (!messagesJson) {
-    return fail('json stringify failed');
-  }
   try {
-    const raw = fn(messagesJson, marker, targetText);
-    if (typeof raw !== 'string' || !raw) {
-      return fail('empty result');
-    }
+    const messagesJson = encodeJsonArg(capability, messages);
+    const raw = invokeNativeStringCapability(capability, [messagesJson, marker, targetText]);
     const parsed = parseContinueDirectiveInjection(raw);
     return parsed ?? fail('invalid payload');
   } catch (error) {

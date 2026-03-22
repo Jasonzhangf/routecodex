@@ -1,6 +1,6 @@
 use napi::Env;
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::tier_load_balancing::{
     build_candidate_weights, build_group_weights, has_non_uniform_weights,
@@ -19,10 +19,37 @@ use crate::virtual_router_engine::quota::{call_quota_view, QuotaViewEntry};
 use crate::virtual_router_engine::routing::{
     build_antigravity_alias_key, build_route_queue, default_pool_supports_capability,
     extract_excluded_provider_keys, extract_runtime_now_ms, filter_candidates_by_state,
-    filter_pools_by_capability, resolve_instruction_target,
+    filter_pools_by_capability, resolve_instruction_target, route_has_targets,
     should_avoid_antigravity_after_repeated_error, should_bind_antigravity_session,
+    InstructionTargetMatchMode,
 };
 use crate::virtual_router_engine::time_utils::now_ms;
+
+fn order_instruction_keys_by_default_route(
+    keys: &[String],
+    routing: &crate::virtual_router_engine::routing::RoutingPools,
+) -> Vec<String> {
+    if keys.len() <= 1 {
+        return keys.to_vec();
+    }
+    let key_set: HashSet<&str> = keys.iter().map(String::as_str).collect();
+    let mut ordered: Vec<String> = Vec::new();
+    for pool in routing.get(DEFAULT_ROUTE) {
+        for target in pool.targets {
+            if key_set.contains(target.as_str()) && !ordered.contains(&target) {
+                ordered.push(target);
+            }
+        }
+    }
+    let mut remaining: Vec<String> = keys
+        .iter()
+        .filter(|key| !ordered.contains(*key))
+        .cloned()
+        .collect();
+    remaining.sort();
+    ordered.extend(remaining);
+    ordered
+}
 
 impl VirtualRouterEngineCore {
     pub(crate) fn select_provider(
@@ -38,14 +65,21 @@ impl VirtualRouterEngineCore {
         let excluded_keys = extract_excluded_provider_keys(metadata);
 
         if let Some(target) = &routing_state.forced_target {
-            if let Some(forced_key) = resolve_instruction_target(target, &self.provider_registry) {
-                if !excluded_keys.contains(&forced_key)
-                    && self.is_provider_available(env, &forced_key)
-                {
+            if let Some(resolved) = resolve_instruction_target(target, &self.provider_registry) {
+                let available: Vec<String> = filter_candidates_by_state(
+                    &resolved.keys,
+                    routing_state,
+                    &self.provider_registry,
+                )
+                .into_iter()
+                .filter(|key| !excluded_keys.contains(key))
+                .filter(|key| self.is_provider_available(env, key))
+                .collect();
+                if let Some(forced_key) = available.into_iter().next() {
                     return Ok(SelectionResult::new(
                         forced_key.clone(),
                         requested_route.to_string(),
-                        vec![forced_key.clone()],
+                        resolved.keys.clone(),
                         Some("forced".to_string()),
                     ));
                 }
@@ -53,14 +87,31 @@ impl VirtualRouterEngineCore {
         }
 
         if let Some(target) = &routing_state.sticky_target {
-            if let Some(sticky_key) = resolve_instruction_target(target, &self.provider_registry) {
-                if !excluded_keys.contains(&sticky_key)
-                    && self.is_provider_available(env, &sticky_key)
-                {
+            if let Some(resolved) = resolve_instruction_target(target, &self.provider_registry) {
+                let ordered_keys = order_instruction_keys_by_default_route(&resolved.keys, &self.routing);
+                let available: Vec<String> = filter_candidates_by_state(
+                    &ordered_keys,
+                    routing_state,
+                    &self.provider_registry,
+                )
+                .into_iter()
+                .filter(|key| !excluded_keys.contains(key))
+                .filter(|key| self.is_provider_available(env, key))
+                .collect();
+                let available_set: HashSet<String> = available.iter().cloned().collect();
+                let sticky_key = match resolved.mode {
+                    InstructionTargetMatchMode::Exact => available.into_iter().next(),
+                    InstructionTargetMatchMode::Filter => self.load_balancer.select_round_robin_with_skips(
+                        "sticky",
+                        &ordered_keys,
+                        |key| available_set.contains(key),
+                    ),
+                };
+                if let Some(sticky_key) = sticky_key {
                     return Ok(SelectionResult::new(
                         sticky_key.clone(),
                         requested_route.to_string(),
-                        vec![sticky_key.clone()],
+                        ordered_keys,
                         Some("sticky".to_string()),
                     ));
                 }
@@ -68,26 +119,63 @@ impl VirtualRouterEngineCore {
         }
 
         if let Some(target) = &routing_state.prefer_target {
-            if let Some(prefer_key) = resolve_instruction_target(target, &self.provider_registry) {
-                if !excluded_keys.contains(&prefer_key)
-                    && self.is_provider_available(env, &prefer_key)
-                {
+            if let Some(resolved) = resolve_instruction_target(target, &self.provider_registry) {
+                let ordered_keys = order_instruction_keys_by_default_route(&resolved.keys, &self.routing);
+                let available: Vec<String> = filter_candidates_by_state(
+                    &ordered_keys,
+                    routing_state,
+                    &self.provider_registry,
+                )
+                .into_iter()
+                .filter(|key| !excluded_keys.contains(key))
+                .filter(|key| self.is_provider_available(env, key))
+                .collect();
+                let available_set: HashSet<String> = available.iter().cloned().collect();
+                let mutation_only = metadata
+                    .get("routingInstructionMutationOnly")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                let prefer_key = match resolved.mode {
+                    InstructionTargetMatchMode::Exact => available.into_iter().next(),
+                    InstructionTargetMatchMode::Filter => {
+                        let route_key = format!("prefer:{}", ordered_keys.join("|"));
+                        if mutation_only {
+                            self.load_balancer.peek_round_robin_with_skips(
+                                &route_key,
+                                &ordered_keys,
+                                |key| available_set.contains(key),
+                            )
+                        } else {
+                            self.load_balancer.select_round_robin_with_skips(
+                                &route_key,
+                                &ordered_keys,
+                                |key| available_set.contains(key),
+                            )
+                        }
+                    }
+                };
+                if let Some(prefer_key) = prefer_key {
                     return Ok(SelectionResult::new(
                         prefer_key.clone(),
                         "prefer".to_string(),
-                        vec![prefer_key.clone()],
+                        ordered_keys,
                         Some("prefer".to_string()),
                     ));
                 }
             }
         }
 
-        let route_queue = build_route_queue(
+        let mut route_queue = build_route_queue(
             requested_route,
             &classification.candidates,
             features,
             &self.routing,
         );
+        if !routing_state.allowed_providers.is_empty()
+            && route_has_targets(&self.routing, DEFAULT_ROUTE)
+        {
+            route_queue = vec![DEFAULT_ROUTE.to_string()];
+        }
         let sticky_key = crate::virtual_router_engine::routing::resolve_sticky_key(metadata);
         let avoid_antigravity =
             !excluded_keys.is_empty() && should_avoid_antigravity_after_repeated_error(metadata);
@@ -96,24 +184,28 @@ impl VirtualRouterEngineCore {
             resolve_health_weighted_config(self.load_balancer.policy().health_weighted.as_ref());
         let requires_vision = features.has_image_attachment
             && default_pool_supports_capability(&self.routing, &self.provider_registry, "vision");
-        let requires_web_search = (self.web_search_force
-            || features.has_web_search_tool_declared
-            || features.has_web_tool
-            || features
-                .last_assistant_tool_category
-                .as_deref()
-                .map(|cat| cat.eq_ignore_ascii_case("websearch"))
-                .unwrap_or(false)
-            || classification.route_name == "web_search")
-            && default_pool_supports_capability(
-                &self.routing,
-                &self.provider_registry,
-                "web_search",
-            );
-        let capability_filter_active = requires_vision || requires_web_search;
+        let web_search_route_requested = classification.route_name == "web_search";
+        let has_explicit_web_search_route = route_has_targets(&self.routing, "web_search");
+        let default_pool_supports_web_search = default_pool_supports_capability(
+            &self.routing,
+            &self.provider_registry,
+            "web_search",
+        );
+        let use_default_pool_web_search_fallback =
+            web_search_route_requested && default_pool_supports_web_search;
 
         for route_name in route_queue {
-            let mut pools = if capability_filter_active {
+            let mut pools = if requires_vision {
+                self.routing.get(DEFAULT_ROUTE)
+            } else if web_search_route_requested
+                && route_name == "web_search"
+                && has_explicit_web_search_route
+            {
+                self.routing.get("web_search")
+            } else if web_search_route_requested
+                && route_name == DEFAULT_ROUTE
+                && use_default_pool_web_search_fallback
+            {
                 self.routing.get(DEFAULT_ROUTE)
             } else {
                 self.routing.get(&route_name)
@@ -121,7 +213,10 @@ impl VirtualRouterEngineCore {
             if requires_vision {
                 pools = filter_pools_by_capability(&pools, &self.provider_registry, "vision");
             }
-            if requires_web_search {
+            if web_search_route_requested
+                && route_name == DEFAULT_ROUTE
+                && use_default_pool_web_search_fallback
+            {
                 pools = filter_pools_by_capability(&pools, &self.provider_registry, "web_search");
             }
             for pool in pools {
@@ -364,7 +459,7 @@ impl VirtualRouterEngineCore {
         }
         Err(format_virtual_router_error(
             "PROVIDER_NOT_AVAILABLE",
-            "No providers available",
+            "No available providers after applying routing instructions",
         ))
     }
 

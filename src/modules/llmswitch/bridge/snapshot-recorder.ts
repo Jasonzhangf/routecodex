@@ -45,12 +45,25 @@ interface StageTraceEntry {
   payload: unknown;
 }
 
+interface ClientToolTraceSummaryEntry {
+  at: string;
+  stage: string;
+}
+
 let cachedSnapshotRecorderFactory:
   | ((context: AnyRecord, endpoint: string) => SnapshotRecorder)
   | null = null;
 
-const MAX_STAGE_TRACE_ENTRIES = 160;
-const MAX_STAGE_TRACE_PAYLOAD_CHARS = 1_500_000;
+const MAX_STAGE_TRACE_ENTRIES = 40;
+const MAX_STAGE_TRACE_PAYLOAD_CHARS = 120_000;
+const MAX_CLIENT_TOOL_ERROR_TRACE_ENTRIES = 6;
+const DEFAULT_CLIENT_TOOL_ERROR_SAMPLE_WINDOW_MS = 30 * 60_000;
+
+const clientToolErrorSampleWindow = new Map<string, number>();
+
+export function resetSnapshotRecorderErrorsampleStateForTests(): void {
+  clientToolErrorSampleWindow.clear();
+}
 
 const PARSE_ERROR_SIGNALS: Array<{ needle: string; errorType: string }> = [
   { needle: 'failed to parse function arguments', errorType: 'tool_args_parse_failed' },
@@ -120,6 +133,7 @@ function logClientToolError(args: {
   toolName: string;
   errorType: string;
   matchedText: string;
+  condensed?: boolean;
 }): void {
   const req = args.requestId && args.requestId.trim().length ? args.requestId.trim() : 'unknown';
   const stage = args.stage && args.stage.trim().length ? args.stage.trim() : 'unknown';
@@ -127,9 +141,12 @@ function logClientToolError(args: {
   const errorType = args.errorType && args.errorType.trim().length ? args.errorType.trim() : 'unknown';
   const detail = clipText(args.matchedText || '', 240);
   const detailPart = detail ? ` detail=${detail}` : '';
+  const condensedPart = args.condensed
+    ? ' (more client-tool errors suppressed for this request; see ~/.rcc/errorsamples/client-tool-error/)'
+    : '';
   // Red warning on console for immediate operator visibility.
   console.error(
-    `\x1b[31m[client-tool-error] requestId=${req} stage=${stage} tool=${tool} errorType=${errorType}${detailPart}\x1b[0m`
+    `\x1b[31m[client-tool-error] requestId=${req} stage=${stage} tool=${tool} errorType=${errorType}${detailPart}${condensedPart}\x1b[0m`
   );
 }
 
@@ -149,6 +166,15 @@ function logRuntimeErrorSignal(args: {
   console.error(
     `\x1b[31m[runtime-error] requestId=${req} group=${group} stage=${stage} errorType=${errorType}${detailPart}\x1b[0m`
   );
+}
+
+function shouldLogRuntimeErrorSignalToConsole(signal: RuntimeErrorSignal): boolean {
+  // 噪音控制：执行失败（exec-error）统一只落样本，不刷控制台。
+  // 解析错误（parse-error）保留控制台提示，便于快速定位兼容问题。
+  if (signal.group === 'exec-error') {
+    return false;
+  }
+  return true;
 }
 
 function shouldInspectRuntimeError(stage: string, payload: AnyRecord): boolean {
@@ -288,6 +314,15 @@ function classifyRuntimeErrorSignal(stage: string, payload: AnyRecord): RuntimeE
   for (const candidate of candidates) {
     const lower = candidate.value.toLowerCase();
 
+    if (lower.includes('apply_patch verification failed')) {
+      const resolved = classifyApplyPatchVerificationFailure(candidate.value);
+      return {
+        group: 'exec-error',
+        errorType: resolved.errorType,
+        matchedText: resolved.matchedText
+      };
+    }
+
     for (const signal of EXEC_ERROR_SIGNALS) {
       if (lower.includes(signal.needle)) {
         return {
@@ -348,17 +383,128 @@ function appendStageTrace(trace: StageTraceEntry[], stage: string, payload: AnyR
   }
 }
 
-function cloneStageTrace(trace: StageTraceEntry[]): StageTraceEntry[] {
-  return trace.map((item) => ({
+function cloneStageTrace(trace: StageTraceEntry[], limit = MAX_STAGE_TRACE_ENTRIES): StageTraceEntry[] {
+  const tail = limit > 0 ? trace.slice(-limit) : trace;
+  return tail.map((item) => ({
     at: item.at,
     stage: item.stage,
     payload: cloneForErrorsample(item.payload)
   }));
 }
 
+function cloneStageTraceSummary(
+  trace: StageTraceEntry[],
+  limit = MAX_CLIENT_TOOL_ERROR_TRACE_ENTRIES
+): ClientToolTraceSummaryEntry[] {
+  const tail = limit > 0 ? trace.slice(-limit) : trace;
+  return tail.map((item) => ({
+    at: item.at,
+    stage: item.stage
+  }));
+}
+
+function resolveClientToolErrorSampleWindowMs(): number {
+  const raw =
+    process.env.ROUTECODEX_CLIENT_TOOL_ERROR_SAMPLE_WINDOW_MS ||
+    process.env.RCC_CLIENT_TOOL_ERROR_SAMPLE_WINDOW_MS;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return DEFAULT_CLIENT_TOOL_ERROR_SAMPLE_WINDOW_MS;
+  }
+  return Math.floor(parsed);
+}
+
+function shouldWriteClientToolErrorsample(args: {
+  endpoint: string;
+  stage: string;
+  failure: ToolExecutionFailureSignal;
+}): boolean {
+  if (
+    args.failure.toolName === 'exec_command' &&
+    args.failure.errorType === 'exec_command_non_zero_exit' &&
+    /\bcode 1\b/i.test(args.failure.matchedText || '')
+  ) {
+    return false;
+  }
+  const windowMs = resolveClientToolErrorSampleWindowMs();
+  if (windowMs <= 0) {
+    return true;
+  }
+  const now = Date.now();
+  const key = [args.endpoint, args.stage, args.failure.toolName, args.failure.errorType].join('|');
+  for (const [sampleKey, seenAt] of clientToolErrorSampleWindow.entries()) {
+    if (now - seenAt > windowMs) {
+      clientToolErrorSampleWindow.delete(sampleKey);
+    }
+  }
+  const lastSeenAt = clientToolErrorSampleWindow.get(key);
+  if (typeof lastSeenAt === 'number' && now - lastSeenAt <= windowMs) {
+    return false;
+  }
+  clientToolErrorSampleWindow.set(key, now);
+  return true;
+}
+
+function summarizeClientToolObservation(payload: AnyRecord): Record<string, unknown> {
+  const toolMessages = collectToolMessages(payload);
+  return {
+    topLevelKeys: Object.keys(payload || {}).slice(0, 20),
+    toolMessageCount: toolMessages.length,
+    toolMessages: toolMessages.slice(-4).map((msg) => ({
+      name: typeof msg.name === 'string' ? msg.name : undefined,
+      tool_call_id: typeof msg.tool_call_id === 'string' ? msg.tool_call_id : undefined,
+      call_id: typeof msg.call_id === 'string' ? msg.call_id : undefined,
+      contentPreview: clipText(typeof msg.content === 'string' ? msg.content : '', 180)
+    }))
+  };
+}
+
+function looksLikeToolOutputTranscript(content: string): boolean {
+  const raw = String(content || '').trim();
+  if (!raw) {
+    return false;
+  }
+  const lower = raw.toLowerCase();
+  const hasChunkId = lower.includes('chunk id:');
+  if (!hasChunkId) {
+    return false;
+  }
+  if (!lower.includes('wall time:')) {
+    return false;
+  }
+  if (!lower.includes('process exited with code')) {
+    return false;
+  }
+  if (!lower.includes('output:') && !lower.includes('original token count:')) {
+    return false;
+  }
+  return true;
+}
+
 function resolveExecCommandFailure(content: string): { errorType: string; matchedText: string } | null {
   const raw = String(content || '');
   const lower = raw.toLowerCase();
+  if (looksLikeToolOutputTranscript(raw)) {
+    return null;
+  }
+  if (lower.includes('failed to parse function arguments')) {
+    if (lower.includes('missing field `cmd`')) {
+      return {
+        errorType: 'exec_command_args_missing_cmd',
+        matchedText: 'missing field `cmd`'
+      };
+    }
+    if (lower.includes('missing field `input`')) {
+      return {
+        errorType: 'exec_command_args_missing_input',
+        matchedText: 'missing field `input`'
+      };
+    }
+    return {
+      errorType: 'exec_command_args_parse_failed',
+      matchedText: clipText(raw)
+    };
+  }
   const nonZeroExit = raw.match(/process exited with code\s+(-?\d+)/i);
   if (nonZeroExit) {
     const code = Number(nonZeroExit[1]);
@@ -378,14 +524,72 @@ function resolveExecCommandFailure(content: string): { errorType: string; matche
   return null;
 }
 
+function classifyApplyPatchVerificationFailure(content: string): { errorType: string; matchedText: string } {
+  const raw = String(content || '');
+  const lower = raw.toLowerCase();
+  if (
+    lower.includes("expected update hunk to start with a @@ context marker, got: '======='") ||
+    lower.includes("expected update hunk to start with a @@ context marker, got: '<<<<<<<") ||
+    lower.includes("expected update hunk to start with a @@ context marker, got: '>>>>>>>")
+  ) {
+    return {
+      errorType: 'apply_patch_conflict_markers_or_merge_chunks',
+      matchedText: clipText(raw)
+    };
+  }
+  if (lower.includes('failed to find context') && lower.includes('@@')) {
+    return {
+      errorType: 'apply_patch_gnu_line_number_context_not_found',
+      matchedText: clipText(raw)
+    };
+  }
+  if (
+    lower.includes('is not a valid hunk header') &&
+    (lower.includes("'--- a/") || lower.includes("'--- /dev/null") || lower.includes("'+++ b/"))
+  ) {
+    return {
+      errorType: 'apply_patch_mixed_gnu_diff_inside_begin_patch',
+      matchedText: clipText(raw)
+    };
+  }
+  if (lower.includes('failed to find expected lines in ')) {
+    return {
+      errorType: 'apply_patch_expected_lines_not_found',
+      matchedText: clipText(raw)
+    };
+  }
+  return {
+    errorType: 'apply_patch_verification_failed',
+    matchedText: clipText(raw)
+  };
+}
+
 function resolveApplyPatchFailure(content: string): { errorType: string; matchedText: string } | null {
   const raw = String(content || '');
   const lower = raw.toLowerCase();
-  if (lower.includes('apply_patch verification failed')) {
+  if (looksLikeToolOutputTranscript(raw)) {
+    return null;
+  }
+  if (lower.includes('failed to parse function arguments')) {
+    if (lower.includes('missing field `input`')) {
+      return {
+        errorType: 'apply_patch_args_missing_input',
+        matchedText: 'missing field `input`'
+      };
+    }
+    if (lower.includes('missing field `patch`')) {
+      return {
+        errorType: 'apply_patch_args_missing_patch',
+        matchedText: 'missing field `patch`'
+      };
+    }
     return {
-      errorType: 'apply_patch_verification_failed',
+      errorType: 'apply_patch_args_parse_failed',
       matchedText: clipText(raw)
     };
+  }
+  if (lower.includes('apply_patch verification failed')) {
+    return classifyApplyPatchVerificationFailure(raw);
   }
   if (lower.includes('apply_patch failed') || lower.includes('invalid patch')) {
     return {
@@ -399,6 +603,9 @@ function resolveApplyPatchFailure(content: string): { errorType: string; matched
 function resolveShellCommandFailure(content: string): { errorType: string; matchedText: string } | null {
   const raw = String(content || '');
   const lower = raw.toLowerCase();
+  if (looksLikeToolOutputTranscript(raw)) {
+    return null;
+  }
   if (lower.includes('missing field `command`')) {
     return {
       errorType: 'shell_command_args_missing_command',
@@ -509,6 +716,24 @@ function detectToolExecutionFailures(payload: AnyRecord): ToolExecutionFailureSi
   return failures;
 }
 
+function shouldLogClientToolErrorToConsole(failure: ToolExecutionFailureSignal): boolean {
+  if (failure.toolName === 'apply_patch') {
+    return (
+      failure.errorType === 'apply_patch_args_missing_input' ||
+      failure.errorType === 'apply_patch_args_missing_patch' ||
+      failure.errorType === 'apply_patch_args_parse_failed'
+    );
+  }
+  if (failure.toolName === 'exec_command') {
+    return (
+      failure.errorType === 'exec_command_args_missing_cmd' ||
+      failure.errorType === 'exec_command_args_missing_input' ||
+      failure.errorType === 'exec_command_args_parse_failed'
+    );
+  }
+  return false;
+}
+
 /**
  * 为 HubPipeline / provider 响应路径创建阶段快照记录器。
  * 内部通过 llmswitch-core 的 snapshot-recorder 模块实现。
@@ -532,6 +757,7 @@ export async function createSnapshotRecorder(
   }
   const runtimeErrorDedup = new Set<string>();
   const clientToolErrorDedup = new Set<string>();
+  let clientToolParseConsoleLogged = false;
   const stageTrace: StageTraceEntry[] = [];
 
   return {
@@ -605,13 +831,20 @@ export async function createSnapshotRecorder(
               continue;
             }
             clientToolErrorDedup.add(dedupKey);
-            logClientToolError({
-              requestId,
-              stage,
-              toolName: failure.toolName,
-              errorType: failure.errorType,
-              matchedText: failure.matchedText
-            });
+            if (!clientToolParseConsoleLogged && shouldLogClientToolErrorToConsole(failure)) {
+              clientToolParseConsoleLogged = true;
+              logClientToolError({
+                requestId,
+                stage,
+                toolName: failure.toolName,
+                errorType: failure.errorType,
+                matchedText: failure.matchedText,
+                condensed: true
+              });
+            }
+            if (!shouldWriteClientToolErrorsample({ endpoint, stage, failure })) {
+              continue;
+            }
             writeBridgeErrorsample({
               group: 'client-tool-error',
               kind: `${stage}.${failure.toolName}`,
@@ -625,9 +858,9 @@ export async function createSnapshotRecorder(
                 matchedText: failure.matchedText,
                 toolCallId: failure.toolCallId,
                 callId: failure.callId,
-                trace: cloneStageTrace(stageTrace)
+                trace: cloneStageTraceSummary(stageTrace, MAX_CLIENT_TOOL_ERROR_TRACE_ENTRIES)
               },
-              observation: cloneForErrorsample(p)
+              observation: summarizeClientToolObservation(p)
             });
           }
         }
@@ -639,13 +872,15 @@ export async function createSnapshotRecorder(
           const dedupKey = [requestId, stage, signal.group, signal.errorType, signal.matchedText].join('|');
           if (runtimeErrorDedup.has(dedupKey)) return;
           runtimeErrorDedup.add(dedupKey);
-          logRuntimeErrorSignal({
-            requestId,
-            stage,
-            group: signal.group,
-            errorType: signal.errorType,
-            matchedText: signal.matchedText
-          });
+          if (shouldLogRuntimeErrorSignalToConsole(signal)) {
+            logRuntimeErrorSignal({
+              requestId,
+              stage,
+              group: signal.group,
+              errorType: signal.errorType,
+              matchedText: signal.matchedText
+            });
+          }
           writeBridgeErrorsample({
             group: signal.group,
             kind: stage,

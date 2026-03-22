@@ -131,6 +131,9 @@ export function collectAssistantToolCallIds(messages: ChatMessage[]): Set<string
       ? ((msg as JsonObject).tool_calls as ChatToolCall[])
       : [];
     for (const tc of tcs) {
+      if (!tc || typeof tc !== 'object') {
+        continue;
+      }
       const id = typeof tc.id === 'string' ? tc.id.trim() : '';
       if (id) {
         assistantToolCallIds.add(id);

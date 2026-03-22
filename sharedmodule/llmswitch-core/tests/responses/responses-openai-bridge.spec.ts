@@ -116,6 +116,42 @@ describe('responses-openai-bridge history seed normalization', () => {
     ]);
   });
 
+  test('does not inject builtin web_search when chat tools never declared web_search', () => {
+    const chatPayload = {
+      model: 'glm-4.7',
+      messages: [{ role: 'user', content: 'list files' }],
+      tools: [
+        {
+          type: 'function',
+          function: { name: 'exec_command', parameters: { type: 'object', properties: {} } }
+        },
+        {
+          type: 'function',
+          function: { name: 'write_stdin', parameters: { type: 'object', properties: {} } }
+        }
+      ]
+    };
+
+    const result = buildResponsesRequestFromChat(chatPayload, {
+      requestId: 'bridge-tools-no-web-search'
+    } as any);
+
+    expect(result.request.tools).toEqual([
+      {
+        type: 'function',
+        name: 'exec_command',
+        function: { name: 'exec_command', parameters: { type: 'object', properties: {} } },
+        parameters: { type: 'object', properties: {} }
+      },
+      {
+        type: 'function',
+        name: 'write_stdin',
+        function: { name: 'write_stdin', parameters: { type: 'object', properties: {} } },
+        parameters: { type: 'object', properties: {} }
+      }
+    ]);
+  });
+
   test('combines reasoning instruction segments before system instruction and marks instructions as raw', () => {
     const chatPayload = {
       model: 'glm-4.7',
@@ -421,6 +457,76 @@ describe('responses-openai-bridge history seed normalization', () => {
 
     expect(roundtrip.request.tools).toHaveLength(2);
     expect(roundtrip.request.tools).toEqual(chatPayload.tools);
+  });
+
+  test('shape-repairs malformed tool-session turns without dropping earlier context', () => {
+    const chatPayload = {
+      model: 'glm-4.7',
+      stream: false,
+      messages: [
+        { role: 'system', content: 'You are Codex.' },
+        { role: 'user', content: 'first question' },
+        {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            {
+              id: 'call_a',
+              type: 'function',
+              function: { name: 'toolA', arguments: '{}' }
+            },
+            {
+              id: 'call_b',
+              type: 'function',
+              function: { name: 'toolB', arguments: '{}' }
+            }
+          ]
+        },
+        {
+          role: 'tool',
+          tool_call_id: 'call_b',
+          content: 'ok-b'
+        },
+        { role: 'user', content: 'second question' }
+      ],
+      tools: [
+        {
+          type: 'function',
+          function: {
+            name: 'toolA',
+            parameters: { type: 'object', properties: {} }
+          }
+        },
+        {
+          type: 'function',
+          function: {
+            name: 'toolB',
+            parameters: { type: 'object', properties: {} }
+          }
+        }
+      ]
+    } as any;
+
+    const result = buildResponsesRequestFromChat(chatPayload, {
+      requestId: 'bridge-shape-repair-malformed-tool-session'
+    } as any);
+
+    const input = Array.isArray(result.request.input) ? (result.request.input as Array<Record<string, unknown>>) : [];
+    const functionCalls = input.filter((item) => item.type === 'function_call');
+    const functionCallOutputs = input.filter((item) => item.type === 'function_call_output');
+    const serializedInput = JSON.stringify(input);
+
+    // No semantic clipping: both user turns must survive.
+    expect(serializedInput).toContain('first question');
+    expect(serializedInput).toContain('second question');
+
+    // Shape repair: missing tool output for call_a should be synthesized, call_b should still exist.
+    expect(functionCalls.some((item) => String(item.call_id ?? '').includes('call_a'))).toBe(true);
+    expect(functionCalls.some((item) => String(item.call_id ?? '').includes('call_b'))).toBe(true);
+    expect(functionCallOutputs.some((item) => String(item.call_id ?? '').includes('call_a'))).toBe(true);
+    expect(functionCallOutputs.some((item) => String(item.call_id ?? '').includes('call_b'))).toBe(true);
+    expect(serializedInput).toContain('[RouteCodex] Tool call result unknown');
+    expect(serializedInput).toContain('ok-b');
   });
 
   test('drops intermediate chat messages when roundtripping responses back to responses payload', () => {

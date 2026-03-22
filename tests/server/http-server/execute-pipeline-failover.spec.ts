@@ -247,6 +247,144 @@ describe('RouteCodexHttpServer.executePipeline failover', () => {
     expect(secondPipelineInput?.metadata?.excludedProviderKeys).toEqual([providerA]);
   });
 
+  it('re-enters hub pipeline when runtime resolve fails for selected provider', async () => {
+    const server = new RouteCodexHttpServer(createTestConfig());
+
+    const providerA = 'deepseek-web.1.deepseek-chat.deepseek-chat';
+    const providerB = 'crs.key1.gpt-5.3-codex.gpt-5.3-codex';
+
+    const hubExecute = attachHubPipeline(server, async (input: any) => {
+      const excluded = Array.isArray(input?.metadata?.excludedProviderKeys)
+        ? input.metadata.excludedProviderKeys
+        : [];
+      if (excluded.includes(providerA)) {
+        return {
+          providerPayload: { model: 'gpt-5.3-codex' },
+          target: {
+            providerKey: providerB,
+            providerType: 'responses',
+            outboundProfile: 'openai-responses',
+            runtimeKey: 'runtime:B',
+            processMode: 'standard'
+          },
+          routingDecision: { routeName: 'longcontext' },
+          processMode: 'standard',
+          metadata: {}
+        };
+      }
+      return {
+        providerPayload: { model: 'deepseek-chat' },
+        target: {
+          providerKey: providerA,
+          providerType: 'responses',
+          outboundProfile: 'openai-responses',
+          runtimeKey: 'deepseek-web.1',
+          processMode: 'standard'
+        },
+        routingDecision: { routeName: 'longcontext' },
+        processMode: 'standard',
+        metadata: {}
+      };
+    });
+
+    // 仅注册 fallback provider，模拟首选 provider runtime 丢失（runtimeKey hint 命中但 handle 缺失）
+    attachProviderHandle(server, {
+      providerKey: providerB,
+      runtimeKey: 'runtime:B',
+      providerType: 'responses',
+      providerFamily: 'openai',
+      providerId: 'crs',
+      providerProtocol: 'openai-responses',
+      processIncoming: async () => ({ status: 200, data: { id: 'ok' } })
+    });
+
+    const result = await server['executePipeline']({
+      requestId: 'req_runtime_missing_failover',
+      entryEndpoint: '/v1/responses',
+      headers: {},
+      body: { messages: [{ role: 'user', content: 'ping' }] },
+      metadata: { stream: false, inboundStream: false }
+    });
+
+    expect(result.status).toBe(200);
+    expect(hubExecute).toHaveBeenCalledTimes(2);
+    const secondPipelineInput = hubExecute.mock.calls[1]?.[0] as Record<string, any>;
+    expect(secondPipelineInput?.metadata?.excludedProviderKeys).toEqual([providerA]);
+  });
+
+  it('re-enters hub pipeline when upstream response status is 502', async () => {
+    const server = new RouteCodexHttpServer(createTestConfig());
+
+    const providerA = 'deepseek-web.1.deepseek-chat.deepseek-chat';
+    const providerB = 'crs.key1.gpt-5.3-codex.gpt-5.3-codex';
+
+    const hubExecute = attachHubPipeline(server, async (input: any) => {
+      const excluded = Array.isArray(input?.metadata?.excludedProviderKeys)
+        ? input.metadata.excludedProviderKeys
+        : [];
+      if (excluded.includes(providerA)) {
+        return {
+          providerPayload: { model: 'gpt-5.3-codex' },
+          target: {
+            providerKey: providerB,
+            providerType: 'responses',
+            outboundProfile: 'openai-responses',
+            runtimeKey: 'runtime:B',
+            processMode: 'standard'
+          },
+          routingDecision: { routeName: 'longcontext' },
+          processMode: 'standard',
+          metadata: {}
+        };
+      }
+      return {
+        providerPayload: { model: 'deepseek-chat' },
+        target: {
+          providerKey: providerA,
+          providerType: 'responses',
+          outboundProfile: 'openai-responses',
+          runtimeKey: 'runtime:A',
+          processMode: 'standard'
+        },
+        routingDecision: { routeName: 'longcontext' },
+        processMode: 'standard',
+        metadata: {}
+      };
+    });
+
+    attachProviderHandle(server, {
+      providerKey: providerA,
+      runtimeKey: 'runtime:A',
+      providerType: 'responses',
+      providerFamily: 'deepseek',
+      providerId: 'deepseek-web',
+      providerProtocol: 'openai-responses',
+      processIncoming: async () => ({ status: 502, data: { error: { message: 'upstream bad gateway' } } })
+    });
+    attachProviderHandle(server, {
+      providerKey: providerB,
+      runtimeKey: 'runtime:B',
+      providerType: 'responses',
+      providerFamily: 'openai',
+      providerId: 'crs',
+      providerProtocol: 'openai-responses',
+      processIncoming: async () => ({ status: 200, data: { id: 'ok' } })
+    });
+
+    const result = await server['executePipeline']({
+      requestId: 'req_conv_502',
+      entryEndpoint: '/v1/responses',
+      headers: {},
+      body: { messages: [{ role: 'user', content: 'ping' }] },
+      metadata: { stream: false, inboundStream: false }
+    });
+
+    expect(result.status).toBe(200);
+    expect(hubExecute).toHaveBeenCalledTimes(2);
+    const secondPipelineInput = hubExecute.mock.calls[1]?.[0] as Record<string, any>;
+    expect(secondPipelineInput?.metadata?.excludedProviderKeys).toEqual([providerA]);
+  });
+
   it('returns first upstream error when retry-exhausted routing reports provider unavailable', async () => {
     const server = new RouteCodexHttpServer(createTestConfig());
 

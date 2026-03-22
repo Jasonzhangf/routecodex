@@ -205,6 +205,31 @@ export function buildResponsesPayloadFromChat(payload: unknown, context?: Respon
   const out: any = {
     ...nativeBuilt
   };
+  if (!retentionContext.stripHostManagedFields) {
+    const contextToolChoice =
+      (context as any)?.tool_choice !== undefined ? (context as any).tool_choice : (context as any)?.toolChoice;
+    const contextParallelToolCalls =
+      typeof (context as any)?.parallel_tool_calls === 'boolean'
+        ? (context as any).parallel_tool_calls
+        : typeof (context as any)?.parallelToolCalls === 'boolean'
+          ? (context as any).parallelToolCalls
+          : undefined;
+    const contextInclude = Array.isArray((context as any)?.include) ? ((context as any).include as unknown[]) : undefined;
+    const contextStore = typeof (context as any)?.store === 'boolean' ? ((context as any).store as boolean) : undefined;
+
+    if (out.tool_choice === undefined && contextToolChoice !== undefined) {
+      out.tool_choice = contextToolChoice;
+    }
+    if (out.parallel_tool_calls === undefined && contextParallelToolCalls !== undefined) {
+      out.parallel_tool_calls = contextParallelToolCalls;
+    }
+    if (out.include === undefined && contextInclude !== undefined) {
+      out.include = contextInclude;
+    }
+    if (out.store === undefined && contextStore !== undefined) {
+      out.store = contextStore;
+    }
+  }
   normalizeResponsesToolCallArgumentsForClient(out, context);
   if ((out as any).metadata) {
     stripInternalToolingMetadata((out as any).metadata);

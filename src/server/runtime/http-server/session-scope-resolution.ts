@@ -7,6 +7,8 @@ type SessionScopeResolutionArgs = {
   clientHeaders?: Record<string, string>;
   daemonId?: string;
   resolveTmuxSessionIdFromDaemon?: (daemonId: string | undefined) => string | undefined;
+  resolveTmuxSessionIdFromBinding?: (sessionScopeId: string) => string | undefined;
+  isTmuxSessionAlive?: (tmuxSessionId: string) => boolean;
 };
 
 export type TmuxSessionResolution = {
@@ -221,21 +223,129 @@ function readTmuxFromHeaderSource(source: Record<string, unknown> | undefined): 
   return undefined;
 }
 
+function readSessionScopeFromHeaderSource(source: Record<string, unknown> | undefined): string | undefined {
+  if (!source) {
+    return undefined;
+  }
+  const fromApiKeyHeader =
+    extractHeaderValue(source, 'x-routecodex-api-key')
+    || extractHeaderValue(source, 'x-api-key')
+    || extractHeaderValue(source, 'x-routecodex-apikey')
+    || extractHeaderValue(source, 'api-key')
+    || extractHeaderValue(source, 'apikey');
+  const fromApiKey = extractSessionClientScopeIdFromApiKey(fromApiKeyHeader);
+  if (fromApiKey) {
+    return fromApiKey;
+  }
+  const authorization = extractHeaderValue(source, 'authorization');
+  if (authorization) {
+    const match = authorization.match(/^(?:Bearer|ApiKey)\s+(.+)$/i);
+    const fromAuth = extractSessionClientScopeIdFromApiKey(match ? String(match[1]) : authorization);
+    if (fromAuth) {
+      return fromAuth;
+    }
+  }
+  return undefined;
+}
+
+function collectBindingSessionScopeCandidates(args: SessionScopeResolutionArgs): string[] {
+  const candidates: string[] = [];
+  const push = (value: unknown): void => {
+    const token = readToken(value);
+    if (!token) {
+      return;
+    }
+    if (!candidates.includes(token)) {
+      candidates.push(token);
+    }
+  };
+
+  const headerSources: Array<Record<string, unknown> | undefined> = [
+    args.headers,
+    args.clientHeaders as unknown as Record<string, unknown> | undefined
+  ];
+
+  for (const source of headerSources) {
+    push(extractHeaderValue(source, 'session_id'));
+    push(extractHeaderValue(source, 'session-id'));
+    push(extractHeaderValue(source, 'x-session-id'));
+    push(extractHeaderValue(source, 'x-routecodex-session-id'));
+    push(extractHeaderValue(source, 'x-rcc-session-id'));
+    push(extractHeaderValue(source, 'conversation_id'));
+    push(extractHeaderValue(source, 'conversation-id'));
+    push(extractHeaderValue(source, 'x-conversation-id'));
+    push(extractHeaderValue(source, 'x-routecodex-conversation-id'));
+    push(readSessionScopeFromHeaderSource(source));
+  }
+
+  push(args.userMeta.sessionId);
+  push(args.userMeta.session_id);
+  push(args.userMeta.conversationId);
+  push(args.userMeta.conversation_id);
+  push(args.bodyMeta.sessionId);
+  push(args.bodyMeta.session_id);
+  push(args.bodyMeta.conversationId);
+  push(args.bodyMeta.conversation_id);
+
+  if (args.daemonId && readToken(args.daemonId)) {
+    push(`sessiond.${readToken(args.daemonId)}`);
+  }
+
+  return candidates;
+}
+
+function isTmuxCandidateAlive(args: SessionScopeResolutionArgs, tmuxSessionId: string): boolean {
+  if (typeof args.isTmuxSessionAlive !== 'function') {
+    return true;
+  }
+  try {
+    return args.isTmuxSessionAlive(tmuxSessionId);
+  } catch {
+    return false;
+  }
+}
+
+function resolveIfAlive(args: SessionScopeResolutionArgs, candidate: string | undefined): string | undefined {
+  const token = readToken(candidate);
+  if (!token) {
+    return undefined;
+  }
+  return isTmuxCandidateAlive(args, token) ? token : undefined;
+}
+
 export function resolveTmuxSessionIdAndSource(args: SessionScopeResolutionArgs): TmuxSessionResolution {
-  const tmuxFromHeaders = readTmuxFromHeaderSource(args.headers)
-    || readTmuxFromHeaderSource(args.clientHeaders as unknown as Record<string, unknown> | undefined);
+  const tmuxFromHeaders = resolveIfAlive(
+    args,
+    readTmuxFromHeaderSource(args.headers)
+      || readTmuxFromHeaderSource(args.clientHeaders as unknown as Record<string, unknown> | undefined)
+  );
   if (tmuxFromHeaders) {
     return { tmuxSessionId: tmuxFromHeaders, source: 'headers_or_api_key' };
   }
 
-  const tmuxFromMeta = readToken(args.userMeta.tmuxSessionId) || readToken(args.userMeta.tmux_session_id);
+  const tmuxFromMeta = resolveIfAlive(args, readToken(args.userMeta.tmuxSessionId) || readToken(args.userMeta.tmux_session_id));
   if (tmuxFromMeta) {
     return { tmuxSessionId: tmuxFromMeta, source: 'metadata' };
   }
 
-  const tmuxFromBody = readToken(args.bodyMeta.tmuxSessionId) || readToken(args.bodyMeta.tmux_session_id);
+  const tmuxFromBody = resolveIfAlive(args, readToken(args.bodyMeta.tmuxSessionId) || readToken(args.bodyMeta.tmux_session_id));
   if (tmuxFromBody) {
     return { tmuxSessionId: tmuxFromBody, source: 'body_metadata' };
+  }
+
+  const tmuxFromDaemon = resolveIfAlive(args, readToken(args.resolveTmuxSessionIdFromDaemon?.(args.daemonId)));
+  if (tmuxFromDaemon) {
+    return { tmuxSessionId: tmuxFromDaemon, source: 'registry_by_daemon' };
+  }
+
+  if (typeof args.resolveTmuxSessionIdFromBinding === 'function') {
+    const bindingCandidates = collectBindingSessionScopeCandidates(args);
+    for (const scope of bindingCandidates) {
+      const tmuxFromBinding = resolveIfAlive(args, readToken(args.resolveTmuxSessionIdFromBinding(scope)));
+      if (tmuxFromBinding) {
+        return { tmuxSessionId: tmuxFromBinding, source: 'registry_by_binding' };
+      }
+    }
   }
 
   return { source: 'none' };
