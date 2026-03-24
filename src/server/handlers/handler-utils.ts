@@ -68,6 +68,115 @@ function shouldLogHttpErrorMeta(): boolean {
   );
 }
 
+function parseStatusCodeCandidate(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (/^\d{3}$/.test(trimmed)) {
+      const parsed = Number.parseInt(trimmed, 10);
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+  }
+  return undefined;
+}
+
+function readTrimmedString(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const normalized = value.trim();
+  return normalized || undefined;
+}
+
+function parseFieldFromText(summary: string): {
+  statusCode?: number;
+  errorCode?: string;
+  upstreamCode?: string;
+} {
+  const statusMatch = summary.match(/\b(?:HTTP\s+)?(\d{3})\b/i);
+  const statusCode = statusMatch
+    ? Number.parseInt(statusMatch[1], 10)
+    : undefined;
+  const codeMatch =
+    summary.match(/"code"\s*:\s*"([^"]+)"/i)?.[1]
+    ?? summary.match(/\bcode[=:]\s*([A-Za-z0-9_.-]+)/i)?.[1];
+  const upstreamCodeMatch =
+    summary.match(/"upstream(?:_code|Code)"\s*:\s*"([^"]+)"/i)?.[1]
+    ?? summary.match(/\bupstream(?:_code|Code)[=:]\s*([A-Za-z0-9_.-]+)/i)?.[1];
+  return {
+    ...(typeof statusCode === 'number' && Number.isFinite(statusCode) ? { statusCode } : {}),
+    ...(codeMatch ? { errorCode: codeMatch } : {}),
+    ...(upstreamCodeMatch ? { upstreamCode: upstreamCodeMatch } : {})
+  };
+}
+
+function extractErrorLogFields(error: unknown, summary: string): {
+  statusCode?: number;
+  errorCode?: string;
+  upstreamCode?: string;
+} {
+  if (!error || typeof error !== 'object') {
+    return parseFieldFromText(summary);
+  }
+  const bag = error as Record<string, unknown>;
+  const details =
+    bag.details && typeof bag.details === 'object' && !Array.isArray(bag.details)
+      ? (bag.details as Record<string, unknown>)
+      : undefined;
+  const response =
+    bag.response && typeof bag.response === 'object' && !Array.isArray(bag.response)
+      ? (bag.response as Record<string, unknown>)
+      : undefined;
+  const responseData =
+    response?.data && typeof response.data === 'object' && !Array.isArray(response.data)
+      ? (response.data as Record<string, unknown>)
+      : undefined;
+  const responseError =
+    responseData?.error && typeof responseData.error === 'object' && !Array.isArray(responseData.error)
+      ? (responseData.error as Record<string, unknown>)
+      : undefined;
+
+  const statusCode =
+    parseStatusCodeCandidate(bag.statusCode)
+    ?? parseStatusCodeCandidate(bag.status)
+    ?? parseStatusCodeCandidate(response?.status)
+    ?? parseStatusCodeCandidate(responseData?.status)
+    ?? parseStatusCodeCandidate(responseError?.status);
+  const errorCode =
+    readTrimmedString(bag.code)
+    ?? readTrimmedString(bag.errorCode)
+    ?? readTrimmedString(details?.code)
+    ?? readTrimmedString(responseError?.code)
+    ?? (typeof bag.code === 'number' ? String(bag.code) : undefined)
+    ?? (typeof bag.errorCode === 'number' ? String(bag.errorCode) : undefined)
+    ?? (typeof details?.code === 'number' ? String(details.code) : undefined)
+    ?? (typeof responseError?.code === 'number' ? String(responseError.code) : undefined);
+  const upstreamCode =
+    readTrimmedString(bag.upstreamCode)
+    ?? readTrimmedString(details?.upstreamCode)
+    ?? readTrimmedString(details?.upstream_code)
+    ?? readTrimmedString(responseError?.upstreamCode)
+    ?? readTrimmedString(responseError?.upstream_code)
+    ?? (typeof bag.upstreamCode === 'number' ? String(bag.upstreamCode) : undefined)
+    ?? (typeof details?.upstreamCode === 'number' ? String(details.upstreamCode) : undefined)
+    ?? (typeof details?.upstream_code === 'number' ? String(details.upstream_code) : undefined)
+    ?? (typeof responseError?.upstreamCode === 'number' ? String(responseError.upstreamCode) : undefined)
+    ?? (typeof responseError?.upstream_code === 'number' ? String(responseError.upstream_code) : undefined);
+
+  const fromText = parseFieldFromText(summary);
+  return {
+    ...(typeof statusCode === 'number'
+      ? { statusCode }
+      : (typeof fromText.statusCode === 'number' ? { statusCode: fromText.statusCode } : {})),
+    ...(errorCode ? { errorCode } : (fromText.errorCode ? { errorCode: fromText.errorCode } : {})),
+    ...(upstreamCode ? { upstreamCode } : (fromText.upstreamCode ? { upstreamCode: fromText.upstreamCode } : {}))
+  };
+}
+
 function formatRequestId(value?: string): string {
   return resolveEffectiveRequestId(value);
 }
@@ -126,9 +235,17 @@ export function logRequestError(endpoint: string, requestId: string, error: unkn
   const formatted = formatErrorForConsole(error);
   const rawMeta = extractRawErrorMeta(error);
   const summary = rawMeta?.rawErrorSnippet ?? formatted.text;
+  const fields = extractErrorLogFields(error, summary);
+  const fieldSuffix = [
+    typeof fields.statusCode === 'number' ? `status=${fields.statusCode}` : undefined,
+    fields.errorCode ? `code=${fields.errorCode}` : undefined,
+    fields.upstreamCode ? `upstreamCode=${fields.upstreamCode}` : undefined
+  ]
+    .filter((item): item is string => Boolean(item))
+    .join(' ');
   const timestamp = formatTimestamp();
   const timingSuffix = formatRequestTimingSummary(resolvedId, { terminal: true });
-  const line = `❌ [${endpoint}] ${timestamp} request ${resolvedId} failed: ${summary}${timingSuffix}`;
+  const line = `❌ [${endpoint}] ${timestamp} request ${resolvedId} failed: ${summary}${fieldSuffix ? ` (${fieldSuffix})` : ''}${timingSuffix}`;
   console.error(colorizeRequestLog(line, resolvedId) || line);
   if (rawMeta && shouldLogHttpErrorMeta()) {
     const payload = {

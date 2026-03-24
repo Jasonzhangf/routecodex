@@ -1,8 +1,17 @@
 # RouteCodex Heartbeat
 
-Heartbeat-Until: 2026-03-24T20:50:00+08:00
+Heartbeat-Until: 2026-03-24T20:55:00+08:00
 Heartbeat-Stop-When: no-open-tasks
-Last-Updated: 2026-03-24 20:17 +08:00
+Last-Updated: 2026-03-24 20:24 +08:00
+
+## 2026-03-24 Heartbeat 继续改（20:24 local）
+- 继续补强“错误切换日志要打印原因/错误号”：
+  - `src/server/handlers/handler-utils.ts`：`logRequestError` 新增结构化字段拼接，支持输出 `status/code/upstreamCode`（优先读错误对象，缺失时从 raw 文本提取）。
+  - 新增测试：`tests/server/handlers/request-error-log.spec.ts`（2 条通过）。
+- 证据：
+  - `test-results/routecodex-276/jest-request-error-log-diagnostics-20260324-202434.log`（`JEST_EXIT_CODE=0`）
+  - `test-results/routecodex-276/jest-request-executor-provider-switch-diagnostics-rerun-20260324-202434.log`（`JEST_EXIT_CODE=0`）
+- routecodex-276 任务仍保持心跳列表持续跟踪（Epic 仍 `in_progress`）。
 
 ## 2026-03-24 Heartbeat 继续改（20:17 local）
 - 已继续执行并补上“provider 自动切换时控制台打印原因/错误号”诊断增强：

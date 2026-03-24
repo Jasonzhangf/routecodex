@@ -1,3 +1,32 @@
+## 2026-03-24 Heartbeat 继续改（20:24 local）— 补强 HTTP 失败日志中的错误号/切换原因可见性
+
+### 先复核上一次交付完整性（20:17 local）
+
+- 20:17 条目证据仍可复核：
+  - `test-results/routecodex-276/jest-request-executor-provider-switch-diagnostics-20260324-201652.log`（`JEST_EXIT_CODE=0`）
+  - 关键断言：`status=429`、`code=SSE_TO_JSON_ERROR`、`upstreamCode=EPIPE`、`reason=\"decoder crashed\"`。
+
+### 继续执行（未完成项直接推进）
+
+- 针对“console 要打印错误切换原因、错误号”的剩余缺口，本轮新增 HTTP 层失败日志增强：
+  - 代码：`src/server/handlers/handler-utils.ts`
+  - 行为：`logRequestError` 现在会在主失败行附带 `(status=... code=... upstreamCode=...)`。
+  - 提取策略：
+    - 优先从结构化错误对象读取（`statusCode/status`, `code/errorCode`, `upstreamCode/upstream_code`）；
+    - 其次从 `rawErrorSnippet` / summary 文本中的 JSON 片段与模式字符串提取。
+- 新增测试：
+  - `tests/server/handlers/request-error-log.spec.ts`
+    - `prints structured status/code/upstreamCode when present on error object`
+    - `parses status/code/upstreamCode from raw error snippet text`
+  - 证据：`test-results/routecodex-276/jest-request-error-log-diagnostics-20260324-202434.log`（`JEST_EXIT_CODE=0`）
+- provider-switch 诊断回归复跑证据：
+  - `test-results/routecodex-276/jest-request-executor-provider-switch-diagnostics-rerun-20260324-202434.log`（`JEST_EXIT_CODE=0`）
+
+### 结论
+
+- 本轮完成“失败日志 + 切换日志”双侧可观测性补强：出现连续切换时，控制台可直接看到状态码与错误号，排障成本显著降低。
+- Epic 状态仍以 beads 为准：`routecodex-276=in_progress`，`routecodex-276.2/.6=in_progress`，其余子项 `open`。
+
 ## 2026-03-24 Heartbeat 继续改（20:17 local）— 补强 provider 自动切换错误诊断日志
 
 ### 先复核上一次交付完整性（19:59 local）
