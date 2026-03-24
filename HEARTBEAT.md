@@ -1,8 +1,24 @@
 # RouteCodex Heartbeat
 
-Heartbeat-Until: 2026-03-24T21:15:00+08:00
+Heartbeat-Until: 2026-03-24T21:30:00+08:00
 Heartbeat-Stop-When: no-open-tasks
-Last-Updated: 2026-03-24 20:44 +08:00
+Last-Updated: 2026-03-24 20:50 +08:00
+
+## 2026-03-24 Heartbeat 继续改（20:50 local）
+- W2 再推进一小刀（SSE stream mode follow-up）：
+  - `resp_outbound_stage2_sse_stream` 的 streaming 分支也统一改为消费 native 返回的 `payload`（不再只在 non-stream 分支使用）。
+  - Rust 侧补充 `process_sse_stream_json` camelCase 兼容回归（输入/输出字段命名）。
+- 代码：
+  - `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/resp_outbound/resp_outbound_stage2_sse_stream/index.ts`
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_sse_stream.rs`
+- 本轮验证证据：
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/cargo-sse-stream-mode-heartbeat-followup-20260324-204934.log`（`14 passed`，`CARGO_EXIT_CODE=0`）
+  - `test-results/routecodex-276/jest-sse-stream-mode-native-heartbeat-followup-20260324-204934.log`（`JEST_EXIT_CODE=0`）
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/build-ci-sse-stream-mode-heartbeat-followup-20260324-204934.log`（`BUILD_CI_EXIT_CODE=0`）
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/file-line-limit-sse-stream-mode-heartbeat-followup-20260324-204934.log`（`FILE_LINE_LIMIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/llmswitch-rustification-audit-sse-stream-mode-heartbeat-followup-20260324-204934.log`（`AUDIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/repo-sanity-sse-stream-mode-heartbeat-followup-20260324-204934.log`（`REPO_SANITY_EXIT_CODE=0`）
+- beads 状态保持：`routecodex-276=in_progress`，`276.2/.6=in_progress`，其余 `open`。
 
 ## 2026-03-24 Heartbeat 继续改（20:44 local）
 - 继续推进 `routecodex-276.2 (W2 SSE codec Rust 化)`：把 `resp_outbound stage2` 的 stream 判定从单点 native bool 扩展为 native 结构化决策（`shouldStream + payload`）。

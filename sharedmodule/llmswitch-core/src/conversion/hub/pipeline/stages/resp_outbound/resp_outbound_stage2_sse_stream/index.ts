@@ -47,7 +47,7 @@ export async function runRespOutboundStage2SseStream(
     clientProtocol: options.clientProtocol
   });
   const codecStart = Date.now();
-  const stream = await codec.convertJsonToSse(options.clientPayload, {
+  const stream = await codec.convertJsonToSse(nativePayload, {
     requestId: options.requestId
   });
   logHubStageTiming(options.requestId, 'resp_outbound.stage2_codec_stream', 'completed', {
@@ -58,7 +58,7 @@ export async function runRespOutboundStage2SseStream(
   recordStage(options.stageRecorder, 'chat_process.resp.stage10.sse_stream', {
     passthrough: false,
     protocol: options.clientProtocol,
-    payload: options.clientPayload
+    payload: nativePayload
   });
   return { stream };
 }

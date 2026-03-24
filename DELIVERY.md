@@ -1,3 +1,42 @@
+## 2026-03-24 Heartbeat 继续改（20:50 local）— W2 SSE stream 模式 follow-up（stream 分支统一 native payload）
+
+### 先复核上一次交付完整性（20:44 local）
+
+- 20:44 条目证据仍成立：
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/cargo-sse-stream-mode-heartbeat-continue-20260324-204326.log`（`CARGO_EXIT_CODE=0`）
+  - `test-results/routecodex-276/jest-sse-stream-mode-native-heartbeat-continue-20260324-204326.log`（`JEST_EXIT_CODE=0`）
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/build-ci-sse-stream-mode-heartbeat-continue-20260324-204326.log`（`BUILD_CI_EXIT_CODE=0`）
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/file-line-limit-sse-stream-mode-heartbeat-continue-20260324-204326.log`（`FILE_LINE_LIMIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/llmswitch-rustification-audit-sse-stream-mode-heartbeat-continue-20260324-204326.log`（`AUDIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/repo-sanity-sse-stream-mode-heartbeat-continue-20260324-204326.log`（`REPO_SANITY_EXIT_CODE=0`）
+
+### 继续执行（未完成项直接推进）
+
+- 本轮进一步收敛 `routecodex-276.2`：
+  - `resp_outbound_stage2_sse_stream` 在 streaming 分支也改为消费 native 返回的 `payload`；
+  - Rust `process_sse_stream_json` 补充 camelCase 输入/输出回归（防止 `clientPayload/clientProtocol/requestId/wantsStream` 形状回退）。
+- 代码变更：
+  - `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/resp_outbound/resp_outbound_stage2_sse_stream/index.ts`
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_sse_stream.rs`
+
+### 验证证据
+
+- Cargo：
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/cargo-sse-stream-mode-heartbeat-followup-20260324-204934.log`（`14 passed`，`CARGO_EXIT_CODE=0`）
+- Jest：
+  - `test-results/routecodex-276/jest-sse-stream-mode-native-heartbeat-followup-20260324-204934.log`（`JEST_EXIT_CODE=0`）
+- build:ci：
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/build-ci-sse-stream-mode-heartbeat-followup-20260324-204934.log`（`BUILD_CI_EXIT_CODE=0`）
+- 门禁：
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/file-line-limit-sse-stream-mode-heartbeat-followup-20260324-204934.log`（`FILE_LINE_LIMIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/llmswitch-rustification-audit-sse-stream-mode-heartbeat-followup-20260324-204934.log`（`AUDIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/repo-sanity-sse-stream-mode-heartbeat-followup-20260324-204934.log`（`REPO_SANITY_EXIT_CODE=0`）
+
+### 结论
+
+- 本轮完成 W2 follow-up：SSE stream stage 的 stream/non-stream 两个分支都统一到 native 结构化返回路径，且 camelCase N-API 形状有直接回归保护。
+- Epic 状态保持（beads 真源）：`routecodex-276=in_progress`，`routecodex-276.2/.6=in_progress`，其余子项 `open`。
+
 ## 2026-03-24 Heartbeat 继续改（20:44 local）— W2 SSE stream 决策切片改为 native 结构化结果
 
 ### 先复核上一次交付完整性（20:24 local）

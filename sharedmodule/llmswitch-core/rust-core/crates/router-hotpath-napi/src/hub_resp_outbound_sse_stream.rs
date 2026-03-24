@@ -153,6 +153,39 @@ mod tests {
             .contains("Failed to parse input JSON"));
     }
 
+    #[test]
+    fn test_process_sse_stream_json_accepts_camel_case_input() {
+        let input_json = serde_json::json!({
+            "clientPayload": { "ok": true },
+            "clientProtocol": "openai-chat",
+            "requestId": "req_camel_case",
+            "wantsStream": true
+        })
+        .to_string();
+
+        let result = process_sse_stream_json(input_json).expect("json output");
+        let parsed: serde_json::Value = serde_json::from_str(&result).expect("valid json");
+        assert_eq!(parsed.get("shouldStream").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(parsed.get("payload").and_then(|v| v.get("ok")).and_then(|v| v.as_bool()), Some(true));
+    }
+
+    #[test]
+    fn test_process_sse_stream_json_outputs_camel_case_fields() {
+        let input_json = serde_json::json!({
+            "clientPayload": { "result": "ok" },
+            "clientProtocol": "unknown-protocol",
+            "requestId": "req_output_case",
+            "wantsStream": true
+        })
+        .to_string();
+
+        let result = process_sse_stream_json(input_json).expect("json output");
+        let parsed: serde_json::Value = serde_json::from_str(&result).expect("valid json");
+        assert!(parsed.get("shouldStream").is_some());
+        assert!(parsed.get("should_stream").is_none());
+        assert_eq!(parsed.get("shouldStream").and_then(|v| v.as_bool()), Some(false));
+    }
+
     // Critical path test: Empty request_id (should still work)
     #[test]
     fn test_empty_request_id() {
