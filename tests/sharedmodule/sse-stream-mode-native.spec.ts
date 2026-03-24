@@ -1,6 +1,9 @@
 import { describe, expect, test } from '@jest/globals';
 
-import { processSseStreamWithNative } from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-edge-stage-semantics.js';
+import {
+  processSseStreamWithNative,
+  resolveSseStreamModeWithNative
+} from '../../sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-edge-stage-semantics.js';
 
 describe('sse stream mode native bridge', () => {
   test('enables stream for openai-responses protocol when wantsStream=true', () => {
@@ -41,5 +44,10 @@ describe('sse stream mode native bridge', () => {
 
     expect(result.shouldStream).toBe(false);
     expect(result.payload).toEqual({ id: 'resp_2' });
+  });
+
+  test('resolveSseStreamModeWithNative supports gemini-chat', () => {
+    expect(resolveSseStreamModeWithNative(true, 'gemini-chat')).toBe(true);
+    expect(resolveSseStreamModeWithNative(false, 'gemini-chat')).toBe(false);
   });
 });

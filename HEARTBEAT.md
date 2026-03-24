@@ -1,8 +1,27 @@
 # RouteCodex Heartbeat
 
-Heartbeat-Until: 2026-03-24T22:50:00+08:00
+Heartbeat-Until: 2026-03-24T23:20:00+08:00
 Heartbeat-Stop-When: no-open-tasks
-Last-Updated: 2026-03-24 21:30 +08:00
+Last-Updated: 2026-03-24 21:54 +08:00
+
+## 2026-03-24 Heartbeat 继续改（21:54 local）
+- W2 再推进一刀：修正 `resolveSseStreamModeJson` 与 `processSseStreamJson` 的协议支持一致性。
+  - Rust：`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics.rs`
+    - `resolve_sse_stream_mode` 新增 `gemini-chat`（此前该路径只允许 openai/anthropic，和 `process_sse_stream_json` 不一致）。
+    - 新增单测：`resolve_sse_stream_mode_supports_gemini_chat`。
+  - TS 回归：`tests/sharedmodule/sse-stream-mode-native.spec.ts`
+    - 新增 `resolveSseStreamModeWithNative supports gemini-chat`。
+- 本轮验证证据：
+  - Cargo：`sharedmodule/llmswitch-core/test-results/routecodex-276/cargo-sse-stream-mode-resolver-gemini-heartbeat-20260324-215211.log`（`6 passed`，`CARGO_EXIT_CODE=0`）
+  - Jest（首次，build:ci 前）：`test-results/routecodex-276/jest-sse-stream-mode-resolver-gemini-heartbeat-20260324-215211.log`（`JEST_EXIT_CODE=1`，暴露 native 产物未刷新导致的旧语义）
+  - build:ci：`sharedmodule/llmswitch-core/test-results/routecodex-276/build-ci-sse-stream-mode-resolver-gemini-heartbeat-20260324-215211.log`（`BUILD_CI_EXIT_CODE=0`）
+  - Jest（重跑，build:ci 后）：`test-results/routecodex-276/jest-sse-stream-mode-resolver-gemini-heartbeat-rerun-20260324-215211.log`（`3 suites / 10 tests passed`，`JEST_EXIT_CODE=0`）
+  - file-line-limit：`sharedmodule/llmswitch-core/test-results/routecodex-276/file-line-limit-sse-stream-mode-resolver-gemini-20260324-215211.log`（`FILE_LINE_LIMIT_EXIT_CODE=0`）
+  - audit：`test-results/routecodex-276/llmswitch-rustification-audit-sse-stream-mode-resolver-gemini-20260324-215211.log`（`AUDIT_EXIT_CODE=0`）
+  - repo-sanity：`test-results/routecodex-276/repo-sanity-sse-stream-mode-resolver-gemini-20260324-215211.log`（`REPO_SANITY_EXIT_CODE=0`）
+- beads 状态快照（真源）：
+  - `test-results/routecodex-276/bd-status-routecodex-276-sse-stream-mode-resolver-gemini-20260324-215211.log`
+  - `routecodex-276=in_progress`，`routecodex-276.2/.6=in_progress`，其余子项 `open`。
 
 ## 2026-03-24 Heartbeat 继续改（21:27 local）
 - W2 继续做一刀“语义收敛 + 回归补齐”：

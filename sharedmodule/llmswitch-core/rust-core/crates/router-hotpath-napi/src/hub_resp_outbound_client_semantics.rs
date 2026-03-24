@@ -254,7 +254,7 @@ fn resolve_sse_stream_mode(wants_stream: bool, client_protocol: &str) -> bool {
     }
     matches!(
         client_protocol.trim(),
-        "openai-chat" | "openai-responses" | "anthropic-messages"
+        "openai-chat" | "openai-responses" | "anthropic-messages" | "gemini-chat"
     )
 }
 
@@ -3550,6 +3550,13 @@ mod tests {
             resolve_client_protocol_for_response_entry(Some("/v1/responses"), true),
             "openai-chat"
         );
+    }
+
+    #[test]
+    fn resolve_sse_stream_mode_supports_gemini_chat() {
+        assert!(resolve_sse_stream_mode(true, "gemini-chat"));
+        assert!(resolve_sse_stream_mode(true, " gemini-chat "));
+        assert!(!resolve_sse_stream_mode(false, "gemini-chat"));
     }
 
     #[test]
