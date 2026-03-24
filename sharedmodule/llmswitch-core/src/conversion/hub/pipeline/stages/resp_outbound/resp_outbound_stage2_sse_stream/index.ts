@@ -6,7 +6,7 @@ import type { JsonObject } from '../../../../types/json.js';
 import { isHubStageTimingDetailEnabled, logHubStageTiming } from '../../../hub-stage-timing.js';
 import { processSseStreamWithNative } from '../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-edge-stage-semantics.js';
 
-type ClientProtocol = 'openai-chat' | 'openai-responses' | 'anthropic-messages' | 'gemini-chat';
+type ClientProtocol = SseProtocol;
 
 export interface RespOutboundStage2SseStreamOptions {
   clientPayload: JsonObject;
@@ -42,7 +42,7 @@ export async function runRespOutboundStage2SseStream(
     return { body: nativePayload };
   }
 
-  const codec = defaultSseCodecRegistry.get(options.clientProtocol as SseProtocol);
+  const codec = defaultSseCodecRegistry.get(options.clientProtocol);
   logHubStageTiming(options.requestId, 'resp_outbound.stage2_codec_stream', 'start', {
     clientProtocol: options.clientProtocol
   });

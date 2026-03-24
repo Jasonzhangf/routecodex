@@ -1,3 +1,41 @@
+## 2026-03-24 Heartbeat 继续改（22:37 local）— W2 stage2 协议类型收敛到 SseProtocol
+
+### 先复核上一次交付完整性（22:14 local）
+
+- 22:14 条目证据保持可复核：
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/build-ci-sse-stream-trimmed-protocol-heartbeat-20260324-221301.log`（`BUILD_CI_EXIT_CODE=0`）
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/cargo-sse-stream-trimmed-protocol-heartbeat-20260324-221301.log`（`CARGO_EXIT_CODE=0`）
+  - `test-results/routecodex-276/jest-sse-stream-trimmed-protocol-heartbeat-20260324-221301.log`（`JEST_EXIT_CODE=0`）
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/file-line-limit-sse-stream-trimmed-protocol-20260324-221301.log`（`FILE_LINE_LIMIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/llmswitch-rustification-audit-sse-stream-trimmed-protocol-20260324-221301.log`（`AUDIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/repo-sanity-sse-stream-trimmed-protocol-20260324-221301.log`（`REPO_SANITY_EXIT_CODE=0`）
+
+### 继续执行（未完成项直接推进）
+
+- 本轮继续推进 `routecodex-276.2` 的类型真源收敛：
+  - `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/resp_outbound/resp_outbound_stage2_sse_stream/index.ts`
+    - `ClientProtocol` 改为复用 `SseProtocol`（不再本地手写协议 union）
+    - `defaultSseCodecRegistry.get(options.clientProtocol)` 去除冗余类型断言
+- 目标：避免协议枚举在 stage 层与 sse registry 之间发生漂移，降低后续新增协议时的漏改风险。
+
+### 验证证据
+
+- Jest：
+  - `test-results/routecodex-276/jest-sse-stream-protocol-type-alias-heartbeat-20260324-223653.log`（`3 suites / 11 tests passed`，`JEST_EXIT_CODE=0`）
+- build:ci：
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/build-ci-sse-stream-protocol-type-alias-heartbeat-20260324-223653.log`（`BUILD_CI_EXIT_CODE=0`）
+- 门禁：
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/file-line-limit-sse-stream-protocol-type-alias-20260324-223653.log`（`FILE_LINE_LIMIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/llmswitch-rustification-audit-sse-stream-protocol-type-alias-20260324-223653.log`（`AUDIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/repo-sanity-sse-stream-protocol-type-alias-20260324-223653.log`（`REPO_SANITY_EXIT_CODE=0`）
+- 状态快照：
+  - `test-results/routecodex-276/bd-status-routecodex-276-sse-stream-protocol-type-alias-20260324-223653.log`
+
+### 结论
+
+- 本轮完成可复核 W2 小切片：`resp_outbound stage2` 协议类型与 `sse registry` 单一真源对齐。
+- Epic 状态保持（beads 真源）：`routecodex-276=in_progress`，`routecodex-276.2/.6=in_progress`，其余子项 `open`。
+
 ## 2026-03-24 Heartbeat 继续改（22:14 local）— W2 统一 SSE stream 协议 trim 语义
 
 ### 先复核上一次交付完整性（21:54 local）

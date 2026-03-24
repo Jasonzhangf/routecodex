@@ -1,8 +1,24 @@
 # RouteCodex Heartbeat
 
-Heartbeat-Until: 2026-03-24T23:40:00+08:00
+Heartbeat-Until: 2026-03-25T00:00:00+08:00
 Heartbeat-Stop-When: no-open-tasks
-Last-Updated: 2026-03-24 22:14 +08:00
+Last-Updated: 2026-03-24 22:37 +08:00
+
+## 2026-03-24 Heartbeat 继续改（22:37 local）
+- W2 再推进一刀“类型真源收敛”：
+  - 文件：`sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/resp_outbound/resp_outbound_stage2_sse_stream/index.ts`
+  - 变更：
+    - `ClientProtocol` 从手写 union 收敛为 `SseProtocol`（避免协议枚举漂移）
+    - `defaultSseCodecRegistry.get(...)` 去掉不必要类型断言
+- 本轮验证证据：
+  - Jest：`test-results/routecodex-276/jest-sse-stream-protocol-type-alias-heartbeat-20260324-223653.log`（`3 suites / 11 tests passed`，`JEST_EXIT_CODE=0`）
+  - build:ci：`sharedmodule/llmswitch-core/test-results/routecodex-276/build-ci-sse-stream-protocol-type-alias-heartbeat-20260324-223653.log`（`BUILD_CI_EXIT_CODE=0`）
+  - file-line-limit：`sharedmodule/llmswitch-core/test-results/routecodex-276/file-line-limit-sse-stream-protocol-type-alias-20260324-223653.log`（`FILE_LINE_LIMIT_EXIT_CODE=0`）
+  - audit：`test-results/routecodex-276/llmswitch-rustification-audit-sse-stream-protocol-type-alias-20260324-223653.log`（`AUDIT_EXIT_CODE=0`）
+  - repo-sanity：`test-results/routecodex-276/repo-sanity-sse-stream-protocol-type-alias-20260324-223653.log`（`REPO_SANITY_EXIT_CODE=0`）
+- beads 状态快照（真源）：
+  - `test-results/routecodex-276/bd-status-routecodex-276-sse-stream-protocol-type-alias-20260324-223653.log`
+  - `routecodex-276=in_progress`，`routecodex-276.2/.6=in_progress`，其余子项 `open`。
 
 ## 2026-03-24 Heartbeat 继续改（22:14 local）
 - W2 再补一刀协议健壮性：SSE stream resolver 统一按 `trim()` 后协议字符串判定。
