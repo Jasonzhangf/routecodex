@@ -1,3 +1,42 @@
+## 2026-03-24 Heartbeat 继续改（23:30 local）— W2 stage2 协议归一化后再判流/选 codec
+
+### 先复核上一次交付完整性（23:18 local）
+
+- 23:18 条目证据保持可复核：
+  - `test-results/routecodex-276/jest-sse-required-exports-resolver-heartbeat-20260324-231715.log`（`JEST_EXIT_CODE=0`）
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/build-ci-sse-required-exports-resolver-heartbeat-20260324-231715.log`（`BUILD_CI_EXIT_CODE=0`）
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/file-line-limit-sse-required-exports-resolver-20260324-231715.log`（`FILE_LINE_LIMIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/llmswitch-rustification-audit-sse-required-exports-resolver-20260324-231715.log`（`AUDIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/repo-sanity-sse-required-exports-resolver-20260324-231715.log`（`REPO_SANITY_EXIT_CODE=0`）
+
+### 继续执行（未完成项直接推进）
+
+- 本轮继续推进 `routecodex-276.2`，收敛 stage2 的协议输入处理：
+  - `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/resp_outbound/resp_outbound_stage2_sse_stream/index.ts`
+    - 接入 `normalizeProviderProtocolTokenWithNative(...)`。
+    - 在 `processSseStreamWithNative`、`defaultSseCodecRegistry.get`、stage record、timing log 上统一使用归一化后的协议 token。
+  - `tests/monitoring/resp-outbound-stage.test.ts`
+    - 新增 `normalizes protocol token before streaming decision and codec lookup`。
+- 目标：防止脏协议输入（大小写/空白）在 stage2 中出现“native 判流通过但 codec lookup 失败”的路径分叉。
+
+### 验证证据
+
+- Jest：
+  - `test-results/routecodex-276/jest-sse-stage-protocol-normalize-heartbeat-20260324-232937.log`（`3 suites / 14 tests passed`，`JEST_EXIT_CODE=0`）
+- build:ci：
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/build-ci-sse-stage-protocol-normalize-heartbeat-20260324-232937.log`（`BUILD_CI_EXIT_CODE=0`）
+- 门禁：
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/file-line-limit-sse-stage-protocol-normalize-20260324-232937.log`（`FILE_LINE_LIMIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/llmswitch-rustification-audit-sse-stage-protocol-normalize-20260324-232937.log`（`AUDIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/repo-sanity-sse-stage-protocol-normalize-20260324-232937.log`（`REPO_SANITY_EXIT_CODE=0`）
+- 状态快照：
+  - `test-results/routecodex-276/bd-status-routecodex-276-sse-stage-protocol-normalize-20260324-232937.log`
+
+### 结论
+
+- 本轮完成可复核 W2 小切片：stage2 的协议 token 在判流与 codec 选择链路上实现同一归一化语义。
+- Epic 状态保持（beads 真源）：`routecodex-276=in_progress`，`routecodex-276.2/.6=in_progress`，其余子项 `open`。
+
 ## 2026-03-24 Heartbeat 继续改（23:18 local）— W2 required exports 增补 resolver 保护
 
 ### 先复核上一次交付完整性（23:07 local）

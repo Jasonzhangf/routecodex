@@ -5,6 +5,7 @@ import type { StageRecorder } from '../../../../format-adapters/index.js';
 import type { JsonObject } from '../../../../types/json.js';
 import { isHubStageTimingDetailEnabled, logHubStageTiming } from '../../../hub-stage-timing.js';
 import { processSseStreamWithNative } from '../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-edge-stage-semantics.js';
+import { normalizeProviderProtocolTokenWithNative } from '../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-req-inbound-semantics.js';
 
 type ClientProtocol = SseProtocol;
 
@@ -25,9 +26,17 @@ export async function runRespOutboundStage2SseStream(
   options: RespOutboundStage2SseStreamOptions
 ): Promise<RespOutboundStage2SseStreamResult> {
   const forceDetailLog = isHubStageTimingDetailEnabled();
+  const normalizedProtocol = normalizeProviderProtocolTokenWithNative(options.clientProtocol);
+  const clientProtocol: SseProtocol =
+    normalizedProtocol === 'openai-chat'
+    || normalizedProtocol === 'openai-responses'
+    || normalizedProtocol === 'anthropic-messages'
+    || normalizedProtocol === 'gemini-chat'
+      ? normalizedProtocol
+      : options.clientProtocol;
   const streamDecision = processSseStreamWithNative({
     clientPayload: options.clientPayload,
-    clientProtocol: options.clientProtocol,
+    clientProtocol,
     requestId: options.requestId,
     wantsStream: options.wantsStream
   });
@@ -36,15 +45,15 @@ export async function runRespOutboundStage2SseStream(
   if (!shouldStream) {
     recordStage(options.stageRecorder, 'chat_process.resp.stage10.sse_stream', {
       passthrough: false,
-      protocol: options.clientProtocol,
+      protocol: clientProtocol,
       payload: nativePayload
     });
     return { body: nativePayload };
   }
 
-  const codec = defaultSseCodecRegistry.get(options.clientProtocol);
+  const codec = defaultSseCodecRegistry.get(clientProtocol);
   logHubStageTiming(options.requestId, 'resp_outbound.stage2_codec_stream', 'start', {
-    clientProtocol: options.clientProtocol
+    clientProtocol
   });
   const codecStart = Date.now();
   const stream = await codec.convertJsonToSse(nativePayload, {
@@ -52,12 +61,12 @@ export async function runRespOutboundStage2SseStream(
   });
   logHubStageTiming(options.requestId, 'resp_outbound.stage2_codec_stream', 'completed', {
     elapsedMs: Date.now() - codecStart,
-    clientProtocol: options.clientProtocol,
+    clientProtocol,
     forceLog: forceDetailLog
   });
   recordStage(options.stageRecorder, 'chat_process.resp.stage10.sse_stream', {
     passthrough: false,
-    protocol: options.clientProtocol,
+    protocol: clientProtocol,
     payload: nativePayload
   });
   return { stream };

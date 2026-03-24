@@ -1,8 +1,29 @@
 # RouteCodex Heartbeat
 
-Heartbeat-Until: 2026-03-25T00:40:00+08:00
+Heartbeat-Until: 2026-03-25T01:00:00+08:00
 Heartbeat-Stop-When: no-open-tasks
-Last-Updated: 2026-03-24 23:18 +08:00
+Last-Updated: 2026-03-24 23:30 +08:00
+
+## 2026-03-24 Heartbeat 继续改（23:30 local）
+- W2 再推进一刀协议输入健壮性：在 stage2 流水线入口统一协议 token 归一化后再做 stream 判定与 codec lookup。
+  - 文件：`sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/resp_outbound/resp_outbound_stage2_sse_stream/index.ts`
+  - 变更：
+    - 接入 `normalizeProviderProtocolTokenWithNative(...)`
+    - 仅当归一化结果属于 `SseProtocol` 时采用归一化值，否则保留原值
+    - `processSseStreamWithNative`、`defaultSseCodecRegistry.get`、stage record 与 timing log 统一使用归一化后的 `clientProtocol`
+- 新增回归：
+  - `tests/monitoring/resp-outbound-stage.test.ts`
+  - 用例：`normalizes protocol token before streaming decision and codec lookup`
+  - 断言：`clientProtocol=' GEMINI-CHAT '`（脏输入）在 `wantsStream=true` 时仍可返回 stream，且 stage recorder 中 `protocol` 为 `gemini-chat`
+- 本轮验证证据：
+  - Jest：`test-results/routecodex-276/jest-sse-stage-protocol-normalize-heartbeat-20260324-232937.log`（`3 suites / 14 tests passed`，`JEST_EXIT_CODE=0`）
+  - build:ci：`sharedmodule/llmswitch-core/test-results/routecodex-276/build-ci-sse-stage-protocol-normalize-heartbeat-20260324-232937.log`（`BUILD_CI_EXIT_CODE=0`）
+  - file-line-limit：`sharedmodule/llmswitch-core/test-results/routecodex-276/file-line-limit-sse-stage-protocol-normalize-20260324-232937.log`（`FILE_LINE_LIMIT_EXIT_CODE=0`）
+  - audit：`test-results/routecodex-276/llmswitch-rustification-audit-sse-stage-protocol-normalize-20260324-232937.log`（`AUDIT_EXIT_CODE=0`）
+  - repo-sanity：`test-results/routecodex-276/repo-sanity-sse-stage-protocol-normalize-20260324-232937.log`（`REPO_SANITY_EXIT_CODE=0`）
+- beads 状态快照（真源）：
+  - `test-results/routecodex-276/bd-status-routecodex-276-sse-stage-protocol-normalize-20260324-232937.log`
+  - `routecodex-276=in_progress`，`routecodex-276.2/.6=in_progress`，其余子项 `open`。
 
 ## 2026-03-24 Heartbeat 继续改（23:18 local）
 - W2 再补一条 required exports 回归，防止 resolver 导出回退：

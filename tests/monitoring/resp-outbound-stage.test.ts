@@ -188,4 +188,38 @@ describe('resp_outbound stages snapshot payloads', () => {
       payload: clientPayload
     });
   });
+
+  it('normalizes protocol token before streaming decision and codec lookup', async () => {
+    const recorder = new StubStageRecorder();
+    const clientPayload = {
+      id: 'gemini_resp_stream_normalized',
+      object: 'response',
+      model: 'gemini-2.5-pro',
+      candidates: [
+        {
+          content: {
+            role: 'model',
+            parts: [{ text: 'gemini normalized protocol stream ok' }]
+          }
+        }
+      ]
+    } as any;
+
+    const result = await runRespOutboundStage2SseStream({
+      clientPayload,
+      clientProtocol: ' GEMINI-CHAT ' as any,
+      requestId: 'req-gemini-stream-normalized-protocol',
+      wantsStream: true,
+      stageRecorder: recorder
+    });
+
+    expect(result.stream).toBeDefined();
+    expect(result.body).toBeUndefined();
+    expect(recorder.entries).toHaveLength(1);
+    expect(recorder.entries[0]?.payload).toEqual({
+      passthrough: false,
+      protocol: 'gemini-chat',
+      payload: clientPayload
+    });
+  });
 });
