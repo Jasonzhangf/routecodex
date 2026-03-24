@@ -121,4 +121,38 @@ describe('resp_outbound stages snapshot payloads', () => {
       payload: clientPayload
     });
   });
+
+  it('supports gemini-chat streaming path', async () => {
+    const recorder = new StubStageRecorder();
+    const clientPayload = {
+      id: 'gemini_resp_stream',
+      object: 'response',
+      model: 'gemini-2.5-pro',
+      candidates: [
+        {
+          content: {
+            role: 'model',
+            parts: [{ text: 'gemini stream ok' }]
+          }
+        }
+      ]
+    } as any;
+
+    const result = await runRespOutboundStage2SseStream({
+      clientPayload,
+      clientProtocol: 'gemini-chat',
+      requestId: 'req-gemini-stream',
+      wantsStream: true,
+      stageRecorder: recorder
+    });
+
+    expect(result.stream).toBeDefined();
+    expect(result.body).toBeUndefined();
+    expect(recorder.entries).toHaveLength(1);
+    expect(recorder.entries[0]?.payload).toEqual({
+      passthrough: false,
+      protocol: 'gemini-chat',
+      payload: clientPayload
+    });
+  });
 });

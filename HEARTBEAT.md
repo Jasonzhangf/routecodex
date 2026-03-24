@@ -1,8 +1,26 @@
 # RouteCodex Heartbeat
 
-Heartbeat-Until: 2026-03-24T21:45:00+08:00
+Heartbeat-Until: 2026-03-24T22:10:00+08:00
 Heartbeat-Stop-When: no-open-tasks
-Last-Updated: 2026-03-24 21:00 +08:00
+Last-Updated: 2026-03-24 21:10 +08:00
+
+## 2026-03-24 Heartbeat 继续改（21:10 local）
+- W2 再补一刀 `resp_outbound stage2` 协议覆盖：允许 `gemini-chat` 走 streaming 判定路径（与 openai/anthropic 同一路径）。
+  - 代码：`sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/resp_outbound/resp_outbound_stage2_sse_stream/index.ts`
+  - 变更：`ClientProtocol` union 新增 `gemini-chat`
+- 新增回归（stage 级）：
+  - `tests/monitoring/resp-outbound-stage.test.ts`
+  - 用例：`supports gemini-chat streaming path`
+  - 断言：`wantsStream=true` 时返回 `stream`，且 stage recorder payload 为 `{ passthrough:false, protocol:'gemini-chat', payload: clientPayload }`
+- 本轮验证证据：
+  - `test-results/routecodex-276/jest-resp-outbound-stage-gemini-stream-heartbeat-20260324-210947.log`（`3 suites / 7 tests passed`，`JEST_EXIT_CODE=0`）
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/build-ci-resp-outbound-stage-gemini-stream-heartbeat-20260324-210947.log`（`BUILD_CI_EXIT_CODE=0`）
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/file-line-limit-resp-outbound-stage-gemini-stream-20260324-210947.log`（`FILE_LINE_LIMIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/llmswitch-rustification-audit-resp-outbound-stage-gemini-stream-20260324-210947.log`（`AUDIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/repo-sanity-resp-outbound-stage-gemini-stream-20260324-210947.log`（`REPO_SANITY_EXIT_CODE=0`）
+- beads 状态快照（真源）：
+  - `test-results/routecodex-276/bd-status-routecodex-276-gemini-stream-heartbeat-20260324-210947.log`
+  - `routecodex-276=in_progress`，`routecodex-276.2/.6=in_progress`，其余子项 `open`。
 
 ## 2026-03-24 Heartbeat 继续改（21:00 local）
 - W2 stream-mode 切片补了一条 stage 级回归，覆盖 streaming=true 分支：
