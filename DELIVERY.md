@@ -1,3 +1,40 @@
+## 2026-03-24 Heartbeat 继续改（23:52 local）— W2 stage2 anthropic-messages 变体协议归一化回归
+
+### 先复核上一次交付完整性（23:43 local）
+
+- 23:43 条目证据保持可复核：
+  - `test-results/routecodex-276/jest-sse-stage-protocol-normalize-openai-responses-heartbeat-20260324-234236.log`（`JEST_EXIT_CODE=0`）
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/build-ci-sse-stage-protocol-normalize-openai-responses-heartbeat-20260324-234236.log`（`BUILD_CI_EXIT_CODE=0`）
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/file-line-limit-sse-stage-protocol-normalize-openai-responses-20260324-234236.log`（`FILE_LINE_LIMIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/llmswitch-rustification-audit-sse-stage-protocol-normalize-openai-responses-20260324-234236.log`（`AUDIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/repo-sanity-sse-stage-protocol-normalize-openai-responses-20260324-234236.log`（`REPO_SANITY_EXIT_CODE=0`）
+
+### 继续执行（未完成项直接推进）
+
+- 本轮继续推进 `routecodex-276.2`，补齐 anthropic-messages 脏协议输入的 stage2 回归：
+  - `tests/monitoring/resp-outbound-stage.test.ts`
+    - 新增：`normalizes anthropic-messages protocol token before streaming decision and codec lookup`
+    - 覆盖 `clientProtocol=' ANTHROPIC-MESSAGES '` + `wantsStream=true`，确保仍返回 stream 且 stage 记录协议标准化为 `anthropic-messages`。
+- 目标：将 stage2 协议归一化回归从 gemini/openai-chat/openai-responses 进一步扩展到 anthropic-messages，实现 4 协议主干闭环。
+
+### 验证证据
+
+- Jest：
+  - `test-results/routecodex-276/jest-sse-stage-protocol-normalize-anthropic-heartbeat-20260324-235137.log`（`3 suites / 17 tests passed`，`JEST_EXIT_CODE=0`）
+- build:ci：
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/build-ci-sse-stage-protocol-normalize-anthropic-heartbeat-20260324-235137.log`（`BUILD_CI_EXIT_CODE=0`）
+- 门禁：
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/file-line-limit-sse-stage-protocol-normalize-anthropic-20260324-235137.log`（`FILE_LINE_LIMIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/llmswitch-rustification-audit-sse-stage-protocol-normalize-anthropic-20260324-235137.log`（`AUDIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/repo-sanity-sse-stage-protocol-normalize-anthropic-20260324-235137.log`（`REPO_SANITY_EXIT_CODE=0`）
+- 状态快照：
+  - `test-results/routecodex-276/bd-status-routecodex-276-sse-stage-protocol-normalize-anthropic-20260324-235137.log`
+
+### 结论
+
+- 本轮完成可复核 W2 小切片：stage2 协议归一化回归现已覆盖 `gemini-chat/openai-chat/openai-responses/anthropic-messages` 四条 stream 主干。
+- Epic 状态保持（beads 真源）：`routecodex-276=in_progress`，`routecodex-276.2/.6=in_progress`，其余子项 `open`。
+
 ## 2026-03-24 Heartbeat 继续改（23:43 local）— W2 stage2 openai-responses 变体协议归一化回归
 
 ### 先复核上一次交付完整性（23:38 local）
