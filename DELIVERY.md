@@ -1,3 +1,43 @@
+## 2026-03-24 Heartbeat 继续改（20:44 local）— W2 SSE stream 决策切片改为 native 结构化结果
+
+### 先复核上一次交付完整性（20:24 local）
+
+- 20:24 条目证据仍成立：
+  - `test-results/routecodex-276/jest-request-error-log-diagnostics-20260324-202434.log`（`JEST_EXIT_CODE=0`）
+  - `test-results/routecodex-276/jest-request-executor-provider-switch-diagnostics-rerun-20260324-202434.log`（`JEST_EXIT_CODE=0`）
+
+### 继续执行（未完成项直接推进）
+
+- 本轮继续推进 `routecodex-276.2`（W2）：
+  - Rust `hub_resp_outbound_sse_stream` 输入/输出切换为 camelCase 兼容；
+  - TS 新增 `processSseStreamWithNative(...)`，在 `resp_outbound stage2` 直接消费 native 结构化结果（`shouldStream + payload`）；
+  - required exports 增补 `processSseStreamJson`，并补充对应 Jest 回归。
+- 代码文件：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_sse_stream.rs`
+  - `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-edge-stage-semantics.ts`
+  - `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/resp_outbound/resp_outbound_stage2_sse_stream/index.ts`
+  - `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-router-hotpath-required-exports.ts`
+  - `tests/sharedmodule/sse-stream-mode-native.spec.ts`
+  - `tests/sharedmodule/native-required-exports-sse-stream.spec.ts`
+
+### 验证证据
+
+- Cargo：
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/cargo-sse-stream-mode-heartbeat-continue-20260324-204326.log`（`12 passed`，`CARGO_EXIT_CODE=0`）
+- Jest：
+  - `test-results/routecodex-276/jest-sse-stream-mode-native-heartbeat-continue-20260324-204326.log`（`5 passed`，`JEST_EXIT_CODE=0`）
+- build:ci：
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/build-ci-sse-stream-mode-heartbeat-continue-20260324-204326.log`（`BUILD_CI_EXIT_CODE=0`）
+- 门禁：
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/file-line-limit-sse-stream-mode-heartbeat-continue-20260324-204326.log`（`FILE_LINE_LIMIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/llmswitch-rustification-audit-sse-stream-mode-heartbeat-continue-20260324-204326.log`（`AUDIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/repo-sanity-sse-stream-mode-heartbeat-continue-20260324-204326.log`（`REPO_SANITY_EXIT_CODE=0`）
+
+### 结论
+
+- 本轮完成一个可复核 W2 小切片：`resp_outbound stage2` stream 决策与 payload 回传改为 native 结构化真源路径。
+- Epic 状态保持（以 beads 为准）：`routecodex-276=in_progress`，`routecodex-276.2/.6=in_progress`，其余子项 `open`。
+
 ## 2026-03-24 Heartbeat 继续改（20:24 local）— 补强 HTTP 失败日志中的错误号/切换原因可见性
 
 ### 先复核上一次交付完整性（20:17 local）

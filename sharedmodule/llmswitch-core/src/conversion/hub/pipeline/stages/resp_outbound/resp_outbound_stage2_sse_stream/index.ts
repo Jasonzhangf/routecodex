@@ -4,7 +4,7 @@ import { recordStage } from '../../../stages/utils.js';
 import type { StageRecorder } from '../../../../format-adapters/index.js';
 import type { JsonObject } from '../../../../types/json.js';
 import { isHubStageTimingDetailEnabled, logHubStageTiming } from '../../../hub-stage-timing.js';
-import { resolveSseStreamModeWithNative } from '../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-edge-stage-semantics.js';
+import { processSseStreamWithNative } from '../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-edge-stage-semantics.js';
 
 type ClientProtocol = 'openai-chat' | 'openai-responses' | 'anthropic-messages';
 
@@ -25,14 +25,21 @@ export async function runRespOutboundStage2SseStream(
   options: RespOutboundStage2SseStreamOptions
 ): Promise<RespOutboundStage2SseStreamResult> {
   const forceDetailLog = isHubStageTimingDetailEnabled();
-  const shouldStream = resolveSseStreamModeWithNative(options.wantsStream, options.clientProtocol);
+  const streamDecision = processSseStreamWithNative({
+    clientPayload: options.clientPayload,
+    clientProtocol: options.clientProtocol,
+    requestId: options.requestId,
+    wantsStream: options.wantsStream
+  });
+  const shouldStream = streamDecision.shouldStream;
+  const nativePayload = streamDecision.payload as JsonObject;
   if (!shouldStream) {
     recordStage(options.stageRecorder, 'chat_process.resp.stage10.sse_stream', {
       passthrough: false,
       protocol: options.clientProtocol,
-      payload: options.clientPayload
+      payload: nativePayload
     });
-    return { body: options.clientPayload };
+    return { body: nativePayload };
   }
 
   const codec = defaultSseCodecRegistry.get(options.clientProtocol as SseProtocol);

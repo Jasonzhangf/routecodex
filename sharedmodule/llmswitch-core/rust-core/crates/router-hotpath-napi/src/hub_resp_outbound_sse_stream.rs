@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SseStreamInput {
     pub client_payload: Value,
     pub client_protocol: String,
@@ -11,6 +12,7 @@ pub struct SseStreamInput {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SseStreamOutput {
     pub should_stream: bool,
     pub payload: Value,

@@ -254,6 +254,57 @@ export function resolveSseStreamModeWithNative(
   }
 }
 
+export function processSseStreamWithNative(input: {
+  clientPayload: Record<string, unknown>;
+  clientProtocol: string;
+  requestId: string;
+  wantsStream: boolean;
+}): { shouldStream: boolean; payload: Record<string, unknown> } {
+  const capability = "processSseStreamJson";
+  const fail = (reason?: string) =>
+    failNativeRequired<{ shouldStream: boolean; payload: Record<string, unknown> }>(
+      capability,
+      reason,
+    );
+  if (isNativeDisabledByEnv()) {
+    return fail("native disabled");
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+  const payloadJson = safeStringify(input);
+  if (!payloadJson) {
+    return fail("json stringify failed");
+  }
+  try {
+    const raw = fn(payloadJson);
+    if (typeof raw !== "string" || !raw) {
+      return fail("empty result");
+    }
+    const parsed = parseRecord(raw);
+    if (!parsed) {
+      return fail("invalid payload");
+    }
+    const shouldStream = parsed.shouldStream;
+    const payload = parsed.payload;
+    if (typeof shouldStream !== "boolean") {
+      return fail("invalid shouldStream");
+    }
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      return fail("invalid payload object");
+    }
+    return {
+      shouldStream,
+      payload: payload as Record<string, unknown>,
+    };
+  } catch (error) {
+    const reason =
+      error instanceof Error ? error.message : String(error ?? "unknown");
+    return fail(reason);
+  }
+}
+
 export function parseReqInboundFormatEnvelopeWithNative(input: {
   rawRequest: Record<string, unknown>;
   protocol: string;

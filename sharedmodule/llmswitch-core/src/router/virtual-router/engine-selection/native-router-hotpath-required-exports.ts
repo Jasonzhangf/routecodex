@@ -312,7 +312,7 @@ export const REQUIRED_NATIVE_HOTPATH_EXPORTS = [
   "repairToolCallsJson",
   "isImagePathJson",
   "resolveServerToolFollowupSnapshotJson",
-  "resolveSseStreamModeJson",
+  "processSseStreamJson", "resolveSseStreamModeJson",
   "resolveSseProtocolFromMetadataJson",
   "resolveSseProtocolJson",
   "repairArgumentsToStringJsonishJson",

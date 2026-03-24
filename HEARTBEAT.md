@@ -1,8 +1,31 @@
 # RouteCodex Heartbeat
 
-Heartbeat-Until: 2026-03-24T20:55:00+08:00
+Heartbeat-Until: 2026-03-24T21:15:00+08:00
 Heartbeat-Stop-When: no-open-tasks
-Last-Updated: 2026-03-24 20:24 +08:00
+Last-Updated: 2026-03-24 20:44 +08:00
+
+## 2026-03-24 Heartbeat 继续改（20:44 local）
+- 继续推进 `routecodex-276.2 (W2 SSE codec Rust 化)`：把 `resp_outbound stage2` 的 stream 判定从单点 native bool 扩展为 native 结构化决策（`shouldStream + payload`）。
+- 代码变更：
+  - `sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_sse_stream.rs`
+    - `SseStreamInput/SseStreamOutput` 增加 `#[serde(rename_all = "camelCase")]`，使 N-API JSON 直接接收/返回 camelCase。
+  - `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-hub-pipeline-edge-stage-semantics.ts`
+    - 新增 `processSseStreamWithNative(...)`。
+  - `sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/resp_outbound/resp_outbound_stage2_sse_stream/index.ts`
+    - 接入 `processSseStreamWithNative`。
+  - `sharedmodule/llmswitch-core/src/router/virtual-router/engine-selection/native-router-hotpath-required-exports.ts`
+    - 增加 required export：`processSseStreamJson`。
+  - 新增回归：
+    - `tests/sharedmodule/sse-stream-mode-native.spec.ts`
+    - `tests/sharedmodule/native-required-exports-sse-stream.spec.ts`
+- 证据：
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/cargo-sse-stream-mode-heartbeat-continue-20260324-204326.log`（`12 passed`，`CARGO_EXIT_CODE=0`）
+  - `test-results/routecodex-276/jest-sse-stream-mode-native-heartbeat-continue-20260324-204326.log`（`5 passed`，`JEST_EXIT_CODE=0`）
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/build-ci-sse-stream-mode-heartbeat-continue-20260324-204326.log`（`BUILD_CI_EXIT_CODE=0`）
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/file-line-limit-sse-stream-mode-heartbeat-continue-20260324-204326.log`（`FILE_LINE_LIMIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/llmswitch-rustification-audit-sse-stream-mode-heartbeat-continue-20260324-204326.log`（`AUDIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/repo-sanity-sse-stream-mode-heartbeat-continue-20260324-204326.log`（`REPO_SANITY_EXIT_CODE=0`）
+- beads 状态未变：`routecodex-276=in_progress`，`276.2/.6=in_progress`，其余 `open`。
 
 ## 2026-03-24 Heartbeat 继续改（20:24 local）
 - 继续补强“错误切换日志要打印原因/错误号”：
