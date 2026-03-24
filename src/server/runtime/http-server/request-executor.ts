@@ -103,6 +103,103 @@ function readString(value: unknown): string | undefined {
   return normalized || undefined;
 }
 
+function readStatusCodeCandidate(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (/^\d{3}$/.test(trimmed)) {
+      const parsed = Number.parseInt(trimmed, 10);
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+  }
+  return undefined;
+}
+
+function parseJsonRecordFromText(text: string): Record<string, unknown> | null {
+  const normalized = text.trim();
+  if (!normalized) {
+    return null;
+  }
+  const parseCandidate = (candidate: string): Record<string, unknown> | null => {
+    try {
+      const parsed = JSON.parse(candidate) as unknown;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+    } catch {
+      return null;
+    }
+    return null;
+  };
+  const direct = parseCandidate(normalized);
+  if (direct) {
+    return direct;
+  }
+  const firstBrace = normalized.indexOf('{');
+  const lastBrace = normalized.lastIndexOf('}');
+  if (firstBrace < 0 || lastBrace <= firstBrace) {
+    return null;
+  }
+  return parseCandidate(normalized.slice(firstBrace, lastBrace + 1));
+}
+
+function extractRetrySnapshotFromText(text: string): Partial<RetryErrorSnapshot> {
+  const parsed = parseJsonRecordFromText(text);
+  const parsedError =
+    parsed?.error && typeof parsed.error === 'object' && !Array.isArray(parsed.error)
+      ? (parsed.error as Record<string, unknown>)
+      : undefined;
+  const statusFromJson =
+    readStatusCodeCandidate(parsedError?.status)
+    ?? readStatusCodeCandidate(parsed?.status)
+    ?? readStatusCodeCandidate((parsed?.response as Record<string, unknown> | undefined)?.status);
+  const errorCodeFromJson =
+    readString(parsedError?.code)
+    ?? readString(parsed?.code)
+    ?? (typeof parsedError?.code === 'number' ? String(parsedError.code) : undefined)
+    ?? (typeof parsed?.code === 'number' ? String(parsed.code) : undefined);
+  const upstreamCodeFromJson =
+    readString(parsedError?.upstreamCode)
+    ?? readString(parsedError?.upstream_code)
+    ?? readString(parsed?.upstreamCode)
+    ?? readString(parsed?.upstream_code)
+    ?? (typeof parsedError?.upstreamCode === 'number' ? String(parsedError.upstreamCode) : undefined)
+    ?? (typeof parsedError?.upstream_code === 'number' ? String(parsedError.upstream_code) : undefined)
+    ?? (typeof parsed?.upstreamCode === 'number' ? String(parsed.upstreamCode) : undefined)
+    ?? (typeof parsed?.upstream_code === 'number' ? String(parsed.upstream_code) : undefined);
+  const reasonFromJson = readString(parsedError?.message) ?? readString(parsed?.message);
+
+  const statusFromRegex = (() => {
+    const match = text.match(/\b(?:HTTP\s+)?(\d{3})\b/i);
+    if (!match) {
+      return undefined;
+    }
+    const parsedStatus = Number.parseInt(match[1], 10);
+    return Number.isFinite(parsedStatus) ? parsedStatus : undefined;
+  })();
+  const errorCodeFromRegex =
+    text.match(/"code"\s*:\s*"([^"]+)"/i)?.[1]
+    ?? text.match(/\bcode[=:]\s*([A-Za-z0-9_.-]+)/i)?.[1];
+  const upstreamCodeFromRegex =
+    text.match(/"upstream(?:_code|Code)"\s*:\s*"([^"]+)"/i)?.[1]
+    ?? text.match(/\bupstream(?:_code|Code)[=:]\s*([A-Za-z0-9_.-]+)/i)?.[1];
+
+  return {
+    ...(typeof statusFromJson === 'number'
+      ? { statusCode: statusFromJson }
+      : (typeof statusFromRegex === 'number' ? { statusCode: statusFromRegex } : {})),
+    ...(errorCodeFromJson ? { errorCode: errorCodeFromJson } : (errorCodeFromRegex ? { errorCode: errorCodeFromRegex } : {})),
+    ...(upstreamCodeFromJson
+      ? { upstreamCode: upstreamCodeFromJson }
+      : (upstreamCodeFromRegex ? { upstreamCode: upstreamCodeFromRegex } : {})),
+    ...(reasonFromJson ? { reason: reasonFromJson } : {})
+  };
+}
+
 function extractRetryErrorSnapshot(error: unknown): RetryErrorSnapshot {
   const fallbackReason = 'Unknown error';
   if (!error || typeof error !== 'object') {
@@ -120,6 +217,10 @@ function extractRetryErrorSnapshot(error: unknown): RetryErrorSnapshot {
     responseError && typeof responseError === 'object'
       ? (responseError as Record<string, unknown>)
       : undefined;
+  const responseDataRecord =
+    responseData && typeof responseData === 'object' && !Array.isArray(responseData)
+      ? (responseData as Record<string, unknown>)
+      : undefined;
   const detailsRecord =
     record.details && typeof record.details === 'object'
       ? (record.details as Record<string, unknown>)
@@ -135,12 +236,32 @@ function extractRetryErrorSnapshot(error: unknown): RetryErrorSnapshot {
     readString(record.upstreamCode)
     ?? readString(detailsRecord?.upstreamCode)
     ?? readString(detailsRecord?.upstream_code);
-  const reason = describeRetryReason(error) || fallbackReason;
+  const textDerived = [
+    readString(record.rawErrorSnippet),
+    readString(record.rawError),
+    readString(record.message),
+    readString(responseData),
+    readString(responseDataRecord?.error),
+    readString(detailsRecord?.rawError),
+    readString(detailsRecord?.rawErrorSnippet)
+  ]
+    .filter((value): value is string => Boolean(value))
+    .map(extractRetrySnapshotFromText);
+  const mergedTextDerived = textDerived.reduce<Partial<RetryErrorSnapshot>>(
+    (acc, next) => ({ ...acc, ...next }),
+    {}
+  );
+  const reason =
+    mergedTextDerived.reason
+    ?? describeRetryReason(error)
+    ?? fallbackReason;
 
   return {
-    ...(typeof statusCode === 'number' ? { statusCode } : {}),
-    ...(errorCode ? { errorCode } : {}),
-    ...(upstreamCode ? { upstreamCode } : {}),
+    ...(typeof statusCode === 'number'
+      ? { statusCode }
+      : (typeof mergedTextDerived.statusCode === 'number' ? { statusCode: mergedTextDerived.statusCode } : {})),
+    ...(errorCode ? { errorCode } : (mergedTextDerived.errorCode ? { errorCode: mergedTextDerived.errorCode } : {})),
+    ...(upstreamCode ? { upstreamCode } : (mergedTextDerived.upstreamCode ? { upstreamCode: mergedTextDerived.upstreamCode } : {})),
     reason
   };
 }

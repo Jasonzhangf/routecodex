@@ -1,3 +1,59 @@
+## 2026-03-24 Heartbeat 继续改（20:17 local）— 补强 provider 自动切换错误诊断日志
+
+### 先复核上一次交付完整性（19:59 local）
+
+- 19:59 条目证据仍可复核：
+  - `test-results/routecodex-276/llmswitch-rustification-audit-heartbeat-continue-20260324-195748.log`（`AUDIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/repo-sanity-heartbeat-continue-20260324-195748.log`（`REPO_SANITY_EXIT_CODE=0`）
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/build-ci-sse-heartbeat-continue-20260324-195748.log`（`BUILD_CI_EXIT_CODE=0`）
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/jest-sse-native-heartbeat-continue-rerun-20260324-195748.log`（`JEST_EXIT_CODE=0`）
+
+### 继续执行（未完成项直接推进）
+
+- 针对“provider 自动切换时 console 缺少明确错误原因/错误号”的问题，本轮已补强：
+  - 代码：`src/server/runtime/http-server/request-executor.ts`
+  - 能力：从原始错误文本（含嵌入 JSON）提取并标准化 `statusCode / errorCode / upstreamCode / reason`；
+  - 输出：`[provider-switch] ... status=... code=... upstreamCode=... reason=...`（缺失字段不打印）。
+- 新增回归：
+  - `tests/server/runtime/request-executor.single-attempt.spec.ts`
+  - 用例：`logs provider-switch status/code/upstreamCode parsed from raw error text`
+  - 证据：`test-results/routecodex-276/jest-request-executor-provider-switch-diagnostics-20260324-201652.log`（`JEST_EXIT_CODE=0`）
+
+### 结论
+
+- 本轮“继续改”已完成一项可复核的运行时可观测性修补：provider 切换日志可直接看到原因与错误号，便于排查连续切换问题。
+- Epic 状态保持（以 beads 为准）：`routecodex-276=in_progress`，`276.2/.6=in_progress`，其余子项 `open`。
+
+## 2026-03-24 Heartbeat 续跑（19:59 local）— 已写入 routecodex-276 任务列表并继续执行 W2/W6
+
+### 先复核上一次交付完整性（2026-03-23 20:15 local）
+
+- 上一条已记录“20:15 post-review 不闭合”的真实状态，未再误报为完成态：
+  - `drudge-review-after-2015-delivery-direct-20260323-201634.json` 为 `ok=true` 但 `failed=true`；
+  - `delivery-2015-review-sequence-proof-20260323-201634.log` 含 `FAIL review_failed_false`。
+
+### 继续执行（未完成项直接推进）
+
+- 已按要求把 `routecodex-276` 明确保留在心跳任务列表，并刷新状态快照：
+  - `test-results/routecodex-276/bd-status-routecodex-276-heartbeat-continue-20260324-195748.log`
+  - 快照：`routecodex-276=in_progress`，`276.1/.3/.4/.5=open`，`276.2/.6=in_progress`。
+- W6 门禁续跑：
+  - `test-results/routecodex-276/llmswitch-rustification-audit-heartbeat-continue-20260324-195748.log`（`AUDIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/repo-sanity-heartbeat-continue-20260324-195748.log`（`REPO_SANITY_EXIT_CODE=0`）
+- W2 定向验证续跑：
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/file-line-limit-heartbeat-continue-20260324-195748.log`（`FILE_LINE_LIMIT_EXIT_CODE=0`）
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/build-ci-sse-heartbeat-continue-20260324-195748.log`（`BUILD_CI_EXIT_CODE=0`）
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/cargo-sse-detect-heartbeat-continue-20260324-195748.log`（`4 passed`，`CARGO_EXIT_CODE=0`）
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/cargo-sse-validate-heartbeat-continue-20260324-195748.log`（`2 passed`，`CARGO_EXIT_CODE=0`）
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/cargo-sse-assemble-heartbeat-continue-20260324-195748.log`（`2 passed`，`CARGO_EXIT_CODE=0`）
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/jest-sse-native-heartbeat-continue-20260324-195748.log`（首次路径不匹配，`JEST_EXIT_CODE=1`）
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/jest-sse-native-heartbeat-continue-rerun-20260324-195748.log`（重跑 `2 suites / 10 tests passed`，`JEST_EXIT_CODE=0`）
+
+### 结论
+
+- 本轮已完成“把 `routecodex-276` 写入心跳任务列表，并继续执行”的动作，且补齐了当天可复核证据。
+- Epic 仍未收口：`routecodex-276.1/.3/.4/.5=open`，`routecodex-276.2/.6=in_progress`。
+
 ## 2026-03-23 Heartbeat 巡检补修（20:15 local）— 闭合 18:52 review 指出的“1845 post-review 缺证据”
 
 ### 先复核上一次交付完整性（18:45 local）

@@ -1,8 +1,35 @@
 # RouteCodex Heartbeat
 
-Heartbeat-Until: 2026-03-23T23:59:00+08:00
+Heartbeat-Until: 2026-03-24T20:50:00+08:00
 Heartbeat-Stop-When: no-open-tasks
-Last-Updated: 2026-03-23 18:17 +08:00
+Last-Updated: 2026-03-24 20:17 +08:00
+
+## 2026-03-24 Heartbeat 继续改（20:17 local）
+- 已继续执行并补上“provider 自动切换时控制台打印原因/错误号”诊断增强：
+  - 变更：`src/server/runtime/http-server/request-executor.ts`
+  - 新增：从原始错误文本（含 JSON 片段）提取 `statusCode / errorCode / upstreamCode / reason`，用于 `[provider-switch]` 日志字段补全。
+  - 测试：`tests/server/runtime/request-executor.single-attempt.spec.ts` 新增用例 `logs provider-switch status/code/upstreamCode parsed from raw error text`。
+- 证据日志：
+  - `test-results/routecodex-276/jest-request-executor-provider-switch-diagnostics-20260324-201652.log`
+  - 结果：`PASS ... provider-switch diagnostics`，`JEST_EXIT_CODE=0`。
+
+## 2026-03-24 Heartbeat 续跑（hb:30m）
+- 已将 `routecodex-276` 明确保留在 Heartbeat 任务列表（见下方 `## Heartbeat 任务列表（routecodex-276 Rust 全量化）`）。
+- 当前 beads 状态快照：
+  - `routecodex-276 = in_progress`
+  - `routecodex-276.1/.3/.4/.5 = open`
+  - `routecodex-276.2/.6 = in_progress`
+  - 证据：`test-results/routecodex-276/bd-status-routecodex-276-heartbeat-continue-20260324-195748.log`
+- 本轮继续执行（W2/W6）并落盘证据：
+  - `test-results/routecodex-276/llmswitch-rustification-audit-heartbeat-continue-20260324-195748.log`（`AUDIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/repo-sanity-heartbeat-continue-20260324-195748.log`（`REPO_SANITY_EXIT_CODE=0`）
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/file-line-limit-heartbeat-continue-20260324-195748.log`（`FILE_LINE_LIMIT_EXIT_CODE=0`）
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/build-ci-sse-heartbeat-continue-20260324-195748.log`（`BUILD_CI_EXIT_CODE=0`）
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/cargo-sse-detect-heartbeat-continue-20260324-195748.log`（`4 passed`，`CARGO_EXIT_CODE=0`）
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/cargo-sse-validate-heartbeat-continue-20260324-195748.log`（`2 passed`，`CARGO_EXIT_CODE=0`）
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/cargo-sse-assemble-heartbeat-continue-20260324-195748.log`（`2 passed`，`CARGO_EXIT_CODE=0`）
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/jest-sse-native-heartbeat-continue-20260324-195748.log`（首次路径不匹配失败，`JEST_EXIT_CODE=1`）
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/jest-sse-native-heartbeat-continue-rerun-20260324-195748.log`（重跑 `2 suites / 10 tests passed`，`JEST_EXIT_CODE=0`）
 
 ## 当前状态
 - 已新开 Rust 全量收口 Epic：`routecodex-276`（in_progress）。
@@ -148,6 +175,7 @@ Last-Updated: 2026-03-23 18:17 +08:00
     - `test-results/routecodex-276/drudge-review-after-1546-delivery-direct-20260323-154919.json`（`ok=true`，`failed=false`，`EXIT_CODE=0`）
 
 ## Heartbeat 任务列表（routecodex-276 Rust 全量化）
+- [ ] routecodex-276 Epic 总控（当前 `in_progress`）
 - [ ] routecodex-276.1 W1 servertool runtime Rust 化（clock/heartbeat/review/stop-message）
 - [ ] routecodex-276.2 W2 SSE codec Rust 化（sse-to-json / json-to-sse，进行中）
 - [ ] routecodex-276.3 W3 Virtual Router 非 native 残量收口

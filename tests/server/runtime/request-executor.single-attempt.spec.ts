@@ -66,6 +66,16 @@ function createExecutor(pipelineResult: PipelineExecutionResult, handle: Provide
 }
 
 describe('HubRequestExecutor single attempt behaviour', () => {
+  const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+  beforeEach(() => {
+    warnSpy.mockClear();
+  });
+
+  afterAll(() => {
+    warnSpy.mockRestore();
+  });
+
   const pipelineResult: PipelineExecutionResult = {
     providerPayload: { data: { messages: [] } },
     target: {
@@ -195,6 +205,92 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     const secondCallMetadata = fakePipeline.execute.mock.calls[1][0]
       .metadata as Record<string, unknown>;
     expect(secondCallMetadata.excludedProviderKeys).toEqual(['antigravity.aliasA']);
+  });
+
+  it('logs provider-switch status/code/upstreamCode parsed from raw error text', async () => {
+    const retryable = Object.assign(
+      new Error(
+        'HTTP 429: {"error":{"code":"SSE_TO_JSON_ERROR","message":"decoder crashed","upstream_code":"EPIPE"}}'
+      ),
+      { statusCode: 429 }
+    );
+    const successHandle = createRuntimeHandle(async () => ({ ok: true }));
+    const failingHandle = createRuntimeHandle(async () => {
+      throw retryable;
+    });
+
+    const pipelineResultOne: PipelineExecutionResult = {
+      providerPayload: { data: { messages: [] } },
+      target: {
+        providerKey: 'tab.key1',
+        providerType: 'responses',
+        outboundProfile: 'openai-responses',
+        runtimeKey: 'runtime:one',
+        processMode: 'standard'
+      },
+      processMode: 'standard',
+      metadata: {}
+    };
+    const pipelineResultTwo: PipelineExecutionResult = {
+      providerPayload: { data: { messages: [] } },
+      target: {
+        providerKey: 'tab.key2',
+        providerType: 'responses',
+        outboundProfile: 'openai-responses',
+        runtimeKey: 'runtime:two',
+        processMode: 'standard'
+      },
+      processMode: 'standard',
+      metadata: {}
+    };
+    const fakePipeline: HubPipeline = {
+      execute: jest.fn().mockResolvedValueOnce(pipelineResultOne).mockResolvedValueOnce(pipelineResultTwo)
+    };
+    const runtimeManager: ProviderRuntimeManager = {
+      resolveRuntimeKey: jest.fn(),
+      getHandleByRuntimeKey: jest.fn((runtimeKey: string) =>
+        runtimeKey === 'runtime:one' ? failingHandle : successHandle
+      ),
+      getHandleByProviderKey: jest.fn(),
+      disposeAll: jest.fn(),
+      initialize: jest.fn()
+    } as unknown as ProviderRuntimeManager;
+    const stats = {
+      recordRequestStart: jest.fn(),
+      recordCompletion: jest.fn(),
+      bindProvider: jest.fn(),
+      recordToolUsage: jest.fn()
+    };
+    const deps = {
+      runtimeManager,
+      getHubPipeline: () => fakePipeline,
+      getModuleDependencies: (): ModuleDependencies => ({
+        errorHandlingCenter: {
+          handleError: jest.fn().mockResolvedValue({ success: true })
+        }
+      } as ModuleDependencies),
+      logStage: jest.fn(),
+      stats
+    };
+    const executor = new HubRequestExecutor(deps);
+    const request: PipelineExecutionInput = {
+      requestId: 'req_retry_log_fields',
+      entryEndpoint: '/v1/responses',
+      headers: {},
+      body: { messages: [{ role: 'user', content: 'retry me' }] },
+      metadata: { stream: false, inboundStream: false }
+    };
+
+    const response = await executor.execute(request);
+    expect(response).toBeDefined();
+
+    const warnLines = warnSpy.mock.calls.map(call => String(call[0] ?? ''));
+    const switchLine = warnLines.find(line => line.includes('[provider-switch]'));
+    expect(switchLine).toBeDefined();
+    expect(switchLine).toContain('status=429');
+    expect(switchLine).toContain('code=SSE_TO_JSON_ERROR');
+    expect(switchLine).toContain('upstreamCode=EPIPE');
+    expect(switchLine).toContain('reason="decoder crashed"');
   });
 
   it('retries and reroutes when converted response returns status 429 without error envelope', async () => {
