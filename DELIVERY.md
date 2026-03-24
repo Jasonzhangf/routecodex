@@ -1,3 +1,43 @@
+## 2026-03-24 Heartbeat 继续改（23:07 local）— W2 unknown 协议分支一致性回归
+
+### 先复核上一次交付完整性（22:44 local）
+
+- 22:44 条目证据保持可复核：
+  - `test-results/routecodex-276/jest-sse-stream-consistency-gemini-heartbeat-20260324-224334.log`（`JEST_EXIT_CODE=0`）
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/build-ci-sse-stream-consistency-gemini-heartbeat-20260324-224334.log`（`BUILD_CI_EXIT_CODE=0`）
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/file-line-limit-sse-stream-consistency-gemini-20260324-224334.log`（`FILE_LINE_LIMIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/llmswitch-rustification-audit-sse-stream-consistency-gemini-20260324-224334.log`（`AUDIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/repo-sanity-sse-stream-consistency-gemini-20260324-224334.log`（`REPO_SANITY_EXIT_CODE=0`）
+
+### 继续执行（未完成项直接推进）
+
+- 本轮继续推进 `routecodex-276.2`，补齐 unknown 协议的负向一致性保护：
+  - Rust：`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics.rs`
+    - 在 `resolve_sse_stream_mode_supports_gemini_chat` 用例中补充 unsupported 协议断言（`unknown-protocol` 变体、`gemini-chat-preview`）。
+  - TS：`tests/sharedmodule/sse-stream-mode-native.spec.ts`
+    - 新增：`resolve/process native stream decisions stay aligned for unknown protocol variants`。
+- 目标：防止 unsupported 协议在 resolver/process 两条 native 路径出现“误开 stream”或语义分叉。
+
+### 验证证据
+
+- Cargo：
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/cargo-sse-stream-unknown-alignment-heartbeat-20260324-230558.log`（`7 passed`，`CARGO_EXIT_CODE=0`）
+- Jest：
+  - `test-results/routecodex-276/jest-sse-stream-unknown-alignment-heartbeat-20260324-230558.log`（`3 suites / 13 tests passed`，`JEST_EXIT_CODE=0`）
+- build:ci：
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/build-ci-sse-stream-unknown-alignment-heartbeat-20260324-230558.log`（`BUILD_CI_EXIT_CODE=0`）
+- 门禁：
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/file-line-limit-sse-stream-unknown-alignment-20260324-230558.log`（`FILE_LINE_LIMIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/llmswitch-rustification-audit-sse-stream-unknown-alignment-20260324-230558.log`（`AUDIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/repo-sanity-sse-stream-unknown-alignment-20260324-230558.log`（`REPO_SANITY_EXIT_CODE=0`）
+- 状态快照：
+  - `test-results/routecodex-276/bd-status-routecodex-276-sse-stream-unknown-alignment-20260324-230558.log`
+
+### 结论
+
+- 本轮完成可复核 W2 小切片：unsupported 协议在 `resolveSseStreamModeJson` 与 `processSseStreamJson` 上保持 non-stream 且语义一致。
+- Epic 状态保持（beads 真源）：`routecodex-276=in_progress`，`routecodex-276.2/.6=in_progress`，其余子项 `open`。
+
 ## 2026-03-24 Heartbeat 继续改（22:44 local）— W2 gemini stream resolver/process 一致性回归
 
 ### 先复核上一次交付完整性（22:37 local）

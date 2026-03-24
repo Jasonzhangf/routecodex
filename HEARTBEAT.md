@@ -1,8 +1,28 @@
 # RouteCodex Heartbeat
 
-Heartbeat-Until: 2026-03-25T00:20:00+08:00
+Heartbeat-Until: 2026-03-25T00:30:00+08:00
 Heartbeat-Stop-When: no-open-tasks
-Last-Updated: 2026-03-24 22:44 +08:00
+Last-Updated: 2026-03-24 23:07 +08:00
+
+## 2026-03-24 Heartbeat 继续改（23:07 local）
+- W2 再补一条“负向协议一致性”回归：
+  - Rust：`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_client_semantics.rs`
+    - 在 `resolve_sse_stream_mode_supports_gemini_chat` 用例中补充断言：
+      - `" unknown-protocol "` 必须为 non-stream；
+      - `"gemini-chat-preview"` 必须为 non-stream。
+  - TS：`tests/sharedmodule/sse-stream-mode-native.spec.ts`
+    - 新增：`resolve/process native stream decisions stay aligned for unknown protocol variants`
+    - 覆盖 `unknown-protocol` / `' unknown-protocol '` / `gemini-chat-preview` 在 `wantsStream=true/false` 下均为 non-stream，且 `resolve` 与 `process` 结果一致。
+- 本轮验证证据：
+  - Cargo：`sharedmodule/llmswitch-core/test-results/routecodex-276/cargo-sse-stream-unknown-alignment-heartbeat-20260324-230558.log`（`7 passed`，`CARGO_EXIT_CODE=0`）
+  - Jest：`test-results/routecodex-276/jest-sse-stream-unknown-alignment-heartbeat-20260324-230558.log`（`3 suites / 13 tests passed`，`JEST_EXIT_CODE=0`）
+  - build:ci：`sharedmodule/llmswitch-core/test-results/routecodex-276/build-ci-sse-stream-unknown-alignment-heartbeat-20260324-230558.log`（`BUILD_CI_EXIT_CODE=0`）
+  - file-line-limit：`sharedmodule/llmswitch-core/test-results/routecodex-276/file-line-limit-sse-stream-unknown-alignment-20260324-230558.log`（`FILE_LINE_LIMIT_EXIT_CODE=0`）
+  - audit：`test-results/routecodex-276/llmswitch-rustification-audit-sse-stream-unknown-alignment-20260324-230558.log`（`AUDIT_EXIT_CODE=0`）
+  - repo-sanity：`test-results/routecodex-276/repo-sanity-sse-stream-unknown-alignment-20260324-230558.log`（`REPO_SANITY_EXIT_CODE=0`）
+- beads 状态快照（真源）：
+  - `test-results/routecodex-276/bd-status-routecodex-276-sse-stream-unknown-alignment-20260324-230558.log`
+  - `routecodex-276=in_progress`，`routecodex-276.2/.6=in_progress`，其余子项 `open`。
 
 ## 2026-03-24 Heartbeat 继续改（22:44 local）
 - W2 再补一条“一致性保护”回归：

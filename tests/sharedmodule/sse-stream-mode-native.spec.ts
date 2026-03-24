@@ -78,4 +78,21 @@ describe('sse stream mode native bridge', () => {
       }
     }
   });
+
+  test('resolve/process native stream decisions stay aligned for unknown protocol variants', () => {
+    const protocols = ['unknown-protocol', ' unknown-protocol ', 'gemini-chat-preview'];
+    for (const protocol of protocols) {
+      for (const wantsStream of [true, false]) {
+        const resolved = resolveSseStreamModeWithNative(wantsStream, protocol);
+        const processed = processSseStreamWithNative({
+          clientPayload: { id: `resp_${protocol.trim()}_${String(wantsStream)}` },
+          clientProtocol: protocol,
+          requestId: `req_${protocol.trim()}_${String(wantsStream)}`,
+          wantsStream
+        });
+        expect(processed.shouldStream).toBe(false);
+        expect(processed.shouldStream).toBe(resolved);
+      }
+    }
+  });
 });

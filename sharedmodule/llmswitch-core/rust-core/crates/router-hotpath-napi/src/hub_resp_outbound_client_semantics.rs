@@ -3557,6 +3557,8 @@ mod tests {
         assert!(resolve_sse_stream_mode(true, "gemini-chat"));
         assert!(resolve_sse_stream_mode(true, " gemini-chat "));
         assert!(!resolve_sse_stream_mode(false, "gemini-chat"));
+        assert!(!resolve_sse_stream_mode(true, " unknown-protocol "));
+        assert!(!resolve_sse_stream_mode(true, "gemini-chat-preview"));
     }
 
     #[test]
