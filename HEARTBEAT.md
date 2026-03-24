@@ -1,8 +1,23 @@
 # RouteCodex Heartbeat
 
-Heartbeat-Until: 2026-03-24T22:10:00+08:00
+Heartbeat-Until: 2026-03-24T22:30:00+08:00
 Heartbeat-Stop-When: no-open-tasks
-Last-Updated: 2026-03-24 21:10 +08:00
+Last-Updated: 2026-03-24 21:16 +08:00
+
+## 2026-03-24 Heartbeat 继续改（21:16 local）
+- W2 再补一条 native bridge 回归，确保 `gemini-chat` 在底层 native 语义判定也被直接覆盖：
+  - 文件：`tests/sharedmodule/sse-stream-mode-native.spec.ts`
+  - 新增用例：`enables stream for gemini-chat protocol when wantsStream=true`
+  - 断言：`shouldStream=true` 且 payload 原样透传（含 `model=gemini-2.5-pro`）
+- 本轮验证证据：
+  - `test-results/routecodex-276/jest-sse-stream-gemini-bridge-heartbeat-20260324-211619.log`（`3 suites / 8 tests passed`，`JEST_EXIT_CODE=0`）
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/build-ci-sse-stream-gemini-bridge-heartbeat-20260324-211619.log`（`BUILD_CI_EXIT_CODE=0`）
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/file-line-limit-sse-stream-gemini-bridge-20260324-211619.log`（`FILE_LINE_LIMIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/llmswitch-rustification-audit-sse-stream-gemini-bridge-20260324-211619.log`（`AUDIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/repo-sanity-sse-stream-gemini-bridge-20260324-211619.log`（`REPO_SANITY_EXIT_CODE=0`）
+- beads 状态快照（真源）：
+  - `test-results/routecodex-276/bd-status-routecodex-276-sse-stream-gemini-bridge-20260324-211619.log`
+  - `routecodex-276=in_progress`，`routecodex-276.2/.6=in_progress`，其余子项 `open`。
 
 ## 2026-03-24 Heartbeat 继续改（21:10 local）
 - W2 再补一刀 `resp_outbound stage2` 协议覆盖：允许 `gemini-chat` 走 streaming 判定路径（与 openai/anthropic 同一路径）。
