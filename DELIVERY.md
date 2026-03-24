@@ -1,3 +1,43 @@
+## 2026-03-24 Heartbeat 继续改（22:44 local）— W2 gemini stream resolver/process 一致性回归
+
+### 先复核上一次交付完整性（22:37 local）
+
+- 22:37 条目证据保持可复核：
+  - `test-results/routecodex-276/jest-sse-stream-protocol-type-alias-heartbeat-20260324-223653.log`（`JEST_EXIT_CODE=0`）
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/build-ci-sse-stream-protocol-type-alias-heartbeat-20260324-223653.log`（`BUILD_CI_EXIT_CODE=0`）
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/file-line-limit-sse-stream-protocol-type-alias-20260324-223653.log`（`FILE_LINE_LIMIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/llmswitch-rustification-audit-sse-stream-protocol-type-alias-20260324-223653.log`（`AUDIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/repo-sanity-sse-stream-protocol-type-alias-20260324-223653.log`（`REPO_SANITY_EXIT_CODE=0`）
+
+### 继续执行（未完成项直接推进）
+
+- 本轮继续推进 `routecodex-276.2`，补强 resolver/process 两条 native 路径的一致性保护：
+  - `tests/sharedmodule/sse-stream-mode-native.spec.ts`
+    - 新增：`resolve/process native stream decisions stay aligned for gemini-chat variants`
+    - 对 `gemini-chat` 与 `' gemini-chat '`，分别断言 `wantsStream=true/false` 时
+      - `resolveSseStreamModeWithNative(...)`
+      - `processSseStreamWithNative(...).shouldStream`
+      二者结果一致。
+- 目标：防止未来仅修改其中一条 native 路径导致协议判定分叉。
+
+### 验证证据
+
+- Jest：
+  - `test-results/routecodex-276/jest-sse-stream-consistency-gemini-heartbeat-20260324-224334.log`（`3 suites / 12 tests passed`，`JEST_EXIT_CODE=0`）
+- build:ci：
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/build-ci-sse-stream-consistency-gemini-heartbeat-20260324-224334.log`（`BUILD_CI_EXIT_CODE=0`）
+- 门禁：
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/file-line-limit-sse-stream-consistency-gemini-20260324-224334.log`（`FILE_LINE_LIMIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/llmswitch-rustification-audit-sse-stream-consistency-gemini-20260324-224334.log`（`AUDIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/repo-sanity-sse-stream-consistency-gemini-20260324-224334.log`（`REPO_SANITY_EXIT_CODE=0`）
+- 状态快照：
+  - `test-results/routecodex-276/bd-status-routecodex-276-sse-stream-consistency-gemini-20260324-224334.log`
+
+### 结论
+
+- 本轮完成可复核 W2 小切片：`resolveSseStreamModeJson` / `processSseStreamJson` 的 gemini 协议判定一致性有直接回归保护。
+- Epic 状态保持（beads 真源）：`routecodex-276=in_progress`，`routecodex-276.2/.6=in_progress`，其余子项 `open`。
+
 ## 2026-03-24 Heartbeat 继续改（22:37 local）— W2 stage2 协议类型收敛到 SseProtocol
 
 ### 先复核上一次交付完整性（22:14 local）
