@@ -222,4 +222,41 @@ describe('resp_outbound stages snapshot payloads', () => {
       payload: clientPayload
     });
   });
+
+  it('normalizes openai-chat protocol token before streaming decision and codec lookup', async () => {
+    const recorder = new StubStageRecorder();
+    const clientPayload = {
+      id: 'chatcmpl_stream_normalized',
+      object: 'chat.completion',
+      created: 1730000001,
+      model: 'qwen3.5-plus',
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: 'assistant',
+            content: 'openai chat normalized protocol stream ok'
+          },
+          finish_reason: 'stop'
+        }
+      ]
+    };
+
+    const result = await runRespOutboundStage2SseStream({
+      clientPayload,
+      clientProtocol: ' OPENAI-CHAT ' as any,
+      requestId: 'req-openai-chat-stream-normalized-protocol',
+      wantsStream: true,
+      stageRecorder: recorder
+    });
+
+    expect(result.stream).toBeDefined();
+    expect(result.body).toBeUndefined();
+    expect(recorder.entries).toHaveLength(1);
+    expect(recorder.entries[0]?.payload).toEqual({
+      passthrough: false,
+      protocol: 'openai-chat',
+      payload: clientPayload
+    });
+  });
 });

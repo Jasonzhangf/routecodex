@@ -1,3 +1,40 @@
+## 2026-03-24 Heartbeat 继续改（23:38 local）— W2 stage2 openai-chat 变体协议归一化回归
+
+### 先复核上一次交付完整性（23:30 local）
+
+- 23:30 条目证据保持可复核：
+  - `test-results/routecodex-276/jest-sse-stage-protocol-normalize-heartbeat-20260324-232937.log`（`JEST_EXIT_CODE=0`）
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/build-ci-sse-stage-protocol-normalize-heartbeat-20260324-232937.log`（`BUILD_CI_EXIT_CODE=0`）
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/file-line-limit-sse-stage-protocol-normalize-20260324-232937.log`（`FILE_LINE_LIMIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/llmswitch-rustification-audit-sse-stage-protocol-normalize-20260324-232937.log`（`AUDIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/repo-sanity-sse-stage-protocol-normalize-20260324-232937.log`（`REPO_SANITY_EXIT_CODE=0`）
+
+### 继续执行（未完成项直接推进）
+
+- 本轮继续推进 `routecodex-276.2`，补齐 openai-chat 脏协议输入的 stage2 回归：
+  - `tests/monitoring/resp-outbound-stage.test.ts`
+    - 新增：`normalizes openai-chat protocol token before streaming decision and codec lookup`
+    - 覆盖 `clientProtocol=' OPENAI-CHAT '` + `wantsStream=true`，确保仍返回 stream 且 stage 记录协议标准化为 `openai-chat`。
+- 目标：与 gemini 归一化路径对齐，避免协议 token 大小写/空白引起 codec 选择偏差。
+
+### 验证证据
+
+- Jest：
+  - `test-results/routecodex-276/jest-sse-stage-protocol-normalize-openai-chat-heartbeat-20260324-233654.log`（`3 suites / 15 tests passed`，`JEST_EXIT_CODE=0`）
+- build:ci：
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/build-ci-sse-stage-protocol-normalize-openai-chat-heartbeat-20260324-233654.log`（`BUILD_CI_EXIT_CODE=0`）
+- 门禁：
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/file-line-limit-sse-stage-protocol-normalize-openai-chat-20260324-233654.log`（`FILE_LINE_LIMIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/llmswitch-rustification-audit-sse-stage-protocol-normalize-openai-chat-20260324-233654.log`（`AUDIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/repo-sanity-sse-stage-protocol-normalize-openai-chat-20260324-233654.log`（`REPO_SANITY_EXIT_CODE=0`）
+- 状态快照：
+  - `test-results/routecodex-276/bd-status-routecodex-276-sse-stage-protocol-normalize-openai-chat-20260324-233654.log`
+
+### 结论
+
+- 本轮完成可复核 W2 小切片：stage2 协议归一化回归已覆盖 gemini + openai-chat 两条主流 stream 路径。
+- Epic 状态保持（beads 真源）：`routecodex-276=in_progress`，`routecodex-276.2/.6=in_progress`，其余子项 `open`。
+
 ## 2026-03-24 Heartbeat 继续改（23:30 local）— W2 stage2 协议归一化后再判流/选 codec
 
 ### 先复核上一次交付完整性（23:18 local）

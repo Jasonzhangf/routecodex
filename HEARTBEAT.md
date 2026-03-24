@@ -1,8 +1,23 @@
 # RouteCodex Heartbeat
 
-Heartbeat-Until: 2026-03-25T01:00:00+08:00
+Heartbeat-Until: 2026-03-25T01:10:00+08:00
 Heartbeat-Stop-When: no-open-tasks
-Last-Updated: 2026-03-24 23:30 +08:00
+Last-Updated: 2026-03-24 23:38 +08:00
+
+## 2026-03-24 Heartbeat 继续改（23:38 local）
+- W2 再补一条 stage 协议归一化回归（openai-chat 变体）：
+  - 文件：`tests/monitoring/resp-outbound-stage.test.ts`
+  - 新增用例：`normalizes openai-chat protocol token before streaming decision and codec lookup`
+  - 断言：`clientProtocol=' OPENAI-CHAT '` 在 `wantsStream=true` 下仍返回 `stream`，且 stage recorder 中协议为 `openai-chat`。
+- 本轮验证证据：
+  - Jest：`test-results/routecodex-276/jest-sse-stage-protocol-normalize-openai-chat-heartbeat-20260324-233654.log`（`3 suites / 15 tests passed`，`JEST_EXIT_CODE=0`）
+  - build:ci：`sharedmodule/llmswitch-core/test-results/routecodex-276/build-ci-sse-stage-protocol-normalize-openai-chat-heartbeat-20260324-233654.log`（`BUILD_CI_EXIT_CODE=0`）
+  - file-line-limit：`sharedmodule/llmswitch-core/test-results/routecodex-276/file-line-limit-sse-stage-protocol-normalize-openai-chat-20260324-233654.log`（`FILE_LINE_LIMIT_EXIT_CODE=0`）
+  - audit：`test-results/routecodex-276/llmswitch-rustification-audit-sse-stage-protocol-normalize-openai-chat-20260324-233654.log`（`AUDIT_EXIT_CODE=0`）
+  - repo-sanity：`test-results/routecodex-276/repo-sanity-sse-stage-protocol-normalize-openai-chat-20260324-233654.log`（`REPO_SANITY_EXIT_CODE=0`）
+- beads 状态快照（真源）：
+  - `test-results/routecodex-276/bd-status-routecodex-276-sse-stage-protocol-normalize-openai-chat-20260324-233654.log`
+  - `routecodex-276=in_progress`，`routecodex-276.2/.6=in_progress`，其余子项 `open`。
 
 ## 2026-03-24 Heartbeat 继续改（23:30 local）
 - W2 再推进一刀协议输入健壮性：在 stage2 流水线入口统一协议 token 归一化后再做 stream 判定与 codec lookup。
