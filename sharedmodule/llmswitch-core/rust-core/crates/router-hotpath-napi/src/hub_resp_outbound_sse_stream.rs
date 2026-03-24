@@ -18,11 +18,7 @@ pub struct SseStreamOutput {
     pub payload: Value,
 }
 
-fn resolve_sse_stream_mode(
-    wants_stream: bool,
-    client_protocol: &str,
-    _original_wants_stream: bool,
-) -> bool {
+fn resolve_sse_stream_mode(wants_stream: bool, client_protocol: &str) -> bool {
     // SSE streaming is only supported for specific protocols
     match client_protocol {
         "openai-chat" | "openai-responses" | "anthropic-messages" | "gemini-chat" => wants_stream,
@@ -31,11 +27,7 @@ fn resolve_sse_stream_mode(
 }
 
 pub fn process_sse_stream(input: SseStreamInput) -> Result<SseStreamOutput, String> {
-    let should_stream = resolve_sse_stream_mode(
-        input.wants_stream,
-        &input.client_protocol,
-        input.wants_stream,
-    );
+    let should_stream = resolve_sse_stream_mode(input.wants_stream, &input.client_protocol);
 
     Ok(SseStreamOutput {
         should_stream,
@@ -64,33 +56,33 @@ mod tests {
 
     #[test]
     fn test_resolve_sse_stream_mode_openai_chat() {
-        assert!(resolve_sse_stream_mode(true, "openai-chat", true));
-        assert!(!resolve_sse_stream_mode(false, "openai-chat", false));
+        assert!(resolve_sse_stream_mode(true, "openai-chat"));
+        assert!(!resolve_sse_stream_mode(false, "openai-chat"));
     }
 
     #[test]
     fn test_resolve_sse_stream_mode_openai_responses() {
-        assert!(resolve_sse_stream_mode(true, "openai-responses", true));
-        assert!(!resolve_sse_stream_mode(false, "openai-responses", false));
+        assert!(resolve_sse_stream_mode(true, "openai-responses"));
+        assert!(!resolve_sse_stream_mode(false, "openai-responses"));
     }
 
     #[test]
     fn test_resolve_sse_stream_mode_anthropic_messages() {
-        assert!(resolve_sse_stream_mode(true, "anthropic-messages", true));
-        assert!(!resolve_sse_stream_mode(false, "anthropic-messages", false));
+        assert!(resolve_sse_stream_mode(true, "anthropic-messages"));
+        assert!(!resolve_sse_stream_mode(false, "anthropic-messages"));
     }
 
     #[test]
     fn test_resolve_sse_stream_mode_gemini_chat() {
-        assert!(resolve_sse_stream_mode(true, "gemini-chat", true));
-        assert!(!resolve_sse_stream_mode(false, "gemini-chat", false));
+        assert!(resolve_sse_stream_mode(true, "gemini-chat"));
+        assert!(!resolve_sse_stream_mode(false, "gemini-chat"));
     }
 
     #[test]
     fn test_resolve_sse_stream_mode_unknown_protocol() {
         // Unknown protocols should not stream
-        assert!(!resolve_sse_stream_mode(true, "unknown-protocol", true));
-        assert!(!resolve_sse_stream_mode(false, "unknown-protocol", false));
+        assert!(!resolve_sse_stream_mode(true, "unknown-protocol"));
+        assert!(!resolve_sse_stream_mode(false, "unknown-protocol"));
     }
 
     #[test]

@@ -66,7 +66,6 @@ describe('resp_outbound stages snapshot payloads', () => {
     const result = await runRespOutboundStage2SseStream({
       clientPayload,
       clientProtocol: 'anthropic-messages',
-      providerProtocol: 'anthropic-messages',
       requestId: 'req-test',
       wantsStream: false,
       stageRecorder: recorder
@@ -148,6 +147,40 @@ describe('resp_outbound stages snapshot payloads', () => {
 
     expect(result.stream).toBeDefined();
     expect(result.body).toBeUndefined();
+    expect(recorder.entries).toHaveLength(1);
+    expect(recorder.entries[0]?.payload).toEqual({
+      passthrough: false,
+      protocol: 'gemini-chat',
+      payload: clientPayload
+    });
+  });
+
+  it('returns body for gemini-chat when wantsStream=false', async () => {
+    const recorder = new StubStageRecorder();
+    const clientPayload = {
+      id: 'gemini_resp_non_stream',
+      object: 'response',
+      model: 'gemini-2.5-pro',
+      candidates: [
+        {
+          content: {
+            role: 'model',
+            parts: [{ text: 'gemini non-stream ok' }]
+          }
+        }
+      ]
+    } as any;
+
+    const result = await runRespOutboundStage2SseStream({
+      clientPayload,
+      clientProtocol: 'gemini-chat',
+      requestId: 'req-gemini-non-stream',
+      wantsStream: false,
+      stageRecorder: recorder
+    });
+
+    expect(result.body).toEqual(clientPayload);
+    expect(result.stream).toBeUndefined();
     expect(recorder.entries).toHaveLength(1);
     expect(recorder.entries[0]?.payload).toEqual({
       passthrough: false,

@@ -1,8 +1,23 @@
 # RouteCodex Heartbeat
 
-Heartbeat-Until: 2026-03-24T22:30:00+08:00
+Heartbeat-Until: 2026-03-24T22:50:00+08:00
 Heartbeat-Stop-When: no-open-tasks
-Last-Updated: 2026-03-24 21:16 +08:00
+Last-Updated: 2026-03-24 21:30 +08:00
+
+## 2026-03-24 Heartbeat 继续改（21:27 local）
+- W2 继续做一刀“语义收敛 + 回归补齐”：
+  - Rust：`hub_resp_outbound_sse_stream.rs` 删除未使用参数 `original_wants_stream`，保持 stream 判定 API 最小必要输入（`wants_stream + client_protocol`）。
+  - Stage 回归：`tests/monitoring/resp-outbound-stage.test.ts` 新增 `returns body for gemini-chat when wantsStream=false`，补齐 gemini 非流式分支。
+- 本轮验证证据：
+  - Cargo：`sharedmodule/llmswitch-core/test-results/routecodex-276/cargo-sse-stream-gemini-mode-heartbeat-20260324-212914.log`（`14 passed`，`CARGO_EXIT_CODE=0`）
+  - Jest：`test-results/routecodex-276/jest-sse-stream-gemini-mode-heartbeat-20260324-212914.log`（`3 suites / 9 tests passed`，`JEST_EXIT_CODE=0`）
+  - build:ci：`sharedmodule/llmswitch-core/test-results/routecodex-276/build-ci-sse-stream-gemini-mode-heartbeat-20260324-212914.log`（`BUILD_CI_EXIT_CODE=0`）
+  - file-line-limit：`sharedmodule/llmswitch-core/test-results/routecodex-276/file-line-limit-sse-stream-gemini-mode-20260324-212914.log`（`FILE_LINE_LIMIT_EXIT_CODE=0`）
+  - audit：`test-results/routecodex-276/llmswitch-rustification-audit-sse-stream-gemini-mode-20260324-212914.log`（`AUDIT_EXIT_CODE=0`）
+  - repo-sanity：`test-results/routecodex-276/repo-sanity-sse-stream-gemini-mode-20260324-212914.log`（`REPO_SANITY_EXIT_CODE=0`）
+- beads 状态快照（真源）：
+  - `test-results/routecodex-276/bd-status-routecodex-276-sse-stream-gemini-mode-20260324-212914.log`
+  - `routecodex-276=in_progress`，`routecodex-276.2/.6=in_progress`，其余子项 `open`。
 
 ## 2026-03-24 Heartbeat 继续改（21:16 local）
 - W2 再补一条 native bridge 回归，确保 `gemini-chat` 在底层 native 语义判定也被直接覆盖：
