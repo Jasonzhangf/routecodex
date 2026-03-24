@@ -68,6 +68,8 @@ Examples:
     .option('--camoufox', 'Force Camoufox environment preparation')
     .option('--providers <ids>', 'Providers (comma-separated), e.g. openai,qwen,iflow')
     .option('--default-provider <id>', 'Default provider id for routing.default')
+    .option('--default-model <id>', 'Default model id for default provider routing target')
+    .option('--provider-source <source>', 'Provider source policy: builtin|external|mixed (default: mixed)')
     .option('--host <host>', 'Server host (httpserver.host)')
     .option('--port <port>', 'Server port (httpserver.port)')
     .option('--list-providers', 'List guided protocol templates + managed-auth provider ids and exit')
@@ -116,6 +118,17 @@ Examples:
       }
 
       const providersFromArg = parseProvidersArg(options.providers);
+      const providerSourceRaw = typeof options.providerSource === 'string' ? options.providerSource.trim().toLowerCase() : 'mixed';
+      const providerSource = providerSourceRaw || 'mixed';
+      if (!['builtin', 'external', 'mixed'].includes(providerSource)) {
+        spinner.fail('Failed to initialize configuration');
+        ctx.logger.error(`Invalid --provider-source "${options.providerSource}". Use: builtin | external | mixed`);
+        return;
+      }
+      const allowExternalProviders = providerSource !== 'builtin';
+      const defaultModelOverride = typeof options.defaultModel === 'string' && options.defaultModel.trim()
+        ? options.defaultModel.trim()
+        : undefined;
       const promptBundle = buildInteractivePrompt(ctx);
       const ensureDefaultPrecommandScript = () => {
         const defaultPrecommand = ensureDefaultPrecommandScriptBestEffort({
@@ -158,7 +171,16 @@ Examples:
             }
             ensureDir(fsImpl, pathImpl.dirname(configPath));
             ensureDir(fsImpl, providerRoot);
-            writeProviderV2(fsImpl, pathImpl, providerRoot, defaultTemplate.id, asRecord(defaultTemplate.provider));
+            const defaultProviderNode = asRecord(JSON.parse(JSON.stringify(defaultTemplate.provider)));
+            if (defaultTemplate.defaultModel) {
+              const defaultModels = asRecord(defaultProviderNode.models);
+              if (!defaultModels[defaultTemplate.defaultModel]) {
+                defaultModels[defaultTemplate.defaultModel] = { supportsStreaming: true };
+              }
+              defaultProviderNode.models = defaultModels;
+              defaultProviderNode.defaultModel = defaultTemplate.defaultModel;
+            }
+            writeProviderV2(fsImpl, pathImpl, providerRoot, defaultTemplate.id, defaultProviderNode);
             const defaultTarget = `${defaultTemplate.id}.${defaultTemplate.defaultModel}`;
             const configPayload = buildV2ConfigObject({
               host: '127.0.0.1',
@@ -183,7 +205,18 @@ Examples:
           let selectedTemplates: InitProviderTemplate[] = [];
 
           if (providersFromArg && providersFromArg.length) {
-            selectedTemplates = resolveSelectedTemplates(providersFromArg, catalogById);
+            if (providerSource === 'builtin') {
+              const unresolved = providersFromArg.filter((providerId) => !catalogById.has(providerId));
+              if (unresolved.length > 0) {
+                spinner.fail('Failed to initialize configuration');
+                ctx.logger.error(`Unknown built-in providers: ${unresolved.join(', ')}. Supported built-ins: ${supported}`);
+                return;
+              }
+            }
+            selectedTemplates = resolveSelectedTemplates(providersFromArg, catalogById, {
+              allowExternal: allowExternalProviders,
+              defaultModel: defaultModelOverride
+            });
             if (!selectedTemplates.length) {
               spinner.fail('Failed to initialize configuration');
               ctx.logger.error(`No valid provider ids found. Supported: ${supported}`);
@@ -218,7 +251,8 @@ Examples:
           }
 
           const defaultTemplate = selectedTemplates.find((provider) => provider.id === defaultProviderId) || selectedTemplates[0];
-          const defaultTarget = `${defaultTemplate.id}.${defaultTemplate.defaultModel}`;
+          const effectiveDefaultModel = defaultModelOverride || defaultTemplate.defaultModel;
+          const defaultTarget = `${defaultTemplate.id}.${effectiveDefaultModel}`;
 
           const defaultHost = normalizeHost(options.host) || '127.0.0.1';
           const defaultPort = normalizePort(options.port) || 5555;
@@ -270,7 +304,20 @@ Examples:
           }
 
           for (const template of selectedTemplates) {
-            writeProviderV2(fsImpl, pathImpl, providerRoot, template.id, asRecord(template.provider));
+            const providerNode = asRecord(JSON.parse(JSON.stringify(template.provider)));
+            const selectedDefaultModel =
+              template.id === defaultProviderId
+                ? (defaultModelOverride || template.defaultModel)
+                : template.defaultModel;
+            if (selectedDefaultModel) {
+              const modelsNode = asRecord(providerNode.models);
+              if (!modelsNode[selectedDefaultModel]) {
+                modelsNode[selectedDefaultModel] = { supportsStreaming: true };
+              }
+              providerNode.models = modelsNode;
+              providerNode.defaultModel = selectedDefaultModel;
+            }
+            writeProviderV2(fsImpl, pathImpl, providerRoot, template.id, providerNode);
           }
 
           const configPayload = buildV2ConfigObject({
@@ -288,6 +335,9 @@ Examples:
           }
           ctx.logger.info(`Providers: ${selectedProviderIds.join(', ')}`);
           ctx.logger.info(`Default provider: ${defaultProviderId}`);
+          if (defaultModelOverride) {
+            ctx.logger.info(`Default model override: ${defaultModelOverride}`);
+          }
           ctx.logger.info(`Provider root: ${providerRoot}`);
           maybePrepareCamoufoxEnvironment(
             ctx,

@@ -23,8 +23,8 @@ export async function interactiveCreateCustomProvider(
     logger.info('Custom provider creation cancelled (empty provider id).');
     return null;
   }
-  if (!/^[A-Za-z0-9._-]+$/.test(providerId)) {
-    logger.info('Invalid provider id. Use only letters, numbers, dot, underscore, dash.');
+  if (!/^[a-z0-9][a-z0-9._-]*$/.test(providerId)) {
+    logger.info('Invalid provider id. Use lowercase letters, numbers, dot, underscore, dash.');
     return null;
   }
   if (existingProviderIds.has(providerId)) {
@@ -63,12 +63,19 @@ export async function interactiveCreateCustomProvider(
   }
   const baseURL = baseURLInput || defaultBase;
 
-  const modelIdInput = (await prompt('Default model id (e.g. gpt-5.2, b=back):\n> ')).trim();
+  const modelIdInput = (await prompt('Model ids (comma-separated, first is default; e.g. gpt-5.2,gpt-5.2-codex, b=back):\n> ')).trim();
   if (isBackInput(modelIdInput)) {
     logger.info('Back to add-provider menu.');
     return null;
   }
-  const modelId = modelIdInput || 'default-model';
+  const modelIds = modelIdInput
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+  if (!modelIds.length) {
+    modelIds.push('default-model');
+  }
+  const modelId = modelIds[0];
   const defaultEnvVar = normalizeEnvVarName(providerId);
   const envVarInput = (await prompt(`API key env var (default=${defaultEnvVar}, b=back):\n> `)).trim();
   if (isBackInput(envVarInput)) {
@@ -82,13 +89,12 @@ export async function interactiveCreateCustomProvider(
     enabled: true,
     type: protocol.providerType,
     baseURL,
+    defaultModel: modelId,
     auth: {
       type: 'apikey',
       apiKey: `\${${envVar}}`
     },
-    models: {
-      [modelId]: { supportsStreaming: true }
-    }
+    models: Object.fromEntries(modelIds.map((id) => [id, { supportsStreaming: true }]))
   };
 
   if (protocol.providerType === 'responses') {

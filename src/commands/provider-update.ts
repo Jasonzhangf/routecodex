@@ -85,6 +85,27 @@ function splitTokenThresholds(raw?: unknown): number[] {
   return out;
 }
 
+function parseUniqueModelIds(raw: string, fallback?: string): string[] {
+  const parts = raw
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const unique = Array.from(new Set(parts));
+  if (unique.length > 0) {
+    return unique;
+  }
+  const fallbackModel = typeof fallback === 'string' ? fallback.trim() : '';
+  return fallbackModel ? [fallbackModel] : [];
+}
+
+function normalizeEnvVarName(providerId: string): string {
+  const normalized = providerId
+    .replace(/[^A-Za-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .toUpperCase();
+  return normalized ? `${normalized}_API_KEY` : 'PROVIDER_API_KEY';
+}
+
 type ProviderUpdateAuth = {
   type: 'apikey' | 'oauth';
   apiKey?: string;
@@ -203,6 +224,22 @@ function normalizeModelsNode(node: unknown): Record<string, UnknownRecord> {
   }
   return node as Record<string, UnknownRecord>;
 }
+
+export const __providerUpdateTestables = {
+  splitCsv,
+  splitTokenThresholds,
+  parseUniqueModelIds,
+  normalizeEnvVarName,
+  readString,
+  readStringArray,
+  isRecord,
+  extractApiKeyFromAuthNode,
+  normalizeAuthForProviderUpdate,
+  buildProviderUpdateInputFromV2,
+  authTypeUsesCredentialFile,
+  readCredentialFileFromAuthNode,
+  normalizeModelsNode
+};
 
 export function createProviderUpdateCommand(): Command {
   const cmd = new Command('provider');
@@ -770,17 +807,22 @@ export function createProviderUpdateCommand(): Command {
       let apiKeyPlaceholder = '';
       let tokenFile = '';
       if (authType.toLowerCase().includes('apikey')) {
-        apiKeyPlaceholder = await ask('API key (or placeholder, e.g. ${PROVIDER_API_KEY:-})', 'YOUR_API_KEY_HERE');
+        const envDefault = normalizeEnvVarName(providerId);
+        const envName = await ask('API key env var name (config writes ${ENV_VAR})', envDefault);
+        const resolved = envName.trim() || envDefault;
+        apiKeyPlaceholder = `\${${resolved}}`;
       } else if (authTypeUsesCredentialFile(authType)) {
         tokenFile = await ask('Token/cookie file path or alias (leave empty to use default)', '');
       }
 
       const modelDefault = tpl.defaultModel ?? '';
-      const primaryModelId = await ask('Primary model id (at least one)', modelDefault);
-      if (!primaryModelId.trim()) {
-        console.error('Primary model id is required');
+      const modelsRaw = await ask('Model ids (comma-separated, first is default)', modelDefault);
+      const modelIds = parseUniqueModelIds(modelsRaw, modelDefault);
+      if (!modelIds.length) {
+        console.error('At least one model id is required');
         process.exit(1);
       }
+      const defaultModelId = await ask('Default model id', modelIds[0]);
 
       const provider = buildProviderFromTemplate(
         providerId,
@@ -789,7 +831,11 @@ export function createProviderUpdateCommand(): Command {
         authType,
         apiKeyPlaceholder,
         tokenFile,
-        primaryModelId
+        modelIds[0],
+        {
+          additionalModelIds: modelIds.slice(1),
+          defaultModelId: defaultModelId.trim() || modelIds[0]
+        }
       );
 
       const payload: ProviderConfigV2 = {
@@ -865,12 +911,16 @@ export function createProviderUpdateCommand(): Command {
 
       let apiKeyPlaceholder = typeof (authNode as { apiKey?: unknown }).apiKey === 'string'
         ? String((authNode as { apiKey?: unknown }).apiKey)
-        : 'YOUR_API_KEY_HERE';
+        : '';
       let tokenFile = readCredentialFileFromAuthNode(authNode);
 
       if (authType.toLowerCase().includes('apikey')) {
-        apiKeyPlaceholder = await ask('API key (or placeholder, e.g. ${PROVIDER_API_KEY:-})', apiKeyPlaceholder);
-        (authNode as { apiKey?: string }).apiKey = apiKeyPlaceholder;
+        const envDefault =
+          (apiKeyPlaceholder.match(/^\$\{([A-Za-z0-9_]+)\}$/)?.[1]) ||
+          normalizeEnvVarName(providerId);
+        const envName = await ask('API key env var name (config writes ${ENV_VAR})', envDefault);
+        const resolved = envName.trim() || envDefault;
+        (authNode as { apiKey?: string }).apiKey = `\${${resolved}}`;
         delete (authNode as { tokenFile?: unknown }).tokenFile;
       } else if (authTypeUsesCredentialFile(authType)) {
         tokenFile = await ask('Token/cookie file path or alias (leave empty to use default)', tokenFile);
@@ -896,13 +946,20 @@ export function createProviderUpdateCommand(): Command {
       const modelsNode = ((node as { models?: unknown }).models ?? {}) as Record<string, UnknownRecord>;
       const existingModelIds = Object.keys(modelsNode);
       const currentPrimary = existingModelIds[0] ?? '';
-      const primaryModelId = await ask('Primary model id', currentPrimary);
-      if (primaryModelId.trim()) {
-        if (!modelsNode[primaryModelId.trim()]) {
-          modelsNode[primaryModelId.trim()] = { supportsStreaming: true };
-        }
+      const currentDefaultModel = readString((node as { defaultModel?: unknown }).defaultModel) || currentPrimary;
+      const modelsRaw = await ask('Model ids (comma-separated, first is default)', existingModelIds.join(',') || currentPrimary);
+      const modelIds = parseUniqueModelIds(modelsRaw, currentPrimary || currentDefaultModel || 'default-model');
+      const nextModels: Record<string, UnknownRecord> = {};
+      for (const modelId of modelIds) {
+        nextModels[modelId] = isRecord(modelsNode[modelId]) ? modelsNode[modelId] : { supportsStreaming: true };
       }
-      (node as { models?: Record<string, UnknownRecord> }).models = modelsNode;
+      const defaultModelId = await ask('Default model id', currentDefaultModel || modelIds[0]);
+      const resolvedDefaultModel = defaultModelId.trim() || modelIds[0];
+      if (!nextModels[resolvedDefaultModel]) {
+        nextModels[resolvedDefaultModel] = { supportsStreaming: true };
+      }
+      (node as { models?: Record<string, UnknownRecord> }).models = nextModels;
+      (node as { defaultModel?: string }).defaultModel = resolvedDefaultModel;
 
       parsed.provider = node;
 

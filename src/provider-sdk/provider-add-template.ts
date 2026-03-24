@@ -42,6 +42,11 @@ export interface ProviderTemplate {
   providerTemplate?: UnknownRecord;
 }
 
+export type BuildProviderFromTemplateOptions = {
+  additionalModelIds?: string[];
+  defaultModelId?: string;
+};
+
 const CUSTOM_PROVIDER_TEMPLATE: ProviderTemplate = {
   id: 'custom',
   label: 'Custom provider (manual configuration)',
@@ -88,7 +93,8 @@ export function buildProviderFromTemplate(
   authType: string,
   apiKeyOrPlaceholder: string,
   tokenFile: string,
-  primaryModelId: string
+  primaryModelId: string,
+  options?: BuildProviderFromTemplateOptions
 ): UnknownRecord {
   const provider: UnknownRecord = tpl.providerTemplate
     ? JSON.parse(JSON.stringify(tpl.providerTemplate))
@@ -126,6 +132,13 @@ export function buildProviderFromTemplate(
 
   const models = normalizeModelsNode(provider.models);
   const seedModels = Array.isArray(tpl.seedModels) ? tpl.seedModels : [];
+  const additionalModelIds = Array.isArray(options?.additionalModelIds) ? options!.additionalModelIds : [];
+  const modelInsertOrder = [primaryModelId, ...additionalModelIds]
+    .map((item) => (typeof item === 'string' ? item.trim() : ''))
+    .filter(Boolean);
+  const defaultModelIdCandidate = readString(options?.defaultModelId);
+  const defaultModelId = defaultModelIdCandidate || modelInsertOrder[0] || tpl.defaultModel;
+
   for (const modelId of seedModels) {
     const normalizedModelId = typeof modelId === 'string' ? modelId.trim() : '';
     if (!normalizedModelId) {
@@ -133,9 +146,15 @@ export function buildProviderFromTemplate(
     }
     models[normalizedModelId] = isRecord(models[normalizedModelId]) ? models[normalizedModelId] : { supportsStreaming: true };
   }
-  if (primaryModelId.trim()) {
-    const key = primaryModelId.trim();
+  for (const key of modelInsertOrder) {
     models[key] = isRecord(models[key]) ? models[key] : { supportsStreaming: true };
+  }
+  if (defaultModelId) {
+    const key = defaultModelId.trim();
+    if (key) {
+      models[key] = isRecord(models[key]) ? models[key] : { supportsStreaming: true };
+      provider.defaultModel = key;
+    }
   }
   provider.models = models;
 

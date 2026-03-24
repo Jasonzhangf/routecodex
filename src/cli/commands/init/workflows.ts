@@ -13,6 +13,7 @@ import {
   inferDefaultModel,
   isBackInput,
   loadProviderV2Map,
+  normalizeEnvVarName,
   normalizeHost,
   normalizePort,
   printConfiguredProviders,
@@ -27,6 +28,7 @@ import {
 import { interactiveCreateCustomProvider, interactiveRoutingWizard } from './interactive.js';
 import { promptDuplicateMigrationStrategy, promptDuplicateProviderResolution } from './prompt-utils.js';
 import type { LoggerLike, PromptLike, Spinner, UnknownRecord } from './shared.js';
+import { isManagedBootstrapTemplate } from '../../config/bootstrap-provider-templates.js';
 
 export async function migrateV1ToV2(args: {
   fsImpl: typeof fs;
@@ -213,7 +215,8 @@ export async function runV2MaintenanceMenu(args: {
       const mode = (await prompt(
         `Add provider:\n` +
         `  1) Add managed-auth built-in provider\n` +
-        `  2) Add standard provider (guided protocol setup)\n` +
+        `  2) Add external custom provider (guided protocol setup)\n` +
+        `  3) Add standard protocol built-in provider\n` +
         `  b) Back\n> `
       )).trim();
 
@@ -222,22 +225,37 @@ export async function runV2MaintenanceMenu(args: {
         continue;
       }
 
-      if (!mode || mode === '1') {
-        const lines = catalog.map((provider, index) => {
+      if (!mode || mode === '1' || mode === '3') {
+        const selectedCatalog = catalog.filter((provider) => {
+          if (!mode || mode === '1') {
+            // Backward compatibility: mode=1 historically listed all built-ins.
+            return true;
+          }
+          return !isManagedBootstrapTemplate(provider.id);
+        });
+        if (!selectedCatalog.length) {
+          logger.info(mode === '3' ? 'No standard protocol built-in providers found.' : 'No managed-auth built-in providers found.');
+          continue;
+        }
+        const lines = selectedCatalog.map((provider, index) => {
           const exists = providerIds.includes(provider.id) ? ' [exists]' : ' [new]';
           return `  ${index + 1}) ${provider.id} - ${provider.label}${exists}`;
         });
-        const pick = (await prompt(`Choose managed-auth built-in provider (b=back):\n${lines.join('\n')}\n> `)).trim();
+        const pickTitle =
+          mode === '3'
+            ? 'Choose standard protocol built-in provider (b=back):'
+            : 'Choose managed-auth built-in provider (b=back):';
+        const pick = (await prompt(`${pickTitle}\n${lines.join('\n')}\n> `)).trim();
         if (isBackInput(pick)) {
           logger.info('Back to add-provider menu.');
           continue;
         }
         const index = Number(pick);
-        if (!Number.isFinite(index) || index <= 0 || Math.floor(index) > catalog.length) {
+        if (!Number.isFinite(index) || index <= 0 || Math.floor(index) > selectedCatalog.length) {
           logger.info('Invalid provider selection.');
           continue;
         }
-        const selected = catalog[Math.floor(index) - 1];
+        const selected = selectedCatalog[Math.floor(index) - 1];
 
         if (providerIds.includes(selected.id)) {
           const resolution = (await prompt(
@@ -257,8 +275,19 @@ export async function runV2MaintenanceMenu(args: {
           }
         }
 
-        writeProviderV2(fsImpl, pathImpl, providerRoot, selected.id, asRecord(selected.provider));
-        logger.info(providerIds.includes(selected.id) ? `Updated managed-auth provider template: ${selected.id}` : `Added managed-auth provider: ${selected.id}`);
+        const providerNode = asRecord(JSON.parse(JSON.stringify(selected.provider)));
+        if (selected.defaultModel) {
+          const modelsNode = asRecord(providerNode.models);
+          if (!modelsNode[selected.defaultModel]) {
+            modelsNode[selected.defaultModel] = { supportsStreaming: true };
+          }
+          providerNode.models = modelsNode;
+          providerNode.defaultModel = selected.defaultModel;
+        }
+        writeProviderV2(fsImpl, pathImpl, providerRoot, selected.id, providerNode);
+        const actionLabel = providerIds.includes(selected.id) ? 'Updated' : 'Added';
+        const sourceLabel = mode === '3' ? 'standard provider template' : 'managed-auth provider template';
+        logger.info(`${actionLabel} ${sourceLabel}: ${selected.id}`);
         continue;
       }
 
@@ -272,7 +301,7 @@ export async function runV2MaintenanceMenu(args: {
         continue;
       }
 
-      logger.info('Unknown add mode. Choose 1 (managed-auth built-in), 2 (guided standard provider), or b (back).');
+      logger.info('Unknown add mode. Choose 1 (managed-auth built-in), 2 (guided standard provider), or b (back). 3 also supported for standard built-in.');
       continue;
     }
 
@@ -349,6 +378,8 @@ export async function runV2MaintenanceMenu(args: {
           `  2) Set baseURL\n` +
           `  3) Replace with built-in managed-auth template\n` +
           `  4) Save provider\n` +
+          `  5) Edit models/defaultModel\n` +
+          `  6) Configure auth reference\n` +
           `  b) Back without saving\n> `
         ))
           .trim();
@@ -387,7 +418,145 @@ export async function runV2MaintenanceMenu(args: {
           logger.info(`Saved provider: ${providerId}`);
           break;
         }
-        logger.info('Unknown modify action. Choose 1/2/3/4/b.');
+        if (action === '5') {
+          const modelsNode = asRecord(providerNode.models);
+          if (!Object.keys(modelsNode).length) {
+            modelsNode['default-model'] = { supportsStreaming: true };
+          }
+          while (true) {
+            const modelIds = Object.keys(modelsNode).sort();
+            const currentDefault = typeof providerNode.defaultModel === 'string' && providerNode.defaultModel.trim()
+              ? providerNode.defaultModel.trim()
+              : modelIds[0];
+            const modelAction = (await prompt(
+              `Model editor (${providerId}): default=${currentDefault}, models=${modelIds.join(', ')}\n` +
+              `  1) Add model ids (comma-separated)\n` +
+              `  2) Remove model id\n` +
+              `  3) Set default model id\n` +
+              `  4) Back\n> `
+            )).trim().toLowerCase();
+            if (isBackInput(modelAction) || modelAction === '4') {
+              break;
+            }
+            if (modelAction === '1') {
+              const raw = (await prompt('Model ids to add (comma-separated, b=back):\n> ')).trim();
+              if (isBackInput(raw)) {
+                continue;
+              }
+              const ids = raw.split(',').map((item) => item.trim()).filter(Boolean);
+              for (const id of ids) {
+                if (!modelsNode[id]) {
+                  modelsNode[id] = { supportsStreaming: true };
+                }
+              }
+              providerNode.models = modelsNode;
+              continue;
+            }
+            if (modelAction === '2') {
+              const raw = (await prompt('Model id to remove (b=back):\n> ')).trim();
+              if (isBackInput(raw)) {
+                continue;
+              }
+              if (!raw || !modelsNode[raw]) {
+                logger.info(`Model not found: ${raw || '(empty)'}`);
+                continue;
+              }
+              if (Object.keys(modelsNode).length <= 1) {
+                logger.info('At least one model must remain configured.');
+                continue;
+              }
+              delete modelsNode[raw];
+              providerNode.models = modelsNode;
+              if (providerNode.defaultModel === raw) {
+                providerNode.defaultModel = Object.keys(modelsNode)[0];
+              }
+              continue;
+            }
+            if (modelAction === '3') {
+              const raw = (await prompt('Default model id (must exist, b=back):\n> ')).trim();
+              if (isBackInput(raw)) {
+                continue;
+              }
+              if (!raw) {
+                logger.info('Default model id cannot be empty.');
+                continue;
+              }
+              if (!modelsNode[raw]) {
+                logger.info(`Model "${raw}" is not configured. Add it first.`);
+                continue;
+              }
+              providerNode.defaultModel = raw;
+              continue;
+            }
+            logger.info('Unknown model action. Choose 1/2/3/4.');
+          }
+          continue;
+        }
+        if (action === '6') {
+          const authNode = asRecord(providerNode.auth);
+          while (true) {
+            const authType = typeof authNode.type === 'string' ? authNode.type : 'apikey';
+            const authAction = (await prompt(
+              `Auth editor (${providerId}): type=${authType}\n` +
+              `  1) Set auth type\n` +
+              `  2) Set API key env placeholder\n` +
+              `  3) Set token/cookie file path\n` +
+              `  4) Back\n> `
+            )).trim().toLowerCase();
+            if (isBackInput(authAction) || authAction === '4') {
+              break;
+            }
+            if (authAction === '1') {
+              const nextType = (await prompt(`Auth type (current=${authType}, b=back):\n> `)).trim();
+              if (isBackInput(nextType)) {
+                continue;
+              }
+              if (!nextType) {
+                logger.info('Auth type cannot be empty.');
+                continue;
+              }
+              authNode.type = nextType;
+              continue;
+            }
+            if (authAction === '2') {
+              const envDefault = normalizeEnvVarName(providerId);
+              const envName = (await prompt(`API key env var (default=${envDefault}, b=back):\n> `)).trim();
+              if (isBackInput(envName)) {
+                continue;
+              }
+              const resolvedEnv = envName || envDefault;
+              authNode.type = String(authNode.type || 'apikey');
+              authNode.apiKey = `\${${resolvedEnv}}`;
+              delete authNode.tokenFile;
+              delete authNode.cookieFile;
+              continue;
+            }
+            if (authAction === '3') {
+              const tokenPath = (await prompt('Token/Cookie file path (b=back):\n> ')).trim();
+              if (isBackInput(tokenPath)) {
+                continue;
+              }
+              if (!tokenPath) {
+                logger.info('Token/Cookie file path cannot be empty.');
+                continue;
+              }
+              const normalizedType = String(authNode.type || '').toLowerCase();
+              if (normalizedType.includes('cookie')) {
+                authNode.cookieFile = tokenPath;
+                delete authNode.tokenFile;
+              } else {
+                authNode.tokenFile = tokenPath;
+                delete authNode.cookieFile;
+              }
+              delete authNode.apiKey;
+              continue;
+            }
+            logger.info('Unknown auth action. Choose 1/2/3/4.');
+          }
+          providerNode.auth = authNode;
+          continue;
+        }
+        logger.info('Unknown modify action. Choose 1/2/3/4/5/6/b.');
       }
       continue;
     }

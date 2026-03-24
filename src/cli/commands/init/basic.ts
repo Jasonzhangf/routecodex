@@ -52,6 +52,10 @@ export function getProviderV2Path(pathImpl: typeof path, providerRoot: string, p
 }
 
 export function inferDefaultModel(providerNode: UnknownRecord): string {
+  const explicitDefault = typeof providerNode.defaultModel === 'string' ? providerNode.defaultModel.trim() : '';
+  if (explicitDefault) {
+    return explicitDefault;
+  }
   const models = asRecord(providerNode.models);
   const keys = Object.keys(models);
   if (keys.length > 0) {
@@ -423,14 +427,50 @@ export function isBackInput(value: string): boolean {
 
 export function resolveSelectedTemplates(
   providerIds: string[],
-  catalogById: Map<string, InitProviderTemplate>
+  catalogById: Map<string, InitProviderTemplate>,
+  options?: {
+    allowExternal?: boolean;
+    defaultModel?: string;
+  }
 ): InitProviderTemplate[] {
   const selected: InitProviderTemplate[] = [];
+  const defaultModel = typeof options?.defaultModel === 'string' && options.defaultModel.trim()
+    ? options.defaultModel.trim()
+    : 'default-model';
   for (const providerId of providerIds) {
     const template = catalogById.get(providerId);
     if (template) {
       selected.push(template);
+      continue;
     }
+    if (!options?.allowExternal) {
+      continue;
+    }
+    const externalProviderId = providerId.trim();
+    if (!externalProviderId) {
+      continue;
+    }
+    const envVar = normalizeEnvVarName(externalProviderId);
+    selected.push({
+      id: externalProviderId,
+      label: `External (${externalProviderId})`,
+      description: 'External OpenAI-compatible provider generated from guided template',
+      provider: {
+        id: externalProviderId,
+        enabled: true,
+        type: 'openai',
+        baseURL: 'https://api.example.com/v1',
+        auth: {
+          type: 'apikey',
+          apiKey: `\${${envVar}}`
+        },
+        defaultModel,
+        models: {
+          [defaultModel]: { supportsStreaming: true }
+        }
+      },
+      defaultModel
+    });
   }
   return selected;
 }

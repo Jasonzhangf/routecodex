@@ -359,6 +359,121 @@ describe('cli config command', () => {
 });
 
 describe('cli init command', () => {
+  it('init (non-interactive) supports external provider ids and default-model override', async () => {
+    const writes = new Map<string, string>();
+    const program = new Command();
+    createInitCommand(program, {
+      logger: {
+        info: () => {},
+        warning: () => {},
+        success: () => {},
+        error: () => {}
+      },
+      createSpinner: async () =>
+        ({
+          start: () => ({} as any),
+          succeed: () => {},
+          fail: () => {},
+          warn: () => {},
+          info: () => {},
+          stop: () => {},
+          text: ''
+        }) as any,
+      fsImpl: {
+        existsSync: () => false,
+        readFileSync: () => '',
+        writeFileSync: (p: any, content: any) => {
+          writes.set(String(p), String(content));
+        },
+        mkdirSync: () => {}
+      },
+      pathImpl: path as any,
+      getHomeDir: () => '/tmp'
+    });
+
+    await program.parseAsync(
+      [
+        'node',
+        'routecodex',
+        'init',
+        '--config',
+        '/tmp/config.json',
+        '--providers',
+        'my-openai',
+        '--default-provider',
+        'my-openai',
+        '--default-model',
+        'gpt-4.1-mini',
+        '--provider-source',
+        'mixed',
+        '--force'
+      ],
+      { from: 'node' }
+    );
+
+    const parsed = JSON.parse(writes.get('/tmp/config.json') || '{}');
+    expect(parsed?.virtualrouterMode).toBe('v2');
+    expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.routing?.default?.[0]?.targets?.[0]).toBe('my-openai.gpt-4.1-mini');
+
+    const providerV2 = JSON.parse(writes.get('/tmp/.rcc/provider/my-openai/config.v2.json') || '{}');
+    expect(providerV2?.providerId).toBe('my-openai');
+    expect(providerV2?.provider?.defaultModel).toBe('gpt-4.1-mini');
+    expect(providerV2?.provider?.models?.['gpt-4.1-mini']).toBeTruthy();
+    expect(providerV2?.provider?.auth?.apiKey).toBe('${MY_OPENAI_API_KEY}');
+  });
+
+  it('init (non-interactive) rejects unknown provider ids when --provider-source=builtin', async () => {
+    const errors: string[] = [];
+    const writes = new Map<string, string>();
+    const program = new Command();
+    createInitCommand(program, {
+      logger: {
+        info: () => {},
+        warning: () => {},
+        success: () => {},
+        error: (msg) => errors.push(msg)
+      },
+      createSpinner: async () =>
+        ({
+          start: () => ({} as any),
+          succeed: () => {},
+          fail: () => {},
+          warn: () => {},
+          info: () => {},
+          stop: () => {},
+          text: ''
+        }) as any,
+      fsImpl: {
+        existsSync: () => false,
+        readFileSync: () => '',
+        writeFileSync: (p: any, content: any) => {
+          writes.set(String(p), String(content));
+        },
+        mkdirSync: () => {}
+      },
+      pathImpl: path as any,
+      getHomeDir: () => '/tmp'
+    });
+
+    await program.parseAsync(
+      [
+        'node',
+        'routecodex',
+        'init',
+        '--config',
+        '/tmp/config.json',
+        '--providers',
+        'my-openai',
+        '--provider-source',
+        'builtin'
+      ],
+      { from: 'node' }
+    );
+
+    expect(errors.join('\n')).toContain('Unknown built-in providers');
+    expect(writes.has('/tmp/config.json')).toBe(false);
+  });
+
   it('init (non-interactive) writes config when --providers is provided', async () => {
     const writes = new Map<string, string>();
     const program = new Command();

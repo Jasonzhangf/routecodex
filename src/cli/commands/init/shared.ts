@@ -69,6 +69,8 @@ export type InitCommandOptions = {
   camoufox?: boolean;
   providers?: string;
   defaultProvider?: string;
+  defaultModel?: string;
+  providerSource?: string;
   host?: string;
   port?: string;
   listProviders?: boolean;

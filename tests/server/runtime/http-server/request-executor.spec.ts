@@ -1,5 +1,5 @@
 import { jest } from '@jest/globals';
-import { createRequestExecutor } from '../../../../src/server/runtime/http-server/request-executor';
+import { __requestExecutorTestables, createRequestExecutor } from '../../../../src/server/runtime/http-server/request-executor';
 import type { ProviderHandle } from '../../../../src/server/runtime/http-server/types';
 import { StatsManager } from '../../../../src/server/runtime/http-server/stats-manager';
 
@@ -28,6 +28,138 @@ function buildHandle(providerKey: string, processFn: () => Promise<unknown>): Pr
 }
 
 describe('HubRequestExecutor failover', () => {
+  test('covers request-executor helper snapshots and truncation utilities', () => {
+    expect(__requestExecutorTestables.readString('  abc  ')).toBe('abc');
+    expect(__requestExecutorTestables.readString('')).toBeUndefined();
+    expect(__requestExecutorTestables.readString(undefined)).toBeUndefined();
+
+    const rawSnapshot = __requestExecutorTestables.extractRetryErrorSnapshot('plain-error');
+    expect(rawSnapshot.reason).toContain('plain-error');
+
+    const detailedSnapshot = __requestExecutorTestables.extractRetryErrorSnapshot({
+      statusCode: 429,
+      details: { code: 'E_DETAIL', upstream_code: 'rate_limit_error' },
+      response: {
+        data: {
+          error: { code: 'E_RESPONSE' }
+        }
+      }
+    });
+    expect(detailedSnapshot.statusCode).toBe(429);
+    expect(detailedSnapshot.errorCode).toBe('E_DETAIL');
+    expect(detailedSnapshot.upstreamCode).toBe('rate_limit_error');
+
+    const longReason = 'x'.repeat(400);
+    const truncated = __requestExecutorTestables.truncateReason(longReason, 50);
+    expect(truncated.length).toBe(50);
+    expect(truncated.endsWith('…')).toBe(true);
+  });
+
+  test('retries when runtime resolution fails before provider send and then succeeds', async () => {
+    const firstProviderKey = 'runtime-missing.alias.model-a';
+    const secondProviderKey = 'runtime-ready.alias.model-b';
+    const successProcess = jest.fn(async () => ({ status: 200, data: { id: 'ok-after-runtime-retry' } }));
+    const successHandle = buildHandle(secondProviderKey, successProcess);
+
+    const runtimeManager = {
+      resolveRuntimeKey: (providerKey?: string) => (providerKey === secondProviderKey ? secondProviderKey : undefined),
+      getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey === secondProviderKey ? successHandle : undefined)
+    };
+
+    const pipeline = {
+      execute: jest.fn(async (input: any) => {
+        const disabled = new Set<string>(
+          Array.isArray(input.metadata?.excludedProviderKeys) ? input.metadata.excludedProviderKeys : []
+        );
+        const providerKey = disabled.has(firstProviderKey) ? secondProviderKey : firstProviderKey;
+        return {
+          requestId: input.id,
+          providerPayload: {},
+          target: {
+            providerKey,
+            providerType: 'openai',
+            outboundProfile: 'openai-chat',
+            runtimeKey: providerKey
+          },
+          routingDecision: { routeName: 'default', pool: [firstProviderKey, secondProviderKey] },
+          metadata: {}
+        };
+      }),
+      updateVirtualRouterConfig: jest.fn()
+    };
+
+    const logStage = jest.fn();
+    const deps = {
+      runtimeManager,
+      getHubPipeline: () => pipeline,
+      getModuleDependencies: () => ({
+        errorHandlingCenter: {
+          handleError: jest.fn(async () => undefined)
+        }
+      }),
+      logStage,
+      stats: new StatsManager()
+    };
+
+    const executor = createRequestExecutor(deps);
+    const result = await executor.execute({
+      requestId: 'req-runtime-retry',
+      entryEndpoint: '/v1/responses',
+      body: {},
+      headers: {},
+      metadata: {}
+    });
+
+    expect(result).toEqual(expect.objectContaining({ status: 200 }));
+    expect(pipeline.execute).toHaveBeenCalledTimes(2);
+    expect(successProcess).toHaveBeenCalledTimes(1);
+    expect(
+      logStage.mock.calls.some(
+        (call) =>
+          call[0] === 'provider.runtime_resolve.error' &&
+          call[1] === 'req-runtime-retry' &&
+          call[2]?.providerKey === firstProviderKey
+      )
+    ).toBe(true);
+    expect(
+      logStage.mock.calls.some(
+        (call) =>
+          call[0] === 'provider.retry' &&
+          call[1] === 'req-runtime-retry' &&
+          Array.isArray(call[2]?.excluded) &&
+          call[2]?.excluded.includes(firstProviderKey)
+      )
+    ).toBe(true);
+  });
+
+  test('records attempt and fails fast when hub pipeline is unavailable', async () => {
+    const deps = {
+      runtimeManager: {
+        resolveRuntimeKey: () => undefined,
+        getHandleByRuntimeKey: () => undefined
+      },
+      getHubPipeline: () => null,
+      getModuleDependencies: () => ({
+        errorHandlingCenter: {
+          handleError: jest.fn(async () => undefined)
+        }
+      }),
+      logStage: jest.fn(),
+      stats: new StatsManager()
+    };
+
+    const executor = createRequestExecutor(deps);
+    await expect(
+      executor.execute({
+        requestId: 'req-no-pipeline',
+        entryEndpoint: '/v1/responses',
+        body: {},
+        headers: {},
+        metadata: {}
+      })
+    ).rejects.toThrow('Hub pipeline runtime is not initialized');
+  });
+
   test('waits for short recoverable cooldown on pool exhaustion before retrying route selection', async () => {
     const providerKey = 'deepseek-web.1.deepseek-chat';
     const handle = buildHandle(providerKey, async () => ({ status: 200, data: { id: 'ok-after-wait' } }));
@@ -173,6 +305,92 @@ describe('HubRequestExecutor failover', () => {
     expect(failingProcess).toHaveBeenCalledTimes(1);
     expect(successProcess).toHaveBeenCalledTimes(1);
     expect(result).toEqual(expect.objectContaining({ status: 200 }));
+  });
+
+  test('prints retry switch reason and error code to console on failover', async () => {
+    const firstProviderKey = 'crs.key2.gpt-5.3-codex';
+    const secondProviderKey = 'crs.key1.gpt-5.3-codex';
+    const failingError = new Error('Upstream SSE parser terminated');
+    (failingError as any).statusCode = 429;
+    (failingError as any).code = 'SSE_TO_JSON_ERROR';
+    (failingError as any).upstreamCode = 'rate_limit_error';
+
+    const failingProcess = jest.fn(async () => {
+      throw failingError;
+    });
+    const failureHandle = buildHandle(firstProviderKey, failingProcess);
+    const successProcess = jest.fn(async () => ({ status: 200, data: { id: 'ok-after-retry' } }));
+    const successHandle = buildHandle(secondProviderKey, successProcess);
+
+    const handles = new Map<string, ProviderHandle>([
+      [firstProviderKey, failureHandle],
+      [secondProviderKey, successHandle]
+    ]);
+
+    const runtimeManager = {
+      resolveRuntimeKey: (providerKey: string) => providerKey,
+      getHandleByRuntimeKey: (runtimeKey?: string) => (runtimeKey ? handles.get(runtimeKey) : undefined)
+    };
+
+    const pipeline = {
+      execute: jest.fn(async (input: any) => {
+        const disabled = new Set<string>(
+          Array.isArray(input.metadata?.excludedProviderKeys)
+            ? input.metadata.excludedProviderKeys
+            : []
+        );
+        const providerKey = disabled.has(firstProviderKey)
+          ? secondProviderKey
+          : firstProviderKey;
+        return {
+          requestId: input.id,
+          providerPayload: {},
+          target: {
+            providerKey,
+            providerType: 'openai',
+            outboundProfile: 'openai-responses',
+            runtimeKey: providerKey
+          },
+          routingDecision: { routeName: 'longcontext' },
+          metadata: {}
+        };
+      }),
+      updateVirtualRouterConfig: jest.fn()
+    };
+
+    const deps = {
+      runtimeManager,
+      getHubPipeline: () => pipeline,
+      getModuleDependencies: () => ({
+        errorHandlingCenter: {
+          handleError: jest.fn(async () => undefined)
+        }
+      }),
+      logStage: jest.fn(),
+      stats: new StatsManager()
+    };
+
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => { });
+    try {
+      const executor = createRequestExecutor(deps);
+      const result = await executor.execute({
+        requestId: 'req-switch-log',
+        entryEndpoint: '/v1/responses',
+        body: {},
+        headers: {},
+        metadata: {}
+      });
+
+      expect(result).toEqual(expect.objectContaining({ status: 200 }));
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('[provider-switch]'));
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('status=429'));
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('code=SSE_TO_JSON_ERROR'));
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('upstreamCode=rate_limit_error'));
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('switch=exclude_and_reroute'));
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('provider=crs.key2.gpt-5.3-codex'));
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   test('forces longcontext routeHint on prompt-too-long retry', async () => {

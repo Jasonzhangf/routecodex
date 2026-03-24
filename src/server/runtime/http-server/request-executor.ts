@@ -88,8 +88,97 @@ const DEFAULT_MAX_PROVIDER_ATTEMPTS = 6;
 // Re-export for backward compatibility
 export type { SseWrapperErrorInfo };
 
+type RetryErrorSnapshot = {
+  statusCode?: number;
+  errorCode?: string;
+  upstreamCode?: string;
+  reason: string;
+};
+
+function readString(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const normalized = value.trim();
+  return normalized || undefined;
+}
+
+function extractRetryErrorSnapshot(error: unknown): RetryErrorSnapshot {
+  const fallbackReason = 'Unknown error';
+  if (!error || typeof error !== 'object') {
+    return {
+      reason: describeRetryReason(error) || fallbackReason
+    };
+  }
+  const record = error as Record<string, unknown>;
+  const responseData = (record.response as { data?: unknown } | undefined)?.data;
+  const responseError =
+    responseData && typeof responseData === 'object'
+      ? (responseData as Record<string, unknown>).error
+      : undefined;
+  const responseErrorRecord =
+    responseError && typeof responseError === 'object'
+      ? (responseError as Record<string, unknown>)
+      : undefined;
+  const detailsRecord =
+    record.details && typeof record.details === 'object'
+      ? (record.details as Record<string, unknown>)
+      : undefined;
+
+  const statusCode = extractStatusCodeFromError(error);
+  const errorCode =
+    readString(record.code)
+    ?? readString(record.errorCode)
+    ?? readString(detailsRecord?.code)
+    ?? readString(responseErrorRecord?.code);
+  const upstreamCode =
+    readString(record.upstreamCode)
+    ?? readString(detailsRecord?.upstreamCode)
+    ?? readString(detailsRecord?.upstream_code);
+  const reason = describeRetryReason(error) || fallbackReason;
+
+  return {
+    ...(typeof statusCode === 'number' ? { statusCode } : {}),
+    ...(errorCode ? { errorCode } : {}),
+    ...(upstreamCode ? { upstreamCode } : {}),
+    reason
+  };
+}
+
+function truncateReason(reason: string, maxLength = 220): string {
+  if (reason.length <= maxLength) {
+    return reason;
+  }
+  return `${reason.slice(0, Math.max(0, maxLength - 1))}…`;
+}
+
 export class HubRequestExecutor implements RequestExecutor {
   constructor(private readonly deps: RequestExecutorDeps) { }
+
+  private logProviderRetrySwitch(args: {
+    requestId: string;
+    attempt: number;
+    maxAttempts: number;
+    providerKey?: string;
+    nextAttempt: number;
+    reason: string;
+    statusCode?: number;
+    errorCode?: string;
+    upstreamCode?: string;
+    switchAction: 'exclude_and_reroute' | 'retry_same_provider';
+  }): void {
+    const providerLabel = args.providerKey || 'unknown-provider';
+    const retryTag = `[provider-switch] req=${args.requestId} attempt=${args.attempt}/${args.maxAttempts} -> ${args.nextAttempt}/${args.maxAttempts}`;
+    const details = [
+      `provider=${providerLabel}`,
+      `switch=${args.switchAction}`,
+      ...(typeof args.statusCode === 'number' ? [`status=${args.statusCode}`] : []),
+      ...(args.errorCode ? [`code=${args.errorCode}`] : []),
+      ...(args.upstreamCode ? [`upstreamCode=${args.upstreamCode}`] : []),
+      `reason=${JSON.stringify(truncateReason(args.reason))}`
+    ];
+    console.warn(`${retryTag} ${details.join(' ')}`);
+  }
 
   async execute(input: PipelineExecutionInput): Promise<PipelineExecutionResult> {
     // Stats must remain stable across provider retries and requestId enhancements.
@@ -289,9 +378,13 @@ export class HubRequestExecutor implements RequestExecutor {
           });
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error ?? 'Unknown error');
+          const retryError = extractRetryErrorSnapshot(error);
           this.logStage('provider.runtime_resolve.error', providerRequestId, {
             providerKey: target.providerKey,
             message: errorMessage,
+            ...(typeof retryError.statusCode === 'number' ? { statusCode: retryError.statusCode } : {}),
+            ...(retryError.errorCode ? { errorCode: retryError.errorCode } : {}),
+            ...(retryError.upstreamCode ? { upstreamCode: retryError.upstreamCode } : {}),
             attempt
           });
           lastError = error;
@@ -308,13 +401,31 @@ export class HubRequestExecutor implements RequestExecutor {
           } else if (target.providerKey) {
             excludedProviderKeys.add(target.providerKey);
           }
+          const switchAction: 'exclude_and_reroute' | 'retry_same_provider' =
+            singleProviderPool ? 'retry_same_provider' : 'exclude_and_reroute';
+          this.logProviderRetrySwitch({
+            requestId: providerRequestId,
+            attempt,
+            maxAttempts,
+            providerKey: target.providerKey,
+            nextAttempt: attempt + 1,
+            reason: retryError.reason,
+            statusCode: retryError.statusCode,
+            errorCode: retryError.errorCode,
+            upstreamCode: retryError.upstreamCode,
+            switchAction
+          });
           this.logStage('provider.retry', input.requestId, {
             providerKey: target.providerKey,
             attempt,
             nextAttempt: attempt + 1,
             excluded: Array.from(excludedProviderKeys),
-            reason: describeRetryReason(error),
-            routeHint: forcedRouteHint
+            reason: retryError.reason,
+            routeHint: forcedRouteHint,
+            switchAction,
+            ...(typeof retryError.statusCode === 'number' ? { statusCode: retryError.statusCode } : {}),
+            ...(retryError.errorCode ? { errorCode: retryError.errorCode } : {}),
+            ...(retryError.upstreamCode ? { upstreamCode: retryError.upstreamCode } : {})
           });
           continue;
         }
@@ -637,6 +748,7 @@ export class HubRequestExecutor implements RequestExecutor {
           };
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error ?? 'Unknown error');
+          const retryError = extractRetryErrorSnapshot(error);
           this.logStage('provider.send.error', input.requestId, {
             providerKey: target.providerKey,
             message: errorMessage,
@@ -644,6 +756,9 @@ export class HubRequestExecutor implements RequestExecutor {
             providerFamily: handle.providerFamily,
             model: providerModel,
             providerLabel,
+            ...(typeof retryError.statusCode === 'number' ? { statusCode: retryError.statusCode } : {}),
+            ...(retryError.errorCode ? { errorCode: retryError.errorCode } : {}),
+            ...(retryError.upstreamCode ? { upstreamCode: retryError.upstreamCode } : {}),
             attempt
           });
           lastError = error;
@@ -772,13 +887,31 @@ export class HubRequestExecutor implements RequestExecutor {
               excludedProviderKeys.add(target.providerKey);
             }
           }
+          const switchAction: 'exclude_and_reroute' | 'retry_same_provider' =
+            singleProviderPool ? 'retry_same_provider' : 'exclude_and_reroute';
+          this.logProviderRetrySwitch({
+            requestId: input.requestId,
+            attempt,
+            maxAttempts,
+            providerKey: target.providerKey,
+            nextAttempt: attempt + 1,
+            reason: retryError.reason,
+            statusCode: retryError.statusCode,
+            errorCode: retryError.errorCode,
+            upstreamCode: retryError.upstreamCode,
+            switchAction
+          });
           this.logStage('provider.retry', input.requestId, {
             providerKey: target.providerKey,
             attempt,
             nextAttempt: attempt + 1,
             excluded: Array.from(excludedProviderKeys),
-            reason: describeRetryReason(error),
+            reason: retryError.reason,
             routeHint: forcedRouteHint,
+            switchAction,
+            ...(typeof retryError.statusCode === 'number' ? { statusCode: retryError.statusCode } : {}),
+            ...(retryError.errorCode ? { errorCode: retryError.errorCode } : {}),
+            ...(retryError.upstreamCode ? { upstreamCode: retryError.upstreamCode } : {}),
             ...(promptTooLong ? { contextOverflowRetries, maxContextOverflowRetries: MAX_CONTEXT_OVERFLOW_RETRIES } : {})
           });
           continue;
@@ -807,6 +940,12 @@ export class HubRequestExecutor implements RequestExecutor {
   }
 
 }
+
+export const __requestExecutorTestables = {
+  readString,
+  extractRetryErrorSnapshot,
+  truncateReason
+};
 
 export function createRequestExecutor(deps: RequestExecutorDeps): RequestExecutor {
   return new HubRequestExecutor(deps);
