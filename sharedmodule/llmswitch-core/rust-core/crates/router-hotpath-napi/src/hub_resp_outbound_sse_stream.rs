@@ -20,7 +20,7 @@ pub struct SseStreamOutput {
 
 fn resolve_sse_stream_mode(wants_stream: bool, client_protocol: &str) -> bool {
     // SSE streaming is only supported for specific protocols
-    match client_protocol {
+    match client_protocol.trim() {
         "openai-chat" | "openai-responses" | "anthropic-messages" | "gemini-chat" => wants_stream,
         _ => false,
     }
@@ -76,6 +76,13 @@ mod tests {
     fn test_resolve_sse_stream_mode_gemini_chat() {
         assert!(resolve_sse_stream_mode(true, "gemini-chat"));
         assert!(!resolve_sse_stream_mode(false, "gemini-chat"));
+    }
+
+    #[test]
+    fn test_resolve_sse_stream_mode_trims_protocol_whitespace() {
+        assert!(resolve_sse_stream_mode(true, " gemini-chat "));
+        assert!(resolve_sse_stream_mode(true, " openai-chat "));
+        assert!(!resolve_sse_stream_mode(false, " anthropic-messages "));
     }
 
     #[test]

@@ -1,3 +1,45 @@
+## 2026-03-24 Heartbeat 继续改（22:14 local）— W2 统一 SSE stream 协议 trim 语义
+
+### 先复核上一次交付完整性（21:54 local）
+
+- 21:54 条目证据保持可复核：
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/cargo-sse-stream-mode-resolver-gemini-heartbeat-20260324-215211.log`（`CARGO_EXIT_CODE=0`）
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/build-ci-sse-stream-mode-resolver-gemini-heartbeat-20260324-215211.log`（`BUILD_CI_EXIT_CODE=0`）
+  - `test-results/routecodex-276/jest-sse-stream-mode-resolver-gemini-heartbeat-rerun-20260324-215211.log`（`JEST_EXIT_CODE=0`）
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/file-line-limit-sse-stream-mode-resolver-gemini-20260324-215211.log`（`FILE_LINE_LIMIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/llmswitch-rustification-audit-sse-stream-mode-resolver-gemini-20260324-215211.log`（`AUDIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/repo-sanity-sse-stream-mode-resolver-gemini-20260324-215211.log`（`REPO_SANITY_EXIT_CODE=0`）
+
+### 继续执行（未完成项直接推进）
+
+- 本轮继续推进 `routecodex-276.2`，补齐协议字符串健壮性边界：
+  - Rust：`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_sse_stream.rs`
+    - `resolve_sse_stream_mode` 改为 `match client_protocol.trim()`，避免前后空白导致误判非流式。
+    - 新增单测：`test_resolve_sse_stream_mode_trims_protocol_whitespace`。
+  - TS：`tests/sharedmodule/sse-stream-mode-native.spec.ts`
+    - 新增：`enables stream when gemini-chat protocol has surrounding whitespace`。
+- 目标：让 `processSseStreamJson` 的协议判定在真实脏输入下保持稳定，避免因输入格式噪音触发不必要非流式退化。
+
+### 验证证据
+
+- build:ci：
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/build-ci-sse-stream-trimmed-protocol-heartbeat-20260324-221301.log`（`BUILD_CI_EXIT_CODE=0`）
+- Cargo：
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/cargo-sse-stream-trimmed-protocol-heartbeat-20260324-221301.log`（`7 passed`，`CARGO_EXIT_CODE=0`）
+- Jest：
+  - `test-results/routecodex-276/jest-sse-stream-trimmed-protocol-heartbeat-20260324-221301.log`（`3 suites / 11 tests passed`，`JEST_EXIT_CODE=0`）
+- 门禁：
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/file-line-limit-sse-stream-trimmed-protocol-20260324-221301.log`（`FILE_LINE_LIMIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/llmswitch-rustification-audit-sse-stream-trimmed-protocol-20260324-221301.log`（`AUDIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/repo-sanity-sse-stream-trimmed-protocol-20260324-221301.log`（`REPO_SANITY_EXIT_CODE=0`）
+- 状态快照：
+  - `test-results/routecodex-276/bd-status-routecodex-276-sse-stream-trimmed-protocol-20260324-221301.log`
+
+### 结论
+
+- 本轮完成可复核 W2 小切片：SSE stream 协议判定对前后空白输入健壮，Rust 与 TS 回归均已覆盖。
+- Epic 状态保持（beads 真源）：`routecodex-276=in_progress`，`routecodex-276.2/.6=in_progress`，其余子项 `open`。
+
 ## 2026-03-24 Heartbeat 继续改（21:54 local）— W2 统一 resolve/process SSE stream 协议语义
 
 ### 先复核上一次交付完整性（21:27 local）

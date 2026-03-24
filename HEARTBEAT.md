@@ -1,8 +1,26 @@
 # RouteCodex Heartbeat
 
-Heartbeat-Until: 2026-03-24T23:20:00+08:00
+Heartbeat-Until: 2026-03-24T23:40:00+08:00
 Heartbeat-Stop-When: no-open-tasks
-Last-Updated: 2026-03-24 21:54 +08:00
+Last-Updated: 2026-03-24 22:14 +08:00
+
+## 2026-03-24 Heartbeat 继续改（22:14 local）
+- W2 再补一刀协议健壮性：SSE stream resolver 统一按 `trim()` 后协议字符串判定。
+  - Rust：`sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_resp_outbound_sse_stream.rs`
+    - `resolve_sse_stream_mode` 改为 `match client_protocol.trim()`
+    - 新增单测：`test_resolve_sse_stream_mode_trims_protocol_whitespace`
+  - TS 回归：`tests/sharedmodule/sse-stream-mode-native.spec.ts`
+    - 新增：`enables stream when gemini-chat protocol has surrounding whitespace`
+- 本轮验证证据：
+  - build:ci：`sharedmodule/llmswitch-core/test-results/routecodex-276/build-ci-sse-stream-trimmed-protocol-heartbeat-20260324-221301.log`（`BUILD_CI_EXIT_CODE=0`）
+  - Cargo：`sharedmodule/llmswitch-core/test-results/routecodex-276/cargo-sse-stream-trimmed-protocol-heartbeat-20260324-221301.log`（`7 passed`，`CARGO_EXIT_CODE=0`）
+  - Jest：`test-results/routecodex-276/jest-sse-stream-trimmed-protocol-heartbeat-20260324-221301.log`（`3 suites / 11 tests passed`，`JEST_EXIT_CODE=0`）
+  - file-line-limit：`sharedmodule/llmswitch-core/test-results/routecodex-276/file-line-limit-sse-stream-trimmed-protocol-20260324-221301.log`（`FILE_LINE_LIMIT_EXIT_CODE=0`）
+  - audit：`test-results/routecodex-276/llmswitch-rustification-audit-sse-stream-trimmed-protocol-20260324-221301.log`（`AUDIT_EXIT_CODE=0`）
+  - repo-sanity：`test-results/routecodex-276/repo-sanity-sse-stream-trimmed-protocol-20260324-221301.log`（`REPO_SANITY_EXIT_CODE=0`）
+- beads 状态快照（真源）：
+  - `test-results/routecodex-276/bd-status-routecodex-276-sse-stream-trimmed-protocol-20260324-221301.log`
+  - `routecodex-276=in_progress`，`routecodex-276.2/.6=in_progress`，其余子项 `open`。
 
 ## 2026-03-24 Heartbeat 继续改（21:54 local）
 - W2 再推进一刀：修正 `resolveSseStreamModeJson` 与 `processSseStreamJson` 的协议支持一致性。

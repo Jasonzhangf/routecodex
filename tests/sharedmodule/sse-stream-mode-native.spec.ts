@@ -34,6 +34,18 @@ describe('sse stream mode native bridge', () => {
     });
   });
 
+  test('enables stream when gemini-chat protocol has surrounding whitespace', () => {
+    const result = processSseStreamWithNative({
+      clientPayload: { id: 'resp_gemini_trim', object: 'response' },
+      clientProtocol: ' gemini-chat ',
+      requestId: 'req_gemini_stream_trim',
+      wantsStream: true
+    });
+
+    expect(result.shouldStream).toBe(true);
+    expect(result.payload).toEqual({ id: 'resp_gemini_trim', object: 'response' });
+  });
+
   test('disables stream for unknown protocol even when wantsStream=true', () => {
     const result = processSseStreamWithNative({
       clientPayload: { id: 'resp_2' },
