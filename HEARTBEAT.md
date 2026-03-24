@@ -2,23 +2,159 @@
 
 Heartbeat-Until: 2026-03-23T23:59:00+08:00
 Heartbeat-Stop-When: no-open-tasks
-Last-Updated: 2026-03-22 22:09 +08:00
+Last-Updated: 2026-03-23 18:17 +08:00
 
 ## 当前状态
-- Heartbeat 任务已清理：当前无待办 checklist（无 `- [ ]`）。
-- drudge heartbeat 已关闭：`routecodex` session 状态为 `disabled`。
-- `routecodex-274` / `routecodex-275` 已在本轮修复后关闭（含代码修复 + 回归 + live probe 证据）。
-- DeepSeek “工具被当成文本”兼容修复已落地（Rust 真源）：补齐 quote 包裹与 JSON-ish 形状解析；回归证据见 `test-results/routecodex-276/`。
-- 已调用 review（drudge）并落盘：`test-results/routecodex-275/drudge-review-after-deepseek-fix-20260322-2016.log`（本次超时 `EXIT_CODE=124`）。
-- “回归 + 构建 + 全局安装 + 重启”已完成并复核：`test-results/routecodex-276/*-20260322-205041.*`。
-- 最新 review（drudge）成功：`test-results/routecodex-276/drudge-review-after-build-install-restart-20260322-205500.json`（`ok=true`，`EXIT_CODE=0`）。
-- reviewing-code 复核通过（21:05）：2026-03-22 20:59 DELIVERY 声明项全部有证据覆盖，无未完成项。
-- Time/Date 标签已补 `timeRef=now` 语义标识，并完成 dev/release 构建安装：证据见 `test-results/routecodex-277/`。
-- DeepSeek “nameless tool_calls（仅 input.cmd）”已修复并回归：证据 `test-results/routecodex-277/*nameless*`，当前版本 `0.90.731`。
-- DeepSeek 普通工具 harvest 形状兼容已继续收口（按“形状”统一，不是按单命令打补丁）：
-  - 支持 markdown bullet 包裹 `{"tool_calls":[...]}` 形状；
-  - 支持 `cmd` 内部未转义双引号（如 `"Mailbox ..."`）的容错修复后再 harvest；
-  - 证据：`sharedmodule/llmswitch-core/test-results/routecodex-278/` 与 `test-results/routecodex-278/`。
+- 已新开 Rust 全量收口 Epic：`routecodex-276`（in_progress）。
+- 已完成最新巡检扫描并落盘证据：`test-results/routecodex-276/rustify-full-scan-heartbeat-20260323-122011.log`。
+- 当前（prod TS）：`600 files / 97,148 LOC`；non-native 主要残量：servertool `16,510`、router `14,828`、sse `12,809`、conversion `7,566`。
+- 已开工子任务：
+  - `routecodex-276.6`（Rust 化门禁与自动审计，in_progress）
+  - `routecodex-276.2`（SSE codec Rust 化首批切片，in_progress）
+- W2 本轮继续推进（SSE 第三切片）：
+  - Rust 新增 `inferSseEventTypeFromDataJson`（从 `message + data.type` 推断事件类型）；
+  - Rust 新增 `detectSseProtocolKindJson`（事件类型 -> 协议归类）；
+  - Rust 新增 `validateSseEventTypeJson`（严格校验开关 + allowedEventTypes）；
+  - TS `inferEventTypeFromData` / `detectEventType` 均已切到 native thin wrapper；
+  - TS `validateEventType` 已切到 native thin wrapper；
+  - 新增回归：`sharedmodule/llmswitch-core/tests/hub/sse-parser-native-infer-event.spec.ts`。
+- 历史条目补证（2026-03-22 Shape-Compat）：
+  - review 指出的“restart 日志为空”缺口已补齐：
+  - `test-results/routecodex-278/restart-5555-proof-from-build-dev-20260322-215340.log`
+  - `test-results/routecodex-278/shape-compat-2209-recheck-restart-backfill-20260323-151039.log`
+  - `test-results/routecodex-276/delivery-1509-completeness-recheck-20260323-151833.log`
+  - `test-results/routecodex-276/bd-status-routecodex-276-slices-20260323-151833.log`
+- 子任务状态快照（以 beads 为准）：
+  - `routecodex-276.1/.3/.4/.5 = open`
+  - `routecodex-276.2/.6 = in_progress`
+  - 证据：`test-results/routecodex-276/bd-status-routecodex-276-slices-latest-20260323-154714.log`
+- 16:02/16:15 轮次新增证据（闭合 review 缺口）：
+- 17:28 轮次新增证据（闭合 17:28 review 缺口）：
+- 18:08 轮次新增证据（闭合 18:06 对 18:00 条目时效误判）：
+  - 
+  - 
+  - 
+  - 
+  - 
+- 17:46 轮次新增证据（闭合 17:45 review 缺口 + Rust helper 直接单测）：
+  - `test-results/routecodex-276/delivery-1728-completeness-rerun-20260323-173643.log`
+  - `test-results/routecodex-276/drudge-review-after-1736-delivery-direct-20260323-173654.json`
+  - `test-results/routecodex-276/delivery-1736-review-sequence-proof-20260323-173654.log`
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/cargo-sse-detect-event-kind-heartbeat-20260323-174622.log`
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/cargo-sse-validate-event-type-heartbeat-20260323-174622.log`
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/cargo-sse-assemble-event-heartbeat-20260323-174622.log`
+  - `test-results/routecodex-276/worktree-staged-unstaged-snapshot-20260323-172856.log`。
+  - `test-results/routecodex-276/worktree-staged-unstaged-snapshot-20260323-172856.log`
+  - `test-results/routecodex-276/delivery-1711-sequence-reference-fix-20260323-172856.log`
+  - `test-results/routecodex-276/delivery-1719-completeness-rerun-20260323-172856.log`
+  - `test-results/routecodex-276/delivery-1701-completeness-rerun-20260323-171131.log`
+  - `test-results/routecodex-276/delivery-1654-completeness-rerun-20260323-170225.log`
+  - `test-results/routecodex-276/drudge-review-after-1719-delivery-direct-20260323-172024.json`
+  - `test-results/routecodex-276/delivery-1719-review-sequence-proof-20260323-172024.log`
+  - `test-results/routecodex-276/drudge-review-after-1701-delivery-direct-20260323-170259.json`
+  - `test-results/routecodex-276/delivery-1701-review-sequence-proof-20260323-170259.log`。
+  - `test-results/routecodex-276/delivery-1546-completeness-recheck-20260323-160659.log`（识别缺口：stale path + 时序）
+  - `test-results/routecodex-276/drudge-review-after-1602-delivery-direct-20260323-161027.json`（`ok=true`，`failed=false`，`EXIT_CODE=0`）
+  - `test-results/routecodex-276/delivery-1602-review-sequence-proof-20260323-161050.log`（`PASS order_delivery_written_before_review_call`）
+  - `test-results/routecodex-276/delivery-1602-completeness-rerun-20260323-161646.log`（关键项全部 PASS）
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/jest-sse-native-latest-heartbeat-continue-20260323-160734.log`（首次失败：`JEST_EXIT_CODE=254`）
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/jest-sse-native-latest-heartbeat-continue-rerun-20260323-160846.log`（重跑通过：`JEST_EXIT_CODE=0`）
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/build-ci-sse-native-latest-heartbeat-continue-20260323-160734.log`（`BUILD_CI_EXIT_CODE=0`）
+  - `test-results/routecodex-276/llmswitch-rustification-audit-latest-heartbeat-continue-20260323-160734.log`（OK）
+  - `test-results/routecodex-276/repo-sanity-latest-heartbeat-continue-20260323-160734.log`（ok）
+  - `test-results/routecodex-276/bd-status-routecodex-276-slices-latest-continue-20260323-160734.log`。
+- Heartbeat 巡检验证通过：
+  - `test-results/routecodex-276/llmswitch-rustification-audit-heartbeat-20260323-121853.log`
+  - `test-results/routecodex-276/repo-sanity-heartbeat-20260323-121853.log`
+  - `test-results/routecodex-276/llmswitch-rustification-audit-heartbeat-rerun-20260323-125642.log`
+  - `test-results/routecodex-276/repo-sanity-heartbeat-rerun-20260323-125642.log`
+  - `test-results/routecodex-276/llmswitch-rustification-audit-after-required-exports-dedupe-20260323-130412.log`
+  - `test-results/routecodex-276/repo-sanity-after-required-exports-dedupe-20260323-130412.log`
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/jest-sse-parser-native-assemble-heartbeat-rerun-20260323-125326.log`
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/cargo-sse-assemble-native-bridge-heartbeat-20260323-121907.log`
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/cargo-sse-infer-event-type-20260323-132204.log`
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/jest-sse-parser-native-infer-event-rerun-20260323-132231.log`
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/build-ci-sse-infer-event-rerun-20260323-132231.log`
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/cargo-sse-native-infer-detect-20260323-135303.log`
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/jest-sse-parser-native-infer-detect-rerun-20260323-135407.log`
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/build-ci-sse-native-infer-detect-rerun-20260323-135407.log`
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/cargo-sse-core-slices-heartbeat-1347-rerun-20260323-135938.log`
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/jest-sse-native-slices-heartbeat-1347-rerun-20260323-135918.log`
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/build-ci-heartbeat-1347-explicit-exit-20260323-140642.log`（`BUILD_CI_EXIT_CODE=0`）
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/cargo-sse-validate-event-type-heartbeat-20260323-142209.log`
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/jest-sse-native-validate-heartbeat-rerun-20260323-142252.log`
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/build-ci-sse-native-validate-heartbeat-explicit-20260323-142306.log`（`BUILD_CI_EXIT_CODE=0`）
+  - `test-results/routecodex-276/native-required-exports-infer-event-rerun-20260323-132306.log`
+  - `test-results/routecodex-276/native-required-exports-sse-infer-detect-rerun-pass-20260323-135508.log`
+  - `test-results/routecodex-276/native-required-exports-sse-validate-heartbeat-20260323-142209.log`
+  - `test-results/routecodex-276/llmswitch-rustification-audit-sse-infer-event-rerun-20260323-132306.log`
+  - `test-results/routecodex-276/llmswitch-rustification-audit-sse-native-infer-detect-rerun-pass-20260323-135508.log`
+  - `test-results/routecodex-276/llmswitch-rustification-audit-heartbeat-1347-rerun-20260323-135834.log`
+  - `test-results/routecodex-276/llmswitch-rustification-audit-sse-native-validate-heartbeat-rerun-20260323-142323.log`
+  - `test-results/routecodex-276/repo-sanity-sse-infer-event-rerun-pass-20260323-132322.log`
+  - `test-results/routecodex-276/repo-sanity-sse-native-infer-detect-rerun-pass-20260323-135508.log`
+  - `test-results/routecodex-276/repo-sanity-heartbeat-1347-rerun-20260323-135834.log`
+  - `test-results/routecodex-276/repo-sanity-sse-native-validate-heartbeat-rerun-20260323-142323.log`
+  - `test-results/routecodex-276/delivery-1317-completeness-audit-20260323-140700.log`
+  - `test-results/routecodex-276/bd-status-routecodex-276-slices-20260323-141445.log`
+  - `test-results/routecodex-276/drudge-review-direct-timeout-snippet-060032-20260323-143427.log`
+  - `test-results/routecodex-276/drudge-review-direct-timeout-snippet-061536-20260323-143427.log`
+  - `test-results/routecodex-276/drudge-review-direct-timeout-snippet-062510-20260323-143427.log`
+  - `test-results/routecodex-276/delivery-1433-gap-recheck-20260323-144038.log`
+  - `test-results/routecodex-276/delivery-1439-completeness-recheck-20260323-144744.log`
+  - `test-results/routecodex-276/delivery-1445-completeness-recheck-20260323-150045.log`
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/jest-sse-native-crlf-thinshell-heartbeat-20260323-144703.log`
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/build-ci-sse-native-crlf-thinshell-heartbeat-20260323-144703.log`
+  - `test-results/routecodex-276/llmswitch-rustification-audit-sse-native-crlf-thinshell-heartbeat-20260323-144703.log`
+  - `test-results/routecodex-276/repo-sanity-sse-native-crlf-thinshell-heartbeat-20260323-144703.log`
+  - `test-results/routecodex-276/delivery-1517-completeness-recheck-20260323-152604.log`
+  - `test-results/routecodex-276/delivery-1524-review-path-fix-recheck-20260323-153344.log`
+  - `test-results/routecodex-276/delivery-1532-proof-rerun-20260323-154002.log`
+  - `test-results/routecodex-276/delivery-1538-proof-rerun-20260323-154748.log`
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/jest-sse-native-followup-heartbeat-20260323-152532.log`
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/build-ci-sse-native-followup-heartbeat-20260323-152532.log`（`BUILD_CI_EXIT_CODE=0`）
+  - `test-results/routecodex-276/llmswitch-rustification-audit-followup-heartbeat-20260323-152532.log`
+  - `test-results/routecodex-276/repo-sanity-followup-heartbeat-20260323-152532.log`
+  - `test-results/routecodex-276/bd-status-routecodex-276-slices-followup-20260323-152532.log`
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/jest-sse-native-latest-heartbeat-20260323-154714.log`
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/build-ci-sse-native-latest-heartbeat-20260323-154714.log`（`BUILD_CI_EXIT_CODE=0`）
+  - `test-results/routecodex-276/llmswitch-rustification-audit-latest-heartbeat-20260323-154714.log`
+  - `test-results/routecodex-276/repo-sanity-latest-heartbeat-20260323-154714.log`
+  - `test-results/routecodex-276/bd-status-routecodex-276-slices-latest-20260323-154714.log`
+- 已补修 review 额外发现（native required exports 覆盖）：
+  - 新增 `assembleSseEventFromLinesJson` 到 required exports；
+  - 同步去重重复项 `mapOpenaiChatToChatJson/mapOpenaiChatFromChatJson`，避免门禁 LOC 回升；
+  - 证据：`test-results/routecodex-276/native-required-exports-assemble-and-dedupe-20260323-130434.log`（`HAS_ASSEMBLE=true`，`DUP_COUNT=0`）。
+- review 已调用（drudge，非脚本短超时方式）：
+  - 成功返回：`test-results/routecodex-276/drudge-review-heartbeat-direct-session16014-20260323-125500.json`（`ok=true`）
+  - drudge 真机日志证据：`test-results/routecodex-276/drudge-review-heartbeat-drudgelog-evidence-20260323-1258.log`（`status=0`、`ok=true`）
+  - `DELIVERY.md` 更新后再次触发 review（direct）：
+    - `test-results/routecodex-276/drudge-review-after-delivery-update-direct-invoke-evidence-20260323-1259.log`（含 `timeout=900000ms` 与 `Starting review`）
+    - `test-results/routecodex-276/drudge-review-after-1304-delivery-update-invoke-evidence-20260323-1305.log`（含 `timeout=900000ms` 与 `Starting review`）
+    - `test-results/routecodex-276/drudge-review-after-1317-heartbeat-invoke-evidence-20260323-1325.log`（含 `timeout=900000ms` 与 `Starting review`）
+    - `test-results/routecodex-276/drudge-review-heartbeat-1347-direct-20260323-140032.json`（`ok=true`，`failed=false`，`EXIT_CODE=0`）
+    - `test-results/routecodex-276/drudge-review-after-1405-delivery-direct-20260323-140902.json`（`ok=true`，`failed=false`，`EXIT_CODE=0`）
+    - `test-results/routecodex-276/drudge-review-after-1415-delivery-direct-20260323-141536.json`（`ok=true`，`failed=false`，`EXIT_CODE=0`）
+    - `test-results/routecodex-276/drudge-review-after-1417-delivery-direct-20260323-142510.json`（`ok=true`，`failed=false`，`EXIT_CODE=0`）
+    - `test-results/routecodex-276/drudge-review-after-1433-delivery-direct-20260323-143542.json`（`ok=true`，`failed=false`，`EXIT_CODE=0`）
+    - `test-results/routecodex-276/drudge-review-after-1439-delivery-direct-20260323-144145.json`（`ok=true`，`failed=false`，`EXIT_CODE=0`）
+    - `test-results/routecodex-276/drudge-review-after-1445-delivery-direct-20260323-144934.json`（`ok=true`，`failed=false`，`EXIT_CODE=0`）
+    - `test-results/routecodex-276/drudge-review-after-1459-delivery-direct-20260323-150141.json`（`ok=true`，`failed=false`，`EXIT_CODE=0`）
+    - `test-results/routecodex-276/drudge-review-after-1509-delivery-direct-20260323-151301.json`（`ok=true`，`failed=false`，`EXIT_CODE=0`）
+    - `test-results/routecodex-276/drudge-review-after-1517-delivery-direct-20260323-151957.json`（`ok=true`，`failed=false`，`EXIT_CODE=0`）
+    - `test-results/routecodex-276/drudge-review-after-1524-delivery-direct-20260323-152643.json`（`ok=true`，`failed=false`，`EXIT_CODE=0`）
+    - `test-results/routecodex-276/drudge-review-after-1532-delivery-direct-20260323-153419.json`（`ok=true`，`failed=false`，`EXIT_CODE=0`）
+    - `test-results/routecodex-276/drudge-review-after-1538-delivery-direct-20260323-154110.json`（`ok=true`，`failed=false`，`EXIT_CODE=0`）
+    - `test-results/routecodex-276/drudge-review-after-1546-delivery-direct-20260323-154919.json`（`ok=true`，`failed=false`，`EXIT_CODE=0`）
+
+## Heartbeat 任务列表（routecodex-276 Rust 全量化）
+- [ ] routecodex-276.1 W1 servertool runtime Rust 化（clock/heartbeat/review/stop-message）
+- [ ] routecodex-276.2 W2 SSE codec Rust 化（sse-to-json / json-to-sse，进行中）
+- [ ] routecodex-276.3 W3 Virtual Router 非 native 残量收口
+- [ ] routecodex-276.4 W4 Conversion residual 语义收口
+- [ ] routecodex-276.5 W5 Tooling 语义 Rust 化（apply_patch / exec-command validator）
+- [ ] routecodex-276.6 W6 Rust 化门禁与自动审计（进行中）
+- [x] 基线扫描证据已生成并写入 Epic notes（`rustify-full-scan-20260323-115919.log`）
 
 ## 说明
 - 若需要重新启用 heartbeat 巡检：

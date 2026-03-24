@@ -177,6 +177,20 @@ function checkTrackedSecrets() {
   }
 }
 
+function checkLlmswitchRustificationAudit() {
+  const out = spawnSync('node', ['scripts/ci/llmswitch-rustification-audit.mjs'], {
+    encoding: 'utf8',
+  });
+  if (out.status !== 0) {
+    console.error('[repo-sanity] llmswitch rustification audit failed');
+    const stdout = String(out.stdout || '').trim();
+    const stderr = String(out.stderr || '').trim();
+    if (stdout) console.error(stdout);
+    if (stderr) console.error(stderr);
+    process.exit(2);
+  }
+}
+
 const files = runGit(['ls-files']).split('\n').map((s) => s.trim()).filter(Boolean);
 const forbidden = [];
 for (const p of files) {
@@ -195,5 +209,6 @@ if (forbidden.length) {
 checkRootLayout();
 checkUntrackedNotIgnored();
 checkTrackedSecrets();
+checkLlmswitchRustificationAudit();
 
 console.log('[repo-sanity] ok');

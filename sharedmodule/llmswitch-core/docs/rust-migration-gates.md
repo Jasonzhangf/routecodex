@@ -108,6 +108,30 @@ Changed TS/Rust files in `src/**` and `rust-core/**` must stay <= 500 lines.
 npm run verify:file-line-limit
 ```
 
+## Gate 4: llmswitch-core Rustification Audit (No TS Semantic Backflow)
+
+Root prebuild now runs an audit that blocks:
+
+- non-native TS LOC increase in `sharedmodule/llmswitch-core/src`
+- non-native TS file count increase
+- new production TS files (unless explicitly allowlisted via env)
+
+Commands:
+
+```bash
+npm run verify:llmswitch-rustification-audit
+```
+
+Baseline snapshot:
+
+- `sharedmodule/llmswitch-core/config/rustification-audit-baseline.json`
+
+If baseline needs intentional refresh (rare, explicit migration step):
+
+```bash
+node scripts/ci/llmswitch-rustification-audit.mjs --write-baseline
+```
+
 ## Native Hotpath Wiring
 
 Rust quota bucket hotpath lives in:
