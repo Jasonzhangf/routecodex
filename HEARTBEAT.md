@@ -1,8 +1,19 @@
 # RouteCodex Heartbeat
 
-Heartbeat-Until: 2026-03-24T21:30:00+08:00
+Heartbeat-Until: 2026-03-24T21:45:00+08:00
 Heartbeat-Stop-When: no-open-tasks
-Last-Updated: 2026-03-24 20:50 +08:00
+Last-Updated: 2026-03-24 21:00 +08:00
+
+## 2026-03-24 Heartbeat 继续改（21:00 local）
+- W2 stream-mode 切片补了一条 stage 级回归，覆盖 streaming=true 分支：
+  - 文件：`tests/monitoring/resp-outbound-stage.test.ts`
+  - 新增断言：`runRespOutboundStage2SseStream(... wantsStream=true ...)` 返回 `stream`，并保持 stage recorder payload 与 clientProtocol 一致。
+- 本轮验证证据：
+  - `test-results/routecodex-276/jest-resp-outbound-stage-stream-enabled-heartbeat-followup-20260324-210011.log`（`JEST_EXIT_CODE=0`）
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/file-line-limit-resp-outbound-stage-stream-enabled-20260324-210011.log`（`FILE_LINE_LIMIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/llmswitch-rustification-audit-resp-outbound-stage-stream-enabled-20260324-210011.log`（`AUDIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/repo-sanity-resp-outbound-stage-stream-enabled-20260324-210011.log`（`REPO_SANITY_EXIT_CODE=0`）
+- beads 状态保持：`routecodex-276=in_progress`，`276.2/.6=in_progress`，其余 `open`。
 
 ## 2026-03-24 Heartbeat 继续改（20:50 local）
 - W2 再推进一小刀（SSE stream mode follow-up）：

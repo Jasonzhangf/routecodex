@@ -1,3 +1,35 @@
+## 2026-03-24 Heartbeat 继续改（21:00 local）— W2 stream 分支 stage 回归补齐
+
+### 先复核上一次交付完整性（20:50 local）
+
+- 20:50 条目证据保持可复核：
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/cargo-sse-stream-mode-heartbeat-followup-20260324-204934.log`（`CARGO_EXIT_CODE=0`）
+  - `test-results/routecodex-276/jest-sse-stream-mode-native-heartbeat-followup-20260324-204934.log`（`JEST_EXIT_CODE=0`）
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/build-ci-sse-stream-mode-heartbeat-followup-20260324-204934.log`（`BUILD_CI_EXIT_CODE=0`）
+  - `test-results/routecodex-276/llmswitch-rustification-audit-sse-stream-mode-heartbeat-followup-20260324-204934.log`（`AUDIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/repo-sanity-sse-stream-mode-heartbeat-followup-20260324-204934.log`（`REPO_SANITY_EXIT_CODE=0`）
+
+### 继续执行（未完成项直接推进）
+
+- 本轮继续推进 `routecodex-276.2` 的测试闭环，补齐 stage 级 streaming 分支回归：
+  - 文件：`tests/monitoring/resp-outbound-stage.test.ts`
+  - 新增用例：`returns stream and records payload when streaming is enabled`
+  - 目标：确保 `runRespOutboundStage2SseStream` 在 `wantsStream=true` 路径返回 stream，且 stage recorder 记录一致。
+
+### 验证证据
+
+- Jest：
+  - `test-results/routecodex-276/jest-resp-outbound-stage-stream-enabled-heartbeat-followup-20260324-210011.log`（`JEST_EXIT_CODE=0`）
+- 门禁：
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/file-line-limit-resp-outbound-stage-stream-enabled-20260324-210011.log`（`FILE_LINE_LIMIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/llmswitch-rustification-audit-resp-outbound-stage-stream-enabled-20260324-210011.log`（`AUDIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/repo-sanity-resp-outbound-stage-stream-enabled-20260324-210011.log`（`REPO_SANITY_EXIT_CODE=0`）
+
+### 结论
+
+- 本轮完成 W2 stream 分支 stage 回归补齐，增强后续切片的回归保护密度。
+- Epic 状态保持（beads 真源）：`routecodex-276=in_progress`，`routecodex-276.2/.6=in_progress`，其余子项 `open`。
+
 ## 2026-03-24 Heartbeat 继续改（20:50 local）— W2 SSE stream 模式 follow-up（stream 分支统一 native payload）
 
 ### 先复核上一次交付完整性（20:44 local）

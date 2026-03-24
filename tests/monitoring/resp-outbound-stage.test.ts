@@ -82,4 +82,43 @@ describe('resp_outbound stages snapshot payloads', () => {
       payload: clientPayload
     });
   });
+
+  it('returns stream and records payload when streaming is enabled', async () => {
+    const recorder = new StubStageRecorder();
+    const clientPayload = {
+      id: 'chatcmpl_stream',
+      object: 'chat.completion',
+      created: 1730000000,
+      model: 'qwen3.5-plus',
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: 'assistant',
+            content: 'stream ok'
+          },
+          finish_reason: 'stop'
+        }
+      ]
+    };
+
+    const result = await runRespOutboundStage2SseStream({
+      clientPayload,
+      clientProtocol: 'openai-chat',
+      requestId: 'req-test-stream',
+      wantsStream: true,
+      stageRecorder: recorder
+    });
+
+    expect(result.stream).toBeDefined();
+    expect(result.body).toBeUndefined();
+    expect(recorder.entries).toHaveLength(1);
+    const recorded = recorder.entries[0];
+    expect(recorded.stage).toBe('chat_process.resp.stage10.sse_stream');
+    expect(recorded.payload).toEqual({
+      passthrough: false,
+      protocol: 'openai-chat',
+      payload: clientPayload
+    });
+  });
 });
