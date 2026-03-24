@@ -1,8 +1,22 @@
 # RouteCodex Heartbeat
 
-Heartbeat-Until: 2026-03-25T00:30:00+08:00
+Heartbeat-Until: 2026-03-25T00:40:00+08:00
 Heartbeat-Stop-When: no-open-tasks
-Last-Updated: 2026-03-24 23:07 +08:00
+Last-Updated: 2026-03-24 23:18 +08:00
+
+## 2026-03-24 Heartbeat 继续改（23:18 local）
+- W2 再补一条 required exports 回归，防止 resolver 导出回退：
+  - 文件：`tests/sharedmodule/native-required-exports-sse-stream.spec.ts`
+  - 变更：在原有 `processSseStreamJson` 断言基础上，新增 `resolveSseStreamModeJson` 必须存在。
+- 本轮验证证据：
+  - Jest：`test-results/routecodex-276/jest-sse-required-exports-resolver-heartbeat-20260324-231715.log`（`3 suites / 13 tests passed`，`JEST_EXIT_CODE=0`）
+  - build:ci：`sharedmodule/llmswitch-core/test-results/routecodex-276/build-ci-sse-required-exports-resolver-heartbeat-20260324-231715.log`（`BUILD_CI_EXIT_CODE=0`）
+  - file-line-limit：`sharedmodule/llmswitch-core/test-results/routecodex-276/file-line-limit-sse-required-exports-resolver-20260324-231715.log`（`FILE_LINE_LIMIT_EXIT_CODE=0`）
+  - audit：`test-results/routecodex-276/llmswitch-rustification-audit-sse-required-exports-resolver-20260324-231715.log`（`AUDIT_EXIT_CODE=0`）
+  - repo-sanity：`test-results/routecodex-276/repo-sanity-sse-required-exports-resolver-20260324-231715.log`（`REPO_SANITY_EXIT_CODE=0`）
+- beads 状态快照（真源）：
+  - `test-results/routecodex-276/bd-status-routecodex-276-sse-required-exports-resolver-20260324-231715.log`
+  - `routecodex-276=in_progress`，`routecodex-276.2/.6=in_progress`，其余子项 `open`。
 
 ## 2026-03-24 Heartbeat 继续改（23:07 local）
 - W2 再补一条“负向协议一致性”回归：
