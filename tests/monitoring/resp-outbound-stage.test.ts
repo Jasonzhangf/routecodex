@@ -325,4 +325,37 @@ describe('resp_outbound stages snapshot payloads', () => {
       payload: clientPayload
     });
   });
+
+  it('normalizes openai-responses protocol token in non-stream branch', async () => {
+    const recorder = new StubStageRecorder();
+    const clientPayload = {
+      id: 'resp_non_stream_normalized',
+      object: 'response',
+      model: 'gpt-5.3-codex',
+      output: [
+        {
+          type: 'message',
+          role: 'assistant',
+          content: [{ type: 'output_text', text: 'responses normalized protocol non-stream ok' }]
+        }
+      ]
+    } as any;
+
+    const result = await runRespOutboundStage2SseStream({
+      clientPayload,
+      clientProtocol: ' OPENAI-RESPONSES ' as any,
+      requestId: 'req-openai-responses-non-stream-normalized-protocol',
+      wantsStream: false,
+      stageRecorder: recorder
+    });
+
+    expect(result.body).toEqual(clientPayload);
+    expect(result.stream).toBeUndefined();
+    expect(recorder.entries).toHaveLength(1);
+    expect(recorder.entries[0]?.payload).toEqual({
+      passthrough: false,
+      protocol: 'openai-responses',
+      payload: clientPayload
+    });
+  });
 });
