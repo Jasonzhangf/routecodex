@@ -1,3 +1,40 @@
+## 2026-03-25 Heartbeat 继续改（09:21 local）— W2 stage2 gemini-chat 非流式分支协议归一化回归
+
+### 先复核上一次交付完整性（2026-03-25 08:44 local）
+
+- 08:44 条目证据保持可复核：
+  - `test-results/routecodex-276/jest-sse-stage-protocol-normalize-openai-chat-nonstream-heartbeat-20260325-084412.log`（`JEST_EXIT_CODE=0`）
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/build-ci-sse-stage-protocol-normalize-openai-chat-nonstream-heartbeat-20260325-084412.log`（`BUILD_CI_EXIT_CODE=0`）
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/file-line-limit-sse-stage-protocol-normalize-openai-chat-nonstream-heartbeat-20260325-084412.log`（`FILE_LINE_LIMIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/llmswitch-rustification-audit-sse-stage-protocol-normalize-openai-chat-nonstream-heartbeat-20260325-084412.log`（`AUDIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/repo-sanity-sse-stage-protocol-normalize-openai-chat-nonstream-heartbeat-20260325-084412.log`（`REPO_SANITY_EXIT_CODE=0`）
+
+### 继续执行（未完成项直接推进）
+
+- 本轮继续推进 `routecodex-276.2`，补齐 stage2 非流式分支在 gemini-chat 协议上的归一化回归：
+  - `tests/monitoring/resp-outbound-stage.test.ts`
+    - 新增：`normalizes gemini-chat protocol token in non-stream branch`
+    - 覆盖 `clientProtocol=' GEMINI-CHAT '` + `wantsStream=false`，确保返回 `body` 且 stage 记录协议标准化为 `gemini-chat`。
+- 目标：补齐 stage2 non-stream 分支的四协议矩阵，维持 stream/non-stream 语义对齐。
+
+### 验证证据
+
+- Jest：
+  - `test-results/routecodex-276/jest-sse-stage-protocol-normalize-gemini-chat-nonstream-heartbeat-20260325-092132.log`（`3 suites / 21 tests passed`，`JEST_EXIT_CODE=0`）
+- build:ci：
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/build-ci-sse-stage-protocol-normalize-gemini-chat-nonstream-heartbeat-20260325-092132.log`（`BUILD_CI_EXIT_CODE=0`）
+- 门禁：
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/file-line-limit-sse-stage-protocol-normalize-gemini-chat-nonstream-heartbeat-20260325-092132.log`（`FILE_LINE_LIMIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/llmswitch-rustification-audit-sse-stage-protocol-normalize-gemini-chat-nonstream-heartbeat-20260325-092132.log`（`AUDIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/repo-sanity-sse-stage-protocol-normalize-gemini-chat-nonstream-heartbeat-20260325-092132.log`（`REPO_SANITY_EXIT_CODE=0`）
+- 状态快照：
+  - `test-results/routecodex-276/bd-status-routecodex-276-sse-stage-protocol-normalize-gemini-chat-nonstream-heartbeat-20260325-092132.log`
+
+### 结论
+
+- 本轮完成可复核 W2 小切片：stage2 协议归一化回归在 non-stream 分支已覆盖 `gemini-chat/openai-chat/openai-responses/anthropic-messages` 四协议。
+- Epic 状态保持（beads 真源）：`routecodex-276=in_progress`，`routecodex-276.2/.6=in_progress`，其余子项 `open`。
+
 ## 2026-03-25 Heartbeat 继续改（08:44 local）— W2 stage2 openai-chat 非流式分支协议归一化回归
 
 ### 先复核上一次交付完整性（2026-03-25 08:39 local）
