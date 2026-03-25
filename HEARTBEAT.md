@@ -1,9 +1,24 @@
 # RouteCodex Heartbeat
 
-Heartbeat-Until: 2026-03-25T11:20:00+08:00
+Heartbeat-Until: 2026-03-25T11:45:00+08:00
 Heartbeat-Stop-When: no-open-tasks
-Last-Updated: 2026-03-25 10:49 +08:00
+Last-Updated: 2026-03-25 10:54 +08:00
 
+
+## 2026-03-25 Heartbeat 继续改（10:54 local）
+- W2 增补一条 stage2 near-known 协议防回退回归（非流式兜底路径）：
+  - 文件：`tests/monitoring/resp-outbound-stage.test.ts`
+  - 新增用例：`keeps near-known protocol variant in non-stream path when wantsStream=true`
+  - 断言：`clientProtocol=' OPENAI-CHAT-PREVIEW '` + `wantsStream=true` 时，不应误判为 `openai-chat` 流式路径，返回 `body` 且 stage recorder 保持原始协议 token。
+- 本轮验证证据：
+  - Jest：`test-results/routecodex-276/jest-sse-stage-near-known-protocol-nonstream-guard-heartbeat-20260325-105417.log`（`3 suites / 23 tests passed`，`JEST_EXIT_CODE=0`）
+  - build:ci：`sharedmodule/llmswitch-core/test-results/routecodex-276/build-ci-sse-stage-near-known-protocol-nonstream-guard-heartbeat-20260325-105417.log`（`BUILD_CI_EXIT_CODE=0`）
+  - file-line-limit：`sharedmodule/llmswitch-core/test-results/routecodex-276/file-line-limit-sse-stage-near-known-protocol-nonstream-guard-heartbeat-20260325-105417.log`（`FILE_LINE_LIMIT_EXIT_CODE=0`）
+  - audit：`test-results/routecodex-276/llmswitch-rustification-audit-sse-stage-near-known-protocol-nonstream-guard-heartbeat-20260325-105417.log`（`AUDIT_EXIT_CODE=0`）
+  - repo-sanity：`test-results/routecodex-276/repo-sanity-sse-stage-near-known-protocol-nonstream-guard-heartbeat-20260325-105417.log`（`REPO_SANITY_EXIT_CODE=0`）
+- beads 状态快照（真源）：
+  - `test-results/routecodex-276/bd-status-routecodex-276-sse-stage-near-known-protocol-nonstream-guard-heartbeat-20260325-105417.log`
+  - `routecodex-276=in_progress`，`routecodex-276.2/.6=in_progress`，其余子项 `open`。
 
 ## 2026-03-25 Heartbeat 继续改（10:49 local）
 - W2 增补一条 stage2 unknown 协议防回退回归（非流式兜底路径）：

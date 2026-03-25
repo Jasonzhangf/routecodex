@@ -463,6 +463,39 @@ describe('resp_outbound stages snapshot payloads', () => {
     });
   });
 
+  it('keeps near-known protocol variant in non-stream path when wantsStream=true', async () => {
+    const recorder = new StubStageRecorder();
+    const clientPayload = {
+      id: 'near_known_protocol_non_stream',
+      object: 'response',
+      model: 'custom-model',
+      output: [
+        {
+          type: 'message',
+          role: 'assistant',
+          content: [{ type: 'output_text', text: 'near-known protocol variant should stay non-stream' }]
+        }
+      ]
+    } as any;
+
+    const result = await runRespOutboundStage2SseStream({
+      clientPayload,
+      clientProtocol: ' OPENAI-CHAT-PREVIEW ' as any,
+      requestId: 'req-near-known-protocol-non-stream',
+      wantsStream: true,
+      stageRecorder: recorder
+    });
+
+    expect(result.body).toEqual(clientPayload);
+    expect(result.stream).toBeUndefined();
+    expect(recorder.entries).toHaveLength(1);
+    expect(recorder.entries[0]?.payload).toEqual({
+      passthrough: false,
+      protocol: ' OPENAI-CHAT-PREVIEW ',
+      payload: clientPayload
+    });
+  });
+
   it('normalizes anthropic-messages protocol token in non-stream branch', async () => {
     const recorder = new StubStageRecorder();
     const clientPayload = {

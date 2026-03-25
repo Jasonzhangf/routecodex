@@ -1,3 +1,40 @@
+## 2026-03-25 Heartbeat 继续改（10:54 local）— W2 stage2 near-known 协议 non-stream 防误判回归
+
+### 先复核上一次交付完整性（2026-03-25 10:49 local）
+
+- 10:49 条目证据保持可复核：
+  - `test-results/routecodex-276/jest-sse-stage-unknown-protocol-nonstream-guard-heartbeat-20260325-104940.log`（`JEST_EXIT_CODE=0`）
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/build-ci-sse-stage-unknown-protocol-nonstream-guard-heartbeat-20260325-104940.log`（`BUILD_CI_EXIT_CODE=0`）
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/file-line-limit-sse-stage-unknown-protocol-nonstream-guard-heartbeat-20260325-104940.log`（`FILE_LINE_LIMIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/llmswitch-rustification-audit-sse-stage-unknown-protocol-nonstream-guard-heartbeat-20260325-104940.log`（`AUDIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/repo-sanity-sse-stage-unknown-protocol-nonstream-guard-heartbeat-20260325-104940.log`（`REPO_SANITY_EXIT_CODE=0`）
+
+### 继续执行（未完成项直接推进）
+
+- 本轮继续推进 `routecodex-276.2`，补一条 near-known 协议防误判回归，确保 stage2 对 `openai-chat` 仅做精确协议匹配：
+  - `tests/monitoring/resp-outbound-stage.test.ts`
+    - 新增：`keeps near-known protocol variant in non-stream path when wantsStream=true`
+    - 覆盖 `clientProtocol=' OPENAI-CHAT-PREVIEW '` + `wantsStream=true`，断言返回 `body` 且 stage recorder 保持原始协议 token。
+- 目标：避免未来出现前缀匹配/宽松匹配导致 near-known 协议误入 stream codec。
+
+### 验证证据
+
+- Jest：
+  - `test-results/routecodex-276/jest-sse-stage-near-known-protocol-nonstream-guard-heartbeat-20260325-105417.log`（`3 suites / 23 tests passed`，`JEST_EXIT_CODE=0`）
+- build:ci：
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/build-ci-sse-stage-near-known-protocol-nonstream-guard-heartbeat-20260325-105417.log`（`BUILD_CI_EXIT_CODE=0`）
+- 门禁：
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/file-line-limit-sse-stage-near-known-protocol-nonstream-guard-heartbeat-20260325-105417.log`（`FILE_LINE_LIMIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/llmswitch-rustification-audit-sse-stage-near-known-protocol-nonstream-guard-heartbeat-20260325-105417.log`（`AUDIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/repo-sanity-sse-stage-near-known-protocol-nonstream-guard-heartbeat-20260325-105417.log`（`REPO_SANITY_EXIT_CODE=0`）
+- 状态快照：
+  - `test-results/routecodex-276/bd-status-routecodex-276-sse-stage-near-known-protocol-nonstream-guard-heartbeat-20260325-105417.log`
+
+### 结论
+
+- 本轮完成可复核 W2 小切片：stage2 已对 unknown + near-known 协议输入具备 non-stream 防误判证据。
+- Epic 状态保持（beads 真源）：`routecodex-276=in_progress`，`routecodex-276.2/.6=in_progress`，其余子项 `open`。
+
 ## 2026-03-25 Heartbeat 继续改（10:49 local）— W2 stage2 unknown 协议 non-stream 防回退回归
 
 ### 先复核上一次交付完整性（2026-03-25 09:21 local）
