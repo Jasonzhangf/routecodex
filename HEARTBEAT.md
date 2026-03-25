@@ -1,9 +1,24 @@
 # RouteCodex Heartbeat
 
-Heartbeat-Until: 2026-03-25T12:35:00+08:00
+Heartbeat-Until: 2026-03-25T13:00:00+08:00
 Heartbeat-Stop-When: no-open-tasks
-Last-Updated: 2026-03-25 11:29 +08:00
+Last-Updated: 2026-03-25 11:45 +08:00
 
+
+## 2026-03-25 Heartbeat 继续改（11:45 local）
+- W2 再补一条 stage2 非流式协议归一化边界回归（anthropic tab/newline 脏 token）：
+  - 文件：`tests/monitoring/resp-outbound-stage.test.ts`
+  - 新增用例：`normalizes anthropic-messages protocol token with tabs/newlines in non-stream branch`
+  - 断言：`clientProtocol='\tANTHROPIC-MESSAGES\n'` + `wantsStream=false` 时，返回 `body` 且 stage recorder 协议为 `anthropic-messages`。
+- 本轮验证证据：
+  - Jest：`test-results/routecodex-276/jest-sse-stage-protocol-normalize-anthropic-tab-newline-nonstream-heartbeat-20260325-114531.log`（`3 suites / 26 tests passed`，`JEST_EXIT_CODE=0`）
+  - build:ci：`sharedmodule/llmswitch-core/test-results/routecodex-276/build-ci-sse-stage-protocol-normalize-anthropic-tab-newline-nonstream-heartbeat-20260325-114531.log`（`BUILD_CI_EXIT_CODE=0`）
+  - file-line-limit：`sharedmodule/llmswitch-core/test-results/routecodex-276/file-line-limit-sse-stage-protocol-normalize-anthropic-tab-newline-nonstream-heartbeat-20260325-114531.log`（`FILE_LINE_LIMIT_EXIT_CODE=0`）
+  - audit：`test-results/routecodex-276/llmswitch-rustification-audit-sse-stage-protocol-normalize-anthropic-tab-newline-nonstream-heartbeat-20260325-114531.log`（`AUDIT_EXIT_CODE=0`）
+  - repo-sanity：`test-results/routecodex-276/repo-sanity-sse-stage-protocol-normalize-anthropic-tab-newline-nonstream-heartbeat-20260325-114531.log`（`REPO_SANITY_EXIT_CODE=0`）
+- beads 状态快照（真源）：
+  - `test-results/routecodex-276/bd-status-routecodex-276-sse-stage-protocol-normalize-anthropic-tab-newline-nonstream-heartbeat-20260325-114531.log`
+  - `routecodex-276=in_progress`，`routecodex-276.2/.6=in_progress`，其余子项 `open`。
 
 ## 2026-03-25 Heartbeat 继续改（11:29 local）
 - W2 再补一条 stage2 非流式协议归一化边界回归（gemini tab/newline 脏 token）：

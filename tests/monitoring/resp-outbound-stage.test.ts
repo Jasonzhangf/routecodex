@@ -595,4 +595,37 @@ describe('resp_outbound stages snapshot payloads', () => {
       payload: clientPayload
     });
   });
+
+  it('normalizes anthropic-messages protocol token with tabs/newlines in non-stream branch', async () => {
+    const recorder = new StubStageRecorder();
+    const clientPayload = {
+      id: 'msg_non_stream_normalized_tab_newline',
+      type: 'message',
+      role: 'assistant',
+      model: 'claude-3-7-sonnet-20250219',
+      content: [
+        {
+          type: 'text',
+          text: 'anthropic protocol with tab/newline non-stream ok'
+        }
+      ]
+    } as any;
+
+    const result = await runRespOutboundStage2SseStream({
+      clientPayload,
+      clientProtocol: '\tANTHROPIC-MESSAGES\n' as any,
+      requestId: 'req-anthropic-messages-non-stream-normalized-tab-newline',
+      wantsStream: false,
+      stageRecorder: recorder
+    });
+
+    expect(result.body).toEqual(clientPayload);
+    expect(result.stream).toBeUndefined();
+    expect(recorder.entries).toHaveLength(1);
+    expect(recorder.entries[0]?.payload).toEqual({
+      passthrough: false,
+      protocol: 'anthropic-messages',
+      payload: clientPayload
+    });
+  });
 });
