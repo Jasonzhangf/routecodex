@@ -1,3 +1,40 @@
+## 2026-03-25 Heartbeat 继续改（11:16 local）— W2 replay 闭环刷新（failing-shape + control）
+
+### 先复核上一次交付完整性（2026-03-25 10:54 local）
+
+- 10:54 条目证据保持可复核：
+  - `test-results/routecodex-276/jest-sse-stage-near-known-protocol-nonstream-guard-heartbeat-20260325-105417.log`（`JEST_EXIT_CODE=0`）
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/build-ci-sse-stage-near-known-protocol-nonstream-guard-heartbeat-20260325-105417.log`（`BUILD_CI_EXIT_CODE=0`）
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/file-line-limit-sse-stage-near-known-protocol-nonstream-guard-heartbeat-20260325-105417.log`（`FILE_LINE_LIMIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/llmswitch-rustification-audit-sse-stage-near-known-protocol-nonstream-guard-heartbeat-20260325-105417.log`（`AUDIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/repo-sanity-sse-stage-near-known-protocol-nonstream-guard-heartbeat-20260325-105417.log`（`REPO_SANITY_EXIT_CODE=0`）
+
+### 继续执行（未完成项直接推进）
+
+- 本轮按 `docs/agent-routing/20-build-test-release-routing.md` 的最小验证栈要求，补做 replay 闭环刷新：
+  - failing-shape replay（预期失败）：`test-results/routecodex-276/replay-failing-shape-routecodex-276-refresh-20260325-111615.log`
+  - control replay（预期成功）：`test-results/routecodex-276/replay-control-routecodex-276-refresh-20260325-111615.log`
+- 同轮补做版本/健康复核：
+  - `test-results/routecodex-276/routecodex-version-routecodex-276-refresh-20260325-111615.log`
+  - `test-results/routecodex-276/rcc-version-routecodex-276-refresh-20260325-111615.log`
+  - `test-results/routecodex-276/health-routecodex-276-refresh-20260325-111615.log`
+- 过程纠偏：首次调用误将 `--base` 指向 `.../v1/responses`（路径被拼接为 `/v1/responses/v1/responses`）并触发 `401`；已改为 `--base http://127.0.0.1:5555` + 显式 `--key "$OPENAI_API_KEY"` 重放，证据有效。
+
+### 验证证据
+
+- replay：
+  - `test-results/routecodex-276/replay-failing-shape-routecodex-276-refresh-20260325-111615.log`（`FAILING_SHAPE_EXIT_CODE=1`，HTTP 502 预期失败形态）
+  - `test-results/routecodex-276/replay-control-routecodex-276-refresh-20260325-111615.log`（`CONTROL_REPLAY_EXIT_CODE=0`）
+- 版本/健康：
+  - `test-results/routecodex-276/routecodex-version-routecodex-276-refresh-20260325-111615.log`（`0.90.739`）
+  - `test-results/routecodex-276/rcc-version-routecodex-276-refresh-20260325-111615.log`（`0.90.739`）
+  - `test-results/routecodex-276/health-routecodex-276-refresh-20260325-111615.log`（`ready=true`, `version=0.90.739`）
+
+### 结论
+
+- 本轮完成 W2 最新改动后的 replay + health 闭环刷新：failing-shape 失败形态稳定复现，control replay 正常通过。
+- Epic 状态保持（beads 真源）：`routecodex-276=in_progress`，`routecodex-276.2/.6=in_progress`，其余子项 `open`。
+
 ## 2026-03-25 Heartbeat 继续改（10:54 local）— W2 stage2 near-known 协议 non-stream 防误判回归
 
 ### 先复核上一次交付完整性（2026-03-25 10:49 local）

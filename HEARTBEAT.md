@@ -1,9 +1,21 @@
 # RouteCodex Heartbeat
 
-Heartbeat-Until: 2026-03-25T11:45:00+08:00
+Heartbeat-Until: 2026-03-25T12:00:00+08:00
 Heartbeat-Stop-When: no-open-tasks
-Last-Updated: 2026-03-25 10:54 +08:00
+Last-Updated: 2026-03-25 11:16 +08:00
 
+
+## 2026-03-25 Heartbeat 继续改（11:16 local）
+- W2 补做 routecodex-276 最小验证栈中的 replay 闭环刷新（在最新 stage2 guard 回归后再次核验）：
+  - failing-shape replay：`test-results/routecodex-276/replay-failing-shape-routecodex-276-refresh-20260325-111615.log`
+    - 结果：`HTTP 502` + `FAILING_SHAPE_EXIT_CODE=1`（预期失败形态可稳定复现）
+  - control replay：`test-results/routecodex-276/replay-control-routecodex-276-refresh-20260325-111615.log`
+    - 结果：`CONTROL_REPLAY_EXIT_CODE=0`
+- 同轮补做版本/健康复核：
+  - `test-results/routecodex-276/routecodex-version-routecodex-276-refresh-20260325-111615.log` → `0.90.739`
+  - `test-results/routecodex-276/rcc-version-routecodex-276-refresh-20260325-111615.log` → `0.90.739`
+  - `test-results/routecodex-276/health-routecodex-276-refresh-20260325-111615.log` → `ready=true`, `version=0.90.739`
+- 说明：本轮初次 replay 误把 `--base` 写成 `.../v1/responses` 导致路径重复并触发 `401`，已立即修正为 `http://127.0.0.1:5555` 后重放并获得有效证据。
 
 ## 2026-03-25 Heartbeat 继续改（10:54 local）
 - W2 增补一条 stage2 near-known 协议防回退回归（非流式兜底路径）：
