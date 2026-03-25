@@ -1,3 +1,41 @@
+## 2026-03-25 Heartbeat 继续改（11:29 local）— W2 stage2 gemini tab/newline 非流式协议归一化回归
+
+### 先复核上一次交付完整性（2026-03-25 11:21 local）
+
+- 11:21 条目证据保持可复核：
+  - `test-results/routecodex-276/jest-sse-stage-protocol-normalize-tab-newline-stream-heartbeat-20260325-112123.log`（`JEST_EXIT_CODE=0`）
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/build-ci-sse-stage-protocol-normalize-tab-newline-stream-heartbeat-20260325-112123.log`（`BUILD_CI_EXIT_CODE=0`）
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/file-line-limit-sse-stage-protocol-normalize-tab-newline-stream-heartbeat-20260325-112123.log`（`FILE_LINE_LIMIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/llmswitch-rustification-audit-sse-stage-protocol-normalize-tab-newline-stream-heartbeat-20260325-112123.log`（`AUDIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/repo-sanity-sse-stage-protocol-normalize-tab-newline-stream-heartbeat-20260325-112123.log`（`REPO_SANITY_EXIT_CODE=0`）
+
+### 继续执行（未完成项直接推进）
+
+- 本轮继续推进 `routecodex-276.2`，补一条 gemini 非流式 tab/newline 脏 token 回归：
+  - `tests/monitoring/resp-outbound-stage.test.ts`
+    - 新增：`normalizes gemini-chat protocol token with tabs/newlines in non-stream branch`
+    - 覆盖 `clientProtocol='	GEMINI-CHAT
+'` + `wantsStream=false`，断言返回 `body` 且 stage recorder 协议标准化为 `gemini-chat`。
+- 目标：将“通用空白字符协议归一化”证据扩展到 non-stream 分支的 gemini 路径。
+
+### 验证证据
+
+- Jest：
+  - `test-results/routecodex-276/jest-sse-stage-protocol-normalize-gemini-tab-newline-nonstream-heartbeat-20260325-112953.log`（`3 suites / 25 tests passed`，`JEST_EXIT_CODE=0`）
+- build:ci：
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/build-ci-sse-stage-protocol-normalize-gemini-tab-newline-nonstream-heartbeat-20260325-112953.log`（`BUILD_CI_EXIT_CODE=0`）
+- 门禁：
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/file-line-limit-sse-stage-protocol-normalize-gemini-tab-newline-nonstream-heartbeat-20260325-112953.log`（`FILE_LINE_LIMIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/llmswitch-rustification-audit-sse-stage-protocol-normalize-gemini-tab-newline-nonstream-heartbeat-20260325-112953.log`（`AUDIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/repo-sanity-sse-stage-protocol-normalize-gemini-tab-newline-nonstream-heartbeat-20260325-112953.log`（`REPO_SANITY_EXIT_CODE=0`）
+- 状态快照：
+  - `test-results/routecodex-276/bd-status-routecodex-276-sse-stage-protocol-normalize-gemini-tab-newline-nonstream-heartbeat-20260325-112953.log`
+
+### 结论
+
+- 本轮完成可复核 W2 小切片：stage2 对 gemini 非流式路径的 tab/newline 协议 token 归一化稳定成立。
+- Epic 状态保持（beads 真源）：`routecodex-276=in_progress`，`routecodex-276.2/.6=in_progress`，其余子项 `open`。
+
 ## 2026-03-25 Heartbeat 继续改（11:21 local）— W2 stage2 tab/newline 协议归一化回归
 
 ### 先复核上一次交付完整性（2026-03-25 11:16 local）
