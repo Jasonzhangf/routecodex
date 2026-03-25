@@ -1,3 +1,41 @@
+## 2026-03-25 Heartbeat 继续改（11:21 local）— W2 stage2 tab/newline 协议归一化回归
+
+### 先复核上一次交付完整性（2026-03-25 11:16 local）
+
+- 11:16 条目证据保持可复核：
+  - `test-results/routecodex-276/replay-failing-shape-routecodex-276-refresh-20260325-111615.log`（`FAILING_SHAPE_EXIT_CODE=1`）
+  - `test-results/routecodex-276/replay-control-routecodex-276-refresh-20260325-111615.log`（`CONTROL_REPLAY_EXIT_CODE=0`）
+  - `test-results/routecodex-276/routecodex-version-routecodex-276-refresh-20260325-111615.log`（`0.90.739`）
+  - `test-results/routecodex-276/rcc-version-routecodex-276-refresh-20260325-111615.log`（`0.90.739`）
+  - `test-results/routecodex-276/health-routecodex-276-refresh-20260325-111615.log`（`ready=true`, `version=0.90.739`）
+
+### 继续执行（未完成项直接推进）
+
+- 本轮继续推进 `routecodex-276.2`，补一条 tab/newline 脏协议 token 回归，防止归一化逻辑只覆盖空格场景：
+  - `tests/monitoring/resp-outbound-stage.test.ts`
+    - 新增：`normalizes openai-responses protocol token with tabs/newlines in stream branch`
+    - 覆盖 `clientProtocol='	OPENAI-RESPONSES
+'` + `wantsStream=true`，断言返回 `stream` 且 stage recorder 协议标准化为 `openai-responses`。
+- 目标：将 stage2 协议归一化证据从“空格包裹”扩展到“通用空白字符包裹”。
+
+### 验证证据
+
+- Jest：
+  - `test-results/routecodex-276/jest-sse-stage-protocol-normalize-tab-newline-stream-heartbeat-20260325-112123.log`（`3 suites / 24 tests passed`，`JEST_EXIT_CODE=0`）
+- build:ci：
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/build-ci-sse-stage-protocol-normalize-tab-newline-stream-heartbeat-20260325-112123.log`（`BUILD_CI_EXIT_CODE=0`）
+- 门禁：
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/file-line-limit-sse-stage-protocol-normalize-tab-newline-stream-heartbeat-20260325-112123.log`（`FILE_LINE_LIMIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/llmswitch-rustification-audit-sse-stage-protocol-normalize-tab-newline-stream-heartbeat-20260325-112123.log`（`AUDIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/repo-sanity-sse-stage-protocol-normalize-tab-newline-stream-heartbeat-20260325-112123.log`（`REPO_SANITY_EXIT_CODE=0`）
+- 状态快照：
+  - `test-results/routecodex-276/bd-status-routecodex-276-sse-stage-protocol-normalize-tab-newline-stream-heartbeat-20260325-112123.log`
+
+### 结论
+
+- 本轮完成可复核 W2 小切片：stage2 对 `openai-responses` 协议 token 的归一化在 tab/newline 场景下也稳定成立。
+- Epic 状态保持（beads 真源）：`routecodex-276=in_progress`，`routecodex-276.2/.6=in_progress`，其余子项 `open`。
+
 ## 2026-03-25 Heartbeat 继续改（11:16 local）— W2 replay 闭环刷新（failing-shape + control）
 
 ### 先复核上一次交付完整性（2026-03-25 10:54 local）
