@@ -1,3 +1,40 @@
+## 2026-03-25 Heartbeat 继续改（10:49 local）— W2 stage2 unknown 协议 non-stream 防回退回归
+
+### 先复核上一次交付完整性（2026-03-25 09:21 local）
+
+- 09:21 条目证据保持可复核：
+  - `test-results/routecodex-276/jest-sse-stage-protocol-normalize-gemini-chat-nonstream-heartbeat-20260325-092132.log`（`JEST_EXIT_CODE=0`）
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/build-ci-sse-stage-protocol-normalize-gemini-chat-nonstream-heartbeat-20260325-092132.log`（`BUILD_CI_EXIT_CODE=0`）
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/file-line-limit-sse-stage-protocol-normalize-gemini-chat-nonstream-heartbeat-20260325-092132.log`（`FILE_LINE_LIMIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/llmswitch-rustification-audit-sse-stage-protocol-normalize-gemini-chat-nonstream-heartbeat-20260325-092132.log`（`AUDIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/repo-sanity-sse-stage-protocol-normalize-gemini-chat-nonstream-heartbeat-20260325-092132.log`（`REPO_SANITY_EXIT_CODE=0`）
+
+### 继续执行（未完成项直接推进）
+
+- 本轮继续推进 `routecodex-276.2`，补一条 unknown 协议防回退用例，确保 stage2 在脏 token + wantsStream=true 场景不误入 stream codec：
+  - `tests/monitoring/resp-outbound-stage.test.ts`
+    - 新增：`keeps unknown protocol in non-stream path even when wantsStream=true`
+    - 覆盖 `clientProtocol=' UNKNOWN-PROTOCOL '` + `wantsStream=true`，断言返回 `body` 且 stage recorder 记录原始协议 token。
+- 目标：在四协议归一化矩阵之外补齐 unknown 分支行为保护，避免未来改动将 unknown 误判为 stream 路径。
+
+### 验证证据
+
+- Jest：
+  - `test-results/routecodex-276/jest-sse-stage-unknown-protocol-nonstream-guard-heartbeat-20260325-104940.log`（`3 suites / 22 tests passed`，`JEST_EXIT_CODE=0`）
+- build:ci：
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/build-ci-sse-stage-unknown-protocol-nonstream-guard-heartbeat-20260325-104940.log`（`BUILD_CI_EXIT_CODE=0`）
+- 门禁：
+  - `sharedmodule/llmswitch-core/test-results/routecodex-276/file-line-limit-sse-stage-unknown-protocol-nonstream-guard-heartbeat-20260325-104940.log`（`FILE_LINE_LIMIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/llmswitch-rustification-audit-sse-stage-unknown-protocol-nonstream-guard-heartbeat-20260325-104940.log`（`AUDIT_EXIT_CODE=0`）
+  - `test-results/routecodex-276/repo-sanity-sse-stage-unknown-protocol-nonstream-guard-heartbeat-20260325-104940.log`（`REPO_SANITY_EXIT_CODE=0`）
+- 状态快照：
+  - `test-results/routecodex-276/bd-status-routecodex-276-sse-stage-unknown-protocol-nonstream-guard-heartbeat-20260325-104940.log`
+
+### 结论
+
+- 本轮完成可复核 W2 小切片：stage2 在 unknown 协议 token 场景已具备 non-stream 防回退证据，不会因为 `wantsStream=true` 误走 codec stream。
+- Epic 状态保持（beads 真源）：`routecodex-276=in_progress`，`routecodex-276.2/.6=in_progress`，其余子项 `open`。
+
 ## 2026-03-25 Heartbeat 继续改（09:21 local）— W2 stage2 gemini-chat 非流式分支协议归一化回归
 
 ### 先复核上一次交付完整性（2026-03-25 08:44 local）

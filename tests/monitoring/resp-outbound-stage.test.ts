@@ -430,6 +430,39 @@ describe('resp_outbound stages snapshot payloads', () => {
     });
   });
 
+  it('keeps unknown protocol in non-stream path even when wantsStream=true', async () => {
+    const recorder = new StubStageRecorder();
+    const clientPayload = {
+      id: 'unknown_protocol_non_stream',
+      object: 'response',
+      model: 'custom-model',
+      output: [
+        {
+          type: 'message',
+          role: 'assistant',
+          content: [{ type: 'output_text', text: 'unknown protocol should stay non-stream' }]
+        }
+      ]
+    } as any;
+
+    const result = await runRespOutboundStage2SseStream({
+      clientPayload,
+      clientProtocol: ' UNKNOWN-PROTOCOL ' as any,
+      requestId: 'req-unknown-protocol-non-stream',
+      wantsStream: true,
+      stageRecorder: recorder
+    });
+
+    expect(result.body).toEqual(clientPayload);
+    expect(result.stream).toBeUndefined();
+    expect(recorder.entries).toHaveLength(1);
+    expect(recorder.entries[0]?.payload).toEqual({
+      passthrough: false,
+      protocol: ' UNKNOWN-PROTOCOL ',
+      payload: clientPayload
+    });
+  });
+
   it('normalizes anthropic-messages protocol token in non-stream branch', async () => {
     const recorder = new StubStageRecorder();
     const clientPayload = {
