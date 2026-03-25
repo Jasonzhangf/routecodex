@@ -358,4 +358,37 @@ describe('resp_outbound stages snapshot payloads', () => {
       payload: clientPayload
     });
   });
+
+  it('normalizes anthropic-messages protocol token in non-stream branch', async () => {
+    const recorder = new StubStageRecorder();
+    const clientPayload = {
+      id: 'msg_non_stream_normalized',
+      type: 'message',
+      role: 'assistant',
+      model: 'claude-3-7-sonnet-20250219',
+      content: [
+        {
+          type: 'text',
+          text: 'anthropic normalized protocol non-stream ok'
+        }
+      ]
+    } as any;
+
+    const result = await runRespOutboundStage2SseStream({
+      clientPayload,
+      clientProtocol: ' ANTHROPIC-MESSAGES ' as any,
+      requestId: 'req-anthropic-messages-non-stream-normalized-protocol',
+      wantsStream: false,
+      stageRecorder: recorder
+    });
+
+    expect(result.body).toEqual(clientPayload);
+    expect(result.stream).toBeUndefined();
+    expect(recorder.entries).toHaveLength(1);
+    expect(recorder.entries[0]?.payload).toEqual({
+      passthrough: false,
+      protocol: 'anthropic-messages',
+      payload: clientPayload
+    });
+  });
 });
