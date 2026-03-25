@@ -359,6 +359,43 @@ describe('resp_outbound stages snapshot payloads', () => {
     });
   });
 
+  it('normalizes openai-chat protocol token in non-stream branch', async () => {
+    const recorder = new StubStageRecorder();
+    const clientPayload = {
+      id: 'chatcmpl_non_stream_normalized',
+      object: 'chat.completion',
+      created: 1730000002,
+      model: 'qwen3.5-plus',
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: 'assistant',
+            content: 'openai chat normalized protocol non-stream ok'
+          },
+          finish_reason: 'stop'
+        }
+      ]
+    };
+
+    const result = await runRespOutboundStage2SseStream({
+      clientPayload,
+      clientProtocol: ' OPENAI-CHAT ' as any,
+      requestId: 'req-openai-chat-non-stream-normalized-protocol',
+      wantsStream: false,
+      stageRecorder: recorder
+    });
+
+    expect(result.body).toEqual(clientPayload);
+    expect(result.stream).toBeUndefined();
+    expect(recorder.entries).toHaveLength(1);
+    expect(recorder.entries[0]?.payload).toEqual({
+      passthrough: false,
+      protocol: 'openai-chat',
+      payload: clientPayload
+    });
+  });
+
   it('normalizes anthropic-messages protocol token in non-stream branch', async () => {
     const recorder = new StubStageRecorder();
     const clientPayload = {
