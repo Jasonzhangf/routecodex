@@ -34,6 +34,13 @@ function normalizeString(value: unknown): string {
   return value.trim();
 }
 
+function resolveJsonBodyLimit(config?: ServerConfigV2): string {
+  const envLimit = normalizeString(process.env.ROUTECODEX_HTTP_BODY_LIMIT || process.env.RCC_HTTP_BODY_LIMIT);
+  if (envLimit) return envLimit;
+  const configLimit = normalizeString(config?.server?.bodyLimit);
+  return configLimit || '64mb';
+}
+
 export function resolveEnvSecretReference(value: string): { ok: true; value: string } | { ok: false; missing: string } {
   const trimmed = normalizeString(value);
   if (!trimmed) {
@@ -259,17 +266,18 @@ export function registerApiKeyAuthMiddleware(app: Application, config: ServerCon
   });
 }
 
-export function registerDefaultMiddleware(app: Application): void {
+export function registerDefaultMiddleware(app: Application, config?: ServerConfigV2): void {
   try {
     if (typeof express.json === 'function') {
-      app.use(express.json({ limit: '10mb' }));
+      const bodyLimit = resolveJsonBodyLimit(config);
+      app.use(express.json({ limit: bodyLimit }));
       app.use((error: unknown, _req: Request, _res: Response, next: NextFunction) => {
         if (isRequestAbortedError(error)) {
           return;
         }
         next(error as Error);
       });
-      console.log('[RouteCodexHttpServer] Middleware: express.json enabled');
+      console.log(`[RouteCodexHttpServer] Middleware: express.json enabled (limit=${bodyLimit})`);
       return;
     }
     app.use((_req, _res, next: NextFunction) => { next(); });

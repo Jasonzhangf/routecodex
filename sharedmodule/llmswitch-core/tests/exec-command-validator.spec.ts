@@ -30,4 +30,26 @@ describe('exec_command validator (shape fixes)', () => {
       expect(normalized.cmd).toBe('echo hi');
     }
   });
+
+  it('unwraps nested input.cmd shape into cmd', () => {
+    const args = JSON.stringify({ input: { cmd: 'pwd', workdir: '/workspace' } });
+    const res = validateToolCall('exec_command', args);
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      const normalized = JSON.parse(res.normalizedArgs as string);
+      expect(normalized.cmd).toBe('pwd');
+      expect(normalized.workdir).toBe('/workspace');
+    }
+  });
+
+  it('unwraps nested arguments.command shape into cmd', () => {
+    const args = JSON.stringify({ arguments: { command: 'ls -la', yield_time_ms: 500 } });
+    const res = validateToolCall('exec_command', args);
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      const normalized = JSON.parse(res.normalizedArgs as string);
+      expect(normalized.cmd).toBe('ls -la');
+      expect(normalized.yield_time_ms).toBe(500);
+    }
+  });
 });

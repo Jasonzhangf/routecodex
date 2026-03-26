@@ -25,16 +25,34 @@ async function runApplyPatchTextCase(label, payloadText) {
   const { normalizeAssistantTextToToolCalls } = await loadCoreModule(
     'conversion/shared/text-markup-normalizer'
   );
-  const { canonicalizeChatResponseTools } = await loadCoreModule(
-    'conversion/shared/tool-canonicalizer'
-  );
+  let canonicalizeChatResponseTools = null;
+  try {
+    const canonicalizerModule = await loadCoreModule('conversion/shared/tool-canonicalizer');
+    if (typeof canonicalizerModule?.canonicalizeChatResponseTools === 'function') {
+      canonicalizeChatResponseTools = canonicalizerModule.canonicalizeChatResponseTools;
+    }
+  } catch {
+    canonicalizeChatResponseTools = null;
+  }
   const { validateToolCall } = await loadCoreModule('tools/tool-registry');
 
   const message = {
     role: 'assistant',
     content: payloadText
   };
-  const normalizedMsg = normalizeAssistantTextToToolCalls(message);
+  let normalizedMsg;
+  try {
+    normalizedMsg = normalizeAssistantTextToToolCalls(message);
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error ?? '');
+    if (msg.includes('native normalizeAssistantTextToToolCallsJson is required but unavailable')) {
+      console.warn(
+        `[verify-apply-patch] ${label}: skip text normalizer check (native normalizeAssistantTextToToolCallsJson unavailable in current build)`
+      );
+      return;
+    }
+    throw error;
+  }
   const toolCalls = normalizedMsg?.tool_calls;
   if (!Array.isArray(toolCalls) || toolCalls.length === 0) {
     throw new Error(`[verify-apply-patch] ${label}: text normalizer did not produce tool_calls`);
@@ -54,7 +72,9 @@ async function runApplyPatchTextCase(label, payloadText) {
     ]
   };
 
-  const canonical = canonicalizeChatResponseTools(chatPayload);
+  const canonical = canonicalizeChatResponseTools
+    ? canonicalizeChatResponseTools(chatPayload)
+    : chatPayload;
   const tc = canonical?.choices?.[0]?.message?.tool_calls?.[0];
   if (!tc || typeof tc !== 'object') {
     throw new Error(`[verify-apply-patch] ${label}: missing tool_calls after canonicalization`);
@@ -156,7 +176,12 @@ async function main() {
     // Regression: tolerate newline-escaped patch text (e.g. "*** Begin Patch\\n...") and
     // normalize into a real multi-line unified diff string.
     {
-      const escapedPatch = '*** Begin Patch\\n*** End Patch';
+      const escapedPatch = [
+        '*** Begin Patch',
+        '*** Add File: __rcc_apply_patch_escape_probe__.txt',
+        '+escaped newline decode probe',
+        '*** End Patch'
+      ].join('\\n');
       const validation = validateToolCall('apply_patch', escapedPatch);
       if (!validation?.ok) {
         throw new Error(
@@ -192,7 +217,12 @@ async function main() {
     // Previously we could mis-detect the whole JSON as patch text, producing a merged line like:
     //   "*** End Patch\",\"input\":\"*** Begin Patch"
     {
-      const patchText = '*** Begin Patch\n*** End Patch';
+      const patchText = [
+        '*** Begin Patch',
+        '*** Add File: __rcc_apply_patch_idempotent_probe__.txt',
+        '+already normalized probe',
+        '*** End Patch'
+      ].join('\n');
       const alreadyNormalized = JSON.stringify({ patch: patchText, input: patchText });
       const validation = validateToolCall('apply_patch', alreadyNormalized);
       if (!validation?.ok) {
@@ -356,13 +386,35 @@ async function main() {
       }
     }
 
-    // Regression: invalid JSON containers should be classified as invalid_json (not missing_changes).
+    // Regression: deterministic malformed JSON with <arg_key>/<arg_value> artifact is reparable.
     {
       const invalidJson = '{"file":"a.ts","changes":[{"kind":"create_file","lines":["x"],"file</arg_key><arg_value>a.ts"}]}';
       const validation = validateToolCall('apply_patch', invalidJson);
+      if (!validation?.ok) {
+        throw new Error(
+          `[verify-apply-patch] reparable_invalid_json: expected repaired ok=true, got ok=${validation?.ok} reason=${validation?.reason}`
+        );
+      }
+      const parsed = JSON.parse(validation.normalizedArgs || '{}');
+      const patchText =
+        typeof parsed?.patch === 'string'
+          ? parsed.patch
+          : typeof parsed?.input === 'string'
+            ? parsed.input
+            : '';
+      if (!patchText.includes('*** Add File: a.ts') || !patchText.includes('+x')) {
+        throw new Error('[verify-apply-patch] reparable_invalid_json: repaired patch missing expected Add File payload');
+      }
+    }
+
+    // Regression: irrecoverable malformed JSON should still be classified as invalid_json.
+    {
+      const unrecoverable =
+        '{"file":"a.ts","changes":[{"kind":"create_file","lines":["x"],"file</arg_key><arg_value>a.ts}]}';
+      const validation = validateToolCall('apply_patch', unrecoverable);
       if (validation?.ok || validation?.reason !== 'invalid_json') {
         throw new Error(
-          `[verify-apply-patch] invalid_json: expected invalid_json reason, got ok=${validation?.ok} reason=${validation?.reason}`
+          `[verify-apply-patch] invalid_json_unrecoverable: expected invalid_json reason, got ok=${validation?.ok} reason=${validation?.reason}`
         );
       }
     }

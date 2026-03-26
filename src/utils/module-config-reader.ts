@@ -157,7 +157,7 @@ export class ModuleConfigReader {
               credentials: true,
             },
             timeout: 30000,
-            bodyLimit: '10mb',
+            bodyLimit: '64mb',
             enableMetrics: true,
             enableHealthChecks: true,
           },

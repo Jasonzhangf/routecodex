@@ -1,9 +1,4 @@
 import type {
-  ResponsesSseEvent,
-  ResponsesSseEventType,
-  ChatSseEvent,
-  AnthropicSseEvent,
-  GeminiSseEvent,
   BaseSseEvent
 } from '../../types/index.js';
 import {
@@ -92,6 +87,11 @@ export interface RawSseEvent {
   timestamp?: number;
 }
 
+interface SseStreamChunkNativeResult {
+  events: SseParseResult[];
+  remainingBuffer: string;
+}
+
 function readNativeFunction(name: string): ((...args: unknown[]) => unknown) | null {
   const binding = loadNativeRouterHotpathBindingForInternalUse() as Record<string, unknown> | null;
   const fn = binding?.[name];
@@ -149,284 +149,175 @@ function assembleSseEventFromLinesWithNative(lines: string[]): RawSseEvent | nul
   }
 }
 
-function inferSseEventTypeFromDataWithNative(rawEvent: RawSseEvent, config: SseParserConfig): string | null {
-  const capability = 'inferSseEventTypeFromDataJson';
-  const fail = (reason?: string) => failNative<string | null>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    return fail();
-  }
-  let rawEventJson: string;
-  let allowedEventTypesJson: string;
-  try {
-    rawEventJson = JSON.stringify(rawEvent);
-    allowedEventTypesJson = JSON.stringify(Array.from(config.allowedEventTypes));
-  } catch {
-    return fail('json stringify failed');
-  }
-  try {
-    const raw = fn(rawEventJson, config.enableStrictValidation, allowedEventTypesJson);
-    if (typeof raw !== 'string' || raw.length === 0) {
-      return fail('empty result');
-    }
-    const parsed = JSON.parse(raw) as unknown;
-    if (parsed === null) {
-      return null;
-    }
-    if (typeof parsed !== 'string') {
-      return fail('invalid payload');
-    }
-    return parsed.trim() ? parsed.trim() : null;
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}
-
-function detectSseProtocolKindWithNative(
-  eventType: string
-): 'chat' | 'responses' | 'anthropic' | 'gemini' {
-  const capability = 'detectSseProtocolKindJson';
-  const fail = (reason?: string) =>
-    failNative<'chat' | 'responses' | 'anthropic' | 'gemini'>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    return fail();
-  }
-  try {
-    const raw = fn(eventType);
-    if (typeof raw !== 'string' || raw.length === 0) {
-      return fail('empty result');
-    }
-    const parsed = JSON.parse(raw) as unknown;
-    if (parsed === 'chat' || parsed === 'responses' || parsed === 'anthropic' || parsed === 'gemini') {
-      return parsed;
-    }
-    return fail('invalid payload');
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}
-
-function validateSseEventTypeWithNative(eventType: string, config: SseParserConfig): boolean {
-  const capability = 'validateSseEventTypeJson';
-  const fail = (reason?: string) => failNative<boolean>(capability, reason);
-  if (isNativeDisabledByEnv()) {
-    return fail('native disabled');
-  }
-  const fn = readNativeFunction(capability);
-  if (!fn) {
-    return fail();
-  }
-  let allowedEventTypesJson: string;
-  try {
-    allowedEventTypesJson = JSON.stringify(Array.from(config.allowedEventTypes));
-  } catch {
-    return fail('json stringify failed');
-  }
-  try {
-    const raw = fn(eventType, config.enableStrictValidation, allowedEventTypesJson);
-    if (typeof raw !== 'string' || raw.length === 0) {
-      return fail('empty result');
-    }
-    const parsed = JSON.parse(raw) as unknown;
-    if (typeof parsed !== 'boolean') {
-      return fail('invalid payload');
-    }
-    return parsed;
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
-    return fail(reason);
-  }
-}
-
 export function assembleSseEvent(lines: string[]): RawSseEvent | null {
   return assembleSseEventFromLinesWithNative(lines);
 }
 
-function safeJsonParse(data: string): unknown {
-  try {
-    if (data === '[DONE]') {
-      return '[DONE]';
-    }
+function parseSseEventWithNative(
+  sseText: string,
+  config: SseParserConfig
+): SseParseResult {
+  const capability = 'parseSseEventWithConfigJson';
+  const fail = (reason?: string) => failNative<SseParseResult>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
 
-    return JSON.parse(data);
+  let configJson: string;
+  try {
+    configJson = JSON.stringify({
+      ...config,
+      allowedEventTypes: Array.from(config.allowedEventTypes)
+    });
+  } catch {
+    return fail('json stringify failed');
+  }
+
+  try {
+    const raw = fn(sseText, configJson);
+    if (typeof raw !== 'string' || raw.length === 0) {
+      return fail('empty result');
+    }
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return fail('invalid payload');
+    }
+    const row = parsed as Record<string, unknown>;
+    return {
+      success: row.success === true,
+      rawData: typeof row.rawData === 'string' ? row.rawData : sseText,
+      event: (row.event as BaseSseEvent | undefined) ?? undefined,
+      error: typeof row.error === 'string' ? row.error : undefined
+    };
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Invalid JSON data: ${message}`);
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
   }
 }
 
-function validateEventType(eventType: string, config: SseParserConfig): boolean {
-  return validateSseEventTypeWithNative(eventType, config);
+function parseSseStreamWithNative(
+  sseData: string,
+  config: SseParserConfig
+): SseParseResult[] {
+  const capability = 'parseSseStreamWithConfigJson';
+  const fail = (reason?: string) => failNative<SseParseResult[]>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
+  }
+
+  let configJson: string;
+  try {
+    configJson = JSON.stringify({
+      ...config,
+      allowedEventTypes: Array.from(config.allowedEventTypes)
+    });
+  } catch {
+    return fail('json stringify failed');
+  }
+
+  try {
+    const raw = fn(sseData, configJson);
+    if (typeof raw !== 'string' || raw.length === 0) {
+      return fail('empty result');
+    }
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) {
+      return fail('invalid payload');
+    }
+    return parsed.map((item): SseParseResult => {
+      const row = item && typeof item === 'object' && !Array.isArray(item)
+        ? item as Record<string, unknown>
+        : {};
+      return {
+        success: row.success === true,
+        rawData: typeof row.rawData === 'string' ? row.rawData : '',
+        event: (row.event as BaseSseEvent | undefined) ?? undefined,
+        error: typeof row.error === 'string' ? row.error : undefined
+      };
+    });
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
 }
 
-function inferEventTypeFromData(rawEvent: RawSseEvent, config: SseParserConfig): string | null {
-  return inferSseEventTypeFromDataWithNative(rawEvent, config);
-}
-
-function createBaseEvent(
-  rawEvent: RawSseEvent,
+function parseSseStreamChunkWithNative(
+  sseBuffer: string,
   config: SseParserConfig,
-  _rawData: string
-): BaseSseEvent {
-  const baseEvent: BaseSseEvent = {
-    type: rawEvent.event,
-    timestamp: rawEvent.timestamp ?? Date.now(),
-    data: null,
-    sequenceNumber: typeof rawEvent.id === 'string' ? Number(rawEvent.id) : 0
-  };
-
-  try {
-    if (rawEvent.data) {
-      const parsedData = safeJsonParse(rawEvent.data);
-      baseEvent.data = parsedData;
-      if (
-        parsedData &&
-        typeof parsedData === 'object' &&
-        'sequence_number' in parsedData &&
-        typeof (parsedData as { sequence_number?: number }).sequence_number === 'number'
-      ) {
-        baseEvent.sequenceNumber = (parsedData as { sequence_number: number }).sequence_number;
-      }
-    }
-  } catch (error) {
-    if (config.enableEventRecovery) {
-      baseEvent.data = { error: 'Invalid JSON', raw: rawEvent.data };
-      baseEvent.type = 'error';
-    } else {
-      throw error instanceof Error ? error : new Error(String(error));
-    }
+  flushTail: boolean
+): SseStreamChunkNativeResult {
+  const capability = 'parseSseStreamChunkWithConfigJson';
+  const fail = (reason?: string) => failNative<SseStreamChunkNativeResult>(capability, reason);
+  if (isNativeDisabledByEnv()) {
+    return fail('native disabled');
+  }
+  const fn = readNativeFunction(capability);
+  if (!fn) {
+    return fail();
   }
 
-  return baseEvent;
-}
+  let configJson: string;
+  try {
+    configJson = JSON.stringify({
+      ...config,
+      allowedEventTypes: Array.from(config.allowedEventTypes)
+    });
+  } catch {
+    return fail('json stringify failed');
+  }
 
-function createChatEvent(baseEvent: BaseSseEvent): ChatSseEvent {
-  return {
-    type: baseEvent.type,
-    event: baseEvent.type as ChatSseEvent['event'],
-    timestamp: baseEvent.timestamp,
-    data: baseEvent.data,
-    sequenceNumber: baseEvent.sequenceNumber,
-    protocol: 'chat' as const,
-    direction: 'sse_to_json' as const
-  };
-}
-
-function createResponsesEvent(baseEvent: BaseSseEvent): ResponsesSseEvent {
-  return {
-    type: baseEvent.type as ResponsesSseEventType,
-    timestamp: baseEvent.timestamp,
-    data: baseEvent.data,
-    sequenceNumber: baseEvent.sequenceNumber,
-    protocol: 'responses' as const,
-    direction: 'sse_to_json' as const
-  };
-}
-
-function createAnthropicEvent(baseEvent: BaseSseEvent): AnthropicSseEvent {
-  return {
-    type: baseEvent.type as AnthropicSseEvent['type'],
-    timestamp: baseEvent.timestamp,
-    data: baseEvent.data,
-    sequenceNumber: baseEvent.sequenceNumber,
-    protocol: 'anthropic-messages',
-    direction: 'sse_to_json'
-  } as AnthropicSseEvent;
-}
-
-function createGeminiEvent(baseEvent: BaseSseEvent): GeminiSseEvent {
-  return {
-    type: baseEvent.type as GeminiSseEvent['type'],
-    event: baseEvent.type as GeminiSseEvent['type'],
-    timestamp: baseEvent.timestamp,
-    data: baseEvent.data,
-    sequenceNumber: baseEvent.sequenceNumber,
-    protocol: 'gemini-chat',
-    direction: 'sse_to_json'
-  };
-}
-
-function detectEventType(eventType: string): 'chat' | 'responses' | 'anthropic' | 'gemini' {
-  return detectSseProtocolKindWithNative(eventType);
+  try {
+    const raw = fn(sseBuffer, configJson, flushTail);
+    if (typeof raw !== 'string' || raw.length === 0) {
+      return fail('empty result');
+    }
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return fail('invalid payload');
+    }
+    const row = parsed as Record<string, unknown>;
+    const eventsRaw = Array.isArray(row.events) ? row.events : [];
+    const events = eventsRaw.map((item): SseParseResult => {
+      const entry = item && typeof item === 'object' && !Array.isArray(item)
+        ? item as Record<string, unknown>
+        : {};
+      return {
+        success: entry.success === true,
+        rawData: typeof entry.rawData === 'string' ? entry.rawData : '',
+        event: (entry.event as BaseSseEvent | undefined) ?? undefined,
+        error: typeof entry.error === 'string' ? entry.error : undefined
+      };
+    });
+    return {
+      events,
+      remainingBuffer: typeof row.remainingBuffer === 'string' ? row.remainingBuffer : ''
+    };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? 'unknown');
+    return fail(reason);
+  }
 }
 
 export function parseSseEvent(
   sseText: string,
   config: SseParserConfig = DEFAULT_SSE_PARSER_CONFIG
 ): SseParseResult {
-  const result: SseParseResult = {
-    success: false,
-    rawData: sseText
-  };
-
-  try {
-    const lines = sseText.split('\n').map(line => line.replace(/\r$/, ''));
-
-    const rawEvent = assembleSseEvent(lines);
-    if (!rawEvent) {
-      result.error = 'Invalid SSE event format';
-      return result;
-    }
-
-    const inferred = inferEventTypeFromData(rawEvent, config);
-    if (inferred) {
-      rawEvent.event = inferred;
-    }
-
-    if (config.enableStrictValidation && sseText.length > config.maxEventSize) {
-      result.error = `Event size ${sseText.length} exceeds maximum ${config.maxEventSize}`;
-      return result;
-    }
-
-    if (!validateEventType(rawEvent.event, config)) {
-      result.error = `Invalid event type: ${rawEvent.event}`;
-      return result;
-    }
-
-    const baseEvent = createBaseEvent(rawEvent, config, sseText);
-
-    const protocol = detectEventType(rawEvent.event);
-    if (protocol === 'chat') {
-      result.event = createChatEvent(baseEvent);
-    } else if (protocol === 'anthropic') {
-      result.event = createAnthropicEvent(baseEvent);
-    } else if (protocol === 'gemini') {
-      result.event = createGeminiEvent(baseEvent);
-    } else {
-      result.event = createResponsesEvent(baseEvent);
-    }
-
-    result.success = true;
-
-  } catch (error) {
-    result.error = error instanceof Error ? error.message : String(error);
-  }
-
-  return result;
+  return parseSseEventWithNative(sseText, config);
 }
 
 export function* parseSseStream(
   sseData: string,
   config: SseParserConfig = DEFAULT_SSE_PARSER_CONFIG
 ): Generator<SseParseResult> {
-  const events = sseData.split('\n\n').filter(event => event.trim() !== '');
-
-  for (const eventData of events) {
-    const result = parseSseEvent(eventData, config);
-
-    if (result.success || config.enableEventRecovery) {
-      yield result;
-    }
-  }
+  yield* parseSseStreamWithNative(sseData, config);
 }
 
 export async function* parseSseStreamAsync(
@@ -437,27 +328,16 @@ export async function* parseSseStreamAsync(
 
   for await (const chunk of asyncSseData) {
     buffer += chunk;
-
-    while (true) {
-      const eventEnd = buffer.indexOf('\n\n');
-      if (eventEnd === -1) {
-        break;
-      }
-
-      const eventData = buffer.substring(0, eventEnd);
-      buffer = buffer.substring(eventEnd + 2);
-
-      const result = parseSseEvent(eventData, config);
-
-      if (result.success || config.enableEventRecovery) {
-        yield result;
-      }
+    const parsedChunk = parseSseStreamChunkWithNative(buffer, config, false);
+    buffer = parsedChunk.remainingBuffer;
+    for (const result of parsedChunk.events) {
+      yield result;
     }
   }
 
   if (buffer.trim() !== '') {
-    const result = parseSseEvent(buffer, config);
-    if (result.success || config.enableEventRecovery) {
+    const parsedTail = parseSseStreamChunkWithNative(buffer, config, true);
+    for (const result of parsedTail.events) {
       yield result;
     }
   }

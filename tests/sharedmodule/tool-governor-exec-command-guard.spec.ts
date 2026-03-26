@@ -2,7 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   normalizeApplyPatchToolCallsOnRequest,
-  normalizeApplyPatchToolCallsOnResponse
+  normalizeApplyPatchToolCallsOnResponse,
+  processChatResponseTools
 } from '../../sharedmodule/llmswitch-core/src/conversion/shared/tool-governor.js';
 
 describe('tool governor exec_command guard', () => {
@@ -147,6 +148,78 @@ describe('tool governor exec_command guard', () => {
 
     expect(String(args.cmd || '')).toContain('policy 不允许');
     expect(String(args.cmd || '')).toContain('mass kill command is not allowed');
+  });
+
+
+  it('repairs request-side nested input.cmd shape before exec_command validation', () => {
+    const request: any = {
+      messages: [
+        {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            {
+              id: 'call_nested_input_1',
+              type: 'function',
+              function: {
+                name: 'exec_command',
+                arguments: JSON.stringify({
+                  input: {
+                    cmd: 'pwd',
+                    workdir: '/workspace',
+                    yield_time_ms: 300
+                  }
+                })
+              }
+            }
+          ]
+        }
+      ]
+    };
+
+    const out: any = normalizeApplyPatchToolCallsOnRequest(request);
+    const argsRaw = out.messages?.[0]?.tool_calls?.[0]?.function?.arguments;
+    const args = JSON.parse(String(argsRaw || '{}'));
+
+    expect(args.cmd).toBe('pwd');
+    expect(args.workdir).toBe('/workspace');
+    expect(args.yield_time_ms).toBe(300);
+  });
+
+  it('repairs response-side nested arguments.command shape before exec_command validation', () => {
+    const response: any = {
+      choices: [
+        {
+          message: {
+            role: 'assistant',
+            content: null,
+            tool_calls: [
+              {
+                id: 'call_nested_arguments_1',
+                type: 'function',
+                function: {
+                  name: 'exec_command',
+                  arguments: JSON.stringify({
+                    arguments: {
+                      command: 'ls -la',
+                      workdir: '/workspace'
+                    }
+                  })
+                }
+              }
+            ]
+          },
+          finish_reason: 'tool_calls'
+        }
+      ]
+    };
+
+    const out: any = processChatResponseTools(response);
+    const argsRaw = out.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;
+    const args = JSON.parse(String(argsRaw || '{}'));
+
+    expect(args.cmd).toBe('ls -la');
+    expect(args.workdir).toBe('/workspace');
   });
 
   it('repairs malformed response tool_call when command is placed in function.name', () => {

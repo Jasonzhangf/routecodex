@@ -80,4 +80,38 @@ describe('normalizeProvider anthropic thinking config', () => {
     expect(normalized.modelAnthropicThinkingConfig?.['kimi-k2.5']).toEqual({ effort: 'high' });
     expect(normalized.modelAnthropicThinkingConfig?.['1']).toBeUndefined();
   });
+
+  it('maps multimodal capability alias to vision capability', () => {
+    const normalized = normalizeProvider('alias-test', {
+      id: 'alias-test',
+      type: 'openai',
+      baseURL: 'https://example.test/openai',
+      auth: { type: 'apikey', apiKey: 'test-key' },
+      models: {
+        'qwen3.5-plus': {
+          supportsStreaming: true,
+          capabilities: ['text', 'multimodal', 'vision']
+        }
+      }
+    });
+
+    expect(normalized.modelCapabilities?.['qwen3.5-plus']).toEqual(['text', 'vision']);
+  });
+
+  it('maps websearch capability aliases to web_search', () => {
+    const normalized = normalizeProvider('alias-test', {
+      id: 'alias-test',
+      type: 'openai',
+      baseURL: 'https://example.test/openai',
+      auth: { type: 'apikey', apiKey: 'test-key' },
+      models: {
+        'glm-5': {
+          supportsStreaming: true,
+          capabilities: ['text', 'websearch', 'web-search', 'search', 'web_search']
+        }
+      }
+    });
+
+    expect(normalized.modelCapabilities?.['glm-5']).toEqual(['text', 'web_search']);
+  });
 });

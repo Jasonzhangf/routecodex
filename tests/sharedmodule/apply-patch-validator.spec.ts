@@ -268,6 +268,36 @@ describe('apply_patch validator', () => {
     expect(result.reason).toBe('empty_add_file_block');
   });
 
+  it('normalizes legacy "*** Start File:" header into Update File', () => {
+    const legacyStartFilePatch = [
+      '*** Begin Patch',
+      '*** Start File: src/legacy.ts',
+      '@@ -1,1 +1,1 @@',
+      '-const a = 1;',
+      '+const a = 2;',
+      '*** End Patch'
+    ].join('\n');
+
+    const result = validateToolCall('apply_patch', JSON.stringify({ patch: legacyStartFilePatch }));
+    expect(result.ok).toBe(true);
+    const parsed = toArgsObject(result);
+    expect(String(parsed.patch)).toContain('*** Update File: src/legacy.ts');
+    expect(String(parsed.patch)).not.toContain('*** Start File:');
+  });
+
+  it('rejects Update File hunk that has @@ but no body lines', () => {
+    const emptyUpdateHunk = [
+      '*** Begin Patch',
+      '*** Update File: src/a.ts',
+      '@@',
+      '*** End Patch'
+    ].join('\n');
+
+    const result = validateToolCall('apply_patch', JSON.stringify({ patch: emptyUpdateHunk }));
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('empty_update_hunk');
+  });
+
   it('rejects invalid /dev/null file path in Add File header', () => {
     const invalidPath = [
       '*** Begin Patch',

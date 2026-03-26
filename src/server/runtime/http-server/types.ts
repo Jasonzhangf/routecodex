@@ -13,6 +13,7 @@ export interface ServerConfigV2 {
     host: string;
     apikey?: string;
     timeout?: number;
+    bodyLimit?: string;
     /**
      * Whether quota management participates in virtual-router routing decisions.
      * When false, quota daemon signals won't remove providers from the pool.

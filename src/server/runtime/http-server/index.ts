@@ -16,11 +16,6 @@ import type { UnknownObject } from '../../../types/common-types.js';
 import type { HandlerContext, PipelineExecutionInput, PipelineExecutionResult } from '../../handlers/types.js';
 import type { ModuleDependencies, PipelineDebugLogger } from '../../../modules/pipeline/interfaces/pipeline-interfaces.js';
 import { PipelineDebugLogger as PipelineDebugLoggerImpl } from '../../../modules/pipeline/utils/debug-logger.js';
-import type {
-  DebugLogEntry,
-  TransformationLogEntry,
-  ProviderRequestLogEntry
-} from '../../../modules/pipeline/utils/debug-logger.js';
 import type { DebugCenter } from '../../../modules/pipeline/types/external-types.js';
 import { AuthFileResolver } from '../../../config/auth-file-resolver.js';
 import type { ProviderRuntimeProfile } from '../../../providers/core/api/provider-types.js';
@@ -111,6 +106,7 @@ import {
   buildHttpHandlerContext
 } from './http-server-lifecycle.js';
 import { executePipelineViaLegacyOverride } from './http-server-legacy-pipeline.js';
+import { createNoopPipelineLogger } from './http-server-noop-pipeline-logger.js';
 import type { RouteErrorHub } from '../../../error-handling/route-error-hub.js';
 
 export class RouteCodexHttpServer {
@@ -239,7 +235,7 @@ export class RouteCodexHttpServer {
     });
 
     registerApiKeyAuthMiddleware(this.app, this.config);
-    registerDefaultMiddleware(this.app);
+    registerDefaultMiddleware(this.app, this.config);
     registerOAuthPortalRoute(this.app);
     this.registerDaemonAdminUiRoute();
     console.log('[RouteCodexHttpServer] OAuth Portal route registered (early initialization)');
@@ -473,45 +469,4 @@ export class RouteCodexHttpServer {
   private async initializeRouteErrorHub(): Promise<void> {
     await initializeRouteErrorHub(this);
   }
-}
-
-function createNoopPipelineLogger(): PipelineDebugLogger {
-  const noop = () => {};
-  const emptyLogs = (): {
-    general: DebugLogEntry[];
-    transformations: TransformationLogEntry[];
-    provider: ProviderRequestLogEntry[];
-  } => ({
-    general: [],
-    transformations: [],
-    provider: []
-  });
-  const emptyList = <T>(): T[] => [];
-  const emptyStats = () => ({
-    totalLogs: 0,
-    logsByLevel: {},
-    logsByCategory: {},
-    logsByPipeline: {},
-    transformationCount: 0,
-    providerRequestCount: 0
-  });
-  return {
-    logModule: noop,
-    logError: noop,
-    logDebug: noop,
-    logPipeline: noop,
-    logRequest: noop,
-    logResponse: noop,
-    logTransformation: noop,
-    logProviderRequest: noop,
-    getRequestLogs: emptyLogs,
-    getPipelineLogs: emptyLogs,
-    getRecentLogs: () => emptyList<DebugLogEntry>(),
-    getTransformationLogs: () => emptyList<TransformationLogEntry>(),
-    getProviderLogs: () => emptyList<ProviderRequestLogEntry>(),
-    getStatistics: emptyStats,
-    clearLogs: noop,
-    exportLogs: () => [],
-    log: noop
-  };
 }

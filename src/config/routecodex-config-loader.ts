@@ -33,6 +33,7 @@ export async function loadRouteCodexConfig(explicitPath?: string): Promise<Loade
   const parsed = raw.trim() ? JSON.parse(raw) : {};
   const userConfig: UnknownRecord = isRecord(parsed) ? parsed : {};
   stickyConfigPath = configPath;
+  let v2InputFromConfig: Awaited<ReturnType<typeof buildVirtualRouterInputV2>> | null = null;
 
   const modeRaw = (userConfig as UnknownRecord).virtualrouterMode;
   const mode = typeof modeRaw === 'string' && modeRaw.trim().toLowerCase() === 'v2' ? 'v2' : 'v1';
@@ -40,6 +41,7 @@ export async function loadRouteCodexConfig(explicitPath?: string): Promise<Loade
   if (mode === 'v2') {
     sanitizeV2ConfigSources(userConfig, configPath);
     validateV2ConfigSources(userConfig);
+    v2InputFromConfig = await ensureCapabilityRoutesPersisted(userConfig, configPath);
   } else {
     // 全局 OAuth 浏览器选择开关（例如：'camoufox' 或 'default'）
     // 若配置中声明且环境变量未显式指定，则将其映射到 ROUTECODEX_OAUTH_BROWSER，供 OAuth 流程使用。
@@ -57,7 +59,7 @@ export async function loadRouteCodexConfig(explicitPath?: string): Promise<Loade
 
   if (mode === 'v2') {
     const vrBase = isRecord(userConfig.virtualrouter) ? (userConfig.virtualrouter as UnknownRecord) : {};
-    const v2Input = await buildVirtualRouterInputV2(userConfig);
+    const v2Input = v2InputFromConfig ?? await buildVirtualRouterInputV2(userConfig);
     userConfig.virtualrouter = {
       ...vrBase,
       providers: v2Input.providers,
@@ -300,4 +302,105 @@ function materializeActiveRoutingPolicyGroup(userConfig: UnknownRecord): void {
     }
     delete vr[key];
   }
+}
+
+async function ensureCapabilityRoutesPersisted(
+  userConfig: UnknownRecord,
+  configPath: string
+): Promise<Awaited<ReturnType<typeof buildVirtualRouterInputV2>>> {
+  const v2Input = await buildVirtualRouterInputV2(userConfig);
+  const vr = isRecord(userConfig.virtualrouter) ? (userConfig.virtualrouter as UnknownRecord) : undefined;
+  if (!vr) {
+    return v2Input;
+  }
+  const groupsNode = isRecord(vr.routingPolicyGroups) ? (vr.routingPolicyGroups as UnknownRecord) : undefined;
+  if (!groupsNode) {
+    return v2Input;
+  }
+  const groups: Record<string, UnknownRecord> = {};
+  for (const [groupId, groupNode] of Object.entries(groupsNode)) {
+    if (!groupId.trim() || !isRecord(groupNode)) {
+      continue;
+    }
+    groups[groupId] = groupNode as UnknownRecord;
+  }
+  const groupIds = Object.keys(groups);
+  if (!groupIds.length) {
+    return v2Input;
+  }
+  const activeCandidate = typeof vr.activeRoutingPolicyGroup === 'string' ? vr.activeRoutingPolicyGroup.trim() : '';
+  const activeGroupId =
+    activeCandidate && groups[activeCandidate]
+      ? activeCandidate
+      : groups.default
+        ? 'default'
+        : groupIds.sort((a, b) => a.localeCompare(b))[0];
+  const activeGroup = groups[activeGroupId];
+  if (!activeGroup) {
+    return v2Input;
+  }
+  const routingNode = isRecord(activeGroup.routing) ? (activeGroup.routing as UnknownRecord) : {};
+  activeGroup.routing = routingNode;
+
+  let changed = false;
+  const injectedRoutes: string[] = [];
+  if (upsertRouteIfMissing(routingNode, v2Input.routing, 'multimodal')) {
+    changed = true;
+    injectedRoutes.push('multimodal');
+  }
+  if (upsertRouteIfMissing(routingNode, v2Input.routing, 'vision')) {
+    changed = true;
+    injectedRoutes.push('vision');
+  }
+  if (upsertRouteIfMissing(routingNode, v2Input.routing, 'web_search', ['search'])) {
+    changed = true;
+    injectedRoutes.push('web_search');
+  }
+
+  if (!changed) {
+    return v2Input;
+  }
+
+  await fs.writeFile(configPath, `${JSON.stringify(userConfig, null, 2)}\n`, 'utf8');
+  console.warn(
+    `[config] v2 auto-injected missing capability routes into active policy "${activeGroupId}": ${injectedRoutes.join('/')} (${configPath})`
+  );
+  return v2Input;
+}
+
+function upsertRouteIfMissing(
+  routingNode: UnknownRecord,
+  synthesizedRouting: Record<string, unknown>,
+  routeName: 'multimodal' | 'vision' | 'web_search',
+  aliasRouteNames: string[] = []
+): boolean {
+  const existingNames = [routeName, ...aliasRouteNames];
+  if (existingNames.some((name) => routeHasConfiguredTargets(routingNode[name]))) {
+    return false;
+  }
+  if (!routeHasConfiguredTargets(synthesizedRouting[routeName])) {
+    return false;
+  }
+  routingNode[routeName] = deepClone(synthesizedRouting[routeName]);
+  return true;
+}
+
+function routeHasConfiguredTargets(routeNode: unknown): boolean {
+  if (!Array.isArray(routeNode) || routeNode.length === 0) {
+    return false;
+  }
+  for (const pool of routeNode) {
+    if (!isRecord(pool)) {
+      continue;
+    }
+    const targets = Array.isArray(pool.targets) ? pool.targets : [];
+    if (targets.some((target) => typeof target === 'string' && target.trim().length > 0)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function deepClone<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
 }

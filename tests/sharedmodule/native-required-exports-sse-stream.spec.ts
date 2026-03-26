@@ -6,6 +6,9 @@ describe('native required exports for sse stream helpers', () => {
   test('includes sse stream resolver/process exports and keeps export list deduplicated', () => {
     expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).toContain('processSseStreamJson');
     expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).toContain('resolveSseStreamModeJson');
+    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).toContain('parseSseEventWithConfigJson');
+    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).toContain('parseSseStreamWithConfigJson');
+    expect(REQUIRED_NATIVE_HOTPATH_EXPORTS).toContain('parseSseStreamChunkWithConfigJson');
     expect(new Set(REQUIRED_NATIVE_HOTPATH_EXPORTS).size).toBe(REQUIRED_NATIVE_HOTPATH_EXPORTS.length);
   });
 });
