@@ -22,7 +22,7 @@ function buildReasoningOnlyResponse(): JsonObject {
 }
 
 describe('servertool reasoning-only auto continue', () => {
-  test('injects continue when assistant text is empty and reasoning is present', async () => {
+  test('uses reenter followup when tmux session is unavailable', async () => {
     const chatResponse = buildReasoningOnlyResponse();
     const adapterContext = {} as AdapterContext;
     const result = await runServerSideToolEngine({
@@ -35,9 +35,37 @@ describe('servertool reasoning-only auto continue', () => {
 
     expect(result.mode).toBe('tool_flow');
     expect(result.execution?.flowId).toBe('reasoning_only_continue_flow');
+    const followup = result.execution?.followup as
+      | {
+          metadata?: Record<string, unknown>;
+          injection?: { ops?: Array<Record<string, unknown>> };
+        }
+      | undefined;
+    expect(followup?.metadata?.clientInjectOnly).toBeUndefined();
+    expect(followup?.injection?.ops).toEqual([
+      { op: 'append_assistant_message', required: false },
+      { op: 'append_user_text', text: '继续执行' }
+    ]);
+  });
+
+  test('keeps clientInjectOnly followup when tmux session is available', async () => {
+    const chatResponse = buildReasoningOnlyResponse();
+    const adapterContext = {
+      clientTmuxSessionId: 'session-123',
+      clientInjectReady: true
+    } as unknown as AdapterContext;
+    const result = await runServerSideToolEngine({
+      chatResponse,
+      adapterContext,
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      requestId: 'req_reasoning_only_2'
+    });
+
+    expect(result.mode).toBe('tool_flow');
+    expect(result.execution?.flowId).toBe('reasoning_only_continue_flow');
     const followup = result.execution?.followup as { metadata?: Record<string, unknown> } | undefined;
     expect(followup?.metadata?.clientInjectOnly).toBe(true);
     expect(followup?.metadata?.clientInjectText).toBe('继续执行');
   });
 });
-

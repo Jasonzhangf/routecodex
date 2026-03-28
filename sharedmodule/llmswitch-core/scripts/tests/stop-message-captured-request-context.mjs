@@ -117,6 +117,7 @@ async function main() {
 
   let dispatchArgs = null;
   let reenterCalled = false;
+  let reenterArgs = null;
   const result = await runServerToolOrchestration({
     chat: {
       id: 'chatcmpl_stop',
@@ -139,6 +140,7 @@ async function main() {
     },
     reenterPipeline: async (args) => {
       reenterCalled = true;
+      reenterArgs = args;
       return {
         body: {
           id: 'chatcmpl_followup',
@@ -157,17 +159,19 @@ async function main() {
 
   assert.equal(result.executed, true, 'stopMessage should execute followup flow');
   assert.equal(result.flowId, 'stop_message_flow', 'expected stop_message_flow');
-  assert.equal(reenterCalled, false, 'stop_message_flow clientInjectOnly should not call reenter');
-  assert.ok(dispatchArgs && typeof dispatchArgs === 'object', 'client inject dispatch args should be generated');
-  const metadata = dispatchArgs.metadata && typeof dispatchArgs.metadata === 'object' ? dispatchArgs.metadata : {};
-  assert.equal(metadata.clientInjectOnly, true, 'stopMessage should use clientInjectOnly followup');
-  const injectText = typeof metadata.clientInjectText === 'string' ? metadata.clientInjectText : '';
+  assert.equal(reenterCalled, true, 'stop_message_flow should reenter by default');
+  assert.equal(dispatchArgs, null, 'stop_message_flow should skip clientInjectDispatch by default');
+  const metadata = reenterArgs?.metadata && typeof reenterArgs.metadata === 'object' ? reenterArgs.metadata : {};
+  assert.equal(metadata.clientInjectOnly, undefined, 'stopMessage reenter flow should not require clientInjectOnly');
+  const followupBody = reenterArgs?.body && typeof reenterArgs.body === 'object' ? reenterArgs.body : {};
+  const followupMessages = Array.isArray(followupBody.messages) ? followupBody.messages : [];
+  const lastMessage = [...followupMessages].reverse().find((item) => item && typeof item.content === 'string');
+  const injectText = lastMessage && typeof lastMessage.content === 'string' ? lastMessage.content : '';
   assert.ok(
     injectText.includes('继续执行'),
     'stopMessage followup text should be injected'
   );
-  const followupBody = dispatchArgs.body && typeof dispatchArgs.body === 'object' ? dispatchArgs.body : {};
-  assert.equal(Array.isArray(followupBody.messages), false, 'clientInjectOnly followup should not carry reenter message history');
+  assert.ok(Array.isArray(followupBody.messages), 'reenter followup should carry message history');
 
   hubPipeline.dispose();
   console.log('[matrix:stop-message-captured-request-context] ok');

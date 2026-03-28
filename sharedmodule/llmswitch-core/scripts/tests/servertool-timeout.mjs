@@ -62,10 +62,8 @@ async function main() {
       requestId,
       entryEndpoint: '/v1/responses',
       providerProtocol: 'gemini-chat',
-      clientInjectDispatch: async () => never,
-      reenterPipeline: async () => {
-        throw new Error('unexpected reenterPipeline call for clientInjectOnly stop_message_flow');
-      }
+      clientInjectDispatch: async () => ({ ok: true }),
+      reenterPipeline: async () => never
     });
     console.error('❌ expected servertool followup timeout, but orchestration completed');
     process.exit(1);

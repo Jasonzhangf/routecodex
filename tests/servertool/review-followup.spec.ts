@@ -40,6 +40,29 @@ function buildReviewToolCallPayload(argsOverride?: Record<string, unknown>): Jso
   } as JsonObject;
 }
 
+function flattenMessageText(body: JsonObject | undefined): string {
+  const messages = Array.isArray((body as any)?.messages) ? ((body as any).messages as Array<Record<string, unknown>>) : [];
+  const chunks: string[] = [];
+  for (const message of messages) {
+    const content = message?.content;
+    if (typeof content === 'string' && content.trim()) {
+      chunks.push(content.trim());
+    }
+  }
+  return chunks.join('\n');
+}
+
+function readLastMessageText(body: JsonObject | undefined): string {
+  const messages = Array.isArray((body as any)?.messages) ? ((body as any).messages as Array<Record<string, unknown>>) : [];
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const content = messages[i]?.content;
+    if (typeof content === 'string' && content.trim()) {
+      return content.trim();
+    }
+  }
+  return '';
+}
+
 describe('review servertool followup', () => {
   const prevEnabled = process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_ENABLED;
 
@@ -51,7 +74,7 @@ describe('review servertool followup', () => {
     process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_ENABLED = prevEnabled;
   });
 
-  test('dispatches client-inject-only followup and skips reenter', async () => {
+  test('uses reenter followup by default and skips clientInject dispatch', async () => {
     process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_ENABLED = '0';
 
     const adapterContext: AdapterContext = {
@@ -71,6 +94,8 @@ describe('review servertool followup', () => {
     } as any;
 
     let capturedFollowupMeta: Record<string, unknown> | null = null;
+    let capturedFollowupBody: JsonObject | undefined;
+    let clientInjectCalled = false;
     let reenterCalled = false;
     const orchestration = await runServerToolOrchestration({
       chat: buildReviewToolCallPayload(),
@@ -78,29 +103,37 @@ describe('review servertool followup', () => {
       requestId: 'req-review-1',
       entryEndpoint: '/v1/messages',
       providerProtocol: 'anthropic-messages',
-      reenterPipeline: async () => {
+      reenterPipeline: async (opts: any) => {
         reenterCalled = true;
-        return { body: { id: 'unexpected' } as JsonObject };
-      },
-      clientInjectDispatch: async (opts: any) => {
         capturedFollowupMeta =
           opts?.metadata && typeof opts.metadata === 'object'
             ? (opts.metadata as Record<string, unknown>)
             : null;
+        capturedFollowupBody = opts?.body as JsonObject | undefined;
+        return { body: { id: 'reentered' } as JsonObject };
+      },
+      clientInjectDispatch: async (opts: any) => {
+        clientInjectCalled = true;
+        capturedFollowupMeta =
+          opts?.metadata && typeof opts.metadata === 'object'
+            ? (opts.metadata as Record<string, unknown>)
+            : null;
+        capturedFollowupBody = opts?.body as JsonObject | undefined;
         return { ok: true } as any;
       }
     });
 
     expect(orchestration.executed).toBe(true);
     expect(orchestration.flowId).toBe('review_flow');
-    expect(reenterCalled).toBe(false);
+    expect(reenterCalled).toBe(true);
+    expect(clientInjectCalled).toBe(false);
     expect(capturedFollowupMeta).toBeTruthy();
-    expect((capturedFollowupMeta as any)?.clientInjectOnly).toBe(true);
+    expect((capturedFollowupMeta as any)?.clientInjectOnly).toBeUndefined();
     expect((capturedFollowupMeta as any)?.workdir).toBe('/tmp/review-workdir');
     expect((capturedFollowupMeta as any)?.cwd).toBe('/tmp/review-workdir');
-    expect(typeof (capturedFollowupMeta as any)?.clientInjectText).toBe('string');
-    expect(String((capturedFollowupMeta as any)?.clientInjectText || '')).toContain('代码 review');
-    expect(String((capturedFollowupMeta as any)?.clientInjectText || '')).toContain(
+    const followupText = flattenMessageText(capturedFollowupBody);
+    expect(followupText).toContain('代码 review');
+    expect(followupText).toContain(
       '必须先根据本次请求逐条核验代码'
     );
     expect((capturedFollowupMeta as any)?.clientInjectSource).toBe('servertool.review');
@@ -144,26 +177,29 @@ describe('review servertool followup', () => {
       } as any;
 
       let capturedFollowupMeta: Record<string, unknown> | null = null;
+      let capturedFollowupBody: JsonObject | undefined;
       const orchestration = await runServerToolOrchestration({
         chat: buildReviewToolCallPayload(),
         adapterContext,
         requestId: 'req-review-no-ai-default',
         entryEndpoint: '/v1/messages',
         providerProtocol: 'anthropic-messages',
-        clientInjectDispatch: async (opts: any) => {
+        reenterPipeline: async (opts: any) => {
           capturedFollowupMeta =
             opts?.metadata && typeof opts.metadata === 'object'
               ? (opts.metadata as Record<string, unknown>)
               : null;
-          return { ok: true } as any;
+          capturedFollowupBody = opts?.body as JsonObject | undefined;
+          return { body: { id: 'ok' } as JsonObject } as any;
         }
       });
 
       expect(orchestration.executed).toBe(true);
       expect(orchestration.flowId).toBe('review_flow');
       expect(fs.existsSync(markerPath)).toBe(false);
-      expect(String((capturedFollowupMeta as any)?.clientInjectText || '')).toContain('严格代码 review');
-      expect(String((capturedFollowupMeta as any)?.clientInjectText || '')).toContain(
+      const followupText = flattenMessageText(capturedFollowupBody);
+      expect(followupText).toContain('严格代码 review');
+      expect(followupText).toContain(
         '必须先根据本次请求逐条核验代码'
       );
     } finally {
@@ -227,6 +263,7 @@ describe('review servertool followup', () => {
       } as any;
 
       let capturedFollowupMeta: Record<string, unknown> | null = null;
+      let capturedFollowupBody: JsonObject | undefined;
       let timerTicked = false;
       const timer = setTimeout(() => {
         timerTicked = true;
@@ -237,12 +274,13 @@ describe('review servertool followup', () => {
         requestId: 'req-review-ai-enabled',
         entryEndpoint: '/v1/messages',
         providerProtocol: 'anthropic-messages',
-        clientInjectDispatch: async (opts: any) => {
+        reenterPipeline: async (opts: any) => {
           capturedFollowupMeta =
             opts?.metadata && typeof opts.metadata === 'object'
               ? (opts.metadata as Record<string, unknown>)
               : null;
-          return { ok: true } as any;
+          capturedFollowupBody = opts?.body as JsonObject | undefined;
+          return { body: { id: 'ok' } as JsonObject } as any;
         }
       });
       clearTimeout(timer);
@@ -251,7 +289,7 @@ describe('review servertool followup', () => {
       expect(orchestration.flowId).toBe('review_flow');
       expect(timerTicked).toBe(true);
       expect(fs.existsSync(markerPath)).toBe(true);
-      expect(String((capturedFollowupMeta as any)?.clientInjectText || '')).toContain('下一步：先补一个最小回归测试再继续实现');
+      expect(flattenMessageText(capturedFollowupBody)).toContain('下一步：先补一个最小回归测试再继续实现');
     } finally {
       if (prevStopEnabled === undefined) delete process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_ENABLED;
       else process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_ENABLED = prevStopEnabled;
@@ -293,12 +331,12 @@ describe('review servertool followup', () => {
       requestId: 'req-review-args-cwd',
       entryEndpoint: '/v1/messages',
       providerProtocol: 'anthropic-messages',
-      clientInjectDispatch: async (opts: any) => {
+      reenterPipeline: async (opts: any) => {
         capturedFollowupMeta =
           opts?.metadata && typeof opts.metadata === 'object'
             ? (opts.metadata as Record<string, unknown>)
             : null;
-        return { ok: true } as any;
+        return { body: { id: 'ok' } as JsonObject } as any;
       }
     });
 
@@ -333,6 +371,7 @@ describe('review servertool followup', () => {
     } as any;
 
     let capturedFollowupMeta: Record<string, unknown> | null = null;
+    let capturedFollowupBody: JsonObject | undefined;
     const orchestration = await runServerToolOrchestration({
       chat: buildReviewToolCallPayload({
         goal:
@@ -342,24 +381,25 @@ describe('review servertool followup', () => {
       requestId: 'req-review-sanitize',
       entryEndpoint: '/v1/messages',
       providerProtocol: 'anthropic-messages',
-      clientInjectDispatch: async (opts: any) => {
+      reenterPipeline: async (opts: any) => {
         capturedFollowupMeta =
           opts?.metadata && typeof opts.metadata === 'object'
             ? (opts.metadata as Record<string, unknown>)
             : null;
-        return { ok: true } as any;
+        capturedFollowupBody = opts?.body as JsonObject | undefined;
+        return { body: { id: 'ok' } as JsonObject } as any;
       }
     });
 
     expect(orchestration.executed).toBe(true);
-    const injectText = String((capturedFollowupMeta as any)?.clientInjectText || '');
-    expect(injectText).toContain('代码 review');
-    expect(injectText).not.toContain('<**stopMessage');
-    expect(injectText).not.toContain('[Time/Date]:');
-    expect(injectText).not.toContain('[Image omitted]');
+    const followupText = readLastMessageText(capturedFollowupBody);
+    expect(followupText).toContain('代码 review');
+    expect(followupText).not.toContain('<**stopMessage');
+    expect(followupText).not.toContain('[Time/Date]:');
+    expect(followupText).not.toContain('[Image omitted]');
   });
 
-  test('heartbeat handoff wording still preserves review flow as client-inject-only', async () => {
+  test('heartbeat handoff wording still preserves review followup source and uses reenter', async () => {
     process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_ENABLED = '0';
 
     const adapterContext: AdapterContext = {
@@ -387,18 +427,18 @@ describe('review servertool followup', () => {
       requestId: 'req-review-heartbeat',
       entryEndpoint: '/v1/messages',
       providerProtocol: 'anthropic-messages',
-      clientInjectDispatch: async (opts: any) => {
+      reenterPipeline: async (opts: any) => {
         capturedFollowupMeta =
           opts?.metadata && typeof opts.metadata === 'object'
             ? (opts.metadata as Record<string, unknown>)
             : null;
-        return { ok: true } as any;
+        return { body: { id: 'ok' } as JsonObject } as any;
       }
     });
 
     expect(orchestration.executed).toBe(true);
     expect(orchestration.flowId).toBe('review_flow');
-    expect((capturedFollowupMeta as any)?.clientInjectOnly).toBe(true);
+    expect((capturedFollowupMeta as any)?.clientInjectOnly).toBeUndefined();
     expect((capturedFollowupMeta as any)?.clientInjectSource).toBe('servertool.review');
   });
 });

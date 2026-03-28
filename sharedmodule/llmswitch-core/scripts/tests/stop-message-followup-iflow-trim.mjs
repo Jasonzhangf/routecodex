@@ -120,6 +120,7 @@ async function runCase({ toolContentLimit, includeProviderKey, historySize }) {
 
   let dispatchArgs = null;
   let reenterCalled = false;
+  let reenterArgs = null;
   const result = await runServerToolOrchestration({
     chat: base,
     adapterContext,
@@ -132,6 +133,7 @@ async function runCase({ toolContentLimit, includeProviderKey, historySize }) {
     },
     reenterPipeline: async (args) => {
       reenterCalled = true;
+      reenterArgs = args;
       return {
         body: {
           id: 'chatcmpl_followup',
@@ -150,19 +152,21 @@ async function runCase({ toolContentLimit, includeProviderKey, historySize }) {
 
   assert.equal(result.executed, true, 'stop_message_flow should execute');
   assert.equal(result.flowId, 'stop_message_flow', 'expected stop_message_flow');
-  assert.equal(reenterCalled, false, 'stop_message_flow clientInjectOnly should not use reenter');
-  assert.ok(dispatchArgs && typeof dispatchArgs === 'object', 'client inject dispatch args should be captured');
+  assert.equal(reenterCalled, true, 'stop_message_flow should use reenter followup by default');
+  assert.equal(dispatchArgs, null, 'stop_message_flow should not use clientInject dispatch by default');
+  assert.ok(reenterArgs && typeof reenterArgs === 'object', 'reenter args should be captured');
 
-  const metadata = dispatchArgs.metadata && typeof dispatchArgs.metadata === 'object' ? dispatchArgs.metadata : {};
-  assert.equal(metadata.clientInjectOnly, true, 'stop_message should run as clientInjectOnly');
-  const injectText = typeof metadata.clientInjectText === 'string' ? metadata.clientInjectText : '';
+  const metadata = reenterArgs.metadata && typeof reenterArgs.metadata === 'object' ? reenterArgs.metadata : {};
+  assert.equal(metadata.clientInjectOnly, undefined, 'stop_message reenter path should not require clientInjectOnly');
+  const followupBody = reenterArgs.body && typeof reenterArgs.body === 'object' ? reenterArgs.body : {};
+  const followupMessages = Array.isArray(followupBody.messages) ? followupBody.messages : [];
+  const lastMessage = [...followupMessages].reverse().find((item) => item && typeof item.content === 'string');
+  const injectText = lastMessage && typeof lastMessage.content === 'string' ? lastMessage.content : '';
   assert.ok(
     injectText.includes('继续执行'),
     `stop message inject text should include base directive, got: ${injectText}`
   );
-  const followupBody = dispatchArgs.body && typeof dispatchArgs.body === 'object' ? dispatchArgs.body : {};
-  const followupMessages = Array.isArray(followupBody.messages) ? followupBody.messages : [];
-  assert.equal(followupMessages.length, 0, 'clientInjectOnly followup should not carry reenter message history');
+  assert.ok(followupMessages.length > 0, 'reenter followup should carry message history');
 
   return {
     injectTextLength: injectText.length

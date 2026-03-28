@@ -67,15 +67,33 @@ async function runStopRequest(args) {
     providerProtocol: 'anthropic-messages',
     clientInjectDispatch: async (injectArgs) => {
       if (args.capture) {
-        args.capture.args = injectArgs;
+        args.capture.args = { mode: 'inject', ...injectArgs };
       }
       return { ok: true };
     },
     reenterPipeline: async (reenterArgs) => {
+      if (args.capture) {
+        args.capture.args = { mode: 'reenter', ...reenterArgs };
+      }
       return { body: createStopChat('ok') };
     }
   });
   return result;
+}
+
+function readFollowupTextAndMode(captureArgs) {
+  const followup = captureArgs && typeof captureArgs === 'object' ? captureArgs : {};
+  const mode = typeof followup.mode === 'string' ? followup.mode : 'unknown';
+  const metadata = followup.metadata && typeof followup.metadata === 'object' ? followup.metadata : {};
+  const body = followup.body && typeof followup.body === 'object' ? followup.body : {};
+  let text = '';
+  if (typeof metadata.clientInjectText === 'string') {
+    text = metadata.clientInjectText;
+  } else if (Array.isArray(body.messages)) {
+    const last = [...body.messages].reverse().find((item) => item && typeof item === 'object' && typeof item.content === 'string');
+    text = last && typeof last.content === 'string' ? last.content : '';
+  }
+  return { mode, metadata, text };
 }
 
 async function runCounterRegression(args) {
@@ -162,9 +180,8 @@ async function runFallbackRegression(args) {
 
   const followup = capture.args;
   assert.ok(followup && typeof followup === 'object', 'followup args should exist');
-  const metadata = followup.metadata && typeof followup.metadata === 'object' ? followup.metadata : {};
-  assert.equal(metadata.clientInjectOnly, true, 'stop_message should use clientInjectOnly followup');
-  const injectText = typeof metadata.clientInjectText === 'string' ? metadata.clientInjectText : '';
+  const { mode, metadata, text: injectText } = readFollowupTextAndMode(followup);
+  assert.ok(mode === 'inject' || mode === 'reenter', `unexpected followup mode: ${mode}`);
   assert.ok(
     injectText.includes('继续执行'),
     `fallback followup should never be empty, got: ${injectText}`
@@ -187,7 +204,7 @@ async function runDoneMarkerStripRegression(args) {
   const sessionId = `stop-marker-strip-${Date.now()}`;
   const tmuxSessionId = `tmux_${sessionId}`;
   const capture = {};
-  const markerOnlyBin = path.join(args.tmpRoot, 'mock-iflow-marker-only.js');
+  const markerOnlyBin = path.join(args.tmpRoot, 'mock-codex-marker-only.js');
   await fs.writeFile(
     markerOnlyBin,
     ['#!/usr/bin/env node', "process.stdout.write('[STOPMESSAGE_DONE]');"].join('\n'),
@@ -196,8 +213,8 @@ async function runDoneMarkerStripRegression(args) {
   await fs.chmod(markerOnlyBin, 0o755);
 
   process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_ENABLED = '1';
-  process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_BACKEND = 'iflow';
-  process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_IFLOW_BIN = markerOnlyBin;
+  process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_BACKEND = 'codex';
+  process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN = markerOnlyBin;
   process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_TIMEOUT_MS = '1000';
 
   const result = await runStopRequest({
@@ -216,9 +233,8 @@ async function runDoneMarkerStripRegression(args) {
 
   const followup = capture.args;
   assert.ok(followup && typeof followup === 'object', 'followup args should exist');
-  const metadata = followup.metadata && typeof followup.metadata === 'object' ? followup.metadata : {};
-  const content = typeof metadata.clientInjectText === 'string' ? metadata.clientInjectText : '';
-  assert.equal(metadata.clientInjectOnly, true, 'marker-only case should use clientInjectOnly followup');
+  const { mode, metadata, text: content } = readFollowupTextAndMode(followup);
+  assert.ok(mode === 'inject' || mode === 'reenter', `unexpected followup mode: ${mode}`);
   const firstLine = content.split('\n').find((line) => line.trim().length > 0) ?? '';
   assert.notEqual(firstLine.trim(), '[STOPMESSAGE_DONE]', 'done marker should be stripped before followup injection');
   assert.ok(content.includes('继续执行'), 'marker-only output should fallback to continue execution');
@@ -241,7 +257,7 @@ async function main() {
   const originalAutoTimeout = process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_TIMEOUT_MS;
   const originalAiEnabled = process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_ENABLED;
   const originalAiBackend = process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_BACKEND;
-  const originalAiIflowBin = process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_IFLOW_BIN;
+  const originalAiCodexBin = process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN;
   const originalAiTimeout = process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_TIMEOUT_MS;
 
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'stop-message-counter-'));
@@ -259,8 +275,8 @@ async function main() {
     await runCounterRegression({ runServerToolOrchestration, loadRoutingInstructionStateSync });
 
     process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_ENABLED = '1';
-    process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_BACKEND = 'iflow';
-    process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_IFLOW_BIN = path.join(tmpRoot, 'missing-iflow-bin');
+    process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_BACKEND = 'codex';
+    process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN = path.join(tmpRoot, 'missing-codex-bin');
     process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_TIMEOUT_MS = '500';
     await runFallbackRegression({ runServerToolOrchestration, loadRoutingInstructionStateSync });
     await runDoneMarkerStripRegression({ runServerToolOrchestration, tmpRoot });
@@ -312,10 +328,10 @@ async function main() {
     } else {
       delete process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_BACKEND;
     }
-    if (typeof originalAiIflowBin === 'string') {
-      process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_IFLOW_BIN = originalAiIflowBin;
+    if (typeof originalAiCodexBin === 'string') {
+      process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN = originalAiCodexBin;
     } else {
-      delete process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_IFLOW_BIN;
+      delete process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BIN;
     }
     if (typeof originalAiTimeout === 'string') {
       process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_TIMEOUT_MS = originalAiTimeout;

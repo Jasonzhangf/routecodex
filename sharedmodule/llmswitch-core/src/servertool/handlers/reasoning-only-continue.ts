@@ -7,6 +7,48 @@ import { stripReasoningTransportNoise } from '../../conversion/shared/reasoning-
 const FLOW_ID = 'reasoning_only_continue_flow';
 const HOOK_ID = 'reasoning_only_continue';
 
+function normalizeToken(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+function parseOptionalBool(value: unknown): boolean | undefined {
+  if (value === true) {
+    return true;
+  }
+  if (value === false) {
+    return false;
+  }
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'true') {
+      return true;
+    }
+    if (normalized === 'false') {
+      return false;
+    }
+  }
+  return undefined;
+}
+
+function canUseClientInjectFollowup(adapterContext: Record<string, unknown>): boolean {
+  const tmuxSessionId =
+    normalizeToken(adapterContext.clientTmuxSessionId) ||
+    normalizeToken(adapterContext.client_tmux_session_id) ||
+    normalizeToken(adapterContext.tmuxSessionId);
+  if (!tmuxSessionId) {
+    return false;
+  }
+  const explicitReady = parseOptionalBool(adapterContext.clientInjectReady);
+  if (explicitReady === false) {
+    return false;
+  }
+  return true;
+}
+
 const handler: ServerToolHandler = async (ctx): Promise<ServerToolHandlerPlan | null> => {
   if (!isStopEligibleForServerTool(ctx.base, ctx.adapterContext)) {
     return null;
@@ -33,15 +75,29 @@ const handler: ServerToolHandler = async (ctx): Promise<ServerToolHandlerPlan | 
             assistantEmpty: true
           }
         },
-        followup: {
-          requestIdSuffix: ':reasoning_only_continue',
-          entryEndpoint: ctx.entryEndpoint,
-          metadata: {
-            clientInjectOnly: true,
-            clientInjectText: '继续执行',
-            clientInjectSource: 'servertool.reasoning_only_continue'
-          }
-        }
+        followup: canUseClientInjectFollowup(ctx.adapterContext as Record<string, unknown>)
+          ? {
+              requestIdSuffix: ':reasoning_only_continue',
+              entryEndpoint: ctx.entryEndpoint,
+              metadata: {
+                clientInjectOnly: true,
+                clientInjectText: '继续执行',
+                clientInjectSource: 'servertool.reasoning_only_continue'
+              }
+            }
+          : {
+              requestIdSuffix: ':reasoning_only_continue',
+              entryEndpoint: ctx.entryEndpoint,
+              injection: {
+                ops: [
+                  { op: 'append_assistant_message', required: false },
+                  { op: 'append_user_text', text: '继续执行' }
+                ]
+              },
+              metadata: {
+                clientInjectSource: 'servertool.reasoning_only_continue'
+              }
+            }
       }
     })
   };
@@ -54,4 +110,3 @@ registerServerToolHandler(HOOK_ID, handler, {
     priority: 200
   }
 });
-

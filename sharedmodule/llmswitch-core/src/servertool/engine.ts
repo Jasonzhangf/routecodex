@@ -18,6 +18,7 @@ import {
 import type { StageRecorder } from '../conversion/hub/format-adapters/index.js';
 import { applyHubFollowupPolicyShadow } from './followup-shadow.js';
 import { buildServerToolFollowupChatPayloadFromInjection, extractCapturedChatSeed } from './handlers/followup-request-builder.js';
+import { sanitizeFollowupText } from './handlers/followup-sanitize.js';
 import { findNextUndeliveredDueAtMs, listClockTasks, resolveClockConfig } from './clock/task-store.js';
 import { resolveClockSessionScope } from './clock/session-scope.js';
 import { savePendingServerToolInjection } from './pending-session.js';
@@ -98,6 +99,63 @@ function resolveServerToolFollowupTimeoutMs(fallback: number): number {
       process.env.LLMSWITCH_SERVERTOOL_FOLLOWUP_TIMEOUT_MS,
     fallback
   );
+}
+
+function parseBooleanLike(value: unknown): boolean | undefined {
+  if (value === true) {
+    return true;
+  }
+  if (value === false) {
+    return false;
+  }
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'true') {
+      return true;
+    }
+    if (normalized === 'false') {
+      return false;
+    }
+  }
+  return undefined;
+}
+
+function readClientInjectOnly(metadata: JsonObject): boolean {
+  const parsed = parseBooleanLike((metadata as Record<string, unknown>).clientInjectOnly);
+  return parsed === true;
+}
+
+function normalizeClientInjectText(value: unknown, fallback = '继续执行'): string {
+  const text =
+    typeof value === 'string' && value.trim().length > 0
+      ? value.trim()
+      : fallback;
+  const sanitized = sanitizeFollowupText(text);
+  return sanitized || fallback;
+}
+
+function extractAppendUserTextFromFollowupPlan(followupPlan: unknown): string | undefined {
+  if (!followupPlan || typeof followupPlan !== 'object' || Array.isArray(followupPlan)) {
+    return undefined;
+  }
+  const injection = (followupPlan as { injection?: unknown }).injection;
+  if (!injection || typeof injection !== 'object' || Array.isArray(injection)) {
+    return undefined;
+  }
+  const ops = Array.isArray((injection as { ops?: unknown }).ops) ? ((injection as { ops: unknown[] }).ops as unknown[]) : [];
+  for (const op of ops) {
+    if (!op || typeof op !== 'object' || Array.isArray(op)) {
+      continue;
+    }
+    const record = op as Record<string, unknown>;
+    if (record.op !== 'append_user_text') {
+      continue;
+    }
+    if (typeof record.text === 'string' && record.text.trim().length > 0) {
+      return record.text.trim();
+    }
+  }
+  return undefined;
 }
 
 function withTimeout<T>(
@@ -358,6 +416,44 @@ function isEmptyClientResponsePayload(payload: JsonObject): boolean {
   }
 
   return true;
+}
+
+function hasRequiresActionShape(payload: JsonObject): boolean {
+  if (!payload || typeof payload !== 'object') {
+    return false;
+  }
+  const record = payload as Record<string, unknown>;
+  if (record.required_action && typeof record.required_action === 'object') {
+    return true;
+  }
+  const choices = Array.isArray(record.choices) ? (record.choices as Array<Record<string, unknown>>) : [];
+  for (const choice of choices) {
+    if (!choice || typeof choice !== 'object') {
+      continue;
+    }
+    const finishReason = typeof choice.finish_reason === 'string' ? choice.finish_reason.trim().toLowerCase() : '';
+    if (finishReason === 'tool_calls' || finishReason === 'requires_action') {
+      return true;
+    }
+    const message =
+      choice.message && typeof choice.message === 'object' && !Array.isArray(choice.message)
+        ? (choice.message as Record<string, unknown>)
+        : undefined;
+    if (message && Array.isArray(message.tool_calls) && message.tool_calls.length > 0) {
+      return true;
+    }
+  }
+  const output = Array.isArray(record.output) ? (record.output as Array<Record<string, unknown>>) : [];
+  for (const item of output) {
+    if (!item || typeof item !== 'object') {
+      continue;
+    }
+    const type = typeof item.type === 'string' ? item.type.trim().toLowerCase() : '';
+    if (type === 'function_call' || type === 'tool_call' || type === 'tool_use') {
+      return true;
+    }
+  }
+  return false;
 }
 
 function createEmptyFollowupError(args: {
@@ -808,7 +904,7 @@ export async function runServerToolOrchestration(
     options.entryEndpoint ||
     '/v1/chat/completions';
 
-  const followupPayloadRaw: JsonObject | null = (() => {
+  let followupPayloadRaw: JsonObject | null = (() => {
     if (
       followupPlan &&
       typeof followupPlan === 'object' &&
@@ -924,6 +1020,46 @@ export async function runServerToolOrchestration(
     stream: false,
     ...(engineResult.execution.followup.metadata ?? {})
   };
+  const forceReenterFollowup = isStopMessageFlow || isReviewFlow;
+  const forceTmuxClientInjectFollowup =
+    isClockHoldFlow || engineResult.execution.flowId === 'heartbeat_flow';
+
+  if (forceReenterFollowup && readClientInjectOnly(metadata)) {
+    const reenterText = normalizeClientInjectText(
+      (metadata as Record<string, unknown>).clientInjectText,
+      '继续执行'
+    );
+    followupPayloadRaw = buildServerToolFollowupChatPayloadFromInjection({
+      adapterContext: options.adapterContext,
+      chatResponse: engineResult.finalChatResponse,
+      injection: {
+        ops: [
+          { op: 'append_assistant_message', required: false },
+          { op: 'append_user_text', text: reenterText }
+        ]
+      }
+    });
+    delete (metadata as Record<string, unknown>).clientInjectOnly;
+    delete (metadata as Record<string, unknown>).clientInjectText;
+  }
+
+  if (forceTmuxClientInjectFollowup && !readClientInjectOnly(metadata)) {
+    const clientInjectText = normalizeClientInjectText(
+      (metadata as Record<string, unknown>).clientInjectText ??
+        extractAppendUserTextFromFollowupPlan(followupPlan) ??
+        'continue',
+      'continue'
+    );
+    (metadata as Record<string, unknown>).clientInjectOnly = true;
+    (metadata as Record<string, unknown>).clientInjectText = clientInjectText;
+    if (typeof (metadata as Record<string, unknown>).clientInjectSource !== 'string') {
+      (metadata as Record<string, unknown>).clientInjectSource =
+        isClockHoldFlow ? 'servertool.clock' : 'servertool.heartbeat';
+    }
+    // tmux-binding flows wake client explicitly; do not run nested reenter followup.
+    followupPayloadRaw = null;
+  }
+
   const rt = ensureRuntimeMetadata(metadata as unknown as Record<string, unknown>);
   (rt as Record<string, unknown>).serverToolFollowup = true;
   if (loopState) {
@@ -1246,6 +1382,16 @@ export async function runServerToolOrchestration(
       requestId: options.requestId,
       lastError
     });
+  }
+
+  if (isStopMessageFlow && followupBody && hasRequiresActionShape(followupBody)) {
+    const decorated = decorateFinalChatWithServerToolContext(engineResult.finalChatResponse, engineResult.execution);
+    logProgress(5, totalSteps, 'completed (stopMessage ignore requires_action reenter)', { flowId });
+    return {
+      chat: decorated,
+      executed: true,
+      flowId: engineResult.execution.flowId
+    };
   }
 
   // Special case: Antigravity thoughtSignature bootstrap flow.

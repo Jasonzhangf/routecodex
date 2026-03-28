@@ -96,6 +96,7 @@ async function main() {
 
   let followupArgs = null;
   let reenterCalled = false;
+  let reenterArgs = null;
   const res = await runServerToolOrchestration({
     chat,
     adapterContext,
@@ -108,6 +109,7 @@ async function main() {
     },
     reenterPipeline: async (args) => {
       reenterCalled = true;
+      reenterArgs = args;
       return { body: followupResponsesPayload };
     }
   });
@@ -118,15 +120,20 @@ async function main() {
   assert.equal(
     (res.chat).status,
     undefined,
-    'clientInjectOnly stop_message should not passthrough reenter requires_action payload'
+    'stop_message should not passthrough reenter requires_action payload'
   );
-  assert.equal(reenterCalled, false, 'stop_message_flow clientInjectOnly should not call reenter');
-  assert.ok(followupArgs && typeof followupArgs === 'object', 'expected inject dispatch args');
-  const metadata = followupArgs.metadata && typeof followupArgs.metadata === 'object' ? followupArgs.metadata : {};
-  assert.equal(metadata.clientInjectOnly, true, 'stop_message should use clientInjectOnly followup');
+  assert.equal(reenterCalled, true, 'stop_message_flow should reenter by default');
+  assert.equal(followupArgs, null, 'stop_message_flow should skip clientInject dispatch by default');
+  assert.ok(reenterArgs && typeof reenterArgs === 'object', 'expected reenter args');
+  const metadata = reenterArgs.metadata && typeof reenterArgs.metadata === 'object' ? reenterArgs.metadata : {};
+  assert.equal(metadata.clientInjectOnly, undefined, 'stop_message reenter flow should not require clientInjectOnly');
+  const followupBody = reenterArgs.body && typeof reenterArgs.body === 'object' ? reenterArgs.body : {};
+  const followupMessages = Array.isArray(followupBody.messages) ? followupBody.messages : [];
+  const lastMessage = [...followupMessages].reverse().find((item) => item && typeof item.content === 'string');
+  const followupText = lastMessage && typeof lastMessage.content === 'string' ? lastMessage.content : '';
   assert.ok(
-    typeof metadata.clientInjectText === 'string' && metadata.clientInjectText.includes('继续执行'),
-    'stop_message should provide clientInjectText'
+    followupText.includes('继续执行'),
+    'stop_message should provide reenter followup text'
   );
 
   console.log('✅ servertool followup requires_action regression passed');
