@@ -44,10 +44,12 @@ if [ ! -f "dist/cli.js" ]; then
 fi
 
 node scripts/ensure-cli-executable.mjs || true
+node scripts/ensure-cli-command-shim.mjs || true
 
 # 全局安装
 echo "🌍 全局安装..."
 npm install -g . --no-audit --no-fund
+node scripts/ensure-cli-command-shim.mjs || true
 
 # 验证安装
 if command -v routecodex &> /dev/null; then

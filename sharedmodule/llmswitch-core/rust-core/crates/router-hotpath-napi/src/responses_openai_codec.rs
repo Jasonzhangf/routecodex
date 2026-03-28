@@ -335,4 +335,63 @@ mod tests {
             Value::String("{\"cmd\":\"pwd\"}".to_string())
         );
     }
+
+    #[test]
+    fn request_codec_harvests_malformed_assistant_tool_markup_from_history() {
+        let raw = run_responses_openai_request_codec_json(
+            json!({
+                "model": "glm-5",
+                "input": [
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": "[思考] <parameter name=\"input\">pwd</</parameter><parameter name=\"type\">string</parameter>"
+                            }
+                        ]
+                    },
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": [
+                            { "type": "input_text", "text": "继续" }
+                        ]
+                    }
+                ],
+                "tools": [
+                    {
+                        "type": "function",
+                        "name": "exec_command",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "cmd": { "type": "string" }
+                            }
+                        }
+                    }
+                ]
+            })
+            .to_string(),
+            Some(json!({ "requestId": "req_responses_harvest_markup" }).to_string()),
+        )
+        .unwrap();
+
+        let value: Value = serde_json::from_str(&raw).unwrap();
+        let request_messages = value["request"]["messages"]
+            .as_array()
+            .expect("request messages");
+        let assistant = request_messages
+            .iter()
+            .find(|entry| entry["role"].as_str() == Some("assistant"))
+            .expect("assistant message exists");
+        let tool_calls = assistant["tool_calls"].as_array().expect("tool_calls");
+        assert!(!tool_calls.is_empty());
+        assert_eq!(
+            tool_calls[0]["function"]["name"].as_str(),
+            Some("exec_command")
+        );
+        assert_eq!(assistant["content"].as_str(), Some(""));
+    }
 }

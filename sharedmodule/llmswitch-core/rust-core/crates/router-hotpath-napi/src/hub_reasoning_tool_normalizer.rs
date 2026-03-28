@@ -773,13 +773,25 @@ fn parse_markup_argument_value(raw: &str) -> Value {
     if trimmed.is_empty() {
         return Value::String(String::new());
     }
-    if let Ok(parsed) = serde_json::from_str::<Value>(trimmed) {
+    let trimmed = {
+        let mut candidate = trimmed.to_string();
+        if let Ok(trailing_broken_close_re) = Regex::new(r"(?is)</\s*$") {
+            candidate = trailing_broken_close_re
+                .replace(candidate.as_str(), "")
+                .to_string();
+        }
+        candidate.trim().to_string()
+    };
+    if trimmed.is_empty() {
+        return Value::String(String::new());
+    }
+    if let Ok(parsed) = serde_json::from_str::<Value>(trimmed.as_str()) {
         return parsed;
     }
     if (trimmed.starts_with('{') && trimmed.ends_with('}'))
         || (trimmed.starts_with('[') && trimmed.ends_with(']'))
     {
-        let parsed = parse_lenient_string(trimmed);
+        let parsed = parse_lenient_string(trimmed.as_str());
         if !matches!(parsed, Value::Object(ref row) if row.is_empty()) {
             return parsed;
         }
@@ -882,6 +894,20 @@ fn apply_markup_arg_aliases(tool_name: &str, args_obj: &mut Map<String, Value>) 
             }
         }
     }
+
+    if lname == "exec_command" || lname == "shell_command" || lname == "shell" {
+        if !args_obj.contains_key("cmd") {
+            if let Some(command) = read_command_from_args_value(Some(&Value::Object(args_obj.clone())))
+            {
+                if !command.trim().is_empty() {
+                    args_obj.insert("cmd".to_string(), Value::String(command.clone()));
+                    if !args_obj.contains_key("command") {
+                        args_obj.insert("command".to_string(), Value::String(command));
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn read_string_array_command(value: Option<&Value>) -> Option<String> {
@@ -922,62 +948,271 @@ fn parse_args_record(value: Option<&Value>) -> Option<Map<String, Value>> {
     }
 }
 
+fn read_command_text_value(value: Option<&Value>) -> Option<String> {
+    match value {
+        Some(Value::String(text)) => {
+            let trimmed = text.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        }
+        Some(Value::Number(number)) => Some(number.to_string()),
+        Some(Value::Bool(flag)) => Some(flag.to_string()),
+        Some(Value::Array(_)) => read_string_array_command(value),
+        _ => None,
+    }
+}
+
 fn read_command_from_args_value(value: Option<&Value>) -> Option<String> {
+    if let Some(Value::String(raw)) = value {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        let looks_like_json_container =
+            (trimmed.starts_with('{') && trimmed.ends_with('}'))
+                || (trimmed.starts_with('[') && trimmed.ends_with(']'));
+        let parsed = parse_lenient_string(trimmed);
+        match &parsed {
+            Value::Object(row) => {
+                if !row.is_empty() {
+                    if let Some(parsed_command) = read_command_from_args_value(Some(&parsed)) {
+                        return Some(parsed_command);
+                    }
+                } else if looks_like_json_container {
+                    return None;
+                }
+            }
+            Value::Array(_) => {
+                if let Some(array_command) = read_string_array_command(Some(&parsed)) {
+                    return Some(array_command);
+                }
+                if looks_like_json_container {
+                    return None;
+                }
+            }
+            Value::String(parsed_text) => {
+                let quoted = (trimmed.starts_with('"') && trimmed.ends_with('"'))
+                    || (trimmed.starts_with('\'') && trimmed.ends_with('\''));
+                if quoted {
+                    let nested = parsed_text.trim();
+                    if !nested.is_empty() {
+                        return Some(nested.to_string());
+                    }
+                }
+            }
+            _ => {}
+        }
+        return read_command_text_value(value);
+    }
+
+    if let Some(direct) = read_command_text_value(value) {
+        return Some(direct);
+    }
+    let args = parse_args_record(value).unwrap_or_default();
+    if args.is_empty() {
+        return None;
+    }
+    let input = args.get("input");
+    let direct = read_command_text_value(args.get("cmd"))
+        .or_else(|| read_command_text_value(args.get("command")))
+        .or_else(|| read_command_text_value(args.get("script")))
+        .or_else(|| read_command_text_value(args.get("toon")))
+        .or_else(|| read_command_text_value(args.get("input")))
+        .or_else(|| read_command_text_value(args.get("text")));
+    if direct.is_some() {
+        return direct;
+    }
+    input
+        .and_then(Value::as_object)
+        .and_then(|input_row| {
+            read_command_text_value(input_row.get("cmd"))
+                .or_else(|| read_command_text_value(input_row.get("command")))
+                .or_else(|| read_command_text_value(input_row.get("script")))
+                .or_else(|| read_command_text_value(input_row.get("toon")))
+        })
+        .or_else(|| {
+            args.get("args")
+                .and_then(Value::as_object)
+                .and_then(|row| {
+                    read_command_text_value(row.get("cmd"))
+                        .or_else(|| read_command_text_value(row.get("command")))
+                        .or_else(|| read_command_text_value(row.get("script")))
+                        .or_else(|| read_command_text_value(row.get("toon")))
+                })
+        })
+}
+
+fn read_workdir_from_args_value(value: Option<&Value>) -> Option<String> {
     let args = parse_args_record(value).unwrap_or_default();
     if args.is_empty() {
         return None;
     }
     let input = args.get("input").and_then(Value::as_object);
-    let direct = args
-        .get("cmd")
-        .and_then(Value::as_str)
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
-        .or_else(|| {
-            args.get("command")
-                .and_then(Value::as_str)
-                .map(|v| v.trim().to_string())
-                .filter(|v| !v.is_empty())
+    read_command_text_value(args.get("workdir"))
+        .or_else(|| read_command_text_value(args.get("cwd")))
+        .or_else(|| read_command_text_value(args.get("workDir")))
+        .or_else(|| input.and_then(|row| read_command_text_value(row.get("workdir"))))
+        .or_else(|| input.and_then(|row| read_command_text_value(row.get("cwd"))))
+}
+
+fn read_write_stdin_session_id(value: Option<&Value>) -> Option<i64> {
+    let args = parse_args_record(value).unwrap_or_default();
+    args.get("session_id")
+        .or_else(|| args.get("sessionId"))
+        .and_then(|entry| match entry {
+            Value::Number(number) => number.as_i64(),
+            Value::String(text) => text.trim().parse::<i64>().ok(),
+            _ => None,
         })
-        .or_else(|| {
-            args.get("script")
-                .and_then(Value::as_str)
-                .map(|v| v.trim().to_string())
-                .filter(|v| !v.is_empty())
-        })
-        .or_else(|| {
-            args.get("toon")
-                .and_then(Value::as_str)
-                .map(|v| v.trim().to_string())
-                .filter(|v| !v.is_empty())
-        })
-        .or_else(|| read_string_array_command(args.get("cmd")))
-        .or_else(|| read_string_array_command(args.get("command")));
-    if direct.is_some() {
-        return direct;
+}
+
+fn read_write_stdin_chars(value: Option<&Value>) -> Option<String> {
+    let args = parse_args_record(value).unwrap_or_default();
+    args.get("chars")
+        .or_else(|| args.get("text"))
+        .or_else(|| args.get("input"))
+        .or_else(|| args.get("data"))
+        .map(value_to_string)
+        .filter(|text| !text.is_empty())
+}
+
+fn looks_like_apply_patch_payload(raw: &str) -> bool {
+    let trimmed = raw.trim();
+    !trimmed.is_empty()
+        && (trimmed.contains("*** Begin Patch")
+            || trimmed.contains("*** Update File:")
+            || trimmed.contains("*** Add File:")
+            || trimmed.contains("*** Delete File:"))
+}
+
+fn extract_apply_patch_text_value(value: Option<&Value>) -> Option<String> {
+    match value {
+        Some(Value::String(raw)) => {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                return None;
+            }
+            if let Ok(parsed) = serde_json::from_str::<Value>(trimmed) {
+                return extract_apply_patch_text_value(Some(&parsed));
+            }
+            if looks_like_apply_patch_payload(trimmed) {
+                return Some(trimmed.to_string());
+            }
+            None
+        }
+        Some(Value::Object(row)) => row
+            .get("patch")
+            .or_else(|| row.get("input"))
+            .or_else(|| row.get("instructions"))
+            .or_else(|| row.get("text"))
+            .or_else(|| row.get("command"))
+            .or_else(|| row.get("cmd"))
+            .or_else(|| row.get("script"))
+            .and_then(|entry| extract_apply_patch_text_value(Some(entry))),
+        Some(Value::Array(entries)) => entries
+            .iter()
+            .find_map(|entry| extract_apply_patch_text_value(Some(entry))),
+        _ => None,
     }
-    let input_row = input?;
-    input_row
-        .get("cmd")
-        .and_then(Value::as_str)
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
-        .or_else(|| {
-            input_row
-                .get("command")
-                .and_then(Value::as_str)
-                .map(|v| v.trim().to_string())
-                .filter(|v| !v.is_empty())
-        })
-        .or_else(|| {
-            input_row
-                .get("script")
-                .and_then(Value::as_str)
-                .map(|v| v.trim().to_string())
-                .filter(|v| !v.is_empty())
-        })
-        .or_else(|| read_string_array_command(input_row.get("cmd")))
-        .or_else(|| read_string_array_command(input_row.get("command")))
+}
+
+fn is_structured_tool_name(raw: &str) -> bool {
+    let trimmed = raw.trim();
+    !trimmed.is_empty()
+        && trimmed
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '.' || ch == '-')
+}
+
+fn normalize_reasoning_harvested_arguments(
+    tool_name: &str,
+    args_source: &Value,
+    args_text: String,
+) -> Option<String> {
+    let normalized_name = normalize_tool_name(tool_name);
+    let lowered = normalized_name.trim().to_ascii_lowercase();
+    if !is_structured_tool_name(normalized_name.as_str()) {
+        return None;
+    }
+
+    if matches!(
+        lowered.as_str(),
+        "exec_command" | "shell_command" | "shell" | "bash" | "terminal"
+    ) {
+        let parsed_args = parse_lenient_string(args_text.as_str());
+        let command = read_command_from_args_value(Some(args_source))
+            .or_else(|| read_command_from_args_value(Some(&parsed_args)))?;
+        let workdir = read_workdir_from_args_value(Some(args_source))
+            .or_else(|| read_workdir_from_args_value(Some(&parsed_args)));
+        let mut args_obj = Map::new();
+        args_obj.insert("cmd".to_string(), Value::String(command.clone()));
+        args_obj.insert("command".to_string(), Value::String(command));
+        if let Some(path) = workdir {
+            args_obj.insert("workdir".to_string(), Value::String(path.clone()));
+            if lowered != "exec_command" {
+                args_obj.insert("cwd".to_string(), Value::String(path));
+            }
+        }
+        return serde_json::to_string(&Value::Object(args_obj)).ok();
+    }
+
+    if lowered == "write_stdin" {
+        let session_id = read_write_stdin_session_id(Some(args_source))
+            .or_else(|| read_write_stdin_session_id(Some(&parse_lenient_string(args_text.as_str()))))?;
+        let mut args_obj = Map::new();
+        args_obj.insert("session_id".to_string(), Value::Number(session_id.into()));
+        if let Some(chars) = read_write_stdin_chars(Some(args_source))
+            .or_else(|| read_write_stdin_chars(Some(&parse_lenient_string(args_text.as_str()))))
+        {
+            args_obj.insert("chars".to_string(), Value::String(chars));
+        }
+        return serde_json::to_string(&Value::Object(args_obj)).ok();
+    }
+
+    if lowered == "apply_patch" {
+        let patch = extract_apply_patch_text_value(Some(args_source))
+            .or_else(|| extract_apply_patch_text_value(Some(&parse_lenient_string(args_text.as_str()))))?;
+        let mut args_obj = Map::new();
+        args_obj.insert("input".to_string(), Value::String(patch.clone()));
+        args_obj.insert("patch".to_string(), Value::String(patch));
+        return serde_json::to_string(&Value::Object(args_obj)).ok();
+    }
+
+    Some(args_text)
+}
+
+fn normalize_shell_like_args_text_for_tool_name(
+    tool_name: &str,
+    args_source: &Value,
+    args_text: String,
+) -> String {
+    let normalized_tool_name = normalize_tool_name(tool_name);
+    if normalized_tool_name != "exec_command" && normalized_tool_name != "shell_command" {
+        return args_text;
+    }
+
+    let parsed_args = parse_lenient_string(args_text.as_str());
+    let mut args_obj = parse_args_record(Some(&parsed_args)).unwrap_or_default();
+    let inferred_command = read_command_from_args_value(Some(args_source))
+        .or_else(|| read_command_from_args_value(Some(&parsed_args)));
+
+    if let Some(command) = inferred_command {
+        if normalized_tool_name == "exec_command" {
+            if !args_obj.contains_key("cmd") {
+                args_obj.insert("cmd".to_string(), Value::String(command.clone()));
+            }
+            if !args_obj.contains_key("command") {
+                args_obj.insert("command".to_string(), Value::String(command));
+            }
+        } else if !args_obj.contains_key("command") {
+            args_obj.insert("command".to_string(), Value::String(command));
+        }
+    }
+
+    serde_json::to_string(&Value::Object(args_obj)).unwrap_or(args_text)
 }
 
 fn infer_tool_name_from_args_value(value: Option<&Value>) -> Option<String> {
@@ -1056,10 +1291,16 @@ fn pick_tool_call_args_source<'a>(row: &'a Map<String, Value>) -> Option<&'a Val
         .and_then(Value::as_object)
         .and_then(|f| f.get("arguments"))
         .or_else(|| row.get("arguments"))
+        .or_else(|| row.get("args"))
         .or_else(|| row.get("input"))
         .or_else(|| row.get("params"))
         .or_else(|| row.get("parameters"))
         .or_else(|| row.get("payload"))
+        .or_else(|| {
+            row.get("function")
+                .and_then(Value::as_object)
+                .and_then(|f| f.get("args"))
+        })
         .or_else(|| {
             row.get("function")
                 .and_then(Value::as_object)
@@ -1150,7 +1391,7 @@ fn parse_markup_tool_call(raw: &str, name_hint: Option<&str>) -> Option<ParsedTo
     }
 
     let parameter_name_pattern = Regex::new(
-        r#"(?is)<\s*parameter\s+name\s*=\s*"([^"]+)"\s*>\s*([\s\S]*?)\s*</\s*parameter\s*>"#,
+        r#"(?is)<\s*parameter\s+name\s*=\s*"([^"]+)"\s*>\s*([\s\S]*?)\s*</\s*<?\s*parameter\s*>"#,
     )
     .expect("valid parameter name pattern");
     for caps in parameter_name_pattern.captures_iter(trimmed) {
@@ -1166,7 +1407,7 @@ fn parse_markup_tool_call(raw: &str, name_hint: Option<&str>) -> Option<ParsedTo
     }
 
     let parameter_eq_pattern =
-        Regex::new(r#"(?is)<\s*parameter\s*=\s*([A-Za-z_][A-Za-z0-9_.-]*)\s*>\s*([\s\S]*?)\s*</\s*parameter\s*>"#)
+        Regex::new(r#"(?is)<\s*parameter\s*=\s*([A-Za-z_][A-Za-z0-9_.-]*)\s*>\s*([\s\S]*?)\s*</\s*<?\s*parameter\s*>"#)
             .expect("valid parameter equals pattern");
     for caps in parameter_eq_pattern.captures_iter(trimmed) {
         let Some(raw_key) = caps.get(1).map(|m| m.as_str()) else {
@@ -1199,9 +1440,30 @@ fn parse_markup_tool_call(raw: &str, name_hint: Option<&str>) -> Option<ParsedTo
         name = Some("exec_command".to_string());
     }
 
+    if name.is_none() {
+        name = infer_tool_name_from_args_value(Some(&Value::Object(args_obj.clone())));
+    }
+
+    if name.is_none()
+        && (trimmed.contains("</command>")
+            || trimmed.contains("<command>")
+            || trimmed.contains("</arg_value>"))
+        && (args_obj.contains_key("input")
+            || args_obj.contains_key("cmd")
+            || args_obj.contains_key("command")
+            || args_obj.contains_key("toon"))
+    {
+        name = Some("exec_command".to_string());
+    }
+
     let resolved_name = normalize_tool_name(name?.as_str());
     apply_markup_arg_aliases(resolved_name.as_str(), &mut args_obj);
-    let args = repair_arguments_to_string(&Value::Object(args_obj));
+    let args_source = Value::Object(args_obj);
+    let args = normalize_reasoning_harvested_arguments(
+        resolved_name.as_str(),
+        &args_source,
+        repair_arguments_to_string(&args_source),
+    )?;
     Some(ParsedToolCall {
         id,
         name: resolved_name,
@@ -1243,7 +1505,18 @@ fn parse_tool_call(raw: &str, name_hint: Option<&str>) -> Option<ParsedToolCall>
         }
 
         if let Some(resolved_name) = name {
-            let args = repair_arguments_to_string(args_source);
+            let args = normalize_shell_like_args_text_for_tool_name(
+                resolved_name.as_str(),
+                args_source,
+                repair_arguments_to_string(args_source),
+            );
+            let Some(args) = normalize_reasoning_harvested_arguments(
+                resolved_name.as_str(),
+                args_source,
+                args,
+            ) else {
+                return None;
+            };
             return Some(ParsedToolCall {
                 id: row
                     .get("id")
@@ -1509,7 +1782,8 @@ fn parse_explicit_json_tool_calls(text: &str, id_prefix: &str) -> Vec<Value> {
     let mut seen = std::collections::HashSet::<String>::new();
 
     for candidate in collect_explicit_tool_calls_json_candidates(text) {
-        let parsed_initial = parse_lenient_string(candidate.as_str());
+        let parsed_initial =
+            serde_json::from_str::<Value>(candidate.as_str()).unwrap_or_else(|_| parse_lenient_string(candidate.as_str()));
         let parsed = match &parsed_initial {
             Value::Object(row) if row.is_empty() => {
                 parse_tool_calls_shape_from_text(candidate.as_str()).unwrap_or(parsed_initial)
@@ -1681,6 +1955,60 @@ fn consume_pattern(
     }
 }
 
+fn looks_like_markup_tool_call_payload(text: &str) -> bool {
+    let lowered = text.to_ascii_lowercase();
+    if lowered.is_empty() {
+        return false;
+    }
+    let has_markup = lowered.contains("<parameter")
+        || lowered.contains("<arg_key")
+        || lowered.contains("<arg_value")
+        || lowered.contains("</arg_value>")
+        || lowered.contains("</command>")
+        || lowered.contains("<tool_call")
+        || lowered.contains("<function_call")
+        || lowered.contains("<function=");
+    if !has_markup {
+        return false;
+    }
+    lowered.contains("</arg_value>")
+        || lowered.contains("</command>")
+        || lowered.contains("</tool_call>")
+        || lowered.contains("</function_call>")
+        || lowered.contains("</function>")
+        || lowered.contains("</parameter>")
+        || lowered.contains("</</parameter>")
+}
+
+fn strip_trailing_orphan_tool_markup_suffix(text: &str) -> String {
+    let trimmed = text.trim_end();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let orphan_suffix_pattern = Regex::new(
+        r"(?is)(?:\s*</\s*<?\s*(?:parameter|arg_value|tool_call|function_call|command)\s*>\s*)+$",
+    )
+    .expect("valid orphan suffix pattern");
+    orphan_suffix_pattern.replace(trimmed, "").trim_end().to_string()
+}
+
+fn find_markup_tail_start(text: &str) -> Option<usize> {
+    let lowered = text.to_ascii_lowercase();
+    let markers = [
+        "<tool_call",
+        "[tool_call",
+        "<function_call",
+        "[function_call",
+        "<function=",
+        "<invoke",
+        "<tool:",
+        "<parameter",
+        "<arg_key",
+        "<arg_value",
+    ];
+    markers.iter().filter_map(|marker| lowered.find(marker)).min()
+}
+
 fn extract_tool_calls_from_reasoning_text(text: &str, id_prefix: &str) -> (String, Vec<Value>) {
     let trimmed = text.trim();
     if trimmed.is_empty() {
@@ -1818,6 +2146,26 @@ fn extract_tool_calls_from_reasoning_text(text: &str, id_prefix: &str) -> (Strin
         let explicit_json_tool_calls = parse_explicit_json_tool_calls(text, id_prefix);
         if !explicit_json_tool_calls.is_empty() {
             return (String::new(), explicit_json_tool_calls);
+        }
+        if looks_like_markup_tool_call_payload(text) {
+            if let Some(parsed_call) = parse_tool_call(text, None) {
+                return (String::new(), vec![build_tool_call(&parsed_call, id_prefix, 0)]);
+            }
+            if let Some(start) = find_markup_tail_start(text) {
+                let candidate = text[start..].trim();
+                if !candidate.is_empty() && looks_like_markup_tool_call_payload(candidate) {
+                    if let Some(parsed_call) = parse_tool_call(candidate, None) {
+                        return (
+                            text[..start].trim().to_string(),
+                            vec![build_tool_call(&parsed_call, id_prefix, 0)],
+                        );
+                    }
+                }
+            }
+            let stripped = strip_trailing_orphan_tool_markup_suffix(text);
+            if stripped.len() < text.trim_end().len() {
+                return (stripped, Vec::new());
+            }
         }
         return (text.to_string(), Vec::new());
     }
@@ -2518,6 +2866,25 @@ mod tests {
     }
 
     #[test]
+    fn extract_tool_calls_skips_shell_like_call_without_command_shape() {
+        let source = r#"{"tool_calls":[{"name":"exec_command","arguments":"{}"}]}"#;
+        let (cleaned, tool_calls) =
+            extract_tool_calls_from_reasoning_text(source, "reasoning_test");
+        assert!(tool_calls.is_empty());
+        assert_eq!(cleaned, source);
+    }
+
+    #[test]
+    fn extract_tool_calls_skips_invalid_non_identifier_tool_name() {
+        let source =
+            r#"{"tool_calls":[{"name":"1. 检查 ledger slot 号（记录： 备份 user.md","arguments":"{}"}]}"#;
+        let (cleaned, tool_calls) =
+            extract_tool_calls_from_reasoning_text(source, "reasoning_test");
+        assert!(tool_calls.is_empty());
+        assert_eq!(cleaned, source);
+    }
+
+    #[test]
     fn extract_tool_calls_maps_execute_block_to_shell() {
         let source = "<function=execute><parameter=command>ls -la</parameter></function>";
         let (cleaned, tool_calls) =
@@ -2531,7 +2898,7 @@ mod tests {
                 .and_then(Value::as_object)
                 .and_then(|row| row.get("name"))
                 .and_then(Value::as_str),
-            Some("shell")
+            Some("exec_command")
         );
     }
 
@@ -2611,6 +2978,137 @@ mod tests {
                 .and_then(|row| row.get("name"))
                 .and_then(Value::as_str),
             Some("exec_command")
+        );
+    }
+
+    #[test]
+    fn extract_tool_calls_harvests_malformed_parameter_markup_payload() {
+        let source = r#"
+<parameter name="input">pwd</</parameter>
+<parameter name="newVersion">
+  <parameter name="newVersion">
+<parameter name="type">string</parameter>
+<parameter name="description"/>
+<parameter name="type">string</parameter>
+</command></arg_value>
+"#;
+        let (cleaned, tool_calls) =
+            extract_tool_calls_from_reasoning_text(source, "reasoning_test");
+        assert_eq!(cleaned, "");
+        assert_eq!(tool_calls.len(), 1);
+        let function = tool_calls[0]
+            .as_object()
+            .and_then(|row| row.get("function"))
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(
+            function.get("name").and_then(Value::as_str),
+            Some("exec_command")
+        );
+        let args = function
+            .get("arguments")
+            .and_then(Value::as_str)
+            .unwrap_or("{}");
+        let args_json: Value = serde_json::from_str(args).unwrap_or(Value::Null);
+        assert_eq!(args_json["cmd"], "pwd");
+    }
+
+    #[test]
+    fn extract_tool_calls_harvests_reported_glm_parameter_fragment() {
+        let source = r#"<parameter name="input">.389</</parameter>
+        <parameter name="newVersion">
+          <parameter name="newVersion">
+        <parameter name="type">string</parameter>
+        <parameter name="description"/>
+        <parameter name="type">string</parameter>
+      </command></arg_value>"#;
+        let (cleaned, tool_calls) =
+            extract_tool_calls_from_reasoning_text(source, "reasoning_test");
+        assert_eq!(cleaned, "");
+        assert_eq!(tool_calls.len(), 1);
+        let function = tool_calls[0]
+            .as_object()
+            .and_then(|row| row.get("function"))
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(
+            function.get("name").and_then(Value::as_str),
+            Some("exec_command")
+        );
+        let args = function
+            .get("arguments")
+            .and_then(Value::as_str)
+            .unwrap_or("{}");
+        let args_json: Value = serde_json::from_str(args).unwrap_or(Value::Null);
+        assert_eq!(args_json["cmd"], "0.389");
+    }
+
+    #[test]
+    fn extract_tool_calls_does_not_harvest_plain_parameter_markup_without_call_shape() {
+        let source = r#"<parameter name="description">just text</parameter>"#;
+        let (cleaned, tool_calls) =
+            extract_tool_calls_from_reasoning_text(source, "reasoning_test");
+        assert_eq!(cleaned, source);
+        assert!(tool_calls.is_empty());
+    }
+
+    #[test]
+    fn extract_tool_calls_skips_markup_exec_command_without_command_shape() {
+        let source = r#"<tool_call>
+exec_command
+<arg_key>workdir</arg_key><arg_value>/Users/fanzhang/Documents/github/camo</arg_value>
+</tool_call>"#;
+        let (cleaned, tool_calls) =
+            extract_tool_calls_from_reasoning_text(source, "reasoning_test");
+        assert!(tool_calls.is_empty());
+        assert!(cleaned.contains("exec_command"));
+        assert!(!cleaned.contains("</arg_value>"));
+        assert!(!cleaned.contains("</tool_call>"));
+    }
+
+    #[test]
+    fn extract_tool_calls_strips_orphan_closing_markup_suffix_when_no_call_harvested() {
+        let source = r#"分析失败原因，发布失败，需要 OTP（一次性密码）验证。 npm 发布需要双重验证（2FA）。
+让用户获取 npm OTP token 并使用 --otp 参数重试。
+</parameter></parameter></arg_value></tool_call>"#;
+        let (cleaned, tool_calls) =
+            extract_tool_calls_from_reasoning_text(source, "reasoning_test");
+        assert!(tool_calls.is_empty());
+        assert!(cleaned.contains("发布失败"));
+        assert!(!cleaned.contains("</arg_value>"));
+        assert!(!cleaned.contains("</tool_call>"));
+    }
+
+    #[test]
+    fn extract_tool_calls_harvests_markup_tail_after_prose_prefix() {
+        let source = r#"已分析失败原因，准备继续执行。
+<parameter name="input">cd /Users/fanzhang/Documents/github/camo && npm publish --otp 123456</parameter>
+</command></arg_value></tool_call>"#;
+        let (cleaned, tool_calls) =
+            extract_tool_calls_from_reasoning_text(source, "reasoning_test");
+        assert_eq!(tool_calls.len(), 1);
+        assert!(!cleaned.contains("</arg_value>"));
+        assert!(!cleaned.contains("</tool_call>"));
+        let function = tool_calls[0]
+            .as_object()
+            .and_then(|row| row.get("function"))
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(
+            function.get("name").and_then(Value::as_str),
+            Some("exec_command")
+        );
+        let args = function
+            .get("arguments")
+            .and_then(Value::as_str)
+            .unwrap_or("{}");
+        let args_json: Value = serde_json::from_str(args).unwrap_or(Value::Null);
+        assert_eq!(
+            args_json["cmd"],
+            "cd /Users/fanzhang/Documents/github/camo && npm publish --otp 123456"
         );
     }
 
@@ -2754,6 +3252,82 @@ mod tests {
                 .unwrap_or("")
                 .contains("node bin/webauto.mjs daemon status --json")
         );
+        assert_eq!(output.get("content").and_then(Value::as_str), Some(""));
+    }
+
+    #[test]
+    fn normalize_assistant_text_accepts_nameless_input_string_tool_calls_payload() {
+        let message = json!({
+            "role": "assistant",
+            "content": r#"{"tool_calls":[{"input":"pwd"}]}"#
+        });
+
+        let output_json = normalize_assistant_text_to_tool_calls_json(message.to_string(), None)
+            .expect("normalize_assistant_text_to_tool_calls_json failed");
+
+        let output: Value =
+            serde_json::from_str(&output_json).expect("failed to parse output json");
+        let tool_calls = output
+            .get("tool_calls")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(
+            tool_calls[0]
+                .get("function")
+                .and_then(Value::as_object)
+                .and_then(|row| row.get("name"))
+                .and_then(Value::as_str),
+            Some("exec_command")
+        );
+        let args = tool_calls[0]
+            .get("function")
+            .and_then(Value::as_object)
+            .and_then(|row| row.get("arguments"))
+            .and_then(Value::as_str)
+            .unwrap_or("{}");
+        let args_json: Value = serde_json::from_str(args).unwrap_or(Value::Null);
+        assert_eq!(args_json["cmd"], "pwd");
+        assert_eq!(args_json["command"], "pwd");
+        assert_eq!(output.get("content").and_then(Value::as_str), Some(""));
+    }
+
+    #[test]
+    fn normalize_assistant_text_accepts_nameless_args_command_tool_calls_payload() {
+        let message = json!({
+            "role": "assistant",
+            "content": r#"{"tool_calls":[{"args":{"command":"git status"}}]}"#
+        });
+
+        let output_json = normalize_assistant_text_to_tool_calls_json(message.to_string(), None)
+            .expect("normalize_assistant_text_to_tool_calls_json failed");
+
+        let output: Value =
+            serde_json::from_str(&output_json).expect("failed to parse output json");
+        let tool_calls = output
+            .get("tool_calls")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(
+            tool_calls[0]
+                .get("function")
+                .and_then(Value::as_object)
+                .and_then(|row| row.get("name"))
+                .and_then(Value::as_str),
+            Some("exec_command")
+        );
+        let args = tool_calls[0]
+            .get("function")
+            .and_then(Value::as_object)
+            .and_then(|row| row.get("arguments"))
+            .and_then(Value::as_str)
+            .unwrap_or("{}");
+        let args_json: Value = serde_json::from_str(args).unwrap_or(Value::Null);
+        assert_eq!(args_json["cmd"], "git status");
+        assert_eq!(args_json["command"], "git status");
         assert_eq!(output.get("content").and_then(Value::as_str), Some(""));
     }
 

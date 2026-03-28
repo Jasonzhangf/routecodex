@@ -1,3 +1,5 @@
+use crate::compat_fix_apply_patch::fix_apply_patch_tool_calls_json;
+use crate::hub_req_inbound_tool_call_normalization::normalize_shell_like_tool_calls_before_governance;
 use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
 use serde_json::{Map, Value};
@@ -260,6 +262,18 @@ fn hub_state_context_populated(state: &Map<String, Value>) -> bool {
     false
 }
 
+pub(crate) fn normalize_chat_envelope_tool_calls(chat: &Value) -> Value {
+    let mut chat_normalized = chat.clone();
+    normalize_shell_like_tool_calls_before_governance(&mut chat_normalized);
+    let Ok(raw_json) = serde_json::to_string(&chat_normalized) else {
+        return chat_normalized;
+    };
+    let Ok(fixed_json) = fix_apply_patch_tool_calls_json(raw_json) else {
+        return chat_normalized;
+    };
+    serde_json::from_str::<Value>(&fixed_json).unwrap_or(chat_normalized)
+}
+
 fn chat_envelope_to_standardized_impl(
     chat: &Value,
     adapter_context: &Value,
@@ -276,6 +290,9 @@ fn chat_envelope_to_standardized_impl(
         .cloned()
         .unwrap_or_default();
     let model = extract_model(&parameters)?;
+
+    let chat_normalized = normalize_chat_envelope_tool_calls(chat);
+    let chat_row = chat_normalized.as_object().cloned().unwrap_or_else(|| chat_row.clone());
 
     let messages = chat_row
         .get("messages")
@@ -649,4 +666,91 @@ pub fn standardized_to_chat_envelope_json(
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let envelope = standardized_to_chat_envelope_impl(&request, &adapter_context)?;
     serde_json::to_string(&envelope).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::chat_envelope_to_standardized_impl;
+    use serde_json::{json, Value};
+
+    #[test]
+    fn standardization_normalizes_exec_command_tool_call_shape() {
+        let chat = json!({
+            "messages": [
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "type": "function",
+                            "function": {
+                                "name": "exec_command",
+                                "arguments": "{\"args\":{\"command\":\"pnpm test\"},\"cwd\":\"/repo\"}"
+                            }
+                        }
+                    ]
+                }
+            ],
+            "tools": [{ "type": "function", "function": { "name": "exec_command" } }],
+            "parameters": { "model": "gpt-5.4" },
+            "metadata": {}
+        });
+
+        let standardized = chat_envelope_to_standardized_impl(
+            &chat,
+            &json!({}),
+            "/v1/chat/completions",
+            Some("req_exec"),
+        )
+        .expect("standardized");
+
+        let args_text = standardized["messages"][0]["tool_calls"][0]["function"]["arguments"]
+            .as_str()
+            .expect("arguments text");
+        let args: Value = serde_json::from_str(args_text).expect("arguments json");
+        assert_eq!(args["cmd"], "pnpm test");
+        assert_eq!(args["command"], "pnpm test");
+        assert_eq!(args["workdir"], "/repo");
+    }
+
+    #[test]
+    fn standardization_normalizes_apply_patch_tool_call_shape() {
+        let chat = json!({
+            "messages": [
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {
+                            "id": "call_patch_1",
+                            "type": "function",
+                            "function": {
+                                "name": "apply_patch",
+                                "arguments": "apply_patch *** Begin Patch\n*** Add File: src/demo.ts\n+console.log('ok');\n*** End Patch"
+                            }
+                        }
+                    ]
+                }
+            ],
+            "tools": [{ "type": "function", "function": { "name": "apply_patch" } }],
+            "parameters": { "model": "gpt-5.4" },
+            "metadata": {}
+        });
+
+        let standardized = chat_envelope_to_standardized_impl(
+            &chat,
+            &json!({}),
+            "/v1/chat/completions",
+            Some("req_patch"),
+        )
+        .expect("standardized");
+
+        let args_text = standardized["messages"][0]["tool_calls"][0]["function"]["arguments"]
+            .as_str()
+            .expect("arguments text");
+        let args: Value = serde_json::from_str(args_text).expect("arguments json");
+        let patch = args["input"].as_str().expect("normalized patch input");
+        assert!(patch.starts_with("*** Begin Patch"));
+        assert!(patch.contains("*** Add File: src/demo.ts"));
+        assert!(!patch.starts_with("apply_patch "));
+    }
 }

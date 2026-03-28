@@ -219,6 +219,15 @@ impl VirtualRouterEngineCore {
             {
                 pools = filter_pools_by_capability(&pools, &self.provider_registry, "web_search");
             }
+            if web_search_route_requested
+                && (route_name == "web_search" || route_name == DEFAULT_ROUTE)
+            {
+                let capability_filtered =
+                    filter_pools_by_capability(&pools, &self.provider_registry, "web_search");
+                if !capability_filtered.is_empty() {
+                    pools = capability_filtered;
+                }
+            }
             for pool in pools {
                 if pool.targets.is_empty() {
                     continue;

@@ -113,6 +113,7 @@ type RateLimitBackoffState = {
 };
 const rateLimitBackoffByProvider: Map<string, RateLimitBackoffState> = new Map();
 const RATE_LIMIT_RESET_WINDOW_MS = readEnvDuration('ROUTECODEX_RL_RESET_WINDOW', 24 * 60 * 60_000);
+const DAY_MS = 24 * 60 * 60_000;
 
 function computeRateLimitCooldownMsForProvider(providerKey: string, now: number): number {
   const prev = rateLimitBackoffByProvider.get(providerKey);
@@ -126,6 +127,74 @@ function computeRateLimitCooldownMsForProvider(providerKey: string, now: number)
   const idx = Math.min(nextCount - 1, NO_QUOTA_RATE_LIMIT_SCHEDULE_MS.length - 1);
   const ttl = NO_QUOTA_RATE_LIMIT_SCHEDULE_MS[idx];
   rateLimitBackoffByProvider.set(providerKey, { count: nextCount, lastAt: now });
+  return ttl;
+}
+
+function extractDailyLimitSignalCandidates(event: ProviderErrorEvent): string[] {
+  const values: string[] = [];
+  const pushString = (value: unknown): void => {
+    if (typeof value !== 'string') {
+      return;
+    }
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return;
+    }
+    values.push(trimmed);
+  };
+
+  pushString(event.code);
+  pushString(event.message);
+  const details = (event as { details?: unknown }).details;
+  if (!details || typeof details !== 'object' || Array.isArray(details)) {
+    return values;
+  }
+  const detailsRecord = details as Record<string, unknown>;
+  pushString(detailsRecord.reason);
+  pushString(detailsRecord.message);
+  pushString(detailsRecord.code);
+  pushString(detailsRecord.upstreamCode);
+  pushString(detailsRecord.upstreamMessage);
+
+  const meta = detailsRecord.meta;
+  if (meta && typeof meta === 'object' && !Array.isArray(meta)) {
+    const metaRecord = meta as Record<string, unknown>;
+    pushString(metaRecord.reason);
+    pushString(metaRecord.message);
+    pushString(metaRecord.code);
+    pushString(metaRecord.upstreamCode);
+    pushString(metaRecord.upstreamMessage);
+  }
+
+  return values;
+}
+
+function isDailyLimitExceededEvent(event: ProviderErrorEvent): boolean {
+  const candidates = extractDailyLimitSignalCandidates(event);
+  if (candidates.length === 0) {
+    return false;
+  }
+  return candidates.some((candidate) => {
+    const lowered = candidate.toLowerCase();
+    return (
+      lowered.includes('daily_limit_exceeded') ||
+      lowered.includes('daily usage limit exceeded') ||
+      lowered.includes('daily limit exceeded') ||
+      /daily[\s_-]*(usage[\s_-]*)?limit[\s_-]*exceed/.test(lowered)
+    );
+  });
+}
+
+function computeCooldownUntilNextLocalMidnightMs(nowMs: number): number {
+  if (!Number.isFinite(nowMs) || nowMs <= 0) {
+    return DAY_MS;
+  }
+  const now = new Date(nowMs);
+  const nextMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0, 0).getTime();
+  const ttl = nextMidnight - nowMs;
+  if (!Number.isFinite(ttl) || ttl <= 0) {
+    return DAY_MS;
+  }
   return ttl;
 }
 
@@ -550,10 +619,14 @@ export function mapProviderErrorImpl(
    fatal = false;
    cooldownOverrideMs = Math.max(120_000, healthConfig.cooldownMs ?? 60_000);
    reason = 'payload_too_large';
- } else if (statusCode === 429 && !recoverable) {
+ } else if (statusCode === 429) {
    fatal = false;
-   cooldownOverrideMs = Math.max(60_000, healthConfig.cooldownMs ?? 60_000);
    reason = 'rate_limit';
+   if (isDailyLimitExceededEvent(event)) {
+     cooldownOverrideMs = computeCooldownUntilNextLocalMidnightMs(Date.now());
+   } else if (!recoverable) {
+     cooldownOverrideMs = Math.max(60_000, healthConfig.cooldownMs ?? 60_000);
+   }
  } else if (statusCode && statusCode >= 500) {
    fatal = false;
     cooldownOverrideMs = Math.max(60_000, healthConfig.cooldownMs ?? 60_000);

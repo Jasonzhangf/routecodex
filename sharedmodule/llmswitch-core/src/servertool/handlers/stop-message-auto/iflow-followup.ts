@@ -219,89 +219,93 @@ export function renderStopMessageAutoFollowupViaAi(args: StopMessageAiFollowupAr
     if (!prompt) {
       continue;
     }
-    const invocation = createStopMessageAutoMessageInvocation(backend, prompt);
     const timeoutMs = resolveStopMessageAutoMessageTimeoutMs(backend);
-    const requestSummary = summarizeStopMessageAutoMessageLog(
-      [
-        `base=${args.baseStopMessageText || ''}`,
-        `candidate=${args.candidateFollowupText || ''}`,
-        `assistant=${args.responseSnapshot.assistantText || ''}`,
-        `reasoning=${args.responseSnapshot.reasoningText || ''}`,
-        `completionClaimed=${args.completionClaimed === true ? 'yes' : 'no'}`,
-        `backend=${backend}`,
-        `cwd=${workingDirectory || 'n/a'}`
-      ].join(' | '),
-      STOP_MESSAGE_AUTOMESSAGE_LOG_SUMMARY_MAX_CHARS
-    );
-    logStopMessageAutoMessageIflow({
-      requestId: args.requestId,
-      stage: 'request',
-      requestSummary
-    });
-    try {
-      const result = childProcess.spawnSync(
-        command,
-        invocation.args,
-        {
-          encoding: 'utf8',
-          timeout: timeoutMs,
-          maxBuffer: 1024 * 1024,
-          ...(workingDirectory ? { cwd: workingDirectory } : {})
-        }
+    const profileOrder = backend === 'codex' ? resolveStopMessageAutoMessageCodexProfileOrder() : [undefined];
+    for (const codexProfile of profileOrder) {
+      const invocation = createStopMessageAutoMessageInvocation(backend, prompt, codexProfile);
+      const backendLabel = backend === 'codex' ? `codex:${codexProfile || 'default'}` : backend;
+      const requestSummary = summarizeStopMessageAutoMessageLog(
+        [
+          `base=${args.baseStopMessageText || ''}`,
+          `candidate=${args.candidateFollowupText || ''}`,
+          `assistant=${args.responseSnapshot.assistantText || ''}`,
+          `reasoning=${args.responseSnapshot.reasoningText || ''}`,
+          `completionClaimed=${args.completionClaimed === true ? 'yes' : 'no'}`,
+          `backend=${backendLabel}`,
+          `cwd=${workingDirectory || 'n/a'}`
+        ].join(' | '),
+        STOP_MESSAGE_AUTOMESSAGE_LOG_SUMMARY_MAX_CHARS
       );
-
-      if (result.error || result.status !== 0) {
-        const responseSummary = summarizeStopMessageAutoMessageLog(
-          sanitizeStopMessageAutoMessageOutput(result.stderr || result.stdout, STOP_MESSAGE_AUTOMESSAGE_OUTPUT_MAX_CHARS),
-          STOP_MESSAGE_AUTOMESSAGE_LOG_SUMMARY_MAX_CHARS
+      logStopMessageAutoMessageIflow({
+        requestId: args.requestId,
+        stage: 'request',
+        requestSummary
+      });
+      try {
+        const result = childProcess.spawnSync(
+          command,
+          invocation.args,
+          {
+            encoding: 'utf8',
+            timeout: timeoutMs,
+            maxBuffer: 1024 * 1024,
+            ...(workingDirectory ? { cwd: workingDirectory } : {})
+          }
         );
-        logStopMessageAutoMessageIflow({
-          requestId: args.requestId,
-          stage: 'response',
-          status: result.status ?? -1,
-          requestSummary,
-          responseSummary,
-          error: result.error ? String(result.error) : 'non_zero_exit'
-        });
-        continue;
-      }
 
-      const backendOutput =
-        backend === 'codex'
-          ? sanitizeStopMessageAutoMessageOutput(readStopMessageAutoMessageCodexOutput(invocation.outputFilePath), maxOutputChars)
-          : '';
-      const stdout = backendOutput || sanitizeStopMessageAutoMessageOutput(result.stdout, maxOutputChars);
-      if (stdout) {
+        if (result.error || result.status !== 0) {
+          const responseSummary = summarizeStopMessageAutoMessageLog(
+            sanitizeStopMessageAutoMessageOutput(result.stderr || result.stdout, STOP_MESSAGE_AUTOMESSAGE_OUTPUT_MAX_CHARS),
+            STOP_MESSAGE_AUTOMESSAGE_LOG_SUMMARY_MAX_CHARS
+          );
+          logStopMessageAutoMessageIflow({
+            requestId: args.requestId,
+            stage: 'response',
+            status: result.status ?? -1,
+            requestSummary,
+            responseSummary,
+            error: result.error ? String(result.error) : 'non_zero_exit'
+          });
+          continue;
+        }
+
+        const backendOutput =
+          backend === 'codex'
+            ? sanitizeStopMessageAutoMessageOutput(readStopMessageAutoMessageCodexOutput(invocation.outputFilePath), maxOutputChars)
+            : '';
+        const stdout = backendOutput || sanitizeStopMessageAutoMessageOutput(result.stdout, maxOutputChars);
+        if (stdout) {
+          logStopMessageAutoMessageIflow({
+            requestId: args.requestId,
+            stage: 'response',
+            status: result.status ?? 0,
+            requestSummary,
+            responseSummary: summarizeStopMessageAutoMessageLog(stdout, STOP_MESSAGE_AUTOMESSAGE_LOG_SUMMARY_MAX_CHARS)
+          });
+          return stdout;
+        }
+        const stderr = sanitizeStopMessageAutoMessageOutput(result.stderr, maxOutputChars);
         logStopMessageAutoMessageIflow({
           requestId: args.requestId,
           stage: 'response',
           status: result.status ?? 0,
           requestSummary,
-          responseSummary: summarizeStopMessageAutoMessageLog(stdout, STOP_MESSAGE_AUTOMESSAGE_LOG_SUMMARY_MAX_CHARS)
+          responseSummary: summarizeStopMessageAutoMessageLog(stderr, STOP_MESSAGE_AUTOMESSAGE_LOG_SUMMARY_MAX_CHARS)
         });
-        return stdout;
+        if (stderr) {
+          return stderr;
+        }
+      } catch (error) {
+        logStopMessageAutoMessageIflow({
+          requestId: args.requestId,
+          stage: 'response',
+          status: -1,
+          requestSummary,
+          error: error instanceof Error ? error.message : String(error ?? 'unknown_error')
+        });
+      } finally {
+        invocation.cleanup();
       }
-      const stderr = sanitizeStopMessageAutoMessageOutput(result.stderr, maxOutputChars);
-      logStopMessageAutoMessageIflow({
-        requestId: args.requestId,
-        stage: 'response',
-        status: result.status ?? 0,
-        requestSummary,
-        responseSummary: summarizeStopMessageAutoMessageLog(stderr, STOP_MESSAGE_AUTOMESSAGE_LOG_SUMMARY_MAX_CHARS)
-      });
-      if (stderr) {
-        return stderr;
-      }
-    } catch (error) {
-      logStopMessageAutoMessageIflow({
-        requestId: args.requestId,
-        stage: 'response',
-        status: -1,
-        requestSummary,
-        error: error instanceof Error ? error.message : String(error ?? 'unknown_error')
-      });
-    } finally {
-      invocation.cleanup();
     }
   }
   return null;
@@ -323,86 +327,90 @@ export async function renderStopMessageAutoFollowupViaAiAsync(args: StopMessageA
     if (!prompt) {
       continue;
     }
-    const invocation = createStopMessageAutoMessageInvocation(backend, prompt);
     const timeoutMs = resolveStopMessageAutoMessageTimeoutMs(backend);
-    const requestSummary = summarizeStopMessageAutoMessageLog(
-      [
-        `base=${args.baseStopMessageText || ''}`,
-        `candidate=${args.candidateFollowupText || ''}`,
-        `assistant=${args.responseSnapshot.assistantText || ''}`,
-        `reasoning=${args.responseSnapshot.reasoningText || ''}`,
-        `completionClaimed=${args.completionClaimed === true ? 'yes' : 'no'}`,
-        `backend=${backend}`,
-        `cwd=${workingDirectory || 'n/a'}`
-      ].join(' | '),
-      STOP_MESSAGE_AUTOMESSAGE_LOG_SUMMARY_MAX_CHARS
-    );
-    logStopMessageAutoMessageIflow({
-      requestId: args.requestId,
-      stage: 'request',
-      requestSummary
-    });
-    try {
-      const result = await runStopMessageAutoMessageCommandAsync({
-        command,
-        args: invocation.args,
-        timeoutMs,
-        maxBuffer: 1024 * 1024,
-        ...(workingDirectory ? { cwd: workingDirectory } : {})
+    const profileOrder = backend === 'codex' ? resolveStopMessageAutoMessageCodexProfileOrder() : [undefined];
+    for (const codexProfile of profileOrder) {
+      const invocation = createStopMessageAutoMessageInvocation(backend, prompt, codexProfile);
+      const backendLabel = backend === 'codex' ? `codex:${codexProfile || 'default'}` : backend;
+      const requestSummary = summarizeStopMessageAutoMessageLog(
+        [
+          `base=${args.baseStopMessageText || ''}`,
+          `candidate=${args.candidateFollowupText || ''}`,
+          `assistant=${args.responseSnapshot.assistantText || ''}`,
+          `reasoning=${args.responseSnapshot.reasoningText || ''}`,
+          `completionClaimed=${args.completionClaimed === true ? 'yes' : 'no'}`,
+          `backend=${backendLabel}`,
+          `cwd=${workingDirectory || 'n/a'}`
+        ].join(' | '),
+        STOP_MESSAGE_AUTOMESSAGE_LOG_SUMMARY_MAX_CHARS
+      );
+      logStopMessageAutoMessageIflow({
+        requestId: args.requestId,
+        stage: 'request',
+        requestSummary
       });
-
-      if (result.error || result.status !== 0) {
-        const responseSummary = summarizeStopMessageAutoMessageLog(
-          sanitizeStopMessageAutoMessageOutput(result.stderr || result.stdout, STOP_MESSAGE_AUTOMESSAGE_OUTPUT_MAX_CHARS),
-          STOP_MESSAGE_AUTOMESSAGE_LOG_SUMMARY_MAX_CHARS
-        );
-        logStopMessageAutoMessageIflow({
-          requestId: args.requestId,
-          stage: 'response',
-          status: result.status ?? -1,
-          requestSummary,
-          responseSummary,
-          error: result.error ? String(result.error) : 'non_zero_exit'
+      try {
+        const result = await runStopMessageAutoMessageCommandAsync({
+          command,
+          args: invocation.args,
+          timeoutMs,
+          maxBuffer: 1024 * 1024,
+          ...(workingDirectory ? { cwd: workingDirectory } : {})
         });
-        continue;
-      }
 
-      const backendOutput =
-        backend === 'codex'
-          ? sanitizeStopMessageAutoMessageOutput(readStopMessageAutoMessageCodexOutput(invocation.outputFilePath), maxOutputChars)
-          : '';
-      const stdout = backendOutput || sanitizeStopMessageAutoMessageOutput(result.stdout, maxOutputChars);
-      if (stdout) {
+        if (result.error || result.status !== 0) {
+          const responseSummary = summarizeStopMessageAutoMessageLog(
+            sanitizeStopMessageAutoMessageOutput(result.stderr || result.stdout, STOP_MESSAGE_AUTOMESSAGE_OUTPUT_MAX_CHARS),
+            STOP_MESSAGE_AUTOMESSAGE_LOG_SUMMARY_MAX_CHARS
+          );
+          logStopMessageAutoMessageIflow({
+            requestId: args.requestId,
+            stage: 'response',
+            status: result.status ?? -1,
+            requestSummary,
+            responseSummary,
+            error: result.error ? String(result.error) : 'non_zero_exit'
+          });
+          continue;
+        }
+
+        const backendOutput =
+          backend === 'codex'
+            ? sanitizeStopMessageAutoMessageOutput(readStopMessageAutoMessageCodexOutput(invocation.outputFilePath), maxOutputChars)
+            : '';
+        const stdout = backendOutput || sanitizeStopMessageAutoMessageOutput(result.stdout, maxOutputChars);
+        if (stdout) {
+          logStopMessageAutoMessageIflow({
+            requestId: args.requestId,
+            stage: 'response',
+            status: result.status ?? 0,
+            requestSummary,
+            responseSummary: summarizeStopMessageAutoMessageLog(stdout, STOP_MESSAGE_AUTOMESSAGE_LOG_SUMMARY_MAX_CHARS)
+          });
+          return stdout;
+        }
+        const stderr = sanitizeStopMessageAutoMessageOutput(result.stderr, maxOutputChars);
         logStopMessageAutoMessageIflow({
           requestId: args.requestId,
           stage: 'response',
           status: result.status ?? 0,
           requestSummary,
-          responseSummary: summarizeStopMessageAutoMessageLog(stdout, STOP_MESSAGE_AUTOMESSAGE_LOG_SUMMARY_MAX_CHARS)
+          responseSummary: summarizeStopMessageAutoMessageLog(stderr, STOP_MESSAGE_AUTOMESSAGE_LOG_SUMMARY_MAX_CHARS)
         });
-        return stdout;
+        if (stderr) {
+          return stderr;
+        }
+      } catch (error) {
+        logStopMessageAutoMessageIflow({
+          requestId: args.requestId,
+          stage: 'response',
+          status: -1,
+          requestSummary,
+          error: error instanceof Error ? error.message : String(error ?? 'unknown_error')
+        });
+      } finally {
+        invocation.cleanup();
       }
-      const stderr = sanitizeStopMessageAutoMessageOutput(result.stderr, maxOutputChars);
-      logStopMessageAutoMessageIflow({
-        requestId: args.requestId,
-        stage: 'response',
-        status: result.status ?? 0,
-        requestSummary,
-        responseSummary: summarizeStopMessageAutoMessageLog(stderr, STOP_MESSAGE_AUTOMESSAGE_LOG_SUMMARY_MAX_CHARS)
-      });
-      if (stderr) {
-        return stderr;
-      }
-    } catch (error) {
-      logStopMessageAutoMessageIflow({
-        requestId: args.requestId,
-        stage: 'response',
-        status: -1,
-        requestSummary,
-        error: error instanceof Error ? error.message : String(error ?? 'unknown_error')
-      });
-    } finally {
-      invocation.cleanup();
     }
   }
   return null;
@@ -560,35 +568,74 @@ function isStopMessageAutoMessageEnabled(): boolean {
 }
 
 function resolveStopMessageAutoMessageBackendOrder(): StopMessageAutoMessageBackend[] {
+  // iFlow backend is retired for ai-followup generation.
+  // Keep type compatibility, but runtime order is codex-only.
   const preferred = resolveStopMessageAutoMessageBackend();
-  if (preferred === 'iflow') {
-    return ['iflow', 'codex'];
-  }
-  return ['codex', 'iflow'];
+  return preferred === 'codex' ? ['codex'] : ['codex'];
 }
 
 function resolveStopMessageAutoMessageBackend(): StopMessageAutoMessageBackend {
   const fromConfig = resolveStopMessageAiFollowupBackendFromConfig();
-  if (fromConfig === 'iflow' || fromConfig === 'codex') {
-    return fromConfig;
+  if (fromConfig === 'codex') {
+    return 'codex';
+  }
+  if (fromConfig === 'iflow') {
+    return 'codex';
   }
   const raw = String(
     process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_BACKEND ??
       process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_BACKEND ??
       ''
   ).trim().toLowerCase();
-  if (raw === 'iflow') {
-    return 'iflow';
-  }
   if (raw === 'codex') {
+    return 'codex';
+  }
+  if (raw === 'iflow') {
     return 'codex';
   }
 
   const legacyIflowHint = String(process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_IFLOW || '').trim().toLowerCase();
   if (legacyIflowHint && legacyIflowHint !== '0' && legacyIflowHint !== 'false' && legacyIflowHint !== 'no' && legacyIflowHint !== 'off') {
-    return 'iflow';
+    return 'codex';
   }
   return 'codex';
+}
+
+function normalizeCodexProfileToken(raw: unknown): string | undefined {
+  if (typeof raw !== 'string') {
+    return undefined;
+  }
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  return trimmed.toLowerCase() === 'default' ? undefined : trimmed;
+}
+
+function resolveStopMessageAutoMessageCodexProfileOrder(): Array<string | undefined> {
+  const primary = normalizeCodexProfileToken(
+    process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_PROFILE ??
+      process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX_PROFILE ??
+      ''
+  );
+  const backup =
+    normalizeCodexProfileToken(
+      process.env.ROUTECODEX_STOPMESSAGE_AI_FOLLOWUP_CODEX_BACKUP_PROFILE ??
+        process.env.ROUTECODEX_STOPMESSAGE_AUTOMESSAGE_CODEX_BACKUP_PROFILE ??
+        ''
+    ) ?? 'crsa';
+
+  const seen = new Set<string>();
+  const out: Array<string | undefined> = [];
+  for (const profile of [primary, backup]) {
+    const key = profile ?? '__default__';
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    out.push(profile);
+  }
+  return out.length > 0 ? out : [undefined];
 }
 
 function resolveStopMessageAutoMessageCommand(backend: StopMessageAutoMessageBackend): string {
@@ -661,7 +708,8 @@ function resolveStopMessageAutoMessageTimeoutMs(backend: StopMessageAutoMessageB
 
 function createStopMessageAutoMessageInvocation(
   backend: StopMessageAutoMessageBackend,
-  prompt: string
+  prompt: string,
+  codexProfile?: string
 ): {
   args: string[];
   outputFilePath?: string;
@@ -679,7 +727,16 @@ function createStopMessageAutoMessageInvocation(
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'routecodex-stopmessage-codex-'));
   const outputFilePath = path.join(dir, 'last-message.txt');
   return {
-    args: ['exec', '--color', 'never', '--skip-git-repo-check', '--output-last-message', outputFilePath, prompt],
+    args: [
+      'exec',
+      '--color',
+      'never',
+      '--skip-git-repo-check',
+      ...(codexProfile ? ['--profile', codexProfile] : []),
+      '--output-last-message',
+      outputFilePath,
+      prompt
+    ],
     outputFilePath,
     cleanup: () => {
       try {

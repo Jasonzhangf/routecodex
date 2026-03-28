@@ -18,6 +18,8 @@ import { recordStage } from "../../../stages/utils.js";
 import { liftReqInboundSemantics } from "./semantic-lift.js";
 import { validateChatEnvelopeWithNative } from "../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-edge-stage-semantics.js";
 import { chatEnvelopeToStandardizedWithNative } from "../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-req-inbound-semantics.js";
+import { normalizeReqInboundShellLikeToolCallsWithNative } from "../../../../../../router/virtual-router/engine-selection/native-hub-pipeline-req-inbound-semantics-tools.js";
+import { fixApplyPatchToolCallsWithNative } from "../../../../../../router/virtual-router/engine-selection/native-compat-action-semantics.js";
 import {
   isHubStageTimingDetailEnabled,
   logHubStageTiming,
@@ -140,6 +142,15 @@ export async function runReqInboundStage2SemanticMap(
       }
     }
   }
+  normalizeReqInboundShellLikeToolCallsWithNative(
+    chatEnvelope as unknown as Record<string, unknown>,
+  );
+  const fixedApplyPatch = fixApplyPatchToolCallsWithNative({
+    messages: (Array.isArray(chatEnvelope.messages)
+      ? chatEnvelope.messages
+      : []) as Array<Record<string, unknown>>,
+  });
+  chatEnvelope.messages = fixedApplyPatch.messages as unknown as ChatEnvelope["messages"];
   logHubStageTiming(
     requestId,
     "req_inbound.stage2_validate_chat_envelope",

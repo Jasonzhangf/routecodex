@@ -57,6 +57,13 @@ export function normalizeClock(raw: unknown): VirtualRouterClockConfig | undefin
   if (typeof record.holdMaxMs === 'number' && Number.isFinite(record.holdMaxMs) && record.holdMaxMs >= 0) {
     out.holdMaxMs = Math.floor(record.holdMaxMs);
   }
+  if (
+    record.includeTimeTag === true ||
+    (typeof record.includeTimeTag === 'string' && record.includeTimeTag.trim().toLowerCase() === 'true') ||
+    (typeof record.includeTimeTag === 'number' && record.includeTimeTag === 1)
+  ) {
+    out.includeTimeTag = true;
+  }
   return out;
 }
 

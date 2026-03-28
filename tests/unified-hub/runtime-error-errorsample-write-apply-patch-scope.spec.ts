@@ -228,6 +228,36 @@ describe('runtime errorsample apply_patch scope', () => {
     expect(String(json.matchedText || '')).toContain('Expected update hunk to start with a @@ context marker');
   });
 
+  it('writes client-tool-error sample for invalid "*** End Patch" hunk-header subtype fallback', async () => {
+    const recorder = await createSnapshotRecorder(
+      {
+        requestId: 'req_client_tool_apply_patch_invalid_end_patch_header_1',
+        providerId: 'mock',
+        providerProtocol: 'openai-responses'
+      },
+      '/v1/responses'
+    );
+
+    (recorder as any).record('chat_process.req.stage2.semantic_map', {
+      messages: [
+        {
+          role: 'tool',
+          name: 'apply_patch',
+          tool_call_id: 'call_apply_patch_invalid_end_patch_header_1',
+          call_id: 'call_apply_patch_invalid_end_patch_header_1',
+          content:
+            "apply_patch verification failed: invalid hunk at line 41, '*** End Patch' is not a valid hunk header. Valid hunk headers: '*** Add File: {path}', '*** Delete File: {path}', '*** Update File: {path}'"
+        }
+      ]
+    });
+
+    const clientToolDir = path.join(errorsDir, 'client-tool-error');
+    const file = await waitForFile(clientToolDir, 'chat_process.req.stage2.semantic_map.apply_patch-');
+    const json = JSON.parse(await fs.readFile(file, 'utf8')) as any;
+    expect(json.errorType).toBe('apply_patch_verification_failed');
+    expect(String(json.matchedText || '')).toContain("'*** End Patch' is not a valid hunk header");
+  });
+
   it('writes client-tool-error sample for legacy new-file header subtype', async () => {
     const recorder = await createSnapshotRecorder(
       {

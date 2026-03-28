@@ -17,11 +17,17 @@ export class RoutingClassifier {
   classify(features: RoutingFeatures): ClassificationResult {
     const lastToolCategory = features.lastAssistantToolCategory;
     const webSearchIntent = detectWebSearchIntent(features.userTextSample);
+    const webSearchToolDeclared = features.hasWebSearchToolDeclared === true;
+    const serverToolRequired = (features.metadata as any)?.serverToolRequired === true;
+    const webSearchContinuation = lastToolCategory === 'websearch';
     const localToolContinuation =
       lastToolCategory === 'read' ||
       lastToolCategory === 'write' ||
       lastToolCategory === 'search' ||
       lastToolCategory === 'other';
+    const webSearchFromIntent = !localToolContinuation && webSearchIntent;
+    const webSearchDeclaredOrRequired =
+      !localToolContinuation && (serverToolRequired || webSearchToolDeclared);
     const reachedLongContext =
       features.estimatedTokens >= (this.config.longContextThresholdTokens ?? DEFAULT_LONG_CONTEXT_THRESHOLD);
     const latestMessageFromUser = features.latestMessageFromUser === true;
@@ -55,11 +61,23 @@ export class RoutingClassifier {
         reason: 'coding:last-tool-write'
       },
       web_search: {
-        // web_search 仅由“当前请求”触发：
-        // - 用户输入命中联网搜索意图关键词。
-        // 不再使用工具声明或上一轮 websearch 续写来决定路由。
-        triggered: !localToolContinuation && webSearchIntent,
-        reason: 'web_search:intent-keyword'
+        // web_search 路由触发条件（按优先级）：
+        // 1) 上一轮 assistant 已触发 websearch 类工具（续写命中）
+        // 2) 本轮已标记 serverToolRequired（例如 stage1 注入 websearch 工具）
+        // 3) 本轮显式声明 web_search/websearch 工具
+        // 4) 用户输入命中联网搜索意图关键词
+        triggered:
+          webSearchContinuation ||
+          webSearchDeclaredOrRequired ||
+          webSearchFromIntent,
+        reason:
+          webSearchContinuation
+            ? 'web_search:last-tool-websearch'
+            : webSearchDeclaredOrRequired && serverToolRequired
+              ? 'web_search:servertool-required'
+              : webSearchDeclaredOrRequired && webSearchToolDeclared
+                ? 'web_search:tool-declared'
+                : 'web_search:intent-keyword'
       },
       search: {
         // search 路由：仅在上一轮 assistant 使用 search 类工具时继续命中，

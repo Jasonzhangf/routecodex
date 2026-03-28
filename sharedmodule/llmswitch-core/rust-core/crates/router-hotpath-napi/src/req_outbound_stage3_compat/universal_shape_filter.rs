@@ -95,12 +95,14 @@ fn normalize_tool_content(value: Option<&Value>) -> String {
     match value {
         Some(Value::String(text)) if !text.trim().is_empty() => text.clone(),
         Some(Value::String(_)) | None | Some(Value::Null) => {
-            "Command succeeded (no output).".to_string()
+            "[RouteCodex] Tool output was empty; execution status unknown.".to_string()
         }
         Some(other) => serde_json::to_string(other)
             .ok()
             .filter(|text| !text.is_empty())
-            .unwrap_or_else(|| "Command succeeded (no output).".to_string()),
+            .unwrap_or_else(|| {
+                "[RouteCodex] Tool output was empty; execution status unknown.".to_string()
+            }),
     }
 }
 

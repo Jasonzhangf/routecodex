@@ -313,22 +313,37 @@ fn parse_json_record(value: Option<&Value>) -> Option<Map<String, Value>> {
 }
 
 fn read_command_from_args(args: &Map<String, Value>) -> Option<String> {
-    let input = args.get("input").and_then(|v| v.as_object());
-    let direct = read_trimmed_string(args.get("cmd"))
-        .or_else(|| read_trimmed_string(args.get("command")))
-        .or_else(|| read_trimmed_string(args.get("script")))
-        .or_else(|| read_trimmed_string(args.get("toon")))
-        .or_else(|| read_string_array_command(args.get("cmd")))
-        .or_else(|| read_string_array_command(args.get("command")));
+    let input = args.get("input");
+    let read_value = |value: Option<&Value>| -> Option<String> {
+        read_trimmed_string(value).or_else(|| read_string_array_command(value))
+    };
+    let direct = read_value(args.get("cmd"))
+        .or_else(|| read_value(args.get("command")))
+        .or_else(|| read_value(args.get("script")))
+        .or_else(|| read_value(args.get("toon")))
+        .or_else(|| read_value(args.get("input")))
+        .or_else(|| read_value(args.get("text")));
     if direct.is_some() {
         return direct;
     }
-    let input_row = input?;
-    read_trimmed_string(input_row.get("cmd"))
-        .or_else(|| read_trimmed_string(input_row.get("command")))
-        .or_else(|| read_trimmed_string(input_row.get("script")))
-        .or_else(|| read_string_array_command(input_row.get("cmd")))
-        .or_else(|| read_string_array_command(input_row.get("command")))
+    input
+        .and_then(Value::as_object)
+        .and_then(|input_row| {
+            read_value(input_row.get("cmd"))
+                .or_else(|| read_value(input_row.get("command")))
+                .or_else(|| read_value(input_row.get("script")))
+                .or_else(|| read_value(input_row.get("toon")))
+        })
+        .or_else(|| {
+            args.get("args")
+                .and_then(Value::as_object)
+                .and_then(|input_row| {
+                    read_value(input_row.get("cmd"))
+                        .or_else(|| read_value(input_row.get("command")))
+                        .or_else(|| read_value(input_row.get("script")))
+                        .or_else(|| read_value(input_row.get("toon")))
+                })
+        })
 }
 
 fn read_workdir_from_args(args: &Map<String, Value>) -> Option<String> {
@@ -942,12 +957,17 @@ fn extract_balanced_json_array_at(text: &str, start_index: usize) -> Option<Stri
     None
 }
 
+fn has_unclosed_code_fence(text: &str) -> bool {
+    let fence_count = text.match_indices("```").count();
+    fence_count % 2 == 1
+}
+
 fn extract_json_candidates_from_text(text: &str) -> Vec<Value> {
     let mut out: Vec<Value> = Vec::new();
     let mut seen = HashSet::new();
     let trimmed = text.trim();
 
-    if !trimmed.is_empty() {
+    if !trimmed.is_empty() && !has_unclosed_code_fence(trimmed) {
         if let Some(parsed) = try_parse_json_value_lenient(trimmed) {
             out.push(parsed);
             seen.insert(trimmed.to_string());
@@ -1039,6 +1059,29 @@ fn extract_json_candidates_from_text(text: &str) -> Vec<Value> {
     }
 
     out
+}
+
+fn extract_function_calls_shell_fence_tool_call(text: &str, fallback_id: usize) -> Option<Value> {
+    if !text.contains("<function_calls>") {
+        return None;
+    }
+    let fence_pattern = Regex::new(
+        r"(?is)<function_calls>\s*```(?:bash|sh|zsh|shell|cmd|powershell)?\s*\n([\s\S]*?)\s*```\s*</function_calls>",
+    )
+    .ok()?;
+    let body = fence_pattern
+        .captures(text)
+        .and_then(|caps| caps.get(1))
+        .map(|m| m.as_str().trim().to_string())
+        .filter(|body| !body.is_empty())?;
+    let entry = json!({
+        "name": "exec_command",
+        "input": {
+            "cmd": body,
+            "command": body
+        }
+    });
+    normalize_tool_call_entry(&entry, fallback_id)
 }
 
 fn collect_harvest_text_variants(raw: &str) -> Vec<String> {
@@ -1424,6 +1467,12 @@ fn maybe_harvest_empty_tool_calls_from_json_content(payload: &mut Value) -> i64 
 
         let mut recovered: Vec<Value> = Vec::new();
         for text in read_message_text_candidates(message) {
+            if let Some(function_call_shell) =
+                extract_function_calls_shell_fence_tool_call(&text, (harvested as usize) + 1)
+            {
+                recovered = vec![function_call_shell];
+                break;
+            }
             let normalized_text = text
                 .replace("<function_calls>", "")
                 .replace("</function_calls>", "")
@@ -1626,12 +1675,11 @@ fn prepare_payload_for_governance(
     payload: &Value,
 ) -> Result<ToolGovernancePreparationOutput, String> {
     let (mut prepared_payload, converted) = coerce_to_canonical_chat_completion(payload);
-
-    let before_strip = prepared_payload.clone();
-    strip_orphan_function_calls_tag(&mut prepared_payload);
-    let shape_sanitized = prepared_payload != before_strip;
     let harvested_tool_calls =
         maybe_harvest_empty_tool_calls_from_json_content(&mut prepared_payload);
+    let before_strip = prepared_payload.clone();
+    strip_orphan_function_calls_tag(&mut prepared_payload);
+    let shape_sanitized = harvested_tool_calls > 0 || prepared_payload != before_strip;
 
     Ok(ToolGovernancePreparationOutput {
         prepared_payload,
@@ -1646,8 +1694,8 @@ fn prepare_payload_for_governance(
 pub fn govern_response(input: ToolGovernanceInput) -> Result<ToolGovernanceOutput, String> {
     let mut payload = input.payload.clone();
 
-    strip_orphan_function_calls_tag(&mut payload);
     let harvested = maybe_harvest_empty_tool_calls_from_json_content(&mut payload);
+    strip_orphan_function_calls_tag(&mut payload);
 
     let apply_patch_repaired = normalize_apply_patch_tool_calls(&mut payload);
     remap_tool_calls_for_client_protocol(&mut payload, &input.client_protocol);
@@ -1718,6 +1766,34 @@ mod tests {
             prepared.prepared_payload["choices"][0]["message"]["content"],
             ""
         );
+    }
+
+    #[test]
+    fn test_govern_response_harvests_function_calls_shell_fence_before_tag_strip() {
+        let input = ToolGovernanceInput {
+            payload: serde_json::json!({
+                "choices": [{
+                    "message": {
+                        "content": "<function_calls>```bash\npwd\n```</function_calls>",
+                        "tool_calls": []
+                    },
+                    "finish_reason": "stop"
+                }]
+            }),
+            client_protocol: "openai-chat".to_string(),
+            entry_endpoint: "/v1/responses".to_string(),
+            request_id: "req_stage1_shell_fence".to_string(),
+        };
+
+        let governed = govern_response(input).unwrap();
+        assert!(governed.summary.applied);
+        assert_eq!(governed.summary.tool_calls_normalized, 1);
+        assert_eq!(
+            governed.governed_payload["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
+            "exec_command"
+        );
+        assert_eq!(governed.governed_payload["choices"][0]["finish_reason"], "tool_calls");
+        assert_eq!(governed.governed_payload["choices"][0]["message"]["content"], "");
     }
 
     #[test]
@@ -2720,6 +2796,25 @@ console.log('ok')"#;
         let parsed: Value = serde_json::from_str(&out).unwrap();
         assert_eq!(parsed["command"], "pwd");
         assert_eq!(parsed["cmd"], "pwd");
+    }
+
+    #[test]
+    fn test_normalize_tool_args_exec_command_input_string_shape() {
+        let raw_args = json!({"input": "git status"});
+        let out = normalize_tool_args("exec_command", Some(&raw_args)).unwrap();
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["command"], "git status");
+        assert_eq!(parsed["cmd"], "git status");
+    }
+
+    #[test]
+    fn test_normalize_tool_args_exec_command_nested_args_command_shape() {
+        let raw_args = json!({"args": {"command": "ls -la"}, "cwd": "/workspace"});
+        let out = normalize_tool_args("exec_command", Some(&raw_args)).unwrap();
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["command"], "ls -la");
+        assert_eq!(parsed["cmd"], "ls -la");
+        assert_eq!(parsed["workdir"], "/workspace");
     }
 
     #[test]

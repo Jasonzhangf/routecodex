@@ -100,10 +100,20 @@ fn flatten_system_content(content: &Value) -> String {
 }
 
 fn normalize_tool_content(content: &Value) -> String {
+    const EMPTY_TOOL_FALLBACK: &str = "[RouteCodex] Tool output was empty; execution status unknown.";
     match content {
-        Value::String(text) => text.clone(),
-        Value::Null => String::new(),
-        _ => serde_json::to_string(content).unwrap_or_else(|_| content.to_string()),
+        Value::String(text) => {
+            if text.trim().is_empty() {
+                EMPTY_TOOL_FALLBACK.to_string()
+            } else {
+                text.clone()
+            }
+        }
+        Value::Null => EMPTY_TOOL_FALLBACK.to_string(),
+        _ => serde_json::to_string(content)
+            .ok()
+            .filter(|text| !text.trim().is_empty())
+            .unwrap_or_else(|| EMPTY_TOOL_FALLBACK.to_string()),
     }
 }
 
@@ -818,7 +828,10 @@ pub fn map_openai_chat_from_chat_json(
 
 #[cfg(test)]
 mod tests {
-    use super::maybe_augment_apply_patch_error_content;
+    use super::{
+        map_openai_chat_to_chat, maybe_augment_apply_patch_error_content, normalize_tool_content,
+    };
+    use serde_json::{json, Value};
 
     #[test]
     fn apply_patch_hint_mixed_syntax_keeps_specific_guidance() {
@@ -836,5 +849,53 @@ mod tests {
         let augmented = maybe_augment_apply_patch_error_content(content, Some("apply_patch"));
         assert!(augmented.contains("更小且唯一的上下文"));
         assert!(augmented.contains("不要依赖猜测出来的 `@@ -x,y +x,y @@` 行号范围"));
+    }
+
+    #[test]
+    fn normalize_tool_content_marks_empty_as_unknown() {
+        assert_eq!(
+            normalize_tool_content(&Value::Null),
+            "[RouteCodex] Tool output was empty; execution status unknown."
+        );
+        assert_eq!(
+            normalize_tool_content(&Value::String("   ".to_string())),
+            "[RouteCodex] Tool output was empty; execution status unknown."
+        );
+    }
+
+    #[test]
+    fn map_openai_chat_to_chat_keeps_failed_tool_output_for_next_round() {
+        let payload = json!({
+          "messages": [
+            {
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "id": "call_exec_1",
+                  "type": "function",
+                  "function": { "name": "exec_command", "arguments": "{\"cmd\":\"pwd\"}" }
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "tool_call_id": "call_exec_1",
+              "name": "exec_command",
+              "content": ""
+            }
+          ],
+          "model": "test-model"
+        });
+        let mapped = map_openai_chat_to_chat(payload, json!({})).expect("map success");
+        let tool_outputs = mapped
+            .get("toolOutputs")
+            .and_then(Value::as_array)
+            .expect("tool outputs");
+        assert_eq!(tool_outputs.len(), 1);
+        assert_eq!(tool_outputs[0]["tool_call_id"], "call_exec_1");
+        assert_eq!(
+            tool_outputs[0]["content"],
+            "[RouteCodex] Tool output was empty; execution status unknown."
+        );
     }
 }

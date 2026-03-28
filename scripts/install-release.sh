@@ -86,6 +86,7 @@ npm uninstall -g @jsonstudio/rcc >/dev/null 2>&1 || true
 
 echo "🌍 全局安装 @jsonstudio/rcc (release)..."
 npm install -g "${RCC_TARBALL}" --no-audit --no-fund
+node scripts/ensure-cli-command-shim.mjs || true
 
 echo "🔗 固定全局 rcc 的 @jsonstudio/llms 到本地 sharedmodule/llmswitch-core..."
 node scripts/link-global-llms-local.mjs --package @jsonstudio/rcc --require-target

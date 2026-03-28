@@ -7,6 +7,7 @@ use serde_json::{Map, Value};
 #[serde(rename_all = "camelCase")]
 struct ClockReminderFlowPlanOutput {
     skip_for_server_tool_followup: bool,
+    inject_per_request_time_tag: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -18,6 +19,7 @@ struct ClockConfigOutput {
     tick_ms: i64,
     hold_non_streaming: bool,
     hold_max_ms: i64,
+    include_time_tag: bool,
 }
 
 const CLOCK_RETENTION_MS_DEFAULT: i64 = 20 * 60_000;
@@ -36,8 +38,22 @@ fn resolve_clock_reminder_flow_plan(runtime_metadata: Value) -> ClockReminderFlo
     let rt_obj = runtime_metadata.as_object();
     let server_tool_followup = resolve_bool_field(rt_obj, "serverToolFollowup");
     let allow_followup = resolve_bool_field(rt_obj, "clockFollowupInjectReminders");
+    let inject_per_request_time_tag = rt_obj
+        .and_then(|obj| obj.get("clock"))
+        .and_then(|clock| clock.as_object())
+        .map(|clock| {
+            parse_boolean_with_default(
+                clock.get("includeTimeTag"),
+                parse_boolean_with_default(
+                    clock.get("injectTimeTag"),
+                    parse_boolean_with_default(clock.get("timeTagEnabled"), false),
+                ),
+            )
+        })
+        .unwrap_or(false);
     ClockReminderFlowPlanOutput {
         skip_for_server_tool_followup: server_tool_followup && !allow_followup,
+        inject_per_request_time_tag,
     }
 }
 
@@ -167,6 +183,7 @@ fn normalize_clock_config(raw: &Value) -> Option<ClockConfigOutput> {
             CLOCK_HOLD_NON_STREAMING_DEFAULT,
         ),
         hold_max_ms: parse_non_negative_int(record.get("holdMaxMs"), CLOCK_HOLD_MAX_MS_DEFAULT),
+        include_time_tag: parse_boolean_with_default(record.get("includeTimeTag"), false),
     })
 }
 
@@ -208,4 +225,48 @@ pub fn resolve_clock_config_json(raw_json: String, raw_is_undefined: bool) -> Na
         serde_json::from_str(&raw_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let output = resolve_clock_config(&raw, raw_is_undefined);
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn flow_plan_defaults_time_tag_injection_to_false() {
+        let out = resolve_clock_reminder_flow_plan(json!({}));
+        assert!(!out.skip_for_server_tool_followup);
+        assert!(!out.inject_per_request_time_tag);
+    }
+
+    #[test]
+    fn flow_plan_reads_include_time_tag_opt_in() {
+        let out = resolve_clock_reminder_flow_plan(json!({
+            "clock": {
+                "enabled": true,
+                "includeTimeTag": true
+            }
+        }));
+        assert!(out.inject_per_request_time_tag);
+    }
+
+    #[test]
+    fn normalized_clock_config_defaults_include_time_tag_false() {
+        let out = resolve_clock_config(&json!({"enabled": true}), false);
+        assert!(out.is_some());
+        assert!(!out.expect("clock config").include_time_tag);
+    }
+
+    #[test]
+    fn normalized_clock_config_honors_include_time_tag_true() {
+        let out = resolve_clock_config(
+            &json!({
+                "enabled": true,
+                "includeTimeTag": true
+            }),
+            false,
+        );
+        assert!(out.is_some());
+        assert!(out.expect("clock config").include_time_tag);
+    }
 }

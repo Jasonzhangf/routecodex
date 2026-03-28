@@ -20,6 +20,8 @@ fn decode_escaped_newlines_if_needed(raw: &str) -> String {
 fn find_first_patch_marker(raw: &str) -> Option<usize> {
     [
         "*** Begin Patch",
+        "*** New File:",
+        "*** Create File:",
         "*** Add File:",
         "*** Update File:",
         "*** Delete File:",
@@ -46,6 +48,8 @@ fn looks_like_patch_body_after_apply_patch_prefix(raw: &str) -> bool {
     let trimmed = raw.trim_start();
     [
         "*** Begin Patch",
+        "*** New File:",
+        "*** Create File:",
         "*** Add File:",
         "*** Update File:",
         "*** Delete File:",
@@ -81,6 +85,80 @@ fn has_unified_like_header(text: &str) -> bool {
     })
 }
 
+fn is_patch_file_header_line(trimmed_line: &str) -> bool {
+    trimmed_line.starts_with("*** Add File:")
+        || trimmed_line.starts_with("*** Update File:")
+        || trimmed_line.starts_with("*** Delete File:")
+}
+
+fn drop_empty_update_sections(text: &str) -> String {
+    if !text.contains("*** Update File:") {
+        return text.to_string();
+    }
+    let lines: Vec<&str> = text.split('\n').collect();
+    let mut out: Vec<&str> = Vec::with_capacity(lines.len());
+    let mut i = 0usize;
+    let mut dropped_any = false;
+
+    while i < lines.len() {
+        let trimmed = lines[i].trim();
+        if !trimmed.starts_with("*** Update File:") {
+            out.push(lines[i]);
+            i += 1;
+            continue;
+        }
+
+        let start = i;
+        i += 1;
+        let mut has_hunk_body = false;
+        while i < lines.len() {
+            let probe_trimmed = lines[i].trim();
+            if is_patch_file_header_line(probe_trimmed) || probe_trimmed.starts_with("*** End Patch") {
+                break;
+            }
+            let probe = lines[i];
+            let probe_start = probe.trim_start();
+            if probe_start.starts_with("@@")
+                || probe.starts_with('+')
+                || probe.starts_with('-')
+                || probe.starts_with(' ')
+            {
+                has_hunk_body = true;
+            }
+            i += 1;
+        }
+
+        if has_hunk_body {
+            for row in &lines[start..i] {
+                out.push(*row);
+            }
+        } else {
+            dropped_any = true;
+        }
+    }
+
+    if !dropped_any {
+        return text.to_string();
+    }
+
+    let candidate = out.join("\n").trim().to_string();
+    // When all file sections were empty and removed, candidate becomes
+    // bare Begin/End markers. Return empty string to signal no valid patch.
+    let has_any_file_op = candidate.contains("*** Add File:")
+        || candidate.contains("*** Update File:")
+        || candidate.contains("*** Delete File:");
+    if candidate.is_empty()
+        || !candidate.contains("*** Begin Patch")
+        || !candidate.contains("*** End Patch")
+    {
+        return text.to_string();
+    }
+    if !has_any_file_op {
+        return String::new();
+    }
+    candidate
+}
+
 fn normalize_apply_patch_header_path(raw: &str) -> String {
     let mut out = raw.trim().to_string();
     if out.is_empty() {
@@ -101,6 +179,24 @@ fn normalize_apply_patch_header_path(raw: &str) -> String {
 }
 
 fn normalize_apply_patch_header_line(line: &str) -> String {
+    let new_re = Regex::new(r"^\*\*\* New File:\s*(.+?)(?:\s+\*\*\*)?\s*$").unwrap();
+    if let Some(caps) = new_re.captures(line) {
+        if let Some(path) = caps.get(1) {
+            return format!(
+                "*** Add File: {}",
+                normalize_apply_patch_header_path(path.as_str())
+            );
+        }
+    }
+    let create_re = Regex::new(r"^\*\*\* Create File:\s*(.+?)(?:\s+\*\*\*)?\s*$").unwrap();
+    if let Some(caps) = create_re.captures(line) {
+        if let Some(path) = caps.get(1) {
+            return format!(
+                "*** Add File: {}",
+                normalize_apply_patch_header_path(path.as_str())
+            );
+        }
+    }
     let add_re = Regex::new(r"^\*\*\* Add File:\s*(.+?)(?:\s+\*\*\*)?\s*$").unwrap();
     if let Some(caps) = add_re.captures(line) {
         if let Some(path) = caps.get(1) {
@@ -142,6 +238,21 @@ fn normalize_unified_header_path(raw: &str) -> String {
     normalized
 }
 
+fn is_legacy_context_diff_hunk_header_line(trimmed: &str) -> bool {
+    fn matches_legacy_header(trimmed: &str, prefix: &str, suffix: &str) -> bool {
+        if !trimmed.starts_with(prefix) || !trimmed.ends_with(suffix) {
+            return false;
+        }
+        let body = trimmed[prefix.len()..trimmed.len() - suffix.len()].trim();
+        !body.is_empty()
+            && body
+                .chars()
+                .all(|ch| ch.is_ascii_digit() || ch == ',' || ch.is_whitespace())
+    }
+    matches_legacy_header(trimmed, "*** ", " ****")
+        || matches_legacy_header(trimmed, "--- ", " ----")
+}
+
 fn normalize_apply_patch_text(raw: &str) -> String {
     let mut text = decode_escaped_newlines_if_needed(raw).replace("\r\n", "\n");
     text = strip_apply_patch_command_prefix(&text);
@@ -154,7 +265,12 @@ fn normalize_apply_patch_text(raw: &str) -> String {
         return text;
     }
 
+    text = text.replace("*** New File:", "*** Add File:");
     text = text.replace("*** Create File:", "*** Add File:");
+    text = text.replace(
+        "*** Begin Patch *** New File:",
+        "*** Begin Patch\n*** Add File:",
+    );
     text = text.replace(
         "*** Begin Patch *** Add File:",
         "*** Begin Patch\n*** Add File:",
@@ -200,7 +316,9 @@ fn normalize_apply_patch_text(raw: &str) -> String {
     for line in text.split('\n') {
         let raw_line = line.strip_suffix('\r').unwrap_or(line);
         let mut normalized = normalize_apply_patch_header_line(raw_line.trim());
-        if raw_line.trim() == "***************" {
+        if raw_line.trim() == "***************"
+            || is_legacy_context_diff_hunk_header_line(raw_line.trim())
+        {
             continue;
         }
         if normalized.starts_with("*** a/") {
@@ -299,7 +417,31 @@ fn normalize_apply_patch_text(raw: &str) -> String {
         out.push(raw_line.to_string());
     }
 
-    out.join("\n").trim().to_string()
+    let mut normalized_out: Vec<String> = Vec::with_capacity(out.len());
+    let mut saw_begin_patch = false;
+    let mut saw_end_patch = false;
+    for row in out {
+        let trimmed = row.trim();
+        if trimmed == "*** Begin Patch" {
+            if saw_begin_patch {
+                continue;
+            }
+            saw_begin_patch = true;
+            normalized_out.push("*** Begin Patch".to_string());
+            continue;
+        }
+        if trimmed == "*** End Patch" {
+            saw_end_patch = true;
+            continue;
+        }
+        normalized_out.push(row);
+    }
+    if saw_end_patch {
+        normalized_out.push("*** End Patch".to_string());
+    }
+
+    let compacted = normalized_out.join("\n").trim().to_string();
+    drop_empty_update_sections(compacted.as_str())
 }
 
 fn looks_like_apply_patch(normalized_patch: &str) -> bool {
@@ -356,7 +498,15 @@ fn extract_patch_text_from_value(value: &Value) -> Option<String> {
 
 fn normalize_apply_patch_tool_arguments_from_patch_text(patch_text: &str) -> Option<String> {
     let normalized_patch = normalize_apply_patch_text(&patch_text);
-    if normalized_patch.is_empty() || !looks_like_apply_patch(&normalized_patch) {
+    if !looks_like_apply_patch(&normalized_patch) {
+        // When patch normalized to empty (all sections dropped), still emit valid JSON
+        // with an empty patch string so downstream always receives valid JSON shape.
+        if normalized_patch.is_empty() {
+            return serde_json::to_string(&serde_json::json!({
+                "patch": "",
+                "input": ""
+            })).ok();
+        }
         return None;
     }
     if has_unsupported_git_metadata(&normalized_patch) {
@@ -689,6 +839,36 @@ mod tests {
     }
 
     #[test]
+    fn normalizes_legacy_new_file_header_to_add_file() {
+        let payload = json!({
+          "messages": [{
+            "role": "assistant",
+            "tool_calls": [{
+              "type": "function",
+              "function": {
+                "name": "apply_patch",
+                "arguments": "*** Begin Patch\n*** New File: src/cli/init.mjs\nconsole.log('ok');\n*** End Patch"
+              }
+            }]
+          }]
+        });
+        let raw = fix_apply_patch_tool_calls_json(payload.to_string()).expect("fix payload");
+        let output: Value = serde_json::from_str(&raw).expect("parse output");
+        let args = output["messages"][0]["tool_calls"][0]["function"]["arguments"]
+            .as_str()
+            .expect("arguments");
+        let parsed: Value = serde_json::from_str(args).expect("parse normalized arguments");
+        let patch = parsed["patch"].as_str().expect("patch");
+        assert!(patch.contains("*** Add File: src/cli/init.mjs"));
+        assert!(!patch.contains("*** New File:"));
+        assert!(patch.contains("+console.log('ok');"));
+        assert_eq!(
+            output["messages"][0]["tool_calls"][0]["_fixed_apply_patch"],
+            Value::Bool(true)
+        );
+    }
+
+    #[test]
     fn normalizes_apply_patch_prefix_with_unified_diff_without_begin_patch() {
         let payload = json!({
           "input": [{
@@ -762,4 +942,81 @@ mod tests {
         assert!(patch.contains("@@ -1 +1 @@"));
         assert!(!patch.contains("***************"));
     }
+
+    #[test]
+    fn drops_empty_update_file_section_when_no_hunk_body_present() {
+        let payload = json!({
+          "messages": [{
+            "role": "assistant",
+            "tool_calls": [{
+              "type": "function",
+              "function": {
+                "name": "apply_patch",
+                "arguments": "*** Begin Patch\n*** Update File: src/empty.ts\n*** End Patch"
+              }
+            }]
+          }]
+        });
+        let raw = fix_apply_patch_tool_calls_json(payload.to_string()).expect("fix payload");
+        let output: Value = serde_json::from_str(&raw).expect("parse output");
+        let args = output["messages"][0]["tool_calls"][0]["function"]["arguments"]
+            .as_str()
+            .expect("arguments");
+        let parsed: Value = serde_json::from_str(args).expect("parse normalized arguments");
+        let patch = parsed["patch"].as_str().expect("patch");
+        assert!(!patch.contains("*** Update File: src/empty.ts"));
+    }
+
+    #[test]
+    fn strips_legacy_context_diff_hunk_headers_when_unified_hunk_exists() {
+        let payload = json!({
+          "messages": [{
+            "role": "assistant",
+            "tool_calls": [{
+              "type": "function",
+              "function": {
+                "name": "apply_patch",
+                "arguments": "*** Begin Patch\n*** Update File: src/a.ts\n*** 369,387 ****\n--- 369,387 ----\n@@ -1 +1 @@\n-old\n+new\n*** End Patch"
+              }
+            }]
+          }]
+        });
+        let raw = fix_apply_patch_tool_calls_json(payload.to_string()).expect("fix payload");
+        let output: Value = serde_json::from_str(&raw).expect("parse output");
+        let args = output["messages"][0]["tool_calls"][0]["function"]["arguments"]
+            .as_str()
+            .expect("arguments");
+        let parsed: Value = serde_json::from_str(args).expect("parse normalized arguments");
+        let patch = parsed["patch"].as_str().expect("patch");
+        assert!(patch.contains("*** Update File: src/a.ts"));
+        assert!(patch.contains("@@ -1 +1 @@"));
+        assert!(!patch.contains("*** 369,387 ****"));
+        assert!(!patch.contains("--- 369,387 ----"));
+    }
+
+    #[test]
+    fn keeps_single_trailing_end_patch_when_input_contains_duplicates() {
+        let payload = json!({
+          "messages": [{
+            "role": "assistant",
+            "tool_calls": [{
+              "type": "function",
+              "function": {
+                "name": "apply_patch",
+                "arguments": "*** Begin Patch\n*** Update File: src/a.ts\n@@ -1 +1 @@\n-old\n+new\n*** End Patch\n*** End Patch"
+              }
+            }]
+          }]
+        });
+        let raw = fix_apply_patch_tool_calls_json(payload.to_string()).expect("fix payload");
+        let output: Value = serde_json::from_str(&raw).expect("parse output");
+        let args = output["messages"][0]["tool_calls"][0]["function"]["arguments"]
+            .as_str()
+            .expect("arguments");
+        let parsed: Value = serde_json::from_str(args).expect("parse normalized arguments");
+        let patch = parsed["patch"].as_str().expect("patch");
+        assert_eq!(patch.matches("*** End Patch").count(), 1);
+        assert!(patch.ends_with("*** End Patch"));
+    }
+
 }

@@ -388,6 +388,11 @@ export interface VirtualRouterClockConfig {
    * Default: 60s.
    */
   holdMaxMs?: number;
+  /**
+   * Whether to inject per-request `[Time/Date]` tags into user messages.
+   * Default: false (disabled) to preserve upstream/cache prompt stability.
+   */
+  includeTimeTag?: boolean;
 }
 
 export interface VirtualRouterConfig {

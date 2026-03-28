@@ -144,6 +144,7 @@ global_install() {
 
     # 全局安装后再次修复可执行位（解决偶发 permission denied）
     node scripts/ensure-cli-executable.mjs || true
+    node scripts/ensure-cli-command-shim.mjs || true
 
     if [ $? -eq 0 ]; then
         echo "✅ 全局安装成功"
@@ -163,6 +164,7 @@ verify_install() {
     echo "🔍 验证全局安装..."
     if command -v routecodex &> /dev/null; then
         echo "✅ routecodex 已全局安装"
+        node scripts/ensure-cli-command-shim.mjs || true
         routecodex --version
         node -e "const path=require('path');const cp=require('child_process');const root=cp.execSync('npm root -g').toString().trim();const pkg=path.join(root,'routecodex','node_modules','@jsonstudio','llms','package.json');const fs=require('fs');if(fs.existsSync(pkg)){const v=require(pkg).version;console.log('🔎 全局 @jsonstudio/llms 版本:',v);}else{console.log('⚠️  未找到全局 @jsonstudio/llms package.json');}"
     else

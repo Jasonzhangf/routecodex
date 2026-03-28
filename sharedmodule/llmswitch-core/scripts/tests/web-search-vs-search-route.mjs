@@ -67,7 +67,7 @@ async function main() {
    assert(caseWebIntent.result.routeName === 'web_search', `web intent should route to web_search (via keywords), got ${caseWebIntent.result.routeName}`);
    assert(caseWebIntent.result.reasoning.includes('web_search:intent-keyword'), 'web intent reason should be intent-keyword');
 
-   // Test: web_search tool declared WITHOUT intent keywords should NOT route to web_search
+   // Test: web_search tool declared WITHOUT intent keywords should still route to web_search
    const caseToolDeclaredNoIntent = classify('route-case-tool-declared-no-intent', {
      model: 'gpt-test',
      messages: [{ role: 'user', content: 'Hello, how are you?' }],
@@ -81,7 +81,7 @@ async function main() {
        }
      ]
    });
-   assert(caseToolDeclaredNoIntent.result.routeName !== 'web_search', `tool declared without intent should NOT route to web_search, got ${caseToolDeclaredNoIntent.result.routeName}`);
+   assert(caseToolDeclaredNoIntent.result.routeName === 'web_search', `tool declared without intent should route to web_search, got ${caseToolDeclaredNoIntent.result.routeName}`);
 
   const caseNoStickyWebSearch = classify('route-case-no-sticky-websearch', {
     model: 'gpt-test',
@@ -106,8 +106,8 @@ async function main() {
   });
   assert(caseNoStickyWebSearch.features.lastAssistantToolCategory === 'websearch', 'web_search call should classify as websearch tool');
   assert(
-    caseNoStickyWebSearch.result.routeName !== 'web_search',
-    'previous web_search tool category should not auto-stick web_search route'
+    caseNoStickyWebSearch.result.routeName === 'web_search',
+    'previous web_search tool category should keep web_search route'
   );
 
   const caseContinueExecutionWithDeclaredWebSearch = classify('route-case-continue-exec-with-websearch-declared', {
@@ -235,6 +235,7 @@ async function main() {
     gitLogRoute: caseGitLog.result.routeName,
     bdSearchRoute: caseBdSearch.result.routeName,
     webIntentRoute: caseWebIntent.result.routeName,
+    toolDeclaredNoIntentRoute: caseToolDeclaredNoIntent.result.routeName,
     noStickyWebSearchRoute: caseNoStickyWebSearch.result.routeName,
     continueExecutionRoute: caseContinueExecutionWithDeclaredWebSearch.result.routeName,
     echoRoute: caseEchoWithDeclaredWebSearch.result.routeName,

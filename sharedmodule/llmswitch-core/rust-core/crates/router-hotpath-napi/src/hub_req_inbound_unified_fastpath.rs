@@ -1,3 +1,4 @@
+use crate::hub_standardized_bridge::normalize_chat_envelope_tool_calls;
 use napi_derive::napi;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -149,6 +150,8 @@ fn chat_envelope_to_standardized_fast(
     chat_envelope: &Value,
     adapter_context: &Value,
 ) -> Result<Value, String> {
+    let chat_envelope = normalize_chat_envelope_tool_calls(chat_envelope);
+
     let model = chat_envelope
         .get("model")
         .and_then(|v| v.as_str())
@@ -245,4 +248,69 @@ pub fn process_unified_inbound_fast_json(input_json: String) -> napi::Result<Str
 
     serde_json::to_string(&output)
         .map_err(|e| napi::Error::from_reason(format!("Failed to serialize output: {}", e)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::chat_envelope_to_standardized_fast;
+    use serde_json::{json, Value};
+
+    #[test]
+    fn chat_envelope_to_standardized_fast_normalizes_exec_and_apply_patch_shapes() {
+        let chat_envelope = json!({
+            "model": "glm-5",
+            "messages": [
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {
+                            "id": "call_exec",
+                            "type": "function",
+                            "function": {
+                                "name": "exec_command",
+                                "arguments": "{\"input\":\"pwd\"}"
+                            }
+                        },
+                        {
+                            "id": "call_patch",
+                            "type": "function",
+                            "function": {
+                                "name": "apply_patch",
+                                "arguments": "{\"input\":\"*** Begin Patch\\n*** Add File: note.txt\\n+hello\\n*** End Patch\\n\"}"
+                            }
+                        }
+                    ]
+                }
+            ],
+            "tools": [
+                { "type": "function", "function": { "name": "exec_command" } },
+                { "type": "function", "function": { "name": "apply_patch" } }
+            ],
+            "parameters": {}
+        });
+        let adapter_context = json!({
+            "requestId": "req-fast",
+            "entryEndpoint": "/v1/chat/completions"
+        });
+
+        let standardized = chat_envelope_to_standardized_fast(&chat_envelope, &adapter_context)
+            .expect("standardized");
+        let messages = standardized["messages"].as_array().expect("messages");
+        let tool_calls = messages[0]["tool_calls"].as_array().expect("tool_calls");
+
+        let exec_args_text = tool_calls[0]["function"]["arguments"]
+            .as_str()
+            .expect("exec args");
+        let exec_args: Value = serde_json::from_str(exec_args_text).expect("exec args json");
+        assert_eq!(exec_args["cmd"], "pwd");
+        assert_eq!(exec_args["command"], "pwd");
+
+        let patch_args_text = tool_calls[1]["function"]["arguments"]
+            .as_str()
+            .expect("patch args");
+        let patch_args: Value = serde_json::from_str(patch_args_text).expect("patch args json");
+        let patch_input = patch_args["input"].as_str().expect("patch input");
+        assert!(patch_input.starts_with("*** Begin Patch"));
+        assert!(patch_input.contains("*** Add File: note.txt"));
+    }
 }

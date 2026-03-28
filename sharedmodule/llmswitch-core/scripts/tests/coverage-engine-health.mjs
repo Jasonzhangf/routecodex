@@ -49,6 +49,75 @@ async function main() {
    assert.equal(out.reason, 'auth');
  }
 
+  // mapProviderErrorImpl: 429 DAILY_LIMIT_EXCEEDED => cooldown until next local midnight
+  {
+    const originalNow = Date.now;
+    try {
+      const fixedNow = new Date(2026, 2, 27, 12, 34, 56, 0).getTime();
+      Date.now = () => fixedNow;
+      const ev = {
+        status: 429,
+        code: 'HTTP_429',
+        stage: 'provider_send',
+        recoverable: false,
+        message:
+          'error: code=429 reason="DAILY_LIMIT_EXCEEDED" message="daily usage limit exceeded" metadata=map[]',
+        runtime: {
+          providerKey: 'p.daily.model',
+          routeName: 'default'
+        }
+      };
+      const out = mapProviderErrorImpl(ev, healthConfig);
+      assert.ok(out && out.fatal === false);
+      assert.equal(out.reason, 'rate_limit');
+      const now = new Date(fixedNow);
+      const expected = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0, 0).getTime() - fixedNow;
+      assert.equal(out.cooldownOverrideMs, expected);
+
+      const evRecoverable = {
+        status: 429,
+        code: 'HTTP_429',
+        stage: 'provider_send',
+        recoverable: true,
+        message: 'upstream quota exceeded',
+        details: {
+          meta: {
+            reason: 'DAILY_LIMIT_EXCEEDED'
+          }
+        },
+        runtime: {
+          providerKey: 'p.daily.recoverable.model',
+          routeName: 'default'
+        }
+      };
+      const outRecoverable = mapProviderErrorImpl(evRecoverable, healthConfig);
+      assert.ok(outRecoverable && outRecoverable.fatal === false);
+      assert.equal(outRecoverable.reason, 'rate_limit');
+      assert.equal(outRecoverable.cooldownOverrideMs, expected);
+    } finally {
+      Date.now = originalNow;
+    }
+  }
+
+  // mapProviderErrorImpl: normal 429 keeps default short cooldown for non-recoverable rate limit
+  {
+    const ev = {
+      status: 429,
+      code: 'HTTP_429',
+      stage: 'provider_send',
+      recoverable: false,
+      message: 'error: code=429 reason="RATE_LIMIT" message="rate limit exceeded"',
+      runtime: {
+        providerKey: 'p.normal429.model',
+        routeName: 'default'
+      }
+    };
+    const out = mapProviderErrorImpl(ev, healthConfig);
+    assert.ok(out && out.fatal === false);
+    assert.equal(out.reason, 'rate_limit');
+    assert.equal(out.cooldownOverrideMs, 60_000);
+  }
+
   // handleProviderFailureImpl: 429 non-fatal uses backoff schedule + mark cooldown
   {
     resetRateLimitBackoffForProvider('p.key2.model');

@@ -513,10 +513,20 @@ function selectFromCandidates(
     if (visitedRoutes.has(routeName)) {
       continue;
     }
-    const routePools =
+    let routePools =
       webSearchRouteRequested && routeName === DEFAULT_ROUTE && hasDefaultWebSearchFallback
         ? defaultWebSearchPools
         : deps.routing[routeName];
+    if (webSearchRouteRequested && (routeName === 'web_search' || routeName === DEFAULT_ROUTE)) {
+      const capabilityFiltered = filterPoolsByCapability(
+        routePools,
+        'web_search',
+        deps.providerRegistry
+      );
+      if (routeHasTargets(capabilityFiltered)) {
+        routePools = capabilityFiltered;
+      }
+    }
     if (!routeHasTargets(routePools)) {
       visitedRoutes.add(routeName);
       attempted.push(`${routeName}:empty`);

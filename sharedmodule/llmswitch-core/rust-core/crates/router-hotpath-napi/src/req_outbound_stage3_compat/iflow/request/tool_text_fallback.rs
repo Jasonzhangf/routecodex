@@ -57,10 +57,20 @@ fn build_tool_markup_instruction() -> String {
 }
 
 fn stringify_tool_output(value: Option<&Value>) -> String {
+    const EMPTY_TOOL_FALLBACK: &str = "[RouteCodex] Tool output was empty; execution status unknown.";
     match value {
-        Some(Value::String(text)) => text.clone(),
-        Some(Value::Null) | None => String::new(),
-        Some(other) => serde_json::to_string_pretty(other).unwrap_or_else(|_| other.to_string()),
+        Some(Value::String(text)) => {
+            if text.trim().is_empty() {
+                EMPTY_TOOL_FALLBACK.to_string()
+            } else {
+                text.clone()
+            }
+        }
+        Some(Value::Null) | None => EMPTY_TOOL_FALLBACK.to_string(),
+        Some(other) => serde_json::to_string_pretty(other)
+            .ok()
+            .filter(|text| !text.trim().is_empty())
+            .unwrap_or_else(|| EMPTY_TOOL_FALLBACK.to_string()),
     }
 }
 
@@ -329,4 +339,75 @@ pub(crate) fn apply_iflow_tool_text_fallback_json(
     }
 
     serde_json::to_string(&payload).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn build_adapter_context() -> AdapterContext {
+        AdapterContext {
+            compatibility_profile: None,
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_iflow_test".to_string()),
+            entry_endpoint: Some("/v1/chat/completions".to_string()),
+            route_id: None,
+            rt: None,
+            captured_chat_request: None,
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        }
+    }
+
+    #[test]
+    fn iflow_tool_text_fallback_marks_empty_tool_output_unknown() {
+        let mut payload = json!({
+          "model": "minimax-m2.5",
+          "messages": [
+            {
+              "role": "assistant",
+              "content": "",
+              "tool_calls": [{
+                "id": "call_1",
+                "type": "function",
+                "function": { "name": "exec_command", "arguments": "{\"cmd\":\"pwd\"}" }
+              }]
+            },
+            {
+              "role": "tool",
+              "tool_call_id": "call_1",
+              "name": "exec_command",
+              "content": null
+            }
+          ]
+        });
+        let adapter = build_adapter_context();
+        let models = vec!["minimax-m2.5".to_string()];
+        let root = payload.as_object_mut().expect("payload object");
+        apply_iflow_tool_text_fallback(root, &adapter, &models);
+        let messages = root
+            .get("messages")
+            .and_then(Value::as_array)
+            .expect("messages");
+        let tool_result_text = messages
+            .iter()
+            .find(|entry| entry.get("role").and_then(Value::as_str) == Some("user"))
+            .and_then(|entry| entry.get("content"))
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        assert!(tool_result_text.contains("[RouteCodex] Tool output was empty; execution status unknown."));
+    }
 }

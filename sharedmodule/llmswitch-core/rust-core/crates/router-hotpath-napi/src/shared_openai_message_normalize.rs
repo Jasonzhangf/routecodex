@@ -67,6 +67,105 @@ fn split_command_string(input: &str) -> Vec<String> {
     out
 }
 
+fn value_to_non_empty_text(value: Option<&Value>) -> Option<String> {
+    match value {
+        Some(Value::String(text)) => {
+            let trimmed = text.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        }
+        Some(Value::Number(num)) => Some(num.to_string()),
+        Some(Value::Bool(flag)) => Some(flag.to_string()),
+        Some(Value::Array(items)) => {
+            let parts = items
+                .iter()
+                .filter_map(|item| match item {
+                    Value::String(text) => {
+                        let trimmed = text.trim();
+                        if trimmed.is_empty() {
+                            None
+                        } else {
+                            Some(trimmed.to_string())
+                        }
+                    }
+                    Value::Number(num) => Some(num.to_string()),
+                    Value::Bool(flag) => Some(flag.to_string()),
+                    _ => None,
+                })
+                .collect::<Vec<String>>();
+            if parts.is_empty() {
+                None
+            } else {
+                Some(parts.join(" "))
+            }
+        }
+        _ => None,
+    }
+}
+
+fn read_exec_command_candidate(args_obj: &Map<String, Value>) -> Option<String> {
+    let direct = value_to_non_empty_text(args_obj.get("cmd"))
+        .or_else(|| value_to_non_empty_text(args_obj.get("command")))
+        .or_else(|| value_to_non_empty_text(args_obj.get("toon")))
+        .or_else(|| value_to_non_empty_text(args_obj.get("script")))
+        .or_else(|| value_to_non_empty_text(args_obj.get("input")))
+        .or_else(|| value_to_non_empty_text(args_obj.get("text")));
+    if direct.is_some() {
+        return direct;
+    }
+
+    let nested = args_obj.get("input").and_then(Value::as_object);
+    nested
+        .and_then(|row| {
+            value_to_non_empty_text(row.get("cmd"))
+                .or_else(|| value_to_non_empty_text(row.get("command")))
+                .or_else(|| value_to_non_empty_text(row.get("script")))
+                .or_else(|| value_to_non_empty_text(row.get("toon")))
+        })
+        .or_else(|| {
+            args_obj
+                .get("args")
+                .and_then(Value::as_object)
+                .and_then(|row| {
+                    value_to_non_empty_text(row.get("cmd"))
+                        .or_else(|| value_to_non_empty_text(row.get("command")))
+                        .or_else(|| value_to_non_empty_text(row.get("script")))
+                        .or_else(|| value_to_non_empty_text(row.get("toon")))
+                })
+        })
+}
+
+fn normalize_exec_like_args(fn_name: &str, args_obj: &mut Map<String, Value>) {
+    let lowered = fn_name.to_ascii_lowercase();
+    if lowered != "exec_command" && lowered != "shell_command" {
+        return;
+    }
+
+    let normalized_cmd = read_exec_command_candidate(args_obj);
+
+    if lowered == "exec_command" {
+        if let Some(cmd) = normalized_cmd.clone() {
+            if !args_obj.contains_key("cmd") {
+                args_obj.insert("cmd".to_string(), Value::String(cmd.clone()));
+            }
+            if !args_obj.contains_key("command") {
+                args_obj.insert("command".to_string(), Value::String(cmd));
+            }
+        }
+    } else if lowered == "shell_command"
+        && !args_obj.contains_key("command")
+        && normalized_cmd.is_some()
+    {
+        args_obj.insert(
+            "command".to_string(),
+            Value::String(normalized_cmd.unwrap_or_default()),
+        );
+    }
+}
+
 fn normalize_openai_tool_call(tool_call: &Value, disable_shell_coerce: bool) -> Value {
     let Some(tool_call_obj) = tool_call.as_object() else {
         return tool_call.clone();
@@ -153,6 +252,8 @@ fn normalize_openai_tool_call(tool_call: &Value, disable_shell_coerce: bool) -> 
         }
     }
 
+    normalize_exec_like_args(fn_name.as_str(), &mut args_obj);
+
     let next_args = serde_json::to_string(&Value::Object(args_obj)).unwrap_or(arg_str_in);
     function.insert("arguments".to_string(), Value::String(next_args));
     out.insert("function".to_string(), Value::Object(function));
@@ -212,12 +313,13 @@ fn normalize_openai_tool(tool: &Value) -> Value {
 }
 
 fn sanitize_tool_content_value(content: &Value) -> Value {
+    const EMPTY_TOOL_FALLBACK: &str = "[RouteCodex] Tool output was empty; execution status unknown.";
     if content.is_null() {
-        return Value::String("执行成功（无输出）".to_string());
+        return Value::String(EMPTY_TOOL_FALLBACK.to_string());
     }
     if let Some(text) = content.as_str() {
         if text.trim().is_empty() {
-            return Value::String("执行成功（无输出）".to_string());
+            return Value::String(EMPTY_TOOL_FALLBACK.to_string());
         }
         return Value::String(text.to_string());
     }
@@ -381,4 +483,111 @@ pub fn normalize_openai_chat_messages_json(messages_json: String) -> NapiResult<
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let output = normalize_openai_chat_messages(&messages);
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{normalize_openai_chat_messages, normalize_openai_tool_call};
+    use serde_json::json;
+
+    #[test]
+    fn normalize_exec_command_fills_cmd_from_command() {
+        let tool_call = json!({
+          "id": "call_1",
+          "type": "function",
+          "function": {
+            "name": "exec_command",
+            "arguments": "{\"command\":\"ls -la\"}"
+          }
+        });
+
+        let out = normalize_openai_tool_call(&tool_call, false);
+        let args_text = out
+            .get("function")
+            .and_then(|v| v.get("arguments"))
+            .and_then(|v| v.as_str())
+            .expect("normalized arguments");
+        let args: serde_json::Value = serde_json::from_str(args_text).expect("parse args");
+        assert_eq!(args.get("cmd").and_then(|v| v.as_str()), Some("ls -la"));
+        assert_eq!(args.get("command").and_then(|v| v.as_str()), Some("ls -la"));
+    }
+
+    #[test]
+    fn normalize_exec_command_fills_command_from_cmd() {
+        let tool_call = json!({
+          "id": "call_2",
+          "type": "function",
+          "function": {
+            "name": "exec_command",
+            "arguments": "{\"cmd\":\"pwd\"}"
+          }
+        });
+
+        let out = normalize_openai_tool_call(&tool_call, false);
+        let args_text = out
+            .get("function")
+            .and_then(|v| v.get("arguments"))
+            .and_then(|v| v.as_str())
+            .expect("normalized arguments");
+        let args: serde_json::Value = serde_json::from_str(args_text).expect("parse args");
+        assert_eq!(args.get("cmd").and_then(|v| v.as_str()), Some("pwd"));
+        assert_eq!(args.get("command").and_then(|v| v.as_str()), Some("pwd"));
+    }
+
+    #[test]
+    fn normalize_shell_command_fills_command_from_cmd() {
+        let tool_call = json!({
+          "id": "call_3",
+          "type": "function",
+          "function": {
+            "name": "shell_command",
+            "arguments": "{\"cmd\":\"echo hello\"}"
+          }
+        });
+
+        let out = normalize_openai_tool_call(&tool_call, false);
+        let args_text = out
+            .get("function")
+            .and_then(|v| v.get("arguments"))
+            .and_then(|v| v.as_str())
+            .expect("normalized arguments");
+        let args: serde_json::Value = serde_json::from_str(args_text).expect("parse args");
+        assert_eq!(args.get("command").and_then(|v| v.as_str()), Some("echo hello"));
+    }
+
+    #[test]
+    fn normalize_exec_command_fills_cmd_from_input_string() {
+        let tool_call = json!({
+          "id": "call_4",
+          "type": "function",
+          "function": {
+            "name": "exec_command",
+            "arguments": "{\"input\":\"git status\"}"
+          }
+        });
+
+        let out = normalize_openai_tool_call(&tool_call, false);
+        let args_text = out
+            .get("function")
+            .and_then(|v| v.get("arguments"))
+            .and_then(|v| v.as_str())
+            .expect("normalized arguments");
+        let args: serde_json::Value = serde_json::from_str(args_text).expect("parse args");
+        assert_eq!(args.get("cmd").and_then(|v| v.as_str()), Some("git status"));
+        assert_eq!(args.get("command").and_then(|v| v.as_str()), Some("git status"));
+    }
+
+    #[test]
+    fn normalize_tool_message_empty_content_marks_unknown_status() {
+        let messages = json!([
+          { "role": "assistant", "tool_calls": [{ "id": "call_1", "type": "function", "function": { "name": "exec_command", "arguments": "{\"cmd\":\"pwd\"}" } }]},
+          { "role": "tool", "tool_call_id": "call_1", "content": "" }
+        ]);
+
+        let out = normalize_openai_chat_messages(&messages);
+        assert_eq!(
+            out[1]["content"],
+            "[RouteCodex] Tool output was empty; execution status unknown."
+        );
+    }
 }

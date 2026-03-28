@@ -16,9 +16,23 @@ const moduleUrl = pathToFileURL(
     'native-chat-process-clock-reminder-semantics.js'
   )
 ).href;
+const flowPlanModuleUrl = pathToFileURL(
+  path.join(
+    repoRoot,
+    'dist',
+    'router',
+    'virtual-router',
+    'engine-selection',
+    'native-chat-process-clock-reminders-semantics.js'
+  )
+).href;
 
 async function importFresh(tag) {
   return import(`${moduleUrl}?case=${tag}_${Date.now()}_${Math.random().toString(16).slice(2)}`);
+}
+
+async function importFreshFlowPlan(tag) {
+  return import(`${flowPlanModuleUrl}?case=${tag}_${Date.now()}_${Math.random().toString(16).slice(2)}`);
 }
 
 function setEnvVar(name, value) {
@@ -61,12 +75,14 @@ exports.buildClockMarkerScheduleMessagesJson = () => JSON.stringify([
 exports.buildDueReminderUserMessageJson = () => JSON.stringify({ role: 'user', content: 'due now' });
 exports.buildClockReminderMetadataJson = () => JSON.stringify({ originalEndpoint: '/v1/chat/completions', __clockReservation: { id: 'r1' } });
 exports.buildClockReminderMessagesJson = () => JSON.stringify([{ role: 'user', content: 'done' }]);
+exports.resolveClockReminderFlowPlanJson = () => JSON.stringify({ skipForServerToolFollowup: false, injectPerRequestTimeTag: true });
 `,
     async (modulePath) => {
       setEnvVar('ROUTECODEX_LLMS_ROUTER_NATIVE_PATH', modulePath);
       setEnvVar('RCC_LLMS_ROUTER_NATIVE_PATH', undefined);
 
       const mod = await importFresh('native-chat-process-clock-reminder-semantics');
+      const flowPlanMod = await importFreshFlowPlan('native-chat-process-clock-reminders-semantics');
 
       const idx = mod.findLastUserMessageIndexWithNative([], () => -1);
       assert.equal(idx, 3);
@@ -107,6 +123,24 @@ exports.buildClockReminderMessagesJson = () => JSON.stringify([{ role: 'user', c
 
       const allMessages = mod.buildClockReminderMessagesWithNative([], [], null, '[time]', () => []);
       assert.equal(allMessages[0].content, 'done');
+
+      const flowPlan = flowPlanMod.resolveClockReminderFlowPlanWithNative({});
+      assert.equal(flowPlan.skipForServerToolFollowup, false);
+      assert.equal(flowPlan.injectPerRequestTimeTag, true);
+    }
+  );
+
+  await withTempNativeModule(
+    `
+exports.resolveClockReminderFlowPlanJson = () => JSON.stringify({ skipForServerToolFollowup: true });
+`,
+    async (modulePath) => {
+      setEnvVar('ROUTECODEX_LLMS_ROUTER_NATIVE_PATH', modulePath);
+      setEnvVar('RCC_LLMS_ROUTER_NATIVE_PATH', undefined);
+      const flowPlanMod = await importFreshFlowPlan('native-chat-process-clock-reminders-semantics-fallback');
+      const flowPlan = flowPlanMod.resolveClockReminderFlowPlanWithNative({});
+      assert.equal(flowPlan.skipForServerToolFollowup, true);
+      assert.equal(flowPlan.injectPerRequestTimeTag, false);
     }
   );
 

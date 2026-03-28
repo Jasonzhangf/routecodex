@@ -151,8 +151,12 @@ export async function maybeInjectClockRemindersAndApplyDirectives(
     nextRequest = applyHubOperations(nextRequest, ensureToolsOps);
   }
 
-  // 5) Per-request time injection (user time tag or paired clock.get tool result).
-  const timeTagLine = await resolveClockReminderTimeTagLine();
+  // 5) Per-request time injection.
+  // Default is disabled to keep prompts stable for cache hit rates.
+  // Opt-in with virtualrouter.clock.includeTimeTag=true.
+  const timeTagLine = flowPlan.injectPerRequestTimeTag
+    ? await resolveClockReminderTimeTagLine()
+    : '';
 
   const withReservationMetadata = buildClockReminderMetadata({
     nextRequest,
@@ -161,7 +165,7 @@ export async function maybeInjectClockRemindersAndApplyDirectives(
     reservation
   });
 
-  // Always inject time via user-role content to keep the tag visible without adding
+  // Inject time tag via user-role content only when enabled by flow plan, without adding
   // extra tool-call semantics that may distract the model.
   //
   // IMPORTANT: do not append an extra trailing user message, otherwise the Virtual Router

@@ -5,6 +5,7 @@ use serde_json::Map;
 use serde_json::Value;
 use std::env;
 use crate::hub_bridge_actions::{build_bridge_history, BuildBridgeHistoryInput};
+use crate::hub_standardized_bridge::normalize_chat_envelope_tool_calls;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -741,7 +742,11 @@ fn coerce_standardized_request_from_payload(input: &Value) -> Result<Value, Stri
         .ok_or_else(|| "coerce standardized request input must be object".to_string())?;
     let payload = row
         .get("payload")
-        .and_then(|v| v.as_object())
+        .cloned()
+        .ok_or_else(|| "payload must be object".to_string())?;
+    let payload = normalize_chat_envelope_tool_calls(&payload);
+    let payload = payload
+        .as_object()
         .ok_or_else(|| "payload must be object".to_string())?;
     let normalized = row
         .get("normalized")
@@ -3893,6 +3898,81 @@ mod tests {
             Some(0)
         );
         assert!(!raw_payload.contains_key("parameters"));
+    }
+
+    #[test]
+    fn test_coerce_standardized_request_from_payload_normalizes_exec_command_and_apply_patch_shapes() {
+        let input = json!({
+            "payload": {
+                "model": "glm-5",
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "tool_calls": [
+                            {
+                                "id": "call_exec",
+                                "type": "function",
+                                "function": {
+                                    "name": "exec_command",
+                                    "arguments": "{\"args\":{\"command\":\"pwd\"},\"cwd\":\"/repo\"}"
+                                }
+                            },
+                            {
+                                "id": "call_patch",
+                                "type": "function",
+                                "function": {
+                                    "name": "apply_patch",
+                                    "arguments": "{\"input\":\"*** Begin Patch\\n*** Add File: note.txt\\n+hello\\n*** End Patch\\n\"}"
+                                }
+                            }
+                        ]
+                    }
+                ],
+                "tools": [
+                    { "type": "function", "function": { "name": "exec_command" } },
+                    { "type": "function", "function": { "name": "apply_patch" } }
+                ],
+                "parameters": {}
+            },
+            "normalized": {
+                "id": "req-shape",
+                "entryEndpoint": "/v1/chat/completions",
+                "stream": false,
+                "processMode": "chat"
+            }
+        });
+
+        let output = coerce_standardized_request_from_payload(&input)
+            .expect("coerce standardized request output");
+        let row = output.as_object().expect("output object");
+        let standardized = row
+            .get("standardizedRequest")
+            .and_then(|v| v.as_object())
+            .expect("standardizedRequest object");
+        let messages = standardized
+            .get("messages")
+            .and_then(|v| v.as_array())
+            .expect("messages");
+        let tool_calls = messages[0]
+            .get("tool_calls")
+            .and_then(|v| v.as_array())
+            .expect("tool calls");
+
+        let exec_args_text = tool_calls[0]["function"]["arguments"]
+            .as_str()
+            .expect("exec args");
+        let exec_args: Value = serde_json::from_str(exec_args_text).expect("exec args json");
+        assert_eq!(exec_args["cmd"], "pwd");
+        assert_eq!(exec_args["command"], "pwd");
+        assert_eq!(exec_args["workdir"], "/repo");
+
+        let patch_args_text = tool_calls[1]["function"]["arguments"]
+            .as_str()
+            .expect("patch args");
+        let patch_args: Value = serde_json::from_str(patch_args_text).expect("patch args json");
+        let patch_input = patch_args["input"].as_str().expect("patch input");
+        assert!(patch_input.starts_with("*** Begin Patch"));
+        assert!(patch_input.contains("*** Add File: note.txt"));
     }
 
     #[test]

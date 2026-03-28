@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.90.750",
+  "version": "0.90.760",
   "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support (dev)",
   "type": "module",
   "main": "dist/index.js",
@@ -72,7 +72,7 @@
     "cleanup:stale-server-pids": "node scripts/cleanup-stale-server-pids.mjs --quiet",
     "prebuild": "npm run verify:repo-sanity && echo skip-lint",
     "prepare": "",
-    "postinstall": "node scripts/ensure-cli-executable.mjs",
+    "postinstall": "node scripts/ensure-cli-executable.mjs && node scripts/ensure-cli-command-shim.mjs",
     "verify:apply-patch": "node scripts/verify-apply-patch.mjs",
     "verify:apply-patch-regressions": "node scripts/verify-apply-patch-regressions.mjs",
     "verify:exec-command": "node scripts/tests/exec-command-loop.mjs",
@@ -155,7 +155,8 @@
     "pack:rcc": "node scripts/pack-rcc.mjs",
     "build:rccx": "npm run build:min && node scripts/pack-mode.mjs --name @jsonstudio/rccx --bin rccx",
     "compare:codex:rccx": "node scripts/compare-codex-rccx.mjs",
-    "fix:cli-permission": "node scripts/ensure-cli-executable.mjs"
+    "fix:cli-permission": "node scripts/ensure-cli-executable.mjs",
+    "fix:cli-shim": "node scripts/ensure-cli-command-shim.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.58",

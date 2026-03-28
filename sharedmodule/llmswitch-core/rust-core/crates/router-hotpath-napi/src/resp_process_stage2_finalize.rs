@@ -30,7 +30,8 @@ fn stringify_args(arg_val: &Value) -> String {
 }
 
 fn to_string_content(val: &Value) -> String {
-    const EMPTY_FALLBACK: &str = "Command succeeded (no output).";
+    const EMPTY_FALLBACK: &str =
+        "[RouteCodex] Tool output was empty; execution status unknown.";
     match val {
         Value::Null => EMPTY_FALLBACK.to_string(),
         Value::String(text) => {
@@ -60,19 +61,41 @@ fn to_string_content(val: &Value) -> String {
     }
 }
 
-fn normalize_tool_call_arguments(tool_call: &mut Value) {
+fn normalize_tool_call_arguments(tool_call: &mut Value, fallback_id: Option<String>) -> bool {
     let Some(tool_call_obj) = tool_call.as_object_mut() else {
-        return;
+        return false;
     };
     if tool_call_obj.get("type").is_none() && tool_call_obj.get("function").is_some() {
         tool_call_obj.insert("type".to_string(), Value::String("function".to_string()));
+    }
+    let id_missing = tool_call_obj
+        .get("id")
+        .and_then(|v| v.as_str())
+        .map(|v| v.trim().is_empty())
+        .unwrap_or(true);
+    if id_missing {
+        if let Some(id) = fallback_id {
+            if !id.trim().is_empty() {
+                tool_call_obj.insert("id".to_string(), Value::String(id));
+            }
+        }
     }
     let Some(function_obj) = tool_call_obj
         .get_mut("function")
         .and_then(|v| v.as_object_mut())
     else {
-        return;
+        return false;
     };
+    let function_name = function_obj
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if function_name.is_empty() {
+        return false;
+    }
+    function_obj.insert("name".to_string(), Value::String(function_name));
     let args = function_obj
         .get("arguments")
         .cloned()
@@ -81,6 +104,20 @@ fn normalize_tool_call_arguments(tool_call: &mut Value) {
         "arguments".to_string(),
         Value::String(stringify_args(&args)),
     );
+    true
+}
+
+fn value_has_non_empty_text(value: Option<&Value>) -> bool {
+    match value {
+        Some(Value::String(text)) => !text.trim().is_empty(),
+        Some(Value::Array(items)) => items.iter().any(|item| value_has_non_empty_text(Some(item))),
+        Some(Value::Object(obj)) => {
+            value_has_non_empty_text(obj.get("text"))
+                || value_has_non_empty_text(obj.get("output_text"))
+                || value_has_non_empty_text(obj.get("content"))
+        }
+        _ => false,
+    }
 }
 
 fn normalize_choices(payload: &mut Value) {
@@ -93,31 +130,70 @@ fn normalize_choices(payload: &mut Value) {
     let Some(first_choice_obj) = first_choice.as_object_mut() else {
         return;
     };
-    let Some(message_obj) = first_choice_obj
-        .get_mut("message")
-        .and_then(|v| v.as_object_mut())
-    else {
-        return;
-    };
-    let Some(tool_calls) = message_obj
-        .get_mut("tool_calls")
-        .and_then(|v| v.as_array_mut())
-    else {
-        return;
-    };
-    for tool_call in tool_calls.iter_mut() {
-        normalize_tool_call_arguments(tool_call);
-    }
     let finish_reason = first_choice_obj
         .get("finish_reason")
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .trim()
         .to_ascii_lowercase();
-    if finish_reason != "tool_calls" {
+    let Some(message_obj) = first_choice_obj
+        .get_mut("message")
+        .and_then(|v| v.as_object_mut())
+    else {
+        return;
+    };
+
+    let mut has_tool_calls = false;
+    if let Some(tool_calls) = message_obj
+        .get_mut("tool_calls")
+        .and_then(|v| v.as_array_mut())
+    {
+        let mut normalized_tool_calls: Vec<Value> = Vec::new();
+        let original = std::mem::take(tool_calls);
+        for (idx, mut tool_call) in original.into_iter().enumerate() {
+            let fallback_id = Some(format!("call_routecodex_repaired_{}", idx + 1));
+            if normalize_tool_call_arguments(&mut tool_call, fallback_id) {
+                normalized_tool_calls.push(tool_call);
+            }
+        }
+        *tool_calls = normalized_tool_calls;
+        has_tool_calls = !tool_calls.is_empty();
+    }
+
+    if has_tool_calls {
+        if finish_reason != "tool_calls" {
+            first_choice_obj.insert(
+                "finish_reason".to_string(),
+                Value::String("tool_calls".to_string()),
+            );
+        }
+        return;
+    }
+
+    let has_message_text = value_has_non_empty_text(message_obj.get("content"))
+        || value_has_non_empty_text(message_obj.get("reasoning_content"))
+        || value_has_non_empty_text(message_obj.get("reasoning"));
+
+    if finish_reason == "tool_calls" && !has_message_text {
+        message_obj.insert(
+            "content".to_string(),
+            Value::String(
+                "[RouteCodex] tool_calls response became empty (finish_reason=tool_calls but no tool_calls found).".to_string(),
+            ),
+        );
         first_choice_obj.insert(
             "finish_reason".to_string(),
-            Value::String("tool_calls".to_string()),
+            Value::String("stop".to_string()),
+        );
+        return;
+    }
+
+    if finish_reason == "stop" && !has_message_text {
+        message_obj.insert(
+            "content".to_string(),
+            Value::String(
+                "[RouteCodex] upstream returned an empty assistant message (finish_reason=stop).".to_string(),
+            ),
         );
     }
 }
@@ -157,8 +233,13 @@ fn normalize_messages(payload: &mut Value) {
         if tool_calls.is_empty() {
             continue;
         }
-        for tool_call in tool_calls.iter_mut() {
-            normalize_tool_call_arguments(tool_call);
+        let mut normalized_tool_calls: Vec<Value> = Vec::new();
+        let original = std::mem::take(tool_calls);
+        for (idx, mut tool_call) in original.into_iter().enumerate() {
+            let fallback_id = Some(format!("call_routecodex_history_{}", idx + 1));
+            if !normalize_tool_call_arguments(&mut tool_call, fallback_id) {
+                continue;
+            }
             let Some(tool_call_obj) = tool_call.as_object() else {
                 continue;
             };
@@ -170,7 +251,9 @@ fn normalize_messages(payload: &mut Value) {
             if let (Some(id), Some(name)) = (call_id, function_name) {
                 id_to_name.insert(id, name);
             }
+            normalized_tool_calls.push(tool_call);
         }
+        *tool_calls = normalized_tool_calls;
         break;
     }
 
@@ -343,6 +426,113 @@ mod tests {
         assert_eq!(
             result["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"],
             "{\"cmd\":\"pwd\"}"
+        );
+    }
+
+    #[test]
+    fn test_finalize_drops_invalid_tool_calls_and_repairs_empty_result() {
+        let input = FinalizeInput {
+            payload: json!({
+              "choices": [{
+                "finish_reason": "tool_calls",
+                "message": {
+                  "tool_calls": [{
+                    "id": "call_missing_name",
+                    "function": {
+                      "arguments": {"cmd": "pwd"}
+                    }
+                  }],
+                  "content": ""
+                }
+              }]
+            }),
+            stream: false,
+            reasoning_mode: Some("keep".to_string()),
+            endpoint: None,
+            request_id: None,
+        };
+        let result = finalize_chat_response(input);
+        assert_eq!(result["choices"][0]["finish_reason"], "stop");
+        assert_eq!(
+            result["choices"][0]["message"]["content"],
+            "[RouteCodex] tool_calls response became empty (finish_reason=tool_calls but no tool_calls found)."
+        );
+    }
+
+    #[test]
+    fn test_finalize_repairs_missing_tool_call_id() {
+        let input = FinalizeInput {
+            payload: json!({
+              "choices": [{
+                "finish_reason": "stop",
+                "message": {
+                  "tool_calls": [{
+                    "function": {
+                      "name": "exec_command",
+                      "arguments": {"cmd": "pwd"}
+                    }
+                  }]
+                }
+              }]
+            }),
+            stream: false,
+            reasoning_mode: Some("keep".to_string()),
+            endpoint: None,
+            request_id: None,
+        };
+        let result = finalize_chat_response(input);
+        assert_eq!(result["choices"][0]["finish_reason"], "tool_calls");
+        assert_eq!(
+            result["choices"][0]["message"]["tool_calls"][0]["id"],
+            "call_routecodex_repaired_1"
+        );
+    }
+
+    #[test]
+    fn test_finalize_repairs_empty_tool_calls_finish_reason_shape() {
+        let input = FinalizeInput {
+            payload: json!({
+              "choices": [{
+                "finish_reason": "tool_calls",
+                "message": {
+                  "content": null,
+                  "tool_calls": []
+                }
+              }]
+            }),
+            stream: false,
+            reasoning_mode: Some("keep".to_string()),
+            endpoint: None,
+            request_id: None,
+        };
+        let result = finalize_chat_response(input);
+        assert_eq!(result["choices"][0]["finish_reason"], "stop");
+        assert_eq!(
+            result["choices"][0]["message"]["content"],
+            "[RouteCodex] tool_calls response became empty (finish_reason=tool_calls but no tool_calls found)."
+        );
+    }
+
+    #[test]
+    fn test_finalize_repairs_empty_stop_message_shape() {
+        let input = FinalizeInput {
+            payload: json!({
+              "choices": [{
+                "finish_reason": "stop",
+                "message": {
+                  "content": ""
+                }
+              }]
+            }),
+            stream: false,
+            reasoning_mode: Some("keep".to_string()),
+            endpoint: None,
+            request_id: None,
+        };
+        let result = finalize_chat_response(input);
+        assert_eq!(
+            result["choices"][0]["message"]["content"],
+            "[RouteCodex] upstream returned an empty assistant message (finish_reason=stop)."
         );
     }
 

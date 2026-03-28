@@ -419,4 +419,34 @@ mod tests {
             "exec_command"
         );
     }
+
+    #[test]
+    fn normalize_assistant_message_harvests_malformed_parameter_reasoning_payload() {
+        let raw_reasoning = "<parameter name=\"input\">pwd</</parameter>\n<parameter name=\"type\">string</parameter>\n</command></arg_value>";
+        let prepared = prepare_reasoning_text_for_harvest(raw_reasoning);
+        let (_, harvested) = harvest_reasoning_tool_calls(prepared.as_str());
+        assert_eq!(harvested.len(), 1);
+
+        let message = serde_json::json!({
+            "role": "assistant",
+            "reasoning_content": raw_reasoning
+        });
+        let normalized = normalize_assistant_message(&message, None).expect("normalized");
+        let tool_calls = normalized
+            .as_object()
+            .and_then(|obj| obj.get("tool_calls"))
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(tool_calls.len(), 1);
+        let args = tool_calls[0]
+            .as_object()
+            .and_then(|obj| obj.get("function"))
+            .and_then(Value::as_object)
+            .and_then(|obj| obj.get("arguments"))
+            .and_then(Value::as_str)
+            .unwrap_or("{}");
+        let args_json: Value = serde_json::from_str(args).unwrap_or(Value::Null);
+        assert_eq!(args_json["cmd"], "pwd");
+    }
 }

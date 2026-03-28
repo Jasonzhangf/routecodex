@@ -1,7 +1,9 @@
 use serde_json::{Map, Value};
 use std::collections::HashMap;
 
-use crate::hub_reasoning_tool_normalizer::repair_arguments_to_string;
+use crate::hub_reasoning_tool_normalizer::{
+    normalize_assistant_text_to_tool_calls_json, repair_arguments_to_string,
+};
 use crate::hub_resp_outbound_client_semantics::normalize_responses_function_name;
 use crate::shared_chat_output_normalizer::normalize_chat_message_content;
 
@@ -114,6 +116,105 @@ fn ensure_assistant_tool_call_identity(
     call_obj.insert("tool_call_id".to_string(), Value::String(resolved.clone()));
     call_obj.insert("call_id".to_string(), Value::String(resolved.clone()));
     resolved
+}
+
+fn should_probe_assistant_tool_markup(content: &str) -> bool {
+    let lowered = content.to_ascii_lowercase();
+    lowered.contains("<tool_call")
+        || lowered.contains("<parameter")
+        || lowered.contains("<arg_key>")
+        || lowered.contains("<arg_value>")
+        || lowered.contains("<function=")
+        || lowered.contains("</command>")
+        || lowered.contains("```tool_call")
+        || lowered.contains("\"tool_calls\"")
+        || lowered.contains("tool_calls:[")
+}
+
+fn harvest_assistant_tool_message_from_text(
+    raw_content: &str,
+    reasoning_segments: &[String],
+) -> Option<Map<String, Value>> {
+    if raw_content.trim().is_empty() || !should_probe_assistant_tool_markup(raw_content) {
+        return None;
+    }
+
+    let mut seed = Map::new();
+    seed.insert("role".to_string(), Value::String("assistant".to_string()));
+    seed.insert(
+        "content".to_string(),
+        Value::String(raw_content.to_string()),
+    );
+    let reasoning = reasoning_segments
+        .iter()
+        .filter(|entry| !entry.trim().is_empty())
+        .cloned()
+        .collect::<Vec<String>>();
+    if !reasoning.is_empty() {
+        seed.insert(
+            "reasoning_content".to_string(),
+            Value::String(reasoning.join("\n")),
+        );
+    }
+
+    let normalized_raw = normalize_assistant_text_to_tool_calls_json(
+        Value::Object(seed).to_string(),
+        None,
+    )
+    .ok()?;
+    let normalized: Value = serde_json::from_str(&normalized_raw).ok()?;
+    let mut message = normalized.as_object().cloned()?;
+    let has_tool_calls = message
+        .get("tool_calls")
+        .and_then(Value::as_array)
+        .map(|arr| !arr.is_empty())
+        .unwrap_or(false);
+    if !has_tool_calls {
+        return None;
+    }
+    message.insert("role".to_string(), Value::String("assistant".to_string()));
+    if !message.contains_key("content") {
+        message.insert("content".to_string(), Value::String(String::new()));
+    }
+    Some(message)
+}
+
+fn append_harvested_assistant_tool_message(
+    messages: &mut Vec<Value>,
+    tool_name_by_id: &mut HashMap<String, String>,
+    last_tool_call_id: &mut Option<String>,
+    raw_content: &str,
+    reasoning_segments: &[String],
+) -> bool {
+    let Some(mut harvested) = harvest_assistant_tool_message_from_text(raw_content, reasoning_segments)
+    else {
+        return false;
+    };
+    if let Some(tool_calls) = harvested
+        .get_mut("tool_calls")
+        .and_then(Value::as_array_mut)
+    {
+        for (idx, call) in tool_calls.iter_mut().enumerate() {
+            let Value::Object(call_obj) = call else {
+                continue;
+            };
+            let fallback_id = format!("fc_call_{}", messages.len() + idx + 1);
+            let call_id = ensure_assistant_tool_call_identity(call_obj, fallback_id.as_str());
+            if let Some(name) = call_obj
+                .get("function")
+                .and_then(Value::as_object)
+                .and_then(|fn_obj| fn_obj.get("name"))
+                .and_then(Value::as_str)
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+            {
+                tool_name_by_id.insert(call_id.clone(), name);
+            }
+            *last_tool_call_id = Some(call_id);
+        }
+    }
+    messages.push(Value::Object(harvested));
+    true
 }
 
 fn serialize_tool_output(entry: &Map<String, Value>) -> Option<String> {
@@ -455,6 +556,18 @@ pub(crate) fn convert_bridge_input_to_chat_messages(
             }
 
             let role = coerce_bridge_role(entry_obj.get("role").and_then(Value::as_str));
+            if role == "assistant" {
+                if append_harvested_assistant_tool_message(
+                    &mut messages,
+                    &mut tool_name_by_id,
+                    &mut last_tool_call_id,
+                    content,
+                    entry_reasoning_segments.as_slice(),
+                ) {
+                    continue;
+                }
+            }
+
             if is_responses_mode {
                 push_chat_message_without_reparse(
                     &mut messages,
@@ -651,6 +764,20 @@ pub(crate) fn convert_bridge_input_to_chat_messages(
                         consume_entry_reasoning().unwrap_or_default().as_slice(),
                         nested.reasoning_segments.as_slice(),
                     );
+                    if normalized_role == "assistant"
+                        && append_harvested_assistant_tool_message(
+                            &mut messages,
+                            &mut tool_name_by_id,
+                            &mut last_tool_call_id,
+                            text.as_str(),
+                            combined.as_slice(),
+                        )
+                    {
+                        if let Some(next_call_id) = nested.last_call_id.clone() {
+                            last_tool_call_id = Some(next_call_id);
+                        }
+                        continue;
+                    }
                     push_normalized_chat_message(
                         &mut messages,
                         normalized_role.as_str(),
@@ -746,19 +873,43 @@ pub(crate) fn convert_bridge_input_to_chat_messages(
                 }
                 messages.push(Value::Object(msg));
             } else if let Some(text) = nested.text.clone() {
+                let combined = combine_reasoning_segments(
+                    consume_entry_reasoning().unwrap_or_default().as_slice(),
+                    nested.reasoning_segments.as_slice(),
+                );
+                if normalized_role == "assistant"
+                    && append_harvested_assistant_tool_message(
+                        &mut messages,
+                        &mut tool_name_by_id,
+                        &mut last_tool_call_id,
+                        text.as_str(),
+                        combined.as_slice(),
+                    )
+                {
+                    last_tool_call_id = nested.last_call_id;
+                    continue;
+                }
                 if is_responses_mode {
                     push_chat_message_without_reparse(
                         &mut messages,
                         normalized_role.as_str(),
                         Some(text.as_str()),
-                        consume_entry_reasoning(),
+                        if combined.is_empty() {
+                            None
+                        } else {
+                            Some(combined)
+                        },
                     );
                 } else {
                     push_normalized_chat_message(
                         &mut messages,
                         normalized_role.as_str(),
                         Some(text.as_str()),
-                        consume_entry_reasoning(),
+                        if combined.is_empty() {
+                            None
+                        } else {
+                            Some(combined)
+                        },
                     );
                 }
             }

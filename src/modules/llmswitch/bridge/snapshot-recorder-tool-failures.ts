@@ -23,6 +23,8 @@ function clipText(input: string, max = 320): string {
   return text.length > max ? `${text.slice(0, max)}...` : text;
 }
 
+const MAX_TRAILING_TOOL_MESSAGES = 8;
+
 function looksLikeToolOutputTranscript(content: string): boolean {
   const raw = String(content || '');
   if (!raw) return false;
@@ -274,46 +276,77 @@ function resolveShellCommandFailure(content: string): { errorType: string; match
 }
 
 export function collectToolMessages(payload: AnyRecord): Array<Record<string, unknown>> {
-  const messages: Array<Record<string, unknown>> = [];
-  const queue: unknown[] = [payload];
-  const seen = new WeakSet<object>();
-  let steps = 0;
+  const directCandidates: Array<unknown> = [];
+  const pushArray = (value: unknown) => {
+    if (Array.isArray(value)) {
+      directCandidates.push(value);
+    }
+  };
 
-  while (queue.length > 0 && steps < 3000) {
-    steps += 1;
-    const current = queue.shift();
-    if (!current || typeof current !== 'object') {
+  pushArray(payload?.messages);
+  pushArray(payload?.input);
+  pushArray((payload as Record<string, unknown> | undefined)?.payload);
+  pushArray((payload as Record<string, unknown> | undefined)?.governedPayload);
+
+  const payloadRecord = payload as Record<string, unknown> | undefined;
+  if (payloadRecord && typeof payloadRecord === 'object') {
+    const nestedPayload = payloadRecord.payload;
+    if (nestedPayload && typeof nestedPayload === 'object' && !Array.isArray(nestedPayload)) {
+      pushArray((nestedPayload as Record<string, unknown>).messages);
+      pushArray((nestedPayload as Record<string, unknown>).input);
+    }
+    const governedPayload = payloadRecord.governedPayload;
+    if (
+      governedPayload &&
+      typeof governedPayload === 'object' &&
+      !Array.isArray(governedPayload)
+    ) {
+      pushArray((governedPayload as Record<string, unknown>).messages);
+      pushArray((governedPayload as Record<string, unknown>).input);
+    }
+  }
+
+  const dedup = new Set<Record<string, unknown>>();
+  const collected: Array<Record<string, unknown>> = [];
+
+  for (const candidate of directCandidates) {
+    if (!Array.isArray(candidate) || candidate.length <= 0) {
       continue;
     }
-    if (seen.has(current as object)) {
-      continue;
-    }
-    seen.add(current as object);
-
-    if (Array.isArray(current)) {
-      for (const item of current) {
-        if (item && typeof item === 'object') {
-          queue.push(item);
+    let seenTrailingTool = 0;
+    for (let index = candidate.length - 1; index >= 0; index -= 1) {
+      const row = candidate[index];
+      if (!row || typeof row !== 'object' || Array.isArray(row)) {
+        if (seenTrailingTool > 0) {
+          break;
         }
+        continue;
       }
-      continue;
-    }
-
-    const record = current as Record<string, unknown>;
-    const role = typeof record.role === 'string' ? record.role.trim().toLowerCase() : '';
-    const name = typeof record.name === 'string' ? record.name.trim().toLowerCase() : '';
-    const content = typeof record.content === 'string' ? record.content : '';
-    if (role === 'tool' && name && content) {
-      messages.push(record);
-    }
-    for (const value of Object.values(record)) {
-      if (value && typeof value === 'object') {
-        queue.push(value);
+      const record = row as Record<string, unknown>;
+      const role = typeof record.role === 'string' ? record.role.trim().toLowerCase() : '';
+      const name = typeof record.name === 'string' ? record.name.trim().toLowerCase() : '';
+      const content = typeof record.content === 'string' ? record.content : '';
+      if (role && role !== 'tool') {
+        break;
+      }
+      if (role === 'tool' && name && content) {
+        seenTrailingTool += 1;
+        if (!dedup.has(record)) {
+          dedup.add(record);
+          collected.unshift(record);
+        }
+        if (seenTrailingTool >= MAX_TRAILING_TOOL_MESSAGES) {
+          break;
+        }
+        continue;
+      }
+      if (seenTrailingTool > 0) {
+        break;
       }
     }
   }
 
-  return messages;
+  return collected;
 }
 
 export function detectToolExecutionFailures(payload: AnyRecord): ToolExecutionFailureSignal[] {

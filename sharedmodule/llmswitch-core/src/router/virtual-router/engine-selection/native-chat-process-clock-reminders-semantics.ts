@@ -6,6 +6,7 @@ import { loadNativeRouterHotpathBindingForInternalUse } from './native-router-ho
 
 export type NativeClockReminderFlowPlan = {
   skipForServerToolFollowup: boolean;
+  injectPerRequestTimeTag: boolean;
 };
 
 function parsePayload(raw: string): NativeClockReminderFlowPlan | null {
@@ -18,8 +19,11 @@ function parsePayload(raw: string): NativeClockReminderFlowPlan | null {
     if (typeof row.skipForServerToolFollowup !== 'boolean') {
       return null;
     }
+    const injectPerRequestTimeTag =
+      typeof row.injectPerRequestTimeTag === 'boolean' ? row.injectPerRequestTimeTag : false;
     return {
-      skipForServerToolFollowup: row.skipForServerToolFollowup
+      skipForServerToolFollowup: row.skipForServerToolFollowup,
+      injectPerRequestTimeTag
     };
   } catch {
     return null;

@@ -1137,6 +1137,62 @@ fn convert_bridge_input_preserves_tool_calls_with_content() {
 }
 
 #[test]
+fn convert_bridge_input_harvests_malformed_assistant_parameter_markup_into_tool_calls() {
+    let input = BridgeInputToChatInput {
+        input: vec![json!({
+            "type": "message",
+            "role": "assistant",
+            "content": r#"[思考] <parameter name="input">pwd</</parameter>
+<parameter name="newVersion"><parameter name="type">string</parameter>"#
+        })],
+        tools: None,
+        tool_result_fallback_text: None,
+        normalize_function_name: Some("responses".to_string()),
+    };
+
+    let output = convert_bridge_input_to_chat_messages(input);
+    assert_eq!(output.messages.len(), 1);
+    let msg = output.messages[0].as_object().unwrap();
+    assert_eq!(msg.get("role").and_then(Value::as_str), Some("assistant"));
+    let tool_calls = msg.get("tool_calls").and_then(Value::as_array).unwrap();
+    assert!(!tool_calls.is_empty());
+    let first = tool_calls[0].as_object().unwrap();
+    let function = first.get("function").and_then(Value::as_object).unwrap();
+    assert_eq!(
+        function.get("name").and_then(Value::as_str),
+        Some("exec_command")
+    );
+    assert_eq!(
+        msg.get("content").and_then(Value::as_str),
+        Some("")
+    );
+}
+
+#[test]
+fn convert_bridge_input_keeps_plain_assistant_text_without_tool_markup() {
+    let input = BridgeInputToChatInput {
+        input: vec![json!({
+            "type": "message",
+            "role": "assistant",
+            "content": "Jason，我先检查一下日志再继续。"
+        })],
+        tools: None,
+        tool_result_fallback_text: None,
+        normalize_function_name: Some("responses".to_string()),
+    };
+
+    let output = convert_bridge_input_to_chat_messages(input);
+    assert_eq!(output.messages.len(), 1);
+    let msg = output.messages[0].as_object().unwrap();
+    assert_eq!(msg.get("role").and_then(Value::as_str), Some("assistant"));
+    assert_eq!(
+        msg.get("content").and_then(Value::as_str),
+        Some("Jason，我先检查一下日志再继续。")
+    );
+    assert!(msg.get("tool_calls").is_none());
+}
+
+#[test]
 fn applies_bridge_ensure_tool_placeholders_preserves_exec_command_payload() {
     let output = apply_bridge_ensure_tool_placeholders(ApplyBridgeEnsureToolPlaceholdersInput {
         stage: "request_outbound".to_string(),
