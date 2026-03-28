@@ -255,6 +255,7 @@ fn normalize_responses_input_function_calls(
         return;
     };
 
+    let mut dropped_call_ids: HashSet<String> = HashSet::new();
     let mut normalized_items = Vec::<Value>::with_capacity(input_items.len());
 
     for mut item in std::mem::take(input_items) {
@@ -276,8 +277,23 @@ fn normalize_responses_input_function_calls(
                         }
                         item_row.insert("arguments".to_string(), Value::String(arguments));
                     } else if is_invalid_shell_like_call(raw_name.as_str(), item_row.get("arguments")) {
-                        // Keep malformed item unchanged; later request-shape filters can drop it
-                        // without inventing a synthetic command.
+                        if let Some(call_id) = read_trimmed_string(item_row.get("call_id"))
+                            .or_else(|| read_trimmed_string(item_row.get("id")))
+                        {
+                            dropped_call_ids.insert(call_id);
+                        }
+                        // Drop malformed shell-like function_call item. Keep shape-only policy:
+                        // no synthetic command inference, no semantic rewrite.
+                        continue;
+                    }
+                }
+            } else if item_type == "function_call_output" {
+                let call_id = read_trimmed_string(item_row.get("call_id"))
+                    .or_else(|| read_trimmed_string(item_row.get("tool_call_id")));
+                if let Some(call_id) = call_id {
+                    if dropped_call_ids.contains(call_id.as_str()) {
+                        // Keep request chain coherent: remove orphan output for a dropped malformed call.
+                        continue;
                     }
                 }
             }
@@ -461,7 +477,7 @@ mod tests {
     }
 
     #[test]
-    fn keeps_invalid_exec_command_items_unchanged_for_later_drop() {
+    fn drops_invalid_exec_command_items_and_orphan_outputs() {
         let mut payload = json!({
           "tools": [{ "type": "function", "function": { "name": "exec_command" } }],
           "input": [
@@ -492,8 +508,50 @@ mod tests {
 
         normalize_shell_like_tool_calls_before_governance(&mut payload);
         let items = payload["input"].as_array().expect("input items");
-        assert_eq!(items.len(), 4);
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0]["call_id"], "call_keep");
+        assert_eq!(items[1]["call_id"], "call_keep");
         let args_text = items[0]["arguments"].as_str().expect("normalized args");
-        assert_eq!(args_text, "{}");
+        assert!(args_text.contains("\"cmd\":\"pwd\""));
+    }
+
+    #[test]
+    fn drops_exec_command_items_with_parameter_tag_pollution_shape() {
+        let mut payload = json!({
+          "tools": [{ "type": "function", "function": { "name": "exec_command" } }],
+          "input": [
+            {
+              "type": "function_call",
+              "call_id": "call_bad",
+              "name": "exec_command",
+              "arguments": "{\"cmd<arg_value>cd /repo && git status</arg_value><arg_key>command\":\"cd /repo && git status\"}"
+            },
+            {
+              "type": "function_call_output",
+              "call_id": "call_bad",
+              "output": "failed to parse function arguments: missing field `cmd` at line 1 column 1117"
+            },
+            {
+              "type": "function_call",
+              "call_id": "call_good",
+              "name": "exec_command",
+              "arguments": "{\"command\":\"pwd\"}"
+            },
+            {
+              "type": "function_call_output",
+              "call_id": "call_good",
+              "output": "pwd"
+            }
+          ]
+        });
+
+        normalize_shell_like_tool_calls_before_governance(&mut payload);
+        let items = payload["input"].as_array().expect("input items");
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0]["call_id"], "call_good");
+        let args_text = items[0]["arguments"].as_str().expect("normalized args");
+        let args: Value = serde_json::from_str(args_text).expect("args object");
+        assert_eq!(args["cmd"], "pwd");
+        assert_eq!(args["command"], "pwd");
     }
 }

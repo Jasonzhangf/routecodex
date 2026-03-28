@@ -660,4 +660,90 @@ describe('runtime parse/exec errorsamples', () => {
     const execDir = path.join(errorsDir, 'exec-error');
     await expect(fs.readdir(execDir)).rejects.toThrow();
   });
+
+  it('writes empty-response-request errorsample when response is stop/completed but has no text or tool calls', async () => {
+    const recorder = await createSnapshotRecorder(
+      {
+        requestId: 'req_empty_response_shape_1',
+        providerId: 'mock',
+        providerProtocol: 'openai-responses'
+      },
+      '/v1/responses'
+    );
+
+    (recorder as any).record('chat_process.req.stage2.semantic_map', {
+      input: [
+        {
+          type: 'function_call',
+          call_id: 'call_servertool_fallback_1774615349539_22',
+          name: 'exec_command',
+          arguments:
+            '{"cmd<arg_value>cd /repo && git status</arg_value><arg_key>command":"cd /repo && git status"}'
+        },
+        {
+          type: 'function_call_output',
+          call_id: 'call_servertool_fallback_1774615349539_22',
+          output: 'failed to parse function arguments: missing field `cmd` at line 1 column 1117'
+        }
+      ]
+    });
+
+    (recorder as any).record('chat_process.resp.stage9.client_remap', {
+      choices: [
+        {
+          finish_reason: 'stop',
+          message: {
+            role: 'assistant',
+            content: ''
+          }
+        }
+      ]
+    });
+
+    const emptyDir = path.join(errorsDir, 'empty-response-request');
+    const file = await waitForFile(
+      emptyDir,
+      (name) => name.startsWith('chat_process.resp.stage9.client_remap-')
+    );
+    const json = JSON.parse(await fs.readFile(file, 'utf8')) as any;
+    expect(json.kind).toBe('empty_response_request_shape');
+    expect(json.errorType).toBe('empty_response_no_text_or_tool_calls');
+    expect(json.requestId).toBe('req_empty_response_shape_1');
+    expect(json.stage).toBe('chat_process.resp.stage9.client_remap');
+    expect(Array.isArray(json.trace)).toBe(true);
+    expect(json.trace.some((entry: any) => entry.stage === 'chat_process.req.stage2.semantic_map')).toBe(true);
+    expect(json.requestTailStage).toBe('chat_process.req.stage2.semantic_map');
+    expect(String(json.observation?.requestTailPreview || '')).toContain('cmd<arg_value>');
+  });
+
+  it('does not write empty-response-request sample when required_action/tool_calls exists', async () => {
+    const recorder = await createSnapshotRecorder(
+      {
+        requestId: 'req_empty_response_shape_skip_1',
+        providerId: 'mock',
+        providerProtocol: 'openai-responses'
+      },
+      '/v1/responses'
+    );
+
+    (recorder as any).record('chat_process.resp.stage9.client_remap', {
+      status: 'requires_action',
+      output_text: '',
+      required_action: {
+        submit_tool_outputs: {
+          tool_calls: [
+            {
+              id: 'call_1',
+              type: 'function',
+              function: { name: 'exec_command', arguments: '{"cmd":"pwd"}' }
+            }
+          ]
+        }
+      }
+    });
+
+    await new Promise((r) => setTimeout(r, 180));
+    const emptyDir = path.join(errorsDir, 'empty-response-request');
+    await expect(fs.readdir(emptyDir)).rejects.toThrow();
+  });
 });

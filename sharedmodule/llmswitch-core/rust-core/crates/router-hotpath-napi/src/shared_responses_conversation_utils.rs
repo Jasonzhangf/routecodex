@@ -2,6 +2,98 @@ use crate::hub_bridge_actions::utils::normalize_function_call_output_id;
 use napi::bindgen_prelude::Result as NapiResult;
 use serde_json::{Map, Value};
 
+fn is_shell_like_function_name(name: &str) -> bool {
+    matches!(
+        name.trim().to_ascii_lowercase().as_str(),
+        "exec_command" | "shell_command" | "shell" | "bash" | "terminal"
+    )
+}
+
+fn read_trimmed_text(value: Option<&Value>) -> Option<String> {
+    let raw = value.and_then(Value::as_str)?.trim().to_string();
+    if raw.is_empty() {
+        None
+    } else {
+        Some(raw)
+    }
+}
+
+fn read_string_array_command(value: Option<&Value>) -> Option<String> {
+    let parts = value.and_then(Value::as_array)?;
+    let tokens: Vec<String> = parts
+        .iter()
+        .map(|item| match item {
+            Value::String(v) => v.trim().to_string(),
+            Value::Null => String::new(),
+            other => other.to_string().trim().to_string(),
+        })
+        .filter(|token| !token.is_empty())
+        .collect();
+    if tokens.is_empty() {
+        return None;
+    }
+    Some(tokens.join(" "))
+}
+
+fn parse_arguments_record(value: Option<&Value>) -> Option<Map<String, Value>> {
+    match value {
+        Some(Value::Object(row)) => Some(row.clone()),
+        Some(Value::String(raw)) => {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                return Some(Map::new());
+            }
+            let parsed: Value = serde_json::from_str(trimmed).ok()?;
+            parsed.as_object().cloned()
+        }
+        _ => None,
+    }
+}
+
+fn read_command_from_args_map(args: &Map<String, Value>) -> Option<String> {
+    let read_value = |value: Option<&Value>| -> Option<String> {
+        read_trimmed_text(value).or_else(|| read_string_array_command(value))
+    };
+
+    let direct = read_value(args.get("cmd"))
+        .or_else(|| read_value(args.get("command")))
+        .or_else(|| read_value(args.get("script")))
+        .or_else(|| read_value(args.get("toon")))
+        .or_else(|| read_value(args.get("input")))
+        .or_else(|| read_value(args.get("text")));
+    if direct.is_some() {
+        return direct;
+    }
+
+    args.get("input")
+        .and_then(Value::as_object)
+        .and_then(|row| {
+            read_value(row.get("cmd"))
+                .or_else(|| read_value(row.get("command")))
+                .or_else(|| read_value(row.get("script")))
+                .or_else(|| read_value(row.get("toon")))
+        })
+        .or_else(|| {
+            args.get("args")
+                .and_then(Value::as_object)
+                .and_then(|row| {
+                    read_value(row.get("cmd"))
+                        .or_else(|| read_value(row.get("command")))
+                        .or_else(|| read_value(row.get("script")))
+                        .or_else(|| read_value(row.get("toon")))
+                })
+        })
+}
+
+fn read_workdir_from_args_map(args: &Map<String, Value>) -> Option<String> {
+    let input = args.get("input").and_then(Value::as_object);
+    read_trimmed_text(args.get("workdir"))
+        .or_else(|| read_trimmed_text(args.get("cwd")))
+        .or_else(|| read_trimmed_text(args.get("workDir")))
+        .or_else(|| input.and_then(|row| read_trimmed_text(row.get("workdir"))))
+        .or_else(|| input.and_then(|row| read_trimmed_text(row.get("cwd"))))
+}
+
 fn pick_responses_persisted_fields(payload: &Value) -> Value {
     let Some(row) = payload.as_object() else {
         return Value::Object(Map::new());
@@ -75,6 +167,43 @@ fn normalize_output_item_to_input(item: &Value) -> Option<Value> {
     }
 
     if item_type == "function_call" {
+        let raw_name = row
+            .get("name")
+            .and_then(Value::as_str)
+            .or_else(|| {
+                row.get("function")
+                    .and_then(Value::as_object)
+                    .and_then(|f| f.get("name"))
+                    .and_then(Value::as_str)
+            })
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty());
+        let is_shell_like = raw_name
+            .as_deref()
+            .map(is_shell_like_function_name)
+            .unwrap_or(false);
+        let raw_arguments = row.get("arguments").or_else(|| {
+            row.get("function")
+                .and_then(Value::as_object)
+                .and_then(|f| f.get("arguments"))
+        });
+
+        let mut normalized_shell_args: Option<Value> = None;
+        if is_shell_like {
+            let args = parse_arguments_record(raw_arguments)?;
+            let cmd = read_command_from_args_map(&args)?;
+            let mut normalized = Map::new();
+            normalized.insert("cmd".to_string(), Value::String(cmd.clone()));
+            normalized.insert("command".to_string(), Value::String(cmd));
+            if let Some(workdir) = read_workdir_from_args_map(&args) {
+                normalized.insert("workdir".to_string(), Value::String(workdir));
+            }
+            let serialized = serde_json::to_string(&Value::Object(normalized))
+                .ok()
+                .unwrap_or_else(|| "{\"cmd\":\"\",\"command\":\"\"}".to_string());
+            normalized_shell_args = Some(Value::String(serialized));
+        }
+
         let call_id = row
             .get("call_id")
             .and_then(Value::as_str)
@@ -87,7 +216,7 @@ fn normalize_output_item_to_input(item: &Value) -> Option<Value> {
                 row.get("name").and_then(Value::as_str).map(|name| {
                     let mut fn_node = Map::new();
                     fn_node.insert("name".to_string(), Value::String(name.to_string()));
-                    if let Some(args) = row.get("arguments") {
+                    if let Some(args) = normalized_shell_args.as_ref().or_else(|| row.get("arguments")) {
                         fn_node.insert("arguments".to_string(), args.clone());
                     }
                     fn_node
@@ -108,7 +237,7 @@ fn normalize_output_item_to_input(item: &Value) -> Option<Value> {
         if let Some(name) = row.get("name").and_then(Value::as_str) {
             out.insert("name".to_string(), Value::String(name.to_string()));
         }
-        if let Some(arguments) = row.get("arguments") {
+        if let Some(arguments) = normalized_shell_args.as_ref().or_else(|| row.get("arguments")) {
             out.insert("arguments".to_string(), arguments.clone());
         }
         if let Some(fn_node) = function_node {
@@ -404,7 +533,10 @@ pub fn resume_responses_conversation_payload_json(
 
 #[cfg(test)]
 mod tests {
-    use super::{prepare_responses_conversation_entry, resume_responses_conversation_payload};
+    use super::{
+        convert_responses_output_to_input_items, prepare_responses_conversation_entry,
+        resume_responses_conversation_payload,
+    };
     use serde_json::{json, Value};
 
     #[test]
@@ -461,5 +593,39 @@ mod tests {
         );
         let meta = resumed.get("meta").and_then(Value::as_object).unwrap();
         assert_eq!(meta.get("toolOutputs").and_then(Value::as_u64), Some(1));
+    }
+
+    #[test]
+    fn drops_invalid_shell_like_function_calls_when_converting_output_items() {
+        let response = json!({
+            "output": [
+                {
+                    "type": "function_call",
+                    "id": "fc_bad",
+                    "call_id": "call_bad",
+                    "name": "exec_command",
+                    "arguments": "{\"cmd<arg_value>cd /repo && git status</arg_value><arg_key>command\":\"cd /repo && git status\"}"
+                },
+                {
+                    "type": "function_call",
+                    "id": "fc_good",
+                    "call_id": "call_good",
+                    "name": "exec_command",
+                    "arguments": "{\"command\":\"pwd\",\"cwd\":\"/tmp\"}"
+                }
+            ]
+        });
+
+        let items = convert_responses_output_to_input_items(&response)
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["call_id"], "call_good");
+        let args_text = items[0]["arguments"].as_str().unwrap_or("{}");
+        let args: Value = serde_json::from_str(args_text).expect("args object");
+        assert_eq!(args["cmd"], "pwd");
+        assert_eq!(args["command"], "pwd");
+        assert_eq!(args["workdir"], "/tmp");
     }
 }
