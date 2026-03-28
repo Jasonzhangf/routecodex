@@ -7,6 +7,10 @@ import {
 } from '../types.js';
 import { asRecord } from './utils.js';
 
+// native-router-hotpath contract:
+// normalized provider/model capability shape is consumed by Rust virtual router engine
+// (router_hotpath_napi) during selection + pool eligibility evaluation.
+
 /**
  * Normalize responses provider config.
  */

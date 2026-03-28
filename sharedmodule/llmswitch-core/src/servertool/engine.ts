@@ -26,6 +26,10 @@ import { appendServerToolProgressFileEvent } from './log/progress-file.js';
 import { attachStopGatewayContext, inspectStopGatewaySignal } from './stop-gateway-context.js';
 import { formatStopMessageCompareContext, readStopMessageCompareContext } from './stop-message-compare-context.js';
 
+// native-router-hotpath contract:
+// servertool followup metadata/injection shape is consumed by Rust hub pipeline
+// (router_hotpath_napi). Keep this TS orchestrator as a thin compatibility shell.
+
 export interface ServerToolOrchestrationOptions {
   chat: JsonObject;
   adapterContext: AdapterContext;
