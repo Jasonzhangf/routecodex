@@ -44,6 +44,13 @@ export interface QuotaRecord {
   fetchedAt: number;
 }
 
+type RoutingProviderScope = {
+  providerKeys?: string[];
+  providerIds?: string[];
+  oauthProviderKeys?: string[];
+  oauthProviderIds?: string[];
+};
+
 const ANTIGRAVITY_PROTECTED_REASON = 'protected';
 
 function logQuotaManagerNonBlockingError(operation: string, error: unknown): void {
@@ -67,6 +74,10 @@ export class QuotaManagerModule implements ManagerModule {
   private quotaStoreLastUnbindReason: string | null = null;
   private coreQuotaManager: CoreQuotaManager | null = null;
   private quotaStorePath: string | null = null;
+  private started = false;
+  private routingScopeResolved = false;
+  private routedProviderKeys: Set<string> = new Set();
+  private routedOAuthProviderKeys: Set<string> = new Set();
   private resolveHomeDir(): string {
     const envHome = typeof process.env.HOME === 'string' ? process.env.HOME.trim() : '';
     if (envHome) {
@@ -133,7 +144,15 @@ export class QuotaManagerModule implements ManagerModule {
     }
   }
   start(): Promise<void> | void {
+    this.started = true;
     if (!this.quotaRoutingEnabled) {
+      return;
+    }
+    if (!this.routingScopeResolved) {
+      return;
+    }
+    if (this.routedOAuthProviderKeys.size === 0) {
+      console.log('[quota-manager] skip background refresh: no routed oauth providers');
       return;
     }
     try {
@@ -161,6 +180,7 @@ export class QuotaManagerModule implements ManagerModule {
     return;
   }
   async stop(): Promise<void> {
+    this.started = false;
     if (this.refreshTimer) {
       clearTimeout(this.refreshTimer);
       this.refreshTimer = null;
@@ -191,6 +211,63 @@ export class QuotaManagerModule implements ManagerModule {
     void this.saveSnapshotToDisk().catch((error) => {
       logQuotaManagerNonBlockingError('stop.saveSnapshotToDisk', error);
     });
+  }
+  async updateRoutingScope(scope?: RoutingProviderScope): Promise<void> {
+    this.routingScopeResolved = true;
+    this.routedProviderKeys = normalizeScopeSet(scope?.providerKeys);
+    this.routedOAuthProviderKeys = normalizeScopeSet(scope?.oauthProviderKeys);
+    this.pruneRegisteredProvidersToRoutingScope();
+
+    if (!this.started) {
+      return;
+    }
+    if (!this.quotaRoutingEnabled || this.routedOAuthProviderKeys.size === 0) {
+      if (this.refreshTimer) {
+        clearTimeout(this.refreshTimer);
+        this.refreshTimer = null;
+      }
+      if (this.providerErrorUnsub) {
+        try {
+          this.providerErrorUnsub();
+        } catch (error) {
+          logQuotaManagerNonBlockingError('updateRoutingScope.providerErrorUnsub', error);
+        }
+        this.providerErrorUnsub = null;
+      }
+      if (this.providerSuccessUnsub) {
+        try {
+          this.providerSuccessUnsub();
+        } catch (error) {
+          logQuotaManagerNonBlockingError('updateRoutingScope.providerSuccessUnsub', error);
+        }
+        this.providerSuccessUnsub = null;
+      }
+      return;
+    }
+    if (!this.providerErrorUnsub || !this.providerSuccessUnsub) {
+      try {
+        await this.subscribeToProviderCenters();
+      } catch (error) {
+        logQuotaManagerNonBlockingError('updateRoutingScope.subscribeToProviderCenters', error);
+      }
+    }
+    try {
+      const result = await this.refreshAllAntigravityQuotas();
+      if (result.attempted > 0 && result.successCount === 0) {
+        this.refreshFailures = 1;
+      } else if (result.successCount > 0) {
+        this.refreshFailures = 0;
+      }
+    } catch (error) {
+      logQuotaManagerNonBlockingError('updateRoutingScope.refreshAllAntigravityQuotas', error);
+    }
+    if (!this.refreshTimer) {
+      try {
+        await this.scheduleNextRefresh();
+      } catch (error) {
+        logQuotaManagerNonBlockingError('updateRoutingScope.scheduleNextRefresh', error);
+      }
+    }
   }
   async refreshNow(): Promise<{ refreshedAt: number; tokenCount: number; recordCount: number }> {
     const refreshedAt = Date.now();
@@ -332,6 +409,9 @@ export class QuotaManagerModule implements ManagerModule {
   ): void {
     const key = typeof providerKey === 'string' ? providerKey.trim() : '';
     if (!key) return;
+    if (this.routingScopeResolved && !this.routedProviderKeys.has(key.toLowerCase())) {
+      return;
+    }
     const authType = typeof config.authType === 'string' ? config.authType.trim().toLowerCase() : '';
     const priorityTier =
       typeof config.priorityTier === 'number' && Number.isFinite(config.priorityTier)
@@ -502,4 +582,63 @@ export class QuotaManagerModule implements ManagerModule {
       this.snapshot as Record<string, QuotaRecordLike>
     );
   }
+  private pruneRegisteredProvidersToRoutingScope(): void {
+    if (this.routedProviderKeys.size === 0) {
+      this.registeredProviderKeys.clear();
+      this.antigravityTokens.clear();
+      this.antigravityProtectedModels.clear();
+      return;
+    }
+    const nextRegistered = new Set<string>();
+    for (const key of this.registeredProviderKeys) {
+      if (this.routedProviderKeys.has(key.toLowerCase())) {
+        nextRegistered.add(key);
+      }
+    }
+    this.registeredProviderKeys = nextRegistered;
+
+    const allowedAliases = this.resolveRegisteredAntigravityAliases();
+    const nextTokens = new Map<string, AntigravityTokenRegistration>();
+    for (const [alias, registration] of this.antigravityTokens.entries()) {
+      if (allowedAliases.has(alias)) {
+        nextTokens.set(alias, registration);
+      }
+    }
+    this.antigravityTokens = nextTokens;
+
+    const nextProtectedModels = new Map<string, Set<string>>();
+    for (const [alias, protectedModels] of this.antigravityProtectedModels.entries()) {
+      if (allowedAliases.has(alias)) {
+        nextProtectedModels.set(alias, protectedModels);
+      }
+    }
+    this.antigravityProtectedModels = nextProtectedModels;
+
+    const nextSnapshot: Record<string, QuotaRecord> = {};
+    for (const [snapshotKey, record] of Object.entries(this.snapshot)) {
+      const parsed = parseAntigravitySnapshotKey(snapshotKey);
+      if (!parsed || allowedAliases.has(parsed.alias)) {
+        nextSnapshot[snapshotKey] = record;
+      }
+    }
+    this.snapshot = nextSnapshot;
+  }
+}
+
+function normalizeScopeSet(values: string[] | undefined): Set<string> {
+  const out = new Set<string>();
+  if (!Array.isArray(values)) {
+    return out;
+  }
+  for (const value of values) {
+    if (typeof value !== 'string') {
+      continue;
+    }
+    const trimmed = value.trim().toLowerCase();
+    if (!trimmed) {
+      continue;
+    }
+    out.add(trimmed);
+  }
+  return out;
 }

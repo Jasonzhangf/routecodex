@@ -5,12 +5,22 @@ import {
   tryAcquireTokenManagerLeader
 } from '../../../token-daemon/leader-lock.js';
 
+type RoutingProviderScope = {
+  providerKeys?: string[];
+  providerIds?: string[];
+  oauthProviderKeys?: string[];
+  oauthProviderIds?: string[];
+};
+
 export class TokenManagerModule implements ManagerModule {
   readonly id = 'token';
   private daemon: TokenDaemon | null = null;
   private ownerId: string | null = null;
   private isLeader: boolean = false;
   private configPath: string | null = null;
+  private started = false;
+  private routingScopeResolved = false;
+  private routedOAuthProviderIds: Set<string> = new Set();
 
   async init(context: ManagerContext): Promise<void> {
     // 使用 serverId 构造稳定 ownerId，便于区分不同服务器实例。
@@ -21,10 +31,40 @@ export class TokenManagerModule implements ManagerModule {
   }
 
   async start(): Promise<void> {
+    this.started = true;
+    await this.reconcileDaemonState();
+  }
+
+  async stop(): Promise<void> {
+    this.started = false;
+    await this.stopDaemonAndReleaseLeader();
+  }
+
+  async updateRoutingScope(scope?: RoutingProviderScope): Promise<void> {
+    this.routingScopeResolved = true;
+    this.routedOAuthProviderIds = normalizeScopeSet(scope?.oauthProviderIds);
+    await this.reconcileDaemonState();
+  }
+
+  private async reconcileDaemonState(): Promise<void> {
+    if (!this.started) {
+      return;
+    }
+    if (!this.routingScopeResolved) {
+      return;
+    }
+    if (this.routedOAuthProviderIds.size === 0) {
+      await this.stopDaemonAndReleaseLeader();
+      console.log('[TokenManagerModule] skip token daemon: no routed oauth providers');
+      return;
+    }
+    await this.ensureDaemonStarted();
+  }
+
+  private async ensureDaemonStarted(): Promise<void> {
     if (this.daemon || !this.ownerId) {
       return;
     }
-
     const disabled =
       String(process.env.ROUTECODEX_DISABLE_TOKEN_DAEMON || '').trim() === '1' ||
       String(process.env.RCC_DISABLE_TOKEN_DAEMON || '').trim() === '1';
@@ -64,7 +104,7 @@ export class TokenManagerModule implements ManagerModule {
     await this.daemon.start();
   }
 
-  async stop(): Promise<void> {
+  private async stopDaemonAndReleaseLeader(): Promise<void> {
     if (this.daemon) {
       await this.daemon.stop();
       this.daemon = null;
@@ -86,4 +126,22 @@ function readPositiveNumberFromEnv(name: string, fallback: number): number {
     return fallback;
   }
   return parsed;
+}
+
+function normalizeScopeSet(values: string[] | undefined): Set<string> {
+  const out = new Set<string>();
+  if (!Array.isArray(values)) {
+    return out;
+  }
+  for (const value of values) {
+    if (typeof value !== 'string') {
+      continue;
+    }
+    const trimmed = value.trim().toLowerCase();
+    if (!trimmed) {
+      continue;
+    }
+    out.add(trimmed);
+  }
+  return out;
 }

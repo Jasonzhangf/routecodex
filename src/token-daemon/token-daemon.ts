@@ -60,27 +60,42 @@ function resolveConfiguredProviders(userConfig: unknown): Set<OAuthProviderId> {
   const routing = input.routing ?? {};
   const providers = input.providers ?? {};
 
-  const activeProviderKeys = new Set<string>();
+  const activeProviderIds = new Set<string>();
   if (routing && typeof routing === 'object') {
     for (const pools of Object.values(routing)) {
       if (!Array.isArray(pools)) {
         continue;
       }
       for (const pool of pools) {
-        const targets = (pool as { targets?: unknown }).targets;
+        const poolRecord = pool as { targets?: unknown; loadBalancing?: unknown };
+        const targets = poolRecord.targets;
         if (!Array.isArray(targets)) {
-          continue;
+          // keep walking weights even when targets is absent
+        } else {
+          for (const target of targets) {
+            const providerId = extractProviderIdFromRouteTarget(target);
+            if (providerId) {
+              activeProviderIds.add(providerId);
+            }
+          }
         }
-        for (const target of targets) {
-          if (typeof target === 'string' && target.trim()) {
-            activeProviderKeys.add(target.trim());
+        const lb = poolRecord.loadBalancing;
+        if (lb && typeof lb === 'object' && !Array.isArray(lb)) {
+          const weights = (lb as Record<string, unknown>).weights;
+          if (weights && typeof weights === 'object' && !Array.isArray(weights)) {
+            for (const weightKey of Object.keys(weights as Record<string, unknown>)) {
+              const providerId = extractProviderIdFromRouteTarget(weightKey);
+              if (providerId) {
+                activeProviderIds.add(providerId);
+              }
+            }
           }
         }
       }
     }
   }
 
-  if (activeProviderKeys.size === 0) {
+  if (activeProviderIds.size === 0) {
     return configured;
   }
 
@@ -106,7 +121,7 @@ function resolveConfiguredProviders(userConfig: unknown): Set<OAuthProviderId> {
   };
 
   for (const [providerKey, value] of Object.entries(providers)) {
-    if (!activeProviderKeys.has(providerKey)) {
+    if (!activeProviderIds.has(providerKey.trim().toLowerCase())) {
       continue;
     }
     const v = value as any;
@@ -114,6 +129,21 @@ function resolveConfiguredProviders(userConfig: unknown): Set<OAuthProviderId> {
   }
 
   return configured;
+}
+
+function extractProviderIdFromRouteTarget(target: unknown): string | null {
+  if (typeof target !== 'string') {
+    return null;
+  }
+  const trimmed = target.trim().toLowerCase();
+  if (!trimmed) {
+    return null;
+  }
+  const idx = trimmed.indexOf('.');
+  if (idx <= 0) {
+    return trimmed;
+  }
+  return trimmed.slice(0, idx);
 }
 
 async function isCamoufoxOauthEnabled(configPath?: string): Promise<boolean> {
