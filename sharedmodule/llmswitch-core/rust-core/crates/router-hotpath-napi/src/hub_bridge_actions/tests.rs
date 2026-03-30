@@ -1453,6 +1453,41 @@ fn reasoning_normalizer_chat_payload_json() {
 }
 
 #[test]
+fn reasoning_normalizer_chat_payload_does_not_backfill_content_when_tool_calls_present() {
+    let payload = json!({
+        "choices": [{
+            "message": {
+                "role": "assistant",
+                "content": null,
+                "reasoning_content": "<|tool_calls_section_begin|><|tool_call_begin|>functions.exec_command:1<|tool_call_argument_begin|>{\"cmd\":\"pwd\"}<|tool_call_end|><|tool_calls_section_end|>",
+                "tool_calls": [{
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "arguments": "{\"cmd\":\"pwd\"}"
+                    }
+                }]
+            },
+            "finish_reason": "tool_calls"
+        }]
+    });
+    let input = json!({"payload": payload}).to_string();
+    let raw = normalize_reasoning_in_chat_payload_json(input).unwrap();
+    let parsed: Value = serde_json::from_str(&raw).unwrap();
+    let message = parsed
+        .get("payload")
+        .and_then(|v| v.get("choices"))
+        .and_then(Value::as_array)
+        .and_then(|arr| arr.first())
+        .and_then(|v| v.get("message"))
+        .and_then(Value::as_object)
+        .unwrap();
+    let content = message.get("content");
+    assert!(!content.and_then(Value::as_str).map(|v| v.contains("<|tool_calls_section_begin|>")).unwrap_or(false));
+}
+
+#[test]
 fn reasoning_normalizer_responses_payload_json() {
     let payload = json!({
         "id": "resp_1",

@@ -794,6 +794,71 @@ fn test_resp_profile_chat_deepseek_web_harvests_markdown_bullet_and_repairs_cmd_
 }
 
 #[test]
+fn test_resp_profile_chat_deepseek_web_harvests_quote_wrapped_tool_calls() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "choices": [{
+                "index": 0,
+                "finish_reason": "stop",
+                "message": {
+                    "role": "assistant",
+                    "tool_calls": [],
+                    "content": "原文是：<quote>{\"tool_calls\":[{\"name\":\"exec_command\",\"input\":{\"cmd\":\"git status\"}}]}</quote>"
+                }
+            }]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:deepseek-web".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_deepseek_resp_quote_harvest_1".to_string()),
+            entry_endpoint: Some("/v1/chat/completions".to_string()),
+            route_id: None,
+            rt: None,
+            captured_chat_request: Some(json!({
+                "tools": [{
+                    "type": "function",
+                    "function": {
+                        "name": "exec_command",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"cmd": {"type": "string"}},
+                            "required": ["cmd"]
+                        }
+                    }
+                }],
+                "tool_choice": "auto"
+            })),
+            deepseek: Some(json!({
+                "strictToolRequired": false,
+                "textToolFallback": true
+            })),
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+
+    let result = run_resp_inbound_stage3_compat(input).unwrap();
+    assert!(result.native_applied);
+    assert_eq!(result.payload["choices"][0]["finish_reason"], "tool_calls");
+    assert_eq!(
+        result.payload["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
+        "exec_command"
+    );
+}
+
+#[test]
 fn test_resp_profile_chat_deepseek_web_strips_commentary_markup() {
     let input = ReqOutboundCompatInput {
         payload: json!({

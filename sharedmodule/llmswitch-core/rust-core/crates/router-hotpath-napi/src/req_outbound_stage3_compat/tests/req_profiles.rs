@@ -1153,6 +1153,7 @@ fn test_req_profile_chat_deepseek_web_native_applied() {
     let prompt = result.payload["prompt"].as_str().unwrap_or("");
     assert!(prompt.contains("Tool-call output contract (STRICT)"));
     assert!(prompt.contains("\"tool_calls\""));
+    assert!(prompt.contains("[调用 list_files]"));
 }
 
 #[test]

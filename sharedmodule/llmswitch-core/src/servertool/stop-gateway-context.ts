@@ -10,6 +10,41 @@ export interface StopGatewayContext {
   hasToolCalls?: boolean;
 }
 
+const HARVESTABLE_TOOL_MARKER_PATTERN =
+  /<\|\s*tool_calls_section_begin\s*\|>|<\|\s*tool_call_begin\s*\|>|<\|\s*tool_call_argument_begin\s*\|>/i;
+
+function hasHarvestableToolMarkers(value: unknown): boolean {
+  if (typeof value === 'string') {
+    return HARVESTABLE_TOOL_MARKER_PATTERN.test(value);
+  }
+  if (Array.isArray(value)) {
+    return value.some((item) => hasHarvestableToolMarkers(item));
+  }
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+  return Object.values(value as Record<string, unknown>).some((item) => hasHarvestableToolMarkers(item));
+}
+
+function hasEmbeddedToolCallMarkersInChatMessage(message: Record<string, unknown> | null): boolean {
+  if (!message) {
+    return false;
+  }
+  const reasoning = message.reasoning;
+  return hasHarvestableToolMarkers([
+    message.content,
+    message.reasoning_content,
+    message.thinking,
+    reasoning,
+    reasoning && typeof reasoning === 'object' && !Array.isArray(reasoning)
+      ? (reasoning as Record<string, unknown>).content
+      : undefined,
+    reasoning && typeof reasoning === 'object' && !Array.isArray(reasoning)
+      ? (reasoning as Record<string, unknown>).text
+      : undefined
+  ]);
+}
+
 export function inspectStopGatewaySignal(base: unknown): StopGatewayContext {
   if (!base || typeof base !== 'object' || Array.isArray(base)) {
     return {
@@ -46,6 +81,17 @@ export function inspectStopGatewaySignal(base: unknown): StopGatewayContext {
         !Array.isArray((choice as { message?: unknown }).message)
           ? ((choice as { message: unknown }).message as { [key: string]: unknown })
           : null;
+      const hasEmbeddedToolMarkers = hasEmbeddedToolCallMarkersInChatMessage(message);
+      if (hasEmbeddedToolMarkers) {
+        return {
+          observed: true,
+          eligible: false,
+          source: 'chat',
+          reason: `finish_reason_${finishReason}_with_embedded_tool_markers`,
+          choiceIndex: idx,
+          hasToolCalls: false
+        };
+      }
       const toolCalls = message && Array.isArray(message.tool_calls) ? message.tool_calls : [];
       const hasToolCalls = toolCalls.length > 0;
       return {

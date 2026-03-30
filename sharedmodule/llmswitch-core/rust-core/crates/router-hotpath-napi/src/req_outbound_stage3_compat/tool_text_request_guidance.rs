@@ -85,21 +85,22 @@ fn build_default_instruction(
         "2) Use only keys: `tool_calls` + each call `name` and `input`.".to_string(),
         "3) Do not output markdown fences, prose, or tool transcripts around JSON.".to_string(),
         "4) Do NOT output pseudo tool results in text (forbidden examples: {\"exec_command\":...}, <function_results>...</function_results>).".to_string(),
+        "5) Do NOT use bracket pseudo-calls like `[调用 list_files] {...}` / `[call list_files] {...}` / `调用工具: list_files({...})`.".to_string(),
     ];
 
     if include_tool_names && !tool_names.is_empty() {
         lines.push(format!(
-            "5) Allowed tool names this turn: {}",
+            "6) Allowed tool names this turn: {}",
             tool_names.join(", ")
         ));
     } else {
-        lines.push("5) Tool name must match provided schema exactly.".to_string());
+        lines.push("6) Tool name must match provided schema exactly.".to_string());
     }
 
     lines.push(if required {
-        "6) tool_choice is required for this turn: return at least one tool call.".to_string()
+        "7) tool_choice is required for this turn: return at least one tool call.".to_string()
     } else {
-        "6) If no tool is needed, plain text is allowed.".to_string()
+        "7) If no tool is needed, plain text is allowed.".to_string()
     });
 
     lines.join("\n")

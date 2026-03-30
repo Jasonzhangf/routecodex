@@ -459,6 +459,11 @@ fn normalize_reasoning_chat_message_container(container: &mut Map<String, Value>
         .and_then(Value::as_str)
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty());
+    let has_tool_calls = container
+        .get("tool_calls")
+        .and_then(Value::as_array)
+        .map(|rows| !rows.is_empty())
+        .unwrap_or(false);
     let normalized =
         normalize_chat_message_content(container.get("content").unwrap_or(&Value::Null));
     let role = container
@@ -478,14 +483,10 @@ fn normalize_reasoning_chat_message_container(container: &mut Map<String, Value>
         .and_then(Value::as_str)
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
+        .filter(|_| !has_tool_calls)
     {
         container.insert("content".to_string(), Value::String(reasoning));
     } else if let Some(role_value) = role.as_deref() {
-        let has_tool_calls = container
-            .get("tool_calls")
-            .and_then(Value::as_array)
-            .map(|rows| !rows.is_empty())
-            .unwrap_or(false);
         if role_value != "system" && role_value != "tool" && !has_tool_calls {
             container.insert("content".to_string(), Value::String(String::new()));
         }

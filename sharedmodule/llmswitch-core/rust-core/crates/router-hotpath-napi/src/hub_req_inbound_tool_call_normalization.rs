@@ -1,7 +1,420 @@
 use napi::bindgen_prelude::Result as NapiResult;
 use napi_derive::napi;
 use serde_json::{Map, Value};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+
+const DEFAULT_SHELL_OUTPUT_MAX_CHARS: usize = 4000;
+const SHELL_OUTPUT_TRUNCATION_SUFFIX: &str = "\n...[truncated]";
+const DEFAULT_RESPONSES_TOOL_HISTORY_MAX_PAIRS: usize = 120;
+const DEFAULT_RESPONSES_TOOL_HISTORY_MAX_CHARS: usize = 120_000;
+
+#[derive(Clone, Copy)]
+enum AnsiStripState {
+    Normal,
+    Esc,
+    Csi,
+}
+
+fn resolve_shell_output_max_chars() -> usize {
+    for key in [
+        "RCC_SHELL_OUTPUT_MAX_CHARS",
+        "ROUTECODEX_SHELL_OUTPUT_MAX_CHARS",
+    ] {
+        let Ok(raw) = std::env::var(key) else {
+            continue;
+        };
+        let Ok(parsed) = raw.trim().parse::<usize>() else {
+            continue;
+        };
+        if parsed > 0 {
+            return parsed;
+        }
+    }
+    DEFAULT_SHELL_OUTPUT_MAX_CHARS
+}
+
+fn resolve_responses_tool_history_max_pairs() -> usize {
+    for key in [
+        "RCC_RESPONSES_TOOL_HISTORY_MAX_PAIRS",
+        "ROUTECODEX_RESPONSES_TOOL_HISTORY_MAX_PAIRS",
+    ] {
+        let Ok(raw) = std::env::var(key) else {
+            continue;
+        };
+        let Ok(parsed) = raw.trim().parse::<usize>() else {
+            continue;
+        };
+        if parsed > 0 {
+            return parsed;
+        }
+    }
+    DEFAULT_RESPONSES_TOOL_HISTORY_MAX_PAIRS
+}
+
+fn resolve_responses_tool_history_max_chars() -> usize {
+    for key in [
+        "RCC_RESPONSES_TOOL_HISTORY_MAX_CHARS",
+        "ROUTECODEX_RESPONSES_TOOL_HISTORY_MAX_CHARS",
+    ] {
+        let Ok(raw) = std::env::var(key) else {
+            continue;
+        };
+        let Ok(parsed) = raw.trim().parse::<usize>() else {
+            continue;
+        };
+        if parsed > 0 {
+            return parsed;
+        }
+    }
+    DEFAULT_RESPONSES_TOOL_HISTORY_MAX_CHARS
+}
+
+fn strip_ansi_escape_sequences(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut state = AnsiStripState::Normal;
+    for ch in raw.chars() {
+        state = match state {
+            AnsiStripState::Normal => {
+                if ch == '\u{1b}' {
+                    AnsiStripState::Esc
+                } else {
+                    out.push(ch);
+                    AnsiStripState::Normal
+                }
+            }
+            AnsiStripState::Esc => {
+                if ch == '[' {
+                    AnsiStripState::Csi
+                } else {
+                    // Drop unknown ESC sequence byte and continue.
+                    AnsiStripState::Normal
+                }
+            }
+            AnsiStripState::Csi => {
+                let code = ch as u32;
+                if (0x40..=0x7E).contains(&code) {
+                    AnsiStripState::Normal
+                } else {
+                    AnsiStripState::Csi
+                }
+            }
+        };
+    }
+    out
+}
+
+fn truncate_chars(text: &str, max_chars: usize) -> String {
+    if max_chars == 0 {
+        return String::new();
+    }
+    let char_count = text.chars().count();
+    if char_count <= max_chars {
+        return text.to_string();
+    }
+    let clipped = text.chars().take(max_chars).collect::<String>();
+    format!("{}{}", clipped, SHELL_OUTPUT_TRUNCATION_SUFFIX)
+}
+
+fn normalize_shell_like_output_text(raw: &str) -> String {
+    let mut normalized = strip_ansi_escape_sequences(raw);
+    if let Some(idx) = normalized.find("\nOutput:\n") {
+        let prefix = &normalized[..idx];
+        let has_shell_wrapper_prefix = normalized.starts_with("Command: ")
+            || prefix.contains("Chunk ID:")
+            || prefix.contains("Wall time:")
+            || prefix.contains("Process exited with code")
+            || prefix.contains("Original token count:");
+        if has_shell_wrapper_prefix {
+            normalized = normalized[idx + "\nOutput:\n".len()..].to_string();
+        }
+    }
+    truncate_chars(normalized.as_str(), resolve_shell_output_max_chars())
+}
+
+fn is_responses_input_tool_item(item_type: &str) -> bool {
+    matches!(item_type, "function_call" | "function_call_output")
+}
+
+fn read_responses_input_tool_call_id(item_row: &Map<String, Value>, item_type: &str) -> Option<String> {
+    if item_type == "function_call_output" {
+        read_trimmed_string(item_row.get("call_id"))
+            .or_else(|| read_trimmed_string(item_row.get("tool_call_id")))
+    } else {
+        read_trimmed_string(item_row.get("call_id"))
+            .or_else(|| read_trimmed_string(item_row.get("id")))
+    }
+}
+
+fn estimate_responses_input_tool_item_chars(item_row: &Map<String, Value>, item_type: &str) -> usize {
+    if item_type == "function_call_output" {
+        return item_row
+            .get("output")
+            .and_then(|v| match v {
+                Value::String(s) => Some(s.len()),
+                Value::Null => Some(0),
+                other => serde_json::to_string(other).ok().map(|s| s.len()),
+            })
+            .unwrap_or(0);
+    }
+    let mut total = 0usize;
+    if let Some(name_len) = item_row.get("name").and_then(Value::as_str).map(|s| s.len()) {
+        total += name_len;
+    }
+    if let Some(args_len) = item_row
+        .get("arguments")
+        .and_then(|v| match v {
+            Value::String(s) => Some(s.len()),
+            Value::Null => Some(0),
+            other => serde_json::to_string(other).ok().map(|s| s.len()),
+        })
+    {
+        total += args_len;
+    }
+    total
+}
+
+fn prune_responses_input_tool_history(items: &mut Vec<Value>) {
+    let max_pairs = resolve_responses_tool_history_max_pairs();
+    let max_chars = resolve_responses_tool_history_max_chars();
+    if max_pairs == 0 || max_chars == 0 {
+        return;
+    }
+
+    let mut call_order: Vec<String> = Vec::new();
+    let mut seen_call_ids: HashSet<String> = HashSet::new();
+    let mut call_chars: HashMap<String, usize> = HashMap::new();
+
+    for item in items.iter() {
+        let Some(item_row) = item.as_object() else {
+            continue;
+        };
+        let item_type = read_trimmed_string(item_row.get("type"))
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if !is_responses_input_tool_item(item_type.as_str()) {
+            continue;
+        }
+        let Some(call_id) = read_responses_input_tool_call_id(item_row, item_type.as_str()) else {
+            continue;
+        };
+        if seen_call_ids.insert(call_id.clone()) {
+            call_order.push(call_id.clone());
+        }
+        let item_chars = estimate_responses_input_tool_item_chars(item_row, item_type.as_str());
+        *call_chars.entry(call_id).or_insert(0) += item_chars;
+    }
+
+    if call_order.len() <= max_pairs {
+        let total_chars: usize = call_order
+            .iter()
+            .map(|id| call_chars.get(id).copied().unwrap_or(0))
+            .sum();
+        if total_chars <= max_chars {
+            return;
+        }
+    }
+
+    let mut keep_ids: HashSet<String> = HashSet::new();
+    let mut kept_pairs = 0usize;
+    let mut kept_chars = 0usize;
+    for call_id in call_order.iter().rev() {
+        let call_size = call_chars.get(call_id).copied().unwrap_or(0);
+        let within_pair_budget = kept_pairs < max_pairs;
+        let within_char_budget = kept_chars + call_size <= max_chars;
+        if within_pair_budget && (within_char_budget || kept_pairs == 0) {
+            keep_ids.insert(call_id.clone());
+            kept_pairs += 1;
+            kept_chars += call_size;
+        }
+    }
+
+    if keep_ids.len() == call_order.len() {
+        return;
+    }
+
+    items.retain(|item| {
+        let Some(item_row) = item.as_object() else {
+            return true;
+        };
+        let item_type = read_trimmed_string(item_row.get("type"))
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if !is_responses_input_tool_item(item_type.as_str()) {
+            return true;
+        }
+        let Some(call_id) = read_responses_input_tool_call_id(item_row, item_type.as_str()) else {
+            return true;
+        };
+        keep_ids.contains(call_id.as_str())
+    });
+}
+
+fn estimate_message_tool_call_chars(call_row: &Map<String, Value>) -> usize {
+    let mut total = 0usize;
+    if let Some(fn_row) = call_row.get("function").and_then(Value::as_object) {
+        if let Some(name_len) = fn_row.get("name").and_then(Value::as_str).map(|s| s.len()) {
+            total += name_len;
+        }
+        if let Some(args_len) = fn_row
+            .get("arguments")
+            .and_then(|v| match v {
+                Value::String(s) => Some(s.len()),
+                Value::Null => Some(0),
+                other => serde_json::to_string(other).ok().map(|s| s.len()),
+            })
+        {
+            total += args_len;
+        }
+    }
+    total
+}
+
+fn estimate_message_tool_content_chars(message_row: &Map<String, Value>) -> usize {
+    message_row
+        .get("content")
+        .and_then(|v| match v {
+            Value::String(s) => Some(s.len()),
+            Value::Null => Some(0),
+            other => serde_json::to_string(other).ok().map(|s| s.len()),
+        })
+        .unwrap_or(0)
+}
+
+fn assistant_message_content_is_empty(message_row: &Map<String, Value>) -> bool {
+    match message_row.get("content") {
+        None | Some(Value::Null) => true,
+        Some(Value::String(s)) => s.trim().is_empty(),
+        Some(Value::Array(arr)) => arr.is_empty(),
+        _ => false,
+    }
+}
+
+fn prune_message_tool_history(messages: &mut Vec<Value>) {
+    let max_pairs = resolve_responses_tool_history_max_pairs();
+    let max_chars = resolve_responses_tool_history_max_chars();
+    if max_pairs == 0 || max_chars == 0 {
+        return;
+    }
+
+    let mut call_order: Vec<String> = Vec::new();
+    let mut seen_call_ids: HashSet<String> = HashSet::new();
+    let mut call_chars: HashMap<String, usize> = HashMap::new();
+
+    for message in messages.iter() {
+        let Some(message_row) = message.as_object() else {
+            continue;
+        };
+        let role = read_trimmed_string(message_row.get("role"))
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+
+        if role == "assistant" {
+            let Some(tool_calls) = message_row.get("tool_calls").and_then(Value::as_array) else {
+                continue;
+            };
+            for call in tool_calls {
+                let Some(call_row) = call.as_object() else {
+                    continue;
+                };
+                let Some(call_id) = read_trimmed_string(call_row.get("id"))
+                    .or_else(|| read_trimmed_string(call_row.get("call_id")))
+                else {
+                    continue;
+                };
+                if seen_call_ids.insert(call_id.clone()) {
+                    call_order.push(call_id.clone());
+                }
+                *call_chars.entry(call_id).or_insert(0) += estimate_message_tool_call_chars(call_row);
+            }
+            continue;
+        }
+
+        if role == "tool" {
+            let Some(call_id) = read_trimmed_string(message_row.get("tool_call_id"))
+                .or_else(|| read_trimmed_string(message_row.get("id")))
+            else {
+                continue;
+            };
+            if seen_call_ids.insert(call_id.clone()) {
+                call_order.push(call_id.clone());
+            }
+            *call_chars.entry(call_id).or_insert(0) += estimate_message_tool_content_chars(message_row);
+        }
+    }
+
+    if call_order.len() <= max_pairs {
+        let total_chars: usize = call_order
+            .iter()
+            .map(|id| call_chars.get(id).copied().unwrap_or(0))
+            .sum();
+        if total_chars <= max_chars {
+            return;
+        }
+    }
+
+    let mut keep_ids: HashSet<String> = HashSet::new();
+    let mut kept_pairs = 0usize;
+    let mut kept_chars = 0usize;
+    for call_id in call_order.iter().rev() {
+        let call_size = call_chars.get(call_id).copied().unwrap_or(0);
+        let within_pair_budget = kept_pairs < max_pairs;
+        let within_char_budget = kept_chars + call_size <= max_chars;
+        if within_pair_budget && (within_char_budget || kept_pairs == 0) {
+            keep_ids.insert(call_id.clone());
+            kept_pairs += 1;
+            kept_chars += call_size;
+        }
+    }
+
+    if keep_ids.len() == call_order.len() {
+        return;
+    }
+
+    messages.retain_mut(|message| {
+        let Some(message_row) = message.as_object_mut() else {
+            return true;
+        };
+        let role = read_trimmed_string(message_row.get("role"))
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+
+        if role == "tool" {
+            let call_id = read_trimmed_string(message_row.get("tool_call_id"))
+                .or_else(|| read_trimmed_string(message_row.get("id")));
+            return call_id
+                .as_ref()
+                .map(|id| keep_ids.contains(id.as_str()))
+                .unwrap_or(true);
+        }
+
+        if role == "assistant" {
+            let Some(tool_calls) = message_row
+                .get_mut("tool_calls")
+                .and_then(Value::as_array_mut)
+            else {
+                return true;
+            };
+
+            tool_calls.retain(|call| {
+                let Some(call_row) = call.as_object() else {
+                    return true;
+                };
+                let call_id = read_trimmed_string(call_row.get("id"))
+                    .or_else(|| read_trimmed_string(call_row.get("call_id")));
+                call_id
+                    .as_ref()
+                    .map(|id| keep_ids.contains(id.as_str()))
+                    .unwrap_or(true)
+            });
+
+            if tool_calls.is_empty() && assistant_message_content_is_empty(message_row) {
+                return false;
+            }
+        }
+
+        true
+    });
+}
 
 fn read_trimmed_string(value: Option<&Value>) -> Option<String> {
     let raw = value
@@ -198,6 +611,8 @@ fn normalize_message_tool_calls(
         return;
     };
 
+    let mut shell_tool_call_ids = HashSet::<String>::new();
+
     for message in messages.iter_mut() {
         let Some(message_row) = message.as_object_mut() else {
             continue;
@@ -205,6 +620,27 @@ fn normalize_message_tool_calls(
         let role = read_trimmed_string(message_row.get("role"))
             .unwrap_or_default()
             .to_ascii_lowercase();
+        if role == "tool" {
+            let tool_call_id = read_trimmed_string(message_row.get("tool_call_id"));
+            let tool_name = read_trimmed_string(message_row.get("name"));
+            let should_normalize = tool_call_id
+                .as_ref()
+                .map(|id| shell_tool_call_ids.contains(id))
+                .unwrap_or(false)
+                || tool_name
+                    .as_ref()
+                    .map(|name| is_shell_like_tool_name(name))
+                    .unwrap_or(false);
+            if should_normalize {
+                if let Some(content) = message_row.get("content").and_then(Value::as_str) {
+                    let normalized = normalize_shell_like_output_text(content);
+                    if normalized != content {
+                        message_row.insert("content".to_string(), Value::String(normalized));
+                    }
+                }
+            }
+            continue;
+        }
         if role != "assistant" {
             continue;
         }
@@ -239,8 +675,15 @@ fn normalize_message_tool_calls(
                 fn_row.insert("name".to_string(), Value::String(resolved_name));
             }
             fn_row.insert("arguments".to_string(), Value::String(arguments));
+            if let Some(call_id) = read_trimmed_string(call_row.get("id"))
+                .or_else(|| read_trimmed_string(call_row.get("call_id")))
+            {
+                shell_tool_call_ids.insert(call_id);
+            }
         }
     }
+
+    prune_message_tool_history(messages);
 }
 
 fn normalize_responses_input_function_calls(
@@ -256,6 +699,7 @@ fn normalize_responses_input_function_calls(
     };
 
     let mut dropped_call_ids: HashSet<String> = HashSet::new();
+    let mut shell_like_call_ids: HashSet<String> = HashSet::new();
     let mut normalized_items = Vec::<Value>::with_capacity(input_items.len());
 
     for mut item in std::mem::take(input_items) {
@@ -276,6 +720,11 @@ fn normalize_responses_input_function_calls(
                             item_row.insert("name".to_string(), Value::String(resolved_name));
                         }
                         item_row.insert("arguments".to_string(), Value::String(arguments));
+                        let call_id = read_trimmed_string(item_row.get("call_id"))
+                            .or_else(|| read_trimmed_string(item_row.get("id")));
+                        if let Some(call_id) = call_id {
+                            shell_like_call_ids.insert(call_id);
+                        }
                     } else if is_invalid_shell_like_call(raw_name.as_str(), item_row.get("arguments")) {
                         if let Some(call_id) = read_trimmed_string(item_row.get("call_id"))
                             .or_else(|| read_trimmed_string(item_row.get("id")))
@@ -295,12 +744,21 @@ fn normalize_responses_input_function_calls(
                         // Keep request chain coherent: remove orphan output for a dropped malformed call.
                         continue;
                     }
+                    if shell_like_call_ids.contains(call_id.as_str()) {
+                        if let Some(raw_output) = item_row.get("output").and_then(Value::as_str) {
+                            let normalized = normalize_shell_like_output_text(raw_output);
+                            if normalized != raw_output {
+                                item_row.insert("output".to_string(), Value::String(normalized));
+                            }
+                        }
+                    }
                 }
             }
         }
         normalized_items.push(item);
     }
 
+    prune_responses_input_tool_history(&mut normalized_items);
     *input_items = normalized_items;
 }
 
@@ -553,5 +1011,248 @@ mod tests {
         let args: Value = serde_json::from_str(args_text).expect("args object");
         assert_eq!(args["cmd"], "pwd");
         assert_eq!(args["command"], "pwd");
+    }
+
+    #[test]
+    fn normalizes_shell_like_function_call_output_shape() {
+        let mut payload = json!({
+          "tools": [{ "type": "function", "function": { "name": "exec_command" } }],
+          "input": [
+            {
+              "type": "function_call",
+              "call_id": "call_exec_1",
+              "name": "exec_command",
+              "arguments": "{\"cmd\":\"echo ok\"}"
+            },
+            {
+              "type": "function_call_output",
+              "call_id": "call_exec_1",
+              "output": "Command: /bin/bash -lc 'echo ok'\nChunk ID: test\nWall time: 0.1s\nProcess exited with code 0\nOriginal token count: 12\nOutput:\n\u{001b}[32mok\u{001b}[0m\n"
+            }
+          ]
+        });
+
+        normalize_shell_like_tool_calls_before_governance(&mut payload);
+        let out = payload["input"][1]["output"].as_str().expect("output text");
+        assert_eq!(out, "ok\n");
+    }
+
+    #[test]
+    fn normalizes_shell_like_output_with_plain_bash_prefix() {
+        let mut payload = json!({
+          "tools": [{ "type": "function", "function": { "name": "exec_command" } }],
+          "input": [
+            {
+              "type": "function_call",
+              "call_id": "call_exec_bash_plain",
+              "name": "exec_command",
+              "arguments": "{\"cmd\":\"echo done\"}"
+            },
+            {
+              "type": "function_call_output",
+              "call_id": "call_exec_bash_plain",
+              "output": "Command: bash -lc 'echo done'\nOutput:\ndone\n"
+            }
+          ]
+        });
+
+        normalize_shell_like_tool_calls_before_governance(&mut payload);
+        let out = payload["input"][1]["output"].as_str().expect("output text");
+        assert_eq!(out, "done\n");
+    }
+
+    #[test]
+    fn truncates_shell_like_function_call_output_to_budget() {
+        let very_long = "0123456789".repeat(420);
+        let mut payload = json!({
+          "tools": [{ "type": "function", "function": { "name": "exec_command" } }],
+          "input": [
+            {
+              "type": "function_call",
+              "call_id": "call_exec_2",
+              "name": "exec_command",
+              "arguments": "{\"cmd\":\"cat long.txt\"}"
+            },
+            {
+              "type": "function_call_output",
+              "call_id": "call_exec_2",
+              "output": format!("Command: /bin/zsh -lc 'cat long.txt'\nOutput:\n{}", very_long)
+            }
+          ]
+        });
+
+        normalize_shell_like_tool_calls_before_governance(&mut payload);
+        let out = payload["input"][1]["output"].as_str().expect("output text");
+        assert!(out.starts_with("0123456789"));
+        assert!(out.ends_with("\n...[truncated]"));
+        assert!(out.len() < very_long.len());
+    }
+
+    #[test]
+    fn normalizes_tool_role_message_content_for_shell_call() {
+        let mut payload = json!({
+          "tools": [{ "type": "function", "function": { "name": "exec_command" } }],
+          "messages": [
+            {
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "id": "call_tool_msg_1",
+                  "type": "function",
+                  "function": {
+                    "name": "exec_command",
+                    "arguments": "{\"cmd\":\"echo ok\"}"
+                  }
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "name": "exec_command",
+              "tool_call_id": "call_tool_msg_1",
+              "content": "Command: /bin/bash -lc 'echo ok'\nChunk ID: x\nOutput:\n\u{001b}[32mok\u{001b}[0m\n"
+            }
+          ]
+        });
+
+        normalize_shell_like_tool_calls_before_governance(&mut payload);
+        let out = payload["messages"][1]["content"]
+            .as_str()
+            .expect("tool content");
+        assert_eq!(out, "ok\n");
+    }
+
+    #[test]
+    fn normalizes_shell_like_output_with_chunk_prefix_shape() {
+        let mut payload = json!({
+          "tools": [{ "type": "function", "function": { "name": "exec_command" } }],
+          "input": [
+            {
+              "type": "function_call",
+              "call_id": "call_exec_chunk_prefix",
+              "name": "exec_command",
+              "arguments": "{\"cmd\":\"echo ok\"}"
+            },
+            {
+              "type": "function_call_output",
+              "call_id": "call_exec_chunk_prefix",
+              "output": "Chunk ID: abc\nWall time: 0.1s\nProcess exited with code 0\nOutput:\n\u{001b}[32mok\u{001b}[0m\n"
+            }
+          ]
+        });
+
+        normalize_shell_like_tool_calls_before_governance(&mut payload);
+        let out = payload["input"][1]["output"].as_str().expect("output text");
+        assert_eq!(out, "ok\n");
+    }
+
+    #[test]
+    fn prunes_old_responses_tool_history_pairs() {
+        let mut input = Vec::<Value>::new();
+        for idx in 0..130 {
+            let call_id = format!("call_{}", idx);
+            input.push(json!({
+              "type": "function_call",
+              "call_id": call_id,
+              "name": "exec_command",
+              "arguments": format!("{{\"cmd\":\"echo {}\"}}", idx)
+            }));
+            input.push(json!({
+              "type": "function_call_output",
+              "call_id": format!("call_{}", idx),
+              "output": format!("Output: {}", idx)
+            }));
+        }
+        let mut payload = json!({
+          "tools": [{ "type": "function", "function": { "name": "exec_command" } }],
+          "input": input
+        });
+
+        normalize_shell_like_tool_calls_before_governance(&mut payload);
+        let items = payload["input"].as_array().expect("input array");
+        let function_calls = items
+            .iter()
+            .filter(|entry| entry.get("type").and_then(Value::as_str) == Some("function_call"))
+            .count();
+        let function_outputs = items
+            .iter()
+            .filter(|entry| entry.get("type").and_then(Value::as_str) == Some("function_call_output"))
+            .count();
+
+        assert_eq!(function_calls, 120);
+        assert_eq!(function_outputs, 120);
+        assert_eq!(
+            items
+                .iter()
+                .find(|entry| entry.get("call_id").and_then(Value::as_str) == Some("call_0")),
+            None
+        );
+        assert!(
+            items
+                .iter()
+                .any(|entry| entry.get("call_id").and_then(Value::as_str) == Some("call_129"))
+        );
+    }
+
+    #[test]
+    fn prunes_old_message_tool_history_pairs() {
+        let mut messages = Vec::<Value>::new();
+        for idx in 0..130 {
+            let call_id = format!("call_msg_{}", idx);
+            messages.push(json!({
+              "role": "assistant",
+              "content": "",
+              "tool_calls": [{
+                "id": call_id,
+                "type": "function",
+                "function": {
+                  "name": "exec_command",
+                  "arguments": format!("{{\"cmd\":\"echo {}\"}}", idx)
+                }
+              }]
+            }));
+            messages.push(json!({
+              "role": "tool",
+              "name": "exec_command",
+              "tool_call_id": format!("call_msg_{}", idx),
+              "content": format!("Output: {}", idx)
+            }));
+        }
+
+        let mut payload = json!({
+          "tools": [{ "type": "function", "function": { "name": "exec_command" } }],
+          "messages": messages
+        });
+
+        normalize_shell_like_tool_calls_before_governance(&mut payload);
+        let entries = payload["messages"].as_array().expect("messages array");
+        let assistant_with_tool_calls = entries
+            .iter()
+            .filter(|entry| {
+                entry.get("role").and_then(Value::as_str) == Some("assistant")
+                    && entry
+                        .get("tool_calls")
+                        .and_then(Value::as_array)
+                        .map(|calls| !calls.is_empty())
+                        .unwrap_or(false)
+            })
+            .count();
+        let tool_messages = entries
+            .iter()
+            .filter(|entry| entry.get("role").and_then(Value::as_str) == Some("tool"))
+            .count();
+
+        assert_eq!(assistant_with_tool_calls, 120);
+        assert_eq!(tool_messages, 120);
+        assert!(
+            entries
+                .iter()
+                .any(|entry| entry.get("tool_call_id").and_then(Value::as_str) == Some("call_msg_129"))
+        );
+        assert!(
+            !entries
+                .iter()
+                .any(|entry| entry.get("tool_call_id").and_then(Value::as_str) == Some("call_msg_0"))
+        );
     }
 }

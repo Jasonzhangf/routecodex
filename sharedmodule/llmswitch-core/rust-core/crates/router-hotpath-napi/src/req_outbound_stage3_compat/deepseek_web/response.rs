@@ -40,6 +40,7 @@ pub(crate) fn apply_deepseek_web_response_compat(
         Ok(output) => output.governed_payload,
         Err(_) => normalized,
     };
+    let (strict_tool_required, text_tool_fallback) = resolve_deepseek_options(adapter_context);
     ensure_finish_reason_tool_calls(&mut governed);
     if harvested_function_results {
         mark_function_results_harvested(&mut governed);
@@ -57,7 +58,6 @@ pub(crate) fn apply_deepseek_web_response_compat(
     apply_usage_estimate(&mut governed, adapter_context);
 
     let tool_choice_required = resolve_tool_choice_required(adapter_context);
-    let (strict_tool_required, text_tool_fallback) = resolve_deepseek_options(adapter_context);
     if tool_choice_required && strict_tool_required && after_count <= 0 {
         return Err(format!(
             "DeepSeek tool_choice=required but no valid tool call was produced (fallbackEnabled={}, strictToolRequired={})",

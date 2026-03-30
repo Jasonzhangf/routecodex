@@ -88,11 +88,12 @@ pub(super) fn build_tool_fallback_instruction(
         "3) Use only `name` + `input` for each tool call. Do NOT emit `arguments`, `parameters`, or custom wrappers.",
         "4) Do NOT include markdown fences, prose, progress logs, or shell transcript around the JSON.",
         "5) Do NOT output pseudo tool results in text (forbidden examples: {\"exec_command\":...}, <function_results>...</function_results>).",
-        "6) If multiple tools are needed, append multiple entries in `tool_calls`.",
+        "6) Do NOT use bracket pseudo-calls like `[调用 list_files] {...}` / `[call list_files] {...}` / `调用工具: list_files({...})`.",
+        "7) If multiple tools are needed, append multiple entries in `tool_calls`.",
         if require_tool_call {
-            "7) tool_choice is required for this turn: return at least one tool call."
+            "8) tool_choice is required for this turn: return at least one tool call."
         } else {
-            "7) If no tool is needed, plain text is allowed."
+            "8) If no tool is needed, plain text is allowed."
         },
         "",
         "Valid example:",

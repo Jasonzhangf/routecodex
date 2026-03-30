@@ -277,7 +277,7 @@ function testTextFallbackToolCallsWithTailSentinel() {
   assert.equal(out.metadata?.deepseek?.toolCallSource, 'fallback');
 }
 
-function testQuotedToolCallsDoNotExecute() {
+function testQuotedToolCallsAreHarvested() {
   const payload = {
     id: 'chatcmpl_quoted_tool_calls',
     object: 'chat.completion',
@@ -306,17 +306,15 @@ function testQuotedToolCallsDoNotExecute() {
   }).payload;
 
   const msg = out.choices?.[0]?.message;
-  assert.equal(
-    Array.isArray(msg?.tool_calls),
-    false,
-    'quoted transcript text must not be harvested as executable tool call'
+  assert.ok(
+    Array.isArray(msg?.tool_calls) && msg.tool_calls.length === 1,
+    'quoted tool_calls text should be harvested into executable tool call'
   );
-  assert.equal(
-    msg?.content,
-    '原文是：<quote>{"tool_calls":[{"name":"exec_command","input":{"cmd":"git status"}}]}</quote>',
-    'quoted transcript text should remain unchanged'
-  );
-  assert.equal(out.metadata?.deepseek?.toolCallState, 'no_tool_calls');
+  assert.equal(msg.tool_calls[0]?.function?.name, 'exec_command');
+  const args = JSON.parse(msg.tool_calls[0]?.function?.arguments || '{}');
+  assert.equal(args.cmd, 'git status');
+  assert.equal(out.choices?.[0]?.finish_reason, 'tool_calls');
+  assert.equal(out.metadata?.deepseek?.toolCallState, 'text_tool_calls');
 }
 
 function testFallbackRepairsEvenWhenRequestedToolsDiffer() {
@@ -405,7 +403,7 @@ function testFallbackStillRepairsWhenRequestToolsEmpty() {
   assert.equal(out.metadata?.deepseek?.toolCallState, 'text_tool_calls');
 }
 
-function testCommandBlockFallbackToolCalls() {
+function testCommandBlockWithoutToolShapeStaysText() {
   const payload = {
     id: 'chatcmpl_command_fallback',
     object: 'chat.completion',
@@ -440,22 +438,16 @@ function testCommandBlockFallbackToolCalls() {
   }).payload;
 
   const msg = out.choices?.[0]?.message;
-  assert.ok(Array.isArray(msg?.tool_calls) && msg.tool_calls.length === 1, 'command block should fallback to one tool call');
-  assert.equal(msg.tool_calls[0]?.function?.name, 'exec_command');
-  const args = JSON.parse(msg.tool_calls[0]?.function?.arguments || '{}');
+  assert.equal(Array.isArray(msg?.tool_calls), false, 'plain bash block must not be guessed as tool call');
+  assert.equal(out.choices?.[0]?.finish_reason, 'stop');
+  assert.equal(out.metadata?.deepseek?.toolCallState, 'no_tool_calls');
   const expected = 'pnpm config set electron_mirror https://npmmirror.com/mirrors/electron/';
   assert.equal(
-    typeof args.cmd,
+    typeof msg?.content,
     'string',
-    'exec_command fallback should produce cmd'
+    'assistant text should remain readable'
   );
-  assert.equal(
-    args.cmd.includes(expected),
-    true,
-    'exec_command fallback should keep bash command text'
-  );
-  assert.equal(out.choices?.[0]?.finish_reason, 'tool_calls');
-  assert.equal(out.metadata?.deepseek?.toolCallState, 'text_tool_calls');
+  assert.equal(msg.content.includes(expected), true, 'assistant text should preserve original command content');
 }
 
 function testStrictRequiredFailure() {
@@ -493,6 +485,58 @@ function testStrictRequiredFailure() {
     },
     'strict required mode should throw when no valid tool call exists'
   );
+}
+
+function testXmlToolCallBlocksAreHarvested() {
+  const payload = {
+    id: 'chatcmpl_xml_tool_call_blocks',
+    object: 'chat.completion',
+    created: 1,
+    model: 'deepseek-chat',
+    choices: [
+      {
+        index: 0,
+        finish_reason: 'stop',
+        message: {
+          role: 'assistant',
+          content: [
+            '我来深入审查这些 AI 生成相关的核心文件。',
+            '<tool_call>',
+            '{"name":"exec_command","input":{"cmd":"cat apps/novelmobile/src/server/backend/routes/ai-generate.ts","workdir":"/Users/fanzhang/Documents/github/novelmobile"}}',
+            '</tool_call>',
+            '<tool_call>',
+            '{"name":"exec_command","input":{"cmd":"cat apps/novelmobile/src/server/backend/routes/story-context.ts","workdir":"/Users/fanzhang/Documents/github/novelmobile"}}',
+            '</tool_call>',
+            '<tool_call>',
+            '{"name":"exec_command","input":{"cmd":"cat apps/novelmobile/src/web/src/components/wizard/CardWizard.tsx","workdir":"/Users/fanzhang/Documents/github/novelmobile"}}',
+            '</tool_call>'
+          ].join('\n')
+        }
+      }
+    ]
+  };
+
+  const out = applyResponseCompat('chat:deepseek-web', payload, {
+    adapterContext: buildAdapterContext({
+      deepseek: {
+        strictToolRequired: false,
+        textToolFallback: true
+      },
+      capturedChatRequest: buildCapturedRequest({ required: false })
+    })
+  }).payload;
+
+  const msg = out.choices?.[0]?.message;
+  assert.ok(Array.isArray(msg?.tool_calls), 'xml <tool_call> blocks should be harvested');
+  assert.equal(msg.tool_calls.length, 3, 'all xml tool_call blocks should be preserved');
+  for (const toolCall of msg.tool_calls) {
+    assert.equal(toolCall?.function?.name, 'exec_command');
+    const args = JSON.parse(toolCall?.function?.arguments || '{}');
+    assert.equal(typeof args?.cmd, 'string');
+    assert.equal(typeof args?.workdir, 'string');
+  }
+  assert.equal(out.choices?.[0]?.finish_reason, 'tool_calls');
+  assert.equal(out.metadata?.deepseek?.toolCallState, 'text_tool_calls');
 }
 
 function testFunctionResultsMarkupHarvest() {
@@ -772,11 +816,12 @@ function main() {
   testNativeToolCalls();
   testTextFallbackToolCalls();
   testTextFallbackToolCallsWithTailSentinel();
-  testQuotedToolCallsDoNotExecute();
+  testQuotedToolCallsAreHarvested();
   testFallbackRepairsEvenWhenRequestedToolsDiffer();
   testFallbackStillRepairsWhenRequestToolsEmpty();
-  testCommandBlockFallbackToolCalls();
+  testCommandBlockWithoutToolShapeStaysText();
   testStrictRequiredFailure();
+  testXmlToolCallBlocksAreHarvested();
   testFunctionResultsMarkupHarvest();
   testCommentaryTagStrippedFromAssistantText();
   testBusinessEnvelopeUnwrap();
