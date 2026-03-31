@@ -117,6 +117,13 @@ function shouldRunVisionFlow(ctx: ServerToolHandlerContext): boolean {
   if (!hasImageAttachment) {
     return false;
   }
+  const hasVideoAttachment =
+    latestUserTurnContainsVideo(seed && Array.isArray(seed.messages) ? (seed.messages as unknown[]) : []) ||
+    record.hasVideoAttachment === true ||
+    (rt as any)?.hasVideoAttachment === true;
+  if (hasVideoAttachment) {
+    return false;
+  }
 
   // 若当前已经使用具备内建多模态能力的 Provider（例如 Gemini/Claude/ChatGPT 路径），
   // 且未显式 forceVision，则不再触发额外的 vision 二跳，避免同一轮请求跑两次。
@@ -153,6 +160,68 @@ function shouldRunVisionFlow(ctx: ServerToolHandlerContext): boolean {
   }
 
   return true;
+}
+
+const VIDEO_URL_HINT_RE = /(^data:video\/)|(\.(mp4|mov|m4v|webm|avi|mkv|m3u8|flv)(?:$|[?#]))/i;
+
+function readMediaUrlCandidate(record: Record<string, unknown>, key: 'image_url' | 'video_url'): string {
+  const direct = record[key];
+  if (typeof direct === 'string') {
+    return direct.trim();
+  }
+  if (!direct || typeof direct !== 'object' || Array.isArray(direct)) {
+    return '';
+  }
+  const nested = direct as Record<string, unknown>;
+  for (const nestedKey of ['url', 'uri', 'data', 'base64']) {
+    const value = nested[nestedKey];
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+  }
+  return '';
+}
+
+function latestUserTurnContainsVideo(messages: unknown[]): boolean {
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return false;
+  }
+  let latestUser: Record<string, unknown> | null = null;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const msg = messages[i];
+    if (!msg || typeof msg !== 'object' || Array.isArray(msg)) {
+      continue;
+    }
+    const role = (msg as { role?: unknown }).role;
+    if (typeof role === 'string' && role.trim().toLowerCase() === 'user') {
+      latestUser = msg as Record<string, unknown>;
+      break;
+    }
+  }
+  if (!latestUser) {
+    return false;
+  }
+  const rawContent = latestUser.content;
+  if (!Array.isArray(rawContent)) {
+    return false;
+  }
+  for (const part of rawContent) {
+    if (!part || typeof part !== 'object' || Array.isArray(part)) {
+      continue;
+    }
+    const record = part as Record<string, unknown>;
+    const typeValue = typeof record.type === 'string' ? record.type.trim().toLowerCase() : '';
+    if (typeValue.includes('video') || record.video_url !== undefined) {
+      return true;
+    }
+    if (typeValue.includes('image') || record.image_url !== undefined) {
+      const imageCandidate = readMediaUrlCandidate(record, 'image_url');
+      if (imageCandidate && VIDEO_URL_HINT_RE.test(imageCandidate)) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 function getCapturedRequest(adapterContext: unknown): JsonObject | null {

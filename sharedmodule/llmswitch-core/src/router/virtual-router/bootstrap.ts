@@ -273,8 +273,7 @@ function normalizeClassifier(input?: VirtualRouterClassifierConfig): VirtualRout
         : DEFAULT_CLASSIFIER.longContextThresholdTokens,
     thinkingKeywords: normalizeStringArray(normalized.thinkingKeywords, DEFAULT_CLASSIFIER.thinkingKeywords),
     codingKeywords: normalizeStringArray(normalized.codingKeywords, DEFAULT_CLASSIFIER.codingKeywords),
-    backgroundKeywords: normalizeStringArray(normalized.backgroundKeywords, DEFAULT_CLASSIFIER.backgroundKeywords),
-    visionKeywords: normalizeStringArray(normalized.visionKeywords, DEFAULT_CLASSIFIER.visionKeywords)
+    backgroundKeywords: normalizeStringArray(normalized.backgroundKeywords, DEFAULT_CLASSIFIER.backgroundKeywords)
   };
 }
 

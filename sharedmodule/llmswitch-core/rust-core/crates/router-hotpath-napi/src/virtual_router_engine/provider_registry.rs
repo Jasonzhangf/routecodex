@@ -1,5 +1,5 @@
 use serde_json::{Map, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone)]
 pub(crate) struct ProviderProfile {
@@ -308,9 +308,25 @@ fn normalize_model_capabilities(
         let caps = caps_value
             .as_array()
             .map(|arr| {
+                let mut seen: HashSet<String> = HashSet::new();
                 arr.iter()
-                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                    .filter(|s| !s.trim().is_empty())
+                    .filter_map(|v| v.as_str())
+                    .map(|raw| raw.trim().to_lowercase())
+                    .filter_map(|normalized| {
+                        if normalized.is_empty() {
+                            return None;
+                        }
+                        let mapped = match normalized.as_str() {
+                            "vision" => "multimodal".to_string(),
+                            "websearch" | "web-search" | "search" => "web_search".to_string(),
+                            _ => normalized,
+                        };
+                        if seen.insert(mapped.clone()) {
+                            Some(mapped)
+                        } else {
+                            None
+                        }
+                    })
                     .collect::<Vec<String>>()
             })
             .unwrap_or_default();

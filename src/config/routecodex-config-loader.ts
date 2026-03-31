@@ -348,13 +348,13 @@ async function ensureCapabilityRoutesPersisted(
     changed = true;
     injectedRoutes.push('multimodal');
   }
-  if (upsertRouteIfMissing(routingNode, v2Input.routing, 'vision')) {
-    changed = true;
-    injectedRoutes.push('vision');
-  }
   if (upsertRouteIfMissing(routingNode, v2Input.routing, 'web_search', ['search'])) {
     changed = true;
     injectedRoutes.push('web_search');
+  }
+  if (upsertRouteIfMissing(routingNode, v2Input.routing, 'video')) {
+    changed = true;
+    injectedRoutes.push('video');
   }
 
   if (!changed) {
@@ -371,7 +371,7 @@ async function ensureCapabilityRoutesPersisted(
 function upsertRouteIfMissing(
   routingNode: UnknownRecord,
   synthesizedRouting: Record<string, unknown>,
-  routeName: 'multimodal' | 'vision' | 'web_search',
+  routeName: 'multimodal' | 'web_search' | 'video',
   aliasRouteNames: string[] = []
 ): boolean {
   const existingNames = [routeName, ...aliasRouteNames];

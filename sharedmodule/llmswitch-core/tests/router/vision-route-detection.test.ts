@@ -155,6 +155,11 @@ describe('virtual-router vision detection', () => {
     expect(features.hasVideoAttachment).toBe(true);
     expect(features.hasRemoteVideoAttachment).toBe(true);
     expect(features.hasLocalVideoAttachment).toBe(false);
+
+    const classifier = new RoutingClassifier({});
+    const result = classifier.classify(features);
+    expect(result.routeName).toBe('video');
+    expect(result.reasoning).toContain('video:remote-video-detected');
   });
 
   test('does not classify as multimodal when video exists only in historical user message', () => {

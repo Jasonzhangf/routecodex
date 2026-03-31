@@ -126,7 +126,7 @@ describe('virtual-router sticky capability guard', () => {
     };
   }
 
-  test('skips sticky exact target for image request when sticky model is not in multimodal/vision routes', () => {
+  test('skips sticky exact target for image request when sticky model is not in multimodal routes', () => {
     const metadata: RouterMetadataInput = { requestId: 'req-image' };
     const selection = selectProviderImpl(
       'multimodal',

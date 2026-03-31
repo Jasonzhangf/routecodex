@@ -17,7 +17,6 @@ export class RoutingClassifier {
   classify(features: RoutingFeatures): ClassificationResult {
     const lastToolCategory = features.lastAssistantToolCategory;
     const webSearchIntent = detectWebSearchIntent(features.userTextSample);
-    const webSearchToolDeclared = features.hasWebSearchToolDeclared === true;
     const serverToolRequired = (features.metadata as any)?.serverToolRequired === true;
     const webSearchContinuation = lastToolCategory === 'websearch';
     const localToolContinuation =
@@ -26,8 +25,7 @@ export class RoutingClassifier {
       lastToolCategory === 'search' ||
       lastToolCategory === 'other';
     const webSearchFromIntent = !localToolContinuation && webSearchIntent;
-    const webSearchDeclaredOrRequired =
-      !localToolContinuation && (serverToolRequired || webSearchToolDeclared);
+    const webSearchDeclaredOrRequired = !localToolContinuation && serverToolRequired;
     const reachedLongContext =
       features.estimatedTokens >= (this.config.longContextThresholdTokens ?? DEFAULT_LONG_CONTEXT_THRESHOLD);
     const latestMessageFromUser = features.latestMessageFromUser === true;
@@ -38,15 +36,16 @@ export class RoutingClassifier {
     const searchContinuation = lastToolCategory === 'search';
     const toolsContinuation = lastToolCategory === 'other';
     const hasToolActivity = features.hasTools || features.hasToolCallResponses;
+    const hasRemoteVideoAttachment = features.hasVideoAttachment === true && features.hasRemoteVideoAttachment === true;
 
     const evaluationMap: Record<string, { triggered: boolean; reason: string }> = {
+      video: {
+        triggered: hasRemoteVideoAttachment,
+        reason: 'video:remote-video-detected'
+      },
       multimodal: {
         triggered: features.hasImageAttachment,
         reason: 'multimodal:media-detected'
-      },
-      vision: {
-        triggered: features.hasImageAttachment,
-        reason: 'vision:media-detected'
       },
       thinking: {
         triggered: thinkingFromUser || thinkingFromRead,
@@ -64,8 +63,7 @@ export class RoutingClassifier {
         // web_search 路由触发条件（按优先级）：
         // 1) 上一轮 assistant 已触发 websearch 类工具（续写命中）
         // 2) 本轮已标记 serverToolRequired（例如 stage1 注入 websearch 工具）
-        // 3) 本轮显式声明 web_search/websearch 工具
-        // 4) 用户输入命中联网搜索意图关键词
+        // 3) 用户输入命中联网搜索意图关键词
         triggered:
           webSearchContinuation ||
           webSearchDeclaredOrRequired ||
@@ -75,9 +73,7 @@ export class RoutingClassifier {
             ? 'web_search:last-tool-websearch'
             : webSearchDeclaredOrRequired && serverToolRequired
               ? 'web_search:servertool-required'
-              : webSearchDeclaredOrRequired && webSearchToolDeclared
-                ? 'web_search:tool-declared'
-                : 'web_search:intent-keyword'
+              : 'web_search:intent-keyword'
       },
       search: {
         // search 路由：仅在上一轮 assistant 使用 search 类工具时继续命中，

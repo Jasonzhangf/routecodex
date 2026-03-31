@@ -8,8 +8,8 @@ export const DEFAULT_MODEL_CONTEXT_TOKENS = 200_000;
 
 export const DEFAULT_ROUTE = 'default';
 export const ROUTE_PRIORITY: string[] = [
+  'video',
   'multimodal',
-  'vision',
   'longcontext',
   'web_search',
   'thinking',
@@ -55,7 +55,6 @@ export interface RoutePoolTier {
   /**
    * Optional force flag for this route pool.
    * Currently interpreted for:
-   * - routing.vision: force dedicated vision backend handling.
    * - routing.web_search: force server-side web_search flow.
    */
   force?: boolean;
@@ -102,7 +101,7 @@ export interface AnthropicThinkingConfig {
 
 export type AnthropicThinkingBudgetMap = Partial<Record<AnthropicThinkingEffort, number>>;
 
-export type ModelCapability = 'text' | 'reasoning' | 'vision' | 'thinking' | 'web_search';
+export type ModelCapability = 'text' | 'reasoning' | 'multimodal' | 'video' | 'thinking' | 'web_search';
 
 export interface ProviderProfile {
   providerKey: string;
@@ -132,7 +131,7 @@ export interface ProviderProfile {
   serverToolsDisabled?: boolean;
   /**
    * Model-level capabilities mapping: modelId -> list of capabilities.
-   * Used for capability-based routing (vision, thinking, web_search).
+   * Used for capability-based routing (multimodal, thinking, web_search).
    */
   modelCapabilities?: Record<string, ModelCapability[]>;
 }
@@ -185,7 +184,6 @@ export interface VirtualRouterClassifierConfig {
   thinkingKeywords?: string[];
   codingKeywords?: string[];
   backgroundKeywords?: string[];
-  visionKeywords?: string[];
 }
 
 export interface LoadBalancingPolicy {
@@ -578,7 +576,7 @@ export interface TargetMetadata {
   /**
    * Route-level flags propagated from the virtual router.
    * These are derived from routing pools and webSearch config and
-   * are used by hub pipeline/process layers (web_search / vision).
+   * are used by hub pipeline/process layers (web_search / multimodal).
    */
   forceWebSearch?: boolean;
   forceVision?: boolean;

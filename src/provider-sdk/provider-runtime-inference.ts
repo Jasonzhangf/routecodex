@@ -204,7 +204,7 @@ function inferSdkBindingFromConfig(providerId: string, providerNode: UnknownReco
 function inferCapabilitiesFromConfig(providerNode: UnknownRecord): ProviderCapabilityMap {
   const capabilities: ProviderCapabilityMap = {};
   const explicitCapabilities = isRecord(providerNode.capabilities) ? providerNode.capabilities : undefined;
-  for (const key of ['supportsCoding', 'supportsLongContext', 'supportsMultimodal', 'supportsReasoning', 'supportsTools']) {
+  for (const key of ['supportsCoding', 'supportsLongContext', 'supportsMultimodal', 'supportsReasoning', 'supportsTools', 'supportsVideo']) {
     if (explicitCapabilities && readBoolean(explicitCapabilities[key])) {
       capabilities[key] = true;
     }
@@ -247,6 +247,20 @@ function inferCapabilitiesFromConfig(providerNode: UnknownRecord): ProviderCapab
       /(^|[-._])(vl|vision|image)([-._]|$)/i.test(normalizedModelId)
     ) {
       capabilities.supportsMultimodal = true;
+    }
+    const modelCapabilities = Array.isArray(modelNode.capabilities)
+      ? modelNode.capabilities.filter((item): item is string => typeof item === 'string').map((item) => item.trim().toLowerCase())
+      : [];
+    if (
+      readBoolean(modelNode.supportsVideo) ||
+      readBoolean(modelNode.supportsVideos) ||
+      readBoolean(modelNode.supportsVideoInput) ||
+      modelCapabilities.includes('video') ||
+      modelCapabilities.includes('video_input') ||
+      modelCapabilities.includes('input_video') ||
+      /(^|[-._])(video|omni)([-._]|$)/i.test(normalizedModelId)
+    ) {
+      capabilities.supportsVideo = true;
     }
   }
 

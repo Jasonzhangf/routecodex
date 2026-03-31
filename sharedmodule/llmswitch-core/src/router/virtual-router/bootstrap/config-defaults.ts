@@ -9,8 +9,7 @@ export const DEFAULT_CLASSIFIER: Required<VirtualRouterClassifierConfig> = {
   longContextThresholdTokens: 180000,
   thinkingKeywords: ['think step', 'analysis', 'reasoning', '仔细分析', '深度思考'],
   codingKeywords: ['apply_patch', 'write_file', 'create_file', 'shell', '修改文件', '写入文件'],
-  backgroundKeywords: ['background', 'context dump', '上下文'],
-  visionKeywords: ['vision', 'image', 'picture', 'photo']
+  backgroundKeywords: ['background', 'context dump', '上下文']
 };
 
 export const DEFAULT_LOAD_BALANCING: LoadBalancingPolicy = { strategy: 'round-robin' };

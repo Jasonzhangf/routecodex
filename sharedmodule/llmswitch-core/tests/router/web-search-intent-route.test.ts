@@ -8,13 +8,21 @@ function classifyRoute(userContent: string): string {
 }
 
 function classifyRouteFromMessages(messages: Array<{ role: string; content: string }>): string {
+  return classifyRouteWith(messages, []);
+}
+
+function classifyRouteWith(
+  messages: Array<{ role: string; content: string }>,
+  tools: Array<{ type: string; function: { name: string; description?: string; parameters?: unknown } }>,
+  metadata?: { serverToolRequired?: boolean }
+): string {
   const req = {
     model: 'gpt-test',
     messages,
-    tools: []
+    tools
   } as any;
 
-  const features = buildRoutingFeatures(req, { requestId: 'req_test' } as any);
+  const features = buildRoutingFeatures(req, { requestId: 'req_test', ...(metadata ?? {}) } as any);
   const classifier = new RoutingClassifier({});
   return classifier.classify(features).routeName;
 }
@@ -54,5 +62,38 @@ describe('virtual-router web_search intent detection', () => {
       { role: 'assistant', content: '好的，我先检查仓库结构。' }
     ]);
     expect(route).not.toBe('web_search');
+  });
+
+  test('does not route to web_search when only web_search tool is declared', () => {
+    const route = classifyRouteWith(
+      [{ role: 'user', content: '继续拆分模块并补回归测试。' }],
+      [
+        {
+          type: 'function',
+          function: {
+            name: 'web_search',
+            parameters: { type: 'object', properties: {} }
+          }
+        }
+      ]
+    );
+    expect(route).not.toBe('web_search');
+  });
+
+  test('routes to web_search when serverToolRequired is true', () => {
+    const route = classifyRouteWith(
+      [{ role: 'user', content: '继续拆分模块并补回归测试。' }],
+      [
+        {
+          type: 'function',
+          function: {
+            name: 'web_search',
+            parameters: { type: 'object', properties: {} }
+          }
+        }
+      ],
+      { serverToolRequired: true }
+    );
+    expect(route).toBe('web_search');
   });
 });

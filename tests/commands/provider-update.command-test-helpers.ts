@@ -119,8 +119,7 @@ export async function loadProviderCommand(): Promise<{
       userConfig: {
         virtualrouter: {
           routing: {
-            multimodal: [{ id: 'mm', targets: ['demo.qwen3.5-plus'] }],
-            vision: [{ id: 'vs', targets: ['demo.qwen3.5-plus'] }]
+            multimodal: [{ id: 'mm', targets: ['demo.qwen3.5-plus'] }]
           }
         }
       },

@@ -30,5 +30,7 @@ export function providerSupportsMultimodalRequest(
   }
   const hasRemoteVideo = features.hasRemoteVideoAttachment === true;
   const hasLocalVideo = features.hasLocalVideoAttachment === true;
-  return hasRemoteVideo && !hasLocalVideo;
+  // qwen3.5-plus should stay eligible for local/video-file payloads.
+  // Only remote video URLs are forced away from qwen3.5-plus.
+  return !hasRemoteVideo || hasLocalVideo;
 }

@@ -81,7 +81,7 @@ describe('normalizeProvider anthropic thinking config', () => {
     expect(normalized.modelAnthropicThinkingConfig?.['1']).toBeUndefined();
   });
 
-  it('maps multimodal capability alias to vision capability', () => {
+  it('normalizes multimodal/vision capability aliases to multimodal', () => {
     const normalized = normalizeProvider('alias-test', {
       id: 'alias-test',
       type: 'openai',
@@ -95,7 +95,7 @@ describe('normalizeProvider anthropic thinking config', () => {
       }
     });
 
-    expect(normalized.modelCapabilities?.['qwen3.5-plus']).toEqual(['text', 'vision']);
+    expect(normalized.modelCapabilities?.['qwen3.5-plus']).toEqual(['text', 'multimodal']);
   });
 
   it('maps websearch capability aliases to web_search', () => {

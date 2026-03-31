@@ -59,7 +59,7 @@ describe('loadRouteCodexConfig v2 capability-route persistence', () => {
     restoreEnv(envSnapshot);
   });
 
-  it('auto-injects and persists multimodal/vision/web_search routes when active policy misses them', async () => {
+  it('auto-injects and persists multimodal/web_search routes when active policy misses them', async () => {
     const root = await mkTmp('routecodex-v2-capability-');
     process.env.RCC_HOME = root;
     process.env.ROUTECODEX_USER_DIR = root;
@@ -98,10 +98,8 @@ describe('loadRouteCodexConfig v2 capability-route persistence', () => {
     const persisted = JSON.parse(await fs.readFile(configPath, 'utf8'));
     const routing = persisted.virtualrouter.routingPolicyGroups.default.routing;
     expect(Array.isArray(routing.multimodal)).toBe(true);
-    expect(Array.isArray(routing.vision)).toBe(true);
     expect(Array.isArray(routing.web_search)).toBe(true);
     expect(routing.multimodal[0].targets).toContain('ali-coding-plan.qwen3.5-plus');
-    expect(routing.vision[0].targets).toContain('ali-coding-plan.qwen3.5-plus');
     expect(routing.web_search[0].targets).toEqual([
       'ali-coding-plan.glm-5',
       'ali-coding-plan.qwen3.5-plus'
@@ -152,8 +150,6 @@ describe('loadRouteCodexConfig v2 capability-route persistence', () => {
     const routing = persisted.virtualrouter.routingPolicyGroups.default.routing;
     expect(routing.multimodal[0].id).toBe('manual-multimodal');
     expect(routing.multimodal[0].targets).toEqual(['ali-coding-plan.manual-vl']);
-    expect(Array.isArray(routing.vision)).toBe(true);
-    expect(routing.vision[0].targets).toContain('ali-coding-plan.qwen3.5-plus');
     expect(Array.isArray(routing.web_search)).toBe(true);
     expect(routing.web_search[0].targets).toEqual([
       'ali-coding-plan.glm-5',

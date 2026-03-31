@@ -138,7 +138,7 @@ describe('buildVirtualRouterInputV2', () => {
     expect(input.routing.default[0].targets).toEqual(['demo.mock-1']);
   });
 
-  it('auto-synthesizes multimodal/vision/web_search routes from provider model capabilities when route pools are absent', async () => {
+  it('auto-synthesizes multimodal/web_search routes from provider model capabilities when route pools are absent', async () => {
     const root = await createTempDir('provider-v2-');
     const providerDir = path.join(root, 'ali-coding-plan');
     await fs.mkdir(providerDir, { recursive: true });
@@ -182,12 +182,7 @@ describe('buildVirtualRouterInputV2', () => {
 
     const input = await buildVirtualRouterInputV2(userConfig, root);
     expect(input.routing.multimodal).toHaveLength(1);
-    expect(input.routing.vision).toHaveLength(1);
     expect(input.routing.multimodal[0].targets).toEqual([
-      'ali-coding-plan.kimi-k2.5',
-      'ali-coding-plan.qwen3.5-plus'
-    ]);
-    expect(input.routing.vision[0].targets).toEqual([
       'ali-coding-plan.kimi-k2.5',
       'ali-coding-plan.qwen3.5-plus'
     ]);
@@ -248,7 +243,6 @@ describe('buildVirtualRouterInputV2', () => {
     expect(input.routing.multimodal).toHaveLength(1);
     expect(input.routing.multimodal[0].id).toBe('manual-multimodal');
     expect(input.routing.multimodal[0].targets).toEqual(['ali-coding-plan.manual-vl']);
-    expect(input.routing.vision?.[0]?.targets).toEqual(['ali-coding-plan.qwen3.5-plus']);
     expect(input.routing.web_search?.[0]?.targets).toEqual(['ali-coding-plan.qwen3.5-plus']);
   });
 
@@ -320,7 +314,6 @@ describe('buildVirtualRouterInputV2', () => {
 
     const input = await buildVirtualRouterInputV2(userConfig, root);
     expect(input.routing.multimodal?.[0]?.targets).toEqual(['ali-coding-plan.qwen3.5-plus']);
-    expect(input.routing.vision?.[0]?.targets).toEqual(['ali-coding-plan.qwen3.5-plus']);
     expect(input.routing.web_search?.[0]?.targets).toEqual([
       'ali-coding-plan.glm-5',
       'ali-coding-plan.qwen3.5-plus'

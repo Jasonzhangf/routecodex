@@ -64,7 +64,6 @@ impl RoutingClassifier {
             .clone()
             .unwrap_or_default();
         let web_search_intent = detect_web_search_intent(&features.user_text_sample);
-        let web_search_tool_declared = features.has_web_search_tool_declared;
         let server_tool_required = features
             .metadata
             .get("serverToolRequired")
@@ -76,8 +75,7 @@ impl RoutingClassifier {
             "read" | "write" | "search" | "other"
         );
         let web_search_from_intent = !local_tool_continuation && web_search_intent;
-        let web_search_declared_or_required =
-            !local_tool_continuation && (server_tool_required || web_search_tool_declared);
+        let web_search_declared_or_required = !local_tool_continuation && server_tool_required;
         let reached_long_context = features.estimated_tokens >= self.long_context_threshold_tokens;
         let latest_message_from_user = features.latest_message_from_user;
         let thinking_continuation = last_tool_category == "read";
@@ -87,17 +85,19 @@ impl RoutingClassifier {
         let search_continuation = last_tool_category == "search";
         let tools_continuation = last_tool_category == "other";
         let has_tool_activity = features.has_tools || features.has_tool_call_responses;
+        let has_remote_video_attachment =
+            features.has_video_attachment && features.has_remote_video_attachment;
 
         let mut evaluation: Vec<(String, bool, String)> = Vec::new();
+        evaluation.push((
+            "video".to_string(),
+            has_remote_video_attachment,
+            "video:remote-video-detected".to_string(),
+        ));
         evaluation.push((
             "multimodal".to_string(),
             features.has_image_attachment,
             "multimodal:media-detected".to_string(),
-        ));
-        evaluation.push((
-            "vision".to_string(),
-            features.has_image_attachment,
-            "vision:media-detected".to_string(),
         ));
         evaluation.push((
             "thinking".to_string(),
@@ -127,8 +127,6 @@ impl RoutingClassifier {
                 "web_search:last-tool-websearch".to_string()
             } else if web_search_declared_or_required && server_tool_required {
                 "web_search:servertool-required".to_string()
-            } else if web_search_declared_or_required && web_search_tool_declared {
-                "web_search:tool-declared".to_string()
             } else {
                 "web_search:intent-keyword".to_string()
             },
@@ -292,8 +290,8 @@ fn is_negative_web_search_context(normalized: &str, original_text: &str) -> bool
 pub(crate) const DEFAULT_ROUTE: &str = "default";
 
 pub(crate) const ROUTE_PRIORITY: [&str; 10] = [
+    "video",
     "multimodal",
-    "vision",
     "longcontext",
     "web_search",
     "thinking",

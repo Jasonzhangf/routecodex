@@ -103,7 +103,7 @@ export function buildRoutingFeatures(
   const estimatedTokens = computeRequestTokens(request, latestUserText);
   const hasThinking = detectKeyword(normalizedUserText, THINKING_KEYWORDS);
   const hasVisionTool = detectVisionTool(request);
-  // Vision routing must only trigger for the current user turn (latest message),
+  // Media-driven multimodal routing must only trigger for the current user turn (latest message),
   // not for historical user messages carrying images during tool/assistant followups.
   const mediaSignals =
     latestMessageRole === 'user' ? analyzeMediaAttachments(latestMessage) : analyzeMediaAttachments(undefined);

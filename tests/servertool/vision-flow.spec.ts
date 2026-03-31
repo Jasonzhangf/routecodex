@@ -18,6 +18,27 @@ function makeCapturedChatRequestWithImage(): JsonObject {
   } as any;
 }
 
+function makeCapturedChatRequestWithVideoUrl(partType: 'video_url' | 'image_url'): JsonObject {
+  const part =
+    partType === 'video_url'
+      ? { type: 'video_url', video_url: { url: 'https://example.com/test.mp4' } }
+      : { type: 'image_url', image_url: { url: 'https://example.com/test.mp4' } };
+
+  return {
+    model: 'gpt-test',
+    messages: [
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'describe this video' },
+          part
+        ]
+      }
+    ],
+    parameters: { temperature: 0.2 }
+  } as any;
+}
+
 describe('vision_auto servertool followup (entry-aware)', () => {
   test('re-enters hub with a canonical chat-like followup body (messages, non-stream)', async () => {
     const adapterContext: AdapterContext = {
@@ -99,5 +120,87 @@ describe('vision_auto servertool followup (entry-aware)', () => {
     expect(body.stream).toBe(false);
     expect(body.parameters?.stream).toBeUndefined();
     expect(JSON.stringify(body.messages)).toContain('[Vision] vision summary');
+  });
+
+  test('does not run vision flow when latest user message uses video_url', async () => {
+    const adapterContext: AdapterContext = {
+      requestId: 'req-vision-video-1',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-chat',
+      providerType: 'openai',
+      hasImageAttachment: true,
+      capturedChatRequest: makeCapturedChatRequestWithVideoUrl('video_url')
+    } as any;
+
+    const chatResponse: JsonObject = {
+      id: 'chatcmpl-vision-video-1',
+      object: 'chat.completion',
+      model: 'gpt-test',
+      choices: [
+        {
+          index: 0,
+          message: { role: 'assistant', content: 'ok' },
+          finish_reason: 'stop'
+        }
+      ]
+    } as any;
+
+    let reenterCalled = 0;
+    const reenterPipeline = async () => {
+      reenterCalled += 1;
+      return { body: {} as JsonObject };
+    };
+    const orchestration = await runServerToolOrchestration({
+      chat: chatResponse,
+      adapterContext,
+      entryEndpoint: '/v1/responses',
+      requestId: 'req-vision-video-1',
+      providerProtocol: 'openai-chat',
+      reenterPipeline
+    });
+
+    expect(orchestration.executed).toBe(false);
+    expect(reenterCalled).toBe(0);
+  });
+
+  test('does not run vision flow when latest user image_url is an mp4 url', async () => {
+    const adapterContext: AdapterContext = {
+      requestId: 'req-vision-video-2',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-chat',
+      providerType: 'openai',
+      hasImageAttachment: true,
+      capturedChatRequest: makeCapturedChatRequestWithVideoUrl('image_url')
+    } as any;
+
+    const chatResponse: JsonObject = {
+      id: 'chatcmpl-vision-video-2',
+      object: 'chat.completion',
+      model: 'gpt-test',
+      choices: [
+        {
+          index: 0,
+          message: { role: 'assistant', content: 'ok' },
+          finish_reason: 'stop'
+        }
+      ]
+    } as any;
+
+    let reenterCalled = 0;
+    const reenterPipeline = async () => {
+      reenterCalled += 1;
+      return { body: {} as JsonObject };
+    };
+    const orchestration = await runServerToolOrchestration({
+      chat: chatResponse,
+      adapterContext,
+      entryEndpoint: '/v1/responses',
+      requestId: 'req-vision-video-2',
+      providerProtocol: 'openai-chat',
+      reenterPipeline
+    });
+
+    expect(orchestration.executed).toBe(false);
+    expect(reenterCalled).toBe(0);
   });
 });

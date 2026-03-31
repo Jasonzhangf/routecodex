@@ -106,12 +106,12 @@ export function normalizeModelCapabilities(
     for (const cap of capabilities) {
       const normalized = typeof cap === 'string' ? cap.trim().toLowerCase() : '';
       const mapped =
-        normalized === 'multimodal'
-          ? 'vision'
+        normalized === 'multimodal' || normalized === 'vision'
+          ? 'multimodal'
           : ['websearch', 'web-search', 'search'].includes(normalized)
             ? 'web_search'
             : normalized;
-      if (['text', 'reasoning', 'vision', 'thinking', 'web_search'].includes(mapped)) {
+      if (['text', 'reasoning', 'multimodal', 'video', 'thinking', 'web_search'].includes(mapped)) {
         validSet.add(mapped as ModelCapability);
       }
     }

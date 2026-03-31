@@ -108,13 +108,9 @@ export function buildRouteCandidates(
   routing: Record<string, RoutePoolTier[]>,
   providerRegistry: ProviderRegistry
 ): string[] {
-  const forceVision = routeHasForceFlag('vision', routing);
   const hasMultimodalTargets = routeHasTargets(routing.multimodal);
-  const hasVisionTargets = routeHasTargets(routing.vision);
-  const hasLocalVideoAttachment = features.hasVideoAttachment === true && features.hasLocalVideoAttachment === true;
-  if (features.hasImageAttachment && hasLocalVideoAttachment && hasVisionTargets) {
-    return ['vision'];
-  }
+  const hasVideoTargets = routeHasTargets(routing.video);
+  const hasRemoteVideoAttachment = features.hasVideoAttachment === true && features.hasRemoteVideoAttachment === true;
   const normalized = normalizeRouteAlias(requestedRoute || DEFAULT_ROUTE);
   const baseList: string[] = [];
   if (classificationCandidates && classificationCandidates.length) {
@@ -125,6 +121,12 @@ export function buildRouteCandidates(
     baseList.push(normalized);
   }
 
+  if (hasRemoteVideoAttachment && hasVideoTargets) {
+    if (!baseList.includes('video')) {
+      baseList.unshift('video');
+    }
+  }
+
   if (features.hasImageAttachment) {
     if (hasMultimodalTargets) {
       if (!baseList.includes('multimodal')) {
@@ -132,15 +134,9 @@ export function buildRouteCandidates(
       }
     }
 
-    if (hasVisionTargets && (!hasMultimodalTargets || forceVision)) {
-      if (!baseList.includes('vision')) {
-        baseList.push('vision');
-      }
-    }
-
-    if (!forceVision && hasMultimodalTargets) {
-      const visionAwareRoutes = [DEFAULT_ROUTE, 'thinking'] as const;
-      for (const routeName of visionAwareRoutes) {
+    if (hasMultimodalTargets) {
+      const multimodalAwareRoutes = [DEFAULT_ROUTE, 'thinking'] as const;
+      for (const routeName of multimodalAwareRoutes) {
         if (routeHasTargets(routing[routeName])) {
           if (!baseList.includes(routeName)) {
             baseList.push(routeName);
@@ -160,9 +156,6 @@ export function buildRouteCandidates(
     ordered = reorderForCapability(ordered, 'web_search', routing, providerRegistry);
   }
 
-  if (features.hasImageAttachment && !forceVision && hasMultimodalTargets) {
-    ordered = reorderForInlineVision(ordered, routing, providerRegistry);
-  }
   if (features.hasImageAttachment && hasMultimodalTargets) {
     ordered = reorderForPreferredModel(ordered, 'kimi-k2.5', routing, providerRegistry);
   }
@@ -202,64 +195,6 @@ export function extendRouteCandidatesForState(
 function routeWeight(routeName: string): number {
   const idx = ROUTE_PRIORITY.indexOf(routeName);
   return idx >= 0 ? idx : ROUTE_PRIORITY.length;
-}
-
-function reorderForInlineVision(
-  routeNames: string[],
-  routing: Record<string, RoutePoolTier[]>,
-  providerRegistry: ProviderRegistry
-): string[] {
-  const unique = Array.from(new Set(routeNames.filter(Boolean)));
-  if (!unique.length) {
-    return unique;
-  }
-
-  const inlinePreferred: string[] = [];
-  const inlineRoutes = [DEFAULT_ROUTE, 'thinking'] as const;
-
-  for (const routeName of inlineRoutes) {
-    if (routeSupportsInlineVision(routeName, routing, providerRegistry) && !inlinePreferred.includes(routeName)) {
-      inlinePreferred.push(routeName);
-    }
-  }
-
-  if (!inlinePreferred.length) {
-    return unique;
-  }
-
-  const remaining: string[] = [];
-  for (const routeName of unique) {
-    if (!inlinePreferred.includes(routeName)) {
-      remaining.push(routeName);
-    }
-  }
-  return [...inlinePreferred, ...remaining];
-}
-
-function routeSupportsInlineVision(
-  routeName: string,
-  routing: Record<string, RoutePoolTier[]>,
-  providerRegistry: ProviderRegistry
-): boolean {
-  const pools = routing[routeName];
-  if (!Array.isArray(pools)) {
-    return false;
-  }
-  for (const pool of pools) {
-    if (!Array.isArray(pool.targets)) {
-      continue;
-    }
-    for (const providerKey of pool.targets) {
-      try {
-        if (providerRegistry.hasCapability(providerKey, 'vision')) {
-          return true;
-        }
-      } catch {
-        // ignore unknown providers when probing capabilities
-      }
-    }
-  }
-  return false;
 }
 
 function reorderForPreferredModel(

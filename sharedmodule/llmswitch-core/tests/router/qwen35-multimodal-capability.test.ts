@@ -5,7 +5,6 @@ import { selectProviderImpl } from '../../src/router/virtual-router/engine/routi
 import { ProviderHealthManager } from '../../src/router/virtual-router/health-manager.js';
 import { RouteLoadBalancer } from '../../src/router/virtual-router/load-balancer.js';
 import { ProviderRegistry } from '../../src/router/virtual-router/provider-registry.js';
-import { VirtualRouterEngine } from '../../src/router/virtual-router/engine.js';
 import type {
   ClassificationResult,
   RoutePoolTier,
@@ -22,15 +21,21 @@ describe('virtual-router qwen3.5-plus multimodal capability', () => {
       endpoint: 'https://example.com',
       auth: { type: 'apiKey', value: 'x' },
       outboundProfile: 'openai-chat',
-      modelId: 'qwen3.5-plus'
+      modelId: 'qwen3.5-plus',
+      modelCapabilities: {
+        'qwen3.5-plus': ['multimodal']
+      }
     } as any,
-    'qwen.1.qwen3-vl-plus': {
-      providerKey: 'qwen.1.qwen3-vl-plus',
+    'qwen.1.qwen3.5-omni-plus': {
+      providerKey: 'qwen.1.qwen3.5-omni-plus',
       providerType: 'openai',
       endpoint: 'https://example.com',
       auth: { type: 'apiKey', value: 'x' },
       outboundProfile: 'openai-chat',
-      modelId: 'qwen3-vl-plus'
+      modelId: 'qwen3.5-omni-plus',
+      modelCapabilities: {
+        'qwen3.5-omni-plus': ['video', 'multimodal']
+      }
     } as any
   });
 
@@ -43,12 +48,12 @@ describe('virtual-router qwen3.5-plus multimodal capability', () => {
         targets: ['qwen.1.qwen3.5-plus']
       }
     ],
-    vision: [
+    video: [
       {
-        id: 'vision-primary',
+        id: 'video-primary',
         priority: 100,
         mode: 'priority',
-        targets: ['qwen.1.qwen3-vl-plus']
+        targets: ['qwen.1.qwen3.5-omni-plus']
       }
     ],
     default: [
@@ -135,7 +140,7 @@ describe('virtual-router qwen3.5-plus multimodal capability', () => {
     expect(selection.providerKey).toBe('qwen.1.qwen3.5-plus');
   });
 
-  test('routes remote video requests to qwen3.5-plus in multimodal pool', () => {
+  test('routes remote video requests to video capability route', () => {
     const metadata: RouterMetadataInput = { requestId: 'req-qwen-remote-video' };
     const selection = selectProviderImpl(
       'multimodal',
@@ -146,11 +151,11 @@ describe('virtual-router qwen3.5-plus multimodal capability', () => {
       baseDeps()
     );
 
-    expect(selection.routeUsed).toBe('multimodal');
-    expect(selection.providerKey).toBe('qwen.1.qwen3.5-plus');
+    expect(selection.routeUsed).toBe('video');
+    expect(selection.providerKey).toBe('qwen.1.qwen3.5-omni-plus');
   });
 
-  test('falls back to vision pool for local video requests', () => {
+  test('keeps local video requests in multimodal pool', () => {
     const metadata: RouterMetadataInput = { requestId: 'req-qwen-local-video' };
     const selection = selectProviderImpl(
       'multimodal',
@@ -161,51 +166,8 @@ describe('virtual-router qwen3.5-plus multimodal capability', () => {
       baseDeps()
     );
 
-    expect(selection.routeUsed).toBe('vision');
-    expect(selection.providerKey).toBe('qwen.1.qwen3-vl-plus');
+    expect(selection.routeUsed).toBe('multimodal');
+    expect(selection.providerKey).toBe('qwen.1.qwen3.5-plus');
   });
 
-  test('falls back from direct qwen.qwen3.5-plus to vision route on local video', () => {
-    const engine = new VirtualRouterEngine({} as any);
-    engine.initialize({
-      routing,
-      providers: {
-        'qwen.1.qwen3.5-plus': {
-          providerKey: 'qwen.1.qwen3.5-plus',
-          providerType: 'openai',
-          endpoint: 'https://example.com',
-          auth: { type: 'apiKey', value: 'x' },
-          outboundProfile: 'openai-chat',
-          modelId: 'qwen3.5-plus'
-        },
-        'qwen.1.qwen3-vl-plus': {
-          providerKey: 'qwen.1.qwen3-vl-plus',
-          providerType: 'openai',
-          endpoint: 'https://example.com',
-          auth: { type: 'apiKey', value: 'x' },
-          outboundProfile: 'openai-chat',
-          modelId: 'qwen3-vl-plus'
-        }
-      },
-      classifier: {},
-      loadBalancing: {}
-    } as any);
-
-    const request = {
-      model: 'qwen.qwen3.5-plus',
-      messages: [
-        {
-          role: 'user',
-          content: [
-            { type: 'input_text', text: 'describe this video' },
-            { type: 'video_url', video_url: { url: 'data:video/mp4;base64,AAAA' } }
-          ]
-        }
-      ],
-      tools: []
-    } as any;
-    const result = engine.route(request, { requestId: 'req-direct-local-video' } as any);
-    expect(result.decision.routeName).toBe('vision');
-    expect(result.target.providerKey).toBe('qwen.1.qwen3-vl-plus');
-  });
 });

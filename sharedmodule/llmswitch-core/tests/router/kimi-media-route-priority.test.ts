@@ -47,15 +47,6 @@ describe('virtual-router multimodal route priority', () => {
         targets: ['tab.key1.gpt-5.2-codex']
       }
     ],
-    vision: [
-      {
-        id: 'vision-primary',
-        priority: 100,
-        mode: 'priority',
-        targets: ['iflow.1-186.qwen3-vl-plus'],
-        force: true
-      }
-    ],
     coding: [
       {
         id: 'coding-primary',
@@ -103,9 +94,8 @@ describe('virtual-router multimodal route priority', () => {
     expect(candidates).not.toContain('vision');
   });
 
-  test('falls back to vision when multimodal route is missing', () => {
+  test('falls back to default when multimodal route is missing', () => {
     const routingWithoutMultimodal = {
-      vision: routing.vision,
       coding: routing.coding,
       default: routing.default
     };
@@ -134,7 +124,7 @@ describe('virtual-router multimodal route priority', () => {
       providerRegistry
     );
 
-    expect(candidates[0]).toBe('vision');
+    expect(candidates[0]).toBe('default');
   });
 
   test('keeps original route order without media', () => {

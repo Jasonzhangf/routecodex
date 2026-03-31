@@ -382,7 +382,7 @@ function createProbeContextCommand(): Command {
 
 function createSyncCapabilityRoutesCommand(): Command {
   return new Command('sync-capability-routes')
-    .description('Sync capability-driven multimodal/vision/web_search routes into active v2 routing policy (config-first, missing-only)')
+    .description('Sync capability-driven multimodal/video/web_search routes into active v2 routing policy (config-first, missing-only)')
     .option('-c, --config <file>', 'RouteCodex config path (default: auto-resolve ~/.rcc/config.json)')
     .action(async (opts: { config?: string }) => {
       const explicitConfig = typeof opts.config === 'string' && opts.config.trim()
@@ -407,7 +407,7 @@ function createSyncCapabilityRoutesCommand(): Command {
           ? (virtualrouter.routing as UnknownRecord)
           : {};
         const multimodalTargets = countRouteTargets(routing.multimodal);
-        const visionTargets = countRouteTargets(routing.vision);
+        const videoTargets = countRouteTargets(routing.video);
         const webSearchTargets = countRouteTargets(routing.web_search);
         const searchAliasTargets = countRouteTargets(routing.search);
 
@@ -416,7 +416,7 @@ function createSyncCapabilityRoutesCommand(): Command {
           console.log(`  updated: ${changed ? 'yes' : 'no'}`);
         }
         console.log(`  multimodal targets: ${multimodalTargets}`);
-        console.log(`  vision targets: ${visionTargets}`);
+        console.log(`  video targets: ${videoTargets}`);
         console.log(`  web_search targets: ${webSearchTargets}`);
         if (searchAliasTargets > 0) {
           console.log(`  search(alias) targets: ${searchAliasTargets}`);

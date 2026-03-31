@@ -62,7 +62,6 @@ describe('provider-update command maintenance flows', () => {
         virtualrouter: {
           routing: {
             multimodal: [{ id: 'mm', targets: ['demo.qwen3.5-plus'] }],
-            vision: [{ id: 'vs', targets: ['demo.qwen3.5-plus', 'demo.kimi-k2.5'] }],
             web_search: [{ id: 'ws', targets: ['demo.glm-5', 'demo.qwen3.5-plus'] }]
           }
         }
@@ -77,7 +76,6 @@ describe('provider-update command maintenance flows', () => {
     expect(mocks.loadRouteCodexConfig).toHaveBeenCalledWith(path.resolve(configPath));
     expect(log).toHaveBeenCalledWith(expect.stringContaining('Capability route sync:'));
     expect(log).toHaveBeenCalledWith(expect.stringContaining('multimodal targets: 1'));
-    expect(log).toHaveBeenCalledWith(expect.stringContaining('vision targets: 2'));
     expect(log).toHaveBeenCalledWith(expect.stringContaining('web_search targets: 2'));
 
     mocks.loadRouteCodexConfig.mockRejectedValueOnce(new Error('sync-failed'));

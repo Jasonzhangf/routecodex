@@ -73,7 +73,7 @@ function resolveProtocol(id: string, raw: UnknownRecord, moduleType?: string): P
 }
 
 const protocolAliases = {
-  openai: new Set(['openai', 'glm', 'qwen', 'lmstudio', 'iflow', 'deepseek', 'deepseek-http', 'chat', 'openai-http', 'openai-standard', 'mock']),
+  openai: new Set(['openai', 'glm', 'qwen', 'qwenchat', 'lmstudio', 'iflow', 'deepseek', 'deepseek-http', 'chat', 'openai-http', 'openai-standard', 'mock']),
   responses: new Set(['responses', 'openai-responses', 'responses-http']),
   anthropic: new Set(['anthropic', 'anthropic-http', 'claude']),
   gemini: new Set(['gemini', 'gemini2', 'gemini-chat', 'gemini-http']),

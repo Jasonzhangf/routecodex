@@ -299,8 +299,7 @@ function stickyProviderMatchesRequestCapabilities(
 
   if (features.hasImageAttachment) {
     const supportsImageRoute =
-      routeTargetsIncludeProvider(routing, 'multimodal', providerKey) ||
-      routeTargetsIncludeProvider(routing, 'vision', providerKey);
+      routeTargetsIncludeProvider(routing, 'multimodal', providerKey);
     if (!supportsImageRoute) {
       return false;
     }

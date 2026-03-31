@@ -237,7 +237,6 @@ export function resolveRouteColor(routeName: string): string {
     longcontext: '\x1b[38;5;141m',
     web_search: '\x1b[32m',
     search: '\x1b[38;5;34m',
-    vision: '\x1b[38;5;207m',
     background: '\x1b[90m'
   };
   return map[routeName] ?? '\x1b[36m';

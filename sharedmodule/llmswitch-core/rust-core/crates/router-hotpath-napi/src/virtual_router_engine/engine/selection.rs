@@ -182,8 +182,9 @@ impl VirtualRouterEngineCore {
         let now_for_weights = extract_runtime_now_ms(metadata).unwrap_or_else(now_ms);
         let health_cfg =
             resolve_health_weighted_config(self.load_balancer.policy().health_weighted.as_ref());
-        let requires_vision = features.has_image_attachment
-            && default_pool_supports_capability(&self.routing, &self.provider_registry, "vision");
+        let requires_remote_video = features.has_video_attachment
+            && features.has_remote_video_attachment
+            && route_has_targets(&self.routing, "video");
         let web_search_route_requested = classification.route_name == "web_search";
         let has_explicit_web_search_route = route_has_targets(&self.routing, "web_search");
         let default_pool_supports_web_search = default_pool_supports_capability(
@@ -195,8 +196,8 @@ impl VirtualRouterEngineCore {
             web_search_route_requested && default_pool_supports_web_search;
 
         for route_name in route_queue {
-            let mut pools = if requires_vision {
-                self.routing.get(DEFAULT_ROUTE)
+            let mut pools = if requires_remote_video {
+                self.routing.get("video")
             } else if web_search_route_requested
                 && route_name == "web_search"
                 && has_explicit_web_search_route
@@ -210,9 +211,6 @@ impl VirtualRouterEngineCore {
             } else {
                 self.routing.get(&route_name)
             };
-            if requires_vision {
-                pools = filter_pools_by_capability(&pools, &self.provider_registry, "vision");
-            }
             if web_search_route_requested
                 && route_name == DEFAULT_ROUTE
                 && use_default_pool_web_search_fallback

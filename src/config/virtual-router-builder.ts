@@ -79,7 +79,12 @@ function synthesizeCapabilityRoutes(
     allowedProviders,
     supportsWebSearchCapability
   );
-  if (multimodalTargets.length === 0 && webSearchTargets.length === 0) {
+  const videoTargets = collectTargetsByCapability(
+    providerConfigs,
+    allowedProviders,
+    supportsVideoCapability
+  );
+  if (multimodalTargets.length === 0 && webSearchTargets.length === 0 && videoTargets.length === 0) {
     return routing;
   }
 
@@ -87,15 +92,15 @@ function synthesizeCapabilityRoutes(
   if (multimodalTargets.length > 0 && !routeHasConfiguredTargets(nextRouting.multimodal)) {
     nextRouting.multimodal = [buildCapabilityRoutePool('multimodal', multimodalTargets)];
   }
-  if (multimodalTargets.length > 0 && !routeHasConfiguredTargets(nextRouting.vision)) {
-    nextRouting.vision = [buildCapabilityRoutePool('vision', multimodalTargets)];
-  }
   if (
     webSearchTargets.length > 0
     && !routeHasConfiguredTargets(nextRouting.web_search)
     && !routeHasConfiguredTargets(nextRouting.search)
   ) {
     nextRouting.web_search = [buildCapabilityRoutePool('web_search', webSearchTargets)];
+  }
+  if (videoTargets.length > 0 && !routeHasConfiguredTargets(nextRouting.video)) {
+    nextRouting.video = [buildCapabilityRoutePool('video', videoTargets)];
   }
   return nextRouting;
 }
@@ -253,6 +258,32 @@ function supportsWebSearchCapability(modelNode: UnknownRecord): boolean {
   return false;
 }
 
+function supportsVideoCapability(modelNode: UnknownRecord): boolean {
+  const boolFlags = [
+    'supportsVideo',
+    'supportsVideos',
+    'supportsVideoInput',
+    'supportsVideoReasoning',
+    'video'
+  ];
+  for (const key of boolFlags) {
+    if (modelNode[key] === true) {
+      return true;
+    }
+  }
+  const capabilities = Array.isArray(modelNode.capabilities) ? modelNode.capabilities : [];
+  for (const capability of capabilities) {
+    if (typeof capability !== 'string') {
+      continue;
+    }
+    const normalized = capability.trim().toLowerCase();
+    if (normalized === 'video' || normalized === 'video_input' || normalized === 'input_video') {
+      return true;
+    }
+  }
+  return false;
+}
+
 function routeHasConfiguredTargets(routePools: VirtualRouterRoutingPool[] | undefined): boolean {
   if (!Array.isArray(routePools) || routePools.length === 0) {
     return false;
@@ -266,7 +297,7 @@ function routeHasConfiguredTargets(routePools: VirtualRouterRoutingPool[] | unde
 }
 
 function buildCapabilityRoutePool(
-  routeName: 'multimodal' | 'vision' | 'web_search',
+  routeName: 'multimodal' | 'web_search' | 'video',
   targets: string[]
 ): VirtualRouterRoutingPool {
   return {

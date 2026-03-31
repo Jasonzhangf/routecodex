@@ -96,6 +96,10 @@ function buildRoutingHints(args: {
     routing.multimodal = routePool('multimodal', args.routeTargets.default);
     notes.push('multimodal route suggested from supportsMultimodal capability.');
   }
+  if (args.capabilities?.supportsVideo) {
+    routing.video = routePool('video', args.routeTargets.default);
+    notes.push('video route suggested from supportsVideo capability.');
+  }
   if (args.routeTargets.webSearch) {
     routing.web_search = routePool('web_search', args.routeTargets.webSearch);
     notes.push('web_search route suggested from provider webSearch binding.');

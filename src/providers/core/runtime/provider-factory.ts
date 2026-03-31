@@ -29,6 +29,7 @@ import {
   resolveProviderModule,
   type RuntimeFactoryAuthConfig
 } from './provider-factory-helpers.js';
+import { classifyQwenChatProviderIdentity } from './qwenchat-http-provider-helpers.js';
 
 type RuntimeAwareProvider = IProviderV2 & { setRuntimeProfile?: (runtime: ProviderRuntimeProfile) => void };
 type RuntimeAwareConfig = OpenAIStandardConfig['config'] & { runtimeKey?: string };
@@ -327,6 +328,17 @@ export class ProviderFactory {
       })
     ) {
       return 'deepseek-http-provider';
+    }
+
+    if (
+      classifyQwenChatProviderIdentity({
+        providerFamily: runtime.providerFamily,
+        providerId: runtime.providerId,
+        providerKey: runtime.providerKey,
+        compatibilityProfile: runtime.compatibilityProfile
+      })
+    ) {
+      return 'qwenchat-http-provider';
     }
 
     return undefined;

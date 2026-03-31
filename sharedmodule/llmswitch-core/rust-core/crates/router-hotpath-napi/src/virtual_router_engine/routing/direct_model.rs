@@ -67,5 +67,5 @@ pub(crate) fn should_fallback_direct_model_for_media(
     if !(features.has_video_attachment && features.has_local_video_attachment) {
         return false;
     }
-    default_pool_supports_capability(routing, provider_registry, "vision")
+    default_pool_supports_capability(routing, provider_registry, "multimodal")
 }
