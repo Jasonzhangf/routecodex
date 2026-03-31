@@ -585,6 +585,16 @@ function extractQwenUploadTokenData(payload: Record<string, unknown>): QwenUploa
   return null;
 }
 
+function throwQwenUploadTokenError(
+  message: string,
+  opts?: { statusCode?: number; code?: string }
+): never {
+  const err = new Error(message);
+  (err as Error & { statusCode?: number; code?: string }).statusCode = opts?.statusCode ?? 502;
+  (err as Error & { statusCode?: number; code?: string }).code = opts?.code || 'QWENCHAT_UPLOAD_TOKEN_FAILED';
+  throw err;
+}
+
 async function requestUploadToken(
   baseUrl: string,
   file: LoadedAttachment,
@@ -605,13 +615,25 @@ async function requestUploadToken(
   if (!parsed.ok || !resp.ok) {
     const preview = parsed.rawText.slice(0, 200).replace(/\s+/g, ' ').trim();
     const suffix = preview ? ` body=${preview}` : '';
-    throw new Error(`Failed to get qwen upload token: HTTP ${resp.status}${suffix}`);
+    throwQwenUploadTokenError(`Failed to get qwen upload token: HTTP ${resp.status}${suffix}`, {
+      statusCode: resp.ok ? 502 : resp.status,
+      code: 'QWENCHAT_UPLOAD_TOKEN_HTTP_ERROR'
+    });
   }
 
   const payload = parsed.data;
   if (payload.success === false) {
     const reason = extractQwenErrorMessage(payload);
-    throw new Error(`Failed to get qwen upload token: ${reason || 'upstream rejected request'}`);
+    const dataNode = isRecord(payload.data) ? payload.data : undefined;
+    const dataKeys = dataNode ? Object.keys(dataNode).slice(0, 8).join(',') : '';
+    const preview = parsed.rawText.slice(0, 200).replace(/\s+/g, ' ').trim();
+    const detail = [reason, dataKeys ? `keys=${dataKeys}` : '', preview ? `body=${preview}` : '']
+      .filter(Boolean)
+      .join(' ');
+    throwQwenUploadTokenError(`Failed to get qwen upload token: ${detail || 'upstream rejected request'}`, {
+      statusCode: 502,
+      code: 'QWENCHAT_UPLOAD_TOKEN_REJECTED'
+    });
   }
 
   const tokenData = extractQwenUploadTokenData(payload);
@@ -623,7 +645,10 @@ async function requestUploadToken(
       .filter(Boolean)
       .join(' ');
     const suffix = detail ? ` (${detail})` : '';
-    throw new Error(`Failed to get qwen upload token: malformed response${suffix}`);
+    throwQwenUploadTokenError(`Failed to get qwen upload token: malformed response${suffix}`, {
+      statusCode: 502,
+      code: 'QWENCHAT_UPLOAD_TOKEN_MALFORMED'
+    });
   }
 
   return {
