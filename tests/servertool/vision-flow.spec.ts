@@ -203,4 +203,45 @@ describe('vision_auto servertool followup (entry-aware)', () => {
     expect(orchestration.executed).toBe(false);
     expect(reenterCalled).toBe(0);
   });
+
+  test('does not run vision flow when route already resolved to vision capability', async () => {
+    const adapterContext: AdapterContext = {
+      requestId: 'req-vision-route-bypass',
+      entryEndpoint: '/v1/responses',
+      providerProtocol: 'openai-chat',
+      providerType: 'openai',
+      routeId: 'vision',
+      hasImageAttachment: true,
+      capturedChatRequest: makeCapturedChatRequestWithImage()
+    } as any;
+
+    const chatResponse: JsonObject = {
+      id: 'chatcmpl-vision-route-bypass',
+      object: 'chat.completion',
+      model: 'gpt-test',
+      choices: [
+        {
+          index: 0,
+          message: { role: 'assistant', content: 'ok' },
+          finish_reason: 'stop'
+        }
+      ]
+    } as any;
+
+    let reenterCalled = 0;
+    const orchestration = await runServerToolOrchestration({
+      chat: chatResponse,
+      adapterContext,
+      entryEndpoint: '/v1/responses',
+      requestId: 'req-vision-route-bypass',
+      providerProtocol: 'openai-chat',
+      reenterPipeline: async () => {
+        reenterCalled += 1;
+        return { body: {} as JsonObject };
+      }
+    });
+
+    expect(orchestration.executed).toBe(false);
+    expect(reenterCalled).toBe(0);
+  });
 });

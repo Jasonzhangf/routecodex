@@ -103,6 +103,28 @@ export async function executeVisionBackendPlan(args: {
 function shouldRunVisionFlow(ctx: ServerToolHandlerContext): boolean {
   const record = ctx.adapterContext as unknown as Record<string, unknown>;
   const rt = readRuntimeMetadata(record);
+  const routeId =
+    typeof (ctx.adapterContext as { routeId?: unknown }).routeId === 'string'
+      ? String((ctx.adapterContext as { routeId?: unknown }).routeId).trim().toLowerCase()
+      : '';
+  const routeHintFromRt =
+    typeof (rt as any)?.routeHint === 'string'
+      ? String((rt as any).routeHint).trim().toLowerCase()
+      : '';
+  const routeHintFromRecord =
+    typeof (record as any).routeHint === 'string'
+      ? String((record as any).routeHint).trim().toLowerCase()
+      : '';
+  const routeNameFromRt =
+    typeof (rt as any)?.routeName === 'string'
+      ? String((rt as any).routeName).trim().toLowerCase()
+      : '';
+  const resolvedRoute = routeId || routeHintFromRt || routeHintFromRecord || routeNameFromRt;
+  // If the request is already routed to a multimodal/vision capability pool,
+  // do not trigger the legacy vision auto-followup (it causes an unnecessary second hop).
+  if (resolvedRoute === 'vision' || resolvedRoute === 'multimodal') {
+    return false;
+  }
   const followupRaw = (rt as any)?.serverToolFollowup;
   const followupFlag = followupRaw === true || followupRaw === 'true';
   if (followupFlag) {
