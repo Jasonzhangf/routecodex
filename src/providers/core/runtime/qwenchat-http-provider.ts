@@ -9,7 +9,8 @@ import {
   DEFAULT_QWENCHAT_BASE_URL,
   DEFAULT_QWENCHAT_COMPLETION_ENDPOINT,
   extractQwenChatPayload,
-  getQwenBaxiaTokens
+  getQwenBaxiaTokens,
+  parseIncomingMessages
 } from './qwenchat-http-provider-helpers.js';
 
 type BxCacheState = {
@@ -25,6 +26,8 @@ const bxCacheState: BxCacheState = {
   tokenCache: null,
   tokenCacheTime: 0
 };
+
+const VIDEO_REQUEST_TIMEOUT_MS = 60 * 60 * 1000;
 
 export class QwenChatHttpProvider extends HttpTransportProvider {
   constructor(config: OpenAIStandardConfig, dependencies: ModuleDependencies) {
@@ -46,6 +49,8 @@ export class QwenChatHttpProvider extends HttpTransportProvider {
 
   protected override async sendRequestInternal(request: UnknownObject): Promise<unknown> {
     const payload = extractQwenChatPayload(request);
+    const parsedMessages = parseIncomingMessages(payload.messages);
+    const isVideoRequest = parsedMessages.attachments.some((item) => item.explicitType === 'video');
     const baseUrl = this.getEffectiveBaseUrl().replace(/\/$/, '');
     const baxiaTokens = await getQwenBaxiaTokens(bxCacheState);
 
@@ -58,7 +63,14 @@ export class QwenChatHttpProvider extends HttpTransportProvider {
     const upstreamStream = await this.httpClient.postStream(
       sendPlan.completionUrl,
       sendPlan.completionBody,
-      sendPlan.completionHeaders
+      sendPlan.completionHeaders,
+      isVideoRequest
+        ? {
+            timeoutMs: VIDEO_REQUEST_TIMEOUT_MS,
+            idleTimeoutMs: VIDEO_REQUEST_TIMEOUT_MS,
+            headersTimeoutMs: VIDEO_REQUEST_TIMEOUT_MS
+          }
+        : undefined
     );
 
     if (payload.stream) {

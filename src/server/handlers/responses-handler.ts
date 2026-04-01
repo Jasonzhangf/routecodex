@@ -16,6 +16,7 @@ import { detectWarmupRequest } from '../utils/warmup-detector.js';
 import { recordWarmupSkipEvent } from '../utils/warmup-storm-tracker.js';
 import { trackClientConnectionState } from '../utils/client-connection-state.js';
 import { DEFAULT_TIMEOUTS } from '../../constants/index.js';
+import { payloadContainsVideoInput, VIDEO_REQUEST_TIMEOUT_MS } from '../utils/video-request-detection.js';
 
 interface ResponsesHandlerOptions {
   entryEndpoint?: string;
@@ -50,10 +51,12 @@ export async function handleResponses(
   ).trim();
   const parsedTimeout = Number(rawTimeout);
   const defaultTimeoutMs = DEFAULT_TIMEOUTS.HTTP_SSE_TOTAL_MS;
-  const requestTimeoutMs =
+  const configuredRequestTimeoutMs =
     rawTimeout === ''
       ? defaultTimeoutMs
       : (Number.isFinite(parsedTimeout) ? parsedTimeout : defaultTimeoutMs);
+  let requestTimeoutMs = configuredRequestTimeoutMs;
+  let isVideoRequest = false;
   let timedOut = false;
   let timeoutHandle: NodeJS.Timeout | undefined;
   const clearTimeoutHandle = () => {
@@ -129,6 +132,10 @@ export async function handleResponses(
     }
     if (!isSubmitToolOutputs && (acceptsSse || options.forceStream) && (!originalStream || options.forceStream)) {
       payload.stream = true;
+    }
+    isVideoRequest = payloadContainsVideoInput(payload);
+    if (isVideoRequest) {
+      requestTimeoutMs = Math.max(configuredRequestTimeoutMs, VIDEO_REQUEST_TIMEOUT_MS);
     }
     const wantsStream = typeof options.forceStream === 'boolean' ? options.forceStream : inboundStream;
 
@@ -238,7 +245,9 @@ export async function handleResponses(
       outboundStream,
       clientAcceptsSse: acceptsSse,
       originalStream,
-      type: payload?.type
+      type: payload?.type,
+      videoRequest: isVideoRequest || undefined,
+      timeoutMs: requestTimeoutMs
     });
     const result = await ctx.executePipeline(pipelineInput);
     clearTimeoutHandle();
@@ -251,7 +260,11 @@ export async function handleResponses(
         preserveTimingForUsage: true
       });
     }
-    sendPipelineResponse(res, result, effectiveRequestId, { forceSSE: wantsStream, entryEndpoint });
+    sendPipelineResponse(res, result, effectiveRequestId, {
+      forceSSE: wantsStream,
+      entryEndpoint,
+      ...(isVideoRequest ? { sseTotalTimeoutMs: requestTimeoutMs } : {})
+    });
   } catch (error: unknown) {
     clearTimeoutHandle();
     if (timedOut) {

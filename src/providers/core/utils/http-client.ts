@@ -147,23 +147,36 @@ export class HttpClient {
   async postStream(
     url: string,
     data?: unknown,
-    headers?: Record<string, string>
+    headers?: Record<string, string>,
+    streamConfig?: {
+      timeoutMs?: number;
+      idleTimeoutMs?: number;
+      headersTimeoutMs?: number;
+    }
   ): Promise<NodeJS.ReadableStream> {
     const fullUrl = this.buildUrl(url);
     const finalHeaders = this.buildHeaders({ Accept: 'text/event-stream', ...(headers || {}) });
 
     const controller = new AbortController();
-    const timeout = this.defaultConfig.timeout;
+    const timeout = Number.isFinite(streamConfig?.timeoutMs) && Number(streamConfig?.timeoutMs) > 0
+      ? Number(streamConfig?.timeoutMs)
+      : this.defaultConfig.timeout;
     // NOTE: stream 请求如果在拿到 response body 后立刻清除 timeout，会导致“流式卡死不返回”。
     // 这里维持一个全局 timeout + idle timeout，直到上游流结束或被消费者关闭。
+    const overrideIdle = Number(streamConfig?.idleTimeoutMs);
     const cfgIdle = this.defaultConfig.streamIdleTimeoutMs;
-    const idleTimeoutMs = Number.isFinite(cfgIdle) && cfgIdle > 0
+    const idleTimeoutMs = Number.isFinite(overrideIdle) && overrideIdle > 0
+      ? overrideIdle
+      : Number.isFinite(cfgIdle) && cfgIdle > 0
       ? cfgIdle
       : Math.min(DEFAULT_TIMEOUTS.PROVIDER_STREAM_IDLE_CAP_MS, timeout);
+    const overrideHeaders = Number(streamConfig?.headersTimeoutMs);
     const cfgHeaders = this.defaultConfig.streamHeadersTimeoutMs;
     // NOTE: headers timeout controls how long we wait for the *first response headers* from upstream.
     // Some upstreams are slow to flush headers for SSE; keep this fairly generous by default.
-    const headersTimeoutMs = Number.isFinite(cfgHeaders) && cfgHeaders > 0
+    const headersTimeoutMs = Number.isFinite(overrideHeaders) && overrideHeaders > 0
+      ? overrideHeaders
+      : Number.isFinite(cfgHeaders) && cfgHeaders > 0
       ? cfgHeaders
       : Math.min(DEFAULT_TIMEOUTS.PROVIDER_STREAM_HEADERS_CAP_MS, timeout);
     const abortWithReason = (reason: string) => {

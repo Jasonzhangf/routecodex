@@ -12,6 +12,7 @@ import {
 } from './handler-utils.js';
 import { applySystemPromptOverride } from '../../utils/system-prompt-loader.js';
 import { trackClientConnectionState } from '../utils/client-connection-state.js';
+import { payloadContainsVideoInput, VIDEO_REQUEST_TIMEOUT_MS } from '../utils/video-request-detection.js';
 
 type ChatCompletionPayload = {
   stream?: boolean;
@@ -31,6 +32,7 @@ export async function handleChatCompletions(req: Request, res: Response, ctx: Ha
     const payload = (req.body && typeof req.body === 'object'
       ? req.body
       : {}) as ChatCompletionPayload;
+    const isVideoRequest = payloadContainsVideoInput(payload);
     const originalPayload = JSON.parse(JSON.stringify(payload)) as ChatCompletionPayload;
     const clientHeaders = captureClientHeaders(req.headers);
     const clientConnectionState = trackClientConnectionState(req, res);
@@ -50,7 +52,8 @@ export async function handleChatCompletions(req: Request, res: Response, ctx: Ha
       outboundStream,
       clientAcceptsSse: acceptsSse,
       originalStream,
-      model: payload?.model
+      model: payload?.model,
+      videoRequest: isVideoRequest || undefined
     });
     const mockSampleReqId =
       process.env.ROUTECODEX_USE_MOCK === '1' &&
@@ -85,7 +88,11 @@ export async function handleChatCompletions(req: Request, res: Response, ctx: Ha
         preserveTimingForUsage: true
       });
     }
-    sendPipelineResponse(res, result, requestId, { forceSSE: wantsSSE, entryEndpoint });
+    sendPipelineResponse(res, result, requestId, {
+      forceSSE: wantsSSE,
+      entryEndpoint,
+      ...(isVideoRequest ? { sseTotalTimeoutMs: VIDEO_REQUEST_TIMEOUT_MS } : {})
+    });
   } catch (error: unknown) {
     logRequestError(entryEndpoint, requestId, error);
     if (res.headersSent) {

@@ -22,6 +22,7 @@ const BLOCKED_HEADERS = new Set(['content-length', 'transfer-encoding', 'connect
 interface DispatchOptions {
   forceSSE?: boolean;
   entryEndpoint?: string;
+  sseTotalTimeoutMs?: number;
 }
 
 export interface SsePayloadShape {
@@ -410,10 +411,14 @@ export function sendPipelineResponse(
       ['ROUTECODEX_HTTP_SSE_IDLE_TIMEOUT_MS', 'RCC_HTTP_SSE_IDLE_TIMEOUT_MS'],
       DEFAULT_TIMEOUTS.HTTP_SSE_IDLE_MS
     );
-    const totalTimeoutMs = readTimeoutMs(
+    let totalTimeoutMs = readTimeoutMs(
       ['ROUTECODEX_HTTP_SSE_TIMEOUT_MS', 'RCC_HTTP_SSE_TIMEOUT_MS'],
       DEFAULT_TIMEOUTS.HTTP_SSE_TOTAL_MS
     );
+    const overrideSseTotalTimeoutMs = Number(options?.sseTotalTimeoutMs);
+    if (Number.isFinite(overrideSseTotalTimeoutMs) && overrideSseTotalTimeoutMs > 0) {
+      totalTimeoutMs = Math.max(totalTimeoutMs, overrideSseTotalTimeoutMs);
+    }
 
     const keepaliveMs = readTimeoutMs(
       ['ROUTECODEX_HTTP_SSE_KEEPALIVE_MS', 'RCC_HTTP_SSE_KEEPALIVE_MS'],
