@@ -26,9 +26,10 @@ else
   exit 1
 fi
 
-echo "🔨 构建源码..."
-# release 包：显式使用 BUILD_MODE=release 以便在编译期区分 dev/release
-BUILD_MODE=release npm run build
+echo "🔨 构建并打包 rcc（本地内联 llms）..."
+# 统一走 pack:rcc（内部会 release build + 生成 @jsonstudio/rcc tgz），
+# 并默认内联本地 sharedmodule/llmswitch-core 到包内，避免依赖外部 npm 版本。
+RCC_LLMS_INLINE_LOCAL=1 npm run pack:rcc
 
 # 构建过程可能自动 bump 版本号，因此需要重新读取
 NEW_VERSION=$(node -p "require('./package.json').version" 2>/dev/null || echo "${VERSION}")
@@ -37,47 +38,9 @@ if [ "${NEW_VERSION}" != "${VERSION}" ]; then
   VERSION=${NEW_VERSION}
 fi
 
-TMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/rcc-release.XXXXXX")
-TARBALL="routecodex-${VERSION}.tgz"
-
-echo "📦 打包当前源码为临时 npm 包..."
-rm -f "routecodex-"*.tgz 2>/dev/null || true
-npm pack --silent
-
-if [ ! -f "${TARBALL}" ]; then
-  echo "❌ 打包失败，未找到 ${TARBALL}"
-  exit 1
-fi
-
-echo "📂 解包到临时目录: ${TMP_DIR}"
-tar xzf "${TARBALL}" -C "${TMP_DIR}"
-PKG_DIR="${TMP_DIR}/package"
-
-if [ ! -d "${PKG_DIR}" ]; then
-  echo "❌ 解包失败，未找到 ${PKG_DIR}"
-  exit 1
-fi
-
-echo "🛠️  重写临时包为 @jsonstudio/rcc (release)..."
-node - <<'EOF' "${PKG_DIR}"
-const fs = require('fs');
-const path = require('path');
-const pkgDir = process.argv[2];
-const pkgPath = path.join(pkgDir, 'package.json');
-const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
-pkg.name = '@jsonstudio/rcc';
-pkg.bin = { rcc: './dist/cli.js' };
-fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2));
-EOF
-
-echo "📦 为 @jsonstudio/rcc (release) 生成独立 tgz 包..."
-(
-  cd "${PKG_DIR}"
-  npm pack --silent
-)
-RCC_TARBALL="${PKG_DIR}/jsonstudio-rcc-${VERSION}.tgz"
+RCC_TARBALL="jsonstudio-rcc-${VERSION}.tgz"
 if [ ! -f "${RCC_TARBALL}" ]; then
-  echo "❌ 打包 @jsonstudio/rcc 失败，未找到 ${RCC_TARBALL}"
+  echo "❌ 打包失败，未找到 ${RCC_TARBALL}"
   exit 1
 fi
 
@@ -88,14 +51,11 @@ echo "🌍 全局安装 @jsonstudio/rcc (release)..."
 npm install -g "${RCC_TARBALL}" --no-audit --no-fund
 node scripts/ensure-cli-command-shim.mjs || true
 
-echo "🔗 固定全局 rcc 的 @jsonstudio/llms 到本地 sharedmodule/llmswitch-core..."
-node scripts/link-global-llms-local.mjs --package @jsonstudio/rcc --require-target
-
 echo "🔍 验证 rcc 安装..."
 if command -v rcc >/dev/null 2>&1; then
   echo "✅ @jsonstudio/rcc 已全局安装：$(command -v rcc)"
   rcc --version || true
-  node -e "const fs=require('fs');const path=require('path');const cp=require('child_process');const root=cp.execSync('npm root -g').toString().trim();const llmsPath=path.join(root,'@jsonstudio','rcc','node_modules','@jsonstudio','llms');const pkgPath=path.join(llmsPath,'package.json');const link=fs.existsSync(llmsPath)&&fs.lstatSync(llmsPath).isSymbolicLink();const target=link?fs.readlinkSync(llmsPath):'(not-symlink)';const version=fs.existsSync(pkgPath)?JSON.parse(fs.readFileSync(pkgPath,'utf8')).version:'unknown';console.log('🔎 全局 rcc @jsonstudio/llms:',version,'link=',link,'target=',target);"
+  node -e "const fs=require('fs');const path=require('path');const cp=require('child_process');const root=cp.execSync('npm root -g').toString().trim();const llmsPath=path.join(root,'@jsonstudio','rcc','node_modules','@jsonstudio','llms');const pkgPath=path.join(llmsPath,'package.json');const link=fs.existsSync(llmsPath)&&fs.lstatSync(llmsPath).isSymbolicLink();const target=link?fs.readlinkSync(llmsPath):'(inline)';const version=fs.existsSync(pkgPath)?JSON.parse(fs.readFileSync(pkgPath,'utf8')).version:'unknown';console.log('🔎 全局 rcc @jsonstudio/llms:',version,'link=',link,'target=',target);"
 else
   echo "❌ 未找到 rcc 命令，请检查 npm 全局安装路径"
   exit 1

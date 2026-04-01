@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
@@ -24,7 +25,9 @@ if (!args.name || !args.bin) {
 const pkgPath = path.join(projectRoot, 'package.json');
 const backupPath = pkgPath + '.bak.pack';
 const ensureScriptPath = path.join(projectRoot, 'scripts', 'ensure-llmswitch-mode.mjs');
+const linkScriptPath = path.join(projectRoot, 'scripts', 'link-llmswitch.mjs');
 const llmsPath = path.join(projectRoot, 'node_modules', '@jsonstudio', 'llms');
+const localLlmsDir = path.join(projectRoot, 'sharedmodule', 'llmswitch-core');
 const localLlmsPkgPath = path.join(projectRoot, 'sharedmodule', 'llmswitch-core', 'package.json');
 
 function runEnsureMode(mode) {
@@ -35,9 +38,60 @@ function runEnsureMode(mode) {
   }
 }
 
+function runNodeScript(scriptPath, args = []) {
+  const res = spawnSync(process.execPath, [scriptPath, ...args], { stdio: 'inherit' });
+  if ((res.status ?? 0) !== 0) {
+    throw new Error(`${path.basename(scriptPath)} ${args.join(' ')} failed`);
+  }
+}
+
+function runNpm(args) {
+  const res = spawnSync('npm', args, { stdio: 'inherit', cwd: projectRoot });
+  if ((res.status ?? 0) !== 0) {
+    throw new Error(`npm ${args.join(' ')} failed`);
+  }
+}
+
+function installLocalLlmsFromTarball() {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rcc-inline-llms-'));
+  try {
+    const pack = spawnSync('npm', ['pack', localLlmsDir, '--silent'], {
+      cwd: tmpDir,
+      encoding: 'utf8'
+    });
+    if ((pack.status ?? 0) !== 0) {
+      throw new Error(`npm pack ${localLlmsDir} failed`);
+    }
+    const lines = String(pack.stdout || '')
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean);
+    const tarballName = lines[lines.length - 1];
+    if (!tarballName) {
+      throw new Error('npm pack local llms produced empty tarball name');
+    }
+    const tarballPath = path.join(tmpDir, tarballName);
+    if (!exists(tarballPath)) {
+      throw new Error(`local llms tarball missing: ${tarballPath}`);
+    }
+    runNpm(['install', '--no-audit', '--no-fund', '--no-save', tarballPath]);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+}
+
 function isSymlink(p) {
   try {
     return fs.lstatSync(p).isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
+function exists(p) {
+  try {
+    fs.accessSync(p);
+    return true;
   } catch {
     return false;
   }
@@ -66,6 +120,20 @@ const original = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
 fs.writeFileSync(backupPath, JSON.stringify(original, null, 2));
 
 try {
+  const inlineLocalLlmsForRcc =
+    isRcc &&
+    exists(localLlmsPkgPath) &&
+    String(process.env.RCC_LLMS_INLINE_LOCAL ?? process.env.ROUTECODEX_RCC_INLINE_LOCAL ?? '1').trim() !== '0';
+
+  if (inlineLocalLlmsForRcc) {
+    // For rcc release packing, inline local llms as a real dependency tree under node_modules
+    // so npm pack can bundle it into the tarball (no external registry dependency at install time).
+    if (isSymlink(llmsPath)) {
+      runNodeScript(linkScriptPath, ['unlink']);
+    }
+    installLocalLlmsFromTarball();
+  }
+
   const mutated = { ...original };
   mutated.name = args.name;
   mutated.bin = { [args.bin]: 'dist/cli.js' };
@@ -77,8 +145,18 @@ try {
   // Prefer real dependencies over bundled to avoid missing build artifacts (e.g., ajv/dist)
 
   if (isDevPkg || isRcc) {
-    mutated.bundledDependencies = [];
-    mutated.bundleDependencies = [];
+    const inlineLocalLlmsForRcc =
+      isRcc &&
+      exists(localLlmsPkgPath) &&
+      String(process.env.RCC_LLMS_INLINE_LOCAL ?? process.env.ROUTECODEX_RCC_INLINE_LOCAL ?? '1').trim() !== '0';
+    if (inlineLocalLlmsForRcc) {
+      mutated.bundledDependencies = ['@jsonstudio/llms'];
+      mutated.bundleDependencies = ['@jsonstudio/llms'];
+      console.log('[pack-mode] inline local @jsonstudio/llms into rcc tarball');
+    } else {
+      mutated.bundledDependencies = [];
+      mutated.bundleDependencies = [];
+    }
     const llmsOverride = String(process.env.RCC_LLMS_VERSION || process.env.ROUTECODEX_PACK_LLMS_VERSION || '').trim();
     const localLlmsVersion = readLocalLlmsVersion();
     const llmsVersion = (isRcc && llmsOverride)
