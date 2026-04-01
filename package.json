@@ -156,7 +156,8 @@
     "build:rccx": "npm run build:min && node scripts/pack-mode.mjs --name @jsonstudio/rccx --bin rccx",
     "compare:codex:rccx": "node scripts/compare-codex-rccx.mjs",
     "fix:cli-permission": "node scripts/ensure-cli-executable.mjs",
-    "fix:cli-shim": "node scripts/ensure-cli-command-shim.mjs"
+    "fix:cli-shim": "node scripts/ensure-cli-command-shim.mjs",
+    "public:rcc": "npm run publish:rcc --"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.58",

@@ -6,98 +6,76 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, '..');
-const PACK_SCRIPT = path.join(PROJECT_ROOT, 'scripts', 'pack-mode.mjs');
 const pkgPath = path.join(PROJECT_ROOT, 'package.json');
-const llmsPath = path.join(PROJECT_ROOT, 'node_modules', '@jsonstudio', 'llms');
-const localLlmsPkgPath = path.join(PROJECT_ROOT, 'sharedmodule', 'llmswitch-core', 'package.json');
 
 function parseArgs(argv) {
-  const out = {};
+  const out = { passthrough: [] };
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--llms-tgz') { out.llmsTgz = argv[++i]; continue; }
     if (a === '--llms-version') { out.llmsVersion = argv[++i]; continue; }
+    if (a === '--tag') { out.tag = argv[++i]; continue; }
+    if (a === '--dry-run') { out.dryRun = true; continue; }
+    out.passthrough.push(a);
   }
   return out;
 }
 
-function exists(p) {
-  try {
-    fs.accessSync(p);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 function run(command, args, options = {}) {
-  const res = spawnSync(command, args, { stdio: 'inherit', ...options });
+  const res = spawnSync(command, args, { stdio: 'inherit', cwd: PROJECT_ROOT, ...options });
   if ((res.status ?? 0) !== 0) {
     throw new Error(`${command} ${args.join(' ')} failed`);
   }
 }
 
+function readPkgVersion() {
+  const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+  return String(pkg.version || '').trim();
+}
+
 try {
   const args = parseArgs(process.argv);
-  const llmsTgz = String(args.llmsTgz || process.env.RCC_LLMS_TGZ || '').trim();
-  const llmsVersion = String(
-    args.llmsVersion ||
-    process.env.RCC_LLMS_VERSION ||
-    (exists(localLlmsPkgPath) ? JSON.parse(fs.readFileSync(localLlmsPkgPath, 'utf-8')).version : '')
-  ).trim();
 
-  const hadDevLink = (() => {
-    try {
-      return fs.lstatSync(llmsPath).isSymbolicLink();
-    } catch {
-      return false;
-    }
-  })();
+  // 始终内联本地 llms，避免发布流程改动全局 llms link。
+  const env = {
+    ...process.env,
+    RCC_LLMS_INLINE_LOCAL: process.env.RCC_LLMS_INLINE_LOCAL ?? '1'
+  };
 
-  if (llmsTgz) {
-    if (!exists(llmsTgz)) {
-      throw new Error(`--llms-tgz not found: ${llmsTgz}`);
-    }
-    if (hadDevLink) {
-      run(process.execPath, [path.join(PROJECT_ROOT, 'scripts', 'link-llmswitch.mjs'), 'unlink'], { cwd: PROJECT_ROOT });
-    }
-    run('npm', ['install', '--no-audit', '--no-fund', '--no-save', llmsTgz], { cwd: PROJECT_ROOT });
+  const packArgs = ['run', 'pack:rcc', '--'];
+  if (args.llmsTgz) {
+    packArgs.push('--llms-tgz', String(args.llmsTgz));
+  }
+  if (args.llmsVersion) {
+    packArgs.push('--llms-version', String(args.llmsVersion));
   }
 
-  // 1) 使用 release 模式构建 dist。若存在本地 sharedmodule/llmswitch-core，则 release 也以其为唯一真源。
-  run('npm', ['run', 'build:min'], {
-    cwd: PROJECT_ROOT,
-    env: { ...process.env, BUILD_MODE: 'release', ...(llmsVersion ? { RCC_LLMS_VERSION: llmsVersion } : {}) }
-  });
+  run('npm', packArgs, { env });
 
-  // 2) 通过 pack-mode 生成 rcc tarball（内部会临时切换 package.json.name/bin，并同步 llms 版本声明）
-  run(
-    process.execPath,
-    [PACK_SCRIPT, '--name', '@jsonstudio/rcc', '--bin', 'rcc'],
-    { cwd: PROJECT_ROOT, env: { ...process.env, ...(llmsVersion ? { RCC_LLMS_VERSION: llmsVersion } : {}) } }
-  );
+  const version = readPkgVersion();
+  if (!version) {
+    throw new Error('failed to read version from package.json after pack:rcc');
+  }
 
-  // 构建过程中版本号可能被 bump（gen-build-info 会 auto-bump），因此需要在 pack 之后重新读取版本号
-  const updatedPkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
-  const version = updatedPkg.version;
   const tarballName = `jsonstudio-rcc-${version}.tgz`;
   const tarballPath = path.join(PROJECT_ROOT, tarballName);
-
   if (!fs.existsSync(tarballPath)) {
     throw new Error(`tarball not found: ${tarballPath}`);
   }
 
-  // 3) 发布 npm 包
-  run('npm', ['publish', tarballName], { cwd: PROJECT_ROOT });
-
-  // 4) 发布结束后恢复 dev 模式（routecodex 约定始终为 dev CLI；rcc 发布时才切 release）。
-  if (hadDevLink) {
-    run('npm', ['run', 'llmswitch:ensure'], {
-      cwd: PROJECT_ROOT,
-      env: { ...process.env, BUILD_MODE: 'dev' }
-    });
+  const publishArgs = ['publish', tarballName];
+  if (args.tag) {
+    publishArgs.push('--tag', String(args.tag));
   }
+  if (args.dryRun) {
+    publishArgs.push('--dry-run');
+  }
+  if (args.passthrough.length > 0) {
+    publishArgs.push(...args.passthrough);
+  }
+
+  run('npm', publishArgs);
 } catch (err) {
-  console.error('[publish-rcc] failed:', err.message);
+  console.error('[publish-rcc] failed:', err instanceof Error ? err.message : String(err));
   process.exit(1);
 }

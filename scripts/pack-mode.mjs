@@ -62,18 +62,36 @@ function installLocalLlmsFromTarball() {
     if ((pack.status ?? 0) !== 0) {
       throw new Error(`npm pack ${localLlmsDir} failed`);
     }
-    const lines = String(pack.stdout || '')
-      .split('\n')
-      .map((line) => line.trim())
-      .filter(Boolean);
-    const tarballName = lines[lines.length - 1];
-    if (!tarballName) {
-      throw new Error('npm pack local llms produced empty tarball name');
+
+    const streamText = `${String(pack.stdout || '')}\n${String(pack.stderr || '')}`;
+    const candidates = Array.from(
+      new Set(
+        streamText
+          .split(/\s+/)
+          .map((token) => token.trim())
+          .filter((token) => token.endsWith('.tgz'))
+      )
+    );
+
+    const tarballsInTmp = (() => {
+      try {
+        return fs.readdirSync(tmpDir)
+          .filter((name) => name.endsWith('.tgz'))
+          .map((name) => path.join(tmpDir, name));
+      } catch {
+        return [];
+      }
+    })();
+
+    const resolvedCandidates = candidates
+      .map((token) => (path.isAbsolute(token) ? token : path.join(tmpDir, token)))
+      .filter((candidatePath) => exists(candidatePath));
+
+    const tarballPath = resolvedCandidates[0] || tarballsInTmp[0] || '';
+    if (!tarballPath) {
+      throw new Error(`local llms tarball missing (stdout=${JSON.stringify(String(pack.stdout || '').trim())})`);
     }
-    const tarballPath = path.join(tmpDir, tarballName);
-    if (!exists(tarballPath)) {
-      throw new Error(`local llms tarball missing: ${tarballPath}`);
-    }
+
     runNpm(['install', '--no-audit', '--no-fund', '--no-save', tarballPath]);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
