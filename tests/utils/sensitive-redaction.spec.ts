@@ -26,13 +26,13 @@ describe('sensitive redaction', () => {
 
   it('redacts bearer/sk tokens embedded in free text while keeping ordinary text', () => {
     const input = {
-      note: 'use Authorization: Bearer abcdefghijklmnop and sk-1234567890abcdef123456 to call api',
+      note: 'use Authorization: Bearer abcdefghijklmnop and sk-test-token to call api',
       usage: { total_tokens: 42 }
     };
     const output = redactSensitiveData(input) as Record<string, unknown>;
     const note = String(output.note || '');
     expect(note).not.toContain('abcdefghijklmnop');
-    expect(note).not.toContain('sk-1234567890abcdef123456');
+    expect(note).not.toContain('sk-test-token');
     expect(note).toContain('[REDACTED]');
     expect((output.usage as Record<string, unknown>).total_tokens).toBe(42);
   });

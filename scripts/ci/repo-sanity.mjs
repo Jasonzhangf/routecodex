@@ -151,8 +151,26 @@ function checkTrackedSecrets() {
     const out = spawnSync(
       'git',
       entry.mode === 'F'
-        ? ['grep', '-nF', '-e', entry.pattern, '--', '.', ':(exclude)scripts/ci/repo-sanity.mjs']
-        : ['grep', '-nE', '-e', entry.pattern, '--', '.', ':(exclude)scripts/ci/repo-sanity.mjs'],
+        ? [
+          'grep',
+          '-nF',
+          '-e',
+          entry.pattern,
+          '--',
+          '.',
+          ':(exclude)scripts/ci/repo-sanity.mjs',
+          ':(exclude)scripts/ci/secrets-check.mjs'
+        ]
+        : [
+          'grep',
+          '-nE',
+          '-e',
+          entry.pattern,
+          '--',
+          '.',
+          ':(exclude)scripts/ci/repo-sanity.mjs',
+          ':(exclude)scripts/ci/secrets-check.mjs'
+        ],
       { encoding: 'utf8' }
     );
     // git grep exits with 1 when no matches; 0 when matches; >1 for errors.
