@@ -102,4 +102,44 @@ describe('errorsample writer safeguards', () => {
       await fs.rm(tmp, { recursive: true, force: true });
     }
   });
+
+  it('redacts obvious secret fields before persisting sample payload', async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-errorsamples-redact-'));
+    const envBackup = new Map<string, string | undefined>();
+    for (const key of ENV_KEYS) {
+      envBackup.set(key, process.env[key]);
+    }
+    try {
+      process.env.RCC_ERRORSAMPLES_DIR = tmp;
+      process.env.ROUTECODEX_ERRORSAMPLE_PRUNE_INTERVAL_MS = '0';
+
+      const file = await writeErrorsampleJson({
+        group: 'client-tool-error',
+        kind: 'chat_process.req.stage2.semantic_map.exec_command.redact',
+        payload: {
+          apiKey: 'sk-user-aaaaaaaaaaaaaaaaaaaaaaaa',
+          headers: {
+            Authorization: 'Bearer abcdefghijklmnop'
+          },
+          note: 'api_key=raw-secret-key-value'
+        }
+      });
+
+      const text = await fs.readFile(file, 'utf8');
+      expect(text).not.toContain('raw-secret-key-value');
+      expect(text).not.toContain('Bearer abcdefghijklmnop');
+      expect(text).not.toContain('sk-user-aaaaaaaaaaaaaaaaaaaaaaaa');
+      expect(text).toContain('[REDACTED]');
+    } finally {
+      for (const key of ENV_KEYS) {
+        const value = envBackup.get(key);
+        if (value == null) {
+          delete process.env[key];
+        } else {
+          process.env[key] = value;
+        }
+      }
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
 });

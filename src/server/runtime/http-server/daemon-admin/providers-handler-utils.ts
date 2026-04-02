@@ -230,3 +230,25 @@ export function validateAndNormalizeProviderConfig(
   }
   return { ok: true, provider: normalized };
 }
+
+const PROVIDER_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+
+export function validateProviderIdInput(
+  raw: unknown
+): { ok: true; providerId: string } | { ok: false; message: string } {
+  if (typeof raw !== 'string') {
+    return { ok: false, message: 'providerId must be a string' };
+  }
+  const providerId = raw.trim();
+  if (!providerId) {
+    return { ok: false, message: 'providerId is required' };
+  }
+  if (!PROVIDER_ID_PATTERN.test(providerId)) {
+    return {
+      ok: false,
+      message:
+        'providerId format is invalid. Use 1-64 chars: letters/digits, and optional . _ - (must start with letter/digit).'
+    };
+  }
+  return { ok: true, providerId };
+}

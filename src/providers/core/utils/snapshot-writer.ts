@@ -7,6 +7,7 @@ import { buildInfo } from '../../../build-info.js';
 import { resolveRccSnapshotsDirFromEnv } from '../../../config/user-data-paths.js';
 import { runtimeFlags } from '../../../runtime/runtime-flags.js';
 import { writeErrorsampleJson } from '../../../utils/errorsamples.js';
+import { redactSensitiveData } from '../../../utils/sensitive-redaction.js';
 import {
   resetProviderSnapshotErrorBufferForTests,
 } from './snapshot-writer-buffer.js';
@@ -106,6 +107,8 @@ function buildSnapshotPayload(options: {
   url?: string;
   extraMeta?: Record<string, unknown>;
 }) {
+  const redactedData = redactSensitiveData(options.data);
+  const redactedHeaders = redactSensitiveData(maskHeaders(options.headers || {})) as Record<string, unknown>;
   return {
     meta: {
       stage: options.stage,
@@ -114,8 +117,8 @@ function buildSnapshotPayload(options: {
       ...(options.extraMeta || {})
     },
     url: options.url,
-    headers: maskHeaders(options.headers || {}),
-    ...(typeof options.data === 'string' ? { bodyText: options.data } : { body: options.data })
+    headers: redactedHeaders,
+    ...(typeof redactedData === 'string' ? { bodyText: redactedData } : { body: redactedData })
   };
 }
 

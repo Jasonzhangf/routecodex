@@ -134,6 +134,8 @@ function checkTrackedSecrets() {
   const patterns = [
     // OpenAI-style API keys.
     { label: 'openai_sk', mode: 'E', pattern: String.raw`sk-[A-Za-z0-9]{20,}` },
+    // OpenRouter API keys.
+    { label: 'openrouter_sk', mode: 'E', pattern: String.raw`sk-or-v1-[A-Za-z0-9]{32,}` },
     // Google API keys.
     { label: 'google_api_key', mode: 'E', pattern: String.raw`AIza[0-9A-Za-z\-_]{20,}` },
     // GitHub classic personal access tokens.

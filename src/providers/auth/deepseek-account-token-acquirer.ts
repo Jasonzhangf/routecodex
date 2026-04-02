@@ -29,6 +29,38 @@ type TokenFileSnapshot = {
   sourceObject: Record<string, unknown> | null;
 };
 
+function stripSensitiveFieldsForTokenPersist(
+  value: Record<string, unknown> | null | undefined
+): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {};
+  }
+  const out: Record<string, unknown> = { ...value };
+  const blockedKeys = [
+    'password',
+    'pass',
+    'secret',
+    'client_secret',
+    'clientSecret',
+    'apiKey',
+    'api_key',
+    'authorization',
+    'cookie'
+  ];
+  for (const key of blockedKeys) {
+    delete out[key];
+  }
+  const credentialsNode = out.credentials;
+  if (credentialsNode && typeof credentialsNode === 'object' && !Array.isArray(credentialsNode)) {
+    const nextCredentials = { ...(credentialsNode as Record<string, unknown>) };
+    for (const key of blockedKeys) {
+      delete nextCredentials[key];
+    }
+    out.credentials = nextCredentials;
+  }
+  return out;
+}
+
 export type EnsureDeepSeekTokenReason = 'initialize' | 'validate' | 'refresh' | 'daemon' | 'manual';
 
 export type EnsureDeepSeekAccountTokenOptions = {
@@ -448,15 +480,15 @@ async function writeTokenFile(params: {
   sourceObject?: Record<string, unknown> | null;
 }): Promise<void> {
   const nowIso = new Date().toISOString();
+  const sanitizedSourceObject = stripSensitiveFieldsForTokenPersist(params.sourceObject || null);
   const payload: Record<string, unknown> = {
-    ...(params.sourceObject || {}),
+    ...sanitizedSourceObject,
     access_token: params.token,
     token: params.token,
     account_alias: params.alias,
     ...(params.credential?.mobile ? { mobile: params.credential.mobile } : {}),
-    ...(params.credential?.password ? { password: params.credential.password } : {}),
     created_at:
-      normalizeString((params.sourceObject || {}).created_at) ||
+      normalizeString((sanitizedSourceObject || {}).created_at) ||
       nowIso,
     updated_at: nowIso
   };

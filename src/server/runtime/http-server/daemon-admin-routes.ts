@@ -65,6 +65,7 @@ export function isLocalRequest(req: Request): boolean {
 
 const DAEMON_ADMIN_AUTH_REQUIRED_LOCAL_KEY = '__routecodexDaemonAdminAuthRequired';
 const DAEMON_ADMIN_APIKEY_CONFIGURED_LOCAL_KEY = '__routecodexDaemonAdminApiKeyConfigured';
+const DAEMON_ADMIN_LOCAL_BYPASS_LOCAL_KEY = '__routecodexDaemonAdminLocalBypassEnabled';
 
 function normalizeHost(value: unknown): string {
   if (typeof value !== 'string') {
@@ -82,8 +83,34 @@ function setDaemonAdminAuthRequiredForApp(app: Application, required: boolean): 
   (app.locals as Record<string, unknown>)[DAEMON_ADMIN_AUTH_REQUIRED_LOCAL_KEY] = required;
 }
 
+function setDaemonAdminLocalBypassForApp(app: Application, enabled: boolean): void {
+  (app.locals as Record<string, unknown>)[DAEMON_ADMIN_LOCAL_BYPASS_LOCAL_KEY] = enabled;
+}
+
+function readBoolEnvFlag(keys: string[]): boolean {
+  for (const key of keys) {
+    const raw = process.env[key];
+    if (typeof raw !== 'string') {
+      continue;
+    }
+    const normalized = raw.trim().toLowerCase();
+    if (!normalized) {
+      continue;
+    }
+    if (normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on') {
+      return true;
+    }
+    if (normalized === '0' || normalized === 'false' || normalized === 'no' || normalized === 'off') {
+      return false;
+    }
+  }
+  return false;
+}
+
 export function isDaemonAdminAuthRequired(req: Request): boolean {
-  if (isLocalRequest(req)) {
+  const localBypassRaw = (req.app?.locals as Record<string, unknown> | undefined)?.[DAEMON_ADMIN_LOCAL_BYPASS_LOCAL_KEY];
+  const localBypassEnabled = typeof localBypassRaw === 'boolean' ? localBypassRaw : false;
+  if (isLocalRequest(req) && localBypassEnabled) {
     return false;
   }
   const raw = (req.app?.locals as Record<string, unknown> | undefined)?.[DAEMON_ADMIN_AUTH_REQUIRED_LOCAL_KEY];
@@ -128,8 +155,13 @@ export function rejectNonLocalOrUnauthorizedAdmin(
 export function registerDaemonAdminRoutes(options: DaemonAdminRouteOptions): void {
   const { app } = options;
   const bindHost = typeof options.getServerHost === 'function' ? options.getServerHost() : '';
-  const authRequired = !isLoopbackBindHost(bindHost);
+  const localBypassEnabled = readBoolEnvFlag([
+    'ROUTECODEX_DAEMON_ADMIN_LOCAL_BYPASS',
+    'RCC_DAEMON_ADMIN_LOCAL_BYPASS'
+  ]);
+  const authRequired = localBypassEnabled && isLoopbackBindHost(bindHost) ? false : true;
   setDaemonAdminAuthRequiredForApp(app, authRequired);
+  setDaemonAdminLocalBypassForApp(app, localBypassEnabled);
   const expectedApiKeyRaw = typeof options.getExpectedApiKey === 'function' ? options.getExpectedApiKey() : '';
   const resolvedApiKey = resolveEnvSecretReference(typeof expectedApiKeyRaw === 'string' ? expectedApiKeyRaw : '');
   (app.locals as Record<string, unknown>)[DAEMON_ADMIN_APIKEY_CONFIGURED_LOCAL_KEY] =

@@ -11,7 +11,8 @@ import {
   extractCredentialsRef,
   extractDefaultModels,
   scrubProviderConfig,
-  validateAndNormalizeProviderConfig
+  validateAndNormalizeProviderConfig,
+  validateProviderIdInput
 } from './providers-handler-utils.js';
 import {
   activateRoutingGroupAtLocation,
@@ -46,6 +47,34 @@ interface ProviderConfigV2Summary {
   defaultModels?: string[];
   credentialsRef?: string;
   version: string;
+}
+
+function isPathWithinRoot(candidatePath: string, rootPath: string): boolean {
+  const rel = path.relative(path.resolve(rootPath), path.resolve(candidatePath));
+  return rel === '' || (!rel.startsWith('..' + path.sep) && rel !== '..');
+}
+
+async function resolveProviderConfigFilePath(
+  providerRoot: string,
+  providerId: string,
+  options?: { ensureDir?: boolean }
+): Promise<string> {
+  const rootResolved = path.resolve(providerRoot);
+  if (options?.ensureDir) {
+    await fs.mkdir(rootResolved, { recursive: true });
+  }
+  const rootReal = await fs.realpath(rootResolved);
+  const providerDirResolved = path.resolve(rootResolved, providerId);
+  if (options?.ensureDir) {
+    await fs.mkdir(providerDirResolved, { recursive: true });
+  }
+  const providerDirReal = await fs.realpath(providerDirResolved);
+  if (!isPathWithinRoot(providerDirReal, rootReal)) {
+    const error = new Error('provider path is not allowed') as Error & { code?: string };
+    error.code = 'forbidden_path';
+    throw error;
+  }
+  return path.join(providerDirReal, 'config.v2.json');
 }
 
 function mapRoutingGroupErrorToStatus(error: unknown): number {
@@ -159,11 +188,12 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
 
   app.get('/config/providers/v2/:id', async (req: Request, res: Response) => {
     if (reject(req, res)) {return;}
-    const id = String(req.params.id || '').trim();
-    if (!id) {
-      res.status(400).json({ error: { message: 'id is required' } });
+    const idCheck = validateProviderIdInput(req.params.id);
+    if (!idCheck.ok) {
+      res.status(400).json({ error: { message: idCheck.message, code: 'bad_request' } });
       return;
     }
+    const id = idCheck.providerId;
     try {
       const configs = await loadProviderConfigsV2();
       const cfg = configs[id];
@@ -185,11 +215,12 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
 
   app.get('/config/providers/v2/:id/preview-route', (req: Request, res: Response) => {
     if (reject(req, res)) {return;}
-    const id = String(req.params.id || '').trim();
-    if (!id) {
-      res.status(400).json({ error: { message: 'id is required' } });
+    const idCheck = validateProviderIdInput(req.params.id);
+    if (!idCheck.ok) {
+      res.status(400).json({ error: { message: idCheck.message, code: 'bad_request' } });
       return;
     }
+    const id = idCheck.providerId;
     res.status(200).json({
       id,
       route: null,
@@ -203,13 +234,14 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
   app.post('/config/providers/v2', async (req: Request, res: Response) => {
     if (reject(req, res)) {return;}
     const body = req.body as Record<string, unknown>;
-    const providerId = typeof body?.providerId === 'string' ? body.providerId.trim() : '';
+    const providerIdCheck = validateProviderIdInput(body?.providerId);
     const version = typeof body?.version === 'string' && body.version.trim() ? body.version.trim() : '2.0.0';
     const provider = body?.provider;
-    if (!providerId) {
-      res.status(400).json({ error: { message: 'providerId is required', code: 'bad_request' } });
+    if (!providerIdCheck.ok) {
+      res.status(400).json({ error: { message: providerIdCheck.message, code: 'bad_request' } });
       return;
     }
+    const providerId = providerIdCheck.providerId;
     if (!provider || typeof provider !== 'object' || Array.isArray(provider)) {
       res.status(400).json({ error: { message: 'provider must be an object', code: 'bad_request' } });
       return;
@@ -223,9 +255,7 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
 
     try {
       const rootDir = pickProviderRootDir();
-      const dirPath = path.join(rootDir, providerId);
-      await fs.mkdir(dirPath, { recursive: true });
-      const filePath = path.join(dirPath, 'config.v2.json');
+      const filePath = await resolveProviderConfigFilePath(rootDir, providerId, { ensureDir: true });
       const payload: ProviderConfigV2 = {
         version,
         providerId,
@@ -234,6 +264,11 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
       await fs.writeFile(filePath, JSON.stringify(payload, null, 2), 'utf8');
       res.status(200).json({ ok: true, providerId, path: filePath });
     } catch (error: unknown) {
+      const code = (error as { code?: string } | null)?.code;
+      if (code === 'forbidden_path') {
+        res.status(400).json({ error: { message: 'provider path is not allowed', code: 'bad_request' } });
+        return;
+      }
       const message = error instanceof Error ? error.message : String(error);
       res.status(500).json({ error: { message } });
     }
@@ -241,18 +276,23 @@ export function registerProviderRoutes(app: Application, options: DaemonAdminRou
 
   app.delete('/config/providers/v2/:id', async (req: Request, res: Response) => {
     if (reject(req, res)) {return;}
-    const id = String(req.params.id || '').trim();
-    if (!id) {
-      res.status(400).json({ error: { message: 'id is required', code: 'bad_request' } });
+    const idCheck = validateProviderIdInput(req.params.id);
+    if (!idCheck.ok) {
+      res.status(400).json({ error: { message: idCheck.message, code: 'bad_request' } });
       return;
     }
+    const id = idCheck.providerId;
     try {
       const rootDir = pickProviderRootDir();
-      const filePath = path.join(rootDir, id, 'config.v2.json');
+      const filePath = await resolveProviderConfigFilePath(rootDir, id);
       await fs.unlink(filePath);
       res.status(200).json({ ok: true, id });
     } catch (error: unknown) {
       const code = (error as { code?: string } | null)?.code;
+      if (code === 'forbidden_path') {
+        res.status(400).json({ error: { message: 'provider path is not allowed', code: 'bad_request' } });
+        return;
+      }
       if (code === 'ENOENT') {
         res.status(404).json({ error: { message: 'provider config not found', code: 'not_found' } });
         return;

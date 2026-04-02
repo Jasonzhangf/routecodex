@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { resolveRccPath } from '../config/user-data-paths.js';
+import { redactSensitiveData } from './sensitive-redaction.js';
 
 const KB = 1024;
 const MB = 1024 * KB;
@@ -272,7 +273,8 @@ export async function writeErrorsampleJson(options: {
     dir,
     `${safeName(options.kind)}-${safeStamp()}-${Math.random().toString(16).slice(2)}.json`
   );
-  const serialized = serializePayloadForWrite(options.payload, budget.maxSampleBytes);
+  const sanitizedPayload = redactSensitiveData(options.payload);
+  const serialized = serializePayloadForWrite(sanitizedPayload, budget.maxSampleBytes);
 
   try {
     await fs.writeFile(file, serialized, 'utf8');

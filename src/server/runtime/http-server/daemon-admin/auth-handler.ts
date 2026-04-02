@@ -26,18 +26,7 @@ export function registerDaemonAuthRoutes(app: Application): void {
       res.status(500).json({ error: { message: loaded.error.message, code: 'login_file_error' } });
       return;
     }
-    if (isLocalRequest(req)) {
-      res.status(200).json({
-        ok: true,
-        authRequired: false,
-        hasPassword: false,
-        authenticated: true,
-        mustChangePassword: false,
-        apiKeyConfigured: isDaemonAdminApiKeyConfigured(req),
-        isRemote: false,
-      });
-      return;
-    }
+    const local = isLocalRequest(req);
     res.status(200).json({
       ok: true,
       authRequired,
@@ -45,7 +34,7 @@ export function registerDaemonAuthRoutes(app: Application): void {
       authenticated: authRequired ? isDaemonSessionAuthenticated(req) : true,
       mustChangePassword: authRequired ? Boolean(loaded.record?.mustChangePassword) : false,
       apiKeyConfigured: isDaemonAdminApiKeyConfigured(req),
-      isRemote: !isLocalRequest(req),
+      isRemote: !local,
     });
   });
 
@@ -74,10 +63,6 @@ export function registerDaemonAuthRoutes(app: Application): void {
   });
 
   app.post('/daemon/auth/login', async (req: Request, res: Response) => {
-    if (isLocalRequest(req)) {
-      res.status(200).json({ ok: true });
-      return;
-    }
     const loaded = await readDaemonLoginRecord();
     if (!loaded.ok) {
       res.status(500).json({ error: { message: loaded.error.message, code: 'login_file_error' } });
@@ -102,7 +87,7 @@ export function registerDaemonAuthRoutes(app: Application): void {
 
   app.post('/daemon/auth/change', async (req: Request, res: Response) => {
     const authRequired = isDaemonAdminAuthRequired(req);
-    if (!isDaemonSessionAuthenticated(req) && !isLocalRequest(req)) {
+    if (authRequired && !isDaemonSessionAuthenticated(req)) {
       res.status(401).json({ error: { message: 'unauthorized', code: 'unauthorized' } });
       return;
     }

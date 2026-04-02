@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import type { NodeSnapshot, SnapshotQuery, SnapshotStore } from './types.js';
+import { redactSensitiveData } from '../utils/sensitive-redaction.js';
 
 function ensureDir(dir: string): void {
   if (!fs.existsSync(dir)) {
@@ -40,7 +41,7 @@ export class FileSnapshotStore implements SnapshotStore {
 
   async save(snapshot: NodeSnapshot): Promise<void> {
     ensureDir(this.baseDir);
-    const payload = JSON.stringify(snapshot);
+    const payload = JSON.stringify(redactSensitiveData(snapshot));
     await fsp.appendFile(this.sessionFile(snapshot.sessionId), `${payload}\n`, 'utf8');
   }
 

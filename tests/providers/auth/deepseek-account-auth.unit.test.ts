@@ -252,7 +252,7 @@ describe('DeepSeekAccountAuthProvider', () => {
       const persisted = JSON.parse(await fs.readFile(tokenFile, 'utf8'));
       expect(persisted.access_token).toBe('single-file-token-3');
       expect(persisted.mobile).toBe('13823250570');
-      expect(persisted.password).toBe('welcome4zcam#');
+      expect(persisted).not.toHaveProperty('password');
     } finally {
       global.fetch = originalFetch;
     }

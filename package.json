@@ -127,7 +127,7 @@
     "duplication:fix": "node scripts/duplicate-code-handler.mjs --threshold 5 --auto-fix true",
     "dup:scan": "node scripts/duplicate-code-handler.mjs --threshold 5 --output reports",
     "dup:auto-fix": "node scripts/duplicate-code-handler.mjs --threshold 5 --output reports --auto-fix true",
-    "secrets:check": "echo 'Secrets check temporarily disabled'",
+    "secrets:check": "node scripts/ci/secrets-check.mjs",
     "format:check": "prettier --check src/**/*.{ts,js,json}",
     "format:fix": "prettier --write src/**/*.{ts,js,json}",
     "verify:split-args": "node scripts/verify-toolcall-arg-splitting.mjs",
@@ -168,8 +168,8 @@
     "@radix-ui/react-switch": "^1.2.6",
     "@types/socket.io": "^3.0.1",
     "ai": "^6.0.116",
-    "ajv": "^8.17.1",
-    "axios": "^1.12.2",
+    "ajv": "^8.18.0",
+    "axios": "^1.14.0",
     "chalk": "^5.6.2",
     "commander": "^14.0.1",
     "cors": "^2.8.5",
@@ -235,5 +235,10 @@
     "typescript": "^5.9.3",
     "vite": "^7.1.12"
   },
-  "bundleDependencies": []
+  "bundleDependencies": [],
+  "overrides": {
+    "path-to-regexp": "0.1.13",
+    "qs": "6.15.0",
+    "socket.io-parser": "4.2.6"
+  }
 }

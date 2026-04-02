@@ -10,6 +10,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 import OpenAI from 'openai';
+import { redactSensitiveData } from '../../../../src/utils/sensitive-redaction.js';
 
 type Unknown = Record<string, any>;
 
@@ -100,11 +101,11 @@ async function main() {
     const dir = path.join(String(home), '.routecodex', 'codex-samples', 'responses-client');
     await fs.mkdir(dir, { recursive: true });
     const out = path.join(dir, `${clientRequestId}_client-request.json`);
-    await fs.writeFile(out, JSON.stringify({
+    await fs.writeFile(out, JSON.stringify(redactSensitiveData({
       timestamp: new Date().toISOString(),
       baseURL,
       request: reqBody
-    }, null, 2), 'utf-8');
+    }), null, 2), 'utf-8');
     if (!raw) console.log(`[${nowIso()}] saved client snapshot: ${out}`);
   } catch { /* non-blocking */ }
 
@@ -130,7 +131,11 @@ async function main() {
     try {
       const dir = path.resolve(process.cwd(), 'logs', 'responses-debug', responseId || 'unknown');
       await fs.mkdir(dir, { recursive: true });
-      await fs.appendFile(path.join(dir, 'events.jsonl'), JSON.stringify({ ts: Date.now(), ...o }) + '\n', 'utf-8');
+      await fs.appendFile(
+        path.join(dir, 'events.jsonl'),
+        JSON.stringify(redactSensitiveData({ ts: Date.now(), ...o })) + '\n',
+        'utf-8'
+      );
     } catch { /* ignore */ }
   };
 
