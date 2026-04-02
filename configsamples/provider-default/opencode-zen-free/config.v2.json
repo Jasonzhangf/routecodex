@@ -1,0 +1,56 @@
+{
+  "version": "2.0.0",
+  "providerId": "opencode-zen-free",
+  "provider": {
+    "id": "opencode-zen-free",
+    "enabled": true,
+    "type": "openai",
+    "baseURL": "https://opencode.ai/zen/v1",
+    "compatibilityProfile": "chat:openai",
+    "transportBackend": "vercel-ai-sdk",
+    "auth": {
+      "type": "apikey",
+      "entries": [
+        {
+          "alias": "key1",
+          "apiKey": "${OPENCODE_ZEN_FREE_API_KEY}"
+        }
+      ]
+    },
+    "models": {
+      "mimo-v2-omni-free": {
+        "supportsStreaming": true,
+        "supportsThinking": true,
+        "maxContext": 262144,
+        "supportsVision": true,
+        "supportsImages": true,
+        "multimodal": true,
+        "description": "Omni multimodal model (text/image/audio/video input); free route id in OpenCode Zen."
+      },
+      "mimo-v2-pro-free": {
+        "supportsStreaming": true,
+        "supportsThinking": true,
+        "maxContext": 1048576,
+        "description": "Long-context reasoning model; free route id in OpenCode Zen."
+      },
+      "minimax-m2.5-free": {
+        "supportsStreaming": true,
+        "supportsThinking": true,
+        "maxContext": 196608,
+        "description": "MiniMax M2.5 free route id."
+      },
+      "nemotron-3-super-free": {
+        "supportsStreaming": true,
+        "supportsThinking": true,
+        "maxContext": 262144,
+        "description": "NVIDIA Nemotron-3 Super free route id."
+      }
+    },
+    "capabilities": {
+      "supportsReasoning": true,
+      "supportsLongContext": true,
+      "supportsMultimodal": true,
+      "supportsTools": true
+    }
+  }
+}

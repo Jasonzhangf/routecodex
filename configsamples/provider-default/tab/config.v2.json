@@ -1,0 +1,26 @@
+{
+  "version": "2.0.0",
+  "providerId": "tab",
+  "provider": {
+    "id": "tab",
+    "enabled": true,
+    "type": "responses",
+    "baseURL": "https://api.tabcode.cc/openai",
+    "maxContextTokens": 256000,
+    "auth": {
+      "type": "apikey",
+      "apiKey": "${TAB_API_KEY}"
+    },
+    "models": {
+      "gpt-5.1": {},
+      "gpt-5.1-codex": {},
+      "gpt-5.3-codex": {}
+    },
+    "config": {
+      "responses": {
+        "process": "chat",
+        "streaming": "always"
+      }
+    }
+  }
+}

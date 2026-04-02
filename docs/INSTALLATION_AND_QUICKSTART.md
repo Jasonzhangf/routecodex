@@ -26,6 +26,12 @@ rcc init
 
 初始化成功后，`rcc init` 会把内置文档复制到：`~/.rcc/docs`
 
+如果你希望一次性解压内置的脱敏 provider 模板到 `~/.rcc/provider`（便于后续直接填 key / tokenFile）：
+
+```bash
+rcc init default
+```
+
 非交互式（CI/脚本）：
 
 ```bash
@@ -38,11 +44,12 @@ rcc init --providers openai,tab --default-provider tab
 rcc init --list-providers
 ```
 
-生成后你需要把 `apiKey` / `tokenFile` / `cookieFile` 按需补齐（脱敏模板会用 `YOUR_API_KEY_HERE` 占位）。
+生成后你需要把 `apiKey` / `tokenFile` / `cookieFile` 按需补齐（脱敏模板会用环境变量占位，例如 `${OPENROUTER_API_KEY}`）。
 
 参考配置：
 - `configsamples/config.reference.json`
 - `configsamples/provider/*/config.v1.json`
+- `configsamples/provider-default/*/config.v2.json`
 
 ## 3) 启动服务器
 

@@ -1,0 +1,33 @@
+{
+  "version": "2.0.0",
+  "providerId": "glm",
+  "provider": {
+    "id": "glm",
+    "enabled": true,
+    "type": "openai-standard",
+    "baseURL": "https://open.bigmodel.cn/api/coding/paas/v4",
+    "compatibilityProfile": "chat:glm",
+    "models": {
+      "glm-4.7": {
+        "maxTokens": 128000,
+        "maxContext": 200000,
+        "supportsThinking": true,
+        "supportsStreaming": true
+      },
+      "glm-4.6v": {
+        "maxTokens": 128000,
+        "maxContext": 200000,
+        "supportsThinking": false,
+        "supportsStreaming": false
+      },
+      "glm-4.5-air": {
+        "supportsStreaming": true
+      }
+    },
+    "auth": {
+      "type": "apikey",
+      "apiKey": "${GLM_API_KEY}"
+    },
+    "transportBackend": "vercel-ai-sdk"
+  }
+}

@@ -104,6 +104,12 @@ npm uninstall -g @jsonstudio/rcc
 rcc init
 ```
 
+若你希望直接解压“脱敏 provider 模板包”（批量写入 `~/.rcc/provider/<providerId>/config.v2.json`），使用：
+
+```bash
+rcc init default
+```
+
 按 provider 模板直接生成 v2（覆盖默认复制流程）：
 
 ```bash
@@ -112,6 +118,7 @@ rcc init --providers deepseek-web,tab,qwen --default-provider deepseek-web --cam
 
 说明：
 - `--providers` 使用 init 内置 provider id（见下文鉴权表）。
+- `init default` 会把内置脱敏 provider 模板包写入 `~/.rcc/provider`，已存在文件默认跳过（`--force` 可覆盖）。
 - `--camoufox` 会显式触发 Camoufox 环境准备（即使当前 provider 不强依赖）。
 - `--force` 会先备份旧配置到 `config.json.bak*` 再重写。
 
@@ -284,6 +291,7 @@ DeepSeek 单文件凭据 + token（同一文件）示例：
 
 已提供脱敏模板：
 - `configsamples/config.v1.quickstart.sanitized.json`
+- `configsamples/provider-default/*/config.v2.json`
 
 快速使用：
 

@@ -1,0 +1,142 @@
+{
+  "version": "2.0.0",
+  "providerId": "antigravity",
+  "provider": {
+    "id": "antigravity",
+    "enabled": true,
+    "type": "gemini-cli-http-provider",
+    "providerType": "gemini",
+    "compatibilityProfile": "chat:gemini-cli",
+    "baseURL": "https://daily-cloudcode-pa.sandbox.googleapis.com",
+    "auth": {
+      "type": "antigravity-oauth",
+      "entries": [
+        {
+          "alias": "geetasamodgeetasamoda",
+          "type": "antigravity-oauth",
+          "tokenFile": "~/.routecodex/auth/antigravity-oauth-1-geetasamodgeetasamoda.json"
+        },
+        {
+          "alias": "jasonqueque",
+          "type": "antigravity-oauth",
+          "tokenFile": "~/.routecodex/auth/antigravity-oauth-2-jasonqueque.json"
+        },
+        {
+          "alias": "antonsoltan",
+          "type": "antigravity-oauth",
+          "tokenFile": "~/.routecodex/auth/antigravity-oauth-3-antonsoltan.json"
+        },
+        {
+          "alias": "xfour8605",
+          "type": "antigravity-oauth",
+          "tokenFile": "~/.routecodex/auth/antigravity-oauth-4-xfour8605.json"
+        }
+      ]
+    },
+    "models": {
+      "gemini-2.5-pro": {
+        "maxTokens": 64000,
+        "maxContext": 1000000,
+        "supportsStreaming": true
+      },
+      "gemini-2.5-flash": {
+        "maxTokens": 64000,
+        "maxContext": 1000000,
+        "supportsStreaming": true
+      },
+      "gemini-2.5-flash-lite": {
+        "maxTokens": 64000,
+        "maxContext": 1000000,
+        "supportsStreaming": true
+      },
+      "gemini-2.5-flash-thinking": {
+        "maxTokens": 64000,
+        "maxContext": 1000000,
+        "supportsStreaming": true
+      },
+      "gemini-3.1-pro-preview": {
+        "maxTokens": 64000,
+        "maxContext": 1000000,
+        "supportsStreaming": true
+      },
+      "gemini-3.1-pro-high": {
+        "maxTokens": 64000,
+        "maxContext": 1000000,
+        "supportsStreaming": true
+      },
+      "gemini-3.1-pro-low": {
+        "maxTokens": 64000,
+        "maxContext": 1000000,
+        "supportsStreaming": true
+      },
+      "gemini-3-pro-image": {
+        "maxTokens": 64000,
+        "maxContext": 1000000,
+        "supportsStreaming": true
+      },
+      "gemini-3-flash": {
+        "maxTokens": 64000,
+        "maxContext": 1000000,
+        "supportsStreaming": true
+      },
+      "gemini-3-flash-preview": {
+        "maxTokens": 64000,
+        "maxContext": 1000000,
+        "supportsStreaming": true
+      },
+      "claude-sonnet-4-5": {
+        "maxTokens": 64000,
+        "maxContext": 148000,
+        "supportsStreaming": true,
+        "maxContextTokens": 148000
+      },
+      "claude-sonnet-4-5-thinking": {
+        "maxTokens": 64000,
+        "maxContext": 148000,
+        "supportsStreaming": true,
+        "maxContextTokens": 148000
+      },
+      "claude-opus-4-5": {
+        "maxTokens": 64000,
+        "maxContext": 148000,
+        "supportsStreaming": true,
+        "maxContextTokens": 148000
+      },
+      "claude-opus-4-5-thinking": {
+        "maxTokens": 64000,
+        "maxContext": 148000,
+        "supportsStreaming": true,
+        "maxContextTokens": 148000
+      },
+      "gpt-oss-120b-medium": {
+        "maxTokens": 64000,
+        "maxContext": 1000000,
+        "supportsStreaming": true
+      },
+      "claude-sonnet-4-6": {
+        "maxTokens": 64000,
+        "maxContext": 148000,
+        "supportsStreaming": true,
+        "maxContextTokens": 148000
+      },
+      "claude-sonnet-4-6-thinking": {
+        "maxTokens": 64000,
+        "maxContext": 148000,
+        "supportsStreaming": true,
+        "maxContextTokens": 148000
+      },
+      "claude-opus-4-6-thinking": {
+        "maxTokens": 64000,
+        "maxContext": 148000,
+        "supportsStreaming": true,
+        "maxContextTokens": 148000
+      },
+      "claude-opus-4-6": {
+        "maxTokens": 64000,
+        "maxContext": 148000,
+        "supportsStreaming": true,
+        "maxContextTokens": 148000
+      }
+    }
+  }
+}

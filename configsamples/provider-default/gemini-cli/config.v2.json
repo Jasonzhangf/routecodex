@@ -1,0 +1,45 @@
+{
+  "version": "2.0.0",
+  "providerId": "gemini-cli",
+  "provider": {
+    "id": "gemini-cli",
+    "enabled": true,
+    "type": "gemini-cli-http-provider",
+    "providerType": "gemini",
+    "compatibilityProfile": "chat:gemini",
+    "baseURL": "https://daily-cloudcode-pa.sandbox.googleapis.com",
+    "endpoint": "/v1beta/models:generateContent",
+    "auth": {
+      "type": "gemini-cli-oauth",
+      "entries": [
+        {
+          "alias": "jasonqueque",
+          "type": "gemini-cli-oauth",
+          "tokenFile": "~/.routecodex/auth/gemini-oauth-2-jasonqueque.json"
+        },
+        {
+          "alias": "geetasamodgeetasamoda",
+          "type": "gemini-cli-oauth",
+          "tokenFile": "~/.routecodex/auth/gemini-oauth-1-geetasamodgeetasamoda.json"
+        }
+      ]
+    },
+    "models": {
+      "gemini-2.5-pro": {
+        "maxTokens": 64000,
+        "maxContext": 1000000,
+        "supportsStreaming": true
+      },
+      "gemini-2.5-flash": {
+        "maxTokens": 64000,
+        "maxContext": 1000000,
+        "supportsStreaming": true
+      },
+      "gemini-2.5-flash-lite": {
+        "maxTokens": 64000,
+        "maxContext": 1000000,
+        "supportsStreaming": true
+      }
+    }
+  }
+}

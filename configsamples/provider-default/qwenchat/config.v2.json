@@ -1,0 +1,38 @@
+{
+  "version": "2.0.0",
+  "providerId": "qwenchat",
+  "provider": {
+    "id": "qwenchat",
+    "enabled": true,
+    "type": "openai",
+    "baseURL": "https://chat.qwen.ai",
+    "compatibilityProfile": "chat:qwenchat-web",
+    "auth": {
+      "type": "qwen-oauth",
+      "tokenFile": "default"
+    },
+    "models": {
+      "qwen3.5-plus": {
+        "maxTokens": 64000,
+        "maxContext": 256000,
+        "supportsStreaming": true
+      },
+      "qwen3.5-flash": {
+        "maxTokens": 32000,
+        "maxContext": 256000,
+        "supportsStreaming": true
+      },
+      "qwen3.5-omni-plus": {
+        "maxTokens": 64000,
+        "maxContext": 256000,
+        "supportsStreaming": true,
+        "capabilities": [
+          "multimodal",
+          "vision",
+          "audio",
+          "video"
+        ]
+      }
+    }
+  }
+}

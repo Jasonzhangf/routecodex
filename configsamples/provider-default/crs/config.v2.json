@@ -1,0 +1,54 @@
+{
+  "version": "2.0.0",
+  "providerId": "crs",
+  "provider": {
+    "id": "crs",
+    "enabled": true,
+    "type": "responses",
+    "baseURL": "https://api.funai.vip",
+    "compatibilityProfile": "responses:crs",
+    "maxContextTokens": 900000,
+    "auth": {
+      "type": "apikey",
+      "entries": [
+        {
+          "alias": "key1",
+          "apiKey": "${CRS_OAI_KEY}"
+        },
+        {
+          "alias": "key2",
+          "apiKey": "${CRS_OAI_KEY1}"
+        }
+      ]
+    },
+    "models": {
+      "gpt-5.3-codex": {
+        "supportsStreaming": true,
+        "maxTokens": 64000,
+        "maxContext": 900000,
+        "capabilities": [
+          "web_search"
+        ]
+      },
+      "gpt-5.4": {
+        "supportsStreaming": true,
+        "maxTokens": 64000,
+        "maxContext": 900000,
+        "capabilities": [
+          "web_search"
+        ]
+      }
+    },
+    "responses": {
+      "process": "chat",
+      "streaming": "always"
+    },
+    "config": {
+      "responses": {
+        "process": "chat",
+        "streaming": "always"
+      }
+    },
+    "transportBackend": "openai-sdk"
+  }
+}

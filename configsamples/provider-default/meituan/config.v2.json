@@ -1,0 +1,20 @@
+{
+  "version": "2.0.0",
+  "providerId": "meituan",
+  "provider": {
+    "id": "meituan",
+    "enabled": true,
+    "type": "anthropic",
+    "baseURL": "https://api.longcat.chat/anthropic",
+    "models": {
+      "LongCat-Flash-Thinking-2601": {
+        "supportsThinking": true,
+        "supportsStreaming": true
+      }
+    },
+    "auth": {
+      "type": "authorization",
+      "secretRef": "${MEITUAN_API_KEY}"
+    }
+  }
+}

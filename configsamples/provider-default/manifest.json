@@ -1,0 +1,31 @@
+{
+  "version": "1.0.0",
+  "profile": "default",
+  "description": "Bundled provider templates copied from a sanitized ~/.rcc/provider baseline. Update auth env vars or tokenFile paths before use.",
+  "providers": [
+    "ali-coding-plan",
+    "antigravity",
+    "ark-coding-plan",
+    "crs",
+    "deepseek-web",
+    "gemini",
+    "gemini-cli",
+    "gemini-native",
+    "glm",
+    "glm-anthropic",
+    "kimi",
+    "lmstudio",
+    "lmstudio-proxy",
+    "meituan",
+    "mimo",
+    "modelscope",
+    "my-openai",
+    "nvidia",
+    "opencode-zen-free",
+    "openrouter",
+    "qwen",
+    "qwenchat",
+    "tab",
+    "tabglm"
+  ]
+}

@@ -3,6 +3,7 @@ import { Command } from 'commander';
 import path from 'node:path';
 
 import { createInitCommand } from '../../src/cli/commands/init.js';
+import { resolveRccProviderDir } from '../../src/config/user-data-paths.js';
 
 type FsMock = {
   existsSync: (p: string) => boolean;
@@ -91,6 +92,13 @@ function createProgramForInit(options?: {
 }
 
 describe('cli init command - additional coverage', () => {
+  const providerRoot = resolveRccProviderDir('/tmp/routecodex-home');
+  it('rejects unsupported init profile values', async () => {
+    const { program, errors } = createProgramForInit();
+    await program.parseAsync(['node', 'routecodex', 'init', 'custom', '--config', '/tmp/config.json'], { from: 'node' });
+    expect(errors.join('\n')).toContain('Unsupported init profile');
+  });
+
   it('fails fast on invalid provider-source', async () => {
     const { program, errors } = createProgramForInit();
     await program.parseAsync(
@@ -153,9 +161,19 @@ describe('cli init command - additional coverage', () => {
     await program.parseAsync(['node', 'routecodex', 'init', '--config', '/tmp/default-init.json'], { from: 'node' });
     const config = JSON.parse(fsMock._files.get('/tmp/default-init.json') || '{}');
     expect(config.virtualrouterMode).toBe('v2');
-    const providerPath = '/tmp/routecodex-home/.rcc/provider/openai/config.v2.json';
+    const providerPath = `${providerRoot}/openai/config.v2.json`;
     expect(fsMock._files.has(providerPath)).toBe(true);
     expect(infos.join('\n')).toContain('Created a minimal V2 config');
+  });
+
+  it('supports `rcc init default` profile and keeps base init successful', async () => {
+    const { program, fsMock, warnings } = createProgramForInit();
+    await program.parseAsync(['node', 'routecodex', 'init', 'default', '--config', '/tmp/default-profile.json'], {
+      from: 'node'
+    });
+    const config = JSON.parse(fsMock._files.get('/tmp/default-profile.json') || '{}');
+    expect(config.virtualrouterMode).toBe('v2');
+    expect(warnings.join('\n')).toContain('Bundled provider template install skipped');
   });
 
   it('backs up existing config when --force is set and writes provider defaults', async () => {
@@ -179,7 +197,7 @@ describe('cli init command - additional coverage', () => {
     );
     const backupPath = `${configPath}.bak`;
     expect(fileStore._files.has(backupPath)).toBe(true);
-    const providerPath = '/tmp/routecodex-home/.rcc/provider/openai/config.v2.json';
+    const providerPath = `${providerRoot}/openai/config.v2.json`;
     const providerV2 = JSON.parse(fileStore._files.get(providerPath) || '{}');
     expect(providerV2.provider.defaultModel).toBe('gpt-4.1-mini');
   });
@@ -206,7 +224,7 @@ describe('cli init command - additional coverage', () => {
     const converted = JSON.parse(fsConvert._files.get(convertConfigPath) || '{}');
     expect(converted.virtualrouterMode).toBe('v2');
     expect(convert.infos.join('\n')).toContain('Converted V1 -> V2');
-    const providerPath = '/tmp/routecodex-home/.rcc/provider/openai/config.v2.json';
+    const providerPath = `${providerRoot}/openai/config.v2.json`;
     expect(fsConvert._files.has(providerPath)).toBe(true);
   });
 

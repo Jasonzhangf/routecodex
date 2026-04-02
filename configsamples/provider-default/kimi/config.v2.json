@@ -1,0 +1,25 @@
+{
+  "version": "2.0.0",
+  "providerId": "kimi",
+  "provider": {
+    "id": "kimi",
+    "enabled": true,
+    "type": "openai",
+    "baseURL": "https://api.kimi.com/coding/v1",
+    "auth": {
+      "type": "apikey",
+      "apiKey": "${KIMI_API_KEY}"
+    },
+    "models": {
+      "kimi-for-coding": {
+        "supportsStreaming": true,
+        "maxTokens": 64000,
+        "maxContext": 256000
+      }
+    },
+    "headers": {
+      "User-Agent": "KimiCLI/1.0"
+    },
+    "transportBackend": "vercel-ai-sdk"
+  }
+}

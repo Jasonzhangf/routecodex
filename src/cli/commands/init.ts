@@ -9,6 +9,7 @@ import { parseProvidersArg } from '../config/init-config.js';
 import { buildV2ConfigObject } from '../config/init-v2-builder.js';
 import { resolveRccConfigFile } from '../../config/user-data-paths.js';
 import { installBundledDocsBestEffort } from '../config/bundled-docs.js';
+import { installBundledProviderPackBestEffort } from '../config/bundled-provider-pack.js';
 import { ensureDefaultPrecommandScriptBestEffort } from '../config/precommand-default-script.js';
 import {
   asRecord,
@@ -51,12 +52,14 @@ export function createInitCommand(program: Command, ctx: InitCommandContext): vo
 
   program
     .command('init')
+    .argument('[profile]', 'Init profile (currently supported: default)')
     .description('Initialize ~/.rcc/config.json (V2 guided setup and maintenance)')
     .addHelpText(
       'after',
       `
 Examples:
   ${bin} init
+  ${bin} init default
   ${bin} init --camoufox
   ${bin} init --list-providers
   ${bin} init --list-current-providers
@@ -74,7 +77,7 @@ Examples:
     .option('--port <port>', 'Server port (httpserver.port)')
     .option('--list-providers', 'List guided protocol templates + managed-auth provider ids and exit')
     .option('--list-current-providers', 'List configured providers from ~/.rcc/provider and exit')
-    .action(async (options: InitCommandOptions) => {
+    .action(async (profileArg: string | undefined, options: InitCommandOptions) => {
       const spinner = await ctx.createSpinner('Initializing configuration...');
 
       const safeSpinnerStop = () => {
@@ -94,6 +97,13 @@ Examples:
       };
 
       const configPath = options.config || resolveRccConfigFile(home());
+      const profile = typeof profileArg === 'string' ? profileArg.trim().toLowerCase() : '';
+      if (profile && profile !== 'default') {
+        spinner.fail('Failed to initialize configuration');
+        ctx.logger.error(`Unsupported init profile "${profileArg}". Supported profiles: default`);
+        return;
+      }
+      const useBundledProviderProfile = profile === 'default';
       const forceCamoufoxPrep = Boolean(options.camoufox);
       const autoCamoufoxPrep = !forceCamoufoxPrep;
       const providerRoot = getProviderRoot(pathImpl, home());
@@ -188,6 +198,21 @@ Examples:
               routing: buildRouting(defaultTarget)
             });
             writeJsonFile(fsImpl, configPath, configPayload);
+            if (useBundledProviderProfile) {
+              const installedProviders = installBundledProviderPackBestEffort({
+                fsImpl,
+                pathImpl,
+                providerRoot,
+                overwriteExisting: Boolean(options.force)
+              });
+              if (installedProviders.ok) {
+                ctx.logger.info(
+                  `Bundled provider templates installed: copied=${installedProviders.copiedProviders.length}, skipped=${installedProviders.skippedProviders.length}`
+                );
+              } else {
+                ctx.logger.warning(`Bundled provider template install skipped: ${installedProviders.message}`);
+              }
+            }
             ensureDefaultPrecommandScript();
             spinner.succeed(`Configuration initialized: ${configPath}`);
             ctx.logger.info(`Providers: ${defaultTemplate.id}`);

@@ -1,0 +1,77 @@
+{
+  "version": "2.0.0",
+  "providerId": "tabglm",
+  "provider": {
+    "id": "tabglm",
+    "enabled": true,
+    "type": "anthropic",
+    "streaming": "auto",
+    "baseURL": "https://api2.tabcode.cc/claude/glm",
+    "models": {
+      "glm-4.7": {
+        "maxTokens": 128000,
+        "maxContext": 200000,
+        "supportsThinking": true,
+        "supportsStreaming": true,
+        "thinking": {
+          "mode": "adaptive",
+          "effort": "high"
+        }
+      },
+      "glm-5": {
+        "maxTokens": 128000,
+        "maxContext": 200000,
+        "supportsThinking": true,
+        "supportsStreaming": true,
+        "thinking": {
+          "mode": "adaptive",
+          "effort": "high"
+        },
+        "capabilities": [
+          "web_search"
+        ]
+      },
+      "glm-5-turbo": {
+        "maxTokens": 128000,
+        "maxContext": 200000,
+        "supportsThinking": true,
+        "supportsStreaming": true,
+        "thinking": {
+          "mode": "adaptive",
+          "effort": "high"
+        },
+        "capabilities": [
+          "web_search"
+        ]
+      },
+      "glm-4.6v": {
+        "maxTokens": 128000,
+        "maxContext": 200000,
+        "supportsThinking": false,
+        "supportsStreaming": false
+      },
+      "glm-4.5-air": {
+        "supportsStreaming": true
+      },
+      "glm-5.1": {
+        "maxTokens": 128000,
+        "maxContext": 200000,
+        "supportsThinking": true,
+        "supportsStreaming": true,
+        "thinking": {
+          "mode": "adaptive",
+          "effort": "high"
+        },
+        "capabilities": [
+          "web_search"
+        ]
+      }
+    },
+    "auth": {
+      "type": "x-api-key",
+      "apiKey": "${TABGLM_API_KEY}"
+    },
+    "compatibilityProfile": "anthropic:claude-code",
+    "transportBackend": "vercel-ai-sdk"
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "version": "2.0.0",
+  "providerId": "mimo",
+  "provider": {
+    "id": "mimo",
+    "enabled": true,
+    "type": "anthropic",
+    "baseURL": "https://api.xiaomimimo.com/anthropic",
+    "auth": {
+      "type": "x-api-key",
+      "apiKey": "${MIMO_API_KEY}"
+    },
+    "models": {
+      "mimo-v2-flash": {
+        "supportsStreaming": true
+      },
+      "mimo-v2-pro": {
+        "supportsStreaming": true,
+        "supportsThinking": true,
+        "maxContext": 200000
+      }
+    },
+    "transportBackend": "vercel-ai-sdk",
+    "compatibilityProfile": "anthropic:claude-code"
+  }
+}

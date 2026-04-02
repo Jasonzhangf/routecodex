@@ -1,0 +1,76 @@
+{
+  "version": "2.0.0",
+  "providerId": "lmstudio",
+  "provider": {
+    "id": "lmstudio",
+    "enabled": true,
+    "type": "responses",
+    "baseURL": "http://127.0.0.1:1234/v1",
+    "timeout": 1800000,
+    "compatibilityProfile": "chat:lmstudio",
+    "models": {
+      "autoglm-phone-9b": {
+        "supportsStreaming": true
+      },
+      "autoglm-phone-9b-multilingual": {
+        "supportsStreaming": true
+      },
+      "bge-small-en-v1.5": {
+        "supportsStreaming": true
+      },
+      "glm-4.6": {
+        "maxTokens": 128000,
+        "maxContext": 200000,
+        "supportsThinking": true,
+        "supportsStreaming": true
+      },
+      "glm-4.6v": {
+        "supportsStreaming": true
+      },
+      "gpt-oss-20b-mlx": {
+        "supportsStreaming": true
+      },
+      "internvl3_5-gpt-oss-20b-a4b-preview": {
+        "supportsStreaming": true
+      },
+      "mimo-v2-flash-mlx": {
+        "supportsStreaming": true
+      },
+      "minimax-m2-mlx": {
+        "supportsStreaming": true
+      },
+      "minimax-m2.1": {
+        "supportsStreaming": true
+      },
+      "qwen3-next-80b-a3b-thinking": {
+        "supportsStreaming": true
+      },
+      "qwen3.5-27b@q8_0": {
+        "supportsStreaming": true
+      },
+      "sensenova-si-internvl3-8b": {
+        "supportsStreaming": true
+      },
+      "text-embedding-nomic-embed-text-v1.5": {
+        "supportsStreaming": true
+      },
+      "ui-ins-32b": {
+        "supportsStreaming": true
+      },
+      "ui-ins-7b": {
+        "supportsStreaming": true
+      },
+      "vibethinker-1.5b": {
+        "supportsStreaming": true
+      }
+    },
+    "responses": {
+      "process": "chat",
+      "streaming": "auto"
+    },
+    "auth": {
+      "type": "apikey",
+      "apiKey": "${LMSTUDIO_API_KEY}"
+    }
+  }
+}

@@ -1,0 +1,76 @@
+{
+  "version": "2.0.0",
+  "providerId": "ali-coding-plan",
+  "provider": {
+    "id": "ali-coding-plan",
+    "enabled": true,
+    "type": "anthropic",
+    "streaming": "auto",
+    "baseURL": "https://coding.dashscope.aliyuncs.com/apps/anthropic",
+    "auth": {
+      "type": "apikey",
+      "apiKey": "${ALI_CODINGPLAN_KEY}"
+    },
+    "models": {
+      "qwen3.5-plus": {
+        "supportsStreaming": true,
+        "maxContext": 1000000,
+        "capabilities": [
+          "web_search",
+          "multimodal"
+        ]
+      },
+      "qwen3-max-2026-01-23": {
+        "supportsStreaming": true,
+        "supportsThinking": true,
+        "maxContext": 1000000,
+        "capabilities": [
+          "web_search"
+        ]
+      },
+      "qwen3-coder-next": {
+        "supportsStreaming": true,
+        "maxContext": 256000
+      },
+      "qwen3-coder-plus": {
+        "supportsStreaming": true,
+        "maxContext": 256000
+      },
+      "glm-5": {
+        "supportsStreaming": true,
+        "thinking": "high",
+        "maxContext": 200000,
+        "capabilities": [
+          "web_search"
+        ]
+      },
+      "glm-4.7": {
+        "supportsStreaming": true,
+        "thinking": "high",
+        "maxContext": 200000,
+        "capabilities": [
+          "web_search"
+        ]
+      },
+      "kimi-k2.5": {
+        "supportsStreaming": true,
+        "thinking": "high",
+        "maxContext": 262144,
+        "capabilities": [
+          "web_search",
+          "multimodal"
+        ]
+      },
+      "MiniMax-M2.5": {
+        "supportsStreaming": true,
+        "thinking": "high",
+        "maxContext": 1000000,
+        "capabilities": [
+          "web_search"
+        ]
+      }
+    },
+    "compatibilityProfile": "anthropic:claude-code",
+    "transportBackend": "vercel-ai-sdk"
+  }
+}

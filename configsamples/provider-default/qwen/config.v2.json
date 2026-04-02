@@ -1,0 +1,38 @@
+{
+  "version": "2.0.0",
+  "providerId": "qwen",
+  "provider": {
+    "id": "qwen",
+    "enabled": true,
+    "type": "openai",
+    "baseURL": "https://portal.qwen.ai/v1",
+    "compatibilityProfile": "chat:qwen",
+    "auth": {
+      "type": "qwen-oauth",
+      "tokenFile": "default"
+    },
+    "models": {
+      "qwen3-coder-plus": {
+        "maxTokens": 64000,
+        "maxContext": 256000,
+        "supportsStreaming": true
+      },
+      "qwen3-coder": {
+        "maxTokens": 64000,
+        "maxContext": 256000,
+        "supportsStreaming": true
+      },
+      "qwen3.5-plus": {
+        "maxTokens": 64000,
+        "maxContext": 1000000,
+        "supportsStreaming": true
+      },
+      "qwen3-vl-plus": {
+        "maxTokens": 64000,
+        "maxContext": 256000,
+        "supportsStreaming": true
+      }
+    },
+    "transportBackend": "vercel-ai-sdk"
+  }
+}

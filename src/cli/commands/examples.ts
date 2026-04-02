@@ -18,6 +18,9 @@ export function createExamplesCommand(program: Command, ctx: ExamplesCommandCont
       ctx.log('  # Guided init (interactive)');
       ctx.log('  rcc init');
       ctx.log('');
+      ctx.log('  # Install bundled sanitized provider templates to ~/.rcc/provider');
+      ctx.log('  rcc init default');
+      ctx.log('');
       ctx.log('  # Non-interactive init (pick providers)');
       ctx.log('  rcc init --providers openai,tab --default-provider tab');
       ctx.log('');

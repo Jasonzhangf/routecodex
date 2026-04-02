@@ -1,0 +1,29 @@
+{
+  "version": "2.0.0",
+  "providerId": "glm-anthropic",
+  "provider": {
+    "id": "glm-anthropic",
+    "enabled": true,
+    "type": "anthropic",
+    "baseURL": "https://open.bigmodel.cn/api/anthropic",
+    "process": "chat",
+    "auth": {
+      "type": "x-api-key",
+      "apiKey": "${GLM_ANTHROPIC_API_KEY}"
+    },
+    "models": {
+      "glm-4.5": {
+        "supportsStreaming": true
+      },
+      "glm-4.5-air": {
+        "supportsStreaming": true
+      },
+      "glm-4.6": {
+        "maxTokens": 128000,
+        "maxContext": 200000,
+        "supportsThinking": true,
+        "supportsStreaming": true
+      }
+    }
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "version": "2.0.0",
+  "providerId": "deepseek-web",
+  "provider": {
+    "id": "deepseek-web",
+    "enabled": true,
+    "type": "openai",
+    "baseURL": "https://chat.deepseek.com",
+    "compatibilityProfile": "chat:deepseek-web",
+    "auth": {
+      "type": "deepseek-account",
+      "entries": [
+        {
+          "alias": "1",
+          "type": "deepseek-account",
+          "tokenFile": "~/.routecodex/auth/deepseek-account-1.json"
+        },
+        {
+          "alias": "2",
+          "type": "deepseek-account",
+          "tokenFile": "~/.routecodex/auth/deepseek-account-2.json"
+        },
+        {
+          "alias": "3",
+          "type": "deepseek-account",
+          "tokenFile": "~/.routecodex/auth/deepseek-account-3-13823250570.json"
+        }
+      ]
+    },
+    "deepseek": {
+      "strictToolRequired": true,
+      "toolProtocol": "text",
+      "powTimeoutMs": 15000,
+      "powMaxAttempts": 2,
+      "sessionReuseTtlMs": 1800000
+    },
+    "models": {
+      "deepseek-chat": {
+        "maxTokens": 64000,
+        "maxContext": 512000,
+        "supportsStreaming": true,
+        "capabilities": [
+          "web_search"
+        ]
+      },
+      "deepseek-reasoner": {
+        "maxTokens": 64000,
+        "maxContext": 512000,
+        "supportsStreaming": true,
+        "capabilities": [
+          "web_search"
+        ]
+      }
+    }
+  }
+}

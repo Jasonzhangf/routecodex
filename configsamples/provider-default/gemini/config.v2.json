@@ -1,0 +1,43 @@
+{
+  "version": "2.0.0",
+  "providerId": "gemini",
+  "provider": {
+    "id": "gemini",
+    "enabled": true,
+    "type": "openai-standard",
+    "baseURL": "https://generativelanguage.googleapis.com",
+    "process": "chat",
+    "auth": {
+      "type": "apikey",
+      "apiKey": "${GEMINI_API_KEY}",
+      "headerName": "x-goog-api-key",
+      "prefix": ""
+    },
+    "models": {
+      "models/embedding-gecko-001": {
+        "supportsStreaming": true
+      },
+      "models/gemini-2.5-pro-preview-03-25": {
+        "supportsStreaming": true
+      },
+      "models/gemini-2.5-flash-preview-05-20": {
+        "supportsStreaming": true
+      },
+      "models/gemini-2.5-flash": {
+        "supportsStreaming": true
+      },
+      "models/gemini-2.5-flash-lite-preview-06-17": {
+        "supportsStreaming": true
+      },
+      "models/gemini-2.5-pro-preview-05-06": {
+        "supportsStreaming": true
+      },
+      "models/gemini-2.5-pro-preview-06-05": {
+        "supportsStreaming": true
+      },
+      "models/gemini-2.5-pro": {
+        "supportsStreaming": true
+      }
+    }
+  }
+}

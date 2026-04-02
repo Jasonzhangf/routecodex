@@ -1,0 +1,32 @@
+{
+  "version": "2.0.0",
+  "providerId": "nvidia",
+  "provider": {
+    "id": "nvidia",
+    "enabled": true,
+    "type": "openai",
+    "baseURL": "https://integrate.api.nvidia.com/v1",
+    "auth": {
+      "type": "apikey",
+      "apiKey": "${NVIDIA_API_KEY}"
+    },
+    "models": {
+      "moonshotai/kimi-k2.5": {
+        "supportsStreaming": true,
+        "maxTokens": 64000,
+        "maxContext": 256000
+      },
+      "moonshotai/kimi-k2-thinking": {
+        "supportsStreaming": true,
+        "maxTokens": 64000,
+        "maxContext": 256000
+      },
+      "moonshotai/kimi-k2-instruct": {
+        "supportsStreaming": true,
+        "maxTokens": 64000,
+        "maxContext": 256000
+      }
+    },
+    "transportBackend": "vercel-ai-sdk"
+  }
+}

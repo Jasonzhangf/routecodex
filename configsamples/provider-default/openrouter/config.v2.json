@@ -1,0 +1,218 @@
+{
+  "version": "2.0.0",
+  "providerId": "openrouter",
+  "provider": {
+    "id": "openrouter",
+    "enabled": true,
+    "type": "openai",
+    "baseURL": "https://openrouter.ai/api/v1",
+    "auth": {
+      "type": "apikey",
+      "apiKey": "${OPENROUTER_API_KEY}"
+    },
+    "headers": {
+      "HTTP-Referer": "https://routecodex.local",
+      "X-Title": "RouteCodex"
+    },
+    "models": {
+      "arcee-ai/trinity-large-preview:free": {
+        "supportsStreaming": true,
+        "maxContext": 131000,
+        "capabilities": [
+          "tools"
+        ]
+      },
+      "arcee-ai/trinity-mini:free": {
+        "supportsStreaming": true,
+        "maxContext": 131072,
+        "capabilities": [
+          "tools"
+        ],
+        "supportsThinking": true
+      },
+      "cognitivecomputations/dolphin-mistral-24b-venice-edition:free": {
+        "supportsStreaming": true,
+        "maxContext": 32768,
+        "capabilities": [
+          "tools"
+        ]
+      },
+      "google/gemma-3-12b-it:free": {
+        "supportsStreaming": true,
+        "maxContext": 32768,
+        "capabilities": [
+          "multimodal"
+        ]
+      },
+      "google/gemma-3-27b-it:free": {
+        "supportsStreaming": true,
+        "maxContext": 131072,
+        "capabilities": [
+          "multimodal"
+        ]
+      },
+      "google/gemma-3-4b-it:free": {
+        "supportsStreaming": true,
+        "maxContext": 32768,
+        "capabilities": [
+          "multimodal"
+        ]
+      },
+      "google/gemma-3n-e2b-it:free": {
+        "supportsStreaming": true,
+        "maxContext": 8192,
+        "capabilities": [
+          "tools"
+        ]
+      },
+      "google/gemma-3n-e4b-it:free": {
+        "supportsStreaming": true,
+        "maxContext": 8192,
+        "capabilities": [
+          "tools"
+        ]
+      },
+      "liquid/lfm-2.5-1.2b-instruct:free": {
+        "supportsStreaming": true,
+        "maxContext": 32768,
+        "capabilities": [
+          "tools"
+        ]
+      },
+      "liquid/lfm-2.5-1.2b-thinking:free": {
+        "supportsStreaming": true,
+        "maxContext": 32768,
+        "capabilities": [
+          "tools"
+        ],
+        "supportsThinking": true
+      },
+      "meta-llama/llama-3.2-3b-instruct:free": {
+        "supportsStreaming": true,
+        "maxContext": 131072,
+        "capabilities": [
+          "tools"
+        ]
+      },
+      "meta-llama/llama-3.3-70b-instruct:free": {
+        "supportsStreaming": true,
+        "maxContext": 65536,
+        "capabilities": [
+          "tools"
+        ]
+      },
+      "minimax/minimax-m2.5:free": {
+        "supportsStreaming": true,
+        "maxContext": 196608,
+        "capabilities": [
+          "tools"
+        ],
+        "supportsThinking": true
+      },
+      "nousresearch/hermes-3-llama-3.1-405b:free": {
+        "supportsStreaming": true,
+        "maxContext": 131072,
+        "capabilities": [
+          "tools"
+        ]
+      },
+      "nvidia/nemotron-3-nano-30b-a3b:free": {
+        "supportsStreaming": true,
+        "maxContext": 256000,
+        "capabilities": [
+          "tools"
+        ],
+        "supportsThinking": true
+      },
+      "nvidia/nemotron-3-super-120b-a12b:free": {
+        "supportsStreaming": true,
+        "maxContext": 262144,
+        "capabilities": [
+          "tools"
+        ],
+        "supportsThinking": true
+      },
+      "nvidia/nemotron-nano-12b-v2-vl:free": {
+        "supportsStreaming": true,
+        "maxContext": 128000,
+        "capabilities": [
+          "tools",
+          "multimodal"
+        ],
+        "supportsThinking": true
+      },
+      "nvidia/nemotron-nano-9b-v2:free": {
+        "supportsStreaming": true,
+        "maxContext": 128000,
+        "capabilities": [
+          "tools"
+        ],
+        "supportsThinking": true
+      },
+      "openai/gpt-oss-120b:free": {
+        "supportsStreaming": true,
+        "maxContext": 131072,
+        "capabilities": [
+          "tools"
+        ],
+        "supportsThinking": true
+      },
+      "openai/gpt-oss-20b:free": {
+        "supportsStreaming": true,
+        "maxContext": 131072,
+        "capabilities": [
+          "tools"
+        ],
+        "supportsThinking": true
+      },
+      "qwen/qwen3-coder:free": {
+        "supportsStreaming": true,
+        "maxContext": 262000,
+        "capabilities": [
+          "tools"
+        ]
+      },
+      "qwen/qwen3-next-80b-a3b-instruct:free": {
+        "supportsStreaming": true,
+        "maxContext": 262144,
+        "capabilities": [
+          "tools"
+        ]
+      },
+      "qwen/qwen3.6-plus-preview:free": {
+        "supportsStreaming": true,
+        "maxContext": 1000000,
+        "capabilities": [
+          "tools"
+        ],
+        "supportsThinking": true
+      },
+      "qwen/qwen3.6-plus:free": {
+        "supportsStreaming": true,
+        "maxContext": 1000000,
+        "capabilities": [
+          "tools",
+          "multimodal"
+        ],
+        "supportsThinking": true
+      },
+      "stepfun/step-3.5-flash:free": {
+        "supportsStreaming": true,
+        "maxContext": 256000,
+        "capabilities": [
+          "tools"
+        ],
+        "supportsThinking": true
+      },
+      "z-ai/glm-4.5-air:free": {
+        "supportsStreaming": true,
+        "maxContext": 131072,
+        "capabilities": [
+          "tools"
+        ],
+        "supportsThinking": true
+      }
+    },
+    "transportBackend": "vercel-ai-sdk"
+  }
+}

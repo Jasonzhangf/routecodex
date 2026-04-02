@@ -1,0 +1,64 @@
+{
+  "version": "2.0.0",
+  "providerId": "ark-coding-plan",
+  "provider": {
+    "id": "ark-coding-plan",
+    "enabled": true,
+    "type": "openai",
+    "baseURL": "https://ark.cn-beijing.volces.com/api/coding/v3",
+    "auth": {
+      "type": "apikey",
+      "apiKey": "${ARK_CODING_PLAN_API_KEY}"
+    },
+    "models": {
+      "doubao-seed-2.0-code": {
+        "supportsStreaming": true,
+        "maxContext": 256000
+      },
+      "doubao-seed-2.0-pro": {
+        "supportsStreaming": true,
+        "maxContext": 256000,
+        "capabilities": [
+          "web_search"
+        ]
+      },
+      "doubao-seed-2.0-lite": {
+        "supportsStreaming": true,
+        "maxContext": 256000
+      },
+      "doubao-seed-code": {
+        "supportsStreaming": true,
+        "maxContext": 256000
+      },
+      "minimax-m2.5": {
+        "supportsStreaming": true,
+        "maxContext": 204800
+      },
+      "glm-4.7": {
+        "supportsStreaming": true,
+        "supportsThinking": true,
+        "maxContext": 202752,
+        "capabilities": [
+          "web_search"
+        ]
+      },
+      "deepseek-v3.2": {
+        "supportsStreaming": true,
+        "maxContext": 256000,
+        "capabilities": [
+          "web_search"
+        ]
+      },
+      "kimi-k2.5": {
+        "supportsStreaming": true,
+        "supportsThinking": true,
+        "maxContext": 262144,
+        "capabilities": [
+          "web_search"
+        ]
+      }
+    },
+    "compatibilityProfile": "chat:openai",
+    "transportBackend": "vercel-ai-sdk"
+  }
+}
