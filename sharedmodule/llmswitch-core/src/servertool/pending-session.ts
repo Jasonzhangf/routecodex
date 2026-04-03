@@ -20,8 +20,26 @@ export interface PendingServerToolInjection {
   sourceRequestId?: string;
 }
 
+const DEFAULT_PENDING_MAX_AGE_MS = 30 * 60 * 1000;
+
 function readSessionDirEnv(): string {
   return String(process.env.ROUTECODEX_SESSION_DIR || '').trim();
+}
+
+function resolvePendingMaxAgeMs(): number {
+  const raw = String(
+    process.env.ROUTECODEX_SERVERTOOL_PENDING_MAX_AGE_MS
+    ?? process.env.RCC_SERVERTOOL_PENDING_MAX_AGE_MS
+    ?? ''
+  ).trim();
+  if (!raw) {
+    return DEFAULT_PENDING_MAX_AGE_MS;
+  }
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return DEFAULT_PENDING_MAX_AGE_MS;
+  }
+  return parsed;
 }
 
 function sanitizeSegment(value: string): string {
@@ -99,7 +117,27 @@ export async function loadPendingServerToolInjection(sessionId: string): Promise
   if (!file) return null;
   try {
     const raw = await readJsonFile(file);
-    return coercePending(raw);
+    const pending = coercePending(raw);
+    if (!pending) {
+      return null;
+    }
+    const maxAgeMs = resolvePendingMaxAgeMs();
+    if (Date.now() - pending.createdAtMs > maxAgeMs) {
+      try {
+        await fs.rm(file, { force: true });
+      } catch {
+        // ignore stale-file cleanup failure
+      }
+      try {
+        console.warn(
+          `[servertool-pending] stale pending injection dropped session=${pending.sessionId} ageMs=${Date.now() - pending.createdAtMs} maxAgeMs=${maxAgeMs}`
+        );
+      } catch {
+        // no-op
+      }
+      return null;
+    }
+    return pending;
   } catch {
     return null;
   }
@@ -116,4 +154,3 @@ export async function clearPendingServerToolInjection(sessionId: string): Promis
     // ignore
   }
 }
-

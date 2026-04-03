@@ -50,6 +50,13 @@ function emitStickyStoreError(
     },
     details
   });
+  try {
+    const op = typeof details.operation === 'string' ? details.operation : 'unknown';
+    const errMsg = typeof details.error === 'string' ? details.error : '';
+    console.warn(`[sticky-session-store] ${code} stage=${stage} op=${op}${errMsg ? ` error=${errMsg}` : ''}`);
+  } catch {
+    // no-op
+  }
 }
 
 export class StickySessionKeyMissingError extends Error {

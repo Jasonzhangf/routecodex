@@ -1,12 +1,44 @@
 import type { RouterMetadataInput } from '../../types.js';
 import type { RoutingInstructionState } from '../../routing-instructions.js';
 import { mergeStopMessageFromPersisted } from '../../stop-message-state-sync.js';
+import { providerErrorCenter } from '../../error-center.js';
 
 export type RoutingInstructionStateStoreLike = {
   loadSync: (key: string) => RoutingInstructionState | null;
   saveAsync: (key: string, state: RoutingInstructionState | null) => void;
   saveSync?: (key: string, state: RoutingInstructionState | null) => void;
 };
+
+function formatError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error);
+}
+
+function emitRoutingStateRefreshError(key: string, error: unknown): void {
+  const errorMessage = formatError(error);
+  providerErrorCenter.emit({
+    code: 'STICKY_STATE_REFRESH_FAILED',
+    message: 'failed to refresh in-memory routing state from persisted sticky store',
+    stage: 'sticky_session.refresh',
+    runtime: {
+      requestId: 'routing-state-store',
+      providerProtocol: 'sticky-session-store',
+      providerType: 'internal'
+    },
+    details: {
+      operation: 'refresh_existing_state',
+      key,
+      error: errorMessage
+    }
+  });
+  try {
+    console.warn(`[routing-state-store] STICKY_STATE_REFRESH_FAILED key=${key} error=${errorMessage}`);
+  } catch {
+    // no-op
+  }
+}
 
 function readToken(value: unknown): string {
   if (typeof value !== 'string') {
@@ -87,8 +119,9 @@ export function getRoutingInstructionState(
         existing.preCommandScriptPath = persisted.preCommandScriptPath;
         existing.preCommandUpdatedAt = persisted.preCommandUpdatedAt;
       }
-    } catch {
-      // 刷新失败不影响原有内存状态
+    } catch (error) {
+      // 刷新失败不影响原有内存状态，但必须显式上报，禁止静默吞错
+      emitRoutingStateRefreshError(key, error);
     }
     return existing;
   }
