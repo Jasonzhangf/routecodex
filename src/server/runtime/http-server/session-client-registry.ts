@@ -25,6 +25,30 @@ import type {
 
 const CLIENT_TMUX_INJECT_DELAY_MS = 10_000;
 
+function formatRegistryError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error ?? 'unknown');
+}
+
+function isErrnoWithCode(error: unknown, code: string): boolean {
+  return !!error && typeof error === 'object' && (error as NodeJS.ErrnoException).code === code;
+}
+
+function logSessionClientRegistryNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
+  try {
+    const detailSuffix = details && Object.keys(details).length
+      ? ` details=${JSON.stringify(details)}`
+      : '';
+    console.warn(
+      `[session-client-registry] ${stage} failed: ${formatRegistryError(error)}${detailSuffix}`
+    );
+  } catch {
+    // no-op
+  }
+}
+
 function resolveClientTmuxInjectDelayMs(): number {
   const runtimeConfigDelay = resolveTmuxInjectDelayMsFromRuntimeConfig();
   if (typeof runtimeConfigDelay === 'number' && Number.isFinite(runtimeConfigDelay) && runtimeConfigDelay >= 0) {
@@ -162,8 +186,12 @@ export class SessionClientRegistry {
         }
         this.conversationToTmuxSession.set(conversationSessionId, tmuxSessionId);
       }
-    } catch {
-      // best-effort only
+    } catch (error) {
+      if (!isErrnoWithCode(error, 'ENOENT')) {
+        logSessionClientRegistryNonBlockingError('ensureConversationBindingsLoaded.read', error, {
+          storePath: nextStorePath
+        });
+      }
     }
   }
 
@@ -183,8 +211,10 @@ export class SessionClientRegistry {
       const tempPath = `${this.bindingsStorePath}.tmp`;
       fs.writeFileSync(tempPath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
       fs.renameSync(tempPath, this.bindingsStorePath);
-    } catch {
-      // best-effort only
+    } catch (error) {
+      logSessionClientRegistryNonBlockingError('persistConversationBindings.write', error, {
+        storePath: this.bindingsStorePath
+      });
     }
   }
 
