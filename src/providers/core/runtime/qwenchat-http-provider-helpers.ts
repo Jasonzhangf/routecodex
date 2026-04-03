@@ -60,6 +60,13 @@ type QwenChatPayload = {
   metadata?: Record<string, unknown>;
 };
 
+type QwenImageGenerationOptions = {
+  enabled: boolean;
+  count: number;
+  sizeRatio: string;
+  responseFormat: 'url' | 'b64_json';
+};
+
 type QwenChatSendInput = {
   baseUrl: string;
   payload: QwenChatPayload;
@@ -127,6 +134,87 @@ function normalizeInputString(value: unknown): string {
     return '';
   }
   return trimmed;
+}
+
+function clampInteger(value: unknown, fallback: number, min: number, max: number): number {
+  const parsed =
+    typeof value === 'number' && Number.isFinite(value)
+      ? Math.trunc(value)
+      : Number.parseInt(normalizeInputString(value), 10);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  return Math.min(max, Math.max(min, parsed));
+}
+
+function parseImageSizeToQwenRatio(size: unknown): string {
+  const text = normalizeInputString(size);
+  if (!text) {
+    return '1:1';
+  }
+  const ratioMatch = text.match(/^(\d{1,2}):(\d{1,2})$/);
+  if (ratioMatch) {
+    const w = Number.parseInt(ratioMatch[1], 10);
+    const h = Number.parseInt(ratioMatch[2], 10);
+    if (Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0) {
+      const ratio = `${w}:${h}`;
+      if (['1:1', '16:9', '9:16', '4:3', '3:4'].includes(ratio)) {
+        return ratio;
+      }
+    }
+  }
+
+  const sizeMatch = text.toLowerCase().match(/^(\d{2,5})\s*x\s*(\d{2,5})$/);
+  if (!sizeMatch) {
+    return '1:1';
+  }
+  const width = Number.parseInt(sizeMatch[1], 10);
+  const height = Number.parseInt(sizeMatch[2], 10);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return '1:1';
+  }
+  const ratio = width / height;
+  const candidates = [
+    { key: '1:1', ratio: 1 },
+    { key: '16:9', ratio: 16 / 9 },
+    { key: '9:16', ratio: 9 / 16 },
+    { key: '4:3', ratio: 4 / 3 },
+    { key: '3:4', ratio: 3 / 4 }
+  ];
+  let best = candidates[0];
+  let bestDiff = Number.POSITIVE_INFINITY;
+  for (const candidate of candidates) {
+    const diff = Math.abs(ratio - candidate.ratio);
+    if (diff < bestDiff) {
+      best = candidate;
+      bestDiff = diff;
+    }
+  }
+  return best.key;
+}
+
+function parseQwenImageGenerationOptions(metadata?: Record<string, unknown>): QwenImageGenerationOptions {
+  const node =
+    metadata && isRecord(metadata.qwenImageGeneration)
+      ? (metadata.qwenImageGeneration as Record<string, unknown>)
+      : undefined;
+  const enabled =
+    metadata?.qwenImageGeneration === true
+    || metadata?.imageGeneration === true
+    || normalizeInputString(metadata?.generationMode).toLowerCase() === 'image'
+    || Boolean(node);
+  const count = clampInteger(node?.n ?? metadata?.n, 1, 1, 10);
+  const sizeRatio = parseImageSizeToQwenRatio(node?.size ?? metadata?.size);
+  const responseFormatRaw = normalizeInputString(
+    node?.responseFormat ?? node?.response_format ?? metadata?.response_format
+  ).toLowerCase();
+  const responseFormat: 'url' | 'b64_json' = responseFormatRaw === 'b64_json' ? 'b64_json' : 'url';
+  return {
+    enabled,
+    count,
+    sizeRatio,
+    responseFormat
+  };
 }
 
 function readPositiveIntegerEnv(keys: string[], fallback: number, min = 1, max = Number.MAX_SAFE_INTEGER): number {
@@ -1072,10 +1160,17 @@ export function extractQwenChatPayload(request: UnknownObject): QwenChatPayload 
 }
 
 export function shouldUseSearchMode(payload: QwenChatPayload): boolean {
+  if (parseQwenImageGenerationOptions(payload.metadata).enabled) {
+    return false;
+  }
   if (payload.metadata?.qwenWebSearch === true || payload.metadata?.webSearch === true) {
     return true;
   }
   return false;
+}
+
+function shouldUseImageGenerationMode(payload: QwenChatPayload): boolean {
+  return parseQwenImageGenerationOptions(payload.metadata).enabled;
 }
 
 function extractChatIdFromCreatePayload(payload: Record<string, unknown>): string {
@@ -1115,7 +1210,7 @@ function extractCreateErrorMessage(payload: Record<string, unknown>): string {
 export async function createQwenChatSession(args: {
   baseUrl: string;
   model: string;
-  chatType: 't2t' | 'search';
+  chatType: 't2t' | 'search' | 't2i';
   baxiaTokens: QwenBaxiaTokens;
   authHeaders?: Record<string, string>;
 }): Promise<string> {
@@ -1161,9 +1256,10 @@ export function buildQwenChatCompletionRequest(args: {
   model: string;
   content: string;
   uploadedFiles: QwenFilePayload[];
-  chatType: 't2t' | 'search';
+  chatType: 't2t' | 'search' | 't2i';
+  imageSize?: string;
 }): Record<string, unknown> {
-  return {
+  const request: Record<string, unknown> = {
     stream: true,
     version: '2.1',
     incremental_output: true,
@@ -1199,6 +1295,10 @@ export function buildQwenChatCompletionRequest(args: {
     ],
     timestamp: Date.now()
   };
+  if (args.chatType === 't2i' && args.imageSize) {
+    request.size = args.imageSize;
+  }
+  return request;
 }
 
 function extractReasoningContentFromDelta(delta: Record<string, unknown>): string {
@@ -1333,6 +1433,7 @@ function processQwenSsePayloadLines(args: {
   collect?: {
     contentParts: string[];
     reasoningParts: string[];
+    imageUrls: string[];
     usageRef: { usage?: Record<string, unknown> };
   };
   responseId: string;
@@ -1369,6 +1470,13 @@ function processQwenSsePayloadLines(args: {
         const reasoning = normalizeInputString(delta.reasoning_content);
         if (reasoning) args.collect.reasoningParts.push(reasoning);
       }
+      if (args.collect && deltaNode) {
+        const phase = normalizeInputString((deltaNode as Record<string, unknown>).phase);
+        const rawContent = normalizeInputString((deltaNode as Record<string, unknown>).content);
+        if (phase === 'image_gen' && /^https?:\/\//i.test(rawContent)) {
+          args.collect.imageUrls.push(rawContent);
+        }
+      }
       if (delta || finishReason || usage) {
         const deltaForEmit = delta ? sanitizeDeltaForStreamEmit(delta) : {};
         args.onChunk(
@@ -1396,6 +1504,7 @@ export function createOpenAiMappedSseStream(input: QwenSseChunkWriterInput): Nod
   let buffer = '';
   const contentParts: string[] = [];
   const reasoningParts: string[] = [];
+  const imageUrls: string[] = [];
   const usageRef: { usage?: Record<string, unknown> } = {};
   let lastUpstreamFinishReason: string | null = null;
 
@@ -1422,7 +1531,7 @@ export function createOpenAiMappedSseStream(input: QwenSseChunkWriterInput): Nod
           lastUpstreamFinishReason = reason;
         },
         includeFinishReason: false,
-        collect: { contentParts, reasoningParts, usageRef },
+        collect: { contentParts, reasoningParts, imageUrls, usageRef },
         responseId,
         created,
         model: input.model
@@ -1444,12 +1553,16 @@ export function createOpenAiMappedSseStream(input: QwenSseChunkWriterInput): Nod
           lastUpstreamFinishReason = reason;
         },
         includeFinishReason: false,
-        collect: { contentParts, reasoningParts, usageRef },
+        collect: { contentParts, reasoningParts, imageUrls, usageRef },
         responseId,
         created,
         model: input.model
       });
     }
+    const dedupImageUrls = Array.from(new Set(imageUrls));
+    const aggregatedContent = dedupImageUrls.length > 0
+      ? dedupImageUrls.join('\n')
+      : contentParts.join('');
     const harvested = applyStandardizedTextHarvestToChatPayload({
       id: responseId,
       object: 'chat.completion',
@@ -1461,7 +1574,7 @@ export function createOpenAiMappedSseStream(input: QwenSseChunkWriterInput): Nod
           finish_reason: 'stop',
           message: {
             role: 'assistant',
-            content: contentParts.join(''),
+            content: aggregatedContent,
             ...(reasoningParts.length ? { reasoning_content: reasoningParts.join('') } : {})
           }
         }
@@ -1516,6 +1629,7 @@ export async function collectQwenSseAsOpenAiResult(args: {
 }): Promise<Record<string, unknown>> {
   const contentParts: string[] = [];
   const reasoningParts: string[] = [];
+  const imageUrls: string[] = [];
   const usageRef: { usage?: Record<string, unknown> } = {};
   let buffer = '';
 
@@ -1535,11 +1649,16 @@ export async function collectQwenSseAsOpenAiResult(args: {
     onDone: () => {
       // no-op in aggregate mode
     },
-    collect: { contentParts, reasoningParts, usageRef },
+    collect: { contentParts, reasoningParts, imageUrls, usageRef },
     responseId: `chatcmpl-${randomUUID()}`,
     created: Math.floor(Date.now() / 1000),
     model: args.model
   });
+
+  const dedupImageUrls = Array.from(new Set(imageUrls));
+  const aggregatedContent = dedupImageUrls.length > 0
+    ? dedupImageUrls.join('\n')
+    : contentParts.join('');
 
   const result: Record<string, unknown> = {
     id: `chatcmpl-${randomUUID()}`,
@@ -1551,7 +1670,7 @@ export async function collectQwenSseAsOpenAiResult(args: {
         index: 0,
         message: {
           role: 'assistant',
-          content: contentParts.join(''),
+          content: aggregatedContent,
           ...(reasoningParts.length ? { reasoning_content: reasoningParts.join('') } : {})
         },
         finish_reason: 'stop'
@@ -1577,7 +1696,12 @@ export async function buildQwenChatSendPlan(input: QwenChatSendInput): Promise<{
     throw err;
   }
 
-  const chatType: 't2t' | 'search' = shouldUseSearchMode(normalizedPayload) ? 'search' : 't2t';
+  const imageGenOptions = parseQwenImageGenerationOptions(normalizedPayload.metadata);
+  const chatType: 't2t' | 'search' | 't2i' = shouldUseImageGenerationMode(normalizedPayload)
+    ? 't2i'
+    : shouldUseSearchMode(normalizedPayload)
+      ? 'search'
+      : 't2t';
   const chatId = await createQwenChatSession({
     baseUrl: input.baseUrl,
     model: normalizedPayload.model,
@@ -1586,6 +1710,10 @@ export async function buildQwenChatSendPlan(input: QwenChatSendInput): Promise<{
     authHeaders: input.authHeaders
   });
   const parsedMessages = parseIncomingMessages(normalizedPayload.messages);
+  const finalContent =
+    chatType === 't2i' && imageGenOptions.count > 1
+      ? `${parsedMessages.content}\n\n(Generate ${imageGenOptions.count} images.)`
+      : parsedMessages.content;
   const uploaded = parsedMessages.attachments.length
     ? await uploadAttachments({
         baseUrl: input.baseUrl,
@@ -1598,9 +1726,10 @@ export async function buildQwenChatSendPlan(input: QwenChatSendInput): Promise<{
   const completionBody = buildQwenChatCompletionRequest({
     chatId,
     model: normalizedPayload.model,
-    content: parsedMessages.content,
+    content: finalContent,
     uploadedFiles: uploaded.files,
-    chatType
+    chatType,
+    ...(chatType === 't2i' ? { imageSize: imageGenOptions.sizeRatio } : {})
   });
 
   const completionHeaders = {

@@ -1,5 +1,6 @@
 import type { Application, Request, Response } from 'express';
 import { handleChatCompletions } from '../../handlers/chat-handler.js';
+import { handleImageGenerations } from '../../handlers/images-handler.js';
 import { handleMessages } from '../../handlers/messages-handler.js';
 import { handleResponses } from '../../handlers/responses-handler.js';
 import type { HandlerContext } from '../../handlers/types.js';
@@ -570,6 +571,10 @@ export function registerHttpRoutes(options: RouteOptions): void {
   app.post('/v1/chat/completions', async (req, res) => {
     if (!(await holdUntilReady(res))) {return;}
     await handleChatCompletions(req, res, buildHandlerContext());
+  });
+  app.post('/v1/images/generations', async (req, res) => {
+    if (!(await holdUntilReady(res))) {return;}
+    await handleImageGenerations(req, res, buildHandlerContext());
   });
   app.post('/v1/messages', async (req, res) => {
     if (!(await holdUntilReady(res))) {return;}

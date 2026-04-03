@@ -6,6 +6,7 @@ HTTP 路由处理器仅负责：
 
 ## 路由与映射
 - `/v1/chat/completions` → `ChatHandler` → Hub Pipeline（Chat）
+- `/v1/images/generations` → `ImagesHandler` → Hub Pipeline（通过 Chat 协议桥接）
 - `/v1/responses` → `ResponsesHandler` → Hub Pipeline（Responses）
 - `/v1/messages` → `MessagesHandler` → Hub Pipeline（Anthropic）
 
