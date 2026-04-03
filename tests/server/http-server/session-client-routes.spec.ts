@@ -143,6 +143,29 @@ describe('session-client routes', () => {
     }
   });
 
+  it('rejects non-loopback callbackUrl during register', async () => {
+    const app = express();
+    app.use(express.json({ limit: '256kb' }));
+    registerSessionClientRoutes(app);
+
+    const server = http.createServer(app);
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const addr = server.address() as AddressInfo;
+    const baseUrl = `http://127.0.0.1:${addr.port}`;
+
+    try {
+      const reg = await localFetch(baseUrl, '/daemon/session-client/register', {
+        daemonId: 'sessiond_bad_callback',
+        callbackUrl: 'https://example.com/inject',
+        sessionId: 's_bad_callback'
+      });
+      expect(reg.status).toBe(400);
+      expect(reg.payload?.error?.message).toContain('callbackUrl host must be localhost/loopback');
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it('supports heartbeat admin list and dry-run trigger endpoints', async () => {
     const app = express();
     app.use(express.json({ limit: '256kb' }));

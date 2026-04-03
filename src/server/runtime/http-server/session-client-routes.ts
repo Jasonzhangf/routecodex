@@ -36,7 +36,8 @@ import {
   normalizeTaskPatch,
   parseBoolean,
   parsePositiveInt,
-  parseString
+  parseString,
+  validateSessionClientCallbackUrl
 } from './session-client-route-utils.js';
 import { clearStopMessageTmuxScope, migrateStopMessageTmuxScope } from './stopmessage-scope-rebind.js';
 import { matchesExpectedClientApiKey } from '../../../utils/session-client-token.js';
@@ -132,6 +133,16 @@ export function registerSessionClientRoutes(app: Application, options: SessionCl
       res.status(400).json({ error: { message: 'daemonId and callbackUrl are required', code: 'bad_request' } });
       return;
     }
+    const callbackValidation = validateSessionClientCallbackUrl(callbackUrl);
+    if (!callbackValidation.ok) {
+      res.status(400).json({
+        error: {
+          message: callbackValidation.reason,
+          code: 'bad_request'
+        }
+      });
+      return;
+    }
 
     const tmuxSessionId = parseString(body.tmuxSessionId) || parseString(body.sessionId);
     const workdir = normalizeWorkdir(parseString(body.workdir) || parseString(body.cwd) || parseString(body.workingDirectory));
@@ -150,7 +161,7 @@ export function registerSessionClientRoutes(app: Application, options: SessionCl
 
     const rec = registry.register({
       daemonId,
-      callbackUrl,
+      callbackUrl: callbackValidation.normalizedUrl,
       ...(tmuxSessionId ? { tmuxSessionId } : {}),
       ...(workdir ? { workdir } : {}),
       clientType: parseString(body.clientType),

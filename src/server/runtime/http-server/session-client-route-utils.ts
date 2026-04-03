@@ -61,6 +61,45 @@ export function parsePositiveInt(input: unknown): number | undefined {
   return undefined;
 }
 
+function isLocalCallbackHost(host: string): boolean {
+  const normalized = host.trim().toLowerCase();
+  return normalized === '127.0.0.1'
+    || normalized === 'localhost'
+    || normalized === '::1'
+    || normalized === '::ffff:127.0.0.1';
+}
+
+export function validateSessionClientCallbackUrl(input: string): { ok: true; normalizedUrl: string } | { ok: false; reason: string } {
+  const value = parseString(input);
+  if (!value) {
+    return { ok: false, reason: 'callbackUrl is required' };
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return { ok: false, reason: 'callbackUrl must be a valid URL' };
+  }
+  const protocol = parsed.protocol.toLowerCase();
+  if (protocol !== 'http:' && protocol !== 'https:') {
+    return { ok: false, reason: 'callbackUrl protocol must be http or https' };
+  }
+  if (parsed.username || parsed.password) {
+    return { ok: false, reason: 'callbackUrl must not include username/password' };
+  }
+  if (!isLocalCallbackHost(parsed.hostname)) {
+    return { ok: false, reason: 'callbackUrl host must be localhost/loopback' };
+  }
+  if (!parsed.port) {
+    return { ok: false, reason: 'callbackUrl must include an explicit port' };
+  }
+  const port = Number.parseInt(parsed.port, 10);
+  if (!Number.isFinite(port) || port <= 0 || port > 65535) {
+    return { ok: false, reason: 'callbackUrl port is invalid' };
+  }
+  return { ok: true, normalizedUrl: parsed.toString() };
+}
+
 function parseIsoToMs(input: unknown): number | null {
   if (typeof input !== 'string') {
     return null;

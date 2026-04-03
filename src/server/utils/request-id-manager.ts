@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { resolveRccStateDir } from '../../config/user-data-paths.js';
 import { rebindRequestTimingTimeline } from './stage-logger.js';
@@ -40,8 +41,12 @@ const REQUEST_COMPONENTS = new Map<string, TimedValue<RequestIdComponents>>();
 const REQUEST_ALIAS = new Map<string, TimedValue<string>>();
 const COMPONENT_TTL_MS = 5 * 60 * 1000;
 const COMPONENT_SWEEP_INTERVAL_MS = 30 * 1000;
+const REQUEST_COUNTER_PERSIST_DEBOUNCE_MS = 1_000;
 const REQUEST_COUNTER_STATE_FILE = resolveRequestCounterStateFilePath();
 let cleanupTimer: NodeJS.Timeout | null = null;
+let requestCounterPersistTimer: NodeJS.Timeout | null = null;
+let requestCounterPersistInFlight = false;
+let requestCounterPersistPending = false;
 let requestCounterStateLoaded = false;
 let requestCounterState: RequestCounterState = {
   version: 1,
@@ -158,7 +163,7 @@ function nextPersistentSequence(now: Date = new Date()): string {
   requestCounterState.totalCount += 1;
   requestCounterState.windowCount += 1;
   requestCounterState.updatedAt = now.toISOString();
-  persistRequestCounterState();
+  schedulePersistRequestCounterState();
   return `${requestCounterState.totalCount}-${requestCounterState.windowCount}`;
 }
 
@@ -272,16 +277,42 @@ function rolloverDailyWindowIfNeeded(now: Date): void {
   requestCounterState.windowCount = 0;
 }
 
-function persistRequestCounterState(): void {
+function schedulePersistRequestCounterState(): void {
+  if (requestCounterPersistInFlight) {
+    requestCounterPersistPending = true;
+    return;
+  }
+  if (requestCounterPersistTimer) {
+    return;
+  }
+  requestCounterPersistTimer = setTimeout(() => {
+    requestCounterPersistTimer = null;
+    void flushPersistRequestCounterState();
+  }, REQUEST_COUNTER_PERSIST_DEBOUNCE_MS);
+  requestCounterPersistTimer.unref?.();
+}
+
+async function flushPersistRequestCounterState(): Promise<void> {
+  if (requestCounterPersistInFlight) {
+    requestCounterPersistPending = true;
+    return;
+  }
+  requestCounterPersistInFlight = true;
   try {
     const dir = path.dirname(REQUEST_COUNTER_STATE_FILE);
-    fs.mkdirSync(dir, { recursive: true });
+    await fsp.mkdir(dir, { recursive: true });
     const tmpFile = `${REQUEST_COUNTER_STATE_FILE}.${process.pid}.tmp`;
     const text = `${JSON.stringify(requestCounterState, null, 2)}\n`;
-    fs.writeFileSync(tmpFile, text, 'utf8');
-    fs.renameSync(tmpFile, REQUEST_COUNTER_STATE_FILE);
+    await fsp.writeFile(tmpFile, text, 'utf8');
+    await fsp.rename(tmpFile, REQUEST_COUNTER_STATE_FILE);
   } catch {
     // non-blocking: request id generation must not fail due to persistence errors
+  } finally {
+    requestCounterPersistInFlight = false;
+    if (requestCounterPersistPending) {
+      requestCounterPersistPending = false;
+      schedulePersistRequestCounterState();
+    }
   }
 }
 
@@ -363,6 +394,12 @@ export function __unsafeRequestIdCacheSize(): { components: number; aliases: num
 export function __unsafeResetRequestIdCounterForTests(
   next?: Partial<Pick<RequestCounterState, 'totalCount' | 'windowCount' | 'windowKey'>>
 ): void {
+  if (requestCounterPersistTimer) {
+    clearTimeout(requestCounterPersistTimer);
+    requestCounterPersistTimer = null;
+  }
+  requestCounterPersistInFlight = false;
+  requestCounterPersistPending = false;
   requestCounterStateLoaded = true;
   requestCounterState = {
     version: 1,

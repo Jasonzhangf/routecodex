@@ -1,4 +1,5 @@
 import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
+import { isIP } from 'node:net';
 import { PassThrough } from 'node:stream';
 
 import type { UnknownObject } from '../../../types/common-types.js';
@@ -106,6 +107,8 @@ type BxCacheState = {
 
 const BAXIA_VERSION = '2.5.36';
 const BAXIA_CACHE_TTL_MS = 4 * 60 * 1000;
+const DEFAULT_ATTACHMENT_FETCH_TIMEOUT_MS = 15_000;
+const DEFAULT_ATTACHMENT_MAX_BYTES = 20 * 1024 * 1024;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -124,6 +127,129 @@ function normalizeInputString(value: unknown): string {
     return '';
   }
   return trimmed;
+}
+
+function readPositiveIntegerEnv(keys: string[], fallback: number, min = 1, max = Number.MAX_SAFE_INTEGER): number {
+  for (const key of keys) {
+    const raw = normalizeInputString(process.env[key]);
+    if (!raw) {
+      continue;
+    }
+    const parsed = Number.parseInt(raw, 10);
+    if (!Number.isFinite(parsed)) {
+      continue;
+    }
+    const normalized = Math.floor(parsed);
+    if (normalized < min || normalized > max) {
+      continue;
+    }
+    return normalized;
+  }
+  return fallback;
+}
+
+function isPrivateIpv4(host: string): boolean {
+  const segments = host.split('.');
+  if (segments.length !== 4) {
+    return false;
+  }
+  const numbers = segments.map((segment) => Number.parseInt(segment, 10));
+  if (numbers.some((value) => !Number.isFinite(value) || value < 0 || value > 255)) {
+    return false;
+  }
+  const [a, b] = numbers;
+  if (a === 10 || a === 127 || a === 0) {
+    return true;
+  }
+  if (a === 169 && b === 254) {
+    return true;
+  }
+  if (a === 192 && b === 168) {
+    return true;
+  }
+  if (a === 172 && b >= 16 && b <= 31) {
+    return true;
+  }
+  return false;
+}
+
+function isPrivateIpv6(host: string): boolean {
+  const normalized = host.toLowerCase();
+  return normalized === '::1'
+    || normalized.startsWith('fc')
+    || normalized.startsWith('fd')
+    || normalized.startsWith('fe80:');
+}
+
+function validateAttachmentSourceUrl(input: string): URL {
+  let parsed: URL;
+  try {
+    parsed = new URL(input);
+  } catch {
+    throw new Error('Invalid attachment URL');
+  }
+  const protocol = parsed.protocol.toLowerCase();
+  if (protocol !== 'https:' && protocol !== 'http:') {
+    throw new Error(`Unsupported attachment URL protocol: ${protocol}`);
+  }
+  if (parsed.username || parsed.password) {
+    throw new Error('Attachment URL must not include username/password');
+  }
+  const hostname = parsed.hostname.trim().toLowerCase();
+  if (!hostname) {
+    throw new Error('Attachment URL hostname is required');
+  }
+  if (hostname === 'localhost' || hostname.endsWith('.localhost') || hostname.endsWith('.local')) {
+    throw new Error('Attachment URL localhost/local domains are not allowed');
+  }
+  const ipType = isIP(hostname);
+  if (ipType === 4 && isPrivateIpv4(hostname)) {
+    throw new Error('Attachment URL private IPv4 is not allowed');
+  }
+  if (ipType === 6 && isPrivateIpv6(hostname)) {
+    throw new Error('Attachment URL private IPv6 is not allowed');
+  }
+  return parsed;
+}
+
+async function readResponseBytesWithLimit(response: Response, maxBytes: number): Promise<Uint8Array> {
+  const contentLengthText = normalizeInputString(response.headers.get('content-length'));
+  if (contentLengthText) {
+    const contentLength = Number.parseInt(contentLengthText, 10);
+    if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+      throw new Error(`Attachment exceeds max size (${contentLength} > ${maxBytes})`);
+    }
+  }
+  const reader = response.body?.getReader();
+  if (!reader) {
+    return new Uint8Array(await response.arrayBuffer());
+  }
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  while (true) {
+    const step = await reader.read();
+    if (step.done) {
+      break;
+    }
+    const chunk = step.value;
+    total += chunk.byteLength;
+    if (total > maxBytes) {
+      try {
+        await reader.cancel('attachment_too_large');
+      } catch {
+        // ignore
+      }
+      throw new Error(`Attachment exceeds max size (${total} > ${maxBytes})`);
+    }
+    chunks.push(chunk);
+  }
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return merged;
 }
 
 function randomString(length: number): string {
@@ -456,11 +582,28 @@ async function loadAttachmentBytes(attachment: QwenMessageAttachment): Promise<L
     };
   }
   if (/^https?:\/\//i.test(attachment.source)) {
-    const resp = await fetch(attachment.source);
+    const parsedUrl = validateAttachmentSourceUrl(attachment.source);
+    const timeoutMs = readPositiveIntegerEnv(
+      ['ROUTECODEX_QWENCHAT_ATTACHMENT_FETCH_TIMEOUT_MS', 'RCC_QWENCHAT_ATTACHMENT_FETCH_TIMEOUT_MS'],
+      DEFAULT_ATTACHMENT_FETCH_TIMEOUT_MS,
+      1_000,
+      300_000
+    );
+    const maxBytes = readPositiveIntegerEnv(
+      ['ROUTECODEX_QWENCHAT_ATTACHMENT_MAX_BYTES', 'RCC_QWENCHAT_ATTACHMENT_MAX_BYTES'],
+      DEFAULT_ATTACHMENT_MAX_BYTES,
+      1024
+    );
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort('attachment_fetch_timeout'), timeoutMs);
+    if (typeof timer.unref === 'function') {
+      timer.unref();
+    }
+    const resp = await fetch(parsedUrl, { signal: controller.signal }).finally(() => clearTimeout(timer));
     if (!resp.ok) {
       throw new Error(`Failed to fetch attachment URL: HTTP ${resp.status}`);
     }
-    const bytes = new Uint8Array(await resp.arrayBuffer());
+    const bytes = await readResponseBytesWithLimit(resp, maxBytes);
     const mimeType = normalizeMimeType(attachment.mimeType || resp.headers.get('content-type'));
     return {
       bytes,
