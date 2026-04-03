@@ -179,14 +179,6 @@
           "tools"
         ]
       },
-      "qwen/qwen3.6-plus-preview:free": {
-        "supportsStreaming": true,
-        "maxContext": 1000000,
-        "capabilities": [
-          "tools"
-        ],
-        "supportsThinking": true
-      },
       "qwen/qwen3.6-plus:free": {
         "supportsStreaming": true,
         "maxContext": 1000000,
