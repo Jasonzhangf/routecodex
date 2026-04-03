@@ -12,6 +12,11 @@
       "tokenFile": "default"
     },
     "models": {
+      "qwen3.6-plus": {
+        "maxTokens": 64000,
+        "maxContext": 256000,
+        "supportsStreaming": true
+      },
       "qwen3.5-plus": {
         "maxTokens": 64000,
         "maxContext": 256000,

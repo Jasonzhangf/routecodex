@@ -1053,7 +1053,7 @@ export async function uploadAttachments(args: {
 export function extractQwenChatPayload(request: UnknownObject): QwenChatPayload {
   const container = isRecord(request) ? request : {};
   const payload = isRecord(container.data) ? container.data : container;
-  const model = normalizeInputString(payload.model) || 'qwen3.5-plus';
+  const model = normalizeInputString(payload.model) || 'qwen3.6-plus';
   const messages = Array.isArray(payload.messages) ? payload.messages : [];
   const streamFlag = payload.stream;
   const stream = streamFlag === undefined ? true : streamFlag === true;

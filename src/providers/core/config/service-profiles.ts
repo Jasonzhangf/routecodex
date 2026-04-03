@@ -178,7 +178,7 @@ export const BASE_SERVICE_PROFILES: Record<string, Omit<ServiceProfile, 'hooks' 
     // Qwen Web chat (chat.qwen.ai) flow used by inlined qwenchat-http-provider.
     defaultBaseUrl: 'https://chat.qwen.ai',
     defaultEndpoint: '/api/v2/chat/completions',
-    defaultModel: 'qwen3.5-plus',
+    defaultModel: 'qwen3.6-plus',
     requiredAuth: [],
     optionalAuth: ['apikey', 'oauth'],
     headers: {
