@@ -43,6 +43,7 @@ function emitStickyStoreError(
     code,
     message,
     stage,
+    timestamp: Date.now(),
     runtime: {
       requestId: STICKY_RUNTIME_REQUEST_ID,
       providerProtocol: 'sticky-session-store',

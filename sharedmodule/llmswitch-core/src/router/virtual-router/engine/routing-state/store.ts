@@ -22,6 +22,7 @@ function emitRoutingStateRefreshError(key: string, error: unknown): void {
     code: 'STICKY_STATE_REFRESH_FAILED',
     message: 'failed to refresh in-memory routing state from persisted sticky store',
     stage: 'sticky_session.refresh',
+    timestamp: Date.now(),
     runtime: {
       requestId: 'routing-state-store',
       providerProtocol: 'sticky-session-store',

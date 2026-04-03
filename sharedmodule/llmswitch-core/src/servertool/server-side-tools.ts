@@ -619,6 +619,11 @@ export async function runServerSideToolEngine(
         options.adapterContext && typeof (options.adapterContext as any).sessionId === 'string'
           ? String((options.adapterContext as any).sessionId).trim()
           : '';
+      const conversationId =
+        options.adapterContext && typeof (options.adapterContext as any).conversationId === 'string'
+          ? String((options.adapterContext as any).conversationId).trim()
+          : '';
+      const aliasSessionIds = conversationId && conversationId !== sessionId ? [conversationId] : [];
       const allowIds = new Set<string>(executedToolCalls.map((t) => t.id));
       const injectionMessages: JsonObject[] = [
         buildAssistantToolCallMessage(executedToolCalls),
@@ -632,10 +637,19 @@ export async function runServerSideToolEngine(
           ? {
             pendingInjection: {
               sessionId,
+              ...(aliasSessionIds.length ? { aliasSessionIds } : {}),
               afterToolCallIds: remainingToolCalls,
               messages: injectionMessages
             }
           }
+          : conversationId && injectionMessages.length
+            ? {
+              pendingInjection: {
+                sessionId: conversationId,
+                afterToolCallIds: remainingToolCalls,
+                messages: injectionMessages
+              }
+            }
           : {})
       };
     }

@@ -3,6 +3,7 @@ import path from 'node:path';
 
 import type { JsonObject } from '../conversion/hub/types/json.js';
 import { readJsonFile, writeJsonFileAtomic } from './clock/io.js';
+import { resolveRccPath } from '../runtime/user-data-paths.js';
 
 export interface PendingServerToolInjection {
   version: 1;
@@ -23,7 +24,19 @@ export interface PendingServerToolInjection {
 const DEFAULT_PENDING_MAX_AGE_MS = 30 * 60 * 1000;
 
 function readSessionDirEnv(): string {
-  return String(process.env.ROUTECODEX_SESSION_DIR || '').trim();
+  const envValue = String(
+    process.env.ROUTECODEX_SESSION_DIR
+    || process.env.RCC_SESSION_DIR
+    || ''
+  ).trim();
+  if (envValue) {
+    return envValue;
+  }
+  try {
+    return resolveRccPath('sessions');
+  } catch {
+    return '';
+  }
 }
 
 function resolvePendingMaxAgeMs(): number {

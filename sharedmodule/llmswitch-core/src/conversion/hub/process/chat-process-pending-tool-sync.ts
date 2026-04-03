@@ -18,9 +18,16 @@ function readString(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
 }
 
-function resolveSessionIdForPending(metadata: Record<string, unknown>, request: StandardizedRequest): string | null {
-  const candidate = readString(metadata.sessionId) ?? readString((request.metadata as any)?.sessionId);
-  return candidate && candidate.trim() ? candidate.trim() : null;
+function resolvePendingSessionCandidates(metadata: Record<string, unknown>, request: StandardizedRequest): string[] {
+  const candidates = [
+    readString(metadata.sessionId),
+    readString((request.metadata as any)?.sessionId),
+    readString(metadata.conversationId),
+    readString((request.metadata as any)?.conversationId)
+  ]
+    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    .map((value) => value.trim());
+  return Array.from(new Set(candidates));
 }
 
 export async function maybeInjectPendingServerToolResultsAfterClientTools(
@@ -32,11 +39,19 @@ export async function maybeInjectPendingServerToolResultsAfterClientTools(
   const clearFn = deps.clearPendingServerToolInjectionFn ?? clearPendingServerToolInjection;
   const analyzeFn = deps.analyzePendingToolSyncFn ?? analyzePendingToolSync;
 
-  const sessionId = resolveSessionIdForPending(metadata, request);
-  if (!sessionId) {
+  const sessionCandidates = resolvePendingSessionCandidates(metadata, request);
+  if (!sessionCandidates.length) {
     return request;
   }
-  const pending = await loadFn(sessionId);
+  let loadedSessionId: string | null = null;
+  let pending: Awaited<ReturnType<typeof loadFn>> = null;
+  for (const sessionId of sessionCandidates) {
+    pending = await loadFn(sessionId);
+    if (pending) {
+      loadedSessionId = sessionId;
+      break;
+    }
+  }
   if (!pending) {
     return request;
   }
@@ -67,7 +82,9 @@ export async function maybeInjectPendingServerToolResultsAfterClientTools(
   const nextMessages = messages.slice();
   nextMessages.splice(analysis.insertAt + 1, 0, ...inject);
   try {
-    await clearFn(sessionId);
+    if (loadedSessionId) {
+      await clearFn(loadedSessionId);
+    }
   } catch {
     // best-effort
   }

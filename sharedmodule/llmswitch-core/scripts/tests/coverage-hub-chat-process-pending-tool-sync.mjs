@@ -19,6 +19,13 @@ function buildRequest(messages, sessionId) {
   };
 }
 
+function buildRequestWithConversation(messages, conversationId) {
+  return {
+    messages,
+    metadata: conversationId ? { conversationId } : undefined
+  };
+}
+
 async function main() {
   const mod = await importFresh('hub-chat-process-pending-tool-sync');
   const maybeInjectPendingServerToolResultsAfterClientTools = mod.maybeInjectPendingServerToolResultsAfterClientTools;
@@ -177,6 +184,54 @@ async function main() {
     });
     assert.equal(out.messages.length, 2);
     assert.equal(out.messages[1].content, 'meta-inject');
+  }
+
+  {
+    const req = buildRequestWithConversation([{ role: 'tool', tool_call_id: 'call-conv' }], 'conv-meta');
+    let loadCalledWith = '';
+    const out = await maybeInjectPendingServerToolResultsAfterClientTools(req, {}, {
+      loadPendingServerToolInjectionFn: async (sessionId) => {
+        loadCalledWith = sessionId;
+        return {
+          afterToolCallIds: ['call-conv'],
+          messages: [{ role: 'assistant', content: 'conversation-inject' }]
+        };
+      },
+      analyzePendingToolSyncFn: () => ({ ready: true, insertAt: 0 }),
+      clearPendingServerToolInjectionFn: async () => {}
+    });
+    assert.equal(loadCalledWith, 'conv-meta');
+    assert.equal(out.messages.length, 2);
+    assert.equal(out.messages[1].content, 'conversation-inject');
+  }
+
+  {
+    const req = {
+      messages: [{ role: 'tool', tool_call_id: 'call-chain' }],
+      metadata: { sessionId: 'session-new', conversationId: 'conv-old' }
+    };
+    let loadCalls = [];
+    let clearedSessionId = '';
+    const out = await maybeInjectPendingServerToolResultsAfterClientTools(req, {}, {
+      loadPendingServerToolInjectionFn: async (sessionId) => {
+        loadCalls.push(sessionId);
+        if (sessionId === 'conv-old') {
+          return {
+            afterToolCallIds: ['call-chain'],
+            messages: [{ role: 'assistant', content: 'fallback-conversation-hit' }]
+          };
+        }
+        return null;
+      },
+      analyzePendingToolSyncFn: () => ({ ready: true, insertAt: 0 }),
+      clearPendingServerToolInjectionFn: async (sessionId) => {
+        clearedSessionId = sessionId;
+      }
+    });
+    assert.deepEqual(loadCalls, ['session-new', 'conv-old']);
+    assert.equal(clearedSessionId, 'conv-old');
+    assert.equal(out.messages.length, 2);
+    assert.equal(out.messages[1].content, 'fallback-conversation-hit');
   }
 
   console.log('✅ coverage-hub-chat-process-pending-tool-sync passed');

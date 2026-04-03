@@ -5,6 +5,7 @@ import type { AdapterContext } from '../../sharedmodule/llmswitch-core/src/conve
 import type { StandardizedRequest } from '../../sharedmodule/llmswitch-core/src/conversion/hub/types/standardized.js';
 import { runServerToolOrchestration } from '../../sharedmodule/llmswitch-core/src/servertool/engine.js';
 import { runReqProcessStage1ToolGovernance } from '../../sharedmodule/llmswitch-core/src/conversion/hub/pipeline/stages/req_process/req_process_stage1_tool_governance/index.js';
+import { applyPostGovernedNormalization } from '../../sharedmodule/llmswitch-core/src/conversion/hub/process/chat-process-post-governed-normalization.js';
 
 const SESSION_DIR = path.join(process.cwd(), 'tmp', 'jest-mixed-tools-sessions');
 
@@ -143,8 +144,13 @@ describe('servertool: mixed tool_calls (servertool + client tools)', () => {
       entryEndpoint: '/v1/chat/completions',
       requestId: 'req-mixed-2'
     });
+    const normalized = await applyPostGovernedNormalization({
+      request: processed.processedRequest as any,
+      metadata: { originalEndpoint: '/v1/chat/completions', sessionId },
+      originalEndpoint: '/v1/chat/completions'
+    });
 
-    const messages = (processed.processedRequest as any).messages ?? [];
+    const messages = (normalized as any).messages ?? [];
     const clientToolIdx = messages.findIndex((m: any) => m?.role === 'tool' && m?.tool_call_id === clientCallId);
     expect(clientToolIdx).toBeGreaterThanOrEqual(0);
     // Injected assistant/tool messages appear AFTER client tool results.
@@ -154,6 +160,113 @@ describe('servertool: mixed tool_calls (servertool + client tools)', () => {
     expect(messages[clientToolIdx + 2]?.tool_call_id).toBe(clockCallId);
 
     // Pending file consumed.
+    expect(fs.existsSync(pendingPath)).toBe(false);
+  });
+
+  test('persists mixed pending injection by conversationId when sessionId is unavailable', async () => {
+    const conversationId = 'conv-mixed-only';
+    const clockCallId = 'call_clock_conv_1';
+    const clientCallId = 'call_exec_command_conv_1';
+
+    const adapterContext: AdapterContext = {
+      requestId: 'req-mixed-conv-1',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      conversationId,
+      __rt: { clock: { enabled: true, tickMs: 0 } },
+      capturedChatRequest: {
+        model: 'gpt-test',
+        messages: [{ role: 'user', content: 'hi' }]
+      }
+    } as any;
+
+    const dueAt = new Date(Date.now() + 60_000).toISOString();
+    const chat = {
+      id: 'chatcmpl-mixed-conv-1',
+      object: 'chat.completion',
+      model: 'gpt-test',
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: 'assistant',
+            content: null,
+            tool_calls: [
+              {
+                id: clockCallId,
+                type: 'function',
+                function: {
+                  name: 'clock',
+                  arguments: JSON.stringify({ action: 'schedule', items: [{ dueAt, task: 'conv-task' }] })
+                }
+              },
+              {
+                id: clientCallId,
+                type: 'function',
+                function: {
+                  name: 'exec_command',
+                  arguments: JSON.stringify({ cmd: 'echo conv' })
+                }
+              }
+            ]
+          },
+          finish_reason: 'tool_calls'
+        }
+      ]
+    } as any;
+
+    const orchestration = await runServerToolOrchestration({
+      chat,
+      adapterContext,
+      requestId: 'req-mixed-conv-1',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat'
+    });
+
+    expect(orchestration.executed).toBe(true);
+    const pendingPath = path.join(SESSION_DIR, 'servertool-pending', `${conversationId}.json`);
+    expect(fs.existsSync(pendingPath)).toBe(true);
+
+    const req = buildRequest([
+      { role: 'user', content: 'hi' },
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          {
+            id: clientCallId,
+            type: 'function',
+            function: { name: 'exec_command', arguments: JSON.stringify({ cmd: 'echo conv' }) }
+          }
+        ]
+      } as any,
+      {
+        role: 'tool',
+        tool_call_id: clientCallId,
+        name: 'exec_command',
+        content: '{"ok":true}'
+      } as any
+    ]);
+
+    const processed = await runReqProcessStage1ToolGovernance({
+      request: req,
+      rawPayload: {},
+      metadata: { originalEndpoint: '/v1/chat/completions', conversationId },
+      entryEndpoint: '/v1/chat/completions',
+      requestId: 'req-mixed-conv-2'
+    });
+    const normalized = await applyPostGovernedNormalization({
+      request: processed.processedRequest as any,
+      metadata: { originalEndpoint: '/v1/chat/completions', conversationId },
+      originalEndpoint: '/v1/chat/completions'
+    });
+
+    const messages = (normalized as any).messages ?? [];
+    const clientToolIdx = messages.findIndex((m: any) => m?.role === 'tool' && m?.tool_call_id === clientCallId);
+    expect(clientToolIdx).toBeGreaterThanOrEqual(0);
+    expect(messages[clientToolIdx + 1]?.role).toBe('assistant');
+    expect(messages[clientToolIdx + 2]?.role).toBe('tool');
+    expect(messages[clientToolIdx + 2]?.tool_call_id).toBe(clockCallId);
     expect(fs.existsSync(pendingPath)).toBe(false);
   });
 

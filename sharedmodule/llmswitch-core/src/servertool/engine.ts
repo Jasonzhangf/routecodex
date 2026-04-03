@@ -860,15 +860,25 @@ export async function runServerToolOrchestration(
 
   // Mixed tools: persist servertool outputs for next request, but return remaining tool_calls to client.
   if (engineResult.pendingInjection) {
-    const sessionId = engineResult.pendingInjection.sessionId;
-    if (sessionId && sessionId.trim()) {
+    const sessionIds = [
+      engineResult.pendingInjection.sessionId,
+      ...(Array.isArray(engineResult.pendingInjection.aliasSessionIds)
+        ? engineResult.pendingInjection.aliasSessionIds
+        : [])
+    ]
+      .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+      .map((value) => value.trim());
+    const uniqueSessionIds = Array.from(new Set(sessionIds));
+    if (uniqueSessionIds.length > 0) {
       try {
-        await savePendingServerToolInjection(sessionId.trim(), {
-          createdAtMs: Date.now(),
-          afterToolCallIds: engineResult.pendingInjection.afterToolCallIds,
-          messages: engineResult.pendingInjection.messages,
-          sourceRequestId: options.requestId
-        });
+        for (const sessionId of uniqueSessionIds) {
+          await savePendingServerToolInjection(sessionId, {
+            createdAtMs: Date.now(),
+            afterToolCallIds: engineResult.pendingInjection.afterToolCallIds,
+            messages: engineResult.pendingInjection.messages,
+            sourceRequestId: options.requestId
+          });
+        }
       } catch {
         // best-effort: do not fail the response conversion just because persistence failed
       }

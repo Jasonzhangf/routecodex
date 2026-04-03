@@ -192,6 +192,7 @@ export interface ServerSideToolEngineResult {
    */
   pendingInjection?: {
     sessionId: string;
+    aliasSessionIds?: string[];
     afterToolCallIds: string[];
     messages: JsonObject[];
   };
