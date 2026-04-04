@@ -3,8 +3,8 @@ import { isIP } from 'node:net';
 import { PassThrough } from 'node:stream';
 
 import type { UnknownObject } from '../../../types/common-types.js';
-import { processChatResponseTools } from '@jsonstudio/llms/conversion';
 import { applyStandardToolTextRequestTransform } from './standard-tool-text-request-transform.js';
+import { applyStandardToolTextHarvestToChatPayload } from './standard-tool-text-harvest.js';
 
 export const DEFAULT_QWENCHAT_BASE_URL = 'https://chat.qwen.ai';
 export const DEFAULT_QWENCHAT_USER_AGENT =
@@ -145,6 +145,23 @@ function clampInteger(value: unknown, fallback: number, min: number, max: number
     return fallback;
   }
   return Math.min(max, Math.max(min, parsed));
+}
+
+function readBooleanEnv(keys: string[], fallback: boolean): boolean {
+  for (const key of keys) {
+    const raw = normalizeInputString(process.env[key]);
+    if (!raw) {
+      continue;
+    }
+    const normalized = raw.trim().toLowerCase();
+    if (['1', 'true', 'yes', 'on'].includes(normalized)) {
+      return true;
+    }
+    if (['0', 'false', 'no', 'off'].includes(normalized)) {
+      return false;
+    }
+  }
+  return fallback;
 }
 
 function parseImageSizeToQwenRatio(size: unknown): string {
@@ -711,34 +728,70 @@ async function loadAttachmentBytes(attachment: QwenMessageAttachment): Promise<L
   };
 }
 
+type QwenHeaderOptions = {
+  baseUrl?: string;
+  refererMode?: 'web' | 'guest';
+  acceptMode?: 'default' | 'json';
+};
+
 function qwenCommonHeaders(
   baxiaTokens: QwenBaxiaTokens,
-  authHeaders?: Record<string, string>
+  authHeaders?: Record<string, string>,
+  options?: QwenHeaderOptions
 ): Record<string, string> {
+  const forwardAuthHeaders = readBooleanEnv(
+    ['ROUTECODEX_QWENCHAT_FORWARD_AUTH_HEADERS', 'RCC_QWENCHAT_FORWARD_AUTH_HEADERS'],
+    false
+  );
+  const normalizedBase = normalizeInputString(options?.baseUrl) || DEFAULT_QWENCHAT_BASE_URL;
+  const base = normalizedBase.replace(/\/$/, '');
+  const referer = options?.refererMode === 'guest' ? `${base}/c/guest` : `${base}/`;
+  const accept = options?.acceptMode === 'json' ? 'application/json' : 'application/json, text/plain, */*';
   return {
-    'Accept': 'application/json, text/plain, */*',
+    'Accept': accept,
     'Content-Type': 'application/json',
     'bx-ua': baxiaTokens.bxUa,
     'bx-umidtoken': baxiaTokens.bxUmidToken,
     'bx-v': baxiaTokens.bxV,
     'source': 'web',
     'timezone': new Date().toUTCString(),
-    'Referer': `${DEFAULT_QWENCHAT_BASE_URL}/`,
+    'Referer': referer,
     'User-Agent': DEFAULT_QWENCHAT_USER_AGENT,
     'Accept-Language': DEFAULT_QWENCHAT_ACCEPT_LANGUAGE,
     'x-request-id': randomUUID(),
-    ...(authHeaders || {})
+    ...(forwardAuthHeaders ? authHeaders || {} : {})
   };
 }
 
 function extractQwenErrorMessage(payload: Record<string, unknown>): string {
+  const readNestedMessage = (value: unknown): string => {
+    if (typeof value === 'string') {
+      return normalizeInputString(value);
+    }
+    if (!isRecord(value)) {
+      return '';
+    }
+    const nested = [
+      normalizeInputString(value.message),
+      normalizeInputString(value.msg),
+      normalizeInputString(value.details),
+      normalizeInputString(value.template),
+      normalizeInputString(value.code),
+      isRecord(value.error) ? normalizeInputString(value.error.message) : ''
+    ].filter(Boolean);
+    return nested[0] || '';
+  };
+
   const readNode = (node: Record<string, unknown> | undefined): string => {
     if (!node) return '';
     const direct = [
       normalizeInputString(node.msg),
       normalizeInputString(node.message),
       normalizeInputString(node.error),
-      normalizeInputString(node.err_msg)
+      normalizeInputString(node.err_msg),
+      normalizeInputString(node.details),
+      normalizeInputString(node.template),
+      normalizeInputString(node.code)
     ].filter(Boolean);
     if (direct.length > 0) {
       return direct[0];
@@ -753,11 +806,18 @@ function extractQwenErrorMessage(payload: Record<string, unknown>): string {
         return nested[0];
       }
     }
+    if (isRecord(node.details)) {
+      const nestedDetails = readNestedMessage(node.details);
+      if (nestedDetails) {
+        return nestedDetails;
+      }
+    }
     return '';
   };
 
   const dataNode = isRecord(payload.data) ? payload.data : undefined;
-  return readNode(payload) || readNode(dataNode) || '';
+  const detailsNode = isRecord(dataNode?.details) ? dataNode.details : undefined;
+  return readNode(payload) || readNode(dataNode) || readNode(detailsNode) || '';
 }
 
 function extractQwenUploadTokenData(payload: Record<string, unknown>): QwenUploadTokenData | null {
@@ -835,7 +895,7 @@ async function requestUploadToken(
   const filetype = inferFileCategory(file.mimeType, file.explicitType);
   const resp = await fetch(joinUrl(baseUrl, '/api/v2/files/getstsToken'), {
     method: 'POST',
-    headers: qwenCommonHeaders(baxiaTokens, authHeaders),
+    headers: qwenCommonHeaders(baxiaTokens, authHeaders, { baseUrl, refererMode: 'web', acceptMode: 'default' }),
     body: JSON.stringify({
       filename: file.filename,
       filesize: file.bytes.length,
@@ -1051,7 +1111,7 @@ async function ensureUploadStatusForNonVideo(
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     const resp = await fetch(joinUrl(baseUrl, '/api/v2/users/status'), {
       method: 'POST',
-      headers: qwenCommonHeaders(baxiaTokens, authHeaders),
+      headers: qwenCommonHeaders(baxiaTokens, authHeaders, { baseUrl, refererMode: 'web', acceptMode: 'default' }),
       body: JSON.stringify({
         typarms: {
           typarm1: 'web',
@@ -1094,7 +1154,7 @@ async function parseDocumentIfNeeded(
   }
   const resp = await fetch(joinUrl(baseUrl, '/api/v2/files/parse'), {
     method: 'POST',
-    headers: qwenCommonHeaders(baxiaTokens, authHeaders),
+    headers: qwenCommonHeaders(baxiaTokens, authHeaders, { baseUrl, refererMode: 'web', acceptMode: 'default' }),
     body: JSON.stringify({ file_id: fileId })
   });
   const text = await resp.text().catch(() => '');
@@ -1142,7 +1202,14 @@ export function extractQwenChatPayload(request: UnknownObject): QwenChatPayload 
   const container = isRecord(request) ? request : {};
   const payload = isRecord(container.data) ? container.data : container;
   const model = normalizeInputString(payload.model) || 'qwen3.6-plus';
-  const messages = Array.isArray(payload.messages) ? payload.messages : [];
+  const directMessages = Array.isArray(payload.messages) ? payload.messages : [];
+  const compatPrompt = normalizeInputString(payload.prompt);
+  const messages =
+    directMessages.length > 0
+      ? directMessages
+      : compatPrompt
+        ? [{ role: 'user', content: compatPrompt }]
+        : [];
   const streamFlag = payload.stream;
   const stream = streamFlag === undefined ? true : streamFlag === true;
   const metadata = isRecord(payload.metadata)
@@ -1174,6 +1241,20 @@ function shouldUseImageGenerationMode(payload: QwenChatPayload): boolean {
 }
 
 function extractChatIdFromCreatePayload(payload: Record<string, unknown>): string {
+  const readChatIdFromText = (value: unknown): string => {
+    const text = normalizeInputString(value);
+    if (!text) {
+      return '';
+    }
+    const namedMatch = text.match(
+      /(?:chat[_-]?id|session[_-]?id|conversation[_-]?id)\s*[:=]\s*["']?([a-zA-Z0-9._:-]{8,})["']?/i
+    );
+    if (namedMatch?.[1]) {
+      return namedMatch[1].trim();
+    }
+    return '';
+  };
+
   const readDirect = (node: Record<string, unknown> | undefined): string => {
     if (!node) {
       return '';
@@ -1185,7 +1266,10 @@ function extractChatIdFromCreatePayload(payload: Record<string, unknown>): strin
       normalizeInputString(node.session_id) ||
       normalizeInputString(node.sessionId) ||
       normalizeInputString(node.conversation_id) ||
-      normalizeInputString(node.conversationId)
+      normalizeInputString(node.conversationId) ||
+      readChatIdFromText(node.details) ||
+      readChatIdFromText(node.message) ||
+      readChatIdFromText(node.msg)
     );
   };
 
@@ -1193,18 +1277,79 @@ function extractChatIdFromCreatePayload(payload: Record<string, unknown>): strin
   const dataNode = isRecord(root.data) ? root.data : undefined;
   const resultNode = isRecord(root.result) ? root.result : undefined;
   const chatNode = isRecord(dataNode?.chat) ? dataNode.chat : undefined;
+  const dataDetailsNode = isRecord(dataNode?.details) ? dataNode.details : undefined;
+  const resultDetailsNode = isRecord(resultNode?.details) ? resultNode.details : undefined;
+  const rootDetailsNode = isRecord(root.details) ? root.details : undefined;
+  const nestedDataNode = isRecord(dataNode?.data) ? dataNode.data : undefined;
+  const nestedResultNode = isRecord(dataNode?.result) ? dataNode.result : undefined;
+  const conversationNode = isRecord(dataNode?.conversation) ? dataNode.conversation : undefined;
+  const sessionNode = isRecord(dataNode?.session) ? dataNode.session : undefined;
 
-  return readDirect(dataNode) || readDirect(chatNode) || readDirect(resultNode) || readDirect(root);
+  return (
+    readDirect(dataNode) ||
+    readDirect(chatNode) ||
+    readDirect(conversationNode) ||
+    readDirect(sessionNode) ||
+    readDirect(nestedDataNode) ||
+    readDirect(nestedResultNode) ||
+    readDirect(resultNode) ||
+    readDirect(dataDetailsNode) ||
+    readDirect(resultDetailsNode) ||
+    readDirect(rootDetailsNode) ||
+    readDirect(root)
+  );
 }
 
 function extractCreateErrorMessage(payload: Record<string, unknown>): string {
-  const parts = [
-    normalizeInputString(payload.msg),
-    normalizeInputString(payload.message),
-    normalizeInputString(payload.error),
-    isRecord(payload.error) ? normalizeInputString(payload.error.message) : ''
+  const reason = extractQwenErrorMessage(payload);
+  if (reason) {
+    return reason;
+  }
+  const dataNode = isRecord(payload.data) ? payload.data : undefined;
+  const detailsNode = isRecord(dataNode?.details) ? dataNode.details : undefined;
+  const detailsParts = [
+    detailsNode ? normalizeInputString(detailsNode.message) : '',
+    detailsNode ? normalizeInputString(detailsNode.msg) : '',
+    detailsNode ? normalizeInputString(detailsNode.details) : '',
+    detailsNode ? normalizeInputString(detailsNode.template) : '',
+    detailsNode ? normalizeInputString(detailsNode.code) : ''
   ].filter(Boolean);
-  return parts[0] || '';
+  return detailsParts[0] || '';
+}
+
+function inferCreateSessionStatusCode(payload: Record<string, unknown>, reason: string): number {
+  const dataNode = isRecord(payload.data) ? payload.data : undefined;
+  const normalized = [
+    normalizeInputString(payload.code),
+    normalizeInputString(dataNode?.code),
+    reason
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  if (
+    normalized.includes('ratelimit') ||
+    normalized.includes('rate_limit') ||
+    normalized.includes('daily usage limit') ||
+    normalized.includes('too many request') ||
+    normalized.includes('达到今日的使用上限') ||
+    normalized.includes('请求过于频繁')
+  ) {
+    return 429;
+  }
+  if (
+    normalized.includes('unauthorized') ||
+    normalized.includes('invalid token') ||
+    normalized.includes('login') ||
+    normalized.includes('auth') ||
+    normalized.includes('未登录')
+  ) {
+    return 401;
+  }
+  if (normalized.includes('forbidden') || normalized.includes('permission') || normalized.includes('无权限')) {
+    return 403;
+  }
+  return 502;
 }
 
 export async function createQwenChatSession(args: {
@@ -1216,7 +1361,11 @@ export async function createQwenChatSession(args: {
 }): Promise<string> {
   const resp = await fetch(joinUrl(args.baseUrl, DEFAULT_QWENCHAT_CHAT_CREATE_ENDPOINT), {
     method: 'POST',
-    headers: qwenCommonHeaders(args.baxiaTokens, args.authHeaders),
+    headers: qwenCommonHeaders(args.baxiaTokens, args.authHeaders, {
+      baseUrl: args.baseUrl,
+      refererMode: 'guest',
+      acceptMode: 'json'
+    }),
     body: JSON.stringify({
       title: '新建对话',
       models: [args.model],
@@ -1235,13 +1384,30 @@ export async function createQwenChatSession(args: {
     (err as Error & { statusCode?: number; code?: string }).code = 'QWENCHAT_CREATE_SESSION_FAILED';
     throw err;
   }
+  const chatId = extractChatIdFromCreatePayload(parsed.data);
   const success = parsed.data.success === true;
-  const chatId = success ? extractChatIdFromCreatePayload(parsed.data) : '';
+  if (chatId) {
+    return chatId;
+  }
+  if (parsed.data.success === false) {
+    const reason = extractCreateErrorMessage(parsed.data);
+    const dataNode = isRecord(parsed.data.data) ? parsed.data.data : undefined;
+    const dataKeys = dataNode ? Object.keys(dataNode).slice(0, 8).join(',') : '';
+    const detail = [reason, dataKeys ? `keys=${dataKeys}` : ''].filter(Boolean).join(' ');
+    const suffix = detail ? ` (${detail})` : '';
+    const err = new Error(`Failed to create qwenchat session: upstream rejected request${suffix}`);
+    (err as Error & { statusCode?: number; code?: string }).statusCode = inferCreateSessionStatusCode(
+      parsed.data,
+      reason
+    );
+    (err as Error & { statusCode?: number; code?: string }).code = 'QWENCHAT_CREATE_SESSION_REJECTED';
+    throw err;
+  }
   if (!chatId) {
     const reason = extractCreateErrorMessage(parsed.data);
     const dataNode = isRecord(parsed.data.data) ? parsed.data.data : undefined;
     const dataKeys = dataNode ? Object.keys(dataNode).slice(0, 8).join(',') : '';
-    const detail = reason || (dataKeys ? `keys=${dataKeys}` : '');
+    const detail = reason || (dataKeys ? `keys=${dataKeys}` : '') || (success ? 'success=true' : '');
     const suffix = detail ? ` (${detail})` : '';
     const err = new Error(`Failed to create qwenchat session: missing chat id${suffix}`);
     (err as Error & { statusCode?: number; code?: string }).statusCode = 502;
@@ -1396,34 +1562,6 @@ function createOpenAiChunk(args: {
   return chunk;
 }
 
-function looksLikeToolMarkupNoise(text: string): boolean {
-  const normalized = normalizeInputString(text);
-  if (!normalized) {
-    return false;
-  }
-  return (
-    /<\s*\/?\s*function_calls\b/i.test(normalized) ||
-    /<\s*\/?\s*tool_call\b/i.test(normalized) ||
-    /<\s*\/?\s*tool_name\b/i.test(normalized) ||
-    /<\s*\/?\s*arg_key\b/i.test(normalized) ||
-    /<\s*\/?\s*arg_value\b/i.test(normalized) ||
-    /"tool_calls"\s*:/i.test(normalized)
-  );
-}
-
-function sanitizeDeltaForStreamEmit(delta: DeltaRecord): DeltaRecord {
-  const next: DeltaRecord = { ...delta };
-  const content = normalizeInputString(next.content);
-  if (content && looksLikeToolMarkupNoise(content)) {
-    delete next.content;
-  }
-  const reasoning = normalizeInputString(next.reasoning_content);
-  if (reasoning && looksLikeToolMarkupNoise(reasoning)) {
-    delete next.reasoning_content;
-  }
-  return next;
-}
-
 function processQwenSsePayloadLines(args: {
   payload: string;
   onChunk: (chunk: Record<string, unknown>) => void;
@@ -1478,7 +1616,7 @@ function processQwenSsePayloadLines(args: {
         }
       }
       if (delta || finishReason || usage) {
-        const deltaForEmit = delta ? sanitizeDeltaForStreamEmit(delta) : {};
+        const deltaForEmit = delta ? { ...delta } : {};
         args.onChunk(
           createOpenAiChunk({
             id: args.responseId,
@@ -1563,7 +1701,7 @@ export function createOpenAiMappedSseStream(input: QwenSseChunkWriterInput): Nod
     const aggregatedContent = dedupImageUrls.length > 0
       ? dedupImageUrls.join('\n')
       : contentParts.join('');
-    const harvested = applyStandardizedTextHarvestToChatPayload({
+    const harvested = applyStandardToolTextHarvestToChatPayload({
       id: responseId,
       object: 'chat.completion',
       created,
@@ -1680,7 +1818,7 @@ export async function collectQwenSseAsOpenAiResult(args: {
   if (usageRef.usage) {
     result.usage = usageRef.usage;
   }
-  return applyStandardizedTextHarvestToChatPayload(result);
+  return applyStandardToolTextHarvestToChatPayload(result);
 }
 
 export async function buildQwenChatSendPlan(input: QwenChatSendInput): Promise<{
@@ -1733,9 +1871,12 @@ export async function buildQwenChatSendPlan(input: QwenChatSendInput): Promise<{
   });
 
   const completionHeaders = {
-    ...qwenCommonHeaders(input.baxiaTokens, input.authHeaders),
-    version: '0.2.9',
-    Referer: `${input.baseUrl.replace(/\/$/, '')}/c/guest`
+    ...qwenCommonHeaders(input.baxiaTokens, input.authHeaders, {
+      baseUrl: input.baseUrl,
+      refererMode: 'guest',
+      acceptMode: 'json'
+    }),
+    version: '0.2.9'
   };
 
   return {
@@ -1749,31 +1890,30 @@ function applyStandardToolTextRequest(payload: QwenChatPayload): QwenChatPayload
   if (!Array.isArray(payload.tools) || payload.tools.length === 0) {
     return payload;
   }
-  try {
-    const transformed = applyStandardToolTextRequestTransform(
-      {
-        model: payload.model,
-        messages: payload.messages,
-        tools: payload.tools,
-        metadata: payload.metadata
-      } as any,
-      {
-        providerProtocol: 'openai-chat',
-        entryEndpoint: '/v1/chat/completions'
-      } as any
-    ) as Record<string, unknown>;
-    const prompt = normalizeInputString(transformed.prompt);
-    if (!prompt) {
-      return payload;
-    }
-    return {
-      ...payload,
-      messages: [{ role: 'user', content: prompt }],
-      tools: undefined
-    };
-  } catch {
-    return payload;
+  const transformed = applyStandardToolTextRequestTransform(
+    {
+      model: payload.model,
+      messages: payload.messages,
+      tools: payload.tools,
+      metadata: payload.metadata
+    } as any,
+    {
+      providerProtocol: 'openai-chat',
+      entryEndpoint: '/v1/chat/completions'
+    } as any
+  ) as Record<string, unknown>;
+  const prompt = normalizeInputString(transformed.prompt);
+  if (!prompt) {
+    const err = new Error('QwenChat tool-text transform failed: prompt is empty');
+    (err as Error & { statusCode?: number; code?: string }).statusCode = 422;
+    (err as Error & { statusCode?: number; code?: string }).code = 'QWENCHAT_TOOL_TEXT_TRANSFORM_FAILED';
+    throw err;
   }
+  return {
+    ...payload,
+    messages: [{ role: 'user', content: prompt }],
+    tools: undefined
+  };
 }
 
 export function extractForwardAuthHeaders(headers: Record<string, string>): Record<string, string> {
@@ -1806,13 +1946,4 @@ export function classifyQwenChatProviderIdentity(input: {
       value.includes('qwenchat') ||
       value === 'chat:qwenchat-web'
   );
-}
-
-function applyStandardizedTextHarvestToChatPayload(payload: Record<string, unknown>): Record<string, unknown> {
-  try {
-    const harvested = processChatResponseTools(payload as any);
-    return isRecord(harvested) ? harvested : payload;
-  } catch {
-    return payload;
-  }
 }

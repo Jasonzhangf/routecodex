@@ -7,6 +7,74 @@ import { afterEach, describe, expect, it, jest } from '@jest/globals';
 import type { OpenAIStandardConfig } from '../../../../src/providers/core/api/provider-config.js';
 import type { ModuleDependencies } from '../../../../src/modules/pipeline/interfaces/pipeline-interfaces.js';
 import { DeepSeekHttpProvider } from '../../../../src/providers/core/runtime/deepseek-http-provider.js';
+import * as standardToolRequestTransform from '../../../../src/providers/core/runtime/standard-tool-text-request-transform.js';
+
+jest.mock('../../../../src/providers/core/config/camoufox-launcher.js', () => ({
+  ensureCamoufoxFingerprintForToken: jest.fn(async () => null),
+  getCamoufoxProfileDir: jest.fn((provider?: string, alias?: string) => {
+    const providerPart = String(provider || 'default').trim().toLowerCase() || 'default';
+    const aliasPart = String(alias || '').trim().toLowerCase();
+    const profileId = aliasPart ? `rc-${providerPart}.${aliasPart}` : `rc-${providerPart}`;
+    return `/tmp/${profileId}`;
+  })
+}));
+
+jest.mock('../../../../src/providers/core/utils/provider-error-reporter.js', () => ({
+  emitProviderError: jest.fn(),
+  buildRuntimeFromProviderContext: jest.fn(() => ({ requestId: 'test-request' })),
+  buildRuntimeFromCompatContext: jest.fn(() => ({ requestId: 'test-request' }))
+}));
+
+jest.mock('../../../../src/modules/llmswitch/bridge.js', () => ({
+  getStatsCenterSafe: jest.fn(() => ({
+    recordProviderUsage: jest.fn()
+  })),
+  getProviderErrorCenter: jest.fn(async () => ({
+    emit: jest.fn()
+  }))
+}));
+
+jest.mock('../../../../src/providers/core/runtime/deepseek-session-pow.js', () => ({
+  DeepSeekSessionPowManager: class MockDeepSeekSessionPowManager {
+    async ensureChatSession(): Promise<string> {
+      return 'mock-session-id';
+    }
+    async createPowResponse(): Promise<string> {
+      return 'mock-pow';
+    }
+    async cleanup(): Promise<void> {}
+  }
+}));
+
+jest.mock('../../../../src/providers/auth/deepseek-account-auth.js', () => {
+  class MockDeepSeekAccountAuthProvider {
+    public readonly type = 'apikey' as const;
+
+    async initialize(): Promise<void> {}
+
+    buildHeaders(): Record<string, string> {
+      return {};
+    }
+
+    async validateCredentials(): Promise<boolean> {
+      return true;
+    }
+
+    async cleanup(): Promise<void> {}
+
+    getStatus() {
+      return {
+        isAuthenticated: true,
+        isValid: true,
+        lastValidated: Date.now()
+      };
+    }
+  }
+
+  return {
+    DeepSeekAccountAuthProvider: MockDeepSeekAccountAuthProvider
+  };
+});
 
 type FakeSessionPow = {
   ensureChatSession: jest.Mock<Promise<string>, [Record<string, string>]>;
@@ -37,6 +105,9 @@ const deps: ModuleDependencies = {
 
 const ENV_KEYS = [
   'HOME',
+  'RCC_HOME',
+  'ROUTECODEX_HOME',
+  'ROUTECODEX_USER_DIR',
   'ROUTECODEX_DEEPSEEK_CAMOUFOX_FINGERPRINT',
   'ROUTECODEX_DEEPSEEK_CAMOUFOX_AUTO_GENERATE',
   'ROUTECODEX_DEEPSEEK_CAMOUFOX_PROVIDER'
@@ -54,6 +125,7 @@ async function createDeepSeekTokenFile(token: string): Promise<string> {
 }
 
 afterEach(async () => {
+  jest.restoreAllMocks();
   for (const key of ENV_KEYS) {
     const value = ORIGINAL_ENV[key];
     if (typeof value === 'string') {
@@ -180,6 +252,141 @@ describe('DeepSeekHttpProvider', () => {
 
     expect(body.prompt).toContain('hi');
     expect(body.chat_session_id).toBe('session-xyz');
+  });
+
+  it('normalizes tools request through standard text-tool prompt skeleton', async () => {
+    const tokenFile = await createDeepSeekTokenFile('tool-prompt-token');
+    const fakeSessionPow: FakeSessionPow = {
+      ensureChatSession: jest.fn(async () => 'session-tool-1'),
+      createPowResponse: jest.fn(async () => 'pow-tool-1'),
+      cleanup: jest.fn(async () => {})
+    };
+
+    const provider = new TestDeepSeekHttpProvider(
+      {
+        type: 'deepseek-http-provider',
+        config: {
+          providerType: 'openai',
+          providerId: 'deepseek',
+          baseUrl: 'https://chat.deepseek.com',
+          auth: {
+            type: 'apikey',
+            rawType: 'deepseek-account',
+            apiKey: '',
+            tokenFile
+          }
+        }
+      } as unknown as OpenAIStandardConfig,
+      deps,
+      fakeSessionPow
+    );
+
+    await provider.initialize();
+    await (provider as any).finalizeRequestHeaders(
+      {},
+      {
+        data: {
+          model: 'deepseek-chat',
+          messages: [{ role: 'user', content: '请调用工具 mailbox.status' }],
+          tools: [
+            {
+              type: 'function',
+              function: {
+                name: 'mailbox.status',
+                description: 'query mailbox status',
+                parameters: {
+                  type: 'object',
+                  properties: { target: { type: 'string' } },
+                  required: ['target']
+                }
+              }
+            }
+          ]
+        }
+      }
+    );
+
+    const body = (provider as any).buildHttpRequestBody({
+      data: {
+        model: 'deepseek-chat',
+        messages: [{ role: 'user', content: '请调用工具 mailbox.status' }],
+        tools: [
+          {
+            type: 'function',
+            function: {
+              name: 'mailbox.status',
+              description: 'query mailbox status',
+              parameters: {
+                type: 'object',
+                properties: { target: { type: 'string' } },
+                required: ['target']
+              }
+            }
+          }
+        ]
+      }
+    });
+
+    expect(body.chat_session_id).toBe('session-tool-1');
+    expect(String(body.prompt || '')).toContain('mailbox.status');
+    expect(String(body.prompt || '')).toContain('tool_calls');
+  });
+
+  it('fails fast when standard tool-text transform does not produce prompt', async () => {
+    const tokenFile = await createDeepSeekTokenFile('tool-transform-fail-token');
+    const fakeSessionPow: FakeSessionPow = {
+      ensureChatSession: jest.fn(async () => 'session-tool-fail-1'),
+      createPowResponse: jest.fn(async () => 'pow-tool-fail-1'),
+      cleanup: jest.fn(async () => {})
+    };
+
+    const provider = new TestDeepSeekHttpProvider(
+      {
+        type: 'deepseek-http-provider',
+        config: {
+          providerType: 'openai',
+          providerId: 'deepseek',
+          baseUrl: 'https://chat.deepseek.com',
+          auth: {
+            type: 'apikey',
+            rawType: 'deepseek-account',
+            apiKey: '',
+            tokenFile
+          }
+        }
+      } as unknown as OpenAIStandardConfig,
+      deps,
+      fakeSessionPow
+    );
+
+    jest
+      .spyOn(standardToolRequestTransform, 'applyStandardToolTextRequestTransform')
+      .mockReturnValue({
+        model: 'deepseek-chat',
+        messages: [{ role: 'user', content: 'fallback text should not be used' }],
+        tools: [
+          {
+            type: 'function',
+            function: { name: 'mailbox.status', parameters: { type: 'object' } }
+          }
+        ]
+      } as any);
+
+    await provider.initialize();
+    expect(() =>
+      (provider as any).buildHttpRequestBody({
+        data: {
+          model: 'deepseek-chat',
+          messages: [{ role: 'user', content: '请调用 mailbox.status' }],
+          tools: [
+            {
+              type: 'function',
+              function: { name: 'mailbox.status', parameters: { type: 'object' } }
+            }
+          ]
+        }
+      })
+    ).toThrow('DeepSeek tool-text transform failed: prompt is empty');
   });
 
   it('fails fast when compat payload prompt and messages are both missing', async () => {
@@ -371,6 +578,7 @@ describe('DeepSeekHttpProvider', () => {
     const tempHome = await fs.mkdtemp(path.join(os.tmpdir(), 'routecodex-deepseek-fp-'));
     tempDirs.push(tempHome);
     process.env.HOME = tempHome;
+    process.env.RCC_HOME = path.join(tempHome, '.rcc');
     process.env.ROUTECODEX_DEEPSEEK_CAMOUFOX_FINGERPRINT = '1';
     process.env.ROUTECODEX_DEEPSEEK_CAMOUFOX_AUTO_GENERATE = '0';
     process.env.ROUTECODEX_DEEPSEEK_CAMOUFOX_PROVIDER = 'deepseek';
@@ -445,5 +653,61 @@ describe('DeepSeekHttpProvider', () => {
     expect(finalizedHeaders['Referer']).toBe('https://chat.deepseek.com/');
     expect(fakeSessionPow.ensureChatSession).toHaveBeenCalledTimes(1);
     expect(fakeSessionPow.ensureChatSession.mock.calls[0]?.[0]?.['User-Agent']).toBe('Mozilla/5.0 Camoufox DeepSeek Test');
+  });
+
+  it('harvests text-emitted function_calls with the same standard skeleton as qwenchat', async () => {
+    const tokenFile = await createDeepSeekTokenFile('harvest-token');
+    const fakeSessionPow: FakeSessionPow = {
+      ensureChatSession: jest.fn(async () => 'session-harvest-1'),
+      createPowResponse: jest.fn(async () => 'pow-harvest-1'),
+      cleanup: jest.fn(async () => {})
+    };
+
+    const provider = new TestDeepSeekHttpProvider(
+      {
+        type: 'deepseek-http-provider',
+        config: {
+          providerType: 'openai',
+          providerId: 'deepseek',
+          baseUrl: 'https://chat.deepseek.com',
+          auth: {
+            type: 'apikey',
+            rawType: 'deepseek-account',
+            apiKey: '',
+            tokenFile
+          }
+        }
+      } as unknown as OpenAIStandardConfig,
+      deps,
+      fakeSessionPow
+    );
+
+    await provider.initialize();
+
+    const harvested = await (provider as any).postprocessResponse(
+      {
+        id: 'chatcmpl-deepseek-text-tool',
+        object: 'chat.completion',
+        created: Math.floor(Date.now() / 1000),
+        model: 'deepseek-chat',
+        choices: [
+          {
+            index: 0,
+            finish_reason: 'stop',
+            message: {
+              role: 'assistant',
+              content:
+                '<function_calls>{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"mailbox.status","arguments":{"target":"finger-system-agent"}}}]}</function_calls>'
+            }
+          }
+        ]
+      },
+      { requestId: 'req-deepseek-harvest' } as any
+    );
+
+    const firstChoice = (harvested as any)?.data?.choices?.[0] || (harvested as any)?.choices?.[0];
+    expect(firstChoice?.finish_reason).toBe('tool_calls');
+    expect(firstChoice?.message?.tool_calls?.[0]?.function?.name).toBe('mailbox.status');
+    expect(firstChoice?.message?.tool_calls?.[0]?.function?.arguments).toContain('finger-system-agent');
   });
 });

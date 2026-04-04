@@ -30,6 +30,8 @@ import {
   type DeepSeekCompletionBody
 } from './deepseek-http-provider-helpers.js';
 import { DeepSeekSessionPowManager } from './deepseek-session-pow.js';
+import { applyStandardToolTextRequestTransform } from './standard-tool-text-request-transform.js';
+import { applyStandardToolTextHarvestToChatPayload } from './standard-tool-text-harvest.js';
 
 const DEFAULT_BASE_URL = 'https://chat.deepseek.com';
 const DEFAULT_COMPLETION_ENDPOINT = '/api/v0/chat/completion';
@@ -143,7 +145,7 @@ export class DeepSeekHttpProvider extends HttpTransportProvider {
   }
 
   protected override buildHttpRequestBody(request: UnknownObject): UnknownObject {
-    const body = this.extractCompatPayload(request);
+    const body = this.normalizeToolTextRequestPayload(this.extractCompatPayload(request));
     if (!isRecord(body)) {
       return body;
     }
@@ -191,11 +193,49 @@ export class DeepSeekHttpProvider extends HttpTransportProvider {
     return normalized;
   }
 
+  protected override async postprocessResponse(response: unknown, context: ProviderContext): Promise<UnknownObject> {
+    const normalized = await super.postprocessResponse(response, context);
+    if (!isRecord(normalized) || normalized.__sse_responses) {
+      return normalized;
+    }
+    if (isRecord(normalized.data)) {
+      return {
+        ...normalized,
+        data: applyStandardToolTextHarvestToChatPayload(normalized.data)
+      };
+    }
+    return applyStandardToolTextHarvestToChatPayload(normalized);
+  }
+
   private extractCompatPayload(request: UnknownObject): UnknownObject {
     if (isRecord(request) && isRecord(request.data)) {
       return request.data;
     }
     return request;
+  }
+
+  private normalizeToolTextRequestPayload(payload: UnknownObject): UnknownObject {
+    if (!isRecord(payload) || !Array.isArray(payload.tools) || payload.tools.length === 0) {
+      return payload;
+    }
+    const transformed = applyStandardToolTextRequestTransform(
+      payload as Record<string, unknown>,
+      {
+        providerProtocol: 'openai-chat',
+        entryEndpoint: '/v1/chat/completions'
+      } as Record<string, unknown>
+    );
+    if (!isRecord(transformed) || !normalizeString(transformed.prompt)) {
+      throw createProviderError(
+        DEEPSEEK_ERROR_CODES.COMPLETION_FAILED,
+        'DeepSeek tool-text transform failed: prompt is empty',
+        422,
+        {
+          hint: 'Verify chat:deepseek-web compat transform output when tools are declared'
+        }
+      );
+    }
+    return transformed;
   }
 
   protected buildDeepSeekSessionPowManager(): DeepSeekSessionPowManager {
