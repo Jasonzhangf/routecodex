@@ -1,3 +1,4 @@
+use crate::hub_resp_outbound_client_semantics::normalize_responses_function_name;
 use napi::bindgen_prelude::Result as NapiResult;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -160,7 +161,20 @@ fn split_command(input: &str) -> Vec<String> {
 }
 
 fn normalize_tool_name(name: &str) -> String {
-    name.trim().to_string()
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let without_prefix = if trimmed.to_ascii_lowercase().starts_with("functions.") {
+        trimmed[10..].trim()
+    } else {
+        trimmed
+    };
+    if without_prefix.eq_ignore_ascii_case("execute") {
+        return "shell".to_string();
+    }
+    normalize_responses_function_name(Some(without_prefix))
+        .unwrap_or_else(|| without_prefix.to_string())
 }
 
 fn push_tool_call_event(
@@ -220,19 +234,62 @@ fn extract_from_textual(
         return events;
     }
 
-    let exec_re = Regex::new(r"<function=execute>[\s\S]*?<parameter=command>([\s\S]*?)</parameter>[\s\S]*?</function=execute>").unwrap();
-    if let Some(caps) = exec_re.captures(content) {
-        if let Some(cmd_match) = caps.get(1) {
-            let cmd_raw = cmd_match.as_str().trim();
-            let argv = split_command(cmd_raw);
-            let id = gen_id(ctx, 0);
-            let arg_str = to_json_string(&json!({"command": argv}));
-            push_tool_call_event(&mut events, 0, &id, Some("shell"), None);
-            for part in chunk_string(&arg_str, chunk_size) {
-                push_tool_call_event(&mut events, 0, &id, None, Some(&part));
-            }
-            return events;
+    let function_re =
+        Regex::new(r"<function=([A-Za-z0-9_.-]+)>([\s\S]*?)</function=([A-Za-z0-9_.-]+)>").unwrap();
+    let function_param_re =
+        Regex::new(r"<parameter=([A-Za-z0-9_.-]+)>([\s\S]*?)</parameter>").unwrap();
+    let mut idx = 0usize;
+    let mut function_events: Vec<Value> = Vec::new();
+    for caps in function_re.captures_iter(content) {
+        let open_name = caps
+            .get(1)
+            .map(|m| m.as_str().trim().to_string())
+            .unwrap_or_default();
+        let close_name = caps
+            .get(3)
+            .map(|m| m.as_str().trim().to_string())
+            .unwrap_or_default();
+        let inner = caps.get(2).map(|m| m.as_str()).unwrap_or("");
+        if open_name.is_empty()
+            || close_name.is_empty()
+            || !open_name.eq_ignore_ascii_case(&close_name)
+        {
+            continue;
         }
+
+        let normalized_name = normalize_tool_name(&open_name);
+        if normalized_name.is_empty() {
+            continue;
+        }
+
+        let mut args_obj = Map::new();
+        for param_caps in function_param_re.captures_iter(inner) {
+            let key = param_caps
+                .get(1)
+                .map(|m| m.as_str().trim().to_string())
+                .unwrap_or_default();
+            if key.is_empty() {
+                continue;
+            }
+            let raw = param_caps.get(2).map(|m| m.as_str().trim()).unwrap_or("");
+            let mut value = serde_json::from_str::<Value>(raw)
+                .unwrap_or_else(|_| Value::String(raw.to_string()));
+            if normalized_name == "shell" && key == "command" && !value.is_array() {
+                value = Value::Array(split_command(raw).into_iter().map(Value::String).collect());
+            }
+            args_obj.insert(key, value);
+        }
+
+        let id = gen_id(ctx, idx);
+        push_tool_call_event(&mut function_events, idx, &id, Some(&normalized_name), None);
+        let arg_str = to_json_string(&Value::Object(args_obj));
+        for part in chunk_string(&arg_str, chunk_size) {
+            push_tool_call_event(&mut function_events, idx, &id, None, Some(&part));
+        }
+        idx += 1;
+    }
+    if !function_events.is_empty() {
+        return function_events;
     }
 
     let invoke_re = Regex::new(r#"<invoke\s+name=\"([^\">]+)\"[^>]*>([\s\S]*?)</invoke>"#).unwrap();
@@ -422,9 +479,12 @@ pub fn harvest_tools_json(input_json: String) -> NapiResult<String> {
             let arg_str = to_json_string(&args_val);
             let id = gen_id(ctx, 0);
             if let Some(name_value) = name.as_ref() {
-                push_tool_call_event(&mut events, 0, &id, Some(name_value), None);
-                for part in chunk_string(&arg_str, chunk_size) {
-                    push_tool_call_event(&mut events, 0, &id, None, Some(&part));
+                let normalized_name = normalize_tool_name(name_value);
+                if !normalized_name.is_empty() {
+                    push_tool_call_event(&mut events, 0, &id, Some(&normalized_name), None);
+                    for part in chunk_string(&arg_str, chunk_size) {
+                        push_tool_call_event(&mut events, 0, &id, None, Some(&part));
+                    }
                 }
             }
         }
