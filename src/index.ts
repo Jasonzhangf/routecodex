@@ -318,6 +318,16 @@ async function reportCliError(
   }
 }
 
+function logNonBlockingError(stage: string, error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error);
+  logProcessLifecycle({
+    event: 'non_blocking_error',
+    source: 'index.nonBlocking',
+    details: { stage, message }
+  });
+  console.warn(`[routecodex][non-blocking] stage=${stage} error=${message}`);
+}
+
 type ShutdownReason =
   | { kind: 'signal'; signal: string }
   | { kind: 'uncaughtException'; message: string }
@@ -339,8 +349,8 @@ function createRuntimeRunId(): string {
     if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
       return crypto.randomUUID();
     }
-  } catch {
-    // ignore
+  } catch (error) {
+    logNonBlockingError('create_runtime_run_id', error);
   }
   return `run_${Date.now()}_${Math.random().toString(16).slice(2, 10)}`;
 }
@@ -756,13 +766,13 @@ class RouteCodexApp {
         const stateDir = resolveRccPath('state');
         try {
           fsSync.mkdirSync(stateDir, { recursive: true });
-        } catch {
-          // ignore
+        } catch (error) {
+          logNonBlockingError('mkdir_state_dir_for_antigravity_signature', error);
         }
         await warmupAntigravitySessionSignatureModule();
         configureAntigravitySessionSignaturePersistence({ stateDir });
-      } catch {
-        // ignore best-effort persistence wiring failures
+      } catch (error) {
+        logNonBlockingError('configure_antigravity_signature_persistence', error);
       }
 
       // 3. 初始化服务器（仅使用 V2 动态流水线架构）
@@ -899,8 +909,8 @@ class RouteCodexApp {
           const routeCodexHome = resolveRccPath();
           await fs.mkdir(routeCodexHome, { recursive: true });
           await fs.writeFile(path.join(routeCodexHome, `server-${bindPort}.pid`), String(process.pid), 'utf8');
-        } catch {
-          // ignore pid file write failures
+        } catch (error) {
+          logNonBlockingError('write_server_pid_file', error);
         }
       })();
 
@@ -917,8 +927,8 @@ class RouteCodexApp {
         if (resolved && resolved.host && resolved.port) {
           serverConfig = resolved;
         }
-      } catch {
-        /* ignore; fall back to defaults */
+      } catch (error) {
+        logNonBlockingError('resolve_server_config_after_start', error);
       }
 
       console.log(`✅ RouteCodex server started successfully!`);
@@ -958,8 +968,8 @@ class RouteCodexApp {
         try {
           const { flushAntigravitySessionSignaturePersistenceSync } = await import('./modules/llmswitch/bridge.js');
           flushAntigravitySessionSignaturePersistenceSync();
-        } catch {
-          // ignore
+        } catch (error) {
+          logNonBlockingError('flush_antigravity_signature_persistence', error);
         }
 
         this._isRunning = false;
@@ -1023,8 +1033,8 @@ class RouteCodexApp {
           details: { reason, lifecyclePath }
         });
       });
-    } catch {
-      // forensics path is best-effort and must never block startup
+    } catch (error) {
+      logNonBlockingError('prepare_runtime_exit_forensics', error);
     }
   }
 

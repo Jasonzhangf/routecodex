@@ -182,24 +182,35 @@ export async function startHttpServer(server: any): Promise<void> {
 }
 
 export async function stopHttpServer(server: any): Promise<void> {
+  const logShutdownNonBlocking = (stage: string, error: unknown) => {
+    const reason = formatValueForConsole(error);
+    console.warn(`[RouteCodexHttpServer][shutdown][non-blocking] stage=${stage} error=${reason}`);
+  };
+
   server.stopSessionDaemonInjectLoop();
   await clearClockRuntimeHooks();
   await clearHeartbeatRuntimeHooks();
   try {
     await shutdownCamoufoxLaunchers();
-  } catch {
-    // ignore launcher cleanup errors
+  } catch (error) {
+    logShutdownNonBlocking('shutdown_camoufox_launchers', error);
   }
   if (!server.server) {
     return;
   }
 
+  let socketDestroyFailures = 0;
   for (const socket of server.activeSockets) {
     try {
       socket.destroy();
     } catch {
-      // ignore
+      socketDestroyFailures += 1;
     }
+  }
+  if (socketDestroyFailures > 0) {
+    console.warn(
+      `[RouteCodexHttpServer][shutdown][non-blocking] stage=destroy_active_sockets failures=${socketDestroyFailures}`
+    );
   }
   server.activeSockets.clear();
   try {
@@ -209,8 +220,8 @@ export async function stopHttpServer(server: any): Promise<void> {
     };
     srv.closeIdleConnections?.();
     srv.closeAllConnections?.();
-  } catch {
-    // ignore
+  } catch (error) {
+    logShutdownNonBlocking('close_idle_or_all_connections', error);
   }
 
   await new Promise<void>((resolve) => {
@@ -219,21 +230,21 @@ export async function stopHttpServer(server: any): Promise<void> {
 
       try {
         await server.disposeProviders();
-      } catch {
-        // ignore
+      } catch (error) {
+        logShutdownNonBlocking('dispose_providers', error);
       }
       try {
         if (server.managerDaemon) {
           await server.managerDaemon.stop();
           server.managerDaemon = null;
         }
-      } catch {
-        // ignore
+      } catch (error) {
+        logShutdownNonBlocking('stop_manager_daemon', error);
       }
       try {
         server.server?.removeAllListeners();
-      } catch {
-        // ignore
+      } catch (error) {
+        logShutdownNonBlocking('remove_server_listeners', error);
       }
       server.server = undefined;
       await server.errorHandling.destroy();
@@ -242,8 +253,8 @@ export async function stopHttpServer(server: any): Promise<void> {
         const uptimeMs = Math.round(process.uptime() * 1000);
         const summary = server.stats.logFinalSummary(uptimeMs);
         await server.stats.persistSnapshot(summary.session, { reason: 'server_shutdown' });
-      } catch {
-        // stats logging must never block shutdown
+      } catch (error) {
+        logShutdownNonBlocking('persist_stats_snapshot', error);
       }
 
       console.log('[RouteCodexHttpServer] Server stopped');
@@ -259,8 +270,8 @@ export async function stopHttpServer(server: any): Promise<void> {
         ) {
           console.log('[session-storage-cleanup] shutdown cleanup', cleanup);
         }
-      } catch {
-        // best-effort cleanup only
+      } catch (error) {
+        logShutdownNonBlocking('cleanup_session_storage', error);
       }
       resolve();
     });
