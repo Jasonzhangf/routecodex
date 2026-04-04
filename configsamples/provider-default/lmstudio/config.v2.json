@@ -27,6 +27,9 @@
       "glm-4.6v": {
         "supportsStreaming": true
       },
+      "gemma-4-31b-it": {
+        "supportsStreaming": true
+      },
       "gpt-oss-20b-mlx": {
         "supportsStreaming": true
       },

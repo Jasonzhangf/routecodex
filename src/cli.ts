@@ -443,7 +443,12 @@ registerStartCommand(program, {
 
 // Config command
 registerStatusConfigCommands(program, {
-  config: { logger, createSpinner },
+  config: {
+    logger,
+    createSpinner,
+    findListeningPids,
+    sendSignal: (pid, signal) => process.kill(pid, signal)
+  },
   status: {
     logger,
     log: (line) => console.log(line),

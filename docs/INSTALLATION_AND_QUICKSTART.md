@@ -63,6 +63,12 @@ rcc start
 rcc start --config ./config.json
 ```
 
+离线单模型（例如 LM Studio）建议单独配置并独立端口运行：
+
+```bash
+routecodex start --port 5520 --config "/Volumes/extension/.rcc/config.offline.json"
+```
+
 ## 4) 验证服务可用
 
 ```bash

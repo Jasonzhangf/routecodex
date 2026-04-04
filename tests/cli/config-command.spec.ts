@@ -356,6 +356,185 @@ describe('cli config command', () => {
     expect(parsed?.virtualrouterMode).toBe('v2');
     expect(parsed?.virtualrouter?.routingPolicyGroups?.default?.routing?.default?.[0]?.targets?.[0]).toContain('openai.');
   });
+
+  it('switch-group persists active group and sends reload signal', async () => {
+    const writes = new Map<string, string>();
+    const infos: string[] = [];
+    const success: string[] = [];
+    const warnings: string[] = [];
+    const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
+    const config = {
+      version: '2.0.0',
+      httpserver: { port: 5555 },
+      virtualrouter: {
+        routingPolicyGroups: {
+          default: { routing: { default: [{ id: 'd', targets: ['test.foo'] }] } },
+          canary: { routing: { default: [{ id: 'c', targets: ['test.bar'] }] } }
+        },
+        activeRoutingPolicyGroup: 'default'
+      }
+    };
+    const program = new Command();
+    createConfigCommand(program, {
+      logger: {
+        info: (msg) => infos.push(msg),
+        warning: (msg) => warnings.push(msg),
+        success: (msg) => success.push(msg),
+        error: () => {}
+      },
+      createSpinner: async () =>
+        ({
+          start: () => ({} as any),
+          succeed: () => {},
+          fail: () => {},
+          warn: () => {},
+          info: () => {},
+          stop: () => {},
+          text: ''
+        }) as any,
+      fsImpl: {
+        existsSync: () => true,
+        readFileSync: () => JSON.stringify(config),
+        writeFileSync: (p: any, content: any) => writes.set(String(p), String(content)),
+        mkdirSync: () => {}
+      },
+      loadProviderConfigsV2: async () => ({
+        test: {
+          provider: {
+            models: {
+              foo: {},
+              bar: {}
+            }
+          }
+        } as any
+      }),
+      findListeningPids: () => [1234],
+      sendSignal: (pid, signal) => signals.push({ pid, signal })
+    });
+
+    await program.parseAsync(
+      ['node', 'routecodex', 'config', 'switch-group', '--group', 'canary', '--config', '/tmp/config.json', '--port', '5555'],
+      { from: 'node' }
+    );
+
+    const written = JSON.parse(writes.get('/tmp/config.json') || '{}');
+    expect(written?.virtualrouter?.activeRoutingPolicyGroup).toBe('canary');
+    expect(success.join('\n')).toContain('Switched active routing group');
+    expect(infos.join('\n')).toContain('Reload signal sent (SIGUSR2)');
+    expect(warnings.join('\n')).toBe('');
+    expect(signals).toEqual([{ pid: 1234, signal: 'SIGUSR2' }]);
+  });
+
+  it('switch-group is blocked when route target references missing provider/model', async () => {
+    const writes = new Map<string, string>();
+    const errors: string[] = [];
+    const config = {
+      version: '2.0.0',
+      httpserver: { port: 5555 },
+      virtualrouter: {
+        routingPolicyGroups: {
+          default: { routing: { default: [{ id: 'd', targets: ['test.foo'] }] } },
+          broken: { routing: { tools: [{ id: 'x', targets: ['ghost.missing-model'] }] } }
+        },
+        activeRoutingPolicyGroup: 'default'
+      }
+    };
+
+    const program = new Command();
+    createConfigCommand(program, {
+      logger: {
+        info: () => {},
+        warning: () => {},
+        success: () => {},
+        error: (msg) => errors.push(msg)
+      },
+      createSpinner: async () =>
+        ({
+          start: () => ({} as any),
+          succeed: () => {},
+          fail: () => {},
+          warn: () => {},
+          info: () => {},
+          stop: () => {},
+          text: ''
+        }) as any,
+      fsImpl: {
+        existsSync: () => true,
+        readFileSync: () => JSON.stringify(config),
+        writeFileSync: (p: any, content: any) => writes.set(String(p), String(content)),
+        mkdirSync: () => {}
+      },
+      loadProviderConfigsV2: async () => ({
+        test: { provider: { models: { foo: {} } } } as any
+      })
+    });
+
+    await program.parseAsync(
+      ['node', 'routecodex', 'config', 'switch-group', '--group', 'broken', '--config', '/tmp/config.json'],
+      { from: 'node' }
+    );
+
+    expect(writes.size).toBe(0);
+    expect(errors.join('\n')).toContain('Switch blocked');
+    expect(errors.join('\n')).toContain('references missing provider "ghost"');
+  });
+
+  it('switch-group supports provider ids containing dots', async () => {
+    const writes = new Map<string, string>();
+    const errors: string[] = [];
+    const success: string[] = [];
+    const config = {
+      version: '2.0.0',
+      httpserver: { port: 5555 },
+      virtualrouter: {
+        routingPolicyGroups: {
+          default: { routing: { default: [{ id: 'd', targets: ['test.foo'] }] } },
+          canary: { routing: { default: [{ id: 'c', targets: ['foo.bar.model-a'] }] } }
+        },
+        activeRoutingPolicyGroup: 'default'
+      }
+    };
+
+    const program = new Command();
+    createConfigCommand(program, {
+      logger: {
+        info: () => {},
+        warning: () => {},
+        success: (msg) => success.push(msg),
+        error: (msg) => errors.push(msg)
+      },
+      createSpinner: async () =>
+        ({
+          start: () => ({} as any),
+          succeed: () => {},
+          fail: () => {},
+          warn: () => {},
+          info: () => {},
+          stop: () => {},
+          text: ''
+        }) as any,
+      fsImpl: {
+        existsSync: () => true,
+        readFileSync: () => JSON.stringify(config),
+        writeFileSync: (p: any, content: any) => writes.set(String(p), String(content)),
+        mkdirSync: () => {}
+      },
+      loadProviderConfigsV2: async () => ({
+        'foo.bar': { provider: { models: { 'model-a': {} } } } as any,
+        test: { provider: { models: { foo: {} } } } as any
+      })
+    });
+
+    await program.parseAsync(
+      ['node', 'routecodex', 'config', 'switch-group', '--group', 'canary', '--config', '/tmp/config.json', '--no-reload'],
+      { from: 'node' }
+    );
+
+    expect(errors).toEqual([]);
+    expect(success.join('\n')).toContain('Switched active routing group');
+    const written = JSON.parse(writes.get('/tmp/config.json') || '{}');
+    expect(written?.virtualrouter?.activeRoutingPolicyGroup).toBe('canary');
+  });
 });
 
 describe('cli init command', () => {

@@ -13,6 +13,8 @@ export function registerStatusConfigCommands(
     config: {
       logger: CliLogger;
       createSpinner: (text: string) => Promise<Spinner>;
+      findListeningPids?: (port: number) => number[];
+      sendSignal?: (pid: number, signal: NodeJS.Signals) => void;
     };
     status: {
       logger: CliLogger;

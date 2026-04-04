@@ -7,6 +7,10 @@
     "type": "openai",
     "baseURL": "https://chat.qwen.ai",
     "compatibilityProfile": "chat:qwenchat-web",
+    "deepseek": {
+      "strictToolRequired": true,
+      "toolProtocol": "text"
+    },
     "auth": {
       "type": "qwen-oauth",
       "tokenFile": "default"
@@ -15,12 +19,18 @@
       "qwen3.6-plus": {
         "maxTokens": 64000,
         "maxContext": 256000,
-        "supportsStreaming": true
+        "supportsStreaming": true,
+        "capabilities": [
+          "tools"
+        ]
       },
       "qwen3.5-plus": {
         "maxTokens": 64000,
         "maxContext": 256000,
-        "supportsStreaming": true
+        "supportsStreaming": true,
+        "capabilities": [
+          "tools"
+        ]
       },
       "qwen3.5-flash": {
         "maxTokens": 32000,
