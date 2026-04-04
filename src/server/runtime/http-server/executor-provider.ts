@@ -169,12 +169,90 @@ function isIflowModelError(error: unknown): boolean {
   return providerHint ? providerHint.includes('iflow') : true;
 }
 
-export async function waitBeforeRetry(error: unknown): Promise<void> {
-  if (!isNetworkTransportError(error)) {
+type WaitBeforeRetryOptions = {
+  attempt?: number;
+};
+
+function parsePositiveInt(raw: string | undefined, fallback: number): number {
+  const parsed = Number.parseInt(String(raw ?? '').trim(), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function readRetryAfterHeaderSeconds(error: unknown): number | undefined {
+  if (!error || typeof error !== 'object') {
+    return undefined;
+  }
+  const record = error as {
+    response?: { headers?: Record<string, unknown> };
+    details?: { response?: { headers?: Record<string, unknown> } };
+  };
+  const headers =
+    (record.response && typeof record.response === 'object' && record.response.headers && typeof record.response.headers === 'object'
+      ? record.response.headers
+      : undefined)
+    ?? (record.details &&
+      typeof record.details === 'object' &&
+      record.details.response &&
+      typeof record.details.response === 'object' &&
+      record.details.response.headers &&
+      typeof record.details.response.headers === 'object'
+      ? record.details.response.headers
+      : undefined);
+  if (!headers) {
+    return undefined;
+  }
+  const retryAfterRaw =
+    headers['retry-after']
+    ?? headers['Retry-After']
+    ?? headers['retry_after']
+    ?? headers['Retry_After'];
+  if (typeof retryAfterRaw === 'number' && Number.isFinite(retryAfterRaw) && retryAfterRaw > 0) {
+    return retryAfterRaw;
+  }
+  if (typeof retryAfterRaw === 'string') {
+    const trimmed = retryAfterRaw.trim();
+    const asSeconds = Number.parseFloat(trimmed);
+    if (Number.isFinite(asSeconds) && asSeconds > 0) {
+      return asSeconds;
+    }
+    const parsedDate = Date.parse(trimmed);
+    if (Number.isFinite(parsedDate)) {
+      const deltaSeconds = Math.ceil((parsedDate - Date.now()) / 1000);
+      if (deltaSeconds > 0) {
+        return deltaSeconds;
+      }
+    }
+  }
+  return undefined;
+}
+
+export async function waitBeforeRetry(error: unknown, options?: WaitBeforeRetryOptions): Promise<void> {
+  const status = extractErrorStatusCode(error);
+  if (status === 429) {
+    const baseMs = parsePositiveInt(
+      process.env.ROUTECODEX_429_BACKOFF_BASE_MS || process.env.RCC_429_BACKOFF_BASE_MS,
+      1000
+    );
+    const maxMs = parsePositiveInt(
+      process.env.ROUTECODEX_429_BACKOFF_MAX_MS || process.env.RCC_429_BACKOFF_MAX_MS,
+      30000
+    );
+    const attemptRaw = typeof options?.attempt === 'number' && Number.isFinite(options.attempt) ? options.attempt : 1;
+    const attempt = Math.max(1, Math.floor(attemptRaw));
+    const exponentialMs = Math.min(maxMs, baseMs * Math.pow(2, Math.max(0, attempt - 1)));
+    const retryAfterSeconds = readRetryAfterHeaderSeconds(error);
+    const retryAfterMs =
+      typeof retryAfterSeconds === 'number' && Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
+        ? Math.min(maxMs, Math.round(retryAfterSeconds * 1000))
+        : 0;
+    const delayMs = Math.max(exponentialMs, retryAfterMs);
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
     return;
   }
-  const delayMs = 500;
-  await new Promise((resolve) => setTimeout(resolve, delayMs));
+  if (isNetworkTransportError(error)) {
+    const delayMs = 500;
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
 }
 
 export function isPromptTooLongError(error: unknown): boolean {
