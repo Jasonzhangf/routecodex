@@ -68,6 +68,7 @@ export function shouldRetryProviderError(error: unknown): boolean {
   if (!error || typeof error !== 'object') {
     return false;
   }
+  const status = extractErrorStatusCode(error);
   // Deterministic context overflow: retrying the *same* model will keep failing,
   // but a different model/provider in the same route pool might accept it.
   // This matches the virtual-router strategy: if a target is over its context window,
@@ -80,9 +81,17 @@ export function shouldRetryProviderError(error: unknown): boolean {
   if (hasVirtualRouterSeriesCooldown(error)) {
     return true;
   }
+  // Deterministic request-shape validation errors (especially malformed tools/input schema)
+  // must not be retried; repeated retries with the same payload only create retry storms.
+  if (isDeterministicInvalidRequestError(error, status)) {
+    return false;
+  }
   const providerError = error as ProviderError;
   if (providerError.retryable === true) {
     return true;
+  }
+  if (providerError.retryable === false) {
+    return false;
   }
   // iFlow 业务错误 514(model error) 多为上游瞬态失败，允许虚拟路由切换候选继续执行。
   if (isIflowModelError(error)) {
@@ -91,7 +100,6 @@ export function shouldRetryProviderError(error: unknown): boolean {
   if (isNetworkTransportError(error)) {
     return true;
   }
-  const status = extractErrorStatusCode(error);
   if (status === 401 || status === 429 || status === 413 || status === 408 || status === 425) {
     return true;
   }
@@ -173,6 +181,68 @@ type WaitBeforeRetryOptions = {
   attempt?: number;
 };
 
+function readNestedProviderError(error: unknown): Record<string, unknown> | undefined {
+  if (!error || typeof error !== 'object') {
+    return undefined;
+  }
+  const response = (error as { response?: unknown }).response;
+  if (!response || typeof response !== 'object') {
+    return undefined;
+  }
+  const data = (response as { data?: unknown }).data;
+  if (!data || typeof data !== 'object') {
+    return undefined;
+  }
+  const nested = (data as { error?: unknown }).error;
+  return nested && typeof nested === 'object' && !Array.isArray(nested)
+    ? (nested as Record<string, unknown>)
+    : undefined;
+}
+
+function isDeterministicInvalidRequestError(error: unknown, statusHint?: number): boolean {
+  const status = typeof statusHint === 'number' ? statusHint : extractErrorStatusCode(error);
+  if (status !== 400) {
+    return false;
+  }
+  const nested = readNestedProviderError(error);
+  const code = String(
+    (error as { code?: unknown })?.code ??
+      (nested?.code as unknown) ??
+      ''
+  )
+    .trim()
+    .toLowerCase();
+  const type = String(
+    (error as { type?: unknown })?.type ??
+      (nested?.type as unknown) ??
+      ''
+  )
+    .trim()
+    .toLowerCase();
+  const param = String((nested?.param as unknown) ?? '').trim().toLowerCase();
+  const messageParts = [
+    (error as { message?: unknown })?.message,
+    nested?.message
+  ]
+    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    .map((value) => value.toLowerCase());
+  const message = messageParts.join(' | ');
+
+  if (param.startsWith('tools.') || param.startsWith('messages.') || param.startsWith('input.')) {
+    return true;
+  }
+  if (type === 'invalid_request_error') {
+    return true;
+  }
+  if (type.startsWith('invalid_') || code.startsWith('invalid_')) {
+    return true;
+  }
+  if (message.includes('invalid') && !message.includes('temporar')) {
+    return true;
+  }
+  return false;
+}
+
 function parsePositiveInt(raw: string | undefined, fallback: number): number {
   const parsed = Number.parseInt(String(raw ?? '').trim(), 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
@@ -226,8 +296,10 @@ function readRetryAfterHeaderSeconds(error: unknown): number | undefined {
   return undefined;
 }
 
-export async function waitBeforeRetry(error: unknown, options?: WaitBeforeRetryOptions): Promise<void> {
+export function computeRetryDelayMs(error: unknown, options?: WaitBeforeRetryOptions): number {
   const status = extractErrorStatusCode(error);
+  const attemptRaw = typeof options?.attempt === 'number' && Number.isFinite(options.attempt) ? options.attempt : 1;
+  const attempt = Math.max(1, Math.floor(attemptRaw));
   if (status === 429) {
     const baseMs = parsePositiveInt(
       process.env.ROUTECODEX_429_BACKOFF_BASE_MS || process.env.RCC_429_BACKOFF_BASE_MS,
@@ -237,22 +309,42 @@ export async function waitBeforeRetry(error: unknown, options?: WaitBeforeRetryO
       process.env.ROUTECODEX_429_BACKOFF_MAX_MS || process.env.RCC_429_BACKOFF_MAX_MS,
       30000
     );
-    const attemptRaw = typeof options?.attempt === 'number' && Number.isFinite(options.attempt) ? options.attempt : 1;
-    const attempt = Math.max(1, Math.floor(attemptRaw));
     const exponentialMs = Math.min(maxMs, baseMs * Math.pow(2, Math.max(0, attempt - 1)));
     const retryAfterSeconds = readRetryAfterHeaderSeconds(error);
     const retryAfterMs =
       typeof retryAfterSeconds === 'number' && Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
         ? Math.min(maxMs, Math.round(retryAfterSeconds * 1000))
         : 0;
-    const delayMs = Math.max(exponentialMs, retryAfterMs);
-    await new Promise((resolve) => setTimeout(resolve, delayMs));
-    return;
+    return Math.max(exponentialMs, retryAfterMs);
   }
   if (isNetworkTransportError(error)) {
-    const delayMs = 500;
-    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    const networkBaseMs = parsePositiveInt(
+      process.env.ROUTECODEX_NETWORK_RETRY_BACKOFF_BASE_MS || process.env.RCC_NETWORK_RETRY_BACKOFF_BASE_MS,
+      500
+    );
+    const networkMaxMs = parsePositiveInt(
+      process.env.ROUTECODEX_NETWORK_RETRY_BACKOFF_MAX_MS || process.env.RCC_NETWORK_RETRY_BACKOFF_MAX_MS,
+      12000
+    );
+    return Math.min(networkMaxMs, networkBaseMs * Math.pow(2, Math.max(0, attempt - 1)));
   }
+  // Single-provider pools can only retry the same provider key; enforce exponential
+  // backoff to avoid retry storms when upstream is temporarily or deterministically failing.
+  const genericBaseMs = parsePositiveInt(
+    process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_BASE_MS || process.env.RCC_PROVIDER_RETRY_BACKOFF_BASE_MS,
+    800
+  );
+  const genericMaxMs = parsePositiveInt(
+    process.env.ROUTECODEX_PROVIDER_RETRY_BACKOFF_MAX_MS || process.env.RCC_PROVIDER_RETRY_BACKOFF_MAX_MS,
+    15000
+  );
+  return Math.min(genericMaxMs, genericBaseMs * Math.pow(2, Math.max(0, attempt - 1)));
+}
+
+export async function waitBeforeRetry(error: unknown, options?: WaitBeforeRetryOptions): Promise<number> {
+  const delayMs = computeRetryDelayMs(error, options);
+  await new Promise((resolve) => setTimeout(resolve, delayMs));
+  return delayMs;
 }
 
 export function isPromptTooLongError(error: unknown): boolean {

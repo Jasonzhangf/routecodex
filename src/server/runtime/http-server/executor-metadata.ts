@@ -424,8 +424,15 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
     || resolveWorkdirFromSessionDaemon(resolvedSessionDaemonId);
   let resolvedTmuxSessionId = tmuxResolution.tmuxSessionId;
   let tmuxSource = tmuxResolution.source;
-  let clientInjectReady = Boolean(resolvedTmuxSessionId);
-  let clientInjectReason = clientInjectReady ? 'tmux_session_ready' : 'tmux_session_missing';
+  const explicitClientInjectReady =
+    typeof userMeta.clientInjectReady === 'boolean' ? userMeta.clientInjectReady : undefined;
+  const explicitClientInjectReason =
+    typeof userMeta.clientInjectReason === 'string' && userMeta.clientInjectReason.trim()
+      ? userMeta.clientInjectReason.trim()
+      : undefined;
+  let clientInjectReady = explicitClientInjectReady ?? Boolean(resolvedTmuxSessionId);
+  let clientInjectReason =
+    explicitClientInjectReason || (clientInjectReady ? 'tmux_session_ready' : 'tmux_session_missing');
   let stopMessageClientInjectSessionScope = resolvedTmuxSessionId ? `tmux:${resolvedTmuxSessionId}` : undefined;
   if (resolvedTmuxSessionId && evaluateTmuxScopeCleanup({
     mode: 'request_guard',
@@ -440,8 +447,12 @@ export function buildRequestMetadata(input: PipelineExecutionInput): Record<stri
     }
     resolvedTmuxSessionId = undefined;
     tmuxSource = 'none';
-    clientInjectReady = false;
-    clientInjectReason = 'tmux_session_missing';
+    if (explicitClientInjectReady === undefined) {
+      clientInjectReady = false;
+    }
+    if (!explicitClientInjectReason) {
+      clientInjectReason = clientInjectReady ? 'tmux_session_ready' : 'tmux_session_missing';
+    }
     stopMessageClientInjectSessionScope = undefined;
   }
   const metadata: Record<string, unknown> = {

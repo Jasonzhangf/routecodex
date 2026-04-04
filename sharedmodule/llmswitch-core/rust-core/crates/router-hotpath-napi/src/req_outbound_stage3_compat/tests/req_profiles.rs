@@ -462,11 +462,86 @@ fn test_req_profile_chat_lmstudio_native_applied() {
     let result = run_req_outbound_stage3_compat(input).unwrap();
     assert!(result.native_applied);
     assert_eq!(result.applied_profile, Some("chat:lmstudio".to_string()));
-    assert_eq!(result.payload["tool_choice"], "required");
+    assert_eq!(result.payload["tool_choice"], serde_json::Value::Null);
     assert_eq!(result.payload["input"][0]["call_id"], "call_shell_1");
     assert_eq!(result.payload["input"][0]["id"], "fc_shell_1");
     assert_eq!(result.payload["input"][1]["call_id"], "call_result-item-1");
     assert_eq!(result.payload["input"][1]["id"], "fc_result-item-1");
+}
+
+#[test]
+fn test_req_profile_chat_lmstudio_sanitizes_tools_for_responses_schema() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "model": "gemma-4-31b-it",
+            "tool_choice": { "type": "function", "function": { "name": "exec_command" } },
+            "tools": [
+                {
+                    "type": "function",
+                    "function": { "name": "exec_command", "parameters": { "type": "object", "properties": { "cmd": { "type": "string" } } } }
+                },
+                {
+                    "type": "web_search_preview",
+                    "name": "web_search"
+                },
+                {
+                    "type": { "unexpected": true },
+                    "function": { "name": "update_plan", "parameters": "{\"type\":\"object\",\"properties\":{}}" }
+                },
+                {
+                    "name": "write_stdin",
+                    "parameters": { "type": "object", "properties": { "session_id": { "type": "number" } } }
+                }
+            ],
+            "input": [
+                {
+                    "role": "user",
+                    "content": [
+                        { "type": "input_text", "text": "run tool test" }
+                    ]
+                }
+            ]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:lmstudio".to_string()),
+            provider_protocol: Some("openai-responses".to_string()),
+            request_id: Some("req_lmstudio_tool_schema_1".to_string()),
+            entry_endpoint: Some("/v1/responses".to_string()),
+            route_id: None,
+            rt: None,
+            captured_chat_request: None,
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+    let result = run_req_outbound_stage3_compat(input).unwrap();
+    assert!(result.native_applied);
+    assert_eq!(result.applied_profile, Some("chat:lmstudio".to_string()));
+    assert_eq!(result.payload["tool_choice"], "required");
+    let tools = result.payload["tools"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(tools.len(), 2);
+    for tool in tools {
+        assert_eq!(tool["type"], "function");
+        assert!(tool["name"].as_str().unwrap_or("").len() > 0);
+        assert!(tool["parameters"].is_object());
+        assert!(tool.get("function").is_none());
+    }
 }
 
 #[test]

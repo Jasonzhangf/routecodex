@@ -92,6 +92,9 @@ describe('HubRequestExecutor single attempt behaviour', () => {
   it('invokes provider only once on success', async () => {
     const handle = createRuntimeHandle(async () => ({ ok: true }));
     const { executor, request } = createExecutor(pipelineResult, handle);
+    jest
+      .spyOn(executor as any, 'convertProviderResponseIfNeeded')
+      .mockResolvedValue({ status: 200, body: { output_text: 'ok' } });
 
     const response = await executor.execute(request);
 
@@ -129,7 +132,7 @@ describe('HubRequestExecutor single attempt behaviour', () => {
   });
 
   it('retries retryable provider errors and re-runs pipeline', async () => {
-    const retryable = Object.assign(new Error('HTTP 429'), { statusCode: 429, retryable: false });
+    const retryable = Object.assign(new Error('HTTP 429'), { statusCode: 429, retryable: true });
     const successHandle = createRuntimeHandle(async () => ({ ok: true }));
     const failingHandle = createRuntimeHandle(async () => {
       throw retryable;
@@ -205,6 +208,90 @@ describe('HubRequestExecutor single attempt behaviour', () => {
     const secondCallMetadata = fakePipeline.execute.mock.calls[1][0]
       .metadata as Record<string, unknown>;
     expect(secondCallMetadata.excludedProviderKeys).toEqual(['antigravity.aliasA']);
+  });
+
+  it('reroutes when converted response is finish_reason=stop with empty assistant payload', async () => {
+    const firstHandle = createRuntimeHandle(async () => ({ status: 200, data: { ok: true } }));
+    const secondHandle = createRuntimeHandle(async () => ({ status: 200, data: { ok: true } }));
+    const pipelineResultOne: PipelineExecutionResult = {
+      providerPayload: { data: { messages: [] } },
+      target: {
+        providerKey: 'qwenchat.aliasA',
+        providerType: 'openai',
+        outboundProfile: 'openai-chat',
+        runtimeKey: 'runtime:one',
+        processMode: 'standard'
+      },
+      processMode: 'standard',
+      metadata: {}
+    };
+    const pipelineResultTwo: PipelineExecutionResult = {
+      providerPayload: { data: { messages: [] } },
+      target: {
+        providerKey: 'tab.aliasB',
+        providerType: 'openai',
+        outboundProfile: 'openai-chat',
+        runtimeKey: 'runtime:two',
+        processMode: 'standard'
+      },
+      processMode: 'standard',
+      metadata: {}
+    };
+    const fakePipeline: HubPipeline = {
+      execute: jest.fn().mockResolvedValueOnce(pipelineResultOne).mockResolvedValueOnce(pipelineResultTwo)
+    };
+    const runtimeManager: ProviderRuntimeManager = {
+      resolveRuntimeKey: jest.fn(),
+      getHandleByRuntimeKey: jest.fn((runtimeKey: string) =>
+        runtimeKey === 'runtime:one' ? firstHandle : secondHandle
+      ),
+      getHandleByProviderKey: jest.fn(),
+      disposeAll: jest.fn(),
+      initialize: jest.fn()
+    } as unknown as ProviderRuntimeManager;
+    const stats = {
+      recordRequestStart: jest.fn(),
+      recordCompletion: jest.fn(),
+      bindProvider: jest.fn(),
+      recordToolUsage: jest.fn()
+    };
+    const deps = {
+      runtimeManager,
+      getHubPipeline: () => fakePipeline,
+      getModuleDependencies: (): ModuleDependencies => ({
+        errorHandlingCenter: {
+          handleError: jest.fn().mockResolvedValue({ success: true })
+        }
+      } as ModuleDependencies),
+      logStage: jest.fn(),
+      stats
+    };
+    const executor = new HubRequestExecutor(deps);
+    jest
+      .spyOn(executor as any, 'convertProviderResponseIfNeeded')
+      .mockResolvedValueOnce({
+        status: 200,
+        body: { choices: [{ finish_reason: 'stop', message: { content: '' } }] }
+      })
+      .mockResolvedValueOnce({
+        status: 200,
+        body: { choices: [{ finish_reason: 'stop', message: { content: 'ok' } }] }
+      });
+    const request: PipelineExecutionInput = {
+      requestId: 'req_empty_assistant_reroute',
+      entryEndpoint: '/v1/chat/completions',
+      headers: {},
+      body: { messages: [{ role: 'user', content: 'retry me' }] },
+      metadata: { stream: false, inboundStream: false }
+    };
+
+    const response = await executor.execute(request);
+
+    expect(response).toBeDefined();
+    expect(fakePipeline.execute).toHaveBeenCalledTimes(2);
+    const secondCallMetadata = fakePipeline.execute.mock.calls[1][0]
+      .metadata as Record<string, unknown>;
+    expect(secondCallMetadata.excludedProviderKeys).toEqual(['qwenchat.aliasA']);
   });
 
   it('logs provider-switch status/code/upstreamCode parsed from raw error text', async () => {

@@ -1,7 +1,19 @@
-import { applyQwenChatWebRequestTransform } from '../../../../sharedmodule/llmswitch-core/src/conversion/compat/actions/qwenchat-web-request.js';
+import { applyQwenChatWebRequestTransform } from '../../../../sharedmodule/llmswitch-core/dist/conversion/compat/actions/qwenchat-web-request.js';
 
 export type StandardToolTextRequestPayload = Record<string, unknown>;
 export type StandardToolTextRequestContext = Record<string, unknown>;
+
+export const standardToolTextRequestTransformRuntime = {
+  transform(
+    payload: StandardToolTextRequestPayload,
+    adapterContext?: StandardToolTextRequestContext
+  ): StandardToolTextRequestPayload {
+    return applyQwenChatWebRequestTransform(
+      payload as any,
+      adapterContext as any
+    ) as StandardToolTextRequestPayload;
+  }
+};
 
 /**
  * Provider-agnostic text-tool request normalization entry.
@@ -14,8 +26,5 @@ export function applyStandardToolTextRequestTransform(
   payload: StandardToolTextRequestPayload,
   adapterContext?: StandardToolTextRequestContext
 ): StandardToolTextRequestPayload {
-  return applyQwenChatWebRequestTransform(
-    payload as any,
-    adapterContext as any
-  ) as StandardToolTextRequestPayload;
+  return standardToolTextRequestTransformRuntime.transform(payload, adapterContext);
 }

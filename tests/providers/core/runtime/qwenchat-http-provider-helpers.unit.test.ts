@@ -10,7 +10,7 @@ import {
   extractQwenChatPayload,
   parseIncomingMessages
 } from '../../../../src/providers/core/runtime/qwenchat-http-provider-helpers.js';
-import * as standardToolRequestTransform from '../../../../src/providers/core/runtime/standard-tool-text-request-transform.js';
+import { standardToolTextRequestTransformRuntime } from '../../../../src/providers/core/runtime/standard-tool-text-request-transform.js';
 
 describe('qwenchat-http-provider helpers', () => {
   afterEach(() => {
@@ -43,6 +43,15 @@ describe('qwenchat-http-provider helpers', () => {
     expect(payload.messages).toEqual([{ role: 'user', content: '原始消息' }]);
     expect(parseIncomingMessages(payload.messages).content).toBe('原始消息');
     expect(payload.stream).toBe(true);
+  });
+
+  it('defaults stream=false when stream flag is omitted', () => {
+    const payload = extractQwenChatPayload({
+      model: 'qwen3.6-plus',
+      messages: [{ role: 'user', content: '默认非流式' }]
+    } as any);
+
+    expect(payload.stream).toBe(false);
   });
 
   it('surfaces upstream rejection reason when create-session returns code/details', async () => {
@@ -78,6 +87,36 @@ describe('qwenchat-http-provider helpers', () => {
           baxiaTokens: { bxUa: 'bx-ua', bxUmidToken: 'bx-token', bxV: '2.5.36' }
         })
       ).rejects.toThrow('upstream rejected request');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('maps permission-denied session create rejection to HTTP 403 (not 401)', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({
+          success: false,
+          data: {
+            code: 'Forbidden',
+            details: '您没有权限访问此资源。请联系您的管理员以获取帮助。'
+          }
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      )) as typeof fetch;
+    try {
+      await expect(
+        createQwenChatSession({
+          baseUrl: 'https://chat.qwen.ai',
+          model: 'qwen3.6-plus',
+          chatType: 't2t',
+          baxiaTokens: { bxUa: 'bx-ua', bxUmidToken: 'bx-token', bxV: '2.5.36' }
+        })
+      ).rejects.toMatchObject({
+        code: 'QWENCHAT_CREATE_SESSION_REJECTED',
+        statusCode: 403
+      });
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -268,7 +307,7 @@ describe('qwenchat-http-provider helpers', () => {
 
   it('fails fast when standard tool-text transform does not produce prompt', async () => {
     jest
-      .spyOn(standardToolRequestTransform, 'applyStandardToolTextRequestTransform')
+      .spyOn(standardToolTextRequestTransformRuntime, 'transform')
       .mockReturnValue({
         model: 'qwen3.6-plus',
         messages: [{ role: 'user', content: 'fallback message should not be used' }],
@@ -317,6 +356,26 @@ describe('qwenchat-http-provider helpers', () => {
     ).rejects.toMatchObject({
       code: 'QWENCHAT_EMPTY_ASSISTANT',
       statusCode: 502
+    });
+  });
+
+  it('fails with 429 when upstream returns non-SSE business rejection payload', async () => {
+    const upstreamPayload = JSON.stringify({
+      success: false,
+      data: {
+        code: 'RateLimited',
+        details: '您已达到今日的使用上限。'
+      }
+    });
+    const upstreamStream = Readable.from([upstreamPayload], { encoding: 'utf8' });
+    await expect(
+      collectQwenSseAsOpenAiResult({
+        upstreamStream,
+        model: 'qwen3.6-plus'
+      })
+    ).rejects.toMatchObject({
+      code: 'QWENCHAT_RATE_LIMITED',
+      statusCode: 429
     });
   });
 });
