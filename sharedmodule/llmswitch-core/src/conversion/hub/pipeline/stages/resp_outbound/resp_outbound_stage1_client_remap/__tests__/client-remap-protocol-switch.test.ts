@@ -83,4 +83,113 @@ describe('client-remap-protocol-switch', () => {
     expect(toolCalls[1].function.name).toBe('Bash');
     expect(toolCalls[1].function.arguments).toBe('{"cmd":"pwd"}');
   });
+
+  it('remaps normalized exec_command back to namespaced declared tool name', () => {
+    const payload = {
+      choices: [
+        {
+          index: 0,
+          finish_reason: 'tool_calls',
+          message: {
+            role: 'assistant',
+            content: null,
+            tool_calls: [
+              {
+                id: 'call_1',
+                type: 'function',
+                function: {
+                  name: 'exec_command',
+                  arguments: '{"cmd":"pwd"}'
+                }
+              }
+            ]
+          }
+        }
+      ]
+    };
+
+    const requestSemantics = {
+      tools: {
+        clientToolsRaw: [
+          {
+            type: 'function',
+            function: {
+              name: 'functions.exec_command',
+              parameters: {
+                type: 'object',
+                properties: {
+                  cmd: { type: 'string' }
+                },
+                required: ['cmd'],
+                additionalProperties: false
+              }
+            }
+          }
+        ]
+      }
+    };
+
+    const result = buildClientPayloadForProtocol({
+      payload: payload as any,
+      clientProtocol: 'openai-chat',
+      requestId: 'req-test-remap-ns',
+      requestSemantics: requestSemantics as any
+    });
+
+    const toolCalls = (result as any).choices[0].message.tool_calls;
+    expect(toolCalls[0].function.name).toBe('functions.exec_command');
+  });
+
+  it('throws when tool names cannot be mapped into the current request tool list', () => {
+    const payload = {
+      choices: [
+        {
+          index: 0,
+          finish_reason: 'tool_calls',
+          message: {
+            role: 'assistant',
+            content: null,
+            tool_calls: [
+              {
+                id: 'call_1',
+                type: 'function',
+                function: {
+                  name: 'unknown_tool_name',
+                  arguments: '{}'
+                }
+              }
+            ]
+          }
+        }
+      ]
+    };
+
+    const requestSemantics = {
+      tools: {
+        clientToolsRaw: [
+          {
+            type: 'function',
+            function: {
+              name: 'exec_command',
+              parameters: {
+                type: 'object',
+                properties: {
+                  cmd: { type: 'string' }
+                },
+                required: ['cmd'],
+                additionalProperties: false
+              }
+            }
+          }
+        ]
+      }
+    };
+
+    expect(() => buildClientPayloadForProtocol({
+      payload: payload as any,
+      clientProtocol: 'openai-chat',
+      requestId: 'req-test-remap-hard-check',
+      requestSemantics: requestSemantics as any
+    })).toThrow('tool name mismatch');
+  });
 });
