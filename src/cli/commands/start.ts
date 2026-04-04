@@ -23,6 +23,25 @@ import type { StartCommandContext, StartCommandOptions } from './start-types.js'
 
 export type { StartCommandContext, StartCommandOptions } from './start-types.js';
 
+function resolveShutdownExitCode(signal: NodeJS.Signals): number {
+  if (signal === 'SIGINT') {
+    return 130;
+  }
+  if (signal === 'SIGTERM') {
+    return 143;
+  }
+  return 1;
+}
+
+function resolveStartShutdownHttpTimeoutMs(env: NodeJS.ProcessEnv): number {
+  const raw = String(env.ROUTECODEX_START_SHUTDOWN_HTTP_TIMEOUT_MS ?? env.RCC_START_SHUTDOWN_HTTP_TIMEOUT_MS ?? '').trim();
+  const parsed = Number(raw);
+  if (Number.isFinite(parsed) && parsed >= 100) {
+    return Math.floor(parsed);
+  }
+  return 1200;
+}
+
 export function createStartCommand(program: Command, ctx: StartCommandContext): void {
   program
     .command('start')
@@ -512,6 +531,7 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
         let activeChildProc = null as ReturnType<typeof ctx.spawn> | null;
         let shuttingDown = false;
         let restartInFlight = false;
+        let shutdownSignalCount = 0;
         let cleanupKeypress = () => {};
 
         const attachChildExitHandler = (proc: ReturnType<typeof ctx.spawn>): void => {
@@ -589,7 +609,18 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
         ctx.logger.info('Press Ctrl+C to stop the server');
 
         const shutdown = async (sig: NodeJS.Signals) => {
+          shutdownSignalCount += 1;
           if (shuttingDown) {
+            const code = resolveShutdownExitCode(sig);
+            ctx.logger.warning(`[start] received ${sig} while shutdown is in progress; forcing exit.`);
+            try {
+              activeChildProc?.kill('SIGKILL');
+            } catch {
+              /* ignore */
+            }
+            closeServerLogStream();
+            try { cleanupKeypress(); } catch { /* ignore */ }
+            ctx.exit(code);
             return;
           }
           shuttingDown = true;
@@ -600,11 +631,23 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
               targetPid: activeChildProc?.pid ?? null
             });
             try {
-              await ctx.fetch(`${HTTP_PROTOCOLS.HTTP}${LOCAL_HOSTS.IPV4}:${resolvedPort}${API_PATHS.SHUTDOWN}`, { method: 'POST' }).catch((error) => {
-                ctx.logger.warning(
-                  `[start] shutdown request failed (non-blocking) port=${resolvedPort}: ${error instanceof Error ? error.message : String(error)}`
-                );
-              });
+              const controller = new AbortController();
+              const timeoutMs = resolveStartShutdownHttpTimeoutMs(ctx.env);
+              const timeout = setTimeout(() => {
+                try { controller.abort(); } catch { /* ignore */ }
+              }, timeoutMs);
+              try {
+                await ctx.fetch(`${HTTP_PROTOCOLS.HTTP}${LOCAL_HOSTS.IPV4}:${resolvedPort}${API_PATHS.SHUTDOWN}`, {
+                  method: 'POST',
+                  signal: controller.signal
+                }).catch((error) => {
+                  ctx.logger.warning(
+                    `[start] shutdown request failed (non-blocking) port=${resolvedPort}: ${error instanceof Error ? error.message : String(error)}`
+                  );
+                });
+              } finally {
+                clearTimeout(timeout);
+              }
             } catch (error) {
               ctx.logger.warning(
                 `[start] shutdown request threw (non-blocking) port=${resolvedPort}: ${error instanceof Error ? error.message : String(error)}`
@@ -642,6 +685,13 @@ export function createStartCommand(program: Command, ctx: StartCommandContext): 
               activeChildProc?.once('exit', () => complete(true));
               setTimeout(() => complete(false), 3500);
             });
+            if (!childExited) {
+              try {
+                activeChildProc?.kill('SIGKILL');
+              } catch {
+                /* ignore */
+              }
+            }
             logProcessLifecycleSync({
               event: 'self_termination',
               source: 'cli.start.shutdown',
