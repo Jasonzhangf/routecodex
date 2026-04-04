@@ -148,6 +148,61 @@ fn ensure_web_search_schema(candidate: Option<&Value>) -> Value {
     Value::Object(schema)
 }
 
+fn normalize_generic_tool_schema(candidate: Option<&Value>) -> Option<Value> {
+    let mut schema = match candidate {
+        Some(Value::Object(map)) => map.clone(),
+        _ => return None,
+    };
+
+    let type_is_object = schema
+        .get("type")
+        .and_then(Value::as_str)
+        .map(|value| value.trim().eq_ignore_ascii_case("object"))
+        .unwrap_or(false);
+    let has_object_shape_keys = schema.contains_key("properties")
+        || schema.contains_key("required")
+        || schema.contains_key("additionalProperties");
+
+    if !schema.contains_key("type") && has_object_shape_keys {
+        schema.insert("type".to_string(), Value::String("object".to_string()));
+    }
+
+    let should_fill_properties = type_is_object
+        || schema
+            .get("type")
+            .and_then(Value::as_str)
+            .map(|value| value.trim().eq_ignore_ascii_case("object"))
+            .unwrap_or(false);
+    if should_fill_properties
+        && !matches!(schema.get("properties"), Some(Value::Object(_)))
+    {
+        schema.insert("properties".to_string(), Value::Object(Map::new()));
+    }
+
+    if let Some(required) = schema.get("required") {
+        match required {
+            Value::Array(items) => {
+                let normalized: Vec<Value> = items
+                    .iter()
+                    .filter_map(|entry| entry.as_str().map(|text| Value::String(text.to_string())))
+                    .collect();
+                schema.insert("required".to_string(), Value::Array(normalized));
+            }
+            _ => {
+                schema.remove("required");
+            }
+        }
+    }
+
+    if let Some(additional) = schema.get("additionalProperties") {
+        if !matches!(additional, Value::Bool(_) | Value::Object(_)) {
+            schema.remove("additionalProperties");
+        }
+    }
+
+    Some(Value::Object(schema))
+}
+
 fn enforce_builtin_tool_schema(name: &str, candidate: Option<&Value>) -> Option<Value> {
     let normalized = name.trim().to_ascii_lowercase();
     if normalized == "apply_patch" {
@@ -156,10 +211,7 @@ fn enforce_builtin_tool_schema(name: &str, candidate: Option<&Value>) -> Option<
     if normalized == "web_search" {
         return Some(ensure_web_search_schema(candidate));
     }
-    match candidate {
-        Some(Value::Object(map)) => Some(Value::Object(map.clone())),
-        _ => None,
-    }
+    normalize_generic_tool_schema(candidate)
 }
 
 fn resolve_tool_name(candidates: &[Option<&Value>], sanitize_mode: &str) -> Option<String> {
@@ -365,5 +417,91 @@ mod tests {
         let parsed: Value = serde_json::from_str(&raw).unwrap();
         assert_eq!(parsed["name"], "Bash");
         assert_eq!(parsed["function"]["name"], "Bash");
+    }
+
+    #[test]
+    fn chat_tool_to_bridge_definition_fills_missing_object_properties() {
+        let input = serde_json::json!({
+          "tool": {
+            "type": "function",
+            "function": {
+              "name": "user_ask",
+              "parameters": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          },
+          "options": { "sanitizeMode": "responses" }
+        });
+        let raw = chat_tool_to_bridge_definition_json(input.to_string()).unwrap();
+        let parsed: Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(parsed["name"], "user_ask");
+        assert_eq!(parsed["parameters"]["type"], "object");
+        assert_eq!(parsed["parameters"]["additionalProperties"], true);
+        assert!(parsed["parameters"]["properties"].is_object());
+    }
+
+    #[test]
+    fn chat_tool_to_bridge_definition_sanitizes_required_shape() {
+        let input = serde_json::json!({
+          "tool": {
+            "type": "function",
+            "function": {
+              "name": "user_ask",
+              "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": ["ok", 1, null]
+              }
+            }
+          },
+          "options": { "sanitizeMode": "responses" }
+        });
+        let raw = chat_tool_to_bridge_definition_json(input.to_string()).unwrap();
+        let parsed: Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(parsed["parameters"]["required"], serde_json::json!(["ok"]));
+    }
+
+    #[test]
+    fn map_chat_tools_to_bridge_normalizes_user_ask_with_web_search_present() {
+        let input = serde_json::json!({
+          "tools": [
+            {
+              "type": "function",
+              "function": {
+                "name": "web_search",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "query": { "type": "string" }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            },
+            {
+              "type": "function",
+              "function": {
+                "name": "user_ask",
+                "parameters": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          ],
+          "options": { "sanitizeMode": "responses" }
+        });
+        let raw = map_chat_tools_to_bridge_with_options_json(input.to_string()).unwrap();
+        let parsed: Value = serde_json::from_str(&raw).unwrap();
+        let rows = parsed.as_array().unwrap();
+        let user = rows
+            .iter()
+            .find(|entry| entry["name"] == "user_ask")
+            .expect("user_ask tool should exist");
+        assert_eq!(user["parameters"]["type"], "object");
+        assert!(user["parameters"]["properties"].is_object());
+        assert_eq!(user["parameters"]["additionalProperties"], true);
     }
 }

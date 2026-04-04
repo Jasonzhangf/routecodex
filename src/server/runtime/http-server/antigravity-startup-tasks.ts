@@ -45,6 +45,27 @@ export function buildAntigravityAliasMap(runtimeMap: Record<string, unknown>): M
   return providerKeysByAlias;
 }
 
+export function filterAntigravityAliasMapByProviderKeys(
+  aliasMap: Map<string, string[]>,
+  allowedProviderKeys: Set<string>,
+  options?: { scopeApplied?: boolean }
+): Map<string, string[]> {
+  if (!allowedProviderKeys.size) {
+    if (options?.scopeApplied) {
+      return new Map<string, string[]>();
+    }
+    return aliasMap;
+  }
+  const next = new Map<string, string[]>();
+  for (const [alias, keys] of aliasMap.entries()) {
+    const filtered = keys.filter((key) => allowedProviderKeys.has(String(key || '').trim().toLowerCase()));
+    if (filtered.length > 0) {
+      next.set(alias, filtered);
+    }
+  }
+  return next;
+}
+
 export function startAntigravityPreload(
   aliases: string[],
   dependencies?: {

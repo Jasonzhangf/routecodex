@@ -8,10 +8,11 @@ import { mapProviderProtocol, normalizeProviderType, resolveProviderIdentity } f
 import { resolveLegacyRouteCodexUserDir, resolveRccAuthDirForRead } from '../../../config/user-data-paths.js';
 import {
   buildAntigravityAliasMap,
-  collectAntigravityAliases,
+  filterAntigravityAliasMapByProviderKeys,
   startAntigravityPreload,
   startAntigravityWarmup
 } from './antigravity-startup-tasks.js';
+import { resolveProviderRoutingScope } from './provider-routing-scope.js';
 
 type LegacyAuthFields = ProviderRuntimeProfile['auth'] & {
   token_file?: unknown;
@@ -142,9 +143,19 @@ export async function initializeProviderRuntimes(server: any, artifacts?: Virtua
   server.providerRuntimeInitErrors.clear();
   server.runtimeKeyCredentialSkipped.clear();
   server.startupExcludedProviderKeys.clear();
+  const {
+    hasRoutingProviderScope,
+    routedProviderKeys,
+    isInRoutingScope
+  } = resolveProviderRoutingScope(server.routingProviderScope as { providerKeys?: unknown[] } | undefined);
+  const antigravityAliasMap = filterAntigravityAliasMapByProviderKeys(
+    buildAntigravityAliasMap(runtimeMap as Record<string, unknown>),
+    routedProviderKeys,
+    { scopeApplied: hasRoutingProviderScope }
+  );
 
   try {
-    startAntigravityPreload(collectAntigravityAliases(runtimeMap as Record<string, unknown>));
+    startAntigravityPreload(Array.from(antigravityAliasMap.keys()));
   } catch {
     // best-effort
   }
@@ -159,7 +170,7 @@ export async function initializeProviderRuntimes(server: any, artifacts?: Virtua
       }
     | undefined;
 
-  startAntigravityWarmup(buildAntigravityAliasMap(runtimeMap as Record<string, unknown>), quotaModule);
+  startAntigravityWarmup(antigravityAliasMap, quotaModule);
 
   const runtimeKeyAuthType = new Map<string, string | null>();
   const apikeyDailyResetTime = (() => {
@@ -182,7 +193,14 @@ export async function initializeProviderRuntimes(server: any, artifacts?: Virtua
 
   const failedRuntimeKeys = new Set<string>();
 
-  for (const [providerKey, runtime] of Object.entries(runtimeMap)) {
+  for (const [providerKeyRaw, runtime] of Object.entries(runtimeMap)) {
+    const providerKey = typeof providerKeyRaw === 'string' ? providerKeyRaw.trim() : '';
+    if (!providerKey) {
+      continue;
+    }
+    if (!isInRoutingScope(providerKey)) {
+      continue;
+    }
     if (!runtime) {
       continue;
     }
