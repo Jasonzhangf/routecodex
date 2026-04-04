@@ -35,10 +35,7 @@ fn extract_responses_message_text(item: &Map<String, Value>) -> String {
     parts.join("\n").trim().to_string()
 }
 
-fn normalize_assistant_message(
-    message: &Value,
-    options_json: Option<&String>,
-) -> Option<Value> {
+fn normalize_assistant_message(message: &Value, options_json: Option<&String>) -> Option<Value> {
     let message_json = serde_json::to_string(message).ok()?;
     let normalized_json =
         normalize_assistant_text_to_tool_calls_json(message_json, options_json.cloned()).ok()?;
@@ -70,10 +67,7 @@ fn prepare_reasoning_text_for_harvest(raw: &str) -> String {
     let lower = stripped.to_ascii_lowercase();
     let has_tool_call_open = lower.contains("<tool_call");
     let has_tool_call_close = lower.contains("</tool_call>");
-    if !has_tool_call_open
-        && has_tool_call_close
-        && has_bare_tool_call_prefix(stripped.as_str())
-    {
+    if !has_tool_call_open && has_tool_call_close && has_bare_tool_call_prefix(stripped.as_str()) {
         return format!("<tool_call>{}", stripped);
     }
     stripped
@@ -110,10 +104,8 @@ fn consume_harvested_reasoning_text(normalized: &mut Value, original: &Value) {
     let source_obj = original.as_object();
 
     for key in REASONING_KEYS {
-        let source_text = read_trimmed_non_empty_string(target.get(key)).or_else(|| {
-            source_obj
-                .and_then(|obj| read_trimmed_non_empty_string(obj.get(key)))
-        });
+        let source_text = read_trimmed_non_empty_string(target.get(key))
+            .or_else(|| source_obj.and_then(|obj| read_trimmed_non_empty_string(obj.get(key))));
         let Some(source_text) = source_text else {
             continue;
         };
@@ -146,9 +138,10 @@ fn consume_harvested_reasoning_text(normalized: &mut Value, original: &Value) {
 }
 
 fn harvest_reasoning_tool_calls(prepared: &str) -> (Option<String>, Vec<Value>) {
-    if let Ok(extracted_json) =
-        extract_tool_calls_from_reasoning_text_json(prepared.to_string(), Some("reasoning".to_string()))
-    {
+    if let Ok(extracted_json) = extract_tool_calls_from_reasoning_text_json(
+        prepared.to_string(),
+        Some("reasoning".to_string()),
+    ) {
         if let Ok(extracted) = serde_json::from_str::<Value>(&extracted_json) {
             let tool_calls = extracted
                 .as_object()
@@ -176,7 +169,8 @@ fn harvest_reasoning_tool_calls(prepared: &str) -> (Option<String>, Vec<Value>) 
         Ok(raw) => raw,
         Err(_) => return (None, Vec::new()),
     };
-    let normalized_probe_json = match normalize_assistant_text_to_tool_calls_json(probe_json, None) {
+    let normalized_probe_json = match normalize_assistant_text_to_tool_calls_json(probe_json, None)
+    {
         Ok(raw) => raw,
         Err(_) => return (None, Vec::new()),
     };
@@ -343,8 +337,11 @@ fn harvest_responses_output_in_place(root: &mut Map<String, Value>, options_json
             continue;
         }
 
-        let harvested =
-            build_responses_function_calls_from_text(text.as_str(), options_json, &mut fallback_counter);
+        let harvested = build_responses_function_calls_from_text(
+            text.as_str(),
+            options_json,
+            &mut fallback_counter,
+        );
         if harvested.is_empty() {
             next_output.push(item.clone());
             continue;

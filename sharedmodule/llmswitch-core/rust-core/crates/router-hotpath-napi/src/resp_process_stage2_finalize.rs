@@ -30,8 +30,7 @@ fn stringify_args(arg_val: &Value) -> String {
 }
 
 fn to_string_content(val: &Value) -> String {
-    const EMPTY_FALLBACK: &str =
-        "[RouteCodex] Tool output was empty; execution status unknown.";
+    const EMPTY_FALLBACK: &str = "[RouteCodex] Tool output was empty; execution status unknown.";
     match val {
         Value::Null => EMPTY_FALLBACK.to_string(),
         Value::String(text) => {
@@ -110,7 +109,9 @@ fn normalize_tool_call_arguments(tool_call: &mut Value, fallback_id: Option<Stri
 fn value_has_non_empty_text(value: Option<&Value>) -> bool {
     match value {
         Some(Value::String(text)) => !text.trim().is_empty(),
-        Some(Value::Array(items)) => items.iter().any(|item| value_has_non_empty_text(Some(item))),
+        Some(Value::Array(items)) => items
+            .iter()
+            .any(|item| value_has_non_empty_text(Some(item))),
         Some(Value::Object(obj)) => {
             value_has_non_empty_text(obj.get("text"))
                 || value_has_non_empty_text(obj.get("output_text"))
@@ -175,26 +176,11 @@ fn normalize_choices(payload: &mut Value) {
         || value_has_non_empty_text(message_obj.get("reasoning"));
 
     if finish_reason == "tool_calls" && !has_message_text {
-        message_obj.insert(
-            "content".to_string(),
-            Value::String(
-                "[RouteCodex] tool_calls response became empty (finish_reason=tool_calls but no tool_calls found).".to_string(),
-            ),
-        );
         first_choice_obj.insert(
             "finish_reason".to_string(),
             Value::String("stop".to_string()),
         );
         return;
-    }
-
-    if finish_reason == "stop" && !has_message_text {
-        message_obj.insert(
-            "content".to_string(),
-            Value::String(
-                "[RouteCodex] upstream returned an empty assistant message (finish_reason=stop).".to_string(),
-            ),
-        );
     }
 }
 
@@ -507,10 +493,7 @@ mod tests {
         };
         let result = finalize_chat_response(input);
         assert_eq!(result["choices"][0]["finish_reason"], "stop");
-        assert_eq!(
-            result["choices"][0]["message"]["content"],
-            "[RouteCodex] tool_calls response became empty (finish_reason=tool_calls but no tool_calls found)."
-        );
+        assert_eq!(result["choices"][0]["message"]["content"], Value::Null);
     }
 
     #[test]
@@ -530,10 +513,7 @@ mod tests {
             request_id: None,
         };
         let result = finalize_chat_response(input);
-        assert_eq!(
-            result["choices"][0]["message"]["content"],
-            "[RouteCodex] upstream returned an empty assistant message (finish_reason=stop)."
-        );
+        assert_eq!(result["choices"][0]["message"]["content"], "");
     }
 
     #[test]

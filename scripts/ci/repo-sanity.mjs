@@ -61,6 +61,7 @@ function isForbiddenTrackedPath(p) {
   if (p.startsWith('.iflow/')) return true;
   if (p === '.secrets.baseline') return true;
   if (p.endsWith('/.DS_Store') || p === '.DS_Store') return true;
+  if (/(^|\/)[^/]+\.bak\d*$/i.test(p)) return true;
   return false;
 }
 

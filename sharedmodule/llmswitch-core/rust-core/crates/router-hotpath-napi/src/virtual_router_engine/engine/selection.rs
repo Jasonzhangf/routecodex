@@ -3,8 +3,7 @@ use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 
 use super::tier_load_balancing::{
-    build_candidate_weights, build_group_weights, has_non_uniform_weights,
-    resolve_tier_load_balancing,
+    build_candidate_weights, build_group_weights, resolve_tier_load_balancing,
 };
 use super::types::SelectionResult;
 use super::VirtualRouterEngineCore;
@@ -88,7 +87,8 @@ impl VirtualRouterEngineCore {
 
         if let Some(target) = &routing_state.sticky_target {
             if let Some(resolved) = resolve_instruction_target(target, &self.provider_registry) {
-                let ordered_keys = order_instruction_keys_by_default_route(&resolved.keys, &self.routing);
+                let ordered_keys =
+                    order_instruction_keys_by_default_route(&resolved.keys, &self.routing);
                 let available: Vec<String> = filter_candidates_by_state(
                     &ordered_keys,
                     routing_state,
@@ -101,11 +101,11 @@ impl VirtualRouterEngineCore {
                 let available_set: HashSet<String> = available.iter().cloned().collect();
                 let sticky_key = match resolved.mode {
                     InstructionTargetMatchMode::Exact => available.into_iter().next(),
-                    InstructionTargetMatchMode::Filter => self.load_balancer.select_round_robin_with_skips(
-                        "sticky",
-                        &ordered_keys,
-                        |key| available_set.contains(key),
-                    ),
+                    InstructionTargetMatchMode::Filter => self
+                        .load_balancer
+                        .select_round_robin_with_skips("sticky", &ordered_keys, |key| {
+                            available_set.contains(key)
+                        }),
                 };
                 if let Some(sticky_key) = sticky_key {
                     return Ok(SelectionResult::new(
@@ -120,7 +120,8 @@ impl VirtualRouterEngineCore {
 
         if let Some(target) = &routing_state.prefer_target {
             if let Some(resolved) = resolve_instruction_target(target, &self.provider_registry) {
-                let ordered_keys = order_instruction_keys_by_default_route(&resolved.keys, &self.routing);
+                let ordered_keys =
+                    order_instruction_keys_by_default_route(&resolved.keys, &self.routing);
                 let available: Vec<String> = filter_candidates_by_state(
                     &ordered_keys,
                     routing_state,
@@ -187,11 +188,8 @@ impl VirtualRouterEngineCore {
             && route_has_targets(&self.routing, "video");
         let web_search_route_requested = classification.route_name == "web_search";
         let has_explicit_web_search_route = route_has_targets(&self.routing, "web_search");
-        let default_pool_supports_web_search = default_pool_supports_capability(
-            &self.routing,
-            &self.provider_registry,
-            "web_search",
-        );
+        let default_pool_supports_web_search =
+            default_pool_supports_capability(&self.routing, &self.provider_registry, "web_search");
         let use_default_pool_web_search_fallback =
             web_search_route_requested && default_pool_supports_web_search;
 
@@ -411,10 +409,13 @@ impl VirtualRouterEngineCore {
                 };
                 let (ordered_group_ids, grouped_candidates) =
                     build_primary_target_groups(&available, &self.provider_registry);
+                let has_runtime_key_level_weights =
+                    has_runtime_key_level_weights(tier_load_balancing.weights.as_ref(), &available);
                 let can_select_grouped = antigravity_sticky_key.is_none()
                     && pool.mode.as_deref() != Some("sticky")
                     && tier_load_balancing.strategy != "sticky"
-                    && !has_non_uniform_weights(&available, weight_map.as_ref());
+                    && dynamic_weight_map.is_none()
+                    && !has_runtime_key_level_weights;
                 let selected = if pool.mode.as_deref() == Some("priority") {
                     let route_key = format!("{}:{}:priority", route_name, pool.id);
                     let priority_candidates = ordered_group_ids
@@ -558,6 +559,16 @@ fn build_primary_target_groups(
     }
 
     (ordered_group_ids, groups)
+}
+
+fn has_runtime_key_level_weights(
+    weights: Option<&HashMap<String, i64>>,
+    candidates: &[String],
+) -> bool {
+    let Some(weights) = weights else {
+        return false;
+    };
+    candidates.iter().any(|key| weights.contains_key(key))
 }
 
 fn alias_base(alias_key: &str) -> Option<String> {

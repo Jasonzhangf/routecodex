@@ -102,7 +102,10 @@ fn apply_target_metadata(
 ) {
     if let Some(route) = route_name.filter(|v| !v.trim().is_empty()) {
         let route_trimmed = route.trim().to_string();
-        normalized_metadata.insert("routeName".to_string(), Value::String(route_trimmed.clone()));
+        normalized_metadata.insert(
+            "routeName".to_string(),
+            Value::String(route_trimmed.clone()),
+        );
 
         if let Some(existing_effort) = normalized_metadata
             .get("reasoning_effort")

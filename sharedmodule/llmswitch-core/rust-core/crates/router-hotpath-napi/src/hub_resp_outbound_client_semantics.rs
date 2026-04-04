@@ -319,10 +319,7 @@ fn resolve_client_protocol_for_response_entry(
     if is_followup {
         return "openai-chat".to_string();
     }
-    let lowered = entry_endpoint
-        .unwrap_or("")
-        .trim()
-        .to_ascii_lowercase();
+    let lowered = entry_endpoint.unwrap_or("").trim().to_ascii_lowercase();
     if lowered.contains("/v1/responses") {
         return "openai-responses".to_string();
     }
@@ -816,8 +813,9 @@ fn map_anthropic_stop_reason_to_finish_reason(raw: Option<&str>) -> String {
         "tool_use" => "tool_calls".to_string(),
         "max_tokens" => "length".to_string(),
         "stop_sequence" | "end_turn" => "stop".to_string(),
-        "model_context_window_exceeded" | "context_window_exceeded"
-        | "context_length_exceeded" => "length".to_string(),
+        "model_context_window_exceeded" | "context_window_exceeded" | "context_length_exceeded" => {
+            "length".to_string()
+        }
         _ => {
             if normalized.is_empty() {
                 "stop".to_string()
@@ -831,10 +829,7 @@ fn map_anthropic_stop_reason_to_finish_reason(raw: Option<&str>) -> String {
 fn resolve_anthropic_stop_reason(raw: Option<&str>) -> Value {
     let normalized = normalize_anthropic_stop_reason_token(raw);
     Value::Object(Map::from_iter([
-        (
-            "normalized".to_string(),
-            Value::String(normalized.clone()),
-        ),
+        ("normalized".to_string(), Value::String(normalized.clone())),
         (
             "finishReason".to_string(),
             Value::String(map_anthropic_stop_reason_to_finish_reason(raw)),
@@ -996,10 +991,7 @@ fn summarize_tool_calls_from_provider_response(payload: &Value) -> Value {
 }
 
 fn infer_provider_type_from_protocol(protocol_raw: Option<&str>) -> Option<String> {
-    let normalized = protocol_raw
-        .unwrap_or("")
-        .trim()
-        .to_ascii_lowercase();
+    let normalized = protocol_raw.unwrap_or("").trim().to_ascii_lowercase();
     if normalized.is_empty() {
         return None;
     }
@@ -1401,6 +1393,28 @@ fn resolve_client_tool_name(
     tool_index: &HashMap<String, ClientToolDefinition>,
     raw_tool_name: &str,
 ) -> Option<String> {
+    fn normalize_tool_name_for_match(value: &str) -> String {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            return String::new();
+        }
+
+        let lowered = trimmed.to_ascii_lowercase();
+        let canonical = if lowered.starts_with("functions.") {
+            trimmed.get(10..).map(str::trim).unwrap_or(trimmed)
+        } else {
+            trimmed
+        };
+
+        let mut out = String::new();
+        for ch in canonical.chars() {
+            if ch.is_ascii_alphanumeric() {
+                out.push(ch.to_ascii_lowercase());
+            }
+        }
+        out
+    }
+
     let trimmed = raw_tool_name.trim();
     if trimmed.is_empty() {
         return None;
@@ -1414,6 +1428,37 @@ fn resolve_client_tool_name(
             return Some(key.to_string());
         }
     }
+
+    let maybe_prefixed = if lower.starts_with("functions.") {
+        trimmed.get(10..).map(str::trim)
+    } else {
+        None
+    };
+    if let Some(suffix) = maybe_prefixed {
+        if tool_index.contains_key(suffix) {
+            return Some(suffix.to_string());
+        }
+        let suffix_lower = suffix.to_ascii_lowercase();
+        for key in tool_index.keys() {
+            if key.to_ascii_lowercase() == suffix_lower {
+                return Some(key.to_string());
+            }
+        }
+    }
+
+    let normalized = normalize_tool_name_for_match(trimmed);
+    if normalized.is_empty() {
+        return None;
+    }
+
+    let mut keys = tool_index.keys().cloned().collect::<Vec<String>>();
+    keys.sort();
+    for key in keys {
+        if normalize_tool_name_for_match(key.as_str()) == normalized {
+            return Some(key);
+        }
+    }
+
     None
 }
 
@@ -1793,13 +1838,15 @@ pub(crate) fn normalize_responses_function_name(raw: Option<&str>) -> Option<Str
     }
     let mut out = String::new();
     for ch in raw.chars() {
-        if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' {
+        if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' || ch == '.' {
             out.push(ch);
         } else if !ch.is_whitespace() {
             out.push('_');
         }
     }
-    let trimmed = out.trim_matches('_').to_string();
+    let trimmed = out
+        .trim_matches(|ch: char| matches!(ch, '_' | '-' | '.'))
+        .to_string();
     if trimmed.is_empty() {
         return None;
     }
@@ -2166,7 +2213,8 @@ fn normalize_reasoning_summary_for_codex_display(summary_value: &mut Value) {
         else {
             continue;
         };
-        if ensure_header && !is_codex_reasoning_summary_display_compatible(normalized_text.as_str()) {
+        if ensure_header && !is_codex_reasoning_summary_display_compatible(normalized_text.as_str())
+        {
             continue;
         }
         row.insert("text".to_string(), Value::String(normalized_text));
@@ -2472,7 +2520,10 @@ fn build_responses_payload_from_chat_core(
                                 .map(|value| value.trim().to_string())
                                 .filter(|value| !value.is_empty())?;
                             Some(Value::Object(Map::from_iter([
-                                ("type".to_string(), Value::String("summary_text".to_string())),
+                                (
+                                    "type".to_string(),
+                                    Value::String("summary_text".to_string()),
+                                ),
                                 ("text".to_string(), Value::String(text)),
                             ])))
                         })
@@ -2485,7 +2536,8 @@ fn build_responses_payload_from_chat_core(
             normalize_reasoning_summary_for_codex_display(&mut summary);
             reasoning_item.insert("summary".to_string(), summary);
         }
-        let summary_was_backfilled = !has_explicit_summary && reasoning_item.contains_key("summary");
+        let summary_was_backfilled =
+            !has_explicit_summary && reasoning_item.contains_key("summary");
         if has_explicit_summary || !summary_was_backfilled {
             if let Some(content) = reasoning_payload.get("content") {
                 reasoning_item.insert("content".to_string(), content.clone());
@@ -2758,9 +2810,11 @@ pub fn resolve_anthropic_chat_completion_outcome_json(
 }
 
 #[napi]
-pub fn summarize_tool_calls_from_provider_response_json(payload_json: String) -> NapiResult<String> {
-    let payload: Value = serde_json::from_str(&payload_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+pub fn summarize_tool_calls_from_provider_response_json(
+    payload_json: String,
+) -> NapiResult<String> {
+    let payload: Value =
+        serde_json::from_str(&payload_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let output = summarize_tool_calls_from_provider_response(&payload);
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
@@ -2780,8 +2834,8 @@ pub fn resolve_provider_response_context_helpers_json(
     entry_endpoint_json: String,
     tool_surface_mode_raw_json: String,
 ) -> NapiResult<String> {
-    let context: Value = serde_json::from_str(&context_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let context: Value =
+        serde_json::from_str(&context_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let server_tool_followup_raw: Value = serde_json::from_str(&server_tool_followup_raw_json)
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let entry_endpoint_raw: Value = serde_json::from_str(&entry_endpoint_json)
@@ -2823,8 +2877,8 @@ pub fn resolve_provider_response_context_helpers_json(
 
 #[napi]
 pub fn resolve_clock_reservation_from_context_json(context_json: String) -> NapiResult<String> {
-    let context: Value = serde_json::from_str(&context_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let context: Value =
+        serde_json::from_str(&context_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let output = resolve_clock_reservation_from_context(&context).unwrap_or(Value::Null);
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
@@ -3005,10 +3059,7 @@ mod tests {
             with_tool_calls["finishReason"],
             Value::String("tool_calls".to_string())
         );
-        assert_eq!(
-            with_tool_calls["isContextOverflow"],
-            Value::Bool(true)
-        );
+        assert_eq!(with_tool_calls["isContextOverflow"], Value::Bool(true));
         assert_eq!(
             with_tool_calls["shouldFailEmptyContextOverflow"],
             Value::Bool(true)
@@ -3152,6 +3203,149 @@ mod tests {
         {
             assert_eq!(item["status"], Value::String("completed".to_string()));
         }
+    }
+
+    #[test]
+    fn normalize_responses_function_name_preserves_dotted_tool_names() {
+        assert_eq!(
+            normalize_responses_function_name(Some("mailbox.status")),
+            Some("mailbox.status".to_string())
+        );
+        assert_eq!(
+            normalize_responses_function_name(Some("agent.dispatch")),
+            Some("agent.dispatch".to_string())
+        );
+    }
+
+    #[test]
+    fn normalize_responses_tool_call_arguments_for_client_recovers_declared_tool_names() {
+        let responses_payload = serde_json::json!({
+            "output": [
+                {
+                    "type": "function_call",
+                    "name": "mailbox_status",
+                    "arguments": "{\"target\":\"finger-system-agent\"}"
+                },
+                {
+                    "type": "function_call",
+                    "name": "functions.mailbox_status",
+                    "arguments": "{\"target\":\"finger-system-agent\"}"
+                }
+            ],
+            "required_action": {
+                "type": "submit_tool_outputs",
+                "submit_tool_outputs": {
+                    "tool_calls": [
+                        {
+                            "name": "mailbox-status",
+                            "arguments": "{\"target\":\"finger-system-agent\"}",
+                            "function": {
+                                "name": "mailbox-status",
+                                "arguments": "{\"target\":\"finger-system-agent\"}"
+                            }
+                        }
+                    ]
+                }
+            }
+        });
+        let tools_raw = serde_json::json!([
+            {
+                "type": "function",
+                "function": {
+                    "name": "mailbox.status",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "target": { "type": "string" }
+                        },
+                        "required": ["target"],
+                        "additionalProperties": false
+                    }
+                }
+            }
+        ]);
+        let normalized =
+            normalize_responses_tool_call_arguments_for_client(&responses_payload, &tools_raw);
+        let output_calls = normalized["output"].as_array().expect("output calls");
+        assert_eq!(
+            output_calls[0]["name"],
+            Value::String("mailbox.status".to_string())
+        );
+        assert_eq!(
+            output_calls[1]["name"],
+            Value::String("mailbox.status".to_string())
+        );
+        assert_eq!(
+            normalized["required_action"]["submit_tool_outputs"]["tool_calls"][0]["name"],
+            Value::String("mailbox.status".to_string())
+        );
+        assert_eq!(
+            normalized["required_action"]["submit_tool_outputs"]["tool_calls"][0]["function"]
+                ["name"],
+            Value::String("mailbox.status".to_string())
+        );
+    }
+
+    #[test]
+    fn build_responses_payload_from_chat_restores_declared_tool_name_from_tools_raw() {
+        let payload = serde_json::json!({
+            "id": "resp_tool_alias_restore",
+            "model": "qwen3.6-plus",
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "id": "call_1",
+                                "type": "function",
+                                "function": {
+                                    "name": "mailbox_status",
+                                    "arguments": "{\"target\":\"finger-system-agent\"}"
+                                }
+                            }
+                        ]
+                    }
+                }
+            ]
+        });
+        let context = serde_json::json!({
+            "toolsRaw": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "mailbox.status",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "target": { "type": "string" }
+                            },
+                            "required": ["target"],
+                            "additionalProperties": false
+                        }
+                    }
+                }
+            ]
+        });
+
+        let output =
+            build_responses_payload_from_chat_core(&payload, Some("req_tool_alias"), &context)
+                .expect("build responses payload");
+
+        let output_calls = output["output"].as_array().expect("output array");
+        let function_call = output_calls
+            .iter()
+            .find(|item| item["type"] == Value::String("function_call".to_string()))
+            .expect("function_call item");
+        assert_eq!(
+            function_call["name"],
+            Value::String("mailbox.status".to_string())
+        );
+        assert_eq!(
+            output["required_action"]["submit_tool_outputs"]["tool_calls"][0]["name"],
+            Value::String("mailbox.status".to_string())
+        );
     }
 
     #[test]
@@ -3614,25 +3808,21 @@ mod tests {
 
     #[test]
     fn resolve_clock_reservation_from_context_returns_none_when_required_fields_missing() {
-        assert!(
-            resolve_clock_reservation_from_context(&serde_json::json!({
-                "__clockReservation": {
-                    "reservationId": "res-1",
-                    "taskIds": ["task-a"]
-                }
-            }))
-            .is_none()
-        );
-        assert!(
-            resolve_clock_reservation_from_context(&serde_json::json!({
-                "__clockReservation": {
-                    "reservationId": "res-1",
-                    "sessionId": "sess-1",
-                    "taskIds": []
-                }
-            }))
-            .is_none()
-        );
+        assert!(resolve_clock_reservation_from_context(&serde_json::json!({
+            "__clockReservation": {
+                "reservationId": "res-1",
+                "taskIds": ["task-a"]
+            }
+        }))
+        .is_none());
+        assert!(resolve_clock_reservation_from_context(&serde_json::json!({
+            "__clockReservation": {
+                "reservationId": "res-1",
+                "sessionId": "sess-1",
+                "taskIds": []
+            }
+        }))
+        .is_none());
     }
 }
 

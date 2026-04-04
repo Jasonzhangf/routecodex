@@ -30,10 +30,11 @@ fn sanitize_reasoning_tagged_text(text: &str) -> String {
 
 fn extract_reasoning_segments(source: &str, reasoning_collector: &mut Vec<String>) -> String {
     let mut working = source.to_string();
-    let has_explicit_open = Regex::new(r"(?i)<think>|<reflection>|```\s*(?:think|reflection)|\\[\\s*思考\\s*\\]")
-        .ok()
-        .map(|re| re.is_match(source))
-        .unwrap_or(false);
+    let has_explicit_open =
+        Regex::new(r"(?i)<think>|<reflection>|```\s*(?:think|reflection)|\\[\\s*思考\\s*\\]")
+            .ok()
+            .map(|re| re.is_match(source))
+            .unwrap_or(false);
     let has_explicit_close = Regex::new(r"(?i)</think>|</reflection>|\\[\\s*/\\s*思考\\s*\\]")
         .ok()
         .map(|re| re.is_match(source))
@@ -47,9 +48,8 @@ fn extract_reasoning_segments(source: &str, reasoning_collector: &mut Vec<String
         .expect("valid cn think capture pattern");
     let fenced =
         Regex::new(r"(?is)```\s*(?:think|reflection)[\s\S]*?```").expect("valid fenced pattern");
-    let open_close =
-        Regex::new(r"(?is)</?(?:think|reflection)>|\\[\\s*/?\\s*思考\\s*\\]")
-            .expect("valid open-close pattern");
+    let open_close = Regex::new(r"(?is)</?(?:think|reflection)>|\\[\\s*/?\\s*思考\\s*\\]")
+        .expect("valid open-close pattern");
     let multiple_breaks = Regex::new(r"\n{3,}").expect("valid line breaks pattern");
 
     working = think_block

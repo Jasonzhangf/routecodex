@@ -785,12 +785,10 @@ fn test_resp_profile_chat_deepseek_web_harvests_markdown_bullet_and_repairs_cmd_
         .as_str()
         .unwrap_or("{}");
     let parsed: Value = serde_json::from_str(args).unwrap_or(Value::Null);
-    assert!(
-        parsed["cmd"]
-            .as_str()
-            .unwrap_or("")
-            .contains("Mailbox 统一消息与心跳优先级改造")
-    );
+    assert!(parsed["cmd"]
+        .as_str()
+        .unwrap_or("")
+        .contains("Mailbox 统一消息与心跳优先级改造"));
 }
 
 #[test]

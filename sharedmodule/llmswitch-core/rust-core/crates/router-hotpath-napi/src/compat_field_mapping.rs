@@ -70,7 +70,10 @@ fn value_to_js_boolean(value: &Value) -> bool {
     match value {
         Value::Null => false,
         Value::Bool(flag) => *flag,
-        Value::Number(number) => number.as_f64().map(|n| n != 0.0 && !n.is_nan()).unwrap_or(false),
+        Value::Number(number) => number
+            .as_f64()
+            .map(|n| n != 0.0 && !n.is_nan())
+            .unwrap_or(false),
         Value::String(text) => !text.is_empty(),
         Value::Array(_) | Value::Object(_) => true,
     }
@@ -108,7 +111,10 @@ fn convert_type(value: Value, mapping_type: &str) -> Value {
 }
 
 fn apply_transform(value: Value, transform: Option<&str>) -> Value {
-    let Some(transform_name) = transform.map(|name| name.trim()).filter(|name| !name.is_empty()) else {
+    let Some(transform_name) = transform
+        .map(|name| name.trim())
+        .filter(|name| !name.is_empty())
+    else {
         return value;
     };
     match transform_name {
@@ -260,7 +266,10 @@ fn apply_single_mapping(root: &mut Value, mapping: &FieldMapping) {
 }
 
 #[napi_derive::napi]
-pub fn apply_field_mappings_json(payload_json: String, mappings_json: String) -> NapiResult<String> {
+pub fn apply_field_mappings_json(
+    payload_json: String,
+    mappings_json: String,
+) -> NapiResult<String> {
     let payload: Value =
         serde_json::from_str(&payload_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let mappings: Vec<FieldMapping> = serde_json::from_str(&mappings_json)

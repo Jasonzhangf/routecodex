@@ -1,7 +1,7 @@
 use serde_json::{Map, Value};
+use std::cell::RefCell;
 use std::env;
 use std::fs;
-use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 
 use super::instructions::{InstructionTarget, RoutingInstructionState};

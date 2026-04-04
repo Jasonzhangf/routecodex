@@ -1,11 +1,11 @@
+use crate::hub_bridge_actions::{build_bridge_history, BuildBridgeHistoryInput};
+use crate::hub_standardized_bridge::normalize_chat_envelope_tool_calls;
 use chrono;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::Map;
 use serde_json::Value;
 use std::env;
-use crate::hub_bridge_actions::{build_bridge_history, BuildBridgeHistoryInput};
-use crate::hub_standardized_bridge::normalize_chat_envelope_tool_calls;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -656,10 +656,7 @@ fn build_req_inbound_node_result(input: &Value) -> Result<Value, String> {
     );
 
     let mut metadata = Map::<String, Value>::new();
-    metadata.insert(
-        "node".to_string(),
-        Value::String("req_inbound".to_string()),
-    );
+    metadata.insert("node".to_string(), Value::String("req_inbound".to_string()));
     metadata.insert(
         "executionTime".to_string(),
         Value::Number(serde_json::Number::from(inbound_end - inbound_start)),
@@ -694,10 +691,7 @@ fn build_req_inbound_skipped_node(input: &Value) -> Result<Value, String> {
         .to_string();
 
     let mut metadata = Map::<String, Value>::new();
-    metadata.insert(
-        "node".to_string(),
-        Value::String("req_inbound".to_string()),
-    );
+    metadata.insert("node".to_string(), Value::String("req_inbound".to_string()));
     metadata.insert("skipped".to_string(), Value::Bool(true));
     metadata.insert("reason".to_string(), Value::String(reason));
     metadata.insert("dataProcessed".to_string(), Value::Object(Map::new()));
@@ -770,7 +764,10 @@ fn coerce_standardized_request_from_payload(input: &Value) -> Result<Value, Stri
         .and_then(|v| v.as_object())
         .cloned()
         .unwrap_or_default();
-    let semantics_from_payload = payload.get("semantics").and_then(|v| v.as_object()).cloned();
+    let semantics_from_payload = payload
+        .get("semantics")
+        .and_then(|v| v.as_object())
+        .cloned();
     let metadata_from_payload = payload.get("metadata").and_then(|v| v.as_object()).cloned();
 
     let mut metadata = Map::<String, Value>::new();
@@ -820,7 +817,10 @@ fn coerce_standardized_request_from_payload(input: &Value) -> Result<Value, Stri
     );
     if let Some(route_hint) = normalized.get("routeHint").and_then(|v| v.as_str()) {
         if !route_hint.is_empty() {
-            metadata.insert("routeHint".to_string(), Value::String(route_hint.to_string()));
+            metadata.insert(
+                "routeHint".to_string(),
+                Value::String(route_hint.to_string()),
+            );
         }
     }
 
@@ -963,10 +963,7 @@ fn merge_clock_reservation_into_metadata(input: &Value) -> Result<Value, String>
         .and_then(|v| v.as_object())
         .and_then(|meta| meta.get("__clockReservation"));
     if let Some(Value::Object(obj)) = reservation {
-        metadata.insert(
-            "__clockReservation".to_string(),
-            Value::Object(obj.clone()),
-        );
+        metadata.insert("__clockReservation".to_string(), Value::Object(obj.clone()));
     }
     Ok(Value::Object(metadata))
 }
@@ -976,7 +973,10 @@ fn build_tool_governance_node_result(input: &Value) -> Result<Value, String> {
         .as_object()
         .ok_or_else(|| "tool governance node result input must be object".to_string())?;
 
-    let success = row.get("success").and_then(|v| v.as_bool()).unwrap_or(false);
+    let success = row
+        .get("success")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     let metadata = row
         .get("metadata")
         .and_then(|v| v.as_object())
@@ -1140,13 +1140,20 @@ fn resolve_adapter_context_metadata_signals(metadata: &Value) -> Value {
         );
     }
     if let Some(assigned_model_id) = metadata_obj.get("assignedModelId").and_then(|v| v.as_str()) {
-        out.insert("modelId".to_string(), Value::String(assigned_model_id.to_string()));
+        out.insert(
+            "modelId".to_string(),
+            Value::String(assigned_model_id.to_string()),
+        );
     }
 
     let estimated_input_tokens_raw = metadata_obj
         .get("estimatedInputTokens")
         .filter(|v| !v.is_null())
-        .or_else(|| metadata_obj.get("estimated_tokens").filter(|v| !v.is_null()))
+        .or_else(|| {
+            metadata_obj
+                .get("estimated_tokens")
+                .filter(|v| !v.is_null())
+        })
         .or_else(|| metadata_obj.get("estimatedTokens").filter(|v| !v.is_null()));
     if let Some(raw_estimated_tokens) = parse_js_number_like(estimated_input_tokens_raw) {
         if raw_estimated_tokens.is_finite() && raw_estimated_tokens > 0.0 {
@@ -1248,12 +1255,12 @@ fn resolve_hub_shadow_compare_config(metadata: &Value) -> Option<Value> {
 }
 
 fn normalize_apply_patch_tool_mode_token(raw: Option<&str>) -> Option<String> {
-  let token = raw.unwrap_or("").trim().to_ascii_lowercase();
-  match token.as_str() {
-      "freeform" => Some("freeform".to_string()),
-      "schema" | "json_schema" => Some("schema".to_string()),
-      _ => None,
-  }
+    let token = raw.unwrap_or("").trim().to_ascii_lowercase();
+    match token.as_str() {
+        "freeform" => Some("freeform".to_string()),
+        "schema" | "json_schema" => Some("schema".to_string()),
+        _ => None,
+    }
 }
 
 fn is_truthy_env_value(raw: &str) -> bool {
@@ -1344,11 +1351,7 @@ fn read_responses_resume_from_request_semantics(request: &Value) -> Option<Value
 }
 
 fn is_search_route_id(route_id: &Value) -> bool {
-    let normalized = route_id
-        .as_str()
-        .unwrap_or("")
-        .trim()
-        .to_ascii_lowercase();
+    let normalized = route_id.as_str().unwrap_or("").trim().to_ascii_lowercase();
     normalized.starts_with("web_search") || normalized.starts_with("search")
 }
 
@@ -1377,7 +1380,10 @@ fn is_canonical_web_search_tool_definition(tool: &Value) -> bool {
     } else {
         function_name.trim().to_ascii_lowercase()
     };
-    matches!(normalized.as_str(), "web_search" | "websearch" | "web-search")
+    matches!(
+        normalized.as_str(),
+        "web_search" | "websearch" | "web-search"
+    )
 }
 
 fn parse_js_number_like(value: Option<&Value>) -> Option<f64> {
@@ -1458,10 +1464,10 @@ fn build_builtin_web_search_tool(max_uses: i64) -> Value {
 }
 
 fn apply_direct_builtin_web_search_tool(
-  provider_payload: &Value,
-  provider_protocol: &str,
-  route_id: &Value,
-  runtime_metadata: &Value,
+    provider_payload: &Value,
+    provider_protocol: &str,
+    route_id: &Value,
+    runtime_metadata: &Value,
 ) -> Value {
     let mut payload = value_as_object_or_empty(provider_payload);
     if provider_protocol.trim() != "anthropic-messages" {
@@ -1482,7 +1488,8 @@ fn apply_direct_builtin_web_search_tool(
         Some(v) => v,
         None => return Value::Object(payload),
     };
-    let matched_engine = match find_direct_builtin_web_search_engine(runtime_metadata_obj, model_id) {
+    let matched_engine = match find_direct_builtin_web_search_engine(runtime_metadata_obj, model_id)
+    {
         Some(v) => v,
         None => return Value::Object(payload),
     };
@@ -2340,9 +2347,7 @@ pub fn resolve_stop_message_router_metadata_json(metadata_json: String) -> napi:
 }
 
 #[napi_derive::napi]
-pub fn resolve_router_metadata_runtime_flags_json(
-    metadata_json: String,
-) -> napi::Result<String> {
+pub fn resolve_router_metadata_runtime_flags_json(metadata_json: String) -> napi::Result<String> {
     let metadata: Value = serde_json::from_str(&metadata_json)
         .map_err(|e| napi::Error::from_reason(format!("Failed to parse metadata JSON: {}", e)))?;
     let output = resolve_router_metadata_runtime_flags(&metadata);
@@ -2358,13 +2363,11 @@ pub fn resolve_router_metadata_runtime_flags_json(
 pub fn build_router_metadata_input_json(input_json: String) -> napi::Result<String> {
     let input: Value = serde_json::from_str(&input_json)
         .map_err(|e| napi::Error::from_reason(format!("Failed to parse input JSON: {}", e)))?;
-    let output = build_router_metadata_input(&input)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to build router metadata input: {}", e)))?;
+    let output = build_router_metadata_input(&input).map_err(|e| {
+        napi::Error::from_reason(format!("Failed to build router metadata input: {}", e))
+    })?;
     serde_json::to_string(&output).map_err(|e| {
-        napi::Error::from_reason(format!(
-            "Failed to serialize router metadata input: {}",
-            e
-        ))
+        napi::Error::from_reason(format!("Failed to serialize router metadata input: {}", e))
     })
 }
 
@@ -2391,10 +2394,7 @@ pub fn build_req_outbound_node_result_json(input_json: String) -> napi::Result<S
     let input: Value = serde_json::from_str(&input_json)
         .map_err(|e| napi::Error::from_reason(format!("Failed to parse input JSON: {}", e)))?;
     let output = build_req_outbound_node_result(&input).map_err(|e| {
-        napi::Error::from_reason(format!(
-            "Failed to build req outbound node result: {}",
-            e
-        ))
+        napi::Error::from_reason(format!("Failed to build req outbound node result: {}", e))
     })?;
     serde_json::to_string(&output).map_err(|e| {
         napi::Error::from_reason(format!(
@@ -2409,10 +2409,7 @@ pub fn build_req_inbound_node_result_json(input_json: String) -> napi::Result<St
     let input: Value = serde_json::from_str(&input_json)
         .map_err(|e| napi::Error::from_reason(format!("Failed to parse input JSON: {}", e)))?;
     let output = build_req_inbound_node_result(&input).map_err(|e| {
-        napi::Error::from_reason(format!(
-            "Failed to build req inbound node result: {}",
-            e
-        ))
+        napi::Error::from_reason(format!("Failed to build req inbound node result: {}", e))
     })?;
     serde_json::to_string(&output).map_err(|e| {
         napi::Error::from_reason(format!(
@@ -2427,10 +2424,7 @@ pub fn build_req_inbound_skipped_node_json(input_json: String) -> napi::Result<S
     let input: Value = serde_json::from_str(&input_json)
         .map_err(|e| napi::Error::from_reason(format!("Failed to parse input JSON: {}", e)))?;
     let output = build_req_inbound_skipped_node(&input).map_err(|e| {
-        napi::Error::from_reason(format!(
-            "Failed to build req inbound skipped node: {}",
-            e
-        ))
+        napi::Error::from_reason(format!("Failed to build req inbound skipped node: {}", e))
     })?;
     serde_json::to_string(&output).map_err(|e| {
         napi::Error::from_reason(format!(
@@ -2611,9 +2605,7 @@ pub fn resolve_adapter_context_metadata_signals_json(
 }
 
 #[napi_derive::napi]
-pub fn resolve_adapter_context_object_carriers_json(
-    metadata_json: String,
-) -> napi::Result<String> {
+pub fn resolve_adapter_context_object_carriers_json(metadata_json: String) -> napi::Result<String> {
     let metadata: Value = serde_json::from_str(&metadata_json)
         .map_err(|e| napi::Error::from_reason(format!("Failed to parse metadata JSON: {}", e)))?;
     let output = resolve_adapter_context_object_carriers(&metadata);
@@ -2677,8 +2669,9 @@ pub fn is_search_route_id_json(route_id_json: String) -> napi::Result<String> {
     let route_id: Value = serde_json::from_str(&route_id_json)
         .map_err(|e| napi::Error::from_reason(format!("Failed to parse routeId JSON: {}", e)))?;
     let output = is_search_route_id(&route_id);
-    serde_json::to_string(&output)
-        .map_err(|e| napi::Error::from_reason(format!("Failed to serialize search route id: {}", e)))
+    serde_json::to_string(&output).map_err(|e| {
+        napi::Error::from_reason(format!("Failed to serialize search route id: {}", e))
+    })
 }
 
 #[napi_derive::napi]
@@ -2696,10 +2689,10 @@ pub fn is_canonical_web_search_tool_definition_json(tool_json: String) -> napi::
 
 #[napi_derive::napi]
 pub fn apply_direct_builtin_web_search_tool_json(
-  provider_payload_json: String,
-  provider_protocol: String,
-  route_id_json: String,
-  runtime_metadata_json: String,
+    provider_payload_json: String,
+    provider_protocol: String,
+    route_id_json: String,
+    runtime_metadata_json: String,
 ) -> napi::Result<String> {
     let provider_payload: Value = serde_json::from_str(&provider_payload_json).map_err(|e| {
         napi::Error::from_reason(format!("Failed to parse provider payload JSON: {}", e))
@@ -3102,9 +3095,7 @@ mod tests {
         let result = run_hub_pipeline(input).expect("hub pipeline");
         let metadata = result.metadata.expect("metadata value");
         assert_eq!(
-            metadata
-                .get("clientTmuxSessionId")
-                .and_then(|v| v.as_str()),
+            metadata.get("clientTmuxSessionId").and_then(|v| v.as_str()),
             Some("tmux-session-123")
         );
         assert_eq!(
@@ -3520,7 +3511,10 @@ mod tests {
             row.get("providerProtocol").and_then(|v| v.as_str()),
             Some("anthropic-messages")
         );
-        assert_eq!(row.get("providerStream").and_then(|v| v.as_bool()), Some(false));
+        assert_eq!(
+            row.get("providerStream").and_then(|v| v.as_bool()),
+            Some(false)
+        );
         assert_eq!(
             row.get("passthroughAudit")
                 .and_then(|v| v.as_object())
@@ -3594,12 +3588,18 @@ mod tests {
             .get("metadata")
             .and_then(|v| v.as_object())
             .expect("metadata object");
-        assert_eq!(metadata.get("node").and_then(|v| v.as_str()), Some("req_outbound"));
+        assert_eq!(
+            metadata.get("node").and_then(|v| v.as_str()),
+            Some("req_outbound")
+        );
         assert_eq!(
             metadata.get("executionTime").and_then(|v| v.as_i64()),
             Some(255)
         );
-        assert_eq!(metadata.get("startTime").and_then(|v| v.as_i64()), Some(1000));
+        assert_eq!(
+            metadata.get("startTime").and_then(|v| v.as_i64()),
+            Some(1000)
+        );
         assert_eq!(metadata.get("endTime").and_then(|v| v.as_i64()), Some(1255));
         assert_eq!(
             metadata
@@ -3901,7 +3901,8 @@ mod tests {
     }
 
     #[test]
-    fn test_coerce_standardized_request_from_payload_normalizes_exec_command_and_apply_patch_shapes() {
+    fn test_coerce_standardized_request_from_payload_normalizes_exec_command_and_apply_patch_shapes(
+    ) {
         let input = json!({
             "payload": {
                 "model": "glm-5",
@@ -4046,8 +4047,8 @@ mod tests {
             "metadata": { "requestId": "req-1" },
             "hasImageAttachment": true
         });
-        let add_output = apply_has_image_attachment_flag(&add_input)
-            .expect("apply has-image-attachment flag");
+        let add_output =
+            apply_has_image_attachment_flag(&add_input).expect("apply has-image-attachment flag");
         let add_row = add_output.as_object().expect("object output");
         assert_eq!(
             add_row.get("hasImageAttachment").and_then(|v| v.as_bool()),
@@ -4077,8 +4078,8 @@ mod tests {
             "metadata": "invalid",
             "hasImageAttachment": true
         });
-        let output = apply_has_image_attachment_flag(&input)
-            .expect("apply has-image-attachment flag");
+        let output =
+            apply_has_image_attachment_flag(&input).expect("apply has-image-attachment flag");
         let row = output.as_object().expect("object output");
         assert_eq!(
             row.get("hasImageAttachment").and_then(|v| v.as_bool()),
@@ -4097,7 +4098,10 @@ mod tests {
             .expect("sync session identifiers to metadata");
         let row = output.as_object().expect("object output");
         assert_eq!(row.get("existing").and_then(|v| v.as_bool()), Some(true));
-        assert_eq!(row.get("sessionId").and_then(|v| v.as_str()), Some("session-1"));
+        assert_eq!(
+            row.get("sessionId").and_then(|v| v.as_str()),
+            Some("session-1")
+        );
         assert_eq!(
             row.get("conversationId").and_then(|v| v.as_str()),
             Some("conv-1")
@@ -4311,9 +4315,18 @@ mod tests {
         });
         let output = resolve_adapter_context_metadata_signals(&metadata);
         let row = output.as_object().expect("object output");
-        assert_eq!(row.get("clientRequestId").and_then(|v| v.as_str()), Some("req-1"));
-        assert_eq!(row.get("groupRequestId").and_then(|v| v.as_str()), Some("group-1"));
-        assert_eq!(row.get("originalModelId").and_then(|v| v.as_str()), Some(""));
+        assert_eq!(
+            row.get("clientRequestId").and_then(|v| v.as_str()),
+            Some("req-1")
+        );
+        assert_eq!(
+            row.get("groupRequestId").and_then(|v| v.as_str()),
+            Some("group-1")
+        );
+        assert_eq!(
+            row.get("originalModelId").and_then(|v| v.as_str()),
+            Some("")
+        );
         assert_eq!(
             row.get("clientModelId").and_then(|v| v.as_str()),
             Some("client-model")
@@ -4371,16 +4384,14 @@ mod tests {
         let output = resolve_adapter_context_object_carriers(&metadata);
         let row = output.as_object().expect("object output");
         assert!(row.get("runtime").and_then(|v| v.as_object()).is_some());
-        assert!(
-            row.get("capturedChatRequest")
-                .and_then(|v| v.as_object())
-                .is_some()
-        );
-        assert!(
-            row.get("clientConnectionState")
-                .and_then(|v| v.as_object())
-                .is_some()
-        );
+        assert!(row
+            .get("capturedChatRequest")
+            .and_then(|v| v.as_object())
+            .is_some());
+        assert!(row
+            .get("clientConnectionState")
+            .and_then(|v| v.as_object())
+            .is_some());
         assert_eq!(
             row.get("clientDisconnected").and_then(|v| v.as_bool()),
             Some(false)
@@ -4908,8 +4919,7 @@ mod tests {
                 }
             }
         });
-        let output =
-            read_responses_resume_from_request_semantics(&request).expect("resume object");
+        let output = read_responses_resume_from_request_semantics(&request).expect("resume object");
         assert_eq!(
             output.get("response_id").and_then(|v| v.as_str()),
             Some("resp_456")

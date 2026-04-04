@@ -18,10 +18,11 @@ use crate::virtual_router_engine::instructions::{
 use crate::virtual_router_engine::provider_registry::ProviderRegistry;
 use crate::virtual_router_engine::routing::{
     alias_prefix_from_alias_key, build_antigravity_alias_key, extract_excluded_provider_keys,
-    filter_candidates_by_state, parse_direct_provider_model, resolve_instruction_target,
-    resolve_instruction_process_mode_for_selection, resolve_session_scope, resolve_sticky_key,
-    resolve_stop_message_scope, should_avoid_antigravity_after_repeated_error,
-    should_bind_antigravity_session, should_fallback_direct_model_for_media,
+    filter_candidates_by_state, parse_direct_provider_model,
+    resolve_instruction_process_mode_for_selection, resolve_instruction_target,
+    resolve_session_scope, resolve_sticky_key, resolve_stop_message_scope,
+    should_avoid_antigravity_after_repeated_error, should_bind_antigravity_session,
+    should_fallback_direct_model_for_media,
 };
 use crate::virtual_router_engine::routing_state_store::{
     load_routing_instruction_state, persist_routing_instruction_state,
@@ -153,9 +154,9 @@ fn append_reasoning_tag(reasoning: &str, tag: Option<String>) -> String {
 
 fn has_only_routing_state_mutation_instructions(instructions: &[RoutingInstruction]) -> bool {
     !instructions.is_empty()
-        && instructions.iter().all(|inst| {
-            matches!(inst.kind.as_str(), "allow" | "disable" | "enable" | "clear")
-        })
+        && instructions
+            .iter()
+            .all(|inst| matches!(inst.kind.as_str(), "allow" | "disable" | "enable" | "clear"))
 }
 
 impl VirtualRouterEngineCore {

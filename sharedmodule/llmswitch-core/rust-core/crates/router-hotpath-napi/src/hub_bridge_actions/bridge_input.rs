@@ -157,11 +157,8 @@ fn harvest_assistant_tool_message_from_text(
         );
     }
 
-    let normalized_raw = normalize_assistant_text_to_tool_calls_json(
-        Value::Object(seed).to_string(),
-        None,
-    )
-    .ok()?;
+    let normalized_raw =
+        normalize_assistant_text_to_tool_calls_json(Value::Object(seed).to_string(), None).ok()?;
     let normalized: Value = serde_json::from_str(&normalized_raw).ok()?;
     let mut message = normalized.as_object().cloned()?;
     let has_tool_calls = message
@@ -186,7 +183,8 @@ fn append_harvested_assistant_tool_message(
     raw_content: &str,
     reasoning_segments: &[String],
 ) -> bool {
-    let Some(mut harvested) = harvest_assistant_tool_message_from_text(raw_content, reasoning_segments)
+    let Some(mut harvested) =
+        harvest_assistant_tool_message_from_text(raw_content, reasoning_segments)
     else {
         return false;
     };

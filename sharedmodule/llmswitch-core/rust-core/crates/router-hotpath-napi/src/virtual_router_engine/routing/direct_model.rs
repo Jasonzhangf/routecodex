@@ -2,8 +2,8 @@ use serde_json::Value;
 
 use super::super::features::RoutingFeatures;
 use super::super::provider_registry::ProviderRegistry;
-use super::config::RoutingPools;
 use super::config::default_pool_supports_capability;
+use super::config::RoutingPools;
 
 pub(crate) fn parse_direct_provider_model(
     model_value: Option<&Value>,

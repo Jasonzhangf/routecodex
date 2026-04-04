@@ -34,10 +34,7 @@ fn read_override_user_dir() -> Option<PathBuf> {
     RCC_USER_DIR_OVERRIDE.with(|slot| slot.borrow().clone())
 }
 
-pub(crate) fn with_rcc_user_dir_override<T>(
-    raw: Option<&str>,
-    callback: impl FnOnce() -> T,
-) -> T {
+pub(crate) fn with_rcc_user_dir_override<T>(raw: Option<&str>, callback: impl FnOnce() -> T) -> T {
     let next = normalize_override_user_dir(raw);
     let previous = RCC_USER_DIR_OVERRIDE.with(|slot| {
         let previous = slot.borrow().clone();
@@ -161,9 +158,7 @@ pub(super) fn resolve_precommand_script_path(raw: &str) -> Result<String, String
         || rel_raw.starts_with('\\')
         || Regex::new(r"^[a-zA-Z]:[\\/]").unwrap().is_match(&rel_raw)
     {
-        return Err(
-            "precommand: only supports paths relative to ~/.rcc/precommand".to_string(),
-        );
+        return Err("precommand: only supports paths relative to ~/.rcc/precommand".to_string());
     }
     let rel_to_precommand = normalize_precommand_relative_path(&rel_raw, from_file_scheme)?;
     let base = resolve_precommand_base_dir()?;
@@ -227,14 +222,12 @@ pub(super) fn resolve_stop_message_text(raw: &str) -> Result<String, String> {
         || rel_raw.starts_with('\\')
         || Regex::new(r"^[a-zA-Z]:[\\/]").unwrap().is_match(&rel_raw)
     {
-        return Err(
-            "stopMessage file://: only supports paths relative to ~/.rcc".to_string(),
-        );
+        return Err("stopMessage file://: only supports paths relative to ~/.rcc".to_string());
     }
     let normalized_rel = normalize_relative_path(&rel_raw)
         .map_err(|_| "stopMessage file://: invalid relative path".to_string())?;
-    let base = resolve_rcc_user_dir()
-        .map_err(|err| err.replace("precommand", "stopMessage file://"))?;
+    let base =
+        resolve_rcc_user_dir().map_err(|err| err.replace("precommand", "stopMessage file://"))?;
     let abs = base.join(Path::new(&normalized_rel));
     if abs != base && !abs.starts_with(&base) {
         return Err("stopMessage file://: path escapes ~/.rcc".to_string());

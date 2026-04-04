@@ -164,8 +164,17 @@ mod tests {
 
         let result = process_sse_stream_json(input_json).expect("json output");
         let parsed: serde_json::Value = serde_json::from_str(&result).expect("valid json");
-        assert_eq!(parsed.get("shouldStream").and_then(|v| v.as_bool()), Some(true));
-        assert_eq!(parsed.get("payload").and_then(|v| v.get("ok")).and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(
+            parsed.get("shouldStream").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            parsed
+                .get("payload")
+                .and_then(|v| v.get("ok"))
+                .and_then(|v| v.as_bool()),
+            Some(true)
+        );
     }
 
     #[test]
@@ -182,7 +191,10 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&result).expect("valid json");
         assert!(parsed.get("shouldStream").is_some());
         assert!(parsed.get("should_stream").is_none());
-        assert_eq!(parsed.get("shouldStream").and_then(|v| v.as_bool()), Some(false));
+        assert_eq!(
+            parsed.get("shouldStream").and_then(|v| v.as_bool()),
+            Some(false)
+        );
     }
 
     // Critical path test: Empty request_id (should still work)

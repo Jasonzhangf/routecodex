@@ -427,13 +427,16 @@ fn resolves_responses_bridge_tools_dedupes_by_function_name_and_preserves_builti
 fn resolves_responses_bridge_tools_injects_builtin_web_search_for_server_side_tool() {
     let output = resolve_responses_bridge_tools(ResolveResponsesBridgeToolsInput {
         original_tools: Some(vec![]),
-        chat_tools: Some(vec![json!({
-            "type": "function",
-            "function": { "name": "web_search", "parameters": { "type": "object", "properties": {} } }
-        }), json!({
-            "type": "function",
-            "function": { "name": "exec_command" }
-        })]),
+        chat_tools: Some(vec![
+            json!({
+                "type": "function",
+                "function": { "name": "web_search", "parameters": { "type": "object", "properties": {} } }
+            }),
+            json!({
+                "type": "function",
+                "function": { "name": "exec_command" }
+            }),
+        ]),
         has_server_side_web_search: Some(true),
         passthrough_keys: None,
         request: None,
@@ -446,7 +449,8 @@ fn resolves_responses_bridge_tools_injects_builtin_web_search_for_server_side_to
 }
 
 #[test]
-fn resolves_responses_bridge_tools_does_not_inject_builtin_web_search_without_web_search_function() {
+fn resolves_responses_bridge_tools_does_not_inject_builtin_web_search_without_web_search_function()
+{
     let output = resolve_responses_bridge_tools(ResolveResponsesBridgeToolsInput {
         original_tools: Some(vec![]),
         chat_tools: Some(vec![json!({
@@ -1143,7 +1147,7 @@ fn convert_bridge_input_harvests_malformed_assistant_parameter_markup_into_tool_
             "type": "message",
             "role": "assistant",
             "content": r#"[思考] <parameter name="input">pwd</</parameter>
-<parameter name="newVersion"><parameter name="type">string</parameter>"#
+        <parameter name="newVersion"><parameter name="type">string</parameter>"#
         })],
         tools: None,
         tool_result_fallback_text: None,
@@ -1162,10 +1166,7 @@ fn convert_bridge_input_harvests_malformed_assistant_parameter_markup_into_tool_
         function.get("name").and_then(Value::as_str),
         Some("exec_command")
     );
-    assert_eq!(
-        msg.get("content").and_then(Value::as_str),
-        Some("")
-    );
+    assert_eq!(msg.get("content").and_then(Value::as_str), Some(""));
 }
 
 #[test]
@@ -1484,7 +1485,10 @@ fn reasoning_normalizer_chat_payload_does_not_backfill_content_when_tool_calls_p
         .and_then(Value::as_object)
         .unwrap();
     let content = message.get("content");
-    assert!(!content.and_then(Value::as_str).map(|v| v.contains("<|tool_calls_section_begin|>")).unwrap_or(false));
+    assert!(!content
+        .and_then(Value::as_str)
+        .map(|v| v.contains("<|tool_calls_section_begin|>"))
+        .unwrap_or(false));
 }
 
 #[test]

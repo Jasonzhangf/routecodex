@@ -282,7 +282,8 @@ fn normalize_responses_input_items(raw_request: &Map<String, Value>) -> Option<V
                 .get("tools")
                 .and_then(Value::as_array)
                 .map(|tools| {
-                    tools.iter()
+                    tools
+                        .iter()
                         .filter_map(|tool| {
                             let row = tool.as_object()?;
                             read_trimmed_string(

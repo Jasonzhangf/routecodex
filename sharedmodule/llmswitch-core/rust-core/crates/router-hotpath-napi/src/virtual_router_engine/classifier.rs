@@ -120,9 +120,7 @@ impl RoutingClassifier {
         ));
         evaluation.push((
             "web_search".to_string(),
-            web_search_continuation
-                || web_search_declared_or_required
-                || web_search_from_intent,
+            web_search_continuation || web_search_declared_or_required || web_search_from_intent,
             if web_search_continuation {
                 "web_search:last-tool-websearch".to_string()
             } else if web_search_declared_or_required && server_tool_required {

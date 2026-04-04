@@ -469,11 +469,8 @@ pub fn infer_sse_event_type_from_data_json(
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let allowed_event_types: Vec<String> = serde_json::from_str(&allowed_event_types_json)
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = infer_sse_event_type_from_data(
-        &raw_event,
-        enable_strict_validation,
-        &allowed_event_types,
-    );
+    let output =
+        infer_sse_event_type_from_data(&raw_event, enable_strict_validation, &allowed_event_types);
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
@@ -491,11 +488,8 @@ pub fn validate_sse_event_type_json(
 ) -> NapiResult<String> {
     let allowed_event_types: Vec<String> = serde_json::from_str(&allowed_event_types_json)
         .map_err(|e| napi::Error::from_reason(e.to_string()))?;
-    let output = validate_sse_event_type(
-        &event_type,
-        enable_strict_validation,
-        &allowed_event_types,
-    );
+    let output =
+        validate_sse_event_type(&event_type, enable_strict_validation, &allowed_event_types);
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
 
@@ -504,8 +498,8 @@ pub fn parse_sse_event_with_config_json(
     sse_text: String,
     config_json: String,
 ) -> NapiResult<String> {
-    let config: SseParserConfigInput = serde_json::from_str(&config_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let config: SseParserConfigInput =
+        serde_json::from_str(&config_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let output = parse_sse_event_with_config(&sse_text, &config);
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
@@ -515,8 +509,8 @@ pub fn parse_sse_stream_with_config_json(
     sse_data: String,
     config_json: String,
 ) -> NapiResult<String> {
-    let config: SseParserConfigInput = serde_json::from_str(&config_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let config: SseParserConfigInput =
+        serde_json::from_str(&config_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let output = parse_sse_stream_with_config(&sse_data, &config);
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
@@ -527,8 +521,8 @@ pub fn parse_sse_stream_chunk_with_config_json(
     config_json: String,
     flush_tail: bool,
 ) -> NapiResult<String> {
-    let config: SseParserConfigInput = serde_json::from_str(&config_json)
-        .map_err(|e| napi::Error::from_reason(e.to_string()))?;
+    let config: SseParserConfigInput =
+        serde_json::from_str(&config_json).map_err(|e| napi::Error::from_reason(e.to_string()))?;
     let output = parse_sse_stream_chunk_with_config(&sse_buffer, &config, flush_tail);
     serde_json::to_string(&output).map_err(|e| napi::Error::from_reason(e.to_string()))
 }
@@ -537,8 +531,8 @@ pub fn parse_sse_stream_chunk_with_config_json(
 mod tests {
     use super::{
         assemble_sse_event, infer_sse_event_type_from_data, parse_json_object_candidate,
-        parse_sse_event_with_config, parse_sse_stream_chunk_with_config, parse_sse_stream_with_config,
-        SseParserConfigInput,
+        parse_sse_event_with_config, parse_sse_stream_chunk_with_config,
+        parse_sse_stream_with_config, SseParserConfigInput,
     };
     use serde_json::{json, Value};
 
@@ -567,10 +561,7 @@ mod tests {
         let parsed = assemble_sse_event(&lines).expect("event");
         assert_eq!(parsed.event, "response.output_text.delta");
         assert_eq!(parsed.id.as_deref(), Some("9"));
-        assert_eq!(
-            parsed.data,
-            "{\"delta\":\"hello\"}\n{\"delta\":\" world\"}"
-        );
+        assert_eq!(parsed.data, "{\"delta\":\"hello\"}\n{\"delta\":\" world\"}");
         assert_eq!(parsed.retry.as_deref(), Some("1000"));
         assert_eq!(parsed.timestamp, Some(1730000000));
     }
@@ -664,7 +655,11 @@ mod tests {
     #[test]
     fn validate_sse_event_type_non_strict() {
         let allowed = vec!["response.completed".to_string()];
-        assert!(super::validate_sse_event_type("custom.type", false, &allowed));
+        assert!(super::validate_sse_event_type(
+            "custom.type",
+            false,
+            &allowed
+        ));
     }
 
     #[test]
@@ -675,12 +670,20 @@ mod tests {
             max_event_size: 1024 * 1024,
             allowed_event_types: vec!["message_stop".to_string()],
         };
-        let result =
-            parse_sse_event_with_config("event: message_stop\ndata: {\"type\":\"message_stop\"}", &config);
+        let result = parse_sse_event_with_config(
+            "event: message_stop\ndata: {\"type\":\"message_stop\"}",
+            &config,
+        );
         assert!(result.success);
         let event = result.event.expect("event");
-        assert_eq!(event.get("protocol").and_then(Value::as_str), Some("anthropic-messages"));
-        assert_eq!(event.get("type").and_then(Value::as_str), Some("message_stop"));
+        assert_eq!(
+            event.get("protocol").and_then(Value::as_str),
+            Some("anthropic-messages")
+        );
+        assert_eq!(
+            event.get("type").and_then(Value::as_str),
+            Some("message_stop")
+        );
     }
 
     #[test]
@@ -699,7 +702,8 @@ mod tests {
         let event = result.event.expect("event");
         assert_eq!(event.get("type").and_then(Value::as_str), Some("error"));
         assert_eq!(
-            event.get("data")
+            event
+                .get("data")
                 .and_then(Value::as_object)
                 .and_then(|row| row.get("error"))
                 .and_then(Value::as_str),
@@ -721,7 +725,10 @@ event: custom.type\ndata: {\"ok\":true}\n\n";
         assert_eq!(result.len(), 1);
         assert!(result[0].success);
         let event = result[0].event.as_ref().expect("event");
-        assert_eq!(event.get("type").and_then(Value::as_str), Some("response.completed"));
+        assert_eq!(
+            event.get("type").and_then(Value::as_str),
+            Some("response.completed")
+        );
     }
 
     #[test]
@@ -738,7 +745,9 @@ event: response.completed\ndata: {\"type\":\"response.completed\"";
         assert_eq!(output.events.len(), 1);
         assert!(output.events[0].success);
         assert!(!output.remaining_buffer.is_empty());
-        assert!(output.remaining_buffer.contains("event: response.completed"));
+        assert!(output
+            .remaining_buffer
+            .contains("event: response.completed"));
     }
 
     #[test]

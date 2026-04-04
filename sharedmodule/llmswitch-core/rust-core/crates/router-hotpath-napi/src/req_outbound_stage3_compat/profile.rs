@@ -60,7 +60,7 @@ pub(super) fn is_iflow_profile(profile: &str) -> bool {
 }
 
 pub(super) fn is_deepseek_web_profile(profile: &str) -> bool {
-    profile_matches(profile, "chat:deepseek-web")
+    profile_matches(profile, "chat:deepseek-web") || profile_matches(profile, "chat:qwenchat-web")
 }
 
 pub(super) fn is_gemini_profile(profile: &str) -> bool {

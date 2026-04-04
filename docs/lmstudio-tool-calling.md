@@ -4,6 +4,31 @@
 
 LM Studio provides comprehensive tool calling functionality that enables Large Language Models (LLMs) to interact with external functions and APIs. All models in LM Studio support at least some degree of tool use, with two levels of support: **Native** and **Default**.
 
+## RouteCodex 集成注意（2026-04-04 更新）
+
+在 RouteCodex → LM Studio 的 `/v1/responses` 路径下，真实回放曾出现：
+
+- `HTTP 400`
+- `type: invalid_request_error`
+- `param: tools.*.type`
+- `code: invalid_string`
+
+根因确认（2026-04-04 实测）：
+
+- LM Studio `/v1/responses` **不接受** chat-style 嵌套工具形状
+  `{"type":"function","function":{...}}`（会触发 `tools.0.type invalid_string`）。
+- LM Studio `/v1/responses` 接受的是 Responses-style 扁平工具形状
+  `{"type":"function","name":"...","parameters":{...}}`。
+- `tool_choice` 需使用字符串枚举（`"none" | "auto" | "required"`），不应传对象。
+
+因此在 RouteCodex 侧必须保证：
+
+1. `tools[]` 仅保留 **function tools**。
+2. 请求工具统一归一为扁平形状：`{"type":"function","name","parameters",...}`。
+3. 当 `tools` 被清空时，移除 `tool_choice`；当 `tool_choice` 为对象时，归一为 `"required"`。
+
+> 结论：LM Studio 文档层面的“工具支持”不代表任意 OpenAI 兼容形状都可透传；RouteCodex 必须做请求侧 schema 约束与形状修复。
+
 ## Tool Support Levels
 
 ### Native Tool Use Support

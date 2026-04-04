@@ -41,8 +41,9 @@ static CN_THINK_OPEN_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?is)\[\s*思考\s*\]").expect("valid cn think open regex"));
 static CN_THINK_CLOSE_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?is)\[\s*/\s*思考\s*\]").expect("valid cn think close regex"));
-static CN_THINK_BLOCK_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?is)\[\s*思考\s*\](.*?)\[\s*/\s*思考\s*\]").expect("valid cn think block regex"));
+static CN_THINK_BLOCK_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?is)\[\s*思考\s*\](.*?)\[\s*/\s*思考\s*\]").expect("valid cn think block regex")
+});
 static CN_THINK_TAG_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?is)\[\s*/?\s*思考\s*\]").expect("valid cn think tag regex"));
 static BLANK_LINES_RE: LazyLock<Regex> =
@@ -72,8 +73,9 @@ pub(crate) fn extract_reasoning_segments(
         || REFLECTION_OPEN_RE.is_match(source)
         || FENCED_OPEN_RE.is_match(source)
         || CN_THINK_OPEN_RE.is_match(source);
-    let has_explicit_close =
-        THINK_CLOSE_RE.is_match(source) || REFLECTION_CLOSE_RE.is_match(source) || CN_THINK_CLOSE_RE.is_match(source);
+    let has_explicit_close = THINK_CLOSE_RE.is_match(source)
+        || REFLECTION_CLOSE_RE.is_match(source)
+        || CN_THINK_CLOSE_RE.is_match(source);
 
     let mut working = source.to_string();
     working = THINK_BLOCK_RE.replace_all(&working, "").to_string();

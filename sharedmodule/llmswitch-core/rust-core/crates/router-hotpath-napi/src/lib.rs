@@ -32,9 +32,9 @@ mod chat_process_media_semantics;
 mod chat_servertool_orchestration;
 mod chat_tool_normalization;
 mod chat_web_search_tool_schema;
+mod compat_field_mapping;
 mod compat_fix_apply_patch;
 mod compat_harvest_tool_calls_from_text;
-mod compat_field_mapping;
 mod compat_tool_schema;
 mod gemini_openai_codec;
 mod hub_bridge_actions;
@@ -1104,7 +1104,10 @@ pub fn harvest_tool_calls_from_text_json_bridge(
     payload_json: String,
     options_json: Option<String>,
 ) -> NapiResult<String> {
-    compat_harvest_tool_calls_from_text::harvest_tool_calls_from_text_json(payload_json, options_json)
+    compat_harvest_tool_calls_from_text::harvest_tool_calls_from_text_json(
+        payload_json,
+        options_json,
+    )
 }
 
 #[napi(js_name = "applyFieldMappingsJson")]

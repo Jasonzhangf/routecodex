@@ -100,7 +100,8 @@ fn flatten_system_content(content: &Value) -> String {
 }
 
 fn normalize_tool_content(content: &Value) -> String {
-    const EMPTY_TOOL_FALLBACK: &str = "[RouteCodex] Tool output was empty; execution status unknown.";
+    const EMPTY_TOOL_FALLBACK: &str =
+        "[RouteCodex] Tool output was empty; execution status unknown.";
     match content {
         Value::String(text) => {
             if text.trim().is_empty() {
@@ -165,13 +166,10 @@ fn maybe_augment_apply_patch_error_content(content: &str, tool_name: Option<&str
     if missing_path {
         return format!("{content}{APPLY_PATCH_PATH_MISSING_HINT}");
     }
-    if lower.contains(
-        "expected update hunk to start with a @@ context marker, got: '======='",
-    ) || lower.contains(
-        "expected update hunk to start with a @@ context marker, got: '<<<<<<<",
-    ) || lower.contains(
-        "expected update hunk to start with a @@ context marker, got: '>>>>>>>",
-    ) {
+    if lower.contains("expected update hunk to start with a @@ context marker, got: '======='")
+        || lower.contains("expected update hunk to start with a @@ context marker, got: '<<<<<<<")
+        || lower.contains("expected update hunk to start with a @@ context marker, got: '>>>>>>>")
+    {
         return format!("{content}{APPLY_PATCH_CONFLICT_MARKER_HINT}");
     }
     if lower.contains("failed to find context") && lower.contains("@@") {

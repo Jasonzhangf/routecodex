@@ -292,7 +292,10 @@ fn chat_envelope_to_standardized_impl(
     let model = extract_model(&parameters)?;
 
     let chat_normalized = normalize_chat_envelope_tool_calls(chat);
-    let chat_row = chat_normalized.as_object().cloned().unwrap_or_else(|| chat_row.clone());
+    let chat_row = chat_normalized
+        .as_object()
+        .cloned()
+        .unwrap_or_else(|| chat_row.clone());
 
     let messages = chat_row
         .get("messages")

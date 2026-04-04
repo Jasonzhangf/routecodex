@@ -113,7 +113,9 @@ fn drop_empty_update_sections(text: &str) -> String {
         let mut has_hunk_body = false;
         while i < lines.len() {
             let probe_trimmed = lines[i].trim();
-            if is_patch_file_header_line(probe_trimmed) || probe_trimmed.starts_with("*** End Patch") {
+            if is_patch_file_header_line(probe_trimmed)
+                || probe_trimmed.starts_with("*** End Patch")
+            {
                 break;
             }
             let probe = lines[i];
@@ -328,8 +330,7 @@ fn normalize_apply_patch_text(raw: &str) -> String {
         }
 
         if normalized.starts_with("--- ") {
-            pending_unified_from =
-                Some(normalized.trim_start_matches("--- ").trim().to_string());
+            pending_unified_from = Some(normalized.trim_start_matches("--- ").trim().to_string());
             continue;
         }
         if normalized.starts_with("+++ ") {
@@ -483,7 +484,10 @@ fn extract_patch_text_from_value(value: &Value) -> Option<String> {
             .or_else(|| obj.get("result").and_then(extract_patch_text_from_value))
             .or_else(|| obj.get("payload").and_then(extract_patch_text_from_value))
             .or_else(|| obj.get("data").and_then(extract_patch_text_from_value))
-            .or_else(|| obj.get("tool_input").and_then(extract_patch_text_from_value))
+            .or_else(|| {
+                obj.get("tool_input")
+                    .and_then(extract_patch_text_from_value)
+            })
             .or_else(|| obj.get("toolInput").and_then(extract_patch_text_from_value))
             .or_else(|| obj.get("arguments").and_then(extract_patch_text_from_value))
     }
@@ -505,7 +509,8 @@ fn normalize_apply_patch_tool_arguments_from_patch_text(patch_text: &str) -> Opt
             return serde_json::to_string(&serde_json::json!({
                 "patch": "",
                 "input": ""
-            })).ok();
+            }))
+            .ok();
         }
         return None;
     }
@@ -598,7 +603,10 @@ pub fn fix_apply_patch_tool_calls_json(payload_json: String) -> NapiResult<Strin
             {
                 continue;
             }
-            let Some(tool_calls) = message_obj.get_mut("tool_calls").and_then(Value::as_array_mut) else {
+            let Some(tool_calls) = message_obj
+                .get_mut("tool_calls")
+                .and_then(Value::as_array_mut)
+            else {
                 continue;
             };
 
@@ -776,7 +784,9 @@ mod tests {
         });
         let raw = fix_apply_patch_tool_calls_json(payload.to_string()).expect("fix payload");
         let output: Value = serde_json::from_str(&raw).expect("parse output");
-        let args = output["input"][0]["arguments"].as_str().expect("arguments string");
+        let args = output["input"][0]["arguments"]
+            .as_str()
+            .expect("arguments string");
         let parsed: Value = serde_json::from_str(args).expect("parse normalized arguments");
         let patch = parsed["patch"].as_str().expect("patch");
         assert!(patch.contains("*** Add File: src/input-only.ts"));
@@ -881,7 +891,9 @@ mod tests {
         });
         let raw = fix_apply_patch_tool_calls_json(payload.to_string()).expect("fix payload");
         let output: Value = serde_json::from_str(&raw).expect("parse output");
-        let args = output["input"][0]["arguments"].as_str().expect("arguments string");
+        let args = output["input"][0]["arguments"]
+            .as_str()
+            .expect("arguments string");
         let parsed: Value = serde_json::from_str(args).expect("parse normalized arguments");
         let patch = parsed["patch"].as_str().expect("patch");
         assert!(patch.starts_with("*** Begin Patch"));
@@ -1018,5 +1030,4 @@ mod tests {
         assert_eq!(patch.matches("*** End Patch").count(), 1);
         assert!(patch.ends_with("*** End Patch"));
     }
-
 }

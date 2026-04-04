@@ -135,7 +135,10 @@ fn is_responses_input_tool_item(item_type: &str) -> bool {
     matches!(item_type, "function_call" | "function_call_output")
 }
 
-fn read_responses_input_tool_call_id(item_row: &Map<String, Value>, item_type: &str) -> Option<String> {
+fn read_responses_input_tool_call_id(
+    item_row: &Map<String, Value>,
+    item_type: &str,
+) -> Option<String> {
     if item_type == "function_call_output" {
         read_trimmed_string(item_row.get("call_id"))
             .or_else(|| read_trimmed_string(item_row.get("tool_call_id")))
@@ -145,7 +148,10 @@ fn read_responses_input_tool_call_id(item_row: &Map<String, Value>, item_type: &
     }
 }
 
-fn estimate_responses_input_tool_item_chars(item_row: &Map<String, Value>, item_type: &str) -> usize {
+fn estimate_responses_input_tool_item_chars(
+    item_row: &Map<String, Value>,
+    item_type: &str,
+) -> usize {
     if item_type == "function_call_output" {
         return item_row
             .get("output")
@@ -157,17 +163,18 @@ fn estimate_responses_input_tool_item_chars(item_row: &Map<String, Value>, item_
             .unwrap_or(0);
     }
     let mut total = 0usize;
-    if let Some(name_len) = item_row.get("name").and_then(Value::as_str).map(|s| s.len()) {
+    if let Some(name_len) = item_row
+        .get("name")
+        .and_then(Value::as_str)
+        .map(|s| s.len())
+    {
         total += name_len;
     }
-    if let Some(args_len) = item_row
-        .get("arguments")
-        .and_then(|v| match v {
-            Value::String(s) => Some(s.len()),
-            Value::Null => Some(0),
-            other => serde_json::to_string(other).ok().map(|s| s.len()),
-        })
-    {
+    if let Some(args_len) = item_row.get("arguments").and_then(|v| match v {
+        Value::String(s) => Some(s.len()),
+        Value::Null => Some(0),
+        other => serde_json::to_string(other).ok().map(|s| s.len()),
+    }) {
         total += args_len;
     }
     total
@@ -255,14 +262,11 @@ fn estimate_message_tool_call_chars(call_row: &Map<String, Value>) -> usize {
         if let Some(name_len) = fn_row.get("name").and_then(Value::as_str).map(|s| s.len()) {
             total += name_len;
         }
-        if let Some(args_len) = fn_row
-            .get("arguments")
-            .and_then(|v| match v {
-                Value::String(s) => Some(s.len()),
-                Value::Null => Some(0),
-                other => serde_json::to_string(other).ok().map(|s| s.len()),
-            })
-        {
+        if let Some(args_len) = fn_row.get("arguments").and_then(|v| match v {
+            Value::String(s) => Some(s.len()),
+            Value::Null => Some(0),
+            other => serde_json::to_string(other).ok().map(|s| s.len()),
+        }) {
             total += args_len;
         }
     }
@@ -324,7 +328,8 @@ fn prune_message_tool_history(messages: &mut Vec<Value>) {
                 if seen_call_ids.insert(call_id.clone()) {
                     call_order.push(call_id.clone());
                 }
-                *call_chars.entry(call_id).or_insert(0) += estimate_message_tool_call_chars(call_row);
+                *call_chars.entry(call_id).or_insert(0) +=
+                    estimate_message_tool_call_chars(call_row);
             }
             continue;
         }
@@ -338,7 +343,8 @@ fn prune_message_tool_history(messages: &mut Vec<Value>) {
             if seen_call_ids.insert(call_id.clone()) {
                 call_order.push(call_id.clone());
             }
-            *call_chars.entry(call_id).or_insert(0) += estimate_message_tool_content_chars(message_row);
+            *call_chars.entry(call_id).or_insert(0) +=
+                estimate_message_tool_content_chars(message_row);
         }
     }
 
@@ -469,8 +475,16 @@ fn read_nested_command_from_object(row: &Map<String, Value>) -> Option<String> {
     row.get("payload")
         .and_then(Value::as_object)
         .and_then(read_nested_command_from_object)
-        .or_else(|| row.get("data").and_then(Value::as_object).and_then(read_nested_command_from_object))
-        .or_else(|| row.get("args").and_then(Value::as_object).and_then(read_nested_command_from_object))
+        .or_else(|| {
+            row.get("data")
+                .and_then(Value::as_object)
+                .and_then(read_nested_command_from_object)
+        })
+        .or_else(|| {
+            row.get("args")
+                .and_then(Value::as_object)
+                .and_then(read_nested_command_from_object)
+        })
 }
 
 fn parse_json_record(value: Option<&Value>) -> Option<Map<String, Value>> {
@@ -494,7 +508,8 @@ fn read_command_from_args(args: &Map<String, Value>) -> Option<String> {
     if direct.is_some() {
         return direct;
     }
-    input.and_then(Value::as_object)
+    input
+        .and_then(Value::as_object)
         .and_then(read_nested_command_from_object)
         .or_else(|| {
             args.get("args")
@@ -599,10 +614,7 @@ fn normalize_shell_like_function_call_arguments(
     Some((resolved_name, arguments))
 }
 
-fn normalize_message_tool_calls(
-    payload: &mut Value,
-    requested_tool_names: &HashSet<String>,
-) {
+fn normalize_message_tool_calls(payload: &mut Value, requested_tool_names: &HashSet<String>) {
     let Some(messages) = payload
         .as_object_mut()
         .and_then(|root| root.get_mut("messages"))
@@ -725,7 +737,10 @@ fn normalize_responses_input_function_calls(
                         if let Some(call_id) = call_id {
                             shell_like_call_ids.insert(call_id);
                         }
-                    } else if is_invalid_shell_like_call(raw_name.as_str(), item_row.get("arguments")) {
+                    } else if is_invalid_shell_like_call(
+                        raw_name.as_str(),
+                        item_row.get("arguments"),
+                    ) {
                         if let Some(call_id) = read_trimmed_string(item_row.get("call_id"))
                             .or_else(|| read_trimmed_string(item_row.get("id")))
                         {
@@ -1176,7 +1191,9 @@ mod tests {
             .count();
         let function_outputs = items
             .iter()
-            .filter(|entry| entry.get("type").and_then(Value::as_str) == Some("function_call_output"))
+            .filter(|entry| {
+                entry.get("type").and_then(Value::as_str) == Some("function_call_output")
+            })
             .count();
 
         assert_eq!(function_calls, 120);
@@ -1187,11 +1204,9 @@ mod tests {
                 .find(|entry| entry.get("call_id").and_then(Value::as_str) == Some("call_0")),
             None
         );
-        assert!(
-            items
-                .iter()
-                .any(|entry| entry.get("call_id").and_then(Value::as_str) == Some("call_129"))
-        );
+        assert!(items
+            .iter()
+            .any(|entry| entry.get("call_id").and_then(Value::as_str) == Some("call_129")));
     }
 
     #[test]
@@ -1247,12 +1262,11 @@ mod tests {
         assert!(
             entries
                 .iter()
-                .any(|entry| entry.get("tool_call_id").and_then(Value::as_str) == Some("call_msg_129"))
+                .any(|entry| entry.get("tool_call_id").and_then(Value::as_str)
+                    == Some("call_msg_129"))
         );
-        assert!(
-            !entries
-                .iter()
-                .any(|entry| entry.get("tool_call_id").and_then(Value::as_str) == Some("call_msg_0"))
-        );
+        assert!(!entries
+            .iter()
+            .any(|entry| entry.get("tool_call_id").and_then(Value::as_str) == Some("call_msg_0")));
     }
 }

@@ -170,7 +170,10 @@ mod tests {
         let output = sanitize_glm_tools_schema(&payload);
         let function = output["tools"][0]["function"].as_object().unwrap();
         assert!(function.get("strict").is_none());
-        assert_eq!(function["parameters"]["properties"]["command"]["type"], "array");
+        assert_eq!(
+            function["parameters"]["properties"]["command"]["type"],
+            "array"
+        );
         assert_eq!(
             function["parameters"]["properties"]["command"]["items"]["type"],
             "string"

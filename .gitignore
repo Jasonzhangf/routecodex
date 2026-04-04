@@ -80,3 +80,6 @@ models/
 **/*.backup3
 sharedmodule/llmswitch-core/CACHE.md
 vendor/llmswitch-core/
+
+# Local agent skills (local only)
+.agents/

@@ -708,8 +708,7 @@ fn normalize_tool_name(raw_name: &str) -> Option<String> {
     if trimmed.is_empty() {
         return None;
     }
-    let trimmed_lowered = trimmed.to_ascii_lowercase();
-    let normalized_raw = if trimmed_lowered.starts_with("functions.") {
+    let normalized_raw = if trimmed.to_ascii_lowercase().starts_with("functions.") {
         trimmed[10..].trim().to_string()
     } else {
         trimmed.to_string()
@@ -717,8 +716,12 @@ fn normalize_tool_name(raw_name: &str) -> Option<String> {
     if normalized_raw.is_empty() {
         return None;
     }
+    let canonical_name =
+        crate::hub_resp_outbound_client_semantics::normalize_responses_function_name(Some(
+            normalized_raw.as_str(),
+        ))?;
 
-    let canonical_lowered = normalized_raw.to_ascii_lowercase();
+    let canonical_lowered = canonical_name.to_ascii_lowercase();
     let canonical = canonical_lowered.as_str();
     let known = matches!(
         canonical,
@@ -745,7 +748,10 @@ fn normalize_tool_name(raw_name: &str) -> Option<String> {
     if known {
         return Some(canonical.to_string());
     }
-    None
+
+    // Keep shape-only harvest generic: do not filter tool names here.
+    // The model-declared tool list is the source of truth; this layer should only normalize shape.
+    Some(canonical_name)
 }
 
 fn infer_tool_name_from_args(raw_args: Option<&Value>) -> Option<String> {
@@ -1511,19 +1517,21 @@ fn collect_thinking_reasoning_segments(message: &Map<String, Value>) -> Vec<Stri
 fn has_visible_text_content_excluding_reasoning(content: Option<&Value>) -> bool {
     match content {
         Some(Value::String(text)) => !text.trim().is_empty(),
-        Some(Value::Array(parts)) => parts
-            .iter()
-            .filter_map(|part| part.as_object())
-            .any(|part_row| {
-                let part_type = read_trimmed_string(part_row.get("type"))
-                    .unwrap_or_default()
-                    .to_ascii_lowercase();
-                if part_type == "thinking" || part_type == "reasoning" {
-                    return false;
-                }
-                read_trimmed_string(part_row.get("text")).is_some()
-                    || read_trimmed_string(part_row.get("content")).is_some()
-            }),
+        Some(Value::Array(parts)) => {
+            parts
+                .iter()
+                .filter_map(|part| part.as_object())
+                .any(|part_row| {
+                    let part_type = read_trimmed_string(part_row.get("type"))
+                        .unwrap_or_default()
+                        .to_ascii_lowercase();
+                    if part_type == "thinking" || part_type == "reasoning" {
+                        return false;
+                    }
+                    read_trimmed_string(part_row.get("text")).is_some()
+                        || read_trimmed_string(part_row.get("content")).is_some()
+                })
+        }
         Some(Value::Object(part_row)) => {
             let part_type = read_trimmed_string(part_row.get("type"))
                 .unwrap_or_default()
@@ -1613,7 +1621,11 @@ fn strip_tool_call_marker_payload(raw: &str) -> String {
 }
 
 fn sanitize_textual_marker_field_in_message(message: &mut Map<String, Value>, key: &str) -> bool {
-    let Some(raw) = message.get(key).and_then(Value::as_str).map(|v| v.to_string()) else {
+    let Some(raw) = message
+        .get(key)
+        .and_then(Value::as_str)
+        .map(|v| v.to_string())
+    else {
         return false;
     };
     let cleaned = strip_tool_call_marker_payload(raw.as_str());
@@ -1659,17 +1671,9 @@ fn sanitize_reasoning_fields_after_tool_harvest(message: &mut Map<String, Value>
                         let Some(entry_row) = entry.as_object_mut() else {
                             continue;
                         };
-                        let text_key = if entry_row
-                            .get("text")
-                            .and_then(Value::as_str)
-                            .is_some()
-                        {
+                        let text_key = if entry_row.get("text").and_then(Value::as_str).is_some() {
                             Some("text")
-                        } else if entry_row
-                            .get("content")
-                            .and_then(Value::as_str)
-                            .is_some()
-                        {
+                        } else if entry_row.get("content").and_then(Value::as_str).is_some() {
                             Some("content")
                         } else {
                             None
@@ -2118,8 +2122,14 @@ mod tests {
             governed.governed_payload["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
             "exec_command"
         );
-        assert_eq!(governed.governed_payload["choices"][0]["finish_reason"], "tool_calls");
-        assert_eq!(governed.governed_payload["choices"][0]["message"]["content"], "");
+        assert_eq!(
+            governed.governed_payload["choices"][0]["finish_reason"],
+            "tool_calls"
+        );
+        assert_eq!(
+            governed.governed_payload["choices"][0]["message"]["content"],
+            ""
+        );
     }
 
     #[test]
@@ -2253,7 +2263,14 @@ mod tests {
             normalize_tool_name("functions.shell_command"),
             Some("shell_command".to_string())
         );
-        assert!(normalize_tool_name("totally_unknown_tool").is_none());
+        assert_eq!(
+            normalize_tool_name("totally_unknown_tool"),
+            Some("totally_unknown_tool".to_string())
+        );
+        assert_eq!(
+            normalize_tool_name("mailbox.status"),
+            Some("mailbox.status".to_string())
+        );
     }
 
     #[test]
@@ -2607,10 +2624,7 @@ mod tests {
             result.governed_payload["choices"][0]["finish_reason"],
             "stop"
         );
-        assert_eq!(
-            message["reasoning_content"],
-            "先检查依赖并确认构建参数。"
-        );
+        assert_eq!(message["reasoning_content"], "先检查依赖并确认构建参数。");
         assert_eq!(message["content"], "");
     }
 
@@ -3401,10 +3415,9 @@ console.log('ok')"#;
         let out = extract_xml_tool_call_blocks(text, 1);
         assert_eq!(out.len(), 2);
         assert_eq!(out[0]["function"]["name"], "exec_command");
-        let args0: Value = serde_json::from_str(
-            out[0]["function"]["arguments"].as_str().unwrap_or("{}"),
-        )
-        .unwrap_or(Value::Null);
+        let args0: Value =
+            serde_json::from_str(out[0]["function"]["arguments"].as_str().unwrap_or("{}"))
+                .unwrap_or(Value::Null);
         assert_eq!(args0["cmd"], "cat a.ts");
         assert_eq!(args0["workdir"], "/tmp");
     }

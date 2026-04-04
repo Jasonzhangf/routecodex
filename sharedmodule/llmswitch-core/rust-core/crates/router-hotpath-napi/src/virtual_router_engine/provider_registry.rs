@@ -244,14 +244,19 @@ impl ProviderRegistry {
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
         let deepseek = map.get("deepseek").cloned();
-        let anthropic_thinking_config = map.get("anthropicThinkingConfig").cloned().filter(|v| !v.is_null());
+        let anthropic_thinking_config = map
+            .get("anthropicThinkingConfig")
+            .cloned()
+            .filter(|v| !v.is_null());
         let anthropic_thinking = map
             .get("anthropicThinking")
             .and_then(|v| v.as_str())
             .map(|v| v.trim().to_string())
             .filter(|v| !v.is_empty());
-        let anthropic_thinking_budgets =
-            map.get("anthropicThinkingBudgets").cloned().filter(|v| !v.is_null());
+        let anthropic_thinking_budgets = map
+            .get("anthropicThinkingBudgets")
+            .cloned()
+            .filter(|v| !v.is_null());
         Some(ProviderProfile {
             provider_key,
             provider_type,
@@ -293,9 +298,7 @@ pub(crate) fn derive_model_id(provider_key: &str) -> String {
     "".to_string()
 }
 
-fn normalize_model_capabilities(
-    value: Option<&Value>,
-) -> Option<HashMap<String, Vec<String>>> {
+fn normalize_model_capabilities(value: Option<&Value>) -> Option<HashMap<String, Vec<String>>> {
     let Some(map) = value.and_then(|v| v.as_object()) else {
         return None;
     };

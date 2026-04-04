@@ -74,14 +74,12 @@ fn read_command_from_args_map(args: &Map<String, Value>) -> Option<String> {
                 .or_else(|| read_value(row.get("toon")))
         })
         .or_else(|| {
-            args.get("args")
-                .and_then(Value::as_object)
-                .and_then(|row| {
-                    read_value(row.get("cmd"))
-                        .or_else(|| read_value(row.get("command")))
-                        .or_else(|| read_value(row.get("script")))
-                        .or_else(|| read_value(row.get("toon")))
-                })
+            args.get("args").and_then(Value::as_object).and_then(|row| {
+                read_value(row.get("cmd"))
+                    .or_else(|| read_value(row.get("command")))
+                    .or_else(|| read_value(row.get("script")))
+                    .or_else(|| read_value(row.get("toon")))
+            })
         })
 }
 
@@ -216,7 +214,10 @@ fn normalize_output_item_to_input(item: &Value) -> Option<Value> {
                 row.get("name").and_then(Value::as_str).map(|name| {
                     let mut fn_node = Map::new();
                     fn_node.insert("name".to_string(), Value::String(name.to_string()));
-                    if let Some(args) = normalized_shell_args.as_ref().or_else(|| row.get("arguments")) {
+                    if let Some(args) = normalized_shell_args
+                        .as_ref()
+                        .or_else(|| row.get("arguments"))
+                    {
                         fn_node.insert("arguments".to_string(), args.clone());
                     }
                     fn_node
@@ -237,7 +238,10 @@ fn normalize_output_item_to_input(item: &Value) -> Option<Value> {
         if let Some(name) = row.get("name").and_then(Value::as_str) {
             out.insert("name".to_string(), Value::String(name.to_string()));
         }
-        if let Some(arguments) = normalized_shell_args.as_ref().or_else(|| row.get("arguments")) {
+        if let Some(arguments) = normalized_shell_args
+            .as_ref()
+            .or_else(|| row.get("arguments"))
+        {
             out.insert("arguments".to_string(), arguments.clone());
         }
         if let Some(fn_node) = function_node {

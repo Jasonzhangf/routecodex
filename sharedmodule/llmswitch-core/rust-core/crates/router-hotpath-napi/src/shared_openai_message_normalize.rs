@@ -313,7 +313,8 @@ fn normalize_openai_tool(tool: &Value) -> Value {
 }
 
 fn sanitize_tool_content_value(content: &Value) -> Value {
-    const EMPTY_TOOL_FALLBACK: &str = "[RouteCodex] Tool output was empty; execution status unknown.";
+    const EMPTY_TOOL_FALLBACK: &str =
+        "[RouteCodex] Tool output was empty; execution status unknown.";
     if content.is_null() {
         return Value::String(EMPTY_TOOL_FALLBACK.to_string());
     }
@@ -552,7 +553,10 @@ mod tests {
             .and_then(|v| v.as_str())
             .expect("normalized arguments");
         let args: serde_json::Value = serde_json::from_str(args_text).expect("parse args");
-        assert_eq!(args.get("command").and_then(|v| v.as_str()), Some("echo hello"));
+        assert_eq!(
+            args.get("command").and_then(|v| v.as_str()),
+            Some("echo hello")
+        );
     }
 
     #[test]
@@ -574,7 +578,10 @@ mod tests {
             .expect("normalized arguments");
         let args: serde_json::Value = serde_json::from_str(args_text).expect("parse args");
         assert_eq!(args.get("cmd").and_then(|v| v.as_str()), Some("git status"));
-        assert_eq!(args.get("command").and_then(|v| v.as_str()), Some("git status"));
+        assert_eq!(
+            args.get("command").and_then(|v| v.as_str()),
+            Some("git status")
+        );
     }
 
     #[test]

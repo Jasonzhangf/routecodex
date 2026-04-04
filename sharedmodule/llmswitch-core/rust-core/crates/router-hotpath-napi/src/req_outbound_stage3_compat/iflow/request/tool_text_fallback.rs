@@ -57,7 +57,8 @@ fn build_tool_markup_instruction() -> String {
 }
 
 fn stringify_tool_output(value: Option<&Value>) -> String {
-    const EMPTY_TOOL_FALLBACK: &str = "[RouteCodex] Tool output was empty; execution status unknown.";
+    const EMPTY_TOOL_FALLBACK: &str =
+        "[RouteCodex] Tool output was empty; execution status unknown.";
     match value {
         Some(Value::String(text)) => {
             if text.trim().is_empty() {
@@ -408,6 +409,7 @@ mod tests {
             .and_then(|entry| entry.get("content"))
             .and_then(Value::as_str)
             .unwrap_or("");
-        assert!(tool_result_text.contains("[RouteCodex] Tool output was empty; execution status unknown."));
+        assert!(tool_result_text
+            .contains("[RouteCodex] Tool output was empty; execution status unknown."));
     }
 }

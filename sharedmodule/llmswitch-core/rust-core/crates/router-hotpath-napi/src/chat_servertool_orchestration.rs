@@ -72,10 +72,7 @@ fn is_canonical_chat_completion_payload(payload: &Value) -> bool {
         Some(v) => v,
         None => return false,
     };
-    first
-        .get("message")
-        .and_then(|v| v.as_object())
-        .is_some()
+    first.get("message").and_then(|v| v.as_object()).is_some()
 }
 
 fn build_review_operations(metadata: &Value) -> Value {
