@@ -79,6 +79,18 @@ const STOP_MESSAGE_STAGE_TIMEOUT_MS = 900_000;
 const STOP_MESSAGE_LOOP_WARN_THRESHOLD = 5;
 const STOP_MESSAGE_LOOP_FAIL_THRESHOLD = 10;
 
+function logServerToolNonBlocking(stage: string, error: unknown, details?: Record<string, unknown>): void {
+  const message = error instanceof Error ? error.message : String(error ?? 'unknown');
+  const detailEntries =
+    details && typeof details === 'object'
+      ? Object.entries(details)
+          .map(([key, value]) => `${key}=${String(value)}`)
+          .join(' ')
+      : '';
+  // eslint-disable-next-line no-console
+  console.warn(`[servertool][non-blocking] stage=${stage} error=${message}${detailEntries ? ` ${detailEntries}` : ''}`);
+}
+
 function parseTimeoutMs(raw: unknown, fallback: number): number {
   const n = typeof raw === 'string' ? Number(raw.trim()) : typeof raw === 'number' ? raw : NaN;
   if (!Number.isFinite(n) || n <= 0) {
@@ -524,7 +536,10 @@ async function shouldDisableServerToolTimeoutForClockHold(args: {
       return false;
     }
     return true;
-  } catch {
+  } catch (error) {
+    logServerToolNonBlocking('clock_hold_disable_timeout_probe', error, {
+      serverToolTimeoutMs: args.serverToolTimeoutMs
+    });
     return false;
   }
 }
@@ -590,8 +605,10 @@ export async function runServerToolOrchestration(
       console.log(
         `${color}[servertool][stop_watch] requestId=${options.requestId} stage=${viewStage} ${brief}${RESET}`
       );
-    } catch {
-      /* best-effort logging */
+    } catch (error) {
+      logServerToolNonBlocking('log_stop_entry_console', error, {
+        requestId: options.requestId
+      });
     }
     appendServerToolProgressFileEvent({
       requestId: options.requestId,
@@ -615,8 +632,11 @@ export async function runServerToolOrchestration(
     try {
       // eslint-disable-next-line no-console
       console.log(`${color}[servertool] requestId=${options.requestId} tool=${tool} stage=${stage} result=${result}${RESET}`);
-    } catch {
-      /* best-effort logging */
+    } catch (error) {
+      logServerToolNonBlocking('log_progress_console', error, {
+        requestId: options.requestId,
+        flowId: flowId || 'none'
+      });
     }
     appendServerToolProgressFileEvent({
       requestId: options.requestId,
@@ -669,8 +689,11 @@ export async function runServerToolOrchestration(
         queueTotal: event.queueTotal,
         ...(event.flowId ? { flowId: event.flowId } : {})
       });
-    } catch {
-      // best-effort only
+    } catch (error) {
+      logServerToolNonBlocking('log_auto_hook_trace_stage_recorder', error, {
+        requestId: options.requestId,
+        hookId: event.hookId
+      });
     }
 
     if (event.hookId === 'stop_message_auto' && event.result === 'miss') {
@@ -681,8 +704,10 @@ export async function runServerToolOrchestration(
         console.log(
           `${BLUE}[servertool][stop_compare] requestId=${options.requestId} stage=miss flow=none ${summary}${RESET}`
         );
-      } catch {
-        // best-effort logging
+      } catch (error) {
+        logServerToolNonBlocking('log_auto_hook_stop_compare_console', error, {
+          requestId: options.requestId
+        });
       }
       const compareResult = compareContext
         ? `${compareContext.decision}_${compareContext.reason.toLowerCase().replace(/[^a-z0-9]+/g, '_') || 'unknown'}`
@@ -711,8 +736,10 @@ export async function runServerToolOrchestration(
       console.log(
         `${BLUE}[servertool][stop_compare] requestId=${options.requestId} stage=${viewStage} flow=${flowToken} ${summary}${RESET}`
       );
-    } catch {
-      // best-effort logging
+    } catch (error) {
+      logServerToolNonBlocking('log_stop_compare_console', error, {
+        requestId: options.requestId
+      });
     }
     const compareResult = compareContext
       ? `${compareContext.decision}_${compareContext.reason.toLowerCase().replace(/[^a-z0-9]+/g, '_') || 'unknown'}`
@@ -735,8 +762,10 @@ export async function runServerToolOrchestration(
         summary,
         ...(compareContext ? { compare: compareContext } : {})
       });
-    } catch {
-      // best-effort only
+    } catch (error) {
+      logServerToolNonBlocking('log_stop_compare_stage_recorder', error, {
+        requestId: options.requestId
+      });
     }
   };
 
@@ -816,8 +845,10 @@ export async function runServerToolOrchestration(
         mode: engineResult.mode,
         reason: skipReason
       });
-    } catch {
-      // best-effort only
+    } catch (error) {
+      logServerToolNonBlocking('record_servertool_match_skipped', error, {
+        requestId: options.requestId
+      });
     }
     appendServerToolProgressFileEvent({
       requestId: options.requestId,
@@ -852,8 +883,10 @@ export async function runServerToolOrchestration(
       flowId,
       hasFollowup: Boolean(engineResult.execution.followup)
     });
-  } catch {
-    // best-effort only
+  } catch (error) {
+    logServerToolNonBlocking('record_servertool_match_hit', error, {
+      requestId: options.requestId
+    });
   }
   const totalSteps = 5;
   logProgress(1, totalSteps, 'matched', { flowId });
@@ -879,8 +912,11 @@ export async function runServerToolOrchestration(
             sourceRequestId: options.requestId
           });
         }
-      } catch {
-        // best-effort: do not fail the response conversion just because persistence failed
+      } catch (error) {
+        logServerToolNonBlocking('save_pending_servertool_injection', error, {
+          requestId: options.requestId,
+          flowId
+        });
       }
     }
     logProgress(5, totalSteps, 'completed (mixed tools; no reenter)', { flowId });
@@ -1553,8 +1589,8 @@ function disableStopMessageAfterFailedFollowup(
     (state as RoutingInstructionState).stopMessageAiSeedPrompt = undefined;
     (state as RoutingInstructionState).stopMessageAiHistory = undefined;
     saveRoutingInstructionStateSync(key, state);
-  } catch {
-    // best-effort: do not crash the request due to state cleanup failures
+  } catch (error) {
+    logServerToolNonBlocking('disable_stop_message_after_failed_followup', error);
   }
 }
 
@@ -1633,7 +1669,8 @@ function cloneRoutingInstructionState(state: RoutingInstructionState | null): Ro
   try {
     const serialized = serializeRoutingInstructionState(state);
     return deserializeRoutingInstructionState(serialized);
-  } catch {
+  } catch (error) {
+    logServerToolNonBlocking('clone_routing_instruction_state', error);
     return null;
   }
 }
@@ -1965,7 +2002,8 @@ function hashPayload(payload: JsonObject): string | null {
   try {
     const stable = stableStringify(payload);
     return createHash('sha1').update(stable).digest('hex');
-  } catch {
+  } catch (error) {
+    logServerToolNonBlocking('hash_payload', error);
     return null;
   }
 }
@@ -1976,7 +2014,8 @@ function hashStopMessageRequestResponsePair(payload: JsonObject, response?: Json
     const normalizedResponse = sanitizeLoopHashValue(response ?? {});
     const stable = stableStringify({ request: normalizedPayload, response: normalizedResponse });
     return createHash('sha1').update(stable).digest('hex');
-  } catch {
+  } catch (error) {
+    logServerToolNonBlocking('hash_stop_message_request_response_pair', error);
     return null;
   }
 }

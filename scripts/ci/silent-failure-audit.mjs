@@ -10,7 +10,7 @@ const jsonOutput = args.has('--json');
 
 const NOISE_HINT_RE = /\b(ignore|best[- ]effort|non-blocking|swallow|fallback)\b/i;
 const HAS_HANDLED_RE =
-  /\b(throw|console\.(warn|error|info)|logger\.(warn|warning|error|info)|report\w*Error|logProcessLifecycle|emit\w*|record\w*Error)\b/;
+  /\b(throw|console\.(warn|error|info)|logger\.(warn|warning|error|info)|report\w*Error|logProcessLifecycle|log\w*NonBlocking|emit\w*|record\w*Error)\b/;
 
 function walk(dir, out) {
   if (!fs.existsSync(dir)) return;

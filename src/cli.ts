@@ -39,6 +39,7 @@ import { registerSessionInjectCommand } from './cli/register/session-inject-comm
 import { registerSessionAdminCommand } from './cli/register/session-admin-command.js';
 import { registerGuardianDaemonCommand } from './cli/register/guardian-daemon-command.js';
 import { listManagedServerZombieChildrenByPort } from './utils/managed-server-pids.js';
+import { logProcessLifecycle } from './utils/process-lifecycle-logger.js';
 import {
   ensureGuardianDaemon,
   registerGuardianProcess,
@@ -76,7 +77,8 @@ const pkgVersion: string = (() => {
     const txt = fs.readFileSync(pkgPath, 'utf-8');
     const j = JSON.parse(txt);
     return typeof j?.version === 'string' ? j.version : '0.0.0';
-  } catch {
+  } catch (error) {
+    logCliNonBlocking('resolve_package_version', error);
     return '0.0.0';
   }
 })();
@@ -92,8 +94,8 @@ const pkgName: string = (() => {
     if (typeof j?.name === 'string' && j.name.trim()) {
       return j.name.trim();
     }
-  } catch {
-    // ignore and fall back
+  } catch (error) {
+    logCliNonBlocking('resolve_package_name', error);
   }
   return 'routecodex';
 })();
@@ -105,6 +107,19 @@ const IS_DEV_PACKAGE = pkgName === 'routecodex';
 const IS_WINDOWS = process.platform === 'win32';
 const DEFAULT_DEV_PORT = 5555;
 const TOKEN_DAEMON_PID_FILE = resolveRccPath('token-daemon.pid');
+
+function logCliNonBlocking(stage: string, error: unknown, details?: Record<string, unknown>): void {
+  const message = error instanceof Error ? error.message : String(error ?? 'unknown');
+  logProcessLifecycle({
+    event: 'cli_non_blocking_error',
+    source: 'cli.main',
+    details: {
+      stage,
+      message,
+      ...(details ?? {})
+    }
+  });
+}
 
 async function ensureGlobalGuardian(): Promise<void> {
   await ensureGuardianDaemon({
@@ -208,30 +223,40 @@ async function stopTokenDaemonIfRunning(): Promise<void> {
     try {
       process.kill(pid, 0);
       running = true;
-    } catch {
+    } catch (error) {
+      logCliNonBlocking('stop_token_daemon_probe_running', error, { pid });
       running = false;
     }
     if (!running) {
-      try { fs.unlinkSync(TOKEN_DAEMON_PID_FILE); } catch { /* ignore */ }
+      try {
+        fs.unlinkSync(TOKEN_DAEMON_PID_FILE);
+      } catch (error) {
+        logCliNonBlocking('stop_token_daemon_unlink_stale_pid_file', error, { pidFile: TOKEN_DAEMON_PID_FILE });
+      }
       return;
     }
     try {
       killPidBestEffort(pid, { force: false });
-    } catch {
-      // ignore
+    } catch (error) {
+      logCliNonBlocking('stop_token_daemon_signal', error, { pid });
     }
     const deadline = Date.now() + 2000;
     while (Date.now() < deadline) {
       try {
         process.kill(pid, 0);
-      } catch {
+      } catch (error) {
+        logCliNonBlocking('stop_token_daemon_wait_for_exit', error, { pid });
         break;
       }
       await new Promise(resolve => setTimeout(resolve, 100));
     }
-    try { fs.unlinkSync(TOKEN_DAEMON_PID_FILE); } catch { /* ignore */ }
-  } catch {
-    // best-effort: failures here must not break CLI shutdown
+    try {
+      fs.unlinkSync(TOKEN_DAEMON_PID_FILE);
+    } catch (error) {
+      logCliNonBlocking('stop_token_daemon_unlink_pid_file', error, { pidFile: TOKEN_DAEMON_PID_FILE });
+    }
+  } catch (error) {
+    logCliNonBlocking('stop_token_daemon_if_running', error);
   }
 }
 
@@ -239,55 +264,73 @@ async function stopTokenDaemonIfRunning(): Promise<void> {
 try {
   const { createProviderUpdateCommand } = await import('./commands/provider-update.js');
   program.addCommand(createProviderUpdateCommand());
-} catch { /* optional: command not available in some builds */ }
+} catch (error) {
+  logCliNonBlocking('load_optional_command_provider_update', error);
+}
 
 // Camoufox fingerprint debug command (optional)
 try {
   const { createCamoufoxFpCommand } = await import('./commands/camoufox-fp.js');
   program.addCommand(createCamoufoxFpCommand());
-} catch { /* optional */ }
+} catch (error) {
+  logCliNonBlocking('load_optional_command_camoufox_fp', error);
+}
 
 // Camoufox fingerprint backfill command (optional)
 try {
   const { createCamoufoxBackfillCommand } = await import('./commands/camoufox-backfill.js');
   program.addCommand(createCamoufoxBackfillCommand());
-} catch { /* optional */ }
+} catch (error) {
+  logCliNonBlocking('load_optional_command_camoufox_backfill', error);
+}
 
 // Token daemon command group - manage OAuth tokens
 try {
   const { createTokenDaemonCommand } = await import('./commands/token-daemon.js');
   program.addCommand(createTokenDaemonCommand());
-} catch { /* optional: command not available in some builds */ }
+} catch (error) {
+  logCliNonBlocking('load_optional_command_token_daemon', error);
+}
 
 // Quota status command - inspect daemon-managed quota snapshot
 try {
   const { createQuotaStatusCommand } = await import('./commands/quota-status.js');
   program.addCommand(createQuotaStatusCommand());
-} catch { /* optional */ }
+} catch (error) {
+  logCliNonBlocking('load_optional_command_quota_status', error);
+}
 
 // Quota daemon command - offline replay/once maintenance for provider-quota snapshot
 try {
   const { createQuotaDaemonCommand } = await import('./commands/quota-daemon.js');
   program.addCommand(createQuotaDaemonCommand());
-} catch { /* optional */ }
+} catch (error) {
+  logCliNonBlocking('load_optional_command_quota_daemon', error);
+}
 
 // OAuth command - force re-auth for a specific token (Camoufox-aware when enabled)
 try {
   const { createOauthCommand } = await import('./commands/oauth.js');
   program.addCommand(createOauthCommand());
-} catch { /* optional: command not available in some builds */ }
+} catch (error) {
+  logCliNonBlocking('load_optional_command_oauth', error);
+}
 
 // Validate command - auto start server then run E2E checks
 try {
   const { createValidateCommand } = await import('./commands/validate.js');
   program.addCommand(createValidateCommand());
-} catch { /* optional */ }
+} catch (error) {
+  logCliNonBlocking('load_optional_command_validate', error);
+}
 
 // User config migration command - explicitly move config.json/config/provider/auth from legacy ~/.routecodex to ~/.rcc
 try {
   const { createUserConfigMigrateCommand } = await import('./commands/migrate-user-config.js');
   program.addCommand(createUserConfigMigrateCommand());
-} catch { /* optional */ }
+} catch (error) {
+  logCliNonBlocking('load_optional_command_migrate_user_config', error);
+}
 
 // Deprecated `code` command (guides users to `claude`)
 registerCodeCommand(program, {
@@ -544,21 +587,47 @@ function setupKeypress(onInterrupt: () => void): () => void {
       const onData = (data: Buffer) => {
         const s = data.toString('utf8');
         // Ctrl+C
-        if (s === '\u0003') { try { onInterrupt(); } catch { /* ignore */ } return; }
+        if (s === '\u0003') {
+          try {
+            onInterrupt();
+          } catch (error) {
+            logCliNonBlocking('setup_keypress_on_interrupt_ctrl_c', error);
+          }
+          return;
+        }
         // 'q' or 'Q' quick quit
-        if (s === 'q' || s === 'Q') { try { onInterrupt(); } catch { /* ignore */ } return; }
+        if (s === 'q' || s === 'Q') {
+          try {
+            onInterrupt();
+          } catch (error) {
+            logCliNonBlocking('setup_keypress_on_interrupt_q', error);
+          }
+          return;
+        }
       };
       stdin.setRawMode?.(true);
       stdin.resume?.();
       stdin.on?.('data', onData);
       return () => {
-        try { stdin.off?.('data', onData); } catch { /* ignore */ }
-        try { stdin.setRawMode?.(false); } catch { /* ignore */ }
-        try { stdin.pause?.(); } catch { /* ignore */ }
+        try {
+          stdin.off?.('data', onData);
+        } catch (error) {
+          logCliNonBlocking('setup_keypress_cleanup_off', error);
+        }
+        try {
+          stdin.setRawMode?.(false);
+        } catch (error) {
+          logCliNonBlocking('setup_keypress_cleanup_raw_mode', error);
+        }
+        try {
+          stdin.pause?.();
+        } catch (error) {
+          logCliNonBlocking('setup_keypress_cleanup_pause', error);
+        }
       };
     }
-  } catch {
-    /* ignore */
+  } catch (error) {
+    logCliNonBlocking('setup_keypress_init', error);
   }
   return () => {
     // No-op cleanup when stdin is not interactive

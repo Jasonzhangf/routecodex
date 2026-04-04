@@ -40,6 +40,12 @@ export interface ToolGovernanceOptions {
   };
 }
 
+function logToolGovernorNonBlocking(stage: string, error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error ?? 'unknown');
+  // eslint-disable-next-line no-console
+  console.warn(`[tool-governor][non-blocking] stage=${stage} error=${message}`);
+}
+
 function tryWriteSnapshot(options: ToolGovernanceOptions | undefined, stage: string, data: Unknown): void {
   try {
     // 仅在 verbose 级别保存快照（环境变量）
@@ -60,7 +66,9 @@ function tryWriteSnapshot(options: ToolGovernanceOptions | undefined, stage: str
     fs.mkdirSync(dir, { recursive: true });
     const payload = JSON.stringify(data, null, 2);
     fs.writeFileSync(file, payload, 'utf-8');
-  } catch { /* ignore snapshot errors */ }
+  } catch (error) {
+    logToolGovernorNonBlocking(`snapshot_write:${stage}`, error);
+  }
 }
 
 /**
@@ -94,7 +102,9 @@ export function processChatRequestTools(request: Unknown, opts?: ToolGovernanceO
       // 严格化工具 schema（apply_patch/shell/MCP 等）保持在唯一治理点，避免重复注入
       (out as any).tools = augmentOpenAITools(tools);
     }
-  } catch { /* best-effort: 保持原样 */ }
+  } catch (error) {
+    logToolGovernorNonBlocking('request_minimal_tool_shape_repair', error);
+  }
 
   // 1) 移除工具 schema 严格化（与 统一标准，不在此处约束 tools 结构）
 
@@ -115,12 +125,17 @@ export function processChatRequestTools(request: Unknown, opts?: ToolGovernanceO
           canonical.tool_choice = 'required';
         }
       }
-    } catch { /* ignore */ }
+    } catch (error) {
+      logToolGovernorNonBlocking('request_tool_choice_policy', error);
+    }
     // 4) Enforce payload budget (context bytes) with minimal loss policy
     const modelId = typeof (canonical as any)?.model === 'string' ? String((canonical as any).model) : 'unknown';
     const budgeted = enforceChatBudget(canonical, modelId);
     return normalizeSpecialToolCallsOnRequest(budgeted);
-  } catch { return out; }
+  } catch (error) {
+    logToolGovernorNonBlocking('process_chat_request_tools', error);
+    return out;
+  }
 }
 
 /**
@@ -171,17 +186,18 @@ export function normalizeApplyPatchToolCallsOnResponse(chat: Unknown): Unknown {
                   snippet ? ` args=${snippet}` : ''
                 }\x1b[0m`
               );
-            } catch {
-              // logging best-effort
+            } catch (error) {
+              logToolGovernorNonBlocking('response_apply_patch_regression_capture', error);
             }
           }
-        } catch {
-          // best-effort per tool_call
+        } catch (error) {
+          logToolGovernorNonBlocking('response_tool_call_normalize_item', error);
         }
       }
     }
     return out;
-  } catch {
+  } catch (error) {
+    logToolGovernorNonBlocking('normalize_apply_patch_tool_calls_on_response', error);
     return chat;
   }
 }
@@ -253,8 +269,8 @@ function normalizeSpecialToolCallsOnRequest(request: Unknown): Unknown {
                     snippet ? ` args=${snippet}` : ''
                   }\x1b[0m`
                 );
-              } catch {
-                // logging best-effort
+              } catch (error) {
+                logToolGovernorNonBlocking('request_apply_patch_regression_capture', error);
               }
             }
             continue;
@@ -272,7 +288,8 @@ function normalizeSpecialToolCallsOnRequest(request: Unknown): Unknown {
               let parsed: any;
               try {
                 parsed = JSON.parse(argsStr);
-              } catch {
+              } catch (error) {
+                logToolGovernorNonBlocking('request_exec_command_parse_json', error);
                 parsed = parseLenient(argsStr);
               }
               if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
@@ -280,14 +297,15 @@ function normalizeSpecialToolCallsOnRequest(request: Unknown): Unknown {
                 const next = normalized.ok ? normalized.normalized : (parsed as Record<string, unknown>);
                 try {
                   (fn as any).arguments = JSON.stringify(next ?? {});
-                } catch {
+                } catch (error) {
+                  logToolGovernorNonBlocking('request_exec_command_json_stringify', error);
                   (fn as any).arguments = '{}';
                 }
               }
             }
           }
-        } catch {
-          // best-effort per tool_call
+        } catch (error) {
+          logToolGovernorNonBlocking('request_tool_call_normalize_item', error);
         }
       }
     }
@@ -295,7 +313,8 @@ function normalizeSpecialToolCallsOnRequest(request: Unknown): Unknown {
       injectNestedApplyPatchPolicyNotice(messages, rewrittenNestedApplyPatchCount);
     }
     return out;
-  } catch {
+  } catch (error) {
+    logToolGovernorNonBlocking('normalize_special_tool_calls_on_request', error);
     return request;
   }
 }
@@ -331,7 +350,10 @@ function enhanceResponseToolArguments(chat: Unknown): Unknown {
           out = out.replace(/-exec([^;]*?)\\+;/g, (_m, g1) => `-exec${g1} \\;`);
           out = out.replace(/(?<!\\)\(/g, '\\(').replace(/(?<!\\)\)/g, '\\)');
           return out;
-        } catch { return s; }
+        } catch (error) {
+          logToolGovernorNonBlocking('enhance_response_tool_arguments_repair_find_meta', error);
+          return s;
+        }
       };
       for (const tc of tcs) {
         try {
@@ -344,7 +366,12 @@ function enhanceResponseToolArguments(chat: Unknown): Unknown {
           // Extra normalization for shell
           if (name === 'shell') {
             let parsed: any;
-            try { parsed = JSON.parse(repaired); } catch { parsed = parseLenient(repaired); }
+            try {
+              parsed = JSON.parse(repaired);
+            } catch (error) {
+              logToolGovernorNonBlocking('enhance_response_tool_arguments_parse_json', error);
+              parsed = parseLenient(repaired);
+            }
             if (parsed && typeof parsed === 'object') {
               const cmd = (parsed as any).command;
               if (Array.isArray(cmd)) {
@@ -366,7 +393,12 @@ function enhanceResponseToolArguments(chat: Unknown): Unknown {
                   (parsed as any).command = ['bash','-lc', repairFindMeta(body)];
                 }
               }
-              try { finalStr = JSON.stringify(parsed); } catch { finalStr = repaired; }
+              try {
+                finalStr = JSON.stringify(parsed);
+              } catch (error) {
+                logToolGovernorNonBlocking('enhance_response_tool_arguments_json_stringify', error);
+                finalStr = repaired;
+              }
             }
           } else if (name === 'exec_command') {
             const validation = validateToolCall('exec_command', repaired, validationOptions);
@@ -377,14 +409,29 @@ function enhanceResponseToolArguments(chat: Unknown): Unknown {
             }
           }
           if (fn) fn.arguments = finalStr;
-        } catch { /* keep original */ }
+        } catch (error) {
+          logToolGovernorNonBlocking('enhance_response_tool_arguments_item', error);
+        }
       }
       // Ensure finish_reason/tool_calls invariant if missing (idempotent with canonicalizer)
-      try { if (!ch.finish_reason) ch.finish_reason = 'tool_calls'; } catch { /* ignore */ }
-      try { if (msg && typeof msg === 'object' && Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) msg.content = null; } catch { /* ignore */ }
+      try {
+        if (!ch.finish_reason) ch.finish_reason = 'tool_calls';
+      } catch (error) {
+        logToolGovernorNonBlocking('enhance_response_tool_arguments_finish_reason', error);
+      }
+      try {
+        if (msg && typeof msg === 'object' && Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
+          msg.content = null;
+        }
+      } catch (error) {
+        logToolGovernorNonBlocking('enhance_response_tool_arguments_message_content', error);
+      }
     }
     return out;
-  } catch { return chat; }
+  } catch (error) {
+    logToolGovernorNonBlocking('enhance_response_tool_arguments', error);
+    return chat;
+  }
 }
 
 export function processChatResponseTools(resp: Unknown): Unknown {
@@ -393,7 +440,10 @@ export function processChatResponseTools(resp: Unknown): Unknown {
     const canon = normalizeChatResponseReasoningToolsWithNative(resp as any);
     const withPatch = normalizeApplyPatchToolCallsOnResponse(canon as Unknown);
     return enhanceResponseToolArguments(withPatch as Unknown);
-  } catch { return resp; }
+  } catch (error) {
+    logToolGovernorNonBlocking('process_chat_response_tools', error);
+    return resp;
+  }
 }
 
 export interface GovernContext extends ToolGovernanceOptions {
@@ -419,28 +469,38 @@ export function governTools(payload: Unknown, ctx: GovernContext): Unknown {
   try {
     const opts: ToolGovernanceOptions = { snapshot: ctx?.snapshot || { enabled: true, endpoint: ep, requestId: ctx?.requestId } };
     tryWriteSnapshot(opts, 'response_before_canonicalize', payload);
-  } catch { /* ignore */ }
+  } catch (error) {
+    logToolGovernorNonBlocking('govern_tools_snapshot_before_canonicalize', error);
+  }
   let out = processChatResponseTools(payload);
   // 变更后快照：响应侧 canonicalize 之后
   try {
     const opts: ToolGovernanceOptions = { snapshot: ctx?.snapshot || { enabled: true, endpoint: ep, requestId: ctx?.requestId } };
     tryWriteSnapshot(opts, 'response_after_canonicalize', out as any);
-  } catch { /* ignore */ }
+  } catch (error) {
+    logToolGovernorNonBlocking('govern_tools_snapshot_after_canonicalize', error);
+  }
   if (ep === 'responses' && ctx?.stream !== true && ctx?.produceRequiredAction !== false) {
     // 变更前快照：构造 required_action 之前
     try {
       const opts: ToolGovernanceOptions = { snapshot: ctx?.snapshot || { enabled: true, endpoint: ep, requestId: ctx?.requestId } };
       tryWriteSnapshot(opts, 'response_before_required_action', out as any);
-    } catch { /* ignore */ }
+    } catch (error) {
+      logToolGovernorNonBlocking('govern_tools_snapshot_before_required_action', error);
+    }
     try {
       const { buildResponsesPayloadFromChat } = require('../responses/responses-openai-bridge.js');
       const res = buildResponsesPayloadFromChat(out, { requestId: ctx?.requestId });
       try {
         const opts: ToolGovernanceOptions = { snapshot: ctx?.snapshot || { enabled: true, endpoint: ep, requestId: ctx?.requestId } };
         tryWriteSnapshot(opts, 'response_after_required_action', res as any);
-      } catch { /* ignore */ }
+      } catch (error) {
+        logToolGovernorNonBlocking('govern_tools_snapshot_after_required_action', error);
+      }
       return res as any;
-    } catch { /* ignore mapping errors and return canonicalized chat */ }
+    } catch (error) {
+      logToolGovernorNonBlocking('govern_tools_required_action_bridge', error);
+    }
   }
   return out;
 }

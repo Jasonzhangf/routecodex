@@ -110,6 +110,19 @@ function resolveExitGracePeriodMs(env: NodeJS.ProcessEnv): number {
   return Math.floor(parsed);
 }
 
+function logLauncherNonBlocking(stage: string, error: unknown, details?: Record<string, unknown>): void {
+  const message = error instanceof Error ? error.message : String(error ?? 'unknown');
+  logProcessLifecycle({
+    event: 'launcher_non_blocking_error',
+    source: 'cli.launcher.kernel',
+    details: {
+      stage,
+      message,
+      ...(details ?? {})
+    }
+  });
+}
+
 function resolveLauncherConfigPath(
   ctx: LauncherCommandContext,
   fsImpl: typeof fs,
@@ -178,7 +191,8 @@ function readProcessPpidAndCommand(pid: number): { ppid: number | null; command:
       ppid: Number.isFinite(ppid) && ppid > 0 ? ppid : null,
       command: match[2] || ''
     };
-  } catch {
+  } catch (error) {
+    logLauncherNonBlocking('read_process_ppid_and_command', error, { pid });
     return { ppid: null, command: '' };
   }
 }
@@ -335,7 +349,8 @@ async function checkServerReady(
             return true;
           }
         }
-      } catch {
+      } catch (error) {
+        logLauncherNonBlocking('check_server_ready_probe_target', error, { target, attempt });
         // try next target
       }
     }
@@ -366,7 +381,8 @@ function resolveServerProbeTargets(serverUrl: string): string[] {
       loopback.hostname = '127.0.0.1';
       pushTarget(loopback.toString());
     }
-  } catch {
+  } catch (error) {
+    logLauncherNonBlocking('resolve_server_probe_targets_parse_url', error, { serverUrl });
     // ignore invalid URL parse; keep original
   }
   return out;
@@ -385,11 +401,17 @@ async function probeServerState(
       signal: controller.signal,
       method: 'GET',
       headers
-    }).catch(() => null);
+    }).catch((error) => {
+      logLauncherNonBlocking('probe_server_state_fetch', error, { url });
+      return null;
+    });
     if (!response || !response.ok) {
       return { ok: false, body: null };
     }
-    const body = await response.json().catch(() => null);
+    const body = await response.json().catch((error) => {
+      logLauncherNonBlocking('probe_server_state_parse_json', error, { url });
+      return null;
+    });
     return { ok: true, body };
   } finally {
     clearTimeout(timeoutId);
@@ -416,7 +438,8 @@ function rotateLogFile(fsImpl: typeof fs, filePath: string, maxBytes = 8 * 1024 
           }
           fsImpl.renameSync(from, to);
         }
-      } catch {
+      } catch (error) {
+        logLauncherNonBlocking('rotate_log_file_rotate_backup', error, { from, to });
         // ignore
       }
     }
@@ -425,12 +448,14 @@ function rotateLogFile(fsImpl: typeof fs, filePath: string, maxBytes = 8 * 1024 
     if (fsImpl.existsSync(firstBackup)) {
       try {
         fsImpl.unlinkSync(firstBackup);
-      } catch {
+      } catch (error) {
+        logLauncherNonBlocking('rotate_log_file_remove_first_backup', error, { firstBackup });
         // ignore
       }
     }
     fsImpl.renameSync(filePath, firstBackup);
-  } catch {
+  } catch (error) {
+    logLauncherNonBlocking('rotate_log_file', error, { filePath });
     // ignore rotation failures
   }
 }
@@ -549,7 +574,8 @@ async function ensureServerReady(
       }
       try {
         serverProcess.unref?.();
-      } catch {
+      } catch (error) {
+        logLauncherNonBlocking('ensure_server_ready_unref_child', error, { port: resolved.port, logPath });
         // ignore
       }
     } catch (error) {
@@ -571,7 +597,8 @@ async function ensureServerReady(
   } finally {
     try {
       fsImpl.closeSync(logFd);
-    } catch {
+    } catch (error) {
+      logLauncherNonBlocking('ensure_server_ready_close_log_fd', error, { port: resolved.port, logPath });
       // ignore
     }
   }
@@ -616,7 +643,8 @@ function resolveWorkingDirectory(ctx: LauncherCommandContext, fsImpl: typeof fs,
 
   try {
     return pathImpl.resolve(getCwd());
-  } catch {
+  } catch (error) {
+    logLauncherNonBlocking('resolve_working_directory_primary_cwd', error);
     // Fallback for cases like: EPERM: operation not permitted, uv_cwd
     // (current shell directory deleted/inaccessible).
     const fallbackCandidates = [
@@ -624,7 +652,8 @@ function resolveWorkingDirectory(ctx: LauncherCommandContext, fsImpl: typeof fs,
       (() => {
         try {
           return ctx.homedir();
-        } catch {
+        } catch (error) {
+          logLauncherNonBlocking('resolve_working_directory_homedir_candidate', error);
           return '';
         }
       })(),
@@ -640,7 +669,8 @@ function resolveWorkingDirectory(ctx: LauncherCommandContext, fsImpl: typeof fs,
         if (stats && typeof stats.isDirectory === 'function' && stats.isDirectory()) {
           return resolved;
         }
-      } catch {
+      } catch (error) {
+        logLauncherNonBlocking('resolve_working_directory_candidate', error, { candidate });
         // try next fallback
       }
     }
@@ -653,7 +683,8 @@ function isTmuxAvailable(spawnSyncImpl: typeof spawnSync = spawnSync): boolean {
   try {
     const result = spawnSyncImpl('tmux', ['-V'], { encoding: 'utf8' });
     return result.status === 0;
-  } catch {
+  } catch (error) {
+    logLauncherNonBlocking('is_tmux_available', error);
     return false;
   }
 }
@@ -670,7 +701,8 @@ function resolveCurrentTmuxTarget(env: NodeJS.ProcessEnv, spawnSyncImpl: typeof 
     }
     const target = String(result.stdout || '').trim();
     return target || null;
-  } catch {
+  } catch (error) {
+    logLauncherNonBlocking('resolve_current_tmux_target', error);
     return null;
   }
 }
@@ -720,7 +752,8 @@ function isReusableTmuxPaneTarget(
     const [command, panePath] = firstLine.split('\t');
     const normalizedPanePath = normalizePathForComparison(String(panePath || '').trim());
     return isReusableIdlePaneCommand(String(command || '').trim()) && normalizedPanePath === expectedCwd;
-  } catch {
+  } catch (error) {
+    logLauncherNonBlocking('is_reusable_tmux_pane_target', error, { tmuxTarget: normalizedTarget });
     return false;
   }
 }
@@ -829,7 +862,8 @@ function normalizePathForComparison(candidate: string): string {
       return resolved.toLowerCase();
     }
     return resolved;
-  } catch {
+  } catch (error) {
+    logLauncherNonBlocking('normalize_path_for_comparison', error, { candidate: raw });
     return raw;
   }
 }
@@ -840,7 +874,8 @@ function resolveManagedTmuxSessionBaseName(cwd: string): string {
   try {
     const resolved = path.resolve(rawCwd || '.').replace(/[\\/]+$/, '');
     baseCandidate = path.basename(resolved);
-  } catch {
+  } catch (error) {
+    logLauncherNonBlocking('resolve_managed_tmux_session_base_name', error, { cwd: rawCwd });
     baseCandidate = rawCwd;
   }
   const normalizedBase = normalizeSessionToken(baseCandidate)
@@ -857,7 +892,8 @@ function tmuxSessionExists(spawnSyncImpl: typeof spawnSync, sessionName: string)
   try {
     const result = spawnSyncImpl('tmux', ['has-session', '-t', sessionName], { encoding: 'utf8' });
     return result.status === 0;
-  } catch {
+  } catch (error) {
+    logLauncherNonBlocking('tmux_session_exists', error, { sessionName });
     return false;
   }
 }
@@ -883,22 +919,26 @@ function requestManagedTmuxSessionExit(
   }
   try {
     spawnSyncImpl('tmux', ['send-keys', '-t', target, '-X', 'cancel'], { encoding: 'utf8' });
-  } catch {
+  } catch (error) {
+    logLauncherNonBlocking('request_managed_tmux_session_exit_cancel', error, { sessionName: target });
     // ignore
   }
   try {
     spawnSyncImpl('tmux', ['send-keys', '-t', target, 'C-c'], { encoding: 'utf8' });
-  } catch {
+  } catch (error) {
+    logLauncherNonBlocking('request_managed_tmux_session_exit_ctrl_c', error, { sessionName: target });
     // ignore
   }
   try {
     spawnSyncImpl('tmux', ['send-keys', '-t', target, '-l', '--', 'exit'], { encoding: 'utf8' });
-  } catch {
+  } catch (error) {
+    logLauncherNonBlocking('request_managed_tmux_session_exit_literal_exit', error, { sessionName: target });
     // ignore
   }
   try {
     sendTmuxSubmitKey(spawnSyncImpl, target);
-  } catch {
+  } catch (error) {
+    logLauncherNonBlocking('request_managed_tmux_session_exit_submit', error, { sessionName: target });
     // ignore
   }
 }
@@ -923,7 +963,8 @@ function createManagedTmuxSession(args: {
       if (result.status !== 0) {
         continue;
       }
-    } catch {
+    } catch (error) {
+      logLauncherNonBlocking('create_managed_tmux_session_new_session', error, { sessionName });
       continue;
     }
 
@@ -933,14 +974,16 @@ function createManagedTmuxSession(args: {
         spawnSyncImpl('tmux', ['set-option', '-t', sessionName, '-g', 'default-terminal', 'tmux-256color'], {
           encoding: 'utf8'
         });
-      } catch {
+      } catch (error) {
+        logLauncherNonBlocking('create_managed_tmux_session_tune_default_terminal', error, { sessionName });
         // best-effort only
       }
       try {
         spawnSyncImpl('tmux', ['set-option', '-t', sessionName, '-ga', 'terminal-features', ',*:RGB'], {
           encoding: 'utf8'
         });
-      } catch {
+      } catch (error) {
+        logLauncherNonBlocking('create_managed_tmux_session_tune_terminal_features', error, { sessionName });
         // best-effort only
       }
     }
@@ -954,7 +997,8 @@ function createManagedTmuxSession(args: {
           ['set-option', '-t', sessionName, '-ga', 'terminal-overrides', ',*:sitm@:ritm@'],
           { encoding: 'utf8' }
         );
-      } catch {
+      } catch (error) {
+        logLauncherNonBlocking('create_managed_tmux_session_disable_italic', error, { sessionName });
         // best-effort only
       }
     }
@@ -967,7 +1011,8 @@ function createManagedTmuxSession(args: {
           ['set-option', '-t', sessionName, '-ga', 'terminal-overrides', ',*:smso@:rmso@:rev@'],
           { encoding: 'utf8' }
         );
-      } catch {
+      } catch (error) {
+        logLauncherNonBlocking('create_managed_tmux_session_disable_standout', error, { sessionName });
         // best-effort only
       }
     }
@@ -1040,7 +1085,8 @@ function launchCommandInTmuxPane(args: {
     if (respawn.status === 0) {
       return true;
     }
-  } catch {
+  } catch (error) {
+    logLauncherNonBlocking('launch_command_in_tmux_pane_respawn', error, { tmuxTarget });
     // fallback to send-keys injection
   }
   try {
@@ -1055,7 +1101,8 @@ function launchCommandInTmuxPane(args: {
     }
     const submit = sendTmuxSubmitKey(spawnSyncImpl, tmuxTarget, commandName);
     return submit.ok;
-  } catch {
+  } catch (error) {
+    logLauncherNonBlocking('launch_command_in_tmux_pane_send_keys', error, { tmuxTarget });
     return false;
   }
 }
@@ -1074,7 +1121,8 @@ function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
       try {
         const payload = JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>;
         resolve(payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {});
-      } catch {
+      } catch (error) {
+        logLauncherNonBlocking('read_json_body_parse', error);
         resolve({});
       }
     });
@@ -1127,7 +1175,8 @@ async function startSessionClientService(args: {
   const daemonId = (() => {
     try {
       return `sessiond_${crypto.randomUUID()}`;
-    } catch {
+    } catch (error) {
+      logLauncherNonBlocking('start_session_client_service_daemon_id', error);
       return `sessiond_${Date.now()}_${Math.random().toString(16).slice(2)}`;
     }
   })();
@@ -1195,12 +1244,16 @@ async function startSessionClientService(args: {
         }
         resolve(address.port);
       });
-    }).catch(() => 0);
+    }).catch((error) => {
+      logLauncherNonBlocking('start_session_client_service_listen', error);
+      return 0;
+    });
 
     if (!port) {
       try {
         server.close();
-      } catch {
+      } catch (error) {
+        logLauncherNonBlocking('start_session_client_service_close_on_port_failure', error, { daemonId });
         // ignore
       }
       return null;
@@ -1246,7 +1299,11 @@ async function startSessionClientService(args: {
       ? setTimeout(() => {
           try {
             abortController.abort();
-          } catch {
+          } catch (error) {
+            logLauncherNonBlocking('start_session_client_service_abort_control_request', error, {
+              daemonId,
+              pathSuffix
+            });
             // ignore abort failures
           }
         }, controlRequestTimeoutMs)
@@ -1265,7 +1322,11 @@ async function startSessionClientService(args: {
         ...(abortController ? { signal: abortController.signal } : {})
       });
       return { ok: response.ok, status: response.status };
-    } catch {
+    } catch (error) {
+      logLauncherNonBlocking('start_session_client_service_post', error, {
+        daemonId,
+        pathSuffix
+      });
       return { ok: false, status: 0 };
     } finally {
       if (timeoutHandle) {
@@ -1342,7 +1403,8 @@ async function startSessionClientService(args: {
     if (server) {
       try {
         server.close();
-      } catch {
+      } catch (error) {
+        logLauncherNonBlocking('start_session_client_service_close_on_register_failure', error, { daemonId });
         // ignore
       }
     }
@@ -1368,7 +1430,8 @@ async function startSessionClientService(args: {
       await new Promise<void>((resolve) => {
         try {
           server?.close(() => resolve());
-        } catch {
+        } catch (error) {
+          logLauncherNonBlocking('start_session_client_service_stop_close', error, { daemonId });
           resolve();
         }
       });
@@ -1670,7 +1733,8 @@ export function createLauncherCommand(program: Command, ctx: LauncherCommandCont
               `daemon=${parsedDaemonId} tmux=${parsedTmuxSessionId} tmuxTarget=${tmuxTarget || 'none'}` +
               (verbose ? ` managedTmux=${managedTmuxSession ? 'yes' : 'no'} serverStarted=${ensureResult?.started ? 'yes' : 'no'}` : '')
             );
-          } catch {
+          } catch (error) {
+            logLauncherNonBlocking('session_scope_trace_launch', error, { commandName: spec.commandName });
             // best-effort diagnostics only
           }
         }
@@ -1862,14 +1926,20 @@ export function createLauncherCommand(program: Command, ctx: LauncherCommandCont
 
         try {
           await sessionClientService?.stop();
-        } catch {
+        } catch (error) {
+          logLauncherNonBlocking('finalize_tool_termination_stop_session_client_service', error, {
+            commandName: spec.commandName
+          });
           // ignore
         }
         try {
           if (managedTmuxSession && shouldStopManagedTmuxOnToolExit(ctx.env)) {
             managedTmuxSession.stop();
           }
-        } catch {
+        } catch (error) {
+          logLauncherNonBlocking('finalize_tool_termination_stop_managed_tmux', error, {
+            commandName: spec.commandName
+          });
           // ignore
         }
         try {
@@ -1878,7 +1948,10 @@ export function createLauncherCommand(program: Command, ctx: LauncherCommandCont
             signal: observedToolExitSignal ? String(observedToolExitSignal) : undefined,
             targetPid: toolProcess.pid ?? null
           });
-        } catch {
+        } catch (error) {
+          logLauncherNonBlocking('finalize_tool_termination_report_lifecycle', error, {
+            commandName: spec.commandName
+          });
           // ignore lifecycle logging errors in exit path
         }
         const forcedExitCode = options?.forceExitCode;
@@ -1936,7 +2009,8 @@ export function createLauncherCommand(program: Command, ctx: LauncherCommandCont
         } catch (error) {
           try {
             ctx.logger.error(error instanceof Error ? error.message : String(error));
-          } catch {
+          } catch (error) {
+            logLauncherNonBlocking('shutdown_log_lifecycle_error', error, { commandName: spec.commandName, signal });
             // ignore
           }
         }
@@ -1944,7 +2018,8 @@ export function createLauncherCommand(program: Command, ctx: LauncherCommandCont
           if (managedTmuxSession && shouldStopManagedTmuxOnShutdown(signal, ctx.env)) {
             managedTmuxSession.stop();
           }
-        } catch {
+        } catch (error) {
+          logLauncherNonBlocking('shutdown_stop_managed_tmux', error, { commandName: spec.commandName, signal });
           // ignore
         }
       };
@@ -1963,7 +2038,8 @@ export function createLauncherCommand(program: Command, ctx: LauncherCommandCont
             ctx.logger.error(
               `Failed to launch ${spec.displayName} (${resolvedBinary}): ${error instanceof Error ? error.message : String(error)}`
             );
-          } catch {
+          } catch (innerError) {
+            logLauncherNonBlocking('tool_process_error_log_to_logger', innerError, { commandName: spec.commandName });
             // ignore
           }
           try {
@@ -1971,7 +2047,8 @@ export function createLauncherCommand(program: Command, ctx: LauncherCommandCont
               action: 'launcher_tool_error_exit',
               targetPid: toolProcess.pid ?? null
             });
-          } catch {
+          } catch (innerError) {
+            logLauncherNonBlocking('tool_process_error_report_lifecycle', innerError, { commandName: spec.commandName });
             // ignore lifecycle logging errors for terminal error path
           }
           await finalizeToolTermination({ forceExitCode: 1 });
