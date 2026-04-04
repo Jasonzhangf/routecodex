@@ -292,7 +292,7 @@ export function recordHubPolicyObservation(options: {
 
   const compatibilityProfile =
     typeof options.compatibilityProfile === 'string' ? options.compatibilityProfile.trim().toLowerCase() : '';
-  if (compatibilityProfile === 'chat:deepseek-web') {
+  if (compatibilityProfile === 'chat:deepseek-web' || compatibilityProfile === 'chat:qwenchat-web') {
     return;
   }
 
@@ -339,7 +339,7 @@ export function applyHubProviderOutboundPolicy(options: {
   const normalizedProviderProtocol = normalizeHubProviderProtocol(options.providerProtocol);
   const compatibilityProfile =
     typeof options.compatibilityProfile === 'string' ? options.compatibilityProfile.trim().toLowerCase() : '';
-  if (compatibilityProfile === 'chat:deepseek-web') {
+  if (compatibilityProfile === 'chat:deepseek-web' || compatibilityProfile === 'chat:qwenchat-web') {
     return options.payload;
   }
 
