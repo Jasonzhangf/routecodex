@@ -1818,7 +1818,23 @@ export async function collectQwenSseAsOpenAiResult(args: {
   if (usageRef.usage) {
     result.usage = usageRef.usage;
   }
-  return applyStandardToolTextHarvestToChatPayload(result);
+  const harvested = applyStandardToolTextHarvestToChatPayload(result);
+  const firstChoice =
+    Array.isArray(harvested.choices) && harvested.choices.length > 0 && isRecord(harvested.choices[0])
+      ? (harvested.choices[0] as Record<string, unknown>)
+      : undefined;
+  const messageNode = firstChoice && isRecord(firstChoice.message) ? (firstChoice.message as Record<string, unknown>) : undefined;
+  const finishReason = normalizeInputString(firstChoice?.finish_reason) || 'stop';
+  const content = normalizeInputString(messageNode?.content);
+  const reasoning = normalizeInputString(messageNode?.reasoning_content);
+  const toolCalls = messageNode && Array.isArray(messageNode.tool_calls) ? messageNode.tool_calls : [];
+  if (finishReason === 'stop' && !content && !reasoning && toolCalls.length === 0) {
+    const err = new Error('QwenChat upstream returned an empty assistant message');
+    (err as Error & { statusCode?: number; code?: string }).statusCode = 502;
+    (err as Error & { statusCode?: number; code?: string }).code = 'QWENCHAT_EMPTY_ASSISTANT';
+    throw err;
+  }
+  return harvested;
 }
 
 export async function buildQwenChatSendPlan(input: QwenChatSendInput): Promise<{

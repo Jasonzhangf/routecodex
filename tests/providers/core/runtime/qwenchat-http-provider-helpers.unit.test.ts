@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, jest } from '@jest/globals';
 
 import {
   buildQwenChatSendPlan,
+  collectQwenSseAsOpenAiResult,
   createOpenAiMappedSseStream,
   createQwenChatSession,
   extractQwenChatPayload,
@@ -297,6 +298,25 @@ describe('qwenchat-http-provider helpers', () => {
     ).rejects.toMatchObject({
       code: 'QWENCHAT_TOOL_TEXT_TRANSFORM_FAILED',
       statusCode: 422
+    });
+  });
+
+  it('fails fast when upstream SSE ends with finish_reason=stop but empty assistant payload', async () => {
+    const upstreamPayload = [
+      `data: ${JSON.stringify({
+        choices: [{ delta: {}, finish_reason: 'stop' }]
+      })}\n`,
+      'data: [DONE]\n'
+    ].join('');
+    const upstreamStream = Readable.from([upstreamPayload], { encoding: 'utf8' });
+    await expect(
+      collectQwenSseAsOpenAiResult({
+        upstreamStream,
+        model: 'qwen3.6-plus'
+      })
+    ).rejects.toMatchObject({
+      code: 'QWENCHAT_EMPTY_ASSISTANT',
+      statusCode: 502
     });
   });
 });
