@@ -14,6 +14,10 @@ type ImageGenerationPayload = {
   n?: unknown;
   size?: unknown;
   response_format?: unknown;
+  image?: unknown;
+  images?: unknown;
+  input_image?: unknown;
+  mask?: unknown;
   metadata?: unknown;
 };
 
@@ -41,6 +45,57 @@ function clampCount(value: unknown): number {
 function normalizeResponseFormat(value: unknown): 'url' | 'b64_json' {
   const normalized = normalizeInputString(value).toLowerCase();
   return normalized === 'b64_json' ? 'b64_json' : 'url';
+}
+
+function readImageSource(value: unknown): string {
+  if (typeof value === 'string') {
+    return normalizeInputString(value);
+  }
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    const node = value as Record<string, unknown>;
+    const direct = normalizeInputString(node.url)
+      || normalizeInputString(node.image_url)
+      || normalizeInputString(node.imageUrl)
+      || normalizeInputString(node.file_url)
+      || normalizeInputString(node.fileUrl)
+      || normalizeInputString(node.b64_json);
+    if (direct) {
+      return direct;
+    }
+    if (node.image_url && typeof node.image_url === 'object' && !Array.isArray(node.image_url)) {
+      return normalizeInputString((node.image_url as Record<string, unknown>).url);
+    }
+  }
+  return '';
+}
+
+function collectInputImages(payload: ImageGenerationPayload): string[] {
+  const out: string[] = [];
+  const add = (value: unknown) => {
+    const image = readImageSource(value);
+    if (image) {
+      out.push(image);
+    }
+  };
+  add(payload.image);
+  add(payload.input_image);
+  if (Array.isArray(payload.images)) {
+    for (const item of payload.images) {
+      add(item);
+    }
+  }
+  return Array.from(new Set(out));
+}
+
+function buildUserMessageContent(prompt: string, images: string[]): string | Array<Record<string, unknown>> {
+  if (!images.length) {
+    return prompt;
+  }
+  const parts: Array<Record<string, unknown>> = [{ type: 'input_text', text: prompt }];
+  for (const image of images) {
+    parts.push({ type: 'input_image', image_url: image });
+  }
+  return parts;
 }
 
 function collectImageUrlsFromText(raw: string): string[] {
@@ -105,7 +160,26 @@ function extractAssistantContent(result: PipelineExecutionResult): string {
 }
 
 export async function handleImageGenerations(req: Request, res: Response, ctx: HandlerContext): Promise<void> {
-  const entryEndpoint = '/v1/images/generations';
+  return handleImageRequest(req, res, ctx, {
+    entryEndpoint: '/v1/images/generations',
+    requireInputImage: false
+  });
+}
+
+export async function handleImageEdits(req: Request, res: Response, ctx: HandlerContext): Promise<void> {
+  return handleImageRequest(req, res, ctx, {
+    entryEndpoint: '/v1/images/edits',
+    requireInputImage: true
+  });
+}
+
+async function handleImageRequest(
+  req: Request,
+  res: Response,
+  ctx: HandlerContext,
+  options: { entryEndpoint: '/v1/images/generations' | '/v1/images/edits'; requireInputImage: boolean }
+): Promise<void> {
+  const entryEndpoint = options.entryEndpoint;
   const { clientRequestId, providerRequestId } = nextRequestIdentifiers(req.headers['x-request-id'], { entryEndpoint });
   const requestId = providerRequestId;
   try {
@@ -117,6 +191,11 @@ export async function handleImageGenerations(req: Request, res: Response, ctx: H
     const prompt = normalizeInputString(payload.prompt);
     if (!prompt) {
       res.status(400).json({ error: { message: 'prompt is required', type: 'invalid_request_error' } });
+      return;
+    }
+    const inputImages = collectInputImages(payload);
+    if (options.requireInputImage && inputImages.length < 1) {
+      res.status(400).json({ error: { message: 'image is required for /v1/images/edits', type: 'invalid_request_error' } });
       return;
     }
     const count = clampCount(payload.n);
@@ -131,22 +210,36 @@ export async function handleImageGenerations(req: Request, res: Response, ctx: H
       clientRequestId,
       model,
       count,
-      responseFormat
+      responseFormat,
+      inputImages: inputImages.length || undefined
     });
 
     const pipelineBody = {
       model,
       stream: false,
-      messages: [{ role: 'user', content: prompt }],
+      messages: [
+        {
+          role: 'user',
+          content: buildUserMessageContent(prompt, inputImages)
+        }
+      ],
       metadata: {
         ...reqMetadata,
         qwenImageGeneration: {
           enabled: true,
           n: count,
           size: payload.size,
-          responseFormat
+          responseFormat,
+          mode: options.requireInputImage ? 'edit' : 'generate'
         }
       }
+    };
+    const qwenImageGenerationMeta = {
+      enabled: true,
+      n: count,
+      size: payload.size,
+      responseFormat,
+      mode: options.requireInputImage ? 'edit' : 'generate'
     };
 
     const result = await ctx.executePipeline({
@@ -160,6 +253,7 @@ export async function handleImageGenerations(req: Request, res: Response, ctx: H
         stream: false,
         clientRequestId,
         providerProtocol: 'openai-chat',
+        qwenImageGeneration: qwenImageGenerationMeta,
         __raw_request_body: payload
       }
     });
@@ -207,4 +301,4 @@ export async function handleImageGenerations(req: Request, res: Response, ctx: H
   }
 }
 
-export default { handleImageGenerations };
+export default { handleImageGenerations, handleImageEdits };

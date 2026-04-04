@@ -273,6 +273,109 @@ function truncateReason(reason: string, maxLength = 220): string {
   return `${reason.slice(0, Math.max(0, maxLength - 1))}…`;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function valueHasNonEmptyText(value: unknown): boolean {
+  if (typeof value === 'string') {
+    return value.trim().length > 0;
+  }
+  if (Array.isArray(value)) {
+    return value.some((item) => valueHasNonEmptyText(item));
+  }
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    valueHasNonEmptyText(value.text)
+    || valueHasNonEmptyText(value.output_text)
+    || valueHasNonEmptyText(value.content)
+    || valueHasNonEmptyText(value.reasoning_content)
+    || valueHasNonEmptyText(value.reasoning)
+  );
+}
+
+function hasNonEmptyToolCalls(value: unknown): boolean {
+  if (!Array.isArray(value) || value.length <= 0) {
+    return false;
+  }
+  return value.some((item) => isRecord(item));
+}
+
+function hasOutputFunctionCalls(value: unknown): boolean {
+  if (!Array.isArray(value) || value.length <= 0) {
+    return false;
+  }
+  return value.some((item) => {
+    if (!isRecord(item)) {
+      return false;
+    }
+    const itemType = readString(item.type)?.toLowerCase();
+    if (itemType === 'function_call' || itemType === 'function') {
+      return true;
+    }
+    if (hasNonEmptyToolCalls(item.tool_calls)) {
+      return true;
+    }
+    return false;
+  });
+}
+
+function detectRetryableEmptyAssistantResponse(body: unknown): { reason: string; marker: string } | null {
+  if (!isRecord(body)) {
+    return null;
+  }
+  if (Object.prototype.hasOwnProperty.call(body, '__sse_responses')) {
+    return null;
+  }
+
+  const choices = Array.isArray(body.choices) ? body.choices : [];
+  if (choices.length > 0) {
+    const firstChoice = isRecord(choices[0]) ? choices[0] : undefined;
+    if (!firstChoice) {
+      return null;
+    }
+    const finishReason = readString(firstChoice.finish_reason)?.toLowerCase() ?? '';
+    const message = isRecord(firstChoice.message) ? firstChoice.message : undefined;
+    const hasToolCalls = hasNonEmptyToolCalls(message?.tool_calls);
+    const hasText =
+      valueHasNonEmptyText(message?.content)
+      || valueHasNonEmptyText(message?.reasoning_content)
+      || valueHasNonEmptyText(message?.reasoning)
+      || valueHasNonEmptyText(firstChoice.content);
+    if ((finishReason === 'stop' || finishReason === 'tool_calls' || !finishReason) && !hasToolCalls && !hasText) {
+      return {
+        reason: `finish_reason=${finishReason || 'unknown'} but assistant text/tool_calls are empty`,
+        marker: 'chat_empty_assistant'
+      };
+    }
+  }
+
+  const status = readString(body.status)?.toLowerCase() ?? '';
+  if (status === 'completed' || status === 'stop') {
+    const requiredAction = isRecord(body.required_action) ? body.required_action : undefined;
+    const submitToolOutputs =
+      requiredAction && isRecord(requiredAction.submit_tool_outputs)
+        ? requiredAction.submit_tool_outputs
+        : undefined;
+    const hasRequiredActionToolCalls = hasNonEmptyToolCalls(submitToolOutputs?.tool_calls);
+    const hasFunctionCalls = hasOutputFunctionCalls(body.output);
+    const hasText =
+      valueHasNonEmptyText(body.output_text)
+      || valueHasNonEmptyText(body.output)
+      || valueHasNonEmptyText(body.reasoning);
+    if (!hasRequiredActionToolCalls && !hasFunctionCalls && !hasText) {
+      return {
+        reason: `responses status=${status} but output text/tool_calls are empty`,
+        marker: 'responses_empty_output'
+      };
+    }
+  }
+
+  return null;
+}
+
 export class HubRequestExecutor implements RequestExecutor {
   constructor(private readonly deps: RequestExecutorDeps) { }
 
@@ -515,11 +618,10 @@ export class HubRequestExecutor implements RequestExecutor {
             throw error;
           }
           recordAttempt({ error: true });
+          const retryBackoffMs = await waitBeforeRetry(error, { attempt });
           const singleProviderPool =
             Boolean(initialRoutePool && initialRoutePool.length === 1 && initialRoutePool[0] === target.providerKey);
-          if (singleProviderPool) {
-            await waitBeforeRetry(error);
-          } else if (target.providerKey) {
+          if (!singleProviderPool && target.providerKey) {
             excludedProviderKeys.add(target.providerKey);
           }
           const switchAction: 'exclude_and_reroute' | 'retry_same_provider' =
@@ -546,7 +648,8 @@ export class HubRequestExecutor implements RequestExecutor {
             switchAction,
             ...(typeof retryError.statusCode === 'number' ? { statusCode: retryError.statusCode } : {}),
             ...(retryError.errorCode ? { errorCode: retryError.errorCode } : {}),
-            ...(retryError.upstreamCode ? { upstreamCode: retryError.upstreamCode } : {})
+            ...(retryError.upstreamCode ? { upstreamCode: retryError.upstreamCode } : {}),
+            retryBackoffMs
           });
           continue;
         }
@@ -821,6 +924,24 @@ export class HubRequestExecutor implements RequestExecutor {
             convertedStatus,
             attempt
           });
+          const emptyAssistantSignal = detectRetryableEmptyAssistantResponse(converted.body);
+          if (emptyAssistantSignal) {
+            const bodyForError = converted.body as Record<string, unknown>;
+            const errorToThrow: any = new Error(
+              `Upstream returned empty assistant payload: ${emptyAssistantSignal.reason}`
+            );
+            errorToThrow.statusCode = 502;
+            errorToThrow.status = 502;
+            errorToThrow.code = 'EMPTY_ASSISTANT_RESPONSE';
+            errorToThrow.response = { data: bodyForError };
+            this.logStage('provider.empty_assistant_retry', input.requestId, {
+              providerKey: target.providerKey,
+              marker: emptyAssistantSignal.marker,
+              reason: emptyAssistantSignal.reason,
+              attempt
+            });
+            throw errorToThrow;
+          }
           this.logStage('provider.usage_extract.start', input.requestId, {
             providerKey: target.providerKey,
             source: 'converted_response',
@@ -980,12 +1101,11 @@ export class HubRequestExecutor implements RequestExecutor {
           }
           // Record this failed provider attempt even if the overall request succeeds later via failover.
           recordAttempt({ error: true });
+          const retryBackoffMs = await waitBeforeRetry(error, { attempt });
           const singleProviderPool =
             Boolean(initialRoutePool && initialRoutePool.length === 1 && initialRoutePool[0] === target.providerKey);
           if (promptTooLong && target.providerKey) {
             excludedProviderKeys.add(target.providerKey);
-          } else if (singleProviderPool) {
-            await waitBeforeRetry(error);
           }
           if (!promptTooLong && !singleProviderPool && target.providerKey) {
             const is429 = status === 429;
@@ -1033,6 +1153,7 @@ export class HubRequestExecutor implements RequestExecutor {
             ...(typeof retryError.statusCode === 'number' ? { statusCode: retryError.statusCode } : {}),
             ...(retryError.errorCode ? { errorCode: retryError.errorCode } : {}),
             ...(retryError.upstreamCode ? { upstreamCode: retryError.upstreamCode } : {}),
+            retryBackoffMs,
             ...(promptTooLong ? { contextOverflowRetries, maxContextOverflowRetries: MAX_CONTEXT_OVERFLOW_RETRIES } : {})
           });
           continue;

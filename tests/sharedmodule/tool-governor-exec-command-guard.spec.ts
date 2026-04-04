@@ -111,6 +111,88 @@ describe('tool governor exec_command guard', () => {
     expect(args.workdir).toBe('/workspace');
   });
 
+  it('harvests malformed content-json tool_calls without filtering tool names', () => {
+    const malformedContent =
+      '{"tool_calls":[{"name":"update_plan","input":{"action":"create","plan":[{"step":"A","status":"pending"}]}},{"name":"agent.dispatch","input":{"target_agent_id":"finger-project-agent","task":"alpha"},{"name":"agent.dispatch","input":{"target_agent_id":"finger-reviewer","task":"beta"}}]}';
+    const response: any = {
+      choices: [
+        {
+          message: {
+            role: 'assistant',
+            content: malformedContent
+          },
+          finish_reason: 'stop'
+        }
+      ]
+    };
+
+    const out: any = processChatResponseTools(response);
+    const choice = out?.choices?.[0];
+    const toolCalls = choice?.message?.tool_calls || [];
+
+    expect(choice?.finish_reason).toBe('tool_calls');
+    expect(toolCalls.map((row: any) => row?.function?.name)).toEqual([
+      'update_plan',
+      'agent.dispatch',
+      'agent.dispatch'
+    ]);
+    expect(choice?.message?.content === '' || choice?.message?.content == null).toBe(true);
+  });
+
+  it('harvests heredoc sentinel wrapped tool_calls payload', () => {
+    const response: any = {
+      choices: [
+        {
+          message: {
+            role: 'assistant',
+            content: [
+              '分析结果：',
+              '<<RCC_TOOL_CALLS_JSON',
+              '{"tool_calls":[{"name":"update_plan","input":{"action":"create","plan":[{"step":"A","status":"pending"}]}},{"name":"agent.dispatch","input":{"target_agent_id":"finger-project-agent","task":"alpha"}}]}',
+              'RCC_TOOL_CALLS_JSON',
+              '以上'
+            ].join('\n')
+          },
+          finish_reason: 'stop'
+        }
+      ]
+    };
+
+    const out: any = processChatResponseTools(response);
+    const choice = out?.choices?.[0];
+    const toolCalls = choice?.message?.tool_calls || [];
+
+    expect(choice?.finish_reason).toBe('tool_calls');
+    expect(toolCalls.map((row: any) => row?.function?.name)).toEqual([
+      'update_plan',
+      'agent.dispatch'
+    ]);
+  });
+
+  it('does not infer tool names from sentinel payload when name is missing', () => {
+    const response: any = {
+      choices: [
+        {
+          message: {
+            role: 'assistant',
+            content: [
+              '<<RCC_TOOL_CALLS_JSON',
+              '{"tool_calls":[{"input":{"cmd":"pwd"}}]}',
+              'RCC_TOOL_CALLS_JSON'
+            ].join('\n')
+          },
+          finish_reason: 'stop'
+        }
+      ]
+    };
+
+    const out: any = processChatResponseTools(response);
+    const choice = out?.choices?.[0];
+    const toolCalls = choice?.message?.tool_calls || [];
+    expect(toolCalls.length).toBe(0);
+    expect(choice?.finish_reason).toBe('stop');
+  });
+
   it('blocks policy-defined mass kill command with policy message', () => {
     const request: any = {
       metadata: {

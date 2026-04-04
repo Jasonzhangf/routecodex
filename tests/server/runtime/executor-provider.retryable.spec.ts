@@ -29,4 +29,28 @@ describe('shouldRetryProviderError', () => {
     err.statusCode = 400;
     expect(shouldRetryProviderError(err)).toBe(false);
   });
+
+  it('does not retry deterministic invalid_request_error even if provider marks retryable', () => {
+    const err: any = new Error('Invalid');
+    err.statusCode = 400;
+    err.retryable = true;
+    err.response = {
+      data: {
+        error: {
+          type: 'invalid_request_error',
+          param: 'tools.33.type',
+          code: 'invalid_string',
+          message: 'Invalid'
+        }
+      }
+    };
+    expect(shouldRetryProviderError(err)).toBe(false);
+  });
+
+  it('does not retry bare HTTP 400 Invalid payload-shape errors', () => {
+    const err: any = new Error('Invalid');
+    err.statusCode = 400;
+    err.code = 'HTTP_400';
+    expect(shouldRetryProviderError(err)).toBe(false);
+  });
 });

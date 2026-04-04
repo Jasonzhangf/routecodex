@@ -130,8 +130,11 @@ function shouldRunVisionFlow(ctx: ServerToolHandlerContext): boolean {
   if (followupFlag) {
     return false;
   }
-
   const captured = getCapturedRequest(ctx.adapterContext);
+  if (isImageGenerationRequest(record, rt, captured)) {
+    return false;
+  }
+
   const seed = captured ? extractCapturedChatSeed(captured) : null;
   const hasImageAttachment = Boolean(
     seed && Array.isArray(seed.messages) && containsImageAttachment(seed.messages as any)
@@ -182,6 +185,61 @@ function shouldRunVisionFlow(ctx: ServerToolHandlerContext): boolean {
   }
 
   return true;
+}
+
+function isImageGenerationRequest(
+  record: Record<string, unknown>,
+  rt: Record<string, unknown> | undefined,
+  captured: JsonObject | null
+): boolean {
+  if (hasImageGenerationFlag(record)) {
+    return true;
+  }
+  if (rt && hasImageGenerationFlag(rt as Record<string, unknown>)) {
+    return true;
+  }
+  if (captured && hasImageGenerationFlag(captured as Record<string, unknown>)) {
+    return true;
+  }
+  const capturedMetadata =
+    captured && typeof (captured as { metadata?: unknown }).metadata === 'object' && !Array.isArray((captured as { metadata?: unknown }).metadata)
+      ? ((captured as { metadata?: Record<string, unknown> }).metadata as Record<string, unknown>)
+      : undefined;
+  if (capturedMetadata && hasImageGenerationFlag(capturedMetadata)) {
+    return true;
+  }
+  return false;
+}
+
+function hasImageGenerationFlag(node: Record<string, unknown>): boolean {
+  if (!node || typeof node !== 'object' || Array.isArray(node)) {
+    return false;
+  }
+  if (node.imageGeneration === true || node.qwenImageGeneration === true) {
+    return true;
+  }
+  const generationMode =
+    typeof node.generationMode === 'string'
+      ? node.generationMode.trim().toLowerCase()
+      : typeof node.generation_mode === 'string'
+        ? node.generation_mode.trim().toLowerCase()
+        : '';
+  if (generationMode === 'image' || generationMode === 't2i' || generationMode === 'edit') {
+    return true;
+  }
+  const qwenImageGeneration =
+    node.qwenImageGeneration && typeof node.qwenImageGeneration === 'object' && !Array.isArray(node.qwenImageGeneration)
+      ? (node.qwenImageGeneration as Record<string, unknown>)
+      : undefined;
+  if (qwenImageGeneration) {
+    if (!Object.prototype.hasOwnProperty.call(qwenImageGeneration, 'enabled')) {
+      return true;
+    }
+    if (qwenImageGeneration.enabled === true) {
+      return true;
+    }
+  }
+  return false;
 }
 
 const VIDEO_URL_HINT_RE = /(^data:video\/)|(\.(mp4|mov|m4v|webm|avi|mkv|m3u8|flv)(?:$|[?#]))/i;

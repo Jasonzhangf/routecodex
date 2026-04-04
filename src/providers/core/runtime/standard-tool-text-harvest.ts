@@ -1,4 +1,4 @@
-import { processChatResponseTools } from '../../../../sharedmodule/llmswitch-core/src/conversion/shared/tool-governor.js';
+import { processChatResponseTools } from '../../../../sharedmodule/llmswitch-core/dist/conversion/shared/tool-governor.js';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);

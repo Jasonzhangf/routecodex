@@ -244,4 +244,98 @@ describe('vision_auto servertool followup (entry-aware)', () => {
     expect(orchestration.executed).toBe(false);
     expect(reenterCalled).toBe(0);
   });
+
+  test('does not run vision flow when runtime metadata marks qwen image generation', async () => {
+    const adapterContext: AdapterContext = {
+      requestId: 'req-vision-imagegen-rt',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      providerType: 'openai',
+      hasImageAttachment: true,
+      __rt: {
+        qwenImageGeneration: {
+          enabled: true,
+          mode: 'edit'
+        }
+      },
+      capturedChatRequest: makeCapturedChatRequestWithImage()
+    } as any;
+
+    const chatResponse: JsonObject = {
+      id: 'chatcmpl-vision-imagegen-rt',
+      object: 'chat.completion',
+      model: 'qwenchat.qwen3.6-plus',
+      choices: [
+        {
+          index: 0,
+          message: { role: 'assistant', content: 'ok' },
+          finish_reason: 'stop'
+        }
+      ]
+    } as any;
+
+    let reenterCalled = 0;
+    const orchestration = await runServerToolOrchestration({
+      chat: chatResponse,
+      adapterContext,
+      entryEndpoint: '/v1/chat/completions',
+      requestId: 'req-vision-imagegen-rt',
+      providerProtocol: 'openai-chat',
+      reenterPipeline: async () => {
+        reenterCalled += 1;
+        return { body: {} as JsonObject };
+      }
+    });
+
+    expect(orchestration.executed).toBe(false);
+    expect(reenterCalled).toBe(0);
+  });
+
+  test('does not run vision flow when captured request metadata marks qwen image generation', async () => {
+    const captured = makeCapturedChatRequestWithImage();
+    (captured as any).metadata = {
+      qwenImageGeneration: {
+        enabled: true,
+        mode: 'generate'
+      }
+    };
+
+    const adapterContext: AdapterContext = {
+      requestId: 'req-vision-imagegen-captured',
+      entryEndpoint: '/v1/chat/completions',
+      providerProtocol: 'openai-chat',
+      providerType: 'openai',
+      hasImageAttachment: true,
+      capturedChatRequest: captured
+    } as any;
+
+    const chatResponse: JsonObject = {
+      id: 'chatcmpl-vision-imagegen-captured',
+      object: 'chat.completion',
+      model: 'qwenchat.qwen3.6-plus',
+      choices: [
+        {
+          index: 0,
+          message: { role: 'assistant', content: 'ok' },
+          finish_reason: 'stop'
+        }
+      ]
+    } as any;
+
+    let reenterCalled = 0;
+    const orchestration = await runServerToolOrchestration({
+      chat: chatResponse,
+      adapterContext,
+      entryEndpoint: '/v1/chat/completions',
+      requestId: 'req-vision-imagegen-captured',
+      providerProtocol: 'openai-chat',
+      reenterPipeline: async () => {
+        reenterCalled += 1;
+        return { body: {} as JsonObject };
+      }
+    });
+
+    expect(orchestration.executed).toBe(false);
+    expect(reenterCalled).toBe(0);
+  });
 });

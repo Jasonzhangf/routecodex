@@ -21,10 +21,11 @@ export async function setupRuntime(server: any, userConfig: UnknownObject): Prom
   const routerInput = server.resolveVirtualRouterInput(server.userConfig);
   const bootstrapArtifacts = await server.bootstrapVirtualRouter(routerInput);
   server.currentRouterArtifacts = bootstrapArtifacts;
-  await applyRoutingScopeToManagerModules(
-    server,
-    deriveRoutingProviderScope(bootstrapArtifacts?.targetRuntime, routerInput)
-  );
+  const routingScope = deriveRoutingProviderScope(bootstrapArtifacts?.targetRuntime, routerInput);
+  // Runtime-level scope cache: provider init/warmup must honor the same routing scope
+  // as token/quota managers to avoid non-routed providers doing background tasks.
+  server.routingProviderScope = routingScope;
+  await applyRoutingScopeToManagerModules(server, routingScope);
   const hubCtor = await server.ensureHubPipelineCtor();
   const hubConfig: { virtualRouter: unknown; [key: string]: unknown } = {
     virtualRouter: bootstrapArtifacts.config

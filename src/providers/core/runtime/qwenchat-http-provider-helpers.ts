@@ -1211,7 +1211,8 @@ export function extractQwenChatPayload(request: UnknownObject): QwenChatPayload 
         ? [{ role: 'user', content: compatPrompt }]
         : [];
   const streamFlag = payload.stream;
-  const stream = streamFlag === undefined ? true : streamFlag === true;
+  // Follow OpenAI semantics: stream defaults to false unless explicitly true.
+  const stream = streamFlag === true;
   const metadata = isRecord(payload.metadata)
     ? (payload.metadata as Record<string, unknown>)
     : isRecord(container.metadata)
@@ -1338,6 +1339,15 @@ function inferCreateSessionStatusCode(payload: Record<string, unknown>, reason: 
     return 429;
   }
   if (
+    normalized.includes('forbidden') ||
+    normalized.includes('permission denied') ||
+    normalized.includes('没有权限') ||
+    normalized.includes('无权限') ||
+    normalized.includes('permission')
+  ) {
+    return 403;
+  }
+  if (
     normalized.includes('unauthorized') ||
     normalized.includes('invalid token') ||
     normalized.includes('login') ||
@@ -1346,10 +1356,43 @@ function inferCreateSessionStatusCode(payload: Record<string, unknown>, reason: 
   ) {
     return 401;
   }
-  if (normalized.includes('forbidden') || normalized.includes('permission') || normalized.includes('无权限')) {
-    return 403;
-  }
   return 502;
+}
+
+type QwenUpstreamBusinessError = {
+  message: string;
+  statusCode: number;
+  code: string;
+};
+
+function parseQwenUpstreamBusinessErrorFromRaw(rawPayload: string): QwenUpstreamBusinessError | null {
+  const trimmed = rawPayload.trim();
+  if (!trimmed || trimmed.startsWith('data:')) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (!isRecord(parsed)) {
+      return null;
+    }
+    const success = parsed.success;
+    const hasErrorNode = isRecord(parsed.error);
+    const hasCode = Boolean(normalizeInputString(parsed.code));
+    // Only treat as business rejection when payload explicitly signals failure.
+    if (success !== false && !hasErrorNode && !hasCode) {
+      return null;
+    }
+    const reason = extractQwenErrorMessage(parsed) || normalizeInputString(parsed.message) || 'upstream rejected request';
+    const statusCode = inferCreateSessionStatusCode(parsed, reason);
+    const code = statusCode === 429 ? 'QWENCHAT_RATE_LIMITED' : 'QWENCHAT_COMPLETION_REJECTED';
+    return {
+      message: `QwenChat upstream rejected completion request: ${reason}`,
+      statusCode,
+      code
+    };
+  } catch {
+    return null;
+  }
 }
 
 export async function createQwenChatSession(args: {
@@ -1679,6 +1722,21 @@ export function createOpenAiMappedSseStream(input: QwenSseChunkWriterInput): Nod
 
   input.upstreamStream.on('end', () => {
     if (buffer.trim()) {
+      const upstreamBusinessError = parseQwenUpstreamBusinessErrorFromRaw(buffer);
+      if (upstreamBusinessError) {
+        output.write(
+          `data: ${JSON.stringify({
+            error: {
+              message: upstreamBusinessError.message,
+              code: upstreamBusinessError.code,
+              status: upstreamBusinessError.statusCode
+            }
+          })}\n\n`
+        );
+        writeDone();
+        output.end();
+        return;
+      }
       processQwenSsePayloadLines({
         payload: buffer,
         onChunk: (mappedChunk) => {
@@ -1778,6 +1836,14 @@ export async function collectQwenSseAsOpenAiResult(args: {
     args.upstreamStream.on('end', resolve);
     args.upstreamStream.on('error', reject);
   });
+
+  const upstreamBusinessError = parseQwenUpstreamBusinessErrorFromRaw(buffer);
+  if (upstreamBusinessError) {
+    const err = new Error(upstreamBusinessError.message);
+    (err as Error & { statusCode?: number; code?: string }).statusCode = upstreamBusinessError.statusCode;
+    (err as Error & { statusCode?: number; code?: string }).code = upstreamBusinessError.code;
+    throw err;
+  }
 
   processQwenSsePayloadLines({
     payload: buffer,
