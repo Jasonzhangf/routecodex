@@ -12,9 +12,11 @@ use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender, TrySendError};
 use std::sync::{Mutex, OnceLock};
 use std::thread;
+use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
-const DEFAULT_SNAPSHOT_QUEUE_CAPACITY: usize = 256;
+const DEFAULT_SNAPSHOT_QUEUE_CAPACITY: usize = 10;
+const DEFAULT_SNAPSHOT_KEEP_RECENT_FILES: usize = 10;
 const SNAPSHOT_DROP_LOG_THROTTLE_MS: i64 = 5_000;
 
 #[derive(Debug, Deserialize, Clone)]
@@ -62,6 +64,19 @@ fn resolve_snapshot_queue_capacity() -> usize {
         .and_then(|value| value.parse::<usize>().ok())
         .filter(|value| *value > 0);
     parsed.unwrap_or(DEFAULT_SNAPSHOT_QUEUE_CAPACITY)
+}
+
+fn resolve_snapshot_keep_recent_files() -> usize {
+    let raw = env::var("ROUTECODEX_SNAPSHOT_KEEP_RECENT_FILES")
+        .ok()
+        .or_else(|| env::var("RCC_SNAPSHOT_KEEP_RECENT_FILES").ok());
+    let parsed = raw
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0);
+    parsed.unwrap_or(DEFAULT_SNAPSHOT_KEEP_RECENT_FILES)
 }
 
 fn snapshot_writer_loop(receiver: Receiver<SnapshotHookOptions>) {
@@ -562,6 +577,65 @@ fn write_unique_file(dir: &Path, base_name: &str, contents: &str) -> Result<(), 
     Ok(())
 }
 
+fn file_mtime_ms(path: &Path) -> i128 {
+    let meta = match fs::metadata(path) {
+        Ok(v) => v,
+        Err(_) => return 0,
+    };
+    match meta.modified() {
+        Ok(time) => match time.duration_since(UNIX_EPOCH) {
+            Ok(duration) => duration.as_millis() as i128,
+            Err(_) => 0,
+        },
+        Err(_) => {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|v| v.as_millis() as i128)
+                .unwrap_or(0);
+            now
+        }
+    }
+}
+
+fn prune_snapshot_files_keep_recent(dir: &Path, keep_recent: usize) {
+    if keep_recent < 1 {
+        return;
+    }
+    let entries = match fs::read_dir(dir) {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+    let mut files: Vec<(PathBuf, String, i128)> = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = match entry.file_name().to_str() {
+            Some(v) => v.to_string(),
+            None => continue,
+        };
+        if name == "__runtime.json" {
+            continue;
+        }
+        if path.extension().and_then(|s| s.to_str()) != Some("json") {
+            continue;
+        }
+        files.push((path.clone(), name, file_mtime_ms(&path)));
+    }
+    if files.len() <= keep_recent {
+        return;
+    }
+    files.sort_by(|a, b| b.2.cmp(&a.2).then_with(|| a.1.cmp(&b.1)));
+    for stale in files.into_iter().skip(keep_recent) {
+        if let Err(error) = fs::remove_file(&stale.0) {
+            if error.kind() != std::io::ErrorKind::NotFound {
+                eprintln!(
+                    "[hub_snapshot_hooks] Failed to prune stale snapshot {:?}: {}",
+                    stale.0, error
+                );
+            }
+        }
+    }
+}
+
 fn merge_dirs(src: &Path, dest: &Path) {
     if let Err(e) = fs::create_dir_all(dest) {
         eprintln!(
@@ -729,7 +803,9 @@ fn write_snapshot_file(
         serde_json::to_string_pretty(&options.data).unwrap_or_else(|_| "{}".to_string())
     };
     let file_name = format!("{}{}.json", stage_token, channel_suffix(&options.channel));
-    write_unique_file(&dir, file_name.as_str(), payload.as_str())
+    write_unique_file(&dir, file_name.as_str(), payload.as_str())?;
+    prune_snapshot_files_keep_recent(&dir, resolve_snapshot_keep_recent_files());
+    Ok(())
 }
 
 fn write_snapshot_via_hooks_sync(options: SnapshotHookOptions) {
@@ -957,7 +1033,7 @@ pub fn should_record_snapshots_json() -> NapiResult<String> {
     let shared_flag = env::var("ROUTECODEX_SNAPSHOT")
         .ok()
         .or_else(|| env::var("ROUTECODEX_SNAPSHOTS").ok());
-    let enabled = resolve_bool_from_env(shared_flag, true);
+    let enabled = resolve_bool_from_env(shared_flag, false);
     serde_json::to_string(&enabled)
         .map_err(|e| napi::Error::from_reason(format!("Failed to serialize snapshot flag: {}", e)))
 }

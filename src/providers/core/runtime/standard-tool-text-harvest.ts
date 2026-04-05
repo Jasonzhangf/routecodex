@@ -1,4 +1,17 @@
-import { processChatResponseTools } from '../../../../sharedmodule/llmswitch-core/dist/conversion/shared/tool-governor.js';
+import { importCoreDist } from '../../../modules/llmswitch/bridge/module-loader.js';
+
+type ToolGovernorModule = {
+  processChatResponseTools?: (payload: Record<string, unknown>) => Record<string, unknown>;
+};
+
+const toolGovernorModule = await importCoreDist<ToolGovernorModule>('conversion/shared/tool-governor');
+const processChatResponseToolsFn: NonNullable<ToolGovernorModule['processChatResponseTools']> = (() => {
+  const fn = toolGovernorModule?.processChatResponseTools;
+  if (typeof fn !== 'function') {
+    throw new Error('[standard-tool-text-harvest] processChatResponseTools not available');
+  }
+  return fn;
+})();
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -12,6 +25,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * - Keep this wrapper neutral so providers share one skeleton.
  */
 export function applyStandardToolTextHarvestToChatPayload<T extends Record<string, unknown>>(payload: T): T {
-  const harvested = processChatResponseTools(payload as any);
+  const harvested = processChatResponseToolsFn(payload as any);
   return (isRecord(harvested) ? harvested : payload) as T;
 }

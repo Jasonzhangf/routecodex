@@ -78,8 +78,11 @@ export async function runHubOutboundConversion(options: HubOutboundOptions): Pro
 }
 
 function maybeCreateStageRecorder(adapterContext: AdapterContext, defaultEndpoint: string) {
-  const flag = process.env.ROUTECODEX_HUB_SNAPSHOTS;
-  if (flag && flag.trim() === '0') {
+  const flag = String(process.env.ROUTECODEX_HUB_SNAPSHOTS ?? process.env.RCC_HUB_SNAPSHOTS ?? '')
+    .trim()
+    .toLowerCase();
+  const enabled = flag === '1' || flag === 'true' || flag === 'yes' || flag === 'on';
+  if (!enabled) {
     return undefined;
   }
   const endpoint = defaultEndpoint || adapterContext.entryEndpoint || '/v1/chat/completions';

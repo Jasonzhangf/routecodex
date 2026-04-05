@@ -1,7 +1,25 @@
-import { applyQwenChatWebRequestTransform } from '../../../../sharedmodule/llmswitch-core/dist/conversion/compat/actions/qwenchat-web-request.js';
+import { importCoreDist } from '../../../modules/llmswitch/bridge/module-loader.js';
 
 export type StandardToolTextRequestPayload = Record<string, unknown>;
 export type StandardToolTextRequestContext = Record<string, unknown>;
+
+type QwenChatWebRequestTransformModule = {
+  applyQwenChatWebRequestTransform?: (
+    payload: Record<string, unknown>,
+    adapterContext?: Record<string, unknown>
+  ) => Record<string, unknown>;
+};
+
+const qwenChatWebRequestTransformModule =
+  await importCoreDist<QwenChatWebRequestTransformModule>('conversion/compat/actions/qwenchat-web-request');
+const qwenChatWebRequestTransformFn: NonNullable<QwenChatWebRequestTransformModule['applyQwenChatWebRequestTransform']> =
+  (() => {
+    const fn = qwenChatWebRequestTransformModule?.applyQwenChatWebRequestTransform;
+    if (typeof fn !== 'function') {
+      throw new Error('[standard-tool-text-request-transform] applyQwenChatWebRequestTransform not available');
+    }
+    return fn;
+  })();
 
 const TOOL_REGISTRY_FAILURE_RE = /\bTool\s+[A-Za-z0-9_.:/-]+\s+does\s+not\s+exists\b/i;
 const TOOL_REGISTRY_FAILURE_GLOBAL_RE = /\bTool\s+[A-Za-z0-9_.:/-]+\s+does\s+not\s+exists\b/gi;
@@ -132,7 +150,7 @@ export const standardToolTextRequestTransformRuntime = {
     payload: StandardToolTextRequestPayload,
     adapterContext?: StandardToolTextRequestContext
   ): StandardToolTextRequestPayload {
-    return applyQwenChatWebRequestTransform(
+    return qwenChatWebRequestTransformFn(
       payload as any,
       adapterContext as any
     ) as StandardToolTextRequestPayload;
