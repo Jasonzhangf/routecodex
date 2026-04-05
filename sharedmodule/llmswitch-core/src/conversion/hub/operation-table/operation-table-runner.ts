@@ -17,6 +17,8 @@ type BridgeRunSpec = {
   moduleType?: string;
 };
 
+type BridgeActionDescriptorLike = { name: string; options?: Record<string, unknown> };
+
 const INBOUND_BRIDGE_SPECS: Record<ProtocolId, BridgeRunSpec> = {
   'openai-chat': { protocol: 'openai-chat', stage: 'request_inbound', messages: 'chat_envelope' },
   // Keep parity with the legacy semantic mapper behavior: do not pass messages[] into the action state
@@ -27,7 +29,10 @@ const INBOUND_BRIDGE_SPECS: Record<ProtocolId, BridgeRunSpec> = {
 };
 
 const OUTBOUND_BRIDGE_SPECS: Record<ProtocolId, BridgeRunSpec> = {
-  'openai-chat': { protocol: 'openai-chat', stage: 'request_outbound', messages: 'format_payload_messages', includeCapturedToolResults: true },
+  // openai-chat outbound post-map hooks do not write back `state.messages` into payload.
+  // Feeding full payload.messages here only adds O(n) scan cost on large histories.
+  // Keep hooks metadata-only by not passing message arrays.
+  'openai-chat': { protocol: 'openai-chat', stage: 'request_outbound', messages: 'none', includeCapturedToolResults: true },
   // Keep parity: openai-responses outbound actions should not touch normalized messages.
   'openai-responses': { protocol: 'openai-responses', stage: 'request_outbound', messages: 'none', moduleType: 'openai-responses' },
   'anthropic-messages': { protocol: 'anthropic-messages', stage: 'request_outbound', messages: 'none', includeCapturedToolResults: true },
@@ -62,6 +67,55 @@ function buildCapturedToolResults(toolOutputs: ChatToolOutput[] | undefined): Ar
   }));
 }
 
+function hasToolSignalsInMessages(messages: Array<Record<string, unknown>> | undefined): boolean {
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return false;
+  }
+  for (const message of messages) {
+    if (!message || typeof message !== 'object') {
+      continue;
+    }
+    const role = typeof message.role === 'string' ? message.role.trim().toLowerCase() : '';
+    if (role === 'tool') {
+      return true;
+    }
+    if (typeof message.tool_call_id === 'string' && message.tool_call_id.trim().length > 0) {
+      return true;
+    }
+    const toolCalls = (message as Record<string, unknown>).tool_calls;
+    if (Array.isArray(toolCalls) && toolCalls.length > 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function filterToolOnlyActionsWhenNoToolSignals(
+  stage: BridgeActionStage,
+  actions: BridgeActionDescriptorLike[] | undefined,
+  messages: Array<Record<string, unknown>> | undefined
+): BridgeActionDescriptorLike[] | undefined {
+  if (!actions?.length) {
+    return actions;
+  }
+  if (stage !== 'request_outbound' && stage !== 'request_inbound') {
+    return actions;
+  }
+  if (hasToolSignalsInMessages(messages)) {
+    return actions;
+  }
+  const toolOnlyActions = new Set([
+    'tools.capture-results',
+    'tools.normalize-call-ids',
+    'compat.fix-apply-patch',
+    'tools.ensure-placeholders'
+  ]);
+  return actions.filter((action) => {
+    const name = typeof action?.name === 'string' ? action.name.trim().toLowerCase() : '';
+    return !toolOnlyActions.has(name);
+  });
+}
+
 function applyBridgePolicy(spec: BridgeRunSpec, options: {
   requestId?: string;
   chatEnvelope: ChatEnvelope;
@@ -69,24 +123,43 @@ function applyBridgePolicy(spec: BridgeRunSpec, options: {
   adapterContext: AdapterContext;
 }): void {
   const bridgePolicy = resolveBridgePolicy({ protocol: spec.protocol, moduleType: spec.moduleType ?? spec.protocol });
-  const actions = resolvePolicyActions(bridgePolicy, spec.stage);
-  if (!actions?.length) {
-    return;
-  }
-
-  const metadata = options.chatEnvelope.metadata as Record<string, unknown> | undefined;
+  const resolvedActions = resolvePolicyActions(bridgePolicy, spec.stage);
   const messages =
     spec.messages === 'chat_envelope'
       ? (options.chatEnvelope.messages as Array<Record<string, unknown>>)
       : spec.messages === 'format_payload_messages'
         ? extractPayloadMessages(options.payload)
         : undefined;
+  const actions = filterToolOnlyActionsWhenNoToolSignals(
+    spec.stage,
+    resolvedActions,
+    messages
+  );
+  if (!actions?.length) {
+    return;
+  }
+
+  const metadata = options.chatEnvelope.metadata as Record<string, unknown> | undefined;
+  const rawRequestForActionState = (() => {
+    if (spec.messages !== 'format_payload_messages') {
+      return options.payload;
+    }
+    if (!messages || !Array.isArray(messages) || messages.length === 0) {
+      return options.payload;
+    }
+    // Performance stop-bleed: avoid duplicating a very large messages[] payload in both
+    // `state.messages` and `state.rawRequest.messages`. Bridge actions still receive the
+    // canonical messages via `state.messages`.
+    const compact = { ...(options.payload as Record<string, unknown>) } as JsonObject;
+    delete (compact as Record<string, unknown>).messages;
+    return compact;
+  })();
   const capturedToolResults = spec.includeCapturedToolResults
     ? buildCapturedToolResults(options.chatEnvelope.toolOutputs)
     : undefined;
   const actionState = createBridgeActionState({
     ...(messages ? { messages } : {}),
-    rawRequest: options.payload,
+    rawRequest: rawRequestForActionState,
     metadata,
     ...(capturedToolResults ? { capturedToolResults } : {})
   });

@@ -171,7 +171,7 @@ export class ProviderModelBackoffTracker {
         : null;
     const until = explicitUntil ?? (nowMs + ttl);
     const existingUntil =
-      typeof previous?.cooldownUntil === 'number' && Number.isFinite(previous.cooldownUntil)
+      sameError && typeof previous?.cooldownUntil === 'number' && Number.isFinite(previous.cooldownUntil)
         ? previous.cooldownUntil
         : null;
     this.states.set(modelKey, {

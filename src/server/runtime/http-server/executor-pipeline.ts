@@ -3,6 +3,17 @@ import type { HubPipeline } from './types.js';
 import { createSnapshotRecorder as bridgeCreateSnapshotRecorder } from '../../../modules/llmswitch/bridge.js';
 import { asRecord } from './provider-utils.js';
 
+const truthy = new Set(['1', 'true', 'yes', 'on']);
+
+function shouldEnableHubStageRecorder(): boolean {
+  const raw = String(
+    process.env.ROUTECODEX_ENABLE_HUB_STAGE_RECORDER
+    ?? process.env.RCC_ENABLE_HUB_STAGE_RECORDER
+    ?? ''
+  ).trim().toLowerCase();
+  return truthy.has(raw);
+}
+
 export type HubPipelineResult = {
   providerPayload: Record<string, unknown>;
   /**
@@ -42,24 +53,26 @@ export async function runHubPipeline(
   metadata: Record<string, unknown>
 ): Promise<HubPipelineResult> {
   let stageRecorder: unknown;
-  try {
-    const providerProtocol =
-      typeof metadata.providerProtocol === 'string' && metadata.providerProtocol.trim()
-        ? metadata.providerProtocol.trim()
-        : input.entryEndpoint.includes('/v1/responses')
-          ? 'openai-responses'
-          : input.entryEndpoint.includes('/v1/messages')
-            ? 'anthropic-messages'
-            : 'openai-chat';
-    stageRecorder = await bridgeCreateSnapshotRecorder(
-      {
-        requestId: input.requestId,
-        providerProtocol
-      },
-      input.entryEndpoint
-    );
-  } catch {
-    stageRecorder = undefined;
+  if (shouldEnableHubStageRecorder()) {
+    try {
+      const providerProtocol =
+        typeof metadata.providerProtocol === 'string' && metadata.providerProtocol.trim()
+          ? metadata.providerProtocol.trim()
+          : input.entryEndpoint.includes('/v1/responses')
+            ? 'openai-responses'
+            : input.entryEndpoint.includes('/v1/messages')
+              ? 'anthropic-messages'
+              : 'openai-chat';
+      stageRecorder = await bridgeCreateSnapshotRecorder(
+        {
+          requestId: input.requestId,
+          providerProtocol
+        },
+        input.entryEndpoint
+      );
+    } catch {
+      stageRecorder = undefined;
+    }
   }
 
   const payload = asRecord(input.body);

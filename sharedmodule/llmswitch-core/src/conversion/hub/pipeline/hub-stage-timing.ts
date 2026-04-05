@@ -1,9 +1,20 @@
 const truthy = new Set(['1', 'true', 'yes', 'on']);
 const falsy = new Set(['0', 'false', 'no', 'off']);
+// Native alignment note: timing integrates with *WithNative stage orchestration flow.
 const REQUEST_TIMELINES = new Map<string, { startedAtMs: number; lastAtMs: number }>();
 const REQUEST_TIMELINE_TTL_MS = 30 * 60 * 1000;
 const REQUEST_TIMELINE_MAX = 4096;
 const DEFAULT_HUB_STAGE_LOG_MIN_MS = 50;
+const DEFAULT_HUB_STAGE_TOP_N = 5;
+const DEFAULT_HUB_STAGE_TOP_MIN_MS = 5;
+
+type HubStageBreakdownEntry = {
+  totalMs: number;
+  count: number;
+  maxMs: number;
+};
+
+const REQUEST_STAGE_BREAKDOWNS = new Map<string, Map<string, HubStageBreakdownEntry>>();
 
 function resolveBool(raw: string | undefined, fallback: boolean): boolean {
   if (raw === undefined) {
@@ -72,6 +83,7 @@ function prune(nowMs: number): void {
   for (const [key, timeline] of REQUEST_TIMELINES.entries()) {
     if (nowMs - timeline.lastAtMs >= REQUEST_TIMELINE_TTL_MS) {
       REQUEST_TIMELINES.delete(key);
+      REQUEST_STAGE_BREAKDOWNS.delete(key);
     }
   }
   while (REQUEST_TIMELINES.size > REQUEST_TIMELINE_MAX) {
@@ -80,6 +92,7 @@ function prune(nowMs: number): void {
       break;
     }
     REQUEST_TIMELINES.delete(oldestKey);
+    REQUEST_STAGE_BREAKDOWNS.delete(oldestKey);
   }
 }
 
@@ -138,6 +151,87 @@ export function clearHubStageTiming(requestId: string | undefined | null): void 
     return;
   }
   REQUEST_TIMELINES.delete(requestId);
+  REQUEST_STAGE_BREAKDOWNS.delete(requestId);
+}
+
+function recordHubStageElapsed(
+  requestId: string,
+  stage: string,
+  elapsedMs: number
+): void {
+  if (!requestId || !stage || !Number.isFinite(elapsedMs) || elapsedMs < 0) {
+    return;
+  }
+  const nowMs = Date.now();
+  prune(nowMs);
+  const byStage = REQUEST_STAGE_BREAKDOWNS.get(requestId) ?? new Map<string, HubStageBreakdownEntry>();
+  if (!REQUEST_STAGE_BREAKDOWNS.has(requestId)) {
+    REQUEST_STAGE_BREAKDOWNS.set(requestId, byStage);
+  }
+  const existing = byStage.get(stage);
+  if (!existing) {
+    byStage.set(stage, {
+      totalMs: elapsedMs,
+      count: 1,
+      maxMs: elapsedMs
+    });
+    return;
+  }
+  existing.totalMs += elapsedMs;
+  existing.count += 1;
+  existing.maxMs = Math.max(existing.maxMs, elapsedMs);
+}
+
+function readIntEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  const parsed = Number.parseInt(String(raw ?? '').trim(), 10);
+  if (Number.isFinite(parsed) && parsed > 0) {
+    return parsed;
+  }
+  return fallback;
+}
+
+export type HubStageTopSummaryEntry = {
+  stage: string;
+  totalMs: number;
+  count: number;
+  avgMs: number;
+  maxMs: number;
+};
+
+export function peekHubStageTopSummary(
+  requestId: string | undefined | null,
+  options?: {
+    topN?: number;
+    minMs?: number;
+  }
+): HubStageTopSummaryEntry[] {
+  if (!requestId) {
+    return [];
+  }
+  const byStage = REQUEST_STAGE_BREAKDOWNS.get(requestId);
+  if (!byStage || !byStage.size) {
+    return [];
+  }
+  const topN = Math.max(1, options?.topN ?? readIntEnv('ROUTECODEX_HUB_STAGE_TOP_N', DEFAULT_HUB_STAGE_TOP_N));
+  const minMs = Math.max(0, options?.minMs ?? readIntEnv('ROUTECODEX_HUB_STAGE_TOP_MIN_MS', DEFAULT_HUB_STAGE_TOP_MIN_MS));
+  return Array.from(byStage.entries())
+    .map(([stage, stats]) => {
+      const totalMs = Math.max(0, Math.round(stats.totalMs));
+      const count = Math.max(0, Math.floor(stats.count));
+      const maxMs = Math.max(0, Math.round(stats.maxMs));
+      const avgMs = count > 0 ? Math.max(0, Math.round(totalMs / count)) : 0;
+      return {
+        stage,
+        totalMs,
+        count,
+        avgMs,
+        maxMs
+      };
+    })
+    .filter((entry) => entry.totalMs >= minMs)
+    .sort((a, b) => b.totalMs - a.totalMs)
+    .slice(0, topN);
 }
 
 export function logHubStageTiming(
@@ -146,6 +240,25 @@ export function logHubStageTiming(
   phase: 'start' | 'completed' | 'error',
   details?: Record<string, unknown>
 ): void {
+  const stageElapsedMs =
+    phase === 'completed' || phase === 'error'
+      ? (
+          typeof details?.elapsedMs === 'number'
+            ? details.elapsedMs
+            : typeof details?.nativeMs === 'number'
+              ? details.nativeMs
+              : undefined
+        )
+      : undefined;
+  if (
+    requestId &&
+    stage &&
+    typeof stageElapsedMs === 'number' &&
+    Number.isFinite(stageElapsedMs) &&
+    stageElapsedMs >= 0
+  ) {
+    recordHubStageElapsed(requestId, stage, stageElapsedMs);
+  }
   if (!isHubStageTimingEnabled() || !requestId || !stage) {
     return;
   }
@@ -236,10 +349,11 @@ export async function measureHubStage<T>(
     });
     return value;
   } catch (error) {
+    const elapsedMs = Math.max(0, Date.now() - startedAt);
     const mapped = options?.mapErrorDetails?.(error);
     const message = error instanceof Error ? error.message : String(error ?? 'unknown');
     logHubStageTiming(requestId, stage, 'error', mapped ?? {
-      elapsedMs: Math.max(0, Date.now() - startedAt),
+      elapsedMs,
       message
     });
     throw error;

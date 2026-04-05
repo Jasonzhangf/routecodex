@@ -16,6 +16,7 @@
 6. **非授权不破坏**：未获明确授权，不做删除/回滚/迁移/发布类破坏动作。
 7. **禁止进程杀戮命令**：禁用 `kill/pkill/killall/taskkill/lsof|xargs kill` 等。
 8. **llmswitch-core 禁止新增 TS 功能代码**：不允许再增加任何 TypeScript 功能实现；如有必要，一律转为 Rust 实现，TS 仅允许保留最小调用壳层。
+9. **真实 payload 不可裁剪**：请求/响应在传输链路中的真实 payload 不得被裁剪或改写语义；性能优化只能发生在算法/处理路径。允许裁剪内部调试、快照、观测数据，不得影响真实传输内容。
 
 ## 分类路由（路径 + 作用）
 1. 入口总览：`docs/agent-routing/00-entry-routing.md`

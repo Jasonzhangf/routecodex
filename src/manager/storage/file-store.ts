@@ -20,6 +20,16 @@ type JsonlEnvelope<TSnapshot, TEvent> =
   | { kind: 'snapshot'; timestamp: number; snapshot: TSnapshot }
   | { kind: 'event'; timestamp: number; event: TEvent };
 
+function isEnoentError(error: unknown): boolean {
+  return Boolean(
+    error &&
+      typeof error === 'object' &&
+      'code' in error &&
+      typeof (error as { code?: unknown }).code === 'string' &&
+      (error as { code: string }).code === 'ENOENT'
+  );
+}
+
 function logJsonlFileStoreNonBlockingError(operation: string, error: unknown, details?: Record<string, unknown>): void {
   const reason = error instanceof Error ? error.message : String(error);
   const suffix = details ? ` details=${JSON.stringify(details)}` : '';
@@ -59,6 +69,9 @@ export class JsonlFileStore<TSnapshot, TEvent = unknown>
       }
       return null;
     } catch (error) {
+      if (isEnoentError(error)) {
+        return null;
+      }
       logJsonlFileStoreNonBlockingError('load.readFile', error, { filePath: this.filePath });
       return null;
     }

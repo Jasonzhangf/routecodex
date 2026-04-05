@@ -6,6 +6,7 @@
  */
 
 import type { DeepSeekProviderRuntimeOptions } from '../core/contracts/deepseek-provider-contract.js';
+import type { ProviderConcurrencyConfig, ProviderRpmConfig } from '../core/api/provider-types.js';
 
 export type ProviderProtocol = 'openai' | 'responses' | 'anthropic' | 'gemini' | 'gemini-cli';
 
@@ -98,6 +99,8 @@ export interface ProviderProfile {
     defaultModel?: string;
     supportedModels?: string[];
     deepseek?: Partial<DeepSeekProviderRuntimeOptions>;
+    concurrency?: ProviderConcurrencyConfig;
+    rpm?: ProviderRpmConfig;
   };
 }
 

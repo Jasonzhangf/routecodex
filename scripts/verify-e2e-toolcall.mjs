@@ -80,6 +80,7 @@ async function main() {
   };
   if (resolved.mode === 'mock') {
     serverEnv.ROUTECODEX_USE_MOCK = '1';
+    serverEnv.ROUTECODEX_ALLOW_MOCK_RUNTIME = '1';
     serverEnv.ROUTECODEX_MOCK_CONFIG_PATH = resolved.configPath;
     serverEnv.ROUTECODEX_MOCK_VALIDATE_NAMES = '1';
   }

@@ -671,6 +671,7 @@ async function main() {
     configPath: file,
     env: {
       ROUTECODEX_USE_MOCK: '1',
+      ROUTECODEX_ALLOW_MOCK_RUNTIME: '1',
       ROUTECODEX_MOCK_CONFIG_PATH: file,
       ROUTECODEX_MOCK_SAMPLES_DIR: MOCK_SAMPLES_DIR,
       ROUTECODEX_MOCK_VALIDATE_NAMES: '1',

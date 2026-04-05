@@ -51,6 +51,53 @@ export async function runReqOutboundStage1SemanticMap(
     request: options.request as unknown as JsonObject,
     adapterContext: options.adapterContext as unknown as Record<string, unknown>
   }) as unknown as ChatEnvelope;
+  // Perf: when outbound target is not /v1/responses, the large responses.context
+  // semantic snapshot is not needed for provider request mapping and can cause
+  // expensive deep traversals in downstream native mappers/policy actions.
+  if (providerProtocol !== 'openai-responses') {
+    const semantics = chatEnvelope.semantics as Record<string, unknown> | undefined;
+    const responsesNode =
+      semantics && typeof semantics.responses === 'object' && semantics.responses !== null && !Array.isArray(semantics.responses)
+        ? (semantics.responses as Record<string, unknown>)
+        : undefined;
+    if (responsesNode && Object.prototype.hasOwnProperty.call(responsesNode, 'context')) {
+      const { context: _unusedContext, ...restResponses } = responsesNode;
+      if (Object.keys(restResponses).length > 0) {
+        chatEnvelope.semantics = {
+          ...(semantics ?? {}),
+          responses: restResponses
+        } as unknown as ChatEnvelope['semantics'];
+      } else if (semantics && Object.keys(semantics).length > 0) {
+        const { responses: _unusedResponses, ...restSemantics } = semantics;
+        chatEnvelope.semantics =
+          Object.keys(restSemantics).length > 0
+            ? (restSemantics as unknown as ChatEnvelope['semantics'])
+            : undefined;
+      }
+    }
+  }
+  if (
+    providerProtocol === 'openai-responses'
+    && options.contextSnapshot
+    && typeof options.contextSnapshot === 'object'
+    && !Array.isArray(options.contextSnapshot)
+  ) {
+    const semantics =
+      chatEnvelope.semantics && typeof chatEnvelope.semantics === 'object' && !Array.isArray(chatEnvelope.semantics)
+        ? (chatEnvelope.semantics as Record<string, unknown>)
+        : {};
+    const responsesNode =
+      semantics.responses && typeof semantics.responses === 'object' && !Array.isArray(semantics.responses)
+        ? (semantics.responses as Record<string, unknown>)
+        : {};
+    chatEnvelope.semantics = {
+      ...semantics,
+      responses: {
+        ...responsesNode,
+        context: options.contextSnapshot
+      }
+    } as unknown as ChatEnvelope['semantics'];
+  }
   logHubStageTiming(requestId, 'req_outbound.stage1_native_to_chat_envelope', 'completed', {
     elapsedMs: Date.now() - toChatStart,
     forceLog: forceDetailLog

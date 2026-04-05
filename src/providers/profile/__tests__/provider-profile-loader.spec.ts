@@ -124,6 +124,36 @@ describe('provider-profile-loader', () => {
     expect(result.byId.tabglm.transport.backend).toBe('vercel-ai-sdk');
   });
 
+  it('extracts concurrency and rpm metadata from provider config', () => {
+    const config: Record<string, unknown> = {
+      providers: {
+        qwenchat: {
+          type: 'qwenchat',
+          concurrency: {
+            maxInFlight: 1,
+            acquireTimeoutMs: 45000,
+            staleLeaseMs: 240000
+          },
+          rpm: {
+            requestsPerMinute: 80,
+            acquireTimeoutMs: 35000
+          }
+        }
+      }
+    };
+
+    const result = buildProviderProfiles(config);
+    expect(result.byId.qwenchat.metadata?.concurrency).toEqual({
+      maxInFlight: 1,
+      acquireTimeoutMs: 45000,
+      staleLeaseMs: 240000
+    });
+    expect(result.byId.qwenchat.metadata?.rpm).toEqual({
+      requestsPerMinute: 80,
+      acquireTimeoutMs: 35000
+    });
+  });
+
 
   it('throws when legacy compatibility fields are used', () => {
     const config: Record<string, unknown> = {

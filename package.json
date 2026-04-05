@@ -1,6 +1,6 @@
 {
   "name": "routecodex",
-  "version": "0.90.833",
+  "version": "0.90.872",
   "description": "Multi-provider OpenAI proxy server with anthropic/responses/chat support (dev)",
   "type": "module",
   "main": "dist/index.js",
@@ -154,8 +154,6 @@
     "mock:clean": "node scripts/mock-provider/clean.mjs",
     "publish:rcc": "node scripts/publish-rcc.mjs",
     "pack:rcc": "node scripts/pack-rcc.mjs",
-    "build:rccx": "npm run build:min && node scripts/pack-mode.mjs --name @jsonstudio/rccx --bin rccx",
-    "compare:codex:rccx": "node scripts/compare-codex-rccx.mjs",
     "fix:cli-permission": "node scripts/ensure-cli-executable.mjs",
     "fix:cli-shim": "node scripts/ensure-cli-command-shim.mjs",
     "public:rcc": "npm run publish:rcc --"

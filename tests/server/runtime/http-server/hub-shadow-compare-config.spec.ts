@@ -21,27 +21,18 @@ describe('Hub shadow compare default gating', () => {
     expect(config.enabled).toBe(false);
   });
 
-  it('defaults to enabled for rccx package', async () => {
-    delete process.env.ROUTECODEX_UNIFIED_HUB_SHADOW_COMPARE;
-    process.env.ROUTECODEX_PACKAGE_NAME = '@jsonstudio/rccx';
-
-    const config = await resolveConfig();
-    expect(config.enabled).toBe(true);
-  });
-
-  it('allows env override to disable even for rccx package', async () => {
-    process.env.ROUTECODEX_PACKAGE_NAME = '@jsonstudio/rccx';
-    process.env.ROUTECODEX_UNIFIED_HUB_SHADOW_COMPARE = '0';
-
-    const config = await resolveConfig();
-    expect(config.enabled).toBe(false);
-  });
-
-  it('allows env override to enable for non-rccx package', async () => {
+  it('allows env override to enable when default is disabled', async () => {
     process.env.ROUTECODEX_PACKAGE_NAME = 'routecodex';
     process.env.ROUTECODEX_UNIFIED_HUB_SHADOW_COMPARE = '1';
 
     const config = await resolveConfig();
     expect(config.enabled).toBe(true);
+  });
+
+  it('allows env override to disable explicitly', async () => {
+    process.env.ROUTECODEX_UNIFIED_HUB_SHADOW_COMPARE = '0';
+
+    const config = await resolveConfig();
+    expect(config.enabled).toBe(false);
   });
 });

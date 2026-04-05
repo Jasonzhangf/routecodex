@@ -182,11 +182,11 @@ export function applyErrorEvent(
         ? COOLDOWN_SCHEDULE_FATAL_MS
         : COOLDOWN_SCHEDULE_DEFAULT_MS;
   const rawNextCount = sameErrorKey ? state.consecutiveErrorCount + 1 : 1;
-  const nextCount = rawNextCount > schedule.length ? 1 : rawNextCount;
+  const nextCount = Math.min(rawNextCount, Math.max(1, schedule.length));
   const cooldownMs =
     computeTransientKeepPoolCooldownMs(series, nextCount) ?? computeCooldownMsBySeries(series, nextCount);
   const nextUntil = cooldownMs ? nowMs + cooldownMs : null;
-  const existingUntil = typeof state.cooldownUntil === 'number' ? state.cooldownUntil : null;
+  const existingUntil = sameErrorKey && typeof state.cooldownUntil === 'number' ? state.cooldownUntil : null;
   const cooldownUntil =
     typeof nextUntil === 'number' && Number.isFinite(nextUntil)
       ? typeof existingUntil === 'number' && existingUntil > nextUntil

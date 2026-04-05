@@ -6,6 +6,7 @@ let cachedStageLoggingFlag: boolean | null = null;
 let cachedStageVerboseFlag: boolean | null = null;
 let cachedStageTimingFlag: boolean | null = null;
 let cachedStageTimingSummaryFlag: boolean | null = null;
+let cachedUsageTimingOutputFlag: boolean | null = null;
 const DEFAULT_STAGE_TIMING_MIN_MS = 50;
 
 const REQUEST_STAGE_TIMELINE_TTL_MS = 30 * 60 * 1000;
@@ -24,6 +25,7 @@ const RELEASE_SUMMARY_BREAKDOWN_SCOPES = [
   'provider.runtime_resolve',
   'provider.context_resolve',
   'provider.metadata_attach',
+  'provider.traffic.acquire',
   'provider.send',
   'provider.response_normalize',
   'client.inject_wait',
@@ -106,6 +108,19 @@ function computeStageTimingSummaryEnabled(): boolean {
   );
 }
 
+function computeUsageTimingOutputEnabled(): boolean {
+  const explicit =
+    process.env.ROUTECODEX_USAGE_TIMING
+    ?? process.env.RCC_USAGE_TIMING
+    ?? process.env.ROUTECODEX_USAGE_TIMING_LOG
+    ?? process.env.RCC_USAGE_TIMING_LOG;
+  if (explicit !== undefined) {
+    return resolveBoolFromEnv(explicit, false);
+  }
+  // 默认策略：dev 打印，release 不打印（可通过上面的环境变量显式覆盖）
+  return resolveRuntimeBuildMode() === 'dev';
+}
+
 function resolveStageTimingMinMs(): number {
   const raw =
     process.env.ROUTECODEX_STAGE_TIMING_MIN_MS
@@ -149,6 +164,13 @@ function isStageTimingSummaryEnabled(): boolean {
     cachedStageTimingSummaryFlag = computeStageTimingSummaryEnabled();
   }
   return cachedStageTimingSummaryFlag;
+}
+
+export function isUsageTimingOutputEnabled(): boolean {
+  if (cachedUsageTimingOutputFlag === null) {
+    cachedUsageTimingOutputFlag = computeUsageTimingOutputEnabled();
+  }
+  return cachedUsageTimingOutputFlag;
 }
 
 export function isStageLoggingEnabled(): boolean {
@@ -267,6 +289,12 @@ export function formatRequestTimingSummary(
     terminal?: boolean;
   }
 ): string {
+  if (!isUsageTimingOutputEnabled()) {
+    if (options?.terminal) {
+      clearRequestStageState(requestId);
+    }
+    return '';
+  }
   let label = '';
   const breakdownLabel = formatReleaseUsageTimingSummary(requestId, options);
   if (
@@ -530,6 +558,8 @@ function shouldTrackTimingBreakdownScope(stage: string): boolean {
     || normalized === 'provider.context_resolve.completed'
     || normalized === 'provider.metadata_attach.start'
     || normalized === 'provider.metadata_attach.completed'
+    || normalized === 'provider.traffic.acquire.start'
+    || normalized === 'provider.traffic.acquire.completed'
     || normalized === 'hub.response.start'
     || normalized === 'hub.response.completed'
     || normalized === 'provider.response_normalize.start'

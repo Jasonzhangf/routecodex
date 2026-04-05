@@ -5,7 +5,6 @@ import type {
 import type { FormatEnvelope } from "../../../../types/format-envelope.js";
 import {
   isJsonObject,
-  jsonClone,
   type JsonObject,
 } from "../../../../types/json.js";
 import type {
@@ -45,6 +44,31 @@ export interface ReqInboundStage2SemanticMapResult {
   responsesContext?: JsonObject;
 }
 
+function buildSlimResponsesContextForSemantics(
+  context: JsonObject | undefined,
+): JsonObject | undefined {
+  if (!context || typeof context !== "object" || Array.isArray(context)) {
+    return undefined;
+  }
+  // Keep semantic essentials only; avoid carrying full `input` history through
+  // chat_process and req_process stages (it can be huge and is not required for
+  // non-responses outbound paths).
+  //
+  // IMPORTANT:
+  // Do not spread-clone first and then delete heavy keys. For large /v1/responses
+  // payloads that would deep-copy gigantic arrays/strings into a temporary object.
+  // Build a filtered object directly to keep this step O(selected fields).
+  const src = context as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(src)) {
+    if (key === "input" || key === "__captured_tool_results") {
+      continue;
+    }
+    out[key] = value;
+  }
+  return out as JsonObject;
+}
+
 export async function runReqInboundStage2SemanticMap(
   options: ReqInboundStage2SemanticMapOptions,
 ): Promise<ReqInboundStage2SemanticMapResult> {
@@ -79,8 +103,13 @@ export async function runReqInboundStage2SemanticMap(
       responsesNode && isJsonObject(responsesNode.context)
         ? (responsesNode.context as JsonObject)
         : undefined;
-    return contextNode ? jsonClone(contextNode) : undefined;
+    // Perf: keep reference instead of deep clone to avoid multi-pass cloning on
+    // heavy /v1/responses histories.
+    return contextNode;
   })();
+  const semanticsResponsesContext =
+    buildSlimResponsesContextForSemantics(preservedResponsesContext) ??
+    preservedResponsesContext;
   logHubStageTiming(
     requestId,
     "req_inbound.stage2_operation_table_inbound",
@@ -120,11 +149,11 @@ export async function runReqInboundStage2SemanticMap(
       forceLog: forceDetailLog,
     },
   );
-  if (preservedResponsesContext) {
+  if (semanticsResponsesContext) {
     const currentSemantics = chatEnvelope.semantics;
     if (!currentSemantics || typeof currentSemantics !== "object") {
       chatEnvelope.semantics = {
-        responses: { context: jsonClone(preservedResponsesContext) },
+        responses: { context: semanticsResponsesContext },
       } as JsonObject;
     } else {
       const semantics = currentSemantics as JsonObject;
@@ -136,21 +165,26 @@ export async function runReqInboundStage2SemanticMap(
           ...semantics,
           responses: {
             ...responsesNode,
-            context: jsonClone(preservedResponsesContext),
+            context: semanticsResponsesContext,
           },
         } as JsonObject;
       }
     }
   }
-  normalizeReqInboundShellLikeToolCallsWithNative(
-    chatEnvelope as unknown as Record<string, unknown>,
-  );
-  const fixedApplyPatch = fixApplyPatchToolCallsWithNative({
-    messages: (Array.isArray(chatEnvelope.messages)
-      ? chatEnvelope.messages
-      : []) as Array<Record<string, unknown>>,
-  });
-  chatEnvelope.messages = fixedApplyPatch.messages as unknown as ChatEnvelope["messages"];
+  // openai-responses path already ran request_inbound bridge policy in
+  // buildChatRequestFromResponses (including call-id/apply-patch compat actions).
+  // Skip duplicate message-wide normalization passes here to reduce heavy-input cost.
+  if (options.formatEnvelope.protocol !== "openai-responses") {
+    normalizeReqInboundShellLikeToolCallsWithNative(
+      chatEnvelope as unknown as Record<string, unknown>,
+    );
+    const fixedApplyPatch = fixApplyPatchToolCallsWithNative({
+      messages: (Array.isArray(chatEnvelope.messages)
+        ? chatEnvelope.messages
+        : []) as Array<Record<string, unknown>>,
+    });
+    chatEnvelope.messages = fixedApplyPatch.messages as unknown as ChatEnvelope["messages"];
+  }
   logHubStageTiming(
     requestId,
     "req_inbound.stage2_validate_chat_envelope",
@@ -197,7 +231,7 @@ export async function runReqInboundStage2SemanticMap(
     const envelopeSemantics = chatEnvelope.semantics as JsonObject;
     const existing = standardizedRequest.semantics;
     if (!existing || typeof existing !== "object") {
-      standardizedRequest.semantics = jsonClone(envelopeSemantics);
+      standardizedRequest.semantics = envelopeSemantics;
     } else {
       const existingObj = existing as JsonObject;
       const envelopeResponses = isJsonObject(
@@ -210,11 +244,14 @@ export async function runReqInboundStage2SemanticMap(
           ? (envelopeResponses.context as JsonObject)
           : undefined;
       if (envelopeContext) {
+        const slimContext =
+          buildSlimResponsesContextForSemantics(envelopeContext) ??
+          envelopeContext;
         const nextResponses = {
           ...(isJsonObject((existingObj as any).responses)
             ? ((existingObj as any).responses as JsonObject)
             : {}),
-          context: jsonClone(envelopeContext),
+          context: slimContext,
         };
         standardizedRequest.semantics = {
           ...existingObj,

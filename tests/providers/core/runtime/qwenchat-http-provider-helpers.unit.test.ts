@@ -340,6 +340,65 @@ describe('qwenchat-http-provider helpers', () => {
     });
   });
 
+  it('does not re-inject stale assistant tool-registry failure text into qwenchat tool prompt', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({
+          success: true,
+          data: {
+            id: 'chat-id-sanitized-history'
+          }
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      )) as typeof fetch;
+    try {
+      const plan = await buildQwenChatSendPlan({
+        baseUrl: 'https://chat.qwen.ai',
+        baxiaTokens: { bxUa: 'bx-ua', bxUmidToken: 'bx-token', bxV: '2.5.36' },
+        payload: {
+          model: 'qwen3.6-plus',
+          messages: [
+            { role: 'system', content: '你是 coding assistant' },
+            {
+              role: 'assistant',
+              content:
+                'Tool exec_command does not exists.Tool apply_patch does not exists.Tool mailbox.status does not exists.'
+            },
+            { role: 'user', content: '继续，调用 exec_command 检查目录。' }
+          ],
+          tools: [
+            {
+              type: 'function',
+              function: {
+                name: 'exec_command',
+                description: 'run shell',
+                parameters: {
+                  type: 'object',
+                  properties: {
+                    cmd: { type: 'string' }
+                  },
+                  required: ['cmd']
+                }
+              }
+            }
+          ]
+        }
+      });
+
+      const content = String(
+        (plan.completionBody.messages as Array<Record<string, unknown>>)?.[0]?.content || ''
+      );
+      expect(content).toContain('exec_command');
+      expect(content).toContain('继续');
+      expect(content).not.toContain('Tool exec_command does not exists');
+      expect(content).not.toContain('Tool apply_patch does not exists');
+      expect(content).not.toContain('Tool mailbox.status does not exists');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('fails fast when upstream SSE ends with finish_reason=stop but empty assistant payload', async () => {
     const upstreamPayload = [
       `data: ${JSON.stringify({

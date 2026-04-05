@@ -59,6 +59,46 @@ export async function recordSnapshot(options: SnapshotPayload): Promise<void> {
 
 export type SnapshotWriter = (stage: string, payload: unknown) => void;
 
+const MAX_SNAPSHOT_QUEUE_SIZE = 2048;
+const SNAPSHOT_QUEUE_BATCH_SIZE = 64;
+const SNAPSHOT_QUEUE: Array<() => void> = [];
+let snapshotQueueDrainScheduled = false;
+
+function scheduleSnapshotQueueDrain(): void {
+  if (snapshotQueueDrainScheduled) {
+    return;
+  }
+  snapshotQueueDrainScheduled = true;
+  setImmediate(() => {
+    snapshotQueueDrainScheduled = false;
+    let processed = 0;
+    while (SNAPSHOT_QUEUE.length > 0 && processed < SNAPSHOT_QUEUE_BATCH_SIZE) {
+      const task = SNAPSHOT_QUEUE.shift();
+      if (!task) {
+        continue;
+      }
+      try {
+        task();
+      } catch {
+        // snapshot write failures are non-blocking by design
+      }
+      processed += 1;
+    }
+    if (SNAPSHOT_QUEUE.length > 0) {
+      scheduleSnapshotQueueDrain();
+    }
+  });
+}
+
+function enqueueSnapshotTask(task: () => void): void {
+  if (SNAPSHOT_QUEUE.length >= MAX_SNAPSHOT_QUEUE_SIZE) {
+    // keep newest writes; snapshot stream is best-effort and must not block request hot path
+    SNAPSHOT_QUEUE.shift();
+  }
+  SNAPSHOT_QUEUE.push(task);
+  scheduleSnapshotQueueDrain();
+}
+
 export function createSnapshotWriter(opts: {
   requestId: string;
   endpoint?: string;
@@ -71,14 +111,16 @@ export function createSnapshotWriter(opts: {
   }
   const endpoint = opts.endpoint || '/v1/chat/completions';
   return (stage: string, payload: unknown) => {
-    void recordSnapshot({
-      stage,
-      requestId: opts.requestId,
-      endpoint,
-      folderHint: opts.folderHint,
-      providerKey: opts.providerKey,
-      groupRequestId: opts.groupRequestId,
-      data: payload
+    enqueueSnapshotTask(() => {
+      void recordSnapshot({
+        stage,
+        requestId: opts.requestId,
+        endpoint,
+        folderHint: opts.folderHint,
+        providerKey: opts.providerKey,
+        groupRequestId: opts.groupRequestId,
+        data: payload
+      });
     });
   };
 }

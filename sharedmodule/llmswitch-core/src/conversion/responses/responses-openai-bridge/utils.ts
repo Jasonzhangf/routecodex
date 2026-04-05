@@ -126,8 +126,11 @@ export function sanitizeCapturedResponsesInput(
       if (!sanitizedName) {
         continue;
       }
-      const next = jsonClone(entry as JsonValue) as BridgeInputItem;
-      (next as any).name = sanitizedName;
+      const rawName = typeof (entry as any).name === 'string' ? String((entry as any).name) : '';
+      const next =
+        rawName === sanitizedName
+          ? entry
+          : ({ ...(entry as Record<string, unknown>), name: sanitizedName } as BridgeInputItem);
       const callId = typeof (next as any).call_id === 'string' ? String((next as any).call_id).trim() : '';
       if (callId) {
         acceptedCallIds.add(callId);
@@ -141,7 +144,7 @@ export function sanitizeCapturedResponsesInput(
         continue;
       }
     }
-    out.push(jsonClone(entry as JsonValue) as BridgeInputItem);
+    out.push(entry);
   }
   return out;
 }

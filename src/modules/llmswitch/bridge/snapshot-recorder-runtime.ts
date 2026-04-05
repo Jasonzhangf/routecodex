@@ -20,6 +20,8 @@ import {
 
 const DEFAULT_CLIENT_TOOL_ERROR_SAMPLE_WINDOW_MS = 30 * 60_000;
 const clientToolErrorSampleWindow = new Map<string, number>();
+const truthy = new Set(['1', 'true', 'yes', 'on']);
+let cachedTracePayloadCaptureEnabled: boolean | null = null;
 
 type SignalFieldPath = ReadonlyArray<string | number>;
 
@@ -30,6 +32,20 @@ interface SignalTextCandidate {
 
 export function resetSnapshotRecorderErrorsampleStateForTests(): void {
   clientToolErrorSampleWindow.clear();
+  cachedTracePayloadCaptureEnabled = null;
+}
+
+function isTracePayloadCaptureEnabled(): boolean {
+  if (cachedTracePayloadCaptureEnabled !== null) {
+    return cachedTracePayloadCaptureEnabled;
+  }
+  const raw = String(
+    process.env.ROUTECODEX_STAGE_TRACE_CAPTURE_PAYLOAD
+    ?? process.env.RCC_STAGE_TRACE_CAPTURE_PAYLOAD
+    ?? ''
+  ).trim().toLowerCase();
+  cachedTracePayloadCaptureEnabled = truthy.has(raw);
+  return cachedTracePayloadCaptureEnabled;
 }
 
 export function clipText(input: string, max = 320): string {
@@ -270,6 +286,9 @@ export function classifyRuntimeErrorSignal(stage: string, payload: AnyRecord): R
 }
 
 function cloneForErrorsample(value: unknown): unknown {
+  if (!isTracePayloadCaptureEnabled()) {
+    return undefined;
+  }
   try {
     const text = JSON.stringify(value);
     if (text.length <= MAX_STAGE_TRACE_PAYLOAD_CHARS) {
@@ -286,10 +305,11 @@ function cloneForErrorsample(value: unknown): unknown {
 }
 
 export function appendStageTrace(trace: StageTraceEntry[], stage: string, payload: AnyRecord): void {
+  const shouldCapturePayload = isTracePayloadCaptureEnabled();
   trace.push({
     at: new Date().toISOString(),
     stage,
-    payload: cloneForErrorsample(payload)
+    payload: shouldCapturePayload ? cloneForErrorsample(payload) : undefined
   });
   if (trace.length > MAX_STAGE_TRACE_ENTRIES) {
     trace.splice(0, trace.length - MAX_STAGE_TRACE_ENTRIES);

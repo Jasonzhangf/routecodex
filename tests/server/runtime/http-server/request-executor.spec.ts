@@ -53,6 +53,7 @@ describe('HubRequestExecutor failover', () => {
     const truncated = __requestExecutorTestables.truncateReason(longReason, 50);
     expect(truncated.length).toBe(50);
     expect(truncated.endsWith('…')).toBe(true);
+
   });
 
   test('retries when runtime resolution fails before provider send and then succeeds', async () => {

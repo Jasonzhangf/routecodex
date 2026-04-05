@@ -125,6 +125,17 @@ export interface AnthropicThinkingConfig {
 
 export type AnthropicThinkingBudgetMap = Partial<Record<AnthropicThinkingEffort, number>>;
 
+export interface ProviderConcurrencyConfig {
+  maxInFlight: number;
+  acquireTimeoutMs?: number;
+  staleLeaseMs?: number;
+}
+
+export interface ProviderRpmConfig {
+  requestsPerMinute: number;
+  acquireTimeoutMs?: number;
+}
+
 export interface ProviderRuntimeProfile {
   runtimeKey: string;
   providerId: string;
@@ -180,6 +191,8 @@ export interface ProviderRuntimeProfile {
     instructionsMode?: 'default' | 'inline';
   };
   deepseek?: Partial<DeepSeekProviderRuntimeOptions>;
+  concurrency?: ProviderConcurrencyConfig;
+  rpm?: ProviderRpmConfig;
 }
 
 /**

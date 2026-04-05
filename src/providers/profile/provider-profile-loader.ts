@@ -10,6 +10,8 @@ import type { ApiKeyEntry, ApiKeyAuthConfig } from './provider-profile.js';
 
 type UnknownRecord = Record<string, unknown>;
 type DeepSeekMetadata = NonNullable<NonNullable<ProviderProfile['metadata']>['deepseek']>;
+type ConcurrencyMetadata = NonNullable<NonNullable<ProviderProfile['metadata']>['concurrency']>;
+type RpmMetadata = NonNullable<NonNullable<ProviderProfile['metadata']>['rpm']>;
 
 export function buildProviderProfiles(config: UnknownRecord): ProviderProfileCollection {
   const providersNode = collectProviderNodes(config);
@@ -274,8 +276,10 @@ function extractMetadata(raw: UnknownRecord): ProviderProfile['metadata'] {
   const modelsNode = isRecord(raw.models) ? raw.models : undefined;
   const supportedModels = modelsNode ? Object.keys(modelsNode) : undefined;
   const deepseek = extractDeepSeekMetadata(raw.deepseek ?? (isRecord(raw.extensions) ? (raw.extensions as UnknownRecord).deepseek : undefined));
+  const concurrency = extractConcurrencyMetadata(raw.concurrency ?? (isRecord(raw.extensions) ? (raw.extensions as UnknownRecord).concurrency : undefined));
+  const rpm = extractRpmMetadata(raw.rpm ?? (isRecord(raw.extensions) ? (raw.extensions as UnknownRecord).rpm : undefined));
 
-  if (!defaultModel && (!supportedModels || supportedModels.length === 0) && !deepseek) {
+  if (!defaultModel && (!supportedModels || supportedModels.length === 0) && !deepseek && !concurrency && !rpm) {
     return undefined;
   }
 
@@ -288,6 +292,12 @@ function extractMetadata(raw: UnknownRecord): ProviderProfile['metadata'] {
   }
   if (deepseek) {
     metadata.deepseek = deepseek;
+  }
+  if (concurrency) {
+    metadata.concurrency = concurrency;
+  }
+  if (rpm) {
+    metadata.rpm = rpm;
   }
   return Object.keys(metadata).length ? metadata : undefined;
 }
@@ -340,6 +350,40 @@ function extractDeepSeekMetadata(raw: unknown): DeepSeekMetadata | undefined {
   return Object.keys(pruned).length ? (pruned as DeepSeekMetadata) : undefined;
 }
 
+function extractConcurrencyMetadata(raw: unknown): ConcurrencyMetadata | undefined {
+  if (!isRecord(raw)) {
+    return undefined;
+  }
+  const node = raw as UnknownRecord;
+  const maxInFlight = pickPositiveInt(node.maxInFlight ?? node.max_in_flight ?? node.maxConcurrency);
+  if (!maxInFlight) {
+    return undefined;
+  }
+  const acquireTimeoutMs = pickPositiveInt(node.acquireTimeoutMs ?? node.acquire_timeout_ms);
+  const staleLeaseMs = pickPositiveInt(node.staleLeaseMs ?? node.stale_lease_ms);
+  return {
+    maxInFlight,
+    ...(acquireTimeoutMs ? { acquireTimeoutMs } : {}),
+    ...(staleLeaseMs ? { staleLeaseMs } : {})
+  };
+}
+
+function extractRpmMetadata(raw: unknown): RpmMetadata | undefined {
+  if (!isRecord(raw)) {
+    return undefined;
+  }
+  const node = raw as UnknownRecord;
+  const requestsPerMinute = pickPositiveInt(node.requestsPerMinute ?? node.requests_per_minute ?? node.maxRequestsPerMinute ?? node.max_requests_per_minute ?? node.limit);
+  if (!requestsPerMinute) {
+    return undefined;
+  }
+  const acquireTimeoutMs = pickPositiveInt(node.acquireTimeoutMs ?? node.acquire_timeout_ms);
+  return {
+    requestsPerMinute,
+    ...(acquireTimeoutMs ? { acquireTimeoutMs } : {})
+  };
+}
+
 function collectProviderNodes(config: UnknownRecord): Record<string, UnknownRecord> {
   const entries: Record<string, UnknownRecord> = {};
   const merge = (node?: UnknownRecord) => {
@@ -381,6 +425,18 @@ function pickNumber(value: unknown): number | undefined {
     return Number.isFinite(parsed) ? parsed : undefined;
   }
   return undefined;
+}
+
+function pickPositiveInt(value: unknown): number | undefined {
+  const parsed = pickNumber(value);
+  if (parsed === undefined) {
+    return undefined;
+  }
+  if (!Number.isFinite(parsed)) {
+    return undefined;
+  }
+  const normalized = Math.floor(parsed);
+  return normalized > 0 ? normalized : undefined;
 }
 
 function pickStringArray(value: unknown): string[] | undefined {

@@ -86,6 +86,17 @@ const RETRYABLE_NETWORK_CODE_HINTS = [
   'timeout'
 ];
 
+const truthy = new Set(['1', 'true', 'yes', 'on']);
+
+function shouldEnableHubStageRecorder(): boolean {
+  const raw = String(
+    process.env.ROUTECODEX_ENABLE_HUB_STAGE_RECORDER
+    ?? process.env.RCC_ENABLE_HUB_STAGE_RECORDER
+    ?? ''
+  ).trim().toLowerCase();
+  return truthy.has(raw);
+}
+
 function isContextLengthExceededError(
   message: string,
   upstreamCode?: string,
@@ -235,6 +246,25 @@ function extractPreservedDaemonOrInjectToken(
     }
   }
   return undefined;
+}
+
+function syncHubStageTopBackToPipelineMetadata(options: {
+  pipelineMetadata?: Record<string, unknown>;
+  adapterContext: Record<string, unknown>;
+}): void {
+  const pipelineMetadata = asRecord(options.pipelineMetadata);
+  if (!pipelineMetadata) {
+    return;
+  }
+  const adapterRt = asRecord((options.adapterContext as Record<string, unknown>).__rt);
+  if (!adapterRt || !Array.isArray(adapterRt.hubStageTop) || adapterRt.hubStageTop.length === 0) {
+    return;
+  }
+  const metadataRt = asRecord((pipelineMetadata as Record<string, unknown>).__rt) ?? {};
+  (pipelineMetadata as Record<string, unknown>).__rt = {
+    ...metadataRt,
+    hubStageTop: adapterRt.hubStageTop
+  };
 }
 
 export type ConvertProviderResponseOptions = {
@@ -426,22 +456,25 @@ export async function convertProviderResponseIfNeeded(
     if (!serverToolsEnabled) {
       (adapterContext as Record<string, unknown>).serverToolsDisabled = true;
     }
-    logPipelineStage('convert.snapshot_recorder.start', options.requestId, {
-      entryEndpoint: options.entryEndpoint || entry,
-      providerProtocol: options.providerProtocol
-    });
-    const snapshotRecorderStartMs = Date.now();
-    const stageRecorder = await bridgeCreateSnapshotRecorder(
-      adapterContext,
-      typeof (adapterContext as Record<string, unknown>).entryEndpoint === 'string'
-        ? ((adapterContext as Record<string, unknown>).entryEndpoint as string)
-        : options.entryEndpoint || entry
-    );
-    logPipelineStage('convert.snapshot_recorder.completed', options.requestId, {
-      entryEndpoint: options.entryEndpoint || entry,
-      providerProtocol: options.providerProtocol,
-      elapsedMs: Date.now() - snapshotRecorderStartMs
-    });
+    let stageRecorder: unknown;
+    if (shouldEnableHubStageRecorder()) {
+      logPipelineStage('convert.snapshot_recorder.start', options.requestId, {
+        entryEndpoint: options.entryEndpoint || entry,
+        providerProtocol: options.providerProtocol
+      });
+      const snapshotRecorderStartMs = Date.now();
+      stageRecorder = await bridgeCreateSnapshotRecorder(
+        adapterContext,
+        typeof (adapterContext as Record<string, unknown>).entryEndpoint === 'string'
+          ? ((adapterContext as Record<string, unknown>).entryEndpoint as string)
+          : options.entryEndpoint || entry
+      );
+      logPipelineStage('convert.snapshot_recorder.completed', options.requestId, {
+        entryEndpoint: options.entryEndpoint || entry,
+        providerProtocol: options.providerProtocol,
+        elapsedMs: Date.now() - snapshotRecorderStartMs
+      });
+    }
 
     const providerInvoker = async (invokeOptions: {
       providerKey: string;
@@ -677,6 +710,10 @@ export async function convertProviderResponseIfNeeded(
       stageRecorder,
       reenterPipeline: serverToolsEnabled ? reenterPipeline : undefined,
       clientInjectDispatch: serverToolsEnabled ? clientInjectDispatch : undefined
+    });
+    syncHubStageTopBackToPipelineMetadata({
+      pipelineMetadata: options.pipelineMetadata,
+      adapterContext
     });
     logPipelineStage('convert.bridge.completed', options.requestId, {
       entryEndpoint: options.entryEndpoint || entry,

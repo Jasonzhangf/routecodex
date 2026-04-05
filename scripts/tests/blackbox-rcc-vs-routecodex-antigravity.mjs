@@ -534,6 +534,8 @@ async function runOnceBlackbox(opts) {
     // Disable ManagerDaemon (quota/health background tasks) so the parity run is isolated and deterministic.
     ROUTECODEX_USE_MOCK: '1',
     RCC_USE_MOCK: '1',
+    ROUTECODEX_ALLOW_MOCK_RUNTIME: '1',
+    RCC_ALLOW_MOCK_RUNTIME: '1',
     // Disable token daemon + OAuth auto-open to keep the blackbox test non-interactive.
     ROUTECODEX_DISABLE_TOKEN_DAEMON: '1',
     RCC_DISABLE_TOKEN_DAEMON: '1',

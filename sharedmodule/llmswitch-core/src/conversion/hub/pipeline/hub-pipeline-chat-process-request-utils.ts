@@ -10,6 +10,12 @@ import { buildPassthroughAuditWithNative, readResponsesResumeFromRequestSemantic
 import { readRuntimeMetadata } from "../../runtime-metadata.js";
 import { computeRequestTokens } from "../../../router/virtual-router/token-estimator.js";
 import { estimateSessionBoundTokens } from "../process/chat-process-session-usage.js";
+import {
+  isHeavyInputFastpathEnabled,
+  markHeavyInputFastpath,
+  resolveHeavyInputTokenThreshold,
+  roughEstimateInputTokensFromRequest,
+} from "./hub-pipeline-heavy-input-fastpath.js";
 
 export function sanitizeStandardizedRequestMessages(
   standardizedRequest: StandardizedRequest,
@@ -74,6 +80,23 @@ export function estimateInputTokensForWorkingRequest(args: {
 }): void {
   const { workingRequest, normalizedMetadata } = args;
   try {
+    const fastpathEnabled = isHeavyInputFastpathEnabled();
+    const threshold = resolveHeavyInputTokenThreshold();
+    if (fastpathEnabled && threshold > 0) {
+      const roughEstimate = roughEstimateInputTokensFromRequest(workingRequest);
+      if (roughEstimate >= threshold) {
+        if (normalizedMetadata && typeof normalizedMetadata === "object") {
+          normalizedMetadata.estimatedInputTokens = roughEstimate;
+          markHeavyInputFastpath({
+            metadata: normalizedMetadata,
+            estimatedInputTokens: roughEstimate,
+            reason: "rough_estimate",
+          });
+        }
+        return;
+      }
+    }
+
     const estimatedTokens =
       estimateSessionBoundTokens(
         workingRequest,
@@ -86,6 +109,13 @@ export function estimateInputTokensForWorkingRequest(args: {
     ) {
       if (normalizedMetadata && typeof normalizedMetadata === "object") {
         normalizedMetadata.estimatedInputTokens = estimatedTokens;
+        if (fastpathEnabled && estimatedTokens >= threshold) {
+          markHeavyInputFastpath({
+            metadata: normalizedMetadata,
+            estimatedInputTokens: estimatedTokens,
+            reason: "full_estimate",
+          });
+        }
       }
     }
   } catch {

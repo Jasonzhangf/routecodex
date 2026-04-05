@@ -14,12 +14,112 @@ type RoutingProviderScope = {
   oauthProviderIds: string[];
 };
 
+const TRUTHY_FLAG_SET = new Set(['1', 'true', 'yes', 'on']);
+
+function readTruthyEnv(names: string[]): boolean {
+  for (const name of names) {
+    const raw = process.env[name];
+    if (raw === undefined) {
+      continue;
+    }
+    const normalized = String(raw).trim().toLowerCase();
+    if (TRUTHY_FLAG_SET.has(normalized)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isMockRuntimeGuardBypassed(): boolean {
+  if (process.env.JEST_WORKER_ID || process.env.NODE_ENV === 'test') {
+    return true;
+  }
+  return readTruthyEnv([
+    'ROUTECODEX_ALLOW_MOCK_RUNTIME',
+    'RCC_ALLOW_MOCK_RUNTIME',
+    'ROUTECODEX_ALLOW_MOCK_PROVIDER',
+    'RCC_ALLOW_MOCK_PROVIDER'
+  ]);
+}
+
+function collectMockRuntimeViolations(options: {
+  runtimeMap?: Record<string, ProviderRuntimeProfile>;
+  configPath?: string;
+}): string[] {
+  const violations: string[] = [];
+  const runtimeMap = options.runtimeMap ?? {};
+  const configPath = typeof options.configPath === 'string' ? options.configPath.trim() : '';
+
+  if (readTruthyEnv(['ROUTECODEX_USE_MOCK', 'RCC_USE_MOCK'])) {
+    violations.push('环境变量 ROUTECODEX_USE_MOCK/RCC_USE_MOCK 已启用');
+  }
+  if (process.env.ROUTECODEX_MOCK_CONFIG_PATH || process.env.ROUTECODEX_MOCK_SAMPLES_DIR) {
+    violations.push('检测到 ROUTECODEX_MOCK_CONFIG_PATH/ROUTECODEX_MOCK_SAMPLES_DIR');
+  }
+  if (
+    configPath &&
+    (configPath.includes('/routecodex-verify-') || configPath.includes('/routecodex-verify-mock-'))
+  ) {
+    violations.push(`配置路径疑似 verify 临时配置: ${configPath}`);
+  }
+
+  for (const [providerKeyRaw, runtime] of Object.entries(runtimeMap)) {
+    const providerKey = String(providerKeyRaw || '').trim().toLowerCase();
+    const providerType = String(runtime?.providerType || '').trim().toLowerCase();
+    const providerModule = String(runtime?.providerModule || '').trim().toLowerCase();
+    const providerId = String(runtime?.providerId || '').trim().toLowerCase();
+    const defaultModel = String(runtime?.defaultModel || '').trim().toLowerCase();
+    const endpoint = String(runtime?.endpoint || '').trim().toLowerCase();
+    const baseUrl = String(runtime?.baseUrl || '').trim().toLowerCase();
+
+    const isMockProvider =
+      providerType === 'mock' ||
+      providerModule === 'mock-provider' ||
+      providerModule.includes('mock-provider');
+    const isVerifySignature =
+      providerId === 'verify' ||
+      providerKey.startsWith('verify.') ||
+      providerKey.includes('.verify-mock') ||
+      defaultModel === 'verify-mock' ||
+      endpoint.includes('mock.local') ||
+      baseUrl.includes('mock.local');
+
+    if (isMockProvider || isVerifySignature) {
+      violations.push(
+        `provider=${providerKeyRaw} type=${providerType || 'unknown'} module=${providerModule || 'unknown'} model=${defaultModel || 'unknown'}`
+      );
+    }
+  }
+
+  return violations;
+}
+
+function enforceNoMockRuntimeInServer(options: {
+  runtimeMap?: Record<string, ProviderRuntimeProfile>;
+  configPath?: string;
+}): void {
+  if (isMockRuntimeGuardBypassed()) {
+    return;
+  }
+  const violations = collectMockRuntimeViolations(options);
+  if (violations.length < 1) {
+    return;
+  }
+  const detail = violations.slice(0, 6).join('; ');
+  const hint = '如确需本地验证 mock，请显式设置 ROUTECODEX_ALLOW_MOCK_RUNTIME=1（仅测试/验证环境）';
+  throw new Error(`[mock-runtime-guard] 生产运行时禁止 mock/verify provider: ${detail}. ${hint}`);
+}
+
 export async function setupRuntime(server: any, userConfig: UnknownObject): Promise<void> {
   applyDefaultStageTimingMode();
   server.userConfig = asRecord(userConfig);
   server.ensureProviderProfilesFromUserConfig();
   const routerInput = server.resolveVirtualRouterInput(server.userConfig);
   const bootstrapArtifacts = await server.bootstrapVirtualRouter(routerInput);
+  enforceNoMockRuntimeInServer({
+    runtimeMap: bootstrapArtifacts?.targetRuntime,
+    configPath: server?.config?.configPath
+  });
   server.currentRouterArtifacts = bootstrapArtifacts;
   const routingScope = deriveRoutingProviderScope(bootstrapArtifacts?.targetRuntime, routerInput);
   // Runtime-level scope cache: provider init/warmup must honor the same routing scope

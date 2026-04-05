@@ -1,4 +1,5 @@
 use crate::hub_resp_outbound_client_semantics::normalize_responses_function_name;
+use crate::hub_reasoning_tool_normalizer::extract_tool_calls_from_reasoning_text_json;
 use napi::bindgen_prelude::Result as NapiResult;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -125,6 +126,210 @@ fn extract_structured_apply_patch_payloads(text: &str) -> Vec<Value> {
     payloads
 }
 
+fn extract_balanced_json_candidate_at(
+    text: &str,
+    start_byte: usize,
+    open: char,
+    close: char,
+) -> Option<(usize, String)> {
+    if start_byte >= text.len() {
+        return None;
+    }
+    let first = text[start_byte..].chars().next()?;
+    if first != open {
+        return None;
+    }
+    let mut depth: i32 = 0;
+    let mut in_string = false;
+    let mut escaped = false;
+    let mut end_byte: Option<usize> = None;
+    for (offset, ch) in text[start_byte..].char_indices() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        if ch == '"' {
+            in_string = true;
+            continue;
+        }
+        if ch == open {
+            depth += 1;
+        } else if ch == close {
+            depth -= 1;
+            if depth == 0 {
+                end_byte = Some(start_byte + offset + ch.len_utf8());
+                break;
+            }
+        }
+    }
+    let end = end_byte?;
+    Some((end, text[start_byte..end].to_string()))
+}
+
+fn collect_json_candidates(text: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let fence_re = Regex::new(r"```(?:json)?\s*([\s\S]*?)\s*```").unwrap();
+    for caps in fence_re.captures_iter(text) {
+        if let Some(body) = caps.get(1) {
+            let candidate = body.as_str().trim();
+            if !candidate.is_empty() {
+                out.push(candidate.to_string());
+            }
+        }
+    }
+    if out.is_empty() && (text.contains("tool_calls") || text.contains("\"name\"")) {
+        let mut index = 0usize;
+        while index < text.len() {
+            let Some(ch) = text[index..].chars().next() else {
+                break;
+            };
+            if ch == '{' {
+                if let Some((end, candidate)) = extract_balanced_json_candidate_at(text, index, '{', '}') {
+                    out.push(candidate);
+                    index = end;
+                    continue;
+                }
+            } else if ch == '[' {
+                if let Some((end, candidate)) = extract_balanced_json_candidate_at(text, index, '[', ']') {
+                    out.push(candidate);
+                    index = end;
+                    continue;
+                }
+            }
+            index += ch.len_utf8();
+        }
+    }
+    out
+}
+
+fn extract_tool_call_entries_from_json_value(value: &Value) -> Vec<Value> {
+    if let Some(obj) = value.as_object() {
+        if let Some(calls) = obj.get("tool_calls").and_then(Value::as_array) {
+            return calls.clone();
+        }
+        if obj.get("name").is_some() || obj.get("function").is_some() {
+            return vec![value.clone()];
+        }
+    }
+    if let Some(arr) = value.as_array() {
+        let mut out: Vec<Value> = Vec::new();
+        for item in arr {
+            if let Some(obj) = item.as_object() {
+                if obj.get("name").is_some() || obj.get("function").is_some() {
+                    out.push(item.clone());
+                } else if let Some(calls) = obj.get("tool_calls").and_then(Value::as_array) {
+                    for call in calls {
+                        out.push(call.clone());
+                    }
+                }
+            }
+        }
+        return out;
+    }
+    Vec::new()
+}
+
+fn build_tool_events_from_entries(
+    entries: Vec<Value>,
+    ctx: Option<&HarvestContext>,
+    chunk_size: usize,
+) -> Vec<Value> {
+    let mut out: Vec<Value> = Vec::new();
+    let mut idx = 0usize;
+    for call in entries {
+        let Some(call_obj) = call.as_object() else {
+            continue;
+        };
+        let fn_obj = call_obj.get("function").and_then(Value::as_object);
+        let name_raw = fn_obj
+            .and_then(|row| row.get("name"))
+            .and_then(Value::as_str)
+            .or_else(|| call_obj.get("name").and_then(Value::as_str))
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        let normalized_name = normalize_tool_name(name_raw.as_str());
+        if normalized_name.is_empty() {
+            continue;
+        }
+        let id = call_obj
+            .get("id")
+            .and_then(Value::as_str)
+            .or_else(|| call_obj.get("call_id").and_then(Value::as_str))
+            .or_else(|| call_obj.get("tool_call_id").and_then(Value::as_str))
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| gen_id(ctx, idx));
+        let args_value = fn_obj
+            .and_then(|row| row.get("arguments"))
+            .cloned()
+            .or_else(|| call_obj.get("arguments").cloned())
+            .or_else(|| call_obj.get("input").cloned())
+            .unwrap_or_else(|| Value::Object(Map::new()));
+        let arg_str = to_json_string(&args_value);
+        push_tool_call_event(&mut out, idx, &id, Some(&normalized_name), None);
+        for part in chunk_string(&arg_str, chunk_size) {
+            push_tool_call_event(&mut out, idx, &id, None, Some(&part));
+        }
+        idx += 1;
+    }
+    out
+}
+
+fn extract_jsonish_tool_calls_direct(
+    text: &str,
+    ctx: Option<&HarvestContext>,
+    chunk_size: usize,
+) -> Vec<Value> {
+    let candidates = collect_json_candidates(text);
+    for candidate in candidates {
+        let parsed = match serde_json::from_str::<Value>(candidate.as_str()) {
+            Ok(value) => value,
+            Err(_) => continue,
+        };
+        let entries = extract_tool_call_entries_from_json_value(&parsed);
+        if entries.is_empty() {
+            continue;
+        }
+        let events = build_tool_events_from_entries(entries, ctx, chunk_size);
+        if !events.is_empty() {
+            return events;
+        }
+    }
+    Vec::new()
+}
+
+fn extract_reasoning_json_tool_calls(
+    text: &str,
+    ctx: Option<&HarvestContext>,
+    chunk_size: usize,
+) -> Vec<Value> {
+    let id_prefix = ctx
+        .and_then(|c| c.id_prefix.as_ref())
+        .map(|v| v.trim())
+        .filter(|v| !v.is_empty())
+        .unwrap_or("call");
+    let extracted_raw =
+        match extract_tool_calls_from_reasoning_text_json(text.to_string(), Some(id_prefix.to_string())) {
+            Ok(raw) => raw,
+            Err(_) => return Vec::new(),
+        };
+    let extracted = match serde_json::from_str::<Value>(&extracted_raw) {
+        Ok(value) => value,
+        Err(_) => return Vec::new(),
+    };
+    let tool_calls = extract_tool_call_entries_from_json_value(&extracted);
+    if tool_calls.is_empty() {
+        return Vec::new();
+    }
+    build_tool_events_from_entries(tool_calls, ctx, chunk_size)
+}
+
 fn split_command(input: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let mut cur = String::new();
@@ -232,6 +437,16 @@ fn extract_from_textual(
             idx += 1;
         }
         return events;
+    }
+
+    let direct_json_events = extract_jsonish_tool_calls_direct(content, ctx, chunk_size);
+    if !direct_json_events.is_empty() {
+        return direct_json_events;
+    }
+
+    let reasoning_json_events = extract_reasoning_json_tool_calls(content, ctx, chunk_size);
+    if !reasoning_json_events.is_empty() {
+        return reasoning_json_events;
     }
 
     let function_re =

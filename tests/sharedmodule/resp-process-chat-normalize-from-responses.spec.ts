@@ -76,6 +76,49 @@ tool:exec_command (tool:exec_command)
     expect(governed?.choices?.[0]?.finish_reason).toBe('tool_calls');
   });
 
+  it('does not duplicate apply_patch when content echoes tool_calls JSON beside structured tool_calls', async () => {
+    const payload: any = {
+      id: 'chat_test_apply_patch_no_duplicate',
+      object: 'chat.completion',
+      created: Math.floor(Date.now() / 1000),
+      model: 'qwen3.6-plus',
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: 'assistant',
+            content:
+              '{"tool_calls":[{"name":"apply_patch","input":{"patch":"*** Begin Patch\\n*** Add File:hello.txt\\n+hello\\n*** EndPatch"}}]}',
+            tool_calls: [
+              {
+                id: 'reasoning_choice_1_1',
+                type: 'function',
+                function: {
+                  name: 'apply_patch',
+                  arguments:
+                    '{"input":"*** Begin Patch\\n*** Add File: hello.txt\\n+hello\\n+*** EndPatch\\n*** End Patch","patch":"*** Begin Patch\\n*** Add File: hello.txt\\n+hello\\n+*** EndPatch\\n*** End Patch"}'
+                }
+              }
+            ]
+          },
+          finish_reason: 'tool_calls'
+        }
+      ]
+    };
+
+    const result = await runRespProcessStage1ToolGovernance({
+      payload,
+      entryEndpoint: '/v1/responses',
+      requestId: 'req_test_apply_patch_no_duplicate',
+      clientProtocol: 'openai-responses'
+    });
+
+    const governed: any = result.governedPayload;
+    const calls = Array.isArray(governed?.choices?.[0]?.message?.tool_calls) ? governed.choices[0].message.tool_calls : [];
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.function?.name).toBe('apply_patch');
+  });
+
   it('harvests reasoning_content native tool call without [思考] wrapper and strips time tag noise', async () => {
     const payload: any = {
       id: 'chat_test_reasoning_native_tool',

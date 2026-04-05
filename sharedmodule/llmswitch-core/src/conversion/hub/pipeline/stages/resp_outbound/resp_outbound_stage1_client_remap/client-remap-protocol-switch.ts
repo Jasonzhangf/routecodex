@@ -30,6 +30,8 @@ type IndexedClientTool = {
 type ClientToolIndex = {
   byExactLower: Map<string, IndexedClientTool>;
   byStrippedLower: Map<string, IndexedClientTool>;
+  byCanonicalLower: Map<string, IndexedClientTool>;
+  byCompactLower: Map<string, IndexedClientTool>;
   byFamily: Map<string, IndexedClientTool>;
 };
 
@@ -54,21 +56,41 @@ function stripFunctionNamespace(raw: string): string {
   return trimmed;
 }
 
-function resolveToolFamily(raw: string): string {
-  const strippedLower = stripFunctionNamespace(raw).toLowerCase();
-  if (!strippedLower) {
+function toCanonicalToolName(raw: string): string {
+  const stripped = stripFunctionNamespace(raw).toLowerCase().trim();
+  if (!stripped) {
     return '';
   }
-  if (isShellToolName(strippedLower) || strippedLower === 'terminal') {
+  return stripped
+    .replace(/[\s_-]+/g, '.')
+    .replace(/\.{2,}/g, '.')
+    .replace(/^\.+|\.+$/g, '');
+}
+
+function toCompactToolName(raw: string): string {
+  const canonical = toCanonicalToolName(raw);
+  if (!canonical) {
+    return '';
+  }
+  return canonical.replace(/[._-]/g, '');
+}
+
+function resolveToolFamily(raw: string): string {
+  const canonicalLower = toCanonicalToolName(raw);
+  if (!canonicalLower) {
+    return '';
+  }
+  const shellCandidate = canonicalLower.replace(/\./g, '_');
+  if (isShellToolName(canonicalLower) || isShellToolName(shellCandidate) || canonicalLower === 'terminal') {
     return 'shell_like';
   }
-  if (strippedLower === 'apply_patch') {
+  if (canonicalLower === 'apply.patch' || canonicalLower === 'apply_patch') {
     return 'apply_patch';
   }
-  if (strippedLower === 'write_stdin') {
+  if (canonicalLower === 'write.stdin' || canonicalLower === 'write_stdin') {
     return 'write_stdin';
   }
-  return strippedLower;
+  return canonicalLower;
 }
 
 function extractClientToolIndex(
@@ -76,6 +98,8 @@ function extractClientToolIndex(
 ): ClientToolIndex {
   const byExactLower = new Map<string, IndexedClientTool>();
   const byStrippedLower = new Map<string, IndexedClientTool>();
+  const byCanonicalLower = new Map<string, IndexedClientTool>();
+  const byCompactLower = new Map<string, IndexedClientTool>();
   const byFamily = new Map<string, IndexedClientTool>();
   for (const tool of clientToolsRaw ?? []) {
     const functionBag = asRecord(tool.function);
@@ -92,6 +116,8 @@ function extractClientToolIndex(
     };
     const exactLower = normalizedName.toLowerCase();
     const strippedLower = stripFunctionNamespace(normalizedName).toLowerCase();
+    const canonicalLower = toCanonicalToolName(normalizedName);
+    const compactLower = toCompactToolName(normalizedName);
     const family = resolveToolFamily(normalizedName);
     if (!byExactLower.has(exactLower)) {
       byExactLower.set(exactLower, entry);
@@ -99,11 +125,17 @@ function extractClientToolIndex(
     if (strippedLower && !byStrippedLower.has(strippedLower)) {
       byStrippedLower.set(strippedLower, entry);
     }
+    if (canonicalLower && !byCanonicalLower.has(canonicalLower)) {
+      byCanonicalLower.set(canonicalLower, entry);
+    }
+    if (compactLower && !byCompactLower.has(compactLower)) {
+      byCompactLower.set(compactLower, entry);
+    }
     if (family && !byFamily.has(family)) {
       byFamily.set(family, entry);
     }
   }
-  return { byExactLower, byStrippedLower, byFamily };
+  return { byExactLower, byStrippedLower, byCanonicalLower, byCompactLower, byFamily };
 }
 
 function resolveClientToolFromIndex(index: ClientToolIndex, rawName: string): IndexedClientTool | undefined {
@@ -113,11 +145,16 @@ function resolveClientToolFromIndex(index: ClientToolIndex, rawName: string): In
   }
   const exactLower = trimmed.toLowerCase();
   const strippedLower = stripFunctionNamespace(trimmed).toLowerCase();
+  const canonicalLower = toCanonicalToolName(trimmed);
+  const compactLower = toCompactToolName(trimmed);
   const family = resolveToolFamily(trimmed);
   return (
     index.byExactLower.get(exactLower)
     ?? index.byExactLower.get(strippedLower)
     ?? index.byStrippedLower.get(strippedLower)
+    ?? (canonicalLower ? index.byCanonicalLower.get(canonicalLower) : undefined)
+    ?? (canonicalLower ? index.byStrippedLower.get(canonicalLower) : undefined)
+    ?? (compactLower ? index.byCompactLower.get(compactLower) : undefined)
     ?? (family ? index.byFamily.get(family) : undefined)
   );
 }
@@ -272,11 +309,26 @@ function assertNoUnknownToolNames(args: {
     })
     .filter(Boolean);
   const declaredPreview = declaredNames.slice(0, 20).join(', ');
-  throw new Error(
+  const error = new Error(
     `[client-remap] tool name mismatch after remap: unknown=[${uniqueUnknown.join(', ')}]` +
-    ` protocol=${args.clientProtocol} requestId=${args.requestId}` +
-    (declaredPreview ? ` declared=[${declaredPreview}]` : ' declared=[none]')
-  );
+      ` protocol=${args.clientProtocol} requestId=${args.requestId}` +
+      (declaredPreview ? ` declared=[${declaredPreview}]` : ' declared=[none]')
+  ) as Error & {
+    code?: string;
+    statusCode?: number;
+    retryable?: boolean;
+    details?: Record<string, unknown>;
+  };
+  error.code = 'CLIENT_TOOL_NAME_MISMATCH';
+  error.statusCode = 502;
+  error.retryable = true;
+  error.details = {
+    unknownToolNames: uniqueUnknown,
+    declaredToolNames: declaredNames,
+    protocol: args.clientProtocol,
+    requestId: args.requestId
+  };
+  throw error;
 }
 
 function enforceClientToolNameContract(

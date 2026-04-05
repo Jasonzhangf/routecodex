@@ -67,8 +67,43 @@ describe('usage logger timing summary', () => {
     expect(rendered).toContain('response=20ms');
   });
 
+  it('does not print timing/hub.top in release by default', async () => {
+    process.env.ROUTECODEX_BUILD_MODE = 'release';
+    delete process.env.ROUTECODEX_USAGE_TIMING;
+    delete process.env.ROUTECODEX_STAGE_LOG;
+    delete process.env.ROUTECODEX_STAGE_TIMING;
+    delete process.env.ROUTECODEX_STAGE_TIMING_SUMMARY;
+
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const { logPipelineStage } = await import('../../../../../src/server/utils/stage-logger.js');
+    const { logUsageSummary } = await import('../../../../../src/server/runtime/http-server/executor/usage-logger.js');
+
+    logPipelineStage('hub.start', 'req_release_no_timing', {});
+    logPipelineStage('hub.completed', 'req_release_no_timing', { elapsedMs: 200 });
+    logPipelineStage('provider.send.start', 'req_release_no_timing', {});
+    logPipelineStage('provider.send.completed', 'req_release_no_timing', { elapsedMs: 500 });
+    logPipelineStage('response.dispatch.start', 'req_release_no_timing', { status: 200, stream: false });
+    logPipelineStage('response.completed', 'req_release_no_timing', { elapsedMs: 20 });
+
+    logUsageSummary('req_release_no_timing', {
+      providerKey: 'demo.key1',
+      model: 'demo-model',
+      latencyMs: 720,
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+      hubStageTop: [
+        { stage: 'req_inbound.stage2_semantic_map', totalMs: 700, count: 1 }
+      ]
+    });
+
+    const rendered = String(logSpy.mock.calls.at(-1)?.[0] ?? '');
+    expect(rendered).toContain('[usage] request req_release_no_timing');
+    expect(rendered).not.toContain('timing={');
+    expect(rendered).not.toContain('hub.top=');
+  });
+
   it('appends release stage breakdown to usage logs without extra env', async () => {
     process.env.ROUTECODEX_BUILD_MODE = 'release';
+    process.env.ROUTECODEX_USAGE_TIMING = '1';
     delete process.env.ROUTECODEX_STAGE_LOG;
     delete process.env.ROUTECODEX_STAGE_TIMING;
     delete process.env.ROUTECODEX_STAGE_TIMING_SUMMARY;
@@ -106,6 +141,7 @@ describe('usage logger timing summary', () => {
 
   it('accumulates repeated scope timings in release usage summary', async () => {
     process.env.ROUTECODEX_BUILD_MODE = 'release';
+    process.env.ROUTECODEX_USAGE_TIMING = '1';
     delete process.env.ROUTECODEX_STAGE_LOG;
     delete process.env.ROUTECODEX_STAGE_TIMING;
     delete process.env.ROUTECODEX_STAGE_TIMING_SUMMARY;
@@ -144,6 +180,7 @@ describe('usage logger timing summary', () => {
 
   it('aggregates timing from multiple request ids in release usage summary', async () => {
     process.env.ROUTECODEX_BUILD_MODE = 'release';
+    process.env.ROUTECODEX_USAGE_TIMING = '1';
     delete process.env.ROUTECODEX_STAGE_LOG;
     delete process.env.ROUTECODEX_STAGE_TIMING;
     delete process.env.ROUTECODEX_STAGE_TIMING_SUMMARY;
@@ -179,6 +216,7 @@ describe('usage logger timing summary', () => {
 
   it('keeps release timing available for usage after non-stream request complete log', async () => {
     process.env.ROUTECODEX_BUILD_MODE = 'release';
+    process.env.ROUTECODEX_USAGE_TIMING = '1';
     process.env.ROUTECODEX_HTTP_LOG_VERBOSE = '1';
     delete process.env.ROUTECODEX_STAGE_LOG;
     delete process.env.ROUTECODEX_STAGE_TIMING;
@@ -222,6 +260,7 @@ describe('usage logger timing summary', () => {
 
   it('includes host.internal in release timing summary when host-side scopes exist', async () => {
     process.env.ROUTECODEX_BUILD_MODE = 'release';
+    process.env.ROUTECODEX_USAGE_TIMING = '1';
     delete process.env.ROUTECODEX_STAGE_LOG;
     delete process.env.ROUTECODEX_STAGE_TIMING;
     delete process.env.ROUTECODEX_STAGE_TIMING_SUMMARY;
@@ -264,5 +303,35 @@ describe('usage logger timing summary', () => {
     expect(rendered).toContain('provider.context_resolve=25ms');
     expect(rendered).toContain('provider.metadata_attach=15ms');
     expect(rendered).toContain('provider.response_normalize=60ms');
+  });
+
+  it('appends hub stage top summary when provided by pipeline metadata', async () => {
+    process.env.ROUTECODEX_BUILD_MODE = 'release';
+    process.env.ROUTECODEX_USAGE_TIMING = '1';
+    process.env.ROUTECODEX_USAGE_HUB_TOP_N = '2';
+    delete process.env.ROUTECODEX_STAGE_LOG;
+    delete process.env.ROUTECODEX_STAGE_TIMING;
+    delete process.env.ROUTECODEX_STAGE_TIMING_SUMMARY;
+
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const { logUsageSummary } = await import('../../../../../src/server/runtime/http-server/executor/usage-logger.js');
+
+    logUsageSummary('req_hub_top', {
+      providerKey: 'demo.key1',
+      model: 'demo-model',
+      latencyMs: 1200,
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+      hubStageTop: [
+        { stage: 'req_inbound.stage2_semantic_map', totalMs: 7600, count: 1 },
+        { stage: 'req_outbound.stage1_semantic_map', totalMs: 2100, count: 1 },
+        { stage: 'req_process.stage2_route_select', totalMs: 900, count: 1 }
+      ]
+    });
+
+    const rendered = String(logSpy.mock.calls.at(-1)?.[0] ?? '');
+    expect(rendered).toContain('hub.top=');
+    expect(rendered).toContain('req_inbound.stage2_semantic_map:7600msx1');
+    expect(rendered).toContain('req_outbound.stage1_semantic_map:2100msx1');
+    expect(rendered).not.toContain('req_process.stage2_route_select:900msx1');
   });
 });

@@ -1,6 +1,7 @@
 import type { ModuleDependencies } from '../../../modules/pipeline/interfaces/pipeline-interfaces.js';
 import type { PipelineExecutionInput, PipelineExecutionResult } from '../../handlers/types.js';
 import type { HubPipeline, ProviderHandle, ProviderProtocol } from './types.js';
+import type { ProviderRuntimeProfile } from '../../../providers/core/api/provider-types.js';
 import { attachProviderRuntimeMetadata } from '../../../providers/core/runtime/provider-runtime-metadata.js';
 import type { StatsManager } from './stats-manager.js';
 import {
@@ -65,8 +66,14 @@ import {
 import { resolveProviderRuntimeOrThrow } from './executor/provider-runtime-resolver.js';
 import { resolveProviderRequestContext } from './executor/provider-request-context.js';
 import { isServerToolEnabled } from './servertool-admin-state.js';
-import { registerRequestLogContext } from '../../utils/request-log-color.js';
+import { registerRequestLogContext, resolveSessionLogColor } from '../../utils/request-log-color.js';
 import { STREAM_LOG_FINISH_REASON_KEY } from '../../utils/finish-reason.js';
+import {
+  createNoopProviderTrafficGovernor,
+  getSharedProviderTrafficGovernor,
+  type ProviderTrafficGovernorLike,
+  type ProviderTrafficPermit
+} from './provider-traffic-governor.js';
 export type RequestExecutorDeps = {
   runtimeManager: {
     resolveRuntimeKey(providerKey?: string, fallback?: string): string | undefined;
@@ -76,6 +83,7 @@ export type RequestExecutorDeps = {
   getModuleDependencies(): ModuleDependencies;
   logStage(stage: string, requestId: string, details?: Record<string, unknown>): void;
   stats: StatsManager;
+  trafficGovernor?: ProviderTrafficGovernorLike;
   onRequestStart?: (args: { requestId: string; metadata: Record<string, unknown> }) => void | Promise<void>;
   onRequestEnd?: (args: { requestId: string }) => void | Promise<void>;
 };
@@ -93,6 +101,14 @@ type RetryErrorSnapshot = {
   errorCode?: string;
   upstreamCode?: string;
   reason: string;
+};
+
+type HubStageTopEntry = {
+  stage: string;
+  totalMs: number;
+  count?: number;
+  avgMs?: number;
+  maxMs?: number;
 };
 
 function readString(value: unknown): string | undefined {
@@ -266,11 +282,101 @@ function extractRetryErrorSnapshot(error: unknown): RetryErrorSnapshot {
   };
 }
 
+function readHubStageTop(metadata: Record<string, unknown> | undefined): HubStageTopEntry[] | undefined {
+  if (!metadata || typeof metadata !== 'object') {
+    return undefined;
+  }
+  const rt =
+    metadata.__rt && typeof metadata.__rt === 'object' && !Array.isArray(metadata.__rt)
+      ? (metadata.__rt as Record<string, unknown>)
+      : undefined;
+  const raw = rt?.hubStageTop;
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return undefined;
+  }
+  const normalized = raw
+    .map((entry) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+        return null;
+      }
+      const record = entry as Record<string, unknown>;
+      const stage = typeof record.stage === 'string' ? record.stage.trim() : '';
+      const totalMs =
+        typeof record.totalMs === 'number' && Number.isFinite(record.totalMs)
+          ? Math.max(0, Math.round(record.totalMs))
+          : undefined;
+      if (!stage || totalMs === undefined) {
+        return null;
+      }
+      const count =
+        typeof record.count === 'number' && Number.isFinite(record.count)
+          ? Math.max(0, Math.floor(record.count))
+          : undefined;
+      const avgMs =
+        typeof record.avgMs === 'number' && Number.isFinite(record.avgMs)
+          ? Math.max(0, Math.round(record.avgMs))
+          : undefined;
+      const maxMs =
+        typeof record.maxMs === 'number' && Number.isFinite(record.maxMs)
+          ? Math.max(0, Math.round(record.maxMs))
+          : undefined;
+      return {
+        stage,
+        totalMs,
+        ...(count !== undefined ? { count } : {}),
+        ...(avgMs !== undefined ? { avgMs } : {}),
+        ...(maxMs !== undefined ? { maxMs } : {})
+      } as HubStageTopEntry;
+    })
+    .filter((entry): entry is HubStageTopEntry => Boolean(entry));
+  return normalized.length ? normalized : undefined;
+}
+
 function truncateReason(reason: string, maxLength = 220): string {
   if (reason.length <= maxLength) {
     return reason;
   }
   return `${reason.slice(0, Math.max(0, maxLength - 1))}…`;
+}
+
+function resolveTrafficRuntimeProfile(
+  runtimeKey: string,
+  handle: ProviderHandle,
+  providerKey?: string
+): ProviderRuntimeProfile {
+  const runtimeCandidate = handle.runtime as ProviderRuntimeProfile | undefined;
+  if (runtimeCandidate && typeof runtimeCandidate === 'object') {
+    return runtimeCandidate;
+  }
+  const providerIdFallback = (() => {
+    if (typeof handle.providerId === 'string' && handle.providerId.trim()) {
+      return handle.providerId.trim();
+    }
+    if (typeof providerKey === 'string' && providerKey.includes('.')) {
+      const [head] = providerKey.split('.');
+      if (head && head.trim()) {
+        return head.trim();
+      }
+    }
+    return 'unknown';
+  })();
+  const providerTypeFallback = (
+    typeof handle.providerType === 'string' && handle.providerType.trim()
+      ? handle.providerType.trim().toLowerCase()
+      : 'openai'
+  ) as ProviderRuntimeProfile['providerType'];
+  return {
+    runtimeKey,
+    providerId: providerIdFallback,
+    providerKey,
+    providerType: providerTypeFallback,
+    providerFamily: handle.providerFamily,
+    endpoint: '',
+    auth: {
+      type: 'apikey',
+      value: ''
+    }
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -293,6 +399,93 @@ function valueHasNonEmptyText(value: unknown): boolean {
     || valueHasNonEmptyText(value.content)
     || valueHasNonEmptyText(value.reasoning_content)
     || valueHasNonEmptyText(value.reasoning)
+  );
+}
+
+function extractTextFromResponsesOutputItem(item: unknown): string {
+  if (!isRecord(item)) {
+    return '';
+  }
+  const itemType = readString(item.type)?.toLowerCase();
+  if (itemType === 'output_text' || itemType === 'text' || itemType === 'input_text') {
+    const direct = readString(item.text);
+    if (direct) {
+      return direct;
+    }
+  }
+  if (itemType === 'message') {
+    const content = Array.isArray(item.content) ? item.content : [];
+    const chunks: string[] = [];
+    for (const part of content) {
+      if (!isRecord(part)) {
+        continue;
+      }
+      const partType = readString(part.type)?.toLowerCase();
+      if (partType && partType !== 'output_text' && partType !== 'text' && partType !== 'input_text') {
+        continue;
+      }
+      const partText = readString(part.text);
+      if (partText) {
+        chunks.push(partText);
+      }
+    }
+    return chunks.join('');
+  }
+  return '';
+}
+
+function backfillResponsesOutputTextIfMissing(body: unknown): void {
+  if (!isRecord(body)) {
+    return;
+  }
+  if (valueHasNonEmptyText(body.output_text)) {
+    return;
+  }
+  const outputItems = Array.isArray(body.output) ? body.output : [];
+  if (outputItems.length <= 0) {
+    return;
+  }
+  const text = outputItems
+    .map((item) => extractTextFromResponsesOutputItem(item))
+    .join('')
+    .trim();
+  if (!text) {
+    return;
+  }
+  body.output_text = text;
+}
+
+function emitVirtualRouterConcurrencyLog(args: {
+  sessionId?: string;
+  routeName?: string;
+  poolId?: string;
+  providerKey?: string;
+  model?: string;
+  reason?: string;
+  activeInFlight: number;
+  maxInFlight: number;
+}): void {
+  const timestamp = (() => {
+    const now = new Date();
+    const hh = String(now.getHours()).padStart(2, '0');
+    const mm = String(now.getMinutes()).padStart(2, '0');
+    const ss = String(now.getSeconds()).padStart(2, '0');
+    return `${hh}:${mm}:${ss}`;
+  })();
+  const sessionLabel = args.sessionId ? ` sid=${args.sessionId}` : '';
+  const routeBase = args.routeName && args.routeName.trim() ? args.routeName.trim() : 'route';
+  const routeLabel = args.poolId && args.poolId.trim() ? `${routeBase}/${args.poolId.trim()}` : routeBase;
+  const providerLabel = args.providerKey && args.providerKey.trim() ? args.providerKey.trim() : 'unknown-provider';
+  const modelLabel = args.model && args.model.trim() ? `.${args.model.trim()}` : '';
+  const reasonLabel = args.reason && args.reason.trim() ? ` reason=${args.reason.trim()}` : '';
+  const prefixColor = '\x1b[38;5;208m';
+  const timeColor = '\x1b[90m';
+  const routeColor = resolveSessionLogColor(args.sessionId);
+  const white = '\x1b[97m';
+  const reset = '\x1b[0m';
+  const concurrencyLabel = `${white}[concurrency:${Math.max(0, Math.floor(args.activeInFlight))}/${Math.max(1, Math.floor(args.maxInFlight))}]${reset}`;
+  console.log(
+    `${prefixColor}[virtual-router-hit]${reset} ${concurrencyLabel} ${timeColor}${timestamp}${reset}${sessionLabel} ${routeColor}${routeLabel} -> ${providerLabel}${modelLabel}${reasonLabel}${reset}`
   );
 }
 
@@ -322,6 +515,22 @@ function hasOutputFunctionCalls(value: unknown): boolean {
   });
 }
 
+function containsToolRegistryMissingText(value: unknown): boolean {
+  if (!valueHasNonEmptyText(value)) {
+    return false;
+  }
+  const text = String(value ?? '');
+  const pattern = /tool\s+[a-z0-9_.-]+\s+does\s+not\s+exist(?:s)?/ig;
+  let count = 0;
+  while (pattern.exec(text)) {
+    count += 1;
+    if (count >= 1) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function detectRetryableEmptyAssistantResponse(body: unknown): { reason: string; marker: string } | null {
   if (!isRecord(body)) {
     return null;
@@ -344,10 +553,25 @@ function detectRetryableEmptyAssistantResponse(body: unknown): { reason: string;
       || valueHasNonEmptyText(message?.reasoning_content)
       || valueHasNonEmptyText(message?.reasoning)
       || valueHasNonEmptyText(firstChoice.content);
+    const combinedText = [
+      message?.content,
+      message?.reasoning_content,
+      message?.reasoning,
+      firstChoice.content
+    ]
+      .filter((item) => valueHasNonEmptyText(item))
+      .map((item) => String(item))
+      .join('\n');
     if ((finishReason === 'stop' || finishReason === 'tool_calls' || !finishReason) && !hasToolCalls && !hasText) {
       return {
         reason: `finish_reason=${finishReason || 'unknown'} but assistant text/tool_calls are empty`,
         marker: 'chat_empty_assistant'
+      };
+    }
+    if ((finishReason === 'stop' || finishReason === 'tool_calls' || !finishReason) && !hasToolCalls && containsToolRegistryMissingText(combinedText)) {
+      return {
+        reason: 'assistant emitted textual tool-not-found complaint without structured tool_calls',
+        marker: 'chat_textual_tool_registry_missing'
       };
     }
   }
@@ -371,13 +595,35 @@ function detectRetryableEmptyAssistantResponse(body: unknown): { reason: string;
         marker: 'responses_empty_output'
       };
     }
+    if (
+      !hasRequiredActionToolCalls &&
+      !hasFunctionCalls &&
+      containsToolRegistryMissingText(body.output_text)
+    ) {
+      return {
+        reason: 'responses completed with textual tool-not-found complaint but no function_call output',
+        marker: 'responses_textual_tool_registry_missing'
+      };
+    }
   }
 
   return null;
 }
 
 export class HubRequestExecutor implements RequestExecutor {
-  constructor(private readonly deps: RequestExecutorDeps) { }
+  private readonly trafficGovernor: ProviderTrafficGovernorLike;
+
+  constructor(private readonly deps: RequestExecutorDeps) {
+    if (deps.trafficGovernor) {
+      this.trafficGovernor = deps.trafficGovernor;
+      return;
+    }
+    if (process.env.NODE_ENV === 'test') {
+      this.trafficGovernor = createNoopProviderTrafficGovernor();
+      return;
+    }
+    this.trafficGovernor = getSharedProviderTrafficGovernor();
+  }
 
   private logProviderRetrySwitch(args: {
     requestId: string;
@@ -471,6 +717,29 @@ export class HubRequestExecutor implements RequestExecutor {
         if (forcedRouteHint) {
           metadataForAttempt.routeHint = forcedRouteHint;
         }
+        const metadataRt =
+          metadataForAttempt.__rt && typeof metadataForAttempt.__rt === 'object' && !Array.isArray(metadataForAttempt.__rt)
+            ? (metadataForAttempt.__rt as Record<string, unknown>)
+            : {};
+        metadataForAttempt.__rt = {
+          ...metadataRt,
+          disableVirtualRouterHitLog: true
+        };
+        // llmswitch Hub 仍有一条 legacy virtual-router-hit 调试日志（无 concurrency 信息）。
+        // 为保证控制台只保留一条统一格式（含 [concurrency:x/y]）的命中日志，这里对
+        // metadata.logger 做最小化降噪：仅屏蔽 logVirtualRouterHit，不影响其他 logger 能力。
+        const loggerRecord =
+          metadataForAttempt.logger &&
+          typeof metadataForAttempt.logger === 'object' &&
+          !Array.isArray(metadataForAttempt.logger)
+            ? (metadataForAttempt.logger as Record<string, unknown>)
+            : undefined;
+        if (loggerRecord && typeof loggerRecord.logVirtualRouterHit === 'function') {
+          metadataForAttempt.logger = {
+            ...loggerRecord,
+            logVirtualRouterHit: undefined
+          };
+        }
         const clientHeadersForAttempt =
           cloneClientHeaders(metadataForAttempt?.clientHeaders) || inboundClientHeaders;
         if (clientHeadersForAttempt) {
@@ -495,6 +764,13 @@ export class HubRequestExecutor implements RequestExecutor {
               attempt < maxAttempts &&
               poolCooldownWaitBudgetMs >= cooldownWaitMs
             ) {
+              this.logStage(`${pipelineLabel}.completed`, providerRequestId, {
+                route: undefined,
+                target: undefined,
+                elapsedMs: Date.now() - hubStartedAtMs,
+                attempt,
+                recoverablePoolCooldown: true
+              });
               this.logStage('provider.route_pool_cooldown_wait', providerRequestId, {
                 attempt,
                 waitMs: cooldownWaitMs,
@@ -533,6 +809,9 @@ export class HubRequestExecutor implements RequestExecutor {
         if (!initialRoutePool && Array.isArray(pipelineResult.routingDecision?.pool)) {
           initialRoutePool = [...pipelineResult.routingDecision!.pool];
         }
+        const routePoolForAttempt = Array.isArray(pipelineResult.routingDecision?.pool)
+          ? pipelineResult.routingDecision.pool
+          : (initialRoutePool ?? []);
 
         const providerPayload = pipelineResult.providerPayload;
         const target = pipelineResult.target;
@@ -717,19 +996,68 @@ export class HubRequestExecutor implements RequestExecutor {
           attempt
         });
 
-        const providerSendStartedAtMs = Date.now();
-        this.logStage('provider.send.start', input.requestId, {
-          providerKey: target.providerKey,
-          runtimeKey,
-          protocol: providerProtocol,
-          providerType: handle.providerType,
-          providerFamily: handle.providerFamily,
-          model: providerModel,
-          providerLabel,
-          attempt
-        });
-
+        let trafficPermit: ProviderTrafficPermit | null = null;
+        let providerSendStartedAtMs = 0;
         try {
+          this.logStage('provider.traffic.acquire.start', input.requestId, {
+            providerKey: target.providerKey,
+            runtimeKey,
+            attempt
+          });
+          const trafficAcquired = await this.trafficGovernor.acquire({
+            runtimeKey,
+            providerKey: target.providerKey,
+            requestId: input.requestId,
+            runtime: resolveTrafficRuntimeProfile(runtimeKey, handle, target.providerKey),
+            // If current route pool has alternatives, do not stall too long on quota/RPM gating.
+            // Switch provider after 10s wait so weighted pools can continue serving.
+            softWaitTimeoutMs: routePoolForAttempt.length > 1 ? 10_000 : undefined
+          });
+          trafficPermit = trafficAcquired.permit;
+          if (trafficAcquired.waitedMs > 0) {
+            this.logStage('provider.traffic.acquire.wait', input.requestId, {
+              providerKey: target.providerKey,
+              runtimeKey,
+              waitedMs: trafficAcquired.waitedMs,
+              attempt
+            });
+          }
+          this.logStage('provider.traffic.acquire.completed', input.requestId, {
+            providerKey: target.providerKey,
+            runtimeKey,
+            maxInFlight: trafficAcquired.policy.concurrency.maxInFlight,
+            requestsPerMinute: trafficAcquired.policy.rpm.requestsPerMinute,
+            activeInFlight: trafficAcquired.activeInFlight,
+            rpmInWindow: trafficAcquired.rpmInWindow,
+            attempt
+          });
+          const routingDecisionRecord =
+            pipelineResult.routingDecision && typeof pipelineResult.routingDecision === 'object'
+              ? (pipelineResult.routingDecision as Record<string, unknown>)
+              : undefined;
+          emitVirtualRouterConcurrencyLog({
+            sessionId: readString(mergedMetadata.sessionId) ?? readString(mergedMetadata.conversationId),
+            routeName: pipelineResult.routingDecision?.routeName,
+            poolId: readString(routingDecisionRecord?.poolId),
+            providerKey: target.providerKey,
+            model: providerModel,
+            reason: readString(routingDecisionRecord?.reasoning),
+            activeInFlight: trafficAcquired.activeInFlight,
+            maxInFlight: trafficAcquired.policy.concurrency.maxInFlight
+          });
+
+          providerSendStartedAtMs = Date.now();
+          this.logStage('provider.send.start', input.requestId, {
+            providerKey: target.providerKey,
+            runtimeKey,
+            protocol: providerProtocol,
+            providerType: handle.providerType,
+            providerFamily: handle.providerFamily,
+            model: providerModel,
+            providerLabel,
+            attempt
+          });
+
           const providerResponse = await handle.instance.processIncoming(providerPayload);
           const responseStatus = extractResponseStatus(providerResponse);
           this.logStage('provider.send.completed', input.requestId, {
@@ -818,6 +1146,9 @@ export class HubRequestExecutor implements RequestExecutor {
             converted.body && typeof converted.body === 'object'
               ? (converted.body as Record<string, unknown>)
               : undefined;
+          if (convertedBodyRecord) {
+            backfillResponsesOutputTextIfMissing(convertedBodyRecord);
+          }
           const finishReason =
             convertedBodyRecord && typeof convertedBodyRecord[STREAM_LOG_FINISH_REASON_KEY] === 'string'
               ? String(convertedBodyRecord[STREAM_LOG_FINISH_REASON_KEY])
@@ -974,12 +1305,14 @@ export class HubRequestExecutor implements RequestExecutor {
           });
 
           recordAttempt({ usage: aggregatedUsage, error: false });
+          const metadataHubStageTop = readHubStageTop(mergedMetadata);
           return {
             ...converted,
             usageLogInfo: {
               providerKey: target.providerKey,
               model: providerModel,
               usage: aggregatedUsage as Record<string, unknown> | undefined,
+              hubStageTop: metadataHubStageTop,
               requestStartedAtMs: requestStartedAt,
               timingRequestIds: Array.from(
                 new Set([providerRequestId, input.requestId].filter((value): value is string => Boolean(value)))
@@ -1157,6 +1490,42 @@ export class HubRequestExecutor implements RequestExecutor {
             ...(promptTooLong ? { contextOverflowRetries, maxContextOverflowRetries: MAX_CONTEXT_OVERFLOW_RETRIES } : {})
           });
           continue;
+        } finally {
+          if (trafficPermit) {
+            const releaseStartedAtMs = Date.now();
+            this.logStage('provider.traffic.release.start', input.requestId, {
+              providerKey: target.providerKey,
+              runtimeKey,
+              leaseId: trafficPermit.leaseId,
+              attempt
+            });
+            try {
+              const released = await this.trafficGovernor.release(trafficPermit);
+              this.logStage('provider.traffic.release.completed', input.requestId, {
+                providerKey: target.providerKey,
+                runtimeKey,
+                leaseId: trafficPermit.leaseId,
+                released: released.released,
+                activeInFlight: released.activeInFlight,
+                elapsedMs: Date.now() - releaseStartedAtMs,
+                attempt
+              });
+            } catch (releaseError) {
+              this.logStage('provider.traffic.release.error', input.requestId, {
+                providerKey: target.providerKey,
+                runtimeKey,
+                leaseId: trafficPermit.leaseId,
+                message:
+                  releaseError instanceof Error
+                    ? releaseError.message
+                    : String(releaseError ?? 'Unknown release error'),
+                elapsedMs: Date.now() - releaseStartedAtMs,
+                attempt
+              });
+            } finally {
+              trafficPermit = null;
+            }
+          }
         }
         }
 
@@ -1186,7 +1555,8 @@ export class HubRequestExecutor implements RequestExecutor {
 export const __requestExecutorTestables = {
   readString,
   extractRetryErrorSnapshot,
-  truncateReason
+  truncateReason,
+  detectRetryableEmptyAssistantResponse
 };
 
 export function createRequestExecutor(deps: RequestExecutorDeps): RequestExecutor {

@@ -198,6 +198,7 @@ async function createServer(configPath, port, snapshotRoot) {
     HOME: isolatedHome,
     USERPROFILE: isolatedHome,
     ROUTECODEX_USE_MOCK: '1',
+    ROUTECODEX_ALLOW_MOCK_RUNTIME: '1',
     ROUTECODEX_MOCK_CONFIG_PATH: configPath,
     ROUTECODEX_MOCK_SAMPLES_DIR: MOCK_SAMPLES_DIR,
     ROUTECODEX_MOCK_VALIDATE_NAMES: '1',

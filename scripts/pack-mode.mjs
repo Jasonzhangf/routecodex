@@ -126,13 +126,10 @@ function readLocalLlmsVersion() {
 
 const isDevPkg = args.name === 'routecodex';
 const isRcc = args.name === 'rcc' || args.name === '@jsonstudio/rcc';
-const isRccx = args.name === '@jsonstudio/rccx';
 
 let hadDevLink = false;
-if (!isRccx) {
-  hadDevLink = isSymlink(llmsPath);
-  runEnsureMode('release');
-}
+hadDevLink = isSymlink(llmsPath);
+runEnsureMode('release');
 
 const original = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
 fs.writeFileSync(backupPath, JSON.stringify(original, null, 2));
@@ -156,7 +153,7 @@ try {
   mutated.name = args.name;
   mutated.bin = { [args.bin]: 'dist/cli.js' };
   // Ensure description mentions mode
-  const suffix = (isRcc || isRccx) ? ' (release)' : ' (dev)';
+  const suffix = isRcc ? ' (release)' : ' (dev)';
   mutated.description = String(original.description || 'RouteCodex')
     .replace(/\s*\((dev|release)\)$/, '')
     .concat(suffix);
@@ -207,25 +204,6 @@ try {
       }
       mutated.files = baseFiles;
     }
-  } else if (isRccx) {
-    // rccx: wasm-backed llms 核心，通过 npm alias 将 @jsonstudio/llms 指向 wasm 引擎包。
-    mutated.bundledDependencies = [];
-    mutated.bundleDependencies = [];
-
-    const deps = { ...(original.dependencies || {}) };
-    // 移除原有 TS 版 llms 直连依赖
-    if (deps['@jsonstudio/llms']) {
-      delete deps['@jsonstudio/llms'];
-    }
-    // 推断 wasm 引擎版本，若未声明则使用本地 llms-engine 缺省版本
-    const engineVersion = deps['@jsonstudio/llms-engine'] || '^0.3.0';
-    deps['@jsonstudio/llms-engine'] = engineVersion;
-    // 通过 npm alias 保持 import 形状不变
-    deps['@jsonstudio/llms'] = `npm:@jsonstudio/llms-engine@${engineVersion}`;
-    deps.ajv = deps.ajv || '^8.17.1';
-    deps.zod = deps.zod || '^3.23.8';
-
-    mutated.dependencies = deps;
   }
   fs.writeFileSync(pkgPath, JSON.stringify(mutated, null, 2));
 

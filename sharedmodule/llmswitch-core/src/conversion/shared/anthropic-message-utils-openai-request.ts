@@ -1,8 +1,7 @@
-import { createBridgeActionState, runBridgeActionPipeline } from '../bridge-actions.js';
-import { resolveBridgePolicy, resolvePolicyActions } from '../bridge-policies.js';
 import { mapChatToolsToAnthropicTools } from './anthropic-message-utils-tool-schema.js';
 import { ProviderProtocolError } from '../provider-protocol-error.js';
 import { jsonClone, type JsonValue } from '../hub/types/json.js';
+import { logHubStageTiming } from '../hub/pipeline/hub-stage-timing.js';
 import { parseLenientJsonishWithNative } from '../../router/virtual-router/engine-selection/native-shared-conversion-semantics.js';
 import {
   flattenAnthropicText,
@@ -34,30 +33,23 @@ const ANTHROPIC_TOP_LEVEL_FIELDS = new Set<string>([
   'thinking'
 ]);
 
-export function buildAnthropicRequestFromOpenAIChat(chatReq: unknown): Unknown {
+export function buildAnthropicRequestFromOpenAIChat(
+  chatReq: unknown,
+  options?: { requestId?: string },
+): Unknown {
   const requestBody: Unknown = isObject(chatReq) ? chatReq : {};
+  const requestId =
+    typeof options?.requestId === 'string' && options.requestId.trim().length
+      ? options.requestId.trim()
+      : 'unknown';
   const model = String(requestBody?.model || 'unknown');
   const messages: UnknownArray = [];
 
-  try {
-    const bridgePolicy = resolveBridgePolicy({ protocol: 'anthropic-messages' });
-    const actions = resolvePolicyActions(bridgePolicy, 'request_outbound');
-    if (actions?.length && Array.isArray((requestBody as Unknown).messages)) {
-      const actionState = createBridgeActionState({
-        messages: (requestBody as Unknown).messages as UnknownArray,
-        rawRequest: requestBody
-      });
-      runBridgeActionPipeline({
-        stage: 'request_outbound',
-        actions,
-        protocol: bridgePolicy?.protocol ?? 'anthropic-messages',
-        moduleType: bridgePolicy?.moduleType ?? 'anthropic-messages',
-        state: actionState
-      });
-    }
-  } catch {
-    // ignore policy errors
-  }
+  // IMPORTANT:
+  // The request_outbound bridge-policy pipeline was previously executed here, but
+  // its output state was never consumed by this builder. That made the whole pass
+  // pure overhead (large-message O(n) scans/clones) with zero semantic effect.
+  // To preserve payload semantics and stop latency bleed, we skip that no-op pass.
 
   const collectText = (val: unknown): string => {
     if (!val) return '';
@@ -74,6 +66,8 @@ export function buildAnthropicRequestFromOpenAIChat(chatReq: unknown): Unknown {
   const mirrorShapes = extractMirrorShapesFromRequest(requestBody);
   let mirrorIndex = 0;
   const knownToolCallIds = new Set<string>();
+  logHubStageTiming(requestId, 'req_outbound.anthropic.pre_scan_tool_calls', 'start');
+  const preScanStart = Date.now();
   for (const m of msgs) {
     if (!m || typeof m !== 'object') continue;
     const role = String((m as any).role || 'user');
@@ -86,6 +80,9 @@ export function buildAnthropicRequestFromOpenAIChat(chatReq: unknown): Unknown {
       knownToolCallIds.add(id);
     }
   }
+  logHubStageTiming(requestId, 'req_outbound.anthropic.pre_scan_tool_calls', 'completed', {
+    elapsedMs: Date.now() - preScanStart
+  });
 
   const systemBlocks: Array<{ type: 'text'; text: string }> = [];
   const pushSystemBlock = (text: string) => {
@@ -122,6 +119,8 @@ export function buildAnthropicRequestFromOpenAIChat(chatReq: unknown): Unknown {
   } catch {
     // ignore system pre-scan errors
   }
+  logHubStageTiming(requestId, 'req_outbound.anthropic.map_messages', 'start');
+  const mapMessagesStart = Date.now();
   for (const m of msgs) {
     if (!m || typeof m !== 'object') continue;
     const role = String((m as any).role || 'user');
@@ -267,6 +266,9 @@ export function buildAnthropicRequestFromOpenAIChat(chatReq: unknown): Unknown {
       messages.push({ role, content: contentNode });
     }
   }
+  logHubStageTiming(requestId, 'req_outbound.anthropic.map_messages', 'completed', {
+    elapsedMs: Date.now() - mapMessagesStart
+  });
 
   const out: any = { model };
   if (systemBlocks.length) {

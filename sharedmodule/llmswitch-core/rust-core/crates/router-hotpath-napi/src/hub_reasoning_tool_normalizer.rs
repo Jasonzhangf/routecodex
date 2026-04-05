@@ -2497,6 +2497,15 @@ fn harvest_tool_calls_from_message_content(
     message_obj: &mut Map<String, Value>,
     id_prefix: &str,
 ) -> usize {
+    let has_structured_tool_calls = message_obj
+        .get("tool_calls")
+        .and_then(Value::as_array)
+        .map(|arr| !arr.is_empty())
+        .unwrap_or(false);
+    if has_structured_tool_calls {
+        return 0;
+    }
+
     let candidates = collect_message_content_text_candidates(message_obj);
     if candidates.is_empty() {
         return 0;
@@ -3943,6 +3952,102 @@ exec_command
         assert_eq!(
             choice.get("finish_reason").and_then(Value::as_str),
             Some("tool_calls")
+        );
+    }
+
+    #[test]
+    fn reasoning_tool_normalizer_harvests_tool_calls_from_prefixed_content_json() {
+        let response = json!({
+            "choices": [
+                {
+                    "message": {
+                        "content": "正文：{\"tool_calls\":[{\"name\":\"mailbox.status\",\"input\":{\"target\":\"finger-system-agent\"}},{\"name\":\"update_plan\",\"input\":{\"plan\":[{\"step\":\"A\",\"status\":\"pending\"}]}}]}",
+                        "reasoning_content": "",
+                        "tool_calls": []
+                    },
+                    "finish_reason": "stop"
+                }
+            ]
+        });
+        let raw = normalize_chat_response_reasoning_tools_json(response.to_string(), None).unwrap();
+        let parsed: Value = serde_json::from_str(&raw).unwrap();
+        let choice = parsed
+            .get("choices")
+            .and_then(Value::as_array)
+            .and_then(|arr| arr.first())
+            .and_then(Value::as_object)
+            .unwrap();
+        let message = choice.get("message").and_then(Value::as_object).unwrap();
+        let tool_calls = message
+            .get("tool_calls")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(tool_calls.len(), 2);
+        let first_name = tool_calls[0]
+            .get("function")
+            .and_then(Value::as_object)
+            .and_then(|row| row.get("name"))
+            .and_then(Value::as_str);
+        let second_name = tool_calls[1]
+            .get("function")
+            .and_then(Value::as_object)
+            .and_then(|row| row.get("name"))
+            .and_then(Value::as_str);
+        assert_eq!(first_name, Some("mailbox.status"));
+        assert_eq!(second_name, Some("update_plan"));
+        assert_eq!(
+            choice.get("finish_reason").and_then(Value::as_str),
+            Some("tool_calls")
+        );
+    }
+
+    #[test]
+    fn reasoning_tool_normalizer_does_not_duplicate_when_structured_tool_calls_already_exist() {
+        let response = json!({
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": r#"{"tool_calls":[{"name":"apply_patch","input":{"patch":"*** Begin Patch\n*** Add File:hello.txt\n+hello\n*** EndPatch"}}]}"#,
+                        "tool_calls": [
+                            {
+                                "id": "reasoning_choice_1_1",
+                                "type": "function",
+                                "function": {
+                                    "name": "apply_patch",
+                                    "arguments": "{\"input\":\"*** Begin Patch\\n*** Add File: hello.txt\\n+hello\\n+*** EndPatch\\n*** End Patch\",\"patch\":\"*** Begin Patch\\n*** Add File: hello.txt\\n+hello\\n+*** EndPatch\\n*** End Patch\"}"
+                                }
+                            }
+                        ]
+                    },
+                    "finish_reason": "tool_calls"
+                }
+            ]
+        });
+
+        let raw = normalize_chat_response_reasoning_tools_json(response.to_string(), None).unwrap();
+        let parsed: Value = serde_json::from_str(&raw).unwrap();
+        let choice = parsed
+            .get("choices")
+            .and_then(Value::as_array)
+            .and_then(|arr| arr.first())
+            .and_then(Value::as_object)
+            .unwrap();
+        let message = choice.get("message").and_then(Value::as_object).unwrap();
+        let tool_calls = message
+            .get("tool_calls")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(
+            tool_calls[0]
+                .get("function")
+                .and_then(Value::as_object)
+                .and_then(|row| row.get("name"))
+                .and_then(Value::as_str),
+            Some("apply_patch")
         );
     }
 

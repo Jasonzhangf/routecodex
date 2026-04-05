@@ -107,6 +107,48 @@ function filterRedundantResponsesReasoningAction(
   });
 }
 
+function hasToolSignalsInMessages(messages: Array<Record<string, unknown>>): boolean {
+  for (const message of messages) {
+    if (!message || typeof message !== 'object') {
+      continue;
+    }
+    const role = typeof message.role === 'string' ? message.role.trim().toLowerCase() : '';
+    if (role === 'tool') {
+      return true;
+    }
+    if (typeof message.tool_call_id === 'string' && message.tool_call_id.trim().length) {
+      return true;
+    }
+    const toolCalls = (message as Record<string, unknown>).tool_calls;
+    if (Array.isArray(toolCalls) && toolCalls.length > 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function filterResponsesInboundActionsByPayloadHints(
+  actions: Array<{ name: string; options?: Record<string, unknown> }> | undefined,
+  messages: Array<Record<string, unknown>>
+): Array<{ name: string; options?: Record<string, unknown> }> | undefined {
+  if (!actions?.length) {
+    return actions;
+  }
+  const hasToolSignals = hasToolSignalsInMessages(messages);
+  if (hasToolSignals) {
+    return actions;
+  }
+  const toolOnlyActions = new Set([
+    'tools.normalize-call-ids',
+    'compat.fix-apply-patch',
+    'tools.ensure-placeholders'
+  ]);
+  return actions.filter((action) => {
+    const name = typeof action?.name === 'string' ? action.name.trim().toLowerCase() : '';
+    return !toolOnlyActions.has(name);
+  });
+}
+
 export function captureResponsesContext(
   payload: Record<string, unknown>,
   dto?: { route?: { requestId?: string } }
@@ -138,9 +180,12 @@ export function captureResponsesContext(
     captured.systemInstruction = (payload as any).instructions;
   }
   if (captured.metadata && isJsonObject(captured.metadata as JsonValue)) {
-    const cloned = jsonClone(captured.metadata as JsonObject);
-    delete (cloned as Record<string, unknown>).extraFields;
-    captured.metadata = cloned;
+    const rawMetadata = captured.metadata as JsonObject;
+    if (Object.prototype.hasOwnProperty.call(rawMetadata as Record<string, unknown>, 'extraFields')) {
+      const cloned = jsonClone(rawMetadata);
+      delete (cloned as Record<string, unknown>).extraFields;
+      captured.metadata = cloned;
+    }
   }
   return captured;
 }
@@ -171,8 +216,11 @@ export function buildChatRequestFromResponses(
   });
   try {
     const bridgePolicy = resolveBridgePolicy({ protocol: 'openai-responses', moduleType: 'openai-responses' });
-    const policyActions = filterRedundantResponsesReasoningAction(
-      resolvePolicyActions(bridgePolicy, 'request_inbound')
+    const policyActions = filterResponsesInboundActionsByPayloadHints(
+      filterRedundantResponsesReasoningAction(
+        resolvePolicyActions(bridgePolicy, 'request_inbound')
+      ),
+      messages
     );
     if (policyActions?.length) {
       logHubStageTiming(requestId, 'req_inbound.responses.inbound_policy', 'start');

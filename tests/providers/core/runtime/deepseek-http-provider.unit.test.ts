@@ -360,7 +360,7 @@ describe('DeepSeekHttpProvider', () => {
     );
 
     jest
-      .spyOn(standardToolRequestTransform, 'applyStandardToolTextRequestTransform')
+      .spyOn(standardToolRequestTransform.standardToolTextRequestTransformRuntime, 'transform')
       .mockReturnValue({
         model: 'deepseek-chat',
         messages: [{ role: 'user', content: 'fallback text should not be used' }],

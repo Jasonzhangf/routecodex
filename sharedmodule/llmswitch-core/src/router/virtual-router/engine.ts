@@ -119,8 +119,6 @@ export class VirtualRouterEngine {
       diagnostics: RoutingDiagnostics;
     };
     emitStopMessageMarkerParseLog(parseLog);
-    // Keep legacy observable behavior for callers/tests that inspect the request object
-    // after route(): instruction markers are stripped from forwarded payload structures.
     cleanStopMessageMarkersInPlace(request as unknown as Record<string, unknown>);
     const stopScope = parseLog?.stopScope || resolveStopMessageScope(metadata);
     const stopState = stopScope ? this.getStopMessageState(metadata) : null;
@@ -128,13 +126,15 @@ export class VirtualRouterEngine {
       parseLog?.stopMessageTypes.length ||
       parseLog?.scopedTypes.some((type) => type === 'stopMessageSet' || type === 'stopMessageMode' || type === 'stopMessageClear')
     );
-    emitVirtualRouterHitLog(parsed, {
-      requestId: metadata.requestId,
-      sessionId: resolveVirtualRouterLogSessionId(metadata),
-      stopScope,
-      stopState,
-      forceStopStatusLabel
-    });
+    if ((metadata as { __rt?: Record<string, unknown> }).__rt?.disableVirtualRouterHitLog !== true) {
+      emitVirtualRouterHitLog(parsed, {
+        requestId: metadata.requestId,
+        sessionId: resolveVirtualRouterLogSessionId(metadata),
+        stopScope,
+        stopState,
+        forceStopStatusLabel
+      });
+    }
     return parsed;
   }
 

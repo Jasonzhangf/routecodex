@@ -291,7 +291,8 @@ export function applyErrorEvent(
     return schedule[idx] ?? null;
   })();
   const nextUntil = cooldownMs ? nowMs + cooldownMs : null;
-  const existingUntil = typeof state.cooldownUntil === 'number' ? state.cooldownUntil : null;
+  const existingUntil =
+    sameErrorKey && typeof state.cooldownUntil === 'number' ? state.cooldownUntil : null;
   const cooldownUntil =
     typeof nextUntil === 'number' && Number.isFinite(nextUntil)
       ? typeof existingUntil === 'number' && existingUntil > nextUntil

@@ -1,4 +1,5 @@
 use serde_json::{Map, Value};
+use std::mem;
 
 use super::history::{
     apply_bridge_capture_tool_results, apply_bridge_ensure_tool_placeholders,
@@ -90,7 +91,7 @@ pub(crate) fn run_bridge_action_pipeline(input: BridgeActionPipelineInput) -> Br
                     ApplyBridgeInjectSystemInstructionInput {
                         stage: stage.clone(),
                         options: options.clone().map(Value::Object),
-                        messages: state.messages.clone(),
+                        messages: mem::take(&mut state.messages),
                         raw_request: state.raw_request.clone(),
                     },
                 );
@@ -109,7 +110,7 @@ pub(crate) fn run_bridge_action_pipeline(input: BridgeActionPipelineInput) -> Br
                     })
                     .filter(|value| !value.trim().is_empty());
                 let output = apply_bridge_reasoning_extract(ApplyBridgeReasoningExtractInput {
-                    messages: state.messages.clone(),
+                    messages: mem::take(&mut state.messages),
                     drop_from_content: Some(drop_from_content),
                     id_prefix_base,
                 });
@@ -119,7 +120,7 @@ pub(crate) fn run_bridge_action_pipeline(input: BridgeActionPipelineInput) -> Br
                 let output =
                     apply_bridge_ensure_tool_placeholders(ApplyBridgeEnsureToolPlaceholdersInput {
                         stage: stage.clone(),
-                        messages: state.messages.clone(),
+                        messages: mem::take(&mut state.messages),
                         captured_tool_results: state.captured_tool_results.clone(),
                         raw_request: state.raw_request.clone(),
                         raw_response: state.raw_response.clone(),
@@ -133,7 +134,7 @@ pub(crate) fn run_bridge_action_pipeline(input: BridgeActionPipelineInput) -> Br
                 let output = apply_bridge_ensure_system_instruction(
                     ApplyBridgeEnsureSystemInstructionInput {
                         stage: stage.clone(),
-                        messages: state.messages.clone(),
+                        messages: mem::take(&mut state.messages),
                         metadata: state.metadata.clone(),
                     },
                 );
@@ -151,7 +152,7 @@ pub(crate) fn run_bridge_action_pipeline(input: BridgeActionPipelineInput) -> Br
                         .and_then(|value| value.as_array())
                         .map(|items| items.clone());
                     let output = apply_bridge_normalize_history(ApplyBridgeNormalizeHistoryInput {
-                        messages: state.messages.clone(),
+                        messages: mem::take(&mut state.messages),
                         tools,
                     });
                     state.messages = output.messages;
@@ -167,7 +168,7 @@ pub(crate) fn run_bridge_action_pipeline(input: BridgeActionPipelineInput) -> Br
                     let assistant_fallback = pick_option_str(options_ref, "assistantFallback")
                         .unwrap_or_else(|| "Assistant response unavailable.".to_string());
                     let output = ensure_bridge_output_fields(EnsureBridgeOutputFieldsInput {
-                        messages: state.messages.clone(),
+                        messages: mem::take(&mut state.messages),
                         tool_fallback: Some(tool_fallback),
                         assistant_fallback: Some(assistant_fallback),
                     });
@@ -199,7 +200,7 @@ pub(crate) fn run_bridge_action_pipeline(input: BridgeActionPipelineInput) -> Br
                     );
                     let output = apply_bridge_responses_output_reasoning(
                         ApplyBridgeResponsesOutputReasoningInput {
-                            messages: state.messages.clone(),
+                            messages: mem::take(&mut state.messages),
                             raw_response: state.raw_response.clone(),
                             id_prefix: Some(id_prefix),
                         },
@@ -214,7 +215,7 @@ pub(crate) fn run_bridge_action_pipeline(input: BridgeActionPipelineInput) -> Br
                         stage: stage.clone(),
                         protocol: protocol.clone(),
                         module_type: module_type.clone(),
-                        messages: state.messages.clone(),
+                        messages: mem::take(&mut state.messages),
                         raw_request: state.raw_request.clone(),
                         captured_tool_results: state.captured_tool_results.clone(),
                         id_prefix: Some(id_prefix),

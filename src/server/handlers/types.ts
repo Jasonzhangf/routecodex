@@ -23,6 +23,13 @@ export interface PipelineExecutionResult {
     providerKey?: string;
     model?: string;
     usage?: Record<string, unknown>;
+    hubStageTop?: Array<{
+      stage: string;
+      totalMs: number;
+      count?: number;
+      avgMs?: number;
+      maxMs?: number;
+    }>;
     requestStartedAtMs: number;
     timingRequestIds?: string[];
     sessionId?: unknown;

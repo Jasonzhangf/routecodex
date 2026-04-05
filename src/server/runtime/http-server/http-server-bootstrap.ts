@@ -244,6 +244,12 @@ export function applyProviderProfileOverrides(server: any, runtime: ProviderRunt
   if (!patched.deepseek && profile.metadata?.deepseek) {
     patched.deepseek = profile.metadata.deepseek;
   }
+  if (!patched.concurrency && profile.metadata?.concurrency) {
+    patched.concurrency = profile.metadata.concurrency;
+  }
+  if (!patched.rpm && profile.metadata?.rpm) {
+    patched.rpm = profile.metadata.rpm;
+  }
 
   return canonicalizeRuntimeProvider(patched);
 }

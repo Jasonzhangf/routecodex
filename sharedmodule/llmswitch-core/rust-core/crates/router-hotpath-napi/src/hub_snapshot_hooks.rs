@@ -8,8 +8,14 @@ use std::env;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
+use std::sync::mpsc::{sync_channel, Receiver, SyncSender, TrySendError};
 use std::sync::{Mutex, OnceLock};
+use std::thread;
 use uuid::Uuid;
+
+const DEFAULT_SNAPSHOT_QUEUE_CAPACITY: usize = 256;
+const SNAPSHOT_DROP_LOG_THROTTLE_MS: i64 = 5_000;
 
 #[derive(Debug, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -25,9 +31,117 @@ struct SnapshotHookOptions {
 }
 
 static PROVIDER_INDEX: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+static SNAPSHOT_WRITER_RUNTIME: OnceLock<Option<SnapshotWriterRuntime>> = OnceLock::new();
+static SNAPSHOT_DROPPED_JOBS: AtomicU64 = AtomicU64::new(0);
+static SNAPSHOT_LAST_DROP_LOG_AT_MS: AtomicI64 = AtomicI64::new(0);
+
+#[derive(Clone)]
+struct SnapshotWriterRuntime {
+    sender: SyncSender<SnapshotHookOptions>,
+}
 
 fn provider_index() -> &'static Mutex<HashMap<String, String>> {
     PROVIDER_INDEX.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn resolve_snapshot_async_enabled() -> bool {
+    let raw = env::var("ROUTECODEX_SNAPSHOT_ASYNC")
+        .ok()
+        .or_else(|| env::var("RCC_SNAPSHOT_ASYNC").ok());
+    resolve_bool_from_env(raw, true)
+}
+
+fn resolve_snapshot_queue_capacity() -> usize {
+    let raw = env::var("ROUTECODEX_SNAPSHOT_QUEUE_CAPACITY")
+        .ok()
+        .or_else(|| env::var("RCC_SNAPSHOT_QUEUE_CAPACITY").ok());
+    let parsed = raw
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0);
+    parsed.unwrap_or(DEFAULT_SNAPSHOT_QUEUE_CAPACITY)
+}
+
+fn snapshot_writer_loop(receiver: Receiver<SnapshotHookOptions>) {
+    while let Ok(options) = receiver.recv() {
+        write_snapshot_via_hooks_sync(options);
+    }
+}
+
+fn snapshot_writer_runtime() -> Option<&'static SnapshotWriterRuntime> {
+    SNAPSHOT_WRITER_RUNTIME
+        .get_or_init(|| {
+            if !resolve_snapshot_async_enabled() {
+                return None;
+            }
+            let capacity = resolve_snapshot_queue_capacity();
+            let (sender, receiver) = sync_channel::<SnapshotHookOptions>(capacity);
+            match thread::Builder::new()
+                .name("rcc-snapshot-writer".to_string())
+                .spawn(move || snapshot_writer_loop(receiver))
+            {
+                Ok(_handle) => Some(SnapshotWriterRuntime { sender }),
+                Err(error) => {
+                    eprintln!(
+                        "[hub_snapshot_hooks] Failed to start snapshot writer thread (capacity={}): {}",
+                        capacity, error
+                    );
+                    None
+                }
+            }
+        })
+        .as_ref()
+}
+
+fn maybe_log_snapshot_drop(stage: &str, request_id: &str, reason: &str) {
+    let dropped = SNAPSHOT_DROPPED_JOBS.fetch_add(1, Ordering::Relaxed) + 1;
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    let mut observed = SNAPSHOT_LAST_DROP_LOG_AT_MS.load(Ordering::Relaxed);
+    loop {
+        if now_ms - observed < SNAPSHOT_DROP_LOG_THROTTLE_MS {
+            return;
+        }
+        match SNAPSHOT_LAST_DROP_LOG_AT_MS.compare_exchange(
+            observed,
+            now_ms,
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+        ) {
+            Ok(_) => break,
+            Err(current) => observed = current,
+        }
+    }
+    eprintln!(
+        "[hub_snapshot_hooks] snapshot enqueue dropped total={} stage={} requestId={} reason={}",
+        dropped, stage, request_id, reason
+    );
+}
+
+fn enqueue_snapshot_job(options: SnapshotHookOptions) {
+    if let Some(runtime) = snapshot_writer_runtime() {
+        match runtime.sender.try_send(options.clone()) {
+            Ok(()) => return,
+            Err(TrySendError::Full(_)) => {
+                maybe_log_snapshot_drop(
+                    options.stage.as_str(),
+                    options.request_id.as_str(),
+                    "queue_full",
+                );
+                return;
+            }
+            Err(TrySendError::Disconnected(_)) => {
+                maybe_log_snapshot_drop(
+                    options.stage.as_str(),
+                    options.request_id.as_str(),
+                    "writer_disconnected",
+                );
+                return;
+            }
+        }
+    }
+    write_snapshot_via_hooks_sync(options);
 }
 
 fn resolve_home_dir() -> PathBuf {
@@ -618,7 +732,7 @@ fn write_snapshot_file(
     write_unique_file(&dir, file_name.as_str(), payload.as_str())
 }
 
-fn write_snapshot_via_hooks(options: SnapshotHookOptions) {
+fn write_snapshot_via_hooks_sync(options: SnapshotHookOptions) {
     let stage = sanitize_token(options.stage.as_str(), "snapshot");
     let mut normal = options.clone();
     normal.stage = stage.clone();
@@ -681,6 +795,10 @@ fn write_snapshot_via_hooks(options: SnapshotHookOptions) {
             }
         }
     }
+}
+
+fn write_snapshot_via_hooks(options: SnapshotHookOptions) {
+    enqueue_snapshot_job(options);
 }
 
 #[derive(Clone, Copy)]

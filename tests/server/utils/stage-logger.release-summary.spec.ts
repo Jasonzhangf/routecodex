@@ -53,6 +53,7 @@ describe('stage logger release summary mode', () => {
 
   it('moves tracked scope timings when request id is rebound', async () => {
     process.env.ROUTECODEX_BUILD_MODE = 'release';
+    process.env.ROUTECODEX_USAGE_TIMING = '1';
     delete process.env.ROUTECODEX_STAGE_LOG;
     delete process.env.ROUTECODEX_STAGE_LOG_VERBOSE;
     delete process.env.ROUTECODEX_STAGE_TIMING;
@@ -80,6 +81,7 @@ describe('stage logger release summary mode', () => {
 
   it('includes tracked host-side request scopes in release timing summary', async () => {
     process.env.ROUTECODEX_BUILD_MODE = 'release';
+    process.env.ROUTECODEX_USAGE_TIMING = '1';
     delete process.env.ROUTECODEX_STAGE_LOG;
     delete process.env.ROUTECODEX_STAGE_LOG_VERBOSE;
     delete process.env.ROUTECODEX_STAGE_TIMING;
@@ -119,5 +121,27 @@ describe('stage logger release summary mode', () => {
     expect(summary).toContain('response=20ms');
     expect(summary).toContain('host.internal=260ms');
     expect(summary).toContain('request.internal=120ms');
+  });
+
+  it('suppresses release timing summary by default when usage timing switch is not enabled', async () => {
+    process.env.ROUTECODEX_BUILD_MODE = 'release';
+    delete process.env.ROUTECODEX_USAGE_TIMING;
+    delete process.env.ROUTECODEX_STAGE_LOG;
+    delete process.env.ROUTECODEX_STAGE_LOG_VERBOSE;
+    delete process.env.ROUTECODEX_STAGE_TIMING;
+    delete process.env.ROUTECODEX_STAGE_TIMING_SUMMARY;
+
+    const { logPipelineStage, formatRequestTimingSummary } =
+      await import('../../../src/server/utils/stage-logger.js');
+
+    logPipelineStage('hub.start', 'req_release_suppressed', {});
+    logPipelineStage('hub.completed', 'req_release_suppressed', { elapsedMs: 200 });
+    logPipelineStage('provider.send.start', 'req_release_suppressed', {});
+    logPipelineStage('provider.send.completed', 'req_release_suppressed', { elapsedMs: 500 });
+    logPipelineStage('response.dispatch.start', 'req_release_suppressed', {});
+    logPipelineStage('response.completed', 'req_release_suppressed', { elapsedMs: 20 });
+
+    const summary = formatRequestTimingSummary('req_release_suppressed', { latencyMs: 720 });
+    expect(summary).toBe('');
   });
 });

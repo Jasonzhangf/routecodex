@@ -298,6 +298,7 @@ export function sendPipelineResponse(
         providerKey: usageLogInfo.providerKey,
         model: usageLogInfo.model,
         usage: usageLogInfo.usage as any,
+        hubStageTop: usageLogInfo.hubStageTop as any,
         latencyMs: Date.now() - usageLogInfo.requestStartedAtMs,
         timingRequestIds: usageLogInfo.timingRequestIds,
         sessionId: usageLogInfo.sessionId,

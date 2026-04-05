@@ -160,3 +160,66 @@ fn harvest_tools_json_delta_function_call_normalizes_functions_prefix() {
         Some("update_plan")
     );
 }
+
+#[test]
+fn harvest_tools_json_final_extracts_jsonish_tool_calls_from_text() {
+    let input = json!({
+        "signal": {
+            "type": "final",
+            "payload": {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "正文：{\"tool_calls\":[{\"name\":\"mailbox.status\",\"input\":{\"target\":\"finger-system-agent\"}}]}"
+                        },
+                        "finish_reason": "stop"
+                    }
+                ]
+            }
+        },
+        "context": {
+            "requestId": "req_harvest_5",
+            "idPrefix": "call"
+        }
+    })
+    .to_string();
+
+    let raw = harvest_tools_json(input).unwrap();
+    let parsed: Value = serde_json::from_str(&raw).unwrap();
+    let normalized = parsed.get("normalized").cloned().unwrap_or(Value::Null);
+    let choice = normalized
+        .get("choices")
+        .and_then(Value::as_array)
+        .and_then(|arr| arr.get(0))
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(
+        choice.get("finish_reason").and_then(Value::as_str),
+        Some("tool_calls")
+    );
+    let message = choice
+        .get("message")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let tool_calls = message
+        .get("tool_calls")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(tool_calls.len(), 1);
+    let function = tool_calls[0]
+        .get("function")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(function.get("name").and_then(Value::as_str), Some("mailbox.status"));
+    let args = function
+        .get("arguments")
+        .and_then(Value::as_str)
+        .unwrap_or("{}");
+    let args_json: Value = serde_json::from_str(args).unwrap_or(Value::Null);
+    assert_eq!(args_json.get("target").and_then(Value::as_str), Some("finger-system-agent"));
+}

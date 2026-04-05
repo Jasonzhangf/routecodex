@@ -1,4 +1,3 @@
-import { jsonClone } from "../types/json.js";
 import type { JsonObject } from "../types/json.js";
 import type { ProcessedRequest, StandardizedRequest } from "../types/standardized.js";
 import type { VirtualRouterEngine } from "../../../router/virtual-router/engine.js";
@@ -30,6 +29,7 @@ import {
   resolveOutboundStreamIntentWithNative,
   syncSessionIdentifiersToMetadataWithNative,
 } from "../../../router/virtual-router/engine-selection/native-hub-pipeline-orchestration-semantics.js";
+import { buildCapturedChatRequestInput } from "./hub-pipeline-heavy-input-fastpath.js";
 
 type ShadowCompareBaselineMode =
   NormalizedRequest["shadowCompare"] extends { baselineMode: infer T }
@@ -96,6 +96,12 @@ export async function executeRouteAndBuildOutbound<TContext = Record<string, unk
   // conversationId，用于 sticky-session 相关逻辑（例如 stopMessage）。
   const normalizedMetadata =
     normalized.metadata as Record<string, unknown> | undefined;
+  const routeRuntimeDirectives =
+    normalizedMetadata &&
+    typeof normalizedMetadata.__rt === "object" &&
+    !Array.isArray(normalizedMetadata.__rt)
+      ? (normalizedMetadata.__rt as Record<string, unknown>)
+      : undefined;
   if (normalizedMetadata && typeof normalizedMetadata === "object") {
     const next = syncSessionIdentifiersToMetadataWithNative({
       metadata: normalizedMetadata,
@@ -124,6 +130,11 @@ export async function executeRouteAndBuildOutbound<TContext = Record<string, unk
     conversationId: sessionIdentifiers.conversationId,
     metadata: normalizedMetadata,
   }) as unknown as RouterMetadataInput;
+  if (routeRuntimeDirectives) {
+    (metadataInput as unknown as Record<string, unknown>).__rt = {
+      ...routeRuntimeDirectives,
+    };
+  }
 
   if (routeSelectTiming?.enabled) {
     logHubStageTiming(
@@ -159,6 +170,7 @@ export async function executeRouteAndBuildOutbound<TContext = Record<string, unk
       ) => void;
     };
     if (
+      routeRuntimeDirectives?.disableVirtualRouterHitLog !== true &&
       logger &&
       typeof logger.logVirtualRouterHit === "function" &&
       routing.decision?.routeName &&
@@ -269,16 +281,13 @@ export async function executeRouteAndBuildOutbound<TContext = Record<string, unk
   // 注意：这里不再根据 processMode(passthrough/chat) 做分支判断——即使某些
   // route 将 processMode 标记为 passthrough，我们仍然需要保留一次规范化后的
   // Chat 请求快照，供 stopMessage 等被动触发型 servertool 在响应阶段使用。
-  const capturedChatRequest = buildCapturedChatRequestSnapshotWithNative({
-    model: workingRequest.model,
-    messages: jsonClone(workingRequest.messages as any),
-    tools: workingRequest.tools
-      ? jsonClone(workingRequest.tools as any)
-      : workingRequest.tools,
-    parameters: workingRequest.parameters
-      ? jsonClone(workingRequest.parameters as any)
-      : workingRequest.parameters,
-  });
+  const capturedChatRequest = buildCapturedChatRequestSnapshotWithNative(
+    buildCapturedChatRequestInput({
+      workingRequest,
+      normalizedMetadata:
+        normalized.metadata as Record<string, unknown> | undefined,
+    }),
+  );
 
   const metadata = buildHubPipelineResultMetadataWithNative({
     normalized: {

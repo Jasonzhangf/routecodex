@@ -105,11 +105,53 @@ export function resolveRequestSemantics(
   processed?: Record<string, unknown>,
   standardized?: Record<string, unknown>
 ): Record<string, unknown> | undefined {
+  const cloneRecord = (value: Record<string, unknown>): Record<string, unknown> => {
+    try {
+      return JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
+    } catch {
+      return { ...value };
+    }
+  };
+  const cloneToolsArray = (value: unknown): unknown[] | undefined => {
+    if (!Array.isArray(value) || value.length <= 0) {
+      return undefined;
+    }
+    try {
+      const cloned = JSON.parse(JSON.stringify(value));
+      return Array.isArray(cloned) ? cloned : undefined;
+    } catch {
+      return value.slice();
+    }
+  };
+  const resolveFallbackClientTools = (): unknown[] | undefined => (
+    cloneToolsArray(processed?.tools) ?? cloneToolsArray(standardized?.tools)
+  );
+  const withFallbackClientTools = (
+    semantics: Record<string, unknown> | undefined
+  ): Record<string, unknown> | undefined => {
+    const fallbackTools = resolveFallbackClientTools();
+    if (!fallbackTools || fallbackTools.length <= 0) {
+      return semantics;
+    }
+    const nextSemantics = semantics ? cloneRecord(semantics) : {};
+    const toolsBagRaw = nextSemantics.tools;
+    const toolsBag =
+      toolsBagRaw && typeof toolsBagRaw === 'object' && !Array.isArray(toolsBagRaw)
+        ? cloneRecord(toolsBagRaw as Record<string, unknown>)
+        : {};
+    const existingTools = Array.isArray(toolsBag.clientToolsRaw) ? toolsBag.clientToolsRaw : [];
+    if (existingTools.length <= 0) {
+      toolsBag.clientToolsRaw = fallbackTools;
+    }
+    nextSemantics.tools = toolsBag;
+    return nextSemantics;
+  };
+
   if (processed && typeof processed.semantics === 'object' && processed.semantics) {
-    return processed.semantics as Record<string, unknown>;
+    return withFallbackClientTools(processed.semantics as Record<string, unknown>);
   }
   if (standardized && typeof standardized.semantics === 'object' && standardized.semantics) {
-    return standardized.semantics as Record<string, unknown>;
+    return withFallbackClientTools(standardized.semantics as Record<string, unknown>);
   }
-  return undefined;
+  return withFallbackClientTools(undefined);
 }

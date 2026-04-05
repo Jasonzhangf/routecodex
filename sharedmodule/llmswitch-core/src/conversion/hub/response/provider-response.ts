@@ -42,7 +42,10 @@ import {
   runRespOutboundStage2SseStream
 } from '../pipeline/stages/resp_outbound/resp_outbound_stage2_sse_stream/index.js';
 import { applyResponseBlacklistWithNative } from '../../../router/virtual-router/engine-selection/native-compat-action-semantics.js';
-import { measureHubStage } from '../pipeline/hub-stage-timing.js';
+import {
+  measureHubStage,
+  peekHubStageTopSummary
+} from '../pipeline/hub-stage-timing.js';
 import { recordResponsesResponse } from '../../shared/responses-conversation-store.js';
 import type { ProviderInvoker } from '../../../servertool/types.js';
 import { saveChatProcessSessionActualUsage } from '../process/chat-process-session-usage.js';
@@ -61,6 +64,14 @@ import {
 type ProviderResponsePlan = {
   createFormatAdapter: () => ChatFormatAdapter | ResponsesFormatAdapter | AnthropicFormatAdapter | GeminiFormatAdapter;
   createMapper: () => ResponseMapper;
+};
+
+type HubStageTopEntry = {
+  stage: string;
+  totalMs: number;
+  count?: number;
+  avgMs?: number;
+  maxMs?: number;
 };
 
 const PROVIDER_RESPONSE_REGISTRY: Record<ProviderProtocol, ProviderResponsePlan> = {
@@ -92,6 +103,105 @@ const INTERNAL_POLICY_DEBUG_BLACKLIST_PATHS = [
   '__responses_passthrough',
   'anthropicToolNameMap'
 ] as const;
+
+function normalizeHubStageTopEntries(raw: unknown): HubStageTopEntry[] {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return [];
+  }
+  return raw
+    .map((entry) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+        return null;
+      }
+      const record = entry as Record<string, unknown>;
+      const stage = typeof record.stage === 'string' ? record.stage.trim() : '';
+      const totalMs =
+        typeof record.totalMs === 'number' && Number.isFinite(record.totalMs)
+          ? Math.max(0, Math.round(record.totalMs))
+          : undefined;
+      if (!stage || totalMs === undefined) {
+        return null;
+      }
+      const count =
+        typeof record.count === 'number' && Number.isFinite(record.count)
+          ? Math.max(0, Math.floor(record.count))
+          : undefined;
+      const avgMs =
+        typeof record.avgMs === 'number' && Number.isFinite(record.avgMs)
+          ? Math.max(0, Math.round(record.avgMs))
+          : undefined;
+      const maxMs =
+        typeof record.maxMs === 'number' && Number.isFinite(record.maxMs)
+          ? Math.max(0, Math.round(record.maxMs))
+          : undefined;
+      return {
+        stage,
+        totalMs,
+        ...(count !== undefined ? { count } : {}),
+        ...(avgMs !== undefined ? { avgMs } : {}),
+        ...(maxMs !== undefined ? { maxMs } : {})
+      } as HubStageTopEntry;
+    })
+    .filter((entry): entry is HubStageTopEntry => Boolean(entry));
+}
+
+function mergeHubStageTopEntries(
+  baseEntries: HubStageTopEntry[],
+  appendEntries: HubStageTopEntry[]
+): HubStageTopEntry[] {
+  if (baseEntries.length === 0) {
+    return appendEntries;
+  }
+  if (appendEntries.length === 0) {
+    return baseEntries;
+  }
+  const merged = new Map<string, HubStageTopEntry>();
+  const apply = (entry: HubStageTopEntry): void => {
+    const existing = merged.get(entry.stage);
+    if (!existing) {
+      merged.set(entry.stage, { ...entry });
+      return;
+    }
+    const totalMs = Math.max(0, Math.round((existing.totalMs ?? 0) + (entry.totalMs ?? 0)));
+    const count = Math.max(0, Math.round((existing.count ?? 0) + (entry.count ?? 0)));
+    const maxMs = Math.max(existing.maxMs ?? 0, entry.maxMs ?? 0, entry.totalMs ?? 0);
+    merged.set(entry.stage, {
+      stage: entry.stage,
+      totalMs,
+      ...(count > 0 ? { count } : {}),
+      ...(count > 0 ? { avgMs: Math.max(0, Math.round(totalMs / count)) } : {}),
+      ...(maxMs > 0 ? { maxMs } : {})
+    });
+  };
+  for (const item of baseEntries) {
+    apply(item);
+  }
+  for (const item of appendEntries) {
+    apply(item);
+  }
+  return Array.from(merged.values()).sort((a, b) => b.totalMs - a.totalMs);
+}
+
+function attachHubStageTopToContext(context: AdapterContext, requestId: string): void {
+  if (!requestId || requestId === 'unknown') {
+    return;
+  }
+  const latest = normalizeHubStageTopEntries(peekHubStageTopSummary(requestId, { topN: 12, minMs: 1 }));
+  if (latest.length === 0) {
+    return;
+  }
+  const contextRecord = context as Record<string, unknown>;
+  const rt =
+    contextRecord.__rt && typeof contextRecord.__rt === 'object' && !Array.isArray(contextRecord.__rt)
+      ? (contextRecord.__rt as Record<string, unknown>)
+      : {};
+  const existing = normalizeHubStageTopEntries(rt.hubStageTop);
+  const merged = mergeHubStageTopEntries(existing, latest);
+  contextRecord.__rt = {
+    ...rt,
+    hubStageTop: merged
+  };
+}
 
 export interface ProviderResponseConversionOptions {
   providerProtocol: ProviderProtocol;
@@ -418,6 +528,8 @@ export async function convertProviderResponse(
       })
     }
   );
+
+  attachHubStageTopToContext(options.context, requestId);
 
   // Commit scheduled-task delivery only after a successful client payload/stream is prepared.
   await maybeCommitClockReservationFromContext(options.context);

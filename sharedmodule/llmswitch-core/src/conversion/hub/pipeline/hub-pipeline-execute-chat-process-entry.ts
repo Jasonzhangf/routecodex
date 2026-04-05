@@ -3,6 +3,7 @@ import type { ProcessedRequest, StandardizedRequest } from "../types/standardize
 import type { VirtualRouterEngine } from "../../../router/virtual-router/engine.js";
 import type { HubPipelineConfig, HubPipelineNodeResult, HubPipelineResult, NormalizedRequest } from "./hub-pipeline.js";
 import { shouldRecordSnapshots } from "../../snapshot-utils.js";
+import { ensureRuntimeMetadata } from "../../runtime-metadata.js";
 import { REQUEST_STAGE_HOOKS } from "./hub-pipeline-stage-hooks.js";
 import {
   buildReqInboundSkippedNodeWithNative,
@@ -29,6 +30,7 @@ import {
 } from "./hub-pipeline-chat-process-governance-utils.js";
 import { createSnapshotRecorder } from "../snapshot-recorder.js";
 import { executeRouteAndBuildOutbound } from "./hub-pipeline-route-and-outbound.js";
+import { peekHubStageTopSummary } from "./hub-stage-timing.js";
 
 export async function executeChatProcessEntryPipeline(args: {
   normalized: NormalizedRequest;
@@ -184,9 +186,6 @@ estimateInputTokensForWorkingRequest({
     ((normalized.metadata = {}) as Record<string, unknown>),
 });
 
-const normalizedMeta = normalized.metadata as
-  | Record<string, unknown>
-  | undefined;
 // responsesResume is a client-protocol semantic (/v1/responses tool loop) and must live in chat.semantics.
 // Do not read it from metadata once entering chat_process.
 const { responsesResume, hasImageAttachment, serverToolRequired } =
@@ -214,6 +213,12 @@ const outbound = await executeRouteAndBuildOutbound({
     enabled: false,
   },
 });
+
+const hubStageTop = peekHubStageTopSummary(normalized.id);
+if (hubStageTop.length) {
+  const rt = ensureRuntimeMetadata(outbound.metadata);
+  (rt as Record<string, unknown>).hubStageTop = hubStageTop as unknown;
+}
 
 return {
   requestId: normalized.id,
