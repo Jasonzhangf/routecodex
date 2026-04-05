@@ -2,10 +2,10 @@
 
 ## 索引概要
 - L1-L9 `purpose`：项目 AGENTS 仅保留入口和硬护栏。
-- L11-L24 `hard-guards`：不可违背的项目级底线。
-- L26-L41 `route-map`：分类路由（文档路径 + 作用）。
-- L43-L50 `execution-flow`：任务执行顺序。
-- L52-L56 `maintenance`：维护原则。
+- L11-L25 `hard-guards`：不可违背的项目级底线。
+- L27-L42 `route-map`：分类路由（文档路径 + 作用）。
+- L44-L51 `execution-flow`：任务执行顺序。
+- L53-L57 `maintenance`：维护原则。
 
 ## 项目硬护栏（Hard Guards）
 1. **单一路径真源**：`HTTP server -> llmswitch-core Hub Pipeline -> Provider V2 -> upstream`，禁止旁路。
@@ -17,6 +17,7 @@
 7. **禁止进程杀戮命令**：禁用 `kill/pkill/killall/taskkill/lsof|xargs kill` 等。
 8. **llmswitch-core 禁止新增 TS 功能代码**：不允许再增加任何 TypeScript 功能实现；如有必要，一律转为 Rust 实现，TS 仅允许保留最小调用壳层。
 9. **真实 payload 不可裁剪**：请求/响应在传输链路中的真实 payload 不得被裁剪或改写语义；性能优化只能发生在算法/处理路径。允许裁剪内部调试、快照、观测数据，不得影响真实传输内容。
+10. **技能沉淀强制规则**：每次成功或失败的探索都必须沉淀到本项目 local skills（如 `.agents/skills/*/SKILL.md`）；沉淀内容必须是“经验精华”（可复用规则/反模式/触发信号/边界条件），禁止流水账式过程记录。
 
 ## 分类路由（路径 + 作用）
 1. 入口总览：`docs/agent-routing/00-entry-routing.md`
