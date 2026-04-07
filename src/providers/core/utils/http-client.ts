@@ -103,6 +103,30 @@ const peekReadableStream = async (
   return '';
 };
 
+const formatUnknownError = (error: unknown): string => {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+};
+
+const logHttpClientNonBlockingError = (
+  stage: string,
+  error: unknown,
+  details?: Record<string, unknown>
+): void => {
+  try {
+    const detailSuffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(`[http-client] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`);
+  } catch {
+    // Never throw from non-blocking logging.
+  }
+};
+
 export class HttpClient {
   private config: HttpClientConfig;
   private defaultConfig: Required<HttpClientConfig>;
@@ -208,8 +232,8 @@ export class HttpClient {
         const headersObj: Record<string, string> = {};
         try {
           response.headers.forEach((value, key) => { headersObj[key] = value; });
-        } catch {
-          // ignore header parsing failures
+        } catch (headerError) {
+          logHttpClientNonBlockingError('requestInternal.errorHeadersParse', headerError, { url, status: response.status });
         }
         const message = this.buildHttpErrorMessage(response.status, errorText);
         const err: UpstreamError = new Error(message) as UpstreamError;
@@ -506,7 +530,9 @@ export class HttpClient {
           } else {
             peek = (await response.text()).slice(0, 256);
           }
-        } catch { /* ignore */ }
+        } catch (peekError) {
+          logHttpClientNonBlockingError('requestInternal.ssePeek', peekError, { url, status: response.status });
+        }
         const err: UpstreamError = new Error(`UPSTREAM_SSE_NOT_ALLOWED: received text/event-stream while expecting JSON. peek=${peek}`) as UpstreamError;
         err.code = 'UPSTREAM_SSE_NOT_ALLOWED';
         err.statusCode = response.status;

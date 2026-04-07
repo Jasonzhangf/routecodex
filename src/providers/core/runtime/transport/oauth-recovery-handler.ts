@@ -41,6 +41,28 @@ export class OAuthRecoveryHandler {
     this.context = context;
   }
 
+  private formatUnknownError(error: unknown): string {
+    if (error instanceof Error) {
+      return error.stack || `${error.name}: ${error.message}`;
+    }
+    try {
+      return JSON.stringify(error);
+    } catch {
+      return String(error);
+    }
+  }
+
+  private logNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
+    try {
+      const detailSuffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+      console.warn(
+        `[oauth-recovery-handler] ${stage} failed (non-blocking): ${this.formatUnknownError(error)}${detailSuffix}`
+      );
+    } catch {
+      // Never throw from non-blocking logging.
+    }
+  }
+
   async tryRecoverOAuthAndReplay(
     error: unknown,
     requestInfo: PreparedHttpRequest,
@@ -90,7 +112,12 @@ export class OAuthRecoveryHandler {
         applyStreamModeHeaders,
         wrapUpstreamSseResponse
       );
-    } catch {
+    } catch (recoveryError) {
+      this.logNonBlockingError('tryRecoverOAuthAndReplay', recoveryError, {
+        requestId: context.requestId,
+        providerKey: context.providerKey,
+        providerId: context.providerId
+      });
       return undefined;
     }
   }
@@ -187,7 +214,13 @@ export class OAuthRecoveryHandler {
             providerKey: context.providerKey,
             providerId: context.providerId
           });
-        } catch { /* non-blocking */ }
+        } catch (snapshotError) {
+          this.logNonBlockingError('writeProviderSnapshot.sse_retry', snapshotError, {
+            requestId: context.requestId,
+            providerKey: context.providerKey,
+            providerId: context.providerId
+          });
+        }
       }
       return wrapped;
     }
@@ -204,7 +237,13 @@ export class OAuthRecoveryHandler {
         providerKey: context.providerKey,
         providerId: context.providerId
       });
-    } catch { /* non-blocking */ }
+    } catch (snapshotError) {
+      this.logNonBlockingError('writeProviderSnapshot.http_retry', snapshotError, {
+        requestId: context.requestId,
+        providerKey: context.providerKey,
+        providerId: context.providerId
+      });
+    }
     return response;
   }
 

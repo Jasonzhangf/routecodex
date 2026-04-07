@@ -60,6 +60,26 @@ type ControlSnapshot = {
   };
 };
 
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function logControlNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
+  try {
+    const detailSuffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(`[daemon-control] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`);
+  } catch {
+    // Never throw from non-blocking logging.
+  }
+}
+
 function getSessionCandidatePorts(): number[] {
   const base = resolveRccSessionsDir();
   try {
@@ -83,7 +103,8 @@ function getSessionCandidatePorts(): number[] {
       }
     }
     return ports;
-  } catch {
+  } catch (error) {
+    logControlNonBlockingError('getSessionCandidatePorts', error, { base });
     return [];
   }
 }
@@ -92,24 +113,35 @@ async function fetchHealthQuick(port: number): Promise<{ ok: boolean; version?: 
   try {
     const controller = new AbortController();
     const t = setTimeout(() => {
-      try { controller.abort(); } catch { /* ignore */ }
+      try {
+        controller.abort();
+      } catch (error) {
+        logControlNonBlockingError('fetchHealthQuick.abort', error, { port });
+      }
     }, 900);
     const res = await fetch(`${HTTP_PROTOCOLS.HTTP}${LOCAL_HOSTS.IPV4}:${port}${API_PATHS.HEALTH}`, {
       method: 'GET',
       signal: controller.signal
-    }).catch(() => null);
+    }).catch((error) => {
+      logControlNonBlockingError('fetchHealthQuick.fetch', error, { port });
+      return null;
+    });
     clearTimeout(t);
     if (!res || !res.ok) {
       return { ok: false };
     }
-    const data = await (res as any).json?.().catch(() => null);
+    const data = await (res as any).json?.().catch((error: unknown) => {
+      logControlNonBlockingError('fetchHealthQuick.json', error, { port });
+      return null;
+    });
     if (!data || typeof data !== 'object' || (data as any).server !== 'routecodex') {
       return { ok: false };
     }
     const version = typeof (data as any).version === 'string' ? String((data as any).version) : undefined;
     const ready = typeof (data as any).ready === 'boolean' ? Boolean((data as any).ready) : undefined;
     return { ok: true, version, ready };
-  } catch {
+  } catch (error) {
+    logControlNonBlockingError('fetchHealthQuick', error, { port });
     return { ok: false };
   }
 }
@@ -220,7 +252,11 @@ async function broadcastRestartToOtherServers(selfId: string): Promise<void> {
     }
     const pids = Array.isArray(t.pids) ? t.pids : findPidsByPort(t.port);
     for (const pid of pids) {
-      try { process.kill(pid, 'SIGUSR2'); } catch { /* ignore */ }
+      try {
+        process.kill(pid, 'SIGUSR2');
+      } catch (error) {
+        logControlNonBlockingError('broadcastRestartToOtherServers.kill', error, { pid, port: t.port });
+      }
     }
   }
 }
@@ -459,8 +495,8 @@ export function registerControlRoutes(app: Application, options: DaemonAdminRout
           try {
             process.kill(pid, 'SIGUSR2');
             ok = true;
-          } catch {
-            // ignore
+          } catch (error) {
+            logControlNonBlockingError('servers.restart.kill', error, { pid, port: t.port });
           }
         }
         results.push({ port: t.port, pids, signal: 'SIGUSR2', ok });
@@ -477,7 +513,12 @@ export function registerControlRoutes(app: Application, options: DaemonAdminRout
             const pids = selfPort ? findPidsByPort(selfPort) : [];
             let ok = false;
             for (const pid of pids) {
-              try { process.kill(pid, 'SIGUSR2'); ok = true; } catch { /* ignore */ }
+              try {
+                process.kill(pid, 'SIGUSR2');
+                ok = true;
+              } catch (error) {
+                logControlNonBlockingError('servers.restart.self.kill', error, { pid, port: selfPort });
+              }
             }
             results.push({ port: selfPort, pids, signal: 'SIGUSR2', ok, note: 'self signal' });
           }

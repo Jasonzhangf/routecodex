@@ -12,6 +12,32 @@ type RuntimeResolveTarget = {
   providerType?: string;
 };
 
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function logRuntimeResolveNonBlockingError(
+  stage: string,
+  error: unknown,
+  details: Record<string, unknown>
+): void {
+  try {
+    const detailSuffix = Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(
+      `[provider-runtime-resolver] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`
+    );
+  } catch {
+    // Never throw from non-blocking logging.
+  }
+}
+
 export async function resolveProviderRuntimeOrThrow(options: {
   requestId: string;
   target: RuntimeResolveTarget;
@@ -61,8 +87,12 @@ export async function resolveProviderRuntimeOrThrow(options: {
           providerKey: target.providerKey
         }
       });
-    } catch {
-      // best-effort
+    } catch (emitError) {
+      logRuntimeResolveNonBlockingError('emitProviderError.runtime_not_initialized', emitError, {
+        requestId,
+        providerKey: target.providerKey,
+        routeName
+      });
     }
     throw Object.assign(new Error(`Runtime for provider ${target.providerKey} not initialized`), {
       code: 'ERR_RUNTIME_NOT_FOUND',
@@ -103,8 +133,13 @@ export async function resolveProviderRuntimeOrThrow(options: {
           runtimeKey
         }
       });
-    } catch {
-      // best-effort
+    } catch (emitError) {
+      logRuntimeResolveNonBlockingError('emitProviderError.runtime_handle_missing', emitError, {
+        requestId,
+        providerKey: target.providerKey,
+        runtimeKey,
+        routeName
+      });
     }
     throw Object.assign(new Error(`Provider runtime ${runtimeKey} not found`), {
       code: 'ERR_PROVIDER_NOT_FOUND',
