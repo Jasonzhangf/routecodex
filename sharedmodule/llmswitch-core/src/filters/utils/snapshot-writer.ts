@@ -3,10 +3,23 @@ import * as fsp from 'node:fs/promises';
 import type { FilterStage } from '../types.js';
 import { resolveRccSnapshotsDirFromEnv } from '../../runtime/user-data-paths.js';
 
+const SNAPSHOT_LOG_THROTTLE_MS = 30_000;
+const lastSnapshotErrorLogAt = new Map<string, number>();
+
 function mapEndpointToFolder(ep?: string): string {
   const e = String(ep || '').trim().toLowerCase();
-  if (e.includes('/v1/responses') || e.includes('/responses.submit')) return 'openai-responses';
-  if (e.includes('/v1/messages')) return 'anthropic-messages';
+  if (
+    e.includes('/v1/responses')
+    || e.includes('/responses.submit')
+    || e.includes('openai-responses')
+    || e === 'responses'
+  ) return 'openai-responses';
+  if (
+    e.includes('/v1/messages')
+    || e.includes('anthropic-messages')
+    || e === 'messages'
+    || e === 'anthropic'
+  ) return 'anthropic-messages';
   return 'openai-chat';
 }
 
@@ -32,6 +45,34 @@ function toErrorCode(error: unknown): string | undefined {
   }
   const code = (error as { code?: unknown }).code;
   return typeof code === 'string' && code.trim() ? code : undefined;
+}
+
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function logSnapshotNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
+  const errorCode = toErrorCode(error) || 'unknown';
+  const key = `${stage}:${errorCode}`;
+  const now = Date.now();
+  const last = lastSnapshotErrorLogAt.get(key) || 0;
+  if (now - last < SNAPSHOT_LOG_THROTTLE_MS) {
+    return;
+  }
+  lastSnapshotErrorLogAt.set(key, now);
+  try {
+    const detailSuffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(`[filter-snapshot] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`);
+  } catch {
+    // Never throw from non-blocking logging.
+  }
 }
 
 async function writeUniqueFile(
@@ -72,8 +113,7 @@ export async function writeFilterSnapshot(options: {
     const rid = sanitizeToken(options.requestId || '', `req_${Date.now()}`);
     const base = resolveRccSnapshotsDirFromEnv();
     const folder = mapEndpointToFolder(options.endpoint);
-    const provider = sanitizeToken(options.profile || '', '__pending__');
-    const dir = path.join(base, folder, provider, rid);
+    const dir = path.join(base, folder, rid);
     await fsp.mkdir(dir, { recursive: true });
     const parts = ['filters', options.stage.replace(/\s+/g, ''), options.tag || (options.name ? `after_${options.name}` : 'after')]
       .filter(Boolean)
@@ -92,5 +132,12 @@ export async function writeFilterSnapshot(options: {
       data: options.data
     };
     await writeUniqueFile(dir, file, JSON.stringify(payload, null, 2));
-  } catch { /* ignore snapshot errors */ }
+  } catch (error) {
+    logSnapshotNonBlockingError('writeFilterSnapshot', error, {
+      requestId: options.requestId,
+      endpoint: options.endpoint,
+      stage: options.stage,
+      tag: options.tag
+    });
+  }
 }
