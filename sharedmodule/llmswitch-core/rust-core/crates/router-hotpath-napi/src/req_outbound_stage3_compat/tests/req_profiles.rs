@@ -399,6 +399,11 @@ fn test_req_profile_chat_qwen_native_applied() {
     assert_eq!(result.applied_profile, Some("chat:qwen".to_string()));
     assert_eq!(result.payload["model"], "qwen3-coder-plus");
     assert_eq!(result.payload["input"][0]["role"], "user");
+    assert_eq!(result.payload["messages"][0]["role"], "user");
+    assert_eq!(
+        result.payload["messages"][0]["content"][0]["type"],
+        "text"
+    );
     assert_eq!(
         result.payload["input"][0]["content"][0]["text"],
         "hello qwen"
@@ -412,6 +417,72 @@ fn test_req_profile_chat_qwen_native_applied() {
         "exec_command"
     );
     assert!(result.payload["tools"][0].get("extra").is_none());
+}
+
+#[test]
+fn test_req_profile_chat_qwen_normalizes_responses_input_content_types() {
+    let input = ReqOutboundCompatInput {
+        payload: json!({
+            "model": "qwen3.6-plus",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": "hello"},
+                        {"type": "input_image", "image_url": {"url": "https://example.com/a.png"}},
+                        {"type": "input_video", "video_url": "https://example.com/a.mp4"}
+                    ]
+                }
+            ]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("chat:qwen".to_string()),
+            provider_protocol: Some("openai-chat".to_string()),
+            request_id: Some("req_qwen_types_1".to_string()),
+            entry_endpoint: Some("/v1/chat/completions".to_string()),
+            route_id: None,
+            rt: None,
+            captured_chat_request: None,
+            deepseek: None,
+            claude_code: None,
+            anthropic_thinking: None,
+            estimated_input_tokens: None,
+            model_id: None,
+            client_model_id: None,
+            original_model_id: None,
+            provider_id: None,
+            provider_key: None,
+            runtime_key: None,
+            client_request_id: None,
+            group_request_id: None,
+            session_id: None,
+            conversation_id: None,
+        },
+        explicit_profile: None,
+    };
+
+    let result = run_req_outbound_stage3_compat(input).unwrap();
+    assert!(result.native_applied);
+    assert_eq!(result.applied_profile, Some("chat:qwen".to_string()));
+
+    let content = &result.payload["messages"][0]["content"];
+    assert_eq!(content[0]["type"], "text");
+    assert_eq!(content[0]["text"], "hello");
+    assert_eq!(content[1]["type"], "image_url");
+    assert_eq!(
+        content[1]["image_url"]["url"],
+        "https://example.com/a.png"
+    );
+    assert_eq!(content[2]["type"], "video_url");
+    assert_eq!(
+        content[2]["video_url"]["url"],
+        "https://example.com/a.mp4"
+    );
+
+    let serialized = serde_json::to_string(&result.payload).unwrap();
+    assert!(!serialized.contains("\"input_text\""));
+    assert!(!serialized.contains("\"input_image\""));
+    assert!(!serialized.contains("\"input_video\""));
 }
 
 #[test]
