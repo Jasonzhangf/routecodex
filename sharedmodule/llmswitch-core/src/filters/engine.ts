@@ -3,6 +3,30 @@ import { writeFilterSnapshot } from './utils/snapshot-writer.js';
 
 // Lightweight, dependency-free filter engine. Field-mapping supports a minimal dot-path subset.
 
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function logFilterEngineNonBlockingError(
+  stage: string,
+  error: unknown,
+  details: Record<string, unknown>
+): void {
+  try {
+    const detailSuffix = Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(`[filter-engine] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`);
+  } catch {
+    // Never throw from non-blocking logging.
+  }
+}
+
 export class FilterEngine {
   private readonly filters: Filter[] = [];
   private fieldMap?: FieldMapConfig;
@@ -15,23 +39,69 @@ export class FilterEngine {
   async run(stage: FilterContext['stage'], payload: JsonObject, ctxBase: Omit<FilterContext,'stage'>): Promise<JsonObject> {
     let out: JsonObject = payload;
     const ctx: FilterContext = { ...ctxBase, stage } as FilterContext;
-    try { await writeFilterSnapshot({ requestId: ctx.requestId, endpoint: ctx.endpoint, profile: ctx.profile, stage, tag: 'begin', data: out }); } catch { /* ignore */ }
+    try {
+      await writeFilterSnapshot({ requestId: ctx.requestId, endpoint: ctx.endpoint, profile: ctx.profile, stage, tag: 'begin', data: out });
+    } catch (error) {
+      logFilterEngineNonBlockingError('snapshot.begin', error, {
+        requestId: ctx.requestId,
+        endpoint: ctx.endpoint,
+        profile: ctx.profile,
+        stage
+      });
+    }
     // stage pre filters
     for (const f of this.filters) {
       if (f.stage !== stage) continue;
       const res = await Promise.resolve(f.apply(out, ctx));
       if (!res.ok) continue; // keep last good state
       out = res.data;
-      try { await writeFilterSnapshot({ requestId: ctx.requestId, endpoint: ctx.endpoint, profile: ctx.profile, stage, name: f.name, tag: 'after', data: out }); } catch { /* ignore */ }
+      try {
+        await writeFilterSnapshot({ requestId: ctx.requestId, endpoint: ctx.endpoint, profile: ctx.profile, stage, name: f.name, tag: 'after', data: out });
+      } catch (error) {
+        logFilterEngineNonBlockingError('snapshot.after_filter', error, {
+          requestId: ctx.requestId,
+          endpoint: ctx.endpoint,
+          profile: ctx.profile,
+          stage,
+          filter: f.name
+        });
+      }
     }
     // field map in map stages
     if (stage === 'request_map' || stage === 'response_map') {
       const rules = (stage === 'request_map') ? (this.fieldMap?.request || []) : (this.fieldMap?.response || []);
-      try { await writeFilterSnapshot({ requestId: ctx.requestId, endpoint: ctx.endpoint, profile: ctx.profile, stage, tag: 'map_before', data: out }); } catch { /* ignore */ }
+      try {
+        await writeFilterSnapshot({ requestId: ctx.requestId, endpoint: ctx.endpoint, profile: ctx.profile, stage, tag: 'map_before', data: out });
+      } catch (error) {
+        logFilterEngineNonBlockingError('snapshot.map_before', error, {
+          requestId: ctx.requestId,
+          endpoint: ctx.endpoint,
+          profile: ctx.profile,
+          stage
+        });
+      }
       out = this.applyFieldMap(out, rules);
-      try { await writeFilterSnapshot({ requestId: ctx.requestId, endpoint: ctx.endpoint, profile: ctx.profile, stage, tag: 'map_after', data: out }); } catch { /* ignore */ }
+      try {
+        await writeFilterSnapshot({ requestId: ctx.requestId, endpoint: ctx.endpoint, profile: ctx.profile, stage, tag: 'map_after', data: out });
+      } catch (error) {
+        logFilterEngineNonBlockingError('snapshot.map_after', error, {
+          requestId: ctx.requestId,
+          endpoint: ctx.endpoint,
+          profile: ctx.profile,
+          stage
+        });
+      }
     }
-    try { await writeFilterSnapshot({ requestId: ctx.requestId, endpoint: ctx.endpoint, profile: ctx.profile, stage, tag: 'end', data: out }); } catch { /* ignore */ }
+    try {
+      await writeFilterSnapshot({ requestId: ctx.requestId, endpoint: ctx.endpoint, profile: ctx.profile, stage, tag: 'end', data: out });
+    } catch (error) {
+      logFilterEngineNonBlockingError('snapshot.end', error, {
+        requestId: ctx.requestId,
+        endpoint: ctx.endpoint,
+        profile: ctx.profile,
+        stage
+      });
+    }
     return out;
   }
 
