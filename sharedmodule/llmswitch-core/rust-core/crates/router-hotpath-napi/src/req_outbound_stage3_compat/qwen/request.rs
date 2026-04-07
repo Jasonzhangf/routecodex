@@ -21,8 +21,40 @@ fn normalize_qwen_model_name(model: &str) -> String {
 
 fn qwen_text_chunk(text: String) -> Value {
     let mut chunk = Map::new();
+    chunk.insert("type".to_string(), Value::String("text".to_string()));
     chunk.insert("text".to_string(), Value::String(text));
     Value::Object(chunk)
+}
+
+fn qwen_media_chunk(media_type: &str, url: String) -> Value {
+    let mut media = Map::new();
+    media.insert("url".to_string(), Value::String(url));
+    let mut chunk = Map::new();
+    chunk.insert("type".to_string(), Value::String(media_type.to_string()));
+    chunk.insert(media_type.to_string(), Value::Object(media));
+    Value::Object(chunk)
+}
+
+fn read_media_url(obj: &Map<String, Value>, key: &str) -> Option<String> {
+    if let Some(raw) = obj.get(key) {
+        if let Some(text) = raw.as_str() {
+            let trimmed = text.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+        if let Some(node) = raw.as_object() {
+            for candidate in ["url", "data"] {
+                if let Some(text) = node.get(candidate).and_then(|v| v.as_str()) {
+                    let trimmed = text.trim();
+                    if !trimmed.is_empty() {
+                        return Some(trimmed.to_string());
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 fn normalize_qwen_content_chunk(chunk: &Value) -> Value {
@@ -31,7 +63,35 @@ fn normalize_qwen_content_chunk(chunk: &Value) -> Value {
     }
     if let Some(obj) = chunk.as_object() {
         if let Some(text) = obj.get("text").and_then(|v| v.as_str()) {
-            return qwen_text_chunk(text.to_string());
+            // Responses API uses input_text/output_text/text/commentary types
+            // Qwen API only accepts: text, image_url, video_url, video (no type field)
+            let raw_type = obj.get("type").and_then(|v| v.as_str()).unwrap_or("");
+            if matches!(
+                raw_type.to_ascii_lowercase().as_str(),
+                "input_text" | "output_text" | "text" | "commentary"
+            ) {
+                return qwen_text_chunk(text.to_string());
+            }
+        }
+        let raw_type = obj.get("type").and_then(|v| v.as_str()).unwrap_or("");
+        match raw_type.to_ascii_lowercase().as_str() {
+            "input_image" | "image" | "image_url" => {
+                if let Some(url) = read_media_url(obj, "image_url")
+                    .or_else(|| read_media_url(obj, "url"))
+                    .or_else(|| read_media_url(obj, "image"))
+                {
+                    return qwen_media_chunk("image_url", url);
+                }
+            }
+            "input_video" | "video" | "video_url" => {
+                if let Some(url) = read_media_url(obj, "video_url")
+                    .or_else(|| read_media_url(obj, "url"))
+                    .or_else(|| read_media_url(obj, "video"))
+                {
+                    return qwen_media_chunk("video_url", url);
+                }
+            }
+            _ => {}
         }
         return Value::Object(obj.clone());
     }
@@ -187,13 +247,15 @@ pub(crate) fn apply_qwen_request_compat(root: &Map<String, Value>) -> Value {
         );
     }
     if let Some(messages) = root.get("messages").and_then(|v| v.as_array()) {
-        qwen_request.insert("messages".to_string(), Value::Array(messages.clone()));
         let normalized = messages
             .iter()
             .filter_map(normalize_qwen_message)
             .collect::<Vec<Value>>();
         if !normalized.is_empty() {
+            qwen_request.insert("messages".to_string(), Value::Array(normalized.clone()));
             qwen_request.insert("input".to_string(), Value::Array(normalized));
+        } else {
+            qwen_request.insert("messages".to_string(), Value::Array(messages.clone()));
         }
     }
     if let Some(parameters) = extract_qwen_parameters(root) {

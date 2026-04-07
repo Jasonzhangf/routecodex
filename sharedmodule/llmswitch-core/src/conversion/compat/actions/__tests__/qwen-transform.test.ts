@@ -14,11 +14,16 @@ describe('qwen-transform native wrapper', () => {
     );
 
     expect((result as any).model).toBe('qwen3-coder-plus');
-    expect((result as any).messages).toEqual([{ role: 'user', content: 'hello qwen' }]);
+    expect((result as any).messages).toEqual([
+      {
+        role: 'user',
+        content: [{ type: 'text', text: 'hello qwen' }]
+      }
+    ]);
     expect((result as any).input).toEqual([
       {
         role: 'user',
-        content: [{ text: 'hello qwen' }]
+        content: [{ type: 'text', text: 'hello qwen' }]
       }
     ]);
   });
@@ -131,7 +136,37 @@ describe('qwen-transform native wrapper', () => {
       } as any
     );
 
-    expect((result as any).input[0].content[0]).toEqual({ text: 'alpha' });
+    expect((result as any).messages[0].content[0]).toEqual({ type: 'text', text: 'alpha' });
+    expect((result as any).input[0].content[0]).toEqual({ type: 'text', text: 'alpha' });
     expect((result as any).input[0].content[1]).toEqual({ meta: 1 });
+    expect(JSON.stringify((result as any).messages)).not.toContain('"input_text"');
+    expect(JSON.stringify((result as any).input)).not.toContain('"input_text"');
+  });
+
+  test('normalizes input_image/input_video into qwen media content types', () => {
+    const result = applyQwenRequestTransform(
+      {
+        model: 'qwen3.6-plus',
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'input_image', image_url: { url: 'https://example.com/a.png' } },
+              { type: 'input_video', video_url: 'https://example.com/a.mp4' }
+            ]
+          }
+        ]
+      } as any,
+      {
+        compatibilityProfile: 'chat:qwen',
+        providerProtocol: 'openai-chat'
+      } as any
+    );
+
+    const inputParts = (result as any).input[0].content;
+    expect(inputParts[0]).toEqual({ type: 'image_url', image_url: { url: 'https://example.com/a.png' } });
+    expect(inputParts[1]).toEqual({ type: 'video_url', video_url: { url: 'https://example.com/a.mp4' } });
+    expect(JSON.stringify((result as any).messages)).not.toContain('"input_image"');
+    expect(JSON.stringify((result as any).messages)).not.toContain('"input_video"');
   });
 });
