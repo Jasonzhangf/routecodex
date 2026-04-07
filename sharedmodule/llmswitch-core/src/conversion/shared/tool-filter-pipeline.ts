@@ -37,6 +37,30 @@ const RESPONSE_FILTER_STAGES: Array<FilterContext['stage']> = [
   'response_finalize'
 ];
 
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function logToolFilterNonBlockingError(
+  stage: string,
+  error: unknown,
+  details: Record<string, unknown>
+): void {
+  try {
+    const detailSuffix = Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(`[tool-filter-pipeline] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`);
+  } catch {
+    // Never throw from non-blocking logging.
+  }
+}
+
 function assertStageCoverage(
   label: string,
   registeredStages: Set<FilterContext['stage']>,
@@ -91,8 +115,12 @@ export async function runChatRequestToolFilters(chatRequest: any, options: Reque
     try {
       const { RequestToolListFilter } = await import('../../filters/index.js');
       register(new RequestToolListFilter());
-    } catch {
-      /* optional */
+    } catch (error) {
+      logToolFilterNonBlockingError('request.import.RequestToolListFilter', error, {
+        requestId: reqCtxBase.requestId,
+        endpoint: reqCtxBase.endpoint,
+        profile: reqCtxBase.profile
+      });
     }
   }
   const {
@@ -107,13 +135,23 @@ export async function runChatRequestToolFilters(chatRequest: any, options: Reque
     const cfg = await loadFieldMapConfig('openai-openai.fieldmap.json');
     if (cfg) engine.setFieldMap(cfg);
     engine.registerTransform('stringifyJson', (v: unknown) => (typeof v === 'string') ? v : (() => { try { return JSON.stringify(v ?? {}); } catch { return '{}'; } })());
-  } catch { /* ignore */ }
+  } catch (error) {
+    logToolFilterNonBlockingError('request.loadFieldMapConfig', error, {
+      requestId: reqCtxBase.requestId,
+      endpoint: reqCtxBase.endpoint,
+      profile: reqCtxBase.profile
+    });
+  }
   try {
     const { RequestOpenAIToolsNormalizeFilter, ToolPostConstraintsFilter } = await import('../../filters/index.js');
     register(new RequestOpenAIToolsNormalizeFilter());
     register(new ToolPostConstraintsFilter('request_finalize'));
-  } catch {
-    // optional; keep prior behavior when filter not available
+  } catch (error) {
+    logToolFilterNonBlockingError('request.import.RequestOpenAIToolsNormalizeFilter', error, {
+      requestId: reqCtxBase.requestId,
+      endpoint: reqCtxBase.endpoint,
+      profile: reqCtxBase.profile
+    });
   }
   assertStageCoverage('request', registeredStages, REQUEST_FILTER_STAGES);
   let staged: any = preFiltered;
@@ -158,8 +196,12 @@ export async function runChatResponseToolFilters(chatJson: any, options: Respons
         'reasoning_choice'
       );
     }
-  } catch {
-    // best-effort; do not block response flow on reasoning parsing issues
+  } catch (error) {
+    logToolFilterNonBlockingError('response.normalizeChatResponseReasoningTools', error, {
+      requestId: resCtxBase.requestId,
+      endpoint: resCtxBase.endpoint,
+      profile: resCtxBase.profile
+    });
   }
 
   const engine = new FilterEngine();
@@ -176,7 +218,15 @@ export async function runChatResponseToolFilters(chatJson: any, options: Respons
     ResponseToolArgumentsSchemaConvergeFilter
   } = await import('../../filters/index.js');
   register(new ResponseToolTextCanonicalizeFilter());
-  try { register(new ResponseToolArgumentsSchemaConvergeFilter()); } catch { /* optional */ }
+  try {
+    register(new ResponseToolArgumentsSchemaConvergeFilter());
+  } catch (error) {
+    logToolFilterNonBlockingError('response.register.ResponseToolArgumentsSchemaConvergeFilter', error, {
+      requestId: resCtxBase.requestId,
+      endpoint: resCtxBase.endpoint,
+      profile: resCtxBase.profile
+    });
+  }
   register(new ResponseToolArgumentsBlacklistFilter());
   register(new ResponseToolArgumentsStringifyFilter());
   register(new ResponseFinishInvariantsFilter());
@@ -184,7 +234,13 @@ export async function runChatResponseToolFilters(chatJson: any, options: Respons
     const cfg = await loadFieldMapConfig('openai-openai.fieldmap.json');
     if (cfg) engine.setFieldMap(cfg);
     engine.registerTransform('stringifyJson', (v: unknown) => (typeof v === 'string') ? v : (() => { try { return JSON.stringify(v ?? {}); } catch { return '{}'; } })());
-  } catch { /* ignore */ }
+  } catch (error) {
+    logToolFilterNonBlockingError('response.loadFieldMapConfig', error, {
+      requestId: resCtxBase.requestId,
+      endpoint: resCtxBase.endpoint,
+      profile: resCtxBase.profile
+    });
+  }
   assertStageCoverage('response', registeredStages, RESPONSE_FILTER_STAGES);
   let staged: any = chatJson as any;
   for (const stage of RESPONSE_FILTER_STAGES) {
