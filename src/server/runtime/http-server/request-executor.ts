@@ -51,7 +51,6 @@ import {
   shouldRotateAntigravityAliasOnRetry
 } from './executor/request-retry-helpers.js';
 import {
-  cloneRequestPayload,
   extractProviderModel,
   extractResponseStatus,
   normalizeProviderResponse,
@@ -66,14 +65,15 @@ import {
 import { resolveProviderRuntimeOrThrow } from './executor/provider-runtime-resolver.js';
 import { resolveProviderRequestContext } from './executor/provider-request-context.js';
 import { isServerToolEnabled } from './servertool-admin-state.js';
-import { registerRequestLogContext, resolveSessionLogColor } from '../../utils/request-log-color.js';
-import { STREAM_LOG_FINISH_REASON_KEY } from '../../utils/finish-reason.js';
+import { registerRequestLogContext } from '../../utils/request-log-color.js';
+import { deriveFinishReason, STREAM_LOG_FINISH_REASON_KEY } from '../../utils/finish-reason.js';
 import {
   createNoopProviderTrafficGovernor,
   getSharedProviderTrafficGovernor,
   type ProviderTrafficGovernorLike,
   type ProviderTrafficPermit
 } from './provider-traffic-governor.js';
+import { recordVirtualRouterHitRollup } from './executor/log-rollup.js';
 export type RequestExecutorDeps = {
   runtimeManager: {
     resolveRuntimeKey(providerKey?: string, fallback?: string): string | undefined;
@@ -93,6 +93,13 @@ export interface RequestExecutor {
 }
 
 const DEFAULT_MAX_PROVIDER_ATTEMPTS = 6;
+const NON_BLOCKING_LOG_THROTTLE_MS = 60_000;
+const nonBlockingLogState = new Map<string, number>();
+const RECOVERABLE_BACKOFF_TTL_MS = 5 * 60_000;
+const recoverableErrorBackoffState = new Map<string, { consecutive: number; updatedAtMs: number }>();
+const recoverableRetryGateState = new Map<string, Promise<void>>();
+const PROVIDER_SWITCH_LOG_THROTTLE_MS = 5_000;
+const providerSwitchLogState = new Map<string, { lastAtMs: number; suppressed: number }>();
 // Re-export for backward compatibility
 export type { SseWrapperErrorInfo };
 
@@ -110,6 +117,37 @@ type HubStageTopEntry = {
   avgMs?: number;
   maxMs?: number;
 };
+
+type HubDecodeBreakdown = {
+  sseDecodeMs: number;
+  codecDecodeMs: number;
+};
+
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack || `${error.name}: ${error.message}`;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function logRequestExecutorNonBlockingError(stage: string, error: unknown, details?: Record<string, unknown>): void {
+  const now = Date.now();
+  const last = nonBlockingLogState.get(stage) ?? 0;
+  if (now - last < NON_BLOCKING_LOG_THROTTLE_MS) {
+    return;
+  }
+  nonBlockingLogState.set(stage, now);
+  try {
+    const detailSuffix = details && Object.keys(details).length > 0 ? ` details=${JSON.stringify(details)}` : '';
+    console.warn(`[request-executor] ${stage} failed (non-blocking): ${formatUnknownError(error)}${detailSuffix}`);
+  } catch {
+    // Never throw from non-blocking logging.
+  }
+}
 
 function readString(value: unknown): string | undefined {
   if (typeof value !== 'string') {
@@ -140,20 +178,36 @@ function parseJsonRecordFromText(text: string): Record<string, unknown> | null {
   if (!normalized) {
     return null;
   }
+  const shouldLogParseFailure = (candidate: string): boolean => {
+    const trimmed = candidate.trimStart();
+    if (trimmed.startsWith('{')) {
+      return true;
+    }
+    // Only treat as JSON array candidate when '[' is followed by JSON-looking payload,
+    // otherwise strings like "[servertool] xxx" should not trigger JSON parse noise.
+    return /^\[\s*[\[{"]/u.test(trimmed);
+  };
   const parseCandidate = (candidate: string): Record<string, unknown> | null => {
     try {
       const parsed = JSON.parse(candidate) as unknown;
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
         return parsed as Record<string, unknown>;
       }
-    } catch {
+    } catch (error) {
+      if (shouldLogParseFailure(candidate)) {
+        logRequestExecutorNonBlockingError('parseJsonRecordFromText.parseCandidate', error, {
+          candidateLength: candidate.length
+        });
+      }
       return null;
     }
     return null;
   };
-  const direct = parseCandidate(normalized);
-  if (direct) {
-    return direct;
+  if (shouldLogParseFailure(normalized)) {
+    const direct = parseCandidate(normalized);
+    if (direct) {
+      return direct;
+    }
   }
   const firstBrace = normalized.indexOf('{');
   const lastBrace = normalized.lastIndexOf('}');
@@ -332,11 +386,220 @@ function readHubStageTop(metadata: Record<string, unknown> | undefined): HubStag
   return normalized.length ? normalized : undefined;
 }
 
+function readHubDecodeBreakdown(hubStageTop: HubStageTopEntry[] | undefined): HubDecodeBreakdown {
+  if (!Array.isArray(hubStageTop) || hubStageTop.length === 0) {
+    return { sseDecodeMs: 0, codecDecodeMs: 0 };
+  }
+  let sseDecodeMs = 0;
+  let codecDecodeMs = 0;
+  for (const entry of hubStageTop) {
+    const stage = String(entry.stage || '').trim().toLowerCase();
+    const totalMs = Number.isFinite(entry.totalMs) ? Math.max(0, Math.round(entry.totalMs)) : 0;
+    if (!(totalMs > 0) || !stage) {
+      continue;
+    }
+    if (stage.includes('sse_decode')) {
+      sseDecodeMs += totalMs;
+    }
+    if (stage.includes('codec_decode')) {
+      codecDecodeMs += totalMs;
+    }
+  }
+  return { sseDecodeMs, codecDecodeMs };
+}
+
+function serializeRequestPayloadForRetry(payload: unknown): string | undefined {
+  if (!payload || typeof payload !== 'object') {
+    return undefined;
+  }
+  try {
+    return JSON.stringify(payload);
+  } catch (error) {
+    logRequestExecutorNonBlockingError('serializeRequestPayloadForRetry', error);
+    return undefined;
+  }
+}
+
+function restoreRequestPayloadFromRetrySnapshot(
+  serializedPayload?: string,
+  fallbackPayload?: Record<string, unknown>
+): Record<string, unknown> | undefined {
+  if (serializedPayload && typeof serializedPayload === 'string') {
+    try {
+      const parsed = JSON.parse(serializedPayload) as unknown;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+    } catch (error) {
+      logRequestExecutorNonBlockingError('restoreRequestPayloadFromRetrySnapshot.parseSerialized', error, {
+        payloadLength: serializedPayload.length
+      });
+    }
+  }
+  if (!fallbackPayload || typeof fallbackPayload !== 'object') {
+    return undefined;
+  }
+  return { ...fallbackPayload };
+}
+
 function truncateReason(reason: string, maxLength = 220): string {
   if (reason.length <= maxLength) {
     return reason;
   }
   return `${reason.slice(0, Math.max(0, maxLength - 1))}…`;
+}
+
+function normalizeCodeKey(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const normalized = value.trim().toUpperCase();
+  return normalized || undefined;
+}
+
+function isBlockingRecoverableRetryError(args: {
+  statusCode?: number;
+  errorCode?: string;
+  upstreamCode?: string;
+  reason?: string;
+}): boolean {
+  const status = typeof args.statusCode === 'number' ? args.statusCode : undefined;
+  const errorCode = normalizeCodeKey(args.errorCode);
+  const upstreamCode = normalizeCodeKey(args.upstreamCode);
+  const reason = typeof args.reason === 'string' ? args.reason.trim().toLowerCase() : '';
+  if (status === 429 || status === 502 || status === 503 || status === 504) {
+    return true;
+  }
+  if (
+    errorCode === 'PROVIDER_TRAFFIC_SATURATED'
+    || errorCode === 'HTTP_429'
+    || errorCode === 'HTTP_502'
+    || errorCode === 'HTTP_503'
+    || errorCode === 'HTTP_504'
+    || errorCode === 'SSE_TO_JSON_ERROR'
+    || errorCode === 'SSE_DECODE_ERROR'
+    || errorCode === 'SERVERTOOL_FOLLOWUP_FAILED'
+    || errorCode === 'SERVERTOOL_EMPTY_FOLLOWUP'
+    || (typeof errorCode === 'string' && errorCode.startsWith('SERVERTOOL_'))
+  ) {
+    return true;
+  }
+  if (
+    upstreamCode === 'HTTP_429'
+    || upstreamCode === 'HTTP_502'
+    || upstreamCode === 'HTTP_503'
+    || upstreamCode === 'HTTP_504'
+    || upstreamCode === 'SSE_TO_JSON_ERROR'
+    || upstreamCode === 'SSE_DECODE_ERROR'
+  ) {
+    return true;
+  }
+  if (
+    reason.includes('fetch failed')
+    || reason.includes('building not completed')
+    || reason.includes('network')
+    || reason.includes('timeout')
+    || reason.includes('temporarily unavailable')
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function shouldBlockRetryOnCurrentProvider(args: {
+  statusCode?: number;
+  errorCode?: string;
+  upstreamCode?: string;
+  reason?: string;
+}): boolean {
+  return isBlockingRecoverableRetryError(args);
+}
+
+function buildRecoverableErrorBackoffKey(args: {
+  statusCode?: number;
+  errorCode?: string;
+  upstreamCode?: string;
+  reason?: string;
+}): string {
+  const statusPart = typeof args.statusCode === 'number' ? `status:${args.statusCode}` : 'status:none';
+  const errorPart = normalizeCodeKey(args.errorCode) ?? 'error:none';
+  const upstreamPart = normalizeCodeKey(args.upstreamCode) ?? 'upstream:none';
+  const reasonPart = (() => {
+    if (typeof args.reason !== 'string') {
+      return 'reason:none';
+    }
+    const normalized = args.reason.trim().toLowerCase();
+    if (!normalized) {
+      return 'reason:none';
+    }
+    if (normalized.includes('fetch failed')) return 'reason:fetch_failed';
+    if (normalized.includes('building not completed')) return 'reason:building_not_completed';
+    if (normalized.includes('network')) return 'reason:network';
+    if (normalized.includes('timeout')) return 'reason:timeout';
+    return 'reason:other';
+  })();
+  return `${statusPart}|${errorPart}|${upstreamPart}|${reasonPart}`;
+}
+
+function consumeRecoverableErrorBackoffMs(key: string): number {
+  const now = Date.now();
+  for (const [existingKey, state] of recoverableErrorBackoffState.entries()) {
+    if (now - state.updatedAtMs >= RECOVERABLE_BACKOFF_TTL_MS) {
+      recoverableErrorBackoffState.delete(existingKey);
+    }
+  }
+  const previous = recoverableErrorBackoffState.get(key);
+  const consecutive =
+    previous && now - previous.updatedAtMs < RECOVERABLE_BACKOFF_TTL_MS
+      ? Math.min(previous.consecutive + 1, 16)
+      : 1;
+  recoverableErrorBackoffState.set(key, {
+    consecutive,
+    updatedAtMs: now
+  });
+  const baseMs = (() => {
+    const raw = process.env.ROUTECODEX_RECOVERABLE_BACKOFF_BASE_MS || process.env.RCC_RECOVERABLE_BACKOFF_BASE_MS;
+    const parsed = raw ? Number.parseInt(String(raw).trim(), 10) : NaN;
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return parsed;
+    }
+    return process.env.NODE_ENV === 'test' ? 200 : 1_000;
+  })();
+  const maxMs = (() => {
+    const raw = process.env.ROUTECODEX_RECOVERABLE_BACKOFF_MAX_MS || process.env.RCC_RECOVERABLE_BACKOFF_MAX_MS;
+    const parsed = raw ? Number.parseInt(String(raw).trim(), 10) : NaN;
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return parsed;
+    }
+    return process.env.NODE_ENV === 'test' ? 5_000 : 120_000;
+  })();
+  return Math.min(maxMs, baseMs * Math.pow(2, Math.max(0, consecutive - 1)));
+}
+
+async function waitRecoverableBackoffMs(ms: number): Promise<void> {
+  if (!(ms > 0)) {
+    return;
+  }
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitRecoverableBackoffWithGlobalGate(key: string, ms: number): Promise<void> {
+  const normalizedKey = key.trim() || 'recoverable:unknown';
+  const previous = recoverableRetryGateState.get(normalizedKey) ?? Promise.resolve();
+  let release: () => void = () => undefined;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  recoverableRetryGateState.set(normalizedKey, current);
+  await previous.catch(() => undefined);
+  try {
+    await waitRecoverableBackoffMs(ms);
+  } finally {
+    release();
+    if (recoverableRetryGateState.get(normalizedKey) === current) {
+      recoverableRetryGateState.delete(normalizedKey);
+    }
+  }
 }
 
 function resolveTrafficRuntimeProfile(
@@ -377,6 +640,81 @@ function resolveTrafficRuntimeProfile(
       value: ''
     }
   };
+}
+
+function normalizeRuntimeKey(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const normalized = value.trim();
+  return normalized || undefined;
+}
+
+function resolveRuntimeKeyForProvider(
+  runtimeManager: RequestExecutorDeps['runtimeManager'],
+  providerKey: string
+): string | undefined {
+  return normalizeRuntimeKey(runtimeManager.resolveRuntimeKey(providerKey));
+}
+
+function routePoolHasAlternativeProvider(args: {
+  routePool: string[];
+  excludedProviderKeys: Set<string>;
+  currentProviderKey?: string;
+}): boolean {
+  const currentProviderKey =
+    typeof args.currentProviderKey === 'string' && args.currentProviderKey.trim()
+      ? args.currentProviderKey.trim()
+      : undefined;
+  for (const providerKey of args.routePool) {
+    if (typeof providerKey !== 'string') {
+      continue;
+    }
+    const normalizedProviderKey = providerKey.trim();
+    if (!normalizedProviderKey) {
+      continue;
+    }
+    if (currentProviderKey && normalizedProviderKey === currentProviderKey) {
+      continue;
+    }
+    if (args.excludedProviderKeys.has(normalizedProviderKey)) {
+      continue;
+    }
+    return true;
+  }
+  return false;
+}
+
+function excludeProvidersSharingRuntimeFromRoutePool(args: {
+  routePool: string[];
+  runtimeKey: string;
+  runtimeManager: RequestExecutorDeps['runtimeManager'];
+  excludedProviderKeys: Set<string>;
+}): string[] {
+  const currentRuntimeKey = normalizeRuntimeKey(args.runtimeKey);
+  if (!currentRuntimeKey) {
+    return [];
+  }
+  const added: string[] = [];
+  for (const providerKey of args.routePool) {
+    if (typeof providerKey !== 'string') {
+      continue;
+    }
+    const normalizedProviderKey = providerKey.trim();
+    if (!normalizedProviderKey) {
+      continue;
+    }
+    const candidateRuntimeKey = resolveRuntimeKeyForProvider(args.runtimeManager, normalizedProviderKey);
+    if (candidateRuntimeKey !== currentRuntimeKey) {
+      continue;
+    }
+    if (args.excludedProviderKeys.has(normalizedProviderKey)) {
+      continue;
+    }
+    args.excludedProviderKeys.add(normalizedProviderKey);
+    added.push(normalizedProviderKey);
+  }
+  return added;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -457,6 +795,7 @@ function backfillResponsesOutputTextIfMissing(body: unknown): void {
 
 function emitVirtualRouterConcurrencyLog(args: {
   sessionId?: string;
+  projectPath?: string;
   routeName?: string;
   poolId?: string;
   providerKey?: string;
@@ -465,28 +804,17 @@ function emitVirtualRouterConcurrencyLog(args: {
   activeInFlight: number;
   maxInFlight: number;
 }): void {
-  const timestamp = (() => {
-    const now = new Date();
-    const hh = String(now.getHours()).padStart(2, '0');
-    const mm = String(now.getMinutes()).padStart(2, '0');
-    const ss = String(now.getSeconds()).padStart(2, '0');
-    return `${hh}:${mm}:${ss}`;
-  })();
-  const sessionLabel = args.sessionId ? ` sid=${args.sessionId}` : '';
-  const routeBase = args.routeName && args.routeName.trim() ? args.routeName.trim() : 'route';
-  const routeLabel = args.poolId && args.poolId.trim() ? `${routeBase}/${args.poolId.trim()}` : routeBase;
-  const providerLabel = args.providerKey && args.providerKey.trim() ? args.providerKey.trim() : 'unknown-provider';
-  const modelLabel = args.model && args.model.trim() ? `.${args.model.trim()}` : '';
-  const reasonLabel = args.reason && args.reason.trim() ? ` reason=${args.reason.trim()}` : '';
-  const prefixColor = '\x1b[38;5;208m';
-  const timeColor = '\x1b[90m';
-  const routeColor = resolveSessionLogColor(args.sessionId);
-  const white = '\x1b[97m';
-  const reset = '\x1b[0m';
-  const concurrencyLabel = `${white}[concurrency:${Math.max(0, Math.floor(args.activeInFlight))}/${Math.max(1, Math.floor(args.maxInFlight))}]${reset}`;
-  console.log(
-    `${prefixColor}[virtual-router-hit]${reset} ${concurrencyLabel} ${timeColor}${timestamp}${reset}${sessionLabel} ${routeColor}${routeLabel} -> ${providerLabel}${modelLabel}${reasonLabel}${reset}`
-  );
+  void args.reason;
+  recordVirtualRouterHitRollup({
+    routeName: args.routeName,
+    poolId: args.poolId,
+    providerKey: args.providerKey,
+    model: args.model,
+    sessionId: args.sessionId,
+    projectPath: args.projectPath,
+    activeInFlight: args.activeInFlight,
+    maxInFlight: args.maxInFlight
+  });
 }
 
 function hasNonEmptyToolCalls(value: unknown): boolean {
@@ -622,6 +950,13 @@ export class HubRequestExecutor implements RequestExecutor {
       this.trafficGovernor = createNoopProviderTrafficGovernor();
       return;
     }
+    const disableTrafficGovernor =
+      process.env.ROUTECODEX_PROVIDER_TRAFFIC_NOOP === '1'
+      || process.env.RCC_PROVIDER_TRAFFIC_NOOP === '1';
+    if (disableTrafficGovernor) {
+      this.trafficGovernor = createNoopProviderTrafficGovernor();
+      return;
+    }
     this.trafficGovernor = getSharedProviderTrafficGovernor();
   }
 
@@ -632,12 +967,36 @@ export class HubRequestExecutor implements RequestExecutor {
     providerKey?: string;
     nextAttempt: number;
     reason: string;
+    backoffMs?: number;
     statusCode?: number;
     errorCode?: string;
     upstreamCode?: string;
     switchAction: 'exclude_and_reroute' | 'retry_same_provider';
   }): void {
+    const now = Date.now();
     const providerLabel = args.providerKey || 'unknown-provider';
+    const dedupeKey = [
+      providerLabel,
+      args.switchAction,
+      typeof args.statusCode === 'number' ? String(args.statusCode) : 'none',
+      args.errorCode || 'none',
+      args.upstreamCode || 'none',
+      truncateReason(args.reason, 96)
+    ].join('|');
+    const prior = providerSwitchLogState.get(dedupeKey);
+    if (prior && now - prior.lastAtMs < PROVIDER_SWITCH_LOG_THROTTLE_MS) {
+      prior.suppressed += 1;
+      prior.lastAtMs = now;
+      providerSwitchLogState.set(dedupeKey, prior);
+      return;
+    }
+    if (prior?.suppressed && prior.suppressed > 0) {
+      console.warn(
+        `[provider-switch] aggregated key=${JSON.stringify(dedupeKey)} suppressed=${prior.suppressed} ` +
+          `windowMs=${PROVIDER_SWITCH_LOG_THROTTLE_MS}`
+      );
+    }
+    providerSwitchLogState.set(dedupeKey, { lastAtMs: now, suppressed: 0 });
     const retryTag = `[provider-switch] req=${args.requestId} attempt=${args.attempt}/${args.maxAttempts} -> ${args.nextAttempt}/${args.maxAttempts}`;
     const details = [
       `provider=${providerLabel}`,
@@ -645,6 +1004,7 @@ export class HubRequestExecutor implements RequestExecutor {
       ...(typeof args.statusCode === 'number' ? [`status=${args.statusCode}`] : []),
       ...(args.errorCode ? [`code=${args.errorCode}`] : []),
       ...(args.upstreamCode ? [`upstreamCode=${args.upstreamCode}`] : []),
+      ...(typeof args.backoffMs === 'number' ? [`backoff=${Math.max(0, Math.round(args.backoffMs))}ms`] : []),
       `reason=${JSON.stringify(truncateReason(args.reason))}`
     ];
     console.warn(`${retryTag} ${details.join(' ')}`);
@@ -692,26 +1052,35 @@ export class HubRequestExecutor implements RequestExecutor {
         let aggregatedUsage: UsageMetrics | undefined;
         const excludedProviderKeys = new Set<string>();
         let maxAttempts = resolveMaxProviderAttempts();
-        const originalRequestSnapshot = cloneRequestPayload(input.body);
+        const originalRequestSnapshot = restoreRequestPayloadFromRetrySnapshot(
+          serializeRequestPayloadForRetry(input.body)
+        );
+        const originalRequestSnapshotSerialized = serializeRequestPayloadForRetry(originalRequestSnapshot);
         let attempt = 0;
         let lastError: unknown;
         let initialRoutePool: string[] | null = null;
         let antigravityRetrySignal: AntigravityRetrySignal | null = null;
-       let poolCooldownWaitBudgetMs = 60 * 1000;
+        let poolCooldownWaitBudgetMs = 60 * 1000;
         let forcedRouteHint: string | undefined;
         let contextOverflowRetries = 0;
         const MAX_CONTEXT_OVERFLOW_RETRIES = 3;
+        let cumulativeExternalLatencyMs = 0;
+        let cumulativeTrafficWaitMs = 0;
+        let cumulativeClientInjectWaitMs = 0;
 
         while (attempt < maxAttempts) {
         attempt += 1;
         // Ensure each attempt starts from the base requestId so pipeline snapshots
         // don't inherit a provider-specific id from a previous attempt.
         input.requestId = providerRequestId;
-        if (originalRequestSnapshot && typeof originalRequestSnapshot === 'object') {
-          const cloned =
-            cloneRequestPayload(originalRequestSnapshot) ??
-            ({ ...(originalRequestSnapshot as Record<string, unknown>) } as Record<string, unknown>);
-          input.body = cloned;
+        if (attempt > 1 && originalRequestSnapshot && typeof originalRequestSnapshot === 'object') {
+          const cloned = restoreRequestPayloadFromRetrySnapshot(
+            originalRequestSnapshotSerialized,
+            originalRequestSnapshot as Record<string, unknown>
+          );
+          if (cloned && typeof cloned === 'object') {
+            input.body = cloned;
+          }
         }
         const metadataForAttempt = decorateMetadataForAttempt(initialMetadata, attempt, excludedProviderKeys);
         if (forcedRouteHint) {
@@ -891,20 +1260,52 @@ export class HubRequestExecutor implements RequestExecutor {
             attempt
           });
           lastError = error;
-          const shouldRetry = attempt < maxAttempts && shouldRetryProviderError(error);
+          const blockingRecoverable = isBlockingRecoverableRetryError({
+            statusCode: retryError.statusCode,
+            errorCode: retryError.errorCode,
+            upstreamCode: retryError.upstreamCode,
+            reason: retryError.reason
+          });
+          const shouldRetry =
+            blockingRecoverable
+              ? shouldRetryProviderError(error)
+              : (attempt < maxAttempts && shouldRetryProviderError(error));
           if (!shouldRetry) {
             recordAttempt({ error: true });
             throw error;
           }
           recordAttempt({ error: true });
-          const retryBackoffMs = await waitBeforeRetry(error, { attempt });
+          let retryBackoffMs = 0;
+          let recoverableBackoffMs = 0;
+          if (blockingRecoverable) {
+            const recoverableKey = buildRecoverableErrorBackoffKey({
+              statusCode: retryError.statusCode,
+              errorCode: retryError.errorCode,
+              upstreamCode: retryError.upstreamCode,
+              reason: retryError.reason
+            });
+            recoverableBackoffMs = consumeRecoverableErrorBackoffMs(recoverableKey);
+            await waitRecoverableBackoffWithGlobalGate(recoverableKey, recoverableBackoffMs);
+            retryBackoffMs = recoverableBackoffMs;
+          } else {
+            retryBackoffMs = await waitBeforeRetry(error, { attempt });
+          }
           const singleProviderPool =
             Boolean(initialRoutePool && initialRoutePool.length === 1 && initialRoutePool[0] === target.providerKey);
-          if (!singleProviderPool && target.providerKey) {
+          const holdOnLastAvailable429 =
+            retryError.statusCode === 429 &&
+            routePoolForAttempt.length > 0 &&
+            !routePoolHasAlternativeProvider({
+              routePool: routePoolForAttempt,
+              excludedProviderKeys,
+              currentProviderKey: target.providerKey
+            });
+          const holdOnCurrentProvider = holdOnLastAvailable429;
+          if (!singleProviderPool && !holdOnCurrentProvider && target.providerKey) {
             excludedProviderKeys.add(target.providerKey);
           }
           const switchAction: 'exclude_and_reroute' | 'retry_same_provider' =
-            singleProviderPool ? 'retry_same_provider' : 'exclude_and_reroute';
+            (singleProviderPool || holdOnCurrentProvider) ? 'retry_same_provider' : 'exclude_and_reroute';
           this.logProviderRetrySwitch({
             requestId: providerRequestId,
             attempt,
@@ -912,6 +1313,7 @@ export class HubRequestExecutor implements RequestExecutor {
             providerKey: target.providerKey,
             nextAttempt: attempt + 1,
             reason: retryError.reason,
+            backoffMs: retryBackoffMs,
             statusCode: retryError.statusCode,
             errorCode: retryError.errorCode,
             upstreamCode: retryError.upstreamCode,
@@ -928,8 +1330,14 @@ export class HubRequestExecutor implements RequestExecutor {
             ...(typeof retryError.statusCode === 'number' ? { statusCode: retryError.statusCode } : {}),
             ...(retryError.errorCode ? { errorCode: retryError.errorCode } : {}),
             ...(retryError.upstreamCode ? { upstreamCode: retryError.upstreamCode } : {}),
-            retryBackoffMs
+            retryBackoffMs,
+            recoverableBackoffMs,
+            holdOnLastAvailable429,
+            blockingRecoverable
           });
+          if (blockingRecoverable && attempt >= maxAttempts) {
+            attempt = Math.max(0, attempt - 1);
+          }
           continue;
         }
         const previousRequestId = input.requestId;
@@ -998,6 +1406,7 @@ export class HubRequestExecutor implements RequestExecutor {
 
         let trafficPermit: ProviderTrafficPermit | null = null;
         let providerSendStartedAtMs = 0;
+        let providerSendElapsedMs = 0;
         try {
           this.logStage('provider.traffic.acquire.start', input.requestId, {
             providerKey: target.providerKey,
@@ -1009,12 +1418,13 @@ export class HubRequestExecutor implements RequestExecutor {
             providerKey: target.providerKey,
             requestId: input.requestId,
             runtime: resolveTrafficRuntimeProfile(runtimeKey, handle, target.providerKey),
-            // If current route pool has alternatives, do not stall too long on quota/RPM gating.
-            // Switch provider after 10s wait so weighted pools can continue serving.
-            softWaitTimeoutMs: routePoolForAttempt.length > 1 ? 10_000 : undefined
+            // Hard rule (2026-04): local traffic saturation must block-wait/backoff instead of
+            // switch storm. Do not use soft timeout here.
+            softWaitTimeoutMs: undefined
           });
           trafficPermit = trafficAcquired.permit;
           if (trafficAcquired.waitedMs > 0) {
+            cumulativeTrafficWaitMs += trafficAcquired.waitedMs;
             this.logStage('provider.traffic.acquire.wait', input.requestId, {
               providerKey: target.providerKey,
               runtimeKey,
@@ -1037,6 +1447,11 @@ export class HubRequestExecutor implements RequestExecutor {
               : undefined;
           emitVirtualRouterConcurrencyLog({
             sessionId: readString(mergedMetadata.sessionId) ?? readString(mergedMetadata.conversationId),
+            projectPath:
+              readString(mergedMetadata.clientWorkdir)
+              ?? readString(mergedMetadata.client_workdir)
+              ?? readString(mergedMetadata.workdir)
+              ?? readString(mergedMetadata.cwd),
             routeName: pipelineResult.routingDecision?.routeName,
             poolId: readString(routingDecisionRecord?.poolId),
             providerKey: target.providerKey,
@@ -1060,10 +1475,12 @@ export class HubRequestExecutor implements RequestExecutor {
 
           const providerResponse = await handle.instance.processIncoming(providerPayload);
           const responseStatus = extractResponseStatus(providerResponse);
+          providerSendElapsedMs = Date.now() - providerSendStartedAtMs;
+          cumulativeExternalLatencyMs += providerSendElapsedMs;
           this.logStage('provider.send.completed', input.requestId, {
             providerKey: target.providerKey,
             status: responseStatus,
-            elapsedMs: Date.now() - providerSendStartedAtMs,
+            elapsedMs: providerSendElapsedMs,
             providerType: handle.providerType,
             providerFamily: handle.providerFamily,
             model: providerModel,
@@ -1140,19 +1557,35 @@ export class HubRequestExecutor implements RequestExecutor {
             typeof clientInjectWaitMsRaw === 'number' && Number.isFinite(clientInjectWaitMsRaw)
               ? Math.max(0, Math.floor(clientInjectWaitMsRaw))
               : 0;
+          if (clientInjectWaitMs > 0) {
+            cumulativeClientInjectWaitMs += clientInjectWaitMs;
+          }
           const hubResponseElapsedMsRaw = Date.now() - hubResponseStartedAtMs;
           const hubResponseElapsedMs = Math.max(0, hubResponseElapsedMsRaw - clientInjectWaitMs);
           const convertedBodyRecord =
             converted.body && typeof converted.body === 'object'
               ? (converted.body as Record<string, unknown>)
               : undefined;
+          const normalizedBodyRecord =
+            normalized.body && typeof normalized.body === 'object'
+              ? (normalized.body as Record<string, unknown>)
+              : undefined;
           if (convertedBodyRecord) {
             backfillResponsesOutputTextIfMissing(convertedBodyRecord);
           }
-          const finishReason =
-            convertedBodyRecord && typeof convertedBodyRecord[STREAM_LOG_FINISH_REASON_KEY] === 'string'
-              ? String(convertedBodyRecord[STREAM_LOG_FINISH_REASON_KEY])
-              : undefined;
+          const finishReason = (() => {
+            if (
+              convertedBodyRecord
+              && typeof convertedBodyRecord[STREAM_LOG_FINISH_REASON_KEY] === 'string'
+            ) {
+              return String(convertedBodyRecord[STREAM_LOG_FINISH_REASON_KEY]);
+            }
+            const fromConverted = deriveFinishReason(convertedBodyRecord);
+            if (fromConverted) {
+              return fromConverted;
+            }
+            return deriveFinishReason(normalizedBodyRecord);
+          })();
           this.logStage('provider.response_convert.completed', input.requestId, {
             providerKey: target.providerKey,
             status: converted.status,
@@ -1245,8 +1678,15 @@ export class HubRequestExecutor implements RequestExecutor {
                   wrappedErrorResponse: true
                 }
               });
-            } catch {
+            } catch (reportError) {
               // best-effort; never block retry/failover path
+              this.logStage('provider.error_reporter.failed', input.requestId, {
+                providerKey: target.providerKey,
+                stage: 'provider.http',
+                convertedStatus: statusCode,
+                message: reportError instanceof Error ? reportError.message : String(reportError ?? 'Unknown reporter error'),
+                attempt
+              });
             }
             throw errorToThrow;
           }
@@ -1306,22 +1746,50 @@ export class HubRequestExecutor implements RequestExecutor {
 
           recordAttempt({ usage: aggregatedUsage, error: false });
           const metadataHubStageTop = readHubStageTop(mergedMetadata);
+          const hubDecodeBreakdown = readHubDecodeBreakdown(metadataHubStageTop);
           return {
             ...converted,
             usageLogInfo: {
               providerKey: target.providerKey,
               model: providerModel,
+              routeName: pipelineResult.routingDecision?.routeName,
+              poolId: readString(routingDecisionRecord?.poolId),
+              finishReason,
               usage: aggregatedUsage as Record<string, unknown> | undefined,
+              externalLatencyMs: cumulativeExternalLatencyMs > 0 ? cumulativeExternalLatencyMs : undefined,
+              trafficWaitMs: cumulativeTrafficWaitMs > 0 ? cumulativeTrafficWaitMs : undefined,
+              clientInjectWaitMs: cumulativeClientInjectWaitMs > 0 ? cumulativeClientInjectWaitMs : undefined,
+              sseDecodeMs: hubDecodeBreakdown.sseDecodeMs > 0 ? hubDecodeBreakdown.sseDecodeMs : undefined,
+              codecDecodeMs: hubDecodeBreakdown.codecDecodeMs > 0 ? hubDecodeBreakdown.codecDecodeMs : undefined,
+              providerAttemptCount: attempt,
+              retryCount: Math.max(0, attempt - 1),
               hubStageTop: metadataHubStageTop,
               requestStartedAtMs: requestStartedAt,
               timingRequestIds: Array.from(
                 new Set([providerRequestId, input.requestId].filter((value): value is string => Boolean(value)))
               ),
               sessionId: mergedMetadata.sessionId,
-              conversationId: mergedMetadata.conversationId
+              conversationId: mergedMetadata.conversationId,
+              projectPath:
+                readString(mergedMetadata.clientWorkdir)
+                ?? readString(mergedMetadata.client_workdir)
+                ?? readString(mergedMetadata.workdir)
+                ?? readString(mergedMetadata.cwd)
             }
           };
         } catch (error) {
+          if (providerSendStartedAtMs > 0 && providerSendElapsedMs <= 0) {
+            const failedSendElapsedMs = Math.max(0, Date.now() - providerSendStartedAtMs);
+            if (failedSendElapsedMs > 0) {
+              providerSendElapsedMs = failedSendElapsedMs;
+              cumulativeExternalLatencyMs += failedSendElapsedMs;
+              this.logStage('provider.send.failed_elapsed', input.requestId, {
+                providerKey: target.providerKey,
+                elapsedMs: failedSendElapsedMs,
+                attempt
+              });
+            }
+          }
           const errorMessage = error instanceof Error ? error.message : String(error ?? 'Unknown error');
           const retryError = extractRetryErrorSnapshot(error);
           this.logStage('provider.send.error', input.requestId, {
@@ -1377,8 +1845,15 @@ export class HubRequestExecutor implements RequestExecutor {
                   message: errorMessage
                 }
               });
-            } catch {
+            } catch (reportError) {
               // best-effort; never block retry/failover path
+              this.logStage('provider.error_reporter.failed', input.requestId, {
+                providerKey: target.providerKey,
+                stage: 'provider.sse_decode_rate_limit',
+                statusCode: 429,
+                message: reportError instanceof Error ? reportError.message : String(reportError ?? 'Unknown reporter error'),
+                attempt
+              });
             }
           } else if (isSseDecodeRetryableNetworkError(error, status)) {
             try {
@@ -1409,8 +1884,15 @@ export class HubRequestExecutor implements RequestExecutor {
                   message: errorMessage
                 }
               });
-            } catch {
+            } catch (reportError) {
               // best-effort; never block retry/failover path
+              this.logStage('provider.error_reporter.failed', input.requestId, {
+                providerKey: target.providerKey,
+                stage: 'provider.sse_decode_network_error',
+                statusCode: 502,
+                message: reportError instanceof Error ? reportError.message : String(reportError ?? 'Unknown reporter error'),
+                attempt
+              });
             }
           }
           const isVerify = status === 403 && isGoogleAccountVerificationRequiredError(error);
@@ -1423,24 +1905,70 @@ export class HubRequestExecutor implements RequestExecutor {
             }
           }
           const shouldRetry =
-            attempt < maxAttempts &&
-            (promptTooLong
-              ? contextOverflowRetries < MAX_CONTEXT_OVERFLOW_RETRIES
-              : (shouldRetryProviderError(error) ||
-                  (isAntigravityProviderKey(target.providerKey) && (isVerify || isReauth))));
+            (() => {
+              const blockingRecoverable = isBlockingRecoverableRetryError({
+                statusCode: retryError.statusCode,
+                errorCode: retryError.errorCode,
+                upstreamCode: retryError.upstreamCode,
+                reason: retryError.reason
+              });
+              if (blockingRecoverable) {
+                return shouldRetryProviderError(error);
+              }
+              return (
+                attempt < maxAttempts &&
+                (promptTooLong
+                  ? contextOverflowRetries < MAX_CONTEXT_OVERFLOW_RETRIES
+                  : (shouldRetryProviderError(error) ||
+                      (isAntigravityProviderKey(target.providerKey) && (isVerify || isReauth))))
+              );
+            })();
           if (!shouldRetry) {
             recordAttempt({ error: true });
             throw error;
           }
           // Record this failed provider attempt even if the overall request succeeds later via failover.
           recordAttempt({ error: true });
-          const retryBackoffMs = await waitBeforeRetry(error, { attempt });
+          const blockingRecoverable = isBlockingRecoverableRetryError({
+            statusCode: retryError.statusCode,
+            errorCode: retryError.errorCode,
+            upstreamCode: retryError.upstreamCode,
+            reason: retryError.reason
+          });
+          let retryBackoffMs = 0;
+          let recoverableBackoffMs = 0;
+          if (blockingRecoverable) {
+            const recoverableKey = buildRecoverableErrorBackoffKey({
+              statusCode: retryError.statusCode,
+              errorCode: retryError.errorCode,
+              upstreamCode: retryError.upstreamCode,
+              reason: retryError.reason
+            });
+            recoverableBackoffMs = consumeRecoverableErrorBackoffMs(recoverableKey);
+            await waitRecoverableBackoffWithGlobalGate(recoverableKey, recoverableBackoffMs);
+            retryBackoffMs = recoverableBackoffMs;
+          } else {
+            retryBackoffMs = await waitBeforeRetry(error, { attempt });
+          }
           const singleProviderPool =
             Boolean(initialRoutePool && initialRoutePool.length === 1 && initialRoutePool[0] === target.providerKey);
+          const isProviderTrafficSaturated =
+            retryError.errorCode === 'PROVIDER_TRAFFIC_SATURATED'
+            || (typeof (error as { code?: unknown })?.code === 'string'
+              && (error as { code?: string }).code === 'PROVIDER_TRAFFIC_SATURATED');
+          const holdOnLastAvailable429 =
+            status === 429 &&
+            routePoolForAttempt.length > 0 &&
+            !routePoolHasAlternativeProvider({
+              routePool: routePoolForAttempt,
+              excludedProviderKeys,
+              currentProviderKey: target.providerKey
+            });
+          const holdOnCurrentProvider = holdOnLastAvailable429;
           if (promptTooLong && target.providerKey) {
             excludedProviderKeys.add(target.providerKey);
           }
-          if (!promptTooLong && !singleProviderPool && target.providerKey) {
+          if (!promptTooLong && !singleProviderPool && !holdOnCurrentProvider && target.providerKey) {
             const is429 = status === 429;
             if (isAntigravityProviderKey(target.providerKey) && (isVerify || is429)) {
               // For Antigravity 403 verify / 429 states:
@@ -1461,8 +1989,24 @@ export class HubRequestExecutor implements RequestExecutor {
               excludedProviderKeys.add(target.providerKey);
             }
           }
+          if (!promptTooLong && !singleProviderPool && !holdOnCurrentProvider && isProviderTrafficSaturated) {
+            const runtimeScopeExcluded = excludeProvidersSharingRuntimeFromRoutePool({
+              routePool: routePoolForAttempt,
+              runtimeKey,
+              runtimeManager: this.deps.runtimeManager,
+              excludedProviderKeys
+            });
+            if (runtimeScopeExcluded.length > 0) {
+              this.logStage('provider.retry.runtime_scope_exclude', input.requestId, {
+                providerKey: target.providerKey,
+                runtimeKey,
+                excludedRuntimeScope: runtimeScopeExcluded,
+                attempt
+              });
+            }
+          }
           const switchAction: 'exclude_and_reroute' | 'retry_same_provider' =
-            singleProviderPool ? 'retry_same_provider' : 'exclude_and_reroute';
+            (singleProviderPool || holdOnCurrentProvider) ? 'retry_same_provider' : 'exclude_and_reroute';
           this.logProviderRetrySwitch({
             requestId: input.requestId,
             attempt,
@@ -1470,6 +2014,7 @@ export class HubRequestExecutor implements RequestExecutor {
             providerKey: target.providerKey,
             nextAttempt: attempt + 1,
             reason: retryError.reason,
+            backoffMs: retryBackoffMs,
             statusCode: retryError.statusCode,
             errorCode: retryError.errorCode,
             upstreamCode: retryError.upstreamCode,
@@ -1487,8 +2032,14 @@ export class HubRequestExecutor implements RequestExecutor {
             ...(retryError.errorCode ? { errorCode: retryError.errorCode } : {}),
             ...(retryError.upstreamCode ? { upstreamCode: retryError.upstreamCode } : {}),
             retryBackoffMs,
+            recoverableBackoffMs,
+            holdOnLastAvailable429,
+            blockingRecoverable,
             ...(promptTooLong ? { contextOverflowRetries, maxContextOverflowRetries: MAX_CONTEXT_OVERFLOW_RETRIES } : {})
           });
+          if (blockingRecoverable && attempt >= maxAttempts) {
+            attempt = Math.max(0, attempt - 1);
+          }
           continue;
         } finally {
           if (trafficPermit) {
